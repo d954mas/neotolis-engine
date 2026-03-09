@@ -81,46 +81,26 @@
         {
             "label": "Serve WASM debug (localhost:8080)",
             "type": "shell",
-            "command": "netstat -ano | findstr :8080 | findstr LISTENING >nul 2>&1 && (echo Serving HTTP - already running on port 8080) || (python -m http.server 8080 -d \"${workspaceFolder}/build/examples/hello/wasm-debug\")",
+            "command": "netstat -ano | findstr :8080 | findstr LISTENING >nul 2>&1 && (echo Server already running on port 8080) || (start \"WASM Server\" python -m http.server 8080 -d \"${workspaceFolder}/build/examples/hello/wasm-debug\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
                     "args": ["/c"]
                 }
             },
-            "isBackground": true,
-            "problemMatcher": {
-                "pattern": {
-                    "regexp": "^never$"
-                },
-                "background": {
-                    "activeOnStart": true,
-                    "beginsPattern": ".",
-                    "endsPattern": "Serving HTTP"
-                }
-            }
+            "problemMatcher": []
         },
         {
             "label": "Serve WASM release (localhost:8081)",
             "type": "shell",
-            "command": "netstat -ano | findstr :8081 | findstr LISTENING >nul 2>&1 && (echo Serving HTTP - already running on port 8081) || (python -m http.server 8081 -d \"${workspaceFolder}/build/examples/hello/wasm-release\")",
+            "command": "netstat -ano | findstr :8081 | findstr LISTENING >nul 2>&1 && (echo Server already running on port 8081) || (start \"WASM Server\" python -m http.server 8081 -d \"${workspaceFolder}/build/examples/hello/wasm-release\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
                     "args": ["/c"]
                 }
             },
-            "isBackground": true,
-            "problemMatcher": {
-                "pattern": {
-                    "regexp": "^never$"
-                },
-                "background": {
-                    "activeOnStart": true,
-                    "beginsPattern": ".",
-                    "endsPattern": "Serving HTTP"
-                }
-            }
+            "problemMatcher": []
         },
         {
             "label": "Build & Serve WASM (debug)",
