@@ -125,8 +125,20 @@
             "problemMatcher": []
         },
         {
-            "label": "Build & Serve WASM hello (release)",
-            "dependsOn": ["Configure wasm-release", "Build wasm-release", "Serve WASM release (localhost:8080)"],
+            "label": "Open browser (localhost:8080)",
+            "type": "shell",
+            "command": "start http://localhost:8080/hello.html",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run WASM hello (release)",
+            "dependsOn": ["Configure wasm-release", "Build wasm-release", "Serve WASM release (localhost:8080)", "Open browser (localhost:8080)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         }

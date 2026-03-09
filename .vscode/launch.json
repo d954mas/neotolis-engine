@@ -8,14 +8,6 @@
             "url": "http://localhost:8080/hello.html",
             "webRoot": "${workspaceFolder}/build/examples/hello/wasm-debug",
             "preLaunchTask": "Build & Serve WASM hello (debug)"
-        },
-        {
-            "name": "Run WASM hello",
-            "type": "chrome",
-            "request": "launch",
-            "url": "http://localhost:8080/hello.html",
-            "webRoot": "${workspaceFolder}/build/examples/hello/wasm-release",
-            "preLaunchTask": "Build & Serve WASM hello (release)"
         }
     ]
 }
