@@ -11,7 +11,7 @@ Requirements for modular build milestone. Each maps to roadmap phases.
 
 - [x] **INFRA-01**: `nt_add_module()` CMake helper creates STATIC library target with include dirs, warning/sanitizer flags, and output directory in a single call
 - [x] **INFRA-02**: `nt_config` INTERFACE target provides platform definitions (NT_PLATFORM_WEB, NT_PLATFORM_NATIVE, NT_CONFIG_DEBUG) to all modules via explicit linking
-- [ ] **INFRA-03**: `nt::` namespace ALIAS targets for each module (nt::core, nt::log, etc.)
+- [x] **INFRA-03**: `nt::` namespace ALIAS targets for each module (nt::core, nt::log, etc.)
 
 ### Module Split
 
@@ -22,8 +22,8 @@ Requirements for modular build milestone. Each maps to roadmap phases.
 
 ### Swappable Backends
 
-- [ ] **SWAP-01**: INTERFACE target for API contract (header-only) of a module with multiple implementations
-- [ ] **SWAP-02**: At least two implementations of the same module (e.g., nt_log and nt_log_empty) sharing the same API
+- [x] **SWAP-01**: INTERFACE target for API contract (header-only) of a module with multiple implementations
+- [x] **SWAP-02**: At least two implementations of the same module (e.g., nt_log and nt_log_empty) sharing the same API
 - [ ] **SWAP-03**: Example/test demonstrates linking different implementations of the same API
 
 ### Build Quality
@@ -62,13 +62,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | INFRA-01 | Phase 3: Build Infrastructure | Complete |
 | INFRA-02 | Phase 3: Build Infrastructure | Complete |
-| INFRA-03 | Phase 5: Swappable Backends | Pending |
+| INFRA-03 | Phase 5: Swappable Backends | Complete |
 | SPLIT-01 | Phase 4: Module Split | Complete |
 | SPLIT-02 | Phase 4: Module Split | Complete |
 | SPLIT-03 | Phase 4: Module Split | Complete |
 | SPLIT-04 | Phase 4: Module Split | Complete |
-| SWAP-01 | Phase 5: Swappable Backends | Pending |
-| SWAP-02 | Phase 5: Swappable Backends | Pending |
+| SWAP-01 | Phase 5: Swappable Backends | Complete |
+| SWAP-02 | Phase 5: Swappable Backends | Complete |
 | SWAP-03 | Phase 5: Swappable Backends | Pending |
 | QUAL-01 | Phase 6: Build Verification | Pending |
 | QUAL-02 | Phase 6: Build Verification | Pending |

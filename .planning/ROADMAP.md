@@ -66,11 +66,11 @@ Plans:
   2. At least two STATIC targets implement the same API (e.g., nt_log with real output and nt_log_empty as no-op stub)
   3. A test or example can switch between implementations by changing one target_link_libraries line -- no other code changes needed
   4. All engine modules have `nt::` namespace ALIAS targets (nt::core, nt::log, etc.) that consumers can use
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 05-01: TBD
-- [ ] 05-02: TBD
+- [ ] 05-01-PLAN.md -- ALIAS auto-creation in nt_add_module(), nt_log module with real and stub implementations
+- [ ] 05-02-PLAN.md -- Swap demo test targets (same source, different link) and CI verification updates
 
 ### Phase 6: Build Verification
 **Goal**: The modular build is validated under production conditions -- optimized WASM, submodule consumption, and full CI
@@ -97,5 +97,5 @@ Phases execute in numeric order: 3 -> 4 -> 5 -> 6
 | 2. Build Hardening | v1.0 | 2/2 | Complete | 2026-03-09 |
 | 3. Build Infrastructure | v1.1 | 2/2 | Complete | 2026-03-09 |
 | 4. Module Split | v1.1 | 0/1 | Not started | - |
-| 5. Swappable Backends | v1.1 | 0/? | Not started | - |
+| 5. Swappable Backends | v1.1 | 0/2 | Not started | - |
 | 6. Build Verification | v1.1 | 0/? | Not started | - |

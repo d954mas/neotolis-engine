@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Modular Build
 status: completed
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-03-09T16:39:50.950Z"
-last_activity: 2026-03-09 -- Completed 04-01 module split (nt_engine removal)
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-03-09T17:06:56.449Z"
+last_activity: 2026-03-09 -- Completed 05-01 ALIAS + nt_log swappable module
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 3
-  completed_plans: 3
-  percent: 100
+  total_plans: 5
+  completed_plans: 4
+  percent: 80
 ---
 
 # Project State
@@ -21,21 +21,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-09)
 
 **Core value:** Simple, fast, predictable engine runtime -- composable features wired by game code with zero hidden magic
-**Current focus:** Phase 4 Module Split complete (1 of 1 plans done)
+**Current focus:** Phase 5 Swappable Backends (1 of 2 plans done)
 
 ## Current Position
 
-Phase: 4 of 6 (Module Split) -- second phase of v1.1 milestone
-Plan: 1 of 1 (phase complete)
-Status: Phase 4 complete
-Last activity: 2026-03-09 -- Completed 04-01 module split (nt_engine removal)
+Phase: 5 of 6 (Swappable Backends) -- third phase of v1.1 milestone
+Plan: 1 of 2
+Status: Plan 05-01 complete
+Last activity: 2026-03-09 -- Completed 05-01 ALIAS + nt_log swappable module
 
-Progress: [##########] 100%
+Progress: [########░░] 80%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7 (4 from v1.0 + 3 from v1.1)
+- Total plans completed: 8 (4 from v1.0 + 4 from v1.1)
 - Average duration: --
 - Total execution time: --
 
@@ -47,6 +47,7 @@ Progress: [##########] 100%
 | 2. Build Hardening | 2 | -- | -- |
 | 3. Build Infrastructure | 2 | 5min | 2.5min |
 | 4. Module Split | 1 | 2min | 2min |
+| 5. Swappable Backends | 1/2 | 2min | 2min |
 
 *Updated after each plan completion*
 
@@ -75,6 +76,11 @@ Phase 4 decisions:
 - hello links cglm_headers for intentional future-proofing (zero binary impact as INTERFACE)
 - Removed redundant target_include_directories from all 3 test targets (nt_core provides via PUBLIC)
 
+Phase 5 decisions:
+- ALIAS uses string(REPLACE) to strip nt_ prefix -- simple and predictable
+- Both implementations are fully independent STATIC libs sharing only the header
+- No INTERFACE CMake target for API -- contract enforced at source level via shared .h
+
 ### Pending Todos
 
 None.
@@ -85,6 +91,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-09T16:39:50.947Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-03-09T17:06:56.446Z
+Stopped at: Completed 05-01-PLAN.md
 Resume file: None
