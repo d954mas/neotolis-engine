@@ -99,11 +99,11 @@
             }
         },
         {
-            "label": "Serve WASM release (localhost:8080)",
+            "label": "Serve WASM release (localhost:8081)",
             "type": "shell",
             "command": "python",
             "args": [
-                "-m", "http.server", "8080",
+                "-m", "http.server", "8081",
                 "-d", "${workspaceFolder}/build/examples/hello/wasm-release"
             ],
             "isBackground": true,
@@ -125,9 +125,9 @@
             "problemMatcher": []
         },
         {
-            "label": "Open browser (localhost:8080)",
+            "label": "Open browser (localhost:8081)",
             "type": "shell",
-            "command": "start http://localhost:8080/hello.html",
+            "command": "start http://localhost:8081/hello.html",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -138,7 +138,7 @@
         },
         {
             "label": "Run WASM hello (release)",
-            "dependsOn": ["Configure wasm-release", "Build wasm-release", "Serve WASM release (localhost:8080)", "Open browser (localhost:8080)"],
+            "dependsOn": ["Configure wasm-release", "Build wasm-release", "Serve WASM release (localhost:8081)", "Open browser (localhost:8081)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         }
