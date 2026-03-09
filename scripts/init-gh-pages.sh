@@ -249,6 +249,9 @@ cd "$ROOT_DIR"
 BRANCH="gh-pages"
 ORIGINAL_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD)
 
+# Git identity for worktree commits
+GIT_COMMIT="git -c user.name='d954mas' -c user.email='d954mas@gmail.com' commit"
+
 if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
     echo "gh-pages branch exists, updating..."
     git worktree add "$TMPDIR/worktree" "$BRANCH" 2>/dev/null
@@ -257,7 +260,7 @@ if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
     cd "$TMPDIR/worktree"
     git add -A
     git diff --cached --quiet && echo "No changes to commit." || \
-        git commit -m "update gh-pages: size tracking chart"
+        eval "$GIT_COMMIT -m 'update gh-pages: size tracking chart'"
     cd "$ROOT_DIR"
     git worktree remove "$TMPDIR/worktree"
 else
@@ -269,7 +272,7 @@ else
     cp "$TMPDIR/index.html" .
     mkdir -p sizes
     git add -A
-    git commit -m "init gh-pages: size tracking chart"
+    eval "$GIT_COMMIT -m 'init gh-pages: size tracking chart'"
     cd "$ROOT_DIR"
     git worktree remove "$TMPDIR/worktree"
 fi

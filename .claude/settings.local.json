@@ -24,7 +24,13 @@
       "Skill(gsd:add-phase)",
       "WebFetch(domain:floooh.github.io)",
       "WebFetch(domain:github.com)",
-      "Bash(emrun:*)"
+      "Bash(emrun:*)",
+      "Skill(gsd:quick)",
+      "Read(//c/projects/neotolis-engine/**)",
+      "Bash(echo \"EMSDK=$EMSDK\")",
+      "Read(//c/emsdk/**)",
+      "Read(//c/projects/neotolis-engine/$HOME/emsdk/**)",
+      "Read(//d/emsdk/**)"
     ]
   }
 }

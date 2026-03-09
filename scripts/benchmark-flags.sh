@@ -8,12 +8,17 @@ TARGET="${1:-hello}"
 PRESET="wasm-release"
 
 # ---------------------------------------------------------------------------
-# Prerequisites
+# Activate Emscripten SDK if not already in PATH
 # ---------------------------------------------------------------------------
 if ! command -v emcmake &>/dev/null; then
-    echo "ERROR: emcmake not found in PATH"
-    echo "Install Emscripten SDK: https://emscripten.org/docs/getting_started/downloads.html"
-    exit 1
+    if [ -n "${EMSDK:-}" ] && [ -f "$EMSDK/emsdk_env.sh" ]; then
+        echo "Activating Emscripten SDK from \$EMSDK ($EMSDK)..."
+        source "$EMSDK/emsdk_env.sh" 2>/dev/null
+    else
+        echo "ERROR: emcmake not found in PATH and \$EMSDK is not set"
+        echo "Install Emscripten SDK: https://emscripten.org/docs/getting_started/downloads.html"
+        exit 1
+    fi
 fi
 
 if ! command -v cmake &>/dev/null; then
