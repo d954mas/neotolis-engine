@@ -70,6 +70,13 @@
     ],
     "testPresets": [
         {
+            "name": "wasm-debug",
+            "configurePreset": "wasm-debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
             "name": "native-debug",
             "configurePreset": "native-debug",
             "output": {

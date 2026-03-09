@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.25)
 project(neotolis-engine LANGUAGES C)
 
 # Warning and sanitizer flag functions (applied per-target, not globally)

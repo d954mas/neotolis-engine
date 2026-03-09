@@ -1,5 +1,5 @@
 # Native unit tests (Unity framework via CTest)
-# WASM tests use a separate Node.js-based approach
+# WASM tests run through CTest via Node.js when available
 
 if(NOT EMSCRIPTEN)
     add_executable(test_core unit/test_core.c)
@@ -80,4 +80,16 @@ if(EMSCRIPTEN)
         "SHELL:-sEXPORTED_FUNCTIONS=['_main']"
         "SHELL:-sEXPORTED_RUNTIME_METHODS=['ccall']"
     )
+    find_program(NT_NODE_EXECUTABLE NAMES node nodejs)
+    if(NT_NODE_EXECUTABLE)
+        add_test(
+            NAME test_wasm_smoke
+            COMMAND
+                "${NT_NODE_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/wasm/smoke_test.js"
+                "$<TARGET_FILE:wasm_smoke>"
+        )
+    else()
+        message(STATUS "Node.js not found; skipping CTest registration for test_wasm_smoke")
+    endif()
 endif()

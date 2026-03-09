@@ -137,7 +137,7 @@ jobs:
         run: cmake --build --preset wasm-debug
 
       - name: Run WASM smoke test
-        run: node tests/wasm/smoke_test.js
+        run: ctest --preset wasm-debug
 
   tidy-check:
     name: clang-tidy

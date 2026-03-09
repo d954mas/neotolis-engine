@@ -4,15 +4,14 @@
  * Loads the Emscripten-generated WASM module (built with -sMODULARIZE)
  * and verifies that engine init/shutdown succeeds.
  *
- * Usage: node tests/wasm/smoke_test.js
+ * Usage: node tests/wasm/smoke_test.js [path/to/wasm_smoke.js]
  */
 const path = require('path');
 
 async function main() {
-    const wasmPath = path.resolve(
-        __dirname,
-        '../../build/tests/wasm-debug/wasm_smoke.js'
-    );
+    const wasmPath = process.argv[2]
+        ? path.resolve(process.argv[2])
+        : path.resolve(__dirname, '../../build/tests/wasm-debug/wasm_smoke.js');
 
     let createModule;
     try {
