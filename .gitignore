@@ -1,0 +1,32 @@
+# Build output
+build/
+*.o
+*.a
+*.so
+*.dylib
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+.cache/
+compile_commands.json
+
+# Emscripten local SDK
+emsdk/
+
+# IDE
+.vscode/settings.json
+.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# GSD planning
+.planning/

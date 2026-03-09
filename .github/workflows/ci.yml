@@ -1,0 +1,161 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  wasm-build:
+    name: WASM Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read emsdk version
+        id: emsdk-version
+        run: echo "version=$(cat .emsdk-version)" >> $GITHUB_OUTPUT
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ steps.emsdk-version.outputs.version }}
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Configure WASM debug
+        run: emcmake cmake --preset wasm-debug
+
+      - name: Build WASM debug
+        run: cmake --build --preset wasm-debug
+
+      - name: Verify WASM debug output
+        run: |
+          test -f build/examples/hello/wasm-debug/hello.html
+          test -f build/examples/hello/wasm-debug/hello.js
+          test -f build/examples/hello/wasm-debug/hello.wasm
+          test -f build/engine/wasm-debug/libnt_engine.a
+          echo "WASM debug build verified"
+
+      - name: Configure WASM release
+        run: emcmake cmake --preset wasm-release
+
+      - name: Build WASM release
+        run: cmake --build --preset wasm-release
+
+      - name: Verify WASM release output
+        run: |
+          test -f build/examples/hello/wasm-release/hello.html
+          test -f build/examples/hello/wasm-release/hello.js
+          test -f build/examples/hello/wasm-release/hello.wasm
+          test -f build/engine/wasm-release/libnt_engine.a
+          echo "WASM release build verified"
+
+  native-build:
+    name: Native Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang ninja-build
+
+      - name: Configure native debug
+        run: cmake --preset native-debug
+
+      - name: Build native debug
+        run: cmake --build --preset native-debug
+
+      - name: Verify native debug output
+        run: |
+          test -f build/tools/builder/native-debug/builder
+          test -f build/engine/native-debug/libnt_engine.a
+          echo "Native debug build verified"
+
+      - name: Smoke test builder (debug)
+        run: ./build/tools/builder/native-debug/builder
+
+      - name: Configure native release
+        run: cmake --preset native-release
+
+      - name: Build native release
+        run: cmake --build --preset native-release
+
+      - name: Verify native release output
+        run: |
+          test -f build/tools/builder/native-release/builder
+          test -f build/engine/native-release/libnt_engine.a
+          echo "Native release build verified"
+
+      - name: Smoke test builder (release)
+        run: ./build/tools/builder/native-release/builder
+
+  test-native:
+    name: Native Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang ninja-build
+
+      - name: Configure
+        run: cmake --preset native-debug
+
+      - name: Build
+        run: cmake --build --preset native-debug
+
+      - name: Run tests
+        run: ctest --preset native-debug
+
+  test-wasm:
+    name: WASM Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read emsdk version
+        id: emsdk-version
+        run: echo "version=$(cat .emsdk-version)" >> $GITHUB_OUTPUT
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ steps.emsdk-version.outputs.version }}
+          actions-cache-folder: 'emsdk-cache'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Configure WASM debug
+        run: emcmake cmake --preset wasm-debug
+
+      - name: Build WASM debug
+        run: cmake --build --preset wasm-debug
+
+      - name: Run WASM smoke test
+        run: node tests/wasm/smoke_test.js
+
+  tidy-check:
+    name: clang-tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang clang-tidy ninja-build
+
+      - name: Configure
+        run: cmake --preset native-debug
+
+      - name: Run clang-tidy
+        run: bash scripts/tidy.sh build/_cmake/native-debug
+
+  format-check:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+
+      - name: Check formatting
+        run: |
+          find engine shared tools examples -name '*.c' -o -name '*.h' | \
+            xargs clang-format --dry-run --Werror

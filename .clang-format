@@ -1,0 +1,8 @@
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 200
+PointerAlignment: Right
+AllowShortIfStatementsOnASingleLine: Never
+BreakBeforeBraces: Attach
+SortIncludes: CaseSensitive

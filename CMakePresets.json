@@ -1,0 +1,80 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 25,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "wasm-debug",
+            "displayName": "WASM Debug",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/_cmake/wasm-debug",
+            "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_C_STANDARD": "17",
+                "CMAKE_C_STANDARD_REQUIRED": "ON"
+            }
+        },
+        {
+            "name": "wasm-release",
+            "displayName": "WASM Release",
+            "inherits": "wasm-debug",
+            "binaryDir": "${sourceDir}/build/_cmake/wasm-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "native-debug",
+            "displayName": "Native Debug",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/_cmake/native-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_C_STANDARD": "17",
+                "CMAKE_C_STANDARD_REQUIRED": "ON",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "native-release",
+            "displayName": "Native Release",
+            "inherits": "native-debug",
+            "binaryDir": "${sourceDir}/build/_cmake/native-release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "wasm-debug",
+            "configurePreset": "wasm-debug"
+        },
+        {
+            "name": "wasm-release",
+            "configurePreset": "wasm-release"
+        },
+        {
+            "name": "native-debug",
+            "configurePreset": "native-debug"
+        },
+        {
+            "name": "native-release",
+            "configurePreset": "native-release"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "native-debug",
+            "configurePreset": "native-debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ]
+}

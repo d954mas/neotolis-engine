@@ -1,0 +1,1 @@
+// Emscripten pre-init JavaScript

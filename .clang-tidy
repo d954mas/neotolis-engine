@@ -1,0 +1,37 @@
+# .clang-tidy -- Maximum strictness for C code.
+# C++-only categories excluded. Noisy checks suppressed with rationale.
+#
+# Run: bash scripts/tidy.sh build/_cmake/native-debug
+---
+Checks: >
+  *,
+  -abseil-*,
+  -boost-*,
+  -cppcoreguidelines-*,
+  -fuchsia-*,
+  -google-readability-todo,
+  -hicpp-*,
+  -llvm-header-guard,
+  -llvm-include-order,
+  -llvmlibc-*,
+  -modernize-*,
+  -objc-*,
+  -altera-*,
+  -android-*,
+  -darwin-*,
+  -zircon-*,
+  -bugprone-easily-swappable-parameters,
+  -readability-magic-numbers,
+  -cert-dcl37-c,
+  -cert-dcl51-cpp,
+  -misc-unused-parameters,
+  -misc-include-cleaner,
+  -readability-identifier-length,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -readability-avoid-const-params-in-decls,
+  -readability-enum-initial-value,
+  -cert-int09-c,
+  -bugprone-macro-parentheses
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(engine|shared|tools|examples|tests)[/\\\\]'
+FormatStyle: file

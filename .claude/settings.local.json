@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node:*)",
+      "Bash(git:*)",
+      "Skill(gsd:plan-phase)",
+      "WebSearch",
+      "Bash(cmake:*)",
+      "Bash(ctest:*)",
+      "Bash(bash:*)",
+      "Bash(emcmake cmake:*)",
+      "Bash(export:*)",
+      "Bash(C:/develop/emsdk/emcmake.bat cmake:*)",
+      "Bash(gh auth:*)",
+      "Bash(gh repo:*)"
+    ]
+  }
+}
