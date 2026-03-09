@@ -7,6 +7,7 @@
 # - Warning flags via nt_set_warning_flags()
 # - Sanitizer flags via nt_set_sanitizer_flags()
 # - Output directory: build/engine/<preset>/
+# - nt:: namespace ALIAS (nt_core -> nt::core, nt_log -> nt::log)
 #
 # Example: nt_add_module(nt_core nt_core.c nt_core.h nt_types.h nt_platform.h)
 
@@ -28,4 +29,9 @@ function(nt_add_module name)
         ARCHIVE_OUTPUT_DIRECTORY
             "${CMAKE_SOURCE_DIR}/build/engine/${NT_PRESET_NAME}"
     )
+
+    # nt:: namespace ALIAS for configure-time typo detection
+    # nt_core -> nt::core, nt_log -> nt::log, nt_log_stub -> nt::log_stub
+    string(REPLACE "nt_" "" _alias_suffix "${name}")
+    add_library(nt::${_alias_suffix} ALIAS ${name})
 endfunction()
