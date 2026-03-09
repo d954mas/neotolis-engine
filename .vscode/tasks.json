@@ -119,13 +119,13 @@
             }
         },
         {
-            "label": "Build & Serve WASM hello (debug)",
+            "label": "Serve WASM & Debug (first run)",
             "dependsOn": ["Configure wasm-debug", "Build wasm-debug", "Serve WASM debug (localhost:8080)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         },
         {
-            "label": "Build & Serve WASM hello (release)",
+            "label": "Serve WASM & Run (first run)",
             "dependsOn": ["Configure wasm-release", "Build wasm-release", "Serve WASM release (localhost:8081)"],
             "dependsOrder": "sequence",
             "problemMatcher": []

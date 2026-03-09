@@ -7,7 +7,7 @@
             "request": "launch",
             "url": "http://localhost:8080/hello.html",
             "webRoot": "${workspaceFolder}/build/examples/hello/wasm-debug",
-            "preLaunchTask": "Build & Serve WASM hello (debug)"
+            "preLaunchTask": "Build wasm-debug"
         },
         {
             "name": "Run WASM hello (release)",
@@ -15,7 +15,7 @@
             "request": "launch",
             "url": "http://localhost:8081/hello.html",
             "webRoot": "${workspaceFolder}/build/examples/hello/wasm-release",
-            "preLaunchTask": "Build & Serve WASM hello (release)"
+            "preLaunchTask": "Build wasm-release"
         }
     ]
 }
