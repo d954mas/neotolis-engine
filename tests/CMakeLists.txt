@@ -32,6 +32,30 @@ if(NOT EMSCRIPTEN)
 
     add_test(NAME sanitizer_proof COMMAND test_sanitizer_proof)
     set_tests_properties(sanitizer_proof PROPERTIES WILL_FAIL TRUE)
+
+    # --- Swap demo tests ---
+    # Same source, different implementation linked.
+    # Proves: swapping = one target_link_libraries change.
+
+    # Swap test: real implementation (printf-based)
+    add_executable(test_log_real unit/test_log_swap.c)
+    target_link_libraries(test_log_real PRIVATE nt_log unity)
+    nt_set_warning_flags(test_log_real)
+    nt_set_sanitizer_flags(test_log_real)
+    set_target_properties(test_log_real PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_log_real COMMAND test_log_real)
+
+    # Swap test: stub implementation (no-op, same source)
+    add_executable(test_log_stub unit/test_log_swap.c)
+    target_link_libraries(test_log_stub PRIVATE nt_log_stub unity)
+    nt_set_warning_flags(test_log_stub)
+    nt_set_sanitizer_flags(test_log_stub)
+    set_target_properties(test_log_stub PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_log_stub COMMAND test_log_stub)
 endif()
 
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---
