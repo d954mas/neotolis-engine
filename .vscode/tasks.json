@@ -16,6 +16,13 @@
             "problemMatcher": []
         },
         {
+            "label": "Configure wasm-release",
+            "type": "shell",
+            "command": "emcmake",
+            "args": ["cmake", "--preset", "wasm-release"],
+            "problemMatcher": []
+        },
+        {
             "label": "Build native-debug",
             "type": "cmake",
             "command": "build",
@@ -103,13 +110,13 @@
         },
         {
             "label": "Build & Serve WASM hello (debug)",
-            "dependsOn": ["Build wasm-debug", "Serve WASM debug (localhost:8080)"],
+            "dependsOn": ["Configure wasm-debug", "Build wasm-debug", "Serve WASM debug (localhost:8080)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         },
         {
             "label": "Build & Serve WASM hello (release)",
-            "dependsOn": ["Build wasm-release", "Serve WASM release (localhost:8080)"],
+            "dependsOn": ["Configure wasm-release", "Build wasm-release", "Serve WASM release (localhost:8080)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         }
