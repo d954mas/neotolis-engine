@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Modular Build
 status: completed
-stopped_at: Completed 03-02-PLAN.md (Phase 3 complete)
-last_updated: "2026-03-09T16:21:55.210Z"
-last_activity: 2026-03-09 -- Completed 03-02 platform tests and CI artifact fix
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-03-09T16:39:50.950Z"
+last_activity: 2026-03-09 -- Completed 04-01 module split (nt_engine removal)
 progress:
   total_phases: 4
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 25
+  completed_phases: 2
+  total_plans: 3
+  completed_plans: 3
+  percent: 100
 ---
 
 # Project State
@@ -21,21 +21,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-09)
 
 **Core value:** Simple, fast, predictable engine runtime -- composable features wired by game code with zero hidden magic
-**Current focus:** Phase 3 Build Infrastructure complete (2 of 2 plans done)
+**Current focus:** Phase 4 Module Split complete (1 of 1 plans done)
 
 ## Current Position
 
-Phase: 3 of 6 (Build Infrastructure) -- first phase of v1.1 milestone
-Plan: 2 of 2 (phase complete)
-Status: Phase 3 complete
-Last activity: 2026-03-09 -- Completed 03-02 platform tests and CI artifact fix
+Phase: 4 of 6 (Module Split) -- second phase of v1.1 milestone
+Plan: 1 of 1 (phase complete)
+Status: Phase 4 complete
+Last activity: 2026-03-09 -- Completed 04-01 module split (nt_engine removal)
 
-Progress: [###░░░░░░░] 25%
+Progress: [##########] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 6 (4 from v1.0 + 2 from v1.1)
+- Total plans completed: 7 (4 from v1.0 + 3 from v1.1)
 - Average duration: --
 - Total execution time: --
 
@@ -46,6 +46,7 @@ Progress: [###░░░░░░░] 25%
 | 1. Project Scaffold | 2 | -- | -- |
 | 2. Build Hardening | 2 | -- | -- |
 | 3. Build Infrastructure | 2 | 5min | 2.5min |
+| 4. Module Split | 1 | 2min | 2min |
 
 *Updated after each plan completion*
 
@@ -69,6 +70,11 @@ Phase 3 decisions:
 - Used #ifdef (not #if) for platform macro checks to avoid -Wundef warnings
 - CI artifact checks updated from libnt_engine.a to libnt_core.a (nt_engine is INTERFACE, produces no .a)
 
+Phase 4 decisions:
+- Removed nt_engine INTERFACE shim with no deprecation period per user decision
+- hello links cglm_headers for intentional future-proofing (zero binary impact as INTERFACE)
+- Removed redundant target_include_directories from all 3 test targets (nt_core provides via PUBLIC)
+
 ### Pending Todos
 
 None.
@@ -79,6 +85,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-09T16:17:00Z
-Stopped at: Completed 03-02-PLAN.md (Phase 3 complete)
-Resume file: Phase 4 plans (next phase)
+Last session: 2026-03-09T16:39:50.947Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
