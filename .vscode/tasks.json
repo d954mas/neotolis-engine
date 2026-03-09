@@ -20,10 +20,7 @@
             "type": "cmake",
             "command": "build",
             "preset": "native-debug",
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
+            "group": "build",
             "problemMatcher": "$gcc"
         },
         {
@@ -39,7 +36,10 @@
             "type": "cmake",
             "command": "build",
             "preset": "wasm-debug",
-            "group": "build",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
             "problemMatcher": "$gcc"
         },
         {
@@ -62,15 +62,29 @@
             "problemMatcher": []
         },
         {
-            "label": "Serve WASM hello",
+            "label": "Serve WASM (localhost:8080)",
             "type": "shell",
-            "command": "emrun",
+            "command": "python",
             "args": [
-                "--port", "8080",
-                "--no_emrun_detect",
-                "${workspaceFolder}/build/examples/hello/wasm-debug/hello.html"
+                "-m", "http.server", "8080",
+                "-d", "${workspaceFolder}/build/examples/hello/wasm-debug"
             ],
             "isBackground": true,
+            "problemMatcher": {
+                "pattern": {
+                    "regexp": "^never$"
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP"
+                }
+            }
+        },
+        {
+            "label": "Build & Serve WASM hello",
+            "dependsOn": ["Build wasm-debug", "Serve WASM (localhost:8080)"],
+            "dependsOrder": "sequence",
             "problemMatcher": []
         }
     ]

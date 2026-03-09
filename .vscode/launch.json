@@ -2,22 +2,12 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug hello (native)",
-            "type": "cppvsdbg",
+            "name": "Run WASM hello",
+            "type": "chrome",
             "request": "launch",
-            "program": "${workspaceFolder}/build/examples/hello/native-debug/hello.exe",
-            "cwd": "${workspaceFolder}",
-            "preLaunchTask": "Build native-debug",
-            "console": "integratedTerminal"
-        },
-        {
-            "name": "Debug test_core (native)",
-            "type": "cppvsdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/tests/native-debug/test_core.exe",
-            "cwd": "${workspaceFolder}",
-            "preLaunchTask": "Build native-debug",
-            "console": "integratedTerminal"
+            "url": "http://localhost:8080/hello.html",
+            "webRoot": "${workspaceFolder}/build/examples/hello/wasm-debug",
+            "preLaunchTask": "Build & Serve WASM hello"
         }
     ]
 }
