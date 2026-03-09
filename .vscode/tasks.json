@@ -125,20 +125,8 @@
             "problemMatcher": []
         },
         {
-            "label": "Open browser (localhost:8081)",
-            "type": "shell",
-            "command": "start http://localhost:8081/hello.html",
-            "options": {
-                "shell": {
-                    "executable": "cmd.exe",
-                    "args": ["/c"]
-                }
-            },
-            "problemMatcher": []
-        },
-        {
-            "label": "Run WASM hello (release)",
-            "dependsOn": ["Configure wasm-release", "Build wasm-release", "Serve WASM release (localhost:8081)", "Open browser (localhost:8081)"],
+            "label": "Build & Serve WASM hello (release)",
+            "dependsOn": ["Configure wasm-release", "Build wasm-release", "Serve WASM release (localhost:8081)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         }
