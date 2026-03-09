@@ -7,7 +7,7 @@
  * Build: emcmake cmake --preset wasm-debug && cmake --build --preset wasm-debug
  * Run:   node tests/wasm/smoke_test.js
  */
-#include "runtime/core/nt_core.h"
+#include "core/nt_core.h"
 #include <stdio.h>
 
 int main(void) {

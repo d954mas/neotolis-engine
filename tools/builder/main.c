@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "runtime/core/nt_core.h"
+#include "core/nt_core.h"
 
 int main(int argc, char *argv[]) {
     (void)argc;

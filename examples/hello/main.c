@@ -1,4 +1,4 @@
-#include "runtime/core/nt_core.h"
+#include "core/nt_core.h"
 #include <stdio.h>
 
 int main(void) {
