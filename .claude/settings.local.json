@@ -17,7 +17,9 @@
       "Skill(gsd:complete-milestone)",
       "Bash(xargs wc:*)",
       "Skill(gsd:execute-phase)",
-      "Skill(gsd:discuss-phase)"
+      "Skill(gsd:discuss-phase)",
+      "Bash(clang-format:*)",
+      "Bash(clang-tidy:*)"
     ]
   }
 }
