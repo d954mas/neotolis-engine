@@ -24,7 +24,21 @@
       "Skill(gsd:add-phase)",
       "WebFetch(domain:floooh.github.io)",
       "WebFetch(domain:github.com)",
+<<<<<<< Updated upstream
       "Bash(emrun:*)"
+=======
+      "Bash(emrun:*)",
+      "Skill(gsd:quick)",
+      "Read(//c/projects/neotolis-engine/**)",
+      "Bash(echo \"EMSDK=$EMSDK\")",
+      "Read(//c/emsdk/**)",
+      "Read(//c/projects/neotolis-engine/$HOME/emsdk/**)",
+      "Read(//d/emsdk/**)",
+      "Bash(source:*)",
+      "Bash(ls:*)",
+      "Bash(echo \"EMSDK_PYTHON=$EMSDK_PYTHON\")",
+      "Read(//c/projects/neotolis-engine/$EMSDK/upstream/emscripten/**)"
+>>>>>>> Stashed changes
     ]
   }
 }
