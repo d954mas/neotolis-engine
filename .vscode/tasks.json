@@ -62,7 +62,7 @@
             "problemMatcher": []
         },
         {
-            "label": "Serve WASM (localhost:8080)",
+            "label": "Serve WASM debug (localhost:8080)",
             "type": "shell",
             "command": "python",
             "args": [
@@ -82,8 +82,34 @@
             }
         },
         {
-            "label": "Build & Serve WASM hello",
-            "dependsOn": ["Build wasm-debug", "Serve WASM (localhost:8080)"],
+            "label": "Serve WASM release (localhost:8080)",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-m", "http.server", "8080",
+                "-d", "${workspaceFolder}/build/examples/hello/wasm-release"
+            ],
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": {
+                    "regexp": "^never$"
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP"
+                }
+            }
+        },
+        {
+            "label": "Build & Serve WASM hello (debug)",
+            "dependsOn": ["Build wasm-debug", "Serve WASM debug (localhost:8080)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve WASM hello (release)",
+            "dependsOn": ["Build wasm-release", "Serve WASM release (localhost:8080)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         }
