@@ -1,7 +1,7 @@
 #ifndef NT_CORE_H
 #define NT_CORE_H
 
-#include "runtime/core/nt_types.h"
+#include "core/nt_types.h"
 
 #define NT_VERSION_MAJOR 0
 #define NT_VERSION_MINOR 1

@@ -3,6 +3,7 @@ project(neotolis-engine LANGUAGES C)
 
 # Warning and sanitizer flag functions (applied per-target, not globally)
 include(cmake/warnings.cmake)
+include(cmake/nt_module.cmake)
 
 # Derive preset name from build type + platform for output directory layout
 if(EMSCRIPTEN)
