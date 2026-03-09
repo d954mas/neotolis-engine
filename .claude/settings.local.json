@@ -12,7 +12,12 @@
       "Bash(export:*)",
       "Bash(C:/develop/emsdk/emcmake.bat cmake:*)",
       "Bash(gh auth:*)",
-      "Bash(gh repo:*)"
+      "Bash(gh repo:*)",
+      "Skill(gsd:progress)",
+      "Skill(gsd:complete-milestone)",
+      "Bash(xargs wc:*)",
+      "Skill(gsd:execute-phase)",
+      "Skill(gsd:discuss-phase)"
     ]
   }
 }
