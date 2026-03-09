@@ -19,7 +19,12 @@
       "Skill(gsd:execute-phase)",
       "Skill(gsd:discuss-phase)",
       "Bash(clang-format:*)",
-      "Bash(clang-tidy:*)"
+      "Bash(clang-tidy:*)",
+      "Skill(gsd:add-todo)",
+      "Skill(gsd:add-phase)",
+      "WebFetch(domain:floooh.github.io)",
+      "WebFetch(domain:github.com)",
+      "Bash(emrun:*)"
     ]
   }
 }
