@@ -52,11 +52,10 @@ Plans:
   3. No `nt_engine` target exists anywhere in the build system (cmake --build produces no libnt_engine artifact)
   4. examples/hello, all tests, and builder each link only the specific modules they use -- no transitive engine dependencies
   5. Both WASM and native builds succeed with all consumers linking granular modules
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 04-01: TBD
-- [ ] 04-02: TBD
+- [ ] 04-01-PLAN.md -- Remove nt_engine shim, migrate all consumers to explicit module linking
 
 ### Phase 5: Swappable Backends
 **Goal**: A module can have multiple implementations sharing the same API, and consumers choose which implementation to link
@@ -97,6 +96,6 @@ Phases execute in numeric order: 3 -> 4 -> 5 -> 6
 | 1. Project Scaffold | v1.0 | 2/2 | Complete | 2026-03-09 |
 | 2. Build Hardening | v1.0 | 2/2 | Complete | 2026-03-09 |
 | 3. Build Infrastructure | v1.1 | 2/2 | Complete | 2026-03-09 |
-| 4. Module Split | v1.1 | 0/? | Not started | - |
+| 4. Module Split | v1.1 | 0/1 | Not started | - |
 | 5. Swappable Backends | v1.1 | 0/? | Not started | - |
 | 6. Build Verification | v1.1 | 0/? | Not started | - |
