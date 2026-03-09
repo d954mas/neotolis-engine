@@ -24,14 +24,9 @@ endif()
 add_subdirectory(shared)
 add_subdirectory(engine)
 
-# Vendored dependencies
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/deps/cglm/CMakeLists.txt")
-    add_subdirectory(deps/cglm EXCLUDE_FROM_ALL)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/deps/unity/CMakeLists.txt")
-    add_subdirectory(deps/unity EXCLUDE_FROM_ALL)
-endif()
+# Vendored dependencies (committed in deps/, always available)
+add_subdirectory(deps/cglm EXCLUDE_FROM_ALL)
+add_subdirectory(deps/unity EXCLUDE_FROM_ALL)
 
 # Top-level only targets (not included when engine is used as subdirectory)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
