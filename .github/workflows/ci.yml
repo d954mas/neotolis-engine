@@ -30,6 +30,8 @@ jobs:
           test -f build/examples/hello/wasm-debug/hello.js
           test -f build/examples/hello/wasm-debug/hello.wasm
           test -f build/engine/wasm-debug/libnt_core.a
+          test -f build/engine/wasm-debug/libnt_log.a
+          test -f build/engine/wasm-debug/libnt_log_stub.a
           echo "WASM debug build verified"
 
       - name: Configure WASM release
@@ -44,6 +46,8 @@ jobs:
           test -f build/examples/hello/wasm-release/hello.js
           test -f build/examples/hello/wasm-release/hello.wasm
           test -f build/engine/wasm-release/libnt_core.a
+          test -f build/engine/wasm-release/libnt_log.a
+          test -f build/engine/wasm-release/libnt_log_stub.a
           echo "WASM release build verified"
 
   native-build:
@@ -65,6 +69,8 @@ jobs:
         run: |
           test -f build/tools/builder/native-debug/builder
           test -f build/engine/native-debug/libnt_core.a
+          test -f build/engine/native-debug/libnt_log.a
+          test -f build/engine/native-debug/libnt_log_stub.a
           echo "Native debug build verified"
 
       - name: Smoke test builder (debug)
@@ -80,6 +86,8 @@ jobs:
         run: |
           test -f build/tools/builder/native-release/builder
           test -f build/engine/native-release/libnt_core.a
+          test -f build/engine/native-release/libnt_log.a
+          test -f build/engine/native-release/libnt_log_stub.a
           echo "Native release build verified"
 
       - name: Smoke test builder (release)
