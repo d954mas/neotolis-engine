@@ -7,7 +7,8 @@
             "request": "launch",
             "url": "http://localhost:8080/hello.html",
             "webRoot": "${workspaceFolder}/build/examples/hello/wasm-debug",
-            "preLaunchTask": "Build & Serve WASM (debug)"
+            "preLaunchTask": "Build & Serve WASM (debug)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
         },
         {
             "name": "Run WASM hello (release)",
@@ -15,7 +16,8 @@
             "request": "launch",
             "url": "http://localhost:8081/hello.html",
             "webRoot": "${workspaceFolder}/build/examples/hello/wasm-release",
-            "preLaunchTask": "Build & Serve WASM (release)"
+            "preLaunchTask": "Build & Serve WASM (release)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
         }
     ]
 }
