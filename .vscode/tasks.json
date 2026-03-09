@@ -79,9 +79,9 @@
             "problemMatcher": []
         },
         {
-            "label": "Serve WASM debug (localhost:8080)",
+            "label": "Ensure server (debug :8080)",
             "type": "shell",
-            "command": "netstat -ano | findstr :8080 | findstr LISTENING >nul 2>&1 && (echo Server already running on port 8080) || (start \"WASM Server\" python -m http.server 8080 -d \"${workspaceFolder}/build/examples/hello/wasm-debug\" & timeout /t 1 >nul)",
+            "command": "netstat -ano | findstr :8080 | findstr LISTENING >nul 2>&1 && (echo Port 8080 already in use, skipping) || (start /b python -m http.server 8080 -d \"${workspaceFolder}/build/examples/hello/wasm-debug\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -91,9 +91,9 @@
             "problemMatcher": []
         },
         {
-            "label": "Serve WASM release (localhost:8081)",
+            "label": "Ensure server (release :8081)",
             "type": "shell",
-            "command": "netstat -ano | findstr :8081 | findstr LISTENING >nul 2>&1 && (echo Server already running on port 8081) || (start \"WASM Server\" python -m http.server 8081 -d \"${workspaceFolder}/build/examples/hello/wasm-release\" & timeout /t 1 >nul)",
+            "command": "netstat -ano | findstr :8081 | findstr LISTENING >nul 2>&1 && (echo Port 8081 already in use, skipping) || (start /b python -m http.server 8081 -d \"${workspaceFolder}/build/examples/hello/wasm-release\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -104,13 +104,13 @@
         },
         {
             "label": "Build & Serve WASM (debug)",
-            "dependsOn": ["Build wasm-debug", "Serve WASM debug (localhost:8080)"],
+            "dependsOn": ["Build wasm-debug", "Ensure server (debug :8080)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         },
         {
             "label": "Build & Serve WASM (release)",
-            "dependsOn": ["Build wasm-release", "Serve WASM release (localhost:8081)"],
+            "dependsOn": ["Build wasm-release", "Ensure server (release :8081)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         }
