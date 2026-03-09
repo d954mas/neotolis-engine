@@ -1,5 +1,5 @@
 add_executable(hello main.c)
-target_link_libraries(hello PRIVATE nt_engine)
+target_link_libraries(hello PRIVATE nt_core cglm_headers)
 
 # Strict warning and sanitizer policy
 nt_set_warning_flags(hello)

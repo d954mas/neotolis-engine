@@ -3,8 +3,7 @@
 
 if(NOT EMSCRIPTEN)
     add_executable(test_core unit/test_core.c)
-    target_link_libraries(test_core PRIVATE nt_engine unity)
-    target_include_directories(test_core PRIVATE ${CMAKE_SOURCE_DIR}/engine)
+    target_link_libraries(test_core PRIVATE nt_core unity)
 
     # Strict warning and sanitizer policy (same as engine code)
     nt_set_warning_flags(test_core)
@@ -22,8 +21,7 @@ if(NOT EMSCRIPTEN)
     # Intentionally triggers UB to prove ASan+UBSan are working.
     # WILL_FAIL=TRUE: CTest expects this test to fail (sanitizer aborts it).
     add_executable(test_sanitizer_proof unit/test_sanitizer_proof.c)
-    target_link_libraries(test_sanitizer_proof PRIVATE nt_engine unity)
-    target_include_directories(test_sanitizer_proof PRIVATE ${CMAKE_SOURCE_DIR}/engine)
+    target_link_libraries(test_sanitizer_proof PRIVATE nt_core unity)
 
     nt_set_warning_flags(test_sanitizer_proof)
     nt_set_sanitizer_flags(test_sanitizer_proof)
@@ -39,8 +37,7 @@ endif()
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---
 if(EMSCRIPTEN)
     add_executable(wasm_smoke wasm/smoke_entry.c)
-    target_link_libraries(wasm_smoke PRIVATE nt_engine)
-    target_include_directories(wasm_smoke PRIVATE ${CMAKE_SOURCE_DIR}/engine)
+    target_link_libraries(wasm_smoke PRIVATE nt_core)
 
     # Strict warning and sanitizer policy (same as engine code)
     nt_set_warning_flags(wasm_smoke)
