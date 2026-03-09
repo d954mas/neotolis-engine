@@ -81,11 +81,13 @@
         {
             "label": "Serve WASM debug (localhost:8080)",
             "type": "shell",
-            "command": "python",
-            "args": [
-                "-m", "http.server", "8080",
-                "-d", "${workspaceFolder}/build/examples/hello/wasm-debug"
-            ],
+            "command": "netstat -ano | findstr :8080 | findstr LISTENING >nul 2>&1 && (echo Serving HTTP - already running on port 8080) || (python -m http.server 8080 -d \"${workspaceFolder}/build/examples/hello/wasm-debug\")",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
             "isBackground": true,
             "problemMatcher": {
                 "pattern": {
@@ -101,11 +103,13 @@
         {
             "label": "Serve WASM release (localhost:8081)",
             "type": "shell",
-            "command": "python",
-            "args": [
-                "-m", "http.server", "8081",
-                "-d", "${workspaceFolder}/build/examples/hello/wasm-release"
-            ],
+            "command": "netstat -ano | findstr :8081 | findstr LISTENING >nul 2>&1 && (echo Serving HTTP - already running on port 8081) || (python -m http.server 8081 -d \"${workspaceFolder}/build/examples/hello/wasm-release\")",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
             "isBackground": true,
             "problemMatcher": {
                 "pattern": {
@@ -119,14 +123,14 @@
             }
         },
         {
-            "label": "Serve WASM & Debug (first run)",
-            "dependsOn": ["Configure wasm-debug", "Build wasm-debug", "Serve WASM debug (localhost:8080)"],
+            "label": "Build & Serve WASM (debug)",
+            "dependsOn": ["Build wasm-debug", "Serve WASM debug (localhost:8080)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         },
         {
-            "label": "Serve WASM & Run (first run)",
-            "dependsOn": ["Configure wasm-release", "Build wasm-release", "Serve WASM release (localhost:8081)"],
+            "label": "Build & Serve WASM (release)",
+            "dependsOn": ["Build wasm-release", "Serve WASM release (localhost:8081)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         }
