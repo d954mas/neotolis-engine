@@ -24,7 +24,7 @@ Requirements for modular build milestone. Each maps to roadmap phases.
 
 - [x] **SWAP-01**: INTERFACE target for API contract (header-only) of a module with multiple implementations
 - [x] **SWAP-02**: At least two implementations of the same module (e.g., nt_log and nt_log_empty) sharing the same API
-- [ ] **SWAP-03**: Example/test demonstrates linking different implementations of the same API
+- [x] **SWAP-03**: Example/test demonstrates linking different implementations of the same API
 
 ### Build Quality
 
@@ -69,7 +69,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SPLIT-04 | Phase 4: Module Split | Complete |
 | SWAP-01 | Phase 5: Swappable Backends | Complete |
 | SWAP-02 | Phase 5: Swappable Backends | Complete |
-| SWAP-03 | Phase 5: Swappable Backends | Pending |
+| SWAP-03 | Phase 5: Swappable Backends | Complete |
 | QUAL-01 | Phase 6: Build Verification | Pending |
 | QUAL-02 | Phase 6: Build Verification | Pending |
 | QUAL-03 | Phase 6: Build Verification | Pending |

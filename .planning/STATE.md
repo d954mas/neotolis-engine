@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Modular Build
 status: completed
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-03-09T17:06:56.449Z"
-last_activity: 2026-03-09 -- Completed 05-01 ALIAS + nt_log swappable module
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-03-09T17:09:59Z"
+last_activity: 2026-03-09 -- Completed 05-02 swap demo tests + CI verification
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 5
-  completed_plans: 4
-  percent: 80
+  completed_plans: 5
+  percent: 100
 ---
 
 # Project State
@@ -21,21 +21,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-09)
 
 **Core value:** Simple, fast, predictable engine runtime -- composable features wired by game code with zero hidden magic
-**Current focus:** Phase 5 Swappable Backends (1 of 2 plans done)
+**Current focus:** Phase 5 Swappable Backends complete (2 of 2 plans done)
 
 ## Current Position
 
 Phase: 5 of 6 (Swappable Backends) -- third phase of v1.1 milestone
-Plan: 1 of 2
-Status: Plan 05-01 complete
-Last activity: 2026-03-09 -- Completed 05-01 ALIAS + nt_log swappable module
+Plan: 2 of 2
+Status: Phase 05 complete
+Last activity: 2026-03-09 -- Completed 05-02 swap demo tests + CI verification
 
-Progress: [########░░] 80%
+Progress: [##########] 100%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8 (4 from v1.0 + 4 from v1.1)
+- Total plans completed: 9 (4 from v1.0 + 5 from v1.1)
 - Average duration: --
 - Total execution time: --
 
@@ -47,7 +47,7 @@ Progress: [########░░] 80%
 | 2. Build Hardening | 2 | -- | -- |
 | 3. Build Infrastructure | 2 | 5min | 2.5min |
 | 4. Module Split | 1 | 2min | 2min |
-| 5. Swappable Backends | 1/2 | 2min | 2min |
+| 5. Swappable Backends | 2/2 | 4min | 2min |
 
 *Updated after each plan completion*
 
@@ -91,6 +91,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-09T17:06:56.446Z
-Stopped at: Completed 05-01-PLAN.md
+Last session: 2026-03-09T17:09:59Z
+Stopped at: Completed 05-02-PLAN.md
 Resume file: None
