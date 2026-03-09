@@ -81,7 +81,7 @@
         {
             "label": "Ensure server (debug :8080)",
             "type": "shell",
-            "command": "netstat -ano | findstr :8080 | findstr LISTENING >nul 2>&1 && (echo Port 8080 already in use, skipping) || (start /b python -m http.server 8080 -d \"${workspaceFolder}/build/examples/hello/wasm-debug\" & timeout /t 1 >nul)",
+            "command": "curl -s -o nul http://localhost:8080 >nul 2>&1 && (echo Server already running on :8080) || (start /b python -m http.server 8080 -d \"${workspaceFolder}/build/examples/hello/wasm-debug\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -93,7 +93,7 @@
         {
             "label": "Ensure server (release :8081)",
             "type": "shell",
-            "command": "netstat -ano | findstr :8081 | findstr LISTENING >nul 2>&1 && (echo Port 8081 already in use, skipping) || (start /b python -m http.server 8081 -d \"${workspaceFolder}/build/examples/hello/wasm-release\" & timeout /t 1 >nul)",
+            "command": "curl -s -o nul http://localhost:8081 >nul 2>&1 && (echo Server already running on :8081) || (start /b python -m http.server 8081 -d \"${workspaceFolder}/build/examples/hello/wasm-release\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
