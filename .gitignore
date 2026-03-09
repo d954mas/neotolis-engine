@@ -17,8 +17,6 @@ compile_commands.json
 emsdk/
 
 # IDE
-.vscode/settings.json
-.vscode/launch.json
 .idea/
 *.swp
 *.swo
