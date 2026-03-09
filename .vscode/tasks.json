@@ -1,0 +1,118 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Configure native-debug",
+            "type": "cmake",
+            "command": "configure",
+            "preset": "native-debug",
+            "problemMatcher": []
+        },
+        {
+            "label": "Configure wasm-debug",
+            "type": "shell",
+            "command": "emcmake cmake --preset wasm-debug",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Configure wasm-release",
+            "type": "shell",
+            "command": "emcmake cmake --preset wasm-release",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build native-debug",
+            "type": "cmake",
+            "command": "build",
+            "preset": "native-debug",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build native-release",
+            "type": "cmake",
+            "command": "build",
+            "preset": "native-release",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build wasm-debug",
+            "type": "cmake",
+            "command": "build",
+            "preset": "wasm-debug",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build wasm-release",
+            "type": "cmake",
+            "command": "build",
+            "preset": "wasm-release",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Run tests (native-debug)",
+            "type": "cmake",
+            "command": "test",
+            "preset": "native-debug",
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Ensure server (debug :8080)",
+            "type": "shell",
+            "command": "curl -s -o nul http://localhost:8080 >nul 2>&1 && (echo Server already running on :8080) || (start /b python -m http.server 8080 -d \"${workspaceFolder}/build/examples/hello/wasm-debug\" & timeout /t 1 >nul)",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Ensure server (release :8081)",
+            "type": "shell",
+            "command": "curl -s -o nul http://localhost:8081 >nul 2>&1 && (echo Server already running on :8081) || (start /b python -m http.server 8081 -d \"${workspaceFolder}/build/examples/hello/wasm-release\" & timeout /t 1 >nul)",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve WASM (debug)",
+            "dependsOn": ["Build wasm-debug", "Ensure server (debug :8080)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve WASM (release)",
+            "dependsOn": ["Build wasm-release", "Ensure server (release :8081)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        }
+    ]
+}
