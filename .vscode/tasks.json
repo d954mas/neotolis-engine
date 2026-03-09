@@ -11,15 +11,25 @@
         {
             "label": "Configure wasm-debug",
             "type": "shell",
-            "command": "emcmake",
-            "args": ["cmake", "--preset", "wasm-debug"],
+            "command": "emcmake cmake --preset wasm-debug",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
             "problemMatcher": []
         },
         {
             "label": "Configure wasm-release",
             "type": "shell",
-            "command": "emcmake",
-            "args": ["cmake", "--preset", "wasm-release"],
+            "command": "emcmake cmake --preset wasm-release",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
             "problemMatcher": []
         },
         {
