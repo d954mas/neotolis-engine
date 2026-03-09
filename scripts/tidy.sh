@@ -23,8 +23,9 @@ echo "Running clang-tidy on $FILE_COUNT files..."
 EXTRA_ARGS="--extra-arg=-isystem$ROOT_DIR/deps/unity/src"
 
 # Use run-clang-tidy if available and python3 is present, otherwise fall back
+# Note: run-clang-tidy uses single-dash flags (-extra-arg), clang-tidy uses double-dash (--extra-arg)
 if command -v run-clang-tidy &>/dev/null && command -v python3 &>/dev/null; then
-    echo "$SOURCES" | xargs run-clang-tidy -p "$BUILD_DIR" $EXTRA_ARGS
+    echo "$SOURCES" | xargs run-clang-tidy -p "$BUILD_DIR" -extra-arg="-isystem$ROOT_DIR/deps/unity/src"
 else
     echo "$SOURCES" | xargs clang-tidy -p "$BUILD_DIR" $EXTRA_ARGS
 fi

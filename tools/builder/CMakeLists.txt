@@ -1,5 +1,5 @@
 add_executable(builder main.c)
-target_link_libraries(builder PRIVATE nt_engine)
+target_link_libraries(builder PRIVATE nt_core)
 
 # Strict warning and sanitizer policy
 nt_set_warning_flags(builder)

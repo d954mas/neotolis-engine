@@ -2,8 +2,8 @@
 #define NT_TYPES_H
 
 #include <stdbool.h>
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 typedef enum {
     NT_OK = 0,

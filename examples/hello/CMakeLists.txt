@@ -1,5 +1,5 @@
 add_executable(hello main.c)
-target_link_libraries(hello PRIVATE nt_engine)
+target_link_libraries(hello PRIVATE nt_core cglm_headers)
 
 # Strict warning and sanitizer policy
 nt_set_warning_flags(hello)
@@ -14,7 +14,7 @@ set_target_properties(hello PROPERTIES
 if(EMSCRIPTEN)
     set_target_properties(hello PROPERTIES SUFFIX ".html")
     target_link_options(hello PRIVATE
-        "SHELL:--shell-file ${CMAKE_SOURCE_DIR}/engine/runtime/web/shell.html"
+        "SHELL:--shell-file ${CMAKE_SOURCE_DIR}/engine/platform/web/shell.html"
         "SHELL:-sUSE_WEBGL2=1"
         "SHELL:-sMAX_WEBGL_VERSION=2"
         "SHELL:-sMIN_WEBGL_VERSION=2"
