@@ -14,7 +14,7 @@
 ## Объём работ
 
 - Создать верхнеуровневые директории `engine/`, `builder/`, `game/` и разложить внутри будущие подсистемы по `§26`.
-- Разделить два базовых build target-а: runtime под `emcc` и builder как native C23 binary.
+- Разделить два базовых build target-а: runtime под `emcc` и builder как native C17 binary.
 - Ввести общие базовые заголовки для platform-independent типов, handles, asserts и compile-time flags.
 - Зафиксировать правила условной компиляции platform-specific реализации: в сборку попадает только один backend file на платформу.
 - Подготовить entrypoints для runtime и builder без попытки рано вводить сложный meta-build framework.

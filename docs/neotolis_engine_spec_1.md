@@ -3,11 +3,13 @@
 
 **Version:** v0.3-consolidated  
 **Status:** Architectural baseline + implementation-oriented spec  
-**Language target:** C23  
+**Language target:** C17  
 **Primary runtime target:** Web / WASM + WebGL 2  
 **Secondary future target:** WebGPU  
 
 This document consolidates all architectural decisions from v0.1 overview, v0.2 technical spec, and subsequent design sessions into a single authoritative reference.
+
+Language baseline is C17 for broader compiler and Emscripten toolchain support.
 
 ---
 

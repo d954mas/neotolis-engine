@@ -2,7 +2,7 @@
 
 ## Цель
 
-Поднять builder как отдельную программу на C23 с code-defined rules и зафиксировать его публичный API для packs и asset additions.
+Поднять builder как отдельную программу на C17 с code-defined rules и зафиксировать его публичный API для packs и asset additions.
 
 ## Основание в спецификации
 

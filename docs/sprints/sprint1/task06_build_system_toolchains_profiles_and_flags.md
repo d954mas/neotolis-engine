@@ -10,7 +10,7 @@
 
 ## Почему это отдельная задача
 
-Спецификация и `AGENTS.md` фиксируют только high-level требования: `C23`, `runtime = WASM через emcc`, `builder = native C binary`. Конкретная система сборки, профили, флаги предупреждений, linker options, sanitizer policy и структура build outputs в baseline-спеке не заданы. Это пробел в архитектурном плане, и его нужно закрыть явно, а не заполнять локальными догадками каждого следующего спринта.
+Спецификация и `AGENTS.md` фиксируют только high-level требования: `C17`, `runtime = WASM через emcc`, `builder = native C binary`. Конкретная система сборки, профили, флаги предупреждений, linker options, sanitizer policy и структура build outputs в baseline-спеке не заданы. Это пробел в архитектурном плане, и его нужно закрыть явно, а не заполнять локальными догадками каждого следующего спринта.
 
 ## Основание в спецификации и проектных инструкциях
 
@@ -34,7 +34,7 @@
   - `release`
   - опционально `relwithdebinfo` или `size`, если проект сочтёт это обязательным
 - Зафиксировать policy по compiler standard и warning levels:
-  - `C23` как обязательный стандарт
+  - `C17` как обязательный стандарт из-за более широкой поддержки toolchain-ами
   - warning baseline для `clang/gcc`
   - warning baseline для `msvc`, если builder должен собираться под Windows native toolchain
   - policy по `warnings as errors`: глобально или только в CI/selected targets
@@ -76,7 +76,7 @@
 
 - Есть один документированный способ собрать runtime и builder с нуля.
 - Runtime target использует `emcc` и не допускает WebGL 1 fallback.
-- Builder target является нативным C23-бинарником и не зависит от wasm toolchain.
+- Builder target является нативным C17-бинарником и не зависит от wasm toolchain.
 - Для каждого профиля заданы ожидаемые optimization/debug/assert behaviors.
 - Warning policy и config macros задокументированы и воспроизводимы.
 - Output directories и имена target-ов стандартизированы.
