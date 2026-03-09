@@ -1,0 +1,77 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Configure native-debug",
+            "type": "cmake",
+            "command": "configure",
+            "preset": "native-debug",
+            "problemMatcher": []
+        },
+        {
+            "label": "Configure wasm-debug",
+            "type": "shell",
+            "command": "emcmake",
+            "args": ["cmake", "--preset", "wasm-debug"],
+            "problemMatcher": []
+        },
+        {
+            "label": "Build native-debug",
+            "type": "cmake",
+            "command": "build",
+            "preset": "native-debug",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build native-release",
+            "type": "cmake",
+            "command": "build",
+            "preset": "native-release",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build wasm-debug",
+            "type": "cmake",
+            "command": "build",
+            "preset": "wasm-debug",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build wasm-release",
+            "type": "cmake",
+            "command": "build",
+            "preset": "wasm-release",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Run tests (native-debug)",
+            "type": "cmake",
+            "command": "test",
+            "preset": "native-debug",
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Serve WASM hello",
+            "type": "shell",
+            "command": "emrun",
+            "args": [
+                "--port", "8080",
+                "--no_emrun_detect",
+                "${workspaceFolder}/build/examples/hello/wasm-debug/hello.html"
+            ],
+            "isBackground": true,
+            "problemMatcher": []
+        }
+    ]
+}
