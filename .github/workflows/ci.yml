@@ -239,3 +239,117 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./gh-pages-data
           keep_files: true
+
+  pr-size-comment:
+    name: PR Size Comment
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read emsdk version
+        id: emsdk-version
+        run: echo "version=$(cat .emsdk-version)" >> $GITHUB_OUTPUT
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ steps.emsdk-version.outputs.version }}
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Configure WASM release
+        run: emcmake cmake --preset wasm-release
+
+      - name: Build WASM release
+        run: cmake --build --preset wasm-release
+
+      - name: Measure sizes
+        run: bash scripts/size.sh hello --json > /tmp/pr_size.json
+
+      - name: Fetch baseline from gh-pages
+        id: baseline
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages-baseline
+        continue-on-error: true
+
+      - name: Generate size comment
+        run: |
+          CURRENT=$(cat /tmp/pr_size.json)
+          BASELINE_FILE="gh-pages-baseline/sizes/hello.json"
+          HAS_BASELINE=false
+          if [ -f "$BASELINE_FILE" ]; then
+            BASELINE=$(jq '.[-1]' "$BASELINE_FILE")
+            HAS_BASELINE=true
+          fi
+
+          {
+            echo "## WASM Build Size (\`hello\`)"
+            echo ""
+            echo "| File | Raw | Gzip | Raw Delta | Gzip Delta |"
+            echo "|------|----:|-----:|----------:|-----------:|"
+
+            for fname in $(echo "$CURRENT" | jq -r '.files | keys[]' | sort); do
+              cur_raw=$(echo "$CURRENT" | jq -r ".files[\"$fname\"].raw")
+              cur_gz=$(echo "$CURRENT" | jq -r ".files[\"$fname\"].gzip")
+              if [ "$HAS_BASELINE" = true ]; then
+                base_raw=$(echo "$BASELINE" | jq -r ".files[\"$fname\"].raw // 0")
+                base_gz=$(echo "$BASELINE" | jq -r ".files[\"$fname\"].gzip // 0")
+                d_raw=$((cur_raw - base_raw))
+                d_gz=$((cur_gz - base_gz))
+                [ "$d_raw" -ge 0 ] && d_raw_str="+${d_raw} B" || d_raw_str="${d_raw} B"
+                [ "$d_gz" -ge 0 ] && d_gz_str="+${d_gz} B" || d_gz_str="${d_gz} B"
+              else
+                d_raw_str="--"
+                d_gz_str="--"
+              fi
+              printf "| \`%s\` | %d B | %d B | %s | %s |\n" "$fname" "$cur_raw" "$cur_gz" "$d_raw_str" "$d_gz_str"
+            done
+
+            cur_total_raw=$(echo "$CURRENT" | jq -r '.total.raw')
+            cur_total_gz=$(echo "$CURRENT" | jq -r '.total.gzip')
+            if [ "$HAS_BASELINE" = true ]; then
+              base_total_raw=$(echo "$BASELINE" | jq -r '.total.raw')
+              base_total_gz=$(echo "$BASELINE" | jq -r '.total.gzip')
+              d_total_raw=$((cur_total_raw - base_total_raw))
+              d_total_gz=$((cur_total_gz - base_total_gz))
+              [ "$d_total_raw" -ge 0 ] && d_total_raw_str="+${d_total_raw} B" || d_total_raw_str="${d_total_raw} B"
+              [ "$d_total_gz" -ge 0 ] && d_total_gz_str="+${d_total_gz} B" || d_total_gz_str="${d_total_gz} B"
+            else
+              d_total_raw_str="--"
+              d_total_gz_str="--"
+            fi
+            echo "| **Total** | **${cur_total_raw} B** | **${cur_total_gz} B** | **${d_total_raw_str}** | **${d_total_gz_str}** |"
+
+            echo ""
+            pr_commit=$(echo "$CURRENT" | jq -r '.commit')
+            if [ "$HAS_BASELINE" = true ]; then
+              base_commit=$(echo "$BASELINE" | jq -r '.commit')
+            else
+              base_commit="none"
+            fi
+            echo "<sub>Baseline: master@${base_commit} | PR: ${pr_commit}</sub>"
+          } > /tmp/pr_comment.md
+
+      - name: Post or update PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMENT_BODY=$(cat /tmp/pr_comment.md)
+          PR_NUMBER=${{ github.event.pull_request.number }}
+
+          EXISTING=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | startswith("## WASM Build Size")) | .id' \
+            | head -1)
+
+          if [ -n "$EXISTING" ]; then
+            gh api "repos/${{ github.repository }}/issues/comments/${EXISTING}" \
+              -X PATCH -f body="$COMMENT_BODY"
+            echo "Updated existing comment $EXISTING"
+          else
+            gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              -X POST -f body="$COMMENT_BODY"
+            echo "Created new comment"
+          fi
