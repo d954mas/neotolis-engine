@@ -3,11 +3,10 @@
 
 /* ---- Accumulator (platform-agnostic math) ---- */
 
-void nt_accumulator_init(nt_accumulator_t *acc, float fixed_dt,
-                          int max_steps) {
-    acc->fixed_dt         = fixed_dt;
-    acc->accumulator      = 0.0f;
-    acc->max_steps        = max_steps;
+void nt_accumulator_init(nt_accumulator_t *acc, float fixed_dt, int max_steps) {
+    acc->fixed_dt = fixed_dt;
+    acc->accumulator = 0.0F;
+    acc->max_steps = max_steps;
     acc->steps_this_frame = 0;
 }
 
@@ -17,8 +16,7 @@ void nt_accumulator_add(nt_accumulator_t *acc, float dt) {
 }
 
 bool nt_accumulator_step(nt_accumulator_t *acc) {
-    if (acc->accumulator >= acc->fixed_dt &&
-        acc->steps_this_frame < acc->max_steps) {
+    if (acc->accumulator >= acc->fixed_dt && acc->steps_this_frame < acc->max_steps) {
         acc->accumulator -= acc->fixed_dt;
         acc->steps_this_frame++;
         return true;
@@ -27,8 +25,8 @@ bool nt_accumulator_step(nt_accumulator_t *acc) {
 }
 
 float nt_accumulator_alpha(const nt_accumulator_t *acc) {
-    if (acc->fixed_dt <= 0.0f) {
-        return 0.0f;
+    if (acc->fixed_dt <= 0.0F) {
+        return 0.0F;
     }
     return acc->accumulator / acc->fixed_dt;
 }
@@ -38,13 +36,9 @@ float nt_accumulator_alpha(const nt_accumulator_t *acc) {
 #ifdef NT_PLATFORM_WEB
 #include <emscripten.h>
 
-double nt_time_now(void) {
-    return emscripten_get_now() / 1000.0; /* ms -> seconds */
-}
+double nt_time_now(void) { return emscripten_get_now() / 1000.0; /* ms -> seconds */ }
 
-uint64_t nt_time_nanos(void) {
-    return (uint64_t)(emscripten_get_now() * 1000000.0); /* ms -> ns */
-}
+uint64_t nt_time_nanos(void) { return (uint64_t)(emscripten_get_now() * 1000000.0); /* ms -> ns */ }
 
 #elif defined(NT_PLATFORM_WIN)
 #include <windows.h>
