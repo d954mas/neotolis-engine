@@ -1,5 +1,7 @@
 #include "core/nt_core.h"
+#include "platform/web/nt_web.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 int main(void) {
     nt_engine_config_t config = {0};
@@ -11,6 +13,8 @@ int main(void) {
         printf("Failed to initialize engine: error %d\n", result);
         return 1;
     }
+
+    nt_web_loading_complete();
 
     printf("Hello from Neotolis Engine!\n");
     printf("Canvas present but no rendering in Phase 1\n");
