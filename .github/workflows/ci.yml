@@ -266,9 +266,7 @@ jobs:
           for example_dir in build/examples/*/wasm-release; do
             example_name=$(basename $(dirname "$example_dir"))
             mkdir -p "gh-pages-data/wasm/$example_name"
-            cp "$example_dir"/*.js "$example_dir"/*.wasm "gh-pages-data/wasm/$example_name/"
-            # Rename <name>.html to index.html so directory URL works on GitHub Pages
-            cp "$example_dir"/$example_name.html "gh-pages-data/wasm/$example_name/index.html"
+            cp "$example_dir"/*.html "$example_dir"/*.js "$example_dir"/*.wasm "gh-pages-data/wasm/$example_name/"
           done
 
       - name: Copy example cover images
