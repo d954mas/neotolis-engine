@@ -7,7 +7,9 @@ include(cmake/nt_module.cmake)
 
 # Derive preset name from build type + platform for output directory layout
 if(EMSCRIPTEN)
-    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    if(NT_WASM_ANALYSIS)
+        set(NT_PRESET_NAME "wasm-analysis")
+    elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
         set(NT_PRESET_NAME "wasm-release")
     else()
         set(NT_PRESET_NAME "wasm-debug")

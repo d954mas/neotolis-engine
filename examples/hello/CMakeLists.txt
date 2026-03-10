@@ -27,4 +27,9 @@ if(EMSCRIPTEN)
             "SHELL:-gsource-map"
         )
     endif()
+
+    # Analysis build: preserve human-readable function names for size reporting
+    if(NT_WASM_ANALYSIS)
+        target_link_options(hello PRIVATE "SHELL:--profiling-funcs")
+    endif()
 endif()
