@@ -34,7 +34,7 @@
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
-        @@keyframes spin {
+        @NT_SHELL_KEYFRAMES@ spin {
             to { transform: translate(-50%, -50%) rotate(360deg); }
         }
 

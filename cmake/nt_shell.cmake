@@ -15,8 +15,9 @@
 #                     toggle bar below the canvas. OFF by default.
 #
 # Template variables set for configure_file:
-#   @NT_SHELL_TITLE@           - Page title
+#   @NT_SHELL_TITLE@            - Page title
 #   @NT_SHELL_FULLSCREEN_BLOCK@ - HTML/CSS/JS for fullscreen bar (or empty)
+#   @NT_SHELL_KEYFRAMES@        - Literal "@keyframes" (CMake @ONLY workaround)
 #
 # Example:
 #   nt_configure_shell(hello TITLE "Hello - Neotolis Engine")
@@ -55,6 +56,11 @@ function(nt_configure_shell target)
     else()
         set(_shell_src "${CMAKE_SOURCE_DIR}/engine/platform/web/shell.html.in")
     endif()
+
+    # CSS @keyframes must be injected via variable because CMake
+    # configure_file(@ONLY) does NOT transform @@ to @ -- the literal
+    # @@keyframes would pass through unchanged, producing invalid CSS.
+    set(NT_SHELL_KEYFRAMES "@keyframes")
 
     # Configure template -> build dir
     set(_shell_out "${CMAKE_CURRENT_BINARY_DIR}/${target}_shell.html")
