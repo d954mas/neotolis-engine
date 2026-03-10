@@ -41,7 +41,22 @@
       "Bash(source:*)",
       "Bash(ls:*)",
       "Bash(echo \"EMSDK_PYTHON=$EMSDK_PYTHON\")",
-      "Read(//c/projects/neotolis-engine/$EMSDK/upstream/emscripten/**)"
+      "Read(//c/projects/neotolis-engine/$EMSDK/upstream/emscripten/**)",
+      "Bash(for commit:*)",
+      "Skill(gsd:verify-work)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(mkdir -p /c/tools)",
+      "Bash(cp -r /tmp/wabt-1.0.39 /c/tools/wabt)",
+      "Read(//c/tools/wabt/bin/**)",
+      "Bash(export PATH=\"/c/tools/wabt/bin:$PATH\" && wasm-objdump -j Code -x build/examples/hello/wasm-analysis/hello.wasm 2>/dev/null | grep -E '^\\\\s+-\\\\s+func\\\\[' | sed -E 's/.*<\\(.*\\)>/\\\\1/' | head -25)",
+      "Bash(export PATH=\"/c/tools/wabt/bin:$PATH:/usr/bin\" && wasm-objdump -j Code -x build/examples/hello/wasm-analysis/hello.wasm 2>/dev/null | grep -E '^\\\\s+-\\\\s+func\\\\[' | sed -E 's/.*<\\(.*\\)>/\\\\1/')",
+      "Bash(export PATH=\"/c/tools/wabt/bin:$PATH:/usr/bin\" && nm --print-file-name build/engine/wasm-analysis/libnt_core.a 2>/dev/null | head -5)",
+      "Bash(export PATH=\"/c/tools/wabt/bin:$PATH:/usr/bin\" && wasm-objdump -x build/engine/wasm-analysis/libnt_core.a 2>/dev/null | head -20)",
+      "Bash(export PATH=\"/c/tools/wabt/bin:$PATH:/usr/bin\" && ar t build/engine/wasm-analysis/libnt_core.a)",
+      "Bash(which emar:*)",
+      "Bash(export PATH=\"/c/tools/wabt/bin:$PATH:/usr/bin\" && /c/develop/emsdk/upstream/emscripten/emar.bat t build/engine/wasm-analysis/libnt_core.a 2>/dev/null)",
+      "Bash(gh run:*)",
+      "Bash(gh api:*)"
     ]
   }
 }
