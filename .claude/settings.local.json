@@ -59,7 +59,16 @@
       "Bash(gh api:*)",
       "Bash(find build/ -name \"hello*\" -type f 2>/dev/null | head -20)",
       "Bash(grep -A 10 \"\\\\-\\\\-auto\" /c/projects/neotolis-engine/.claude/get-shit-done/workflows/discuss-phase.md 2>/dev/null | head -30)",
-      "Bash(rm \".claude/commands/gsd/issue-to-phase.md\" && rm \".claude/get-shit-done/workflows/issue-to-phase.md\" && echo \"Old GSD files removed\")"
+      "Bash(rm \".claude/commands/gsd/issue-to-phase.md\" && rm \".claude/get-shit-done/workflows/issue-to-phase.md\" && echo \"Old GSD files removed\")",
+      "Bash(mkdir -p \"C:/projects/neotolis-engine/neotolis-engine-site\" && cd \"C:/projects/neotolis-engine/neotolis-engine-site\" && npx create-astro@latest . -- --template minimal --typescript strict --no-install --skip-houston 2>&1)",
+      "Bash(node --version && npm --version)",
+      "Bash(nvm list:*)",
+      "Bash(cd \"C:/projects/neotolis-engine/neotolis-engine-site\" && npx create-astro@4.11.0 . -- --template minimal --typescript strict --no-install --skip-houston 2>&1)",
+      "Bash(cd \"C:/projects/neotolis-engine\" && rm -rf neotolis-engine-site && mkdir -p neotolis-engine-site)",
+      "Bash(cd \"C:/projects/neotolis-engine/neotolis-engine-site\" && npm install 2>&1)",
+      "Bash(cd \"C:/projects/neotolis-engine/neotolis-engine-site\" && npm run build 2>&1)",
+      "Bash(cd \"C:/projects/neotolis-engine/neotolis-engine-site\" && npm run build 2>&1 && test -f dist/index.html && echo \"BUILD_OK: dist/index.html exists\")",
+      "Bash(cd \"C:/projects/neotolis-engine/neotolis-engine-site\" && npm ci 2>&1 | tail -5 && npm run build 2>&1 | tail -20 && test -f dist/index.html && echo \"VERIFIED: dist/index.html exists\" || echo \"FAIL: dist/index.html missing\")"
     ]
   }
 }
