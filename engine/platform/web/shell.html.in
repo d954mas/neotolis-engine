@@ -46,7 +46,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.85);
+            background: #1a1a1a;
             color: #e04040;
             font-family: monospace;
             font-size: 16px;
@@ -57,9 +57,9 @@
         }
     </style>
 </head>
-<body>
+<body oncontextmenu="return false;">
     <div id="spinner"></div>
-    <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+    <canvas id="canvas" tabindex="-1"></canvas>
     <div id="crash-overlay"></div>
     @NT_SHELL_FULLSCREEN_BLOCK@
 
@@ -74,7 +74,8 @@
 
         Module.onAbort = function(what) {
             var overlay = document.getElementById('crash-overlay');
-            overlay.textContent = 'Fatal error: ' + what;
+            var msg = what || 'Application aborted unexpectedly';
+            overlay.textContent = 'Fatal error: ' + msg;
             overlay.style.display = 'flex';
         };
     </script>
