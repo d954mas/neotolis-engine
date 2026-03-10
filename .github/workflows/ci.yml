@@ -282,7 +282,7 @@ jobs:
       - name: Build promo site
         run: |
           cd neotolis-engine-site
-          npm ci
+          npm install
           npm run build
 
       - name: Copy site to gh-pages
