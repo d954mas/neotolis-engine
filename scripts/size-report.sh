@@ -66,7 +66,7 @@ fi
 # Path resolution
 # ---------------------------------------------------------------------------
 WASM_FILE="$ROOT_DIR/build/examples/$TARGET/$PRESET/$TARGET.wasm"
-ENGINE_LIB_DIR="$ROOT_DIR/build/_cmake/$PRESET/engine"
+ENGINE_LIB_DIR="$ROOT_DIR/build/engine/$PRESET"
 
 if [ ! -f "$WASM_FILE" ]; then
     echo "ERROR: WASM binary not found: $WASM_FILE"
@@ -95,11 +95,11 @@ printf "%-16s %10s\n" "----------------" "----------"
 SECTION_TOTAL=0
 while IFS= read -r line; do
     name=$(echo "$line" | awk '{print $1}')
-    hex_size=$(echo "$line" | awk -F'size=' '{print $2}' | awk -F')' '{print $1}')
-    dec_size=$((16#${hex_size#0x}))
+    hex_size=$(echo "$line" | sed -E 's/.*\(size=(0x[0-9a-fA-F]+)\).*/\1/')
+    dec_size=$((hex_size))
     SECTION_TOTAL=$((SECTION_TOTAL + dec_size))
     printf "%-16s %7d B\n" "$name" "$dec_size"
-done < <(wasm-objdump -h "$WASM_FILE" 2>/dev/null | grep -E '^\s+\w+\s+start=' | awk '{print $1, $2}')
+done < <(wasm-objdump -h "$WASM_FILE" 2>/dev/null | grep -E '^\s+\w+\s+start=')
 
 printf "%-16s %10s\n" "----------------" "----------"
 printf "%-16s %7d B\n" "TOTAL" "$SECTION_TOTAL"

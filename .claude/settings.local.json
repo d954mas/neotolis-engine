@@ -41,7 +41,8 @@
       "Bash(source:*)",
       "Bash(ls:*)",
       "Bash(echo \"EMSDK_PYTHON=$EMSDK_PYTHON\")",
-      "Read(//c/projects/neotolis-engine/$EMSDK/upstream/emscripten/**)"
+      "Read(//c/projects/neotolis-engine/$EMSDK/upstream/emscripten/**)",
+      "Bash(for commit:*)"
     ]
   }
 }
