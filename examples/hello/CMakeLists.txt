@@ -13,8 +13,11 @@ set_target_properties(hello PROPERTIES
 # WASM-specific settings
 if(EMSCRIPTEN)
     set_target_properties(hello PROPERTIES SUFFIX ".html")
+
+    # Shell configuration (replaces hardcoded --shell-file)
+    nt_configure_shell(hello TITLE "Hello - Neotolis Engine")
+
     target_link_options(hello PRIVATE
-        "SHELL:--shell-file ${CMAKE_SOURCE_DIR}/engine/platform/web/shell.html"
         "SHELL:-sUSE_WEBGL2=1"
         "SHELL:-sMAX_WEBGL_VERSION=2"
         "SHELL:-sMIN_WEBGL_VERSION=2"

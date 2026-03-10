@@ -56,7 +56,8 @@
       "Bash(which emar:*)",
       "Bash(export PATH=\"/c/tools/wabt/bin:$PATH:/usr/bin\" && /c/develop/emsdk/upstream/emscripten/emar.bat t build/engine/wasm-analysis/libnt_core.a 2>/dev/null)",
       "Bash(gh run:*)",
-      "Bash(gh api:*)"
+      "Bash(gh api:*)",
+      "Bash(find build/ -name \"hello*\" -type f 2>/dev/null | head -20)"
     ]
   }
 }

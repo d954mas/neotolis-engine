@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>@NT_SHELL_TITLE@</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            /* CRITICAL: no border or padding -- breaks Emscripten mouse coords */
+            border: 0;
+            padding: 0;
+        }
+
+        /* Loading spinner */
+        #spinner {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 48px;
+            height: 48px;
+            border: 4px solid #333;
+            border-top-color: #ccc;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @NT_SHELL_KEYFRAMES@ spin {
+            to { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+
+        /* Crash overlay */
+        #crash-overlay {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #1a1a1a;
+            color: #e04040;
+            font-family: monospace;
+            font-size: 16px;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 24px;
+        }
+    </style>
+</head>
+<body oncontextmenu="return false;">
+    <div id="spinner"></div>
+    <canvas id="canvas" tabindex="-1"></canvas>
+    <div id="crash-overlay"></div>
+    @NT_SHELL_FULLSCREEN_BLOCK@
+
+    <script>
+        var Module = {
+            canvas: document.getElementById('canvas')
+        };
+
+        document.getElementById('canvas').addEventListener('webglcontextlost', function(e) {
+            e.preventDefault();
+        });
+
+        Module.onAbort = function(what) {
+            var overlay = document.getElementById('crash-overlay');
+            var msg = what || 'Application aborted unexpectedly';
+            overlay.textContent = 'Fatal error: ' + msg;
+            overlay.style.display = 'flex';
+        };
+    </script>
+    {{{ SCRIPT }}}
+</body>
+</html>
