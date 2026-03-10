@@ -195,6 +195,18 @@ jobs:
       - name: Measure sizes
         run: bash scripts/size.sh hello --json > /tmp/size_entry.json
 
+      - name: Install wabt
+        run: sudo apt-get update && sudo apt-get install -y wabt
+
+      - name: Configure WASM analysis
+        run: emcmake cmake --preset wasm-analysis
+
+      - name: Build WASM analysis
+        run: cmake --build --preset wasm-analysis
+
+      - name: Generate size report
+        run: bash scripts/size-report.sh hello | tee /tmp/size-report.txt
+
       - name: Checkout gh-pages branch
         uses: actions/checkout@v4
         with:
@@ -204,6 +216,11 @@ jobs:
 
       - name: Ensure gh-pages data directory exists
         run: mkdir -p gh-pages-data/sizes
+
+      - name: Copy size report to gh-pages
+        run: |
+          mkdir -p gh-pages-data/reports/hello
+          cp /tmp/size-report.txt gh-pages-data/reports/hello/size-report.txt
 
       - name: Update size history
         run: |
