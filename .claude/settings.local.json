@@ -57,7 +57,9 @@
       "Bash(export PATH=\"/c/tools/wabt/bin:$PATH:/usr/bin\" && /c/develop/emsdk/upstream/emscripten/emar.bat t build/engine/wasm-analysis/libnt_core.a 2>/dev/null)",
       "Bash(gh run:*)",
       "Bash(gh api:*)",
-      "Bash(find build/ -name \"hello*\" -type f 2>/dev/null | head -20)"
+      "Bash(find build/ -name \"hello*\" -type f 2>/dev/null | head -20)",
+      "Bash(grep -A 10 \"\\\\-\\\\-auto\" /c/projects/neotolis-engine/.claude/get-shit-done/workflows/discuss-phase.md 2>/dev/null | head -30)",
+      "Bash(rm \".claude/commands/gsd/issue-to-phase.md\" && rm \".claude/get-shit-done/workflows/issue-to-phase.md\" && echo \"Old GSD files removed\")"
     ]
   }
 }
