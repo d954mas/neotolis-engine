@@ -47,7 +47,7 @@ cmake --build --preset native-release
 ### WASM (Hello example)
 
 ```bash
-emrun build/examples/hello/wasm-debug/hello.html
+emrun build/examples/hello/wasm-debug/index.html
 ```
 
 ### Native (Builder)

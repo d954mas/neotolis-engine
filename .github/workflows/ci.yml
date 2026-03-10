@@ -26,9 +26,9 @@ jobs:
 
       - name: Verify WASM debug output
         run: |
-          test -f build/examples/hello/wasm-debug/hello.html
-          test -f build/examples/hello/wasm-debug/hello.js
-          test -f build/examples/hello/wasm-debug/hello.wasm
+          test -f build/examples/hello/wasm-debug/index.html
+          test -f build/examples/hello/wasm-debug/index.js
+          test -f build/examples/hello/wasm-debug/index.wasm
           test -f build/engine/wasm-debug/libnt_core.a
           test -f build/engine/wasm-debug/libnt_log.a
           test -f build/engine/wasm-debug/libnt_log_stub.a
@@ -42,9 +42,9 @@ jobs:
 
       - name: Verify WASM release output
         run: |
-          test -f build/examples/hello/wasm-release/hello.html
-          test -f build/examples/hello/wasm-release/hello.js
-          test -f build/examples/hello/wasm-release/hello.wasm
+          test -f build/examples/hello/wasm-release/index.html
+          test -f build/examples/hello/wasm-release/index.js
+          test -f build/examples/hello/wasm-release/index.wasm
           test -f build/engine/wasm-release/libnt_core.a
           test -f build/engine/wasm-release/libnt_log.a
           test -f build/engine/wasm-release/libnt_log_stub.a
