@@ -151,26 +151,61 @@ echo ""
 # ---------------------------------------------------------------------------
 echo "## Per-Module Contributions"
 echo ""
+
+# Parse linked libraries from target's CMakeLists.txt
+TARGET_CMAKE="$ROOT_DIR/examples/$TARGET/CMakeLists.txt"
+LINKED_LIBS=""
+if [ -f "$TARGET_CMAKE" ]; then
+    LINKED_LIBS=$(grep 'target_link_libraries' "$TARGET_CMAKE" \
+        | sed -E 's/.*target_link_libraries\([^ ]+ [A-Z]+ //' \
+        | sed -E 's/\)$//' || true)
+fi
+
+echo "(pre-link archive sizes, before LTO)"
+echo ""
 printf "%-24s %10s\n" "Module" "Size"
 printf "%-24s %10s\n" "------------------------" "----------"
 
-MODULE_TOTAL=0
+LINKED_TOTAL=0
+NOT_LINKED=""
+
 if [ -d "$ENGINE_LIB_DIR" ]; then
-    while IFS=$'\t' read -r fname fsize; do
-        MODULE_TOTAL=$((MODULE_TOTAL + fsize))
-        printf "%-24s %7d B\n" "$fname" "$fsize"
-    done < <(find "$ENGINE_LIB_DIR" -name '*.a' -print0 2>/dev/null \
-        | while IFS= read -r -d '' afile; do
-            fname=$(basename "$afile")
-            fsize=$(wc -c < "$afile" | tr -d ' ')
-            printf "%s\t%s\n" "$fname" "$fsize"
-        done | sort -t$'\t' -k1,1)
+    for afile in "$ENGINE_LIB_DIR"/*.a; do
+        [ -f "$afile" ] || continue
+        fname=$(basename "$afile")
+        fsize=$(wc -c < "$afile" | tr -d ' ')
+
+        # Strip lib prefix and .a suffix to get CMake target name
+        cmake_name=$(echo "$fname" | sed -E 's/^lib//; s/\.a$//')
+
+        # Check if this module is in linked libraries
+        is_linked=0
+        for lib in $LINKED_LIBS; do
+            if [ "$lib" = "$cmake_name" ]; then
+                is_linked=1
+                break
+            fi
+        done
+
+        if [ "$is_linked" -eq 1 ]; then
+            LINKED_TOTAL=$((LINKED_TOTAL + fsize))
+            printf "%-24s %7d B\n" "$fname" "$fsize"
+        else
+            NOT_LINKED="${NOT_LINKED}$(printf "%-24s %7d B" "$fname" "$fsize")\n"
+        fi
+    done
 else
     echo "(no .a files found in $ENGINE_LIB_DIR)"
 fi
 
 printf "%-24s %10s\n" "------------------------" "----------"
-printf "%-24s %7d B\n" "TOTAL" "$MODULE_TOTAL"
+printf "%-24s %7d B\n" "TOTAL (linked)" "$LINKED_TOTAL"
+
+if [ -n "$NOT_LINKED" ]; then
+    echo ""
+    echo "Not linked to $TARGET:"
+    printf "%b\n" "$NOT_LINKED"
+fi
 echo ""
 
 # ---------------------------------------------------------------------------
