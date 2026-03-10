@@ -93,6 +93,14 @@ jobs:
       - name: Smoke test builder (release)
         run: ./build/tools/builder/native-release/builder
 
+      - name: Submodule consumption test
+        run: |
+          cmake -S tests/submodule -B build/submodule-test \
+            -DENGINE_ROOT=${{ github.workspace }} \
+            -DCMAKE_C_COMPILER=clang -G Ninja
+          cmake --build build/submodule-test
+          ./build/submodule-test/submodule_test
+
   test-native:
     name: Native Tests
     runs-on: ubuntu-latest
@@ -136,8 +144,17 @@ jobs:
       - name: Build WASM debug
         run: cmake --build --preset wasm-debug
 
-      - name: Run WASM smoke test
-        run: ctest --preset wasm-debug
+      - name: Run WASM smoke test (debug)
+        run: node tests/wasm/smoke_test.js wasm-debug
+
+      - name: Configure WASM release
+        run: emcmake cmake --preset wasm-release
+
+      - name: Build WASM release
+        run: cmake --build --preset wasm-release
+
+      - name: Run WASM smoke test (release)
+        run: node tests/wasm/smoke_test.js wasm-release
 
   tidy-check:
     name: clang-tidy
