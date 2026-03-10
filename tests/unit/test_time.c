@@ -40,8 +40,9 @@ void test_accumulator_single_step(void) {
 /* 3. Add 3*fixed_dt, step returns true 3 times then false */
 void test_accumulator_multiple_steps(void) {
     nt_accumulator_t acc;
-    nt_accumulator_init(&acc, 1.0f / 60.0f, 10);
-    nt_accumulator_add(&acc, 3.0f / 60.0f);
+    /* Use 0.25f (exact in IEEE 754) to avoid float-subtraction drift */
+    nt_accumulator_init(&acc, 0.25f, 10);
+    nt_accumulator_add(&acc, 0.75f);
 
     TEST_ASSERT_TRUE(nt_accumulator_step(&acc));
     TEST_ASSERT_TRUE(nt_accumulator_step(&acc));
