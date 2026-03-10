@@ -1,0 +1,59 @@
+---
+import fs from 'node:fs';
+import path from 'node:path';
+import { getCollection } from 'astro:content';
+import ExampleCard from './ExampleCard.astro';
+
+const examples = await getCollection('examples');
+
+// Fetch size data for each example at build time
+const sizeDataMap: Record<string, any> = {};
+
+for (const example of examples) {
+  const slug = example.id;
+  const localPath = path.resolve(`../gh-pages-data/sizes/${slug}.json`);
+
+  try {
+    if (fs.existsSync(localPath)) {
+      const raw = fs.readFileSync(localPath, 'utf-8');
+      const entries = JSON.parse(raw);
+      if (entries.length > 0) {
+        sizeDataMap[slug] = entries[entries.length - 1];
+      }
+    } else {
+      // Fallback: fetch from live GitHub Pages
+      const res = await fetch(`https://d954mas.github.io/neotolis-engine/sizes/${slug}.json`);
+      if (res.ok) {
+        const entries = await res.json();
+        if (entries.length > 0) {
+          sizeDataMap[slug] = entries[entries.length - 1];
+        }
+      }
+    }
+  } catch {
+    // Size data unavailable for this example
+  }
+}
+
+// Check cover.png existence for each example
+const coverMap: Record<string, boolean> = {};
+for (const example of examples) {
+  const coverPath = path.resolve(`../examples/${example.id}/site_promo/cover.png`);
+  coverMap[example.id] = fs.existsSync(coverPath);
+}
+---
+<section id="examples" class="py-16 sm:py-20 bg-bg-secondary">
+  <div class="max-w-5xl mx-auto px-4">
+    <h2 class="text-3xl font-bold text-text-primary mb-10">Examples</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {examples.map((example) => (
+        <ExampleCard
+          slug={example.id}
+          title={example.data.title}
+          hasCover={coverMap[example.id] ?? false}
+          sizeData={sizeDataMap[example.id] ?? null}
+        />
+      ))}
+    </div>
+  </div>
+</section>

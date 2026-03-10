@@ -136,10 +136,10 @@ if command -v emcc > /dev/null 2>&1; then
         echo "  Building wasm-debug..."
         if cmake --build --preset wasm-debug > /dev/null 2>&1; then
             pass "wasm-debug built"
-            if [ -f "build/examples/hello/wasm-debug/hello.html" ]; then
-                pass "hello.html at build/examples/hello/wasm-debug/"
+            if [ -f "build/examples/hello/wasm-debug/index.html" ]; then
+                pass "index.html at build/examples/hello/wasm-debug/"
             else
-                fail "hello.html not found at build/examples/hello/wasm-debug/"
+                fail "index.html not found at build/examples/hello/wasm-debug/"
             fi
         else
             fail "wasm-debug build failed"

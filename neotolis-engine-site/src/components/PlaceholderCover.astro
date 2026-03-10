@@ -1,0 +1,9 @@
+---
+interface Props {
+  title: string;
+}
+const { title } = Astro.props;
+---
+<div class="aspect-video bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center rounded-t-lg">
+  <span class="text-lg font-mono text-gray-400 px-4 text-center">{title}</span>
+</div>

@@ -1,0 +1,16 @@
+---
+import { features } from '../data/features';
+---
+<section id="features" class="py-16 sm:py-20">
+  <div class="max-w-3xl mx-auto px-4">
+    <h2 class="text-3xl font-bold text-text-primary mb-10">Features</h2>
+    <ul class="space-y-5">
+      {features.map((f) => (
+        <li>
+          <span class="font-bold text-text-primary">{f.title}</span>
+          <span class="text-text-secondary"> &mdash; {f.description}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
+</section>

@@ -12,7 +12,7 @@ set_target_properties(hello PROPERTIES
 
 # WASM-specific settings
 if(EMSCRIPTEN)
-    set_target_properties(hello PROPERTIES SUFFIX ".html")
+    set_target_properties(hello PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
 
     # Shell configuration (replaces hardcoded --shell-file)
     nt_configure_shell(hello TITLE "Hello - Neotolis Engine")

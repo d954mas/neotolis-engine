@@ -1,0 +1,65 @@
+---
+import PlaceholderCover from './PlaceholderCover.astro';
+
+interface SizeEntry {
+  raw: number;
+  gzip: number;
+}
+
+interface SizeData {
+  total: { gzip: number };
+  files: Record<string, SizeEntry>;
+}
+
+interface Props {
+  slug: string;
+  title: string;
+  hasCover: boolean;
+  sizeData?: SizeData | null;
+}
+
+const { slug, title, hasCover, sizeData } = Astro.props;
+
+function formatSize(bytes: number): string {
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${bytes} B`;
+}
+---
+<a href={`/neotolis-engine/examples/${slug}/`} class="block bg-bg-card rounded-lg overflow-hidden hover:ring-1 hover:ring-accent transition group">
+  {hasCover ? (
+    <img
+      src={`/neotolis-engine/examples/${slug}/cover.png`}
+      alt={title}
+      class="aspect-video w-full object-cover"
+    />
+  ) : (
+    <PlaceholderCover title={title} />
+  )}
+
+  <div class="p-4">
+    <h3 class="font-bold text-text-primary group-hover:text-accent transition">{title}</h3>
+
+    {sizeData ? (
+      <div class="mt-2">
+        <span class="text-sm font-semibold text-accent">{formatSize(sizeData.total.gzip)} gzip</span>
+        <details class="mt-2">
+          <summary class="text-sm text-text-secondary cursor-pointer hover:text-text-primary">
+            Size breakdown
+          </summary>
+          <div class="mt-1 text-xs text-text-secondary space-y-0.5">
+            {Object.entries(sizeData.files).map(([filename, sizes]) => (
+              <div class="flex justify-between">
+                <span>{filename}</span>
+                <span>{formatSize(sizes.gzip)}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      </div>
+    ) : (
+      <p class="mt-2 text-sm text-text-secondary">Size data unavailable</p>
+    )}
+  </div>
+</a>

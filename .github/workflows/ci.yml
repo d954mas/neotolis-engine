@@ -26,9 +26,9 @@ jobs:
 
       - name: Verify WASM debug output
         run: |
-          test -f build/examples/hello/wasm-debug/hello.html
-          test -f build/examples/hello/wasm-debug/hello.js
-          test -f build/examples/hello/wasm-debug/hello.wasm
+          test -f build/examples/hello/wasm-debug/index.html
+          test -f build/examples/hello/wasm-debug/index.js
+          test -f build/examples/hello/wasm-debug/index.wasm
           test -f build/engine/wasm-debug/libnt_core.a
           test -f build/engine/wasm-debug/libnt_log.a
           test -f build/engine/wasm-debug/libnt_log_stub.a
@@ -42,9 +42,9 @@ jobs:
 
       - name: Verify WASM release output
         run: |
-          test -f build/examples/hello/wasm-release/hello.html
-          test -f build/examples/hello/wasm-release/hello.js
-          test -f build/examples/hello/wasm-release/hello.wasm
+          test -f build/examples/hello/wasm-release/index.html
+          test -f build/examples/hello/wasm-release/index.js
+          test -f build/examples/hello/wasm-release/index.wasm
           test -f build/engine/wasm-release/libnt_core.a
           test -f build/engine/wasm-release/libnt_log.a
           test -f build/engine/wasm-release/libnt_log_stub.a
@@ -177,6 +177,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Read emsdk version
         id: emsdk-version
         run: echo "version=$(cat .emsdk-version)" >> $GITHUB_OUTPUT
@@ -249,6 +253,40 @@ jobs:
               fi
             fi
           fi
+
+      - name: Preserve old size chart page
+        run: |
+          if [ -f "gh-pages-data/index.html" ] && ! [ -d "gh-pages-data/_astro" ]; then
+            mkdir -p gh-pages-data/sizes
+            cp gh-pages-data/index.html gh-pages-data/sizes/index.html
+          fi
+
+      - name: Copy WASM examples to gh-pages
+        run: |
+          for example_dir in build/examples/*/wasm-release; do
+            example_name=$(basename $(dirname "$example_dir"))
+            mkdir -p "gh-pages-data/wasm/$example_name"
+            cp "$example_dir"/*.html "$example_dir"/*.js "$example_dir"/*.wasm "gh-pages-data/wasm/$example_name/"
+          done
+
+      - name: Copy example cover images
+        run: |
+          for promo_dir in examples/*/site_promo; do
+            example_name=$(basename $(dirname "$promo_dir"))
+            if [ -f "$promo_dir/cover.png" ]; then
+              mkdir -p "gh-pages-data/examples/$example_name"
+              cp "$promo_dir/cover.png" "gh-pages-data/examples/$example_name/cover.png"
+            fi
+          done
+
+      - name: Build promo site
+        run: |
+          cd neotolis-engine-site
+          npm install
+          npm run build
+
+      - name: Copy site to gh-pages
+        run: cp -r neotolis-engine-site/dist/* gh-pages-data/
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
