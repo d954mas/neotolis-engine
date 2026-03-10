@@ -1,23 +1,23 @@
 # Size Report: hello (wasm-analysis)
-# Commit: 262b5b7
+# Commit: 639338f
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 100 B
-Import                13 B
+Import                19 B
 Function              24 B
 Table                  5 B
 Memory                 6 B
 Global                 8 B
 Export                17 B
 Elem                  12 B
-Code               10321 B
+Code               10323 B
 Data                 697 B
-Custom               556 B
+Custom               581 B
 ---------------- ----------
-TOTAL              11759 B
+TOTAL              11792 B
 
 ## Top 30 Functions by Size
 
@@ -28,8 +28,8 @@ TOTAL              11759 B
   650 B   pop_arg_long_double
   508 B   __memcpy
   376 B   puts
+  373 B   main
   372 B   __stdio_write
-  371 B   main
   370 B   __memset
   316 B   pop_arg
   296 B   __vfprintf_internal
@@ -48,7 +48,7 @@ TOTAL              11759 B
     4 B   __emscripten_stdout_seek
 
 Total functions: 23
-Total code size: 10283 B
+Total code size: 10285 B
 
 ## Per-Module Contributions
 

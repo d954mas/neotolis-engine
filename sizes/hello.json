@@ -64,5 +64,27 @@
       "raw": 23871,
       "gzip": 10524
     }
+  },
+  {
+    "commit": "639338f",
+    "date": "2026-03-10T14:30:14Z",
+    "files": {
+      "hello.html": {
+        "raw": 1342,
+        "gzip": 743
+      },
+      "hello.js": {
+        "raw": 11526,
+        "gzip": 3930
+      },
+      "hello.wasm": {
+        "raw": 11241,
+        "gzip": 5962
+      }
+    },
+    "total": {
+      "raw": 24109,
+      "gzip": 10635
+    }
   }
 ]
