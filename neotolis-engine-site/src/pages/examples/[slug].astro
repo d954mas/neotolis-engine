@@ -1,0 +1,22 @@
+---
+import { getCollection } from 'astro:content';
+import ExampleLayout from '../../layouts/ExampleLayout.astro';
+
+export async function getStaticPaths() {
+  const examples = await getCollection('examples');
+  return examples.map((example) => ({
+    params: { slug: example.id },
+    props: { example },
+  }));
+}
+
+const { example } = Astro.props;
+---
+<ExampleLayout title={example.data.title}>
+  <iframe
+    src={`/neotolis-engine/wasm/${example.id}/`}
+    title={example.data.title}
+    class="w-full h-full border-none"
+    allow="autoplay; fullscreen"
+  ></iframe>
+</ExampleLayout>
