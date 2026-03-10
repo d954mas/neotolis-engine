@@ -275,6 +275,9 @@ jobs:
           version: ${{ steps.emsdk-version.outputs.version }}
           actions-cache-folder: 'emsdk-cache'
 
+      - name: Install wabt
+        run: sudo apt-get update && sudo apt-get install -y wabt
+
       - name: Configure WASM release
         run: emcmake cmake --preset wasm-release
 
@@ -284,6 +287,15 @@ jobs:
       - name: Measure sizes
         run: bash scripts/size.sh hello --json > /tmp/pr_size.json
 
+      - name: Configure WASM analysis
+        run: emcmake cmake --preset wasm-analysis
+
+      - name: Build WASM analysis
+        run: cmake --build --preset wasm-analysis
+
+      - name: Generate size report
+        run: bash scripts/size-report.sh hello | tee /tmp/pr-report.txt
+
       - name: Fetch baseline from gh-pages
         id: baseline
         uses: actions/checkout@v4
@@ -291,6 +303,15 @@ jobs:
           ref: gh-pages
           path: gh-pages-baseline
         continue-on-error: true
+
+      - name: Check for baseline report
+        id: baseline-report
+        run: |
+          if [ -f "gh-pages-baseline/reports/hello/size-report.txt" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Generate size comment
         run: |
@@ -369,4 +390,141 @@ jobs:
             gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
               -X POST -f body="$COMMENT_BODY"
             echo "Created new comment"
+          fi
+
+      - name: Generate size report comment
+        run: |
+          PR_REPORT="/tmp/pr-report.txt"
+          BASE_REPORT="gh-pages-baseline/reports/hello/size-report.txt"
+          HAS_BASELINE="${{ steps.baseline-report.outputs.exists }}"
+
+          {
+            echo "## WASM Size Report (\`hello\`)"
+            echo ""
+
+            if [ "$HAS_BASELINE" = "true" ]; then
+              echo "<details>"
+              echo "<summary>Size Report Diff (Master | PR | Delta)</summary>"
+              echo ""
+              echo '```diff'
+
+              # Generate a unified diff of the two reports
+              diff --unified=1000 "$BASE_REPORT" "$PR_REPORT" | tail -n +4 || true
+
+              echo '```'
+              echo "</details>"
+              echo ""
+
+              # Show a summary of key section changes inline
+              echo "### Key Changes"
+              echo ""
+
+              # Extract section sizes from both reports and show delta
+              echo "| Section | Master | PR | Delta |"
+              echo "|---------|-------:|---:|------:|"
+
+              awk '
+              BEGIN { mode=0 }
+              FILENAME==ARGV[1] && /^## WASM Section Sizes/ { mode=1; next }
+              FILENAME==ARGV[1] && mode==1 && /^##/ { mode=0 }
+              FILENAME==ARGV[1] && mode==1 && /^[A-Za-z]/ && !/^Section/ && !/^---/ {
+                name=$1; size=$(NF-1); base[name]=size
+              }
+              FILENAME==ARGV[2] && /^## WASM Section Sizes/ { mode=1; next }
+              FILENAME==ARGV[2] && mode==1 && /^##/ { mode=0 }
+              FILENAME==ARGV[2] && mode==1 && /^[A-Za-z]/ && !/^Section/ && !/^---/ {
+                name=$1; size=$(NF-1); pr[name]=size
+                if (name in base) {
+                  delta = size - base[name]
+                  if (delta > 0) prefix = "+"
+                  else prefix = ""
+                  printf "| %s | %d B | %d B | %s%d B |\n", name, base[name], size, prefix, delta
+                } else {
+                  printf "| %s | (new) | %d B | -- |\n", name, size
+                }
+              }
+              END {
+                for (name in base) {
+                  if (!(name in pr)) {
+                    printf "| %s | %d B | (removed) | -- |\n", name, base[name]
+                  }
+                }
+              }
+              ' "$BASE_REPORT" "$PR_REPORT"
+
+              echo ""
+
+              # Top functions diff: show functions that changed
+              echo "| Function | Master | PR | Delta |"
+              echo "|----------|-------:|---:|------:|"
+
+              awk '
+              BEGIN { mode_base=0; mode_pr=0 }
+              FILENAME==ARGV[1] && /^## Top.*Functions/ { mode_base=1; next }
+              FILENAME==ARGV[1] && mode_base==1 && /^##/ { mode_base=0 }
+              FILENAME==ARGV[1] && mode_base==1 && /^ *[0-9]+ B / {
+                size=$1; name=""; for(i=3;i<=NF;i++) name=name (i>3?" ":"") $i
+                base_fn[name]=size
+              }
+              FILENAME==ARGV[2] && /^## Top.*Functions/ { mode_pr=1; next }
+              FILENAME==ARGV[2] && mode_pr==1 && /^##/ { mode_pr=0 }
+              FILENAME==ARGV[2] && mode_pr==1 && /^ *[0-9]+ B / {
+                size=$1; name=""; for(i=3;i<=NF;i++) name=name (i>3?" ":"") $i
+                pr_fn[name]=size
+                if (name in base_fn) {
+                  delta = size - base_fn[name]
+                  if (delta != 0) {
+                    if (delta > 0) prefix = "+"
+                    else prefix = ""
+                    printf "| `%s` | %d B | %d B | %s%d B |\n", name, base_fn[name], size, prefix, delta
+                  }
+                } else {
+                  printf "| `%s` | (new) | %d B | -- |\n", name, size
+                }
+              }
+              END {
+                for (name in base_fn) {
+                  if (!(name in pr_fn)) {
+                    printf "| `%s` | %d B | (removed) | -- |\n", name, base_fn[name]
+                  }
+                }
+              }
+              ' "$BASE_REPORT" "$PR_REPORT"
+
+            else
+              # No baseline -- show full report without diff
+              echo "<details>"
+              echo "<summary>Size Report (no baseline available)</summary>"
+              echo ""
+              echo '```'
+              cat "$PR_REPORT"
+              echo '```'
+              echo "</details>"
+            fi
+
+            echo ""
+            pr_commit=$(git rev-parse --short HEAD)
+            echo "<sub>PR: ${pr_commit} | Baseline: $( [ "$HAS_BASELINE" = "true" ] && head -2 "$BASE_REPORT" | grep '# Commit:' | awk '{print $3}' || echo 'none' )</sub>"
+
+          } > /tmp/report_comment.md
+
+      - name: Post or update size report comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMENT_BODY=$(cat /tmp/report_comment.md)
+          PR_NUMBER=${{ github.event.pull_request.number }}
+
+          EXISTING=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | startswith("## WASM Size Report")) | .id' \
+            | head -1)
+
+          if [ -n "$EXISTING" ]; then
+            gh api "repos/${{ github.repository }}/issues/comments/${EXISTING}" \
+              -X PATCH -f body="$COMMENT_BODY"
+            echo "Updated existing size report comment $EXISTING"
+          else
+            gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              -X POST -f body="$COMMENT_BODY"
+            echo "Created new size report comment"
           fi
