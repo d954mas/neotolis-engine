@@ -1,0 +1,37 @@
+---
+const principles = [
+  {
+    title: 'Data-Oriented Design',
+    text: 'Sparse component storages, dense iteration, and predictable memory access patterns. Performance comes from how data is laid out, not from abstraction layers.',
+  },
+  {
+    title: 'Code-First Architecture',
+    text: 'Render loop, system order, builder rules, and orchestration logic are all defined in game code. No heavy declarative systems or configuration files.',
+  },
+  {
+    title: 'No Hidden Schedulers',
+    text: 'No system registry, no hidden render graph, no automatic ECS magic. The game controls the order of execution, not the engine.',
+  },
+  {
+    title: 'Composable Features',
+    text: 'The engine is a set of modules. Your game links only the features it needs. There is no monolithic pipeline to buy into.',
+  },
+  {
+    title: 'Builder Does the Heavy Work',
+    text: 'Offline builder validates and processes assets. Runtime stays simple -- it loads, resolves, and renders. No expensive validation in the hot path.',
+  },
+];
+---
+<section id="overview" class="py-16 sm:py-20 bg-bg-secondary">
+  <div class="max-w-3xl mx-auto px-4">
+    <h2 class="text-3xl font-bold text-text-primary mb-10">Philosophy</h2>
+    <ul class="space-y-6">
+      {principles.map((p) => (
+        <li>
+          <h3 class="text-lg font-semibold text-text-primary">{p.title}</h3>
+          <p class="mt-1 text-text-secondary leading-relaxed">{p.text}</p>
+        </li>
+      ))}
+    </ul>
+  </div>
+</section>
