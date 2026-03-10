@@ -371,26 +371,16 @@ jobs:
             echo "<sub>Baseline: master@${base_commit} | PR: ${pr_commit}</sub>"
           } > /tmp/pr_comment.md
 
-      - name: Post or update PR comment
+      - name: Post PR size comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           COMMENT_BODY=$(cat /tmp/pr_comment.md)
           PR_NUMBER=${{ github.event.pull_request.number }}
 
-          EXISTING=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --jq '.[] | select(.body | startswith("## WASM Build Size")) | .id' \
-            | head -1)
-
-          if [ -n "$EXISTING" ]; then
-            gh api "repos/${{ github.repository }}/issues/comments/${EXISTING}" \
-              -X PATCH -f body="$COMMENT_BODY"
-            echo "Updated existing comment $EXISTING"
-          else
-            gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-              -X POST -f body="$COMMENT_BODY"
-            echo "Created new comment"
-          fi
+          gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            -X POST -f body="$COMMENT_BODY"
+          echo "Created size comment"
 
       - name: Generate size report comment
         run: |
@@ -508,23 +498,13 @@ jobs:
 
           } > /tmp/report_comment.md
 
-      - name: Post or update size report comment
+      - name: Post size report comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           COMMENT_BODY=$(cat /tmp/report_comment.md)
           PR_NUMBER=${{ github.event.pull_request.number }}
 
-          EXISTING=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --jq '.[] | select(.body | startswith("## WASM Size Report")) | .id' \
-            | head -1)
-
-          if [ -n "$EXISTING" ]; then
-            gh api "repos/${{ github.repository }}/issues/comments/${EXISTING}" \
-              -X PATCH -f body="$COMMENT_BODY"
-            echo "Updated existing size report comment $EXISTING"
-          else
-            gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-              -X POST -f body="$COMMENT_BODY"
-            echo "Created new size report comment"
-          fi
+          gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            -X POST -f body="$COMMENT_BODY"
+          echo "Created size report comment"
