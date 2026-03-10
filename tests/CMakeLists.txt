@@ -66,6 +66,16 @@ if(NOT EMSCRIPTEN)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_time COMMAND test_time)
+
+    # --- App module tests ---
+    add_executable(test_app unit/test_app.c)
+    target_link_libraries(test_app PRIVATE nt_app_native unity)
+    nt_set_warning_flags(test_app)
+    nt_set_sanitizer_flags(test_app)
+    set_target_properties(test_app PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_app COMMAND test_app)
 endif()
 
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---
