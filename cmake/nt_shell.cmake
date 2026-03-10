@@ -24,6 +24,8 @@
 #   nt_configure_shell(my_game TITLE "My Game" FULLSCREEN_BUTTON)
 #   nt_configure_shell(my_game SHELL_FILE "${CMAKE_CURRENT_SOURCE_DIR}/custom_shell.html.in")
 
+set(_NT_SHELL_MODULE_DIR "${CMAKE_CURRENT_LIST_DIR}" CACHE INTERNAL "")
+
 function(nt_configure_shell target)
     if(NOT EMSCRIPTEN)
         return()
@@ -54,7 +56,7 @@ function(nt_configure_shell target)
     if(SHELL_SHELL_FILE)
         set(_shell_src "${SHELL_SHELL_FILE}")
     else()
-        set(_shell_src "${CMAKE_SOURCE_DIR}/engine/platform/web/shell.html.in")
+        set(_shell_src "${_NT_SHELL_MODULE_DIR}/../engine/platform/web/shell.html.in")
     endif()
 
     # CSS @keyframes must be injected via variable because CMake
