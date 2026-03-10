@@ -9,6 +9,8 @@ if(EMSCRIPTEN)
         nt_app.h
     )
     target_link_libraries(nt_app_web PUBLIC nt_time)
+    # RAF callback fires after main() returns -- runtime must stay alive
+    target_link_options(nt_app_web INTERFACE "SHELL:-sNO_EXIT_RUNTIME=1")
 endif()
 
 nt_add_module(nt_app_native

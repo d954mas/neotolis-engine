@@ -83,40 +83,20 @@ void test_accumulator_steps_this_frame_resets_on_add(void) {
     TEST_ASSERT_EQUAL_INT(0, acc.steps_this_frame);
 }
 
-/* 7. Alpha returns correct interpolation factor (~0.5 for half fixed_dt) */
-void test_accumulator_alpha_range(void) {
-    nt_accumulator_t acc;
-    nt_accumulator_init(&acc, 1.0F / 60.0F, 4);
-    nt_accumulator_add(&acc, 0.5F / 60.0F);
-
-    float alpha = nt_accumulator_alpha(&acc);
-    TEST_ASSERT_TRUE_MESSAGE(float_near(0.5F, alpha, 0.01F), "Alpha should be approximately 0.5 for half fixed_dt");
-}
-
-/* 8. Alpha returns 0.0 when fixed_dt is zero (safety) */
-void test_accumulator_alpha_zero_fixed_dt(void) {
-    nt_accumulator_t acc;
-    nt_accumulator_init(&acc, 0.0F, 4);
-    nt_accumulator_add(&acc, 0.1F);
-
-    float alpha = nt_accumulator_alpha(&acc);
-    TEST_ASSERT_TRUE_MESSAGE(float_near(0.0F, alpha, 1e-6F), "Alpha should be 0.0 when fixed_dt is zero");
-}
-
-/* 9. nt_time_now returns a positive value */
+/* 7. nt_time_now returns a positive value */
 void test_time_now_positive(void) {
     double now = nt_time_now();
     TEST_ASSERT_TRUE_MESSAGE(now > 0.0, "nt_time_now() must be positive");
 }
 
-/* 10. Two sequential nt_time_now calls return non-decreasing values */
+/* 8. Two sequential nt_time_now calls return non-decreasing values */
 void test_time_now_monotonic(void) {
     double first = nt_time_now();
     double second = nt_time_now();
     TEST_ASSERT_TRUE_MESSAGE(second >= first, "nt_time_now() must be monotonic");
 }
 
-/* 11. nt_time_nanos returns a positive value */
+/* 9. nt_time_nanos returns a positive value */
 void test_time_nanos_positive(void) {
     uint64_t nanos = nt_time_nanos();
     TEST_ASSERT_TRUE_MESSAGE(nanos > 0, "nt_time_nanos() must be positive");
@@ -130,8 +110,6 @@ int main(void) {
     RUN_TEST(test_accumulator_max_steps_clamp);
     RUN_TEST(test_accumulator_partial_step);
     RUN_TEST(test_accumulator_steps_this_frame_resets_on_add);
-    RUN_TEST(test_accumulator_alpha_range);
-    RUN_TEST(test_accumulator_alpha_zero_fixed_dt);
     RUN_TEST(test_time_now_positive);
     RUN_TEST(test_time_now_monotonic);
     RUN_TEST(test_time_nanos_positive);

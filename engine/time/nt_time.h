@@ -15,7 +15,6 @@ typedef struct nt_accumulator_t {
 void nt_accumulator_init(nt_accumulator_t *acc, float fixed_dt, int max_steps);
 void nt_accumulator_add(nt_accumulator_t *acc, float dt);
 bool nt_accumulator_step(nt_accumulator_t *acc);
-float nt_accumulator_alpha(const nt_accumulator_t *acc);
 
 /* ---- High-resolution monotonic clock ---- */
 

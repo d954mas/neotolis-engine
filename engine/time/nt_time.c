@@ -24,13 +24,6 @@ bool nt_accumulator_step(nt_accumulator_t *acc) {
     return false;
 }
 
-float nt_accumulator_alpha(const nt_accumulator_t *acc) {
-    if (acc->fixed_dt <= 0.0F) {
-        return 0.0F;
-    }
-    return acc->accumulator / acc->fixed_dt;
-}
-
 /* ---- Platform timer ---- */
 
 #ifdef NT_PLATFORM_WEB

@@ -1,5 +1,9 @@
 add_executable(hello main.c)
-target_link_libraries(hello PRIVATE nt_core cglm_headers)
+if(EMSCRIPTEN)
+    target_link_libraries(hello PRIVATE nt_core nt_app_web cglm_headers)
+else()
+    target_link_libraries(hello PRIVATE nt_core nt_app_native cglm_headers)
+endif()
 
 # Strict warning and sanitizer policy
 nt_set_warning_flags(hello)
