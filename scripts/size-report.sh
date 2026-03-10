@@ -93,8 +93,13 @@ printf "%-16s %10s\n" "Section" "Size"
 printf "%-16s %10s\n" "----------------" "----------"
 
 SECTION_TOTAL=0
+declare -A SECTION_COUNT=()
 while IFS= read -r line; do
     name=$(echo "$line" | awk '{print $1}')
+    SECTION_COUNT[$name]=$(( ${SECTION_COUNT[$name]:-0} + 1 ))
+    if [ "${SECTION_COUNT[$name]}" -gt 1 ]; then
+        name="${name}_${SECTION_COUNT[$name]}"
+    fi
     hex_size=$(echo "$line" | sed -E 's/.*\(size=(0x[0-9a-fA-F]+)\).*/\1/')
     dec_size=$((hex_size))
     SECTION_TOTAL=$((SECTION_TOTAL + dec_size))
