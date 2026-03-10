@@ -1,0 +1,71 @@
+# Size Report: hello (wasm-analysis)
+# Commit: 262b5b7
+
+## WASM Section Sizes
+
+Section                Size
+---------------- ----------
+Type                 100 B
+Import                13 B
+Function              24 B
+Table                  5 B
+Memory                 6 B
+Global                 8 B
+Export                17 B
+Elem                  12 B
+Code               10321 B
+Data                 697 B
+Custom               556 B
+---------------- ----------
+TOTAL              11759 B
+
+## Top 30 Functions by Size
+
+    Size  Name
+--------  ----
+ 3101 B   fmt_fp
+ 2624 B   printf_core
+  650 B   pop_arg_long_double
+  508 B   __memcpy
+  376 B   puts
+  372 B   __stdio_write
+  371 B   main
+  370 B   __memset
+  316 B   pop_arg
+  296 B   __vfprintf_internal
+  279 B   wctomb
+  193 B   __fwritex
+  166 B   sn_write
+  131 B   fmt_u
+  126 B   frexp
+  114 B   getint
+  111 B   pad
+   89 B   __towrite
+   40 B   iprintf
+   23 B   out
+   19 B   __wasm_call_ctors
+    4 B   __emscripten_stdout_close
+    4 B   __emscripten_stdout_seek
+
+Total functions: 23
+Total code size: 10283 B
+
+## Per-Module Contributions
+
+(pre-link archive sizes, before LTO)
+
+Module                         Size
+------------------------ ----------
+libnt_core.a                1688 B
+------------------------ ----------
+TOTAL (linked)              1688 B
+
+Not linked to hello:
+libnt_log.a                  970 B
+libnt_log_stub.a             506 B
+
+
+## Data Segments Summary
+
+Segments: 19
+Total data size: 581 B
