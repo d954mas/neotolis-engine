@@ -7,21 +7,16 @@ void nt_accumulator_init(nt_accumulator_t *acc, float fixed_dt, int max_steps) {
     acc->fixed_dt = fixed_dt;
     acc->accumulator = 0.0F;
     acc->max_steps = max_steps;
-    acc->steps_this_frame = 0;
 }
 
-void nt_accumulator_add(nt_accumulator_t *acc, float dt) {
+int nt_accumulator_update(nt_accumulator_t *acc, float dt) {
     acc->accumulator += dt;
-    acc->steps_this_frame = 0;
-}
-
-bool nt_accumulator_step(nt_accumulator_t *acc) {
-    if (acc->accumulator >= acc->fixed_dt && acc->steps_this_frame < acc->max_steps) {
+    int steps = 0;
+    while (acc->accumulator >= acc->fixed_dt && steps < acc->max_steps) {
         acc->accumulator -= acc->fixed_dt;
-        acc->steps_this_frame++;
-        return true;
+        steps++;
     }
-    return false;
+    return steps;
 }
 
 /* ---- Platform timer ---- */

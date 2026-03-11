@@ -11,9 +11,8 @@ static int s_physics_ticks;
 static void frame(void) {
     float dt = g_nt_app.dt;
 
-    /* Fixed update via accumulator */
-    nt_accumulator_add(&s_acc, dt);
-    while (nt_accumulator_step(&s_acc)) {
+    int steps = nt_accumulator_update(&s_acc, dt);
+    for (int i = 0; i < steps; i++) {
         s_physics_ticks++;
     }
 

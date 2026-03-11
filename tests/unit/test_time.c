@@ -18,69 +18,46 @@ void test_accumulator_init_sets_fields(void) {
     TEST_ASSERT_TRUE(float_near(1.0F / 60.0F, acc.fixed_dt, 1e-6F));
     TEST_ASSERT_TRUE(float_near(0.0F, acc.accumulator, 1e-6F));
     TEST_ASSERT_EQUAL_INT(4, acc.max_steps);
-    TEST_ASSERT_EQUAL_INT(0, acc.steps_this_frame);
 }
 
-/* 2. Add exactly 1 fixed_dt, step returns true once then false */
+/* 2. Add exactly 1 fixed_dt, get 1 step */
 void test_accumulator_single_step(void) {
     nt_accumulator_t acc;
     nt_accumulator_init(&acc, 1.0F / 60.0F, 4);
-    nt_accumulator_add(&acc, 1.0F / 60.0F);
-
-    TEST_ASSERT_TRUE(nt_accumulator_step(&acc));
-    TEST_ASSERT_FALSE(nt_accumulator_step(&acc));
+    TEST_ASSERT_EQUAL_INT(1, nt_accumulator_update(&acc, 1.0F / 60.0F));
 }
 
-/* 3. Add 3*fixed_dt, step returns true 3 times then false */
+/* 3. Add 3*fixed_dt, get 3 steps */
 void test_accumulator_multiple_steps(void) {
     nt_accumulator_t acc;
     /* Use 0.25F (exact in IEEE 754) to avoid float-subtraction drift */
     nt_accumulator_init(&acc, 0.25F, 10);
-    nt_accumulator_add(&acc, 0.75F);
-
-    TEST_ASSERT_TRUE(nt_accumulator_step(&acc));
-    TEST_ASSERT_TRUE(nt_accumulator_step(&acc));
-    TEST_ASSERT_TRUE(nt_accumulator_step(&acc));
-    TEST_ASSERT_FALSE(nt_accumulator_step(&acc));
+    TEST_ASSERT_EQUAL_INT(3, nt_accumulator_update(&acc, 0.75F));
 }
 
 /* 4. Max steps clamp: add 10*fixed_dt with max_steps=4, only 4 steps */
 void test_accumulator_max_steps_clamp(void) {
     nt_accumulator_t acc;
     nt_accumulator_init(&acc, 1.0F / 60.0F, 4);
-    nt_accumulator_add(&acc, 10.0F / 60.0F);
-
-    int count = 0;
-    while (nt_accumulator_step(&acc)) {
-        count++;
-    }
-    TEST_ASSERT_EQUAL_INT(4, count);
-    TEST_ASSERT_EQUAL_INT(4, acc.steps_this_frame);
+    TEST_ASSERT_EQUAL_INT(4, nt_accumulator_update(&acc, 10.0F / 60.0F));
 }
 
-/* 5. Add less than fixed_dt, step returns false immediately */
+/* 5. Add less than fixed_dt, get 0 steps */
 void test_accumulator_partial_step(void) {
     nt_accumulator_t acc;
     nt_accumulator_init(&acc, 1.0F / 60.0F, 4);
-    nt_accumulator_add(&acc, 0.5F / 60.0F);
-
-    TEST_ASSERT_FALSE(nt_accumulator_step(&acc));
+    TEST_ASSERT_EQUAL_INT(0, nt_accumulator_update(&acc, 0.5F / 60.0F));
 }
 
-/* 6. steps_this_frame resets to 0 on nt_accumulator_add */
-void test_accumulator_steps_this_frame_resets_on_add(void) {
+/* 6. Leftover accumulates across frames */
+void test_accumulator_leftover_carries(void) {
     nt_accumulator_t acc;
-    nt_accumulator_init(&acc, 1.0F / 60.0F, 4);
+    nt_accumulator_init(&acc, 0.25F, 10);
 
-    /* First frame: do some steps */
-    nt_accumulator_add(&acc, 2.0F / 60.0F);
-    nt_accumulator_step(&acc);
-    nt_accumulator_step(&acc);
-    TEST_ASSERT_EQUAL_INT(2, acc.steps_this_frame);
-
-    /* Second frame: add resets steps_this_frame */
-    nt_accumulator_add(&acc, 1.0F / 60.0F);
-    TEST_ASSERT_EQUAL_INT(0, acc.steps_this_frame);
+    /* Add 0.3: 1 step, 0.05 leftover */
+    TEST_ASSERT_EQUAL_INT(1, nt_accumulator_update(&acc, 0.3F));
+    /* Add 0.2: leftover 0.05 + 0.2 = 0.25, 1 step */
+    TEST_ASSERT_EQUAL_INT(1, nt_accumulator_update(&acc, 0.2F));
 }
 
 /* 7. nt_time_now returns a positive value */
@@ -109,7 +86,7 @@ int main(void) {
     RUN_TEST(test_accumulator_multiple_steps);
     RUN_TEST(test_accumulator_max_steps_clamp);
     RUN_TEST(test_accumulator_partial_step);
-    RUN_TEST(test_accumulator_steps_this_frame_resets_on_add);
+    RUN_TEST(test_accumulator_leftover_carries);
     RUN_TEST(test_time_now_positive);
     RUN_TEST(test_time_now_monotonic);
     RUN_TEST(test_time_nanos_positive);

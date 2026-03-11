@@ -6,15 +6,13 @@
 /* ---- Accumulator-based fixed timestep ---- */
 
 typedef struct nt_accumulator_t {
-    float fixed_dt;       /* Fixed timestep interval (seconds) */
-    float accumulator;    /* Accumulated time debt (seconds) */
-    int max_steps;        /* Spiral-of-death clamp */
-    int steps_this_frame; /* Steps taken this frame (diagnostic) */
+    float fixed_dt;    /* Fixed timestep interval (seconds) */
+    float accumulator; /* Accumulated time debt (seconds) */
+    int max_steps;     /* Spiral-of-death clamp */
 } nt_accumulator_t;
 
 void nt_accumulator_init(nt_accumulator_t *acc, float fixed_dt, int max_steps);
-void nt_accumulator_add(nt_accumulator_t *acc, float dt);
-bool nt_accumulator_step(nt_accumulator_t *acc);
+int nt_accumulator_update(nt_accumulator_t *acc, float dt);
 
 /* ---- High-resolution monotonic clock ---- */
 
