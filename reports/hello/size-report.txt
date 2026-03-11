@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis)
-# Commit: 61a012d
+# Commit: f660ac0
 
 ## WASM Section Sizes
 
@@ -68,7 +68,6 @@ Not linked to hello:
 libnt_log.a                  970 B
 libnt_log_stub.a             506 B
 libnt_time.a                 866 B
-libnt_window.a              3592 B
 
 
 ## Data Segments Summary
