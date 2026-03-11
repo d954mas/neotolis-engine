@@ -1,6 +1,7 @@
 #include "app/nt_app.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#include "input/nt_input.h"
 #include "time/nt_time.h"
 #include "window/nt_window.h"
 #include <stdio.h>
@@ -14,11 +15,21 @@ static int s_physics_ticks;
 
 static void frame(void) {
     nt_window_poll();
+    nt_input_poll();
     float dt = g_nt_app.dt;
 
     int steps = nt_accumulator_update(&s_acc, dt);
     for (int i = 0; i < steps; i++) {
         s_physics_ticks++;
+    }
+
+    /* Input demo: log key presses */
+    if (nt_input_key_is_pressed(NT_KEY_SPACE)) {
+        printf("[input] SPACE pressed\n");
+    }
+    if (nt_input_mouse_is_pressed(NT_BUTTON_LEFT)) {
+        nt_pointer_t *p = &g_nt_input.pointers[0];
+        printf("[input] LMB click at %.0f, %.0f\n", (double)p->x, (double)p->y);
     }
 
     /* Log every 60 frames */
@@ -27,8 +38,7 @@ static void frame(void) {
     }
 
 #ifndef NT_PLATFORM_WEB
-    /* Native: exit after 300 frames */
-    if (g_nt_app.frame >= 300) {
+    if (nt_input_key_is_pressed(NT_KEY_ESCAPE) || g_nt_app.frame >= 300) {
         nt_app_quit();
     }
 #endif
@@ -46,6 +56,7 @@ int main(void) {
     }
 
     nt_window_init();
+    nt_input_init();
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
 #endif
@@ -59,7 +70,7 @@ int main(void) {
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
-    /* On native nt_app_run() blocks until nt_app_quit(). Cleanup here. */
+    nt_input_shutdown();
     nt_engine_shutdown();
 #endif
     return 0;

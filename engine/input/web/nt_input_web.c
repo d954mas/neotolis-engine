@@ -129,6 +129,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     /* Pointer events — pass CSS-relative coords, C maps with engine DPR */
     canvas.addEventListener("pointerdown", function(e) {
         canvas.focus();
+        canvas.setPointerCapture(e.pointerId);
         var ptype = e.pointerType === "touch" ? 1
                   : (e.pointerType === "pen" ? 2 : 0);
         Module._ntPtrBuf.push(0, e.pointerId,
