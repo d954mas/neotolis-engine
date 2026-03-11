@@ -1,7 +1,3 @@
-#include "core/nt_platform.h"
-
-#ifdef NT_PLATFORM_WEB
-
 #include "input/nt_input.h"
 #include <emscripten.h>
 
@@ -204,7 +200,3 @@ void nt_input_platform_init(void) { nt_input_web_register_listeners(); }
 void nt_input_platform_poll(void) { nt_input_web_flush_events(); }
 
 void nt_input_platform_shutdown(void) { /* Listeners GC'd with module unload */ }
-
-#else
-typedef int nt_input_web_unused;
-#endif /* NT_PLATFORM_WEB */

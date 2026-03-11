@@ -11,12 +11,8 @@ nt_input_t g_nt_input;
 /* ---- File-scope statics for edge detection ---- */
 
 static bool s_keys_current[NT_KEY_COUNT];
-static bool s_keys_previous[NT_KEY_COUNT];
 static bool s_keys_pressed[NT_KEY_COUNT];
 static bool s_keys_released[NT_KEY_COUNT];
-static float s_prev_x[NT_INPUT_MAX_POINTERS];
-static float s_prev_y[NT_INPUT_MAX_POINTERS];
-static nt_button_state_t s_prev_buttons[NT_INPUT_MAX_POINTERS][NT_BUTTON_MAX];
 
 /* ---- Coordinate mapping ---- */
 
@@ -46,10 +42,17 @@ static nt_pointer_t *find_free_pointer_slot(void) {
 }
 
 static void apply_buttons_mask(nt_pointer_t *ptr, uint8_t buttons_mask) {
-    /* Bit 0 = left, bit 1 = right, bit 2 = middle */
-    ptr->buttons[NT_BUTTON_LEFT].is_down = (buttons_mask & 1U) != 0;
-    ptr->buttons[NT_BUTTON_RIGHT].is_down = (buttons_mask & 2U) != 0;
-    ptr->buttons[NT_BUTTON_MIDDLE].is_down = (buttons_mask & 4U) != 0;
+    static const uint8_t masks[NT_BUTTON_MAX] = {1U, 2U, 4U};
+    for (int b = 0; b < NT_BUTTON_MAX; b++) {
+        bool now = (buttons_mask & masks[b]) != 0;
+        if (now && !ptr->buttons[b].is_down) {
+            ptr->buttons[b].is_pressed = true;
+        }
+        if (!now && ptr->buttons[b].is_down) {
+            ptr->buttons[b].is_released = true;
+        }
+        ptr->buttons[b].is_down = now;
+    }
 }
 
 /* ---- Lifecycle ---- */
@@ -57,56 +60,29 @@ static void apply_buttons_mask(nt_pointer_t *ptr, uint8_t buttons_mask) {
 void nt_input_init(void) {
     memset(&g_nt_input, 0, sizeof(g_nt_input));
     memset(s_keys_current, 0, sizeof(s_keys_current));
-    memset(s_keys_previous, 0, sizeof(s_keys_previous));
     memset(s_keys_pressed, 0, sizeof(s_keys_pressed));
     memset(s_keys_released, 0, sizeof(s_keys_released));
-    memset(s_prev_x, 0, sizeof(s_prev_x));
-    memset(s_prev_y, 0, sizeof(s_prev_y));
-    memset(s_prev_buttons, 0, sizeof(s_prev_buttons));
     nt_input_platform_init();
 }
 
 void nt_input_poll(void) {
-    /* 1. Reset wheel deltas (they accumulate between polls) */
+    /* Clear edge flags accumulated since last poll */
+    memset(s_keys_pressed, 0, sizeof(s_keys_pressed));
+    memset(s_keys_released, 0, sizeof(s_keys_released));
     for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        g_nt_input.pointers[i].dx = 0.0F;
+        g_nt_input.pointers[i].dy = 0.0F;
         g_nt_input.pointers[i].wheel_dx = 0.0F;
         g_nt_input.pointers[i].wheel_dy = 0.0F;
+        for (int b = 0; b < NT_BUTTON_MAX; b++) {
+            g_nt_input.pointers[i].buttons[b].is_pressed = false;
+            g_nt_input.pointers[i].buttons[b].is_released = false;
+        }
     }
 
-    /* 2. Platform backend processes events (may call set_key,
-       pointer_down/move/up, updating current state arrays) */
+    /* Platform backend delivers events (calls set_key, pointer_down/move/up,
+       which set edge flags immediately) */
     nt_input_platform_poll();
-
-    /* 3. Compute key edge detection (before snapshot) */
-    for (int i = 0; i < NT_KEY_COUNT; i++) {
-        s_keys_pressed[i] = s_keys_current[i] && !s_keys_previous[i];
-        s_keys_released[i] = !s_keys_current[i] && s_keys_previous[i];
-    }
-
-    /* 4. Compute pointer deltas and button edge detection
-       using previous-frame state saved at end of last poll */
-    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        if (g_nt_input.pointers[i].active) {
-            g_nt_input.pointers[i].dx = g_nt_input.pointers[i].x - s_prev_x[i];
-            g_nt_input.pointers[i].dy = g_nt_input.pointers[i].y - s_prev_y[i];
-        }
-        for (int b = 0; b < NT_BUTTON_MAX; b++) {
-            bool cur = g_nt_input.pointers[i].buttons[b].is_down;
-            bool prev = s_prev_buttons[i][b].is_down;
-            g_nt_input.pointers[i].buttons[b].is_pressed = cur && !prev;
-            g_nt_input.pointers[i].buttons[b].is_released = !cur && prev;
-        }
-    }
-
-    /* 5. Snapshot current state for next frame */
-    memcpy(s_keys_previous, s_keys_current, sizeof(s_keys_current));
-    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
-        s_prev_x[i] = g_nt_input.pointers[i].x;
-        s_prev_y[i] = g_nt_input.pointers[i].y;
-        for (int b = 0; b < NT_BUTTON_MAX; b++) {
-            s_prev_buttons[i][b] = g_nt_input.pointers[i].buttons[b];
-        }
-    }
 }
 
 void nt_input_shutdown(void) {
@@ -196,6 +172,12 @@ void nt_input_set_key(nt_key_t key, bool down) {
     if (key >= NT_KEY_COUNT) {
         return;
     }
+    if (down && !s_keys_current[key]) {
+        s_keys_pressed[key] = true;
+    }
+    if (!down && s_keys_current[key]) {
+        s_keys_released[key] = true;
+    }
     s_keys_current[key] = down;
 }
 
@@ -221,8 +203,14 @@ void nt_input_pointer_move(uint32_t id, float css_x, float css_y, float pressure
     if (ptr == NULL) {
         return; /* Unknown pointer */
     }
+    float new_x;
+    float new_y;
+    map_css_to_fb(css_x, css_y, &new_x, &new_y);
+    ptr->dx += new_x - ptr->x;
+    ptr->dy += new_y - ptr->y;
+    ptr->x = new_x;
+    ptr->y = new_y;
     ptr->pressure = pressure;
-    map_css_to_fb(css_x, css_y, &ptr->x, &ptr->y);
     apply_buttons_mask(ptr, buttons_mask);
 }
 
@@ -231,11 +219,13 @@ void nt_input_pointer_up(uint32_t id) {
     if (ptr == NULL) {
         return; /* Unknown pointer */
     }
-    ptr->active = false;
-    /* Clear all button is_down (released state computed in poll) */
     for (int b = 0; b < NT_BUTTON_MAX; b++) {
+        if (ptr->buttons[b].is_down) {
+            ptr->buttons[b].is_released = true;
+        }
         ptr->buttons[b].is_down = false;
     }
+    ptr->active = false;
 }
 
 void nt_input_wheel(float dx, float dy) {

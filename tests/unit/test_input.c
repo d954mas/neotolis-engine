@@ -29,40 +29,29 @@ void test_key_down_after_set(void) {
 }
 
 void test_key_pressed_edge(void) {
-    /* Frame 1: key goes from up to down */
     nt_input_set_key(NT_KEY_W, true);
-    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_W));
 }
 
 void test_key_released_edge(void) {
-    /* Frame 1: key down */
     nt_input_set_key(NT_KEY_S, true);
-    nt_input_poll();
-    /* Frame 2: key released */
+    nt_input_poll(); /* clears pressed edge */
     nt_input_set_key(NT_KEY_S, false);
-    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_released(NT_KEY_S));
 }
 
 void test_key_pressed_clears_next_frame(void) {
-    /* Frame 1: key pressed */
     nt_input_set_key(NT_KEY_D, true);
-    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_key_is_pressed(NT_KEY_D));
-    /* Frame 2: key still held -- pressed should be false */
+    /* Next frame: poll clears edges, key still held */
     nt_input_poll();
     TEST_ASSERT_FALSE(nt_input_key_is_pressed(NT_KEY_D));
     TEST_ASSERT_TRUE(nt_input_key_is_down(NT_KEY_D));
 }
 
 void test_any_key_pressed(void) {
-    /* No keys pressed */
-    nt_input_poll();
     TEST_ASSERT_FALSE(nt_input_any_key_pressed());
-    /* Press a key */
     nt_input_set_key(NT_KEY_SPACE, true);
-    nt_input_poll();
     TEST_ASSERT_TRUE(nt_input_any_key_pressed());
 }
 
@@ -96,32 +85,24 @@ void test_pointer_slot_dealloc(void) {
 void test_pointer_delta(void) {
     g_nt_window.dpr = 1.0F;
     nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
-    /* Poll frame 1: saves position */
-    nt_input_poll();
-    /* Move pointer */
+    nt_input_poll(); /* clears initial dx/dy */
     nt_input_pointer_move(1, 120.0F, 230.0F, 0.5F, 1);
-    /* Poll frame 2: computes delta */
-    nt_input_poll();
+    /* Delta computed immediately in pointer_move */
     TEST_ASSERT_TRUE(float_near(20.0F, g_nt_input.pointers[0].dx, 1e-3F));
     TEST_ASSERT_TRUE(float_near(30.0F, g_nt_input.pointers[0].dy, 1e-3F));
 }
 
 void test_pointer_button_pressed(void) {
     g_nt_window.dpr = 1.0F;
-    /* Frame 1: button down */
     nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
-    nt_input_poll();
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_pressed);
 }
 
 void test_pointer_button_released(void) {
     g_nt_window.dpr = 1.0F;
-    /* Frame 1: button down */
     nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
-    nt_input_poll();
-    /* Frame 2: button up */
+    nt_input_poll(); /* clears pressed edge */
     nt_input_pointer_up(1);
-    nt_input_poll();
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_released);
 }
 
