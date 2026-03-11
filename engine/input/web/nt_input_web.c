@@ -71,18 +71,21 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
         rect = canvas.getBoundingClientRect();
     }).observe(canvas);
 
-    /* Event accumulation buffers */
-    Module._ntInputKeyEvents = [];
-    Module._ntInputPointerEvents = [];
-    Module._ntInputWheelEvents = [];
-    Module._ntInputBlurred = false;
+    /* Flat event buffers — no object allocation per event.
+       Key:     stride 2  [key, down, ...]
+       Pointer: stride 7  [type, id, x, y, pressure, ptype, buttons, ...]
+       Wheel:   stride 2  [dx, dy, ...] */
+    Module._ntKeyBuf = [];
+    Module._ntPtrBuf = [];
+    Module._ntWheelBuf = [];
+    Module._ntBlurred = false;
 
     /* Keyboard events */
     canvas.addEventListener("keydown", function(e) {
         if (e.repeat) return;
         var k = keyMap[e.code];
         if (k !== undefined) {
-            Module._ntInputKeyEvents.push({key: k, down: 1});
+            Module._ntKeyBuf.push(k, 1);
         }
         if (preventSet[e.code]) {
             e.preventDefault();
@@ -92,55 +95,44 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     canvas.addEventListener("keyup", function(e) {
         var k = keyMap[e.code];
         if (k !== undefined) {
-            Module._ntInputKeyEvents.push({key: k, down: 0});
+            Module._ntKeyBuf.push(k, 0);
         }
     });
 
     /* Blur: clear all keys on focus loss */
     canvas.addEventListener("blur", function() {
-        Module._ntInputBlurred = true;
+        Module._ntBlurred = true;
     });
-
-    /* CSS -> framebuffer coordinate mapping */
-    function toFB(cssX, cssY) {
-        var dpr = window.devicePixelRatio || 1;
-        return [Math.round((cssX - rect.left) * dpr),
-                Math.round((cssY - rect.top) * dpr)];
-    }
 
     /* Pointer events */
     canvas.addEventListener("pointerdown", function(e) {
-        var fb = toFB(e.clientX, e.clientY);
+        var dpr = window.devicePixelRatio || 1;
         var ptype = e.pointerType === "touch" ? 1
                   : (e.pointerType === "pen" ? 2 : 0);
-        Module._ntInputPointerEvents.push({
-            type: 0, id: e.pointerId,
-            x: fb[0], y: fb[1],
-            pressure: e.pressure, ptype: ptype,
-            buttons: e.buttons
-        });
+        Module._ntPtrBuf.push(0, e.pointerId,
+            Math.round((e.clientX - rect.left) * dpr),
+            Math.round((e.clientY - rect.top) * dpr),
+            e.pressure, ptype, e.buttons);
         e.preventDefault();
     });
 
     canvas.addEventListener("pointermove", function(e) {
-        var fb = toFB(e.clientX, e.clientY);
+        var dpr = window.devicePixelRatio || 1;
         var ptype = e.pointerType === "touch" ? 1
                   : (e.pointerType === "pen" ? 2 : 0);
-        Module._ntInputPointerEvents.push({
-            type: 1, id: e.pointerId,
-            x: fb[0], y: fb[1],
-            pressure: e.pressure, ptype: ptype,
-            buttons: e.buttons
-        });
+        Module._ntPtrBuf.push(1, e.pointerId,
+            Math.round((e.clientX - rect.left) * dpr),
+            Math.round((e.clientY - rect.top) * dpr),
+            e.pressure, ptype, e.buttons);
     });
 
     canvas.addEventListener("pointerup", function(e) {
-        Module._ntInputPointerEvents.push({type: 2, id: e.pointerId});
+        Module._ntPtrBuf.push(2, e.pointerId, 0, 0, 0, 0, 0);
         e.preventDefault();
     });
 
     canvas.addEventListener("pointercancel", function(e) {
-        Module._ntInputPointerEvents.push({type: 2, id: e.pointerId});
+        Module._ntPtrBuf.push(2, e.pointerId, 0, 0, 0, 0, 0);
         e.preventDefault();
     });
 
@@ -155,7 +147,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
             dx *= window.innerWidth;
             dy *= window.innerHeight;
         }
-        Module._ntInputWheelEvents.push({dx: dx, dy: dy});
+        Module._ntWheelBuf.push(dx, dy);
         e.preventDefault();
     }, {passive: false});
 
@@ -164,41 +156,40 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
 })
 
 EM_JS(void, nt_input_web_flush_events, (void), {
-    /* Blur handling: clear all keys */
-    if (Module._ntInputBlurred) {
+    /* Blur handling */
+    if (Module._ntBlurred) {
         Module._nt_input_web_on_blur();
-        Module._ntInputBlurred = false;
+        Module._ntBlurred = false;
     }
 
-    /* Drain key events */
-    var keys = Module._ntInputKeyEvents;
-    for (var i = 0; i < keys.length; i++) {
-        Module._nt_input_web_on_key(keys[i].key, keys[i].down);
+    /* Drain key buffer (stride 2: key, down) */
+    var kb = Module._ntKeyBuf;
+    for (var i = 0; i < kb.length; i += 2) {
+        Module._nt_input_web_on_key(kb[i], kb[i + 1]);
     }
-    Module._ntInputKeyEvents = [];
+    kb.length = 0;
 
-    /* Drain pointer events */
-    var ptrs = Module._ntInputPointerEvents;
-    for (var i = 0; i < ptrs.length; i++) {
-        var ev = ptrs[i];
-        if (ev.type === 0) {
+    /* Drain pointer buffer (stride 7: type, id, x, y, pressure, ptype, buttons) */
+    var pb = Module._ntPtrBuf;
+    for (var i = 0; i < pb.length; i += 7) {
+        if (pb[i] === 0) {
             Module._nt_input_web_on_pointer_down(
-                ev.id, ev.x, ev.y, ev.pressure, ev.ptype, ev.buttons);
-        } else if (ev.type === 1) {
+                pb[i + 1], pb[i + 2], pb[i + 3], pb[i + 4], pb[i + 5], pb[i + 6]);
+        } else if (pb[i] === 1) {
             Module._nt_input_web_on_pointer_move(
-                ev.id, ev.x, ev.y, ev.pressure, ev.buttons);
+                pb[i + 1], pb[i + 2], pb[i + 3], pb[i + 4], pb[i + 6]);
         } else {
-            Module._nt_input_web_on_pointer_up(ev.id);
+            Module._nt_input_web_on_pointer_up(pb[i + 1]);
         }
     }
-    Module._ntInputPointerEvents = [];
+    pb.length = 0;
 
-    /* Drain wheel events */
-    var wheels = Module._ntInputWheelEvents;
-    for (var i = 0; i < wheels.length; i++) {
-        Module._nt_input_web_on_wheel(wheels[i].dx, wheels[i].dy);
+    /* Drain wheel buffer (stride 2: dx, dy) */
+    var wb = Module._ntWheelBuf;
+    for (var i = 0; i < wb.length; i += 2) {
+        Module._nt_input_web_on_wheel(wb[i], wb[i + 1]);
     }
-    Module._ntInputWheelEvents = [];
+    wb.length = 0;
 })
 /* clang-format on */
 
