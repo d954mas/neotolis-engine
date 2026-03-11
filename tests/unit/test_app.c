@@ -12,8 +12,6 @@ static int s_frame_count;
 static int s_target_frames;
 static float s_first_dt;
 static float s_recorded_dts[64];
-static bool s_shutdown_called;
-
 static void frame_fn_quit_after_n(void) {
     if (s_frame_count == 0) {
         s_first_dt = g_nt_app.dt;
@@ -27,13 +25,10 @@ static void frame_fn_quit_after_n(void) {
     }
 }
 
-static void shutdown_callback(void) { s_shutdown_called = true; }
-
 void setUp(void) {
     s_frame_count = 0;
     s_target_frames = 1;
     s_first_dt = -1.0F;
-    s_shutdown_called = false;
     for (int i = 0; i < 64; i++) {
         s_recorded_dts[i] = -1.0F;
     }
@@ -85,21 +80,13 @@ void test_app_frame_counter(void) {
     TEST_ASSERT_EQUAL_UINT32(5, g_nt_app.frame);
 }
 
-/* 6. Shutdown callback is invoked after loop exit */
-void test_app_shutdown_callback(void) {
-    s_target_frames = 1;
-    nt_app_on_shutdown(shutdown_callback);
-    nt_app_run(frame_fn_quit_after_n);
-    TEST_ASSERT_TRUE_MESSAGE(s_shutdown_called, "Shutdown callback must be called after loop exit");
-}
-
-/* 7. max_dt defaults to 0.1f */
+/* 6. max_dt defaults to 0.1f */
 void test_app_max_dt_default(void) {
     /* g_nt_app is reset in setUp with max_dt = 0.1F to match the definition default */
     TEST_ASSERT_TRUE_MESSAGE(float_near(0.1F, g_nt_app.max_dt, 1e-6F), "max_dt should default to 0.1f");
 }
 
-/* 8. nt_app_quit exits the loop (function returns) */
+/* 7. nt_app_quit exits the loop (function returns) */
 void test_app_quit_exits_loop(void) {
     s_target_frames = 1; /* frame_fn calls nt_app_quit after 1 frame */
     nt_app_run(frame_fn_quit_after_n);
@@ -114,7 +101,6 @@ int main(void) {
     RUN_TEST(test_app_dt_clamped);
     RUN_TEST(test_app_time_accumulates);
     RUN_TEST(test_app_frame_counter);
-    RUN_TEST(test_app_shutdown_callback);
     RUN_TEST(test_app_max_dt_default);
     RUN_TEST(test_app_quit_exits_loop);
     return UNITY_END();

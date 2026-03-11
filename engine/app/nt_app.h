@@ -3,10 +3,7 @@
 
 #include "core/nt_types.h"
 
-/* ---- Callback typedefs ---- */
-
 typedef void (*nt_app_frame_fn)(void);
-typedef void (*nt_app_shutdown_fn)(void);
 
 /* ---- Frame state (engine writes, game reads) ---- */
 
@@ -23,6 +20,5 @@ extern nt_app_t g_nt_app;
 
 void nt_app_run(nt_app_frame_fn fn);
 void nt_app_quit(void);
-void nt_app_on_shutdown(nt_app_shutdown_fn fn);
 
 #endif /* NT_APP_H */

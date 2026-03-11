@@ -42,11 +42,6 @@ void nt_app_run(nt_app_frame_fn fn) {
 
 void nt_app_quit(void) { /* No-op on web -- browser manages lifecycle */ }
 
-void nt_app_on_shutdown(nt_app_shutdown_fn fn) {
-    /* No-op on web -- browser cleans up; pagehide deferred to future phase */
-    (void)fn;
-}
-
 #else
 /* Ensure non-empty translation unit on non-web platforms (clang-tidy) */
 typedef int nt_app_web_unused;

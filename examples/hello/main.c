@@ -1,5 +1,6 @@
 #include "app/nt_app.h"
 #include "core/nt_core.h"
+#include "core/nt_platform.h"
 #include "platform/web/nt_web.h"
 #include "time/nt_time.h"
 #include <stdio.h>
@@ -27,11 +28,6 @@ static void frame(void) {
     }
 }
 
-static void shutdown(void) {
-    printf("Shutdown: %d physics ticks in %.1fs\n", s_physics_ticks, (double)g_nt_app.time);
-    nt_engine_shutdown();
-}
-
 int main(void) {
     nt_engine_config_t config = {0};
     config.app_name = "hello";
@@ -49,7 +45,11 @@ int main(void) {
 
     nt_accumulator_init(&s_acc, 1.0F / 60.0F, 4);
 
-    nt_app_on_shutdown(shutdown);
     nt_app_run(frame);
+
+#ifndef NT_PLATFORM_WEB
+    /* On native nt_app_run() blocks until nt_app_quit(). Cleanup here. */
+    nt_engine_shutdown();
+#endif
     return 0;
 }
