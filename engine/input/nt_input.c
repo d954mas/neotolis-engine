@@ -186,6 +186,7 @@ void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_
         ptr->dy = 0.0F;
         ptr->wheel_dx = 0.0F;
         ptr->wheel_dy = 0.0F;
+        memset(ptr->buttons, 0, sizeof(ptr->buttons));
     }
     ptr->pressure = pressure;
     ptr->x = x;
@@ -206,10 +207,12 @@ void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_
         ptr->type = type;
         ptr->x = x;
         ptr->y = y;
+        ptr->pressure = pressure;
         ptr->dx = 0.0F;
         ptr->dy = 0.0F;
         ptr->wheel_dx = 0.0F;
         ptr->wheel_dy = 0.0F;
+        memset(ptr->buttons, 0, sizeof(ptr->buttons));
         apply_buttons_mask(ptr, buttons_mask);
         return;
     }
@@ -238,7 +241,22 @@ void nt_input_pointer_up(uint32_t id) {
 void nt_input_wheel(float dx, float dy) {
     nt_pointer_t *mouse = find_mouse_pointer();
     if (mouse == NULL) {
-        return;
+        /* Auto-create mouse slot so early wheel events aren't lost */
+        mouse = find_free_pointer_slot();
+        if (mouse == NULL) {
+            return;
+        }
+        mouse->active = true;
+        mouse->id = 0;
+        mouse->type = NT_POINTER_MOUSE;
+        mouse->x = 0.0F;
+        mouse->y = 0.0F;
+        mouse->pressure = 0.0F;
+        mouse->dx = 0.0F;
+        mouse->dy = 0.0F;
+        mouse->wheel_dx = 0.0F;
+        mouse->wheel_dy = 0.0F;
+        memset(mouse->buttons, 0, sizeof(mouse->buttons));
     }
     mouse->wheel_dx += dx;
     mouse->wheel_dy += dy;
