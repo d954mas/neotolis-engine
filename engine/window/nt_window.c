@@ -2,9 +2,7 @@
 
 #include <math.h>
 
-/* Single definition of global window state -- shared by all platform backends.
-   Static storage: width, height, fb_width, fb_height, dpr are zero-initialized
-   by C standard. */
+/* Global window state, shared by all platform backends. */
 nt_window_t g_nt_window = {.max_dpr = 2.0F};
 
 void nt_window_apply_sizes(float canvas_w, float canvas_h, float device_dpr) {
