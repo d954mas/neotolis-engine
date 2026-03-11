@@ -65,6 +65,12 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
         "F6": 1, "F7": 1, "F8": 1, "F9": 1, "F10": 1
     };
 
+    /* Cached canvas rect — updated on resize */
+    var rect = canvas.getBoundingClientRect();
+    new ResizeObserver(function() {
+        rect = canvas.getBoundingClientRect();
+    }).observe(canvas);
+
     /* Event accumulation buffers */
     Module._ntInputKeyEvents = [];
     Module._ntInputPointerEvents = [];
@@ -95,16 +101,21 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
         Module._ntInputBlurred = true;
     });
 
+    /* CSS -> framebuffer coordinate mapping */
+    function toFB(cssX, cssY) {
+        var dpr = window.devicePixelRatio || 1;
+        return [Math.round((cssX - rect.left) * dpr),
+                Math.round((cssY - rect.top) * dpr)];
+    }
+
     /* Pointer events */
     canvas.addEventListener("pointerdown", function(e) {
-        var rect = canvas.getBoundingClientRect();
-        var cx = e.clientX - rect.left;
-        var cy = e.clientY - rect.top;
+        var fb = toFB(e.clientX, e.clientY);
         var ptype = e.pointerType === "touch" ? 1
                   : (e.pointerType === "pen" ? 2 : 0);
         Module._ntInputPointerEvents.push({
             type: 0, id: e.pointerId,
-            cx: cx, cy: cy,
+            x: fb[0], y: fb[1],
             pressure: e.pressure, ptype: ptype,
             buttons: e.buttons
         });
@@ -112,14 +123,12 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     });
 
     canvas.addEventListener("pointermove", function(e) {
-        var rect = canvas.getBoundingClientRect();
-        var cx = e.clientX - rect.left;
-        var cy = e.clientY - rect.top;
+        var fb = toFB(e.clientX, e.clientY);
         var ptype = e.pointerType === "touch" ? 1
                   : (e.pointerType === "pen" ? 2 : 0);
         Module._ntInputPointerEvents.push({
             type: 1, id: e.pointerId,
-            cx: cx, cy: cy,
+            x: fb[0], y: fb[1],
             pressure: e.pressure, ptype: ptype,
             buttons: e.buttons
         });
@@ -174,10 +183,10 @@ EM_JS(void, nt_input_web_flush_events, (void), {
         var ev = ptrs[i];
         if (ev.type === 0) {
             Module._nt_input_web_on_pointer_down(
-                ev.id, ev.cx, ev.cy, ev.pressure, ev.ptype, ev.buttons);
+                ev.id, ev.x, ev.y, ev.pressure, ev.ptype, ev.buttons);
         } else if (ev.type === 1) {
             Module._nt_input_web_on_pointer_move(
-                ev.id, ev.cx, ev.cy, ev.pressure, ev.buttons);
+                ev.id, ev.x, ev.y, ev.pressure, ev.buttons);
         } else {
             Module._nt_input_web_on_pointer_up(ev.id);
         }

@@ -16,10 +16,6 @@ endif()
 
 target_link_libraries(nt_input PUBLIC nt_core nt_window)
 
-if(UNIX)
-    target_link_libraries(nt_input PRIVATE m)
-endif()
-
 # Stub implementation for headless builds (CI, builder, tests)
 nt_add_module(nt_input_stub
     nt_input.c
@@ -28,7 +24,3 @@ nt_add_module(nt_input_stub
 )
 
 target_link_libraries(nt_input_stub PUBLIC nt_core nt_window)
-
-if(UNIX)
-    target_link_libraries(nt_input_stub PRIVATE m)
-endif()

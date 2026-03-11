@@ -1,7 +1,5 @@
 #include "input/nt_input.h"
-#include "window/nt_window.h"
 
-#include <math.h>
 #include <string.h>
 
 /* ---- Global input state ---- */
@@ -13,13 +11,6 @@ nt_input_t g_nt_input;
 static bool s_keys_current[NT_KEY_COUNT];
 static bool s_keys_pressed[NT_KEY_COUNT];
 static bool s_keys_released[NT_KEY_COUNT];
-
-/* ---- Coordinate mapping ---- */
-
-static void map_css_to_fb(float css_x, float css_y, float *fb_x, float *fb_y) {
-    *fb_x = roundf(css_x * g_nt_window.dpr);
-    *fb_y = roundf(css_y * g_nt_window.dpr);
-}
 
 /* ---- Internal pointer helpers ---- */
 
@@ -181,7 +172,7 @@ void nt_input_set_key(nt_key_t key, bool down) {
     s_keys_current[key] = down;
 }
 
-void nt_input_pointer_down(uint32_t id, float css_x, float css_y, float pressure, uint8_t type, uint8_t buttons_mask) {
+void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
     nt_pointer_t *ptr = find_free_pointer_slot();
     if (ptr == NULL) {
         return; /* All slots full */
@@ -190,7 +181,8 @@ void nt_input_pointer_down(uint32_t id, float css_x, float css_y, float pressure
     ptr->id = id;
     ptr->type = type;
     ptr->pressure = pressure;
-    map_css_to_fb(css_x, css_y, &ptr->x, &ptr->y);
+    ptr->x = x;
+    ptr->y = y;
     ptr->dx = 0.0F;
     ptr->dy = 0.0F;
     ptr->wheel_dx = 0.0F;
@@ -198,18 +190,15 @@ void nt_input_pointer_down(uint32_t id, float css_x, float css_y, float pressure
     apply_buttons_mask(ptr, buttons_mask);
 }
 
-void nt_input_pointer_move(uint32_t id, float css_x, float css_y, float pressure, uint8_t buttons_mask) {
+void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t buttons_mask) {
     nt_pointer_t *ptr = find_pointer_by_id(id);
     if (ptr == NULL) {
         return; /* Unknown pointer */
     }
-    float new_x;
-    float new_y;
-    map_css_to_fb(css_x, css_y, &new_x, &new_y);
-    ptr->dx += new_x - ptr->x;
-    ptr->dy += new_y - ptr->y;
-    ptr->x = new_x;
-    ptr->y = new_y;
+    ptr->dx += x - ptr->x;
+    ptr->dy += y - ptr->y;
+    ptr->x = x;
+    ptr->y = y;
     ptr->pressure = pressure;
     apply_buttons_mask(ptr, buttons_mask);
 }
@@ -237,4 +226,11 @@ void nt_input_wheel(float dx, float dy) {
     mouse->wheel_dy += dy;
 }
 
-void nt_input_clear_all_keys(void) { memset(s_keys_current, 0, sizeof(s_keys_current)); }
+void nt_input_clear_all_keys(void) {
+    for (int i = 0; i < NT_KEY_COUNT; i++) {
+        if (s_keys_current[i]) {
+            s_keys_released[i] = true;
+        }
+    }
+    memset(s_keys_current, 0, sizeof(s_keys_current));
+}
