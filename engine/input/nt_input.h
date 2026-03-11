@@ -106,14 +106,14 @@ typedef struct {
 #define NT_INPUT_MAX_POINTERS 8
 
 typedef struct {
-    uint32_t id;    /* Browser PointerEvent.pointerId */
-    float x, y;     /* Framebuffer pixels, canvas-relative */
-    float dx, dy;   /* Movement delta in framebuffer pixels */
-    float wheel_dx; /* Wheel horizontal delta (mouse only) */
-    float wheel_dy; /* Wheel vertical delta (mouse only) */
-    float pressure; /* 0.0-1.0 */
-    uint8_t type;   /* nt_pointer_type_t */
-    bool active;    /* Pointer currently exists */
+    uint32_t id;             /* Browser PointerEvent.pointerId */
+    float x, y;              /* Framebuffer pixels, canvas-relative */
+    float dx, dy;            /* Movement delta in framebuffer pixels */
+    float wheel_dx;          /* Wheel horizontal delta (mouse only) */
+    float wheel_dy;          /* Wheel vertical delta (mouse only) */
+    float pressure;          /* 0.0-1.0 */
+    uint8_t type;            /* nt_pointer_type_t */
+    bool active;             /* Pointer currently exists */
     bool deactivate_pending; /* pointer_up defers deactivation by one frame */
     nt_button_state_t buttons[NT_BUTTON_MAX];
 } nt_pointer_t;
