@@ -71,7 +71,9 @@
       "Bash(cd \"C:/projects/neotolis-engine/neotolis-engine-site\" && npm ci 2>&1 | tail -5 && npm run build 2>&1 | tail -20 && test -f dist/index.html && echo \"VERIFIED: dist/index.html exists\" || echo \"FAIL: dist/index.html missing\")",
       "Bash(timeout 3 build/examples/hello/native-debug/hello.exe 2>&1 || true)",
       "WebFetch(domain:blat-blatnik.github.io)",
-      "Bash(cmake --build build/_cmake/native-debug 2>&1 && timeout 12 build/examples/hello/native-debug/hello.exe 2>&1 || true)"
+      "Bash(cmake --build build/_cmake/native-debug 2>&1 && timeout 12 build/examples/hello/native-debug/hello.exe 2>&1 || true)",
+      "WebFetch(domain:emscripten.org)",
+      "WebFetch(domain:webglfundamentals.org)"
     ]
   }
 }
