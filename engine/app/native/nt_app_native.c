@@ -35,7 +35,8 @@ void nt_app_run(nt_app_frame_fn fn) {
             if (remaining > NT_SPIN_MARGIN) {
                 nt_time_sleep(remaining - NT_SPIN_MARGIN);
             }
-            while (nt_time_now() < target) { /* spin */ }
+            while (nt_time_now() < target) { /* spin */
+            }
         }
     }
 }

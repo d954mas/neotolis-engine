@@ -12,7 +12,9 @@ void nt_accumulator_init(nt_accumulator_t *acc, float fixed_dt, int max_steps) {
 int nt_accumulator_update(nt_accumulator_t *acc, float dt) {
     acc->accumulator += dt;
     int steps = (int)(acc->accumulator / acc->fixed_dt);
-    if (steps > acc->max_steps) steps = acc->max_steps;
+    if (steps > acc->max_steps) {
+        steps = acc->max_steps;
+    }
     acc->accumulator -= acc->fixed_dt * (float)steps;
     return steps;
 }
@@ -60,15 +62,19 @@ uint64_t nt_time_nanos(void) {
 }
 
 void nt_time_sleep(double seconds) {
-    if (seconds <= 0.0) return;
+    if (seconds <= 0.0) {
+        return;
+    }
     /* Set 1ms timer resolution on first call (standard for games) */
     static bool s_period_set = false;
     if (!s_period_set) {
-        timeBeginPeriod(1);
+        (void)timeBeginPeriod(1);
         s_period_set = true;
     }
     DWORD ms = (DWORD)(seconds * 1000.0);
-    if (ms > 0) Sleep(ms);
+    if (ms > 0) {
+        Sleep(ms);
+    }
 }
 
 #else /* NT_PLATFORM_NATIVE (Linux, macOS, POSIX) */
@@ -87,7 +93,9 @@ uint64_t nt_time_nanos(void) {
 }
 
 void nt_time_sleep(double seconds) {
-    if (seconds <= 0.0) return;
+    if (seconds <= 0.0) {
+        return;
+    }
     struct timespec ts;
     ts.tv_sec = (time_t)seconds;
     ts.tv_nsec = (long)((seconds - (double)ts.tv_sec) * 1e9);
