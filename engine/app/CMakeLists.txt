@@ -5,6 +5,7 @@
 
 if(EMSCRIPTEN)
     nt_add_module(nt_app_web
+        nt_app.c
         web/nt_app_web.c
         nt_app.h
     )
@@ -14,6 +15,7 @@ if(EMSCRIPTEN)
 endif()
 
 nt_add_module(nt_app_native
+    nt_app.c
     native/nt_app_native.c
     nt_app.h
 )

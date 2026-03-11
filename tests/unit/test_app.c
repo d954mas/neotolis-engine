@@ -53,11 +53,12 @@ void test_app_run_calls_frame_fn(void) {
     TEST_ASSERT_TRUE_MESSAGE(g_nt_app.frame >= 1, "frame_fn should be called at least once");
 }
 
-/* 2. First frame produces dt == 0.0 */
-void test_app_dt_zero_first_frame(void) {
+/* 2. First frame dt is clamped like any other frame */
+void test_app_dt_clamped_first_frame(void) {
+    g_nt_app.max_dt = 0.1F;
     s_target_frames = 1;
     nt_app_run(frame_fn_quit_after_n);
-    TEST_ASSERT_TRUE_MESSAGE(float_near(0.0F, s_first_dt, 1e-9F), "First frame dt must be 0.0");
+    TEST_ASSERT_TRUE_MESSAGE(s_first_dt <= 0.1F + 1e-6F, "First frame dt must be clamped to max_dt");
 }
 
 /* 3. dt is clamped to max_dt */
@@ -65,8 +66,7 @@ void test_app_dt_clamped(void) {
     g_nt_app.max_dt = 0.001F; /* Very small clamp to ensure real dt exceeds it */
     s_target_frames = 5;
     nt_app_run(frame_fn_quit_after_n);
-    /* Check all recorded dts (skip first which is 0.0) */
-    for (int i = 1; i < s_frame_count && i < 64; i++) {
+    for (int i = 0; i < s_frame_count && i < 64; i++) {
         TEST_ASSERT_TRUE_MESSAGE(s_recorded_dts[i] <= 0.001F + 1e-6F, "dt must be clamped to max_dt");
     }
 }
@@ -110,7 +110,7 @@ void test_app_quit_exits_loop(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_app_run_calls_frame_fn);
-    RUN_TEST(test_app_dt_zero_first_frame);
+    RUN_TEST(test_app_dt_clamped_first_frame);
     RUN_TEST(test_app_dt_clamped);
     RUN_TEST(test_app_time_accumulates);
     RUN_TEST(test_app_frame_counter);

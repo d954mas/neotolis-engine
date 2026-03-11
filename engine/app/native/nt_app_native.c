@@ -1,9 +1,6 @@
 #include "app/nt_app.h"
 #include "time/nt_time.h"
-
-/* ---- Global frame state ---- */
-
-nt_app_t g_nt_app = {.max_dt = 0.1F};
+#include <math.h>
 
 /* ---- File-scope statics ---- */
 
@@ -17,26 +14,16 @@ void nt_app_run(nt_app_frame_fn fn) {
     s_frame_fn = fn;
     s_should_quit = false;
 
-    /* Reset frame state, preserve max_dt (game may configure before run) */
     g_nt_app.dt = 0.0F;
     g_nt_app.time = 0.0F;
     g_nt_app.frame = 0;
 
-    /* First frame: dt = 0 (no previous timestamp) */
     double prev_time = nt_time_now();
-    g_nt_app.dt = 0.0F;
-    g_nt_app.frame++;
-    s_frame_fn();
 
-    /* Subsequent frames */
     while (!s_should_quit) {
         double now = nt_time_now();
-        float dt = (float)(now - prev_time);
+        float dt = fminf((float)(now - prev_time), g_nt_app.max_dt);
         prev_time = now;
-
-        if (dt > g_nt_app.max_dt) {
-            dt = g_nt_app.max_dt;
-        }
 
         g_nt_app.dt = dt;
         g_nt_app.time += dt;
