@@ -1,16 +1,34 @@
 # nt_input -- input polling with swappable backends
 
-# Stub implementation for headless builds and testing
+if(EMSCRIPTEN)
+    nt_add_module(nt_input
+        nt_input.c
+        web/nt_input_web.c
+        nt_input.h
+    )
+else()
+    nt_add_module(nt_input
+        nt_input.c
+        native/nt_input_native.c
+        nt_input.h
+    )
+endif()
+
+target_link_libraries(nt_input PUBLIC nt_core nt_window)
+
+if(UNIX)
+    target_link_libraries(nt_input PRIVATE m)
+endif()
+
+# Stub implementation for headless builds (CI, builder, tests)
 nt_add_module(nt_input_stub
     nt_input.c
     stub/nt_input_stub.c
     nt_input.h
 )
+
 target_link_libraries(nt_input_stub PUBLIC nt_core nt_window)
 
-# Platform-conditional backends (Plan 02 will populate)
-if(EMSCRIPTEN)
-    # nt_input with web backend (Plan 02)
-else()
-    # nt_input with native backend (Plan 02)
+if(UNIX)
+    target_link_libraries(nt_input_stub PRIVATE m)
 endif()
