@@ -23,7 +23,7 @@ Requirements for v1.2 Runtime Renderer milestone. Each maps to roadmap phases.
 - [ ] **PLAT-04**: Platform provides keyboard input polling (down, pressed, released per key)
 - [ ] **PLAT-05**: Platform provides mouse input polling (position, buttons, delta)
 - [ ] **PLAT-06**: Platform maps CSS coordinates to framebuffer coordinates for input
-- [ ] **PLAT-07**: Platform uses EM_JS for all JS bridge calls
+- [x] **PLAT-07**: Platform uses EM_JS for all JS bridge calls
 - [ ] **PLAT-08**: Platform detects WebGL context loss and pauses rendering
 - [ ] **PLAT-09**: Platform recovers from context loss by recreating GPU resources
 
@@ -110,7 +110,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PLAT-04 | Phase 14 | Pending |
 | PLAT-05 | Phase 14 | Pending |
 | PLAT-06 | Phase 14 | Pending |
-| PLAT-07 | Phase 13 | Pending |
+| PLAT-07 | Phase 13 | Complete |
 | PLAT-08 | Phase 15 | Pending |
 | PLAT-09 | Phase 15 | Pending |
 | GFX-01 | Phase 15 | Pending |

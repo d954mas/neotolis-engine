@@ -40,7 +40,7 @@ See `.planning/milestones/v1.1-ROADMAP.md` for full history.
 **Milestone Goal:** First rendering runtime -- from empty main() to a spinning cube in the browser with game loop, input, and shape-based debug drawing.
 
 - [x] **Phase 12: Frame Lifecycle** - Engine frame loop with game callbacks, fixed timestep, and delta time (completed 2026-03-10)
-- [ ] **Phase 13: Web Platform Layer** - Canvas initialization, DPR handling, resize detection, JS bridge
+- [x] **Phase 13: Web Platform Layer** - Canvas initialization, DPR handling, resize detection, JS bridge (completed 2026-03-11)
 - [ ] **Phase 14: Input System** - Keyboard and mouse polling with coordinate mapping
 - [ ] **Phase 15: WebGL 2 Renderer** - Shader pipeline, buffer management, draw state, context loss handling
 - [ ] **Phase 16: Shape Renderer** - Immediate-mode shape drawing with batching and per-vertex color
@@ -156,7 +156,7 @@ Note: Phase 14 (Input) and Phase 15 (Renderer) both depend on Phase 13 and could
 | 10. HTML Shell | v1.1 | 3/3 | Complete | 2026-03-10 |
 | 11. Promo Website | v1.1 | 3/3 | Complete | 2026-03-10 |
 | 12. Frame Lifecycle | 2/2 | Complete    | 2026-03-10 | - |
-| 13. Web Platform Layer | 1/2 | In Progress|  | - |
+| 13. Web Platform Layer | 2/2 | Complete   | 2026-03-11 | - |
 | 14. Input System | v1.2 | 0/? | Not started | - |
 | 15. WebGL 2 Renderer | v1.2 | 0/? | Not started | - |
 | 16. Shape Renderer | v1.2 | 0/? | Not started | - |

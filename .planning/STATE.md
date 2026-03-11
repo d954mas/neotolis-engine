@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Runtime Renderer
 status: in-progress
-stopped_at: Completed 13-01-PLAN.md
-last_updated: "2026-03-11T17:07:00.000Z"
-last_activity: 2026-03-11 -- Completed 13-01 nt_window contract
+stopped_at: Completed 13-02-PLAN.md
+last_updated: "2026-03-11T17:12:09.000Z"
+last_activity: 2026-03-11 -- Completed 13-02 nt_window platform backends
 progress:
   total_phases: 6
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 4
-  completed_plans: 3
-  percent: 25
+  completed_plans: 4
+  percent: 50
 ---
 
 # Project State
@@ -21,21 +21,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-10)
 
 **Core value:** Simple, fast, predictable engine runtime -- composable features wired by game code with zero hidden magic
-**Current focus:** Phase 13 - Web Platform Layer (in progress)
+**Current focus:** Phase 13 - Web Platform Layer (complete, ready for Phase 14)
 
 ## Current Position
 
 Phase: 13 of 17 (Web Platform Layer)
-Plan: 1 of 2 complete
-Status: 13-01 complete, ready for 13-02
-Last activity: 2026-03-11 -- Completed 13-01 nt_window contract
+Plan: 2 of 2 complete
+Status: Phase 13 complete, ready for Phase 14
+Last activity: 2026-03-11 -- Completed 13-02 nt_window platform backends
 
-Progress: [###░░░░░░░] 25%
+Progress: [#####░░░░░] 50%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 22 (4 from v1.0 + 17 from v1.1 + 1 from v1.2)
+- Total plans completed: 23 (4 from v1.0 + 17 from v1.1 + 2 from v1.2)
 - Average duration: ~3min
 - Total execution time: --
 
@@ -46,7 +46,7 @@ Progress: [###░░░░░░░] 25%
 | 1-2 (v1.0) | 4 | -- | -- |
 | 3-11 (v1.1) | 17 | ~45min | ~2.6min |
 | 12 (v1.2) | 2 | 13min | 6.5min |
-| 13 (v1.2) | 1 | 4min | 4min |
+| 13 (v1.2) | 2 | 6min | 3min |
 
 *Updated after each plan completion*
 
@@ -74,6 +74,8 @@ Phase 13 execution decisions:
 - roundf (not lroundf) for fb dimension rounding -- lroundf unavailable in MSVC runtime on Windows
 - nt_window_apply_sizes in public header since both platform backends need it
 - nt_window module follows same global extern struct pattern as nt_app
+- EM_JS double return type for numeric JS bridge values (EM_JS limitation -- no uint32_t returns)
+- File-scope statics for change detection in nt_window_poll (CSS size, device DPR, max_dpr)
 
 Research decisions for v1.2:
 - emscripten_request_animation_frame_loop over emscripten_set_main_loop (simpler, passes timestamp)
@@ -93,6 +95,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-11T17:07:00.000Z
-Stopped at: Completed 13-01-PLAN.md
-Resume file: .planning/phases/13-web-platform-layer/13-02-PLAN.md
+Last session: 2026-03-11T17:12:09.000Z
+Stopped at: Completed 13-02-PLAN.md
+Resume file: Phase 13 complete. Next: Phase 14
