@@ -1,23 +1,23 @@
 # Size Report: hello (wasm-analysis)
-# Commit: d66c5ca
+# Commit: 03af38f
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 115 B
-Import                49 B
-Function              30 B
+Type                 129 B
+Import                61 B
+Function              36 B
 Table                  5 B
 Memory                 6 B
 Global                 8 B
-Export                17 B
+Export                41 B
 Elem                  14 B
-Code               11492 B
-Data                 718 B
-Custom               828 B
+Code               15048 B
+Data                 776 B
+Custom              1054 B
 ---------------- ----------
-TOTAL              13282 B
+TOTAL              17178 B
 
 ## Top 30 Functions by Size
 
@@ -25,17 +25,22 @@ TOTAL              13282 B
 --------  ----
  3101 B   fmt_fp
  2624 B   printf_core
+  927 B   frame
+  836 B   nt_input_web_on_blur
+  680 B   nt_input_web_on_pointer_move
   650 B   pop_arg_long_double
+  641 B   nt_input_web_on_pointer_down
   508 B   __memcpy
   445 B   nt_window_init
-  377 B   main
+  423 B   main
   376 B   puts
   372 B   __stdio_write
   370 B   __memset
   316 B   pop_arg
+  313 B   nt_input_web_on_pointer_up
   296 B   __vfprintf_internal
-  279 B   wctomb
-  198 B   frame
+  280 B   wctomb
+  216 B   nt_input_web_on_wheel
   195 B   nt_app_web_frame
   193 B   __fwritex
   166 B   sn_write
@@ -46,15 +51,11 @@ TOTAL              13282 B
   114 B   getint
   111 B   pad
    89 B   __towrite
+   82 B   nt_input_web_on_key
    40 B   __small_printf
-   40 B   iprintf
-   23 B   out
-   19 B   __wasm_call_ctors
-    4 B   __emscripten_stdout_close
-    4 B   __emscripten_stdout_seek
 
-Total functions: 29
-Total code size: 11443 B
+Total functions: 35
+Total code size: 14988 B
 
 ## Per-Module Contributions
 
@@ -64,11 +65,13 @@ Module                         Size
 ------------------------ ----------
 libnt_app.a                 1428 B
 libnt_core.a                1688 B
+libnt_input.a              16358 B
 libnt_window.a              3454 B
 ------------------------ ----------
-TOTAL (linked)              6570 B
+TOTAL (linked)             22928 B
 
 Not linked to hello:
+libnt_input_stub.a         10902 B
 libnt_log.a                  970 B
 libnt_log_stub.a             506 B
 libnt_time.a                 866 B
@@ -76,5 +79,5 @@ libnt_time.a                 866 B
 
 ## Data Segments Summary
 
-Segments: 20
-Total data size: 596 B
+Segments: 21
+Total data size: 648 B
