@@ -1,21 +1,43 @@
-#include "input/nt_input.h"
+#include "input/nt_input_internal.h"
+#include "window/nt_window.h"
+
 #include <emscripten.h>
+#include <math.h>
+
+/* ---- CSS → framebuffer coordinate mapping ---- */
+
+static void map_css_to_fb(float css_x, float css_y, float *fb_x, float *fb_y) {
+    float scale = g_nt_window.dpr; /* effective DPR = min(device_dpr, max_dpr) */
+    *fb_x = roundf(css_x * scale);
+    *fb_y = roundf(css_y * scale);
+}
 
 /* ---- KEEPALIVE wrappers for JS event handlers ---- */
 
 EMSCRIPTEN_KEEPALIVE void nt_input_web_on_key(int key, int down) { nt_input_set_key((nt_key_t)key, down != 0); }
 
 EMSCRIPTEN_KEEPALIVE void nt_input_web_on_pointer_down(int id, float cx, float cy, float pressure, int ptype, int buttons) {
-    nt_input_pointer_down((uint32_t)id, cx, cy, pressure, (uint8_t)ptype, (uint8_t)buttons);
+    float fx;
+    float fy;
+    map_css_to_fb(cx, cy, &fx, &fy);
+    nt_input_pointer_down((uint32_t)id, fx, fy, pressure, (uint8_t)ptype, (uint8_t)buttons);
 }
 
-EMSCRIPTEN_KEEPALIVE void nt_input_web_on_pointer_move(int id, float cx, float cy, float pressure, int buttons) { nt_input_pointer_move((uint32_t)id, cx, cy, pressure, (uint8_t)buttons); }
+EMSCRIPTEN_KEEPALIVE void nt_input_web_on_pointer_move(int id, float cx, float cy, float pressure, int ptype, int buttons) {
+    float fx;
+    float fy;
+    map_css_to_fb(cx, cy, &fx, &fy);
+    nt_input_pointer_move((uint32_t)id, fx, fy, pressure, (uint8_t)ptype, (uint8_t)buttons);
+}
 
 EMSCRIPTEN_KEEPALIVE void nt_input_web_on_pointer_up(int id) { nt_input_pointer_up((uint32_t)id); }
 
 EMSCRIPTEN_KEEPALIVE void nt_input_web_on_wheel(float dx, float dy) { nt_input_wheel(dx, dy); }
 
-EMSCRIPTEN_KEEPALIVE void nt_input_web_on_blur(void) { nt_input_clear_all_keys(); }
+EMSCRIPTEN_KEEPALIVE void nt_input_web_on_blur(void) {
+    nt_input_clear_all_keys();
+    nt_input_clear_all_pointers();
+}
 
 /* ---- EM_JS event registration ---- */
 
@@ -104,36 +126,47 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
         Module._ntBlurred = true;
     });
 
-    /* Pointer events */
+    /* Pointer events — pass CSS-relative coords, C maps with engine DPR */
     canvas.addEventListener("pointerdown", function(e) {
-        var dpr = window.devicePixelRatio || 1;
+        canvas.focus();
         var ptype = e.pointerType === "touch" ? 1
                   : (e.pointerType === "pen" ? 2 : 0);
         Module._ntPtrBuf.push(0, e.pointerId,
-            Math.round((e.clientX - rect.left) * dpr),
-            Math.round((e.clientY - rect.top) * dpr),
+            e.clientX - rect.left, e.clientY - rect.top,
             e.pressure, ptype, e.buttons);
         e.preventDefault();
     });
 
     canvas.addEventListener("pointermove", function(e) {
-        var dpr = window.devicePixelRatio || 1;
         var ptype = e.pointerType === "touch" ? 1
                   : (e.pointerType === "pen" ? 2 : 0);
         Module._ntPtrBuf.push(1, e.pointerId,
-            Math.round((e.clientX - rect.left) * dpr),
-            Math.round((e.clientY - rect.top) * dpr),
+            e.clientX - rect.left, e.clientY - rect.top,
             e.pressure, ptype, e.buttons);
     });
 
     canvas.addEventListener("pointerup", function(e) {
-        Module._ntPtrBuf.push(2, e.pointerId, 0, 0, 0, 0, 0);
+        if (e.pointerType === "mouse") {
+            /* Mouse stays active after button release — send move with buttons=0 */
+            Module._ntPtrBuf.push(1, e.pointerId,
+                e.clientX - rect.left, e.clientY - rect.top,
+                e.pressure, 0, e.buttons);
+        } else {
+            Module._ntPtrBuf.push(2, e.pointerId, 0, 0, 0, 0, 0);
+        }
         e.preventDefault();
     });
 
     canvas.addEventListener("pointercancel", function(e) {
         Module._ntPtrBuf.push(2, e.pointerId, 0, 0, 0, 0, 0);
         e.preventDefault();
+    });
+
+    /* Mouse leaves canvas — deactivate slot */
+    canvas.addEventListener("pointerleave", function(e) {
+        if (e.pointerType === "mouse") {
+            Module._ntPtrBuf.push(2, e.pointerId, 0, 0, 0, 0, 0);
+        }
     });
 
     /* Wheel event (passive: false for preventDefault) */
@@ -177,7 +210,7 @@ EM_JS(void, nt_input_web_flush_events, (void), {
                 pb[i + 1], pb[i + 2], pb[i + 3], pb[i + 4], pb[i + 5], pb[i + 6]);
         } else if (pb[i] === 1) {
             Module._nt_input_web_on_pointer_move(
-                pb[i + 1], pb[i + 2], pb[i + 3], pb[i + 4], pb[i + 6]);
+                pb[i + 1], pb[i + 2], pb[i + 3], pb[i + 4], pb[i + 5], pb[i + 6]);
         } else {
             Module._nt_input_web_on_pointer_up(pb[i + 1]);
         }

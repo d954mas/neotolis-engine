@@ -1,4 +1,4 @@
-#include "input/nt_input.h"
+#include "input/nt_input_internal.h"
 #include "unity.h"
 
 static bool float_near(float a, float b, float eps) { return (a - b) <= eps && (b - a) <= eps; }
@@ -63,7 +63,7 @@ void test_pointer_slot_alloc(void) {
 
 void test_pointer_slot_find_by_id(void) {
     nt_input_pointer_down(42, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
-    nt_input_pointer_move(42, 150.0F, 250.0F, 0.5F, 1);
+    nt_input_pointer_move(42, 150.0F, 250.0F, 0.5F, NT_POINTER_MOUSE, 1);
     TEST_ASSERT_TRUE(float_near(150.0F, g_nt_input.pointers[0].x, 1e-3F));
     TEST_ASSERT_TRUE(float_near(250.0F, g_nt_input.pointers[0].y, 1e-3F));
 }
@@ -78,7 +78,7 @@ void test_pointer_slot_dealloc(void) {
 void test_pointer_delta(void) {
     nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
     nt_input_poll();
-    nt_input_pointer_move(1, 120.0F, 230.0F, 0.5F, 1);
+    nt_input_pointer_move(1, 120.0F, 230.0F, 0.5F, NT_POINTER_MOUSE, 1);
     TEST_ASSERT_TRUE(float_near(20.0F, g_nt_input.pointers[0].dx, 1e-3F));
     TEST_ASSERT_TRUE(float_near(30.0F, g_nt_input.pointers[0].dy, 1e-3F));
 }
@@ -99,6 +99,23 @@ void test_pointer_stores_coords(void) {
     nt_input_pointer_down(1, 320.0F, 480.0F, 0.5F, NT_POINTER_MOUSE, 1);
     TEST_ASSERT_TRUE(float_near(320.0F, g_nt_input.pointers[0].x, 1e-3F));
     TEST_ASSERT_TRUE(float_near(480.0F, g_nt_input.pointers[0].y, 1e-3F));
+}
+
+void test_pointer_move_creates_on_hover(void) {
+    /* Mouse hover before any click — pointer_move auto-creates slot */
+    nt_input_pointer_move(1, 50.0F, 60.0F, 0.0F, NT_POINTER_MOUSE, 0);
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
+    TEST_ASSERT_EQUAL_UINT8(NT_POINTER_MOUSE, g_nt_input.pointers[0].type);
+    TEST_ASSERT_TRUE(float_near(50.0F, g_nt_input.pointers[0].x, 1e-3F));
+}
+
+void test_pointer_down_reuses_hover_slot(void) {
+    /* Hover creates slot, then click reuses it (no duplicate) */
+    nt_input_pointer_move(1, 50.0F, 60.0F, 0.0F, NT_POINTER_MOUSE, 0);
+    nt_input_pointer_down(1, 50.0F, 60.0F, 0.5F, NT_POINTER_MOUSE, 1);
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_pressed);
+    /* No second slot created */
+    TEST_ASSERT_FALSE(g_nt_input.pointers[1].active);
 }
 
 /* ---- Mouse convenience test ---- */
@@ -124,6 +141,8 @@ int main(void) {
     RUN_TEST(test_pointer_button_pressed);
     RUN_TEST(test_pointer_button_released);
     RUN_TEST(test_pointer_stores_coords);
+    RUN_TEST(test_pointer_move_creates_on_hover);
+    RUN_TEST(test_pointer_down_reuses_hover_slot);
     RUN_TEST(test_mouse_convenience);
     return UNITY_END();
 }

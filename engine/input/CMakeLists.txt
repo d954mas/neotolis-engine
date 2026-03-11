@@ -5,12 +5,14 @@ if(EMSCRIPTEN)
         nt_input.c
         web/nt_input_web.c
         nt_input.h
+        nt_input_internal.h
     )
 else()
     nt_add_module(nt_input
         nt_input.c
         native/nt_input_native.c
         nt_input.h
+        nt_input_internal.h
     )
 endif()
 
@@ -23,4 +25,4 @@ nt_add_module(nt_input_stub
     nt_input.h
 )
 
-target_link_libraries(nt_input_stub PUBLIC nt_core nt_window)
+target_link_libraries(nt_input_stub PUBLIC nt_core)

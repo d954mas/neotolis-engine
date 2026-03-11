@@ -1,4 +1,4 @@
-#include "input/nt_input.h"
+#include "input/nt_input_internal.h"
 
 #include <string.h>
 
@@ -173,27 +173,45 @@ void nt_input_set_key(nt_key_t key, bool down) {
 }
 
 void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
-    nt_pointer_t *ptr = find_free_pointer_slot();
+    nt_pointer_t *ptr = find_pointer_by_id(id);
     if (ptr == NULL) {
-        return; /* All slots full */
+        ptr = find_free_pointer_slot();
+        if (ptr == NULL) {
+            return; /* All slots full */
+        }
+        ptr->active = true;
+        ptr->id = id;
+        ptr->type = type;
+        ptr->dx = 0.0F;
+        ptr->dy = 0.0F;
+        ptr->wheel_dx = 0.0F;
+        ptr->wheel_dy = 0.0F;
     }
-    ptr->active = true;
-    ptr->id = id;
-    ptr->type = type;
     ptr->pressure = pressure;
     ptr->x = x;
     ptr->y = y;
-    ptr->dx = 0.0F;
-    ptr->dy = 0.0F;
-    ptr->wheel_dx = 0.0F;
-    ptr->wheel_dy = 0.0F;
     apply_buttons_mask(ptr, buttons_mask);
 }
 
-void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t buttons_mask) {
+void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
     nt_pointer_t *ptr = find_pointer_by_id(id);
     if (ptr == NULL) {
-        return; /* Unknown pointer */
+        /* Auto-create on first hover (mouse enters canvas before click) */
+        ptr = find_free_pointer_slot();
+        if (ptr == NULL) {
+            return;
+        }
+        ptr->active = true;
+        ptr->id = id;
+        ptr->type = type;
+        ptr->x = x;
+        ptr->y = y;
+        ptr->dx = 0.0F;
+        ptr->dy = 0.0F;
+        ptr->wheel_dx = 0.0F;
+        ptr->wheel_dy = 0.0F;
+        apply_buttons_mask(ptr, buttons_mask);
+        return;
     }
     ptr->dx += x - ptr->x;
     ptr->dy += y - ptr->y;
@@ -233,4 +251,19 @@ void nt_input_clear_all_keys(void) {
         }
     }
     memset(s_keys_current, 0, sizeof(s_keys_current));
+}
+
+void nt_input_clear_all_pointers(void) {
+    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        if (!g_nt_input.pointers[i].active) {
+            continue;
+        }
+        for (int b = 0; b < NT_BUTTON_MAX; b++) {
+            if (g_nt_input.pointers[i].buttons[b].is_down) {
+                g_nt_input.pointers[i].buttons[b].is_released = true;
+            }
+            g_nt_input.pointers[i].buttons[b].is_down = false;
+        }
+        g_nt_input.pointers[i].active = false;
+    }
 }

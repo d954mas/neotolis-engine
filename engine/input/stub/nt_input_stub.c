@@ -1,4 +1,4 @@
-#include "input/nt_input.h"
+#include "input/nt_input_internal.h"
 
 /* No-op platform backend for headless builds and testing. */
 

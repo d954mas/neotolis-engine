@@ -144,19 +144,4 @@ void nt_input_init(void);
 void nt_input_poll(void);
 void nt_input_shutdown(void);
 
-/* ---- Internal helpers (called by platform backends and tests) ---- */
-
-void nt_input_set_key(nt_key_t key, bool down);
-void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask);
-void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t buttons_mask);
-void nt_input_pointer_up(uint32_t id);
-void nt_input_wheel(float dx, float dy);
-void nt_input_clear_all_keys(void);
-
-/* ---- Platform-specific (implemented by each backend) ---- */
-
-void nt_input_platform_init(void);
-void nt_input_platform_poll(void);
-void nt_input_platform_shutdown(void);
-
 #endif /* NT_INPUT_H */
