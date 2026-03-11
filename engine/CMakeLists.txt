@@ -3,6 +3,7 @@ add_subdirectory(log)
 add_subdirectory(time)
 add_subdirectory(app)
 add_subdirectory(window)
+add_subdirectory(input)
 
 if(EMSCRIPTEN)
     add_subdirectory(platform/web)
