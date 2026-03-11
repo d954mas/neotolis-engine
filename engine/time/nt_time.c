@@ -11,24 +11,26 @@ void nt_accumulator_init(nt_accumulator_t *acc, float fixed_dt, int max_steps) {
 
 int nt_accumulator_update(nt_accumulator_t *acc, float dt) {
     acc->accumulator += dt;
-    int steps = 0;
-    while (acc->accumulator >= acc->fixed_dt && steps < acc->max_steps) {
-        acc->accumulator -= acc->fixed_dt;
-        steps++;
-    }
+    int steps = (int)(acc->accumulator / acc->fixed_dt);
+    if (steps > acc->max_steps) steps = acc->max_steps;
+    acc->accumulator -= acc->fixed_dt * (float)steps;
     return steps;
 }
 
 /* ---- Platform timer ---- */
 
 #ifdef NT_PLATFORM_WEB
+#include <assert.h>
 #include <emscripten.h>
 
 double nt_time_now(void) { return emscripten_get_now() / 1000.0; /* ms -> seconds */ }
 
 uint64_t nt_time_nanos(void) { return (uint64_t)(emscripten_get_now() * 1000000.0); /* ms -> ns */ }
 
-void nt_time_sleep(double seconds) { (void)seconds; /* No-op on web -- RAF controls timing */ }
+void nt_time_sleep(double seconds) {
+    (void)seconds;
+    assert(0 && "nt_time_sleep not supported on web");
+}
 
 #elif defined(NT_PLATFORM_WIN)
 #include <windows.h>
