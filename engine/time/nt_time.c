@@ -28,6 +28,8 @@ double nt_time_now(void) { return emscripten_get_now() / 1000.0; /* ms -> second
 
 uint64_t nt_time_nanos(void) { return (uint64_t)(emscripten_get_now() * 1000000.0); /* ms -> ns */ }
 
+void nt_time_sleep(double seconds) { (void)seconds; /* No-op on web -- RAF controls timing */ }
+
 #elif defined(NT_PLATFORM_WIN)
 #include <windows.h>
 
@@ -55,6 +57,18 @@ uint64_t nt_time_nanos(void) {
     return (uint64_t)((double)counter.QuadPart * s_freq_inv * 1e9);
 }
 
+void nt_time_sleep(double seconds) {
+    if (seconds <= 0.0) return;
+    /* Set 1ms timer resolution on first call (standard for games) */
+    static bool s_period_set = false;
+    if (!s_period_set) {
+        timeBeginPeriod(1);
+        s_period_set = true;
+    }
+    DWORD ms = (DWORD)(seconds * 1000.0);
+    if (ms > 0) Sleep(ms);
+}
+
 #else /* NT_PLATFORM_NATIVE (Linux, macOS, POSIX) */
 #include <time.h>
 
@@ -68,6 +82,14 @@ uint64_t nt_time_nanos(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
+void nt_time_sleep(double seconds) {
+    if (seconds <= 0.0) return;
+    struct timespec ts;
+    ts.tv_sec = (time_t)seconds;
+    ts.tv_nsec = (long)((seconds - (double)ts.tv_sec) * 1e9);
+    nanosleep(&ts, NULL);
 }
 
 #endif

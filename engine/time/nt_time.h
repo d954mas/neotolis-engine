@@ -18,5 +18,6 @@ int nt_accumulator_update(nt_accumulator_t *acc, float dt);
 
 double nt_time_now(void);     /* Monotonic seconds */
 uint64_t nt_time_nanos(void); /* Monotonic nanoseconds */
+void nt_time_sleep(double seconds); /* Sleep (best-effort, not precise) */
 
 #endif /* NT_TIME_H */

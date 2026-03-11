@@ -8,10 +8,11 @@ typedef void (*nt_app_frame_fn)(void);
 /* ---- Frame state (engine writes, game reads) ---- */
 
 typedef struct nt_app_t {
-    float dt;       /* Clamped delta time (seconds) */
-    float time;     /* Elapsed time since loop start (seconds) */
-    float max_dt;   /* Clamp threshold (seconds), default 0.1f */
-    uint32_t frame; /* Frame counter */
+    float dt;        /* Clamped delta time (seconds) */
+    float time;      /* Elapsed time since loop start (seconds) */
+    float max_dt;    /* Clamp threshold (seconds), default 0.1f */
+    float target_dt; /* Frame rate cap (seconds), 0 = uncapped */
+    uint32_t frame;  /* Frame counter */
 } nt_app_t;
 
 extern nt_app_t g_nt_app;

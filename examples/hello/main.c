@@ -43,6 +43,7 @@ int main(void) {
     printf("Hello from Neotolis Engine %s!\n", nt_engine_version_string());
 
     nt_accumulator_init(&s_acc, 1.0F / 60.0F, 4);
+    g_nt_app.target_dt = 1.0F / 30.0F;
 
     nt_app_run(frame);
 
