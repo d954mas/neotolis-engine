@@ -2,7 +2,7 @@
 #include "time/nt_time.h"
 #include <math.h>
 
-/* ---- File-scope statics ---- */
+/* ---- File-scope statics (zero-initialized by C standard) ---- */
 
 static nt_app_frame_fn s_frame_fn;
 static bool s_should_quit;
