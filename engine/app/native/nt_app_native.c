@@ -13,10 +13,6 @@ void nt_app_run(nt_app_frame_fn fn) {
     s_frame_fn = fn;
     s_should_quit = false;
 
-    g_nt_app.dt = 0.0F;
-    g_nt_app.time = 0.0F;
-    g_nt_app.frame = 0;
-
     double prev_time = nt_time_now();
 
     while (!s_should_quit) {

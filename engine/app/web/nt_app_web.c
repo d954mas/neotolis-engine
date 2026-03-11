@@ -31,10 +31,6 @@ static EM_BOOL nt_app_web_frame(double time_ms, void *user_data) {
 
 void nt_app_run(nt_app_frame_fn fn) {
     s_frame_fn = fn;
-
-    g_nt_app.dt = 0.0F;
-    g_nt_app.time = 0.0F;
-    g_nt_app.frame = 0;
     s_prev_time_ms = 0.0;
 
     emscripten_request_animation_frame_loop(nt_app_web_frame, NULL);
