@@ -72,6 +72,11 @@ void test_pointer_slot_dealloc(void) {
     nt_input_pointer_down(42, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
     nt_input_pointer_up(42);
+    /* Slot stays active for one frame so game can read is_released */
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_released);
+    /* Next poll deactivates */
+    nt_input_poll();
     TEST_ASSERT_FALSE(g_nt_input.pointers[0].active);
 }
 

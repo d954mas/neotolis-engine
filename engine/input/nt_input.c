@@ -57,6 +57,14 @@ void nt_input_init(void) {
 }
 
 void nt_input_poll(void) {
+    /* Deactivate pointers that had pointer_up last frame */
+    for (int i = 0; i < NT_INPUT_MAX_POINTERS; i++) {
+        if (g_nt_input.pointers[i].deactivate_pending) {
+            g_nt_input.pointers[i].active = false;
+            g_nt_input.pointers[i].deactivate_pending = false;
+        }
+    }
+
     /* Clear edge flags accumulated since last poll */
     memset(s_keys_pressed, 0, sizeof(s_keys_pressed));
     memset(s_keys_released, 0, sizeof(s_keys_released));
@@ -187,7 +195,10 @@ void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_
         ptr->wheel_dx = 0.0F;
         ptr->wheel_dy = 0.0F;
         memset(ptr->buttons, 0, sizeof(ptr->buttons));
+    } else if (ptr->deactivate_pending) {
+        memset(ptr->buttons, 0, sizeof(ptr->buttons));
     }
+    ptr->deactivate_pending = false;
     ptr->pressure = pressure;
     ptr->x = x;
     ptr->y = y;
@@ -216,6 +227,10 @@ void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_
         apply_buttons_mask(ptr, buttons_mask);
         return;
     }
+    if (ptr->deactivate_pending) {
+        memset(ptr->buttons, 0, sizeof(ptr->buttons));
+        ptr->deactivate_pending = false;
+    }
     ptr->dx += x - ptr->x;
     ptr->dy += y - ptr->y;
     ptr->x = x;
@@ -235,28 +250,13 @@ void nt_input_pointer_up(uint32_t id) {
         }
         ptr->buttons[b].is_down = false;
     }
-    ptr->active = false;
+    ptr->deactivate_pending = true;
 }
 
 void nt_input_wheel(float dx, float dy) {
     nt_pointer_t *mouse = find_mouse_pointer();
     if (mouse == NULL) {
-        /* Auto-create mouse slot so early wheel events aren't lost */
-        mouse = find_free_pointer_slot();
-        if (mouse == NULL) {
-            return;
-        }
-        mouse->active = true;
-        mouse->id = 0;
-        mouse->type = NT_POINTER_MOUSE;
-        mouse->x = 0.0F;
-        mouse->y = 0.0F;
-        mouse->pressure = 0.0F;
-        mouse->dx = 0.0F;
-        mouse->dy = 0.0F;
-        mouse->wheel_dx = 0.0F;
-        mouse->wheel_dy = 0.0F;
-        memset(mouse->buttons, 0, sizeof(mouse->buttons));
+        return; /* No mouse slot yet — wheel before first move is lost */
     }
     mouse->wheel_dx += dx;
     mouse->wheel_dy += dy;
@@ -283,5 +283,6 @@ void nt_input_clear_all_pointers(void) {
             g_nt_input.pointers[i].buttons[b].is_down = false;
         }
         g_nt_input.pointers[i].active = false;
+        g_nt_input.pointers[i].deactivate_pending = false;
     }
 }
