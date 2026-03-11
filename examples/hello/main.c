@@ -26,10 +26,12 @@ static void frame(void) {
         printf("[frame %u] dt=%.6f time=%.3f physics=%d\n", g_nt_app.frame, (double)dt, (double)g_nt_app.time, s_physics_ticks);
     }
 
+#ifndef NT_PLATFORM_WEB
     /* Native: exit after 300 frames */
     if (g_nt_app.frame >= 300) {
         nt_app_quit();
     }
+#endif
 }
 
 int main(void) {
