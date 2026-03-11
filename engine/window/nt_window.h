@@ -19,7 +19,7 @@ typedef struct nt_window_t {
 
 extern nt_window_t g_nt_window;
 
-/* ---- Lifecycle (platform-specific, see Plan 02) ---- */
+/* ---- Lifecycle (platform-specific) ---- */
 
 void nt_window_init(void);
 void nt_window_poll(void);
