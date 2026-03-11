@@ -1,0 +1,139 @@
+# Requirements: Neotolis Engine
+
+**Defined:** 2026-03-10
+**Core Value:** Simple, fast, predictable engine runtime -- composable features wired by game code with zero hidden magic
+
+## v1.2 Requirements
+
+Requirements for v1.2 Runtime Renderer milestone. Each maps to roadmap phases.
+
+### Frame Lifecycle
+
+- [x] **FRAME-01**: Engine runs game callbacks (init, update, render, shutdown) in defined order
+- [x] **FRAME-02**: Engine provides accumulator-based fixed update loop with configurable fixed_dt and max_fixed_steps
+- [x] **FRAME-03**: Engine computes high-resolution delta time with clamp for tab-switch recovery
+- [x] **FRAME-04**: Engine provides platform-agnostic frame loop with mode selection (vsync / uncapped)
+- [x] **FRAME-05**: Game configures engine settings (fixed_dt, max_fixed_steps, loop mode) via code
+
+### Platform
+
+- [x] **PLAT-01**: Platform initializes canvas and creates WebGL 2 context
+- [x] **PLAT-02**: Platform provides display info with DPR, canvas size, and framebuffer size
+- [x] **PLAT-03**: Platform detects canvas resize and updates framebuffer dimensions
+- [ ] **PLAT-04**: Platform provides keyboard input polling (down, pressed, released per key)
+- [ ] **PLAT-05**: Platform provides mouse input polling (position, buttons, delta)
+- [ ] **PLAT-06**: Platform maps CSS coordinates to framebuffer coordinates for input
+- [ ] **PLAT-07**: Platform uses EM_JS for all JS bridge calls
+- [ ] **PLAT-08**: Platform detects WebGL context loss and pauses rendering
+- [ ] **PLAT-09**: Platform recovers from context loss by recreating GPU resources
+
+### Renderer
+
+- [ ] **GFX-01**: Renderer compiles and links shaders with error reporting
+- [ ] **GFX-02**: Renderer creates and manages vertex/index buffers with VAOs
+- [ ] **GFX-03**: Renderer sets uniforms (matrices, colors) per draw call
+- [ ] **GFX-04**: Renderer provides frame begin/end and pass begin/end API
+- [ ] **GFX-05**: Renderer controls depth test, back-face culling, blend state, and viewport
+
+### Shape Renderer
+
+- [ ] **SHAPE-01**: Shape renderer draws lines in 3D world space
+- [ ] **SHAPE-02**: Shape renderer draws rectangles (fill + wireframe)
+- [ ] **SHAPE-03**: Shape renderer draws circles with CPU tessellation (fill + wireframe)
+- [ ] **SHAPE-04**: Shape renderer draws triangles (fill + wireframe)
+- [ ] **SHAPE-05**: Shape renderer draws cubes (fill + wireframe)
+- [ ] **SHAPE-06**: Shape renderer draws spheres with UV tessellation (fill + wireframe)
+- [ ] **SHAPE-07**: Shape renderer supports per-vertex color
+- [ ] **SHAPE-08**: Shape renderer batches shapes into dynamic VBO with preallocated buffer
+
+### Demo
+
+- [ ] **DEMO-01**: Demo provides camera with perspective projection and view matrix using cglm
+- [ ] **DEMO-02**: Demo renders spinning cube controlled by keyboard/mouse input
+
+## Future Requirements
+
+Deferred to future milestones. Tracked but not in current roadmap.
+
+### Memory
+
+- **MEM-01**: Engine provides compile-time memory limits with preallocated storages
+- **MEM-02**: Engine provides frame scratch memory allocator
+
+### Components
+
+- **COMP-01**: Engine provides transform component with position, rotation, scale, model matrix
+- **COMP-02**: Engine provides material component with shader and parameter binding
+
+### Debug
+
+- **DBG-01**: Engine provides debug overlay with frame time, draw calls, vertex count
+- **DBG-02**: Engine provides debug counters API for custom metrics
+
+### Input
+
+- **INPUT-01**: Platform provides touch input with unified pointer model
+- **INPUT-02**: Input system provides pointer capture (input_try_capture, input_release_capture)
+
+## Out of Scope
+
+Explicitly excluded. Documented to prevent scope creep.
+
+| Feature | Reason |
+|---------|--------|
+| ECS / component system | Next milestone -- runtime must be proven first |
+| Memory policy / frame allocator | Needs real consumers (renderer, ECS) to validate |
+| Text rendering | Separate complex feature (font, glyph atlas, layout) -- future milestone |
+| Retained-mode shape API | Contradicts immediate-mode debug-draw philosophy |
+| UBO for uniforms | Individual glUniform calls sufficient for single-shader v1.2 |
+| Touch input | Keyboard + mouse sufficient for v1.2 demo |
+| Shader hot-reload | Needs builder pipeline |
+| sRGB / gamma-correct rendering | Needs texture pipeline |
+| Multi-pass rendering (shadows) | Needs full render item system |
+| WebGL 1 fallback | Spec locks WebGL 2 only, 95%+ coverage |
+| Interpolation alpha | Trivial to add later when visual stutter noticed |
+
+## Traceability
+
+Which phases cover which requirements. Updated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| FRAME-01 | Phase 12 | Complete |
+| FRAME-02 | Phase 12 | Complete |
+| FRAME-03 | Phase 12 | Complete |
+| FRAME-04 | Phase 12 | Complete |
+| FRAME-05 | Phase 12 | Complete |
+| PLAT-01 | Phase 13 | Complete |
+| PLAT-02 | Phase 13 | Complete |
+| PLAT-03 | Phase 13 | Complete |
+| PLAT-04 | Phase 14 | Pending |
+| PLAT-05 | Phase 14 | Pending |
+| PLAT-06 | Phase 14 | Pending |
+| PLAT-07 | Phase 13 | Pending |
+| PLAT-08 | Phase 15 | Pending |
+| PLAT-09 | Phase 15 | Pending |
+| GFX-01 | Phase 15 | Pending |
+| GFX-02 | Phase 15 | Pending |
+| GFX-03 | Phase 15 | Pending |
+| GFX-04 | Phase 15 | Pending |
+| GFX-05 | Phase 15 | Pending |
+| SHAPE-01 | Phase 16 | Pending |
+| SHAPE-02 | Phase 16 | Pending |
+| SHAPE-03 | Phase 16 | Pending |
+| SHAPE-04 | Phase 16 | Pending |
+| SHAPE-05 | Phase 16 | Pending |
+| SHAPE-06 | Phase 16 | Pending |
+| SHAPE-07 | Phase 16 | Pending |
+| SHAPE-08 | Phase 16 | Pending |
+| DEMO-01 | Phase 17 | Pending |
+| DEMO-02 | Phase 17 | Pending |
+
+**Coverage:**
+- v1.2 requirements: 29 total
+- Mapped to phases: 29
+- Unmapped: 0
+
+---
+*Requirements defined: 2026-03-10*
+*Last updated: 2026-03-10 after roadmap creation*
