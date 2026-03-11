@@ -1,22 +1,19 @@
-# Swappable app module
-# API header: nt_app.h (shared by both implementations)
-# Web impl:    web/nt_app_web.c (RAF loop for WASM -- Emscripten only)
-# Native impl: native/nt_app_native.c (while loop -- always available)
+# nt_app -- frame loop, one implementation per platform
 
 if(EMSCRIPTEN)
-    nt_add_module(nt_app_web
+    nt_add_module(nt_app
         nt_app.c
         web/nt_app_web.c
         nt_app.h
     )
-    target_link_libraries(nt_app_web PUBLIC nt_time)
     # RAF callback fires after main() returns -- runtime must stay alive
-    target_link_options(nt_app_web INTERFACE "SHELL:-sNO_EXIT_RUNTIME=1")
+    target_link_options(nt_app INTERFACE "SHELL:-sNO_EXIT_RUNTIME=1")
+else()
+    nt_add_module(nt_app
+        nt_app.c
+        native/nt_app_native.c
+        nt_app.h
+    )
 endif()
 
-nt_add_module(nt_app_native
-    nt_app.c
-    native/nt_app_native.c
-    nt_app.h
-)
-target_link_libraries(nt_app_native PUBLIC nt_time)
+target_link_libraries(nt_app PUBLIC nt_time)

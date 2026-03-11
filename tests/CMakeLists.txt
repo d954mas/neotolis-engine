@@ -69,7 +69,7 @@ if(NOT EMSCRIPTEN)
 
     # --- App module tests ---
     add_executable(test_app unit/test_app.c)
-    target_link_libraries(test_app PRIVATE nt_app_native unity)
+    target_link_libraries(test_app PRIVATE nt_app unity)
     nt_set_warning_flags(test_app)
     nt_set_sanitizer_flags(test_app)
     set_target_properties(test_app PROPERTIES
