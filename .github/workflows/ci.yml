@@ -226,7 +226,7 @@ jobs:
         run: cmake --build --preset wasm-analysis
 
       - name: Generate size report
-        run: bash scripts/size-report.sh hello | tee /tmp/size-report.txt
+        run: set -o pipefail && bash scripts/size-report.sh hello | tee /tmp/size-report.txt
 
       - name: Checkout gh-pages branch
         uses: actions/checkout@v4
@@ -349,7 +349,7 @@ jobs:
         run: cmake --build --preset wasm-analysis
 
       - name: Generate size report
-        run: bash scripts/size-report.sh hello | tee /tmp/pr-report.txt
+        run: set -o pipefail && bash scripts/size-report.sh hello | tee /tmp/pr-report.txt
 
       - name: Fetch baseline from gh-pages
         id: baseline

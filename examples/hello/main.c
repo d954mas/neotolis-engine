@@ -1,7 +1,31 @@
+#include "app/nt_app.h"
 #include "core/nt_core.h"
+#include "core/nt_platform.h"
 #include "platform/web/nt_web.h"
+#include "time/nt_time.h"
 #include <stdio.h>
-#include <stdlib.h>
+
+static nt_accumulator_t s_acc;
+static int s_physics_ticks;
+
+static void frame(void) {
+    float dt = g_nt_app.dt;
+
+    int steps = nt_accumulator_update(&s_acc, dt);
+    for (int i = 0; i < steps; i++) {
+        s_physics_ticks++;
+    }
+
+    /* Log every 60 frames */
+    if (g_nt_app.frame % 60 == 0) {
+        printf("[frame %u] dt=%.6f time=%.3f physics=%d\n", g_nt_app.frame, (double)dt, (double)g_nt_app.time, s_physics_ticks);
+    }
+
+    /* Native: exit after 300 frames */
+    if (g_nt_app.frame >= 300) {
+        nt_app_quit();
+    }
+}
 
 int main(void) {
     nt_engine_config_t config = {0};
@@ -16,9 +40,16 @@ int main(void) {
 
     nt_web_loading_complete();
 
-    printf("Hello from Neotolis Engine!\n");
-    printf("Canvas present but no rendering in Phase 1\n");
+    printf("Hello from Neotolis Engine %s!\n", nt_engine_version_string());
 
+    nt_accumulator_init(&s_acc, 1.0F / 60.0F, 4);
+    g_nt_app.target_dt = 1.0F / 30.0F;
+
+    nt_app_run(frame);
+
+#ifndef NT_PLATFORM_WEB
+    /* On native nt_app_run() blocks until nt_app_quit(). Cleanup here. */
     nt_engine_shutdown();
+#endif
     return 0;
 }
