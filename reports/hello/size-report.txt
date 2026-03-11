@@ -1,23 +1,23 @@
 # Size Report: hello (wasm-analysis)
-# Commit: f660ac0
+# Commit: d66c5ca
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 106 B
-Import                25 B
-Function              27 B
+Type                 115 B
+Import                49 B
+Function              30 B
 Table                  5 B
 Memory                 6 B
 Global                 8 B
 Export                17 B
 Elem                  14 B
-Code               10848 B
-Data                 679 B
-Custom               654 B
+Code               11492 B
+Data                 718 B
+Custom               828 B
 ---------------- ----------
-TOTAL              12389 B
+TOTAL              13282 B
 
 ## Top 30 Functions by Size
 
@@ -27,31 +27,34 @@ TOTAL              12389 B
  2624 B   printf_core
   650 B   pop_arg_long_double
   508 B   __memcpy
+  445 B   nt_window_init
+  377 B   main
   376 B   puts
   372 B   __stdio_write
   370 B   __memset
-  331 B   main
   316 B   pop_arg
   296 B   __vfprintf_internal
   279 B   wctomb
-  231 B   frame
+  198 B   frame
   195 B   nt_app_web_frame
   193 B   __fwritex
   166 B   sn_write
+  141 B   roundf
   135 B   snprintf
   131 B   fmt_u
   126 B   frexp
   114 B   getint
   111 B   pad
    89 B   __towrite
+   40 B   __small_printf
    40 B   iprintf
    23 B   out
    19 B   __wasm_call_ctors
     4 B   __emscripten_stdout_close
     4 B   __emscripten_stdout_seek
 
-Total functions: 26
-Total code size: 10804 B
+Total functions: 29
+Total code size: 11443 B
 
 ## Per-Module Contributions
 
@@ -61,8 +64,9 @@ Module                         Size
 ------------------------ ----------
 libnt_app.a                 1428 B
 libnt_core.a                1688 B
+libnt_window.a              3454 B
 ------------------------ ----------
-TOTAL (linked)              3116 B
+TOTAL (linked)              6570 B
 
 Not linked to hello:
 libnt_log.a                  970 B
@@ -72,5 +76,5 @@ libnt_time.a                 866 B
 
 ## Data Segments Summary
 
-Segments: 19
-Total data size: 563 B
+Segments: 20
+Total data size: 596 B
