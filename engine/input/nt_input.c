@@ -32,6 +32,15 @@ static nt_pointer_t *find_free_pointer_slot(void) {
     return NULL;
 }
 
+static void reset_pointer_transients(nt_pointer_t *ptr) {
+    ptr->dx = 0.0F;
+    ptr->dy = 0.0F;
+    ptr->wheel_dx = 0.0F;
+    ptr->wheel_dy = 0.0F;
+    ptr->deactivate_pending = false;
+    memset(ptr->buttons, 0, sizeof(ptr->buttons));
+}
+
 static void apply_buttons_mask(nt_pointer_t *ptr, uint8_t buttons_mask) {
     static const uint8_t masks[NT_BUTTON_MAX] = {1U, 2U, 4U};
     for (int b = 0; b < NT_BUTTON_MAX; b++) {
@@ -182,7 +191,8 @@ void nt_input_set_key(nt_key_t key, bool down) {
 
 void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
     nt_pointer_t *ptr = find_pointer_by_id(id);
-    if (ptr == NULL) {
+    bool fresh = (ptr == NULL);
+    if (fresh) {
         ptr = find_free_pointer_slot();
         if (ptr == NULL) {
             return; /* All slots full */
@@ -190,15 +200,10 @@ void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_
         ptr->active = true;
         ptr->id = id;
         ptr->type = type;
-        ptr->dx = 0.0F;
-        ptr->dy = 0.0F;
-        ptr->wheel_dx = 0.0F;
-        ptr->wheel_dy = 0.0F;
-        memset(ptr->buttons, 0, sizeof(ptr->buttons));
-    } else if (ptr->deactivate_pending) {
-        memset(ptr->buttons, 0, sizeof(ptr->buttons));
     }
-    ptr->deactivate_pending = false;
+    if (fresh || ptr->deactivate_pending) {
+        reset_pointer_transients(ptr);
+    }
     ptr->pressure = pressure;
     ptr->x = x;
     ptr->y = y;
@@ -207,6 +212,7 @@ void nt_input_pointer_down(uint32_t id, float x, float y, float pressure, uint8_
 
 void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_t type, uint8_t buttons_mask) {
     nt_pointer_t *ptr = find_pointer_by_id(id);
+    bool fresh = (ptr == NULL) || ptr->deactivate_pending;
     if (ptr == NULL) {
         /* Auto-create on first hover (mouse enters canvas before click) */
         ptr = find_free_pointer_slot();
@@ -216,23 +222,13 @@ void nt_input_pointer_move(uint32_t id, float x, float y, float pressure, uint8_
         ptr->active = true;
         ptr->id = id;
         ptr->type = type;
-        ptr->x = x;
-        ptr->y = y;
-        ptr->pressure = pressure;
-        ptr->dx = 0.0F;
-        ptr->dy = 0.0F;
-        ptr->wheel_dx = 0.0F;
-        ptr->wheel_dy = 0.0F;
-        memset(ptr->buttons, 0, sizeof(ptr->buttons));
-        apply_buttons_mask(ptr, buttons_mask);
-        return;
     }
-    if (ptr->deactivate_pending) {
-        memset(ptr->buttons, 0, sizeof(ptr->buttons));
-        ptr->deactivate_pending = false;
+    if (fresh) {
+        reset_pointer_transients(ptr);
+    } else {
+        ptr->dx += x - ptr->x;
+        ptr->dy += y - ptr->y;
     }
-    ptr->dx += x - ptr->x;
-    ptr->dy += y - ptr->y;
     ptr->x = x;
     ptr->y = y;
     ptr->pressure = pressure;
