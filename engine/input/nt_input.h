@@ -32,8 +32,8 @@ typedef enum {
     NT_KEY_X,
     NT_KEY_Y,
     NT_KEY_Z,
-    NT_KEY_0,
-    NT_KEY_1,
+    NT_KEY_0, // NOLINT(misc-confusable-identifiers)
+    NT_KEY_1, // NOLINT(misc-confusable-identifiers)
     NT_KEY_2,
     NT_KEY_3,
     NT_KEY_4,
@@ -147,11 +147,8 @@ void nt_input_shutdown(void);
 /* ---- Internal helpers (called by platform backends and tests) ---- */
 
 void nt_input_set_key(nt_key_t key, bool down);
-void nt_input_pointer_down(uint32_t id, float css_x, float css_y,
-                           float pressure, uint8_t type,
-                           uint8_t buttons_mask);
-void nt_input_pointer_move(uint32_t id, float css_x, float css_y,
-                           float pressure, uint8_t buttons_mask);
+void nt_input_pointer_down(uint32_t id, float css_x, float css_y, float pressure, uint8_t type, uint8_t buttons_mask);
+void nt_input_pointer_move(uint32_t id, float css_x, float css_y, float pressure, uint8_t buttons_mask);
 void nt_input_pointer_up(uint32_t id);
 void nt_input_wheel(float dx, float dy);
 void nt_input_clear_all_keys(void);

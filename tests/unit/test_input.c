@@ -1,12 +1,10 @@
-#include "unity.h"
 #include "input/nt_input.h"
+#include "unity.h"
 #include "window/nt_window.h"
 
 #include <math.h>
 
-static bool float_near(float a, float b, float epsilon) {
-    return fabsf(a - b) <= epsilon;
-}
+static bool float_near(float a, float b, float epsilon) { return fabsf(a - b) <= epsilon; }
 
 void setUp(void) {
     g_nt_window = (nt_window_t){.max_dpr = 2.0F, .dpr = 1.0F};
@@ -72,29 +70,23 @@ void test_any_key_pressed(void) {
 
 void test_pointer_slot_alloc(void) {
     g_nt_window.dpr = 1.0F;
-    nt_input_pointer_down(42, 100.0F, 200.0F, 0.5F,
-                          NT_POINTER_MOUSE, 1);
+    nt_input_pointer_down(42, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
     TEST_ASSERT_EQUAL_UINT32(42, g_nt_input.pointers[0].id);
-    TEST_ASSERT_EQUAL_UINT8(NT_POINTER_MOUSE,
-                            g_nt_input.pointers[0].type);
+    TEST_ASSERT_EQUAL_UINT8(NT_POINTER_MOUSE, g_nt_input.pointers[0].type);
 }
 
 void test_pointer_slot_find_by_id(void) {
     g_nt_window.dpr = 1.0F;
-    nt_input_pointer_down(42, 100.0F, 200.0F, 0.5F,
-                          NT_POINTER_MOUSE, 1);
+    nt_input_pointer_down(42, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
     nt_input_pointer_move(42, 150.0F, 250.0F, 0.5F, 1);
-    TEST_ASSERT_TRUE(
-        float_near(150.0F, g_nt_input.pointers[0].x, 1e-3F));
-    TEST_ASSERT_TRUE(
-        float_near(250.0F, g_nt_input.pointers[0].y, 1e-3F));
+    TEST_ASSERT_TRUE(float_near(150.0F, g_nt_input.pointers[0].x, 1e-3F));
+    TEST_ASSERT_TRUE(float_near(250.0F, g_nt_input.pointers[0].y, 1e-3F));
 }
 
 void test_pointer_slot_dealloc(void) {
     g_nt_window.dpr = 1.0F;
-    nt_input_pointer_down(42, 100.0F, 200.0F, 0.5F,
-                          NT_POINTER_MOUSE, 1);
+    nt_input_pointer_down(42, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
     /* Verify pointer was activated first */
     TEST_ASSERT_TRUE(g_nt_input.pointers[0].active);
     nt_input_pointer_up(42);
@@ -103,81 +95,64 @@ void test_pointer_slot_dealloc(void) {
 
 void test_pointer_delta(void) {
     g_nt_window.dpr = 1.0F;
-    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F,
-                          NT_POINTER_MOUSE, 1);
+    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
     /* Poll frame 1: saves position */
     nt_input_poll();
     /* Move pointer */
     nt_input_pointer_move(1, 120.0F, 230.0F, 0.5F, 1);
     /* Poll frame 2: computes delta */
     nt_input_poll();
-    TEST_ASSERT_TRUE(
-        float_near(20.0F, g_nt_input.pointers[0].dx, 1e-3F));
-    TEST_ASSERT_TRUE(
-        float_near(30.0F, g_nt_input.pointers[0].dy, 1e-3F));
+    TEST_ASSERT_TRUE(float_near(20.0F, g_nt_input.pointers[0].dx, 1e-3F));
+    TEST_ASSERT_TRUE(float_near(30.0F, g_nt_input.pointers[0].dy, 1e-3F));
 }
 
 void test_pointer_button_pressed(void) {
     g_nt_window.dpr = 1.0F;
     /* Frame 1: button down */
-    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F,
-                          NT_POINTER_MOUSE, 1);
+    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
     nt_input_poll();
-    TEST_ASSERT_TRUE(
-        g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_pressed);
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_pressed);
 }
 
 void test_pointer_button_released(void) {
     g_nt_window.dpr = 1.0F;
     /* Frame 1: button down */
-    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F,
-                          NT_POINTER_MOUSE, 1);
+    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
     nt_input_poll();
     /* Frame 2: button up */
     nt_input_pointer_up(1);
     nt_input_poll();
-    TEST_ASSERT_TRUE(
-        g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_released);
+    TEST_ASSERT_TRUE(g_nt_input.pointers[0].buttons[NT_BUTTON_LEFT].is_released);
 }
 
 /* ---- Coordinate mapping tests ---- */
 
 void test_coord_mapping_1x(void) {
     g_nt_window.dpr = 1.0F;
-    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F,
-                          NT_POINTER_MOUSE, 1);
-    TEST_ASSERT_TRUE(
-        float_near(100.0F, g_nt_input.pointers[0].x, 1e-3F));
-    TEST_ASSERT_TRUE(
-        float_near(200.0F, g_nt_input.pointers[0].y, 1e-3F));
+    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
+    TEST_ASSERT_TRUE(float_near(100.0F, g_nt_input.pointers[0].x, 1e-3F));
+    TEST_ASSERT_TRUE(float_near(200.0F, g_nt_input.pointers[0].y, 1e-3F));
 }
 
 void test_coord_mapping_2x(void) {
     g_nt_window.dpr = 2.0F;
-    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F,
-                          NT_POINTER_MOUSE, 1);
-    TEST_ASSERT_TRUE(
-        float_near(200.0F, g_nt_input.pointers[0].x, 1e-3F));
-    TEST_ASSERT_TRUE(
-        float_near(400.0F, g_nt_input.pointers[0].y, 1e-3F));
+    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
+    TEST_ASSERT_TRUE(float_near(200.0F, g_nt_input.pointers[0].x, 1e-3F));
+    TEST_ASSERT_TRUE(float_near(400.0F, g_nt_input.pointers[0].y, 1e-3F));
 }
 
 void test_coord_mapping_fractional(void) {
     g_nt_window.dpr = 1.5F;
-    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F,
-                          NT_POINTER_MOUSE, 1);
-    TEST_ASSERT_TRUE(
-        float_near(150.0F, g_nt_input.pointers[0].x, 1e-3F));
-    TEST_ASSERT_TRUE(
-        float_near(300.0F, g_nt_input.pointers[0].y, 1e-3F));
+    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
+    TEST_ASSERT_TRUE(float_near(150.0F, g_nt_input.pointers[0].x, 1e-3F));
+    TEST_ASSERT_TRUE(float_near(300.0F, g_nt_input.pointers[0].y, 1e-3F));
 }
 
 /* ---- Mouse convenience test ---- */
 
 void test_mouse_convenience(void) {
     g_nt_window.dpr = 1.0F;
-    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F,
-                          NT_POINTER_MOUSE, 1);
+    nt_input_pointer_down(1, 100.0F, 200.0F, 0.5F, NT_POINTER_MOUSE, 1);
     TEST_ASSERT_TRUE(nt_input_mouse_is_down(NT_BUTTON_LEFT));
 }
 
