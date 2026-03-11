@@ -37,7 +37,9 @@ void nt_window_poll(void) {
     float device_dpr = (float)nt_window_js_get_dpr();
 
     float effective_dpr = fminf(device_dpr, g_nt_window.max_dpr);
-    if (effective_dpr < 1.0F) effective_dpr = 1.0F;
+    if (effective_dpr < 1.0F) {
+        effective_dpr = 1.0F;
+    }
 
     uint32_t w = (uint32_t)canvas_w;
     uint32_t h = (uint32_t)canvas_h;

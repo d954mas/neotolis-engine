@@ -7,7 +7,7 @@ static bool float_near(float a, float b, float epsilon) { return fabsf(a - b) <=
 
 void setUp(void) { g_nt_window = (nt_window_t){.max_dpr = 2.0F}; }
 
-void tearDown(void) { }
+void tearDown(void) {}
 
 /* 1x DPR: fb matches canvas */
 void test_apply_sizes_1x(void) {

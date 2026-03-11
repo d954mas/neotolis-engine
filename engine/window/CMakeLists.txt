@@ -15,3 +15,7 @@ else()
 endif()
 
 target_link_libraries(nt_window PUBLIC nt_core)
+
+if(UNIX)
+    target_link_libraries(nt_window PRIVATE m)
+endif()
