@@ -27,7 +27,7 @@ void test_window_default_max_dpr(void) {
     TEST_ASSERT_TRUE_MESSAGE(float_near(2.0F, fresh.max_dpr, 1e-6F), "Default max_dpr should be 2.0F");
 }
 
-/* 2. apply_sizes with 1x DPR: fb matches CSS */
+/* 2. apply_sizes with 1x DPR: fb matches canvas */
 void test_window_apply_sizes_1x_dpr(void) {
     nt_window_apply_sizes(800.0F, 600.0F, 1.0F);
     TEST_ASSERT_EQUAL_UINT32(800, g_nt_window.width);
@@ -37,7 +37,7 @@ void test_window_apply_sizes_1x_dpr(void) {
     TEST_ASSERT_TRUE_MESSAGE(float_near(1.0F, g_nt_window.dpr, 1e-6F), "Effective DPR should be 1.0");
 }
 
-/* 3. apply_sizes with 2x DPR and max_dpr=2.0: fb = css * 2 */
+/* 3. apply_sizes with 2x DPR and max_dpr=2.0: fb = canvas * 2 */
 void test_window_apply_sizes_2x_dpr(void) {
     g_nt_window.max_dpr = 2.0F;
     nt_window_apply_sizes(800.0F, 600.0F, 2.0F);

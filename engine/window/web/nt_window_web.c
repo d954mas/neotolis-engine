@@ -12,11 +12,11 @@ EM_JS(double, nt_window_js_get_dpr, (void), {
     return window.devicePixelRatio || 1.0;
 })
 
-EM_JS(double, nt_window_js_get_css_width, (void), {
+EM_JS(double, nt_window_js_get_canvas_width, (void), {
     return Module.canvas.clientWidth;
 })
 
-EM_JS(double, nt_window_js_get_css_height, (void), {
+EM_JS(double, nt_window_js_get_canvas_height, (void), {
     return Module.canvas.clientHeight;
 })
 
@@ -28,44 +28,44 @@ EM_JS(void, nt_window_js_set_backing_size, (int w, int h), {
 
 /* ---- Change-detection statics ---- */
 
-static uint32_t s_last_css_w;
-static uint32_t s_last_css_h;
+static uint32_t s_last_canvas_w;
+static uint32_t s_last_canvas_h;
 static float s_last_device_dpr;
 static float s_last_max_dpr;
 
 /* ---- Lifecycle ---- */
 
 void nt_window_init(void) {
-    float css_w = (float)nt_window_js_get_css_width();
-    float css_h = (float)nt_window_js_get_css_height();
+    float canvas_w = (float)nt_window_js_get_canvas_width();
+    float canvas_h = (float)nt_window_js_get_canvas_height();
     float device_dpr = (float)nt_window_js_get_dpr();
 
-    nt_window_apply_sizes(css_w, css_h, device_dpr);
+    nt_window_apply_sizes(canvas_w, canvas_h, device_dpr);
     nt_window_js_set_backing_size((int)g_nt_window.fb_width, (int)g_nt_window.fb_height);
 
-    s_last_css_w = g_nt_window.width;
-    s_last_css_h = g_nt_window.height;
+    s_last_canvas_w = g_nt_window.width;
+    s_last_canvas_h = g_nt_window.height;
     s_last_device_dpr = device_dpr;
     s_last_max_dpr = g_nt_window.max_dpr;
 }
 
 void nt_window_poll(void) {
-    float css_w = (float)nt_window_js_get_css_width();
-    float css_h = (float)nt_window_js_get_css_height();
+    float canvas_w = (float)nt_window_js_get_canvas_width();
+    float canvas_h = (float)nt_window_js_get_canvas_height();
     float device_dpr = (float)nt_window_js_get_dpr();
 
-    uint32_t w = (uint32_t)css_w;
-    uint32_t h = (uint32_t)css_h;
+    uint32_t w = (uint32_t)canvas_w;
+    uint32_t h = (uint32_t)canvas_h;
 
-    if (w == s_last_css_w && h == s_last_css_h && device_dpr == s_last_device_dpr && g_nt_window.max_dpr == s_last_max_dpr) {
+    if (w == s_last_canvas_w && h == s_last_canvas_h && device_dpr == s_last_device_dpr && g_nt_window.max_dpr == s_last_max_dpr) {
         return; /* Nothing changed */
     }
 
-    nt_window_apply_sizes(css_w, css_h, device_dpr);
+    nt_window_apply_sizes(canvas_w, canvas_h, device_dpr);
     nt_window_js_set_backing_size((int)g_nt_window.fb_width, (int)g_nt_window.fb_height);
 
-    s_last_css_w = g_nt_window.width;
-    s_last_css_h = g_nt_window.height;
+    s_last_canvas_w = g_nt_window.width;
+    s_last_canvas_h = g_nt_window.height;
     s_last_device_dpr = device_dpr;
     s_last_max_dpr = g_nt_window.max_dpr;
 }
