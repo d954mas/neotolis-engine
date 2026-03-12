@@ -18,6 +18,36 @@
 #define NT_GFX_ASSERT(cond) ((void)0)
 #endif
 
+/* ---- Descriptor ownership helpers ----
+   Shader source/label and immutable buffer data are strdup/memcpy'd so
+   context-loss recreation doesn't chase dangling pointers.
+   TODO(assets): remove copies once shaders/buffers come from asset packs
+   that outlive the resource. */
+
+static char *nt_gfx_strdup(const char *s) {
+    if (!s) {
+        return NULL;
+    }
+    size_t len = strlen(s) + 1;
+    char *copy = (char *)malloc(len);
+    if (copy) {
+        memcpy(copy, s, len);
+    }
+    return copy;
+}
+
+static void nt_gfx_free_shader_desc(nt_shader_desc_t *d) {
+    free((void *)d->source);
+    free((void *)d->label);
+    memset(d, 0, sizeof(*d));
+}
+
+static void nt_gfx_free_buffer_desc(nt_buffer_desc_t *d) {
+    free((void *)d->data);
+    free((void *)d->label);
+    memset(d, 0, sizeof(*d));
+}
+
 /* ---- Global state ---- */
 
 nt_gfx_t g_nt_gfx;
@@ -148,6 +178,14 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 
 void nt_gfx_shutdown(void) {
     nt_gfx_backend_shutdown();
+
+    /* Free owned strings/data in stored descriptors */
+    for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
+        nt_gfx_free_shader_desc(&s_gfx.shader_descs[i]);
+    }
+    for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
+        nt_gfx_free_buffer_desc(&s_gfx.buffer_descs[i]);
+    }
 
     nt_gfx_pool_shutdown(&s_gfx.shader_pool);
     nt_gfx_pool_shutdown(&s_gfx.pipeline_pool);
@@ -288,6 +326,8 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
     uint32_t slot = nt_gfx_pool_slot_index(id);
     s_gfx.shader_backends[slot] = backend;
     s_gfx.shader_descs[slot] = *desc;
+    s_gfx.shader_descs[slot].source = nt_gfx_strdup(desc->source);
+    s_gfx.shader_descs[slot].label = nt_gfx_strdup(desc->label);
 
     result.id = id;
     return result;
@@ -347,6 +387,18 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
     uint32_t slot = nt_gfx_pool_slot_index(id);
     s_gfx.buffer_backends[slot] = backend;
     s_gfx.buffer_descs[slot] = *desc;
+    s_gfx.buffer_descs[slot].label = nt_gfx_strdup(desc->label);
+    /* Immutable buffers: copy data for context-loss recreation.
+       Dynamic/stream: game refills every frame, recreate empty. */
+    if (desc->usage == NT_USAGE_IMMUTABLE && desc->data && desc->size > 0) {
+        void *copy = malloc(desc->size);
+        if (copy) {
+            memcpy(copy, desc->data, desc->size);
+        }
+        s_gfx.buffer_descs[slot].data = copy;
+    } else {
+        s_gfx.buffer_descs[slot].data = NULL;
+    }
 
     result.id = id;
     return result;
@@ -361,7 +413,7 @@ void nt_gfx_destroy_shader(nt_shader_t shd) {
     uint32_t slot = nt_gfx_pool_slot_index(shd.id);
     nt_gfx_backend_destroy_shader(s_gfx.shader_backends[slot]);
     s_gfx.shader_backends[slot] = 0;
-    memset(&s_gfx.shader_descs[slot], 0, sizeof(nt_shader_desc_t));
+    nt_gfx_free_shader_desc(&s_gfx.shader_descs[slot]);
     nt_gfx_pool_free(&s_gfx.shader_pool, shd.id);
 }
 
@@ -383,7 +435,7 @@ void nt_gfx_destroy_buffer(nt_buffer_t buf) {
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
     nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[slot]);
     s_gfx.buffer_backends[slot] = 0;
-    memset(&s_gfx.buffer_descs[slot], 0, sizeof(nt_buffer_desc_t));
+    nt_gfx_free_buffer_desc(&s_gfx.buffer_descs[slot]);
     nt_gfx_pool_free(&s_gfx.buffer_pool, buf.id);
 }
 
