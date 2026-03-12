@@ -28,10 +28,11 @@ function(nt_set_sanitizer_flags target)
     target_link_options(${target} PRIVATE
         $<$<CONFIG:Debug>:-fsanitize=address,undefined>
     )
-    # Emscripten ASan requires memory growth and large initial memory for shadow
     if(EMSCRIPTEN)
+        # All WASM builds need growable memory (static data can exceed 16 MB default)
         target_link_options(${target} PRIVATE
-            $<$<CONFIG:Debug>:-sALLOW_MEMORY_GROWTH=1>
+            "-sALLOW_MEMORY_GROWTH=1"
+            $<$<CONFIG:Release>:-sINITIAL_MEMORY=64MB>
             $<$<CONFIG:Debug>:-sINITIAL_MEMORY=512MB>
         )
     endif()
