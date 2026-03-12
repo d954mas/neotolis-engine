@@ -1,10 +1,22 @@
 #include "graphics/nt_gfx_internal.h"
 
-#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "core/nt_platform.h"
+
+/* Debug-only state machine validation.
+   Release builds rely on the return-early guards that follow each NT_GFX_ASSERT. */
+#ifdef NT_ENABLE_ASSERTS
+#define NT_GFX_ASSERT(cond)                                                                                                                                                                            \
+    do {                                                                                                                                                                                               \
+        if (!(cond)) {                                                                                                                                                                                 \
+            __builtin_trap();                                                                                                                                                                          \
+        }                                                                                                                                                                                              \
+    } while (0)
+#else
+#define NT_GFX_ASSERT(cond) ((void)0)
+#endif
 
 /* ---- Global state ---- */
 
@@ -78,7 +90,11 @@ void nt_gfx_pool_free(nt_gfx_pool_t *pool, uint32_t id) {
     if (pool->slots[slot_index].id != id) {
         return; /* stale handle */
     }
-    pool->slots[slot_index].id = 0;
+    /* Increment generation so old handles are invalid. Keep generation
+       in slot so the next alloc produces a higher generation. Clear the
+       slot index bits so valid() rejects the freed id. */
+    uint32_t gen = (id >> NT_GFX_SLOT_SHIFT) + 1;
+    pool->slots[slot_index].id = gen << NT_GFX_SLOT_SHIFT;
     pool->free_queue[pool->queue_top] = slot_index;
     pool->queue_top++;
 }
@@ -156,23 +172,26 @@ static void restore_context(void) {
 
     nt_gfx_backend_recreate_all_resources();
 
+    /* A slot is live when its index bits match its position (freed slots have index bits zeroed) */
+#define SLOT_IS_LIVE(pool, idx) (((pool).slots[(idx)].id & NT_GFX_SLOT_MASK) == (idx))
+
     /* Recreate shaders first (pipelines reference shader backend handles) */
     for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
-        if (s_gfx.shader_pool.slots[i].id != 0) {
+        if (SLOT_IS_LIVE(s_gfx.shader_pool, i)) {
             s_gfx.shader_backends[i] = nt_gfx_backend_create_shader(&s_gfx.shader_descs[i]);
         }
     }
 
     /* Recreate buffers */
     for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
-        if (s_gfx.buffer_pool.slots[i].id != 0) {
+        if (SLOT_IS_LIVE(s_gfx.buffer_pool, i)) {
             s_gfx.buffer_backends[i] = nt_gfx_backend_create_buffer(&s_gfx.buffer_descs[i]);
         }
     }
 
     /* Recreate pipelines (need shader backend handles) */
     for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
-        if (s_gfx.pipeline_pool.slots[i].id != 0) {
+        if (SLOT_IS_LIVE(s_gfx.pipeline_pool, i)) {
             const nt_pipeline_desc_t *pdesc = &s_gfx.pipeline_descs[i];
             uint32_t vs_slot = nt_gfx_pool_slot_index(pdesc->vertex_shader.id);
             uint32_t fs_slot = nt_gfx_pool_slot_index(pdesc->fragment_shader.id);
@@ -195,9 +214,7 @@ void nt_gfx_begin_frame(void) {
         restore_context();
     }
 
-#ifdef NT_ENABLE_ASSERTS
-    assert(s_gfx.render_state == NT_GFX_STATE_IDLE);
-#endif
+    NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
     if (s_gfx.render_state != NT_GFX_STATE_IDLE) {
         return;
     }
@@ -211,9 +228,7 @@ void nt_gfx_end_frame(void) {
         return;
     }
 
-#ifdef NT_ENABLE_ASSERTS
-    assert(s_gfx.render_state == NT_GFX_STATE_FRAME);
-#endif
+    NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_FRAME);
     if (s_gfx.render_state != NT_GFX_STATE_FRAME) {
         return;
     }
@@ -228,9 +243,7 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
         return;
     }
 
-#ifdef NT_ENABLE_ASSERTS
-    assert(s_gfx.render_state == NT_GFX_STATE_FRAME);
-#endif
+    NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_FRAME);
     if (s_gfx.render_state != NT_GFX_STATE_FRAME) {
         return;
     }
@@ -244,9 +257,7 @@ void nt_gfx_end_pass(void) {
         return;
     }
 
-#ifdef NT_ENABLE_ASSERTS
-    assert(s_gfx.render_state == NT_GFX_STATE_PASS);
-#endif
+    NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
         return;
     }
@@ -451,9 +462,7 @@ void nt_gfx_draw(uint32_t first_element, uint32_t num_elements) {
         return;
     }
 
-#ifdef NT_ENABLE_ASSERTS
-    assert(s_gfx.render_state == NT_GFX_STATE_PASS);
-#endif
+    NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
         return;
     }
