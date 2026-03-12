@@ -644,31 +644,91 @@ void nt_shape_sphere_wire(const float center[3], float radius, const float color
     (void)color;
 }
 
-void nt_shape_cylinder(const float base[3], float radius, float height, const float color[4]) {
-    (void)base;
+void nt_shape_circle_rot(const float center[3], float radius, const float rot[4], const float color[4]) {
+    (void)center;
+    (void)radius;
+    (void)rot;
+    (void)color;
+}
+
+void nt_shape_circle_wire_rot(const float center[3], float radius, const float rot[4], const float color[4]) {
+    (void)center;
+    (void)radius;
+    (void)rot;
+    (void)color;
+}
+
+void nt_shape_cube_rot(const float center[3], const float size[3], const float rot[4], const float color[4]) {
+    (void)center;
+    (void)size;
+    (void)rot;
+    (void)color;
+}
+
+void nt_shape_cube_wire_rot(const float center[3], const float size[3], const float rot[4], const float color[4]) {
+    (void)center;
+    (void)size;
+    (void)rot;
+    (void)color;
+}
+
+void nt_shape_cylinder(const float center[3], float radius, float height, const float color[4]) {
+    (void)center;
     (void)radius;
     (void)height;
     (void)color;
 }
 
-void nt_shape_cylinder_wire(const float base[3], float radius, float height, const float color[4]) {
-    (void)base;
+void nt_shape_cylinder_wire(const float center[3], float radius, float height, const float color[4]) {
+    (void)center;
     (void)radius;
     (void)height;
     (void)color;
 }
 
-void nt_shape_capsule(const float base[3], float radius, float height, const float color[4]) {
-    (void)base;
+void nt_shape_cylinder_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) {
+    (void)center;
+    (void)radius;
+    (void)height;
+    (void)rot;
+    (void)color;
+}
+
+void nt_shape_cylinder_wire_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) {
+    (void)center;
+    (void)radius;
+    (void)height;
+    (void)rot;
+    (void)color;
+}
+
+void nt_shape_capsule(const float center[3], float radius, float height, const float color[4]) {
+    (void)center;
     (void)radius;
     (void)height;
     (void)color;
 }
 
-void nt_shape_capsule_wire(const float base[3], float radius, float height, const float color[4]) {
-    (void)base;
+void nt_shape_capsule_wire(const float center[3], float radius, float height, const float color[4]) {
+    (void)center;
     (void)radius;
     (void)height;
+    (void)color;
+}
+
+void nt_shape_capsule_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) {
+    (void)center;
+    (void)radius;
+    (void)height;
+    (void)rot;
+    (void)color;
+}
+
+void nt_shape_capsule_wire_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) {
+    (void)center;
+    (void)radius;
+    (void)height;
+    (void)rot;
     (void)color;
 }
 

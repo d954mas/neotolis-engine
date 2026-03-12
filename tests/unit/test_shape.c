@@ -231,6 +231,114 @@ void test_shape_batch_accumulates(void) {
     TEST_ASSERT_EQUAL_UINT32(6 + 6 + 3, nt_shape_test_index_count());
 }
 
+/* ---- 16. Circle fill counts (32 segments) ---- */
+
+void test_shape_circle_fill_counts(void) {
+    float center[3] = {0, 0, 0};
+    float col[4] = {1, 0, 0, 1};
+    /* Default segments = 32: center + 32 ring = 33 verts, 32*3 = 96 indices */
+    nt_shape_circle(center, 1.0F, col);
+    TEST_ASSERT_EQUAL_UINT32(33, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(96, nt_shape_test_index_count());
+}
+
+/* ---- 17. Circle wire counts (32 segments) ---- */
+
+void test_shape_circle_wire_counts(void) {
+    float center[3] = {0, 0, 0};
+    float col[4] = {1, 0, 0, 1};
+    /* 32 edges x 4 verts = 128, 32 edges x 6 indices = 192 */
+    nt_shape_circle_wire(center, 1.0F, col);
+    TEST_ASSERT_EQUAL_UINT32(128, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(192, nt_shape_test_index_count());
+}
+
+/* ---- 18. Circle with set_segments(8) ---- */
+
+void test_shape_circle_fill_custom_segments(void) {
+    float center[3] = {0, 0, 0};
+    float col[4] = {1, 0, 0, 1};
+    nt_shape_set_segments(8);
+    /* 8 segments: center + 8 ring = 9 verts, 8*3 = 24 indices */
+    nt_shape_circle(center, 1.0F, col);
+    TEST_ASSERT_EQUAL_UINT32(9, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(24, nt_shape_test_index_count());
+}
+
+/* ---- 19. Cube fill counts ---- */
+
+void test_shape_cube_fill_counts(void) {
+    float center[3] = {0, 0, 0};
+    float size[3] = {1, 1, 1};
+    float col[4] = {0, 1, 0, 1};
+    /* 8 shared verts, 36 indices (6 faces x 2 triangles x 3 indices) */
+    nt_shape_cube(center, size, col);
+    TEST_ASSERT_EQUAL_UINT32(8, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(36, nt_shape_test_index_count());
+}
+
+/* ---- 20. Cube wire counts ---- */
+
+void test_shape_cube_wire_counts(void) {
+    float center[3] = {0, 0, 0};
+    float size[3] = {1, 1, 1};
+    float col[4] = {0, 1, 0, 1};
+    /* 12 edges x 4 verts = 48, 12 edges x 6 indices = 72 */
+    nt_shape_cube_wire(center, size, col);
+    TEST_ASSERT_EQUAL_UINT32(48, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(72, nt_shape_test_index_count());
+}
+
+/* ---- 21. Sphere fill counts (32 segments) ---- */
+
+void test_shape_sphere_fill_counts(void) {
+    float center[3] = {0, 0, 0};
+    float col[4] = {0, 0, 1, 1};
+    /* 32 segments, 16 rings: (16+1)*(32+1) = 561 verts, 16*32*6 = 3072 indices */
+    nt_shape_sphere(center, 1.0F, col);
+    TEST_ASSERT_EQUAL_UINT32(561, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(3072, nt_shape_test_index_count());
+}
+
+/* ---- 22. Sphere wire counts (32 segments) ---- */
+
+void test_shape_sphere_wire_counts(void) {
+    float center[3] = {0, 0, 0};
+    float col[4] = {0, 0, 1, 1};
+    /* Longitude: 32 lines x 16 edges each = 512 edges
+       Latitude: 15 rings x 32 edges each = 480 edges
+       Total: 992 edges x 4 verts = 3968, 992 edges x 6 indices = 5952 */
+    nt_shape_sphere_wire(center, 1.0F, col);
+    TEST_ASSERT_EQUAL_UINT32(3968, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(5952, nt_shape_test_index_count());
+}
+
+/* ---- 23. Circle rot vertex count matches base ---- */
+
+void test_shape_circle_rot_count(void) {
+    float center[3] = {0, 0, 0};
+    float col[4] = {1, 0, 0, 1};
+    /* 90-degree rotation around Z axis: q = (0, 0, sin(45), cos(45)) */
+    float rot[4] = {0, 0, 0.7071068F, 0.7071068F};
+    nt_shape_circle_rot(center, 1.0F, rot, col);
+    /* Same vertex count as base circle: 33 verts, 96 indices */
+    TEST_ASSERT_EQUAL_UINT32(33, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(96, nt_shape_test_index_count());
+}
+
+/* ---- 24. Cube rot vertex count matches base ---- */
+
+void test_shape_cube_rot_count(void) {
+    float center[3] = {0, 0, 0};
+    float size[3] = {1, 1, 1};
+    float col[4] = {0, 1, 0, 1};
+    float rot[4] = {0, 0, 0.7071068F, 0.7071068F};
+    nt_shape_cube_rot(center, size, rot, col);
+    /* Same vertex count as base cube: 8 verts, 36 indices */
+    TEST_ASSERT_EQUAL_UINT32(8, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(36, nt_shape_test_index_count());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_shape_init_shutdown);
@@ -248,5 +356,14 @@ int main(void) {
     RUN_TEST(test_shape_triangle_col_per_vertex);
     RUN_TEST(test_shape_auto_flush_on_overflow);
     RUN_TEST(test_shape_batch_accumulates);
+    RUN_TEST(test_shape_circle_fill_counts);
+    RUN_TEST(test_shape_circle_wire_counts);
+    RUN_TEST(test_shape_circle_fill_custom_segments);
+    RUN_TEST(test_shape_cube_fill_counts);
+    RUN_TEST(test_shape_cube_wire_counts);
+    RUN_TEST(test_shape_sphere_fill_counts);
+    RUN_TEST(test_shape_sphere_wire_counts);
+    RUN_TEST(test_shape_circle_rot_count);
+    RUN_TEST(test_shape_cube_rot_count);
     return UNITY_END();
 }

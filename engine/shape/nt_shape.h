@@ -53,32 +53,40 @@ void nt_shape_triangle_wire(const float a[3], const float b[3], const float c[3]
 void nt_shape_triangle_col(const float a[3], const float b[3], const float c[3], const float color_a[4], const float color_b[4], const float color_c[4]);
 void nt_shape_triangle_wire_col(const float a[3], const float b[3], const float c[3], const float color_a[4], const float color_b[4], const float color_c[4]);
 
-/* ---- Circle (implemented in plan 02) ---- */
+/* ---- Circle ---- */
 
 void nt_shape_circle(const float center[3], float radius, const float color[4]);
 void nt_shape_circle_wire(const float center[3], float radius, const float color[4]);
+void nt_shape_circle_rot(const float center[3], float radius, const float rot[4], const float color[4]);
+void nt_shape_circle_wire_rot(const float center[3], float radius, const float rot[4], const float color[4]);
 
-/* ---- Cube (implemented in plan 02) ---- */
+/* ---- Cube ---- */
 
 void nt_shape_cube(const float center[3], const float size[3], const float color[4]);
 void nt_shape_cube_wire(const float center[3], const float size[3], const float color[4]);
+void nt_shape_cube_rot(const float center[3], const float size[3], const float rot[4], const float color[4]);
+void nt_shape_cube_wire_rot(const float center[3], const float size[3], const float rot[4], const float color[4]);
 
-/* ---- Sphere (implemented in plan 02) ---- */
+/* ---- Sphere ---- */
 
 void nt_shape_sphere(const float center[3], float radius, const float color[4]);
 void nt_shape_sphere_wire(const float center[3], float radius, const float color[4]);
 
-/* ---- Cylinder (implemented in plan 02) ---- */
+/* ---- Cylinder ---- */
 
-void nt_shape_cylinder(const float base[3], float radius, float height, const float color[4]);
-void nt_shape_cylinder_wire(const float base[3], float radius, float height, const float color[4]);
+void nt_shape_cylinder(const float center[3], float radius, float height, const float color[4]);
+void nt_shape_cylinder_wire(const float center[3], float radius, float height, const float color[4]);
+void nt_shape_cylinder_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]);
+void nt_shape_cylinder_wire_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]);
 
-/* ---- Capsule (implemented in plan 02) ---- */
+/* ---- Capsule ---- */
 
-void nt_shape_capsule(const float base[3], float radius, float height, const float color[4]);
-void nt_shape_capsule_wire(const float base[3], float radius, float height, const float color[4]);
+void nt_shape_capsule(const float center[3], float radius, float height, const float color[4]);
+void nt_shape_capsule_wire(const float center[3], float radius, float height, const float color[4]);
+void nt_shape_capsule_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]);
+void nt_shape_capsule_wire_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]);
 
-/* ---- Mesh (implemented in plan 02) ---- */
+/* ---- Mesh ---- */
 
 void nt_shape_mesh(const float *positions, const uint16_t *indices, uint32_t num_indices, const float color[4]);
 void nt_shape_mesh_wire(const float *positions, const uint16_t *indices, uint32_t num_indices, const float color[4]);
