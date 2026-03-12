@@ -3,7 +3,7 @@
 #ifdef NT_PLATFORM_WEB
 
 #include "app/nt_app.h"
-#include <assert.h>
+#include "core/nt_assert.h"
 #include <emscripten/html5.h>
 #include <math.h>
 
@@ -43,7 +43,7 @@ void nt_app_run(nt_app_frame_fn fn) {
     emscripten_request_animation_frame_loop(nt_app_web_frame, NULL);
 }
 
-void nt_app_quit(void) { assert(0 && "nt_app_quit not supported on web"); }
+void nt_app_quit(void) { NT_ASSERT(0 && "nt_app_quit not supported on web"); }
 
 #else
 /* Ensure non-empty translation unit on non-web platforms (clang-tidy) */

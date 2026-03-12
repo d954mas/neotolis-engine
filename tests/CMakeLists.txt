@@ -96,6 +96,16 @@ if(NOT EMSCRIPTEN)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_input COMMAND test_input)
+
+    # --- Graphics module tests ---
+    add_executable(test_gfx unit/test_gfx.c)
+    target_link_libraries(test_gfx PRIVATE nt_gfx_stub unity)
+    nt_set_warning_flags(test_gfx)
+    nt_set_sanitizer_flags(test_gfx)
+    set_target_properties(test_gfx PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_gfx COMMAND test_gfx)
 endif()
 
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---
