@@ -28,10 +28,11 @@ function(nt_set_sanitizer_flags target)
     target_link_options(${target} PRIVATE
         $<$<CONFIG:Debug>:-fsanitize=address,undefined>
     )
-    # Emscripten ASan requires memory growth enabled
+    # Emscripten ASan requires memory growth and large initial memory for shadow
     if(EMSCRIPTEN)
         target_link_options(${target} PRIVATE
             $<$<CONFIG:Debug>:-sALLOW_MEMORY_GROWTH=1>
+            $<$<CONFIG:Debug>:-sINITIAL_MEMORY=512MB>
         )
     endif()
 endfunction()
