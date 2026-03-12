@@ -4,6 +4,7 @@ add_subdirectory(time)
 add_subdirectory(app)
 add_subdirectory(window)
 add_subdirectory(input)
+add_subdirectory(graphics)
 
 if(EMSCRIPTEN)
     add_subdirectory(platform/web)
