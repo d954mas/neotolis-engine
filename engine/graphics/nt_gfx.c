@@ -204,11 +204,18 @@ void nt_gfx_shutdown(void) {
 
 /* ---- Context restoration ---- */
 
-static void restore_context(void) {
+/* Try to recreate the GL context and all resources.
+   Returns true on success, false if context is still unavailable. */
+static bool restore_context(void) {
+    nt_gfx_backend_recreate_all_resources();
+
+    /* Check if the NEW context is actually valid before re-uploading resources */
+    if (nt_gfx_backend_is_context_lost()) {
+        return false;
+    }
+
     g_nt_gfx.context_lost = false;
     g_nt_gfx.context_restored = true;
-
-    nt_gfx_backend_recreate_all_resources();
 
     /* A slot is live when its index bits match its position (freed slots have index bits zeroed) */
 #define SLOT_IS_LIVE(pool, idx) (((pool).slots[(idx)].id & NT_GFX_SLOT_MASK) == (idx))
@@ -238,6 +245,7 @@ static void restore_context(void) {
             s_gfx.pipeline_backends[i] = nt_gfx_backend_create_pipeline(pdesc, vs_backend, fs_backend);
         }
     }
+    return true;
 }
 
 /* ---- Frame / Pass ---- */
@@ -245,11 +253,12 @@ static void restore_context(void) {
 void nt_gfx_begin_frame(void) {
     if (nt_gfx_backend_is_context_lost()) {
         g_nt_gfx.context_lost = true;
-        return;
     }
 
     if (g_nt_gfx.context_lost) {
-        restore_context();
+        if (!restore_context()) {
+            return; /* Context still unavailable — skip frame */
+        }
     }
 
     NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
