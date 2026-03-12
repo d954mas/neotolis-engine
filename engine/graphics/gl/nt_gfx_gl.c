@@ -53,6 +53,32 @@ static GLenum *s_buffer_targets;          /* GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY
 static uint32_t s_max_pipelines;
 static uint32_t s_max_buffers;
 
+/* ---- GL state cache (skip redundant JS interop calls) ---- */
+
+static struct {
+    GLuint vao;
+    GLuint program;
+    bool depth_test;
+    bool depth_write;
+    GLenum depth_func;
+    bool cull_face;
+    bool blend;
+    GLenum blend_src;
+    GLenum blend_dst;
+} s_gl_cache;
+
+static void nt_gfx_gl_cache_reset(void) {
+    s_gl_cache.vao = 0;
+    s_gl_cache.program = 0;
+    s_gl_cache.depth_test = false;
+    s_gl_cache.depth_write = true;    /* GL default: depth write enabled */
+    s_gl_cache.depth_func = GL_LESS;  /* GL default */
+    s_gl_cache.cull_face = false;
+    s_gl_cache.blend = false;
+    s_gl_cache.blend_src = GL_ONE;    /* GL default */
+    s_gl_cache.blend_dst = GL_ZERO;   /* GL default */
+}
+
 /* ---- Helpers: enum mapping ---- */
 
 static GLenum map_blend_factor(nt_blend_factor_t f) {
@@ -148,6 +174,7 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
 
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
+    nt_gfx_gl_cache_reset();
     return true;
 }
 
@@ -195,34 +222,59 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
     }
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[backend_handle];
 
-    glBindVertexArray(pip->vao);
-    glUseProgram(pip->program);
+    if (s_gl_cache.vao != pip->vao) {
+        glBindVertexArray(pip->vao);
+        s_gl_cache.vao = pip->vao;
+    }
+    if (s_gl_cache.program != pip->program) {
+        glUseProgram(pip->program);
+        s_gl_cache.program = pip->program;
+    }
     s_bound_program = pip->program;
     s_bound_pipeline_slot = backend_handle;
 
     /* Depth test */
-    if (pip->depth_test) {
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(pip->depth_func);
-    } else {
-        glDisable(GL_DEPTH_TEST);
+    if (s_gl_cache.depth_test != pip->depth_test) {
+        if (pip->depth_test) {
+            glEnable(GL_DEPTH_TEST);
+        } else {
+            glDisable(GL_DEPTH_TEST);
+        }
+        s_gl_cache.depth_test = pip->depth_test;
     }
-    glDepthMask(pip->depth_write ? GL_TRUE : GL_FALSE);
+    if (pip->depth_test && s_gl_cache.depth_func != pip->depth_func) {
+        glDepthFunc(pip->depth_func);
+        s_gl_cache.depth_func = pip->depth_func;
+    }
+    if (s_gl_cache.depth_write != pip->depth_write) {
+        glDepthMask(pip->depth_write ? GL_TRUE : GL_FALSE);
+        s_gl_cache.depth_write = pip->depth_write;
+    }
 
     /* Cull face */
-    if (pip->cull_face) {
-        glEnable(GL_CULL_FACE);
-        glCullFace(GL_BACK);
-    } else {
-        glDisable(GL_CULL_FACE);
+    if (s_gl_cache.cull_face != pip->cull_face) {
+        if (pip->cull_face) {
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_BACK);
+        } else {
+            glDisable(GL_CULL_FACE);
+        }
+        s_gl_cache.cull_face = pip->cull_face;
     }
 
     /* Blend */
-    if (pip->blend) {
-        glEnable(GL_BLEND);
+    if (s_gl_cache.blend != pip->blend) {
+        if (pip->blend) {
+            glEnable(GL_BLEND);
+        } else {
+            glDisable(GL_BLEND);
+        }
+        s_gl_cache.blend = pip->blend;
+    }
+    if (pip->blend && (s_gl_cache.blend_src != pip->blend_src || s_gl_cache.blend_dst != pip->blend_dst)) {
         glBlendFunc(pip->blend_src, pip->blend_dst);
-    } else {
-        glDisable(GL_BLEND);
+        s_gl_cache.blend_src = pip->blend_src;
+        s_gl_cache.blend_dst = pip->blend_dst;
     }
 }
 
@@ -475,5 +527,6 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     }
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
+    nt_gfx_gl_cache_reset();
     return true;
 }

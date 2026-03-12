@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "core/nt_platform.h"
+#include "log/nt_log.h"
 
 /* Debug-only state machine validation.
    Release builds rely on the return-early guards that follow each NT_GFX_ASSERT. */
@@ -195,6 +196,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.render_state = NT_GFX_STATE_IDLE;
 
     if (!nt_gfx_backend_init(desc)) {
+        nt_log_error("gfx: backend init failed");
         nt_gfx_shutdown();
         return;
     }
@@ -296,6 +298,7 @@ void nt_gfx_begin_frame(void) {
 
     NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
     if (s_gfx.render_state != NT_GFX_STATE_IDLE) {
+        nt_log_error("gfx: begin_frame called outside IDLE state");
         return;
     }
 
@@ -310,6 +313,7 @@ void nt_gfx_end_frame(void) {
 
     NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_FRAME);
     if (s_gfx.render_state != NT_GFX_STATE_FRAME) {
+        nt_log_error("gfx: end_frame called outside FRAME state");
         return;
     }
 
@@ -325,6 +329,7 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
 
     NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_FRAME);
     if (s_gfx.render_state != NT_GFX_STATE_FRAME) {
+        nt_log_error("gfx: begin_pass called outside FRAME state");
         return;
     }
 
@@ -339,6 +344,7 @@ void nt_gfx_end_pass(void) {
 
     NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        nt_log_error("gfx: end_pass called outside PASS state");
         return;
     }
 
@@ -356,11 +362,13 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
 
     uint32_t id = nt_gfx_pool_alloc(&s_gfx.shader_pool);
     if (id == 0) {
+        nt_log_error("gfx: shader pool full");
         return result;
     }
 
     uint32_t backend = nt_gfx_backend_create_shader(desc);
     if (backend == 0) {
+        nt_log_error("gfx: backend shader creation failed");
         nt_gfx_pool_free(&s_gfx.shader_pool, id);
         return result;
     }
@@ -382,14 +390,17 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     }
 
     if (!nt_gfx_pool_valid(&s_gfx.shader_pool, desc->vertex_shader.id) || !nt_gfx_pool_valid(&s_gfx.shader_pool, desc->fragment_shader.id)) {
+        nt_log_error("gfx: pipeline creation failed: invalid shader handle");
         return result;
     }
     if (desc->layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS) {
+        nt_log_error("gfx: pipeline creation failed: too many vertex attrs");
         return result;
     }
 
     uint32_t id = nt_gfx_pool_alloc(&s_gfx.pipeline_pool);
     if (id == 0) {
+        nt_log_error("gfx: pipeline pool full");
         return result;
     }
 
@@ -400,6 +411,7 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
 
     uint32_t backend = nt_gfx_backend_create_pipeline(desc, vs_backend, fs_backend);
     if (backend == 0) {
+        nt_log_error("gfx: backend pipeline creation failed");
         nt_gfx_pool_free(&s_gfx.pipeline_pool, id);
         return result;
     }
@@ -425,11 +437,13 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
 
     uint32_t id = nt_gfx_pool_alloc(&s_gfx.buffer_pool);
     if (id == 0) {
+        nt_log_error("gfx: buffer pool full");
         return result;
     }
 
     uint32_t backend = nt_gfx_backend_create_buffer(desc);
     if (backend == 0) {
+        nt_log_error("gfx: backend buffer creation failed");
         nt_gfx_pool_free(&s_gfx.buffer_pool, id);
         return result;
     }
@@ -496,6 +510,7 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
         return;
     }
     if (!nt_gfx_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
+        nt_log_error("gfx: bind_pipeline: invalid handle");
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(pip.id);
@@ -509,11 +524,13 @@ void nt_gfx_bind_vertex_buffer(nt_buffer_t buf) {
         return;
     }
     if (!nt_gfx_pool_valid(&s_gfx.buffer_pool, buf.id)) {
+        nt_log_error("gfx: bind_vertex_buffer: invalid handle");
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
     NT_GFX_ASSERT(s_gfx.buffer_descs[slot].type == NT_BUFFER_VERTEX);
     if (s_gfx.buffer_descs[slot].type != NT_BUFFER_VERTEX) {
+        nt_log_error("gfx: bind_vertex_buffer: buffer is not vertex type");
         return;
     }
     nt_gfx_backend_bind_vertex_buffer(s_gfx.buffer_backends[slot]);
@@ -524,11 +541,13 @@ void nt_gfx_bind_index_buffer(nt_buffer_t buf) {
         return;
     }
     if (!nt_gfx_pool_valid(&s_gfx.buffer_pool, buf.id)) {
+        nt_log_error("gfx: bind_index_buffer: invalid handle");
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
     NT_GFX_ASSERT(s_gfx.buffer_descs[slot].type == NT_BUFFER_INDEX);
     if (s_gfx.buffer_descs[slot].type != NT_BUFFER_INDEX) {
+        nt_log_error("gfx: bind_index_buffer: buffer is not index type");
         return;
     }
     s_gfx.has_index_buffer = true;
@@ -574,10 +593,12 @@ void nt_gfx_draw(uint32_t first_element, uint32_t num_elements) {
 
     NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        nt_log_error("gfx: draw called outside PASS state");
         return;
     }
     NT_GFX_ASSERT(s_gfx.bound_pipeline != 0);
     if (s_gfx.bound_pipeline == 0) {
+        nt_log_error("gfx: draw called without bound pipeline");
         return;
     }
 
@@ -591,11 +612,13 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
         return;
     }
     if (!nt_gfx_pool_valid(&s_gfx.buffer_pool, buf.id)) {
+        nt_log_error("gfx: update_buffer: invalid handle");
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
     NT_GFX_ASSERT(size <= s_gfx.buffer_descs[slot].size);
     if (size > s_gfx.buffer_descs[slot].size) {
+        nt_log_error("gfx: update_buffer: size exceeds buffer capacity");
         return;
     }
     nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], data, size);

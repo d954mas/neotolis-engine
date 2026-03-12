@@ -12,7 +12,7 @@ if(EMSCRIPTEN)
         nt_gfx_internal.h
         gl/nt_gfx_gl_ctx.h
     )
-    target_link_libraries(nt_gfx PUBLIC nt_core nt_window)
+    target_link_libraries(nt_gfx PUBLIC nt_core nt_window nt_log)
 endif()
 
 # Stub implementation for headless builds (CI, builder, tests, native)
@@ -23,4 +23,4 @@ nt_add_module(nt_gfx_stub
     nt_gfx_internal.h
 )
 
-target_link_libraries(nt_gfx_stub PUBLIC nt_core)
+target_link_libraries(nt_gfx_stub PUBLIC nt_core nt_log_stub)
