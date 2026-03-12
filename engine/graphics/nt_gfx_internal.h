@@ -42,7 +42,7 @@ uint32_t nt_gfx_pool_slot_index(uint32_t id);
 
 /* ---- Backend function signatures (implemented by each backend) ---- */
 
-void nt_gfx_backend_init(const nt_gfx_desc_t *desc);
+bool nt_gfx_backend_init(const nt_gfx_desc_t *desc);
 void nt_gfx_backend_shutdown(void);
 bool nt_gfx_backend_is_context_lost(void);
 
@@ -72,6 +72,6 @@ void nt_gfx_backend_set_uniform_int(const char *name, int val);
 
 void nt_gfx_backend_draw(uint32_t first_element, uint32_t num_elements, bool indexed);
 
-void nt_gfx_backend_recreate_all_resources(void);
+bool nt_gfx_backend_recreate_all_resources(void);
 
 #endif /* NT_GFX_INTERNAL_H */

@@ -48,6 +48,16 @@ static void nt_gfx_free_buffer_desc(nt_buffer_desc_t *d) {
     memset(d, 0, sizeof(*d));
 }
 
+/* Pipeline-owned shader source copies.
+   Pipelines keep their own vs/fs source so context-loss recovery
+   works even if the original shader was destroyed. */
+typedef struct {
+    char *vs_source;
+    char *fs_source;
+} nt_gfx_pipeline_sources_t;
+
+static void nt_gfx_free_pipeline_data(uint32_t slot);
+
 /* ---- Global state ---- */
 
 nt_gfx_t g_nt_gfx;
@@ -66,6 +76,7 @@ static struct {
     nt_shader_desc_t *shader_descs; /* stored descs for context loss recreation */
     nt_pipeline_desc_t *pipeline_descs;
     nt_buffer_desc_t *buffer_descs;
+    nt_gfx_pipeline_sources_t *pipeline_sources; /* pipeline-owned shader source copies */
 
     nt_gfx_render_state_t render_state;
     uint32_t bound_pipeline; /* currently bound pipeline backend handle */
@@ -142,6 +153,16 @@ bool nt_gfx_pool_valid(const nt_gfx_pool_t *pool, uint32_t id) {
 
 uint32_t nt_gfx_pool_slot_index(uint32_t id) { return id & NT_GFX_SLOT_MASK; }
 
+/* ---- Pipeline data cleanup ---- */
+
+static void nt_gfx_free_pipeline_data(uint32_t slot) {
+    free((void *)s_gfx.pipeline_descs[slot].label);
+    free(s_gfx.pipeline_sources[slot].vs_source);
+    free(s_gfx.pipeline_sources[slot].fs_source);
+    memset(&s_gfx.pipeline_descs[slot], 0, sizeof(nt_pipeline_desc_t));
+    memset(&s_gfx.pipeline_sources[slot], 0, sizeof(nt_gfx_pipeline_sources_t));
+}
+
 /* ---- Default pool sizes ---- */
 
 #define NT_GFX_DEFAULT_SHADERS 32
@@ -169,11 +190,16 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.shader_descs = (nt_shader_desc_t *)calloc(max_shd + 1, sizeof(nt_shader_desc_t));
     s_gfx.pipeline_descs = (nt_pipeline_desc_t *)calloc(max_pip + 1, sizeof(nt_pipeline_desc_t));
     s_gfx.buffer_descs = (nt_buffer_desc_t *)calloc(max_buf + 1, sizeof(nt_buffer_desc_t));
+    s_gfx.pipeline_sources = (nt_gfx_pipeline_sources_t *)calloc(max_pip + 1, sizeof(nt_gfx_pipeline_sources_t));
 
     s_gfx.render_state = NT_GFX_STATE_IDLE;
-    g_nt_gfx.initialized = true;
 
-    nt_gfx_backend_init(desc);
+    if (!nt_gfx_backend_init(desc)) {
+        nt_gfx_shutdown();
+        return;
+    }
+
+    g_nt_gfx.initialized = true;
 }
 
 void nt_gfx_shutdown(void) {
@@ -182,6 +208,9 @@ void nt_gfx_shutdown(void) {
     /* Free owned strings/data in stored descriptors */
     for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
         nt_gfx_free_shader_desc(&s_gfx.shader_descs[i]);
+    }
+    for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
+        nt_gfx_free_pipeline_data(i);
     }
     for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
         nt_gfx_free_buffer_desc(&s_gfx.buffer_descs[i]);
@@ -197,6 +226,7 @@ void nt_gfx_shutdown(void) {
     free(s_gfx.shader_descs);
     free(s_gfx.pipeline_descs);
     free(s_gfx.buffer_descs);
+    free(s_gfx.pipeline_sources);
 
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
@@ -207,10 +237,7 @@ void nt_gfx_shutdown(void) {
 /* Try to recreate the GL context and all resources.
    Returns true on success, false if context is still unavailable. */
 static bool restore_context(void) {
-    nt_gfx_backend_recreate_all_resources();
-
-    /* Check if the NEW context is actually valid before re-uploading resources */
-    if (nt_gfx_backend_is_context_lost()) {
+    if (!nt_gfx_backend_recreate_all_resources()) {
         return false;
     }
 
@@ -220,7 +247,7 @@ static bool restore_context(void) {
     /* A slot is live when its index bits match its position (freed slots have index bits zeroed) */
 #define SLOT_IS_LIVE(pool, idx) (((pool).slots[(idx)].id & NT_GFX_SLOT_MASK) == (idx))
 
-    /* Recreate shaders first (pipelines reference shader backend handles) */
+    /* Recreate standalone shaders (for future pipeline creation) */
     for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
         if (SLOT_IS_LIVE(s_gfx.shader_pool, i)) {
             s_gfx.shader_backends[i] = nt_gfx_backend_create_shader(&s_gfx.shader_descs[i]);
@@ -234,17 +261,23 @@ static bool restore_context(void) {
         }
     }
 
-    /* Recreate pipelines (need shader backend handles) */
+    /* Recreate pipelines from pipeline-owned shader sources.
+       This works even if the original shaders were destroyed. */
     for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
         if (SLOT_IS_LIVE(s_gfx.pipeline_pool, i)) {
             const nt_pipeline_desc_t *pdesc = &s_gfx.pipeline_descs[i];
-            uint32_t vs_slot = nt_gfx_pool_slot_index(pdesc->vertex_shader.id);
-            uint32_t fs_slot = nt_gfx_pool_slot_index(pdesc->fragment_shader.id);
-            uint32_t vs_backend = s_gfx.shader_backends[vs_slot];
-            uint32_t fs_backend = s_gfx.shader_backends[fs_slot];
+            nt_shader_desc_t vs_desc = {.type = NT_SHADER_VERTEX, .source = s_gfx.pipeline_sources[i].vs_source};
+            nt_shader_desc_t fs_desc = {.type = NT_SHADER_FRAGMENT, .source = s_gfx.pipeline_sources[i].fs_source};
+            uint32_t vs_backend = nt_gfx_backend_create_shader(&vs_desc);
+            uint32_t fs_backend = nt_gfx_backend_create_shader(&fs_desc);
             s_gfx.pipeline_backends[i] = nt_gfx_backend_create_pipeline(pdesc, vs_backend, fs_backend);
+            /* Shader objects can be deleted after linking — GL keeps them alive through the program */
+            nt_gfx_backend_destroy_shader(vs_backend);
+            nt_gfx_backend_destroy_shader(fs_backend);
         }
     }
+
+#undef SLOT_IS_LIVE
     return true;
 }
 
@@ -374,6 +407,11 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     uint32_t slot = nt_gfx_pool_slot_index(id);
     s_gfx.pipeline_backends[slot] = backend;
     s_gfx.pipeline_descs[slot] = *desc;
+    s_gfx.pipeline_descs[slot].label = nt_gfx_strdup(desc->label);
+
+    /* Copy shader sources so pipeline can recover independently of shader lifetime */
+    s_gfx.pipeline_sources[slot].vs_source = nt_gfx_strdup(s_gfx.shader_descs[vs_slot].source);
+    s_gfx.pipeline_sources[slot].fs_source = nt_gfx_strdup(s_gfx.shader_descs[fs_slot].source);
 
     result.id = id;
     return result;
@@ -436,7 +474,7 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
     uint32_t slot = nt_gfx_pool_slot_index(pip.id);
     nt_gfx_backend_destroy_pipeline(s_gfx.pipeline_backends[slot]);
     s_gfx.pipeline_backends[slot] = 0;
-    memset(&s_gfx.pipeline_descs[slot], 0, sizeof(nt_pipeline_desc_t));
+    nt_gfx_free_pipeline_data(slot);
     nt_gfx_pool_free(&s_gfx.pipeline_pool, pip.id);
 }
 
@@ -536,6 +574,10 @@ void nt_gfx_draw(uint32_t first_element, uint32_t num_elements) {
 
     NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        return;
+    }
+    NT_GFX_ASSERT(s_gfx.bound_pipeline != 0);
+    if (s_gfx.bound_pipeline == 0) {
         return;
     }
 

@@ -117,7 +117,7 @@ typedef struct {
 
 typedef struct {
     float clear_color[4];
-    float clear_depth;
+    float clear_depth; /* typically 1.0f; zero-init gives 0.0 which fails all depth tests */
 } nt_pass_desc_t;
 
 /* ---- Global state ---- */

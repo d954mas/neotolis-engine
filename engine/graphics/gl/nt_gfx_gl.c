@@ -46,15 +46,12 @@ typedef struct {
 static GLuint s_bound_program;         /* currently bound GL program (for uniforms) */
 static uint32_t s_bound_pipeline_slot; /* currently bound pipeline index */
 
-static GLuint *s_shader_gl;               /* GL shader names, indexed by slot */
 static nt_gfx_gl_pipeline_t *s_pipelines; /* pipeline data, indexed by slot */
 static GLuint *s_buffer_gl;               /* GL buffer names, indexed by slot */
 static GLenum *s_buffer_targets;          /* GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY_BUFFER */
 
-static uint32_t s_max_shaders;
 static uint32_t s_max_pipelines;
 static uint32_t s_max_buffers;
-static uint32_t s_next_pipeline_slot;
 
 /* ---- Helpers: enum mapping ---- */
 
@@ -136,9 +133,9 @@ static GLenum map_buffer_usage(nt_buffer_usage_t u) {
 
 /* ==== Backend interface implementation ==== */
 
-void nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
+bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     if (!nt_gfx_gl_ctx_create()) {
-        return;
+        return false;
     }
 
     /* Initial GL state */
@@ -146,34 +143,29 @@ void nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     glDepthFunc(GL_LESS);
 
     /* Allocate backend resource arrays (+1 because slots are 1-based) */
-    s_max_shaders = (desc && desc->max_shaders) ? desc->max_shaders : 32;
     s_max_pipelines = (desc && desc->max_pipelines) ? desc->max_pipelines : 16;
     s_max_buffers = (desc && desc->max_buffers) ? desc->max_buffers : 128;
 
-    s_shader_gl = (GLuint *)calloc(s_max_shaders + 1, sizeof(GLuint));
     s_pipelines = (nt_gfx_gl_pipeline_t *)calloc(s_max_pipelines + 1, sizeof(nt_gfx_gl_pipeline_t));
     s_buffer_gl = (GLuint *)calloc(s_max_buffers + 1, sizeof(GLuint));
     s_buffer_targets = (GLenum *)calloc(s_max_buffers + 1, sizeof(GLenum));
 
-    s_next_pipeline_slot = 1;
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
+    return true;
 }
 
 void nt_gfx_backend_shutdown(void) {
-    free(s_shader_gl);
     free(s_pipelines);
     free(s_buffer_gl);
     free(s_buffer_targets);
 
-    s_shader_gl = NULL;
     s_pipelines = NULL;
     s_buffer_gl = NULL;
     s_buffer_targets = NULL;
 
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
-    s_next_pipeline_slot = 0;
 
     nt_gfx_gl_ctx_destroy();
 }
@@ -484,19 +476,18 @@ void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle) {
 
 /* ---- Context loss recovery ---- */
 
-void nt_gfx_backend_recreate_all_resources(void) {
+bool nt_gfx_backend_recreate_all_resources(void) {
     /* Destroy old context and create a fresh one. */
     nt_gfx_gl_ctx_destroy();
-    nt_gfx_gl_ctx_create();
+    if (!nt_gfx_gl_ctx_create()) {
+        return false;
+    }
 
     /* Re-enable initial GL state. */
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
 
     /* Zero out all backend-side arrays -- old GL names are invalid. */
-    if (s_shader_gl) {
-        memset(s_shader_gl, 0, (s_max_shaders + 1) * sizeof(GLuint));
-    }
     if (s_pipelines) {
         memset(s_pipelines, 0, (s_max_pipelines + 1) * sizeof(nt_gfx_gl_pipeline_t));
     }
@@ -508,4 +499,5 @@ void nt_gfx_backend_recreate_all_resources(void) {
     }
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
+    return true;
 }

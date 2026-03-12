@@ -3,7 +3,10 @@
 /* No-op backend for headless builds and testing.
    Create functions return 1 (nonzero) so make_shader/pipeline/buffer succeed. */
 
-void nt_gfx_backend_init(const nt_gfx_desc_t *desc) { (void)desc; }
+bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
+    (void)desc;
+    return true;
+}
 
 void nt_gfx_backend_shutdown(void) {}
 
@@ -78,4 +81,4 @@ void nt_gfx_backend_draw(uint32_t first_element, uint32_t num_elements, bool ind
     (void)indexed;
 }
 
-void nt_gfx_backend_recreate_all_resources(void) {}
+bool nt_gfx_backend_recreate_all_resources(void) { return true; }

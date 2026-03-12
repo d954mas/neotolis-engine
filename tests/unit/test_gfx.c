@@ -142,6 +142,85 @@ void test_gfx_defaults_applied(void) {
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 4, .max_pipelines = 4, .max_buffers = 4});
 }
 
+/* ---- Pipeline: create with valid shaders, destroy ---- */
+
+void test_gfx_make_destroy_pipeline(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, vs.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, fs.id);
+
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
+    nt_gfx_destroy_pipeline(pip);
+}
+
+/* ---- Pipeline: survives shader destroy ---- */
+
+void test_gfx_pipeline_survives_shader_destroy(void) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
+
+    /* Destroy shaders — pipeline should still be bindable */
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    nt_gfx_destroy_pipeline(pip);
+}
+
+/* ---- State machine: valid frame cycle ---- */
+
+void test_gfx_state_machine_valid_cycle(void) {
+    nt_gfx_begin_frame();
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+    /* Reaching here without crash means state machine accepted the sequence */
+}
+
+/* ---- Double destroy: shader ---- */
+
+void test_gfx_double_destroy_shader(void) {
+    nt_shader_t shd = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "test"});
+    nt_gfx_destroy_shader(shd);
+    /* Second destroy on stale handle — must be no-op */
+    nt_gfx_destroy_shader(shd);
+}
+
+/* ---- Double destroy: buffer ---- */
+
+void test_gfx_double_destroy_buffer(void) {
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .size = 64});
+    nt_gfx_destroy_buffer(buf);
+    nt_gfx_destroy_buffer(buf);
+}
+
+/* ---- Pipeline: rejected with invalid shaders ---- */
+
+void test_gfx_pipeline_rejects_invalid_shaders(void) {
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = {.id = 0},
+        .fragment_shader = {.id = 0},
+    });
+    TEST_ASSERT_EQUAL_UINT32(0, pip.id);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_gfx_pool_alloc_returns_nonzero);
@@ -156,5 +235,11 @@ int main(void) {
     RUN_TEST(test_gfx_make_destroy_shader);
     RUN_TEST(test_gfx_make_destroy_buffer);
     RUN_TEST(test_gfx_defaults_applied);
+    RUN_TEST(test_gfx_make_destroy_pipeline);
+    RUN_TEST(test_gfx_pipeline_survives_shader_destroy);
+    RUN_TEST(test_gfx_state_machine_valid_cycle);
+    RUN_TEST(test_gfx_double_destroy_shader);
+    RUN_TEST(test_gfx_double_destroy_buffer);
+    RUN_TEST(test_gfx_pipeline_rejects_invalid_shaders);
     return UNITY_END();
 }

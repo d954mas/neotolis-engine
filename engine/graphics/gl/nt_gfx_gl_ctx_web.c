@@ -34,7 +34,7 @@ void nt_gfx_gl_ctx_destroy(void) {
     }
 }
 
-bool nt_gfx_gl_ctx_is_lost(void) { return s_gl_context > 0 && emscripten_is_webgl_context_lost(s_gl_context) != 0; }
+bool nt_gfx_gl_ctx_is_lost(void) { return s_gl_context <= 0 || emscripten_is_webgl_context_lost(s_gl_context) != 0; }
 
 #else
 typedef int nt_gfx_gl_ctx_web_unused;
