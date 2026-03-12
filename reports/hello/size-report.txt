@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis)
-# Commit: b6cbed8
+# Commit: 6b5ad14
 
 ## WASM Section Sizes
 
@@ -71,6 +71,8 @@ libnt_window.a              3454 B
 TOTAL (linked)             22928 B
 
 Not linked to hello:
+libnt_gfx.a                23460 B
+libnt_gfx_stub.a           15604 B
 libnt_input_stub.a         10902 B
 libnt_log.a                  970 B
 libnt_log_stub.a             506 B
