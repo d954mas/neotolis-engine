@@ -1,127 +1,17 @@
-#include "shape/nt_shape.h"
+#include "renderers/nt_shape_renderer.h"
 
 #include "core/nt_assert.h"
+#include "math/nt_math.h"
 #include "graphics/nt_gfx.h"
 
 #include <string.h>
 
-/* Use compiler builtins to avoid Windows UCRT DLL import issues
-   with clang + ASan. Maps to CPU instructions directly. */
-#define nt_sqrtf(x) __builtin_sqrtf(x)
-#define nt_fabsf(x) __builtin_fabsf(x)
-#define nt_sinf(x) __builtin_sinf(x)
-#define nt_cosf(x) __builtin_cosf(x)
+_Static_assert(NT_SHAPE_RENDERER_MAX_VERTICES <= 65535, "uint16 index limit");
 
-#define NT_PI 3.14159265358979323846F
-
-_Static_assert(NT_SHAPE_MAX_VERTICES <= 65535, "uint16 index limit");
-
-/* ---- Inline vector/matrix math (avoids cglm header-only issues on Windows/clang) ---- */
-
-static void v3_sub(const float a[3], const float b[3], float out[3]) {
-    out[0] = a[0] - b[0];
-    out[1] = a[1] - b[1];
-    out[2] = a[2] - b[2];
-}
-
-static void v3_cross(const float a[3], const float b[3], float out[3]) {
-    out[0] = a[1] * b[2] - a[2] * b[1];
-    out[1] = a[2] * b[0] - a[0] * b[2];
-    out[2] = a[0] * b[1] - a[1] * b[0];
-}
-
-static float v3_norm2(const float v[3]) { return (v[0] * v[0]) + (v[1] * v[1]) + (v[2] * v[2]); }
-
-static void v3_normalize(float v[3]) {
-    float len2 = v3_norm2(v);
-    if (len2 > 1e-12F) {
-        float inv = 1.0F / nt_sqrtf(len2);
-        v[0] *= inv;
-        v[1] *= inv;
-        v[2] *= inv;
-    }
-}
-
-static void v3_scale(float v[3], float s) {
-    v[0] *= s;
-    v[1] *= s;
-    v[2] *= s;
-}
-
-/* 4x4 matrix inversion (column-major).
-   Extracts camera world position from VP matrix inverse column 3. */
-static void m4_inv(const float m[16], float out[16]) {
-    /* Cofactor expansion for general 4x4 inverse */
-    float a00 = m[0];
-    float a01 = m[1];
-    float a02 = m[2];
-    float a03 = m[3];
-    float a10 = m[4];
-    float a11 = m[5];
-    float a12 = m[6];
-    float a13 = m[7];
-    float a20 = m[8];
-    float a21 = m[9];
-    float a22 = m[10];
-    float a23 = m[11];
-    float a30 = m[12];
-    float a31 = m[13];
-    float a32 = m[14];
-    float a33 = m[15];
-
-    float b00 = (a00 * a11) - (a01 * a10);
-    float b01 = (a00 * a12) - (a02 * a10);
-    float b02 = (a00 * a13) - (a03 * a10);
-    float b03 = (a01 * a12) - (a02 * a11);
-    float b04 = (a01 * a13) - (a03 * a11);
-    float b05 = (a02 * a13) - (a03 * a12);
-    float b06 = (a20 * a31) - (a21 * a30);
-    float b07 = (a20 * a32) - (a22 * a30);
-    float b08 = (a20 * a33) - (a23 * a30);
-    float b09 = (a21 * a32) - (a22 * a31);
-    float b10 = (a21 * a33) - (a23 * a31);
-    float b11 = (a22 * a33) - (a23 * a32);
-
-    float det = (b00 * b11) - (b01 * b10) + (b02 * b09) + (b03 * b08) - (b04 * b07) + (b05 * b06);
-    if (nt_fabsf(det) < 1e-12F) {
-        memset(out, 0, sizeof(float) * 16);
-        return;
-    }
-    float inv_det = 1.0F / det;
-
-    out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * inv_det;
-    out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * inv_det;
-    out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * inv_det;
-    out[3] = (a22 * b04 - a21 * b05 - a23 * b03) * inv_det;
-    out[4] = (a12 * b08 - a10 * b11 - a13 * b07) * inv_det;
-    out[5] = (a00 * b11 - a02 * b08 + a03 * b07) * inv_det;
-    out[6] = (a32 * b02 - a30 * b05 - a33 * b01) * inv_det;
-    out[7] = (a20 * b05 - a22 * b02 + a23 * b01) * inv_det;
-    out[8] = (a10 * b10 - a11 * b08 + a13 * b06) * inv_det;
-    out[9] = (a01 * b08 - a00 * b10 - a03 * b06) * inv_det;
-    out[10] = (a30 * b04 - a31 * b02 + a33 * b00) * inv_det;
-    out[11] = (a21 * b02 - a20 * b04 - a23 * b00) * inv_det;
-    out[12] = (a11 * b07 - a10 * b09 - a12 * b06) * inv_det;
-    out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * inv_det;
-    out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * inv_det;
-    out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * inv_det;
-}
-
-/* Rotate vec3 by quaternion: q * v * q_conjugate.
-   Quaternion layout: [x, y, z, w]. */
+/* Rotate vec3 by quaternion [x,y,z,w] using Rodrigues' formula. */
 static void quat_rotatev(const float q[4], const float v[3], float out[3]) {
-    float qx = q[0];
-    float qy = q[1];
-    float qz = q[2];
-    float qw = q[3];
-    /* t = 2 * cross(q.xyz, v) */
-    float tx = 2.0F * (qy * v[2] - qz * v[1]);
-    float ty = 2.0F * (qz * v[0] - qx * v[2]);
-    float tz = 2.0F * (qx * v[1] - qy * v[0]);
-    /* result = v + w*t + cross(q.xyz, t) */
-    out[0] = v[0] + qw * tx + (qy * tz - qz * ty);
-    out[1] = v[1] + qw * ty + (qz * tx - qx * tz);
-    out[2] = v[2] + qw * tz + (qx * ty - qy * tx);
+    /* cglm versor layout is [x,y,z,w] — matches ours */
+    glm_quat_rotatev((float *)q, (float *)v, out);
 }
 
 /* ---- Embedded shader source ---- */
@@ -156,8 +46,8 @@ static struct {
     nt_buffer_t ibo;
 
     /* CPU-side batch buffers */
-    nt_shape_vertex_t vertices[NT_SHAPE_MAX_VERTICES];
-    uint16_t indices[NT_SHAPE_MAX_INDICES];
+    nt_shape_renderer_vertex_t vertices[NT_SHAPE_RENDERER_MAX_VERTICES];
+    uint16_t indices[NT_SHAPE_RENDERER_MAX_INDICES];
     uint32_t vertex_count;
     uint32_t index_count;
 
@@ -187,7 +77,7 @@ static nt_pipeline_t make_shape_pipeline(bool depth, bool blend, bool poly_offse
         .layout =
             {
                 .attr_count = 2,
-                .stride = (uint16_t)sizeof(nt_shape_vertex_t),
+                .stride = (uint16_t)sizeof(nt_shape_renderer_vertex_t),
                 .attrs =
                     {
                         {.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT3, .offset = 0},
@@ -209,7 +99,7 @@ static nt_pipeline_t make_shape_pipeline(bool depth, bool blend, bool poly_offse
     return nt_gfx_make_pipeline(&desc);
 }
 
-static void set_vertex(nt_shape_vertex_t *v, const float pos[3], const float color[4]) {
+static void set_vertex(nt_shape_renderer_vertex_t *v, const float pos[3], const float color[4]) {
     v->pos[0] = pos[0];
     v->pos[1] = pos[1];
     v->pos[2] = pos[2];
@@ -222,41 +112,41 @@ static void set_vertex(nt_shape_vertex_t *v, const float pos[3], const float col
 /* Emit a billboard quad wireframe edge between two endpoints.
    Both endpoints get the same color. */
 static void emit_wire_edge(const float a[3], const float b[3], const float color[4]) {
-    if (s_shape.vertex_count + 4 > NT_SHAPE_MAX_VERTICES || s_shape.index_count + 6 > NT_SHAPE_MAX_INDICES) {
-        nt_shape_flush();
+    if (s_shape.vertex_count + 4 > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + 6 > NT_SHAPE_RENDERER_MAX_INDICES) {
+        nt_shape_renderer_flush();
     }
 
     float edge[3];
-    v3_sub(b, a, edge);
+    glm_vec3_sub((float *)b, (float *)a, edge);
 
     /* Midpoint to camera */
     float mid[3] = {(a[0] + b[0]) * 0.5F, (a[1] + b[1]) * 0.5F, (a[2] + b[2]) * 0.5F};
     float to_cam[3];
-    v3_sub(s_shape.cam_pos, mid, to_cam);
+    glm_vec3_sub(s_shape.cam_pos, mid, to_cam);
 
     /* side = normalize(cross(edge, to_cam)) * half_width */
     float side[3];
-    v3_cross(edge, to_cam, side);
+    glm_vec3_cross(edge, to_cam, side);
 
-    float len_sq = v3_norm2(side);
+    float len_sq = glm_vec3_norm2(side);
     if (len_sq < 1e-12F) {
         /* Degenerate: edge parallel to camera. Fallback to cross(edge, up) */
         float up[3] = {0.0F, 1.0F, 0.0F};
-        v3_cross(edge, up, side);
-        len_sq = v3_norm2(side);
+        glm_vec3_cross(edge, up, side);
+        len_sq = glm_vec3_norm2(side);
         if (len_sq < 1e-12F) {
             /* Still degenerate: edge parallel to Y. Use right. */
             float right[3] = {1.0F, 0.0F, 0.0F};
-            v3_cross(edge, right, side);
+            glm_vec3_cross(edge, right, side);
         }
     }
-    v3_normalize(side);
+    glm_vec3_normalize(side);
 
     float hw = s_shape.line_width * 0.5F;
-    v3_scale(side, hw);
+    glm_vec3_scale(side, hw, side);
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
+    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
 
     float p0[3] = {a[0] - side[0], a[1] - side[1], a[2] - side[2]};
     float p1[3] = {a[0] + side[0], a[1] + side[1], a[2] + side[2]};
@@ -282,37 +172,37 @@ static void emit_wire_edge(const float a[3], const float b[3], const float color
 
 /* Emit a billboard quad wireframe edge with per-vertex color. */
 static void emit_wire_edge_col(const float a[3], const float b[3], const float color_a[4], const float color_b[4]) {
-    if (s_shape.vertex_count + 4 > NT_SHAPE_MAX_VERTICES || s_shape.index_count + 6 > NT_SHAPE_MAX_INDICES) {
-        nt_shape_flush();
+    if (s_shape.vertex_count + 4 > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + 6 > NT_SHAPE_RENDERER_MAX_INDICES) {
+        nt_shape_renderer_flush();
     }
 
     float edge[3];
-    v3_sub(b, a, edge);
+    glm_vec3_sub((float *)b, (float *)a, edge);
 
     float mid[3] = {(a[0] + b[0]) * 0.5F, (a[1] + b[1]) * 0.5F, (a[2] + b[2]) * 0.5F};
     float to_cam[3];
-    v3_sub(s_shape.cam_pos, mid, to_cam);
+    glm_vec3_sub(s_shape.cam_pos, mid, to_cam);
 
     float side[3];
-    v3_cross(edge, to_cam, side);
+    glm_vec3_cross(edge, to_cam, side);
 
-    float len_sq = v3_norm2(side);
+    float len_sq = glm_vec3_norm2(side);
     if (len_sq < 1e-12F) {
         float up[3] = {0.0F, 1.0F, 0.0F};
-        v3_cross(edge, up, side);
-        len_sq = v3_norm2(side);
+        glm_vec3_cross(edge, up, side);
+        len_sq = glm_vec3_norm2(side);
         if (len_sq < 1e-12F) {
             float right[3] = {1.0F, 0.0F, 0.0F};
-            v3_cross(edge, right, side);
+            glm_vec3_cross(edge, right, side);
         }
     }
-    v3_normalize(side);
+    glm_vec3_normalize(side);
 
     float hw = s_shape.line_width * 0.5F;
-    v3_scale(side, hw);
+    glm_vec3_scale(side, hw, side);
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
+    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
 
     float p0[3] = {a[0] - side[0], a[1] - side[1], a[2] - side[2]};
     float p1[3] = {a[0] + side[0], a[1] + side[1], a[2] + side[2]};
@@ -338,7 +228,7 @@ static void emit_wire_edge_col(const float a[3], const float b[3], const float c
 
 /* ---- Lifecycle ---- */
 
-void nt_shape_init(void) {
+void nt_shape_renderer_init(void) {
     memset(&s_shape, 0, sizeof(s_shape));
 
     s_shape.vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_shape_vs_src, .label = "shape_vs"});
@@ -351,9 +241,9 @@ void nt_shape_init(void) {
     s_shape.pip_overlay = make_shape_pipeline(false, false, false);
     s_shape.pip_overlay_blend = make_shape_pipeline(false, true, false);
 
-    s_shape.vbo =
-        nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_MAX_VERTICES * (uint32_t)sizeof(nt_shape_vertex_t), .label = "shape_vbo"});
-    s_shape.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_MAX_INDICES * (uint32_t)sizeof(uint16_t), .label = "shape_ibo"});
+    s_shape.vbo = nt_gfx_make_buffer(
+        &(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_VERTICES * (uint32_t)sizeof(nt_shape_renderer_vertex_t), .label = "shape_vbo"});
+    s_shape.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_INDICES * (uint32_t)sizeof(uint16_t), .label = "shape_ibo"});
 
     s_shape.line_width = 0.02F;
     s_shape.segments = 32;
@@ -363,7 +253,7 @@ void nt_shape_init(void) {
     s_shape.initialized = true;
 }
 
-void nt_shape_shutdown(void) {
+void nt_shape_renderer_shutdown(void) {
     if (!s_shape.initialized) {
         return;
     }
@@ -378,12 +268,12 @@ void nt_shape_shutdown(void) {
     memset(&s_shape, 0, sizeof(s_shape));
 }
 
-void nt_shape_flush(void) {
+void nt_shape_renderer_flush(void) {
     if (s_shape.index_count == 0) {
         return;
     }
 
-    nt_gfx_update_buffer(s_shape.vbo, s_shape.vertices, s_shape.vertex_count * (uint32_t)sizeof(nt_shape_vertex_t));
+    nt_gfx_update_buffer(s_shape.vbo, s_shape.vertices, s_shape.vertex_count * (uint32_t)sizeof(nt_shape_renderer_vertex_t));
     nt_gfx_update_buffer(s_shape.ibo, s_shape.indices, s_shape.index_count * (uint32_t)sizeof(uint16_t));
 
     nt_gfx_bind_pipeline(s_shape.pip_active);
@@ -399,61 +289,61 @@ void nt_shape_flush(void) {
 
 /* ---- State setters ---- */
 
-void nt_shape_set_vp(const float vp[16]) {
+void nt_shape_renderer_set_vp(const float vp[16]) {
     memcpy(s_shape.vp, vp, sizeof(float) * 16);
 
     /* Extract camera position: inverse(VP) column 3 */
     float inv_vp[16];
-    m4_inv(s_shape.vp, inv_vp);
+    glm_mat4_inv((vec4 *)s_shape.vp, (vec4 *)inv_vp);
     s_shape.cam_pos[0] = inv_vp[12]; /* col3.x */
     s_shape.cam_pos[1] = inv_vp[13]; /* col3.y */
     s_shape.cam_pos[2] = inv_vp[14]; /* col3.z */
 }
 
-void nt_shape_set_line_width(float width) { s_shape.line_width = width; }
+void nt_shape_renderer_set_line_width(float width) { s_shape.line_width = width; }
 
-void nt_shape_set_depth(bool enabled) {
+void nt_shape_renderer_set_depth(bool enabled) {
     if (enabled == s_shape.depth_enabled) {
         return;
     }
     if (s_shape.index_count > 0) {
-        nt_shape_flush();
+        nt_shape_renderer_flush();
     }
     s_shape.depth_enabled = enabled;
     s_shape.pip_active = get_active_pipeline();
 }
 
-void nt_shape_set_blend(bool enabled) {
+void nt_shape_renderer_set_blend(bool enabled) {
     if (enabled == s_shape.blend_enabled) {
         return;
     }
     if (s_shape.index_count > 0) {
-        nt_shape_flush();
+        nt_shape_renderer_flush();
     }
     s_shape.blend_enabled = enabled;
     s_shape.pip_active = get_active_pipeline();
 }
 
-void nt_shape_set_segments(int segments) { s_shape.segments = (segments <= 0) ? 32 : segments; }
+void nt_shape_renderer_set_segments(int segments) { s_shape.segments = (segments <= 0) ? 32 : segments; }
 
 /* ---- Line ---- */
 
-void nt_shape_line(const float a[3], const float b[3], const float color[4]) { emit_wire_edge(a, b, color); }
+void nt_shape_renderer_line(const float a[3], const float b[3], const float color[4]) { emit_wire_edge(a, b, color); }
 
-void nt_shape_line_col(const float a[3], const float b[3], const float color_a[4], const float color_b[4]) { emit_wire_edge_col(a, b, color_a, color_b); }
+void nt_shape_renderer_line_col(const float a[3], const float b[3], const float color_a[4], const float color_b[4]) { emit_wire_edge_col(a, b, color_a, color_b); }
 
 /* ---- Rectangle ---- */
 
-void nt_shape_rect(const float pos[3], const float size[2], const float color[4]) {
-    if (s_shape.vertex_count + 4 > NT_SHAPE_MAX_VERTICES || s_shape.index_count + 6 > NT_SHAPE_MAX_INDICES) {
-        nt_shape_flush();
+void nt_shape_renderer_rect(const float pos[3], const float size[2], const float color[4]) {
+    if (s_shape.vertex_count + 4 > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + 6 > NT_SHAPE_RENDERER_MAX_INDICES) {
+        nt_shape_renderer_flush();
     }
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
     float hx = size[0] * 0.5F;
     float hy = size[1] * 0.5F;
 
-    nt_shape_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
+    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
     float p0[3] = {pos[0] - hx, pos[1] - hy, pos[2]};
     float p1[3] = {pos[0] + hx, pos[1] - hy, pos[2]};
     float p2[3] = {pos[0] + hx, pos[1] + hy, pos[2]};
@@ -476,7 +366,7 @@ void nt_shape_rect(const float pos[3], const float size[2], const float color[4]
     s_shape.index_count += 6;
 }
 
-void nt_shape_rect_wire(const float pos[3], const float size[2], const float color[4]) {
+void nt_shape_renderer_rect_wire(const float pos[3], const float size[2], const float color[4]) {
     float hx = size[0] * 0.5F;
     float hy = size[1] * 0.5F;
 
@@ -491,9 +381,9 @@ void nt_shape_rect_wire(const float pos[3], const float size[2], const float col
     emit_wire_edge(c3, c0, color);
 }
 
-void nt_shape_rect_rot(const float pos[3], const float size[2], const float rot[4], const float color[4]) {
-    if (s_shape.vertex_count + 4 > NT_SHAPE_MAX_VERTICES || s_shape.index_count + 6 > NT_SHAPE_MAX_INDICES) {
-        nt_shape_flush();
+void nt_shape_renderer_rect_rot(const float pos[3], const float size[2], const float rot[4], const float color[4]) {
+    if (s_shape.vertex_count + 4 > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + 6 > NT_SHAPE_RENDERER_MAX_INDICES) {
+        nt_shape_renderer_flush();
     }
 
     float hx = size[0] * 0.5F;
@@ -507,7 +397,7 @@ void nt_shape_rect_rot(const float pos[3], const float size[2], const float rot[
     };
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
+    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
 
     for (int i = 0; i < 4; i++) {
         float rotated[3];
@@ -528,7 +418,7 @@ void nt_shape_rect_rot(const float pos[3], const float size[2], const float rot[
     s_shape.index_count += 6;
 }
 
-void nt_shape_rect_wire_rot(const float pos[3], const float size[2], const float rot[4], const float color[4]) {
+void nt_shape_renderer_rect_wire_rot(const float pos[3], const float size[2], const float rot[4], const float color[4]) {
     float hx = size[0] * 0.5F;
     float hy = size[1] * 0.5F;
 
@@ -556,13 +446,13 @@ void nt_shape_rect_wire_rot(const float pos[3], const float size[2], const float
 
 /* ---- Triangle ---- */
 
-void nt_shape_triangle(const float a[3], const float b[3], const float c[3], const float color[4]) {
-    if (s_shape.vertex_count + 3 > NT_SHAPE_MAX_VERTICES || s_shape.index_count + 3 > NT_SHAPE_MAX_INDICES) {
-        nt_shape_flush();
+void nt_shape_renderer_triangle(const float a[3], const float b[3], const float c[3], const float color[4]) {
+    if (s_shape.vertex_count + 3 > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + 3 > NT_SHAPE_RENDERER_MAX_INDICES) {
+        nt_shape_renderer_flush();
     }
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
+    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
 
     set_vertex(&v[0], a, color);
     set_vertex(&v[1], b, color);
@@ -577,19 +467,19 @@ void nt_shape_triangle(const float a[3], const float b[3], const float c[3], con
     s_shape.index_count += 3;
 }
 
-void nt_shape_triangle_wire(const float a[3], const float b[3], const float c[3], const float color[4]) {
+void nt_shape_renderer_triangle_wire(const float a[3], const float b[3], const float c[3], const float color[4]) {
     emit_wire_edge(a, b, color);
     emit_wire_edge(b, c, color);
     emit_wire_edge(c, a, color);
 }
 
-void nt_shape_triangle_col(const float a[3], const float b[3], const float c[3], const float color_a[4], const float color_b[4], const float color_c[4]) {
-    if (s_shape.vertex_count + 3 > NT_SHAPE_MAX_VERTICES || s_shape.index_count + 3 > NT_SHAPE_MAX_INDICES) {
-        nt_shape_flush();
+void nt_shape_renderer_triangle_col(const float a[3], const float b[3], const float c[3], const float color_a[4], const float color_b[4], const float color_c[4]) {
+    if (s_shape.vertex_count + 3 > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + 3 > NT_SHAPE_RENDERER_MAX_INDICES) {
+        nt_shape_renderer_flush();
     }
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
+    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
 
     set_vertex(&v[0], a, color_a);
     set_vertex(&v[1], b, color_b);
@@ -604,7 +494,7 @@ void nt_shape_triangle_col(const float a[3], const float b[3], const float c[3],
     s_shape.index_count += 3;
 }
 
-void nt_shape_triangle_wire_col(const float a[3], const float b[3], const float c[3], const float color_a[4], const float color_b[4], const float color_c[4]) {
+void nt_shape_renderer_triangle_wire_col(const float a[3], const float b[3], const float c[3], const float color_a[4], const float color_b[4], const float color_c[4]) {
     emit_wire_edge_col(a, b, color_a, color_b);
     emit_wire_edge_col(b, c, color_b, color_c); // NOLINT(readability-suspicious-call-argument)
     emit_wire_edge_col(c, a, color_c, color_a); // NOLINT(readability-suspicious-call-argument)
@@ -612,17 +502,17 @@ void nt_shape_triangle_wire_col(const float a[3], const float b[3], const float 
 
 /* ---- Circle ---- */
 
-void nt_shape_circle(const float center[3], float radius, const float color[4]) {
+void nt_shape_renderer_circle(const float center[3], float radius, const float color[4]) {
     int segs = s_shape.segments;
     uint32_t vert_count = (uint32_t)(segs + 1); /* center + ring */
     uint32_t idx_count = (uint32_t)(segs * 3);
 
-    if (s_shape.vertex_count + vert_count > NT_SHAPE_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_MAX_INDICES) {
-        nt_shape_flush();
+    if (s_shape.vertex_count + vert_count > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_RENDERER_MAX_INDICES) {
+        nt_shape_renderer_flush();
     }
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
+    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
 
     /* Center vertex */
     set_vertex(&v[0], center, color);
@@ -630,7 +520,7 @@ void nt_shape_circle(const float center[3], float radius, const float color[4]) 
     /* Ring vertices in XZ plane */
     for (int i = 0; i < segs; i++) {
         float theta = 2.0F * NT_PI * (float)i / (float)segs;
-        float p[3] = {center[0] + (radius * nt_cosf(theta)), center[1], center[2] + (radius * nt_sinf(theta))};
+        float p[3] = {center[0] + (radius * cosf(theta)), center[1], center[2] + (radius * sinf(theta))};
         set_vertex(&v[1 + i], p, color);
     }
 
@@ -648,35 +538,35 @@ void nt_shape_circle(const float center[3], float radius, const float color[4]) 
     s_shape.index_count += idx_count;
 }
 
-void nt_shape_circle_wire(const float center[3], float radius, const float color[4]) {
+void nt_shape_renderer_circle_wire(const float center[3], float radius, const float color[4]) {
     int segs = s_shape.segments;
 
     for (int i = 0; i < segs; i++) {
         float t0 = 2.0F * NT_PI * (float)i / (float)segs;
         float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
-        float a[3] = {center[0] + (radius * nt_cosf(t0)), center[1], center[2] + (radius * nt_sinf(t0))};
-        float b[3] = {center[0] + (radius * nt_cosf(t1)), center[1], center[2] + (radius * nt_sinf(t1))};
+        float a[3] = {center[0] + (radius * cosf(t0)), center[1], center[2] + (radius * sinf(t0))};
+        float b[3] = {center[0] + (radius * cosf(t1)), center[1], center[2] + (radius * sinf(t1))};
         emit_wire_edge(a, b, color);
     }
 }
 
-void nt_shape_circle_rot(const float center[3], float radius, const float rot[4], const float color[4]) {
+void nt_shape_renderer_circle_rot(const float center[3], float radius, const float rot[4], const float color[4]) {
     int segs = s_shape.segments;
     uint32_t vert_count = (uint32_t)(segs + 1);
     uint32_t idx_count = (uint32_t)(segs * 3);
 
-    if (s_shape.vertex_count + vert_count > NT_SHAPE_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_MAX_INDICES) {
-        nt_shape_flush();
+    if (s_shape.vertex_count + vert_count > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_RENDERER_MAX_INDICES) {
+        nt_shape_renderer_flush();
     }
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
+    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
 
     set_vertex(&v[0], center, color);
 
     for (int i = 0; i < segs; i++) {
         float theta = 2.0F * NT_PI * (float)i / (float)segs;
-        float offset[3] = {radius * nt_cosf(theta), 0.0F, radius * nt_sinf(theta)};
+        float offset[3] = {radius * cosf(theta), 0.0F, radius * sinf(theta)};
         float rotated[3];
         quat_rotatev(rot, offset, rotated);
         float p[3] = {center[0] + rotated[0], center[1] + rotated[1], center[2] + rotated[2]};
@@ -696,14 +586,14 @@ void nt_shape_circle_rot(const float center[3], float radius, const float rot[4]
     s_shape.index_count += idx_count;
 }
 
-void nt_shape_circle_wire_rot(const float center[3], float radius, const float rot[4], const float color[4]) {
+void nt_shape_renderer_circle_wire_rot(const float center[3], float radius, const float rot[4], const float color[4]) {
     int segs = s_shape.segments;
 
     for (int i = 0; i < segs; i++) {
         float t0 = 2.0F * NT_PI * (float)i / (float)segs;
         float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
-        float off_a[3] = {radius * nt_cosf(t0), 0.0F, radius * nt_sinf(t0)};
-        float off_b[3] = {radius * nt_cosf(t1), 0.0F, radius * nt_sinf(t1)};
+        float off_a[3] = {radius * cosf(t0), 0.0F, radius * sinf(t0)};
+        float off_b[3] = {radius * cosf(t1), 0.0F, radius * sinf(t1)};
         float rot_a[3];
         float rot_b[3];
         quat_rotatev(rot, off_a, rot_a);
@@ -716,9 +606,9 @@ void nt_shape_circle_wire_rot(const float center[3], float radius, const float r
 
 /* ---- Cube ---- */
 
-void nt_shape_cube(const float center[3], const float size[3], const float color[4]) {
-    if (s_shape.vertex_count + 8 > NT_SHAPE_MAX_VERTICES || s_shape.index_count + 36 > NT_SHAPE_MAX_INDICES) {
-        nt_shape_flush();
+void nt_shape_renderer_cube(const float center[3], const float size[3], const float color[4]) {
+    if (s_shape.vertex_count + 8 > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + 36 > NT_SHAPE_RENDERER_MAX_INDICES) {
+        nt_shape_renderer_flush();
     }
 
     float hx = size[0] * 0.5F;
@@ -726,7 +616,7 @@ void nt_shape_cube(const float center[3], const float size[3], const float color
     float hz = size[2] * 0.5F;
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
+    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
 
     /* 8 corner vertices */
     float corners[8][3] = {
@@ -762,7 +652,7 @@ void nt_shape_cube(const float center[3], const float size[3], const float color
     s_shape.index_count += 36;
 }
 
-void nt_shape_cube_wire(const float center[3], const float size[3], const float color[4]) {
+void nt_shape_renderer_cube_wire(const float center[3], const float size[3], const float color[4]) {
     float hx = size[0] * 0.5F;
     float hy = size[1] * 0.5F;
     float hz = size[2] * 0.5F;
@@ -791,9 +681,9 @@ void nt_shape_cube_wire(const float center[3], const float size[3], const float 
     emit_wire_edge(c[4], c[7], color);
 }
 
-void nt_shape_cube_rot(const float center[3], const float size[3], const float rot[4], const float color[4]) {
-    if (s_shape.vertex_count + 8 > NT_SHAPE_MAX_VERTICES || s_shape.index_count + 36 > NT_SHAPE_MAX_INDICES) {
-        nt_shape_flush();
+void nt_shape_renderer_cube_rot(const float center[3], const float size[3], const float rot[4], const float color[4]) {
+    if (s_shape.vertex_count + 8 > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + 36 > NT_SHAPE_RENDERER_MAX_INDICES) {
+        nt_shape_renderer_flush();
     }
 
     float hx = size[0] * 0.5F;
@@ -805,7 +695,7 @@ void nt_shape_cube_rot(const float center[3], const float size[3], const float r
     };
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
+    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
 
     for (int i = 0; i < 8; i++) {
         float rotated[3];
@@ -827,7 +717,7 @@ void nt_shape_cube_rot(const float center[3], const float size[3], const float r
     s_shape.index_count += 36;
 }
 
-void nt_shape_cube_wire_rot(const float center[3], const float size[3], const float rot[4], const float color[4]) {
+void nt_shape_renderer_cube_wire_rot(const float center[3], const float size[3], const float rot[4], const float color[4]) {
     float hx = size[0] * 0.5F;
     float hy = size[1] * 0.5F;
     float hz = size[2] * 0.5F;
@@ -861,14 +751,14 @@ void nt_shape_cube_wire_rot(const float center[3], const float size[3], const fl
 
 /* ---- Sphere ---- */
 
-void nt_shape_sphere(const float center[3], float radius, const float color[4]) {
+void nt_shape_renderer_sphere(const float center[3], float radius, const float color[4]) {
     int segs = s_shape.segments;
     int rings = segs / 2;
     uint32_t vert_count = (uint32_t)((rings + 1) * (segs + 1));
     uint32_t idx_count = (uint32_t)(rings * segs * 6);
 
-    if (s_shape.vertex_count + vert_count > NT_SHAPE_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_MAX_INDICES) {
-        nt_shape_flush();
+    if (s_shape.vertex_count + vert_count > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_RENDERER_MAX_INDICES) {
+        nt_shape_renderer_flush();
     }
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
@@ -876,12 +766,12 @@ void nt_shape_sphere(const float center[3], float radius, const float color[4]) 
     /* Generate vertices */
     for (int ring = 0; ring <= rings; ring++) {
         float phi = NT_PI * (float)ring / (float)rings;
-        float sp = nt_sinf(phi);
-        float cp = nt_cosf(phi);
+        float sp = sinf(phi);
+        float cp = cosf(phi);
         for (int seg = 0; seg <= segs; seg++) {
             float theta = 2.0F * NT_PI * (float)seg / (float)segs;
-            float st = nt_sinf(theta);
-            float ct = nt_cosf(theta);
+            float st = sinf(theta);
+            float ct = cosf(theta);
             float p[3] = {center[0] + (radius * sp * ct), center[1] + (radius * cp), center[2] + (radius * sp * st)};
             set_vertex(&s_shape.vertices[s_shape.vertex_count], p, color);
             s_shape.vertex_count++;
@@ -905,20 +795,20 @@ void nt_shape_sphere(const float center[3], float radius, const float color[4]) 
     }
 }
 
-void nt_shape_sphere_wire(const float center[3], float radius, const float color[4]) {
+void nt_shape_renderer_sphere_wire(const float center[3], float radius, const float color[4]) {
     int segs = s_shape.segments;
     int rings = segs / 2;
 
     /* Longitude lines: segs lines, each from pole to pole through rings */
     for (int seg = 0; seg < segs; seg++) {
         float theta = 2.0F * NT_PI * (float)seg / (float)segs;
-        float st = nt_sinf(theta);
-        float ct = nt_cosf(theta);
+        float st = sinf(theta);
+        float ct = cosf(theta);
         for (int ring = 0; ring < rings; ring++) {
             float phi0 = NT_PI * (float)ring / (float)rings;
             float phi1 = NT_PI * (float)(ring + 1) / (float)rings;
-            float a[3] = {center[0] + (radius * nt_sinf(phi0) * ct), center[1] + (radius * nt_cosf(phi0)), center[2] + (radius * nt_sinf(phi0) * st)};
-            float b[3] = {center[0] + (radius * nt_sinf(phi1) * ct), center[1] + (radius * nt_cosf(phi1)), center[2] + (radius * nt_sinf(phi1) * st)};
+            float a[3] = {center[0] + (radius * sinf(phi0) * ct), center[1] + (radius * cosf(phi0)), center[2] + (radius * sinf(phi0) * st)};
+            float b[3] = {center[0] + (radius * sinf(phi1) * ct), center[1] + (radius * cosf(phi1)), center[2] + (radius * sinf(phi1) * st)};
             emit_wire_edge(a, b, color);
         }
     }
@@ -926,13 +816,13 @@ void nt_shape_sphere_wire(const float center[3], float radius, const float color
     /* Latitude lines: (rings-1) lines (skip poles), each going around */
     for (int ring = 1; ring < rings; ring++) {
         float phi = NT_PI * (float)ring / (float)rings;
-        float sp = nt_sinf(phi);
-        float cp = nt_cosf(phi);
+        float sp = sinf(phi);
+        float cp = cosf(phi);
         for (int seg = 0; seg < segs; seg++) {
             float t0 = 2.0F * NT_PI * (float)seg / (float)segs;
             float t1 = 2.0F * NT_PI * (float)((seg + 1) % segs) / (float)segs;
-            float a[3] = {center[0] + (radius * sp * nt_cosf(t0)), center[1] + (radius * cp), center[2] + (radius * sp * nt_sinf(t0))};
-            float b[3] = {center[0] + (radius * sp * nt_cosf(t1)), center[1] + (radius * cp), center[2] + (radius * sp * nt_sinf(t1))};
+            float a[3] = {center[0] + (radius * sp * cosf(t0)), center[1] + (radius * cp), center[2] + (radius * sp * sinf(t0))};
+            float b[3] = {center[0] + (radius * sp * cosf(t1)), center[1] + (radius * cp), center[2] + (radius * sp * sinf(t1))};
             emit_wire_edge(a, b, color);
         }
     }
@@ -947,8 +837,8 @@ static void emit_cylinder_fill(const float center[3], float radius, float height
     uint32_t vert_count = (uint32_t)((2 * (segs + 1)) + 2);
     uint32_t idx_count = (uint32_t)(12 * segs);
 
-    if (s_shape.vertex_count + vert_count > NT_SHAPE_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_MAX_INDICES) {
-        nt_shape_flush();
+    if (s_shape.vertex_count + vert_count > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_RENDERER_MAX_INDICES) {
+        nt_shape_renderer_flush();
     }
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
@@ -984,7 +874,7 @@ static void emit_cylinder_fill(const float center[3], float radius, float height
     /* Top ring (segs+1 verts, last duplicates first for seam) */
     for (int i = 0; i <= segs; i++) {
         float theta = 2.0F * NT_PI * (float)i / (float)segs;
-        float off[3] = {radius * nt_cosf(theta), hy, radius * nt_sinf(theta)};
+        float off[3] = {radius * cosf(theta), hy, radius * sinf(theta)};
         if (rot) {
             float tmp[3];
             quat_rotatev(rot, off, tmp);
@@ -999,7 +889,7 @@ static void emit_cylinder_fill(const float center[3], float radius, float height
     /* Bottom ring (segs+1 verts) */
     for (int i = 0; i <= segs; i++) {
         float theta = 2.0F * NT_PI * (float)i / (float)segs;
-        float off[3] = {radius * nt_cosf(theta), -hy, radius * nt_sinf(theta)};
+        float off[3] = {radius * cosf(theta), -hy, radius * sinf(theta)};
         if (rot) {
             float tmp[3];
             quat_rotatev(rot, off, tmp);
@@ -1056,8 +946,8 @@ static void emit_cylinder_wire(const float center[3], float radius, float height
         float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
 
         /* Top edge */
-        float top_a_off[3] = {radius * nt_cosf(t0), hy, radius * nt_sinf(t0)};
-        float top_b_off[3] = {radius * nt_cosf(t1), hy, radius * nt_sinf(t1)};
+        float top_a_off[3] = {radius * cosf(t0), hy, radius * sinf(t0)};
+        float top_b_off[3] = {radius * cosf(t1), hy, radius * sinf(t1)};
         if (rot) {
             float tmp[3];
             quat_rotatev(rot, top_a_off, tmp);
@@ -1074,8 +964,8 @@ static void emit_cylinder_wire(const float center[3], float radius, float height
         emit_wire_edge(ta, tb, color);
 
         /* Bottom edge */
-        float bot_a_off[3] = {radius * nt_cosf(t0), -hy, radius * nt_sinf(t0)};
-        float bot_b_off[3] = {radius * nt_cosf(t1), -hy, radius * nt_sinf(t1)};
+        float bot_a_off[3] = {radius * cosf(t0), -hy, radius * sinf(t0)};
+        float bot_b_off[3] = {radius * cosf(t1), -hy, radius * sinf(t1)};
         if (rot) {
             float tmp[3];
             quat_rotatev(rot, bot_a_off, tmp);
@@ -1096,13 +986,13 @@ static void emit_cylinder_wire(const float center[3], float radius, float height
     }
 }
 
-void nt_shape_cylinder(const float center[3], float radius, float height, const float color[4]) { emit_cylinder_fill(center, radius, height, NULL, color); }
+void nt_shape_renderer_cylinder(const float center[3], float radius, float height, const float color[4]) { emit_cylinder_fill(center, radius, height, NULL, color); }
 
-void nt_shape_cylinder_wire(const float center[3], float radius, float height, const float color[4]) { emit_cylinder_wire(center, radius, height, NULL, color); }
+void nt_shape_renderer_cylinder_wire(const float center[3], float radius, float height, const float color[4]) { emit_cylinder_wire(center, radius, height, NULL, color); }
 
-void nt_shape_cylinder_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) { emit_cylinder_fill(center, radius, height, rot, color); }
+void nt_shape_renderer_cylinder_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) { emit_cylinder_fill(center, radius, height, rot, color); }
 
-void nt_shape_cylinder_wire_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) { emit_cylinder_wire(center, radius, height, rot, color); }
+void nt_shape_renderer_cylinder_wire_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) { emit_cylinder_wire(center, radius, height, rot, color); }
 
 /* ---- Capsule ---- */
 
@@ -1120,8 +1010,8 @@ static void emit_capsule_fill(const float center[3], float radius, float height,
     uint32_t vert_count = (uint32_t)((total_sections + 1) * (segs + 1));
     uint32_t idx_count = (uint32_t)(total_sections * segs * 6);
 
-    if (s_shape.vertex_count + vert_count > NT_SHAPE_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_MAX_INDICES) {
-        nt_shape_flush();
+    if (s_shape.vertex_count + vert_count > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_RENDERER_MAX_INDICES) {
+        nt_shape_renderer_flush();
     }
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
@@ -1140,8 +1030,8 @@ static void emit_capsule_fill(const float center[3], float radius, float height,
         if (row <= half_rings) {
             /* Top hemisphere: row 0 = pole, row half_rings = equator */
             float phi = (NT_PI * 0.5F) * (float)(half_rings - row) / (float)half_rings; /* PI/2 -> 0 */
-            y_offset = body_half + (radius * nt_sinf(phi));
-            ring_radius = radius * nt_cosf(phi);
+            y_offset = body_half + (radius * sinf(phi));
+            ring_radius = radius * cosf(phi);
         } else if (row == half_rings + 1) {
             /* Body bottom edge (tube bottom) */
             y_offset = -body_half;
@@ -1150,13 +1040,13 @@ static void emit_capsule_fill(const float center[3], float radius, float height,
             /* Bottom hemisphere: row half_rings+2..total_sections */
             int bot_row = row - half_rings - 1;                              /* 1..half_rings */
             float phi = (NT_PI * 0.5F) * (float)bot_row / (float)half_rings; /* 0 -> PI/2 */
-            y_offset = -body_half - (radius * nt_sinf(phi));
-            ring_radius = radius * nt_cosf(phi);
+            y_offset = -body_half - (radius * sinf(phi));
+            ring_radius = radius * cosf(phi);
         }
 
         for (int seg = 0; seg <= segs; seg++) {
             float theta = 2.0F * NT_PI * (float)seg / (float)segs;
-            float off[3] = {ring_radius * nt_cosf(theta), y_offset, ring_radius * nt_sinf(theta)};
+            float off[3] = {ring_radius * cosf(theta), y_offset, ring_radius * sinf(theta)};
             if (rot) {
                 float tmp[3];
                 quat_rotatev(rot, off, tmp);
@@ -1192,16 +1082,16 @@ static void emit_capsule_fill(const float center[3], float radius, float height,
 static void capsule_row_params(int row, int half_rings, float body_half, float radius, float *out_y, float *out_r) {
     if (row <= half_rings) {
         float phi = (NT_PI * 0.5F) * (float)(half_rings - row) / (float)half_rings;
-        *out_y = body_half + (radius * nt_sinf(phi));
-        *out_r = radius * nt_cosf(phi);
+        *out_y = body_half + (radius * sinf(phi));
+        *out_r = radius * cosf(phi);
     } else if (row == half_rings + 1) {
         *out_y = -body_half;
         *out_r = radius;
     } else {
         int br = row - half_rings - 1;
         float phi = (NT_PI * 0.5F) * (float)br / (float)half_rings;
-        *out_y = -body_half - (radius * nt_sinf(phi));
-        *out_r = radius * nt_cosf(phi);
+        *out_y = -body_half - (radius * sinf(phi));
+        *out_r = radius * cosf(phi);
     }
 }
 
@@ -1232,8 +1122,8 @@ static void emit_capsule_wire(const float center[3], float radius, float height,
     /* Longitude lines: segs lines, each spanning all sections */
     for (int seg = 0; seg < segs; seg++) {
         float theta = 2.0F * NT_PI * (float)seg / (float)segs;
-        float ct = nt_cosf(theta);
-        float st = nt_sinf(theta);
+        float ct = cosf(theta);
+        float st = sinf(theta);
 
         for (int row = 0; row < total_sections; row++) {
             float y0;
@@ -1263,8 +1153,8 @@ static void emit_capsule_wire(const float center[3], float radius, float height,
         for (int seg = 0; seg < segs; seg++) {
             float t0 = 2.0F * NT_PI * (float)seg / (float)segs;
             float t1 = 2.0F * NT_PI * (float)((seg + 1) % segs) / (float)segs;
-            float off_a[3] = {rr * nt_cosf(t0), y_off, rr * nt_sinf(t0)};
-            float off_b[3] = {rr * nt_cosf(t1), y_off, rr * nt_sinf(t1)};
+            float off_a[3] = {rr * cosf(t0), y_off, rr * sinf(t0)};
+            float off_b[3] = {rr * cosf(t1), y_off, rr * sinf(t1)};
             float a[3];
             float b[3];
             apply_rot_and_offset(center, off_a, rot, a);
@@ -1274,17 +1164,17 @@ static void emit_capsule_wire(const float center[3], float radius, float height,
     }
 }
 
-void nt_shape_capsule(const float center[3], float radius, float height, const float color[4]) { emit_capsule_fill(center, radius, height, NULL, color); }
+void nt_shape_renderer_capsule(const float center[3], float radius, float height, const float color[4]) { emit_capsule_fill(center, radius, height, NULL, color); }
 
-void nt_shape_capsule_wire(const float center[3], float radius, float height, const float color[4]) { emit_capsule_wire(center, radius, height, NULL, color); }
+void nt_shape_renderer_capsule_wire(const float center[3], float radius, float height, const float color[4]) { emit_capsule_wire(center, radius, height, NULL, color); }
 
-void nt_shape_capsule_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) { emit_capsule_fill(center, radius, height, rot, color); }
+void nt_shape_renderer_capsule_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) { emit_capsule_fill(center, radius, height, rot, color); }
 
-void nt_shape_capsule_wire_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) { emit_capsule_wire(center, radius, height, rot, color); }
+void nt_shape_renderer_capsule_wire_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) { emit_capsule_wire(center, radius, height, rot, color); }
 
 /* ---- Mesh ---- */
 
-void nt_shape_mesh(const float *positions, const uint16_t *indices, uint32_t num_indices, const float color[4]) {
+void nt_shape_renderer_mesh(const float *positions, const uint16_t *indices, uint32_t num_indices, const float color[4]) {
     /* Determine how many unique vertices we need.
        Find max index to know vertex count. */
     uint16_t max_idx = 0;
@@ -1295,8 +1185,8 @@ void nt_shape_mesh(const float *positions, const uint16_t *indices, uint32_t num
     }
     uint32_t num_verts = (uint32_t)(max_idx + 1);
 
-    if (s_shape.vertex_count + num_verts > NT_SHAPE_MAX_VERTICES || s_shape.index_count + num_indices > NT_SHAPE_MAX_INDICES) {
-        nt_shape_flush();
+    if (s_shape.vertex_count + num_verts > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + num_indices > NT_SHAPE_RENDERER_MAX_INDICES) {
+        nt_shape_renderer_flush();
     }
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
@@ -1314,7 +1204,7 @@ void nt_shape_mesh(const float *positions, const uint16_t *indices, uint32_t num
     }
 }
 
-void nt_shape_mesh_wire(const float *positions, const uint16_t *indices, uint32_t num_indices, const float color[4]) {
+void nt_shape_renderer_mesh_wire(const float *positions, const uint16_t *indices, uint32_t num_indices, const float color[4]) {
     /* For each triangle (3 consecutive indices), emit 3 wireframe edges */
     for (uint32_t i = 0; (i + 2) < num_indices; i += 3) {
         const float *a = &positions[(ptrdiff_t)indices[i] * 3];
@@ -1328,9 +1218,9 @@ void nt_shape_mesh_wire(const float *positions, const uint16_t *indices, uint32_
 
 /* ---- Test accessors (always compiled; header guards visibility) ---- */
 
-uint32_t nt_shape_test_vertex_count(void) { return s_shape.vertex_count; }
-uint32_t nt_shape_test_index_count(void) { return s_shape.index_count; }
-const float *nt_shape_test_cam_pos(void) { return s_shape.cam_pos; }
-float nt_shape_test_line_width(void) { return s_shape.line_width; }
-int nt_shape_test_segments(void) { return s_shape.segments; }
-bool nt_shape_test_initialized(void) { return s_shape.initialized; }
+uint32_t nt_shape_renderer_test_vertex_count(void) { return s_shape.vertex_count; }
+uint32_t nt_shape_renderer_test_index_count(void) { return s_shape.index_count; }
+const float *nt_shape_renderer_test_cam_pos(void) { return s_shape.cam_pos; }
+float nt_shape_renderer_test_line_width(void) { return s_shape.line_width; }
+int nt_shape_renderer_test_segments(void) { return s_shape.segments; }
+bool nt_shape_renderer_test_initialized(void) { return s_shape.initialized; }

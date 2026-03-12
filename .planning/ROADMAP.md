@@ -162,7 +162,7 @@ Note: Phase 18 (Desktop GL) depends on Phase 15 and can execute in parallel with
 | 13. Web Platform Layer | 2/2 | Complete   | 2026-03-11 | - |
 | 14. Input System | 2/2 | Complete    | 2026-03-11 | - |
 | 15. WebGL 2 Renderer | 2/2 | Complete    | 2026-03-12 | - |
-| 16. Shape Renderer | 2/2 | Complete   | 2026-03-12 | - |
+| 16. Shape Renderer | 2/2 | Complete    | 2026-03-12 | - |
 | 17. Demo Integration | v1.2 | 0/? | Not started | - |
 | 18. Desktop GL Rendering | v1.2 | 0/? | Not started | - |
 

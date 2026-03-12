@@ -36,6 +36,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     enable_testing()
 
     add_subdirectory(examples/hello)
+    add_subdirectory(examples/bench_shapes)
     add_subdirectory(tests)
 
     if(NOT EMSCRIPTEN)
