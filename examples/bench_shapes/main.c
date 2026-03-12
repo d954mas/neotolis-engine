@@ -16,17 +16,17 @@
 #include "platform/web/nt_platform_web.h"
 #endif
 
-#define BATCH 50
+#define BATCH 250
 
 /* Room dimensions */
-#define ROOM_W 20.0F
-#define ROOM_H 8.0F
-#define ROOM_D 20.0F
+#define ROOM_W 40.0F
+#define ROOM_H 16.0F
+#define ROOM_D 40.0F
 #define GRID_STEP 1.0F
 #define MIN_DIST 2.0F
 
 /* Shape storage */
-#define MAX_SHAPES_PER_TYPE 4096
+#define MAX_SHAPES_PER_TYPE 65536
 #define MAX_SHAPES (MAX_SHAPES_PER_TYPE * 8)
 
 /* Shape types */
@@ -83,9 +83,9 @@ static float rand_range(int i, int salt, float lo, float hi) {
 static void rand_pos(int i, int salt, float out[3]) {
     for (int attempt = 0; attempt < 8; attempt++) {
         int s = salt + (attempt * 100);
-        out[0] = rand_range(i, s, -ROOM_W * 0.45F, ROOM_W * 0.45F);
-        out[1] = rand_range(i, s + 1, 0.3F, ROOM_H - 0.3F);
-        out[2] = rand_range(i, s + 2, -ROOM_D * 0.45F, ROOM_D * 0.45F);
+        out[0] = rand_range(i, s, -9.0F, 9.0F);
+        out[1] = rand_range(i, s + 1, 0.3F, 7.7F);
+        out[2] = rand_range(i, s + 2, -9.0F, 9.0F);
         float dy = out[1] - (ROOM_H * 0.5F);
         float d2 = (out[0] * out[0]) + (dy * dy) + (out[2] * out[2]);
         if (d2 > MIN_DIST * MIN_DIST) {
@@ -476,7 +476,7 @@ static void frame(void) {
     if (nt_input_key_is_pressed(NT_KEY_F)) {
         s_mul++;
         rebuild_shapes();
-        printf("[bench] +50 each => %d per type, %d total shapes\n", s_mul * BATCH, s_mul * BATCH * 8);
+        printf("[bench] +250 each => %d per type, %d total shapes\n", s_mul * BATCH, s_mul * BATCH * 8);
     }
 
     if (dt > s_dt_max) {
@@ -619,7 +619,7 @@ int main(void) {
 
     printf("Shape Renderer Benchmark\n");
     printf("  WASD = move | Space/Shift = up/down | Mouse+LMB/RMB = look\n");
-    printf("  F = +50 shapes per type | ESC = quit\n");
+    printf("  F = +250 shapes per type | ESC = quit\n");
     printf("  Starting: %d per type, %d total\n", BATCH, BATCH * 8);
 
     nt_accumulator_init(&s_acc, 1.0F / 60.0F, 4);

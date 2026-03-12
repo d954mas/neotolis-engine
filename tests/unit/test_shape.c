@@ -218,9 +218,9 @@ void test_shape_circle_fill_counts(void) {
 void test_shape_circle_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {1, 0, 0, 1};
-    /* 32 edges = 32 line instances */
+    /* 16 edges = 16 line instances */
     nt_shape_renderer_circle_wire(center, 1.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(32, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(16, nt_shape_renderer_test_line_count());
 }
 
 /* ---- 18. Cube fill counts (instanced) ---- */
@@ -255,14 +255,14 @@ void test_shape_sphere_fill_counts(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_vertex_count());
 }
 
-/* ---- 22. Sphere wire counts (32 segments) ---- */
+/* ---- 22. Sphere wire counts (16 segments) ---- */
 
 void test_shape_sphere_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {0, 0, 1, 1};
-    /* 3 great circles x 32 edges = 96 line instances */
+    /* 3 great circles x 16 edges = 48 line instances */
     nt_shape_renderer_sphere_wire(center, 1.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(96, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(48, nt_shape_renderer_test_line_count());
 }
 
 /* ---- 23. Circle rot instance count matches base ---- */
@@ -296,14 +296,14 @@ void test_shape_cylinder_fill_counts(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_vertex_count());
 }
 
-/* ---- 26. Cylinder wire counts (32 segments) ---- */
+/* ---- 26. Cylinder wire counts (16 segments) ---- */
 
 void test_shape_cylinder_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {1, 1, 0, 1};
-    /* Top circle (32) + bottom circle (32) + 4 vertical struts = 68 line instances */
+    /* Top circle (16) + bottom circle (16) + 4 vertical struts = 36 line instances */
     nt_shape_renderer_cylinder_wire(center, 1.0F, 2.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(68, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(36, nt_shape_renderer_test_line_count());
 }
 
 /* ---- 27. Capsule fill counts (32 segments) ---- */
@@ -316,14 +316,14 @@ void test_shape_capsule_fill_counts(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_vertex_count());
 }
 
-/* ---- 28. Capsule wire counts (32 segments) ---- */
+/* ---- 28. Capsule wire counts (16 segments) ---- */
 
 void test_shape_capsule_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {0, 1, 1, 1};
-    /* 4 meridians x 17 edges + 2 latitude rings x 32 edges = 68 + 64 = 132 line instances */
+    /* 4 meridians x 9 edges + 2 latitude rings x 16 edges = 36 + 32 = 68 line instances */
     nt_shape_renderer_capsule_wire(center, 0.5F, 2.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(132, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(68, nt_shape_renderer_test_line_count());
 }
 
 /* ---- 29. Mesh fill copies geometry into batch ---- */

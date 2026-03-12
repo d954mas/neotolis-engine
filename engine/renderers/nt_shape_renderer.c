@@ -9,7 +9,20 @@
 
 _Static_assert(NT_SHAPE_RENDERER_MAX_VERTICES <= 65535, "uint16 index limit");
 
-#define NT_SHAPE_SEGMENTS 32
+#define NT_SHAPE_SEGMENTS 16
+
+/* Derived template sizes (compile-time, used for stack arrays) */
+#define NT_SEG_CIRCLE_NV (NT_SHAPE_SEGMENTS + 1)
+#define NT_SEG_CIRCLE_NI (NT_SHAPE_SEGMENTS * 3)
+#define NT_SEG_SPHERE_RINGS (NT_SHAPE_SEGMENTS / 2)
+#define NT_SEG_SPHERE_NV ((NT_SEG_SPHERE_RINGS + 1) * (NT_SHAPE_SEGMENTS + 1))
+#define NT_SEG_SPHERE_NI (NT_SEG_SPHERE_RINGS * NT_SHAPE_SEGMENTS * 6)
+#define NT_SEG_CYL_NV (2 * (NT_SHAPE_SEGMENTS + 1) + 2)
+#define NT_SEG_CYL_NI (12 * NT_SHAPE_SEGMENTS)
+#define NT_SEG_CAP_HALF (NT_SHAPE_SEGMENTS / 4)
+#define NT_SEG_CAP_SECTIONS (2 * NT_SEG_CAP_HALF + 1)
+#define NT_SEG_CAP_NV ((NT_SEG_CAP_SECTIONS + 1) * (NT_SHAPE_SEGMENTS + 1))
+#define NT_SEG_CAP_NI (NT_SEG_CAP_SECTIONS * NT_SHAPE_SEGMENTS * 6)
 
 /* Convert quaternion to 3x3 rotation matrix (column-major). */
 static void quat_to_mat3(const float q[4], float m[3][3]) { glm_quat_mat3((float *)q, (vec3 *)m); }
@@ -99,7 +112,7 @@ enum {
 };
 
 #ifndef NT_SHAPE_RENDERER_MAX_INSTANCES
-#define NT_SHAPE_RENDERER_MAX_INSTANCES 4096
+#define NT_SHAPE_RENDERER_MAX_INSTANCES 2048
 #endif
 
 /* Per-type template mesh */
@@ -428,8 +441,8 @@ static void build_templates(void) {
 
     /* Circle: unit circle in XZ plane (center + 32 ring) */
     {
-        float v[33 * 3];
-        uint16_t idx[32 * 3];
+        float v[NT_SEG_CIRCLE_NV * 3];
+        uint16_t idx[NT_SEG_CIRCLE_NI];
         v[0] = 0.0F;
         v[1] = 0.0F;
         v[2] = 0.0F;
@@ -444,20 +457,20 @@ static void build_templates(void) {
             idx[j * 3 + 1] = (uint16_t)(1 + j);
             idx[j * 3 + 2] = (uint16_t)(1 + next);
         }
-        s_shape.templates[NT_SHAPE_CIRCLE] = make_template(v, 33, idx, 96, "tpl_circle");
+        s_shape.templates[NT_SHAPE_CIRCLE] = make_template(v, NT_SEG_CIRCLE_NV, idx, NT_SEG_CIRCLE_NI, "tpl_circle");
     }
 
-    /* Sphere: unit sphere, segs=32, rings=16 */
+    /* Sphere: unit sphere */
     {
         int segs = NT_SHAPE_SEGMENTS;
-        int rings = segs / 2;
-        uint32_t nv = (uint32_t)((rings + 1) * (segs + 1));
-        uint32_t ni = (uint32_t)(rings * segs * 6);
-        float v[561 * 3];
-        uint16_t idx[3072];
+        int rings = NT_SEG_SPHERE_RINGS;
+        uint32_t nv = NT_SEG_SPHERE_NV;
+        uint32_t ni = NT_SEG_SPHERE_NI;
+        float v[NT_SEG_SPHERE_NV * 3];
+        uint16_t idx[NT_SEG_SPHERE_NI];
 
-        float sin_phi[17];
-        float cos_phi[17];
+        float sin_phi[NT_SEG_SPHERE_RINGS + 1];
+        float cos_phi[NT_SEG_SPHERE_RINGS + 1];
         for (int r = 0; r <= rings; r++) {
             float phi = NT_PI * (float)r / (float)rings;
             sin_phi[r] = sinf(phi);
@@ -492,10 +505,10 @@ static void build_templates(void) {
     /* Cylinder: unit cylinder R=1 H=1, center at origin */
     {
         int segs = NT_SHAPE_SEGMENTS;
-        uint32_t nv = (uint32_t)((2 * (segs + 1)) + 2);
-        uint32_t ni = (uint32_t)(12 * segs);
-        float v[68 * 3];
-        uint16_t idx[384];
+        uint32_t nv = NT_SEG_CYL_NV;
+        uint32_t ni = NT_SEG_CYL_NI;
+        float v[NT_SEG_CYL_NV * 3];
+        uint16_t idx[NT_SEG_CYL_NI];
 
         int vi = 0;
         /* 0: top center */
@@ -556,12 +569,12 @@ static void build_templates(void) {
        Template is radius=1, body_half=0. Shader shifts hemispheres via p.y += w * body_half. */
     {
         int segs = NT_SHAPE_SEGMENTS;
-        int half_rings = segs / 4;                                   /* 8 */
-        int total_sections = (2 * half_rings) + 1;                   /* 17 */
-        uint32_t nv = (uint32_t)((total_sections + 1) * (segs + 1)); /* 594 */
-        uint32_t ni = (uint32_t)(total_sections * segs * 6);         /* 3264 */
-        float v[594 * 4];                                            /* vec4 per vertex */
-        uint16_t idx[3264];
+        int half_rings = NT_SEG_CAP_HALF;
+        int total_sections = NT_SEG_CAP_SECTIONS;
+        uint32_t nv = NT_SEG_CAP_NV;
+        uint32_t ni = NT_SEG_CAP_NI;
+        float v[NT_SEG_CAP_NV * 4]; /* vec4 per vertex */
+        uint16_t idx[NT_SEG_CAP_NI];
 
         int vi = 0;
         for (int row = 0; row <= total_sections; row++) {
