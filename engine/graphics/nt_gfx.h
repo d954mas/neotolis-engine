@@ -65,7 +65,7 @@ typedef enum {
 
 /* ---- Vertex layout ---- */
 
-#define NT_GFX_MAX_VERTEX_ATTRS 8
+#define NT_GFX_MAX_VERTEX_ATTRS 16
 
 typedef struct {
     uint8_t location;
@@ -85,6 +85,11 @@ typedef struct {
     uint32_t max_shaders;   /* default: 32 */
     uint32_t max_pipelines; /* default: 16 */
     uint32_t max_buffers;   /* default: 128 */
+    bool depth;             /* request depth buffer (default: true) */
+    bool stencil;           /* request stencil buffer (default: false) */
+    bool antialias;         /* MSAA (default: false) */
+    bool alpha;             /* transparent canvas/window (default: false) */
+    bool premultiplied_alpha; /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
 } nt_gfx_desc_t;
 
 typedef struct {

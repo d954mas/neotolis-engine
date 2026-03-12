@@ -53,6 +53,7 @@ static GLenum *s_buffer_targets;          /* GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY
 
 static uint32_t s_max_pipelines;
 static uint32_t s_max_buffers;
+static nt_gfx_desc_t s_init_desc; /* saved for context loss recreation */
 
 /* ---- GL state cache (skip redundant JS interop calls) ---- */
 
@@ -161,7 +162,7 @@ static GLenum map_buffer_usage(nt_buffer_usage_t u) {
 /* ==== Backend interface implementation ==== */
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
-    if (!nt_gfx_gl_ctx_create()) {
+    if (!nt_gfx_gl_ctx_create(desc)) {
         return false;
     }
 
@@ -176,6 +177,11 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
     nt_gfx_gl_cache_reset();
+
+    if (desc) {
+        s_init_desc = *desc;
+    }
+
     return true;
 }
 
@@ -510,7 +516,7 @@ void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle) {
 bool nt_gfx_backend_recreate_all_resources(void) {
     /* Destroy old context and create a fresh one. */
     nt_gfx_gl_ctx_destroy();
-    if (!nt_gfx_gl_ctx_create()) {
+    if (!nt_gfx_gl_ctx_create(&s_init_desc)) {
         return false;
     }
 

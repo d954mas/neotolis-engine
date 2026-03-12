@@ -222,8 +222,8 @@ void nt_gfx_shutdown(void) {
 
 /* ---- Context restoration ---- */
 
-/* Try to recreate the GL context and all resources.
-   Returns true on success, false if context is still unavailable. */
+/* TODO(assets): restore_context assumes synchronous recreation (all data in memory).
+   When assets load from packs/network, this needs staged recovery across frames. */
 static bool restore_context(void) {
     if (!nt_gfx_backend_recreate_all_resources()) {
         return false;
