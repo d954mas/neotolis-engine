@@ -1,6 +1,17 @@
 # Neotolis Engine
 
-Minimalist C17 game engine for Web/WASM (WebGL 2). Data-oriented architecture, code-first design. The builder does heavy work offline; the runtime is intentionally simple.
+Minimalist C17 game engine for Web/WASM (WebGL 2).
+
+**[Website](https://d954mas.github.io/neotolis-engine/)**
+
+## Philosophy
+
+1. **Code-first** — game controls the main loop. The engine gives building blocks, not a pipeline.
+2. **Explicit over implicit** — you see everything. No hidden behavior, no magic behind the scenes.
+3. **Keep it simple** — less code is better. Simplify further when possible.
+4. **Tiny size** — every byte counts. Binary size tracked on every PR.
+5. **Set of modules** — use only what you need.
+6. **Prebuilt assets** — source formats packed into binaries at build time. Runtime loads packs on demand, no parsers.
 
 ## Prerequisites
 
@@ -42,18 +53,24 @@ cmake --preset native-release
 cmake --build --preset native-release
 ```
 
+## Tests
+
+```bash
+ctest --test-dir build/_cmake/native-debug --output-on-failure
+```
+
 ## Running
 
 ### WASM (Hello example)
 
 ```bash
-emrun build/examples/hello/wasm-debug/index.html
+emrun build/_cmake/wasm-debug/examples/hello/index.html
 ```
 
 ### Native (Builder)
 
 ```bash
-./build/tools/builder/native-debug/builder
+./build/_cmake/native-debug/tools/builder/builder
 ```
 
 ## Project Structure
@@ -61,13 +78,13 @@ emrun build/examples/hello/wasm-debug/index.html
 ```
 neotolis-engine/
   engine/
-    runtime/
-      core/           -- nt_core.h/c, nt_types.h (init, shutdown, types)
-      platform/       -- platform abstraction layer (future)
-      memory/         -- memory management (future)
-      web/            -- shell.html, pre.js, library.js (Emscripten)
-    graphics/         -- rendering subsystem (future)
-    systems/          -- input, audio subsystems (future)
+    app/              -- application lifecycle (+ native/ web/ backends)
+    core/             -- nt_core, nt_types, nt_platform (init, shutdown, types)
+    input/            -- input system (+ native/ web/ stub/ backends)
+    log/              -- logging (+ default/ stub/ backends)
+    platform/web/     -- Emscripten glue (shell.html, pre.js, library.js)
+    time/             -- frame timing
+    window/           -- window management (+ native/ web/ backends)
   shared/
     include/          -- nt_formats.h (shared between runtime and builder)
   tools/
@@ -75,12 +92,13 @@ neotolis-engine/
   examples/
     hello/            -- minimal WASM example
   tests/
-    unit/             -- unit tests
-    wasm/             -- WASM integration tests
+    unit/             -- unit tests (core, app, input, log, time, window)
+    wasm/             -- WASM smoke tests
   deps/
-    cglm/             -- vendored cglm v0.9.6 (header-only math library)
-  scripts/
-    setup.sh          -- emsdk bootstrap script
+    cglm/             -- vendored cglm (header-only math library)
+    unity/            -- vendored Unity test framework
+  cmake/              -- CMake helper modules (warnings, nt_module, nt_shell)
+  scripts/            -- build & CI scripts (setup, tidy, size reports)
   docs/               -- specifications and architecture documents
 ```
 

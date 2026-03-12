@@ -1,24 +1,28 @@
 ---
 const principles = [
   {
-    title: 'Data-Oriented Design',
-    text: 'Sparse component storages, dense iteration, and predictable memory access patterns. Performance comes from how data is laid out, not from abstraction layers.',
+    title: 'Code-first',
+    text: 'Game controls the main loop. The engine gives building blocks, not a pipeline.',
   },
   {
-    title: 'Code-First Architecture',
-    text: 'Render loop, system order, builder rules, and orchestration logic are all defined in game code. No heavy declarative systems or configuration files.',
+    title: 'Explicit over implicit',
+    text: 'You see everything. No hidden behavior, no magic behind the scenes.',
   },
   {
-    title: 'No Hidden Schedulers',
-    text: 'No system registry, no hidden render graph, no automatic ECS magic. The game controls the order of execution, not the engine.',
+    title: 'Keep it simple',
+    text: 'Less code is better. Simplify further when possible.',
   },
   {
-    title: 'Composable Features',
-    text: 'The engine is a set of modules. Your game links only the features it needs. There is no monolithic pipeline to buy into.',
+    title: 'Tiny size',
+    text: 'Every byte counts. Binary size tracked on every PR.',
   },
   {
-    title: 'Builder Does the Heavy Work',
-    text: 'Offline builder validates and processes assets. Runtime stays simple -- it loads, resolves, and renders. No expensive validation in the hot path.',
+    title: 'Set of modules',
+    text: 'Use only what you need.',
+  },
+  {
+    title: 'Prebuilt assets',
+    text: 'Source formats packed into binaries at build time. Runtime loads packs on demand, no parsers.',
   },
 ];
 ---

@@ -73,7 +73,8 @@
       "WebFetch(domain:blat-blatnik.github.io)",
       "Bash(cmake --build build/_cmake/native-debug 2>&1 && timeout 12 build/examples/hello/native-debug/hello.exe 2>&1 || true)",
       "WebFetch(domain:emscripten.org)",
-      "WebFetch(domain:webglfundamentals.org)"
+      "WebFetch(domain:webglfundamentals.org)",
+      "Bash(tree -L 3 -I node_modules /c/projects/neotolis-engine/neotolis-engine-site/src 2>/dev/null || find /c/projects/neotolis-engine/neotolis-engine-site/src -not -path \"*/\\\\.*\" | head -20)"
     ]
   }
 }

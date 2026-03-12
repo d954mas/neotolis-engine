@@ -1,32 +1,32 @@
 export const features = [
   {
-    title: 'Code-First Architecture',
+    title: 'Code-first',
     description:
-      'Render loop, system order, and builder rules are all defined in game code. No heavy declarative systems.',
+      'Game controls the main loop. The engine gives building blocks, not a pipeline.',
   },
   {
-    title: 'No Hidden Magic',
+    title: 'Explicit over implicit',
     description:
-      'No hidden scheduler, no hidden render graph, no automatic ECS magic. Explicit over implicit.',
+      'You see everything. No hidden behavior, no magic behind the scenes.',
   },
   {
-    title: 'Composable Modules',
+    title: 'Keep it simple',
     description:
-      'Engine is a set of features. Your game links only the modules it needs. No monolithic pipeline.',
+      'Less code is better. Simplify further when possible.',
   },
   {
-    title: 'Tiny WASM Output',
+    title: 'Tiny size',
     description:
-      'Minimal runtime with compile-time limits and zero heap allocation in hot paths. Builds measure in kilobytes.',
+      'Every byte counts. Binary size tracked on every PR.',
   },
   {
-    title: 'Data-Oriented Design',
+    title: 'Set of modules',
     description:
-      'Sparse component storages, dense iteration, typed handles. Predictable memory access patterns.',
+      'Use only what you need.',
   },
   {
-    title: 'Builder Does the Heavy Work',
+    title: 'Prebuilt assets',
     description:
-      'Offline builder validates and processes assets. Runtime only loads, resolves, and renders.',
+      'Source formats packed into binaries at build time. Runtime loads packs on demand, no parsers.',
   },
 ];

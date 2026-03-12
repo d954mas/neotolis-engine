@@ -1,68 +1,62 @@
-﻿## Проект
+﻿## Project
 
-Neotolis Engine — минималистичный игровой движок на **C17** для **Web/WASM** (WebGL 2). Архитектура data-oriented, code-first. Builder делает тяжёлую работу офлайн, runtime намеренно простой.
+Neotolis Engine — minimalist **C17** game engine for **Web/WASM** (WebGL 2). Code-first, modular. Builder does heavy work offline; runtime is intentionally simple.
 
-## Источники истины
+## Source of truth
 
-При работе с кодом сначала сверяться со спецификацией:
+Check the spec before making code changes:
 
-- `docs/neotolis_engine_spec_1.md` — текущий архитектурный и технический baseline
+- `docs/neotolis_engine_spec_1.md` — current architectural and technical baseline
 
-Если код и спецификация расходятся, это нужно явно отметить в ответе и не молча "нормализовывать" поведение по догадке.
+If code and spec diverge, flag it explicitly in the response. Do not silently "normalize" behavior by guessing.
 
-## Сборка
+## Build
 
-- **Runtime**: WASM через Emscripten (`emcc`)
-- **Builder**: нативный C-бинарник
-- **Стандарт**: C17
-- **Причина выбора C17**: более широкая поддержка компиляторами, Emscripten toolchain и окружениями сборки
+- **Runtime**: WASM via Emscripten (`emcc`)
+- **Builder**: native C binary
+- **Standard**: C17
+- **Why C17**: broader compiler, Emscripten toolchain, and build environment support
 
-Если в репозитории появятся конкретные команды сборки, проверки и запуска, их нужно поддерживать в этом файле в актуальном состоянии.
+If specific build, check, or run commands appear in the repo, keep them up to date in this file.
 
-## Структура репозитория
+## Philosophy
 
-Сейчас репозиторий минимальный. На текущий момент подтверждено:
+1. **Code-first** — game controls the main loop. The engine gives building blocks, not a pipeline.
+2. **Explicit over implicit** — you see everything. No hidden behavior, no magic behind the scenes.
+3. **Keep it simple** — less code is better. Simplify further when possible.
+4. **Tiny size** — every byte counts. Binary size tracked on every PR.
+5. **Set of modules** — use only what you need.
+6. **Prebuilt assets** — source formats packed into binaries at build time. Runtime loads packs on demand, no parsers.
 
-- `docs/` — спецификации и архитектурные документы
-- `AGENTS.md` — локальные инструкции для агентов
-- `CLAUDE.md` — прокси-ссылка на `AGENTS.md`
+## Working principles
 
-Когда появятся директории runtime, builder, platform, renderer, game samples и тесты, их стоит перечислить здесь коротко и предметно.
+- **Data-oriented** for renderer and components (SoA, dense iteration, typed handles). Not everything — input, window, app stay simple structs.
+- **Platform abstraction** — all platform calls go through engine wrappers, never call browser/OS API directly from modules.
+- **No heap in hot path** — use compile-time limits (`#define`), preallocated storages, frame scratch memory.
+- **Builder validates, runtime is a safety net** — runtime checks only magic/version/type, handles fallbacks gracefully. No heavy validation at runtime.
 
-## Ключевые принципы
+## Change rules
 
-- **Движок = набор фич.** Игра подключает только нужные фичи. Нет монолитного pipeline.
-- **Игра управляет поведением.** Нет system registry, нет скрытого scheduler'а, нет render graph'а. Порядок систем, render passes, sort policy задаётся кодом игры.
-- **Code-first.** Render loop, system order, builder rules и конкретная orchestration-логика определяются кодом, а не тяжёлой декларативной системой.
-- **Все платформенные вызовы** только через обёртки движка, не напрямую через browser/OS API.
-- **Без heap в hot path.** Использовать compile-time лимиты (`#define`), preallocated storages, frame scratch memory.
-- **Builder валидирует, runtime — safety net.** Runtime проверяет только magic/version/type, корректно отрабатывает fallback'и и не пытается повторять тяжёлую валидацию builder'а.
-- **Минимум скрытой магии.** Не добавлять неявный scheduler, auto-registration, reflection-heavy механики и "умные" runtime-абстракции без явного запроса.
+- Do not introduce monolithic subsystems where the spec requires a composable module set.
+- Do not move game responsibility into the engine without explicit architectural justification.
+- When adding a new subsystem, verify it does not conflict with the spec on explicit-over-implicit and runtime simplicity.
+- If a temporary deviation from the spec is necessary, mark it explicitly in the change comment and the final report.
 
-## Правила изменений
+## Performance and hot path
 
-- Не вводить монолитные подсистемы там, где спецификация требует composable feature set.
-- Не переносить ответственность игры в движок без явного архитектурного основания.
-- Не добавлять heap allocation в кадр/итерацию/hot path, если это можно решить статическими лимитами или заранее выделенной памятью.
-- Не вызывать browser API, OS API или JS interop напрямую из произвольных модулей; использовать platform abstraction.
-- При добавлении новой подсистемы коротко проверять, не конфликтует ли она со спецификацией по explicit-over-implicit и runtime simplicity.
-- Если приходится делать временное отступление от спецификации, это нужно явно отметить в комментарии к изменению и в итоговом отчёте.
+- Hot path includes at minimum: frame loop, fixed update loop, render item generation, batching, resource resolve per frame, and any dense ECS/SoA iterations.
+- In hot path: no heap allocation, no hidden container realloc, no unnecessary copies, no heavy abstraction layers.
+- Prefer dense data, predictable memory access patterns, and simple control flow.
 
-## Performance и hot path
+## Pre-commit checks
 
-- Считать hot path'ом как минимум frame loop, fixed update loop, render item generation, batching, resource resolve на кадре и любые плотные ECS/SoA-итерации.
-- В hot path избегать heap allocation, скрытых контейнерных realloc, лишних копирований и тяжёлых универсальных abstraction layers.
-- Предпочитать плотные данные, предсказуемые проходы по памяти и простые структуры управления.
+**Before every commit and task completion:**
 
-## Проверки после изменений
+1. Build affected targets: `cmake --build build/_cmake/native-debug`
+2. Tests: `ctest --test-dir build/_cmake/native-debug --output-on-failure`
+3. Formatting: `clang-format --dry-run --Werror <affected .c/.h files>`
+4. Static analysis: `bash scripts/tidy.sh build/_cmake/native-debug`
 
-**Перед каждым коммитом и завершением задачи обязательно:**
+If any check fails — fix before committing. Do not commit code that hasn't passed all four checks.
 
-1. Сборка затронутых target'ов: `cmake --build build/_cmake/native-debug`
-2. Тесты: `ctest --test-dir build/_cmake/native-debug --output-on-failure`
-3. Форматирование: `clang-format --dry-run --Werror <затронутые .c/.h файлы>`
-4. Статический анализ: `bash scripts/tidy.sh build/_cmake/native-debug`
-
-Если какая-либо из проверок не проходит — исправить до коммита. Не коммитить код, не прошедший все четыре проверки.
-
-Если инфраструктура сборки или тестов отсутствует, это нужно прямо указать в итоговом ответе, а не подразумевать проверку.
+If build or test infrastructure is missing, state it explicitly in the response — do not imply the check was done.
