@@ -24,10 +24,10 @@ _Static_assert(NT_SHAPE_RENDERER_MAX_VERTICES <= 65535, "uint16 index limit");
 #define NT_SEG_CAP_NV ((NT_SEG_CAP_SECTIONS + 1) * (NT_SHAPE_SEGMENTS + 1))
 #define NT_SEG_CAP_NI (NT_SEG_CAP_SECTIONS * NT_SHAPE_SEGMENTS * 6)
 
-/* Convert quaternion to 3x3 rotation matrix (column-major). */
+/* Thin wrappers over cglm — cast float[] to cglm typedefs (versor=float[4],
+   mat3=float[3][3], vec3=float[3]).  Casts only strip const; types are
+   layout-identical.  No SIMD path for mat3/quat in cglm. */
 static void quat_to_mat3(const float q[4], float m[3][3]) { glm_quat_mat3((float *)q, (vec3 *)m); }
-
-/* Multiply mat3 by vec3: out = M * v (column-major). */
 static void mat3_mulv(const float m[3][3], const float v[3], float out[3]) { glm_mat3_mulv((vec3 *)m, (float *)v, out); }
 
 /* ---- Embedded shader source ---- */

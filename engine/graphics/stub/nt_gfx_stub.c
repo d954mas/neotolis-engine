@@ -77,16 +77,25 @@ void nt_gfx_backend_set_uniform_int(const char *name, int val) {
     (void)val;
 }
 
-void nt_gfx_backend_draw(uint32_t first_element, uint32_t num_elements, bool indexed) {
-    (void)first_element;
-    (void)num_elements;
-    (void)indexed;
+void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices) {
+    (void)first_vertex;
+    (void)num_vertices;
 }
 
-void nt_gfx_backend_draw_instanced(uint32_t first_element, uint32_t num_elements, bool indexed, uint32_t instance_count) {
-    (void)first_element;
-    (void)num_elements;
-    (void)indexed;
+void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices) {
+    (void)first_index;
+    (void)num_indices;
+}
+
+void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
+    (void)first_vertex;
+    (void)num_vertices;
+    (void)instance_count;
+}
+
+void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count) {
+    (void)first_index;
+    (void)num_indices;
     (void)instance_count;
 }
 

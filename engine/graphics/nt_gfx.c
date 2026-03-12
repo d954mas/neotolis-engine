@@ -591,7 +591,7 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
 
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
-    nt_gfx_backend_draw(first_vertex, num_vertices, false);
+    nt_gfx_backend_draw(first_vertex, num_vertices);
 }
 
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices) {
@@ -613,7 +613,7 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
     g_nt_gfx.frame_stats.indices += num_indices;
-    nt_gfx_backend_draw(first_index, num_indices, true);
+    nt_gfx_backend_draw_indexed(first_index, num_indices);
 }
 
 void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count) {
@@ -637,7 +637,7 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.indices += num_indices * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
-    nt_gfx_backend_draw_instanced(first_index, num_indices, true, instance_count);
+    nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count);
 }
 
 /* ---- Instance buffer ---- */

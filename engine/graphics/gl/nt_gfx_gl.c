@@ -337,13 +337,13 @@ void nt_gfx_backend_set_uniform_int(const char *name, int val) {
 /* ---- Draw calls ---- */
 
 /* TODO: support uint32 indices (GL_UNSIGNED_INT) via nt_index_type_t in nt_buffer_desc_t */
-void nt_gfx_backend_draw(uint32_t first_element, uint32_t num_elements, bool indexed) {
-    if (indexed) {
-        glDrawElements(GL_TRIANGLES, (GLsizei)num_elements, GL_UNSIGNED_SHORT,
-                       (void *)(uintptr_t)(first_element * sizeof(uint16_t))); // NOLINT(performance-no-int-to-ptr)
-    } else {
-        glDrawArrays(GL_TRIANGLES, (GLint)first_element, (GLsizei)num_elements);
-    }
+void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices) {
+    glDrawArrays(GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices);
+}
+
+void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices) {
+    glDrawElements(GL_TRIANGLES, (GLsizei)num_indices, GL_UNSIGNED_SHORT,
+                   (void *)(uintptr_t)(first_index * sizeof(uint16_t))); // NOLINT(performance-no-int-to-ptr)
 }
 
 /* ---- Resource management (shader / buffer / pipeline) ---- */
@@ -557,14 +557,14 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) {
     }
 }
 
-void nt_gfx_backend_draw_instanced(uint32_t first_element, uint32_t num_elements, bool indexed, uint32_t instance_count) {
-    if (indexed) {
-        glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)num_elements, GL_UNSIGNED_SHORT,
-                                (void *)(uintptr_t)(first_element * sizeof(uint16_t)), // NOLINT(performance-no-int-to-ptr)
-                                (GLsizei)instance_count);
-    } else {
-        glDrawArraysInstanced(GL_TRIANGLES, (GLint)first_element, (GLsizei)num_elements, (GLsizei)instance_count);
-    }
+void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
+    glDrawArraysInstanced(GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices, (GLsizei)instance_count);
+}
+
+void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count) {
+    glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)num_indices, GL_UNSIGNED_SHORT,
+                            (void *)(uintptr_t)(first_index * sizeof(uint16_t)), // NOLINT(performance-no-int-to-ptr)
+                            (GLsizei)instance_count);
 }
 
 /* ---- Context loss recovery ---- */
