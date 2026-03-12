@@ -281,6 +281,7 @@ void nt_gfx_begin_frame(void) {
     }
 
     s_gfx.render_state = NT_GFX_STATE_FRAME;
+    memset(&g_nt_gfx.frame_stats, 0, sizeof(g_nt_gfx.frame_stats));
     nt_gfx_backend_begin_frame();
 }
 
@@ -584,6 +585,8 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
         return;
     }
 
+    g_nt_gfx.frame_stats.draw_calls++;
+    g_nt_gfx.frame_stats.vertices += num_vertices;
     nt_gfx_backend_draw(first_vertex, num_vertices, false);
 }
 
@@ -603,6 +606,8 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices) {
         return;
     }
 
+    g_nt_gfx.frame_stats.draw_calls++;
+    g_nt_gfx.frame_stats.indices += num_indices;
     nt_gfx_backend_draw(first_index, num_indices, true);
 }
 

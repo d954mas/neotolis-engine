@@ -1,8 +1,8 @@
 #include "renderers/nt_shape_renderer.h"
 
 #include "core/nt_assert.h"
-#include "math/nt_math.h"
 #include "graphics/nt_gfx.h"
+#include "math/nt_math.h"
 
 #include <string.h>
 
@@ -797,34 +797,35 @@ void nt_shape_renderer_sphere(const float center[3], float radius, const float c
 
 void nt_shape_renderer_sphere_wire(const float center[3], float radius, const float color[4]) {
     int segs = s_shape.segments;
-    int rings = segs / 2;
 
-    /* Longitude lines: segs lines, each from pole to pole through rings */
-    for (int seg = 0; seg < segs; seg++) {
-        float theta = 2.0F * NT_PI * (float)seg / (float)segs;
-        float st = sinf(theta);
-        float ct = cosf(theta);
-        for (int ring = 0; ring < rings; ring++) {
-            float phi0 = NT_PI * (float)ring / (float)rings;
-            float phi1 = NT_PI * (float)(ring + 1) / (float)rings;
-            float a[3] = {center[0] + (radius * sinf(phi0) * ct), center[1] + (radius * cosf(phi0)), center[2] + (radius * sinf(phi0) * st)};
-            float b[3] = {center[0] + (radius * sinf(phi1) * ct), center[1] + (radius * cosf(phi1)), center[2] + (radius * sinf(phi1) * st)};
-            emit_wire_edge(a, b, color);
-        }
+    /* Draw 3 great circles (XZ, XY, YZ planes) for clean wireframe contour.
+       Each circle is a full loop of 'segs' edges using angle 0..2PI. */
+
+    /* Equator (XZ plane): y=0, circle in XZ */
+    for (int i = 0; i < segs; i++) {
+        float t0 = 2.0F * NT_PI * (float)i / (float)segs;
+        float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
+        float a[3] = {center[0] + (radius * cosf(t0)), center[1], center[2] + (radius * sinf(t0))};
+        float b[3] = {center[0] + (radius * cosf(t1)), center[1], center[2] + (radius * sinf(t1))};
+        emit_wire_edge(a, b, color);
     }
 
-    /* Latitude lines: (rings-1) lines (skip poles), each going around */
-    for (int ring = 1; ring < rings; ring++) {
-        float phi = NT_PI * (float)ring / (float)rings;
-        float sp = sinf(phi);
-        float cp = cosf(phi);
-        for (int seg = 0; seg < segs; seg++) {
-            float t0 = 2.0F * NT_PI * (float)seg / (float)segs;
-            float t1 = 2.0F * NT_PI * (float)((seg + 1) % segs) / (float)segs;
-            float a[3] = {center[0] + (radius * sp * cosf(t0)), center[1] + (radius * cp), center[2] + (radius * sp * sinf(t0))};
-            float b[3] = {center[0] + (radius * sp * cosf(t1)), center[1] + (radius * cp), center[2] + (radius * sp * sinf(t1))};
-            emit_wire_edge(a, b, color);
-        }
+    /* Great circle in XY plane: z=0, circle in XY */
+    for (int i = 0; i < segs; i++) {
+        float t0 = 2.0F * NT_PI * (float)i / (float)segs;
+        float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
+        float a[3] = {center[0] + (radius * cosf(t0)), center[1] + (radius * sinf(t0)), center[2]};
+        float b[3] = {center[0] + (radius * cosf(t1)), center[1] + (radius * sinf(t1)), center[2]};
+        emit_wire_edge(a, b, color);
+    }
+
+    /* Great circle in YZ plane: x=0, circle in YZ */
+    for (int i = 0; i < segs; i++) {
+        float t0 = 2.0F * NT_PI * (float)i / (float)segs;
+        float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
+        float a[3] = {center[0], center[1] + (radius * cosf(t0)), center[2] + (radius * sinf(t0))};
+        float b[3] = {center[0], center[1] + (radius * cosf(t1)), center[2] + (radius * sinf(t1))};
+        emit_wire_edge(a, b, color);
     }
 }
 
@@ -940,12 +941,12 @@ static void emit_cylinder_wire(const float center[3], float radius, float height
     int segs = s_shape.segments;
     float hy = height * 0.5F;
 
-    /* Compute ring positions */
+    /* Top and bottom circles */
     for (int i = 0; i < segs; i++) {
         float t0 = 2.0F * NT_PI * (float)i / (float)segs;
         float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
 
-        /* Top edge */
+        /* Top circle edge */
         float top_a_off[3] = {radius * cosf(t0), hy, radius * sinf(t0)};
         float top_b_off[3] = {radius * cosf(t1), hy, radius * sinf(t1)};
         if (rot) {
@@ -963,7 +964,7 @@ static void emit_cylinder_wire(const float center[3], float radius, float height
         float tb[3] = {center[0] + top_b_off[0], center[1] + top_b_off[1], center[2] + top_b_off[2]};
         emit_wire_edge(ta, tb, color);
 
-        /* Bottom edge */
+        /* Bottom circle edge */
         float bot_a_off[3] = {radius * cosf(t0), -hy, radius * sinf(t0)};
         float bot_b_off[3] = {radius * cosf(t1), -hy, radius * sinf(t1)};
         if (rot) {
@@ -980,8 +981,26 @@ static void emit_cylinder_wire(const float center[3], float radius, float height
         float ba[3] = {center[0] + bot_a_off[0], center[1] + bot_a_off[1], center[2] + bot_a_off[2]};
         float bb[3] = {center[0] + bot_b_off[0], center[1] + bot_b_off[1], center[2] + bot_b_off[2]};
         emit_wire_edge(ba, bb, color);
+    }
 
-        /* Vertical edge (from top_a to bottom_a) */
+    /* 4 vertical struts at 0, 90, 180, 270 degrees */
+    for (int i = 0; i < 4; i++) {
+        float theta = NT_PI * 0.5F * (float)i;
+        float top_off[3] = {radius * cosf(theta), hy, radius * sinf(theta)};
+        float bot_off[3] = {radius * cosf(theta), -hy, radius * sinf(theta)};
+        if (rot) {
+            float tmp[3];
+            quat_rotatev(rot, top_off, tmp);
+            top_off[0] = tmp[0];
+            top_off[1] = tmp[1];
+            top_off[2] = tmp[2];
+            quat_rotatev(rot, bot_off, tmp);
+            bot_off[0] = tmp[0];
+            bot_off[1] = tmp[1];
+            bot_off[2] = tmp[2];
+        }
+        float ta[3] = {center[0] + top_off[0], center[1] + top_off[1], center[2] + top_off[2]};
+        float ba[3] = {center[0] + bot_off[0], center[1] + bot_off[1], center[2] + bot_off[2]};
         emit_wire_edge(ta, ba, color);
     }
 }
@@ -1119,9 +1138,9 @@ static void emit_capsule_wire(const float center[3], float radius, float height,
         body_half = 0.0F;
     }
 
-    /* Longitude lines: segs lines, each spanning all sections */
-    for (int seg = 0; seg < segs; seg++) {
-        float theta = 2.0F * NT_PI * (float)seg / (float)segs;
+    /* 4 meridian profile lines at 0, 90, 180, 270 degrees */
+    for (int m = 0; m < 4; m++) {
+        float theta = NT_PI * 0.5F * (float)m;
         float ct = cosf(theta);
         float st = sinf(theta);
 
@@ -1143,9 +1162,9 @@ static void emit_capsule_wire(const float center[3], float radius, float height,
         }
     }
 
-    /* Latitude lines: skip poles (row 0 and row total_sections converge to points).
-       Emit rings for rows 1..total_sections-1. */
-    for (int row = 1; row < total_sections; row++) {
+    /* 2 latitude rings: top equator (row half_rings) and bottom equator (row half_rings+1) */
+    for (int r = 0; r < 2; r++) {
+        int row = (r == 0) ? half_rings : half_rings + 1;
         float y_off;
         float rr;
         capsule_row_params(row, half_rings, body_half, radius, &y_off, &rr);

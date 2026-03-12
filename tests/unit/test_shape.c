@@ -305,12 +305,11 @@ void test_shape_sphere_fill_counts(void) {
 void test_shape_sphere_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {0, 0, 1, 1};
-    /* Longitude: 32 lines x 16 edges each = 512 edges
-       Latitude: 15 rings x 32 edges each = 480 edges
-       Total: 992 edges x 4 verts = 3968, 992 edges x 6 indices = 5952 */
+    /* 3 great circles: equator (32 edges) + XY meridian (32 edges) + YZ meridian (32 edges)
+       Total: 96 edges x 4 verts = 384, 96 x 6 = 576 */
     nt_shape_renderer_sphere_wire(center, 1.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(3968, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(5952, nt_shape_renderer_test_index_count());
+    TEST_ASSERT_EQUAL_UINT32(384, nt_shape_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(576, nt_shape_renderer_test_index_count());
 }
 
 /* ---- 23. Circle rot vertex count matches base ---- */
@@ -356,11 +355,11 @@ void test_shape_cylinder_fill_counts(void) {
 void test_shape_cylinder_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {1, 1, 0, 1};
-    /* 3*N = 96 edges: N top + N bottom + N vertical
-       96 * 4 = 384 verts, 96 * 6 = 576 indices */
+    /* Top circle (32) + bottom circle (32) + 4 vertical struts = 68 edges
+       68 * 4 = 272 verts, 68 * 6 = 408 indices */
     nt_shape_renderer_cylinder_wire(center, 1.0F, 2.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(384, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(576, nt_shape_renderer_test_index_count());
+    TEST_ASSERT_EQUAL_UINT32(272, nt_shape_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(408, nt_shape_renderer_test_index_count());
 }
 
 /* ---- 27. Capsule fill counts (32 segments) ---- */
@@ -382,12 +381,12 @@ void test_shape_capsule_fill_counts(void) {
 void test_shape_capsule_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {0, 1, 1, 1};
-    /* Longitude: 32 lines x 17 edges each = 544 edges
-       Latitude: 16 rings x 32 edges each = 512 edges
-       Total: 1056 edges x 4 verts = 4224, 1056 * 6 = 6336 */
+    /* 4 meridians x 17 edges = 68 edges
+       2 latitude rings x 32 edges = 64 edges
+       Total: 132 edges x 4 verts = 528, 132 * 6 = 792 */
     nt_shape_renderer_capsule_wire(center, 0.5F, 2.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(4224, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(6336, nt_shape_renderer_test_index_count());
+    TEST_ASSERT_EQUAL_UINT32(528, nt_shape_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(792, nt_shape_renderer_test_index_count());
 }
 
 /* ---- 29. Mesh fill copies geometry into batch ---- */

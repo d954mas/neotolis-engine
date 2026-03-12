@@ -128,9 +128,18 @@ typedef struct {
     float clear_depth; /* typically 1.0f; zero-init gives 0.0 which fails all depth tests */
 } nt_pass_desc_t;
 
+/* ---- Frame statistics ---- */
+
+typedef struct {
+    uint32_t draw_calls;
+    uint32_t vertices;
+    uint32_t indices;
+} nt_gfx_frame_stats_t;
+
 /* ---- Global state ---- */
 
 typedef struct {
+    nt_gfx_frame_stats_t frame_stats;
     bool context_lost;
     bool context_restored;
     bool initialized;

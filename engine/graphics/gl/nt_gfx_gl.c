@@ -403,19 +403,15 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
         return 0; /* no free slots */
     }
 
-    /* Create VAO with vertex layout */
+    /* Create VAO with vertex layout.
+     * Only enable attributes here — actual glVertexAttribPointer calls happen
+     * in bind_vertex_buffer() once a buffer is bound.  WebGL requires a bound
+     * ARRAY_BUFFER for non-zero offsets, so calling it here would be an error. */
     GLuint vao;
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao);
     for (uint8_t i = 0; i < desc->layout.attr_count; i++) {
-        const nt_vertex_attr_t *attr = &desc->layout.attrs[i];
-        GLint size;
-        GLenum type;
-        GLboolean normalized;
-        get_format_params(attr->format, &size, &type, &normalized);
-        glEnableVertexAttribArray(attr->location);
-        glVertexAttribPointer(attr->location, size, type, normalized, (GLsizei)desc->layout.stride,
-                              (void *)(uintptr_t)attr->offset); // NOLINT(performance-no-int-to-ptr)
+        glEnableVertexAttribArray(desc->layout.attrs[i].location);
     }
     glBindVertexArray(0);
 

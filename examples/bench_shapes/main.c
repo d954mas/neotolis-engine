@@ -17,32 +17,138 @@
 
 #define BATCH 50
 
+/* Room dimensions */
+#define ROOM_W 20.0F
+#define ROOM_H 8.0F
+#define ROOM_D 20.0F
+#define GRID_STEP 1.0F
+#define MIN_DIST 2.0F /* minimum distance from camera to shapes */
+
 static nt_accumulator_t s_acc;
 static int s_mul = 1;
 
-/* timing stats — reset every second */
+/* timing stats */
 static float s_dt_max;
 static float s_dt_sum;
 static int s_dt_count;
 static float s_log_timer;
-static float s_orbit;
 
-/* ---- deterministic pseudo-random scatter ---- */
+/* FPS camera */
+static float s_cam_pos[3];
+static float s_cam_yaw;
+static float s_cam_pitch;
+#define MOVE_SPEED 5.0F
+#define MOUSE_SENS 0.003F
 
-static float scatter(int i, int axis) {
-    uint32_t h = (uint32_t)i * 2654435761u + (uint32_t)axis * 2246822519u;
-    return ((float)(h & 0xFFFFu) / 65535.0F) * 20.0F - 10.0F;
+/* ---- deterministic pseudo-random ---- */
+
+static uint32_t hash_int(int i, int salt) {
+    uint32_t h = ((uint32_t)i * 2654435761U) + ((uint32_t)salt * 2246822519U);
+    h ^= h >> 16;
+    h *= 0x45d9f3bU;
+    return h;
+}
+
+/* Returns value in [lo, hi] */
+static float rand_range(int i, int salt, float lo, float hi) {
+    uint32_t h = hash_int(i, salt);
+    return lo + (((float)(h & 0xFFFFU) / 65535.0F) * (hi - lo));
+}
+
+/* Generate position inside room, at least MIN_DIST from origin (camera) */
+static void rand_pos(int i, int salt, float out[3]) {
+    for (int attempt = 0; attempt < 8; attempt++) {
+        int s = salt + (attempt * 100);
+        out[0] = rand_range(i, s, -ROOM_W * 0.45F, ROOM_W * 0.45F);
+        out[1] = rand_range(i, s + 1, 0.3F, ROOM_H - 0.3F);
+        out[2] = rand_range(i, s + 2, -ROOM_D * 0.45F, ROOM_D * 0.45F);
+        float dy = out[1] - (ROOM_H * 0.5F);
+        float d2 = (out[0] * out[0]) + (dy * dy) + (out[2] * out[2]);
+        if (d2 > MIN_DIST * MIN_DIST) {
+            return;
+        }
+    }
+}
+
+/* ---- draw room ---- */
+
+static void draw_room(void) {
+    float hw = ROOM_W * 0.5F;
+    float hd = ROOM_D * 0.5F;
+
+    /* Floor — dark gray */
+    float floor_col[4] = {0.15F, 0.15F, 0.18F, 1.0F};
+    float floor_pos[3] = {0, 0, 0};
+    float floor_sz[2] = {ROOM_W, ROOM_D};
+    float floor_rot[4] = {0.7071068F, 0, 0, 0.7071068F}; /* 90 deg around X */
+    nt_shape_renderer_rect_rot(floor_pos, floor_sz, floor_rot, floor_col);
+
+    /* Floor grid */
+    float grid_col[4] = {0.25F, 0.25F, 0.30F, 1.0F};
+    int grid_nx = (int)(ROOM_W / GRID_STEP) + 1;
+    int grid_nz = (int)(ROOM_D / GRID_STEP) + 1;
+    for (int ix = 0; ix < grid_nx; ix++) {
+        float x = -hw + ((float)ix * GRID_STEP);
+        float a[3] = {x, 0.001F, -hd};
+        float b[3] = {x, 0.001F, hd};
+        nt_shape_renderer_line(a, b, grid_col);
+    }
+    for (int iz = 0; iz < grid_nz; iz++) {
+        float z = -hd + ((float)iz * GRID_STEP);
+        float a[3] = {-hw, 0.001F, z};
+        float b[3] = {hw, 0.001F, z};
+        nt_shape_renderer_line(a, b, grid_col);
+    }
+
+    /* Ceiling — blue-gray */
+    float ceil_col[4] = {0.12F, 0.12F, 0.20F, 1.0F};
+    float ceil_pos[3] = {0, ROOM_H, 0};
+    nt_shape_renderer_rect_rot(ceil_pos, floor_sz, floor_rot, ceil_col);
+
+    /* Walls — warm gray */
+    float wall_col[4] = {0.18F, 0.16F, 0.14F, 1.0F};
+
+    /* Front wall (-Z) */
+    {
+        float pos[3] = {0, ROOM_H * 0.5F, -hd};
+        float sz[2] = {ROOM_W, ROOM_H};
+        nt_shape_renderer_rect(pos, sz, wall_col);
+    }
+    /* Back wall (+Z) */
+    {
+        float pos[3] = {0, ROOM_H * 0.5F, hd};
+        float sz[2] = {ROOM_W, ROOM_H};
+        nt_shape_renderer_rect(pos, sz, wall_col);
+    }
+    /* Left wall (-X): rotated 90 around Y */
+    {
+        float pos[3] = {-hw, ROOM_H * 0.5F, 0};
+        float sz[2] = {ROOM_D, ROOM_H};
+        float rot[4] = {0, 0.7071068F, 0, 0.7071068F};
+        nt_shape_renderer_rect_rot(pos, sz, rot, wall_col);
+    }
+    /* Right wall (+X) */
+    {
+        float pos[3] = {hw, ROOM_H * 0.5F, 0};
+        float sz[2] = {ROOM_D, ROOM_H};
+        float rot[4] = {0, 0.7071068F, 0, 0.7071068F};
+        nt_shape_renderer_rect_rot(pos, sz, rot, wall_col);
+    }
 }
 
 /* ---- draw all shapes ---- */
 
-static void draw_shapes(float t) {
-    int n = s_mul * BATCH;
+/* Build a deterministic random Y-axis quaternion from shape index + salt */
+static void rand_rot(int i, int salt, float rot[4]) {
+    float angle = rand_range(i, salt, 0.0F, 2.0F * NT_PI);
+    rot[0] = 0.0F;
+    rot[1] = sinf(angle * 0.5F);
+    rot[2] = 0.0F;
+    rot[3] = cosf(angle * 0.5F);
+}
 
-    float angle = t * 0.5F;
-    float sa = sinf(angle * 0.5F);
-    float ca = cosf(angle * 0.5F);
-    float rot[4] = {0, sa, 0, ca};
+static void draw_shapes(void) {
+    int n = s_mul * BATCH;
 
     float red[4] = {1.0F, 0.3F, 0.2F, 1.0F};
     float grn[4] = {0.2F, 1.0F, 0.3F, 1.0F};
@@ -55,18 +161,23 @@ static void draw_shapes(float t) {
 
     /* Lines */
     for (int i = 0; i < n; i++) {
-        float a[3] = {scatter(i, 0), scatter(i, 1), scatter(i, 2)};
+        float a[3];
+        rand_pos(i, 0, a);
         float b[3] = {a[0] + 0.5F, a[1] + 0.5F, a[2]};
-        if (i & 1)
+        if (i & 1) {
             nt_shape_renderer_line(a, b, red);
-        else
+        } else {
             nt_shape_renderer_line_col(a, b, red, blu);
+        }
     }
 
-    /* Rects: fill / wire / fill+rot / wire+rot */
+    /* Rects */
     for (int i = 0; i < n; i++) {
-        float pos[3] = {scatter(i + 1000, 0), scatter(i + 1000, 1), scatter(i + 1000, 2)};
+        float pos[3];
+        rand_pos(i, 1000, pos);
         float sz[2] = {0.4F, 0.4F};
+        float rot[4];
+        rand_rot(i, 1000, rot);
         switch (i & 3) {
         case 0:
             nt_shape_renderer_rect(pos, sz, grn);
@@ -80,36 +191,42 @@ static void draw_shapes(float t) {
         case 3:
             nt_shape_renderer_rect_wire_rot(pos, sz, rot, grn);
             break;
+        default:
+            break;
         }
     }
 
-    /* Triangles: fill / wire / per-vert / wire per-vert */
+    /* Triangles */
     for (int i = 0; i < n; i++) {
-        float cx = scatter(i + 2000, 0);
-        float cy = scatter(i + 2000, 1);
-        float cz = scatter(i + 2000, 2);
-        float a[3] = {cx, cy + 0.3F, cz};
-        float b[3] = {cx - 0.25F, cy - 0.2F, cz};
-        float c[3] = {cx + 0.25F, cy - 0.2F, cz};
+        float c[3];
+        rand_pos(i, 2000, c);
+        float a[3] = {c[0], c[1] + 0.3F, c[2]};
+        float b[3] = {c[0] - 0.25F, c[1] - 0.2F, c[2]};
+        float d[3] = {c[0] + 0.25F, c[1] - 0.2F, c[2]};
         switch (i & 3) {
         case 0:
-            nt_shape_renderer_triangle(a, b, c, blu);
+            nt_shape_renderer_triangle(a, b, d, blu);
             break;
         case 1:
-            nt_shape_renderer_triangle_wire(a, b, c, blu);
+            nt_shape_renderer_triangle_wire(a, b, d, blu);
             break;
         case 2:
-            nt_shape_renderer_triangle_col(a, b, c, red, grn, blu);
+            nt_shape_renderer_triangle_col(a, b, d, red, grn, blu);
             break;
         case 3:
-            nt_shape_renderer_triangle_wire_col(a, b, c, red, grn, blu);
+            nt_shape_renderer_triangle_wire_col(a, b, d, red, grn, blu);
+            break;
+        default:
             break;
         }
     }
 
-    /* Circles: fill / wire / fill+rot / wire+rot */
+    /* Circles */
     for (int i = 0; i < n; i++) {
-        float ctr[3] = {scatter(i + 3000, 0), scatter(i + 3000, 1), scatter(i + 3000, 2)};
+        float ctr[3];
+        rand_pos(i, 3000, ctr);
+        float rot[4];
+        rand_rot(i, 3000, rot);
         switch (i & 3) {
         case 0:
             nt_shape_renderer_circle(ctr, 0.3F, yel);
@@ -123,13 +240,18 @@ static void draw_shapes(float t) {
         case 3:
             nt_shape_renderer_circle_wire_rot(ctr, 0.3F, rot, yel);
             break;
+        default:
+            break;
         }
     }
 
-    /* Cubes: fill / wire / fill+rot / wire+rot */
+    /* Cubes */
     for (int i = 0; i < n; i++) {
-        float ctr[3] = {scatter(i + 4000, 0), scatter(i + 4000, 1), scatter(i + 4000, 2)};
+        float ctr[3];
+        rand_pos(i, 4000, ctr);
         float sz[3] = {0.3F, 0.3F, 0.3F};
+        float rot[4];
+        rand_rot(i, 4000, rot);
         switch (i & 3) {
         case 0:
             nt_shape_renderer_cube(ctr, sz, cyn);
@@ -143,21 +265,31 @@ static void draw_shapes(float t) {
         case 3:
             nt_shape_renderer_cube_wire_rot(ctr, sz, rot, cyn);
             break;
+        default:
+            break;
         }
     }
 
-    /* Spheres: fill / wire */
+    /* Spheres */
     for (int i = 0; i < n; i++) {
-        float ctr[3] = {scatter(i + 5000, 0), scatter(i + 5000, 1), scatter(i + 5000, 2)};
-        if (i & 1)
+        float ctr[3];
+        rand_pos(i, 5000, ctr);
+        switch (i & 1) {
+        case 0:
             nt_shape_renderer_sphere(ctr, 0.2F, pur);
-        else
+            break;
+        default:
             nt_shape_renderer_sphere_wire(ctr, 0.2F, pur);
+            break;
+        }
     }
 
-    /* Cylinders: fill / wire / fill+rot / wire+rot */
+    /* Cylinders */
     for (int i = 0; i < n; i++) {
-        float ctr[3] = {scatter(i + 6000, 0), scatter(i + 6000, 1), scatter(i + 6000, 2)};
+        float ctr[3];
+        rand_pos(i, 6000, ctr);
+        float rot[4];
+        rand_rot(i, 6000, rot);
         switch (i & 3) {
         case 0:
             nt_shape_renderer_cylinder(ctr, 0.15F, 0.5F, org);
@@ -171,12 +303,17 @@ static void draw_shapes(float t) {
         case 3:
             nt_shape_renderer_cylinder_wire_rot(ctr, 0.15F, 0.5F, rot, org);
             break;
+        default:
+            break;
         }
     }
 
-    /* Capsules: fill / wire / fill+rot / wire+rot */
+    /* Capsules */
     for (int i = 0; i < n; i++) {
-        float ctr[3] = {scatter(i + 7000, 0), scatter(i + 7000, 1), scatter(i + 7000, 2)};
+        float ctr[3];
+        rand_pos(i, 7000, ctr);
+        float rot[4];
+        rand_rot(i, 7000, rot);
         switch (i & 3) {
         case 0:
             nt_shape_renderer_capsule(ctr, 0.1F, 0.4F, wht);
@@ -189,6 +326,8 @@ static void draw_shapes(float t) {
             break;
         case 3:
             nt_shape_renderer_capsule_wire_rot(ctr, 0.1F, 0.4F, rot, wht);
+            break;
+        default:
             break;
         }
     }
@@ -218,20 +357,64 @@ static void frame(void) {
 
     if (s_log_timer >= 1.0F) {
         float avg = s_dt_sum / (float)s_dt_count;
-        printf("[bench] shapes=%-6d avg=%.2fms  max=%.2fms  fps=%.0f\n", s_mul * BATCH * 8, (double)(avg * 1000.0F), (double)(s_dt_max * 1000.0F), (double)(1.0F / avg));
+        nt_gfx_frame_stats_t stats = g_nt_gfx.frame_stats;
+        printf("[bench] shapes=%-6d avg=%.2fms  max=%.2fms  fps=%.0f  dc=%u  verts=%u  idx=%u\n", s_mul * BATCH * 8, (double)(avg * 1000.0F), (double)(s_dt_max * 1000.0F), (double)(1.0F / avg),
+               stats.draw_calls, stats.vertices, stats.indices);
         s_dt_max = 0.0F;
         s_dt_sum = 0.0F;
         s_dt_count = 0;
         s_log_timer -= 1.0F;
     }
 
-    /* Camera orbit */
-    s_orbit += dt * 0.3F;
-    float dist = 15.0F;
-    float pitch = 0.4F;
-    float cp = cosf(pitch);
-    vec3 eye = {dist * cp * sinf(s_orbit), dist * sinf(pitch), dist * cp * cosf(s_orbit)};
-    vec3 center = {0, 0, 0};
+    /* FPS camera: mouse look when left or right button held */
+    if (nt_input_mouse_is_down(NT_BUTTON_LEFT) || nt_input_mouse_is_down(NT_BUTTON_RIGHT)) {
+        s_cam_yaw -= g_nt_input.pointers[0].dx * MOUSE_SENS;
+        s_cam_pitch -= g_nt_input.pointers[0].dy * MOUSE_SENS;
+        /* Clamp pitch to avoid flipping */
+        if (s_cam_pitch > 1.5F) {
+            s_cam_pitch = 1.5F;
+        }
+        if (s_cam_pitch < -1.5F) {
+            s_cam_pitch = -1.5F;
+        }
+    }
+
+    /* Forward/right vectors from yaw+pitch (fly mode: W/S follow look direction) */
+    float cp = cosf(s_cam_pitch);
+    float sp = sinf(s_cam_pitch);
+    float fwd_x = sinf(s_cam_yaw) * cp;
+    float fwd_y = sp;
+    float fwd_z = cosf(s_cam_yaw) * cp;
+    float rgt_x = -cosf(s_cam_yaw);
+    float rgt_z = sinf(s_cam_yaw);
+
+    /* WASD movement (fly camera) */
+    float speed = MOVE_SPEED * dt;
+    if (nt_input_key_is_down(NT_KEY_W)) {
+        s_cam_pos[0] += fwd_x * speed;
+        s_cam_pos[1] += fwd_y * speed;
+        s_cam_pos[2] += fwd_z * speed;
+    }
+    if (nt_input_key_is_down(NT_KEY_S)) {
+        s_cam_pos[0] -= fwd_x * speed;
+        s_cam_pos[1] -= fwd_y * speed;
+        s_cam_pos[2] -= fwd_z * speed;
+    }
+    if (nt_input_key_is_down(NT_KEY_D)) {
+        s_cam_pos[0] += rgt_x * speed;
+        s_cam_pos[2] += rgt_z * speed;
+    }
+    if (nt_input_key_is_down(NT_KEY_A)) {
+        s_cam_pos[0] -= rgt_x * speed;
+        s_cam_pos[2] -= rgt_z * speed;
+    }
+
+    /* Look direction */
+    float look_x = fwd_x;
+    float look_y = fwd_y;
+    float look_z = fwd_z;
+    vec3 eye = {s_cam_pos[0], s_cam_pos[1], s_cam_pos[2]};
+    vec3 center = {s_cam_pos[0] + look_x, s_cam_pos[1] + look_y, s_cam_pos[2] + look_z};
     vec3 up = {0, 1, 0};
 
     float aspect = 1.0F;
@@ -239,19 +422,22 @@ static void frame(void) {
         aspect = (float)g_nt_window.fb_width / (float)g_nt_window.fb_height;
     }
 
-    mat4 view, proj, vp;
+    mat4 view;
+    mat4 proj;
+    mat4 vp;
     glm_lookat(eye, center, up, view);
-    glm_perspective(glm_rad(60.0F), aspect, 0.1F, 100.0F, proj);
+    glm_perspective(glm_rad(75.0F), aspect, 0.1F, 50.0F, proj);
     glm_mat4_mul(proj, view, vp);
 
     /* Render */
     nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.08F, 0.08F, 0.1F, 1.0F}, .clear_depth = 1.0F});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.05F, 0.05F, 0.08F, 1.0F}, .clear_depth = 1.0F});
 
     nt_shape_renderer_set_vp((float *)vp);
     nt_shape_renderer_set_depth(true);
 
-    draw_shapes(g_nt_app.time);
+    draw_room();
+    draw_shapes();
 
     nt_shape_renderer_flush();
     nt_gfx_end_pass();
@@ -284,7 +470,13 @@ int main(void) {
     nt_platform_web_loading_complete();
 #endif
 
+    /* Start camera at room center, eye level */
+    s_cam_pos[0] = 0.0F;
+    s_cam_pos[1] = ROOM_H * 0.5F;
+    s_cam_pos[2] = 0.0F;
+
     printf("Shape Renderer Benchmark\n");
+    printf("  WASD = move | Mouse+LMB/RMB = look\n");
     printf("  SPACE = +50 shapes per type | ESC = quit\n");
     printf("  Starting: %d per type, %d total\n", BATCH, BATCH * 8);
 
