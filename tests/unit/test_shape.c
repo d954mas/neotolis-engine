@@ -41,21 +41,18 @@ void test_shape_flush_empty(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_index_count());
 }
 
-/* ---- 3. set_vp extracts camera position ---- */
+/* ---- 3. set_cam_pos sets camera position ---- */
 
 void test_shape_set_vp_extracts_cam_pos(void) {
-    /* Identity VP -> camera at origin */
-    float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-    nt_shape_renderer_set_vp(identity);
+    float pos1[3] = {0.0F, 0.0F, 0.0F};
+    nt_shape_renderer_set_cam_pos(pos1);
     const float *cam = nt_shape_renderer_test_cam_pos();
     TEST_ASSERT_TRUE(float_near(cam[0], 0.0F, 0.001F));
     TEST_ASSERT_TRUE(float_near(cam[1], 0.0F, 0.001F));
     TEST_ASSERT_TRUE(float_near(cam[2], 0.0F, 0.001F));
 
-    /* Translation matrix (column-major): T = I with col3=(5,3,-2,1).
-       inv(T) has col3=(-5,-3,2,1). Camera pos = inv(VP) col3. */
-    float vp_translated[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, 3, -2, 1};
-    nt_shape_renderer_set_vp(vp_translated);
+    float pos2[3] = {-5.0F, -3.0F, 2.0F};
+    nt_shape_renderer_set_cam_pos(pos2);
     cam = nt_shape_renderer_test_cam_pos();
     TEST_ASSERT_TRUE(float_near(cam[0], -5.0F, 0.001F));
     TEST_ASSERT_TRUE(float_near(cam[1], -3.0F, 0.001F));

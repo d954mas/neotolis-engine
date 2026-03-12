@@ -32,6 +32,8 @@ static float s_dt_max;
 static float s_dt_sum;
 static int s_dt_count;
 static float s_log_timer;
+static float s_render_max;
+static float s_render_sum;
 
 /* FPS camera */
 static float s_cam_pos[3];
@@ -68,6 +70,76 @@ static void rand_pos(int i, int salt, float out[3]) {
             return;
         }
     }
+}
+
+/* ---- stroke font: draw a letter on the floor (XZ plane, y=0.002) ---- */
+
+/* Each letter is a sequence of line segments in a 0..1 x 0..1 cell.
+   Encoded as pairs of (x0,z0, x1,z1). Terminated by -1. */
+static void draw_letter(float ox, float oz, float scale, const float *strokes, int count, const float color[4]) {
+    for (int i = 0; i < count; i++) {
+        int si = i * 4;
+        float x0 = ox + (strokes[si] * scale);
+        float z0 = oz - (strokes[si + 1] * scale); /* negate Z to flip letters right-side-up */
+        float x1 = ox + (strokes[si + 2] * scale);
+        float z1 = oz - (strokes[si + 3] * scale);
+        float a[3] = {x0, 0.002F, z0};
+        float b[3] = {x1, 0.002F, z1};
+        nt_shape_renderer_line(a, b, color);
+    }
+}
+
+/* Stroke data: each letter in a 1x1.4 cell (width x height) */
+/* clang-format off */
+static const float s_N[] = {0,1.4F, 0,0, 0,1.4F, 1,0, 1,0, 1,1.4F};
+static const float s_E[] = {0,0, 0,1.4F, 0,1.4F, 1,1.4F, 0,0.7F, 0.8F,0.7F, 0,0, 1,0};
+static const float s_O[] = {0,0, 1,0, 1,0, 1,1.4F, 1,1.4F, 0,1.4F, 0,1.4F, 0,0};
+static const float s_T[] = {0,1.4F, 1,1.4F, 0.5F,1.4F, 0.5F,0};
+static const float s_L[] = {0,1.4F, 0,0, 0,0, 1,0};
+static const float s_I[] = {0.5F,1.4F, 0.5F,0};
+static const float s_S[] = {1,1.4F, 0,1.4F, 0,1.4F, 0,0.7F, 0,0.7F, 1,0.7F, 1,0.7F, 1,0, 1,0, 0,0};
+static const float s_G[] = {1,1.4F, 0,1.4F, 0,1.4F, 0,0, 0,0, 1,0, 1,0, 1,0.7F, 1,0.7F, 0.5F,0.7F};
+/* clang-format on */
+
+static void draw_floor_text(void) {
+    float color[4] = {0.6F, 0.7F, 1.0F, 1.0F};
+    nt_shape_renderer_set_line_width(0.05F);
+    float scale = 1.2F;
+    float gap = 0.3F;
+    float cell_w = scale + gap;
+
+    /* "NEOTOLIS" — 8 letters */
+    /* "ENGINE"  — 6 letters */
+    /* Center both lines */
+    float line1_w = (8.0F * cell_w) - gap;
+    float line2_w = (6.0F * cell_w) - gap;
+    float x1_start = -line1_w * 0.5F;
+    float x2_start = -line2_w * 0.5F;
+    float z_line1 = -1.0F; /* NEOTOLIS — closer when looking down */
+    float z_line2 = 1.0F;  /* ENGINE — further */
+
+    /* NEOTOLIS */
+    struct {
+        const float *strokes;
+        int count;
+    } word1[] = {
+        {s_N, 3}, {s_E, 4}, {s_O, 4}, {s_T, 2}, {s_O, 4}, {s_L, 2}, {s_I, 1}, {s_S, 5},
+    };
+    for (int i = 0; i < 8; i++) {
+        draw_letter(x1_start + ((float)i * cell_w), z_line1, scale, word1[i].strokes, word1[i].count, color);
+    }
+
+    /* ENGINE */
+    struct {
+        const float *strokes;
+        int count;
+    } word2[] = {
+        {s_E, 4}, {s_N, 3}, {s_G, 5}, {s_I, 1}, {s_N, 3}, {s_E, 4},
+    };
+    for (int i = 0; i < 6; i++) {
+        draw_letter(x2_start + ((float)i * cell_w), z_line2, scale, word2[i].strokes, word2[i].count, color);
+    }
+    nt_shape_renderer_set_line_width(0.02F); /* restore default */
 }
 
 /* ---- draw room ---- */
@@ -341,8 +413,8 @@ static void frame(void) {
     float dt = g_nt_app.dt;
     nt_accumulator_update(&s_acc, dt);
 
-    /* Space = +50 of each shape type */
-    if (nt_input_key_is_pressed(NT_KEY_SPACE)) {
+    /* F = +50 of each shape type */
+    if (nt_input_key_is_pressed(NT_KEY_F)) {
         s_mul++;
         printf("[bench] +50 each => %d per type, %d total shapes\n", s_mul * BATCH, s_mul * BATCH * 8);
     }
@@ -357,12 +429,15 @@ static void frame(void) {
 
     if (s_log_timer >= 1.0F) {
         float avg = s_dt_sum / (float)s_dt_count;
+        float render_avg = s_render_sum / (float)s_dt_count;
         nt_gfx_frame_stats_t stats = g_nt_gfx.frame_stats;
-        printf("[bench] shapes=%-6d avg=%.2fms  max=%.2fms  fps=%.0f  dc=%u  verts=%u  idx=%u\n", s_mul * BATCH * 8, (double)(avg * 1000.0F), (double)(s_dt_max * 1000.0F), (double)(1.0F / avg),
-               stats.draw_calls, stats.vertices, stats.indices);
+        printf("[bench] shapes=%-6d avg=%.2fms  max=%.2fms  render=%.2f/%.2fms  fps=%.0f  dc=%u  verts=%u  idx=%u\n", s_mul * BATCH * 8, (double)(avg * 1000.0F), (double)(s_dt_max * 1000.0F),
+               (double)render_avg, (double)s_render_max, (double)(1.0F / avg), stats.draw_calls, stats.vertices, stats.indices);
         s_dt_max = 0.0F;
         s_dt_sum = 0.0F;
         s_dt_count = 0;
+        s_render_max = 0.0F;
+        s_render_sum = 0.0F;
         s_log_timer -= 1.0F;
     }
 
@@ -408,6 +483,12 @@ static void frame(void) {
         s_cam_pos[0] -= rgt_x * speed;
         s_cam_pos[2] -= rgt_z * speed;
     }
+    if (nt_input_key_is_down(NT_KEY_SPACE)) {
+        s_cam_pos[1] += speed;
+    }
+    if (nt_input_key_is_down(NT_KEY_LSHIFT)) {
+        s_cam_pos[1] -= speed;
+    }
 
     /* Look direction */
     float look_x = fwd_x;
@@ -434,12 +515,21 @@ static void frame(void) {
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.05F, 0.05F, 0.08F, 1.0F}, .clear_depth = 1.0F});
 
     nt_shape_renderer_set_vp((float *)vp);
+    nt_shape_renderer_set_cam_pos(s_cam_pos);
     nt_shape_renderer_set_depth(true);
 
+    double t_render_start = nt_time_now();
     draw_room();
+    draw_floor_text();
     draw_shapes();
-
     nt_shape_renderer_flush();
+    double t_render_end = nt_time_now();
+    float render_ms = (float)(t_render_end - t_render_start) * 1000.0F;
+    s_render_sum += render_ms;
+    if (render_ms > s_render_max) {
+        s_render_max = render_ms;
+    }
+
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
@@ -476,8 +566,8 @@ int main(void) {
     s_cam_pos[2] = 0.0F;
 
     printf("Shape Renderer Benchmark\n");
-    printf("  WASD = move | Mouse+LMB/RMB = look\n");
-    printf("  SPACE = +50 shapes per type | ESC = quit\n");
+    printf("  WASD = move | Space/Shift = up/down | Mouse+LMB/RMB = look\n");
+    printf("  F = +50 shapes per type | ESC = quit\n");
     printf("  Starting: %d per type, %d total\n", BATCH, BATCH * 8);
 
     nt_accumulator_init(&s_acc, 1.0F / 60.0F, 4);

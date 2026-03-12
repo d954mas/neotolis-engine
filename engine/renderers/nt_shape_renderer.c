@@ -168,13 +168,26 @@ static void emit_wire_edge(const float a[3], const float b[3], const float color
     float hw = s_shape.line_width * 0.5F;
     glm_vec3_scale(side, hw, side);
 
+    /* Small depth bias toward camera to prevent z-fighting with nearby surfaces */
+    float cam_dir[3];
+    float dist = glm_vec3_norm(to_cam);
+    float bias = dist * 0.0005F;
+    if (dist > 1e-6F) {
+        float inv_dist = bias / dist;
+        cam_dir[0] = to_cam[0] * inv_dist;
+        cam_dir[1] = to_cam[1] * inv_dist;
+        cam_dir[2] = to_cam[2] * inv_dist;
+    } else {
+        cam_dir[0] = cam_dir[1] = cam_dir[2] = 0.0F;
+    }
+
     uint16_t base = (uint16_t)s_shape.vertex_count;
     nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
 
-    float p0[3] = {a[0] - side[0], a[1] - side[1], a[2] - side[2]};
-    float p1[3] = {a[0] + side[0], a[1] + side[1], a[2] + side[2]};
-    float p2[3] = {b[0] + side[0], b[1] + side[1], b[2] + side[2]};
-    float p3[3] = {b[0] - side[0], b[1] - side[1], b[2] - side[2]};
+    float p0[3] = {a[0] - side[0] + cam_dir[0], a[1] - side[1] + cam_dir[1], a[2] - side[2] + cam_dir[2]};
+    float p1[3] = {a[0] + side[0] + cam_dir[0], a[1] + side[1] + cam_dir[1], a[2] + side[2] + cam_dir[2]};
+    float p2[3] = {b[0] + side[0] + cam_dir[0], b[1] + side[1] + cam_dir[1], b[2] + side[2] + cam_dir[2]};
+    float p3[3] = {b[0] - side[0] + cam_dir[0], b[1] - side[1] + cam_dir[1], b[2] - side[2] + cam_dir[2]};
 
     set_vertex(&v[0], p0, color);
     set_vertex(&v[1], p1, color);
@@ -228,13 +241,26 @@ static void emit_wire_edge_col(const float a[3], const float b[3], const float c
     float hw = s_shape.line_width * 0.5F;
     glm_vec3_scale(side, hw, side);
 
+    /* Small depth bias toward camera to prevent z-fighting with nearby surfaces */
+    float cam_dir[3];
+    float dist = glm_vec3_norm(to_cam);
+    float bias = dist * 0.0005F;
+    if (dist > 1e-6F) {
+        float inv_dist = bias / dist;
+        cam_dir[0] = to_cam[0] * inv_dist;
+        cam_dir[1] = to_cam[1] * inv_dist;
+        cam_dir[2] = to_cam[2] * inv_dist;
+    } else {
+        cam_dir[0] = cam_dir[1] = cam_dir[2] = 0.0F;
+    }
+
     uint16_t base = (uint16_t)s_shape.vertex_count;
     nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
 
-    float p0[3] = {a[0] - side[0], a[1] - side[1], a[2] - side[2]};
-    float p1[3] = {a[0] + side[0], a[1] + side[1], a[2] + side[2]};
-    float p2[3] = {b[0] + side[0], b[1] + side[1], b[2] + side[2]};
-    float p3[3] = {b[0] - side[0], b[1] - side[1], b[2] - side[2]};
+    float p0[3] = {a[0] - side[0] + cam_dir[0], a[1] - side[1] + cam_dir[1], a[2] - side[2] + cam_dir[2]};
+    float p1[3] = {a[0] + side[0] + cam_dir[0], a[1] + side[1] + cam_dir[1], a[2] + side[2] + cam_dir[2]};
+    float p2[3] = {b[0] + side[0] + cam_dir[0], b[1] + side[1] + cam_dir[1], b[2] + side[2] + cam_dir[2]};
+    float p3[3] = {b[0] - side[0] + cam_dir[0], b[1] - side[1] + cam_dir[1], b[2] - side[2] + cam_dir[2]};
 
     set_vertex(&v[0], p0, color_a);
     set_vertex(&v[1], p1, color_a);
@@ -309,6 +335,7 @@ void nt_shape_renderer_flush(void) {
     nt_gfx_bind_index_buffer(s_shape.ibo);
     nt_gfx_set_uniform_mat4("u_vp", s_shape.vp);
 
+    g_nt_gfx.frame_stats.vertices += s_shape.vertex_count;
     nt_gfx_draw_indexed(0, s_shape.index_count);
 
     s_shape.vertex_count = 0;
@@ -317,15 +344,12 @@ void nt_shape_renderer_flush(void) {
 
 /* ---- State setters ---- */
 
-void nt_shape_renderer_set_vp(const float vp[16]) {
-    memcpy(s_shape.vp, vp, sizeof(float) * 16);
+void nt_shape_renderer_set_vp(const float vp[16]) { memcpy(s_shape.vp, vp, sizeof(float) * 16); }
 
-    /* Extract camera position: inverse(VP) column 3 */
-    float inv_vp[16];
-    glm_mat4_inv((vec4 *)s_shape.vp, (vec4 *)inv_vp);
-    s_shape.cam_pos[0] = inv_vp[12]; /* col3.x */
-    s_shape.cam_pos[1] = inv_vp[13]; /* col3.y */
-    s_shape.cam_pos[2] = inv_vp[14]; /* col3.z */
+void nt_shape_renderer_set_cam_pos(const float pos[3]) {
+    s_shape.cam_pos[0] = pos[0];
+    s_shape.cam_pos[1] = pos[1];
+    s_shape.cam_pos[2] = pos[2];
 }
 
 void nt_shape_renderer_set_line_width(float width) { s_shape.line_width = width; }

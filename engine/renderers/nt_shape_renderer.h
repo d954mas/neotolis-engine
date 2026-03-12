@@ -33,6 +33,7 @@ void nt_shape_renderer_flush(void);
 /* ---- State setters ---- */
 
 void nt_shape_renderer_set_vp(const float vp[16]);
+void nt_shape_renderer_set_cam_pos(const float pos[3]);
 void nt_shape_renderer_set_line_width(float width);
 void nt_shape_renderer_set_depth(bool enabled);
 void nt_shape_renderer_set_blend(bool enabled);
