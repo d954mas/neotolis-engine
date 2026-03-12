@@ -39,6 +39,9 @@ typedef struct {
     bool blend;
     GLenum blend_src;
     GLenum blend_dst;
+    bool polygon_offset;
+    float po_factor;
+    float po_units;
     /* Store layout for re-applying vertex attrib pointers on buffer bind */
     nt_vertex_layout_t layout;
 } nt_gfx_gl_pipeline_t;
@@ -66,6 +69,9 @@ static struct {
     bool blend;
     GLenum blend_src;
     GLenum blend_dst;
+    bool polygon_offset;
+    float po_factor;
+    float po_units;
 } s_gl_cache;
 
 static void nt_gfx_gl_cache_reset(void) {
@@ -78,6 +84,9 @@ static void nt_gfx_gl_cache_reset(void) {
     s_gl_cache.blend = false;
     s_gl_cache.blend_src = GL_ONE;  /* GL default */
     s_gl_cache.blend_dst = GL_ZERO; /* GL default */
+    s_gl_cache.polygon_offset = false;
+    s_gl_cache.po_factor = 0.0F;
+    s_gl_cache.po_units = 0.0F;
 }
 
 /* ---- Helpers: enum mapping ---- */
@@ -277,6 +286,21 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
         s_gl_cache.blend_src = pip->blend_src;
         s_gl_cache.blend_dst = pip->blend_dst;
     }
+
+    /* Polygon offset */
+    if (s_gl_cache.polygon_offset != pip->polygon_offset) {
+        if (pip->polygon_offset) {
+            glEnable(GL_POLYGON_OFFSET_FILL);
+        } else {
+            glDisable(GL_POLYGON_OFFSET_FILL);
+        }
+        s_gl_cache.polygon_offset = pip->polygon_offset;
+    }
+    if (pip->polygon_offset && (s_gl_cache.po_factor != pip->po_factor || s_gl_cache.po_units != pip->po_units)) {
+        glPolygonOffset(pip->po_factor, pip->po_units);
+        s_gl_cache.po_factor = pip->po_factor;
+        s_gl_cache.po_units = pip->po_units;
+    }
 }
 
 /* ---- Uniforms ---- */
@@ -406,6 +430,9 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     pip->blend = desc->blend;
     pip->blend_src = map_blend_factor(desc->blend_src);
     pip->blend_dst = map_blend_factor(desc->blend_dst);
+    pip->polygon_offset = desc->polygon_offset;
+    pip->po_factor = desc->polygon_offset_factor;
+    pip->po_units = desc->polygon_offset_units;
     pip->layout = desc->layout;
 
     return slot;

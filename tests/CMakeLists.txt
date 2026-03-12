@@ -106,6 +106,17 @@ if(NOT EMSCRIPTEN)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_gfx COMMAND test_gfx)
+
+    # --- Shape module tests ---
+    add_executable(test_shape unit/test_shape.c)
+    target_link_libraries(test_shape PRIVATE nt_shape nt_gfx_stub unity)
+    target_compile_definitions(test_shape PRIVATE NT_SHAPE_TEST_ACCESS)
+    nt_set_warning_flags(test_shape)
+    nt_set_sanitizer_flags(test_shape)
+    set_target_properties(test_shape PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_shape COMMAND test_shape)
 endif()
 
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---

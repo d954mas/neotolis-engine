@@ -109,6 +109,9 @@ typedef struct {
     bool blend;
     nt_blend_factor_t blend_src;
     nt_blend_factor_t blend_dst;
+    bool polygon_offset;         /* enable GL_POLYGON_OFFSET_FILL */
+    float polygon_offset_factor; /* glPolygonOffset factor (typically 1.0) */
+    float polygon_offset_units;  /* glPolygonOffset units (typically 1.0) */
     const char *label;
 } nt_pipeline_desc_t;
 
