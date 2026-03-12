@@ -351,6 +351,9 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     if (!nt_gfx_pool_valid(&s_gfx.shader_pool, desc->vertex_shader.id) || !nt_gfx_pool_valid(&s_gfx.shader_pool, desc->fragment_shader.id)) {
         return result;
     }
+    if (desc->layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS) {
+        return result;
+    }
 
     uint32_t id = nt_gfx_pool_alloc(&s_gfx.pipeline_pool);
     if (id == 0) {
@@ -471,6 +474,10 @@ void nt_gfx_bind_vertex_buffer(nt_buffer_t buf) {
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
+    NT_GFX_ASSERT(s_gfx.buffer_descs[slot].type == NT_BUFFER_VERTEX);
+    if (s_gfx.buffer_descs[slot].type != NT_BUFFER_VERTEX) {
+        return;
+    }
     nt_gfx_backend_bind_vertex_buffer(s_gfx.buffer_backends[slot]);
 }
 
@@ -482,6 +489,10 @@ void nt_gfx_bind_index_buffer(nt_buffer_t buf) {
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
+    NT_GFX_ASSERT(s_gfx.buffer_descs[slot].type == NT_BUFFER_INDEX);
+    if (s_gfx.buffer_descs[slot].type != NT_BUFFER_INDEX) {
+        return;
+    }
     s_gfx.has_index_buffer = true;
     nt_gfx_backend_bind_index_buffer(s_gfx.buffer_backends[slot]);
 }
@@ -541,5 +552,9 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
+    NT_GFX_ASSERT(size <= s_gfx.buffer_descs[slot].size);
+    if (size > s_gfx.buffer_descs[slot].size) {
+        return;
+    }
     nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], data, size);
 }
