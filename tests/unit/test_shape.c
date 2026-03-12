@@ -138,21 +138,6 @@ void test_shape_triangle_wire_counts(void) {
     TEST_ASSERT_EQUAL_UINT32(3, nt_shape_renderer_test_line_count());
 }
 
-/* ---- 13. Triangle per-vertex color ---- */
-
-void test_shape_triangle_col_per_vertex(void) {
-    float a[3] = {0, 0, 0};
-    float b[3] = {1, 0, 0};
-    float c[3] = {0.5F, 1, 0};
-    float ca[4] = {1, 0, 0, 1};
-    float cb[4] = {0, 1, 0, 1};
-    float cc[4] = {0, 0, 1, 1};
-    nt_shape_renderer_triangle_col(a, b, c, ca, cb, cc);
-    /* Same geometry as triangle fill: 3 verts, 3 indices */
-    TEST_ASSERT_EQUAL_UINT32(3, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(3, nt_shape_renderer_test_index_count());
-}
-
 /* ---- 14. Auto-flush on overflow ---- */
 
 void test_shape_auto_flush_on_overflow(void) {
@@ -262,6 +247,26 @@ void test_shape_sphere_wire_counts(void) {
     float col[4] = {0, 0, 1, 1};
     /* 3 great circles x 16 edges = 48 line instances */
     nt_shape_renderer_sphere_wire(center, 1.0F, col);
+    TEST_ASSERT_EQUAL_UINT32(48, nt_shape_renderer_test_line_count());
+}
+
+/* ---- 22b. Sphere rot instance count ---- */
+
+void test_shape_sphere_rot_count(void) {
+    float center[3] = {0, 0, 0};
+    float col[4] = {0, 0, 1, 1};
+    float rot[4] = {0, 0, 0.7071068F, 0.7071068F};
+    nt_shape_renderer_sphere_rot(center, 1.0F, rot, col);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_instance_count(NT_SHAPE_TEST_SPHERE));
+}
+
+/* ---- 22c. Sphere wire rot counts (same as sphere_wire: 48 lines) ---- */
+
+void test_shape_sphere_wire_rot_counts(void) {
+    float center[3] = {0, 0, 0};
+    float col[4] = {0, 0, 1, 1};
+    float rot[4] = {0, 0, 0.7071068F, 0.7071068F};
+    nt_shape_renderer_sphere_wire_rot(center, 1.0F, rot, col);
     TEST_ASSERT_EQUAL_UINT32(48, nt_shape_renderer_test_line_count());
 }
 
@@ -381,7 +386,6 @@ int main(void) {
     RUN_TEST(test_shape_rect_wire_counts);
     RUN_TEST(test_shape_triangle_fill_counts);
     RUN_TEST(test_shape_triangle_wire_counts);
-    RUN_TEST(test_shape_triangle_col_per_vertex);
     RUN_TEST(test_shape_auto_flush_on_overflow);
     RUN_TEST(test_shape_batch_accumulates);
     RUN_TEST(test_shape_circle_fill_counts);
@@ -390,6 +394,8 @@ int main(void) {
     RUN_TEST(test_shape_cube_wire_counts);
     RUN_TEST(test_shape_sphere_fill_counts);
     RUN_TEST(test_shape_sphere_wire_counts);
+    RUN_TEST(test_shape_sphere_rot_count);
+    RUN_TEST(test_shape_sphere_wire_rot_counts);
     RUN_TEST(test_shape_circle_rot_count);
     RUN_TEST(test_shape_cube_rot_count);
     RUN_TEST(test_shape_cylinder_fill_counts);

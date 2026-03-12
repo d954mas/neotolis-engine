@@ -376,6 +376,10 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
         nt_log_error("gfx: pipeline creation failed: too many vertex attrs");
         return result;
     }
+    if (desc->instance_layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS) {
+        nt_log_error("gfx: pipeline creation failed: too many instance attrs");
+        return result;
+    }
 
     uint32_t id = nt_gfx_pool_alloc(&s_gfx.pipeline_pool);
     if (id == 0) {
@@ -590,7 +594,7 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     nt_gfx_backend_draw(first_vertex, num_vertices, false);
 }
 
-void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices) {
+void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices) {
     if (g_nt_gfx.context_lost) {
         return;
     }
@@ -607,11 +611,12 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices) {
     }
 
     g_nt_gfx.frame_stats.draw_calls++;
+    g_nt_gfx.frame_stats.vertices += num_vertices;
     g_nt_gfx.frame_stats.indices += num_indices;
     nt_gfx_backend_draw(first_index, num_indices, true);
 }
 
-void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count) {
+void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count) {
     if (g_nt_gfx.context_lost) {
         return;
     }
@@ -628,6 +633,8 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     }
 
     g_nt_gfx.frame_stats.draw_calls++;
+    g_nt_gfx.frame_stats.draw_calls_instanced++;
+    g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.indices += num_indices * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
     nt_gfx_backend_draw_instanced(first_index, num_indices, true, instance_count);

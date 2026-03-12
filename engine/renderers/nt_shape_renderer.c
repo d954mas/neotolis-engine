@@ -362,11 +362,21 @@ static nt_pipeline_t make_cap_inst_pipeline(bool depth) {
 
 /* ---- Color packing: float [0,1] → uint8 [0,255] ---- */
 
+static inline uint8_t float_to_u8(float v) {
+    if (v <= 0.0F) {
+        return 0;
+    }
+    if (v >= 1.0F) {
+        return 255;
+    }
+    return (uint8_t)(v * 255.0F + 0.5F);
+}
+
 static void pack_color(uint8_t out[4], const float f[4]) {
-    out[0] = (uint8_t)(f[0] * 255.0F + 0.5F);
-    out[1] = (uint8_t)(f[1] * 255.0F + 0.5F);
-    out[2] = (uint8_t)(f[2] * 255.0F + 0.5F);
-    out[3] = (uint8_t)(f[3] * 255.0F + 0.5F);
+    out[0] = float_to_u8(f[0]);
+    out[1] = float_to_u8(f[1]);
+    out[2] = float_to_u8(f[2]);
+    out[3] = float_to_u8(f[3]);
 }
 
 /* ---- Push instance helper ---- */
@@ -681,6 +691,16 @@ void nt_shape_renderer_init(void) {
     s_shape.line_instance_buf = nt_gfx_make_buffer(
         &(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_LINES * (uint32_t)sizeof(nt_shape_line_instance_t), .label = "shape_line_inst"});
 
+    /* Verify all resources were created successfully */
+    if (!s_shape.fs.id || !s_shape.batch_vs.id || !s_shape.inst_vs.id || !s_shape.cap_inst_vs.id || !s_shape.line_vs.id || !s_shape.batch_pip_depth.id || !s_shape.batch_pip_overlay.id ||
+        !s_shape.inst_pip_depth.id || !s_shape.inst_pip_overlay.id || !s_shape.cap_inst_pip_depth.id || !s_shape.cap_inst_pip_overlay.id || !s_shape.line_pip_depth.id ||
+        !s_shape.line_pip_overlay.id || !s_shape.batch_vbo.id || !s_shape.batch_ibo.id || !s_shape.inst_buf.id || !s_shape.line_template_vbo.id || !s_shape.line_template_ibo.id ||
+        !s_shape.line_instance_buf.id) {
+        nt_log_error("shape_renderer: init failed — resource creation error");
+        nt_shape_renderer_shutdown();
+        return;
+    }
+
     s_shape.line_width = 0.02F;
     s_shape.depth_enabled = true;
     s_shape.batch_pip_active = s_shape.batch_pip_depth;
@@ -734,8 +754,7 @@ void nt_shape_renderer_flush(void) {
         nt_gfx_bind_instance_buffer(s_shape.inst_buf);
         nt_gfx_set_uniform_mat4("u_vp", s_shape.vp);
 
-        g_nt_gfx.frame_stats.vertices += cnt * s_shape.templates[t].num_vertices;
-        nt_gfx_draw_indexed_instanced(0, s_shape.templates[t].num_indices, cnt);
+        nt_gfx_draw_indexed_instanced(0, s_shape.templates[t].num_indices, s_shape.templates[t].num_vertices, cnt);
         s_shape.inst_counts[t] = 0;
     }
 
@@ -749,8 +768,7 @@ void nt_shape_renderer_flush(void) {
         nt_gfx_bind_index_buffer(s_shape.batch_ibo);
         nt_gfx_set_uniform_mat4("u_vp", s_shape.vp);
 
-        g_nt_gfx.frame_stats.vertices += s_shape.vertex_count;
-        nt_gfx_draw_indexed(0, s_shape.index_count);
+        nt_gfx_draw_indexed(0, s_shape.index_count, s_shape.vertex_count);
 
         s_shape.vertex_count = 0;
         s_shape.index_count = 0;
@@ -769,8 +787,7 @@ void nt_shape_renderer_flush(void) {
         nt_gfx_set_uniform_vec4("u_cam_pos", cp4);
         nt_gfx_set_uniform_float("u_line_width", s_shape.line_width);
 
-        g_nt_gfx.frame_stats.vertices += s_shape.line_count * 4;
-        nt_gfx_draw_indexed_instanced(0, 6, s_shape.line_count);
+        nt_gfx_draw_indexed_instanced(0, 6, 4, s_shape.line_count);
 
         s_shape.line_count = 0;
     }
@@ -778,9 +795,19 @@ void nt_shape_renderer_flush(void) {
 
 /* ---- State setters ---- */
 
-void nt_shape_renderer_set_vp(const float vp[16]) { memcpy(s_shape.vp, vp, sizeof(float) * 16); }
+void nt_shape_renderer_set_vp(const float vp[16]) {
+    if (memcmp(s_shape.vp, vp, sizeof(float) * 16) == 0) {
+        return;
+    }
+    nt_shape_renderer_flush();
+    memcpy(s_shape.vp, vp, sizeof(float) * 16);
+}
 
 void nt_shape_renderer_set_cam_pos(const float pos[3]) {
+    if (s_shape.cam_pos[0] == pos[0] && s_shape.cam_pos[1] == pos[1] && s_shape.cam_pos[2] == pos[2]) {
+        return;
+    }
+    nt_shape_renderer_flush();
     s_shape.cam_pos[0] = pos[0];
     s_shape.cam_pos[1] = pos[1];
     s_shape.cam_pos[2] = pos[2];
@@ -895,27 +922,6 @@ void nt_shape_renderer_triangle_wire(const float a[3], const float b[3], const f
     emit_wire_edge(a, b, color);
     emit_wire_edge(b, c, color);
     emit_wire_edge(c, a, color);
-}
-
-void nt_shape_renderer_triangle_col(const float a[3], const float b[3], const float c[3], const float color_a[4], const float color_b[4], const float color_c[4]) {
-    if (s_shape.vertex_count + 3 > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + 3 > NT_SHAPE_RENDERER_MAX_INDICES) {
-        nt_shape_renderer_flush();
-    }
-
-    uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
-
-    set_vertex(&v[0], a, color_a);
-    set_vertex(&v[1], b, color_b);
-    set_vertex(&v[2], c, color_c);
-
-    uint16_t *idx = &s_shape.indices[s_shape.index_count];
-    idx[0] = base;
-    idx[1] = (uint16_t)(base + 1);
-    idx[2] = (uint16_t)(base + 2);
-
-    s_shape.vertex_count += 3;
-    s_shape.index_count += 3;
 }
 
 /* ---- Circle ---- */
@@ -1068,6 +1074,57 @@ void nt_shape_renderer_sphere_wire(const float center[3], float radius, const fl
     }
 }
 
+void nt_shape_renderer_sphere_rot(const float center[3], float radius, const float rot[4], const float color[4]) {
+    float scale[3] = {radius, radius, radius};
+    push_instance(NT_SHAPE_SPHERE, center, scale, rot, color);
+}
+
+void nt_shape_renderer_sphere_wire_rot(const float center[3], float radius, const float rot[4], const float color[4]) {
+    int segs = NT_SHAPE_SEGMENTS;
+    float rm[3][3];
+    quat_to_mat3(rot, rm);
+
+    /* 3 great circles, same as sphere_wire but with rotation applied */
+    for (int i = 0; i < segs; i++) {
+        int next = (i + 1) % segs;
+        float c_i = s_shape.cos_lut[i];
+        float s_i = s_shape.sin_lut[i];
+        float c_n = s_shape.cos_lut[next];
+        float s_n = s_shape.sin_lut[next];
+
+        /* XZ plane (equator) */
+        float xz_a[3] = {radius * c_i, 0.0F, radius * s_i};
+        float xz_b[3] = {radius * c_n, 0.0F, radius * s_n};
+        /* XY plane */
+        float xy_a[3] = {radius * c_i, radius * s_i, 0.0F};
+        float xy_b[3] = {radius * c_n, radius * s_n, 0.0F};
+        /* YZ plane */
+        float yz_a[3] = {0.0F, radius * c_i, radius * s_i};
+        float yz_b[3] = {0.0F, radius * c_n, radius * s_n};
+
+        float ra[3];
+        float rb[3];
+
+        mat3_mulv(rm, xz_a, ra);
+        mat3_mulv(rm, xz_b, rb);
+        float a1[3] = {center[0] + ra[0], center[1] + ra[1], center[2] + ra[2]};
+        float b1[3] = {center[0] + rb[0], center[1] + rb[1], center[2] + rb[2]};
+        emit_wire_edge(a1, b1, color);
+
+        mat3_mulv(rm, xy_a, ra);
+        mat3_mulv(rm, xy_b, rb);
+        float a2[3] = {center[0] + ra[0], center[1] + ra[1], center[2] + ra[2]};
+        float b2[3] = {center[0] + rb[0], center[1] + rb[1], center[2] + rb[2]};
+        emit_wire_edge(a2, b2, color);
+
+        mat3_mulv(rm, yz_a, ra);
+        mat3_mulv(rm, yz_b, rb);
+        float a3[3] = {center[0] + ra[0], center[1] + ra[1], center[2] + ra[2]};
+        float b3[3] = {center[0] + rb[0], center[1] + rb[1], center[2] + rb[2]};
+        emit_wire_edge(a3, b3, color);
+    }
+}
+
 /* ---- Cylinder ---- */
 
 static void emit_cylinder_wire(const float center[3], float radius, float height, const float *rot, const float color[4]) {
@@ -1121,10 +1178,11 @@ static void emit_cylinder_wire(const float center[3], float radius, float height
     }
 
     /* 4 vertical struts at 0, 90, 180, 270 degrees */
+    int quarter = NT_SHAPE_SEGMENTS / 4;
     for (int i = 0; i < 4; i++) {
-        float theta = NT_PI * 0.5F * (float)i;
-        float ct = cosf(theta);
-        float st = sinf(theta);
+        int si = i * quarter;
+        float ct = s_shape.cos_lut[si];
+        float st = s_shape.sin_lut[si];
         float top_off[3] = {radius * ct, hy, radius * st};
         float bot_off[3] = {radius * ct, -hy, radius * st};
         if (has_rot) {
@@ -1208,10 +1266,11 @@ static void emit_capsule_wire(const float center[3], float radius, float height,
     }
 
     /* 4 meridian profile lines at 0, 90, 180, 270 degrees */
+    int quarter = segs / 4;
     for (int m = 0; m < 4; m++) {
-        float theta = NT_PI * 0.5F * (float)m;
-        float ct = cosf(theta);
-        float st = sinf(theta);
+        int si = m * quarter;
+        float ct = s_shape.cos_lut[si];
+        float st = s_shape.sin_lut[si];
 
         for (int row = 0; row < total_sections; row++) {
             float y0;
@@ -1285,6 +1344,15 @@ void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const
         return;
     }
 
+    /* Validate indices are within bounds */
+    for (uint32_t i = 0; i < num_indices; i++) {
+        if (indices[i] >= num_vertices) {
+            NT_ASSERT(0 && "mesh index out of bounds");
+            nt_log_error("mesh index out of bounds, dropped");
+            return;
+        }
+    }
+
     uint16_t base = (uint16_t)s_shape.vertex_count;
 
     /* Copy positions into vertex buffer with color */
@@ -1301,9 +1369,13 @@ void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const
 }
 
 void nt_shape_renderer_mesh_wire(const float *positions, uint32_t num_vertices, const uint16_t *indices, uint32_t num_indices, const float color[4]) {
-    (void)num_vertices;
     /* For each triangle (3 consecutive indices), emit 3 wireframe edges */
     for (uint32_t i = 0; (i + 2) < num_indices; i += 3) {
+        if (indices[i] >= num_vertices || indices[i + 1] >= num_vertices || indices[i + 2] >= num_vertices) {
+            NT_ASSERT(0 && "mesh_wire index out of bounds");
+            nt_log_error("mesh_wire index out of bounds, skipped triangle");
+            continue;
+        }
         const float *a = &positions[(ptrdiff_t)indices[i] * 3];
         const float *b = &positions[(ptrdiff_t)indices[i + 1] * 3];
         const float *c = &positions[(ptrdiff_t)indices[i + 2] * 3];

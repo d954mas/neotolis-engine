@@ -245,7 +245,7 @@ static void dispatch_shape(const bench_shape_t *s) {
             nt_shape_renderer_triangle_wire(s->a, s->b, s->c, s->col);
             break;
         case 2:
-            nt_shape_renderer_triangle_col(s->a, s->b, s->c, s->col, s->col_b, s->col_c);
+            nt_shape_renderer_triangle(s->a, s->b, s->c, s->col);
             break;
         case 3:
             nt_shape_renderer_triangle_wire(s->a, s->b, s->c, s->col);
@@ -490,8 +490,12 @@ static void frame(void) {
         float avg = s_dt_sum / (float)s_dt_count;
         float render_avg = s_render_sum / (float)s_dt_count;
         nt_gfx_frame_stats_t stats = g_nt_gfx.frame_stats;
-        printf("[bench] shapes=%-6d avg=%.2fms  max=%.2fms  render=%.2f/%.2fms  fps=%.0f  dc=%u  inst=%u  verts=%u  idx=%u\n", s_shape_count, (double)(avg * 1000.0F), (double)(s_dt_max * 1000.0F),
-               (double)render_avg, (double)s_render_max, (double)(1.0F / avg), stats.draw_calls, stats.instances, stats.vertices, stats.indices);
+        uint32_t batch_dc = stats.draw_calls - stats.draw_calls_instanced;
+        uint32_t tris = stats.indices / 3;
+        printf("[bench] shapes=%-6d avg=%.2fms  max=%.2fms  render=%.2f/%.2fms  fps=%.0f\n"
+               "        dc=%u (batch=%u inst=%u)  obj=%u  verts=%u  tris=%u  idx=%u\n",
+               s_shape_count, (double)(avg * 1000.0F), (double)(s_dt_max * 1000.0F), (double)render_avg, (double)s_render_max, (double)(1.0F / avg), stats.draw_calls, batch_dc,
+               stats.draw_calls_instanced, stats.instances, stats.vertices, tris, stats.indices);
         s_dt_max = 0.0F;
         s_dt_sum = 0.0F;
         s_dt_count = 0;

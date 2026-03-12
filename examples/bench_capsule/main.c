@@ -8,8 +8,8 @@
    Shader: p = a_pos.xyz * radius;  p.y += a_pos.w * body_half;
    No branching — just a multiply + add.
 
-   Instance data (56 bytes, same as shape_renderer):
-     center[3], scale[3] (x=radius, y=body_half, z=unused), rot[4], color[4].
+   Instance data (44 bytes, same as shape_renderer):
+     center[3], scale[3] (x=radius, y=body_half, z=unused), rot[4], color_u8[4].
 */
 
 #include "app/nt_app.h"
@@ -45,10 +45,10 @@ typedef struct {
     float center[3];
     float scale[3]; /* x=radius, y=body_half, z=unused */
     float rot[4];
-    float color[4];
+    uint8_t color[4];
 } capsule_instance_t;
 
-_Static_assert(sizeof(capsule_instance_t) == 56, "instance size");
+_Static_assert(sizeof(capsule_instance_t) == 44, "instance size");
 
 /* ---- Capsule instancing vertex shader ---- */
 
@@ -86,6 +86,7 @@ static struct {
     nt_buffer_t tpl_vbo;
     nt_buffer_t tpl_ibo;
     nt_buffer_t inst_buf;
+    uint32_t tpl_num_vertices;
     uint32_t tpl_num_indices;
 
     /* Pre-built instance data */
@@ -176,6 +177,7 @@ static void build_template(void) {
         }
     }
 
+    s_bench.tpl_num_vertices = TPL_VERTS;
     s_bench.tpl_num_indices = TPL_INDICES;
     s_bench.tpl_vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
@@ -217,10 +219,10 @@ static void build_pipeline(void) {
                 .stride = (uint16_t)sizeof(capsule_instance_t),
                 .attrs =
                     {
-                        {.location = 1, .format = NT_FORMAT_FLOAT3, .offset = 0},  /* center */
-                        {.location = 2, .format = NT_FORMAT_FLOAT3, .offset = 12}, /* scale */
-                        {.location = 3, .format = NT_FORMAT_FLOAT4, .offset = 24}, /* rot */
-                        {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 40}, /* color */
+                        {.location = 1, .format = NT_FORMAT_FLOAT3, .offset = 0},   /* center */
+                        {.location = 2, .format = NT_FORMAT_FLOAT3, .offset = 12},  /* scale */
+                        {.location = 3, .format = NT_FORMAT_FLOAT4, .offset = 24},  /* rot */
+                        {.location = 4, .format = NT_FORMAT_UBYTE4N, .offset = 40}, /* color */
                     },
             },
         .depth_test = true,
@@ -236,6 +238,25 @@ static void build_pipeline(void) {
         .size = MAX_INSTANCES * (uint32_t)sizeof(capsule_instance_t),
         .label = "cap_inst_buf",
     });
+}
+
+/* ---- Color packing: float [0,1] → uint8 [0,255] ---- */
+
+static inline uint8_t float_to_u8(float v) {
+    if (v <= 0.0F) {
+        return 0;
+    }
+    if (v >= 1.0F) {
+        return 255;
+    }
+    return (uint8_t)(v * 255.0F + 0.5F);
+}
+
+static void pack_color(uint8_t out[4], float r, float g, float b, float a) {
+    out[0] = float_to_u8(r);
+    out[1] = float_to_u8(g);
+    out[2] = float_to_u8(b);
+    out[3] = float_to_u8(a);
 }
 
 /* ---- Pseudo-random helpers ---- */
@@ -288,10 +309,7 @@ static void rebuild_instances(void) {
 
         /* Color based on index */
         float t = (float)i / (float)s_bench.count;
-        inst->color[0] = 0.3F + t * 0.7F;
-        inst->color[1] = 1.0F - t * 0.5F;
-        inst->color[2] = 0.5F;
-        inst->color[3] = 1.0F;
+        pack_color(inst->color, 0.3F + t * 0.7F, 1.0F - t * 0.5F, 0.5F, 1.0F);
     }
 }
 
@@ -304,7 +322,7 @@ static void draw_instanced(const float vp[16]) {
     nt_gfx_bind_index_buffer(s_bench.tpl_ibo);
     nt_gfx_bind_instance_buffer(s_bench.inst_buf);
     nt_gfx_set_uniform_mat4("u_vp", vp);
-    nt_gfx_draw_indexed_instanced(0, s_bench.tpl_num_indices, (uint32_t)s_bench.count);
+    nt_gfx_draw_indexed_instanced(0, s_bench.tpl_num_indices, s_bench.tpl_num_vertices, (uint32_t)s_bench.count);
 }
 
 /* ---- Draw CPU-batched capsules (via shape_renderer) ---- */
@@ -315,11 +333,12 @@ static void draw_cpu_batch(void) {
         float radius = inst->scale[0];
         float body_half = inst->scale[1];
         float height = (2.0F * radius) + (2.0F * body_half);
+        float col[4] = {(float)inst->color[0] / 255.0F, (float)inst->color[1] / 255.0F, (float)inst->color[2] / 255.0F, (float)inst->color[3] / 255.0F};
 
         if (inst->rot[3] < 0.9999F) {
-            nt_shape_renderer_capsule_rot(inst->center, radius, height, inst->rot, inst->color);
+            nt_shape_renderer_capsule_rot(inst->center, radius, height, inst->rot, col);
         } else {
-            nt_shape_renderer_capsule(inst->center, radius, height, inst->color);
+            nt_shape_renderer_capsule(inst->center, radius, height, col);
         }
     }
     nt_shape_renderer_flush();
@@ -369,10 +388,7 @@ static void frame(void) {
             inst->rot[2] = 0.0F;
             inst->rot[3] = cosf(angle * 0.5F);
             float t = (float)i / (float)s_bench.count;
-            inst->color[0] = 0.3F + t * 0.7F;
-            inst->color[1] = 1.0F - t * 0.5F;
-            inst->color[2] = 0.5F;
-            inst->color[3] = 1.0F;
+            pack_color(inst->color, 0.3F + t * 0.7F, 1.0F - t * 0.5F, 0.5F, 1.0F);
         }
         printf("[bench_capsule] count: %d\n", s_bench.count);
     }
@@ -389,8 +405,12 @@ static void frame(void) {
         float avg = s_bench.dt_sum / (float)s_bench.dt_count;
         float render_avg = s_bench.render_sum / (float)s_bench.dt_count;
         nt_gfx_frame_stats_t stats = g_nt_gfx.frame_stats;
-        printf("[bench_capsule] %s  n=%-5d avg=%.2fms  max=%.2fms  render=%.2f/%.2fms  fps=%.0f  dc=%u  inst=%u\n", s_bench.mode == 0 ? "INST" : "CPU ", s_bench.count, (double)(avg * 1000.0F),
-               (double)(s_bench.dt_max * 1000.0F), (double)render_avg, (double)s_bench.render_max, (double)(1.0F / avg), stats.draw_calls, stats.instances);
+        uint32_t batch_dc = stats.draw_calls - stats.draw_calls_instanced;
+        uint32_t tris = stats.indices / 3;
+        printf("[bench_capsule] %s  n=%-5d avg=%.2fms  max=%.2fms  render=%.2f/%.2fms  fps=%.0f\n"
+               "                dc=%u (batch=%u inst=%u)  obj=%u  verts=%u  tris=%u  idx=%u\n",
+               s_bench.mode == 0 ? "INST" : "CPU ", s_bench.count, (double)(avg * 1000.0F), (double)(s_bench.dt_max * 1000.0F), (double)render_avg, (double)s_bench.render_max, (double)(1.0F / avg),
+               stats.draw_calls, batch_dc, stats.draw_calls_instanced, stats.instances, stats.vertices, tris, stats.indices);
         s_bench.dt_max = 0.0F;
         s_bench.dt_sum = 0.0F;
         s_bench.dt_count = 0;

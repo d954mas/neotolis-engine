@@ -52,7 +52,6 @@ void nt_shape_renderer_rect_wire_rot(const float pos[3], const float size[2], co
 
 void nt_shape_renderer_triangle(const float a[3], const float b[3], const float c[3], const float color[4]);
 void nt_shape_renderer_triangle_wire(const float a[3], const float b[3], const float c[3], const float color[4]);
-void nt_shape_renderer_triangle_col(const float a[3], const float b[3], const float c[3], const float color_a[4], const float color_b[4], const float color_c[4]);
 
 /* ---- Circle ---- */
 
@@ -72,6 +71,8 @@ void nt_shape_renderer_cube_wire_rot(const float center[3], const float size[3],
 
 void nt_shape_renderer_sphere(const float center[3], float radius, const float color[4]);
 void nt_shape_renderer_sphere_wire(const float center[3], float radius, const float color[4]);
+void nt_shape_renderer_sphere_rot(const float center[3], float radius, const float rot[4], const float color[4]);
+void nt_shape_renderer_sphere_wire_rot(const float center[3], float radius, const float rot[4], const float color[4]);
 
 /* ---- Cylinder ---- */
 

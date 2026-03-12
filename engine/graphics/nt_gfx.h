@@ -132,7 +132,8 @@ typedef struct {
 /* ---- Frame statistics ---- */
 
 typedef struct {
-    uint32_t draw_calls;
+    uint32_t draw_calls;           /* all GPU draw calls */
+    uint32_t draw_calls_instanced; /* of those, instanced */
     uint32_t vertices;
     uint32_t indices;
     uint32_t instances; /* total objects drawn via instanced calls */
@@ -201,8 +202,8 @@ void nt_gfx_set_uniform_int(const char *name, int val);
 /* ---- Draw calls ---- */
 
 void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices);
-void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices);
-void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count);
+void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices);
+void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count);
 
 /* ---- Instance buffer ---- */
 
