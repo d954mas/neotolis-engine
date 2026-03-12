@@ -5,10 +5,14 @@
 
 #include <string.h>
 
-/* Use compiler builtin for sqrtf/fabsf to avoid Windows UCRT DLL import issues
-   with clang + ASan. __builtin_sqrtf maps to the CPU instruction directly. */
+/* Use compiler builtins to avoid Windows UCRT DLL import issues
+   with clang + ASan. Maps to CPU instructions directly. */
 #define nt_sqrtf(x) __builtin_sqrtf(x)
 #define nt_fabsf(x) __builtin_fabsf(x)
+#define nt_sinf(x) __builtin_sinf(x)
+#define nt_cosf(x) __builtin_cosf(x)
+
+#define NT_PI 3.14159265358979323846F
 
 _Static_assert(NT_SHAPE_MAX_VERTICES <= 65535, "uint16 index limit");
 
@@ -606,70 +610,332 @@ void nt_shape_triangle_wire_col(const float a[3], const float b[3], const float 
     emit_wire_edge_col(c, a, color_c, color_a); // NOLINT(readability-suspicious-call-argument)
 }
 
-/* ---- Stubs for plan 02 shapes ---- */
+/* ---- Circle ---- */
 
 void nt_shape_circle(const float center[3], float radius, const float color[4]) {
-    (void)center;
-    (void)radius;
-    (void)color;
+    int segs = s_shape.segments;
+    uint32_t vert_count = (uint32_t)(segs + 1); /* center + ring */
+    uint32_t idx_count = (uint32_t)(segs * 3);
+
+    if (s_shape.vertex_count + vert_count > NT_SHAPE_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_MAX_INDICES) {
+        nt_shape_flush();
+    }
+
+    uint16_t base = (uint16_t)s_shape.vertex_count;
+    nt_shape_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
+
+    /* Center vertex */
+    set_vertex(&v[0], center, color);
+
+    /* Ring vertices in XZ plane */
+    for (int i = 0; i < segs; i++) {
+        float theta = 2.0F * NT_PI * (float)i / (float)segs;
+        float p[3] = {center[0] + (radius * nt_cosf(theta)), center[1], center[2] + (radius * nt_sinf(theta))};
+        set_vertex(&v[1 + i], p, color);
+    }
+
+    /* Triangle fan indices */
+    uint16_t *idx = &s_shape.indices[s_shape.index_count];
+    int idx_off = 0;
+    for (int i = 0; i < segs; i++) {
+        int next = ((i + 1) % segs);
+        idx[idx_off++] = base;                        /* center */
+        idx[idx_off++] = (uint16_t)(base + 1 + i);    /* current ring */
+        idx[idx_off++] = (uint16_t)(base + 1 + next); /* next ring */
+    }
+
+    s_shape.vertex_count += vert_count;
+    s_shape.index_count += idx_count;
 }
 
 void nt_shape_circle_wire(const float center[3], float radius, const float color[4]) {
-    (void)center;
-    (void)radius;
-    (void)color;
-}
+    int segs = s_shape.segments;
 
-void nt_shape_cube(const float center[3], const float size[3], const float color[4]) {
-    (void)center;
-    (void)size;
-    (void)color;
-}
-
-void nt_shape_cube_wire(const float center[3], const float size[3], const float color[4]) {
-    (void)center;
-    (void)size;
-    (void)color;
-}
-
-void nt_shape_sphere(const float center[3], float radius, const float color[4]) {
-    (void)center;
-    (void)radius;
-    (void)color;
-}
-
-void nt_shape_sphere_wire(const float center[3], float radius, const float color[4]) {
-    (void)center;
-    (void)radius;
-    (void)color;
+    for (int i = 0; i < segs; i++) {
+        float t0 = 2.0F * NT_PI * (float)i / (float)segs;
+        float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
+        float a[3] = {center[0] + (radius * nt_cosf(t0)), center[1], center[2] + (radius * nt_sinf(t0))};
+        float b[3] = {center[0] + (radius * nt_cosf(t1)), center[1], center[2] + (radius * nt_sinf(t1))};
+        emit_wire_edge(a, b, color);
+    }
 }
 
 void nt_shape_circle_rot(const float center[3], float radius, const float rot[4], const float color[4]) {
-    (void)center;
-    (void)radius;
-    (void)rot;
-    (void)color;
+    int segs = s_shape.segments;
+    uint32_t vert_count = (uint32_t)(segs + 1);
+    uint32_t idx_count = (uint32_t)(segs * 3);
+
+    if (s_shape.vertex_count + vert_count > NT_SHAPE_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_MAX_INDICES) {
+        nt_shape_flush();
+    }
+
+    uint16_t base = (uint16_t)s_shape.vertex_count;
+    nt_shape_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
+
+    set_vertex(&v[0], center, color);
+
+    for (int i = 0; i < segs; i++) {
+        float theta = 2.0F * NT_PI * (float)i / (float)segs;
+        float offset[3] = {radius * nt_cosf(theta), 0.0F, radius * nt_sinf(theta)};
+        float rotated[3];
+        quat_rotatev(rot, offset, rotated);
+        float p[3] = {center[0] + rotated[0], center[1] + rotated[1], center[2] + rotated[2]};
+        set_vertex(&v[1 + i], p, color);
+    }
+
+    uint16_t *idx = &s_shape.indices[s_shape.index_count];
+    int idx_off = 0;
+    for (int i = 0; i < segs; i++) {
+        int next = ((i + 1) % segs);
+        idx[idx_off++] = base;
+        idx[idx_off++] = (uint16_t)(base + 1 + i);
+        idx[idx_off++] = (uint16_t)(base + 1 + next);
+    }
+
+    s_shape.vertex_count += vert_count;
+    s_shape.index_count += idx_count;
 }
 
 void nt_shape_circle_wire_rot(const float center[3], float radius, const float rot[4], const float color[4]) {
-    (void)center;
-    (void)radius;
-    (void)rot;
-    (void)color;
+    int segs = s_shape.segments;
+
+    for (int i = 0; i < segs; i++) {
+        float t0 = 2.0F * NT_PI * (float)i / (float)segs;
+        float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
+        float off_a[3] = {radius * nt_cosf(t0), 0.0F, radius * nt_sinf(t0)};
+        float off_b[3] = {radius * nt_cosf(t1), 0.0F, radius * nt_sinf(t1)};
+        float rot_a[3];
+        float rot_b[3];
+        quat_rotatev(rot, off_a, rot_a);
+        quat_rotatev(rot, off_b, rot_b);
+        float a[3] = {center[0] + rot_a[0], center[1] + rot_a[1], center[2] + rot_a[2]};
+        float b[3] = {center[0] + rot_b[0], center[1] + rot_b[1], center[2] + rot_b[2]};
+        emit_wire_edge(a, b, color);
+    }
+}
+
+/* ---- Cube ---- */
+
+void nt_shape_cube(const float center[3], const float size[3], const float color[4]) {
+    if (s_shape.vertex_count + 8 > NT_SHAPE_MAX_VERTICES || s_shape.index_count + 36 > NT_SHAPE_MAX_INDICES) {
+        nt_shape_flush();
+    }
+
+    float hx = size[0] * 0.5F;
+    float hy = size[1] * 0.5F;
+    float hz = size[2] * 0.5F;
+
+    uint16_t base = (uint16_t)s_shape.vertex_count;
+    nt_shape_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
+
+    /* 8 corner vertices */
+    float corners[8][3] = {
+        {center[0] - hx, center[1] - hy, center[2] - hz}, /* 0: ---  */
+        {center[0] + hx, center[1] - hy, center[2] - hz}, /* 1: +--  */
+        {center[0] + hx, center[1] + hy, center[2] - hz}, /* 2: ++-  */
+        {center[0] - hx, center[1] + hy, center[2] - hz}, /* 3: -+-  */
+        {center[0] - hx, center[1] - hy, center[2] + hz}, /* 4: --+  */
+        {center[0] + hx, center[1] - hy, center[2] + hz}, /* 5: +-+  */
+        {center[0] + hx, center[1] + hy, center[2] + hz}, /* 6: +++  */
+        {center[0] - hx, center[1] + hy, center[2] + hz}, /* 7: -++  */
+    };
+    for (int i = 0; i < 8; i++) {
+        set_vertex(&v[i], corners[i], color);
+    }
+
+    /* 36 indices: 6 faces x 2 triangles x 3 */
+    static const uint16_t face_idx[36] = {
+        0, 1, 2, 0, 2, 3, /* front  (-Z) */
+        5, 4, 7, 5, 7, 6, /* back   (+Z) */
+        4, 0, 3, 4, 3, 7, /* left   (-X) */
+        1, 5, 6, 1, 6, 2, /* right  (+X) */
+        3, 2, 6, 3, 6, 7, /* top    (+Y) */
+        4, 5, 1, 4, 1, 0, /* bottom (-Y) */
+    };
+
+    uint16_t *idx = &s_shape.indices[s_shape.index_count];
+    for (int i = 0; i < 36; i++) {
+        idx[i] = (uint16_t)(base + face_idx[i]);
+    }
+
+    s_shape.vertex_count += 8;
+    s_shape.index_count += 36;
+}
+
+void nt_shape_cube_wire(const float center[3], const float size[3], const float color[4]) {
+    float hx = size[0] * 0.5F;
+    float hy = size[1] * 0.5F;
+    float hz = size[2] * 0.5F;
+
+    float c[8][3] = {
+        {center[0] - hx, center[1] - hy, center[2] - hz}, {center[0] + hx, center[1] - hy, center[2] - hz}, {center[0] + hx, center[1] + hy, center[2] - hz},
+        {center[0] - hx, center[1] + hy, center[2] - hz}, {center[0] - hx, center[1] - hy, center[2] + hz}, {center[0] + hx, center[1] - hy, center[2] + hz},
+        {center[0] + hx, center[1] + hy, center[2] + hz}, {center[0] - hx, center[1] + hy, center[2] + hz},
+    };
+
+    /* 12 edges */
+    /* Bottom face */
+    emit_wire_edge(c[0], c[1], color);
+    emit_wire_edge(c[1], c[5], color);
+    emit_wire_edge(c[5], c[4], color);
+    emit_wire_edge(c[4], c[0], color);
+    /* Top face */
+    emit_wire_edge(c[3], c[2], color);
+    emit_wire_edge(c[2], c[6], color);
+    emit_wire_edge(c[6], c[7], color);
+    emit_wire_edge(c[7], c[3], color);
+    /* Vertical edges */
+    emit_wire_edge(c[0], c[3], color);
+    emit_wire_edge(c[1], c[2], color);
+    emit_wire_edge(c[5], c[6], color);
+    emit_wire_edge(c[4], c[7], color);
 }
 
 void nt_shape_cube_rot(const float center[3], const float size[3], const float rot[4], const float color[4]) {
-    (void)center;
-    (void)size;
-    (void)rot;
-    (void)color;
+    if (s_shape.vertex_count + 8 > NT_SHAPE_MAX_VERTICES || s_shape.index_count + 36 > NT_SHAPE_MAX_INDICES) {
+        nt_shape_flush();
+    }
+
+    float hx = size[0] * 0.5F;
+    float hy = size[1] * 0.5F;
+    float hz = size[2] * 0.5F;
+
+    float offsets[8][3] = {
+        {-hx, -hy, -hz}, {+hx, -hy, -hz}, {+hx, +hy, -hz}, {-hx, +hy, -hz}, {-hx, -hy, +hz}, {+hx, -hy, +hz}, {+hx, +hy, +hz}, {-hx, +hy, +hz},
+    };
+
+    uint16_t base = (uint16_t)s_shape.vertex_count;
+    nt_shape_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
+
+    for (int i = 0; i < 8; i++) {
+        float rotated[3];
+        quat_rotatev(rot, offsets[i], rotated);
+        float p[3] = {center[0] + rotated[0], center[1] + rotated[1], center[2] + rotated[2]};
+        set_vertex(&v[i], p, color);
+    }
+
+    static const uint16_t face_idx[36] = {
+        0, 1, 2, 0, 2, 3, 5, 4, 7, 5, 7, 6, 4, 0, 3, 4, 3, 7, 1, 5, 6, 1, 6, 2, 3, 2, 6, 3, 6, 7, 4, 5, 1, 4, 1, 0,
+    };
+
+    uint16_t *idx = &s_shape.indices[s_shape.index_count];
+    for (int i = 0; i < 36; i++) {
+        idx[i] = (uint16_t)(base + face_idx[i]);
+    }
+
+    s_shape.vertex_count += 8;
+    s_shape.index_count += 36;
 }
 
 void nt_shape_cube_wire_rot(const float center[3], const float size[3], const float rot[4], const float color[4]) {
-    (void)center;
-    (void)size;
-    (void)rot;
-    (void)color;
+    float hx = size[0] * 0.5F;
+    float hy = size[1] * 0.5F;
+    float hz = size[2] * 0.5F;
+
+    float offsets[8][3] = {
+        {-hx, -hy, -hz}, {+hx, -hy, -hz}, {+hx, +hy, -hz}, {-hx, +hy, -hz}, {-hx, -hy, +hz}, {+hx, -hy, +hz}, {+hx, +hy, +hz}, {-hx, +hy, +hz},
+    };
+
+    float c[8][3];
+    for (int i = 0; i < 8; i++) {
+        float rotated[3];
+        quat_rotatev(rot, offsets[i], rotated);
+        c[i][0] = center[0] + rotated[0];
+        c[i][1] = center[1] + rotated[1];
+        c[i][2] = center[2] + rotated[2];
+    }
+
+    emit_wire_edge(c[0], c[1], color);
+    emit_wire_edge(c[1], c[5], color);
+    emit_wire_edge(c[5], c[4], color);
+    emit_wire_edge(c[4], c[0], color);
+    emit_wire_edge(c[3], c[2], color);
+    emit_wire_edge(c[2], c[6], color);
+    emit_wire_edge(c[6], c[7], color);
+    emit_wire_edge(c[7], c[3], color);
+    emit_wire_edge(c[0], c[3], color);
+    emit_wire_edge(c[1], c[2], color);
+    emit_wire_edge(c[5], c[6], color);
+    emit_wire_edge(c[4], c[7], color);
+}
+
+/* ---- Sphere ---- */
+
+void nt_shape_sphere(const float center[3], float radius, const float color[4]) {
+    int segs = s_shape.segments;
+    int rings = segs / 2;
+    uint32_t vert_count = (uint32_t)((rings + 1) * (segs + 1));
+    uint32_t idx_count = (uint32_t)(rings * segs * 6);
+
+    if (s_shape.vertex_count + vert_count > NT_SHAPE_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_MAX_INDICES) {
+        nt_shape_flush();
+    }
+
+    uint16_t base = (uint16_t)s_shape.vertex_count;
+
+    /* Generate vertices */
+    for (int ring = 0; ring <= rings; ring++) {
+        float phi = NT_PI * (float)ring / (float)rings;
+        float sp = nt_sinf(phi);
+        float cp = nt_cosf(phi);
+        for (int seg = 0; seg <= segs; seg++) {
+            float theta = 2.0F * NT_PI * (float)seg / (float)segs;
+            float st = nt_sinf(theta);
+            float ct = nt_cosf(theta);
+            float p[3] = {center[0] + (radius * sp * ct), center[1] + (radius * cp), center[2] + (radius * sp * st)};
+            set_vertex(&s_shape.vertices[s_shape.vertex_count], p, color);
+            s_shape.vertex_count++;
+        }
+    }
+
+    /* Generate indices: 2 triangles per quad */
+    for (int ring = 0; ring < rings; ring++) {
+        for (int seg = 0; seg < segs; seg++) {
+            uint16_t a = (uint16_t)(base + (ring * (segs + 1)) + seg);
+            uint16_t b = (uint16_t)(a + 1);
+            uint16_t c = (uint16_t)(a + (segs + 1));
+            uint16_t d = (uint16_t)(c + 1);
+            s_shape.indices[s_shape.index_count++] = a;
+            s_shape.indices[s_shape.index_count++] = c;
+            s_shape.indices[s_shape.index_count++] = b;
+            s_shape.indices[s_shape.index_count++] = b;
+            s_shape.indices[s_shape.index_count++] = c;
+            s_shape.indices[s_shape.index_count++] = d;
+        }
+    }
+}
+
+void nt_shape_sphere_wire(const float center[3], float radius, const float color[4]) {
+    int segs = s_shape.segments;
+    int rings = segs / 2;
+
+    /* Longitude lines: segs lines, each from pole to pole through rings */
+    for (int seg = 0; seg < segs; seg++) {
+        float theta = 2.0F * NT_PI * (float)seg / (float)segs;
+        float st = nt_sinf(theta);
+        float ct = nt_cosf(theta);
+        for (int ring = 0; ring < rings; ring++) {
+            float phi0 = NT_PI * (float)ring / (float)rings;
+            float phi1 = NT_PI * (float)(ring + 1) / (float)rings;
+            float a[3] = {center[0] + (radius * nt_sinf(phi0) * ct), center[1] + (radius * nt_cosf(phi0)), center[2] + (radius * nt_sinf(phi0) * st)};
+            float b[3] = {center[0] + (radius * nt_sinf(phi1) * ct), center[1] + (radius * nt_cosf(phi1)), center[2] + (radius * nt_sinf(phi1) * st)};
+            emit_wire_edge(a, b, color);
+        }
+    }
+
+    /* Latitude lines: (rings-1) lines (skip poles), each going around */
+    for (int ring = 1; ring < rings; ring++) {
+        float phi = NT_PI * (float)ring / (float)rings;
+        float sp = nt_sinf(phi);
+        float cp = nt_cosf(phi);
+        for (int seg = 0; seg < segs; seg++) {
+            float t0 = 2.0F * NT_PI * (float)seg / (float)segs;
+            float t1 = 2.0F * NT_PI * (float)((seg + 1) % segs) / (float)segs;
+            float a[3] = {center[0] + (radius * sp * nt_cosf(t0)), center[1] + (radius * cp), center[2] + (radius * sp * nt_sinf(t0))};
+            float b[3] = {center[0] + (radius * sp * nt_cosf(t1)), center[1] + (radius * cp), center[2] + (radius * sp * nt_sinf(t1))};
+            emit_wire_edge(a, b, color);
+        }
+    }
 }
 
 void nt_shape_cylinder(const float center[3], float radius, float height, const float color[4]) {
