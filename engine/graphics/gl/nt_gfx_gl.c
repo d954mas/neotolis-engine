@@ -17,115 +17,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- Platform-specific GL headers ---- */
+/* ---- GL headers ---- */
 
-#ifdef NT_PLATFORM_WEB
 #include <GLES3/gl3.h>
-#else
-/*
- * Desktop GL 3.3 Core.
- *
- * A proper GL loader (e.g. glad) is required to resolve GL function pointers
- * on desktop.  For now the project does not ship one -- this header satisfies
- * the compiler so the file compiles on native, while all tests link the stub
- * backend (no GL dependency).  A glad single-header will be vendored when
- * desktop rendering is enabled.
- */
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
-#include <GL/gl.h>
 
-/* GL 3.3 Core constants / typedefs that may be absent from legacy gl.h.
- * These are only needed to let the file *compile* on native; actual
- * rendering will go through glad once vendored. */
-#ifndef GL_ARRAY_BUFFER
-#define GL_ARRAY_BUFFER 0x8892
-#endif
-#ifndef GL_ELEMENT_ARRAY_BUFFER
-#define GL_ELEMENT_ARRAY_BUFFER 0x8893
-#endif
-#ifndef GL_STATIC_DRAW
-#define GL_STATIC_DRAW 0x88E4
-#endif
-#ifndef GL_DYNAMIC_DRAW
-#define GL_DYNAMIC_DRAW 0x88E8
-#endif
-#ifndef GL_STREAM_DRAW
-#define GL_STREAM_DRAW 0x88E0
-#endif
-#ifndef GL_FRAGMENT_SHADER
-#define GL_FRAGMENT_SHADER 0x8B30
-#endif
-#ifndef GL_VERTEX_SHADER
-#define GL_VERTEX_SHADER 0x8B31
-#endif
-#ifndef GL_LINK_STATUS
-#define GL_LINK_STATUS 0x8B82
-#endif
-#ifndef GL_INFO_LOG_LENGTH
-#define GL_INFO_LOG_LENGTH 0x8B84
-#endif
-
-typedef char GLchar;
-typedef ptrdiff_t GLsizeiptr;
-
-/* Function pointer declarations for GL 2.0+ / 3.3 Core entry points that
- * are not in the base gl.h shipped by Windows / Mesa.  When glad is
- * vendored these will be provided by the loader. */
-#define NT_GL_STUB_DECL
-#ifdef NT_GL_STUB_DECL
-
-/* Shader / program */
-static GLuint (*glCreateShader)(GLenum) = NULL;
-static void (*glDeleteShader)(GLuint) = NULL;
-static void (*glShaderSource)(GLuint, GLsizei, const GLchar *const *, const GLint *) = NULL;
-static void (*glCompileShader)(GLuint) = NULL;
-static void (*glGetShaderInfoLog)(GLuint, GLsizei, GLsizei *, GLchar *) = NULL;
-static GLuint (*glCreateProgram)(void) = NULL;
-static void (*glDeleteProgram)(GLuint) = NULL;
-static void (*glAttachShader)(GLuint, GLuint) = NULL;
-static void (*glLinkProgram)(GLuint) = NULL;
-static void (*glGetProgramiv)(GLuint, GLenum, GLint *) = NULL;
-static void (*glGetProgramInfoLog)(GLuint, GLsizei, GLsizei *, GLchar *) = NULL;
-static void (*glUseProgram)(GLuint) = NULL;
-
-/* Uniforms */
-static GLint (*glGetUniformLocation)(GLuint, const GLchar *) = NULL;
-static void (*glUniformMatrix4fv)(GLint, GLsizei, GLboolean, const GLfloat *) = NULL;
-static void (*glUniform4fv)(GLint, GLsizei, const GLfloat *) = NULL;
-static void (*glUniform1f)(GLint, GLfloat) = NULL;
-static void (*glUniform1i)(GLint, GLint) = NULL;
-
-/* Buffers */
-static void (*glGenBuffers)(GLsizei, GLuint *) = NULL;
-static void (*glDeleteBuffers)(GLsizei, const GLuint *) = NULL;
-static void (*glBindBuffer)(GLenum, GLuint) = NULL;
-static void (*glBufferData)(GLenum, GLsizeiptr, const void *, GLenum) = NULL;
-static void (*glBufferSubData)(GLenum, GLsizeiptr, GLsizeiptr, const void *) = NULL;
-
-/* VAO */
-static void (*glGenVertexArrays)(GLsizei, GLuint *) = NULL;
-static void (*glDeleteVertexArrays)(GLsizei, const GLuint *) = NULL;
-static void (*glBindVertexArray)(GLuint) = NULL;
-static void (*glEnableVertexAttribArray)(GLuint) = NULL;
-static void (*glVertexAttribPointer)(GLuint, GLint, GLenum, GLboolean, GLsizei, const void *) = NULL;
-
-#endif /* NT_GL_STUB_DECL */
-
-/* Desktop GL uses glClearDepth (double) while GLES/WebGL uses glClearDepthf (float). */
-#define nt_gl_clear_depth(d) glClearDepth((double)(d))
-
-#endif /* !NT_PLATFORM_WEB */
-
-/* ---- WebGL-specific alias ---- */
-
-#ifdef NT_PLATFORM_WEB
+/* WebGL 2 / GLES 3.0 uses glClearDepthf.  When desktop GL is added via glad,
+   this will need a desktop variant (glClearDepth with double). */
 #define nt_gl_clear_depth(d) glClearDepthf(d)
-#endif
 
 /* ---- Pipeline backend data ---- */
 
@@ -391,12 +289,9 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     GLenum gl_type = (desc->type == NT_SHADER_VERTEX) ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER;
     GLuint shader = glCreateShader(gl_type);
 
-    /* TODO(builder): remove prefix once builder packs per-platform shader variants. */
-#ifdef NT_PLATFORM_WEB
+    /* TODO(builder): remove prefix once builder packs per-platform shader variants.
+       TODO(glad): add desktop "#version 330 core\n" variant when native GL is enabled. */
     const char *prefix = "#version 300 es\nprecision mediump float;\n";
-#else
-    const char *prefix = "#version 330 core\n";
-#endif
     const char *sources[2] = {prefix, desc->source};
     glShaderSource(shader, 2, sources, NULL);
 
