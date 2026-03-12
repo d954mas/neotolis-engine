@@ -337,9 +337,7 @@ void nt_gfx_backend_set_uniform_int(const char *name, int val) {
 /* ---- Draw calls ---- */
 
 /* TODO: support uint32 indices (GL_UNSIGNED_INT) via nt_index_type_t in nt_buffer_desc_t */
-void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices) {
-    glDrawArrays(GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices);
-}
+void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices) { glDrawArrays(GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices); }
 
 void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices) {
     glDrawElements(GL_TRIANGLES, (GLsizei)num_indices, GL_UNSIGNED_SHORT,
