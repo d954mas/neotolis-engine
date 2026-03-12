@@ -8,6 +8,7 @@
  * Only remaining #ifdef: GL headers and glClearDepthf vs glClearDepth.
  */
 
+#include "core/nt_assert.h"
 #include "core/nt_platform.h"
 #include "graphics/gl/nt_gfx_gl_ctx.h"
 #include "graphics/nt_gfx_internal.h"
@@ -51,9 +52,7 @@ static nt_gfx_gl_pipeline_t *s_pipelines; /* pipeline data, indexed by slot */
 static GLuint *s_buffer_gl;               /* GL buffer names, indexed by slot */
 static GLenum *s_buffer_targets;          /* GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY_BUFFER */
 
-static uint32_t s_max_pipelines;
-static uint32_t s_max_buffers;
-static nt_gfx_desc_t s_init_desc; /* saved for context loss recreation */
+static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
 
 /* ---- GL state cache (skip redundant JS interop calls) ---- */
 
@@ -73,12 +72,12 @@ static void nt_gfx_gl_cache_reset(void) {
     s_gl_cache.vao = 0;
     s_gl_cache.program = 0;
     s_gl_cache.depth_test = false;
-    s_gl_cache.depth_write = true;    /* GL default: depth write enabled */
-    s_gl_cache.depth_func = GL_LESS;  /* GL default */
+    s_gl_cache.depth_write = true;   /* GL default: depth write enabled */
+    s_gl_cache.depth_func = GL_LESS; /* GL default */
     s_gl_cache.cull_face = false;
     s_gl_cache.blend = false;
-    s_gl_cache.blend_src = GL_ONE;    /* GL default */
-    s_gl_cache.blend_dst = GL_ZERO;   /* GL default */
+    s_gl_cache.blend_src = GL_ONE;  /* GL default */
+    s_gl_cache.blend_dst = GL_ZERO; /* GL default */
 }
 
 /* ---- Helpers: enum mapping ---- */
@@ -162,26 +161,21 @@ static GLenum map_buffer_usage(nt_buffer_usage_t u) {
 /* ==== Backend interface implementation ==== */
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
-    if (!nt_gfx_gl_ctx_create(desc)) {
+    NT_ASSERT(desc);
+    s_init_desc = *desc;
+
+    if (!nt_gfx_gl_ctx_create(&s_init_desc)) {
         return false;
     }
 
     /* Allocate backend resource arrays (+1 because slots are 1-based) */
-    s_max_pipelines = (desc && desc->max_pipelines) ? desc->max_pipelines : 16;
-    s_max_buffers = (desc && desc->max_buffers) ? desc->max_buffers : 128;
-
-    s_pipelines = (nt_gfx_gl_pipeline_t *)calloc(s_max_pipelines + 1, sizeof(nt_gfx_gl_pipeline_t));
-    s_buffer_gl = (GLuint *)calloc(s_max_buffers + 1, sizeof(GLuint));
-    s_buffer_targets = (GLenum *)calloc(s_max_buffers + 1, sizeof(GLenum));
+    s_pipelines = (nt_gfx_gl_pipeline_t *)calloc(s_init_desc.max_pipelines + 1, sizeof(nt_gfx_gl_pipeline_t));
+    s_buffer_gl = (GLuint *)calloc(s_init_desc.max_buffers + 1, sizeof(GLuint));
+    s_buffer_targets = (GLenum *)calloc(s_init_desc.max_buffers + 1, sizeof(GLenum));
 
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
     nt_gfx_gl_cache_reset();
-
-    if (desc) {
-        s_init_desc = *desc;
-    }
-
     return true;
 }
 
@@ -224,7 +218,7 @@ void nt_gfx_backend_end_pass(void) {}
 /* ---- Pipeline bind ---- */
 
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
-    if (backend_handle == 0 || backend_handle > s_max_pipelines) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_pipelines) {
         return;
     }
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[backend_handle];
@@ -374,7 +368,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
 
     /* Find free pipeline slot */
     uint32_t slot = 0;
-    for (uint32_t i = 1; i <= s_max_pipelines; i++) {
+    for (uint32_t i = 1; i <= s_init_desc.max_pipelines; i++) {
         if (s_pipelines[i].vao == 0) {
             slot = i;
             break;
@@ -418,7 +412,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
 }
 
 void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) {
-    if (backend_handle == 0 || backend_handle > s_max_pipelines) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_pipelines) {
         return;
     }
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[backend_handle];
@@ -441,7 +435,7 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
 
     /* Find free buffer slot */
     uint32_t slot = 0;
-    for (uint32_t i = 1; i <= s_max_buffers; i++) {
+    for (uint32_t i = 1; i <= s_init_desc.max_buffers; i++) {
         if (s_buffer_gl[i] == 0) {
             slot = i;
             break;
@@ -458,7 +452,7 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
 }
 
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) {
-    if (backend_handle == 0 || backend_handle > s_max_buffers) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
         return;
     }
     GLuint buf = s_buffer_gl[backend_handle];
@@ -470,7 +464,7 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle) {
 }
 
 void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uint32_t size) {
-    if (backend_handle == 0 || backend_handle > s_max_buffers) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
         return;
     }
     GLuint buf = s_buffer_gl[backend_handle];
@@ -480,7 +474,7 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uin
 }
 
 void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) {
-    if (backend_handle == 0 || backend_handle > s_max_buffers) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
         return;
     }
     GLuint buf = s_buffer_gl[backend_handle];
@@ -489,7 +483,7 @@ void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) {
     /* Re-apply vertex attribute pointers from the currently bound pipeline.
      * VAOs record the buffer binding per attribute, so when a different
      * buffer is bound we must re-set the pointers. */
-    if (s_bound_pipeline_slot != 0 && s_bound_pipeline_slot <= s_max_pipelines) {
+    if (s_bound_pipeline_slot != 0 && s_bound_pipeline_slot <= s_init_desc.max_pipelines) {
         const nt_vertex_layout_t *layout = &s_pipelines[s_bound_pipeline_slot].layout;
         for (uint8_t i = 0; i < layout->attr_count; i++) {
             const nt_vertex_attr_t *attr = &layout->attrs[i];
@@ -504,7 +498,7 @@ void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) {
 }
 
 void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle) {
-    if (backend_handle == 0 || backend_handle > s_max_buffers) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
         return;
     }
     GLuint buf = s_buffer_gl[backend_handle];
@@ -522,13 +516,13 @@ bool nt_gfx_backend_recreate_all_resources(void) {
 
     /* Zero out all backend-side arrays -- old GL names are invalid. */
     if (s_pipelines) {
-        memset(s_pipelines, 0, (s_max_pipelines + 1) * sizeof(nt_gfx_gl_pipeline_t));
+        memset(s_pipelines, 0, (s_init_desc.max_pipelines + 1) * sizeof(nt_gfx_gl_pipeline_t));
     }
     if (s_buffer_gl) {
-        memset(s_buffer_gl, 0, (s_max_buffers + 1) * sizeof(GLuint));
+        memset(s_buffer_gl, 0, (s_init_desc.max_buffers + 1) * sizeof(GLuint));
     }
     if (s_buffer_targets) {
-        memset(s_buffer_targets, 0, (s_max_buffers + 1) * sizeof(GLenum));
+        memset(s_buffer_targets, 0, (s_init_desc.max_buffers + 1) * sizeof(GLenum));
     }
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;

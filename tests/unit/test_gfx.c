@@ -122,15 +122,16 @@ void test_gfx_make_destroy_buffer(void) {
     nt_gfx_destroy_buffer(buf);
 }
 
-/* ---- High-level: default pool sizes applied when desc is zeroed ---- */
+/* ---- High-level: nt_gfx_desc_defaults provides usable config ---- */
 
 void test_gfx_defaults_applied(void) {
-    /* Shutdown current, re-init with zeroed desc */
+    /* Shutdown current, re-init with defaults */
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){0});
+    nt_gfx_desc_t defaults = nt_gfx_desc_defaults();
+    nt_gfx_init(&defaults);
     TEST_ASSERT_TRUE(g_nt_gfx.initialized);
 
-    /* Verify we can allocate more than 4 shaders (proves defaults applied, not 0) */
+    /* Verify we can allocate more than 4 shaders (proves defaults > test setUp) */
     nt_shader_t shaders[10];
     for (int i = 0; i < 10; i++) {
         shaders[i] = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});

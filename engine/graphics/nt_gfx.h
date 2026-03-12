@@ -82,13 +82,13 @@ typedef struct {
 /* ---- Descriptor structs ---- */
 
 typedef struct {
-    uint32_t max_shaders;   /* default: 32 */
-    uint32_t max_pipelines; /* default: 16 */
-    uint32_t max_buffers;   /* default: 128 */
-    bool depth;             /* request depth buffer (default: true) */
-    bool stencil;           /* request stencil buffer (default: false) */
-    bool antialias;         /* MSAA (default: false) */
-    bool alpha;             /* transparent canvas/window (default: false) */
+    uint32_t max_shaders;     /* default: 32 */
+    uint32_t max_pipelines;   /* default: 16 */
+    uint32_t max_buffers;     /* default: 128 */
+    bool depth;               /* request depth buffer (default: true) */
+    bool stencil;             /* request stencil buffer (default: false) */
+    bool antialias;           /* MSAA (default: false) */
+    bool alpha;               /* transparent canvas/window (default: false) */
     bool premultiplied_alpha; /* web only: canvas-to-page blending (default: true, ignored when alpha=false) */
 } nt_gfx_desc_t;
 
@@ -134,6 +134,18 @@ typedef struct {
 } nt_gfx_t;
 
 extern nt_gfx_t g_nt_gfx;
+
+/* ---- Defaults ---- */
+
+static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
+    return (nt_gfx_desc_t){
+        .max_shaders = 32,
+        .max_pipelines = 16,
+        .max_buffers = 128,
+        .depth = true,
+        .premultiplied_alpha = true,
+    };
+}
 
 /* ---- Lifecycle ---- */
 

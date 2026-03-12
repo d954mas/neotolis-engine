@@ -6,13 +6,13 @@ static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE s_gl_context;
 bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     EmscriptenWebGLContextAttributes attrs;
     emscripten_webgl_init_context_attributes(&attrs);
-    attrs.alpha = desc ? desc->alpha : false;
-    attrs.depth = desc ? desc->depth : true;
-    attrs.stencil = desc ? desc->stencil : false;
-    attrs.antialias = desc ? desc->antialias : false;
+    attrs.alpha = desc->alpha;
+    attrs.depth = desc->depth;
+    attrs.stencil = desc->stencil;
+    attrs.antialias = desc->antialias;
     attrs.majorVersion = 2;
     attrs.minorVersion = 0;
-    attrs.premultipliedAlpha = desc ? desc->premultiplied_alpha : true;
+    attrs.premultipliedAlpha = desc->premultiplied_alpha;
     attrs.preserveDrawingBuffer = false;
 
     s_gl_context = emscripten_webgl_create_context("#canvas", &attrs);

@@ -150,34 +150,25 @@ static void nt_gfx_free_pipeline_data(uint32_t slot) {
     memset(&s_gfx.pipeline_sources[slot], 0, sizeof(nt_gfx_pipeline_sources_t));
 }
 
-/* ---- Default pool sizes ---- */
-
-#define NT_GFX_DEFAULT_SHADERS 32
-#define NT_GFX_DEFAULT_PIPELINES 16
-#define NT_GFX_DEFAULT_BUFFERS 128
-
 /* ---- Lifecycle ---- */
 
 void nt_gfx_init(const nt_gfx_desc_t *desc) {
+    NT_ASSERT(desc);
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
 
-    uint32_t max_shd = (desc && desc->max_shaders > 0) ? desc->max_shaders : NT_GFX_DEFAULT_SHADERS;
-    uint32_t max_pip = (desc && desc->max_pipelines > 0) ? desc->max_pipelines : NT_GFX_DEFAULT_PIPELINES;
-    uint32_t max_buf = (desc && desc->max_buffers > 0) ? desc->max_buffers : NT_GFX_DEFAULT_BUFFERS;
+    nt_gfx_pool_init(&s_gfx.shader_pool, desc->max_shaders);
+    nt_gfx_pool_init(&s_gfx.pipeline_pool, desc->max_pipelines);
+    nt_gfx_pool_init(&s_gfx.buffer_pool, desc->max_buffers);
 
-    nt_gfx_pool_init(&s_gfx.shader_pool, max_shd);
-    nt_gfx_pool_init(&s_gfx.pipeline_pool, max_pip);
-    nt_gfx_pool_init(&s_gfx.buffer_pool, max_buf);
+    s_gfx.shader_backends = (uint32_t *)calloc(desc->max_shaders + 1, sizeof(uint32_t));
+    s_gfx.pipeline_backends = (uint32_t *)calloc(desc->max_pipelines + 1, sizeof(uint32_t));
+    s_gfx.buffer_backends = (uint32_t *)calloc(desc->max_buffers + 1, sizeof(uint32_t));
 
-    s_gfx.shader_backends = (uint32_t *)calloc(max_shd + 1, sizeof(uint32_t));
-    s_gfx.pipeline_backends = (uint32_t *)calloc(max_pip + 1, sizeof(uint32_t));
-    s_gfx.buffer_backends = (uint32_t *)calloc(max_buf + 1, sizeof(uint32_t));
-
-    s_gfx.shader_descs = (nt_shader_desc_t *)calloc(max_shd + 1, sizeof(nt_shader_desc_t));
-    s_gfx.pipeline_descs = (nt_pipeline_desc_t *)calloc(max_pip + 1, sizeof(nt_pipeline_desc_t));
-    s_gfx.buffer_descs = (nt_buffer_desc_t *)calloc(max_buf + 1, sizeof(nt_buffer_desc_t));
-    s_gfx.pipeline_sources = (nt_gfx_pipeline_sources_t *)calloc(max_pip + 1, sizeof(nt_gfx_pipeline_sources_t));
+    s_gfx.shader_descs = (nt_shader_desc_t *)calloc(desc->max_shaders + 1, sizeof(nt_shader_desc_t));
+    s_gfx.pipeline_descs = (nt_pipeline_desc_t *)calloc(desc->max_pipelines + 1, sizeof(nt_pipeline_desc_t));
+    s_gfx.buffer_descs = (nt_buffer_desc_t *)calloc(desc->max_buffers + 1, sizeof(nt_buffer_desc_t));
+    s_gfx.pipeline_sources = (nt_gfx_pipeline_sources_t *)calloc(desc->max_pipelines + 1, sizeof(nt_gfx_pipeline_sources_t));
 
     s_gfx.render_state = NT_GFX_STATE_IDLE;
 
