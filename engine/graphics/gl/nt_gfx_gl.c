@@ -453,7 +453,16 @@ void nt_gfx_backend_draw(uint32_t first_element, uint32_t num_elements, bool ind
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     GLenum gl_type = (desc->type == NT_SHADER_VERTEX) ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER;
     GLuint shader = glCreateShader(gl_type);
-    glShaderSource(shader, 1, &desc->source, NULL);
+
+    /* TODO(builder): remove prefix once builder packs per-platform shader variants. */
+#ifdef NT_PLATFORM_WEB
+    const char *prefix = "#version 300 es\nprecision mediump float;\n";
+#else
+    const char *prefix = "#version 330 core\n";
+#endif
+    const char *sources[2] = {prefix, desc->source};
+    glShaderSource(shader, 2, sources, NULL);
+
     glCompileShader(shader);
     /* Per MDN best practice: do NOT check GL_COMPILE_STATUS here.
      * Checking forces synchronous compilation.  Errors surface at link time. */
