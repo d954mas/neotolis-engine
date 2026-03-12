@@ -459,6 +459,7 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
 
 void nt_gfx_destroy_shader(nt_shader_t shd) {
     if (!nt_gfx_pool_valid(&s_gfx.shader_pool, shd.id)) {
+        nt_log_error("gfx: destroy_shader: invalid handle");
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(shd.id);
@@ -470,6 +471,7 @@ void nt_gfx_destroy_shader(nt_shader_t shd) {
 
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
     if (!nt_gfx_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
+        nt_log_error("gfx: destroy_pipeline: invalid handle");
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(pip.id);
@@ -481,6 +483,7 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
 
 void nt_gfx_destroy_buffer(nt_buffer_t buf) {
     if (!nt_gfx_pool_valid(&s_gfx.buffer_pool, buf.id)) {
+        nt_log_error("gfx: destroy_buffer: invalid handle");
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
