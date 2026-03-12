@@ -18,6 +18,24 @@
             "webRoot": "${workspaceFolder}/build/examples/hello/wasm-release",
             "preLaunchTask": "Build & Serve WASM (release)",
             "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Debug WASM bench_shapes",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8082/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/bench_shapes/wasm-debug",
+            "preLaunchTask": "Build & Serve bench_shapes (debug)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Run WASM bench_shapes (release)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8083/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/bench_shapes/wasm-release",
+            "preLaunchTask": "Build & Serve bench_shapes (release)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
         }
     ]
 }

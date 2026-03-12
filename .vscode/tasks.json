@@ -113,6 +113,42 @@
             "dependsOn": ["Build wasm-release", "Ensure server (release :8081)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
+        },
+        {
+            "label": "Ensure server bench_shapes (debug :8082)",
+            "type": "shell",
+            "command": "curl -s -o nul http://localhost:8082 >nul 2>&1 && (echo Server already running on :8082) || (start /b python -m http.server 8082 -d \"${workspaceFolder}/build/examples/bench_shapes/wasm-debug\" & timeout /t 1 >nul)",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Ensure server bench_shapes (release :8083)",
+            "type": "shell",
+            "command": "curl -s -o nul http://localhost:8083 >nul 2>&1 && (echo Server already running on :8083) || (start /b python -m http.server 8083 -d \"${workspaceFolder}/build/examples/bench_shapes/wasm-release\" & timeout /t 1 >nul)",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve bench_shapes (debug)",
+            "dependsOn": ["Build wasm-debug", "Ensure server bench_shapes (debug :8082)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve bench_shapes (release)",
+            "dependsOn": ["Build wasm-release", "Ensure server bench_shapes (release :8083)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
         }
     ]
 }
