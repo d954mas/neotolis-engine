@@ -68,7 +68,6 @@ static struct {
 
     nt_gfx_render_state_t render_state;
     uint32_t bound_pipeline; /* currently bound pipeline backend handle */
-    bool has_index_buffer;   /* track if index buffer is bound for draw */
 } s_gfx;
 
 /* ---- Pool helpers ---- */
@@ -505,7 +504,6 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
     }
     uint32_t slot = nt_gfx_pool_slot_index(pip.id);
     s_gfx.bound_pipeline = s_gfx.pipeline_backends[slot];
-    s_gfx.has_index_buffer = false;
     nt_gfx_backend_bind_pipeline(s_gfx.bound_pipeline);
 }
 
@@ -540,7 +538,6 @@ void nt_gfx_bind_index_buffer(nt_buffer_t buf) {
         nt_log_error("gfx: bind_index_buffer: buffer is not index type");
         return;
     }
-    s_gfx.has_index_buffer = true;
     nt_gfx_backend_bind_index_buffer(s_gfx.buffer_backends[slot]);
 }
 
@@ -574,9 +571,9 @@ void nt_gfx_set_uniform_int(const char *name, int val) {
     nt_gfx_backend_set_uniform_int(name, val);
 }
 
-/* ---- Draw call ---- */
+/* ---- Draw calls ---- */
 
-void nt_gfx_draw(uint32_t first_element, uint32_t num_elements) {
+void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     if (g_nt_gfx.context_lost) {
         return;
     }
@@ -592,7 +589,26 @@ void nt_gfx_draw(uint32_t first_element, uint32_t num_elements) {
         return;
     }
 
-    nt_gfx_backend_draw(first_element, num_elements, s_gfx.has_index_buffer);
+    nt_gfx_backend_draw(first_vertex, num_vertices, false);
+}
+
+void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
+    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        nt_log_error("gfx: draw_indexed called outside PASS state");
+        return;
+    }
+    NT_ASSERT(s_gfx.bound_pipeline != 0);
+    if (s_gfx.bound_pipeline == 0) {
+        nt_log_error("gfx: draw_indexed called without bound pipeline");
+        return;
+    }
+
+    nt_gfx_backend_draw(first_index, num_indices, true);
 }
 
 /* ---- Buffer update ---- */

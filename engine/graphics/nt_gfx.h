@@ -167,9 +167,10 @@ void nt_gfx_set_uniform_vec4(const char *name, const float *vec);
 void nt_gfx_set_uniform_float(const char *name, float val);
 void nt_gfx_set_uniform_int(const char *name, int val);
 
-/* ---- Draw call ---- */
+/* ---- Draw calls ---- */
 
-void nt_gfx_draw(uint32_t first_element, uint32_t num_elements);
+void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices);
+void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices);
 
 /* ---- Buffer update ---- */
 
