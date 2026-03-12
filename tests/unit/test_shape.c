@@ -9,7 +9,7 @@
 static bool float_near(float a, float b, float epsilon) { return fabsf(a - b) <= epsilon; }
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 128});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 32, .max_buffers = 128});
     nt_shape_renderer_init();
     /* Enter frame/pass so flush->draw_indexed doesn't assert */
     nt_gfx_begin_frame();
@@ -66,11 +66,11 @@ void test_shape_set_depth_auto_flush(void) {
     float b[3] = {1, 0, 0};
     float col[4] = {1, 1, 1, 1};
     nt_shape_renderer_line(a, b, col);
-    TEST_ASSERT_GREATER_THAN_UINT32(0, nt_shape_renderer_test_vertex_count());
+    TEST_ASSERT_GREATER_THAN_UINT32(0, nt_shape_renderer_test_line_count());
 
     nt_shape_renderer_set_depth(false);
     /* After auto-flush, buffers should be reset */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_line_count());
 }
 
 /* ---- 5. set_blend auto-flushes non-empty batch ---- */
@@ -80,10 +80,10 @@ void test_shape_set_blend_auto_flush(void) {
     float b[3] = {1, 0, 0};
     float col[4] = {1, 1, 1, 1};
     nt_shape_renderer_line(a, b, col);
-    TEST_ASSERT_GREATER_THAN_UINT32(0, nt_shape_renderer_test_vertex_count());
+    TEST_ASSERT_GREATER_THAN_UINT32(0, nt_shape_renderer_test_line_count());
 
     nt_shape_renderer_set_blend(true);
-    TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_line_count());
 }
 
 /* ---- 6. set_line_width stores value ---- */
@@ -93,28 +93,16 @@ void test_shape_set_line_width(void) {
     TEST_ASSERT_TRUE(float_near(nt_shape_renderer_test_line_width(), 0.5F, 0.001F));
 }
 
-/* ---- 7. set_segments default and custom ---- */
-
-void test_shape_set_segments_default(void) {
-    nt_shape_renderer_set_segments(0);
-    TEST_ASSERT_EQUAL_INT(32, nt_shape_renderer_test_segments());
-
-    nt_shape_renderer_set_segments(16);
-    TEST_ASSERT_EQUAL_INT(16, nt_shape_renderer_test_segments());
-
-    nt_shape_renderer_set_segments(-5);
-    TEST_ASSERT_EQUAL_INT(32, nt_shape_renderer_test_segments());
-}
-
-/* ---- 8. Line vertex/index counts ---- */
+/* ---- 7. Line instance count (instanced billboard) ---- */
 
 void test_shape_line_vertex_count(void) {
     float a[3] = {0, 0, 0};
     float b[3] = {1, 0, 0};
     float col[4] = {1, 0, 0, 1};
     nt_shape_renderer_line(a, b, col);
-    TEST_ASSERT_EQUAL_UINT32(4, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(6, nt_shape_renderer_test_index_count());
+    /* Lines use instanced draw: 1 line = 1 instance */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(0, nt_shape_renderer_test_vertex_count());
 }
 
 /* ---- 9. Rect fill counts ---- */
@@ -135,9 +123,8 @@ void test_shape_rect_wire_counts(void) {
     float size[2] = {2, 2};
     float col[4] = {0, 1, 0, 1};
     nt_shape_renderer_rect_wire(pos, size, col);
-    /* 4 edges x 4 verts = 16, 4 edges x 6 indices = 24 */
-    TEST_ASSERT_EQUAL_UINT32(16, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(24, nt_shape_renderer_test_index_count());
+    /* 4 edges = 4 line instances */
+    TEST_ASSERT_EQUAL_UINT32(4, nt_shape_renderer_test_line_count());
 }
 
 /* ---- 11. Triangle fill counts ---- */
@@ -160,9 +147,8 @@ void test_shape_triangle_wire_counts(void) {
     float c[3] = {0.5F, 1, 0};
     float col[4] = {0, 0, 1, 1};
     nt_shape_renderer_triangle_wire(a, b, c, col);
-    /* 3 edges x 4 verts = 12, 3 edges x 6 indices = 18 */
-    TEST_ASSERT_EQUAL_UINT32(12, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(18, nt_shape_renderer_test_index_count());
+    /* 3 edges = 3 line instances */
+    TEST_ASSERT_EQUAL_UINT32(3, nt_shape_renderer_test_line_count());
 }
 
 /* ---- 13. Triangle per-vertex color ---- */
@@ -220,12 +206,13 @@ void test_shape_batch_accumulates(void) {
     float size[2] = {1, 1};
     float col[4] = {1, 1, 1, 1};
 
-    nt_shape_renderer_line(a, b, col);        /* 4v + 6i */
+    nt_shape_renderer_line(a, b, col);        /* 1 line instance */
     nt_shape_renderer_rect(pos, size, col);   /* 4v + 6i */
     nt_shape_renderer_triangle(a, b, c, col); /* 3v + 3i */
 
-    TEST_ASSERT_EQUAL_UINT32(4 + 4 + 3, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(6 + 6 + 3, nt_shape_renderer_test_index_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_line_count());
+    TEST_ASSERT_EQUAL_UINT32(4 + 3, nt_shape_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(6 + 3, nt_shape_renderer_test_index_count());
 }
 
 /* ---- 16. Circle fill counts (32 segments) ---- */
@@ -244,25 +231,12 @@ void test_shape_circle_fill_counts(void) {
 void test_shape_circle_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {1, 0, 0, 1};
-    /* 32 edges x 4 verts = 128, 32 edges x 6 indices = 192 */
+    /* 32 edges = 32 line instances */
     nt_shape_renderer_circle_wire(center, 1.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(128, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(192, nt_shape_renderer_test_index_count());
+    TEST_ASSERT_EQUAL_UINT32(32, nt_shape_renderer_test_line_count());
 }
 
-/* ---- 18. Circle with set_segments(8) ---- */
-
-void test_shape_circle_fill_custom_segments(void) {
-    float center[3] = {0, 0, 0};
-    float col[4] = {1, 0, 0, 1};
-    nt_shape_renderer_set_segments(8);
-    /* 8 segments: center + 8 ring = 9 verts, 8*3 = 24 indices */
-    nt_shape_renderer_circle(center, 1.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(9, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(24, nt_shape_renderer_test_index_count());
-}
-
-/* ---- 19. Cube fill counts ---- */
+/* ---- 18. Cube fill counts ---- */
 
 void test_shape_cube_fill_counts(void) {
     float center[3] = {0, 0, 0};
@@ -280,10 +254,9 @@ void test_shape_cube_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float size[3] = {1, 1, 1};
     float col[4] = {0, 1, 0, 1};
-    /* 12 edges x 4 verts = 48, 12 edges x 6 indices = 72 */
+    /* 12 edges = 12 line instances */
     nt_shape_renderer_cube_wire(center, size, col);
-    TEST_ASSERT_EQUAL_UINT32(48, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(72, nt_shape_renderer_test_index_count());
+    TEST_ASSERT_EQUAL_UINT32(12, nt_shape_renderer_test_line_count());
 }
 
 /* ---- 21. Sphere fill counts (32 segments) ---- */
@@ -302,11 +275,9 @@ void test_shape_sphere_fill_counts(void) {
 void test_shape_sphere_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {0, 0, 1, 1};
-    /* 3 great circles: equator (32 edges) + XY meridian (32 edges) + YZ meridian (32 edges)
-       Total: 96 edges x 4 verts = 384, 96 x 6 = 576 */
+    /* 3 great circles x 32 edges = 96 line instances */
     nt_shape_renderer_sphere_wire(center, 1.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(384, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(576, nt_shape_renderer_test_index_count());
+    TEST_ASSERT_EQUAL_UINT32(96, nt_shape_renderer_test_line_count());
 }
 
 /* ---- 23. Circle rot vertex count matches base ---- */
@@ -352,11 +323,9 @@ void test_shape_cylinder_fill_counts(void) {
 void test_shape_cylinder_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {1, 1, 0, 1};
-    /* Top circle (32) + bottom circle (32) + 4 vertical struts = 68 edges
-       68 * 4 = 272 verts, 68 * 6 = 408 indices */
+    /* Top circle (32) + bottom circle (32) + 4 vertical struts = 68 line instances */
     nt_shape_renderer_cylinder_wire(center, 1.0F, 2.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(272, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(408, nt_shape_renderer_test_index_count());
+    TEST_ASSERT_EQUAL_UINT32(68, nt_shape_renderer_test_line_count());
 }
 
 /* ---- 27. Capsule fill counts (32 segments) ---- */
@@ -378,12 +347,9 @@ void test_shape_capsule_fill_counts(void) {
 void test_shape_capsule_wire_counts(void) {
     float center[3] = {0, 0, 0};
     float col[4] = {0, 1, 1, 1};
-    /* 4 meridians x 17 edges = 68 edges
-       2 latitude rings x 32 edges = 64 edges
-       Total: 132 edges x 4 verts = 528, 132 * 6 = 792 */
+    /* 4 meridians x 17 edges + 2 latitude rings x 32 edges = 68 + 64 = 132 line instances */
     nt_shape_renderer_capsule_wire(center, 0.5F, 2.0F, col);
-    TEST_ASSERT_EQUAL_UINT32(528, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(792, nt_shape_renderer_test_index_count());
+    TEST_ASSERT_EQUAL_UINT32(132, nt_shape_renderer_test_line_count());
 }
 
 /* ---- 29. Mesh fill copies geometry into batch ---- */
@@ -393,7 +359,7 @@ void test_shape_mesh_fill_counts(void) {
     float positions[] = {0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0};
     uint16_t indices[] = {0, 1, 2, 0, 2, 3};
     float col[4] = {1, 1, 1, 1};
-    nt_shape_renderer_mesh(positions, indices, 6, col);
+    nt_shape_renderer_mesh(positions, 4, indices, 6, col);
     TEST_ASSERT_EQUAL_UINT32(4, nt_shape_renderer_test_vertex_count());
     TEST_ASSERT_EQUAL_UINT32(6, nt_shape_renderer_test_index_count());
 }
@@ -401,14 +367,12 @@ void test_shape_mesh_fill_counts(void) {
 /* ---- 30. Mesh wire emits edges per triangle ---- */
 
 void test_shape_mesh_wire_counts(void) {
-    /* 1 triangle: 3 positions, 3 indices -> 3 wireframe edges
-       3 * 4 = 12 verts, 3 * 6 = 18 indices */
+    /* 1 triangle: 3 edges = 3 line instances */
     float positions[] = {0, 0, 0, 1, 0, 0, 0.5F, 1, 0};
     uint16_t indices[] = {0, 1, 2};
     float col[4] = {1, 1, 1, 1};
-    nt_shape_renderer_mesh_wire(positions, indices, 3, col);
-    TEST_ASSERT_EQUAL_UINT32(12, nt_shape_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(18, nt_shape_renderer_test_index_count());
+    nt_shape_renderer_mesh_wire(positions, 3, indices, 3, col);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_shape_renderer_test_line_count());
 }
 
 /* ---- 31. Cylinder rot vertex count matches base ---- */
@@ -441,7 +405,6 @@ int main(void) {
     RUN_TEST(test_shape_set_depth_auto_flush);
     RUN_TEST(test_shape_set_blend_auto_flush);
     RUN_TEST(test_shape_set_line_width);
-    RUN_TEST(test_shape_set_segments_default);
     RUN_TEST(test_shape_line_vertex_count);
     RUN_TEST(test_shape_rect_fill_counts);
     RUN_TEST(test_shape_rect_wire_counts);
@@ -452,7 +415,6 @@ int main(void) {
     RUN_TEST(test_shape_batch_accumulates);
     RUN_TEST(test_shape_circle_fill_counts);
     RUN_TEST(test_shape_circle_wire_counts);
-    RUN_TEST(test_shape_circle_fill_custom_segments);
     RUN_TEST(test_shape_cube_fill_counts);
     RUN_TEST(test_shape_cube_wire_counts);
     RUN_TEST(test_shape_sphere_fill_counts);

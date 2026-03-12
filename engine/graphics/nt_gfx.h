@@ -109,9 +109,10 @@ typedef struct {
     bool blend;
     nt_blend_factor_t blend_src;
     nt_blend_factor_t blend_dst;
-    bool polygon_offset;         /* enable GL_POLYGON_OFFSET_FILL */
-    float polygon_offset_factor; /* glPolygonOffset factor (typically 1.0) */
-    float polygon_offset_units;  /* glPolygonOffset units (typically 1.0) */
+    bool polygon_offset;                /* enable GL_POLYGON_OFFSET_FILL */
+    float polygon_offset_factor;        /* glPolygonOffset factor (typically 1.0) */
+    float polygon_offset_units;         /* glPolygonOffset units (typically 1.0) */
+    nt_vertex_layout_t instance_layout; /* per-instance vertex attributes (optional, divisor=1) */
     const char *label;
 } nt_pipeline_desc_t;
 
@@ -200,6 +201,11 @@ void nt_gfx_set_uniform_int(const char *name, int val);
 
 void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices);
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices);
+void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count);
+
+/* ---- Instance buffer ---- */
+
+void nt_gfx_bind_instance_buffer(nt_buffer_t buf);
 
 /* ---- Buffer update ---- */
 

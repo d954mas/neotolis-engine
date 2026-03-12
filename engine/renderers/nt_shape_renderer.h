@@ -13,8 +13,8 @@
 #define NT_SHAPE_RENDERER_MAX_INDICES 131072
 #endif
 
-#ifndef NT_SHAPE_RENDERER_MAX_SEGMENTS
-#define NT_SHAPE_RENDERER_MAX_SEGMENTS 256
+#ifndef NT_SHAPE_RENDERER_MAX_LINES
+#define NT_SHAPE_RENDERER_MAX_LINES 32768
 #endif
 
 /* ---- Vertex format ---- */
@@ -37,7 +37,6 @@ void nt_shape_renderer_set_cam_pos(const float pos[3]);
 void nt_shape_renderer_set_line_width(float width);
 void nt_shape_renderer_set_depth(bool enabled);
 void nt_shape_renderer_set_blend(bool enabled);
-void nt_shape_renderer_set_segments(int segments);
 
 /* ---- Line ---- */
 
@@ -93,17 +92,17 @@ void nt_shape_renderer_capsule_wire_rot(const float center[3], float radius, flo
 
 /* ---- Mesh ---- */
 
-void nt_shape_renderer_mesh(const float *positions, const uint16_t *indices, uint32_t num_indices, const float color[4]);
-void nt_shape_renderer_mesh_wire(const float *positions, const uint16_t *indices, uint32_t num_indices, const float color[4]);
+void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const uint16_t *indices, uint32_t num_indices, const float color[4]);
+void nt_shape_renderer_mesh_wire(const float *positions, uint32_t num_vertices, const uint16_t *indices, uint32_t num_indices, const float color[4]);
 
 /* ---- Test accessors (test builds only) ---- */
 
 #ifdef NT_SHAPE_RENDERER_TEST_ACCESS
 uint32_t nt_shape_renderer_test_vertex_count(void);
 uint32_t nt_shape_renderer_test_index_count(void);
+uint32_t nt_shape_renderer_test_line_count(void);
 const float *nt_shape_renderer_test_cam_pos(void);
 float nt_shape_renderer_test_line_width(void);
-int nt_shape_renderer_test_segments(void);
 bool nt_shape_renderer_test_initialized(void);
 #endif
 
