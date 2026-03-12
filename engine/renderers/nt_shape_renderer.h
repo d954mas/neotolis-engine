@@ -13,6 +13,10 @@
 #define NT_SHAPE_RENDERER_MAX_INDICES 131072
 #endif
 
+#ifndef NT_SHAPE_RENDERER_MAX_SEGMENTS
+#define NT_SHAPE_RENDERER_MAX_SEGMENTS 256
+#endif
+
 /* ---- Vertex format ---- */
 
 typedef struct {

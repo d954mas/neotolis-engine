@@ -8,11 +8,11 @@
 
 _Static_assert(NT_SHAPE_RENDERER_MAX_VERTICES <= 65535, "uint16 index limit");
 
-/* Rotate vec3 by quaternion [x,y,z,w] using Rodrigues' formula. */
-static void quat_rotatev(const float q[4], const float v[3], float out[3]) {
-    /* cglm versor layout is [x,y,z,w] — matches ours */
-    glm_quat_rotatev((float *)q, (float *)v, out);
-}
+/* Convert quaternion to 3x3 rotation matrix (column-major). */
+static void quat_to_mat3(const float q[4], float m[3][3]) { glm_quat_mat3((float *)q, (vec3 *)m); }
+
+/* Multiply mat3 by vec3: out = M * v (column-major). */
+static void mat3_mulv(const float m[3][3], const float v[3], float out[3]) { glm_mat3_mulv((vec3 *)m, (float *)v, out); }
 
 /* ---- Embedded shader source ---- */
 
@@ -59,6 +59,11 @@ static struct {
     bool depth_enabled;
     bool blend_enabled;
     bool initialized;
+
+    /* Sin/Cos lookup table for segment-based shapes */
+    float sin_lut[NT_SHAPE_RENDERER_MAX_SEGMENTS + 1];
+    float cos_lut[NT_SHAPE_RENDERER_MAX_SEGMENTS + 1];
+    int lut_segs;
 } s_shape;
 
 /* ---- Helpers ---- */
@@ -109,6 +114,20 @@ static void set_vertex(nt_shape_renderer_vertex_t *v, const float pos[3], const 
     v->color[3] = color[3];
 }
 
+/* Rebuild the sin/cos lookup table when segment count changes. */
+static void rebuild_trig_lut(int segs) {
+    if (s_shape.lut_segs == segs) {
+        return;
+    }
+    float inv = 2.0F * NT_PI / (float)segs;
+    for (int i = 0; i <= segs; i++) {
+        float theta = inv * (float)i;
+        s_shape.sin_lut[i] = sinf(theta);
+        s_shape.cos_lut[i] = cosf(theta);
+    }
+    s_shape.lut_segs = segs;
+}
+
 /* Emit a billboard quad wireframe edge between two endpoints.
    Both endpoints get the same color. */
 static void emit_wire_edge(const float a[3], const float b[3], const float color[4]) {
@@ -138,9 +157,13 @@ static void emit_wire_edge(const float a[3], const float b[3], const float color
             /* Still degenerate: edge parallel to Y. Use right. */
             float right[3] = {1.0F, 0.0F, 0.0F};
             glm_vec3_cross(edge, right, side);
+            len_sq = glm_vec3_norm2(side);
         }
     }
-    glm_vec3_normalize(side);
+    float inv_len = 1.0F / sqrtf(len_sq);
+    side[0] *= inv_len;
+    side[1] *= inv_len;
+    side[2] *= inv_len;
 
     float hw = s_shape.line_width * 0.5F;
     glm_vec3_scale(side, hw, side);
@@ -194,9 +217,13 @@ static void emit_wire_edge_col(const float a[3], const float b[3], const float c
         if (len_sq < 1e-12F) {
             float right[3] = {1.0F, 0.0F, 0.0F};
             glm_vec3_cross(edge, right, side);
+            len_sq = glm_vec3_norm2(side);
         }
     }
-    glm_vec3_normalize(side);
+    float inv_len = 1.0F / sqrtf(len_sq);
+    side[0] *= inv_len;
+    side[1] *= inv_len;
+    side[2] *= inv_len;
 
     float hw = s_shape.line_width * 0.5F;
     glm_vec3_scale(side, hw, side);
@@ -247,6 +274,7 @@ void nt_shape_renderer_init(void) {
 
     s_shape.line_width = 0.02F;
     s_shape.segments = 32;
+    rebuild_trig_lut(s_shape.segments);
     s_shape.depth_enabled = true;
     s_shape.blend_enabled = false;
     s_shape.pip_active = s_shape.pip_depth;
@@ -324,7 +352,14 @@ void nt_shape_renderer_set_blend(bool enabled) {
     s_shape.pip_active = get_active_pipeline();
 }
 
-void nt_shape_renderer_set_segments(int segments) { s_shape.segments = (segments <= 0) ? 32 : segments; }
+void nt_shape_renderer_set_segments(int segments) {
+    int s = (segments <= 0) ? 32 : segments;
+    if (s > NT_SHAPE_RENDERER_MAX_SEGMENTS) {
+        s = NT_SHAPE_RENDERER_MAX_SEGMENTS;
+    }
+    s_shape.segments = s;
+    rebuild_trig_lut(s);
+}
 
 /* ---- Line ---- */
 
@@ -396,12 +431,15 @@ void nt_shape_renderer_rect_rot(const float pos[3], const float size[2], const f
         {-hx, +hy, 0.0F},
     };
 
+    float rm[3][3];
+    quat_to_mat3(rot, rm);
+
     uint16_t base = (uint16_t)s_shape.vertex_count;
     nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
 
     for (int i = 0; i < 4; i++) {
         float rotated[3];
-        quat_rotatev(rot, offsets[i], rotated);
+        mat3_mulv(rm, offsets[i], rotated);
         float p[3] = {pos[0] + rotated[0], pos[1] + rotated[1], pos[2] + rotated[2]};
         set_vertex(&v[i], p, color);
     }
@@ -429,10 +467,13 @@ void nt_shape_renderer_rect_wire_rot(const float pos[3], const float size[2], co
         {-hx, +hy, 0.0F},
     };
 
+    float rm[3][3];
+    quat_to_mat3(rot, rm);
+
     float corners[4][3];
     for (int i = 0; i < 4; i++) {
         float rotated[3];
-        quat_rotatev(rot, offsets[i], rotated);
+        mat3_mulv(rm, offsets[i], rotated);
         corners[i][0] = pos[0] + rotated[0];
         corners[i][1] = pos[1] + rotated[1];
         corners[i][2] = pos[2] + rotated[2];
@@ -519,8 +560,7 @@ void nt_shape_renderer_circle(const float center[3], float radius, const float c
 
     /* Ring vertices in XZ plane */
     for (int i = 0; i < segs; i++) {
-        float theta = 2.0F * NT_PI * (float)i / (float)segs;
-        float p[3] = {center[0] + (radius * cosf(theta)), center[1], center[2] + (radius * sinf(theta))};
+        float p[3] = {center[0] + (radius * s_shape.cos_lut[i]), center[1], center[2] + (radius * s_shape.sin_lut[i])};
         set_vertex(&v[1 + i], p, color);
     }
 
@@ -542,10 +582,9 @@ void nt_shape_renderer_circle_wire(const float center[3], float radius, const fl
     int segs = s_shape.segments;
 
     for (int i = 0; i < segs; i++) {
-        float t0 = 2.0F * NT_PI * (float)i / (float)segs;
-        float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
-        float a[3] = {center[0] + (radius * cosf(t0)), center[1], center[2] + (radius * sinf(t0))};
-        float b[3] = {center[0] + (radius * cosf(t1)), center[1], center[2] + (radius * sinf(t1))};
+        int next = (i + 1) % segs;
+        float a[3] = {center[0] + (radius * s_shape.cos_lut[i]), center[1], center[2] + (radius * s_shape.sin_lut[i])};
+        float b[3] = {center[0] + (radius * s_shape.cos_lut[next]), center[1], center[2] + (radius * s_shape.sin_lut[next])};
         emit_wire_edge(a, b, color);
     }
 }
@@ -564,11 +603,13 @@ void nt_shape_renderer_circle_rot(const float center[3], float radius, const flo
 
     set_vertex(&v[0], center, color);
 
+    float rm[3][3];
+    quat_to_mat3(rot, rm);
+
     for (int i = 0; i < segs; i++) {
-        float theta = 2.0F * NT_PI * (float)i / (float)segs;
-        float offset[3] = {radius * cosf(theta), 0.0F, radius * sinf(theta)};
+        float offset[3] = {radius * s_shape.cos_lut[i], 0.0F, radius * s_shape.sin_lut[i]};
         float rotated[3];
-        quat_rotatev(rot, offset, rotated);
+        mat3_mulv(rm, offset, rotated);
         float p[3] = {center[0] + rotated[0], center[1] + rotated[1], center[2] + rotated[2]};
         set_vertex(&v[1 + i], p, color);
     }
@@ -588,16 +629,17 @@ void nt_shape_renderer_circle_rot(const float center[3], float radius, const flo
 
 void nt_shape_renderer_circle_wire_rot(const float center[3], float radius, const float rot[4], const float color[4]) {
     int segs = s_shape.segments;
+    float rm[3][3];
+    quat_to_mat3(rot, rm);
 
     for (int i = 0; i < segs; i++) {
-        float t0 = 2.0F * NT_PI * (float)i / (float)segs;
-        float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
-        float off_a[3] = {radius * cosf(t0), 0.0F, radius * sinf(t0)};
-        float off_b[3] = {radius * cosf(t1), 0.0F, radius * sinf(t1)};
+        int next = (i + 1) % segs;
+        float off_a[3] = {radius * s_shape.cos_lut[i], 0.0F, radius * s_shape.sin_lut[i]};
+        float off_b[3] = {radius * s_shape.cos_lut[next], 0.0F, radius * s_shape.sin_lut[next]};
         float rot_a[3];
         float rot_b[3];
-        quat_rotatev(rot, off_a, rot_a);
-        quat_rotatev(rot, off_b, rot_b);
+        mat3_mulv(rm, off_a, rot_a);
+        mat3_mulv(rm, off_b, rot_b);
         float a[3] = {center[0] + rot_a[0], center[1] + rot_a[1], center[2] + rot_a[2]};
         float b[3] = {center[0] + rot_b[0], center[1] + rot_b[1], center[2] + rot_b[2]};
         emit_wire_edge(a, b, color);
@@ -694,12 +736,15 @@ void nt_shape_renderer_cube_rot(const float center[3], const float size[3], cons
         {-hx, -hy, -hz}, {+hx, -hy, -hz}, {+hx, +hy, -hz}, {-hx, +hy, -hz}, {-hx, -hy, +hz}, {+hx, -hy, +hz}, {+hx, +hy, +hz}, {-hx, +hy, +hz},
     };
 
+    float rm[3][3];
+    quat_to_mat3(rot, rm);
+
     uint16_t base = (uint16_t)s_shape.vertex_count;
     nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
 
     for (int i = 0; i < 8; i++) {
         float rotated[3];
-        quat_rotatev(rot, offsets[i], rotated);
+        mat3_mulv(rm, offsets[i], rotated);
         float p[3] = {center[0] + rotated[0], center[1] + rotated[1], center[2] + rotated[2]};
         set_vertex(&v[i], p, color);
     }
@@ -726,10 +771,13 @@ void nt_shape_renderer_cube_wire_rot(const float center[3], const float size[3],
         {-hx, -hy, -hz}, {+hx, -hy, -hz}, {+hx, +hy, -hz}, {-hx, +hy, -hz}, {-hx, -hy, +hz}, {+hx, -hy, +hz}, {+hx, +hy, +hz}, {-hx, +hy, +hz},
     };
 
+    float rm[3][3];
+    quat_to_mat3(rot, rm);
+
     float c[8][3];
     for (int i = 0; i < 8; i++) {
         float rotated[3];
-        quat_rotatev(rot, offsets[i], rotated);
+        mat3_mulv(rm, offsets[i], rotated);
         c[i][0] = center[0] + rotated[0];
         c[i][1] = center[1] + rotated[1];
         c[i][2] = center[2] + rotated[2];
@@ -763,15 +811,22 @@ void nt_shape_renderer_sphere(const float center[3], float radius, const float c
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
 
-    /* Generate vertices */
+    /* Precompute phi sin/cos per ring (stack-local) */
+    float sin_phi[(NT_SHAPE_RENDERER_MAX_SEGMENTS / 2) + 1];
+    float cos_phi[(NT_SHAPE_RENDERER_MAX_SEGMENTS / 2) + 1];
     for (int ring = 0; ring <= rings; ring++) {
         float phi = NT_PI * (float)ring / (float)rings;
-        float sp = sinf(phi);
-        float cp = cosf(phi);
+        sin_phi[ring] = sinf(phi);
+        cos_phi[ring] = cosf(phi);
+    }
+
+    /* Generate vertices */
+    for (int ring = 0; ring <= rings; ring++) {
+        float sp = sin_phi[ring];
+        float cp = cos_phi[ring];
         for (int seg = 0; seg <= segs; seg++) {
-            float theta = 2.0F * NT_PI * (float)seg / (float)segs;
-            float st = sinf(theta);
-            float ct = cosf(theta);
+            float st = s_shape.sin_lut[seg];
+            float ct = s_shape.cos_lut[seg];
             float p[3] = {center[0] + (radius * sp * ct), center[1] + (radius * cp), center[2] + (radius * sp * st)};
             set_vertex(&s_shape.vertices[s_shape.vertex_count], p, color);
             s_shape.vertex_count++;
@@ -803,28 +858,25 @@ void nt_shape_renderer_sphere_wire(const float center[3], float radius, const fl
 
     /* Equator (XZ plane): y=0, circle in XZ */
     for (int i = 0; i < segs; i++) {
-        float t0 = 2.0F * NT_PI * (float)i / (float)segs;
-        float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
-        float a[3] = {center[0] + (radius * cosf(t0)), center[1], center[2] + (radius * sinf(t0))};
-        float b[3] = {center[0] + (radius * cosf(t1)), center[1], center[2] + (radius * sinf(t1))};
+        int next = (i + 1) % segs;
+        float a[3] = {center[0] + (radius * s_shape.cos_lut[i]), center[1], center[2] + (radius * s_shape.sin_lut[i])};
+        float b[3] = {center[0] + (radius * s_shape.cos_lut[next]), center[1], center[2] + (radius * s_shape.sin_lut[next])};
         emit_wire_edge(a, b, color);
     }
 
     /* Great circle in XY plane: z=0, circle in XY */
     for (int i = 0; i < segs; i++) {
-        float t0 = 2.0F * NT_PI * (float)i / (float)segs;
-        float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
-        float a[3] = {center[0] + (radius * cosf(t0)), center[1] + (radius * sinf(t0)), center[2]};
-        float b[3] = {center[0] + (radius * cosf(t1)), center[1] + (radius * sinf(t1)), center[2]};
+        int next = (i + 1) % segs;
+        float a[3] = {center[0] + (radius * s_shape.cos_lut[i]), center[1] + (radius * s_shape.sin_lut[i]), center[2]};
+        float b[3] = {center[0] + (radius * s_shape.cos_lut[next]), center[1] + (radius * s_shape.sin_lut[next]), center[2]};
         emit_wire_edge(a, b, color);
     }
 
     /* Great circle in YZ plane: x=0, circle in YZ */
     for (int i = 0; i < segs; i++) {
-        float t0 = 2.0F * NT_PI * (float)i / (float)segs;
-        float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
-        float a[3] = {center[0], center[1] + (radius * cosf(t0)), center[2] + (radius * sinf(t0))};
-        float b[3] = {center[0], center[1] + (radius * cosf(t1)), center[2] + (radius * sinf(t1))};
+        int next = (i + 1) % segs;
+        float a[3] = {center[0], center[1] + (radius * s_shape.cos_lut[i]), center[2] + (radius * s_shape.sin_lut[i])};
+        float b[3] = {center[0], center[1] + (radius * s_shape.cos_lut[next]), center[2] + (radius * s_shape.sin_lut[next])};
         emit_wire_edge(a, b, color);
     }
 }
@@ -844,15 +896,20 @@ static void emit_cylinder_fill(const float center[3], float radius, float height
 
     uint16_t base = (uint16_t)s_shape.vertex_count;
     float hy = height * 0.5F;
+    bool has_rot = (rot != NULL);
+    float rm[3][3];
+    if (has_rot) {
+        quat_to_mat3(rot, rm);
+    }
 
     /* Vertex layout: [top_center, bottom_center, top_ring[0..segs], bottom_ring[0..segs]] */
     /* Index 0: top center, 1: bottom center, 2..segs+2: top ring, segs+3..2*segs+3: bottom ring */
 
     /* Top center */
     float tc_off[3] = {0, hy, 0};
-    if (rot) {
+    if (has_rot) {
         float tmp[3];
-        quat_rotatev(rot, tc_off, tmp);
+        mat3_mulv(rm, tc_off, tmp);
         tc_off[0] = tmp[0];
         tc_off[1] = tmp[1];
         tc_off[2] = tmp[2];
@@ -862,9 +919,9 @@ static void emit_cylinder_fill(const float center[3], float radius, float height
 
     /* Bottom center */
     float bc_off[3] = {0, -hy, 0};
-    if (rot) {
+    if (has_rot) {
         float tmp[3];
-        quat_rotatev(rot, bc_off, tmp);
+        mat3_mulv(rm, bc_off, tmp);
         bc_off[0] = tmp[0];
         bc_off[1] = tmp[1];
         bc_off[2] = tmp[2];
@@ -874,11 +931,10 @@ static void emit_cylinder_fill(const float center[3], float radius, float height
 
     /* Top ring (segs+1 verts, last duplicates first for seam) */
     for (int i = 0; i <= segs; i++) {
-        float theta = 2.0F * NT_PI * (float)i / (float)segs;
-        float off[3] = {radius * cosf(theta), hy, radius * sinf(theta)};
-        if (rot) {
+        float off[3] = {radius * s_shape.cos_lut[i], hy, radius * s_shape.sin_lut[i]};
+        if (has_rot) {
             float tmp[3];
-            quat_rotatev(rot, off, tmp);
+            mat3_mulv(rm, off, tmp);
             off[0] = tmp[0];
             off[1] = tmp[1];
             off[2] = tmp[2];
@@ -889,11 +945,10 @@ static void emit_cylinder_fill(const float center[3], float radius, float height
 
     /* Bottom ring (segs+1 verts) */
     for (int i = 0; i <= segs; i++) {
-        float theta = 2.0F * NT_PI * (float)i / (float)segs;
-        float off[3] = {radius * cosf(theta), -hy, radius * sinf(theta)};
-        if (rot) {
+        float off[3] = {radius * s_shape.cos_lut[i], -hy, radius * s_shape.sin_lut[i]};
+        if (has_rot) {
             float tmp[3];
-            quat_rotatev(rot, off, tmp);
+            mat3_mulv(rm, off, tmp);
             off[0] = tmp[0];
             off[1] = tmp[1];
             off[2] = tmp[2];
@@ -940,22 +995,26 @@ static void emit_cylinder_fill(const float center[3], float radius, float height
 static void emit_cylinder_wire(const float center[3], float radius, float height, const float *rot, const float color[4]) {
     int segs = s_shape.segments;
     float hy = height * 0.5F;
+    bool has_rot = (rot != NULL);
+    float rm[3][3];
+    if (has_rot) {
+        quat_to_mat3(rot, rm);
+    }
 
     /* Top and bottom circles */
     for (int i = 0; i < segs; i++) {
-        float t0 = 2.0F * NT_PI * (float)i / (float)segs;
-        float t1 = 2.0F * NT_PI * (float)((i + 1) % segs) / (float)segs;
+        int next = (i + 1) % segs;
 
         /* Top circle edge */
-        float top_a_off[3] = {radius * cosf(t0), hy, radius * sinf(t0)};
-        float top_b_off[3] = {radius * cosf(t1), hy, radius * sinf(t1)};
-        if (rot) {
+        float top_a_off[3] = {radius * s_shape.cos_lut[i], hy, radius * s_shape.sin_lut[i]};
+        float top_b_off[3] = {radius * s_shape.cos_lut[next], hy, radius * s_shape.sin_lut[next]};
+        if (has_rot) {
             float tmp[3];
-            quat_rotatev(rot, top_a_off, tmp);
+            mat3_mulv(rm, top_a_off, tmp);
             top_a_off[0] = tmp[0];
             top_a_off[1] = tmp[1];
             top_a_off[2] = tmp[2];
-            quat_rotatev(rot, top_b_off, tmp);
+            mat3_mulv(rm, top_b_off, tmp);
             top_b_off[0] = tmp[0];
             top_b_off[1] = tmp[1];
             top_b_off[2] = tmp[2];
@@ -965,15 +1024,15 @@ static void emit_cylinder_wire(const float center[3], float radius, float height
         emit_wire_edge(ta, tb, color);
 
         /* Bottom circle edge */
-        float bot_a_off[3] = {radius * cosf(t0), -hy, radius * sinf(t0)};
-        float bot_b_off[3] = {radius * cosf(t1), -hy, radius * sinf(t1)};
-        if (rot) {
+        float bot_a_off[3] = {radius * s_shape.cos_lut[i], -hy, radius * s_shape.sin_lut[i]};
+        float bot_b_off[3] = {radius * s_shape.cos_lut[next], -hy, radius * s_shape.sin_lut[next]};
+        if (has_rot) {
             float tmp[3];
-            quat_rotatev(rot, bot_a_off, tmp);
+            mat3_mulv(rm, bot_a_off, tmp);
             bot_a_off[0] = tmp[0];
             bot_a_off[1] = tmp[1];
             bot_a_off[2] = tmp[2];
-            quat_rotatev(rot, bot_b_off, tmp);
+            mat3_mulv(rm, bot_b_off, tmp);
             bot_b_off[0] = tmp[0];
             bot_b_off[1] = tmp[1];
             bot_b_off[2] = tmp[2];
@@ -986,22 +1045,24 @@ static void emit_cylinder_wire(const float center[3], float radius, float height
     /* 4 vertical struts at 0, 90, 180, 270 degrees */
     for (int i = 0; i < 4; i++) {
         float theta = NT_PI * 0.5F * (float)i;
-        float top_off[3] = {radius * cosf(theta), hy, radius * sinf(theta)};
-        float bot_off[3] = {radius * cosf(theta), -hy, radius * sinf(theta)};
-        if (rot) {
+        float ct = cosf(theta);
+        float st = sinf(theta);
+        float top_off[3] = {radius * ct, hy, radius * st};
+        float bot_off[3] = {radius * ct, -hy, radius * st};
+        if (has_rot) {
             float tmp[3];
-            quat_rotatev(rot, top_off, tmp);
+            mat3_mulv(rm, top_off, tmp);
             top_off[0] = tmp[0];
             top_off[1] = tmp[1];
             top_off[2] = tmp[2];
-            quat_rotatev(rot, bot_off, tmp);
+            mat3_mulv(rm, bot_off, tmp);
             bot_off[0] = tmp[0];
             bot_off[1] = tmp[1];
             bot_off[2] = tmp[2];
         }
         float ta[3] = {center[0] + top_off[0], center[1] + top_off[1], center[2] + top_off[2]};
-        float ba[3] = {center[0] + bot_off[0], center[1] + bot_off[1], center[2] + bot_off[2]};
-        emit_wire_edge(ta, ba, color);
+        float bv[3] = {center[0] + bot_off[0], center[1] + bot_off[1], center[2] + bot_off[2]};
+        emit_wire_edge(ta, bv, color);
     }
 }
 
@@ -1038,6 +1099,11 @@ static void emit_capsule_fill(const float center[3], float radius, float height,
     if (body_half < 0.0F) {
         body_half = 0.0F;
     }
+    bool has_rot = (rot != NULL);
+    float rm[3][3];
+    if (has_rot) {
+        quat_to_mat3(rot, rm);
+    }
 
     /* Generate vertices row by row from top pole to bottom pole.
        Row indices: 0..half_rings = top hemisphere, half_rings+1 = body bottom,
@@ -1064,11 +1130,10 @@ static void emit_capsule_fill(const float center[3], float radius, float height,
         }
 
         for (int seg = 0; seg <= segs; seg++) {
-            float theta = 2.0F * NT_PI * (float)seg / (float)segs;
-            float off[3] = {ring_radius * cosf(theta), y_offset, ring_radius * sinf(theta)};
-            if (rot) {
+            float off[3] = {ring_radius * s_shape.cos_lut[seg], y_offset, ring_radius * s_shape.sin_lut[seg]};
+            if (has_rot) {
                 float tmp[3];
-                quat_rotatev(rot, off, tmp);
+                mat3_mulv(rm, off, tmp);
                 off[0] = tmp[0];
                 off[1] = tmp[1];
                 off[2] = tmp[2];
@@ -1115,10 +1180,10 @@ static void capsule_row_params(int row, int half_rings, float body_half, float r
 }
 
 /* Optionally rotate an offset vector, then add center to produce final position. */
-static void apply_rot_and_offset(const float center[3], float off[3], const float *rot, float out[3]) {
-    if (rot) {
+static void apply_rot_and_offset(const float center[3], float off[3], bool has_rot, const float rm[3][3], float out[3]) {
+    if (has_rot) {
         float tmp[3];
-        quat_rotatev(rot, off, tmp);
+        mat3_mulv(rm, off, tmp);
         off[0] = tmp[0];
         off[1] = tmp[1];
         off[2] = tmp[2];
@@ -1136,6 +1201,11 @@ static void emit_capsule_wire(const float center[3], float radius, float height,
     float body_half = (height - (2.0F * radius)) * 0.5F;
     if (body_half < 0.0F) {
         body_half = 0.0F;
+    }
+    bool has_rot = (rot != NULL);
+    float rm[3][3];
+    if (has_rot) {
+        quat_to_mat3(rot, rm);
     }
 
     /* 4 meridian profile lines at 0, 90, 180, 270 degrees */
@@ -1156,8 +1226,8 @@ static void emit_capsule_wire(const float center[3], float radius, float height,
             float off_b[3] = {r1 * ct, y1, r1 * st};
             float a[3];
             float b[3];
-            apply_rot_and_offset(center, off_a, rot, a);
-            apply_rot_and_offset(center, off_b, rot, b);
+            apply_rot_and_offset(center, off_a, has_rot, rm, a);
+            apply_rot_and_offset(center, off_b, has_rot, rm, b);
             emit_wire_edge(a, b, color);
         }
     }
@@ -1170,14 +1240,13 @@ static void emit_capsule_wire(const float center[3], float radius, float height,
         capsule_row_params(row, half_rings, body_half, radius, &y_off, &rr);
 
         for (int seg = 0; seg < segs; seg++) {
-            float t0 = 2.0F * NT_PI * (float)seg / (float)segs;
-            float t1 = 2.0F * NT_PI * (float)((seg + 1) % segs) / (float)segs;
-            float off_a[3] = {rr * cosf(t0), y_off, rr * sinf(t0)};
-            float off_b[3] = {rr * cosf(t1), y_off, rr * sinf(t1)};
+            int next = (seg + 1) % segs;
+            float off_a[3] = {rr * s_shape.cos_lut[seg], y_off, rr * s_shape.sin_lut[seg]};
+            float off_b[3] = {rr * s_shape.cos_lut[next], y_off, rr * s_shape.sin_lut[next]};
             float a[3];
             float b[3];
-            apply_rot_and_offset(center, off_a, rot, a);
-            apply_rot_and_offset(center, off_b, rot, b);
+            apply_rot_and_offset(center, off_a, has_rot, rm, a);
+            apply_rot_and_offset(center, off_b, has_rot, rm, b);
             emit_wire_edge(a, b, color);
         }
     }
