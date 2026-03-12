@@ -39,8 +39,12 @@ typedef struct {
     bool blend;
     GLenum blend_src;
     GLenum blend_dst;
-    /* Store layout for re-applying vertex attrib pointers on buffer bind */
+    bool polygon_offset;
+    float po_factor;
+    float po_units;
+    /* Store layouts for re-applying vertex attrib pointers on buffer bind */
     nt_vertex_layout_t layout;
+    nt_vertex_layout_t instance_layout;
 } nt_gfx_gl_pipeline_t;
 
 /* ---- File-scope state ---- */
@@ -66,6 +70,9 @@ static struct {
     bool blend;
     GLenum blend_src;
     GLenum blend_dst;
+    bool polygon_offset;
+    float po_factor;
+    float po_units;
 } s_gl_cache;
 
 static void nt_gfx_gl_cache_reset(void) {
@@ -78,6 +85,9 @@ static void nt_gfx_gl_cache_reset(void) {
     s_gl_cache.blend = false;
     s_gl_cache.blend_src = GL_ONE;  /* GL default */
     s_gl_cache.blend_dst = GL_ZERO; /* GL default */
+    s_gl_cache.polygon_offset = false;
+    s_gl_cache.po_factor = 0.0F;
+    s_gl_cache.po_units = 0.0F;
 }
 
 /* ---- Helpers: enum mapping ---- */
@@ -277,6 +287,21 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
         s_gl_cache.blend_src = pip->blend_src;
         s_gl_cache.blend_dst = pip->blend_dst;
     }
+
+    /* Polygon offset */
+    if (s_gl_cache.polygon_offset != pip->polygon_offset) {
+        if (pip->polygon_offset) {
+            glEnable(GL_POLYGON_OFFSET_FILL);
+        } else {
+            glDisable(GL_POLYGON_OFFSET_FILL);
+        }
+        s_gl_cache.polygon_offset = pip->polygon_offset;
+    }
+    if (pip->polygon_offset && (s_gl_cache.po_factor != pip->po_factor || s_gl_cache.po_units != pip->po_units)) {
+        glPolygonOffset(pip->po_factor, pip->po_units);
+        s_gl_cache.po_factor = pip->po_factor;
+        s_gl_cache.po_units = pip->po_units;
+    }
 }
 
 /* ---- Uniforms ---- */
@@ -312,13 +337,11 @@ void nt_gfx_backend_set_uniform_int(const char *name, int val) {
 /* ---- Draw calls ---- */
 
 /* TODO: support uint32 indices (GL_UNSIGNED_INT) via nt_index_type_t in nt_buffer_desc_t */
-void nt_gfx_backend_draw(uint32_t first_element, uint32_t num_elements, bool indexed) {
-    if (indexed) {
-        glDrawElements(GL_TRIANGLES, (GLsizei)num_elements, GL_UNSIGNED_SHORT,
-                       (void *)(uintptr_t)(first_element * sizeof(uint16_t))); // NOLINT(performance-no-int-to-ptr)
-    } else {
-        glDrawArrays(GL_TRIANGLES, (GLint)first_element, (GLsizei)num_elements);
-    }
+void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices) { glDrawArrays(GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices); }
+
+void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices) {
+    glDrawElements(GL_TRIANGLES, (GLsizei)num_indices, GL_UNSIGNED_SHORT,
+                   (void *)(uintptr_t)(first_index * sizeof(uint16_t))); // NOLINT(performance-no-int-to-ptr)
 }
 
 /* ---- Resource management (shader / buffer / pipeline) ---- */
@@ -379,19 +402,20 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
         return 0; /* no free slots */
     }
 
-    /* Create VAO with vertex layout */
+    /* Create VAO with vertex layout.
+     * Only enable attributes here — actual glVertexAttribPointer calls happen
+     * in bind_vertex_buffer() once a buffer is bound.  WebGL requires a bound
+     * ARRAY_BUFFER for non-zero offsets, so calling it here would be an error. */
     GLuint vao;
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao);
     for (uint8_t i = 0; i < desc->layout.attr_count; i++) {
-        const nt_vertex_attr_t *attr = &desc->layout.attrs[i];
-        GLint size;
-        GLenum type;
-        GLboolean normalized;
-        get_format_params(attr->format, &size, &type, &normalized);
-        glEnableVertexAttribArray(attr->location);
-        glVertexAttribPointer(attr->location, size, type, normalized, (GLsizei)desc->layout.stride,
-                              (void *)(uintptr_t)attr->offset); // NOLINT(performance-no-int-to-ptr)
+        glEnableVertexAttribArray(desc->layout.attrs[i].location);
+    }
+    for (uint8_t i = 0; i < desc->instance_layout.attr_count; i++) {
+        GLuint loc = desc->instance_layout.attrs[i].location;
+        glEnableVertexAttribArray(loc);
+        glVertexAttribDivisor(loc, 1);
     }
     glBindVertexArray(0);
 
@@ -406,7 +430,11 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     pip->blend = desc->blend;
     pip->blend_src = map_blend_factor(desc->blend_src);
     pip->blend_dst = map_blend_factor(desc->blend_dst);
+    pip->polygon_offset = desc->polygon_offset;
+    pip->po_factor = desc->polygon_offset_factor;
+    pip->po_units = desc->polygon_offset_units;
     pip->layout = desc->layout;
+    pip->instance_layout = desc->instance_layout;
 
     return slot;
 }
@@ -503,6 +531,38 @@ void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle) {
     }
     GLuint buf = s_buffer_gl[backend_handle];
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf);
+}
+
+void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
+        return;
+    }
+    GLuint buf = s_buffer_gl[backend_handle];
+    glBindBuffer(GL_ARRAY_BUFFER, buf);
+
+    /* Re-apply instance attribute pointers from the currently bound pipeline. */
+    if (s_bound_pipeline_slot != 0 && s_bound_pipeline_slot <= s_init_desc.max_pipelines) {
+        const nt_vertex_layout_t *layout = &s_pipelines[s_bound_pipeline_slot].instance_layout;
+        for (uint8_t i = 0; i < layout->attr_count; i++) {
+            const nt_vertex_attr_t *attr = &layout->attrs[i];
+            GLint size;
+            GLenum type;
+            GLboolean normalized;
+            get_format_params(attr->format, &size, &type, &normalized);
+            glVertexAttribPointer(attr->location, size, type, normalized, (GLsizei)layout->stride,
+                                  (void *)(uintptr_t)attr->offset); // NOLINT(performance-no-int-to-ptr)
+        }
+    }
+}
+
+void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
+    glDrawArraysInstanced(GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices, (GLsizei)instance_count);
+}
+
+void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count) {
+    glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)num_indices, GL_UNSIGNED_SHORT,
+                            (void *)(uintptr_t)(first_index * sizeof(uint16_t)), // NOLINT(performance-no-int-to-ptr)
+                            (GLsizei)instance_count);
 }
 
 /* ---- Context loss recovery ---- */

@@ -281,6 +281,7 @@ void nt_gfx_begin_frame(void) {
     }
 
     s_gfx.render_state = NT_GFX_STATE_FRAME;
+    memset(&g_nt_gfx.frame_stats, 0, sizeof(g_nt_gfx.frame_stats));
     nt_gfx_backend_begin_frame();
 }
 
@@ -373,6 +374,10 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     }
     if (desc->layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS) {
         nt_log_error("gfx: pipeline creation failed: too many vertex attrs");
+        return result;
+    }
+    if (desc->instance_layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS) {
+        nt_log_error("gfx: pipeline creation failed: too many instance attrs");
         return result;
     }
 
@@ -584,10 +589,12 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
         return;
     }
 
-    nt_gfx_backend_draw(first_vertex, num_vertices, false);
+    g_nt_gfx.frame_stats.draw_calls++;
+    g_nt_gfx.frame_stats.vertices += num_vertices;
+    nt_gfx_backend_draw(first_vertex, num_vertices);
 }
 
-void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices) {
+void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices) {
     if (g_nt_gfx.context_lost) {
         return;
     }
@@ -603,7 +610,53 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices) {
         return;
     }
 
-    nt_gfx_backend_draw(first_index, num_indices, true);
+    g_nt_gfx.frame_stats.draw_calls++;
+    g_nt_gfx.frame_stats.vertices += num_vertices;
+    g_nt_gfx.frame_stats.indices += num_indices;
+    nt_gfx_backend_draw_indexed(first_index, num_indices);
+}
+
+void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
+    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        nt_log_error("gfx: draw_indexed_instanced called outside PASS state");
+        return;
+    }
+    NT_ASSERT(s_gfx.bound_pipeline != 0);
+    if (s_gfx.bound_pipeline == 0) {
+        nt_log_error("gfx: draw_indexed_instanced called without bound pipeline");
+        return;
+    }
+
+    g_nt_gfx.frame_stats.draw_calls++;
+    g_nt_gfx.frame_stats.draw_calls_instanced++;
+    g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
+    g_nt_gfx.frame_stats.indices += num_indices * instance_count;
+    g_nt_gfx.frame_stats.instances += instance_count;
+    nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count);
+}
+
+/* ---- Instance buffer ---- */
+
+void nt_gfx_bind_instance_buffer(nt_buffer_t buf) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    if (!nt_gfx_pool_valid(&s_gfx.buffer_pool, buf.id)) {
+        nt_log_error("gfx: bind_instance_buffer: invalid handle");
+        return;
+    }
+    uint32_t slot = nt_gfx_pool_slot_index(buf.id);
+    NT_ASSERT(s_gfx.buffer_descs[slot].type == NT_BUFFER_VERTEX);
+    if (s_gfx.buffer_descs[slot].type != NT_BUFFER_VERTEX) {
+        nt_log_error("gfx: bind_instance_buffer: buffer is not vertex type");
+        return;
+    }
+    nt_gfx_backend_bind_instance_buffer(s_gfx.buffer_backends[slot]);
 }
 
 /* ---- Buffer update ---- */

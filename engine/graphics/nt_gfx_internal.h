@@ -64,13 +64,17 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uin
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle);
 void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle);
 void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle);
+void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle);
 
 void nt_gfx_backend_set_uniform_mat4(const char *name, const float *matrix);
 void nt_gfx_backend_set_uniform_vec4(const char *name, const float *vec);
 void nt_gfx_backend_set_uniform_float(const char *name, float val);
 void nt_gfx_backend_set_uniform_int(const char *name, int val);
 
-void nt_gfx_backend_draw(uint32_t first_element, uint32_t num_elements, bool indexed);
+void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices);
+void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices);
+void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count);
+void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count);
 
 bool nt_gfx_backend_recreate_all_resources(void);
 

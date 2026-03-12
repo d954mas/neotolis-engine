@@ -23,19 +23,21 @@ else()
     endif()
 endif()
 
+# Vendored dependencies (committed in deps/, always available)
+# Must come before engine so targets like cglm_headers are visible.
+add_subdirectory(deps/cglm EXCLUDE_FROM_ALL)
+add_subdirectory(deps/unity EXCLUDE_FROM_ALL)
+
 # Core libraries (always available)
 add_subdirectory(shared)
 add_subdirectory(engine)
-
-# Vendored dependencies (committed in deps/, always available)
-add_subdirectory(deps/cglm EXCLUDE_FROM_ALL)
-add_subdirectory(deps/unity EXCLUDE_FROM_ALL)
 
 # Top-level only targets (not included when engine is used as subdirectory)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     enable_testing()
 
     add_subdirectory(examples/hello)
+    add_subdirectory(examples/bench_shapes)
     add_subdirectory(tests)
 
     if(NOT EMSCRIPTEN)
