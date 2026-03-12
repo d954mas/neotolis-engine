@@ -135,6 +135,7 @@ typedef struct {
     uint32_t draw_calls;
     uint32_t vertices;
     uint32_t indices;
+    uint32_t instances; /* total objects drawn via instanced calls */
 } nt_gfx_frame_stats_t;
 
 /* ---- Global state ---- */

@@ -10,6 +10,7 @@
 #include "math/nt_math.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #ifdef NT_PLATFORM_WEB
 #include "platform/web/nt_platform_web.h"
@@ -22,7 +23,30 @@
 #define ROOM_H 8.0F
 #define ROOM_D 20.0F
 #define GRID_STEP 1.0F
-#define MIN_DIST 2.0F /* minimum distance from camera to shapes */
+#define MIN_DIST 2.0F
+
+/* Shape storage */
+#define MAX_SHAPES_PER_TYPE 4096
+#define MAX_SHAPES (MAX_SHAPES_PER_TYPE * 8)
+
+/* Shape types */
+enum { BENCH_LINE, BENCH_RECT, BENCH_TRI, BENCH_CIRCLE, BENCH_CUBE, BENCH_SPHERE, BENCH_CYL, BENCH_CAP };
+
+typedef struct {
+    int type;
+    int variant; /* 0=fill, 1=wire, 2=fill_rot/col, 3=wire_rot/col */
+    float a[3];
+    float b[3];
+    float c[3];
+    float size[3];
+    float rot[4];
+    float col[4];
+    float col_b[4];
+    float col_c[4];
+} bench_shape_t;
+
+static bench_shape_t s_shapes[MAX_SHAPES];
+static int s_shape_count;
 
 static nt_accumulator_t s_acc;
 static int s_mul = 1;
@@ -51,13 +75,11 @@ static uint32_t hash_int(int i, int salt) {
     return h;
 }
 
-/* Returns value in [lo, hi] */
 static float rand_range(int i, int salt, float lo, float hi) {
     uint32_t h = hash_int(i, salt);
     return lo + (((float)(h & 0xFFFFU) / 65535.0F) * (hi - lo));
 }
 
-/* Generate position inside room, at least MIN_DIST from origin (camera) */
 static void rand_pos(int i, int salt, float out[3]) {
     for (int attempt = 0; attempt < 8; attempt++) {
         int s = salt + (attempt * 100);
@@ -72,15 +94,257 @@ static void rand_pos(int i, int salt, float out[3]) {
     }
 }
 
+static void rand_rot(int i, int salt, float rot[4]) {
+    float angle = rand_range(i, salt, 0.0F, 2.0F * NT_PI);
+    rot[0] = 0.0F;
+    rot[1] = sinf(angle * 0.5F);
+    rot[2] = 0.0F;
+    rot[3] = cosf(angle * 0.5F);
+}
+
+static void set4(float dst[4], float r, float g, float b, float a2) {
+    dst[0] = r;
+    dst[1] = g;
+    dst[2] = b;
+    dst[3] = a2;
+}
+
+/* ---- Build shape array (runs once on start + each F press) ---- */
+
+static void rebuild_shapes(void) {
+    int n = s_mul * BATCH;
+    s_shape_count = 0;
+
+    for (int i = 0; i < n && s_shape_count + 8 <= MAX_SHAPES; i++) {
+        int v = i & 3;
+        bench_shape_t *s;
+
+        /* Line */
+        s = &s_shapes[s_shape_count++];
+        s->type = BENCH_LINE;
+        s->variant = (i & 1) ? 0 : 1;
+        rand_pos(i, 0, s->a);
+        s->b[0] = s->a[0] + 0.5F;
+        s->b[1] = s->a[1] + 0.5F;
+        s->b[2] = s->a[2];
+        set4(s->col, 1.0F, 0.3F, 0.2F, 1.0F);
+        set4(s->col_b, 0.3F, 0.5F, 1.0F, 1.0F);
+
+        /* Rect */
+        s = &s_shapes[s_shape_count++];
+        s->type = BENCH_RECT;
+        s->variant = v;
+        rand_pos(i, 1000, s->a);
+        s->size[0] = 0.4F;
+        s->size[1] = 0.4F;
+        rand_rot(i, 1000, s->rot);
+        set4(s->col, 0.2F, 1.0F, 0.3F, 1.0F);
+
+        /* Triangle */
+        s = &s_shapes[s_shape_count++];
+        s->type = BENCH_TRI;
+        s->variant = v;
+        {
+            float tc[3];
+            rand_pos(i, 2000, tc);
+            s->a[0] = tc[0];
+            s->a[1] = tc[1] + 0.3F;
+            s->a[2] = tc[2];
+            s->b[0] = tc[0] - 0.25F;
+            s->b[1] = tc[1] - 0.2F;
+            s->b[2] = tc[2];
+            s->c[0] = tc[0] + 0.25F;
+            s->c[1] = tc[1] - 0.2F;
+            s->c[2] = tc[2];
+        }
+        set4(s->col, 0.3F, 0.5F, 1.0F, 1.0F);
+        set4(s->col_b, 0.2F, 1.0F, 0.3F, 1.0F);
+        set4(s->col_c, 1.0F, 0.3F, 0.2F, 1.0F);
+
+        /* Circle */
+        s = &s_shapes[s_shape_count++];
+        s->type = BENCH_CIRCLE;
+        s->variant = v;
+        rand_pos(i, 3000, s->a);
+        s->size[0] = 0.3F;
+        rand_rot(i, 3000, s->rot);
+        set4(s->col, 1.0F, 0.9F, 0.2F, 1.0F);
+
+        /* Cube */
+        s = &s_shapes[s_shape_count++];
+        s->type = BENCH_CUBE;
+        s->variant = v;
+        rand_pos(i, 4000, s->a);
+        s->size[0] = 0.3F;
+        s->size[1] = 0.3F;
+        s->size[2] = 0.3F;
+        rand_rot(i, 4000, s->rot);
+        set4(s->col, 0.2F, 0.9F, 0.9F, 1.0F);
+
+        /* Sphere */
+        s = &s_shapes[s_shape_count++];
+        s->type = BENCH_SPHERE;
+        s->variant = (i & 1) ? 0 : 1;
+        rand_pos(i, 5000, s->a);
+        s->size[0] = 0.2F;
+        set4(s->col, 0.7F, 0.3F, 1.0F, 1.0F);
+
+        /* Cylinder */
+        s = &s_shapes[s_shape_count++];
+        s->type = BENCH_CYL;
+        s->variant = v;
+        rand_pos(i, 6000, s->a);
+        s->size[0] = 0.15F;
+        s->size[1] = 0.5F;
+        rand_rot(i, 6000, s->rot);
+        set4(s->col, 1.0F, 0.5F, 0.1F, 1.0F);
+
+        /* Capsule */
+        s = &s_shapes[s_shape_count++];
+        s->type = BENCH_CAP;
+        s->variant = v;
+        rand_pos(i, 7000, s->a);
+        s->size[0] = 0.1F;
+        s->size[1] = 0.4F;
+        rand_rot(i, 7000, s->rot);
+        set4(s->col, 0.9F, 0.9F, 0.9F, 1.0F);
+    }
+}
+
+/* ---- Dispatch one shape to the renderer ---- */
+
+static void dispatch_shape(const bench_shape_t *s) {
+    switch (s->type) {
+    case BENCH_LINE:
+        nt_shape_renderer_line(s->a, s->b, s->col);
+        break;
+    case BENCH_RECT:
+        switch (s->variant) {
+        case 0:
+            nt_shape_renderer_rect(s->a, s->size, s->col);
+            break;
+        case 1:
+            nt_shape_renderer_rect_wire(s->a, s->size, s->col);
+            break;
+        case 2:
+            nt_shape_renderer_rect_rot(s->a, s->size, s->rot, s->col);
+            break;
+        case 3:
+            nt_shape_renderer_rect_wire_rot(s->a, s->size, s->rot, s->col);
+            break;
+        default:
+            break;
+        }
+        break;
+    case BENCH_TRI:
+        switch (s->variant) {
+        case 0:
+            nt_shape_renderer_triangle(s->a, s->b, s->c, s->col);
+            break;
+        case 1:
+            nt_shape_renderer_triangle_wire(s->a, s->b, s->c, s->col);
+            break;
+        case 2:
+            nt_shape_renderer_triangle_col(s->a, s->b, s->c, s->col, s->col_b, s->col_c);
+            break;
+        case 3:
+            nt_shape_renderer_triangle_wire(s->a, s->b, s->c, s->col);
+            break;
+        default:
+            break;
+        }
+        break;
+    case BENCH_CIRCLE:
+        switch (s->variant) {
+        case 0:
+            nt_shape_renderer_circle(s->a, s->size[0], s->col);
+            break;
+        case 1:
+            nt_shape_renderer_circle_wire(s->a, s->size[0], s->col);
+            break;
+        case 2:
+            nt_shape_renderer_circle_rot(s->a, s->size[0], s->rot, s->col);
+            break;
+        case 3:
+            nt_shape_renderer_circle_wire_rot(s->a, s->size[0], s->rot, s->col);
+            break;
+        default:
+            break;
+        }
+        break;
+    case BENCH_CUBE:
+        switch (s->variant) {
+        case 0:
+            nt_shape_renderer_cube(s->a, s->size, s->col);
+            break;
+        case 1:
+            nt_shape_renderer_cube_wire(s->a, s->size, s->col);
+            break;
+        case 2:
+            nt_shape_renderer_cube_rot(s->a, s->size, s->rot, s->col);
+            break;
+        case 3:
+            nt_shape_renderer_cube_wire_rot(s->a, s->size, s->rot, s->col);
+            break;
+        default:
+            break;
+        }
+        break;
+    case BENCH_SPHERE:
+        if (s->variant == 0) {
+            nt_shape_renderer_sphere(s->a, s->size[0], s->col);
+        } else {
+            nt_shape_renderer_sphere_wire(s->a, s->size[0], s->col);
+        }
+        break;
+    case BENCH_CYL:
+        switch (s->variant) {
+        case 0:
+            nt_shape_renderer_cylinder(s->a, s->size[0], s->size[1], s->col);
+            break;
+        case 1:
+            nt_shape_renderer_cylinder_wire(s->a, s->size[0], s->size[1], s->col);
+            break;
+        case 2:
+            nt_shape_renderer_cylinder_rot(s->a, s->size[0], s->size[1], s->rot, s->col);
+            break;
+        case 3:
+            nt_shape_renderer_cylinder_wire_rot(s->a, s->size[0], s->size[1], s->rot, s->col);
+            break;
+        default:
+            break;
+        }
+        break;
+    case BENCH_CAP:
+        switch (s->variant) {
+        case 0:
+            nt_shape_renderer_capsule(s->a, s->size[0], s->size[1], s->col);
+            break;
+        case 1:
+            nt_shape_renderer_capsule_wire(s->a, s->size[0], s->size[1], s->col);
+            break;
+        case 2:
+            nt_shape_renderer_capsule_rot(s->a, s->size[0], s->size[1], s->rot, s->col);
+            break;
+        case 3:
+            nt_shape_renderer_capsule_wire_rot(s->a, s->size[0], s->size[1], s->rot, s->col);
+            break;
+        default:
+            break;
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 /* ---- stroke font: draw a letter on the floor (XZ plane, y=0.002) ---- */
 
-/* Each letter is a sequence of line segments in a 0..1 x 0..1 cell.
-   Encoded as pairs of (x0,z0, x1,z1). Terminated by -1. */
 static void draw_letter(float ox, float oz, float scale, const float *strokes, int count, const float color[4]) {
     for (int i = 0; i < count; i++) {
         int si = i * 4;
         float x0 = ox + (strokes[si] * scale);
-        float z0 = oz - (strokes[si + 1] * scale); /* negate Z to flip letters right-side-up */
+        float z0 = oz - (strokes[si + 1] * scale);
         float x1 = ox + (strokes[si + 2] * scale);
         float z1 = oz - (strokes[si + 3] * scale);
         float a[3] = {x0, 0.002F, z0};
@@ -89,7 +353,6 @@ static void draw_letter(float ox, float oz, float scale, const float *strokes, i
     }
 }
 
-/* Stroke data: each letter in a 1x1.4 cell (width x height) */
 /* clang-format off */
 static const float s_N[] = {0,1.4F, 0,0, 0,1.4F, 1,0, 1,0, 1,1.4F};
 static const float s_E[] = {0,0, 0,1.4F, 0,1.4F, 1,1.4F, 0,0.7F, 0.8F,0.7F, 0,0, 1,0};
@@ -108,17 +371,13 @@ static void draw_floor_text(void) {
     float gap = 0.3F;
     float cell_w = scale + gap;
 
-    /* "NEOTOLIS" — 8 letters */
-    /* "ENGINE"  — 6 letters */
-    /* Center both lines */
     float line1_w = (8.0F * cell_w) - gap;
     float line2_w = (6.0F * cell_w) - gap;
     float x1_start = -line1_w * 0.5F;
     float x2_start = -line2_w * 0.5F;
-    float z_line1 = -1.0F; /* NEOTOLIS — closer when looking down */
-    float z_line2 = 1.0F;  /* ENGINE — further */
+    float z_line1 = -1.0F;
+    float z_line2 = 1.0F;
 
-    /* NEOTOLIS */
     struct {
         const float *strokes;
         int count;
@@ -129,7 +388,6 @@ static void draw_floor_text(void) {
         draw_letter(x1_start + ((float)i * cell_w), z_line1, scale, word1[i].strokes, word1[i].count, color);
     }
 
-    /* ENGINE */
     struct {
         const float *strokes;
         int count;
@@ -139,7 +397,7 @@ static void draw_floor_text(void) {
     for (int i = 0; i < 6; i++) {
         draw_letter(x2_start + ((float)i * cell_w), z_line2, scale, word2[i].strokes, word2[i].count, color);
     }
-    nt_shape_renderer_set_line_width(0.02F); /* restore default */
+    nt_shape_renderer_set_line_width(0.02F);
 }
 
 /* ---- draw room ---- */
@@ -148,14 +406,12 @@ static void draw_room(void) {
     float hw = ROOM_W * 0.5F;
     float hd = ROOM_D * 0.5F;
 
-    /* Floor — dark gray */
     float floor_col[4] = {0.15F, 0.15F, 0.18F, 1.0F};
     float floor_pos[3] = {0, 0, 0};
     float floor_sz[2] = {ROOM_W, ROOM_D};
-    float floor_rot[4] = {0.7071068F, 0, 0, 0.7071068F}; /* 90 deg around X */
+    float floor_rot[4] = {0.7071068F, 0, 0, 0.7071068F};
     nt_shape_renderer_rect_rot(floor_pos, floor_sz, floor_rot, floor_col);
 
-    /* Floor grid */
     float grid_col[4] = {0.25F, 0.25F, 0.30F, 1.0F};
     int grid_nx = (int)(ROOM_W / GRID_STEP) + 1;
     int grid_nz = (int)(ROOM_D / GRID_STEP) + 1;
@@ -172,34 +428,27 @@ static void draw_room(void) {
         nt_shape_renderer_line(a, b, grid_col);
     }
 
-    /* Ceiling — blue-gray */
     float ceil_col[4] = {0.12F, 0.12F, 0.20F, 1.0F};
     float ceil_pos[3] = {0, ROOM_H, 0};
     nt_shape_renderer_rect_rot(ceil_pos, floor_sz, floor_rot, ceil_col);
 
-    /* Walls — warm gray */
     float wall_col[4] = {0.18F, 0.16F, 0.14F, 1.0F};
-
-    /* Front wall (-Z) */
     {
         float pos[3] = {0, ROOM_H * 0.5F, -hd};
         float sz[2] = {ROOM_W, ROOM_H};
         nt_shape_renderer_rect(pos, sz, wall_col);
     }
-    /* Back wall (+Z) */
     {
         float pos[3] = {0, ROOM_H * 0.5F, hd};
         float sz[2] = {ROOM_W, ROOM_H};
         nt_shape_renderer_rect(pos, sz, wall_col);
     }
-    /* Left wall (-X): rotated 90 around Y */
     {
         float pos[3] = {-hw, ROOM_H * 0.5F, 0};
         float sz[2] = {ROOM_D, ROOM_H};
         float rot[4] = {0, 0.7071068F, 0, 0.7071068F};
         nt_shape_renderer_rect_rot(pos, sz, rot, wall_col);
     }
-    /* Right wall (+X) */
     {
         float pos[3] = {hw, ROOM_H * 0.5F, 0};
         float sz[2] = {ROOM_D, ROOM_H};
@@ -208,200 +457,11 @@ static void draw_room(void) {
     }
 }
 
-/* ---- draw all shapes ---- */
-
-/* Build a deterministic random Y-axis quaternion from shape index + salt */
-static void rand_rot(int i, int salt, float rot[4]) {
-    float angle = rand_range(i, salt, 0.0F, 2.0F * NT_PI);
-    rot[0] = 0.0F;
-    rot[1] = sinf(angle * 0.5F);
-    rot[2] = 0.0F;
-    rot[3] = cosf(angle * 0.5F);
-}
+/* ---- Draw pre-built shapes ---- */
 
 static void draw_shapes(void) {
-    int n = s_mul * BATCH;
-
-    float red[4] = {1.0F, 0.3F, 0.2F, 1.0F};
-    float grn[4] = {0.2F, 1.0F, 0.3F, 1.0F};
-    float blu[4] = {0.3F, 0.5F, 1.0F, 1.0F};
-    float yel[4] = {1.0F, 0.9F, 0.2F, 1.0F};
-    float cyn[4] = {0.2F, 0.9F, 0.9F, 1.0F};
-    float pur[4] = {0.7F, 0.3F, 1.0F, 1.0F};
-    float org[4] = {1.0F, 0.5F, 0.1F, 1.0F};
-    float wht[4] = {0.9F, 0.9F, 0.9F, 1.0F};
-
-    /* Lines */
-    for (int i = 0; i < n; i++) {
-        float a[3];
-        rand_pos(i, 0, a);
-        float b[3] = {a[0] + 0.5F, a[1] + 0.5F, a[2]};
-        if (i & 1) {
-            nt_shape_renderer_line(a, b, red);
-        } else {
-            nt_shape_renderer_line_col(a, b, red, blu);
-        }
-    }
-
-    /* Rects */
-    for (int i = 0; i < n; i++) {
-        float pos[3];
-        rand_pos(i, 1000, pos);
-        float sz[2] = {0.4F, 0.4F};
-        float rot[4];
-        rand_rot(i, 1000, rot);
-        switch (i & 3) {
-        case 0:
-            nt_shape_renderer_rect(pos, sz, grn);
-            break;
-        case 1:
-            nt_shape_renderer_rect_wire(pos, sz, grn);
-            break;
-        case 2:
-            nt_shape_renderer_rect_rot(pos, sz, rot, grn);
-            break;
-        case 3:
-            nt_shape_renderer_rect_wire_rot(pos, sz, rot, grn);
-            break;
-        default:
-            break;
-        }
-    }
-
-    /* Triangles */
-    for (int i = 0; i < n; i++) {
-        float c[3];
-        rand_pos(i, 2000, c);
-        float a[3] = {c[0], c[1] + 0.3F, c[2]};
-        float b[3] = {c[0] - 0.25F, c[1] - 0.2F, c[2]};
-        float d[3] = {c[0] + 0.25F, c[1] - 0.2F, c[2]};
-        switch (i & 3) {
-        case 0:
-            nt_shape_renderer_triangle(a, b, d, blu);
-            break;
-        case 1:
-            nt_shape_renderer_triangle_wire(a, b, d, blu);
-            break;
-        case 2:
-            nt_shape_renderer_triangle_col(a, b, d, red, grn, blu);
-            break;
-        case 3:
-            nt_shape_renderer_triangle_wire_col(a, b, d, red, grn, blu);
-            break;
-        default:
-            break;
-        }
-    }
-
-    /* Circles */
-    for (int i = 0; i < n; i++) {
-        float ctr[3];
-        rand_pos(i, 3000, ctr);
-        float rot[4];
-        rand_rot(i, 3000, rot);
-        switch (i & 3) {
-        case 0:
-            nt_shape_renderer_circle(ctr, 0.3F, yel);
-            break;
-        case 1:
-            nt_shape_renderer_circle_wire(ctr, 0.3F, yel);
-            break;
-        case 2:
-            nt_shape_renderer_circle_rot(ctr, 0.3F, rot, yel);
-            break;
-        case 3:
-            nt_shape_renderer_circle_wire_rot(ctr, 0.3F, rot, yel);
-            break;
-        default:
-            break;
-        }
-    }
-
-    /* Cubes */
-    for (int i = 0; i < n; i++) {
-        float ctr[3];
-        rand_pos(i, 4000, ctr);
-        float sz[3] = {0.3F, 0.3F, 0.3F};
-        float rot[4];
-        rand_rot(i, 4000, rot);
-        switch (i & 3) {
-        case 0:
-            nt_shape_renderer_cube(ctr, sz, cyn);
-            break;
-        case 1:
-            nt_shape_renderer_cube_wire(ctr, sz, cyn);
-            break;
-        case 2:
-            nt_shape_renderer_cube_rot(ctr, sz, rot, cyn);
-            break;
-        case 3:
-            nt_shape_renderer_cube_wire_rot(ctr, sz, rot, cyn);
-            break;
-        default:
-            break;
-        }
-    }
-
-    /* Spheres */
-    for (int i = 0; i < n; i++) {
-        float ctr[3];
-        rand_pos(i, 5000, ctr);
-        switch (i & 1) {
-        case 0:
-            nt_shape_renderer_sphere(ctr, 0.2F, pur);
-            break;
-        default:
-            nt_shape_renderer_sphere_wire(ctr, 0.2F, pur);
-            break;
-        }
-    }
-
-    /* Cylinders */
-    for (int i = 0; i < n; i++) {
-        float ctr[3];
-        rand_pos(i, 6000, ctr);
-        float rot[4];
-        rand_rot(i, 6000, rot);
-        switch (i & 3) {
-        case 0:
-            nt_shape_renderer_cylinder(ctr, 0.15F, 0.5F, org);
-            break;
-        case 1:
-            nt_shape_renderer_cylinder_wire(ctr, 0.15F, 0.5F, org);
-            break;
-        case 2:
-            nt_shape_renderer_cylinder_rot(ctr, 0.15F, 0.5F, rot, org);
-            break;
-        case 3:
-            nt_shape_renderer_cylinder_wire_rot(ctr, 0.15F, 0.5F, rot, org);
-            break;
-        default:
-            break;
-        }
-    }
-
-    /* Capsules */
-    for (int i = 0; i < n; i++) {
-        float ctr[3];
-        rand_pos(i, 7000, ctr);
-        float rot[4];
-        rand_rot(i, 7000, rot);
-        switch (i & 3) {
-        case 0:
-            nt_shape_renderer_capsule(ctr, 0.1F, 0.4F, wht);
-            break;
-        case 1:
-            nt_shape_renderer_capsule_wire(ctr, 0.1F, 0.4F, wht);
-            break;
-        case 2:
-            nt_shape_renderer_capsule_rot(ctr, 0.1F, 0.4F, rot, wht);
-            break;
-        case 3:
-            nt_shape_renderer_capsule_wire_rot(ctr, 0.1F, 0.4F, rot, wht);
-            break;
-        default:
-            break;
-        }
+    for (int i = 0; i < s_shape_count; i++) {
+        dispatch_shape(&s_shapes[i]);
     }
 }
 
@@ -413,13 +473,12 @@ static void frame(void) {
     float dt = g_nt_app.dt;
     nt_accumulator_update(&s_acc, dt);
 
-    /* F = +50 of each shape type */
     if (nt_input_key_is_pressed(NT_KEY_F)) {
         s_mul++;
+        rebuild_shapes();
         printf("[bench] +50 each => %d per type, %d total shapes\n", s_mul * BATCH, s_mul * BATCH * 8);
     }
 
-    /* Track timing */
     if (dt > s_dt_max) {
         s_dt_max = dt;
     }
@@ -431,8 +490,8 @@ static void frame(void) {
         float avg = s_dt_sum / (float)s_dt_count;
         float render_avg = s_render_sum / (float)s_dt_count;
         nt_gfx_frame_stats_t stats = g_nt_gfx.frame_stats;
-        printf("[bench] shapes=%-6d avg=%.2fms  max=%.2fms  render=%.2f/%.2fms  fps=%.0f  dc=%u  verts=%u  idx=%u\n", s_mul * BATCH * 8, (double)(avg * 1000.0F), (double)(s_dt_max * 1000.0F),
-               (double)render_avg, (double)s_render_max, (double)(1.0F / avg), stats.draw_calls, stats.vertices, stats.indices);
+        printf("[bench] shapes=%-6d avg=%.2fms  max=%.2fms  render=%.2f/%.2fms  fps=%.0f  dc=%u  inst=%u  verts=%u  idx=%u\n", s_shape_count, (double)(avg * 1000.0F), (double)(s_dt_max * 1000.0F),
+               (double)render_avg, (double)s_render_max, (double)(1.0F / avg), stats.draw_calls, stats.instances, stats.vertices, stats.indices);
         s_dt_max = 0.0F;
         s_dt_sum = 0.0F;
         s_dt_count = 0;
@@ -441,11 +500,10 @@ static void frame(void) {
         s_log_timer -= 1.0F;
     }
 
-    /* FPS camera: mouse look when left or right button held */
+    /* FPS camera */
     if (nt_input_mouse_is_down(NT_BUTTON_LEFT) || nt_input_mouse_is_down(NT_BUTTON_RIGHT)) {
         s_cam_yaw -= g_nt_input.pointers[0].dx * MOUSE_SENS;
         s_cam_pitch -= g_nt_input.pointers[0].dy * MOUSE_SENS;
-        /* Clamp pitch to avoid flipping */
         if (s_cam_pitch > 1.5F) {
             s_cam_pitch = 1.5F;
         }
@@ -454,7 +512,6 @@ static void frame(void) {
         }
     }
 
-    /* Forward/right vectors from yaw+pitch (fly mode: W/S follow look direction) */
     float cp = cosf(s_cam_pitch);
     float sp = sinf(s_cam_pitch);
     float fwd_x = sinf(s_cam_yaw) * cp;
@@ -463,7 +520,6 @@ static void frame(void) {
     float rgt_x = -cosf(s_cam_yaw);
     float rgt_z = sinf(s_cam_yaw);
 
-    /* WASD movement (fly camera) */
     float speed = MOVE_SPEED * dt;
     if (nt_input_key_is_down(NT_KEY_W)) {
         s_cam_pos[0] += fwd_x * speed;
@@ -490,12 +546,8 @@ static void frame(void) {
         s_cam_pos[1] -= speed;
     }
 
-    /* Look direction */
-    float look_x = fwd_x;
-    float look_y = fwd_y;
-    float look_z = fwd_z;
     vec3 eye = {s_cam_pos[0], s_cam_pos[1], s_cam_pos[2]};
-    vec3 center = {s_cam_pos[0] + look_x, s_cam_pos[1] + look_y, s_cam_pos[2] + look_z};
+    vec3 center = {s_cam_pos[0] + fwd_x, s_cam_pos[1] + fwd_y, s_cam_pos[2] + fwd_z};
     vec3 up = {0, 1, 0};
 
     float aspect = 1.0F;
@@ -510,7 +562,6 @@ static void frame(void) {
     glm_perspective(glm_rad(75.0F), aspect, 0.1F, 50.0F, proj);
     glm_mat4_mul(proj, view, vp);
 
-    /* Render */
     nt_gfx_begin_frame();
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.05F, 0.05F, 0.08F, 1.0F}, .clear_depth = 1.0F});
 
@@ -560,10 +611,11 @@ int main(void) {
     nt_platform_web_loading_complete();
 #endif
 
-    /* Start camera at room center, eye level */
     s_cam_pos[0] = 0.0F;
     s_cam_pos[1] = ROOM_H * 0.5F;
     s_cam_pos[2] = 0.0F;
+
+    rebuild_shapes();
 
     printf("Shape Renderer Benchmark\n");
     printf("  WASD = move | Space/Shift = up/down | Mouse+LMB/RMB = look\n");

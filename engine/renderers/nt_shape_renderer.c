@@ -39,15 +39,14 @@ static const char *s_shape_fs_src = "in vec4 v_color;\n"
 static const char *s_line_vs_src = "layout(location = 0) in vec2 a_corner;\n"
                                    "layout(location = 1) in vec3 i_a;\n"
                                    "layout(location = 2) in vec3 i_b;\n"
-                                   "layout(location = 3) in vec4 i_color_a;\n"
-                                   "layout(location = 4) in vec4 i_color_b;\n"
+                                   "layout(location = 3) in vec4 i_color;\n"
                                    "uniform mat4 u_vp;\n"
                                    "uniform vec4 u_cam_pos;\n"
                                    "uniform float u_line_width;\n"
                                    "out vec4 v_color;\n"
                                    "void main() {\n"
                                    "    vec3 pos = mix(i_a, i_b, a_corner.y);\n"
-                                   "    v_color = mix(i_color_a, i_color_b, a_corner.y);\n"
+                                   "    v_color = i_color;\n"
                                    "    vec3 edge = i_b - i_a;\n"
                                    "    vec3 to_cam = u_cam_pos.xyz - pos;\n"
                                    "    vec3 side = cross(edge, to_cam);\n"
@@ -69,49 +68,127 @@ static const char *s_line_vs_src = "layout(location = 0) in vec2 a_corner;\n"
                                    "    gl_Position = u_vp * vec4(pos, 1.0);\n"
                                    "}\n";
 
-/* ---- Line instance data ---- */
+/* ---- Instance data ---- */
 
 typedef struct {
     float a[3];
     float b[3];
-    float color_a[4];
-    float color_b[4];
+    uint8_t color[4];
 } nt_shape_line_instance_t;
 
-_Static_assert(sizeof(nt_shape_line_instance_t) == 56, "line instance size");
+_Static_assert(sizeof(nt_shape_line_instance_t) == 28, "line instance size");
+
+typedef struct {
+    float center[3];
+    float scale[3];
+    float rot[4];
+    uint8_t color[4];
+} nt_shape_instance_t;
+
+_Static_assert(sizeof(nt_shape_instance_t) == 44, "shape instance size");
+
+/* Shape types that use instanced rendering */
+enum {
+    NT_SHAPE_RECT = 0,
+    NT_SHAPE_CUBE,
+    NT_SHAPE_CIRCLE,
+    NT_SHAPE_SPHERE,
+    NT_SHAPE_CYLINDER,
+    NT_SHAPE_CAPSULE,
+    NT_SHAPE_TYPE_COUNT,
+};
+
+#ifndef NT_SHAPE_RENDERER_MAX_INSTANCES
+#define NT_SHAPE_RENDERER_MAX_INSTANCES 4096
+#endif
+
+/* Per-type template mesh */
+typedef struct {
+    nt_buffer_t vbo;
+    nt_buffer_t ibo;
+    uint32_t num_vertices;
+    uint32_t num_indices;
+} nt_shape_template_t;
+
+/* ---- Instanced shape vertex shader ---- */
+
+static const char *s_inst_vs_src = "layout(location = 0) in vec3 a_position;\n"
+                                   "layout(location = 1) in vec3 i_center;\n"
+                                   "layout(location = 2) in vec3 i_scale;\n"
+                                   "layout(location = 3) in vec4 i_rot;\n"
+                                   "layout(location = 4) in vec4 i_color;\n"
+                                   "uniform mat4 u_vp;\n"
+                                   "out vec4 v_color;\n"
+                                   "void main() {\n"
+                                   "    vec3 s = a_position * i_scale;\n"
+                                   "    vec3 t = 2.0 * cross(i_rot.xyz, s);\n"
+                                   "    vec3 r = s + i_rot.w * t + cross(i_rot.xyz, t);\n"
+                                   "    v_color = i_color;\n"
+                                   "    gl_Position = u_vp * vec4(i_center + r, 1.0);\n"
+                                   "}\n";
+
+/* ---- Capsule instanced vertex shader (vec4 template: xyz=unit sphere, w=hemisphere sign) ---- */
+
+static const char *s_cap_inst_vs_src = "layout(location = 0) in vec4 a_pos_tag;\n"
+                                       "layout(location = 1) in vec3 i_center;\n"
+                                       "layout(location = 2) in vec3 i_scale;\n"
+                                       "layout(location = 3) in vec4 i_rot;\n"
+                                       "layout(location = 4) in vec4 i_color;\n"
+                                       "uniform mat4 u_vp;\n"
+                                       "out vec4 v_color;\n"
+                                       "void main() {\n"
+                                       "    float radius = i_scale.x;\n"
+                                       "    float body_half = i_scale.y;\n"
+                                       "    vec3 p = a_pos_tag.xyz * radius;\n"
+                                       "    p.y += a_pos_tag.w * body_half;\n"
+                                       "    vec3 t = 2.0 * cross(i_rot.xyz, p);\n"
+                                       "    vec3 r = p + i_rot.w * t + cross(i_rot.xyz, t);\n"
+                                       "    v_color = i_color;\n"
+                                       "    gl_Position = u_vp * vec4(i_center + r, 1.0);\n"
+                                       "}\n";
 
 /* ---- Module state ---- */
 
 static struct {
-    /* GPU resources — filled shapes */
-    nt_shader_t vs;
+    /* Shared fragment shader */
     nt_shader_t fs;
-    nt_pipeline_t pip_depth;         /* depth=on,  blend=off */
-    nt_pipeline_t pip_depth_blend;   /* depth=on,  blend=on  */
-    nt_pipeline_t pip_overlay;       /* depth=off, blend=off */
-    nt_pipeline_t pip_overlay_blend; /* depth=off, blend=on  */
-    nt_pipeline_t pip_active;
-    nt_buffer_t vbo;
-    nt_buffer_t ibo;
 
-    /* GPU resources — instanced lines */
-    nt_shader_t line_vs;
-    nt_pipeline_t line_pip_depth;
-    nt_pipeline_t line_pip_depth_blend;
-    nt_pipeline_t line_pip_overlay;
-    nt_pipeline_t line_pip_overlay_blend;
-    nt_pipeline_t line_pip_active;
-    nt_buffer_t line_template_vbo;
-    nt_buffer_t line_template_ibo;
-    nt_buffer_t line_instance_buf;
-
-    /* CPU-side batch buffers — filled shapes */
+    /* CPU batch for non-instanced shapes (triangle, capsule, mesh) */
+    nt_shader_t batch_vs;
+    nt_pipeline_t batch_pip_depth;
+    nt_pipeline_t batch_pip_overlay;
+    nt_pipeline_t batch_pip_active;
+    nt_buffer_t batch_vbo;
+    nt_buffer_t batch_ibo;
     nt_shape_renderer_vertex_t vertices[NT_SHAPE_RENDERER_MAX_VERTICES];
     uint16_t indices[NT_SHAPE_RENDERER_MAX_INDICES];
     uint32_t vertex_count;
     uint32_t index_count;
 
-    /* CPU-side batch buffer — instanced lines */
+    /* Instanced shapes (rect, cube, circle, sphere, cylinder) */
+    nt_shader_t inst_vs;
+    nt_pipeline_t inst_pip_depth;
+    nt_pipeline_t inst_pip_overlay;
+    nt_pipeline_t inst_pip_active;
+    nt_buffer_t inst_buf; /* shared GPU instance buffer, reused per type */
+    nt_shape_template_t templates[NT_SHAPE_TYPE_COUNT];
+    nt_shape_instance_t inst_data[NT_SHAPE_TYPE_COUNT][NT_SHAPE_RENDERER_MAX_INSTANCES];
+    uint32_t inst_counts[NT_SHAPE_TYPE_COUNT];
+
+    /* Capsule instancing (separate pipeline: vec4 template + hemisphere-tagged shader) */
+    nt_shader_t cap_inst_vs;
+    nt_pipeline_t cap_inst_pip_depth;
+    nt_pipeline_t cap_inst_pip_overlay;
+    nt_pipeline_t cap_inst_pip_active;
+
+    /* Instanced lines */
+    nt_shader_t line_vs;
+    nt_pipeline_t line_pip_depth;
+    nt_pipeline_t line_pip_overlay;
+    nt_pipeline_t line_pip_active;
+    nt_buffer_t line_template_vbo;
+    nt_buffer_t line_template_ibo;
+    nt_buffer_t line_instance_buf;
     nt_shape_line_instance_t lines[NT_SHAPE_RENDERER_MAX_LINES];
     uint32_t line_count;
 
@@ -120,7 +197,6 @@ static struct {
     float cam_pos[3];
     float line_width;
     bool depth_enabled;
-    bool blend_enabled;
     bool initialized;
 
     /* Sin/Cos lookup table (fixed NT_SHAPE_SEGMENTS) */
@@ -130,23 +206,17 @@ static struct {
 
 /* ---- Helpers ---- */
 
-static nt_pipeline_t get_active_pipeline(void) {
-    if (s_shape.depth_enabled) {
-        return s_shape.blend_enabled ? s_shape.pip_depth_blend : s_shape.pip_depth;
-    }
-    return s_shape.blend_enabled ? s_shape.pip_overlay_blend : s_shape.pip_overlay;
-}
+static nt_pipeline_t get_active_batch_pipeline(void) { return s_shape.depth_enabled ? s_shape.batch_pip_depth : s_shape.batch_pip_overlay; }
 
-static nt_pipeline_t get_active_line_pipeline(void) {
-    if (s_shape.depth_enabled) {
-        return s_shape.blend_enabled ? s_shape.line_pip_depth_blend : s_shape.line_pip_depth;
-    }
-    return s_shape.blend_enabled ? s_shape.line_pip_overlay_blend : s_shape.line_pip_overlay;
-}
+static nt_pipeline_t get_active_inst_pipeline(void) { return s_shape.depth_enabled ? s_shape.inst_pip_depth : s_shape.inst_pip_overlay; }
 
-static nt_pipeline_t make_shape_pipeline(bool depth, bool blend, bool poly_offset) {
+static nt_pipeline_t get_active_cap_inst_pipeline(void) { return s_shape.depth_enabled ? s_shape.cap_inst_pip_depth : s_shape.cap_inst_pip_overlay; }
+
+static nt_pipeline_t get_active_line_pipeline(void) { return s_shape.depth_enabled ? s_shape.line_pip_depth : s_shape.line_pip_overlay; }
+
+static nt_pipeline_t make_batch_pipeline(bool depth, bool poly_offset) {
     nt_pipeline_desc_t desc = {
-        .vertex_shader = s_shape.vs,
+        .vertex_shader = s_shape.batch_vs,
         .fragment_shader = s_shape.fs,
         .layout =
             {
@@ -155,16 +225,13 @@ static nt_pipeline_t make_shape_pipeline(bool depth, bool blend, bool poly_offse
                 .attrs =
                     {
                         {.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT3, .offset = 0},
-                        {.location = NT_ATTR_COLOR, .format = NT_FORMAT_FLOAT4, .offset = 12},
+                        {.location = NT_ATTR_COLOR, .format = NT_FORMAT_UBYTE4N, .offset = 12},
                     },
             },
         .depth_test = depth,
         .depth_write = depth,
         .depth_func = NT_DEPTH_LEQUAL,
         .cull_face = false,
-        .blend = blend,
-        .blend_src = NT_BLEND_SRC_ALPHA,
-        .blend_dst = NT_BLEND_ONE_MINUS_SRC_ALPHA,
         .polygon_offset = poly_offset,
         .polygon_offset_factor = poly_offset ? 1.0F : 0.0F,
         .polygon_offset_units = poly_offset ? 1.0F : 0.0F,
@@ -173,7 +240,7 @@ static nt_pipeline_t make_shape_pipeline(bool depth, bool blend, bool poly_offse
     return nt_gfx_make_pipeline(&desc);
 }
 
-static nt_pipeline_t make_line_pipeline(bool depth, bool blend) {
+static nt_pipeline_t make_line_pipeline(bool depth) {
     nt_pipeline_desc_t desc = {
         .vertex_shader = s_shape.line_vs,
         .fragment_shader = s_shape.fs,
@@ -188,45 +255,358 @@ static nt_pipeline_t make_line_pipeline(bool depth, bool blend) {
             },
         .instance_layout =
             {
-                .attr_count = 4,
+                .attr_count = 3,
                 .stride = (uint16_t)sizeof(nt_shape_line_instance_t),
                 .attrs =
                     {
                         {.location = 1, .format = NT_FORMAT_FLOAT3, .offset = 0},
                         {.location = 2, .format = NT_FORMAT_FLOAT3, .offset = 12},
-                        {.location = 3, .format = NT_FORMAT_FLOAT4, .offset = 24},
-                        {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 40},
+                        {.location = 3, .format = NT_FORMAT_UBYTE4N, .offset = 24},
                     },
             },
         .depth_test = depth,
         .depth_write = depth,
         .depth_func = NT_DEPTH_LEQUAL,
         .cull_face = false,
-        .blend = blend,
-        .blend_src = NT_BLEND_SRC_ALPHA,
-        .blend_dst = NT_BLEND_ONE_MINUS_SRC_ALPHA,
         .label = "shape_line_pipeline",
     };
     return nt_gfx_make_pipeline(&desc);
+}
+
+static nt_pipeline_t make_inst_pipeline(bool depth) {
+    nt_pipeline_desc_t desc = {
+        .vertex_shader = s_shape.inst_vs,
+        .fragment_shader = s_shape.fs,
+        .layout =
+            {
+                .attr_count = 1,
+                .stride = (uint16_t)(3 * sizeof(float)),
+                .attrs =
+                    {
+                        {.location = 0, .format = NT_FORMAT_FLOAT3, .offset = 0},
+                    },
+            },
+        .instance_layout =
+            {
+                .attr_count = 4,
+                .stride = (uint16_t)sizeof(nt_shape_instance_t),
+                .attrs =
+                    {
+                        {.location = 1, .format = NT_FORMAT_FLOAT3, .offset = 0},
+                        {.location = 2, .format = NT_FORMAT_FLOAT3, .offset = 12},
+                        {.location = 3, .format = NT_FORMAT_FLOAT4, .offset = 24},
+                        {.location = 4, .format = NT_FORMAT_UBYTE4N, .offset = 40},
+                    },
+            },
+        .depth_test = depth,
+        .depth_write = depth,
+        .depth_func = NT_DEPTH_LEQUAL,
+        .cull_face = false,
+        .polygon_offset = depth,
+        .polygon_offset_factor = depth ? 1.0F : 0.0F,
+        .polygon_offset_units = depth ? 1.0F : 0.0F,
+        .label = "shape_inst_pipeline",
+    };
+    return nt_gfx_make_pipeline(&desc);
+}
+
+static nt_pipeline_t make_cap_inst_pipeline(bool depth) {
+    nt_pipeline_desc_t desc = {
+        .vertex_shader = s_shape.cap_inst_vs,
+        .fragment_shader = s_shape.fs,
+        .layout =
+            {
+                .attr_count = 1,
+                .stride = (uint16_t)(4 * sizeof(float)), /* vec4 template */
+                .attrs =
+                    {
+                        {.location = 0, .format = NT_FORMAT_FLOAT4, .offset = 0},
+                    },
+            },
+        .instance_layout =
+            {
+                .attr_count = 4,
+                .stride = (uint16_t)sizeof(nt_shape_instance_t),
+                .attrs =
+                    {
+                        {.location = 1, .format = NT_FORMAT_FLOAT3, .offset = 0},
+                        {.location = 2, .format = NT_FORMAT_FLOAT3, .offset = 12},
+                        {.location = 3, .format = NT_FORMAT_FLOAT4, .offset = 24},
+                        {.location = 4, .format = NT_FORMAT_UBYTE4N, .offset = 40},
+                    },
+            },
+        .depth_test = depth,
+        .depth_write = depth,
+        .depth_func = NT_DEPTH_LEQUAL,
+        .cull_face = false,
+        .polygon_offset = depth,
+        .polygon_offset_factor = depth ? 1.0F : 0.0F,
+        .polygon_offset_units = depth ? 1.0F : 0.0F,
+        .label = "shape_cap_inst_pipeline",
+    };
+    return nt_gfx_make_pipeline(&desc);
+}
+
+/* ---- Color packing: float [0,1] → uint8 [0,255] ---- */
+
+static void pack_color(uint8_t out[4], const float f[4]) {
+    out[0] = (uint8_t)(f[0] * 255.0F + 0.5F);
+    out[1] = (uint8_t)(f[1] * 255.0F + 0.5F);
+    out[2] = (uint8_t)(f[2] * 255.0F + 0.5F);
+    out[3] = (uint8_t)(f[3] * 255.0F + 0.5F);
+}
+
+/* ---- Push instance helper ---- */
+
+static void push_instance(int type, const float center[3], const float scale[3], const float *rot, const float color[4]) {
+    if (s_shape.inst_counts[type] >= NT_SHAPE_RENDERER_MAX_INSTANCES) {
+        nt_shape_renderer_flush();
+    }
+    nt_shape_instance_t *inst = &s_shape.inst_data[type][s_shape.inst_counts[type]];
+    memcpy(inst->center, center, sizeof(float) * 3);
+    memcpy(inst->scale, scale, sizeof(float) * 3);
+    if (rot) {
+        memcpy(inst->rot, rot, sizeof(float) * 4);
+    } else {
+        inst->rot[0] = 0.0F;
+        inst->rot[1] = 0.0F;
+        inst->rot[2] = 0.0F;
+        inst->rot[3] = 1.0F;
+    }
+    pack_color(inst->color, color);
+    s_shape.inst_counts[type]++;
 }
 
 static void set_vertex(nt_shape_renderer_vertex_t *v, const float pos[3], const float color[4]) {
     v->pos[0] = pos[0];
     v->pos[1] = pos[1];
     v->pos[2] = pos[2];
-    v->color[0] = color[0];
-    v->color[1] = color[1];
-    v->color[2] = color[2];
-    v->color[3] = color[3];
+    pack_color(v->color, color);
 }
 
-/* Rebuild the sin/cos lookup table when segment count changes. */
 static void build_trig_lut(void) {
     float inv = 2.0F * NT_PI / (float)NT_SHAPE_SEGMENTS;
     for (int i = 0; i <= NT_SHAPE_SEGMENTS; i++) {
         float theta = inv * (float)i;
         s_shape.sin_lut[i] = sinf(theta);
         s_shape.cos_lut[i] = cosf(theta);
+    }
+}
+
+/* ---- Template mesh generation (unit scale, positions only) ---- */
+
+static nt_shape_template_t make_template_ex(const float *verts, uint32_t nv, uint32_t components, const uint16_t *idx, uint32_t ni, const char *label) {
+    nt_shape_template_t t;
+    t.num_vertices = nv;
+    t.num_indices = ni;
+    t.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = verts, .size = nv * components * (uint32_t)sizeof(float), .label = label});
+    t.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_IMMUTABLE, .data = idx, .size = ni * (uint32_t)sizeof(uint16_t), .label = label});
+    return t;
+}
+
+static nt_shape_template_t make_template(const float *verts, uint32_t nv, const uint16_t *idx, uint32_t ni, const char *label) { return make_template_ex(verts, nv, 3, idx, ni, label); }
+
+static void build_templates(void) {
+    /* Rect: unit quad in XY plane */
+    {
+        static const float v[] = {-0.5F, -0.5F, 0.0F, 0.5F, -0.5F, 0.0F, 0.5F, 0.5F, 0.0F, -0.5F, 0.5F, 0.0F};
+        static const uint16_t i[] = {0, 1, 2, 0, 2, 3};
+        s_shape.templates[NT_SHAPE_RECT] = make_template(v, 4, i, 6, "tpl_rect");
+    }
+
+    /* Cube: unit cube ±0.5 */
+    {
+        /* clang-format off */
+        static const float v[] = {
+            -0.5F, -0.5F, -0.5F, 0.5F, -0.5F, -0.5F, 0.5F, 0.5F, -0.5F, -0.5F, 0.5F, -0.5F,
+            -0.5F, -0.5F, 0.5F,  0.5F, -0.5F, 0.5F,  0.5F, 0.5F, 0.5F,  -0.5F, 0.5F, 0.5F,
+        };
+        /* clang-format on */
+        static const uint16_t i[] = {0, 1, 2, 0, 2, 3, 5, 4, 7, 5, 7, 6, 4, 0, 3, 4, 3, 7, 1, 5, 6, 1, 6, 2, 3, 2, 6, 3, 6, 7, 4, 5, 1, 4, 1, 0};
+        s_shape.templates[NT_SHAPE_CUBE] = make_template(v, 8, i, 36, "tpl_cube");
+    }
+
+    /* Circle: unit circle in XZ plane (center + 32 ring) */
+    {
+        float v[33 * 3];
+        uint16_t idx[32 * 3];
+        v[0] = 0.0F;
+        v[1] = 0.0F;
+        v[2] = 0.0F;
+        for (int j = 0; j < NT_SHAPE_SEGMENTS; j++) {
+            v[(1 + j) * 3 + 0] = s_shape.cos_lut[j];
+            v[(1 + j) * 3 + 1] = 0.0F;
+            v[(1 + j) * 3 + 2] = s_shape.sin_lut[j];
+        }
+        for (int j = 0; j < NT_SHAPE_SEGMENTS; j++) {
+            int next = (j + 1) % NT_SHAPE_SEGMENTS;
+            idx[j * 3 + 0] = 0;
+            idx[j * 3 + 1] = (uint16_t)(1 + j);
+            idx[j * 3 + 2] = (uint16_t)(1 + next);
+        }
+        s_shape.templates[NT_SHAPE_CIRCLE] = make_template(v, 33, idx, 96, "tpl_circle");
+    }
+
+    /* Sphere: unit sphere, segs=32, rings=16 */
+    {
+        int segs = NT_SHAPE_SEGMENTS;
+        int rings = segs / 2;
+        uint32_t nv = (uint32_t)((rings + 1) * (segs + 1));
+        uint32_t ni = (uint32_t)(rings * segs * 6);
+        float v[561 * 3];
+        uint16_t idx[3072];
+
+        float sin_phi[17];
+        float cos_phi[17];
+        for (int r = 0; r <= rings; r++) {
+            float phi = NT_PI * (float)r / (float)rings;
+            sin_phi[r] = sinf(phi);
+            cos_phi[r] = cosf(phi);
+        }
+        int vi = 0;
+        for (int r = 0; r <= rings; r++) {
+            for (int s2 = 0; s2 <= segs; s2++) {
+                v[vi++] = sin_phi[r] * s_shape.cos_lut[s2];
+                v[vi++] = cos_phi[r];
+                v[vi++] = sin_phi[r] * s_shape.sin_lut[s2];
+            }
+        }
+        int ii = 0;
+        for (int r = 0; r < rings; r++) {
+            for (int s2 = 0; s2 < segs; s2++) {
+                uint16_t a = (uint16_t)(r * (segs + 1) + s2);
+                uint16_t b = (uint16_t)(a + 1);
+                uint16_t c = (uint16_t)(a + segs + 1);
+                uint16_t d = (uint16_t)(c + 1);
+                idx[ii++] = a;
+                idx[ii++] = c;
+                idx[ii++] = b;
+                idx[ii++] = b;
+                idx[ii++] = c;
+                idx[ii++] = d;
+            }
+        }
+        s_shape.templates[NT_SHAPE_SPHERE] = make_template(v, nv, idx, ni, "tpl_sphere");
+    }
+
+    /* Cylinder: unit cylinder R=1 H=1, center at origin */
+    {
+        int segs = NT_SHAPE_SEGMENTS;
+        uint32_t nv = (uint32_t)((2 * (segs + 1)) + 2);
+        uint32_t ni = (uint32_t)(12 * segs);
+        float v[68 * 3];
+        uint16_t idx[384];
+
+        int vi = 0;
+        /* 0: top center */
+        v[vi++] = 0.0F;
+        v[vi++] = 0.5F;
+        v[vi++] = 0.0F;
+        /* 1: bottom center */
+        v[vi++] = 0.0F;
+        v[vi++] = -0.5F;
+        v[vi++] = 0.0F;
+        /* 2..segs+2: top ring */
+        for (int j = 0; j <= segs; j++) {
+            v[vi++] = s_shape.cos_lut[j];
+            v[vi++] = 0.5F;
+            v[vi++] = s_shape.sin_lut[j];
+        }
+        /* segs+3..2*segs+3: bottom ring */
+        for (int j = 0; j <= segs; j++) {
+            v[vi++] = s_shape.cos_lut[j];
+            v[vi++] = -0.5F;
+            v[vi++] = s_shape.sin_lut[j];
+        }
+
+        int ii = 0;
+        uint16_t top_c = 0;
+        uint16_t bot_c = 1;
+        uint16_t top_ring = 2;
+        uint16_t bot_ring = (uint16_t)(2 + segs + 1);
+        /* Top cap */
+        for (int j = 0; j < segs; j++) {
+            idx[ii++] = top_c;
+            idx[ii++] = (uint16_t)(top_ring + j);
+            idx[ii++] = (uint16_t)(top_ring + j + 1);
+        }
+        /* Bottom cap */
+        for (int j = 0; j < segs; j++) {
+            idx[ii++] = bot_c;
+            idx[ii++] = (uint16_t)(bot_ring + j + 1);
+            idx[ii++] = (uint16_t)(bot_ring + j);
+        }
+        /* Tube */
+        for (int j = 0; j < segs; j++) {
+            uint16_t t0 = (uint16_t)(top_ring + j);
+            uint16_t t1 = (uint16_t)(top_ring + j + 1);
+            uint16_t b0 = (uint16_t)(bot_ring + j);
+            uint16_t b1 = (uint16_t)(bot_ring + j + 1);
+            idx[ii++] = t0;
+            idx[ii++] = b0;
+            idx[ii++] = t1;
+            idx[ii++] = t1;
+            idx[ii++] = b0;
+            idx[ii++] = b1;
+        }
+        s_shape.templates[NT_SHAPE_CYLINDER] = make_template(v, nv, idx, ni, "tpl_cylinder");
+    }
+
+    /* Capsule: unit sphere with hemisphere-tagged vec4 vertices (w=+1 top, w=-1 bottom).
+       Template is radius=1, body_half=0. Shader shifts hemispheres via p.y += w * body_half. */
+    {
+        int segs = NT_SHAPE_SEGMENTS;
+        int half_rings = segs / 4;                                   /* 8 */
+        int total_sections = (2 * half_rings) + 1;                   /* 17 */
+        uint32_t nv = (uint32_t)((total_sections + 1) * (segs + 1)); /* 594 */
+        uint32_t ni = (uint32_t)(total_sections * segs * 6);         /* 3264 */
+        float v[594 * 4];                                            /* vec4 per vertex */
+        uint16_t idx[3264];
+
+        int vi = 0;
+        for (int row = 0; row <= total_sections; row++) {
+            float tag;
+            float phi;
+            float sp;
+            float cp;
+
+            if (row <= half_rings) {
+                tag = 1.0F;
+                phi = NT_PI * 0.5F * (float)(half_rings - row) / (float)half_rings;
+                sp = sinf(phi);
+                cp = cosf(phi);
+            } else {
+                tag = -1.0F;
+                int bot_row = row - half_rings - 1;
+                phi = NT_PI * 0.5F * (float)bot_row / (float)half_rings;
+                sp = -sinf(phi);
+                cp = cosf(phi);
+            }
+
+            for (int seg = 0; seg <= segs; seg++) {
+                v[vi++] = cp * s_shape.cos_lut[seg]; /* x */
+                v[vi++] = sp;                        /* y */
+                v[vi++] = cp * s_shape.sin_lut[seg]; /* z */
+                v[vi++] = tag;                       /* w: hemisphere sign */
+            }
+        }
+
+        int ii = 0;
+        for (int row = 0; row < total_sections; row++) {
+            for (int seg = 0; seg < segs; seg++) {
+                uint16_t a = (uint16_t)(row * (segs + 1) + seg);
+                uint16_t b = (uint16_t)(a + 1);
+                uint16_t c = (uint16_t)(a + segs + 1);
+                uint16_t d = (uint16_t)(c + 1);
+                idx[ii++] = a;
+                idx[ii++] = c;
+                idx[ii++] = b;
+                idx[ii++] = b;
+                idx[ii++] = c;
+                idx[ii++] = d;
+            }
+        }
+        s_shape.templates[NT_SHAPE_CAPSULE] = make_template_ex(v, nv, 4, idx, ni, "tpl_capsule");
     }
 }
 
@@ -238,21 +618,7 @@ static void emit_wire_edge(const float a[3], const float b[3], const float color
     nt_shape_line_instance_t *inst = &s_shape.lines[s_shape.line_count];
     memcpy(inst->a, a, sizeof(float) * 3);
     memcpy(inst->b, b, sizeof(float) * 3);
-    memcpy(inst->color_a, color, sizeof(float) * 4);
-    memcpy(inst->color_b, color, sizeof(float) * 4);
-    s_shape.line_count++;
-}
-
-/* Emit a line instance with per-endpoint color. */
-static void emit_wire_edge_col(const float a[3], const float b[3], const float color_a[4], const float color_b[4]) {
-    if (s_shape.line_count >= NT_SHAPE_RENDERER_MAX_LINES) {
-        nt_shape_renderer_flush();
-    }
-    nt_shape_line_instance_t *inst = &s_shape.lines[s_shape.line_count];
-    memcpy(inst->a, a, sizeof(float) * 3);
-    memcpy(inst->b, b, sizeof(float) * 3);
-    memcpy(inst->color_a, color_a, sizeof(float) * 4);
-    memcpy(inst->color_b, color_b, sizeof(float) * 4);
+    pack_color(inst->color, color);
     s_shape.line_count++;
 }
 
@@ -262,28 +628,37 @@ void nt_shape_renderer_init(void) {
     memset(&s_shape, 0, sizeof(s_shape));
 
     /* Shaders */
-    s_shape.vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_shape_vs_src, .label = "shape_vs"});
     s_shape.fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = s_shape_fs_src, .label = "shape_fs"});
+    s_shape.batch_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_shape_vs_src, .label = "shape_batch_vs"});
+    s_shape.inst_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_inst_vs_src, .label = "shape_inst_vs"});
+    s_shape.cap_inst_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_cap_inst_vs_src, .label = "shape_cap_inst_vs"});
     s_shape.line_vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = s_line_vs_src, .label = "shape_line_vs"});
 
-    /* Filled shape pipelines: depth x blend, with polygon_offset */
-    s_shape.pip_depth = make_shape_pipeline(true, false, true);
-    s_shape.pip_depth_blend = make_shape_pipeline(true, true, true);
-    s_shape.pip_overlay = make_shape_pipeline(false, false, false);
-    s_shape.pip_overlay_blend = make_shape_pipeline(false, true, false);
+    /* Pipelines */
+    s_shape.batch_pip_depth = make_batch_pipeline(true, true);
+    s_shape.batch_pip_overlay = make_batch_pipeline(false, false);
+    s_shape.inst_pip_depth = make_inst_pipeline(true);
+    s_shape.inst_pip_overlay = make_inst_pipeline(false);
+    s_shape.cap_inst_pip_depth = make_cap_inst_pipeline(true);
+    s_shape.cap_inst_pip_overlay = make_cap_inst_pipeline(false);
+    s_shape.line_pip_depth = make_line_pipeline(true);
+    s_shape.line_pip_overlay = make_line_pipeline(false);
 
-    /* Instanced line pipelines: depth x blend, no polygon_offset */
-    s_shape.line_pip_depth = make_line_pipeline(true, false);
-    s_shape.line_pip_depth_blend = make_line_pipeline(true, true);
-    s_shape.line_pip_overlay = make_line_pipeline(false, false);
-    s_shape.line_pip_overlay_blend = make_line_pipeline(false, true);
+    /* CPU batch buffers (triangle, mesh) */
+    s_shape.batch_vbo = nt_gfx_make_buffer(
+        &(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_VERTICES * (uint32_t)sizeof(nt_shape_renderer_vertex_t), .label = "shape_batch_vbo"});
+    s_shape.batch_ibo =
+        nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_INDICES * (uint32_t)sizeof(uint16_t), .label = "shape_batch_ibo"});
 
-    /* Filled shape buffers */
-    s_shape.vbo = nt_gfx_make_buffer(
-        &(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_VERTICES * (uint32_t)sizeof(nt_shape_renderer_vertex_t), .label = "shape_vbo"});
-    s_shape.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_INDICES * (uint32_t)sizeof(uint16_t), .label = "shape_ibo"});
+    /* Instanced shape buffer (shared across types, reused per draw) */
+    s_shape.inst_buf = nt_gfx_make_buffer(
+        &(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_INSTANCES * (uint32_t)sizeof(nt_shape_instance_t), .label = "shape_inst_buf"});
 
-    /* Instanced line buffers: template quad (immutable) + instance data (stream) */
+    /* Build template meshes (requires trig LUT) */
+    build_trig_lut();
+    build_templates();
+
+    /* Instanced line buffers */
     static const float line_template_verts[] = {-1.0F, 0.0F, 1.0F, 0.0F, 1.0F, 1.0F, -1.0F, 1.0F};
     s_shape.line_template_vbo =
         nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_IMMUTABLE, .data = line_template_verts, .size = sizeof(line_template_verts), .label = "shape_line_quad"});
@@ -294,10 +669,10 @@ void nt_shape_renderer_init(void) {
         &(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_LINES * (uint32_t)sizeof(nt_shape_line_instance_t), .label = "shape_line_inst"});
 
     s_shape.line_width = 0.02F;
-    build_trig_lut();
     s_shape.depth_enabled = true;
-    s_shape.blend_enabled = false;
-    s_shape.pip_active = s_shape.pip_depth;
+    s_shape.batch_pip_active = s_shape.batch_pip_depth;
+    s_shape.inst_pip_active = s_shape.inst_pip_depth;
+    s_shape.cap_inst_pip_active = s_shape.cap_inst_pip_depth;
     s_shape.line_pip_active = s_shape.line_pip_depth;
     s_shape.initialized = true;
 }
@@ -309,31 +684,56 @@ void nt_shape_renderer_shutdown(void) {
     nt_gfx_destroy_buffer(s_shape.line_instance_buf);
     nt_gfx_destroy_buffer(s_shape.line_template_ibo);
     nt_gfx_destroy_buffer(s_shape.line_template_vbo);
-    nt_gfx_destroy_buffer(s_shape.ibo);
-    nt_gfx_destroy_buffer(s_shape.vbo);
-    nt_gfx_destroy_pipeline(s_shape.line_pip_overlay_blend);
+    nt_gfx_destroy_buffer(s_shape.inst_buf);
+    for (int t = NT_SHAPE_TYPE_COUNT - 1; t >= 0; t--) {
+        nt_gfx_destroy_buffer(s_shape.templates[t].ibo);
+        nt_gfx_destroy_buffer(s_shape.templates[t].vbo);
+    }
+    nt_gfx_destroy_buffer(s_shape.batch_ibo);
+    nt_gfx_destroy_buffer(s_shape.batch_vbo);
     nt_gfx_destroy_pipeline(s_shape.line_pip_overlay);
-    nt_gfx_destroy_pipeline(s_shape.line_pip_depth_blend);
     nt_gfx_destroy_pipeline(s_shape.line_pip_depth);
-    nt_gfx_destroy_pipeline(s_shape.pip_overlay_blend);
-    nt_gfx_destroy_pipeline(s_shape.pip_overlay);
-    nt_gfx_destroy_pipeline(s_shape.pip_depth_blend);
-    nt_gfx_destroy_pipeline(s_shape.pip_depth);
+    nt_gfx_destroy_pipeline(s_shape.cap_inst_pip_overlay);
+    nt_gfx_destroy_pipeline(s_shape.cap_inst_pip_depth);
+    nt_gfx_destroy_pipeline(s_shape.inst_pip_overlay);
+    nt_gfx_destroy_pipeline(s_shape.inst_pip_depth);
+    nt_gfx_destroy_pipeline(s_shape.batch_pip_overlay);
+    nt_gfx_destroy_pipeline(s_shape.batch_pip_depth);
     nt_gfx_destroy_shader(s_shape.line_vs);
+    nt_gfx_destroy_shader(s_shape.cap_inst_vs);
+    nt_gfx_destroy_shader(s_shape.inst_vs);
+    nt_gfx_destroy_shader(s_shape.batch_vs);
     nt_gfx_destroy_shader(s_shape.fs);
-    nt_gfx_destroy_shader(s_shape.vs);
     memset(&s_shape, 0, sizeof(s_shape));
 }
 
 void nt_shape_renderer_flush(void) {
-    /* Flush filled shapes */
-    if (s_shape.index_count > 0) {
-        nt_gfx_update_buffer(s_shape.vbo, s_shape.vertices, s_shape.vertex_count * (uint32_t)sizeof(nt_shape_renderer_vertex_t));
-        nt_gfx_update_buffer(s_shape.ibo, s_shape.indices, s_shape.index_count * (uint32_t)sizeof(uint16_t));
+    /* Flush instanced shapes (rect, cube, circle, sphere, cylinder, capsule) */
+    for (int t = 0; t < NT_SHAPE_TYPE_COUNT; t++) {
+        uint32_t cnt = s_shape.inst_counts[t];
+        if (cnt == 0) {
+            continue;
+        }
+        nt_gfx_update_buffer(s_shape.inst_buf, s_shape.inst_data[t], cnt * (uint32_t)sizeof(nt_shape_instance_t));
+        nt_gfx_bind_pipeline(t == NT_SHAPE_CAPSULE ? s_shape.cap_inst_pip_active : s_shape.inst_pip_active);
+        nt_gfx_bind_vertex_buffer(s_shape.templates[t].vbo);
+        nt_gfx_bind_index_buffer(s_shape.templates[t].ibo);
+        nt_gfx_bind_instance_buffer(s_shape.inst_buf);
+        nt_gfx_set_uniform_mat4("u_vp", s_shape.vp);
 
-        nt_gfx_bind_pipeline(s_shape.pip_active);
-        nt_gfx_bind_vertex_buffer(s_shape.vbo);
-        nt_gfx_bind_index_buffer(s_shape.ibo);
+        g_nt_gfx.frame_stats.vertices += cnt * s_shape.templates[t].num_vertices;
+        nt_gfx_draw_indexed_instanced(0, s_shape.templates[t].num_indices, cnt);
+        s_shape.inst_counts[t] = 0;
+    }
+
+    /* Flush CPU-batched shapes (triangle, mesh) */
+    if (s_shape.index_count > 0) {
+        nt_gfx_update_buffer(s_shape.batch_vbo, s_shape.vertices, s_shape.vertex_count * (uint32_t)sizeof(nt_shape_renderer_vertex_t));
+        nt_gfx_update_buffer(s_shape.batch_ibo, s_shape.indices, s_shape.index_count * (uint32_t)sizeof(uint16_t));
+
+        nt_gfx_bind_pipeline(s_shape.batch_pip_active);
+        nt_gfx_bind_vertex_buffer(s_shape.batch_vbo);
+        nt_gfx_bind_index_buffer(s_shape.batch_ibo);
         nt_gfx_set_uniform_mat4("u_vp", s_shape.vp);
 
         g_nt_gfx.frame_stats.vertices += s_shape.vertex_count;
@@ -387,23 +787,11 @@ void nt_shape_renderer_set_depth(bool enabled) {
     if (enabled == s_shape.depth_enabled) {
         return;
     }
-    if (s_shape.index_count > 0 || s_shape.line_count > 0) {
-        nt_shape_renderer_flush();
-    }
+    nt_shape_renderer_flush();
     s_shape.depth_enabled = enabled;
-    s_shape.pip_active = get_active_pipeline();
-    s_shape.line_pip_active = get_active_line_pipeline();
-}
-
-void nt_shape_renderer_set_blend(bool enabled) {
-    if (enabled == s_shape.blend_enabled) {
-        return;
-    }
-    if (s_shape.index_count > 0 || s_shape.line_count > 0) {
-        nt_shape_renderer_flush();
-    }
-    s_shape.blend_enabled = enabled;
-    s_shape.pip_active = get_active_pipeline();
+    s_shape.batch_pip_active = get_active_batch_pipeline();
+    s_shape.inst_pip_active = get_active_inst_pipeline();
+    s_shape.cap_inst_pip_active = get_active_cap_inst_pipeline();
     s_shape.line_pip_active = get_active_line_pipeline();
 }
 
@@ -411,40 +799,11 @@ void nt_shape_renderer_set_blend(bool enabled) {
 
 void nt_shape_renderer_line(const float a[3], const float b[3], const float color[4]) { emit_wire_edge(a, b, color); }
 
-void nt_shape_renderer_line_col(const float a[3], const float b[3], const float color_a[4], const float color_b[4]) { emit_wire_edge_col(a, b, color_a, color_b); }
-
 /* ---- Rectangle ---- */
 
 void nt_shape_renderer_rect(const float pos[3], const float size[2], const float color[4]) {
-    if (s_shape.vertex_count + 4 > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + 6 > NT_SHAPE_RENDERER_MAX_INDICES) {
-        nt_shape_renderer_flush();
-    }
-
-    uint16_t base = (uint16_t)s_shape.vertex_count;
-    float hx = size[0] * 0.5F;
-    float hy = size[1] * 0.5F;
-
-    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
-    float p0[3] = {pos[0] - hx, pos[1] - hy, pos[2]};
-    float p1[3] = {pos[0] + hx, pos[1] - hy, pos[2]};
-    float p2[3] = {pos[0] + hx, pos[1] + hy, pos[2]};
-    float p3[3] = {pos[0] - hx, pos[1] + hy, pos[2]};
-
-    set_vertex(&v[0], p0, color);
-    set_vertex(&v[1], p1, color);
-    set_vertex(&v[2], p2, color);
-    set_vertex(&v[3], p3, color);
-
-    uint16_t *idx = &s_shape.indices[s_shape.index_count];
-    idx[0] = base;
-    idx[1] = (uint16_t)(base + 1);
-    idx[2] = (uint16_t)(base + 2);
-    idx[3] = base;
-    idx[4] = (uint16_t)(base + 2);
-    idx[5] = (uint16_t)(base + 3);
-
-    s_shape.vertex_count += 4;
-    s_shape.index_count += 6;
+    float scale[3] = {size[0], size[1], 1.0F};
+    push_instance(NT_SHAPE_RECT, pos, scale, NULL, color);
 }
 
 void nt_shape_renderer_rect_wire(const float pos[3], const float size[2], const float color[4]) {
@@ -463,43 +822,8 @@ void nt_shape_renderer_rect_wire(const float pos[3], const float size[2], const 
 }
 
 void nt_shape_renderer_rect_rot(const float pos[3], const float size[2], const float rot[4], const float color[4]) {
-    if (s_shape.vertex_count + 4 > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + 6 > NT_SHAPE_RENDERER_MAX_INDICES) {
-        nt_shape_renderer_flush();
-    }
-
-    float hx = size[0] * 0.5F;
-    float hy = size[1] * 0.5F;
-
-    float offsets[4][3] = {
-        {-hx, -hy, 0.0F},
-        {+hx, -hy, 0.0F},
-        {+hx, +hy, 0.0F},
-        {-hx, +hy, 0.0F},
-    };
-
-    float rm[3][3];
-    quat_to_mat3(rot, rm);
-
-    uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
-
-    for (int i = 0; i < 4; i++) {
-        float rotated[3];
-        mat3_mulv(rm, offsets[i], rotated);
-        float p[3] = {pos[0] + rotated[0], pos[1] + rotated[1], pos[2] + rotated[2]};
-        set_vertex(&v[i], p, color);
-    }
-
-    uint16_t *idx = &s_shape.indices[s_shape.index_count];
-    idx[0] = base;
-    idx[1] = (uint16_t)(base + 1);
-    idx[2] = (uint16_t)(base + 2);
-    idx[3] = base;
-    idx[4] = (uint16_t)(base + 2);
-    idx[5] = (uint16_t)(base + 3);
-
-    s_shape.vertex_count += 4;
-    s_shape.index_count += 6;
+    float scale[3] = {size[0], size[1], 1.0F};
+    push_instance(NT_SHAPE_RECT, pos, scale, rot, color);
 }
 
 void nt_shape_renderer_rect_wire_rot(const float pos[3], const float size[2], const float rot[4], const float color[4]) {
@@ -581,47 +905,11 @@ void nt_shape_renderer_triangle_col(const float a[3], const float b[3], const fl
     s_shape.index_count += 3;
 }
 
-void nt_shape_renderer_triangle_wire_col(const float a[3], const float b[3], const float c[3], const float color_a[4], const float color_b[4], const float color_c[4]) {
-    emit_wire_edge_col(a, b, color_a, color_b);
-    emit_wire_edge_col(b, c, color_b, color_c); // NOLINT(readability-suspicious-call-argument)
-    emit_wire_edge_col(c, a, color_c, color_a); // NOLINT(readability-suspicious-call-argument)
-}
-
 /* ---- Circle ---- */
 
 void nt_shape_renderer_circle(const float center[3], float radius, const float color[4]) {
-    int segs = NT_SHAPE_SEGMENTS;
-    uint32_t vert_count = (uint32_t)(segs + 1); /* center + ring */
-    uint32_t idx_count = (uint32_t)(segs * 3);
-
-    if (s_shape.vertex_count + vert_count > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_RENDERER_MAX_INDICES) {
-        nt_shape_renderer_flush();
-    }
-
-    uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
-
-    /* Center vertex */
-    set_vertex(&v[0], center, color);
-
-    /* Ring vertices in XZ plane */
-    for (int i = 0; i < segs; i++) {
-        float p[3] = {center[0] + (radius * s_shape.cos_lut[i]), center[1], center[2] + (radius * s_shape.sin_lut[i])};
-        set_vertex(&v[1 + i], p, color);
-    }
-
-    /* Triangle fan indices */
-    uint16_t *idx = &s_shape.indices[s_shape.index_count];
-    int idx_off = 0;
-    for (int i = 0; i < segs; i++) {
-        int next = ((i + 1) % segs);
-        idx[idx_off++] = base;                        /* center */
-        idx[idx_off++] = (uint16_t)(base + 1 + i);    /* current ring */
-        idx[idx_off++] = (uint16_t)(base + 1 + next); /* next ring */
-    }
-
-    s_shape.vertex_count += vert_count;
-    s_shape.index_count += idx_count;
+    float scale[3] = {radius, 1.0F, radius};
+    push_instance(NT_SHAPE_CIRCLE, center, scale, NULL, color);
 }
 
 void nt_shape_renderer_circle_wire(const float center[3], float radius, const float color[4]) {
@@ -636,41 +924,8 @@ void nt_shape_renderer_circle_wire(const float center[3], float radius, const fl
 }
 
 void nt_shape_renderer_circle_rot(const float center[3], float radius, const float rot[4], const float color[4]) {
-    int segs = NT_SHAPE_SEGMENTS;
-    uint32_t vert_count = (uint32_t)(segs + 1);
-    uint32_t idx_count = (uint32_t)(segs * 3);
-
-    if (s_shape.vertex_count + vert_count > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_RENDERER_MAX_INDICES) {
-        nt_shape_renderer_flush();
-    }
-
-    uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
-
-    set_vertex(&v[0], center, color);
-
-    float rm[3][3];
-    quat_to_mat3(rot, rm);
-
-    for (int i = 0; i < segs; i++) {
-        float offset[3] = {radius * s_shape.cos_lut[i], 0.0F, radius * s_shape.sin_lut[i]};
-        float rotated[3];
-        mat3_mulv(rm, offset, rotated);
-        float p[3] = {center[0] + rotated[0], center[1] + rotated[1], center[2] + rotated[2]};
-        set_vertex(&v[1 + i], p, color);
-    }
-
-    uint16_t *idx = &s_shape.indices[s_shape.index_count];
-    int idx_off = 0;
-    for (int i = 0; i < segs; i++) {
-        int next = ((i + 1) % segs);
-        idx[idx_off++] = base;
-        idx[idx_off++] = (uint16_t)(base + 1 + i);
-        idx[idx_off++] = (uint16_t)(base + 1 + next);
-    }
-
-    s_shape.vertex_count += vert_count;
-    s_shape.index_count += idx_count;
+    float scale[3] = {radius, 1.0F, radius};
+    push_instance(NT_SHAPE_CIRCLE, center, scale, rot, color);
 }
 
 void nt_shape_renderer_circle_wire_rot(const float center[3], float radius, const float rot[4], const float color[4]) {
@@ -694,51 +949,7 @@ void nt_shape_renderer_circle_wire_rot(const float center[3], float radius, cons
 
 /* ---- Cube ---- */
 
-void nt_shape_renderer_cube(const float center[3], const float size[3], const float color[4]) {
-    if (s_shape.vertex_count + 8 > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + 36 > NT_SHAPE_RENDERER_MAX_INDICES) {
-        nt_shape_renderer_flush();
-    }
-
-    float hx = size[0] * 0.5F;
-    float hy = size[1] * 0.5F;
-    float hz = size[2] * 0.5F;
-
-    uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
-
-    /* 8 corner vertices */
-    float corners[8][3] = {
-        {center[0] - hx, center[1] - hy, center[2] - hz}, /* 0: ---  */
-        {center[0] + hx, center[1] - hy, center[2] - hz}, /* 1: +--  */
-        {center[0] + hx, center[1] + hy, center[2] - hz}, /* 2: ++-  */
-        {center[0] - hx, center[1] + hy, center[2] - hz}, /* 3: -+-  */
-        {center[0] - hx, center[1] - hy, center[2] + hz}, /* 4: --+  */
-        {center[0] + hx, center[1] - hy, center[2] + hz}, /* 5: +-+  */
-        {center[0] + hx, center[1] + hy, center[2] + hz}, /* 6: +++  */
-        {center[0] - hx, center[1] + hy, center[2] + hz}, /* 7: -++  */
-    };
-    for (int i = 0; i < 8; i++) {
-        set_vertex(&v[i], corners[i], color);
-    }
-
-    /* 36 indices: 6 faces x 2 triangles x 3 */
-    static const uint16_t face_idx[36] = {
-        0, 1, 2, 0, 2, 3, /* front  (-Z) */
-        5, 4, 7, 5, 7, 6, /* back   (+Z) */
-        4, 0, 3, 4, 3, 7, /* left   (-X) */
-        1, 5, 6, 1, 6, 2, /* right  (+X) */
-        3, 2, 6, 3, 6, 7, /* top    (+Y) */
-        4, 5, 1, 4, 1, 0, /* bottom (-Y) */
-    };
-
-    uint16_t *idx = &s_shape.indices[s_shape.index_count];
-    for (int i = 0; i < 36; i++) {
-        idx[i] = (uint16_t)(base + face_idx[i]);
-    }
-
-    s_shape.vertex_count += 8;
-    s_shape.index_count += 36;
-}
+void nt_shape_renderer_cube(const float center[3], const float size[3], const float color[4]) { push_instance(NT_SHAPE_CUBE, center, size, NULL, color); }
 
 void nt_shape_renderer_cube_wire(const float center[3], const float size[3], const float color[4]) {
     float hx = size[0] * 0.5F;
@@ -769,44 +980,7 @@ void nt_shape_renderer_cube_wire(const float center[3], const float size[3], con
     emit_wire_edge(c[4], c[7], color);
 }
 
-void nt_shape_renderer_cube_rot(const float center[3], const float size[3], const float rot[4], const float color[4]) {
-    if (s_shape.vertex_count + 8 > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + 36 > NT_SHAPE_RENDERER_MAX_INDICES) {
-        nt_shape_renderer_flush();
-    }
-
-    float hx = size[0] * 0.5F;
-    float hy = size[1] * 0.5F;
-    float hz = size[2] * 0.5F;
-
-    float offsets[8][3] = {
-        {-hx, -hy, -hz}, {+hx, -hy, -hz}, {+hx, +hy, -hz}, {-hx, +hy, -hz}, {-hx, -hy, +hz}, {+hx, -hy, +hz}, {+hx, +hy, +hz}, {-hx, +hy, +hz},
-    };
-
-    float rm[3][3];
-    quat_to_mat3(rot, rm);
-
-    uint16_t base = (uint16_t)s_shape.vertex_count;
-    nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
-
-    for (int i = 0; i < 8; i++) {
-        float rotated[3];
-        mat3_mulv(rm, offsets[i], rotated);
-        float p[3] = {center[0] + rotated[0], center[1] + rotated[1], center[2] + rotated[2]};
-        set_vertex(&v[i], p, color);
-    }
-
-    static const uint16_t face_idx[36] = {
-        0, 1, 2, 0, 2, 3, 5, 4, 7, 5, 7, 6, 4, 0, 3, 4, 3, 7, 1, 5, 6, 1, 6, 2, 3, 2, 6, 3, 6, 7, 4, 5, 1, 4, 1, 0,
-    };
-
-    uint16_t *idx = &s_shape.indices[s_shape.index_count];
-    for (int i = 0; i < 36; i++) {
-        idx[i] = (uint16_t)(base + face_idx[i]);
-    }
-
-    s_shape.vertex_count += 8;
-    s_shape.index_count += 36;
-}
+void nt_shape_renderer_cube_rot(const float center[3], const float size[3], const float rot[4], const float color[4]) { push_instance(NT_SHAPE_CUBE, center, size, rot, color); }
 
 void nt_shape_renderer_cube_wire_rot(const float center[3], const float size[3], const float rot[4], const float color[4]) {
     float hx = size[0] * 0.5F;
@@ -846,54 +1020,8 @@ void nt_shape_renderer_cube_wire_rot(const float center[3], const float size[3],
 /* ---- Sphere ---- */
 
 void nt_shape_renderer_sphere(const float center[3], float radius, const float color[4]) {
-    int segs = NT_SHAPE_SEGMENTS;
-    int rings = segs / 2;
-    uint32_t vert_count = (uint32_t)((rings + 1) * (segs + 1));
-    uint32_t idx_count = (uint32_t)(rings * segs * 6);
-
-    if (s_shape.vertex_count + vert_count > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_RENDERER_MAX_INDICES) {
-        nt_shape_renderer_flush();
-    }
-
-    uint16_t base = (uint16_t)s_shape.vertex_count;
-
-    /* Precompute phi sin/cos per ring (stack-local) */
-    float sin_phi[(NT_SHAPE_SEGMENTS / 2) + 1];
-    float cos_phi[(NT_SHAPE_SEGMENTS / 2) + 1];
-    for (int ring = 0; ring <= rings; ring++) {
-        float phi = NT_PI * (float)ring / (float)rings;
-        sin_phi[ring] = sinf(phi);
-        cos_phi[ring] = cosf(phi);
-    }
-
-    /* Generate vertices */
-    for (int ring = 0; ring <= rings; ring++) {
-        float sp = sin_phi[ring];
-        float cp = cos_phi[ring];
-        for (int seg = 0; seg <= segs; seg++) {
-            float st = s_shape.sin_lut[seg];
-            float ct = s_shape.cos_lut[seg];
-            float p[3] = {center[0] + (radius * sp * ct), center[1] + (radius * cp), center[2] + (radius * sp * st)};
-            set_vertex(&s_shape.vertices[s_shape.vertex_count], p, color);
-            s_shape.vertex_count++;
-        }
-    }
-
-    /* Generate indices: 2 triangles per quad */
-    for (int ring = 0; ring < rings; ring++) {
-        for (int seg = 0; seg < segs; seg++) {
-            uint16_t a = (uint16_t)(base + (ring * (segs + 1)) + seg);
-            uint16_t b = (uint16_t)(a + 1);
-            uint16_t c = (uint16_t)(a + (segs + 1));
-            uint16_t d = (uint16_t)(c + 1);
-            s_shape.indices[s_shape.index_count++] = a;
-            s_shape.indices[s_shape.index_count++] = c;
-            s_shape.indices[s_shape.index_count++] = b;
-            s_shape.indices[s_shape.index_count++] = b;
-            s_shape.indices[s_shape.index_count++] = c;
-            s_shape.indices[s_shape.index_count++] = d;
-        }
-    }
+    float scale[3] = {radius, radius, radius};
+    push_instance(NT_SHAPE_SPHERE, center, scale, NULL, color);
 }
 
 void nt_shape_renderer_sphere_wire(const float center[3], float radius, const float color[4]) {
@@ -928,115 +1056,6 @@ void nt_shape_renderer_sphere_wire(const float center[3], float radius, const fl
 }
 
 /* ---- Cylinder ---- */
-
-/* Internal: emit cylinder geometry with optional quaternion rotation.
-   Center is the midpoint of the cylinder. Height along Y axis. */
-static void emit_cylinder_fill(const float center[3], float radius, float height, const float *rot, const float color[4]) {
-    int segs = NT_SHAPE_SEGMENTS;
-    uint32_t vert_count = (uint32_t)((2 * (segs + 1)) + 2);
-    uint32_t idx_count = (uint32_t)(12 * segs);
-
-    if (s_shape.vertex_count + vert_count > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_RENDERER_MAX_INDICES) {
-        nt_shape_renderer_flush();
-    }
-
-    uint16_t base = (uint16_t)s_shape.vertex_count;
-    float hy = height * 0.5F;
-    bool has_rot = (rot != NULL);
-    float rm[3][3];
-    if (has_rot) {
-        quat_to_mat3(rot, rm);
-    }
-
-    /* Vertex layout: [top_center, bottom_center, top_ring[0..segs], bottom_ring[0..segs]] */
-    /* Index 0: top center, 1: bottom center, 2..segs+2: top ring, segs+3..2*segs+3: bottom ring */
-
-    /* Top center */
-    float tc_off[3] = {0, hy, 0};
-    if (has_rot) {
-        float tmp[3];
-        mat3_mulv(rm, tc_off, tmp);
-        tc_off[0] = tmp[0];
-        tc_off[1] = tmp[1];
-        tc_off[2] = tmp[2];
-    }
-    float tc[3] = {center[0] + tc_off[0], center[1] + tc_off[1], center[2] + tc_off[2]};
-    set_vertex(&s_shape.vertices[s_shape.vertex_count++], tc, color);
-
-    /* Bottom center */
-    float bc_off[3] = {0, -hy, 0};
-    if (has_rot) {
-        float tmp[3];
-        mat3_mulv(rm, bc_off, tmp);
-        bc_off[0] = tmp[0];
-        bc_off[1] = tmp[1];
-        bc_off[2] = tmp[2];
-    }
-    float bc[3] = {center[0] + bc_off[0], center[1] + bc_off[1], center[2] + bc_off[2]};
-    set_vertex(&s_shape.vertices[s_shape.vertex_count++], bc, color);
-
-    /* Top ring (segs+1 verts, last duplicates first for seam) */
-    for (int i = 0; i <= segs; i++) {
-        float off[3] = {radius * s_shape.cos_lut[i], hy, radius * s_shape.sin_lut[i]};
-        if (has_rot) {
-            float tmp[3];
-            mat3_mulv(rm, off, tmp);
-            off[0] = tmp[0];
-            off[1] = tmp[1];
-            off[2] = tmp[2];
-        }
-        float p[3] = {center[0] + off[0], center[1] + off[1], center[2] + off[2]};
-        set_vertex(&s_shape.vertices[s_shape.vertex_count++], p, color);
-    }
-
-    /* Bottom ring (segs+1 verts) */
-    for (int i = 0; i <= segs; i++) {
-        float off[3] = {radius * s_shape.cos_lut[i], -hy, radius * s_shape.sin_lut[i]};
-        if (has_rot) {
-            float tmp[3];
-            mat3_mulv(rm, off, tmp);
-            off[0] = tmp[0];
-            off[1] = tmp[1];
-            off[2] = tmp[2];
-        }
-        float p[3] = {center[0] + off[0], center[1] + off[1], center[2] + off[2]};
-        set_vertex(&s_shape.vertices[s_shape.vertex_count++], p, color);
-    }
-
-    /* Indices */
-    uint16_t top_center = base;
-    uint16_t bot_center = (uint16_t)(base + 1);
-    uint16_t top_ring_start = (uint16_t)(base + 2);
-    uint16_t bot_ring_start = (uint16_t)(base + 2 + segs + 1);
-
-    /* Top cap fan */
-    for (int i = 0; i < segs; i++) {
-        s_shape.indices[s_shape.index_count++] = top_center;
-        s_shape.indices[s_shape.index_count++] = (uint16_t)(top_ring_start + i);
-        s_shape.indices[s_shape.index_count++] = (uint16_t)(top_ring_start + i + 1);
-    }
-
-    /* Bottom cap fan (reversed winding) */
-    for (int i = 0; i < segs; i++) {
-        s_shape.indices[s_shape.index_count++] = bot_center;
-        s_shape.indices[s_shape.index_count++] = (uint16_t)(bot_ring_start + i + 1);
-        s_shape.indices[s_shape.index_count++] = (uint16_t)(bot_ring_start + i);
-    }
-
-    /* Tube quads */
-    for (int i = 0; i < segs; i++) {
-        uint16_t t0 = (uint16_t)(top_ring_start + i);
-        uint16_t t1 = (uint16_t)(top_ring_start + i + 1);
-        uint16_t b0 = (uint16_t)(bot_ring_start + i);
-        uint16_t b1 = (uint16_t)(bot_ring_start + i + 1);
-        s_shape.indices[s_shape.index_count++] = t0;
-        s_shape.indices[s_shape.index_count++] = b0;
-        s_shape.indices[s_shape.index_count++] = t1;
-        s_shape.indices[s_shape.index_count++] = t1;
-        s_shape.indices[s_shape.index_count++] = b0;
-        s_shape.indices[s_shape.index_count++] = b1;
-    }
-}
 
 static void emit_cylinder_wire(const float center[3], float radius, float height, const float *rot, const float color[4]) {
     int segs = NT_SHAPE_SEGMENTS;
@@ -1112,100 +1131,21 @@ static void emit_cylinder_wire(const float center[3], float radius, float height
     }
 }
 
-void nt_shape_renderer_cylinder(const float center[3], float radius, float height, const float color[4]) { emit_cylinder_fill(center, radius, height, NULL, color); }
+void nt_shape_renderer_cylinder(const float center[3], float radius, float height, const float color[4]) {
+    float scale[3] = {radius, height, radius};
+    push_instance(NT_SHAPE_CYLINDER, center, scale, NULL, color);
+}
 
 void nt_shape_renderer_cylinder_wire(const float center[3], float radius, float height, const float color[4]) { emit_cylinder_wire(center, radius, height, NULL, color); }
 
-void nt_shape_renderer_cylinder_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) { emit_cylinder_fill(center, radius, height, rot, color); }
+void nt_shape_renderer_cylinder_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) {
+    float scale[3] = {radius, height, radius};
+    push_instance(NT_SHAPE_CYLINDER, center, scale, rot, color);
+}
 
 void nt_shape_renderer_cylinder_wire_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) { emit_cylinder_wire(center, radius, height, rot, color); }
 
 /* ---- Capsule ---- */
-
-/* Capsule: two hemisphere caps + cylindrical tube body.
-   Center is the midpoint. Height is total height including caps.
-   Body height = max(0, height - 2*radius). Hemisphere radius = radius.
-   Tessellation: half_rings = segments/4 per hemisphere, tube = 1 ring section.
-   Total ring sections = half_rings + 1 + half_rings = segments/2 + 1.
-   Verts: (total_sections + 1) * (segs + 1). */
-
-static void emit_capsule_fill(const float center[3], float radius, float height, const float *rot, const float color[4]) {
-    int segs = NT_SHAPE_SEGMENTS;
-    int half_rings = segs / 4;
-    int total_sections = (2 * half_rings) + 1; /* top hemi + tube + bottom hemi */
-    uint32_t vert_count = (uint32_t)((total_sections + 1) * (segs + 1));
-    uint32_t idx_count = (uint32_t)(total_sections * segs * 6);
-
-    if (s_shape.vertex_count + vert_count > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + idx_count > NT_SHAPE_RENDERER_MAX_INDICES) {
-        nt_shape_renderer_flush();
-    }
-
-    uint16_t base = (uint16_t)s_shape.vertex_count;
-    float body_half = (height - (2.0F * radius)) * 0.5F;
-    if (body_half < 0.0F) {
-        body_half = 0.0F;
-    }
-    bool has_rot = (rot != NULL);
-    float rm[3][3];
-    if (has_rot) {
-        quat_to_mat3(rot, rm);
-    }
-
-    /* Generate vertices row by row from top pole to bottom pole.
-       Row indices: 0..half_rings = top hemisphere, half_rings+1 = body bottom,
-       half_rings+1..total_sections = bottom hemisphere */
-    for (int row = 0; row <= total_sections; row++) {
-        float y_offset;
-        float ring_radius;
-
-        if (row <= half_rings) {
-            /* Top hemisphere: row 0 = pole, row half_rings = equator */
-            float phi = (NT_PI * 0.5F) * (float)(half_rings - row) / (float)half_rings; /* PI/2 -> 0 */
-            y_offset = body_half + (radius * sinf(phi));
-            ring_radius = radius * cosf(phi);
-        } else if (row == half_rings + 1) {
-            /* Body bottom edge (tube bottom) */
-            y_offset = -body_half;
-            ring_radius = radius;
-        } else {
-            /* Bottom hemisphere: row half_rings+2..total_sections */
-            int bot_row = row - half_rings - 1;                              /* 1..half_rings */
-            float phi = (NT_PI * 0.5F) * (float)bot_row / (float)half_rings; /* 0 -> PI/2 */
-            y_offset = -body_half - (radius * sinf(phi));
-            ring_radius = radius * cosf(phi);
-        }
-
-        for (int seg = 0; seg <= segs; seg++) {
-            float off[3] = {ring_radius * s_shape.cos_lut[seg], y_offset, ring_radius * s_shape.sin_lut[seg]};
-            if (has_rot) {
-                float tmp[3];
-                mat3_mulv(rm, off, tmp);
-                off[0] = tmp[0];
-                off[1] = tmp[1];
-                off[2] = tmp[2];
-            }
-            float p[3] = {center[0] + off[0], center[1] + off[1], center[2] + off[2]};
-            set_vertex(&s_shape.vertices[s_shape.vertex_count], p, color);
-            s_shape.vertex_count++;
-        }
-    }
-
-    /* Generate indices: 2 triangles per quad between adjacent rows */
-    for (int row = 0; row < total_sections; row++) {
-        for (int seg = 0; seg < segs; seg++) {
-            uint16_t a = (uint16_t)(base + (row * (segs + 1)) + seg);
-            uint16_t b = (uint16_t)(a + 1);
-            uint16_t c = (uint16_t)(a + (segs + 1));
-            uint16_t d = (uint16_t)(c + 1);
-            s_shape.indices[s_shape.index_count++] = a;
-            s_shape.indices[s_shape.index_count++] = c;
-            s_shape.indices[s_shape.index_count++] = b;
-            s_shape.indices[s_shape.index_count++] = b;
-            s_shape.indices[s_shape.index_count++] = c;
-            s_shape.indices[s_shape.index_count++] = d;
-        }
-    }
-}
 
 /* Compute y-offset and ring radius for a given capsule row.
    Extracts the branching logic from capsule wireframe to reduce complexity. */
@@ -1298,11 +1238,25 @@ static void emit_capsule_wire(const float center[3], float radius, float height,
     }
 }
 
-void nt_shape_renderer_capsule(const float center[3], float radius, float height, const float color[4]) { emit_capsule_fill(center, radius, height, NULL, color); }
+void nt_shape_renderer_capsule(const float center[3], float radius, float height, const float color[4]) {
+    float body_half = (height - 2.0F * radius) * 0.5F;
+    if (body_half < 0.0F) {
+        body_half = 0.0F;
+    }
+    float scale[3] = {radius, body_half, 0.0F};
+    push_instance(NT_SHAPE_CAPSULE, center, scale, NULL, color);
+}
 
 void nt_shape_renderer_capsule_wire(const float center[3], float radius, float height, const float color[4]) { emit_capsule_wire(center, radius, height, NULL, color); }
 
-void nt_shape_renderer_capsule_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) { emit_capsule_fill(center, radius, height, rot, color); }
+void nt_shape_renderer_capsule_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) {
+    float body_half = (height - 2.0F * radius) * 0.5F;
+    if (body_half < 0.0F) {
+        body_half = 0.0F;
+    }
+    float scale[3] = {radius, body_half, 0.0F};
+    push_instance(NT_SHAPE_CAPSULE, center, scale, rot, color);
+}
 
 void nt_shape_renderer_capsule_wire_rot(const float center[3], float radius, float height, const float rot[4], const float color[4]) { emit_capsule_wire(center, radius, height, rot, color); }
 
@@ -1348,6 +1302,7 @@ void nt_shape_renderer_mesh_wire(const float *positions, uint32_t num_vertices, 
 
 /* ---- Test accessors (always compiled; header guards visibility) ---- */
 
+uint32_t nt_shape_renderer_test_instance_count(int type) { return s_shape.inst_counts[type]; }
 uint32_t nt_shape_renderer_test_vertex_count(void) { return s_shape.vertex_count; }
 uint32_t nt_shape_renderer_test_index_count(void) { return s_shape.index_count; }
 uint32_t nt_shape_renderer_test_line_count(void) { return s_shape.line_count; }

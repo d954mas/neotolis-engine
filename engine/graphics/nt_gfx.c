@@ -629,6 +629,7 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.indices += num_indices * instance_count;
+    g_nt_gfx.frame_stats.instances += instance_count;
     nt_gfx_backend_draw_instanced(first_index, num_indices, true, instance_count);
 }
 

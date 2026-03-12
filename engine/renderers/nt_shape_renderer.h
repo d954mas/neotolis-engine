@@ -20,8 +20,8 @@
 /* ---- Vertex format ---- */
 
 typedef struct {
-    float pos[3];   /* world-space position */
-    float color[4]; /* RGBA (0.0-1.0) */
+    float pos[3];     /* world-space position */
+    uint8_t color[4]; /* RGBA packed (0-255, GPU normalizes to 0.0-1.0) */
 } nt_shape_renderer_vertex_t;
 
 /* ---- Lifecycle ---- */
@@ -36,12 +36,10 @@ void nt_shape_renderer_set_vp(const float vp[16]);
 void nt_shape_renderer_set_cam_pos(const float pos[3]);
 void nt_shape_renderer_set_line_width(float width);
 void nt_shape_renderer_set_depth(bool enabled);
-void nt_shape_renderer_set_blend(bool enabled);
 
 /* ---- Line ---- */
 
 void nt_shape_renderer_line(const float a[3], const float b[3], const float color[4]);
-void nt_shape_renderer_line_col(const float a[3], const float b[3], const float color_a[4], const float color_b[4]);
 
 /* ---- Rectangle ---- */
 
@@ -55,7 +53,6 @@ void nt_shape_renderer_rect_wire_rot(const float pos[3], const float size[2], co
 void nt_shape_renderer_triangle(const float a[3], const float b[3], const float c[3], const float color[4]);
 void nt_shape_renderer_triangle_wire(const float a[3], const float b[3], const float c[3], const float color[4]);
 void nt_shape_renderer_triangle_col(const float a[3], const float b[3], const float c[3], const float color_a[4], const float color_b[4], const float color_c[4]);
-void nt_shape_renderer_triangle_wire_col(const float a[3], const float b[3], const float c[3], const float color_a[4], const float color_b[4], const float color_c[4]);
 
 /* ---- Circle ---- */
 
@@ -98,6 +95,18 @@ void nt_shape_renderer_mesh_wire(const float *positions, uint32_t num_vertices, 
 /* ---- Test accessors (test builds only) ---- */
 
 #ifdef NT_SHAPE_RENDERER_TEST_ACCESS
+
+/* Instanced shape types (for test_instance_count) */
+enum {
+    NT_SHAPE_TEST_RECT = 0,
+    NT_SHAPE_TEST_CUBE,
+    NT_SHAPE_TEST_CIRCLE,
+    NT_SHAPE_TEST_SPHERE,
+    NT_SHAPE_TEST_CYLINDER,
+    NT_SHAPE_TEST_CAPSULE,
+};
+
+uint32_t nt_shape_renderer_test_instance_count(int type);
 uint32_t nt_shape_renderer_test_vertex_count(void);
 uint32_t nt_shape_renderer_test_index_count(void);
 uint32_t nt_shape_renderer_test_line_count(void);
