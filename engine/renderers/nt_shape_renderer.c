@@ -17,10 +17,10 @@ _Static_assert(NT_SHAPE_RENDERER_MAX_VERTICES <= 65535, "uint16 index limit");
 #define NT_SEG_SPHERE_RINGS (NT_SHAPE_SEGMENTS / 2)
 #define NT_SEG_SPHERE_NV ((NT_SEG_SPHERE_RINGS + 1) * (NT_SHAPE_SEGMENTS + 1))
 #define NT_SEG_SPHERE_NI (NT_SEG_SPHERE_RINGS * NT_SHAPE_SEGMENTS * 6)
-#define NT_SEG_CYL_NV (2 * (NT_SHAPE_SEGMENTS + 1) + 2)
+#define NT_SEG_CYL_NV ((2 * (NT_SHAPE_SEGMENTS + 1)) + 2)
 #define NT_SEG_CYL_NI (12 * NT_SHAPE_SEGMENTS)
 #define NT_SEG_CAP_HALF (NT_SHAPE_SEGMENTS / 4)
-#define NT_SEG_CAP_SECTIONS (2 * NT_SEG_CAP_HALF + 1)
+#define NT_SEG_CAP_SECTIONS ((2 * NT_SEG_CAP_HALF) + 1)
 #define NT_SEG_CAP_NV ((NT_SEG_CAP_SECTIONS + 1) * (NT_SHAPE_SEGMENTS + 1))
 #define NT_SEG_CAP_NI (NT_SEG_CAP_SECTIONS * NT_SHAPE_SEGMENTS * 6)
 
@@ -369,7 +369,7 @@ static inline uint8_t float_to_u8(float v) {
     if (v >= 1.0F) {
         return 255;
     }
-    return (uint8_t)(v * 255.0F + 0.5F);
+    return (uint8_t)((v * 255.0F) + 0.5F);
 }
 
 static void pack_color(uint8_t out[4], const float f[4]) {
@@ -457,15 +457,15 @@ static void build_templates(void) {
         v[1] = 0.0F;
         v[2] = 0.0F;
         for (int j = 0; j < NT_SHAPE_SEGMENTS; j++) {
-            v[(1 + j) * 3 + 0] = s_shape.cos_lut[j];
-            v[(1 + j) * 3 + 1] = 0.0F;
-            v[(1 + j) * 3 + 2] = s_shape.sin_lut[j];
+            v[((1 + j) * 3) + 0] = s_shape.cos_lut[j];
+            v[((1 + j) * 3) + 1] = 0.0F;
+            v[((1 + j) * 3) + 2] = s_shape.sin_lut[j];
         }
         for (int j = 0; j < NT_SHAPE_SEGMENTS; j++) {
             int next = (j + 1) % NT_SHAPE_SEGMENTS;
-            idx[j * 3 + 0] = 0;
-            idx[j * 3 + 1] = (uint16_t)(1 + j);
-            idx[j * 3 + 2] = (uint16_t)(1 + next);
+            idx[(j * 3) + 0] = 0;
+            idx[(j * 3) + 1] = (uint16_t)(1 + j);
+            idx[(j * 3) + 2] = (uint16_t)(1 + next);
         }
         s_shape.templates[NT_SHAPE_CIRCLE] = make_template(v, NT_SEG_CIRCLE_NV, idx, NT_SEG_CIRCLE_NI, "tpl_circle");
     }
@@ -497,7 +497,7 @@ static void build_templates(void) {
         int ii = 0;
         for (int r = 0; r < rings; r++) {
             for (int s2 = 0; s2 < segs; s2++) {
-                uint16_t a = (uint16_t)(r * (segs + 1) + s2);
+                uint16_t a = (uint16_t)((r * (segs + 1)) + s2);
                 uint16_t b = (uint16_t)(a + 1);
                 uint16_t c = (uint16_t)(a + segs + 1);
                 uint16_t d = (uint16_t)(c + 1);
@@ -617,7 +617,7 @@ static void build_templates(void) {
         int ii = 0;
         for (int row = 0; row < total_sections; row++) {
             for (int seg = 0; seg < segs; seg++) {
-                uint16_t a = (uint16_t)(row * (segs + 1) + seg);
+                uint16_t a = (uint16_t)((row * (segs + 1)) + seg);
                 uint16_t b = (uint16_t)(a + 1);
                 uint16_t c = (uint16_t)(a + segs + 1);
                 uint16_t d = (uint16_t)(c + 1);
@@ -796,7 +796,7 @@ void nt_shape_renderer_flush(void) {
 /* ---- State setters ---- */
 
 void nt_shape_renderer_set_vp(const float vp[16]) {
-    if (memcmp(s_shape.vp, vp, sizeof(float) * 16) == 0) {
+    if (memcmp(s_shape.vp, vp, sizeof(float) * 16) == 0) { // NOLINT — intentional bitwise dirty-check
         return;
     }
     nt_shape_renderer_flush();

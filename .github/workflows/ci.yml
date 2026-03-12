@@ -213,8 +213,11 @@ jobs:
       - name: Build WASM release
         run: cmake --build --preset wasm-release
 
-      - name: Measure sizes
-        run: bash scripts/size.sh hello --json > /tmp/size_entry.json
+      - name: Measure sizes (all examples)
+        run: |
+          for example in hello bench_shapes; do
+            bash scripts/size.sh $example --json > /tmp/size_${example}.json
+          done
 
       - name: Install wabt
         run: sudo apt-get update && sudo apt-get install -y wabt
@@ -225,8 +228,11 @@ jobs:
       - name: Build WASM analysis
         run: cmake --build --preset wasm-analysis
 
-      - name: Generate size report
-        run: set -o pipefail && bash scripts/size-report.sh hello | tee /tmp/size-report.txt
+      - name: Generate size reports (all examples)
+        run: |
+          for example in hello bench_shapes; do
+            bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
+          done
 
       - name: Checkout gh-pages branch
         uses: actions/checkout@v4
@@ -238,38 +244,41 @@ jobs:
       - name: Ensure gh-pages data directory exists
         run: mkdir -p gh-pages-data/sizes
 
-      - name: Copy size report to gh-pages
+      - name: Update size history and reports (all examples)
         run: |
-          mkdir -p gh-pages-data/reports/hello
-          cp /tmp/size-report.txt gh-pages-data/reports/hello/size-report.txt
+          for example in hello bench_shapes; do
+            mkdir -p "gh-pages-data/reports/$example"
+            cp "/tmp/report_${example}.txt" "gh-pages-data/reports/$example/size-report.txt"
 
-      - name: Update size history
-        run: |
-          TARGET_FILE="gh-pages-data/sizes/hello.json"
-          ENTRY=$(cat /tmp/size_entry.json)
-          if [ -f "$TARGET_FILE" ]; then
-            jq --argjson e "$ENTRY" '. += [$e]' "$TARGET_FILE" > /tmp/updated.json
-            mv /tmp/updated.json "$TARGET_FILE"
-          else
-            echo "[$ENTRY]" > "$TARGET_FILE"
-          fi
+            TARGET_FILE="gh-pages-data/sizes/${example}.json"
+            ENTRY=$(cat "/tmp/size_${example}.json")
+            if [ -f "$TARGET_FILE" ]; then
+              jq --argjson e "$ENTRY" '. += [$e]' "$TARGET_FILE" > /tmp/updated.json
+              mv /tmp/updated.json "$TARGET_FILE"
+            else
+              echo "[$ENTRY]" > "$TARGET_FILE"
+            fi
+          done
 
       - name: Check for size regression
         run: |
-          TARGET_FILE="gh-pages-data/sizes/hello.json"
-          ENTRIES=$(jq length "$TARGET_FILE")
-          if [ "$ENTRIES" -gt 1 ]; then
-            PREV=$(jq '.[-2].total.raw' "$TARGET_FILE")
-            CURR=$(jq '.[-1].total.raw' "$TARGET_FILE")
-            if [ "$PREV" -gt 0 ]; then
-              GROWTH=$(( (CURR - PREV) * 100 / PREV ))
-              if [ "$GROWTH" -gt 10 ]; then
-                echo "::warning::WASM output size grew by ${GROWTH}% (${PREV}B -> ${CURR}B)"
-              else
-                echo "Size change: ${GROWTH}% (${PREV}B -> ${CURR}B)"
+          for example in hello bench_shapes; do
+            TARGET_FILE="gh-pages-data/sizes/${example}.json"
+            [ -f "$TARGET_FILE" ] || continue
+            ENTRIES=$(jq length "$TARGET_FILE")
+            if [ "$ENTRIES" -gt 1 ]; then
+              PREV=$(jq '.[-2].total.raw' "$TARGET_FILE")
+              CURR=$(jq '.[-1].total.raw' "$TARGET_FILE")
+              if [ "$PREV" -gt 0 ]; then
+                GROWTH=$(( (CURR - PREV) * 100 / PREV ))
+                if [ "$GROWTH" -gt 10 ]; then
+                  echo "::warning::${example}: WASM size grew by ${GROWTH}% (${PREV}B -> ${CURR}B)"
+                else
+                  echo "${example}: size change ${GROWTH}% (${PREV}B -> ${CURR}B)"
+                fi
               fi
             fi
-          fi
+          done
 
       - name: Preserve old size chart page
         run: |
@@ -339,8 +348,11 @@ jobs:
       - name: Build WASM release
         run: cmake --build --preset wasm-release
 
-      - name: Measure sizes
-        run: bash scripts/size.sh hello --json > /tmp/pr_size.json
+      - name: Measure sizes (all examples)
+        run: |
+          for example in hello bench_shapes; do
+            bash scripts/size.sh $example --json > /tmp/size_${example}.json
+          done
 
       - name: Configure WASM analysis
         run: emcmake cmake --preset wasm-analysis
@@ -348,8 +360,11 @@ jobs:
       - name: Build WASM analysis
         run: cmake --build --preset wasm-analysis
 
-      - name: Generate size report
-        run: set -o pipefail && bash scripts/size-report.sh hello | tee /tmp/pr-report.txt
+      - name: Generate size reports (all examples)
+        run: |
+          for example in hello bench_shapes; do
+            bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
+          done
 
       - name: Fetch baseline from gh-pages
         id: baseline
@@ -359,71 +374,79 @@ jobs:
           path: gh-pages-baseline
         continue-on-error: true
 
-      - name: Check for baseline report
-        id: baseline-report
-        run: |
-          if [ -f "gh-pages-baseline/reports/hello/size-report.txt" ]; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Generate size comment
         run: |
-          CURRENT=$(cat /tmp/pr_size.json)
-          BASELINE_FILE="gh-pages-baseline/sizes/hello.json"
-          HAS_BASELINE=false
-          if [ -f "$BASELINE_FILE" ]; then
-            BASELINE=$(jq '.[-1]' "$BASELINE_FILE")
-            HAS_BASELINE=true
-          fi
+          EXAMPLES="hello bench_shapes"
+          PR_COMMIT=$(git rev-parse --short HEAD)
 
           {
-            echo "## WASM Build Size (\`hello\`)"
+            echo "## WASM Build Sizes"
             echo ""
-            echo "| File | Raw | Gzip | Raw Delta | Gzip Delta |"
-            echo "|------|----:|-----:|----------:|-----------:|"
 
-            for fname in $(echo "$CURRENT" | jq -r '.files | keys[]' | sort); do
-              cur_raw=$(echo "$CURRENT" | jq -r ".files[\"$fname\"].raw")
-              cur_gz=$(echo "$CURRENT" | jq -r ".files[\"$fname\"].gzip")
-              if [ "$HAS_BASELINE" = true ]; then
-                base_raw=$(echo "$BASELINE" | jq -r ".files[\"$fname\"].raw // 0")
-                base_gz=$(echo "$BASELINE" | jq -r ".files[\"$fname\"].gzip // 0")
-                d_raw=$((cur_raw - base_raw))
-                d_gz=$((cur_gz - base_gz))
-                [ "$d_raw" -ge 0 ] && d_raw_str="+${d_raw} B" || d_raw_str="${d_raw} B"
-                [ "$d_gz" -ge 0 ] && d_gz_str="+${d_gz} B" || d_gz_str="${d_gz} B"
-              else
-                d_raw_str="--"
-                d_gz_str="--"
+            for example in $EXAMPLES; do
+              CURRENT=$(cat /tmp/size_${example}.json)
+              BASELINE_FILE="gh-pages-baseline/sizes/${example}.json"
+              HAS_BASELINE=false
+              if [ -f "$BASELINE_FILE" ]; then
+                BASELINE=$(jq '.[-1]' "$BASELINE_FILE")
+                HAS_BASELINE=true
               fi
-              printf "| \`%s\` | %d B | %d B | %s | %s |\n" "$fname" "$cur_raw" "$cur_gz" "$d_raw_str" "$d_gz_str"
+
+              cur_total_raw=$(echo "$CURRENT" | jq -r '.total.raw')
+              cur_total_gz=$(echo "$CURRENT" | jq -r '.total.gzip')
+              if [ "$HAS_BASELINE" = true ]; then
+                base_total_raw=$(echo "$BASELINE" | jq -r '.total.raw')
+                d_total_raw=$((cur_total_raw - base_total_raw))
+                [ "$d_total_raw" -ge 0 ] && delta_str="+${d_total_raw} B" || delta_str="${d_total_raw} B"
+                summary_extra=" | ${delta_str}"
+              else
+                summary_extra=""
+              fi
+
+              echo "<details>"
+              echo "<summary><code>${example}</code> — ${cur_total_raw} B raw, ${cur_total_gz} B gzip${summary_extra}</summary>"
+              echo ""
+              echo "| File | Raw | Gzip | Raw Delta | Gzip Delta |"
+              echo "|------|----:|-----:|----------:|-----------:|"
+
+              for fname in $(echo "$CURRENT" | jq -r '.files | keys[]' | sort); do
+                cur_raw=$(echo "$CURRENT" | jq -r ".files[\"$fname\"].raw")
+                cur_gz=$(echo "$CURRENT" | jq -r ".files[\"$fname\"].gzip")
+                if [ "$HAS_BASELINE" = true ]; then
+                  base_raw=$(echo "$BASELINE" | jq -r ".files[\"$fname\"].raw // 0")
+                  base_gz=$(echo "$BASELINE" | jq -r ".files[\"$fname\"].gzip // 0")
+                  d_raw=$((cur_raw - base_raw))
+                  d_gz=$((cur_gz - base_gz))
+                  [ "$d_raw" -ge 0 ] && d_raw_str="+${d_raw} B" || d_raw_str="${d_raw} B"
+                  [ "$d_gz" -ge 0 ] && d_gz_str="+${d_gz} B" || d_gz_str="${d_gz} B"
+                else
+                  d_raw_str="--"
+                  d_gz_str="--"
+                fi
+                printf "| \`%s\` | %d B | %d B | %s | %s |\n" "$fname" "$cur_raw" "$cur_gz" "$d_raw_str" "$d_gz_str"
+              done
+
+              if [ "$HAS_BASELINE" = true ]; then
+                base_total_gz=$(echo "$BASELINE" | jq -r '.total.gzip')
+                d_total_gz=$((cur_total_gz - base_total_gz))
+                [ "$d_total_raw" -ge 0 ] && d_total_raw_str="+${d_total_raw} B" || d_total_raw_str="${d_total_raw} B"
+                [ "$d_total_gz" -ge 0 ] && d_total_gz_str="+${d_total_gz} B" || d_total_gz_str="${d_total_gz} B"
+              else
+                d_total_raw_str="--"
+                d_total_gz_str="--"
+              fi
+              echo "| **Total** | **${cur_total_raw} B** | **${cur_total_gz} B** | **${d_total_raw_str}** | **${d_total_gz_str}** |"
+              echo ""
+              echo "</details>"
+              echo ""
             done
 
-            cur_total_raw=$(echo "$CURRENT" | jq -r '.total.raw')
-            cur_total_gz=$(echo "$CURRENT" | jq -r '.total.gzip')
-            if [ "$HAS_BASELINE" = true ]; then
-              base_total_raw=$(echo "$BASELINE" | jq -r '.total.raw')
-              base_total_gz=$(echo "$BASELINE" | jq -r '.total.gzip')
-              d_total_raw=$((cur_total_raw - base_total_raw))
-              d_total_gz=$((cur_total_gz - base_total_gz))
-              [ "$d_total_raw" -ge 0 ] && d_total_raw_str="+${d_total_raw} B" || d_total_raw_str="${d_total_raw} B"
-              [ "$d_total_gz" -ge 0 ] && d_total_gz_str="+${d_total_gz} B" || d_total_gz_str="${d_total_gz} B"
-            else
-              d_total_raw_str="--"
-              d_total_gz_str="--"
-            fi
-            echo "| **Total** | **${cur_total_raw} B** | **${cur_total_gz} B** | **${d_total_raw_str}** | **${d_total_gz_str}** |"
-
-            echo ""
-            pr_commit=$(echo "$CURRENT" | jq -r '.commit')
-            if [ "$HAS_BASELINE" = true ]; then
-              base_commit=$(echo "$BASELINE" | jq -r '.commit')
+            if [ -f "gh-pages-baseline/sizes/hello.json" ]; then
+              base_commit=$(jq -r '.[-1].commit' "gh-pages-baseline/sizes/hello.json")
             else
               base_commit="none"
             fi
-            echo "<sub>Baseline: master@${base_commit} | PR: ${pr_commit}</sub>"
+            echo "<sub>Baseline: master@${base_commit} | PR: ${PR_COMMIT}</sub>"
           } > /tmp/pr_comment.md
 
       - name: Post PR size comment
@@ -439,118 +462,43 @@ jobs:
 
       - name: Generate size report comment
         run: |
-          PR_REPORT="/tmp/pr-report.txt"
-          BASE_REPORT="gh-pages-baseline/reports/hello/size-report.txt"
-          HAS_BASELINE="${{ steps.baseline-report.outputs.exists }}"
+          EXAMPLES="hello bench_shapes"
+          PR_COMMIT=$(git rev-parse --short HEAD)
 
           {
-            echo "## WASM Size Report (\`hello\`)"
+            echo "## WASM Size Reports"
             echo ""
 
-            if [ "$HAS_BASELINE" = "true" ]; then
+            for example in $EXAMPLES; do
+              PR_REPORT="/tmp/report_${example}.txt"
+              BASE_REPORT="gh-pages-baseline/reports/${example}/size-report.txt"
+
               echo "<details>"
-              echo "<summary>Size Report Diff (Master | PR | Delta)</summary>"
-              echo ""
-              echo '```diff'
 
-              # Generate a unified diff of the two reports
-              diff --unified=1000 "$BASE_REPORT" "$PR_REPORT" | tail -n +4 || true
+              if [ -f "$BASE_REPORT" ]; then
+                echo "<summary><code>${example}</code> — Size Report Diff</summary>"
+                echo ""
+                echo '```diff'
+                diff --unified=1000 "$BASE_REPORT" "$PR_REPORT" | tail -n +4 || true
+                echo '```'
+              else
+                echo "<summary><code>${example}</code> — Size Report (no baseline)</summary>"
+                echo ""
+                echo '```'
+                cat "$PR_REPORT"
+                echo '```'
+              fi
 
-              echo '```'
               echo "</details>"
               echo ""
+            done
 
-              # Show a summary of key section changes inline
-              echo "### Key Changes"
-              echo ""
-
-              # Extract section sizes from both reports and show delta
-              echo "| Section | Master | PR | Delta |"
-              echo "|---------|-------:|---:|------:|"
-
-              awk '
-              BEGIN { mode=0 }
-              FILENAME==ARGV[1] && /^## WASM Section Sizes/ { mode=1; next }
-              FILENAME==ARGV[1] && mode==1 && /^##/ { mode=0 }
-              FILENAME==ARGV[1] && mode==1 && /^[A-Za-z]/ && !/^Section/ && !/^---/ {
-                name=$1; size=$(NF-1); base[name]=size
-              }
-              FILENAME==ARGV[2] && /^## WASM Section Sizes/ { mode=1; next }
-              FILENAME==ARGV[2] && mode==1 && /^##/ { mode=0 }
-              FILENAME==ARGV[2] && mode==1 && /^[A-Za-z]/ && !/^Section/ && !/^---/ {
-                name=$1; size=$(NF-1); pr[name]=size
-                if (name in base) {
-                  delta = size - base[name]
-                  if (delta > 0) prefix = "+"
-                  else prefix = ""
-                  printf "| %s | %d B | %d B | %s%d B |\n", name, base[name], size, prefix, delta
-                } else {
-                  printf "| %s | (new) | %d B | -- |\n", name, size
-                }
-              }
-              END {
-                for (name in base) {
-                  if (!(name in pr)) {
-                    printf "| %s | %d B | (removed) | -- |\n", name, base[name]
-                  }
-                }
-              }
-              ' "$BASE_REPORT" "$PR_REPORT"
-
-              echo ""
-
-              # Top functions diff: show functions that changed
-              echo "| Function | Master | PR | Delta |"
-              echo "|----------|-------:|---:|------:|"
-
-              awk '
-              BEGIN { mode_base=0; mode_pr=0 }
-              FILENAME==ARGV[1] && /^## Top.*Functions/ { mode_base=1; next }
-              FILENAME==ARGV[1] && mode_base==1 && /^##/ { mode_base=0 }
-              FILENAME==ARGV[1] && mode_base==1 && /^ *[0-9]+ B / {
-                size=$1; name=""; for(i=3;i<=NF;i++) name=name (i>3?" ":"") $i
-                base_fn[name]=size
-              }
-              FILENAME==ARGV[2] && /^## Top.*Functions/ { mode_pr=1; next }
-              FILENAME==ARGV[2] && mode_pr==1 && /^##/ { mode_pr=0 }
-              FILENAME==ARGV[2] && mode_pr==1 && /^ *[0-9]+ B / {
-                size=$1; name=""; for(i=3;i<=NF;i++) name=name (i>3?" ":"") $i
-                pr_fn[name]=size
-                if (name in base_fn) {
-                  delta = size - base_fn[name]
-                  if (delta != 0) {
-                    if (delta > 0) prefix = "+"
-                    else prefix = ""
-                    printf "| `%s` | %d B | %d B | %s%d B |\n", name, base_fn[name], size, prefix, delta
-                  }
-                } else {
-                  printf "| `%s` | (new) | %d B | -- |\n", name, size
-                }
-              }
-              END {
-                for (name in base_fn) {
-                  if (!(name in pr_fn)) {
-                    printf "| `%s` | %d B | (removed) | -- |\n", name, base_fn[name]
-                  }
-                }
-              }
-              ' "$BASE_REPORT" "$PR_REPORT"
-
+            if [ -f "gh-pages-baseline/reports/hello/size-report.txt" ]; then
+              base_commit=$(head -2 "gh-pages-baseline/reports/hello/size-report.txt" | grep '# Commit:' | awk '{print $3}')
             else
-              # No baseline -- show full report without diff
-              echo "<details>"
-              echo "<summary>Size Report (no baseline available)</summary>"
-              echo ""
-              echo '```'
-              cat "$PR_REPORT"
-              echo '```'
-              echo "</details>"
+              base_commit="none"
             fi
-
-            echo ""
-            pr_commit=$(git rev-parse --short HEAD)
-            echo "<sub>PR: ${pr_commit} | Baseline: $( [ "$HAS_BASELINE" = "true" ] && head -2 "$BASE_REPORT" | grep '# Commit:' | awk '{print $3}' || echo 'none' )</sub>"
-
+            echo "<sub>PR: ${PR_COMMIT} | Baseline: ${base_commit:-none}</sub>"
           } > /tmp/report_comment.md
 
       - name: Post size report comment
