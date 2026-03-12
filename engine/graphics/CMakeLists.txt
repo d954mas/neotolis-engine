@@ -1,22 +1,23 @@
-# nt_gfx -- graphics rendering with swappable backends
+# nt_gfx -- graphics rendering with unified GL backend
+#
+# Unified GL backend (gl/nt_gfx_gl.c) handles both WebGL 2 (Emscripten)
+# and OpenGL 3.3 Core (native desktop) using #ifdef NT_PLATFORM_WEB
+# for the handful of platform differences.
 
-if(EMSCRIPTEN)
-    nt_add_module(nt_gfx
-        nt_gfx.c
-        webgl/nt_gfx_webgl.c
-        nt_gfx.h
-        nt_gfx_internal.h
-    )
-else()
-    nt_add_module(nt_gfx
-        nt_gfx.c
-        native/nt_gfx_native.c
-        nt_gfx.h
-        nt_gfx_internal.h
-    )
-endif()
+nt_add_module(nt_gfx
+    nt_gfx.c
+    gl/nt_gfx_gl.c
+    nt_gfx.h
+    nt_gfx_internal.h
+)
 
 target_link_libraries(nt_gfx PUBLIC nt_core nt_window)
+
+if(WIN32)
+    target_link_libraries(nt_gfx PRIVATE opengl32)
+elseif(NOT EMSCRIPTEN)
+    target_link_libraries(nt_gfx PRIVATE GL)
+endif()
 
 # Stub implementation for headless builds (CI, builder, tests)
 nt_add_module(nt_gfx_stub
