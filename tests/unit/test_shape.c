@@ -339,6 +339,104 @@ void test_shape_cube_rot_count(void) {
     TEST_ASSERT_EQUAL_UINT32(36, nt_shape_test_index_count());
 }
 
+/* ---- 25. Cylinder fill counts (32 segments) ---- */
+
+void test_shape_cylinder_fill_counts(void) {
+    float center[3] = {0, 0, 0};
+    float col[4] = {1, 1, 0, 1};
+    /* N=32: 2 center verts + 2*(N+1) ring verts = 2 + 66 = 68 verts
+       Indices: top cap 3*N + bottom cap 3*N + tube 6*N = 12*N = 384 */
+    nt_shape_cylinder(center, 1.0F, 2.0F, col);
+    TEST_ASSERT_EQUAL_UINT32(68, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(384, nt_shape_test_index_count());
+}
+
+/* ---- 26. Cylinder wire counts (32 segments) ---- */
+
+void test_shape_cylinder_wire_counts(void) {
+    float center[3] = {0, 0, 0};
+    float col[4] = {1, 1, 0, 1};
+    /* 3*N = 96 edges: N top + N bottom + N vertical
+       96 * 4 = 384 verts, 96 * 6 = 576 indices */
+    nt_shape_cylinder_wire(center, 1.0F, 2.0F, col);
+    TEST_ASSERT_EQUAL_UINT32(384, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(576, nt_shape_test_index_count());
+}
+
+/* ---- 27. Capsule fill counts (32 segments) ---- */
+
+void test_shape_capsule_fill_counts(void) {
+    float center[3] = {0, 0, 0};
+    float col[4] = {0, 1, 1, 1};
+    /* N=32, half_rings=N/4=8.
+       Capsule: top hemi (8 rings) + tube (1 ring) + bottom hemi (8 rings) = 17 ring sections.
+       Verts: (17+1) * (32+1) = 18 * 33 = 594
+       Indices: 17 * 32 * 6 = 3264 */
+    nt_shape_capsule(center, 0.5F, 2.0F, col);
+    TEST_ASSERT_EQUAL_UINT32(594, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(3264, nt_shape_test_index_count());
+}
+
+/* ---- 28. Capsule wire counts (32 segments) ---- */
+
+void test_shape_capsule_wire_counts(void) {
+    float center[3] = {0, 0, 0};
+    float col[4] = {0, 1, 1, 1};
+    /* Longitude: 32 lines x 17 edges each = 544 edges
+       Latitude: 16 rings x 32 edges each = 512 edges
+       Total: 1056 edges x 4 verts = 4224, 1056 * 6 = 6336 */
+    nt_shape_capsule_wire(center, 0.5F, 2.0F, col);
+    TEST_ASSERT_EQUAL_UINT32(4224, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(6336, nt_shape_test_index_count());
+}
+
+/* ---- 29. Mesh fill copies geometry into batch ---- */
+
+void test_shape_mesh_fill_counts(void) {
+    /* Quad: 4 positions, 6 indices (2 triangles) */
+    float positions[] = {0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0};
+    uint16_t indices[] = {0, 1, 2, 0, 2, 3};
+    float col[4] = {1, 1, 1, 1};
+    nt_shape_mesh(positions, indices, 6, col);
+    TEST_ASSERT_EQUAL_UINT32(4, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(6, nt_shape_test_index_count());
+}
+
+/* ---- 30. Mesh wire emits edges per triangle ---- */
+
+void test_shape_mesh_wire_counts(void) {
+    /* 1 triangle: 3 positions, 3 indices -> 3 wireframe edges
+       3 * 4 = 12 verts, 3 * 6 = 18 indices */
+    float positions[] = {0, 0, 0, 1, 0, 0, 0.5F, 1, 0};
+    uint16_t indices[] = {0, 1, 2};
+    float col[4] = {1, 1, 1, 1};
+    nt_shape_mesh_wire(positions, indices, 3, col);
+    TEST_ASSERT_EQUAL_UINT32(12, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(18, nt_shape_test_index_count());
+}
+
+/* ---- 31. Cylinder rot vertex count matches base ---- */
+
+void test_shape_cylinder_rot_count(void) {
+    float center[3] = {0, 0, 0};
+    float col[4] = {1, 1, 0, 1};
+    float rot[4] = {0, 0, 0.7071068F, 0.7071068F};
+    nt_shape_cylinder_rot(center, 1.0F, 2.0F, rot, col);
+    TEST_ASSERT_EQUAL_UINT32(68, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(384, nt_shape_test_index_count());
+}
+
+/* ---- 32. Capsule rot vertex count matches base ---- */
+
+void test_shape_capsule_rot_count(void) {
+    float center[3] = {0, 0, 0};
+    float col[4] = {0, 1, 1, 1};
+    float rot[4] = {0, 0, 0.7071068F, 0.7071068F};
+    nt_shape_capsule_rot(center, 0.5F, 2.0F, rot, col);
+    TEST_ASSERT_EQUAL_UINT32(594, nt_shape_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(3264, nt_shape_test_index_count());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_shape_init_shutdown);
@@ -365,5 +463,13 @@ int main(void) {
     RUN_TEST(test_shape_sphere_wire_counts);
     RUN_TEST(test_shape_circle_rot_count);
     RUN_TEST(test_shape_cube_rot_count);
+    RUN_TEST(test_shape_cylinder_fill_counts);
+    RUN_TEST(test_shape_cylinder_wire_counts);
+    RUN_TEST(test_shape_capsule_fill_counts);
+    RUN_TEST(test_shape_capsule_wire_counts);
+    RUN_TEST(test_shape_mesh_fill_counts);
+    RUN_TEST(test_shape_mesh_wire_counts);
+    RUN_TEST(test_shape_cylinder_rot_count);
+    RUN_TEST(test_shape_capsule_rot_count);
     return UNITY_END();
 }
