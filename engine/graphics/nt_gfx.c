@@ -222,6 +222,7 @@ static bool restore_context(void) {
 
     g_nt_gfx.context_lost = false;
     g_nt_gfx.context_restored = true;
+    s_gfx.bound_pipeline = 0;
 
     /* A slot is live when its index bits match its position (freed slots have index bits zeroed) */
 #define SLOT_IS_LIVE(pool, idx) (((pool).slots[(idx)].id & NT_GFX_SLOT_MASK) == (idx))
@@ -465,6 +466,9 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(pip.id);
+    if (s_gfx.bound_pipeline == s_gfx.pipeline_backends[slot]) {
+        s_gfx.bound_pipeline = 0;
+    }
     nt_gfx_backend_destroy_pipeline(s_gfx.pipeline_backends[slot]);
     s_gfx.pipeline_backends[slot] = 0;
     nt_gfx_free_pipeline_data(slot);
