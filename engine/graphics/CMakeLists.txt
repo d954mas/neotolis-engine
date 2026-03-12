@@ -1,14 +1,22 @@
 # nt_gfx -- graphics rendering with unified GL backend
 #
-# Unified GL backend (gl/nt_gfx_gl.c) handles both WebGL 2 (Emscripten)
-# and OpenGL 3.3 Core (native desktop) using #ifdef NT_PLATFORM_WEB
-# for the handful of platform differences.
+# GL backend (gl/nt_gfx_gl.c) is platform-agnostic -- all GL calls are
+# identical between WebGL 2 and OpenGL 3.3 Core.  Platform-specific context
+# management lives in gl/nt_gfx_gl_ctx_{web,native}.c.
+
+if(EMSCRIPTEN)
+    set(GFX_GL_CTX gl/nt_gfx_gl_ctx_web.c)
+else()
+    set(GFX_GL_CTX gl/nt_gfx_gl_ctx_native.c)
+endif()
 
 nt_add_module(nt_gfx
     nt_gfx.c
     gl/nt_gfx_gl.c
+    ${GFX_GL_CTX}
     nt_gfx.h
     nt_gfx_internal.h
+    gl/nt_gfx_gl_ctx.h
 )
 
 target_link_libraries(nt_gfx PUBLIC nt_core nt_window)

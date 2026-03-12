@@ -1,21 +1,15 @@
 /*
  * Unified OpenGL backend for nt_gfx.
  *
- * Covers WebGL 2 (via Emscripten / GLES 3.0) and OpenGL 3.3 Core (native
- * desktop).  The two APIs share >95% of their surface; the handful of
- * differences are isolated behind #ifdef NT_PLATFORM_WEB.
+ * Covers WebGL 2 (GLES 3.0) and OpenGL 3.3 Core (native desktop).
+ * All platform calls (context create/destroy/loss) go through
+ * nt_gfx_gl_ctx.h — zero Emscripten or OS API here.
  *
- * Platform differences:
- *   - Headers:  GLES3/gl3.h + emscripten/html5_webgl.h  vs  glad/gl.h
- *   - Context create/destroy:  emscripten_webgl_*  vs  no-op (window layer)
- *   - Context loss detection:  emscripten_is_webgl_context_lost  vs  false
- *   - glClearDepthf (ES) vs glClearDepth (desktop)
- *
- * Everything else (shaders, buffers, VAOs, pipelines, uniforms, draw calls)
- * uses identical GL calls on both paths.
+ * Only remaining #ifdef: GL headers and glClearDepthf vs glClearDepth.
  */
 
 #include "core/nt_platform.h"
+#include "graphics/gl/nt_gfx_gl_ctx.h"
 #include "graphics/nt_gfx_internal.h"
 #include "window/nt_window.h"
 
@@ -27,7 +21,6 @@
 
 #ifdef NT_PLATFORM_WEB
 #include <GLES3/gl3.h>
-#include <emscripten/html5_webgl.h>
 #else
 /*
  * Desktop GL 3.3 Core.
@@ -152,10 +145,6 @@ typedef struct {
 
 /* ---- File-scope state ---- */
 
-#ifdef NT_PLATFORM_WEB
-static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE s_gl_context;
-#endif
-
 static GLuint s_bound_program;         /* currently bound GL program (for uniforms) */
 static uint32_t s_bound_pipeline_slot; /* currently bound pipeline index */
 
@@ -247,56 +236,10 @@ static GLenum map_buffer_usage(nt_buffer_usage_t u) {
     }
 }
 
-/* ---- Platform context helpers ---- */
-
-#ifdef NT_PLATFORM_WEB
-
-static bool create_gl_context(void) {
-    EmscriptenWebGLContextAttributes attrs;
-    emscripten_webgl_init_context_attributes(&attrs);
-    attrs.alpha = false;
-    attrs.depth = true;
-    attrs.stencil = true;
-    attrs.antialias = false;
-    attrs.majorVersion = 2;
-    attrs.minorVersion = 0;
-    attrs.premultipliedAlpha = true;
-    attrs.preserveDrawingBuffer = false;
-
-    s_gl_context = emscripten_webgl_create_context("#canvas", &attrs);
-    if (s_gl_context <= 0) {
-        /* Fatal: cannot proceed without a GL context. */
-        emscripten_force_exit(1);
-        return false;
-    }
-    emscripten_webgl_make_context_current(s_gl_context);
-    return true;
-}
-
-static void destroy_gl_context(void) {
-    if (s_gl_context > 0) {
-        emscripten_webgl_destroy_context(s_gl_context);
-        s_gl_context = 0;
-    }
-}
-
-#else /* native desktop */
-
-static bool create_gl_context(void) {
-    /* On desktop the window layer (GLFW, SDL, etc.) creates the GL context.
-     * The GL backend assumes a current context already exists.
-     * When glad is vendored, gladLoadGL() will be called here. */
-    return true;
-}
-
-static void destroy_gl_context(void) { /* No-op: window layer owns the context. */ }
-
-#endif /* NT_PLATFORM_WEB */
-
 /* ==== Backend interface implementation ==== */
 
 void nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
-    if (!create_gl_context()) {
+    if (!nt_gfx_gl_ctx_create()) {
         return;
     }
 
@@ -334,16 +277,10 @@ void nt_gfx_backend_shutdown(void) {
     s_bound_pipeline_slot = 0;
     s_next_pipeline_slot = 0;
 
-    destroy_gl_context();
+    nt_gfx_gl_ctx_destroy();
 }
 
-bool nt_gfx_backend_is_context_lost(void) {
-#ifdef NT_PLATFORM_WEB
-    return emscripten_is_webgl_context_lost(s_gl_context) != 0;
-#else
-    return false;
-#endif
-}
+bool nt_gfx_backend_is_context_lost(void) { return nt_gfx_gl_ctx_is_lost(); }
 
 /* ---- Frame / Pass ---- */
 
@@ -653,11 +590,9 @@ void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle) {
 /* ---- Context loss recovery ---- */
 
 void nt_gfx_backend_recreate_all_resources(void) {
-#ifdef NT_PLATFORM_WEB
     /* Destroy old context and create a fresh one. */
-    destroy_gl_context();
-    create_gl_context();
-#endif
+    nt_gfx_gl_ctx_destroy();
+    nt_gfx_gl_ctx_create();
 
     /* Re-enable initial GL state. */
     glEnable(GL_DEPTH_TEST);
