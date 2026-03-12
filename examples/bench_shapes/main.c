@@ -26,7 +26,7 @@
 #define MIN_DIST 2.0F
 
 /* Shape storage */
-#define MAX_SHAPES_PER_TYPE 65536
+#define MAX_SHAPES_PER_TYPE 16384
 #define MAX_SHAPES (MAX_SHAPES_PER_TYPE * 8)
 
 /* Shape types */

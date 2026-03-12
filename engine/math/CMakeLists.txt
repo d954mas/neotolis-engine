@@ -8,3 +8,6 @@
 
 add_library(nt_math INTERFACE)
 target_link_libraries(nt_math INTERFACE cglm_headers)
+if(NOT WIN32)
+    target_link_libraries(nt_math INTERFACE m)
+endif()
