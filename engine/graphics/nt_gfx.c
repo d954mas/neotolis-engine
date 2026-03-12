@@ -3,21 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "core/nt_platform.h"
+#include "core/nt_assert.h"
 #include "log/nt_log.h"
-
-/* Debug-only state machine validation.
-   Release builds rely on the return-early guards that follow each NT_GFX_ASSERT. */
-#ifdef NT_ENABLE_ASSERTS
-#define NT_GFX_ASSERT(cond)                                                                                                                                                                            \
-    do {                                                                                                                                                                                               \
-        if (!(cond)) {                                                                                                                                                                                 \
-            __builtin_trap();                                                                                                                                                                          \
-        }                                                                                                                                                                                              \
-    } while (0)
-#else
-#define NT_GFX_ASSERT(cond) ((void)0)
-#endif
 
 /* ---- Descriptor ownership helpers ----
    Shader source/label and immutable buffer data are strdup/memcpy'd so
@@ -296,7 +283,7 @@ void nt_gfx_begin_frame(void) {
         }
     }
 
-    NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
     if (s_gfx.render_state != NT_GFX_STATE_IDLE) {
         nt_log_error("gfx: begin_frame called outside IDLE state");
         return;
@@ -311,7 +298,7 @@ void nt_gfx_end_frame(void) {
         return;
     }
 
-    NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_FRAME);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_FRAME);
     if (s_gfx.render_state != NT_GFX_STATE_FRAME) {
         nt_log_error("gfx: end_frame called outside FRAME state");
         return;
@@ -327,7 +314,7 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
         return;
     }
 
-    NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_FRAME);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_FRAME);
     if (s_gfx.render_state != NT_GFX_STATE_FRAME) {
         nt_log_error("gfx: begin_pass called outside FRAME state");
         return;
@@ -342,7 +329,7 @@ void nt_gfx_end_pass(void) {
         return;
     }
 
-    NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
         nt_log_error("gfx: end_pass called outside PASS state");
         return;
@@ -528,7 +515,7 @@ void nt_gfx_bind_vertex_buffer(nt_buffer_t buf) {
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
-    NT_GFX_ASSERT(s_gfx.buffer_descs[slot].type == NT_BUFFER_VERTEX);
+    NT_ASSERT(s_gfx.buffer_descs[slot].type == NT_BUFFER_VERTEX);
     if (s_gfx.buffer_descs[slot].type != NT_BUFFER_VERTEX) {
         nt_log_error("gfx: bind_vertex_buffer: buffer is not vertex type");
         return;
@@ -545,7 +532,7 @@ void nt_gfx_bind_index_buffer(nt_buffer_t buf) {
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
-    NT_GFX_ASSERT(s_gfx.buffer_descs[slot].type == NT_BUFFER_INDEX);
+    NT_ASSERT(s_gfx.buffer_descs[slot].type == NT_BUFFER_INDEX);
     if (s_gfx.buffer_descs[slot].type != NT_BUFFER_INDEX) {
         nt_log_error("gfx: bind_index_buffer: buffer is not index type");
         return;
@@ -591,12 +578,12 @@ void nt_gfx_draw(uint32_t first_element, uint32_t num_elements) {
         return;
     }
 
-    NT_GFX_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
         nt_log_error("gfx: draw called outside PASS state");
         return;
     }
-    NT_GFX_ASSERT(s_gfx.bound_pipeline != 0);
+    NT_ASSERT(s_gfx.bound_pipeline != 0);
     if (s_gfx.bound_pipeline == 0) {
         nt_log_error("gfx: draw called without bound pipeline");
         return;
@@ -616,7 +603,12 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
-    NT_GFX_ASSERT(size <= s_gfx.buffer_descs[slot].size);
+    NT_ASSERT(s_gfx.buffer_descs[slot].usage != NT_USAGE_IMMUTABLE);
+    if (s_gfx.buffer_descs[slot].usage == NT_USAGE_IMMUTABLE) {
+        nt_log_error("gfx: update_buffer: cannot update immutable buffer");
+        return;
+    }
+    NT_ASSERT(size <= s_gfx.buffer_descs[slot].size);
     if (size > s_gfx.buffer_descs[slot].size) {
         nt_log_error("gfx: update_buffer: size exceeds buffer capacity");
         return;

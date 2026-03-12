@@ -11,6 +11,7 @@
 #include "core/nt_platform.h"
 #include "graphics/gl/nt_gfx_gl_ctx.h"
 #include "graphics/nt_gfx_internal.h"
+#include "log/nt_log.h"
 #include "window/nt_window.h"
 
 #include <stdint.h>
@@ -353,16 +354,13 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     GLint linked = 0;
     glGetProgramiv(program, GL_LINK_STATUS, &linked);
     if (!linked) {
-        char info[1024];
-        /* Log vertex shader errors */
+        char info[512];
         glGetShaderInfoLog((GLuint)vs_backend, (GLsizei)sizeof(info), NULL, info);
-        (void)info; /* TODO: pipe through nt_log */
-        /* Log fragment shader errors */
+        nt_log_error(info);
         glGetShaderInfoLog((GLuint)fs_backend, (GLsizei)sizeof(info), NULL, info);
-        (void)info;
-        /* Log program link errors */
+        nt_log_error(info);
         glGetProgramInfoLog(program, (GLsizei)sizeof(info), NULL, info);
-        (void)info;
+        nt_log_error(info);
 
         glDeleteProgram(program);
         return 0;
