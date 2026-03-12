@@ -138,10 +138,6 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
         return false;
     }
 
-    /* Initial GL state */
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
-
     /* Allocate backend resource arrays (+1 because slots are 1-based) */
     s_max_pipelines = (desc && desc->max_pipelines) ? desc->max_pipelines : 16;
     s_max_buffers = (desc && desc->max_buffers) ? desc->max_buffers : 128;
@@ -189,11 +185,7 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
-void nt_gfx_backend_end_pass(void) {
-    glBindVertexArray(0);
-    s_bound_program = 0;
-    s_bound_pipeline_slot = 0;
-}
+void nt_gfx_backend_end_pass(void) {}
 
 /* ---- Pipeline bind ---- */
 
@@ -389,17 +381,6 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     GLenum usage = map_buffer_usage(desc->usage);
     glBindBuffer(target, buf);
     glBufferData(target, (GLsizeiptr)desc->size, desc->data, usage);
-    glBindBuffer(target, 0);
-
-    /* Store the target for correct bind in update_buffer */
-    /* Use the GL buffer name as backend handle directly.
-     * We also need to track which slot it maps to for s_buffer_targets.
-     * Since the shared pool handles slot tracking, and we return the GL
-     * name as the backend handle, we store the target in a parallel
-     * array indexed by GL buffer name -- but GL names can be large.
-     * Alternative: use the buffer pool slot approach like pipelines.
-     * Simplest: store a target lookup in s_buffer_targets indexed by
-     * a sequential counter. */
 
     /* Find free buffer slot */
     uint32_t slot = 0;
@@ -439,7 +420,6 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uin
     GLenum target = s_buffer_targets[backend_handle];
     glBindBuffer(target, buf);
     glBufferSubData(target, 0, (GLsizeiptr)size, data);
-    glBindBuffer(target, 0);
 }
 
 void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) {
@@ -482,10 +462,6 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     if (!nt_gfx_gl_ctx_create()) {
         return false;
     }
-
-    /* Re-enable initial GL state. */
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
 
     /* Zero out all backend-side arrays -- old GL names are invalid. */
     if (s_pipelines) {
