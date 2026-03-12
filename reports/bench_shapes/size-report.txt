@@ -1,0 +1,86 @@
+# Size Report: bench_shapes (wasm-analysis)
+# Commit: 318fe44
+
+## WASM Section Sizes
+
+Section                Size
+---------------- ----------
+Type                 186 B
+Import               360 B
+Function              80 B
+Table                  5 B
+Memory                 7 B
+Global                 9 B
+Export                53 B
+Elem                  24 B
+Code               65011 B
+Data                8597 B
+Custom              3078 B
+---------------- ----------
+TOTAL              77410 B
+
+## Top 30 Functions by Size
+
+    Size  Name
+--------  ----
+11423 B   frame
+11369 B   main
+ 5335 B   dlmalloc
+ 3469 B   rebuild_shapes
+ 3102 B   fmt_fp
+ 2803 B   emit_capsule_wire
+ 2628 B   printf_core
+ 2041 B   __rem_pio2f
+ 1927 B   emit_cylinder_wire
+ 1560 B   dlfree
+ 1315 B   nt_shape_renderer_triangle
+ 1122 B   nt_shape_renderer_flush
+ 1026 B   nt_input_web_on_blur
+  796 B   nt_gfx_bind_pipeline
+  731 B   nt_input_web_on_pointer_move
+  692 B   nt_input_web_on_pointer_down
+  650 B   pop_arg_long_double
+  596 B   nt_gfx_backend_create_pipeline
+  592 B   nt_gfx_make_pipeline
+  568 B   push_instance
+  512 B   __memcpy
+  469 B   emit_wire_edge
+  464 B   nt_gfx_make_buffer
+  458 B   nt_window_init
+  424 B   nt_gfx_make_shader
+  401 B   nt_gfx_destroy_pipeline
+  381 B   sinf
+  376 B   __stdio_write
+  370 B   __memset
+  362 B   nt_gfx_destroy_buffer
+
+Total functions: 79
+Total code size: 64879 B
+
+## Per-Module Contributions
+
+(pre-link archive sizes, before LTO)
+
+Module                         Size
+------------------------ ----------
+libnt_app.a                 1428 B
+libnt_core.a                1688 B
+libnt_gfx.a                26268 B
+libnt_gfx_stub.a           17420 B
+libnt_input.a              16358 B
+libnt_shape_renderer.a   1140002 B
+libnt_window.a              3454 B
+------------------------ ----------
+TOTAL (linked)           1206618 B
+
+Not linked to bench_shapes:
+libnt_input_stub.a         10902 B
+libnt_log.a                  970 B
+libnt_log_stub.a             506 B
+libnt_time.a                 866 B
+
+
+## Data Segments Summary
+
+Segments: 40
+Total data size: 8326 B
