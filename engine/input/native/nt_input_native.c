@@ -1,12 +1,5 @@
 #include "input/nt_input_internal.h"
-
-/* clang-format off */
-#include <glad/gl.h>   /* Must precede glfw3.h -- glad replaces system GL header */
-#include <GLFW/glfw3.h>
-/* clang-format on */
-
-/* GLFW window handle owned by nt_window_native.c */
-extern GLFWwindow *g_nt_glfw_window;
+#include "window/nt_window_native.h"
 
 /* ---- Mouse button mask tracking ---- */
 
@@ -167,8 +160,9 @@ void nt_input_platform_init(void) {
 }
 
 void nt_input_platform_poll(void) {
-    /* No-op. GLFW callbacks fire during glfwPollEvents() in nt_app_native.c.
-       Input state is already populated by callback time. */
+    /* glfwPollEvents must run HERE, after nt_input_poll() clears edge flags.
+       Callbacks fire during this call and set fresh input state. */
+    glfwPollEvents();
 }
 
 void nt_input_platform_shutdown(void) { /* No-op. Callbacks are automatically unregistered when GLFW window is destroyed. */ }

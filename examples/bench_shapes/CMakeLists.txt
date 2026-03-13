@@ -3,7 +3,7 @@ target_link_libraries(bench_shapes PRIVATE nt_core nt_app nt_input nt_window nt_
 if(EMSCRIPTEN)
     target_link_libraries(bench_shapes PRIVATE nt_platform_web nt_gfx)
 else()
-    target_link_libraries(bench_shapes PRIVATE nt_gfx glfw)
+    target_link_libraries(bench_shapes PRIVATE nt_gfx)
 endif()
 
 # Strict warning and sanitizer policy

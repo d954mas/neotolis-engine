@@ -1,16 +1,9 @@
 #include "app/nt_app.h"
 #include "time/nt_time.h"
-
-/* clang-format off */
-#include <glad/gl.h>   /* Must precede glfw3.h -- glad replaces system GL header */
-#include <GLFW/glfw3.h>
-/* clang-format on */
+#include "window/nt_window_native.h"
 
 /* Use __builtin_fminf to bypass Windows UCRT DLL import issue with ASan */
 #define nt_fminf(a, b) __builtin_fminf((a), (b))
-
-/* GLFW window handle owned by nt_window_native.c */
-extern GLFWwindow *g_nt_glfw_window;
 
 /* ---- File-scope statics (zero-initialized by C standard) ---- */
 
@@ -43,8 +36,6 @@ void nt_app_run(nt_app_frame_fn fn) {
     double prev_time = nt_time_now();
 
     while (!s_should_quit && !glfwWindowShouldClose(g_nt_glfw_window)) {
-        glfwPollEvents();
-
         double now = nt_time_now();
         float dt = nt_fminf((float)(now - prev_time), g_nt_app.max_dt);
         prev_time = now;

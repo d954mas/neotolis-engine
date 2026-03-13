@@ -1,12 +1,7 @@
 #include "graphics/gl/nt_gfx_gl_ctx.h"
+#include "window/nt_window_native.h"
 
-/* clang-format off */
-#include <glad/gl.h>   /* Must precede glfw3.h -- glad replaces system GL header */
-#include <GLFW/glfw3.h>
-/* clang-format on */
-
-/* GLFW window handle owned by nt_window_native.c */
-extern GLFWwindow *g_nt_glfw_window;
+#include <glad/gl.h>
 
 bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc) {
     (void)desc;

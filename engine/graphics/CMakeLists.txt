@@ -21,7 +21,8 @@ else()
         nt_gfx_internal.h
         gl/nt_gfx_gl_ctx.h
     )
-    target_link_libraries(nt_gfx PUBLIC nt_core nt_window nt_log glad glfw)
+    target_link_libraries(nt_gfx PUBLIC nt_core nt_window nt_log)
+    target_link_libraries(nt_gfx PRIVATE glad)
     find_package(OpenGL REQUIRED)
     target_link_libraries(nt_gfx PRIVATE OpenGL::GL)
 endif()

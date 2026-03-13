@@ -61,6 +61,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/hello/native-debug/hello.exe",
             "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
             "preLaunchTask": "Build native-debug"
         },
         {
@@ -69,6 +70,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/hello/native-release/hello.exe",
             "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
             "preLaunchTask": "Build native-release"
         },
         {
@@ -77,6 +79,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/bench_shapes/native-debug/bench_shapes.exe",
             "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
             "preLaunchTask": "Build native-debug"
         },
         {
@@ -85,6 +88,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/bench_shapes/native-release/bench_shapes.exe",
             "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
             "preLaunchTask": "Build native-release"
         },
         {
@@ -93,6 +97,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/spinning_cube/native-debug/spinning_cube.exe",
             "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
             "preLaunchTask": "Build native-debug"
         },
         {
@@ -101,6 +106,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/spinning_cube/native-release/spinning_cube.exe",
             "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
             "preLaunchTask": "Build native-release"
         }
     ]

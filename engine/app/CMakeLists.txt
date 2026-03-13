@@ -19,7 +19,7 @@ endif()
 target_link_libraries(nt_app PUBLIC nt_time)
 
 if(NOT EMSCRIPTEN)
-    target_link_libraries(nt_app PRIVATE glad glfw)
+    target_link_libraries(nt_app PRIVATE nt_window)
 endif()
 
 # Stub implementation for headless builds (CI, tests)

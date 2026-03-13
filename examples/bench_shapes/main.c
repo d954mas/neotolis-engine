@@ -606,6 +606,8 @@ int main(void) {
         return 1;
     }
 
+    g_nt_window.width = 800;
+    g_nt_window.height = 600;
     nt_window_init();
     nt_input_init();
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 128, .depth = true});
@@ -635,6 +637,7 @@ int main(void) {
     nt_shape_renderer_shutdown();
     nt_gfx_shutdown();
     nt_input_shutdown();
+    nt_window_shutdown();
     nt_engine_shutdown();
 #endif
     return 0;

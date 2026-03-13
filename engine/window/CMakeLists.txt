@@ -17,7 +17,10 @@ endif()
 target_link_libraries(nt_window PUBLIC nt_core)
 
 if(NOT EMSCRIPTEN)
-    target_link_libraries(nt_window PRIVATE glad glfw nt_log)
+    # PUBLIC: glfw propagates to all modules/examples that link nt_window,
+    # so they never need to mention glfw themselves.
+    target_link_libraries(nt_window PUBLIC glfw)
+    target_link_libraries(nt_window PRIVATE nt_log)
 endif()
 
 if(UNIX)
