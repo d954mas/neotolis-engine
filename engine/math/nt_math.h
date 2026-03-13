@@ -23,6 +23,7 @@
 #define sqrtf(x) __builtin_sqrtf(x)
 #define fabsf(x) __builtin_fabsf(x)
 #define acosf(x) __builtin_acosf(x)
+#define powf(x, y) __builtin_powf(x, y)
 
 /* Suppress cglm header warnings under -Werror */
 #pragma GCC diagnostic push

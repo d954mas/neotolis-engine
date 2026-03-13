@@ -36,6 +36,24 @@
             "webRoot": "${workspaceFolder}/build/examples/bench_shapes/wasm-release",
             "preLaunchTask": "Build & Serve bench_shapes (release)",
             "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Debug WASM spinning_cube",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8084/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/spinning_cube/wasm-debug",
+            "preLaunchTask": "Build & Serve spinning_cube (debug)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Run WASM spinning_cube (release)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8085/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/spinning_cube/wasm-release",
+            "preLaunchTask": "Build & Serve spinning_cube (release)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
         }
     ]
 }
