@@ -28,6 +28,22 @@ endif()
 add_subdirectory(deps/cglm EXCLUDE_FROM_ALL)
 add_subdirectory(deps/unity EXCLUDE_FROM_ALL)
 
+# Desktop dependencies: GLFW windowing + glad GL loader (not needed for WASM)
+if(NOT EMSCRIPTEN)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+    add_subdirectory(deps/glfw EXCLUDE_FROM_ALL)
+    add_subdirectory(deps/glad EXCLUDE_FROM_ALL)
+
+    # GLFW uses CRT functions (assert, sscanf, powf, wcscpy) that resolve to
+    # __declspec(dllimport) stubs under the default -D_DLL flag. Since we link
+    # static UCRT, those dllimport thunks are missing. Remove _DLL so GLFW
+    # calls the static CRT symbols directly.
+    target_compile_options(glfw PRIVATE -U_DLL)
+endif()
+
 # Core libraries (always available)
 add_subdirectory(shared)
 add_subdirectory(engine)

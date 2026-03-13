@@ -54,6 +54,11 @@ void nt_window_poll(void) {
 
 void nt_window_shutdown(void) { /* No-op on web */ }
 
+void nt_window_set_fullscreen(bool fullscreen) {
+    (void)fullscreen;
+    /* No-op on web -- fullscreen is browser-controlled */
+}
+
 #else
 typedef int nt_window_web_unused;
 #endif /* NT_PLATFORM_WEB */

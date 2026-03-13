@@ -7,7 +7,9 @@
 
 typedef struct nt_window_t {
     /* Config (game writes before init) */
-    float max_dpr; /* Default 2.0, effective DPR = min(device_dpr, max_dpr) */
+    float max_dpr;     /* Default 2.0, effective DPR = min(device_dpr, max_dpr) */
+    const char *title; /* Window title, default "Neotolis" */
+    bool resizable;    /* Default true on desktop */
 
     /* State (engine writes, game reads) */
     uint32_t width;     /* Canvas width (pixels) */
@@ -24,6 +26,7 @@ extern nt_window_t g_nt_window;
 void nt_window_init(void);
 void nt_window_poll(void);
 void nt_window_shutdown(void);
+void nt_window_set_fullscreen(bool fullscreen);
 
 /* ---- Shared DPR math (used by all platform backends) ---- */
 

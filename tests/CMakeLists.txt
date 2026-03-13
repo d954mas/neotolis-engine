@@ -69,7 +69,7 @@ if(NOT EMSCRIPTEN)
 
     # --- App module tests ---
     add_executable(test_app unit/test_app.c)
-    target_link_libraries(test_app PRIVATE nt_app unity)
+    target_link_libraries(test_app PRIVATE nt_app_stub unity)
     nt_set_warning_flags(test_app)
     nt_set_sanitizer_flags(test_app)
     set_target_properties(test_app PROPERTIES
@@ -79,13 +79,24 @@ if(NOT EMSCRIPTEN)
 
     # --- Window module tests ---
     add_executable(test_window unit/test_window.c)
-    target_link_libraries(test_window PRIVATE nt_window unity)
+    target_link_libraries(test_window PRIVATE nt_window_stub unity)
     nt_set_warning_flags(test_window)
     nt_set_sanitizer_flags(test_window)
     set_target_properties(test_window PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_window COMMAND test_window)
+
+    # --- Native window smoke test (real GLFW, hidden window) ---
+    add_executable(test_window_native unit/test_window_native.c)
+    target_link_libraries(test_window_native PRIVATE nt_window nt_log unity)
+    nt_set_warning_flags(test_window_native)
+    nt_set_sanitizer_flags(test_window_native)
+    set_target_properties(test_window_native PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_window_native COMMAND test_window_native)
+    set_tests_properties(test_window_native PROPERTIES LABELS "native")
 
     # --- Input module tests ---
     add_executable(test_input unit/test_input.c)

@@ -1,6 +1,9 @@
 #include "app/nt_app.h"
 #include "time/nt_time.h"
-#include <math.h>
+#include "window/nt_window_native.h"
+
+/* Use __builtin_fminf to bypass Windows UCRT DLL import issue with ASan */
+#define nt_fminf(a, b) __builtin_fminf((a), (b))
 
 /* ---- File-scope statics (zero-initialized by C standard) ---- */
 
@@ -16,17 +19,33 @@ void nt_app_run(nt_app_frame_fn fn) {
     s_frame_fn = fn;
     s_should_quit = false;
 
+    /* Apply vsync setting */
+    switch (g_nt_app.vsync) {
+    case NT_VSYNC_OFF:
+        glfwSwapInterval(0);
+        break;
+    case NT_VSYNC_ADAPTIVE:
+        glfwSwapInterval(-1);
+        break;
+    case NT_VSYNC_ON: /* fall through */
+    default:
+        glfwSwapInterval(1);
+        break;
+    }
+
     double prev_time = nt_time_now();
 
-    while (!s_should_quit) {
+    while (!s_should_quit && !glfwWindowShouldClose(g_nt_glfw_window)) {
         double now = nt_time_now();
-        float dt = fminf((float)(now - prev_time), g_nt_app.max_dt);
+        float dt = nt_fminf((float)(now - prev_time), g_nt_app.max_dt);
         prev_time = now;
 
         g_nt_app.dt = dt;
         g_nt_app.time += dt;
         g_nt_app.frame++;
         s_frame_fn();
+
+        glfwSwapBuffers(g_nt_glfw_window);
 
         /* Frame rate cap: single sleep + spin-wait */
         if (g_nt_app.target_dt > 0.0F) {

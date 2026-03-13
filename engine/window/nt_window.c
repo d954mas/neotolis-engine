@@ -3,7 +3,7 @@
 #include <math.h>
 
 /* Global window state, shared by all platform backends. */
-nt_window_t g_nt_window = {.max_dpr = 2.0F};
+nt_window_t g_nt_window = {.max_dpr = 2.0F, .resizable = true};
 
 void nt_window_apply_sizes(float canvas_w, float canvas_h, float device_dpr) {
     float effective_dpr = fminf(device_dpr, g_nt_window.max_dpr);

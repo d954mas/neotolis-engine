@@ -21,11 +21,13 @@
 
 /* ---- GL headers ---- */
 
+#ifdef NT_PLATFORM_WEB
 #include <GLES3/gl3.h>
-
-/* WebGL 2 / GLES 3.0 uses glClearDepthf.  When desktop GL is added via glad,
-   this will need a desktop variant (glClearDepth with double). */
 #define nt_gl_clear_depth(d) glClearDepthf(d)
+#else
+#include <glad/gl.h>
+#define nt_gl_clear_depth(d) glClearDepth((double)(d))
+#endif
 
 /* ---- Pipeline backend data ---- */
 
@@ -350,9 +352,11 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     GLenum gl_type = (desc->type == NT_SHADER_VERTEX) ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER;
     GLuint shader = glCreateShader(gl_type);
 
-    /* TODO(builder): remove prefix once builder packs per-platform shader variants.
-       TODO(glad): add desktop "#version 330 core\n" variant when native GL is enabled. */
+#ifdef NT_PLATFORM_WEB
     const char *prefix = "#version 300 es\nprecision mediump float;\n";
+#else
+    const char *prefix = "#version 330 core\nprecision mediump float;\n";
+#endif
     const char *sources[2] = {prefix, desc->source};
     glShaderSource(shader, 2, sources, NULL);
 
