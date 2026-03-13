@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Runtime Renderer
 current_phase: 18-desktop-gl-rendering
-current_plan: Plan 1 of 2
-status: in-progress
-last_updated: "2026-03-13T09:36:00.000Z"
+current_plan: Plan 1 of 2 complete
+status: executing
+last_updated: "2026-03-13T09:49:14.863Z"
 progress:
   total_phases: 7
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 13
-  completed_plans: 12
+  completed_plans: 13
 ---
 
 # Session State
@@ -52,6 +52,9 @@ See: .planning/PROJECT.md
 - [Phase 18]: glad must be included before GLFW/glfw3.h -- system GL header conflict; use clang-format-off guard
 - [Phase 18]: nt_gfx links glfw (not just glad) for glfwGetProcAddress access in native GL context creation
 - [Phase 18]: Native window stub gets fullscreen no-op to prevent linker errors before Plan 02
+- [Phase 18]: -U_DLL compile flag for vendored GLFW to fix Windows UCRT dllimport linker errors (assert, sscanf, powf)
+- [Phase 18]: Stub backends (nt_app_stub, nt_window_stub) for headless tests -- same pattern as nt_input_stub/nt_gfx_stub
+- [Phase 18]: __builtin_fminf in app loop -- same UCRT DLL import bypass as sinf/cosf/sqrtf
 
 ## Performance Metrics
 
@@ -63,6 +66,7 @@ See: .planning/PROJECT.md
 | 16 | 02 | 12m | 2 | 3 |
 | 17 | 01 | 25m | 3 | 8 |
 | 18 | 01 | 6m | 3 | 8 |
+| Phase 18 P02 | 7m | 2 tasks | 13 files |
 
 ## Accumulated Context
 

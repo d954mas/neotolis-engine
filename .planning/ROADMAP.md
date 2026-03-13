@@ -45,7 +45,7 @@ See `.planning/milestones/v1.1-ROADMAP.md` for full history.
 - [x] **Phase 15: WebGL 2 Renderer** - Shader pipeline, buffer management, draw state, context loss handling (completed 2026-03-12)
 - [x] **Phase 16: Shape Renderer** - Immediate-mode shape drawing with batching and per-vertex color (completed 2026-03-12)
 - [x] **Phase 17: Demo Integration** - Spinning cube with camera and input control (completed 2026-03-13)
-- [ ] **Phase 18: Desktop Build** - Vendor glad, GLFW native window, GL backend, native input — full desktop parity with web
+- [x] **Phase 18: Desktop Build** - Vendor glad, GLFW native window, GL backend, native input — full desktop parity with web (completed 2026-03-13)
 
 ## Phase Details
 
@@ -181,4 +181,4 @@ Note: Phase 18 (Desktop GL) depends on Phase 15 and can execute in parallel with
 | 15. WebGL 2 Renderer | 2/2 | Complete    | 2026-03-12 | - |
 | 16. Shape Renderer | 2/2 | Complete    | 2026-03-12 | - |
 | 17. Demo Integration | v1.2 | Complete    | 2026-03-13 | 2026-03-13 |
-| 18. Desktop Build | 1/2 | In Progress|  | - |
+| 18. Desktop Build | 2/2 | Complete   | 2026-03-13 | - |

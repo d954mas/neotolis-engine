@@ -55,10 +55,10 @@ Requirements for v1.2 Runtime Renderer milestone. Each maps to roadmap phases.
 
 - [x] **DESK-01**: Desktop build vendors glad (GL 3.3 Core loader) and GLFW (windowing library)
 - [x] **DESK-02**: GL backend compiles and runs on both WebGL 2 (Emscripten) and OpenGL 3.3 Core (desktop)
-- [ ] **DESK-03**: Desktop window creates via GLFW with GL 3.3 Core context, resize, fullscreen, and DPR
-- [ ] **DESK-04**: Desktop input provides keyboard and mouse polling via GLFW callbacks matching web API surface
-- [ ] **DESK-05**: Desktop app loop integrates vsync control and GLFW window close detection
-- [ ] **DESK-06**: Same game code (spinning_cube main.c) builds and runs on both web and desktop
+- [x] **DESK-03**: Desktop window creates via GLFW with GL 3.3 Core context, resize, fullscreen, and DPR
+- [x] **DESK-04**: Desktop input provides keyboard and mouse polling via GLFW callbacks matching web API surface
+- [x] **DESK-05**: Desktop app loop integrates vsync control and GLFW window close detection
+- [x] **DESK-06**: Same game code (spinning_cube main.c) builds and runs on both web and desktop
 
 ## Future Requirements
 
