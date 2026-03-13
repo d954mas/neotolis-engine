@@ -16,6 +16,23 @@ endif()
 
 target_link_libraries(nt_window PUBLIC nt_core)
 
+if(NOT EMSCRIPTEN)
+    target_link_libraries(nt_window PRIVATE glad glfw nt_log)
+endif()
+
 if(UNIX)
     target_link_libraries(nt_window PRIVATE m)
+endif()
+
+# Stub implementation for headless builds (CI, tests)
+nt_add_module(nt_window_stub
+    nt_window.c
+    stub/nt_window_stub.c
+    nt_window.h
+)
+
+target_link_libraries(nt_window_stub PUBLIC nt_core)
+
+if(UNIX)
+    target_link_libraries(nt_window_stub PRIVATE m)
 endif()
