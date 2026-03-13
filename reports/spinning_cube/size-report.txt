@@ -1,61 +1,61 @@
-# Size Report: bench_shapes (wasm-analysis)
+# Size Report: spinning_cube (wasm-analysis)
 # Commit: c49f38b
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 186 B
-Import               360 B
-Function              80 B
+Type                 178 B
+Import               353 B
+Function              72 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
-Export                53 B
-Elem                  24 B
-Code               65011 B
-Data                8597 B
-Custom              3078 B
+Export                51 B
+Elem                  17 B
+Code               57210 B
+Data                8622 B
+Custom              2775 B
 ---------------- ----------
-TOTAL              77410 B
+TOTAL              69299 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-11423 B   frame
-11369 B   main
+13543 B   frame
+11243 B   main
  5335 B   dlmalloc
- 3469 B   rebuild_shapes
  3102 B   fmt_fp
- 2803 B   emit_capsule_wire
  2628 B   printf_core
  2041 B   __rem_pio2f
- 1927 B   emit_cylinder_wire
  1560 B   dlfree
- 1315 B   nt_shape_renderer_triangle
- 1122 B   nt_shape_renderer_flush
- 1026 B   nt_input_web_on_blur
+ 1043 B   nt_shape_renderer_flush
+  931 B   nt_input_web_on_blur
   796 B   nt_gfx_bind_pipeline
-  731 B   nt_input_web_on_pointer_move
-  692 B   nt_input_web_on_pointer_down
+  706 B   nt_input_web_on_pointer_move
+  667 B   nt_input_web_on_pointer_down
   650 B   pop_arg_long_double
   596 B   nt_gfx_backend_create_pipeline
   592 B   nt_gfx_make_pipeline
-  568 B   push_instance
+  559 B   push_instance
   512 B   __memcpy
-  469 B   emit_wire_edge
+  464 B   emit_wire_edge
   464 B   nt_gfx_make_buffer
   458 B   nt_window_init
   424 B   nt_gfx_make_shader
   401 B   nt_gfx_destroy_pipeline
+  384 B   apply_rotation
   381 B   sinf
   376 B   __stdio_write
   370 B   __memset
   362 B   nt_gfx_destroy_buffer
+  361 B   cosf
+  350 B   nt_gfx_bind_instance_buffer
+  349 B   nt_gfx_bind_vertex_buffer
 
-Total functions: 79
-Total code size: 64879 B
+Total functions: 71
+Total code size: 57090 B
 
 ## Per-Module Contributions
 
@@ -73,7 +73,7 @@ libnt_window.a              3454 B
 ------------------------ ----------
 TOTAL (linked)           1206618 B
 
-Not linked to bench_shapes:
+Not linked to spinning_cube:
 libnt_input_stub.a         10902 B
 libnt_log.a                  970 B
 libnt_log_stub.a             506 B
@@ -82,5 +82,5 @@ libnt_time.a                 866 B
 
 ## Data Segments Summary
 
-Segments: 40
-Total data size: 8326 B
+Segments: 32
+Total data size: 8399 B
