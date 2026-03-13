@@ -5,14 +5,23 @@
 
 typedef void (*nt_app_frame_fn)(void);
 
+/* ---- Vsync mode ---- */
+
+typedef enum {
+    NT_VSYNC_OFF = 0,
+    NT_VSYNC_ON = 1,
+    NT_VSYNC_ADAPTIVE = 2,
+} nt_vsync_t;
+
 /* ---- Frame state (engine writes, game reads) ---- */
 
 typedef struct nt_app_t {
-    float dt;        /* Clamped delta time (seconds) */
-    float time;      /* Elapsed time since loop start (seconds) */
-    float max_dt;    /* Clamp threshold (seconds), default 0.1f */
-    float target_dt; /* Frame rate cap (seconds), 0 = uncapped */
-    uint32_t frame;  /* Frame counter */
+    float dt;         /* Clamped delta time (seconds) */
+    float time;       /* Elapsed time since loop start (seconds) */
+    float max_dt;     /* Clamp threshold (seconds), default 0.1f */
+    float target_dt;  /* Frame rate cap (seconds), 0 = uncapped */
+    uint32_t frame;   /* Frame counter */
+    nt_vsync_t vsync; /* Vsync mode, default NT_VSYNC_ON */
 } nt_app_t;
 
 extern nt_app_t g_nt_app;
