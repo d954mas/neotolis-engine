@@ -16,9 +16,9 @@
 
 /* ---- Room dimensions ---- */
 
-#define ROOM_W 10.0F
-#define ROOM_H 8.0F
-#define ROOM_D 10.0F
+#define ROOM_W 20.0F
+#define ROOM_H 10.0F
+#define ROOM_D 20.0F
 #define GRID_STEP 1.0F
 
 /* ---- Interaction constants ---- */
@@ -27,7 +27,7 @@
 #define AUTO_SPIN_SPEED 0.5F
 #define INERTIA_DECAY 0.95F
 #define ZOOM_MIN 2.5F
-#define ZOOM_MAX 12.0F
+#define ZOOM_MAX 9.0F
 #define ZOOM_SPEED 0.01F
 #define FOV_DEG 70.0F
 #define VEL_THRESHOLD 0.0001F
@@ -193,22 +193,17 @@ static void draw_shape(void) {
 /* ---- apply_rotation: compose yaw/pitch into accumulated quaternion ---- */
 
 static void apply_rotation(float yaw, float pitch) {
-    if (fabsf(yaw) > VEL_THRESHOLD) {
-        versor q_yaw;
-        vec3 axis_y = {0, 1, 0};
-        glm_quatv(q_yaw, yaw, axis_y);
-        versor tmp;
-        glm_quat_mul(q_yaw, s_rotation, tmp);
-        glm_quat_copy(tmp, s_rotation);
-    }
-    if (fabsf(pitch) > VEL_THRESHOLD) {
-        versor q_pitch;
-        vec3 axis_x = {1, 0, 0};
-        glm_quatv(q_pitch, pitch, axis_x);
-        versor tmp;
-        glm_quat_mul(q_pitch, s_rotation, tmp);
-        glm_quat_copy(tmp, s_rotation);
-    }
+    versor q_yaw;
+    vec3 axis_y = {0, 1, 0};
+    glm_quatv(q_yaw, yaw, axis_y);
+
+    versor q_pitch;
+    vec3 axis_x = {1, 0, 0};
+    glm_quatv(q_pitch, pitch, axis_x);
+
+    versor tmp;
+    glm_quat_mul(q_yaw, s_rotation, tmp);
+    glm_quat_mul(q_pitch, tmp, s_rotation);
     glm_quat_normalize(s_rotation);
 }
 
@@ -247,12 +242,15 @@ static void frame(void) {
         s_grabbed = true;
         float dx = g_nt_input.pointers[0].dx;
         float dy = g_nt_input.pointers[0].dy;
-        s_vel_yaw = -dx * MOUSE_SENS;
-        s_vel_pitch = -dy * MOUSE_SENS;
+        float new_yaw = dx * MOUSE_SENS;
+        float new_pitch = dy * MOUSE_SENS;
+        /* Blend with previous velocity so brief pauses don't kill momentum */
+        s_vel_yaw = new_yaw * 0.6F + s_vel_yaw * 0.4F;
+        s_vel_pitch = new_pitch * 0.6F + s_vel_pitch * 0.4F;
         apply_rotation(s_vel_yaw, s_vel_pitch);
     } else if (fabsf(s_vel_yaw) > VEL_THRESHOLD || fabsf(s_vel_pitch) > VEL_THRESHOLD) {
         /* Inertia: apply decaying velocity */
-        apply_rotation(s_vel_yaw * dt * 60.0F, s_vel_pitch * dt * 60.0F);
+        apply_rotation(s_vel_yaw, s_vel_pitch);
         float decay = powf(INERTIA_DECAY, dt * 60.0F);
         s_vel_yaw *= decay;
         s_vel_pitch *= decay;
@@ -271,7 +269,7 @@ static void frame(void) {
 
     float wheel = g_nt_input.pointers[0].wheel_dy;
     if (fabsf(wheel) > 0.001F) {
-        s_cam_dist -= wheel * ZOOM_SPEED;
+        s_cam_dist += wheel * ZOOM_SPEED;
         if (s_cam_dist < ZOOM_MIN) {
             s_cam_dist = ZOOM_MIN;
         }

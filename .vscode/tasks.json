@@ -149,6 +149,42 @@
             "dependsOn": ["Build wasm-release", "Ensure server bench_shapes (release :8083)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
+        },
+        {
+            "label": "Ensure server spinning_cube (debug :8084)",
+            "type": "shell",
+            "command": "curl -s -o nul http://localhost:8084 >nul 2>&1 && (echo Server already running on :8084) || (start /b python -m http.server 8084 -d \"${workspaceFolder}/build/examples/spinning_cube/wasm-debug\" & timeout /t 1 >nul)",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Ensure server spinning_cube (release :8085)",
+            "type": "shell",
+            "command": "curl -s -o nul http://localhost:8085 >nul 2>&1 && (echo Server already running on :8085) || (start /b python -m http.server 8085 -d \"${workspaceFolder}/build/examples/spinning_cube/wasm-release\" & timeout /t 1 >nul)",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve spinning_cube (debug)",
+            "dependsOn": ["Build wasm-debug", "Ensure server spinning_cube (debug :8084)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve spinning_cube (release)",
+            "dependsOn": ["Build wasm-release", "Ensure server spinning_cube (release :8085)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
         }
     ]
 }
