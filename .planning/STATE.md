@@ -73,6 +73,7 @@ See: .planning/PROJECT.md
 ### Roadmap Evolution
 
 - Phase 19 merged into Phase 18: Desktop Build now covers glad, GLFW, GL backend, and native input
+- Phase 19 added: Isolate GLFW behind nt_window API
 
 ### Pending Todos
 

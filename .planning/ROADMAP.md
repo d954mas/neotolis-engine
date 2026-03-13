@@ -182,3 +182,13 @@ Note: Phase 18 (Desktop GL) depends on Phase 15 and can execute in parallel with
 | 16. Shape Renderer | 2/2 | Complete    | 2026-03-12 | - |
 | 17. Demo Integration | v1.2 | Complete    | 2026-03-13 | 2026-03-13 |
 | 18. Desktop Build | 2/2 | Complete   | 2026-03-13 | - |
+
+### Phase 19: Isolate GLFW behind nt_window API
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 18
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 19 to break down)
