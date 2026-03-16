@@ -138,6 +138,16 @@ if(NOT EMSCRIPTEN)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_pack_format COMMAND test_pack_format)
+
+    # --- Entity module tests ---
+    add_executable(test_entity unit/test_entity.c)
+    target_link_libraries(test_entity PRIVATE nt_entity unity)
+    nt_set_warning_flags(test_entity)
+    nt_set_sanitizer_flags(test_entity)
+    set_target_properties(test_entity PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_entity COMMAND test_entity)
 endif()
 
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---
