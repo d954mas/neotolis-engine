@@ -1,7 +1,6 @@
 #include "material_comp/nt_material_comp.h"
 
 #include <stdlib.h>
-#include <string.h>
 
 #include "comp_storage/nt_comp_storage.h"
 #include "core/nt_assert.h"
