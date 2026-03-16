@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis)
-# Commit: e2460ea
+# Commit: 9e5a695
 
 ## WASM Section Sizes
 
@@ -7,26 +7,26 @@ Section                Size
 ---------------- ----------
 Type                 190 B
 Import               395 B
-Function              72 B
+Function              93 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
-Export                52 B
-Elem                  22 B
-Code               58382 B
-Data                8652 B
-Custom              2890 B
+Export                59 B
+Elem                  42 B
+Code               63229 B
+Data                8705 B
+Custom              3414 B
 ---------------- ----------
-TOTAL              70676 B
+TOTAL              76148 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-14146 B   frame
-11731 B   main
+16215 B   frame
+12838 B   main
  5335 B   dlmalloc
- 3102 B   fmt_fp
+ 3103 B   fmt_fp
  2628 B   printf_core
  2041 B   __rem_pio2f
  1560 B   dlfree
@@ -45,17 +45,17 @@ TOTAL              70676 B
   464 B   nt_gfx_make_buffer
   458 B   nt_window_init
   424 B   nt_gfx_make_shader
-  384 B   apply_rotation
-  381 B   sinf
+  393 B   apply_rotation
+  382 B   sinf
   376 B   __stdio_write
   370 B   __memset
+  362 B   cosf
   362 B   nt_gfx_destroy_buffer
-  361 B   cosf
   350 B   nt_gfx_bind_instance_buffer
   349 B   nt_gfx_bind_vertex_buffer
 
-Total functions: 71
-Total code size: 58262 B
+Total functions: 92
+Total code size: 63084 B
 
 ## Per-Module Contributions
 
@@ -67,22 +67,28 @@ libnt_app.a                 1428 B
 libnt_core.a                1688 B
 libnt_gfx.a                31256 B
 libnt_input.a              16358 B
+libnt_render_state_comp.a    2752 B
 libnt_shape_renderer.a   1140002 B
+libnt_transform_comp.a      4536 B
 libnt_window.a              3928 B
 ------------------------ ----------
-TOTAL (linked)           1194660 B
+TOTAL (linked)           1201948 B
 
 Not linked to spinning_cube:
 libnt_app_stub.a            1428 B
+libnt_comp_storage.a        1778 B
+libnt_entity.a              2942 B
 libnt_gfx_stub.a           21058 B
 libnt_input_stub.a         11148 B
 libnt_log.a                  970 B
 libnt_log_stub.a             506 B
+libnt_material_comp.a       1990 B
+libnt_mesh_comp.a           1914 B
 libnt_time.a                 866 B
 libnt_window_stub.a         1838 B
 
 
 ## Data Segments Summary
 
-Segments: 33
-Total data size: 8422 B
+Segments: 34
+Total data size: 8469 B
