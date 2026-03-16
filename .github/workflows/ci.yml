@@ -187,7 +187,7 @@ jobs:
 
       - name: Measure sizes (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube; do
+          for example in hello bench_shapes spinning_cube textured_quad; do
             bash scripts/size.sh $example --json > /tmp/size_${example}.json
           done
 
@@ -202,7 +202,7 @@ jobs:
 
       - name: Generate size reports (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube; do
+          for example in hello bench_shapes spinning_cube textured_quad; do
             bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
           done
 
@@ -218,7 +218,7 @@ jobs:
 
       - name: Update size history and reports (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube; do
+          for example in hello bench_shapes spinning_cube textured_quad; do
             mkdir -p "gh-pages-data/reports/$example"
             cp "/tmp/report_${example}.txt" "gh-pages-data/reports/$example/size-report.txt"
 
@@ -234,7 +234,7 @@ jobs:
 
       - name: Check for size regression
         run: |
-          for example in hello bench_shapes spinning_cube; do
+          for example in hello bench_shapes spinning_cube textured_quad; do
             TARGET_FILE="gh-pages-data/sizes/${example}.json"
             [ -f "$TARGET_FILE" ] || continue
             ENTRIES=$(jq length "$TARGET_FILE")
@@ -322,7 +322,7 @@ jobs:
 
       - name: Measure sizes (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube; do
+          for example in hello bench_shapes spinning_cube textured_quad; do
             bash scripts/size.sh $example --json > /tmp/size_${example}.json
           done
 
@@ -334,7 +334,7 @@ jobs:
 
       - name: Generate size reports (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube; do
+          for example in hello bench_shapes spinning_cube textured_quad; do
             bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
           done
 
@@ -348,7 +348,7 @@ jobs:
 
       - name: Generate size comment
         run: |
-          EXAMPLES="hello bench_shapes spinning_cube"
+          EXAMPLES="hello bench_shapes spinning_cube textured_quad"
           PR_COMMIT=$(git rev-parse --short HEAD)
 
           {
@@ -434,7 +434,7 @@ jobs:
 
       - name: Generate size report comment
         run: |
-          EXAMPLES="hello bench_shapes spinning_cube"
+          EXAMPLES="hello bench_shapes spinning_cube textured_quad"
           PR_COMMIT=$(git rev-parse --short HEAD)
 
           {

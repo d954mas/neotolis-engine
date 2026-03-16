@@ -36,6 +36,11 @@ static void nt_gfx_free_buffer_desc(nt_buffer_desc_t *d) {
     memset(d, 0, sizeof(*d));
 }
 
+static void nt_gfx_free_texture_desc(nt_texture_desc_t *d) {
+    free((void *)d->label);
+    memset(d, 0, sizeof(*d));
+}
+
 /* Pipeline-owned shader source copies.
    Pipelines keep their own vs/fs source so context-loss recovery
    works even if the original shader was destroyed. */
@@ -56,14 +61,17 @@ static struct {
     nt_gfx_pool_t shader_pool;
     nt_gfx_pool_t pipeline_pool;
     nt_gfx_pool_t buffer_pool;
+    nt_gfx_pool_t texture_pool;
 
     uint32_t *shader_backends; /* backend handles parallel to pool slots */
     uint32_t *pipeline_backends;
     uint32_t *buffer_backends;
+    uint32_t *texture_backends;
 
     nt_shader_desc_t *shader_descs; /* stored descs for context loss recreation */
     nt_pipeline_desc_t *pipeline_descs;
     nt_buffer_desc_t *buffer_descs;
+    nt_texture_desc_t *texture_descs;
     nt_gfx_pipeline_sources_t *pipeline_sources; /* pipeline-owned shader source copies */
 
     nt_gfx_render_state_t render_state;
@@ -160,14 +168,17 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     nt_gfx_pool_init(&s_gfx.shader_pool, desc->max_shaders);
     nt_gfx_pool_init(&s_gfx.pipeline_pool, desc->max_pipelines);
     nt_gfx_pool_init(&s_gfx.buffer_pool, desc->max_buffers);
+    nt_gfx_pool_init(&s_gfx.texture_pool, desc->max_textures);
 
     s_gfx.shader_backends = (uint32_t *)calloc(desc->max_shaders + 1, sizeof(uint32_t));
     s_gfx.pipeline_backends = (uint32_t *)calloc(desc->max_pipelines + 1, sizeof(uint32_t));
     s_gfx.buffer_backends = (uint32_t *)calloc(desc->max_buffers + 1, sizeof(uint32_t));
+    s_gfx.texture_backends = (uint32_t *)calloc(desc->max_textures + 1, sizeof(uint32_t));
 
     s_gfx.shader_descs = (nt_shader_desc_t *)calloc(desc->max_shaders + 1, sizeof(nt_shader_desc_t));
     s_gfx.pipeline_descs = (nt_pipeline_desc_t *)calloc(desc->max_pipelines + 1, sizeof(nt_pipeline_desc_t));
     s_gfx.buffer_descs = (nt_buffer_desc_t *)calloc(desc->max_buffers + 1, sizeof(nt_buffer_desc_t));
+    s_gfx.texture_descs = (nt_texture_desc_t *)calloc(desc->max_textures + 1, sizeof(nt_texture_desc_t));
     s_gfx.pipeline_sources = (nt_gfx_pipeline_sources_t *)calloc(desc->max_pipelines + 1, sizeof(nt_gfx_pipeline_sources_t));
 
     s_gfx.render_state = NT_GFX_STATE_IDLE;
@@ -194,17 +205,23 @@ void nt_gfx_shutdown(void) {
     for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
         nt_gfx_free_buffer_desc(&s_gfx.buffer_descs[i]);
     }
+    for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
+        nt_gfx_free_texture_desc(&s_gfx.texture_descs[i]);
+    }
 
     nt_gfx_pool_shutdown(&s_gfx.shader_pool);
     nt_gfx_pool_shutdown(&s_gfx.pipeline_pool);
     nt_gfx_pool_shutdown(&s_gfx.buffer_pool);
+    nt_gfx_pool_shutdown(&s_gfx.texture_pool);
 
     free(s_gfx.shader_backends);
     free(s_gfx.pipeline_backends);
     free(s_gfx.buffer_backends);
+    free(s_gfx.texture_backends);
     free(s_gfx.shader_descs);
     free(s_gfx.pipeline_descs);
     free(s_gfx.buffer_descs);
+    free(s_gfx.texture_descs);
     free(s_gfx.pipeline_sources);
 
     memset(&s_gfx, 0, sizeof(s_gfx));
@@ -238,6 +255,16 @@ static bool restore_context(void) {
     for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
         if (SLOT_IS_LIVE(s_gfx.buffer_pool, i)) {
             s_gfx.buffer_backends[i] = nt_gfx_backend_create_buffer(&s_gfx.buffer_descs[i]);
+        }
+    }
+
+    /* Recreate textures (no pixel data or mipmaps — GPU-side only placeholder) */
+    for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
+        if (SLOT_IS_LIVE(s_gfx.texture_pool, i)) {
+            nt_texture_desc_t recovery_desc = s_gfx.texture_descs[i];
+            recovery_desc.data = NULL;
+            recovery_desc.gen_mipmaps = false;
+            s_gfx.texture_backends[i] = nt_gfx_backend_create_texture(&recovery_desc);
         }
     }
 
@@ -451,6 +478,56 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
     return result;
 }
 
+nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
+    nt_texture_t result = {0};
+    if (!desc) {
+        return result;
+    }
+    if (!desc->data) {
+        nt_log_error("gfx: make_texture: NULL data");
+        return result;
+    }
+    if (desc->width == 0 || desc->height == 0) {
+        nt_log_error("gfx: make_texture: zero dimension");
+        return result;
+    }
+    nt_texture_desc_t local_desc = *desc;
+
+    /* Clamp mipmap min_filter when no mipmaps — prevents GL incomplete texture */
+    if (!local_desc.gen_mipmaps && local_desc.min_filter > NT_FILTER_LINEAR) {
+        local_desc.min_filter = (local_desc.min_filter & 1) ? NT_FILTER_LINEAR : NT_FILTER_NEAREST;
+        nt_log_info("gfx: make_texture: min_filter clamped (gen_mipmaps=false)");
+    }
+
+    /* Validate mag_filter: only NEAREST or LINEAR allowed */
+    if (local_desc.mag_filter > NT_FILTER_LINEAR) {
+        nt_log_info("gfx: make_texture: mag_filter clamped to LINEAR");
+        local_desc.mag_filter = NT_FILTER_LINEAR;
+    }
+
+    uint32_t id = nt_gfx_pool_alloc(&s_gfx.texture_pool);
+    if (id == 0) {
+        nt_log_error("gfx: texture pool full");
+        return result;
+    }
+
+    uint32_t backend = nt_gfx_backend_create_texture(&local_desc);
+    if (backend == 0) {
+        nt_log_error("gfx: backend texture creation failed");
+        nt_gfx_pool_free(&s_gfx.texture_pool, id);
+        return result;
+    }
+
+    uint32_t slot = nt_gfx_pool_slot_index(id);
+    s_gfx.texture_backends[slot] = backend;
+    s_gfx.texture_descs[slot] = local_desc;
+    s_gfx.texture_descs[slot].label = nt_gfx_strdup(local_desc.label);
+    s_gfx.texture_descs[slot].data = NULL; /* no CPU copy of pixel data */
+
+    result.id = id;
+    return result;
+}
+
 /* ---- Resource destruction ---- */
 
 void nt_gfx_destroy_shader(nt_shader_t shd) {
@@ -490,6 +567,18 @@ void nt_gfx_destroy_buffer(nt_buffer_t buf) {
     s_gfx.buffer_backends[slot] = 0;
     nt_gfx_free_buffer_desc(&s_gfx.buffer_descs[slot]);
     nt_gfx_pool_free(&s_gfx.buffer_pool, buf.id);
+}
+
+void nt_gfx_destroy_texture(nt_texture_t tex) {
+    if (!nt_gfx_pool_valid(&s_gfx.texture_pool, tex.id)) {
+        nt_log_error("gfx: destroy_texture: invalid handle");
+        return;
+    }
+    uint32_t slot = nt_gfx_pool_slot_index(tex.id);
+    nt_gfx_backend_destroy_texture(s_gfx.texture_backends[slot]);
+    s_gfx.texture_backends[slot] = 0;
+    nt_gfx_free_texture_desc(&s_gfx.texture_descs[slot]);
+    nt_gfx_pool_free(&s_gfx.texture_pool, tex.id);
 }
 
 /* ---- Draw state ---- */
@@ -539,6 +628,22 @@ void nt_gfx_bind_index_buffer(nt_buffer_t buf) {
         return;
     }
     nt_gfx_backend_bind_index_buffer(s_gfx.buffer_backends[slot]);
+}
+
+void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    if (!nt_gfx_pool_valid(&s_gfx.texture_pool, tex.id)) {
+        nt_log_error("gfx: bind_texture: invalid handle");
+        return;
+    }
+    if (slot >= NT_GFX_MAX_TEXTURE_SLOTS) {
+        nt_log_error("gfx: bind_texture: slot exceeds max");
+        return;
+    }
+    uint32_t idx = nt_gfx_pool_slot_index(tex.id);
+    nt_gfx_backend_bind_texture(s_gfx.texture_backends[idx], slot);
 }
 
 /* ---- Uniforms ---- */

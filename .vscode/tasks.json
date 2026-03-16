@@ -185,6 +185,42 @@
             "dependsOn": ["Build wasm-release", "Ensure server spinning_cube (release :8085)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
+        },
+        {
+            "label": "Ensure server textured_quad (debug :8086)",
+            "type": "shell",
+            "command": "curl -s -o nul http://localhost:8086 >nul 2>&1 && (echo Server already running on :8086) || (start /b python -m http.server 8086 -d \"${workspaceFolder}/build/examples/textured_quad/wasm-debug\" & timeout /t 1 >nul)",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Ensure server textured_quad (release :8087)",
+            "type": "shell",
+            "command": "curl -s -o nul http://localhost:8087 >nul 2>&1 && (echo Server already running on :8087) || (start /b python -m http.server 8087 -d \"${workspaceFolder}/build/examples/textured_quad/wasm-release\" & timeout /t 1 >nul)",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve textured_quad (debug)",
+            "dependsOn": ["Build wasm-debug", "Ensure server textured_quad (debug :8086)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve textured_quad (release)",
+            "dependsOn": ["Build wasm-release", "Ensure server textured_quad (release :8087)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
         }
     ]
 }

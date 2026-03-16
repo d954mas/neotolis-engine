@@ -6,6 +6,11 @@ include(cmake/warnings.cmake)
 include(cmake/nt_module.cmake)
 include(cmake/nt_shell.cmake)
 
+# Closure Compiler minifies Emscripten JS glue code (~60% reduction)
+if(CMAKE_BUILD_TYPE STREQUAL "Release" AND EMSCRIPTEN)
+    add_link_options(--closure 1)
+endif()
+
 # Derive preset name from build type + platform for output directory layout
 if(EMSCRIPTEN)
     if(NT_WASM_ANALYSIS)
@@ -55,6 +60,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(examples/hello)
     add_subdirectory(examples/bench_shapes)
     add_subdirectory(examples/spinning_cube)
+    add_subdirectory(examples/textured_quad)
     add_subdirectory(tests)
 
     if(NOT EMSCRIPTEN)
