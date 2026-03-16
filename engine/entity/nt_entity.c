@@ -149,7 +149,10 @@ bool nt_entity_is_enabled(nt_entity_t entity) {
 
 void nt_entity_register_storage(const nt_comp_storage_reg_t *reg) {
     NT_ASSERT(reg && reg->name && reg->has && reg->on_destroy);
-    NT_ASSERT(s_entity.reg_count < NT_MAX_COMP_STORAGES);
+    if (s_entity.reg_count >= NT_MAX_COMP_STORAGES) {
+        NT_ASSERT(false);
+        return;
+    }
     s_entity.registrations[s_entity.reg_count] = *reg;
     s_entity.reg_count++;
 }
