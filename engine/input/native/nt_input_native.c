@@ -88,11 +88,11 @@ static void glfw_key_callback(GLFWwindow *window, int key, int scancode, int act
 
 static void glfw_cursor_pos_callback(GLFWwindow *window, double xpos, double ypos) {
     (void)window;
-    float xscale = 1.0F;
-    float yscale = 1.0F;
-    glfwGetWindowContentScale(g_nt_glfw_window, &xscale, &yscale);
-    float fx = (float)xpos * xscale;
-    float fy = (float)ypos * yscale;
+    /* Use g_nt_window.dpr (fb/window ratio) not content scale — they diverge
+       on Windows without DPI awareness. Must match window's coordinate space. */
+    float dpr = g_nt_window.dpr;
+    float fx = (float)xpos * dpr;
+    float fy = (float)ypos * dpr;
     nt_input_pointer_move(0, fx, fy, 1.0F, NT_POINTER_MOUSE, s_cached_buttons);
 }
 
@@ -125,11 +125,9 @@ static void glfw_mouse_button_callback(GLFWwindow *window, int button, int actio
     double xpos = 0.0;
     double ypos = 0.0;
     glfwGetCursorPos(g_nt_glfw_window, &xpos, &ypos);
-    float xscale = 1.0F;
-    float yscale = 1.0F;
-    glfwGetWindowContentScale(g_nt_glfw_window, &xscale, &yscale);
-    float fx = (float)xpos * xscale;
-    float fy = (float)ypos * yscale;
+    float dpr = g_nt_window.dpr;
+    float fx = (float)xpos * dpr;
+    float fy = (float)ypos * dpr;
 
     if (action == GLFW_PRESS) {
         nt_input_pointer_down(0, fx, fy, 1.0F, NT_POINTER_MOUSE, s_cached_buttons);

@@ -12,7 +12,6 @@
 /* ---- File-scope statics (zero-initialized by C standard) ---- */
 
 static nt_app_frame_fn s_frame_fn;
-static bool s_should_quit;
 
 /* Spin-wait margin: sleep the bulk, spin-wait the last 2ms for precision */
 #define NT_SPIN_MARGIN 0.002
@@ -21,7 +20,6 @@ static bool s_should_quit;
 
 void nt_app_run(nt_app_frame_fn fn) {
     s_frame_fn = fn;
-    s_should_quit = false;
 
     /* Apply vsync setting */
     switch (g_nt_app.vsync) {
@@ -39,7 +37,7 @@ void nt_app_run(nt_app_frame_fn fn) {
 
     double prev_time = nt_time_now();
 
-    while (!s_should_quit && !glfwWindowShouldClose(g_nt_glfw_window)) {
+    while (!glfwWindowShouldClose(g_nt_glfw_window)) {
         double now = nt_time_now();
         float dt = fminf((float)(now - prev_time), g_nt_app.max_dt);
         prev_time = now;
@@ -64,4 +62,4 @@ void nt_app_run(nt_app_frame_fn fn) {
     }
 }
 
-void nt_app_quit(void) { s_should_quit = true; }
+void nt_app_quit(void) { glfwSetWindowShouldClose(g_nt_glfw_window, GLFW_TRUE); }
