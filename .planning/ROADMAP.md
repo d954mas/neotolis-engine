@@ -240,8 +240,8 @@ Plans:
 
 Plans:
 - [x] 22-01-PLAN.md -- Entity pool core: generational handles, free queue stack, storage registration, NT_ASSERT_ALWAYS, unit tests
-- [ ] 22-02-PLAN.md -- Transform component: sparse+dense storage, typed API, swap-and-pop, TRS world matrix, dirty flag, unit tests
-- [ ] 22-03-PLAN.md -- Render components: MeshComponent, MaterialComponent, RenderStateComponent with typed APIs, unit tests
+- [x] 22-02-PLAN.md -- Transform component: sparse+dense storage, typed API, swap-and-pop, TRS world matrix, dirty flag, unit tests
+- [x] 22-03-PLAN.md -- Render components: MeshComponent, MaterialComponent, RenderStateComponent with typed APIs, unit tests
 
 ### Phase 23: Builder
 **Goal**: A native C binary reads .glb mesh files, .png textures, and .glsl shader source, validates inputs, and writes a NEOPAK binary pack that the runtime can load

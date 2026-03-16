@@ -74,16 +74,16 @@
 
 ### Component Storage
 
-- [ ] **COMP-01**: Canonical sparse+dense storage pattern per component type
-- [ ] **COMP-02**: Typed API per component: add/get/has/remove (not generic void*)
-- [ ] **COMP-03**: Swap-and-pop removal keeps dense array packed
-- [ ] **COMP-04**: Sparse array initialized to INVALID_INDEX at storage init
+- [x] **COMP-01**: Canonical sparse+dense storage pattern per component type
+- [x] **COMP-02**: Typed API per component: add/get/has/remove (not generic void*)
+- [x] **COMP-03**: Swap-and-pop removal keeps dense array packed
+- [x] **COMP-04**: Sparse array initialized to INVALID_INDEX at storage init
 
 ### Transform Component
 
-- [ ] **XFORM-01**: TransformComponent with local_position (vec3), local_rotation (quat), local_scale (vec3), world_matrix (mat4), dirty flag
-- [ ] **XFORM-02**: transform_update() recomputes world_matrix for dirty transforms and clears dirty flag
-- [ ] **XFORM-03**: All entities are roots (no hierarchy in v1.3) -- world = local transform
+- [x] **XFORM-01**: TransformComponent with local_position (vec3), local_rotation (quat), local_scale (vec3), world_matrix (mat4), dirty flag
+- [x] **XFORM-02**: transform_update() recomputes world_matrix for dirty transforms and clears dirty flag
+- [x] **XFORM-03**: All entities are roots (no hierarchy in v1.3) -- world = local transform
 
 ### Render Components
 
@@ -164,13 +164,13 @@
 | ENT-02 | Phase 22 | Complete |
 | ENT-03 | Phase 22 | Complete |
 | ENT-04 | Phase 22 | Complete |
-| COMP-01 | Phase 22 | Pending |
-| COMP-02 | Phase 22 | Pending |
-| COMP-03 | Phase 22 | Pending |
-| COMP-04 | Phase 22 | Pending |
-| XFORM-01 | Phase 22 | Pending |
-| XFORM-02 | Phase 22 | Pending |
-| XFORM-03 | Phase 22 | Pending |
+| COMP-01 | Phase 22 | Complete |
+| COMP-02 | Phase 22 | Complete |
+| COMP-03 | Phase 22 | Complete |
+| COMP-04 | Phase 22 | Complete |
+| XFORM-01 | Phase 22 | Complete |
+| XFORM-02 | Phase 22 | Complete |
+| XFORM-03 | Phase 22 | Complete |
 | RCOMP-01 | Phase 22 | Complete |
 | RCOMP-02 | Phase 22 | Complete |
 | RCOMP-03 | Phase 22 | Complete |
