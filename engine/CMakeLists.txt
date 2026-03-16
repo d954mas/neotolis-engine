@@ -6,6 +6,7 @@ add_subdirectory(window)
 add_subdirectory(input)
 add_subdirectory(graphics)
 add_subdirectory(math)
+add_subdirectory(entity)
 add_subdirectory(renderers)
 
 if(EMSCRIPTEN)
