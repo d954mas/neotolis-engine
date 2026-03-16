@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis)
-# Commit: 9e5a695
+# Commit: 9b92994
 
 ## WASM Section Sizes
 
@@ -66,10 +66,10 @@ Module                         Size
 libnt_app.a                 1428 B
 libnt_core.a                1688 B
 libnt_gfx.a                31256 B
-libnt_input.a              16358 B
-libnt_window.a              3928 B
+libnt_input.a              16446 B
+libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)             54658 B
+TOTAL (linked)             54758 B
 
 Not linked to textured_quad:
 libnt_app_stub.a            1428 B

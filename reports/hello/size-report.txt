@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis)
-# Commit: 9e5a695
+# Commit: 9b92994
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                41 B
 Elem                  14 B
-Code               15062 B
+Code               15064 B
 Data                 781 B
 Custom              1054 B
 ---------------- ----------
-TOTAL              17198 B
+TOTAL              17200 B
 
 ## Top 30 Functions by Size
 
@@ -55,7 +55,7 @@ TOTAL              17198 B
    40 B   __small_printf
 
 Total functions: 35
-Total code size: 15002 B
+Total code size: 15004 B
 
 ## Per-Module Contributions
 
@@ -65,10 +65,10 @@ Module                         Size
 ------------------------ ----------
 libnt_app.a                 1428 B
 libnt_core.a                1688 B
-libnt_input.a              16358 B
-libnt_window.a              3928 B
+libnt_input.a              16446 B
+libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)             23402 B
+TOTAL (linked)             23502 B
 
 Not linked to hello:
 libnt_app_stub.a            1428 B

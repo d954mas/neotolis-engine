@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis)
-# Commit: 9e5a695
+# Commit: 9b92994
 
 ## WASM Section Sizes
 
@@ -66,13 +66,13 @@ Module                         Size
 libnt_app.a                 1428 B
 libnt_core.a                1688 B
 libnt_gfx.a                31256 B
-libnt_input.a              16358 B
+libnt_input.a              16446 B
 libnt_render_state_comp.a    2752 B
 libnt_shape_renderer.a   1140002 B
 libnt_transform_comp.a      4536 B
-libnt_window.a              3928 B
+libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)           1201948 B
+TOTAL (linked)           1202048 B
 
 Not linked to spinning_cube:
 libnt_app_stub.a            1428 B
