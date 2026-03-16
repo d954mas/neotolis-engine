@@ -1,9 +1,12 @@
 #include "app/nt_app.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#include "entity/nt_entity.h"
 #include "graphics/nt_gfx.h"
 #include "input/nt_input.h"
+#include "render_state_comp/nt_render_state_comp.h"
 #include "renderers/nt_shape_renderer.h"
+#include "transform_comp/nt_transform_comp.h"
 #include "window/nt_window.h"
 
 #include "math/nt_math.h"
@@ -42,7 +45,7 @@ enum { MODE_SOLID_WIRE = 0, MODE_SOLID, MODE_WIRE, MODE_COUNT };
 
 /* ---- State ---- */
 
-static versor s_rotation = GLM_QUAT_IDENTITY_INIT;
+static nt_entity_t s_shape_entity;
 static float s_vel_yaw;
 static float s_vel_pitch;
 static float s_cam_dist = 6.0F;
@@ -133,55 +136,62 @@ static void draw_room(void) {
     }
 }
 
-/* ---- draw_shape ---- */
+/* ---- draw_shape: reads entity components ---- */
 
 static void draw_shape(void) {
-    float pos[3] = {0, s_shape_y, 0};
-    const float *col = s_shape_colors[s_current_shape];
+    if (!*nt_render_state_comp_visible(s_shape_entity)) {
+        return;
+    }
+
+    float *pos = nt_transform_comp_position(s_shape_entity);
+    float *rot = nt_transform_comp_rotation(s_shape_entity);
+    const float *col = nt_render_state_comp_color(s_shape_entity);
     const float *wcol = s_wire_color;
     bool draw_solid = (s_render_mode == MODE_SOLID_WIRE) || (s_render_mode == MODE_SOLID);
     bool draw_wire = (s_render_mode == MODE_SOLID_WIRE) || (s_render_mode == MODE_WIRE);
 
+    float *scl = nt_transform_comp_scale(s_shape_entity);
+
     switch (s_current_shape) {
     case SHAPE_CUBE: {
-        float sz[3] = {1.5F, 1.5F, 1.5F};
+        float sz[3] = {scl[0], scl[1], scl[2]};
         if (draw_solid) {
-            nt_shape_renderer_cube_rot(pos, sz, s_rotation, col);
+            nt_shape_renderer_cube_rot(pos, sz, rot, col);
         }
         if (draw_wire) {
-            nt_shape_renderer_cube_wire_rot(pos, sz, s_rotation, wcol);
+            nt_shape_renderer_cube_wire_rot(pos, sz, rot, wcol);
         }
         break;
     }
     case SHAPE_SPHERE: {
-        float radius = 1.0F;
+        float radius = scl[0];
         if (draw_solid) {
-            nt_shape_renderer_sphere_rot(pos, radius, s_rotation, col);
+            nt_shape_renderer_sphere_rot(pos, radius, rot, col);
         }
         if (draw_wire) {
-            nt_shape_renderer_sphere_wire_rot(pos, radius, s_rotation, wcol);
+            nt_shape_renderer_sphere_wire_rot(pos, radius, rot, wcol);
         }
         break;
     }
     case SHAPE_CYLINDER: {
-        float radius = 0.6F;
-        float height = 2.0F;
+        float radius = scl[0];
+        float height = scl[1];
         if (draw_solid) {
-            nt_shape_renderer_cylinder_rot(pos, radius, height, s_rotation, col);
+            nt_shape_renderer_cylinder_rot(pos, radius, height, rot, col);
         }
         if (draw_wire) {
-            nt_shape_renderer_cylinder_wire_rot(pos, radius, height, s_rotation, wcol);
+            nt_shape_renderer_cylinder_wire_rot(pos, radius, height, rot, wcol);
         }
         break;
     }
     case SHAPE_CAPSULE: {
-        float radius = 0.4F;
-        float height = 1.5F;
+        float radius = scl[0];
+        float height = scl[1];
         if (draw_solid) {
-            nt_shape_renderer_capsule_rot(pos, radius, height, s_rotation, col);
+            nt_shape_renderer_capsule_rot(pos, radius, height, rot, col);
         }
         if (draw_wire) {
-            nt_shape_renderer_capsule_wire_rot(pos, radius, height, s_rotation, wcol);
+            nt_shape_renderer_capsule_wire_rot(pos, radius, height, rot, wcol);
         }
         break;
     }
@@ -190,9 +200,11 @@ static void draw_shape(void) {
     }
 }
 
-/* ---- apply_rotation: compose yaw/pitch into accumulated quaternion ---- */
+/* ---- apply_rotation: compose yaw/pitch into transform component ---- */
 
 static void apply_rotation(float yaw, float pitch) {
+    float *local_rot = nt_transform_comp_rotation(s_shape_entity);
+
     versor q_yaw;
     vec3 axis_y = {0, 1, 0};
     glm_quatv(q_yaw, yaw, axis_y);
@@ -202,9 +214,43 @@ static void apply_rotation(float yaw, float pitch) {
     glm_quatv(q_pitch, pitch, axis_x);
 
     versor tmp;
-    glm_quat_mul(q_yaw, s_rotation, tmp);
-    glm_quat_mul(q_pitch, tmp, s_rotation);
-    glm_quat_normalize(s_rotation);
+    glm_quat_mul(q_yaw, local_rot, tmp);
+    glm_quat_mul(q_pitch, tmp, local_rot);
+    glm_quat_normalize(local_rot);
+    *nt_transform_comp_dirty(s_shape_entity) = true;
+}
+
+/* ---- set_shape_scale: update transform scale for current shape ---- */
+
+static void set_shape_scale(void) {
+    float *scl = nt_transform_comp_scale(s_shape_entity);
+    switch (s_current_shape) {
+    case SHAPE_CUBE:
+        glm_vec3_copy((vec3){1.5F, 1.5F, 1.5F}, scl);
+        break;
+    case SHAPE_SPHERE:
+        glm_vec3_copy((vec3){1.0F, 1.0F, 1.0F}, scl);
+        break;
+    case SHAPE_CYLINDER:
+        glm_vec3_copy((vec3){0.6F, 2.0F, 0.6F}, scl);
+        break;
+    case SHAPE_CAPSULE:
+        glm_vec3_copy((vec3){0.4F, 1.5F, 0.4F}, scl);
+        break;
+    default:
+        break;
+    }
+    *nt_transform_comp_dirty(s_shape_entity) = true;
+}
+
+/* ---- set_shape_color: update render state from shape table ---- */
+
+static void set_shape_color(void) {
+    float *col = nt_render_state_comp_color(s_shape_entity);
+    col[0] = s_shape_colors[s_current_shape][0];
+    col[1] = s_shape_colors[s_current_shape][1];
+    col[2] = s_shape_colors[s_current_shape][2];
+    col[3] = s_shape_colors[s_current_shape][3];
 }
 
 /* ---- frame callback ---- */
@@ -218,15 +264,20 @@ static void frame(void) {
 
     if (nt_input_key_is_pressed(NT_KEY_A)) {
         s_current_shape = (s_current_shape + SHAPE_COUNT - 1) % SHAPE_COUNT;
+        set_shape_scale();
+        set_shape_color();
     }
     if (nt_input_key_is_pressed(NT_KEY_D)) {
         s_current_shape = (s_current_shape + 1) % SHAPE_COUNT;
+        set_shape_scale();
+        set_shape_color();
     }
     if (nt_input_key_is_pressed(NT_KEY_W)) {
         s_render_mode = (s_render_mode + 1) % MODE_COUNT;
     }
     if (nt_input_key_is_pressed(NT_KEY_R)) {
-        glm_quat_identity(s_rotation);
+        glm_quat_identity(nt_transform_comp_rotation(s_shape_entity));
+        *nt_transform_comp_dirty(s_shape_entity) = true;
         s_vel_yaw = 0;
         s_vel_pitch = 0;
     }
@@ -277,6 +328,10 @@ static void frame(void) {
             s_cam_dist = ZOOM_MAX;
         }
     }
+
+    /* ---- Update transform system ---- */
+
+    nt_transform_comp_update();
 
     /* ---- VP matrix construction ---- */
 
@@ -334,12 +389,25 @@ int main(void) {
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 128, .depth = true});
     nt_shape_renderer_init();
 
+    /* ---- Entity system init ---- */
+
+    nt_entity_init(&(nt_entity_desc_t){.max_entities = 64});
+    nt_transform_comp_init(&(nt_transform_comp_desc_t){.capacity = 64});
+    nt_render_state_comp_init(&(nt_render_state_comp_desc_t){.capacity = 64});
+
+    /* Create the shape entity */
+    s_shape_entity = nt_entity_create();
+
+    nt_transform_comp_add(s_shape_entity);
+    nt_transform_comp_position(s_shape_entity)[1] = s_shape_y;
+
+    nt_render_state_comp_add(s_shape_entity);
+
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
 #endif
 
     /* Initialize state */
-    glm_quat_identity(s_rotation);
     s_vel_yaw = 0;
     s_vel_pitch = 0;
     s_cam_dist = 6.0F;
@@ -347,9 +415,15 @@ int main(void) {
     s_render_mode = MODE_SOLID_WIRE;
     s_grabbed = false;
 
+    set_shape_scale();
+    set_shape_color();
+
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
+    nt_render_state_comp_shutdown();
+    nt_transform_comp_shutdown();
+    nt_entity_shutdown();
     nt_shape_renderer_shutdown();
     nt_gfx_shutdown();
     nt_input_shutdown();

@@ -17,4 +17,13 @@
 #define NT_ASSERT(cond) ((void)0)
 #endif
 
+/* NT_ASSERT_ALWAYS: fires in both debug and release builds.
+   Used for critical invariants (stale entity handles, etc.). */
+#define NT_ASSERT_ALWAYS(cond)                                                                                                                                                                         \
+    do {                                                                                                                                                                                               \
+        if (!(cond)) {                                                                                                                                                                                 \
+            __builtin_trap();                                                                                                                                                                          \
+        }                                                                                                                                                                                              \
+    } while (0)
+
 #endif /* NT_ASSERT_H */

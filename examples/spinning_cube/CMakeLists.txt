@@ -1,5 +1,5 @@
 add_executable(spinning_cube main.c)
-target_link_libraries(spinning_cube PRIVATE nt_core nt_app nt_input nt_window nt_shape_renderer nt_math)
+target_link_libraries(spinning_cube PRIVATE nt_core nt_app nt_input nt_window nt_shape_renderer nt_math nt_transform_comp nt_render_state_comp)
 if(EMSCRIPTEN)
     target_link_libraries(spinning_cube PRIVATE nt_platform_web nt_gfx)
 else()
