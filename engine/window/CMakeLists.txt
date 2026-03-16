@@ -20,7 +20,10 @@ if(NOT EMSCRIPTEN)
     # PUBLIC: glfw propagates to all modules/examples that link nt_window,
     # so they never need to mention glfw themselves.
     target_link_libraries(nt_window PUBLIC glfw)
-    target_link_libraries(nt_window PRIVATE nt_log)
+    target_link_libraries(nt_window PRIVATE nt_log nt_input)
+else()
+    # Web: nt_window_poll() calls nt_input_poll()
+    target_link_libraries(nt_window PRIVATE nt_input)
 endif()
 
 if(UNIX)

@@ -2,16 +2,9 @@
 #define NT_APP_H
 
 #include "core/nt_types.h"
+#include "window/nt_window.h"
 
 typedef void (*nt_app_frame_fn)(void);
-
-/* ---- Vsync mode ---- */
-
-typedef enum {
-    NT_VSYNC_OFF = 0,
-    NT_VSYNC_ON = 1,
-    NT_VSYNC_ADAPTIVE = 2,
-} nt_vsync_t;
 
 /* ---- Frame state (engine writes, game reads) ---- */
 

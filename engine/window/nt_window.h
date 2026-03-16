@@ -3,6 +3,14 @@
 
 #include "core/nt_types.h"
 
+/* ---- Vsync mode (used by nt_window_set_vsync and nt_app_t) ---- */
+
+typedef enum {
+    NT_VSYNC_OFF = 0,
+    NT_VSYNC_ON = 1,
+    NT_VSYNC_ADAPTIVE = 2,
+} nt_vsync_t;
+
 /* ---- Window / canvas state ---- */
 
 typedef struct nt_window_t {
@@ -30,6 +38,16 @@ void nt_window_init(void);
 void nt_window_poll(void);
 void nt_window_shutdown(void);
 void nt_window_set_fullscreen(bool fullscreen);
+
+/* ---- Presentation ---- */
+
+void nt_window_swap_buffers(void);
+void nt_window_set_vsync(nt_vsync_t mode);
+
+/* ---- Close management ---- */
+
+bool nt_window_should_close(void);
+void nt_window_request_close(void);
 
 /* ---- Shared DPR math (used by all platform backends) ---- */
 

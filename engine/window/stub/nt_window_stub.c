@@ -10,3 +10,15 @@ void nt_window_poll(void) { /* No-op */ }
 void nt_window_shutdown(void) { /* No-op */ }
 
 void nt_window_set_fullscreen(bool fullscreen) { (void)fullscreen; }
+
+/* ---- Presentation ---- */
+
+void nt_window_swap_buffers(void) { /* No-op */ }
+
+void nt_window_set_vsync(nt_vsync_t mode) { (void)mode; }
+
+/* ---- Close management ---- */
+
+bool nt_window_should_close(void) { return false; }
+
+void nt_window_request_close(void) { /* No-op */ }

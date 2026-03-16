@@ -16,7 +16,13 @@ else()
     )
 endif()
 
-target_link_libraries(nt_input PUBLIC nt_core nt_window)
+if(EMSCRIPTEN)
+    # Web: nt_input_web.c reads g_nt_window.dpr for coordinate mapping
+    target_link_libraries(nt_input PUBLIC nt_core nt_window)
+else()
+    # Native: nt_input_native.c is all no-ops, no nt_window dependency
+    target_link_libraries(nt_input PUBLIC nt_core)
+endif()
 
 # Stub implementation for headless builds (CI, builder, tests)
 nt_add_module(nt_input_stub
