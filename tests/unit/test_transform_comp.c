@@ -21,49 +21,45 @@ void tearDown(void) {
 
 /* ---- Tests ---- */
 
-void test_add_returns_nonnull(void) {
+void test_add_returns_true(void) {
     nt_entity_t e = nt_entity_create();
-    nt_transform_comp_t *t = nt_transform_comp_add(e);
-    TEST_ASSERT_NOT_NULL(t);
+    bool ok = nt_transform_comp_add(e);
+    TEST_ASSERT_TRUE(ok);
 }
 
 void test_add_defaults_position(void) {
     nt_entity_t e = nt_entity_create();
-    nt_transform_comp_t *t = nt_transform_comp_add(e);
-    ASSERT_FLOAT_NEAR(0.0F, t->local_position[0]);
-    ASSERT_FLOAT_NEAR(0.0F, t->local_position[1]);
-    ASSERT_FLOAT_NEAR(0.0F, t->local_position[2]);
+    nt_transform_comp_add(e);
+    float *pos = nt_transform_comp_position(e);
+    ASSERT_FLOAT_NEAR(0.0F, pos[0]);
+    ASSERT_FLOAT_NEAR(0.0F, pos[1]);
+    ASSERT_FLOAT_NEAR(0.0F, pos[2]);
 }
 
 void test_add_defaults_rotation(void) {
     nt_entity_t e = nt_entity_create();
-    nt_transform_comp_t *t = nt_transform_comp_add(e);
+    nt_transform_comp_add(e);
+    float *rot = nt_transform_comp_rotation(e);
     /* Identity quaternion: (0, 0, 0, 1) -- w at index 3 in cglm */
-    ASSERT_FLOAT_NEAR(0.0F, t->local_rotation[0]);
-    ASSERT_FLOAT_NEAR(0.0F, t->local_rotation[1]);
-    ASSERT_FLOAT_NEAR(0.0F, t->local_rotation[2]);
-    ASSERT_FLOAT_NEAR(1.0F, t->local_rotation[3]);
+    ASSERT_FLOAT_NEAR(0.0F, rot[0]);
+    ASSERT_FLOAT_NEAR(0.0F, rot[1]);
+    ASSERT_FLOAT_NEAR(0.0F, rot[2]);
+    ASSERT_FLOAT_NEAR(1.0F, rot[3]);
 }
 
 void test_add_defaults_scale(void) {
     nt_entity_t e = nt_entity_create();
-    nt_transform_comp_t *t = nt_transform_comp_add(e);
-    ASSERT_FLOAT_NEAR(1.0F, t->local_scale[0]);
-    ASSERT_FLOAT_NEAR(1.0F, t->local_scale[1]);
-    ASSERT_FLOAT_NEAR(1.0F, t->local_scale[2]);
+    nt_transform_comp_add(e);
+    float *scl = nt_transform_comp_scale(e);
+    ASSERT_FLOAT_NEAR(1.0F, scl[0]);
+    ASSERT_FLOAT_NEAR(1.0F, scl[1]);
+    ASSERT_FLOAT_NEAR(1.0F, scl[2]);
 }
 
 void test_add_defaults_dirty(void) {
     nt_entity_t e = nt_entity_create();
-    nt_transform_comp_t *t = nt_transform_comp_add(e);
-    TEST_ASSERT_TRUE(t->dirty);
-}
-
-void test_get_returns_same_as_add(void) {
-    nt_entity_t e = nt_entity_create();
-    nt_transform_comp_t *added = nt_transform_comp_add(e);
-    nt_transform_comp_t *got = nt_transform_comp_get(e);
-    TEST_ASSERT_EQUAL_PTR(added, got);
+    nt_transform_comp_add(e);
+    TEST_ASSERT_TRUE(*nt_transform_comp_dirty(e));
 }
 
 void test_has_true_after_add(void) {
@@ -89,11 +85,11 @@ void test_swap_and_pop_preserves_data(void) {
     nt_entity_t e2 = nt_entity_create();
     nt_entity_t e3 = nt_entity_create();
 
-    nt_transform_comp_t *t1 = nt_transform_comp_add(e1);
-    t1->local_position[0] = 1.0F;
+    nt_transform_comp_add(e1);
+    nt_transform_comp_position(e1)[0] = 1.0F;
     nt_transform_comp_add(e2);
-    nt_transform_comp_t *t3 = nt_transform_comp_add(e3);
-    t3->local_position[0] = 3.0F;
+    nt_transform_comp_add(e3);
+    nt_transform_comp_position(e3)[0] = 3.0F;
 
     /* Remove middle element */
     nt_transform_comp_remove(e2);
@@ -101,8 +97,8 @@ void test_swap_and_pop_preserves_data(void) {
     /* Verify e1 and e3 still accessible with correct data */
     TEST_ASSERT_TRUE(nt_transform_comp_has(e1));
     TEST_ASSERT_TRUE(nt_transform_comp_has(e3));
-    ASSERT_FLOAT_NEAR(1.0F, nt_transform_comp_get(e1)->local_position[0]);
-    ASSERT_FLOAT_NEAR(3.0F, nt_transform_comp_get(e3)->local_position[0]);
+    ASSERT_FLOAT_NEAR(1.0F, nt_transform_comp_position(e1)[0]);
+    ASSERT_FLOAT_NEAR(3.0F, nt_transform_comp_position(e3)[0]);
 }
 
 void test_sparse_init_invalid(void) {
@@ -117,51 +113,53 @@ void test_sparse_init_invalid(void) {
 
 void test_update_computes_world_matrix(void) {
     nt_entity_t e = nt_entity_create();
-    nt_transform_comp_t *t = nt_transform_comp_add(e);
+    nt_transform_comp_add(e);
 
     /* Set position to (1, 2, 3), identity rotation, scale (1,1,1) */
-    t->local_position[0] = 1.0F;
-    t->local_position[1] = 2.0F;
-    t->local_position[2] = 3.0F;
-    t->dirty = true;
+    nt_transform_comp_position(e)[0] = 1.0F;
+    nt_transform_comp_position(e)[1] = 2.0F;
+    nt_transform_comp_position(e)[2] = 3.0F;
+    *nt_transform_comp_dirty(e) = true;
 
     nt_transform_comp_update();
 
     /* cglm column-major: translation is in column 3 */
-    ASSERT_FLOAT_NEAR(1.0F, t->world_matrix[3][0]);
-    ASSERT_FLOAT_NEAR(2.0F, t->world_matrix[3][1]);
-    ASSERT_FLOAT_NEAR(3.0F, t->world_matrix[3][2]);
+    const float *wm = nt_transform_comp_world_matrix(e);
+    ASSERT_FLOAT_NEAR(1.0F, wm[12]); /* column 3, row 0 */
+    ASSERT_FLOAT_NEAR(2.0F, wm[13]); /* column 3, row 1 */
+    ASSERT_FLOAT_NEAR(3.0F, wm[14]); /* column 3, row 2 */
 }
 
 void test_update_clears_dirty(void) {
     nt_entity_t e = nt_entity_create();
-    nt_transform_comp_t *t = nt_transform_comp_add(e);
-    TEST_ASSERT_TRUE(t->dirty);
+    nt_transform_comp_add(e);
+    TEST_ASSERT_TRUE(*nt_transform_comp_dirty(e));
 
     nt_transform_comp_update();
-    TEST_ASSERT_FALSE(t->dirty);
+    TEST_ASSERT_FALSE(*nt_transform_comp_dirty(e));
 }
 
 void test_update_skips_clean(void) {
     nt_entity_t e = nt_entity_create();
-    nt_transform_comp_t *t = nt_transform_comp_add(e);
+    nt_transform_comp_add(e);
 
     /* First update to clear dirty and set identity world matrix */
     nt_transform_comp_update();
-    TEST_ASSERT_FALSE(t->dirty);
+    TEST_ASSERT_FALSE(*nt_transform_comp_dirty(e));
 
     /* Manually set dirty=false, change position -- update should skip */
-    t->local_position[0] = 5.0F;
-    t->local_position[1] = 5.0F;
-    t->local_position[2] = 5.0F;
-    t->dirty = false;
+    nt_transform_comp_position(e)[0] = 5.0F;
+    nt_transform_comp_position(e)[1] = 5.0F;
+    nt_transform_comp_position(e)[2] = 5.0F;
+    *nt_transform_comp_dirty(e) = false;
 
     nt_transform_comp_update();
 
     /* World matrix should still be identity (translation column = 0) */
-    ASSERT_FLOAT_NEAR(0.0F, t->world_matrix[3][0]);
-    ASSERT_FLOAT_NEAR(0.0F, t->world_matrix[3][1]);
-    ASSERT_FLOAT_NEAR(0.0F, t->world_matrix[3][2]);
+    const float *wm = nt_transform_comp_world_matrix(e);
+    ASSERT_FLOAT_NEAR(0.0F, wm[12]);
+    ASSERT_FLOAT_NEAR(0.0F, wm[13]);
+    ASSERT_FLOAT_NEAR(0.0F, wm[14]);
 }
 
 void test_entity_destroy_auto_removes_component(void) {
@@ -177,8 +175,8 @@ void test_entity_destroy_auto_removes_component(void) {
     nt_entity_t entities[8];
     for (int i = 0; i < 8; i++) {
         entities[i] = nt_entity_create();
-        nt_transform_comp_t *t = nt_transform_comp_add(entities[i]);
-        TEST_ASSERT_NOT_NULL(t);
+        bool ok = nt_transform_comp_add(entities[i]);
+        TEST_ASSERT_TRUE(ok);
     }
 }
 
@@ -186,12 +184,11 @@ void test_entity_destroy_auto_removes_component(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_add_returns_nonnull);
+    RUN_TEST(test_add_returns_true);
     RUN_TEST(test_add_defaults_position);
     RUN_TEST(test_add_defaults_rotation);
     RUN_TEST(test_add_defaults_scale);
     RUN_TEST(test_add_defaults_dirty);
-    RUN_TEST(test_get_returns_same_as_add);
     RUN_TEST(test_has_true_after_add);
     RUN_TEST(test_has_false_before_add);
     RUN_TEST(test_remove_makes_has_false);

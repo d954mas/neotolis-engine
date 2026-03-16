@@ -1,21 +1,40 @@
 #include "transform_comp/nt_transform_comp.h"
 
+#include <stdlib.h>
+#include <string.h>
+
 #include "comp_storage/nt_comp_storage.h"
+#include "core/nt_assert.h"
 
 static nt_comp_storage_t s_storage;
 
-/* ---- Default initializer ---- */
+/* ---- Data arrays (parallel to dense index) ---- */
 
-static void transform_default(void *comp) {
-    nt_transform_comp_t *t = (nt_transform_comp_t *)comp;
-    glm_vec3_zero(t->local_position);
-    glm_quat_identity(t->local_rotation);
-    glm_vec3_one(t->local_scale);
-    glm_mat4_identity(t->world_matrix);
-    t->dirty = true;
+typedef struct {
+    vec3 position;
+    vec4 rotation; /* quaternion (cglm versor) */
+    vec3 scale;
+} nt_trs_t; /* 40 bytes — fits one cache line */
+
+static bool *s_dirty;
+static nt_trs_t *s_trs;
+static mat4 *s_world_matrices;
+
+/* ---- Callbacks ---- */
+
+static void transform_default(uint16_t idx) {
+    s_dirty[idx] = true;
+    glm_vec3_zero(s_trs[idx].position);
+    glm_quat_identity(s_trs[idx].rotation);
+    glm_vec3_one(s_trs[idx].scale);
+    glm_mat4_identity(s_world_matrices[idx]);
 }
 
-/* ---- Destroy callback ---- */
+static void transform_swap(uint16_t dst, uint16_t src) {
+    s_dirty[dst] = s_dirty[src];
+    s_trs[dst] = s_trs[src];
+    glm_mat4_copy(s_world_matrices[src], s_world_matrices[dst]);
+}
 
 static void transform_on_destroy(nt_entity_t entity) {
     if (nt_comp_storage_has(&s_storage, entity)) {
@@ -30,9 +49,19 @@ nt_result_t nt_transform_comp_init(const nt_transform_comp_desc_t *desc) {
         return NT_ERR_INVALID_ARG;
     }
 
-    nt_result_t res = nt_comp_storage_init(&s_storage, desc->capacity, sizeof(nt_transform_comp_t), transform_default);
+    nt_result_t res = nt_comp_storage_init(&s_storage, desc->capacity, transform_default, transform_swap);
     if (res != NT_OK) {
         return res;
+    }
+
+    uint16_t cap = desc->capacity;
+    s_dirty = (bool *)calloc(cap, sizeof(bool));
+    s_trs = (nt_trs_t *)calloc(cap, sizeof(nt_trs_t));
+    s_world_matrices = (mat4 *)calloc(cap, sizeof(mat4));
+
+    if (!s_dirty || !s_trs || !s_world_matrices) {
+        nt_transform_comp_shutdown();
+        return NT_ERR_INIT_FAILED;
     }
 
     nt_entity_register_storage(&(nt_comp_storage_reg_t){
@@ -44,39 +73,76 @@ nt_result_t nt_transform_comp_init(const nt_transform_comp_desc_t *desc) {
     return NT_OK;
 }
 
-void nt_transform_comp_shutdown(void) { nt_comp_storage_shutdown(&s_storage); }
+void nt_transform_comp_shutdown(void) {
+    free(s_dirty);
+    free(s_trs);
+    free(s_world_matrices);
+    s_dirty = NULL;
+    s_trs = NULL;
+    s_world_matrices = NULL;
+    nt_comp_storage_shutdown(&s_storage);
+}
 
-/* ---- Typed wrappers ---- */
+/* ---- Per-entity operations ---- */
 
-nt_transform_comp_t *nt_transform_comp_add(nt_entity_t entity) { return (nt_transform_comp_t *)nt_comp_storage_add(&s_storage, entity); }
-
-nt_transform_comp_t *nt_transform_comp_get(nt_entity_t entity) { return (nt_transform_comp_t *)nt_comp_storage_get(&s_storage, entity); }
+bool nt_transform_comp_add(nt_entity_t entity) { return nt_comp_storage_add(&s_storage, entity) != NT_INVALID_COMP_INDEX; }
 
 bool nt_transform_comp_has(nt_entity_t entity) { return nt_comp_storage_has(&s_storage, entity); }
 
 void nt_transform_comp_remove(nt_entity_t entity) { nt_comp_storage_remove(&s_storage, entity); }
 
-/* ---- Update ---- */
+/* ---- Field access ---- */
+
+float *nt_transform_comp_position(nt_entity_t entity) {
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    return s_trs[idx].position;
+}
+
+float *nt_transform_comp_rotation(nt_entity_t entity) {
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    return s_trs[idx].rotation;
+}
+
+float *nt_transform_comp_scale(nt_entity_t entity) {
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    return s_trs[idx].scale;
+}
+
+bool *nt_transform_comp_dirty(nt_entity_t entity) {
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    return &s_dirty[idx];
+}
+
+const float *nt_transform_comp_world_matrix(nt_entity_t entity) {
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    return (const float *)s_world_matrices[idx];
+}
+
+/* ---- System ---- */
 
 void nt_transform_comp_update(void) {
-    nt_transform_comp_t *data = (nt_transform_comp_t *)s_storage.data;
-    for (uint16_t i = 0; i < s_storage.count; i++) {
-        nt_transform_comp_t *t = &data[i];
-        if (!t->dirty) {
+    uint16_t count = nt_comp_storage_count(&s_storage);
+    for (uint16_t i = 0; i < count; i++) {
+        if (!s_dirty[i]) {
             continue;
         }
 
-        /* Build world_matrix = T * R * S */
+        nt_trs_t *trs = &s_trs[i];
         mat4 translation;
         mat4 rotation;
         mat4 scale_mat;
         mat4 temp;
-        glm_translate_make(translation, t->local_position);
-        glm_quat_mat4(t->local_rotation, rotation);
-        glm_scale_make(scale_mat, t->local_scale);
+        glm_translate_make(translation, trs->position);
+        glm_quat_mat4(trs->rotation, rotation);
+        glm_scale_make(scale_mat, trs->scale);
         glm_mat4_mul(translation, rotation, temp);
-        glm_mat4_mul(temp, scale_mat, t->world_matrix);
+        glm_mat4_mul(temp, scale_mat, s_world_matrices[i]);
 
-        t->dirty = false;
+        s_dirty[i] = false;
     }
 }

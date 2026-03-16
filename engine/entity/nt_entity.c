@@ -77,6 +77,7 @@ nt_entity_t nt_entity_create(void) {
 
     /* Increment generation (starts at 1 for first allocation) */
     s_entity.generations[index]++;
+    NT_ASSERT(s_entity.generations[index] != 0); /* overflow: 65535 cycles on one slot */
     uint16_t gen = s_entity.generations[index];
 
     s_entity.alive[index] = true;

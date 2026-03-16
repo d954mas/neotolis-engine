@@ -22,16 +22,16 @@ void tearDown(void) {
 
 /* ---- Mesh component tests ---- */
 
-void test_mesh_add_returns_nonnull(void) {
+void test_mesh_add_returns_true(void) {
     nt_entity_t e = nt_entity_create();
-    nt_mesh_comp_t *comp = nt_mesh_comp_add(e);
-    TEST_ASSERT_NOT_NULL(comp);
+    bool ok = nt_mesh_comp_add(e);
+    TEST_ASSERT_TRUE(ok);
 }
 
 void test_mesh_add_default_handle(void) {
     nt_entity_t e = nt_entity_create();
-    nt_mesh_comp_t *comp = nt_mesh_comp_add(e);
-    TEST_ASSERT_EQUAL_UINT32(0, comp->mesh_handle);
+    nt_mesh_comp_add(e);
+    TEST_ASSERT_EQUAL_UINT32(0, *nt_mesh_comp_handle(e));
 }
 
 void test_mesh_has_true_after_add(void) {
@@ -54,25 +54,24 @@ void test_mesh_remove_makes_has_false(void) {
 
 void test_mesh_get_set_handle(void) {
     nt_entity_t e = nt_entity_create();
-    nt_mesh_comp_t *comp = nt_mesh_comp_add(e);
-    comp->mesh_handle = 42;
+    nt_mesh_comp_add(e);
+    *nt_mesh_comp_handle(e) = 42;
 
-    nt_mesh_comp_t *got = nt_mesh_comp_get(e);
-    TEST_ASSERT_EQUAL_UINT32(42, got->mesh_handle);
+    TEST_ASSERT_EQUAL_UINT32(42, *nt_mesh_comp_handle(e));
 }
 
 /* ---- Material component tests ---- */
 
-void test_material_add_returns_nonnull(void) {
+void test_material_add_returns_true(void) {
     nt_entity_t e = nt_entity_create();
-    nt_material_comp_t *comp = nt_material_comp_add(e);
-    TEST_ASSERT_NOT_NULL(comp);
+    bool ok = nt_material_comp_add(e);
+    TEST_ASSERT_TRUE(ok);
 }
 
 void test_material_add_default_handle(void) {
     nt_entity_t e = nt_entity_create();
-    nt_material_comp_t *comp = nt_material_comp_add(e);
-    TEST_ASSERT_EQUAL_UINT32(0, comp->material_handle);
+    nt_material_comp_add(e);
+    TEST_ASSERT_EQUAL_UINT32(0, *nt_material_comp_handle(e));
 }
 
 void test_material_has_and_remove(void) {
@@ -88,40 +87,40 @@ void test_material_has_and_remove(void) {
 
 void test_render_state_add_defaults_tag(void) {
     nt_entity_t e = nt_entity_create();
-    nt_render_state_comp_t *comp = nt_render_state_comp_add(e);
-    TEST_ASSERT_EQUAL_UINT16(0, comp->tag);
+    nt_render_state_comp_add(e);
+    TEST_ASSERT_EQUAL_UINT16(0, *nt_render_state_comp_tag(e));
 }
 
 void test_render_state_add_defaults_visible(void) {
     nt_entity_t e = nt_entity_create();
-    nt_render_state_comp_t *comp = nt_render_state_comp_add(e);
-    TEST_ASSERT_TRUE(comp->visible);
+    nt_render_state_comp_add(e);
+    TEST_ASSERT_TRUE(*nt_render_state_comp_visible(e));
 }
 
 void test_render_state_add_defaults_color(void) {
     nt_entity_t e = nt_entity_create();
-    nt_render_state_comp_t *comp = nt_render_state_comp_add(e);
-    TEST_ASSERT_TRUE(comp->color[0] == 1.0F); /* NOLINT */
-    TEST_ASSERT_TRUE(comp->color[1] == 1.0F); /* NOLINT */
-    TEST_ASSERT_TRUE(comp->color[2] == 1.0F); /* NOLINT */
-    TEST_ASSERT_TRUE(comp->color[3] == 1.0F); /* NOLINT */
+    nt_render_state_comp_add(e);
+    float *col = nt_render_state_comp_color(e);
+    TEST_ASSERT_TRUE(col[0] == 1.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(col[1] == 1.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(col[2] == 1.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(col[3] == 1.0F); /* NOLINT */
 }
 
 void test_render_state_set_visible_false(void) {
     nt_entity_t e = nt_entity_create();
     nt_render_state_comp_add(e);
-    nt_render_state_comp_get(e)->visible = false;
+    *nt_render_state_comp_visible(e) = false;
 
-    TEST_ASSERT_FALSE(nt_render_state_comp_get(e)->visible);
+    TEST_ASSERT_FALSE(*nt_render_state_comp_visible(e));
 }
 
 void test_render_state_set_tag(void) {
     nt_entity_t e = nt_entity_create();
-    nt_render_state_comp_t *comp = nt_render_state_comp_add(e);
-    comp->tag = 5;
+    nt_render_state_comp_add(e);
+    *nt_render_state_comp_tag(e) = 5;
 
-    nt_render_state_comp_t *got = nt_render_state_comp_get(e);
-    TEST_ASSERT_EQUAL_UINT16(5, got->tag);
+    TEST_ASSERT_EQUAL_UINT16(5, *nt_render_state_comp_tag(e));
 }
 
 /* ---- Cross-component tests ---- */
@@ -154,12 +153,12 @@ void test_swap_and_pop_render_state(void) {
     nt_entity_t e2 = nt_entity_create();
     nt_entity_t e3 = nt_entity_create();
 
-    nt_render_state_comp_t *c1 = nt_render_state_comp_add(e1);
+    nt_render_state_comp_add(e1);
     nt_render_state_comp_add(e2);
-    nt_render_state_comp_t *c3 = nt_render_state_comp_add(e3);
+    nt_render_state_comp_add(e3);
 
-    c1->tag = 10;
-    c3->tag = 30;
+    *nt_render_state_comp_tag(e1) = 10;
+    *nt_render_state_comp_tag(e3) = 30;
 
     /* Remove middle entity's component */
     nt_render_state_comp_remove(e2);
@@ -169,8 +168,8 @@ void test_swap_and_pop_render_state(void) {
     TEST_ASSERT_FALSE(nt_render_state_comp_has(e2));
     TEST_ASSERT_TRUE(nt_render_state_comp_has(e3));
 
-    TEST_ASSERT_EQUAL_UINT16(10, nt_render_state_comp_get(e1)->tag);
-    TEST_ASSERT_EQUAL_UINT16(30, nt_render_state_comp_get(e3)->tag);
+    TEST_ASSERT_EQUAL_UINT16(10, *nt_render_state_comp_tag(e1));
+    TEST_ASSERT_EQUAL_UINT16(30, *nt_render_state_comp_tag(e3));
 }
 
 /* ---- Main ---- */
@@ -178,14 +177,14 @@ void test_swap_and_pop_render_state(void) {
 int main(void) {
     UNITY_BEGIN();
     /* Mesh */
-    RUN_TEST(test_mesh_add_returns_nonnull);
+    RUN_TEST(test_mesh_add_returns_true);
     RUN_TEST(test_mesh_add_default_handle);
     RUN_TEST(test_mesh_has_true_after_add);
     RUN_TEST(test_mesh_has_false_before_add);
     RUN_TEST(test_mesh_remove_makes_has_false);
     RUN_TEST(test_mesh_get_set_handle);
     /* Material */
-    RUN_TEST(test_material_add_returns_nonnull);
+    RUN_TEST(test_material_add_returns_true);
     RUN_TEST(test_material_add_default_handle);
     RUN_TEST(test_material_has_and_remove);
     /* Render state */

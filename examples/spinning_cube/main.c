@@ -139,23 +139,22 @@ static void draw_room(void) {
 /* ---- draw_shape: reads entity components ---- */
 
 static void draw_shape(void) {
-    nt_transform_comp_t *xform = nt_transform_comp_get(s_shape_entity);
-    nt_render_state_comp_t *rs = nt_render_state_comp_get(s_shape_entity);
-
-    if (!rs->visible) {
+    if (!*nt_render_state_comp_visible(s_shape_entity)) {
         return;
     }
 
-    float *pos = xform->local_position;
-    float *rot = xform->local_rotation;
-    const float *col = rs->color;
+    float *pos = nt_transform_comp_position(s_shape_entity);
+    float *rot = nt_transform_comp_rotation(s_shape_entity);
+    const float *col = nt_render_state_comp_color(s_shape_entity);
     const float *wcol = s_wire_color;
     bool draw_solid = (s_render_mode == MODE_SOLID_WIRE) || (s_render_mode == MODE_SOLID);
     bool draw_wire = (s_render_mode == MODE_SOLID_WIRE) || (s_render_mode == MODE_WIRE);
 
+    float *scl = nt_transform_comp_scale(s_shape_entity);
+
     switch (s_current_shape) {
     case SHAPE_CUBE: {
-        float sz[3] = {xform->local_scale[0], xform->local_scale[1], xform->local_scale[2]};
+        float sz[3] = {scl[0], scl[1], scl[2]};
         if (draw_solid) {
             nt_shape_renderer_cube_rot(pos, sz, rot, col);
         }
@@ -165,7 +164,7 @@ static void draw_shape(void) {
         break;
     }
     case SHAPE_SPHERE: {
-        float radius = xform->local_scale[0];
+        float radius = scl[0];
         if (draw_solid) {
             nt_shape_renderer_sphere_rot(pos, radius, rot, col);
         }
@@ -175,8 +174,8 @@ static void draw_shape(void) {
         break;
     }
     case SHAPE_CYLINDER: {
-        float radius = xform->local_scale[0];
-        float height = xform->local_scale[1];
+        float radius = scl[0];
+        float height = scl[1];
         if (draw_solid) {
             nt_shape_renderer_cylinder_rot(pos, radius, height, rot, col);
         }
@@ -186,8 +185,8 @@ static void draw_shape(void) {
         break;
     }
     case SHAPE_CAPSULE: {
-        float radius = xform->local_scale[0];
-        float height = xform->local_scale[1];
+        float radius = scl[0];
+        float height = scl[1];
         if (draw_solid) {
             nt_shape_renderer_capsule_rot(pos, radius, height, rot, col);
         }
@@ -204,7 +203,7 @@ static void draw_shape(void) {
 /* ---- apply_rotation: compose yaw/pitch into transform component ---- */
 
 static void apply_rotation(float yaw, float pitch) {
-    nt_transform_comp_t *xform = nt_transform_comp_get(s_shape_entity);
+    float *local_rot = nt_transform_comp_rotation(s_shape_entity);
 
     versor q_yaw;
     vec3 axis_y = {0, 1, 0};
@@ -215,43 +214,43 @@ static void apply_rotation(float yaw, float pitch) {
     glm_quatv(q_pitch, pitch, axis_x);
 
     versor tmp;
-    glm_quat_mul(q_yaw, xform->local_rotation, tmp);
-    glm_quat_mul(q_pitch, tmp, xform->local_rotation);
-    glm_quat_normalize(xform->local_rotation);
-    xform->dirty = true;
+    glm_quat_mul(q_yaw, local_rot, tmp);
+    glm_quat_mul(q_pitch, tmp, local_rot);
+    glm_quat_normalize(local_rot);
+    *nt_transform_comp_dirty(s_shape_entity) = true;
 }
 
 /* ---- set_shape_scale: update transform scale for current shape ---- */
 
 static void set_shape_scale(void) {
-    nt_transform_comp_t *xform = nt_transform_comp_get(s_shape_entity);
+    float *scl = nt_transform_comp_scale(s_shape_entity);
     switch (s_current_shape) {
     case SHAPE_CUBE:
-        glm_vec3_copy((vec3){1.5F, 1.5F, 1.5F}, xform->local_scale);
+        glm_vec3_copy((vec3){1.5F, 1.5F, 1.5F}, scl);
         break;
     case SHAPE_SPHERE:
-        glm_vec3_copy((vec3){1.0F, 1.0F, 1.0F}, xform->local_scale);
+        glm_vec3_copy((vec3){1.0F, 1.0F, 1.0F}, scl);
         break;
     case SHAPE_CYLINDER:
-        glm_vec3_copy((vec3){0.6F, 2.0F, 0.6F}, xform->local_scale);
+        glm_vec3_copy((vec3){0.6F, 2.0F, 0.6F}, scl);
         break;
     case SHAPE_CAPSULE:
-        glm_vec3_copy((vec3){0.4F, 1.5F, 0.4F}, xform->local_scale);
+        glm_vec3_copy((vec3){0.4F, 1.5F, 0.4F}, scl);
         break;
     default:
         break;
     }
-    xform->dirty = true;
+    *nt_transform_comp_dirty(s_shape_entity) = true;
 }
 
 /* ---- set_shape_color: update render state from shape table ---- */
 
 static void set_shape_color(void) {
-    nt_render_state_comp_t *rs = nt_render_state_comp_get(s_shape_entity);
-    rs->color[0] = s_shape_colors[s_current_shape][0];
-    rs->color[1] = s_shape_colors[s_current_shape][1];
-    rs->color[2] = s_shape_colors[s_current_shape][2];
-    rs->color[3] = s_shape_colors[s_current_shape][3];
+    float *col = nt_render_state_comp_color(s_shape_entity);
+    col[0] = s_shape_colors[s_current_shape][0];
+    col[1] = s_shape_colors[s_current_shape][1];
+    col[2] = s_shape_colors[s_current_shape][2];
+    col[3] = s_shape_colors[s_current_shape][3];
 }
 
 /* ---- frame callback ---- */
@@ -277,9 +276,8 @@ static void frame(void) {
         s_render_mode = (s_render_mode + 1) % MODE_COUNT;
     }
     if (nt_input_key_is_pressed(NT_KEY_R)) {
-        nt_transform_comp_t *xform = nt_transform_comp_get(s_shape_entity);
-        glm_quat_identity(xform->local_rotation);
-        xform->dirty = true;
+        glm_quat_identity(nt_transform_comp_rotation(s_shape_entity));
+        *nt_transform_comp_dirty(s_shape_entity) = true;
         s_vel_yaw = 0;
         s_vel_pitch = 0;
     }
@@ -400,8 +398,8 @@ int main(void) {
     /* Create the shape entity */
     s_shape_entity = nt_entity_create();
 
-    nt_transform_comp_t *xform = nt_transform_comp_add(s_shape_entity);
-    xform->local_position[1] = s_shape_y;
+    nt_transform_comp_add(s_shape_entity);
+    nt_transform_comp_position(s_shape_entity)[1] = s_shape_y;
 
     nt_render_state_comp_add(s_shape_entity);
 
