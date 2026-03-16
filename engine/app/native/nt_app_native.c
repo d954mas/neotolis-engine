@@ -5,10 +5,9 @@
 #include "window/nt_window.h"
 #include <GLFW/glfw3.h>
 
-#define g_nt_glfw_window ((GLFWwindow *)g_nt_window.platform_handle)
+#include "core/nt_builtins.h"
 
-/* Use __builtin_fminf to bypass Windows UCRT DLL import issue with ASan */
-#define nt_fminf(a, b) __builtin_fminf((a), (b))
+#define g_nt_glfw_window ((GLFWwindow *)g_nt_window.platform_handle)
 
 /* ---- File-scope statics (zero-initialized by C standard) ---- */
 
@@ -42,7 +41,7 @@ void nt_app_run(nt_app_frame_fn fn) {
 
     while (!s_should_quit && !glfwWindowShouldClose(g_nt_glfw_window)) {
         double now = nt_time_now();
-        float dt = nt_fminf((float)(now - prev_time), g_nt_app.max_dt);
+        float dt = fminf((float)(now - prev_time), g_nt_app.max_dt);
         prev_time = now;
 
         g_nt_app.dt = dt;
