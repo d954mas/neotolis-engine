@@ -87,9 +87,9 @@
 
 ### Render Components
 
-- [ ] **RCOMP-01**: MeshComponent stores mesh asset reference
-- [ ] **RCOMP-02**: MaterialComponent stores material reference
-- [ ] **RCOMP-03**: RenderStateComponent with visible (bool), color (vec4), params0 (vec4)
+- [x] **RCOMP-01**: MeshComponent stores mesh asset reference
+- [x] **RCOMP-02**: MaterialComponent stores material reference
+- [x] **RCOMP-03**: RenderStateComponent with visible (bool), color (vec4), params0 (vec4)
 
 ### Mesh Rendering Pipeline
 
@@ -171,9 +171,9 @@
 | XFORM-01 | Phase 22 | Pending |
 | XFORM-02 | Phase 22 | Pending |
 | XFORM-03 | Phase 22 | Pending |
-| RCOMP-01 | Phase 22 | Pending |
-| RCOMP-02 | Phase 22 | Pending |
-| RCOMP-03 | Phase 22 | Pending |
+| RCOMP-01 | Phase 22 | Complete |
+| RCOMP-02 | Phase 22 | Complete |
+| RCOMP-03 | Phase 22 | Complete |
 | BUILD-01 | Phase 23 | Pending |
 | BUILD-02 | Phase 23 | Pending |
 | BUILD-03 | Phase 23 | Pending |

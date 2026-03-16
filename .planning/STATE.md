@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Asset Pipeline
-current_phase: Phase 22 -- Entity System (in progress)
-current_plan: Plan 1 of 3
-status: executing
-last_updated: "2026-03-16T18:37:25Z"
-last_activity: 2026-03-16 -- Completed 22-01 (entity pool core + 15 unit tests)
+current_phase: Phase 22 -- Entity System (complete)
+current_plan: Plan 3 of 3
+status: phase_complete
+last_updated: "2026-03-16T18:52:22Z"
+last_activity: 2026-03-16 -- Completed 22-02 (transform component + 15 tests); Phase 22 complete (3/3 plans)
 progress:
   total_phases: 10
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 5
   completed_plans: 5
 ---
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Core value:** Simple, fast, predictable -- composable features wired through code, zero hidden magic.
-**Current focus:** v1.3 Asset Pipeline -- Phase 22 in progress (1/3 plans done)
+**Current focus:** v1.3 Asset Pipeline -- Phase 22 complete (3/3 plans done)
 
 ## Position
 
 **Milestone:** v1.3 Asset Pipeline (Phases 20-28)
-**Current phase:** Phase 22 -- Entity System (in progress)
-**Current Plan:** Plan 1 of 3 complete
-**Status:** Executing
-**Last activity:** 2026-03-16 -- Completed 22-01 (entity pool core + 15 unit tests)
+**Current phase:** Phase 22 -- Entity System (complete)
+**Current Plan:** Plan 3 of 3 complete
+**Status:** Phase complete
+**Last activity:** 2026-03-16 -- Completed 22-02 (transform component + 15 tests); Phase 22 complete
 
 ## Decisions
 
@@ -69,10 +69,20 @@ Phase 21-01 decisions:
 | 20 | 02 | 6min | 2 | 6 |
 | 21 | 01 | 9min | 2 | 6 |
 | 22 | 01 | 5min | 2 | 7 |
+| 22 | 02 | 11min | 2 | 5 |
+| 22 | 03 | 9min | 2 | 11 |
 
 Phase 22-01 decisions:
 - NT_ASSERT_ALWAYS added to nt_assert.h (shared utility) for release-mode stale handle assertions
 - Entity destroy increments generation and clears alive BEFORE calling storage callbacks (prevents re-add during destroy)
+
+Phase 22-02 decisions:
+- vec4 for quaternion rotation instead of versor to avoid cglm type compatibility warnings
+- Custom ASSERT_FLOAT_NEAR macro in tests because Unity float assertions disabled globally (UNITY_EXCLUDE_FLOAT)
+
+Phase 22-03 decisions:
+- Float suffix uppercase (1.0F) per clang-tidy readability-uppercase-literal-suffix rule
+- RenderStateComponent color as float[4] (not cglm vec4) to avoid nt_math dependency
 
 ## Accumulated Context
 
@@ -100,3 +110,6 @@ Phase 22-01 decisions:
 - 2026-03-16: Phase 20 complete -- all shared format headers defined, ready for Phase 21
 - 2026-03-16: Completed 21-01-PLAN.md -- texture pool infrastructure, 14 new tests (32 total), 9min
 - 2026-03-16: Completed 22-01-PLAN.md -- entity pool core, generational handles, storage registration, 15 tests, 5min
+- 2026-03-16: Completed 22-03-PLAN.md -- render components (mesh, material, render_state), 16 unit tests, 9min
+- 2026-03-16: Completed 22-02-PLAN.md -- transform component, sparse+dense storage, TRS matrix, 15 tests, 11min
+- 2026-03-16: Phase 22 complete -- entity system with 4 component types, 46 unit tests total
