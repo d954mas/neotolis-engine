@@ -10,7 +10,7 @@
 
 /* ---- Callbacks ---- */
 
-typedef void (*nt_comp_default_fn)(uint16_t dense_idx);            /* init new slot */
+typedef void (*nt_comp_default_fn)(uint16_t dense_idx);              /* init new slot */
 typedef void (*nt_comp_swap_fn)(uint16_t dst_idx, uint16_t src_idx); /* move src data to dst on swap-and-pop */
 
 /* ---- Index-only sparse+dense storage ---- */
@@ -27,8 +27,7 @@ typedef struct {
 
 /* ---- Lifecycle ---- */
 
-nt_result_t nt_comp_storage_init(nt_comp_storage_t *s, uint16_t capacity, nt_comp_default_fn default_fn,
-                                 nt_comp_swap_fn swap_fn);
+nt_result_t nt_comp_storage_init(nt_comp_storage_t *s, uint16_t capacity, nt_comp_default_fn default_fn, nt_comp_swap_fn swap_fn);
 void nt_comp_storage_shutdown(nt_comp_storage_t *s);
 
 /* ---- Operations ---- */

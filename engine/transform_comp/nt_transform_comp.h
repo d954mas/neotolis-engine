@@ -24,9 +24,9 @@ void nt_transform_comp_remove(nt_entity_t entity);
 
 /* ---- Field access (returns pointer into dense array, valid until next add/remove) ---- */
 
-float *nt_transform_comp_position(nt_entity_t entity);  /* vec3 */
-float *nt_transform_comp_rotation(nt_entity_t entity);  /* vec4 quaternion */
-float *nt_transform_comp_scale(nt_entity_t entity);     /* vec3 */
+float *nt_transform_comp_position(nt_entity_t entity); /* vec3 */
+float *nt_transform_comp_rotation(nt_entity_t entity); /* vec4 quaternion */
+float *nt_transform_comp_scale(nt_entity_t entity);    /* vec3 */
 bool *nt_transform_comp_dirty(nt_entity_t entity);
 const float *nt_transform_comp_world_matrix(nt_entity_t entity); /* mat4, read-only */
 

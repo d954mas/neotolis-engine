@@ -7,8 +7,7 @@
 
 /* ---- Lifecycle ---- */
 
-nt_result_t nt_comp_storage_init(nt_comp_storage_t *s, uint16_t capacity, nt_comp_default_fn default_fn,
-                                 nt_comp_swap_fn swap_fn) {
+nt_result_t nt_comp_storage_init(nt_comp_storage_t *s, uint16_t capacity, nt_comp_default_fn default_fn, nt_comp_swap_fn swap_fn) {
     NT_ASSERT(s);
     NT_ASSERT(default_fn);
     NT_ASSERT(swap_fn);
