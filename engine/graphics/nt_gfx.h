@@ -17,6 +17,10 @@ typedef struct {
     uint32_t id;
 } nt_buffer_t;
 
+typedef struct {
+    uint32_t id;
+} nt_texture_t;
+
 /* ---- Enums ---- */
 
 typedef enum {
@@ -63,9 +67,25 @@ typedef enum {
     NT_DEPTH_ALWAYS,
 } nt_depth_func_t;
 
+typedef enum {
+    NT_FILTER_NEAREST = 0,
+    NT_FILTER_LINEAR,
+    NT_FILTER_NEAREST_MIPMAP_NEAREST,
+    NT_FILTER_LINEAR_MIPMAP_NEAREST,
+    NT_FILTER_NEAREST_MIPMAP_LINEAR,
+    NT_FILTER_LINEAR_MIPMAP_LINEAR,
+} nt_texture_filter_t;
+
+typedef enum {
+    NT_WRAP_CLAMP_TO_EDGE = 0,
+    NT_WRAP_REPEAT,
+    NT_WRAP_MIRRORED_REPEAT,
+} nt_texture_wrap_t;
+
 /* ---- Vertex layout ---- */
 
 #define NT_GFX_MAX_VERTEX_ATTRS 16
+#define NT_GFX_MAX_TEXTURE_SLOTS 8
 
 typedef struct {
     uint8_t location;
@@ -85,6 +105,7 @@ typedef struct {
     uint32_t max_shaders;     /* default: 32 */
     uint32_t max_pipelines;   /* default: 16 */
     uint32_t max_buffers;     /* default: 128 */
+    uint32_t max_textures;    /* default: 64 */
     bool depth;               /* request depth buffer (default: true) */
     bool stencil;             /* request stencil buffer (default: false) */
     bool antialias;           /* MSAA (default: false) */
@@ -125,6 +146,18 @@ typedef struct {
 } nt_buffer_desc_t;
 
 typedef struct {
+    uint32_t width;                 /* must be power-of-2 */
+    uint32_t height;                /* must be power-of-2 */
+    const void *data;               /* raw RGBA8 pixel data (width * height * 4 bytes) */
+    nt_texture_filter_t min_filter; /* default: NT_FILTER_NEAREST */
+    nt_texture_filter_t mag_filter; /* default: NT_FILTER_NEAREST (only NEAREST or LINEAR valid) */
+    nt_texture_wrap_t wrap_u;       /* default: NT_WRAP_CLAMP_TO_EDGE */
+    nt_texture_wrap_t wrap_v;       /* default: NT_WRAP_CLAMP_TO_EDGE */
+    bool gen_mipmaps;               /* call glGenerateMipmap after upload */
+    const char *label;
+} nt_texture_desc_t;
+
+typedef struct {
     float clear_color[4];
     float clear_depth; /* typically 1.0f; zero-init gives 0.0 which fails all depth tests */
 } nt_pass_desc_t;
@@ -157,6 +190,7 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_shaders = 32,
         .max_pipelines = 16,
         .max_buffers = 128,
+        .max_textures = 64,
         .depth = true,
         .premultiplied_alpha = true,
     };
@@ -179,18 +213,21 @@ void nt_gfx_end_pass(void);
 nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
+nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
 
 /* ---- Resource destruction ---- */
 
 void nt_gfx_destroy_shader(nt_shader_t shd);
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
+void nt_gfx_destroy_texture(nt_texture_t tex);
 
 /* ---- Draw state ---- */
 
 void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 void nt_gfx_bind_vertex_buffer(nt_buffer_t buf);
 void nt_gfx_bind_index_buffer(nt_buffer_t buf);
+void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
 
 /* ---- Uniforms ---- */
 
