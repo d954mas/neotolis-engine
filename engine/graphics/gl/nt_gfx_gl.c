@@ -560,6 +560,20 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) {
     }
 }
 
+/* ---- Texture placeholders (Plan 21-02 will implement GL texture support) ---- */
+
+uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
+    (void)desc;
+    return 1; /* TODO(21-02): implement GL texture creation */
+}
+
+void nt_gfx_backend_destroy_texture(uint32_t backend_handle) { (void)backend_handle; /* TODO(21-02): implement GL texture destruction */ }
+
+void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
+    (void)backend_handle;
+    (void)slot; /* TODO(21-02): implement GL texture binding */
+}
+
 void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
     glDrawArraysInstanced(GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices, (GLsizei)instance_count);
 }
