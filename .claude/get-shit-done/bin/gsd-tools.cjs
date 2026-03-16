@@ -377,6 +377,11 @@ async function main() {
       break;
     }
 
+    case "config-set-model-profile": {
+      config.cmdConfigSetModelProfile(cwd, args[1], raw);
+      break;
+    }
+
     case 'config-get': {
       config.cmdConfigGet(cwd, args[1], raw);
       break;
@@ -485,6 +490,12 @@ async function main() {
     case 'progress': {
       const subcommand = args[1] || 'json';
       commands.cmdProgressRender(cwd, subcommand, raw);
+      break;
+    }
+
+    case 'stats': {
+      const subcommand = args[1] || 'json';
+      commands.cmdStats(cwd, subcommand, raw);
       break;
     }
 

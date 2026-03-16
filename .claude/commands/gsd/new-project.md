@@ -29,14 +29,14 @@ Initialize a new project through unified flow: questioning → research (optiona
 </objective>
 
 <execution_context>
-@./.claude/get-shit-done/workflows/new-project.md
-@./.claude/get-shit-done/references/questioning.md
-@./.claude/get-shit-done/references/ui-brand.md
-@./.claude/get-shit-done/templates/project.md
-@./.claude/get-shit-done/templates/requirements.md
+@C:/projects/neotolis-engine/.claude/get-shit-done/workflows/new-project.md
+@C:/projects/neotolis-engine/.claude/get-shit-done/references/questioning.md
+@C:/projects/neotolis-engine/.claude/get-shit-done/references/ui-brand.md
+@C:/projects/neotolis-engine/.claude/get-shit-done/templates/project.md
+@C:/projects/neotolis-engine/.claude/get-shit-done/templates/requirements.md
 </execution_context>
 
 <process>
-Execute the new-project workflow from @./.claude/get-shit-done/workflows/new-project.md end-to-end.
+Execute the new-project workflow from @C:/projects/neotolis-engine/.claude/get-shit-done/workflows/new-project.md end-to-end.
 Preserve all workflow gates (validation, approvals, commits, routing).
 </process>

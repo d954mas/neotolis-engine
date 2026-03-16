@@ -9,8 +9,6 @@ tools:
   - Glob
   - Grep
 color: "#8B5CF6"
-skills:
-  - gsd-nyquist-auditor-workflow
 ---
 
 <role>

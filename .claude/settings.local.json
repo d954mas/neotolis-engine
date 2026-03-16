@@ -75,7 +75,8 @@
       "WebFetch(domain:emscripten.org)",
       "WebFetch(domain:webglfundamentals.org)",
       "Bash(tree -L 3 -I node_modules /c/projects/neotolis-engine/neotolis-engine-site/src 2>/dev/null || find /c/projects/neotolis-engine/neotolis-engine-site/src -not -path \"*/\\\\.*\" | head -20)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Skill(gsd:update)"
     ]
   }
 }
