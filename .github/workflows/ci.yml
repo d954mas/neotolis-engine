@@ -8,14 +8,12 @@ on:
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
-      - 'neotolis-engine-site/**'
   pull_request:
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
-      - 'neotolis-engine-site/**'
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -136,8 +134,8 @@ jobs:
           cmake --build build/submodule-test
           ./build/submodule-test/submodule_test
 
-  tidy-check:
-    name: clang-tidy
+  lint:
+    name: Format & Tidy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -148,29 +146,19 @@ jobs:
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev
 
+      - name: Check formatting
+        run: |
+          find engine shared tools examples -name '*.c' -o -name '*.h' | \
+            xargs clang-format --dry-run --Werror
+
       - name: Configure
         run: cmake --preset native-debug
 
       - name: Run clang-tidy
         run: bash scripts/tidy.sh build/_cmake/native-debug
 
-  format-check:
-    name: Format Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install clang-format
-        run: sudo apt-get update && sudo apt-get install -y clang-format
-
-      - name: Check formatting
-        run: |
-          find engine shared tools examples -name '*.c' -o -name '*.h' | \
-            xargs clang-format --dry-run --Werror
-
   size-track:
     name: Track Build Size
-    needs: [wasm]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
@@ -307,7 +295,6 @@ jobs:
 
   pr-size-comment:
     name: PR Size Comment
-    needs: [wasm]
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     permissions:
