@@ -23,7 +23,7 @@ void nt_app_run(nt_app_frame_fn fn) {
 
     while (!nt_window_should_close()) {
         double now = nt_time_now();
-        float dt = __builtin_fminf((float)(now - prev_time), g_nt_app.max_dt);
+        float dt = fminf((float)(now - prev_time), g_nt_app.max_dt);
         prev_time = now;
 
         g_nt_app.dt = dt;
