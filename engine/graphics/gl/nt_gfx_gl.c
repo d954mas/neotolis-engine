@@ -57,6 +57,7 @@ static uint32_t s_bound_pipeline_slot; /* currently bound pipeline index */
 static nt_gfx_gl_pipeline_t *s_pipelines; /* pipeline data, indexed by slot */
 static GLuint *s_buffer_gl;               /* GL buffer names, indexed by slot */
 static GLenum *s_buffer_targets;          /* GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY_BUFFER */
+static GLuint *s_texture_gl;              /* GL texture names, indexed by slot */
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
 
@@ -170,6 +171,38 @@ static GLenum map_buffer_usage(nt_buffer_usage_t u) {
     }
 }
 
+static GLenum map_texture_filter(nt_texture_filter_t f) {
+    switch (f) {
+    case NT_FILTER_NEAREST:
+        return GL_NEAREST;
+    case NT_FILTER_LINEAR:
+        return GL_LINEAR;
+    case NT_FILTER_NEAREST_MIPMAP_NEAREST:
+        return GL_NEAREST_MIPMAP_NEAREST;
+    case NT_FILTER_LINEAR_MIPMAP_NEAREST:
+        return GL_LINEAR_MIPMAP_NEAREST;
+    case NT_FILTER_NEAREST_MIPMAP_LINEAR:
+        return GL_NEAREST_MIPMAP_LINEAR;
+    case NT_FILTER_LINEAR_MIPMAP_LINEAR:
+        return GL_LINEAR_MIPMAP_LINEAR;
+    default:
+        return GL_NEAREST;
+    }
+}
+
+static GLenum map_texture_wrap(nt_texture_wrap_t w) {
+    switch (w) {
+    case NT_WRAP_CLAMP_TO_EDGE:
+        return GL_CLAMP_TO_EDGE;
+    case NT_WRAP_REPEAT:
+        return GL_REPEAT;
+    case NT_WRAP_MIRRORED_REPEAT:
+        return GL_MIRRORED_REPEAT;
+    default:
+        return GL_CLAMP_TO_EDGE;
+    }
+}
+
 /* ==== Backend interface implementation ==== */
 
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
@@ -184,6 +217,7 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_pipelines = (nt_gfx_gl_pipeline_t *)calloc(s_init_desc.max_pipelines + 1, sizeof(nt_gfx_gl_pipeline_t));
     s_buffer_gl = (GLuint *)calloc(s_init_desc.max_buffers + 1, sizeof(GLuint));
     s_buffer_targets = (GLenum *)calloc(s_init_desc.max_buffers + 1, sizeof(GLenum));
+    s_texture_gl = (GLuint *)calloc(s_init_desc.max_textures + 1, sizeof(GLuint));
 
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
@@ -195,10 +229,12 @@ void nt_gfx_backend_shutdown(void) {
     free(s_pipelines);
     free(s_buffer_gl);
     free(s_buffer_targets);
+    free(s_texture_gl);
 
     s_pipelines = NULL;
     s_buffer_gl = NULL;
     s_buffer_targets = NULL;
+    s_texture_gl = NULL;
 
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
@@ -560,18 +596,61 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) {
     }
 }
 
-/* ---- Texture placeholders (Plan 21-02 will implement GL texture support) ---- */
+/* ---- Texture management ---- */
 
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
-    (void)desc;
-    return 1; /* TODO(21-02): implement GL texture creation */
+    GLuint tex;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+
+    /* Set filter and wrap parameters BEFORE uploading data */
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (GLint)map_texture_filter(desc->min_filter));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (GLint)map_texture_filter(desc->mag_filter));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (GLint)map_texture_wrap(desc->wrap_u));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (GLint)map_texture_wrap(desc->wrap_v));
+
+    /* Upload pixel data (may be NULL for context-loss recovery placeholder) */
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)desc->width, (GLsizei)desc->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, desc->data);
+
+    /* Generate mipmaps after base level upload if requested and data present */
+    if (desc->gen_mipmaps && desc->data) {
+        glGenerateMipmap(GL_TEXTURE_2D);
+    }
+
+    /* Find free texture slot (1-based, 0 is reserved invalid) */
+    uint32_t slot = 0;
+    for (uint32_t i = 1; i <= s_init_desc.max_textures; i++) {
+        if (s_texture_gl[i] == 0) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == 0) {
+        glDeleteTextures(1, &tex);
+        return 0;
+    }
+
+    s_texture_gl[slot] = tex;
+    return slot;
 }
 
-void nt_gfx_backend_destroy_texture(uint32_t backend_handle) { (void)backend_handle; /* TODO(21-02): implement GL texture destruction */ }
+void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_textures) {
+        return;
+    }
+    GLuint tex = s_texture_gl[backend_handle];
+    if (tex) {
+        glDeleteTextures(1, &tex);
+    }
+    s_texture_gl[backend_handle] = 0;
+}
 
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
-    (void)backend_handle;
-    (void)slot; /* TODO(21-02): implement GL texture binding */
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_textures) {
+        return;
+    }
+    glActiveTexture(GL_TEXTURE0 + slot);
+    glBindTexture(GL_TEXTURE_2D, s_texture_gl[backend_handle]);
 }
 
 void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
@@ -602,6 +681,9 @@ bool nt_gfx_backend_recreate_all_resources(void) {
     }
     if (s_buffer_targets) {
         memset(s_buffer_targets, 0, (s_init_desc.max_buffers + 1) * sizeof(GLenum));
+    }
+    if (s_texture_gl) {
+        memset(s_texture_gl, 0, (s_init_desc.max_textures + 1) * sizeof(GLuint));
     }
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
