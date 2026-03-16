@@ -54,6 +54,60 @@
             "webRoot": "${workspaceFolder}/build/examples/spinning_cube/wasm-release",
             "preLaunchTask": "Build & Serve spinning_cube (release)",
             "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Debug Desktop hello",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/hello/native-debug/hello.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-debug"
+        },
+        {
+            "name": "Run Desktop hello (release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/hello/native-release/hello.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-release"
+        },
+        {
+            "name": "Debug Desktop bench_shapes",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/bench_shapes/native-debug/bench_shapes.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-debug"
+        },
+        {
+            "name": "Run Desktop bench_shapes (release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/bench_shapes/native-release/bench_shapes.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-release"
+        },
+        {
+            "name": "Debug Desktop spinning_cube",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/spinning_cube/native-debug/spinning_cube.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-debug"
+        },
+        {
+            "name": "Run Desktop spinning_cube (release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/spinning_cube/native-release/spinning_cube.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-release"
         }
     ]
 }

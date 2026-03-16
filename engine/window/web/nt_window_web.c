@@ -4,6 +4,7 @@
 
 #include "window/nt_window.h"
 #include <emscripten.h>
+#include <emscripten/html5.h>
 #include <math.h>
 
 /* ---- EM_JS canvas bridge ---- */
@@ -53,6 +54,16 @@ void nt_window_poll(void) {
 }
 
 void nt_window_shutdown(void) { /* No-op on web */ }
+
+void nt_window_set_fullscreen(bool fullscreen) {
+    /* Browser requires a user gesture (click/key) on the call stack for this
+       to succeed. Calling outside a gesture handler is silently ignored. */
+    if (fullscreen) {
+        emscripten_request_fullscreen("#canvas", true);
+    } else {
+        emscripten_exit_fullscreen();
+    }
+}
 
 #else
 typedef int nt_window_web_unused;

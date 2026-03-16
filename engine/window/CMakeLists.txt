@@ -16,6 +16,26 @@ endif()
 
 target_link_libraries(nt_window PUBLIC nt_core)
 
+if(NOT EMSCRIPTEN)
+    # PUBLIC: glfw propagates to all modules/examples that link nt_window,
+    # so they never need to mention glfw themselves.
+    target_link_libraries(nt_window PUBLIC glfw)
+    target_link_libraries(nt_window PRIVATE nt_log)
+endif()
+
 if(UNIX)
     target_link_libraries(nt_window PRIVATE m)
+endif()
+
+# Stub implementation for headless builds (CI, tests)
+nt_add_module(nt_window_stub
+    nt_window.c
+    stub/nt_window_stub.c
+    nt_window.h
+)
+
+target_link_libraries(nt_window_stub PUBLIC nt_core)
+
+if(UNIX)
+    target_link_libraries(nt_window_stub PRIVATE m)
 endif()

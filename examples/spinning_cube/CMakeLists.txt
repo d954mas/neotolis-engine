@@ -3,7 +3,7 @@ target_link_libraries(spinning_cube PRIVATE nt_core nt_app nt_input nt_window nt
 if(EMSCRIPTEN)
     target_link_libraries(spinning_cube PRIVATE nt_platform_web nt_gfx)
 else()
-    target_link_libraries(spinning_cube PRIVATE nt_gfx_stub)
+    target_link_libraries(spinning_cube PRIVATE nt_gfx)
 endif()
 
 # Strict warning and sanitizer policy

@@ -55,6 +55,8 @@ int main(void) {
         return 1;
     }
 
+    g_nt_window.width = 800;
+    g_nt_window.height = 600;
     nt_window_init();
     nt_input_init();
 #ifdef NT_PLATFORM_WEB
@@ -71,6 +73,7 @@ int main(void) {
 
 #ifndef NT_PLATFORM_WEB
     nt_input_shutdown();
+    nt_window_shutdown();
     nt_engine_shutdown();
 #endif
     return 0;

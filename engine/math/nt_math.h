@@ -12,18 +12,7 @@
  *      that fire under -Werror.
  */
 
-#include <math.h>
-
-/* Redirect standard math to compiler builtins.
-   Must come after <math.h> (so declarations exist) but before cglm
-   (so cglm's inline code uses builtins instead of DLL-imported symbols). */
-#define sinf(x) __builtin_sinf(x)
-#define cosf(x) __builtin_cosf(x)
-#define tanf(x) __builtin_tanf(x)
-#define sqrtf(x) __builtin_sqrtf(x)
-#define fabsf(x) __builtin_fabsf(x)
-#define acosf(x) __builtin_acosf(x)
-#define powf(x, y) __builtin_powf(x, y)
+#include "core/nt_builtins.h"
 
 /* Suppress cglm header warnings under -Werror */
 #pragma GCC diagnostic push
