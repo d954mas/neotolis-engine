@@ -4,6 +4,18 @@
 
 static nt_comp_storage_t s_storage;
 
+/* ---- Default initializer ---- */
+
+static void render_state_default(void *comp) {
+    nt_render_state_comp_t *rs = (nt_render_state_comp_t *)comp;
+    rs->tag = 0;
+    rs->visible = true;
+    rs->color[0] = 1.0F;
+    rs->color[1] = 1.0F;
+    rs->color[2] = 1.0F;
+    rs->color[3] = 1.0F;
+}
+
 /* ---- Destroy callback ---- */
 
 static void render_state_on_destroy(nt_entity_t entity) {
@@ -19,7 +31,7 @@ nt_result_t nt_render_state_comp_init(const nt_render_state_comp_desc_t *desc) {
         return NT_ERR_INVALID_ARG;
     }
 
-    nt_result_t res = nt_comp_storage_init(&s_storage, desc->capacity, sizeof(nt_render_state_comp_t));
+    nt_result_t res = nt_comp_storage_init(&s_storage, desc->capacity, sizeof(nt_render_state_comp_t), render_state_default);
     if (res != NT_OK) {
         return res;
     }
@@ -37,19 +49,7 @@ void nt_render_state_comp_shutdown(void) { nt_comp_storage_shutdown(&s_storage);
 
 /* ---- Typed wrappers ---- */
 
-nt_render_state_comp_t *nt_render_state_comp_add(nt_entity_t entity) {
-    nt_render_state_comp_t *comp = (nt_render_state_comp_t *)nt_comp_storage_add(&s_storage, entity);
-
-    /* Defaults per user decision: tag=0, visible=true, color=white */
-    comp->tag = 0;
-    comp->visible = true;
-    comp->color[0] = 1.0F;
-    comp->color[1] = 1.0F;
-    comp->color[2] = 1.0F;
-    comp->color[3] = 1.0F;
-
-    return comp;
-}
+nt_render_state_comp_t *nt_render_state_comp_add(nt_entity_t entity) { return (nt_render_state_comp_t *)nt_comp_storage_add(&s_storage, entity); }
 
 nt_render_state_comp_t *nt_render_state_comp_get(nt_entity_t entity) { return (nt_render_state_comp_t *)nt_comp_storage_get(&s_storage, entity); }
 

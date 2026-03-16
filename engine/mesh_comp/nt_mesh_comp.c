@@ -4,6 +4,13 @@
 
 static nt_comp_storage_t s_storage;
 
+/* ---- Default initializer ---- */
+
+static void mesh_default(void *comp) {
+    nt_mesh_comp_t *m = (nt_mesh_comp_t *)comp;
+    m->mesh_handle = 0;
+}
+
 /* ---- Destroy callback ---- */
 
 static void mesh_on_destroy(nt_entity_t entity) {
@@ -19,7 +26,7 @@ nt_result_t nt_mesh_comp_init(const nt_mesh_comp_desc_t *desc) {
         return NT_ERR_INVALID_ARG;
     }
 
-    nt_result_t res = nt_comp_storage_init(&s_storage, desc->capacity, sizeof(nt_mesh_comp_t));
+    nt_result_t res = nt_comp_storage_init(&s_storage, desc->capacity, sizeof(nt_mesh_comp_t), mesh_default);
     if (res != NT_OK) {
         return res;
     }

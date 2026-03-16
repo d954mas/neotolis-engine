@@ -7,8 +7,9 @@
 
 /* ---- Lifecycle ---- */
 
-nt_result_t nt_comp_storage_init(nt_comp_storage_t *s, uint16_t capacity, size_t element_size) {
+nt_result_t nt_comp_storage_init(nt_comp_storage_t *s, uint16_t capacity, size_t element_size, nt_comp_default_fn default_fn) {
     NT_ASSERT(s);
+    NT_ASSERT(default_fn);
     if (capacity == 0) {
         return NT_ERR_INVALID_ARG;
     }
@@ -17,6 +18,7 @@ nt_result_t nt_comp_storage_init(nt_comp_storage_t *s, uint16_t capacity, size_t
     memset(s, 0, sizeof(*s));
     s->capacity = capacity;
     s->element_size = element_size;
+    s->default_fn = default_fn;
 
     uint32_t sparse_count = (uint32_t)nt_entity_max() + 1;
     s->data = calloc(capacity, element_size);
@@ -65,7 +67,7 @@ void *nt_comp_storage_add(nt_comp_storage_t *s, nt_entity_t entity) {
     s->count++;
 
     void *comp = (char *)s->data + (size_t)dense_idx * s->element_size;
-    memset(comp, 0, s->element_size);
+    s->default_fn(comp);
     return comp;
 }
 

@@ -4,6 +4,17 @@
 
 static nt_comp_storage_t s_storage;
 
+/* ---- Default initializer ---- */
+
+static void transform_default(void *comp) {
+    nt_transform_comp_t *t = (nt_transform_comp_t *)comp;
+    glm_vec3_zero(t->local_position);
+    glm_quat_identity(t->local_rotation);
+    glm_vec3_one(t->local_scale);
+    glm_mat4_identity(t->world_matrix);
+    t->dirty = true;
+}
+
 /* ---- Destroy callback ---- */
 
 static void transform_on_destroy(nt_entity_t entity) {
@@ -19,7 +30,7 @@ nt_result_t nt_transform_comp_init(const nt_transform_comp_desc_t *desc) {
         return NT_ERR_INVALID_ARG;
     }
 
-    nt_result_t res = nt_comp_storage_init(&s_storage, desc->capacity, sizeof(nt_transform_comp_t));
+    nt_result_t res = nt_comp_storage_init(&s_storage, desc->capacity, sizeof(nt_transform_comp_t), transform_default);
     if (res != NT_OK) {
         return res;
     }
@@ -37,17 +48,7 @@ void nt_transform_comp_shutdown(void) { nt_comp_storage_shutdown(&s_storage); }
 
 /* ---- Typed wrappers ---- */
 
-nt_transform_comp_t *nt_transform_comp_add(nt_entity_t entity) {
-    nt_transform_comp_t *comp = (nt_transform_comp_t *)nt_comp_storage_add(&s_storage, entity);
-
-    glm_vec3_zero(comp->local_position);
-    glm_quat_identity(comp->local_rotation);
-    glm_vec3_one(comp->local_scale);
-    glm_mat4_identity(comp->world_matrix);
-    comp->dirty = true;
-
-    return comp;
-}
+nt_transform_comp_t *nt_transform_comp_add(nt_entity_t entity) { return (nt_transform_comp_t *)nt_comp_storage_add(&s_storage, entity); }
 
 nt_transform_comp_t *nt_transform_comp_get(nt_entity_t entity) { return (nt_transform_comp_t *)nt_comp_storage_get(&s_storage, entity); }
 
