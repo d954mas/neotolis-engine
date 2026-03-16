@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis)
-# Commit: 31b496d
+# Commit: 6414f3b
 
 ## WASM Section Sizes
 
@@ -14,10 +14,10 @@ Global                 9 B
 Export                51 B
 Elem                  17 B
 Code               57225 B
-Data                8635 B
-Custom              2765 B
+Data                8627 B
+Custom              2775 B
 ---------------- ----------
-TOTAL              69317 B
+TOTAL              69319 B
 
 ## Top 30 Functions by Size
 
@@ -63,26 +63,26 @@ Total code size: 57105 B
 
 Module                         Size
 ------------------------ ----------
-libnt_app.a                 1432 B
+libnt_app.a                 1428 B
 libnt_core.a                1688 B
 libnt_gfx.a                26268 B
 libnt_input.a              16358 B
 libnt_shape_renderer.a   1140002 B
-libnt_window.a              3702 B
+libnt_window.a              3928 B
 ------------------------ ----------
-TOTAL (linked)           1189450 B
+TOTAL (linked)           1189672 B
 
 Not linked to spinning_cube:
-libnt_app_stub.a            1432 B
+libnt_app_stub.a            1428 B
 libnt_gfx_stub.a           17420 B
-libnt_input_stub.a         10902 B
+libnt_input_stub.a         11148 B
 libnt_log.a                  970 B
 libnt_log_stub.a             506 B
 libnt_time.a                 866 B
-libnt_window_stub.a         1608 B
+libnt_window_stub.a         1838 B
 
 
 ## Data Segments Summary
 
-Segments: 31
-Total data size: 8419 B
+Segments: 32
+Total data size: 8404 B

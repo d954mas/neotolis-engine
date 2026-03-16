@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis)
-# Commit: 31b496d
+# Commit: 6414f3b
 
 ## WASM Section Sizes
 
@@ -14,8 +14,8 @@ Global                 8 B
 Export                41 B
 Elem                  14 B
 Code               15062 B
-Data                 790 B
-Custom              1045 B
+Data                 781 B
+Custom              1054 B
 ---------------- ----------
 TOTAL              17198 B
 
@@ -63,26 +63,26 @@ Total code size: 15002 B
 
 Module                         Size
 ------------------------ ----------
-libnt_app.a                 1432 B
+libnt_app.a                 1428 B
 libnt_core.a                1688 B
 libnt_input.a              16358 B
-libnt_window.a              3702 B
+libnt_window.a              3928 B
 ------------------------ ----------
-TOTAL (linked)             23180 B
+TOTAL (linked)             23402 B
 
 Not linked to hello:
-libnt_app_stub.a            1432 B
+libnt_app_stub.a            1428 B
 libnt_gfx.a                26268 B
 libnt_gfx_stub.a           17420 B
-libnt_input_stub.a         10902 B
+libnt_input_stub.a         11148 B
 libnt_log.a                  970 B
 libnt_log_stub.a             506 B
 libnt_shape_renderer.a   1140002 B
 libnt_time.a                 866 B
-libnt_window_stub.a         1608 B
+libnt_window_stub.a         1838 B
 
 
 ## Data Segments Summary
 
-Segments: 20
-Total data size: 668 B
+Segments: 21
+Total data size: 653 B
