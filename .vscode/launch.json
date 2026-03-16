@@ -108,6 +108,42 @@
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "preLaunchTask": "Build native-release"
+        },
+        {
+            "name": "Debug WASM textured_quad",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8086/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/textured_quad/wasm-debug",
+            "preLaunchTask": "Build & Serve textured_quad (debug)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Run WASM textured_quad (release)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8087/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/textured_quad/wasm-release",
+            "preLaunchTask": "Build & Serve textured_quad (release)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Debug Desktop textured_quad",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/textured_quad/native-debug/textured_quad.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-debug"
+        },
+        {
+            "name": "Run Desktop textured_quad (release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/textured_quad/native-release/textured_quad.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-release"
         }
     ]
 }

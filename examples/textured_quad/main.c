@@ -23,8 +23,8 @@
 
 /* ---- Shader sources (no version prefix -- backend adds it) ---- */
 
-static const char *s_vs_source = "in vec3 a_position;\n"
-                                 "in vec2 a_texcoord;\n"
+static const char *s_vs_source = "layout(location = 0) in vec3 a_position;\n"
+                                 "layout(location = 3) in vec2 a_texcoord;\n"
                                  "out vec2 v_uv;\n"
                                  "uniform mat4 u_mvp;\n"
                                  "void main() {\n"
@@ -190,8 +190,8 @@ int main(void) {
         .data = s_checker_4x4,
         .min_filter = NT_FILTER_NEAREST,
         .mag_filter = NT_FILTER_NEAREST,
-        .wrap_u = NT_WRAP_REPEAT,
-        .wrap_v = NT_WRAP_REPEAT,
+        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
         .label = "checkerboard",
     });
 
