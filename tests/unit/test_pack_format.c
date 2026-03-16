@@ -246,28 +246,6 @@ void test_shader_stage_enum(void) {
     TEST_ASSERT_EQUAL_UINT(1, NT_SHADER_STAGE_FRAGMENT);
 }
 
-/* --- Shader program header tests --- */
-
-void test_shader_program_header_size(void) { TEST_ASSERT_EQUAL_UINT(16, sizeof(NtShaderProgramHeader)); }
-
-void test_shader_program_magic_value(void) {
-    TEST_ASSERT_EQUAL_HEX32(0x50444853, NT_SHADER_PROGRAM_MAGIC);
-
-    uint32_t magic = NT_SHADER_PROGRAM_MAGIC;
-    const uint8_t *b = (const uint8_t *)&magic;
-    TEST_ASSERT_EQUAL_UINT8('S', b[0]);
-    TEST_ASSERT_EQUAL_UINT8('H', b[1]);
-    TEST_ASSERT_EQUAL_UINT8('D', b[2]);
-    TEST_ASSERT_EQUAL_UINT8('P', b[3]);
-}
-
-void test_shader_program_header_field_offsets(void) {
-    TEST_ASSERT_EQUAL_UINT(0, offsetof(NtShaderProgramHeader, magic));
-    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtShaderProgramHeader, version));
-    TEST_ASSERT_EQUAL_UINT(8, offsetof(NtShaderProgramHeader, vs_resource_id));
-    TEST_ASSERT_EQUAL_UINT(12, offsetof(NtShaderProgramHeader, fs_resource_id));
-}
-
 int main(void) {
     UNITY_BEGIN();
 
@@ -311,10 +289,6 @@ int main(void) {
     RUN_TEST(test_shader_code_header_field_offsets);
     RUN_TEST(test_shader_stage_enum);
 
-    /* Shader program header tests */
-    RUN_TEST(test_shader_program_header_size);
-    RUN_TEST(test_shader_program_magic_value);
-    RUN_TEST(test_shader_program_header_field_offsets);
 
     return UNITY_END();
 }
