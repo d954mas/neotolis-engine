@@ -148,6 +148,26 @@ if(NOT EMSCRIPTEN)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_entity COMMAND test_entity)
+
+    # --- Transform component tests ---
+    add_executable(test_transform_comp unit/test_transform_comp.c)
+    target_link_libraries(test_transform_comp PRIVATE nt_transform_comp nt_entity unity)
+    nt_set_warning_flags(test_transform_comp)
+    nt_set_sanitizer_flags(test_transform_comp)
+    set_target_properties(test_transform_comp PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_transform_comp COMMAND test_transform_comp)
+
+    # --- Component tests (mesh, material, render_state) ---
+    add_executable(test_components unit/test_components.c)
+    target_link_libraries(test_components PRIVATE nt_mesh_comp nt_material_comp nt_render_state_comp nt_entity unity)
+    nt_set_warning_flags(test_components)
+    nt_set_sanitizer_flags(test_components)
+    set_target_properties(test_components PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_components COMMAND test_components)
 endif()
 
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---
