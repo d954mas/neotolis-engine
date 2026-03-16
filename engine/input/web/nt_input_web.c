@@ -43,7 +43,7 @@ EMSCRIPTEN_KEEPALIVE void nt_input_web_on_blur(void) {
 
 /* clang-format off */
 EM_JS(void, nt_input_web_register_listeners, (void), {
-    var canvas = Module.canvas;
+    var canvas = Module['canvas'];
 
     /* Key mapping: KeyboardEvent.code -> nt_key_t enum value */
     var keyMap = {};
@@ -97,17 +97,17 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
        Key:     stride 2  [key, down, ...]
        Pointer: stride 7  [type, id, x, y, pressure, ptype, buttons, ...]
        Wheel:   stride 2  [dx, dy, ...] */
-    Module._ntKeyBuf = [];
-    Module._ntPtrBuf = [];
-    Module._ntWheelBuf = [];
-    Module._ntBlurred = false;
+    Module['_ntKeyBuf'] = [];
+    Module['_ntPtrBuf'] = [];
+    Module['_ntWheelBuf'] = [];
+    Module['_ntBlurred'] = false;
 
     /* Keyboard events */
     canvas.addEventListener("keydown", function(e) {
         if (e.repeat) return;
         var k = keyMap[e.code];
         if (k !== undefined) {
-            Module._ntKeyBuf.push(k, 1);
+            Module['_ntKeyBuf'].push(k, 1);
         }
         if (preventSet[e.code]) {
             e.preventDefault();
@@ -117,13 +117,13 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     canvas.addEventListener("keyup", function(e) {
         var k = keyMap[e.code];
         if (k !== undefined) {
-            Module._ntKeyBuf.push(k, 0);
+            Module['_ntKeyBuf'].push(k, 0);
         }
     });
 
     /* Blur: clear all keys on focus loss */
     canvas.addEventListener("blur", function() {
-        Module._ntBlurred = true;
+        Module['_ntBlurred'] = true;
     });
 
     /* Pointer events — pass CSS-relative coords, C maps with engine DPR */
@@ -132,7 +132,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
         canvas.setPointerCapture(e.pointerId);
         var ptype = e.pointerType === "touch" ? 1
                   : (e.pointerType === "pen" ? 2 : 0);
-        Module._ntPtrBuf.push(0, e.pointerId,
+        Module['_ntPtrBuf'].push(0, e.pointerId,
             e.clientX - rect.left, e.clientY - rect.top,
             e.pressure, ptype, e.buttons);
         e.preventDefault();
@@ -141,7 +141,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     canvas.addEventListener("pointermove", function(e) {
         var ptype = e.pointerType === "touch" ? 1
                   : (e.pointerType === "pen" ? 2 : 0);
-        Module._ntPtrBuf.push(1, e.pointerId,
+        Module['_ntPtrBuf'].push(1, e.pointerId,
             e.clientX - rect.left, e.clientY - rect.top,
             e.pressure, ptype, e.buttons);
     });
@@ -149,24 +149,24 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
     canvas.addEventListener("pointerup", function(e) {
         if (e.pointerType === "mouse") {
             /* Mouse stays active after button release — send move with buttons=0 */
-            Module._ntPtrBuf.push(1, e.pointerId,
+            Module['_ntPtrBuf'].push(1, e.pointerId,
                 e.clientX - rect.left, e.clientY - rect.top,
                 e.pressure, 0, e.buttons);
         } else {
-            Module._ntPtrBuf.push(2, e.pointerId, 0, 0, 0, 0, 0);
+            Module['_ntPtrBuf'].push(2, e.pointerId, 0, 0, 0, 0, 0);
         }
         e.preventDefault();
     });
 
     canvas.addEventListener("pointercancel", function(e) {
-        Module._ntPtrBuf.push(2, e.pointerId, 0, 0, 0, 0, 0);
+        Module['_ntPtrBuf'].push(2, e.pointerId, 0, 0, 0, 0, 0);
         e.preventDefault();
     });
 
     /* Mouse leaves canvas — deactivate slot */
     canvas.addEventListener("pointerleave", function(e) {
         if (e.pointerType === "mouse") {
-            Module._ntPtrBuf.push(2, e.pointerId, 0, 0, 0, 0, 0);
+            Module['_ntPtrBuf'].push(2, e.pointerId, 0, 0, 0, 0, 0);
         }
     });
 
@@ -181,7 +181,7 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
             dx *= window.innerWidth;
             dy *= window.innerHeight;
         }
-        Module._ntWheelBuf.push(dx, dy);
+        Module['_ntWheelBuf'].push(dx, dy);
         e.preventDefault();
     }, {passive: false});
 
@@ -191,41 +191,41 @@ EM_JS(void, nt_input_web_register_listeners, (void), {
 
 EM_JS(void, nt_input_web_flush_events, (void), {
     /* Blur handling — discard stale pre-blur events */
-    if (Module._ntBlurred) {
-        Module._nt_input_web_on_blur();
-        Module._ntBlurred = false;
-        Module._ntKeyBuf.length = 0;
-        Module._ntPtrBuf.length = 0;
-        Module._ntWheelBuf.length = 0;
+    if (Module['_ntBlurred']) {
+        Module['_nt_input_web_on_blur']();
+        Module['_ntBlurred'] = false;
+        Module['_ntKeyBuf'].length = 0;
+        Module['_ntPtrBuf'].length = 0;
+        Module['_ntWheelBuf'].length = 0;
         return;
     }
 
     /* Drain key buffer (stride 2: key, down) */
-    var kb = Module._ntKeyBuf;
+    var kb = Module['_ntKeyBuf'];
     for (var i = 0; i < kb.length; i += 2) {
-        Module._nt_input_web_on_key(kb[i], kb[i + 1]);
+        Module['_nt_input_web_on_key'](kb[i], kb[i + 1]);
     }
     kb.length = 0;
 
     /* Drain pointer buffer (stride 7: type, id, x, y, pressure, ptype, buttons) */
-    var pb = Module._ntPtrBuf;
+    var pb = Module['_ntPtrBuf'];
     for (var i = 0; i < pb.length; i += 7) {
         if (pb[i] === 0) {
-            Module._nt_input_web_on_pointer_down(
+            Module['_nt_input_web_on_pointer_down'](
                 pb[i + 1], pb[i + 2], pb[i + 3], pb[i + 4], pb[i + 5], pb[i + 6]);
         } else if (pb[i] === 1) {
-            Module._nt_input_web_on_pointer_move(
+            Module['_nt_input_web_on_pointer_move'](
                 pb[i + 1], pb[i + 2], pb[i + 3], pb[i + 4], pb[i + 5], pb[i + 6]);
         } else {
-            Module._nt_input_web_on_pointer_up(pb[i + 1]);
+            Module['_nt_input_web_on_pointer_up'](pb[i + 1]);
         }
     }
     pb.length = 0;
 
     /* Drain wheel buffer (stride 2: dx, dy) */
-    var wb = Module._ntWheelBuf;
+    var wb = Module['_ntWheelBuf'];
     for (var i = 0; i < wb.length; i += 2) {
-        Module._nt_input_web_on_wheel(wb[i], wb[i + 1]);
+        Module['_nt_input_web_on_wheel'](wb[i], wb[i + 1]);
     }
     wb.length = 0;
 })

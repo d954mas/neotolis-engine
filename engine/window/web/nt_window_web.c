@@ -15,16 +15,16 @@ EM_JS(double, nt_window_js_get_dpr, (void), {
 })
 
 EM_JS(double, nt_window_js_get_canvas_width, (void), {
-    return Module.canvas.clientWidth;
+    return Module['canvas'].clientWidth;
 })
 
 EM_JS(double, nt_window_js_get_canvas_height, (void), {
-    return Module.canvas.clientHeight;
+    return Module['canvas'].clientHeight;
 })
 
 EM_JS(void, nt_window_js_set_backing_size, (int w, int h), {
-    Module.canvas.width = w;
-    Module.canvas.height = h;
+    Module['canvas'].width = w;
+    Module['canvas'].height = h;
 })
 /* clang-format on */
 
