@@ -27,16 +27,12 @@ static void sync_sizes(void) {
        Content scale may not reflect the real framebuffer size on Windows
        when the process lacks DPI awareness. */
     float device_dpr = (win_w > 0) ? (float)fb_w / (float)win_w : 1.0F;
+
+    if ((uint32_t)win_w == g_nt_window.width && (uint32_t)win_h == g_nt_window.height && device_dpr == g_nt_window.dpr) {
+        return;
+    }
+
     nt_window_apply_sizes((float)win_w, (float)win_h, device_dpr);
-}
-
-/* ---- Callbacks ---- */
-
-static void fb_size_callback(GLFWwindow *window, int width, int height) {
-    (void)window;
-    (void)width;
-    (void)height;
-    sync_sizes();
 }
 
 /* ---- Lifecycle ---- */
@@ -69,9 +65,6 @@ void nt_window_init(void) {
 
     glfwMakeContextCurrent(s_glfw_window);
 
-    /* Register framebuffer resize callback */
-    glfwSetFramebufferSizeCallback(s_glfw_window, fb_size_callback);
-
     /* Query initial sizes via shared DPR logic (respects max_dpr) */
     sync_sizes();
 
@@ -82,7 +75,7 @@ void nt_window_init(void) {
     g_nt_window.platform_handle = s_glfw_window;
 }
 
-void nt_window_poll(void) { /* No-op on desktop: resize handled via callback */ }
+void nt_window_poll(void) { sync_sizes(); }
 
 void nt_window_shutdown(void) {
     if (s_glfw_window) {
