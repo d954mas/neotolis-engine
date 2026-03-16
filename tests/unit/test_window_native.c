@@ -4,6 +4,10 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
+/* Suppress GLFW/GLX internal leaks (X11 extension query cache) */
+const char *__lsan_default_suppressions(void);
+const char *__lsan_default_suppressions(void) { return "leak:extensionSupportedGLX\n"; }
+
 void setUp(void) { g_nt_window = (nt_window_t){.max_dpr = 2.0F, .resizable = true}; }
 
 void tearDown(void) {}
