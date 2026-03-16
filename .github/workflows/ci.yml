@@ -1,10 +1,27 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  wasm-build:
-    name: WASM Build
+  wasm:
+    name: WASM Build & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,6 +34,10 @@ jobs:
         with:
           version: ${{ steps.emsdk-version.outputs.version }}
           actions-cache-folder: 'emsdk-cache'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - name: Configure WASM debug
         run: emcmake cmake --preset wasm-debug
@@ -34,6 +55,9 @@ jobs:
           test -f build/engine/wasm-debug/libnt_log_stub.a
           echo "WASM debug build verified"
 
+      - name: Run WASM smoke test (debug)
+        run: node tests/wasm/smoke_test.js wasm-debug
+
       - name: Configure WASM release
         run: emcmake cmake --preset wasm-release
 
@@ -50,8 +74,11 @@ jobs:
           test -f build/engine/wasm-release/libnt_log_stub.a
           echo "WASM release build verified"
 
-  native-build:
-    name: Native Build
+      - name: Run WASM smoke test (release)
+        run: node tests/wasm/smoke_test.js wasm-release
+
+  native:
+    name: Native Build & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,7 +87,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y clang ninja-build \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev
+            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev xvfb
 
       - name: Configure native debug
         run: cmake --preset native-debug
@@ -78,6 +105,9 @@ jobs:
 
       - name: Smoke test builder (debug)
         run: ./build/tools/builder/native-debug/builder
+
+      - name: Run tests
+        run: xvfb-run ctest --preset native-debug
 
       - name: Configure native release
         run: cmake --preset native-release
@@ -104,66 +134,8 @@ jobs:
           cmake --build build/submodule-test
           ./build/submodule-test/submodule_test
 
-  test-native:
-    name: Native Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y clang ninja-build \
-            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev xvfb
-
-      - name: Configure
-        run: cmake --preset native-debug
-
-      - name: Build
-        run: cmake --build --preset native-debug
-
-      - name: Run tests
-        run: xvfb-run ctest --preset native-debug
-
-  test-wasm:
-    name: WASM Smoke Test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Read emsdk version
-        id: emsdk-version
-        run: echo "version=$(cat .emsdk-version)" >> $GITHUB_OUTPUT
-
-      - uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: ${{ steps.emsdk-version.outputs.version }}
-          actions-cache-folder: 'emsdk-cache'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Configure WASM debug
-        run: emcmake cmake --preset wasm-debug
-
-      - name: Build WASM debug
-        run: cmake --build --preset wasm-debug
-
-      - name: Run WASM smoke test (debug)
-        run: node tests/wasm/smoke_test.js wasm-debug
-
-      - name: Configure WASM release
-        run: emcmake cmake --preset wasm-release
-
-      - name: Build WASM release
-        run: cmake --build --preset wasm-release
-
-      - name: Run WASM smoke test (release)
-        run: node tests/wasm/smoke_test.js wasm-release
-
-  tidy-check:
-    name: clang-tidy
+  lint:
+    name: Format & Tidy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -174,25 +146,16 @@ jobs:
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev
 
+      - name: Check formatting
+        run: |
+          find engine shared tools examples -name '*.c' -o -name '*.h' | \
+            xargs clang-format --dry-run --Werror
+
       - name: Configure
         run: cmake --preset native-debug
 
       - name: Run clang-tidy
         run: bash scripts/tidy.sh build/_cmake/native-debug
-
-  format-check:
-    name: Format Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install clang-format
-        run: sudo apt-get update && sudo apt-get install -y clang-format
-
-      - name: Check formatting
-        run: |
-          find engine shared tools examples -name '*.c' -o -name '*.h' | \
-            xargs clang-format --dry-run --Werror
 
   size-track:
     name: Track Build Size
