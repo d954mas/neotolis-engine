@@ -15,7 +15,6 @@ static int s_physics_ticks;
 
 static void frame(void) {
     nt_window_poll();
-    nt_input_poll();
     float dt = g_nt_app.dt;
 
     int steps = nt_accumulator_update(&s_acc, dt);
@@ -36,6 +35,8 @@ static void frame(void) {
     if (g_nt_app.frame % 60 == 0) {
         printf("[frame %u] dt=%.6f time=%.3f physics=%d\n", g_nt_app.frame, (double)dt, (double)g_nt_app.time, s_physics_ticks);
     }
+
+    nt_window_swap_buffers();
 
 #ifndef NT_PLATFORM_WEB
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE) || g_nt_app.frame >= 300) {

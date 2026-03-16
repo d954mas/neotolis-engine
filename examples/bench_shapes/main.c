@@ -469,7 +469,6 @@ static void draw_shapes(void) {
 
 static void frame(void) {
     nt_window_poll();
-    nt_input_poll();
     float dt = g_nt_app.dt;
     nt_accumulator_update(&s_acc, dt);
 
@@ -587,6 +586,8 @@ static void frame(void) {
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+
+    nt_window_swap_buffers();
 
 #ifndef NT_PLATFORM_WEB
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
