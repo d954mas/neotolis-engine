@@ -4,10 +4,6 @@
 #include "core/nt_types.h"
 #include "entity/nt_entity.h"
 
-#ifndef NT_INVALID_COMP_INDEX
-#define NT_INVALID_COMP_INDEX UINT16_MAX
-#endif
-
 typedef struct {
     uint32_t mesh_handle; /* opaque mesh asset reference (typed handle in Phase 24+) */
 } nt_mesh_comp_t;

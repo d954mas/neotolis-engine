@@ -89,26 +89,29 @@ void nt_entity_destroy(nt_entity_t entity) {
     uint16_t index = nt_entity_index(entity);
     uint16_t gen = nt_entity_generation(entity);
 
-    /* Double destroy: check alive first */
-    if (index > 0 && index <= s_entity.max_entities && !s_entity.alive[index]) {
-        NT_ASSERT(false); /* debug: double destroy */
+    /* Bounds check */
+    NT_ASSERT_ALWAYS(index > 0 && index <= s_entity.max_entities);
+
+    /* Double destroy: slot already dead */
+    if (!s_entity.alive[index]) {
+        NT_ASSERT(false); /* debug: catch double destroy */
         return;           /* release: silent ignore */
     }
 
-    /* Stale handle check: always fires, even in release */
-    NT_ASSERT_ALWAYS(index > 0 && index <= s_entity.max_entities && s_entity.alive[index] && s_entity.generations[index] == gen);
+    /* Stale handle: slot alive but generation mismatch (old handle for recycled slot) */
+    NT_ASSERT_ALWAYS(s_entity.generations[index] == gen);
 
-    /* Increment generation and clear flags BEFORE callbacks (Pitfall 5) */
-    s_entity.generations[index]++;
-    s_entity.alive[index] = false;
-    s_entity.enabled[index] = false;
-
-    /* Call all registered on_destroy callbacks */
+    /* Call on_destroy callbacks WHILE entity is still alive.
+       Callbacks may call comp_get() which asserts is_alive. */
     for (uint8_t i = 0; i < s_entity.reg_count; i++) {
         s_entity.registrations[i].on_destroy(entity);
     }
 
-    /* Push index back onto free queue */
+    /* NOW mark dead: bump generation, clear flags, return slot to free queue */
+    s_entity.generations[index]++;
+    s_entity.alive[index] = false;
+    s_entity.enabled[index] = false;
+
     s_entity.free_queue[s_entity.queue_top] = index;
     s_entity.queue_top++;
 }

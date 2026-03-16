@@ -5,10 +5,6 @@
 #include "entity/nt_entity.h"
 #include "math/nt_math.h"
 
-/* ---- Sentinel for unused sparse slots ---- */
-
-#define NT_INVALID_COMP_INDEX UINT16_MAX
-
 /* ---- Component data ---- */
 
 typedef struct {

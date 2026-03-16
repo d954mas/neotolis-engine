@@ -4,10 +4,6 @@
 #include "core/nt_types.h"
 #include "entity/nt_entity.h"
 
-#ifndef NT_INVALID_COMP_INDEX
-#define NT_INVALID_COMP_INDEX UINT16_MAX
-#endif
-
 typedef struct {
     uint32_t material_handle; /* opaque material reference (typed in Phase 26+) */
 } nt_material_comp_t;

@@ -4,10 +4,6 @@
 #include "core/nt_types.h"
 #include "entity/nt_entity.h"
 
-#ifndef NT_INVALID_COMP_INDEX
-#define NT_INVALID_COMP_INDEX UINT16_MAX
-#endif
-
 typedef struct {
     uint16_t tag;   /* pass/group filter (0 = default/all passes) */
     bool visible;   /* render visibility (false = skip in render) */
