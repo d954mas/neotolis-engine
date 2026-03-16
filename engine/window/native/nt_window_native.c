@@ -241,14 +241,11 @@ void nt_window_shutdown(void) {
         glfwDestroyWindow(s_glfw_window);
         s_glfw_window = NULL;
     }
+    s_cached_buttons = 0;
     glfwTerminate();
 }
 
 void nt_window_set_fullscreen(bool fullscreen) {
-    if (!s_glfw_window) {
-        return;
-    }
-
     /* Skip if already in the requested mode */
     bool is_currently_fullscreen = glfwGetWindowMonitor(s_glfw_window) != NULL;
     if (fullscreen == is_currently_fullscreen) {
@@ -281,7 +278,13 @@ void nt_window_set_vsync(nt_vsync_t mode) {
         glfwSwapInterval(0);
         break;
     case NT_VSYNC_ADAPTIVE:
-        glfwSwapInterval(-1);
+        if (glfwExtensionSupported("WGL_EXT_swap_control_tear") ||
+            glfwExtensionSupported("GLX_EXT_swap_control_tear")) {
+            glfwSwapInterval(-1);
+        } else {
+            nt_log_info("adaptive vsync not supported, falling back to vsync on");
+            glfwSwapInterval(1);
+        }
         break;
     case NT_VSYNC_ON: /* fall through */
     default:

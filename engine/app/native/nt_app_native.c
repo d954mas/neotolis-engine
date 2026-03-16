@@ -16,9 +16,6 @@ static nt_app_frame_fn s_frame_fn;
 void nt_app_run(nt_app_frame_fn fn) {
     s_frame_fn = fn;
 
-    /* Apply vsync setting */
-    nt_window_set_vsync(g_nt_app.vsync);
-
     double prev_time = nt_time_now();
 
     while (!nt_window_should_close()) {
