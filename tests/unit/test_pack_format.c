@@ -5,8 +5,6 @@
 #include "nt_texture_format.h"
 #include "unity.h"
 
-#include "graphics/nt_gfx.h" /* for NT_ATTR_* to verify mask alignment */
-
 #include <stddef.h>
 #include <string.h>
 
@@ -110,6 +108,53 @@ void test_crc32_deterministic(void) {
     TEST_ASSERT_EQUAL_HEX32(first, second);
 }
 
+/* --- Stream descriptor tests --- */
+
+void test_stream_desc_size(void) { TEST_ASSERT_EQUAL_UINT(8, sizeof(NtStreamDesc)); }
+
+void test_stream_desc_field_offsets(void) {
+    TEST_ASSERT_EQUAL_UINT(0, offsetof(NtStreamDesc, name_hash));
+    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtStreamDesc, type));
+    TEST_ASSERT_EQUAL_UINT(5, offsetof(NtStreamDesc, count));
+    TEST_ASSERT_EQUAL_UINT(6, offsetof(NtStreamDesc, normalized));
+}
+
+void test_stream_type_sizes(void) {
+    TEST_ASSERT_EQUAL_UINT32(1, nt_stream_type_size(NT_STREAM_UINT8));
+    TEST_ASSERT_EQUAL_UINT32(2, nt_stream_type_size(NT_STREAM_INT16));
+    TEST_ASSERT_EQUAL_UINT32(2, nt_stream_type_size(NT_STREAM_UINT16));
+    TEST_ASSERT_EQUAL_UINT32(4, nt_stream_type_size(NT_STREAM_FLOAT32));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_stream_type_size(99)); /* unknown type */
+}
+
+void test_stream_stride_calculation(void) {
+    /* Typical mesh: position(float3) + normal(float3) + uv(float2) */
+    NtStreamDesc streams[3] = {
+        {0xAABBCCDD, NT_STREAM_FLOAT32, 3, 0, 0},
+        {0x11223344, NT_STREAM_FLOAT32, 3, 0, 0},
+        {0x55667788, NT_STREAM_FLOAT32, 2, 0, 0},
+    };
+    uint32_t stride = 0;
+    for (int i = 0; i < 3; i++) {
+        stride += nt_stream_type_size(streams[i].type) * streams[i].count;
+    }
+    TEST_ASSERT_EQUAL_UINT32(32, stride); /* 12 + 12 + 8 */
+}
+
+void test_stream_stride_mixed_precision(void) {
+    /* Compact mesh: position(float3) + color(uint8x4 normalized) + uv(uint16x2) */
+    NtStreamDesc streams[3] = {
+        {0xAABBCCDD, NT_STREAM_FLOAT32, 3, 0, 0},
+        {0x11223344, NT_STREAM_UINT8, 4, 1, 0},
+        {0x55667788, NT_STREAM_UINT16, 2, 0, 0},
+    };
+    uint32_t stride = 0;
+    for (int i = 0; i < 3; i++) {
+        stride += nt_stream_type_size(streams[i].type) * streams[i].count;
+    }
+    TEST_ASSERT_EQUAL_UINT32(20, stride); /* 12 + 4 + 4 */
+}
+
 /* --- Mesh header tests --- */
 
 void test_mesh_header_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtMeshAssetHeader)); }
@@ -129,22 +174,13 @@ void test_mesh_magic_value(void) {
 void test_mesh_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(0, offsetof(NtMeshAssetHeader, magic));
     TEST_ASSERT_EQUAL_UINT(4, offsetof(NtMeshAssetHeader, version));
-    TEST_ASSERT_EQUAL_UINT(6, offsetof(NtMeshAssetHeader, attribute_mask));
+    TEST_ASSERT_EQUAL_UINT(6, offsetof(NtMeshAssetHeader, stream_count));
+    TEST_ASSERT_EQUAL_UINT(7, offsetof(NtMeshAssetHeader, index_type));
     TEST_ASSERT_EQUAL_UINT(8, offsetof(NtMeshAssetHeader, vertex_count));
     TEST_ASSERT_EQUAL_UINT(12, offsetof(NtMeshAssetHeader, index_count));
     TEST_ASSERT_EQUAL_UINT(16, offsetof(NtMeshAssetHeader, vertex_data_size));
     TEST_ASSERT_EQUAL_UINT(20, offsetof(NtMeshAssetHeader, index_data_size));
 }
-
-void test_mesh_attr_mask_matches_gfx(void) {
-    /* Verify bitmask positions match the NT_ATTR_* enum from nt_gfx.h */
-    TEST_ASSERT_EQUAL_HEX32((1u << NT_ATTR_POSITION), NT_MESH_ATTR_POSITION);
-    TEST_ASSERT_EQUAL_HEX32((1u << NT_ATTR_NORMAL), NT_MESH_ATTR_NORMAL);
-    TEST_ASSERT_EQUAL_HEX32((1u << NT_ATTR_COLOR), NT_MESH_ATTR_COLOR);
-    TEST_ASSERT_EQUAL_HEX32((1u << NT_ATTR_TEXCOORD0), NT_MESH_ATTR_TEXCOORD0);
-}
-
-void test_mesh_attr_required(void) { TEST_ASSERT_EQUAL_HEX32(NT_MESH_ATTR_POSITION, NT_MESH_ATTR_REQUIRED); }
 
 /* --- Texture header tests --- */
 
@@ -219,12 +255,17 @@ int main(void) {
     RUN_TEST(test_crc32_single_byte);
     RUN_TEST(test_crc32_deterministic);
 
-    /* Mesh header tests (Plan 02) */
+    /* Stream descriptor tests */
+    RUN_TEST(test_stream_desc_size);
+    RUN_TEST(test_stream_desc_field_offsets);
+    RUN_TEST(test_stream_type_sizes);
+    RUN_TEST(test_stream_stride_calculation);
+    RUN_TEST(test_stream_stride_mixed_precision);
+
+    /* Mesh header tests */
     RUN_TEST(test_mesh_header_size);
     RUN_TEST(test_mesh_magic_value);
     RUN_TEST(test_mesh_header_field_offsets);
-    RUN_TEST(test_mesh_attr_mask_matches_gfx);
-    RUN_TEST(test_mesh_attr_required);
 
     /* Texture header tests (Plan 02) */
     RUN_TEST(test_texture_header_size);

@@ -131,7 +131,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Pack format tests ---
     add_executable(test_pack_format unit/test_pack_format.c)
-    target_link_libraries(test_pack_format PRIVATE nt_shared nt_core unity)
+    target_link_libraries(test_pack_format PRIVATE nt_shared unity)
     nt_set_warning_flags(test_pack_format)
     nt_set_sanitizer_flags(test_pack_format)
     set_target_properties(test_pack_format PROPERTIES
