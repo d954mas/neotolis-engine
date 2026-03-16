@@ -39,7 +39,7 @@
 typedef enum {
     NT_ASSET_MESH = 1,
     NT_ASSET_TEXTURE = 2,
-    NT_ASSET_SHADER = 3,
+    NT_ASSET_SHADER_CODE = 3, /* individual VS or FS source */
 } nt_asset_type_t;
 
 /*

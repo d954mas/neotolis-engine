@@ -82,7 +82,7 @@ void test_asset_entry_field_offsets(void) {
 void test_asset_type_enum_values(void) {
     TEST_ASSERT_EQUAL_UINT(1, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL_UINT(2, NT_ASSET_TEXTURE);
-    TEST_ASSERT_EQUAL_UINT(3, NT_ASSET_SHADER);
+    TEST_ASSERT_EQUAL_UINT(3, NT_ASSET_SHADER_CODE);
 }
 
 /* --- CRC32 tests --- */
@@ -219,30 +219,53 @@ void test_texture_header_field_offsets(void) {
 
 void test_texture_format_enum(void) { TEST_ASSERT_EQUAL_UINT(1, NT_TEXTURE_FORMAT_RGBA8); }
 
-/* --- Shader header tests --- */
+/* --- Shader code header tests --- */
 
-void test_shader_header_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtShaderAssetHeader)); }
+void test_shader_code_header_size(void) { TEST_ASSERT_EQUAL_UINT(12, sizeof(NtShaderCodeHeader)); }
 
-void test_shader_magic_value(void) {
-    TEST_ASSERT_EQUAL_HEX32(0x52444853, NT_SHADER_MAGIC);
+void test_shader_code_magic_value(void) {
+    TEST_ASSERT_EQUAL_HEX32(0x43444853, NT_SHADER_CODE_MAGIC);
 
-    /* Verify the bytes spell "SHDR" in little-endian */
-    uint32_t magic = NT_SHADER_MAGIC;
+    uint32_t magic = NT_SHADER_CODE_MAGIC;
     const uint8_t *b = (const uint8_t *)&magic;
     TEST_ASSERT_EQUAL_UINT8('S', b[0]);
     TEST_ASSERT_EQUAL_UINT8('H', b[1]);
     TEST_ASSERT_EQUAL_UINT8('D', b[2]);
-    TEST_ASSERT_EQUAL_UINT8('R', b[3]);
+    TEST_ASSERT_EQUAL_UINT8('C', b[3]);
 }
 
-void test_shader_header_field_offsets(void) {
-    TEST_ASSERT_EQUAL_UINT(0, offsetof(NtShaderAssetHeader, magic));
-    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtShaderAssetHeader, version));
-    TEST_ASSERT_EQUAL_UINT(6, offsetof(NtShaderAssetHeader, _pad));
-    TEST_ASSERT_EQUAL_UINT(8, offsetof(NtShaderAssetHeader, vs_offset));
-    TEST_ASSERT_EQUAL_UINT(12, offsetof(NtShaderAssetHeader, vs_size));
-    TEST_ASSERT_EQUAL_UINT(16, offsetof(NtShaderAssetHeader, fs_offset));
-    TEST_ASSERT_EQUAL_UINT(20, offsetof(NtShaderAssetHeader, fs_size));
+void test_shader_code_header_field_offsets(void) {
+    TEST_ASSERT_EQUAL_UINT(0, offsetof(NtShaderCodeHeader, magic));
+    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtShaderCodeHeader, version));
+    TEST_ASSERT_EQUAL_UINT(6, offsetof(NtShaderCodeHeader, stage));
+    TEST_ASSERT_EQUAL_UINT(8, offsetof(NtShaderCodeHeader, code_size));
+}
+
+void test_shader_stage_enum(void) {
+    TEST_ASSERT_EQUAL_UINT(0, NT_SHADER_STAGE_VERTEX);
+    TEST_ASSERT_EQUAL_UINT(1, NT_SHADER_STAGE_FRAGMENT);
+}
+
+/* --- Shader program header tests --- */
+
+void test_shader_program_header_size(void) { TEST_ASSERT_EQUAL_UINT(16, sizeof(NtShaderProgramHeader)); }
+
+void test_shader_program_magic_value(void) {
+    TEST_ASSERT_EQUAL_HEX32(0x50444853, NT_SHADER_PROGRAM_MAGIC);
+
+    uint32_t magic = NT_SHADER_PROGRAM_MAGIC;
+    const uint8_t *b = (const uint8_t *)&magic;
+    TEST_ASSERT_EQUAL_UINT8('S', b[0]);
+    TEST_ASSERT_EQUAL_UINT8('H', b[1]);
+    TEST_ASSERT_EQUAL_UINT8('D', b[2]);
+    TEST_ASSERT_EQUAL_UINT8('P', b[3]);
+}
+
+void test_shader_program_header_field_offsets(void) {
+    TEST_ASSERT_EQUAL_UINT(0, offsetof(NtShaderProgramHeader, magic));
+    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtShaderProgramHeader, version));
+    TEST_ASSERT_EQUAL_UINT(8, offsetof(NtShaderProgramHeader, vs_resource_id));
+    TEST_ASSERT_EQUAL_UINT(12, offsetof(NtShaderProgramHeader, fs_resource_id));
 }
 
 int main(void) {
@@ -282,10 +305,16 @@ int main(void) {
     RUN_TEST(test_texture_header_field_offsets);
     RUN_TEST(test_texture_format_enum);
 
-    /* Shader header tests (Plan 02) */
-    RUN_TEST(test_shader_header_size);
-    RUN_TEST(test_shader_magic_value);
-    RUN_TEST(test_shader_header_field_offsets);
+    /* Shader code header tests */
+    RUN_TEST(test_shader_code_header_size);
+    RUN_TEST(test_shader_code_magic_value);
+    RUN_TEST(test_shader_code_header_field_offsets);
+    RUN_TEST(test_shader_stage_enum);
+
+    /* Shader program header tests */
+    RUN_TEST(test_shader_program_header_size);
+    RUN_TEST(test_shader_program_magic_value);
+    RUN_TEST(test_shader_program_header_field_offsets);
 
     return UNITY_END();
 }

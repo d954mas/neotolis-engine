@@ -3,39 +3,43 @@
 
 #include <stdint.h>
 
-/* Magic: ASCII "SHDR" as uint32_t little-endian = 0x52444853 */
-#define NT_SHADER_MAGIC 0x52444853
-#define NT_SHADER_VERSION 1
+/*
+ * Shader code asset format for ntpack.
+ *
+ * Each shader source (vertex or fragment) is stored as a separate asset
+ * (NT_ASSET_SHADER_CODE). This allows reusing one vertex shader with
+ * multiple fragment shaders. Combining VS + FS into a GPU program is
+ * a runtime/material concern, not a pack concern.
+ */
+
+/* Magic: ASCII "SHDC" as uint32_t little-endian = 0x43444853 */
+#define NT_SHADER_CODE_MAGIC 0x43444853
+#define NT_SHADER_CODE_VERSION 1
+
+typedef enum {
+    NT_SHADER_STAGE_VERTEX = 0,
+    NT_SHADER_STAGE_FRAGMENT = 1,
+} nt_shader_stage_t;
 
 /*
- * ShaderAssetHeader -- binary header prepended to shader data in ntpack.
+ * NtShaderCodeHeader — one shader source in ntpack.
  *
- * Layout (24 bytes):
- *   magic(4) + version(2) + _pad(2) +
- *   vs_offset(4) + vs_size(4) +
- *   fs_offset(4) + fs_size(4)
+ * Layout (12 bytes):
+ *   magic(4) + version(2) + stage(1) + _pad(1) + code_size(4)
  *
- * vs_offset and fs_offset are relative to the start of this header.
- * Shader source is null-terminated text. vs_size and fs_size include
- * the null terminator.
- *
- * Typical layout:
- *   [ShaderAssetHeader][vertex source bytes][fragment source bytes]
- *   vs_offset = sizeof(ShaderAssetHeader) = 24
- *   fs_offset = vs_offset + vs_size
+ * After header: code_size bytes of null-terminated GLSL ES 3.00 source text.
+ * WebGL2 compiles shaders at runtime (glCompileShader), no offline compilation.
  */
 #pragma pack(push, 1)
 typedef struct {
-    uint32_t magic;     /* NT_SHADER_MAGIC */
-    uint16_t version;   /* NT_SHADER_VERSION */
-    uint16_t _pad;      /* explicit padding */
-    uint32_t vs_offset; /* vertex shader source offset from header start */
-    uint32_t vs_size;   /* vertex shader source size (incl. null terminator) */
-    uint32_t fs_offset; /* fragment shader source offset from header start */
-    uint32_t fs_size;   /* fragment shader source size (incl. null terminator) */
-} NtShaderAssetHeader;
+    uint32_t magic;     /* 0:  NT_SHADER_CODE_MAGIC ("SHDC") */
+    uint16_t version;   /* 4:  NT_SHADER_CODE_VERSION */
+    uint8_t stage;      /* 6:  nt_shader_stage_t (vertex or fragment) */
+    uint8_t _pad;       /* 7:  explicit padding */
+    uint32_t code_size; /* 8:  source size in bytes (incl. null terminator) */
+} NtShaderCodeHeader;
 #pragma pack(pop)
 
-_Static_assert(sizeof(NtShaderAssetHeader) == 24, "ShaderAssetHeader must be 24 bytes");
+_Static_assert(sizeof(NtShaderCodeHeader) == 12, "ShaderCodeHeader must be 12 bytes");
 
 #endif /* NT_SHADER_FORMAT_H */
