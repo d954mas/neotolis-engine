@@ -128,6 +128,16 @@ if(NOT EMSCRIPTEN)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_shape COMMAND test_shape)
+
+    # --- Pack format tests ---
+    add_executable(test_pack_format unit/test_pack_format.c)
+    target_link_libraries(test_pack_format PRIVATE nt_shared unity)
+    nt_set_warning_flags(test_pack_format)
+    nt_set_sanitizer_flags(test_pack_format)
+    set_target_properties(test_pack_format PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_pack_format COMMAND test_pack_format)
 endif()
 
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---
