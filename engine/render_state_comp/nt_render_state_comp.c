@@ -52,7 +52,7 @@ nt_result_t nt_render_state_comp_init(const nt_render_state_comp_desc_t *desc) {
     uint16_t cap = desc->capacity;
     s_tags = (uint16_t *)calloc(cap, sizeof(uint16_t));
     s_visible = (bool *)calloc(cap, sizeof(bool));
-    s_colors = calloc(cap, sizeof(float) * 4);
+    s_colors = calloc(cap, sizeof(*s_colors));
 
     if (!s_tags || !s_visible || !s_colors) {
         nt_render_state_comp_shutdown();
