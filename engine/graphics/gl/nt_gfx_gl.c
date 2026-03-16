@@ -463,6 +463,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
         glVertexAttribDivisor(loc, 1);
     }
     glBindVertexArray(0);
+    s_gl_cache.vao = 0; /* create dirtied VAO binding */
 
     /* Store pipeline data */
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[slot];
@@ -489,6 +490,13 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) {
         return;
     }
     nt_gfx_gl_pipeline_t *pip = &s_pipelines[backend_handle];
+    /* Invalidate cache if this pipeline's GL objects are currently bound */
+    if (pip->vao && s_gl_cache.vao == pip->vao) {
+        s_gl_cache.vao = 0;
+    }
+    if (pip->program && s_gl_cache.program == pip->program) {
+        s_gl_cache.program = 0;
+    }
     if (pip->vao) {
         glDeleteVertexArrays(1, &pip->vao);
     }
@@ -648,6 +656,13 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     }
 
     s_texture_gl[slot] = tex;
+
+    /* Invalidate cache: glBindTexture above dirtied the active unit's binding */
+    uint32_t active_slot = s_gl_cache.active_texture - GL_TEXTURE0;
+    if (active_slot < NT_GFX_MAX_TEXTURE_SLOTS) {
+        s_gl_cache.bound_textures[active_slot] = 0;
+    }
+
     return slot;
 }
 
