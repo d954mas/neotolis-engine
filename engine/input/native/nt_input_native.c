@@ -38,6 +38,8 @@ static bool s_focus_lost;
 void nt_input_buffer_key(nt_key_t key, bool down) {
     if (s_key_count < NT_MAX_KEY_EVENTS) {
         s_key_buf[s_key_count++] = (nt_key_event_t){.key = key, .down = down};
+    } else {
+        s_key_buf[NT_MAX_KEY_EVENTS - 1] = (nt_key_event_t){.key = key, .down = down};
     }
 }
 
@@ -56,12 +58,21 @@ void nt_input_buffer_pointer(bool is_down, double raw_x, double raw_y, uint8_t b
     }
     if (s_ptr_count < NT_MAX_PTR_EVENTS) {
         s_ptr_buf[s_ptr_count++] = (nt_ptr_event_t){.x = raw_x, .y = raw_y, .buttons = buttons, .is_down = is_down};
+    } else {
+        /* Buffer full — overwrite tail so the newest state (especially button
+           release) is never lost. Losing a mid-frame move is acceptable;
+           losing the final press/release causes stuck buttons. */
+        s_ptr_buf[NT_MAX_PTR_EVENTS - 1] = (nt_ptr_event_t){.x = raw_x, .y = raw_y, .buttons = buttons, .is_down = is_down};
     }
 }
 
 void nt_input_buffer_wheel(float dx, float dy) {
     if (s_wheel_count < NT_MAX_WHEEL_EVENTS) {
         s_wheel_buf[s_wheel_count++] = (nt_wheel_event_t){.dx = dx, .dy = dy};
+    } else {
+        /* Accumulate into tail — wheel deltas are additive */
+        s_wheel_buf[NT_MAX_WHEEL_EVENTS - 1].dx += dx;
+        s_wheel_buf[NT_MAX_WHEEL_EVENTS - 1].dy += dy;
     }
 }
 

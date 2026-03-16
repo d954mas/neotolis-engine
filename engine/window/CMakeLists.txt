@@ -20,7 +20,11 @@ if(NOT EMSCRIPTEN)
     # PUBLIC: glfw propagates to all modules/examples that link nt_window,
     # so they never need to mention glfw themselves.
     target_link_libraries(nt_window PUBLIC glfw)
-    target_link_libraries(nt_window PRIVATE nt_log nt_input)
+    target_link_libraries(nt_window PRIVATE nt_log)
+    # NOTE: nt_window_native.c calls nt_input_buffer_* (declared in
+    # input/nt_input_internal.h). The header is found via the shared engine/
+    # include root. The actual symbols are resolved at executable link time --
+    # the app chooses which input backend to link (nt_input or nt_input_stub).
 endif()
 
 if(UNIX)

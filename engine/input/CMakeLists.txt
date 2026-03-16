@@ -20,9 +20,10 @@ if(EMSCRIPTEN)
     # Web: nt_input_web.c reads g_nt_window.dpr for coordinate mapping
     target_link_libraries(nt_input PUBLIC nt_core nt_window)
 else()
-    # Native: nt_input_native.c reads g_nt_window.dpr at flush time
+    # Native: nt_input_native.c reads g_nt_window.dpr at flush time.
+    # The header is found via the shared engine/ include root; the symbol
+    # g_nt_window resolves at executable link time (app links nt_window).
     target_link_libraries(nt_input PUBLIC nt_core)
-    target_link_libraries(nt_input PRIVATE nt_window)
 endif()
 
 # Stub implementation for headless builds (CI, builder, tests)
