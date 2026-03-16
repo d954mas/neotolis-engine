@@ -69,9 +69,10 @@ uint16_t nt_comp_storage_add(nt_comp_storage_t *s, nt_entity_t entity) {
 }
 
 bool nt_comp_storage_has(const nt_comp_storage_t *s, nt_entity_t entity) {
-    if (!s->initialized || entity.id == 0) {
+    if (!s->initialized) {
         return false;
     }
+    NT_ASSERT_ALWAYS(entity.id != 0);
     if (!nt_entity_is_alive(entity)) {
         return false;
     }
