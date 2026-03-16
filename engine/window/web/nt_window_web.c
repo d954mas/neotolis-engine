@@ -28,11 +28,9 @@ EM_JS(void, nt_window_js_set_backing_size, (int w, int h), {
 })
 /* clang-format on */
 
-/* ---- Lifecycle ---- */
+/* ---- Helpers ---- */
 
-void nt_window_init(void) { nt_window_poll(); }
-
-void nt_window_poll(void) {
+static void sync_sizes(void) {
     float canvas_w = (float)nt_window_js_get_canvas_width();
     float canvas_h = (float)nt_window_js_get_canvas_height();
     float device_dpr = (float)nt_window_js_get_dpr();
@@ -53,6 +51,12 @@ void nt_window_poll(void) {
     nt_window_js_set_backing_size((int)g_nt_window.fb_width, (int)g_nt_window.fb_height);
 }
 
+/* ---- Lifecycle ---- */
+
+void nt_window_init(void) { sync_sizes(); }
+
+void nt_window_poll(void) { sync_sizes(); }
+
 void nt_window_shutdown(void) { /* No-op on web */ }
 
 void nt_window_set_fullscreen(bool fullscreen) {
@@ -64,6 +68,18 @@ void nt_window_set_fullscreen(bool fullscreen) {
         emscripten_exit_fullscreen();
     }
 }
+
+/* ---- Presentation ---- */
+
+void nt_window_swap_buffers(void) { /* No-op: browser swaps after rAF return */ }
+
+void nt_window_set_vsync(nt_vsync_t mode) { (void)mode; /* No-op: browser controls vsync */ }
+
+/* ---- Close management ---- */
+
+bool nt_window_should_close(void) { return false; /* Web apps don't close via window API */ }
+
+void nt_window_request_close(void) { /* No-op on web */ }
 
 #else
 typedef int nt_window_web_unused;

@@ -313,6 +313,8 @@ static void frame(void) {
     nt_shape_renderer_flush();
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+
+    nt_window_swap_buffers();
 }
 
 int main(void) {

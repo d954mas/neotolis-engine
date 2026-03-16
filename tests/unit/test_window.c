@@ -73,6 +73,29 @@ void test_apply_sizes_overwrites(void) {
     TEST_ASSERT_TRUE(float_near(1.0F, g_nt_window.dpr, 1e-6F));
 }
 
+/* Stub: swap_buffers is no-op (does not crash) */
+void test_stub_swap_buffers(void) {
+    nt_window_swap_buffers();
+    TEST_PASS(); /* No crash = pass */
+}
+
+/* Stub: should_close returns false */
+void test_stub_should_close(void) { TEST_ASSERT_FALSE(nt_window_should_close()); }
+
+/* Stub: request_close is no-op (does not crash) */
+void test_stub_request_close(void) {
+    nt_window_request_close();
+    TEST_PASS();
+}
+
+/* Stub: set_vsync is no-op (does not crash) */
+void test_stub_set_vsync(void) {
+    nt_window_set_vsync(NT_VSYNC_ON);
+    nt_window_set_vsync(NT_VSYNC_OFF);
+    nt_window_set_vsync(NT_VSYNC_ADAPTIVE);
+    TEST_PASS();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_apply_sizes_1x);
@@ -82,5 +105,9 @@ int main(void) {
     RUN_TEST(test_apply_sizes_fractional);
     RUN_TEST(test_apply_sizes_max_dpr_one);
     RUN_TEST(test_apply_sizes_overwrites);
+    RUN_TEST(test_stub_swap_buffers);
+    RUN_TEST(test_stub_should_close);
+    RUN_TEST(test_stub_request_close);
+    RUN_TEST(test_stub_set_vsync);
     return UNITY_END();
 }

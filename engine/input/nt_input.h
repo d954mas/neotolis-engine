@@ -142,7 +142,11 @@ bool nt_input_mouse_is_released(nt_button_t button);
 /* ---- Lifecycle ---- */
 
 void nt_input_init(void);
+
+/* Poll input state. Drains buffered events from nt_window_poll() and updates
+   input state. Call once per frame AFTER nt_window_poll(). */
 void nt_input_poll(void);
+
 void nt_input_shutdown(void);
 
 #endif /* NT_INPUT_H */

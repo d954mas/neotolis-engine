@@ -60,9 +60,54 @@ void test_native_window_shutdown_cleans_up(void) {
     nt_window_shutdown();
 }
 
+/* Native: should_close is false after init */
+void test_native_should_close_initially_false(void) {
+    TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    g_nt_window.width = 320;
+    g_nt_window.height = 240;
+    nt_window_init();
+
+    TEST_ASSERT_FALSE(nt_window_should_close());
+
+    nt_window_shutdown();
+}
+
+/* Native: request_close makes should_close true */
+void test_native_request_close(void) {
+    TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    g_nt_window.width = 320;
+    g_nt_window.height = 240;
+    nt_window_init();
+
+    nt_window_request_close();
+    TEST_ASSERT_TRUE(nt_window_should_close());
+
+    nt_window_shutdown();
+}
+
+/* Native: set_vsync does not crash */
+void test_native_set_vsync(void) {
+    TEST_ASSERT_TRUE_MESSAGE(glfwInit(), "glfwInit failed");
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    g_nt_window.width = 320;
+    g_nt_window.height = 240;
+    nt_window_init();
+
+    nt_window_set_vsync(NT_VSYNC_ON);
+    nt_window_set_vsync(NT_VSYNC_OFF);
+    nt_window_set_vsync(NT_VSYNC_ADAPTIVE);
+
+    nt_window_shutdown();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_native_window_creates);
     RUN_TEST(test_native_window_shutdown_cleans_up);
+    RUN_TEST(test_native_should_close_initially_false);
+    RUN_TEST(test_native_request_close);
+    RUN_TEST(test_native_set_vsync);
     return UNITY_END();
 }

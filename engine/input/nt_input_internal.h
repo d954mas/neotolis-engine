@@ -14,6 +14,14 @@ void nt_input_wheel(float dx, float dy);
 void nt_input_clear_all_keys(void);
 void nt_input_clear_all_pointers(void);
 
+/* Event buffering — native backend queues events here during glfwPollEvents(),
+   nt_input_platform_poll() drains them with current DPR. */
+
+void nt_input_buffer_key(nt_key_t key, bool down);
+void nt_input_buffer_pointer(bool is_down, double raw_x, double raw_y, uint8_t buttons);
+void nt_input_buffer_wheel(float dx, float dy);
+void nt_input_buffer_focus_lost(void);
+
 /* Platform lifecycle — implemented by each backend (web, native, stub). */
 
 void nt_input_platform_init(void);

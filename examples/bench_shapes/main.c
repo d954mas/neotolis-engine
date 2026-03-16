@@ -588,6 +588,8 @@ static void frame(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
+    nt_window_swap_buffers();
+
 #ifndef NT_PLATFORM_WEB
     if (nt_input_key_is_pressed(NT_KEY_ESCAPE)) {
         nt_app_quit();
