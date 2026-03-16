@@ -1,5 +1,8 @@
 #include "nt_crc32.h"
+#include "nt_mesh_format.h"
 #include "nt_pack_format.h"
+#include "nt_shader_format.h"
+#include "nt_texture_format.h"
 #include "unity.h"
 
 #include <stddef.h>
