@@ -211,6 +211,7 @@ static void apply_rotation(float yaw, float pitch) {
 
 static void frame(void) {
     nt_window_poll();
+    nt_input_poll();
     float dt = g_nt_app.dt;
 
     /* ---- Input: shape cycling and controls ---- */

@@ -143,9 +143,8 @@ bool nt_input_mouse_is_released(nt_button_t button);
 
 void nt_input_init(void);
 
-/* Poll input state. Called automatically by nt_window_poll() -- game code
-   should NOT call both nt_window_poll() and nt_input_poll() in the same frame
-   (double-calling clears edge flags set by the first poll). */
+/* Poll input state. Drains buffered events from nt_window_poll() and updates
+   input state. Call once per frame AFTER nt_window_poll(). */
 void nt_input_poll(void);
 
 void nt_input_shutdown(void);

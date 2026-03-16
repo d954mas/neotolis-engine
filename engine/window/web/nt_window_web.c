@@ -2,7 +2,6 @@
 
 #ifdef NT_PLATFORM_WEB
 
-#include "input/nt_input.h"
 #include "window/nt_window.h"
 #include <emscripten.h>
 #include <emscripten/html5.h>
@@ -29,13 +28,9 @@ EM_JS(void, nt_window_js_set_backing_size, (int w, int h), {
 })
 /* clang-format on */
 
-/* ---- Lifecycle ---- */
+/* ---- Helpers ---- */
 
-void nt_window_init(void) { nt_window_poll(); }
-
-void nt_window_poll(void) {
-    nt_input_poll(); /* Clear edge flags, flush JS event buffers */
-
+static void sync_sizes(void) {
     float canvas_w = (float)nt_window_js_get_canvas_width();
     float canvas_h = (float)nt_window_js_get_canvas_height();
     float device_dpr = (float)nt_window_js_get_dpr();
@@ -55,6 +50,12 @@ void nt_window_poll(void) {
     nt_window_apply_sizes(canvas_w, canvas_h, device_dpr);
     nt_window_js_set_backing_size((int)g_nt_window.fb_width, (int)g_nt_window.fb_height);
 }
+
+/* ---- Lifecycle ---- */
+
+void nt_window_init(void) { sync_sizes(); }
+
+void nt_window_poll(void) { sync_sizes(); }
 
 void nt_window_shutdown(void) { /* No-op on web */ }
 

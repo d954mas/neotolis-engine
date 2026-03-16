@@ -1,8 +1,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
-#include "input/nt_input.h"          /* nt_input_poll() */
-#include "input/nt_input_internal.h" /* nt_input_set_key, pointer_*, wheel, clear_* */
+#include "input/nt_input_internal.h" /* nt_input_buffer_* */
 #include "log/nt_log.h"
 #include "window/nt_window.h"
 
@@ -82,7 +81,7 @@ static nt_key_t glfw_key_to_nt(int key) {
     }
 }
 
-/* ---- GLFW Callbacks (moved from nt_input_native.c) ---- */
+/* ---- GLFW Callbacks — buffer events for nt_input_poll() to drain ---- */
 
 static void glfw_key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
     (void)window;
@@ -90,18 +89,13 @@ static void glfw_key_callback(GLFWwindow *window, int key, int scancode, int act
     (void)mods;
     nt_key_t nt_key = glfw_key_to_nt(key);
     if (nt_key < NT_KEY_COUNT) {
-        nt_input_set_key(nt_key, action != GLFW_RELEASE);
+        nt_input_buffer_key(nt_key, action != GLFW_RELEASE);
     }
 }
 
 static void glfw_cursor_pos_callback(GLFWwindow *window, double xpos, double ypos) {
     (void)window;
-    /* Use g_nt_window.dpr (fb/window ratio) not content scale -- they diverge
-       on Windows without DPI awareness. Must match window's coordinate space. */
-    float dpr = g_nt_window.dpr;
-    float fx = (float)xpos * dpr;
-    float fy = (float)ypos * dpr;
-    nt_input_pointer_move(0, fx, fy, 1.0F, NT_POINTER_MOUSE, s_cached_buttons);
+    nt_input_buffer_pointer(false, xpos, ypos, s_cached_buttons);
 }
 
 static void glfw_mouse_button_callback(GLFWwindow *window, int button, int action, int mods) {
@@ -129,34 +123,24 @@ static void glfw_mouse_button_callback(GLFWwindow *window, int button, int actio
         s_cached_buttons &= (uint8_t)~bit;
     }
 
-    /* Get cursor position in framebuffer coords */
     double xpos = 0.0;
     double ypos = 0.0;
     glfwGetCursorPos(s_glfw_window, &xpos, &ypos);
-    float dpr = g_nt_window.dpr;
-    float fx = (float)xpos * dpr;
-    float fy = (float)ypos * dpr;
 
-    if (action == GLFW_PRESS) {
-        nt_input_pointer_down(0, fx, fy, 1.0F, NT_POINTER_MOUSE, s_cached_buttons);
-    } else {
-        /* Mouse stays active after release -- send move, not up */
-        nt_input_pointer_move(0, fx, fy, 1.0F, NT_POINTER_MOUSE, s_cached_buttons);
-    }
+    nt_input_buffer_pointer(action == GLFW_PRESS, xpos, ypos, s_cached_buttons);
 }
 
 static void glfw_scroll_callback(GLFWwindow *window, double xoffset, double yoffset) {
     (void)window;
     /* 16x scale per RESEARCH.md to approximate web pixel-based scroll */
-    nt_input_wheel((float)xoffset * 16.0F, (float)yoffset * 16.0F);
+    nt_input_buffer_wheel((float)xoffset * 16.0F, (float)yoffset * 16.0F);
 }
 
 static void glfw_focus_callback(GLFWwindow *window, int focused) {
     (void)window;
     if (!focused) {
-        nt_input_clear_all_keys();
-        nt_input_clear_all_pointers();
         s_cached_buttons = 0;
+        nt_input_buffer_focus_lost();
     }
 }
 
@@ -222,7 +206,7 @@ void nt_window_init(void) {
     s_windowed_h = (int)g_nt_window.height;
     g_nt_window.platform_handle = s_glfw_window;
 
-    /* Register GLFW input callbacks */
+    /* Register GLFW callbacks */
     glfwSetKeyCallback(s_glfw_window, glfw_key_callback);
     glfwSetCursorPosCallback(s_glfw_window, glfw_cursor_pos_callback);
     glfwSetMouseButtonCallback(s_glfw_window, glfw_mouse_button_callback);
@@ -231,9 +215,8 @@ void nt_window_init(void) {
 }
 
 void nt_window_poll(void) {
-    nt_input_poll();  /* Clear edge flags from last frame */
-    glfwPollEvents(); /* Fire callbacks -> set fresh input state */
-    sync_sizes();     /* Update window/framebuffer dimensions */
+    glfwPollEvents(); /* Pump OS events → callbacks buffer input */
+    sync_sizes();     /* Update DPR/sizes (used by nt_input_poll drain) */
 }
 
 void nt_window_shutdown(void) {
@@ -278,8 +261,7 @@ void nt_window_set_vsync(nt_vsync_t mode) {
         glfwSwapInterval(0);
         break;
     case NT_VSYNC_ADAPTIVE:
-        if (glfwExtensionSupported("WGL_EXT_swap_control_tear") ||
-            glfwExtensionSupported("GLX_EXT_swap_control_tear")) {
+        if (glfwExtensionSupported("WGL_EXT_swap_control_tear") || glfwExtensionSupported("GLX_EXT_swap_control_tear")) {
             glfwSwapInterval(-1);
         } else {
             nt_log_info("adaptive vsync not supported, falling back to vsync on");

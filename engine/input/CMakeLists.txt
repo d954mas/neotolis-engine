@@ -20,8 +20,9 @@ if(EMSCRIPTEN)
     # Web: nt_input_web.c reads g_nt_window.dpr for coordinate mapping
     target_link_libraries(nt_input PUBLIC nt_core nt_window)
 else()
-    # Native: nt_input_native.c is all no-ops, no nt_window dependency
+    # Native: nt_input_native.c reads g_nt_window.dpr at flush time
     target_link_libraries(nt_input PUBLIC nt_core)
+    target_link_libraries(nt_input PRIVATE nt_window)
 endif()
 
 # Stub implementation for headless builds (CI, builder, tests)

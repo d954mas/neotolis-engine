@@ -21,9 +21,6 @@ if(NOT EMSCRIPTEN)
     # so they never need to mention glfw themselves.
     target_link_libraries(nt_window PUBLIC glfw)
     target_link_libraries(nt_window PRIVATE nt_log nt_input)
-else()
-    # Web: nt_window_poll() calls nt_input_poll()
-    target_link_libraries(nt_window PRIVATE nt_input)
 endif()
 
 if(UNIX)

@@ -15,6 +15,7 @@ static int s_physics_ticks;
 
 static void frame(void) {
     nt_window_poll();
+    nt_input_poll();
     float dt = g_nt_app.dt;
 
     int steps = nt_accumulator_update(&s_acc, dt);
