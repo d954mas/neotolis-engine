@@ -212,6 +212,10 @@ void nt_window_init(void) {
     glfwSetMouseButtonCallback(s_glfw_window, glfw_mouse_button_callback);
     glfwSetScrollCallback(s_glfw_window, glfw_scroll_callback);
     glfwSetWindowFocusCallback(s_glfw_window, glfw_focus_callback);
+
+    /* Establish a known swap interval. Without this the interval depends on
+       the driver default, which varies across vendors. */
+    nt_window_set_vsync(NT_VSYNC_ON);
 }
 
 void nt_window_poll(void) {

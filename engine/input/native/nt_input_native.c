@@ -42,6 +42,18 @@ void nt_input_buffer_key(nt_key_t key, bool down) {
 }
 
 void nt_input_buffer_pointer(bool is_down, double raw_x, double raw_y, uint8_t buttons) {
+    /* Coalesce consecutive moves: if the tail is also a plain move with the
+       same button mask, overwrite its coordinates instead of appending.
+       Button transitions (is_down=true or changed mask) always get their own
+       slot so press/release events are never lost. */
+    if (!is_down && s_ptr_count > 0) {
+        nt_ptr_event_t *tail = &s_ptr_buf[s_ptr_count - 1];
+        if (!tail->is_down && tail->buttons == buttons) {
+            tail->x = raw_x;
+            tail->y = raw_y;
+            return;
+        }
+    }
     if (s_ptr_count < NT_MAX_PTR_EVENTS) {
         s_ptr_buf[s_ptr_count++] = (nt_ptr_event_t){.x = raw_x, .y = raw_y, .buttons = buttons, .is_down = is_down};
     }
