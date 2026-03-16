@@ -68,6 +68,10 @@ typedef enum {
 } nt_depth_func_t;
 
 typedef enum {
+    NT_PIXEL_RGBA8 = 0, /* 4 bpp, 8 bits per channel */
+} nt_pixel_format_t;
+
+typedef enum {
     NT_FILTER_NEAREST = 0,
     NT_FILTER_LINEAR,
     NT_FILTER_NEAREST_MIPMAP_NEAREST,
@@ -146,9 +150,10 @@ typedef struct {
 } nt_buffer_desc_t;
 
 typedef struct {
-    uint32_t width;                 /* must be power-of-2 */
-    uint32_t height;                /* must be power-of-2 */
-    const void *data;               /* raw RGBA8 pixel data (width * height * 4 bytes) */
+    uint32_t width;
+    uint32_t height;
+    const void *data;               /* raw pixel data (width * height * bpp bytes) */
+    nt_pixel_format_t format;       /* default: NT_PIXEL_RGBA8 */
     nt_texture_filter_t min_filter; /* default: NT_FILTER_NEAREST */
     nt_texture_filter_t mag_filter; /* default: NT_FILTER_NEAREST (only NEAREST or LINEAR valid) */
     nt_texture_wrap_t wrap_u;       /* default: NT_WRAP_CLAMP_TO_EDGE */

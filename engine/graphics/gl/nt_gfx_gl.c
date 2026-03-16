@@ -76,6 +76,8 @@ static struct {
     bool polygon_offset;
     float po_factor;
     float po_units;
+    GLenum active_texture;                           /* current glActiveTexture unit */
+    GLuint bound_textures[NT_GFX_MAX_TEXTURE_SLOTS]; /* GL name per slot */
 } s_gl_cache;
 
 static void nt_gfx_gl_cache_reset(void) {
@@ -91,6 +93,8 @@ static void nt_gfx_gl_cache_reset(void) {
     s_gl_cache.polygon_offset = false;
     s_gl_cache.po_factor = 0.0F;
     s_gl_cache.po_units = 0.0F;
+    s_gl_cache.active_texture = GL_TEXTURE0;
+    memset(s_gl_cache.bound_textures, 0, sizeof(s_gl_cache.bound_textures));
 }
 
 /* ---- Helpers: enum mapping ---- */
@@ -609,8 +613,21 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (GLint)map_texture_wrap(desc->wrap_u));
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (GLint)map_texture_wrap(desc->wrap_v));
 
+    /* Map pixel format to GL constants */
+    GLenum internal_fmt = GL_RGBA8;
+    GLenum pixel_fmt = GL_RGBA;
+    GLenum pixel_type = GL_UNSIGNED_BYTE;
+    switch (desc->format) {
+    case NT_PIXEL_RGBA8:
+    default:
+        internal_fmt = GL_RGBA8;
+        pixel_fmt = GL_RGBA;
+        pixel_type = GL_UNSIGNED_BYTE;
+        break;
+    }
+
     /* Upload pixel data (may be NULL for context-loss recovery placeholder) */
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)desc->width, (GLsizei)desc->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, desc->data);
+    glTexImage2D(GL_TEXTURE_2D, 0, (GLint)internal_fmt, (GLsizei)desc->width, (GLsizei)desc->height, 0, pixel_fmt, pixel_type, desc->data);
 
     /* Generate mipmaps after base level upload if requested and data present */
     if (desc->gen_mipmaps && desc->data) {
@@ -640,6 +657,12 @@ void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
     }
     GLuint tex = s_texture_gl[backend_handle];
     if (tex) {
+        /* Invalidate cache entries referencing this GL name */
+        for (uint32_t i = 0; i < NT_GFX_MAX_TEXTURE_SLOTS; i++) {
+            if (s_gl_cache.bound_textures[i] == tex) {
+                s_gl_cache.bound_textures[i] = 0;
+            }
+        }
         glDeleteTextures(1, &tex);
     }
     s_texture_gl[backend_handle] = 0;
@@ -649,8 +672,17 @@ void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
     if (backend_handle == 0 || backend_handle > s_init_desc.max_textures) {
         return;
     }
-    glActiveTexture(GL_TEXTURE0 + slot);
-    glBindTexture(GL_TEXTURE_2D, s_texture_gl[backend_handle]);
+    GLuint tex = s_texture_gl[backend_handle];
+    if (s_gl_cache.bound_textures[slot] == tex) {
+        return; /* already bound to this slot */
+    }
+    GLenum unit = GL_TEXTURE0 + slot;
+    if (s_gl_cache.active_texture != unit) {
+        glActiveTexture(unit);
+        s_gl_cache.active_texture = unit;
+    }
+    glBindTexture(GL_TEXTURE_2D, tex);
+    s_gl_cache.bound_textures[slot] = tex;
 }
 
 void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {

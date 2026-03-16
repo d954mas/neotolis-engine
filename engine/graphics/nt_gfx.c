@@ -41,8 +41,6 @@ static void nt_gfx_free_texture_desc(nt_texture_desc_t *d) {
     memset(d, 0, sizeof(*d));
 }
 
-static bool is_power_of_2(uint32_t n) { return n > 0 && (n & (n - 1)) == 0; }
-
 /* Pipeline-owned shader source copies.
    Pipelines keep their own vs/fs source so context-loss recovery
    works even if the original shader was destroyed. */
@@ -493,13 +491,15 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         nt_log_error("gfx: make_texture: zero dimension");
         return result;
     }
-    if (!is_power_of_2(desc->width) || !is_power_of_2(desc->height)) {
-        nt_log_error("gfx: make_texture: non-power-of-2 dimension");
-        return result;
+    nt_texture_desc_t local_desc = *desc;
+
+    /* Clamp mipmap min_filter when no mipmaps — prevents GL incomplete texture */
+    if (!local_desc.gen_mipmaps && local_desc.min_filter > NT_FILTER_LINEAR) {
+        local_desc.min_filter = (local_desc.min_filter & 1) ? NT_FILTER_LINEAR : NT_FILTER_NEAREST;
+        nt_log_info("gfx: make_texture: min_filter clamped (gen_mipmaps=false)");
     }
 
     /* Validate mag_filter: only NEAREST or LINEAR allowed */
-    nt_texture_desc_t local_desc = *desc;
     if (local_desc.mag_filter > NT_FILTER_LINEAR) {
         nt_log_info("gfx: make_texture: mag_filter clamped to LINEAR");
         local_desc.mag_filter = NT_FILTER_LINEAR;

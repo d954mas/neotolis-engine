@@ -280,26 +280,17 @@ void test_gfx_make_texture_zero_height(void) {
     TEST_ASSERT_EQUAL_UINT32(0, tex.id);
 }
 
-/* ---- Texture: non-power-of-2 width ---- */
+/* ---- Texture: NPOT dimensions accepted ---- */
 
-void test_gfx_make_texture_npot_width(void) {
+void test_gfx_make_texture_npot(void) {
+    /* WebGL 2 / GL 3.3 fully support NPOT textures */
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 3,
-        .height = 4,
-        .data = s_test_pixels_4x4,
-    });
-    TEST_ASSERT_EQUAL_UINT32(0, tex.id);
-}
-
-/* ---- Texture: non-power-of-2 height ---- */
-
-void test_gfx_make_texture_npot_height(void) {
-    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = 4,
         .height = 5,
         .data = s_test_pixels_4x4,
     });
-    TEST_ASSERT_EQUAL_UINT32(0, tex.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+    nt_gfx_destroy_texture(tex);
 }
 
 /* ---- Texture: mag_filter clamped from mipmap variant ---- */
@@ -324,6 +315,22 @@ void test_gfx_make_texture_gen_mipmaps(void) {
         .data = s_test_pixels_4x4,
         .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
         .gen_mipmaps = true,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+    nt_gfx_destroy_texture(tex);
+}
+
+/* ---- Texture: mipmap min_filter clamped when gen_mipmaps=false ---- */
+
+void test_gfx_make_texture_mipmap_filter_no_mipmaps(void) {
+    /* Without gen_mipmaps, mipmap min_filter would create incomplete texture.
+       Engine must clamp to non-mipmap variant and still return valid handle. */
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .data = s_test_pixels_4x4,
+        .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
+        .gen_mipmaps = false,
     });
     TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
     nt_gfx_destroy_texture(tex);
@@ -431,10 +438,10 @@ int main(void) {
     RUN_TEST(test_gfx_make_texture_null_data);
     RUN_TEST(test_gfx_make_texture_zero_width);
     RUN_TEST(test_gfx_make_texture_zero_height);
-    RUN_TEST(test_gfx_make_texture_npot_width);
-    RUN_TEST(test_gfx_make_texture_npot_height);
+    RUN_TEST(test_gfx_make_texture_npot);
     RUN_TEST(test_gfx_make_texture_mag_filter_clamped);
     RUN_TEST(test_gfx_make_texture_gen_mipmaps);
+    RUN_TEST(test_gfx_make_texture_mipmap_filter_no_mipmaps);
     RUN_TEST(test_gfx_bind_texture_valid);
     RUN_TEST(test_gfx_bind_texture_invalid);
     RUN_TEST(test_gfx_destroy_texture_and_reuse);
