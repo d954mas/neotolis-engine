@@ -1,5 +1,10 @@
 #include "input/nt_input_internal.h"
-#include "window/nt_window_native.h"
+
+#define GLFW_INCLUDE_NONE
+#include "window/nt_window.h"
+#include <GLFW/glfw3.h>
+
+#define g_nt_glfw_window ((GLFWwindow *)g_nt_window.platform_handle)
 
 /* ---- Mouse button mask tracking ---- */
 

@@ -57,7 +57,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang ninja-build
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang ninja-build \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev wayland-protocols libxkbcommon-dev
 
       - name: Configure native debug
         run: cmake --preset native-debug
@@ -108,7 +111,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang ninja-build
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang ninja-build \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev wayland-protocols libxkbcommon-dev xvfb
 
       - name: Configure
         run: cmake --preset native-debug
@@ -117,7 +123,7 @@ jobs:
         run: cmake --build --preset native-debug
 
       - name: Run tests
-        run: ctest --preset native-debug
+        run: xvfb-run ctest --preset native-debug
 
   test-wasm:
     name: WASM Smoke Test
@@ -163,7 +169,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang clang-tidy ninja-build
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang clang-tidy ninja-build \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev wayland-protocols libxkbcommon-dev
 
       - name: Configure
         run: cmake --preset native-debug

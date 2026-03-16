@@ -1,8 +1,10 @@
-#include "window/nt_window_native.h"
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+
 #include "log/nt_log.h"
 #include "window/nt_window.h"
 
-GLFWwindow *g_nt_glfw_window = NULL;
+static GLFWwindow *s_glfw_window = NULL;
 
 /* ---- Pre-fullscreen size for restore ---- */
 static int s_windowed_x;
@@ -15,11 +17,11 @@ static int s_windowed_h;
 static void sync_sizes(void) {
     int win_w = 0;
     int win_h = 0;
-    glfwGetWindowSize(g_nt_glfw_window, &win_w, &win_h);
+    glfwGetWindowSize(s_glfw_window, &win_w, &win_h);
 
     int fb_w = 0;
     int fb_h = 0;
-    glfwGetFramebufferSize(g_nt_glfw_window, &fb_w, &fb_h);
+    glfwGetFramebufferSize(s_glfw_window, &fb_w, &fb_h);
 
     /* Derive DPR from actual framebuffer/logical ratio, not content scale.
        Content scale may not reflect the real framebuffer size on Windows
@@ -58,52 +60,61 @@ void nt_window_init(void) {
 
     const char *title = g_nt_window.title ? g_nt_window.title : "Neotolis";
 
-    g_nt_glfw_window = glfwCreateWindow((int)g_nt_window.width, (int)g_nt_window.height, title, NULL, NULL);
-    if (!g_nt_glfw_window) {
+    s_glfw_window = glfwCreateWindow((int)g_nt_window.width, (int)g_nt_window.height, title, NULL, NULL);
+    if (!s_glfw_window) {
         nt_log_error("GLFW: glfwCreateWindow() failed");
         glfwTerminate();
         __builtin_trap();
     }
 
-    glfwMakeContextCurrent(g_nt_glfw_window);
+    glfwMakeContextCurrent(s_glfw_window);
 
     /* Register framebuffer resize callback */
-    glfwSetFramebufferSizeCallback(g_nt_glfw_window, fb_size_callback);
+    glfwSetFramebufferSizeCallback(s_glfw_window, fb_size_callback);
 
     /* Query initial sizes via shared DPR logic (respects max_dpr) */
     sync_sizes();
 
     /* Save initial windowed position/size for fullscreen restore */
-    glfwGetWindowPos(g_nt_glfw_window, &s_windowed_x, &s_windowed_y);
+    glfwGetWindowPos(s_glfw_window, &s_windowed_x, &s_windowed_y);
     s_windowed_w = (int)g_nt_window.width;
     s_windowed_h = (int)g_nt_window.height;
+    g_nt_window.platform_handle = s_glfw_window;
 }
 
 void nt_window_poll(void) { /* No-op on desktop: resize handled via callback */ }
 
 void nt_window_shutdown(void) {
-    if (g_nt_glfw_window) {
-        glfwDestroyWindow(g_nt_glfw_window);
-        g_nt_glfw_window = NULL;
+    if (s_glfw_window) {
+        glfwDestroyWindow(s_glfw_window);
+        s_glfw_window = NULL;
     }
     glfwTerminate();
 }
 
 void nt_window_set_fullscreen(bool fullscreen) {
-    if (!g_nt_glfw_window) {
+    if (!s_glfw_window) {
+        return;
+    }
+
+    /* Skip if already in the requested mode */
+    bool is_currently_fullscreen = glfwGetWindowMonitor(s_glfw_window) != NULL;
+    if (fullscreen == is_currently_fullscreen) {
         return;
     }
 
     if (fullscreen) {
-        /* Save current windowed position/size */
-        glfwGetWindowPos(g_nt_glfw_window, &s_windowed_x, &s_windowed_y);
-        glfwGetWindowSize(g_nt_glfw_window, &s_windowed_w, &s_windowed_h);
+        /* Save current windowed position/size ONLY if we were truly windowed */
+        if (!is_currently_fullscreen) {
+            glfwGetWindowPos(s_glfw_window, &s_windowed_x, &s_windowed_y);
+            glfwGetWindowSize(s_glfw_window, &s_windowed_w, &s_windowed_h);
+        }
 
         GLFWmonitor *monitor = glfwGetPrimaryMonitor();
         const GLFWvidmode *mode = glfwGetVideoMode(monitor);
-        glfwSetWindowMonitor(g_nt_glfw_window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+        glfwSetWindowMonitor(s_glfw_window, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
     } else {
         /* Restore windowed mode */
-        glfwSetWindowMonitor(g_nt_glfw_window, NULL, s_windowed_x, s_windowed_y, s_windowed_w, s_windowed_h, 0);
+        glfwSetWindowMonitor(s_glfw_window, NULL, s_windowed_x, s_windowed_y, s_windowed_w, s_windowed_h, 0);
     }
 }

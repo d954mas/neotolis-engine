@@ -1,6 +1,11 @@
 #include "app/nt_app.h"
 #include "time/nt_time.h"
-#include "window/nt_window_native.h"
+
+#define GLFW_INCLUDE_NONE
+#include "window/nt_window.h"
+#include <GLFW/glfw3.h>
+
+#define g_nt_glfw_window ((GLFWwindow *)g_nt_window.platform_handle)
 
 /* Use __builtin_fminf to bypass Windows UCRT DLL import issue with ASan */
 #define nt_fminf(a, b) __builtin_fminf((a), (b))

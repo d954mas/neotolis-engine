@@ -1,5 +1,6 @@
 #include "graphics/gl/nt_gfx_gl_ctx.h"
-#include "window/nt_window_native.h"
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
 
 #include <glad/gl.h>
 

@@ -14,9 +14,12 @@ typedef struct nt_window_t {
     /* State (engine writes, game reads) */
     uint32_t width;     /* Canvas width (pixels) */
     uint32_t height;    /* Canvas height (pixels) */
-    uint32_t fb_width;  /* Framebuffer width (render pixels) */
-    uint32_t fb_height; /* Framebuffer height (render pixels) */
-    float dpr;          /* Effective DPR = min(device_dpr, max_dpr) */
+    uint32_t fb_width;  /* Actual framebuffer width */
+    uint32_t fb_height; /* Actual framebuffer height */
+    float dpr;          /* Current effective Device Pixel Ratio */
+
+    /* Internal platform context (used by backends) */
+    void *platform_handle;
 } nt_window_t;
 
 extern nt_window_t g_nt_window;
