@@ -75,9 +75,11 @@ nt_entity_t nt_entity_create(void) {
     s_entity.queue_top--;
     uint16_t index = s_entity.free_queue[s_entity.queue_top];
 
-    /* Increment generation (starts at 1 for first allocation) */
+    /* Increment generation (starts at 1 for first allocation, wraps at 65535) */
     s_entity.generations[index]++;
-    NT_ASSERT(s_entity.generations[index] != 0); /* overflow: 65535 cycles on one slot */
+    if (s_entity.generations[index] == 0) {
+        s_entity.generations[index] = 1; /* skip 0: reserved for invalid handles */
+    }
     uint16_t gen = s_entity.generations[index];
 
     s_entity.alive[index] = true;
@@ -110,6 +112,9 @@ void nt_entity_destroy(nt_entity_t entity) {
 
     /* NOW mark dead: bump generation, clear flags, return slot to free queue */
     s_entity.generations[index]++;
+    if (s_entity.generations[index] == 0) {
+        s_entity.generations[index] = 1;
+    }
     s_entity.alive[index] = false;
     s_entity.enabled[index] = false;
 
