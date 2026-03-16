@@ -60,7 +60,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y clang ninja-build \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev
+            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev
 
       - name: Configure native debug
         run: cmake --preset native-debug
@@ -114,7 +114,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y clang ninja-build \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev xvfb
+            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev xvfb
 
       - name: Configure
         run: cmake --preset native-debug
@@ -172,7 +172,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y clang clang-tidy ninja-build \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-            libwayland-dev wayland-protocols libxkbcommon-dev
+            libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev
 
       - name: Configure
         run: cmake --preset native-debug
