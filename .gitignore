@@ -35,3 +35,6 @@ package-lock.json
 
 # GSD planning
 .planning/
+
+# Claude local settings
+.claude/settings.local.json
