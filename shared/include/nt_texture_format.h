@@ -13,7 +13,7 @@ typedef enum {
 } nt_texture_pixel_format_t;
 
 /*
- * TextureAssetHeader -- binary header prepended to texture data in NEOPAK.
+ * TextureAssetHeader -- binary header prepended to texture data in ntpack.
  *
  * Layout (20 bytes):
  *   magic(4) + version(2) + format(2) +

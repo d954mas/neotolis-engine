@@ -34,27 +34,34 @@ void test_pack_magic_value(void) {
 
 void test_pack_version(void) { TEST_ASSERT_EQUAL_UINT(1, NT_PACK_VERSION); }
 
-void test_pack_align(void) { TEST_ASSERT_EQUAL_UINT(4, NT_PACK_ALIGN); }
+void test_pack_align(void) {
+    TEST_ASSERT_EQUAL_UINT(4, NT_PACK_ASSET_ALIGN);
+    TEST_ASSERT_EQUAL_UINT(8, NT_PACK_DATA_ALIGN);
+}
 
 /* --- Alignment macro --- */
 
 void test_align_up_macro(void) {
-    TEST_ASSERT_EQUAL_UINT32(0, NT_PACK_ALIGN_UP(0));
-    TEST_ASSERT_EQUAL_UINT32(4, NT_PACK_ALIGN_UP(1));
-    TEST_ASSERT_EQUAL_UINT32(4, NT_PACK_ALIGN_UP(2));
-    TEST_ASSERT_EQUAL_UINT32(4, NT_PACK_ALIGN_UP(3));
-    TEST_ASSERT_EQUAL_UINT32(4, NT_PACK_ALIGN_UP(4));
-    TEST_ASSERT_EQUAL_UINT32(8, NT_PACK_ALIGN_UP(5));
-    TEST_ASSERT_EQUAL_UINT32(16, NT_PACK_ALIGN_UP(13));
-    TEST_ASSERT_EQUAL_UINT32(100, NT_PACK_ALIGN_UP(100));
+    /* 4-byte alignment */
+    TEST_ASSERT_EQUAL_UINT32(0, NT_PACK_ALIGN_UP(0, 4));
+    TEST_ASSERT_EQUAL_UINT32(4, NT_PACK_ALIGN_UP(1, 4));
+    TEST_ASSERT_EQUAL_UINT32(4, NT_PACK_ALIGN_UP(4, 4));
+    TEST_ASSERT_EQUAL_UINT32(8, NT_PACK_ALIGN_UP(5, 4));
+    TEST_ASSERT_EQUAL_UINT32(100, NT_PACK_ALIGN_UP(100, 4));
+    /* 8-byte alignment */
+    TEST_ASSERT_EQUAL_UINT32(0, NT_PACK_ALIGN_UP(0, 8));
+    TEST_ASSERT_EQUAL_UINT32(8, NT_PACK_ALIGN_UP(1, 8));
+    TEST_ASSERT_EQUAL_UINT32(8, NT_PACK_ALIGN_UP(8, 8));
+    TEST_ASSERT_EQUAL_UINT32(16, NT_PACK_ALIGN_UP(9, 8));
+    TEST_ASSERT_EQUAL_UINT32(24, NT_PACK_ALIGN_UP(24, 8));
 }
 
 /* --- Pack header field offset tests --- */
 
 void test_pack_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(0, offsetof(NtPackHeader, magic));
-    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtPackHeader, version));
-    TEST_ASSERT_EQUAL_UINT(6, offsetof(NtPackHeader, pack_id));
+    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtPackHeader, pack_id));
+    TEST_ASSERT_EQUAL_UINT(8, offsetof(NtPackHeader, version));
     TEST_ASSERT_EQUAL_UINT(10, offsetof(NtPackHeader, asset_count));
     TEST_ASSERT_EQUAL_UINT(12, offsetof(NtPackHeader, header_size));
     TEST_ASSERT_EQUAL_UINT(16, offsetof(NtPackHeader, total_size));
@@ -63,8 +70,8 @@ void test_pack_header_field_offsets(void) {
 
 void test_asset_entry_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(0, offsetof(NtAssetEntry, resource_id));
-    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtAssetEntry, asset_type));
-    TEST_ASSERT_EQUAL_UINT(5, offsetof(NtAssetEntry, format_version));
+    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtAssetEntry, format_version));
+    TEST_ASSERT_EQUAL_UINT(6, offsetof(NtAssetEntry, asset_type));
     TEST_ASSERT_EQUAL_UINT(7, offsetof(NtAssetEntry, _pad));
     TEST_ASSERT_EQUAL_UINT(8, offsetof(NtAssetEntry, offset));
     TEST_ASSERT_EQUAL_UINT(12, offsetof(NtAssetEntry, size));
@@ -121,14 +128,16 @@ void test_stream_desc_field_offsets(void) {
 
 void test_stream_type_sizes(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_stream_type_size(NT_STREAM_UINT8));
-    TEST_ASSERT_EQUAL_UINT32(2, nt_stream_type_size(NT_STREAM_INT16));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_stream_type_size(NT_STREAM_INT8));
     TEST_ASSERT_EQUAL_UINT32(2, nt_stream_type_size(NT_STREAM_UINT16));
+    TEST_ASSERT_EQUAL_UINT32(2, nt_stream_type_size(NT_STREAM_INT16));
+    TEST_ASSERT_EQUAL_UINT32(2, nt_stream_type_size(NT_STREAM_FLOAT16));
     TEST_ASSERT_EQUAL_UINT32(4, nt_stream_type_size(NT_STREAM_FLOAT32));
     TEST_ASSERT_EQUAL_UINT32(0, nt_stream_type_size(99)); /* unknown type */
 }
 
 void test_stream_stride_calculation(void) {
-    /* Typical mesh: position(float3) + normal(float3) + uv(float2) */
+    /* Typical mesh: position(float32x3) + normal(float32x3) + uv(float32x2) */
     NtStreamDesc streams[3] = {
         {0xAABBCCDD, NT_STREAM_FLOAT32, 3, 0, 0},
         {0x11223344, NT_STREAM_FLOAT32, 3, 0, 0},
@@ -142,17 +151,17 @@ void test_stream_stride_calculation(void) {
 }
 
 void test_stream_stride_mixed_precision(void) {
-    /* Compact mesh: position(float3) + color(uint8x4 normalized) + uv(uint16x2) */
+    /* Compact mesh: position(float32x3) + normal(float16x3) + uv(uint16x2) */
     NtStreamDesc streams[3] = {
         {0xAABBCCDD, NT_STREAM_FLOAT32, 3, 0, 0},
-        {0x11223344, NT_STREAM_UINT8, 4, 1, 0},
+        {0x11223344, NT_STREAM_FLOAT16, 3, 0, 0},
         {0x55667788, NT_STREAM_UINT16, 2, 0, 0},
     };
     uint32_t stride = 0;
     for (int i = 0; i < 3; i++) {
         stride += nt_stream_type_size(streams[i].type) * streams[i].count;
     }
-    TEST_ASSERT_EQUAL_UINT32(20, stride); /* 12 + 4 + 4 */
+    TEST_ASSERT_EQUAL_UINT32(22, stride); /* 12 + 6 + 4 */
 }
 
 /* --- Mesh header tests --- */

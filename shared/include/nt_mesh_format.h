@@ -12,9 +12,11 @@
 /* Stream value type */
 typedef enum {
     NT_STREAM_UINT8 = 0,   /* 1 byte  */
-    NT_STREAM_INT16 = 1,   /* 2 bytes */
+    NT_STREAM_INT8 = 1,    /* 1 byte  */
     NT_STREAM_UINT16 = 2,  /* 2 bytes */
-    NT_STREAM_FLOAT32 = 3, /* 4 bytes */
+    NT_STREAM_INT16 = 3,   /* 2 bytes */
+    NT_STREAM_FLOAT16 = 4, /* 2 bytes */
+    NT_STREAM_FLOAT32 = 5, /* 4 bytes */
 } nt_stream_type_t;
 
 /*
@@ -40,7 +42,7 @@ typedef struct {
 _Static_assert(sizeof(NtStreamDesc) == 8, "NtStreamDesc must be 8 bytes");
 
 /*
- * NtMeshAssetHeader — binary header prepended to mesh data in NEOPAK pack.
+ * NtMeshAssetHeader — binary header prepended to mesh data in ntpack.
  *
  * Layout (24 bytes):
  *   magic(4) + version(2) + stream_count(1) + index_type(1) +
@@ -71,8 +73,8 @@ _Static_assert(sizeof(NtMeshAssetHeader) == 24, "NtMeshAssetHeader must be 24 by
 
 /* Byte size of one component of a given stream type */
 static inline uint32_t nt_stream_type_size(uint8_t type) {
-    static const uint32_t sizes[] = {1, 2, 2, 4};
-    return (type < 4) ? sizes[type] : 0;
+    static const uint32_t sizes[] = {1, 1, 2, 2, 2, 4};
+    return (type < 6) ? sizes[type] : 0;
 }
 
 #endif /* NT_MESH_FORMAT_H */

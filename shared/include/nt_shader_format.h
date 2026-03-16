@@ -8,7 +8,7 @@
 #define NT_SHADER_VERSION 1
 
 /*
- * ShaderAssetHeader -- binary header prepended to shader data in NEOPAK.
+ * ShaderAssetHeader -- binary header prepended to shader data in ntpack.
  *
  * Layout (24 bytes):
  *   magic(4) + version(2) + _pad(2) +
