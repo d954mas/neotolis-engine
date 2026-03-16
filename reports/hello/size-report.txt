@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis)
-# Commit: c49f38b
+# Commit: 31b496d
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                41 B
 Elem                  14 B
-Code               15048 B
-Data                 776 B
-Custom              1054 B
+Code               15062 B
+Data                 790 B
+Custom              1045 B
 ---------------- ----------
-TOTAL              17179 B
+TOTAL              17198 B
 
 ## Top 30 Functions by Size
 
@@ -32,7 +32,7 @@ TOTAL              17179 B
   641 B   nt_input_web_on_pointer_down
   508 B   __memcpy
   445 B   nt_window_init
-  423 B   main
+  437 B   main
   376 B   puts
   372 B   __stdio_write
   370 B   __memset
@@ -55,7 +55,7 @@ TOTAL              17179 B
    40 B   __small_printf
 
 Total functions: 35
-Total code size: 14988 B
+Total code size: 15002 B
 
 ## Per-Module Contributions
 
@@ -63,14 +63,15 @@ Total code size: 14988 B
 
 Module                         Size
 ------------------------ ----------
-libnt_app.a                 1428 B
+libnt_app.a                 1432 B
 libnt_core.a                1688 B
 libnt_input.a              16358 B
-libnt_window.a              3454 B
+libnt_window.a              3702 B
 ------------------------ ----------
-TOTAL (linked)             22928 B
+TOTAL (linked)             23180 B
 
 Not linked to hello:
+libnt_app_stub.a            1432 B
 libnt_gfx.a                26268 B
 libnt_gfx_stub.a           17420 B
 libnt_input_stub.a         10902 B
@@ -78,9 +79,10 @@ libnt_log.a                  970 B
 libnt_log_stub.a             506 B
 libnt_shape_renderer.a   1140002 B
 libnt_time.a                 866 B
+libnt_window_stub.a         1608 B
 
 
 ## Data Segments Summary
 
-Segments: 21
-Total data size: 648 B
+Segments: 20
+Total data size: 668 B

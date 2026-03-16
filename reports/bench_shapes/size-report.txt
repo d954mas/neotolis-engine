@@ -1,5 +1,5 @@
 # Size Report: bench_shapes (wasm-analysis)
-# Commit: c49f38b
+# Commit: 31b496d
 
 ## WASM Section Sizes
 
@@ -13,18 +13,18 @@ Memory                 7 B
 Global                 9 B
 Export                53 B
 Elem                  24 B
-Code               65011 B
-Data                8597 B
-Custom              3078 B
+Code               65026 B
+Data                8610 B
+Custom              3068 B
 ---------------- ----------
-TOTAL              77410 B
+TOTAL              77428 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
 11423 B   frame
-11369 B   main
+11384 B   main
  5335 B   dlmalloc
  3469 B   rebuild_shapes
  3102 B   fmt_fp
@@ -55,7 +55,7 @@ TOTAL              77410 B
   362 B   nt_gfx_destroy_buffer
 
 Total functions: 79
-Total code size: 64879 B
+Total code size: 64894 B
 
 ## Per-Module Contributions
 
@@ -63,24 +63,26 @@ Total code size: 64879 B
 
 Module                         Size
 ------------------------ ----------
-libnt_app.a                 1428 B
+libnt_app.a                 1432 B
 libnt_core.a                1688 B
 libnt_gfx.a                26268 B
-libnt_gfx_stub.a           17420 B
 libnt_input.a              16358 B
 libnt_shape_renderer.a   1140002 B
-libnt_window.a              3454 B
+libnt_window.a              3702 B
 ------------------------ ----------
-TOTAL (linked)           1206618 B
+TOTAL (linked)           1189450 B
 
 Not linked to bench_shapes:
+libnt_app_stub.a            1432 B
+libnt_gfx_stub.a           17420 B
 libnt_input_stub.a         10902 B
 libnt_log.a                  970 B
 libnt_log_stub.a             506 B
 libnt_time.a                 866 B
+libnt_window_stub.a         1608 B
 
 
 ## Data Segments Summary
 
-Segments: 40
-Total data size: 8326 B
+Segments: 39
+Total data size: 8346 B

@@ -1,10 +1,46 @@
-[{
-  "commit": "c49f38b",
-  "date": "2026-03-13T08:10:52Z",
-  "files": {
-    "index.html": { "raw": 1352, "gzip": 752 },
-    "index.js": { "raw": 36194, "gzip": 10568 },
-    "index.wasm": { "raw": 66557, "gzip": 28356 }
+[
+  {
+    "commit": "c49f38b",
+    "date": "2026-03-13T08:10:52Z",
+    "files": {
+      "index.html": {
+        "raw": 1352,
+        "gzip": 752
+      },
+      "index.js": {
+        "raw": 36194,
+        "gzip": 10568
+      },
+      "index.wasm": {
+        "raw": 66557,
+        "gzip": 28356
+      }
+    },
+    "total": {
+      "raw": 104103,
+      "gzip": 39676
+    }
   },
-  "total": { "raw": 104103, "gzip": 39676 }
-}]
+  {
+    "commit": "31b496d",
+    "date": "2026-03-16T06:46:38Z",
+    "files": {
+      "index.html": {
+        "raw": 1352,
+        "gzip": 752
+      },
+      "index.js": {
+        "raw": 36194,
+        "gzip": 10567
+      },
+      "index.wasm": {
+        "raw": 66585,
+        "gzip": 28360
+      }
+    },
+    "total": {
+      "raw": 104131,
+      "gzip": 39679
+    }
+  }
+]
