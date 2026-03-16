@@ -144,15 +144,11 @@ void test_mesh_attr_mask_matches_gfx(void) {
     TEST_ASSERT_EQUAL_HEX32((1u << NT_ATTR_TEXCOORD0), NT_MESH_ATTR_TEXCOORD0);
 }
 
-void test_mesh_attr_required(void) {
-    TEST_ASSERT_EQUAL_HEX32(NT_MESH_ATTR_POSITION, NT_MESH_ATTR_REQUIRED);
-}
+void test_mesh_attr_required(void) { TEST_ASSERT_EQUAL_HEX32(NT_MESH_ATTR_POSITION, NT_MESH_ATTR_REQUIRED); }
 
 /* --- Texture header tests --- */
 
-void test_texture_header_size(void) {
-    TEST_ASSERT_EQUAL_UINT(20, sizeof(NtTextureAssetHeader));
-}
+void test_texture_header_size(void) { TEST_ASSERT_EQUAL_UINT(20, sizeof(NtTextureAssetHeader)); }
 
 void test_texture_magic_value(void) {
     TEST_ASSERT_EQUAL_HEX32(0x58455454, NT_TEXTURE_MAGIC);
@@ -176,15 +172,11 @@ void test_texture_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(18, offsetof(NtTextureAssetHeader, _pad));
 }
 
-void test_texture_format_enum(void) {
-    TEST_ASSERT_EQUAL_UINT(1, NT_TEXTURE_FORMAT_RGBA8);
-}
+void test_texture_format_enum(void) { TEST_ASSERT_EQUAL_UINT(1, NT_TEXTURE_FORMAT_RGBA8); }
 
 /* --- Shader header tests --- */
 
-void test_shader_header_size(void) {
-    TEST_ASSERT_EQUAL_UINT(24, sizeof(NtShaderAssetHeader));
-}
+void test_shader_header_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtShaderAssetHeader)); }
 
 void test_shader_magic_value(void) {
     TEST_ASSERT_EQUAL_HEX32(0x52444853, NT_SHADER_MAGIC);
