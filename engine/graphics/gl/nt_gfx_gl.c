@@ -229,6 +229,7 @@ void nt_gfx_backend_end_pass(void) {}
 
 /* ---- Pipeline bind ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
     if (backend_handle == 0 || backend_handle > s_init_desc.max_pipelines) {
         return;
