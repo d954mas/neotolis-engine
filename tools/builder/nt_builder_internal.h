@@ -1,0 +1,97 @@
+#ifndef NT_BUILDER_INTERNAL_H
+#define NT_BUILDER_INTERNAL_H
+
+#include "nt_builder.h"
+#include "nt_pack_format.h"
+
+/* Always-on assert for builder (never compiled out by NDEBUG).
+   Mirrors engine NT_ASSERT_ALWAYS but without engine header deps. */
+#define NT_BUILD_ASSERT(cond)                                                                                                                                                                          \
+    do {                                                                                                                                                                                               \
+        if (!(cond)) {                                                                                                                                                                                 \
+            (void)fprintf(stderr, "FATAL: %s:%d: assertion failed: %s\n", __FILE__, __LINE__, #cond);                                                                                                  \
+            abort();                                                                                                                                                                                   \
+        }                                                                                                                                                                                              \
+    } while (0)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Initial data buffer capacity (1 MB, doubles on overflow) */
+#define NT_BUILD_INITIAL_CAPACITY (1024 * 1024)
+
+/* Asset type tag for deferred entries */
+typedef enum {
+    NT_BUILD_ASSET_MESH = 0,
+    NT_BUILD_ASSET_TEXTURE = 1,
+    NT_BUILD_ASSET_SHADER = 2,
+} nt_build_asset_kind_t;
+
+/* Type-specific data for mesh entries */
+typedef struct {
+    NtStreamLayout layout[NT_MESH_MAX_STREAMS]; /* deep-copied from user */
+    uint32_t stream_count;
+} NtBuildMeshData;
+
+/* Type-specific data for shader entries */
+typedef struct {
+    nt_build_shader_stage_t stage;
+} NtBuildShaderData;
+
+/* Deferred asset entry -- stored during add_*, processed in finish_pack */
+typedef struct {
+    char *path;                 /* normalized source file path (owned, heap) */
+    char *rename_key;           /* renamed key path (owned, heap, NULL if not renamed) */
+    uint32_t resource_id;       /* FNV-1a hash */
+    nt_build_asset_kind_t kind; /* mesh/texture/shader */
+    void *data;                 /* NtBuildMeshData* / NtBuildShaderData* / NULL (owned, heap) */
+} NtBuildEntry;
+
+struct NtBuilderContext {
+    char output_path[512];
+
+    /* Deferred asset descriptors */
+    NtBuildEntry pending[NT_BUILD_MAX_ASSETS];
+    uint32_t pending_count;
+
+    /* Data accumulation buffer (used during finish_pack) */
+    uint8_t *data_buf;
+    uint32_t data_size;
+    uint32_t data_capacity;
+
+    /* Final asset entries (built during finish_pack) */
+    NtAssetEntry entries[NT_BUILD_MAX_ASSETS];
+    uint32_t entry_count;
+
+    /* Mode flags */
+    bool force;
+    bool has_error;
+
+    /* Pack metadata */
+    uint32_t pack_id;
+
+    /* Per-type counters for summary */
+    uint32_t mesh_count;
+    uint32_t texture_count;
+    uint32_t shader_count;
+};
+
+/* Internal helpers -- data accumulation (used in finish_pack phase) */
+nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data, uint32_t size);
+nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint32_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size);
+
+/* Internal import functions -- called from finish_pack */
+nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, uint32_t resource_id);
+nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *path, uint32_t resource_id);
+nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint32_t resource_id);
+
+/* File I/O utilities */
+char *nt_builder_read_file(const char *path, uint32_t *out_size);
+
+/* Hash and path utilities */
+char *nt_builder_normalize_path(const char *path);
+uint32_t nt_builder_fnv1a(const char *str);
+uint16_t nt_builder_float32_to_float16(float value);
+
+#endif /* NT_BUILDER_INTERNAL_H */

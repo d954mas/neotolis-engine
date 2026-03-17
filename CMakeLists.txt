@@ -41,6 +41,8 @@ if(NOT EMSCRIPTEN)
     set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
     add_subdirectory(deps/glfw EXCLUDE_FROM_ALL)
     add_subdirectory(deps/glad EXCLUDE_FROM_ALL)
+    add_subdirectory(deps/cgltf EXCLUDE_FROM_ALL)
+    add_subdirectory(deps/stb EXCLUDE_FROM_ALL)
 
     # GLFW uses CRT functions (assert, sscanf, powf, wcscpy) that resolve to
     # __declspec(dllimport) stubs under the default -D_DLL flag. Since we link
@@ -65,5 +67,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
     if(NOT EMSCRIPTEN)
         add_subdirectory(tools/builder)
+        add_subdirectory(examples/builder_demo)
     endif()
 endif()

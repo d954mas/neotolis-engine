@@ -168,6 +168,20 @@ if(NOT EMSCRIPTEN)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_components COMMAND test_components)
+
+    # --- Builder tests ---
+    add_executable(test_builder unit/test_builder.c)
+    target_link_libraries(test_builder PRIVATE nt_builder unity)
+    target_compile_definitions(test_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    target_compile_options(test_builder PRIVATE -U_DLL)
+    nt_set_warning_flags(test_builder)
+    nt_set_sanitizer_flags(test_builder)
+    set_target_properties(test_builder PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_builder COMMAND test_builder
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
 endif()
 
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---

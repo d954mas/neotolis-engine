@@ -144,6 +144,15 @@
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "preLaunchTask": "Build native-release"
+        },
+        {
+            "name": "Build Assets",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/builder_demo/native-release/build_assets.exe",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-release"
         }
     ]
 }
