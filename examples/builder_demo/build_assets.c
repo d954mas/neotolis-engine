@@ -58,6 +58,7 @@ static void generate_cube_glb(const char *path) {
     /* clang-format on */
 
     /* JSON chunk */
+    /* clang-format off */
     char json_buf[1024];
     int json_len = snprintf(
         json_buf, sizeof(json_buf),
@@ -81,6 +82,7 @@ static void generate_cube_glb(const char *path) {
         (uint32_t)sizeof(positions), (uint32_t)sizeof(uvs),
         (uint32_t)(sizeof(positions) + sizeof(uvs)), (uint32_t)sizeof(indices),
         (uint32_t)(sizeof(positions) + sizeof(uvs) + sizeof(indices)));
+    /* clang-format on */
 
     uint32_t json_padded = ((uint32_t)json_len + 3U) & ~3U;
     uint32_t json_padding = json_padded - (uint32_t)json_len;
