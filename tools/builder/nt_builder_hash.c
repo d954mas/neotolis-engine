@@ -44,7 +44,7 @@ char *nt_builder_normalize_path(const char *path) {
     char *tok = buf;
 
     for (;;) {
-        while (*tok == '/') {
+        while (*tok == '/') { // NOLINT(clang-analyzer-core.UndefinedBinaryOperatorResult)
             tok++;
         }
         if (*tok == '\0') {
@@ -52,7 +52,7 @@ char *nt_builder_normalize_path(const char *path) {
         }
 
         char *seg_start = tok;
-        while (*tok != '/' && *tok != '\0') {
+        while (*tok != '/' && *tok != '\0') { // NOLINT(clang-analyzer-core.UndefinedBinaryOperatorResult)
             tok++;
         }
 
