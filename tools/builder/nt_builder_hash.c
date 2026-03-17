@@ -46,20 +46,6 @@ uint32_t nt_builder_hash(const char *str) {
     return hash;
 }
 
-bool nt_builder_check_duplicate(NtBuilderContext *ctx, uint32_t resource_id, const char *path) {
-    for (uint32_t i = 0; i < ctx->entry_count; i++) {
-        if (ctx->resource_ids[i] == resource_id) {
-            (void)fprintf(stderr,
-                          "ERROR: Duplicate resource_id 0x%08X\n"
-                          "  existing: %s\n"
-                          "  new:      %s\n",
-                          resource_id, ctx->resource_paths[i] ? ctx->resource_paths[i] : "(unknown)", path ? path : "(unknown)");
-            return true;
-        }
-    }
-    return false;
-}
-
 uint16_t nt_builder_float32_to_float16(float value) {
     union {
         float f;

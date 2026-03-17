@@ -349,15 +349,16 @@ void test_missing_position_attribute_errors(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
+    /* add_mesh is deferred -- succeeds */
     nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, layout, 1);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
-    /* finish_pack should also fail due to has_error */
+    /* finish_pack fails during import */
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
 }
 
-void test_duplicate_path_errors(void) {
+void test_duplicate_path_replaces(void) {
     const char *vert_path = TMP_DIR "/dup.vert";
     write_test_shader(vert_path, "precision mediump float;\n"
                                  "void main() { gl_Position = vec4(0); }\n");
@@ -369,12 +370,21 @@ void test_duplicate_path_errors(void) {
     nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
+    /* Second add replaces (force semantics) */
     r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_ERR_DUPLICATE, r);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
-    /* finish should fail */
+    /* finish should succeed with 1 asset (not 2) */
     r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    /* Verify only 1 asset in pack */
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    NtPackHeader hdr;
+    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL_UINT16(1, hdr.asset_count);
+    (void)fclose(f);
 }
 
 void test_empty_shader_errors(void) {
@@ -385,9 +395,11 @@ void test_empty_shader_errors(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
+    /* add is deferred -- succeeds */
     nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
+    /* finish_pack fails during import */
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
 }
@@ -402,9 +414,11 @@ void test_shader_with_version_errors(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
+    /* add is deferred -- succeeds */
     nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
+    /* finish_pack fails during import */
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
 }
@@ -720,7 +734,7 @@ int main(void) {
 
     /* Validation errors */
     RUN_TEST(test_missing_position_attribute_errors);
-    RUN_TEST(test_duplicate_path_errors);
+    RUN_TEST(test_duplicate_path_replaces);
     RUN_TEST(test_empty_shader_errors);
     RUN_TEST(test_shader_with_version_errors);
 

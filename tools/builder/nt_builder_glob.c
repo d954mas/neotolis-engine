@@ -47,9 +47,7 @@ static bool wildcard_match(const char *pattern, const char *str) {
 
 typedef void (*glob_callback_fn)(const char *full_path, void *user);
 
-static int glob_strcmp(const void *a, const void *b) {
-    return strcmp(*(const char *const *)a, *(const char *const *)b);
-}
+static int glob_strcmp(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
 
 static void glob_iterate(const char *pattern, glob_callback_fn callback, void *user) {
     /* Split pattern into directory + filename pattern at last separator */
