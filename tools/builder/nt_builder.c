@@ -3,6 +3,60 @@
 #include "nt_crc32.h"
 /* clang-format on */
 
+/* --- Entry data management --- */
+
+static void nt_builder_free_mesh_data(NtBuildMeshData *md) {
+    if (!md) {
+        return;
+    }
+    for (uint32_t s = 0; s < md->stream_count; s++) {
+        free((char *)md->layout[s].engine_name);
+        free((char *)md->layout[s].gltf_name);
+    }
+    free(md);
+}
+
+static NtBuildMeshData *nt_builder_copy_mesh_data(const NtStreamLayout *layout, uint32_t stream_count) {
+    NtBuildMeshData *md = (NtBuildMeshData *)calloc(1, sizeof(NtBuildMeshData));
+    if (!md) {
+        return NULL;
+    }
+    md->stream_count = stream_count;
+    memcpy(md->layout, layout, stream_count * sizeof(NtStreamLayout));
+    for (uint32_t s = 0; s < stream_count; s++) {
+        if (layout[s].engine_name) {
+            md->layout[s].engine_name = strdup(layout[s].engine_name);
+            assert(md->layout[s].engine_name && "strdup engine_name failed");
+        }
+        if (layout[s].gltf_name) {
+            md->layout[s].gltf_name = strdup(layout[s].gltf_name);
+            assert(md->layout[s].gltf_name && "strdup gltf_name failed");
+        }
+    }
+    return md;
+}
+
+static NtBuildShaderData *nt_builder_copy_shader_data(nt_build_shader_stage_t stage) {
+    NtBuildShaderData *sd = (NtBuildShaderData *)calloc(1, sizeof(NtBuildShaderData));
+    if (!sd) {
+        return NULL;
+    }
+    sd->stage = stage;
+    return sd;
+}
+
+static void nt_builder_free_entry_data(NtBuildEntry *entry) {
+    if (!entry->data) {
+        return;
+    }
+    if (entry->kind == NT_BUILD_ASSET_MESH) {
+        nt_builder_free_mesh_data((NtBuildMeshData *)entry->data);
+    } else {
+        free(entry->data);
+    }
+    entry->data = NULL;
+}
+
 /* --- Deferred entry management --- */
 
 static int32_t nt_builder_find_entry(NtBuilderContext *ctx, uint32_t resource_id) {
@@ -14,34 +68,15 @@ static int32_t nt_builder_find_entry(NtBuilderContext *ctx, uint32_t resource_id
     return -1;
 }
 
-static void nt_builder_free_entry_layout(NtBuildEntry *entry) {
-    for (uint32_t s = 0; s < entry->stream_count; s++) {
-        free((char *)entry->layout[s].engine_name);
-        free((char *)entry->layout[s].gltf_name);
-        entry->layout[s].engine_name = NULL;
-        entry->layout[s].gltf_name = NULL;
-    }
+static void nt_builder_free_entry(NtBuildEntry *entry) {
+    free(entry->path);
+    free(entry->rename_key);
+    nt_builder_free_entry_data(entry);
+    entry->path = NULL;
+    entry->rename_key = NULL;
 }
 
-static void nt_builder_fill_entry(NtBuildEntry *entry, char *norm_path, uint32_t resource_id, nt_build_asset_kind_t kind, nt_build_shader_stage_t shader_stage, const NtStreamLayout *layout,
-                                  uint32_t stream_count) {
-    entry->path = norm_path;
-    entry->resource_id = resource_id;
-    entry->kind = kind;
-    entry->shader_stage = shader_stage;
-    entry->stream_count = stream_count;
-    if (layout && stream_count > 0) {
-        memcpy(entry->layout, layout, stream_count * sizeof(NtStreamLayout));
-        /* Deep-copy string pointers so entry owns all data */
-        for (uint32_t s = 0; s < stream_count; s++) {
-            entry->layout[s].engine_name = layout[s].engine_name ? strdup(layout[s].engine_name) : NULL;
-            entry->layout[s].gltf_name = layout[s].gltf_name ? strdup(layout[s].gltf_name) : NULL;
-        }
-    }
-}
-
-static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, nt_build_shader_stage_t shader_stage, const NtStreamLayout *layout,
-                                              uint32_t stream_count) {
+static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data) {
     if (!ctx || !path) {
         return NT_BUILD_ERR_VALIDATION;
     }
@@ -56,9 +91,11 @@ static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char 
     int32_t existing = nt_builder_find_entry(ctx, resource_id);
     if (existing >= 0) {
         if (ctx->force) {
-            free(ctx->pending[existing].path);
-            nt_builder_free_entry_layout(&ctx->pending[existing]);
-            nt_builder_fill_entry(&ctx->pending[existing], norm_path, resource_id, kind, shader_stage, layout, stream_count);
+            nt_builder_free_entry(&ctx->pending[existing]);
+            ctx->pending[existing].path = norm_path;
+            ctx->pending[existing].resource_id = resource_id;
+            ctx->pending[existing].kind = kind;
+            ctx->pending[existing].data = data;
             return NT_BUILD_OK;
         }
         (void)fprintf(stderr, "ERROR: duplicate resource_id 0x%08X\n  existing: %s\n  new:      %s\n", resource_id, ctx->pending[existing].path, norm_path);
@@ -72,7 +109,12 @@ static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char 
         return NT_BUILD_ERR_LIMIT;
     }
 
-    nt_builder_fill_entry(&ctx->pending[ctx->pending_count++], norm_path, resource_id, kind, shader_stage, layout, stream_count);
+    NtBuildEntry *entry = &ctx->pending[ctx->pending_count++];
+    entry->path = norm_path;
+    entry->rename_key = NULL;
+    entry->resource_id = resource_id;
+    entry->kind = kind;
+    entry->data = data;
     return NT_BUILD_OK;
 }
 
@@ -105,7 +147,6 @@ nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data
         return NT_BUILD_ERR_VALIDATION;
     }
 
-    /* Grow buffer if needed */
     while (ctx->data_size + size > ctx->data_capacity) {
         uint32_t new_capacity = ctx->data_capacity > 0 ? ctx->data_capacity * 2 : NT_BUILD_INITIAL_CAPACITY;
         uint8_t *new_buf = (uint8_t *)realloc(ctx->data_buf, new_capacity);
@@ -149,10 +190,9 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, const char *p
     entry->format_version = format_version;
     entry->asset_type = (uint8_t)type;
     entry->_pad = 0;
-    entry->offset = 0; /* computed later */
+    entry->offset = 0;
     entry->size = data_size;
 
-    /* Pad data buffer to asset alignment */
     uint32_t aligned_size = (data_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
     uint32_t padding = aligned_size - data_size;
     if (padding > 0) {
@@ -188,8 +228,7 @@ static void nt_builder_free_context(NtBuilderContext *ctx) {
     }
     free(ctx->data_buf);
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
-        free(ctx->pending[i].path);
-        nt_builder_free_entry_layout(&ctx->pending[i]);
+        nt_builder_free_entry(&ctx->pending[i]);
     }
     for (uint32_t i = 0; i < ctx->entry_count; i++) {
         free(ctx->resource_paths[i]);
@@ -213,31 +252,37 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     /* Phase 1: Import all deferred assets */
     (void)printf("Importing %u assets...\n", ctx->pending_count);
+    uint32_t fail_count = 0;
 
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
         nt_build_result_t ret = NT_BUILD_OK;
 
         switch (pe->kind) {
-        case NT_BUILD_ASSET_MESH:
-            ret = nt_builder_import_mesh(ctx, pe->path, pe->layout, pe->stream_count, pe->resource_id);
+        case NT_BUILD_ASSET_MESH: {
+            NtBuildMeshData *md = (NtBuildMeshData *)pe->data;
+            ret = nt_builder_import_mesh(ctx, pe->path, md->layout, md->stream_count, pe->resource_id);
             break;
+        }
         case NT_BUILD_ASSET_TEXTURE:
             ret = nt_builder_import_texture(ctx, pe->path, pe->resource_id);
             break;
-        case NT_BUILD_ASSET_SHADER:
-            ret = nt_builder_import_shader(ctx, pe->path, pe->shader_stage, pe->resource_id);
+        case NT_BUILD_ASSET_SHADER: {
+            NtBuildShaderData *sd = (NtBuildShaderData *)pe->data;
+            ret = nt_builder_import_shader(ctx, pe->path, sd->stage, pe->resource_id);
             break;
+        }
         }
 
         if (ret != NT_BUILD_OK) {
             ctx->has_error = true;
+            fail_count++;
             (void)fprintf(stderr, "  FAILED: %s\n", pe->path);
         }
     }
 
     if (ctx->has_error) {
-        (void)fprintf(stderr, "ERROR: Build failed. No .neopak written.\n");
+        (void)fprintf(stderr, "ERROR: Build failed: %u/%u assets failed. No .neopak written.\n", fail_count, ctx->pending_count);
         return NT_BUILD_ERR_VALIDATION;
     }
 
@@ -299,13 +344,25 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     (void)printf("  CRC32: 0x%08X\n", checksum);
 
     for (uint32_t i = 0; i < ctx->entry_count; i++) {
-        (void)printf("  %s -> 0x%08X\n", ctx->resource_paths[i] ? ctx->resource_paths[i] : "(unknown)", ctx->entries[i].resource_id);
+        const char *path = ctx->resource_paths[i] ? ctx->resource_paths[i] : "(unknown)";
+        const char *rkey = NULL;
+        for (uint32_t p = 0; p < ctx->pending_count; p++) {
+            if (ctx->pending[p].resource_id == ctx->entries[i].resource_id) {
+                rkey = ctx->pending[p].rename_key;
+                break;
+            }
+        }
+        if (rkey) {
+            (void)printf("  %s -> 0x%08X (renamed: %s)\n", path, ctx->entries[i].resource_id, rkey);
+        } else {
+            (void)printf("  %s -> 0x%08X\n", path, ctx->entries[i].resource_id);
+        }
     }
 
     return NT_BUILD_OK;
 }
 
-/* --- Helper: compute resource_id from path (normalize once) --- */
+/* --- Helper: compute resource_id from path --- */
 
 static uint32_t nt_builder_path_id(const char *path) {
     char *norm = nt_builder_normalize_path(path);
@@ -314,15 +371,36 @@ static uint32_t nt_builder_path_id(const char *path) {
     return id;
 }
 
-/* --- Strict add_* (duplicate = error) --- */
+/* --- Public add_* --- */
 
 nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count) {
-    return nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_MESH, (nt_build_shader_stage_t)0, layout, stream_count);
+    if (!layout || stream_count == 0) {
+        return NT_BUILD_ERR_VALIDATION;
+    }
+    NtBuildMeshData *md = nt_builder_copy_mesh_data(layout, stream_count);
+    if (!md) {
+        return NT_BUILD_ERR_IO;
+    }
+    nt_build_result_t r = nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_MESH, md);
+    if (r != NT_BUILD_OK) {
+        nt_builder_free_mesh_data(md);
+    }
+    return r;
 }
 
-nt_build_result_t nt_builder_add_texture(NtBuilderContext *ctx, const char *path) { return nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_TEXTURE, (nt_build_shader_stage_t)0, NULL, 0); }
+nt_build_result_t nt_builder_add_texture(NtBuilderContext *ctx, const char *path) { return nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_TEXTURE, NULL); }
 
-nt_build_result_t nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage) { return nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_SHADER, stage, NULL, 0); }
+nt_build_result_t nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage) {
+    NtBuildShaderData *sd = nt_builder_copy_shader_data(stage);
+    if (!sd) {
+        return NT_BUILD_ERR_IO;
+    }
+    nt_build_result_t r = nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_SHADER, sd);
+    if (r != NT_BUILD_OK) {
+        free(sd);
+    }
+    return r;
+}
 
 void nt_builder_set_force(NtBuilderContext *ctx, bool force) {
     if (ctx) {
@@ -346,7 +424,6 @@ nt_build_result_t nt_builder_rename(NtBuilderContext *ctx, const char *old_path,
 
     uint32_t new_id = nt_builder_path_id(new_path);
 
-    /* Check new_id doesn't collide with another entry */
     int32_t collision = nt_builder_find_entry(ctx, new_id);
     if (collision >= 0 && collision != idx) {
         (void)fprintf(stderr, "ERROR: rename: new path '%s' collides with existing '%s'\n", new_path, ctx->pending[collision].path);
@@ -354,5 +431,9 @@ nt_build_result_t nt_builder_rename(NtBuilderContext *ctx, const char *old_path,
     }
 
     ctx->pending[idx].resource_id = new_id;
+
+    free(ctx->pending[idx].rename_key);
+    ctx->pending[idx].rename_key = nt_builder_normalize_path(new_path);
+
     return NT_BUILD_OK;
 }

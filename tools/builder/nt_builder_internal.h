@@ -4,6 +4,7 @@
 #include "nt_builder.h"
 #include "nt_pack_format.h"
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,14 +19,24 @@ typedef enum {
     NT_BUILD_ASSET_SHADER = 2,
 } nt_build_asset_kind_t;
 
+/* Type-specific data for mesh entries */
+typedef struct {
+    NtStreamLayout layout[NT_MESH_MAX_STREAMS]; /* deep-copied from user */
+    uint32_t stream_count;
+} NtBuildMeshData;
+
+/* Type-specific data for shader entries */
+typedef struct {
+    nt_build_shader_stage_t stage;
+} NtBuildShaderData;
+
 /* Deferred asset entry -- stored during add_*, processed in finish_pack */
 typedef struct {
-    char *path;                                 /* normalized path (owned, heap) */
-    uint32_t resource_id;                       /* FNV-1a hash or explicit */
-    nt_build_asset_kind_t kind;                 /* mesh/texture/shader */
-    nt_build_shader_stage_t shader_stage;       /* only for shaders */
-    NtStreamLayout layout[NT_MESH_MAX_STREAMS]; /* copied from user */
-    uint32_t stream_count;                      /* only for meshes */
+    char *path;                 /* normalized source file path (owned, heap) */
+    char *rename_key;           /* renamed key path (owned, heap, NULL if not renamed) */
+    uint32_t resource_id;       /* FNV-1a hash */
+    nt_build_asset_kind_t kind; /* mesh/texture/shader */
+    void *data;                 /* NtBuildMeshData* / NtBuildShaderData* / NULL (owned, heap) */
 } NtBuildEntry;
 
 struct NtBuilderContext {

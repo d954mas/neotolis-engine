@@ -49,7 +49,8 @@ typedef void (*glob_callback_fn)(const char *full_path, void *user);
 
 static int glob_strcmp(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
 
-static void glob_iterate(const char *pattern, glob_callback_fn callback, void *user) {
+/* Returns false if glob overflow (too many matches). */
+static bool glob_iterate(const char *pattern, glob_callback_fn callback, void *user) {
     /* Split pattern into directory + filename pattern at last separator */
     const char *last_sep = NULL;
     for (const char *p = pattern; *p != '\0'; p++) {
@@ -78,6 +79,7 @@ static void glob_iterate(const char *pattern, glob_callback_fn callback, void *u
     /* Collect matching paths into array, then sort for deterministic order */
     char *matches[GLOB_MAX_MATCHES];
     uint32_t match_count = 0;
+    bool overflow = false;
 
 #ifdef _WIN32
     {
@@ -87,7 +89,7 @@ static void glob_iterate(const char *pattern, glob_callback_fn callback, void *u
 
         HANDLE h_find = FindFirstFileA(search_path, &find_data);
         if (h_find == INVALID_HANDLE_VALUE) {
-            return;
+            return true;
         }
 
         do {
@@ -99,7 +101,8 @@ static void glob_iterate(const char *pattern, glob_callback_fn callback, void *u
             }
             if (wildcard_match(file_pattern, find_data.cFileName)) {
                 if (match_count >= GLOB_MAX_MATCHES) {
-                    (void)fprintf(stderr, "WARNING: glob match limit reached (%d), some files skipped\n", GLOB_MAX_MATCHES);
+                    (void)fprintf(stderr, "ERROR: glob match limit reached (%d), aborting pattern '%s'\n", GLOB_MAX_MATCHES, pattern);
+                    overflow = true;
                     break;
                 }
                 char full_path[512];
@@ -117,7 +120,7 @@ static void glob_iterate(const char *pattern, glob_callback_fn callback, void *u
     {
         DIR *dir = opendir(directory);
         if (!dir) {
-            return;
+            return true;
         }
 
         struct dirent *entry;
@@ -133,7 +136,8 @@ static void glob_iterate(const char *pattern, glob_callback_fn callback, void *u
             }
             if (wildcard_match(file_pattern, entry->d_name)) {
                 if (match_count >= GLOB_MAX_MATCHES) {
-                    (void)fprintf(stderr, "WARNING: glob match limit reached (%d), some files skipped\n", GLOB_MAX_MATCHES);
+                    (void)fprintf(stderr, "ERROR: glob match limit reached (%d), aborting pattern '%s'\n", GLOB_MAX_MATCHES, pattern);
+                    overflow = true;
                     break;
                 }
                 matches[match_count] = strdup(full_path);
@@ -152,11 +156,20 @@ static void glob_iterate(const char *pattern, glob_callback_fn callback, void *u
         qsort(matches, match_count, sizeof(char *), glob_strcmp);
     }
 
+    /* On overflow, free collected matches without invoking callbacks */
+    if (overflow) {
+        for (uint32_t i = 0; i < match_count; i++) {
+            free(matches[i]);
+        }
+        return false;
+    }
+
     /* Invoke callbacks in sorted order */
     for (uint32_t i = 0; i < match_count; i++) {
         callback(matches[i], user);
         free(matches[i]);
     }
+    return true;
 }
 
 /* --- Batch callback context --- */
@@ -213,10 +226,13 @@ nt_build_result_t nt_builder_add_meshes(NtBuilderContext *ctx, const char *patte
     data.stream_count = stream_count;
     data.last_result = NT_BUILD_OK;
 
-    glob_iterate(pattern, mesh_glob_callback, &data);
+    if (!glob_iterate(pattern, mesh_glob_callback, &data)) {
+        return NT_BUILD_ERR_LIMIT;
+    }
 
     if (data.match_count == 0) {
-        (void)fprintf(stderr, "WARNING: no files matched pattern '%s'\n", pattern);
+        (void)fprintf(stderr, "ERROR: no files matched pattern '%s'\n", pattern);
+        return NT_BUILD_ERR_VALIDATION;
     }
     return data.last_result;
 }
@@ -231,10 +247,13 @@ nt_build_result_t nt_builder_add_textures(NtBuilderContext *ctx, const char *pat
     data.ctx = ctx;
     data.last_result = NT_BUILD_OK;
 
-    glob_iterate(pattern, texture_glob_callback, &data);
+    if (!glob_iterate(pattern, texture_glob_callback, &data)) {
+        return NT_BUILD_ERR_LIMIT;
+    }
 
     if (data.match_count == 0) {
-        (void)fprintf(stderr, "WARNING: no files matched pattern '%s'\n", pattern);
+        (void)fprintf(stderr, "ERROR: no files matched pattern '%s'\n", pattern);
+        return NT_BUILD_ERR_VALIDATION;
     }
     return data.last_result;
 }
@@ -250,10 +269,13 @@ nt_build_result_t nt_builder_add_shaders(NtBuilderContext *ctx, const char *patt
     data.stage = stage;
     data.last_result = NT_BUILD_OK;
 
-    glob_iterate(pattern, shader_glob_callback, &data);
+    if (!glob_iterate(pattern, shader_glob_callback, &data)) {
+        return NT_BUILD_ERR_LIMIT;
+    }
 
     if (data.match_count == 0) {
-        (void)fprintf(stderr, "WARNING: no files matched pattern '%s'\n", pattern);
+        (void)fprintf(stderr, "ERROR: no files matched pattern '%s'\n", pattern);
+        return NT_BUILD_ERR_VALIDATION;
     }
     return data.last_result;
 }
