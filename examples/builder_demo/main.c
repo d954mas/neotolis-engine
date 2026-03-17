@@ -26,13 +26,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Add assets -- paths relative to working directory */
-    nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", layout, 2);
-    nt_builder_add_texture(ctx, "assets/textures/diffuse.png");
+    /* Single-file additions */
     nt_builder_add_shader(ctx, "assets/shaders/mesh.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/mesh.frag", NT_BUILD_SHADER_FRAGMENT);
 
-    /* Batch add all .glb files from a directory */
+    /* Batch add all .glb files from a directory (single-level glob, no recursion) */
     nt_builder_add_meshes(ctx, "assets/meshes/*.glb", layout, 2);
 
     /* Batch add all .png textures */
@@ -41,11 +39,13 @@ int main(int argc, char *argv[]) {
     nt_build_result_t result = nt_builder_finish_pack(ctx);
     if (result != NT_BUILD_OK) {
         (void)fprintf(stderr, "Build failed with code %d\n", result);
+        nt_builder_free_pack(ctx);
         return 1;
     }
 
     /* Verify the pack */
     nt_builder_dump_pack("build/assets/demo.neopak");
 
+    nt_builder_free_pack(ctx);
     return 0;
 }

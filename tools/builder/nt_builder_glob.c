@@ -97,7 +97,11 @@ static void glob_iterate(const char *pattern, glob_callback_fn callback, void *u
             if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
                 continue;
             }
-            if (wildcard_match(file_pattern, find_data.cFileName) && match_count < GLOB_MAX_MATCHES) {
+            if (wildcard_match(file_pattern, find_data.cFileName)) {
+                if (match_count >= GLOB_MAX_MATCHES) {
+                    (void)fprintf(stderr, "WARNING: glob match limit reached (%d), some files skipped\n", GLOB_MAX_MATCHES);
+                    break;
+                }
                 char full_path[512];
                 (void)snprintf(full_path, sizeof(full_path), "%s/%s", directory, find_data.cFileName);
                 matches[match_count] = strdup(full_path);
@@ -127,7 +131,11 @@ static void glob_iterate(const char *pattern, glob_callback_fn callback, void *u
             if (stat(full_path, &st) != 0 || S_ISDIR(st.st_mode)) {
                 continue;
             }
-            if (wildcard_match(file_pattern, entry->d_name) && match_count < GLOB_MAX_MATCHES) {
+            if (wildcard_match(file_pattern, entry->d_name)) {
+                if (match_count >= GLOB_MAX_MATCHES) {
+                    (void)fprintf(stderr, "WARNING: glob match limit reached (%d), some files skipped\n", GLOB_MAX_MATCHES);
+                    break;
+                }
                 matches[match_count] = strdup(full_path);
                 if (matches[match_count]) {
                     match_count++;

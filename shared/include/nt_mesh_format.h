@@ -34,7 +34,8 @@ typedef struct {
     uint32_t name_hash; /* hash of attribute name ("position", "normal", ...) */
     uint8_t type;       /* nt_stream_type_t */
     uint8_t count;      /* components per vertex (1-4) */
-    uint8_t normalized; /* 1 = normalize to [0,1] or [-1,1] on GPU */
+    uint8_t normalized; /* 1 = normalize integer types to [0,1] (unsigned) or [-1,1] (signed)
+                         *     via GL_TRUE in glVertexAttribPointer. Must be 0 for float types. */
     uint8_t _pad;
 } NtStreamDesc;
 #pragma pack(pop)

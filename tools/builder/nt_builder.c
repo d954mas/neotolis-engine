@@ -14,6 +14,15 @@ static int32_t nt_builder_find_entry(NtBuilderContext *ctx, uint32_t resource_id
     return -1;
 }
 
+static void nt_builder_free_entry_layout(NtBuildEntry *entry) {
+    for (uint32_t s = 0; s < entry->stream_count; s++) {
+        free((char *)entry->layout[s].engine_name);
+        free((char *)entry->layout[s].gltf_name);
+        entry->layout[s].engine_name = NULL;
+        entry->layout[s].gltf_name = NULL;
+    }
+}
+
 static void nt_builder_fill_entry(NtBuildEntry *entry, char *norm_path, uint32_t resource_id, nt_build_asset_kind_t kind, nt_build_shader_stage_t shader_stage, const NtStreamLayout *layout,
                                   uint32_t stream_count) {
     entry->path = norm_path;
@@ -23,11 +32,16 @@ static void nt_builder_fill_entry(NtBuildEntry *entry, char *norm_path, uint32_t
     entry->stream_count = stream_count;
     if (layout && stream_count > 0) {
         memcpy(entry->layout, layout, stream_count * sizeof(NtStreamLayout));
+        /* Deep-copy string pointers so entry owns all data */
+        for (uint32_t s = 0; s < stream_count; s++) {
+            entry->layout[s].engine_name = layout[s].engine_name ? strdup(layout[s].engine_name) : NULL;
+            entry->layout[s].gltf_name = layout[s].gltf_name ? strdup(layout[s].gltf_name) : NULL;
+        }
     }
 }
 
-static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char *path, uint32_t resource_id, nt_build_asset_kind_t kind, nt_build_shader_stage_t shader_stage,
-                                              const NtStreamLayout *layout, uint32_t stream_count) {
+static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, nt_build_shader_stage_t shader_stage, const NtStreamLayout *layout,
+                                              uint32_t stream_count) {
     if (!ctx || !path) {
         return NT_BUILD_ERR_VALIDATION;
     }
@@ -37,10 +51,13 @@ static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char 
         return NT_BUILD_ERR_IO;
     }
 
+    uint32_t resource_id = nt_builder_fnv1a(norm_path);
+
     int32_t existing = nt_builder_find_entry(ctx, resource_id);
     if (existing >= 0) {
         if (ctx->force) {
             free(ctx->pending[existing].path);
+            nt_builder_free_entry_layout(&ctx->pending[existing]);
             nt_builder_fill_entry(&ctx->pending[existing], norm_path, resource_id, kind, shader_stage, layout, stream_count);
             return NT_BUILD_OK;
         }
@@ -110,11 +127,19 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, const char *p
         return NT_BUILD_ERR_VALIDATION;
     }
 
+    if (ctx->entry_count >= NT_BUILD_MAX_ASSETS) {
+        (void)fprintf(stderr, "ERROR: entry limit reached (%d max)\n", NT_BUILD_MAX_ASSETS);
+        return NT_BUILD_ERR_LIMIT;
+    }
+
     uint32_t idx = ctx->entry_count;
 
     if (path) {
         ctx->resource_paths[idx] = strdup(path);
-        assert(ctx->resource_paths[idx] && "strdup failed: out of memory");
+        if (!ctx->resource_paths[idx]) {
+            (void)fprintf(stderr, "ERROR: strdup failed (out of memory)\n");
+            return NT_BUILD_ERR_IO;
+        }
     } else {
         ctx->resource_paths[idx] = NULL;
     }
@@ -164,6 +189,7 @@ static void nt_builder_free_context(NtBuilderContext *ctx) {
     free(ctx->data_buf);
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         free(ctx->pending[i].path);
+        nt_builder_free_entry_layout(&ctx->pending[i]);
     }
     for (uint32_t i = 0; i < ctx->entry_count; i++) {
         free(ctx->resource_paths[i]);
@@ -182,7 +208,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     if (ctx->pending_count == 0) {
         (void)fprintf(stderr, "ERROR: No assets added.\n");
-        nt_builder_free_context(ctx);
         return NT_BUILD_ERR_VALIDATION;
     }
 
@@ -213,7 +238,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     if (ctx->has_error) {
         (void)fprintf(stderr, "ERROR: Build failed. No .neopak written.\n");
-        nt_builder_free_context(ctx);
         return NT_BUILD_ERR_VALIDATION;
     }
 
@@ -243,7 +267,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     FILE *file = fopen(ctx->output_path, "wb");
     if (!file) {
         (void)fprintf(stderr, "ERROR: Cannot open output file: %s\n", ctx->output_path);
-        nt_builder_free_context(ctx);
         return NT_BUILD_ERR_IO;
     }
 
@@ -266,7 +289,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     if (!write_ok) {
         (void)fprintf(stderr, "ERROR: Failed to write pack file\n");
         (void)remove(ctx->output_path);
-        nt_builder_free_context(ctx);
         return NT_BUILD_ERR_IO;
     }
 
@@ -280,7 +302,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         (void)printf("  %s -> 0x%08X\n", ctx->resource_paths[i] ? ctx->resource_paths[i] : "(unknown)", ctx->entries[i].resource_id);
     }
 
-    nt_builder_free_context(ctx);
     return NT_BUILD_OK;
 }
 
@@ -296,16 +317,12 @@ static uint32_t nt_builder_path_id(const char *path) {
 /* --- Strict add_* (duplicate = error) --- */
 
 nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count) {
-    return nt_builder_add_entry(ctx, path, nt_builder_path_id(path), NT_BUILD_ASSET_MESH, (nt_build_shader_stage_t)0, layout, stream_count);
+    return nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_MESH, (nt_build_shader_stage_t)0, layout, stream_count);
 }
 
-nt_build_result_t nt_builder_add_texture(NtBuilderContext *ctx, const char *path) {
-    return nt_builder_add_entry(ctx, path, nt_builder_path_id(path), NT_BUILD_ASSET_TEXTURE, (nt_build_shader_stage_t)0, NULL, 0);
-}
+nt_build_result_t nt_builder_add_texture(NtBuilderContext *ctx, const char *path) { return nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_TEXTURE, (nt_build_shader_stage_t)0, NULL, 0); }
 
-nt_build_result_t nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage) {
-    return nt_builder_add_entry(ctx, path, nt_builder_path_id(path), NT_BUILD_ASSET_SHADER, stage, NULL, 0);
-}
+nt_build_result_t nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage) { return nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_SHADER, stage, NULL, 0); }
 
 void nt_builder_set_force(NtBuilderContext *ctx, bool force) {
     if (ctx) {

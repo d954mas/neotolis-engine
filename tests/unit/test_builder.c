@@ -206,6 +206,7 @@ void test_start_pack_returns_context(void) {
     /* Finish immediately with no assets should return error */
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 }
 
 /* --- Shader round-trip test --- */
@@ -225,6 +226,7 @@ void test_shader_round_trip(void) {
 
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 
     /* Read back and verify header */
     FILE *f = fopen(pack_path, "rb");
@@ -271,6 +273,7 @@ void test_texture_round_trip(void) {
 
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 
     /* Read back and verify texture header */
     FILE *f = fopen(pack_path, "rb");
@@ -312,6 +315,7 @@ void test_mesh_round_trip(void) {
 
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 
     /* Read back and verify mesh header */
     FILE *f = fopen(pack_path, "rb");
@@ -356,6 +360,7 @@ void test_missing_position_attribute_errors(void) {
     /* finish_pack fails during import */
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 }
 
 void test_duplicate_path_errors(void) {
@@ -397,6 +402,7 @@ void test_force_add_replaces(void) {
 
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 
     /* Verify 1 asset, stage = FRAGMENT (replaced) */
     FILE *f = fopen(pack_path, "rb");
@@ -430,6 +436,7 @@ void test_empty_shader_errors(void) {
     /* finish_pack fails during import */
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 }
 
 void test_shader_with_version_errors(void) {
@@ -449,6 +456,7 @@ void test_shader_with_version_errors(void) {
     /* finish_pack fails during import */
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 }
 
 /* --- Comment stripping test --- */
@@ -471,6 +479,7 @@ void test_shader_comment_stripping(void) {
 
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 
     /* Read back shader source from pack */
     FILE *f = fopen(pack_path, "rb");
@@ -515,11 +524,14 @@ void test_asset_alignment(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_builder_add_shader(ctx, v_path, NT_BUILD_SHADER_VERTEX);
-    nt_builder_add_shader(ctx, f_path, NT_BUILD_SHADER_FRAGMENT);
-
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_add_shader(ctx, v_path, NT_BUILD_SHADER_VERTEX);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    r = nt_builder_add_shader(ctx, f_path, NT_BUILD_SHADER_FRAGMENT);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 
     /* Read back and verify alignment */
     FILE *fp = fopen(pack_path, "rb");
@@ -548,9 +560,11 @@ void test_crc32_verification(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 
     /* Read entire file, compute CRC32 manually, compare */
     FILE *f = fopen(pack_path, "rb");
@@ -583,9 +597,11 @@ void test_dump_valid_pack(void) {
 
     const char *pack_path = TMP_DIR "/dump_test.neopak";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
-    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 
     /* Dump should succeed */
     r = nt_builder_dump_pack(pack_path);
@@ -636,6 +652,7 @@ void test_multi_asset_pack(void) {
 
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 
     /* Read back and verify */
     FILE *f = fopen(pack_path, "rb");
@@ -693,9 +710,11 @@ void test_shader_stage_correct(void) {
 
     const char *pack_path = TMP_DIR "/stage_test.neopak";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
-    nt_builder_add_shader(ctx, frag_path, NT_BUILD_SHADER_FRAGMENT);
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_add_shader(ctx, frag_path, NT_BUILD_SHADER_FRAGMENT);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 
     /* Read back and verify stage */
     FILE *f = fopen(pack_path, "rb");
@@ -732,6 +751,7 @@ void test_glob_shaders(void) {
 
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
 
     /* Verify pack has 2 assets */
     FILE *f = fopen(pack_path, "rb");

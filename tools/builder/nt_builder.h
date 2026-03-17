@@ -48,7 +48,10 @@ typedef enum {
 /* Opaque builder context */
 typedef struct NtBuilderContext NtBuilderContext;
 
-/* --- Core API --- */
+/* --- Core API ---
+ * Lifecycle: start_pack → add_* → finish_pack → free_pack.
+ * Caller must always call free_pack when done, whether finish succeeded or not.
+ */
 NtBuilderContext *nt_builder_start_pack(const char *output_path);
 nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx);
 void nt_builder_free_pack(NtBuilderContext *ctx);
