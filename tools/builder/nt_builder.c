@@ -244,28 +244,4 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     return NT_BUILD_OK;
 }
 
-/* --- Stub implementations for batch functions (implemented in Plan 03) --- */
-
-nt_build_result_t nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const NtStreamLayout *layout, uint32_t stream_count) {
-    (void)ctx;
-    (void)pattern;
-    (void)layout;
-    (void)stream_count;
-    (void)fprintf(stderr, "ERROR: nt_builder_add_meshes not yet implemented\n");
-    return NT_BUILD_ERR_VALIDATION;
-}
-
-nt_build_result_t nt_builder_add_textures(NtBuilderContext *ctx, const char *pattern) {
-    (void)ctx;
-    (void)pattern;
-    (void)fprintf(stderr, "ERROR: nt_builder_add_textures not yet implemented\n");
-    return NT_BUILD_ERR_VALIDATION;
-}
-
-nt_build_result_t nt_builder_add_shaders(NtBuilderContext *ctx, const char *pattern, nt_build_shader_stage_t stage) {
-    (void)ctx;
-    (void)pattern;
-    (void)stage;
-    (void)fprintf(stderr, "ERROR: nt_builder_add_shaders not yet implemented\n");
-    return NT_BUILD_ERR_VALIDATION;
-}
+/* Batch glob functions are in nt_builder_glob.c */

@@ -6,6 +6,7 @@ add_library(nt_builder STATIC
     nt_builder_mesh.c
     nt_builder_texture.c
     nt_builder_shader.c
+    nt_builder_glob.c
 )
 target_include_directories(nt_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(nt_builder PUBLIC nt_shared nt_core cgltf stb_image)
