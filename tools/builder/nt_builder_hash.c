@@ -21,6 +21,7 @@ uint32_t nt_builder_fnv1a(const char *str) {
     return hash;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 char *nt_builder_normalize_path(const char *path) {
     if (!path) {
         return NULL;
@@ -43,7 +44,6 @@ char *nt_builder_normalize_path(const char *path) {
     char *tok = buf;
 
     while (*tok != '\0') {
-        /* Skip consecutive slashes */
         while (*tok == '/') {
             tok++;
         }
@@ -56,31 +56,25 @@ char *nt_builder_normalize_path(const char *path) {
             tok++;
         }
 
-        size_t seg_len = (size_t)(tok - seg_start);
+        /* Null-terminate segment in-place */
+        bool had_slash = (*tok == '/');
+        if (had_slash) {
+            *tok = '\0';
+            tok++;
+        }
+
+        size_t seg_len = (size_t)strlen(seg_start);
 
         if (seg_len == 1 && seg_start[0] == '.') {
-            /* Skip '.' segments */
             continue;
         }
         if (seg_len == 2 && seg_start[0] == '.' && seg_start[1] == '.') {
-            /* Pop last segment for '..', or keep '..' if nothing to pop */
-            if (seg_count > 0 && !(strlen(segments[seg_count - 1]) == 2 && segments[seg_count - 1][0] == '.' && segments[seg_count - 1][1] == '.')) {
+            if (seg_count > 0 && strcmp(segments[seg_count - 1], "..") != 0) {
                 seg_count--;
             } else if (seg_count < 256) {
-                /* Null-terminate */
-                if (*tok == '/') {
-                    *tok = '\0';
-                    tok++;
-                }
                 segments[seg_count++] = seg_start;
             }
             continue;
-        }
-
-        /* Null-terminate this segment in the buffer */
-        if (*tok == '/') {
-            *tok = '\0';
-            tok++;
         }
 
         if (seg_count < 256) {

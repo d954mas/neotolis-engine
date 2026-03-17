@@ -50,6 +50,7 @@ typedef void (*glob_callback_fn)(const char *full_path, void *user);
 static int glob_strcmp(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
 
 /* Returns false if glob overflow (too many matches). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool glob_iterate(const char *pattern, glob_callback_fn callback, void *user) {
     /* Split pattern into directory + filename pattern at last separator */
     const char *last_sep = NULL;
@@ -124,7 +125,7 @@ static bool glob_iterate(const char *pattern, glob_callback_fn callback, void *u
         }
 
         struct dirent *entry;
-        while ((entry = readdir(dir)) != NULL) {
+        while ((entry = readdir(dir)) != NULL) { // NOLINT(concurrency-mt-unsafe)
             if (entry->d_name[0] == '.' && (entry->d_name[1] == '\0' || (entry->d_name[1] == '.' && entry->d_name[2] == '\0'))) {
                 continue;
             }
@@ -153,7 +154,7 @@ static bool glob_iterate(const char *pattern, glob_callback_fn callback, void *u
 
     /* Sort for deterministic pack layout across platforms */
     if (match_count > 1) {
-        qsort(matches, match_count, sizeof(char *), glob_strcmp);
+        qsort((void *)matches, match_count, sizeof(char *), glob_strcmp);
     }
 
     /* On overflow, free collected matches without invoking callbacks */

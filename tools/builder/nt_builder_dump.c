@@ -50,7 +50,7 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
         (void)fclose(file);
         return NT_BUILD_ERR_IO;
     }
-    rewind(file);
+    (void)fseek(file, 0, SEEK_SET);
 
     uint32_t file_size = (uint32_t)file_size_long;
 
@@ -123,6 +123,11 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
     (void)printf("\n");
 
     /* Parse and print entries */
+    if (header->header_size < (uint32_t)sizeof(NtPackHeader)) {
+        (void)fprintf(stderr, "ERROR: header_size (%u) smaller than PackHeader (%u)\n", header->header_size, (uint32_t)sizeof(NtPackHeader));
+        free(buffer);
+        return NT_BUILD_ERR_FORMAT;
+    }
     const NtAssetEntry *entries = (const NtAssetEntry *)(buffer + sizeof(NtPackHeader));
     uint32_t max_entries = (header->header_size - (uint32_t)sizeof(NtPackHeader)) / (uint32_t)sizeof(NtAssetEntry);
     uint32_t count = header->asset_count;

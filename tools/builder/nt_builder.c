@@ -226,6 +226,7 @@ void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx);
 
 /* --- Finish: import all deferred entries, write pack --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     if (!ctx) {
         return NT_BUILD_ERR_VALIDATION;
@@ -360,7 +361,7 @@ static uint32_t nt_builder_path_id(const char *path) {
 /* --- Public add_* --- */
 
 nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count) {
-    if (!layout || stream_count == 0) {
+    if (!layout || stream_count == 0 || stream_count > NT_MESH_MAX_STREAMS) {
         return NT_BUILD_ERR_VALIDATION;
     }
     NtBuildMeshData *md = nt_builder_copy_mesh_data(layout, stream_count);

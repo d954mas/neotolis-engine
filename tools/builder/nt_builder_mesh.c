@@ -18,6 +18,7 @@ static float nt_clampf(float v, float lo, float hi) {
     return v;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void nt_convert_component(float value, nt_stream_type_t type, bool normalized, uint8_t *out_ptr, bool *warned_f16) {
     switch (type) {
     case NT_STREAM_FLOAT32: {

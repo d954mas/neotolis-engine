@@ -259,7 +259,7 @@ void test_shader_round_trip(void) {
     /* Verify CRC32 */
     (void)fseek(f, 0, SEEK_END);
     long file_size = ftell(f);
-    rewind(f);
+    (void)fseek(f, 0, SEEK_SET);
     uint8_t *buf = (uint8_t *)malloc((size_t)file_size);
     TEST_ASSERT_NOT_NULL(buf);
     (void)fread(buf, 1, (size_t)file_size, f);
@@ -474,6 +474,7 @@ void test_shader_with_version_errors(void) {
 
 /* --- Comment stripping test --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_shader_comment_stripping(void) {
     const char *vert_path = TMP_DIR "/comments.vert";
     write_test_shader(vert_path, "// This is a line comment\n"
@@ -585,7 +586,7 @@ void test_crc32_verification(void) {
 
     (void)fseek(f, 0, SEEK_END);
     long file_size = ftell(f);
-    rewind(f);
+    (void)fseek(f, 0, SEEK_SET);
 
     uint8_t *buf = (uint8_t *)malloc((size_t)file_size);
     TEST_ASSERT_NOT_NULL(buf);
@@ -636,6 +637,7 @@ void test_dump_invalid_file_errors(void) {
 
 /* --- Multi-asset pack test --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_multi_asset_pack(void) {
     const char *glb_path = TMP_DIR "/multi_tri.glb";
     const char *png_path = TMP_DIR "/multi_tex.png";
@@ -702,7 +704,7 @@ void test_multi_asset_pack(void) {
     /* Verify CRC32 */
     (void)fseek(f, 0, SEEK_END);
     long file_size = ftell(f);
-    rewind(f);
+    (void)fseek(f, 0, SEEK_SET);
     uint8_t *buf = (uint8_t *)malloc((size_t)file_size);
     (void)fread(buf, 1, (size_t)file_size, f);
     uint32_t data_size = (uint32_t)file_size - hdr.header_size;
