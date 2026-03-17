@@ -4,6 +4,7 @@
 
 /* clang-format off */
 #include "resource/nt_resource.h"
+#include "resource/nt_resource_internal.h"
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
 #include "unity.h"
@@ -288,6 +289,339 @@ void test_parse_unmounted_pack(void) {
     free(blob);
 }
 
+/* ---- Pack builder with specific resource_id ---- */
+
+/*
+ * Build a NEOPAK blob with one asset whose resource_id is `rid` and type is `atype`.
+ * Returns malloc'd blob (caller frees). Sets *out_size to total blob size.
+ */
+static uint8_t *build_pack_with_rid(uint32_t rid, uint8_t atype, uint32_t *out_size) {
+    uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
+    uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
+    uint32_t data_per_asset = 16;
+    uint32_t aligned_data = (data_per_asset + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+    uint32_t total_size = header_size + aligned_data;
+
+    uint8_t *blob = (uint8_t *)calloc(1, total_size);
+    if (!blob) {
+        return NULL;
+    }
+
+    NtPackHeader *h = (NtPackHeader *)blob;
+    h->magic = NT_PACK_MAGIC;
+    h->pack_id = 0; /* caller sets before parse */
+    h->version = NT_PACK_VERSION;
+    h->asset_count = 1;
+    h->header_size = header_size;
+    h->total_size = total_size;
+
+    NtAssetEntry *entry = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
+    entry->resource_id = rid;
+    entry->format_version = 1;
+    entry->asset_type = atype;
+    entry->_pad = 0;
+    entry->offset = header_size;
+    entry->size = data_per_asset;
+
+    h->checksum = nt_crc32(blob + header_size, aligned_data);
+
+    *out_size = total_size;
+    return blob;
+}
+
+/* ---- Mount / unmount / set_priority tests ---- */
+
+void test_mount_unmount_remount(void) {
+    uint32_t pid = nt_resource_hash("remount_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    nt_resource_unmount(pid);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+}
+
+void test_mount_duplicate(void) {
+    uint32_t pid = nt_resource_hash("dup_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, nt_resource_mount(pid, 0));
+}
+
+void test_unmount_unknown(void) {
+    /* Should not crash or assert */
+    nt_resource_unmount(0xDEAD);
+}
+
+void test_set_priority_ok(void) {
+    uint32_t pid = nt_resource_hash("prio_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_set_priority(pid, 5));
+}
+
+void test_set_priority_unknown(void) { TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, nt_resource_set_priority(0xDEAD, 5)); }
+
+/* ---- Request / get tests ---- */
+
+void test_request_returns_handle(void) {
+    nt_resource_t h = nt_resource_request(nt_resource_hash("some_res"), NT_ASSET_MESH);
+    TEST_ASSERT_TRUE(h.id != 0);
+}
+
+void test_request_idempotent(void) {
+    uint32_t rid = nt_resource_hash("idem_res");
+    nt_resource_t h1 = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_t h2 = nt_resource_request(rid, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL_UINT32(h1.id, h2.id);
+}
+
+void test_get_invalid_handle(void) { TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(NT_RESOURCE_INVALID)); }
+
+/* ---- State transition tests ---- */
+
+void test_is_ready_before_step(void) {
+    uint32_t pid = nt_resource_hash("ready_before_pack");
+    uint32_t rid = nt_resource_hash("ready_before_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    ((NtPackHeader *)blob)->pack_id = pid;
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    TEST_ASSERT_TRUE(h.id != 0);
+
+    /* Asset is REGISTERED, not READY -- is_ready should be false even after step */
+    nt_resource_step();
+    TEST_ASSERT_FALSE(nt_resource_is_ready(h));
+
+    free(blob);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_is_ready_after_step(void) {
+    uint32_t pid = nt_resource_hash("ready_after_pack");
+    uint32_t rid = nt_resource_hash("ready_after_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    ((NtPackHeader *)blob)->pack_id = pid;
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    TEST_ASSERT_TRUE(h.id != 0);
+
+    /* Simulate loading: set asset state to READY with runtime_handle=42 */
+    /* Pack index 0 because it's the first mount in this test */
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 42);
+    nt_resource_step();
+
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+    TEST_ASSERT_EQUAL_UINT32(42, nt_resource_get(h));
+
+    free(blob);
+}
+
+/* ---- Priority stacking tests ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_priority_high_wins(void) {
+    uint32_t pid_a = nt_resource_hash("prio_pack_a");
+    uint32_t pid_b = nt_resource_hash("prio_pack_b");
+    uint32_t rid = nt_resource_hash("shared_asset");
+
+    /* Mount A with priority 1, B with priority 10 */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 1));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 10));
+
+    /* Parse both with same resource_id */
+    uint32_t blob_size_a = 0;
+    uint8_t *blob_a = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_a);
+    TEST_ASSERT_NOT_NULL(blob_a);
+    ((NtPackHeader *)blob_a)->pack_id = pid_a;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_a, blob_a, blob_size_a));
+
+    uint32_t blob_size_b = 0;
+    uint8_t *blob_b = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_b);
+    TEST_ASSERT_NOT_NULL(blob_b);
+    ((NtPackHeader *)blob_b)->pack_id = pid_b;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_b, blob_b, blob_size_b));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+
+    /* Set both READY with different handles */
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100); /* pack A index 0 */
+    nt_resource_test_set_asset_state(rid, 1, NT_ASSET_STATE_READY, 200); /* pack B index 1 */
+    nt_resource_step();
+
+    /* B (priority 10) should win */
+    TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
+
+    free(blob_a);
+    free(blob_b);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_priority_equal_last_mounted_wins(void) {
+    uint32_t pid_a = nt_resource_hash("eq_pack_a");
+    uint32_t pid_b = nt_resource_hash("eq_pack_b");
+    uint32_t rid = nt_resource_hash("eq_shared");
+
+    /* Both priority 5: A mounted first, B mounted second */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 5));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 5));
+
+    uint32_t blob_size_a = 0;
+    uint8_t *blob_a = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_a);
+    TEST_ASSERT_NOT_NULL(blob_a);
+    ((NtPackHeader *)blob_a)->pack_id = pid_a;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_a, blob_a, blob_size_a));
+
+    uint32_t blob_size_b = 0;
+    uint8_t *blob_b = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_b);
+    TEST_ASSERT_NOT_NULL(blob_b);
+    ((NtPackHeader *)blob_b)->pack_id = pid_b;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_b, blob_b, blob_size_b));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100); /* A */
+    nt_resource_test_set_asset_state(rid, 1, NT_ASSET_STATE_READY, 200); /* B */
+    nt_resource_step();
+
+    /* B (last mounted, higher pack index) should win */
+    TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
+
+    free(blob_a);
+    free(blob_b);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_unmount_fallback(void) {
+    uint32_t pid_a = nt_resource_hash("fb_pack_a");
+    uint32_t pid_b = nt_resource_hash("fb_pack_b");
+    uint32_t rid = nt_resource_hash("fb_shared");
+
+    /* A priority 1, B priority 10 */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 1));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 10));
+
+    uint32_t blob_size_a = 0;
+    uint8_t *blob_a = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_a);
+    TEST_ASSERT_NOT_NULL(blob_a);
+    ((NtPackHeader *)blob_a)->pack_id = pid_a;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_a, blob_a, blob_size_a));
+
+    uint32_t blob_size_b = 0;
+    uint8_t *blob_b = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_b);
+    TEST_ASSERT_NOT_NULL(blob_b);
+    ((NtPackHeader *)blob_b)->pack_id = pid_b;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_b, blob_b, blob_size_b));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100); /* A */
+    nt_resource_test_set_asset_state(rid, 1, NT_ASSET_STATE_READY, 200); /* B */
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
+
+    /* Unmount B: should fall back to A */
+    nt_resource_unmount(pid_b);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
+
+    free(blob_a);
+    free(blob_b);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_set_priority_reorder(void) {
+    uint32_t pid_a = nt_resource_hash("reorder_pack_a");
+    uint32_t pid_b = nt_resource_hash("reorder_pack_b");
+    uint32_t rid = nt_resource_hash("reorder_shared");
+
+    /* A priority 10 (high), B priority 1 (low) */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 10));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 1));
+
+    uint32_t blob_size_a = 0;
+    uint8_t *blob_a = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_a);
+    TEST_ASSERT_NOT_NULL(blob_a);
+    ((NtPackHeader *)blob_a)->pack_id = pid_a;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_a, blob_a, blob_size_a));
+
+    uint32_t blob_size_b = 0;
+    uint8_t *blob_b = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_b);
+    TEST_ASSERT_NOT_NULL(blob_b);
+    ((NtPackHeader *)blob_b)->pack_id = pid_b;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_b, blob_b, blob_size_b));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100); /* A */
+    nt_resource_test_set_asset_state(rid, 1, NT_ASSET_STATE_READY, 200); /* B */
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h)); /* A wins (priority 10) */
+
+    /* Boost B to priority 20 */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_set_priority(pid_b, 20));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h)); /* B now wins (priority 20) */
+
+    free(blob_a);
+    free(blob_b);
+}
+
+/* ---- State reporting tests ---- */
+
+void test_get_state_registered(void) {
+    uint32_t pid = nt_resource_hash("state_reg_pack");
+    uint32_t rid = nt_resource_hash("state_reg_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    ((NtPackHeader *)blob)->pack_id = pid;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL_UINT8(NT_ASSET_STATE_REGISTERED, nt_resource_get_state(h));
+
+    free(blob);
+}
+
+void test_failed_permanent(void) {
+    uint32_t pid = nt_resource_hash("fail_pack");
+    uint32_t rid = nt_resource_hash("fail_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    ((NtPackHeader *)blob)->pack_id = pid;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+
+    /* Set FAILED state */
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_FAILED, 0);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT8(NT_ASSET_STATE_FAILED, nt_resource_get_state(h));
+
+    /* Step again: state should remain FAILED */
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT8(NT_ASSET_STATE_FAILED, nt_resource_get_state(h));
+
+    free(blob);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -320,6 +654,32 @@ int main(void) {
 
     /* Parser unmounted pack test */
     RUN_TEST(test_parse_unmounted_pack);
+
+    /* Mount / unmount / set_priority tests */
+    RUN_TEST(test_mount_unmount_remount);
+    RUN_TEST(test_mount_duplicate);
+    RUN_TEST(test_unmount_unknown);
+    RUN_TEST(test_set_priority_ok);
+    RUN_TEST(test_set_priority_unknown);
+
+    /* Request / get tests */
+    RUN_TEST(test_request_returns_handle);
+    RUN_TEST(test_request_idempotent);
+    RUN_TEST(test_get_invalid_handle);
+
+    /* State transition tests */
+    RUN_TEST(test_is_ready_before_step);
+    RUN_TEST(test_is_ready_after_step);
+
+    /* Priority stacking tests */
+    RUN_TEST(test_priority_high_wins);
+    RUN_TEST(test_priority_equal_last_mounted_wins);
+    RUN_TEST(test_unmount_fallback);
+    RUN_TEST(test_set_priority_reorder);
+
+    /* State reporting tests */
+    RUN_TEST(test_get_state_registered);
+    RUN_TEST(test_failed_permanent);
 
     return UNITY_END();
 }
