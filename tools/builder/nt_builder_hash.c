@@ -63,9 +63,16 @@ char *nt_builder_normalize_path(const char *path) {
             continue;
         }
         if (seg_len == 2 && seg_start[0] == '.' && seg_start[1] == '.') {
-            /* Pop last segment for '..' */
-            if (seg_count > 0) {
+            /* Pop last segment for '..', or keep '..' if nothing to pop */
+            if (seg_count > 0 && !(strlen(segments[seg_count - 1]) == 2 && segments[seg_count - 1][0] == '.' && segments[seg_count - 1][1] == '.')) {
                 seg_count--;
+            } else if (seg_count < 256) {
+                /* Null-terminate */
+                if (*tok == '/') {
+                    *tok = '\0';
+                    tok++;
+                }
+                segments[seg_count++] = seg_start;
             }
             continue;
         }

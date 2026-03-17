@@ -26,11 +26,11 @@ static NtBuildMeshData *nt_builder_copy_mesh_data(const NtStreamLayout *layout, 
     for (uint32_t s = 0; s < stream_count; s++) {
         if (layout[s].engine_name) {
             md->layout[s].engine_name = strdup(layout[s].engine_name);
-            assert(md->layout[s].engine_name && "strdup engine_name failed");
+            NT_BUILD_ASSERT(md->layout[s].engine_name && "strdup engine_name failed");
         }
         if (layout[s].gltf_name) {
             md->layout[s].gltf_name = strdup(layout[s].gltf_name);
-            assert(md->layout[s].gltf_name && "strdup gltf_name failed");
+            NT_BUILD_ASSERT(md->layout[s].gltf_name && "strdup gltf_name failed");
         }
     }
     return md;

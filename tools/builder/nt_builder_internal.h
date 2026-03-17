@@ -4,7 +4,16 @@
 #include "nt_builder.h"
 #include "nt_pack_format.h"
 
-#include <assert.h>
+/* Always-on assert for builder (never compiled out by NDEBUG).
+   Mirrors engine NT_ASSERT_ALWAYS but without engine header deps. */
+#define NT_BUILD_ASSERT(cond)                                                                                                                                                                          \
+    do {                                                                                                                                                                                               \
+        if (!(cond)) {                                                                                                                                                                                 \
+            (void)fprintf(stderr, "FATAL: %s:%d: assertion failed: %s\n", __FILE__, __LINE__, #cond);                                                                                                  \
+            abort();                                                                                                                                                                                   \
+        }                                                                                                                                                                                              \
+    } while (0)
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -187,9 +187,22 @@ void test_hash_known_value(void) {
 }
 
 void test_hash_path_normalization(void) {
+    /* Backslash -> forward slash */
     uint32_t h1 = nt_builder_hash("meshes/cube.glb");
     uint32_t h2 = nt_builder_hash("meshes\\cube.glb");
     TEST_ASSERT_EQUAL_UINT32(h1, h2);
+
+    /* ./ stripped */
+    TEST_ASSERT_EQUAL_UINT32(nt_builder_hash("foo/bar.png"), nt_builder_hash("./foo/bar.png"));
+
+    /* // collapsed */
+    TEST_ASSERT_EQUAL_UINT32(nt_builder_hash("foo/bar.png"), nt_builder_hash("foo//bar.png"));
+
+    /* ../ resolved */
+    TEST_ASSERT_EQUAL_UINT32(nt_builder_hash("bar.png"), nt_builder_hash("foo/../bar.png"));
+
+    /* Leading ../ preserved */
+    TEST_ASSERT_NOT_EQUAL(nt_builder_hash("assets/mesh.glb"), nt_builder_hash("../assets/mesh.glb"));
 }
 
 void test_hash_different_strings_differ(void) {
