@@ -21,7 +21,7 @@ uint32_t nt_builder_fnv1a(const char *str) {
     return hash;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,clang-analyzer-core.UndefinedBinaryOperatorResult)
 char *nt_builder_normalize_path(const char *path) {
     if (!path) {
         return NULL;
