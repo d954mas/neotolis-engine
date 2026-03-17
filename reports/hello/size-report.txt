@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis)
-# Commit: 9b92994
+# Commit: 5d81e9e
 
 ## WASM Section Sizes
 
