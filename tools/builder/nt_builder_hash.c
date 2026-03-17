@@ -43,7 +43,7 @@ char *nt_builder_normalize_path(const char *path) {
     uint32_t seg_count = 0;
     char *tok = buf;
 
-    while (*tok != '\0') {
+    for (;;) {
         while (*tok == '/') {
             tok++;
         }
@@ -56,28 +56,22 @@ char *nt_builder_normalize_path(const char *path) {
             tok++;
         }
 
-        /* Null-terminate segment in-place */
-        bool had_slash = (*tok == '/');
-        if (had_slash) {
+        /* Compute length, then null-terminate */
+        size_t seg_len = (size_t)(tok - seg_start);
+        if (*tok == '/') {
             *tok = '\0';
             tok++;
         }
 
-        size_t seg_len = (size_t)strlen(seg_start);
-
         if (seg_len == 1 && seg_start[0] == '.') {
-            continue;
-        }
-        if (seg_len == 2 && seg_start[0] == '.' && seg_start[1] == '.') {
-            if (seg_count > 0 && strcmp(segments[seg_count - 1], "..") != 0) {
+            /* skip '.' */
+        } else if (seg_len == 2 && seg_start[0] == '.' && seg_start[1] == '.') {
+            if (seg_count > 0 && !(segments[seg_count - 1][0] == '.' && segments[seg_count - 1][1] == '.' && segments[seg_count - 1][2] == '\0')) {
                 seg_count--;
             } else if (seg_count < 256) {
                 segments[seg_count++] = seg_start;
             }
-            continue;
-        }
-
-        if (seg_count < 256) {
+        } else if (seg_count < 256) {
             segments[seg_count++] = seg_start;
         }
     }

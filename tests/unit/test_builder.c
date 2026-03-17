@@ -847,7 +847,9 @@ void test_e2e_real_assets(void) {
     TEST_ASSERT_EQUAL_UINT8(2, mh->stream_count);
     /* First vertex: position (-0.5, -0.5, 0.5) — compare as uint32 bit pattern */
     uint8_t *vdata = pack + mesh_e->offset + sizeof(NtMeshAssetHeader) + mh->stream_count * sizeof(NtStreamDesc);
-    float vx, vy, vz;
+    float vx = 0;
+    float vy = 0;
+    float vz = 0;
     memcpy(&vx, vdata + 0, 4);
     memcpy(&vy, vdata + 4, 4);
     memcpy(&vz, vdata + 8, 4);
@@ -864,7 +866,7 @@ void test_e2e_real_assets(void) {
     TEST_ASSERT_EQUAL_UINT32(512, th->height);
     /* First pixel should be non-zero (Lenna top-left is skin tone) */
     uint8_t *pixel0 = pack + tex_e->offset + sizeof(NtTextureAssetHeader);
-    TEST_ASSERT_TRUE(pixel0[0] > 100); /* R */
+    TEST_ASSERT_TRUE(pixel0[0] > 100);  /* R */
     TEST_ASSERT_TRUE(pixel0[3] == 255); /* A = opaque */
 
     /* Verify shader source */
