@@ -349,7 +349,7 @@ Note: Phase 25 (Asset Loading) depends on Phase 24, Phase 21, and Phase 23.
 | 20. Shared Format Headers | 2/2 | Complete   | 2026-03-16 | - |
 | 21. Texture Support | 2/2 | Complete    | 2026-03-16 | - |
 | 22. Entity System | 3/3 | Complete    | 2026-03-16 | - |
-| 23. Builder | 1/3 | In Progress|  | - |
+| 23. Builder | 2/3 | In Progress|  | - |
 | 24. Asset Registry | v1.3 | 0/TBD | Not started | - |
 | 25. Asset Loading | v1.3 | 0/TBD | Not started | - |
 | 26. Material System | v1.3 | 0/TBD | Not started | - |
@@ -361,7 +361,7 @@ Note: Phase 25 (Asset Loading) depends on Phase 24, Phase 21, and Phase 23.
 **Goal:** [To be planned]
 **Requirements**: TBD
 **Depends on:** Phase 28
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 
 Plans:
 - [ ] TBD (run /gsd:plan-phase 29 to break down)

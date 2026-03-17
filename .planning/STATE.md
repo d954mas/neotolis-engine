@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Asset Pipeline
-current_phase: Phase 23 -- Builder (Plan 1 of 3 complete)
-current_plan: Plan 2 of 3
+current_phase: Phase 23 -- Builder (Plan 2 of 3 complete)
+current_plan: Plan 3 of 3
 status: executing
-last_updated: "2026-03-17T04:39:55Z"
-last_activity: 2026-03-17 -- Completed 23-01 (builder infrastructure, cgltf/stb vendors, pack writer); 10min
+last_updated: "2026-03-17T04:57:13Z"
+last_activity: 2026-03-17 -- Completed 23-02 (mesh/texture/shader importers); 13min
 progress:
   total_phases: 10
   completed_phases: 3
   total_plans: 10
-  completed_plans: 8
+  completed_plans: 9
 ---
 
 # Session State
@@ -26,10 +26,10 @@ See: .planning/PROJECT.md (updated 2026-03-16)
 ## Position
 
 **Milestone:** v1.3 Asset Pipeline (Phases 20-28)
-**Current phase:** Phase 23 -- Builder (1/3 plans done)
-**Current Plan:** Plan 2 of 3
+**Current phase:** Phase 23 -- Builder (2/3 plans done)
+**Current Plan:** Plan 3 of 3
 **Status:** Executing
-**Last activity:** 2026-03-17 -- Completed 23-01 (builder infrastructure, cgltf/stb vendors, pack writer); 10min
+**Last activity:** 2026-03-17 -- Completed 23-02 (mesh/texture/shader importers); 13min
 
 ## Decisions
 
@@ -72,6 +72,7 @@ Phase 21-01 decisions:
 | 22 | 02 | 11min | 2 | 5 |
 | 22 | 03 | 9min | 2 | 11 |
 | 23 | 01 | 10min | 2 | 13 |
+| 23 | 02 | 13min | 2 | 5 |
 
 Phase 22-01 decisions:
 - NT_ASSERT_ALWAYS added to nt_assert.h (shared utility) for release-mode stale handle assertions
@@ -89,6 +90,11 @@ Phase 23-01 decisions:
 - _CRT_SECURE_NO_WARNINGS and _CRT_NONSTDC_NO_DEPRECATE for builder target (standard C I/O on Windows)
 - Inline unsigned alignment arithmetic instead of NT_PACK_ALIGN_UP macro to avoid sign-conversion warnings
 - nt_builder as STATIC library separate from builder executable for testability and reuse
+
+Phase 23-02 decisions:
+- NOLINTNEXTLINE for cognitive complexity on sequential pipeline functions
+- Explicit NULL checks on gltf_name before strcmp for static analysis compliance
+- calloc(max(n,1)) pattern to avoid zero-size allocation UB
 
 ## Accumulated Context
 
@@ -120,3 +126,4 @@ Phase 23-01 decisions:
 - 2026-03-16: Completed 22-02-PLAN.md -- transform component, sparse+dense storage, TRS matrix, 15 tests, 11min
 - 2026-03-16: Phase 22 complete -- entity system with 4 component types, 46 unit tests total
 - 2026-03-17: Completed 23-01-PLAN.md -- builder infrastructure, cgltf+stb vendors, pack writer, FNV-1a hash, dump utility, 10min
+- 2026-03-17: Completed 23-02-PLAN.md -- mesh/texture/shader importers (cgltf, stb_image, GLSL comment strip), 13min

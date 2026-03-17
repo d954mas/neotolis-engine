@@ -7,13 +7,13 @@
 
 ### Builder
 
-- [ ] **BUILD-01**: Native C builder binary reads .glb mesh files via cgltf and outputs runtime mesh binary
-- [ ] **BUILD-02**: Builder reads .png textures via stb_image and outputs raw RGBA8 pixel data
-- [ ] **BUILD-03**: Builder reads .glsl vertex/fragment shader source files as text blobs
+- [x] **BUILD-01**: Native C builder binary reads .glb mesh files via cgltf and outputs runtime mesh binary
+- [x] **BUILD-02**: Builder reads .png textures via stb_image and outputs raw RGBA8 pixel data
+- [x] **BUILD-03**: Builder reads .glsl vertex/fragment shader source files as text blobs
 - [x] **BUILD-04**: Builder writes NEOPAK binary pack with header, asset entries, and aligned data
 - [x] **BUILD-05**: Builder supports code-first API (start_pack/add_mesh/add_texture/add_shader/finish_pack)
 - [ ] **BUILD-06**: Builder supports glob patterns for batch asset addition (add_meshes("*.glb"))
-- [ ] **BUILD-07**: Builder validates mesh vertex attributes against minimum requirements (POSITION required)
+- [x] **BUILD-07**: Builder validates mesh vertex attributes against minimum requirements (POSITION required)
 
 ### NEOPAK Format
 
@@ -174,13 +174,13 @@
 | RCOMP-01 | Phase 22 | Complete |
 | RCOMP-02 | Phase 22 | Complete |
 | RCOMP-03 | Phase 22 | Complete |
-| BUILD-01 | Phase 23 | Pending |
-| BUILD-02 | Phase 23 | Pending |
-| BUILD-03 | Phase 23 | Pending |
+| BUILD-01 | Phase 23 | Complete |
+| BUILD-02 | Phase 23 | Complete |
+| BUILD-03 | Phase 23 | Complete |
 | BUILD-04 | Phase 23 | Complete |
 | BUILD-05 | Phase 23 | Complete |
 | BUILD-06 | Phase 23 | Pending |
-| BUILD-07 | Phase 23 | Pending |
+| BUILD-07 | Phase 23 | Complete |
 | REG-01 | Phase 24 | Pending |
 | REG-02 | Phase 24 | Pending |
 | REG-03 | Phase 24 | Pending |
