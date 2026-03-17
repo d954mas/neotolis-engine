@@ -21,12 +21,12 @@ typedef enum {
 
 /* Deferred asset entry -- stored during add_*, processed in finish_pack */
 typedef struct {
-    char *path;                           /* normalized path (owned, heap) */
-    uint32_t resource_id;                 /* FNV-1a hash or explicit */
-    nt_build_asset_kind_t kind;           /* mesh/texture/shader */
-    nt_build_shader_stage_t shader_stage; /* only for shaders */
-    NtStreamLayout layout[8];             /* NT_MESH_MAX_STREAMS -- copied from user */
-    uint32_t stream_count;                /* only for meshes */
+    char *path;                                 /* normalized path (owned, heap) */
+    uint32_t resource_id;                       /* FNV-1a hash or explicit */
+    nt_build_asset_kind_t kind;                 /* mesh/texture/shader */
+    nt_build_shader_stage_t shader_stage;       /* only for shaders */
+    NtStreamLayout layout[NT_MESH_MAX_STREAMS]; /* copied from user */
+    uint32_t stream_count;                      /* only for meshes */
 } NtBuildEntry;
 
 struct NtBuilderContext {
@@ -48,7 +48,8 @@ struct NtBuilderContext {
     /* Diagnostic paths for summary */
     char *resource_paths[NT_BUILD_MAX_ASSETS];
 
-    /* Error state */
+    /* Mode flags */
+    bool force;
     bool has_error;
 
     /* Pack metadata */

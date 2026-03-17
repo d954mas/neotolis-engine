@@ -61,10 +61,16 @@ nt_build_result_t nt_builder_add_texture_with_id(NtBuilderContext *ctx, const ch
 nt_build_result_t nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage);
 nt_build_result_t nt_builder_add_shader_with_id(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint32_t resource_id);
 
+/* --- Force mode (add or replace, no duplicate error) --- */
+void nt_builder_set_force(NtBuilderContext *ctx, bool force);
+
 /* --- Batch addition (glob patterns) --- */
 nt_build_result_t nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const NtStreamLayout *layout, uint32_t stream_count);
 nt_build_result_t nt_builder_add_textures(NtBuilderContext *ctx, const char *pattern);
 nt_build_result_t nt_builder_add_shaders(NtBuilderContext *ctx, const char *pattern, nt_build_shader_stage_t stage);
+
+/* --- Rename (change resource_id key, keep source file) --- */
+nt_build_result_t nt_builder_rename(NtBuilderContext *ctx, const char *old_path, const char *new_path);
 
 /* --- Utilities --- */
 nt_build_result_t nt_builder_dump_pack(const char *pack_path);

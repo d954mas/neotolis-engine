@@ -358,7 +358,7 @@ void test_missing_position_attribute_errors(void) {
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
 }
 
-void test_duplicate_path_replaces(void) {
+void test_duplicate_path_errors(void) {
     const char *vert_path = TMP_DIR "/dup.vert";
     write_test_shader(vert_path, "precision mediump float;\n"
                                  "void main() { gl_Position = vec4(0); }\n");
@@ -370,20 +370,48 @@ void test_duplicate_path_replaces(void) {
     nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
-    /* Second add replaces (force semantics) */
+    /* Second add with same path = duplicate error */
     r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_ERR_DUPLICATE, r);
+
+    nt_builder_free_pack(ctx);
+}
+
+void test_force_add_replaces(void) {
+    const char *vert_path = TMP_DIR "/force.vert";
+    write_test_shader(vert_path, "precision mediump float;\n"
+                                 "void main() { gl_Position = vec4(0); }\n");
+
+    const char *pack_path = TMP_DIR "/force_test.neopak";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
-    /* finish should succeed with 1 asset (not 2) */
+    /* Force mode: replaces without error */
+    nt_builder_set_force(ctx, true);
+    r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_FRAGMENT);
+    nt_builder_set_force(ctx, false);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
-    /* Verify only 1 asset in pack */
+    /* Verify 1 asset, stage = FRAGMENT (replaced) */
     FILE *f = fopen(pack_path, "rb");
     TEST_ASSERT_NOT_NULL(f);
     NtPackHeader hdr;
     (void)fread(&hdr, sizeof(hdr), 1, f);
     TEST_ASSERT_EQUAL_UINT16(1, hdr.asset_count);
+
+    NtAssetEntry entry;
+    (void)fread(&entry, sizeof(entry), 1, f);
+    (void)fseek(f, (long)entry.offset, SEEK_SET);
+    NtShaderCodeHeader shdr;
+    (void)fread(&shdr, sizeof(shdr), 1, f);
+    TEST_ASSERT_EQUAL_UINT8(NT_SHADER_STAGE_FRAGMENT, shdr.stage);
+
     (void)fclose(f);
 }
 
@@ -734,7 +762,8 @@ int main(void) {
 
     /* Validation errors */
     RUN_TEST(test_missing_position_attribute_errors);
-    RUN_TEST(test_duplicate_path_replaces);
+    RUN_TEST(test_duplicate_path_errors);
+    RUN_TEST(test_force_add_replaces);
     RUN_TEST(test_empty_shader_errors);
     RUN_TEST(test_shader_with_version_errors);
 

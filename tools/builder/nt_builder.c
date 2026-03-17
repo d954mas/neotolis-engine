@@ -14,6 +14,18 @@ static int32_t nt_builder_find_entry(NtBuilderContext *ctx, uint32_t resource_id
     return -1;
 }
 
+static void nt_builder_fill_entry(NtBuildEntry *entry, char *norm_path, uint32_t resource_id, nt_build_asset_kind_t kind, nt_build_shader_stage_t shader_stage, const NtStreamLayout *layout,
+                                  uint32_t stream_count) {
+    entry->path = norm_path;
+    entry->resource_id = resource_id;
+    entry->kind = kind;
+    entry->shader_stage = shader_stage;
+    entry->stream_count = stream_count;
+    if (layout && stream_count > 0) {
+        memcpy(entry->layout, layout, stream_count * sizeof(NtStreamLayout));
+    }
+}
+
 static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char *path, uint32_t resource_id, nt_build_asset_kind_t kind, nt_build_shader_stage_t shader_stage,
                                               const NtStreamLayout *layout, uint32_t stream_count) {
     if (!ctx || !path) {
@@ -25,32 +37,25 @@ static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char 
         return NT_BUILD_ERR_IO;
     }
 
-    /* Check for existing entry with same resource_id -- replace (force semantics) */
     int32_t existing = nt_builder_find_entry(ctx, resource_id);
-    NtBuildEntry *entry;
-
     if (existing >= 0) {
-        entry = &ctx->pending[existing];
-        free(entry->path);
-        (void)printf("  Replacing: %s\n", norm_path);
-    } else {
-        if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
-            (void)fprintf(stderr, "ERROR: Asset limit reached (%d max)\n", NT_BUILD_MAX_ASSETS);
-            free(norm_path);
-            return NT_BUILD_ERR_LIMIT;
+        if (ctx->force) {
+            free(ctx->pending[existing].path);
+            nt_builder_fill_entry(&ctx->pending[existing], norm_path, resource_id, kind, shader_stage, layout, stream_count);
+            return NT_BUILD_OK;
         }
-        entry = &ctx->pending[ctx->pending_count++];
+        (void)fprintf(stderr, "ERROR: duplicate resource_id 0x%08X\n  existing: %s\n  new:      %s\n", resource_id, ctx->pending[existing].path, norm_path);
+        free(norm_path);
+        return NT_BUILD_ERR_DUPLICATE;
     }
 
-    entry->path = norm_path;
-    entry->resource_id = resource_id;
-    entry->kind = kind;
-    entry->shader_stage = shader_stage;
-    entry->stream_count = stream_count;
-    if (layout && stream_count > 0) {
-        memcpy(entry->layout, layout, stream_count * sizeof(NtStreamLayout));
+    if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
+        (void)fprintf(stderr, "ERROR: Asset limit reached (%d max)\n", NT_BUILD_MAX_ASSETS);
+        free(norm_path);
+        return NT_BUILD_ERR_LIMIT;
     }
 
+    nt_builder_fill_entry(&ctx->pending[ctx->pending_count++], norm_path, resource_id, kind, shader_stage, layout, stream_count);
     return NT_BUILD_OK;
 }
 
@@ -279,16 +284,19 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     return NT_BUILD_OK;
 }
 
-/* --- Lightweight add_* functions (deferred) --- */
+/* --- Helper: compute resource_id from path (normalize once) --- */
 
-nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count) {
-    if (!ctx || !path) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
+static uint32_t nt_builder_path_id(const char *path) {
     char *norm = nt_builder_normalize_path(path);
     uint32_t id = nt_builder_fnv1a(norm ? norm : path);
     free(norm);
-    return nt_builder_add_entry(ctx, path, id, NT_BUILD_ASSET_MESH, (nt_build_shader_stage_t)0, layout, stream_count);
+    return id;
+}
+
+/* --- Strict add_* (duplicate = error) --- */
+
+nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count) {
+    return nt_builder_add_entry(ctx, path, nt_builder_path_id(path), NT_BUILD_ASSET_MESH, (nt_build_shader_stage_t)0, layout, stream_count);
 }
 
 nt_build_result_t nt_builder_add_mesh_with_id(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, uint32_t resource_id) {
@@ -296,13 +304,7 @@ nt_build_result_t nt_builder_add_mesh_with_id(NtBuilderContext *ctx, const char 
 }
 
 nt_build_result_t nt_builder_add_texture(NtBuilderContext *ctx, const char *path) {
-    if (!ctx || !path) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-    char *norm = nt_builder_normalize_path(path);
-    uint32_t id = nt_builder_fnv1a(norm ? norm : path);
-    free(norm);
-    return nt_builder_add_entry(ctx, path, id, NT_BUILD_ASSET_TEXTURE, (nt_build_shader_stage_t)0, NULL, 0);
+    return nt_builder_add_entry(ctx, path, nt_builder_path_id(path), NT_BUILD_ASSET_TEXTURE, (nt_build_shader_stage_t)0, NULL, 0);
 }
 
 nt_build_result_t nt_builder_add_texture_with_id(NtBuilderContext *ctx, const char *path, uint32_t resource_id) {
@@ -310,15 +312,42 @@ nt_build_result_t nt_builder_add_texture_with_id(NtBuilderContext *ctx, const ch
 }
 
 nt_build_result_t nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage) {
-    if (!ctx || !path) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-    char *norm = nt_builder_normalize_path(path);
-    uint32_t id = nt_builder_fnv1a(norm ? norm : path);
-    free(norm);
-    return nt_builder_add_entry(ctx, path, id, NT_BUILD_ASSET_SHADER, stage, NULL, 0);
+    return nt_builder_add_entry(ctx, path, nt_builder_path_id(path), NT_BUILD_ASSET_SHADER, stage, NULL, 0);
 }
 
 nt_build_result_t nt_builder_add_shader_with_id(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint32_t resource_id) {
     return nt_builder_add_entry(ctx, path, resource_id, NT_BUILD_ASSET_SHADER, stage, NULL, 0);
+}
+
+void nt_builder_set_force(NtBuilderContext *ctx, bool force) {
+    if (ctx) {
+        ctx->force = force;
+    }
+}
+
+/* --- Rename: change resource_id key, keep source file --- */
+
+nt_build_result_t nt_builder_rename(NtBuilderContext *ctx, const char *old_path, const char *new_path) {
+    if (!ctx || !old_path || !new_path) {
+        return NT_BUILD_ERR_VALIDATION;
+    }
+
+    uint32_t old_id = nt_builder_path_id(old_path);
+    int32_t idx = nt_builder_find_entry(ctx, old_id);
+    if (idx < 0) {
+        (void)fprintf(stderr, "ERROR: rename: '%s' not found in pending assets\n", old_path);
+        return NT_BUILD_ERR_VALIDATION;
+    }
+
+    uint32_t new_id = nt_builder_path_id(new_path);
+
+    /* Check new_id doesn't collide with another entry */
+    int32_t collision = nt_builder_find_entry(ctx, new_id);
+    if (collision >= 0 && collision != idx) {
+        (void)fprintf(stderr, "ERROR: rename: new path '%s' collides with existing '%s'\n", new_path, ctx->pending[collision].path);
+        return NT_BUILD_ERR_DUPLICATE;
+    }
+
+    ctx->pending[idx].resource_id = new_id;
+    return NT_BUILD_OK;
 }
