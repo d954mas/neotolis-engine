@@ -212,8 +212,7 @@ void test_start_pack_returns_context(void) {
 
 void test_shader_round_trip(void) {
     const char *vert_path = TMP_DIR "/rt_test.vert";
-    write_test_shader(vert_path, "#version 300 es\n"
-                                 "precision mediump float;\n"
+    write_test_shader(vert_path, "precision mediump float;\n"
                                  "layout(location = 0) in vec3 a_pos;\n"
                                  "void main() { gl_Position = vec4(a_pos, 1.0); }\n");
 
@@ -301,7 +300,7 @@ void test_mesh_round_trip(void) {
     write_test_glb(glb_path);
 
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
     };
 
     const char *pack_path = TMP_DIR "/mesh_rt.neopak";
@@ -343,7 +342,7 @@ void test_missing_position_attribute_errors(void) {
     write_test_glb(glb_path);
 
     NtStreamLayout layout[] = {
-        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
     };
 
     const char *pack_path = TMP_DIR "/no_pos.neopak";
@@ -360,8 +359,7 @@ void test_missing_position_attribute_errors(void) {
 
 void test_duplicate_path_errors(void) {
     const char *vert_path = TMP_DIR "/dup.vert";
-    write_test_shader(vert_path, "#version 300 es\n"
-                                 "precision mediump float;\n"
+    write_test_shader(vert_path, "precision mediump float;\n"
                                  "void main() { gl_Position = vec4(0); }\n");
 
     const char *pack_path = TMP_DIR "/dup_test.neopak";
@@ -394,12 +392,13 @@ void test_empty_shader_errors(void) {
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
 }
 
-void test_shader_missing_version_errors(void) {
-    const char *vert_path = TMP_DIR "/noversion.vert";
-    write_test_shader(vert_path, "precision mediump float;\n"
+void test_shader_with_version_errors(void) {
+    const char *vert_path = TMP_DIR "/hasversion.vert";
+    write_test_shader(vert_path, "#version 300 es\n"
+                                 "precision mediump float;\n"
                                  "void main() { gl_Position = vec4(0); }\n");
 
-    const char *pack_path = TMP_DIR "/noversion_test.neopak";
+    const char *pack_path = TMP_DIR "/hasversion_test.neopak";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -414,8 +413,7 @@ void test_shader_missing_version_errors(void) {
 
 void test_shader_comment_stripping(void) {
     const char *vert_path = TMP_DIR "/comments.vert";
-    write_test_shader(vert_path, "#version 300 es\n"
-                                 "// This is a line comment\n"
+    write_test_shader(vert_path, "// This is a line comment\n"
                                  "precision mediump float;\n"
                                  "/* This is a\n   block comment */\n"
                                  "void main() {\n"
@@ -454,7 +452,6 @@ void test_shader_comment_stripping(void) {
     TEST_ASSERT_NULL(strstr(source, "inline comment"));
 
     /* Verify code is preserved */
-    TEST_ASSERT_NOT_NULL(strstr(source, "#version 300 es"));
     TEST_ASSERT_NOT_NULL(strstr(source, "void main"));
 
     free(source);
@@ -466,11 +463,9 @@ void test_shader_comment_stripping(void) {
 void test_asset_alignment(void) {
     const char *v_path = TMP_DIR "/align_v.vert";
     const char *f_path = TMP_DIR "/align_f.frag";
-    write_test_shader(v_path, "#version 300 es\n"
-                              "precision mediump float;\n"
+    write_test_shader(v_path, "precision mediump float;\n"
                               "void main() { gl_Position = vec4(0); }\n");
-    write_test_shader(f_path, "#version 300 es\n"
-                              "precision mediump float;\n"
+    write_test_shader(f_path, "precision mediump float;\n"
                               "out vec4 c;\n"
                               "void main() { c = vec4(1); }\n");
 
@@ -504,8 +499,7 @@ void test_asset_alignment(void) {
 
 void test_crc32_verification(void) {
     const char *vert_path = TMP_DIR "/crc_test.vert";
-    write_test_shader(vert_path, "#version 300 es\n"
-                                 "precision mediump float;\n"
+    write_test_shader(vert_path, "precision mediump float;\n"
                                  "void main() { gl_Position = vec4(1); }\n");
 
     const char *pack_path = TMP_DIR "/crc_test.neopak";
@@ -542,8 +536,7 @@ void test_crc32_verification(void) {
 void test_dump_valid_pack(void) {
     /* Build a valid pack first */
     const char *vert_path = TMP_DIR "/dump_test.vert";
-    write_test_shader(vert_path, "#version 300 es\n"
-                                 "precision mediump float;\n"
+    write_test_shader(vert_path, "precision mediump float;\n"
                                  "void main() { gl_Position = vec4(0); }\n");
 
     const char *pack_path = TMP_DIR "/dump_test.neopak";
@@ -578,13 +571,12 @@ void test_multi_asset_pack(void) {
     const char *vert_path = TMP_DIR "/multi.vert";
     write_test_glb(glb_path);
     write_test_png(png_path);
-    write_test_shader(vert_path, "#version 300 es\n"
-                                 "precision mediump float;\n"
+    write_test_shader(vert_path, "precision mediump float;\n"
                                  "layout(location = 0) in vec3 a_pos;\n"
                                  "void main() { gl_Position = vec4(a_pos, 1.0); }\n");
 
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
     };
 
     const char *pack_path = TMP_DIR "/multi_test.neopak";
@@ -653,8 +645,7 @@ void test_multi_asset_pack(void) {
 
 void test_shader_stage_correct(void) {
     const char *frag_path = TMP_DIR "/stage.frag";
-    write_test_shader(frag_path, "#version 300 es\n"
-                                 "precision mediump float;\n"
+    write_test_shader(frag_path, "precision mediump float;\n"
                                  "out vec4 c;\n"
                                  "void main() { c = vec4(1); }\n");
 
@@ -731,7 +722,7 @@ int main(void) {
     RUN_TEST(test_missing_position_attribute_errors);
     RUN_TEST(test_duplicate_path_errors);
     RUN_TEST(test_empty_shader_errors);
-    RUN_TEST(test_shader_missing_version_errors);
+    RUN_TEST(test_shader_with_version_errors);
 
     /* Comment stripping */
     RUN_TEST(test_shader_comment_stripping);

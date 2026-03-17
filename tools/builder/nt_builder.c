@@ -83,7 +83,12 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, const char *p
     /* Store tracking data */
     uint32_t idx = ctx->entry_count;
     ctx->resource_ids[idx] = resource_id;
-    ctx->resource_paths[idx] = path ? strdup(path) : NULL;
+    if (path) {
+        ctx->resource_paths[idx] = strdup(path);
+        assert(ctx->resource_paths[idx] && "strdup failed: out of memory");
+    } else {
+        ctx->resource_paths[idx] = NULL;
+    }
 
     /* Fill entry */
     NtAssetEntry *entry = &ctx->entries[idx];
@@ -133,6 +138,8 @@ static void nt_builder_free_context(NtBuilderContext *ctx) {
     }
     free(ctx);
 }
+
+void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx); }
 
 nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     if (!ctx) {
@@ -190,6 +197,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     if (fwrite(&header, sizeof(header), 1, file) != 1) {
         (void)fprintf(stderr, "ERROR: Failed to write pack header\n");
         (void)fclose(file);
+        (void)remove(ctx->output_path);
         nt_builder_free_context(ctx);
         return NT_BUILD_ERR_IO;
     }
@@ -200,6 +208,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         if (fwrite(ctx->entries, entries_size, 1, file) != 1) {
             (void)fprintf(stderr, "ERROR: Failed to write asset entries\n");
             (void)fclose(file);
+            (void)remove(ctx->output_path);
             nt_builder_free_context(ctx);
             return NT_BUILD_ERR_IO;
         }
@@ -212,6 +221,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         if (fwrite(zeros, header_padding, 1, file) != 1) {
             (void)fprintf(stderr, "ERROR: Failed to write header padding\n");
             (void)fclose(file);
+            (void)remove(ctx->output_path);
             nt_builder_free_context(ctx);
             return NT_BUILD_ERR_IO;
         }
@@ -222,6 +232,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         if (fwrite(ctx->data_buf, ctx->data_size, 1, file) != 1) {
             (void)fprintf(stderr, "ERROR: Failed to write data region\n");
             (void)fclose(file);
+            (void)remove(ctx->output_path);
             nt_builder_free_context(ctx);
             return NT_BUILD_ERR_IO;
         }

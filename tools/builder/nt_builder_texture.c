@@ -41,7 +41,14 @@ nt_build_result_t nt_builder_add_texture_with_id(NtBuilderContext *ctx, const ch
     tex_hdr.mip_count = 1;
     tex_hdr._pad = 0;
 
-    uint32_t pixel_data_size = (uint32_t)w * (uint32_t)h * 4;
+    uint64_t pixel_data_size_64 = (uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4;
+    if (pixel_data_size_64 > UINT32_MAX) {
+        (void)fprintf(stderr, "ERROR: %s: pixel data size overflow (%ux%u RGBA8)\n", path, (uint32_t)w, (uint32_t)h);
+        stbi_image_free(pixels);
+        ctx->has_error = true;
+        return NT_BUILD_ERR_LIMIT;
+    }
+    uint32_t pixel_data_size = (uint32_t)pixel_data_size_64;
     uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeader) + pixel_data_size;
 
     /* Append header + pixel data */

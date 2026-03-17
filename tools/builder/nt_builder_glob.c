@@ -9,6 +9,7 @@
 #include <windows.h>
 #else
 #include <dirent.h>
+#include <sys/stat.h>
 #endif
 
 /* --- Wildcard matching --- */
@@ -40,9 +41,15 @@ static bool wildcard_match(const char *pattern, const char *str) {
     return *pp == '\0';
 }
 
-/* --- Directory iteration --- */
+/* --- Sorted directory iteration --- */
+
+#define GLOB_MAX_MATCHES 1024
 
 typedef void (*glob_callback_fn)(const char *full_path, void *user);
+
+static int glob_strcmp(const void *a, const void *b) {
+    return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
 
 static void glob_iterate(const char *pattern, glob_callback_fn callback, void *user) {
     /* Split pattern into directory + filename pattern at last separator */
@@ -70,6 +77,10 @@ static void glob_iterate(const char *pattern, glob_callback_fn callback, void *u
         file_pattern = pattern;
     }
 
+    /* Collect matching paths into array, then sort for deterministic order */
+    char *matches[GLOB_MAX_MATCHES];
+    uint32_t match_count = 0;
+
 #ifdef _WIN32
     {
         WIN32_FIND_DATAA find_data;
@@ -82,18 +93,19 @@ static void glob_iterate(const char *pattern, glob_callback_fn callback, void *u
         }
 
         do {
-            /* Skip . and .. */
             if (find_data.cFileName[0] == '.' && (find_data.cFileName[1] == '\0' || (find_data.cFileName[1] == '.' && find_data.cFileName[2] == '\0'))) {
                 continue;
             }
-            /* Skip directories */
             if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
                 continue;
             }
-            if (wildcard_match(file_pattern, find_data.cFileName)) {
+            if (wildcard_match(file_pattern, find_data.cFileName) && match_count < GLOB_MAX_MATCHES) {
                 char full_path[512];
                 (void)snprintf(full_path, sizeof(full_path), "%s/%s", directory, find_data.cFileName);
-                callback(full_path, user);
+                matches[match_count] = strdup(full_path);
+                if (matches[match_count]) {
+                    match_count++;
+                }
             }
         } while (FindNextFileA(h_find, &find_data));
 
@@ -108,20 +120,37 @@ static void glob_iterate(const char *pattern, glob_callback_fn callback, void *u
 
         struct dirent *entry;
         while ((entry = readdir(dir)) != NULL) {
-            /* Skip . and .. */
             if (entry->d_name[0] == '.' && (entry->d_name[1] == '\0' || (entry->d_name[1] == '.' && entry->d_name[2] == '\0'))) {
                 continue;
             }
-            if (wildcard_match(file_pattern, entry->d_name)) {
-                char full_path[512];
-                (void)snprintf(full_path, sizeof(full_path), "%s/%s", directory, entry->d_name);
-                callback(full_path, user);
+            char full_path[512];
+            (void)snprintf(full_path, sizeof(full_path), "%s/%s", directory, entry->d_name);
+            struct stat st;
+            if (stat(full_path, &st) != 0 || S_ISDIR(st.st_mode)) {
+                continue;
+            }
+            if (wildcard_match(file_pattern, entry->d_name) && match_count < GLOB_MAX_MATCHES) {
+                matches[match_count] = strdup(full_path);
+                if (matches[match_count]) {
+                    match_count++;
+                }
             }
         }
 
         closedir(dir);
     }
 #endif
+
+    /* Sort for deterministic pack layout across platforms */
+    if (match_count > 1) {
+        qsort(matches, match_count, sizeof(char *), glob_strcmp);
+    }
+
+    /* Invoke callbacks in sorted order */
+    for (uint32_t i = 0; i < match_count; i++) {
+        callback(matches[i], user);
+        free(matches[i]);
+    }
 }
 
 /* --- Batch callback context --- */

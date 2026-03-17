@@ -4,6 +4,7 @@
 #include "nt_builder.h"
 #include "nt_pack_format.h"
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

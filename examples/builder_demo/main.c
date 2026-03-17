@@ -16,8 +16,8 @@ int main(int argc, char *argv[]) {
 
     /* Stream layout: position (float32 x3) + uv0 (float32 x2) */
     NtStreamLayout layout[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2},
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
     };
 
     NtBuilderContext *ctx = nt_builder_start_pack("build/assets/demo.neopak");

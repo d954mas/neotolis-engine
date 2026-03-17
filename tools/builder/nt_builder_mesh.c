@@ -78,6 +78,12 @@ static nt_build_result_t nt_validate_stream_layout(const char *path, const NtStr
             ctx->has_error = true;
             return NT_BUILD_ERR_VALIDATION;
         }
+        if (layout[s].normalized && (layout[s].type == NT_STREAM_FLOAT32 || layout[s].type == NT_STREAM_FLOAT16)) {
+            (void)fprintf(stderr, "ERROR: %s: stream[%u] '%s': normalized=true is invalid for float types\n", path, s,
+                          layout[s].engine_name ? layout[s].engine_name : "(null)");
+            ctx->has_error = true;
+            return NT_BUILD_ERR_VALIDATION;
+        }
         if (layout[s].gltf_name != NULL && strcmp(layout[s].gltf_name, "POSITION") == 0) {
             has_position = true;
         }
@@ -133,6 +139,15 @@ static nt_build_result_t nt_parse_gltf(const char *path, cgltf_data **out_data, 
     }
 
     *out_prim = &(*out_data)->meshes[0].primitives[0];
+
+    if ((*out_prim)->type != cgltf_primitive_type_triangles) {
+        (void)fprintf(stderr, "ERROR: %s: primitive type %d is not TRIANGLES (only triangles supported)\n", path, (int)(*out_prim)->type);
+        cgltf_free(*out_data);
+        *out_data = NULL;
+        ctx->has_error = true;
+        return NT_BUILD_ERR_VALIDATION;
+    }
+
     return NT_BUILD_OK;
 }
 
@@ -154,14 +169,18 @@ static nt_build_result_t nt_extract_vertex_streams(const char *path, const cgltf
         }
 
         if (!acc) {
-            if (layout[s].gltf_name != NULL && strcmp(layout[s].gltf_name, "POSITION") == 0) {
-                (void)fprintf(stderr, "ERROR: %s: POSITION attribute not found in glTF data\n", path);
-                ctx->has_error = true;
-                return NT_BUILD_ERR_VALIDATION;
-            }
-            (void)fprintf(stderr, "WARNING: %s: attribute %s not found, filling zeros\n", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)");
-            stream_floats[s] = NULL;
-            continue;
+            (void)fprintf(stderr, "ERROR: %s: attribute %s not found in glTF data\n", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)");
+            ctx->has_error = true;
+            return NT_BUILD_ERR_VALIDATION;
+        }
+
+        /* Validate accessor component count matches layout */
+        uint32_t acc_components = (uint32_t)cgltf_num_components(acc->type);
+        if (acc_components != layout[s].count) {
+            (void)fprintf(stderr, "ERROR: %s: attribute %s has %u components, layout expects %u\n", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)", acc_components,
+                          (uint32_t)layout[s].count);
+            ctx->has_error = true;
+            return NT_BUILD_ERR_VALIDATION;
         }
 
         uint32_t count = (uint32_t)acc->count;
@@ -200,19 +219,6 @@ static nt_build_result_t nt_extract_vertex_streams(const char *path, const cgltf
         (void)fprintf(stderr, "ERROR: %s: vertex count %u exceeds max %d\n", path, vertex_count, NT_BUILD_MAX_VERTICES);
         ctx->has_error = true;
         return NT_BUILD_ERR_LIMIT;
-    }
-
-    /* Allocate zero-filled buffers for missing streams */
-    for (uint32_t s = 0; s < stream_count; s++) {
-        if (!stream_floats[s]) {
-            cgltf_size float_count = (cgltf_size)vertex_count * (cgltf_size)layout[s].count;
-            stream_floats[s] = (float *)calloc(float_count > 0 ? float_count : 1, sizeof(float));
-            if (!stream_floats[s]) {
-                (void)fprintf(stderr, "ERROR: %s: failed to allocate zero buffer for %s\n", path, layout[s].engine_name ? layout[s].engine_name : "(null)");
-                ctx->has_error = true;
-                return NT_BUILD_ERR_IO;
-            }
-        }
     }
 
     *out_vertex_count = vertex_count;
@@ -352,7 +358,7 @@ nt_build_result_t nt_builder_add_mesh_with_id(NtBuilderContext *ctx, const char 
             descs[s].name_hash = nt_builder_fnv1a(layout[s].engine_name);
             descs[s].type = (uint8_t)layout[s].type;
             descs[s].count = layout[s].count;
-            descs[s].normalized = (layout[s].type <= NT_STREAM_INT16) ? 1 : 0;
+            descs[s].normalized = layout[s].normalized ? 1 : 0;
             descs[s]._pad = 0;
         }
 

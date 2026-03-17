@@ -36,6 +36,7 @@ typedef struct {
     const char *gltf_name;   /* e.g. "POSITION", "TEXCOORD_0" */
     nt_stream_type_t type;   /* target type in output (may differ from glTF) */
     uint8_t count;           /* components per vertex (1-4) */
+    bool normalized;         /* true = normalize to [0,1] or [-1,1] in runtime */
 } NtStreamLayout;
 
 /* Shader stage hint for add_shader */
@@ -50,6 +51,7 @@ typedef struct NtBuilderContext NtBuilderContext;
 /* --- Core API --- */
 NtBuilderContext *nt_builder_start_pack(const char *output_path);
 nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx);
+void nt_builder_free_pack(NtBuilderContext *ctx);
 
 /* --- Asset addition (single file) --- */
 nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count);

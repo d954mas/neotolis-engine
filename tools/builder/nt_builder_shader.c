@@ -189,14 +189,15 @@ nt_build_result_t nt_builder_add_shader_with_id(NtBuilderContext *ctx, const cha
 
     collapse_whitespace(stripped, &stripped_len);
 
-    /* Sanity checks */
-    if (strstr(stripped, "#version") == NULL) {
-        (void)fprintf(stderr, "ERROR: %s: missing #version directive\n", path);
+    /* #version must not be in source -- runtime prepends platform-appropriate version */
+    if (strstr(stripped, "#version") != NULL) {
+        (void)fprintf(stderr, "ERROR: %s: #version directive found -- runtime adds it per platform, remove from source\n", path);
         free(stripped);
         ctx->has_error = true;
         return NT_BUILD_ERR_VALIDATION;
     }
 
+    /* Sanity check */
     if (strstr(stripped, "void main") == NULL) {
         (void)fprintf(stderr, "ERROR: %s: missing void main()\n", path);
         free(stripped);
