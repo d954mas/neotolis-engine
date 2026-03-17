@@ -146,10 +146,10 @@
             "preLaunchTask": "Build native-release"
         },
         {
-            "name": "Build Assets (builder_demo)",
+            "name": "Build Assets",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/examples/builder_demo/native-release/builder_demo.exe",
+            "program": "${workspaceFolder}/build/examples/builder_demo/native-release/build_assets.exe",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "preLaunchTask": "Build native-release"
