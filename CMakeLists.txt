@@ -67,5 +67,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
     if(NOT EMSCRIPTEN)
         add_subdirectory(tools/builder)
+        add_subdirectory(examples/builder_demo)
     endif()
 endif()
