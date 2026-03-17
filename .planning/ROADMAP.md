@@ -355,7 +355,7 @@ Note: Phase 25 (Asset Loading) depends on Phase 24, Phase 21, and Phase 23.
 | 21. Texture Support | 2/2 | Complete    | 2026-03-16 | - |
 | 22. Entity System | 3/3 | Complete    | 2026-03-16 | - |
 | 23. Builder | 3/3 | Complete    | 2026-03-17 | - |
-| 24. Asset Registry | v1.3 | 0/3 | Not started | - |
+| 24. Asset Registry | 2/3 | In Progress|  | - |
 | 25. Asset Loading | v1.3 | 0/TBD | Not started | - |
 | 26. Material System | v1.3 | 0/TBD | Not started | - |
 | 27. Mesh Rendering Pipeline | v1.3 | 0/TBD | Not started | - |
@@ -366,7 +366,7 @@ Note: Phase 25 (Asset Loading) depends on Phase 24, Phase 21, and Phase 23.
 **Goal:** [To be planned]
 **Requirements**: TBD
 **Depends on:** Phase 28
-**Plans:** 3/3 plans complete
+**Plans:** 2/3 plans executed
 
 Plans:
 - [ ] TBD (run /gsd:plan-phase 29 to break down)
