@@ -6,6 +6,8 @@ add_library(nt_builder STATIC
 )
 target_include_directories(nt_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(nt_builder PUBLIC nt_shared nt_core cgltf stb_image)
+# Builder uses standard C I/O (fopen, strdup, strncpy) -- suppress MSVC deprecation
+target_compile_definitions(nt_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
 nt_set_warning_flags(nt_builder)
 nt_set_sanitizer_flags(nt_builder)
 set_target_properties(nt_builder PROPERTIES
