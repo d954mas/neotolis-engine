@@ -120,6 +120,51 @@ uint32_t nt_builder_hash(const char *str) {
     return hash;
 }
 
+/* --- File I/O --- */
+
+char *nt_builder_read_file(const char *path, uint32_t *out_size) {
+    FILE *file = fopen(path, "rb");
+    if (!file) {
+        return NULL;
+    }
+
+    if (fseek(file, 0, SEEK_END) != 0) {
+        (void)fclose(file);
+        return NULL;
+    }
+    long file_size = ftell(file);
+    if (file_size < 0) {
+        (void)fclose(file);
+        return NULL;
+    }
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        (void)fclose(file);
+        return NULL;
+    }
+
+    char *buf = (char *)malloc((size_t)file_size + 1);
+    if (!buf) {
+        (void)fclose(file);
+        return NULL;
+    }
+
+    if (file_size > 0) {
+        size_t read_count = fread(buf, 1, (size_t)file_size, file);
+        if (read_count != (size_t)file_size) {
+            free(buf);
+            (void)fclose(file);
+            return NULL;
+        }
+    }
+
+    buf[file_size] = '\0';
+    (void)fclose(file);
+    *out_size = (uint32_t)file_size;
+    return buf;
+}
+
+/* --- Float16 conversion --- */
+
 uint16_t nt_builder_float32_to_float16(float value) {
     union {
         float f;

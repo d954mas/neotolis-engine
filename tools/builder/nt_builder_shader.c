@@ -100,49 +100,6 @@ static void collapse_whitespace(char *buf, uint32_t *len) {
     *len = wp;
 }
 
-/* --- File reading --- */
-
-static char *read_file(const char *path, uint32_t *out_size) {
-    FILE *file = fopen(path, "rb");
-    if (!file) {
-        return NULL;
-    }
-
-    if (fseek(file, 0, SEEK_END) != 0) {
-        (void)fclose(file);
-        return NULL;
-    }
-    long file_size = ftell(file);
-    if (file_size < 0) {
-        (void)fclose(file);
-        return NULL;
-    }
-    if (fseek(file, 0, SEEK_SET) != 0) {
-        (void)fclose(file);
-        return NULL;
-    }
-
-    char *buf = (char *)malloc((size_t)file_size + 1);
-    if (!buf) {
-        (void)fclose(file);
-        return NULL;
-    }
-
-    if (file_size > 0) {
-        size_t read_count = fread(buf, 1, (size_t)file_size, file);
-        if (read_count != (size_t)file_size) {
-            free(buf);
-            (void)fclose(file);
-            return NULL;
-        }
-    }
-
-    buf[file_size] = '\0';
-    (void)fclose(file);
-    *out_size = (uint32_t)file_size;
-    return buf;
-}
-
 /* --- Shader import (called from finish_pack) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -152,7 +109,7 @@ nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *pa
     }
 
     uint32_t file_size = 0;
-    char *raw_source = read_file(path, &file_size);
+    char *raw_source = nt_builder_read_file(path, &file_size);
     if (!raw_source) {
         (void)fprintf(stderr, "ERROR: %s: failed to read shader file\n", path);
         return NT_BUILD_ERR_IO;

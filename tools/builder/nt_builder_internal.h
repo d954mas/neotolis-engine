@@ -89,6 +89,9 @@ nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path
 nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *path, uint32_t resource_id);
 nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint32_t resource_id);
 
+/* File I/O utilities */
+char *nt_builder_read_file(const char *path, uint32_t *out_size);
+
 /* Hash and path utilities */
 char *nt_builder_normalize_path(const char *path);
 uint32_t nt_builder_fnv1a(const char *str);
