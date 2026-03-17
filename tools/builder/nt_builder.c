@@ -299,24 +299,12 @@ nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, c
     return nt_builder_add_entry(ctx, path, nt_builder_path_id(path), NT_BUILD_ASSET_MESH, (nt_build_shader_stage_t)0, layout, stream_count);
 }
 
-nt_build_result_t nt_builder_add_mesh_with_id(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, uint32_t resource_id) {
-    return nt_builder_add_entry(ctx, path, resource_id, NT_BUILD_ASSET_MESH, (nt_build_shader_stage_t)0, layout, stream_count);
-}
-
 nt_build_result_t nt_builder_add_texture(NtBuilderContext *ctx, const char *path) {
     return nt_builder_add_entry(ctx, path, nt_builder_path_id(path), NT_BUILD_ASSET_TEXTURE, (nt_build_shader_stage_t)0, NULL, 0);
 }
 
-nt_build_result_t nt_builder_add_texture_with_id(NtBuilderContext *ctx, const char *path, uint32_t resource_id) {
-    return nt_builder_add_entry(ctx, path, resource_id, NT_BUILD_ASSET_TEXTURE, (nt_build_shader_stage_t)0, NULL, 0);
-}
-
 nt_build_result_t nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage) {
     return nt_builder_add_entry(ctx, path, nt_builder_path_id(path), NT_BUILD_ASSET_SHADER, stage, NULL, 0);
-}
-
-nt_build_result_t nt_builder_add_shader_with_id(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint32_t resource_id) {
-    return nt_builder_add_entry(ctx, path, resource_id, NT_BUILD_ASSET_SHADER, stage, NULL, 0);
 }
 
 void nt_builder_set_force(NtBuilderContext *ctx, bool force) {

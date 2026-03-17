@@ -55,11 +55,8 @@ void nt_builder_free_pack(NtBuilderContext *ctx);
 
 /* --- Asset addition (single file) --- */
 nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count);
-nt_build_result_t nt_builder_add_mesh_with_id(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, uint32_t resource_id);
 nt_build_result_t nt_builder_add_texture(NtBuilderContext *ctx, const char *path);
-nt_build_result_t nt_builder_add_texture_with_id(NtBuilderContext *ctx, const char *path, uint32_t resource_id);
 nt_build_result_t nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage);
-nt_build_result_t nt_builder_add_shader_with_id(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint32_t resource_id);
 
 /* --- Force mode (add or replace, no duplicate error) --- */
 void nt_builder_set_force(NtBuilderContext *ctx, bool force);
