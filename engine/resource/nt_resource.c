@@ -209,12 +209,23 @@ void nt_resource_unmount(uint32_t pack_id) {
         return; /* not found: silent no-op */
     }
 
-    /* Clear AssetMeta entries belonging to this pack */
     NtPackMeta *pack = &s_resource.packs[pack_idx];
-    for (uint16_t i = 0; i < pack->asset_count; i++) {
-        uint32_t asset_idx = (uint32_t)pack->asset_start + i;
-        if (asset_idx < NT_RESOURCE_MAX_ASSETS) {
-            s_resource.assets[asset_idx].resource_id = 0;
+
+    if (pack->pack_type == NT_PACK_VIRTUAL) {
+        /* Virtual pack: scan ALL assets for matching pack_index (non-contiguous entries).
+         * Clear entries but do NOT destroy GPU handles -- game owns them. */
+        for (uint32_t i = 0; i < s_resource.asset_count; i++) {
+            if (s_resource.assets[i].pack_index == (uint16_t)pack_idx && s_resource.assets[i].resource_id != 0) {
+                s_resource.assets[i].resource_id = 0;
+            }
+        }
+    } else {
+        /* File pack: clear contiguous range [asset_start..asset_start+asset_count) */
+        for (uint16_t i = 0; i < pack->asset_count; i++) {
+            uint32_t asset_idx = (uint32_t)pack->asset_start + i;
+            if (asset_idx < NT_RESOURCE_MAX_ASSETS) {
+                s_resource.assets[asset_idx].resource_id = 0;
+            }
         }
     }
 
@@ -407,34 +418,139 @@ uint8_t nt_resource_get_state(nt_resource_t handle) {
     return s_resource.slots[index].state;
 }
 
-/* ---- Virtual packs (stubs) ---- */
+/* ---- Virtual packs ---- */
 
 nt_result_t nt_resource_create_pack(uint32_t pack_id, int16_t priority) {
-    (void)pack_id;
-    (void)priority;
-    return NT_ERR_INVALID_ARG; /* Stub: implemented in 24-03 */
+    if (!s_resource.initialized) {
+        return NT_ERR_INVALID_ARG;
+    }
+
+    /* Check for duplicate pack_id (same check as mount) */
+    for (uint16_t i = 0; i < NT_RESOURCE_MAX_PACKS; i++) {
+        if (s_resource.packs[i].mounted == 1 && s_resource.packs[i].pack_id == pack_id) {
+            return NT_ERR_INVALID_ARG; /* duplicate */
+        }
+    }
+
+    /* Find free slot in packs[] */
+    for (uint16_t i = 0; i < NT_RESOURCE_MAX_PACKS; i++) {
+        if (s_resource.packs[i].mounted == 0) {
+            memset(&s_resource.packs[i], 0, sizeof(NtPackMeta));
+            s_resource.packs[i].pack_id = pack_id;
+            s_resource.packs[i].priority = priority;
+            s_resource.packs[i].pack_type = NT_PACK_VIRTUAL;
+            s_resource.packs[i].mounted = 1;
+            s_resource.needs_resolve = true;
+            return NT_OK;
+        }
+    }
+
+    return NT_ERR_INVALID_ARG; /* no free slot */
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_result_t nt_resource_register(uint32_t pack_id, uint32_t resource_id, uint8_t asset_type, uint32_t gfx_handle) {
-    (void)pack_id;
-    (void)resource_id;
-    (void)asset_type;
-    (void)gfx_handle;
-    return NT_ERR_INVALID_ARG; /* Stub: implemented in 24-03 */
+    if (!s_resource.initialized) {
+        return NT_ERR_INVALID_ARG;
+    }
+
+    /* Find pack by pack_id (must be mounted and virtual) */
+    int16_t pack_idx = -1;
+    for (uint16_t i = 0; i < NT_RESOURCE_MAX_PACKS; i++) {
+        if (s_resource.packs[i].mounted == 1 && s_resource.packs[i].pack_id == pack_id) {
+            if (s_resource.packs[i].pack_type != NT_PACK_VIRTUAL) {
+                return NT_ERR_INVALID_ARG; /* not a virtual pack */
+            }
+            pack_idx = (int16_t)i;
+            break;
+        }
+    }
+    if (pack_idx < 0) {
+        return NT_ERR_INVALID_ARG; /* pack not found */
+    }
+
+    /* Check for duplicate: update existing entry */
+    for (uint32_t i = 0; i < s_resource.asset_count; i++) {
+        if (s_resource.assets[i].resource_id == resource_id && s_resource.assets[i].pack_index == (uint16_t)pack_idx) {
+            s_resource.assets[i].runtime_handle = gfx_handle;
+            s_resource.assets[i].state = NT_ASSET_STATE_READY;
+            s_resource.needs_resolve = true;
+            return NT_OK;
+        }
+    }
+
+    /* Find free slot: first scan for freed entries (resource_id == 0) */
+    uint32_t slot_idx = s_resource.asset_count; /* default: append */
+    for (uint32_t i = 0; i < s_resource.asset_count; i++) {
+        if (s_resource.assets[i].resource_id == 0) {
+            slot_idx = i;
+            break;
+        }
+    }
+
+    if (slot_idx >= NT_RESOURCE_MAX_ASSETS) {
+        return NT_ERR_INVALID_ARG; /* asset array full */
+    }
+
+    NtAssetMeta *meta = &s_resource.assets[slot_idx];
+    meta->resource_id = resource_id;
+    meta->asset_type = asset_type;
+    meta->state = NT_ASSET_STATE_READY;
+    meta->format_version = 0;
+    meta->pack_index = (uint16_t)pack_idx;
+    meta->_pad = 0;
+    meta->offset = 0;
+    meta->size = 0;
+    meta->runtime_handle = gfx_handle;
+
+    if (slot_idx == s_resource.asset_count) {
+        s_resource.asset_count++;
+    }
+
+    s_resource.packs[pack_idx].asset_count++;
+    s_resource.needs_resolve = true;
+
+    return NT_OK;
 }
 
 void nt_resource_unregister(uint32_t pack_id, uint32_t resource_id) {
-    (void)pack_id;
-    (void)resource_id;
-    /* Stub: implemented in 24-03 */
+    if (!s_resource.initialized) {
+        return;
+    }
+
+    /* Find pack by pack_id */
+    int16_t pack_idx = -1;
+    for (uint16_t i = 0; i < NT_RESOURCE_MAX_PACKS; i++) {
+        if (s_resource.packs[i].mounted == 1 && s_resource.packs[i].pack_id == pack_id) {
+            pack_idx = (int16_t)i;
+            break;
+        }
+    }
+    if (pack_idx < 0) {
+        return; /* pack not found: silent no-op */
+    }
+
+    /* Scan all assets for matching resource_id + pack_index */
+    for (uint32_t i = 0; i < s_resource.asset_count; i++) {
+        if (s_resource.assets[i].resource_id == resource_id && s_resource.assets[i].pack_index == (uint16_t)pack_idx) {
+            s_resource.assets[i].resource_id = 0; /* mark as free */
+            if (s_resource.packs[pack_idx].asset_count > 0) {
+                s_resource.packs[pack_idx].asset_count--;
+            }
+            s_resource.needs_resolve = true;
+            return;
+        }
+    }
 }
 
-/* ---- Placeholder (stub) ---- */
+/* ---- Placeholder ---- */
 
 void nt_resource_set_placeholder(uint8_t asset_type, uint32_t gfx_handle) {
-    (void)asset_type;
-    (void)gfx_handle;
-    /* Stub: implemented in 24-03 */
+    if (asset_type == 0 || asset_type > 3) {
+        return; /* invalid type: 1=mesh, 2=texture, 3=shader */
+    }
+    s_resource.placeholder_handles[asset_type] = gfx_handle;
+    s_resource.needs_resolve = true;
 }
 
 /* ---- Test access (test-only) ---- */
