@@ -622,6 +622,250 @@ void test_failed_permanent(void) {
     free(blob);
 }
 
+/* ---- Virtual pack tests ---- */
+
+void test_create_virtual_pack(void) {
+    uint32_t pid = nt_resource_hash("virtual_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
+}
+
+void test_create_virtual_pack_duplicate(void) {
+    uint32_t pid = nt_resource_hash("dup_virtual");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
+    TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, nt_resource_create_pack(pid, 0));
+}
+
+void test_register_no_pack(void) {
+    /* Register on a pack that was never created */
+    nt_result_t r = nt_resource_register(0xDEAD, nt_resource_hash("some_res"), NT_ASSET_TEXTURE, 42);
+    TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, r);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_register_file_pack_rejected(void) {
+    /* Mount a file pack (not virtual) */
+    uint32_t pid = nt_resource_hash("file_only_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    /* Attempt register on file pack should fail */
+    nt_result_t r = nt_resource_register(pid, nt_resource_hash("some_res"), NT_ASSET_TEXTURE, 42);
+    TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, r);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_register_immediate_ready(void) {
+    uint32_t pid = nt_resource_hash("imm_ready_pack");
+    uint32_t rid = nt_resource_hash("imm_ready_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, 42));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_TEXTURE);
+    TEST_ASSERT_TRUE(h.id != 0);
+
+    nt_resource_step();
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+    TEST_ASSERT_EQUAL_UINT32(42, nt_resource_get(h));
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_register_update_handle(void) {
+    uint32_t pid = nt_resource_hash("update_handle_pack");
+    uint32_t rid = nt_resource_hash("update_handle_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, 42));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_TEXTURE);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(42, nt_resource_get(h));
+
+    /* Re-register same resource with new handle */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, 99));
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(99, nt_resource_get(h));
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_virtual_overrides_file(void) {
+    uint32_t pid_file = nt_resource_hash("vof_file_pack");
+    uint32_t pid_virt = nt_resource_hash("vof_virt_pack");
+    uint32_t rid = nt_resource_hash("vof_shared");
+
+    /* File pack at priority 1 */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_file, 1));
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_TEXTURE, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    ((NtPackHeader *)blob)->pack_id = pid_file;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_file, blob, blob_size));
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100);
+
+    /* Virtual pack at priority 10 */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid_virt, 10));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid_virt, rid, NT_ASSET_TEXTURE, 200));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_TEXTURE);
+    nt_resource_step();
+
+    /* Virtual (priority 10) should win over file (priority 1) */
+    TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
+
+    free(blob);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_file_overrides_virtual(void) {
+    uint32_t pid_virt = nt_resource_hash("fov_virt_pack");
+    uint32_t pid_file = nt_resource_hash("fov_file_pack");
+    uint32_t rid = nt_resource_hash("fov_shared");
+
+    /* Virtual pack at priority 1 */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid_virt, 1));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid_virt, rid, NT_ASSET_TEXTURE, 100));
+
+    /* File pack at priority 10 */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_file, 10));
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_TEXTURE, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    ((NtPackHeader *)blob)->pack_id = pid_file;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_file, blob, blob_size));
+    nt_resource_test_set_asset_state(rid, 1, NT_ASSET_STATE_READY, 200);
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_TEXTURE);
+    nt_resource_step();
+
+    /* File (priority 10) should win over virtual (priority 1) */
+    TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
+
+    free(blob);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_unregister_fallback(void) {
+    uint32_t pid_file = nt_resource_hash("unreg_file_pack");
+    uint32_t pid_virt = nt_resource_hash("unreg_virt_pack");
+    uint32_t rid = nt_resource_hash("unreg_shared");
+
+    /* File pack at priority 1, handle=100 */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_file, 1));
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_TEXTURE, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    ((NtPackHeader *)blob)->pack_id = pid_file;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_file, blob, blob_size));
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100);
+
+    /* Virtual pack at priority 10, handle=200 */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid_virt, 10));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid_virt, rid, NT_ASSET_TEXTURE, 200));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_TEXTURE);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(200, nt_resource_get(h));
+
+    /* Unregister from virtual: should fall back to file pack */
+    nt_resource_unregister(pid_virt, rid);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(100, nt_resource_get(h));
+
+    free(blob);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_unmount_virtual_clears(void) {
+    uint32_t pid = nt_resource_hash("unmount_virt_pack");
+    uint32_t rid = nt_resource_hash("unmount_virt_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, 42));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_TEXTURE);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(42, nt_resource_get(h));
+
+    /* Unmount virtual pack: entries cleared, no READY source left -> handle 0 */
+    nt_resource_unmount(pid);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(h));
+}
+
+/* ---- Placeholder tests ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_set_placeholder_fallback(void) {
+    nt_resource_set_placeholder(NT_ASSET_TEXTURE, 999);
+
+    /* Mount file pack with resource in REGISTERED state (not READY) */
+    uint32_t pid = nt_resource_hash("ph_fallback_pack");
+    uint32_t rid = nt_resource_hash("ph_fallback_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_TEXTURE, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    ((NtPackHeader *)blob)->pack_id = pid;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    /* Asset is REGISTERED, not READY: should get placeholder */
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_TEXTURE);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(999, nt_resource_get(h));
+
+    free(blob);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_placeholder_not_used_when_ready(void) {
+    nt_resource_set_placeholder(NT_ASSET_TEXTURE, 999);
+
+    uint32_t pid = nt_resource_hash("ph_ready_pack");
+    uint32_t rid = nt_resource_hash("ph_ready_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_TEXTURE, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    ((NtPackHeader *)blob)->pack_id = pid;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    /* Set READY with handle=42 */
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 42);
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_TEXTURE);
+    nt_resource_step();
+
+    /* READY entry exists: should get 42, not 999 */
+    TEST_ASSERT_EQUAL_UINT32(42, nt_resource_get(h));
+
+    free(blob);
+}
+
+void test_placeholder_type_specific(void) {
+    /* Set placeholder for TEXTURE only */
+    nt_resource_set_placeholder(NT_ASSET_TEXTURE, 999);
+
+    /* Request a MESH resource with no READY entry */
+    uint32_t pid = nt_resource_hash("ph_type_pack");
+    uint32_t rid = nt_resource_hash("ph_type_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    ((NtPackHeader *)blob)->pack_id = pid;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step();
+
+    /* No mesh placeholder set: should get 0, not 999 */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(h));
+
+    free(blob);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -680,6 +924,23 @@ int main(void) {
     /* State reporting tests */
     RUN_TEST(test_get_state_registered);
     RUN_TEST(test_failed_permanent);
+
+    /* Virtual pack tests */
+    RUN_TEST(test_create_virtual_pack);
+    RUN_TEST(test_create_virtual_pack_duplicate);
+    RUN_TEST(test_register_no_pack);
+    RUN_TEST(test_register_file_pack_rejected);
+    RUN_TEST(test_register_immediate_ready);
+    RUN_TEST(test_register_update_handle);
+    RUN_TEST(test_virtual_overrides_file);
+    RUN_TEST(test_file_overrides_virtual);
+    RUN_TEST(test_unregister_fallback);
+    RUN_TEST(test_unmount_virtual_clears);
+
+    /* Placeholder tests */
+    RUN_TEST(test_set_placeholder_fallback);
+    RUN_TEST(test_placeholder_not_used_when_ready);
+    RUN_TEST(test_placeholder_type_specific);
 
     return UNITY_END();
 }
