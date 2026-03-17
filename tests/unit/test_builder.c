@@ -779,6 +779,197 @@ void test_glob_shaders(void) {
     (void)fclose(f);
 }
 
+/* --- E2E test: real files → pack → verify data --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_e2e_real_assets(void) {
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
+    };
+
+    const char *pack_path = TMP_DIR "/e2e.neopak";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, "assets/shaders/mesh.vert", NT_BUILD_SHADER_VERTEX));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, "assets/shaders/mesh.frag", NT_BUILD_SHADER_FRAGMENT));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", layout, 2));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_texture(ctx, "assets/textures/lenna.png"));
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    /* Read entire pack */
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    (void)fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    uint8_t *pack = (uint8_t *)malloc((size_t)file_size);
+    TEST_ASSERT_NOT_NULL(pack);
+    (void)fread(pack, 1, (size_t)file_size, f);
+    (void)fclose(f);
+
+    NtPackHeader *hdr = (NtPackHeader *)pack;
+    TEST_ASSERT_EQUAL_UINT32(NT_PACK_MAGIC, hdr->magic);
+    TEST_ASSERT_EQUAL_UINT16(4, hdr->asset_count);
+
+    /* CRC32 */
+    uint32_t crc = nt_crc32(pack + hdr->header_size, (uint32_t)file_size - hdr->header_size);
+    TEST_ASSERT_EQUAL_HEX32(hdr->checksum, crc);
+
+    /* Find assets by type */
+    NtAssetEntry *entries = (NtAssetEntry *)(pack + sizeof(NtPackHeader));
+    NtAssetEntry *mesh_e = NULL;
+    NtAssetEntry *tex_e = NULL;
+    NtAssetEntry *vert_e = NULL;
+    for (uint16_t i = 0; i < hdr->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_MESH) {
+            mesh_e = &entries[i];
+        }
+        if (entries[i].asset_type == NT_ASSET_TEXTURE) {
+            tex_e = &entries[i];
+        }
+        if (entries[i].asset_type == NT_ASSET_SHADER_CODE && !vert_e) {
+            vert_e = &entries[i];
+        }
+    }
+    TEST_ASSERT_NOT_NULL(mesh_e);
+    TEST_ASSERT_NOT_NULL(tex_e);
+    TEST_ASSERT_NOT_NULL(vert_e);
+
+    /* Verify mesh data */
+    NtMeshAssetHeader *mh = (NtMeshAssetHeader *)(pack + mesh_e->offset);
+    TEST_ASSERT_EQUAL_UINT32(NT_MESH_MAGIC, mh->magic);
+    TEST_ASSERT_EQUAL_UINT32(24, mh->vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(36, mh->index_count);
+    TEST_ASSERT_EQUAL_UINT8(2, mh->stream_count);
+    /* First vertex: position (-0.5, -0.5, 0.5) — compare as uint32 bit pattern */
+    uint8_t *vdata = pack + mesh_e->offset + sizeof(NtMeshAssetHeader) + mh->stream_count * sizeof(NtStreamDesc);
+    float vx, vy, vz;
+    memcpy(&vx, vdata + 0, 4);
+    memcpy(&vy, vdata + 4, 4);
+    memcpy(&vz, vdata + 8, 4);
+    float expected_neg = -0.5F;
+    float expected_pos = 0.5F;
+    TEST_ASSERT_EQUAL_MEMORY(&expected_neg, &vx, 4);
+    TEST_ASSERT_EQUAL_MEMORY(&expected_neg, &vy, 4);
+    TEST_ASSERT_EQUAL_MEMORY(&expected_pos, &vz, 4);
+
+    /* Verify texture data */
+    NtTextureAssetHeader *th = (NtTextureAssetHeader *)(pack + tex_e->offset);
+    TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, th->magic);
+    TEST_ASSERT_EQUAL_UINT32(512, th->width);
+    TEST_ASSERT_EQUAL_UINT32(512, th->height);
+    /* First pixel should be non-zero (Lenna top-left is skin tone) */
+    uint8_t *pixel0 = pack + tex_e->offset + sizeof(NtTextureAssetHeader);
+    TEST_ASSERT_TRUE(pixel0[0] > 100); /* R */
+    TEST_ASSERT_TRUE(pixel0[3] == 255); /* A = opaque */
+
+    /* Verify shader source */
+    NtShaderCodeHeader *sh = (NtShaderCodeHeader *)(pack + vert_e->offset);
+    TEST_ASSERT_EQUAL_UINT32(NT_SHADER_CODE_MAGIC, sh->magic);
+    char *src = (char *)(pack + vert_e->offset + sizeof(NtShaderCodeHeader));
+    TEST_ASSERT_NOT_NULL(strstr(src, "void main"));
+    TEST_ASSERT_NOT_NULL(strstr(src, "u_mvp"));
+    TEST_ASSERT_NULL(strstr(src, "#version"));
+
+    free(pack);
+}
+
+/* --- Rename test --- */
+
+void test_rename_changes_resource_id(void) {
+    const char *vert_path = TMP_DIR "/rename.vert";
+    write_test_shader(vert_path, "precision mediump float;\nvoid main() { gl_Position = vec4(0); }\n");
+
+    const char *pack_path = TMP_DIR "/rename_test.neopak";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX));
+
+    uint32_t old_id = nt_builder_hash(vert_path);
+    uint32_t new_id = nt_builder_hash("renamed/shader.vert");
+    TEST_ASSERT_NOT_EQUAL(old_id, new_id);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_rename(ctx, vert_path, "renamed/shader.vert"));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    /* Verify resource_id in pack matches new path hash */
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    NtPackHeader hdr;
+    (void)fread(&hdr, sizeof(hdr), 1, f);
+    NtAssetEntry entry;
+    (void)fread(&entry, sizeof(entry), 1, f);
+    TEST_ASSERT_EQUAL_HEX32(new_id, entry.resource_id);
+    (void)fclose(f);
+}
+
+/* --- Force + glob test --- */
+
+void test_force_glob_override(void) {
+    /* Write two shaders to tmp dir */
+    MKDIR(TMP_DIR "/force_glob");
+    write_test_shader(TMP_DIR "/force_glob/a.vert", "precision mediump float;\nvoid main() { gl_Position = vec4(0); }\n");
+    write_test_shader(TMP_DIR "/force_glob/b.vert", "precision mediump float;\nvoid main() { gl_Position = vec4(1); }\n");
+
+    const char *pack_path = TMP_DIR "/force_glob.neopak";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Glob adds both */
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shaders(ctx, TMP_DIR "/force_glob/*.vert", NT_BUILD_SHADER_VERTEX));
+
+    /* Force override a.vert as FRAGMENT */
+    nt_builder_set_force(ctx, true);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, TMP_DIR "/force_glob/a.vert", NT_BUILD_SHADER_FRAGMENT));
+    nt_builder_set_force(ctx, false);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    /* Verify: 2 assets, a.vert is FRAGMENT */
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    NtPackHeader hdr;
+    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL_UINT16(2, hdr.asset_count);
+
+    bool found_fragment = false;
+    for (uint16_t i = 0; i < hdr.asset_count; i++) {
+        NtAssetEntry entry;
+        (void)fread(&entry, sizeof(entry), 1, f);
+        long cur = ftell(f);
+        (void)fseek(f, (long)entry.offset, SEEK_SET);
+        NtShaderCodeHeader sh;
+        (void)fread(&sh, sizeof(sh), 1, f);
+        if (sh.stage == NT_SHADER_STAGE_FRAGMENT) {
+            found_fragment = true;
+        }
+        (void)fseek(f, cur, SEEK_SET);
+    }
+    TEST_ASSERT_TRUE(found_fragment);
+    (void)fclose(f);
+}
+
+/* --- free_pack without finish --- */
+
+void test_free_pack_without_finish(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/nofin.neopak");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    const char *vert_path = TMP_DIR "/nofin.vert";
+    write_test_shader(vert_path, "precision mediump float;\nvoid main() { gl_Position = vec4(0); }\n");
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX));
+
+    /* Free without finish — should not crash or leak */
+    nt_builder_free_pack(ctx);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -819,6 +1010,18 @@ int main(void) {
 
     /* Glob batch */
     RUN_TEST(test_glob_shaders);
+
+    /* E2E with real assets */
+    RUN_TEST(test_e2e_real_assets);
+
+    /* Rename */
+    RUN_TEST(test_rename_changes_resource_id);
+
+    /* Force + glob override */
+    RUN_TEST(test_force_glob_override);
+
+    /* Lifecycle */
+    RUN_TEST(test_free_pack_without_finish);
 
     return UNITY_END();
 }
