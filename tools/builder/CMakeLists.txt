@@ -1,11 +1,22 @@
-add_executable(builder main.c)
-target_link_libraries(builder PRIVATE nt_core)
+# nt_builder static library
+add_library(nt_builder STATIC
+    nt_builder.c
+    nt_builder_hash.c
+    nt_builder_dump.c
+)
+target_include_directories(nt_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(nt_builder PUBLIC nt_shared nt_core cgltf stb_image)
+nt_set_warning_flags(nt_builder)
+nt_set_sanitizer_flags(nt_builder)
+set_target_properties(nt_builder PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tools/builder/${NT_PRESET_NAME}"
+)
 
-# Strict warning and sanitizer policy
+# Builder executable (placeholder, uses nt_builder library)
+add_executable(builder main.c)
+target_link_libraries(builder PRIVATE nt_builder)
 nt_set_warning_flags(builder)
 nt_set_sanitizer_flags(builder)
-
-# Per-project output: build/tools/builder/[preset]/
 set_target_properties(builder PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tools/builder/${NT_PRESET_NAME}"
 )
