@@ -78,4 +78,10 @@ void nt_resource_set_placeholder(uint8_t asset_type, uint32_t gfx_handle);
 
 uint32_t nt_resource_hash(const char *name);
 
+/* ---- Test access (test-only) ---- */
+
+#ifdef NT_RESOURCE_TEST_ACCESS
+void nt_resource_test_set_asset_state(uint32_t resource_id, uint16_t pack_index, uint8_t state, uint32_t runtime_handle);
+#endif
+
 #endif /* NT_RESOURCE_H */

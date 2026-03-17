@@ -18,7 +18,7 @@
  */
 static uint8_t *build_test_pack(uint32_t asset_count, uint32_t *out_size) {
     /* Compute sizes using unsigned arithmetic to avoid sign-conversion */
-    uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + asset_count * sizeof(NtAssetEntry));
+    uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (asset_count * sizeof(NtAssetEntry)));
     uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
 
     uint32_t data_per_asset = 16; /* fake payload per asset */

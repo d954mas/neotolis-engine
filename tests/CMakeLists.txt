@@ -172,6 +172,7 @@ if(NOT EMSCRIPTEN)
     # --- Resource module tests ---
     add_executable(test_resource unit/test_resource.c)
     target_link_libraries(test_resource PRIVATE nt_resource unity)
+    target_compile_definitions(test_resource PRIVATE NT_RESOURCE_TEST_ACCESS)
     nt_set_warning_flags(test_resource)
     nt_set_sanitizer_flags(test_resource)
     set_target_properties(test_resource PROPERTIES
