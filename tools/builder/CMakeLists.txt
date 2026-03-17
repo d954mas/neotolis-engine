@@ -3,6 +3,7 @@ add_library(nt_builder STATIC
     nt_builder.c
     nt_builder_hash.c
     nt_builder_dump.c
+    nt_builder_mesh.c
 )
 target_include_directories(nt_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(nt_builder PUBLIC nt_shared nt_core cgltf stb_image)

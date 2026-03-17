@@ -244,58 +244,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     return NT_BUILD_OK;
 }
 
-/* --- Stub implementations for add_* functions (implemented in Plan 02) --- */
-
-nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count) {
-    (void)ctx;
-    (void)path;
-    (void)layout;
-    (void)stream_count;
-    (void)fprintf(stderr, "ERROR: nt_builder_add_mesh not yet implemented\n");
-    return NT_BUILD_ERR_VALIDATION;
-}
-
-nt_build_result_t nt_builder_add_mesh_with_id(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, uint32_t resource_id) {
-    (void)ctx;
-    (void)path;
-    (void)layout;
-    (void)stream_count;
-    (void)resource_id;
-    (void)fprintf(stderr, "ERROR: nt_builder_add_mesh_with_id not yet implemented\n");
-    return NT_BUILD_ERR_VALIDATION;
-}
-
-nt_build_result_t nt_builder_add_texture(NtBuilderContext *ctx, const char *path) {
-    (void)ctx;
-    (void)path;
-    (void)fprintf(stderr, "ERROR: nt_builder_add_texture not yet implemented\n");
-    return NT_BUILD_ERR_VALIDATION;
-}
-
-nt_build_result_t nt_builder_add_texture_with_id(NtBuilderContext *ctx, const char *path, uint32_t resource_id) {
-    (void)ctx;
-    (void)path;
-    (void)resource_id;
-    (void)fprintf(stderr, "ERROR: nt_builder_add_texture_with_id not yet implemented\n");
-    return NT_BUILD_ERR_VALIDATION;
-}
-
-nt_build_result_t nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage) {
-    (void)ctx;
-    (void)path;
-    (void)stage;
-    (void)fprintf(stderr, "ERROR: nt_builder_add_shader not yet implemented\n");
-    return NT_BUILD_ERR_VALIDATION;
-}
-
-nt_build_result_t nt_builder_add_shader_with_id(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint32_t resource_id) {
-    (void)ctx;
-    (void)path;
-    (void)stage;
-    (void)resource_id;
-    (void)fprintf(stderr, "ERROR: nt_builder_add_shader_with_id not yet implemented\n");
-    return NT_BUILD_ERR_VALIDATION;
-}
+/* --- Stub implementations for batch functions (implemented in Plan 03) --- */
 
 nt_build_result_t nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const NtStreamLayout *layout, uint32_t stream_count) {
     (void)ctx;
