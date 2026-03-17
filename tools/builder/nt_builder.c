@@ -163,7 +163,7 @@ nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data
     return NT_BUILD_OK;
 }
 
-nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, const char *path, uint32_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size) {
+nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint32_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size) {
     if (!ctx) {
         return NT_BUILD_ERR_VALIDATION;
     }
@@ -174,17 +174,6 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, const char *p
     }
 
     uint32_t idx = ctx->entry_count;
-
-    if (path) {
-        ctx->resource_paths[idx] = strdup(path);
-        if (!ctx->resource_paths[idx]) {
-            (void)fprintf(stderr, "ERROR: strdup failed (out of memory)\n");
-            return NT_BUILD_ERR_IO;
-        }
-    } else {
-        ctx->resource_paths[idx] = NULL;
-    }
-
     NtAssetEntry *entry = &ctx->entries[idx];
     entry->resource_id = resource_id;
     entry->format_version = format_version;
@@ -229,9 +218,6 @@ static void nt_builder_free_context(NtBuilderContext *ctx) {
     free(ctx->data_buf);
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         nt_builder_free_entry(&ctx->pending[i]);
-    }
-    for (uint32_t i = 0; i < ctx->entry_count; i++) {
-        free(ctx->resource_paths[i]);
     }
     free(ctx);
 }
@@ -340,18 +326,18 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     /* Summary */
     (void)printf("Build complete: %s\n", ctx->output_path);
     (void)printf("  Assets: %u total (%u meshes, %u textures, %u shaders)\n", ctx->entry_count, ctx->mesh_count, ctx->texture_count, ctx->shader_count);
-    (void)printf("  Pack size: %u bytes\n", total_size);
+    if (total_size >= 1024 * 1024) {
+        (void)printf("  Pack size: %.3f MB (%u bytes)\n", (double)total_size / (1024.0 * 1024.0), total_size);
+    } else if (total_size >= 1024) {
+        (void)printf("  Pack size: %.3f KB (%u bytes)\n", (double)total_size / 1024.0, total_size);
+    } else {
+        (void)printf("  Pack size: %u bytes\n", total_size);
+    }
     (void)printf("  CRC32: 0x%08X\n", checksum);
 
     for (uint32_t i = 0; i < ctx->entry_count; i++) {
-        const char *path = ctx->resource_paths[i] ? ctx->resource_paths[i] : "(unknown)";
-        const char *rkey = NULL;
-        for (uint32_t p = 0; p < ctx->pending_count; p++) {
-            if (ctx->pending[p].resource_id == ctx->entries[i].resource_id) {
-                rkey = ctx->pending[p].rename_key;
-                break;
-            }
-        }
+        const char *path = ctx->pending[i].path ? ctx->pending[i].path : "(unknown)";
+        const char *rkey = ctx->pending[i].rename_key;
         if (rkey) {
             (void)printf("  %s -> 0x%08X (renamed: %s)\n", path, ctx->entries[i].resource_id, rkey);
         } else {

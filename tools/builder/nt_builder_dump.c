@@ -3,6 +3,16 @@
 #include "nt_crc32.h"
 /* clang-format on */
 
+static void nt_format_size(uint32_t bytes, char *buf, size_t buf_size) {
+    if (bytes >= 1024 * 1024) {
+        (void)snprintf(buf, buf_size, "%.3f MB", (double)bytes / (1024.0 * 1024.0));
+    } else if (bytes >= 1024) {
+        (void)snprintf(buf, buf_size, "%.3f KB", (double)bytes / 1024.0);
+    } else {
+        (void)snprintf(buf, buf_size, "%u B", bytes);
+    }
+}
+
 static const char *nt_asset_type_name(uint8_t type) {
     switch (type) {
     case NT_ASSET_MESH:
@@ -105,8 +115,10 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
     (void)printf("Pack ID: 0x%08X\n", header->pack_id);
     (void)printf("Version: %u\n", header->version);
     (void)printf("Assets: %u\n", header->asset_count);
+    char size_buf[32];
     (void)printf("Header size: %u bytes\n", header->header_size);
-    (void)printf("Total size: %u bytes\n", header->total_size);
+    nt_format_size(header->total_size, size_buf, sizeof(size_buf));
+    (void)printf("Total size: %s (%u bytes)\n", size_buf, header->total_size);
     (void)printf("CRC32: 0x%08X (%s)\n", header->checksum, crc_match);
     (void)printf("\n");
 
@@ -123,7 +135,8 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
     (void)printf("  %-5s %-12s %-10s %-7s %-10s %-10s\n", "-----", "----------", "--------", "------", "--------", "--------");
 
     for (uint32_t i = 0; i < count; i++) {
-        (void)printf("  %-5u 0x%08X   %-10s %-7u %-10u %-10u\n", i, entries[i].resource_id, nt_asset_type_name(entries[i].asset_type), entries[i].format_version, entries[i].offset, entries[i].size);
+        nt_format_size(entries[i].size, size_buf, sizeof(size_buf));
+        (void)printf("  %-5u 0x%08X   %-10s %-7u %-10u %-10s\n", i, entries[i].resource_id, nt_asset_type_name(entries[i].asset_type), entries[i].format_version, entries[i].offset, size_buf);
     }
 
     free(buffer);

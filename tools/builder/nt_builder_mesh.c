@@ -365,7 +365,7 @@ nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path
         }
 
         if (ret == NT_BUILD_OK) {
-            ret = nt_builder_register_asset(ctx, path, resource_id, NT_ASSET_MESH, NT_MESH_VERSION, total_asset_size);
+            ret = nt_builder_register_asset(ctx, resource_id, NT_ASSET_MESH, NT_MESH_VERSION, total_asset_size);
         }
 
         free(vertex_buf);

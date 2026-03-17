@@ -64,9 +64,6 @@ struct NtBuilderContext {
     NtAssetEntry entries[NT_BUILD_MAX_ASSETS];
     uint32_t entry_count;
 
-    /* Diagnostic paths for summary */
-    char *resource_paths[NT_BUILD_MAX_ASSETS];
-
     /* Mode flags */
     bool force;
     bool has_error;
@@ -82,7 +79,7 @@ struct NtBuilderContext {
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
 nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data, uint32_t size);
-nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, const char *path, uint32_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size);
+nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint32_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size);
 
 /* Internal import functions -- called from finish_pack */
 nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, uint32_t resource_id);

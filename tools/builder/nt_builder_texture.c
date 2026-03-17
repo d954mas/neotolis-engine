@@ -56,5 +56,5 @@ nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *p
         return ret;
     }
 
-    return nt_builder_register_asset(ctx, path, resource_id, NT_ASSET_TEXTURE, NT_TEXTURE_VERSION, total_asset_size);
+    return nt_builder_register_asset(ctx, resource_id, NT_ASSET_TEXTURE, NT_TEXTURE_VERSION, total_asset_size);
 }

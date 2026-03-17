@@ -168,5 +168,5 @@ nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *pa
         return ret;
     }
 
-    return nt_builder_register_asset(ctx, path, resource_id, NT_ASSET_SHADER_CODE, NT_SHADER_CODE_VERSION, total_asset_size);
+    return nt_builder_register_asset(ctx, resource_id, NT_ASSET_SHADER_CODE, NT_SHADER_CODE_VERSION, total_asset_size);
 }
