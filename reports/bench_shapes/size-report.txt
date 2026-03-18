@@ -1,5 +1,5 @@
 # Size Report: bench_shapes (wasm-analysis)
-# Commit: 553c7d1
+# Commit: 386fdd6
 
 ## WASM Section Sizes
 
@@ -79,6 +79,7 @@ libnt_entity.a              2942 B
 libnt_fs.a                  2620 B
 libnt_fs_stub.a             2620 B
 libnt_gfx_stub.a           26738 B
+libnt_hash.a                4028 B
 libnt_http.a                6696 B
 libnt_http_stub.a           3210 B
 libnt_input_stub.a         11148 B
@@ -87,7 +88,7 @@ libnt_log_stub.a             506 B
 libnt_material_comp.a       1990 B
 libnt_mesh_comp.a           1914 B
 libnt_render_state_comp.a    2752 B
-libnt_resource.a          116076 B
+libnt_resource.a          148828 B
 libnt_time.a                 866 B
 libnt_transform_comp.a      4536 B
 libnt_window_stub.a         1838 B
