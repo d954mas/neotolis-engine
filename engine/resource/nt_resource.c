@@ -2,6 +2,7 @@
 
 #include "resource/nt_resource_internal.h"
 
+#include <limits.h>
 #include <string.h>
 
 #include "log/nt_log.h"
@@ -16,6 +17,7 @@
 /* ---- Slot map: resource_id -> slot index, open-addressing hash table ---- */
 
 #define NT_SLOT_MAP_SIZE (NT_RESOURCE_MAX_SLOTS * 2)
+_Static_assert(NT_SLOT_MAP_SIZE >= NT_RESOURCE_MAX_SLOTS * 2, "slot_map must be at least 2x MAX_SLOTS");
 
 /* ---- Module state ---- */
 
@@ -23,7 +25,6 @@ static struct {
     NtPackMeta packs[NT_RESOURCE_MAX_PACKS];
     NtAssetMeta assets[NT_RESOURCE_MAX_ASSETS];
     NtResourceSlot slots[NT_RESOURCE_MAX_SLOTS + 1]; /* index 0 reserved */
-    uint16_t generations[NT_RESOURCE_MAX_SLOTS + 1];
     uint16_t free_queue[NT_RESOURCE_MAX_SLOTS];
     uint16_t slot_map[NT_SLOT_MAP_SIZE];
     uint16_t queue_top;
@@ -115,8 +116,7 @@ void nt_resource_step(void) {
         return; /* O(1) fast path when nothing changed */
     }
 
-    /* Per-slot resolve tracking (static to avoid stack pressure on WASM) */
-    static int16_t resolve_prio[NT_RESOURCE_MAX_SLOTS + 1];
+    /* Per-slot tiebreak tracking (static to avoid stack pressure on WASM) */
     static uint16_t resolve_pack[NT_RESOURCE_MAX_SLOTS + 1];
 
     /* Phase 1: Reset all active slots */
@@ -125,9 +125,9 @@ void nt_resource_step(void) {
         if (slot->resource_id == 0) {
             continue;
         }
-        slot->gfx_handle = 0;
+        slot->runtime_handle = 0;
         slot->state = NT_ASSET_STATE_REGISTERED;
-        resolve_prio[si] = -32768; /* INT16_MIN */
+        slot->resolve_prio = INT16_MIN;
         resolve_pack[si] = 0;
     }
 
@@ -160,10 +160,10 @@ void nt_resource_step(void) {
         int16_t prio = s_resource.packs[meta->pack_index].priority;
 
         /* Higher priority wins. Equal priority: higher pack_index wins (last mounted) */
-        if (prio > resolve_prio[si] || (prio == resolve_prio[si] && meta->pack_index >= resolve_pack[si])) {
-            slot->gfx_handle = meta->runtime_handle;
+        if (prio > slot->resolve_prio || (prio == slot->resolve_prio && meta->pack_index >= resolve_pack[si])) {
+            slot->runtime_handle = meta->runtime_handle;
             slot->state = NT_ASSET_STATE_READY;
-            resolve_prio[si] = prio;
+            slot->resolve_prio = prio;
             resolve_pack[si] = meta->pack_index;
         }
     }
@@ -179,7 +179,7 @@ void nt_resource_step(void) {
                 continue;
             }
             if (slot->asset_type == NT_ASSET_TEXTURE) {
-                slot->gfx_handle = s_resource.placeholder_texture;
+                slot->runtime_handle = s_resource.placeholder_texture;
             }
         }
     }
@@ -213,23 +213,23 @@ static nt_resource_t slot_alloc(uint32_t resource_id, uint8_t asset_type) {
     s_resource.queue_top--;
     uint16_t index = s_resource.free_queue[s_resource.queue_top];
 
-    /* Increment generation (skip 0: reserved for invalid handles) */
-    s_resource.generations[index]++;
-    if (s_resource.generations[index] == 0) {
-        s_resource.generations[index] = 1;
-    }
-    uint16_t gen = s_resource.generations[index];
-
     NtResourceSlot *slot = &s_resource.slots[index];
+
+    /* Increment generation (skip 0: reserved for invalid handles) */
+    slot->generation++;
+    if (slot->generation == 0) {
+        slot->generation = 1;
+    }
+
     slot->resource_id = resource_id;
-    slot->gfx_handle = 0;
-    slot->generation = gen;
+    slot->runtime_handle = 0;
+    slot->resolve_prio = INT16_MIN;
     slot->asset_type = asset_type;
     slot->state = NT_ASSET_STATE_REGISTERED;
 
     slot_map_insert(resource_id, index);
 
-    return resource_make(index, gen);
+    return resource_make(index, slot->generation);
 }
 
 /* ---- Pack management ---- */
@@ -240,7 +240,8 @@ static nt_result_t pack_alloc(uint32_t pack_id, int16_t priority, uint8_t pack_t
     }
 
     if (find_pack(pack_id) >= 0) {
-        return NT_ERR_INVALID_ARG; /* duplicate */
+        nt_log_error("nt_resource: pack already mounted");
+        return NT_ERR_INVALID_ARG;
     }
 
     for (uint16_t i = 0; i < NT_RESOURCE_MAX_PACKS; i++) {
@@ -255,7 +256,8 @@ static nt_result_t pack_alloc(uint32_t pack_id, int16_t priority, uint8_t pack_t
         }
     }
 
-    return NT_ERR_INVALID_ARG; /* no free slot */
+    nt_log_error("nt_resource: pack slots full");
+    return NT_ERR_INVALID_ARG;
 }
 
 nt_result_t nt_resource_mount(uint32_t pack_id, int16_t priority) { return pack_alloc(pack_id, priority, NT_PACK_FILE); }
@@ -288,6 +290,7 @@ nt_result_t nt_resource_set_priority(uint32_t pack_id, int16_t new_priority) {
 
     int16_t idx = find_pack(pack_id);
     if (idx < 0) {
+        nt_log_error("nt_resource: set_priority pack not found");
         return NT_ERR_INVALID_ARG;
     }
 
@@ -305,11 +308,13 @@ nt_result_t nt_resource_parse_pack(uint32_t pack_id, const uint8_t *blob, uint32
 
     int16_t pack_idx = find_pack(pack_id);
     if (pack_idx < 0) {
+        nt_log_error("nt_resource: parse_pack not mounted");
         return NT_ERR_INVALID_ARG;
     }
 
     /* Validate blob size */
     if (blob_size < sizeof(NtPackHeader)) {
+        nt_log_error("nt_resource: blob too small");
         return NT_ERR_INVALID_ARG;
     }
 
@@ -317,27 +322,32 @@ nt_result_t nt_resource_parse_pack(uint32_t pack_id, const uint8_t *blob, uint32
 
     /* Validate magic */
     if (h->magic != NT_PACK_MAGIC) {
+        nt_log_error("nt_resource: bad magic");
         return NT_ERR_INVALID_ARG;
     }
 
     /* Validate version */
     if (h->version > NT_PACK_VERSION_MAX) {
+        nt_log_error("nt_resource: unsupported version");
         return NT_ERR_INVALID_ARG;
     }
 
     /* Validate header_size */
     if (h->header_size > blob_size) {
+        nt_log_error("nt_resource: header_size exceeds blob");
         return NT_ERR_INVALID_ARG;
     }
 
     /* Validate total_size */
     if (h->total_size != blob_size) {
+        nt_log_error("nt_resource: total_size mismatch");
         return NT_ERR_INVALID_ARG;
     }
 
     /* Validate asset entries fit in header region */
     uint32_t entries_end = (uint32_t)sizeof(NtPackHeader) + (uint32_t)h->asset_count * (uint32_t)sizeof(NtAssetEntry);
     if (entries_end > h->header_size) {
+        nt_log_error("nt_resource: entries overflow header region");
         return NT_ERR_INVALID_ARG;
     }
 
@@ -345,6 +355,7 @@ nt_result_t nt_resource_parse_pack(uint32_t pack_id, const uint8_t *blob, uint32
     uint32_t data_size = blob_size - h->header_size;
     uint32_t computed = nt_crc32(blob + h->header_size, data_size);
     if (computed != h->checksum) {
+        nt_log_error("nt_resource: CRC32 mismatch");
         return NT_ERR_INVALID_ARG;
     }
 
@@ -413,11 +424,11 @@ uint32_t nt_resource_get(nt_resource_t handle) {
     if (index == 0 || index > NT_RESOURCE_MAX_SLOTS) {
         return 0;
     }
-    if (s_resource.generations[index] != gen) {
+    if (s_resource.slots[index].generation != gen) {
         return 0; /* stale handle */
     }
 
-    return s_resource.slots[index].gfx_handle;
+    return s_resource.slots[index].runtime_handle;
 }
 
 bool nt_resource_is_ready(nt_resource_t handle) {
@@ -431,7 +442,7 @@ bool nt_resource_is_ready(nt_resource_t handle) {
     if (index == 0 || index > NT_RESOURCE_MAX_SLOTS) {
         return false;
     }
-    if (s_resource.generations[index] != gen) {
+    if (s_resource.slots[index].generation != gen) {
         return false; /* stale handle */
     }
 
@@ -449,7 +460,7 @@ uint8_t nt_resource_get_state(nt_resource_t handle) {
     if (index == 0 || index > NT_RESOURCE_MAX_SLOTS) {
         return NT_ASSET_STATE_FAILED;
     }
-    if (s_resource.generations[index] != gen) {
+    if (s_resource.slots[index].generation != gen) {
         return NT_ASSET_STATE_FAILED; /* stale handle */
     }
 
@@ -461,23 +472,25 @@ uint8_t nt_resource_get_state(nt_resource_t handle) {
 nt_result_t nt_resource_create_pack(uint32_t pack_id, int16_t priority) { return pack_alloc(pack_id, priority, NT_PACK_VIRTUAL); }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_result_t nt_resource_register(uint32_t pack_id, uint32_t resource_id, uint8_t asset_type, uint32_t gfx_handle) {
+nt_result_t nt_resource_register(uint32_t pack_id, uint32_t resource_id, uint8_t asset_type, uint32_t runtime_handle) {
     if (!s_resource.initialized) {
         return NT_ERR_INVALID_ARG;
     }
 
     int16_t pack_idx = find_pack(pack_id);
     if (pack_idx < 0) {
+        nt_log_error("nt_resource: register pack not found");
         return NT_ERR_INVALID_ARG;
     }
     if (s_resource.packs[pack_idx].pack_type != NT_PACK_VIRTUAL) {
-        return NT_ERR_INVALID_ARG; /* not a virtual pack */
+        nt_log_error("nt_resource: register on non-virtual pack");
+        return NT_ERR_INVALID_ARG;
     }
 
     /* Check for duplicate: update existing entry */
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
         if (s_resource.assets[i].resource_id == resource_id && s_resource.assets[i].pack_index == (uint16_t)pack_idx) {
-            s_resource.assets[i].runtime_handle = gfx_handle;
+            s_resource.assets[i].runtime_handle = runtime_handle;
             s_resource.assets[i].state = NT_ASSET_STATE_READY;
             s_resource.needs_resolve = true;
             return NT_OK;
@@ -486,7 +499,8 @@ nt_result_t nt_resource_register(uint32_t pack_id, uint32_t resource_id, uint8_t
 
     uint32_t idx = asset_alloc();
     if (idx == UINT32_MAX) {
-        return NT_ERR_INVALID_ARG; /* asset array full */
+        nt_log_error("nt_resource: asset array full");
+        return NT_ERR_INVALID_ARG;
     }
 
     NtAssetMeta *meta = &s_resource.assets[idx];
@@ -498,7 +512,7 @@ nt_result_t nt_resource_register(uint32_t pack_id, uint32_t resource_id, uint8_t
     meta->_pad = 0;
     meta->offset = 0;
     meta->size = 0;
-    meta->runtime_handle = gfx_handle;
+    meta->runtime_handle = runtime_handle;
 
     s_resource.packs[pack_idx].asset_count++;
     s_resource.needs_resolve = true;
@@ -530,11 +544,11 @@ void nt_resource_unregister(uint32_t pack_id, uint32_t resource_id) {
 
 /* ---- Placeholder ---- */
 
-void nt_resource_set_placeholder_texture(uint32_t gfx_handle) {
+void nt_resource_set_placeholder_texture(uint32_t runtime_handle) {
     if (!s_resource.initialized) {
         return;
     }
-    s_resource.placeholder_texture = gfx_handle;
+    s_resource.placeholder_texture = runtime_handle;
     s_resource.needs_resolve = true;
 }
 

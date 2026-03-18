@@ -10,11 +10,11 @@
 #endif
 
 #ifndef NT_RESOURCE_MAX_ASSETS
-#define NT_RESOURCE_MAX_ASSETS 4096
+#define NT_RESOURCE_MAX_ASSETS 2048
 #endif
 
 #ifndef NT_RESOURCE_MAX_SLOTS
-#define NT_RESOURCE_MAX_SLOTS 1024
+#define NT_RESOURCE_MAX_SLOTS 2048
 #endif
 
 /* ---- Resource handle ---- */
@@ -63,12 +63,12 @@ uint8_t nt_resource_get_state(nt_resource_t handle);
 /* ---- Virtual packs ---- */
 
 nt_result_t nt_resource_create_pack(uint32_t pack_id, int16_t priority);
-nt_result_t nt_resource_register(uint32_t pack_id, uint32_t resource_id, uint8_t asset_type, uint32_t gfx_handle);
+nt_result_t nt_resource_register(uint32_t pack_id, uint32_t resource_id, uint8_t asset_type, uint32_t runtime_handle);
 void nt_resource_unregister(uint32_t pack_id, uint32_t resource_id);
 
 /* ---- Placeholder ---- */
 
-void nt_resource_set_placeholder_texture(uint32_t gfx_handle);
+void nt_resource_set_placeholder_texture(uint32_t runtime_handle);
 
 /* ---- Hash utility ---- */
 

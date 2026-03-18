@@ -49,11 +49,13 @@ typedef struct {
 /* ---- Per unique ResourceId requested by game ---- */
 
 typedef struct {
-    uint32_t resource_id; /* FNV-1a hash */
-    uint32_t gfx_handle;  /* current best GFX handle */
-    uint16_t generation;  /* for stale detection */
-    uint8_t asset_type;   /* nt_asset_type_t */
-    uint8_t state;        /* nt_asset_state_t of resolved entry */
+    uint32_t resource_id;    /* FNV-1a hash */
+    uint32_t runtime_handle; /* current best resolved handle */
+    uint16_t generation;     /* for stale detection */
+    int16_t resolve_prio;    /* priority of current winner; Phase 25: use for O(1) activation */
+    uint8_t asset_type;      /* nt_asset_type_t */
+    uint8_t state;           /* nt_asset_state_t of resolved entry */
+    uint16_t _pad;
 } NtResourceSlot;
 
 #endif /* NT_RESOURCE_INTERNAL_H */

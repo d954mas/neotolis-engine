@@ -38,3 +38,6 @@ package-lock.json
 
 # Claude local settings
 .claude/settings.local.json
+
+# GSD tooling (Claude Code workflow engine)
+.claude/get-shit-done/
