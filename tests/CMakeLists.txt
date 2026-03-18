@@ -181,6 +181,16 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_resource COMMAND test_resource)
 
+    # --- HTTP module tests ---
+    add_executable(test_http unit/test_http.c)
+    target_link_libraries(test_http PRIVATE nt_http_stub unity)
+    nt_set_warning_flags(test_http)
+    nt_set_sanitizer_flags(test_http)
+    set_target_properties(test_http PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_http COMMAND test_http)
+
     # --- Builder tests ---
     add_executable(test_builder unit/test_builder.c)
     target_link_libraries(test_builder PRIVATE nt_builder unity)
