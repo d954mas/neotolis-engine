@@ -331,8 +331,9 @@ Examples: render item arrays, temporary sort arrays, transient CPU batch buffers
 #define MAX_TEXT_COMPONENTS     2048
 #define MAX_SHADOW_COMPONENTS   4096
 
-#define MAX_RESOURCES           65536
-#define MAX_PACKS               256
+#define MAX_ASSETS              2048
+#define MAX_SLOTS               2048
+#define MAX_PACKS               16
 #define MAX_RENDER_ITEMS        16384
 #define MAX_POINTERS            8
 
@@ -899,78 +900,88 @@ Even if pass code on C directly sets depth/blend/cull state, material still stor
 
 ## 17.1 Core concepts
 
-- `ResourceId`: stable resource identity
-- `AssetRef`: typed ref into asset registry
-- `AssetMeta`: metadata entry
-- `Handle`: runtime typed handle to actual loaded runtime object
+- `resource_id`: FNV-1a hash of asset path — stable resource identity
+- `NtAssetMeta`: per-asset metadata entry (one per asset per pack)
+- `NtResourceSlot`: per unique resource requested by game code — holds resolved handle
+- `nt_resource_t`: generational handle to a slot — what game code holds and passes around
+
+Two-level system:
+- **Assets** (MAX_ASSETS): metadata from all packs. Same resource_id can appear in multiple packs.
+- **Slots** (MAX_SLOTS): unique resources requested by game. One slot per resource_id, holds the best resolved handle.
 
 ## 17.2 ResourceId
 
-`ResourceId` is a stable resource key. By it the resource registry knows: whether the resource exists, its type, where it lives, what state it is in, whether a runtime representation exists.
+`resource_id` is a `uint32_t` FNV-1a hash of the asset path. Game code obtains it via `nt_resource_hash("path")`. The registry uses it to match assets across packs and resolve priority.
 
-## 17.3 Typed refs
+## 17.3 Generational handles
 
-```c
-MeshAssetRef
-TextureAssetRef
-MaterialAssetRef
-ShaderAssetRef
-AudioAssetRef        // new
-```
+Game code receives `nt_resource_t` — a 32-bit handle encoding slot index (lower 16 bits) and generation (upper 16 bits). Generation prevents stale handle use after shutdown/reinit cycles. Access functions (`nt_resource_get`, `nt_resource_is_ready`) validate generation before returning data.
 
-Also typed runtime handles:
+Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game code or future phases.
 
-```c
-MeshHandle
-TextureHandle
-MaterialHandle
-ShaderHandle
-AudioClipHandle      // new
-```
+## 17.4 AssetMeta stability
 
-## 17.4 Stable AssetMeta entries
+**Unmount** removes asset entries (resource_id = 0) — slots are recycled for new packs. **Unload** (Phase 25) clears runtime handle/state but preserves metadata — enables fast reload without re-parsing.
 
-AssetMeta entries are stable for whole runtime. Unload clears runtime handle/state, not the asset metadata slot. AssetRef does not need generation if slot is stable.
-
-## 17.5 AssetMeta
+## 17.5 NtAssetMeta
 
 ```c
-typedef struct AssetMeta
-{
-    ResourceId id;
-    AssetType type;
-    uint32_t pack_index;
-    uint32_t entry_offset;
-    uint32_t entry_size;
-    uint16_t format_version;
-    AssetState state;
-} AssetMeta;
+typedef struct {
+    uint32_t resource_id;    /* FNV-1a hash */
+    uint8_t  asset_type;     /* nt_asset_type_t */
+    uint8_t  state;          /* nt_asset_state_t */
+    uint16_t format_version; /* per-type binary format version */
+    uint16_t pack_index;     /* index into packs[] */
+    uint16_t _pad;
+    uint32_t offset;         /* byte offset in pack blob */
+    uint32_t size;           /* asset data size */
+    uint32_t runtime_handle; /* resolved handle, 0 = none */
+} NtAssetMeta; /* 24 bytes */
 ```
 
-## 17.6 Asset types
+## 17.6 NtResourceSlot
 
 ```c
-typedef enum AssetType
-{
-    ASSET_TYPE_MESH,
-    ASSET_TYPE_TEXTURE,
-    ASSET_TYPE_SHADER,
-    ASSET_TYPE_MATERIAL,
-    ASSET_TYPE_AUDIO,
-    ASSET_TYPE_SPRITE,
-    ASSET_TYPE_FONT,
-} AssetType;
+typedef struct {
+    uint32_t resource_id;    /* FNV-1a hash */
+    uint32_t runtime_handle; /* current best resolved handle */
+    uint16_t generation;     /* stale detection */
+    int16_t  resolve_prio;   /* priority of current winner */
+    uint8_t  asset_type;     /* nt_asset_type_t */
+    uint8_t  state;          /* nt_asset_state_t of resolved entry */
+    uint16_t resolve_pack;   /* pack_index of current winner */
+} NtResourceSlot; /* 16 bytes */
 ```
 
-## 17.7 Placeholder policy
+## 17.7 Virtual packs
 
-If resource is not ready:
+Game code can create virtual packs to register runtime-created resources (procedural textures, generated meshes) into the registry. Virtual pack assets participate in priority stacking identically to file pack assets. Unmount clears registry entries but does not destroy resources — game owns them.
 
-- typed resolve returns placeholder handle
-- runtime continues working
-- resource state remains UNLOADED / LOADING / FAILED as appropriate
+```c
+nt_resource_create_pack(pack_id, priority);
+nt_resource_register(pack_id, resource_id, asset_type, runtime_handle);
+nt_resource_unregister(pack_id, resource_id);
+```
 
-Placeholder policy is part of the resource system, not ad-hoc code.
+## 17.8 Asset types
+
+```c
+typedef enum {
+    NT_ASSET_MESH = 1,
+    NT_ASSET_TEXTURE = 2,
+    NT_ASSET_SHADER_CODE = 3,
+} nt_asset_type_t;
+```
+
+Additional types (material, audio, sprite, font) will be added as needed.
+
+## 17.9 Placeholder policy
+
+Texture-only placeholder: if a texture resource is not READY, `nt_resource_step()` substitutes the registered placeholder handle. Non-texture resources return handle 0 when not ready — game code checks `nt_resource_is_ready()`.
+
+```c
+nt_resource_set_placeholder_texture(runtime_handle);
+```
 
 ---
 
@@ -999,14 +1010,12 @@ typedef enum PackState
 ## 18.3 Asset state machine
 
 ```c
-typedef enum AssetState
-{
-    ASSET_STATE_UNKNOWN,      // meta does not exist yet
-    ASSET_STATE_REGISTERED,   // meta exists, data not loaded
-    ASSET_STATE_LOADING,      // being created (e.g. GPU upload, audio decode)
-    ASSET_STATE_READY,        // runtime handle created, usable
-    ASSET_STATE_FAILED        // parse/creation error
-} AssetState;
+typedef enum {
+    NT_ASSET_STATE_REGISTERED = 0, /* meta exists, data not loaded */
+    NT_ASSET_STATE_LOADING,        /* being activated (GPU upload etc.) */
+    NT_ASSET_STATE_READY,          /* runtime handle valid, usable */
+    NT_ASSET_STATE_FAILED,         /* error, permanent, no retry */
+} nt_asset_state_t;
 ```
 
 ## 18.4 Pack loading flow
@@ -1038,25 +1047,20 @@ Asset activation (eager with rate-limit):
 
 ## 18.5 Loading progress
 
-PackMeta includes progress tracking:
+Current NtPackMeta (Phase 24 — registry only):
 
 ```c
-typedef struct PackMeta
-{
-    PackId id;
-    const char* url;
-    PackState state;
-    uint32_t blob_size;
-    void* blob_data;
-
-    uint32_t bytes_received;  // progress tracking
-    uint32_t bytes_total;     // 0 = unknown (Content-Length absent)
-
-    float last_used_time;
-} PackMeta;
+typedef struct {
+    uint32_t pack_id;     /* FNV-1a hash of pack name/path */
+    int16_t  priority;    /* higher = wins on conflict */
+    uint8_t  pack_type;   /* NT_PACK_FILE or NT_PACK_VIRTUAL */
+    uint8_t  mounted;     /* 1 if mounted, 0 if slot available */
+    const uint8_t *blob;  /* loaded pack data */
+    uint32_t blob_size;   /* size of loaded blob */
+} NtPackMeta;
 ```
 
-Progress is delivered via JS `ReadableStream` API through per-chunk callbacks. When `bytes_total` is unknown (no Content-Length header), game code can show a spinner instead of a percentage bar.
+Phase 25 will extend with PackState (NONE → REQUESTED → LOADED → READY → FAILED), progress tracking (bytes_received/bytes_total), and url for async web loading.
 
 ## 18.6 JS bridge — fetch contract
 
@@ -1082,6 +1086,8 @@ void platform_on_fetch_complete(uint32_t request_id,
 ## 18.7 Asset activation strategy
 
 **Eager with rate-limit** (recommended for v0.1): when a pack becomes READY, `resource_step()` processes up to N assets per frame from the ready queue. This prevents frame spikes while ensuring assets become available quickly.
+
+Each NtResourceSlot stores `resolve_prio` and `resolve_pack` of the current winner. When an individual asset becomes READY, the loader can compare priority directly against the slot — O(1) activation without full rebuild. Full rebuild (`needs_resolve`) is only needed for mount/unmount/set_priority.
 
 ## 18.8 Retry policy
 
