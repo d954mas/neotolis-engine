@@ -365,14 +365,14 @@ Note: Phase 25 (Asset Loading) depends on Phase 24, Phase 21, and Phase 23.
 | 26. Material System | v1.3 | 0/TBD | Not started | - |
 | 27. Mesh Rendering Pipeline | v1.3 | 0/TBD | Not started | - |
 | 28. Demo Integration | v1.3 | 0/TBD | Not started | - |
-| 29. nt_hash module | v1.3 | 1/3 | In progress | - |
+| 29. nt_hash module | 2/3 | In Progress|  | - |
 
 ### Phase 29: nt_hash module -- unified CRC32 + string hash, resource label hashing
 
 **Goal:** Centralize all identity hashing behind a new nt_hash module with type-safe struct wrappers (nt_hash32_t, nt_hash64_t), benchmark-driven algorithm selection, debug label reverse-lookup, and migration of resource_id from uint32 to nt_hash64_t across builder and runtime
 **Requirements**: Infrastructure improvement (no formal requirement IDs)
 **Depends on:** Phase 25 (modifies nt_resource and builder from Phases 24-25)
-**Plans:** 3 plans
+**Plans:** 2/3 plans executed
 
 Plans:
 - [x] 29-01-PLAN.md -- nt_hash module (FNV-1a 32/64, typed structs, label system, unit tests) + benchmark harness (4 candidates)

@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Asset Pipeline
-current_phase: Phase 29 -- nt_hash module (1/3 plans done)
+current_phase: Phase 29 -- nt_hash module (2/3 plans done)
 current_plan: Plan 02
 status: executing
-last_updated: "2026-03-18T20:20:20.000Z"
-last_activity: 2026-03-19 -- Completed 29-01 (nt_hash module, FNV-1a 32/64, label system, benchmark); 14min
+last_updated: "2026-03-18T20:38:31.526Z"
+last_activity: 2026-03-19 -- Completed 29-03 (builder hash migration, spec update); 12min
 progress:
   total_phases: 10
   completed_phases: 6
   total_plans: 19
-  completed_plans: 17
+  completed_plans: 18
 ---
 
 # Session State
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Core value:** Simple, fast, predictable -- composable features wired through code, zero hidden magic.
-**Current focus:** v1.3 Asset Pipeline -- Phase 29 nt_hash module (1/3 plans done)
+**Current focus:** v1.3 Asset Pipeline -- Phase 29 nt_hash module (2/3 plans done)
 
 ## Position
 
 **Milestone:** v1.3 Asset Pipeline (Phases 20-29)
-**Current phase:** Phase 29 -- nt_hash module (1/3 plans done)
+**Current phase:** Phase 29 -- nt_hash module (2/3 plans done)
 **Current Plan:** Plan 02
 **Status:** Executing
-**Last activity:** 2026-03-19 -- Completed 29-01 (nt_hash module, FNV-1a 32/64, label system, benchmark); 14min
+**Last activity:** 2026-03-19 -- Completed 29-03 (builder hash migration, spec update); 12min
 
 ## Decisions
 
@@ -62,6 +62,7 @@ Phase 21-01 decisions:
 - Context-loss texture recovery uses data=NULL and gen_mipmaps=false (GPU placeholder only)
 - [Phase 24]: Option B for virtual pack entries: asset_count tracks total, unmount/unregister scan all assets[] by pack_index (non-contiguous)
 - [Phase 24]: Virtual pack ownership: game creates GPU handles, game destroys -- registry only tracks references, unmount never calls destroy
+- [Phase 29]: Builder public API returns raw uint64_t (not nt_hash64_t) to keep nt_builder.h free of nt_hash.h dependency
 
 ## Performance Metrics
 
@@ -82,6 +83,7 @@ Phase 21-01 decisions:
 | 25 | 02 | 10min | 2 | 5 |
 | 25 | 03 | 15min | 2 | 6 |
 | 29 | 01 | 14min | 2 | 10 |
+| 29 | 03 | 12min | 2 | 11 |
 
 Phase 22-01 decisions:
 - NT_ASSERT_ALWAYS added to nt_assert.h (shared utility) for release-mode stale handle assertions
@@ -136,10 +138,15 @@ Phase 29-01 decisions:
 - _CRT_SECURE_NO_WARNINGS on nt_hash for strncpy in label table (same pattern as builder/fs)
 - NT_HASH_LABELS compile definition on both nt_hash and test_hash targets (same as NT_RESOURCE_TEST_ACCESS)
 
+Phase 29-03 decisions:
+- Builder public API returns raw uint64_t (not nt_hash64_t) to keep nt_builder.h free of nt_hash.h dependency
+- nt_builder_dump.c displays 64-bit resource_id as 0x%016llX with wider column headers
+
 Phase 25-01 decisions:
 - Backend slot accessor pattern (nt_http_get_slot/nt_fs_get_slot via extern) for backend files to update slot state
 - -U_DLL for nt_fs native target and test_fs (CRT file I/O on Windows, same pattern as builder)
 - (void)fclose() casts for cert-err33-c compliance in error paths
+| Phase 29 P03 | 12min | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -183,3 +190,4 @@ Phase 25-01 decisions:
 - 2026-03-18: Completed 25-03-PLAN.md -- pack loading state machine, activation loop, retry, blob eviction, invalidation, 22 new tests (67 total), 15min
 - 2026-03-18: Phase 25 complete -- asset loading with I/O integration, activator system, retry, blob management, 67 unit tests
 - 2026-03-19: Completed 29-01-PLAN.md -- nt_hash module, FNV-1a 32/64, typed wrappers, label system, 16 unit tests, benchmark (FNV-1a winner), 14min
+- 2026-03-19: Completed 29-03-PLAN.md -- builder hash migration to nt_hash, spec updated with nt_hash module and 64-bit resource_id, 12min
