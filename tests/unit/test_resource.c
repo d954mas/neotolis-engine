@@ -789,7 +789,17 @@ void test_unmount_virtual_clears(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_set_placeholder_fallback(void) {
-    nt_resource_set_placeholder_texture(999);
+    /* Register placeholder texture via virtual pack */
+    uint32_t ph_pid = nt_resource_hash("ph_vpack");
+    uint32_t ph_rid = nt_resource_hash("placeholder_tex");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(ph_pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(ph_pid, ph_rid, NT_ASSET_TEXTURE, 999));
+
+    /* Request placeholder so it gets a slot, then resolve */
+    nt_resource_request(ph_rid, NT_ASSET_TEXTURE);
+    nt_resource_step();
+
+    nt_resource_set_placeholder_texture(ph_rid);
 
     /* Mount file pack with resource in REGISTERED state (not READY) */
     uint32_t pid = nt_resource_hash("ph_fallback_pack");
@@ -802,7 +812,7 @@ void test_set_placeholder_fallback(void) {
     ((NtPackHeader *)blob)->pack_id = pid;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
 
-    /* Asset is REGISTERED, not READY: should get placeholder */
+    /* Asset is REGISTERED, not READY: should get placeholder handle */
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_TEXTURE);
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(999, nt_resource_get(h));
@@ -812,7 +822,14 @@ void test_set_placeholder_fallback(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_placeholder_not_used_when_ready(void) {
-    nt_resource_set_placeholder_texture(999);
+    /* Register placeholder texture via virtual pack */
+    uint32_t ph_pid = nt_resource_hash("ph_ready_vpack");
+    uint32_t ph_rid = nt_resource_hash("placeholder_tex2");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(ph_pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(ph_pid, ph_rid, NT_ASSET_TEXTURE, 999));
+    nt_resource_request(ph_rid, NT_ASSET_TEXTURE);
+    nt_resource_step();
+    nt_resource_set_placeholder_texture(ph_rid);
 
     uint32_t pid = nt_resource_hash("ph_ready_pack");
     uint32_t rid = nt_resource_hash("ph_ready_res");
@@ -824,21 +841,28 @@ void test_placeholder_not_used_when_ready(void) {
     ((NtPackHeader *)blob)->pack_id = pid;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
 
-    /* Set READY with handle=42 */
-    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 42);
+    /* Set READY with handle=42 (pack_index=1, file pack after virtual pack at 0) */
+    nt_resource_test_set_asset_state(rid, 1, NT_ASSET_STATE_READY, 42);
 
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_TEXTURE);
     nt_resource_step();
 
-    /* READY entry exists: should get 42, not 999 */
+    /* READY entry exists: should get 42, not placeholder 999 */
     TEST_ASSERT_EQUAL_UINT32(42, nt_resource_get(h));
 
     free(blob);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_placeholder_type_specific(void) {
-    /* Set placeholder for TEXTURE only */
-    nt_resource_set_placeholder_texture(999);
+    /* Register placeholder texture via virtual pack */
+    uint32_t ph_pid = nt_resource_hash("ph_type_vpack");
+    uint32_t ph_rid = nt_resource_hash("placeholder_tex3");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(ph_pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(ph_pid, ph_rid, NT_ASSET_TEXTURE, 999));
+    nt_resource_request(ph_rid, NT_ASSET_TEXTURE);
+    nt_resource_step();
+    nt_resource_set_placeholder_texture(ph_rid);
 
     /* Request a MESH resource with no READY entry */
     uint32_t pid = nt_resource_hash("ph_type_pack");

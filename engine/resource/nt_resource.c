@@ -30,7 +30,7 @@ static struct {
     uint16_t queue_top;
     uint16_t next_mount_seq;      /* monotonic counter for mount order tiebreak */
     uint32_t asset_hwm;           /* high-water mark in assets[] */
-    uint32_t placeholder_texture; /* gfx handle for fallback texture, 0 = none */
+    uint32_t placeholder_texture; /* resource_id for fallback texture, 0 = none */
     bool needs_resolve;
     bool initialized;
 } s_resource;
@@ -167,18 +167,23 @@ void nt_resource_step(void) {
         }
     }
 
-    /* Phase 3: Texture placeholder fallback */
+    /* Phase 3: Texture placeholder fallback — resolve via slot_map */
     if (s_resource.placeholder_texture != 0) {
-        for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
-            NtResourceSlot *slot = &s_resource.slots[si];
-            if (slot->resource_id == 0) {
-                continue;
-            }
-            if (slot->state == NT_ASSET_STATE_READY) {
-                continue;
-            }
-            if (slot->asset_type == NT_ASSET_TEXTURE) {
-                slot->runtime_handle = s_resource.placeholder_texture;
+        uint16_t ph_si = slot_map_find(s_resource.placeholder_texture);
+        uint32_t ph_handle = (ph_si != 0) ? s_resource.slots[ph_si].runtime_handle : 0;
+
+        if (ph_handle != 0) {
+            for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
+                NtResourceSlot *slot = &s_resource.slots[si];
+                if (slot->resource_id == 0) {
+                    continue;
+                }
+                if (slot->state == NT_ASSET_STATE_READY) {
+                    continue;
+                }
+                if (slot->asset_type == NT_ASSET_TEXTURE) {
+                    slot->runtime_handle = ph_handle;
+                }
             }
         }
     }
@@ -539,11 +544,11 @@ void nt_resource_unregister(uint32_t pack_id, uint32_t resource_id) {
 
 /* ---- Placeholder ---- */
 
-void nt_resource_set_placeholder_texture(uint32_t runtime_handle) {
+void nt_resource_set_placeholder_texture(uint32_t resource_id) {
     if (!s_resource.initialized) {
         return;
     }
-    s_resource.placeholder_texture = runtime_handle;
+    s_resource.placeholder_texture = resource_id;
     s_resource.needs_resolve = true;
 }
 

@@ -68,7 +68,7 @@ void nt_resource_unregister(uint32_t pack_id, uint32_t resource_id);
 
 /* ---- Placeholder ---- */
 
-void nt_resource_set_placeholder_texture(uint32_t runtime_handle);
+void nt_resource_set_placeholder_texture(uint32_t resource_id);
 
 /* ---- Hash utility ---- */
 
