@@ -730,7 +730,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         .wrap_u = NT_WRAP_REPEAT,
         .wrap_v = NT_WRAP_REPEAT,
         .gen_mipmaps = (hdr->mip_count == 1),
-        .label = "pack_texture",
+        .label = NULL,
     };
     nt_texture_t tex = nt_gfx_make_texture(&desc);
     return tex.id;
@@ -772,7 +772,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         .usage = NT_USAGE_IMMUTABLE,
         .data = vertex_data,
         .size = hdr->vertex_data_size,
-        .label = "mesh_vbo",
+        .label = NULL,
     });
     if (vbo.id == 0) {
         nt_log_error("gfx: activate_mesh: VBO creation failed");
@@ -787,7 +787,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
             .data = index_data,
             .size = hdr->index_data_size,
             .index_type = hdr->index_type,
-            .label = "mesh_ibo",
+            .label = NULL,
         });
         if (ibo.id == 0) {
             nt_log_error("gfx: activate_mesh: IBO creation failed");
@@ -843,7 +843,7 @@ uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {
     nt_shader_t shd = nt_gfx_make_shader(&(nt_shader_desc_t){
         .type = type,
         .source = source,
-        .label = "pack_shader",
+        .label = NULL,
     });
     return shd.id;
 }
