@@ -365,6 +365,7 @@ Note: Phase 25 (Asset Loading) depends on Phase 24, Phase 21, and Phase 23.
 | 26. Material System | v1.3 | 0/TBD | Not started | - |
 | 27. Mesh Rendering Pipeline | v1.3 | 0/TBD | Not started | - |
 | 28. Demo Integration | v1.3 | 0/TBD | Not started | - |
+| 29. nt_hash module | v1.3 | 1/3 | In progress | - |
 
 ### Phase 29: nt_hash module -- unified CRC32 + string hash, resource label hashing
 
@@ -374,6 +375,6 @@ Note: Phase 25 (Asset Loading) depends on Phase 24, Phase 21, and Phase 23.
 **Plans:** 3 plans
 
 Plans:
-- [ ] 29-01-PLAN.md -- nt_hash module (FNV-1a 32/64, typed structs, label system, unit tests) + benchmark harness (4 candidates)
+- [x] 29-01-PLAN.md -- nt_hash module (FNV-1a 32/64, typed structs, label system, unit tests) + benchmark harness (4 candidates)
 - [ ] 29-02-PLAN.md -- Pack format migration (NtAssetEntry 16->24 bytes) + nt_resource API migration to nt_hash types + test/example migration
 - [ ] 29-03-PLAN.md -- Builder migration (delete FNV-1a duplication, normalize_and_hash) + spec update
