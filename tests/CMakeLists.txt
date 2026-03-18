@@ -191,6 +191,20 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_http COMMAND test_http)
 
+    # --- File system module tests ---
+    add_executable(test_fs unit/test_fs.c)
+    target_link_libraries(test_fs PRIVATE nt_fs unity)
+    target_compile_definitions(test_fs PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    target_compile_options(test_fs PRIVATE -U_DLL)
+    nt_set_warning_flags(test_fs)
+    nt_set_sanitizer_flags(test_fs)
+    set_target_properties(test_fs PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_fs COMMAND test_fs
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
+
     # --- Builder tests ---
     add_executable(test_builder unit/test_builder.c)
     target_link_libraries(test_builder PRIVATE nt_builder unity)
