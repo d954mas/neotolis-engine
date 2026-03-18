@@ -28,6 +28,7 @@ static struct {
     uint16_t free_queue[NT_RESOURCE_MAX_SLOTS];
     uint16_t slot_map[NT_SLOT_MAP_SIZE];
     uint16_t queue_top;
+    uint16_t next_mount_seq;      /* monotonic counter for mount order tiebreak */
     uint32_t asset_hwm;           /* high-water mark in assets[] */
     uint32_t placeholder_texture; /* gfx handle for fallback texture, 0 = none */
     bool needs_resolve;
@@ -125,7 +126,7 @@ void nt_resource_step(void) {
         slot->runtime_handle = 0;
         slot->state = NT_ASSET_STATE_REGISTERED;
         slot->resolve_prio = INT16_MIN;
-        slot->resolve_pack = 0;
+        slot->resolve_seq = 0;
     }
 
     /* Phase 2: Single pass over assets — O(A) via slot_map lookup */
@@ -155,13 +156,14 @@ void nt_resource_step(void) {
         }
 
         int16_t prio = s_resource.packs[meta->pack_index].priority;
+        uint16_t seq = s_resource.packs[meta->pack_index].mount_seq;
 
-        /* Higher priority wins. Equal priority: higher pack_index wins (last mounted) */
-        if (prio > slot->resolve_prio || (prio == slot->resolve_prio && meta->pack_index >= slot->resolve_pack)) {
+        /* Higher priority wins. Equal priority: higher mount_seq wins (last mounted) */
+        if (prio > slot->resolve_prio || (prio == slot->resolve_prio && seq >= slot->resolve_seq)) {
             slot->runtime_handle = meta->runtime_handle;
             slot->state = NT_ASSET_STATE_READY;
             slot->resolve_prio = prio;
-            slot->resolve_pack = meta->pack_index;
+            slot->resolve_seq = seq;
         }
     }
 
@@ -219,7 +221,7 @@ static nt_resource_t slot_alloc(uint32_t resource_id, uint8_t asset_type) {
     slot->resource_id = resource_id;
     slot->runtime_handle = 0;
     slot->resolve_prio = INT16_MIN;
-    slot->resolve_pack = 0;
+    slot->resolve_seq = 0;
     slot->asset_type = asset_type;
     slot->state = NT_ASSET_STATE_REGISTERED;
 
@@ -247,6 +249,7 @@ static nt_result_t pack_alloc(uint32_t pack_id, int16_t priority, uint8_t pack_t
             s_resource.packs[i].priority = priority;
             s_resource.packs[i].pack_type = pack_type;
             s_resource.packs[i].mounted = 1;
+            s_resource.packs[i].mount_seq = s_resource.next_mount_seq++;
             s_resource.needs_resolve = true;
             return NT_OK;
         }
@@ -359,6 +362,12 @@ nt_result_t nt_resource_parse_pack(uint32_t pack_id, const uint8_t *blob, uint32
     const NtAssetEntry *entries = (const NtAssetEntry *)(blob + sizeof(NtPackHeader));
 
     for (uint16_t i = 0; i < h->asset_count; i++) {
+        /* Validate entry data fits within blob */
+        if (entries[i].offset + entries[i].size > blob_size) {
+            nt_log_error("nt_resource: entry data exceeds blob");
+            return NT_ERR_INVALID_ARG;
+        }
+
         uint32_t idx = asset_alloc();
         NT_ASSERT_ALWAYS(idx != UINT32_MAX); /* asset array full — raise limits */
 
@@ -394,6 +403,7 @@ nt_resource_t nt_resource_request(uint32_t resource_id, uint8_t asset_type) {
     /* O(1) lookup via slot map (idempotent) */
     uint16_t existing = slot_map_find(resource_id);
     if (existing != 0) {
+        NT_ASSERT(s_resource.slots[existing].asset_type == asset_type);
         return resource_make(existing, s_resource.slots[existing].generation);
     }
 

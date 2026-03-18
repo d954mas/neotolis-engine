@@ -915,7 +915,7 @@ Two-level system:
 
 ## 17.3 Generational handles
 
-Game code receives `nt_resource_t` — a 32-bit handle encoding slot index (lower 16 bits) and generation (upper 16 bits). Generation prevents stale handle use after shutdown/reinit cycles. Access functions (`nt_resource_get`, `nt_resource_is_ready`) validate generation before returning data.
+Game code receives `nt_resource_t` — a 32-bit handle encoding slot index (lower 16 bits) and generation (upper 16 bits). Generation detects stale handles within a single init/shutdown lifecycle. After shutdown, all handles are invalid — game code must re-request resources after reinit. Access functions (`nt_resource_get`, `nt_resource_is_ready`) validate generation before returning data.
 
 Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game code or future phases.
 

@@ -7,9 +7,9 @@
 
 typedef enum {
     NT_ASSET_STATE_REGISTERED = 0, /* meta exists, data not loaded */
+    NT_ASSET_STATE_FAILED,         /* error, permanent, no retry */
     NT_ASSET_STATE_LOADING,        /* being activated (GPU upload etc.) */
     NT_ASSET_STATE_READY,          /* runtime handle valid, usable */
-    NT_ASSET_STATE_FAILED,         /* error, permanent, no retry */
 } nt_asset_state_t;
 
 /* ---- Pack type ---- */
@@ -40,7 +40,8 @@ typedef struct {
     int16_t priority;     /* higher = wins on conflict, signed */
     uint8_t pack_type;    /* nt_pack_type_t */
     uint8_t mounted;      /* 1 if mounted, 0 if slot available */
-    uint16_t _pad[2];
+    uint16_t mount_seq;   /* monotonic mount order for tiebreak */
+    uint16_t _pad;
     const uint8_t *blob; /* loaded pack data (NULL until Phase 25) */
     uint32_t blob_size;  /* size of loaded blob */
 } NtPackMeta;
@@ -54,7 +55,7 @@ typedef struct {
     int16_t resolve_prio;    /* priority of current winner; Phase 25: use for O(1) activation */
     uint8_t asset_type;      /* nt_asset_type_t */
     uint8_t state;           /* nt_asset_state_t of resolved entry */
-    uint16_t resolve_pack;   /* pack_index of current winner; Phase 25: use for O(1) activation */
+    uint16_t resolve_seq;    /* mount_seq of current winner; tiebreak + Phase 25 O(1) activation */
 } NtResourceSlot;
 
 #endif /* NT_RESOURCE_INTERNAL_H */
