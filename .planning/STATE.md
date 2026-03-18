@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Asset Pipeline
-current_phase: Phase 25 -- Asset Loading (2/3 plans done)
-current_plan: Plan 3 of 3
-status: executing
-last_updated: "2026-03-18T15:15:51Z"
-last_activity: 2026-03-18 -- Completed 25-02 (GFX activators, mesh table, context loss refactor); 10min
+current_phase: Phase 25 -- Asset Loading (3/3 plans done)
+current_plan: Plan 3 of 3 (COMPLETE)
+status: phase_complete
+last_updated: "2026-03-18T15:34:33Z"
+last_activity: 2026-03-18 -- Completed 25-03 (pack loading state machine, activation, retry, invalidation); 15min
 progress:
   total_phases: 10
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 16
-  completed_plans: 15
+  completed_plans: 16
 ---
 
 # Session State
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Core value:** Simple, fast, predictable -- composable features wired through code, zero hidden magic.
-**Current focus:** v1.3 Asset Pipeline -- Phase 25 Asset Loading (2/3 plans done)
+**Current focus:** v1.3 Asset Pipeline -- Phase 25 Asset Loading (COMPLETE)
 
 ## Position
 
 **Milestone:** v1.3 Asset Pipeline (Phases 20-28)
-**Current phase:** Phase 25 -- Asset Loading (2/3 plans done)
-**Current Plan:** Plan 3 of 3
-**Status:** Executing
-**Last activity:** 2026-03-18 -- Completed 25-02 (GFX activators, mesh table, context loss refactor); 10min
+**Current phase:** Phase 25 -- Asset Loading (3/3 plans done, COMPLETE)
+**Current Plan:** Plan 3 of 3 (COMPLETE)
+**Status:** Phase complete
+**Last activity:** 2026-03-18 -- Completed 25-03 (pack loading state machine, activation, retry, invalidation); 15min
 
 ## Decisions
 
@@ -80,6 +80,7 @@ Phase 21-01 decisions:
 | 24 | 02 | 11min | 2 | 4 |
 | 25 | 01 | 7min | 2 | 16 |
 | 25 | 02 | 10min | 2 | 5 |
+| 25 | 03 | 15min | 2 | 6 |
 
 Phase 22-01 decisions:
 - NT_ASSERT_ALWAYS added to nt_assert.h (shared utility) for release-mode stale handle assertions
@@ -123,6 +124,11 @@ Phase 25-02 decisions:
 - Buffer metadata struct (nt_gfx_buffer_meta_t, 8 bytes) replaces full buffer_desc copies -- type/usage/size only
 - Context loss wipes backend handles and mesh table but keeps pool slots -- game must re-create from source
 - Shape renderer restore_gpu uses save-shutdown-init-restore pattern for simplicity
+
+Phase 25-03 decisions:
+- Blob ownership split: I/O-loaded blobs (io_type != NT_IO_NONE) freed by nt_resource_unmount; parse_pack blobs remain caller-owned
+- _CRT_SECURE_NO_WARNINGS on nt_resource target for strncpy (same pattern as builder/fs)
+- WORKING_DIRECTORY set to CMAKE_SOURCE_DIR for test_resource (file I/O tests need project root)
 
 Phase 25-01 decisions:
 - Backend slot accessor pattern (nt_http_get_slot/nt_fs_get_slot via extern) for backend files to update slot state
@@ -168,3 +174,5 @@ Phase 25-01 decisions:
 - 2026-03-17: Phase 24 complete -- asset registry with virtual packs, placeholder, 45 unit tests total
 - 2026-03-18: Completed 25-01-PLAN.md -- nt_http + nt_fs I/O modules, generational handles, 22 unit tests, 7min
 - 2026-03-18: Completed 25-02-PLAN.md -- GFX activators (texture/mesh/shader), mesh side table, CPU desc removal, restore_gpu, 10min
+- 2026-03-18: Completed 25-03-PLAN.md -- pack loading state machine, activation loop, retry, blob eviction, invalidation, 22 new tests (67 total), 15min
+- 2026-03-18: Phase 25 complete -- asset loading with I/O integration, activator system, retry, blob management, 67 unit tests

@@ -35,9 +35,9 @@
 
 - [x] **LOAD-01**: Pack loading on WASM via JS fetch bridge (platform_request_fetch / on_fetch_complete)
 - [x] **LOAD-02**: Pack loading on native via synchronous fread()
-- [ ] **LOAD-03**: Pack state machine: NONE -> REQUESTED -> LOADED -> READY / FAILED
+- [x] **LOAD-03**: Pack state machine: NONE -> REQUESTED -> LOADED -> READY / FAILED
 - [x] **LOAD-04**: NEOPAK parser validates magic, version, sizes, CRC32 before registering assets
-- [ ] **LOAD-05**: resource_step() activates assets each frame (mesh -> buffers, texture -> GPU, shader -> program)
+- [x] **LOAD-05**: resource_step() activates assets each frame (mesh -> buffers, texture -> GPU, shader -> program)
 
 ### Texture Support (nt_gfx extension)
 
@@ -190,8 +190,8 @@
 | LOAD-04 | Phase 24 | Complete |
 | LOAD-01 | Phase 25 | Complete |
 | LOAD-02 | Phase 25 | Complete |
-| LOAD-03 | Phase 25 | Pending |
-| LOAD-05 | Phase 25 | Pending |
+| LOAD-03 | Phase 25 | Complete |
+| LOAD-05 | Phase 25 | Complete |
 | SHDR-01 | Phase 25 | Complete |
 | SHDR-02 | Phase 25 | Complete |
 | MESH-02 | Phase 25 | Complete |

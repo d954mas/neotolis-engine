@@ -361,7 +361,7 @@ Note: Phase 25 (Asset Loading) depends on Phase 24, Phase 21, and Phase 23.
 | 22. Entity System | 3/3 | Complete    | 2026-03-16 | - |
 | 23. Builder | 3/3 | Complete    | 2026-03-17 | - |
 | 24. Asset Registry | 3/3 | Complete    | 2026-03-17 | - |
-| 25. Asset Loading | 2/3 | In Progress|  | - |
+| 25. Asset Loading | 3/3 | Complete   | 2026-03-18 | - |
 | 26. Material System | v1.3 | 0/TBD | Not started | - |
 | 27. Mesh Rendering Pipeline | v1.3 | 0/TBD | Not started | - |
 | 28. Demo Integration | v1.3 | 0/TBD | Not started | - |
@@ -371,7 +371,7 @@ Note: Phase 25 (Asset Loading) depends on Phase 24, Phase 21, and Phase 23.
 **Goal:** [To be planned]
 **Requirements**: TBD
 **Depends on:** Phase 28
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 - [ ] TBD (run /gsd:plan-phase 29 to break down)
