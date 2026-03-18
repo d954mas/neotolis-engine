@@ -794,11 +794,6 @@ void test_set_placeholder_fallback(void) {
     uint32_t ph_rid = nt_resource_hash("placeholder_tex");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(ph_pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(ph_pid, ph_rid, NT_ASSET_TEXTURE, 999));
-
-    /* Request placeholder so it gets a slot, then resolve */
-    nt_resource_request(ph_rid, NT_ASSET_TEXTURE);
-    nt_resource_step();
-
     nt_resource_set_placeholder_texture(ph_rid);
 
     /* Mount file pack with resource in REGISTERED state (not READY) */
@@ -827,8 +822,6 @@ void test_placeholder_not_used_when_ready(void) {
     uint32_t ph_rid = nt_resource_hash("placeholder_tex2");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(ph_pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(ph_pid, ph_rid, NT_ASSET_TEXTURE, 999));
-    nt_resource_request(ph_rid, NT_ASSET_TEXTURE);
-    nt_resource_step();
     nt_resource_set_placeholder_texture(ph_rid);
 
     uint32_t pid = nt_resource_hash("ph_ready_pack");
@@ -860,8 +853,6 @@ void test_placeholder_type_specific(void) {
     uint32_t ph_rid = nt_resource_hash("placeholder_tex3");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(ph_pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(ph_pid, ph_rid, NT_ASSET_TEXTURE, 999));
-    nt_resource_request(ph_rid, NT_ASSET_TEXTURE);
-    nt_resource_step();
     nt_resource_set_placeholder_texture(ph_rid);
 
     /* Request a MESH resource with no READY entry */

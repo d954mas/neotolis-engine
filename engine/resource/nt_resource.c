@@ -146,6 +146,11 @@ void nt_resource_step(void) {
 
         NtResourceSlot *slot = &s_resource.slots[si];
 
+        /* Skip type mismatch (malformed pack or FNV collision) */
+        if (meta->asset_type != slot->asset_type) {
+            continue;
+        }
+
         /* Track best available state from any matching entry */
         if (meta->state > slot->state && slot->state != NT_ASSET_STATE_READY) {
             slot->state = meta->state;
@@ -554,6 +559,11 @@ void nt_resource_set_placeholder_texture(uint32_t resource_id) {
         return;
     }
     s_resource.placeholder_texture = resource_id;
+
+    /* Ensure placeholder has a slot so step() can resolve its handle */
+    if (resource_id != 0 && slot_map_find(resource_id) == 0) {
+        nt_resource_request(resource_id, NT_ASSET_TEXTURE);
+    }
     s_resource.needs_resolve = true;
 }
 

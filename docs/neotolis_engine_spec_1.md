@@ -977,11 +977,14 @@ Additional types (material, audio, sprite, font) will be added as needed.
 
 ## 17.9 Placeholder policy
 
-Texture-only placeholder: if a texture resource is not READY, `nt_resource_step()` substitutes the registered placeholder handle. Non-texture resources return handle 0 when not ready — game code checks `nt_resource_is_ready()`.
+Texture-only placeholder: if a texture resource is not READY, `nt_resource_step()` resolves the placeholder resource_id and substitutes its handle. Non-texture resources return handle 0 when not ready — game code checks `nt_resource_is_ready()`.
 
 ```c
-nt_resource_set_placeholder_texture(runtime_handle);
+// Placeholder is a regular resource (e.g. from a virtual pack or base pack)
+nt_resource_set_placeholder_texture(nt_resource_hash("textures/placeholder.png"));
 ```
+
+The function automatically requests a slot for the placeholder resource_id if one does not exist. Placeholder participates in the same resolve system — if the placeholder resource itself is not READY, no substitution occurs.
 
 ---
 
