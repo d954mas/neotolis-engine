@@ -57,7 +57,7 @@ static int16_t find_pack(uint32_t pack_id) {
 /* ---- Slot map helpers ---- */
 
 static uint16_t slot_map_find(uint64_t resource_id) {
-    uint32_t idx = (uint32_t)(resource_id % NT_SLOT_MAP_SIZE);
+    uint32_t idx = (uint32_t)(resource_id % (uint64_t)NT_SLOT_MAP_SIZE);
     for (uint32_t i = 0; i < NT_SLOT_MAP_SIZE; i++) {
         uint32_t probe = (idx + i) % NT_SLOT_MAP_SIZE;
         uint16_t si = s_resource.slot_map[probe];
@@ -72,7 +72,7 @@ static uint16_t slot_map_find(uint64_t resource_id) {
 }
 
 static void slot_map_insert(uint64_t resource_id, uint16_t slot_index) {
-    uint32_t idx = (uint32_t)(resource_id % NT_SLOT_MAP_SIZE);
+    uint32_t idx = (uint32_t)(resource_id % (uint64_t)NT_SLOT_MAP_SIZE);
     for (uint32_t i = 0; i < NT_SLOT_MAP_SIZE; i++) {
         uint32_t probe = (idx + i) % NT_SLOT_MAP_SIZE;
         if (s_resource.slot_map[probe] == 0) {

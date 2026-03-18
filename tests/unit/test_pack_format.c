@@ -16,7 +16,7 @@ void tearDown(void) {}
 
 void test_pack_header_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtPackHeader)); }
 
-void test_asset_entry_size(void) { TEST_ASSERT_EQUAL_UINT(16, sizeof(NtAssetEntry)); }
+void test_asset_entry_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtAssetEntry)); }
 
 /* --- Pack header constants --- */
 
@@ -70,11 +70,12 @@ void test_pack_header_field_offsets(void) {
 
 void test_asset_entry_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(0, offsetof(NtAssetEntry, resource_id));
-    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtAssetEntry, format_version));
-    TEST_ASSERT_EQUAL_UINT(6, offsetof(NtAssetEntry, asset_type));
-    TEST_ASSERT_EQUAL_UINT(7, offsetof(NtAssetEntry, _pad));
     TEST_ASSERT_EQUAL_UINT(8, offsetof(NtAssetEntry, offset));
     TEST_ASSERT_EQUAL_UINT(12, offsetof(NtAssetEntry, size));
+    TEST_ASSERT_EQUAL_UINT(16, offsetof(NtAssetEntry, format_version));
+    TEST_ASSERT_EQUAL_UINT(18, offsetof(NtAssetEntry, asset_type));
+    TEST_ASSERT_EQUAL_UINT(19, offsetof(NtAssetEntry, _pad));
+    TEST_ASSERT_EQUAL_UINT(20, offsetof(NtAssetEntry, _pad2));
 }
 
 /* --- Asset type enum --- */
@@ -288,7 +289,6 @@ int main(void) {
     RUN_TEST(test_shader_code_magic_value);
     RUN_TEST(test_shader_code_header_field_offsets);
     RUN_TEST(test_shader_stage_enum);
-
 
     return UNITY_END();
 }

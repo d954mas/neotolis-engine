@@ -6,6 +6,7 @@
 /* clang-format off */
 #include "resource/nt_resource.h"
 #include "resource/nt_resource_internal.h"
+#include "hash/nt_hash.h"
 #include "http/nt_http.h"
 #include "fs/nt_fs.h"
 #include "time/nt_time.h"
@@ -42,7 +43,7 @@ static uint8_t *build_test_pack(uint32_t asset_count, uint32_t *out_size) {
     /* Fill header */
     NtPackHeader *h = (NtPackHeader *)blob;
     h->magic = NT_PACK_MAGIC;
-    h->pack_id = nt_resource_hash("test_pack");
+    h->pack_id = nt_hash32_str("test_pack").value;
     h->version = NT_PACK_VERSION;
     h->asset_count = (uint16_t)asset_count;
     h->header_size = header_size;
@@ -55,10 +56,11 @@ static uint8_t *build_test_pack(uint32_t asset_count, uint32_t *out_size) {
         char name[32];
         (void)snprintf(name, sizeof(name), "asset%u", i);
 
-        entries[i].resource_id = nt_resource_hash(name);
+        entries[i].resource_id = nt_hash64_str(name).value;
         entries[i].format_version = 1;
         entries[i].asset_type = (uint8_t)(NT_ASSET_MESH + (i % 3)); /* rotate types */
         entries[i]._pad = 0;
+        entries[i]._pad2 = 0;
         entries[i].offset = data_offset;
         entries[i].size = data_per_asset;
 
@@ -90,17 +92,6 @@ void tearDown(void) {
     nt_http_shutdown();
 }
 
-/* ---- Hash tests ---- */
-
-void test_hash_known_value(void) {
-    /* FNV-1a of "hello" = 0x4F9F2CAB */
-    TEST_ASSERT_EQUAL_HEX32(0x4F9F2CAB, nt_resource_hash("hello"));
-}
-
-void test_hash_null(void) { TEST_ASSERT_EQUAL_HEX32(0x811C9DC5, nt_resource_hash(NULL)); }
-
-void test_hash_empty(void) { TEST_ASSERT_EQUAL_HEX32(0x811C9DC5, nt_resource_hash("")); }
-
 /* ---- Init / shutdown tests ---- */
 
 void test_init_shutdown(void) {
@@ -131,7 +122,7 @@ void test_handle_encode_decode(void) {
 /* ---- Parser tests ---- */
 
 void test_parse_too_small(void) {
-    uint32_t pack_id = nt_resource_hash("small_pack");
+    nt_hash32_t pack_id = nt_hash32_str("small_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack_id, 0));
 
     uint8_t tiny[8] = {0};
@@ -140,7 +131,7 @@ void test_parse_too_small(void) {
 }
 
 void test_parse_bad_magic(void) {
-    uint32_t pack_id = nt_resource_hash("badmagic_pack");
+    nt_hash32_t pack_id = nt_hash32_str("badmagic_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack_id, 0));
 
     /* Build a valid-sized blob but with wrong magic */
@@ -150,7 +141,7 @@ void test_parse_bad_magic(void) {
 
     NtPackHeader *h = (NtPackHeader *)blob;
     h->magic = 0xDEADBEEF;
-    h->pack_id = pack_id;
+    h->pack_id = pack_id.value;
 
     nt_result_t r = nt_resource_parse_pack(pack_id, blob, blob_size);
     TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, r);
@@ -158,7 +149,7 @@ void test_parse_bad_magic(void) {
 }
 
 void test_parse_bad_version(void) {
-    uint32_t pack_id = nt_resource_hash("badver_pack");
+    nt_hash32_t pack_id = nt_hash32_str("badver_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack_id, 0));
 
     uint32_t blob_size = 0;
@@ -167,7 +158,7 @@ void test_parse_bad_version(void) {
 
     NtPackHeader *h = (NtPackHeader *)blob;
     h->version = 99;
-    h->pack_id = pack_id;
+    h->pack_id = pack_id.value;
 
     nt_result_t r = nt_resource_parse_pack(pack_id, blob, blob_size);
     TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, r);
@@ -175,7 +166,7 @@ void test_parse_bad_version(void) {
 }
 
 void test_parse_header_size_overflow(void) {
-    uint32_t pack_id = nt_resource_hash("hdr_overflow_pack");
+    nt_hash32_t pack_id = nt_hash32_str("hdr_overflow_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack_id, 0));
 
     uint32_t blob_size = 0;
@@ -184,7 +175,7 @@ void test_parse_header_size_overflow(void) {
 
     NtPackHeader *h = (NtPackHeader *)blob;
     h->header_size = blob_size + 100; /* header_size > blob_size */
-    h->pack_id = pack_id;
+    h->pack_id = pack_id.value;
 
     nt_result_t r = nt_resource_parse_pack(pack_id, blob, blob_size);
     TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, r);
@@ -192,7 +183,7 @@ void test_parse_header_size_overflow(void) {
 }
 
 void test_parse_total_size_mismatch(void) {
-    uint32_t pack_id = nt_resource_hash("total_mismatch_pack");
+    nt_hash32_t pack_id = nt_hash32_str("total_mismatch_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack_id, 0));
 
     uint32_t blob_size = 0;
@@ -201,7 +192,7 @@ void test_parse_total_size_mismatch(void) {
 
     NtPackHeader *h = (NtPackHeader *)blob;
     h->total_size = blob_size + 1; /* mismatch */
-    h->pack_id = pack_id;
+    h->pack_id = pack_id.value;
 
     nt_result_t r = nt_resource_parse_pack(pack_id, blob, blob_size);
     TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, r);
@@ -209,7 +200,7 @@ void test_parse_total_size_mismatch(void) {
 }
 
 void test_parse_bad_crc(void) {
-    uint32_t pack_id = nt_resource_hash("badcrc_pack");
+    nt_hash32_t pack_id = nt_hash32_str("badcrc_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack_id, 0));
 
     uint32_t blob_size = 0;
@@ -217,7 +208,7 @@ void test_parse_bad_crc(void) {
     TEST_ASSERT_NOT_NULL(blob);
 
     NtPackHeader *h = (NtPackHeader *)blob;
-    h->pack_id = pack_id;
+    h->pack_id = pack_id.value;
 
     /* Corrupt a data byte after header */
     blob[h->header_size] ^= 0xFF;
@@ -229,7 +220,7 @@ void test_parse_bad_crc(void) {
 }
 
 void test_parse_valid_empty(void) {
-    uint32_t pack_id = nt_resource_hash("empty_pack");
+    nt_hash32_t pack_id = nt_hash32_str("empty_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack_id, 0));
 
     uint32_t blob_size = 0;
@@ -237,7 +228,7 @@ void test_parse_valid_empty(void) {
     TEST_ASSERT_NOT_NULL(blob);
 
     NtPackHeader *h = (NtPackHeader *)blob;
-    h->pack_id = pack_id;
+    h->pack_id = pack_id.value;
     /* Recompute CRC for this pack_id (data region unchanged, CRC still valid) */
 
     nt_result_t r = nt_resource_parse_pack(pack_id, blob, blob_size);
@@ -247,7 +238,7 @@ void test_parse_valid_empty(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_parse_valid_two_assets(void) {
-    uint32_t pack_id = nt_resource_hash("two_asset_pack");
+    nt_hash32_t pack_id = nt_hash32_str("two_asset_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack_id, 0));
 
     uint32_t blob_size = 0;
@@ -255,7 +246,7 @@ void test_parse_valid_two_assets(void) {
     TEST_ASSERT_NOT_NULL(blob);
 
     NtPackHeader *h = (NtPackHeader *)blob;
-    h->pack_id = pack_id;
+    h->pack_id = pack_id.value;
     /* Recompute CRC since build_test_pack already computed it correctly */
 
     nt_result_t r = nt_resource_parse_pack(pack_id, blob, blob_size);
@@ -263,8 +254,8 @@ void test_parse_valid_two_assets(void) {
 
     /* Verify entries were registered correctly by checking resource_ids match */
     NtAssetEntry *entries = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
-    TEST_ASSERT_EQUAL_HEX32(nt_resource_hash("asset0"), entries[0].resource_id);
-    TEST_ASSERT_EQUAL_HEX32(nt_resource_hash("asset1"), entries[1].resource_id);
+    TEST_ASSERT_TRUE(entries[0].resource_id == nt_hash64_str("asset0").value);
+    TEST_ASSERT_TRUE(entries[1].resource_id == nt_hash64_str("asset1").value);
 
     /* Verify asset types */
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_MESH, entries[0].asset_type);
@@ -281,7 +272,7 @@ void test_parse_valid_two_assets(void) {
 
 void test_parse_unmounted_pack(void) {
     /* Do NOT mount this pack_id */
-    uint32_t pack_id = nt_resource_hash("never_mounted");
+    nt_hash32_t pack_id = nt_hash32_str("never_mounted");
 
     uint32_t blob_size = 0;
     uint8_t *blob = build_test_pack(0, &blob_size);
@@ -298,7 +289,7 @@ void test_parse_unmounted_pack(void) {
  * Build a NTPACK blob with one asset whose resource_id is `rid` and type is `atype`.
  * Returns malloc'd blob (caller frees). Sets *out_size to total blob size.
  */
-static uint8_t *build_pack_with_rid(uint32_t rid, uint8_t atype, uint32_t *out_size) {
+static uint8_t *build_pack_with_rid(uint64_t rid, uint8_t atype, uint32_t *out_size) {
     uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
     uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
     uint32_t data_per_asset = 16;
@@ -323,6 +314,7 @@ static uint8_t *build_pack_with_rid(uint32_t rid, uint8_t atype, uint32_t *out_s
     entry->format_version = 1;
     entry->asset_type = atype;
     entry->_pad = 0;
+    entry->_pad2 = 0;
     entry->offset = header_size;
     entry->size = data_per_asset;
 
@@ -335,40 +327,40 @@ static uint8_t *build_pack_with_rid(uint32_t rid, uint8_t atype, uint32_t *out_s
 /* ---- Mount / unmount / set_priority tests ---- */
 
 void test_mount_unmount_remount(void) {
-    uint32_t pid = nt_resource_hash("remount_pack");
+    nt_hash32_t pid = nt_hash32_str("remount_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     nt_resource_unmount(pid);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
 }
 
 void test_mount_duplicate(void) {
-    uint32_t pid = nt_resource_hash("dup_pack");
+    nt_hash32_t pid = nt_hash32_str("dup_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, nt_resource_mount(pid, 0));
 }
 
 void test_unmount_unknown(void) {
     /* Should not crash or assert */
-    nt_resource_unmount(0xDEAD);
+    nt_resource_unmount((nt_hash32_t){0xDEAD});
 }
 
 void test_set_priority_ok(void) {
-    uint32_t pid = nt_resource_hash("prio_pack");
+    nt_hash32_t pid = nt_hash32_str("prio_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_set_priority(pid, 5));
 }
 
-void test_set_priority_unknown(void) { TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, nt_resource_set_priority(0xDEAD, 5)); }
+void test_set_priority_unknown(void) { TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, nt_resource_set_priority((nt_hash32_t){0xDEAD}, 5)); }
 
 /* ---- Request / get tests ---- */
 
 void test_request_returns_handle(void) {
-    nt_resource_t h = nt_resource_request(nt_resource_hash("some_res"), NT_ASSET_MESH);
+    nt_resource_t h = nt_resource_request(nt_hash64_str("some_res"), NT_ASSET_MESH);
     TEST_ASSERT_TRUE(h.id != 0);
 }
 
 void test_request_idempotent(void) {
-    uint32_t rid = nt_resource_hash("idem_res");
+    nt_hash64_t rid = nt_hash64_str("idem_res");
     nt_resource_t h1 = nt_resource_request(rid, NT_ASSET_MESH);
     nt_resource_t h2 = nt_resource_request(rid, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL_UINT32(h1.id, h2.id);
@@ -379,15 +371,15 @@ void test_get_invalid_handle(void) { TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get
 /* ---- State transition tests ---- */
 
 void test_is_ready_before_step(void) {
-    uint32_t pid = nt_resource_hash("ready_before_pack");
-    uint32_t rid = nt_resource_hash("ready_before_res");
+    nt_hash32_t pid = nt_hash32_str("ready_before_pack");
+    nt_hash64_t rid = nt_hash64_str("ready_before_res");
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
 
     uint32_t blob_size = 0;
-    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size);
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
-    ((NtPackHeader *)blob)->pack_id = pid;
+    ((NtPackHeader *)blob)->pack_id = pid.value;
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
 
@@ -403,15 +395,15 @@ void test_is_ready_before_step(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_is_ready_after_step(void) {
-    uint32_t pid = nt_resource_hash("ready_after_pack");
-    uint32_t rid = nt_resource_hash("ready_after_res");
+    nt_hash32_t pid = nt_hash32_str("ready_after_pack");
+    nt_hash64_t rid = nt_hash64_str("ready_after_res");
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
 
     uint32_t blob_size = 0;
-    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size);
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
-    ((NtPackHeader *)blob)->pack_id = pid;
+    ((NtPackHeader *)blob)->pack_id = pid.value;
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
 
@@ -433,9 +425,9 @@ void test_is_ready_after_step(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_priority_high_wins(void) {
-    uint32_t pid_a = nt_resource_hash("prio_pack_a");
-    uint32_t pid_b = nt_resource_hash("prio_pack_b");
-    uint32_t rid = nt_resource_hash("shared_asset");
+    nt_hash32_t pid_a = nt_hash32_str("prio_pack_a");
+    nt_hash32_t pid_b = nt_hash32_str("prio_pack_b");
+    nt_hash64_t rid = nt_hash64_str("shared_asset");
 
     /* Mount A with priority 1, B with priority 10 */
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 1));
@@ -443,15 +435,15 @@ void test_priority_high_wins(void) {
 
     /* Parse both with same resource_id */
     uint32_t blob_size_a = 0;
-    uint8_t *blob_a = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_a);
+    uint8_t *blob_a = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size_a);
     TEST_ASSERT_NOT_NULL(blob_a);
-    ((NtPackHeader *)blob_a)->pack_id = pid_a;
+    ((NtPackHeader *)blob_a)->pack_id = pid_a.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_a, blob_a, blob_size_a));
 
     uint32_t blob_size_b = 0;
-    uint8_t *blob_b = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_b);
+    uint8_t *blob_b = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size_b);
     TEST_ASSERT_NOT_NULL(blob_b);
-    ((NtPackHeader *)blob_b)->pack_id = pid_b;
+    ((NtPackHeader *)blob_b)->pack_id = pid_b.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_b, blob_b, blob_size_b));
 
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
@@ -470,24 +462,24 @@ void test_priority_high_wins(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_priority_equal_last_mounted_wins(void) {
-    uint32_t pid_a = nt_resource_hash("eq_pack_a");
-    uint32_t pid_b = nt_resource_hash("eq_pack_b");
-    uint32_t rid = nt_resource_hash("eq_shared");
+    nt_hash32_t pid_a = nt_hash32_str("eq_pack_a");
+    nt_hash32_t pid_b = nt_hash32_str("eq_pack_b");
+    nt_hash64_t rid = nt_hash64_str("eq_shared");
 
     /* Both priority 5: A mounted first, B mounted second */
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 5));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 5));
 
     uint32_t blob_size_a = 0;
-    uint8_t *blob_a = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_a);
+    uint8_t *blob_a = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size_a);
     TEST_ASSERT_NOT_NULL(blob_a);
-    ((NtPackHeader *)blob_a)->pack_id = pid_a;
+    ((NtPackHeader *)blob_a)->pack_id = pid_a.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_a, blob_a, blob_size_a));
 
     uint32_t blob_size_b = 0;
-    uint8_t *blob_b = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_b);
+    uint8_t *blob_b = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size_b);
     TEST_ASSERT_NOT_NULL(blob_b);
-    ((NtPackHeader *)blob_b)->pack_id = pid_b;
+    ((NtPackHeader *)blob_b)->pack_id = pid_b.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_b, blob_b, blob_size_b));
 
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
@@ -505,24 +497,24 @@ void test_priority_equal_last_mounted_wins(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_unmount_fallback(void) {
-    uint32_t pid_a = nt_resource_hash("fb_pack_a");
-    uint32_t pid_b = nt_resource_hash("fb_pack_b");
-    uint32_t rid = nt_resource_hash("fb_shared");
+    nt_hash32_t pid_a = nt_hash32_str("fb_pack_a");
+    nt_hash32_t pid_b = nt_hash32_str("fb_pack_b");
+    nt_hash64_t rid = nt_hash64_str("fb_shared");
 
     /* A priority 1, B priority 10 */
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 1));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 10));
 
     uint32_t blob_size_a = 0;
-    uint8_t *blob_a = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_a);
+    uint8_t *blob_a = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size_a);
     TEST_ASSERT_NOT_NULL(blob_a);
-    ((NtPackHeader *)blob_a)->pack_id = pid_a;
+    ((NtPackHeader *)blob_a)->pack_id = pid_a.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_a, blob_a, blob_size_a));
 
     uint32_t blob_size_b = 0;
-    uint8_t *blob_b = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_b);
+    uint8_t *blob_b = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size_b);
     TEST_ASSERT_NOT_NULL(blob_b);
-    ((NtPackHeader *)blob_b)->pack_id = pid_b;
+    ((NtPackHeader *)blob_b)->pack_id = pid_b.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_b, blob_b, blob_size_b));
 
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
@@ -543,24 +535,24 @@ void test_unmount_fallback(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_set_priority_reorder(void) {
-    uint32_t pid_a = nt_resource_hash("reorder_pack_a");
-    uint32_t pid_b = nt_resource_hash("reorder_pack_b");
-    uint32_t rid = nt_resource_hash("reorder_shared");
+    nt_hash32_t pid_a = nt_hash32_str("reorder_pack_a");
+    nt_hash32_t pid_b = nt_hash32_str("reorder_pack_b");
+    nt_hash64_t rid = nt_hash64_str("reorder_shared");
 
     /* A priority 10 (high), B priority 1 (low) */
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 10));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 1));
 
     uint32_t blob_size_a = 0;
-    uint8_t *blob_a = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_a);
+    uint8_t *blob_a = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size_a);
     TEST_ASSERT_NOT_NULL(blob_a);
-    ((NtPackHeader *)blob_a)->pack_id = pid_a;
+    ((NtPackHeader *)blob_a)->pack_id = pid_a.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_a, blob_a, blob_size_a));
 
     uint32_t blob_size_b = 0;
-    uint8_t *blob_b = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size_b);
+    uint8_t *blob_b = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size_b);
     TEST_ASSERT_NOT_NULL(blob_b);
-    ((NtPackHeader *)blob_b)->pack_id = pid_b;
+    ((NtPackHeader *)blob_b)->pack_id = pid_b.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_b, blob_b, blob_size_b));
 
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
@@ -582,15 +574,15 @@ void test_set_priority_reorder(void) {
 /* ---- State reporting tests ---- */
 
 void test_get_state_registered(void) {
-    uint32_t pid = nt_resource_hash("state_reg_pack");
-    uint32_t rid = nt_resource_hash("state_reg_res");
+    nt_hash32_t pid = nt_hash32_str("state_reg_pack");
+    nt_hash64_t rid = nt_hash64_str("state_reg_res");
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
 
     uint32_t blob_size = 0;
-    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size);
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
-    ((NtPackHeader *)blob)->pack_id = pid;
+    ((NtPackHeader *)blob)->pack_id = pid.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
 
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
@@ -600,15 +592,15 @@ void test_get_state_registered(void) {
 }
 
 void test_failed_permanent(void) {
-    uint32_t pid = nt_resource_hash("fail_pack");
-    uint32_t rid = nt_resource_hash("fail_res");
+    nt_hash32_t pid = nt_hash32_str("fail_pack");
+    nt_hash64_t rid = nt_hash64_str("fail_res");
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
 
     uint32_t blob_size = 0;
-    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size);
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
-    ((NtPackHeader *)blob)->pack_id = pid;
+    ((NtPackHeader *)blob)->pack_id = pid.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
 
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
@@ -628,37 +620,37 @@ void test_failed_permanent(void) {
 /* ---- Virtual pack tests ---- */
 
 void test_create_virtual_pack(void) {
-    uint32_t pid = nt_resource_hash("virtual_pack");
+    nt_hash32_t pid = nt_hash32_str("virtual_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
 }
 
 void test_create_virtual_pack_duplicate(void) {
-    uint32_t pid = nt_resource_hash("dup_virtual");
+    nt_hash32_t pid = nt_hash32_str("dup_virtual");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
     TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, nt_resource_create_pack(pid, 0));
 }
 
 void test_register_no_pack(void) {
     /* Register on a pack that was never created */
-    nt_result_t r = nt_resource_register(0xDEAD, nt_resource_hash("some_res"), NT_ASSET_TEXTURE, 42);
+    nt_result_t r = nt_resource_register((nt_hash32_t){0xDEAD}, nt_hash64_str("some_res"), NT_ASSET_TEXTURE, 42);
     TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, r);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_register_file_pack_rejected(void) {
     /* Mount a file pack (not virtual) */
-    uint32_t pid = nt_resource_hash("file_only_pack");
+    nt_hash32_t pid = nt_hash32_str("file_only_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
 
     /* Attempt register on file pack should fail */
-    nt_result_t r = nt_resource_register(pid, nt_resource_hash("some_res"), NT_ASSET_TEXTURE, 42);
+    nt_result_t r = nt_resource_register(pid, nt_hash64_str("some_res"), NT_ASSET_TEXTURE, 42);
     TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, r);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_register_immediate_ready(void) {
-    uint32_t pid = nt_resource_hash("imm_ready_pack");
-    uint32_t rid = nt_resource_hash("imm_ready_res");
+    nt_hash32_t pid = nt_hash32_str("imm_ready_pack");
+    nt_hash64_t rid = nt_hash64_str("imm_ready_res");
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, 42));
@@ -673,8 +665,8 @@ void test_register_immediate_ready(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_register_update_handle(void) {
-    uint32_t pid = nt_resource_hash("update_handle_pack");
-    uint32_t rid = nt_resource_hash("update_handle_res");
+    nt_hash32_t pid = nt_hash32_str("update_handle_pack");
+    nt_hash64_t rid = nt_hash64_str("update_handle_res");
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, 42));
@@ -691,16 +683,16 @@ void test_register_update_handle(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_virtual_overrides_file(void) {
-    uint32_t pid_file = nt_resource_hash("vof_file_pack");
-    uint32_t pid_virt = nt_resource_hash("vof_virt_pack");
-    uint32_t rid = nt_resource_hash("vof_shared");
+    nt_hash32_t pid_file = nt_hash32_str("vof_file_pack");
+    nt_hash32_t pid_virt = nt_hash32_str("vof_virt_pack");
+    nt_hash64_t rid = nt_hash64_str("vof_shared");
 
     /* File pack at priority 1 */
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_file, 1));
     uint32_t blob_size = 0;
-    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_TEXTURE, &blob_size);
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_TEXTURE, &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
-    ((NtPackHeader *)blob)->pack_id = pid_file;
+    ((NtPackHeader *)blob)->pack_id = pid_file.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_file, blob, blob_size));
     nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100);
 
@@ -719,9 +711,9 @@ void test_virtual_overrides_file(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_file_overrides_virtual(void) {
-    uint32_t pid_virt = nt_resource_hash("fov_virt_pack");
-    uint32_t pid_file = nt_resource_hash("fov_file_pack");
-    uint32_t rid = nt_resource_hash("fov_shared");
+    nt_hash32_t pid_virt = nt_hash32_str("fov_virt_pack");
+    nt_hash32_t pid_file = nt_hash32_str("fov_file_pack");
+    nt_hash64_t rid = nt_hash64_str("fov_shared");
 
     /* Virtual pack at priority 1 */
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid_virt, 1));
@@ -730,9 +722,9 @@ void test_file_overrides_virtual(void) {
     /* File pack at priority 10 */
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_file, 10));
     uint32_t blob_size = 0;
-    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_TEXTURE, &blob_size);
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_TEXTURE, &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
-    ((NtPackHeader *)blob)->pack_id = pid_file;
+    ((NtPackHeader *)blob)->pack_id = pid_file.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_file, blob, blob_size));
     nt_resource_test_set_asset_state(rid, 1, NT_ASSET_STATE_READY, 200);
 
@@ -747,16 +739,16 @@ void test_file_overrides_virtual(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_unregister_fallback(void) {
-    uint32_t pid_file = nt_resource_hash("unreg_file_pack");
-    uint32_t pid_virt = nt_resource_hash("unreg_virt_pack");
-    uint32_t rid = nt_resource_hash("unreg_shared");
+    nt_hash32_t pid_file = nt_hash32_str("unreg_file_pack");
+    nt_hash32_t pid_virt = nt_hash32_str("unreg_virt_pack");
+    nt_hash64_t rid = nt_hash64_str("unreg_shared");
 
     /* File pack at priority 1, handle=100 */
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_file, 1));
     uint32_t blob_size = 0;
-    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_TEXTURE, &blob_size);
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_TEXTURE, &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
-    ((NtPackHeader *)blob)->pack_id = pid_file;
+    ((NtPackHeader *)blob)->pack_id = pid_file.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_file, blob, blob_size));
     nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 100);
 
@@ -778,8 +770,8 @@ void test_unregister_fallback(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_unmount_virtual_clears(void) {
-    uint32_t pid = nt_resource_hash("unmount_virt_pack");
-    uint32_t rid = nt_resource_hash("unmount_virt_res");
+    nt_hash32_t pid = nt_hash32_str("unmount_virt_pack");
+    nt_hash64_t rid = nt_hash64_str("unmount_virt_res");
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, 42));
@@ -799,21 +791,21 @@ void test_unmount_virtual_clears(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_set_placeholder_fallback(void) {
     /* Register placeholder texture via virtual pack */
-    uint32_t ph_pid = nt_resource_hash("ph_vpack");
-    uint32_t ph_rid = nt_resource_hash("placeholder_tex");
+    nt_hash32_t ph_pid = nt_hash32_str("ph_vpack");
+    nt_hash64_t ph_rid = nt_hash64_str("placeholder_tex");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(ph_pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(ph_pid, ph_rid, NT_ASSET_TEXTURE, 999));
     nt_resource_set_placeholder_texture(ph_rid);
 
     /* Mount file pack with resource in REGISTERED state (not READY) */
-    uint32_t pid = nt_resource_hash("ph_fallback_pack");
-    uint32_t rid = nt_resource_hash("ph_fallback_res");
+    nt_hash32_t pid = nt_hash32_str("ph_fallback_pack");
+    nt_hash64_t rid = nt_hash64_str("ph_fallback_res");
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     uint32_t blob_size = 0;
-    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_TEXTURE, &blob_size);
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_TEXTURE, &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
-    ((NtPackHeader *)blob)->pack_id = pid;
+    ((NtPackHeader *)blob)->pack_id = pid.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
 
     /* Asset is REGISTERED, not READY: should get placeholder handle */
@@ -827,20 +819,20 @@ void test_set_placeholder_fallback(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_placeholder_not_used_when_ready(void) {
     /* Register placeholder texture via virtual pack */
-    uint32_t ph_pid = nt_resource_hash("ph_ready_vpack");
-    uint32_t ph_rid = nt_resource_hash("placeholder_tex2");
+    nt_hash32_t ph_pid = nt_hash32_str("ph_ready_vpack");
+    nt_hash64_t ph_rid = nt_hash64_str("placeholder_tex2");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(ph_pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(ph_pid, ph_rid, NT_ASSET_TEXTURE, 999));
     nt_resource_set_placeholder_texture(ph_rid);
 
-    uint32_t pid = nt_resource_hash("ph_ready_pack");
-    uint32_t rid = nt_resource_hash("ph_ready_res");
+    nt_hash32_t pid = nt_hash32_str("ph_ready_pack");
+    nt_hash64_t rid = nt_hash64_str("ph_ready_res");
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     uint32_t blob_size = 0;
-    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_TEXTURE, &blob_size);
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_TEXTURE, &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
-    ((NtPackHeader *)blob)->pack_id = pid;
+    ((NtPackHeader *)blob)->pack_id = pid.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
 
     /* Set READY with handle=42 (pack_index=1, file pack after virtual pack at 0) */
@@ -858,21 +850,21 @@ void test_placeholder_not_used_when_ready(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_placeholder_type_specific(void) {
     /* Register placeholder texture via virtual pack */
-    uint32_t ph_pid = nt_resource_hash("ph_type_vpack");
-    uint32_t ph_rid = nt_resource_hash("placeholder_tex3");
+    nt_hash32_t ph_pid = nt_hash32_str("ph_type_vpack");
+    nt_hash64_t ph_rid = nt_hash64_str("placeholder_tex3");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(ph_pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(ph_pid, ph_rid, NT_ASSET_TEXTURE, 999));
     nt_resource_set_placeholder_texture(ph_rid);
 
     /* Request a MESH resource with no READY entry */
-    uint32_t pid = nt_resource_hash("ph_type_pack");
-    uint32_t rid = nt_resource_hash("ph_type_res");
+    nt_hash32_t pid = nt_hash32_str("ph_type_pack");
+    nt_hash64_t rid = nt_hash64_str("ph_type_res");
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     uint32_t blob_size = 0;
-    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size);
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
-    ((NtPackHeader *)blob)->pack_id = pid;
+    ((NtPackHeader *)blob)->pack_id = pid.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
 
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
@@ -887,7 +879,7 @@ void test_placeholder_type_specific(void) {
 /* ---- Entries bounds check test ---- */
 
 void test_parse_entries_overflow(void) {
-    uint32_t pack_id = nt_resource_hash("entries_overflow_pack");
+    nt_hash32_t pack_id = nt_hash32_str("entries_overflow_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack_id, 0));
 
     /* Build a valid blob with 0 assets, then lie about asset_count */
@@ -896,7 +888,7 @@ void test_parse_entries_overflow(void) {
     TEST_ASSERT_NOT_NULL(blob);
 
     NtPackHeader *h = (NtPackHeader *)blob;
-    h->pack_id = pack_id;
+    h->pack_id = pack_id.value;
     h->asset_count = 9999; /* header region can't hold 9999 entries */
 
     nt_result_t r = nt_resource_parse_pack(pack_id, blob, blob_size);
@@ -908,30 +900,30 @@ void test_parse_entries_overflow(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_asset_slot_reuse(void) {
-    /* Mount pack A, parse 2 assets, unmount → creates holes */
-    uint32_t pid_a = nt_resource_hash("reuse_pack_a");
+    /* Mount pack A, parse 2 assets, unmount -> creates holes */
+    nt_hash32_t pid_a = nt_hash32_str("reuse_pack_a");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 0));
 
     uint32_t blob_size_a = 0;
     uint8_t *blob_a = build_test_pack(2, &blob_size_a);
     TEST_ASSERT_NOT_NULL(blob_a);
-    ((NtPackHeader *)blob_a)->pack_id = pid_a;
+    ((NtPackHeader *)blob_a)->pack_id = pid_a.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_a, blob_a, blob_size_a));
 
     nt_resource_unmount(pid_a);
 
-    /* Mount pack B, parse 2 assets → should reuse holes from A */
-    uint32_t pid_b = nt_resource_hash("reuse_pack_b");
+    /* Mount pack B, parse 2 assets -> should reuse holes from A */
+    nt_hash32_t pid_b = nt_hash32_str("reuse_pack_b");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 0));
 
     uint32_t blob_size_b = 0;
     uint8_t *blob_b = build_test_pack(2, &blob_size_b);
     TEST_ASSERT_NOT_NULL(blob_b);
-    ((NtPackHeader *)blob_b)->pack_id = pid_b;
+    ((NtPackHeader *)blob_b)->pack_id = pid_b.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_b, blob_b, blob_size_b));
 
     /* Request and verify assets from pack B resolve correctly */
-    uint32_t rid = nt_resource_hash("asset0");
+    nt_hash64_t rid = nt_hash64_str("asset0");
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
     TEST_ASSERT_TRUE(h.id != 0);
 
@@ -970,7 +962,7 @@ static uint32_t fake_activate_fail(const uint8_t *data, uint32_t size) {
 
 /* ---- Test pack file writer ---- */
 
-static void write_test_pack_file(const char *path, uint32_t pack_id, uint32_t rid, uint8_t atype) {
+static void write_test_pack_file(const char *path, uint32_t pack_id, uint64_t rid, uint8_t atype) {
     uint32_t blob_size = 0;
     uint8_t *blob = build_pack_with_rid(rid, atype, &blob_size);
     if (!blob) {
@@ -990,10 +982,10 @@ static void write_test_pack_file(const char *path, uint32_t pack_id, uint32_t ri
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_load_file_transitions_state(void) {
-    uint32_t pid = nt_resource_hash("load_file_pack");
-    uint32_t rid = nt_resource_hash("load_file_res");
+    nt_hash32_t pid = nt_hash32_str("load_file_pack");
+    nt_hash64_t rid = nt_hash64_str("load_file_res");
 
-    write_test_pack_file("build/test_pack_load.ntpack", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_pack_load.ntpack", pid.value, rid.value, NT_ASSET_MESH);
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_PACK_STATE_NONE, nt_resource_pack_state(pid));
@@ -1012,7 +1004,7 @@ void test_load_file_transitions_state(void) {
 }
 
 void test_load_file_nonexistent(void) {
-    uint32_t pid = nt_resource_hash("load_nofile_pack");
+    nt_hash32_t pid = nt_hash32_str("load_nofile_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
 
     /* Set retry to 1 so it fails permanently */
@@ -1033,8 +1025,8 @@ void test_load_file_nonexistent(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_pack_state_api(void) {
-    uint32_t pid = nt_resource_hash("state_api_pack");
-    uint32_t rid = nt_resource_hash("state_api_res");
+    nt_hash32_t pid = nt_hash32_str("state_api_pack");
+    nt_hash64_t rid = nt_hash64_str("state_api_res");
 
     /* Not mounted: NONE */
     TEST_ASSERT_EQUAL(NT_PACK_STATE_NONE, nt_resource_pack_state(pid));
@@ -1044,9 +1036,9 @@ void test_pack_state_api(void) {
 
     /* Load via direct parse (manual): NONE -> directly to READY via parse_pack + set_asset_state */
     uint32_t blob_size = 0;
-    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size);
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
-    ((NtPackHeader *)blob)->pack_id = pid;
+    ((NtPackHeader *)blob)->pack_id = pid.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
 
     /* After parse_pack, pack_state is READY (assets registered, blob available) */
@@ -1056,7 +1048,7 @@ void test_pack_state_api(void) {
 }
 
 void test_pack_progress(void) {
-    uint32_t pid = nt_resource_hash("progress_pack");
+    nt_hash32_t pid = nt_hash32_str("progress_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
 
     uint32_t received = 99;
@@ -1079,15 +1071,15 @@ void test_activation_called_on_step(void) {
     s_activate_call_count = 0;
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
 
-    uint32_t pid = nt_resource_hash("act_call_pack");
-    uint32_t rid = nt_resource_hash("act_call_res");
+    nt_hash32_t pid = nt_hash32_str("act_call_pack");
+    nt_hash64_t rid = nt_hash64_str("act_call_res");
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
 
     uint32_t blob_size = 0;
-    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size);
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
-    ((NtPackHeader *)blob)->pack_id = pid;
+    ((NtPackHeader *)blob)->pack_id = pid.value;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
 
     /* Pack needs to be in READY state for activation to run */
@@ -1110,10 +1102,10 @@ void test_activation_called_on_step(void) {
     s_activate_call_count = 0;
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
 
-    uint32_t pid2 = nt_resource_hash("act_call_pack2");
-    uint32_t rid2 = nt_resource_hash("act_call_res2");
+    nt_hash32_t pid2 = nt_hash32_str("act_call_pack2");
+    nt_hash64_t rid2 = nt_hash64_str("act_call_res2");
 
-    write_test_pack_file("build/test_act_call.ntpack", pid2, rid2, NT_ASSET_MESH);
+    write_test_pack_file("build/test_act_call.ntpack", pid2.value, rid2.value, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid2, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid2, "build/test_act_call.ntpack"));
     nt_resource_step(); /* polls I/O, parses, activates */
@@ -1129,10 +1121,10 @@ void test_activation_sets_runtime_handle(void) {
     s_activate_call_count = 0;
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
 
-    uint32_t pid = nt_resource_hash("act_handle_pack");
-    uint32_t rid = nt_resource_hash("act_handle_res");
+    nt_hash32_t pid = nt_hash32_str("act_handle_pack");
+    nt_hash64_t rid = nt_hash64_str("act_handle_res");
 
-    write_test_pack_file("build/test_act_handle.ntpack", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_act_handle.ntpack", pid.value, rid.value, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_act_handle.ntpack"));
     nt_resource_step();
@@ -1171,10 +1163,11 @@ static void write_test_pack_multi(const char *path, uint32_t pack_id, uint8_t at
     for (uint32_t i = 0; i < count; i++) {
         char name[32];
         (void)snprintf(name, sizeof(name), "multi_%u", i);
-        entries[i].resource_id = nt_resource_hash(name);
+        entries[i].resource_id = nt_hash64_str(name).value;
         entries[i].format_version = 1;
         entries[i].asset_type = atype;
         entries[i]._pad = 0;
+        entries[i]._pad2 = 0;
         entries[i].offset = data_offset;
         entries[i].size = data_per_asset;
         uint32_t aligned = (data_per_asset + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
@@ -1196,10 +1189,10 @@ void test_activation_budget_limits(void) {
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
     nt_resource_set_activate_budget(1); /* budget = 1, mesh cost = 1: only 1 per step */
 
-    uint32_t pid = nt_resource_hash("budget_pack");
+    nt_hash32_t pid = nt_hash32_str("budget_pack");
 
     /* Build pack with 3 mesh assets (all same type) */
-    write_test_pack_multi("build/test_budget.ntpack", pid, NT_ASSET_MESH, 3);
+    write_test_pack_multi("build/test_budget.ntpack", pid.value, NT_ASSET_MESH, 3);
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_budget.ntpack"));
@@ -1221,10 +1214,10 @@ void test_activation_budget_skips_expensive(void) {
     nt_resource_set_activator(NT_ASSET_TEXTURE, fake_activate, fake_deactivate);
     nt_resource_set_activate_budget(1); /* budget 1, texture cost 4: can't fit */
 
-    uint32_t pid = nt_resource_hash("budget_skip_pack");
-    uint32_t rid = nt_resource_hash("budget_skip_res");
+    nt_hash32_t pid = nt_hash32_str("budget_skip_pack");
+    nt_hash64_t rid = nt_hash64_str("budget_skip_res");
 
-    write_test_pack_file("build/test_budget_skip.ntpack", pid, rid, NT_ASSET_TEXTURE);
+    write_test_pack_file("build/test_budget_skip.ntpack", pid.value, rid.value, NT_ASSET_TEXTURE);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_budget_skip.ntpack"));
     nt_resource_step();
@@ -1237,10 +1230,10 @@ void test_activation_budget_skips_expensive(void) {
 
 void test_no_activator_stays_registered(void) {
     /* Don't register any activator -- assets stay REGISTERED */
-    uint32_t pid = nt_resource_hash("no_act_pack");
-    uint32_t rid = nt_resource_hash("no_act_res");
+    nt_hash32_t pid = nt_hash32_str("no_act_pack");
+    nt_hash64_t rid = nt_hash64_str("no_act_res");
 
-    write_test_pack_file("build/test_no_act.ntpack", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_no_act.ntpack", pid.value, rid.value, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_no_act.ntpack"));
     nt_resource_step();
@@ -1270,12 +1263,12 @@ void test_set_retry_policy(void) {
 /* ---- Blob policy tests ---- */
 
 void test_blob_policy_keep(void) {
-    uint32_t pid = nt_resource_hash("blob_keep_pack");
-    uint32_t rid = nt_resource_hash("blob_keep_res");
+    nt_hash32_t pid = nt_hash32_str("blob_keep_pack");
+    nt_hash64_t rid = nt_hash64_str("blob_keep_res");
 
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
 
-    write_test_pack_file("build/test_blob_keep.ntpack", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_blob_keep.ntpack", pid.value, rid.value, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     nt_resource_set_blob_policy(pid, NT_BLOB_KEEP, 0);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_blob_keep.ntpack"));
@@ -1300,10 +1293,10 @@ void test_invalidate_marks_registered(void) {
     s_deactivate_call_count = 0;
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
 
-    uint32_t pid = nt_resource_hash("inv_reg_pack");
-    uint32_t rid = nt_resource_hash("inv_reg_res");
+    nt_hash32_t pid = nt_hash32_str("inv_reg_pack");
+    nt_hash64_t rid = nt_hash64_str("inv_reg_res");
 
-    write_test_pack_file("build/test_inv_reg.ntpack", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_inv_reg.ntpack", pid.value, rid.value, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_inv_reg.ntpack"));
     nt_resource_step(); /* load + activate */
@@ -1332,10 +1325,10 @@ void test_invalidate_calls_deactivator(void) {
     s_last_deactivated_handle = 0;
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
 
-    uint32_t pid = nt_resource_hash("inv_deact_pack");
-    uint32_t rid = nt_resource_hash("inv_deact_res");
+    nt_hash32_t pid = nt_hash32_str("inv_deact_pack");
+    nt_hash64_t rid = nt_hash64_str("inv_deact_res");
 
-    write_test_pack_file("build/test_inv_deact.ntpack", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_inv_deact.ntpack", pid.value, rid.value, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_inv_deact.ntpack"));
     nt_resource_step();
@@ -1355,8 +1348,8 @@ void test_invalidate_skips_virtual(void) {
     s_deactivate_call_count = 0;
 
     /* Virtual pack asset should NOT be invalidated */
-    uint32_t pid = nt_resource_hash("inv_virt_pack");
-    uint32_t rid = nt_resource_hash("inv_virt_res");
+    nt_hash32_t pid = nt_hash32_str("inv_virt_pack");
+    nt_hash64_t rid = nt_hash64_str("inv_virt_res");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, 42));
 
@@ -1377,10 +1370,10 @@ void test_invalidate_triggers_redownload_on_evicted_blob(void) {
     s_deactivate_call_count = 0;
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
 
-    uint32_t pid = nt_resource_hash("inv_redl_pack");
-    uint32_t rid = nt_resource_hash("inv_redl_res");
+    nt_hash32_t pid = nt_hash32_str("inv_redl_pack");
+    nt_hash64_t rid = nt_hash64_str("inv_redl_res");
 
-    write_test_pack_file("build/test_inv_redl.ntpack", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_inv_redl.ntpack", pid.value, rid.value, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1); /* TTL = 1ms */
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_inv_redl.ntpack"));
@@ -1426,10 +1419,10 @@ void test_unmount_deactivates_assets(void) {
     s_deactivate_call_count = 0;
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
 
-    uint32_t pid = nt_resource_hash("unmount_deact_pack");
-    uint32_t rid = nt_resource_hash("unmount_deact_res");
+    nt_hash32_t pid = nt_hash32_str("unmount_deact_pack");
+    nt_hash64_t rid = nt_hash64_str("unmount_deact_res");
 
-    write_test_pack_file("build/test_unmount_deact.ntpack", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_unmount_deact.ntpack", pid.value, rid.value, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_unmount_deact.ntpack"));
     nt_resource_step();
@@ -1450,10 +1443,10 @@ void test_activation_failure_sets_failed(void) {
     s_activate_call_count = 0;
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate_fail, NULL);
 
-    uint32_t pid = nt_resource_hash("act_fail_pack");
-    uint32_t rid = nt_resource_hash("act_fail_res");
+    nt_hash32_t pid = nt_hash32_str("act_fail_pack");
+    nt_hash64_t rid = nt_hash64_str("act_fail_res");
 
-    write_test_pack_file("build/test_act_fail.ntpack", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_act_fail.ntpack", pid.value, rid.value, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_act_fail.ntpack"));
     nt_resource_step();
@@ -1469,7 +1462,7 @@ void test_activation_failure_sets_failed(void) {
 /* ---- Load URL on native (should fail gracefully) ---- */
 
 void test_load_url_native_fails(void) {
-    uint32_t pid = nt_resource_hash("url_fail_pack");
+    nt_hash32_t pid = nt_hash32_str("url_fail_pack");
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     nt_resource_set_retry_policy(1, 100, 1000);
 
@@ -1486,11 +1479,6 @@ void test_load_url_native_fails(void) {
 
 int main(void) {
     UNITY_BEGIN();
-
-    /* Hash tests */
-    RUN_TEST(test_hash_known_value);
-    RUN_TEST(test_hash_null);
-    RUN_TEST(test_hash_empty);
 
     /* Init / shutdown */
     RUN_TEST(test_init_shutdown);

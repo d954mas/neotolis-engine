@@ -1,17 +1,17 @@
 /*
- * Textured Cube Demo — Neotolis Engine
+ * Textured Cube Demo -- Neotolis Engine
  *
  * Full asset pipeline demo: mesh, shaders, and textures all from .ntpack packs.
  *
  * Packs:
- *   base.ntpack         — cube mesh + shaders (loaded on start)
- *   lenna_pixel.ntpack  — 8x8 pixel art lenna
- *   lenna_hires.ntpack  — full resolution lenna
+ *   base.ntpack         -- cube mesh + shaders (loaded on start)
+ *   lenna_pixel.ntpack  -- 8x8 pixel art lenna
+ *   lenna_hires.ntpack  -- full resolution lenna
  *
  * Controls:
- *   SPACE — cycle: load pixel → load hires → unload both
- *   ENTER — swap texture pack priorities
- *   ESC   — quit (native only)
+ *   SPACE -- cycle: load pixel -> load hires -> unload both
+ *   ENTER -- swap texture pack priorities
+ *   ESC   -- quit (native only)
  *
  * Build packs first:  build_tq_packs  (from project root)
  */
@@ -21,6 +21,7 @@
 #include "core/nt_platform.h"
 #include "fs/nt_fs.h"
 #include "graphics/nt_gfx.h"
+#include "hash/nt_hash.h"
 #include "http/nt_http.h"
 #include "input/nt_input.h"
 #include "log/nt_log.h"
@@ -56,9 +57,9 @@ static nt_texture_t s_fallback_texture;
 
 /* ---- Resource handles ---- */
 
-static uint32_t s_base_pack_id;
-static uint32_t s_pixel_pack_id;
-static uint32_t s_hires_pack_id;
+static nt_hash32_t s_base_pack_id;
+static nt_hash32_t s_pixel_pack_id;
+static nt_hash32_t s_hires_pack_id;
 
 static nt_resource_t s_mesh_handle;
 static nt_resource_t s_vs_handle;
@@ -204,7 +205,7 @@ static void frame(void) {
         nt_log_info(">> Pipeline created from pack shaders");
     }
 
-    /* Resolve texture: resource handle → GFX texture, fallback if not ready */
+    /* Resolve texture: resource handle -> GFX texture, fallback if not ready */
     nt_texture_t active_tex = s_fallback_texture;
     if (s_load_state > STATE_EMPTY && nt_resource_is_ready(s_lenna_handle)) {
         uint32_t tex_id = nt_resource_get(s_lenna_handle);
@@ -288,15 +289,15 @@ int main(void) {
     nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
 
     /* Compute pack IDs */
-    s_base_pack_id = nt_resource_hash("base");
-    s_pixel_pack_id = nt_resource_hash("lenna_pixel");
-    s_hires_pack_id = nt_resource_hash("lenna_hires");
+    s_base_pack_id = nt_hash32_str("base");
+    s_pixel_pack_id = nt_hash32_str("lenna_pixel");
+    s_hires_pack_id = nt_hash32_str("lenna_hires");
 
     /* Request resource handles */
-    s_mesh_handle = nt_resource_request(nt_resource_hash("assets/meshes/cube.glb"), NT_ASSET_MESH);
-    s_vs_handle = nt_resource_request(nt_resource_hash("assets/shaders/mesh.vert"), NT_ASSET_SHADER_CODE);
-    s_fs_handle = nt_resource_request(nt_resource_hash("assets/shaders/mesh.frag"), NT_ASSET_SHADER_CODE);
-    s_lenna_handle = nt_resource_request(nt_resource_hash("textures/lenna"), NT_ASSET_TEXTURE);
+    s_mesh_handle = nt_resource_request(nt_hash64_str("assets/meshes/cube.glb"), NT_ASSET_MESH);
+    s_vs_handle = nt_resource_request(nt_hash64_str("assets/shaders/mesh.vert"), NT_ASSET_SHADER_CODE);
+    s_fs_handle = nt_resource_request(nt_hash64_str("assets/shaders/mesh.frag"), NT_ASSET_SHADER_CODE);
+    s_lenna_handle = nt_resource_request(nt_hash64_str("textures/lenna"), NT_ASSET_TEXTURE);
 
     /* Fallback checkerboard texture */
     s_fallback_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
@@ -310,7 +311,7 @@ int main(void) {
         .label = "fallback_checker",
     });
 
-    /* Load base pack (cube mesh + shaders — always present) */
+    /* Load base pack (cube mesh + shaders -- always present) */
     nt_resource_mount(s_base_pack_id, 100);
     nt_resource_load_auto(s_base_pack_id, "assets/base.ntpack");
 
