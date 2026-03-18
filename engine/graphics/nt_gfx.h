@@ -21,6 +21,23 @@ typedef struct {
     uint32_t id;
 } nt_texture_t;
 
+/* ---- Mesh info (side table for VBO+IBO pairs from mesh activator) ---- */
+
+#ifndef NT_GFX_MAX_MESHES
+#define NT_GFX_MAX_MESHES 128
+#endif
+
+typedef struct {
+    nt_buffer_t vbo;
+    nt_buffer_t ibo;
+    uint32_t vertex_count;
+    uint32_t index_count;
+    uint8_t stream_count;
+    uint8_t index_type; /* 0=none, 1=uint16, 2=uint32 */
+    uint16_t generation;
+    bool active;
+} nt_gfx_mesh_info_t;
+
 /* ---- Enums ---- */
 
 typedef enum {
@@ -254,5 +271,18 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf);
 /* ---- Buffer update ---- */
 
 void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size);
+
+/* ---- Asset activators (called by nt_resource via callback registration) ---- */
+
+uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size);
+uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size);
+uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size);
+void nt_gfx_deactivate_texture(uint32_t handle);
+void nt_gfx_deactivate_mesh(uint32_t handle);
+void nt_gfx_deactivate_shader(uint32_t handle);
+
+/* ---- Mesh info query ---- */
+
+const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(uint32_t mesh_handle);
 
 #endif /* NT_GFX_H */

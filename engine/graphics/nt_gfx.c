@@ -5,6 +5,9 @@
 
 #include "core/nt_assert.h"
 #include "log/nt_log.h"
+#include "nt_mesh_format.h"
+#include "nt_shader_format.h"
+#include "nt_texture_format.h"
 
 /* ---- Descriptor ownership helpers ----
    Shader source/label and immutable buffer data are strdup/memcpy'd so
@@ -73,6 +76,8 @@ static struct {
     nt_buffer_desc_t *buffer_descs;
     nt_texture_desc_t *texture_descs;
     nt_gfx_pipeline_sources_t *pipeline_sources; /* pipeline-owned shader source copies */
+
+    nt_gfx_mesh_info_t mesh_table[NT_GFX_MAX_MESHES + 1]; /* index 0 reserved */
 
     nt_gfx_render_state_t render_state;
     uint32_t bound_pipeline; /* currently bound pipeline backend handle */
@@ -786,4 +791,185 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
         return;
     }
     nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], data, size);
+}
+
+/* ---- Mesh side table helpers ---- */
+
+static uint32_t mesh_table_alloc(void) {
+    for (uint32_t i = 1; i <= NT_GFX_MAX_MESHES; i++) {
+        if (!s_gfx.mesh_table[i].active) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+static uint32_t mesh_handle_make(uint32_t index, uint16_t gen) { return ((uint32_t)gen << 16) | (index & 0xFFFF); }
+
+/* ---- Asset activators ---- */
+
+uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
+    if (!data || size < sizeof(NtTextureAssetHeader)) {
+        nt_log_error("gfx: activate_texture: blob too small");
+        return 0;
+    }
+    const NtTextureAssetHeader *hdr = (const NtTextureAssetHeader *)data;
+    if (hdr->magic != NT_TEXTURE_MAGIC) {
+        nt_log_error("gfx: activate_texture: bad magic");
+        return 0;
+    }
+    uint32_t pixel_size = hdr->width * hdr->height * 4; /* RGBA8 */
+    if (sizeof(NtTextureAssetHeader) + pixel_size > size) {
+        nt_log_error("gfx: activate_texture: blob truncated");
+        return 0;
+    }
+    const uint8_t *pixels = data + sizeof(NtTextureAssetHeader);
+    nt_texture_desc_t desc = {
+        .width = hdr->width,
+        .height = hdr->height,
+        .data = pixels,
+        .format = NT_PIXEL_RGBA8,
+        .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+        .wrap_u = NT_WRAP_REPEAT,
+        .wrap_v = NT_WRAP_REPEAT,
+        .gen_mipmaps = (hdr->mip_count == 1),
+        .label = "pack_texture",
+    };
+    nt_texture_t tex = nt_gfx_make_texture(&desc);
+    return tex.id;
+}
+
+uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
+    if (!data || size < sizeof(NtMeshAssetHeader)) {
+        nt_log_error("gfx: activate_mesh: blob too small");
+        return 0;
+    }
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    if (hdr->magic != NT_MESH_MAGIC) {
+        nt_log_error("gfx: activate_mesh: bad magic");
+        return 0;
+    }
+    if (hdr->stream_count == 0 || hdr->stream_count > NT_MESH_MAX_STREAMS) {
+        nt_log_error("gfx: activate_mesh: invalid stream_count");
+        return 0;
+    }
+    uint32_t streams_size = (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc);
+    uint32_t required = (uint32_t)sizeof(NtMeshAssetHeader) + streams_size + hdr->vertex_data_size + hdr->index_data_size;
+    if (required > size) {
+        nt_log_error("gfx: activate_mesh: blob truncated");
+        return 0;
+    }
+    const uint8_t *vertex_data = data + sizeof(NtMeshAssetHeader) + streams_size;
+    const uint8_t *index_data = vertex_data + hdr->vertex_data_size;
+
+    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX,
+        .usage = NT_USAGE_IMMUTABLE,
+        .data = vertex_data,
+        .size = hdr->vertex_data_size,
+        .label = "mesh_vbo",
+    });
+    if (vbo.id == 0) {
+        nt_log_error("gfx: activate_mesh: VBO creation failed");
+        return 0;
+    }
+
+    nt_buffer_t ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_INDEX,
+        .usage = NT_USAGE_IMMUTABLE,
+        .data = index_data,
+        .size = hdr->index_data_size,
+        .label = "mesh_ibo",
+    });
+    if (ibo.id == 0) {
+        nt_log_error("gfx: activate_mesh: IBO creation failed");
+        nt_gfx_destroy_buffer(vbo);
+        return 0;
+    }
+
+    uint32_t slot = mesh_table_alloc();
+    if (slot == 0) {
+        nt_log_error("gfx: activate_mesh: mesh table full");
+        nt_gfx_destroy_buffer(ibo);
+        nt_gfx_destroy_buffer(vbo);
+        return 0;
+    }
+
+    s_gfx.mesh_table[slot].vbo = vbo;
+    s_gfx.mesh_table[slot].ibo = ibo;
+    s_gfx.mesh_table[slot].vertex_count = hdr->vertex_count;
+    s_gfx.mesh_table[slot].index_count = hdr->index_count;
+    s_gfx.mesh_table[slot].stream_count = hdr->stream_count;
+    s_gfx.mesh_table[slot].index_type = hdr->index_type;
+    s_gfx.mesh_table[slot].generation++;
+    s_gfx.mesh_table[slot].active = true;
+
+    return mesh_handle_make(slot, s_gfx.mesh_table[slot].generation);
+}
+
+uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {
+    if (!data || size < sizeof(NtShaderCodeHeader)) {
+        nt_log_error("gfx: activate_shader: blob too small");
+        return 0;
+    }
+    const NtShaderCodeHeader *hdr = (const NtShaderCodeHeader *)data;
+    if (hdr->magic != NT_SHADER_CODE_MAGIC) {
+        nt_log_error("gfx: activate_shader: bad magic");
+        return 0;
+    }
+    if ((uint32_t)sizeof(NtShaderCodeHeader) + hdr->code_size > size) {
+        nt_log_error("gfx: activate_shader: blob truncated");
+        return 0;
+    }
+    const char *source = (const char *)(data + sizeof(NtShaderCodeHeader));
+    nt_shader_type_t type = (hdr->stage == NT_SHADER_STAGE_VERTEX) ? NT_SHADER_VERTEX : NT_SHADER_FRAGMENT;
+    nt_shader_t shd = nt_gfx_make_shader(&(nt_shader_desc_t){
+        .type = type,
+        .source = source,
+        .label = "pack_shader",
+    });
+    return shd.id;
+}
+
+/* ---- Asset deactivators ---- */
+
+void nt_gfx_deactivate_texture(uint32_t handle) {
+    nt_texture_t tex = {.id = handle};
+    nt_gfx_destroy_texture(tex);
+}
+
+void nt_gfx_deactivate_mesh(uint32_t handle) {
+    uint32_t index = handle & 0xFFFF;
+    uint16_t gen = (uint16_t)(handle >> 16);
+    if (index == 0 || index > NT_GFX_MAX_MESHES) {
+        nt_log_error("gfx: deactivate_mesh: invalid handle index");
+        return;
+    }
+    if (!s_gfx.mesh_table[index].active || s_gfx.mesh_table[index].generation != gen) {
+        nt_log_error("gfx: deactivate_mesh: stale or inactive handle");
+        return;
+    }
+    nt_gfx_destroy_buffer(s_gfx.mesh_table[index].vbo);
+    nt_gfx_destroy_buffer(s_gfx.mesh_table[index].ibo);
+    s_gfx.mesh_table[index].active = false;
+}
+
+void nt_gfx_deactivate_shader(uint32_t handle) {
+    nt_shader_t shd = {.id = handle};
+    nt_gfx_destroy_shader(shd);
+}
+
+/* ---- Mesh info query ---- */
+
+const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(uint32_t mesh_handle) {
+    uint32_t index = mesh_handle & 0xFFFF;
+    uint16_t gen = (uint16_t)(mesh_handle >> 16);
+    if (index == 0 || index > NT_GFX_MAX_MESHES) {
+        return NULL;
+    }
+    if (!s_gfx.mesh_table[index].active || s_gfx.mesh_table[index].generation != gen) {
+        return NULL;
+    }
+    return &s_gfx.mesh_table[index];
 }
