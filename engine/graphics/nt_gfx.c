@@ -12,9 +12,10 @@
 /* ---- Buffer metadata (minimal info kept for runtime validation) ---- */
 
 typedef struct {
-    uint8_t type;  /* nt_buffer_type_t */
-    uint8_t usage; /* nt_buffer_usage_t */
-    uint8_t _pad[2];
+    uint8_t type;       /* nt_buffer_type_t */
+    uint8_t usage;      /* nt_buffer_usage_t */
+    uint8_t index_type; /* 0=none, 1=uint16, 2=uint32 */
+    uint8_t _pad;
     uint32_t size;
 } nt_gfx_buffer_meta_t;
 
@@ -40,7 +41,8 @@ static struct {
     nt_gfx_mesh_info_t mesh_table[NT_GFX_MAX_MESHES + 1]; /* index 0 reserved */
 
     nt_gfx_render_state_t render_state;
-    uint32_t bound_pipeline; /* currently bound pipeline backend handle */
+    uint32_t bound_pipeline;  /* currently bound pipeline backend handle */
+    uint8_t bound_index_type; /* index type of currently bound IBO (1=uint16, 2=uint32) */
 } s_gfx;
 
 /* ---- Pool helpers ---- */
@@ -358,6 +360,7 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
     s_gfx.buffer_backends[slot] = backend;
     s_gfx.buffer_metas[slot].type = (uint8_t)desc->type;
     s_gfx.buffer_metas[slot].usage = (uint8_t)desc->usage;
+    s_gfx.buffer_metas[slot].index_type = desc->index_type;
     s_gfx.buffer_metas[slot].size = desc->size;
 
     result.id = id;
@@ -507,6 +510,7 @@ void nt_gfx_bind_index_buffer(nt_buffer_t buf) {
         nt_log_error("gfx: bind_index_buffer: buffer is not index type");
         return;
     }
+    s_gfx.bound_index_type = s_gfx.buffer_metas[slot].index_type;
     nt_gfx_backend_bind_index_buffer(s_gfx.buffer_backends[slot]);
 }
 
@@ -598,7 +602,7 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
     g_nt_gfx.frame_stats.indices += num_indices;
-    nt_gfx_backend_draw_indexed(first_index, num_indices);
+    nt_gfx_backend_draw_indexed(first_index, num_indices, s_gfx.bound_index_type);
 }
 
 void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count) {
@@ -622,7 +626,7 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.indices += num_indices * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
-    nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count);
+    nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count, s_gfx.bound_index_type);
 }
 
 /* ---- Instance buffer ---- */
@@ -755,6 +759,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         .usage = NT_USAGE_IMMUTABLE,
         .data = index_data,
         .size = hdr->index_data_size,
+        .index_type = hdr->index_type,
         .label = "mesh_ibo",
     });
     if (ibo.id == 0) {

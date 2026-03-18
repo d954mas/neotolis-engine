@@ -1,18 +1,35 @@
 /*
- * Textured Quad Demo - Neotolis Engine
+ * Textured Cube Demo — Neotolis Engine
  *
- * Renders a quad textured with a hardcoded 4x4 checkerboard pattern.
- * Proves the full texture pipeline: create, bind, draw, destroy.
+ * Full asset pipeline demo: mesh, shaders, and textures all from .neopak packs.
+ *
+ * Packs:
+ *   base.neopak         — cube mesh + shaders (loaded on start)
+ *   lenna_pixel.neopak  — 8x8 pixel art lenna
+ *   lenna_hires.neopak  — full resolution lenna
+ *
+ * Controls:
+ *   SPACE — cycle: load pixel → load hires → unload both
+ *   ENTER — swap texture pack priorities
+ *   ESC   — quit (native only)
+ *
+ * Build packs first:  build_tq_packs  (from project root)
  */
 
 #include "app/nt_app.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#include "fs/nt_fs.h"
 #include "graphics/nt_gfx.h"
+#include "http/nt_http.h"
 #include "input/nt_input.h"
+#include "log/nt_log.h"
+#include "resource/nt_resource.h"
+#include "time/nt_time.h"
 #include "window/nt_window.h"
 
 #include "math/nt_math.h"
+#include "nt_pack_format.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -21,50 +38,41 @@
 #include "platform/web/nt_platform_web.h"
 #endif
 
-/* ---- Shader sources (no version prefix -- backend adds it) ---- */
-
-static const char *s_vs_source = "layout(location = 0) in vec3 a_position;\n"
-                                 "layout(location = 3) in vec2 a_texcoord;\n"
-                                 "out vec2 v_uv;\n"
-                                 "uniform mat4 u_mvp;\n"
-                                 "void main() {\n"
-                                 "    v_uv = a_texcoord;\n"
-                                 "    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
-                                 "}\n";
-
-static const char *s_fs_source = "uniform sampler2D u_texture;\n"
-                                 "in vec2 v_uv;\n"
-                                 "out vec4 frag_color;\n"
-                                 "void main() {\n"
-                                 "    frag_color = texture(u_texture, v_uv);\n"
-                                 "}\n";
-
-/* ---- 4x4 checkerboard RGBA8 pixel data ---- */
+/* ---- Fallback 4x4 checkerboard (shown when no texture pack loaded) ---- */
 
 /* clang-format off */
 static const uint8_t s_checker_4x4[4 * 4 * 4] = {
-    255,255,255,255,  0,0,0,255,      255,255,255,255,  0,0,0,255,
-    0,0,0,255,        255,255,255,255, 0,0,0,255,        255,255,255,255,
-    255,255,255,255,  0,0,0,255,      255,255,255,255,  0,0,0,255,
-    0,0,0,255,        255,255,255,255, 0,0,0,255,        255,255,255,255,
+    255,255,255,255,  80,80,80,255,    255,255,255,255,  80,80,80,255,
+    80,80,80,255,     255,255,255,255, 80,80,80,255,     255,255,255,255,
+    255,255,255,255,  80,80,80,255,    255,255,255,255,  80,80,80,255,
+    80,80,80,255,     255,255,255,255, 80,80,80,255,     255,255,255,255,
 };
 /* clang-format on */
 
-/* ---- Quad geometry ---- */
+/* ---- GFX handles ---- */
 
-static const float s_quad_vertices[] = {
-    /* pos x,y,z       uv u,v */
-    -0.5F, -0.5F, 0.0F, 0.0F, 0.0F, 0.5F, -0.5F, 0.0F, 1.0F, 0.0F, 0.5F, 0.5F, 0.0F, 1.0F, 1.0F, -0.5F, 0.5F, 0.0F, 0.0F, 1.0F,
-};
-
-static const uint16_t s_quad_indices[] = {0, 1, 2, 0, 2, 3};
+static nt_pipeline_t s_pipeline;
+static nt_texture_t s_fallback_texture;
 
 /* ---- Resource handles ---- */
 
-static nt_pipeline_t s_pipeline;
-static nt_buffer_t s_vbo;
-static nt_buffer_t s_ibo;
-static nt_texture_t s_texture;
+static uint32_t s_base_pack_id;
+static uint32_t s_pixel_pack_id;
+static uint32_t s_hires_pack_id;
+
+static nt_resource_t s_mesh_handle;
+static nt_resource_t s_vs_handle;
+static nt_resource_t s_fs_handle;
+static nt_resource_t s_lenna_handle;
+
+static int16_t s_pixel_prio = 10;
+static int16_t s_hires_prio = 20;
+
+/* ---- State ---- */
+
+enum { STATE_EMPTY = 0, STATE_PIXEL = 1, STATE_BOTH = 2 };
+static int s_load_state = STATE_EMPTY;
+static bool s_pipeline_ready;
 
 /* ---- Frame callback ---- */
 
@@ -78,32 +86,120 @@ static void frame(void) {
     }
 #endif
 
-    /* Build MVP: perspective camera looking at quad */
+    /* SPACE: cycle texture load states */
+    if (nt_input_key_is_pressed(NT_KEY_SPACE)) {
+        if (s_load_state == STATE_EMPTY) {
+            nt_resource_mount(s_pixel_pack_id, s_pixel_prio);
+            nt_resource_load_auto(s_pixel_pack_id, "assets/lenna_pixel.neopak");
+            s_load_state = STATE_PIXEL;
+            nt_log_info(">> Loaded pixel pack");
+        } else if (s_load_state == STATE_PIXEL) {
+            nt_resource_mount(s_hires_pack_id, s_hires_prio);
+            nt_resource_load_auto(s_hires_pack_id, "assets/lenna_hires.neopak");
+            s_load_state = STATE_BOTH;
+            nt_log_info(">> Loaded hires pack");
+        } else {
+            nt_resource_unmount(s_pixel_pack_id);
+            nt_resource_unmount(s_hires_pack_id);
+            s_load_state = STATE_EMPTY;
+            nt_log_info(">> Unloaded both packs");
+        }
+    }
+
+    /* ENTER: swap priorities */
+    if (nt_input_key_is_pressed(NT_KEY_ENTER)) {
+        int16_t tmp = s_pixel_prio;
+        s_pixel_prio = s_hires_prio;
+        s_hires_prio = tmp;
+        if (s_load_state >= STATE_PIXEL) {
+            nt_resource_set_priority(s_pixel_pack_id, s_pixel_prio);
+        }
+        if (s_load_state >= STATE_BOTH) {
+            nt_resource_set_priority(s_hires_pack_id, s_hires_prio);
+        }
+        nt_log_info(">> Swapped priorities");
+    }
+
+    /* Step resource system */
+    nt_resource_step();
+
+    /* Create pipeline once shaders are ready */
+    if (!s_pipeline_ready && nt_resource_is_ready(s_vs_handle) && nt_resource_is_ready(s_fs_handle)) {
+        nt_shader_t vs = {.id = nt_resource_get(s_vs_handle)};
+        nt_shader_t fs = {.id = nt_resource_get(s_fs_handle)};
+
+        /* Layout matches cube.glb: position(float3) + uv0(float2), stride 20 */
+        s_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+            .vertex_shader = vs,
+            .fragment_shader = fs,
+            .layout =
+                {
+                    .attrs =
+                        {
+                            {.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT3, .offset = 0},
+                            {.location = 1, .format = NT_FORMAT_FLOAT2, .offset = 12}, /* mesh.vert: layout(location=1) a_uv */
+                        },
+                    .attr_count = 2,
+                    .stride = 20,
+                },
+            .depth_test = true,
+            .depth_write = true,
+            .depth_func = NT_DEPTH_LEQUAL,
+            .cull_face = true,
+            .label = "cube_pipeline",
+        });
+        s_pipeline_ready = true;
+        nt_log_info(">> Pipeline created from pack shaders");
+    }
+
+    /* Resolve texture: resource handle → GFX texture, fallback if not ready */
+    nt_texture_t active_tex = s_fallback_texture;
+    if (s_load_state > STATE_EMPTY && nt_resource_is_ready(s_lenna_handle)) {
+        uint32_t tex_id = nt_resource_get(s_lenna_handle);
+        if (tex_id != 0) {
+            active_tex.id = tex_id;
+        }
+    }
+
+    /* Build MVP */
     float aspect = 1.0F;
     if (g_nt_window.fb_height > 0) {
         aspect = (float)g_nt_window.fb_width / (float)g_nt_window.fb_height;
     }
 
+    float angle = (float)nt_time_now() * 0.7F;
+    mat4 model;
     mat4 proj;
     mat4 view;
     mat4 mvp;
+    mat4 tmp;
+
+    glm_mat4_identity(model);
+    glm_rotate_y(model, angle, model);
+    glm_rotate_x(model, angle * 0.6F, model);
     glm_perspective(glm_rad(60.0F), aspect, 0.1F, 10.0F, proj);
-    glm_lookat((vec3){0.0F, 0.0F, 2.0F}, (vec3){0.0F, 0.0F, 0.0F}, (vec3){0.0F, 1.0F, 0.0F}, view);
-    glm_mat4_mul(proj, view, mvp);
+    glm_lookat((vec3){0.0F, 0.0F, 3.0F}, (vec3){0.0F, 0.0F, 0.0F}, (vec3){0.0F, 1.0F, 0.0F}, view);
+    glm_mat4_mul(proj, view, tmp);
+    glm_mat4_mul(tmp, model, mvp);
 
     /* Render */
     nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.2F, 0.2F, 0.2F, 1.0F}, .clear_depth = 1.0F});
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.15F, 0.15F, 0.2F, 1.0F}, .clear_depth = 1.0F});
 
-    nt_gfx_bind_pipeline(s_pipeline);
-    nt_gfx_bind_vertex_buffer(s_vbo);
-    nt_gfx_bind_index_buffer(s_ibo);
-    nt_gfx_bind_texture(s_texture, 0);
+    if (s_pipeline_ready && nt_resource_is_ready(s_mesh_handle)) {
+        uint32_t mesh_handle = nt_resource_get(s_mesh_handle);
+        const nt_gfx_mesh_info_t *mesh = nt_gfx_get_mesh_info(mesh_handle);
 
-    nt_gfx_set_uniform_mat4("u_mvp", (float *)mvp);
-    nt_gfx_set_uniform_int("u_texture", 0);
-
-    nt_gfx_draw_indexed(0, 6, 4);
+        if (mesh) {
+            nt_gfx_bind_pipeline(s_pipeline);
+            nt_gfx_bind_vertex_buffer(mesh->vbo);
+            nt_gfx_bind_index_buffer(mesh->ibo);
+            nt_gfx_bind_texture(active_tex, 0);
+            nt_gfx_set_uniform_mat4("u_mvp", (float *)mvp);
+            nt_gfx_set_uniform_int("u_texture", 0);
+            nt_gfx_draw_indexed(0, mesh->index_count, mesh->vertex_count);
+        }
+    }
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
@@ -113,7 +209,7 @@ static void frame(void) {
 
 int main(void) {
     nt_engine_config_t config = {0};
-    config.app_name = "textured_quad";
+    config.app_name = "textured_cube";
     config.version = 1;
 
     nt_result_t result = nt_engine_init(&config);
@@ -129,71 +225,45 @@ int main(void) {
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     nt_gfx_init(&gfx_desc);
 
-    /* Create shaders */
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){
-        .type = NT_SHADER_VERTEX,
-        .source = s_vs_source,
-        .label = "textured_quad_vs",
-    });
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){
-        .type = NT_SHADER_FRAGMENT,
-        .source = s_fs_source,
-        .label = "textured_quad_fs",
-    });
+    /* Init I/O and resource systems */
+    nt_http_init();
+    nt_fs_init();
+    nt_resource_init(&(nt_resource_desc_t){0});
 
-    /* Create pipeline */
-    s_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-        .vertex_shader = vs,
-        .fragment_shader = fs,
-        .layout =
-            {
-                .attrs =
-                    {
-                        {.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT3, .offset = 0},
-                        {.location = NT_ATTR_TEXCOORD0, .format = NT_FORMAT_FLOAT2, .offset = 12},
-                    },
-                .attr_count = 2,
-                .stride = 20,
-            },
-        .depth_test = true,
-        .depth_write = true,
-        .depth_func = NT_DEPTH_LEQUAL,
-        .label = "textured_quad_pipeline",
-    });
+    /* Register GFX activators */
+    nt_resource_set_activator(NT_ASSET_TEXTURE, nt_gfx_activate_texture, nt_gfx_deactivate_texture);
+    nt_resource_set_activator(NT_ASSET_MESH, nt_gfx_activate_mesh, nt_gfx_deactivate_mesh);
+    nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
 
-    /* Destroy shaders after pipeline creation (pipeline owns copies) */
-    nt_gfx_destroy_shader(vs);
-    nt_gfx_destroy_shader(fs);
+    /* Compute pack IDs */
+    s_base_pack_id = nt_resource_hash("base");
+    s_pixel_pack_id = nt_resource_hash("lenna_pixel");
+    s_hires_pack_id = nt_resource_hash("lenna_hires");
 
-    /* Create vertex buffer */
-    s_vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_VERTEX,
-        .usage = NT_USAGE_IMMUTABLE,
-        .data = s_quad_vertices,
-        .size = sizeof(s_quad_vertices),
-        .label = "textured_quad_vbo",
-    });
+    /* Request resource handles */
+    s_mesh_handle = nt_resource_request(nt_resource_hash("assets/meshes/cube.glb"), NT_ASSET_MESH);
+    s_vs_handle = nt_resource_request(nt_resource_hash("assets/shaders/mesh.vert"), NT_ASSET_SHADER_CODE);
+    s_fs_handle = nt_resource_request(nt_resource_hash("assets/shaders/mesh.frag"), NT_ASSET_SHADER_CODE);
+    s_lenna_handle = nt_resource_request(nt_resource_hash("textures/lenna"), NT_ASSET_TEXTURE);
 
-    /* Create index buffer */
-    s_ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_INDEX,
-        .usage = NT_USAGE_IMMUTABLE,
-        .data = s_quad_indices,
-        .size = sizeof(s_quad_indices),
-        .label = "textured_quad_ibo",
-    });
-
-    /* Create texture: 4x4 checkerboard with NEAREST filtering for crisp pixels */
-    s_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
+    /* Fallback checkerboard texture */
+    s_fallback_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
         .data = s_checker_4x4,
         .min_filter = NT_FILTER_NEAREST,
         .mag_filter = NT_FILTER_NEAREST,
-        .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
-        .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
-        .label = "checkerboard",
+        .wrap_u = NT_WRAP_REPEAT,
+        .wrap_v = NT_WRAP_REPEAT,
+        .label = "fallback_checker",
     });
+
+    /* Load base pack (cube mesh + shaders — always present) */
+    nt_resource_mount(s_base_pack_id, 100);
+    nt_resource_load_auto(s_base_pack_id, "assets/base.neopak");
+
+    /* Bump activation budget so base pack activates in first frame */
+    nt_resource_set_activate_budget(64);
 
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
@@ -202,10 +272,13 @@ int main(void) {
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
-    nt_gfx_destroy_texture(s_texture);
-    nt_gfx_destroy_pipeline(s_pipeline);
-    nt_gfx_destroy_buffer(s_vbo);
-    nt_gfx_destroy_buffer(s_ibo);
+    if (s_pipeline_ready) {
+        nt_gfx_destroy_pipeline(s_pipeline);
+    }
+    nt_resource_shutdown();
+    nt_fs_shutdown();
+    nt_http_shutdown();
+    nt_gfx_destroy_texture(s_fallback_texture);
     nt_gfx_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();

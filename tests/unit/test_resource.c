@@ -1049,8 +1049,8 @@ void test_pack_state_api(void) {
     ((NtPackHeader *)blob)->pack_id = pid;
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
 
-    /* After parse_pack, pack_state is still NONE (parse_pack doesn't set it) */
-    TEST_ASSERT_EQUAL(NT_PACK_STATE_NONE, nt_resource_pack_state(pid));
+    /* After parse_pack, pack_state is READY (assets registered, blob available) */
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
 
     free(blob);
 }

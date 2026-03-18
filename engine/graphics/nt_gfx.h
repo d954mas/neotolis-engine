@@ -163,6 +163,7 @@ typedef struct {
     nt_buffer_usage_t usage;
     const void *data;
     uint32_t size;
+    uint8_t index_type; /* INDEX buffers: 0=none, 1=uint16(default), 2=uint32 */
     const char *label;
 } nt_buffer_desc_t;
 

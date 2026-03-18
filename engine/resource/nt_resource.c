@@ -340,6 +340,7 @@ void nt_resource_step(void) {
                 } else {
                     meta->state = NT_ASSET_STATE_FAILED;
                 }
+                pack->blob_last_access_ms = resource_get_time_ms();
                 budget -= cost;
             }
         }
@@ -687,6 +688,9 @@ nt_result_t nt_resource_parse_pack(uint32_t pack_id, const uint8_t *blob, uint32
     NtPackMeta *pack = &s_resource.packs[pack_idx];
     pack->blob = blob;
     pack->blob_size = blob_size;
+    if (pack->pack_state != NT_PACK_STATE_READY) {
+        pack->pack_state = NT_PACK_STATE_READY;
+    }
 
     s_resource.needs_resolve = true;
 
