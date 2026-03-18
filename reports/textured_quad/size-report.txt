@@ -1,61 +1,61 @@
 # Size Report: textured_quad (wasm-analysis)
-# Commit: 77326e6
+# Commit: 553c7d1
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
-Type                 174 B
-Import               374 B
-Function              53 B
+Type                 185 B
+Import               402 B
+Function              77 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
-Export                51 B
-Elem                  16 B
-Code               31242 B
-Data                2595 B
-Custom              2399 B
+Export                73 B
+Elem                  33 B
+Code               45071 B
+Data                8507 B
+Custom              2890 B
 ---------------- ----------
-TOTAL              36924 B
+TOTAL              57258 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
+ 9587 B   frame
  5203 B   dlmalloc
- 4076 B   main
- 3699 B   frame
- 3101 B   fmt_fp
- 2625 B   printf_core
+ 3102 B   fmt_fp
+ 3015 B   main
+ 2627 B   printf_core
+ 2041 B   __rem_pio2f
  1525 B   dlfree
   931 B   nt_input_web_on_blur
-  705 B   nt_input_web_on_pointer_move
-  666 B   nt_input_web_on_pointer_down
+  808 B   nt_gfx_make_texture
+  706 B   nt_input_web_on_pointer_move
+  667 B   nt_input_web_on_pointer_down
   650 B   pop_arg_long_double
-  602 B   nt_gfx_backend_create_pipeline
-  512 B   __memcpy
-  451 B   nt_gfx_make_buffer
-  445 B   nt_window_init
-  411 B   nt_gfx_make_shader
-  401 B   nt_gfx_backend_create_texture
+  567 B   nt_gfx_deactivate_mesh
+  543 B   nt_gfx_activate_mesh
+  524 B   nt_gfx_make_buffer
+  508 B   __memcpy
+  493 B   nt_gfx_activate_shader
+  491 B   nt_resource_request
+  470 B   find_pack
+  469 B   pack_alloc
+  460 B   nt_gfx_deactivate_texture
+  458 B   nt_window_init
+  440 B   resource_load
+  392 B   puts
+  381 B   sinf
   374 B   __stdio_write
+  374 B   nt_resource_dump_pack
   370 B   __memset
-  337 B   nt_input_web_on_pointer_up
-  316 B   pop_arg
-  296 B   __vfprintf_internal
-  281 B   wctomb
-  260 B   puts
-  234 B   nt_gfx_destroy_shader
-  233 B   nt_input_web_on_wheel
-  217 B   nt_gfx_backend_create_buffer
-  198 B   nt_app_web_frame
-  194 B   __fwritex
-  168 B   sn_write
-  145 B   nt_gfx_gl_ctx_create
+  361 B   cosf
+  344 B   nt_resource_unmount
 
-Total functions: 52
-Total code size: 31157 B
+Total functions: 76
+Total code size: 44944 B
 
 ## Per-Module Contributions
 
@@ -65,31 +65,35 @@ Module                         Size
 ------------------------ ----------
 libnt_app.a                 1428 B
 libnt_core.a                1688 B
-libnt_gfx.a                31256 B
+libnt_fs.a                  2620 B
+libnt_gfx.a                36960 B
+libnt_http.a                6696 B
+libnt_http_stub.a           3210 B
 libnt_input.a              16446 B
+libnt_log.a                  970 B
+libnt_resource.a          116076 B
+libnt_time.a                 866 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)             54758 B
+TOTAL (linked)            190900 B
 
 Not linked to textured_quad:
 libnt_app_stub.a            1428 B
 libnt_comp_storage.a        1778 B
 libnt_entity.a              2942 B
-libnt_gfx_stub.a           21058 B
+libnt_fs_stub.a             2620 B
+libnt_gfx_stub.a           26738 B
 libnt_input_stub.a         11148 B
-libnt_log.a                  970 B
 libnt_log_stub.a             506 B
 libnt_material_comp.a       1990 B
 libnt_mesh_comp.a           1914 B
 libnt_render_state_comp.a    2752 B
-libnt_resource.a          103704 B
-libnt_shape_renderer.a   1140002 B
-libnt_time.a                 866 B
+libnt_shape_renderer.a   1141046 B
 libnt_transform_comp.a      4536 B
 libnt_window_stub.a         1838 B
 
 
 ## Data Segments Summary
 
-Segments: 29
-Total data size: 2418 B
+Segments: 31
+Total data size: 8290 B
