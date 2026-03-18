@@ -3,12 +3,16 @@
 #include "resource/nt_resource_internal.h"
 
 #include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "core/nt_assert.h"
+#include "fs/nt_fs.h"
+#include "http/nt_http.h"
 #include "log/nt_log.h"
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
+#include "time/nt_time.h"
 
 /* ---- FNV-1a constants ---- */
 
@@ -25,12 +29,18 @@ static struct {
     NtPackMeta packs[NT_RESOURCE_MAX_PACKS];
     NtAssetMeta assets[NT_RESOURCE_MAX_ASSETS];
     NtResourceSlot slots[NT_RESOURCE_MAX_SLOTS + 1]; /* index 0 reserved */
+    NtActivatorEntry activators[NT_RESOURCE_MAX_ASSET_TYPES];
     uint16_t free_queue[NT_RESOURCE_MAX_SLOTS];
     uint16_t slot_map[NT_SLOT_MAP_SIZE];
     uint16_t queue_top;
     uint16_t next_mount_seq;      /* monotonic counter for mount order tiebreak */
     uint32_t asset_hwm;           /* high-water mark in assets[] */
     uint32_t placeholder_texture; /* resource_id for fallback texture, 0 = none */
+    int32_t activate_budget;      /* per-frame budget, default NT_RESOURCE_ACTIVATE_BUDGET */
+    /* Retry policy (global) */
+    uint32_t retry_max_attempts; /* 0 = infinite */
+    uint32_t retry_base_delay_ms;
+    uint32_t retry_max_delay_ms;
     bool needs_resolve;
     bool initialized;
 } s_resource;
@@ -104,6 +114,11 @@ nt_result_t nt_resource_init(const nt_resource_desc_t *desc) {
     for (uint16_t i = 0; i < NT_RESOURCE_MAX_SLOTS; i++) {
         s_resource.free_queue[i] = (uint16_t)(NT_RESOURCE_MAX_SLOTS - i); /* top has lowest */
     }
+
+    s_resource.activate_budget = NT_RESOURCE_ACTIVATE_BUDGET;
+    s_resource.retry_max_attempts = 0; /* infinite by default */
+    s_resource.retry_base_delay_ms = 500;
+    s_resource.retry_max_delay_ms = 10000;
 
     s_resource.initialized = true;
     return NT_OK;
@@ -550,6 +565,79 @@ void nt_resource_unregister(uint32_t pack_id, uint32_t resource_id) {
             return;
         }
     }
+}
+
+/* ---- Pack loading ---- */
+
+nt_result_t nt_resource_load_file(uint32_t pack_id, const char *path) {
+    (void)pack_id;
+    (void)path;
+    return NT_ERR_INVALID_ARG; /* stub -- Task 2 */
+}
+
+nt_result_t nt_resource_load_url(uint32_t pack_id, const char *url) {
+    (void)pack_id;
+    (void)url;
+    return NT_ERR_INVALID_ARG; /* stub -- Task 2 */
+}
+
+nt_result_t nt_resource_load_auto(uint32_t pack_id, const char *path) {
+    (void)pack_id;
+    (void)path;
+    return NT_ERR_INVALID_ARG; /* stub -- Task 2 */
+}
+
+nt_pack_state_t nt_resource_pack_state(uint32_t pack_id) {
+    (void)pack_id;
+    return NT_PACK_STATE_NONE; /* stub -- Task 2 */
+}
+
+void nt_resource_pack_progress(uint32_t pack_id, uint32_t *received, uint32_t *total) {
+    (void)pack_id;
+    if (received) {
+        *received = 0;
+    }
+    if (total) {
+        *total = 0;
+    }
+}
+
+/* ---- Activator registration ---- */
+
+void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_deactivate_fn deactivate) {
+    NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
+    s_resource.activators[asset_type].activate = activate;
+    s_resource.activators[asset_type].deactivate = deactivate;
+}
+
+/* ---- Activation budget ---- */
+
+void nt_resource_set_activate_budget(int32_t budget) { s_resource.activate_budget = budget; }
+
+/* ---- Retry policy ---- */
+
+void nt_resource_set_retry_policy(uint32_t max_attempts, uint32_t base_delay_ms, uint32_t max_delay_ms) {
+    s_resource.retry_max_attempts = max_attempts;
+    s_resource.retry_base_delay_ms = base_delay_ms;
+    s_resource.retry_max_delay_ms = max_delay_ms;
+}
+
+/* ---- Blob policy ---- */
+
+void nt_resource_set_blob_policy(uint32_t pack_id, uint8_t policy, uint32_t ttl_ms) {
+    int16_t idx = find_pack(pack_id);
+    if (idx < 0) {
+        return;
+    }
+    s_resource.packs[idx].blob_policy = policy;
+    s_resource.packs[idx].blob_ttl_ms = ttl_ms;
+}
+
+/* ---- Context loss recovery ---- */
+
+void nt_resource_invalidate(uint8_t asset_type) {
+    (void)asset_type;
+    /* stub -- Task 2 */
 }
 
 /* ---- Placeholder ---- */
