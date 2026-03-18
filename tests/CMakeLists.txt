@@ -169,6 +169,18 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_components COMMAND test_components)
 
+    # --- Resource module tests ---
+    add_executable(test_resource unit/test_resource.c)
+    target_link_libraries(test_resource PRIVATE nt_resource unity)
+    target_compile_definitions(test_resource PRIVATE NT_RESOURCE_TEST_ACCESS)
+    target_compile_definitions(nt_resource PRIVATE NT_RESOURCE_TEST_ACCESS)
+    nt_set_warning_flags(test_resource)
+    nt_set_sanitizer_flags(test_resource)
+    set_target_properties(test_resource PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_resource COMMAND test_resource)
+
     # --- Builder tests ---
     add_executable(test_builder unit/test_builder.c)
     target_link_libraries(test_builder PRIVATE nt_builder unity)
