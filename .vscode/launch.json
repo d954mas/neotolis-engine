@@ -146,13 +146,23 @@
             "preLaunchTask": "Build native-release"
         },
         {
+            "name": "Build Textured Quad Packs",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/textured_quad/native-debug/build_tq_packs.exe",
+            "args": ["build/examples/textured_quad"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-debug (build_tq_packs)"
+        },
+        {
             "name": "Build Assets",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/examples/builder_demo/native-release/build_assets.exe",
-            "cwd": "${workspaceFolder}/build/examples/builder_demo/native-release",
+            "program": "${workspaceFolder}/build/examples/builder_demo/native-debug/build_assets.exe",
+            "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "preLaunchTask": "Build native-release"
+            "preLaunchTask": "Build native-debug (build_assets)"
         }
     ]
 }
