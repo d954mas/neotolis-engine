@@ -44,7 +44,7 @@ typedef enum {
 
 /*
  * PackHeader: 24 bytes total (packed, naturally aligned).
- * magic(4) + pack_id(4) + version(2) + asset_count(2) +
+ * magic(4) + _reserved(4) + version(2) + asset_count(2) +
  * header_size(4) + total_size(4) + checksum(4) = 24
  *
  * Fields ordered so every field sits on its natural alignment boundary
@@ -54,7 +54,7 @@ typedef enum {
 #pragma pack(push, 1)
 typedef struct {
     uint32_t magic;       /* 0:  NT_PACK_MAGIC ("NPAK") */
-    uint32_t pack_id;     /* 4:  unique pack identifier */
+    uint32_t _reserved;   /* 4:  must be 0 */
     uint16_t version;     /* 8:  NT_PACK_VERSION */
     uint16_t asset_count; /* 10: number of assets */
     uint32_t header_size; /* 12: offset where data region starts */

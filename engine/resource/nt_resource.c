@@ -662,9 +662,9 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     const NtAssetEntry *entries = (const NtAssetEntry *)(blob + sizeof(NtPackHeader));
 
     for (uint16_t i = 0; i < h->asset_count; i++) {
-        /* Validate entry data fits within blob (overflow-safe) */
-        if (entries[i].size > blob_size || entries[i].offset > blob_size - entries[i].size) {
-            nt_log_error("nt_resource: entry data exceeds blob");
+        /* Validate entry offset is in data region and data fits within blob */
+        if (entries[i].offset < h->header_size || entries[i].size > blob_size || entries[i].offset > blob_size - entries[i].size) {
+            nt_log_error("nt_resource: entry data outside data region");
             return NT_ERR_INVALID_ARG;
         }
 

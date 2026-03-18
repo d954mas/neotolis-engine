@@ -51,7 +51,7 @@ const char *nt_hash64_label(nt_hash64_t hash);
 /* ---- Inline string helpers ---- */
 
 static inline nt_hash32_t nt_hash32_str(const char *s) {
-    NT_ASSERT(s != NULL);
+    NT_ASSERT_ALWAYS(s != NULL);
     nt_hash32_t h = nt_hash32((const void *)s, (uint32_t)strlen(s));
 #if NT_HASH_LABELS
     nt_hash_register_label32(h, s);
@@ -60,7 +60,7 @@ static inline nt_hash32_t nt_hash32_str(const char *s) {
 }
 
 static inline nt_hash64_t nt_hash64_str(const char *s) {
-    NT_ASSERT(s != NULL);
+    NT_ASSERT_ALWAYS(s != NULL);
     nt_hash64_t h = nt_hash64((const void *)s, (uint32_t)strlen(s));
 #if NT_HASH_LABELS
     nt_hash_register_label64(h, s);

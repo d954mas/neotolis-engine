@@ -112,7 +112,6 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
 
     /* Print pack summary */
     (void)printf("Pack: %s\n", pack_path);
-    (void)printf("Pack ID: 0x%08X\n", header->pack_id);
     (void)printf("Version: %u\n", header->version);
     (void)printf("Assets: %u\n", header->asset_count);
     char size_buf[32];

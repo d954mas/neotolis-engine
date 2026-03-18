@@ -68,9 +68,6 @@ struct NtBuilderContext {
     bool force;
     bool has_error;
 
-    /* Pack metadata */
-    uint32_t pack_id;
-
     /* Per-type counters for summary */
     uint32_t mesh_count;
     uint32_t texture_count;

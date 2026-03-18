@@ -180,35 +180,35 @@ void tearDown(void) {}
 /* --- Normalize-and-hash tests --- */
 
 void test_hash_known_value(void) {
-    uint64_t h = nt_builder_normalize_and_hash("test");
-    TEST_ASSERT_TRUE(h != 0);
+    nt_hash64_t h = nt_builder_normalize_and_hash("test");
+    TEST_ASSERT_TRUE(h.value != 0);
     /* Deterministic */
-    TEST_ASSERT_TRUE(h == nt_builder_normalize_and_hash("test"));
+    TEST_ASSERT_TRUE(h.value == nt_builder_normalize_and_hash("test").value);
 }
 
 void test_hash_path_normalization(void) {
     /* Backslash -> forward slash */
-    uint64_t h1 = nt_builder_normalize_and_hash("meshes/cube.glb");
-    uint64_t h2 = nt_builder_normalize_and_hash("meshes\\cube.glb");
-    TEST_ASSERT_TRUE(h1 == h2);
+    nt_hash64_t h1 = nt_builder_normalize_and_hash("meshes/cube.glb");
+    nt_hash64_t h2 = nt_builder_normalize_and_hash("meshes\\cube.glb");
+    TEST_ASSERT_TRUE(h1.value == h2.value);
 
     /* ./ stripped */
-    TEST_ASSERT_TRUE(nt_builder_normalize_and_hash("foo/bar.png") == nt_builder_normalize_and_hash("./foo/bar.png"));
+    TEST_ASSERT_TRUE(nt_builder_normalize_and_hash("foo/bar.png").value == nt_builder_normalize_and_hash("./foo/bar.png").value);
 
     /* // collapsed */
-    TEST_ASSERT_TRUE(nt_builder_normalize_and_hash("foo/bar.png") == nt_builder_normalize_and_hash("foo//bar.png"));
+    TEST_ASSERT_TRUE(nt_builder_normalize_and_hash("foo/bar.png").value == nt_builder_normalize_and_hash("foo//bar.png").value);
 
     /* ../ resolved */
-    TEST_ASSERT_TRUE(nt_builder_normalize_and_hash("bar.png") == nt_builder_normalize_and_hash("foo/../bar.png"));
+    TEST_ASSERT_TRUE(nt_builder_normalize_and_hash("bar.png").value == nt_builder_normalize_and_hash("foo/../bar.png").value);
 
     /* Leading ../ preserved */
-    TEST_ASSERT_TRUE(nt_builder_normalize_and_hash("assets/mesh.glb") != nt_builder_normalize_and_hash("../assets/mesh.glb"));
+    TEST_ASSERT_TRUE(nt_builder_normalize_and_hash("assets/mesh.glb").value != nt_builder_normalize_and_hash("../assets/mesh.glb").value);
 }
 
 void test_hash_different_strings_differ(void) {
-    uint64_t h1 = nt_builder_normalize_and_hash("a");
-    uint64_t h2 = nt_builder_normalize_and_hash("b");
-    TEST_ASSERT_TRUE(h1 != h2);
+    nt_hash64_t h1 = nt_builder_normalize_and_hash("a");
+    nt_hash64_t h2 = nt_builder_normalize_and_hash("b");
+    TEST_ASSERT_TRUE(h1.value != h2.value);
 }
 
 /* --- Pack writer core tests --- */
@@ -892,9 +892,9 @@ void test_rename_changes_resource_id(void) {
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX));
 
-    uint64_t old_id = nt_builder_normalize_and_hash(vert_path);
-    uint64_t new_id = nt_builder_normalize_and_hash("renamed/shader.vert");
-    TEST_ASSERT_TRUE(old_id != new_id);
+    nt_hash64_t old_id = nt_builder_normalize_and_hash(vert_path);
+    nt_hash64_t new_id = nt_builder_normalize_and_hash("renamed/shader.vert");
+    TEST_ASSERT_TRUE(old_id.value != new_id.value);
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_rename(ctx, vert_path, "renamed/shader.vert"));
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
@@ -907,7 +907,7 @@ void test_rename_changes_resource_id(void) {
     (void)fread(&hdr, sizeof(hdr), 1, f);
     NtAssetEntry entry;
     (void)fread(&entry, sizeof(entry), 1, f);
-    TEST_ASSERT_TRUE(new_id == entry.resource_id);
+    TEST_ASSERT_TRUE(new_id.value == entry.resource_id);
     (void)fclose(f);
 }
 

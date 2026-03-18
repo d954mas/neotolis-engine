@@ -1,99 +1,106 @@
 # Hash Algorithm Benchmark Results
 
 **Date:** 2026-03-19
-**Platform:** Windows 11 (x86_64)
-**Compiler:** Clang 18, C17, Debug build with ASan+UBSan
+**Benchmark source:** `tools/research/hash_benchmark/main.c` (official xxHash via `deps/xxhash/xxhash.h`)
 **Iterations:** 1,000,000 per test
 
-## Throughput Results
+## Candidates
 
-### Short Strings (~20 chars)
+| Candidate | Implementation | Notes |
+|-----------|---------------|-------|
+| FNV-1a | Inline, byte-by-byte | Previous engine default |
+| XXH32/XXH64 | Official Cyan4973/xxHash | **Selected for engine** |
+| XXH3 | Official Cyan4973/xxHash | 128-bit multiply, SIMD paths |
+| MurmurHash3 | x86_32 + x64_128 (upper 64) | No standalone 64-bit variant |
+| CRC32 | Lookup table (same as nt_crc32) | Error detection, not identity |
 
-| Candidate   | 32-bit (ops/s) | 64-bit (ops/s) |
-|-------------|---------------|----------------|
-| FNV-1a      | 39,480,905    | 37,744,252     |
-| xxHash      | 27,504,414    | 61,153,851     |
-| MurmurHash3 | 23,818,371    | 84,321,298     |
-| CRC32       | 29,924,530    | 34,123,404     |
+## Native Release (Windows 11 x86_64, Clang 18, -O2)
 
-Input: `textures/lenna.png` (18 chars)
+### 64-bit Throughput (primary use case: resource_id)
 
-### Medium Strings (~22 chars)
+| Candidate | Short 18B | Medium 22B | Long 85B |
+|-----------|-----------|------------|----------|
+| **XXH3** | **551M** | **562M** | **330M** |
+| **XXH64** | **295M** | **250M** | **116M** |
+| MurmurHash3 x64 | 253M | 225M | 95M |
+| FNV-1a | 223M | 182M | 28M |
+| CRC32 | 127M | 97M | 16M |
 
-| Candidate   | 32-bit (ops/s) | 64-bit (ops/s) |
-|-------------|---------------|----------------|
-| FNV-1a      | 29,108,353    | 40,134,048     |
-| xxHash      | 24,562,782    | 63,158,427     |
-| MurmurHash3 | 20,913,764    | 79,553,229     |
-| CRC32       | 24,709,356    | 26,631,158     |
+### 32-bit Throughput (pack_id, attribute names)
 
-Input: `assets/meshes/cube.glb` (22 chars)
+| Candidate | Short 18B | Medium 22B | Long 85B |
+|-----------|-----------|------------|----------|
+| **XXH3** | **571M** | **553M** | **338M** |
+| XXH32 | 261M | 163M | 89M |
+| FNV-1a | 230M | 169M | 28M |
+| MurmurHash3 x86 | 224M | 199M | 48M |
+| CRC32 | 92M | 70M | 10M |
 
-### Long Strings (~85 chars)
+## WASM (Emscripten, -O2, Node.js V8)
 
-| Candidate   | 32-bit (ops/s) | 64-bit (ops/s) |
-|-------------|---------------|----------------|
-| FNV-1a      | 15,296,344    | 15,485,941     |
-| xxHash      | 9,402,376     | 19,381,948     |
-| MurmurHash3 | 6,083,424     | 23,919,954     |
-| CRC32       | 7,133,146     | 7,604,794      |
+### 64-bit Throughput
 
-Input: `assets/textures/environments/outdoor/sky_clouds_morning_hdr_compressed_bc6h_v2.ntex` (85 chars)
+| Candidate | Short 18B | Medium 22B | Long 85B |
+|-----------|-----------|------------|----------|
+| XXH3 | 207M | 210M | 97M |
+| **XXH64** | **189M** | **195M** | **90M** |
+| MurmurHash3 x64 | 187M | 158M | 78M |
+| FNV-1a | 135M | 111M | 26M |
+| CRC32 | 68M | 54M | 12M |
+
+### 32-bit Throughput
+
+| Candidate | Short 18B | Medium 22B | Long 85B |
+|-----------|-----------|------------|----------|
+| MurmurHash3 x86 | **181M** | 184M | 54M |
+| XXH3 | 159M | 178M | 99M |
+| **XXH32** | 157M | **191M** | **100M** |
+| FNV-1a | 131M | 116M | 26M |
+| CRC32 | 55M | 43M | 9M |
+
+## Distribution Quality
+
+Chi-squared test: 10,000 keys hashed into 256 buckets (power-of-2, worst case for poor avalanche).
+Key pattern: `assets/textures/env/tile_NNNN.ntex`
+Ideal chi2 ~ 256.
+
+| Candidate | chi2 32-bit | chi2 64-bit | 32-bit bucket range |
+|-----------|-------------|-------------|---------------------|
+| MurmurHash3 | **255.5** | 282.6 | 21-59 |
+| XXH32/64 | **263.9** | **218.8** | 25-61 |
+| XXH3 | 265.5 | 265.5 | 22-62 |
+| FNV-1a | **524.2** | 71.2 | 23-59 |
+| CRC32 | 25.0 | **2,550,000** | 36-42 (32b) / 0-10000 (64b) |
+
+FNV-1a 32-bit chi2=524 is 2x worse than ideal -- significant clustering in open-addressing hash maps.
 
 ## Collision Test
 
-10,000 sequential keys (`key_0000` through `key_9999`), 32-bit hashes:
+10,000 sequential keys (`key_0000` through `key_9999`):
 
-| Candidate   | Collisions |
-|-------------|------------|
-| FNV-1a      | 0          |
-| xxHash      | 0          |
-| MurmurHash3 | 0          |
-| CRC32       | 0          |
+All candidates: 0 collisions (32-bit and 64-bit).
 
-All candidates produce zero collisions on 10,000 sequential strings.
+## WASM Binary Size Impact
 
-## Code Size
+| Metric | FNV-1a (baseline) | XXH32/XXH64 | Delta |
+|--------|-------------------|-------------|-------|
+| Raw .wasm | 53,836 B | 56,350 B | +2,514 B |
+| Gzipped .wasm | 26,437 B | 27,051 B | **+614 B** |
 
-| Candidate   | Approximate Lines |
-|-------------|-------------------|
-| FNV-1a      | ~15 (32+64)       |
-| xxHash      | ~90 (32+64)       |
-| MurmurHash3 | ~110 (32+128)     |
-| CRC32       | ~75 (table+hash)  |
+Measured on `textured_quad` example (only example that links nt_hash via nt_resource).
+Other examples unchanged (LTO removes unused hash code).
 
-## Analysis
-
-### 32-bit Performance
-
-FNV-1a is the clear winner for 32-bit hashing at all string lengths:
-- **Short strings (18-22 chars):** FNV-1a is 32-60% faster than all competitors
-- **Long strings (85 chars):** FNV-1a is 63% faster than xxHash, 150% faster than MurmurHash3
-
-FNV-1a's byte-by-byte loop has minimal per-call overhead, which dominates on short inputs.
-
-### 64-bit Performance
-
-MurmurHash3 x64_128 is fastest on this native x86_64 platform due to 64-bit block reads. However:
-- On WASM (32-bit), 64-bit multiply is emulated and much slower
-- MurmurHash3's block-based approach has high setup cost on very short strings
-- The code is 7x larger than FNV-1a
-
-FNV-1a 64-bit remains competitive (37-40M ops/s on short strings) and is consistent across all input sizes.
-
-### CRC32
-
-Slowest overall. Designed for error detection, not identity hashing. The lookup table adds cache pressure. The pseudo-64-bit variant (hash two halves) has poor distribution properties.
-
-## Winner: FNV-1a
+## Decision: XXH32/XXH64
 
 **Rationale:**
-1. **Fastest 32-bit hash** at all tested string lengths
-2. **Competitive 64-bit performance** on short strings (our primary use case: asset paths 20-50 chars)
-3. **Smallest code size** (~15 lines vs 90-110 for alternatives) -- critical for WASM binary size
-4. **Zero collisions** on sequential test set (adequate distribution for our use case)
-5. **Already in codebase** -- proven, understood, no new dependencies
-6. **Endian-safe** -- byte-by-byte loop produces identical results on all platforms
-7. **WASM-friendly** -- no 64-bit multiply in 32-bit variant, no block reads requiring alignment
 
-MurmurHash3 and xxHash win on large data (>0.5KB), but asset path strings are typically 20-50 characters. FNV-1a is the optimal choice for this use case.
+1. **Distribution quality:** FNV-1a fails SMHasher avalanche tests (100% worst bias). XXH32/XXH64 pass all SMHasher tests. This directly impacts open-addressing hash map performance in the engine.
+2. **WASM throughput:** XXH64 is 3.5x faster than FNV-1a on long strings (90M vs 26M ops/s). XXH32 is 4x faster (100M vs 26M). On short strings ~1.4x faster.
+3. **No 128-bit multiply:** Unlike XXH3/wyhash/rapidhash, XXH32/XXH64 use only standard `i32.mul`/`i64.mul` -- native WASM instructions. No penalty from missing `i64.mul_wide_u` proposal.
+4. **Minimal size impact:** +614 bytes gzipped (~2.3% of a typical example binary).
+5. **Battle-tested:** xxHash is used in Linux kernel, FreeBSD, Chromium, LZ4, Zstandard.
+6. **Single vendored header:** `deps/xxhash/xxhash.h` from Cyan4973/xxHash, `XXH_INLINE_ALL` + `XXH_NO_XXH3`.
+
+**Why not XXH3:** Uses 128-bit multiply and SIMD paths. On native x86_64 it's 2x faster than XXH64, but on WASM they're nearly equal due to 128-bit multiply emulation. Extra complexity for no WASM benefit.
+
+**Why not wyhash/rapidhash:** Same 128-bit multiply problem. Better candidates once browsers ship the WebAssembly wide-arithmetic proposal.

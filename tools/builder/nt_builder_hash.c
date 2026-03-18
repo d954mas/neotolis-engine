@@ -80,14 +80,14 @@ char *nt_builder_normalize_path(const char *path) {
     return buf;
 }
 
-uint64_t nt_builder_normalize_and_hash(const char *str) {
+nt_hash64_t nt_builder_normalize_and_hash(const char *str) {
     char *normalized = nt_builder_normalize_path(str);
     if (!normalized) {
-        return 0;
+        return (nt_hash64_t){0};
     }
     nt_hash64_t h = nt_hash64_str(normalized);
     free(normalized);
-    return h.value;
+    return h;
 }
 
 /* --- File I/O --- */

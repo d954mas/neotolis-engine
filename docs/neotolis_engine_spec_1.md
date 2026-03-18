@@ -900,7 +900,7 @@ Even if pass code on C directly sets depth/blend/cull state, material still stor
 
 ## 17.1 Core concepts
 
-- `resource_id`: 64-bit FNV-1a hash of asset path (`nt_hash64_t`) — stable resource identity
+- `resource_id`: 64-bit xxHash of asset path (`nt_hash64_t`) — stable resource identity
 - `NtAssetMeta`: per-asset metadata entry (one per asset per pack)
 - `NtResourceSlot`: per unique resource requested by game code — holds resolved handle
 - `nt_resource_t`: generational handle to a slot — what game code holds and passes around
@@ -911,7 +911,7 @@ Two-level system:
 
 ## 17.2 ResourceId
 
-`resource_id` is a `uint64_t` FNV-1a hash of the asset path, wrapped in `nt_hash64_t` for type safety. Game code obtains it via `nt_hash64_str("path")`. The `nt_hash` module provides centralized hashing for both builder and runtime. The registry uses resource_id to match assets across packs and resolve priority.
+`resource_id` is a `uint64_t` xxHash (XXH64) of the asset path, wrapped in `nt_hash64_t` for type safety. Game code obtains it via `nt_hash64_str("path")`. The `nt_hash` module provides centralized hashing for both builder and runtime. The registry uses resource_id to match assets across packs and resolve priority.
 
 ## 17.3 Generational handles
 
@@ -988,7 +988,7 @@ The function automatically requests a slot for the placeholder resource_id if on
 
 ## 17.10 nt_hash -- Identity Hashing
 
-`nt_hash` provides FNV-1a hashing in 32-bit and 64-bit widths. Used for resource identity (64-bit) and attribute/pack naming (32-bit). Both builder and runtime link this module -- single source of truth for hash computation.
+`nt_hash` provides xxHash (XXH32/XXH64) hashing in 32-bit and 64-bit widths. Used for resource identity (64-bit) and attribute/pack naming (32-bit). Both builder and runtime link this module -- single source of truth for hash computation. xxHash chosen over FNV-1a for superior avalanche properties (critical for open-addressing hash maps) and higher throughput on WASM.
 
 Type-safe wrappers prevent accidental mixing of raw integers with hash values:
 

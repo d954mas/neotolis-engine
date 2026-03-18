@@ -60,7 +60,7 @@ void test_align_up_macro(void) {
 
 void test_pack_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(0, offsetof(NtPackHeader, magic));
-    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtPackHeader, pack_id));
+    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtPackHeader, _reserved));
     TEST_ASSERT_EQUAL_UINT(8, offsetof(NtPackHeader, version));
     TEST_ASSERT_EQUAL_UINT(10, offsetof(NtPackHeader, asset_count));
     TEST_ASSERT_EQUAL_UINT(12, offsetof(NtPackHeader, header_size));

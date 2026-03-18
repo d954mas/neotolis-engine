@@ -130,12 +130,11 @@ void test_label_disabled_returns_null(void) {
 /* ---- Lifecycle test ---- */
 
 void test_init_shutdown(void) {
-    /* Shutdown from setUp, re-init to verify double init fails */
-    nt_hash_shutdown();
-
+    /* setUp already called init, so double-init should fail */
     nt_hash_desc_t desc = {0};
-    TEST_ASSERT_EQUAL(NT_OK, nt_hash_init(&desc));
-    /* Second init should still succeed (idempotent shutdown + init) */
+    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, nt_hash_init(&desc));
+
+    /* After shutdown, init should succeed again */
     nt_hash_shutdown();
     TEST_ASSERT_EQUAL(NT_OK, nt_hash_init(&desc));
 }

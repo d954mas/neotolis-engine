@@ -135,7 +135,6 @@ NtBuilderContext *nt_builder_start_pack(const char *output_path) {
 
     strncpy(ctx->output_path, output_path, sizeof(ctx->output_path) - 1);
     ctx->output_path[sizeof(ctx->output_path) - 1] = '\0';
-    ctx->pack_id = nt_hash32_str(output_path).value;
 
     (void)printf("Starting pack: %s\n", output_path);
     return ctx;
@@ -290,7 +289,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NtPackHeader header;
     memset(&header, 0, sizeof(header));
     header.magic = NT_PACK_MAGIC;
-    header.pack_id = ctx->pack_id;
     header.version = NT_PACK_VERSION;
     header.asset_count = (uint16_t)ctx->entry_count;
     header.header_size = header_size;
