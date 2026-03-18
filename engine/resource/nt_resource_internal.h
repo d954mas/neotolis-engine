@@ -1,6 +1,8 @@
 #ifndef NT_RESOURCE_INTERNAL_H
 #define NT_RESOURCE_INTERNAL_H
 
+#include "resource/nt_resource.h"
+
 #include <stdint.h>
 
 /* ---- Asset state machine ---- */
@@ -15,9 +17,33 @@ typedef enum {
 /* ---- Pack type ---- */
 
 typedef enum {
-    NT_PACK_FILE = 0,    /* loaded from NEOPAK file */
+    NT_PACK_FILE = 0,    /* loaded from NTPACK file */
     NT_PACK_VIRTUAL = 1, /* runtime-created resources */
 } nt_pack_type_t;
+
+/* ---- Blob retention policy ---- */
+
+typedef enum {
+    NT_BLOB_KEEP = 0, /* blob lives as long as pack is mounted */
+    NT_BLOB_AUTO = 1, /* auto-evict after TTL since last access */
+} nt_blob_policy_t;
+
+/* ---- I/O request type ---- */
+
+typedef enum {
+    NT_IO_NONE = 0,
+    NT_IO_FS = 1,
+    NT_IO_HTTP = 2,
+} nt_io_type_t;
+
+/* ---- Activator callbacks ---- */
+
+#define NT_RESOURCE_MAX_ASSET_TYPES 8
+
+typedef struct {
+    nt_activate_fn activate;
+    nt_deactivate_fn deactivate;
+} NtActivatorEntry;
 
 /* ---- Per-asset metadata (one per asset from all packs) ---- */
 
@@ -36,14 +62,31 @@ typedef struct {
 /* ---- Per-pack metadata ---- */
 
 typedef struct {
-    uint32_t pack_id;   /* FNV-1a hash of pack name/path */
-    int16_t priority;   /* higher = wins on conflict, signed */
-    uint8_t pack_type;  /* nt_pack_type_t */
-    uint8_t mounted;    /* 1 if mounted, 0 if slot available */
-    uint16_t mount_seq; /* monotonic mount order for tiebreak */
-    uint16_t _pad;
-    const uint8_t *blob; /* loaded pack data (NULL until Phase 25) */
+    uint32_t pack_id;    /* FNV-1a hash of pack name/path */
+    int16_t priority;    /* higher = wins on conflict, signed */
+    uint8_t pack_type;   /* nt_pack_type_t */
+    uint8_t mounted;     /* 1 if mounted, 0 if slot available */
+    uint16_t mount_seq;  /* monotonic mount order for tiebreak */
+    uint8_t pack_state;  /* nt_pack_state_t */
+    uint8_t blob_policy; /* nt_blob_policy_t */
+    const uint8_t *blob; /* loaded pack data */
     uint32_t blob_size;  /* size of loaded blob */
+    /* Loading progress */
+    uint32_t bytes_received;
+    uint32_t bytes_total;
+    /* I/O request linkage */
+    uint32_t io_request_id; /* nt_http or nt_fs handle.id */
+    uint8_t io_type;        /* nt_io_type_t */
+    uint8_t _pad2;
+    /* Retry state */
+    uint16_t attempt_count;
+    uint32_t retry_delay_ms;
+    uint32_t retry_time_ms; /* wall clock ms of next retry */
+    /* Blob eviction */
+    uint32_t blob_last_access_ms;
+    uint32_t blob_ttl_ms;
+    /* Original load path for retry and re-download after invalidation */
+    char load_path[256];
 } NtPackMeta;
 
 /* ---- Per unique ResourceId requested by game ---- */

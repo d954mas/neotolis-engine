@@ -13,6 +13,8 @@ add_subdirectory(mesh_comp)
 add_subdirectory(material_comp)
 add_subdirectory(render_state_comp)
 add_subdirectory(resource)
+add_subdirectory(http)
+add_subdirectory(fs)
 add_subdirectory(renderers)
 
 if(EMSCRIPTEN)

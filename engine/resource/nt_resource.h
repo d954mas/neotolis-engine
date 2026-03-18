@@ -17,6 +17,37 @@
 #define NT_RESOURCE_MAX_SLOTS 2048
 #endif
 
+/* ---- Activation budget (overridable) ---- */
+
+#ifndef NT_ACTIVATE_COST_MESH
+#define NT_ACTIVATE_COST_MESH 1
+#endif
+#ifndef NT_ACTIVATE_COST_SHADER
+#define NT_ACTIVATE_COST_SHADER 2
+#endif
+#ifndef NT_ACTIVATE_COST_TEXTURE
+#define NT_ACTIVATE_COST_TEXTURE 4
+#endif
+#ifndef NT_RESOURCE_ACTIVATE_BUDGET
+#define NT_RESOURCE_ACTIVATE_BUDGET 16
+#endif
+
+/* ---- Pack state (game-visible for polling) ---- */
+
+typedef enum {
+    NT_PACK_STATE_NONE = 0,    /* not loaded */
+    NT_PACK_STATE_REQUESTED,   /* I/O request issued */
+    NT_PACK_STATE_DOWNLOADING, /* receiving data (progress available) */
+    NT_PACK_STATE_LOADED,      /* data received, not yet parsed */
+    NT_PACK_STATE_READY,       /* parsed, assets registered */
+    NT_PACK_STATE_FAILED,      /* load failed (may retry) */
+} nt_pack_state_t;
+
+/* ---- Activator callback types ---- */
+
+typedef uint32_t (*nt_activate_fn)(const uint8_t *data, uint32_t size);
+typedef void (*nt_deactivate_fn)(uint32_t runtime_handle);
+
 /* ---- Resource handle ---- */
 
 typedef struct {
@@ -70,9 +101,41 @@ void nt_resource_unregister(uint32_t pack_id, uint32_t resource_id);
 
 void nt_resource_set_placeholder_texture(uint32_t resource_id);
 
+/* ---- Pack loading ---- */
+
+nt_result_t nt_resource_load_file(uint32_t pack_id, const char *path);
+nt_result_t nt_resource_load_url(uint32_t pack_id, const char *url);
+nt_result_t nt_resource_load_auto(uint32_t pack_id, const char *path);
+nt_pack_state_t nt_resource_pack_state(uint32_t pack_id);
+void nt_resource_pack_progress(uint32_t pack_id, uint32_t *received, uint32_t *total);
+
+/* ---- Activator registration ---- */
+
+void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_deactivate_fn deactivate);
+
+/* ---- Activation budget ---- */
+
+void nt_resource_set_activate_budget(int32_t budget);
+
+/* ---- Retry policy ---- */
+
+void nt_resource_set_retry_policy(uint32_t max_attempts, uint32_t base_delay_ms, uint32_t max_delay_ms);
+
+/* ---- Blob policy ---- */
+
+void nt_resource_set_blob_policy(uint32_t pack_id, uint8_t policy, uint32_t ttl_ms);
+
+/* ---- Context loss recovery ---- */
+
+void nt_resource_invalidate(uint8_t asset_type);
+
 /* ---- Hash utility ---- */
 
 uint32_t nt_resource_hash(const char *name);
+
+/* ---- Debug: dump loaded pack contents to log ---- */
+
+void nt_resource_dump_pack(uint32_t pack_id);
 
 /* ---- Test access (test-only) ---- */
 

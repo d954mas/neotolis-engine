@@ -1,8 +1,8 @@
-# Task 3.3 — NEOPAK Parser and Zero-Copy Asset Access
+# Task 3.3 — NTPACK Parser and Zero-Copy Asset Access
 
 ## Цель
 
-Реализовать runtime parser формата NEOPAK и zero-copy доступ к asset data внутри WASM heap blob-а.
+Реализовать runtime parser формата NTPACK и zero-copy доступ к asset data внутри WASM heap blob-а.
 
 ## Основание в спецификации
 

@@ -172,14 +172,41 @@ if(NOT EMSCRIPTEN)
     # --- Resource module tests ---
     add_executable(test_resource unit/test_resource.c)
     target_link_libraries(test_resource PRIVATE nt_resource unity)
-    target_compile_definitions(test_resource PRIVATE NT_RESOURCE_TEST_ACCESS)
+    target_compile_definitions(test_resource PRIVATE NT_RESOURCE_TEST_ACCESS _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    target_compile_options(test_resource PRIVATE -U_DLL)
     target_compile_definitions(nt_resource PRIVATE NT_RESOURCE_TEST_ACCESS)
     nt_set_warning_flags(test_resource)
     nt_set_sanitizer_flags(test_resource)
     set_target_properties(test_resource PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
-    add_test(NAME test_resource COMMAND test_resource)
+    add_test(NAME test_resource COMMAND test_resource
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
+
+    # --- HTTP module tests ---
+    add_executable(test_http unit/test_http.c)
+    target_link_libraries(test_http PRIVATE nt_http_stub unity)
+    nt_set_warning_flags(test_http)
+    nt_set_sanitizer_flags(test_http)
+    set_target_properties(test_http PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_http COMMAND test_http)
+
+    # --- File system module tests ---
+    add_executable(test_fs unit/test_fs.c)
+    target_link_libraries(test_fs PRIVATE nt_fs unity)
+    target_compile_definitions(test_fs PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    target_compile_options(test_fs PRIVATE -U_DLL)
+    nt_set_warning_flags(test_fs)
+    nt_set_sanitizer_flags(test_fs)
+    set_target_properties(test_fs PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_fs COMMAND test_fs
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
 
     # --- Builder tests ---
     add_executable(test_builder unit/test_builder.c)

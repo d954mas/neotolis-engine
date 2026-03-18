@@ -17,11 +17,11 @@
 | --- | --- | --- |
 | [Sprint 1](./sprint1/README.md) | Foundation runtime | Каркас проекта, frame lifecycle, platform/web, memory policy, logging, build contract |
 | [Sprint 2](./sprint2/README.md) | ECS foundation | Entity handles, hierarchy, destruction policy, component storage, transforms |
-| [Sprint 3](./sprint3/README.md) | Resources and packs | Resource registry, PackState/AssetState, NEOPAK parsing, async loading |
+| [Sprint 3](./sprint3/README.md) | Resources and packs | Resource registry, PackState/AssetState, NTPACK parsing, async loading |
 | [Sprint 4](./sprint4/README.md) | Runtime asset layer | Validation framework, shader/material/texture/mesh runtime formats |
 | [Sprint 5](./sprint5/README.md) | Rendering | WebGL 2 backend, render passes, render items, mesh/sprite/text/shadow path |
 | [Sprint 6](./sprint6/README.md) | Interaction and diagnostics | Input polling, pointer capture, audio, debug overlay, smoke harness |
-| [Sprint 7](./sprint7/README.md) | Builder and integration | Builder API, importers, NEOPAK writer, validation, end-to-end flow |
+| [Sprint 7](./sprint7/README.md) | Builder and integration | Builder API, importers, NTPACK writer, validation, end-to-end flow |
 
 ## Что сознательно не планируется
 

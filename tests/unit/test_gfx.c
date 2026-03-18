@@ -1,6 +1,11 @@
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
+#include "nt_mesh_format.h"
+#include "nt_shader_format.h"
+#include "nt_texture_format.h"
 #include "unity.h"
+
+#include <string.h>
 
 /* 4x4 RGBA8 test pixel data (64 bytes) */
 static const uint8_t s_test_pixels_4x4[4 * 4 * 4] = {
@@ -8,7 +13,7 @@ static const uint8_t s_test_pixels_4x4[4 * 4 * 4] = {
     255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
 };
 
-void setUp(void) { nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 4, .max_pipelines = 4, .max_buffers = 4, .max_textures = 4}); }
+void setUp(void) { nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8}); }
 
 void tearDown(void) { nt_gfx_shutdown(); }
 
@@ -106,7 +111,7 @@ void test_gfx_init_shutdown(void) {
     nt_gfx_shutdown();
     TEST_ASSERT_FALSE(g_nt_gfx.initialized);
     /* Re-init for tearDown */
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 4, .max_pipelines = 4, .max_buffers = 4, .max_textures = 4});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8});
 }
 
 /* ---- High-level: make/destroy shader ---- */
@@ -146,7 +151,7 @@ void test_gfx_defaults_applied(void) {
 
     /* Re-init for tearDown */
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 4, .max_pipelines = 4, .max_buffers = 4, .max_textures = 4});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8});
 }
 
 /* ---- Pipeline: create with valid shaders, destroy ---- */
@@ -392,8 +397,8 @@ void test_gfx_double_destroy_texture(void) {
 /* ---- Texture: pool exhaustion ---- */
 
 void test_gfx_texture_pool_full(void) {
-    nt_texture_t textures[4];
-    for (int i = 0; i < 4; i++) {
+    nt_texture_t textures[8];
+    for (int i = 0; i < 8; i++) {
         textures[i] = nt_gfx_make_texture(&(nt_texture_desc_t){
             .width = 4,
             .height = 4,
@@ -407,9 +412,195 @@ void test_gfx_texture_pool_full(void) {
         .data = s_test_pixels_4x4,
     });
     TEST_ASSERT_EQUAL_UINT32(0, overflow.id);
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 8; i++) {
         nt_gfx_destroy_texture(textures[i]);
     }
+}
+
+/* ---- Activator: texture valid blob ---- */
+
+void test_activate_texture_valid_blob(void) {
+    uint32_t w = 2;
+    uint32_t h = 2;
+    uint32_t pixel_size = w * h * 4;
+    uint32_t blob_size = (uint32_t)sizeof(NtTextureAssetHeader) + pixel_size;
+    uint8_t blob[sizeof(NtTextureAssetHeader) + 16];
+    NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)blob;
+    memset(blob, 0, sizeof(blob));
+    hdr->magic = NT_TEXTURE_MAGIC;
+    hdr->version = NT_TEXTURE_VERSION;
+    hdr->format = NT_TEXTURE_FORMAT_RGBA8;
+    hdr->width = w;
+    hdr->height = h;
+    hdr->mip_count = 1;
+    /* Fill pixel data with non-zero */
+    memset(blob + sizeof(NtTextureAssetHeader), 0xFF, pixel_size);
+    uint32_t handle = nt_gfx_activate_texture(blob, blob_size);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
+    nt_gfx_deactivate_texture(handle);
+}
+
+/* ---- Activator: texture bad magic ---- */
+
+void test_activate_texture_bad_magic(void) {
+    uint8_t blob[sizeof(NtTextureAssetHeader) + 16];
+    NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)blob;
+    memset(blob, 0, sizeof(blob));
+    hdr->magic = 0xDEADBEEF;
+    hdr->width = 2;
+    hdr->height = 2;
+    hdr->mip_count = 1;
+    uint32_t handle = nt_gfx_activate_texture(blob, sizeof(blob));
+    TEST_ASSERT_EQUAL_UINT32(0, handle);
+}
+
+/* ---- Activator: texture too small ---- */
+
+void test_activate_texture_too_small(void) {
+    uint8_t blob[4]; /* smaller than header */
+    memset(blob, 0, sizeof(blob));
+    uint32_t handle = nt_gfx_activate_texture(blob, sizeof(blob));
+    TEST_ASSERT_EQUAL_UINT32(0, handle);
+}
+
+/* ---- Activator: mesh valid blob ---- */
+
+void test_activate_mesh_valid_blob(void) {
+    /* Build: header + 1 stream desc + 12 bytes vertex data + 6 bytes index data */
+    uint32_t streams_size = (uint32_t)sizeof(NtStreamDesc);
+    uint32_t vdata_size = 12; /* 1 vertex, 3 floats */
+    uint32_t idata_size = 6;  /* 3 uint16 indices */
+    uint32_t blob_size = (uint32_t)sizeof(NtMeshAssetHeader) + streams_size + vdata_size + idata_size;
+    uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 12 + 6];
+    memset(blob, 0, sizeof(blob));
+
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 1;
+    hdr->index_type = 1; /* uint16 */
+    hdr->vertex_count = 1;
+    hdr->index_count = 3;
+    hdr->vertex_data_size = vdata_size;
+    hdr->index_data_size = idata_size;
+
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd->name_hash = 0x12345678;
+    sd->type = NT_STREAM_FLOAT32;
+    sd->count = 3;
+
+    uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
+    nt_gfx_deactivate_mesh(handle);
+}
+
+/* ---- Activator: mesh bad magic ---- */
+
+void test_activate_mesh_bad_magic(void) {
+    uint8_t blob[sizeof(NtMeshAssetHeader)];
+    memset(blob, 0, sizeof(blob));
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = 0xDEADBEEF;
+    uint32_t handle = nt_gfx_activate_mesh(blob, sizeof(blob));
+    TEST_ASSERT_EQUAL_UINT32(0, handle);
+}
+
+/* ---- Activator: shader valid blob ---- */
+
+void test_activate_shader_valid_blob(void) {
+    const char *source = "void main() {}\0";
+    uint32_t code_size = (uint32_t)strlen(source) + 1;
+    uint32_t blob_size = (uint32_t)sizeof(NtShaderCodeHeader) + code_size;
+    uint8_t blob[sizeof(NtShaderCodeHeader) + 32];
+    memset(blob, 0, sizeof(blob));
+
+    NtShaderCodeHeader *hdr = (NtShaderCodeHeader *)blob;
+    hdr->magic = NT_SHADER_CODE_MAGIC;
+    hdr->version = NT_SHADER_CODE_VERSION;
+    hdr->stage = NT_SHADER_STAGE_VERTEX;
+    hdr->code_size = code_size;
+    memcpy(blob + sizeof(NtShaderCodeHeader), source, code_size);
+
+    uint32_t handle = nt_gfx_activate_shader(blob, blob_size);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
+    nt_gfx_deactivate_shader(handle);
+}
+
+/* ---- Activator: shader bad magic ---- */
+
+void test_activate_shader_bad_magic(void) {
+    uint8_t blob[sizeof(NtShaderCodeHeader)];
+    memset(blob, 0, sizeof(blob));
+    NtShaderCodeHeader *hdr = (NtShaderCodeHeader *)blob;
+    hdr->magic = 0xDEADBEEF;
+    uint32_t handle = nt_gfx_activate_shader(blob, sizeof(blob));
+    TEST_ASSERT_EQUAL_UINT32(0, handle);
+}
+
+/* ---- Deactivate mesh clears table ---- */
+
+void test_deactivate_mesh_clears_table(void) {
+    uint32_t streams_size = (uint32_t)sizeof(NtStreamDesc);
+    uint32_t vdata_size = 12;
+    uint32_t idata_size = 6;
+    uint32_t blob_size = (uint32_t)sizeof(NtMeshAssetHeader) + streams_size + vdata_size + idata_size;
+    uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 12 + 6];
+    memset(blob, 0, sizeof(blob));
+
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 1;
+    hdr->index_type = 1;
+    hdr->vertex_count = 3;
+    hdr->index_count = 3;
+    hdr->vertex_data_size = vdata_size;
+    hdr->index_data_size = idata_size;
+
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd->type = NT_STREAM_FLOAT32;
+    sd->count = 3;
+
+    uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
+    TEST_ASSERT_NOT_NULL(nt_gfx_get_mesh_info(handle));
+    nt_gfx_deactivate_mesh(handle);
+    TEST_ASSERT_NULL(nt_gfx_get_mesh_info(handle));
+}
+
+/* ---- Mesh info fields ---- */
+
+void test_mesh_info_fields(void) {
+    uint32_t streams_size = (uint32_t)sizeof(NtStreamDesc);
+    uint32_t vdata_size = 36; /* 3 vertices * 3 floats * 4 bytes */
+    uint32_t idata_size = 6;  /* 3 uint16 indices */
+    uint32_t blob_size = (uint32_t)sizeof(NtMeshAssetHeader) + streams_size + vdata_size + idata_size;
+    uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 36 + 6];
+    memset(blob, 0, sizeof(blob));
+
+    NtMeshAssetHeader *hdr = (NtMeshAssetHeader *)blob;
+    hdr->magic = NT_MESH_MAGIC;
+    hdr->version = NT_MESH_VERSION;
+    hdr->stream_count = 1;
+    hdr->index_type = 1;
+    hdr->vertex_count = 3;
+    hdr->index_count = 3;
+    hdr->vertex_data_size = vdata_size;
+    hdr->index_data_size = idata_size;
+
+    NtStreamDesc *sd = (NtStreamDesc *)(blob + sizeof(NtMeshAssetHeader));
+    sd->type = NT_STREAM_FLOAT32;
+    sd->count = 3;
+
+    uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
+    const nt_gfx_mesh_info_t *info = nt_gfx_get_mesh_info(handle);
+    TEST_ASSERT_NOT_NULL(info);
+    TEST_ASSERT_EQUAL_UINT32(3, info->vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(3, info->index_count);
+    TEST_ASSERT_EQUAL_UINT8(1, info->stream_count);
+    TEST_ASSERT_EQUAL_UINT8(1, info->index_type);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, info->vbo.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, info->ibo.id);
+    nt_gfx_deactivate_mesh(handle);
 }
 
 int main(void) {
@@ -447,5 +638,15 @@ int main(void) {
     RUN_TEST(test_gfx_destroy_texture_and_reuse);
     RUN_TEST(test_gfx_double_destroy_texture);
     RUN_TEST(test_gfx_texture_pool_full);
+    /* Activator tests */
+    RUN_TEST(test_activate_texture_valid_blob);
+    RUN_TEST(test_activate_texture_bad_magic);
+    RUN_TEST(test_activate_texture_too_small);
+    RUN_TEST(test_activate_mesh_valid_blob);
+    RUN_TEST(test_activate_mesh_bad_magic);
+    RUN_TEST(test_activate_shader_valid_blob);
+    RUN_TEST(test_activate_shader_bad_magic);
+    RUN_TEST(test_deactivate_mesh_clears_table);
+    RUN_TEST(test_mesh_info_fields);
     return UNITY_END();
 }

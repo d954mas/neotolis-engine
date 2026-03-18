@@ -76,9 +76,9 @@ void nt_gfx_backend_set_uniform_float(const char *name, float val);
 void nt_gfx_backend_set_uniform_int(const char *name, int val);
 
 void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices);
-void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices);
+void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint8_t index_type);
 void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count);
-void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count);
+void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type);
 
 bool nt_gfx_backend_recreate_all_resources(void);
 

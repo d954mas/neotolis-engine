@@ -379,12 +379,13 @@ void nt_gfx_backend_set_uniform_int(const char *name, int val) {
 
 /* ---- Draw calls ---- */
 
-/* TODO: support uint32 indices (GL_UNSIGNED_INT) via nt_index_type_t in nt_buffer_desc_t */
 void nt_gfx_backend_draw(uint32_t first_vertex, uint32_t num_vertices) { glDrawArrays(GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices); }
 
-void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices) {
-    glDrawElements(GL_TRIANGLES, (GLsizei)num_indices, GL_UNSIGNED_SHORT,
-                   (void *)(uintptr_t)(first_index * sizeof(uint16_t))); // NOLINT(performance-no-int-to-ptr)
+void nt_gfx_backend_draw_indexed(uint32_t first_index, uint32_t num_indices, uint8_t index_type) {
+    GLenum gl_type = (index_type == 2) ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
+    uint32_t stride = (index_type == 2) ? sizeof(uint32_t) : sizeof(uint16_t);
+    glDrawElements(GL_TRIANGLES, (GLsizei)num_indices, gl_type,
+                   (void *)(uintptr_t)(first_index * stride)); // NOLINT(performance-no-int-to-ptr)
 }
 
 /* ---- Resource management (shader / buffer / pipeline) ---- */
@@ -704,9 +705,11 @@ void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices,
     glDrawArraysInstanced(GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices, (GLsizei)instance_count);
 }
 
-void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count) {
-    glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)num_indices, GL_UNSIGNED_SHORT,
-                            (void *)(uintptr_t)(first_index * sizeof(uint16_t)), // NOLINT(performance-no-int-to-ptr)
+void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t instance_count, uint8_t index_type) {
+    GLenum gl_type = (index_type == 2) ? GL_UNSIGNED_INT : GL_UNSIGNED_SHORT;
+    uint32_t stride = (index_type == 2) ? sizeof(uint32_t) : sizeof(uint16_t);
+    glDrawElementsInstanced(GL_TRIANGLES, (GLsizei)num_indices, gl_type,
+                            (void *)(uintptr_t)(first_index * stride), // NOLINT(performance-no-int-to-ptr)
                             (GLsizei)instance_count);
 }
 

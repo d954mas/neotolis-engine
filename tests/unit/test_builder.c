@@ -214,7 +214,7 @@ void test_hash_different_strings_differ(void) {
 /* --- Pack writer core tests --- */
 
 void test_start_pack_returns_context(void) {
-    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/test_ctx.neopak");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/test_ctx.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
     /* Finish immediately with no assets should return error */
     nt_build_result_t r = nt_builder_finish_pack(ctx);
@@ -230,7 +230,7 @@ void test_shader_round_trip(void) {
                                  "layout(location = 0) in vec3 a_pos;\n"
                                  "void main() { gl_Position = vec4(a_pos, 1.0); }\n");
 
-    const char *pack_path = TMP_DIR "/shader_rt.neopak";
+    const char *pack_path = TMP_DIR "/shader_rt.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -277,7 +277,7 @@ void test_texture_round_trip(void) {
     const char *png_path = TMP_DIR "/rt_test_2x2.png";
     write_test_png(png_path);
 
-    const char *pack_path = TMP_DIR "/texture_rt.neopak";
+    const char *pack_path = TMP_DIR "/texture_rt.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -319,7 +319,7 @@ void test_mesh_round_trip(void) {
         {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
     };
 
-    const char *pack_path = TMP_DIR "/mesh_rt.neopak";
+    const char *pack_path = TMP_DIR "/mesh_rt.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -362,7 +362,7 @@ void test_missing_position_attribute_errors(void) {
         {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
     };
 
-    const char *pack_path = TMP_DIR "/no_pos.neopak";
+    const char *pack_path = TMP_DIR "/no_pos.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -381,7 +381,7 @@ void test_duplicate_path_errors(void) {
     write_test_shader(vert_path, "precision mediump float;\n"
                                  "void main() { gl_Position = vec4(0); }\n");
 
-    const char *pack_path = TMP_DIR "/dup_test.neopak";
+    const char *pack_path = TMP_DIR "/dup_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -400,7 +400,7 @@ void test_force_add_replaces(void) {
     write_test_shader(vert_path, "precision mediump float;\n"
                                  "void main() { gl_Position = vec4(0); }\n");
 
-    const char *pack_path = TMP_DIR "/force_test.neopak";
+    const char *pack_path = TMP_DIR "/force_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -438,7 +438,7 @@ void test_empty_shader_errors(void) {
     const char *vert_path = TMP_DIR "/empty.vert";
     write_test_shader(vert_path, "");
 
-    const char *pack_path = TMP_DIR "/empty_test.neopak";
+    const char *pack_path = TMP_DIR "/empty_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -458,7 +458,7 @@ void test_shader_with_version_errors(void) {
                                  "precision mediump float;\n"
                                  "void main() { gl_Position = vec4(0); }\n");
 
-    const char *pack_path = TMP_DIR "/hasversion_test.neopak";
+    const char *pack_path = TMP_DIR "/hasversion_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -484,7 +484,7 @@ void test_shader_comment_stripping(void) {
                                  "    gl_Position = vec4(0.0); // inline comment\n"
                                  "}\n");
 
-    const char *pack_path = TMP_DIR "/comments_test.neopak";
+    const char *pack_path = TMP_DIR "/comments_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -534,7 +534,7 @@ void test_asset_alignment(void) {
                               "out vec4 c;\n"
                               "void main() { c = vec4(1); }\n");
 
-    const char *pack_path = TMP_DIR "/align_test.neopak";
+    const char *pack_path = TMP_DIR "/align_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -570,7 +570,7 @@ void test_crc32_verification(void) {
     write_test_shader(vert_path, "precision mediump float;\n"
                                  "void main() { gl_Position = vec4(1); }\n");
 
-    const char *pack_path = TMP_DIR "/crc_test.neopak";
+    const char *pack_path = TMP_DIR "/crc_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -609,7 +609,7 @@ void test_dump_valid_pack(void) {
     write_test_shader(vert_path, "precision mediump float;\n"
                                  "void main() { gl_Position = vec4(0); }\n");
 
-    const char *pack_path = TMP_DIR "/dump_test.neopak";
+    const char *pack_path = TMP_DIR "/dump_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
@@ -624,7 +624,7 @@ void test_dump_valid_pack(void) {
 
 void test_dump_invalid_file_errors(void) {
     /* Write garbage data */
-    const char *bad_path = TMP_DIR "/bad.neopak";
+    const char *bad_path = TMP_DIR "/bad.ntpack";
     FILE *f = fopen(bad_path, "wb");
     TEST_ASSERT_NOT_NULL(f);
     uint8_t garbage[] = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
@@ -652,7 +652,7 @@ void test_multi_asset_pack(void) {
         {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
     };
 
-    const char *pack_path = TMP_DIR "/multi_test.neopak";
+    const char *pack_path = TMP_DIR "/multi_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -723,7 +723,7 @@ void test_shader_stage_correct(void) {
                                  "out vec4 c;\n"
                                  "void main() { c = vec4(1); }\n");
 
-    const char *pack_path = TMP_DIR "/stage_test.neopak";
+    const char *pack_path = TMP_DIR "/stage_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     nt_build_result_t r = nt_builder_add_shader(ctx, frag_path, NT_BUILD_SHADER_FRAGMENT);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
@@ -754,7 +754,7 @@ void test_shader_stage_correct(void) {
 
 void test_glob_shaders(void) {
     /* Use the test fixtures directory which has .vert and .frag files */
-    const char *pack_path = TMP_DIR "/glob_test.neopak";
+    const char *pack_path = TMP_DIR "/glob_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -788,7 +788,7 @@ void test_e2e_real_assets(void) {
         {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
     };
 
-    const char *pack_path = TMP_DIR "/e2e.neopak";
+    const char *pack_path = TMP_DIR "/e2e.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -886,7 +886,7 @@ void test_rename_changes_resource_id(void) {
     const char *vert_path = TMP_DIR "/rename.vert";
     write_test_shader(vert_path, "precision mediump float;\nvoid main() { gl_Position = vec4(0); }\n");
 
-    const char *pack_path = TMP_DIR "/rename_test.neopak";
+    const char *pack_path = TMP_DIR "/rename_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -919,7 +919,7 @@ void test_force_glob_override(void) {
     write_test_shader(TMP_DIR "/force_glob/a.vert", "precision mediump float;\nvoid main() { gl_Position = vec4(0); }\n");
     write_test_shader(TMP_DIR "/force_glob/b.vert", "precision mediump float;\nvoid main() { gl_Position = vec4(1); }\n");
 
-    const char *pack_path = TMP_DIR "/force_glob.neopak";
+    const char *pack_path = TMP_DIR "/force_glob.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -961,7 +961,7 @@ void test_force_glob_override(void) {
 /* --- free_pack without finish --- */
 
 void test_free_pack_without_finish(void) {
-    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/nofin.neopak");
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/nofin.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
 
     const char *vert_path = TMP_DIR "/nofin.vert";

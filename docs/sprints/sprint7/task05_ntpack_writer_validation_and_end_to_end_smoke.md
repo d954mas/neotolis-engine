@@ -1,4 +1,4 @@
-# Task 7.5 — NEOPAK Writer, Validation, and End-to-End Smoke
+# Task 7.5 — NTPACK Writer, Validation, and End-to-End Smoke
 
 ## Цель
 
@@ -15,7 +15,7 @@
 ## Объём работ
 
 - Реализовать pack placement с alignment, header generation, `AssetEntry[]`, `header_size`, `total_size`, checksum.
-- Встроить manifest прямо в NEOPAK header region согласно flat binary design.
+- Встроить manifest прямо в NTPACK header region согласно flat binary design.
 - Реализовать `pack_dump(filename)` и человекочитаемый debug output состава pack-а.
 - Собрать builder validation pass для ссылок, типов, shader/material/mesh compatibility, корректности generated runtime formats и audio validity.
 - Подготовить end-to-end smoke: builder генерирует pack, runtime грузит его через resource system, активирует assets и проходит render/audio smoke scenario.
@@ -27,7 +27,7 @@
 
 ## Критерии приёмки
 
-- Pack binary соответствует NEOPAK layout и успешно парсится runtime parser-ом из Sprint 3.
+- Pack binary соответствует NTPACK layout и успешно парсится runtime parser-ом из Sprint 3.
 - `pack_dump` помогает диагностировать содержимое без внешних утилит.
 - Builder validation перехватывает ошибки раньше runtime whenever possible.
 - End-to-end smoke покрывает как минимум один shader/material/texture/mesh asset и один audio asset.

@@ -5,51 +5,19 @@
 
 #include "core/nt_assert.h"
 #include "log/nt_log.h"
+#include "nt_mesh_format.h"
+#include "nt_shader_format.h"
+#include "nt_texture_format.h"
 
-/* ---- Descriptor ownership helpers ----
-   Shader source/label and immutable buffer data are strdup/memcpy'd so
-   context-loss recreation doesn't chase dangling pointers.
-   TODO(assets): remove copies once shaders/buffers come from asset packs
-   that outlive the resource. */
+/* ---- Buffer metadata (minimal info kept for runtime validation) ---- */
 
-static char *nt_gfx_strdup(const char *s) {
-    if (!s) {
-        return NULL;
-    }
-    size_t len = strlen(s) + 1;
-    char *copy = (char *)malloc(len);
-    if (copy) {
-        memcpy(copy, s, len);
-    }
-    return copy;
-}
-
-static void nt_gfx_free_shader_desc(nt_shader_desc_t *d) {
-    free((void *)d->source);
-    free((void *)d->label);
-    memset(d, 0, sizeof(*d));
-}
-
-static void nt_gfx_free_buffer_desc(nt_buffer_desc_t *d) {
-    free((void *)d->data);
-    free((void *)d->label);
-    memset(d, 0, sizeof(*d));
-}
-
-static void nt_gfx_free_texture_desc(nt_texture_desc_t *d) {
-    free((void *)d->label);
-    memset(d, 0, sizeof(*d));
-}
-
-/* Pipeline-owned shader source copies.
-   Pipelines keep their own vs/fs source so context-loss recovery
-   works even if the original shader was destroyed. */
 typedef struct {
-    char *vs_source;
-    char *fs_source;
-} nt_gfx_pipeline_sources_t;
-
-static void nt_gfx_free_pipeline_data(uint32_t slot);
+    uint8_t type;       /* nt_buffer_type_t */
+    uint8_t usage;      /* nt_buffer_usage_t */
+    uint8_t index_type; /* 0=none, 1=uint16, 2=uint32 */
+    uint8_t _pad;
+    uint32_t size;
+} nt_gfx_buffer_meta_t;
 
 /* ---- Global state ---- */
 
@@ -68,14 +36,15 @@ static struct {
     uint32_t *buffer_backends;
     uint32_t *texture_backends;
 
-    nt_shader_desc_t *shader_descs; /* stored descs for context loss recreation */
-    nt_pipeline_desc_t *pipeline_descs;
-    nt_buffer_desc_t *buffer_descs;
-    nt_texture_desc_t *texture_descs;
-    nt_gfx_pipeline_sources_t *pipeline_sources; /* pipeline-owned shader source copies */
+    nt_gfx_buffer_meta_t *buffer_metas; /* minimal buffer metadata for runtime validation */
+
+    nt_gfx_mesh_info_t mesh_table[NT_GFX_MAX_MESHES + 1]; /* index 0 reserved */
+    uint16_t mesh_free[NT_GFX_MAX_MESHES];
+    uint16_t mesh_free_top;
 
     nt_gfx_render_state_t render_state;
-    uint32_t bound_pipeline; /* currently bound pipeline backend handle */
+    uint32_t bound_pipeline;  /* currently bound pipeline backend handle */
+    uint8_t bound_index_type; /* index type of currently bound IBO (1=uint16, 2=uint32) */
 } s_gfx;
 
 /* ---- Pool helpers ---- */
@@ -148,16 +117,6 @@ bool nt_gfx_pool_valid(const nt_gfx_pool_t *pool, uint32_t id) {
 
 uint32_t nt_gfx_pool_slot_index(uint32_t id) { return id & NT_GFX_SLOT_MASK; }
 
-/* ---- Pipeline data cleanup ---- */
-
-static void nt_gfx_free_pipeline_data(uint32_t slot) {
-    free((void *)s_gfx.pipeline_descs[slot].label);
-    free(s_gfx.pipeline_sources[slot].vs_source);
-    free(s_gfx.pipeline_sources[slot].fs_source);
-    memset(&s_gfx.pipeline_descs[slot], 0, sizeof(nt_pipeline_desc_t));
-    memset(&s_gfx.pipeline_sources[slot], 0, sizeof(nt_gfx_pipeline_sources_t));
-}
-
 /* ---- Lifecycle ---- */
 
 void nt_gfx_init(const nt_gfx_desc_t *desc) {
@@ -175,13 +134,15 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.buffer_backends = (uint32_t *)calloc(desc->max_buffers + 1, sizeof(uint32_t));
     s_gfx.texture_backends = (uint32_t *)calloc(desc->max_textures + 1, sizeof(uint32_t));
 
-    s_gfx.shader_descs = (nt_shader_desc_t *)calloc(desc->max_shaders + 1, sizeof(nt_shader_desc_t));
-    s_gfx.pipeline_descs = (nt_pipeline_desc_t *)calloc(desc->max_pipelines + 1, sizeof(nt_pipeline_desc_t));
-    s_gfx.buffer_descs = (nt_buffer_desc_t *)calloc(desc->max_buffers + 1, sizeof(nt_buffer_desc_t));
-    s_gfx.texture_descs = (nt_texture_desc_t *)calloc(desc->max_textures + 1, sizeof(nt_texture_desc_t));
-    s_gfx.pipeline_sources = (nt_gfx_pipeline_sources_t *)calloc(desc->max_pipelines + 1, sizeof(nt_gfx_pipeline_sources_t));
+    s_gfx.buffer_metas = (nt_gfx_buffer_meta_t *)calloc(desc->max_buffers + 1, sizeof(nt_gfx_buffer_meta_t));
 
     s_gfx.render_state = NT_GFX_STATE_IDLE;
+
+    /* Fill mesh free stack: lowest index on top */
+    s_gfx.mesh_free_top = NT_GFX_MAX_MESHES;
+    for (uint16_t i = 0; i < NT_GFX_MAX_MESHES; i++) {
+        s_gfx.mesh_free[i] = (uint16_t)(NT_GFX_MAX_MESHES - i);
+    }
 
     if (!nt_gfx_backend_init(desc)) {
         nt_log_error("gfx: backend init failed");
@@ -195,18 +156,14 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 void nt_gfx_shutdown(void) {
     nt_gfx_backend_shutdown();
 
-    /* Free owned strings/data in stored descriptors */
-    for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
-        nt_gfx_free_shader_desc(&s_gfx.shader_descs[i]);
-    }
-    for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
-        nt_gfx_free_pipeline_data(i);
-    }
-    for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
-        nt_gfx_free_buffer_desc(&s_gfx.buffer_descs[i]);
-    }
-    for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
-        nt_gfx_free_texture_desc(&s_gfx.texture_descs[i]);
+    /* Destroy active mesh table entries */
+    for (uint32_t i = 1; i <= NT_GFX_MAX_MESHES; i++) {
+        if (s_gfx.mesh_table[i].vbo.id != 0) {
+            nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[nt_gfx_pool_slot_index(s_gfx.mesh_table[i].vbo.id)]);
+            if (s_gfx.mesh_table[i].ibo.id != 0) {
+                nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[nt_gfx_pool_slot_index(s_gfx.mesh_table[i].ibo.id)]);
+            }
+        }
     }
 
     nt_gfx_pool_shutdown(&s_gfx.shader_pool);
@@ -218,95 +175,53 @@ void nt_gfx_shutdown(void) {
     free(s_gfx.pipeline_backends);
     free(s_gfx.buffer_backends);
     free(s_gfx.texture_backends);
-    free(s_gfx.shader_descs);
-    free(s_gfx.pipeline_descs);
-    free(s_gfx.buffer_descs);
-    free(s_gfx.texture_descs);
-    free(s_gfx.pipeline_sources);
+    free(s_gfx.buffer_metas);
 
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
-}
-
-/* ---- Context restoration ---- */
-
-/* TODO(assets): restore_context assumes synchronous recreation (all data in memory).
-   When assets load from packs/network, this needs staged recovery across frames. */
-static bool restore_context(void) {
-    if (!nt_gfx_backend_recreate_all_resources()) {
-        return false;
-    }
-
-    g_nt_gfx.context_lost = false;
-    g_nt_gfx.context_restored = true;
-    s_gfx.bound_pipeline = 0;
-
-    /* A slot is live when its index bits match its position (freed slots have index bits zeroed) */
-#define SLOT_IS_LIVE(pool, idx) (((pool).slots[(idx)].id & NT_GFX_SLOT_MASK) == (idx))
-
-    /* Recreate standalone shaders (for future pipeline creation) */
-    for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
-        if (SLOT_IS_LIVE(s_gfx.shader_pool, i)) {
-            s_gfx.shader_backends[i] = nt_gfx_backend_create_shader(&s_gfx.shader_descs[i]);
-        }
-    }
-
-    /* Recreate buffers */
-    for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
-        if (SLOT_IS_LIVE(s_gfx.buffer_pool, i)) {
-            s_gfx.buffer_backends[i] = nt_gfx_backend_create_buffer(&s_gfx.buffer_descs[i]);
-        }
-    }
-
-    /* Recreate textures (no pixel data or mipmaps — GPU-side only placeholder) */
-    for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
-        if (SLOT_IS_LIVE(s_gfx.texture_pool, i)) {
-            nt_texture_desc_t recovery_desc = s_gfx.texture_descs[i];
-            recovery_desc.data = NULL;
-            recovery_desc.gen_mipmaps = false;
-            s_gfx.texture_backends[i] = nt_gfx_backend_create_texture(&recovery_desc);
-        }
-    }
-
-    /* Recreate pipelines from pipeline-owned shader sources.
-       This works even if the original shaders were destroyed. */
-    for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
-        if (SLOT_IS_LIVE(s_gfx.pipeline_pool, i)) {
-            const nt_pipeline_desc_t *pdesc = &s_gfx.pipeline_descs[i];
-            nt_shader_desc_t vs_desc = {.type = NT_SHADER_VERTEX, .source = s_gfx.pipeline_sources[i].vs_source};
-            nt_shader_desc_t fs_desc = {.type = NT_SHADER_FRAGMENT, .source = s_gfx.pipeline_sources[i].fs_source};
-            uint32_t vs_backend = nt_gfx_backend_create_shader(&vs_desc);
-            uint32_t fs_backend = nt_gfx_backend_create_shader(&fs_desc);
-            s_gfx.pipeline_backends[i] = nt_gfx_backend_create_pipeline(pdesc, vs_backend, fs_backend);
-            /* Shader objects can be deleted after linking — GL keeps them alive through the program */
-            nt_gfx_backend_destroy_shader(vs_backend);
-            nt_gfx_backend_destroy_shader(fs_backend);
-        }
-    }
-
-#undef SLOT_IS_LIVE
-    return true;
 }
 
 /* ---- Frame / Pass ---- */
 
 void nt_gfx_begin_frame(void) {
     if (nt_gfx_backend_is_context_lost()) {
-        g_nt_gfx.context_lost = true;
+        if (!g_nt_gfx.context_lost) {
+            /* First detection: wipe all backend handles */
+            for (uint32_t i = 1; i <= s_gfx.shader_pool.capacity; i++) {
+                s_gfx.shader_backends[i] = 0;
+            }
+            for (uint32_t i = 1; i <= s_gfx.pipeline_pool.capacity; i++) {
+                s_gfx.pipeline_backends[i] = 0;
+            }
+            for (uint32_t i = 1; i <= s_gfx.buffer_pool.capacity; i++) {
+                s_gfx.buffer_backends[i] = 0;
+            }
+            for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
+                s_gfx.texture_backends[i] = 0;
+            }
+            /* Mesh table: keep entries active. nt_resource_invalidate() will
+             * call deactivate_mesh() which returns slots to free lists.
+             * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
+            s_gfx.bound_pipeline = 0;
+            g_nt_gfx.context_lost = true;
+            nt_log_error("gfx: WebGL context lost");
+        }
+        return; /* Skip frame */
     }
 
     if (g_nt_gfx.context_lost) {
-        if (!restore_context()) {
-            return; /* Context still unavailable — skip frame */
-        }
+        /* Context was lost but now available again -- game must re-create resources */
+        g_nt_gfx.context_lost = false;
+        g_nt_gfx.context_restored = true;
+        nt_log_info("gfx: WebGL context restored -- game must re-create resources");
     }
 
+    /* Normal frame begin */
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
     if (s_gfx.render_state != NT_GFX_STATE_IDLE) {
         nt_log_error("gfx: begin_frame called outside IDLE state");
         return;
     }
-
     s_gfx.render_state = NT_GFX_STATE_FRAME;
     memset(&g_nt_gfx.frame_stats, 0, sizeof(g_nt_gfx.frame_stats));
     nt_gfx_backend_begin_frame();
@@ -381,9 +296,6 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
 
     uint32_t slot = nt_gfx_pool_slot_index(id);
     s_gfx.shader_backends[slot] = backend;
-    s_gfx.shader_descs[slot] = *desc;
-    s_gfx.shader_descs[slot].source = nt_gfx_strdup(desc->source);
-    s_gfx.shader_descs[slot].label = nt_gfx_strdup(desc->label);
 
     result.id = id;
     return result;
@@ -428,12 +340,6 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
 
     uint32_t slot = nt_gfx_pool_slot_index(id);
     s_gfx.pipeline_backends[slot] = backend;
-    s_gfx.pipeline_descs[slot] = *desc;
-    s_gfx.pipeline_descs[slot].label = nt_gfx_strdup(desc->label);
-
-    /* Copy shader sources so pipeline can recover independently of shader lifetime */
-    s_gfx.pipeline_sources[slot].vs_source = nt_gfx_strdup(s_gfx.shader_descs[vs_slot].source);
-    s_gfx.pipeline_sources[slot].fs_source = nt_gfx_strdup(s_gfx.shader_descs[fs_slot].source);
 
     result.id = id;
     return result;
@@ -460,19 +366,10 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
 
     uint32_t slot = nt_gfx_pool_slot_index(id);
     s_gfx.buffer_backends[slot] = backend;
-    s_gfx.buffer_descs[slot] = *desc;
-    s_gfx.buffer_descs[slot].label = nt_gfx_strdup(desc->label);
-    /* Immutable buffers: copy data for context-loss recreation.
-       Dynamic/stream: game refills every frame, recreate empty. */
-    if (desc->usage == NT_USAGE_IMMUTABLE && desc->data && desc->size > 0) {
-        void *copy = malloc(desc->size);
-        if (copy) {
-            memcpy(copy, desc->data, desc->size);
-        }
-        s_gfx.buffer_descs[slot].data = copy;
-    } else {
-        s_gfx.buffer_descs[slot].data = NULL;
-    }
+    s_gfx.buffer_metas[slot].type = (uint8_t)desc->type;
+    s_gfx.buffer_metas[slot].usage = (uint8_t)desc->usage;
+    s_gfx.buffer_metas[slot].index_type = desc->index_type;
+    s_gfx.buffer_metas[slot].size = desc->size;
 
     result.id = id;
     return result;
@@ -520,9 +417,6 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
 
     uint32_t slot = nt_gfx_pool_slot_index(id);
     s_gfx.texture_backends[slot] = backend;
-    s_gfx.texture_descs[slot] = local_desc;
-    s_gfx.texture_descs[slot].label = nt_gfx_strdup(local_desc.label);
-    s_gfx.texture_descs[slot].data = NULL; /* no CPU copy of pixel data */
 
     result.id = id;
     return result;
@@ -538,7 +432,6 @@ void nt_gfx_destroy_shader(nt_shader_t shd) {
     uint32_t slot = nt_gfx_pool_slot_index(shd.id);
     nt_gfx_backend_destroy_shader(s_gfx.shader_backends[slot]);
     s_gfx.shader_backends[slot] = 0;
-    nt_gfx_free_shader_desc(&s_gfx.shader_descs[slot]);
     nt_gfx_pool_free(&s_gfx.shader_pool, shd.id);
 }
 
@@ -553,7 +446,6 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
     }
     nt_gfx_backend_destroy_pipeline(s_gfx.pipeline_backends[slot]);
     s_gfx.pipeline_backends[slot] = 0;
-    nt_gfx_free_pipeline_data(slot);
     nt_gfx_pool_free(&s_gfx.pipeline_pool, pip.id);
 }
 
@@ -565,7 +457,7 @@ void nt_gfx_destroy_buffer(nt_buffer_t buf) {
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
     nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[slot]);
     s_gfx.buffer_backends[slot] = 0;
-    nt_gfx_free_buffer_desc(&s_gfx.buffer_descs[slot]);
+    memset(&s_gfx.buffer_metas[slot], 0, sizeof(nt_gfx_buffer_meta_t));
     nt_gfx_pool_free(&s_gfx.buffer_pool, buf.id);
 }
 
@@ -577,7 +469,6 @@ void nt_gfx_destroy_texture(nt_texture_t tex) {
     uint32_t slot = nt_gfx_pool_slot_index(tex.id);
     nt_gfx_backend_destroy_texture(s_gfx.texture_backends[slot]);
     s_gfx.texture_backends[slot] = 0;
-    nt_gfx_free_texture_desc(&s_gfx.texture_descs[slot]);
     nt_gfx_pool_free(&s_gfx.texture_pool, tex.id);
 }
 
@@ -605,8 +496,8 @@ void nt_gfx_bind_vertex_buffer(nt_buffer_t buf) {
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
-    NT_ASSERT(s_gfx.buffer_descs[slot].type == NT_BUFFER_VERTEX);
-    if (s_gfx.buffer_descs[slot].type != NT_BUFFER_VERTEX) {
+    NT_ASSERT(s_gfx.buffer_metas[slot].type == NT_BUFFER_VERTEX);
+    if (s_gfx.buffer_metas[slot].type != NT_BUFFER_VERTEX) {
         nt_log_error("gfx: bind_vertex_buffer: buffer is not vertex type");
         return;
     }
@@ -622,11 +513,12 @@ void nt_gfx_bind_index_buffer(nt_buffer_t buf) {
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
-    NT_ASSERT(s_gfx.buffer_descs[slot].type == NT_BUFFER_INDEX);
-    if (s_gfx.buffer_descs[slot].type != NT_BUFFER_INDEX) {
+    NT_ASSERT(s_gfx.buffer_metas[slot].type == NT_BUFFER_INDEX);
+    if (s_gfx.buffer_metas[slot].type != NT_BUFFER_INDEX) {
         nt_log_error("gfx: bind_index_buffer: buffer is not index type");
         return;
     }
+    s_gfx.bound_index_type = s_gfx.buffer_metas[slot].index_type;
     nt_gfx_backend_bind_index_buffer(s_gfx.buffer_backends[slot]);
 }
 
@@ -718,7 +610,7 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     g_nt_gfx.frame_stats.draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
     g_nt_gfx.frame_stats.indices += num_indices;
-    nt_gfx_backend_draw_indexed(first_index, num_indices);
+    nt_gfx_backend_draw_indexed(first_index, num_indices, s_gfx.bound_index_type);
 }
 
 void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count) {
@@ -742,7 +634,7 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.indices += num_indices * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
-    nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count);
+    nt_gfx_backend_draw_indexed_instanced(first_index, num_indices, instance_count, s_gfx.bound_index_type);
 }
 
 /* ---- Instance buffer ---- */
@@ -756,8 +648,8 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf) {
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
-    NT_ASSERT(s_gfx.buffer_descs[slot].type == NT_BUFFER_VERTEX);
-    if (s_gfx.buffer_descs[slot].type != NT_BUFFER_VERTEX) {
+    NT_ASSERT(s_gfx.buffer_metas[slot].type == NT_BUFFER_VERTEX);
+    if (s_gfx.buffer_metas[slot].type != NT_BUFFER_VERTEX) {
         nt_log_error("gfx: bind_instance_buffer: buffer is not vertex type");
         return;
     }
@@ -775,15 +667,228 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
         return;
     }
     uint32_t slot = nt_gfx_pool_slot_index(buf.id);
-    NT_ASSERT(s_gfx.buffer_descs[slot].usage != NT_USAGE_IMMUTABLE);
-    if (s_gfx.buffer_descs[slot].usage == NT_USAGE_IMMUTABLE) {
+    NT_ASSERT(s_gfx.buffer_metas[slot].usage != NT_USAGE_IMMUTABLE);
+    if (s_gfx.buffer_metas[slot].usage == NT_USAGE_IMMUTABLE) {
         nt_log_error("gfx: update_buffer: cannot update immutable buffer");
         return;
     }
-    NT_ASSERT(size <= s_gfx.buffer_descs[slot].size);
-    if (size > s_gfx.buffer_descs[slot].size) {
+    NT_ASSERT(size <= s_gfx.buffer_metas[slot].size);
+    if (size > s_gfx.buffer_metas[slot].size) {
         nt_log_error("gfx: update_buffer: size exceeds buffer capacity");
         return;
     }
     nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], data, size);
+}
+
+/* ---- Mesh side table helpers ---- */
+
+static uint32_t mesh_table_alloc(void) {
+    if (s_gfx.mesh_free_top == 0) {
+        return 0;
+    }
+    s_gfx.mesh_free_top--;
+    return s_gfx.mesh_free[s_gfx.mesh_free_top];
+}
+
+static uint32_t mesh_handle_make(uint32_t index, uint16_t gen) { return ((uint32_t)gen << 16) | (index & 0xFFFF); }
+
+/* ---- Asset activators ---- */
+
+uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
+    if (!data || size < sizeof(NtTextureAssetHeader)) {
+        nt_log_error("gfx: activate_texture: blob too small");
+        return 0;
+    }
+    const NtTextureAssetHeader *hdr = (const NtTextureAssetHeader *)data;
+    if (hdr->magic != NT_TEXTURE_MAGIC) {
+        nt_log_error("gfx: activate_texture: bad magic");
+        return 0;
+    }
+    if (hdr->version > NT_TEXTURE_VERSION) {
+        nt_log_error("gfx: activate_texture: unsupported version");
+        return 0;
+    }
+    if (hdr->format != NT_TEXTURE_FORMAT_RGBA8) {
+        nt_log_error("gfx: activate_texture: unsupported format");
+        return 0;
+    }
+    uint32_t pixel_size = hdr->width * hdr->height * 4; /* RGBA8 */
+    if (sizeof(NtTextureAssetHeader) + pixel_size > size) {
+        nt_log_error("gfx: activate_texture: blob truncated");
+        return 0;
+    }
+    const uint8_t *pixels = data + sizeof(NtTextureAssetHeader);
+    nt_texture_desc_t desc = {
+        .width = hdr->width,
+        .height = hdr->height,
+        .data = pixels,
+        .format = NT_PIXEL_RGBA8,
+        .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+        .wrap_u = NT_WRAP_REPEAT,
+        .wrap_v = NT_WRAP_REPEAT,
+        .gen_mipmaps = (hdr->mip_count == 1),
+        .label = NULL,
+    };
+    nt_texture_t tex = nt_gfx_make_texture(&desc);
+    return tex.id;
+}
+
+uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
+    if (!data || size < sizeof(NtMeshAssetHeader)) {
+        nt_log_error("gfx: activate_mesh: blob too small");
+        return 0;
+    }
+    const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
+    if (hdr->magic != NT_MESH_MAGIC) {
+        nt_log_error("gfx: activate_mesh: bad magic");
+        return 0;
+    }
+    if (hdr->version > NT_MESH_VERSION) {
+        nt_log_error("gfx: activate_mesh: unsupported version");
+        return 0;
+    }
+    if (hdr->index_type > 2) {
+        nt_log_error("gfx: activate_mesh: invalid index_type");
+        return 0;
+    }
+    if (hdr->stream_count == 0 || hdr->stream_count > NT_MESH_MAX_STREAMS) {
+        nt_log_error("gfx: activate_mesh: invalid stream_count");
+        return 0;
+    }
+    uint32_t streams_size = (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc);
+    uint32_t required = (uint32_t)sizeof(NtMeshAssetHeader) + streams_size + hdr->vertex_data_size + hdr->index_data_size;
+    if (required > size) {
+        nt_log_error("gfx: activate_mesh: blob truncated");
+        return 0;
+    }
+    const uint8_t *vertex_data = data + sizeof(NtMeshAssetHeader) + streams_size;
+    const uint8_t *index_data = vertex_data + hdr->vertex_data_size;
+
+    nt_buffer_t vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX,
+        .usage = NT_USAGE_IMMUTABLE,
+        .data = vertex_data,
+        .size = hdr->vertex_data_size,
+        .label = NULL,
+    });
+    if (vbo.id == 0) {
+        nt_log_error("gfx: activate_mesh: VBO creation failed");
+        return 0;
+    }
+
+    nt_buffer_t ibo = {0};
+    if (hdr->index_type != 0 && hdr->index_data_size > 0) {
+        ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+            .type = NT_BUFFER_INDEX,
+            .usage = NT_USAGE_IMMUTABLE,
+            .data = index_data,
+            .size = hdr->index_data_size,
+            .index_type = hdr->index_type,
+            .label = NULL,
+        });
+        if (ibo.id == 0) {
+            nt_log_error("gfx: activate_mesh: IBO creation failed");
+            nt_gfx_destroy_buffer(vbo);
+            return 0;
+        }
+    }
+
+    uint32_t slot = mesh_table_alloc();
+    if (slot == 0) {
+        nt_log_error("gfx: activate_mesh: mesh table full");
+        nt_gfx_destroy_buffer(ibo);
+        nt_gfx_destroy_buffer(vbo);
+        return 0;
+    }
+
+    s_gfx.mesh_table[slot].vbo = vbo;
+    s_gfx.mesh_table[slot].ibo = ibo;
+    s_gfx.mesh_table[slot].vertex_count = hdr->vertex_count;
+    s_gfx.mesh_table[slot].index_count = hdr->index_count;
+    s_gfx.mesh_table[slot].stream_count = hdr->stream_count;
+    s_gfx.mesh_table[slot].index_type = hdr->index_type;
+    s_gfx.mesh_table[slot].generation++;
+
+    return mesh_handle_make(slot, s_gfx.mesh_table[slot].generation);
+}
+
+uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {
+    if (!data || size < sizeof(NtShaderCodeHeader)) {
+        nt_log_error("gfx: activate_shader: blob too small");
+        return 0;
+    }
+    const NtShaderCodeHeader *hdr = (const NtShaderCodeHeader *)data;
+    if (hdr->magic != NT_SHADER_CODE_MAGIC) {
+        nt_log_error("gfx: activate_shader: bad magic");
+        return 0;
+    }
+    if (hdr->version > NT_SHADER_CODE_VERSION) {
+        nt_log_error("gfx: activate_shader: unsupported version");
+        return 0;
+    }
+    if (hdr->stage > NT_SHADER_STAGE_FRAGMENT) {
+        nt_log_error("gfx: activate_shader: invalid stage");
+        return 0;
+    }
+    if ((uint32_t)sizeof(NtShaderCodeHeader) + hdr->code_size > size) {
+        nt_log_error("gfx: activate_shader: blob truncated");
+        return 0;
+    }
+    const char *source = (const char *)(data + sizeof(NtShaderCodeHeader));
+    nt_shader_type_t type = (hdr->stage == NT_SHADER_STAGE_VERTEX) ? NT_SHADER_VERTEX : NT_SHADER_FRAGMENT;
+    nt_shader_t shd = nt_gfx_make_shader(&(nt_shader_desc_t){
+        .type = type,
+        .source = source,
+        .label = NULL,
+    });
+    return shd.id;
+}
+
+/* ---- Asset deactivators ---- */
+
+void nt_gfx_deactivate_texture(uint32_t handle) {
+    nt_texture_t tex = {.id = handle};
+    nt_gfx_destroy_texture(tex);
+}
+
+void nt_gfx_deactivate_mesh(uint32_t handle) {
+    uint32_t index = handle & 0xFFFF;
+    uint16_t gen = (uint16_t)(handle >> 16);
+    if (index == 0 || index > NT_GFX_MAX_MESHES) {
+        nt_log_error("gfx: deactivate_mesh: invalid handle index");
+        return;
+    }
+    if (s_gfx.mesh_table[index].generation != gen) {
+        nt_log_error("gfx: deactivate_mesh: stale handle");
+        return;
+    }
+    nt_gfx_destroy_buffer(s_gfx.mesh_table[index].vbo);
+    if (s_gfx.mesh_table[index].ibo.id != 0) {
+        nt_gfx_destroy_buffer(s_gfx.mesh_table[index].ibo);
+    }
+    s_gfx.mesh_table[index].vbo.id = 0;
+    s_gfx.mesh_table[index].ibo.id = 0;
+    s_gfx.mesh_table[index].generation++; /* invalidate old handles */
+    s_gfx.mesh_free[s_gfx.mesh_free_top] = (uint16_t)index;
+    s_gfx.mesh_free_top++;
+}
+
+void nt_gfx_deactivate_shader(uint32_t handle) {
+    nt_shader_t shd = {.id = handle};
+    nt_gfx_destroy_shader(shd);
+}
+
+/* ---- Mesh info query ---- */
+
+const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(uint32_t mesh_handle) {
+    uint32_t index = mesh_handle & 0xFFFF;
+    uint16_t gen = (uint16_t)(mesh_handle >> 16);
+    if (index == 0 || index > NT_GFX_MAX_MESHES) {
+        return NULL;
+    }
+    if (s_gfx.mesh_table[index].generation != gen) {
+        return NULL;
+    }
+    return &s_gfx.mesh_table[index];
 }

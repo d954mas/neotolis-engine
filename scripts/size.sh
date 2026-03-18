@@ -58,9 +58,10 @@ declare -a FILE_NAMES=()
 declare -a FILE_RAWS=()
 declare -a FILE_GZIPS=()
 
-for file in "$OUTPUT_DIR"/*; do
-    [ -f "$file" ] || continue
-    fname=$(basename "$file")
+measure_file() {
+    local file="$1" prefix="$2"
+    local fname="${prefix}$(basename "$file")"
+    local raw gz
     raw=$(wc -c < "$file" | tr -d ' ')
     gz=$(gzip -c "$file" | wc -c | tr -d ' ')
     TOTAL_RAW=$((TOTAL_RAW + raw))
@@ -68,7 +69,20 @@ for file in "$OUTPUT_DIR"/*; do
     FILE_NAMES+=("$fname")
     FILE_RAWS+=("$raw")
     FILE_GZIPS+=("$gz")
+}
+
+for file in "$OUTPUT_DIR"/*; do
+    [ -f "$file" ] || continue
+    measure_file "$file" ""
 done
+
+# Include asset packs (assets/ subdirectory) if present
+if [ -d "$OUTPUT_DIR/assets" ]; then
+    for file in "$OUTPUT_DIR/assets"/*; do
+        [ -f "$file" ] || continue
+        measure_file "$file" "assets/"
+    done
+fi
 
 # ---------------------------------------------------------------------------
 # Table output (to stdout normally, to stderr in JSON mode)
