@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <string.h>
 
+#include "core/nt_assert.h"
 #include "log/nt_log.h"
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
@@ -17,7 +18,6 @@
 /* ---- Slot map: resource_id -> slot index, open-addressing hash table ---- */
 
 #define NT_SLOT_MAP_SIZE (NT_RESOURCE_MAX_SLOTS * 2)
-_Static_assert(NT_SLOT_MAP_SIZE >= NT_RESOURCE_MAX_SLOTS * 2, "slot_map must be at least 2x MAX_SLOTS");
 
 /* ---- Module state ---- */
 
@@ -116,9 +116,6 @@ void nt_resource_step(void) {
         return; /* O(1) fast path when nothing changed */
     }
 
-    /* Per-slot tiebreak tracking (static to avoid stack pressure on WASM) */
-    static uint16_t resolve_pack[NT_RESOURCE_MAX_SLOTS + 1];
-
     /* Phase 1: Reset all active slots */
     for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
         NtResourceSlot *slot = &s_resource.slots[si];
@@ -128,7 +125,7 @@ void nt_resource_step(void) {
         slot->runtime_handle = 0;
         slot->state = NT_ASSET_STATE_REGISTERED;
         slot->resolve_prio = INT16_MIN;
-        resolve_pack[si] = 0;
+        slot->resolve_pack = 0;
     }
 
     /* Phase 2: Single pass over assets — O(A) via slot_map lookup */
@@ -160,11 +157,11 @@ void nt_resource_step(void) {
         int16_t prio = s_resource.packs[meta->pack_index].priority;
 
         /* Higher priority wins. Equal priority: higher pack_index wins (last mounted) */
-        if (prio > slot->resolve_prio || (prio == slot->resolve_prio && meta->pack_index >= resolve_pack[si])) {
+        if (prio > slot->resolve_prio || (prio == slot->resolve_prio && meta->pack_index >= slot->resolve_pack)) {
             slot->runtime_handle = meta->runtime_handle;
             slot->state = NT_ASSET_STATE_READY;
             slot->resolve_prio = prio;
-            resolve_pack[si] = meta->pack_index;
+            slot->resolve_pack = meta->pack_index;
         }
     }
 
@@ -206,9 +203,7 @@ uint32_t nt_resource_hash(const char *name) {
 static inline nt_resource_t resource_make(uint16_t index, uint16_t gen) { return (nt_resource_t){.id = ((uint32_t)gen << 16) | index}; }
 
 static nt_resource_t slot_alloc(uint32_t resource_id, uint8_t asset_type) {
-    if (s_resource.queue_top == 0) {
-        return NT_RESOURCE_INVALID; /* pool full */
-    }
+    NT_ASSERT_ALWAYS(s_resource.queue_top > 0); /* slot pool full — raise MAX_SLOTS */
 
     s_resource.queue_top--;
     uint16_t index = s_resource.free_queue[s_resource.queue_top];
@@ -224,6 +219,7 @@ static nt_resource_t slot_alloc(uint32_t resource_id, uint8_t asset_type) {
     slot->resource_id = resource_id;
     slot->runtime_handle = 0;
     slot->resolve_prio = INT16_MIN;
+    slot->resolve_pack = 0;
     slot->asset_type = asset_type;
     slot->state = NT_ASSET_STATE_REGISTERED;
 
@@ -256,8 +252,8 @@ static nt_result_t pack_alloc(uint32_t pack_id, int16_t priority, uint8_t pack_t
         }
     }
 
-    nt_log_error("nt_resource: pack slots full");
-    return NT_ERR_INVALID_ARG;
+    NT_ASSERT_ALWAYS(0); /* pack slots full — raise MAX_PACKS */
+    return NT_ERR_INVALID_ARG; /* unreachable, satisfies compiler */
 }
 
 nt_result_t nt_resource_mount(uint32_t pack_id, int16_t priority) { return pack_alloc(pack_id, priority, NT_PACK_FILE); }
@@ -364,10 +360,7 @@ nt_result_t nt_resource_parse_pack(uint32_t pack_id, const uint8_t *blob, uint32
 
     for (uint16_t i = 0; i < h->asset_count; i++) {
         uint32_t idx = asset_alloc();
-        if (idx == UINT32_MAX) {
-            nt_log_error("nt_resource: asset array full");
-            break;
-        }
+        NT_ASSERT_ALWAYS(idx != UINT32_MAX); /* asset array full — raise limits */
 
         NtAssetMeta *meta = &s_resource.assets[idx];
         meta->resource_id = entries[i].resource_id;
@@ -383,7 +376,6 @@ nt_result_t nt_resource_parse_pack(uint32_t pack_id, const uint8_t *blob, uint32
 
     /* Update pack metadata */
     NtPackMeta *pack = &s_resource.packs[pack_idx];
-    pack->asset_count = h->asset_count;
     pack->blob = blob;
     pack->blob_size = blob_size;
 
@@ -498,10 +490,7 @@ nt_result_t nt_resource_register(uint32_t pack_id, uint32_t resource_id, uint8_t
     }
 
     uint32_t idx = asset_alloc();
-    if (idx == UINT32_MAX) {
-        nt_log_error("nt_resource: asset array full");
-        return NT_ERR_INVALID_ARG;
-    }
+    NT_ASSERT_ALWAYS(idx != UINT32_MAX); /* asset array full — raise limits */
 
     NtAssetMeta *meta = &s_resource.assets[idx];
     meta->resource_id = resource_id;
@@ -514,7 +503,6 @@ nt_result_t nt_resource_register(uint32_t pack_id, uint32_t resource_id, uint8_t
     meta->size = 0;
     meta->runtime_handle = runtime_handle;
 
-    s_resource.packs[pack_idx].asset_count++;
     s_resource.needs_resolve = true;
 
     return NT_OK;
@@ -533,9 +521,6 @@ void nt_resource_unregister(uint32_t pack_id, uint32_t resource_id) {
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
         if (s_resource.assets[i].resource_id == resource_id && s_resource.assets[i].pack_index == (uint16_t)pack_idx) {
             s_resource.assets[i].resource_id = 0; /* mark as free */
-            if (s_resource.packs[pack_idx].asset_count > 0) {
-                s_resource.packs[pack_idx].asset_count--;
-            }
             s_resource.needs_resolve = true;
             return;
         }
