@@ -173,6 +173,7 @@ if(NOT EMSCRIPTEN)
     add_executable(test_hash unit/test_hash.c)
     target_link_libraries(test_hash PRIVATE nt_hash unity)
     target_compile_definitions(test_hash PRIVATE NT_HASH_LABELS=1)
+    target_compile_definitions(nt_hash PRIVATE NT_HASH_LABELS=1)
     nt_set_warning_flags(test_hash)
     nt_set_sanitizer_flags(test_hash)
     set_target_properties(test_hash PROPERTIES
