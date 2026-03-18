@@ -103,6 +103,18 @@ static uint32_t asset_alloc(void) {
 
 static uint32_t resource_get_time_ms(void) { return (uint32_t)(nt_time_now() * 1000.0); }
 
+/* ---- I/O issue helper (shared by load + retry) ---- */
+
+static uint32_t resource_io_issue(const char *path, uint8_t io_type) {
+    if (io_type == NT_IO_HTTP) {
+        return nt_http_request(path).id;
+    }
+    if (io_type == NT_IO_FS) {
+        return nt_fs_read_file(path).id;
+    }
+    return 0;
+}
+
 /* ---- Load failure / retry handler ---- */
 
 static void resource_handle_load_failure(NtPackMeta *pack) {
@@ -196,15 +208,8 @@ void nt_resource_step(void) {
             if (now >= pack->retry_time_ms) {
                 pack->retry_time_ms = 0;
                 pack->attempt_count++;
-                if (pack->io_type == NT_IO_HTTP) {
-                    nt_http_request_t req = nt_http_request(pack->load_path);
-                    pack->io_request_id = req.id;
-                    pack->pack_state = (req.id != 0) ? NT_PACK_STATE_REQUESTED : NT_PACK_STATE_FAILED;
-                } else if (pack->io_type == NT_IO_FS) {
-                    nt_fs_request_t req = nt_fs_read_file(pack->load_path);
-                    pack->io_request_id = req.id;
-                    pack->pack_state = (req.id != 0) ? NT_PACK_STATE_REQUESTED : NT_PACK_STATE_FAILED;
-                }
+                pack->io_request_id = resource_io_issue(pack->load_path, pack->io_type);
+                pack->pack_state = (pack->io_request_id != 0) ? NT_PACK_STATE_REQUESTED : NT_PACK_STATE_FAILED;
             }
         }
 
@@ -834,7 +839,7 @@ void nt_resource_unregister(uint32_t pack_id, uint32_t resource_id) {
 
 /* ---- Pack loading ---- */
 
-nt_result_t nt_resource_load_file(uint32_t pack_id, const char *path) {
+static nt_result_t resource_load(uint32_t pack_id, const char *path, uint8_t io_type) {
     int16_t idx = find_pack(pack_id);
     NT_ASSERT_ALWAYS(idx >= 0); /* programmer error: load called on unmounted pack */
 
@@ -844,15 +849,15 @@ nt_result_t nt_resource_load_file(uint32_t pack_id, const char *path) {
     strncpy(pack->load_path, path, 255);
     pack->load_path[255] = '\0';
 
-    nt_fs_request_t req = nt_fs_read_file(path);
-    if (req.id == 0) {
+    uint32_t req_id = resource_io_issue(path, io_type);
+    if (req_id == 0) {
         pack->pack_state = NT_PACK_STATE_FAILED;
-        nt_log_error("nt_resource: load_file failed to issue I/O request");
+        nt_log_error("nt_resource: load failed to issue I/O request");
         return NT_ERR_INVALID_ARG;
     }
 
-    pack->io_request_id = req.id;
-    pack->io_type = NT_IO_FS;
+    pack->io_request_id = req_id;
+    pack->io_type = io_type;
     pack->pack_state = NT_PACK_STATE_REQUESTED;
     pack->attempt_count = 1;
 
@@ -863,34 +868,9 @@ nt_result_t nt_resource_load_file(uint32_t pack_id, const char *path) {
     return NT_OK;
 }
 
-nt_result_t nt_resource_load_url(uint32_t pack_id, const char *url) {
-    int16_t idx = find_pack(pack_id);
-    NT_ASSERT_ALWAYS(idx >= 0); /* programmer error: load called on unmounted pack */
+nt_result_t nt_resource_load_file(uint32_t pack_id, const char *path) { return resource_load(pack_id, path, NT_IO_FS); }
 
-    NtPackMeta *pack = &s_resource.packs[idx];
-    NT_ASSERT_ALWAYS(pack->pack_state == NT_PACK_STATE_NONE); /* not already loading */
-
-    strncpy(pack->load_path, url, 255);
-    pack->load_path[255] = '\0';
-
-    nt_http_request_t req = nt_http_request(url);
-    if (req.id == 0) {
-        pack->pack_state = NT_PACK_STATE_FAILED;
-        nt_log_error("nt_resource: load_url failed to issue HTTP request");
-        return NT_ERR_INVALID_ARG;
-    }
-
-    pack->io_request_id = req.id;
-    pack->io_type = NT_IO_HTTP;
-    pack->pack_state = NT_PACK_STATE_REQUESTED;
-    pack->attempt_count = 1;
-
-    char buf[320];
-    (void)snprintf(buf, sizeof(buf), "nt_resource: loading pack 0x%08X from %s", pack_id, url);
-    nt_log_info(buf);
-
-    return NT_OK;
-}
+nt_result_t nt_resource_load_url(uint32_t pack_id, const char *url) { return resource_load(pack_id, url, NT_IO_HTTP); }
 
 nt_result_t nt_resource_load_auto(uint32_t pack_id, const char *path) {
 #ifdef NT_PLATFORM_WEB
