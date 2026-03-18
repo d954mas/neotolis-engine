@@ -60,7 +60,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/hello/native-debug/hello.exe",
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/build/examples/hello/native-debug",
             "console": "integratedTerminal",
             "preLaunchTask": "Build native-debug"
         },
@@ -69,7 +69,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/hello/native-release/hello.exe",
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/build/examples/hello/native-release",
             "console": "integratedTerminal",
             "preLaunchTask": "Build native-release"
         },
@@ -78,7 +78,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/bench_shapes/native-debug/bench_shapes.exe",
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/build/examples/bench_shapes/native-debug",
             "console": "integratedTerminal",
             "preLaunchTask": "Build native-debug"
         },
@@ -87,7 +87,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/bench_shapes/native-release/bench_shapes.exe",
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/build/examples/bench_shapes/native-release",
             "console": "integratedTerminal",
             "preLaunchTask": "Build native-release"
         },
@@ -96,7 +96,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/spinning_cube/native-debug/spinning_cube.exe",
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/build/examples/spinning_cube/native-debug",
             "console": "integratedTerminal",
             "preLaunchTask": "Build native-debug"
         },
@@ -105,7 +105,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/spinning_cube/native-release/spinning_cube.exe",
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/build/examples/spinning_cube/native-release",
             "console": "integratedTerminal",
             "preLaunchTask": "Build native-release"
         },
@@ -132,7 +132,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/textured_quad/native-debug/textured_quad.exe",
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/build/examples/textured_quad/native-debug",
             "console": "integratedTerminal",
             "preLaunchTask": "Build native-debug"
         },
@@ -141,7 +141,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/textured_quad/native-release/textured_quad.exe",
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/build/examples/textured_quad/native-release",
             "console": "integratedTerminal",
             "preLaunchTask": "Build native-release"
         },
@@ -150,7 +150,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/examples/builder_demo/native-release/build_assets.exe",
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/build/examples/builder_demo/native-release",
             "console": "integratedTerminal",
             "preLaunchTask": "Build native-release"
         }

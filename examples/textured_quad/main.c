@@ -73,6 +73,36 @@ static int16_t s_hires_prio = 20;
 enum { STATE_EMPTY = 0, STATE_PIXEL = 1, STATE_BOTH = 2 };
 static int s_load_state = STATE_EMPTY;
 static bool s_pipeline_ready;
+static bool s_base_dumped;
+static bool s_pixel_dumped;
+static bool s_hires_dumped;
+
+
+/* ---- Status print: show current pack priorities ---- */
+
+static void print_status(void) {
+    char buf[256];
+    (void)snprintf(buf, sizeof(buf), "  base   prio=100  state=%d", (int)nt_resource_pack_state(s_base_pack_id));
+    nt_log_info(buf);
+    if (s_load_state >= STATE_PIXEL) {
+        (void)snprintf(buf, sizeof(buf), "  pixel  prio=%d  state=%d", (int)s_pixel_prio,
+                       (int)nt_resource_pack_state(s_pixel_pack_id));
+        nt_log_info(buf);
+    }
+    if (s_load_state >= STATE_BOTH) {
+        (void)snprintf(buf, sizeof(buf), "  hires  prio=%d  state=%d", (int)s_hires_prio,
+                       (int)nt_resource_pack_state(s_hires_pack_id));
+        nt_log_info(buf);
+    }
+    if (s_load_state == STATE_EMPTY) {
+        nt_log_info("  Texture: (fallback)");
+    } else if (s_load_state == STATE_PIXEL) {
+        nt_log_info("  Texture winner: pixel (only texture pack)");
+    } else {
+        (void)snprintf(buf, sizeof(buf), "  Texture winner: %s", s_pixel_prio > s_hires_prio ? "pixel" : "hires");
+        nt_log_info(buf);
+    }
+}
 
 /* ---- Frame callback ---- */
 
@@ -89,20 +119,25 @@ static void frame(void) {
     /* SPACE: cycle texture load states */
     if (nt_input_key_is_pressed(NT_KEY_SPACE)) {
         if (s_load_state == STATE_EMPTY) {
+            nt_log_info("======== LOAD PIXEL PACK ========");
             nt_resource_mount(s_pixel_pack_id, s_pixel_prio);
             nt_resource_load_auto(s_pixel_pack_id, "assets/lenna_pixel.neopak");
+            s_pixel_dumped = false;
             s_load_state = STATE_PIXEL;
-            nt_log_info(">> Loaded pixel pack");
+            print_status();
         } else if (s_load_state == STATE_PIXEL) {
+            nt_log_info("======== LOAD HIRES PACK ========");
             nt_resource_mount(s_hires_pack_id, s_hires_prio);
             nt_resource_load_auto(s_hires_pack_id, "assets/lenna_hires.neopak");
+            s_hires_dumped = false;
             s_load_state = STATE_BOTH;
-            nt_log_info(">> Loaded hires pack");
+            print_status();
         } else {
+            nt_log_info("======== UNLOAD ALL ========");
             nt_resource_unmount(s_pixel_pack_id);
             nt_resource_unmount(s_hires_pack_id);
             s_load_state = STATE_EMPTY;
-            nt_log_info(">> Unloaded both packs");
+            print_status();
         }
     }
 
@@ -117,11 +152,31 @@ static void frame(void) {
         if (s_load_state >= STATE_BOTH) {
             nt_resource_set_priority(s_hires_pack_id, s_hires_prio);
         }
-        nt_log_info(">> Swapped priorities");
+        nt_log_info("======== SWAP PRIORITIES ========");
+        print_status();
     }
 
     /* Step resource system */
     nt_resource_step();
+
+    /* Dump pack contents when they become READY */
+    if (!s_base_dumped && nt_resource_pack_state(s_base_pack_id) == NT_PACK_STATE_READY) {
+        nt_log_info("======== BASE PACK READY ========");
+        nt_resource_dump_pack(s_base_pack_id);
+        s_base_dumped = true;
+    }
+    if (!s_pixel_dumped && s_load_state >= STATE_PIXEL && nt_resource_pack_state(s_pixel_pack_id) == NT_PACK_STATE_READY) {
+        nt_log_info("======== PIXEL PACK READY ========");
+        nt_resource_dump_pack(s_pixel_pack_id);
+        print_status();
+        s_pixel_dumped = true;
+    }
+    if (!s_hires_dumped && s_load_state >= STATE_BOTH && nt_resource_pack_state(s_hires_pack_id) == NT_PACK_STATE_READY) {
+        nt_log_info("======== HIRES PACK READY ========");
+        nt_resource_dump_pack(s_hires_pack_id);
+        print_status();
+        s_hires_dumped = true;
+    }
 
     /* Create pipeline once shaders are ready */
     if (!s_pipeline_ready && nt_resource_is_ready(s_vs_handle) && nt_resource_is_ready(s_fs_handle)) {

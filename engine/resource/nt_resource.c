@@ -1012,6 +1012,53 @@ void nt_resource_set_placeholder_texture(uint32_t resource_id) {
     s_resource.needs_resolve = true;
 }
 
+/* ---- Debug: dump loaded pack contents to log ---- */
+
+void nt_resource_dump_pack(uint32_t pack_id) {
+    int16_t idx = find_pack(pack_id);
+    if (idx < 0) {
+        nt_log_error("nt_resource: dump_pack: not mounted");
+        return;
+    }
+
+    NtPackMeta *pack = &s_resource.packs[idx];
+    char buf[256];
+    (void)snprintf(buf, sizeof(buf), "  Pack 0x%08X  prio=%d  state=%d  blob=%s (%u bytes)", pack->pack_id, (int)pack->priority,
+                   (int)pack->pack_state, pack->blob ? "yes" : "no", pack->blob_size);
+    nt_log_info(buf);
+
+    if (!pack->blob || pack->blob_size < sizeof(NtPackHeader)) {
+        nt_log_info("  (no blob data to dump)");
+        return;
+    }
+
+    const NtPackHeader *h = (const NtPackHeader *)pack->blob;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(pack->blob + sizeof(NtPackHeader));
+    uint32_t max_entries = (h->header_size - (uint32_t)sizeof(NtPackHeader)) / (uint32_t)sizeof(NtAssetEntry);
+    if (h->asset_count < max_entries) {
+        max_entries = h->asset_count;
+    }
+
+    for (uint32_t i = 0; i < max_entries; i++) {
+        const char *tname = "???";
+        switch (entries[i].asset_type) {
+        case NT_ASSET_MESH:
+            tname = "mesh";
+            break;
+        case NT_ASSET_TEXTURE:
+            tname = "texture";
+            break;
+        case NT_ASSET_SHADER_CODE:
+            tname = "shader";
+            break;
+        default:
+            break;
+        }
+        (void)snprintf(buf, sizeof(buf), "    [%u] 0x%08X  %-8s  %u bytes", i, entries[i].resource_id, tname, entries[i].size);
+        nt_log_info(buf);
+    }
+}
+
 /* ---- Test access (test-only) ---- */
 
 #ifdef NT_RESOURCE_TEST_ACCESS

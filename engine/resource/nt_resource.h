@@ -133,6 +133,10 @@ void nt_resource_invalidate(uint8_t asset_type);
 
 uint32_t nt_resource_hash(const char *name);
 
+/* ---- Debug: dump loaded pack contents to log ---- */
+
+void nt_resource_dump_pack(uint32_t pack_id);
+
 /* ---- Test access (test-only) ---- */
 
 #ifdef NT_RESOURCE_TEST_ACCESS

@@ -74,8 +74,8 @@ int main(int argc, char *argv[]) {
             (void)fprintf(stderr, "Failed to start pixel pack\n");
             return 1;
         }
-        nt_builder_add_texture(ctx, "assets/textures/lenna_pixel.bmp");
-        nt_builder_rename(ctx, "assets/textures/lenna_pixel.bmp", "textures/lenna");
+        nt_builder_add_texture(ctx, "assets/textures/lenna_pixel.png");
+        nt_builder_rename(ctx, "assets/textures/lenna_pixel.png", "textures/lenna");
         nt_build_result_t r = nt_builder_finish_pack(ctx);
         nt_builder_free_pack(ctx);
         if (r != NT_BUILD_OK) {
