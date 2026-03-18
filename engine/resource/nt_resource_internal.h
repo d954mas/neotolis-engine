@@ -36,11 +36,11 @@ typedef struct {
 /* ---- Per-pack metadata ---- */
 
 typedef struct {
-    uint32_t pack_id;     /* FNV-1a hash of pack name/path */
-    int16_t priority;     /* higher = wins on conflict, signed */
-    uint8_t pack_type;    /* nt_pack_type_t */
-    uint8_t mounted;      /* 1 if mounted, 0 if slot available */
-    uint16_t mount_seq;   /* monotonic mount order for tiebreak */
+    uint32_t pack_id;   /* FNV-1a hash of pack name/path */
+    int16_t priority;   /* higher = wins on conflict, signed */
+    uint8_t pack_type;  /* nt_pack_type_t */
+    uint8_t mounted;    /* 1 if mounted, 0 if slot available */
+    uint16_t mount_seq; /* monotonic mount order for tiebreak */
     uint16_t _pad;
     const uint8_t *blob; /* loaded pack data (NULL until Phase 25) */
     uint32_t blob_size;  /* size of loaded blob */

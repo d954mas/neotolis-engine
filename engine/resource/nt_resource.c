@@ -255,7 +255,7 @@ static nt_result_t pack_alloc(uint32_t pack_id, int16_t priority, uint8_t pack_t
         }
     }
 
-    NT_ASSERT_ALWAYS(0); /* pack slots full — raise MAX_PACKS */
+    NT_ASSERT_ALWAYS(0);       /* pack slots full — raise MAX_PACKS */
     return NT_ERR_INVALID_ARG; /* unreachable, satisfies compiler */
 }
 
@@ -344,7 +344,7 @@ nt_result_t nt_resource_parse_pack(uint32_t pack_id, const uint8_t *blob, uint32
     }
 
     /* Validate asset entries fit in header region */
-    uint32_t entries_end = (uint32_t)sizeof(NtPackHeader) + (uint32_t)h->asset_count * (uint32_t)sizeof(NtAssetEntry);
+    uint32_t entries_end = (uint32_t)sizeof(NtPackHeader) + ((uint32_t)h->asset_count * (uint32_t)sizeof(NtAssetEntry));
     if (entries_end > h->header_size) {
         nt_log_error("nt_resource: entries overflow header region");
         return NT_ERR_INVALID_ARG;
