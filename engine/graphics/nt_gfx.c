@@ -39,6 +39,8 @@ static struct {
     nt_gfx_buffer_meta_t *buffer_metas; /* minimal buffer metadata for runtime validation */
 
     nt_gfx_mesh_info_t mesh_table[NT_GFX_MAX_MESHES + 1]; /* index 0 reserved */
+    uint16_t mesh_free[NT_GFX_MAX_MESHES];
+    uint16_t mesh_free_top;
 
     nt_gfx_render_state_t render_state;
     uint32_t bound_pipeline;  /* currently bound pipeline backend handle */
@@ -136,6 +138,12 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 
     s_gfx.render_state = NT_GFX_STATE_IDLE;
 
+    /* Fill mesh free stack: lowest index on top */
+    s_gfx.mesh_free_top = NT_GFX_MAX_MESHES;
+    for (uint16_t i = 0; i < NT_GFX_MAX_MESHES; i++) {
+        s_gfx.mesh_free[i] = (uint16_t)(NT_GFX_MAX_MESHES - i);
+    }
+
     if (!nt_gfx_backend_init(desc)) {
         nt_log_error("gfx: backend init failed");
         nt_gfx_shutdown();
@@ -152,7 +160,9 @@ void nt_gfx_shutdown(void) {
     for (uint32_t i = 1; i <= NT_GFX_MAX_MESHES; i++) {
         if (s_gfx.mesh_table[i].active) {
             nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[nt_gfx_pool_slot_index(s_gfx.mesh_table[i].vbo.id)]);
-            nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[nt_gfx_pool_slot_index(s_gfx.mesh_table[i].ibo.id)]);
+            if (s_gfx.mesh_table[i].ibo.id != 0) {
+                nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[nt_gfx_pool_slot_index(s_gfx.mesh_table[i].ibo.id)]);
+            }
             s_gfx.mesh_table[i].active = false;
         }
     }
@@ -675,12 +685,11 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
 /* ---- Mesh side table helpers ---- */
 
 static uint32_t mesh_table_alloc(void) {
-    for (uint32_t i = 1; i <= NT_GFX_MAX_MESHES; i++) {
-        if (!s_gfx.mesh_table[i].active) {
-            return i;
-        }
+    if (s_gfx.mesh_free_top == 0) {
+        return 0;
     }
-    return 0;
+    s_gfx.mesh_free_top--;
+    return s_gfx.mesh_free[s_gfx.mesh_free_top];
 }
 
 static uint32_t mesh_handle_make(uint32_t index, uint16_t gen) { return ((uint32_t)gen << 16) | (index & 0xFFFF); }
@@ -770,18 +779,21 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         return 0;
     }
 
-    nt_buffer_t ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_INDEX,
-        .usage = NT_USAGE_IMMUTABLE,
-        .data = index_data,
-        .size = hdr->index_data_size,
-        .index_type = hdr->index_type,
-        .label = "mesh_ibo",
-    });
-    if (ibo.id == 0) {
-        nt_log_error("gfx: activate_mesh: IBO creation failed");
-        nt_gfx_destroy_buffer(vbo);
-        return 0;
+    nt_buffer_t ibo = {0};
+    if (hdr->index_type != 0 && hdr->index_data_size > 0) {
+        ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+            .type = NT_BUFFER_INDEX,
+            .usage = NT_USAGE_IMMUTABLE,
+            .data = index_data,
+            .size = hdr->index_data_size,
+            .index_type = hdr->index_type,
+            .label = "mesh_ibo",
+        });
+        if (ibo.id == 0) {
+            nt_log_error("gfx: activate_mesh: IBO creation failed");
+            nt_gfx_destroy_buffer(vbo);
+            return 0;
+        }
     }
 
     uint32_t slot = mesh_table_alloc();
@@ -855,8 +867,12 @@ void nt_gfx_deactivate_mesh(uint32_t handle) {
         return;
     }
     nt_gfx_destroy_buffer(s_gfx.mesh_table[index].vbo);
-    nt_gfx_destroy_buffer(s_gfx.mesh_table[index].ibo);
+    if (s_gfx.mesh_table[index].ibo.id != 0) {
+        nt_gfx_destroy_buffer(s_gfx.mesh_table[index].ibo);
+    }
     s_gfx.mesh_table[index].active = false;
+    s_gfx.mesh_free[s_gfx.mesh_free_top] = (uint16_t)index;
+    s_gfx.mesh_free_top++;
 }
 
 void nt_gfx_deactivate_shader(uint32_t handle) {
