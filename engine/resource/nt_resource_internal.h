@@ -77,9 +77,9 @@ typedef struct {
     /* I/O request linkage */
     uint32_t io_request_id; /* nt_http or nt_fs handle.id */
     uint8_t io_type;        /* nt_io_type_t */
+    uint8_t _pad2;
     /* Retry state */
-    uint8_t attempt_count;
-    uint16_t _pad2;
+    uint16_t attempt_count;
     uint32_t retry_delay_ms;
     uint32_t retry_time_ms; /* wall clock ms of next retry */
     /* Blob eviction */

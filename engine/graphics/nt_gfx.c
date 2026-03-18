@@ -697,6 +697,14 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         nt_log_error("gfx: activate_texture: bad magic");
         return 0;
     }
+    if (hdr->version > NT_TEXTURE_VERSION) {
+        nt_log_error("gfx: activate_texture: unsupported version");
+        return 0;
+    }
+    if (hdr->format != NT_TEXTURE_FORMAT_RGBA8) {
+        nt_log_error("gfx: activate_texture: unsupported format");
+        return 0;
+    }
     uint32_t pixel_size = hdr->width * hdr->height * 4; /* RGBA8 */
     if (sizeof(NtTextureAssetHeader) + pixel_size > size) {
         nt_log_error("gfx: activate_texture: blob truncated");
@@ -727,6 +735,14 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
     if (hdr->magic != NT_MESH_MAGIC) {
         nt_log_error("gfx: activate_mesh: bad magic");
+        return 0;
+    }
+    if (hdr->version > NT_MESH_VERSION) {
+        nt_log_error("gfx: activate_mesh: unsupported version");
+        return 0;
+    }
+    if (hdr->index_type > 2) {
+        nt_log_error("gfx: activate_mesh: invalid index_type");
         return 0;
     }
     if (hdr->stream_count == 0 || hdr->stream_count > NT_MESH_MAX_STREAMS) {
@@ -796,6 +812,14 @@ uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {
     const NtShaderCodeHeader *hdr = (const NtShaderCodeHeader *)data;
     if (hdr->magic != NT_SHADER_CODE_MAGIC) {
         nt_log_error("gfx: activate_shader: bad magic");
+        return 0;
+    }
+    if (hdr->version > NT_SHADER_CODE_VERSION) {
+        nt_log_error("gfx: activate_shader: unsupported version");
+        return 0;
+    }
+    if (hdr->stage > NT_SHADER_STAGE_FRAGMENT) {
+        nt_log_error("gfx: activate_shader: invalid stage");
         return 0;
     }
     if ((uint32_t)sizeof(NtShaderCodeHeader) + hdr->code_size > size) {

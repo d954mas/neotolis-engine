@@ -185,7 +185,15 @@ nt_result_t nt_resource_init(const nt_resource_desc_t *desc) {
     return NT_OK;
 }
 
-void nt_resource_shutdown(void) { memset(&s_resource, 0, sizeof(s_resource)); }
+void nt_resource_shutdown(void) {
+    /* Unmount all packs: deactivates GPU resources, frees owned blobs, cancels I/O */
+    for (uint16_t i = 0; i < NT_RESOURCE_MAX_PACKS; i++) {
+        if (s_resource.packs[i].mounted) {
+            nt_resource_unmount(s_resource.packs[i].pack_id);
+        }
+    }
+    memset(&s_resource, 0, sizeof(s_resource));
+}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_resource_step(void) {
@@ -363,7 +371,11 @@ void nt_resource_step(void) {
                 continue;
             }
             if (now_ms - pack->blob_last_access_ms >= pack->blob_ttl_ms) {
-                free((void *)pack->blob);
+                /* Only free blobs owned by resource system (loaded via I/O).
+                 * Caller-owned blobs (parse_pack direct) have io_type == NT_IO_NONE. */
+                if (pack->io_type != NT_IO_NONE) {
+                    free((void *)pack->blob);
+                }
                 pack->blob = NULL;
                 pack->blob_size = 0;
             }
