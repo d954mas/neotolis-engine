@@ -169,6 +169,17 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_components COMMAND test_components)
 
+    # --- Hash module tests ---
+    add_executable(test_hash unit/test_hash.c)
+    target_link_libraries(test_hash PRIVATE nt_hash unity)
+    target_compile_definitions(test_hash PRIVATE NT_HASH_LABELS=1)
+    nt_set_warning_flags(test_hash)
+    nt_set_sanitizer_flags(test_hash)
+    set_target_properties(test_hash PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_hash COMMAND test_hash)
+
     # --- Resource module tests ---
     add_executable(test_resource unit/test_resource.c)
     target_link_libraries(test_resource PRIVATE nt_resource unity)
