@@ -44,7 +44,7 @@ typedef enum {
 
 /*
  * PackHeader: 24 bytes total (packed, naturally aligned).
- * magic(4) + pack_id(4) + version(2) + asset_count(2) +
+ * magic(4) + _reserved(4) + version(2) + asset_count(2) +
  * header_size(4) + total_size(4) + checksum(4) = 24
  *
  * Fields ordered so every field sits on its natural alignment boundary
@@ -54,7 +54,7 @@ typedef enum {
 #pragma pack(push, 1)
 typedef struct {
     uint32_t magic;       /* 0:  NT_PACK_MAGIC ("NPAK") */
-    uint32_t pack_id;     /* 4:  unique pack identifier */
+    uint32_t _reserved;   /* 4:  must be 0 */
     uint16_t version;     /* 8:  NT_PACK_VERSION */
     uint16_t asset_count; /* 10: number of assets */
     uint32_t header_size; /* 12: offset where data region starts */
@@ -64,22 +64,23 @@ typedef struct {
 #pragma pack(pop)
 
 /*
- * AssetEntry: 16 bytes total (packed, naturally aligned).
- * resource_id(4) + format_version(2) + asset_type(1) +
- * _pad(1) + offset(4) + size(4) = 16
+ * AssetEntry: 24 bytes total (packed).
+ * resource_id(8) + offset(4) + size(4) + format_version(2) +
+ * asset_type(1) + _pad(1) + _pad2(4) = 24
  */
 #pragma pack(push, 1)
 typedef struct {
-    uint32_t resource_id;    /* 0:  hash of asset path (algorithm TBD in nt_hash) */
-    uint16_t format_version; /* 4:  per-asset-type format version */
-    uint8_t asset_type;      /* 6:  nt_asset_type_t */
-    uint8_t _pad;            /* 7:  explicit padding */
+    uint64_t resource_id;    /* 0:  nt_hash64 of asset path */
     uint32_t offset;         /* 8:  byte offset from file start */
     uint32_t size;           /* 12: asset data size in bytes */
+    uint16_t format_version; /* 16: per-asset-type format version */
+    uint8_t asset_type;      /* 18: nt_asset_type_t */
+    uint8_t _pad;            /* 19: explicit padding */
+    uint32_t _pad2;          /* 20: align to 24 bytes */
 } NtAssetEntry;
 #pragma pack(pop)
 
 _Static_assert(sizeof(NtPackHeader) == 24, "PackHeader must be 24 bytes");
-_Static_assert(sizeof(NtAssetEntry) == 16, "AssetEntry must be 16 bytes");
+_Static_assert(sizeof(NtAssetEntry) == 24, "AssetEntry must be 24 bytes");
 
 #endif /* NT_PACK_FORMAT_H */

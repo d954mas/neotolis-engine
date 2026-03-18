@@ -6,7 +6,7 @@
 
 /* --- Texture import (called from finish_pack) --- */
 
-nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *path, uint32_t resource_id) {
+nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *path, uint64_t resource_id) {
     if (!ctx || !path) {
         return NT_BUILD_ERR_VALIDATION;
     }

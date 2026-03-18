@@ -43,7 +43,7 @@ typedef struct {
 typedef struct {
     char *path;                 /* normalized source file path (owned, heap) */
     char *rename_key;           /* renamed key path (owned, heap, NULL if not renamed) */
-    uint32_t resource_id;       /* FNV-1a hash */
+    uint64_t resource_id;       /* nt_hash64 value */
     nt_build_asset_kind_t kind; /* mesh/texture/shader */
     void *data;                 /* NtBuildMeshData* / NtBuildShaderData* / NULL (owned, heap) */
 } NtBuildEntry;
@@ -68,9 +68,6 @@ struct NtBuilderContext {
     bool force;
     bool has_error;
 
-    /* Pack metadata */
-    uint32_t pack_id;
-
     /* Per-type counters for summary */
     uint32_t mesh_count;
     uint32_t texture_count;
@@ -79,19 +76,18 @@ struct NtBuilderContext {
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
 nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data, uint32_t size);
-nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint32_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size);
+nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size);
 
 /* Internal import functions -- called from finish_pack */
-nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, uint32_t resource_id);
-nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *path, uint32_t resource_id);
-nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint32_t resource_id);
+nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, uint64_t resource_id);
+nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *path, uint64_t resource_id);
+nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint64_t resource_id);
 
 /* File I/O utilities */
 char *nt_builder_read_file(const char *path, uint32_t *out_size);
 
 /* Hash and path utilities */
 char *nt_builder_normalize_path(const char *path);
-uint32_t nt_builder_fnv1a(const char *str);
 uint16_t nt_builder_float32_to_float16(float value);
 
 #endif /* NT_BUILDER_INTERNAL_H */

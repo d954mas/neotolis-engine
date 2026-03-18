@@ -49,6 +49,20 @@
             "problemMatcher": "$gcc"
         },
         {
+            "label": "Build native-debug (build_tq_packs)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target build_tq_packs",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build native-debug (build_assets)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target build_assets",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
             "label": "Build wasm-debug",
             "type": "cmake",
             "command": "build",

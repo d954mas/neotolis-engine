@@ -900,7 +900,7 @@ Even if pass code on C directly sets depth/blend/cull state, material still stor
 
 ## 17.1 Core concepts
 
-- `resource_id`: FNV-1a hash of asset path — stable resource identity
+- `resource_id`: 64-bit xxHash of asset path (`nt_hash64_t`) — stable resource identity
 - `NtAssetMeta`: per-asset metadata entry (one per asset per pack)
 - `NtResourceSlot`: per unique resource requested by game code — holds resolved handle
 - `nt_resource_t`: generational handle to a slot — what game code holds and passes around
@@ -911,7 +911,7 @@ Two-level system:
 
 ## 17.2 ResourceId
 
-`resource_id` is a `uint32_t` FNV-1a hash of the asset path. Game code obtains it via `nt_resource_hash("path")`. The registry uses it to match assets across packs and resolve priority.
+`resource_id` is a `uint64_t` xxHash (XXH64) of the asset path, wrapped in `nt_hash64_t` for type safety. Game code obtains it via `nt_hash64_str("path")`. The `nt_hash` module provides centralized hashing for both builder and runtime. The registry uses resource_id to match assets across packs and resolve priority.
 
 ## 17.3 Generational handles
 
@@ -927,7 +927,7 @@ Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game cod
 
 ```c
 typedef struct {
-    uint32_t resource_id;    /* FNV-1a hash */
+    uint64_t resource_id;    /* nt_hash64 value */
     uint8_t  asset_type;     /* nt_asset_type_t */
     uint8_t  state;          /* nt_asset_state_t */
     uint16_t format_version; /* per-type binary format version */
@@ -936,21 +936,21 @@ typedef struct {
     uint32_t offset;         /* byte offset in pack blob */
     uint32_t size;           /* asset data size */
     uint32_t runtime_handle; /* resolved handle, 0 = none */
-} NtAssetMeta; /* 24 bytes */
+} NtAssetMeta; /* 28 bytes */
 ```
 
 ## 17.6 NtResourceSlot
 
 ```c
 typedef struct {
-    uint32_t resource_id;    /* FNV-1a hash */
+    uint64_t resource_id;    /* nt_hash64 value */
     uint32_t runtime_handle; /* current best resolved handle */
     uint16_t generation;     /* stale detection */
     int16_t  resolve_prio;   /* priority of current winner */
     uint8_t  asset_type;     /* nt_asset_type_t */
     uint8_t  state;          /* nt_asset_state_t of resolved entry */
     uint16_t resolve_pack;   /* pack_index of current winner */
-} NtResourceSlot; /* 16 bytes */
+} NtResourceSlot; /* 20 bytes */
 ```
 
 ## 17.7 Virtual packs
@@ -981,10 +981,40 @@ Texture-only placeholder: if a texture resource is not READY, `nt_resource_step(
 
 ```c
 // Placeholder is a regular resource (e.g. from a virtual pack or base pack)
-nt_resource_set_placeholder_texture(nt_resource_hash("textures/placeholder.png"));
+nt_resource_set_placeholder_texture(nt_hash64_str("textures/placeholder.png"));
 ```
 
 The function automatically requests a slot for the placeholder resource_id if one does not exist. Placeholder participates in the same resolve system — if the placeholder resource itself is not READY, no substitution occurs.
+
+## 17.10 nt_hash -- Identity Hashing
+
+`nt_hash` provides xxHash (XXH32/XXH64) hashing in 32-bit and 64-bit widths. Used for resource identity (64-bit) and attribute/pack naming (32-bit). Both builder and runtime link this module -- single source of truth for hash computation. xxHash chosen over FNV-1a for superior avalanche properties (critical for open-addressing hash maps) and higher throughput on WASM.
+
+Type-safe wrappers prevent accidental mixing of raw integers with hash values:
+
+```c
+typedef struct { uint32_t value; } nt_hash32_t;
+typedef struct { uint64_t value; } nt_hash64_t;
+```
+
+API:
+
+```c
+nt_hash32_t nt_hash32(const void *data, uint32_t size);
+nt_hash64_t nt_hash64(const void *data, uint32_t size);
+
+static inline nt_hash32_t nt_hash32_str(const char *s);
+static inline nt_hash64_t nt_hash64_str(const char *s);
+```
+
+Debug label system for hash-to-string reverse lookup (compile-time toggle `NT_HASH_LABELS`):
+
+```c
+void nt_hash_register_label64(nt_hash64_t hash, const char *label);
+const char *nt_hash64_label(nt_hash64_t hash);
+```
+
+CRC32 remains in `shared/` for pack data checksum -- different purpose (error detection vs identity hashing).
 
 ---
 
@@ -1054,7 +1084,7 @@ Current NtPackMeta (Phase 24 — registry only):
 
 ```c
 typedef struct {
-    uint32_t pack_id;     /* FNV-1a hash of pack name/path */
+    uint32_t pack_id;     /* nt_hash32 value of pack name/path */
     int16_t  priority;    /* higher = wins on conflict */
     uint8_t  pack_type;   /* NT_PACK_FILE or NT_PACK_VIRTUAL */
     uint8_t  mounted;     /* 1 if mounted, 0 if slot available */
@@ -1129,11 +1159,11 @@ Custom flat binary format instead of ZIP. Rationale:
 │   checksum: uint32     ← CRC32       │
 ├──────────────────────────────────────┤
 │ AssetEntry[0]                         │
-│   resource_id: uint32                 │
-│   asset_type: uint8                   │
-│   format_version: uint16              │
+│   resource_id: uint64                 │
 │   offset: uint32  ← from file start  │
 │   size: uint32                        │
+│   format_version: uint16              │
+│   asset_type: uint8                   │
 ├──────────────────────────────────────┤
 │ AssetEntry[1]                         │
 │   ...                                 │

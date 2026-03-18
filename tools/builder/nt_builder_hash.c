@@ -1,25 +1,7 @@
+/* clang-format off */
 #include "nt_builder_internal.h"
-
-/*
- * FNV-1a 32-bit hash.
- * Offset basis: 0x811C9DC5, Prime: 0x01000193
- * Standard algorithm for fast, well-distributed string hashing.
- */
-
-#define FNV1A_OFFSET_BASIS 0x811C9DC5U
-#define FNV1A_PRIME 0x01000193U
-
-uint32_t nt_builder_fnv1a(const char *str) {
-    if (!str) {
-        return FNV1A_OFFSET_BASIS;
-    }
-    uint32_t hash = FNV1A_OFFSET_BASIS;
-    for (const char *p = str; *p != '\0'; p++) {
-        hash ^= (uint8_t)*p;
-        hash *= FNV1A_PRIME;
-    }
-    return hash;
-}
+#include "hash/nt_hash.h"
+/* clang-format on */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity,clang-analyzer-core.UndefinedBinaryOperatorResult)
 char *nt_builder_normalize_path(const char *path) {
@@ -98,14 +80,14 @@ char *nt_builder_normalize_path(const char *path) {
     return buf;
 }
 
-uint32_t nt_builder_hash(const char *str) {
+nt_hash64_t nt_builder_normalize_and_hash(const char *str) {
     char *normalized = nt_builder_normalize_path(str);
     if (!normalized) {
-        return 0;
+        return (nt_hash64_t){0};
     }
-    uint32_t hash = nt_builder_fnv1a(normalized);
+    nt_hash64_t h = nt_hash64_str(normalized);
     free(normalized);
-    return hash;
+    return h;
 }
 
 /* --- File I/O --- */

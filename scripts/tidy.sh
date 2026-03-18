@@ -20,12 +20,12 @@ FILE_COUNT=$(echo "$SOURCES" | wc -w)
 echo "Running clang-tidy on $FILE_COUNT files..."
 
 # Treat vendored deps as system includes to silence clang-tidy on their headers
-EXTRA_ARGS="--extra-arg=-isystem$ROOT_DIR/deps/unity/src --extra-arg=-isystem$ROOT_DIR/deps/cglm/include --extra-arg=-isystem$ROOT_DIR/deps/glad/include"
+EXTRA_ARGS="--extra-arg=-isystem$ROOT_DIR/deps/unity/src --extra-arg=-isystem$ROOT_DIR/deps/cglm/include --extra-arg=-isystem$ROOT_DIR/deps/glad/include --extra-arg=-isystem$ROOT_DIR/deps/xxhash"
 
 # Use run-clang-tidy if available and python3 is present, otherwise fall back
 # Note: run-clang-tidy uses single-dash flags (-extra-arg), clang-tidy uses double-dash (--extra-arg)
 if command -v run-clang-tidy &>/dev/null && command -v python3 &>/dev/null; then
-    echo "$SOURCES" | xargs run-clang-tidy -p "$BUILD_DIR" -extra-arg="-isystem$ROOT_DIR/deps/unity/src" -extra-arg="-isystem$ROOT_DIR/deps/cglm/include" -extra-arg="-isystem$ROOT_DIR/deps/glad/include"
+    echo "$SOURCES" | xargs run-clang-tidy -p "$BUILD_DIR" -extra-arg="-isystem$ROOT_DIR/deps/unity/src" -extra-arg="-isystem$ROOT_DIR/deps/cglm/include" -extra-arg="-isystem$ROOT_DIR/deps/glad/include" -extra-arg="-isystem$ROOT_DIR/deps/xxhash"
 else
     echo "$SOURCES" | xargs clang-tidy -p "$BUILD_DIR" $EXTRA_ARGS
 fi

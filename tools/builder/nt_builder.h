@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "hash/nt_hash.h"
 #include "nt_mesh_format.h" /* nt_stream_type_t */
 
 /* Build limits (game can override before including this header) */
@@ -74,6 +75,6 @@ nt_build_result_t nt_builder_rename(NtBuilderContext *ctx, const char *old_path,
 
 /* --- Utilities --- */
 nt_build_result_t nt_builder_dump_pack(const char *pack_path);
-uint32_t nt_builder_hash(const char *str);
+nt_hash64_t nt_builder_normalize_and_hash(const char *str);
 
 #endif /* NT_BUILDER_H */

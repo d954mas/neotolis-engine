@@ -2,6 +2,7 @@
 
 #include "resource/nt_resource_internal.h"
 
+#include <inttypes.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,16 +10,12 @@
 
 #include "core/nt_assert.h"
 #include "fs/nt_fs.h"
+#include "hash/nt_hash.h"
 #include "http/nt_http.h"
 #include "log/nt_log.h"
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
 #include "time/nt_time.h"
-
-/* ---- FNV-1a constants ---- */
-
-#define NT_FNV1A_OFFSET_BASIS 0x811C9DC5U
-#define NT_FNV1A_PRIME 0x01000193U
 
 /* ---- Slot map: resource_id -> slot index, open-addressing hash table ---- */
 
@@ -36,7 +33,7 @@ static struct {
     uint16_t queue_top;
     uint16_t next_mount_seq;      /* monotonic counter for mount order tiebreak */
     uint32_t asset_hwm;           /* high-water mark in assets[] */
-    uint32_t placeholder_texture; /* resource_id for fallback texture, 0 = none */
+    uint64_t placeholder_texture; /* resource_id for fallback texture, 0 = none */
     int32_t activate_budget;      /* per-frame budget, default NT_RESOURCE_ACTIVATE_BUDGET */
     /* Retry policy (global) */
     uint32_t retry_max_attempts; /* 0 = infinite */
@@ -59,8 +56,8 @@ static int16_t find_pack(uint32_t pack_id) {
 
 /* ---- Slot map helpers ---- */
 
-static uint16_t slot_map_find(uint32_t resource_id) {
-    uint32_t idx = resource_id % NT_SLOT_MAP_SIZE;
+static uint16_t slot_map_find(uint64_t resource_id) {
+    uint32_t idx = (uint32_t)(resource_id % (uint64_t)NT_SLOT_MAP_SIZE);
     for (uint32_t i = 0; i < NT_SLOT_MAP_SIZE; i++) {
         uint32_t probe = (idx + i) % NT_SLOT_MAP_SIZE;
         uint16_t si = s_resource.slot_map[probe];
@@ -74,8 +71,8 @@ static uint16_t slot_map_find(uint32_t resource_id) {
     return 0;
 }
 
-static void slot_map_insert(uint32_t resource_id, uint16_t slot_index) {
-    uint32_t idx = resource_id % NT_SLOT_MAP_SIZE;
+static void slot_map_insert(uint64_t resource_id, uint16_t slot_index) {
+    uint32_t idx = (uint32_t)(resource_id % (uint64_t)NT_SLOT_MAP_SIZE);
     for (uint32_t i = 0; i < NT_SLOT_MAP_SIZE; i++) {
         uint32_t probe = (idx + i) % NT_SLOT_MAP_SIZE;
         if (s_resource.slot_map[probe] == 0) {
@@ -189,7 +186,7 @@ void nt_resource_shutdown(void) {
     /* Unmount all packs: deactivates GPU resources, frees owned blobs, cancels I/O */
     for (uint16_t i = 0; i < NT_RESOURCE_MAX_PACKS; i++) {
         if (s_resource.packs[i].mounted) {
-            nt_resource_unmount(s_resource.packs[i].pack_id);
+            nt_resource_unmount((nt_hash32_t){s_resource.packs[i].pack_id});
         }
     }
     memset(&s_resource, 0, sizeof(s_resource));
@@ -201,9 +198,9 @@ void nt_resource_step(void) {
         return;
     }
 
-    /* ═══════════════════════════════════════════════════
+    /* ===================================================
      *  Phase A: Poll I/O for loading packs + retry
-     * ═══════════════════════════════════════════════════ */
+     * =================================================== */
     for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
         NtPackMeta *pack = &s_resource.packs[pi];
         if (!pack->mounted) {
@@ -264,7 +261,7 @@ void nt_resource_step(void) {
                 nt_log_info(buf);
 
                 /* Check if asset entries already exist (re-download after blob eviction).
-                 * If so, skip parse_pack — entries have correct offsets/sizes already.
+                 * If so, skip parse_pack -- entries have correct offsets/sizes already.
                  * Just restore the blob pointer and let the activation loop re-activate. */
                 bool has_existing_assets = false;
                 for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
@@ -276,7 +273,7 @@ void nt_resource_step(void) {
 
                 if (has_existing_assets) {
                     /* Re-download after blob eviction: restore blob, skip re-parse.
-                     * Assumes pack content is immutable — same URL/path always returns
+                     * Assumes pack content is immutable -- same URL/path always returns
                      * identical data. If hot-update is ever needed, validate CRC32 here
                      * and fall through to full re-parse on mismatch. */
                     NT_ASSERT(loaded_size == pack->blob_size);
@@ -287,7 +284,7 @@ void nt_resource_step(void) {
                     s_resource.needs_resolve = true;
                 } else {
                     /* First load: full parse */
-                    nt_result_t res = nt_resource_parse_pack(pack->pack_id, loaded_blob, loaded_size);
+                    nt_result_t res = nt_resource_parse_pack((nt_hash32_t){pack->pack_id}, loaded_blob, loaded_size);
                     if (res == NT_OK) {
                         pack->pack_state = NT_PACK_STATE_READY;
                         pack->blob_last_access_ms = resource_get_time_ms();
@@ -304,9 +301,9 @@ void nt_resource_step(void) {
         }
     }
 
-    /* ═══════════════════════════════════════════════════
+    /* ===================================================
      *  Phase B: Activate assets within budget
-     * ═══════════════════════════════════════════════════ */
+     * =================================================== */
     {
         int32_t budget = s_resource.activate_budget;
         for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS && budget > 0; pi++) {
@@ -358,9 +355,9 @@ void nt_resource_step(void) {
         }
     }
 
-    /* ═══════════════════════════════════════════════════
+    /* ===================================================
      *  Phase C: Blob eviction (NT_BLOB_AUTO)
-     * ═══════════════════════════════════════════════════ */
+     * =================================================== */
     {
         uint32_t now_ms = resource_get_time_ms();
         for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
@@ -381,14 +378,14 @@ void nt_resource_step(void) {
                     free((void *)pack->blob);
                 }
                 pack->blob = NULL;
-                /* Keep blob_size — used to validate re-download returns same data */
+                /* Keep blob_size -- used to validate re-download returns same data */
             }
         }
     }
 
-    /* ═══════════════════════════════════════════════════
+    /* ===================================================
      *  Phase D: Resolve slots (priority-based winner)
-     * ═══════════════════════════════════════════════════ */
+     * =================================================== */
 
     if (!s_resource.needs_resolve) {
         return; /* O(1) fast path when nothing changed */
@@ -406,7 +403,7 @@ void nt_resource_step(void) {
         slot->resolve_seq = 0;
     }
 
-    /* D.2: Single pass over assets — O(A) via slot_map lookup */
+    /* D.2: Single pass over assets -- O(A) via slot_map lookup */
     for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
         NtAssetMeta *meta = &s_resource.assets[ai];
         if (meta->resource_id == 0) {
@@ -423,7 +420,7 @@ void nt_resource_step(void) {
 
         NtResourceSlot *slot = &s_resource.slots[si];
 
-        /* Skip type mismatch (malformed pack or FNV collision) */
+        /* Skip type mismatch (malformed pack or hash collision) */
         if (meta->asset_type != slot->asset_type) {
             continue;
         }
@@ -449,7 +446,7 @@ void nt_resource_step(void) {
         }
     }
 
-    /* D.3: Texture placeholder fallback — resolve via slot_map */
+    /* D.3: Texture placeholder fallback -- resolve via slot_map */
     if (s_resource.placeholder_texture != 0) {
         uint16_t ph_si = slot_map_find(s_resource.placeholder_texture);
         uint32_t ph_handle = (ph_si != 0) ? s_resource.slots[ph_si].runtime_handle : 0;
@@ -473,26 +470,12 @@ void nt_resource_step(void) {
     s_resource.needs_resolve = false;
 }
 
-/* ---- Hash utility ---- */
-
-uint32_t nt_resource_hash(const char *name) {
-    if (!name) {
-        return NT_FNV1A_OFFSET_BASIS;
-    }
-    uint32_t hash = NT_FNV1A_OFFSET_BASIS;
-    for (const char *p = name; *p != '\0'; p++) {
-        hash ^= (uint8_t)*p;
-        hash *= NT_FNV1A_PRIME;
-    }
-    return hash;
-}
-
 /* ---- Slot allocation helpers ---- */
 
 static inline nt_resource_t resource_make(uint16_t index, uint16_t gen) { return (nt_resource_t){.id = ((uint32_t)gen << 16) | index}; }
 
-static nt_resource_t slot_alloc(uint32_t resource_id, uint8_t asset_type) {
-    NT_ASSERT_ALWAYS(s_resource.queue_top > 0); /* slot pool full — raise MAX_SLOTS */
+static nt_resource_t slot_alloc(uint64_t resource_id, uint8_t asset_type) {
+    NT_ASSERT_ALWAYS(s_resource.queue_top > 0); /* slot pool full -- raise MAX_SLOTS */
 
     s_resource.queue_top--;
     uint16_t index = s_resource.free_queue[s_resource.queue_top];
@@ -542,19 +525,19 @@ static nt_result_t pack_alloc(uint32_t pack_id, int16_t priority, uint8_t pack_t
         }
     }
 
-    NT_ASSERT_ALWAYS(0);       /* pack slots full — raise MAX_PACKS */
+    NT_ASSERT_ALWAYS(0);       /* pack slots full -- raise MAX_PACKS */
     return NT_ERR_INVALID_ARG; /* unreachable, satisfies compiler */
 }
 
-nt_result_t nt_resource_mount(uint32_t pack_id, int16_t priority) { return pack_alloc(pack_id, priority, NT_PACK_FILE); }
+nt_result_t nt_resource_mount(nt_hash32_t pack_id, int16_t priority) { return pack_alloc(pack_id.value, priority, NT_PACK_FILE); }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_resource_unmount(uint32_t pack_id) {
+void nt_resource_unmount(nt_hash32_t pack_id) {
     if (!s_resource.initialized) {
         return;
     }
 
-    int16_t pack_idx = find_pack(pack_id);
+    int16_t pack_idx = find_pack(pack_id.value);
     if (pack_idx < 0) {
         return;
     }
@@ -594,12 +577,12 @@ void nt_resource_unmount(uint32_t pack_id) {
     s_resource.needs_resolve = true;
 }
 
-nt_result_t nt_resource_set_priority(uint32_t pack_id, int16_t new_priority) {
+nt_result_t nt_resource_set_priority(nt_hash32_t pack_id, int16_t new_priority) {
     if (!s_resource.initialized) {
         return NT_ERR_INVALID_ARG;
     }
 
-    int16_t idx = find_pack(pack_id);
+    int16_t idx = find_pack(pack_id.value);
     if (idx < 0) {
         nt_log_error("nt_resource: set_priority pack not found");
         return NT_ERR_INVALID_ARG;
@@ -612,12 +595,12 @@ nt_result_t nt_resource_set_priority(uint32_t pack_id, int16_t new_priority) {
 
 /* ---- Pack parsing ---- */
 
-nt_result_t nt_resource_parse_pack(uint32_t pack_id, const uint8_t *blob, uint32_t blob_size) {
+nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size) {
     if (!s_resource.initialized) {
         return NT_ERR_INVALID_ARG;
     }
 
-    int16_t pack_idx = find_pack(pack_id);
+    int16_t pack_idx = find_pack(pack_id.value);
     if (pack_idx < 0) {
         nt_log_error("nt_resource: parse_pack not mounted");
         return NT_ERR_INVALID_ARG;
@@ -679,14 +662,14 @@ nt_result_t nt_resource_parse_pack(uint32_t pack_id, const uint8_t *blob, uint32
     const NtAssetEntry *entries = (const NtAssetEntry *)(blob + sizeof(NtPackHeader));
 
     for (uint16_t i = 0; i < h->asset_count; i++) {
-        /* Validate entry data fits within blob (overflow-safe) */
-        if (entries[i].size > blob_size || entries[i].offset > blob_size - entries[i].size) {
-            nt_log_error("nt_resource: entry data exceeds blob");
+        /* Validate entry offset is in data region and data fits within blob */
+        if (entries[i].offset < h->header_size || entries[i].size > blob_size || entries[i].offset > blob_size - entries[i].size) {
+            nt_log_error("nt_resource: entry data outside data region");
             return NT_ERR_INVALID_ARG;
         }
 
         uint32_t idx = asset_alloc();
-        NT_ASSERT_ALWAYS(idx != UINT32_MAX); /* asset array full — raise limits */
+        NT_ASSERT_ALWAYS(idx != UINT32_MAX); /* asset array full -- raise limits */
 
         NtAssetMeta *meta = &s_resource.assets[idx];
         meta->resource_id = entries[i].resource_id;
@@ -715,20 +698,20 @@ nt_result_t nt_resource_parse_pack(uint32_t pack_id, const uint8_t *blob, uint32
 
 /* ---- Resource access ---- */
 
-nt_resource_t nt_resource_request(uint32_t resource_id, uint8_t asset_type) {
+nt_resource_t nt_resource_request(nt_hash64_t resource_id, uint8_t asset_type) {
     if (!s_resource.initialized) {
         return NT_RESOURCE_INVALID;
     }
 
     /* O(1) lookup via slot map (idempotent) */
-    uint16_t existing = slot_map_find(resource_id);
+    uint16_t existing = slot_map_find(resource_id.value);
     if (existing != 0) {
         NT_ASSERT(s_resource.slots[existing].asset_type == asset_type);
         return resource_make(existing, s_resource.slots[existing].generation);
     }
 
     /* Not found: allocate new slot */
-    nt_resource_t handle = slot_alloc(resource_id, asset_type);
+    nt_resource_t handle = slot_alloc(resource_id.value, asset_type);
     if (handle.id != 0) {
         s_resource.needs_resolve = true;
     }
@@ -791,15 +774,15 @@ uint8_t nt_resource_get_state(nt_resource_t handle) {
 
 /* ---- Virtual packs ---- */
 
-nt_result_t nt_resource_create_pack(uint32_t pack_id, int16_t priority) { return pack_alloc(pack_id, priority, NT_PACK_VIRTUAL); }
+nt_result_t nt_resource_create_pack(nt_hash32_t pack_id, int16_t priority) { return pack_alloc(pack_id.value, priority, NT_PACK_VIRTUAL); }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_result_t nt_resource_register(uint32_t pack_id, uint32_t resource_id, uint8_t asset_type, uint32_t runtime_handle) {
+nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, uint8_t asset_type, uint32_t runtime_handle) {
     if (!s_resource.initialized) {
         return NT_ERR_INVALID_ARG;
     }
 
-    int16_t pack_idx = find_pack(pack_id);
+    int16_t pack_idx = find_pack(pack_id.value);
     if (pack_idx < 0) {
         nt_log_error("nt_resource: register pack not found");
         return NT_ERR_INVALID_ARG;
@@ -811,7 +794,7 @@ nt_result_t nt_resource_register(uint32_t pack_id, uint32_t resource_id, uint8_t
 
     /* Check for duplicate: update existing entry */
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
-        if (s_resource.assets[i].resource_id == resource_id && s_resource.assets[i].pack_index == (uint16_t)pack_idx) {
+        if (s_resource.assets[i].resource_id == resource_id.value && s_resource.assets[i].pack_index == (uint16_t)pack_idx) {
             s_resource.assets[i].runtime_handle = runtime_handle;
             s_resource.assets[i].state = NT_ASSET_STATE_READY;
             s_resource.needs_resolve = true;
@@ -820,10 +803,10 @@ nt_result_t nt_resource_register(uint32_t pack_id, uint32_t resource_id, uint8_t
     }
 
     uint32_t idx = asset_alloc();
-    NT_ASSERT_ALWAYS(idx != UINT32_MAX); /* asset array full — raise limits */
+    NT_ASSERT_ALWAYS(idx != UINT32_MAX); /* asset array full -- raise limits */
 
     NtAssetMeta *meta = &s_resource.assets[idx];
-    meta->resource_id = resource_id;
+    meta->resource_id = resource_id.value;
     meta->asset_type = asset_type;
     meta->state = NT_ASSET_STATE_READY;
     meta->format_version = 0;
@@ -838,18 +821,18 @@ nt_result_t nt_resource_register(uint32_t pack_id, uint32_t resource_id, uint8_t
     return NT_OK;
 }
 
-void nt_resource_unregister(uint32_t pack_id, uint32_t resource_id) {
+void nt_resource_unregister(nt_hash32_t pack_id, nt_hash64_t resource_id) {
     if (!s_resource.initialized) {
         return;
     }
 
-    int16_t pack_idx = find_pack(pack_id);
+    int16_t pack_idx = find_pack(pack_id.value);
     if (pack_idx < 0) {
         return;
     }
 
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
-        if (s_resource.assets[i].resource_id == resource_id && s_resource.assets[i].pack_index == (uint16_t)pack_idx) {
+        if (s_resource.assets[i].resource_id == resource_id.value && s_resource.assets[i].pack_index == (uint16_t)pack_idx) {
             s_resource.assets[i].resource_id = 0; /* mark as free */
             s_resource.needs_resolve = true;
             return;
@@ -888,11 +871,11 @@ static nt_result_t resource_load(uint32_t pack_id, const char *path, uint8_t io_
     return NT_OK;
 }
 
-nt_result_t nt_resource_load_file(uint32_t pack_id, const char *path) { return resource_load(pack_id, path, NT_IO_FS); }
+nt_result_t nt_resource_load_file(nt_hash32_t pack_id, const char *path) { return resource_load(pack_id.value, path, NT_IO_FS); }
 
-nt_result_t nt_resource_load_url(uint32_t pack_id, const char *url) { return resource_load(pack_id, url, NT_IO_HTTP); }
+nt_result_t nt_resource_load_url(nt_hash32_t pack_id, const char *url) { return resource_load(pack_id.value, url, NT_IO_HTTP); }
 
-nt_result_t nt_resource_load_auto(uint32_t pack_id, const char *path) {
+nt_result_t nt_resource_load_auto(nt_hash32_t pack_id, const char *path) {
 #ifdef NT_PLATFORM_WEB
     return nt_resource_load_url(pack_id, path);
 #else
@@ -900,16 +883,16 @@ nt_result_t nt_resource_load_auto(uint32_t pack_id, const char *path) {
 #endif
 }
 
-nt_pack_state_t nt_resource_pack_state(uint32_t pack_id) {
-    int16_t idx = find_pack(pack_id);
+nt_pack_state_t nt_resource_pack_state(nt_hash32_t pack_id) {
+    int16_t idx = find_pack(pack_id.value);
     if (idx < 0) {
         return NT_PACK_STATE_NONE;
     }
     return (nt_pack_state_t)s_resource.packs[idx].pack_state;
 }
 
-void nt_resource_pack_progress(uint32_t pack_id, uint32_t *received, uint32_t *total) {
-    int16_t idx = find_pack(pack_id);
+void nt_resource_pack_progress(nt_hash32_t pack_id, uint32_t *received, uint32_t *total) {
+    int16_t idx = find_pack(pack_id.value);
     if (idx < 0) {
         if (received) {
             *received = 0;
@@ -949,8 +932,8 @@ void nt_resource_set_retry_policy(uint32_t max_attempts, uint32_t base_delay_ms,
 
 /* ---- Blob policy ---- */
 
-void nt_resource_set_blob_policy(uint32_t pack_id, uint8_t policy, uint32_t ttl_ms) {
-    int16_t idx = find_pack(pack_id);
+void nt_resource_set_blob_policy(nt_hash32_t pack_id, uint8_t policy, uint32_t ttl_ms) {
+    int16_t idx = find_pack(pack_id.value);
     if (idx < 0) {
         return;
     }
@@ -1015,14 +998,14 @@ void nt_resource_invalidate(uint8_t asset_type) {
 
 /* ---- Placeholder ---- */
 
-void nt_resource_set_placeholder_texture(uint32_t resource_id) {
+void nt_resource_set_placeholder_texture(nt_hash64_t resource_id) {
     if (!s_resource.initialized) {
         return;
     }
-    s_resource.placeholder_texture = resource_id;
+    s_resource.placeholder_texture = resource_id.value;
 
     /* Ensure placeholder has a slot so step() can resolve its handle */
-    if (resource_id != 0 && slot_map_find(resource_id) == 0) {
+    if (resource_id.value != 0 && slot_map_find(resource_id.value) == 0) {
         nt_resource_request(resource_id, NT_ASSET_TEXTURE);
     }
     s_resource.needs_resolve = true;
@@ -1030,8 +1013,8 @@ void nt_resource_set_placeholder_texture(uint32_t resource_id) {
 
 /* ---- Debug: dump loaded pack contents to log ---- */
 
-void nt_resource_dump_pack(uint32_t pack_id) {
-    int16_t idx = find_pack(pack_id);
+void nt_resource_dump_pack(nt_hash32_t pack_id) {
+    int16_t idx = find_pack(pack_id.value);
     if (idx < 0) {
         nt_log_error("nt_resource: dump_pack: not mounted");
         return;
@@ -1069,7 +1052,7 @@ void nt_resource_dump_pack(uint32_t pack_id) {
         default:
             break;
         }
-        (void)snprintf(buf, sizeof(buf), "    [%u] 0x%08X  %-8s  %u bytes", i, entries[i].resource_id, tname, entries[i].size);
+        (void)snprintf(buf, sizeof(buf), "    [%u] 0x%016" PRIX64 "  %-8s  %u bytes", i, entries[i].resource_id, tname, entries[i].size);
         nt_log_info(buf);
     }
 }
@@ -1078,9 +1061,9 @@ void nt_resource_dump_pack(uint32_t pack_id) {
 
 #ifdef NT_RESOURCE_TEST_ACCESS
 
-void nt_resource_test_set_asset_state(uint32_t resource_id, uint16_t pack_index, uint8_t state, uint32_t runtime_handle) {
+void nt_resource_test_set_asset_state(nt_hash64_t resource_id, uint16_t pack_index, uint8_t state, uint32_t runtime_handle) {
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
-        if (s_resource.assets[i].resource_id == resource_id && s_resource.assets[i].pack_index == pack_index) {
+        if (s_resource.assets[i].resource_id == resource_id.value && s_resource.assets[i].pack_index == pack_index) {
             s_resource.assets[i].state = state;
             s_resource.assets[i].runtime_handle = runtime_handle;
             s_resource.needs_resolve = true;

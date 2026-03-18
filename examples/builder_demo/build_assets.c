@@ -1,6 +1,6 @@
 /*
  * Builder Demo -- builds a .ntpack pack from assets/ directory.
- * Run from the project root directory.
+ * NT_PROJECT_ROOT is injected by CMake so paths work regardless of cwd.
  */
 
 #include "nt_builder.h"
@@ -10,14 +10,22 @@
 #ifdef _WIN32
 #include <direct.h>
 #define MKDIR(p) _mkdir(p)
+#define CHDIR(p) _chdir(p)
 #else
 #include <sys/stat.h>
+#include <unistd.h>
 #define MKDIR(p) mkdir(p, 0755)
+#define CHDIR(p) chdir(p)
 #endif
+
+#define STR(x) #x
+#define XSTR(x) STR(x)
 
 int main(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
+
+    CHDIR(XSTR(NT_PROJECT_ROOT));
 
     (void)printf("=== Builder Demo ===\n\n");
 
