@@ -3,6 +3,7 @@
 #include "resource/nt_resource_internal.h"
 
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -98,6 +99,54 @@ static uint32_t asset_alloc(void) {
     return s_resource.asset_hwm++;
 }
 
+/* ---- Time helper ---- */
+
+static uint32_t resource_get_time_ms(void) { return (uint32_t)(nt_time_now() * 1000.0); }
+
+/* ---- Load failure / retry handler ---- */
+
+static void resource_handle_load_failure(NtPackMeta *pack) {
+    /* Check retry policy */
+    if (s_resource.retry_max_attempts == 1 || (s_resource.retry_max_attempts > 1 && pack->attempt_count >= s_resource.retry_max_attempts)) {
+        /* Max attempts reached -- FAILED permanently */
+        pack->pack_state = NT_PACK_STATE_FAILED;
+        char buf[128];
+        (void)snprintf(buf, sizeof(buf), "nt_resource: pack 0x%08X FAILED after %d attempts", pack->pack_id, pack->attempt_count);
+        nt_log_error(buf);
+        return;
+    }
+    /* Compute backoff delay */
+    if (pack->retry_delay_ms == 0) {
+        pack->retry_delay_ms = s_resource.retry_base_delay_ms;
+    } else {
+        pack->retry_delay_ms = (uint32_t)((float)pack->retry_delay_ms * 1.5F);
+        if (pack->retry_delay_ms > s_resource.retry_max_delay_ms) {
+            pack->retry_delay_ms = s_resource.retry_max_delay_ms;
+        }
+    }
+    pack->retry_time_ms = resource_get_time_ms() + pack->retry_delay_ms;
+    pack->pack_state = NT_PACK_STATE_NONE; /* will be retried */
+    /* NOTE: io_type is NOT cleared -- preserved for retry re-issue */
+    char buf[128];
+    (void)snprintf(buf, sizeof(buf), "nt_resource: pack 0x%08X attempt %d, retry in %ums", pack->pack_id, pack->attempt_count, pack->retry_delay_ms);
+    nt_log_info(buf);
+}
+
+/* ---- Activation cost helper ---- */
+
+static int32_t resource_get_activate_cost(uint8_t asset_type) {
+    switch (asset_type) {
+    case NT_ASSET_MESH:
+        return NT_ACTIVATE_COST_MESH;
+    case NT_ASSET_SHADER_CODE:
+        return NT_ACTIVATE_COST_SHADER;
+    case NT_ASSET_TEXTURE:
+        return NT_ACTIVATE_COST_TEXTURE;
+    default:
+        return 1;
+    }
+}
+
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_resource_init(const nt_resource_desc_t *desc) {
@@ -128,7 +177,169 @@ void nt_resource_shutdown(void) { memset(&s_resource, 0, sizeof(s_resource)); }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_resource_step(void) {
-    if (!s_resource.initialized || !s_resource.needs_resolve) {
+    if (!s_resource.initialized) {
+        return;
+    }
+
+    /* ---- Phase 0a: Poll I/O for loading packs + retry logic ---- */
+    for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
+        NtPackMeta *pack = &s_resource.packs[pi];
+        if (!pack->mounted) {
+            continue;
+        }
+
+        /* Retry check: packs in NONE state with pending retry */
+        if (pack->pack_state == NT_PACK_STATE_NONE && pack->retry_time_ms > 0) {
+            uint32_t now = resource_get_time_ms();
+            if (now >= pack->retry_time_ms) {
+                pack->retry_time_ms = 0;
+                pack->attempt_count++;
+                if (pack->io_type == NT_IO_HTTP) {
+                    nt_http_request_t req = nt_http_request(pack->load_path);
+                    pack->io_request_id = req.id;
+                    pack->pack_state = (req.id != 0) ? NT_PACK_STATE_REQUESTED : NT_PACK_STATE_FAILED;
+                } else if (pack->io_type == NT_IO_FS) {
+                    nt_fs_request_t req = nt_fs_read_file(pack->load_path);
+                    pack->io_request_id = req.id;
+                    pack->pack_state = (req.id != 0) ? NT_PACK_STATE_REQUESTED : NT_PACK_STATE_FAILED;
+                }
+            }
+        }
+
+        if (pack->pack_state == NT_PACK_STATE_REQUESTED || pack->pack_state == NT_PACK_STATE_DOWNLOADING) {
+            uint8_t *loaded_blob = NULL;
+            uint32_t loaded_size = 0;
+            bool io_done = false;
+            bool io_failed = false;
+
+            if (pack->io_type == NT_IO_HTTP) {
+                nt_http_request_t req = {.id = pack->io_request_id};
+                nt_http_state_t st = nt_http_state(req);
+                if (st == NT_HTTP_STATE_DOWNLOADING) {
+                    pack->pack_state = NT_PACK_STATE_DOWNLOADING;
+                    nt_http_progress(req, &pack->bytes_received, &pack->bytes_total);
+                } else if (st == NT_HTTP_STATE_DONE) {
+                    loaded_blob = nt_http_take_data(req, &loaded_size);
+                    nt_http_free(req);
+                    pack->io_request_id = 0;
+                    io_done = true;
+                } else if (st == NT_HTTP_STATE_FAILED) {
+                    nt_http_free(req);
+                    pack->io_request_id = 0;
+                    io_failed = true;
+                }
+            } else if (pack->io_type == NT_IO_FS) {
+                nt_fs_request_t req = {.id = pack->io_request_id};
+                nt_fs_state_t st = nt_fs_state(req);
+                if (st == NT_FS_STATE_DONE) {
+                    loaded_blob = nt_fs_take_data(req, &loaded_size);
+                    nt_fs_free(req);
+                    pack->io_request_id = 0;
+                    io_done = true;
+                } else if (st == NT_FS_STATE_FAILED) {
+                    nt_fs_free(req);
+                    pack->io_request_id = 0;
+                    io_failed = true;
+                }
+            }
+
+            if (io_done && loaded_blob != NULL) {
+                char buf[128];
+                (void)snprintf(buf, sizeof(buf), "nt_resource: pack 0x%08X loaded (%u bytes)", pack->pack_id, loaded_size);
+                nt_log_info(buf);
+
+                /* Parse the loaded blob (parse_pack sets pack->blob on success) */
+                nt_result_t res = nt_resource_parse_pack(pack->pack_id, loaded_blob, loaded_size);
+                if (res == NT_OK) {
+                    pack->pack_state = NT_PACK_STATE_READY;
+                    pack->blob_last_access_ms = resource_get_time_ms();
+                } else {
+                    free(loaded_blob);
+                    pack->pack_state = NT_PACK_STATE_FAILED;
+                    (void)snprintf(buf, sizeof(buf), "nt_resource: pack 0x%08X parse failed", pack->pack_id);
+                    nt_log_error(buf);
+                }
+            } else if (io_failed) {
+                resource_handle_load_failure(pack);
+            }
+        }
+    }
+
+    /* ---- Phase 0c: Activate assets within budget ---- */
+    {
+        int32_t budget = s_resource.activate_budget;
+        for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS && budget > 0; pi++) {
+            NtPackMeta *pack = &s_resource.packs[pi];
+            if (!pack->mounted || pack->pack_state != NT_PACK_STATE_READY) {
+                continue;
+            }
+            if (pack->blob == NULL) {
+                continue; /* blob evicted */
+            }
+
+            for (uint32_t ai = 0; ai < s_resource.asset_hwm && budget > 0; ai++) {
+                NtAssetMeta *meta = &s_resource.assets[ai];
+                if (meta->resource_id == 0) {
+                    continue;
+                }
+                if (meta->pack_index != pi) {
+                    continue;
+                }
+                if (meta->state != NT_ASSET_STATE_REGISTERED) {
+                    continue;
+                }
+
+                uint8_t atype = meta->asset_type;
+                if (atype >= NT_RESOURCE_MAX_ASSET_TYPES) {
+                    continue;
+                }
+                if (!s_resource.activators[atype].activate) {
+                    continue;
+                }
+
+                int32_t cost = resource_get_activate_cost(atype);
+                if (cost > budget) {
+                    continue;
+                }
+
+                const uint8_t *data = pack->blob + meta->offset;
+                uint32_t handle = s_resource.activators[atype].activate(data, meta->size);
+                if (handle != 0) {
+                    meta->state = NT_ASSET_STATE_READY;
+                    meta->runtime_handle = handle;
+                    s_resource.needs_resolve = true;
+                } else {
+                    meta->state = NT_ASSET_STATE_FAILED;
+                }
+                budget -= cost;
+            }
+        }
+    }
+
+    /* ---- Phase 0d: Blob eviction (NT_BLOB_AUTO) ---- */
+    {
+        uint32_t now_ms = resource_get_time_ms();
+        for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
+            NtPackMeta *pack = &s_resource.packs[pi];
+            if (!pack->mounted || pack->blob == NULL) {
+                continue;
+            }
+            if (pack->blob_policy != NT_BLOB_AUTO) {
+                continue;
+            }
+            if (pack->blob_ttl_ms == 0) {
+                continue;
+            }
+            if (now_ms - pack->blob_last_access_ms >= pack->blob_ttl_ms) {
+                free((void *)pack->blob);
+                pack->blob = NULL;
+                pack->blob_size = 0;
+            }
+        }
+    }
+
+    /* ---- Existing resolve phases ---- */
+    if (!s_resource.needs_resolve) {
         return; /* O(1) fast path when nothing changed */
     }
 
@@ -286,6 +497,7 @@ static nt_result_t pack_alloc(uint32_t pack_id, int16_t priority, uint8_t pack_t
 
 nt_result_t nt_resource_mount(uint32_t pack_id, int16_t priority) { return pack_alloc(pack_id, priority, NT_PACK_FILE); }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_resource_unmount(uint32_t pack_id) {
     if (!s_resource.initialized) {
         return;
@@ -296,11 +508,35 @@ void nt_resource_unmount(uint32_t pack_id) {
         return;
     }
 
-    /* Clear all assets belonging to this pack (unified for file and virtual) */
+    NtPackMeta *pack = &s_resource.packs[pack_idx];
+
+    /* Deactivate READY assets and clear all assets belonging to this pack */
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
         if (s_resource.assets[i].pack_index == (uint16_t)pack_idx && s_resource.assets[i].resource_id != 0) {
+            /* Deactivate if file pack asset is READY with runtime handle */
+            if (s_resource.assets[i].state == NT_ASSET_STATE_READY && s_resource.assets[i].runtime_handle != 0 && pack->pack_type == NT_PACK_FILE) {
+                uint8_t atype = s_resource.assets[i].asset_type;
+                if (atype < NT_RESOURCE_MAX_ASSET_TYPES && s_resource.activators[atype].deactivate) {
+                    s_resource.activators[atype].deactivate(s_resource.assets[i].runtime_handle);
+                }
+            }
             s_resource.assets[i].resource_id = 0;
         }
+    }
+
+    /* Cancel any pending I/O */
+    if (pack->io_request_id != 0) {
+        if (pack->io_type == NT_IO_HTTP) {
+            nt_http_free((nt_http_request_t){.id = pack->io_request_id});
+        } else if (pack->io_type == NT_IO_FS) {
+            nt_fs_free((nt_fs_request_t){.id = pack->io_request_id});
+        }
+    }
+
+    /* Free blob if it was loaded via I/O (resource system owns it).
+     * Blobs provided directly via parse_pack are caller-owned. */
+    if (pack->blob != NULL && pack->io_type != NT_IO_NONE) {
+        free((void *)pack->blob);
     }
 
     memset(&s_resource.packs[pack_idx], 0, sizeof(NtPackMeta));
@@ -570,35 +806,95 @@ void nt_resource_unregister(uint32_t pack_id, uint32_t resource_id) {
 /* ---- Pack loading ---- */
 
 nt_result_t nt_resource_load_file(uint32_t pack_id, const char *path) {
-    (void)pack_id;
-    (void)path;
-    return NT_ERR_INVALID_ARG; /* stub -- Task 2 */
+    int16_t idx = find_pack(pack_id);
+    NT_ASSERT_ALWAYS(idx >= 0); /* programmer error: load called on unmounted pack */
+
+    NtPackMeta *pack = &s_resource.packs[idx];
+    NT_ASSERT_ALWAYS(pack->pack_state == NT_PACK_STATE_NONE); /* not already loading */
+
+    strncpy(pack->load_path, path, 255);
+    pack->load_path[255] = '\0';
+
+    nt_fs_request_t req = nt_fs_read_file(path);
+    if (req.id == 0) {
+        pack->pack_state = NT_PACK_STATE_FAILED;
+        nt_log_error("nt_resource: load_file failed to issue I/O request");
+        return NT_ERR_INVALID_ARG;
+    }
+
+    pack->io_request_id = req.id;
+    pack->io_type = NT_IO_FS;
+    pack->pack_state = NT_PACK_STATE_REQUESTED;
+    pack->attempt_count = 1;
+
+    char buf[320];
+    (void)snprintf(buf, sizeof(buf), "nt_resource: loading pack 0x%08X from %s", pack_id, path);
+    nt_log_info(buf);
+
+    return NT_OK;
 }
 
 nt_result_t nt_resource_load_url(uint32_t pack_id, const char *url) {
-    (void)pack_id;
-    (void)url;
-    return NT_ERR_INVALID_ARG; /* stub -- Task 2 */
+    int16_t idx = find_pack(pack_id);
+    NT_ASSERT_ALWAYS(idx >= 0); /* programmer error: load called on unmounted pack */
+
+    NtPackMeta *pack = &s_resource.packs[idx];
+    NT_ASSERT_ALWAYS(pack->pack_state == NT_PACK_STATE_NONE); /* not already loading */
+
+    strncpy(pack->load_path, url, 255);
+    pack->load_path[255] = '\0';
+
+    nt_http_request_t req = nt_http_request(url);
+    if (req.id == 0) {
+        pack->pack_state = NT_PACK_STATE_FAILED;
+        nt_log_error("nt_resource: load_url failed to issue HTTP request");
+        return NT_ERR_INVALID_ARG;
+    }
+
+    pack->io_request_id = req.id;
+    pack->io_type = NT_IO_HTTP;
+    pack->pack_state = NT_PACK_STATE_REQUESTED;
+    pack->attempt_count = 1;
+
+    char buf[320];
+    (void)snprintf(buf, sizeof(buf), "nt_resource: loading pack 0x%08X from %s", pack_id, url);
+    nt_log_info(buf);
+
+    return NT_OK;
 }
 
 nt_result_t nt_resource_load_auto(uint32_t pack_id, const char *path) {
-    (void)pack_id;
-    (void)path;
-    return NT_ERR_INVALID_ARG; /* stub -- Task 2 */
+#ifdef NT_PLATFORM_WEB
+    return nt_resource_load_url(pack_id, path);
+#else
+    return nt_resource_load_file(pack_id, path);
+#endif
 }
 
 nt_pack_state_t nt_resource_pack_state(uint32_t pack_id) {
-    (void)pack_id;
-    return NT_PACK_STATE_NONE; /* stub -- Task 2 */
+    int16_t idx = find_pack(pack_id);
+    if (idx < 0) {
+        return NT_PACK_STATE_NONE;
+    }
+    return (nt_pack_state_t)s_resource.packs[idx].pack_state;
 }
 
 void nt_resource_pack_progress(uint32_t pack_id, uint32_t *received, uint32_t *total) {
-    (void)pack_id;
+    int16_t idx = find_pack(pack_id);
+    if (idx < 0) {
+        if (received) {
+            *received = 0;
+        }
+        if (total) {
+            *total = 0;
+        }
+        return;
+    }
     if (received) {
-        *received = 0;
+        *received = s_resource.packs[idx].bytes_received;
     }
     if (total) {
-        *total = 0;
+        *total = s_resource.packs[idx].bytes_total;
     }
 }
 
@@ -635,9 +931,57 @@ void nt_resource_set_blob_policy(uint32_t pack_id, uint8_t policy, uint32_t ttl_
 
 /* ---- Context loss recovery ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_resource_invalidate(uint8_t asset_type) {
-    (void)asset_type;
-    /* stub -- Task 2 */
+    /* Pass 1: Deactivate and mark assets back to REGISTERED */
+    for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
+        NtAssetMeta *meta = &s_resource.assets[i];
+        if (meta->resource_id == 0) {
+            continue;
+        }
+        if (meta->asset_type != asset_type) {
+            continue;
+        }
+        /* Skip virtual pack assets -- only file pack assets are invalidated */
+        if (meta->pack_index >= NT_RESOURCE_MAX_PACKS) {
+            continue;
+        }
+        if (s_resource.packs[meta->pack_index].pack_type == NT_PACK_VIRTUAL) {
+            continue;
+        }
+        /* Deactivate if READY with runtime handle */
+        if (meta->state == NT_ASSET_STATE_READY && meta->runtime_handle != 0) {
+            uint8_t atype = meta->asset_type;
+            if (atype < NT_RESOURCE_MAX_ASSET_TYPES && s_resource.activators[atype].deactivate) {
+                s_resource.activators[atype].deactivate(meta->runtime_handle);
+            }
+        }
+        meta->state = NT_ASSET_STATE_REGISTERED;
+        meta->runtime_handle = 0;
+    }
+
+    /* Pass 2: Check file packs for blob eviction + re-download trigger */
+    for (uint16_t i = 0; i < NT_RESOURCE_MAX_PACKS; i++) {
+        NtPackMeta *pack = &s_resource.packs[i];
+        if (!pack->mounted || pack->pack_type == NT_PACK_VIRTUAL) {
+            continue;
+        }
+        if (pack->pack_state != NT_PACK_STATE_READY) {
+            continue;
+        }
+        if (pack->blob != NULL) {
+            continue; /* blob still available, resource_step will re-activate from it */
+        }
+        /* Blob was evicted -- need to re-download to re-activate assets.
+         * Set pack_state to NONE so resource_step's retry logic re-issues the download.
+         * io_type and load_path are preserved from the original load call. */
+        pack->pack_state = NT_PACK_STATE_NONE;
+        pack->retry_delay_ms = 0; /* immediate, not exponential backoff */
+        pack->retry_time_ms = 1;  /* non-zero triggers retry on next resource_step() */
+        pack->attempt_count = 0;  /* reset attempt count for re-download */
+    }
+
+    s_resource.needs_resolve = true;
 }
 
 /* ---- Placeholder ---- */

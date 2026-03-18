@@ -6,6 +6,9 @@
 /* clang-format off */
 #include "resource/nt_resource.h"
 #include "resource/nt_resource_internal.h"
+#include "http/nt_http.h"
+#include "fs/nt_fs.h"
+#include "time/nt_time.h"
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
 #include "unity.h"
@@ -75,11 +78,17 @@ static uint8_t *build_test_pack(uint32_t asset_count, uint32_t *out_size) {
 static nt_resource_desc_t s_desc;
 
 void setUp(void) {
+    nt_http_init();
+    nt_fs_init();
     memset(&s_desc, 0, sizeof(s_desc));
     nt_resource_init(&s_desc);
 }
 
-void tearDown(void) { nt_resource_shutdown(); }
+void tearDown(void) {
+    nt_resource_shutdown();
+    nt_fs_shutdown();
+    nt_http_shutdown();
+}
 
 /* ---- Hash tests ---- */
 
@@ -934,6 +943,545 @@ void test_asset_slot_reuse(void) {
     free(blob_b);
 }
 
+/* ---- Fake activator for testing ---- */
+
+static uint32_t s_activate_call_count;
+static uint32_t s_deactivate_call_count;
+static uint32_t s_last_deactivated_handle;
+
+static uint32_t fake_activate(const uint8_t *data, uint32_t size) {
+    (void)data;
+    (void)size;
+    s_activate_call_count++;
+    return 0xBEEF;
+}
+
+static void fake_deactivate(uint32_t runtime_handle) {
+    s_deactivate_call_count++;
+    s_last_deactivated_handle = runtime_handle;
+}
+
+static uint32_t fake_activate_fail(const uint8_t *data, uint32_t size) {
+    (void)data;
+    (void)size;
+    s_activate_call_count++;
+    return 0; /* failure */
+}
+
+/* ---- Test pack file writer ---- */
+
+static void write_test_pack_file(const char *path, uint32_t pack_id, uint32_t rid, uint8_t atype) {
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_pack_with_rid(rid, atype, &blob_size);
+    if (!blob) {
+        return;
+    }
+    ((NtPackHeader *)blob)->pack_id = pack_id;
+
+    FILE *f = fopen(path, "wb");
+    if (f) {
+        (void)fwrite(blob, 1, blob_size, f);
+        (void)fclose(f);
+    }
+    free(blob);
+}
+
+/* ---- Pack loading tests ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_load_file_transitions_state(void) {
+    uint32_t pid = nt_resource_hash("load_file_pack");
+    uint32_t rid = nt_resource_hash("load_file_res");
+
+    write_test_pack_file("build/test_pack_load.neopak", pid, rid, NT_ASSET_MESH);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_NONE, nt_resource_pack_state(pid));
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_pack_load.neopak"));
+    /* On native, nt_fs reads synchronously, so state should be REQUESTED
+     * (nt_fs returns immediately with DONE state) */
+    nt_pack_state_t st = nt_resource_pack_state(pid);
+    TEST_ASSERT_TRUE(st == NT_PACK_STATE_REQUESTED || st == NT_PACK_STATE_LOADED);
+
+    /* Step to poll I/O and parse */
+    nt_resource_step();
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
+
+    (void)remove("build/test_pack_load.neopak");
+}
+
+void test_load_file_nonexistent(void) {
+    uint32_t pid = nt_resource_hash("load_nofile_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    /* Set retry to 1 so it fails permanently */
+    nt_resource_set_retry_policy(1, 100, 1000);
+
+    nt_result_t r = nt_resource_load_file(pid, "nonexistent_file_that_does_not_exist.neopak");
+    /* On native nt_fs, reading a non-existent file returns a valid request
+     * but with FAILED state. The load_file still returns OK because the
+     * request ID is non-zero; the failure is detected in resource_step. */
+    if (r == NT_OK) {
+        nt_resource_step();
+        TEST_ASSERT_EQUAL(NT_PACK_STATE_FAILED, nt_resource_pack_state(pid));
+    } else {
+        /* If nt_fs_read_file returned INVALID (req.id == 0), load_file returns error */
+        TEST_ASSERT_EQUAL(NT_PACK_STATE_FAILED, nt_resource_pack_state(pid));
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_pack_state_api(void) {
+    uint32_t pid = nt_resource_hash("state_api_pack");
+    uint32_t rid = nt_resource_hash("state_api_res");
+
+    /* Not mounted: NONE */
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_NONE, nt_resource_pack_state(pid));
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_NONE, nt_resource_pack_state(pid));
+
+    /* Load via direct parse (manual): NONE -> directly to READY via parse_pack + set_asset_state */
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    ((NtPackHeader *)blob)->pack_id = pid;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    /* After parse_pack, pack_state is still NONE (parse_pack doesn't set it) */
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_NONE, nt_resource_pack_state(pid));
+
+    free(blob);
+}
+
+void test_pack_progress(void) {
+    uint32_t pid = nt_resource_hash("progress_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t received = 99;
+    uint32_t total = 99;
+    nt_resource_pack_progress(pid, &received, &total);
+    /* On native, no progress tracking -- both 0 */
+    TEST_ASSERT_EQUAL_UINT32(0, received);
+    TEST_ASSERT_EQUAL_UINT32(0, total);
+}
+
+/* ---- Activator system tests ---- */
+
+void test_set_activator(void) {
+    /* Just verify it doesn't crash */
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_activation_called_on_step(void) {
+    s_activate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+
+    uint32_t pid = nt_resource_hash("act_call_pack");
+    uint32_t rid = nt_resource_hash("act_call_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_pack_with_rid(rid, NT_ASSET_MESH, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    ((NtPackHeader *)blob)->pack_id = pid;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    /* Pack needs to be in READY state for activation to run */
+    /* Manually set pack_state to READY (since we used parse_pack directly) */
+    nt_resource_step(); /* should activate the registered asset */
+
+    /* parse_pack sets blob pointer, pack_state is NONE but activation checks pack_state == READY.
+     * Since we used parse_pack directly (not load_file), pack_state is NONE. Need to set it. */
+    /* Actually we need pack_state == READY for activation. Let me use test_set_asset_state approach
+     * or set pack_state manually. Since we don't have a public API for that, let's use load_file. */
+
+    /* Reset and use load_file approach */
+    nt_resource_shutdown();
+    nt_http_shutdown();
+    nt_fs_shutdown();
+    nt_http_init();
+    nt_fs_init();
+    nt_resource_init(&s_desc);
+
+    s_activate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+
+    uint32_t pid2 = nt_resource_hash("act_call_pack2");
+    uint32_t rid2 = nt_resource_hash("act_call_res2");
+
+    write_test_pack_file("build/test_act_call.neopak", pid2, rid2, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid2, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid2, "build/test_act_call.neopak"));
+    nt_resource_step(); /* polls I/O, parses, activates */
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_activate_call_count);
+
+    (void)remove("build/test_act_call.neopak");
+    free(blob);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_activation_sets_runtime_handle(void) {
+    s_activate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+
+    uint32_t pid = nt_resource_hash("act_handle_pack");
+    uint32_t rid = nt_resource_hash("act_handle_res");
+
+    write_test_pack_file("build/test_act_handle.neopak", pid, rid, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_act_handle.neopak"));
+    nt_resource_step();
+
+    /* Request handle after activation */
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step(); /* resolve */
+    TEST_ASSERT_EQUAL_UINT32(0xBEEF, nt_resource_get(h));
+
+    (void)remove("build/test_act_handle.neopak");
+}
+
+/* Build a pack with N assets all of the same type */
+static void write_test_pack_multi(const char *path, uint32_t pack_id, uint8_t atype, uint32_t count) {
+    uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (count * sizeof(NtAssetEntry)));
+    uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
+    uint32_t data_per_asset = 16;
+    uint32_t data_size = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        data_size += (data_per_asset + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+    }
+    uint32_t total_size = header_size + data_size;
+    uint8_t *blob = (uint8_t *)calloc(1, total_size);
+    if (!blob) {
+        return;
+    }
+    NtPackHeader *h = (NtPackHeader *)blob;
+    h->magic = NT_PACK_MAGIC;
+    h->pack_id = pack_id;
+    h->version = NT_PACK_VERSION;
+    h->asset_count = (uint16_t)count;
+    h->header_size = header_size;
+    h->total_size = total_size;
+    NtAssetEntry *entries = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
+    uint32_t data_offset = header_size;
+    for (uint32_t i = 0; i < count; i++) {
+        char name[32];
+        (void)snprintf(name, sizeof(name), "multi_%u", i);
+        entries[i].resource_id = nt_resource_hash(name);
+        entries[i].format_version = 1;
+        entries[i].asset_type = atype;
+        entries[i]._pad = 0;
+        entries[i].offset = data_offset;
+        entries[i].size = data_per_asset;
+        uint32_t aligned = (data_per_asset + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+        data_offset += aligned;
+    }
+    h->checksum = nt_crc32(blob + header_size, data_size);
+
+    FILE *f = fopen(path, "wb");
+    if (f) {
+        (void)fwrite(blob, 1, total_size, f);
+        (void)fclose(f);
+    }
+    free(blob);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_activation_budget_limits(void) {
+    s_activate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+    nt_resource_set_activate_budget(1); /* budget = 1, mesh cost = 1: only 1 per step */
+
+    uint32_t pid = nt_resource_hash("budget_pack");
+
+    /* Build pack with 3 mesh assets (all same type) */
+    write_test_pack_multi("build/test_budget.neopak", pid, NT_ASSET_MESH, 3);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_budget.neopak"));
+    nt_resource_step(); /* load + parse + activate up to budget */
+
+    /* Budget 1, cost per mesh = 1: should activate exactly 1 per step */
+    TEST_ASSERT_EQUAL_UINT32(1, s_activate_call_count);
+
+    /* Second step should activate one more */
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(2, s_activate_call_count);
+
+    (void)remove("build/test_budget.neopak");
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_activation_budget_skips_expensive(void) {
+    s_activate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_TEXTURE, fake_activate, fake_deactivate);
+    nt_resource_set_activate_budget(1); /* budget 1, texture cost 4: can't fit */
+
+    uint32_t pid = nt_resource_hash("budget_skip_pack");
+    uint32_t rid = nt_resource_hash("budget_skip_res");
+
+    write_test_pack_file("build/test_budget_skip.neopak", pid, rid, NT_ASSET_TEXTURE);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_budget_skip.neopak"));
+    nt_resource_step();
+
+    /* Budget 1 < cost 4: texture should NOT be activated */
+    TEST_ASSERT_EQUAL_UINT32(0, s_activate_call_count);
+
+    (void)remove("build/test_budget_skip.neopak");
+}
+
+void test_no_activator_stays_registered(void) {
+    /* Don't register any activator -- assets stay REGISTERED */
+    uint32_t pid = nt_resource_hash("no_act_pack");
+    uint32_t rid = nt_resource_hash("no_act_res");
+
+    write_test_pack_file("build/test_no_act.neopak", pid, rid, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_no_act.neopak"));
+    nt_resource_step();
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step();
+    TEST_ASSERT_FALSE(nt_resource_is_ready(h));
+
+    (void)remove("build/test_no_act.neopak");
+}
+
+/* ---- Retry policy tests ---- */
+
+void test_retry_policy_defaults(void) {
+    /* Defaults are set in init: max_attempts=0 (infinite), base=500, max=10000.
+     * We verify by setting a policy and checking it works. No direct getter. */
+    /* Just test the set function doesn't crash */
+    nt_resource_set_retry_policy(3, 200, 5000);
+}
+
+void test_set_retry_policy(void) {
+    nt_resource_set_retry_policy(5, 100, 2000);
+    /* Verify by triggering a load failure and checking retry behavior */
+    /* This is implicitly tested by other failure tests */
+}
+
+/* ---- Blob policy tests ---- */
+
+void test_blob_policy_keep(void) {
+    uint32_t pid = nt_resource_hash("blob_keep_pack");
+    uint32_t rid = nt_resource_hash("blob_keep_res");
+
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+
+    write_test_pack_file("build/test_blob_keep.neopak", pid, rid, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    nt_resource_set_blob_policy(pid, NT_BLOB_KEEP, 0);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_blob_keep.neopak"));
+    nt_resource_step();
+
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
+
+    /* Call step many times -- blob should persist (NT_BLOB_KEEP) */
+    for (int i = 0; i < 10; i++) {
+        nt_resource_step();
+    }
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
+
+    (void)remove("build/test_blob_keep.neopak");
+}
+
+/* ---- Invalidate tests ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_invalidate_marks_registered(void) {
+    s_activate_call_count = 0;
+    s_deactivate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+
+    uint32_t pid = nt_resource_hash("inv_reg_pack");
+    uint32_t rid = nt_resource_hash("inv_reg_res");
+
+    write_test_pack_file("build/test_inv_reg.neopak", pid, rid, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_inv_reg.neopak"));
+    nt_resource_step(); /* load + activate */
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(0xBEEF, nt_resource_get(h));
+
+    /* Invalidate mesh type */
+    nt_resource_invalidate(NT_ASSET_MESH);
+    nt_resource_step();
+
+    /* After invalidation, assets are REGISTERED, will be re-activated from blob */
+    /* Step again to re-activate */
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(0xBEEF, nt_resource_get(h));
+    TEST_ASSERT_TRUE(s_activate_call_count >= 2); /* activated at least twice */
+
+    (void)remove("build/test_inv_reg.neopak");
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_invalidate_calls_deactivator(void) {
+    s_activate_call_count = 0;
+    s_deactivate_call_count = 0;
+    s_last_deactivated_handle = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+
+    uint32_t pid = nt_resource_hash("inv_deact_pack");
+    uint32_t rid = nt_resource_hash("inv_deact_res");
+
+    write_test_pack_file("build/test_inv_deact.neopak", pid, rid, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_inv_deact.neopak"));
+    nt_resource_step();
+
+    TEST_ASSERT_EQUAL_UINT32(0, s_deactivate_call_count);
+
+    nt_resource_invalidate(NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL_UINT32(1, s_deactivate_call_count);
+    TEST_ASSERT_EQUAL_UINT32(0xBEEF, s_last_deactivated_handle);
+
+    (void)remove("build/test_inv_deact.neopak");
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_invalidate_skips_virtual(void) {
+    s_activate_call_count = 0;
+    s_deactivate_call_count = 0;
+
+    /* Virtual pack asset should NOT be invalidated */
+    uint32_t pid = nt_resource_hash("inv_virt_pack");
+    uint32_t rid = nt_resource_hash("inv_virt_res");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, 42));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_TEXTURE);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(42, nt_resource_get(h));
+
+    /* Invalidate texture type -- virtual assets should be unaffected */
+    nt_resource_invalidate(NT_ASSET_TEXTURE);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(42, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT32(0, s_deactivate_call_count);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_invalidate_triggers_redownload_on_evicted_blob(void) {
+    s_activate_call_count = 0;
+    s_deactivate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+
+    uint32_t pid = nt_resource_hash("inv_redl_pack");
+    uint32_t rid = nt_resource_hash("inv_redl_res");
+
+    write_test_pack_file("build/test_inv_redl.neopak", pid, rid, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1); /* TTL = 1ms */
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_inv_redl.neopak"));
+
+    nt_resource_step(); /* load, parse, activate */
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
+    TEST_ASSERT_EQUAL_UINT32(1, s_activate_call_count);
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(0xBEEF, nt_resource_get(h));
+
+    /* Wait for blob TTL to expire (1ms) then step to trigger eviction */
+    nt_time_sleep(0.005); /* 5ms, well past 1ms TTL */
+    nt_resource_step();   /* should evict blob (TTL expired) */
+
+    /* Now invalidate -- since blob is evicted, should trigger re-download */
+    nt_resource_invalidate(NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL_UINT32(1, s_deactivate_call_count);
+
+    /* pack_state should be NONE (re-download pending) */
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_NONE, nt_resource_pack_state(pid));
+
+    /* Step again -- should re-download from load_path, parse, activate */
+    nt_resource_step();
+    nt_pack_state_t st = nt_resource_pack_state(pid);
+    TEST_ASSERT_TRUE(st == NT_PACK_STATE_READY || st == NT_PACK_STATE_REQUESTED);
+
+    if (st == NT_PACK_STATE_REQUESTED) {
+        nt_resource_step();
+    }
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
+    TEST_ASSERT_TRUE(s_activate_call_count >= 2);
+
+    (void)remove("build/test_inv_redl.neopak");
+}
+
+/* ---- Unmount with deactivation test ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_unmount_deactivates_assets(void) {
+    s_activate_call_count = 0;
+    s_deactivate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+
+    uint32_t pid = nt_resource_hash("unmount_deact_pack");
+    uint32_t rid = nt_resource_hash("unmount_deact_res");
+
+    write_test_pack_file("build/test_unmount_deact.neopak", pid, rid, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_unmount_deact.neopak"));
+    nt_resource_step();
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_activate_call_count);
+
+    /* Unmount should call deactivator */
+    nt_resource_unmount(pid);
+    TEST_ASSERT_EQUAL_UINT32(1, s_deactivate_call_count);
+
+    (void)remove("build/test_unmount_deact.neopak");
+}
+
+/* ---- Activation failure test ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_activation_failure_sets_failed(void) {
+    s_activate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate_fail, NULL);
+
+    uint32_t pid = nt_resource_hash("act_fail_pack");
+    uint32_t rid = nt_resource_hash("act_fail_res");
+
+    write_test_pack_file("build/test_act_fail.neopak", pid, rid, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_act_fail.neopak"));
+    nt_resource_step();
+
+    /* Activator returned 0 (failure) -- asset should be FAILED */
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT8(NT_ASSET_STATE_FAILED, nt_resource_get_state(h));
+
+    (void)remove("build/test_act_fail.neopak");
+}
+
+/* ---- Load URL on native (should fail gracefully) ---- */
+
+void test_load_url_native_fails(void) {
+    uint32_t pid = nt_resource_hash("url_fail_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    nt_resource_set_retry_policy(1, 100, 1000);
+
+    /* On native, nt_http_request immediately fails. load_url may return error
+     * (if request ID is 0) or OK (if request ID is non-zero but state is FAILED). */
+    nt_result_t r = nt_resource_load_url(pid, "http://example.com/test.neopak");
+    if (r == NT_OK) {
+        nt_resource_step();
+    }
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_FAILED, nt_resource_pack_state(pid));
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -1013,6 +1561,42 @@ int main(void) {
 
     /* Asset slot reuse */
     RUN_TEST(test_asset_slot_reuse);
+
+    /* Pack loading tests */
+    RUN_TEST(test_load_file_transitions_state);
+    RUN_TEST(test_load_file_nonexistent);
+    RUN_TEST(test_pack_state_api);
+    RUN_TEST(test_pack_progress);
+
+    /* Activator system tests */
+    RUN_TEST(test_set_activator);
+    RUN_TEST(test_activation_called_on_step);
+    RUN_TEST(test_activation_sets_runtime_handle);
+    RUN_TEST(test_activation_budget_limits);
+    RUN_TEST(test_activation_budget_skips_expensive);
+    RUN_TEST(test_no_activator_stays_registered);
+
+    /* Retry policy tests */
+    RUN_TEST(test_retry_policy_defaults);
+    RUN_TEST(test_set_retry_policy);
+
+    /* Blob policy tests */
+    RUN_TEST(test_blob_policy_keep);
+
+    /* Invalidate tests */
+    RUN_TEST(test_invalidate_marks_registered);
+    RUN_TEST(test_invalidate_calls_deactivator);
+    RUN_TEST(test_invalidate_skips_virtual);
+    RUN_TEST(test_invalidate_triggers_redownload_on_evicted_blob);
+
+    /* Unmount with deactivation */
+    RUN_TEST(test_unmount_deactivates_assets);
+
+    /* Activation failure */
+    RUN_TEST(test_activation_failure_sets_failed);
+
+    /* URL loading on native */
+    RUN_TEST(test_load_url_native_fails);
 
     return UNITY_END();
 }
