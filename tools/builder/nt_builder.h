@@ -74,6 +74,6 @@ nt_build_result_t nt_builder_rename(NtBuilderContext *ctx, const char *old_path,
 
 /* --- Utilities --- */
 nt_build_result_t nt_builder_dump_pack(const char *pack_path);
-uint32_t nt_builder_hash(const char *str);
+uint64_t nt_builder_normalize_and_hash(const char *str);
 
 #endif /* NT_BUILDER_H */

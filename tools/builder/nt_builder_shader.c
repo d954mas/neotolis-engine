@@ -103,7 +103,7 @@ static void collapse_whitespace(char *buf, uint32_t *len) {
 /* --- Shader import (called from finish_pack) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint32_t resource_id) {
+nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint64_t resource_id) {
     if (!ctx || !path) {
         return NT_BUILD_ERR_VALIDATION;
     }

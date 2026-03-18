@@ -1,5 +1,6 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
+#include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
 #include "cgltf.h"
 /* clang-format on */
@@ -257,7 +258,7 @@ static uint8_t *nt_interleave_vertices(const NtStreamLayout *layout, uint32_t st
 /* --- Mesh import (called from finish_pack) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, uint32_t resource_id) {
+nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, uint64_t resource_id) {
     if (!ctx || !path || !layout) {
         return NT_BUILD_ERR_VALIDATION;
     }
@@ -344,7 +345,7 @@ nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path
         NtStreamDesc descs[NT_MESH_MAX_STREAMS];
         memset(descs, 0, sizeof(descs));
         for (uint32_t s = 0; s < stream_count; s++) {
-            descs[s].name_hash = nt_builder_fnv1a(layout[s].engine_name);
+            descs[s].name_hash = nt_hash32_str(layout[s].engine_name).value;
             descs[s].type = (uint8_t)layout[s].type;
             descs[s].count = layout[s].count;
             descs[s].normalized = layout[s].normalized ? 1 : 0;

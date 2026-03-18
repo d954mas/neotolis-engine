@@ -1,5 +1,6 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
+#include "hash/nt_hash.h"
 #include "nt_crc32.h"
 /* clang-format on */
 
@@ -59,7 +60,7 @@ static void nt_builder_free_entry_data(NtBuildEntry *entry) {
 
 /* --- Deferred entry management --- */
 
-static int32_t nt_builder_find_entry(NtBuilderContext *ctx, uint32_t resource_id) {
+static int32_t nt_builder_find_entry(NtBuilderContext *ctx, uint64_t resource_id) {
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         if (ctx->pending[i].resource_id == resource_id) {
             return (int32_t)i;
@@ -86,7 +87,7 @@ static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char 
         return NT_BUILD_ERR_IO;
     }
 
-    uint32_t resource_id = nt_builder_fnv1a(norm_path);
+    uint64_t resource_id = nt_hash64_str(norm_path).value;
 
     int32_t existing = nt_builder_find_entry(ctx, resource_id);
     if (existing >= 0) {
@@ -98,7 +99,7 @@ static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char 
             ctx->pending[existing].data = data;
             return NT_BUILD_OK;
         }
-        (void)fprintf(stderr, "ERROR: duplicate resource_id 0x%08X\n  existing: %s\n  new:      %s\n", resource_id, ctx->pending[existing].path, norm_path);
+        (void)fprintf(stderr, "ERROR: duplicate resource_id 0x%016llX\n  existing: %s\n  new:      %s\n", (unsigned long long)resource_id, ctx->pending[existing].path, norm_path);
         free(norm_path);
         return NT_BUILD_ERR_DUPLICATE;
     }
@@ -134,7 +135,7 @@ NtBuilderContext *nt_builder_start_pack(const char *output_path) {
 
     strncpy(ctx->output_path, output_path, sizeof(ctx->output_path) - 1);
     ctx->output_path[sizeof(ctx->output_path) - 1] = '\0';
-    ctx->pack_id = nt_builder_fnv1a(output_path);
+    ctx->pack_id = nt_hash32_str(output_path).value;
 
     (void)printf("Starting pack: %s\n", output_path);
     return ctx;
@@ -163,7 +164,7 @@ nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data
     return NT_BUILD_OK;
 }
 
-nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint32_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size) {
+nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size) {
     if (!ctx) {
         return NT_BUILD_ERR_VALIDATION;
     }
@@ -340,9 +341,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         const char *path = ctx->pending[i].path ? ctx->pending[i].path : "(unknown)";
         const char *rkey = ctx->pending[i].rename_key;
         if (rkey) {
-            (void)printf("  %s -> 0x%08X (renamed: %s)\n", path, ctx->entries[i].resource_id, rkey);
+            (void)printf("  %s -> 0x%016llX (renamed: %s)\n", path, (unsigned long long)ctx->pending[i].resource_id, rkey);
         } else {
-            (void)printf("  %s -> 0x%08X\n", path, ctx->entries[i].resource_id);
+            (void)printf("  %s -> 0x%016llX\n", path, (unsigned long long)ctx->pending[i].resource_id);
         }
     }
 
@@ -351,9 +352,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
 /* --- Helper: compute resource_id from path --- */
 
-static uint32_t nt_builder_path_id(const char *path) {
+static uint64_t nt_builder_path_id(const char *path) {
     char *norm = nt_builder_normalize_path(path);
-    uint32_t id = nt_builder_fnv1a(norm ? norm : path);
+    uint64_t id = nt_hash64_str(norm ? norm : path).value;
     free(norm);
     return id;
 }
@@ -402,14 +403,14 @@ nt_build_result_t nt_builder_rename(NtBuilderContext *ctx, const char *old_path,
         return NT_BUILD_ERR_VALIDATION;
     }
 
-    uint32_t old_id = nt_builder_path_id(old_path);
+    uint64_t old_id = nt_builder_path_id(old_path);
     int32_t idx = nt_builder_find_entry(ctx, old_id);
     if (idx < 0) {
         (void)fprintf(stderr, "ERROR: rename: '%s' not found in pending assets\n", old_path);
         return NT_BUILD_ERR_VALIDATION;
     }
 
-    uint32_t new_id = nt_builder_path_id(new_path);
+    uint64_t new_id = nt_builder_path_id(new_path);
 
     int32_t collision = nt_builder_find_entry(ctx, new_id);
     if (collision >= 0 && collision != idx) {

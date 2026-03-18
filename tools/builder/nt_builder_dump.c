@@ -136,12 +136,13 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
         count = max_entries;
     }
 
-    (void)printf("  %-5s %-12s %-10s %-7s %-10s %-10s\n", "Index", "Resource ID", "Type", "FmtVer", "Offset", "Size");
-    (void)printf("  %-5s %-12s %-10s %-7s %-10s %-10s\n", "-----", "----------", "--------", "------", "--------", "--------");
+    (void)printf("  %-5s %-20s %-10s %-7s %-10s %-10s\n", "Index", "Resource ID", "Type", "FmtVer", "Offset", "Size");
+    (void)printf("  %-5s %-20s %-10s %-7s %-10s %-10s\n", "-----", "------------------", "--------", "------", "--------", "--------");
 
     for (uint32_t i = 0; i < count; i++) {
         nt_format_size(entries[i].size, size_buf, sizeof(size_buf));
-        (void)printf("  %-5u 0x%08X   %-10s %-7u %-10u %-10s\n", i, entries[i].resource_id, nt_asset_type_name(entries[i].asset_type), entries[i].format_version, entries[i].offset, size_buf);
+        (void)printf("  %-5u 0x%016llX   %-10s %-7u %-10u %-10s\n", i, (unsigned long long)entries[i].resource_id, nt_asset_type_name(entries[i].asset_type), entries[i].format_version,
+                     entries[i].offset, size_buf);
     }
 
     free(buffer);
