@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Asset Pipeline
-current_phase: Phase 29 -- nt_hash module (2/3 plans done)
-current_plan: Plan 02
-status: executing
-last_updated: "2026-03-18T20:38:31.526Z"
-last_activity: 2026-03-19 -- Completed 29-03 (builder hash migration, spec update); 12min
+current_phase: Phase 29 -- nt_hash module (3/3 plans done)
+current_plan: Plan 03
+status: completed
+last_updated: "2026-03-18T20:44:40.722Z"
+last_activity: 2026-03-19 -- Completed 29-02 (resource migration to nt_hash types, NtAssetEntry 24B); 18min
 progress:
   total_phases: 10
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 19
-  completed_plans: 18
+  completed_plans: 19
 ---
 
 # Session State
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Core value:** Simple, fast, predictable -- composable features wired through code, zero hidden magic.
-**Current focus:** v1.3 Asset Pipeline -- Phase 29 nt_hash module (2/3 plans done)
+**Current focus:** v1.3 Asset Pipeline -- Phase 29 nt_hash module (3/3 plans done)
 
 ## Position
 
 **Milestone:** v1.3 Asset Pipeline (Phases 20-29)
-**Current phase:** Phase 29 -- nt_hash module (2/3 plans done)
-**Current Plan:** Plan 02
-**Status:** Executing
-**Last activity:** 2026-03-19 -- Completed 29-03 (builder hash migration, spec update); 12min
+**Current phase:** Phase 29 -- nt_hash module (3/3 plans done)
+**Current Plan:** Plan 03
+**Status:** Complete
+**Last activity:** 2026-03-19 -- Completed 29-02 (resource migration to nt_hash types, NtAssetEntry 24B); 18min
 
 ## Decisions
 
@@ -63,6 +63,8 @@ Phase 21-01 decisions:
 - [Phase 24]: Option B for virtual pack entries: asset_count tracks total, unmount/unregister scan all assets[] by pack_index (non-contiguous)
 - [Phase 24]: Virtual pack ownership: game creates GPU handles, game destroys -- registry only tracks references, unmount never calls destroy
 - [Phase 29]: Builder public API returns raw uint64_t (not nt_hash64_t) to keep nt_builder.h free of nt_hash.h dependency
+- [Phase 29]: NtAssetEntry reordered to 24 bytes: resource_id(8) + offset(4) + size(4) + format_version(2) + asset_type(1) + _pad(1) + _pad2(4)
+- [Phase 29]: nt_resource public API uses nt_hash32_t for pack_id and nt_hash64_t for resource_id; internal structs use raw uint64_t/uint32_t
 
 ## Performance Metrics
 
@@ -147,6 +149,7 @@ Phase 25-01 decisions:
 - -U_DLL for nt_fs native target and test_fs (CRT file I/O on Windows, same pattern as builder)
 - (void)fclose() casts for cert-err33-c compliance in error paths
 | Phase 29 P03 | 12min | 2 tasks | 11 files |
+| Phase 29 P02 | 18min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -191,3 +194,5 @@ Phase 25-01 decisions:
 - 2026-03-18: Phase 25 complete -- asset loading with I/O integration, activator system, retry, blob management, 67 unit tests
 - 2026-03-19: Completed 29-01-PLAN.md -- nt_hash module, FNV-1a 32/64, typed wrappers, label system, 16 unit tests, benchmark (FNV-1a winner), 14min
 - 2026-03-19: Completed 29-03-PLAN.md -- builder hash migration to nt_hash, spec updated with nt_hash module and 64-bit resource_id, 12min
+- 2026-03-19: Completed 29-02-PLAN.md -- resource migration to nt_hash types, NtAssetEntry widened to 24B, ~100 test sites migrated, 18min
+- 2026-03-19: Phase 29 complete -- nt_hash module unified hash, all resource/builder modules migrated, 3/3 plans done
