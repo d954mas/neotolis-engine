@@ -35,7 +35,6 @@ typedef struct {
     uint8_t stream_count;
     uint8_t index_type; /* 0=none, 1=uint16, 2=uint32 */
     uint16_t generation;
-    bool active;
 } nt_gfx_mesh_info_t;
 
 /* ---- Enums ---- */

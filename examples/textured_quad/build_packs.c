@@ -1,14 +1,14 @@
 /*
- * Build three .neopak packs for the textured cube demo:
- *   base.neopak         — cube mesh + shaders (always loaded)
- *   lenna_pixel.neopak  — 64x64 pixel art lenna
- *   lenna_hires.neopak  — full resolution lenna
+ * Build three .ntpack packs for the textured cube demo:
+ *   base.ntpack         — cube mesh + shaders (always loaded)
+ *   lenna_pixel.ntpack  — 64x64 pixel art lenna
+ *   lenna_hires.ntpack  — full resolution lenna
  *
  * Both texture packs share resource_id "textures/lenna"
  * so the resource system resolves by priority.
  *
  * Usage: build_tq_packs <output_dir>
- *   output_dir — where to write .neopak files (e.g. build/examples/textured_quad)
+ *   output_dir — where to write .ntpack files (e.g. build/examples/textured_quad)
  * Run from the project root directory.
  */
 
@@ -50,7 +50,7 @@ int main(int argc, char *argv[]) {
 
     /* ---- Pack 0: base (cube mesh + shaders) ---- */
     {
-        NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "base.neopak"));
+        NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "base.ntpack"));
         if (!ctx) {
             (void)fprintf(stderr, "Failed to start base pack\n");
             return 1;
@@ -64,12 +64,12 @@ int main(int argc, char *argv[]) {
             (void)fprintf(stderr, "Base pack failed: %d\n", r);
             return 1;
         }
-        (void)printf("Built: base.neopak\n");
+        (void)printf("Built: base.ntpack\n");
     }
 
     /* ---- Pack 1: pixel texture (64x64) ---- */
     {
-        NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "lenna_pixel.neopak"));
+        NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "lenna_pixel.ntpack"));
         if (!ctx) {
             (void)fprintf(stderr, "Failed to start pixel pack\n");
             return 1;
@@ -82,12 +82,12 @@ int main(int argc, char *argv[]) {
             (void)fprintf(stderr, "Pixel pack failed: %d\n", r);
             return 1;
         }
-        (void)printf("Built: lenna_pixel.neopak\n");
+        (void)printf("Built: lenna_pixel.ntpack\n");
     }
 
     /* ---- Pack 2: hires texture (512x512) ---- */
     {
-        NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "lenna_hires.neopak"));
+        NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "lenna_hires.ntpack"));
         if (!ctx) {
             (void)fprintf(stderr, "Failed to start hires pack\n");
             return 1;
@@ -100,7 +100,7 @@ int main(int argc, char *argv[]) {
             (void)fprintf(stderr, "Hires pack failed: %d\n", r);
             return 1;
         }
-        (void)printf("Built: lenna_hires.neopak\n");
+        (void)printf("Built: lenna_hires.ntpack\n");
     }
 
     (void)printf("\nDone.\n");

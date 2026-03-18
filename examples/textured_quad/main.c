@@ -1,12 +1,12 @@
 /*
  * Textured Cube Demo — Neotolis Engine
  *
- * Full asset pipeline demo: mesh, shaders, and textures all from .neopak packs.
+ * Full asset pipeline demo: mesh, shaders, and textures all from .ntpack packs.
  *
  * Packs:
- *   base.neopak         — cube mesh + shaders (loaded on start)
- *   lenna_pixel.neopak  — 8x8 pixel art lenna
- *   lenna_hires.neopak  — full resolution lenna
+ *   base.ntpack         — cube mesh + shaders (loaded on start)
+ *   lenna_pixel.ntpack  — 8x8 pixel art lenna
+ *   lenna_hires.ntpack  — full resolution lenna
  *
  * Controls:
  *   SPACE — cycle: load pixel → load hires → unload both
@@ -103,6 +103,7 @@ static void print_status(void) {
 
 /* ---- Frame callback ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
     nt_window_poll();
     nt_input_poll();
@@ -118,14 +119,14 @@ static void frame(void) {
         if (s_load_state == STATE_EMPTY) {
             nt_log_info("======== LOAD PIXEL PACK ========");
             nt_resource_mount(s_pixel_pack_id, s_pixel_prio);
-            nt_resource_load_auto(s_pixel_pack_id, "assets/lenna_pixel.neopak");
+            nt_resource_load_auto(s_pixel_pack_id, "assets/lenna_pixel.ntpack");
             s_pixel_dumped = false;
             s_load_state = STATE_PIXEL;
             print_status();
         } else if (s_load_state == STATE_PIXEL) {
             nt_log_info("======== LOAD HIRES PACK ========");
             nt_resource_mount(s_hires_pack_id, s_hires_prio);
-            nt_resource_load_auto(s_hires_pack_id, "assets/lenna_hires.neopak");
+            nt_resource_load_auto(s_hires_pack_id, "assets/lenna_hires.ntpack");
             s_hires_dumped = false;
             s_load_state = STATE_BOTH;
             print_status();
@@ -311,7 +312,7 @@ int main(void) {
 
     /* Load base pack (cube mesh + shaders — always present) */
     nt_resource_mount(s_base_pack_id, 100);
-    nt_resource_load_auto(s_base_pack_id, "assets/base.neopak");
+    nt_resource_load_auto(s_base_pack_id, "assets/base.ntpack");
 
     /* Bump activation budget so base pack activates in first frame */
     nt_resource_set_activate_budget(64);

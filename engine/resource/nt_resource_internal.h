@@ -17,7 +17,7 @@ typedef enum {
 /* ---- Pack type ---- */
 
 typedef enum {
-    NT_PACK_FILE = 0,    /* loaded from NEOPAK file */
+    NT_PACK_FILE = 0,    /* loaded from NTPACK file */
     NT_PACK_VIRTUAL = 1, /* runtime-created resources */
 } nt_pack_type_t;
 

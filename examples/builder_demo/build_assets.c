@@ -1,5 +1,5 @@
 /*
- * Builder Demo -- builds a .neopak pack from assets/ directory.
+ * Builder Demo -- builds a .ntpack pack from assets/ directory.
  * Run from the project root directory.
  */
 
@@ -29,7 +29,7 @@ int main(int argc, char *argv[]) {
     MKDIR("build");
     MKDIR("build/assets");
 
-    NtBuilderContext *ctx = nt_builder_start_pack("build/assets/demo.neopak");
+    NtBuilderContext *ctx = nt_builder_start_pack("build/assets/demo.ntpack");
     if (!ctx) {
         (void)fprintf(stderr, "Failed to start pack\n");
         return 1;
@@ -53,10 +53,10 @@ int main(int argc, char *argv[]) {
     }
 
     (void)printf("\n--- Pack contents ---\n");
-    nt_builder_dump_pack("build/assets/demo.neopak");
+    nt_builder_dump_pack("build/assets/demo.ntpack");
 
     nt_builder_free_pack(ctx);
 
-    (void)printf("\nDone. Pack: build/assets/demo.neopak\n");
+    (void)printf("\nDone. Pack: build/assets/demo.ntpack\n");
     return 0;
 }

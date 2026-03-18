@@ -17,7 +17,7 @@
 /* ---- Test blob builder ---- */
 
 /*
- * Build a valid NEOPAK blob in memory with `asset_count` fake assets.
+ * Build a valid NTPACK blob in memory with `asset_count` fake assets.
  * Each asset has 16 bytes of zero data. Returns malloc'd blob (caller frees).
  * Sets *out_size to total blob size.
  */
@@ -295,7 +295,7 @@ void test_parse_unmounted_pack(void) {
 /* ---- Pack builder with specific resource_id ---- */
 
 /*
- * Build a NEOPAK blob with one asset whose resource_id is `rid` and type is `atype`.
+ * Build a NTPACK blob with one asset whose resource_id is `rid` and type is `atype`.
  * Returns malloc'd blob (caller frees). Sets *out_size to total blob size.
  */
 static uint8_t *build_pack_with_rid(uint32_t rid, uint8_t atype, uint32_t *out_size) {
@@ -993,12 +993,12 @@ void test_load_file_transitions_state(void) {
     uint32_t pid = nt_resource_hash("load_file_pack");
     uint32_t rid = nt_resource_hash("load_file_res");
 
-    write_test_pack_file("build/test_pack_load.neopak", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_pack_load.ntpack", pid, rid, NT_ASSET_MESH);
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_PACK_STATE_NONE, nt_resource_pack_state(pid));
 
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_pack_load.neopak"));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_pack_load.ntpack"));
     /* On native, nt_fs reads synchronously, so state should be REQUESTED
      * (nt_fs returns immediately with DONE state) */
     nt_pack_state_t st = nt_resource_pack_state(pid);
@@ -1008,7 +1008,7 @@ void test_load_file_transitions_state(void) {
     nt_resource_step();
     TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
 
-    (void)remove("build/test_pack_load.neopak");
+    (void)remove("build/test_pack_load.ntpack");
 }
 
 void test_load_file_nonexistent(void) {
@@ -1018,7 +1018,7 @@ void test_load_file_nonexistent(void) {
     /* Set retry to 1 so it fails permanently */
     nt_resource_set_retry_policy(1, 100, 1000);
 
-    nt_result_t r = nt_resource_load_file(pid, "nonexistent_file_that_does_not_exist.neopak");
+    nt_result_t r = nt_resource_load_file(pid, "nonexistent_file_that_does_not_exist.ntpack");
     /* On native nt_fs, reading a non-existent file returns a valid request
      * but with FAILED state. The load_file still returns OK because the
      * request ID is non-zero; the failure is detected in resource_step. */
@@ -1113,14 +1113,14 @@ void test_activation_called_on_step(void) {
     uint32_t pid2 = nt_resource_hash("act_call_pack2");
     uint32_t rid2 = nt_resource_hash("act_call_res2");
 
-    write_test_pack_file("build/test_act_call.neopak", pid2, rid2, NT_ASSET_MESH);
+    write_test_pack_file("build/test_act_call.ntpack", pid2, rid2, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid2, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid2, "build/test_act_call.neopak"));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid2, "build/test_act_call.ntpack"));
     nt_resource_step(); /* polls I/O, parses, activates */
 
     TEST_ASSERT_EQUAL_UINT32(1, s_activate_call_count);
 
-    (void)remove("build/test_act_call.neopak");
+    (void)remove("build/test_act_call.ntpack");
     free(blob);
 }
 
@@ -1132,9 +1132,9 @@ void test_activation_sets_runtime_handle(void) {
     uint32_t pid = nt_resource_hash("act_handle_pack");
     uint32_t rid = nt_resource_hash("act_handle_res");
 
-    write_test_pack_file("build/test_act_handle.neopak", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_act_handle.ntpack", pid, rid, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_act_handle.neopak"));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_act_handle.ntpack"));
     nt_resource_step();
 
     /* Request handle after activation */
@@ -1142,7 +1142,7 @@ void test_activation_sets_runtime_handle(void) {
     nt_resource_step(); /* resolve */
     TEST_ASSERT_EQUAL_UINT32(0xBEEF, nt_resource_get(h));
 
-    (void)remove("build/test_act_handle.neopak");
+    (void)remove("build/test_act_handle.ntpack");
 }
 
 /* Build a pack with N assets all of the same type */
@@ -1199,10 +1199,10 @@ void test_activation_budget_limits(void) {
     uint32_t pid = nt_resource_hash("budget_pack");
 
     /* Build pack with 3 mesh assets (all same type) */
-    write_test_pack_multi("build/test_budget.neopak", pid, NT_ASSET_MESH, 3);
+    write_test_pack_multi("build/test_budget.ntpack", pid, NT_ASSET_MESH, 3);
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_budget.neopak"));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_budget.ntpack"));
     nt_resource_step(); /* load + parse + activate up to budget */
 
     /* Budget 1, cost per mesh = 1: should activate exactly 1 per step */
@@ -1212,7 +1212,7 @@ void test_activation_budget_limits(void) {
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT32(2, s_activate_call_count);
 
-    (void)remove("build/test_budget.neopak");
+    (void)remove("build/test_budget.ntpack");
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1224,15 +1224,15 @@ void test_activation_budget_skips_expensive(void) {
     uint32_t pid = nt_resource_hash("budget_skip_pack");
     uint32_t rid = nt_resource_hash("budget_skip_res");
 
-    write_test_pack_file("build/test_budget_skip.neopak", pid, rid, NT_ASSET_TEXTURE);
+    write_test_pack_file("build/test_budget_skip.ntpack", pid, rid, NT_ASSET_TEXTURE);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_budget_skip.neopak"));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_budget_skip.ntpack"));
     nt_resource_step();
 
     /* Budget 1 < cost 4: texture should NOT be activated */
     TEST_ASSERT_EQUAL_UINT32(0, s_activate_call_count);
 
-    (void)remove("build/test_budget_skip.neopak");
+    (void)remove("build/test_budget_skip.ntpack");
 }
 
 void test_no_activator_stays_registered(void) {
@@ -1240,16 +1240,16 @@ void test_no_activator_stays_registered(void) {
     uint32_t pid = nt_resource_hash("no_act_pack");
     uint32_t rid = nt_resource_hash("no_act_res");
 
-    write_test_pack_file("build/test_no_act.neopak", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_no_act.ntpack", pid, rid, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_no_act.neopak"));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_no_act.ntpack"));
     nt_resource_step();
 
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
     nt_resource_step();
     TEST_ASSERT_FALSE(nt_resource_is_ready(h));
 
-    (void)remove("build/test_no_act.neopak");
+    (void)remove("build/test_no_act.ntpack");
 }
 
 /* ---- Retry policy tests ---- */
@@ -1275,10 +1275,10 @@ void test_blob_policy_keep(void) {
 
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
 
-    write_test_pack_file("build/test_blob_keep.neopak", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_blob_keep.ntpack", pid, rid, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     nt_resource_set_blob_policy(pid, NT_BLOB_KEEP, 0);
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_blob_keep.neopak"));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_blob_keep.ntpack"));
     nt_resource_step();
 
     TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
@@ -1289,7 +1289,7 @@ void test_blob_policy_keep(void) {
     }
     TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
 
-    (void)remove("build/test_blob_keep.neopak");
+    (void)remove("build/test_blob_keep.ntpack");
 }
 
 /* ---- Invalidate tests ---- */
@@ -1303,9 +1303,9 @@ void test_invalidate_marks_registered(void) {
     uint32_t pid = nt_resource_hash("inv_reg_pack");
     uint32_t rid = nt_resource_hash("inv_reg_res");
 
-    write_test_pack_file("build/test_inv_reg.neopak", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_inv_reg.ntpack", pid, rid, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_inv_reg.neopak"));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_inv_reg.ntpack"));
     nt_resource_step(); /* load + activate */
 
     nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
@@ -1322,7 +1322,7 @@ void test_invalidate_marks_registered(void) {
     TEST_ASSERT_EQUAL_UINT32(0xBEEF, nt_resource_get(h));
     TEST_ASSERT_TRUE(s_activate_call_count >= 2); /* activated at least twice */
 
-    (void)remove("build/test_inv_reg.neopak");
+    (void)remove("build/test_inv_reg.ntpack");
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1335,9 +1335,9 @@ void test_invalidate_calls_deactivator(void) {
     uint32_t pid = nt_resource_hash("inv_deact_pack");
     uint32_t rid = nt_resource_hash("inv_deact_res");
 
-    write_test_pack_file("build/test_inv_deact.neopak", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_inv_deact.ntpack", pid, rid, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_inv_deact.neopak"));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_inv_deact.ntpack"));
     nt_resource_step();
 
     TEST_ASSERT_EQUAL_UINT32(0, s_deactivate_call_count);
@@ -1346,7 +1346,7 @@ void test_invalidate_calls_deactivator(void) {
     TEST_ASSERT_EQUAL_UINT32(1, s_deactivate_call_count);
     TEST_ASSERT_EQUAL_UINT32(0xBEEF, s_last_deactivated_handle);
 
-    (void)remove("build/test_inv_deact.neopak");
+    (void)remove("build/test_inv_deact.ntpack");
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1380,10 +1380,10 @@ void test_invalidate_triggers_redownload_on_evicted_blob(void) {
     uint32_t pid = nt_resource_hash("inv_redl_pack");
     uint32_t rid = nt_resource_hash("inv_redl_res");
 
-    write_test_pack_file("build/test_inv_redl.neopak", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_inv_redl.ntpack", pid, rid, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     nt_resource_set_blob_policy(pid, NT_BLOB_AUTO, 1); /* TTL = 1ms */
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_inv_redl.neopak"));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_inv_redl.ntpack"));
 
     nt_resource_step(); /* load, parse, activate */
     TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
@@ -1415,7 +1415,7 @@ void test_invalidate_triggers_redownload_on_evicted_blob(void) {
     TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid));
     TEST_ASSERT_TRUE(s_activate_call_count >= 2);
 
-    (void)remove("build/test_inv_redl.neopak");
+    (void)remove("build/test_inv_redl.ntpack");
 }
 
 /* ---- Unmount with deactivation test ---- */
@@ -1429,9 +1429,9 @@ void test_unmount_deactivates_assets(void) {
     uint32_t pid = nt_resource_hash("unmount_deact_pack");
     uint32_t rid = nt_resource_hash("unmount_deact_res");
 
-    write_test_pack_file("build/test_unmount_deact.neopak", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_unmount_deact.ntpack", pid, rid, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_unmount_deact.neopak"));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_unmount_deact.ntpack"));
     nt_resource_step();
 
     TEST_ASSERT_EQUAL_UINT32(1, s_activate_call_count);
@@ -1440,7 +1440,7 @@ void test_unmount_deactivates_assets(void) {
     nt_resource_unmount(pid);
     TEST_ASSERT_EQUAL_UINT32(1, s_deactivate_call_count);
 
-    (void)remove("build/test_unmount_deact.neopak");
+    (void)remove("build/test_unmount_deact.ntpack");
 }
 
 /* ---- Activation failure test ---- */
@@ -1453,9 +1453,9 @@ void test_activation_failure_sets_failed(void) {
     uint32_t pid = nt_resource_hash("act_fail_pack");
     uint32_t rid = nt_resource_hash("act_fail_res");
 
-    write_test_pack_file("build/test_act_fail.neopak", pid, rid, NT_ASSET_MESH);
+    write_test_pack_file("build/test_act_fail.ntpack", pid, rid, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_act_fail.neopak"));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_act_fail.ntpack"));
     nt_resource_step();
 
     /* Activator returned 0 (failure) -- asset should be FAILED */
@@ -1463,7 +1463,7 @@ void test_activation_failure_sets_failed(void) {
     nt_resource_step();
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_STATE_FAILED, nt_resource_get_state(h));
 
-    (void)remove("build/test_act_fail.neopak");
+    (void)remove("build/test_act_fail.ntpack");
 }
 
 /* ---- Load URL on native (should fail gracefully) ---- */
@@ -1475,7 +1475,7 @@ void test_load_url_native_fails(void) {
 
     /* On native, nt_http_request immediately fails. load_url may return error
      * (if request ID is 0) or OK (if request ID is non-zero but state is FAILED). */
-    nt_result_t r = nt_resource_load_url(pid, "http://example.com/test.neopak");
+    nt_result_t r = nt_resource_load_url(pid, "http://example.com/test.ntpack");
     if (r == NT_OK) {
         nt_resource_step();
     }

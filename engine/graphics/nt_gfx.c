@@ -158,12 +158,11 @@ void nt_gfx_shutdown(void) {
 
     /* Destroy active mesh table entries */
     for (uint32_t i = 1; i <= NT_GFX_MAX_MESHES; i++) {
-        if (s_gfx.mesh_table[i].active) {
+        if (s_gfx.mesh_table[i].vbo.id != 0) {
             nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[nt_gfx_pool_slot_index(s_gfx.mesh_table[i].vbo.id)]);
             if (s_gfx.mesh_table[i].ibo.id != 0) {
                 nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[nt_gfx_pool_slot_index(s_gfx.mesh_table[i].ibo.id)]);
             }
-            s_gfx.mesh_table[i].active = false;
         }
     }
 
@@ -200,10 +199,9 @@ void nt_gfx_begin_frame(void) {
             for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
                 s_gfx.texture_backends[i] = 0;
             }
-            /* Clear mesh table (VBO/IBO handles are now invalid) */
-            for (uint32_t i = 1; i <= NT_GFX_MAX_MESHES; i++) {
-                s_gfx.mesh_table[i].active = false;
-            }
+            /* Mesh table: keep entries active. nt_resource_invalidate() will
+             * call deactivate_mesh() which returns slots to free lists.
+             * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
             s_gfx.bound_pipeline = 0;
             g_nt_gfx.context_lost = true;
             nt_log_error("gfx: WebGL context lost");
@@ -811,7 +809,6 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     s_gfx.mesh_table[slot].stream_count = hdr->stream_count;
     s_gfx.mesh_table[slot].index_type = hdr->index_type;
     s_gfx.mesh_table[slot].generation++;
-    s_gfx.mesh_table[slot].active = true;
 
     return mesh_handle_make(slot, s_gfx.mesh_table[slot].generation);
 }
@@ -862,15 +859,17 @@ void nt_gfx_deactivate_mesh(uint32_t handle) {
         nt_log_error("gfx: deactivate_mesh: invalid handle index");
         return;
     }
-    if (!s_gfx.mesh_table[index].active || s_gfx.mesh_table[index].generation != gen) {
-        nt_log_error("gfx: deactivate_mesh: stale or inactive handle");
+    if (s_gfx.mesh_table[index].generation != gen) {
+        nt_log_error("gfx: deactivate_mesh: stale handle");
         return;
     }
     nt_gfx_destroy_buffer(s_gfx.mesh_table[index].vbo);
     if (s_gfx.mesh_table[index].ibo.id != 0) {
         nt_gfx_destroy_buffer(s_gfx.mesh_table[index].ibo);
     }
-    s_gfx.mesh_table[index].active = false;
+    s_gfx.mesh_table[index].vbo.id = 0;
+    s_gfx.mesh_table[index].ibo.id = 0;
+    s_gfx.mesh_table[index].generation++; /* invalidate old handles */
     s_gfx.mesh_free[s_gfx.mesh_free_top] = (uint16_t)index;
     s_gfx.mesh_free_top++;
 }
@@ -888,7 +887,7 @@ const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(uint32_t mesh_handle) {
     if (index == 0 || index > NT_GFX_MAX_MESHES) {
         return NULL;
     }
-    if (!s_gfx.mesh_table[index].active || s_gfx.mesh_table[index].generation != gen) {
+    if (s_gfx.mesh_table[index].generation != gen) {
         return NULL;
     }
     return &s_gfx.mesh_table[index];

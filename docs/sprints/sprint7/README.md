@@ -2,7 +2,7 @@
 
 ## Цель спринта
 
-Собрать builder как отдельный C-бинарник, который импортирует source assets, валидирует их, конвертирует в runtime formats и пишет NEOPAK packs для полного end-to-end цикла.
+Собрать builder как отдельный C-бинарник, который импортирует source assets, валидирует их, конвертирует в runtime formats и пишет NTPACK packs для полного end-to-end цикла.
 
 ## Почему builder закрывает roadmap
 
@@ -24,7 +24,7 @@
 2. [Task 7.2 — Shader, Material, and Texture Import Pipeline](./task02_shader_material_and_texture_import_pipeline.md)
 3. [Task 7.3 — Mesh Import and Runtime Conversion](./task03_mesh_import_and_runtime_conversion.md)
 4. [Task 7.4 — Audio Import and OGG Pipeline](./task04_audio_import_and_ogg_pipeline.md)
-5. [Task 7.5 — NEOPAK Writer, Validation, and End-to-End Smoke](./task05_neopak_writer_validation_and_end_to_end_smoke.md)
+5. [Task 7.5 — NTPACK Writer, Validation, and End-to-End Smoke](./task05_ntpack_writer_validation_and_end_to_end_smoke.md)
 
 ## Результат спринта
 
@@ -39,7 +39,7 @@
 
 ## Опорные разделы спецификации
 
-- `§19 Pack Format (NEOPAK)`
+- `§19 Pack Format (NTPACK)`
 - `§20 Runtime Formats`
 - `§23 Builder Architecture`
 - `§27 Suggested Implementation Order` пункты 18-19

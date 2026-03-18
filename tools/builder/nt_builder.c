@@ -269,7 +269,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     }
 
     if (ctx->has_error) {
-        (void)fprintf(stderr, "ERROR: Build failed: %u/%u assets failed. No .neopak written.\n", fail_count, ctx->pending_count);
+        (void)fprintf(stderr, "ERROR: Build failed: %u/%u assets failed. No .ntpack written.\n", fail_count, ctx->pending_count);
         return NT_BUILD_ERR_VALIDATION;
     }
 

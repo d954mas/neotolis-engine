@@ -275,7 +275,11 @@ void nt_resource_step(void) {
                 }
 
                 if (has_existing_assets) {
-                    /* Re-download: restore blob, skip re-parse */
+                    /* Re-download after blob eviction: restore blob, skip re-parse.
+                     * Assumes pack content is immutable — same URL/path always returns
+                     * identical data. If hot-update is ever needed, validate CRC32 here
+                     * and fall through to full re-parse on mismatch. */
+                    NT_ASSERT(loaded_size == pack->blob_size);
                     pack->blob = loaded_blob;
                     pack->blob_size = loaded_size;
                     pack->pack_state = NT_PACK_STATE_READY;
@@ -377,7 +381,7 @@ void nt_resource_step(void) {
                     free((void *)pack->blob);
                 }
                 pack->blob = NULL;
-                pack->blob_size = 0;
+                /* Keep blob_size — used to validate re-download returns same data */
             }
         }
     }

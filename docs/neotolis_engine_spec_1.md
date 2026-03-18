@@ -82,7 +82,7 @@ If a decision can be deferred without loss of base architecture — it is deferr
 - hierarchy
 - transform system
 - resource system with async loading
-- custom binary pack format (NEOPAK)
+- custom binary pack format (NTPACK)
 - custom runtime formats
 - shader + material system
 - mesh rendering
@@ -1036,7 +1036,7 @@ JS callback → WASM: platform_on_fetch_complete(request_id, blob_ptr, blob_size
 
 Next resource_step():
   → sees LOADED pack
-  → parses header/manifest (NEOPAK format, direct struct read)
+  → parses header/manifest (NTPACK format, direct struct read)
   → registers AssetMeta entries (state = REGISTERED)
   → PackMeta.state = READY
 
@@ -1102,7 +1102,7 @@ Peak memory during loading = 2x pack size (JS fetch buffer + WASM heap copy). Fo
 
 ---
 
-# 19. Pack Format (NEOPAK)
+# 19. Pack Format (NTPACK)
 
 ## 19.1 Design rationale
 
@@ -1550,7 +1550,7 @@ Prefer typed wildcard functions over one untyped `add_files()`.
 4. conversion to runtime format
 5. pack placement with alignment
 6. manifest generation (embedded in pack header)
-7. write NEOPAK binary
+7. write NTPACK binary
 
 ## 23.6 Builder validation
 
@@ -1663,7 +1663,7 @@ game/      (game-side code)
 4. sparse component storage template
 5. transform + hierarchy update
 6. resource ids / asset meta / pack meta
-7. NEOPAK format: pack parsing + asset access
+7. NTPACK format: pack parsing + asset access
 8. async loading (fetch bridge + resource_step)
 9. shader asset + material asset parsing
 10. texture asset handling
@@ -1692,7 +1692,7 @@ These decisions are **locked** unless a strong reason appears:
 7. Builder is standalone C binary
 8. Builder rules are code
 9. Runtime formats are custom binary
-10. Custom pack format (NEOPAK) — flat binary, no ZIP
+10. Custom pack format (NTPACK) — flat binary, no ZIP
 11. Manifest embedded in pack header
 12. Material numeric params are `vec4[]`
 13. No full duplicated MaterialRuntime object initially
@@ -1753,7 +1753,7 @@ Engine
     ├─ runs frame lifecycle
     ├─ stores entities/components/resources
     ├─ updates transforms
-    ├─ loads runtime assets from NEOPAK packs (async)
+    ├─ loads runtime assets from NTPACK packs (async)
     ├─ provides render backend (WebGL 2)
     ├─ provides input + platform services
     └─ provides audio playback
@@ -1762,7 +1762,7 @@ Builder
     ├─ imports source assets
     ├─ validates compatibility
     ├─ converts to runtime formats
-    ├─ builds NEOPAK packs
+    ├─ builds NTPACK packs
     └─ embeds manifest in pack header
 ```
 
