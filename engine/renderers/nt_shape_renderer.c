@@ -740,6 +740,33 @@ void nt_shape_renderer_shutdown(void) {
     memset(&s_shape, 0, sizeof(s_shape));
 }
 
+void nt_shape_renderer_restore_gpu(void) {
+    /* Save CPU-side state that survives context loss */
+    float saved_vp[16];
+    float saved_cam_pos[3];
+    float saved_line_width = s_shape.line_width;
+    bool saved_depth = s_shape.depth_enabled;
+    memcpy(saved_vp, s_shape.vp, sizeof(saved_vp));
+    memcpy(saved_cam_pos, s_shape.cam_pos, sizeof(saved_cam_pos));
+
+    /* Shutdown destroys GPU handles (no-ops for zero backends after context loss)
+       and clears all state including CPU-side arrays. */
+    nt_shape_renderer_shutdown();
+
+    /* Full re-init: recreates shaders, pipelines, buffers, template meshes, trig LUT */
+    nt_shape_renderer_init();
+
+    /* Restore saved settings */
+    memcpy(s_shape.vp, saved_vp, sizeof(s_shape.vp));
+    memcpy(s_shape.cam_pos, saved_cam_pos, sizeof(s_shape.cam_pos));
+    s_shape.line_width = saved_line_width;
+    s_shape.depth_enabled = saved_depth;
+    s_shape.batch_pip_active = saved_depth ? s_shape.batch_pip_depth : s_shape.batch_pip_overlay;
+    s_shape.inst_pip_active = saved_depth ? s_shape.inst_pip_depth : s_shape.inst_pip_overlay;
+    s_shape.cap_inst_pip_active = saved_depth ? s_shape.cap_inst_pip_depth : s_shape.cap_inst_pip_overlay;
+    s_shape.line_pip_active = saved_depth ? s_shape.line_pip_depth : s_shape.line_pip_overlay;
+}
+
 void nt_shape_renderer_flush(void) {
     /* Flush instanced shapes (rect, cube, circle, sphere, cylinder, capsule) */
     for (int t = 0; t < NT_SHAPE_TYPE_COUNT; t++) {

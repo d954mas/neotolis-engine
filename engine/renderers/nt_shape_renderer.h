@@ -28,6 +28,7 @@ typedef struct {
 
 void nt_shape_renderer_init(void);
 void nt_shape_renderer_shutdown(void);
+void nt_shape_renderer_restore_gpu(void);
 void nt_shape_renderer_flush(void);
 
 /* ---- State setters ---- */
