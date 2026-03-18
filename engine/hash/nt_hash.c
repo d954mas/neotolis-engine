@@ -22,6 +22,26 @@ nt_hash64_t nt_hash64(const void *data, uint32_t size) {
     return (nt_hash64_t){XXH64(data, (size_t)size, 0)};
 }
 
+/* ---- String helpers ---- */
+
+nt_hash32_t nt_hash32_str(const char *s) {
+    NT_ASSERT_ALWAYS(s != NULL);
+    nt_hash32_t h = nt_hash32((const void *)s, (uint32_t)strlen(s));
+#if NT_HASH_LABELS
+    nt_hash_register_label32(h, s);
+#endif
+    return h;
+}
+
+nt_hash64_t nt_hash64_str(const char *s) {
+    NT_ASSERT_ALWAYS(s != NULL);
+    nt_hash64_t h = nt_hash64((const void *)s, (uint32_t)strlen(s));
+#if NT_HASH_LABELS
+    nt_hash_register_label64(h, s);
+#endif
+    return h;
+}
+
 /* ---- Label system ---- */
 
 #if NT_HASH_LABELS
