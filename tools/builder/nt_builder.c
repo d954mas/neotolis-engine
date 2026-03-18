@@ -274,7 +274,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     }
 
     /* Phase 2: Compute layout and write pack file */
-    uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + ctx->entry_count * sizeof(NtAssetEntry));
+    uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (ctx->entry_count * sizeof(NtAssetEntry)));
     uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
 
     uint32_t data_offset = 0;

@@ -11,10 +11,10 @@
  *          distribution quality (chi-squared on bucket spread).
  */
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -72,22 +72,16 @@ static uint64_t fnv1a_64(const void *data, uint32_t size) {
  *  2. xxHash official wrappers (thin wrappers to match our fn sigs)
  * ================================================================ */
 
-static uint32_t xxhash_official_32(const void *data, uint32_t size) {
-    return XXH32(data, size, 0);
-}
+static uint32_t xxhash_official_32(const void *data, uint32_t size) { return XXH32(data, size, 0); }
 
-static uint64_t xxhash_official_64(const void *data, uint32_t size) {
-    return XXH64(data, size, 0);
-}
+static uint64_t xxhash_official_64(const void *data, uint32_t size) { return XXH64(data, size, 0); }
 
 static uint32_t xxh3_official_32(const void *data, uint32_t size) {
     /* XXH3 is 64-bit; truncate to 32 for the 32-bit benchmark slot */
     return (uint32_t)XXH3_64bits(data, size);
 }
 
-static uint64_t xxh3_official_64(const void *data, uint32_t size) {
-    return XXH3_64bits(data, size);
-}
+static uint64_t xxh3_official_64(const void *data, uint32_t size) { return XXH3_64bits(data, size); }
 
 /* ================================================================
  *  3. MurmurHash3
@@ -115,7 +109,7 @@ static uint32_t murmur3_x86_32(const void *data, uint32_t size) {
 
     for (uint32_t i = 0; i < nblocks; i++) {
         uint32_t k1;
-        memcpy(&k1, p + i * 4, 4);
+        memcpy(&k1, p + ((size_t)i * 4), 4);
         k1 *= c1;
         k1 = murmur_rotl32(k1, 15);
         k1 *= c2;
@@ -124,9 +118,9 @@ static uint32_t murmur3_x86_32(const void *data, uint32_t size) {
         h1 = h1 * 5 + 0xE6546B64U;
     }
 
-    const uint8_t *tail = p + nblocks * 4;
+    const uint8_t *tail = p + (size_t)(nblocks * 4);
     uint32_t k1 = 0;
-    switch (size & 3) {
+    switch (size & 3) { /* NOLINT(bugprone-switch-missing-default-case) */
     case 3:
         k1 ^= (uint32_t)tail[2] << 16;
         /* fallthrough */
@@ -168,8 +162,8 @@ static uint64_t murmur3_x64_128_upper64(const void *data, uint32_t size) {
     for (uint32_t i = 0; i < nblocks; i++) {
         uint64_t k1;
         uint64_t k2;
-        memcpy(&k1, p + i * 16, 8);
-        memcpy(&k2, p + i * 16 + 8, 8);
+        memcpy(&k1, p + ((size_t)i * 16), 8);
+        memcpy(&k2, p + ((size_t)i * 16) + 8, 8);
 
         k1 *= c1;
         k1 = murmur_rotl64(k1, 31);
@@ -188,10 +182,10 @@ static uint64_t murmur3_x64_128_upper64(const void *data, uint32_t size) {
         h2 = h2 * 5 + 0x38495AB5U;
     }
 
-    const uint8_t *tail = p + nblocks * 16;
+    const uint8_t *tail = p + (size_t)(nblocks * 16);
     uint64_t k1 = 0;
     uint64_t k2 = 0;
-    switch (size & 15) {
+    switch (size & 15) { /* NOLINT(bugprone-switch-missing-default-case) */
     case 15:
         k2 ^= (uint64_t)tail[14] << 48;
         /* fallthrough */
@@ -387,8 +381,7 @@ static void bench_throughput(const Candidate *c, const char *input, uint32_t len
     (void)sink32;
     (void)sink64;
 
-    printf("  %-14s  %-20s  32-bit: %7.1f ms (%10.0f ops/s)  64-bit: %7.1f ms (%10.0f ops/s)\n",
-           c->name, label, ms32, ops32, ms64, ops64);
+    printf("  %-14s  %-20s  32-bit: %7.1f ms (%10.0f ops/s)  64-bit: %7.1f ms (%10.0f ops/s)\n", c->name, label, ms32, ops32, ms64, ops64);
 }
 
 /* ================================================================
@@ -443,8 +436,8 @@ static uint32_t collision_test_64(hash64_fn fn) {
  *  (the worst case for poor avalanche — exactly what open-addressing uses).
  * ================================================================ */
 
-#define DIST_KEYS   10000
-#define DIST_BUCKETS 256   /* power of 2 — worst case for bad hashes */
+#define DIST_KEYS 10000
+#define DIST_BUCKETS 256 /* power of 2 — worst case for bad hashes */
 
 static double distribution_chi2_32(hash32_fn fn) {
     uint32_t buckets[DIST_BUCKETS];
@@ -501,8 +494,12 @@ static void distribution_minmax_32(hash32_fn fn, uint32_t *out_min, uint32_t *ou
     *out_min = buckets[0];
     *out_max = buckets[0];
     for (int i = 1; i < DIST_BUCKETS; i++) {
-        if (buckets[i] < *out_min) *out_min = buckets[i];
-        if (buckets[i] > *out_max) *out_max = buckets[i];
+        if (buckets[i] < *out_min) {
+            *out_min = buckets[i];
+        }
+        if (buckets[i] > *out_max) {
+            *out_max = buckets[i];
+        }
     }
 }
 
@@ -520,8 +517,12 @@ static void distribution_minmax_64(hash64_fn fn, uint32_t *out_min, uint32_t *ou
     *out_min = buckets[0];
     *out_max = buckets[0];
     for (int i = 1; i < DIST_BUCKETS; i++) {
-        if (buckets[i] < *out_min) *out_min = buckets[i];
-        if (buckets[i] > *out_max) *out_max = buckets[i];
+        if (buckets[i] < *out_min) {
+            *out_min = buckets[i];
+        }
+        if (buckets[i] > *out_max) {
+            *out_max = buckets[i];
+        }
     }
 }
 
@@ -531,11 +532,11 @@ static void distribution_minmax_64(hash64_fn fn, uint32_t *out_min, uint32_t *ou
 
 int main(void) {
     Candidate candidates[] = {
-        {"FNV-1a",      fnv1a_32,           fnv1a_64},
-        {"XXH32/64",    xxhash_official_32, xxhash_official_64},
-        {"XXH3",        xxh3_official_32,   xxh3_official_64},
-        {"MurmurHash3", murmur3_x86_32,     murmur3_x64_128_upper64},
-        {"CRC32",       crc32_hash,         crc32_hash64},
+        {"FNV-1a", fnv1a_32, fnv1a_64},
+        {"XXH32/64", xxhash_official_32, xxhash_official_64},
+        {"XXH3", xxh3_official_32, xxh3_official_64},
+        {"MurmurHash3", murmur3_x86_32, murmur3_x64_128_upper64},
+        {"CRC32", crc32_hash, crc32_hash64},
     };
     int num = (int)(sizeof(candidates) / sizeof(candidates[0]));
 
@@ -558,27 +559,26 @@ int main(void) {
     for (int i = 0; i < num; i++) {
         uint32_t col32 = collision_test_32(candidates[i].fn32);
         uint32_t col64 = collision_test_64(candidates[i].fn64);
-        printf("  %-14s  32-bit: %u collisions  |  64-bit: %u collisions\n",
-               candidates[i].name, col32, col64);
+        printf("  %-14s  32-bit: %u collisions  |  64-bit: %u collisions\n", candidates[i].name, col32, col64);
     }
 
-    printf("\n--- Distribution Quality (chi-squared, %d keys -> %d buckets, lower = better) ---\n",
-           DIST_KEYS, DIST_BUCKETS);
+    printf("\n--- Distribution Quality (chi-squared, %d keys -> %d buckets, lower = better) ---\n", DIST_KEYS, DIST_BUCKETS);
     printf("  (Ideal chi2 ~ %d for uniform random distribution)\n", DIST_BUCKETS);
     printf("  Key pattern: \"assets/textures/env/tile_NNNN.ntex\"\n\n");
     for (int i = 0; i < num; i++) {
         double chi2_32 = distribution_chi2_32(candidates[i].fn32);
         double chi2_64 = distribution_chi2_64(candidates[i].fn64);
-        uint32_t min32, max32, min64, max64;
+        uint32_t min32 = 0;
+        uint32_t max32 = 0;
+        uint32_t min64 = 0;
+        uint32_t max64 = 0;
         distribution_minmax_32(candidates[i].fn32, &min32, &max32);
         distribution_minmax_64(candidates[i].fn64, &min64, &max64);
-        printf("  %-14s  32-bit: chi2=%8.1f  (min=%u, max=%u)  |  64-bit: chi2=%8.1f  (min=%u, max=%u)\n",
-               candidates[i].name, chi2_32, min32, max32, chi2_64, min64, max64);
+        printf("  %-14s  32-bit: chi2=%8.1f  (min=%u, max=%u)  |  64-bit: chi2=%8.1f  (min=%u, max=%u)\n", candidates[i].name, chi2_32, min32, max32, chi2_64, min64, max64);
     }
 
     double expected = (double)DIST_KEYS / DIST_BUCKETS;
-    printf("\n  Expected per bucket: %.1f  |  Ideal range: ~%.0f-%.0f\n",
-           expected, expected * 0.7, expected * 1.3);
+    printf("\n  Expected per bucket: %.1f  |  Ideal range: ~%.0f-%.0f\n", expected, expected * 0.7, expected * 1.3);
 
     printf("\nDone.\n");
     return 0;
