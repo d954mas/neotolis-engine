@@ -1035,8 +1035,7 @@ void nt_resource_dump_pack(uint32_t pack_id) {
 
     NtPackMeta *pack = &s_resource.packs[idx];
     char buf[256];
-    (void)snprintf(buf, sizeof(buf), "  Pack 0x%08X  prio=%d  state=%d  blob=%s (%u bytes)", pack->pack_id, (int)pack->priority,
-                   (int)pack->pack_state, pack->blob ? "yes" : "no", pack->blob_size);
+    (void)snprintf(buf, sizeof(buf), "  Pack 0x%08X  prio=%d  state=%d  blob=%s (%u bytes)", pack->pack_id, (int)pack->priority, (int)pack->pack_state, pack->blob ? "yes" : "no", pack->blob_size);
     nt_log_info(buf);
 
     if (!pack->blob || pack->blob_size < sizeof(NtPackHeader)) {

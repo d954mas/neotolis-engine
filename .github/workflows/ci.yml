@@ -23,6 +23,7 @@ jobs:
   wasm:
     name: WASM Build & Test
     runs-on: ubuntu-latest
+    needs: native
     steps:
       - uses: actions/checkout@v4
 
@@ -38,6 +39,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Download asset packs
+        uses: actions/download-artifact@v4
+        with:
+          name: asset-packs
+          path: build/examples/textured_quad
 
       - name: Configure WASM debug
         run: emcmake cmake --preset wasm-debug
@@ -93,6 +100,12 @@ jobs:
         run: cmake --preset native-debug
 
       - name: Build native debug
+        run: cmake --build --preset native-debug --target build_tq_packs
+
+      - name: Build asset packs
+        run: ./build/examples/textured_quad/native-debug/build_tq_packs build/examples/textured_quad
+
+      - name: Build native debug (all targets)
         run: cmake --build --preset native-debug
 
       - name: Verify native debug output
@@ -115,6 +128,12 @@ jobs:
       - name: Build native release
         run: cmake --build --preset native-release
 
+      - name: Build asset packs (release)
+        run: ./build/examples/textured_quad/native-release/build_tq_packs build/examples/textured_quad
+
+      - name: Rebuild native release (with packs)
+        run: cmake --build --preset native-release
+
       - name: Verify native release output
         run: |
           test -f build/tools/builder/native-release/builder
@@ -125,6 +144,13 @@ jobs:
 
       - name: Smoke test builder (release)
         run: ./build/tools/builder/native-release/builder
+
+      - name: Upload asset packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: asset-packs
+          path: build/examples/textured_quad/*.neopak
+          retention-days: 1
 
       - name: Submodule consumption test
         run: |
@@ -296,11 +322,18 @@ jobs:
   pr-size-comment:
     name: PR Size Comment
     runs-on: ubuntu-latest
+    needs: native
     if: github.event_name == 'pull_request'
     permissions:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download asset packs
+        uses: actions/download-artifact@v4
+        with:
+          name: asset-packs
+          path: build/examples/textured_quad
 
       - name: Read emsdk version
         id: emsdk-version

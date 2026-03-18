@@ -96,8 +96,7 @@ EMSCRIPTEN_KEEPALIVE void nt_http_web_on_progress(int slot_index, int generation
 EMSCRIPTEN_KEEPALIVE void nt_http_web_on_complete(int slot_index, int generation, uint8_t *data, int size, int success) {
     NtHttpSlot *slot = nt_http_get_slot((uint16_t)slot_index);
     /* Debug log */
-    emscripten_log(0, "[http_cb] slot=%d cb_gen=%d slot_gen=%u ok=%d sz=%d", slot_index, generation,
-                   slot ? (unsigned)slot->generation : 0, success, size);
+    emscripten_log(0, "[http_cb] slot=%d cb_gen=%d slot_gen=%u ok=%d sz=%d", slot_index, generation, slot ? (unsigned)slot->generation : 0, success, size);
     if (!slot || slot->generation != (uint16_t)generation) {
         if (data) {
             free(data);

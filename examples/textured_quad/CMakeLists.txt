@@ -32,6 +32,7 @@ if(NOT EMSCRIPTEN)
 endif()
 
 # Copy packs from shared location to preset output (all presets, including wasm)
+# Packs must be built first: build_tq_packs <TQ_PACK_DIR> (from project root)
 set(TQ_PACK_NAMES base.neopak lenna_pixel.neopak lenna_hires.neopak)
 foreach(PACK ${TQ_PACK_NAMES})
     add_custom_command(

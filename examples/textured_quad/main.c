@@ -77,7 +77,6 @@ static bool s_base_dumped;
 static bool s_pixel_dumped;
 static bool s_hires_dumped;
 
-
 /* ---- Status print: show current pack priorities ---- */
 
 static void print_status(void) {
@@ -85,13 +84,11 @@ static void print_status(void) {
     (void)snprintf(buf, sizeof(buf), "  base   prio=100  state=%d", (int)nt_resource_pack_state(s_base_pack_id));
     nt_log_info(buf);
     if (s_load_state >= STATE_PIXEL) {
-        (void)snprintf(buf, sizeof(buf), "  pixel  prio=%d  state=%d", (int)s_pixel_prio,
-                       (int)nt_resource_pack_state(s_pixel_pack_id));
+        (void)snprintf(buf, sizeof(buf), "  pixel  prio=%d  state=%d", (int)s_pixel_prio, (int)nt_resource_pack_state(s_pixel_pack_id));
         nt_log_info(buf);
     }
     if (s_load_state >= STATE_BOTH) {
-        (void)snprintf(buf, sizeof(buf), "  hires  prio=%d  state=%d", (int)s_hires_prio,
-                       (int)nt_resource_pack_state(s_hires_pack_id));
+        (void)snprintf(buf, sizeof(buf), "  hires  prio=%d  state=%d", (int)s_hires_prio, (int)nt_resource_pack_state(s_hires_pack_id));
         nt_log_info(buf);
     }
     if (s_load_state == STATE_EMPTY) {
@@ -191,8 +188,7 @@ static void frame(void) {
                 {
                     .attrs =
                         {
-                            {.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT3, .offset = 0},
-                            {.location = 1, .format = NT_FORMAT_FLOAT2, .offset = 12}, /* mesh.vert: layout(location=1) a_uv */
+                            {.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT3, .offset = 0}, {.location = 1, .format = NT_FORMAT_FLOAT2, .offset = 12}, /* mesh.vert: layout(location=1) a_uv */
                         },
                     .attr_count = 2,
                     .stride = 20,
