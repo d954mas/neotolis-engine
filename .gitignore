@@ -41,3 +41,5 @@ package-lock.json
 
 # GSD tooling (Claude Code workflow engine)
 .claude/get-shit-done/
+.claude/gsd-file-manifest.json
+.claude/gsd-local-patches/
