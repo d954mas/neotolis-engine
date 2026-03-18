@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Asset Pipeline
-current_phase: Phase 25 -- Asset Loading (1/3 plans done)
-current_plan: Plan 2 of 3
+current_phase: Phase 25 -- Asset Loading (2/3 plans done)
+current_plan: Plan 3 of 3
 status: executing
-last_updated: "2026-03-18T15:13:10Z"
-last_activity: 2026-03-18 -- Completed 25-01 (nt_http + nt_fs I/O modules, 22 tests); 7min
+last_updated: "2026-03-18T15:15:51Z"
+last_activity: 2026-03-18 -- Completed 25-02 (GFX activators, mesh table, context loss refactor); 10min
 progress:
   total_phases: 10
   completed_phases: 5
   total_plans: 16
-  completed_plans: 14
+  completed_plans: 15
 ---
 
 # Session State
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Core value:** Simple, fast, predictable -- composable features wired through code, zero hidden magic.
-**Current focus:** v1.3 Asset Pipeline -- Phase 25 Asset Loading (1/3 plans done)
+**Current focus:** v1.3 Asset Pipeline -- Phase 25 Asset Loading (2/3 plans done)
 
 ## Position
 
 **Milestone:** v1.3 Asset Pipeline (Phases 20-28)
-**Current phase:** Phase 25 -- Asset Loading (1/3 plans done)
-**Current Plan:** Plan 2 of 3
+**Current phase:** Phase 25 -- Asset Loading (2/3 plans done)
+**Current Plan:** Plan 3 of 3
 **Status:** Executing
-**Last activity:** 2026-03-18 -- Completed 25-01 (nt_http + nt_fs I/O modules, 22 tests); 7min
+**Last activity:** 2026-03-18 -- Completed 25-02 (GFX activators, mesh table, context loss refactor); 10min
 
 ## Decisions
 
@@ -79,6 +79,7 @@ Phase 21-01 decisions:
 | 24 | 01 | 8min | 2 | 7 |
 | 24 | 02 | 11min | 2 | 4 |
 | 25 | 01 | 7min | 2 | 16 |
+| 25 | 02 | 10min | 2 | 5 |
 
 Phase 22-01 decisions:
 - NT_ASSERT_ALWAYS added to nt_assert.h (shared utility) for release-mode stale handle assertions
@@ -117,6 +118,11 @@ Phase 24-02 decisions:
 - Equal priority tiebreaker: higher pack_index (later mount) wins
 - build_pack_with_rid helper for targeted resource_id blob construction in stacking tests
 | Phase 24 P03 | 4min | 2 tasks | 2 files |
+
+Phase 25-02 decisions:
+- Buffer metadata struct (nt_gfx_buffer_meta_t, 8 bytes) replaces full buffer_desc copies -- type/usage/size only
+- Context loss wipes backend handles and mesh table but keeps pool slots -- game must re-create from source
+- Shape renderer restore_gpu uses save-shutdown-init-restore pattern for simplicity
 
 Phase 25-01 decisions:
 - Backend slot accessor pattern (nt_http_get_slot/nt_fs_get_slot via extern) for backend files to update slot state
@@ -161,3 +167,4 @@ Phase 25-01 decisions:
 - 2026-03-17: Completed 24-03-PLAN.md -- virtual packs, placeholder fallback, 13 new tests (45 total), 4min
 - 2026-03-17: Phase 24 complete -- asset registry with virtual packs, placeholder, 45 unit tests total
 - 2026-03-18: Completed 25-01-PLAN.md -- nt_http + nt_fs I/O modules, generational handles, 22 unit tests, 7min
+- 2026-03-18: Completed 25-02-PLAN.md -- GFX activators (texture/mesh/shader), mesh side table, CPU desc removal, restore_gpu, 10min

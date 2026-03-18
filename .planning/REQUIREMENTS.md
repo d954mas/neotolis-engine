@@ -49,13 +49,13 @@
 
 ### Shader Assets
 
-- [ ] **SHDR-01**: Shader asset contains vertex + fragment source text loaded from pack
-- [ ] **SHDR-02**: Shader asset activation creates nt_gfx shader + pipeline with vertex layout from mesh format
+- [x] **SHDR-01**: Shader asset contains vertex + fragment source text loaded from pack
+- [x] **SHDR-02**: Shader asset activation creates nt_gfx shader + pipeline with vertex layout from mesh format
 
 ### Mesh Assets
 
 - [x] **MESH-01**: Mesh runtime format contains: vertex data (POSITION + optional NORMAL, UV, COLOR), index data, attribute mask, counts
-- [ ] **MESH-02**: Mesh asset activation creates VBO + IBO via nt_gfx_make_buffer()
+- [x] **MESH-02**: Mesh asset activation creates VBO + IBO via nt_gfx_make_buffer()
 - [x] **MESH-03**: MeshAssetHeader has magic, version, attribute_mask, vertex_count, index_count
 
 ### Material System
@@ -192,9 +192,9 @@
 | LOAD-02 | Phase 25 | Complete |
 | LOAD-03 | Phase 25 | Pending |
 | LOAD-05 | Phase 25 | Pending |
-| SHDR-01 | Phase 25 | Pending |
-| SHDR-02 | Phase 25 | Pending |
-| MESH-02 | Phase 25 | Pending |
+| SHDR-01 | Phase 25 | Complete |
+| SHDR-02 | Phase 25 | Complete |
+| MESH-02 | Phase 25 | Complete |
 | MAT-01 | Phase 26 | Pending |
 | MAT-02 | Phase 26 | Pending |
 | MAT-03 | Phase 26 | Pending |
