@@ -1,32 +1,23 @@
 #include "hash/nt_hash.h"
 
+#include "core/nt_assert.h"
+
 #include <string.h>
 
-/* ---- FNV-1a constants ---- */
+/* ---- xxHash official (single-header, inlined) ---- */
+#define XXH_INLINE_ALL
+#include "xxhash.h"
 
-#define NT_FNV1A32_PRIME 0x01000193U
-#define NT_FNV1A64_PRIME 0x00000100000001B3ULL
-
-/* ---- Hash functions ---- */
+/* ---- Hash functions (xxHash backend) ---- */
 
 nt_hash32_t nt_hash32(const void *data, uint32_t size) {
-    const uint8_t *bytes = (const uint8_t *)data;
-    uint32_t hash = NT_FNV1A32_OFFSET;
-    for (uint32_t i = 0; i < size; i++) {
-        hash ^= bytes[i];
-        hash *= NT_FNV1A32_PRIME;
-    }
-    return (nt_hash32_t){hash};
+    NT_ASSERT(data != NULL);
+    return (nt_hash32_t){XXH32(data, (size_t)size, 0)};
 }
 
 nt_hash64_t nt_hash64(const void *data, uint32_t size) {
-    const uint8_t *bytes = (const uint8_t *)data;
-    uint64_t hash = NT_FNV1A64_OFFSET;
-    for (uint32_t i = 0; i < size; i++) {
-        hash ^= bytes[i];
-        hash *= NT_FNV1A64_PRIME;
-    }
-    return (nt_hash64_t){hash};
+    NT_ASSERT(data != NULL);
+    return (nt_hash64_t){XXH64(data, (size_t)size, 0)};
 }
 
 /* ---- Label system ---- */

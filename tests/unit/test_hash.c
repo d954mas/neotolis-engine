@@ -15,12 +15,12 @@ void tearDown(void) { nt_hash_shutdown(); }
 
 void test_hash32_known_vector(void) {
     nt_hash32_t h = nt_hash32("hello", 5);
-    TEST_ASSERT_EQUAL_HEX32(0x4F9F2CAB, h.value);
+    TEST_ASSERT_EQUAL_HEX32(0xFB0077F9, h.value);
 }
 
 void test_hash64_known_vector(void) {
     nt_hash64_t h = nt_hash64("hello", 5);
-    TEST_ASSERT_EQUAL_HEX64(0xA430D84680AABD0BULL, h.value);
+    TEST_ASSERT_EQUAL_HEX64(0x26C7827D889F6DA3ULL, h.value);
 }
 
 /* ---- String wrapper tests ---- */
@@ -37,28 +37,16 @@ void test_hash64_str_wrapper(void) {
     TEST_ASSERT_EQUAL_HEX64(h_bin.value, h_str.value);
 }
 
-/* ---- NULL input tests ---- */
-
-void test_hash32_null(void) {
-    nt_hash32_t h = nt_hash32_str(NULL);
-    TEST_ASSERT_EQUAL_HEX32(0x811C9DC5U, h.value);
-}
-
-void test_hash64_null(void) {
-    nt_hash64_t h = nt_hash64_str(NULL);
-    TEST_ASSERT_EQUAL_HEX64(0xCBF29CE484222325ULL, h.value);
-}
-
 /* ---- Empty string tests ---- */
 
 void test_hash32_empty(void) {
     nt_hash32_t h = nt_hash32_str("");
-    TEST_ASSERT_EQUAL_HEX32(0x811C9DC5U, h.value);
+    TEST_ASSERT_EQUAL_HEX32(0x02CC5D05U, h.value);
 }
 
 void test_hash64_empty(void) {
     nt_hash64_t h = nt_hash64_str("");
-    TEST_ASSERT_EQUAL_HEX64(0xCBF29CE484222325ULL, h.value);
+    TEST_ASSERT_EQUAL_HEX64(0xEF46DB3751D8E999ULL, h.value);
 }
 
 /* ---- Determinism tests ---- */
@@ -101,7 +89,7 @@ void test_hash_binary_data(void) {
     uint8_t data[] = {0x00, 0xFF, 0x80, 0x01, 0xFE};
     nt_hash32_t h = nt_hash32(data, sizeof(data));
     /* Just verify it does not crash and produces a non-zero-basis value */
-    TEST_ASSERT_NOT_EQUAL(0x811C9DC5U, h.value);
+    TEST_ASSERT_NOT_EQUAL(0x02CC5D05U, h.value);
 }
 
 /* ---- Label tests (compiled with NT_HASH_LABELS=1) ---- */
@@ -158,8 +146,6 @@ int main(void) {
     RUN_TEST(test_hash64_known_vector);
     RUN_TEST(test_hash32_str_wrapper);
     RUN_TEST(test_hash64_str_wrapper);
-    RUN_TEST(test_hash32_null);
-    RUN_TEST(test_hash64_null);
     RUN_TEST(test_hash32_empty);
     RUN_TEST(test_hash64_empty);
     RUN_TEST(test_hash32_deterministic);

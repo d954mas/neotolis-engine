@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "core/nt_assert.h"
 #include "core/nt_types.h"
 
 /* ---- Compile-time label toggle (default off) ---- */
@@ -49,14 +50,8 @@ const char *nt_hash64_label(nt_hash64_t hash);
 
 /* ---- Inline string helpers ---- */
 
-/* FNV-1a offset basis constants (needed for NULL input return) */
-#define NT_FNV1A32_OFFSET 0x811C9DC5U
-#define NT_FNV1A64_OFFSET 0xCBF29CE484222325ULL
-
 static inline nt_hash32_t nt_hash32_str(const char *s) {
-    if (!s) {
-        return (nt_hash32_t){NT_FNV1A32_OFFSET};
-    }
+    NT_ASSERT(s != NULL);
     nt_hash32_t h = nt_hash32((const void *)s, (uint32_t)strlen(s));
 #if NT_HASH_LABELS
     nt_hash_register_label32(h, s);
@@ -65,9 +60,7 @@ static inline nt_hash32_t nt_hash32_str(const char *s) {
 }
 
 static inline nt_hash64_t nt_hash64_str(const char *s) {
-    if (!s) {
-        return (nt_hash64_t){NT_FNV1A64_OFFSET};
-    }
+    NT_ASSERT(s != NULL);
     nt_hash64_t h = nt_hash64((const void *)s, (uint32_t)strlen(s));
 #if NT_HASH_LABELS
     nt_hash_register_label64(h, s);

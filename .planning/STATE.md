@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Asset Pipeline
 current_phase: Phase 29 -- nt_hash module (3/3 plans done)
-current_plan: Plan 03
+current_plan: Not started
 status: completed
-last_updated: "2026-03-18T20:44:40.722Z"
+last_updated: "2026-03-18T20:49:08.264Z"
 last_activity: 2026-03-19 -- Completed 29-02 (resource migration to nt_hash types, NtAssetEntry 24B); 18min
 progress:
   total_phases: 10
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Milestone:** v1.3 Asset Pipeline (Phases 20-29)
 **Current phase:** Phase 29 -- nt_hash module (3/3 plans done)
-**Current Plan:** Plan 03
-**Status:** Complete
+**Current Plan:** Not started
+**Status:** Milestone complete
 **Last activity:** 2026-03-19 -- Completed 29-02 (resource migration to nt_hash types, NtAssetEntry 24B); 18min
 
 ## Decisions
