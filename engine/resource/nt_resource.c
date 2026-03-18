@@ -316,6 +316,11 @@ nt_result_t nt_resource_parse_pack(uint32_t pack_id, const uint8_t *blob, uint32
         return NT_ERR_INVALID_ARG;
     }
 
+    if (s_resource.packs[pack_idx].blob != NULL) {
+        nt_log_error("nt_resource: pack already parsed");
+        return NT_ERR_INVALID_ARG;
+    }
+
     /* Validate blob size */
     if (blob_size < sizeof(NtPackHeader)) {
         nt_log_error("nt_resource: blob too small");
@@ -367,8 +372,8 @@ nt_result_t nt_resource_parse_pack(uint32_t pack_id, const uint8_t *blob, uint32
     const NtAssetEntry *entries = (const NtAssetEntry *)(blob + sizeof(NtPackHeader));
 
     for (uint16_t i = 0; i < h->asset_count; i++) {
-        /* Validate entry data fits within blob */
-        if (entries[i].offset + entries[i].size > blob_size) {
+        /* Validate entry data fits within blob (overflow-safe) */
+        if (entries[i].size > blob_size || entries[i].offset > blob_size - entries[i].size) {
             nt_log_error("nt_resource: entry data exceeds blob");
             return NT_ERR_INVALID_ARG;
         }
