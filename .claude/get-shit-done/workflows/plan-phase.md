@@ -174,11 +174,32 @@ If "Run discuss-phase first": Display `/gsd:discuss-phase {X}` and exit workflow
 
 ## 5. Handle Research
 
-**Skip if:** `--gaps` flag, `--skip-research` flag, or `research_enabled` is false (from init) without `--research` override.
+**Skip if:** `--gaps` flag or `--skip-research` flag.
 
 **If `has_research` is true (from init) AND no `--research` flag:** Use existing, skip to step 6.
 
 **If RESEARCH.md missing OR `--research` flag:**
+
+**If no explicit flag (`--research` or `--skip-research`) and not `--auto`:**
+Ask the user whether to research, with a contextual recommendation based on the phase:
+
+```
+AskUserQuestion([
+  {
+    question: "Research before planning Phase {X}: {phase_name}?",
+    header: "Research",
+    multiSelect: false,
+    options: [
+      { label: "Research first (Recommended)", description: "Investigate domain, patterns, and dependencies before planning. Best for new features, unfamiliar integrations, or architectural changes." },
+      { label: "Skip research", description: "Plan directly from context and requirements. Best for bug fixes, simple refactors, or well-understood tasks." }
+    ]
+  }
+])
+```
+
+If user selects "Skip research": skip to step 6.
+
+**If `--auto` and `research_enabled` is false:** Skip research silently (preserves automated behavior).
 
 Display banner:
 ```

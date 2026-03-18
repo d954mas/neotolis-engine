@@ -17,10 +17,6 @@
 #define NT_RESOURCE_MAX_SLOTS 1024
 #endif
 
-#ifndef NT_RESOURCE_STEP_BUDGET
-#define NT_RESOURCE_STEP_BUDGET 8
-#endif
-
 /* ---- Resource handle ---- */
 
 typedef struct {
@@ -72,7 +68,7 @@ void nt_resource_unregister(uint32_t pack_id, uint32_t resource_id);
 
 /* ---- Placeholder ---- */
 
-void nt_resource_set_placeholder(uint8_t asset_type, uint32_t gfx_handle);
+void nt_resource_set_placeholder_texture(uint32_t gfx_handle);
 
 /* ---- Hash utility ---- */
 

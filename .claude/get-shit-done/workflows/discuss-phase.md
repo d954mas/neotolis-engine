@@ -456,8 +456,10 @@ After all areas are auto-resolved, skip the "Explore more gray areas" prompt and
 
 3. **After the current set of questions, check:**
    - header: "[Area]" (max 12 chars)
-   - question: "More questions about [area], or move to next?"
+   - question: "More questions about [area], or move to next? (Remaining: [list other unvisited areas])"
    - options: "More questions" / "Next area"
+
+   When building the question text, list the remaining unvisited areas so the user knows what's ahead. For example: "More questions about Layout, or move to next? (Remaining: Loading behavior, Content ordering)"
 
    If "More questions" → ask another 4 single questions, or another 2-5 question batch when `--batch` is active, then check again
    If "Next area" → proceed to next selected area

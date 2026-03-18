@@ -68,7 +68,8 @@ Generate 3-4 **phase-specific** gray areas, not generic categories.
 
 **Probing depth:**
 - Ask 4 questions per area before checking
-- "More questions about [area], or move to next?"
+- "More questions about [area], or move to next? (Remaining: [list unvisited areas])"
+- Show remaining unvisited areas so user knows what's still ahead
 - If more → ask 4 more, check again
 - After all areas → "Ready to create context?"
 

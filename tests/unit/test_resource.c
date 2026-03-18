@@ -1,4 +1,5 @@
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -49,14 +50,7 @@ static uint8_t *build_test_pack(uint32_t asset_count, uint32_t *out_size) {
     uint32_t data_offset = header_size;
     for (uint32_t i = 0; i < asset_count; i++) {
         char name[32];
-        /* Build asset name like "asset0", "asset1" */
-        name[0] = 'a';
-        name[1] = 's';
-        name[2] = 's';
-        name[3] = 'e';
-        name[4] = 't';
-        name[5] = (char)('0' + (char)i);
-        name[6] = '\0';
+        (void)snprintf(name, sizeof(name), "asset%u", i);
 
         entries[i].resource_id = nt_resource_hash(name);
         entries[i].format_version = 1;
@@ -795,7 +789,7 @@ void test_unmount_virtual_clears(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_set_placeholder_fallback(void) {
-    nt_resource_set_placeholder(NT_ASSET_TEXTURE, 999);
+    nt_resource_set_placeholder_texture(999);
 
     /* Mount file pack with resource in REGISTERED state (not READY) */
     uint32_t pid = nt_resource_hash("ph_fallback_pack");
@@ -818,7 +812,7 @@ void test_set_placeholder_fallback(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_placeholder_not_used_when_ready(void) {
-    nt_resource_set_placeholder(NT_ASSET_TEXTURE, 999);
+    nt_resource_set_placeholder_texture(999);
 
     uint32_t pid = nt_resource_hash("ph_ready_pack");
     uint32_t rid = nt_resource_hash("ph_ready_res");
@@ -844,7 +838,7 @@ void test_placeholder_not_used_when_ready(void) {
 
 void test_placeholder_type_specific(void) {
     /* Set placeholder for TEXTURE only */
-    nt_resource_set_placeholder(NT_ASSET_TEXTURE, 999);
+    nt_resource_set_placeholder_texture(999);
 
     /* Request a MESH resource with no READY entry */
     uint32_t pid = nt_resource_hash("ph_type_pack");
@@ -864,6 +858,65 @@ void test_placeholder_type_specific(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(h));
 
     free(blob);
+}
+
+/* ---- Entries bounds check test ---- */
+
+void test_parse_entries_overflow(void) {
+    uint32_t pack_id = nt_resource_hash("entries_overflow_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pack_id, 0));
+
+    /* Build a valid blob with 0 assets, then lie about asset_count */
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_pack(0, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+
+    NtPackHeader *h = (NtPackHeader *)blob;
+    h->pack_id = pack_id;
+    h->asset_count = 9999; /* header region can't hold 9999 entries */
+
+    nt_result_t r = nt_resource_parse_pack(pack_id, blob, blob_size);
+    TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, r);
+    free(blob);
+}
+
+/* ---- Asset slot reuse test ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_asset_slot_reuse(void) {
+    /* Mount pack A, parse 2 assets, unmount → creates holes */
+    uint32_t pid_a = nt_resource_hash("reuse_pack_a");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 0));
+
+    uint32_t blob_size_a = 0;
+    uint8_t *blob_a = build_test_pack(2, &blob_size_a);
+    TEST_ASSERT_NOT_NULL(blob_a);
+    ((NtPackHeader *)blob_a)->pack_id = pid_a;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_a, blob_a, blob_size_a));
+
+    nt_resource_unmount(pid_a);
+
+    /* Mount pack B, parse 2 assets → should reuse holes from A */
+    uint32_t pid_b = nt_resource_hash("reuse_pack_b");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 0));
+
+    uint32_t blob_size_b = 0;
+    uint8_t *blob_b = build_test_pack(2, &blob_size_b);
+    TEST_ASSERT_NOT_NULL(blob_b);
+    ((NtPackHeader *)blob_b)->pack_id = pid_b;
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_b, blob_b, blob_size_b));
+
+    /* Request and verify assets from pack B resolve correctly */
+    uint32_t rid = nt_resource_hash("asset0");
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    TEST_ASSERT_TRUE(h.id != 0);
+
+    nt_resource_test_set_asset_state(rid, 0, NT_ASSET_STATE_READY, 77);
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(77, nt_resource_get(h));
+
+    free(blob_a);
+    free(blob_b);
 }
 
 /* ---- main ---- */
@@ -891,6 +944,7 @@ int main(void) {
     RUN_TEST(test_parse_header_size_overflow);
     RUN_TEST(test_parse_total_size_mismatch);
     RUN_TEST(test_parse_bad_crc);
+    RUN_TEST(test_parse_entries_overflow);
 
     /* Parser acceptance tests */
     RUN_TEST(test_parse_valid_empty);
@@ -941,6 +995,9 @@ int main(void) {
     RUN_TEST(test_set_placeholder_fallback);
     RUN_TEST(test_placeholder_not_used_when_ready);
     RUN_TEST(test_placeholder_type_specific);
+
+    /* Asset slot reuse */
+    RUN_TEST(test_asset_slot_reuse);
 
     return UNITY_END();
 }

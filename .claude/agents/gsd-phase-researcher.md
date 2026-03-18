@@ -238,6 +238,12 @@ Priority: Context7 > Official Docs > Official GitHub > Verified WebSearch > Unve
 npm install [packages]
 \`\`\`
 
+**Version verification:** Before writing the Standard Stack table, verify each recommended package version is current:
+\`\`\`bash
+npm view [package] version
+\`\`\`
+Document the verified version and publish date. Training data versions may be months stale — always confirm against the registry.
+
 ## Architecture Patterns
 
 ### Recommended Project Structure

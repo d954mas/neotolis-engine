@@ -337,6 +337,8 @@ git commit -m "{type}({phase}-{plan}): {concise task description}
 ```
 
 **5. Record hash:** `TASK_COMMIT=$(git rev-parse --short HEAD)` — track for SUMMARY.
+
+**6. Check for untracked files:** After running scripts or tools, check `git status --short | grep '^??'`. For any new untracked files: commit if intentional, add to `.gitignore` if generated/runtime output. Never leave generated files untracked.
 </task_commit_protocol>
 
 <summary_creation>

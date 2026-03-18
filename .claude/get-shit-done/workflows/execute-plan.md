@@ -279,6 +279,15 @@ TASK_COMMIT=$(git rev-parse --short HEAD)
 TASK_COMMITS+=("Task ${TASK_NUM}: ${TASK_COMMIT}")
 ```
 
+**6. Check for untracked generated files:**
+```bash
+git status --short | grep '^??'
+```
+If new untracked files appeared after running scripts or tools, decide for each:
+- **Commit it** — if it's a source file, config, or intentional artifact
+- **Add to .gitignore** — if it's a generated/runtime output (build artifacts, `.env` files, cache files, compiled output)
+- Do NOT leave generated files untracked
+
 </task_commit>
 
 <step name="checkpoint_protocol">

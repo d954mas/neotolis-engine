@@ -40,10 +40,10 @@ typedef struct {
     int16_t priority;     /* higher = wins on conflict, signed */
     uint8_t pack_type;    /* nt_pack_type_t */
     uint8_t mounted;      /* 1 if mounted, 0 if slot available */
-    uint16_t asset_start; /* first index in assets[] array */
     uint16_t asset_count; /* number of AssetMeta entries from this pack */
-    const uint8_t *blob;  /* loaded pack data (NULL until Phase 25) */
-    uint32_t blob_size;   /* size of loaded blob */
+    uint16_t _pad;
+    const uint8_t *blob; /* loaded pack data (NULL until Phase 25) */
+    uint32_t blob_size;  /* size of loaded blob */
 } NtPackMeta;
 
 /* ---- Per unique ResourceId requested by game ---- */

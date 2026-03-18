@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Asset Pipeline
 current_phase: Phase 24 -- Asset Registry (3/3 plans done)
-current_plan: Plan 3 of 3
-status: completed
-last_updated: "2026-03-17T14:19:43.831Z"
+current_plan: Not started
+status: planning
+last_updated: "2026-03-17T14:25:00.535Z"
 last_activity: 2026-03-17 -- Completed 24-03 (virtual packs, placeholder fallback, 45 tests); 4min
 progress:
   total_phases: 10
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Milestone:** v1.3 Asset Pipeline (Phases 20-28)
 **Current phase:** Phase 24 -- Asset Registry (3/3 plans done)
-**Current Plan:** Plan 3 of 3
-**Status:** Phase complete
+**Current Plan:** Not started
+**Status:** Ready to plan
 **Last activity:** 2026-03-17 -- Completed 24-03 (virtual packs, placeholder fallback, 45 tests); 4min
 
 ## Decisions
