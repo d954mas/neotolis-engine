@@ -48,21 +48,21 @@ typedef struct {
 /* ---- Per-asset metadata (one per asset from all packs) ---- */
 
 typedef struct {
-    uint32_t resource_id;    /* FNV-1a hash */
-    uint8_t asset_type;      /* nt_asset_type_t (mesh/texture/shader) */
-    uint8_t state;           /* nt_asset_state_t */
-    uint16_t format_version; /* from NtAssetEntry */
-    uint16_t pack_index;     /* index into packs[] array */
-    uint16_t _pad;
+    uint64_t resource_id;    /* nt_hash64 value */
     uint32_t offset;         /* byte offset in pack blob */
     uint32_t size;           /* asset data size in bytes */
     uint32_t runtime_handle; /* GFX handle (uint32), 0 = none */
+    uint16_t format_version; /* from NtAssetEntry */
+    uint16_t pack_index;     /* index into packs[] array */
+    uint8_t asset_type;      /* nt_asset_type_t (mesh/texture/shader) */
+    uint8_t state;           /* nt_asset_state_t */
+    uint16_t _pad;
 } NtAssetMeta;
 
 /* ---- Per-pack metadata ---- */
 
 typedef struct {
-    uint32_t pack_id;    /* FNV-1a hash of pack name/path */
+    uint32_t pack_id;    /* nt_hash32 value of pack name/path */
     int16_t priority;    /* higher = wins on conflict, signed */
     uint8_t pack_type;   /* nt_pack_type_t */
     uint8_t mounted;     /* 1 if mounted, 0 if slot available */
@@ -92,7 +92,7 @@ typedef struct {
 /* ---- Per unique ResourceId requested by game ---- */
 
 typedef struct {
-    uint32_t resource_id;    /* FNV-1a hash */
+    uint64_t resource_id;    /* nt_hash64 value */
     uint32_t runtime_handle; /* current best resolved handle */
     uint16_t generation;     /* for stale detection */
     int16_t resolve_prio;    /* priority of current winner; Phase 25: use for O(1) activation */

@@ -2,6 +2,7 @@
 #define NT_RESOURCE_H
 
 #include "core/nt_types.h"
+#include "hash/nt_hash.h"
 
 /* ---- Compile-time limits (overridable via -D) ---- */
 
@@ -76,38 +77,38 @@ void nt_resource_step(void);
 
 /* ---- Pack management ---- */
 
-nt_result_t nt_resource_mount(uint32_t pack_id, int16_t priority);
-void nt_resource_unmount(uint32_t pack_id);
-nt_result_t nt_resource_set_priority(uint32_t pack_id, int16_t new_priority);
+nt_result_t nt_resource_mount(nt_hash32_t pack_id, int16_t priority);
+void nt_resource_unmount(nt_hash32_t pack_id);
+nt_result_t nt_resource_set_priority(nt_hash32_t pack_id, int16_t new_priority);
 
 /* ---- Pack parsing ---- */
 
-nt_result_t nt_resource_parse_pack(uint32_t pack_id, const uint8_t *blob, uint32_t blob_size);
+nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size);
 
 /* ---- Resource access ---- */
 
-nt_resource_t nt_resource_request(uint32_t resource_id, uint8_t asset_type);
+nt_resource_t nt_resource_request(nt_hash64_t resource_id, uint8_t asset_type);
 uint32_t nt_resource_get(nt_resource_t handle);
 bool nt_resource_is_ready(nt_resource_t handle);
 uint8_t nt_resource_get_state(nt_resource_t handle);
 
 /* ---- Virtual packs ---- */
 
-nt_result_t nt_resource_create_pack(uint32_t pack_id, int16_t priority);
-nt_result_t nt_resource_register(uint32_t pack_id, uint32_t resource_id, uint8_t asset_type, uint32_t runtime_handle);
-void nt_resource_unregister(uint32_t pack_id, uint32_t resource_id);
+nt_result_t nt_resource_create_pack(nt_hash32_t pack_id, int16_t priority);
+nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, uint8_t asset_type, uint32_t runtime_handle);
+void nt_resource_unregister(nt_hash32_t pack_id, nt_hash64_t resource_id);
 
 /* ---- Placeholder ---- */
 
-void nt_resource_set_placeholder_texture(uint32_t resource_id);
+void nt_resource_set_placeholder_texture(nt_hash64_t resource_id);
 
 /* ---- Pack loading ---- */
 
-nt_result_t nt_resource_load_file(uint32_t pack_id, const char *path);
-nt_result_t nt_resource_load_url(uint32_t pack_id, const char *url);
-nt_result_t nt_resource_load_auto(uint32_t pack_id, const char *path);
-nt_pack_state_t nt_resource_pack_state(uint32_t pack_id);
-void nt_resource_pack_progress(uint32_t pack_id, uint32_t *received, uint32_t *total);
+nt_result_t nt_resource_load_file(nt_hash32_t pack_id, const char *path);
+nt_result_t nt_resource_load_url(nt_hash32_t pack_id, const char *url);
+nt_result_t nt_resource_load_auto(nt_hash32_t pack_id, const char *path);
+nt_pack_state_t nt_resource_pack_state(nt_hash32_t pack_id);
+void nt_resource_pack_progress(nt_hash32_t pack_id, uint32_t *received, uint32_t *total);
 
 /* ---- Activator registration ---- */
 
@@ -123,24 +124,20 @@ void nt_resource_set_retry_policy(uint32_t max_attempts, uint32_t base_delay_ms,
 
 /* ---- Blob policy ---- */
 
-void nt_resource_set_blob_policy(uint32_t pack_id, uint8_t policy, uint32_t ttl_ms);
+void nt_resource_set_blob_policy(nt_hash32_t pack_id, uint8_t policy, uint32_t ttl_ms);
 
 /* ---- Context loss recovery ---- */
 
 void nt_resource_invalidate(uint8_t asset_type);
 
-/* ---- Hash utility ---- */
-
-uint32_t nt_resource_hash(const char *name);
-
 /* ---- Debug: dump loaded pack contents to log ---- */
 
-void nt_resource_dump_pack(uint32_t pack_id);
+void nt_resource_dump_pack(nt_hash32_t pack_id);
 
 /* ---- Test access (test-only) ---- */
 
 #ifdef NT_RESOURCE_TEST_ACCESS
-void nt_resource_test_set_asset_state(uint32_t resource_id, uint16_t pack_index, uint8_t state, uint32_t runtime_handle);
+void nt_resource_test_set_asset_state(nt_hash64_t resource_id, uint16_t pack_index, uint8_t state, uint32_t runtime_handle);
 #endif
 
 #endif /* NT_RESOURCE_H */
