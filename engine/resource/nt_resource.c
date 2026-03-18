@@ -181,7 +181,9 @@ void nt_resource_step(void) {
         return;
     }
 
-    /* ---- Phase 0a: Poll I/O for loading packs + retry logic ---- */
+    /* ═══════════════════════════════════════════════════
+     *  Phase A: Poll I/O for loading packs + retry
+     * ═══════════════════════════════════════════════════ */
     for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
         NtPackMeta *pack = &s_resource.packs[pi];
         if (!pack->mounted) {
@@ -248,16 +250,36 @@ void nt_resource_step(void) {
                 (void)snprintf(buf, sizeof(buf), "nt_resource: pack 0x%08X loaded (%u bytes)", pack->pack_id, loaded_size);
                 nt_log_info(buf);
 
-                /* Parse the loaded blob (parse_pack sets pack->blob on success) */
-                nt_result_t res = nt_resource_parse_pack(pack->pack_id, loaded_blob, loaded_size);
-                if (res == NT_OK) {
+                /* Check if asset entries already exist (re-download after blob eviction).
+                 * If so, skip parse_pack — entries have correct offsets/sizes already.
+                 * Just restore the blob pointer and let the activation loop re-activate. */
+                bool has_existing_assets = false;
+                for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
+                    if (s_resource.assets[ai].pack_index == pi && s_resource.assets[ai].resource_id != 0) {
+                        has_existing_assets = true;
+                        break;
+                    }
+                }
+
+                if (has_existing_assets) {
+                    /* Re-download: restore blob, skip re-parse */
+                    pack->blob = loaded_blob;
+                    pack->blob_size = loaded_size;
                     pack->pack_state = NT_PACK_STATE_READY;
                     pack->blob_last_access_ms = resource_get_time_ms();
+                    s_resource.needs_resolve = true;
                 } else {
-                    free(loaded_blob);
-                    pack->pack_state = NT_PACK_STATE_FAILED;
-                    (void)snprintf(buf, sizeof(buf), "nt_resource: pack 0x%08X parse failed", pack->pack_id);
-                    nt_log_error(buf);
+                    /* First load: full parse */
+                    nt_result_t res = nt_resource_parse_pack(pack->pack_id, loaded_blob, loaded_size);
+                    if (res == NT_OK) {
+                        pack->pack_state = NT_PACK_STATE_READY;
+                        pack->blob_last_access_ms = resource_get_time_ms();
+                    } else {
+                        free(loaded_blob);
+                        pack->pack_state = NT_PACK_STATE_FAILED;
+                        (void)snprintf(buf, sizeof(buf), "nt_resource: pack 0x%08X parse failed", pack->pack_id);
+                        nt_log_error(buf);
+                    }
                 }
             } else if (io_failed) {
                 resource_handle_load_failure(pack);
@@ -265,7 +287,9 @@ void nt_resource_step(void) {
         }
     }
 
-    /* ---- Phase 0c: Activate assets within budget ---- */
+    /* ═══════════════════════════════════════════════════
+     *  Phase B: Activate assets within budget
+     * ═══════════════════════════════════════════════════ */
     {
         int32_t budget = s_resource.activate_budget;
         for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS && budget > 0; pi++) {
@@ -316,7 +340,9 @@ void nt_resource_step(void) {
         }
     }
 
-    /* ---- Phase 0d: Blob eviction (NT_BLOB_AUTO) ---- */
+    /* ═══════════════════════════════════════════════════
+     *  Phase C: Blob eviction (NT_BLOB_AUTO)
+     * ═══════════════════════════════════════════════════ */
     {
         uint32_t now_ms = resource_get_time_ms();
         for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
@@ -338,12 +364,15 @@ void nt_resource_step(void) {
         }
     }
 
-    /* ---- Existing resolve phases ---- */
+    /* ═══════════════════════════════════════════════════
+     *  Phase D: Resolve slots (priority-based winner)
+     * ═══════════════════════════════════════════════════ */
+
     if (!s_resource.needs_resolve) {
         return; /* O(1) fast path when nothing changed */
     }
 
-    /* Phase 1: Reset all active slots */
+    /* D.1: Reset all active slots */
     for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
         NtResourceSlot *slot = &s_resource.slots[si];
         if (slot->resource_id == 0) {
@@ -355,7 +384,7 @@ void nt_resource_step(void) {
         slot->resolve_seq = 0;
     }
 
-    /* Phase 2: Single pass over assets — O(A) via slot_map lookup */
+    /* D.2: Single pass over assets — O(A) via slot_map lookup */
     for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
         NtAssetMeta *meta = &s_resource.assets[ai];
         if (meta->resource_id == 0) {
@@ -398,7 +427,7 @@ void nt_resource_step(void) {
         }
     }
 
-    /* Phase 3: Texture placeholder fallback — resolve via slot_map */
+    /* D.3: Texture placeholder fallback — resolve via slot_map */
     if (s_resource.placeholder_texture != 0) {
         uint16_t ph_si = slot_map_find(s_resource.placeholder_texture);
         uint32_t ph_handle = (ph_si != 0) ? s_resource.slots[ph_si].runtime_handle : 0;

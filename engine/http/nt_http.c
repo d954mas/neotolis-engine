@@ -1,23 +1,7 @@
-#include "http/nt_http.h"
+#include "http/nt_http_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
-
-/* ---- Backend function (implemented in web/native/stub .c) ---- */
-
-extern void nt_http_backend_request(uint16_t slot_index, const char *url);
-
-/* ---- Slot data ---- */
-
-typedef struct {
-    uint8_t *data;
-    uint32_t size;
-    uint32_t received;
-    uint32_t total;
-    uint16_t generation;
-    uint8_t state; /* nt_http_state_t */
-    uint8_t _pad;
-} NtHttpSlot;
 
 /* ---- Module state ---- */
 
@@ -162,6 +146,11 @@ void nt_http_free(nt_http_request_t req) {
     NtHttpSlot *slot = http_validate(req);
     if (!slot) {
         return;
+    }
+
+    /* Cancel in-flight backend request (aborts fetch on web, noop on native/stub) */
+    if (slot->state == (uint8_t)NT_HTTP_STATE_PENDING || slot->state == (uint8_t)NT_HTTP_STATE_DOWNLOADING) {
+        nt_http_backend_cancel(index);
     }
 
     /* Free any remaining data */

@@ -1,21 +1,7 @@
-#include "fs/nt_fs.h"
+#include "fs/nt_fs_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
-
-/* ---- Backend function (implemented in web/native/stub .c) ---- */
-
-extern void nt_fs_backend_read(uint16_t slot_index, const char *path);
-
-/* ---- Slot data ---- */
-
-typedef struct {
-    uint8_t *data;
-    uint32_t size;
-    uint16_t generation;
-    uint8_t state; /* nt_fs_state_t */
-    uint8_t _pad;
-} NtFsSlot;
 
 /* ---- Module state ---- */
 

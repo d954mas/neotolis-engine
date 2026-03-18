@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Asset Pipeline
-current_phase: Phase 25 -- Asset Loading (3/3 plans done)
-current_plan: Plan 3 of 3 (COMPLETE)
-status: phase_complete
-last_updated: "2026-03-18T15:34:33Z"
+current_phase: Phase 25 -- Asset Loading (3/3 plans done, COMPLETE)
+current_plan: Not started
+status: planning
+last_updated: "2026-03-18T15:43:54.607Z"
 last_activity: 2026-03-18 -- Completed 25-03 (pack loading state machine, activation, retry, invalidation); 15min
 progress:
   total_phases: 10
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Milestone:** v1.3 Asset Pipeline (Phases 20-28)
 **Current phase:** Phase 25 -- Asset Loading (3/3 plans done, COMPLETE)
-**Current Plan:** Plan 3 of 3 (COMPLETE)
-**Status:** Phase complete
+**Current Plan:** Not started
+**Status:** Ready to plan
 **Last activity:** 2026-03-18 -- Completed 25-03 (pack loading state machine, activation, retry, invalidation); 15min
 
 ## Decisions

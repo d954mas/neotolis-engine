@@ -424,7 +424,7 @@ void test_activate_texture_valid_blob(void) {
     uint32_t h = 2;
     uint32_t pixel_size = w * h * 4;
     uint32_t blob_size = (uint32_t)sizeof(NtTextureAssetHeader) + pixel_size;
-    uint8_t blob[sizeof(NtTextureAssetHeader) + 2 * 2 * 4];
+    uint8_t blob[sizeof(NtTextureAssetHeader) + (2 * 2 * 4)];
     NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)blob;
     memset(blob, 0, sizeof(blob));
     hdr->magic = NT_TEXTURE_MAGIC;
@@ -443,7 +443,7 @@ void test_activate_texture_valid_blob(void) {
 /* ---- Activator: texture bad magic ---- */
 
 void test_activate_texture_bad_magic(void) {
-    uint8_t blob[sizeof(NtTextureAssetHeader) + 2 * 2 * 4];
+    uint8_t blob[sizeof(NtTextureAssetHeader) + (2 * 2 * 4)];
     NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)blob;
     memset(blob, 0, sizeof(blob));
     hdr->magic = 0xDEADBEEF;
