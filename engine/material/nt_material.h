@@ -6,10 +6,6 @@
 
 /* ---- Compile-time limits ---- */
 
-#ifndef NT_MAX_MATERIALS
-#define NT_MAX_MATERIALS 64
-#endif
-
 #define NT_MATERIAL_MAX_TEXTURES 4
 #define NT_MATERIAL_MAX_PARAMS 4
 #define NT_MATERIAL_MAX_ATTR_MAP 8
@@ -82,8 +78,16 @@ typedef struct {
 /* ---- Init descriptor ---- */
 
 typedef struct {
-    uint16_t max_materials; /* 0 = use NT_MAX_MATERIALS default */
+    uint16_t max_materials;
 } nt_material_desc_t;
+
+/* ---- Defaults ---- */
+
+static inline nt_material_desc_t nt_material_desc_defaults(void) {
+    return (nt_material_desc_t){
+        .max_materials = 64,
+    };
+}
 
 /* ---- Material info (read-only query for render module) ---- */
 
@@ -107,6 +111,7 @@ typedef struct {
     nt_cull_mode_t cull_mode;
     uint32_t version;
     bool ready;
+    const char *label; /* debug name (string literal, static storage) */
 } nt_material_info_t;
 
 /* ---- Lifecycle ---- */

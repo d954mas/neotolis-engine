@@ -8,6 +8,14 @@ typedef struct {
     uint16_t capacity;
 } nt_material_comp_desc_t;
 
+/* ---- Defaults ---- */
+
+static inline nt_material_comp_desc_t nt_material_comp_desc_defaults(void) {
+    return (nt_material_comp_desc_t){
+        .capacity = 256,
+    };
+}
+
 nt_result_t nt_material_comp_init(const nt_material_comp_desc_t *desc);
 void nt_material_comp_shutdown(void);
 

@@ -8,6 +8,14 @@ typedef struct {
     uint16_t capacity;
 } nt_drawable_comp_desc_t;
 
+/* ---- Defaults ---- */
+
+static inline nt_drawable_comp_desc_t nt_drawable_comp_desc_defaults(void) {
+    return (nt_drawable_comp_desc_t){
+        .capacity = 256,
+    };
+}
+
 nt_result_t nt_drawable_comp_init(const nt_drawable_comp_desc_t *desc);
 void nt_drawable_comp_shutdown(void);
 

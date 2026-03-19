@@ -3,22 +3,18 @@
 #include <stdlib.h>
 #include <string.h>
 
-nt_result_t nt_pool_init(nt_pool_t *pool, uint32_t capacity) {
-    if (!pool || capacity == 0) {
-        return NT_ERR_INVALID_ARG;
-    }
+#include "core/nt_assert.h"
+
+void nt_pool_init(nt_pool_t *pool, uint32_t capacity) {
+    NT_ASSERT(pool);
+    NT_ASSERT(capacity > 0);
+    NT_ASSERT(capacity <= NT_POOL_SLOT_MASK);
 
     pool->slots = (nt_pool_slot_t *)calloc(capacity + 1, sizeof(nt_pool_slot_t));
-    if (!pool->slots) {
-        return NT_ERR_INIT_FAILED;
-    }
+    NT_ASSERT(pool->slots);
 
     pool->free_queue = (uint32_t *)malloc(capacity * sizeof(uint32_t));
-    if (!pool->free_queue) {
-        free(pool->slots);
-        pool->slots = NULL;
-        return NT_ERR_INIT_FAILED;
-    }
+    NT_ASSERT(pool->free_queue);
 
     /* Fill free queue: stack with indices 1..capacity, lowest index on top */
     pool->queue_top = capacity;
@@ -27,7 +23,6 @@ nt_result_t nt_pool_init(nt_pool_t *pool, uint32_t capacity) {
     }
 
     pool->capacity = capacity;
-    return NT_OK;
 }
 
 void nt_pool_shutdown(nt_pool_t *pool) {

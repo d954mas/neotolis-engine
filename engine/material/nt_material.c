@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "core/nt_assert.h"
 #include "hash/nt_hash.h"
 #include "pool/nt_pool.h"
 
@@ -33,21 +34,18 @@ static struct {
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_material_init(const nt_material_desc_t *desc) {
-    if (s_mat.initialized) {
+    NT_ASSERT(!s_mat.initialized);        /* double init */
+    NT_ASSERT(desc);                       /* NULL descriptor */
+    NT_ASSERT(desc->max_materials > 0);    /* must specify capacity */
+    if (s_mat.initialized || !desc || desc->max_materials == 0) {
         return NT_ERR_INIT_FAILED;
     }
 
-    uint32_t cap = NT_MAX_MATERIALS;
-    if (desc && desc->max_materials > 0) {
-        cap = desc->max_materials;
-    }
-
-    nt_result_t res = nt_pool_init(&s_mat.pool, cap);
-    if (res != NT_OK) {
-        return NT_ERR_INIT_FAILED;
-    }
+    uint32_t cap = desc->max_materials;
+    nt_pool_init(&s_mat.pool, cap);
 
     s_mat.slots = (nt_material_slot_t *)calloc(cap + 1, sizeof(nt_material_slot_t));
+    NT_ASSERT(s_mat.slots); /* alloc failed */
     if (!s_mat.slots) {
         nt_pool_shutdown(&s_mat.pool);
         return NT_ERR_INIT_FAILED;
@@ -68,6 +66,7 @@ void nt_material_shutdown(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_material_step(void) {
+    NT_ASSERT(s_mat.initialized); /* step before init is a dev mistake */
     if (!s_mat.initialized) {
         return;
     }
@@ -104,6 +103,8 @@ void nt_material_step(void) {
 /* ---- Create / Destroy / Query ---- */
 
 nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
+    NT_ASSERT(s_mat.initialized); /* create before init */
+    NT_ASSERT(desc);              /* NULL descriptor */
     if (!s_mat.initialized || !desc) {
         return NT_MATERIAL_INVALID;
     }
@@ -172,10 +173,14 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     slot->info.depth_write = desc->depth_write;
     slot->info.cull_mode = desc->cull_mode;
 
+    /* Debug label (caller must ensure static storage / string literal) */
+    slot->info.label = desc->label;
+
     return (nt_material_t){.id = id};
 }
 
 void nt_material_destroy(nt_material_t mat) {
+    NT_ASSERT(s_mat.initialized); /* destroy before init */
     if (mat.id == 0 || !s_mat.initialized) {
         return;
     }
@@ -190,6 +195,7 @@ bool nt_material_valid(nt_material_t mat) {
 }
 
 const nt_material_info_t *nt_material_get_info(nt_material_t mat) {
+    NT_ASSERT(s_mat.initialized); /* query before init */
     if (mat.id == 0 || !s_mat.initialized) {
         return NULL;
     }

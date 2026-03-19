@@ -25,6 +25,7 @@
 #include "http/nt_http.h"
 #include "input/nt_input.h"
 #include "log/nt_log.h"
+#include "material/nt_material.h"
 #include "resource/nt_resource.h"
 #include "time/nt_time.h"
 #include "window/nt_window.h"
@@ -65,6 +66,10 @@ static nt_resource_t s_mesh_handle;
 static nt_resource_t s_vs_handle;
 static nt_resource_t s_fs_handle;
 static nt_resource_t s_lenna_handle;
+
+/* ---- Material ---- */
+
+static nt_material_t s_cube_material;
 
 static int16_t s_pixel_prio = 10;
 static int16_t s_hires_prio = 20;
@@ -155,8 +160,9 @@ static void frame(void) {
         print_status();
     }
 
-    /* Step resource system */
+    /* Step resource + material systems */
     nt_resource_step();
+    nt_material_step();
 
     /* Dump pack contents when they become READY */
     if (!s_base_dumped && nt_resource_pack_state(s_base_pack_id) == NT_PACK_STATE_READY) {
@@ -177,10 +183,11 @@ static void frame(void) {
         s_hires_dumped = true;
     }
 
-    /* Create pipeline once shaders are ready */
-    if (!s_pipeline_ready && nt_resource_is_ready(s_vs_handle) && nt_resource_is_ready(s_fs_handle)) {
-        nt_shader_t vs = {.id = nt_resource_get(s_vs_handle)};
-        nt_shader_t fs = {.id = nt_resource_get(s_fs_handle)};
+    /* Create pipeline once material is ready (shaders resolved) */
+    const nt_material_info_t *mat_info = nt_material_get_info(s_cube_material);
+    if (!s_pipeline_ready && mat_info && mat_info->ready) {
+        nt_shader_t vs = {.id = mat_info->resolved_vs};
+        nt_shader_t fs = {.id = mat_info->resolved_fs};
 
         /* Layout matches cube.glb: position(float3) + uv0(float2), stride 20 */
         s_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
@@ -195,23 +202,20 @@ static void frame(void) {
                     .attr_count = 2,
                     .stride = 20,
                 },
-            .depth_test = true,
-            .depth_write = true,
+            .depth_test = mat_info->depth_test,
+            .depth_write = mat_info->depth_write,
             .depth_func = NT_DEPTH_LEQUAL,
-            .cull_face = true,
-            .label = "cube_pipeline",
+            .cull_face = (mat_info->cull_mode != NT_CULL_NONE),
+            .label = mat_info->label,
         });
         s_pipeline_ready = true;
-        nt_log_info(">> Pipeline created from pack shaders");
+        nt_log_info(">> Pipeline created from material");
     }
 
-    /* Resolve texture: resource handle -> GFX texture, fallback if not ready */
+    /* Resolve texture from material, fallback if not ready */
     nt_texture_t active_tex = s_fallback_texture;
-    if (s_load_state > STATE_EMPTY && nt_resource_is_ready(s_lenna_handle)) {
-        uint32_t tex_id = nt_resource_get(s_lenna_handle);
-        if (tex_id != 0) {
-            active_tex.id = tex_id;
-        }
+    if (mat_info && mat_info->tex_count > 0 && mat_info->resolved_tex[0] != 0) {
+        active_tex.id = mat_info->resolved_tex[0];
     }
 
     /* Build MVP */
@@ -293,11 +297,29 @@ int main(void) {
     s_pixel_pack_id = nt_hash32_str("lenna_pixel");
     s_hires_pack_id = nt_hash32_str("lenna_hires");
 
+    /* Init material system */
+    nt_material_desc_t mat_desc = nt_material_desc_defaults();
+    nt_material_init(&mat_desc);
+
     /* Request resource handles */
     s_mesh_handle = nt_resource_request(nt_hash64_str("assets/meshes/cube.glb"), NT_ASSET_MESH);
     s_vs_handle = nt_resource_request(nt_hash64_str("assets/shaders/mesh.vert"), NT_ASSET_SHADER_CODE);
     s_fs_handle = nt_resource_request(nt_hash64_str("assets/shaders/mesh.frag"), NT_ASSET_SHADER_CODE);
     s_lenna_handle = nt_resource_request(nt_hash64_str("textures/lenna"), NT_ASSET_TEXTURE);
+
+    /* Create material from resource handles */
+    s_cube_material = nt_material_create(&(nt_material_create_desc_t){
+        .vs = s_vs_handle,
+        .fs = s_fs_handle,
+        .textures = {{.name = "u_texture", .resource = s_lenna_handle}},
+        .texture_count = 1,
+        .attr_map = {{.stream_name = "position", .location = 0}, {.stream_name = "uv0", .location = 1}},
+        .attr_map_count = 2,
+        .depth_test = true,
+        .depth_write = true,
+        .cull_mode = NT_CULL_BACK,
+        .label = "cube_lenna",
+    });
 
     /* Fallback checkerboard texture */
     s_fallback_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
@@ -328,6 +350,8 @@ int main(void) {
     if (s_pipeline_ready) {
         nt_gfx_destroy_pipeline(s_pipeline);
     }
+    nt_material_destroy(s_cube_material);
+    nt_material_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();

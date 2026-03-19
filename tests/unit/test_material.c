@@ -16,10 +16,15 @@ static uint32_t s_vpack_counter;
 
 /* ---- Unity setUp / tearDown ---- */
 
+static nt_result_t init_material_defaults(void) {
+    nt_material_desc_t d = nt_material_desc_defaults();
+    return nt_material_init(&d);
+}
+
 void setUp(void) {
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
-    nt_material_init(&(nt_material_desc_t){0});
+    init_material_defaults();
     s_vpack_counter = 0;
 }
 
@@ -74,17 +79,13 @@ static nt_material_create_desc_t make_test_desc(void) {
 void test_init_shutdown(void) {
     /* tearDown calls shutdown, so re-init to test return values */
     nt_material_shutdown();
-    nt_result_t r = nt_material_init(&(nt_material_desc_t){0});
+    nt_result_t r = init_material_defaults();
     TEST_ASSERT_EQUAL(NT_OK, r);
-
-    /* Double-init should fail */
-    nt_result_t r2 = nt_material_init(&(nt_material_desc_t){0});
-    TEST_ASSERT_EQUAL(NT_ERR_INIT_FAILED, r2);
 
     /* Shutdown and re-init should succeed */
     nt_material_shutdown();
-    nt_result_t r3 = nt_material_init(&(nt_material_desc_t){0});
-    TEST_ASSERT_EQUAL(NT_OK, r3);
+    nt_result_t r2 = init_material_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, r2);
 }
 
 /* ---- Test 2: create returns valid handle ---- */

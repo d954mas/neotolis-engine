@@ -8,6 +8,14 @@ typedef struct {
     uint16_t capacity;
 } nt_mesh_comp_desc_t;
 
+/* ---- Defaults ---- */
+
+static inline nt_mesh_comp_desc_t nt_mesh_comp_desc_defaults(void) {
+    return (nt_mesh_comp_desc_t){
+        .capacity = 256,
+    };
+}
+
 nt_result_t nt_mesh_comp_init(const nt_mesh_comp_desc_t *desc);
 void nt_mesh_comp_shutdown(void);
 

@@ -28,7 +28,7 @@ typedef struct {
 } nt_pool_t;
 
 /* Lifecycle */
-nt_result_t nt_pool_init(nt_pool_t *pool, uint32_t capacity);
+void nt_pool_init(nt_pool_t *pool, uint32_t capacity);
 void nt_pool_shutdown(nt_pool_t *pool);
 
 /* Alloc / Free / Valid */

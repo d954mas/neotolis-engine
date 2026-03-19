@@ -11,6 +11,14 @@ typedef struct {
     uint16_t capacity;
 } nt_transform_comp_desc_t;
 
+/* ---- Defaults ---- */
+
+static inline nt_transform_comp_desc_t nt_transform_comp_desc_defaults(void) {
+    return (nt_transform_comp_desc_t){
+        .capacity = 256,
+    };
+}
+
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_transform_comp_init(const nt_transform_comp_desc_t *desc);
