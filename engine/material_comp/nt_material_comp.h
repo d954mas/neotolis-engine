@@ -3,6 +3,7 @@
 
 #include "core/nt_types.h"
 #include "entity/nt_entity.h"
+#include "material/nt_material.h"
 
 typedef struct {
     uint16_t capacity;
@@ -23,6 +24,6 @@ bool nt_material_comp_add(nt_entity_t entity);
 bool nt_material_comp_has(nt_entity_t entity);
 void nt_material_comp_remove(nt_entity_t entity);
 
-uint32_t *nt_material_comp_handle(nt_entity_t entity); /* opaque material reference */
+nt_material_t *nt_material_comp_handle(nt_entity_t entity);
 
 #endif /* NT_MATERIAL_COMP_H */

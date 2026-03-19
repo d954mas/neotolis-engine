@@ -24,11 +24,11 @@ typedef struct {
     nt_pool_slot_t *slots; /* [capacity+1], index 0 reserved */
     uint32_t *free_queue;  /* stack of free slot indices */
     uint32_t queue_top;    /* next free position (stack pointer) */
-    uint32_t capacity;
+    uint16_t capacity;     /* max 65535 (slot index is 16-bit) */
 } nt_pool_t;
 
 /* Lifecycle */
-void nt_pool_init(nt_pool_t *pool, uint32_t capacity);
+void nt_pool_init(nt_pool_t *pool, uint16_t capacity);
 void nt_pool_shutdown(nt_pool_t *pool);
 
 /* Alloc / Free / Valid */

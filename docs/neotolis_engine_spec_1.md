@@ -513,21 +513,21 @@ The architecture supports different renderable kinds via separate components, no
 ## 9.1 Common render state
 
 ```c
-typedef struct RenderStateComponent
+typedef struct DrawableComponent
 {
     uint16_t tag;
     bool visible;
     vec4 color;
-    vec4 params0;
-} RenderStateComponent;
+} DrawableComponent;
 ```
 
-Defaults: `visible = true`, `color = (1,1,1,1)`, `params0 = (0,0,0,0)`.
+Defaults: `visible = true`, `color = (1,1,1,1)`.
 
 - `tag`: pass/group filter chosen by game
 - `visible`: render visibility only
 - `color`: object tint / alpha multiplier
-- `params0`: extra per-object shader values (blink, hit flash, dissolve, outline factor)
+
+Per-entity shader params (`params0`) deferred to ShaderParamsComponent — add when per-entity shader effects are needed (#98).
 
 ## 9.2 Mesh component
 
@@ -543,7 +543,7 @@ typedef struct MeshComponent
 ```c
 typedef struct MaterialComponent
 {
-    MaterialAssetRef material;
+    nt_material_t material; /* typed handle from nt_material module */
 } MaterialComponent;
 ```
 
@@ -843,7 +843,8 @@ Benefits: simple layout, simple alignment, easy future GPU block packing, no per
 // In-memory header (NOT a C struct with FAM)
 typedef struct MaterialAssetHeader
 {
-    ShaderAssetRef shader;
+    ShaderAssetRef vertex_shader;
+    ShaderAssetRef fragment_shader;
 
     BlendMode blend_mode;
     bool depth_test;

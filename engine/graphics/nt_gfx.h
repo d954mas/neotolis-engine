@@ -127,10 +127,10 @@ typedef struct {
 /* ---- Descriptor structs ---- */
 
 typedef struct {
-    uint32_t max_shaders;     /* default: 32 */
-    uint32_t max_pipelines;   /* default: 16 */
-    uint32_t max_buffers;     /* default: 128 */
-    uint32_t max_textures;    /* default: 64 */
+    uint16_t max_shaders;     /* default: 32 */
+    uint16_t max_pipelines;   /* default: 16 */
+    uint16_t max_buffers;     /* default: 128 */
+    uint16_t max_textures;    /* default: 64 */
     bool depth;               /* request depth buffer (default: true) */
     bool stencil;             /* request stencil buffer (default: false) */
     bool antialias;           /* MSAA (default: false) */

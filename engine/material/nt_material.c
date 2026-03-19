@@ -41,15 +41,10 @@ nt_result_t nt_material_init(const nt_material_desc_t *desc) {
         return NT_ERR_INIT_FAILED;
     }
 
-    uint32_t cap = desc->max_materials;
-    nt_pool_init(&s_mat.pool, cap);
+    nt_pool_init(&s_mat.pool, desc->max_materials);
 
-    s_mat.slots = (nt_material_slot_t *)calloc(cap + 1, sizeof(nt_material_slot_t));
-    NT_ASSERT(s_mat.slots); /* alloc failed */
-    if (!s_mat.slots) {
-        nt_pool_shutdown(&s_mat.pool);
-        return NT_ERR_INIT_FAILED;
-    }
+    s_mat.slots = (nt_material_slot_t *)calloc((size_t)desc->max_materials + 1, sizeof(nt_material_slot_t));
+    NT_ASSERT_ALWAYS(s_mat.slots); /* alloc fail at init = fatal */
 
     s_mat.initialized = true;
     return NT_OK;
@@ -124,46 +119,34 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     slot->vs_resource = desc->vs;
     slot->fs_resource = desc->fs;
 
-    /* Textures: clamp count */
-    uint8_t tex_count = desc->texture_count;
-    if (tex_count > NT_MATERIAL_MAX_TEXTURES) {
-        tex_count = NT_MATERIAL_MAX_TEXTURES;
-    }
-    slot->info.tex_count = tex_count;
-    for (uint8_t i = 0; i < tex_count; i++) {
+    /* Textures */
+    NT_ASSERT_ALWAYS(desc->texture_count <= NT_MATERIAL_MAX_TEXTURES);
+    slot->info.tex_count = desc->texture_count;
+    for (uint8_t i = 0; i < desc->texture_count; i++) {
         slot->tex_resources[i] = desc->textures[i].resource;
         slot->info.tex_name_hashes[i] = desc->textures[i].name ? nt_hash32_str(desc->textures[i].name).value : 0;
     }
 
-    /* Params: clamp count */
-    uint8_t param_count = desc->param_count;
-    if (param_count > NT_MATERIAL_MAX_PARAMS) {
-        param_count = NT_MATERIAL_MAX_PARAMS;
-    }
-    slot->info.param_count = param_count;
-    for (uint8_t i = 0; i < param_count; i++) {
+    /* Params */
+    NT_ASSERT_ALWAYS(desc->param_count <= NT_MATERIAL_MAX_PARAMS);
+    slot->info.param_count = desc->param_count;
+    for (uint8_t i = 0; i < desc->param_count; i++) {
         memcpy(slot->info.params[i], desc->params[i].value, sizeof(float) * 4);
         slot->info.param_name_hashes[i] = desc->params[i].name ? nt_hash32_str(desc->params[i].name).value : 0;
     }
 
-    /* Attr map: clamp count */
-    uint8_t attr_count = desc->attr_map_count;
-    if (attr_count > NT_MATERIAL_MAX_ATTR_MAP) {
-        attr_count = NT_MATERIAL_MAX_ATTR_MAP;
-    }
-    slot->info.attr_map_count = attr_count;
-    for (uint8_t i = 0; i < attr_count; i++) {
+    /* Attr map */
+    NT_ASSERT_ALWAYS(desc->attr_map_count <= NT_MATERIAL_MAX_ATTR_MAP);
+    slot->info.attr_map_count = desc->attr_map_count;
+    for (uint8_t i = 0; i < desc->attr_map_count; i++) {
         slot->info.attr_map_hashes[i] = desc->attr_map[i].stream_name ? nt_hash32_str(desc->attr_map[i].stream_name).value : 0;
         slot->info.attr_map_locations[i] = desc->attr_map[i].location;
     }
 
-    /* Entity params: clamp count */
-    uint8_t ep_count = desc->entity_param_count;
-    if (ep_count > NT_MAX_PER_ENTITY_PARAMS) {
-        ep_count = NT_MAX_PER_ENTITY_PARAMS;
-    }
-    slot->info.entity_param_count = ep_count;
-    for (uint8_t i = 0; i < ep_count; i++) {
+    /* Entity params */
+    NT_ASSERT_ALWAYS(desc->entity_param_count <= NT_MAX_PER_ENTITY_PARAMS);
+    slot->info.entity_param_count = desc->entity_param_count;
+    for (uint8_t i = 0; i < desc->entity_param_count; i++) {
         slot->info.entity_param_hashes[i] = desc->entity_params[i].name ? nt_hash32_str(desc->entity_params[i].name).value : 0;
     }
 

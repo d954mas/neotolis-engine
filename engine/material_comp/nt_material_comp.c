@@ -6,11 +6,11 @@
 #include "core/nt_assert.h"
 
 static nt_comp_storage_t s_storage;
-static uint32_t *s_material_handles;
+static nt_material_t *s_material_handles;
 
 /* ---- Callbacks ---- */
 
-static void material_default(uint16_t idx) { s_material_handles[idx] = 0; }
+static void material_default(uint16_t idx) { s_material_handles[idx] = NT_MATERIAL_INVALID; }
 
 static void material_swap(uint16_t dst, uint16_t src) { s_material_handles[dst] = s_material_handles[src]; }
 
@@ -32,7 +32,7 @@ nt_result_t nt_material_comp_init(const nt_material_comp_desc_t *desc) {
         return res;
     }
 
-    s_material_handles = (uint32_t *)calloc(desc->capacity, sizeof(uint32_t));
+    s_material_handles = (nt_material_t *)calloc(desc->capacity, sizeof(nt_material_t));
     if (!s_material_handles) {
         nt_comp_storage_shutdown(&s_storage);
         return NT_ERR_INIT_FAILED;
@@ -61,7 +61,7 @@ bool nt_material_comp_has(nt_entity_t entity) { return nt_comp_storage_has(&s_st
 
 void nt_material_comp_remove(nt_entity_t entity) { nt_comp_storage_remove(&s_storage, entity); }
 
-uint32_t *nt_material_comp_handle(nt_entity_t entity) {
+nt_material_t *nt_material_comp_handle(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT_ALWAYS(idx != NT_INVALID_COMP_INDEX);
     return &s_material_handles[idx];

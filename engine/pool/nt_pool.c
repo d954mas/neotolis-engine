@@ -5,16 +5,19 @@
 
 #include "core/nt_assert.h"
 
-void nt_pool_init(nt_pool_t *pool, uint32_t capacity) {
+void nt_pool_init(nt_pool_t *pool, uint16_t capacity) {
     NT_ASSERT(pool);
     NT_ASSERT(capacity > 0);
-    NT_ASSERT(capacity <= NT_POOL_SLOT_MASK);
 
     pool->slots = (nt_pool_slot_t *)calloc(capacity + 1, sizeof(nt_pool_slot_t));
-    NT_ASSERT(pool->slots);
+    NT_ASSERT_ALWAYS(pool->slots); /* alloc fail at init = fatal */
 
     pool->free_queue = (uint32_t *)malloc(capacity * sizeof(uint32_t));
-    NT_ASSERT(pool->free_queue);
+    if (!pool->free_queue) {
+        free(pool->slots);
+        pool->slots = NULL;
+        NT_ASSERT_ALWAYS(pool->free_queue); /* alloc fail at init = fatal */
+    }
 
     /* Fill free queue: stack with indices 1..capacity, lowest index on top */
     pool->queue_top = capacity;
@@ -44,6 +47,10 @@ uint32_t nt_pool_alloc(nt_pool_t *pool) {
     /* Increment generation (starts at 1 for first allocation) */
     uint32_t prev_gen = pool->slots[slot_index].id >> NT_POOL_SLOT_SHIFT;
     uint32_t new_gen = prev_gen + 1;
+    /* Guard against generation wraparound to 0 */
+    if (new_gen == 0) {
+        new_gen = 1;
+    }
 
     uint32_t id = (new_gen << NT_POOL_SLOT_SHIFT) | slot_index;
     pool->slots[slot_index].id = id;
@@ -58,8 +65,10 @@ void nt_pool_free(nt_pool_t *pool, uint32_t id) {
     if (pool->slots[slot_index].id != id) {
         return; /* stale handle */
     }
-    /* Increment generation, clear slot index bits so valid() rejects freed id */
     uint32_t gen = (id >> NT_POOL_SLOT_SHIFT) + 1;
+    if (gen == 0) {
+        gen = 1;
+    }
     pool->slots[slot_index].id = gen << NT_POOL_SLOT_SHIFT;
     pool->free_queue[pool->queue_top] = slot_index;
     pool->queue_top++;

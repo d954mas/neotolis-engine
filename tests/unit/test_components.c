@@ -71,7 +71,7 @@ void test_material_add_returns_true(void) {
 void test_material_add_default_handle(void) {
     nt_entity_t e = nt_entity_create();
     nt_material_comp_add(e);
-    TEST_ASSERT_EQUAL_UINT32(0, *nt_material_comp_handle(e));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_material_comp_handle(e)->id);
 }
 
 void test_material_has_and_remove(void) {

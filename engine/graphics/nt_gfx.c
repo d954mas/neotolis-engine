@@ -414,6 +414,7 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
         return;
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
+    NT_ASSERT(s_gfx.pipeline_backends[slot] != 0); /* stale pipeline after context loss — must recreate */
     s_gfx.bound_pipeline = s_gfx.pipeline_backends[slot];
     nt_gfx_backend_bind_pipeline(s_gfx.bound_pipeline);
 }

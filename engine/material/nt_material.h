@@ -72,7 +72,7 @@ typedef struct {
     bool depth_test;
     bool depth_write;
     nt_cull_mode_t cull_mode;
-    const char *label;
+    const char *label; /* debug name — must be string literal or static storage */
 } nt_material_create_desc_t;
 
 /* ---- Init descriptor ---- */
