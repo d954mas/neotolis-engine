@@ -159,9 +159,9 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_transform_comp COMMAND test_transform_comp)
 
-    # --- Component tests (mesh, material, render_state) ---
+    # --- Component tests (mesh, material, drawable) ---
     add_executable(test_components unit/test_components.c)
-    target_link_libraries(test_components PRIVATE nt_mesh_comp nt_material_comp nt_render_state_comp nt_entity unity)
+    target_link_libraries(test_components PRIVATE nt_mesh_comp nt_material_comp nt_drawable_comp nt_entity unity)
     nt_set_warning_flags(test_components)
     nt_set_sanitizer_flags(test_components)
     set_target_properties(test_components PROPERTIES
