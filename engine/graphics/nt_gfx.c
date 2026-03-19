@@ -39,9 +39,8 @@ static struct {
 
     nt_gfx_buffer_meta_t *buffer_metas; /* minimal buffer metadata for runtime validation */
 
-    nt_gfx_mesh_info_t mesh_table[NT_GFX_MAX_MESHES + 1]; /* index 0 reserved */
-    uint16_t mesh_free[NT_GFX_MAX_MESHES];
-    uint16_t mesh_free_top;
+    nt_pool_t mesh_pool;
+    nt_gfx_mesh_info_t *mesh_table; /* [capacity+1], index 0 reserved */
 
     nt_gfx_render_state_t render_state;
     uint32_t bound_pipeline;  /* currently bound pipeline backend handle */
@@ -69,11 +68,9 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 
     s_gfx.render_state = NT_GFX_STATE_IDLE;
 
-    /* Fill mesh free stack: lowest index on top */
-    s_gfx.mesh_free_top = NT_GFX_MAX_MESHES;
-    for (uint16_t i = 0; i < NT_GFX_MAX_MESHES; i++) {
-        s_gfx.mesh_free[i] = (uint16_t)(NT_GFX_MAX_MESHES - i);
-    }
+    /* Mesh pool + data table */
+    nt_pool_init(&s_gfx.mesh_pool, desc->max_meshes);
+    s_gfx.mesh_table = (nt_gfx_mesh_info_t *)calloc((size_t)desc->max_meshes + 1, sizeof(nt_gfx_mesh_info_t));
 
     if (!nt_gfx_backend_init(desc)) {
         nt_log_error("gfx: backend init failed");
@@ -88,8 +85,8 @@ void nt_gfx_shutdown(void) {
     nt_gfx_backend_shutdown();
 
     /* Destroy active mesh table entries */
-    for (uint32_t i = 1; i <= NT_GFX_MAX_MESHES; i++) {
-        if (s_gfx.mesh_table[i].vbo.id != 0) {
+    for (uint32_t i = 1; i <= s_gfx.mesh_pool.capacity; i++) {
+        if (nt_pool_slot_alive(&s_gfx.mesh_pool, i) && s_gfx.mesh_table[i].vbo.id != 0) {
             nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[nt_pool_slot_index(s_gfx.mesh_table[i].vbo.id)]);
             if (s_gfx.mesh_table[i].ibo.id != 0) {
                 nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[nt_pool_slot_index(s_gfx.mesh_table[i].ibo.id)]);
@@ -101,12 +98,14 @@ void nt_gfx_shutdown(void) {
     nt_pool_shutdown(&s_gfx.pipeline_pool);
     nt_pool_shutdown(&s_gfx.buffer_pool);
     nt_pool_shutdown(&s_gfx.texture_pool);
+    nt_pool_shutdown(&s_gfx.mesh_pool);
 
     free(s_gfx.shader_backends);
     free(s_gfx.pipeline_backends);
     free(s_gfx.buffer_backends);
     free(s_gfx.texture_backends);
     free(s_gfx.buffer_metas);
+    free(s_gfx.mesh_table);
 
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
@@ -131,7 +130,7 @@ void nt_gfx_begin_frame(void) {
                 s_gfx.texture_backends[i] = 0;
             }
             /* Mesh table: keep entries active. nt_resource_invalidate() will
-             * call deactivate_mesh() which returns slots to free lists.
+             * call deactivate_mesh() which returns slots to mesh pool.
              * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
             s_gfx.bound_pipeline = 0;
             g_nt_gfx.context_lost = true;
@@ -614,15 +613,7 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
 
 /* ---- Mesh side table helpers ---- */
 
-static uint32_t mesh_table_alloc(void) {
-    if (s_gfx.mesh_free_top == 0) {
-        return 0;
-    }
-    s_gfx.mesh_free_top--;
-    return s_gfx.mesh_free[s_gfx.mesh_free_top];
-}
-
-static uint32_t mesh_handle_make(uint32_t index, uint16_t gen) { return ((uint32_t)gen << 16) | (index & 0xFFFF); }
+/* mesh_table_alloc and mesh_handle_make replaced by nt_pool_alloc(&s_gfx.mesh_pool) */
 
 /* ---- Asset activators ---- */
 
@@ -726,13 +717,16 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         }
     }
 
-    uint32_t slot = mesh_table_alloc();
-    if (slot == 0) {
-        nt_log_error("gfx: activate_mesh: mesh table full");
+    uint32_t mesh_id = nt_pool_alloc(&s_gfx.mesh_pool);
+    if (mesh_id == 0) {
+        nt_log_error("gfx: activate_mesh: mesh pool full");
         nt_gfx_destroy_buffer(ibo);
         nt_gfx_destroy_buffer(vbo);
         return 0;
     }
+
+    uint32_t slot = nt_pool_slot_index(mesh_id);
+    memset(&s_gfx.mesh_table[slot], 0, sizeof(nt_gfx_mesh_info_t));
 
     s_gfx.mesh_table[slot].vbo = vbo;
     s_gfx.mesh_table[slot].ibo = ibo;
@@ -744,10 +738,6 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     /* Copy stream descriptors from pack data for render module vertex layout building */
     const NtStreamDesc *src_streams = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
     memcpy(s_gfx.mesh_table[slot].streams, src_streams, (size_t)hdr->stream_count * sizeof(NtStreamDesc));
-    /* Zero remaining stream slots for deterministic hashing */
-    if (hdr->stream_count < NT_MESH_MAX_STREAMS) {
-        memset(&s_gfx.mesh_table[slot].streams[hdr->stream_count], 0, (size_t)(NT_MESH_MAX_STREAMS - hdr->stream_count) * sizeof(NtStreamDesc));
-    }
 
     /* Compute stride: sum of all stream sizes (type_size * count) */
     uint16_t stride = 0;
@@ -759,9 +749,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     /* Compute layout_hash from stream descriptors for pipeline cache keying */
     s_gfx.mesh_table[slot].layout_hash = nt_hash32(src_streams, (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc)).value;
 
-    s_gfx.mesh_table[slot].generation++;
-
-    return mesh_handle_make(slot, s_gfx.mesh_table[slot].generation);
+    return mesh_id;
 }
 
 uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {
@@ -804,28 +792,17 @@ void nt_gfx_deactivate_texture(uint32_t handle) {
 }
 
 void nt_gfx_deactivate_mesh(uint32_t handle) {
-    uint32_t index = handle & 0xFFFF;
-    uint16_t gen = (uint16_t)(handle >> 16);
-    if (index == 0 || index > NT_GFX_MAX_MESHES) {
-        nt_log_error("gfx: deactivate_mesh: invalid handle index");
+    if (!nt_pool_valid(&s_gfx.mesh_pool, handle)) {
+        nt_log_error("gfx: deactivate_mesh: invalid or stale handle");
         return;
     }
-    if (s_gfx.mesh_table[index].generation != gen) {
-        nt_log_error("gfx: deactivate_mesh: stale handle");
-        return;
-    }
+    uint32_t index = nt_pool_slot_index(handle);
     nt_gfx_destroy_buffer(s_gfx.mesh_table[index].vbo);
     if (s_gfx.mesh_table[index].ibo.id != 0) {
         nt_gfx_destroy_buffer(s_gfx.mesh_table[index].ibo);
     }
-    s_gfx.mesh_table[index].vbo.id = 0;
-    s_gfx.mesh_table[index].ibo.id = 0;
-    memset(s_gfx.mesh_table[index].streams, 0, sizeof(s_gfx.mesh_table[index].streams));
-    s_gfx.mesh_table[index].stride = 0;
-    s_gfx.mesh_table[index].layout_hash = 0;
-    s_gfx.mesh_table[index].generation++; /* invalidate old handles */
-    s_gfx.mesh_free[s_gfx.mesh_free_top] = (uint16_t)index;
-    s_gfx.mesh_free_top++;
+    memset(&s_gfx.mesh_table[index], 0, sizeof(nt_gfx_mesh_info_t));
+    nt_pool_free(&s_gfx.mesh_pool, handle);
 }
 
 void nt_gfx_deactivate_shader(uint32_t handle) {
@@ -836,13 +813,9 @@ void nt_gfx_deactivate_shader(uint32_t handle) {
 /* ---- Mesh info query ---- */
 
 const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh) {
-    uint32_t index = mesh.id & 0xFFFF;
-    uint16_t gen = (uint16_t)(mesh.id >> 16);
-    if (index == 0 || index > NT_GFX_MAX_MESHES) {
+    if (!nt_pool_valid(&s_gfx.mesh_pool, mesh.id)) {
         return NULL;
     }
-    if (s_gfx.mesh_table[index].generation != gen) {
-        return NULL;
-    }
+    uint32_t index = nt_pool_slot_index(mesh.id);
     return &s_gfx.mesh_table[index];
 }

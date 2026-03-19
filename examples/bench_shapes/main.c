@@ -612,7 +612,7 @@ int main(void) {
     g_nt_window.height = 600;
     nt_window_init();
     nt_input_init();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 128, .depth = true});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 128, .max_meshes = 64, .depth = true});
     nt_shape_renderer_init();
 
 #ifdef NT_PLATFORM_WEB

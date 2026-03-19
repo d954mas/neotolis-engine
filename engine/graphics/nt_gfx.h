@@ -30,10 +30,6 @@ typedef struct {
 
 /* ---- Mesh info (side table for VBO+IBO pairs from mesh activator) ---- */
 
-#ifndef NT_GFX_MAX_MESHES
-#define NT_GFX_MAX_MESHES 128
-#endif
-
 typedef struct {
     nt_buffer_t vbo;
     nt_buffer_t ibo;
@@ -41,10 +37,8 @@ typedef struct {
     uint32_t index_count;
     uint8_t stream_count;
     uint8_t index_type; /* 0=none, 1=uint16, 2=uint32 */
-    uint16_t generation;
     NtStreamDesc streams[NT_MESH_MAX_STREAMS]; /* copied from pack data at activation */
     uint16_t stride;                           /* total vertex size in bytes */
-    uint16_t _pad_mesh;                        /* alignment padding */
     uint32_t layout_hash;                      /* hash of stream descriptors for pipeline cache key */
 } nt_gfx_mesh_info_t;
 
@@ -137,6 +131,7 @@ typedef struct {
     uint16_t max_pipelines;   /* default: 16 */
     uint16_t max_buffers;     /* default: 128 */
     uint16_t max_textures;    /* default: 64 */
+    uint16_t max_meshes;      /* default: 128 */
     bool depth;               /* request depth buffer (default: true) */
     bool stencil;             /* request stencil buffer (default: false) */
     bool antialias;           /* MSAA (default: false) */
@@ -224,6 +219,7 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .max_pipelines = 16,
         .max_buffers = 128,
         .max_textures = 64,
+        .max_meshes = 128,
         .depth = true,
         .premultiplied_alpha = true,
     };
