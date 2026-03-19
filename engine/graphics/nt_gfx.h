@@ -36,7 +36,7 @@ typedef struct {
     uint32_t vertex_count;
     uint32_t index_count;
     uint8_t stream_count;
-    uint8_t index_type; /* 0=none, 1=uint16, 2=uint32 */
+    uint8_t index_type;                        /* 0=none, 1=uint16, 2=uint32 */
     NtStreamDesc streams[NT_MESH_MAX_STREAMS]; /* copied from pack data at activation */
     uint16_t stride;                           /* total vertex size in bytes */
     uint32_t layout_hash;                      /* hash of stream descriptors for pipeline cache key */

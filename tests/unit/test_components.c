@@ -1,7 +1,7 @@
+#include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
 #include "material_comp/nt_material_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
-#include "drawable_comp/nt_drawable_comp.h"
 #include "unity.h"
 
 /* ---- setUp / tearDown ---- */

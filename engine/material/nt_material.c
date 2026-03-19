@@ -34,9 +34,9 @@ static struct {
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_material_init(const nt_material_desc_t *desc) {
-    NT_ASSERT(!s_mat.initialized);        /* double init */
-    NT_ASSERT(desc);                       /* NULL descriptor */
-    NT_ASSERT(desc->max_materials > 0);    /* must specify capacity */
+    NT_ASSERT(!s_mat.initialized);      /* double init */
+    NT_ASSERT(desc);                    /* NULL descriptor */
+    NT_ASSERT(desc->max_materials > 0); /* must specify capacity */
     if (s_mat.initialized || !desc || desc->max_materials == 0) {
         return NT_ERR_INIT_FAILED;
     }
@@ -97,6 +97,7 @@ void nt_material_step(void) {
 
 /* ---- Create / Destroy / Query ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     NT_ASSERT(s_mat.initialized); /* create before init */
     NT_ASSERT(desc);              /* NULL descriptor */
