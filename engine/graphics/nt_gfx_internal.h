@@ -2,26 +2,7 @@
 #define NT_GFX_INTERNAL_H
 
 #include "graphics/nt_gfx.h"
-
-/* ---- Handle encoding ---- */
-
-#define NT_GFX_SLOT_SHIFT 16
-#define NT_GFX_SLOT_MASK 0xFFFF
-
-/* ---- Pool slot ---- */
-
-typedef struct {
-    uint32_t id; /* matches handle.id when valid, 0 when free */
-} nt_gfx_slot_t;
-
-/* ---- Resource pool ---- */
-
-typedef struct {
-    nt_gfx_slot_t *slots;
-    uint32_t capacity;
-    uint32_t *free_queue; /* stack of free slot indices */
-    uint32_t queue_top;   /* next free position (stack pointer) */
-} nt_gfx_pool_t;
+#include "pool/nt_pool.h"
 
 /* ---- Render state machine ---- */
 
@@ -30,15 +11,6 @@ typedef enum {
     NT_GFX_STATE_FRAME,
     NT_GFX_STATE_PASS,
 } nt_gfx_render_state_t;
-
-/* ---- Pool helper functions (implemented in nt_gfx.c) ---- */
-
-void nt_gfx_pool_init(nt_gfx_pool_t *pool, uint32_t capacity);
-void nt_gfx_pool_shutdown(nt_gfx_pool_t *pool);
-uint32_t nt_gfx_pool_alloc(nt_gfx_pool_t *pool);
-void nt_gfx_pool_free(nt_gfx_pool_t *pool, uint32_t id);
-bool nt_gfx_pool_valid(const nt_gfx_pool_t *pool, uint32_t id);
-uint32_t nt_gfx_pool_slot_index(uint32_t id);
 
 /* ---- Backend function signatures (implemented by each backend) ---- */
 

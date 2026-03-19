@@ -20,87 +20,87 @@ void tearDown(void) { nt_gfx_shutdown(); }
 /* ---- Pool: alloc returns nonzero ---- */
 
 void test_gfx_pool_alloc_returns_nonzero(void) {
-    nt_gfx_pool_t pool;
-    nt_gfx_pool_init(&pool, 4);
-    uint32_t id = nt_gfx_pool_alloc(&pool);
+    nt_pool_t pool;
+    nt_pool_init(&pool, 4);
+    uint32_t id = nt_pool_alloc(&pool);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, id);
-    nt_gfx_pool_shutdown(&pool);
+    nt_pool_shutdown(&pool);
 }
 
 /* ---- Pool: two allocs return different ids ---- */
 
 void test_gfx_pool_alloc_unique(void) {
-    nt_gfx_pool_t pool;
-    nt_gfx_pool_init(&pool, 4);
-    uint32_t a = nt_gfx_pool_alloc(&pool);
-    uint32_t b = nt_gfx_pool_alloc(&pool);
+    nt_pool_t pool;
+    nt_pool_init(&pool, 4);
+    uint32_t a = nt_pool_alloc(&pool);
+    uint32_t b = nt_pool_alloc(&pool);
     TEST_ASSERT_NOT_EQUAL_UINT32(a, b);
-    nt_gfx_pool_shutdown(&pool);
+    nt_pool_shutdown(&pool);
 }
 
 /* ---- Pool: free then realloc gives new generation ---- */
 
 void test_gfx_pool_free_and_realloc(void) {
-    nt_gfx_pool_t pool;
-    nt_gfx_pool_init(&pool, 4);
-    uint32_t first = nt_gfx_pool_alloc(&pool);
-    nt_gfx_pool_free(&pool, first);
-    uint32_t second = nt_gfx_pool_alloc(&pool);
+    nt_pool_t pool;
+    nt_pool_init(&pool, 4);
+    uint32_t first = nt_pool_alloc(&pool);
+    nt_pool_free(&pool, first);
+    uint32_t second = nt_pool_alloc(&pool);
     /* Same slot index, different generation -> different id */
     TEST_ASSERT_NOT_EQUAL_UINT32(first, second);
     /* Same slot index */
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_pool_slot_index(first), nt_gfx_pool_slot_index(second));
-    nt_gfx_pool_shutdown(&pool);
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(first), nt_pool_slot_index(second));
+    nt_pool_shutdown(&pool);
 }
 
 /* ---- Pool: valid accepts live handle ---- */
 
 void test_gfx_pool_valid_accepts_live(void) {
-    nt_gfx_pool_t pool;
-    nt_gfx_pool_init(&pool, 4);
-    uint32_t id = nt_gfx_pool_alloc(&pool);
-    TEST_ASSERT_TRUE(nt_gfx_pool_valid(&pool, id));
-    nt_gfx_pool_shutdown(&pool);
+    nt_pool_t pool;
+    nt_pool_init(&pool, 4);
+    uint32_t id = nt_pool_alloc(&pool);
+    TEST_ASSERT_TRUE(nt_pool_valid(&pool, id));
+    nt_pool_shutdown(&pool);
 }
 
 /* ---- Pool: valid rejects zero ---- */
 
 void test_gfx_pool_valid_rejects_zero(void) {
-    nt_gfx_pool_t pool;
-    nt_gfx_pool_init(&pool, 4);
-    TEST_ASSERT_FALSE(nt_gfx_pool_valid(&pool, 0));
-    nt_gfx_pool_shutdown(&pool);
+    nt_pool_t pool;
+    nt_pool_init(&pool, 4);
+    TEST_ASSERT_FALSE(nt_pool_valid(&pool, 0));
+    nt_pool_shutdown(&pool);
 }
 
 /* ---- Pool: valid rejects stale handle ---- */
 
 void test_gfx_pool_valid_rejects_stale(void) {
-    nt_gfx_pool_t pool;
-    nt_gfx_pool_init(&pool, 4);
-    uint32_t id = nt_gfx_pool_alloc(&pool);
-    nt_gfx_pool_free(&pool, id);
-    TEST_ASSERT_FALSE(nt_gfx_pool_valid(&pool, id));
-    nt_gfx_pool_shutdown(&pool);
+    nt_pool_t pool;
+    nt_pool_init(&pool, 4);
+    uint32_t id = nt_pool_alloc(&pool);
+    nt_pool_free(&pool, id);
+    TEST_ASSERT_FALSE(nt_pool_valid(&pool, id));
+    nt_pool_shutdown(&pool);
 }
 
 /* ---- Pool: full pool returns zero ---- */
 
 void test_gfx_pool_full_returns_zero(void) {
-    nt_gfx_pool_t pool;
-    nt_gfx_pool_init(&pool, 2);
-    nt_gfx_pool_alloc(&pool);
-    nt_gfx_pool_alloc(&pool);
-    uint32_t third = nt_gfx_pool_alloc(&pool);
+    nt_pool_t pool;
+    nt_pool_init(&pool, 2);
+    nt_pool_alloc(&pool);
+    nt_pool_alloc(&pool);
+    uint32_t third = nt_pool_alloc(&pool);
     TEST_ASSERT_EQUAL_UINT32(0, third);
-    nt_gfx_pool_shutdown(&pool);
+    nt_pool_shutdown(&pool);
 }
 
 /* ---- Pool: slot_index extracts correctly ---- */
 
 void test_gfx_slot_index_extracts_correctly(void) {
     /* Construct a known handle: generation=3, slot=5 */
-    uint32_t id = (3U << NT_GFX_SLOT_SHIFT) | 5U;
-    TEST_ASSERT_EQUAL_UINT32(5, nt_gfx_pool_slot_index(id));
+    uint32_t id = (3U << NT_POOL_SLOT_SHIFT) | 5U;
+    TEST_ASSERT_EQUAL_UINT32(5, nt_pool_slot_index(id));
 }
 
 /* ---- High-level: init/shutdown transitions initialized flag ---- */
