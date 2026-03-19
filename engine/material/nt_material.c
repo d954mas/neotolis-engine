@@ -154,8 +154,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     slot->info.tex_count = tex_count;
     for (uint8_t i = 0; i < tex_count; i++) {
         slot->tex_resources[i] = desc->textures[i].resource;
-        slot->info.tex_name_hashes[i] =
-            desc->textures[i].name ? nt_hash32_str(desc->textures[i].name).value : 0;
+        slot->info.tex_name_hashes[i] = desc->textures[i].name ? nt_hash32_str(desc->textures[i].name).value : 0;
     }
 
     /* Params: clamp count */
@@ -166,8 +165,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     slot->info.param_count = param_count;
     for (uint8_t i = 0; i < param_count; i++) {
         memcpy(slot->info.params[i], desc->params[i].value, sizeof(float) * 4);
-        slot->info.param_name_hashes[i] =
-            desc->params[i].name ? nt_hash32_str(desc->params[i].name).value : 0;
+        slot->info.param_name_hashes[i] = desc->params[i].name ? nt_hash32_str(desc->params[i].name).value : 0;
     }
 
     /* Attr map: clamp count */
@@ -177,8 +175,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     }
     slot->info.attr_map_count = attr_count;
     for (uint8_t i = 0; i < attr_count; i++) {
-        slot->info.attr_map_hashes[i] =
-            desc->attr_map[i].stream_name ? nt_hash32_str(desc->attr_map[i].stream_name).value : 0;
+        slot->info.attr_map_hashes[i] = desc->attr_map[i].stream_name ? nt_hash32_str(desc->attr_map[i].stream_name).value : 0;
         slot->info.attr_map_locations[i] = desc->attr_map[i].location;
     }
 
@@ -189,8 +186,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     }
     slot->info.entity_param_count = ep_count;
     for (uint8_t i = 0; i < ep_count; i++) {
-        slot->info.entity_param_hashes[i] =
-            desc->entity_params[i].name ? nt_hash32_str(desc->entity_params[i].name).value : 0;
+        slot->info.entity_param_hashes[i] = desc->entity_params[i].name ? nt_hash32_str(desc->entity_params[i].name).value : 0;
     }
 
     /* Render state */
