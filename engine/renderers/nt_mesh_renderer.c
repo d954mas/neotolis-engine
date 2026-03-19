@@ -15,7 +15,7 @@
 /* ---- Pipeline cache entry ---- */
 
 typedef struct {
-    uint64_t key; /* (layout_hash << 32) | resolved_vs */
+    uint64_t key; /* hash of full pipeline signature (layout + shaders + render state) */
     nt_pipeline_t pipeline;
 } nt_pipeline_cache_entry_t;
 
@@ -171,6 +171,8 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
         s_mesh_renderer.count++;
     } else {
         nt_log_error("mesh_renderer: pipeline cache full — increase max_pipelines in desc");
+        nt_gfx_destroy_pipeline(pip);
+        return (nt_pipeline_t){0};
     }
 
     return pip;
@@ -208,10 +210,10 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
         return NT_ERR_INIT_FAILED;
     }
 
-    /* Create dynamic instance buffer */
+    /* Create instance buffer (STREAM: rewritten every frame) */
     s_mesh_renderer.instance_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
-        .usage = NT_USAGE_DYNAMIC,
+        .usage = NT_USAGE_STREAM,
         .size = (uint32_t)desc->max_instances * (uint32_t)sizeof(nt_mesh_instance_t),
         .data = NULL,
         .label = "mesh_renderer_instance",
@@ -265,7 +267,8 @@ void nt_mesh_renderer_restore_gpu(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
 
-    if (count == 0) {
+    NT_ASSERT(s_mesh_renderer.initialized);
+    if (!s_mesh_renderer.initialized || count == 0) {
         return;
     }
 

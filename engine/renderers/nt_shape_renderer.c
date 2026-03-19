@@ -32,7 +32,8 @@ static void mat3_mulv(const float m[3][3], const float v[3], float out[3]) { glm
 
 /* ---- Embedded shader source ---- */
 
-static const char *s_shape_vs_src = "layout(location = 0) in vec3 a_position;\n"
+static const char *s_shape_vs_src = "precision mediump float;\n"
+                                    "layout(location = 0) in vec3 a_position;\n"
                                     "layout(location = 2) in vec4 a_color;\n"
                                     "uniform mat4 u_vp;\n"
                                     "out vec4 v_color;\n"
@@ -41,7 +42,8 @@ static const char *s_shape_vs_src = "layout(location = 0) in vec3 a_position;\n"
                                     "    gl_Position = u_vp * vec4(a_position, 1.0);\n"
                                     "}\n";
 
-static const char *s_shape_fs_src = "in vec4 v_color;\n"
+static const char *s_shape_fs_src = "precision mediump float;\n"
+                                    "in vec4 v_color;\n"
                                     "out vec4 frag_color;\n"
                                     "void main() {\n"
                                     "    frag_color = v_color;\n"
@@ -49,7 +51,8 @@ static const char *s_shape_fs_src = "in vec4 v_color;\n"
 
 /* ---- Instanced line vertex shader ---- */
 
-static const char *s_line_vs_src = "layout(location = 0) in vec2 a_corner;\n"
+static const char *s_line_vs_src = "precision mediump float;\n"
+                                   "layout(location = 0) in vec2 a_corner;\n"
                                    "layout(location = 1) in vec3 i_a;\n"
                                    "layout(location = 2) in vec3 i_b;\n"
                                    "layout(location = 3) in vec4 i_color;\n"
@@ -125,7 +128,8 @@ typedef struct {
 
 /* ---- Instanced shape vertex shader ---- */
 
-static const char *s_inst_vs_src = "layout(location = 0) in vec3 a_position;\n"
+static const char *s_inst_vs_src = "precision mediump float;\n"
+                                   "layout(location = 0) in vec3 a_position;\n"
                                    "layout(location = 1) in vec3 i_center;\n"
                                    "layout(location = 2) in vec3 i_scale;\n"
                                    "layout(location = 3) in vec4 i_rot;\n"
@@ -142,7 +146,8 @@ static const char *s_inst_vs_src = "layout(location = 0) in vec3 a_position;\n"
 
 /* ---- Capsule instanced vertex shader (vec4 template: xyz=unit sphere, w=hemisphere sign) ---- */
 
-static const char *s_cap_inst_vs_src = "layout(location = 0) in vec4 a_pos_tag;\n"
+static const char *s_cap_inst_vs_src = "precision mediump float;\n"
+                                       "layout(location = 0) in vec4 a_pos_tag;\n"
                                        "layout(location = 1) in vec3 i_center;\n"
                                        "layout(location = 2) in vec3 i_scale;\n"
                                        "layout(location = 3) in vec4 i_rot;\n"

@@ -435,9 +435,9 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     GLuint shader = glCreateShader(gl_type);
 
 #ifdef NT_PLATFORM_WEB
-    const char *prefix = "#version 300 es\nprecision mediump float;\n";
+    const char *prefix = "#version 300 es\n";
 #else
-    const char *prefix = "#version 330 core\nprecision mediump float;\n";
+    const char *prefix = "#version 330 core\n";
 #endif
     const char *sources[2] = {prefix, desc->source};
     glShaderSource(shader, 2, sources, NULL);

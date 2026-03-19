@@ -1,4 +1,4 @@
-precision mediump float;
+precision highp float;
 
 /* Mesh vertex attributes */
 layout(location = 0) in vec3 a_position;
