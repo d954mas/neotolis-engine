@@ -797,7 +797,6 @@ typedef struct ShaderAsset
     bool default_depth_test;
     bool default_depth_write;
     CullMode default_cull_mode;
-    SortMode default_sort_mode;
 } ShaderAsset;
 ```
 
@@ -850,7 +849,6 @@ typedef struct MaterialAssetHeader
     bool depth_test;
     bool depth_write;
     CullMode cull_mode;
-    SortMode sort_mode;
 
     uint16_t param_count;
     uint16_t texture_count;
@@ -886,13 +884,15 @@ const TextureAssetRef* material_get_textures(const MaterialAssetHeader* h)
 
 **Note:** C does not allow two flexible array members in one struct. The layout above uses computed offsets instead.
 
-## 16.4 No separate MaterialRuntime copy
+## 16.4 One material, one copy
 
-Important decision: no full duplicated MaterialRuntime object by default. MaterialHandle points directly to MaterialAsset-style runtime-loaded asset storage. No unnecessary full-copy runtime material object.
+No duplicated material data. Material is created once (either from code via descriptor or loaded from pack asset in the future) and lives in a single pool slot. Multiple entities reference the same material handle. Per-entity variation goes through components (color, future shader params), not material mutation.
 
 ## 16.5 Render state and material
 
-Even if pass code on C directly sets depth/blend/cull state, material still stores render hints/state because they are needed for: bucket/pass selection, sort policy, batch compatibility.
+Material stores render state (blend mode, depth test/write, cull mode) because it is a property of the surface, not the pass. Pipeline (GPU state object) is derived from material render state + mesh vertex layout at render time.
+
+Sort order is **not** a material property. Sorting is game-controlled: game code gets entities by tag, sorts them (by material for opaques, by depth for transparents, or any custom order), and submits draw items to the renderer in that order. The renderer draws in submission order and batches consecutive compatible items. See section 13.1.
 
 ---
 
