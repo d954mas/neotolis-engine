@@ -23,11 +23,21 @@ interface Props {
 const { slug, title, hasCover, sizeData } = Astro.props;
 
 function formatSize(bytes: number): string {
+  if (bytes >= 1048576) {
+    return `${(bytes / 1048576).toFixed(3)} MB`;
+  }
   if (bytes >= 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024).toFixed(3)} KB`;
   }
   return `${bytes} B`;
 }
+
+const engineFiles = sizeData
+  ? Object.entries(sizeData.files).filter(([f]) => !f.startsWith('assets/'))
+  : [];
+const resourceFiles = sizeData
+  ? Object.entries(sizeData.files).filter(([f]) => f.startsWith('assets/'))
+  : [];
 ---
 <a href={`/neotolis-engine/examples/${slug}/`} class="block bg-bg-card rounded-lg overflow-hidden hover:ring-1 hover:ring-accent transition group">
   {hasCover ? (
@@ -56,12 +66,31 @@ function formatSize(bytes: number): string {
             Size breakdown
           </summary>
           <div class="mt-1 text-xs text-text-secondary space-y-0.5">
-            {Object.entries(sizeData.files).map(([filename, sizes]) => (
+            {engineFiles.map(([filename, sizes]) => (
               <div class="flex justify-between">
                 <span>{filename}</span>
                 <span>{formatSize(sizes.gzip)}</span>
               </div>
             ))}
+            <div class="flex justify-between font-semibold border-t border-border pt-1 mt-1">
+              <span>Engine</span>
+              <span>{formatSize(sizeData.engine?.gzip ?? sizeData.total.gzip)}</span>
+            </div>
+            {resourceFiles.length > 0 && (
+              <>
+                <div class="pt-1"></div>
+                {resourceFiles.map(([filename, sizes]) => (
+                  <div class="flex justify-between">
+                    <span>{filename}</span>
+                    <span>{formatSize(sizes.gzip)}</span>
+                  </div>
+                ))}
+                <div class="flex justify-between font-semibold border-t border-border pt-1 mt-1">
+                  <span>Resources</span>
+                  <span>{formatSize(sizeData.resources.gzip)}</span>
+                </div>
+              </>
+            )}
             <div class="flex justify-between font-semibold border-t border-border pt-1 mt-1">
               <span>Total</span>
               <span>{formatSize(sizeData.total.gzip)}</span>

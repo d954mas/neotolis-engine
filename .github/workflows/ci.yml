@@ -407,6 +407,33 @@ jobs:
           EXAMPLES="hello bench_shapes spinning_cube textured_quad"
           PR_COMMIT=$(git rev-parse --short HEAD)
 
+          # Format bytes as KB/MB with 3 decimal places
+          fmt() {
+            local bytes="$1"
+            if [ "$bytes" -ge 1048576 ]; then
+              awk "BEGIN { printf \"%.3f MB\", $bytes / 1048576 }"
+            elif [ "$bytes" -ge 1024 ]; then
+              awk "BEGIN { printf \"%.3f KB\", $bytes / 1024 }"
+            else
+              printf "%d B" "$bytes"
+            fi
+          }
+
+          # Format delta: +/- with KB/MB
+          fmt_delta() {
+            local bytes="$1"
+            local abs=${bytes#-}
+            local formatted
+            if [ "$abs" -ge 1048576 ]; then
+              formatted=$(awk "BEGIN { printf \"%.3f MB\", $abs / 1048576 }")
+            elif [ "$abs" -ge 1024 ]; then
+              formatted=$(awk "BEGIN { printf \"%.3f KB\", $abs / 1024 }")
+            else
+              formatted="${abs} B"
+            fi
+            [ "$bytes" -ge 0 ] && printf "+%s" "$formatted" || printf "-%s" "$formatted"
+          }
+
           {
             echo "## WASM Build Sizes"
             echo ""
@@ -423,25 +450,25 @@ jobs:
               cur_engine_raw=$(echo "$CURRENT" | jq -r '.engine.raw')
               cur_engine_gz=$(echo "$CURRENT" | jq -r '.engine.gzip')
               cur_res_raw=$(echo "$CURRENT" | jq -r '.resources.raw')
+              cur_res_gz=$(echo "$CURRENT" | jq -r '.resources.gzip')
               cur_total_raw=$(echo "$CURRENT" | jq -r '.total.raw')
               cur_total_gz=$(echo "$CURRENT" | jq -r '.total.gzip')
+
               if [ "$HAS_BASELINE" = true ]; then
-                base_engine_raw=$(echo "$BASELINE" | jq -r '.engine.raw // 0')
-                base_total_raw=$(echo "$BASELINE" | jq -r '.total.raw')
-                d_engine_raw=$((cur_engine_raw - base_engine_raw))
-                d_total_raw=$((cur_total_raw - base_total_raw))
-                [ "$d_engine_raw" -ge 0 ] && engine_delta_str="+${d_engine_raw} B" || engine_delta_str="${d_engine_raw} B"
-                [ "$d_total_raw" -ge 0 ] && delta_str="+${d_total_raw} B" || delta_str="${d_total_raw} B"
-                summary_extra=" | engine ${engine_delta_str} | total ${delta_str}"
+                base_engine_gz=$(echo "$BASELINE" | jq -r '.engine.gzip // 0')
+                d_engine_gz=$((cur_engine_gz - base_engine_gz))
+                base_total_gz=$(echo "$BASELINE" | jq -r '.total.gzip')
+                d_total_gz=$((cur_total_gz - base_total_gz))
+                summary_extra=" | engine $(fmt_delta $d_engine_gz) | total $(fmt_delta $d_total_gz)"
               else
                 summary_extra=""
               fi
 
               # Build summary line: engine (+ resources if present)
               if [ "$cur_res_raw" -gt 0 ]; then
-                summary_sizes="engine ${cur_engine_gz} B gzip + resources ${cur_res_raw} B = ${cur_total_gz} B gzip"
+                summary_sizes="engine $(fmt $cur_engine_gz) gzip + resources $(fmt $cur_res_raw) = $(fmt $cur_total_gz) gzip"
               else
-                summary_sizes="${cur_total_gz} B gzip"
+                summary_sizes="$(fmt $cur_total_gz) gzip"
               fi
 
               echo "<details>"
@@ -450,53 +477,72 @@ jobs:
               echo "| File | Raw | Gzip | Raw Delta | Gzip Delta |"
               echo "|------|----:|-----:|----------:|-----------:|"
 
-              for fname in $(echo "$CURRENT" | jq -r '.files | keys[]' | sort); do
+              # Helper to print a file row with delta
+              print_file_row() {
+                local fname="$1"
+                local cur_raw cur_gz d_raw_str d_gz_str
                 cur_raw=$(echo "$CURRENT" | jq -r ".files[\"$fname\"].raw")
                 cur_gz=$(echo "$CURRENT" | jq -r ".files[\"$fname\"].gzip")
                 if [ "$HAS_BASELINE" = true ]; then
+                  local base_raw base_gz d_raw d_gz
                   base_raw=$(echo "$BASELINE" | jq -r ".files[\"$fname\"].raw // 0")
                   base_gz=$(echo "$BASELINE" | jq -r ".files[\"$fname\"].gzip // 0")
                   d_raw=$((cur_raw - base_raw))
                   d_gz=$((cur_gz - base_gz))
-                  [ "$d_raw" -ge 0 ] && d_raw_str="+${d_raw} B" || d_raw_str="${d_raw} B"
-                  [ "$d_gz" -ge 0 ] && d_gz_str="+${d_gz} B" || d_gz_str="${d_gz} B"
+                  d_raw_str="$(fmt_delta $d_raw)"
+                  d_gz_str="$(fmt_delta $d_gz)"
                 else
                   d_raw_str="--"
                   d_gz_str="--"
                 fi
-                printf "| \`%s\` | %d B | %d B | %s | %s |\n" "$fname" "$cur_raw" "$cur_gz" "$d_raw_str" "$d_gz_str"
+                printf "| \`%s\` | %s | %s | %s | %s |\n" "$fname" "$(fmt $cur_raw)" "$(fmt $cur_gz)" "$d_raw_str" "$d_gz_str"
+              }
+
+              # Engine files (not starting with assets/)
+              for fname in $(echo "$CURRENT" | jq -r '.files | keys[]' | sort); do
+                case "$fname" in assets/*) continue ;; esac
+                print_file_row "$fname"
               done
 
+              # Compute deltas for subtotals
               if [ "$HAS_BASELINE" = true ]; then
-                base_engine_gz=$(echo "$BASELINE" | jq -r '.engine.gzip // 0')
+                base_engine_raw=$(echo "$BASELINE" | jq -r '.engine.raw // 0')
                 base_res_raw=$(echo "$BASELINE" | jq -r '.resources.raw // 0')
                 base_res_gz=$(echo "$BASELINE" | jq -r '.resources.gzip // 0')
-                base_total_gz=$(echo "$BASELINE" | jq -r '.total.gzip')
+                d_engine_raw=$((cur_engine_raw - base_engine_raw))
                 d_engine_gz=$((cur_engine_gz - base_engine_gz))
                 d_res_raw=$((cur_res_raw - base_res_raw))
-                cur_res_gz=$(echo "$CURRENT" | jq -r '.resources.gzip')
                 d_res_gz=$((cur_res_gz - base_res_gz))
+                d_total_raw=$((cur_total_raw - $(echo "$BASELINE" | jq -r '.total.raw')))
                 d_total_gz=$((cur_total_gz - base_total_gz))
-                [ "$d_engine_raw" -ge 0 ] && d_engine_raw_str="+${d_engine_raw} B" || d_engine_raw_str="${d_engine_raw} B"
-                [ "$d_engine_gz" -ge 0 ] && d_engine_gz_str="+${d_engine_gz} B" || d_engine_gz_str="${d_engine_gz} B"
-                [ "$d_res_raw" -ge 0 ] && d_res_raw_str="+${d_res_raw} B" || d_res_raw_str="${d_res_raw} B"
-                [ "$d_res_gz" -ge 0 ] && d_res_gz_str="+${d_res_gz} B" || d_res_gz_str="${d_res_gz} B"
-                [ "$d_total_raw" -ge 0 ] && d_total_raw_str="+${d_total_raw} B" || d_total_raw_str="${d_total_raw} B"
-                [ "$d_total_gz" -ge 0 ] && d_total_gz_str="+${d_total_gz} B" || d_total_gz_str="${d_total_gz} B"
+              fi
+
+              # Engine subtotal
+              if [ "$HAS_BASELINE" = true ]; then
+                echo "| **Engine** | **$(fmt $cur_engine_raw)** | **$(fmt $cur_engine_gz)** | **$(fmt_delta $d_engine_raw)** | **$(fmt_delta $d_engine_gz)** |"
               else
-                cur_res_gz=$(echo "$CURRENT" | jq -r '.resources.gzip')
-                d_engine_raw_str="--"
-                d_engine_gz_str="--"
-                d_res_raw_str="--"
-                d_res_gz_str="--"
-                d_total_raw_str="--"
-                d_total_gz_str="--"
+                echo "| **Engine** | **$(fmt $cur_engine_raw)** | **$(fmt $cur_engine_gz)** | **--** | **--** |"
               fi
-              echo "| **Engine** | **${cur_engine_raw} B** | **${cur_engine_gz} B** | **${d_engine_raw_str}** | **${d_engine_gz_str}** |"
+
+              # Resources files + subtotal (only if resources exist)
               if [ "$cur_res_raw" -gt 0 ]; then
-                echo "| **Resources** | **${cur_res_raw} B** | **${cur_res_gz} B** | **${d_res_raw_str}** | **${d_res_gz_str}** |"
+                for fname in $(echo "$CURRENT" | jq -r '.files | keys[]' | sort); do
+                  case "$fname" in assets/*) ;; *) continue ;; esac
+                  print_file_row "$fname"
+                done
+                if [ "$HAS_BASELINE" = true ]; then
+                  echo "| **Resources** | **$(fmt $cur_res_raw)** | **$(fmt $cur_res_gz)** | **$(fmt_delta $d_res_raw)** | **$(fmt_delta $d_res_gz)** |"
+                else
+                  echo "| **Resources** | **$(fmt $cur_res_raw)** | **$(fmt $cur_res_gz)** | **--** | **--** |"
+                fi
               fi
-              echo "| **Total** | **${cur_total_raw} B** | **${cur_total_gz} B** | **${d_total_raw_str}** | **${d_total_gz_str}** |"
+
+              # Total
+              if [ "$HAS_BASELINE" = true ]; then
+                echo "| **Total** | **$(fmt $cur_total_raw)** | **$(fmt $cur_total_gz)** | **$(fmt_delta $d_total_raw)** | **$(fmt_delta $d_total_gz)** |"
+              else
+                echo "| **Total** | **$(fmt $cur_total_raw)** | **$(fmt $cur_total_gz)** | **--** | **--** |"
+              fi
               echo ""
               echo "</details>"
               echo ""
