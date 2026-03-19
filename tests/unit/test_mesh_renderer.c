@@ -401,11 +401,12 @@ void test_stream_to_format_float32(void) {
     TEST_ASSERT_EQUAL(NT_FORMAT_FLOAT4, nt_stream_to_vertex_format(NT_STREAM_FLOAT32, 4, 0));
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_stream_to_format_float16(void) {
+    TEST_ASSERT_EQUAL(NT_FORMAT_HALF, nt_stream_to_vertex_format(NT_STREAM_FLOAT16, 1, 0));
     TEST_ASSERT_EQUAL(NT_FORMAT_HALF2, nt_stream_to_vertex_format(NT_STREAM_FLOAT16, 2, 0));
+    TEST_ASSERT_EQUAL(NT_FORMAT_HALF3, nt_stream_to_vertex_format(NT_STREAM_FLOAT16, 3, 0));
     TEST_ASSERT_EQUAL(NT_FORMAT_HALF4, nt_stream_to_vertex_format(NT_STREAM_FLOAT16, 4, 0));
-    TEST_ASSERT_EQUAL(NT_FORMAT_HALF2, nt_stream_to_vertex_format(NT_STREAM_FLOAT16, 1, 0));
-    TEST_ASSERT_EQUAL(NT_FORMAT_HALF4, nt_stream_to_vertex_format(NT_STREAM_FLOAT16, 3, 0));
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

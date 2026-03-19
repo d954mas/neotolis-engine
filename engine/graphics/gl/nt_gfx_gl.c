@@ -149,8 +149,18 @@ static void get_format_params(nt_vertex_format_t fmt, GLint *size, GLenum *type,
         *type = GL_FLOAT;
         *normalized = GL_FALSE;
         break;
+    case NT_FORMAT_HALF:
+        *size = 1;
+        *type = GL_HALF_FLOAT;
+        *normalized = GL_FALSE;
+        break;
     case NT_FORMAT_HALF2:
         *size = 2;
+        *type = GL_HALF_FLOAT;
+        *normalized = GL_FALSE;
+        break;
+    case NT_FORMAT_HALF3:
+        *size = 3;
         *type = GL_HALF_FLOAT;
         *normalized = GL_FALSE;
         break;
