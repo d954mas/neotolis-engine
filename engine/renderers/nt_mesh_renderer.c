@@ -56,8 +56,9 @@ static const nt_vertex_layout_t s_instance_layout = {
 /* ---- Stream type to vertex format mapping ---- */
 
 /* Map mesh stream type to GL vertex format.
- * GL lacks UBYTE1-3, so UINT8/INT8 any count promotes to *BYTE4.
- * All other types map 1:1 with exact component count. */
+ * FLOAT32/FLOAT16/INT16/UINT16: exact count 1-4 mapping.
+ * UINT8/INT8: count must be 4 (vertex colors, bone indices, packed normals).
+ * If new byte counts needed, extend nt_vertex_format_t or switch to raw (type, count, normalized). */
 nt_vertex_format_t nt_stream_to_vertex_format(uint8_t type, uint8_t count, uint8_t normalized) {
     switch (type) {
     case NT_STREAM_FLOAT32:
@@ -88,8 +89,10 @@ nt_vertex_format_t nt_stream_to_vertex_format(uint8_t type, uint8_t count, uint8
         }
         return normalized ? NT_FORMAT_SHORT4N : NT_FORMAT_SHORT4;
     case NT_STREAM_UINT8:
+        NT_ASSERT(count == 4); /* GL byte formats require count=4 in current enum set */
         return normalized ? NT_FORMAT_UBYTE4N : NT_FORMAT_UBYTE4;
     case NT_STREAM_INT8:
+        NT_ASSERT(count == 4);
         return NT_FORMAT_BYTE4N;
     case NT_STREAM_UINT16:
         /* GL_UNSIGNED_SHORT vertex attrs: uncommon, treat as short for now */
