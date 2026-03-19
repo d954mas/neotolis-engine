@@ -264,7 +264,9 @@ void nt_mesh_renderer_restore_gpu(void) {
     uint16_t saved_pip = s_mesh_renderer.max_pipelines;
     nt_mesh_renderer_shutdown();
     nt_mesh_renderer_desc_t desc = {.max_instances = saved_max, .max_pipelines = saved_pip};
-    nt_mesh_renderer_init(&desc);
+    nt_result_t res = nt_mesh_renderer_init(&desc);
+    NT_ASSERT(res == NT_OK); /* context alive but GPU alloc failed = fatal */
+    (void)res;
 }
 
 /* ---- Draw list ---- */
@@ -294,7 +296,8 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
         nt_material_t run_mat = *nt_material_comp_handle(entity);
         nt_mesh_t run_mesh = *nt_mesh_comp_handle(entity);
 
-        /* Detect run end via batch_key (same material+mesh = same key, independent of sort order) */
+        /* Detect run end via batch_key (same material+mesh = same key, independent of sort order).
+         * Hash collision risk ~0.0001% at 100 unique combos — acceptable vs per-item component reads. */
         uint32_t run_end = run_start + 1;
         while (run_end < count && items[run_end].batch_key == items[run_start].batch_key) {
             run_end++;
