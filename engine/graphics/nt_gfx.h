@@ -2,6 +2,7 @@
 #define NT_GFX_H
 
 #include "core/nt_types.h"
+#include "nt_mesh_format.h"
 
 /* ---- Handle types (typed opaque handles backed by pool) ---- */
 
@@ -35,6 +36,10 @@ typedef struct {
     uint8_t stream_count;
     uint8_t index_type; /* 0=none, 1=uint16, 2=uint32 */
     uint16_t generation;
+    NtStreamDesc streams[NT_MESH_MAX_STREAMS]; /* copied from pack data at activation */
+    uint16_t stride;                           /* total vertex size in bytes */
+    uint16_t _pad_mesh;                        /* alignment padding */
+    uint32_t layout_hash;                      /* hash of stream descriptors for pipeline cache key */
 } nt_gfx_mesh_info_t;
 
 /* ---- Enums ---- */

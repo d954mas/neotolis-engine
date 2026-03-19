@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
+#include "hash/nt_hash.h"
 #include "log/nt_log.h"
 #include "nt_mesh_format.h"
 #include "nt_shader_format.h"
@@ -808,6 +809,25 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     s_gfx.mesh_table[slot].index_count = hdr->index_count;
     s_gfx.mesh_table[slot].stream_count = hdr->stream_count;
     s_gfx.mesh_table[slot].index_type = hdr->index_type;
+
+    /* Copy stream descriptors from pack data for render module vertex layout building */
+    const NtStreamDesc *src_streams = (const NtStreamDesc *)(data + sizeof(NtMeshAssetHeader));
+    memcpy(s_gfx.mesh_table[slot].streams, src_streams, (size_t)hdr->stream_count * sizeof(NtStreamDesc));
+    /* Zero remaining stream slots for deterministic hashing */
+    if (hdr->stream_count < NT_MESH_MAX_STREAMS) {
+        memset(&s_gfx.mesh_table[slot].streams[hdr->stream_count], 0, (size_t)(NT_MESH_MAX_STREAMS - hdr->stream_count) * sizeof(NtStreamDesc));
+    }
+
+    /* Compute stride: sum of all stream sizes (type_size * count) */
+    uint16_t stride = 0;
+    for (uint8_t i = 0; i < hdr->stream_count; i++) {
+        stride += (uint16_t)(nt_stream_type_size(src_streams[i].type) * src_streams[i].count);
+    }
+    s_gfx.mesh_table[slot].stride = stride;
+
+    /* Compute layout_hash from stream descriptors for pipeline cache keying */
+    s_gfx.mesh_table[slot].layout_hash = nt_hash32(src_streams, (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc)).value;
+
     s_gfx.mesh_table[slot].generation++;
 
     return mesh_handle_make(slot, s_gfx.mesh_table[slot].generation);
@@ -869,6 +889,9 @@ void nt_gfx_deactivate_mesh(uint32_t handle) {
     }
     s_gfx.mesh_table[index].vbo.id = 0;
     s_gfx.mesh_table[index].ibo.id = 0;
+    memset(s_gfx.mesh_table[index].streams, 0, sizeof(s_gfx.mesh_table[index].streams));
+    s_gfx.mesh_table[index].stride = 0;
+    s_gfx.mesh_table[index].layout_hash = 0;
     s_gfx.mesh_table[index].generation++; /* invalidate old handles */
     s_gfx.mesh_free[s_gfx.mesh_free_top] = (uint16_t)index;
     s_gfx.mesh_free_top++;
