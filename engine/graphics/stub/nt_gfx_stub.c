@@ -69,6 +69,11 @@ void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle) { (void)backend_h
 
 void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) { (void)backend_handle; }
 
+void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) {
+    (void)backend_handle;
+    (void)slot;
+}
+
 void nt_gfx_backend_set_uniform_mat4(const char *name, const float *matrix) {
     (void)name;
     (void)matrix;

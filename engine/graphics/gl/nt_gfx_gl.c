@@ -435,6 +435,14 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
         return 0;
     }
 
+    /* Auto-bind "Globals" UBO block to slot 0 if present */
+    {
+        GLuint block_index = glGetUniformBlockIndex(program, "Globals");
+        if (block_index != GL_INVALID_INDEX) {
+            glUniformBlockBinding(program, block_index, 0);
+        }
+    }
+
     /* Find free pipeline slot */
     uint32_t slot = 0;
     for (uint32_t i = 1; i <= s_init_desc.max_pipelines; i++) {
@@ -510,7 +518,21 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) {
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     GLuint buf;
     glGenBuffers(1, &buf);
-    GLenum target = (desc->type == NT_BUFFER_VERTEX) ? GL_ARRAY_BUFFER : GL_ELEMENT_ARRAY_BUFFER;
+    GLenum target;
+    switch (desc->type) {
+    case NT_BUFFER_VERTEX:
+        target = GL_ARRAY_BUFFER;
+        break;
+    case NT_BUFFER_INDEX:
+        target = GL_ELEMENT_ARRAY_BUFFER;
+        break;
+    case NT_BUFFER_UNIFORM:
+        target = GL_UNIFORM_BUFFER;
+        break;
+    default:
+        target = GL_ARRAY_BUFFER;
+        break;
+    }
     GLenum usage = map_buffer_usage(desc->usage);
     glBindBuffer(target, buf);
     glBufferData(target, (GLsizeiptr)desc->size, desc->data, usage);
@@ -607,6 +629,16 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) {
                                   (void *)(uintptr_t)attr->offset); // NOLINT(performance-no-int-to-ptr)
         }
     }
+}
+
+/* ---- Uniform buffer ---- */
+
+void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
+        return;
+    }
+    GLuint buf = s_buffer_gl[backend_handle];
+    glBindBufferBase(GL_UNIFORM_BUFFER, slot, buf);
 }
 
 /* ---- Texture management ---- */

@@ -41,6 +41,7 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle);
 void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle);
 void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle);
 void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle);
+void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot);
 
 void nt_gfx_backend_set_uniform_mat4(const char *name, const float *matrix);
 void nt_gfx_backend_set_uniform_vec4(const char *name, const float *vec);

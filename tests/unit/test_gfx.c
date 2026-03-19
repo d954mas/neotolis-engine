@@ -603,6 +603,62 @@ void test_mesh_info_fields(void) {
     nt_gfx_deactivate_mesh(handle);
 }
 
+/* ---- Uniform buffer tests ---- */
+
+void test_make_uniform_buffer(void) {
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_UNIFORM,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = 256,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
+    nt_gfx_destroy_buffer(buf);
+}
+
+void test_bind_uniform_buffer(void) {
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_UNIFORM,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = 256,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
+    nt_gfx_bind_uniform_buffer(buf, 0); /* must not crash */
+    nt_gfx_destroy_buffer(buf);
+}
+
+void test_update_uniform_buffer(void) {
+    nt_buffer_t buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_UNIFORM,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = 256,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, buf.id);
+    uint8_t data[256];
+    memset(data, 0xAB, sizeof(data));
+    nt_gfx_update_buffer(buf, data, 256);
+    nt_gfx_destroy_buffer(buf);
+}
+
+void test_destroy_uniform_buffer(void) {
+    nt_buffer_t buf1 = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_UNIFORM,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = 256,
+    });
+    uint32_t slot1 = buf1.id & 0xFFFF;
+    nt_gfx_destroy_buffer(buf1);
+
+    nt_buffer_t buf2 = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_UNIFORM,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = 256,
+    });
+    uint32_t slot2 = buf2.id & 0xFFFF;
+    TEST_ASSERT_EQUAL_UINT32(slot1, slot2);         /* reused slot */
+    TEST_ASSERT_NOT_EQUAL_UINT32(buf1.id, buf2.id); /* different generation */
+    nt_gfx_destroy_buffer(buf2);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_gfx_pool_alloc_returns_nonzero);
@@ -648,5 +704,10 @@ int main(void) {
     RUN_TEST(test_activate_shader_bad_magic);
     RUN_TEST(test_deactivate_mesh_clears_table);
     RUN_TEST(test_mesh_info_fields);
+    /* Uniform buffer tests */
+    RUN_TEST(test_make_uniform_buffer);
+    RUN_TEST(test_bind_uniform_buffer);
+    RUN_TEST(test_update_uniform_buffer);
+    RUN_TEST(test_destroy_uniform_buffer);
     return UNITY_END();
 }

@@ -587,6 +587,25 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf) {
     nt_gfx_backend_bind_instance_buffer(s_gfx.buffer_backends[slot]);
 }
 
+/* ---- Uniform buffer ---- */
+
+void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
+        nt_log_error("gfx: bind_uniform_buffer: invalid handle");
+        return;
+    }
+    uint32_t idx = nt_pool_slot_index(buf.id);
+    NT_ASSERT(s_gfx.buffer_metas[idx].type == NT_BUFFER_UNIFORM);
+    if (s_gfx.buffer_metas[idx].type != NT_BUFFER_UNIFORM) {
+        nt_log_error("gfx: bind_uniform_buffer: buffer is not uniform type");
+        return;
+    }
+    nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot);
+}
+
 /* ---- Buffer update ---- */
 
 void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {

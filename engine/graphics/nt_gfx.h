@@ -52,6 +52,7 @@ typedef enum {
 typedef enum {
     NT_BUFFER_VERTEX = 0,
     NT_BUFFER_INDEX,
+    NT_BUFFER_UNIFORM,
 } nt_buffer_type_t;
 
 typedef enum {
@@ -274,6 +275,10 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 /* ---- Instance buffer ---- */
 
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf);
+
+/* ---- Uniform buffer ---- */
+
+void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
 
 /* ---- Buffer update ---- */
 
