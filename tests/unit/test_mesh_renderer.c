@@ -14,6 +14,7 @@
 #include "material/nt_material.h"
 #include "resource/nt_resource.h"
 #include "hash/nt_hash.h"
+#include "render/nt_render_items.h"
 #include "nt_mesh_format.h"
 #include "nt_pack_format.h"
 #include "unity.h"
@@ -29,7 +30,7 @@ static nt_mesh_t create_test_mesh(void) {
     /* header + 1 stream desc + 3 vertices (3 floats each = 36B) + 3 uint16 indices (6B) */
     uint32_t streams_size = (uint32_t)sizeof(NtStreamDesc);
     uint32_t vdata_size = 3 * 3 * (uint32_t)sizeof(float); /* 3 vertices, 3 floats */
-    uint32_t idata_size = 3 * (uint32_t)sizeof(uint16_t);   /* 3 indices */
+    uint32_t idata_size = 3 * (uint32_t)sizeof(uint16_t);  /* 3 indices */
     uint32_t blob_size = (uint32_t)sizeof(NtMeshAssetHeader) + streams_size + vdata_size + idata_size;
     uint8_t blob[sizeof(NtMeshAssetHeader) + sizeof(NtStreamDesc) + 36 + 6];
     memset(blob, 0, sizeof(blob));
@@ -229,6 +230,7 @@ void test_draw_list_single_item(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
+    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
 
     nt_mesh_renderer_draw_list(items, 1);
 
@@ -247,13 +249,17 @@ void test_draw_list_same_material_mesh_batching(void) {
     nt_entity_t e1 = create_test_entity(mesh, mat);
     nt_entity_t e2 = create_test_entity(mesh, mat);
 
+    uint32_t bk = nt_batch_key(mat.id, mesh.id);
     nt_render_item_t items[3];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
+    items[0].batch_key = bk;
     items[1].sort_key = 0;
     items[1].entity = e1.id;
+    items[1].batch_key = bk;
     items[2].sort_key = 0;
     items[2].entity = e2.id;
+    items[2].batch_key = bk;
 
     nt_mesh_renderer_draw_list(items, 3);
 
@@ -274,8 +280,10 @@ void test_draw_list_different_materials(void) {
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
+    items[0].batch_key = nt_batch_key(mat_a.id, mesh.id);
     items[1].sort_key = 1;
     items[1].entity = e1.id;
+    items[1].batch_key = nt_batch_key(mat_b.id, mesh.id);
 
     nt_mesh_renderer_draw_list(items, 2);
 
@@ -294,13 +302,18 @@ void test_draw_list_alternating_materials(void) {
     nt_entity_t e1 = create_test_entity(mesh, mat_b);
     nt_entity_t e2 = create_test_entity(mesh, mat_a);
 
+    uint32_t bk_a = nt_batch_key(mat_a.id, mesh.id);
+    uint32_t bk_b = nt_batch_key(mat_b.id, mesh.id);
     nt_render_item_t items[3];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
+    items[0].batch_key = bk_a;
     items[1].sort_key = 1;
     items[1].entity = e1.id;
+    items[1].batch_key = bk_b;
     items[2].sort_key = 2;
     items[2].entity = e2.id;
+    items[2].batch_key = bk_a;
 
     nt_mesh_renderer_draw_list(items, 3);
 
@@ -317,6 +330,7 @@ void test_pipeline_cache_reuse(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
+    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
 
     /* First draw_list call */
     nt_mesh_renderer_draw_list(items, 1);
@@ -340,8 +354,10 @@ void test_pipeline_cache_different_layouts(void) {
     nt_render_item_t items[2];
     items[0].sort_key = 0;
     items[0].entity = e0.id;
+    items[0].batch_key = nt_batch_key(mat_a.id, mesh.id);
     items[1].sort_key = 1;
     items[1].entity = e1.id;
+    items[1].batch_key = nt_batch_key(mat_b.id, mesh.id);
 
     nt_mesh_renderer_draw_list(items, 2);
 
@@ -359,6 +375,7 @@ void test_restore_gpu(void) {
     nt_render_item_t items[1];
     items[0].sort_key = 0;
     items[0].entity = e.id;
+    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
 
     /* Draw to populate cache */
     nt_mesh_renderer_draw_list(items, 1);

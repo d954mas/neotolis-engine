@@ -26,15 +26,14 @@ typedef struct {
 
 _Static_assert(sizeof(nt_mesh_instance_t) == 80, "mesh instance must be 80 bytes");
 
-/* ---- Render item for sort and draw (12 bytes) ---- */
+/* ---- Render item for sort and draw (16 bytes, naturally aligned) ---- */
 
-#pragma pack(push, 1)
 typedef struct {
     uint64_t sort_key;
-    uint32_t entity; /* raw entity id (not nt_entity_t to keep 12 bytes) */
+    uint32_t entity;    /* raw entity id (not nt_entity_t) */
+    uint32_t batch_key; /* state compatibility: same material+mesh = same key, game fills this */
 } nt_render_item_t;
-#pragma pack(pop)
 
-_Static_assert(sizeof(nt_render_item_t) == 12, "render item must be 12 bytes");
+_Static_assert(sizeof(nt_render_item_t) == 16, "render item must be 16 bytes");
 
 #endif /* NT_RENDER_DEFS_H */

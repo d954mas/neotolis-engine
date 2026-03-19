@@ -39,8 +39,8 @@ void test_instance_size(void) {
 }
 
 void test_render_item_size(void) {
-    /* _Static_assert in nt_render_defs.h guarantees 12 bytes at compile time */
-    TEST_ASSERT_EQUAL_UINT32(12, sizeof(nt_render_item_t));
+    /* _Static_assert in nt_render_defs.h guarantees 16 bytes at compile time */
+    TEST_ASSERT_EQUAL_UINT32(16, sizeof(nt_render_item_t));
 }
 
 /* ---- Sort key opaque ---- */

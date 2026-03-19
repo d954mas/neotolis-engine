@@ -515,15 +515,15 @@ The architecture supports different renderable kinds via separate components, no
 ```c
 typedef struct DrawableComponent
 {
-    uint16_t tag;
+    nt_hash32_t tag;  // hash-based, game-defined via nt_hash32_str()
     bool visible;
     vec4 color;
 } DrawableComponent;
 ```
 
-Defaults: `visible = true`, `color = (1,1,1,1)`.
+Defaults: `visible = true`, `color = (1,1,1,1)`, `tag = {0}`.
 
-- `tag`: pass/group filter chosen by game
+- `tag`: pass/group filter chosen by game, set via `nt_hash32_str("world")` etc.
 - `visible`: render visibility only
 - `color`: object tint / alpha multiplier
 
@@ -589,12 +589,12 @@ If missing: object does not participate in shadow pass. If present and enabled: 
 
 ## 10.1 RenderTag philosophy
 
-Render tags are **game-defined**, not engine-enum-defined.
+Render tags are **game-defined**, not engine-enum-defined. Tags are `nt_hash32_t` values created via `nt_hash32_str()`.
 
 ```c
-RenderTag TAG_WORLD = render_tags_new();
-RenderTag TAG_UI = render_tags_new();
-RenderTag TAG_DEBUG = render_tags_new();
+nt_hash32_t TAG_WORLD = nt_hash32_str("world");
+nt_hash32_t TAG_UI    = nt_hash32_str("ui");
+nt_hash32_t TAG_DEBUG = nt_hash32_str("debug");
 ```
 
 ## 10.2 What tags mean
@@ -663,43 +663,23 @@ Entity/components
     → GPU draw calls
 ```
 
-## 12.2 Universal RenderItem model
+## 12.2 RenderItem model
+
+Minimal render item — sorted draw record, not a fat data carrier. Renderer reads per-entity data (world matrix, color) from components at draw time.
 
 ```c
-typedef enum RenderDrawType
+typedef struct nt_render_item_t
 {
-    RENDER_DRAW_MESH,
-    RENDER_DRAW_SPRITE,
-    RENDER_DRAW_TEXT
-} RenderDrawType;
+    uint64_t sort_key;    // 8 bytes — encodes material+mesh for opaque, depth for transparent
+    uint32_t entity;      // 4 bytes — raw entity id
+    uint32_t batch_key;   // 4 bytes — state compatibility (same material+mesh = same key)
+} nt_render_item_t;       // 16 bytes, naturally aligned
 ```
 
-```c
-typedef struct RenderItem
-{
-    uint64_t sort_key;
-    uint64_t batch_key;
+**batch_key vs sort_key:** sort_key controls draw order (can be anything: material, depth, layer). batch_key controls instancing compatibility (same material+mesh). These are independent — depth-sorted items still batch by material+mesh.
 
-    RenderDrawType draw_type;
+**Why no inline world_matrix:** Instance packing reads world_matrix + color from component arrays via entity lookup (scattered access). Inlining them in the render item (96B) would make packing sequential, but qsort on 96B elements is ~6× slower than on 16B. At typical scales (<5K entities), sort dominates over packing. If CPU-bound at 10K+: switch to radix sort or indirect sort, then fat items become free.
 
-    MaterialHandle material;
-
-    float sort_depth;
-
-    mat4 world_matrix;  // copied, not pointer — see note
-    vec4 color;
-    vec4 params0;
-
-    union
-    {
-        MeshHandle mesh;
-        SpriteHandle sprite;
-        TextHandle text;
-    } draw;
-} RenderItem;
-```
-
-**Design note:** `world_matrix` is stored by value (64 bytes), not as pointer. This avoids dangling pointer risk if entity/component storages undergo structural changes between render item build phase and actual render. At MAX_RENDER_ITEMS = 16384, this costs ~1MB of frame scratch memory, which is acceptable.
 
 ## 12.3 Sort key meaning
 
@@ -709,26 +689,15 @@ Sort key determines item order in the final draw sequence for a pass. It is pass
 
 **Depth-sorted pass:** sort by depth first, then other fields as tie-break.
 
-## 12.4 Batch key meaning
+## 12.4 Batch key / run detection
 
-Batch key determines state compatibility. A run of equal batch keys means likely same shader/material/state, likely no state switch needed, possibly batchable.
+`batch_key` encodes state compatibility (same material+mesh = same key). `sort_key` controls draw order. These are independent concerns — sort order can be anything (material, depth, layer) without affecting batch detection.
 
-Equal batch key does **not** always mean single draw call is possible.
-
-## 12.5 Why both keys exist
-
-- `sort_key` controls ordering
-- `batch_key` controls state compatibility grouping
+Game fills `batch_key` via `nt_batch_key(material_id, mesh_id)`. Renderer compares consecutive batch_keys to detect instancing runs:
 
 ```c
-if (item.batch_key == current_batch_key)
-{
-    // continue run — no state change needed
-}
-else
-{
-    // flush and begin new run
-}
+while (run_end < count && items[run_end].batch_key == items[run_start].batch_key)
+    run_end++;
 ```
 
 ---

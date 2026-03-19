@@ -37,6 +37,10 @@ static inline uint64_t nt_sort_key_z(float z) {
     return (uint64_t)bits << 32;
 }
 
+/* ---- Batch key helper (material+mesh → state compatibility) ---- */
+
+static inline uint32_t nt_batch_key(uint32_t material_id, uint32_t mesh_id) { return (material_id * 0x9E3779B9U) ^ mesh_id; }
+
 /* ---- Declared functions (implemented in nt_render_items.c) ---- */
 
 float nt_calc_view_depth(uint32_t entity_id, const float view_pos[3], const float view_fwd[3]);

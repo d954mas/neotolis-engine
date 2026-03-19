@@ -1,5 +1,6 @@
 #include "renderers/nt_mesh_renderer.h"
 
+#include "core/nt_assert.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
@@ -11,10 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- Compile-time limits ---- */
-
-#define NT_PIPELINE_CACHE_MAX 64
-
 /* ---- Pipeline cache entry ---- */
 
 typedef struct {
@@ -25,7 +22,8 @@ typedef struct {
 /* ---- Module state ---- */
 
 static struct {
-    nt_pipeline_cache_entry_t entries[NT_PIPELINE_CACHE_MAX];
+    nt_pipeline_cache_entry_t *entries; /* [max_pipelines] */
+    uint16_t max_pipelines;
     uint16_t count;
 
     nt_buffer_t instance_buf; /* dynamic vertex buffer for nt_mesh_instance_t */
@@ -148,14 +146,15 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     nt_pipeline_t pip = nt_gfx_make_pipeline(&desc);
 
     /* Store in cache */
-    if (s_mesh_renderer.count < NT_PIPELINE_CACHE_MAX) {
+    if (s_mesh_renderer.count < s_mesh_renderer.max_pipelines) {
         s_mesh_renderer.entries[s_mesh_renderer.count].key = key;
         s_mesh_renderer.entries[s_mesh_renderer.count].pipeline = pip;
         s_mesh_renderer.count++;
     } else {
-        nt_log_error("mesh_renderer: pipeline cache full, reusing last slot");
-        s_mesh_renderer.entries[NT_PIPELINE_CACHE_MAX - 1].key = key;
-        s_mesh_renderer.entries[NT_PIPELINE_CACHE_MAX - 1].pipeline = pip;
+        nt_log_error("mesh_renderer: pipeline cache full, evicting last slot");
+        nt_gfx_destroy_pipeline(s_mesh_renderer.entries[s_mesh_renderer.max_pipelines - 1].pipeline);
+        s_mesh_renderer.entries[s_mesh_renderer.max_pipelines - 1].key = key;
+        s_mesh_renderer.entries[s_mesh_renderer.max_pipelines - 1].pipeline = pip;
     }
 
     return pip;
@@ -164,14 +163,31 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
+    NT_ASSERT(!s_mesh_renderer.initialized);
+    NT_ASSERT(desc);
+    NT_ASSERT(desc->max_instances > 0);
+    NT_ASSERT(desc->max_pipelines > 0);
+    if (s_mesh_renderer.initialized || !desc || desc->max_instances == 0 || desc->max_pipelines == 0) {
+        return NT_ERR_INIT_FAILED;
+    }
+
     memset(&s_mesh_renderer, 0, sizeof(s_mesh_renderer));
 
-    uint16_t max_inst = (desc != NULL && desc->max_instances > 0) ? desc->max_instances : 4096;
-    s_mesh_renderer.max_instances = max_inst;
+    s_mesh_renderer.max_instances = desc->max_instances;
+    s_mesh_renderer.max_pipelines = desc->max_pipelines;
+
+    /* Allocate pipeline cache */
+    s_mesh_renderer.entries = (nt_pipeline_cache_entry_t *)calloc(desc->max_pipelines, sizeof(nt_pipeline_cache_entry_t));
+    if (!s_mesh_renderer.entries) {
+        nt_log_error("mesh_renderer: failed to allocate pipeline cache");
+        return NT_ERR_INIT_FAILED;
+    }
 
     /* Allocate CPU staging array */
-    s_mesh_renderer.instance_data = (nt_mesh_instance_t *)calloc(max_inst, sizeof(nt_mesh_instance_t));
+    s_mesh_renderer.instance_data = (nt_mesh_instance_t *)calloc(desc->max_instances, sizeof(nt_mesh_instance_t));
     if (!s_mesh_renderer.instance_data) {
+        free(s_mesh_renderer.entries);
+        s_mesh_renderer.entries = NULL;
         nt_log_error("mesh_renderer: failed to allocate instance data");
         return NT_ERR_INIT_FAILED;
     }
@@ -180,7 +196,7 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     s_mesh_renderer.instance_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
         .usage = NT_USAGE_DYNAMIC,
-        .size = (uint32_t)max_inst * (uint32_t)sizeof(nt_mesh_instance_t),
+        .size = (uint32_t)desc->max_instances * (uint32_t)sizeof(nt_mesh_instance_t),
         .data = NULL,
         .label = "mesh_renderer_instance",
     });
@@ -209,6 +225,9 @@ void nt_mesh_renderer_shutdown(void) {
         nt_gfx_destroy_pipeline(s_mesh_renderer.entries[i].pipeline);
     }
 
+    /* Free pipeline cache */
+    free(s_mesh_renderer.entries);
+
     /* Free CPU staging array */
     free(s_mesh_renderer.instance_data);
 
@@ -217,8 +236,9 @@ void nt_mesh_renderer_shutdown(void) {
 
 void nt_mesh_renderer_restore_gpu(void) {
     uint16_t saved_max = s_mesh_renderer.max_instances;
+    uint16_t saved_pip = s_mesh_renderer.max_pipelines;
     nt_mesh_renderer_shutdown();
-    nt_mesh_renderer_desc_t desc = {.max_instances = saved_max};
+    nt_mesh_renderer_desc_t desc = {.max_instances = saved_max, .max_pipelines = saved_pip};
     nt_mesh_renderer_init(&desc);
 }
 
@@ -248,15 +268,9 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
         nt_material_t run_mat = *nt_material_comp_handle(entity);
         nt_mesh_t run_mesh = *nt_mesh_comp_handle(entity);
 
-        /* Detect run end (consecutive same material + same mesh) */
+        /* Detect run end via batch_key (same material+mesh = same key, independent of sort order) */
         uint32_t run_end = run_start + 1;
-        while (run_end < count) {
-            nt_entity_t e2 = {.id = items[run_end].entity};
-            nt_material_t m2 = *nt_material_comp_handle(e2);
-            nt_mesh_t mesh2 = *nt_mesh_comp_handle(e2);
-            if (m2.id != run_mat.id || mesh2.id != run_mesh.id) {
-                break;
-            }
+        while (run_end < count && items[run_end].batch_key == items[run_start].batch_key) {
             run_end++;
         }
 
@@ -267,6 +281,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
         const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(run_mesh);
 
         if (!mat_info || !mat_info->ready || !mesh_info) {
+            nt_log_error("mesh_renderer: skipping run — material or mesh not ready");
             run_start = run_end;
             continue;
         }
@@ -301,7 +316,11 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                 batch_count = s_mesh_renderer.max_instances;
             }
 
-            /* Pack world_matrix + color for this batch */
+            /* Pack world_matrix + color for this batch.
+             * Reads from component arrays via entity→index lookup (scattered access).
+             * Acceptable: ~20μs at 1K entities. Inline world_matrix in render item
+             * would make packing sequential but sort 6× slower (96B vs 16B elements).
+             * If CPU-bound at 10K+: switch to radix/indirect sort + fat item. */
             for (uint32_t i = 0; i < batch_count; i++) {
                 nt_entity_t e = {.id = items[run_start + batch_offset + i].entity};
                 const float *world = nt_transform_comp_world_matrix(e);

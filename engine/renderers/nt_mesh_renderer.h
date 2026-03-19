@@ -6,9 +6,10 @@
 
 typedef struct {
     uint16_t max_instances; /* max per single instanced draw call, default: 4096 */
+    uint16_t max_pipelines; /* pipeline cache capacity, default: 64 */
 } nt_mesh_renderer_desc_t;
 
-static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { return (nt_mesh_renderer_desc_t){.max_instances = 4096}; }
+static inline nt_mesh_renderer_desc_t nt_mesh_renderer_desc_defaults(void) { return (nt_mesh_renderer_desc_t){.max_instances = 4096, .max_pipelines = 64}; }
 
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc);
 void nt_mesh_renderer_shutdown(void);
