@@ -522,6 +522,29 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     nt_gfx_backend_draw(first_vertex, num_vertices);
 }
 
+void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
+    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        nt_log_error("gfx: draw_instanced called outside PASS state");
+        return;
+    }
+    NT_ASSERT(s_gfx.bound_pipeline != 0);
+    if (s_gfx.bound_pipeline == 0) {
+        nt_log_error("gfx: draw_instanced called without bound pipeline");
+        return;
+    }
+
+    g_nt_gfx.frame_stats.draw_calls++;
+    g_nt_gfx.frame_stats.draw_calls_instanced++;
+    g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
+    g_nt_gfx.frame_stats.instances += instance_count;
+    nt_gfx_backend_draw_instanced(first_vertex, num_vertices, instance_count);
+}
+
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices) {
     if (g_nt_gfx.context_lost) {
         return;
@@ -585,6 +608,37 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf) {
         return;
     }
     nt_gfx_backend_bind_instance_buffer(s_gfx.buffer_backends[slot]);
+}
+
+/* ---- Uniform buffer ---- */
+
+void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
+        nt_log_error("gfx: bind_uniform_buffer: invalid handle");
+        return;
+    }
+    uint32_t idx = nt_pool_slot_index(buf.id);
+    NT_ASSERT(s_gfx.buffer_metas[idx].type == NT_BUFFER_UNIFORM);
+    if (s_gfx.buffer_metas[idx].type != NT_BUFFER_UNIFORM) {
+        nt_log_error("gfx: bind_uniform_buffer: buffer is not uniform type");
+        return;
+    }
+    nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot);
+}
+
+void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_t slot) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
+        nt_log_error("gfx: set_uniform_block: invalid pipeline handle");
+        return;
+    }
+    uint32_t idx = nt_pool_slot_index(pip.id);
+    nt_gfx_backend_set_uniform_block(s_gfx.pipeline_backends[idx], block_name, slot);
 }
 
 /* ---- Buffer update ---- */

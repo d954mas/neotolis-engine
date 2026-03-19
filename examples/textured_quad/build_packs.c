@@ -58,6 +58,8 @@ int main(int argc, char *argv[]) {
         nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", layout, 2);
         nt_builder_add_shader(ctx, "assets/shaders/mesh.vert", NT_BUILD_SHADER_VERTEX);
         nt_builder_add_shader(ctx, "assets/shaders/mesh.frag", NT_BUILD_SHADER_FRAGMENT);
+        nt_builder_add_shader(ctx, "assets/shaders/mesh_inst.vert", NT_BUILD_SHADER_VERTEX);
+        nt_builder_add_shader(ctx, "assets/shaders/mesh_inst.frag", NT_BUILD_SHADER_FRAGMENT);
         nt_build_result_t r = nt_builder_finish_pack(ctx);
         nt_builder_free_pack(ctx);
         if (r != NT_BUILD_OK) {

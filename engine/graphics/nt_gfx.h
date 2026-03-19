@@ -52,6 +52,7 @@ typedef enum {
 typedef enum {
     NT_BUFFER_VERTEX = 0,
     NT_BUFFER_INDEX,
+    NT_BUFFER_UNIFORM,
 } nt_buffer_type_t;
 
 typedef enum {
@@ -65,7 +66,17 @@ typedef enum {
     NT_FORMAT_FLOAT2,
     NT_FORMAT_FLOAT3,
     NT_FORMAT_FLOAT4,
-    NT_FORMAT_UBYTE4N, /* normalized ubyte4 */
+    NT_FORMAT_HALF,    /* GL_HALF_FLOAT × 1 */
+    NT_FORMAT_HALF2,   /* GL_HALF_FLOAT × 2 */
+    NT_FORMAT_HALF3,   /* GL_HALF_FLOAT × 3 */
+    NT_FORMAT_HALF4,   /* GL_HALF_FLOAT × 4 */
+    NT_FORMAT_SHORT2,  /* GL_SHORT × 2 */
+    NT_FORMAT_SHORT2N, /* GL_SHORT × 2, normalized */
+    NT_FORMAT_SHORT4,  /* GL_SHORT × 4 */
+    NT_FORMAT_SHORT4N, /* GL_SHORT × 4, normalized */
+    NT_FORMAT_UBYTE4,  /* GL_UNSIGNED_BYTE × 4 */
+    NT_FORMAT_UBYTE4N, /* GL_UNSIGNED_BYTE × 4, normalized */
+    NT_FORMAT_BYTE4N,  /* GL_BYTE × 4, normalized */
 } nt_vertex_format_t;
 
 typedef enum {
@@ -152,7 +163,7 @@ typedef struct {
     bool depth_test;
     bool depth_write;
     nt_depth_func_t depth_func;
-    bool cull_face;
+    uint8_t cull_mode; /* 0=none, 1=back, 2=front (matches nt_cull_mode_t) */
     bool blend;
     nt_blend_factor_t blend_src;
     nt_blend_factor_t blend_dst;
@@ -268,12 +279,18 @@ void nt_gfx_set_uniform_int(const char *name, int val);
 /* ---- Draw calls ---- */
 
 void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices);
+void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count);
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices);
 void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count);
 
 /* ---- Instance buffer ---- */
 
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf);
+
+/* ---- Uniform buffer ---- */
+
+void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
+void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_t slot);
 
 /* ---- Buffer update ---- */
 

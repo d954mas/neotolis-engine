@@ -37,7 +37,7 @@ typedef struct {
     bool depth_test;
     bool depth_write;
     GLenum depth_func;
-    bool cull_face;
+    uint8_t cull_mode;
     bool blend;
     GLenum blend_src;
     GLenum blend_dst;
@@ -69,7 +69,7 @@ static struct {
     bool depth_test;
     bool depth_write;
     GLenum depth_func;
-    bool cull_face;
+    uint8_t cull_mode;
     bool blend;
     GLenum blend_src;
     GLenum blend_dst;
@@ -86,7 +86,7 @@ static void nt_gfx_gl_cache_reset(void) {
     s_gl_cache.depth_test = false;
     s_gl_cache.depth_write = true;   /* GL default: depth write enabled */
     s_gl_cache.depth_func = GL_LESS; /* GL default */
-    s_gl_cache.cull_face = false;
+    s_gl_cache.cull_mode = 0;
     s_gl_cache.blend = false;
     s_gl_cache.blend_src = GL_ONE;  /* GL default */
     s_gl_cache.blend_dst = GL_ZERO; /* GL default */
@@ -149,9 +149,59 @@ static void get_format_params(nt_vertex_format_t fmt, GLint *size, GLenum *type,
         *type = GL_FLOAT;
         *normalized = GL_FALSE;
         break;
+    case NT_FORMAT_HALF:
+        *size = 1;
+        *type = GL_HALF_FLOAT;
+        *normalized = GL_FALSE;
+        break;
+    case NT_FORMAT_HALF2:
+        *size = 2;
+        *type = GL_HALF_FLOAT;
+        *normalized = GL_FALSE;
+        break;
+    case NT_FORMAT_HALF3:
+        *size = 3;
+        *type = GL_HALF_FLOAT;
+        *normalized = GL_FALSE;
+        break;
+    case NT_FORMAT_HALF4:
+        *size = 4;
+        *type = GL_HALF_FLOAT;
+        *normalized = GL_FALSE;
+        break;
+    case NT_FORMAT_SHORT2:
+        *size = 2;
+        *type = GL_SHORT;
+        *normalized = GL_FALSE;
+        break;
+    case NT_FORMAT_SHORT2N:
+        *size = 2;
+        *type = GL_SHORT;
+        *normalized = GL_TRUE;
+        break;
+    case NT_FORMAT_SHORT4:
+        *size = 4;
+        *type = GL_SHORT;
+        *normalized = GL_FALSE;
+        break;
+    case NT_FORMAT_SHORT4N:
+        *size = 4;
+        *type = GL_SHORT;
+        *normalized = GL_TRUE;
+        break;
+    case NT_FORMAT_UBYTE4:
+        *size = 4;
+        *type = GL_UNSIGNED_BYTE;
+        *normalized = GL_FALSE;
+        break;
     case NT_FORMAT_UBYTE4N:
         *size = 4;
         *type = GL_UNSIGNED_BYTE;
+        *normalized = GL_TRUE;
+        break;
+    case NT_FORMAT_BYTE4N:
+        *size = 4;
+        *type = GL_BYTE;
         *normalized = GL_TRUE;
         break;
     default:
@@ -305,15 +355,15 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
         s_gl_cache.depth_write = pip->depth_write;
     }
 
-    /* Cull face */
-    if (s_gl_cache.cull_face != pip->cull_face) {
-        if (pip->cull_face) {
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_BACK);
-        } else {
+    /* Cull mode */
+    if (s_gl_cache.cull_mode != pip->cull_mode) {
+        if (pip->cull_mode == 0) {
             glDisable(GL_CULL_FACE);
+        } else {
+            glEnable(GL_CULL_FACE);
+            glCullFace(pip->cull_mode == 2 ? GL_FRONT : GL_BACK);
         }
-        s_gl_cache.cull_face = pip->cull_face;
+        s_gl_cache.cull_mode = pip->cull_mode;
     }
 
     /* Blend */
@@ -395,9 +445,9 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     GLuint shader = glCreateShader(gl_type);
 
 #ifdef NT_PLATFORM_WEB
-    const char *prefix = "#version 300 es\nprecision mediump float;\n";
+    const char *prefix = "#version 300 es\n";
 #else
-    const char *prefix = "#version 330 core\nprecision mediump float;\n";
+    const char *prefix = "#version 330 core\n";
 #endif
     const char *sources[2] = {prefix, desc->source};
     glShaderSource(shader, 2, sources, NULL);
@@ -433,6 +483,14 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
 
         glDeleteProgram(program);
         return 0;
+    }
+
+    /* Auto-bind "Globals" UBO block to slot 0 if present (engine convention) */
+    {
+        GLuint block_index = glGetUniformBlockIndex(program, "Globals");
+        if (block_index != GL_INVALID_INDEX) {
+            glUniformBlockBinding(program, block_index, 0);
+        }
     }
 
     /* Find free pipeline slot */
@@ -473,7 +531,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     pip->depth_test = desc->depth_test;
     pip->depth_write = desc->depth_write;
     pip->depth_func = map_depth_func(desc->depth_func);
-    pip->cull_face = desc->cull_face;
+    pip->cull_mode = desc->cull_mode;
     pip->blend = desc->blend;
     pip->blend_src = map_blend_factor(desc->blend_src);
     pip->blend_dst = map_blend_factor(desc->blend_dst);
@@ -510,7 +568,21 @@ void nt_gfx_backend_destroy_pipeline(uint32_t backend_handle) {
 uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc) {
     GLuint buf;
     glGenBuffers(1, &buf);
-    GLenum target = (desc->type == NT_BUFFER_VERTEX) ? GL_ARRAY_BUFFER : GL_ELEMENT_ARRAY_BUFFER;
+    GLenum target;
+    switch (desc->type) {
+    case NT_BUFFER_VERTEX:
+        target = GL_ARRAY_BUFFER;
+        break;
+    case NT_BUFFER_INDEX:
+        target = GL_ELEMENT_ARRAY_BUFFER;
+        break;
+    case NT_BUFFER_UNIFORM:
+        target = GL_UNIFORM_BUFFER;
+        break;
+    default:
+        target = GL_ARRAY_BUFFER;
+        break;
+    }
     GLenum usage = map_buffer_usage(desc->usage);
     glBindBuffer(target, buf);
     glBufferData(target, (GLsizeiptr)desc->size, desc->data, usage);
@@ -606,6 +678,30 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) {
             glVertexAttribPointer(attr->location, size, type, normalized, (GLsizei)layout->stride,
                                   (void *)(uintptr_t)attr->offset); // NOLINT(performance-no-int-to-ptr)
         }
+    }
+}
+
+/* ---- Uniform buffer ---- */
+
+void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
+        return;
+    }
+    GLuint buf = s_buffer_gl[backend_handle];
+    glBindBufferBase(GL_UNIFORM_BUFFER, slot, buf);
+}
+
+void nt_gfx_backend_set_uniform_block(uint32_t pipeline_backend, const char *block_name, uint32_t slot) {
+    if (pipeline_backend == 0 || pipeline_backend > s_init_desc.max_pipelines) {
+        return;
+    }
+    GLuint program = s_pipelines[pipeline_backend].program;
+    if (program == 0) {
+        return;
+    }
+    GLuint block_index = glGetUniformBlockIndex(program, block_name);
+    if (block_index != GL_INVALID_INDEX) {
+        glUniformBlockBinding(program, block_index, slot);
     }
 }
 

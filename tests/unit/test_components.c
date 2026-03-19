@@ -1,5 +1,6 @@
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
+#include "hash/nt_hash.h"
 #include "material_comp/nt_material_comp.h"
 #include "mesh_comp/nt_mesh_comp.h"
 #include "unity.h"
@@ -88,7 +89,7 @@ void test_material_has_and_remove(void) {
 void test_drawable_add_defaults_tag(void) {
     nt_entity_t e = nt_entity_create();
     nt_drawable_comp_add(e);
-    TEST_ASSERT_EQUAL_UINT16(0, *nt_drawable_comp_tag(e));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_drawable_comp_tag(e)->value);
 }
 
 void test_drawable_add_defaults_visible(void) {
@@ -118,9 +119,9 @@ void test_drawable_set_visible_false(void) {
 void test_drawable_set_tag(void) {
     nt_entity_t e = nt_entity_create();
     nt_drawable_comp_add(e);
-    *nt_drawable_comp_tag(e) = 5;
+    *nt_drawable_comp_tag(e) = (nt_hash32_t){.value = 5};
 
-    TEST_ASSERT_EQUAL_UINT16(5, *nt_drawable_comp_tag(e));
+    TEST_ASSERT_EQUAL_UINT32(5, nt_drawable_comp_tag(e)->value);
 }
 
 /* ---- Cross-component tests ---- */
@@ -157,8 +158,8 @@ void test_swap_and_pop_drawable(void) {
     nt_drawable_comp_add(e2);
     nt_drawable_comp_add(e3);
 
-    *nt_drawable_comp_tag(e1) = 10;
-    *nt_drawable_comp_tag(e3) = 30;
+    *nt_drawable_comp_tag(e1) = (nt_hash32_t){.value = 10};
+    *nt_drawable_comp_tag(e3) = (nt_hash32_t){.value = 30};
 
     /* Remove middle entity's component */
     nt_drawable_comp_remove(e2);
@@ -168,8 +169,8 @@ void test_swap_and_pop_drawable(void) {
     TEST_ASSERT_FALSE(nt_drawable_comp_has(e2));
     TEST_ASSERT_TRUE(nt_drawable_comp_has(e3));
 
-    TEST_ASSERT_EQUAL_UINT16(10, *nt_drawable_comp_tag(e1));
-    TEST_ASSERT_EQUAL_UINT16(30, *nt_drawable_comp_tag(e3));
+    TEST_ASSERT_EQUAL_UINT32(10, nt_drawable_comp_tag(e1)->value);
+    TEST_ASSERT_EQUAL_UINT32(30, nt_drawable_comp_tag(e3)->value);
 }
 
 /* ---- Main ---- */

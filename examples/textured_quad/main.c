@@ -1,11 +1,15 @@
 /*
  * Textured Cube Demo -- Neotolis Engine
  *
- * Full asset pipeline demo: mesh, shaders, and textures all from .ntpack packs.
+ * Full mesh rendering pipeline demo:
+ *   Entity/components → render items → nt_mesh_renderer_draw_list → GPU
+ *
+ * Shows: asset packs, material system, entity system, instanced mesh rendering,
+ * UBO frame uniforms, texture hot-swap via resource priorities.
  *
  * Packs:
- *   base.ntpack         -- cube mesh + shaders (loaded on start)
- *   lenna_pixel.ntpack  -- 8x8 pixel art lenna
+ *   base.ntpack         -- cube mesh + instanced shaders (loaded on start)
+ *   lenna_pixel.ntpack  -- 64x64 pixel art lenna
  *   lenna_hires.ntpack  -- full resolution lenna
  *
  * Controls:
@@ -19,6 +23,8 @@
 #include "app/nt_app.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#include "drawable_comp/nt_drawable_comp.h"
+#include "entity/nt_entity.h"
 #include "fs/nt_fs.h"
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
@@ -26,8 +32,14 @@
 #include "input/nt_input.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
+#include "material_comp/nt_material_comp.h"
+#include "mesh_comp/nt_mesh_comp.h"
+#include "render/nt_render_defs.h"
+#include "render/nt_render_items.h"
+#include "renderers/nt_mesh_renderer.h"
 #include "resource/nt_resource.h"
 #include "time/nt_time.h"
+#include "transform_comp/nt_transform_comp.h"
 #include "window/nt_window.h"
 
 #include "math/nt_math.h"
@@ -53,8 +65,8 @@ static const uint8_t s_checker_4x4[4 * 4 * 4] = {
 
 /* ---- GFX handles ---- */
 
-static nt_pipeline_t s_pipeline;
 static nt_texture_t s_fallback_texture;
+static nt_buffer_t s_frame_ubo;
 
 /* ---- Resource handles ---- */
 
@@ -74,11 +86,33 @@ static nt_material_t s_cube_material;
 static int16_t s_pixel_prio = 10;
 static int16_t s_hires_prio = 20;
 
+/* ---- Entities ---- */
+
+#define NUM_CUBES 5
+
+static nt_entity_t s_cubes[NUM_CUBES];
+
+/* clang-format off */
+static const float s_cube_positions[NUM_CUBES][3] = {
+    { 0.0F,  0.0F,  0.0F},
+    {-2.0F,  0.5F, -1.0F},
+    { 2.0F, -0.5F, -1.0F},
+    {-1.0F, -1.0F,  1.5F},
+    { 1.0F,  1.0F,  1.5F},
+};
+static const float s_cube_colors[NUM_CUBES][4] = {
+    {1.0F, 1.0F, 1.0F, 1.0F}, /* white — full texture */
+    {1.0F, 0.6F, 0.6F, 1.0F}, /* red tint */
+    {0.6F, 1.0F, 0.6F, 1.0F}, /* green tint */
+    {0.6F, 0.6F, 1.0F, 1.0F}, /* blue tint */
+    {1.0F, 1.0F, 0.6F, 1.0F}, /* yellow tint */
+};
+/* clang-format on */
+
 /* ---- State ---- */
 
 enum { STATE_EMPTY = 0, STATE_PIXEL = 1, STATE_BOTH = 2 };
 static int s_load_state = STATE_EMPTY;
-static bool s_pipeline_ready;
 static bool s_base_dumped;
 static bool s_pixel_dumped;
 static bool s_hires_dumped;
@@ -183,78 +217,123 @@ static void frame(void) {
         s_hires_dumped = true;
     }
 
-    /* Create pipeline once material is ready (shaders resolved) */
-    const nt_material_info_t *mat_info = nt_material_get_info(s_cube_material);
-    if (!s_pipeline_ready && mat_info && mat_info->ready) {
-        nt_shader_t vs = {.id = mat_info->resolved_vs};
-        nt_shader_t fs = {.id = mat_info->resolved_fs};
+    /* ---- Update entity transforms ---- */
 
-        /* Layout matches cube.glb: position(float3) + uv0(float2), stride 20 */
-        s_pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
-            .vertex_shader = vs,
-            .fragment_shader = fs,
-            .layout =
-                {
-                    .attrs =
-                        {
-                            {.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT3, .offset = 0}, {.location = 1, .format = NT_FORMAT_FLOAT2, .offset = 12}, /* mesh.vert: layout(location=1) a_uv */
-                        },
-                    .attr_count = 2,
-                    .stride = 20,
-                },
-            .depth_test = mat_info->depth_test,
-            .depth_write = mat_info->depth_write,
-            .depth_func = NT_DEPTH_LEQUAL,
-            .cull_face = (mat_info->cull_mode != NT_CULL_NONE),
-            .label = mat_info->label,
-        });
-        s_pipeline_ready = true;
-        nt_log_info(">> Pipeline created from material");
+    float angle = (float)nt_time_now() * 0.7F;
+
+    for (int i = 0; i < NUM_CUBES; i++) {
+        float *rot = nt_transform_comp_rotation(s_cubes[i]);
+
+        /* Each cube spins at a different rate */
+        float speed = 1.0F + ((float)i * 0.3F);
+        versor q_y;
+        versor q_x;
+        glm_quatv(q_y, angle * speed, (vec3){0, 1, 0});
+        glm_quatv(q_x, angle * speed * 0.6F, (vec3){1, 0, 0});
+        glm_quat_mul(q_y, q_x, rot);
+        *nt_transform_comp_dirty(s_cubes[i]) = true;
     }
 
-    /* Resolve texture from material (placeholder handles fallback automatically) */
-    nt_texture_t active_tex = {0};
-    if (mat_info && mat_info->tex_count > 0) {
-        active_tex.id = mat_info->resolved_tex[0];
-    }
+    nt_transform_comp_update();
 
-    /* Build MVP */
+    /* ---- Build frame uniforms ---- */
+
     float aspect = 1.0F;
     if (g_nt_window.fb_height > 0) {
         aspect = (float)g_nt_window.fb_width / (float)g_nt_window.fb_height;
     }
 
-    float angle = (float)nt_time_now() * 0.7F;
-    mat4 model;
-    mat4 proj;
-    mat4 view;
-    mat4 mvp;
-    mat4 tmp;
+    mat4 view_m;
+    mat4 proj_m;
+    mat4 vp;
+    glm_lookat((vec3){0.0F, 0.0F, 3.0F}, (vec3){0.0F, 0.0F, 0.0F}, (vec3){0.0F, 1.0F, 0.0F}, view_m);
+    glm_perspective(glm_rad(60.0F), aspect, 0.1F, 10.0F, proj_m);
+    glm_mat4_mul(proj_m, view_m, vp);
 
-    glm_mat4_identity(model);
-    glm_rotate_y(model, angle, model);
-    glm_rotate_x(model, angle * 0.6F, model);
-    glm_perspective(glm_rad(60.0F), aspect, 0.1F, 10.0F, proj);
-    glm_lookat((vec3){0.0F, 0.0F, 3.0F}, (vec3){0.0F, 0.0F, 0.0F}, (vec3){0.0F, 1.0F, 0.0F}, view);
-    glm_mat4_mul(proj, view, tmp);
-    glm_mat4_mul(tmp, model, mvp);
+    nt_frame_uniforms_t uniforms = {0};
+    memcpy(uniforms.view_proj, vp, 64);
+    memcpy(uniforms.view, view_m, 64);
+    memcpy(uniforms.proj, proj_m, 64);
+    uniforms.camera_pos[0] = 0.0F;
+    uniforms.camera_pos[1] = 0.0F;
+    uniforms.camera_pos[2] = 3.0F;
+    uniforms.time[0] = (float)nt_time_now();
+    uniforms.time[1] = g_nt_app.dt;
+    if (g_nt_window.fb_width > 0) {
+        uniforms.resolution[0] = (float)g_nt_window.fb_width;
+        uniforms.resolution[1] = (float)g_nt_window.fb_height;
+        uniforms.resolution[2] = 1.0F / (float)g_nt_window.fb_width;
+        uniforms.resolution[3] = 1.0F / (float)g_nt_window.fb_height;
+    }
+    uniforms.near_far[0] = 0.1F;
+    uniforms.near_far[1] = 10.0F;
 
-    /* Render */
+    /* ---- Build render items ---- */
+
+    const nt_material_info_t *mat_info = nt_material_get_info(s_cube_material);
+    bool can_render = mat_info && mat_info->ready && nt_resource_is_ready(s_mesh_handle);
+
+    /* ---- Render ---- */
+
     nt_gfx_begin_frame();
+
+    /* Restore GPU resources after WebGL context loss */
+    if (g_nt_gfx.context_restored) {
+        /* Invalidate all GFX-backed resources so they re-activate from blobs */
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+        nt_resource_invalidate(NT_ASSET_MESH);
+        nt_resource_invalidate(NT_ASSET_TEXTURE);
+
+        /* Re-register virtual pack resources (invalidate skips virtual packs) */
+        nt_resource_register(nt_hash32_str("__fallback__"), nt_hash64_str("__fallback_checker__"), NT_ASSET_TEXTURE, s_fallback_texture.id);
+
+        /* Recreate game-owned GPU resources */
+        s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+            .type = NT_BUFFER_UNIFORM,
+            .usage = NT_USAGE_DYNAMIC,
+            .size = sizeof(nt_frame_uniforms_t),
+            .label = "frame_uniforms",
+        });
+        nt_mesh_renderer_restore_gpu();
+    }
+
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.15F, 0.15F, 0.2F, 1.0F}, .clear_depth = 1.0F});
 
-    if (s_pipeline_ready && nt_resource_is_ready(s_mesh_handle)) {
-        uint32_t mesh_handle = nt_resource_get(s_mesh_handle);
-        const nt_gfx_mesh_info_t *mesh = nt_gfx_get_mesh_info((nt_mesh_t){.id = mesh_handle});
+    if (can_render) {
+        /* Upload frame uniforms and bind to slot 0 */
+        nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));
+        nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
-        if (mesh) {
-            nt_gfx_bind_pipeline(s_pipeline);
-            nt_gfx_bind_vertex_buffer(mesh->vbo);
-            nt_gfx_bind_index_buffer(mesh->ibo);
-            nt_gfx_bind_texture(active_tex, 0);
-            nt_gfx_set_uniform_mat4("u_mvp", (float *)mvp);
-            nt_gfx_set_uniform_int("u_texture", 0);
-            nt_gfx_draw_indexed(0, mesh->index_count, mesh->vertex_count);
+        uint32_t mesh_id = nt_resource_get(s_mesh_handle);
+
+        /* ---- Collect: build render items from entities ---- */
+        nt_render_item_t items[NUM_CUBES];
+        uint32_t item_count = 0;
+
+        for (int i = 0; i < NUM_CUBES; i++) {
+            /* Update mesh handle (may change when resource resolves) */
+            *nt_mesh_comp_handle(s_cubes[i]) = (nt_mesh_t){.id = mesh_id};
+
+            items[item_count].sort_key = nt_sort_key_opaque(s_cube_material.id, mesh_id);
+            items[item_count].entity = s_cubes[i].id;
+            items[item_count].batch_key = nt_batch_key(s_cube_material.id, mesh_id);
+            item_count++;
+        }
+
+        /* ---- Sort: order by sort_key (material+mesh grouping) ---- */
+        nt_sort_by_key(items, item_count);
+
+        /* ---- Draw: mesh renderer handles pipeline, instancing, batching ---- */
+        nt_mesh_renderer_draw_list(items, item_count);
+
+        /* One-time log to verify batching */
+        static bool s_stats_logged;
+        if (!s_stats_logged) {
+            char buf[128];
+            (void)snprintf(buf, sizeof(buf), ">> Render stats: %u draw calls, %u instanced, %u instances (from %u items)", g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.draw_calls_instanced,
+                           g_nt_gfx.frame_stats.instances, item_count);
+            nt_log_info(buf);
+            s_stats_logged = true;
         }
     }
 
@@ -285,6 +364,7 @@ int main(void) {
     /* Init I/O and resource systems */
     nt_http_init();
     nt_fs_init();
+    nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
 
     /* Register GFX activators */
@@ -301,10 +381,21 @@ int main(void) {
     nt_material_desc_t mat_desc = nt_material_desc_defaults();
     nt_material_init(&mat_desc);
 
-    /* Request resource handles */
+    /* Init entity / component systems */
+    nt_entity_init(&(nt_entity_desc_t){.max_entities = 64});
+    nt_transform_comp_init(&(nt_transform_comp_desc_t){.capacity = 64});
+    nt_mesh_comp_init(&(nt_mesh_comp_desc_t){.capacity = 64});
+    nt_material_comp_init(&(nt_material_comp_desc_t){.capacity = 64});
+    nt_drawable_comp_init(&(nt_drawable_comp_desc_t){.capacity = 64});
+
+    /* Init mesh renderer */
+    nt_mesh_renderer_desc_t mr_desc = nt_mesh_renderer_desc_defaults();
+    nt_mesh_renderer_init(&mr_desc);
+
+    /* Request resource handles (instanced shaders) */
     s_mesh_handle = nt_resource_request(nt_hash64_str("assets/meshes/cube.glb"), NT_ASSET_MESH);
-    s_vs_handle = nt_resource_request(nt_hash64_str("assets/shaders/mesh.vert"), NT_ASSET_SHADER_CODE);
-    s_fs_handle = nt_resource_request(nt_hash64_str("assets/shaders/mesh.frag"), NT_ASSET_SHADER_CODE);
+    s_vs_handle = nt_resource_request(nt_hash64_str("assets/shaders/mesh_inst.vert"), NT_ASSET_SHADER_CODE);
+    s_fs_handle = nt_resource_request(nt_hash64_str("assets/shaders/mesh_inst.frag"), NT_ASSET_SHADER_CODE);
     s_lenna_handle = nt_resource_request(nt_hash64_str("textures/lenna"), NT_ASSET_TEXTURE);
 
     /* Create material from resource handles */
@@ -318,11 +409,52 @@ int main(void) {
         .depth_test = true,
         .depth_write = true,
         .cull_mode = NT_CULL_BACK,
-        .label = "cube_lenna",
+        .label = "cube_lenna_instanced",
     });
 
-    /* Fallback checkerboard texture — registered as placeholder so material
-       resolved_tex[] gets checker handle while real textures load */
+    /* Create cube entities with all components */
+    for (int i = 0; i < NUM_CUBES; i++) {
+        s_cubes[i] = nt_entity_create();
+        nt_transform_comp_add(s_cubes[i]);
+        nt_mesh_comp_add(s_cubes[i]);
+        nt_material_comp_add(s_cubes[i]);
+        nt_drawable_comp_add(s_cubes[i]);
+
+        /* Set position */
+        float *p = nt_transform_comp_position(s_cubes[i]);
+        p[0] = s_cube_positions[i][0];
+        p[1] = s_cube_positions[i][1];
+        p[2] = s_cube_positions[i][2];
+
+        /* Set scale (smaller for orbiting cubes) */
+        float *scl = nt_transform_comp_scale(s_cubes[i]);
+        float s = (i == 0) ? 1.0F : 0.5F;
+        scl[0] = s;
+        scl[1] = s;
+        scl[2] = s;
+
+        *nt_transform_comp_dirty(s_cubes[i]) = true;
+
+        /* Set material */
+        *nt_material_comp_handle(s_cubes[i]) = s_cube_material;
+
+        /* Set tint color */
+        float *color = nt_drawable_comp_color(s_cubes[i]);
+        color[0] = s_cube_colors[i][0];
+        color[1] = s_cube_colors[i][1];
+        color[2] = s_cube_colors[i][2];
+        color[3] = s_cube_colors[i][3];
+    }
+
+    /* Create frame uniforms UBO (updated each frame) */
+    s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_UNIFORM,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = sizeof(nt_frame_uniforms_t),
+        .label = "frame_uniforms",
+    });
+
+    /* Fallback checkerboard texture */
     s_fallback_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
@@ -339,7 +471,7 @@ int main(void) {
     nt_resource_register(checker_pid, checker_rid, NT_ASSET_TEXTURE, s_fallback_texture.id);
     nt_resource_set_placeholder_texture(checker_rid);
 
-    /* Load base pack (cube mesh + shaders -- always present) */
+    /* Load base pack (cube mesh + instanced shaders -- always present) */
     nt_resource_mount(s_base_pack_id, 100);
     nt_resource_load_auto(s_base_pack_id, "assets/base.ntpack");
 
@@ -353,14 +485,19 @@ int main(void) {
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
-    if (s_pipeline_ready) {
-        nt_gfx_destroy_pipeline(s_pipeline);
-    }
+    nt_mesh_renderer_shutdown();
+    nt_drawable_comp_shutdown();
+    nt_material_comp_shutdown();
+    nt_mesh_comp_shutdown();
+    nt_transform_comp_shutdown();
+    nt_entity_shutdown();
     nt_material_destroy(s_cube_material);
     nt_material_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();
+    nt_hash_shutdown();
+    nt_gfx_destroy_buffer(s_frame_ubo);
     nt_gfx_destroy_texture(s_fallback_texture);
     nt_gfx_shutdown();
     nt_input_shutdown();
