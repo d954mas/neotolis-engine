@@ -18,6 +18,7 @@ emsdk/
 
 # IDE
 .idea/
+.clangd
 *.swp
 *.swo
 *~
@@ -43,3 +44,6 @@ package-lock.json
 .claude/get-shit-done/
 .claude/gsd-file-manifest.json
 .claude/gsd-local-patches/
+.claude/agents/gsd-*.md
+.claude/commands/gsd/
+.claude/hooks/gsd-*

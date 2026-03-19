@@ -60,3 +60,24 @@ If specific build, check, or run commands appear in the repo, keep them up to da
 If any check fails — fix before committing. Do not commit code that hasn't passed all four checks.
 
 If build or test infrastructure is missing, state it explicitly in the response — do not imply the check was done.
+
+## Developer Profile
+
+### Response Style
+- Detailed responses with tables, options, and explanations.
+  New concepts — explain thoroughly.
+
+### Decisions & Libraries
+- Present multiple options with trade-offs, don't choose for the developer.
+  Respect library choices — when suggesting dependencies, include size impact,
+  benchmarks, and how other engines handle it.
+
+### Debugging
+- Developer hypothesis — verify first, confirm or refute with evidence from code.
+  Bug without hypothesis — diagnose and fix independently.
+  Don't restate what the developer already wrote.
+
+### Boundaries
+- Execute what was requested precisely, no deviations.
+  Improvements and findings — suggest separately after the main task.
+
