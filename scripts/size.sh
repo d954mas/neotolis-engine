@@ -52,6 +52,10 @@ fi
 # ---------------------------------------------------------------------------
 TOTAL_RAW=0
 TOTAL_GZIP=0
+ENGINE_RAW=0
+ENGINE_GZIP=0
+RESOURCES_RAW=0
+RESOURCES_GZIP=0
 
 # Parallel arrays for file data
 declare -a FILE_NAMES=()
@@ -66,6 +70,13 @@ measure_file() {
     gz=$(gzip -c "$file" | wc -c | tr -d ' ')
     TOTAL_RAW=$((TOTAL_RAW + raw))
     TOTAL_GZIP=$((TOTAL_GZIP + gz))
+    if [ -n "$prefix" ]; then
+        RESOURCES_RAW=$((RESOURCES_RAW + raw))
+        RESOURCES_GZIP=$((RESOURCES_GZIP + gz))
+    else
+        ENGINE_RAW=$((ENGINE_RAW + raw))
+        ENGINE_GZIP=$((ENGINE_GZIP + gz))
+    fi
     FILE_NAMES+=("$fname")
     FILE_RAWS+=("$raw")
     FILE_GZIPS+=("$gz")
@@ -99,6 +110,10 @@ print_table() {
     done
 
     printf "%s\n" "$sep"
+    printf "%-24s %7d B  %7d B\n" "Engine" "$ENGINE_RAW" "$ENGINE_GZIP"
+    if [ "$RESOURCES_RAW" -gt 0 ]; then
+        printf "%-24s %7d B  %7d B\n" "Resources" "$RESOURCES_RAW" "$RESOURCES_GZIP"
+    fi
     printf "%-24s %7d B  %7d B\n" "TOTAL" "$TOTAL_RAW" "$TOTAL_GZIP"
     printf "\n"
 }
@@ -126,6 +141,8 @@ print_json() {
     done
 
     printf '  },\n'
+    printf '  "engine": { "raw": %d, "gzip": %d },\n' "$ENGINE_RAW" "$ENGINE_GZIP"
+    printf '  "resources": { "raw": %d, "gzip": %d },\n' "$RESOURCES_RAW" "$RESOURCES_GZIP"
     printf '  "total": { "raw": %d, "gzip": %d }\n' "$TOTAL_RAW" "$TOTAL_GZIP"
     printf '}\n'
 }

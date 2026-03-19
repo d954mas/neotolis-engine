@@ -7,6 +7,8 @@ interface SizeEntry {
 }
 
 interface SizeData {
+  engine: SizeEntry;
+  resources: SizeEntry;
   total: { gzip: number };
   files: Record<string, SizeEntry>;
 }
@@ -43,7 +45,12 @@ function formatSize(bytes: number): string {
 
     {sizeData ? (
       <div class="mt-2">
-        <span class="text-sm font-semibold text-accent">{formatSize(sizeData.total.gzip)} gzip</span>
+        <div class="flex items-baseline gap-2 flex-wrap">
+          <span class="text-sm font-semibold text-accent">{formatSize(sizeData.engine?.gzip ?? sizeData.total.gzip)} engine</span>
+          {sizeData.resources?.raw > 0 && (
+            <span class="text-sm text-text-secondary">+ {formatSize(sizeData.resources.gzip)} resources</span>
+          )}
+        </div>
         <details class="mt-2">
           <summary class="text-sm text-text-secondary cursor-pointer hover:text-text-primary">
             Size breakdown
@@ -55,6 +62,10 @@ function formatSize(bytes: number): string {
                 <span>{formatSize(sizes.gzip)}</span>
               </div>
             ))}
+            <div class="flex justify-between font-semibold border-t border-border pt-1 mt-1">
+              <span>Total</span>
+              <span>{formatSize(sizeData.total.gzip)}</span>
+            </div>
           </div>
         </details>
       </div>

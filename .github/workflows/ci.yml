@@ -272,14 +272,26 @@ jobs:
             [ -f "$TARGET_FILE" ] || continue
             ENTRIES=$(jq length "$TARGET_FILE")
             if [ "$ENTRIES" -gt 1 ]; then
-              PREV=$(jq '.[-2].total.raw' "$TARGET_FILE")
-              CURR=$(jq '.[-1].total.raw' "$TARGET_FILE")
-              if [ "$PREV" -gt 0 ]; then
-                GROWTH=$(( (CURR - PREV) * 100 / PREV ))
+              # Check engine size regression
+              PREV_ENGINE=$(jq '.[-2].engine.raw // .[-2].total.raw' "$TARGET_FILE")
+              CURR_ENGINE=$(jq '.[-1].engine.raw' "$TARGET_FILE")
+              if [ "$PREV_ENGINE" -gt 0 ]; then
+                GROWTH=$(( (CURR_ENGINE - PREV_ENGINE) * 100 / PREV_ENGINE ))
                 if [ "$GROWTH" -gt 10 ]; then
-                  echo "::warning::${example}: WASM size grew by ${GROWTH}% (${PREV}B -> ${CURR}B)"
+                  echo "::warning::${example}: engine size grew by ${GROWTH}% (${PREV_ENGINE}B -> ${CURR_ENGINE}B)"
                 else
-                  echo "${example}: size change ${GROWTH}% (${PREV}B -> ${CURR}B)"
+                  echo "${example}: engine size change ${GROWTH}% (${PREV_ENGINE}B -> ${CURR_ENGINE}B)"
+                fi
+              fi
+              # Check total size regression
+              PREV_TOTAL=$(jq '.[-2].total.raw' "$TARGET_FILE")
+              CURR_TOTAL=$(jq '.[-1].total.raw' "$TARGET_FILE")
+              if [ "$PREV_TOTAL" -gt 0 ]; then
+                GROWTH=$(( (CURR_TOTAL - PREV_TOTAL) * 100 / PREV_TOTAL ))
+                if [ "$GROWTH" -gt 10 ]; then
+                  echo "::warning::${example}: total size grew by ${GROWTH}% (${PREV_TOTAL}B -> ${CURR_TOTAL}B)"
+                else
+                  echo "${example}: total size change ${GROWTH}% (${PREV_TOTAL}B -> ${CURR_TOTAL}B)"
                 fi
               fi
             fi
@@ -408,19 +420,32 @@ jobs:
                 HAS_BASELINE=true
               fi
 
+              cur_engine_raw=$(echo "$CURRENT" | jq -r '.engine.raw')
+              cur_engine_gz=$(echo "$CURRENT" | jq -r '.engine.gzip')
+              cur_res_raw=$(echo "$CURRENT" | jq -r '.resources.raw')
               cur_total_raw=$(echo "$CURRENT" | jq -r '.total.raw')
               cur_total_gz=$(echo "$CURRENT" | jq -r '.total.gzip')
               if [ "$HAS_BASELINE" = true ]; then
+                base_engine_raw=$(echo "$BASELINE" | jq -r '.engine.raw // 0')
                 base_total_raw=$(echo "$BASELINE" | jq -r '.total.raw')
+                d_engine_raw=$((cur_engine_raw - base_engine_raw))
                 d_total_raw=$((cur_total_raw - base_total_raw))
+                [ "$d_engine_raw" -ge 0 ] && engine_delta_str="+${d_engine_raw} B" || engine_delta_str="${d_engine_raw} B"
                 [ "$d_total_raw" -ge 0 ] && delta_str="+${d_total_raw} B" || delta_str="${d_total_raw} B"
-                summary_extra=" | ${delta_str}"
+                summary_extra=" | engine ${engine_delta_str} | total ${delta_str}"
               else
                 summary_extra=""
               fi
 
+              # Build summary line: engine (+ resources if present)
+              if [ "$cur_res_raw" -gt 0 ]; then
+                summary_sizes="engine ${cur_engine_gz} B gzip + resources ${cur_res_raw} B = ${cur_total_gz} B gzip"
+              else
+                summary_sizes="${cur_total_gz} B gzip"
+              fi
+
               echo "<details>"
-              echo "<summary><code>${example}</code> — ${cur_total_raw} B raw, ${cur_total_gz} B gzip${summary_extra}</summary>"
+              echo "<summary><code>${example}</code> — ${summary_sizes}${summary_extra}</summary>"
               echo ""
               echo "| File | Raw | Gzip | Raw Delta | Gzip Delta |"
               echo "|------|----:|-----:|----------:|-----------:|"
@@ -443,13 +468,33 @@ jobs:
               done
 
               if [ "$HAS_BASELINE" = true ]; then
+                base_engine_gz=$(echo "$BASELINE" | jq -r '.engine.gzip // 0')
+                base_res_raw=$(echo "$BASELINE" | jq -r '.resources.raw // 0')
+                base_res_gz=$(echo "$BASELINE" | jq -r '.resources.gzip // 0')
                 base_total_gz=$(echo "$BASELINE" | jq -r '.total.gzip')
+                d_engine_gz=$((cur_engine_gz - base_engine_gz))
+                d_res_raw=$((cur_res_raw - base_res_raw))
+                cur_res_gz=$(echo "$CURRENT" | jq -r '.resources.gzip')
+                d_res_gz=$((cur_res_gz - base_res_gz))
                 d_total_gz=$((cur_total_gz - base_total_gz))
+                [ "$d_engine_raw" -ge 0 ] && d_engine_raw_str="+${d_engine_raw} B" || d_engine_raw_str="${d_engine_raw} B"
+                [ "$d_engine_gz" -ge 0 ] && d_engine_gz_str="+${d_engine_gz} B" || d_engine_gz_str="${d_engine_gz} B"
+                [ "$d_res_raw" -ge 0 ] && d_res_raw_str="+${d_res_raw} B" || d_res_raw_str="${d_res_raw} B"
+                [ "$d_res_gz" -ge 0 ] && d_res_gz_str="+${d_res_gz} B" || d_res_gz_str="${d_res_gz} B"
                 [ "$d_total_raw" -ge 0 ] && d_total_raw_str="+${d_total_raw} B" || d_total_raw_str="${d_total_raw} B"
                 [ "$d_total_gz" -ge 0 ] && d_total_gz_str="+${d_total_gz} B" || d_total_gz_str="${d_total_gz} B"
               else
+                cur_res_gz=$(echo "$CURRENT" | jq -r '.resources.gzip')
+                d_engine_raw_str="--"
+                d_engine_gz_str="--"
+                d_res_raw_str="--"
+                d_res_gz_str="--"
                 d_total_raw_str="--"
                 d_total_gz_str="--"
+              fi
+              echo "| **Engine** | **${cur_engine_raw} B** | **${cur_engine_gz} B** | **${d_engine_raw_str}** | **${d_engine_gz_str}** |"
+              if [ "$cur_res_raw" -gt 0 ]; then
+                echo "| **Resources** | **${cur_res_raw} B** | **${cur_res_gz} B** | **${d_res_raw_str}** | **${d_res_gz_str}** |"
               fi
               echo "| **Total** | **${cur_total_raw} B** | **${cur_total_gz} B** | **${d_total_raw_str}** | **${d_total_gz_str}** |"
               echo ""
