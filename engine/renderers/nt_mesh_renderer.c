@@ -56,40 +56,31 @@ static const nt_vertex_layout_t s_instance_layout = {
 /* ---- Stream type to vertex format mapping ---- */
 
 /* Map mesh stream type to GL vertex format.
- * FLOAT32/FLOAT16/INT16/UINT16: exact count 1-4 mapping.
+ * FLOAT32/FLOAT16: exact count 1-4 via lookup table.
+ * INT16/UINT16: count 2 or 4, with optional normalization.
  * UINT8/INT8: count must be 4 (vertex colors, bone indices, packed normals).
  * If new byte counts needed, extend nt_vertex_format_t or switch to raw (type, count, normalized). */
+
+/* clang-format off */
+static const nt_vertex_format_t s_float32_formats[4] = {NT_FORMAT_FLOAT, NT_FORMAT_FLOAT2, NT_FORMAT_FLOAT3, NT_FORMAT_FLOAT4};
+static const nt_vertex_format_t s_float16_formats[4] = {NT_FORMAT_HALF,  NT_FORMAT_HALF2,  NT_FORMAT_HALF3,  NT_FORMAT_HALF4};
+/* clang-format on */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_vertex_format_t nt_stream_to_vertex_format(uint8_t type, uint8_t count, uint8_t normalized) {
+    uint8_t idx = (count >= 1 && count <= 4) ? (uint8_t)(count - 1) : 3;
     switch (type) {
     case NT_STREAM_FLOAT32:
-        if (count == 1) {
-            return NT_FORMAT_FLOAT;
-        }
-        if (count == 2) {
-            return NT_FORMAT_FLOAT2;
-        }
-        if (count == 3) {
-            return NT_FORMAT_FLOAT3;
-        }
-        return NT_FORMAT_FLOAT4;
+        return s_float32_formats[idx];
     case NT_STREAM_FLOAT16:
-        if (count == 1) {
-            return NT_FORMAT_HALF;
-        }
-        if (count == 2) {
-            return NT_FORMAT_HALF2;
-        }
-        if (count == 3) {
-            return NT_FORMAT_HALF3;
-        }
-        return NT_FORMAT_HALF4;
+        return s_float16_formats[idx];
     case NT_STREAM_INT16:
         if (count <= 2) {
             return normalized ? NT_FORMAT_SHORT2N : NT_FORMAT_SHORT2;
         }
         return normalized ? NT_FORMAT_SHORT4N : NT_FORMAT_SHORT4;
     case NT_STREAM_UINT8:
-        NT_ASSERT(count == 4); /* GL byte formats require count=4 in current enum set */
+        NT_ASSERT(count == 4);
         return normalized ? NT_FORMAT_UBYTE4N : NT_FORMAT_UBYTE4;
     case NT_STREAM_INT8:
         NT_ASSERT(count == 4);
