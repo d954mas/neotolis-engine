@@ -254,6 +254,24 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_builder COMMAND test_builder
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
+
+    # --- Mesh renderer tests ---
+    add_executable(test_mesh_renderer unit/test_mesh_renderer.c)
+    target_link_libraries(test_mesh_renderer PRIVATE
+        nt_mesh_renderer nt_render nt_gfx_stub
+        nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp
+        nt_material nt_resource nt_hash unity
+    )
+    target_compile_definitions(test_mesh_renderer PRIVATE
+        NT_MESH_RENDERER_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS
+    )
+    nt_set_warning_flags(test_mesh_renderer)
+    nt_set_sanitizer_flags(test_mesh_renderer)
+    set_target_properties(test_mesh_renderer PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_mesh_renderer COMMAND test_mesh_renderer)
 endif()
 
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---
