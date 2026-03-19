@@ -52,6 +52,10 @@ fi
 # ---------------------------------------------------------------------------
 TOTAL_RAW=0
 TOTAL_GZIP=0
+ENGINE_RAW=0
+ENGINE_GZIP=0
+RESOURCES_RAW=0
+RESOURCES_GZIP=0
 
 # Parallel arrays for file data
 declare -a FILE_NAMES=()
@@ -66,6 +70,13 @@ measure_file() {
     gz=$(gzip -c "$file" | wc -c | tr -d ' ')
     TOTAL_RAW=$((TOTAL_RAW + raw))
     TOTAL_GZIP=$((TOTAL_GZIP + gz))
+    if [ -n "$prefix" ]; then
+        RESOURCES_RAW=$((RESOURCES_RAW + raw))
+        RESOURCES_GZIP=$((RESOURCES_GZIP + gz))
+    else
+        ENGINE_RAW=$((ENGINE_RAW + raw))
+        ENGINE_GZIP=$((ENGINE_GZIP + gz))
+    fi
     FILE_NAMES+=("$fname")
     FILE_RAWS+=("$raw")
     FILE_GZIPS+=("$gz")
@@ -85,21 +96,53 @@ if [ -d "$OUTPUT_DIR/assets" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Human-readable size formatting (KB/MB with 3 decimal places)
+# ---------------------------------------------------------------------------
+fmt_size() {
+    local bytes="$1"
+    if [ "$bytes" -ge 1048576 ]; then
+        awk "BEGIN { printf \"%.3f MB\", $bytes / 1048576 }"
+    elif [ "$bytes" -ge 1024 ]; then
+        awk "BEGIN { printf \"%.3f KB\", $bytes / 1024 }"
+    else
+        printf "%d B" "$bytes"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Table output (to stdout normally, to stderr in JSON mode)
 # ---------------------------------------------------------------------------
 print_table() {
-    local sep="-------------------------------------------"
+    local sep="-----------------------------------------------------"
     printf "\nTarget: %s (%s)\n" "$TARGET" "$PRESET"
     printf "%s\n" "$sep"
-    printf "%-24s %10s %10s\n" "File" "Raw" "Gzip"
+    printf "%-24s %12s %12s\n" "File" "Raw" "Gzip"
     printf "%s\n" "$sep"
 
+    # Engine files (no prefix)
     for i in "${!FILE_NAMES[@]}"; do
-        printf "%-24s %7d B  %7d B\n" "${FILE_NAMES[$i]}" "${FILE_RAWS[$i]}" "${FILE_GZIPS[$i]}"
+        case "${FILE_NAMES[$i]}" in
+            assets/*) continue ;;
+        esac
+        printf "%-24s %12s %12s\n" "${FILE_NAMES[$i]}" "$(fmt_size "${FILE_RAWS[$i]}")" "$(fmt_size "${FILE_GZIPS[$i]}")"
     done
+    printf "%-24s %12s %12s\n" "= Engine" "$(fmt_size "$ENGINE_RAW")" "$(fmt_size "$ENGINE_GZIP")"
+
+    # Resources (prefix assets/)
+    if [ "$RESOURCES_RAW" -gt 0 ]; then
+        printf "%s\n" "$sep"
+        for i in "${!FILE_NAMES[@]}"; do
+            case "${FILE_NAMES[$i]}" in
+                assets/*) ;;
+                *) continue ;;
+            esac
+            printf "%-24s %12s %12s\n" "${FILE_NAMES[$i]}" "$(fmt_size "${FILE_RAWS[$i]}")" "$(fmt_size "${FILE_GZIPS[$i]}")"
+        done
+        printf "%-24s %12s %12s\n" "= Resources" "$(fmt_size "$RESOURCES_RAW")" "$(fmt_size "$RESOURCES_GZIP")"
+    fi
 
     printf "%s\n" "$sep"
-    printf "%-24s %7d B  %7d B\n" "TOTAL" "$TOTAL_RAW" "$TOTAL_GZIP"
+    printf "%-24s %12s %12s\n" "TOTAL" "$(fmt_size "$TOTAL_RAW")" "$(fmt_size "$TOTAL_GZIP")"
     printf "\n"
 }
 
@@ -126,6 +169,8 @@ print_json() {
     done
 
     printf '  },\n'
+    printf '  "engine": { "raw": %d, "gzip": %d },\n' "$ENGINE_RAW" "$ENGINE_GZIP"
+    printf '  "resources": { "raw": %d, "gzip": %d },\n' "$RESOURCES_RAW" "$RESOURCES_GZIP"
     printf '  "total": { "raw": %d, "gzip": %d }\n' "$TOTAL_RAW" "$TOTAL_GZIP"
     printf '}\n'
 }
