@@ -55,26 +55,32 @@ static const nt_vertex_layout_t s_instance_layout = {
 
 /* ---- Stream type to vertex format mapping ---- */
 
-static nt_vertex_format_t stream_to_format(uint8_t type, uint8_t count) {
-    /* NT_STREAM_FLOAT32 (5) */
-    if (type == NT_STREAM_FLOAT32) {
-        if (count == 1) {
+/* Visible to tests via NT_MESH_RENDERER_TEST_ACCESS */
+nt_vertex_format_t nt_stream_to_vertex_format(uint8_t type, uint8_t count, uint8_t normalized) {
+    switch (type) {
+    case NT_STREAM_FLOAT32:
+        if (count == 1)
             return NT_FORMAT_FLOAT;
-        }
-        if (count == 2) {
+        if (count == 2)
             return NT_FORMAT_FLOAT2;
-        }
-        if (count == 3) {
+        if (count == 3)
             return NT_FORMAT_FLOAT3;
-        }
+        return NT_FORMAT_FLOAT4;
+    case NT_STREAM_FLOAT16:
+        return (count <= 2) ? NT_FORMAT_HALF2 : NT_FORMAT_HALF4;
+    case NT_STREAM_INT16:
+        return (count <= 2) ? (normalized ? NT_FORMAT_SHORT2N : NT_FORMAT_SHORT2) : (normalized ? NT_FORMAT_SHORT4N : NT_FORMAT_SHORT4);
+    case NT_STREAM_UINT8:
+        return normalized ? NT_FORMAT_UBYTE4N : NT_FORMAT_UBYTE4;
+    case NT_STREAM_INT8:
+        return NT_FORMAT_BYTE4N;
+    case NT_STREAM_UINT16:
+        /* GL_UNSIGNED_SHORT vertex attrs: uncommon, treat as short for now */
+        return (count <= 2) ? NT_FORMAT_SHORT2 : NT_FORMAT_SHORT4;
+    default:
+        nt_log_error("mesh_renderer: unmapped stream type in vertex layout");
         return NT_FORMAT_FLOAT4;
     }
-    /* NT_STREAM_UINT8 (0) with count==4 -> UBYTE4N */
-    if (type == NT_STREAM_UINT8 && count == 4) {
-        return NT_FORMAT_UBYTE4N;
-    }
-    /* Default fallback */
-    return NT_FORMAT_FLOAT4;
 }
 
 /* ---- Vertex layout offset computation helper ---- */
@@ -117,7 +123,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
 
         if (found && layout.attr_count < NT_GFX_MAX_VERTEX_ATTRS) {
             layout.attrs[layout.attr_count].location = location;
-            layout.attrs[layout.attr_count].format = stream_to_format(stream->type, stream->count);
+            layout.attrs[layout.attr_count].format = nt_stream_to_vertex_format(stream->type, stream->count, stream->normalized);
             layout.attrs[layout.attr_count].offset = offset;
             layout.attr_count++;
         }

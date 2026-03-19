@@ -1,5 +1,4 @@
 #include <math.h>
-#include <string.h>
 
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
@@ -30,7 +29,7 @@ void tearDown(void) {
 
 void test_globals_size(void) {
     /* _Static_assert in nt_render_defs.h guarantees 256 bytes at compile time */
-    TEST_ASSERT_EQUAL_UINT32(256, sizeof(nt_globals_t));
+    TEST_ASSERT_EQUAL_UINT32(256, sizeof(nt_frame_uniforms_t));
 }
 
 void test_instance_size(void) {
@@ -176,24 +175,6 @@ void test_is_visible_valid(void) {
     TEST_ASSERT_TRUE(nt_render_is_visible(e));
 }
 
-/* ---- Get defaults ---- */
-
-/* NOLINTNEXTLINE(readability-function-cognitive-complexity) */
-void test_get_defaults_zeroed(void) {
-    nt_globals_t globals;
-    memset(&globals, 0xFF, sizeof(globals)); /* fill with junk */
-    nt_gfx_get_defaults(&globals);
-
-    /* All fields should be zero */
-    TEST_ASSERT_TRUE(globals.view_proj[0] == 0.0F);  /* NOLINT */
-    TEST_ASSERT_TRUE(globals.view[0] == 0.0F);       /* NOLINT */
-    TEST_ASSERT_TRUE(globals.proj[0] == 0.0F);       /* NOLINT */
-    TEST_ASSERT_TRUE(globals.camera_pos[0] == 0.0F); /* NOLINT */
-    TEST_ASSERT_TRUE(globals.time[0] == 0.0F);       /* NOLINT */
-    TEST_ASSERT_TRUE(globals.resolution[0] == 0.0F); /* NOLINT */
-    TEST_ASSERT_TRUE(globals.near_far[0] == 0.0F);   /* NOLINT */
-}
-
 /* ---- Drawable tag migration (nt_hash32_t) ---- */
 
 void test_drawable_tag_default_hash(void) {
@@ -242,8 +223,6 @@ int main(void) {
     RUN_TEST(test_is_visible_not_visible);
     RUN_TEST(test_is_visible_zero_alpha);
     RUN_TEST(test_is_visible_valid);
-    /* Defaults */
-    RUN_TEST(test_get_defaults_zeroed);
     /* Drawable tag migration */
     RUN_TEST(test_drawable_tag_default_hash);
     RUN_TEST(test_drawable_tag_set_get_hash);

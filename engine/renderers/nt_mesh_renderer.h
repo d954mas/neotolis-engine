@@ -2,6 +2,7 @@
 #define NT_MESH_RENDERER_H
 
 #include "core/nt_types.h"
+#include "graphics/nt_gfx.h"
 #include "render/nt_render_defs.h"
 
 typedef struct {
@@ -22,5 +23,8 @@ uint32_t nt_mesh_renderer_test_pipeline_cache_count(void);
 uint32_t nt_mesh_renderer_test_draw_call_count(void);
 uint32_t nt_mesh_renderer_test_instance_total(void);
 #endif
+
+/* Stream type → vertex format mapping (used by pipeline builder, testable) */
+nt_vertex_format_t nt_stream_to_vertex_format(uint8_t type, uint8_t count, uint8_t normalized);
 
 #endif /* NT_MESH_RENDERER_H */

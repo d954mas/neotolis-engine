@@ -1,7 +1,5 @@
 #include "render/nt_render_util.h"
 
-#include <string.h>
-
 #include "drawable_comp/nt_drawable_comp.h"
 
 /* ---- Visibility check ---- */
@@ -25,7 +23,3 @@ bool nt_render_is_visible(nt_entity_t entity) {
     }
     return true;
 }
-
-/* ---- Default globals ---- */
-
-void nt_gfx_get_defaults(nt_globals_t *globals) { memset(globals, 0, sizeof(*globals)); }

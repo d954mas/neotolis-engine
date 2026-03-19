@@ -13,9 +13,9 @@ typedef struct {
     float time[4];       /* vec4: .x=elapsed, .y=delta, .zw=reserved */
     float resolution[4]; /* vec4: .x=w, .y=h, .z=1/w, .w=1/h */
     float near_far[4];   /* vec4: .x=near, .y=far, .z=1/near, .w=1/far */
-} nt_globals_t;
+} nt_frame_uniforms_t;
 
-_Static_assert(sizeof(nt_globals_t) == 256, "globals must be 256 bytes for std140");
+_Static_assert(sizeof(nt_frame_uniforms_t) == 256, "globals must be 256 bytes for std140");
 
 /* ---- Per-instance data for mesh rendering (80 bytes) ---- */
 

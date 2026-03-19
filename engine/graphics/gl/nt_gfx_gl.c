@@ -149,9 +149,49 @@ static void get_format_params(nt_vertex_format_t fmt, GLint *size, GLenum *type,
         *type = GL_FLOAT;
         *normalized = GL_FALSE;
         break;
+    case NT_FORMAT_HALF2:
+        *size = 2;
+        *type = GL_HALF_FLOAT;
+        *normalized = GL_FALSE;
+        break;
+    case NT_FORMAT_HALF4:
+        *size = 4;
+        *type = GL_HALF_FLOAT;
+        *normalized = GL_FALSE;
+        break;
+    case NT_FORMAT_SHORT2:
+        *size = 2;
+        *type = GL_SHORT;
+        *normalized = GL_FALSE;
+        break;
+    case NT_FORMAT_SHORT2N:
+        *size = 2;
+        *type = GL_SHORT;
+        *normalized = GL_TRUE;
+        break;
+    case NT_FORMAT_SHORT4:
+        *size = 4;
+        *type = GL_SHORT;
+        *normalized = GL_FALSE;
+        break;
+    case NT_FORMAT_SHORT4N:
+        *size = 4;
+        *type = GL_SHORT;
+        *normalized = GL_TRUE;
+        break;
+    case NT_FORMAT_UBYTE4:
+        *size = 4;
+        *type = GL_UNSIGNED_BYTE;
+        *normalized = GL_FALSE;
+        break;
     case NT_FORMAT_UBYTE4N:
         *size = 4;
         *type = GL_UNSIGNED_BYTE;
+        *normalized = GL_TRUE;
+        break;
+    case NT_FORMAT_BYTE4N:
+        *size = 4;
+        *type = GL_BYTE;
         *normalized = GL_TRUE;
         break;
     default:

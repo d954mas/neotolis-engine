@@ -391,6 +391,45 @@ void test_restore_gpu(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
 }
 
+/* ---- Test 10: stream_to_format covers all mesh format stream types ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_stream_to_format_float32(void) {
+    TEST_ASSERT_EQUAL(NT_FORMAT_FLOAT, nt_stream_to_vertex_format(NT_STREAM_FLOAT32, 1, 0));
+    TEST_ASSERT_EQUAL(NT_FORMAT_FLOAT2, nt_stream_to_vertex_format(NT_STREAM_FLOAT32, 2, 0));
+    TEST_ASSERT_EQUAL(NT_FORMAT_FLOAT3, nt_stream_to_vertex_format(NT_STREAM_FLOAT32, 3, 0));
+    TEST_ASSERT_EQUAL(NT_FORMAT_FLOAT4, nt_stream_to_vertex_format(NT_STREAM_FLOAT32, 4, 0));
+}
+
+void test_stream_to_format_float16(void) {
+    TEST_ASSERT_EQUAL(NT_FORMAT_HALF2, nt_stream_to_vertex_format(NT_STREAM_FLOAT16, 2, 0));
+    TEST_ASSERT_EQUAL(NT_FORMAT_HALF4, nt_stream_to_vertex_format(NT_STREAM_FLOAT16, 4, 0));
+    TEST_ASSERT_EQUAL(NT_FORMAT_HALF2, nt_stream_to_vertex_format(NT_STREAM_FLOAT16, 1, 0));
+    TEST_ASSERT_EQUAL(NT_FORMAT_HALF4, nt_stream_to_vertex_format(NT_STREAM_FLOAT16, 3, 0));
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_stream_to_format_int16(void) {
+    TEST_ASSERT_EQUAL(NT_FORMAT_SHORT2, nt_stream_to_vertex_format(NT_STREAM_INT16, 2, 0));
+    TEST_ASSERT_EQUAL(NT_FORMAT_SHORT2N, nt_stream_to_vertex_format(NT_STREAM_INT16, 2, 1));
+    TEST_ASSERT_EQUAL(NT_FORMAT_SHORT4, nt_stream_to_vertex_format(NT_STREAM_INT16, 4, 0));
+    TEST_ASSERT_EQUAL(NT_FORMAT_SHORT4N, nt_stream_to_vertex_format(NT_STREAM_INT16, 4, 1));
+}
+
+void test_stream_to_format_uint8(void) {
+    TEST_ASSERT_EQUAL(NT_FORMAT_UBYTE4, nt_stream_to_vertex_format(NT_STREAM_UINT8, 4, 0));
+    TEST_ASSERT_EQUAL(NT_FORMAT_UBYTE4N, nt_stream_to_vertex_format(NT_STREAM_UINT8, 4, 1));
+}
+
+void test_stream_to_format_int8(void) {
+    TEST_ASSERT_EQUAL(NT_FORMAT_BYTE4N, nt_stream_to_vertex_format(NT_STREAM_INT8, 4, 1));
+}
+
+void test_stream_to_format_uint16(void) {
+    TEST_ASSERT_EQUAL(NT_FORMAT_SHORT2, nt_stream_to_vertex_format(NT_STREAM_UINT16, 2, 0));
+    TEST_ASSERT_EQUAL(NT_FORMAT_SHORT4, nt_stream_to_vertex_format(NT_STREAM_UINT16, 4, 0));
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -405,6 +444,13 @@ int main(void) {
     RUN_TEST(test_pipeline_cache_reuse);
     RUN_TEST(test_pipeline_cache_different_layouts);
     RUN_TEST(test_restore_gpu);
+    /* Stream format mapping */
+    RUN_TEST(test_stream_to_format_float32);
+    RUN_TEST(test_stream_to_format_float16);
+    RUN_TEST(test_stream_to_format_int16);
+    RUN_TEST(test_stream_to_format_uint8);
+    RUN_TEST(test_stream_to_format_int8);
+    RUN_TEST(test_stream_to_format_uint16);
 
     return UNITY_END();
 }
