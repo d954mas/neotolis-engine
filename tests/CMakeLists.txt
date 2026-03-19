@@ -161,13 +161,23 @@ if(NOT EMSCRIPTEN)
 
     # --- Component tests (mesh, material, drawable) ---
     add_executable(test_components unit/test_components.c)
-    target_link_libraries(test_components PRIVATE nt_mesh_comp nt_material_comp nt_drawable_comp nt_entity unity)
+    target_link_libraries(test_components PRIVATE nt_mesh_comp nt_material_comp nt_drawable_comp nt_entity nt_hash unity)
     nt_set_warning_flags(test_components)
     nt_set_sanitizer_flags(test_components)
     set_target_properties(test_components PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_components COMMAND test_components)
+
+    # --- Render items tests ---
+    add_executable(test_render_items unit/test_render_items.c)
+    target_link_libraries(test_render_items PRIVATE nt_render nt_entity nt_drawable_comp nt_transform_comp nt_hash nt_gfx_stub unity)
+    nt_set_warning_flags(test_render_items)
+    nt_set_sanitizer_flags(test_render_items)
+    set_target_properties(test_render_items PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_render_items COMMAND test_render_items)
 
     # --- Material module tests ---
     add_executable(test_material unit/test_material.c)

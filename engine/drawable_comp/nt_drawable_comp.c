@@ -5,19 +5,20 @@
 
 #include "comp_storage/nt_comp_storage.h"
 #include "core/nt_assert.h"
+#include "hash/nt_hash.h"
 
 static nt_comp_storage_t s_storage;
 
 /* ---- Data arrays ---- */
 
-static uint16_t *s_tags;
+static nt_hash32_t *s_tags;
 static bool *s_visible;
 static float (*s_colors)[4]; /* float[N][4] */
 
 /* ---- Callbacks ---- */
 
 static void drawable_default(uint16_t idx) {
-    s_tags[idx] = 0;
+    s_tags[idx] = (nt_hash32_t){.value = 0};
     s_visible[idx] = true;
     s_colors[idx][0] = 1.0F;
     s_colors[idx][1] = 1.0F;
@@ -50,7 +51,7 @@ nt_result_t nt_drawable_comp_init(const nt_drawable_comp_desc_t *desc) {
     }
 
     uint16_t cap = desc->capacity;
-    s_tags = (uint16_t *)calloc(cap, sizeof(uint16_t));
+    s_tags = (nt_hash32_t *)calloc(cap, sizeof(nt_hash32_t));
     s_visible = (bool *)calloc(cap, sizeof(bool));
     s_colors = calloc(cap, sizeof(*s_colors));
 
@@ -86,7 +87,7 @@ bool nt_drawable_comp_has(nt_entity_t entity) { return nt_comp_storage_has(&s_st
 
 void nt_drawable_comp_remove(nt_entity_t entity) { nt_comp_storage_remove(&s_storage, entity); }
 
-uint16_t *nt_drawable_comp_tag(nt_entity_t entity) {
+nt_hash32_t *nt_drawable_comp_tag(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT_ALWAYS(idx != NT_INVALID_COMP_INDEX);
     return &s_tags[idx];
