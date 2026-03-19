@@ -212,9 +212,9 @@ static void frame(void) {
         nt_log_info(">> Pipeline created from material");
     }
 
-    /* Resolve texture from material, fallback if not ready */
-    nt_texture_t active_tex = s_fallback_texture;
-    if (mat_info && mat_info->tex_count > 0 && mat_info->resolved_tex[0] != 0) {
+    /* Resolve texture from material (placeholder handles fallback automatically) */
+    nt_texture_t active_tex = {0};
+    if (mat_info && mat_info->tex_count > 0) {
         active_tex.id = mat_info->resolved_tex[0];
     }
 
@@ -321,7 +321,8 @@ int main(void) {
         .label = "cube_lenna",
     });
 
-    /* Fallback checkerboard texture */
+    /* Fallback checkerboard texture — registered as placeholder so material
+       resolved_tex[] gets checker handle while real textures load */
     s_fallback_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
@@ -332,6 +333,11 @@ int main(void) {
         .wrap_v = NT_WRAP_REPEAT,
         .label = "fallback_checker",
     });
+    nt_hash64_t checker_rid = nt_hash64_str("__fallback_checker__");
+    nt_hash32_t checker_pid = nt_hash32_str("__fallback__");
+    nt_resource_create_pack(checker_pid, 0);
+    nt_resource_register(checker_pid, checker_rid, NT_ASSET_TEXTURE, s_fallback_texture.id);
+    nt_resource_set_placeholder_texture(checker_rid);
 
     /* Load base pack (cube mesh + shaders -- always present) */
     nt_resource_mount(s_base_pack_id, 100);
