@@ -562,9 +562,9 @@ void test_deactivate_mesh_clears_table(void) {
     sd->count = 3;
 
     uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
-    TEST_ASSERT_NOT_NULL(nt_gfx_get_mesh_info(handle));
+    TEST_ASSERT_NOT_NULL(nt_gfx_get_mesh_info((nt_mesh_t){.id = handle}));
     nt_gfx_deactivate_mesh(handle);
-    TEST_ASSERT_NULL(nt_gfx_get_mesh_info(handle));
+    TEST_ASSERT_NULL(nt_gfx_get_mesh_info((nt_mesh_t){.id = handle}));
 }
 
 /* ---- Mesh info fields ---- */
@@ -592,7 +592,7 @@ void test_mesh_info_fields(void) {
     sd->count = 3;
 
     uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
-    const nt_gfx_mesh_info_t *info = nt_gfx_get_mesh_info(handle);
+    const nt_gfx_mesh_info_t *info = nt_gfx_get_mesh_info((nt_mesh_t){.id = handle});
     TEST_ASSERT_NOT_NULL(info);
     TEST_ASSERT_EQUAL_UINT32(3, info->vertex_count);
     TEST_ASSERT_EQUAL_UINT32(3, info->index_count);

@@ -31,7 +31,7 @@ void test_mesh_add_returns_true(void) {
 void test_mesh_add_default_handle(void) {
     nt_entity_t e = nt_entity_create();
     nt_mesh_comp_add(e);
-    TEST_ASSERT_EQUAL_UINT32(0, *nt_mesh_comp_handle(e));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_mesh_comp_handle(e)->id);
 }
 
 void test_mesh_has_true_after_add(void) {
@@ -55,9 +55,9 @@ void test_mesh_remove_makes_has_false(void) {
 void test_mesh_get_set_handle(void) {
     nt_entity_t e = nt_entity_create();
     nt_mesh_comp_add(e);
-    *nt_mesh_comp_handle(e) = 42;
+    nt_mesh_comp_handle(e)->id = 42;
 
-    TEST_ASSERT_EQUAL_UINT32(42, *nt_mesh_comp_handle(e));
+    TEST_ASSERT_EQUAL_UINT32(42, nt_mesh_comp_handle(e)->id);
 }
 
 /* ---- Material component tests ---- */

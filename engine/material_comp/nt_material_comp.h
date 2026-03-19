@@ -24,6 +24,7 @@ bool nt_material_comp_add(nt_entity_t entity);
 bool nt_material_comp_has(nt_entity_t entity);
 void nt_material_comp_remove(nt_entity_t entity);
 
+/* Caller MUST call nt_material_comp_has() first — traps if entity has no component */
 nt_material_t *nt_material_comp_handle(nt_entity_t entity);
 
 #endif /* NT_MATERIAL_COMP_H */

@@ -245,7 +245,7 @@ static void frame(void) {
 
     if (s_pipeline_ready && nt_resource_is_ready(s_mesh_handle)) {
         uint32_t mesh_handle = nt_resource_get(s_mesh_handle);
-        const nt_gfx_mesh_info_t *mesh = nt_gfx_get_mesh_info(mesh_handle);
+        const nt_gfx_mesh_info_t *mesh = nt_gfx_get_mesh_info((nt_mesh_t){.id = mesh_handle});
 
         if (mesh) {
             nt_gfx_bind_pipeline(s_pipeline);

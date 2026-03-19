@@ -77,7 +77,7 @@ void nt_material_step(void) {
         uint32_t vs = nt_resource_get(mat->vs_resource);
         uint32_t fs = nt_resource_get(mat->fs_resource);
 
-        /* Change detection */
+        /* Change detection (shaders only — texture changes don't affect pipeline) */
         if (vs != mat->last_vs || fs != mat->last_fs) {
             mat->info.version++;
             mat->last_vs = vs;

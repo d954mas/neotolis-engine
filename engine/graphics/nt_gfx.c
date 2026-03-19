@@ -835,9 +835,9 @@ void nt_gfx_deactivate_shader(uint32_t handle) {
 
 /* ---- Mesh info query ---- */
 
-const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(uint32_t mesh_handle) {
-    uint32_t index = mesh_handle & 0xFFFF;
-    uint16_t gen = (uint16_t)(mesh_handle >> 16);
+const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh) {
+    uint32_t index = mesh.id & 0xFFFF;
+    uint16_t gen = (uint16_t)(mesh.id >> 16);
     if (index == 0 || index > NT_GFX_MAX_MESHES) {
         return NULL;
     }

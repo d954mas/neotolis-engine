@@ -22,6 +22,12 @@ typedef struct {
     uint32_t id;
 } nt_texture_t;
 
+typedef struct {
+    uint32_t id;
+} nt_mesh_t;
+
+#define NT_MESH_INVALID ((nt_mesh_t){0})
+
 /* ---- Mesh info (side table for VBO+IBO pairs from mesh activator) ---- */
 
 #ifndef NT_GFX_MAX_MESHES
@@ -288,6 +294,6 @@ void nt_gfx_deactivate_shader(uint32_t handle);
 
 /* ---- Mesh info query ---- */
 
-const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(uint32_t mesh_handle);
+const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh);
 
 #endif /* NT_GFX_H */

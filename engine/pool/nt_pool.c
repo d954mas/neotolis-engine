@@ -70,6 +70,7 @@ void nt_pool_free(nt_pool_t *pool, uint32_t id) {
         gen = 1;
     }
     pool->slots[slot_index].id = gen << NT_POOL_SLOT_SHIFT;
+    NT_ASSERT(pool->queue_top < pool->capacity); /* double-free or corruption */
     pool->free_queue[pool->queue_top] = slot_index;
     pool->queue_top++;
 }
