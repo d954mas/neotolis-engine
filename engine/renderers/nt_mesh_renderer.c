@@ -94,8 +94,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
 
     /* Full pipeline signature: layout + shaders + render state.
      * Multiplicative hash combining to avoid collisions. */
-    uint32_t state_bits = ((uint32_t)mat_info->blend_mode) | ((uint32_t)mat_info->depth_test << 4) |
-                          ((uint32_t)mat_info->depth_write << 5) | ((uint32_t)mat_info->cull_mode << 6);
+    uint32_t state_bits = ((uint32_t)mat_info->blend_mode) | ((uint32_t)mat_info->depth_test << 4) | ((uint32_t)mat_info->depth_write << 5) | ((uint32_t)mat_info->cull_mode << 6);
     uint64_t key = mesh_info->layout_hash;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_vs;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_fs;
