@@ -421,9 +421,7 @@ void test_stream_to_format_uint8(void) {
     TEST_ASSERT_EQUAL(NT_FORMAT_UBYTE4N, nt_stream_to_vertex_format(NT_STREAM_UINT8, 4, 1));
 }
 
-void test_stream_to_format_int8(void) {
-    TEST_ASSERT_EQUAL(NT_FORMAT_BYTE4N, nt_stream_to_vertex_format(NT_STREAM_INT8, 4, 1));
-}
+void test_stream_to_format_int8(void) { TEST_ASSERT_EQUAL(NT_FORMAT_BYTE4N, nt_stream_to_vertex_format(NT_STREAM_INT8, 4, 1)); }
 
 void test_stream_to_format_uint16(void) {
     TEST_ASSERT_EQUAL(NT_FORMAT_SHORT2, nt_stream_to_vertex_format(NT_STREAM_UINT16, 2, 0));

@@ -629,6 +629,18 @@ void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
     nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot);
 }
 
+void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_t slot) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
+        nt_log_error("gfx: set_uniform_block: invalid pipeline handle");
+        return;
+    }
+    uint32_t idx = nt_pool_slot_index(pip.id);
+    nt_gfx_backend_set_uniform_block(s_gfx.pipeline_backends[idx], block_name, slot);
+}
+
 /* ---- Buffer update ---- */
 
 void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {

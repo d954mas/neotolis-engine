@@ -16,7 +16,7 @@ float nt_calc_view_depth(uint32_t entity_id, const float view_pos[3], const floa
     float dy = m[13] - view_pos[1];
     float dz = m[14] - view_pos[2];
 
-    return dx * view_fwd[0] + dy * view_fwd[1] + dz * view_fwd[2];
+    return (dx * view_fwd[0]) + (dy * view_fwd[1]) + (dz * view_fwd[2]);
 }
 
 /* ---- Sort by key ---- */

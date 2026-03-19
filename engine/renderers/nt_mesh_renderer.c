@@ -59,17 +59,23 @@ static const nt_vertex_layout_t s_instance_layout = {
 nt_vertex_format_t nt_stream_to_vertex_format(uint8_t type, uint8_t count, uint8_t normalized) {
     switch (type) {
     case NT_STREAM_FLOAT32:
-        if (count == 1)
+        if (count == 1) {
             return NT_FORMAT_FLOAT;
-        if (count == 2)
+        }
+        if (count == 2) {
             return NT_FORMAT_FLOAT2;
-        if (count == 3)
+        }
+        if (count == 3) {
             return NT_FORMAT_FLOAT3;
+        }
         return NT_FORMAT_FLOAT4;
     case NT_STREAM_FLOAT16:
         return (count <= 2) ? NT_FORMAT_HALF2 : NT_FORMAT_HALF4;
     case NT_STREAM_INT16:
-        return (count <= 2) ? (normalized ? NT_FORMAT_SHORT2N : NT_FORMAT_SHORT2) : (normalized ? NT_FORMAT_SHORT4N : NT_FORMAT_SHORT4);
+        if (count <= 2) {
+            return normalized ? NT_FORMAT_SHORT2N : NT_FORMAT_SHORT2;
+        }
+        return normalized ? NT_FORMAT_SHORT4N : NT_FORMAT_SHORT4;
     case NT_STREAM_UINT8:
         return normalized ? NT_FORMAT_UBYTE4N : NT_FORMAT_UBYTE4;
     case NT_STREAM_INT8:

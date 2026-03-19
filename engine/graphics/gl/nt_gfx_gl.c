@@ -475,7 +475,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
         return 0;
     }
 
-    /* Auto-bind "Globals" UBO block to slot 0 if present */
+    /* Auto-bind "Globals" UBO block to slot 0 if present (engine convention) */
     {
         GLuint block_index = glGetUniformBlockIndex(program, "Globals");
         if (block_index != GL_INVALID_INDEX) {
@@ -679,6 +679,20 @@ void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) 
     }
     GLuint buf = s_buffer_gl[backend_handle];
     glBindBufferBase(GL_UNIFORM_BUFFER, slot, buf);
+}
+
+void nt_gfx_backend_set_uniform_block(uint32_t pipeline_backend, const char *block_name, uint32_t slot) {
+    if (pipeline_backend == 0 || pipeline_backend > s_init_desc.max_pipelines) {
+        return;
+    }
+    GLuint program = s_pipelines[pipeline_backend].program;
+    if (program == 0) {
+        return;
+    }
+    GLuint block_index = glGetUniformBlockIndex(program, block_name);
+    if (block_index != GL_INVALID_INDEX) {
+        glUniformBlockBinding(program, block_index, slot);
+    }
 }
 
 /* ---- Texture management ---- */

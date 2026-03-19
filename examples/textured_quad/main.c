@@ -225,7 +225,7 @@ static void frame(void) {
         float *rot = nt_transform_comp_rotation(s_cubes[i]);
 
         /* Each cube spins at a different rate */
-        float speed = 1.0F + (float)i * 0.3F;
+        float speed = 1.0F + ((float)i * 0.3F);
         versor q_y;
         versor q_x;
         glm_quatv(q_y, angle * speed, (vec3){0, 1, 0});
@@ -330,8 +330,7 @@ static void frame(void) {
         static bool s_stats_logged;
         if (!s_stats_logged) {
             char buf[128];
-            (void)snprintf(buf, sizeof(buf), ">> Render stats: %u draw calls, %u instanced, %u instances (from %u items)",
-                           g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.draw_calls_instanced,
+            (void)snprintf(buf, sizeof(buf), ">> Render stats: %u draw calls, %u instanced, %u instances (from %u items)", g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.draw_calls_instanced,
                            g_nt_gfx.frame_stats.instances, item_count);
             nt_log_info(buf);
             s_stats_logged = true;

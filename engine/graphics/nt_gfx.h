@@ -288,6 +288,7 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf);
 /* ---- Uniform buffer ---- */
 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
+void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_t slot);
 
 /* ---- Buffer update ---- */
 

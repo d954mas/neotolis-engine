@@ -11,7 +11,7 @@ layout(location = 6) in vec4 a_world_col2;
 layout(location = 7) in vec4 a_world_col3;
 layout(location = 8) in vec4 a_color;
 
-/* Frame uniforms UBO (slot 0, game uploads before draw_list) */
+/* Frame uniforms UBO (slot 0, bound via nt_gfx_set_uniform_block) */
 layout(std140) uniform Globals {
     mat4 view_proj;
     mat4 view;
