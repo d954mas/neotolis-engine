@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis)
-# Commit: 3a7385a
+# Commit: 9422c8d
 
 ## WASM Section Sizes
 
@@ -7,55 +7,55 @@ Section                Size
 ---------------- ----------
 Type                 178 B
 Import               353 B
-Function              88 B
+Function              94 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                59 B
-Elem                  33 B
-Code               61452 B
-Data                8776 B
-Custom              3174 B
+Elem                  39 B
+Code               54427 B
+Data                8767 B
+Custom              3278 B
 ---------------- ----------
-TOTAL              74134 B
+TOTAL              67216 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-15172 B   frame
-12872 B   main
- 5335 B   dlmalloc
+15072 B   frame
+11782 B   main
  3102 B   fmt_fp
  2628 B   printf_core
  2041 B   __rem_pio2f
- 1560 B   dlfree
  1058 B   nt_shape_renderer_flush
- 1057 B   nt_gfx_make_pipeline
   931 B   nt_input_web_on_blur
-  796 B   nt_gfx_bind_pipeline
+  794 B   nt_gfx_make_pipeline
+  759 B   nt_gfx_bind_pipeline
   706 B   nt_input_web_on_pointer_move
   667 B   nt_input_web_on_pointer_down
   650 B   pop_arg_long_double
   559 B   push_instance
-  539 B   nt_gfx_make_buffer
+  554 B   emmalloc_memalign
+  516 B   claim_more_memory
   512 B   __memcpy
   464 B   emit_wire_edge
   458 B   nt_window_init
+  415 B   attempt_allocate
   393 B   apply_rotation
   392 B   puts
   381 B   sinf
-  377 B   nt_gfx_destroy_pipeline
   376 B   __stdio_write
   370 B   __memset
   361 B   cosf
-  350 B   nt_gfx_bind_instance_buffer
-  349 B   nt_gfx_bind_vertex_buffer
-  338 B   nt_gfx_make_shader
+  348 B   nt_gfx_make_buffer
+  340 B   emmalloc_free
   337 B   nt_input_web_on_pointer_up
+  316 B   pop_arg
+  314 B   nt_gfx_bind_instance_buffer
 
-Total functions: 87
-Total code size: 61315 B
+Total functions: 93
+Total code size: 54283 B
 
 ## Per-Module Contributions
 
@@ -65,14 +65,14 @@ Module                         Size
 ------------------------ ----------
 libnt_app.a                 1428 B
 libnt_core.a                1688 B
-libnt_gfx.a                36960 B
+libnt_drawable_comp.a       2668 B
+libnt_gfx.a                30250 B
 libnt_input.a              16446 B
-libnt_render_state_comp.a    2752 B
 libnt_shape_renderer.a   1141046 B
 libnt_transform_comp.a      4536 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)           1208796 B
+TOTAL (linked)           1202002 B
 
 Not linked to spinning_cube:
 libnt_app_stub.a            1428 B
@@ -80,15 +80,17 @@ libnt_comp_storage.a        1778 B
 libnt_entity.a              2942 B
 libnt_fs.a                  2620 B
 libnt_fs_stub.a             2620 B
-libnt_gfx_stub.a           26738 B
+libnt_gfx_stub.a           20012 B
 libnt_hash.a                4028 B
 libnt_http.a                6696 B
 libnt_http_stub.a           3210 B
 libnt_input_stub.a         11148 B
 libnt_log.a                  970 B
 libnt_log_stub.a             506 B
+libnt_material.a            2594 B
 libnt_material_comp.a       1990 B
 libnt_mesh_comp.a           1914 B
+libnt_pool.a                1256 B
 libnt_resource.a          148828 B
 libnt_time.a                 866 B
 libnt_window_stub.a         1838 B
@@ -96,5 +98,5 @@ libnt_window_stub.a         1838 B
 
 ## Data Segments Summary
 
-Segments: 33
-Total data size: 8547 B
+Segments: 32
+Total data size: 8544 B
