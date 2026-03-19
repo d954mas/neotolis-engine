@@ -95,7 +95,7 @@
 
 - [x] **REND-01**: Iterate entities with Transform + Mesh + Material + RenderState components
 - [x] **REND-02**: Bind material pipeline, textures, and set uniforms (MVP matrix, color, params) per entity
-- [ ] **REND-03**: Draw indexed mesh geometry via nt_gfx_draw_indexed()
+- [x] **REND-03**: Draw indexed mesh geometry via nt_gfx_draw_indexed()
 
 ### Demo
 
@@ -201,7 +201,7 @@
 | MAT-04 | Phase 26 | Complete |
 | REND-01 | Phase 27 | Complete |
 | REND-02 | Phase 27 | Complete |
-| REND-03 | Phase 27 | Pending |
+| REND-03 | Phase 27 | Complete |
 | DEMO-01 | Phase 28 | Pending |
 | DEMO-02 | Phase 28 | Pending |
 | DEMO-03 | Phase 28 | Pending |

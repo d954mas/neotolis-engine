@@ -4,14 +4,14 @@ milestone: v1.3
 milestone_name: Asset Pipeline
 current_phase: 27
 current_plan: 2
-status: executing
-last_updated: "2026-03-19T18:40:11.188Z"
+status: phase-complete
+last_updated: "2026-03-19T18:52:57Z"
 last_activity: 2026-03-19
 progress:
   total_phases: 18
-  completed_phases: 16
+  completed_phases: 17
   total_plans: 35
-  completed_plans: 36
+  completed_plans: 37
 ---
 
 # Session State
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Milestone:** v1.3 Asset Pipeline (Phases 20-29)
 **Current phase:** 27
-**Current Plan:** 1
-**Status:** Executing Phase 27
+**Current Plan:** 2 (complete)
+**Status:** Phase 27 complete
 **Last activity:** 2026-03-19
 
 ## Decisions
@@ -74,6 +74,9 @@ Phase 21-01 decisions:
 - [Phase 26]: Pool size via nt_material_desc_t.max_materials at init, not compile-time define in test
 - [Phase 27]: pragma pack(push,1) for nt_render_item_t to achieve exact 12-byte layout
 - [Phase 27]: UBO Globals block auto-bound to slot 0 via glGetUniformBlockIndex/glUniformBlockBinding in pipeline creation
+- [Phase 27]: Pipeline cache key: (layout_hash << 32 | resolved_vs) for lazy pipeline creation
+- [Phase 27]: Instance layout uses attribute locations 4-8 (mat4 columns + color) with vertex divisor=1
+- [Phase 27]: Real GFX shader handles in test materials (virtual packs register pool-allocated IDs)
 
 ## Performance Metrics
 
@@ -177,6 +180,7 @@ Phase 25-01 decisions:
 | Phase 26 P01 | 9min | 2 tasks | 6 files |
 | Phase 26 P02 | 14min | 2 tasks | 6 files |
 | Phase 27 P01 | 11min | 2 tasks | 19 files |
+| Phase 27 P02 | 9min | 1 task | 5 files |
 
 ## Accumulated Context
 
@@ -227,3 +231,5 @@ Phase 25-01 decisions:
 - 2026-03-19: Completed 26-02-PLAN.md -- nt_material module, pooled handles, step resolution, 22 unit tests, 14min
 - 2026-03-19: Phase 26 complete -- material system with descriptor creation, resource resolution, change detection, 22 unit tests
 - 2026-03-19: Completed 27-01-PLAN.md -- render defs (globals 256B, instance 80B, item 12B), sort keys, visibility, UBO support, drawable tag migration, 26 new tests, 11min
+- 2026-03-19: Completed 27-02-PLAN.md -- mesh renderer with pipeline cache, run detection, instanced drawing, 9 unit tests, 9min
+- 2026-03-19: Phase 27 complete -- mesh rendering pipeline with render defs, sort keys, pipeline cache, instanced draw, 2/2 plans done
