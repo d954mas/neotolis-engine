@@ -522,6 +522,29 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     nt_gfx_backend_draw(first_vertex, num_vertices);
 }
 
+void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+
+    NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
+    if (s_gfx.render_state != NT_GFX_STATE_PASS) {
+        nt_log_error("gfx: draw_instanced called outside PASS state");
+        return;
+    }
+    NT_ASSERT(s_gfx.bound_pipeline != 0);
+    if (s_gfx.bound_pipeline == 0) {
+        nt_log_error("gfx: draw_instanced called without bound pipeline");
+        return;
+    }
+
+    g_nt_gfx.frame_stats.draw_calls++;
+    g_nt_gfx.frame_stats.draw_calls_instanced++;
+    g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
+    g_nt_gfx.frame_stats.instances += instance_count;
+    nt_gfx_backend_draw_instanced(first_vertex, num_vertices, instance_count);
+}
+
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices) {
     if (g_nt_gfx.context_lost) {
         return;

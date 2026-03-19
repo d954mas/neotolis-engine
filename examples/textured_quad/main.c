@@ -279,6 +279,15 @@ static void frame(void) {
 
     /* Restore GPU resources after WebGL context loss */
     if (g_nt_gfx.context_restored) {
+        /* Invalidate all GFX-backed resources so they re-activate from blobs */
+        nt_resource_invalidate(NT_ASSET_SHADER_CODE);
+        nt_resource_invalidate(NT_ASSET_MESH);
+        nt_resource_invalidate(NT_ASSET_TEXTURE);
+
+        /* Re-register virtual pack resources (invalidate skips virtual packs) */
+        nt_resource_register(nt_hash32_str("__fallback__"), nt_hash64_str("__fallback_checker__"), NT_ASSET_TEXTURE, s_fallback_texture.id);
+
+        /* Recreate game-owned GPU resources */
         s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
             .type = NT_BUFFER_UNIFORM,
             .usage = NT_USAGE_DYNAMIC,

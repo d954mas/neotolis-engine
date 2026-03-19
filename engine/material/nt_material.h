@@ -96,6 +96,7 @@ typedef struct {
     uint32_t resolved_fs;
     uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
     uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
+    const char *tex_names[NT_MATERIAL_MAX_TEXTURES]; /* sampler uniform names (static storage) */
     uint8_t tex_count;
     float params[NT_MATERIAL_MAX_PARAMS][4];
     uint32_t param_name_hashes[NT_MATERIAL_MAX_PARAMS];

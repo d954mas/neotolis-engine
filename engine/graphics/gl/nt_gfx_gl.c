@@ -37,7 +37,7 @@ typedef struct {
     bool depth_test;
     bool depth_write;
     GLenum depth_func;
-    bool cull_face;
+    uint8_t cull_mode;
     bool blend;
     GLenum blend_src;
     GLenum blend_dst;
@@ -69,7 +69,7 @@ static struct {
     bool depth_test;
     bool depth_write;
     GLenum depth_func;
-    bool cull_face;
+    uint8_t cull_mode;
     bool blend;
     GLenum blend_src;
     GLenum blend_dst;
@@ -86,7 +86,7 @@ static void nt_gfx_gl_cache_reset(void) {
     s_gl_cache.depth_test = false;
     s_gl_cache.depth_write = true;   /* GL default: depth write enabled */
     s_gl_cache.depth_func = GL_LESS; /* GL default */
-    s_gl_cache.cull_face = false;
+    s_gl_cache.cull_mode = 0;
     s_gl_cache.blend = false;
     s_gl_cache.blend_src = GL_ONE;  /* GL default */
     s_gl_cache.blend_dst = GL_ZERO; /* GL default */
@@ -345,15 +345,15 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
         s_gl_cache.depth_write = pip->depth_write;
     }
 
-    /* Cull face */
-    if (s_gl_cache.cull_face != pip->cull_face) {
-        if (pip->cull_face) {
-            glEnable(GL_CULL_FACE);
-            glCullFace(GL_BACK);
-        } else {
+    /* Cull mode */
+    if (s_gl_cache.cull_mode != pip->cull_mode) {
+        if (pip->cull_mode == 0) {
             glDisable(GL_CULL_FACE);
+        } else {
+            glEnable(GL_CULL_FACE);
+            glCullFace(pip->cull_mode == 2 ? GL_FRONT : GL_BACK);
         }
-        s_gl_cache.cull_face = pip->cull_face;
+        s_gl_cache.cull_mode = pip->cull_mode;
     }
 
     /* Blend */
@@ -521,7 +521,7 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     pip->depth_test = desc->depth_test;
     pip->depth_write = desc->depth_write;
     pip->depth_func = map_depth_func(desc->depth_func);
-    pip->cull_face = desc->cull_face;
+    pip->cull_mode = desc->cull_mode;
     pip->blend = desc->blend;
     pip->blend_src = map_blend_factor(desc->blend_src);
     pip->blend_dst = map_blend_factor(desc->blend_dst);

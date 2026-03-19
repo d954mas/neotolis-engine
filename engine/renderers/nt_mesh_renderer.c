@@ -92,7 +92,14 @@ static uint16_t stream_byte_size(const NtStreamDesc *s) { return (uint16_t)(nt_s
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
 
-    uint64_t key = ((uint64_t)mesh_info->layout_hash << 32) | (uint64_t)mat_info->resolved_vs;
+    /* Full pipeline signature: layout + shaders + render state.
+     * Multiplicative hash combining to avoid collisions. */
+    uint32_t state_bits = ((uint32_t)mat_info->blend_mode) | ((uint32_t)mat_info->depth_test << 4) |
+                          ((uint32_t)mat_info->depth_write << 5) | ((uint32_t)mat_info->cull_mode << 6);
+    uint64_t key = mesh_info->layout_hash;
+    key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_vs;
+    key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_fs;
+    key = key * 0x9E3779B97F4A7C15ULL + state_bits;
 
     /* Linear scan for cached entry */
     for (uint16_t i = 0; i < s_mesh_renderer.count; i++) {
@@ -121,7 +128,12 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
             }
         }
 
-        if (found && layout.attr_count < NT_GFX_MAX_VERTEX_ATTRS) {
+        if (found) {
+            NT_ASSERT(layout.attr_count < NT_GFX_MAX_VERTEX_ATTRS);
+            if (layout.attr_count >= NT_GFX_MAX_VERTEX_ATTRS) {
+                nt_log_error("mesh_renderer: vertex attr count exceeds max");
+                break;
+            }
             layout.attrs[layout.attr_count].location = location;
             layout.attrs[layout.attr_count].format = nt_stream_to_vertex_format(stream->type, stream->count, stream->normalized);
             layout.attrs[layout.attr_count].offset = offset;
@@ -146,21 +158,19 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
         desc.blend_src = NT_BLEND_SRC_ALPHA;
         desc.blend_dst = NT_BLEND_ONE_MINUS_SRC_ALPHA;
     }
-    desc.cull_face = (mat_info->cull_mode != NT_CULL_NONE);
+    desc.cull_mode = (uint8_t)mat_info->cull_mode;
     desc.label = (mat_info->label != NULL) ? mat_info->label : "mesh_pipeline";
 
     nt_pipeline_t pip = nt_gfx_make_pipeline(&desc);
 
-    /* Store in cache */
+    /* Store in cache — full cache is a configuration bug, not a runtime recovery case */
+    NT_ASSERT(s_mesh_renderer.count < s_mesh_renderer.max_pipelines);
     if (s_mesh_renderer.count < s_mesh_renderer.max_pipelines) {
         s_mesh_renderer.entries[s_mesh_renderer.count].key = key;
         s_mesh_renderer.entries[s_mesh_renderer.count].pipeline = pip;
         s_mesh_renderer.count++;
     } else {
-        nt_log_error("mesh_renderer: pipeline cache full, evicting last slot");
-        nt_gfx_destroy_pipeline(s_mesh_renderer.entries[s_mesh_renderer.max_pipelines - 1].pipeline);
-        s_mesh_renderer.entries[s_mesh_renderer.max_pipelines - 1].key = key;
-        s_mesh_renderer.entries[s_mesh_renderer.max_pipelines - 1].pipeline = pip;
+        nt_log_error("mesh_renderer: pipeline cache full — increase max_pipelines in desc");
     }
 
     return pip;
@@ -210,6 +220,8 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     if (s_mesh_renderer.instance_buf.id == 0) {
         free(s_mesh_renderer.instance_data);
         s_mesh_renderer.instance_data = NULL;
+        free(s_mesh_renderer.entries);
+        s_mesh_renderer.entries = NULL;
         nt_log_error("mesh_renderer: failed to create instance buffer");
         return NT_ERR_INIT_FAILED;
     }
@@ -297,16 +309,21 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             nt_pipeline_t pip = find_or_create_pipeline(mat_info, mesh_info);
             nt_gfx_bind_pipeline(pip);
 
-            /* Bind textures */
+            /* Bind textures and set sampler uniforms to correct texture units */
             for (uint8_t t = 0; t < mat_info->tex_count; t++) {
                 if (mat_info->resolved_tex[t] != 0) {
                     nt_gfx_bind_texture((nt_texture_t){.id = mat_info->resolved_tex[t]}, t);
+                    if (mat_info->tex_names[t] != NULL) {
+                        nt_gfx_set_uniform_int(mat_info->tex_names[t], (int)t);
+                    }
                 }
             }
 
-            /* Bind mesh VBO + IBO */
+            /* Bind mesh VBO (+ IBO if indexed) */
             nt_gfx_bind_vertex_buffer(mesh_info->vbo);
-            nt_gfx_bind_index_buffer(mesh_info->ibo);
+            if (mesh_info->index_count > 0) {
+                nt_gfx_bind_index_buffer(mesh_info->ibo);
+            }
 
             prev_mat = run_mat;
             prev_mesh = run_mesh;
@@ -339,8 +356,12 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             nt_gfx_update_buffer(s_mesh_renderer.instance_buf, s_mesh_renderer.instance_data, batch_count * (uint32_t)sizeof(nt_mesh_instance_t));
             nt_gfx_bind_instance_buffer(s_mesh_renderer.instance_buf);
 
-            /* Draw */
-            nt_gfx_draw_indexed_instanced(0, mesh_info->index_count, mesh_info->vertex_count, batch_count);
+            /* Draw (indexed or non-indexed) */
+            if (mesh_info->index_count > 0) {
+                nt_gfx_draw_indexed_instanced(0, mesh_info->index_count, mesh_info->vertex_count, batch_count);
+            } else {
+                nt_gfx_draw_instanced(0, mesh_info->vertex_count, batch_count);
+            }
 
             s_mesh_renderer.frame_draw_calls++;
             s_mesh_renderer.frame_instance_total += batch_count;

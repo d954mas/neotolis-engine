@@ -161,7 +161,7 @@ typedef struct {
     bool depth_test;
     bool depth_write;
     nt_depth_func_t depth_func;
-    bool cull_face;
+    uint8_t cull_mode; /* 0=none, 1=back, 2=front (matches nt_cull_mode_t) */
     bool blend;
     nt_blend_factor_t blend_src;
     nt_blend_factor_t blend_dst;
@@ -277,6 +277,7 @@ void nt_gfx_set_uniform_int(const char *name, int val);
 /* ---- Draw calls ---- */
 
 void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices);
+void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count);
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices);
 void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count);
 
