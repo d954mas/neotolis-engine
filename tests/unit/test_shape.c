@@ -9,7 +9,7 @@
 static bool float_near(float a, float b, float epsilon) { return fabsf(a - b) <= epsilon; }
 
 void setUp(void) {
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 32, .max_buffers = 128});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 32, .max_buffers = 128, .max_textures = 32, .max_meshes = 32});
     nt_shape_renderer_init();
     /* Enter frame/pass so flush->draw_indexed doesn't assert */
     nt_gfx_begin_frame();

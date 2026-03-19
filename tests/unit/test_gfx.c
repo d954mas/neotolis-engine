@@ -13,94 +13,94 @@ static const uint8_t s_test_pixels_4x4[4 * 4 * 4] = {
     255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
 };
 
-void setUp(void) { nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8}); }
+void setUp(void) { nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8}); }
 
 void tearDown(void) { nt_gfx_shutdown(); }
 
 /* ---- Pool: alloc returns nonzero ---- */
 
 void test_gfx_pool_alloc_returns_nonzero(void) {
-    nt_gfx_pool_t pool;
-    nt_gfx_pool_init(&pool, 4);
-    uint32_t id = nt_gfx_pool_alloc(&pool);
+    nt_pool_t pool;
+    nt_pool_init(&pool, 4);
+    uint32_t id = nt_pool_alloc(&pool);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, id);
-    nt_gfx_pool_shutdown(&pool);
+    nt_pool_shutdown(&pool);
 }
 
 /* ---- Pool: two allocs return different ids ---- */
 
 void test_gfx_pool_alloc_unique(void) {
-    nt_gfx_pool_t pool;
-    nt_gfx_pool_init(&pool, 4);
-    uint32_t a = nt_gfx_pool_alloc(&pool);
-    uint32_t b = nt_gfx_pool_alloc(&pool);
+    nt_pool_t pool;
+    nt_pool_init(&pool, 4);
+    uint32_t a = nt_pool_alloc(&pool);
+    uint32_t b = nt_pool_alloc(&pool);
     TEST_ASSERT_NOT_EQUAL_UINT32(a, b);
-    nt_gfx_pool_shutdown(&pool);
+    nt_pool_shutdown(&pool);
 }
 
 /* ---- Pool: free then realloc gives new generation ---- */
 
 void test_gfx_pool_free_and_realloc(void) {
-    nt_gfx_pool_t pool;
-    nt_gfx_pool_init(&pool, 4);
-    uint32_t first = nt_gfx_pool_alloc(&pool);
-    nt_gfx_pool_free(&pool, first);
-    uint32_t second = nt_gfx_pool_alloc(&pool);
+    nt_pool_t pool;
+    nt_pool_init(&pool, 4);
+    uint32_t first = nt_pool_alloc(&pool);
+    nt_pool_free(&pool, first);
+    uint32_t second = nt_pool_alloc(&pool);
     /* Same slot index, different generation -> different id */
     TEST_ASSERT_NOT_EQUAL_UINT32(first, second);
     /* Same slot index */
-    TEST_ASSERT_EQUAL_UINT32(nt_gfx_pool_slot_index(first), nt_gfx_pool_slot_index(second));
-    nt_gfx_pool_shutdown(&pool);
+    TEST_ASSERT_EQUAL_UINT32(nt_pool_slot_index(first), nt_pool_slot_index(second));
+    nt_pool_shutdown(&pool);
 }
 
 /* ---- Pool: valid accepts live handle ---- */
 
 void test_gfx_pool_valid_accepts_live(void) {
-    nt_gfx_pool_t pool;
-    nt_gfx_pool_init(&pool, 4);
-    uint32_t id = nt_gfx_pool_alloc(&pool);
-    TEST_ASSERT_TRUE(nt_gfx_pool_valid(&pool, id));
-    nt_gfx_pool_shutdown(&pool);
+    nt_pool_t pool;
+    nt_pool_init(&pool, 4);
+    uint32_t id = nt_pool_alloc(&pool);
+    TEST_ASSERT_TRUE(nt_pool_valid(&pool, id));
+    nt_pool_shutdown(&pool);
 }
 
 /* ---- Pool: valid rejects zero ---- */
 
 void test_gfx_pool_valid_rejects_zero(void) {
-    nt_gfx_pool_t pool;
-    nt_gfx_pool_init(&pool, 4);
-    TEST_ASSERT_FALSE(nt_gfx_pool_valid(&pool, 0));
-    nt_gfx_pool_shutdown(&pool);
+    nt_pool_t pool;
+    nt_pool_init(&pool, 4);
+    TEST_ASSERT_FALSE(nt_pool_valid(&pool, 0));
+    nt_pool_shutdown(&pool);
 }
 
 /* ---- Pool: valid rejects stale handle ---- */
 
 void test_gfx_pool_valid_rejects_stale(void) {
-    nt_gfx_pool_t pool;
-    nt_gfx_pool_init(&pool, 4);
-    uint32_t id = nt_gfx_pool_alloc(&pool);
-    nt_gfx_pool_free(&pool, id);
-    TEST_ASSERT_FALSE(nt_gfx_pool_valid(&pool, id));
-    nt_gfx_pool_shutdown(&pool);
+    nt_pool_t pool;
+    nt_pool_init(&pool, 4);
+    uint32_t id = nt_pool_alloc(&pool);
+    nt_pool_free(&pool, id);
+    TEST_ASSERT_FALSE(nt_pool_valid(&pool, id));
+    nt_pool_shutdown(&pool);
 }
 
 /* ---- Pool: full pool returns zero ---- */
 
 void test_gfx_pool_full_returns_zero(void) {
-    nt_gfx_pool_t pool;
-    nt_gfx_pool_init(&pool, 2);
-    nt_gfx_pool_alloc(&pool);
-    nt_gfx_pool_alloc(&pool);
-    uint32_t third = nt_gfx_pool_alloc(&pool);
+    nt_pool_t pool;
+    nt_pool_init(&pool, 2);
+    nt_pool_alloc(&pool);
+    nt_pool_alloc(&pool);
+    uint32_t third = nt_pool_alloc(&pool);
     TEST_ASSERT_EQUAL_UINT32(0, third);
-    nt_gfx_pool_shutdown(&pool);
+    nt_pool_shutdown(&pool);
 }
 
 /* ---- Pool: slot_index extracts correctly ---- */
 
 void test_gfx_slot_index_extracts_correctly(void) {
     /* Construct a known handle: generation=3, slot=5 */
-    uint32_t id = (3U << NT_GFX_SLOT_SHIFT) | 5U;
-    TEST_ASSERT_EQUAL_UINT32(5, nt_gfx_pool_slot_index(id));
+    uint32_t id = (3U << NT_POOL_SLOT_SHIFT) | 5U;
+    TEST_ASSERT_EQUAL_UINT32(5, nt_pool_slot_index(id));
 }
 
 /* ---- High-level: init/shutdown transitions initialized flag ---- */
@@ -111,7 +111,7 @@ void test_gfx_init_shutdown(void) {
     nt_gfx_shutdown();
     TEST_ASSERT_FALSE(g_nt_gfx.initialized);
     /* Re-init for tearDown */
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8});
 }
 
 /* ---- High-level: make/destroy shader ---- */
@@ -151,7 +151,7 @@ void test_gfx_defaults_applied(void) {
 
     /* Re-init for tearDown */
     nt_gfx_shutdown();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8});
 }
 
 /* ---- Pipeline: create with valid shaders, destroy ---- */
@@ -562,9 +562,9 @@ void test_deactivate_mesh_clears_table(void) {
     sd->count = 3;
 
     uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
-    TEST_ASSERT_NOT_NULL(nt_gfx_get_mesh_info(handle));
+    TEST_ASSERT_NOT_NULL(nt_gfx_get_mesh_info((nt_mesh_t){.id = handle}));
     nt_gfx_deactivate_mesh(handle);
-    TEST_ASSERT_NULL(nt_gfx_get_mesh_info(handle));
+    TEST_ASSERT_NULL(nt_gfx_get_mesh_info((nt_mesh_t){.id = handle}));
 }
 
 /* ---- Mesh info fields ---- */
@@ -592,7 +592,7 @@ void test_mesh_info_fields(void) {
     sd->count = 3;
 
     uint32_t handle = nt_gfx_activate_mesh(blob, blob_size);
-    const nt_gfx_mesh_info_t *info = nt_gfx_get_mesh_info(handle);
+    const nt_gfx_mesh_info_t *info = nt_gfx_get_mesh_info((nt_mesh_t){.id = handle});
     TEST_ASSERT_NOT_NULL(info);
     TEST_ASSERT_EQUAL_UINT32(3, info->vertex_count);
     TEST_ASSERT_EQUAL_UINT32(3, info->index_count);

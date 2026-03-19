@@ -1,10 +1,10 @@
 #include "app/nt_app.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
 #include "graphics/nt_gfx.h"
 #include "input/nt_input.h"
-#include "render_state_comp/nt_render_state_comp.h"
 #include "renderers/nt_shape_renderer.h"
 #include "transform_comp/nt_transform_comp.h"
 #include "window/nt_window.h"
@@ -139,13 +139,13 @@ static void draw_room(void) {
 /* ---- draw_shape: reads entity components ---- */
 
 static void draw_shape(void) {
-    if (!*nt_render_state_comp_visible(s_shape_entity)) {
+    if (!*nt_drawable_comp_visible(s_shape_entity)) {
         return;
     }
 
     float *pos = nt_transform_comp_position(s_shape_entity);
     float *rot = nt_transform_comp_rotation(s_shape_entity);
-    const float *col = nt_render_state_comp_color(s_shape_entity);
+    const float *col = nt_drawable_comp_color(s_shape_entity);
     const float *wcol = s_wire_color;
     bool draw_solid = (s_render_mode == MODE_SOLID_WIRE) || (s_render_mode == MODE_SOLID);
     bool draw_wire = (s_render_mode == MODE_SOLID_WIRE) || (s_render_mode == MODE_WIRE);
@@ -246,7 +246,7 @@ static void set_shape_scale(void) {
 /* ---- set_shape_color: update render state from shape table ---- */
 
 static void set_shape_color(void) {
-    float *col = nt_render_state_comp_color(s_shape_entity);
+    float *col = nt_drawable_comp_color(s_shape_entity);
     col[0] = s_shape_colors[s_current_shape][0];
     col[1] = s_shape_colors[s_current_shape][1];
     col[2] = s_shape_colors[s_current_shape][2];
@@ -386,14 +386,14 @@ int main(void) {
     g_nt_window.height = 600;
     nt_window_init();
     nt_input_init();
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 128, .depth = true});
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 128, .max_meshes = 64, .depth = true});
     nt_shape_renderer_init();
 
     /* ---- Entity system init ---- */
 
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 64});
     nt_transform_comp_init(&(nt_transform_comp_desc_t){.capacity = 64});
-    nt_render_state_comp_init(&(nt_render_state_comp_desc_t){.capacity = 64});
+    nt_drawable_comp_init(&(nt_drawable_comp_desc_t){.capacity = 64});
 
     /* Create the shape entity */
     s_shape_entity = nt_entity_create();
@@ -401,7 +401,7 @@ int main(void) {
     nt_transform_comp_add(s_shape_entity);
     nt_transform_comp_position(s_shape_entity)[1] = s_shape_y;
 
-    nt_render_state_comp_add(s_shape_entity);
+    nt_drawable_comp_add(s_shape_entity);
 
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
@@ -421,7 +421,7 @@ int main(void) {
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
-    nt_render_state_comp_shutdown();
+    nt_drawable_comp_shutdown();
     nt_transform_comp_shutdown();
     nt_entity_shutdown();
     nt_shape_renderer_shutdown();

@@ -6,9 +6,14 @@ include(cmake/warnings.cmake)
 include(cmake/nt_module.cmake)
 include(cmake/nt_shell.cmake)
 
-# Closure Compiler minifies Emscripten JS glue code (~60% reduction)
-if(CMAKE_BUILD_TYPE STREQUAL "Release" AND EMSCRIPTEN)
-    add_link_options(--closure 1)
+# Emscripten optimizations
+if(EMSCRIPTEN)
+    # emmalloc: compact allocator, ~4 KB smaller than default dlmalloc
+    add_link_options(-sMALLOC=emmalloc)
+    # Closure Compiler minifies JS glue code (~60% reduction)
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        add_link_options(--closure 1)
+    endif()
 endif()
 
 # Derive preset name from build type + platform for output directory layout

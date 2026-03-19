@@ -23,6 +23,14 @@ typedef struct {
     uint16_t max_entities;
 } nt_entity_desc_t;
 
+/* ---- Defaults ---- */
+
+static inline nt_entity_desc_t nt_entity_desc_defaults(void) {
+    return (nt_entity_desc_t){
+        .max_entities = 256,
+    };
+}
+
 /* ---- Component storage registration ---- */
 
 #define NT_MAX_COMP_STORAGES 16

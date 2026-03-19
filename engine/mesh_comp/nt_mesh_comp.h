@@ -3,10 +3,19 @@
 
 #include "core/nt_types.h"
 #include "entity/nt_entity.h"
+#include "graphics/nt_gfx.h"
 
 typedef struct {
     uint16_t capacity;
 } nt_mesh_comp_desc_t;
+
+/* ---- Defaults ---- */
+
+static inline nt_mesh_comp_desc_t nt_mesh_comp_desc_defaults(void) {
+    return (nt_mesh_comp_desc_t){
+        .capacity = 256,
+    };
+}
 
 nt_result_t nt_mesh_comp_init(const nt_mesh_comp_desc_t *desc);
 void nt_mesh_comp_shutdown(void);
@@ -15,6 +24,7 @@ bool nt_mesh_comp_add(nt_entity_t entity);
 bool nt_mesh_comp_has(nt_entity_t entity);
 void nt_mesh_comp_remove(nt_entity_t entity);
 
-uint32_t *nt_mesh_comp_handle(nt_entity_t entity); /* opaque mesh asset reference */
+/* Caller MUST call nt_mesh_comp_has() first — traps if entity has no component */
+nt_mesh_t *nt_mesh_comp_handle(nt_entity_t entity);
 
 #endif /* NT_MESH_COMP_H */

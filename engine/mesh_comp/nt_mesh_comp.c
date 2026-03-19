@@ -6,11 +6,11 @@
 #include "core/nt_assert.h"
 
 static nt_comp_storage_t s_storage;
-static uint32_t *s_mesh_handles;
+static nt_mesh_t *s_mesh_handles;
 
 /* ---- Callbacks ---- */
 
-static void mesh_default(uint16_t idx) { s_mesh_handles[idx] = 0; }
+static void mesh_default(uint16_t idx) { s_mesh_handles[idx] = NT_MESH_INVALID; }
 
 static void mesh_swap(uint16_t dst, uint16_t src) { s_mesh_handles[dst] = s_mesh_handles[src]; }
 
@@ -32,7 +32,7 @@ nt_result_t nt_mesh_comp_init(const nt_mesh_comp_desc_t *desc) {
         return res;
     }
 
-    s_mesh_handles = (uint32_t *)calloc(desc->capacity, sizeof(uint32_t));
+    s_mesh_handles = (nt_mesh_t *)calloc(desc->capacity, sizeof(nt_mesh_t));
     if (!s_mesh_handles) {
         nt_comp_storage_shutdown(&s_storage);
         return NT_ERR_INIT_FAILED;
@@ -61,7 +61,7 @@ bool nt_mesh_comp_has(nt_entity_t entity) { return nt_comp_storage_has(&s_storag
 
 void nt_mesh_comp_remove(nt_entity_t entity) { nt_comp_storage_remove(&s_storage, entity); }
 
-uint32_t *nt_mesh_comp_handle(nt_entity_t entity) {
+nt_mesh_t *nt_mesh_comp_handle(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT_ALWAYS(idx != NT_INVALID_COMP_INDEX);
     return &s_mesh_handles[idx];
