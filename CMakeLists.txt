@@ -48,6 +48,7 @@ if(NOT EMSCRIPTEN)
     add_subdirectory(deps/glad EXCLUDE_FROM_ALL)
     add_subdirectory(deps/cgltf EXCLUDE_FROM_ALL)
     add_subdirectory(deps/stb EXCLUDE_FROM_ALL)
+    add_subdirectory(deps/mikktspace EXCLUDE_FROM_ALL)
 
     # GLFW uses CRT functions (assert, sscanf, powf, wcscpy) that resolve to
     # __declspec(dllimport) stubs under the default -D_DLL flag. Since we link

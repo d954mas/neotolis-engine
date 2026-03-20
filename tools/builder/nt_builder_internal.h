@@ -26,6 +26,9 @@ typedef enum {
     NT_BUILD_ASSET_MESH = 0,
     NT_BUILD_ASSET_TEXTURE = 1,
     NT_BUILD_ASSET_SHADER = 2,
+    NT_BUILD_ASSET_BLOB = 3,
+    NT_BUILD_ASSET_SCENE_MESH = 4,
+    NT_BUILD_ASSET_TEXTURE_MEM = 5,
 } nt_build_asset_kind_t;
 
 /* Type-specific data for mesh entries */
@@ -38,6 +41,28 @@ typedef struct {
 typedef struct {
     nt_build_shader_stage_t stage;
 } NtBuildShaderData;
+
+/* Type-specific data for blob entries */
+typedef struct {
+    void *data; /* deep-copied blob data (owned, heap) */
+    uint32_t size;
+} NtBuildBlobData;
+
+/* Type-specific data for scene mesh entries */
+typedef struct {
+    const nt_glb_scene_t *scene; /* borrowed reference, valid until free_glb_scene */
+    uint32_t mesh_index;
+    uint32_t primitive_index;
+    NtStreamLayout layout[NT_MESH_MAX_STREAMS];
+    uint32_t stream_count;
+    nt_tangent_mode_t tangent_mode;
+} NtBuildSceneMeshData;
+
+/* Type-specific data for texture-from-memory entries */
+typedef struct {
+    uint8_t *data; /* deep-copied image data (owned, heap) */
+    uint32_t size;
+} NtBuildTexMemData;
 
 /* Deferred asset entry -- stored during add_*, processed in finish_pack */
 typedef struct {
@@ -72,6 +97,7 @@ struct NtBuilderContext {
     uint32_t mesh_count;
     uint32_t texture_count;
     uint32_t shader_count;
+    uint32_t blob_count;
 };
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
@@ -82,6 +108,14 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
 nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, uint64_t resource_id);
 nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *path, uint64_t resource_id);
 nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint64_t resource_id);
+nt_build_result_t nt_builder_import_blob(NtBuilderContext *ctx, const void *data, uint32_t size, uint64_t resource_id);
+nt_build_result_t nt_builder_import_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, uint64_t resource_id);
+nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
+                                               nt_tangent_mode_t tangent_mode, uint64_t resource_id);
+
+/* Tangent computation (MikkTSpace wrapper) */
+nt_build_result_t nt_builder_compute_tangents(const float *positions, const float *normals, const float *uvs, const uint32_t *indices, uint32_t vertex_count, uint32_t index_count,
+                                              float *out_tangents);
 
 /* File I/O utilities */
 char *nt_builder_read_file(const char *path, uint32_t *out_size);

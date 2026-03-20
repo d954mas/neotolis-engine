@@ -46,14 +46,54 @@ static NtBuildShaderData *nt_builder_copy_shader_data(nt_build_shader_stage_t st
     return sd;
 }
 
+static void nt_builder_free_blob_data(NtBuildBlobData *bd) {
+    if (!bd) {
+        return;
+    }
+    free(bd->data);
+    free(bd);
+}
+
+static void nt_builder_free_scene_mesh_data(NtBuildSceneMeshData *sd) {
+    if (!sd) {
+        return;
+    }
+    for (uint32_t s = 0; s < sd->stream_count; s++) {
+        free((char *)sd->layout[s].engine_name);
+        free((char *)sd->layout[s].gltf_name);
+    }
+    free(sd);
+}
+
+static void nt_builder_free_tex_mem_data(NtBuildTexMemData *td) {
+    if (!td) {
+        return;
+    }
+    free(td->data);
+    free(td);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void nt_builder_free_entry_data(NtBuildEntry *entry) {
     if (!entry->data) {
         return;
     }
-    if (entry->kind == NT_BUILD_ASSET_MESH) {
+    switch (entry->kind) {
+    case NT_BUILD_ASSET_MESH:
         nt_builder_free_mesh_data((NtBuildMeshData *)entry->data);
-    } else {
+        break;
+    case NT_BUILD_ASSET_BLOB:
+        nt_builder_free_blob_data((NtBuildBlobData *)entry->data);
+        break;
+    case NT_BUILD_ASSET_SCENE_MESH:
+        nt_builder_free_scene_mesh_data((NtBuildSceneMeshData *)entry->data);
+        break;
+    case NT_BUILD_ASSET_TEXTURE_MEM:
+        nt_builder_free_tex_mem_data((NtBuildTexMemData *)entry->data);
+        break;
+    default:
         free(entry->data);
+        break;
     }
     entry->data = NULL;
 }
@@ -204,6 +244,9 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
     case NT_ASSET_SHADER_CODE:
         ctx->shader_count++;
         break;
+    case NT_ASSET_BLOB:
+        ctx->blob_count++;
+        break;
     }
 
     return NT_BUILD_OK;
@@ -257,6 +300,21 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         case NT_BUILD_ASSET_SHADER: {
             NtBuildShaderData *sd = (NtBuildShaderData *)pe->data;
             ret = nt_builder_import_shader(ctx, pe->path, sd->stage, pe->resource_id);
+            break;
+        }
+        case NT_BUILD_ASSET_BLOB: {
+            NtBuildBlobData *bd = (NtBuildBlobData *)pe->data;
+            ret = nt_builder_import_blob(ctx, bd->data, bd->size, pe->resource_id);
+            break;
+        }
+        case NT_BUILD_ASSET_SCENE_MESH: {
+            NtBuildSceneMeshData *smd = (NtBuildSceneMeshData *)pe->data;
+            ret = nt_builder_import_scene_mesh(ctx, smd->scene, smd->mesh_index, smd->primitive_index, smd->layout, smd->stream_count, smd->tangent_mode, pe->resource_id);
+            break;
+        }
+        case NT_BUILD_ASSET_TEXTURE_MEM: {
+            NtBuildTexMemData *tmd = (NtBuildTexMemData *)pe->data;
+            ret = nt_builder_import_texture_from_memory(ctx, tmd->data, tmd->size, pe->resource_id);
             break;
         }
         }
@@ -325,7 +383,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     /* Summary */
     (void)printf("Build complete: %s\n", ctx->output_path);
-    (void)printf("  Assets: %u total (%u meshes, %u textures, %u shaders)\n", ctx->entry_count, ctx->mesh_count, ctx->texture_count, ctx->shader_count);
+    (void)printf("  Assets: %u total (%u meshes, %u textures, %u shaders, %u blobs)\n", ctx->entry_count, ctx->mesh_count, ctx->texture_count, ctx->shader_count, ctx->blob_count);
     if (total_size >= 1024 * 1024) {
         (void)printf("  Pack size: %.3f MB (%u bytes)\n", (double)total_size / (1024.0 * 1024.0), total_size);
     } else if (total_size >= 1024) {
@@ -386,6 +444,112 @@ nt_build_result_t nt_builder_add_shader(NtBuilderContext *ctx, const char *path,
         free(sd);
     }
     return r;
+}
+
+/* --- Public add_blob --- */
+
+nt_build_result_t nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id) {
+    if (!ctx || !data || size == 0 || !resource_id) {
+        return NT_BUILD_ERR_VALIDATION;
+    }
+
+    uint64_t rid = nt_hash64_str(resource_id).value;
+
+    int32_t existing = nt_builder_find_entry(ctx, rid);
+    if (existing >= 0 && !ctx->force) {
+        (void)fprintf(stderr, "ERROR: duplicate resource_id for blob '%s'\n", resource_id);
+        return NT_BUILD_ERR_DUPLICATE;
+    }
+
+    NtBuildBlobData *bd = (NtBuildBlobData *)calloc(1, sizeof(NtBuildBlobData));
+    if (!bd) {
+        return NT_BUILD_ERR_IO;
+    }
+    bd->data = malloc(size);
+    if (!bd->data) {
+        free(bd);
+        return NT_BUILD_ERR_IO;
+    }
+    memcpy(bd->data, data, size);
+    bd->size = size;
+
+    if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
+        (void)fprintf(stderr, "ERROR: Asset limit reached (%d max)\n", NT_BUILD_MAX_ASSETS);
+        free(bd->data);
+        free(bd);
+        return NT_BUILD_ERR_LIMIT;
+    }
+
+    if (existing >= 0) {
+        nt_builder_free_entry(&ctx->pending[existing]);
+        ctx->pending[existing].path = strdup(resource_id);
+        ctx->pending[existing].rename_key = NULL;
+        ctx->pending[existing].resource_id = rid;
+        ctx->pending[existing].kind = NT_BUILD_ASSET_BLOB;
+        ctx->pending[existing].data = bd;
+        return NT_BUILD_OK;
+    }
+
+    NtBuildEntry *entry = &ctx->pending[ctx->pending_count++];
+    entry->path = strdup(resource_id);
+    entry->rename_key = NULL;
+    entry->resource_id = rid;
+    entry->kind = NT_BUILD_ASSET_BLOB;
+    entry->data = bd;
+    return NT_BUILD_OK;
+}
+
+/* --- Public add_texture_from_memory --- */
+
+nt_build_result_t nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id) {
+    if (!ctx || !data || size == 0 || !resource_id) {
+        return NT_BUILD_ERR_VALIDATION;
+    }
+
+    uint64_t rid = nt_hash64_str(resource_id).value;
+
+    int32_t existing = nt_builder_find_entry(ctx, rid);
+    if (existing >= 0 && !ctx->force) {
+        (void)fprintf(stderr, "ERROR: duplicate resource_id for texture '%s'\n", resource_id);
+        return NT_BUILD_ERR_DUPLICATE;
+    }
+
+    NtBuildTexMemData *td = (NtBuildTexMemData *)calloc(1, sizeof(NtBuildTexMemData));
+    if (!td) {
+        return NT_BUILD_ERR_IO;
+    }
+    td->data = (uint8_t *)malloc(size);
+    if (!td->data) {
+        free(td);
+        return NT_BUILD_ERR_IO;
+    }
+    memcpy(td->data, data, size);
+    td->size = size;
+
+    if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
+        (void)fprintf(stderr, "ERROR: Asset limit reached (%d max)\n", NT_BUILD_MAX_ASSETS);
+        free(td->data);
+        free(td);
+        return NT_BUILD_ERR_LIMIT;
+    }
+
+    if (existing >= 0) {
+        nt_builder_free_entry(&ctx->pending[existing]);
+        ctx->pending[existing].path = strdup(resource_id);
+        ctx->pending[existing].rename_key = NULL;
+        ctx->pending[existing].resource_id = rid;
+        ctx->pending[existing].kind = NT_BUILD_ASSET_TEXTURE_MEM;
+        ctx->pending[existing].data = td;
+        return NT_BUILD_OK;
+    }
+
+    NtBuildEntry *entry = &ctx->pending[ctx->pending_count++];
+    entry->path = strdup(resource_id);
+    entry->rename_key = NULL;
+    entry->resource_id = rid;
+    entry->kind = NT_BUILD_ASSET_TEXTURE_MEM;
+    entry->data = td;
+    return NT_BUILD_OK;
 }
 
 void nt_builder_set_force(NtBuilderContext *ctx, bool force) {
