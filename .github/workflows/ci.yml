@@ -310,8 +310,9 @@ jobs:
             example_name=$(basename $(dirname "$example_dir"))
             mkdir -p "gh-pages-data/wasm/$example_name"
             cp "$example_dir"/*.html "$example_dir"/*.js "$example_dir"/*.wasm "gh-pages-data/wasm/$example_name/"
-            # Copy asset packs if present
+            # Copy asset packs if present (rm first to avoid cp -r nesting into existing dir)
             if [ -d "$example_dir/assets" ]; then
+              rm -rf "gh-pages-data/wasm/$example_name/assets"
               cp -r "$example_dir/assets" "gh-pages-data/wasm/$example_name/assets"
             fi
           done
