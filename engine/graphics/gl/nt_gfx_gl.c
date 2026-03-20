@@ -12,6 +12,7 @@
 #include "core/nt_platform.h"
 #include "graphics/gl/nt_gfx_gl_ctx.h"
 #include "graphics/nt_gfx_internal.h"
+#include "hash/nt_hash.h"
 #include "log/nt_log.h"
 #include "window/nt_window.h"
 
@@ -31,6 +32,14 @@
 
 /* ---- Pipeline backend data ---- */
 
+/* Per-pipeline uniform location cache (populated at link time) */
+#define NT_MAX_CACHED_UNIFORMS 16
+
+typedef struct {
+    uint32_t name_hash;
+    GLint location;
+} nt_cached_uniform_t;
+
 typedef struct {
     GLuint vao;
     GLuint program;
@@ -47,6 +56,9 @@ typedef struct {
     /* Store layouts for re-applying vertex attrib pointers on buffer bind */
     nt_vertex_layout_t layout;
     nt_vertex_layout_t instance_layout;
+    /* Uniform location cache (filled at glLinkProgram time) */
+    nt_cached_uniform_t uniforms[NT_MAX_CACHED_UNIFORMS];
+    uint8_t uniform_count;
 } nt_gfx_gl_pipeline_t;
 
 /* ---- File-scope state ---- */
@@ -81,42 +93,20 @@ static struct {
     GLuint bound_textures[NT_GFX_MAX_TEXTURE_SLOTS]; /* GL name per slot */
 } s_gl_cache;
 
-/* ---- Uniform location cache (avoid glGetUniformLocation string lookups per frame) ---- */
+/* ---- Per-pipeline uniform location lookup ---- */
 
-#define NT_UNIFORM_CACHE_SIZE 32
-
-typedef struct {
-    uint32_t key; /* hash of (program_id << 16) ^ name_hash */
-    GLint location;
-} nt_uniform_cache_entry_t;
-
-static nt_uniform_cache_entry_t s_uniform_cache[NT_UNIFORM_CACHE_SIZE];
-static uint32_t s_uniform_cache_count;
-
-static GLint uniform_location_cached(GLuint program, const char *name) {
-    /* FNV-1a hash of name */
-    uint32_t h = 2166136261U;
-    for (const char *p = name; *p; p++) {
-        h ^= (uint32_t)(uint8_t)*p;
-        h *= 16777619U;
+static GLint pipeline_get_uniform(const char *name) {
+    if (s_bound_pipeline_slot == 0 || s_bound_pipeline_slot > s_init_desc.max_pipelines) {
+        return -1;
     }
-    uint32_t key = ((uint32_t)program << 16) ^ h;
-
-    /* Linear scan — 32 entries max, trivial */
-    for (uint32_t i = 0; i < s_uniform_cache_count; i++) {
-        if (s_uniform_cache[i].key == key) {
-            return s_uniform_cache[i].location;
+    const nt_gfx_gl_pipeline_t *pip = &s_pipelines[s_bound_pipeline_slot];
+    uint32_t h = nt_hash32_str(name).value;
+    for (uint8_t i = 0; i < pip->uniform_count; i++) {
+        if (pip->uniforms[i].name_hash == h) {
+            return pip->uniforms[i].location;
         }
     }
-
-    /* Cache miss — query GL and store */
-    GLint loc = glGetUniformLocation(program, name);
-    if (s_uniform_cache_count < NT_UNIFORM_CACHE_SIZE) {
-        s_uniform_cache[s_uniform_cache_count].key = key;
-        s_uniform_cache[s_uniform_cache_count].location = loc;
-        s_uniform_cache_count++;
-    }
-    return loc;
+    return -1;
 }
 
 static void nt_gfx_gl_cache_reset(void) {
@@ -134,6 +124,7 @@ static void nt_gfx_gl_cache_reset(void) {
     s_gl_cache.po_units = 0.0F;
     s_gl_cache.active_texture = GL_TEXTURE0;
     memset(s_gl_cache.bound_textures, 0, sizeof(s_gl_cache.bound_textures));
+    s_instance_gl_buf = 0;
 }
 
 /* ---- Helpers: enum mapping ---- */
@@ -439,28 +430,28 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
 /* ---- Uniforms ---- */
 
 void nt_gfx_backend_set_uniform_mat4(const char *name, const float *matrix) {
-    GLint loc = uniform_location_cached(s_bound_program, name);
+    GLint loc = pipeline_get_uniform(name);
     if (loc >= 0) {
         glUniformMatrix4fv(loc, 1, GL_FALSE, matrix);
     }
 }
 
 void nt_gfx_backend_set_uniform_vec4(const char *name, const float *vec) {
-    GLint loc = uniform_location_cached(s_bound_program, name);
+    GLint loc = pipeline_get_uniform(name);
     if (loc >= 0) {
         glUniform4fv(loc, 1, vec);
     }
 }
 
 void nt_gfx_backend_set_uniform_float(const char *name, float val) {
-    GLint loc = uniform_location_cached(s_bound_program, name);
+    GLint loc = pipeline_get_uniform(name);
     if (loc >= 0) {
         glUniform1f(loc, val);
     }
 }
 
 void nt_gfx_backend_set_uniform_int(const char *name, int val) {
-    GLint loc = uniform_location_cached(s_bound_program, name);
+    GLint loc = pipeline_get_uniform(name);
     if (loc >= 0) {
         glUniform1i(loc, val);
     }
@@ -584,6 +575,24 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     pip->po_units = desc->polygon_offset_units;
     pip->layout = desc->layout;
     pip->instance_layout = desc->instance_layout;
+
+    /* Cache active uniform locations (avoids glGetUniformLocation per frame) */
+    pip->uniform_count = 0;
+    GLint active_uniforms = 0;
+    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &active_uniforms);
+    for (GLint ui = 0; ui < active_uniforms && pip->uniform_count < NT_MAX_CACHED_UNIFORMS; ui++) {
+        char uname[64];
+        GLsizei ulen = 0;
+        GLint usize = 0;
+        GLenum utype = 0;
+        glGetActiveUniform(program, (GLuint)ui, (GLsizei)sizeof(uname), &ulen, &usize, &utype, uname);
+        GLint loc = glGetUniformLocation(program, uname);
+        if (loc >= 0) {
+            pip->uniforms[pip->uniform_count].name_hash = nt_hash32_str(uname).value;
+            pip->uniforms[pip->uniform_count].location = loc;
+            pip->uniform_count++;
+        }
+    }
 
     return slot;
 }

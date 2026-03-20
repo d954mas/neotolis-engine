@@ -151,19 +151,19 @@ static nt_build_result_t add_textures(NtBuilderContext *ctx, const nt_glb_scene_
             continue;
         }
 
-        nt_tex_opts_t opts = {.format = NT_TEX_RGBA8, .max_size = max_size};
+        nt_tex_opts_t opts = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = max_size};
         switch (roles[i]) {
         case TEX_ROLE_DIFFUSE:
-            opts.format = texture_needs_alpha(scene, i, gltf) ? NT_TEX_RGBA8 : NT_TEX_RGB8;
+            opts.format = texture_needs_alpha(scene, i, gltf) ? NT_TEXTURE_FORMAT_RGBA8 : NT_TEXTURE_FORMAT_RGB8;
             break;
         case TEX_ROLE_NORMAL:
-            opts.format = NT_TEX_RG8;
+            opts.format = NT_TEXTURE_FORMAT_RG8;
             break;
         case TEX_ROLE_SPECULAR:
-            opts.format = NT_TEX_RG8;
+            opts.format = NT_TEXTURE_FORMAT_RG8;
             break;
         case TEX_ROLE_UNKNOWN:
-            opts.format = NT_TEX_RGBA8;
+            opts.format = NT_TEXTURE_FORMAT_RGBA8;
             break;
         }
 

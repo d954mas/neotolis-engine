@@ -5,7 +5,8 @@
 #include <stdint.h>
 
 #include "hash/nt_hash.h"
-#include "nt_mesh_format.h" /* nt_stream_type_t */
+#include "nt_mesh_format.h"    /* nt_stream_type_t */
+#include "nt_texture_format.h" /* nt_texture_pixel_format_t */
 
 /* Build limits (game can override before including this header) */
 #ifndef NT_BUILD_MAX_ASSETS
@@ -140,16 +141,10 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene);
 nt_build_result_t nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id);
 
 /* --- Texture options (game controls format and resize per-texture) --- */
-typedef enum {
-    NT_TEX_RGBA8 = 1, /* 4 bpp -- default */
-    NT_TEX_RGB8 = 2,  /* 3 bpp, drop alpha */
-    NT_TEX_RG8 = 3,   /* 2 bpp, keep R+G only */
-    NT_TEX_R8 = 4,    /* 1 bpp, keep R only */
-} nt_tex_format_t;
 
 typedef struct {
-    nt_tex_format_t format;   /* output pixel format (default: NT_TEX_RGBA8) */
-    uint32_t max_size;        /* 0 = no resize, otherwise max(w,h) clamped to this */
+    nt_texture_pixel_format_t format; /* output pixel format (default: NT_TEXTURE_FORMAT_RGBA8) */
+    uint32_t max_size;                /* 0 = no resize, otherwise max(w,h) clamped to this */
 } nt_tex_opts_t;
 
 /* --- Texture from memory API --- */

@@ -8,26 +8,8 @@
 #pragma clang diagnostic pop
 /* clang-format on */
 
-/* Map builder tex format enum to pack format enum (values intentionally match) */
-static nt_texture_pixel_format_t map_tex_format(nt_tex_format_t fmt) {
-    switch (fmt) {
-    case NT_TEX_RGB8: return NT_TEXTURE_FORMAT_RGB8;
-    case NT_TEX_RG8: return NT_TEXTURE_FORMAT_RG8;
-    case NT_TEX_R8: return NT_TEXTURE_FORMAT_R8;
-    case NT_TEX_RGBA8:
-    default: return NT_TEXTURE_FORMAT_RGBA8;
-    }
-}
-
-static uint32_t tex_bpp(nt_tex_format_t fmt) {
-    switch (fmt) {
-    case NT_TEX_RGB8: return 3;
-    case NT_TEX_RG8: return 2;
-    case NT_TEX_R8: return 1;
-    case NT_TEX_RGBA8:
-    default: return 4;
-    }
-}
+/* No mapping needed — builder and runtime share nt_texture_pixel_format_t.
+ * BPP lookup uses nt_texture_bpp() from nt_texture_format.h. */
 
 /* Strip RGBA8 source pixels to target channel count */
 static uint8_t *strip_channels(const uint8_t *rgba, uint32_t pixel_count, uint32_t target_channels) {
@@ -48,7 +30,7 @@ static uint8_t *strip_channels(const uint8_t *rgba, uint32_t pixel_count, uint32
 
 /* Shared import logic for both file and memory paths */
 static nt_build_result_t import_texture_pixels(NtBuilderContext *ctx, unsigned char *pixels, int w, int h, uint64_t resource_id, const nt_tex_opts_t *opts) {
-    nt_tex_format_t fmt = (opts && opts->format) ? opts->format : NT_TEX_RGBA8;
+    nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
     uint32_t max_size = opts ? opts->max_size : 0;
 
     int out_w = w;
@@ -80,7 +62,7 @@ static nt_build_result_t import_texture_pixels(NtBuilderContext *ctx, unsigned c
 
     const unsigned char *src = resized ? resized : pixels;
     uint32_t pixel_count = (uint32_t)out_w * (uint32_t)out_h;
-    uint32_t bpp = tex_bpp(fmt);
+    uint32_t bpp = nt_texture_bpp(fmt);
 
     /* Strip channels if needed */
     uint8_t *stripped = NULL;
@@ -102,7 +84,7 @@ static nt_build_result_t import_texture_pixels(NtBuilderContext *ctx, unsigned c
     memset(&tex_hdr, 0, sizeof(tex_hdr));
     tex_hdr.magic = NT_TEXTURE_MAGIC;
     tex_hdr.version = NT_TEXTURE_VERSION;
-    tex_hdr.format = (uint16_t)map_tex_format(fmt);
+    tex_hdr.format = (uint16_t)fmt;
     tex_hdr.width = (uint32_t)out_w;
     tex_hdr.height = (uint32_t)out_h;
     tex_hdr.mip_count = 1;

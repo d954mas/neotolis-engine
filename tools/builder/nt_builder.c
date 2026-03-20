@@ -421,8 +421,17 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         for (uint32_t i = 0; i < ctx->entry_count; i++) {
             for (uint32_t j = 0; j < i; j++) {
                 if (ctx->entries[i].offset == ctx->entries[j].offset && ctx->entries[i].size == ctx->entries[j].size) {
-                    const char *dup_name = (i < ctx->pending_count && ctx->pending[i].path) ? ctx->pending[i].path : "?";
-                    const char *orig_name = (j < ctx->pending_count && ctx->pending[j].path) ? ctx->pending[j].path : "?";
+                    /* Find names by matching resource_id in pending[] */
+                    const char *dup_name = "?";
+                    const char *orig_name = "?";
+                    for (uint32_t pi = 0; pi < ctx->pending_count; pi++) {
+                        if (ctx->pending[pi].resource_id == ctx->entries[i].resource_id) {
+                            dup_name = ctx->pending[pi].path ? ctx->pending[pi].path : "?";
+                        }
+                        if (ctx->pending[pi].resource_id == ctx->entries[j].resource_id) {
+                            orig_name = ctx->pending[pi].path ? ctx->pending[pi].path : "?";
+                        }
+                    }
                     (void)printf("    %s -> %s\n", dup_name, orig_name);
                     break;
                 }
@@ -573,7 +582,7 @@ nt_build_result_t nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, c
     if (opts) {
         td->opts = *opts;
     } else {
-        td->opts.format = NT_TEX_RGBA8;
+        td->opts.format = NT_TEXTURE_FORMAT_RGBA8;
         td->opts.max_size = 0;
     }
 
