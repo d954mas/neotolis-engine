@@ -101,9 +101,9 @@
 
 - [x] **DEMO-01**: Demo loads a .neopak pack containing mesh + texture + shaders
 - [x] **DEMO-02**: Demo creates material from loaded shader and texture at runtime
-- [ ] **DEMO-03**: Demo creates entity with Transform + Mesh + Material + RenderState components
+- [x] **DEMO-03**: Demo creates entity with Transform + Mesh + Material + RenderState components
 - [x] **DEMO-04**: Demo renders textured 3D model from asset pack
-- [ ] **DEMO-05**: Demo has camera control (reuse/adapt trackball from v1.2)
+- [x] **DEMO-05**: Demo has camera control (reuse/adapt trackball from v1.2)
 
 ## v1.4 Requirements (Deferred)
 
@@ -204,9 +204,9 @@
 | REND-03 | Phase 27 | Complete |
 | DEMO-01 | Phase 28 | Complete |
 | DEMO-02 | Phase 28 | Complete |
-| DEMO-03 | Phase 28 | Pending |
+| DEMO-03 | Phase 28 | Complete |
 | DEMO-04 | Phase 28 | Complete |
-| DEMO-05 | Phase 28 | Pending |
+| DEMO-05 | Phase 28 | Complete |
 
 **Coverage:**
 - v1.3 requirements: 58 total (corrected from initial estimate of 52)

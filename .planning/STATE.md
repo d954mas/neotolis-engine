@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Asset Pipeline
 current_phase: 28
-current_plan: 4
+current_plan: 5
 status: executing
-last_updated: "2026-03-20T09:35:22.340Z"
+last_updated: "2026-03-20T09:49:42.686Z"
 last_activity: 2026-03-20
 progress:
   total_phases: 18
   completed_phases: 16
   total_plans: 40
-  completed_plans: 38
+  completed_plans: 39
 ---
 
 # Session State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Milestone:** v1.3 Asset Pipeline (Phases 20-29)
 **Current phase:** 28
-**Current Plan:** 3
+**Current Plan:** 5
 **Status:** Executing Phase 28
 **Last activity:** 2026-03-20
 
@@ -80,6 +80,7 @@ Phase 21-01 decisions:
 - [Phase 28]: Sponza downloaded as separate glTF then converted to .glb via gltf-pipeline (no pre-made .glb available)
 - [Phase 28]: Per-primitive material accessed via cgltf_data internal pointer cast in builder code
 - [Phase 28]: Both sponza packs use force mode and share resource_ids for pack stacking
+- [Phase 28]: Extract translation from manifest 4x4 matrix for TRS transform component (position from columns 12-14)
 
 ## Performance Metrics
 
@@ -202,6 +203,7 @@ Phase 28-01 decisions:
 - nt_glb_texture_t maps to cgltf images (not cgltf textures) for direct buffer_view data access
 
 | Phase 28 P03 | 14min | 2 tasks | 12 files |
+| Phase 28 P04 | 10min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -257,3 +259,4 @@ Phase 28-01 decisions:
 - 2026-03-20: Completed 28-01-PLAN.md -- builder extensions: nt_glb_scene API, NT_ASSET_BLOB, MikkTSpace tangent, texture-from-memory, 3 new tests, 30min
 - 2026-03-20: Completed 28-02-PLAN.md -- global blocks API replacing hardcoded Globals, nt_resource_get_blob, 7 new tests, 10min
 - 2026-03-20: Completed 28-03-PLAN.md -- Sponza asset (52MB glb), 3 shader permutations, build_packs.c producing two progressive packs (179 assets each), 14min
+- 2026-03-20: Completed 28-04-PLAN.md -- Sponza runtime demo (721 lines), FPS camera, Lighting UBO, scene manifest loading, 3 shader permutations, progressive pack stacking, 10min
