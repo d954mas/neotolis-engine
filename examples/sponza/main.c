@@ -338,17 +338,19 @@ static void load_scene_from_manifest(void) {
         nt_material_comp_add(s_entities[i]);
         nt_drawable_comp_add(s_entities[i]);
 
-        /* Set transform from manifest (world matrix via position, identity rotation/scale) */
-        /* The manifest stores a full 4x4 world matrix per node.
-         * We extract translation and leave rotation=identity, scale=1.
-         * The full matrix is used directly when building render items
-         * (transform_comp_update recomputes from TRS, so we set dirty=false
-         * and override the world matrix). */
-        float *pos = nt_transform_comp_position(s_entities[i]);
-        pos[0] = mn->transform[12];
-        pos[1] = mn->transform[13];
-        pos[2] = mn->transform[14];
-        *nt_transform_comp_dirty(s_entities[i]) = true;
+        /* Decompose manifest 4x4 matrix into TRS for transform component */
+        {
+            mat4 rot_m;
+            vec4 t;
+            vec3 s;
+            versor q;
+            glm_decompose((float (*)[4])mn->transform, t, rot_m, s);
+            glm_mat4_quat(rot_m, q);
+            memcpy(nt_transform_comp_position(s_entities[i]), t, sizeof(float) * 3);
+            memcpy(nt_transform_comp_rotation(s_entities[i]), q, sizeof(versor));
+            memcpy(nt_transform_comp_scale(s_entities[i]), s, sizeof(float) * 3);
+            *nt_transform_comp_dirty(s_entities[i]) = true;
+        }
 
         /* Set material component */
         *nt_material_comp_handle(s_entities[i]) = s_materials[i];

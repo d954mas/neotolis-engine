@@ -220,19 +220,13 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
     uint32_t dedup_offset = UINT32_MAX;
 
     if (data_size >= 64) { /* only dedup assets >= 64 bytes */
-        uint32_t scan_end = new_data_start;
-        uint32_t scan_pos = 0;
         for (uint32_t ei = 0; ei < ctx->entry_count; ei++) {
-            uint32_t entry_size = ctx->entries[ei].size;
-            if (entry_size == data_size && scan_pos + data_size <= scan_end) {
-                if (memcmp(ctx->data_buf + scan_pos, new_data, data_size) == 0) {
-                    dedup_offset = scan_pos;
+            if (ctx->entries[ei].size == data_size && ctx->entries[ei].offset + data_size <= new_data_start) {
+                if (memcmp(ctx->data_buf + ctx->entries[ei].offset, new_data, data_size) == 0) {
+                    dedup_offset = ctx->entries[ei].offset;
                     break;
                 }
             }
-            /* Advance past this entry's aligned data */
-            uint32_t aligned = (entry_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
-            scan_pos += aligned;
         }
     }
 
