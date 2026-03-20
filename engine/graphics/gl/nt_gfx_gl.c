@@ -80,6 +80,44 @@ static struct {
     GLuint bound_textures[NT_GFX_MAX_TEXTURE_SLOTS]; /* GL name per slot */
 } s_gl_cache;
 
+/* ---- Uniform location cache (avoid glGetUniformLocation string lookups per frame) ---- */
+
+#define NT_UNIFORM_CACHE_SIZE 32
+
+typedef struct {
+    uint32_t key; /* hash of (program_id << 16) ^ name_hash */
+    GLint location;
+} nt_uniform_cache_entry_t;
+
+static nt_uniform_cache_entry_t s_uniform_cache[NT_UNIFORM_CACHE_SIZE];
+static uint32_t s_uniform_cache_count;
+
+static GLint uniform_location_cached(GLuint program, const char *name) {
+    /* FNV-1a hash of name */
+    uint32_t h = 2166136261U;
+    for (const char *p = name; *p; p++) {
+        h ^= (uint32_t)(uint8_t)*p;
+        h *= 16777619U;
+    }
+    uint32_t key = ((uint32_t)program << 16) ^ h;
+
+    /* Linear scan — 32 entries max, trivial */
+    for (uint32_t i = 0; i < s_uniform_cache_count; i++) {
+        if (s_uniform_cache[i].key == key) {
+            return s_uniform_cache[i].location;
+        }
+    }
+
+    /* Cache miss — query GL and store */
+    GLint loc = glGetUniformLocation(program, name);
+    if (s_uniform_cache_count < NT_UNIFORM_CACHE_SIZE) {
+        s_uniform_cache[s_uniform_cache_count].key = key;
+        s_uniform_cache[s_uniform_cache_count].location = loc;
+        s_uniform_cache_count++;
+    }
+    return loc;
+}
+
 static void nt_gfx_gl_cache_reset(void) {
     s_gl_cache.vao = 0;
     s_gl_cache.program = 0;
@@ -400,28 +438,28 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
 /* ---- Uniforms ---- */
 
 void nt_gfx_backend_set_uniform_mat4(const char *name, const float *matrix) {
-    GLint loc = glGetUniformLocation(s_bound_program, name);
+    GLint loc = uniform_location_cached(s_bound_program, name);
     if (loc >= 0) {
         glUniformMatrix4fv(loc, 1, GL_FALSE, matrix);
     }
 }
 
 void nt_gfx_backend_set_uniform_vec4(const char *name, const float *vec) {
-    GLint loc = glGetUniformLocation(s_bound_program, name);
+    GLint loc = uniform_location_cached(s_bound_program, name);
     if (loc >= 0) {
         glUniform4fv(loc, 1, vec);
     }
 }
 
 void nt_gfx_backend_set_uniform_float(const char *name, float val) {
-    GLint loc = glGetUniformLocation(s_bound_program, name);
+    GLint loc = uniform_location_cached(s_bound_program, name);
     if (loc >= 0) {
         glUniform1f(loc, val);
     }
 }
 
 void nt_gfx_backend_set_uniform_int(const char *name, int val) {
-    GLint loc = glGetUniformLocation(s_bound_program, name);
+    GLint loc = uniform_location_cached(s_bound_program, name);
     if (loc >= 0) {
         glUniform1i(loc, val);
     }
