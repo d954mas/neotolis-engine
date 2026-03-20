@@ -23,7 +23,8 @@ layout(std140) uniform Lighting {
 
 void main() {
     vec4 albedo = texture(u_diffuse, v_uv);
-    vec3 normal_map = texture(u_normal, v_uv).rgb * 2.0 - 1.0;
+    vec2 normal_xy = texture(u_normal, v_uv).rg * 2.0 - 1.0;
+    vec3 normal_map = vec3(normal_xy, sqrt(max(1.0 - dot(normal_xy, normal_xy), 0.0)));
     float spec_map = texture(u_specular, v_uv).r;
     vec3 N = normalize(v_tbn * normal_map);
     vec3 L = normalize(light_dir.xyz);

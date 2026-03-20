@@ -111,6 +111,9 @@ typedef enum {
 
 typedef enum {
     NT_PIXEL_RGBA8 = 0, /* 4 bpp, 8 bits per channel */
+    NT_PIXEL_RGB8 = 1,  /* 3 bpp, no alpha */
+    NT_PIXEL_RG8 = 2,   /* 2 bpp, two channels */
+    NT_PIXEL_R8 = 3,    /* 1 bpp, single channel */
 } nt_pixel_format_t;
 
 typedef enum {

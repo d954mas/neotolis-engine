@@ -62,6 +62,7 @@ typedef struct {
 typedef struct {
     uint8_t *data; /* deep-copied image data (owned, heap) */
     uint32_t size;
+    nt_tex_opts_t opts; /* format + resize options */
 } NtBuildTexMemData;
 
 /* Deferred asset entry -- stored during add_*, processed in finish_pack */
@@ -109,7 +110,7 @@ nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path
 nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *path, uint64_t resource_id);
 nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint64_t resource_id);
 nt_build_result_t nt_builder_import_blob(NtBuilderContext *ctx, const void *data, uint32_t size, uint64_t resource_id);
-nt_build_result_t nt_builder_import_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, uint64_t resource_id);
+nt_build_result_t nt_builder_import_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, uint64_t resource_id, const nt_tex_opts_t *opts);
 nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
                                                nt_tangent_mode_t tangent_mode, uint64_t resource_id);
 

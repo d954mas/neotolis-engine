@@ -106,8 +106,9 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     }
 
     uint32_t id = nt_pool_alloc(&s_mat.pool);
+    NT_ASSERT_ALWAYS(id != 0); /* material pool full — increase max_materials */
     if (id == 0) {
-        return NT_MATERIAL_INVALID; /* pool full */
+        return NT_MATERIAL_INVALID;
     }
 
     uint32_t slot_index = nt_pool_slot_index(id);

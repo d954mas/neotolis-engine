@@ -10,7 +10,21 @@
 /* Texture pixel formats */
 typedef enum {
     NT_TEXTURE_FORMAT_RGBA8 = 1, /* 4 bytes per pixel, 8 bits per channel */
+    NT_TEXTURE_FORMAT_RGB8 = 2,  /* 3 bytes per pixel, no alpha */
+    NT_TEXTURE_FORMAT_RG8 = 3,   /* 2 bytes per pixel, two channels */
+    NT_TEXTURE_FORMAT_R8 = 4,    /* 1 byte per pixel, single channel */
 } nt_texture_pixel_format_t;
+
+/* Bytes per pixel for each format */
+static inline uint32_t nt_texture_bpp(nt_texture_pixel_format_t fmt) {
+    switch (fmt) {
+    case NT_TEXTURE_FORMAT_RGBA8: return 4;
+    case NT_TEXTURE_FORMAT_RGB8: return 3;
+    case NT_TEXTURE_FORMAT_RG8: return 2;
+    case NT_TEXTURE_FORMAT_R8: return 1;
+    default: return 4;
+    }
+}
 
 /*
  * TextureAssetHeader -- binary header prepended to texture data in ntpack.

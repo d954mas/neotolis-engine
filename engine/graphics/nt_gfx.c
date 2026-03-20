@@ -712,11 +712,18 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         nt_log_error("gfx: activate_texture: unsupported version");
         return 0;
     }
-    if (hdr->format != NT_TEXTURE_FORMAT_RGBA8) {
+    nt_pixel_format_t pixel_fmt;
+    switch (hdr->format) {
+    case NT_TEXTURE_FORMAT_RGBA8: pixel_fmt = NT_PIXEL_RGBA8; break;
+    case NT_TEXTURE_FORMAT_RGB8: pixel_fmt = NT_PIXEL_RGB8; break;
+    case NT_TEXTURE_FORMAT_RG8: pixel_fmt = NT_PIXEL_RG8; break;
+    case NT_TEXTURE_FORMAT_R8: pixel_fmt = NT_PIXEL_R8; break;
+    default:
         nt_log_error("gfx: activate_texture: unsupported format");
         return 0;
     }
-    uint32_t pixel_size = hdr->width * hdr->height * 4; /* RGBA8 */
+    uint32_t bpp = nt_texture_bpp((nt_texture_pixel_format_t)hdr->format);
+    uint32_t pixel_size = hdr->width * hdr->height * bpp;
     if (sizeof(NtTextureAssetHeader) + pixel_size > size) {
         nt_log_error("gfx: activate_texture: blob truncated");
         return 0;
@@ -726,7 +733,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         .width = hdr->width,
         .height = hdr->height,
         .data = pixels,
-        .format = NT_PIXEL_RGBA8,
+        .format = pixel_fmt,
         .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
         .mag_filter = NT_FILTER_LINEAR,
         .wrap_u = NT_WRAP_REPEAT,

@@ -91,23 +91,92 @@ static const char *tex_rid(uint32_t tex_index) {
     return s_tid_buf;
 }
 
-/* --- Add all textures from embedded glb data --- */
+/* --- Texture role classification --- */
 
-static nt_build_result_t add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
+typedef enum { TEX_ROLE_DIFFUSE, TEX_ROLE_NORMAL, TEX_ROLE_SPECULAR, TEX_ROLE_UNKNOWN } tex_role_t;
+
+/* Build a lookup: texture_index -> role (based on how materials reference it) */
+static tex_role_t *build_texture_roles(const nt_glb_scene_t *scene) {
+    tex_role_t *roles = (tex_role_t *)calloc(scene->texture_count > 0 ? scene->texture_count : 1, sizeof(tex_role_t));
+    if (!roles) {
+        return NULL;
+    }
+    for (uint32_t i = 0; i < scene->texture_count; i++) {
+        roles[i] = TEX_ROLE_UNKNOWN;
+    }
+    for (uint32_t mi = 0; mi < scene->material_count; mi++) {
+        const nt_glb_material_t *mat = &scene->materials[mi];
+        if (mat->diffuse_index < scene->texture_count) {
+            roles[mat->diffuse_index] = TEX_ROLE_DIFFUSE;
+        }
+        if (mat->normal_index < scene->texture_count) {
+            roles[mat->normal_index] = TEX_ROLE_NORMAL;
+        }
+        if (mat->specular_index < scene->texture_count) {
+            roles[mat->specular_index] = TEX_ROLE_SPECULAR;
+        }
+    }
+    return roles;
+}
+
+/* Check if any material uses this texture as a diffuse with alpha */
+static bool texture_needs_alpha(const nt_glb_scene_t *scene, uint32_t tex_index, const cgltf_data *gltf) {
+    for (uint32_t mi = 0; mi < scene->material_count; mi++) {
+        if (scene->materials[mi].diffuse_index != tex_index) {
+            continue;
+        }
+        if (mi < gltf->materials_count) {
+            cgltf_alpha_mode am = gltf->materials[mi].alpha_mode;
+            if (am == cgltf_alpha_mode_mask || am == cgltf_alpha_mode_blend) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/* --- Add all textures with per-role format and optional resize --- */
+
+static nt_build_result_t add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t max_size) {
+    tex_role_t *roles = build_texture_roles(scene);
+    if (!roles) {
+        return NT_BUILD_ERR_IO;
+    }
+    cgltf_data *gltf = (cgltf_data *)scene->_internal;
+
     uint32_t added = 0;
     for (uint32_t i = 0; i < scene->texture_count; i++) {
         if (scene->textures[i].data == NULL || scene->textures[i].size == 0) {
             (void)fprintf(stderr, "WARNING: texture %u has no embedded data, skipping\n", i);
             continue;
         }
-        nt_build_result_t r = nt_builder_add_texture_from_memory(ctx, scene->textures[i].data, scene->textures[i].size, tex_rid(i));
+
+        nt_tex_opts_t opts = {.format = NT_TEX_RGBA8, .max_size = max_size};
+        switch (roles[i]) {
+        case TEX_ROLE_DIFFUSE:
+            opts.format = texture_needs_alpha(scene, i, gltf) ? NT_TEX_RGBA8 : NT_TEX_RGB8;
+            break;
+        case TEX_ROLE_NORMAL:
+            opts.format = NT_TEX_RG8;
+            break;
+        case TEX_ROLE_SPECULAR:
+            opts.format = NT_TEX_RG8;
+            break;
+        case TEX_ROLE_UNKNOWN:
+            opts.format = NT_TEX_RGBA8;
+            break;
+        }
+
+        nt_build_result_t r = nt_builder_add_texture_from_memory_ex(ctx, scene->textures[i].data, scene->textures[i].size, tex_rid(i), &opts);
         if (r != NT_BUILD_OK) {
             (void)fprintf(stderr, "ERROR: failed to add texture %u: %d\n", i, r);
+            free(roles);
             return r;
         }
         added++;
     }
     (void)printf("  Textures added: %u / %u\n", added, scene->texture_count);
+    free(roles);
     return NT_BUILD_OK;
 }
 
@@ -155,6 +224,7 @@ static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt
         {"position", "POSITION", NT_STREAM_FLOAT16, 3, false},
         {"normal", "NORMAL", NT_STREAM_INT8, 3, true},
         {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false},
+        {"tangent", "TANGENT", NT_STREAM_INT8, 4, true},
     };
 
     /* Access cgltf data for per-primitive material info */
@@ -217,8 +287,8 @@ static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt
 
             if (use_base_quality) {
                 layout = layout_base;
-                stream_count = 3;
-                tangent_mode = NT_TANGENT_NONE;
+                stream_count = (shader_type == SHADER_FULL) ? 4 : 3;
+                tangent_mode = (shader_type == SHADER_FULL) ? NT_TANGENT_AUTO : NT_TANGENT_NONE;
             } else if (shader_type == SHADER_FULL) {
                 layout = layout_full;
                 stream_count = 4;
@@ -326,7 +396,7 @@ int main(int argc, char *argv[]) {
         }
         nt_builder_set_force(ctx, true);
 
-        r = add_textures(ctx, &scene);
+        r = add_textures(ctx, &scene, 512);
         if (r != NT_BUILD_OK) {
             nt_builder_free_pack(ctx);
             nt_builder_free_glb_scene(&scene);
@@ -366,7 +436,7 @@ int main(int argc, char *argv[]) {
         }
         nt_builder_set_force(ctx, true);
 
-        r = add_textures(ctx, &scene);
+        r = add_textures(ctx, &scene, 0);
         if (r != NT_BUILD_OK) {
             nt_builder_free_pack(ctx);
             nt_builder_free_glb_scene(&scene);

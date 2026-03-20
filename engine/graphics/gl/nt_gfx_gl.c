@@ -728,6 +728,21 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     GLenum pixel_fmt = GL_RGBA;
     GLenum pixel_type = GL_UNSIGNED_BYTE;
     switch (desc->format) {
+    case NT_PIXEL_RGB8:
+        internal_fmt = GL_RGB8;
+        pixel_fmt = GL_RGB;
+        pixel_type = GL_UNSIGNED_BYTE;
+        break;
+    case NT_PIXEL_RG8:
+        internal_fmt = GL_RG8;
+        pixel_fmt = GL_RG;
+        pixel_type = GL_UNSIGNED_BYTE;
+        break;
+    case NT_PIXEL_R8:
+        internal_fmt = GL_R8;
+        pixel_fmt = GL_RED;
+        pixel_type = GL_UNSIGNED_BYTE;
+        break;
     case NT_PIXEL_RGBA8:
     default:
         internal_fmt = GL_RGBA8;

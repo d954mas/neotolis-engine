@@ -314,7 +314,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
         case NT_BUILD_ASSET_TEXTURE_MEM: {
             NtBuildTexMemData *tmd = (NtBuildTexMemData *)pe->data;
-            ret = nt_builder_import_texture_from_memory(ctx, tmd->data, tmd->size, pe->resource_id);
+            ret = nt_builder_import_texture_from_memory(ctx, tmd->data, tmd->size, pe->resource_id, &tmd->opts);
             break;
         }
         }
@@ -501,7 +501,7 @@ nt_build_result_t nt_builder_add_blob(NtBuilderContext *ctx, const void *data, u
 
 /* --- Public add_texture_from_memory --- */
 
-nt_build_result_t nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id) {
+nt_build_result_t nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts) {
     if (!ctx || !data || size == 0 || !resource_id) {
         return NT_BUILD_ERR_VALIDATION;
     }
@@ -525,6 +525,12 @@ nt_build_result_t nt_builder_add_texture_from_memory(NtBuilderContext *ctx, cons
     }
     memcpy(td->data, data, size);
     td->size = size;
+    if (opts) {
+        td->opts = *opts;
+    } else {
+        td->opts.format = NT_TEX_RGBA8;
+        td->opts.max_size = 0;
+    }
 
     if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
         (void)fprintf(stderr, "ERROR: Asset limit reached (%d max)\n", NT_BUILD_MAX_ASSETS);
@@ -550,6 +556,10 @@ nt_build_result_t nt_builder_add_texture_from_memory(NtBuilderContext *ctx, cons
     entry->kind = NT_BUILD_ASSET_TEXTURE_MEM;
     entry->data = td;
     return NT_BUILD_OK;
+}
+
+nt_build_result_t nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id) {
+    return nt_builder_add_texture_from_memory_ex(ctx, data, size, resource_id, NULL);
 }
 
 void nt_builder_set_force(NtBuilderContext *ctx, bool force) {

@@ -66,9 +66,9 @@
 
 #define MAX_SCENE_NODES 256
 #define MOUSE_SENSITIVITY 0.003F
-#define MOVE_SPEED_DEFAULT 5.0F
-#define MOVE_SPEED_MIN 0.5F
-#define MOVE_SPEED_MAX 50.0F
+#define MOVE_SPEED_DEFAULT 200.0F
+#define MOVE_SPEED_MIN 10.0F
+#define MOVE_SPEED_MAX 2000.0F
 
 /* ---- Lighting UBO (game-defined, slot 1) ---- */
 
@@ -118,7 +118,7 @@ static const uint8_t s_checker_4x4[4 * 4 * 4] = {
 
 /* ---- Camera state ---- */
 
-static float s_cam_pos[3] = {-5.0F, 2.0F, 0.0F};
+static float s_cam_pos[3] = {-1000.0F, 500.0F, 0.0F};
 static float s_cam_yaw;   /* radians */
 static float s_cam_pitch; /* radians */
 static float s_move_speed = MOVE_SPEED_DEFAULT;
@@ -153,6 +153,7 @@ static nt_material_t s_materials[MAX_SCENE_NODES];
 static nt_entity_t s_entities[MAX_SCENE_NODES];
 static uint32_t s_entity_count;
 static bool s_scene_loaded;
+static bool s_full_quality; /* true = full pack has higher priority */
 
 /* ---- Pitch clamp (89 degrees in radians) ---- */
 
@@ -166,28 +167,8 @@ static void camera_update(float dt) {
     if (nt_input_mouse_is_down(NT_BUTTON_LEFT)) {
         float mx = g_nt_input.pointers[0].dx;
         float my = g_nt_input.pointers[0].dy;
-
-        /* Check touch zone: right half = look, left half = movement */
-        float px = g_nt_input.pointers[0].x;
-        float half_w = (float)g_nt_window.fb_width * 0.5F;
-
-        if (px >= half_w) {
-            /* Right zone: look rotation */
-            s_cam_yaw -= mx * MOUSE_SENSITIVITY;
-            s_cam_pitch -= my * MOUSE_SENSITIVITY;
-        } else {
-            /* Left zone: touch movement (dx=strafe, dy=forward/back) */
-            float speed = s_move_speed * dt;
-            float forward[3] = {sinf(s_cam_yaw), 0.0F, cosf(s_cam_yaw)};
-            float right[3] = {cosf(s_cam_yaw), 0.0F, -sinf(s_cam_yaw)};
-
-            float move_fwd = -my * MOUSE_SENSITIVITY * 10.0F * speed;
-            float move_right = mx * MOUSE_SENSITIVITY * 10.0F * speed;
-
-            s_cam_pos[0] += forward[0] * move_fwd + right[0] * move_right;
-            s_cam_pos[1] += forward[1] * move_fwd + right[1] * move_right;
-            s_cam_pos[2] += forward[2] * move_fwd + right[2] * move_right;
-        }
+        s_cam_yaw -= mx * MOUSE_SENSITIVITY;
+        s_cam_pitch -= my * MOUSE_SENSITIVITY;
     }
 
     /* Clamp pitch */
@@ -198,8 +179,12 @@ static void camera_update(float dt) {
         s_cam_pitch = -PITCH_LIMIT;
     }
 
-    /* Forward and right vectors from yaw */
-    float forward[3] = {sinf(s_cam_yaw), 0.0F, cosf(s_cam_yaw)};
+    /* Forward (fly-style: includes pitch) and right vectors */
+    float forward[3] = {
+        sinf(s_cam_yaw) * cosf(s_cam_pitch),
+        sinf(s_cam_pitch),
+        cosf(s_cam_yaw) * cosf(s_cam_pitch),
+    };
     float right[3] = {cosf(s_cam_yaw), 0.0F, -sinf(s_cam_yaw)};
 
     /* WASD movement */
@@ -421,6 +406,20 @@ static void frame(void) {
     }
 #endif
 
+    /* Enter toggles pack priority (base <-> full quality) */
+    if (nt_input_key_is_pressed(NT_KEY_ENTER)) {
+        s_full_quality = !s_full_quality;
+        if (s_full_quality) {
+            nt_resource_set_priority(s_base_pack_id, 10);
+            nt_resource_set_priority(s_full_pack_id, 20);
+            nt_log_info(">> Switched to FULL quality");
+        } else {
+            nt_resource_set_priority(s_base_pack_id, 20);
+            nt_resource_set_priority(s_full_pack_id, 10);
+            nt_log_info(">> Switched to BASE quality");
+        }
+    }
+
     /* Step resource + material systems */
     nt_resource_step();
     nt_material_step();
@@ -452,7 +451,7 @@ static void frame(void) {
     mat4 proj_m;
     mat4 vp;
     glm_lookat(s_cam_pos, target, (vec3){0.0F, 1.0F, 0.0F}, view_m);
-    glm_perspective(glm_rad(60.0F), aspect, 0.1F, 200.0F, proj_m);
+    glm_perspective(glm_rad(60.0F), aspect, 1.0F, 10000.0F, proj_m);
     glm_mat4_mul(proj_m, view_m, vp);
 
     nt_frame_uniforms_t uniforms = {0};
@@ -470,25 +469,33 @@ static void frame(void) {
         uniforms.resolution[2] = 1.0F / (float)g_nt_window.fb_width;
         uniforms.resolution[3] = 1.0F / (float)g_nt_window.fb_height;
     }
-    uniforms.near_far[0] = 0.1F;
-    uniforms.near_far[1] = 200.0F;
+    uniforms.near_far[0] = 1.0F;
+    uniforms.near_far[1] = 10000.0F;
 
     /* Build render items (only if scene loaded) */
     nt_render_item_t items[MAX_SCENE_NODES];
     uint32_t item_count = 0;
 
     if (s_scene_loaded) {
+        static bool s_diag_logged;
+        uint32_t skip_vis = 0;
+        uint32_t skip_mat = 0;
+        uint32_t skip_mesh = 0;
+
         for (uint32_t i = 0; i < s_entity_count; i++) {
             if (!nt_render_is_visible(s_entities[i])) {
+                skip_vis++;
                 continue;
             }
 
             const nt_material_info_t *mat_info = nt_material_get_info(s_materials[i]);
             if (!mat_info || !mat_info->ready) {
+                skip_mat++;
                 continue;
             }
 
             if (!nt_resource_is_ready(s_mesh_handles[i])) {
+                skip_mesh++;
                 continue;
             }
 
@@ -500,6 +507,15 @@ static void frame(void) {
             items[item_count].entity = s_entities[i].id;
             items[item_count].batch_key = nt_batch_key(s_materials[i].id, mesh_id);
             item_count++;
+        }
+
+        if (!s_diag_logged && item_count > 0 && item_count < s_entity_count) {
+            char dbuf[256];
+            (void)snprintf(dbuf, sizeof(dbuf),
+                           ">> DIAG: %u/%u rendered, skipped: vis=%u mat=%u mesh=%u",
+                           item_count, s_entity_count, skip_vis, skip_mat, skip_mesh);
+            nt_log_info(dbuf);
+            s_diag_logged = true;
         }
 
         /* Sort items by sort_key */
@@ -555,14 +571,33 @@ static void frame(void) {
         /* Draw all render items */
         nt_mesh_renderer_draw_list(items, item_count);
 
-        /* One-time log to verify rendering */
-        static bool s_stats_logged;
-        if (!s_stats_logged) {
-            char buf[128];
-            (void)snprintf(buf, sizeof(buf), ">> Render stats: %u draw calls, %u instanced, %u instances (from %u items)", g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.draw_calls_instanced,
-                           g_nt_gfx.frame_stats.instances, item_count);
-            nt_log_info(buf);
-            s_stats_logged = true;
+        /* Per-second FPS + render stats */
+        {
+            static double s_stats_accum;
+            static uint32_t s_stats_frames;
+            static float s_stats_max_dt;
+            s_stats_accum += (double)g_nt_app.dt;
+            s_stats_frames++;
+            if (g_nt_app.dt > s_stats_max_dt) {
+                s_stats_max_dt = g_nt_app.dt;
+            }
+            if (s_stats_accum >= 1.0) {
+                float avg_fps = (float)s_stats_frames / (float)s_stats_accum;
+                float min_fps = (s_stats_max_dt > 0.0F) ? (1.0F / s_stats_max_dt) : 0.0F;
+                char buf[256];
+                (void)snprintf(buf, sizeof(buf),
+                               "FPS avg=%.1f min=%.1f | draws=%u inst=%u verts=%u tris=%u items=%u/%u",
+                               (double)avg_fps, (double)min_fps,
+                               g_nt_gfx.frame_stats.draw_calls,
+                               g_nt_gfx.frame_stats.instances,
+                               g_nt_gfx.frame_stats.vertices,
+                               g_nt_gfx.frame_stats.indices / 3,
+                               item_count, s_entity_count);
+                nt_log_info(buf);
+                s_stats_accum = 0.0;
+                s_stats_frames = 0;
+                s_stats_max_dt = 0.0F;
+            }
         }
     }
 
@@ -591,8 +626,11 @@ int main(void) {
     /* 3. Input init */
     nt_input_init();
 
-    /* 4. GFX init */
+    /* 4. GFX init -- Sponza needs larger pools (69 textures, 103 meshes) */
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
+    gfx_desc.max_textures = 256;
+    gfx_desc.max_buffers = 512;
+    gfx_desc.max_meshes = 256;
     nt_gfx_init(&gfx_desc);
 
     /* Register global UBO blocks */
@@ -611,7 +649,7 @@ int main(void) {
     nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
 
     /* 7. Material init */
-    nt_material_desc_t mat_desc = {.max_materials = 64};
+    nt_material_desc_t mat_desc = {.max_materials = 256};
     nt_material_init(&mat_desc);
 
     /* 8. Entity init */
@@ -672,17 +710,17 @@ int main(void) {
         .label = "lighting",
     });
 
-    /* 15. Mount and load packs (progressive stacking) */
+    /* 15. Mount and load packs (base first, full in background) */
     s_base_pack_id = nt_hash32_str("sponza_base");
-    nt_resource_mount(s_base_pack_id, 10);
+    nt_resource_mount(s_base_pack_id, 20); /* base starts as primary */
     nt_resource_load_auto(s_base_pack_id, "assets/sponza_base.ntpack");
 
     s_full_pack_id = nt_hash32_str("sponza_full");
-    nt_resource_mount(s_full_pack_id, 20);
+    nt_resource_mount(s_full_pack_id, 10); /* full loads but lower priority */
     nt_resource_load_auto(s_full_pack_id, "assets/sponza_full.ntpack");
 
-    /* 16. Bump activation budget for first frame */
-    nt_resource_set_activate_budget(256);
+    /* 16. Sponza needs ~400 activation units total — set budget high enough */
+    nt_resource_set_activate_budget(1024);
 
     /* 17. Platform web loading complete */
 #ifdef NT_PLATFORM_WEB

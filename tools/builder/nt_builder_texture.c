@@ -2,9 +2,132 @@
 #include "nt_builder_internal.h"
 #include "nt_texture_format.h"
 #include "stb_image.h"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlanguage-extension-token"
+#include "stb_image_resize2.h"
+#pragma clang diagnostic pop
 /* clang-format on */
 
-/* --- Texture import (called from finish_pack) --- */
+/* Map builder tex format enum to pack format enum (values intentionally match) */
+static nt_texture_pixel_format_t map_tex_format(nt_tex_format_t fmt) {
+    switch (fmt) {
+    case NT_TEX_RGB8: return NT_TEXTURE_FORMAT_RGB8;
+    case NT_TEX_RG8: return NT_TEXTURE_FORMAT_RG8;
+    case NT_TEX_R8: return NT_TEXTURE_FORMAT_R8;
+    case NT_TEX_RGBA8:
+    default: return NT_TEXTURE_FORMAT_RGBA8;
+    }
+}
+
+static uint32_t tex_bpp(nt_tex_format_t fmt) {
+    switch (fmt) {
+    case NT_TEX_RGB8: return 3;
+    case NT_TEX_RG8: return 2;
+    case NT_TEX_R8: return 1;
+    case NT_TEX_RGBA8:
+    default: return 4;
+    }
+}
+
+/* Strip RGBA8 source pixels to target channel count */
+static uint8_t *strip_channels(const uint8_t *rgba, uint32_t pixel_count, uint32_t target_channels) {
+    if (target_channels >= 4) {
+        return NULL; /* no strip needed */
+    }
+    uint8_t *out = (uint8_t *)malloc((size_t)pixel_count * target_channels);
+    if (!out) {
+        return NULL;
+    }
+    for (uint32_t i = 0; i < pixel_count; i++) {
+        for (uint32_t c = 0; c < target_channels; c++) {
+            out[i * target_channels + c] = rgba[i * 4 + c];
+        }
+    }
+    return out;
+}
+
+/* Shared import logic for both file and memory paths */
+static nt_build_result_t import_texture_pixels(NtBuilderContext *ctx, unsigned char *pixels, int w, int h, uint64_t resource_id, const nt_tex_opts_t *opts) {
+    nt_tex_format_t fmt = (opts && opts->format) ? opts->format : NT_TEX_RGBA8;
+    uint32_t max_size = opts ? opts->max_size : 0;
+
+    int out_w = w;
+    int out_h = h;
+    unsigned char *resized = NULL;
+
+    /* Resize if needed */
+    if (max_size > 0 && ((uint32_t)w > max_size || (uint32_t)h > max_size)) {
+        if ((uint32_t)w >= (uint32_t)h) {
+            out_w = (int)max_size;
+            out_h = (int)((uint32_t)h * max_size / (uint32_t)w);
+        } else {
+            out_h = (int)max_size;
+            out_w = (int)((uint32_t)w * max_size / (uint32_t)h);
+        }
+        if (out_w < 1) {
+            out_w = 1;
+        }
+        if (out_h < 1) {
+            out_h = 1;
+        }
+        resized = (unsigned char *)malloc((size_t)out_w * (size_t)out_h * 4);
+        if (!resized) {
+            stbi_image_free(pixels);
+            return NT_BUILD_ERR_IO;
+        }
+        stbir_resize_uint8_linear(pixels, w, h, 0, resized, out_w, out_h, 0, STBIR_RGBA);
+    }
+
+    const unsigned char *src = resized ? resized : pixels;
+    uint32_t pixel_count = (uint32_t)out_w * (uint32_t)out_h;
+    uint32_t bpp = tex_bpp(fmt);
+
+    /* Strip channels if needed */
+    uint8_t *stripped = NULL;
+    const uint8_t *final_data;
+    if (bpp < 4) {
+        stripped = strip_channels(src, pixel_count, bpp);
+        if (!stripped) {
+            free(resized);
+            stbi_image_free(pixels);
+            return NT_BUILD_ERR_IO;
+        }
+        final_data = stripped;
+    } else {
+        final_data = src;
+    }
+
+    /* Write header */
+    NtTextureAssetHeader tex_hdr;
+    memset(&tex_hdr, 0, sizeof(tex_hdr));
+    tex_hdr.magic = NT_TEXTURE_MAGIC;
+    tex_hdr.version = NT_TEXTURE_VERSION;
+    tex_hdr.format = (uint16_t)map_tex_format(fmt);
+    tex_hdr.width = (uint32_t)out_w;
+    tex_hdr.height = (uint32_t)out_h;
+    tex_hdr.mip_count = 1;
+    tex_hdr._pad = 0;
+
+    uint32_t data_size = pixel_count * bpp;
+    uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeader) + data_size;
+
+    nt_build_result_t ret = nt_builder_append_data(ctx, &tex_hdr, (uint32_t)sizeof(NtTextureAssetHeader));
+    if (ret == NT_BUILD_OK) {
+        ret = nt_builder_append_data(ctx, final_data, data_size);
+    }
+
+    free(stripped);
+    free(resized);
+    stbi_image_free(pixels);
+
+    if (ret != NT_BUILD_OK) {
+        return ret;
+    }
+
+    return nt_builder_register_asset(ctx, resource_id, NT_ASSET_TEXTURE, NT_TEXTURE_VERSION, total_asset_size);
+}
+
+/* --- Texture import from file (called from finish_pack) --- */
 
 nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *path, uint64_t resource_id) {
     if (!ctx || !path) {
@@ -26,42 +149,13 @@ nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *p
         return NT_BUILD_ERR_LIMIT;
     }
 
-    NtTextureAssetHeader tex_hdr;
-    memset(&tex_hdr, 0, sizeof(tex_hdr));
-    tex_hdr.magic = NT_TEXTURE_MAGIC;
-    tex_hdr.version = NT_TEXTURE_VERSION;
-    tex_hdr.format = NT_TEXTURE_FORMAT_RGBA8;
-    tex_hdr.width = (uint32_t)w;
-    tex_hdr.height = (uint32_t)h;
-    tex_hdr.mip_count = 1;
-    tex_hdr._pad = 0;
-
-    uint64_t pixel_data_size_64 = (uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4;
-    if (pixel_data_size_64 > UINT32_MAX) {
-        (void)fprintf(stderr, "ERROR: %s: pixel data size overflow (%ux%u RGBA8)\n", path, (uint32_t)w, (uint32_t)h);
-        stbi_image_free(pixels);
-        return NT_BUILD_ERR_LIMIT;
-    }
-    uint32_t pixel_data_size = (uint32_t)pixel_data_size_64;
-    uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeader) + pixel_data_size;
-
-    nt_build_result_t ret = nt_builder_append_data(ctx, &tex_hdr, (uint32_t)sizeof(NtTextureAssetHeader));
-    if (ret == NT_BUILD_OK) {
-        ret = nt_builder_append_data(ctx, pixels, pixel_data_size);
-    }
-
-    stbi_image_free(pixels);
-
-    if (ret != NT_BUILD_OK) {
-        return ret;
-    }
-
-    return nt_builder_register_asset(ctx, resource_id, NT_ASSET_TEXTURE, NT_TEXTURE_VERSION, total_asset_size);
+    /* File-based textures use default opts (RGBA8, no resize) */
+    return import_texture_pixels(ctx, pixels, w, h, resource_id, NULL);
 }
 
 /* --- Texture import from memory (called from finish_pack) --- */
 
-nt_build_result_t nt_builder_import_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, uint64_t resource_id) {
+nt_build_result_t nt_builder_import_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, uint64_t resource_id, const nt_tex_opts_t *opts) {
     if (!ctx || !data || size == 0) {
         return NT_BUILD_ERR_VALIDATION;
     }
@@ -81,35 +175,5 @@ nt_build_result_t nt_builder_import_texture_from_memory(NtBuilderContext *ctx, c
         return NT_BUILD_ERR_LIMIT;
     }
 
-    NtTextureAssetHeader tex_hdr;
-    memset(&tex_hdr, 0, sizeof(tex_hdr));
-    tex_hdr.magic = NT_TEXTURE_MAGIC;
-    tex_hdr.version = NT_TEXTURE_VERSION;
-    tex_hdr.format = NT_TEXTURE_FORMAT_RGBA8;
-    tex_hdr.width = (uint32_t)w;
-    tex_hdr.height = (uint32_t)h;
-    tex_hdr.mip_count = 1;
-    tex_hdr._pad = 0;
-
-    uint64_t pixel_data_size_64 = (uint64_t)(uint32_t)w * (uint64_t)(uint32_t)h * 4;
-    if (pixel_data_size_64 > UINT32_MAX) {
-        (void)fprintf(stderr, "ERROR: texture from memory: pixel data size overflow (%ux%u RGBA8)\n", (uint32_t)w, (uint32_t)h);
-        stbi_image_free(pixels);
-        return NT_BUILD_ERR_LIMIT;
-    }
-    uint32_t pixel_data_size = (uint32_t)pixel_data_size_64;
-    uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeader) + pixel_data_size;
-
-    nt_build_result_t ret = nt_builder_append_data(ctx, &tex_hdr, (uint32_t)sizeof(NtTextureAssetHeader));
-    if (ret == NT_BUILD_OK) {
-        ret = nt_builder_append_data(ctx, pixels, pixel_data_size);
-    }
-
-    stbi_image_free(pixels);
-
-    if (ret != NT_BUILD_OK) {
-        return ret;
-    }
-
-    return nt_builder_register_asset(ctx, resource_id, NT_ASSET_TEXTURE, NT_TEXTURE_VERSION, total_asset_size);
+    return import_texture_pixels(ctx, pixels, w, h, resource_id, opts);
 }
