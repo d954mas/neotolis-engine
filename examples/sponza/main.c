@@ -185,7 +185,7 @@ static void camera_update(float dt) {
         sinf(s_cam_pitch),
         cosf(s_cam_yaw) * cosf(s_cam_pitch),
     };
-    float right[3] = {cosf(s_cam_yaw), 0.0F, -sinf(s_cam_yaw)};
+    float right[3] = {-cosf(s_cam_yaw), 0.0F, sinf(s_cam_yaw)};
 
     /* WASD movement */
     float speed = s_move_speed * dt;
@@ -586,8 +586,9 @@ static void frame(void) {
                 float min_fps = (s_stats_max_dt > 0.0F) ? (1.0F / s_stats_max_dt) : 0.0F;
                 char buf[256];
                 (void)snprintf(buf, sizeof(buf),
-                               "FPS avg=%.1f min=%.1f | draws=%u inst=%u verts=%u tris=%u items=%u/%u",
+                               "FPS avg=%.1f min=%.1f dt=%.4f spd=%.0f | draws=%u inst=%u verts=%u tris=%u items=%u/%u",
                                (double)avg_fps, (double)min_fps,
+                               (double)g_nt_app.dt, (double)s_move_speed,
                                g_nt_gfx.frame_stats.draw_calls,
                                g_nt_gfx.frame_stats.instances,
                                g_nt_gfx.frame_stats.vertices,

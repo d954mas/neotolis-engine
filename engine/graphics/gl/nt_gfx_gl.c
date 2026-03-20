@@ -751,8 +751,18 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
         break;
     }
 
+    /* Set alignment for non-4-byte-aligned formats (RGB8=3, RG8=2, R8=1) */
+    if (desc->format != NT_PIXEL_RGBA8) {
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    }
+
     /* Upload pixel data (may be NULL for context-loss recovery placeholder) */
     glTexImage2D(GL_TEXTURE_2D, 0, (GLint)internal_fmt, (GLsizei)desc->width, (GLsizei)desc->height, 0, pixel_fmt, pixel_type, desc->data);
+
+    /* Restore default alignment */
+    if (desc->format != NT_PIXEL_RGBA8) {
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    }
 
     /* Generate mipmaps after base level upload if requested and data present */
     if (desc->gen_mipmaps && desc->data) {

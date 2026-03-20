@@ -1,4 +1,4 @@
-precision mediump float;
+precision highp float;
 
 in vec2 v_uv;
 in vec3 v_world_normal;

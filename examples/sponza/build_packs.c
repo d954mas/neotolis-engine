@@ -222,9 +222,9 @@ static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt
 
     NtStreamLayout layout_base[] = {
         {"position", "POSITION", NT_STREAM_FLOAT16, 3, false},
-        {"normal", "NORMAL", NT_STREAM_INT8, 3, true},
+        {"normal", "NORMAL", NT_STREAM_INT16, 3, true},
         {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false},
-        {"tangent", "TANGENT", NT_STREAM_INT8, 4, true},
+        {"tangent", "TANGENT", NT_STREAM_INT16, 4, true},
     };
 
     /* Access cgltf data for per-primitive material info */
