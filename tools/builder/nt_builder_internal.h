@@ -99,6 +99,10 @@ struct NtBuilderContext {
     uint32_t texture_count;
     uint32_t shader_count;
     uint32_t blob_count;
+
+    /* Deduplication stats */
+    uint32_t dedup_count;
+    uint32_t dedup_saved_bytes;
 };
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */

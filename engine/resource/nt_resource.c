@@ -341,8 +341,26 @@ void nt_resource_step(void) {
                     continue;
                 }
 
-                const uint8_t *data = pack->blob + meta->offset;
-                uint32_t handle = s_resource.activators[atype].activate(data, meta->size);
+                /* Deduplicate: check if identical data (same pack, offset, size) was already activated */
+                uint32_t reused_handle = 0;
+                for (uint32_t di = 0; di < s_resource.asset_hwm; di++) {
+                    const NtAssetMeta *other = &s_resource.assets[di];
+                    if (other->resource_id == 0 || di == ai) {
+                        continue;
+                    }
+                    if (other->state == NT_ASSET_STATE_READY && other->pack_index == pi && other->offset == meta->offset && other->size == meta->size && other->asset_type == atype) {
+                        reused_handle = other->runtime_handle;
+                        break;
+                    }
+                }
+
+                uint32_t handle;
+                if (reused_handle != 0) {
+                    handle = reused_handle;
+                } else {
+                    const uint8_t *data = pack->blob + meta->offset;
+                    handle = s_resource.activators[atype].activate(data, meta->size);
+                }
                 if (handle != 0) {
                     meta->state = NT_ASSET_STATE_READY;
                     meta->runtime_handle = handle;

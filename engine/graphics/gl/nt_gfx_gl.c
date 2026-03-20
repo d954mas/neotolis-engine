@@ -727,13 +727,12 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) {
 }
 
 void nt_gfx_backend_set_instance_offset(uint32_t byte_offset) {
+    NT_ASSERT(s_instance_gl_buf != 0); /* must call bind_instance_buffer first */
     if (s_bound_pipeline_slot == 0 || s_bound_pipeline_slot > s_init_desc.max_pipelines) {
         return;
     }
     /* Re-bind instance buffer so glVertexAttribPointer captures the right source */
-    if (s_instance_gl_buf != 0) {
-        glBindBuffer(GL_ARRAY_BUFFER, s_instance_gl_buf);
-    }
+    glBindBuffer(GL_ARRAY_BUFFER, s_instance_gl_buf);
     const nt_vertex_layout_t *layout = &s_pipelines[s_bound_pipeline_slot].instance_layout;
     for (uint8_t i = 0; i < layout->attr_count; i++) {
         const nt_vertex_attr_t *attr = &layout->attrs[i];

@@ -383,7 +383,20 @@ int main(int argc, char *argv[]) {
     }
 
     (void)printf("\nScene summary:\n");
-    (void)printf("  Meshes: %u, Materials: %u, Textures: %u, Nodes: %u\n\n", scene.mesh_count, scene.material_count, scene.texture_count, scene.node_count);
+    (void)printf("  Meshes: %u, Materials: %u, Textures: %u, Nodes: %u\n", scene.mesh_count, scene.material_count, scene.texture_count, scene.node_count);
+
+    /* Dump texture info for dedup analysis */
+    tex_role_t *roles = build_texture_roles(&scene);
+    if (roles) {
+        static const char *role_names[] = {"diffuse", "normal", "specular", "unknown"};
+        (void)printf("\n  Texture details:\n");
+        for (uint32_t i = 0; i < scene.texture_count; i++) {
+            const nt_glb_texture_t *t = &scene.textures[i];
+            (void)printf("    [%2u] %-8s %6u bytes  %s  %s\n", i, role_names[roles[i]], t->size, t->mime_type ? t->mime_type : "?", t->name ? t->name : "(unnamed)");
+        }
+        free(roles);
+    }
+    (void)printf("\n");
 
     /* ---- Pack 1: sponza_base.ntpack (compressed quality) ---- */
     {

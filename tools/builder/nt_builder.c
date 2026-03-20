@@ -213,22 +213,54 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
         return NT_BUILD_ERR_LIMIT;
     }
 
+    /* Deduplicate: check if identical data already exists in an earlier entry.
+     * The just-written data sits at data_buf[new_data_start .. data_size). */
+    uint32_t new_data_start = ctx->data_size - data_size;
+    const uint8_t *new_data = ctx->data_buf + new_data_start;
+    uint32_t dedup_offset = UINT32_MAX;
+
+    if (data_size >= 64) { /* only dedup assets >= 64 bytes */
+        uint32_t scan_end = new_data_start;
+        uint32_t scan_pos = 0;
+        for (uint32_t ei = 0; ei < ctx->entry_count; ei++) {
+            uint32_t entry_size = ctx->entries[ei].size;
+            if (entry_size == data_size && scan_pos + data_size <= scan_end) {
+                if (memcmp(ctx->data_buf + scan_pos, new_data, data_size) == 0) {
+                    dedup_offset = scan_pos;
+                    break;
+                }
+            }
+            /* Advance past this entry's aligned data */
+            uint32_t aligned = (entry_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+            scan_pos += aligned;
+        }
+    }
+
     uint32_t idx = ctx->entry_count;
     NtAssetEntry *entry = &ctx->entries[idx];
     entry->resource_id = resource_id;
     entry->format_version = format_version;
     entry->asset_type = (uint8_t)type;
     entry->_pad = 0;
-    entry->offset = 0;
     entry->size = data_size;
 
-    uint32_t aligned_size = (data_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
-    uint32_t padding = aligned_size - data_size;
-    if (padding > 0) {
-        uint8_t zeros[4] = {0};
-        nt_build_result_t res = nt_builder_append_data(ctx, zeros, padding);
-        if (res != NT_BUILD_OK) {
-            return res;
+    if (dedup_offset != UINT32_MAX) {
+        /* Duplicate found — rewind data_buf, point to existing data */
+        ctx->data_size = new_data_start;
+        entry->offset = dedup_offset; /* temporary: relative to data_buf start */
+        ctx->dedup_count++;
+        ctx->dedup_saved_bytes += data_size;
+    } else {
+        entry->offset = new_data_start; /* temporary: relative to data_buf start */
+        /* Add alignment padding */
+        uint32_t aligned_size = (data_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+        uint32_t padding = aligned_size - data_size;
+        if (padding > 0) {
+            uint8_t zeros[4] = {0};
+            nt_build_result_t res = nt_builder_append_data(ctx, zeros, padding);
+            if (res != NT_BUILD_OK) {
+                return res;
+            }
         }
     }
 
@@ -335,10 +367,10 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (ctx->entry_count * sizeof(NtAssetEntry)));
     uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
 
-    uint32_t data_offset = 0;
+    /* entry->offset is relative to data_buf start (set in register_asset).
+     * Shift to absolute file offset by adding header_size. */
     for (uint32_t i = 0; i < ctx->entry_count; i++) {
-        ctx->entries[i].offset = header_size + data_offset;
-        data_offset += (ctx->entries[i].size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+        ctx->entries[i].offset += header_size;
     }
 
     uint32_t total_size = header_size + ctx->data_size;
@@ -384,6 +416,19 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     /* Summary */
     (void)printf("Build complete: %s\n", ctx->output_path);
     (void)printf("  Assets: %u total (%u meshes, %u textures, %u shaders, %u blobs)\n", ctx->entry_count, ctx->mesh_count, ctx->texture_count, ctx->shader_count, ctx->blob_count);
+    if (ctx->dedup_count > 0) {
+        (void)printf("  Deduplicated: %u assets (saved %.3f MB)\n", ctx->dedup_count, (double)ctx->dedup_saved_bytes / (1024.0 * 1024.0));
+        for (uint32_t i = 0; i < ctx->entry_count; i++) {
+            for (uint32_t j = 0; j < i; j++) {
+                if (ctx->entries[i].offset == ctx->entries[j].offset && ctx->entries[i].size == ctx->entries[j].size) {
+                    const char *dup_name = (i < ctx->pending_count && ctx->pending[i].path) ? ctx->pending[i].path : "?";
+                    const char *orig_name = (j < ctx->pending_count && ctx->pending[j].path) ? ctx->pending[j].path : "?";
+                    (void)printf("    %s -> %s\n", dup_name, orig_name);
+                    break;
+                }
+            }
+        }
+    }
     if (total_size >= 1024 * 1024) {
         (void)printf("  Pack size: %.3f MB (%u bytes)\n", (double)total_size / (1024.0 * 1024.0), total_size);
     } else if (total_size >= 1024) {
