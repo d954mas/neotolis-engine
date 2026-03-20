@@ -611,6 +611,7 @@ nt_result_t nt_resource_set_priority(nt_hash32_t pack_id, int16_t new_priority) 
 
 /* ---- Pack parsing ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uint32_t blob_size) {
     if (!s_resource.initialized) {
         return NT_ERR_INVALID_ARG;

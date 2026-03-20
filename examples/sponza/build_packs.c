@@ -136,8 +136,6 @@ static nt_build_result_t add_textures(NtBuilderContext *ctx, const nt_glb_scene_
             opts.format = texture_needs_alpha(scene, i, gltf) ? NT_TEXTURE_FORMAT_RGBA8 : NT_TEXTURE_FORMAT_RGB8;
             break;
         case TEX_ROLE_NORMAL:
-            opts.format = NT_TEXTURE_FORMAT_RG8;
-            break;
         case TEX_ROLE_SPECULAR:
             opts.format = NT_TEXTURE_FORMAT_RG8;
             break;
@@ -220,7 +218,7 @@ static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt
     }
 
     /* Allocate manifest */
-    uint32_t manifest_size = (uint32_t)sizeof(SponzaManifestHeader) + manifest_count * (uint32_t)sizeof(SponzaManifestNode);
+    uint32_t manifest_size = (uint32_t)sizeof(SponzaManifestHeader) + (manifest_count * (uint32_t)sizeof(SponzaManifestNode));
     uint8_t *manifest_buf = (uint8_t *)calloc(manifest_size > 0 ? manifest_size : 1, 1);
     if (!manifest_buf) {
         return NT_BUILD_ERR_IO;

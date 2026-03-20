@@ -340,7 +340,8 @@ static void load_scene_from_manifest(void) {
 
         /* Decompose manifest 4x4 world matrix into TRS for transform component */
         {
-            mat4 m, rot_m;
+            mat4 m;
+            mat4 rot_m;
             vec4 t;
             vec3 s;
             versor q;
@@ -421,9 +422,9 @@ static void frame(void) {
     }
 
     vec3 target = {
-        s_cam_pos[0] + sinf(s_cam_yaw) * cosf(s_cam_pitch),
+        s_cam_pos[0] + (sinf(s_cam_yaw) * cosf(s_cam_pitch)),
         s_cam_pos[1] + sinf(s_cam_pitch),
-        s_cam_pos[2] + cosf(s_cam_yaw) * cosf(s_cam_pitch),
+        s_cam_pos[2] + (cosf(s_cam_yaw) * cosf(s_cam_pitch)),
     };
 
     mat4 view_m;
