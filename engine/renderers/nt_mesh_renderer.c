@@ -294,7 +294,6 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     uint32_t chunk_start = 0;
     nt_material_t prev_mat = {0};
     nt_mesh_t prev_mesh = {0};
-    uint32_t prev_pip_id = 0;
 
     while (chunk_start < count) {
         /* ---- Pack chunk into staging buffer ---- */
@@ -348,13 +347,10 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                 nt_pipeline_t pip = find_or_create_pipeline(mat_info, mesh_info);
                 nt_gfx_bind_pipeline(pip);
 
-                bool program_changed = (pip.id != prev_pip_id);
-                prev_pip_id = pip.id;
-
                 for (uint8_t t = 0; t < mat_info->tex_count; t++) {
                     if (mat_info->resolved_tex[t] != 0) {
                         nt_gfx_bind_texture((nt_texture_t){.id = mat_info->resolved_tex[t]}, t);
-                        if (program_changed && mat_info->tex_names[t] != NULL) {
+                        if (mat_info->tex_names[t] != NULL) {
                             nt_gfx_set_uniform_int(mat_info->tex_names[t], (int)t);
                         }
                     }
