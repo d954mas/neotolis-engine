@@ -99,8 +99,8 @@
 
 ### Demo
 
-- [ ] **DEMO-01**: Demo loads a .neopak pack containing mesh + texture + shaders
-- [ ] **DEMO-02**: Demo creates material from loaded shader and texture at runtime
+- [x] **DEMO-01**: Demo loads a .neopak pack containing mesh + texture + shaders
+- [x] **DEMO-02**: Demo creates material from loaded shader and texture at runtime
 - [ ] **DEMO-03**: Demo creates entity with Transform + Mesh + Material + RenderState components
 - [x] **DEMO-04**: Demo renders textured 3D model from asset pack
 - [ ] **DEMO-05**: Demo has camera control (reuse/adapt trackball from v1.2)
@@ -202,8 +202,8 @@
 | REND-01 | Phase 27 | Complete |
 | REND-02 | Phase 27 | Complete |
 | REND-03 | Phase 27 | Complete |
-| DEMO-01 | Phase 28 | Pending |
-| DEMO-02 | Phase 28 | Pending |
+| DEMO-01 | Phase 28 | Complete |
+| DEMO-02 | Phase 28 | Complete |
 | DEMO-03 | Phase 28 | Pending |
 | DEMO-04 | Phase 28 | Complete |
 | DEMO-05 | Phase 28 | Pending |

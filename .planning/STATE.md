@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Asset Pipeline
 current_phase: 28
-current_plan: 3
+current_plan: 4
 status: executing
-last_updated: "2026-03-20T09:16:11.000Z"
+last_updated: "2026-03-20T09:35:22.340Z"
 last_activity: 2026-03-20
 progress:
   total_phases: 18
   completed_phases: 16
   total_plans: 40
-  completed_plans: 37
+  completed_plans: 38
 ---
 
 # Session State
@@ -77,6 +77,9 @@ Phase 21-01 decisions:
 - [Phase 27]: Pipeline cache key: (layout_hash << 32 | resolved_vs) for lazy pipeline creation
 - [Phase 27]: Instance layout uses attribute locations 4-8 (mat4 columns + color) with vertex divisor=1
 - [Phase 27]: Real GFX shader handles in test materials (virtual packs register pool-allocated IDs)
+- [Phase 28]: Sponza downloaded as separate glTF then converted to .glb via gltf-pipeline (no pre-made .glb available)
+- [Phase 28]: Per-primitive material accessed via cgltf_data internal pointer cast in builder code
+- [Phase 28]: Both sponza packs use force mode and share resource_ids for pack stacking
 
 ## Performance Metrics
 
@@ -198,6 +201,8 @@ Phase 28-01 decisions:
 - Tangent mode is per-mesh configurable via nt_mesh_opts_t, not global
 - nt_glb_texture_t maps to cgltf images (not cgltf textures) for direct buffer_view data access
 
+| Phase 28 P03 | 14min | 2 tasks | 12 files |
+
 ## Accumulated Context
 
 ### Pending Todos
@@ -251,3 +256,4 @@ Phase 28-01 decisions:
 - 2026-03-19: Phase 27 complete -- mesh rendering pipeline with render defs, sort keys, pipeline cache, instanced draw, 2/2 plans done
 - 2026-03-20: Completed 28-01-PLAN.md -- builder extensions: nt_glb_scene API, NT_ASSET_BLOB, MikkTSpace tangent, texture-from-memory, 3 new tests, 30min
 - 2026-03-20: Completed 28-02-PLAN.md -- global blocks API replacing hardcoded Globals, nt_resource_get_blob, 7 new tests, 10min
+- 2026-03-20: Completed 28-03-PLAN.md -- Sponza asset (52MB glb), 3 shader permutations, build_packs.c producing two progressive packs (179 assets each), 14min
