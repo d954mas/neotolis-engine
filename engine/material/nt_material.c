@@ -4,8 +4,8 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
-#include "log/nt_log.h"
 #include "hash/nt_hash.h"
+#include "log/nt_log.h"
 #include "pool/nt_pool.h"
 
 /* ---- Internal slot struct ---- */

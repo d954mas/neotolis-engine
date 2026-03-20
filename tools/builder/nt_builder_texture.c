@@ -22,7 +22,7 @@ static uint8_t *strip_channels(const uint8_t *rgba, uint32_t pixel_count, uint32
     }
     for (uint32_t i = 0; i < pixel_count; i++) {
         for (uint32_t c = 0; c < target_channels; c++) {
-            out[i * target_channels + c] = rgba[i * 4 + c];
+            out[(i * target_channels) + c] = rgba[(i * 4) + c];
         }
     }
     return out;

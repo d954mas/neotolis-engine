@@ -18,11 +18,16 @@ typedef enum {
 /* Bytes per pixel for each format */
 static inline uint32_t nt_texture_bpp(nt_texture_pixel_format_t fmt) {
     switch (fmt) {
-    case NT_TEXTURE_FORMAT_RGBA8: return 4;
-    case NT_TEXTURE_FORMAT_RGB8: return 3;
-    case NT_TEXTURE_FORMAT_RG8: return 2;
-    case NT_TEXTURE_FORMAT_R8: return 1;
-    default: return 4;
+    case NT_TEXTURE_FORMAT_RGBA8:
+        return 4;
+    case NT_TEXTURE_FORMAT_RGB8:
+        return 3;
+    case NT_TEXTURE_FORMAT_RG8:
+        return 2;
+    case NT_TEXTURE_FORMAT_R8:
+        return 1;
+    default:
+        return 4;
     }
 }
 

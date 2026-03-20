@@ -63,9 +63,9 @@
 
 #define MAX_SCENE_NODES 256
 #define MOUSE_SENSITIVITY 0.003F
-#define MOVE_SPEED_DEFAULT 200.0F
-#define MOVE_SPEED_MIN 10.0F
-#define MOVE_SPEED_MAX 2000.0F
+#define MOVE_SPEED_DEFAULT 3.0F
+#define MOVE_SPEED_MIN 0.5F
+#define MOVE_SPEED_MAX 20.0F
 
 /* ---- Lighting UBO (game-defined, slot 1) ---- */
 
@@ -92,7 +92,7 @@ static const uint8_t s_checker_4x4[4 * 4 * 4] = {
 
 /* ---- Camera state ---- */
 
-static float s_cam_pos[3] = {-1000.0F, 500.0F, 0.0F};
+static float s_cam_pos[3] = {-8.0F, 4.0F, 0.0F};
 static float s_cam_yaw;   /* radians */
 static float s_cam_pitch; /* radians */
 static float s_move_speed = MOVE_SPEED_DEFAULT;
@@ -338,13 +338,14 @@ static void load_scene_from_manifest(void) {
         nt_material_comp_add(s_entities[i]);
         nt_drawable_comp_add(s_entities[i]);
 
-        /* Decompose manifest 4x4 matrix into TRS for transform component */
+        /* Decompose manifest 4x4 world matrix into TRS for transform component */
         {
-            mat4 rot_m;
+            mat4 m, rot_m;
             vec4 t;
             vec3 s;
             versor q;
-            glm_decompose((float (*)[4])mn->transform, t, rot_m, s);
+            memcpy(m, mn->transform, sizeof(mat4));
+            glm_decompose(m, t, rot_m, s);
             glm_mat4_quat(rot_m, q);
             memcpy(nt_transform_comp_position(s_entities[i]), t, sizeof(float) * 3);
             memcpy(nt_transform_comp_rotation(s_entities[i]), q, sizeof(versor));
@@ -429,7 +430,7 @@ static void frame(void) {
     mat4 proj_m;
     mat4 vp;
     glm_lookat(s_cam_pos, target, (vec3){0.0F, 1.0F, 0.0F}, view_m);
-    glm_perspective(glm_rad(60.0F), aspect, 1.0F, 10000.0F, proj_m);
+    glm_perspective(glm_rad(60.0F), aspect, 0.01F, 100.0F, proj_m);
     glm_mat4_mul(proj_m, view_m, vp);
 
     nt_frame_uniforms_t uniforms = {0};
@@ -447,8 +448,8 @@ static void frame(void) {
         uniforms.resolution[2] = 1.0F / (float)g_nt_window.fb_width;
         uniforms.resolution[3] = 1.0F / (float)g_nt_window.fb_height;
     }
-    uniforms.near_far[0] = 1.0F;
-    uniforms.near_far[1] = 10000.0F;
+    uniforms.near_far[0] = 0.01F;
+    uniforms.near_far[1] = 100.0F;
 
     /* Build render items (only if scene loaded) */
     nt_render_item_t items[MAX_SCENE_NODES];
@@ -489,9 +490,7 @@ static void frame(void) {
 
         if (!s_diag_logged && item_count > 0 && item_count < s_entity_count) {
             char dbuf[256];
-            (void)snprintf(dbuf, sizeof(dbuf),
-                           ">> DIAG: %u/%u rendered, skipped: vis=%u mat=%u mesh=%u",
-                           item_count, s_entity_count, skip_vis, skip_mat, skip_mesh);
+            (void)snprintf(dbuf, sizeof(dbuf), ">> DIAG: %u/%u rendered, skipped: vis=%u mat=%u mesh=%u", item_count, s_entity_count, skip_vis, skip_mat, skip_mesh);
             nt_log_info(dbuf);
             s_diag_logged = true;
         }
@@ -563,15 +562,9 @@ static void frame(void) {
                 float avg_fps = (float)s_stats_frames / (float)s_stats_accum;
                 float min_fps = (s_stats_max_dt > 0.0F) ? (1.0F / s_stats_max_dt) : 0.0F;
                 char buf[256];
-                (void)snprintf(buf, sizeof(buf),
-                               "FPS avg=%.1f min=%.1f dt=%.4f spd=%.0f | draws=%u inst=%u verts=%u tris=%u items=%u/%u",
-                               (double)avg_fps, (double)min_fps,
-                               (double)g_nt_app.dt, (double)s_move_speed,
-                               g_nt_gfx.frame_stats.draw_calls,
-                               g_nt_gfx.frame_stats.instances,
-                               g_nt_gfx.frame_stats.vertices,
-                               g_nt_gfx.frame_stats.indices / 3,
-                               item_count, s_entity_count);
+                (void)snprintf(buf, sizeof(buf), "FPS avg=%.1f min=%.1f dt=%.4f spd=%.0f | draws=%u inst=%u verts=%u tris=%u items=%u/%u", (double)avg_fps, (double)min_fps, (double)g_nt_app.dt,
+                               (double)s_move_speed, g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.instances, g_nt_gfx.frame_stats.vertices, g_nt_gfx.frame_stats.indices / 3, item_count,
+                               s_entity_count);
                 nt_log_info(buf);
                 s_stats_accum = 0.0;
                 s_stats_frames = 0;

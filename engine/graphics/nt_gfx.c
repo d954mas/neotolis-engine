@@ -721,10 +721,18 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     }
     nt_pixel_format_t pixel_fmt;
     switch (hdr->format) {
-    case NT_TEXTURE_FORMAT_RGBA8: pixel_fmt = NT_PIXEL_RGBA8; break;
-    case NT_TEXTURE_FORMAT_RGB8: pixel_fmt = NT_PIXEL_RGB8; break;
-    case NT_TEXTURE_FORMAT_RG8: pixel_fmt = NT_PIXEL_RG8; break;
-    case NT_TEXTURE_FORMAT_R8: pixel_fmt = NT_PIXEL_R8; break;
+    case NT_TEXTURE_FORMAT_RGBA8:
+        pixel_fmt = NT_PIXEL_RGBA8;
+        break;
+    case NT_TEXTURE_FORMAT_RGB8:
+        pixel_fmt = NT_PIXEL_RGB8;
+        break;
+    case NT_TEXTURE_FORMAT_RG8:
+        pixel_fmt = NT_PIXEL_RG8;
+        break;
+    case NT_TEXTURE_FORMAT_R8:
+        pixel_fmt = NT_PIXEL_R8;
+        break;
     default:
         nt_log_error("gfx: activate_texture: unsupported format");
         return 0;
