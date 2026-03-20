@@ -13,6 +13,7 @@
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
 #include "log/nt_log.h"
+#include "nt_blob_format.h"
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
 #include "time/nt_time.h"
@@ -674,13 +675,19 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
         NtAssetMeta *meta = &s_resource.assets[idx];
         meta->resource_id = entries[i].resource_id;
         meta->asset_type = entries[i].asset_type;
-        meta->state = NT_ASSET_STATE_REGISTERED;
         meta->format_version = entries[i].format_version;
         meta->pack_index = (uint16_t)pack_idx;
         meta->_pad = 0;
         meta->offset = entries[i].offset;
         meta->size = entries[i].size;
         meta->runtime_handle = 0;
+
+        /* Blob assets auto-transition to READY (no GPU activation needed) */
+        if (entries[i].asset_type == NT_ASSET_BLOB) {
+            meta->state = NT_ASSET_STATE_READY;
+        } else {
+            meta->state = NT_ASSET_STATE_REGISTERED;
+        }
     }
 
     /* Update pack metadata */
@@ -770,6 +777,56 @@ uint8_t nt_resource_get_state(nt_resource_t handle) {
     }
 
     return s_resource.slots[index].state;
+}
+
+const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size) {
+    if (out_size) {
+        *out_size = 0;
+    }
+    if (handle.id == 0) {
+        return NULL;
+    }
+
+    uint16_t index = nt_resource_slot_index(handle);
+    uint16_t gen = nt_resource_generation(handle);
+
+    if (index == 0 || index > NT_RESOURCE_MAX_SLOTS) {
+        return NULL;
+    }
+    if (s_resource.slots[index].generation != gen) {
+        return NULL; /* stale handle */
+    }
+    if (s_resource.slots[index].asset_type != NT_ASSET_BLOB) {
+        return NULL; /* not a blob */
+    }
+
+    /* Find the READY asset meta entry for this resource_id */
+    uint64_t rid = s_resource.slots[index].resource_id;
+    for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
+        NtAssetMeta *meta = &s_resource.assets[ai];
+        if (meta->resource_id != rid) {
+            continue;
+        }
+        if (meta->state != NT_ASSET_STATE_READY) {
+            continue;
+        }
+        if (meta->pack_index >= NT_RESOURCE_MAX_PACKS) {
+            continue;
+        }
+        const NtPackMeta *pack = &s_resource.packs[meta->pack_index];
+        if (!pack->mounted || pack->blob == NULL) {
+            continue;
+        }
+        if (meta->size <= sizeof(NtBlobAssetHeader)) {
+            return NULL; /* data too small for header */
+        }
+        if (out_size) {
+            *out_size = meta->size - (uint32_t)sizeof(NtBlobAssetHeader);
+        }
+        return pack->blob + meta->offset + sizeof(NtBlobAssetHeader);
+    }
+
+    return NULL;
 }
 
 /* ---- Virtual packs ---- */

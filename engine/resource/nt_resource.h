@@ -92,6 +92,9 @@ uint32_t nt_resource_get(nt_resource_t handle);
 bool nt_resource_is_ready(nt_resource_t handle);
 uint8_t nt_resource_get_state(nt_resource_t handle);
 
+/* Get raw blob data pointer (after NtBlobAssetHeader). Returns NULL if not ready or not a blob. */
+const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size);
+
 /* ---- Virtual packs ---- */
 
 nt_result_t nt_resource_create_pack(nt_hash32_t pack_id, int16_t priority);
