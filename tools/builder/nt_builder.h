@@ -5,7 +5,8 @@
 #include <stdint.h>
 
 #include "hash/nt_hash.h"
-#include "nt_mesh_format.h" /* nt_stream_type_t */
+#include "nt_mesh_format.h"    /* nt_stream_type_t */
+#include "nt_texture_format.h" /* nt_texture_pixel_format_t */
 
 /* Build limits (game can override before including this header) */
 #ifndef NT_BUILD_MAX_ASSETS
@@ -46,6 +47,64 @@ typedef enum {
     NT_BUILD_SHADER_FRAGMENT = 1,
 } nt_build_shader_stage_t;
 
+/* Tangent computation mode for scene mesh extraction */
+typedef enum {
+    NT_TANGENT_AUTO = 0,    /* extract from glTF if present, compute MikkTSpace if not */
+    NT_TANGENT_COMPUTE = 1, /* always compute via MikkTSpace (ignore glTF tangents) */
+    NT_TANGENT_REQUIRE = 2, /* error if glTF doesn't have tangents */
+    NT_TANGENT_NONE = 3,    /* skip tangent attribute entirely */
+} nt_tangent_mode_t;
+
+/* Mesh options for scene mesh extraction */
+typedef struct {
+    const NtStreamLayout *layout;
+    uint32_t stream_count;
+    nt_tangent_mode_t tangent_mode;
+} nt_mesh_opts_t;
+
+/* --- glTF scene types (parse/inspect/extract) --- */
+
+typedef struct {
+    uint32_t diffuse_index;  /* index into scene.textures[], UINT32_MAX if none */
+    uint32_t normal_index;   /* index into scene.textures[], UINT32_MAX if none */
+    uint32_t specular_index; /* index into scene.textures[], UINT32_MAX if none */
+    float base_color[4];     /* base color factor from glTF material */
+    float alpha_cutoff;      /* alpha cutoff for alpha test materials */
+    bool double_sided;
+    const char *name; /* material name from glTF (NULL if unnamed) */
+} nt_glb_material_t;
+
+typedef struct {
+    const uint8_t *data;   /* raw image data pointer (from glb buffer) */
+    uint32_t size;         /* image data size in bytes */
+    const char *name;      /* image name or URI from glTF */
+    const char *mime_type; /* e.g. "image/png", "image/jpeg" */
+} nt_glb_texture_t;
+
+typedef struct {
+    uint32_t primitive_count;
+    uint32_t material_index; /* glTF material index, UINT32_MAX if none */
+    const char *name;
+} nt_glb_mesh_t;
+
+typedef struct {
+    float transform[16]; /* world transform mat4 */
+    uint32_t mesh_index; /* index into scene.meshes[], UINT32_MAX if no mesh */
+    const char *name;
+} nt_glb_node_t;
+
+typedef struct {
+    nt_glb_mesh_t *meshes;
+    uint32_t mesh_count;
+    nt_glb_material_t *materials;
+    uint32_t material_count;
+    nt_glb_texture_t *textures;
+    uint32_t texture_count;
+    nt_glb_node_t *nodes;
+    uint32_t node_count;
+    void *_internal; /* opaque cgltf_data pointer */
+} nt_glb_scene_t;
+
 /* Opaque builder context */
 typedef struct NtBuilderContext NtBuilderContext;
 
@@ -72,6 +131,25 @@ nt_build_result_t nt_builder_add_shaders(NtBuilderContext *ctx, const char *patt
 
 /* --- Rename (change resource_id key, keep source file) --- */
 nt_build_result_t nt_builder_rename(NtBuilderContext *ctx, const char *old_path, const char *new_path);
+
+/* --- Scene API (parse/inspect/extract multi-mesh glTF) --- */
+nt_build_result_t nt_builder_parse_glb_scene(nt_glb_scene_t *scene, const char *path);
+nt_build_result_t nt_builder_add_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const char *resource_id, const nt_mesh_opts_t *opts);
+void nt_builder_free_glb_scene(nt_glb_scene_t *scene);
+
+/* --- Blob API (generic binary data asset) --- */
+nt_build_result_t nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id);
+
+/* --- Texture options (game controls format and resize per-texture) --- */
+
+typedef struct {
+    nt_texture_pixel_format_t format; /* output pixel format (default: NT_TEXTURE_FORMAT_RGBA8) */
+    uint32_t max_size;                /* 0 = no resize, otherwise max(w,h) clamped to this */
+} nt_tex_opts_t;
+
+/* --- Texture from memory API --- */
+nt_build_result_t nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id);
+nt_build_result_t nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts);
 
 /* --- Utilities --- */
 nt_build_result_t nt_builder_dump_pack(const char *pack_path);

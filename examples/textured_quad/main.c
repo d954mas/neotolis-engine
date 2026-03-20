@@ -361,6 +361,9 @@ int main(void) {
     nt_gfx_desc_t gfx_desc = nt_gfx_desc_defaults();
     nt_gfx_init(&gfx_desc);
 
+    /* Register global UBO blocks (required after Plan 02 removed auto-bind) */
+    nt_gfx_register_global_block("Globals", 0);
+
     /* Init I/O and resource systems */
     nt_http_init();
     nt_fs_init();

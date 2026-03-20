@@ -7,3 +7,7 @@
 *.md text eol=lf
 *.html text eol=lf
 *.js text eol=lf
+
+# Git LFS tracked assets
+assets/sponza/**/*.glb filter=lfs diff=lfs merge=lfs -text
+assets/sponza/**/*.bin filter=lfs diff=lfs merge=lfs -text

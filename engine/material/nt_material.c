@@ -5,6 +5,7 @@
 
 #include "core/nt_assert.h"
 #include "hash/nt_hash.h"
+#include "log/nt_log.h"
 #include "pool/nt_pool.h"
 
 /* ---- Internal slot struct ---- */
@@ -107,7 +108,8 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
 
     uint32_t id = nt_pool_alloc(&s_mat.pool);
     if (id == 0) {
-        return NT_MATERIAL_INVALID; /* pool full */
+        nt_log_error("nt_material: pool full — increase max_materials");
+        return NT_MATERIAL_INVALID;
     }
 
     uint32_t slot_index = nt_pool_slot_index(id);
@@ -135,6 +137,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     for (uint8_t i = 0; i < desc->param_count; i++) {
         memcpy(slot->info.params[i], desc->params[i].value, sizeof(float) * 4);
         slot->info.param_name_hashes[i] = desc->params[i].name ? nt_hash32_str(desc->params[i].name).value : 0;
+        slot->info.param_names[i] = desc->params[i].name;
     }
 
     /* Attr map */

@@ -24,6 +24,11 @@ typedef struct {
 
 nt_gfx_t g_nt_gfx;
 
+/* ---- Global UBO block registry ---- */
+
+static nt_global_block_t s_global_blocks[NT_GFX_MAX_GLOBAL_BLOCKS];
+static uint32_t s_global_block_count;
+
 /* ---- File-scope internal state ---- */
 
 static struct {
@@ -46,6 +51,24 @@ static struct {
     uint32_t bound_pipeline;  /* currently bound pipeline backend handle */
     uint8_t bound_index_type; /* index type of currently bound IBO (1=uint16, 2=uint32) */
 } s_gfx;
+
+/* ---- Global UBO block registration ---- */
+
+void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
+    NT_ASSERT_ALWAYS(name != NULL);
+    NT_ASSERT_ALWAYS(s_global_block_count < NT_GFX_MAX_GLOBAL_BLOCKS);
+    s_global_blocks[s_global_block_count].name = name;
+    s_global_blocks[s_global_block_count].binding_slot = binding_slot;
+    s_global_blocks[s_global_block_count].active = true;
+    s_global_block_count++;
+}
+
+void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count) {
+    NT_ASSERT(blocks != NULL);
+    NT_ASSERT(count != NULL);
+    *blocks = s_global_blocks;
+    *count = s_global_block_count;
+}
 
 /* ---- Lifecycle ---- */
 
@@ -109,6 +132,10 @@ void nt_gfx_shutdown(void) {
 
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
+
+    /* Clear global block registry */
+    memset(s_global_blocks, 0, sizeof(s_global_blocks));
+    s_global_block_count = 0;
 }
 
 /* ---- Frame / Pass ---- */
@@ -610,6 +637,13 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf) {
     nt_gfx_backend_bind_instance_buffer(s_gfx.buffer_backends[slot]);
 }
 
+void nt_gfx_set_instance_offset(uint32_t byte_offset) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    nt_gfx_backend_set_instance_offset(byte_offset);
+}
+
 /* ---- Uniform buffer ---- */
 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
@@ -685,11 +719,26 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         nt_log_error("gfx: activate_texture: unsupported version");
         return 0;
     }
-    if (hdr->format != NT_TEXTURE_FORMAT_RGBA8) {
+    nt_pixel_format_t pixel_fmt;
+    switch (hdr->format) {
+    case NT_TEXTURE_FORMAT_RGBA8:
+        pixel_fmt = NT_PIXEL_RGBA8;
+        break;
+    case NT_TEXTURE_FORMAT_RGB8:
+        pixel_fmt = NT_PIXEL_RGB8;
+        break;
+    case NT_TEXTURE_FORMAT_RG8:
+        pixel_fmt = NT_PIXEL_RG8;
+        break;
+    case NT_TEXTURE_FORMAT_R8:
+        pixel_fmt = NT_PIXEL_R8;
+        break;
+    default:
         nt_log_error("gfx: activate_texture: unsupported format");
         return 0;
     }
-    uint32_t pixel_size = hdr->width * hdr->height * 4; /* RGBA8 */
+    uint32_t bpp = nt_texture_bpp((nt_texture_pixel_format_t)hdr->format);
+    uint32_t pixel_size = hdr->width * hdr->height * bpp;
     if (sizeof(NtTextureAssetHeader) + pixel_size > size) {
         nt_log_error("gfx: activate_texture: blob truncated");
         return 0;
@@ -699,7 +748,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         .width = hdr->width,
         .height = hdr->height,
         .data = pixels,
-        .format = NT_PIXEL_RGBA8,
+        .format = pixel_fmt,
         .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
         .mag_filter = NT_FILTER_LINEAR,
         .wrap_u = NT_WRAP_REPEAT,

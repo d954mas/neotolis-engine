@@ -163,6 +163,52 @@
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
             "preLaunchTask": "Build native-debug (build_assets)"
+        },
+        {
+            "name": "Build Sponza Packs",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/sponza/native-debug/build_sponza_packs.exe",
+            "args": ["build/examples/sponza"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-debug (build_sponza_packs)"
+        },
+        {
+            "name": "Debug Desktop sponza",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/sponza/native-debug/sponza.exe",
+            "cwd": "${workspaceFolder}/build/examples/sponza/native-debug",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-debug"
+        },
+        {
+            "name": "Run Desktop sponza (release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/sponza/native-release/sponza.exe",
+            "cwd": "${workspaceFolder}/build/examples/sponza/native-release",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-release"
+        },
+        {
+            "name": "Debug WASM sponza",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8088/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/sponza/wasm-debug",
+            "preLaunchTask": "Build & Serve sponza (debug)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Run WASM sponza (release)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8089/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/sponza/wasm-release",
+            "preLaunchTask": "Build & Serve sponza (release)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
         }
     ]
 }
