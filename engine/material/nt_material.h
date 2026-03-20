@@ -100,6 +100,7 @@ typedef struct {
     uint8_t tex_count;
     float params[NT_MATERIAL_MAX_PARAMS][4];
     uint32_t param_name_hashes[NT_MATERIAL_MAX_PARAMS];
+    const char *param_names[NT_MATERIAL_MAX_PARAMS]; /* uniform names (static storage) */
     uint8_t param_count;
     uint32_t attr_map_hashes[NT_MATERIAL_MAX_ATTR_MAP];
     uint8_t attr_map_locations[NT_MATERIAL_MAX_ATTR_MAP];

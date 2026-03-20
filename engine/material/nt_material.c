@@ -137,6 +137,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     for (uint8_t i = 0; i < desc->param_count; i++) {
         memcpy(slot->info.params[i], desc->params[i].value, sizeof(float) * 4);
         slot->info.param_name_hashes[i] = desc->params[i].name ? nt_hash32_str(desc->params[i].name).value : 0;
+        slot->info.param_names[i] = desc->params[i].name;
     }
 
     /* Attr map */

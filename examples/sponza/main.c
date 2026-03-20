@@ -14,16 +14,13 @@
  *   sponza_full.ntpack -- full quality (float32, full-res textures)
  *
  * Controls:
- *   WASD       -- move horizontal
+ *   WASD       -- move (fly mode, follows pitch)
  *   SPACE      -- move up
  *   LSHIFT     -- move down
  *   LMB + drag -- look around
  *   SCROLL     -- adjust move speed
+ *   ENTER      -- toggle base/full quality
  *   ESC        -- quit (native only)
- *
- * Touch zones (mobile):
- *   Left half  -- drag for movement (dx=strafe, dy=forward/back)
- *   Right half -- drag for look rotation
  *
  * Build packs first:  build_sponza_packs  (from project root)
  */
@@ -80,30 +77,7 @@ typedef struct {
 
 _Static_assert(sizeof(nt_lighting_t) == 48, "lighting UBO 48 bytes");
 
-/* ---- Manifest structs (must match build_packs.c exactly) ---- */
-
-#pragma pack(push, 1)
-typedef struct {
-    uint32_t node_count;
-    uint32_t _pad;
-} ManifestHeader;
-
-typedef struct {
-    uint64_t mesh_rid;
-    uint64_t diffuse_rid;
-    uint64_t normal_rid;
-    uint64_t specular_rid;
-    float transform[16];
-    float base_color[4];
-    uint8_t shader_type;       /* 0=full, 1=diffuse, 2=alpha_test */
-    uint8_t alpha_cutoff_x100; /* alpha cutoff * 100 */
-    uint8_t _pad[6];
-} ManifestNode;
-#pragma pack(pop)
-
-/* ---- Shader type enum (matches build_packs.c) ---- */
-
-enum { SHADER_FULL = 0, SHADER_DIFFUSE = 1, SHADER_ALPHA = 2 };
+#include "sponza_manifest.h"
 
 /* ---- Fallback 4x4 checkerboard ---- */
 
@@ -235,26 +209,26 @@ static void camera_update(float dt) {
 static void load_scene_from_manifest(void) {
     uint32_t manifest_size = 0;
     const uint8_t *blob = nt_resource_get_blob(s_manifest_handle, &manifest_size);
-    if (!blob || manifest_size < sizeof(ManifestHeader)) {
+    if (!blob || manifest_size < sizeof(SponzaManifestHeader)) {
         nt_log_info("Manifest blob not available or too small");
         return;
     }
 
-    const ManifestHeader *hdr = (const ManifestHeader *)blob;
+    const SponzaManifestHeader *hdr = (const SponzaManifestHeader *)blob;
     uint32_t node_count = hdr->node_count;
     if (node_count > MAX_SCENE_NODES) {
         node_count = MAX_SCENE_NODES;
     }
 
-    if (manifest_size < sizeof(ManifestHeader) + node_count * sizeof(ManifestNode)) {
+    if (manifest_size < sizeof(SponzaManifestHeader) + node_count * sizeof(SponzaManifestNode)) {
         nt_log_info("Manifest blob truncated");
         return;
     }
 
-    const ManifestNode *nodes = (const ManifestNode *)(blob + sizeof(ManifestHeader));
+    const SponzaManifestNode *nodes = (const SponzaManifestNode *)(blob + sizeof(SponzaManifestHeader));
 
     for (uint32_t i = 0; i < node_count; i++) {
-        const ManifestNode *mn = &nodes[i];
+        const SponzaManifestNode *mn = &nodes[i];
 
         /* Request mesh resource */
         s_mesh_handles[i] = nt_resource_request((nt_hash64_t){.value = mn->mesh_rid}, NT_ASSET_MESH);
@@ -276,15 +250,15 @@ static void load_scene_from_manifest(void) {
         nt_resource_t fs_handle;
 
         switch (mn->shader_type) {
-        case SHADER_FULL:
+        case SPONZA_SHADER_FULL:
             vs_handle = s_vs_full;
             fs_handle = s_fs_full;
             break;
-        case SHADER_ALPHA:
+        case SPONZA_SHADER_ALPHA:
             vs_handle = s_vs_alpha;
             fs_handle = s_fs_alpha;
             break;
-        default: /* SHADER_DIFFUSE */
+        default: /* SPONZA_SHADER_DIFFUSE */
             vs_handle = s_vs_diffuse;
             fs_handle = s_fs_diffuse;
             break;
@@ -300,7 +274,7 @@ static void load_scene_from_manifest(void) {
         };
 
         /* Textures and attr_map depend on shader type */
-        if (mn->shader_type == SHADER_FULL) {
+        if (mn->shader_type == SPONZA_SHADER_FULL) {
             /* Full: diffuse + normal + specular, 4 streams */
             mat_desc.texture_count = 0;
             if (mn->diffuse_rid != 0) {
@@ -323,7 +297,7 @@ static void load_scene_from_manifest(void) {
             mat_desc.attr_map[2] = (nt_material_attr_desc_t){.stream_name = "uv0", .location = 2};
             mat_desc.attr_map[3] = (nt_material_attr_desc_t){.stream_name = "tangent", .location = 3};
             mat_desc.attr_map_count = 4;
-        } else if (mn->shader_type == SHADER_ALPHA) {
+        } else if (mn->shader_type == SPONZA_SHADER_ALPHA) {
             /* Alpha: diffuse only, 3 streams, double-sided */
             mat_desc.texture_count = 0;
             if (mn->diffuse_rid != 0) {
@@ -335,6 +309,8 @@ static void load_scene_from_manifest(void) {
             mat_desc.attr_map[1] = (nt_material_attr_desc_t){.stream_name = "normal", .location = 1};
             mat_desc.attr_map[2] = (nt_material_attr_desc_t){.stream_name = "uv0", .location = 2};
             mat_desc.attr_map_count = 3;
+            mat_desc.params[0] = (nt_material_param_desc_t){.name = "u_alpha_cutoff", .value = {(float)mn->alpha_cutoff_x100 / 100.0F}};
+            mat_desc.param_count = 1;
             mat_desc.blend_mode = NT_BLEND_MODE_OPAQUE;
             mat_desc.cull_mode = NT_CULL_NONE; /* double-sided for foliage */
         } else {

@@ -24,7 +24,7 @@ uniform float u_alpha_cutoff;
 
 void main() {
     vec4 albedo = texture(u_diffuse, v_uv);
-    if (albedo.a < 0.5) discard;
+    if (albedo.a < u_alpha_cutoff) discard;
     vec3 N = normalize(v_world_normal);
     vec3 L = normalize(light_dir.xyz);
     float NdotL = max(dot(N, L), 0.0);

@@ -341,23 +341,18 @@ void nt_resource_step(void) {
                     continue;
                 }
 
-                /* Deduplicate: check if identical data (same pack, offset, size) was already activated */
-                uint32_t reused_handle = 0;
-                for (uint32_t di = 0; di < s_resource.asset_hwm; di++) {
-                    const NtAssetMeta *other = &s_resource.assets[di];
-                    if (other->resource_id == 0 || di == ai) {
-                        continue;
-                    }
-                    if (other->state == NT_ASSET_STATE_READY && other->pack_index == pi && other->offset == meta->offset && other->size == meta->size && other->asset_type == atype) {
-                        reused_handle = other->runtime_handle;
-                        break;
+                /* Deduplicate: if marked as dedup, find the original (same pack+offset+size, already READY) */
+                uint32_t handle = 0;
+                if (meta->is_dedup) {
+                    for (uint32_t di = 0; di < s_resource.asset_hwm; di++) {
+                        const NtAssetMeta *other = &s_resource.assets[di];
+                        if (di != ai && other->state == NT_ASSET_STATE_READY && other->pack_index == pi && other->offset == meta->offset && other->size == meta->size) {
+                            handle = other->runtime_handle;
+                            break;
+                        }
                     }
                 }
-
-                uint32_t handle;
-                if (reused_handle != 0) {
-                    handle = reused_handle;
-                } else {
+                if (handle == 0) {
                     const uint8_t *data = pack->blob + meta->offset;
                     handle = s_resource.activators[atype].activate(data, meta->size);
                 }
@@ -695,10 +690,18 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
         meta->asset_type = entries[i].asset_type;
         meta->format_version = entries[i].format_version;
         meta->pack_index = (uint16_t)pack_idx;
-        meta->_pad = 0;
         meta->offset = entries[i].offset;
         meta->size = entries[i].size;
         meta->runtime_handle = 0;
+
+        /* Detect dedup: check if a previous entry in this pack has same offset+size */
+        meta->is_dedup = 0;
+        for (uint16_t j = 0; j < i; j++) {
+            if (entries[j].offset == entries[i].offset && entries[j].size == entries[i].size) {
+                meta->is_dedup = 1;
+                break;
+            }
+        }
 
         /* Blob assets auto-transition to READY (no GPU activation needed) */
         if (entries[i].asset_type == NT_ASSET_BLOB) {
@@ -886,6 +889,7 @@ nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, u
     meta->state = NT_ASSET_STATE_READY;
     meta->format_version = 0;
     meta->pack_index = (uint16_t)pack_idx;
+    meta->is_dedup = 0;
     meta->_pad = 0;
     meta->offset = 0;
     meta->size = 0;

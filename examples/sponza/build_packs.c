@@ -25,45 +25,24 @@
 #define MKDIR(p) mkdir(p, 0755)
 #endif
 
-/* --- Scene manifest structs (builder-side only) --- */
-
-#pragma pack(push, 1)
-typedef struct {
-    uint32_t node_count;
-    uint32_t _pad;
-} ManifestHeader;
-
-typedef struct {
-    uint64_t mesh_rid;
-    uint64_t diffuse_rid;
-    uint64_t normal_rid;
-    uint64_t specular_rid;
-    float transform[16];
-    float base_color[4];
-    uint8_t shader_type; /* 0=full, 1=diffuse, 2=alpha_test */
-    uint8_t alpha_cutoff_x100;
-    uint8_t _pad[6];
-} ManifestNode;
-#pragma pack(pop)
+#include "sponza_manifest.h"
 
 /* --- Shader type classification from glTF material properties --- */
 
-enum { SHADER_FULL = 0, SHADER_DIFFUSE = 1, SHADER_ALPHA = 2 };
-
 static uint8_t classify_material(const nt_glb_material_t *mat, const cgltf_material *cm) {
     if (mat == NULL) {
-        return SHADER_DIFFUSE;
+        return SPONZA_SHADER_DIFFUSE;
     }
     /* Alpha mask/blend -> alpha test shader */
     if (cm != NULL && (cm->alpha_mode == cgltf_alpha_mode_mask || cm->alpha_mode == cgltf_alpha_mode_blend)) {
-        return SHADER_ALPHA;
+        return SPONZA_SHADER_ALPHA;
     }
     /* Has normal map -> full shader (Blinn-Phong + normal mapping) */
     if (mat->normal_index != UINT32_MAX) {
-        return SHADER_FULL;
+        return SPONZA_SHADER_FULL;
     }
     /* Diffuse-only */
-    return SHADER_DIFFUSE;
+    return SPONZA_SHADER_DIFFUSE;
 }
 
 /* --- Path helper --- */
@@ -241,15 +220,15 @@ static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt
     }
 
     /* Allocate manifest */
-    uint32_t manifest_size = (uint32_t)sizeof(ManifestHeader) + manifest_count * (uint32_t)sizeof(ManifestNode);
+    uint32_t manifest_size = (uint32_t)sizeof(SponzaManifestHeader) + manifest_count * (uint32_t)sizeof(SponzaManifestNode);
     uint8_t *manifest_buf = (uint8_t *)calloc(manifest_size > 0 ? manifest_size : 1, 1);
     if (!manifest_buf) {
         return NT_BUILD_ERR_IO;
     }
 
-    ManifestHeader *hdr = (ManifestHeader *)manifest_buf;
+    SponzaManifestHeader *hdr = (SponzaManifestHeader *)manifest_buf;
     hdr->node_count = manifest_count;
-    ManifestNode *nodes_out = (ManifestNode *)(manifest_buf + sizeof(ManifestHeader));
+    SponzaManifestNode *nodes_out = (SponzaManifestNode *)(manifest_buf + sizeof(SponzaManifestHeader));
 
     /* Second pass: add meshes and fill manifest */
     uint32_t entry_idx = 0;
@@ -273,7 +252,7 @@ static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt
             /* Determine shader type */
             const nt_glb_material_t *mat = NULL;
             const cgltf_material *cm = NULL;
-            uint8_t shader_type = SHADER_DIFFUSE;
+            uint8_t shader_type = SPONZA_SHADER_DIFFUSE;
             if (mat_idx < scene->material_count) {
                 mat = &scene->materials[mat_idx];
                 cm = &gltf->materials[mat_idx];
@@ -287,9 +266,9 @@ static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt
 
             if (use_base_quality) {
                 layout = layout_base;
-                stream_count = (shader_type == SHADER_FULL) ? 4 : 3;
-                tangent_mode = (shader_type == SHADER_FULL) ? NT_TANGENT_AUTO : NT_TANGENT_NONE;
-            } else if (shader_type == SHADER_FULL) {
+                stream_count = (shader_type == SPONZA_SHADER_FULL) ? 4 : 3;
+                tangent_mode = (shader_type == SPONZA_SHADER_FULL) ? NT_TANGENT_AUTO : NT_TANGENT_NONE;
+            } else if (shader_type == SPONZA_SHADER_FULL) {
                 layout = layout_full;
                 stream_count = 4;
                 tangent_mode = NT_TANGENT_AUTO;
@@ -315,7 +294,7 @@ static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt
             meshes_added++;
 
             /* Fill manifest entry */
-            ManifestNode *mn = &nodes_out[entry_idx];
+            SponzaManifestNode *mn = &nodes_out[entry_idx];
             mn->mesh_rid = nt_builder_normalize_and_hash(rid).value;
 
             /* Texture resource IDs */

@@ -360,6 +360,13 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                     }
                 }
 
+                /* Apply material params as uniforms */
+                for (uint8_t p = 0; p < mat_info->param_count; p++) {
+                    if (mat_info->param_names[p] != NULL) {
+                        nt_gfx_set_uniform_float(mat_info->param_names[p], mat_info->params[p][0]);
+                    }
+                }
+
                 nt_gfx_bind_vertex_buffer(mesh_info->vbo);
                 if (mesh_info->index_count > 0) {
                     nt_gfx_bind_index_buffer(mesh_info->ibo);

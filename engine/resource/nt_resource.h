@@ -92,7 +92,9 @@ uint32_t nt_resource_get(nt_resource_t handle);
 bool nt_resource_is_ready(nt_resource_t handle);
 uint8_t nt_resource_get_state(nt_resource_t handle);
 
-/* Get raw blob data pointer (after NtBlobAssetHeader). Returns NULL if not ready or not a blob. */
+/* Get raw blob data pointer (after NtBlobAssetHeader). Returns NULL if not ready or not a blob.
+ * Returned pointer is a view into pack memory — valid until pack blob is evicted.
+ * Caller must copy data if it needs to persist beyond the current frame. */
 const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size);
 
 /* ---- Virtual packs ---- */

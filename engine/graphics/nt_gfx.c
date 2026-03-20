@@ -55,8 +55,8 @@ static struct {
 /* ---- Global UBO block registration ---- */
 
 void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
-    NT_ASSERT(name != NULL);
-    NT_ASSERT(s_global_block_count < NT_GFX_MAX_GLOBAL_BLOCKS);
+    NT_ASSERT_ALWAYS(name != NULL);
+    NT_ASSERT_ALWAYS(s_global_block_count < NT_GFX_MAX_GLOBAL_BLOCKS);
     s_global_blocks[s_global_block_count].name = name;
     s_global_blocks[s_global_block_count].binding_slot = binding_slot;
     s_global_blocks[s_global_block_count].active = true;

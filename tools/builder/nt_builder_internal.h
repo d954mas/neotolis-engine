@@ -122,11 +122,85 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
 nt_build_result_t nt_builder_compute_tangents(const float *positions, const float *normals, const float *uvs, const uint32_t *indices, uint32_t vertex_count, uint32_t index_count,
                                               float *out_tangents);
 
-/* File I/O utilities */
-char *nt_builder_read_file(const char *path, uint32_t *out_size);
-
-/* Hash and path utilities */
+/* Hash and path utilities (declared early — used by inline functions below) */
 char *nt_builder_normalize_path(const char *path);
 uint16_t nt_builder_float32_to_float16(float value);
+
+/* Shared type conversion: float → target stream type (float16, int8, uint8, int16, uint16) */
+static inline float nt_builder_clampf(float v, float lo, float hi) {
+    if (v < lo) {
+        return lo;
+    }
+    if (v > hi) {
+        return hi;
+    }
+    return v;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static inline void nt_builder_convert_component(float value, nt_stream_type_t type, bool normalized, uint8_t *out_ptr, bool *warned_f16) {
+    switch (type) {
+    case NT_STREAM_FLOAT32: {
+        memcpy(out_ptr, &value, sizeof(float));
+        break;
+    }
+    case NT_STREAM_FLOAT16: {
+        if (!*warned_f16 && (value > 65504.0F || value < -65504.0F)) {
+            (void)fprintf(stderr, "WARNING: float16 overflow (value=%.6g exceeds +-65504)\n", (double)value);
+            *warned_f16 = true;
+        }
+        uint16_t h = nt_builder_float32_to_float16(value);
+        memcpy(out_ptr, &h, sizeof(uint16_t));
+        break;
+    }
+    case NT_STREAM_UINT8: {
+        if (normalized) {
+            float c = nt_builder_clampf(value, 0.0F, 1.0F);
+            *out_ptr = (uint8_t)((c * 255.0F) + 0.5F);
+        } else {
+            *out_ptr = (uint8_t)nt_builder_clampf(value + 0.5F, 0.0F, 255.0F);
+        }
+        break;
+    }
+    case NT_STREAM_INT8: {
+        if (normalized) {
+            float c = nt_builder_clampf(value, -1.0F, 1.0F);
+            float bias = (c >= 0.0F) ? 0.5F : -0.5F;
+            int8_t s = (int8_t)((c * 127.0F) + bias);
+            memcpy(out_ptr, &s, sizeof(int8_t));
+        } else {
+            int8_t s = (int8_t)nt_builder_clampf(value + ((value >= 0.0F) ? 0.5F : -0.5F), -128.0F, 127.0F);
+            memcpy(out_ptr, &s, sizeof(int8_t));
+        }
+        break;
+    }
+    case NT_STREAM_UINT16: {
+        if (normalized) {
+            float c = nt_builder_clampf(value, 0.0F, 1.0F);
+            uint16_t u = (uint16_t)((c * 65535.0F) + 0.5F);
+            memcpy(out_ptr, &u, sizeof(uint16_t));
+        } else {
+            uint16_t u = (uint16_t)nt_builder_clampf(value + 0.5F, 0.0F, 65535.0F);
+            memcpy(out_ptr, &u, sizeof(uint16_t));
+        }
+        break;
+    }
+    case NT_STREAM_INT16: {
+        if (normalized) {
+            float c = nt_builder_clampf(value, -1.0F, 1.0F);
+            float bias = (c >= 0.0F) ? 0.5F : -0.5F;
+            int16_t s = (int16_t)((c * 32767.0F) + bias);
+            memcpy(out_ptr, &s, sizeof(int16_t));
+        } else {
+            int16_t s = (int16_t)nt_builder_clampf(value + ((value >= 0.0F) ? 0.5F : -0.5F), -32768.0F, 32767.0F);
+            memcpy(out_ptr, &s, sizeof(int16_t));
+        }
+        break;
+    }
+    }
+}
+
+/* File I/O utilities */
+char *nt_builder_read_file(const char *path, uint32_t *out_size);
 
 #endif /* NT_BUILDER_INTERNAL_H */

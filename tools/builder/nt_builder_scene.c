@@ -5,84 +5,7 @@
 #include "cgltf.h"
 /* clang-format on */
 
-#include <math.h>
-
-/* --- Forward declarations for helpers from nt_builder_mesh.c pattern --- */
-
-static float nt_scene_clampf(float v, float lo, float hi) {
-    if (v < lo) {
-        return lo;
-    }
-    if (v > hi) {
-        return hi;
-    }
-    return v;
-}
-
-/* --- Type conversion (mirrors nt_builder_mesh.c) --- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void nt_scene_convert_component(float value, nt_stream_type_t type, bool normalized, uint8_t *out_ptr, bool *warned_f16) {
-    switch (type) {
-    case NT_STREAM_FLOAT32: {
-        memcpy(out_ptr, &value, sizeof(float));
-        break;
-    }
-    case NT_STREAM_FLOAT16: {
-        if (!*warned_f16 && fabsf(value) > 65504.0F) {
-            (void)fprintf(stderr, "WARNING: float16 overflow (value=%.6g exceeds +-65504)\n", (double)value);
-            *warned_f16 = true;
-        }
-        uint16_t h = nt_builder_float32_to_float16(value);
-        memcpy(out_ptr, &h, sizeof(uint16_t));
-        break;
-    }
-    case NT_STREAM_UINT8: {
-        if (normalized) {
-            float c = nt_scene_clampf(value, 0.0F, 1.0F);
-            *out_ptr = (uint8_t)((c * 255.0F) + 0.5F);
-        } else {
-            *out_ptr = (uint8_t)nt_scene_clampf(value + 0.5F, 0.0F, 255.0F);
-        }
-        break;
-    }
-    case NT_STREAM_INT8: {
-        if (normalized) {
-            float c = nt_scene_clampf(value, -1.0F, 1.0F);
-            float bias = (c >= 0.0F) ? 0.5F : -0.5F;
-            int8_t s = (int8_t)((c * 127.0F) + bias);
-            memcpy(out_ptr, &s, sizeof(int8_t));
-        } else {
-            int8_t s = (int8_t)nt_scene_clampf(value + ((value >= 0.0F) ? 0.5F : -0.5F), -128.0F, 127.0F);
-            memcpy(out_ptr, &s, sizeof(int8_t));
-        }
-        break;
-    }
-    case NT_STREAM_UINT16: {
-        if (normalized) {
-            float c = nt_scene_clampf(value, 0.0F, 1.0F);
-            uint16_t u = (uint16_t)((c * 65535.0F) + 0.5F);
-            memcpy(out_ptr, &u, sizeof(uint16_t));
-        } else {
-            uint16_t u = (uint16_t)nt_scene_clampf(value + 0.5F, 0.0F, 65535.0F);
-            memcpy(out_ptr, &u, sizeof(uint16_t));
-        }
-        break;
-    }
-    case NT_STREAM_INT16: {
-        if (normalized) {
-            float c = nt_scene_clampf(value, -1.0F, 1.0F);
-            float bias = (c >= 0.0F) ? 0.5F : -0.5F;
-            int16_t s = (int16_t)((c * 32767.0F) + bias);
-            memcpy(out_ptr, &s, sizeof(int16_t));
-        } else {
-            int16_t s = (int16_t)nt_scene_clampf(value + ((value >= 0.0F) ? 0.5F : -0.5F), -32768.0F, 32767.0F);
-            memcpy(out_ptr, &s, sizeof(int16_t));
-        }
-        break;
-    }
-    }
-}
+/* Uses nt_builder_convert_component() and nt_builder_clampf() from nt_builder_internal.h */
 
 /* --- Helper: get texture index from cgltf_texture_view -> images array --- */
 
@@ -556,7 +479,7 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
                 uint32_t comp_size = nt_stream_type_size((uint8_t)layout[s].type);
                 for (uint8_t c = 0; c < layout[s].count; c++) {
                     float val = stream_floats[s][((size_t)v * layout[s].count) + c];
-                    nt_scene_convert_component(val, layout[s].type, layout[s].normalized, dst + offset, &warned_f16);
+                    nt_builder_convert_component(val, layout[s].type, layout[s].normalized, dst + offset, &warned_f16);
                     offset += comp_size;
                 }
             }
