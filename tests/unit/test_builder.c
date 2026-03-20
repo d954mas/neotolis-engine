@@ -4,6 +4,7 @@
 #include <string.h>
 
 /* clang-format off */
+#include "nt_blob_format.h"
 #include "nt_builder.h"
 #include "nt_crc32.h"
 #include "nt_mesh_format.h"
@@ -972,6 +973,202 @@ void test_free_pack_without_finish(void) {
     nt_builder_free_pack(ctx);
 }
 
+/* --- Blob import test --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_blob_import(void) {
+    const uint8_t test_data[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10};
+
+    const char *pack_path = TMP_DIR "/blob_test.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_blob(ctx, test_data, sizeof(test_data), "test/blob");
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Read back and verify */
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+
+    NtPackHeader hdr;
+    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL_UINT32(NT_PACK_MAGIC, hdr.magic);
+    TEST_ASSERT_EQUAL_UINT16(1, hdr.asset_count);
+
+    NtAssetEntry entry;
+    (void)fread(&entry, sizeof(entry), 1, f);
+    TEST_ASSERT_EQUAL_UINT8(NT_ASSET_BLOB, entry.asset_type);
+    TEST_ASSERT_EQUAL_UINT16(NT_BLOB_VERSION, entry.format_version);
+
+    /* Verify blob header at entry offset */
+    (void)fseek(f, (long)entry.offset, SEEK_SET);
+    NtBlobAssetHeader blob_hdr;
+    (void)fread(&blob_hdr, sizeof(blob_hdr), 1, f);
+    TEST_ASSERT_EQUAL_UINT32(NT_BLOB_MAGIC, blob_hdr.magic);
+    TEST_ASSERT_EQUAL_UINT16(NT_BLOB_VERSION, blob_hdr.version);
+
+    /* Verify blob data follows header */
+    uint8_t read_data[16];
+    (void)fread(read_data, 1, sizeof(read_data), f);
+    TEST_ASSERT_EQUAL_MEMORY(test_data, read_data, sizeof(test_data));
+
+    (void)fclose(f);
+}
+
+/* --- Texture from memory test --- */
+
+void test_tex_from_memory(void) {
+    /* Use our write_test_png to get PNG data, then read it back as memory */
+    const char *png_path = TMP_DIR "/mem_test.png";
+    write_test_png(png_path);
+
+    /* Read the PNG file into memory */
+    FILE *pf = fopen(png_path, "rb");
+    TEST_ASSERT_NOT_NULL(pf);
+    (void)fseek(pf, 0, SEEK_END);
+    long png_size = ftell(pf);
+    (void)fseek(pf, 0, SEEK_SET);
+    uint8_t *png_data = (uint8_t *)malloc((size_t)png_size);
+    TEST_ASSERT_NOT_NULL(png_data);
+    (void)fread(png_data, 1, (size_t)png_size, pf);
+    (void)fclose(pf);
+
+    const char *pack_path = TMP_DIR "/texmem_test.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_size, "test/texture_mem");
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    free(png_data);
+
+    /* Read back and verify texture */
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+
+    NtPackHeader hdr;
+    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL_UINT16(1, hdr.asset_count);
+
+    NtAssetEntry entry;
+    (void)fread(&entry, sizeof(entry), 1, f);
+    TEST_ASSERT_EQUAL_UINT8(NT_ASSET_TEXTURE, entry.asset_type);
+
+    (void)fseek(f, (long)entry.offset, SEEK_SET);
+    NtTextureAssetHeader tex;
+    (void)fread(&tex, sizeof(tex), 1, f);
+    TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, tex.magic);
+    TEST_ASSERT_EQUAL_UINT32(2, tex.width);
+    TEST_ASSERT_EQUAL_UINT32(2, tex.height);
+
+    (void)fclose(f);
+}
+
+/* --- Write a glb with nodes for scene tests --- */
+
+static void write_test_glb_with_node(const char *path) {
+    /* JSON chunk with mesh + node referencing the mesh */
+    const char *json_str = "{"
+                           "\"asset\":{\"version\":\"2.0\"},"
+                           "\"scene\":0,"
+                           "\"scenes\":[{\"nodes\":[0]}],"
+                           "\"nodes\":[{\"mesh\":0,\"name\":\"TriNode\"}],"
+                           "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},\"indices\":1}]}],"
+                           "\"accessors\":["
+                           "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\","
+                           "\"max\":[1.0,1.0,0.0],\"min\":[0.0,0.0,0.0]},"
+                           "{\"bufferView\":1,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}"
+                           "],"
+                           "\"bufferViews\":["
+                           "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+                           "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6}"
+                           "],"
+                           "\"buffers\":[{\"byteLength\":44}]"
+                           "}";
+
+    uint32_t json_len = (uint32_t)strlen(json_str);
+    uint32_t json_padded = (json_len + 3U) & ~3U;
+    uint32_t json_padding = json_padded - json_len;
+
+    float positions[] = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+    uint16_t indices[] = {0, 1, 2};
+    uint16_t idx_pad = 0;
+
+    uint32_t bin_data_size = (uint32_t)sizeof(positions) + (uint32_t)sizeof(indices) + (uint32_t)sizeof(idx_pad);
+    uint32_t bin_padded = (bin_data_size + 3U) & ~3U;
+
+    uint32_t glb_magic = 0x46546C67;
+    uint32_t glb_version = 2;
+    uint32_t json_chunk_type = 0x4E4F534A;
+    uint32_t bin_chunk_type = 0x004E4942;
+    uint32_t total_length = 12 + 8 + json_padded + 8 + bin_padded;
+
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        return;
+    }
+
+    (void)fwrite(&glb_magic, 4, 1, f);
+    (void)fwrite(&glb_version, 4, 1, f);
+    (void)fwrite(&total_length, 4, 1, f);
+    (void)fwrite(&json_padded, 4, 1, f);
+    (void)fwrite(&json_chunk_type, 4, 1, f);
+    (void)fwrite(json_str, 1, json_len, f);
+    for (uint32_t i = 0; i < json_padding; i++) {
+        char space = ' ';
+        (void)fwrite(&space, 1, 1, f);
+    }
+    (void)fwrite(&bin_padded, 4, 1, f);
+    (void)fwrite(&bin_chunk_type, 4, 1, f);
+    (void)fwrite(positions, sizeof(positions), 1, f);
+    (void)fwrite(indices, sizeof(indices), 1, f);
+    (void)fwrite(&idx_pad, sizeof(idx_pad), 1, f);
+
+    (void)fclose(f);
+}
+
+/* --- glb scene parse test --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_glb_scene_parse(void) {
+    const char *glb_path = TMP_DIR "/scene_test.glb";
+    write_test_glb_with_node(glb_path);
+
+    nt_glb_scene_t scene;
+    nt_build_result_t r = nt_builder_parse_glb_scene(&scene, glb_path);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    /* Verify scene contents */
+    TEST_ASSERT_EQUAL_UINT32(1, scene.mesh_count);
+    TEST_ASSERT_TRUE(scene.node_count >= 1);
+    TEST_ASSERT_EQUAL_UINT32(1, scene.meshes[0].primitive_count);
+
+    /* Find a node that references the mesh */
+    bool found_mesh_node = false;
+    for (uint32_t i = 0; i < scene.node_count; i++) {
+        if (scene.nodes[i].mesh_index == 0) {
+            found_mesh_node = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE(found_mesh_node);
+
+    /* Free should not crash */
+    nt_builder_free_glb_scene(&scene);
+
+    /* Verify scene is zeroed after free */
+    TEST_ASSERT_NULL(scene.meshes);
+    TEST_ASSERT_EQUAL_UINT32(0, scene.mesh_count);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -1024,6 +1221,15 @@ int main(void) {
 
     /* Lifecycle */
     RUN_TEST(test_free_pack_without_finish);
+
+    /* Blob import */
+    RUN_TEST(test_blob_import);
+
+    /* Texture from memory */
+    RUN_TEST(test_tex_from_memory);
+
+    /* Scene parse */
+    RUN_TEST(test_glb_scene_parse);
 
     return UNITY_END();
 }
