@@ -637,6 +637,13 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf) {
     nt_gfx_backend_bind_instance_buffer(s_gfx.buffer_backends[slot]);
 }
 
+void nt_gfx_set_instance_offset(uint32_t byte_offset) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    nt_gfx_backend_set_instance_offset(byte_offset);
+}
+
 /* ---- Uniform buffer ---- */
 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {

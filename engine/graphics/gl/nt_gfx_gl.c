@@ -58,6 +58,7 @@ static nt_gfx_gl_pipeline_t *s_pipelines; /* pipeline data, indexed by slot */
 static GLuint *s_buffer_gl;               /* GL buffer names, indexed by slot */
 static GLenum *s_buffer_targets;          /* GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY_BUFFER */
 static GLuint *s_texture_gl;              /* GL texture names, indexed by slot */
+static GLuint s_instance_gl_buf;          /* GL name of last bound instance buffer */
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
 
@@ -707,6 +708,7 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) {
         return;
     }
     GLuint buf = s_buffer_gl[backend_handle];
+    s_instance_gl_buf = buf;
     glBindBuffer(GL_ARRAY_BUFFER, buf);
 
     /* Re-apply instance attribute pointers from the currently bound pipeline. */
@@ -721,6 +723,26 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) {
             glVertexAttribPointer(attr->location, size, type, normalized, (GLsizei)layout->stride,
                                   (void *)(uintptr_t)attr->offset); // NOLINT(performance-no-int-to-ptr)
         }
+    }
+}
+
+void nt_gfx_backend_set_instance_offset(uint32_t byte_offset) {
+    if (s_bound_pipeline_slot == 0 || s_bound_pipeline_slot > s_init_desc.max_pipelines) {
+        return;
+    }
+    /* Re-bind instance buffer so glVertexAttribPointer captures the right source */
+    if (s_instance_gl_buf != 0) {
+        glBindBuffer(GL_ARRAY_BUFFER, s_instance_gl_buf);
+    }
+    const nt_vertex_layout_t *layout = &s_pipelines[s_bound_pipeline_slot].instance_layout;
+    for (uint8_t i = 0; i < layout->attr_count; i++) {
+        const nt_vertex_attr_t *attr = &layout->attrs[i];
+        GLint size;
+        GLenum type;
+        GLboolean normalized;
+        get_format_params(attr->format, &size, &type, &normalized);
+        glVertexAttribPointer(attr->location, size, type, normalized, (GLsizei)layout->stride,
+                              (void *)(uintptr_t)(attr->offset + byte_offset)); // NOLINT(performance-no-int-to-ptr)
     }
 }
 

@@ -288,8 +288,24 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     s_mesh_renderer.frame_draw_calls = 0;
     s_mesh_renderer.frame_instance_total = 0;
 
-    /* Run detection loop */
+    /* ---- Pass 1: Pack ALL instance data into staging buffer ---- */
+    uint32_t total_instances = 0;
+    for (uint32_t i = 0; i < count && total_instances < s_mesh_renderer.max_instances; i++) {
+        nt_entity_t e = {.id = items[i].entity};
+        const float *world = nt_transform_comp_world_matrix(e);
+        const float *color = nt_drawable_comp_color(e);
+        memcpy(s_mesh_renderer.instance_data[total_instances].world_matrix, world, sizeof(s_mesh_renderer.instance_data[0].world_matrix));
+        memcpy(s_mesh_renderer.instance_data[total_instances].color, color, sizeof(s_mesh_renderer.instance_data[0].color));
+        total_instances++;
+    }
+
+    /* ---- Single GPU upload ---- */
+    nt_gfx_update_buffer(s_mesh_renderer.instance_buf, s_mesh_renderer.instance_data, total_instances * (uint32_t)sizeof(nt_mesh_instance_t));
+    nt_gfx_bind_instance_buffer(s_mesh_renderer.instance_buf);
+
+    /* ---- Pass 2: Draw with offsets ---- */
     uint32_t run_start = 0;
+    uint32_t instance_offset = 0;
     nt_material_t prev_mat = {0};
     nt_mesh_t prev_mesh = {0};
     uint32_t prev_pip_id = 0;
@@ -302,8 +318,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
         nt_material_t run_mat = *nt_material_comp_handle(entity);
         nt_mesh_t run_mesh = *nt_mesh_comp_handle(entity);
 
-        /* Detect run end via batch_key (same material+mesh = same key, independent of sort order).
-         * Hash collision risk ~0.0001% at 100 unique combos — acceptable vs per-item component reads. */
+        /* Detect run end via batch_key (same material+mesh = same key, independent of sort order). */
         uint32_t run_end = run_start + 1;
         while (run_end < count && items[run_end].batch_key == items[run_start].batch_key) {
             run_end++;
@@ -316,8 +331,8 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
         const nt_gfx_mesh_info_t *mesh_info = nt_gfx_get_mesh_info(run_mesh);
 
         if (!mat_info || !mat_info->ready || !mesh_info) {
-            nt_log_error("mesh_renderer: skipping run — material or mesh not ready");
             run_start = run_end;
+            instance_offset += instance_count;
             continue;
         }
 
@@ -350,47 +365,20 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             prev_mesh = run_mesh;
         }
 
-        /* Pack instance data (split into sub-batches if exceeds max_instances) */
-        uint32_t instances_remaining = instance_count;
-        uint32_t batch_offset = 0;
+        /* Set instance buffer offset for this run (no re-upload, just re-point attribs) */
+        nt_gfx_set_instance_offset(instance_offset * (uint32_t)sizeof(nt_mesh_instance_t));
 
-        while (instances_remaining > 0) {
-            uint32_t batch_count = instances_remaining;
-            if (batch_count > s_mesh_renderer.max_instances) {
-                batch_count = s_mesh_renderer.max_instances;
-            }
-
-            /* Pack world_matrix + color for this batch.
-             * Reads from component arrays via entity→index lookup (scattered access).
-             * Acceptable: ~20μs at 1K entities. Inline world_matrix in render item
-             * would make packing sequential but sort 6× slower (96B vs 16B elements).
-             * If CPU-bound at 10K+: switch to radix/indirect sort + fat item. */
-            for (uint32_t i = 0; i < batch_count; i++) {
-                nt_entity_t e = {.id = items[run_start + batch_offset + i].entity};
-                const float *world = nt_transform_comp_world_matrix(e);
-                const float *color = nt_drawable_comp_color(e);
-                memcpy(s_mesh_renderer.instance_data[i].world_matrix, world, sizeof(s_mesh_renderer.instance_data[i].world_matrix));
-                memcpy(s_mesh_renderer.instance_data[i].color, color, sizeof(s_mesh_renderer.instance_data[i].color));
-            }
-
-            /* Upload instance buffer */
-            nt_gfx_update_buffer(s_mesh_renderer.instance_buf, s_mesh_renderer.instance_data, batch_count * (uint32_t)sizeof(nt_mesh_instance_t));
-            nt_gfx_bind_instance_buffer(s_mesh_renderer.instance_buf);
-
-            /* Draw (indexed or non-indexed) */
-            if (mesh_info->index_count > 0) {
-                nt_gfx_draw_indexed_instanced(0, mesh_info->index_count, mesh_info->vertex_count, batch_count);
-            } else {
-                nt_gfx_draw_instanced(0, mesh_info->vertex_count, batch_count);
-            }
-
-            s_mesh_renderer.frame_draw_calls++;
-            s_mesh_renderer.frame_instance_total += batch_count;
-
-            batch_offset += batch_count;
-            instances_remaining -= batch_count;
+        /* Draw (indexed or non-indexed) */
+        if (mesh_info->index_count > 0) {
+            nt_gfx_draw_indexed_instanced(0, mesh_info->index_count, mesh_info->vertex_count, instance_count);
+        } else {
+            nt_gfx_draw_instanced(0, mesh_info->vertex_count, instance_count);
         }
 
+        s_mesh_renderer.frame_draw_calls++;
+        s_mesh_renderer.frame_instance_total += instance_count;
+
+        instance_offset += instance_count;
         run_start = run_end;
     }
 }

@@ -304,6 +304,7 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 /* ---- Instance buffer ---- */
 
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf);
+void nt_gfx_set_instance_offset(uint32_t byte_offset);
 
 /* ---- Uniform buffer ---- */
 
