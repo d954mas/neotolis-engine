@@ -24,6 +24,11 @@ typedef struct {
 
 nt_gfx_t g_nt_gfx;
 
+/* ---- Global UBO block registry ---- */
+
+static nt_global_block_t s_global_blocks[NT_GFX_MAX_GLOBAL_BLOCKS];
+static uint32_t s_global_block_count;
+
 /* ---- File-scope internal state ---- */
 
 static struct {
@@ -46,6 +51,24 @@ static struct {
     uint32_t bound_pipeline;  /* currently bound pipeline backend handle */
     uint8_t bound_index_type; /* index type of currently bound IBO (1=uint16, 2=uint32) */
 } s_gfx;
+
+/* ---- Global UBO block registration ---- */
+
+void nt_gfx_register_global_block(const char *name, uint32_t binding_slot) {
+    NT_ASSERT(name != NULL);
+    NT_ASSERT(s_global_block_count < NT_GFX_MAX_GLOBAL_BLOCKS);
+    s_global_blocks[s_global_block_count].name = name;
+    s_global_blocks[s_global_block_count].binding_slot = binding_slot;
+    s_global_blocks[s_global_block_count].active = true;
+    s_global_block_count++;
+}
+
+void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count) {
+    NT_ASSERT(blocks != NULL);
+    NT_ASSERT(count != NULL);
+    *blocks = s_global_blocks;
+    *count = s_global_block_count;
+}
 
 /* ---- Lifecycle ---- */
 
@@ -109,6 +132,10 @@ void nt_gfx_shutdown(void) {
 
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
+
+    /* Clear global block registry */
+    memset(s_global_blocks, 0, sizeof(s_global_blocks));
+    s_global_block_count = 0;
 }
 
 /* ---- Frame / Pass ---- */

@@ -28,6 +28,16 @@ typedef struct {
 
 #define NT_MESH_INVALID ((nt_mesh_t){0})
 
+/* ---- Global UBO block registry (compile-time limit) ---- */
+
+#define NT_GFX_MAX_GLOBAL_BLOCKS 8
+
+typedef struct {
+    const char *name; /* string literal, not owned */
+    uint32_t binding_slot;
+    bool active;
+} nt_global_block_t;
+
 /* ---- Mesh info (side table for VBO+IBO pairs from mesh activator) ---- */
 
 typedef struct {
@@ -235,6 +245,11 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
         .premultiplied_alpha = true,
     };
 }
+
+/* ---- Global UBO block registration ---- */
+
+void nt_gfx_register_global_block(const char *name, uint32_t binding_slot);
+void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count);
 
 /* ---- Lifecycle ---- */
 

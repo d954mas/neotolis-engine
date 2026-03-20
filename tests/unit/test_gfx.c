@@ -659,6 +659,44 @@ void test_destroy_uniform_buffer(void) {
     nt_gfx_destroy_buffer(buf2);
 }
 
+/* ---- Global block registration ---- */
+
+void test_register_global_block(void) {
+    nt_gfx_register_global_block("Globals", 0);
+    nt_gfx_register_global_block("Lighting", 1);
+
+    const nt_global_block_t *blocks;
+    uint32_t count;
+    nt_gfx_get_global_blocks(&blocks, &count);
+    TEST_ASSERT_EQUAL_UINT32(2, count);
+    TEST_ASSERT_EQUAL_STRING("Globals", blocks[0].name);
+    TEST_ASSERT_EQUAL_UINT32(0, blocks[0].binding_slot);
+    TEST_ASSERT_TRUE(blocks[0].active);
+    TEST_ASSERT_EQUAL_STRING("Lighting", blocks[1].name);
+    TEST_ASSERT_EQUAL_UINT32(1, blocks[1].binding_slot);
+    TEST_ASSERT_TRUE(blocks[1].active);
+}
+
+void test_register_global_block_max(void) {
+    for (uint32_t i = 0; i < NT_GFX_MAX_GLOBAL_BLOCKS; i++) {
+        nt_gfx_register_global_block("Block", i);
+    }
+    const nt_global_block_t *blocks;
+    uint32_t count;
+    nt_gfx_get_global_blocks(&blocks, &count);
+    TEST_ASSERT_EQUAL_UINT32(NT_GFX_MAX_GLOBAL_BLOCKS, count);
+}
+
+void test_register_global_block_cleared_on_shutdown(void) {
+    nt_gfx_register_global_block("Globals", 0);
+    nt_gfx_shutdown();
+    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8});
+    const nt_global_block_t *blocks;
+    uint32_t count;
+    nt_gfx_get_global_blocks(&blocks, &count);
+    TEST_ASSERT_EQUAL_UINT32(0, count);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_gfx_pool_alloc_returns_nonzero);
@@ -709,5 +747,9 @@ int main(void) {
     RUN_TEST(test_bind_uniform_buffer);
     RUN_TEST(test_update_uniform_buffer);
     RUN_TEST(test_destroy_uniform_buffer);
+    /* Global block registration tests */
+    RUN_TEST(test_register_global_block);
+    RUN_TEST(test_register_global_block_max);
+    RUN_TEST(test_register_global_block_cleared_on_shutdown);
     return UNITY_END();
 }

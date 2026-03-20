@@ -485,11 +485,16 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
         return 0;
     }
 
-    /* Auto-bind "Globals" UBO block to slot 0 if present (engine convention) */
+    /* Auto-bind all registered global UBO blocks */
     {
-        GLuint block_index = glGetUniformBlockIndex(program, "Globals");
-        if (block_index != GL_INVALID_INDEX) {
-            glUniformBlockBinding(program, block_index, 0);
+        const nt_global_block_t *blocks;
+        uint32_t block_count;
+        nt_gfx_get_global_blocks(&blocks, &block_count);
+        for (uint32_t bi = 0; bi < block_count; bi++) {
+            GLuint block_index = glGetUniformBlockIndex(program, blocks[bi].name);
+            if (block_index != GL_INVALID_INDEX) {
+                glUniformBlockBinding(program, block_index, (GLuint)blocks[bi].binding_slot);
+            }
         }
     }
 
