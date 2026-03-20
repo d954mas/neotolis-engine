@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Asset Pipeline
 current_phase: 28
-current_plan: 2
+current_plan: 3
 status: executing
-last_updated: "2026-03-20T09:01:06.000Z"
+last_updated: "2026-03-20T09:16:11.000Z"
 last_activity: 2026-03-20
 progress:
   total_phases: 18
   completed_phases: 16
   total_plans: 40
-  completed_plans: 36
+  completed_plans: 37
 ---
 
 # Session State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Milestone:** v1.3 Asset Pipeline (Phases 20-29)
 **Current phase:** 28
-**Current Plan:** 2
+**Current Plan:** 3
 **Status:** Executing Phase 28
 **Last activity:** 2026-03-20
 
@@ -182,6 +182,13 @@ Phase 25-01 decisions:
 | Phase 27 P01 | 11min | 2 tasks | 19 files |
 | Phase 27 P02 | 9min | 1 task | 5 files |
 | Phase 28 P01 | 30min | 2 tasks | 15 files |
+| Phase 28 P02 | 10min | 2 tasks | 7 files |
+
+Phase 28-02 decisions:
+
+- Global block registry as file-scope static array in nt_gfx.c with getter function for backend access
+- NT_ASSET_BLOB auto-marked READY during parse_pack (no activator needed, no GPU resource)
+- nt_resource_get_blob scans asset metadata to find blob data pointer within pack blob
 
 Phase 28-01 decisions:
 
@@ -243,3 +250,4 @@ Phase 28-01 decisions:
 - 2026-03-19: Completed 27-02-PLAN.md -- mesh renderer with pipeline cache, run detection, instanced drawing, 9 unit tests, 9min
 - 2026-03-19: Phase 27 complete -- mesh rendering pipeline with render defs, sort keys, pipeline cache, instanced draw, 2/2 plans done
 - 2026-03-20: Completed 28-01-PLAN.md -- builder extensions: nt_glb_scene API, NT_ASSET_BLOB, MikkTSpace tangent, texture-from-memory, 3 new tests, 30min
+- 2026-03-20: Completed 28-02-PLAN.md -- global blocks API replacing hardcoded Globals, nt_resource_get_blob, 7 new tests, 10min
