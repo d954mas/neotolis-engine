@@ -20,14 +20,10 @@ typedef enum {
 void nt_log_init(void);
 void nt_log_set_level(nt_log_level_t level);
 
-/* --- Plain functions (no domain, for game/example code) ---
-   NOTE: NT_PRINTF_ATTR intentionally omitted during migration period.
-   Existing call sites pass non-literal strings (nt_log_info(msg)), which
-   triggers -Wformat-security with format attributes. Attributes will be
-   added once all call sites are migrated to printf-style in Plan 02/03. */
-void nt_log_info(const char *fmt, ...);
-void nt_log_warn(const char *fmt, ...);
-void nt_log_error(const char *fmt, ...);
+/* --- Plain functions (no domain, for game/example code) --- */
+void nt_log_info(const char *fmt, ...) NT_PRINTF_ATTR(1, 2);
+void nt_log_warn(const char *fmt, ...) NT_PRINTF_ATTR(1, 2);
+void nt_log_error(const char *fmt, ...) NT_PRINTF_ATTR(1, 2);
 
 /* --- Domain functions (called by macros, engine-internal) --- */
 void nt_log_info_impl(const char *domain, const char *fmt, ...) NT_PRINTF_ATTR(2, 3);

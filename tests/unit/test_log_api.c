@@ -36,6 +36,12 @@ void test_log_macro_error(void) {
     TEST_PASS();
 }
 
+/* Printf-style variadic formatting */
+void test_log_info_formats_printf_args(void) {
+    nt_log_info("value=%d str=%s", 42, "hello");
+    TEST_PASS();
+}
+
 /* Level filtering */
 void test_log_set_level_filters_info(void) {
     nt_log_set_level(NT_LOG_LEVEL_WARN);
@@ -66,6 +72,7 @@ int main(void) {
     RUN_TEST(test_log_macro_info);
     RUN_TEST(test_log_macro_warn);
     RUN_TEST(test_log_macro_error);
+    RUN_TEST(test_log_info_formats_printf_args);
     RUN_TEST(test_log_set_level_filters_info);
     RUN_TEST(test_log_set_level_allows_error);
     RUN_TEST(test_log_set_level_none_filters_all);
