@@ -1,20 +1,21 @@
 #include "core/nt_core.h"
+#include "log/nt_log.h"
 #include <stdio.h>
 
 static bool s_initialized = false;
 
 nt_result_t nt_engine_init(const nt_engine_config_t *config) {
     if (s_initialized) {
-        printf("Engine already initialized\n");
+        NT_LOG_ERROR("engine already initialized");
         return NT_ERR_INIT_FAILED;
     }
 
     if (config == NULL) {
-        printf("Invalid engine config\n");
+        NT_LOG_ERROR("invalid engine config");
         return NT_ERR_INVALID_ARG;
     }
 
-    printf("Neotolis Engine %s initializing: app='%s'\n", nt_engine_version_string(), config->app_name ? config->app_name : "(unnamed)");
+    NT_LOG_INFO("Neotolis Engine %s initializing: app='%s'", nt_engine_version_string(), config->app_name ? config->app_name : "(unnamed)");
 
     s_initialized = true;
     return NT_OK;
@@ -25,7 +26,7 @@ void nt_engine_shutdown(void) {
         return;
     }
 
-    printf("Neotolis Engine shutting down\n");
+    NT_LOG_INFO("Neotolis Engine shutting down");
     s_initialized = false;
 }
 
