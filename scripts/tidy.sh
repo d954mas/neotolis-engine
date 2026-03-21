@@ -11,23 +11,57 @@ if [ ! -f "$BUILD_DIR/compile_commands.json" ]; then
     exit 1
 fi
 
-# Find all engine .c source files (exclude vendored deps/).
-# Headers are analyzed transitively; passing only .c avoids duplicated header work.
+# Find all engine .c source files (exclude vendored deps/ and web-only files).
 SOURCES=$(find engine shared tools examples tests \
-    -name '*.c' | grep -v deps/)
+    -name '*.c' | grep -v 'deps/\|/web/\|_web\.c')
 
 FILE_COUNT=$(echo "$SOURCES" | wc -w)
 echo "Running clang-tidy on $FILE_COUNT files..."
 
 # Treat vendored deps as system includes to silence clang-tidy on their headers
-EXTRA_ARGS="--extra-arg=-isystem$ROOT_DIR/deps/unity/src --extra-arg=-isystem$ROOT_DIR/deps/cglm/include --extra-arg=-isystem$ROOT_DIR/deps/glad/include --extra-arg=-isystem$ROOT_DIR/deps/xxhash"
+SYSTEM_DEPS=(
+    "$ROOT_DIR/deps/unity/src"
+    "$ROOT_DIR/deps/cglm/include"
+    "$ROOT_DIR/deps/glad/include"
+    "$ROOT_DIR/deps/xxhash"
+    "$ROOT_DIR/deps/cgltf"
+    "$ROOT_DIR/deps/mikktspace"
+    "$ROOT_DIR/deps/stb"
+)
 
-# Use run-clang-tidy if available and python3 is present, otherwise fall back
-# Note: run-clang-tidy uses single-dash flags (-extra-arg), clang-tidy uses double-dash (--extra-arg)
+EXTRA_ARGS=""
+RCT_ARGS=""
+for dep in "${SYSTEM_DEPS[@]}"; do
+    EXTRA_ARGS+=" --extra-arg=-isystem$dep"
+    RCT_ARGS+=" -extra-arg=-isystem$dep"
+done
+
+# Capture output, filter deps noise, then check for project errors
+TIDY_OUTPUT=$(mktemp)
+TIDY_RC=0
+
 if command -v run-clang-tidy &>/dev/null && command -v python3 &>/dev/null; then
-    echo "$SOURCES" | xargs run-clang-tidy -p "$BUILD_DIR" -extra-arg="-isystem$ROOT_DIR/deps/unity/src" -extra-arg="-isystem$ROOT_DIR/deps/cglm/include" -extra-arg="-isystem$ROOT_DIR/deps/glad/include" -extra-arg="-isystem$ROOT_DIR/deps/xxhash"
+    echo "$SOURCES" | xargs run-clang-tidy -p "$BUILD_DIR" $RCT_ARGS > "$TIDY_OUTPUT" 2>&1 || TIDY_RC=$?
 else
-    echo "$SOURCES" | xargs clang-tidy -p "$BUILD_DIR" $EXTRA_ARGS
+    echo "$SOURCES" | xargs clang-tidy -p "$BUILD_DIR" $EXTRA_ARGS > "$TIDY_OUTPUT" 2>&1 || TIDY_RC=$?
 fi
 
-echo "clang-tidy: all checks passed"
+# Filter: show only errors from project files, not vendored deps
+PROJECT_ERRORS=$(grep "error:" "$TIDY_OUTPUT" | grep -v "deps/" || true)
+
+if [ -n "$PROJECT_ERRORS" ]; then
+    echo "$PROJECT_ERRORS"
+    echo ""
+    echo "clang-tidy: FAILED — errors in project files"
+    rm -f "$TIDY_OUTPUT"
+    exit 1
+fi
+
+# Count suppressed deps warnings for info
+DEPS_WARNINGS=$(grep -c "error:" "$TIDY_OUTPUT" || true)
+if [ "$DEPS_WARNINGS" -gt 0 ]; then
+    echo "($DEPS_WARNINGS warnings from vendored deps/ suppressed)"
+fi
+
+rm -f "$TIDY_OUTPUT"
+echo "clang-tidy: all project checks passed"

@@ -1,3 +1,6 @@
+/* clang-analyzer thinks fread failures leave data uninitialized, but Unity's
+   TEST_ASSERT_EQUAL aborts via longjmp before any uninitialized access. */
+// NOLINTBEGIN(clang-analyzer-unix.Stream,clang-analyzer-core.CallAndMessage,clang-analyzer-core.UndefinedBinaryOperatorResult)
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
 #include <stdio.h>
 #include <stdlib.h>
@@ -263,7 +266,7 @@ void test_shader_round_trip(void) {
     (void)fseek(f, 0, SEEK_SET);
     uint8_t *buf = (uint8_t *)malloc((size_t)file_size);
     TEST_ASSERT_NOT_NULL(buf);
-    (void)fread(buf, 1, (size_t)file_size, f);
+    TEST_ASSERT_EQUAL((size_t)file_size, fread(buf, 1, (size_t)file_size, f));
     uint32_t data_size = (uint32_t)file_size - hdr.header_size;
     uint32_t computed_crc = nt_crc32(buf + hdr.header_size, data_size);
     TEST_ASSERT_EQUAL_HEX32(hdr.checksum, computed_crc);
@@ -294,14 +297,14 @@ void test_texture_round_trip(void) {
     TEST_ASSERT_NOT_NULL(f);
 
     NtPackHeader hdr;
-    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
     NtAssetEntry entry;
-    (void)fread(&entry, sizeof(entry), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_TEXTURE, entry.asset_type);
 
     (void)fseek(f, (long)entry.offset, SEEK_SET);
     NtTextureAssetHeader tex;
-    (void)fread(&tex, sizeof(tex), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&tex, sizeof(tex), 1, f));
     TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, tex.magic);
     TEST_ASSERT_EQUAL_UINT32(2, tex.width);
     TEST_ASSERT_EQUAL_UINT32(2, tex.height);
@@ -336,14 +339,14 @@ void test_mesh_round_trip(void) {
     TEST_ASSERT_NOT_NULL(f);
 
     NtPackHeader hdr;
-    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
     NtAssetEntry entry;
-    (void)fread(&entry, sizeof(entry), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_MESH, entry.asset_type);
 
     (void)fseek(f, (long)entry.offset, SEEK_SET);
     NtMeshAssetHeader mesh;
-    (void)fread(&mesh, sizeof(mesh), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&mesh, sizeof(mesh), 1, f));
     TEST_ASSERT_EQUAL_UINT32(NT_MESH_MAGIC, mesh.magic);
     TEST_ASSERT_EQUAL_UINT8(1, mesh.stream_count);
     TEST_ASSERT_EQUAL_UINT32(3, mesh.vertex_count);
@@ -422,14 +425,14 @@ void test_force_add_replaces(void) {
     FILE *f = fopen(pack_path, "rb");
     TEST_ASSERT_NOT_NULL(f);
     NtPackHeader hdr;
-    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
     TEST_ASSERT_EQUAL_UINT16(1, hdr.asset_count);
 
     NtAssetEntry entry;
-    (void)fread(&entry, sizeof(entry), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
     (void)fseek(f, (long)entry.offset, SEEK_SET);
     NtShaderCodeHeader shdr;
-    (void)fread(&shdr, sizeof(shdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&shdr, sizeof(shdr), 1, f));
     TEST_ASSERT_EQUAL_UINT8(NT_SHADER_STAGE_FRAGMENT, shdr.stage);
 
     (void)fclose(f);
@@ -501,16 +504,16 @@ void test_shader_comment_stripping(void) {
     TEST_ASSERT_NOT_NULL(f);
 
     NtPackHeader hdr;
-    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
     NtAssetEntry entry;
-    (void)fread(&entry, sizeof(entry), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
     (void)fseek(f, (long)entry.offset, SEEK_SET);
     NtShaderCodeHeader shdr;
-    (void)fread(&shdr, sizeof(shdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&shdr, sizeof(shdr), 1, f));
 
     char *source = (char *)malloc(shdr.code_size);
     TEST_ASSERT_NOT_NULL(source);
-    (void)fread(source, 1, shdr.code_size, f);
+    TEST_ASSERT_EQUAL(shdr.code_size, fread(source, 1, shdr.code_size, f));
 
     /* Verify comments are stripped */
     TEST_ASSERT_NULL(strstr(source, "line comment"));
@@ -553,11 +556,11 @@ void test_asset_alignment(void) {
     TEST_ASSERT_NOT_NULL(fp);
 
     NtPackHeader hdr;
-    (void)fread(&hdr, sizeof(hdr), 1, fp);
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, fp));
 
     for (uint16_t i = 0; i < hdr.asset_count; i++) {
         NtAssetEntry entry;
-        (void)fread(&entry, sizeof(entry), 1, fp);
+        TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, fp));
         TEST_ASSERT_EQUAL_UINT32(0, entry.offset % NT_PACK_ASSET_ALIGN);
     }
 
@@ -591,7 +594,7 @@ void test_crc32_verification(void) {
 
     uint8_t *buf = (uint8_t *)malloc((size_t)file_size);
     TEST_ASSERT_NOT_NULL(buf);
-    (void)fread(buf, 1, (size_t)file_size, f);
+    TEST_ASSERT_EQUAL((size_t)file_size, fread(buf, 1, (size_t)file_size, f));
     (void)fclose(f);
 
     NtPackHeader *hdr = (NtPackHeader *)buf;
@@ -675,7 +678,7 @@ void test_multi_asset_pack(void) {
     TEST_ASSERT_NOT_NULL(f);
 
     NtPackHeader hdr;
-    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
     TEST_ASSERT_EQUAL_UINT32(NT_PACK_MAGIC, hdr.magic);
     TEST_ASSERT_EQUAL_UINT16(3, hdr.asset_count);
 
@@ -685,7 +688,7 @@ void test_multi_asset_pack(void) {
     bool has_shader = false;
     for (uint16_t i = 0; i < hdr.asset_count; i++) {
         NtAssetEntry entry;
-        (void)fread(&entry, sizeof(entry), 1, f);
+        TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
         if (entry.asset_type == NT_ASSET_MESH) {
             has_mesh = true;
         }
@@ -707,7 +710,7 @@ void test_multi_asset_pack(void) {
     long file_size = ftell(f);
     (void)fseek(f, 0, SEEK_SET);
     uint8_t *buf = (uint8_t *)malloc((size_t)file_size);
-    (void)fread(buf, 1, (size_t)file_size, f);
+    TEST_ASSERT_EQUAL((size_t)file_size, fread(buf, 1, (size_t)file_size, f));
     uint32_t data_size = (uint32_t)file_size - hdr.header_size;
     uint32_t computed_crc = nt_crc32(buf + hdr.header_size, data_size);
     TEST_ASSERT_EQUAL_HEX32(hdr.checksum, computed_crc);
@@ -737,12 +740,12 @@ void test_shader_stage_correct(void) {
     TEST_ASSERT_NOT_NULL(f);
 
     NtPackHeader hdr;
-    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
     NtAssetEntry entry;
-    (void)fread(&entry, sizeof(entry), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
     (void)fseek(f, (long)entry.offset, SEEK_SET);
     NtShaderCodeHeader shdr;
-    (void)fread(&shdr, sizeof(shdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&shdr, sizeof(shdr), 1, f));
 
     TEST_ASSERT_EQUAL_UINT32(NT_SHADER_CODE_MAGIC, shdr.magic);
     TEST_ASSERT_EQUAL_UINT8(NT_SHADER_STAGE_FRAGMENT, shdr.stage);
@@ -774,7 +777,7 @@ void test_glob_shaders(void) {
     TEST_ASSERT_NOT_NULL(f);
 
     NtPackHeader hdr;
-    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
     TEST_ASSERT_EQUAL_UINT16(2, hdr.asset_count);
 
     (void)fclose(f);
@@ -809,7 +812,7 @@ void test_e2e_real_assets(void) {
     (void)fseek(f, 0, SEEK_SET);
     uint8_t *pack = (uint8_t *)malloc((size_t)file_size);
     TEST_ASSERT_NOT_NULL(pack);
-    (void)fread(pack, 1, (size_t)file_size, f);
+    TEST_ASSERT_EQUAL((size_t)file_size, fread(pack, 1, (size_t)file_size, f));
     (void)fclose(f);
 
     NtPackHeader *hdr = (NtPackHeader *)pack;
@@ -847,7 +850,7 @@ void test_e2e_real_assets(void) {
     TEST_ASSERT_EQUAL_UINT32(36, mh->index_count);
     TEST_ASSERT_EQUAL_UINT8(2, mh->stream_count);
     /* First vertex: position (-0.5, -0.5, 0.5) — compare as uint32 bit pattern */
-    uint8_t *vdata = pack + mesh_e->offset + sizeof(NtMeshAssetHeader) + mh->stream_count * sizeof(NtStreamDesc);
+    uint8_t *vdata = pack + mesh_e->offset + sizeof(NtMeshAssetHeader) + (mh->stream_count * sizeof(NtStreamDesc));
     float vx = 0;
     float vy = 0;
     float vz = 0;
@@ -905,9 +908,9 @@ void test_rename_changes_resource_id(void) {
     FILE *f = fopen(pack_path, "rb");
     TEST_ASSERT_NOT_NULL(f);
     NtPackHeader hdr;
-    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
     NtAssetEntry entry;
-    (void)fread(&entry, sizeof(entry), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
     TEST_ASSERT_TRUE(new_id.value == entry.resource_id);
     (void)fclose(f);
 }
@@ -939,17 +942,17 @@ void test_force_glob_override(void) {
     FILE *f = fopen(pack_path, "rb");
     TEST_ASSERT_NOT_NULL(f);
     NtPackHeader hdr;
-    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
     TEST_ASSERT_EQUAL_UINT16(2, hdr.asset_count);
 
     bool found_fragment = false;
     for (uint16_t i = 0; i < hdr.asset_count; i++) {
         NtAssetEntry entry;
-        (void)fread(&entry, sizeof(entry), 1, f);
+        TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
         long cur = ftell(f);
         (void)fseek(f, (long)entry.offset, SEEK_SET);
         NtShaderCodeHeader sh;
-        (void)fread(&sh, sizeof(sh), 1, f);
+        TEST_ASSERT_EQUAL(1, fread(&sh, sizeof(sh), 1, f));
         if (sh.stage == NT_SHADER_STAGE_FRAGMENT) {
             found_fragment = true;
         }
@@ -995,25 +998,25 @@ void test_blob_import(void) {
     TEST_ASSERT_NOT_NULL(f);
 
     NtPackHeader hdr;
-    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
     TEST_ASSERT_EQUAL_UINT32(NT_PACK_MAGIC, hdr.magic);
     TEST_ASSERT_EQUAL_UINT16(1, hdr.asset_count);
 
     NtAssetEntry entry;
-    (void)fread(&entry, sizeof(entry), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_BLOB, entry.asset_type);
     TEST_ASSERT_EQUAL_UINT16(NT_BLOB_VERSION, entry.format_version);
 
     /* Verify blob header at entry offset */
     (void)fseek(f, (long)entry.offset, SEEK_SET);
     NtBlobAssetHeader blob_hdr;
-    (void)fread(&blob_hdr, sizeof(blob_hdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&blob_hdr, sizeof(blob_hdr), 1, f));
     TEST_ASSERT_EQUAL_UINT32(NT_BLOB_MAGIC, blob_hdr.magic);
     TEST_ASSERT_EQUAL_UINT16(NT_BLOB_VERSION, blob_hdr.version);
 
     /* Verify blob data follows header */
     uint8_t read_data[16];
-    (void)fread(read_data, 1, sizeof(read_data), f);
+    TEST_ASSERT_EQUAL(sizeof(read_data), fread(read_data, 1, sizeof(read_data), f));
     TEST_ASSERT_EQUAL_MEMORY(test_data, read_data, sizeof(test_data));
 
     (void)fclose(f);
@@ -1034,7 +1037,7 @@ void test_tex_from_memory(void) {
     (void)fseek(pf, 0, SEEK_SET);
     uint8_t *png_data = (uint8_t *)malloc((size_t)png_size);
     TEST_ASSERT_NOT_NULL(png_data);
-    (void)fread(png_data, 1, (size_t)png_size, pf);
+    TEST_ASSERT_EQUAL((size_t)png_size, fread(png_data, 1, (size_t)png_size, pf));
     (void)fclose(pf);
 
     const char *pack_path = TMP_DIR "/texmem_test.ntpack";
@@ -1055,16 +1058,16 @@ void test_tex_from_memory(void) {
     TEST_ASSERT_NOT_NULL(f);
 
     NtPackHeader hdr;
-    (void)fread(&hdr, sizeof(hdr), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
     TEST_ASSERT_EQUAL_UINT16(1, hdr.asset_count);
 
     NtAssetEntry entry;
-    (void)fread(&entry, sizeof(entry), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_TEXTURE, entry.asset_type);
 
     (void)fseek(f, (long)entry.offset, SEEK_SET);
     NtTextureAssetHeader tex;
-    (void)fread(&tex, sizeof(tex), 1, f);
+    TEST_ASSERT_EQUAL(1, fread(&tex, sizeof(tex), 1, f));
     TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, tex.magic);
     TEST_ASSERT_EQUAL_UINT32(2, tex.width);
     TEST_ASSERT_EQUAL_UINT32(2, tex.height);
@@ -1233,3 +1236,4 @@ int main(void) {
 
     return UNITY_END();
 }
+// NOLINTEND(clang-analyzer-unix.Stream,clang-analyzer-core.CallAndMessage,clang-analyzer-core.UndefinedBinaryOperatorResult)
