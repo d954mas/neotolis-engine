@@ -37,6 +37,9 @@ package-lock.json
 # GSD planning
 .planning/
 
+#codex branch diff
+branch_diff.patch
+
 # Claude local settings
 .claude/settings.local.json
 

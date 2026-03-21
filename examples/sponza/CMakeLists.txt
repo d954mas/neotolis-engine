@@ -32,7 +32,7 @@ if(NOT EMSCRIPTEN)
 endif()
 
 # Copy packs from shared location to preset output
-set(SP_PACK_NAMES sponza_base.ntpack sponza_full.ntpack)
+set(SP_PACK_NAMES sponza_core.ntpack sponza_geo.ntpack sponza_tex.ntpack sponza_full.ntpack)
 foreach(PACK ${SP_PACK_NAMES})
     add_custom_command(
         OUTPUT "${SP_ASSETS_DIR}/${PACK}"

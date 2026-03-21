@@ -151,6 +151,9 @@ typedef struct {
 nt_build_result_t nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id);
 nt_build_result_t nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts);
 
+/* --- Texture from raw RGBA pixels (no image decode needed) --- */
+nt_build_result_t nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts);
+
 /* --- Utilities --- */
 nt_build_result_t nt_builder_dump_pack(const char *pack_path);
 nt_hash64_t nt_builder_normalize_and_hash(const char *str);

@@ -5,13 +5,15 @@
  *   Builder packs -> resource loading -> material creation -> entity/components
  *   -> render items -> nt_mesh_renderer_draw_list -> GPU
  *
- * Shows: progressive pack stacking (base + full quality), Blinn-Phong shading
- * with normal mapping via Lighting UBO, scene manifest loading, 3 shader
- * permutations (full/diffuse/alpha), FPS camera with WASD + mouse look.
+ * Shows: progressive pack loading (core -> geo -> tex -> full), Blinn-Phong
+ * shading with normal mapping via Lighting UBO, scene manifest loading, 3
+ * shader permutations (full/diffuse/alpha), FPS camera with WASD + mouse look.
  *
- * Packs:
- *   sponza_base.ntpack -- compressed quality (float16 pos, int8 normals)
- *   sponza_full.ntpack -- full quality (float32, full-res textures)
+ * Packs (loaded sequentially for fast time-to-first-frame):
+ *   sponza_core.ntpack -- shaders + manifest + placeholder textures (~80 KB)
+ *   sponza_geo.ntpack  -- all meshes, float16/int16 (~2-3 MB)
+ *   sponza_tex.ntpack  -- all textures, 512px (~43 MB)
+ *   sponza_full.ntpack -- full quality meshes + textures + shaders + manifest
  *
  * Controls:
  *   WASD       -- move (fly mode, follows pitch)
@@ -79,17 +81,6 @@ _Static_assert(sizeof(nt_lighting_t) == 48, "lighting UBO 48 bytes");
 
 #include "sponza_manifest.h"
 
-/* ---- Fallback 4x4 checkerboard ---- */
-
-/* clang-format off */
-static const uint8_t s_checker_4x4[4 * 4 * 4] = {
-    255,255,255,255,  80,80,80,255,    255,255,255,255,  80,80,80,255,
-    80,80,80,255,     255,255,255,255, 80,80,80,255,     255,255,255,255,
-    255,255,255,255,  80,80,80,255,    255,255,255,255,  80,80,80,255,
-    80,80,80,255,     255,255,255,255, 80,80,80,255,     255,255,255,255,
-};
-/* clang-format on */
-
 /* ---- Camera state ---- */
 
 static float s_cam_pos[3] = {-8.0F, 4.0F, 0.0F};
@@ -101,14 +92,16 @@ static float s_move_speed = MOVE_SPEED_DEFAULT;
 
 static nt_buffer_t s_frame_ubo;
 static nt_buffer_t s_light_ubo;
-static nt_texture_t s_fallback_texture;
 
 /* ---- Resource handles ---- */
 
-static nt_hash32_t s_base_pack_id;
+static nt_hash32_t s_core_pack_id;
+static nt_hash32_t s_geo_pack_id;
+static nt_hash32_t s_tex_pack_id;
 static nt_hash32_t s_full_pack_id;
 
 static nt_resource_t s_manifest_handle;
+static nt_resource_t s_fallback_handle;
 static nt_resource_t s_mesh_handles[MAX_SCENE_NODES];
 static nt_resource_t s_tex_handles[MAX_SCENE_NODES * 3]; /* diffuse, normal, specular per node */
 
@@ -128,6 +121,8 @@ static nt_entity_t s_entities[MAX_SCENE_NODES];
 static uint32_t s_entity_count;
 static bool s_scene_loaded;
 static bool s_full_quality;  /* true = full pack has higher priority */
+static bool s_geo_loading;   /* true = geo pack download started */
+static bool s_tex_loading;   /* true = tex pack download started */
 static bool s_full_loading;  /* true = full pack download started */
 static bool s_full_promoted; /* true = full pack auto-promoted */
 
@@ -388,15 +383,13 @@ static void frame(void) {
     }
 #endif
 
-    /* Enter toggles pack priority (base <-> full quality) */
-    if (nt_input_key_is_pressed(NT_KEY_ENTER)) {
+    /* Enter toggles full quality on/off (only after full pack is loaded) */
+    if (s_full_promoted && nt_input_key_is_pressed(NT_KEY_ENTER)) {
         s_full_quality = !s_full_quality;
         if (s_full_quality) {
-            nt_resource_set_priority(s_base_pack_id, 10);
-            nt_resource_set_priority(s_full_pack_id, 20);
+            nt_resource_set_priority(s_full_pack_id, 50);
             nt_log_info(">> Switched to FULL quality");
         } else {
-            nt_resource_set_priority(s_base_pack_id, 20);
             nt_resource_set_priority(s_full_pack_id, 10);
             nt_log_info(">> Switched to BASE quality");
         }
@@ -406,10 +399,39 @@ static void frame(void) {
     nt_resource_step();
     nt_material_step();
 
-    /* Start full pack download once base is ready */
-    if (!s_full_loading && nt_resource_pack_state(s_base_pack_id) == NT_PACK_STATE_READY) {
+    /* Sequential loading chain: core -> geo -> tex -> full */
+
+    /* core READY -> register fallback texture, start geo download */
+    if (!s_geo_loading && nt_resource_pack_state(s_core_pack_id) == NT_PACK_STATE_READY) {
+        s_geo_loading = true;
+        /* Checkerboard from core pack becomes the fallback for all unloaded textures */
+        nt_resource_set_placeholder_texture(nt_hash64_str("sponza/fallback_checker"));
+        nt_log_info("Core pack ready, starting geo download...");
+#ifdef NT_CDN_URL
+        nt_resource_load_auto(s_geo_pack_id, NT_CDN_URL "/sponza/sponza_geo.ntpack");
+#else
+        nt_resource_load_auto(s_geo_pack_id, "assets/sponza_geo.ntpack");
+#endif
+    }
+
+    /* geo READY -> hide loading screen, start tex download */
+    if (!s_tex_loading && nt_resource_pack_state(s_geo_pack_id) == NT_PACK_STATE_READY) {
+        s_tex_loading = true;
+#ifdef NT_PLATFORM_WEB
+        nt_platform_web_loading_complete();
+#endif
+        nt_log_info("Geo pack ready, starting tex download...");
+#ifdef NT_CDN_URL
+        nt_resource_load_auto(s_tex_pack_id, NT_CDN_URL "/sponza/sponza_tex.ntpack");
+#else
+        nt_resource_load_auto(s_tex_pack_id, "assets/sponza_tex.ntpack");
+#endif
+    }
+
+    /* tex READY -> start full download */
+    if (!s_full_loading && nt_resource_pack_state(s_tex_pack_id) == NT_PACK_STATE_READY) {
         s_full_loading = true;
-        nt_log_info("Base pack ready, starting full quality download...");
+        nt_log_info("Tex pack ready, starting full quality download...");
 #ifdef NT_CDN_URL
         nt_resource_load_auto(s_full_pack_id, NT_CDN_URL "/sponza/sponza_full.ntpack");
 #else
@@ -417,12 +439,11 @@ static void frame(void) {
 #endif
     }
 
-    /* Auto-promote full pack when loaded */
+    /* full READY -> auto-promote to priority 50 */
     if (s_full_loading && !s_full_promoted && nt_resource_pack_state(s_full_pack_id) == NT_PACK_STATE_READY) {
         s_full_promoted = true;
         s_full_quality = true;
-        nt_resource_set_priority(s_base_pack_id, 10);
-        nt_resource_set_priority(s_full_pack_id, 20);
+        nt_resource_set_priority(s_full_pack_id, 50);
         nt_log_info("Full quality pack loaded and promoted");
     }
 
@@ -531,8 +552,6 @@ static void frame(void) {
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_MESH);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
-
-        nt_resource_register(nt_hash32_str("__fallback__"), nt_hash64_str("__fallback_checker__"), NT_ASSET_TEXTURE, s_fallback_texture.id);
 
         s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
             .type = NT_BUFFER_UNIFORM,
@@ -668,28 +687,11 @@ int main(void) {
     s_vs_alpha = nt_resource_request(nt_hash64_str("assets/shaders/sponza_alpha.vert"), NT_ASSET_SHADER_CODE);
     s_fs_alpha = nt_resource_request(nt_hash64_str("assets/shaders/sponza_alpha.frag"), NT_ASSET_SHADER_CODE);
 
-    /* 12. Request manifest resource handle */
+    /* 12. Request manifest and fallback texture resource handles */
     s_manifest_handle = nt_resource_request(nt_hash64_str("sponza/manifest"), NT_ASSET_BLOB);
+    s_fallback_handle = nt_resource_request(nt_hash64_str("sponza/fallback_checker"), NT_ASSET_TEXTURE);
 
-    /* 13-14. Create fallback checkerboard texture and set as placeholder */
-    s_fallback_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = 4,
-        .height = 4,
-        .data = s_checker_4x4,
-        .min_filter = NT_FILTER_NEAREST,
-        .mag_filter = NT_FILTER_NEAREST,
-        .wrap_u = NT_WRAP_REPEAT,
-        .wrap_v = NT_WRAP_REPEAT,
-        .label = "fallback_checker",
-    });
-
-    nt_hash64_t checker_rid = nt_hash64_str("__fallback_checker__");
-    nt_hash32_t checker_pid = nt_hash32_str("__fallback__");
-    nt_resource_create_pack(checker_pid, 0);
-    nt_resource_register(checker_pid, checker_rid, NT_ASSET_TEXTURE, s_fallback_texture.id);
-    nt_resource_set_placeholder_texture(checker_rid);
-
-    /* Create frame uniforms UBO (updated each frame) */
+    /* 13. Create frame uniforms UBO (updated each frame) */
     s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_UNIFORM,
         .usage = NT_USAGE_DYNAMIC,
@@ -705,25 +707,28 @@ int main(void) {
         .label = "lighting",
     });
 
-    /* 15. Mount and load packs (base first, full in background) */
-    s_base_pack_id = nt_hash32_str("sponza_base");
-    nt_resource_mount(s_base_pack_id, 20); /* base starts as primary */
+    /* 15. Mount all 4 packs, load core immediately (rest loaded sequentially in frame) */
+    s_core_pack_id = nt_hash32_str("sponza_core");
+    nt_resource_mount(s_core_pack_id, 5); /* lowest priority — placeholders, overridden by real data */
 #ifdef NT_CDN_URL
-    nt_resource_load_auto(s_base_pack_id, NT_CDN_URL "/sponza/sponza_base.ntpack");
+    nt_resource_load_auto(s_core_pack_id, NT_CDN_URL "/sponza/sponza_core.ntpack");
 #else
-    nt_resource_load_auto(s_base_pack_id, "assets/sponza_base.ntpack");
+    nt_resource_load_auto(s_core_pack_id, "assets/sponza_core.ntpack");
 #endif
 
+    s_geo_pack_id = nt_hash32_str("sponza_geo");
+    nt_resource_mount(s_geo_pack_id, 30); /* meshes override nothing, just need to exist */
+
+    s_tex_pack_id = nt_hash32_str("sponza_tex");
+    nt_resource_mount(s_tex_pack_id, 20); /* 512px textures override placeholders */
+
     s_full_pack_id = nt_hash32_str("sponza_full");
-    nt_resource_mount(s_full_pack_id, 10); /* full loads after base is ready */
+    nt_resource_mount(s_full_pack_id, 10); /* starts low, promoted to 50 when loaded */
 
     /* 16. Sponza needs ~400 activation units total — set budget high enough */
     nt_resource_set_activate_budget(1024);
 
-    /* 17. Platform web loading complete */
-#ifdef NT_PLATFORM_WEB
-    nt_platform_web_loading_complete();
-#endif
+    /* 17. Loading screen stays until geo pack is ready (see frame()) */
 
     /* 18. Run main loop */
     nt_app_run(frame);
@@ -746,7 +751,6 @@ int main(void) {
     nt_hash_shutdown();
     nt_gfx_destroy_buffer(s_light_ubo);
     nt_gfx_destroy_buffer(s_frame_ubo);
-    nt_gfx_destroy_texture(s_fallback_texture);
     nt_gfx_shutdown();
     nt_input_shutdown();
     nt_window_shutdown();

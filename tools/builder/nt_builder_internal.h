@@ -29,6 +29,7 @@ typedef enum {
     NT_BUILD_ASSET_BLOB = 3,
     NT_BUILD_ASSET_SCENE_MESH = 4,
     NT_BUILD_ASSET_TEXTURE_MEM = 5,
+    NT_BUILD_ASSET_TEXTURE_RAW = 6,
 } nt_build_asset_kind_t;
 
 /* Type-specific data for mesh entries */
@@ -64,6 +65,14 @@ typedef struct {
     uint32_t size;
     nt_tex_opts_t opts; /* format + resize options */
 } NtBuildTexMemData;
+
+/* Type-specific data for raw RGBA pixel texture entries */
+typedef struct {
+    uint8_t *pixels; /* deep-copied RGBA pixel data (owned, heap) */
+    uint32_t width;
+    uint32_t height;
+    nt_tex_opts_t opts; /* format + resize options */
+} NtBuildTexRawData;
 
 /* Deferred asset entry -- stored during add_*, processed in finish_pack */
 typedef struct {
@@ -115,6 +124,7 @@ nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *p
 nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint64_t resource_id);
 nt_build_result_t nt_builder_import_blob(NtBuilderContext *ctx, const void *data, uint32_t size, uint64_t resource_id);
 nt_build_result_t nt_builder_import_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, uint64_t resource_id, const nt_tex_opts_t *opts);
+nt_build_result_t nt_builder_import_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts);
 nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
                                                nt_tangent_mode_t tangent_mode, uint64_t resource_id);
 

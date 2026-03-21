@@ -159,3 +159,21 @@ nt_build_result_t nt_builder_import_texture_from_memory(NtBuilderContext *ctx, c
 
     return import_texture_pixels(ctx, pixels, w, h, resource_id, opts);
 }
+
+/* --- Texture import from raw RGBA pixels (called from finish_pack) --- */
+
+nt_build_result_t nt_builder_import_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts) {
+    if (!ctx || !rgba_pixels || width == 0 || height == 0) {
+        return NT_BUILD_ERR_VALIDATION;
+    }
+
+    /* Create a malloc'd copy -- import_texture_pixels frees via stbi_image_free (= free) */
+    uint32_t data_size = width * height * 4;
+    unsigned char *pixels = (unsigned char *)malloc(data_size);
+    if (!pixels) {
+        return NT_BUILD_ERR_IO;
+    }
+    memcpy(pixels, rgba_pixels, data_size);
+
+    return import_texture_pixels(ctx, pixels, (int)width, (int)height, resource_id, opts);
+}

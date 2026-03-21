@@ -1,10 +1,13 @@
 /*
- * Build two .ntpack packs for the Sponza demo:
- *   sponza_base.ntpack  -- compressed quality (float16 positions, int8 normals)
- *   sponza_full.ntpack  -- full quality (float32, full-res textures)
+ * Build four .ntpack packs for the Sponza demo (progressive loading):
+ *   sponza_core.ntpack -- shaders + manifest + placeholder textures (~60-80 KB)
+ *   sponza_geo.ntpack  -- all meshes, float16/int16 (~2-3 MB)
+ *   sponza_tex.ntpack  -- all textures, 512px max (~43 MB)
+ *   sponza_full.ntpack -- full quality meshes + textures + shaders + manifest
  *
- * Both packs share resource_ids -- pack stacking (priority) resolves at runtime.
- * Contains: all Sponza meshes, all textures, all 6 shaders, scene manifest blob.
+ * All packs share resource_ids -- pack stacking (priority) resolves at runtime.
+ * Core loads first for instant feedback, geo next for visible geometry, then
+ * real textures progressively replace placeholders.
  *
  * Usage: build_sponza_packs <output_dir>
  */
@@ -157,6 +160,79 @@ static nt_build_result_t add_textures(NtBuilderContext *ctx, const nt_glb_scene_
     return NT_BUILD_OK;
 }
 
+/* --- Add placeholder textures (role-specific, same resource IDs) --- */
+/* Diffuse textures are NOT included — covered by runtime fallback checkerboard.
+ * Normal/specular get role-appropriate 1x1 placeholders so lighting is correct
+ * even before real textures load. */
+
+#define CHECKER_SIZE 16
+static uint8_t s_checker[CHECKER_SIZE * CHECKER_SIZE * 4];
+
+static void init_checker(void) {
+    for (int y = 0; y < CHECKER_SIZE; y++) {
+        for (int x = 0; x < CHECKER_SIZE; x++) {
+            uint8_t *p = &s_checker[((size_t)y * CHECKER_SIZE + (size_t)x) * 4];
+            uint8_t v = ((x ^ y) & 1) ? 60 : 160;
+            p[0] = v;
+            p[1] = v;
+            p[2] = v;
+            p[3] = 255;
+        }
+    }
+}
+
+/* RG8 format: only first 2 bytes used per pixel */
+static const uint8_t s_flat_normal_rg[4] = {128, 128, 0, 0}; /* (0,0,1) in RG8 — Z reconstructed in shader */
+static const uint8_t s_rough_rg[4]       = {0, 255, 0, 0};   /* max roughness in RG8: R=0, G=255 (roughness=1.0 → no specular) */
+
+static nt_build_result_t add_placeholder_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
+    tex_role_t *roles = build_texture_roles(scene);
+    if (!roles) {
+        return NT_BUILD_ERR_IO;
+    }
+
+    uint32_t added = 0;
+    for (uint32_t i = 0; i < scene->texture_count; i++) {
+        const uint8_t *pixels = NULL;
+        nt_tex_opts_t opts = {.format = NT_TEXTURE_FORMAT_RG8, .max_size = 0};
+
+        switch (roles[i]) {
+        case TEX_ROLE_NORMAL:
+            pixels = s_flat_normal_rg;
+            break;
+        case TEX_ROLE_SPECULAR:
+            pixels = s_rough_rg;
+            break;
+        default: /* diffuse + unknown — handled by runtime fallback */
+            continue;
+        }
+
+        nt_build_result_t r = nt_builder_add_texture_raw(ctx, pixels, 1, 1, tex_rid(i), &opts);
+        if (r != NT_BUILD_OK) {
+            (void)fprintf(stderr, "ERROR: failed to add placeholder texture %u: %d\n", i, r);
+            free(roles);
+            return r;
+        }
+        added++;
+    }
+    (void)printf("  Placeholder textures added: %u (normal + specular only)\n", added);
+    free(roles);
+    return NT_BUILD_OK;
+}
+
+/* --- Add fallback checkerboard texture (used as runtime placeholder for all unloaded textures) --- */
+
+static nt_build_result_t add_fallback_checker(NtBuilderContext *ctx) {
+    nt_tex_opts_t opts = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = 0};
+    nt_build_result_t r = nt_builder_add_texture_raw(ctx, s_checker, CHECKER_SIZE, CHECKER_SIZE, "sponza/fallback_checker", &opts);
+    if (r != NT_BUILD_OK) {
+        (void)fprintf(stderr, "ERROR: failed to add fallback checker: %d\n", r);
+    } else {
+        (void)printf("  Fallback checkerboard added\n");
+    }
+    return r;
+}
+
 /* --- Add all 6 shader files --- */
 
 static nt_build_result_t add_shaders(NtBuilderContext *ctx) {
@@ -179,32 +255,10 @@ static nt_build_result_t add_shaders(NtBuilderContext *ctx) {
     return NT_BUILD_OK;
 }
 
-/* --- Add all meshes and build scene manifest --- */
+/* --- Build manifest blob (scene layout info, no mesh data dependency) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt_glb_scene_t *scene, bool use_base_quality) {
-    /* Stream layouts */
-    NtStreamLayout layout_full[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
-        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
-        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false},
-    };
-
-    NtStreamLayout layout_diffuse[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
-        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
-    };
-
-    NtStreamLayout layout_base[] = {
-        {"position", "POSITION", NT_STREAM_FLOAT16, 3, false},
-        {"normal", "NORMAL", NT_STREAM_INT16, 3, true},
-        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false},
-        {"tangent", "TANGENT", NT_STREAM_INT16, 4, true},
-    };
-
-    /* Access cgltf data for per-primitive material info */
+static nt_build_result_t build_manifest_blob(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     cgltf_data *gltf = (cgltf_data *)scene->_internal;
 
     /* First pass: count manifest entries */
@@ -228,8 +282,98 @@ static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt
     hdr->node_count = manifest_count;
     SponzaManifestNode *nodes_out = (SponzaManifestNode *)(manifest_buf + sizeof(SponzaManifestHeader));
 
-    /* Second pass: add meshes and fill manifest */
+    /* Second pass: fill manifest entries */
     uint32_t entry_idx = 0;
+
+    for (uint32_t ni = 0; ni < scene->node_count; ni++) {
+        if (scene->nodes[ni].mesh_index == UINT32_MAX) {
+            continue;
+        }
+        uint32_t mi = scene->nodes[ni].mesh_index;
+        const cgltf_mesh *cgltf_m = &gltf->meshes[mi];
+
+        for (uint32_t pi = 0; pi < scene->meshes[mi].primitive_count; pi++) {
+            const cgltf_primitive *prim = &cgltf_m->primitives[pi];
+            uint32_t mat_idx = UINT32_MAX;
+            if (prim->material != NULL) {
+                mat_idx = (uint32_t)(prim->material - gltf->materials);
+            }
+
+            const nt_glb_material_t *mat = NULL;
+            const cgltf_material *cm = NULL;
+            uint8_t shader_type = SPONZA_SHADER_DIFFUSE;
+            if (mat_idx < scene->material_count) {
+                mat = &scene->materials[mat_idx];
+                cm = &gltf->materials[mat_idx];
+                shader_type = classify_material(mat, cm);
+            }
+
+            SponzaManifestNode *mn = &nodes_out[entry_idx];
+            mn->mesh_rid = nt_builder_normalize_and_hash(mesh_rid(mi, pi)).value;
+
+            if (mat != NULL && mat->diffuse_index != UINT32_MAX) {
+                mn->diffuse_rid = nt_builder_normalize_and_hash(tex_rid(mat->diffuse_index)).value;
+            }
+            if (mat != NULL && mat->normal_index != UINT32_MAX) {
+                mn->normal_rid = nt_builder_normalize_and_hash(tex_rid(mat->normal_index)).value;
+            }
+            if (mat != NULL && mat->specular_index != UINT32_MAX) {
+                mn->specular_rid = nt_builder_normalize_and_hash(tex_rid(mat->specular_index)).value;
+            }
+
+            memcpy(mn->transform, scene->nodes[ni].transform, sizeof(float) * 16);
+
+            if (mat != NULL) {
+                memcpy(mn->base_color, mat->base_color, sizeof(float) * 4);
+            } else {
+                mn->base_color[0] = 1.0F;
+                mn->base_color[1] = 1.0F;
+                mn->base_color[2] = 1.0F;
+                mn->base_color[3] = 1.0F;
+            }
+
+            mn->shader_type = shader_type;
+            mn->alpha_cutoff_x100 = (mat != NULL) ? (uint8_t)(mat->alpha_cutoff * 100.0F) : 50;
+
+            entry_idx++;
+        }
+    }
+
+    (void)printf("  Manifest entries: %u\n", entry_idx);
+
+    nt_build_result_t r = nt_builder_add_blob(ctx, manifest_buf, manifest_size, "sponza/manifest");
+    free(manifest_buf);
+    if (r != NT_BUILD_OK) {
+        (void)fprintf(stderr, "ERROR: failed to add manifest blob: %d\n", r);
+    }
+    return r;
+}
+
+/* --- Add all meshes (no manifest) --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static nt_build_result_t add_meshes(NtBuilderContext *ctx, const nt_glb_scene_t *scene, bool use_base_quality) {
+    NtStreamLayout layout_full[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
+        {"tangent", "TANGENT", NT_STREAM_FLOAT32, 4, false},
+    };
+
+    NtStreamLayout layout_diffuse[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+        {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT32, 2, false},
+    };
+
+    NtStreamLayout layout_base[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT16, 3, false},
+        {"normal", "NORMAL", NT_STREAM_INT16, 3, true},
+        {"uv0", "TEXCOORD_0", NT_STREAM_FLOAT16, 2, false},
+        {"tangent", "TANGENT", NT_STREAM_INT16, 4, true},
+    };
+
+    cgltf_data *gltf = (cgltf_data *)scene->_internal;
     uint32_t meshes_added = 0;
 
     for (uint32_t ni = 0; ni < scene->node_count; ni++) {
@@ -240,14 +384,12 @@ static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt
         const cgltf_mesh *cgltf_m = &gltf->meshes[mi];
 
         for (uint32_t pi = 0; pi < scene->meshes[mi].primitive_count; pi++) {
-            /* Get per-primitive material index from cgltf */
             const cgltf_primitive *prim = &cgltf_m->primitives[pi];
             uint32_t mat_idx = UINT32_MAX;
             if (prim->material != NULL) {
                 mat_idx = (uint32_t)(prim->material - gltf->materials);
             }
 
-            /* Determine shader type */
             const nt_glb_material_t *mat = NULL;
             const cgltf_material *cm = NULL;
             uint8_t shader_type = SPONZA_SHADER_DIFFUSE;
@@ -257,7 +399,6 @@ static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt
                 shader_type = classify_material(mat, cm);
             }
 
-            /* Choose layout and tangent mode */
             const NtStreamLayout *layout = NULL;
             uint32_t stream_count = 0;
             nt_tangent_mode_t tangent_mode = NT_TANGENT_NONE;
@@ -276,7 +417,6 @@ static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt
                 tangent_mode = NT_TANGENT_NONE;
             }
 
-            /* Add mesh */
             const char *rid = mesh_rid(mi, pi);
             nt_mesh_opts_t opts = {
                 .layout = layout,
@@ -286,58 +426,87 @@ static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt
             nt_build_result_t r = nt_builder_add_scene_mesh(ctx, scene, mi, pi, rid, &opts);
             if (r != NT_BUILD_OK) {
                 (void)fprintf(stderr, "ERROR: failed to add mesh %u/%u: %d\n", mi, pi, r);
-                free(manifest_buf);
                 return r;
             }
             meshes_added++;
-
-            /* Fill manifest entry */
-            SponzaManifestNode *mn = &nodes_out[entry_idx];
-            mn->mesh_rid = nt_builder_normalize_and_hash(rid).value;
-
-            /* Texture resource IDs */
-            if (mat != NULL && mat->diffuse_index != UINT32_MAX) {
-                mn->diffuse_rid = nt_builder_normalize_and_hash(tex_rid(mat->diffuse_index)).value;
-            }
-            if (mat != NULL && mat->normal_index != UINT32_MAX) {
-                mn->normal_rid = nt_builder_normalize_and_hash(tex_rid(mat->normal_index)).value;
-            }
-            if (mat != NULL && mat->specular_index != UINT32_MAX) {
-                mn->specular_rid = nt_builder_normalize_and_hash(tex_rid(mat->specular_index)).value;
-            }
-
-            /* Transform from node */
-            memcpy(mn->transform, scene->nodes[ni].transform, sizeof(float) * 16);
-
-            /* Base color from material */
-            if (mat != NULL) {
-                memcpy(mn->base_color, mat->base_color, sizeof(float) * 4);
-            } else {
-                mn->base_color[0] = 1.0F;
-                mn->base_color[1] = 1.0F;
-                mn->base_color[2] = 1.0F;
-                mn->base_color[3] = 1.0F;
-            }
-
-            mn->shader_type = shader_type;
-            mn->alpha_cutoff_x100 = (mat != NULL) ? (uint8_t)(mat->alpha_cutoff * 100.0F) : 50;
-
-            entry_idx++;
         }
     }
 
-    (void)printf("  Meshes added: %u (manifest entries: %u)\n", meshes_added, entry_idx);
+    (void)printf("  Meshes added: %u\n", meshes_added);
+    return NT_BUILD_OK;
+}
 
-    /* Add manifest blob */
-    nt_build_result_t r = nt_builder_add_blob(ctx, manifest_buf, manifest_size, "sponza/manifest");
-    free(manifest_buf);
+/* --- Add all meshes and build scene manifest (for full pack) --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt_glb_scene_t *scene, bool use_base_quality) {
+    nt_build_result_t r = add_meshes(ctx, scene, use_base_quality);
     if (r != NT_BUILD_OK) {
-        (void)fprintf(stderr, "ERROR: failed to add manifest blob: %d\n", r);
+        return r;
     }
-    return r;
+    return build_manifest_blob(ctx, scene);
 }
 
 /* --- Main --- */
+
+static nt_build_result_t build_pack(const char *out_dir, const char *name, const nt_glb_scene_t *scene, nt_build_result_t (*populate)(NtBuilderContext *, const nt_glb_scene_t *)) {
+    (void)printf("--- Building %s ---\n", name);
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, name));
+    if (!ctx) {
+        (void)fprintf(stderr, "Failed to start %s\n", name);
+        return NT_BUILD_ERR_IO;
+    }
+    nt_builder_set_force(ctx, true);
+
+    nt_build_result_t r = populate(ctx, scene);
+    if (r != NT_BUILD_OK) {
+        nt_builder_free_pack(ctx);
+        return r;
+    }
+
+    r = nt_builder_finish_pack(ctx);
+    nt_builder_free_pack(ctx);
+    if (r != NT_BUILD_OK) {
+        (void)fprintf(stderr, "%s failed: %d\n", name, r);
+        return r;
+    }
+    (void)printf("Built: %s\n\n", name);
+    return NT_BUILD_OK;
+}
+
+/* Pack population callbacks */
+
+static nt_build_result_t populate_core(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
+    nt_build_result_t r = add_shaders(ctx);
+    if (r != NT_BUILD_OK) {
+        return r;
+    }
+    r = build_manifest_blob(ctx, scene);
+    if (r != NT_BUILD_OK) {
+        return r;
+    }
+    r = add_fallback_checker(ctx);
+    if (r != NT_BUILD_OK) {
+        return r;
+    }
+    return add_placeholder_textures(ctx, scene);
+}
+
+static nt_build_result_t populate_geo(NtBuilderContext *ctx, const nt_glb_scene_t *scene) { return add_meshes(ctx, scene, true); }
+
+static nt_build_result_t populate_tex(NtBuilderContext *ctx, const nt_glb_scene_t *scene) { return add_textures(ctx, scene, 512); }
+
+static nt_build_result_t populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
+    nt_build_result_t r = add_textures(ctx, scene, 0);
+    if (r != NT_BUILD_OK) {
+        return r;
+    }
+    r = add_shaders(ctx);
+    if (r != NT_BUILD_OK) {
+        return r;
+    }
+    return add_meshes_and_manifest(ctx, scene, false);
+}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 int main(int argc, char *argv[]) {
@@ -350,6 +519,7 @@ int main(int argc, char *argv[]) {
     (void)printf("=== Build Sponza Packs -> %s ===\n\n", out_dir);
 
     MKDIR(out_dir);
+    init_checker();
 
     /* Parse Sponza scene */
     nt_glb_scene_t scene;
@@ -375,84 +545,32 @@ int main(int argc, char *argv[]) {
     }
     (void)printf("\n");
 
-    /* ---- Pack 1: sponza_base.ntpack (compressed quality) ---- */
-    {
-        (void)printf("--- Building sponza_base.ntpack ---\n");
-        NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "sponza_base.ntpack"));
-        if (!ctx) {
-            (void)fprintf(stderr, "Failed to start base pack\n");
-            nt_builder_free_glb_scene(&scene);
-            return 1;
-        }
-        nt_builder_set_force(ctx, true);
-
-        r = add_textures(ctx, &scene, 512);
-        if (r != NT_BUILD_OK) {
-            nt_builder_free_pack(ctx);
-            nt_builder_free_glb_scene(&scene);
-            return 1;
-        }
-        r = add_shaders(ctx);
-        if (r != NT_BUILD_OK) {
-            nt_builder_free_pack(ctx);
-            nt_builder_free_glb_scene(&scene);
-            return 1;
-        }
-        r = add_meshes_and_manifest(ctx, &scene, true);
-        if (r != NT_BUILD_OK) {
-            nt_builder_free_pack(ctx);
-            nt_builder_free_glb_scene(&scene);
-            return 1;
-        }
-
-        r = nt_builder_finish_pack(ctx);
-        nt_builder_free_pack(ctx);
-        if (r != NT_BUILD_OK) {
-            (void)fprintf(stderr, "Base pack failed: %d\n", r);
-            nt_builder_free_glb_scene(&scene);
-            return 1;
-        }
-        (void)printf("Built: sponza_base.ntpack\n\n");
+    /* ---- Pack 1: sponza_core.ntpack (shaders + manifest + placeholder textures) ---- */
+    r = build_pack(out_dir, "sponza_core.ntpack", &scene, populate_core);
+    if (r != NT_BUILD_OK) {
+        nt_builder_free_glb_scene(&scene);
+        return 1;
     }
 
-    /* ---- Pack 2: sponza_full.ntpack (full quality) ---- */
-    {
-        (void)printf("--- Building sponza_full.ntpack ---\n");
-        NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "sponza_full.ntpack"));
-        if (!ctx) {
-            (void)fprintf(stderr, "Failed to start full pack\n");
-            nt_builder_free_glb_scene(&scene);
-            return 1;
-        }
-        nt_builder_set_force(ctx, true);
+    /* ---- Pack 2: sponza_geo.ntpack (all meshes, base quality) ---- */
+    r = build_pack(out_dir, "sponza_geo.ntpack", &scene, populate_geo);
+    if (r != NT_BUILD_OK) {
+        nt_builder_free_glb_scene(&scene);
+        return 1;
+    }
 
-        r = add_textures(ctx, &scene, 0);
-        if (r != NT_BUILD_OK) {
-            nt_builder_free_pack(ctx);
-            nt_builder_free_glb_scene(&scene);
-            return 1;
-        }
-        r = add_shaders(ctx);
-        if (r != NT_BUILD_OK) {
-            nt_builder_free_pack(ctx);
-            nt_builder_free_glb_scene(&scene);
-            return 1;
-        }
-        r = add_meshes_and_manifest(ctx, &scene, false);
-        if (r != NT_BUILD_OK) {
-            nt_builder_free_pack(ctx);
-            nt_builder_free_glb_scene(&scene);
-            return 1;
-        }
+    /* ---- Pack 3: sponza_tex.ntpack (all textures, 512px max) ---- */
+    r = build_pack(out_dir, "sponza_tex.ntpack", &scene, populate_tex);
+    if (r != NT_BUILD_OK) {
+        nt_builder_free_glb_scene(&scene);
+        return 1;
+    }
 
-        r = nt_builder_finish_pack(ctx);
-        nt_builder_free_pack(ctx);
-        if (r != NT_BUILD_OK) {
-            (void)fprintf(stderr, "Full pack failed: %d\n", r);
-            nt_builder_free_glb_scene(&scene);
-            return 1;
-        }
-        (void)printf("Built: sponza_full.ntpack\n\n");
+    /* ---- Pack 4: sponza_full.ntpack (full quality everything) ---- */
+    r = build_pack(out_dir, "sponza_full.ntpack", &scene, populate_full);
+    if (r != NT_BUILD_OK) {
+        nt_builder_free_glb_scene(&scene);
+        return 1;
     }
 
     nt_builder_free_glb_scene(&scene);

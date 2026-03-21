@@ -73,6 +73,14 @@ static void nt_builder_free_tex_mem_data(NtBuildTexMemData *td) {
     free(td);
 }
 
+static void nt_builder_free_tex_raw_data(NtBuildTexRawData *td) {
+    if (!td) {
+        return;
+    }
+    free(td->pixels);
+    free(td);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void nt_builder_free_entry_data(NtBuildEntry *entry) {
     if (!entry->data) {
@@ -90,6 +98,9 @@ static void nt_builder_free_entry_data(NtBuildEntry *entry) {
         break;
     case NT_BUILD_ASSET_TEXTURE_MEM:
         nt_builder_free_tex_mem_data((NtBuildTexMemData *)entry->data);
+        break;
+    case NT_BUILD_ASSET_TEXTURE_RAW:
+        nt_builder_free_tex_raw_data((NtBuildTexRawData *)entry->data);
         break;
     default:
         free(entry->data);
@@ -219,13 +230,11 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
     const uint8_t *new_data = ctx->data_buf + new_data_start;
     uint32_t dedup_offset = UINT32_MAX;
 
-    if (data_size >= 64) { /* only dedup assets >= 64 bytes */
-        for (uint32_t ei = 0; ei < ctx->entry_count; ei++) {
-            if (ctx->entries[ei].size == data_size && ctx->entries[ei].offset + data_size <= new_data_start) {
-                if (memcmp(ctx->data_buf + ctx->entries[ei].offset, new_data, data_size) == 0) {
-                    dedup_offset = ctx->entries[ei].offset;
-                    break;
-                }
+    for (uint32_t ei = 0; ei < ctx->entry_count; ei++) {
+        if (ctx->entries[ei].size == data_size && ctx->entries[ei].offset + data_size <= new_data_start) {
+            if (memcmp(ctx->data_buf + ctx->entries[ei].offset, new_data, data_size) == 0) {
+                dedup_offset = ctx->entries[ei].offset;
+                break;
             }
         }
     }
@@ -341,6 +350,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         case NT_BUILD_ASSET_TEXTURE_MEM: {
             NtBuildTexMemData *tmd = (NtBuildTexMemData *)pe->data;
             ret = nt_builder_import_texture_from_memory(ctx, tmd->data, tmd->size, pe->resource_id, &tmd->opts);
+            break;
+        }
+        case NT_BUILD_ASSET_TEXTURE_RAW: {
+            NtBuildTexRawData *trd = (NtBuildTexRawData *)pe->data;
+            ret = nt_builder_import_texture_raw(ctx, trd->pixels, trd->width, trd->height, pe->resource_id, &trd->opts);
             break;
         }
         }
@@ -608,6 +622,67 @@ nt_build_result_t nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, c
 
 nt_build_result_t nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id) {
     return nt_builder_add_texture_from_memory_ex(ctx, data, size, resource_id, NULL);
+}
+
+/* --- Public add_texture_raw --- */
+
+nt_build_result_t nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts) {
+    if (!ctx || !rgba_pixels || width == 0 || height == 0 || !resource_id) {
+        return NT_BUILD_ERR_VALIDATION;
+    }
+
+    uint64_t rid = nt_hash64_str(resource_id).value;
+
+    int32_t existing = nt_builder_find_entry(ctx, rid);
+    if (existing >= 0 && !ctx->force) {
+        (void)fprintf(stderr, "ERROR: duplicate resource_id for raw texture '%s'\n", resource_id);
+        return NT_BUILD_ERR_DUPLICATE;
+    }
+
+    uint32_t data_size = width * height * 4;
+    NtBuildTexRawData *td = (NtBuildTexRawData *)calloc(1, sizeof(NtBuildTexRawData));
+    if (!td) {
+        return NT_BUILD_ERR_IO;
+    }
+    td->pixels = (uint8_t *)malloc(data_size);
+    if (!td->pixels) {
+        free(td);
+        return NT_BUILD_ERR_IO;
+    }
+    memcpy(td->pixels, rgba_pixels, data_size);
+    td->width = width;
+    td->height = height;
+    if (opts) {
+        td->opts = *opts;
+    } else {
+        td->opts.format = NT_TEXTURE_FORMAT_RGBA8;
+        td->opts.max_size = 0;
+    }
+
+    if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
+        (void)fprintf(stderr, "ERROR: Asset limit reached (%d max)\n", NT_BUILD_MAX_ASSETS);
+        free(td->pixels);
+        free(td);
+        return NT_BUILD_ERR_LIMIT;
+    }
+
+    if (existing >= 0) {
+        nt_builder_free_entry(&ctx->pending[existing]);
+        ctx->pending[existing].path = strdup(resource_id);
+        ctx->pending[existing].rename_key = NULL;
+        ctx->pending[existing].resource_id = rid;
+        ctx->pending[existing].kind = NT_BUILD_ASSET_TEXTURE_RAW;
+        ctx->pending[existing].data = td;
+        return NT_BUILD_OK;
+    }
+
+    NtBuildEntry *entry = &ctx->pending[ctx->pending_count++];
+    entry->path = strdup(resource_id);
+    entry->rename_key = NULL;
+    entry->resource_id = rid;
+    entry->kind = NT_BUILD_ASSET_TEXTURE_RAW;
+    entry->data = td;
+    return NT_BUILD_OK;
 }
 
 void nt_builder_set_force(NtBuilderContext *ctx, bool force) {
