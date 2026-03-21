@@ -15,7 +15,7 @@
 #endif
 
 #ifndef NT_LOG_BUF_SIZE
-#define NT_LOG_BUF_SIZE 256
+#define NT_LOG_BUF_SIZE 512
 #endif
 
 static nt_log_level_t s_log_level = NT_LOG_LEVEL_INFO;
