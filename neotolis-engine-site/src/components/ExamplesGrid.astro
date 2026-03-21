@@ -22,7 +22,7 @@ for (const example of examples) {
       }
     } else {
       // Fallback: fetch from live GitHub Pages
-      const res = await fetch(`https://d954mas.github.io/neotolis-engine/sizes/${slug}.json`);
+      const res = await fetch(`https://neotolis-engine.dev/sizes/${slug}.json`);
       if (res.ok) {
         const entries = await res.json();
         if (entries.length > 0) {

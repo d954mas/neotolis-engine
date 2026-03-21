@@ -14,7 +14,7 @@ const { example } = Astro.props;
 ---
 <ExampleLayout title={example.data.title}>
   <iframe
-    src={`/neotolis-engine/wasm/${example.id}/`}
+    src={`/wasm/${example.id}/`}
     title={example.data.title}
     class="w-full h-full border-none"
     allow="autoplay; fullscreen"

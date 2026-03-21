@@ -39,10 +39,10 @@ const resourceFiles = sizeData
   ? Object.entries(sizeData.files).filter(([f]) => f.startsWith('assets/'))
   : [];
 ---
-<a href={`/neotolis-engine/examples/${slug}/`} class="block bg-bg-card rounded-lg overflow-hidden hover:ring-1 hover:ring-accent transition group">
+<a href={`/examples/${slug}/`} class="block bg-bg-card rounded-lg overflow-hidden hover:ring-1 hover:ring-accent transition group">
   {hasCover ? (
     <img
-      src={`/neotolis-engine/examples/${slug}/cover.png`}
+      src={`/examples/${slug}/cover.png`}
       alt={title}
       class="aspect-video w-full object-cover"
     />
