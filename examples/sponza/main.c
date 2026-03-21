@@ -365,9 +365,7 @@ static void load_scene_from_manifest(void) {
     s_entity_count = node_count;
     s_scene_loaded = true;
 
-    char buf[128];
-    (void)snprintf(buf, sizeof(buf), "Sponza scene loaded: %u entities, %u materials", node_count, node_count);
-    nt_log_info(buf);
+    nt_log_info("Sponza scene loaded: %u entities, %u materials", node_count, node_count);
 }
 
 /* ---- Frame callback ---- */
@@ -533,9 +531,7 @@ static void frame(void) {
         }
 
         if (!s_diag_logged && item_count > 0 && item_count < s_entity_count) {
-            char dbuf[256];
-            (void)snprintf(dbuf, sizeof(dbuf), ">> DIAG: %u/%u rendered, skipped: vis=%u mat=%u mesh=%u", item_count, s_entity_count, skip_vis, skip_mat, skip_mesh);
-            nt_log_info(dbuf);
+            nt_log_info(">> DIAG: %u/%u rendered, skipped: vis=%u mat=%u mesh=%u", item_count, s_entity_count, skip_vis, skip_mat, skip_mesh);
             s_diag_logged = true;
         }
 
@@ -603,11 +599,8 @@ static void frame(void) {
             if (s_stats_accum >= 1.0) {
                 float avg_fps = (float)s_stats_frames / (float)s_stats_accum;
                 float min_fps = (s_stats_max_dt > 0.0F) ? (1.0F / s_stats_max_dt) : 0.0F;
-                char buf[256];
-                (void)snprintf(buf, sizeof(buf), "FPS avg=%.1f min=%.1f dt=%.4f spd=%.0f | draws=%u inst=%u verts=%u tris=%u items=%u/%u", (double)avg_fps, (double)min_fps, (double)g_nt_app.dt,
-                               (double)s_move_speed, g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.instances, g_nt_gfx.frame_stats.vertices, g_nt_gfx.frame_stats.indices / 3, item_count,
-                               s_entity_count);
-                nt_log_info(buf);
+                nt_log_info("FPS avg=%.1f min=%.1f dt=%.4f spd=%.0f | draws=%u inst=%u verts=%u tris=%u items=%u/%u", (double)avg_fps, (double)min_fps, (double)g_nt_app.dt, (double)s_move_speed,
+                            g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.instances, g_nt_gfx.frame_stats.vertices, g_nt_gfx.frame_stats.indices / 3, item_count, s_entity_count);
                 s_stats_accum = 0.0;
                 s_stats_frames = 0;
                 s_stats_max_dt = 0.0F;
