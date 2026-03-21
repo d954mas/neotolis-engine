@@ -1,6 +1,5 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
-#include "log/nt_log.h"
 /* clang-format on */
 
 #ifdef _WIN32

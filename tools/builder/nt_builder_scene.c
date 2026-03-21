@@ -3,7 +3,6 @@
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
 #include "cgltf.h"
-#include "log/nt_log.h"
 /* clang-format on */
 
 /* Uses nt_builder_convert_component() and nt_builder_clampf() from nt_builder_internal.h */

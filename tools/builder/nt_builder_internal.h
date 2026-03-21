@@ -1,8 +1,13 @@
 #ifndef NT_BUILDER_INTERNAL_H
 #define NT_BUILDER_INTERNAL_H
 
+#include "log/nt_log.h"
 #include "nt_builder.h"
 #include "nt_pack_format.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* Always-on assert for builder (never compiled out by NDEBUG).
    Mirrors engine NT_ASSERT_ALWAYS but without engine header deps. */
@@ -13,12 +18,6 @@
             abort();                                                                                                                                                                                   \
         }                                                                                                                                                                                              \
     } while (0)
-
-#include "log/nt_log.h"
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 /* Initial data buffer capacity (1 MB, doubles on overflow) */
 #define NT_BUILD_INITIAL_CAPACITY (1024 * 1024)

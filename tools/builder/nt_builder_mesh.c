@@ -3,7 +3,6 @@
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
 #include "cgltf.h"
-#include "log/nt_log.h"
 /* clang-format on */
 
 /* --- Stream layout validation --- */

@@ -6,12 +6,8 @@
 #include <emscripten/console.h>
 #endif
 
-/* Suppress -Wformat-nonliteral for this translation unit.
-   The vsnprintf/fprintf calls here intentionally forward user-supplied
-   format strings. Type-safety is enforced at the public API boundary
-   via NT_PRINTF_ATTR on the _impl functions in nt_log.h.  The plain
-   functions (nt_log_info etc.) deliberately omit the attribute during
-   migration (existing callers pass non-literal strings). */
+/* Suppress -Wformat-nonliteral: vsnprintf/fprintf here forward caller-supplied
+   format strings. Type-safety is enforced at call sites via NT_PRINTF_ATTR. */
 #if defined(__clang__)
 #pragma clang diagnostic ignored "-Wformat-nonliteral"
 #elif defined(__GNUC__)
@@ -30,6 +26,9 @@ void nt_log_set_level(nt_log_level_t level) { s_log_level = level; }
 /* Shared formatting + output helper */
 static void log_write(nt_log_level_t level, const char *domain, const char *fmt, va_list args) {
     static const char *const level_names[] = {"INFO", "WARN", "ERROR"};
+    if (level >= NT_LOG_LEVEL_NONE) {
+        return;
+    }
     char msg[NT_LOG_BUF_SIZE];
     (void)vsnprintf(msg, sizeof(msg), fmt, args);
 

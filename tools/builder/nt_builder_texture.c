@@ -1,7 +1,6 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
 #include "nt_texture_format.h"
-#include "log/nt_log.h"
 #include "stb_image.h"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlanguage-extension-token"

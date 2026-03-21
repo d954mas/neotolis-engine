@@ -1,7 +1,6 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
 #include "nt_crc32.h"
-#include "log/nt_log.h"
 /* clang-format on */
 
 static void nt_format_size(uint32_t bytes, char *buf, size_t buf_size) {

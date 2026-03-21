@@ -1,7 +1,6 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
 #include "mikktspace.h"
-#include "log/nt_log.h"
 /* clang-format on */
 
 /* --- MikkTSpace callback context --- */

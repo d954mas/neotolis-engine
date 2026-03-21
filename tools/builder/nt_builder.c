@@ -2,7 +2,6 @@
 #include "nt_builder_internal.h"
 #include "hash/nt_hash.h"
 #include "nt_crc32.h"
-#include "log/nt_log.h"
 /* clang-format on */
 
 /* --- Entry data management --- */
