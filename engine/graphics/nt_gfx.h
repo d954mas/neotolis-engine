@@ -28,6 +28,16 @@ typedef struct {
 
 #define NT_MESH_INVALID ((nt_mesh_t){0})
 
+/* ---- Global UBO block registry (compile-time limit) ---- */
+
+#define NT_GFX_MAX_GLOBAL_BLOCKS 8
+
+typedef struct {
+    const char *name; /* string literal, not owned */
+    uint32_t binding_slot;
+    bool active;
+} nt_global_block_t;
+
 /* ---- Mesh info (side table for VBO+IBO pairs from mesh activator) ---- */
 
 typedef struct {
@@ -101,6 +111,9 @@ typedef enum {
 
 typedef enum {
     NT_PIXEL_RGBA8 = 0, /* 4 bpp, 8 bits per channel */
+    NT_PIXEL_RGB8 = 1,  /* 3 bpp, no alpha */
+    NT_PIXEL_RG8 = 2,   /* 2 bpp, two channels */
+    NT_PIXEL_R8 = 3,    /* 1 bpp, single channel */
 } nt_pixel_format_t;
 
 typedef enum {
@@ -236,6 +249,11 @@ static inline nt_gfx_desc_t nt_gfx_desc_defaults(void) {
     };
 }
 
+/* ---- Global UBO block registration ---- */
+
+void nt_gfx_register_global_block(const char *name, uint32_t binding_slot);
+void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count);
+
 /* ---- Lifecycle ---- */
 
 void nt_gfx_init(const nt_gfx_desc_t *desc);
@@ -286,6 +304,7 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 /* ---- Instance buffer ---- */
 
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf);
+void nt_gfx_set_instance_offset(uint32_t byte_offset);
 
 /* ---- Uniform buffer ---- */
 

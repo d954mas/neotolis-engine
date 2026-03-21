@@ -10,6 +10,7 @@
 #include "http/nt_http.h"
 #include "fs/nt_fs.h"
 #include "time/nt_time.h"
+#include "nt_blob_format.h"
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
 #include "unity.h"
@@ -1438,6 +1439,141 @@ void test_load_url_native_fails(void) {
     TEST_ASSERT_EQUAL(NT_PACK_STATE_FAILED, nt_resource_pack_state(pid));
 }
 
+/* ---- Blob asset pack builder ---- */
+
+/*
+ * Build a NTPACK blob with one NT_ASSET_BLOB entry containing `payload_size`
+ * bytes of test data (filled with `fill_byte`). Returns malloc'd blob (caller
+ * frees). Sets *out_size to total blob size.
+ */
+static uint8_t *build_blob_pack(uint64_t rid, uint32_t payload_size, uint8_t fill_byte, uint32_t *out_size) {
+    uint32_t asset_data_size = (uint32_t)sizeof(NtBlobAssetHeader) + payload_size;
+    uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
+    uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
+    uint32_t aligned_data = (asset_data_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+    uint32_t total_size = header_size + aligned_data;
+
+    uint8_t *blob = (uint8_t *)calloc(1, total_size);
+    if (!blob) {
+        return NULL;
+    }
+
+    NtPackHeader *h = (NtPackHeader *)blob;
+    h->magic = NT_PACK_MAGIC;
+    h->version = NT_PACK_VERSION;
+    h->asset_count = 1;
+    h->header_size = header_size;
+    h->total_size = total_size;
+
+    NtAssetEntry *entry = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
+    entry->resource_id = rid;
+    entry->format_version = 1;
+    entry->asset_type = NT_ASSET_BLOB;
+    entry->_pad = 0;
+    entry->_pad2 = 0;
+    entry->offset = header_size;
+    entry->size = asset_data_size;
+
+    /* Write blob asset header */
+    NtBlobAssetHeader *bhdr = (NtBlobAssetHeader *)(blob + header_size);
+    bhdr->magic = NT_BLOB_MAGIC;
+    bhdr->version = NT_BLOB_VERSION;
+    bhdr->_pad = 0;
+
+    /* Fill payload data after header */
+    memset(blob + header_size + sizeof(NtBlobAssetHeader), fill_byte, payload_size);
+
+    h->checksum = nt_crc32(blob + header_size, aligned_data);
+
+    *out_size = total_size;
+    return blob;
+}
+
+/* ---- Blob asset tests ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_blob_asset_ready_after_parse(void) {
+    nt_hash32_t pid = nt_hash32_str("blob_ready_pack");
+    nt_hash64_t rid = nt_hash64_str("blob_ready_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_blob_pack(rid.value, 32, 0xAB, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_BLOB);
+    TEST_ASSERT_TRUE(h.id != 0);
+
+    /* Blob assets should be READY immediately after parse + step (no activator needed) */
+    nt_resource_step();
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+
+    free(blob);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_get_blob_returns_data(void) {
+    nt_hash32_t pid = nt_hash32_str("blob_data_pack");
+    nt_hash64_t rid = nt_hash64_str("blob_data_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t payload_size = 16;
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_blob_pack(rid.value, payload_size, 0xCD, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_BLOB);
+    nt_resource_step();
+
+    uint32_t data_size = 0;
+    const uint8_t *data = nt_resource_get_blob(h, &data_size);
+    TEST_ASSERT_NOT_NULL(data);
+    TEST_ASSERT_EQUAL_UINT32(payload_size, data_size);
+
+    /* Verify payload content matches fill byte */
+    for (uint32_t i = 0; i < payload_size; i++) {
+        TEST_ASSERT_EQUAL_UINT8(0xCD, data[i]);
+    }
+
+    free(blob);
+}
+
+void test_get_blob_null_for_non_blob(void) {
+    nt_hash32_t pid = nt_hash32_str("blob_non_pack");
+    nt_hash64_t rid = nt_hash64_str("blob_non_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_pack_with_rid(rid.value, NT_ASSET_MESH, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step();
+
+    uint32_t data_size = 99;
+    const uint8_t *data = nt_resource_get_blob(h, &data_size);
+    TEST_ASSERT_NULL(data);
+    TEST_ASSERT_EQUAL_UINT32(0, data_size);
+
+    free(blob);
+}
+
+void test_get_blob_null_for_invalid_handle(void) {
+    uint32_t data_size = 99;
+    const uint8_t *data = nt_resource_get_blob(NT_RESOURCE_INVALID, &data_size);
+    TEST_ASSERT_NULL(data);
+    TEST_ASSERT_EQUAL_UINT32(0, data_size);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -1548,6 +1684,12 @@ int main(void) {
 
     /* URL loading on native */
     RUN_TEST(test_load_url_native_fails);
+
+    /* Blob asset tests */
+    RUN_TEST(test_blob_asset_ready_after_parse);
+    RUN_TEST(test_get_blob_returns_data);
+    RUN_TEST(test_get_blob_null_for_non_blob);
+    RUN_TEST(test_get_blob_null_for_invalid_handle);
 
     return UNITY_END();
 }

@@ -26,6 +26,11 @@ jobs:
     needs: native
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Pull LFS files
+        run: git lfs pull
 
       - name: Read emsdk version
         id: emsdk-version
@@ -40,11 +45,17 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Download asset packs
+      - name: Download textured_quad packs
         uses: actions/download-artifact@v4
         with:
-          name: asset-packs
+          name: tq-packs
           path: build/examples/textured_quad
+
+      - name: Download sponza packs
+        uses: actions/download-artifact@v4
+        with:
+          name: sponza-packs
+          path: build/examples/sponza
 
       - name: Configure WASM debug
         run: emcmake cmake --preset wasm-debug
@@ -89,6 +100,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Pull LFS files
+        run: git lfs pull
 
       - name: Install dependencies
         run: |
@@ -102,8 +118,14 @@ jobs:
       - name: Build native debug
         run: cmake --build --preset native-debug --target build_tq_packs
 
-      - name: Build asset packs
+      - name: Build asset packs (textured_quad)
         run: ./build/examples/textured_quad/native-debug/build_tq_packs build/examples/textured_quad
+
+      - name: Build sponza pack builder
+        run: cmake --build --preset native-debug --target build_sponza_packs
+
+      - name: Build asset packs (sponza)
+        run: ./build/examples/sponza/native-debug/build_sponza_packs build/examples/sponza
 
       - name: Build native debug (all targets)
         run: cmake --build --preset native-debug
@@ -128,8 +150,11 @@ jobs:
       - name: Build native release
         run: cmake --build --preset native-release
 
-      - name: Build asset packs (release)
+      - name: Build asset packs (textured_quad, release)
         run: ./build/examples/textured_quad/native-release/build_tq_packs build/examples/textured_quad
+
+      - name: Build asset packs (sponza, release)
+        run: ./build/examples/sponza/native-release/build_sponza_packs build/examples/sponza
 
       - name: Rebuild native release (with packs)
         run: cmake --build --preset native-release
@@ -145,11 +170,18 @@ jobs:
       - name: Smoke test builder (release)
         run: ./build/tools/builder/native-release/builder
 
-      - name: Upload asset packs
+      - name: Upload textured_quad packs
         uses: actions/upload-artifact@v4
         with:
-          name: asset-packs
+          name: tq-packs
           path: build/examples/textured_quad/*.ntpack
+          retention-days: 1
+
+      - name: Upload sponza packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sponza-packs
+          path: build/examples/sponza/*.ntpack
           retention-days: 1
 
       - name: Submodule consumption test
@@ -165,6 +197,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Pull LFS files
+        run: git lfs pull
 
       - name: Install dependencies
         run: |
@@ -192,12 +229,23 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
-      - name: Download asset packs
+      - name: Pull LFS files
+        run: git lfs pull
+
+      - name: Download textured_quad packs
         uses: actions/download-artifact@v4
         with:
-          name: asset-packs
+          name: tq-packs
           path: build/examples/textured_quad
+
+      - name: Download sponza packs
+        uses: actions/download-artifact@v4
+        with:
+          name: sponza-packs
+          path: build/examples/sponza
 
       - uses: actions/setup-node@v4
         with:
@@ -220,7 +268,7 @@ jobs:
 
       - name: Measure sizes (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad; do
+          for example in hello bench_shapes spinning_cube textured_quad sponza; do
             bash scripts/size.sh $example --json > /tmp/size_${example}.json
           done
 
@@ -235,7 +283,7 @@ jobs:
 
       - name: Generate size reports (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad; do
+          for example in hello bench_shapes spinning_cube textured_quad sponza; do
             bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
           done
 
@@ -251,7 +299,7 @@ jobs:
 
       - name: Update size history and reports (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad; do
+          for example in hello bench_shapes spinning_cube textured_quad sponza; do
             mkdir -p "gh-pages-data/reports/$example"
             cp "/tmp/report_${example}.txt" "gh-pages-data/reports/$example/size-report.txt"
 
@@ -267,7 +315,7 @@ jobs:
 
       - name: Check for size regression
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad; do
+          for example in hello bench_shapes spinning_cube textured_quad sponza; do
             TARGET_FILE="gh-pages-data/sizes/${example}.json"
             [ -f "$TARGET_FILE" ] || continue
             ENTRIES=$(jq length "$TARGET_FILE")
@@ -352,12 +400,23 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
-      - name: Download asset packs
+      - name: Pull LFS files
+        run: git lfs pull
+
+      - name: Download textured_quad packs
         uses: actions/download-artifact@v4
         with:
-          name: asset-packs
+          name: tq-packs
           path: build/examples/textured_quad
+
+      - name: Download sponza packs
+        uses: actions/download-artifact@v4
+        with:
+          name: sponza-packs
+          path: build/examples/sponza
 
       - name: Read emsdk version
         id: emsdk-version
@@ -379,7 +438,7 @@ jobs:
 
       - name: Measure sizes (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad; do
+          for example in hello bench_shapes spinning_cube textured_quad sponza; do
             bash scripts/size.sh $example --json > /tmp/size_${example}.json
           done
 
@@ -391,7 +450,7 @@ jobs:
 
       - name: Generate size reports (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad; do
+          for example in hello bench_shapes spinning_cube textured_quad sponza; do
             bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
           done
 
@@ -405,7 +464,7 @@ jobs:
 
       - name: Generate size comment
         run: |
-          EXAMPLES="hello bench_shapes spinning_cube textured_quad"
+          EXAMPLES="hello bench_shapes spinning_cube textured_quad sponza"
           PR_COMMIT=$(git rev-parse --short HEAD)
 
           # Format bytes as KB/MB with 3 decimal places
@@ -570,7 +629,7 @@ jobs:
 
       - name: Generate size report comment
         run: |
-          EXAMPLES="hello bench_shapes spinning_cube textured_quad"
+          EXAMPLES="hello bench_shapes spinning_cube textured_quad sponza"
           PR_COMMIT=$(git rev-parse --short HEAD)
 
           {

@@ -12,6 +12,7 @@
 #include "core/nt_platform.h"
 #include "graphics/gl/nt_gfx_gl_ctx.h"
 #include "graphics/nt_gfx_internal.h"
+#include "hash/nt_hash.h"
 #include "log/nt_log.h"
 #include "window/nt_window.h"
 
@@ -31,6 +32,14 @@
 
 /* ---- Pipeline backend data ---- */
 
+/* Per-pipeline uniform location cache (populated at link time) */
+#define NT_MAX_CACHED_UNIFORMS 16
+
+typedef struct {
+    uint32_t name_hash;
+    GLint location;
+} nt_cached_uniform_t;
+
 typedef struct {
     GLuint vao;
     GLuint program;
@@ -47,6 +56,9 @@ typedef struct {
     /* Store layouts for re-applying vertex attrib pointers on buffer bind */
     nt_vertex_layout_t layout;
     nt_vertex_layout_t instance_layout;
+    /* Uniform location cache (filled at glLinkProgram time) */
+    nt_cached_uniform_t uniforms[NT_MAX_CACHED_UNIFORMS];
+    uint8_t uniform_count;
 } nt_gfx_gl_pipeline_t;
 
 /* ---- File-scope state ---- */
@@ -58,6 +70,7 @@ static nt_gfx_gl_pipeline_t *s_pipelines; /* pipeline data, indexed by slot */
 static GLuint *s_buffer_gl;               /* GL buffer names, indexed by slot */
 static GLenum *s_buffer_targets;          /* GL_ARRAY_BUFFER or GL_ELEMENT_ARRAY_BUFFER */
 static GLuint *s_texture_gl;              /* GL texture names, indexed by slot */
+static GLuint s_instance_gl_buf;          /* GL name of last bound instance buffer */
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
 
@@ -80,6 +93,22 @@ static struct {
     GLuint bound_textures[NT_GFX_MAX_TEXTURE_SLOTS]; /* GL name per slot */
 } s_gl_cache;
 
+/* ---- Per-pipeline uniform location lookup ---- */
+
+static GLint pipeline_get_uniform(const char *name) {
+    if (s_bound_pipeline_slot == 0 || s_bound_pipeline_slot > s_init_desc.max_pipelines) {
+        return -1;
+    }
+    const nt_gfx_gl_pipeline_t *pip = &s_pipelines[s_bound_pipeline_slot];
+    uint32_t h = nt_hash32_str(name).value;
+    for (uint8_t i = 0; i < pip->uniform_count; i++) {
+        if (pip->uniforms[i].name_hash == h) {
+            return pip->uniforms[i].location;
+        }
+    }
+    return -1;
+}
+
 static void nt_gfx_gl_cache_reset(void) {
     s_gl_cache.vao = 0;
     s_gl_cache.program = 0;
@@ -95,6 +124,7 @@ static void nt_gfx_gl_cache_reset(void) {
     s_gl_cache.po_units = 0.0F;
     s_gl_cache.active_texture = GL_TEXTURE0;
     memset(s_gl_cache.bound_textures, 0, sizeof(s_gl_cache.bound_textures));
+    s_instance_gl_buf = 0;
 }
 
 /* ---- Helpers: enum mapping ---- */
@@ -400,28 +430,28 @@ void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) {
 /* ---- Uniforms ---- */
 
 void nt_gfx_backend_set_uniform_mat4(const char *name, const float *matrix) {
-    GLint loc = glGetUniformLocation(s_bound_program, name);
+    GLint loc = pipeline_get_uniform(name);
     if (loc >= 0) {
         glUniformMatrix4fv(loc, 1, GL_FALSE, matrix);
     }
 }
 
 void nt_gfx_backend_set_uniform_vec4(const char *name, const float *vec) {
-    GLint loc = glGetUniformLocation(s_bound_program, name);
+    GLint loc = pipeline_get_uniform(name);
     if (loc >= 0) {
         glUniform4fv(loc, 1, vec);
     }
 }
 
 void nt_gfx_backend_set_uniform_float(const char *name, float val) {
-    GLint loc = glGetUniformLocation(s_bound_program, name);
+    GLint loc = pipeline_get_uniform(name);
     if (loc >= 0) {
         glUniform1f(loc, val);
     }
 }
 
 void nt_gfx_backend_set_uniform_int(const char *name, int val) {
-    GLint loc = glGetUniformLocation(s_bound_program, name);
+    GLint loc = pipeline_get_uniform(name);
     if (loc >= 0) {
         glUniform1i(loc, val);
     }
@@ -485,11 +515,16 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
         return 0;
     }
 
-    /* Auto-bind "Globals" UBO block to slot 0 if present (engine convention) */
+    /* Auto-bind all registered global UBO blocks */
     {
-        GLuint block_index = glGetUniformBlockIndex(program, "Globals");
-        if (block_index != GL_INVALID_INDEX) {
-            glUniformBlockBinding(program, block_index, 0);
+        const nt_global_block_t *blocks;
+        uint32_t block_count;
+        nt_gfx_get_global_blocks(&blocks, &block_count);
+        for (uint32_t bi = 0; bi < block_count; bi++) {
+            GLuint block_index = glGetUniformBlockIndex(program, blocks[bi].name);
+            if (block_index != GL_INVALID_INDEX) {
+                glUniformBlockBinding(program, block_index, (GLuint)blocks[bi].binding_slot);
+            }
         }
     }
 
@@ -540,6 +575,24 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     pip->po_units = desc->polygon_offset_units;
     pip->layout = desc->layout;
     pip->instance_layout = desc->instance_layout;
+
+    /* Cache active uniform locations (avoids glGetUniformLocation per frame) */
+    pip->uniform_count = 0;
+    GLint active_uniforms = 0;
+    glGetProgramiv(program, GL_ACTIVE_UNIFORMS, &active_uniforms);
+    for (GLint ui = 0; ui < active_uniforms && pip->uniform_count < NT_MAX_CACHED_UNIFORMS; ui++) {
+        char uname[64];
+        GLsizei ulen = 0;
+        GLint usize = 0;
+        GLenum utype = 0;
+        glGetActiveUniform(program, (GLuint)ui, (GLsizei)sizeof(uname), &ulen, &usize, &utype, uname);
+        GLint loc = glGetUniformLocation(program, uname);
+        if (loc >= 0) {
+            pip->uniforms[pip->uniform_count].name_hash = nt_hash32_str(uname).value;
+            pip->uniforms[pip->uniform_count].location = loc;
+            pip->uniform_count++;
+        }
+    }
 
     return slot;
 }
@@ -664,6 +717,7 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) {
         return;
     }
     GLuint buf = s_buffer_gl[backend_handle];
+    s_instance_gl_buf = buf;
     glBindBuffer(GL_ARRAY_BUFFER, buf);
 
     /* Re-apply instance attribute pointers from the currently bound pipeline. */
@@ -678,6 +732,25 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) {
             glVertexAttribPointer(attr->location, size, type, normalized, (GLsizei)layout->stride,
                                   (void *)(uintptr_t)attr->offset); // NOLINT(performance-no-int-to-ptr)
         }
+    }
+}
+
+void nt_gfx_backend_set_instance_offset(uint32_t byte_offset) {
+    NT_ASSERT(s_instance_gl_buf != 0); /* must call bind_instance_buffer first */
+    if (s_bound_pipeline_slot == 0 || s_bound_pipeline_slot > s_init_desc.max_pipelines) {
+        return;
+    }
+    /* Re-bind instance buffer so glVertexAttribPointer captures the right source */
+    glBindBuffer(GL_ARRAY_BUFFER, s_instance_gl_buf);
+    const nt_vertex_layout_t *layout = &s_pipelines[s_bound_pipeline_slot].instance_layout;
+    for (uint8_t i = 0; i < layout->attr_count; i++) {
+        const nt_vertex_attr_t *attr = &layout->attrs[i];
+        GLint size;
+        GLenum type;
+        GLboolean normalized;
+        get_format_params(attr->format, &size, &type, &normalized);
+        glVertexAttribPointer(attr->location, size, type, normalized, (GLsizei)layout->stride,
+                              (void *)(uintptr_t)(attr->offset + byte_offset)); // NOLINT(performance-no-int-to-ptr)
     }
 }
 
@@ -723,6 +796,21 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     GLenum pixel_fmt = GL_RGBA;
     GLenum pixel_type = GL_UNSIGNED_BYTE;
     switch (desc->format) {
+    case NT_PIXEL_RGB8:
+        internal_fmt = GL_RGB8;
+        pixel_fmt = GL_RGB;
+        pixel_type = GL_UNSIGNED_BYTE;
+        break;
+    case NT_PIXEL_RG8:
+        internal_fmt = GL_RG8;
+        pixel_fmt = GL_RG;
+        pixel_type = GL_UNSIGNED_BYTE;
+        break;
+    case NT_PIXEL_R8:
+        internal_fmt = GL_R8;
+        pixel_fmt = GL_RED;
+        pixel_type = GL_UNSIGNED_BYTE;
+        break;
     case NT_PIXEL_RGBA8:
     default:
         internal_fmt = GL_RGBA8;
@@ -731,8 +819,18 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
         break;
     }
 
+    /* Set alignment for non-4-byte-aligned formats (RGB8=3, RG8=2, R8=1) */
+    if (desc->format != NT_PIXEL_RGBA8) {
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    }
+
     /* Upload pixel data (may be NULL for context-loss recovery placeholder) */
     glTexImage2D(GL_TEXTURE_2D, 0, (GLint)internal_fmt, (GLsizei)desc->width, (GLsizei)desc->height, 0, pixel_fmt, pixel_type, desc->data);
+
+    /* Restore default alignment */
+    if (desc->format != NT_PIXEL_RGBA8) {
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    }
 
     /* Generate mipmaps after base level upload if requested and data present */
     if (desc->gen_mipmaps && desc->data) {

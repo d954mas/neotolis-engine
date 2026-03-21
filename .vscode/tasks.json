@@ -235,6 +235,49 @@
             "dependsOn": ["Build wasm-release", "Ensure server textured_quad (release :8087)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
+        },
+        {
+            "label": "Build native-debug (build_sponza_packs)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target build_sponza_packs",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Ensure server sponza (debug :8088)",
+            "type": "shell",
+            "command": "curl -s -o nul http://localhost:8088 >nul 2>&1 && (echo Server already running on :8088) || (start /b python -m http.server 8088 -d \"${workspaceFolder}/build/examples/sponza/wasm-debug\" & timeout /t 1 >nul)",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Ensure server sponza (release :8089)",
+            "type": "shell",
+            "command": "curl -s -o nul http://localhost:8089 >nul 2>&1 && (echo Server already running on :8089) || (start /b python -m http.server 8089 -d \"${workspaceFolder}/build/examples/sponza/wasm-release\" & timeout /t 1 >nul)",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve sponza (debug)",
+            "dependsOn": ["Build wasm-debug", "Ensure server sponza (debug :8088)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve sponza (release)",
+            "dependsOn": ["Build wasm-release", "Ensure server sponza (release :8089)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
         }
     ]
 }

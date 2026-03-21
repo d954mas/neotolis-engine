@@ -56,7 +56,8 @@ typedef struct {
     uint16_t pack_index;     /* index into packs[] array */
     uint8_t asset_type;      /* nt_asset_type_t (mesh/texture/shader) */
     uint8_t state;           /* nt_asset_state_t */
-    uint16_t _pad;
+    uint8_t is_dedup;        /* 1 = shares data with another asset in same pack (same offset+size) */
+    uint8_t _pad;
 } NtAssetMeta;
 
 /* ---- Per-pack metadata ---- */
