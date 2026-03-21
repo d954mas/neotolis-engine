@@ -1,0 +1,14 @@
+[{
+  "commit": "c121a05",
+  "date": "2026-03-21T07:51:25Z",
+  "files": {
+    "index.html": { "raw": 1343, "gzip": 747 },
+    "index.js": { "raw": 23022, "gzip": 9578 },
+    "index.wasm": { "raw": 66560, "gzip": 32171 },
+    "assets/sponza_base.ntpack": { "raw": 46628656, "gzip": 26792288 },
+    "assets/sponza_full.ntpack": { "raw": 172919968, "gzip": 99471849 }
+  },
+  "engine": { "raw": 90925, "gzip": 42496 },
+  "resources": { "raw": 219548624, "gzip": 126264137 },
+  "total": { "raw": 219639549, "gzip": 126306633 }
+}]
