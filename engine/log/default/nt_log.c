@@ -20,7 +20,6 @@
 
 static nt_log_level_t s_log_level = NT_LOG_LEVEL_INFO;
 
-void nt_log_init(void) { /* no-op, reserved for future use */ }
 void nt_log_set_level(nt_log_level_t level) { s_log_level = level; }
 
 void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) {
@@ -31,8 +30,13 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
     char msg[NT_LOG_BUF_SIZE];
     va_list args;
     va_start(args, fmt);
-    (void)vsnprintf(msg, sizeof(msg), fmt, args);
+    int written = vsnprintf(msg, sizeof(msg), fmt, args);
     va_end(args);
+    if (written >= (int)sizeof(msg)) {
+        msg[sizeof(msg) - 4] = '.';
+        msg[sizeof(msg) - 3] = '.';
+        msg[sizeof(msg) - 2] = '.';
+    }
 
 #ifdef __EMSCRIPTEN__
     char out[NT_LOG_BUF_SIZE + 64];

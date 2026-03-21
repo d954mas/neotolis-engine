@@ -17,7 +17,6 @@ typedef enum {
 #endif
 
 /* --- Lifecycle --- */
-void nt_log_init(void);
 void nt_log_set_level(nt_log_level_t level);
 
 /* --- Single log function --- */
