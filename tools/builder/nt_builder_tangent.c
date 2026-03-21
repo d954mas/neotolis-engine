@@ -1,6 +1,7 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
 #include "mikktspace.h"
+#include "log/nt_log.h"
 /* clang-format on */
 
 /* --- MikkTSpace callback context --- */
@@ -99,7 +100,7 @@ nt_build_result_t nt_builder_compute_tangents(const float *positions, const floa
 
     tbool result = genTangSpaceDefault(&context);
     if (!result) {
-        (void)fprintf(stderr, "ERROR: MikkTSpace tangent computation failed\n");
+        NT_LOG_ERROR("MikkTSpace tangent computation failed");
         return NT_BUILD_ERR_VALIDATION;
     }
 

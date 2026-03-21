@@ -14,6 +14,8 @@
         }                                                                                                                                                                                              \
     } while (0)
 
+#include "log/nt_log.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -156,7 +158,7 @@ static inline void nt_builder_convert_component(float value, nt_stream_type_t ty
     }
     case NT_STREAM_FLOAT16: {
         if (!*warned_f16 && (value > 65504.0F || value < -65504.0F)) {
-            (void)fprintf(stderr, "WARNING: float16 overflow (value=%.6g exceeds +-65504)\n", (double)value);
+            NT_LOG_WARN("float16 overflow (value=%.6g exceeds +-65504)", (double)value);
             *warned_f16 = true;
         }
         uint16_t h = nt_builder_float32_to_float16(value);

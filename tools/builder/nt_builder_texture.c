@@ -1,6 +1,7 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
 #include "nt_texture_format.h"
+#include "log/nt_log.h"
 #include "stb_image.h"
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlanguage-extension-token"
@@ -121,12 +122,12 @@ nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *p
     int channels = 0;
     unsigned char *pixels = stbi_load(path, &w, &h, &channels, 4);
     if (!pixels) {
-        (void)fprintf(stderr, "ERROR: %s: %s\n", path, stbi_failure_reason());
+        NT_LOG_ERROR("%s: %s", path, stbi_failure_reason());
         return NT_BUILD_ERR_IO;
     }
 
     if ((uint32_t)w > NT_BUILD_MAX_TEXTURE_SIZE || (uint32_t)h > NT_BUILD_MAX_TEXTURE_SIZE) {
-        (void)fprintf(stderr, "ERROR: %s: %ux%u exceeds max %u\n", path, (uint32_t)w, (uint32_t)h, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
+        NT_LOG_ERROR("%s: %ux%u exceeds max %u", path, (uint32_t)w, (uint32_t)h, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
         stbi_image_free(pixels);
         return NT_BUILD_ERR_LIMIT;
     }
@@ -147,12 +148,12 @@ nt_build_result_t nt_builder_import_texture_from_memory(NtBuilderContext *ctx, c
     int channels = 0;
     unsigned char *pixels = stbi_load_from_memory(data, (int)size, &w, &h, &channels, 4);
     if (!pixels) {
-        (void)fprintf(stderr, "ERROR: texture from memory: %s\n", stbi_failure_reason());
+        NT_LOG_ERROR("texture from memory: %s", stbi_failure_reason());
         return NT_BUILD_ERR_IO;
     }
 
     if ((uint32_t)w > NT_BUILD_MAX_TEXTURE_SIZE || (uint32_t)h > NT_BUILD_MAX_TEXTURE_SIZE) {
-        (void)fprintf(stderr, "ERROR: texture from memory: %ux%u exceeds max %u\n", (uint32_t)w, (uint32_t)h, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
+        NT_LOG_ERROR("texture from memory: %ux%u exceeds max %u", (uint32_t)w, (uint32_t)h, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
         stbi_image_free(pixels);
         return NT_BUILD_ERR_LIMIT;
     }
