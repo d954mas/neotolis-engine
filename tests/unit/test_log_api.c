@@ -4,19 +4,19 @@
 void setUp(void) { nt_log_set_level(NT_LOG_LEVEL_INFO); }
 void tearDown(void) {}
 
-/* Domain impl functions */
+/* Direct nt_log_write with domain */
 void test_log_domain_info(void) {
-    nt_log_info_impl("gfx", "init %s", "ok");
+    nt_log_write(NT_LOG_LEVEL_INFO, "gfx", "init %s", "ok");
     TEST_PASS();
 }
 
 void test_log_domain_warn(void) {
-    nt_log_warn_impl("gfx", "slow %d", 1);
+    nt_log_write(NT_LOG_LEVEL_WARN, "gfx", "slow %d", 1);
     TEST_PASS();
 }
 
 void test_log_domain_error(void) {
-    nt_log_error_impl("res", "fail %d", 0);
+    nt_log_write(NT_LOG_LEVEL_ERROR, "res", "fail %d", 0);
     TEST_PASS();
 }
 

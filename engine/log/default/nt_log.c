@@ -23,14 +23,16 @@ static nt_log_level_t s_log_level = NT_LOG_LEVEL_INFO;
 void nt_log_init(void) { /* no-op, reserved for future use */ }
 void nt_log_set_level(nt_log_level_t level) { s_log_level = level; }
 
-/* Shared formatting + output helper */
-static void log_write(nt_log_level_t level, const char *domain, const char *fmt, va_list args) {
+void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) {
     static const char *const level_names[] = {"INFO", "WARN", "ERROR"};
-    if (level >= NT_LOG_LEVEL_NONE) {
+    if (s_log_level > level || level >= NT_LOG_LEVEL_NONE) {
         return;
     }
     char msg[NT_LOG_BUF_SIZE];
+    va_list args;
+    va_start(args, fmt);
     (void)vsnprintf(msg, sizeof(msg), fmt, args);
+    va_end(args);
 
 #ifdef __EMSCRIPTEN__
     char out[NT_LOG_BUF_SIZE + 64];
@@ -61,66 +63,4 @@ static void log_write(nt_log_level_t level, const char *domain, const char *fmt,
         (void)fprintf(stream, "%s: %s\n", level_names[level], msg);
     }
 #endif
-}
-
-/* Plain functions (no domain) */
-void nt_log_info(const char *fmt, ...) {
-    if (s_log_level > NT_LOG_LEVEL_INFO) {
-        return;
-    }
-    va_list args;
-    va_start(args, fmt);
-    log_write(NT_LOG_LEVEL_INFO, NULL, fmt, args);
-    va_end(args);
-}
-
-void nt_log_warn(const char *fmt, ...) {
-    if (s_log_level > NT_LOG_LEVEL_WARN) {
-        return;
-    }
-    va_list args;
-    va_start(args, fmt);
-    log_write(NT_LOG_LEVEL_WARN, NULL, fmt, args);
-    va_end(args);
-}
-
-void nt_log_error(const char *fmt, ...) {
-    if (s_log_level > NT_LOG_LEVEL_ERROR) {
-        return;
-    }
-    va_list args;
-    va_start(args, fmt);
-    log_write(NT_LOG_LEVEL_ERROR, NULL, fmt, args);
-    va_end(args);
-}
-
-/* Domain functions (called by macros) */
-void nt_log_info_impl(const char *domain, const char *fmt, ...) {
-    if (s_log_level > NT_LOG_LEVEL_INFO) {
-        return;
-    }
-    va_list args;
-    va_start(args, fmt);
-    log_write(NT_LOG_LEVEL_INFO, domain, fmt, args);
-    va_end(args);
-}
-
-void nt_log_warn_impl(const char *domain, const char *fmt, ...) {
-    if (s_log_level > NT_LOG_LEVEL_WARN) {
-        return;
-    }
-    va_list args;
-    va_start(args, fmt);
-    log_write(NT_LOG_LEVEL_WARN, domain, fmt, args);
-    va_end(args);
-}
-
-void nt_log_error_impl(const char *domain, const char *fmt, ...) {
-    if (s_log_level > NT_LOG_LEVEL_ERROR) {
-        return;
-    }
-    va_list args;
-    va_start(args, fmt);
-    log_write(NT_LOG_LEVEL_ERROR, domain, fmt, args);
-    va_end(args);
 }

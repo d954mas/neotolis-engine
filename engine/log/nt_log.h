@@ -9,7 +9,7 @@ typedef enum {
     NT_LOG_LEVEL_NONE = 3 /* suppress all logging */
 } nt_log_level_t;
 
-/* Format attribute for printf-style type checking (no GNU extensions) */
+/* Format attribute for printf-style type checking */
 #if defined(__GNUC__) || defined(__clang__)
 #define NT_PRINTF_ATTR(fmt_idx, arg_idx) __attribute__((format(printf, fmt_idx, arg_idx)))
 #else
@@ -20,15 +20,13 @@ typedef enum {
 void nt_log_init(void);
 void nt_log_set_level(nt_log_level_t level);
 
-/* --- Plain functions (no domain, for game/example code) --- */
-void nt_log_info(const char *fmt, ...) NT_PRINTF_ATTR(1, 2);
-void nt_log_warn(const char *fmt, ...) NT_PRINTF_ATTR(1, 2);
-void nt_log_error(const char *fmt, ...) NT_PRINTF_ATTR(1, 2);
+/* --- Single log function --- */
+void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...) NT_PRINTF_ATTR(3, 4);
 
-/* --- Domain functions (called by macros, engine-internal) --- */
-void nt_log_info_impl(const char *domain, const char *fmt, ...) NT_PRINTF_ATTR(2, 3);
-void nt_log_warn_impl(const char *domain, const char *fmt, ...) NT_PRINTF_ATTR(2, 3);
-void nt_log_error_impl(const char *domain, const char *fmt, ...) NT_PRINTF_ATTR(2, 3);
+/* --- Plain macros (no domain, for game/example code) --- */
+#define nt_log_info(...) nt_log_write(NT_LOG_LEVEL_INFO, NULL, __VA_ARGS__)
+#define nt_log_warn(...) nt_log_write(NT_LOG_LEVEL_WARN, NULL, __VA_ARGS__)
+#define nt_log_error(...) nt_log_write(NT_LOG_LEVEL_ERROR, NULL, __VA_ARGS__)
 
 /* --- Domain resolution --- */
 #ifndef NT_LOG_DOMAIN
@@ -37,11 +35,11 @@ void nt_log_error_impl(const char *domain, const char *fmt, ...) NT_PRINTF_ATTR(
 #endif
 #endif
 
-/* --- Domain macros --- */
+/* --- Domain macros (engine modules, domain auto-injected) --- */
 #ifdef NT_LOG_DOMAIN
-#define NT_LOG_INFO(...) nt_log_info_impl(NT_LOG_DOMAIN, __VA_ARGS__)
-#define NT_LOG_WARN(...) nt_log_warn_impl(NT_LOG_DOMAIN, __VA_ARGS__)
-#define NT_LOG_ERROR(...) nt_log_error_impl(NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_INFO(...) nt_log_write(NT_LOG_LEVEL_INFO, NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_WARN(...) nt_log_write(NT_LOG_LEVEL_WARN, NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_ERROR(...) nt_log_write(NT_LOG_LEVEL_ERROR, NT_LOG_DOMAIN, __VA_ARGS__)
 #else
 /* Compile error when domain macros used without domain defined */
 #define NT_LOG_INFO(...)                                                                                                                                                                               \
