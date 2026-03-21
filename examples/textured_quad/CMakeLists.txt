@@ -47,6 +47,11 @@ endforeach()
 add_custom_target(textured_quad_packs DEPENDS ${TQ_PACK_OUTPUTS})
 add_dependencies(textured_quad textured_quad_packs)
 
+# Optional CDN base URL (set by CI for deployed builds)
+if(NT_CDN_URL)
+    target_compile_definitions(textured_quad PRIVATE NT_CDN_URL="${NT_CDN_URL}")
+endif()
+
 # WASM-specific settings
 if(EMSCRIPTEN)
     set_target_properties(textured_quad PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")

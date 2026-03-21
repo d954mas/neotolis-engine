@@ -686,11 +686,19 @@ int main(void) {
     /* 15. Mount and load packs (base first, full in background) */
     s_base_pack_id = nt_hash32_str("sponza_base");
     nt_resource_mount(s_base_pack_id, 20); /* base starts as primary */
+#ifdef NT_CDN_URL
+    nt_resource_load_auto(s_base_pack_id, NT_CDN_URL "/sponza/sponza_base.ntpack");
+#else
     nt_resource_load_auto(s_base_pack_id, "assets/sponza_base.ntpack");
+#endif
 
     s_full_pack_id = nt_hash32_str("sponza_full");
     nt_resource_mount(s_full_pack_id, 10); /* full loads but lower priority */
+#ifdef NT_CDN_URL
+    nt_resource_load_auto(s_full_pack_id, NT_CDN_URL "/sponza/sponza_full.ntpack");
+#else
     nt_resource_load_auto(s_full_pack_id, "assets/sponza_full.ntpack");
+#endif
 
     /* 16. Sponza needs ~400 activation units total — set budget high enough */
     nt_resource_set_activate_budget(1024);

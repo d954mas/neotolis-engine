@@ -260,8 +260,26 @@ jobs:
           version: ${{ steps.emsdk-version.outputs.version }}
           actions-cache-folder: 'emsdk-cache'
 
+      - name: Upload asset packs to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          for example_dir in build/examples/*/; do
+            example_name=$(basename "$example_dir")
+            for pack in "$example_dir"*.ntpack; do
+              [ -f "$pack" ] || continue
+              name=$(basename "$pack")
+              echo "Uploading $example_name/$name to R2..."
+              aws s3 cp "$pack" "s3://neotolis-assets/$example_name/$name" \
+                --endpoint-url "$R2_ENDPOINT" \
+                --no-progress
+            done
+          done
+
       - name: Configure WASM release
-        run: emcmake cmake --preset wasm-release
+        run: emcmake cmake --preset wasm-release -DNT_CDN_URL="https://cdn.neotolis-engine.dev"
 
       - name: Build WASM release
         run: cmake --build --preset wasm-release
@@ -358,11 +376,6 @@ jobs:
             example_name=$(basename $(dirname "$example_dir"))
             mkdir -p "gh-pages-data/wasm/$example_name"
             cp "$example_dir"/*.html "$example_dir"/*.js "$example_dir"/*.wasm "gh-pages-data/wasm/$example_name/"
-            # Copy asset packs if present (rm first to avoid cp -r nesting into existing dir)
-            if [ -d "$example_dir/assets" ]; then
-              rm -rf "gh-pages-data/wasm/$example_name/assets"
-              cp -r "$example_dir/assets" "gh-pages-data/wasm/$example_name/assets"
-            fi
           done
 
       - name: Copy example cover images
@@ -381,14 +394,27 @@ jobs:
           npm install
           npm run build
 
-      - name: Copy site to gh-pages
+      - name: Copy site to deploy directory
         run: cp -r neotolis-engine-site/dist/* gh-pages-data/
 
-      - name: Deploy to gh-pages
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy gh-pages-data --project-name=neotolis-engine --branch=main
+
+      - name: Prepare size data for persistence
+        run: |
+          mkdir -p /tmp/size-data
+          cp -r gh-pages-data/sizes /tmp/size-data/ 2>/dev/null || true
+          cp -r gh-pages-data/reports /tmp/size-data/ 2>/dev/null || true
+
+      - name: Persist size data to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./gh-pages-data
+          publish_dir: /tmp/size-data
           keep_files: true
 
   pr-size-comment:

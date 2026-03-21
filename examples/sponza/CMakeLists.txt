@@ -46,6 +46,11 @@ endforeach()
 add_custom_target(sponza_packs DEPENDS ${SP_PACK_OUTPUTS})
 add_dependencies(sponza sponza_packs)
 
+# Optional CDN base URL (set by CI for deployed builds)
+if(NT_CDN_URL)
+    target_compile_definitions(sponza PRIVATE NT_CDN_URL="${NT_CDN_URL}")
+endif()
+
 # WASM-specific settings
 if(EMSCRIPTEN)
     set_target_properties(sponza PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")

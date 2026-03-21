@@ -159,14 +159,22 @@ static void frame(void) {
         if (s_load_state == STATE_EMPTY) {
             nt_log_info("======== LOAD PIXEL PACK ========");
             nt_resource_mount(s_pixel_pack_id, s_pixel_prio);
+#ifdef NT_CDN_URL
+            nt_resource_load_auto(s_pixel_pack_id, NT_CDN_URL "/textured_quad/lenna_pixel.ntpack");
+#else
             nt_resource_load_auto(s_pixel_pack_id, "assets/lenna_pixel.ntpack");
+#endif
             s_pixel_dumped = false;
             s_load_state = STATE_PIXEL;
             print_status();
         } else if (s_load_state == STATE_PIXEL) {
             nt_log_info("======== LOAD HIRES PACK ========");
             nt_resource_mount(s_hires_pack_id, s_hires_prio);
+#ifdef NT_CDN_URL
+            nt_resource_load_auto(s_hires_pack_id, NT_CDN_URL "/textured_quad/lenna_hires.ntpack");
+#else
             nt_resource_load_auto(s_hires_pack_id, "assets/lenna_hires.ntpack");
+#endif
             s_hires_dumped = false;
             s_load_state = STATE_BOTH;
             print_status();
@@ -476,7 +484,11 @@ int main(void) {
 
     /* Load base pack (cube mesh + instanced shaders -- always present) */
     nt_resource_mount(s_base_pack_id, 100);
+#ifdef NT_CDN_URL
+    nt_resource_load_auto(s_base_pack_id, NT_CDN_URL "/textured_quad/base.ntpack");
+#else
     nt_resource_load_auto(s_base_pack_id, "assets/base.ntpack");
+#endif
 
     /* Bump activation budget so base pack activates in first frame */
     nt_resource_set_activate_budget(64);
