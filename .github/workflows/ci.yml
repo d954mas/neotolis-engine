@@ -278,7 +278,9 @@ jobs:
               echo "Uploading $example_name/$name to R2..."
               aws s3 cp "$pack" "s3://neotolis-assets/$example_name/$name" \
                 --endpoint-url "$R2_ENDPOINT" \
-                --no-progress
+                --no-progress \
+                --content-type application/octet-stream \
+                --cache-control "public, max-age=31536000, immutable"
             done
           done
 

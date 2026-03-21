@@ -127,7 +127,9 @@ static nt_material_t s_materials[MAX_SCENE_NODES];
 static nt_entity_t s_entities[MAX_SCENE_NODES];
 static uint32_t s_entity_count;
 static bool s_scene_loaded;
-static bool s_full_quality; /* true = full pack has higher priority */
+static bool s_full_quality;  /* true = full pack has higher priority */
+static bool s_full_loading;  /* true = full pack download started */
+static bool s_full_promoted; /* true = full pack auto-promoted */
 
 /* ---- Pitch clamp (89 degrees in radians) ---- */
 
@@ -403,6 +405,26 @@ static void frame(void) {
     /* Step resource + material systems */
     nt_resource_step();
     nt_material_step();
+
+    /* Start full pack download once base is ready */
+    if (!s_full_loading && nt_resource_pack_state(s_base_pack_id) == NT_PACK_STATE_READY) {
+        s_full_loading = true;
+        nt_log_info("Base pack ready, starting full quality download...");
+#ifdef NT_CDN_URL
+        nt_resource_load_auto(s_full_pack_id, NT_CDN_URL "/sponza/sponza_full.ntpack");
+#else
+        nt_resource_load_auto(s_full_pack_id, "assets/sponza_full.ntpack");
+#endif
+    }
+
+    /* Auto-promote full pack when loaded */
+    if (s_full_loading && !s_full_promoted && nt_resource_pack_state(s_full_pack_id) == NT_PACK_STATE_READY) {
+        s_full_promoted = true;
+        s_full_quality = true;
+        nt_resource_set_priority(s_base_pack_id, 10);
+        nt_resource_set_priority(s_full_pack_id, 20);
+        nt_log_info("Full quality pack loaded and promoted");
+    }
 
     /* Check if manifest is ready and scene not yet loaded */
     if (!s_scene_loaded && nt_resource_is_ready(s_manifest_handle)) {
@@ -693,12 +715,7 @@ int main(void) {
 #endif
 
     s_full_pack_id = nt_hash32_str("sponza_full");
-    nt_resource_mount(s_full_pack_id, 10); /* full loads but lower priority */
-#ifdef NT_CDN_URL
-    nt_resource_load_auto(s_full_pack_id, NT_CDN_URL "/sponza/sponza_full.ntpack");
-#else
-    nt_resource_load_auto(s_full_pack_id, "assets/sponza_full.ntpack");
-#endif
+    nt_resource_mount(s_full_pack_id, 10); /* full loads after base is ready */
 
     /* 16. Sponza needs ~400 activation units total — set budget high enough */
     nt_resource_set_activate_budget(1024);
