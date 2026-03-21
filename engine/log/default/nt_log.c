@@ -41,9 +41,9 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
 #ifdef __EMSCRIPTEN__
     char out[NT_LOG_BUF_SIZE + 64];
     if (domain) {
-        (void)snprintf(out, sizeof(out), "%s:%s: %s", level_names[level], domain, msg);
+        (void)snprintf(out, sizeof(out), "%s [%s] %s", level_names[level], domain, msg);
     } else {
-        (void)snprintf(out, sizeof(out), "%s: %s", level_names[level], msg);
+        (void)snprintf(out, sizeof(out), "%s %s", level_names[level], msg);
     }
     switch (level) {
     case NT_LOG_LEVEL_INFO:
@@ -62,9 +62,9 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
     /* INFO -> stdout, WARN + ERROR -> stderr */
     FILE *stream = (level >= NT_LOG_LEVEL_WARN) ? stderr : stdout;
     if (domain) {
-        (void)fprintf(stream, "%s:%s: %s\n", level_names[level], domain, msg);
+        (void)fprintf(stream, "%s [%s] %s\n", level_names[level], domain, msg);
     } else {
-        (void)fprintf(stream, "%s: %s\n", level_names[level], msg);
+        (void)fprintf(stream, "%s %s\n", level_names[level], msg);
     }
 #endif
 }
