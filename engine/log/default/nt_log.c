@@ -66,8 +66,9 @@ static void log_write(nt_log_level_t level, const char *domain, const char *fmt,
 
 /* Plain functions (no domain) */
 void nt_log_info(const char *fmt, ...) {
-    if (s_log_level > NT_LOG_LEVEL_INFO)
+    if (s_log_level > NT_LOG_LEVEL_INFO) {
         return;
+    }
     va_list args;
     va_start(args, fmt);
     log_write(NT_LOG_LEVEL_INFO, NULL, fmt, args);
@@ -75,8 +76,9 @@ void nt_log_info(const char *fmt, ...) {
 }
 
 void nt_log_warn(const char *fmt, ...) {
-    if (s_log_level > NT_LOG_LEVEL_WARN)
+    if (s_log_level > NT_LOG_LEVEL_WARN) {
         return;
+    }
     va_list args;
     va_start(args, fmt);
     log_write(NT_LOG_LEVEL_WARN, NULL, fmt, args);
@@ -84,8 +86,9 @@ void nt_log_warn(const char *fmt, ...) {
 }
 
 void nt_log_error(const char *fmt, ...) {
-    if (s_log_level > NT_LOG_LEVEL_ERROR)
+    if (s_log_level > NT_LOG_LEVEL_ERROR) {
         return;
+    }
     va_list args;
     va_start(args, fmt);
     log_write(NT_LOG_LEVEL_ERROR, NULL, fmt, args);
@@ -94,8 +97,9 @@ void nt_log_error(const char *fmt, ...) {
 
 /* Domain functions (called by macros) */
 void nt_log_info_impl(const char *domain, const char *fmt, ...) {
-    if (s_log_level > NT_LOG_LEVEL_INFO)
+    if (s_log_level > NT_LOG_LEVEL_INFO) {
         return;
+    }
     va_list args;
     va_start(args, fmt);
     log_write(NT_LOG_LEVEL_INFO, domain, fmt, args);
@@ -103,8 +107,9 @@ void nt_log_info_impl(const char *domain, const char *fmt, ...) {
 }
 
 void nt_log_warn_impl(const char *domain, const char *fmt, ...) {
-    if (s_log_level > NT_LOG_LEVEL_WARN)
+    if (s_log_level > NT_LOG_LEVEL_WARN) {
         return;
+    }
     va_list args;
     va_start(args, fmt);
     log_write(NT_LOG_LEVEL_WARN, domain, fmt, args);
@@ -112,8 +117,9 @@ void nt_log_warn_impl(const char *domain, const char *fmt, ...) {
 }
 
 void nt_log_error_impl(const char *domain, const char *fmt, ...) {
-    if (s_log_level > NT_LOG_LEVEL_ERROR)
+    if (s_log_level > NT_LOG_LEVEL_ERROR) {
         return;
+    }
     va_list args;
     va_start(args, fmt);
     log_write(NT_LOG_LEVEL_ERROR, domain, fmt, args);
