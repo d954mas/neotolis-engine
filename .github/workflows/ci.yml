@@ -4,16 +4,20 @@ on:
   push:
     branches: [master]
     paths-ignore:
-      - '**.md'
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
+      - 'README.md'
+      - 'CLAUDE.md'
+      - 'AGENTS.md'
   pull_request:
     paths-ignore:
-      - '**.md'
       - 'docs/**'
       - 'LICENSE'
       - '.gitignore'
+      - 'README.md'
+      - 'CLAUDE.md'
+      - 'AGENTS.md'
 
 concurrency:
   group: ci-${{ github.ref }}
