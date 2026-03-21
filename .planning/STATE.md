@@ -4,8 +4,8 @@ milestone: v1.4
 milestone_name: Rendering & Textures
 current_phase: 30
 current_plan: 3
-status: phase-complete
-last_updated: "2026-03-21T18:45:14Z"
+status: completed
+last_updated: "2026-03-21T18:49:19.782Z"
 last_activity: 2026-03-21
 progress:
   total_phases: 6
@@ -49,6 +49,7 @@ Carried from v1.3 (relevant to v1.4):
 - Pipeline cache key: (layout_hash << 32 | resolved_vs) for lazy pipeline creation
 - Instance layout uses attribute locations 4-8 (mat4 columns + color) with vertex divisor=1
 - pragma pack(push,1) for format structs (native + WASM layout guarantee)
+- [Phase 30]: Removed unused stdio.h from nt_resource.c after snprintf elimination; em-dash replaced with ASCII double-dash in shape_renderer
 
 ## Performance Metrics
 
@@ -61,6 +62,8 @@ Phase 30-01 decisions:
 
 - NT_PRINTF_ATTR omitted from plain functions during migration (existing callers pass non-literal strings). Restored in Plan 02/03.
 - Pragma-based -Wformat-nonliteral suppression in nt_log.c TU; format safety at API boundary via _impl attributes.
+
+| Phase 30 P02 | 14min | 2 tasks | 9 files |
 
 ## Accumulated Context
 

@@ -73,7 +73,7 @@ See `.planning/milestones/v1.3-ROADMAP.md` for full history.
 
 ### v1.4 Rendering & Textures (In Progress)
 
-- [ ] **Phase 30: Logging Infrastructure** - Variadic printf-style log with auto module domains via CMake
+- [x] **Phase 30: Logging Infrastructure** - Variadic printf-style log with auto module domains via CMake (completed 2026-03-21)
 - [ ] **Phase 31: Material & Shape Fixes** - Runtime material param updates and uint32 shape indices
 - [ ] **Phase 32: Radix Sort** - LSD radix sort replacing qsort for render items
 - [ ] **Phase 33: Compact Instance Data** - mat4x3 transform with configurable color mode
@@ -96,7 +96,7 @@ See `.planning/milestones/v1.3-ROADMAP.md` for full history.
 
 Plans:
 - [x] 30-01-PLAN.md -- New variadic logging API, CMake LOG_DOMAIN infrastructure, stub update, unit tests
-- [ ] 30-02-PLAN.md -- Engine module + example call site migration to domain macros / variadic functions
+- [x] 30-02-PLAN.md -- Engine module + example call site migration to domain macros / variadic functions
 - [x] 30-03-PLAN.md -- Builder printf/fprintf migration to nt_log domain macros
 
 ### Phase 31: Material & Shape Fixes
@@ -211,7 +211,7 @@ Plans:
 | 27. Mesh Rendering Pipeline | v1.3 | 2/2 | Complete | 2026-03-19 |
 | 28. Demo Integration | v1.3 | 5/5 | Complete | 2026-03-21 |
 | 29. nt_hash module | v1.3 | 3/3 | Complete | 2026-03-19 |
-| 30. Logging Infrastructure | v1.4 | 2/3 | In Progress|  |
+| 30. Logging Infrastructure | v1.4 | 3/3 | Complete   | 2026-03-21 |
 | 31. Material & Shape Fixes | v1.4 | 0/? | Not started | - |
 | 32. Radix Sort | v1.4 | 0/? | Not started | - |
 | 33. Compact Instance Data | v1.4 | 0/? | Not started | - |
