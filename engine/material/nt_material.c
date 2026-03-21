@@ -108,7 +108,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
 
     uint32_t id = nt_pool_alloc(&s_mat.pool);
     if (id == 0) {
-        nt_log_error("nt_material: pool full — increase max_materials");
+        NT_LOG_ERROR("pool full -- increase max_materials");
         return NT_MATERIAL_INVALID;
     }
 

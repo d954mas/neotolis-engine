@@ -96,7 +96,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.mesh_table = (nt_gfx_mesh_info_t *)calloc((size_t)desc->max_meshes + 1, sizeof(nt_gfx_mesh_info_t));
 
     if (!nt_gfx_backend_init(desc)) {
-        nt_log_error("gfx: backend init failed");
+        NT_LOG_ERROR("backend init failed");
         nt_gfx_shutdown();
         return;
     }
@@ -161,7 +161,7 @@ void nt_gfx_begin_frame(void) {
              * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
             s_gfx.bound_pipeline = 0;
             g_nt_gfx.context_lost = true;
-            nt_log_error("gfx: WebGL context lost");
+            NT_LOG_ERROR("WebGL context lost");
         }
         return; /* Skip frame */
     }
@@ -170,13 +170,13 @@ void nt_gfx_begin_frame(void) {
         /* Context was lost but now available again -- game must re-create resources */
         g_nt_gfx.context_lost = false;
         g_nt_gfx.context_restored = true;
-        nt_log_info("gfx: WebGL context restored -- game must re-create resources");
+        NT_LOG_INFO("WebGL context restored -- game must re-create resources");
     }
 
     /* Normal frame begin */
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_IDLE);
     if (s_gfx.render_state != NT_GFX_STATE_IDLE) {
-        nt_log_error("gfx: begin_frame called outside IDLE state");
+        NT_LOG_ERROR("begin_frame called outside IDLE state");
         return;
     }
     s_gfx.render_state = NT_GFX_STATE_FRAME;
@@ -191,7 +191,7 @@ void nt_gfx_end_frame(void) {
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_FRAME);
     if (s_gfx.render_state != NT_GFX_STATE_FRAME) {
-        nt_log_error("gfx: end_frame called outside FRAME state");
+        NT_LOG_ERROR("end_frame called outside FRAME state");
         return;
     }
 
@@ -207,7 +207,7 @@ void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_FRAME);
     if (s_gfx.render_state != NT_GFX_STATE_FRAME) {
-        nt_log_error("gfx: begin_pass called outside FRAME state");
+        NT_LOG_ERROR("begin_pass called outside FRAME state");
         return;
     }
 
@@ -222,7 +222,7 @@ void nt_gfx_end_pass(void) {
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        nt_log_error("gfx: end_pass called outside PASS state");
+        NT_LOG_ERROR("end_pass called outside PASS state");
         return;
     }
 
@@ -240,13 +240,13 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc) {
 
     uint32_t id = nt_pool_alloc(&s_gfx.shader_pool);
     if (id == 0) {
-        nt_log_error("gfx: shader pool full");
+        NT_LOG_ERROR("shader pool full");
         return result;
     }
 
     uint32_t backend = nt_gfx_backend_create_shader(desc);
     if (backend == 0) {
-        nt_log_error("gfx: backend shader creation failed");
+        NT_LOG_ERROR("backend shader creation failed");
         nt_pool_free(&s_gfx.shader_pool, id);
         return result;
     }
@@ -265,21 +265,21 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
     }
 
     if (!nt_pool_valid(&s_gfx.shader_pool, desc->vertex_shader.id) || !nt_pool_valid(&s_gfx.shader_pool, desc->fragment_shader.id)) {
-        nt_log_error("gfx: pipeline creation failed: invalid shader handle");
+        NT_LOG_ERROR("pipeline creation failed: invalid shader handle");
         return result;
     }
     if (desc->layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS) {
-        nt_log_error("gfx: pipeline creation failed: too many vertex attrs");
+        NT_LOG_ERROR("pipeline creation failed: too many vertex attrs");
         return result;
     }
     if (desc->instance_layout.attr_count > NT_GFX_MAX_VERTEX_ATTRS) {
-        nt_log_error("gfx: pipeline creation failed: too many instance attrs");
+        NT_LOG_ERROR("pipeline creation failed: too many instance attrs");
         return result;
     }
 
     uint32_t id = nt_pool_alloc(&s_gfx.pipeline_pool);
     if (id == 0) {
-        nt_log_error("gfx: pipeline pool full");
+        NT_LOG_ERROR("pipeline pool full");
         return result;
     }
 
@@ -290,7 +290,7 @@ nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc) {
 
     uint32_t backend = nt_gfx_backend_create_pipeline(desc, vs_backend, fs_backend);
     if (backend == 0) {
-        nt_log_error("gfx: backend pipeline creation failed");
+        NT_LOG_ERROR("backend pipeline creation failed");
         nt_pool_free(&s_gfx.pipeline_pool, id);
         return result;
     }
@@ -310,13 +310,13 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
 
     uint32_t id = nt_pool_alloc(&s_gfx.buffer_pool);
     if (id == 0) {
-        nt_log_error("gfx: buffer pool full");
+        NT_LOG_ERROR("buffer pool full");
         return result;
     }
 
     uint32_t backend = nt_gfx_backend_create_buffer(desc);
     if (backend == 0) {
-        nt_log_error("gfx: backend buffer creation failed");
+        NT_LOG_ERROR("backend buffer creation failed");
         nt_pool_free(&s_gfx.buffer_pool, id);
         return result;
     }
@@ -338,11 +338,11 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         return result;
     }
     if (!desc->data) {
-        nt_log_error("gfx: make_texture: NULL data");
+        NT_LOG_ERROR("make_texture: NULL data");
         return result;
     }
     if (desc->width == 0 || desc->height == 0) {
-        nt_log_error("gfx: make_texture: zero dimension");
+        NT_LOG_ERROR("make_texture: zero dimension");
         return result;
     }
     nt_texture_desc_t local_desc = *desc;
@@ -350,24 +350,24 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     /* Clamp mipmap min_filter when no mipmaps — prevents GL incomplete texture */
     if (!local_desc.gen_mipmaps && local_desc.min_filter > NT_FILTER_LINEAR) {
         local_desc.min_filter = (local_desc.min_filter & 1) ? NT_FILTER_LINEAR : NT_FILTER_NEAREST;
-        nt_log_info("gfx: make_texture: min_filter clamped (gen_mipmaps=false)");
+        NT_LOG_INFO("make_texture: min_filter clamped (gen_mipmaps=false)");
     }
 
     /* Validate mag_filter: only NEAREST or LINEAR allowed */
     if (local_desc.mag_filter > NT_FILTER_LINEAR) {
-        nt_log_info("gfx: make_texture: mag_filter clamped to LINEAR");
+        NT_LOG_INFO("make_texture: mag_filter clamped to LINEAR");
         local_desc.mag_filter = NT_FILTER_LINEAR;
     }
 
     uint32_t id = nt_pool_alloc(&s_gfx.texture_pool);
     if (id == 0) {
-        nt_log_error("gfx: texture pool full");
+        NT_LOG_ERROR("texture pool full");
         return result;
     }
 
     uint32_t backend = nt_gfx_backend_create_texture(&local_desc);
     if (backend == 0) {
-        nt_log_error("gfx: backend texture creation failed");
+        NT_LOG_ERROR("backend texture creation failed");
         nt_pool_free(&s_gfx.texture_pool, id);
         return result;
     }
@@ -383,7 +383,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
 
 void nt_gfx_destroy_shader(nt_shader_t shd) {
     if (!nt_pool_valid(&s_gfx.shader_pool, shd.id)) {
-        nt_log_error("gfx: destroy_shader: invalid handle");
+        NT_LOG_ERROR("destroy_shader: invalid handle");
         return;
     }
     uint32_t slot = nt_pool_slot_index(shd.id);
@@ -394,7 +394,7 @@ void nt_gfx_destroy_shader(nt_shader_t shd) {
 
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
-        nt_log_error("gfx: destroy_pipeline: invalid handle");
+        NT_LOG_ERROR("destroy_pipeline: invalid handle");
         return;
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
@@ -408,7 +408,7 @@ void nt_gfx_destroy_pipeline(nt_pipeline_t pip) {
 
 void nt_gfx_destroy_buffer(nt_buffer_t buf) {
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
-        nt_log_error("gfx: destroy_buffer: invalid handle");
+        NT_LOG_ERROR("destroy_buffer: invalid handle");
         return;
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
@@ -420,7 +420,7 @@ void nt_gfx_destroy_buffer(nt_buffer_t buf) {
 
 void nt_gfx_destroy_texture(nt_texture_t tex) {
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
-        nt_log_error("gfx: destroy_texture: invalid handle");
+        NT_LOG_ERROR("destroy_texture: invalid handle");
         return;
     }
     uint32_t slot = nt_pool_slot_index(tex.id);
@@ -436,7 +436,7 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip) {
         return;
     }
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
-        nt_log_error("gfx: bind_pipeline: invalid handle");
+        NT_LOG_ERROR("bind_pipeline: invalid handle");
         return;
     }
     uint32_t slot = nt_pool_slot_index(pip.id);
@@ -450,13 +450,13 @@ void nt_gfx_bind_vertex_buffer(nt_buffer_t buf) {
         return;
     }
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
-        nt_log_error("gfx: bind_vertex_buffer: invalid handle");
+        NT_LOG_ERROR("bind_vertex_buffer: invalid handle");
         return;
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
     NT_ASSERT(s_gfx.buffer_metas[slot].type == NT_BUFFER_VERTEX);
     if (s_gfx.buffer_metas[slot].type != NT_BUFFER_VERTEX) {
-        nt_log_error("gfx: bind_vertex_buffer: buffer is not vertex type");
+        NT_LOG_ERROR("bind_vertex_buffer: buffer is not vertex type");
         return;
     }
     nt_gfx_backend_bind_vertex_buffer(s_gfx.buffer_backends[slot]);
@@ -467,13 +467,13 @@ void nt_gfx_bind_index_buffer(nt_buffer_t buf) {
         return;
     }
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
-        nt_log_error("gfx: bind_index_buffer: invalid handle");
+        NT_LOG_ERROR("bind_index_buffer: invalid handle");
         return;
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
     NT_ASSERT(s_gfx.buffer_metas[slot].type == NT_BUFFER_INDEX);
     if (s_gfx.buffer_metas[slot].type != NT_BUFFER_INDEX) {
-        nt_log_error("gfx: bind_index_buffer: buffer is not index type");
+        NT_LOG_ERROR("bind_index_buffer: buffer is not index type");
         return;
     }
     s_gfx.bound_index_type = s_gfx.buffer_metas[slot].index_type;
@@ -485,11 +485,11 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
         return;
     }
     if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
-        nt_log_error("gfx: bind_texture: invalid handle");
+        NT_LOG_ERROR("bind_texture: invalid handle");
         return;
     }
     if (slot >= NT_GFX_MAX_TEXTURE_SLOTS) {
-        nt_log_error("gfx: bind_texture: slot exceeds max");
+        NT_LOG_ERROR("bind_texture: slot exceeds max");
         return;
     }
     uint32_t idx = nt_pool_slot_index(tex.id);
@@ -535,12 +535,12 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        nt_log_error("gfx: draw called outside PASS state");
+        NT_LOG_ERROR("draw called outside PASS state");
         return;
     }
     NT_ASSERT(s_gfx.bound_pipeline != 0);
     if (s_gfx.bound_pipeline == 0) {
-        nt_log_error("gfx: draw called without bound pipeline");
+        NT_LOG_ERROR("draw called without bound pipeline");
         return;
     }
 
@@ -556,12 +556,12 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        nt_log_error("gfx: draw_instanced called outside PASS state");
+        NT_LOG_ERROR("draw_instanced called outside PASS state");
         return;
     }
     NT_ASSERT(s_gfx.bound_pipeline != 0);
     if (s_gfx.bound_pipeline == 0) {
-        nt_log_error("gfx: draw_instanced called without bound pipeline");
+        NT_LOG_ERROR("draw_instanced called without bound pipeline");
         return;
     }
 
@@ -579,12 +579,12 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        nt_log_error("gfx: draw_indexed called outside PASS state");
+        NT_LOG_ERROR("draw_indexed called outside PASS state");
         return;
     }
     NT_ASSERT(s_gfx.bound_pipeline != 0);
     if (s_gfx.bound_pipeline == 0) {
-        nt_log_error("gfx: draw_indexed called without bound pipeline");
+        NT_LOG_ERROR("draw_indexed called without bound pipeline");
         return;
     }
 
@@ -601,12 +601,12 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
 
     NT_ASSERT(s_gfx.render_state == NT_GFX_STATE_PASS);
     if (s_gfx.render_state != NT_GFX_STATE_PASS) {
-        nt_log_error("gfx: draw_indexed_instanced called outside PASS state");
+        NT_LOG_ERROR("draw_indexed_instanced called outside PASS state");
         return;
     }
     NT_ASSERT(s_gfx.bound_pipeline != 0);
     if (s_gfx.bound_pipeline == 0) {
-        nt_log_error("gfx: draw_indexed_instanced called without bound pipeline");
+        NT_LOG_ERROR("draw_indexed_instanced called without bound pipeline");
         return;
     }
 
@@ -625,13 +625,13 @@ void nt_gfx_bind_instance_buffer(nt_buffer_t buf) {
         return;
     }
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
-        nt_log_error("gfx: bind_instance_buffer: invalid handle");
+        NT_LOG_ERROR("bind_instance_buffer: invalid handle");
         return;
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
     NT_ASSERT(s_gfx.buffer_metas[slot].type == NT_BUFFER_VERTEX);
     if (s_gfx.buffer_metas[slot].type != NT_BUFFER_VERTEX) {
-        nt_log_error("gfx: bind_instance_buffer: buffer is not vertex type");
+        NT_LOG_ERROR("bind_instance_buffer: buffer is not vertex type");
         return;
     }
     nt_gfx_backend_bind_instance_buffer(s_gfx.buffer_backends[slot]);
@@ -651,13 +651,13 @@ void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
         return;
     }
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
-        nt_log_error("gfx: bind_uniform_buffer: invalid handle");
+        NT_LOG_ERROR("bind_uniform_buffer: invalid handle");
         return;
     }
     uint32_t idx = nt_pool_slot_index(buf.id);
     NT_ASSERT(s_gfx.buffer_metas[idx].type == NT_BUFFER_UNIFORM);
     if (s_gfx.buffer_metas[idx].type != NT_BUFFER_UNIFORM) {
-        nt_log_error("gfx: bind_uniform_buffer: buffer is not uniform type");
+        NT_LOG_ERROR("bind_uniform_buffer: buffer is not uniform type");
         return;
     }
     nt_gfx_backend_bind_uniform_buffer(s_gfx.buffer_backends[idx], slot);
@@ -668,7 +668,7 @@ void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_
         return;
     }
     if (!nt_pool_valid(&s_gfx.pipeline_pool, pip.id)) {
-        nt_log_error("gfx: set_uniform_block: invalid pipeline handle");
+        NT_LOG_ERROR("set_uniform_block: invalid pipeline handle");
         return;
     }
     uint32_t idx = nt_pool_slot_index(pip.id);
@@ -682,18 +682,18 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
         return;
     }
     if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
-        nt_log_error("gfx: update_buffer: invalid handle");
+        NT_LOG_ERROR("update_buffer: invalid handle");
         return;
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
     NT_ASSERT(s_gfx.buffer_metas[slot].usage != NT_USAGE_IMMUTABLE);
     if (s_gfx.buffer_metas[slot].usage == NT_USAGE_IMMUTABLE) {
-        nt_log_error("gfx: update_buffer: cannot update immutable buffer");
+        NT_LOG_ERROR("update_buffer: cannot update immutable buffer");
         return;
     }
     NT_ASSERT(size <= s_gfx.buffer_metas[slot].size);
     if (size > s_gfx.buffer_metas[slot].size) {
-        nt_log_error("gfx: update_buffer: size exceeds buffer capacity");
+        NT_LOG_ERROR("update_buffer: size exceeds buffer capacity");
         return;
     }
     nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], data, size);
@@ -707,16 +707,16 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
 
 uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     if (!data || size < sizeof(NtTextureAssetHeader)) {
-        nt_log_error("gfx: activate_texture: blob too small");
+        NT_LOG_ERROR("activate_texture: blob too small");
         return 0;
     }
     const NtTextureAssetHeader *hdr = (const NtTextureAssetHeader *)data;
     if (hdr->magic != NT_TEXTURE_MAGIC) {
-        nt_log_error("gfx: activate_texture: bad magic");
+        NT_LOG_ERROR("activate_texture: bad magic");
         return 0;
     }
     if (hdr->version > NT_TEXTURE_VERSION) {
-        nt_log_error("gfx: activate_texture: unsupported version");
+        NT_LOG_ERROR("activate_texture: unsupported version");
         return 0;
     }
     nt_pixel_format_t pixel_fmt;
@@ -734,13 +734,13 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         pixel_fmt = NT_PIXEL_R8;
         break;
     default:
-        nt_log_error("gfx: activate_texture: unsupported format");
+        NT_LOG_ERROR("activate_texture: unsupported format");
         return 0;
     }
     uint32_t bpp = nt_texture_bpp((nt_texture_pixel_format_t)hdr->format);
     uint32_t pixel_size = hdr->width * hdr->height * bpp;
     if (sizeof(NtTextureAssetHeader) + pixel_size > size) {
-        nt_log_error("gfx: activate_texture: blob truncated");
+        NT_LOG_ERROR("activate_texture: blob truncated");
         return 0;
     }
     const uint8_t *pixels = data + sizeof(NtTextureAssetHeader);
@@ -762,30 +762,30 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
 
 uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
     if (!data || size < sizeof(NtMeshAssetHeader)) {
-        nt_log_error("gfx: activate_mesh: blob too small");
+        NT_LOG_ERROR("activate_mesh: blob too small");
         return 0;
     }
     const NtMeshAssetHeader *hdr = (const NtMeshAssetHeader *)data;
     if (hdr->magic != NT_MESH_MAGIC) {
-        nt_log_error("gfx: activate_mesh: bad magic");
+        NT_LOG_ERROR("activate_mesh: bad magic");
         return 0;
     }
     if (hdr->version > NT_MESH_VERSION) {
-        nt_log_error("gfx: activate_mesh: unsupported version");
+        NT_LOG_ERROR("activate_mesh: unsupported version");
         return 0;
     }
     if (hdr->index_type > 2) {
-        nt_log_error("gfx: activate_mesh: invalid index_type");
+        NT_LOG_ERROR("activate_mesh: invalid index_type");
         return 0;
     }
     if (hdr->stream_count == 0 || hdr->stream_count > NT_MESH_MAX_STREAMS) {
-        nt_log_error("gfx: activate_mesh: invalid stream_count");
+        NT_LOG_ERROR("activate_mesh: invalid stream_count");
         return 0;
     }
     uint32_t streams_size = (uint32_t)hdr->stream_count * (uint32_t)sizeof(NtStreamDesc);
     uint32_t required = (uint32_t)sizeof(NtMeshAssetHeader) + streams_size + hdr->vertex_data_size + hdr->index_data_size;
     if (required > size) {
-        nt_log_error("gfx: activate_mesh: blob truncated");
+        NT_LOG_ERROR("activate_mesh: blob truncated");
         return 0;
     }
     const uint8_t *vertex_data = data + sizeof(NtMeshAssetHeader) + streams_size;
@@ -799,7 +799,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         .label = NULL,
     });
     if (vbo.id == 0) {
-        nt_log_error("gfx: activate_mesh: VBO creation failed");
+        NT_LOG_ERROR("activate_mesh: VBO creation failed");
         return 0;
     }
 
@@ -814,7 +814,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
             .label = NULL,
         });
         if (ibo.id == 0) {
-            nt_log_error("gfx: activate_mesh: IBO creation failed");
+            NT_LOG_ERROR("activate_mesh: IBO creation failed");
             nt_gfx_destroy_buffer(vbo);
             return 0;
         }
@@ -822,7 +822,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
 
     uint32_t mesh_id = nt_pool_alloc(&s_gfx.mesh_pool);
     if (mesh_id == 0) {
-        nt_log_error("gfx: activate_mesh: mesh pool full");
+        NT_LOG_ERROR("activate_mesh: mesh pool full");
         nt_gfx_destroy_buffer(ibo);
         nt_gfx_destroy_buffer(vbo);
         return 0;
@@ -857,24 +857,24 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
 
 uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {
     if (!data || size < sizeof(NtShaderCodeHeader)) {
-        nt_log_error("gfx: activate_shader: blob too small");
+        NT_LOG_ERROR("activate_shader: blob too small");
         return 0;
     }
     const NtShaderCodeHeader *hdr = (const NtShaderCodeHeader *)data;
     if (hdr->magic != NT_SHADER_CODE_MAGIC) {
-        nt_log_error("gfx: activate_shader: bad magic");
+        NT_LOG_ERROR("activate_shader: bad magic");
         return 0;
     }
     if (hdr->version > NT_SHADER_CODE_VERSION) {
-        nt_log_error("gfx: activate_shader: unsupported version");
+        NT_LOG_ERROR("activate_shader: unsupported version");
         return 0;
     }
     if (hdr->stage > NT_SHADER_STAGE_FRAGMENT) {
-        nt_log_error("gfx: activate_shader: invalid stage");
+        NT_LOG_ERROR("activate_shader: invalid stage");
         return 0;
     }
     if ((uint32_t)sizeof(NtShaderCodeHeader) + hdr->code_size > size) {
-        nt_log_error("gfx: activate_shader: blob truncated");
+        NT_LOG_ERROR("activate_shader: blob truncated");
         return 0;
     }
     const char *source = (const char *)(data + sizeof(NtShaderCodeHeader));
@@ -896,7 +896,7 @@ void nt_gfx_deactivate_texture(uint32_t handle) {
 
 void nt_gfx_deactivate_mesh(uint32_t handle) {
     if (!nt_pool_valid(&s_gfx.mesh_pool, handle)) {
-        nt_log_error("gfx: deactivate_mesh: invalid or stale handle");
+        NT_LOG_ERROR("deactivate_mesh: invalid or stale handle");
         return;
     }
     uint32_t index = nt_pool_slot_index(handle);

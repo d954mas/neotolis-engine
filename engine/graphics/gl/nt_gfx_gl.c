@@ -505,11 +505,11 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     if (!linked) {
         char info[512];
         glGetShaderInfoLog((GLuint)vs_backend, (GLsizei)sizeof(info), NULL, info);
-        nt_log_error(info);
+        NT_LOG_ERROR("%s", info);
         glGetShaderInfoLog((GLuint)fs_backend, (GLsizei)sizeof(info), NULL, info);
-        nt_log_error(info);
+        NT_LOG_ERROR("%s", info);
         glGetProgramInfoLog(program, (GLsizei)sizeof(info), NULL, info);
-        nt_log_error(info);
+        NT_LOG_ERROR("%s", info);
 
         glDeleteProgram(program);
         return 0;

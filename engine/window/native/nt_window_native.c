@@ -171,12 +171,12 @@ static void sync_sizes(void) {
 
 void nt_window_init(void) {
     if (g_nt_window.width == 0 || g_nt_window.height == 0) {
-        nt_log_error("g_nt_window width/height must be set before nt_window_init()");
+        NT_LOG_ERROR("g_nt_window width/height must be set before nt_window_init()");
         __builtin_trap();
     }
 
     if (!glfwInit()) {
-        nt_log_error("GLFW: glfwInit() failed");
+        NT_LOG_ERROR("GLFW: glfwInit() failed");
         __builtin_trap();
     }
 
@@ -190,7 +190,7 @@ void nt_window_init(void) {
 
     s_glfw_window = glfwCreateWindow((int)g_nt_window.width, (int)g_nt_window.height, title, NULL, NULL);
     if (!s_glfw_window) {
-        nt_log_error("GLFW: glfwCreateWindow() failed");
+        NT_LOG_ERROR("GLFW: glfwCreateWindow() failed");
         glfwTerminate();
         __builtin_trap();
     }
@@ -268,7 +268,7 @@ void nt_window_set_vsync(nt_vsync_t mode) {
         if (glfwExtensionSupported("WGL_EXT_swap_control_tear") || glfwExtensionSupported("GLX_EXT_swap_control_tear")) {
             glfwSwapInterval(-1);
         } else {
-            nt_log_info("adaptive vsync not supported, falling back to vsync on");
+            NT_LOG_INFO("adaptive vsync not supported, falling back to vsync on");
             glfwSwapInterval(1);
         }
         break;

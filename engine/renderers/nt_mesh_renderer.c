@@ -89,7 +89,7 @@ nt_vertex_format_t nt_stream_to_vertex_format(uint8_t type, uint8_t count, uint8
         /* GL_UNSIGNED_SHORT vertex attrs: uncommon, treat as short for now */
         return (count <= 2) ? NT_FORMAT_SHORT2 : NT_FORMAT_SHORT4;
     default:
-        nt_log_error("mesh_renderer: unmapped stream type in vertex layout");
+        NT_LOG_ERROR("unmapped stream type in vertex layout");
         return NT_FORMAT_FLOAT4;
     }
 }
@@ -141,7 +141,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
         if (found) {
             NT_ASSERT(layout.attr_count < NT_GFX_MAX_VERTEX_ATTRS);
             if (layout.attr_count >= NT_GFX_MAX_VERTEX_ATTRS) {
-                nt_log_error("mesh_renderer: vertex attr count exceeds max");
+                NT_LOG_ERROR("vertex attr count exceeds max");
                 break;
             }
             layout.attrs[layout.attr_count].location = location;
@@ -180,7 +180,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
         s_mesh_renderer.entries[s_mesh_renderer.count].pipeline = pip;
         s_mesh_renderer.count++;
     } else {
-        nt_log_error("mesh_renderer: pipeline cache full — increase max_pipelines in desc");
+        NT_LOG_ERROR("pipeline cache full — increase max_pipelines in desc");
         nt_gfx_destroy_pipeline(pip);
         return (nt_pipeline_t){0};
     }
@@ -207,7 +207,7 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     /* Allocate pipeline cache */
     s_mesh_renderer.entries = (nt_pipeline_cache_entry_t *)calloc(desc->max_pipelines, sizeof(nt_pipeline_cache_entry_t));
     if (!s_mesh_renderer.entries) {
-        nt_log_error("mesh_renderer: failed to allocate pipeline cache");
+        NT_LOG_ERROR("failed to allocate pipeline cache");
         return NT_ERR_INIT_FAILED;
     }
 
@@ -216,7 +216,7 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     if (!s_mesh_renderer.instance_data) {
         free(s_mesh_renderer.entries);
         s_mesh_renderer.entries = NULL;
-        nt_log_error("mesh_renderer: failed to allocate instance data");
+        NT_LOG_ERROR("failed to allocate instance data");
         return NT_ERR_INIT_FAILED;
     }
 
@@ -234,7 +234,7 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
         s_mesh_renderer.instance_data = NULL;
         free(s_mesh_renderer.entries);
         s_mesh_renderer.entries = NULL;
-        nt_log_error("mesh_renderer: failed to create instance buffer");
+        NT_LOG_ERROR("failed to create instance buffer");
         return NT_ERR_INIT_FAILED;
     }
 
