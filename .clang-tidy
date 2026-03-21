@@ -31,8 +31,7 @@ Checks: >
   -readability-avoid-const-params-in-decls,
   -readability-enum-initial-value,
   -cert-int09-c,
-  -bugprone-macro-parentheses,
-  -bugprone-reserved-identifier
+  -bugprone-macro-parentheses
 WarningsAsErrors: '*'
 HeaderFilterRegex: '(engine|shared|tools|examples|tests)[/\\\\]'
 FormatStyle: file
