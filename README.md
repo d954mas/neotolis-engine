@@ -2,7 +2,7 @@
 
 Minimalist C17 game engine for Web/WASM (WebGL 2).
 
-**[Website](https://d954mas.github.io/neotolis-engine/)**
+**[Website](https://neotolis-engine.dev)**
 
 ## Philosophy
 
