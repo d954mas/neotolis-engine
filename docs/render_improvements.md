@@ -64,16 +64,6 @@ Replace `qsort` with LSD radix sort (8-bit, 8 passes for full uint64 sort_key).
 
 **Requires:** benchmark on real scene data before/after to validate gains.
 
-### 4. Draw List Contract: Assert Ready
-
-**Status:** planned (small fix)
-**Scope:** `nt_mesh_renderer.c`
-
-`nt_mesh_renderer_draw_list` currently silently skips items with not-ready materials.
-This violates explicit-over-implicit — caller must pass only ready items.
-
-- Replace silent skip with debug assert
-- Filtering responsibility moves to game/orchestration layer before `draw_list` call
 
 ---
 
