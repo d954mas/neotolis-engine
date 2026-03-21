@@ -686,5 +686,35 @@
       "raw": 85631,
       "gzip": 35686
     }
+  },
+  {
+    "commit": "273c102",
+    "date": "2026-03-21T20:42:15Z",
+    "files": {
+      "index.html": {
+        "raw": 1352,
+        "gzip": 751
+      },
+      "index.js": {
+        "raw": 15749,
+        "gzip": 6537
+      },
+      "index.wasm": {
+        "raw": 69469,
+        "gzip": 28742
+      }
+    },
+    "engine": {
+      "raw": 86570,
+      "gzip": 36030
+    },
+    "resources": {
+      "raw": 0,
+      "gzip": 0
+    },
+    "total": {
+      "raw": 86570,
+      "gzip": 36030
+    }
   }
 ]

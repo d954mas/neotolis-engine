@@ -1,61 +1,61 @@
 # Size Report: bench_shapes (wasm-analysis)
-# Commit: 62b6337
+# Commit: 273c102
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 196 B
-Import               381 B
-Function              82 B
+Import               395 B
+Function              83 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
-Export                58 B
-Elem                  24 B
-Code               59126 B
-Data                8890 B
-Custom              3186 B
+Export                59 B
+Elem                  22 B
+Code               59923 B
+Data                8736 B
+Custom              3187 B
 ---------------- ----------
-TOTAL              71964 B
+TOTAL              72622 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-10883 B   frame
-10845 B   main
+10900 B   frame
+10755 B   main
  3469 B   rebuild_shapes
  3102 B   fmt_fp
  2803 B   emit_capsule_wire
  2628 B   printf_core
  2041 B   __rem_pio2f
  1927 B   emit_cylinder_wire
- 1353 B   nt_shape_renderer_flush
+ 1367 B   nt_shape_renderer_flush
  1315 B   nt_shape_renderer_triangle
+ 1264 B   nt_gfx_make_pipeline
  1121 B   nt_hash32_str
- 1074 B   nt_gfx_make_pipeline
  1026 B   nt_input_web_on_blur
-  758 B   nt_gfx_bind_pipeline
+  765 B   nt_gfx_bind_pipeline
   731 B   nt_input_web_on_pointer_move
   692 B   nt_input_web_on_pointer_down
   650 B   pop_arg_long_double
   568 B   push_instance
-  554 B   emmalloc_memalign
+  555 B   emmalloc_memalign
   516 B   claim_more_memory
   512 B   __memcpy
   469 B   emit_wire_edge
   458 B   nt_window_init
   415 B   attempt_allocate
-  381 B   sinf
+  382 B   sinf
+  381 B   nt_gfx_make_buffer
   376 B   __stdio_write
   370 B   __memset
-  363 B   nt_gfx_make_buffer
-  361 B   cosf
+  362 B   cosf
   361 B   nt_input_web_on_pointer_up
 
-Total functions: 81
-Total code size: 58992 B
+Total functions: 82
+Total code size: 59785 B
 
 ## Per-Module Contributions
 
@@ -64,13 +64,13 @@ Total code size: 58992 B
 Module                         Size
 ------------------------ ----------
 libnt_app.a                 1428 B
-libnt_core.a                1688 B
-libnt_gfx.a                34406 B
+libnt_core.a                1780 B
+libnt_gfx.a                36228 B
 libnt_input.a              16446 B
-libnt_shape_renderer.a   1141172 B
+libnt_shape_renderer.a   1141276 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)           1199080 B
+TOTAL (linked)           1201098 B
 
 Not linked to bench_shapes:
 libnt_app_stub.a            1428 B
@@ -79,20 +79,20 @@ libnt_drawable_comp.a       2668 B
 libnt_entity.a              2942 B
 libnt_fs.a                  2620 B
 libnt_fs_stub.a             2620 B
-libnt_gfx_stub.a           22244 B
+libnt_gfx_stub.a           23082 B
 libnt_hash.a                4028 B
-libnt_http.a                6696 B
+libnt_http.a                6710 B
 libnt_http_stub.a           3210 B
 libnt_input_stub.a         11148 B
-libnt_log.a                  970 B
-libnt_log_stub.a             506 B
-libnt_material.a            2774 B
+libnt_log.a                 1424 B
+libnt_log_stub.a             484 B
+libnt_material.a            2830 B
 libnt_material_comp.a       1990 B
 libnt_mesh_comp.a           1914 B
-libnt_mesh_renderer.a       6818 B
+libnt_mesh_renderer.a       6886 B
 libnt_pool.a                1256 B
 libnt_render.a              1528 B
-libnt_resource.a          149634 B
+libnt_resource.a          149510 B
 libnt_time.a                 866 B
 libnt_transform_comp.a      4536 B
 libnt_window_stub.a         1838 B
@@ -100,5 +100,5 @@ libnt_window_stub.a         1838 B
 
 ## Data Segments Summary
 
-Segments: 41
-Total data size: 8612 B
+Segments: 35
+Total data size: 8500 B
