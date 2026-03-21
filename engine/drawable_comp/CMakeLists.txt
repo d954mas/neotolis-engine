@@ -1,4 +1,4 @@
-nt_add_module(nt_drawable_comp
+nt_add_module(nt_drawable_comp LOG_DOMAIN "drawable_comp"
     nt_drawable_comp.c
     nt_drawable_comp.h
 )

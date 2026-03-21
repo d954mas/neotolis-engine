@@ -1,4 +1,4 @@
-nt_add_module(nt_entity
+nt_add_module(nt_entity LOG_DOMAIN "entity"
     nt_entity.c
     nt_entity.h
 )

@@ -1,4 +1,4 @@
-nt_add_module(nt_comp_storage
+nt_add_module(nt_comp_storage LOG_DOMAIN "comp_storage"
     nt_comp_storage.c
     nt_comp_storage.h
 )

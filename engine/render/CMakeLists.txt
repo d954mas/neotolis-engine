@@ -1,4 +1,4 @@
-nt_add_module(nt_render
+nt_add_module(nt_render LOG_DOMAIN "render"
     nt_render_items.c
     nt_render_items.h
     nt_render_defs.h
