@@ -3,7 +3,7 @@
 # GL backend: WebGL 2 via Emscripten (GLES 3.0) or OpenGL 3.3 Core via glad (desktop).
 
 if(EMSCRIPTEN)
-    nt_add_module(nt_gfx
+    nt_add_module(nt_gfx LOG_DOMAIN "gfx"
         nt_gfx.c
         gl/nt_gfx_gl.c
         gl/nt_gfx_gl_ctx_web.c
@@ -13,7 +13,7 @@ if(EMSCRIPTEN)
     )
     target_link_libraries(nt_gfx PUBLIC nt_core nt_pool nt_window nt_log nt_hash)
 else()
-    nt_add_module(nt_gfx
+    nt_add_module(nt_gfx LOG_DOMAIN "gfx"
         nt_gfx.c
         gl/nt_gfx_gl.c
         gl/nt_gfx_gl_ctx_native.c
@@ -28,7 +28,7 @@ else()
 endif()
 
 # Stub implementation for headless builds (CI, builder, tests)
-nt_add_module(nt_gfx_stub
+nt_add_module(nt_gfx_stub LOG_DOMAIN "gfx_stub"
     nt_gfx.c
     stub/nt_gfx_stub.c
     nt_gfx.h

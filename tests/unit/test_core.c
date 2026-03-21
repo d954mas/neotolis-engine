@@ -1,12 +1,10 @@
-#include "unity.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
+#include "unity.h"
 
 #include <string.h>
 
-void setUp(void) {
-    /* Called before each test */
-}
+void setUp(void) { /* Called before each test */ }
 
 void tearDown(void) {
     /* Ensure engine is shut down between tests to reset state */
@@ -18,9 +16,7 @@ void test_engine_init_succeeds(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_engine_init(&config));
 }
 
-void test_engine_init_null_config_fails(void) {
-    TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, nt_engine_init(NULL));
-}
+void test_engine_init_null_config_fails(void) { TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, nt_engine_init(NULL)); }
 
 void test_engine_double_init_fails(void) {
     nt_engine_config_t config = {.app_name = "test", .version = 1};
@@ -53,8 +49,7 @@ void test_platform_exactly_one_defined(void) {
 #ifdef NT_PLATFORM_NATIVE
     count++;
 #endif
-    TEST_ASSERT_EQUAL_INT_MESSAGE(1, count,
-        "Exactly one NT_PLATFORM_* must be defined");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, count, "Exactly one NT_PLATFORM_* must be defined");
 }
 
 void test_debug_build_defines(void) {

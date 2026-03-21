@@ -523,7 +523,7 @@ jobs:
             else
               formatted="${abs} B"
             fi
-            [ "$bytes" -ge 0 ] && printf "+%s" "$formatted" || printf "-%s" "$formatted"
+            [ "$bytes" -ge 0 ] && printf -- "+%s" "$formatted" || printf -- "-%s" "$formatted"
           }
 
           {

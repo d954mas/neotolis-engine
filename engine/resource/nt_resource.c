@@ -4,7 +4,6 @@
 
 #include <inttypes.h>
 #include <limits.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -120,9 +119,7 @@ static void resource_handle_load_failure(NtPackMeta *pack) {
     if (s_resource.retry_max_attempts == 1 || (s_resource.retry_max_attempts > 1 && pack->attempt_count >= s_resource.retry_max_attempts)) {
         /* Max attempts reached -- FAILED permanently */
         pack->pack_state = NT_PACK_STATE_FAILED;
-        char buf[128];
-        (void)snprintf(buf, sizeof(buf), "nt_resource: pack 0x%08X FAILED after %d attempts", pack->pack_id, pack->attempt_count);
-        nt_log_error(buf);
+        NT_LOG_ERROR("pack 0x%08X FAILED after %d attempts", pack->pack_id, pack->attempt_count);
         return;
     }
     /* Compute backoff delay */
@@ -137,9 +134,7 @@ static void resource_handle_load_failure(NtPackMeta *pack) {
     pack->retry_time_ms = resource_get_time_ms() + pack->retry_delay_ms;
     pack->pack_state = NT_PACK_STATE_NONE; /* will be retried */
     /* NOTE: io_type is NOT cleared -- preserved for retry re-issue */
-    char buf[128];
-    (void)snprintf(buf, sizeof(buf), "nt_resource: pack 0x%08X attempt %d, retry in %ums", pack->pack_id, pack->attempt_count, pack->retry_delay_ms);
-    nt_log_info(buf);
+    NT_LOG_INFO("pack 0x%08X attempt %d, retry in %ums", pack->pack_id, pack->attempt_count, pack->retry_delay_ms);
 }
 
 /* ---- Activation cost helper ---- */
@@ -257,9 +252,7 @@ void nt_resource_step(void) {
             }
 
             if (io_done && loaded_blob != NULL) {
-                char buf[128];
-                (void)snprintf(buf, sizeof(buf), "nt_resource: pack 0x%08X loaded (%u bytes)", pack->pack_id, loaded_size);
-                nt_log_info(buf);
+                NT_LOG_INFO("pack 0x%08X loaded (%u bytes)", pack->pack_id, loaded_size);
 
                 /* Check if asset entries already exist (re-download after blob eviction).
                  * If so, skip parse_pack -- entries have correct offsets/sizes already.
@@ -292,8 +285,7 @@ void nt_resource_step(void) {
                     } else {
                         free(loaded_blob);
                         pack->pack_state = NT_PACK_STATE_FAILED;
-                        (void)snprintf(buf, sizeof(buf), "nt_resource: pack 0x%08X parse failed", pack->pack_id);
-                        nt_log_error(buf);
+                        NT_LOG_ERROR("pack 0x%08X parse failed", pack->pack_id);
                     }
                 }
             } else if (io_failed) {
@@ -523,7 +515,7 @@ static nt_result_t pack_alloc(uint32_t pack_id, int16_t priority, uint8_t pack_t
     }
 
     if (find_pack(pack_id) >= 0) {
-        nt_log_error("nt_resource: pack already mounted");
+        NT_LOG_ERROR("pack already mounted");
         return NT_ERR_INVALID_ARG;
     }
 
@@ -600,7 +592,7 @@ nt_result_t nt_resource_set_priority(nt_hash32_t pack_id, int16_t new_priority) 
 
     int16_t idx = find_pack(pack_id.value);
     if (idx < 0) {
-        nt_log_error("nt_resource: set_priority pack not found");
+        NT_LOG_ERROR("set_priority pack not found");
         return NT_ERR_INVALID_ARG;
     }
 
@@ -619,18 +611,18 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
 
     int16_t pack_idx = find_pack(pack_id.value);
     if (pack_idx < 0) {
-        nt_log_error("nt_resource: parse_pack not mounted");
+        NT_LOG_ERROR("parse_pack not mounted");
         return NT_ERR_INVALID_ARG;
     }
 
     if (s_resource.packs[pack_idx].blob != NULL) {
-        nt_log_error("nt_resource: pack already parsed");
+        NT_LOG_ERROR("pack already parsed");
         return NT_ERR_INVALID_ARG;
     }
 
     /* Validate blob size */
     if (blob_size < sizeof(NtPackHeader)) {
-        nt_log_error("nt_resource: blob too small");
+        NT_LOG_ERROR("blob too small");
         return NT_ERR_INVALID_ARG;
     }
 
@@ -638,32 +630,32 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
 
     /* Validate magic */
     if (h->magic != NT_PACK_MAGIC) {
-        nt_log_error("nt_resource: bad magic");
+        NT_LOG_ERROR("bad magic");
         return NT_ERR_INVALID_ARG;
     }
 
     /* Validate version */
     if (h->version > NT_PACK_VERSION_MAX) {
-        nt_log_error("nt_resource: unsupported version");
+        NT_LOG_ERROR("unsupported version");
         return NT_ERR_INVALID_ARG;
     }
 
     /* Validate header_size */
     if (h->header_size > blob_size) {
-        nt_log_error("nt_resource: header_size exceeds blob");
+        NT_LOG_ERROR("header_size exceeds blob");
         return NT_ERR_INVALID_ARG;
     }
 
     /* Validate total_size */
     if (h->total_size != blob_size) {
-        nt_log_error("nt_resource: total_size mismatch");
+        NT_LOG_ERROR("total_size mismatch");
         return NT_ERR_INVALID_ARG;
     }
 
     /* Validate asset entries fit in header region */
     uint32_t entries_end = (uint32_t)sizeof(NtPackHeader) + ((uint32_t)h->asset_count * (uint32_t)sizeof(NtAssetEntry));
     if (entries_end > h->header_size) {
-        nt_log_error("nt_resource: entries overflow header region");
+        NT_LOG_ERROR("entries overflow header region");
         return NT_ERR_INVALID_ARG;
     }
 
@@ -671,7 +663,7 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     uint32_t data_size = blob_size - h->header_size;
     uint32_t computed = nt_crc32(blob + h->header_size, data_size);
     if (computed != h->checksum) {
-        nt_log_error("nt_resource: CRC32 mismatch");
+        NT_LOG_ERROR("CRC32 mismatch");
         return NT_ERR_INVALID_ARG;
     }
 
@@ -681,7 +673,7 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     for (uint16_t i = 0; i < h->asset_count; i++) {
         /* Validate entry offset is in data region and data fits within blob */
         if (entries[i].offset < h->header_size || entries[i].size > blob_size || entries[i].offset > blob_size - entries[i].size) {
-            nt_log_error("nt_resource: entry data outside data region");
+            NT_LOG_ERROR("entry data outside data region");
             return NT_ERR_INVALID_ARG;
         }
 
@@ -865,11 +857,11 @@ nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, u
 
     int16_t pack_idx = find_pack(pack_id.value);
     if (pack_idx < 0) {
-        nt_log_error("nt_resource: register pack not found");
+        NT_LOG_ERROR("register pack not found");
         return NT_ERR_INVALID_ARG;
     }
     if (s_resource.packs[pack_idx].pack_type != NT_PACK_VIRTUAL) {
-        nt_log_error("nt_resource: register on non-virtual pack");
+        NT_LOG_ERROR("register on non-virtual pack");
         return NT_ERR_INVALID_ARG;
     }
 
@@ -937,7 +929,7 @@ static nt_result_t resource_load(uint32_t pack_id, const char *path, uint8_t io_
     uint32_t req_id = resource_io_issue(path, io_type);
     if (req_id == 0) {
         pack->pack_state = NT_PACK_STATE_FAILED;
-        nt_log_error("nt_resource: load failed to issue I/O request");
+        NT_LOG_ERROR("load failed to issue I/O request");
         return NT_ERR_INVALID_ARG;
     }
 
@@ -946,9 +938,7 @@ static nt_result_t resource_load(uint32_t pack_id, const char *path, uint8_t io_
     pack->pack_state = NT_PACK_STATE_REQUESTED;
     pack->attempt_count = 1;
 
-    char buf[320];
-    (void)snprintf(buf, sizeof(buf), "nt_resource: loading pack 0x%08X from %s", pack_id, path);
-    nt_log_info(buf);
+    NT_LOG_INFO("loading pack 0x%08X from %s", pack_id, path);
 
     return NT_OK;
 }
@@ -1099,17 +1089,15 @@ void nt_resource_set_placeholder_texture(nt_hash64_t resource_id) {
 void nt_resource_dump_pack(nt_hash32_t pack_id) {
     int16_t idx = find_pack(pack_id.value);
     if (idx < 0) {
-        nt_log_error("nt_resource: dump_pack: not mounted");
+        NT_LOG_ERROR("dump_pack: not mounted");
         return;
     }
 
     NtPackMeta *pack = &s_resource.packs[idx];
-    char buf[256];
-    (void)snprintf(buf, sizeof(buf), "  Pack 0x%08X  prio=%d  state=%d  blob=%s (%u bytes)", pack->pack_id, (int)pack->priority, (int)pack->pack_state, pack->blob ? "yes" : "no", pack->blob_size);
-    nt_log_info(buf);
+    NT_LOG_INFO("  Pack 0x%08X  prio=%d  state=%d  blob=%s (%u bytes)", pack->pack_id, (int)pack->priority, (int)pack->pack_state, pack->blob ? "yes" : "no", pack->blob_size);
 
     if (!pack->blob || pack->blob_size < sizeof(NtPackHeader)) {
-        nt_log_info("  (no blob data to dump)");
+        NT_LOG_INFO("  (no blob data to dump)");
         return;
     }
 
@@ -1135,8 +1123,7 @@ void nt_resource_dump_pack(nt_hash32_t pack_id) {
         default:
             break;
         }
-        (void)snprintf(buf, sizeof(buf), "    [%u] 0x%016" PRIX64 "  %-8s  %u bytes", i, entries[i].resource_id, tname, entries[i].size);
-        nt_log_info(buf);
+        NT_LOG_INFO("    [%u] 0x%016" PRIX64 "  %-8s  %u bytes", i, entries[i].resource_id, tname, entries[i].size);
     }
 }
 

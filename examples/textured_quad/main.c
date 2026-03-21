@@ -120,24 +120,19 @@ static bool s_hires_dumped;
 /* ---- Status print: show current pack priorities ---- */
 
 static void print_status(void) {
-    char buf[256];
-    (void)snprintf(buf, sizeof(buf), "  base   prio=100  state=%d", (int)nt_resource_pack_state(s_base_pack_id));
-    nt_log_info(buf);
+    nt_log_info("  base   prio=100  state=%d", (int)nt_resource_pack_state(s_base_pack_id));
     if (s_load_state >= STATE_PIXEL) {
-        (void)snprintf(buf, sizeof(buf), "  pixel  prio=%d  state=%d", (int)s_pixel_prio, (int)nt_resource_pack_state(s_pixel_pack_id));
-        nt_log_info(buf);
+        nt_log_info("  pixel  prio=%d  state=%d", (int)s_pixel_prio, (int)nt_resource_pack_state(s_pixel_pack_id));
     }
     if (s_load_state >= STATE_BOTH) {
-        (void)snprintf(buf, sizeof(buf), "  hires  prio=%d  state=%d", (int)s_hires_prio, (int)nt_resource_pack_state(s_hires_pack_id));
-        nt_log_info(buf);
+        nt_log_info("  hires  prio=%d  state=%d", (int)s_hires_prio, (int)nt_resource_pack_state(s_hires_pack_id));
     }
     if (s_load_state == STATE_EMPTY) {
         nt_log_info("  Texture: (fallback)");
     } else if (s_load_state == STATE_PIXEL) {
         nt_log_info("  Texture winner: pixel (only texture pack)");
     } else {
-        (void)snprintf(buf, sizeof(buf), "  Texture winner: %s", s_pixel_prio > s_hires_prio ? "pixel" : "hires");
-        nt_log_info(buf);
+        nt_log_info("  Texture winner: %s", s_pixel_prio > s_hires_prio ? "pixel" : "hires");
     }
 }
 
@@ -337,10 +332,8 @@ static void frame(void) {
         /* One-time log to verify batching */
         static bool s_stats_logged;
         if (!s_stats_logged) {
-            char buf[128];
-            (void)snprintf(buf, sizeof(buf), ">> Render stats: %u draw calls, %u instanced, %u instances (from %u items)", g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.draw_calls_instanced,
-                           g_nt_gfx.frame_stats.instances, item_count);
-            nt_log_info(buf);
+            nt_log_info(">> Render stats: %u draw calls, %u instanced, %u instances (from %u items)", g_nt_gfx.frame_stats.draw_calls, g_nt_gfx.frame_stats.draw_calls_instanced,
+                        g_nt_gfx.frame_stats.instances, item_count);
             s_stats_logged = true;
         }
     }

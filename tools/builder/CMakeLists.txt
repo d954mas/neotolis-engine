@@ -12,9 +12,9 @@ add_library(nt_builder STATIC
     nt_builder_tangent.c
 )
 target_include_directories(nt_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(nt_builder PUBLIC nt_shared nt_core cgltf stb_image stb_image_resize2 nt_hash mikktspace)
+target_link_libraries(nt_builder PUBLIC nt_shared nt_core nt_log cgltf stb_image stb_image_resize2 nt_hash mikktspace)
 # Builder uses standard C I/O (fopen, strdup, strncpy) -- suppress MSVC deprecation
-target_compile_definitions(nt_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+target_compile_definitions(nt_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE NT_LOG_DOMAIN_DEFAULT="builder")
 # Static CRT: remove _DLL so CRT calls resolve to static symbols
 target_compile_options(nt_builder PRIVATE -U_DLL)
 nt_set_warning_flags(nt_builder)
@@ -26,6 +26,7 @@ set_target_properties(nt_builder PROPERTIES
 # Builder executable (placeholder, uses nt_builder library)
 add_executable(builder main.c)
 target_link_libraries(builder PRIVATE nt_builder)
+target_compile_definitions(builder PRIVATE NT_LOG_DOMAIN_DEFAULT="builder")
 target_compile_options(builder PRIVATE -U_DLL)
 nt_set_warning_flags(builder)
 nt_set_sanitizer_flags(builder)

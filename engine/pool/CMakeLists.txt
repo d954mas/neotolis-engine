@@ -1,4 +1,4 @@
-nt_add_module(nt_pool
+nt_add_module(nt_pool LOG_DOMAIN "pool"
     nt_pool.c
     nt_pool.h
 )

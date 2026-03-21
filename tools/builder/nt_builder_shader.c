@@ -111,12 +111,12 @@ nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *pa
     uint32_t file_size = 0;
     char *raw_source = nt_builder_read_file(path, &file_size);
     if (!raw_source) {
-        (void)fprintf(stderr, "ERROR: %s: failed to read shader file\n", path);
+        NT_LOG_ERROR("%s: failed to read shader file", path);
         return NT_BUILD_ERR_IO;
     }
 
     if (file_size == 0) {
-        (void)fprintf(stderr, "ERROR: %s: empty shader file\n", path);
+        NT_LOG_ERROR("%s: empty shader file", path);
         free(raw_source);
         return NT_BUILD_ERR_VALIDATION;
     }
@@ -134,13 +134,13 @@ nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *pa
     collapse_whitespace(stripped, &stripped_len);
 
     if (strstr(stripped, "#version") != NULL) {
-        (void)fprintf(stderr, "ERROR: %s: #version directive found -- runtime adds it per platform, remove from source\n", path);
+        NT_LOG_ERROR("%s: #version directive found -- runtime adds it per platform, remove from source", path);
         free(stripped);
         return NT_BUILD_ERR_VALIDATION;
     }
 
     if (strstr(stripped, "void main") == NULL) {
-        (void)fprintf(stderr, "ERROR: %s: missing void main()\n", path);
+        NT_LOG_ERROR("%s: missing void main()", path);
         free(stripped);
         return NT_BUILD_ERR_VALIDATION;
     }

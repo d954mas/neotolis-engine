@@ -14,10 +14,10 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
     var controller = new AbortController();
     Module['_nt_http_controllers'][slot_index] = controller;
 
-    console.log('[nt_http] fetch start slot=' + slot_index + ' gen=' + generation + ' url=' + url);
+    console.log('INFO [http] fetch start slot=' + slot_index + ' gen=' + generation + ' url=' + url);
 
     fetch(url, { signal: controller.signal }).then(function(response) {
-        console.log('[nt_http] response slot=' + slot_index + ' status=' + response.status + ' ok=' + response.ok + ' hasBody=' + !!response.body);
+        console.log('INFO [http] response slot=' + slot_index + ' status=' + response.status + ' ok=' + response.ok + ' hasBody=' + !!response.body);
         if (!response.ok) {
             Module['_nt_http_web_on_complete'](slot_index, generation, 0, 0, 0);
             return;
@@ -35,7 +35,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
                 reader.read().then(function(result) {
                     if (result.done) {
                         var totalLen = received;
-                        console.log('[nt_http] stream done slot=' + slot_index + ' size=' + totalLen);
+                        console.log('INFO [http] stream done slot=' + slot_index + ' size=' + totalLen);
                         var ptr = Module['_malloc'](totalLen);
                         var offset = 0;
                         for (var i = 0; i < chunks.length; i++) {
@@ -51,7 +51,7 @@ EM_JS(void, nt_http_web_fetch, (int slot_index, int generation, const char *url_
                     Module['_nt_http_web_on_progress'](slot_index, generation, received, total);
                     pump();
                 }).catch(function(e) {
-                    console.error('[nt_http] stream error slot=' + slot_index, e);
+                    console.error('ERROR [http] stream error slot=' + slot_index, e);
                     Module['_nt_http_web_on_complete'](slot_index, generation, 0, 0, 0);
                 });
             }
@@ -96,7 +96,7 @@ EMSCRIPTEN_KEEPALIVE void nt_http_web_on_progress(int slot_index, int generation
 EMSCRIPTEN_KEEPALIVE void nt_http_web_on_complete(int slot_index, int generation, uint8_t *data, int size, int success) {
     NtHttpSlot *slot = nt_http_get_slot((uint16_t)slot_index);
     /* Debug log */
-    emscripten_log(0, "[http_cb] slot=%d cb_gen=%d slot_gen=%u ok=%d sz=%d", slot_index, generation, slot ? (unsigned)slot->generation : 0, success, size);
+    emscripten_log(0, "INFO [http] cb slot=%d cb_gen=%d slot_gen=%u ok=%d sz=%d", slot_index, generation, slot ? (unsigned)slot->generation : 0, success, size);
     if (!slot || slot->generation != (uint16_t)generation) {
         if (data) {
             free(data);

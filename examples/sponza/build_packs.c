@@ -183,7 +183,7 @@ static void init_checker(void) {
 
 /* RG8 format: only first 2 bytes used per pixel */
 static const uint8_t s_flat_normal_rg[4] = {128, 128, 0, 0}; /* (0,0,1) in RG8 — Z reconstructed in shader */
-static const uint8_t s_rough_rg[4]       = {0, 255, 0, 0};   /* max roughness in RG8: R=0, G=255 (roughness=1.0 → no specular) */
+static const uint8_t s_rough_rg[4] = {0, 255, 0, 0};         /* max roughness in RG8: R=0, G=255 (roughness=1.0 → no specular) */
 
 static nt_build_result_t add_placeholder_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     tex_role_t *roles = build_texture_roles(scene);

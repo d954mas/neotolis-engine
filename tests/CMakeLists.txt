@@ -57,6 +57,28 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_log_stub COMMAND test_log_stub)
 
+    # --- Log API tests (domain functions, macros, level filtering) ---
+    add_executable(test_log_api unit/test_log_api.c)
+    target_link_libraries(test_log_api PRIVATE nt_log unity)
+    target_compile_definitions(test_log_api PRIVATE NT_LOG_DOMAIN_DEFAULT="test_mod")
+    nt_set_warning_flags(test_log_api)
+    nt_set_sanitizer_flags(test_log_api)
+    set_target_properties(test_log_api PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_log_api COMMAND test_log_api)
+
+    # --- Log API tests with stub backend ---
+    add_executable(test_log_api_stub unit/test_log_api.c)
+    target_link_libraries(test_log_api_stub PRIVATE nt_log_stub unity)
+    target_compile_definitions(test_log_api_stub PRIVATE NT_LOG_DOMAIN_DEFAULT="test_mod")
+    nt_set_warning_flags(test_log_api_stub)
+    nt_set_sanitizer_flags(test_log_api_stub)
+    set_target_properties(test_log_api_stub PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_log_api_stub COMMAND test_log_api_stub)
+
     # --- Time module tests ---
     add_executable(test_time unit/test_time.c)
     target_link_libraries(test_time PRIVATE nt_time unity)

@@ -31,20 +31,20 @@ nt_build_result_t nt_builder_parse_glb_scene(nt_glb_scene_t *scene, const char *
     cgltf_data *data = NULL;
     cgltf_result result = cgltf_parse_file(&options, path, &data);
     if (result != cgltf_result_success) {
-        (void)fprintf(stderr, "ERROR: %s: failed to parse glTF (cgltf error %d)\n", path, (int)result);
+        NT_LOG_ERROR("%s: failed to parse glTF (cgltf error %d)", path, (int)result);
         return NT_BUILD_ERR_FORMAT;
     }
 
     result = cgltf_load_buffers(&options, data, path);
     if (result != cgltf_result_success) {
-        (void)fprintf(stderr, "ERROR: %s: failed to load glTF buffers (cgltf error %d)\n", path, (int)result);
+        NT_LOG_ERROR("%s: failed to load glTF buffers (cgltf error %d)", path, (int)result);
         cgltf_free(data);
         return NT_BUILD_ERR_IO;
     }
 
     result = cgltf_validate(data);
     if (result != cgltf_result_success) {
-        (void)fprintf(stderr, "WARNING: %s: glTF validation issues (cgltf error %d)\n", path, (int)result);
+        NT_LOG_WARN("%s: glTF validation issues (cgltf error %d)", path, (int)result);
     }
 
     /* Meshes */
@@ -126,8 +126,8 @@ nt_build_result_t nt_builder_parse_glb_scene(nt_glb_scene_t *scene, const char *
 
     scene->_internal = data;
 
-    (void)printf("Parsed glTF scene: %s\n", path);
-    (void)printf("  Meshes: %u, Materials: %u, Textures: %u, Nodes: %u\n", scene->mesh_count, scene->material_count, scene->texture_count, scene->node_count);
+    NT_LOG_INFO("Parsed glTF scene: %s", path);
+    NT_LOG_INFO("  Meshes: %u, Materials: %u, Textures: %u, Nodes: %u", scene->mesh_count, scene->material_count, scene->texture_count, scene->node_count);
 
     return NT_BUILD_OK;
 }
@@ -155,18 +155,18 @@ nt_build_result_t nt_builder_add_scene_mesh(NtBuilderContext *ctx, const nt_glb_
         return NT_BUILD_ERR_VALIDATION;
     }
     if (mesh_index >= scene->mesh_count) {
-        (void)fprintf(stderr, "ERROR: mesh_index %u out of range (mesh_count=%u)\n", mesh_index, scene->mesh_count);
+        NT_LOG_ERROR("mesh_index %u out of range (mesh_count=%u)", mesh_index, scene->mesh_count);
         return NT_BUILD_ERR_VALIDATION;
     }
     if (primitive_index >= scene->meshes[mesh_index].primitive_count) {
-        (void)fprintf(stderr, "ERROR: primitive_index %u out of range (primitive_count=%u)\n", primitive_index, scene->meshes[mesh_index].primitive_count);
+        NT_LOG_ERROR("primitive_index %u out of range (primitive_count=%u)", primitive_index, scene->meshes[mesh_index].primitive_count);
         return NT_BUILD_ERR_VALIDATION;
     }
 
     uint64_t rid = nt_hash64_str(resource_id).value;
 
     if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
-        (void)fprintf(stderr, "ERROR: Asset limit reached (%d max)\n", NT_BUILD_MAX_ASSETS);
+        NT_LOG_ERROR("Asset limit reached (%d max)", NT_BUILD_MAX_ASSETS);
         return NT_BUILD_ERR_LIMIT;
     }
 
@@ -220,7 +220,7 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
 
     cgltf_primitive *prim = &mesh->primitives[primitive_index];
     if (prim->type != cgltf_primitive_type_triangles) {
-        (void)fprintf(stderr, "ERROR: mesh[%u] prim[%u]: only triangle primitives supported\n", mesh_index, primitive_index);
+        NT_LOG_ERROR("mesh[%u] prim[%u]: only triangle primitives supported", mesh_index, primitive_index);
         return NT_BUILD_ERR_VALIDATION;
     }
 
@@ -261,7 +261,7 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
             break;
         case NT_TANGENT_REQUIRE:
             if (!has_gltf_tangent) {
-                (void)fprintf(stderr, "ERROR: mesh[%u] prim[%u]: TANGENT required but not found in glTF\n", mesh_index, primitive_index);
+                NT_LOG_ERROR("mesh[%u] prim[%u]: TANGENT required but not found in glTF", mesh_index, primitive_index);
                 return NT_BUILD_ERR_VALIDATION;
             }
             break;
@@ -290,15 +290,15 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
         }
 
         if (!acc) {
-            (void)fprintf(stderr, "ERROR: mesh[%u] prim[%u]: attribute %s not found\n", mesh_index, primitive_index, layout[s].gltf_name ? layout[s].gltf_name : "(null)");
+            NT_LOG_ERROR("mesh[%u] prim[%u]: attribute %s not found", mesh_index, primitive_index, layout[s].gltf_name ? layout[s].gltf_name : "(null)");
             ret = NT_BUILD_ERR_VALIDATION;
             goto cleanup_streams;
         }
 
         uint32_t acc_components = (uint32_t)cgltf_num_components(acc->type);
         if (acc_components != layout[s].count) {
-            (void)fprintf(stderr, "ERROR: mesh[%u] prim[%u]: attribute %s has %u components, layout expects %u\n", mesh_index, primitive_index, layout[s].gltf_name ? layout[s].gltf_name : "(null)",
-                          acc_components, (uint32_t)layout[s].count);
+            NT_LOG_ERROR("mesh[%u] prim[%u]: attribute %s has %u components, layout expects %u", mesh_index, primitive_index, layout[s].gltf_name ? layout[s].gltf_name : "(null)", acc_components,
+                         (uint32_t)layout[s].count);
             ret = NT_BUILD_ERR_VALIDATION;
             goto cleanup_streams;
         }
@@ -332,7 +332,7 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
     }
 
     if (vertex_count > NT_BUILD_MAX_VERTICES) {
-        (void)fprintf(stderr, "ERROR: mesh[%u] prim[%u]: vertex count %u exceeds max %d\n", mesh_index, primitive_index, vertex_count, NT_BUILD_MAX_VERTICES);
+        NT_LOG_ERROR("mesh[%u] prim[%u]: vertex count %u exceeds max %d", mesh_index, primitive_index, vertex_count, NT_BUILD_MAX_VERTICES);
         ret = NT_BUILD_ERR_LIMIT;
         goto cleanup_streams;
     }
@@ -346,7 +346,7 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
     if (prim->indices != NULL) {
         index_count = (uint32_t)prim->indices->count;
         if (index_count > NT_BUILD_MAX_INDICES) {
-            (void)fprintf(stderr, "ERROR: mesh[%u] prim[%u]: index count %u exceeds max %d\n", mesh_index, primitive_index, index_count, NT_BUILD_MAX_INDICES);
+            NT_LOG_ERROR("mesh[%u] prim[%u]: index count %u exceeds max %d", mesh_index, primitive_index, index_count, NT_BUILD_MAX_INDICES);
             ret = NT_BUILD_ERR_LIMIT;
             goto cleanup_streams;
         }
@@ -391,7 +391,7 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
         }
 
         if (!pos_data || !norm_data || !uv_data) {
-            (void)fprintf(stderr, "ERROR: mesh[%u] prim[%u]: tangent computation requires POSITION, NORMAL, TEXCOORD_0\n", mesh_index, primitive_index);
+            NT_LOG_ERROR("mesh[%u] prim[%u]: tangent computation requires POSITION, NORMAL, TEXCOORD_0", mesh_index, primitive_index);
             free(index_buf);
             ret = NT_BUILD_ERR_VALIDATION;
             goto cleanup_streams;

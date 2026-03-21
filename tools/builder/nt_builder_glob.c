@@ -102,7 +102,7 @@ static bool glob_iterate(const char *pattern, glob_callback_fn callback, void *u
             }
             if (wildcard_match(file_pattern, find_data.cFileName)) {
                 if (match_count >= GLOB_MAX_MATCHES) {
-                    (void)fprintf(stderr, "ERROR: glob match limit reached (%d), aborting pattern '%s'\n", GLOB_MAX_MATCHES, pattern);
+                    NT_LOG_ERROR("glob match limit reached (%d), aborting pattern '%s'", GLOB_MAX_MATCHES, pattern);
                     overflow = true;
                     break;
                 }
@@ -137,7 +137,7 @@ static bool glob_iterate(const char *pattern, glob_callback_fn callback, void *u
             }
             if (wildcard_match(file_pattern, entry->d_name)) {
                 if (match_count >= GLOB_MAX_MATCHES) {
-                    (void)fprintf(stderr, "ERROR: glob match limit reached (%d), aborting pattern '%s'\n", GLOB_MAX_MATCHES, pattern);
+                    NT_LOG_ERROR("glob match limit reached (%d), aborting pattern '%s'", GLOB_MAX_MATCHES, pattern);
                     overflow = true;
                     break;
                 }
@@ -236,7 +236,7 @@ static nt_build_result_t nt_builder_glob_add(NtBuilderContext *ctx, const char *
     }
 
     if (cb.match_count == 0) {
-        (void)fprintf(stderr, "ERROR: no files matched pattern '%s'\n", pattern);
+        NT_LOG_ERROR("no files matched pattern '%s'", pattern);
         return NT_BUILD_ERR_VALIDATION;
     }
     return cb.last_result;

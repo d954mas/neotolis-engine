@@ -42,6 +42,7 @@ branch_diff.patch
 
 # Claude local settings
 .claude/settings.local.json
+.claude/settings.json
 
 # GSD tooling (Claude Code workflow engine)
 .claude/get-shit-done/

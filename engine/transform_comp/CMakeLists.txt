@@ -1,4 +1,4 @@
-nt_add_module(nt_transform_comp
+nt_add_module(nt_transform_comp LOG_DOMAIN "transform_comp"
     nt_transform_comp.c
     nt_transform_comp.h
 )

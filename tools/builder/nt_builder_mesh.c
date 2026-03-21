@@ -9,18 +9,18 @@
 
 static nt_build_result_t nt_validate_stream_layout(const char *path, const NtStreamLayout *layout, uint32_t stream_count) {
     if (stream_count == 0 || stream_count > NT_MESH_MAX_STREAMS) {
-        (void)fprintf(stderr, "ERROR: %s: stream_count %u out of range [1, %d]\n", path, stream_count, NT_MESH_MAX_STREAMS);
+        NT_LOG_ERROR("%s: stream_count %u out of range [1, %d]", path, stream_count, NT_MESH_MAX_STREAMS);
         return NT_BUILD_ERR_VALIDATION;
     }
 
     bool has_position = false;
     for (uint32_t s = 0; s < stream_count; s++) {
         if (layout[s].count < 1 || layout[s].count > 4) {
-            (void)fprintf(stderr, "ERROR: %s: stream[%u] count %u out of range [1, 4]\n", path, s, layout[s].count);
+            NT_LOG_ERROR("%s: stream[%u] count %u out of range [1, 4]", path, s, layout[s].count);
             return NT_BUILD_ERR_VALIDATION;
         }
         if (layout[s].normalized && (layout[s].type == NT_STREAM_FLOAT32 || layout[s].type == NT_STREAM_FLOAT16)) {
-            (void)fprintf(stderr, "ERROR: %s: stream[%u] '%s': normalized=true is invalid for float types\n", path, s, layout[s].engine_name ? layout[s].engine_name : "(null)");
+            NT_LOG_ERROR("%s: stream[%u] '%s': normalized=true is invalid for float types", path, s, layout[s].engine_name ? layout[s].engine_name : "(null)");
             return NT_BUILD_ERR_VALIDATION;
         }
         if (layout[s].gltf_name != NULL && strcmp(layout[s].gltf_name, "POSITION") == 0) {
@@ -28,7 +28,7 @@ static nt_build_result_t nt_validate_stream_layout(const char *path, const NtStr
         }
     }
     if (!has_position) {
-        (void)fprintf(stderr, "ERROR: %s: stream layout missing required POSITION attribute\n", path);
+        NT_LOG_ERROR("%s: stream layout missing required POSITION attribute", path);
         return NT_BUILD_ERR_VALIDATION;
     }
     return NT_BUILD_OK;
@@ -42,13 +42,13 @@ static nt_build_result_t nt_parse_gltf(const char *path, cgltf_data **out_data, 
 
     cgltf_result result = cgltf_parse_file(&options, path, out_data);
     if (result != cgltf_result_success) {
-        (void)fprintf(stderr, "ERROR: %s: failed to parse glTF (cgltf error %d)\n", path, (int)result);
+        NT_LOG_ERROR("%s: failed to parse glTF (cgltf error %d)", path, (int)result);
         return NT_BUILD_ERR_FORMAT;
     }
 
     result = cgltf_load_buffers(&options, *out_data, path);
     if (result != cgltf_result_success) {
-        (void)fprintf(stderr, "ERROR: %s: failed to load glTF buffers (cgltf error %d)\n", path, (int)result);
+        NT_LOG_ERROR("%s: failed to load glTF buffers (cgltf error %d)", path, (int)result);
         cgltf_free(*out_data);
         *out_data = NULL;
         return NT_BUILD_ERR_IO;
@@ -56,17 +56,17 @@ static nt_build_result_t nt_parse_gltf(const char *path, cgltf_data **out_data, 
 
     result = cgltf_validate(*out_data);
     if (result != cgltf_result_success) {
-        (void)fprintf(stderr, "WARNING: %s: glTF validation issues (cgltf error %d)\n", path, (int)result);
+        NT_LOG_WARN("%s: glTF validation issues (cgltf error %d)", path, (int)result);
     }
 
     if ((*out_data)->meshes_count != 1) {
-        (void)fprintf(stderr, "ERROR: %s: expected 1 mesh, found %zu\n", path, (*out_data)->meshes_count);
+        NT_LOG_ERROR("%s: expected 1 mesh, found %zu", path, (*out_data)->meshes_count);
         cgltf_free(*out_data);
         *out_data = NULL;
         return NT_BUILD_ERR_VALIDATION;
     }
     if ((*out_data)->meshes[0].primitives_count != 1) {
-        (void)fprintf(stderr, "ERROR: %s: expected 1 primitive, found %zu\n", path, (*out_data)->meshes[0].primitives_count);
+        NT_LOG_ERROR("%s: expected 1 primitive, found %zu", path, (*out_data)->meshes[0].primitives_count);
         cgltf_free(*out_data);
         *out_data = NULL;
         return NT_BUILD_ERR_VALIDATION;
@@ -75,7 +75,7 @@ static nt_build_result_t nt_parse_gltf(const char *path, cgltf_data **out_data, 
     *out_prim = &(*out_data)->meshes[0].primitives[0];
 
     if ((*out_prim)->type != cgltf_primitive_type_triangles) {
-        (void)fprintf(stderr, "ERROR: %s: primitive type %d is not TRIANGLES (only triangles supported)\n", path, (int)(*out_prim)->type);
+        NT_LOG_ERROR("%s: primitive type %d is not TRIANGLES (only triangles supported)", path, (int)(*out_prim)->type);
         cgltf_free(*out_data);
         *out_data = NULL;
         return NT_BUILD_ERR_VALIDATION;
@@ -102,14 +102,13 @@ static nt_build_result_t nt_extract_vertex_streams(const char *path, const cgltf
         }
 
         if (!acc) {
-            (void)fprintf(stderr, "ERROR: %s: attribute %s not found in glTF data\n", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)");
+            NT_LOG_ERROR("%s: attribute %s not found in glTF data", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)");
             return NT_BUILD_ERR_VALIDATION;
         }
 
         uint32_t acc_components = (uint32_t)cgltf_num_components(acc->type);
         if (acc_components != layout[s].count) {
-            (void)fprintf(stderr, "ERROR: %s: attribute %s has %u components, layout expects %u\n", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)", acc_components,
-                          (uint32_t)layout[s].count);
+            NT_LOG_ERROR("%s: attribute %s has %u components, layout expects %u", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)", acc_components, (uint32_t)layout[s].count);
             return NT_BUILD_ERR_VALIDATION;
         }
 
@@ -118,31 +117,31 @@ static nt_build_result_t nt_extract_vertex_streams(const char *path, const cgltf
             vertex_count = count;
             vertex_count_set = true;
         } else if (count != vertex_count) {
-            (void)fprintf(stderr, "ERROR: %s: attribute %s has %u vertices, expected %u\n", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)", count, vertex_count);
+            NT_LOG_ERROR("%s: attribute %s has %u vertices, expected %u", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)", count, vertex_count);
             return NT_BUILD_ERR_VALIDATION;
         }
 
         cgltf_size float_count = (cgltf_size)vertex_count * (cgltf_size)layout[s].count;
         stream_floats[s] = (float *)calloc(float_count, sizeof(float));
         if (!stream_floats[s]) {
-            (void)fprintf(stderr, "ERROR: %s: failed to allocate float buffer for %s\n", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)");
+            NT_LOG_ERROR("%s: failed to allocate float buffer for %s", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)");
             return NT_BUILD_ERR_IO;
         }
 
         cgltf_size unpacked = cgltf_accessor_unpack_floats(acc, stream_floats[s], float_count);
         if (unpacked == 0) {
-            (void)fprintf(stderr, "ERROR: %s: failed to unpack floats for %s\n", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)");
+            NT_LOG_ERROR("%s: failed to unpack floats for %s", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)");
             return NT_BUILD_ERR_FORMAT;
         }
     }
 
     if (!vertex_count_set) {
-        (void)fprintf(stderr, "ERROR: %s: no attributes found\n", path);
+        NT_LOG_ERROR("%s: no attributes found", path);
         return NT_BUILD_ERR_VALIDATION;
     }
 
     if (vertex_count > NT_BUILD_MAX_VERTICES) {
-        (void)fprintf(stderr, "ERROR: %s: vertex count %u exceeds max %d\n", path, vertex_count, NT_BUILD_MAX_VERTICES);
+        NT_LOG_ERROR("%s: vertex count %u exceeds max %d", path, vertex_count, NT_BUILD_MAX_VERTICES);
         return NT_BUILD_ERR_LIMIT;
     }
 
@@ -216,7 +215,7 @@ nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path
         uint32_t vertex_data_size = 0;
         uint8_t *vertex_buf = nt_interleave_vertices(layout, stream_count, stream_floats, vertex_count, vertex_stride, &vertex_data_size);
         if (!vertex_buf) {
-            (void)fprintf(stderr, "ERROR: %s: failed to allocate vertex buffer\n", path);
+            NT_LOG_ERROR("%s: failed to allocate vertex buffer", path);
             ret = NT_BUILD_ERR_IO;
             goto cleanup_streams;
         }
@@ -229,7 +228,7 @@ nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path
         if (prim->indices != NULL) {
             index_count = (uint32_t)prim->indices->count;
             if (index_count > NT_BUILD_MAX_INDICES) {
-                (void)fprintf(stderr, "ERROR: %s: index count %u exceeds max %d\n", path, index_count, NT_BUILD_MAX_INDICES);
+                NT_LOG_ERROR("%s: index count %u exceeds max %d", path, index_count, NT_BUILD_MAX_INDICES);
                 free(vertex_buf);
                 ret = NT_BUILD_ERR_LIMIT;
                 goto cleanup_streams;

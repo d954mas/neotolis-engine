@@ -1,13 +1,13 @@
 # nt_window -- canvas/window abstraction
 
 if(EMSCRIPTEN)
-    nt_add_module(nt_window
+    nt_add_module(nt_window LOG_DOMAIN "window"
         nt_window.c
         web/nt_window_web.c
         nt_window.h
     )
 else()
-    nt_add_module(nt_window
+    nt_add_module(nt_window LOG_DOMAIN "window"
         nt_window.c
         native/nt_window_native.c
         nt_window.h
@@ -32,7 +32,7 @@ if(UNIX)
 endif()
 
 # Stub implementation for headless builds (CI, tests)
-nt_add_module(nt_window_stub
+nt_add_module(nt_window_stub LOG_DOMAIN "window_stub"
     nt_window.c
     stub/nt_window_stub.c
     nt_window.h

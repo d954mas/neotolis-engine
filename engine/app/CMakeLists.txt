@@ -1,7 +1,7 @@
 # nt_app -- frame loop, one implementation per platform
 
 if(EMSCRIPTEN)
-    nt_add_module(nt_app
+    nt_add_module(nt_app LOG_DOMAIN "app"
         nt_app.c
         web/nt_app_web.c
         nt_app.h
@@ -9,7 +9,7 @@ if(EMSCRIPTEN)
     # RAF callback fires after main() returns -- runtime must stay alive
     target_link_options(nt_app INTERFACE "SHELL:-sNO_EXIT_RUNTIME=1")
 else()
-    nt_add_module(nt_app
+    nt_add_module(nt_app LOG_DOMAIN "app"
         nt_app.c
         native/nt_app_native.c
         nt_app.h
@@ -23,7 +23,7 @@ if(NOT EMSCRIPTEN)
 endif()
 
 # Stub implementation for headless builds (CI, tests)
-nt_add_module(nt_app_stub
+nt_add_module(nt_app_stub LOG_DOMAIN "app_stub"
     nt_app.c
     stub/nt_app_stub.c
     nt_app.h

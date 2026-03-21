@@ -1,4 +1,4 @@
-nt_add_module(nt_mesh_comp
+nt_add_module(nt_mesh_comp LOG_DOMAIN "mesh_comp"
     nt_mesh_comp.c
     nt_mesh_comp.h
 )

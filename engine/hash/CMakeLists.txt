@@ -1,4 +1,4 @@
-nt_add_module(nt_hash
+nt_add_module(nt_hash LOG_DOMAIN "hash"
     nt_hash.c
     nt_hash.h
 )

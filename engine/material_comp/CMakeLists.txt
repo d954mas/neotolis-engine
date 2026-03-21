@@ -1,4 +1,4 @@
-nt_add_module(nt_material_comp
+nt_add_module(nt_material_comp LOG_DOMAIN "material_comp"
     nt_material_comp.c
     nt_material_comp.h
 )

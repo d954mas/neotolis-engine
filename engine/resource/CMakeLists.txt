@@ -1,4 +1,4 @@
-nt_add_module(nt_resource
+nt_add_module(nt_resource LOG_DOMAIN "resource"
     nt_resource.c
     nt_resource.h
 )

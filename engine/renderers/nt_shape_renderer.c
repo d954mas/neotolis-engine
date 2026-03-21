@@ -701,7 +701,7 @@ void nt_shape_renderer_init(void) {
         !s_shape.inst_pip_depth.id || !s_shape.inst_pip_overlay.id || !s_shape.cap_inst_pip_depth.id || !s_shape.cap_inst_pip_overlay.id || !s_shape.line_pip_depth.id ||
         !s_shape.line_pip_overlay.id || !s_shape.batch_vbo.id || !s_shape.batch_ibo.id || !s_shape.inst_buf.id || !s_shape.line_template_vbo.id || !s_shape.line_template_ibo.id ||
         !s_shape.line_instance_buf.id) {
-        nt_log_error("shape_renderer: init failed — resource creation error");
+        NT_LOG_ERROR("init failed -- resource creation error");
         nt_shape_renderer_shutdown();
         return;
     }
@@ -1372,7 +1372,7 @@ void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const
     }
     if (num_vertices > NT_SHAPE_RENDERER_MAX_VERTICES || num_indices > NT_SHAPE_RENDERER_MAX_INDICES) {
         NT_ASSERT(0 && "mesh exceeds batch limits");
-        nt_log_error("mesh too large for batch, dropped");
+        NT_LOG_ERROR("mesh too large for batch, dropped");
         return;
     }
 
@@ -1380,7 +1380,7 @@ void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const
     for (uint32_t i = 0; i < num_indices; i++) {
         if (indices[i] >= num_vertices) {
             NT_ASSERT(0 && "mesh index out of bounds");
-            nt_log_error("mesh index out of bounds, dropped");
+            NT_LOG_ERROR("mesh index out of bounds, dropped");
             return;
         }
     }
@@ -1405,7 +1405,7 @@ void nt_shape_renderer_mesh_wire(const float *positions, uint32_t num_vertices, 
     for (uint32_t i = 0; (i + 2) < num_indices; i += 3) {
         if (indices[i] >= num_vertices || indices[i + 1] >= num_vertices || indices[i + 2] >= num_vertices) {
             NT_ASSERT(0 && "mesh_wire index out of bounds");
-            nt_log_error("mesh_wire index out of bounds, skipped triangle");
+            NT_LOG_ERROR("mesh_wire index out of bounds, skipped triangle");
             continue;
         }
         const float *a = &positions[(ptrdiff_t)indices[i] * 3];

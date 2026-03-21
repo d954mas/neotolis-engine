@@ -150,13 +150,13 @@ static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char 
             ctx->pending[existing].data = data;
             return NT_BUILD_OK;
         }
-        (void)fprintf(stderr, "ERROR: duplicate resource_id 0x%016llX\n  existing: %s\n  new:      %s\n", (unsigned long long)resource_id, ctx->pending[existing].path, norm_path);
+        NT_LOG_ERROR("duplicate resource_id 0x%016llX  existing: %s  new:      %s", (unsigned long long)resource_id, ctx->pending[existing].path, norm_path);
         free(norm_path);
         return NT_BUILD_ERR_DUPLICATE;
     }
 
     if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
-        (void)fprintf(stderr, "ERROR: Asset limit reached (%d max)\n", NT_BUILD_MAX_ASSETS);
+        NT_LOG_ERROR("Asset limit reached (%d max)", NT_BUILD_MAX_ASSETS);
         free(norm_path);
         return NT_BUILD_ERR_LIMIT;
     }
@@ -174,20 +174,20 @@ static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char 
 
 NtBuilderContext *nt_builder_start_pack(const char *output_path) {
     if (!output_path) {
-        (void)fprintf(stderr, "ERROR: output_path is NULL\n");
+        NT_LOG_ERROR("output_path is NULL");
         return NULL;
     }
 
     NtBuilderContext *ctx = (NtBuilderContext *)calloc(1, sizeof(NtBuilderContext));
     if (!ctx) {
-        (void)fprintf(stderr, "ERROR: Failed to allocate builder context\n");
+        NT_LOG_ERROR("Failed to allocate builder context");
         return NULL;
     }
 
     strncpy(ctx->output_path, output_path, sizeof(ctx->output_path) - 1);
     ctx->output_path[sizeof(ctx->output_path) - 1] = '\0';
 
-    (void)printf("Starting pack: %s\n", output_path);
+    NT_LOG_INFO("Starting pack: %s", output_path);
     return ctx;
 }
 
@@ -202,7 +202,7 @@ nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data
         uint32_t new_capacity = ctx->data_capacity > 0 ? ctx->data_capacity * 2 : NT_BUILD_INITIAL_CAPACITY;
         uint8_t *new_buf = (uint8_t *)realloc(ctx->data_buf, new_capacity);
         if (!new_buf) {
-            (void)fprintf(stderr, "ERROR: Failed to grow data buffer to %u bytes\n", new_capacity);
+            NT_LOG_ERROR("Failed to grow data buffer to %u bytes", new_capacity);
             return NT_BUILD_ERR_IO;
         }
         ctx->data_buf = new_buf;
@@ -220,7 +220,7 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
     }
 
     if (ctx->entry_count >= NT_BUILD_MAX_ASSETS) {
-        (void)fprintf(stderr, "ERROR: entry limit reached (%d max)\n", NT_BUILD_MAX_ASSETS);
+        NT_LOG_ERROR("entry limit reached (%d max)", NT_BUILD_MAX_ASSETS);
         return NT_BUILD_ERR_LIMIT;
     }
 
@@ -311,12 +311,12 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     }
 
     if (ctx->pending_count == 0) {
-        (void)fprintf(stderr, "ERROR: No assets added.\n");
+        NT_LOG_ERROR("No assets added");
         return NT_BUILD_ERR_VALIDATION;
     }
 
     /* Phase 1: Import all deferred assets */
-    (void)printf("Importing %u assets...\n", ctx->pending_count);
+    NT_LOG_INFO("Importing %u assets...", ctx->pending_count);
     uint32_t fail_count = 0;
 
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
@@ -362,12 +362,12 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         if (ret != NT_BUILD_OK) {
             ctx->has_error = true;
             fail_count++;
-            (void)fprintf(stderr, "  FAILED: %s\n", pe->path);
+            NT_LOG_ERROR("  FAILED: %s", pe->path);
         }
     }
 
     if (ctx->has_error) {
-        (void)fprintf(stderr, "ERROR: Build failed: %u/%u assets failed. No .ntpack written.\n", fail_count, ctx->pending_count);
+        NT_LOG_ERROR("Build failed: %u/%u assets failed. No .ntpack written.", fail_count, ctx->pending_count);
         return NT_BUILD_ERR_VALIDATION;
     }
 
@@ -395,7 +395,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     FILE *file = fopen(ctx->output_path, "wb");
     if (!file) {
-        (void)fprintf(stderr, "ERROR: Cannot open output file: %s\n", ctx->output_path);
+        NT_LOG_ERROR("Cannot open output file: %s", ctx->output_path);
         return NT_BUILD_ERR_IO;
     }
 
@@ -416,16 +416,16 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     (void)fclose(file);
 
     if (!write_ok) {
-        (void)fprintf(stderr, "ERROR: Failed to write pack file\n");
+        NT_LOG_ERROR("Failed to write pack file");
         (void)remove(ctx->output_path);
         return NT_BUILD_ERR_IO;
     }
 
     /* Summary */
-    (void)printf("Build complete: %s\n", ctx->output_path);
-    (void)printf("  Assets: %u total (%u meshes, %u textures, %u shaders, %u blobs)\n", ctx->entry_count, ctx->mesh_count, ctx->texture_count, ctx->shader_count, ctx->blob_count);
+    NT_LOG_INFO("Build complete: %s", ctx->output_path);
+    NT_LOG_INFO("  Assets: %u total (%u meshes, %u textures, %u shaders, %u blobs)", ctx->entry_count, ctx->mesh_count, ctx->texture_count, ctx->shader_count, ctx->blob_count);
     if (ctx->dedup_count > 0) {
-        (void)printf("  Deduplicated: %u assets (saved %.3f MB)\n", ctx->dedup_count, (double)ctx->dedup_saved_bytes / (1024.0 * 1024.0));
+        NT_LOG_INFO("  Deduplicated: %u assets (saved %.3f MB)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / (1024.0 * 1024.0));
         for (uint32_t i = 0; i < ctx->entry_count; i++) {
             for (uint32_t j = 0; j < i; j++) {
                 if (ctx->entries[i].offset == ctx->entries[j].offset && ctx->entries[i].size == ctx->entries[j].size) {
@@ -440,28 +440,28 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                             orig_name = ctx->pending[pi].path ? ctx->pending[pi].path : "?";
                         }
                     }
-                    (void)printf("    %s -> %s\n", dup_name, orig_name);
+                    NT_LOG_INFO("    %s -> %s", dup_name, orig_name);
                     break;
                 }
             }
         }
     }
     if (total_size >= 1024 * 1024) {
-        (void)printf("  Pack size: %.3f MB (%u bytes)\n", (double)total_size / (1024.0 * 1024.0), total_size);
+        NT_LOG_INFO("  Pack size: %.3f MB (%u bytes)", (double)total_size / (1024.0 * 1024.0), total_size);
     } else if (total_size >= 1024) {
-        (void)printf("  Pack size: %.3f KB (%u bytes)\n", (double)total_size / 1024.0, total_size);
+        NT_LOG_INFO("  Pack size: %.3f KB (%u bytes)", (double)total_size / 1024.0, total_size);
     } else {
-        (void)printf("  Pack size: %u bytes\n", total_size);
+        NT_LOG_INFO("  Pack size: %u bytes", total_size);
     }
-    (void)printf("  CRC32: 0x%08X\n", checksum);
+    NT_LOG_INFO("  CRC32: 0x%08X", checksum);
 
     for (uint32_t i = 0; i < ctx->entry_count; i++) {
         const char *path = ctx->pending[i].path ? ctx->pending[i].path : "(unknown)";
         const char *rkey = ctx->pending[i].rename_key;
         if (rkey) {
-            (void)printf("  %s -> 0x%016llX (renamed: %s)\n", path, (unsigned long long)ctx->pending[i].resource_id, rkey);
+            NT_LOG_INFO("  %s -> 0x%016llX (renamed: %s)", path, (unsigned long long)ctx->pending[i].resource_id, rkey);
         } else {
-            (void)printf("  %s -> 0x%016llX\n", path, (unsigned long long)ctx->pending[i].resource_id);
+            NT_LOG_INFO("  %s -> 0x%016llX", path, (unsigned long long)ctx->pending[i].resource_id);
         }
     }
 
@@ -519,7 +519,7 @@ nt_build_result_t nt_builder_add_blob(NtBuilderContext *ctx, const void *data, u
 
     int32_t existing = nt_builder_find_entry(ctx, rid);
     if (existing >= 0 && !ctx->force) {
-        (void)fprintf(stderr, "ERROR: duplicate resource_id for blob '%s'\n", resource_id);
+        NT_LOG_ERROR("duplicate resource_id for blob '%s'", resource_id);
         return NT_BUILD_ERR_DUPLICATE;
     }
 
@@ -536,7 +536,7 @@ nt_build_result_t nt_builder_add_blob(NtBuilderContext *ctx, const void *data, u
     bd->size = size;
 
     if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
-        (void)fprintf(stderr, "ERROR: Asset limit reached (%d max)\n", NT_BUILD_MAX_ASSETS);
+        NT_LOG_ERROR("Asset limit reached (%d max)", NT_BUILD_MAX_ASSETS);
         free(bd->data);
         free(bd);
         return NT_BUILD_ERR_LIMIT;
@@ -572,7 +572,7 @@ nt_build_result_t nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, c
 
     int32_t existing = nt_builder_find_entry(ctx, rid);
     if (existing >= 0 && !ctx->force) {
-        (void)fprintf(stderr, "ERROR: duplicate resource_id for texture '%s'\n", resource_id);
+        NT_LOG_ERROR("duplicate resource_id for texture '%s'", resource_id);
         return NT_BUILD_ERR_DUPLICATE;
     }
 
@@ -595,7 +595,7 @@ nt_build_result_t nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, c
     }
 
     if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
-        (void)fprintf(stderr, "ERROR: Asset limit reached (%d max)\n", NT_BUILD_MAX_ASSETS);
+        NT_LOG_ERROR("Asset limit reached (%d max)", NT_BUILD_MAX_ASSETS);
         free(td->data);
         free(td);
         return NT_BUILD_ERR_LIMIT;
@@ -635,7 +635,7 @@ nt_build_result_t nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_
 
     int32_t existing = nt_builder_find_entry(ctx, rid);
     if (existing >= 0 && !ctx->force) {
-        (void)fprintf(stderr, "ERROR: duplicate resource_id for raw texture '%s'\n", resource_id);
+        NT_LOG_ERROR("duplicate resource_id for raw texture '%s'", resource_id);
         return NT_BUILD_ERR_DUPLICATE;
     }
 
@@ -660,7 +660,7 @@ nt_build_result_t nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_
     }
 
     if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
-        (void)fprintf(stderr, "ERROR: Asset limit reached (%d max)\n", NT_BUILD_MAX_ASSETS);
+        NT_LOG_ERROR("Asset limit reached (%d max)", NT_BUILD_MAX_ASSETS);
         free(td->pixels);
         free(td);
         return NT_BUILD_ERR_LIMIT;
@@ -701,7 +701,7 @@ nt_build_result_t nt_builder_rename(NtBuilderContext *ctx, const char *old_path,
     uint64_t old_id = nt_builder_path_id(old_path);
     int32_t idx = nt_builder_find_entry(ctx, old_id);
     if (idx < 0) {
-        (void)fprintf(stderr, "ERROR: rename: '%s' not found in pending assets\n", old_path);
+        NT_LOG_ERROR("rename: '%s' not found in pending assets", old_path);
         return NT_BUILD_ERR_VALIDATION;
     }
 
@@ -709,7 +709,7 @@ nt_build_result_t nt_builder_rename(NtBuilderContext *ctx, const char *old_path,
 
     int32_t collision = nt_builder_find_entry(ctx, new_id);
     if (collision >= 0 && collision != idx) {
-        (void)fprintf(stderr, "ERROR: rename: new path '%s' collides with existing '%s'\n", new_path, ctx->pending[collision].path);
+        NT_LOG_ERROR("rename: new path '%s' collides with existing '%s'", new_path, ctx->pending[collision].path);
         return NT_BUILD_ERR_DUPLICATE;
     }
 

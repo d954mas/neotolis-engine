@@ -1,4 +1,4 @@
-nt_add_module(nt_time
+nt_add_module(nt_time LOG_DOMAIN "time"
     nt_time.c
     nt_time.h
 )

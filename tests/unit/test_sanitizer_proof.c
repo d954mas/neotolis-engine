@@ -9,8 +9,8 @@
  */
 /* stdlib.h must come before limits.h on Windows+Clang to avoid
    __declspec(noreturn) conflict with C17 stdnoreturn.h macro. */
-#include <stdlib.h>
 #include <limits.h>
+#include <stdlib.h>
 
 #include "unity.h"
 
