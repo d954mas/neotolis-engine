@@ -488,6 +488,54 @@ uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     return (uint32_t)shader;
 }
 
+/* Log shader/program info line-by-line (query actual length, no fixed buffer) */
+static void nt_gfx_gl_log_lines(const char *log) {
+    const char *line = log;
+    for (const char *p = log; *p; p++) {
+        if (*p == '\n') {
+            if (p > line) {
+                NT_LOG_ERROR("%.*s", (int)(p - line), line);
+            }
+            line = p + 1;
+        }
+    }
+    if (*line) {
+        NT_LOG_ERROR("%s", line);
+    }
+}
+
+static void nt_gfx_gl_log_shader(uint32_t shader, const char *stage) {
+    GLint len = 0;
+    glGetShaderiv((GLuint)shader, GL_INFO_LOG_LENGTH, &len);
+    if (len <= 1) {
+        return;
+    }
+    char *log = (char *)malloc((size_t)len);
+    if (!log) {
+        return;
+    }
+    glGetShaderInfoLog((GLuint)shader, len, NULL, log);
+    NT_LOG_ERROR("%s shader:", stage);
+    nt_gfx_gl_log_lines(log);
+    free(log);
+}
+
+static void nt_gfx_gl_log_program(uint32_t program) {
+    GLint len = 0;
+    glGetProgramiv((GLuint)program, GL_INFO_LOG_LENGTH, &len);
+    if (len <= 1) {
+        return;
+    }
+    char *log = (char *)malloc((size_t)len);
+    if (!log) {
+        return;
+    }
+    glGetProgramInfoLog((GLuint)program, len, NULL, log);
+    NT_LOG_ERROR("program link:");
+    nt_gfx_gl_log_lines(log);
+    free(log);
+}
+
 void nt_gfx_backend_destroy_shader(uint32_t backend_handle) {
     GLuint shader = (GLuint)backend_handle;
     glDeleteShader(shader);
@@ -503,13 +551,9 @@ uint32_t nt_gfx_backend_create_pipeline(const nt_pipeline_desc_t *desc, uint32_t
     GLint linked = 0;
     glGetProgramiv(program, GL_LINK_STATUS, &linked);
     if (!linked) {
-        char info[512];
-        glGetShaderInfoLog((GLuint)vs_backend, (GLsizei)sizeof(info), NULL, info);
-        NT_LOG_ERROR("%s", info);
-        glGetShaderInfoLog((GLuint)fs_backend, (GLsizei)sizeof(info), NULL, info);
-        NT_LOG_ERROR("%s", info);
-        glGetProgramInfoLog(program, (GLsizei)sizeof(info), NULL, info);
-        NT_LOG_ERROR("%s", info);
+        nt_gfx_gl_log_shader(vs_backend, "vertex");
+        nt_gfx_gl_log_shader(fs_backend, "fragment");
+        nt_gfx_gl_log_program(program);
 
         glDeleteProgram(program);
         return 0;
