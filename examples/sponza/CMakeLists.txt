@@ -54,7 +54,7 @@ endif()
 # WASM-specific settings
 if(EMSCRIPTEN)
     set_target_properties(sponza PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
-    nt_configure_shell(sponza TITLE "Sponza - Neotolis Engine")
+    nt_configure_shell(sponza TITLE "Sponza - Neotolis Engine" SIMD_WASM_PATH "${NT_WASM_SIMD_WASM_PATH}")
     target_link_options(sponza PRIVATE
         "SHELL:-sUSE_WEBGL2=1"
         "SHELL:-sMAX_WEBGL_VERSION=2"

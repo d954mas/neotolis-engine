@@ -6,8 +6,27 @@ include(cmake/warnings.cmake)
 include(cmake/nt_module.cmake)
 include(cmake/nt_shell.cmake)
 
+option(NT_WASM_ENABLE_SIMD "Build WASM targets with -msimd128 enabled." OFF)
+set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected into the HTML shell.")
+
+if(NT_WASM_ENABLE_SIMD AND NT_WASM_SIMD_WASM_PATH)
+    message(FATAL_ERROR "NT_WASM_ENABLE_SIMD and NT_WASM_SIMD_WASM_PATH cannot be enabled together. Use a paired preset for baseline+SIMD output or a standalone SIMD preset.")
+endif()
+
+if(NT_WASM_SIMD_WASM_PATH AND NOT NT_WASM_ENABLE_SIMD)
+    message(WARNING "NT_WASM_SIMD_WASM_PATH is set to \"${NT_WASM_SIMD_WASM_PATH}\". "
+        "The HTML shell will reference this file, but this build does not produce it. "
+        "Use scripts/build_wasm_paired.sh or build the matching SIMD preset and run "
+        "scripts/package_wasm_simd.sh to place the SIMD wasm beside the baseline output.")
+endif()
+
 # Emscripten optimizations
 if(EMSCRIPTEN)
+    if(NT_WASM_ENABLE_SIMD)
+        add_compile_options(-msimd128)
+        add_link_options(-msimd128)
+    endif()
+
     # emmalloc: compact allocator, ~4 KB smaller than default dlmalloc
     add_link_options(-sMALLOC=emmalloc)
     # Closure Compiler minifies JS glue code (~60% reduction)
@@ -19,12 +38,21 @@ endif()
 # Derive preset name from build type + platform for output directory layout
 if(EMSCRIPTEN)
     if(NT_WASM_ANALYSIS)
-        set(NT_PRESET_NAME "wasm-analysis")
+        set(_nt_wasm_tier "analysis")
     elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-        set(NT_PRESET_NAME "wasm-release")
+        set(_nt_wasm_tier "release")
     else()
-        set(NT_PRESET_NAME "wasm-debug")
+        set(_nt_wasm_tier "debug")
     endif()
+
+    set(_nt_wasm_mode_suffix "")
+    if(NT_WASM_ENABLE_SIMD)
+        set(_nt_wasm_mode_suffix "-simd")
+    elseif(NT_WASM_SIMD_WASM_PATH)
+        set(_nt_wasm_mode_suffix "-paired")
+    endif()
+
+    set(NT_PRESET_NAME "wasm-${_nt_wasm_tier}${_nt_wasm_mode_suffix}")
 else()
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
         set(NT_PRESET_NAME "native-release")

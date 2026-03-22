@@ -64,8 +64,10 @@
     @NT_SHELL_FULLSCREEN_BLOCK@
 
     <script>
+@NT_SHELL_SIMD_LOADER_JS@
+@NT_SHELL_SIMD_RUNTIME_STATE@
         var Module = {
-            canvas: document.getElementById('canvas')
+            canvas: document.getElementById('canvas')@NT_SHELL_LOCATE_FILE_PROPERTY@
         };
 
         document.getElementById('canvas').addEventListener('webglcontextlost', function(e) {

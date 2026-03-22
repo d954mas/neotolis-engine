@@ -82,10 +82,42 @@ measure_file() {
     FILE_GZIPS+=("$gz")
 }
 
+# Paired builds produce both index.wasm and index_simd.wasm but a player
+# downloads only one.  Show both files with real sizes; count only the
+# larger one in engine/total sums.
+_baseline_wasm=""
+_simd_wasm=""
 for file in "$OUTPUT_DIR"/*; do
     [ -f "$file" ] || continue
-    measure_file "$file" ""
+    case "$(basename "$file")" in
+        index.wasm)      _baseline_wasm="$file" ;;
+        index_simd.wasm) _simd_wasm="$file" ;;
+        *) measure_file "$file" "" ;;
+    esac
 done
+
+if [ -n "$_simd_wasm" ] && [ -n "$_baseline_wasm" ]; then
+    _base_sz=$(wc -c < "$_baseline_wasm" | tr -d ' ')
+    _simd_sz=$(wc -c < "$_simd_wasm" | tr -d ' ')
+    if [ "$_simd_sz" -ge "$_base_sz" ]; then
+        measure_file "$_simd_wasm" ""
+        # Show baseline but don't add to totals
+        _base_gz=$(gzip -c "$_baseline_wasm" | wc -c | tr -d ' ')
+        FILE_NAMES+=("index.wasm")
+        FILE_RAWS+=("$_base_sz")
+        FILE_GZIPS+=("$_base_gz")
+    else
+        measure_file "$_baseline_wasm" ""
+        _simd_gz=$(gzip -c "$_simd_wasm" | wc -c | tr -d ' ')
+        FILE_NAMES+=("index_simd.wasm")
+        FILE_RAWS+=("$_simd_sz")
+        FILE_GZIPS+=("$_simd_gz")
+    fi
+elif [ -n "$_baseline_wasm" ]; then
+    measure_file "$_baseline_wasm" ""
+elif [ -n "$_simd_wasm" ]; then
+    measure_file "$_simd_wasm" ""
+fi
 
 # Include asset packs (assets/ subdirectory) if present
 if [ -d "$OUTPUT_DIR/assets" ]; then

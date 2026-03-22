@@ -61,13 +61,12 @@ jobs:
           name: sponza-packs
           path: build/examples/sponza
 
-      - name: Configure WASM debug
-        run: emcmake cmake --preset wasm-debug
+      - name: Build baseline WASM debug artifacts
+        run: |
+          emcmake cmake --preset wasm-debug
+          cmake --build --preset wasm-debug
 
-      - name: Build WASM debug
-        run: cmake --build --preset wasm-debug
-
-      - name: Verify WASM debug output
+      - name: Verify baseline WASM debug output
         run: |
           test -f build/examples/hello/wasm-debug/index.html
           test -f build/examples/hello/wasm-debug/index.js
@@ -75,18 +74,64 @@ jobs:
           test -f build/engine/wasm-debug/libnt_core.a
           test -f build/engine/wasm-debug/libnt_log.a
           test -f build/engine/wasm-debug/libnt_log_stub.a
-          echo "WASM debug build verified"
+          echo "Baseline WASM debug build verified"
 
-      - name: Run WASM smoke test (debug)
+      - name: Run SIMD loader test
+        run: node tests/wasm/simd_loader_test.js
+
+      - name: Run baseline WASM smoke test (debug)
         run: node tests/wasm/smoke_test.js wasm-debug
 
-      - name: Configure WASM release
-        run: emcmake cmake --preset wasm-release
+      - name: Run baseline WASM debug ctest
+        run: ctest --preset wasm-debug
 
-      - name: Build WASM release
-        run: cmake --build --preset wasm-release
+      - name: Build standalone WASM debug SIMD artifacts
+        run: |
+          emcmake cmake --preset wasm-debug-simd
+          cmake --build --preset wasm-debug-simd
 
-      - name: Verify WASM release output
+      - name: Verify standalone WASM debug SIMD output
+        run: |
+          test -f build/examples/hello/wasm-debug-simd/index.html
+          test -f build/examples/hello/wasm-debug-simd/index.js
+          test -f build/examples/hello/wasm-debug-simd/index.wasm
+          test -f build/engine/wasm-debug-simd/libnt_core.a
+          test -f build/engine/wasm-debug-simd/libnt_log.a
+          test -f build/engine/wasm-debug-simd/libnt_log_stub.a
+          echo "Standalone WASM debug SIMD build verified"
+
+      - name: Run standalone WASM smoke test (debug SIMD)
+        run: node tests/wasm/smoke_test.js wasm-debug-simd
+
+      - name: Run standalone WASM debug SIMD ctest
+        run: ctest --preset wasm-debug-simd
+
+      - name: Build paired WASM debug artifacts
+        run: ./scripts/build_wasm_paired.sh wasm-debug-paired
+
+      - name: Verify paired WASM debug output
+        run: |
+          test -f build/examples/hello/wasm-debug-paired/index.html
+          test -f build/examples/hello/wasm-debug-paired/index.js
+          test -f build/examples/hello/wasm-debug-paired/index.wasm
+          test -f build/examples/hello/wasm-debug-paired/index_simd.wasm
+          test -f build/engine/wasm-debug-paired/libnt_core.a
+          test -f build/engine/wasm-debug-paired/libnt_log.a
+          test -f build/engine/wasm-debug-paired/libnt_log_stub.a
+          echo "Paired WASM debug build verified"
+
+      - name: Run paired WASM smoke test (debug baseline shell)
+        run: node tests/wasm/smoke_test.js wasm-debug-paired
+
+      - name: Run paired WASM debug ctest
+        run: ctest --preset wasm-debug-paired
+
+      - name: Build baseline WASM release artifacts
+        run: |
+          emcmake cmake --preset wasm-release
+          cmake --build --preset wasm-release
+
+      - name: Verify baseline WASM release output
         run: |
           test -f build/examples/hello/wasm-release/index.html
           test -f build/examples/hello/wasm-release/index.js
@@ -94,10 +139,96 @@ jobs:
           test -f build/engine/wasm-release/libnt_core.a
           test -f build/engine/wasm-release/libnt_log.a
           test -f build/engine/wasm-release/libnt_log_stub.a
-          echo "WASM release build verified"
+          echo "Baseline WASM release build verified"
 
-      - name: Run WASM smoke test (release)
+      - name: Run baseline WASM smoke test (release)
         run: node tests/wasm/smoke_test.js wasm-release
+
+      - name: Run baseline WASM release ctest
+        run: ctest --preset wasm-release
+
+      - name: Build paired WASM release artifacts
+        run: ./scripts/build_wasm_paired.sh wasm-release-paired
+
+      - name: Verify paired WASM release output
+        run: |
+          test -f build/examples/hello/wasm-release-paired/index.html
+          test -f build/examples/hello/wasm-release-paired/index.js
+          test -f build/examples/hello/wasm-release-paired/index.wasm
+          test -f build/examples/hello/wasm-release-paired/index_simd.wasm
+          test -f build/examples/hello/wasm-release-simd/index.html
+          test -f build/examples/hello/wasm-release-simd/index.js
+          test -f build/examples/hello/wasm-release-simd/index.wasm
+          test -f build/engine/wasm-release-paired/libnt_core.a
+          test -f build/engine/wasm-release-paired/libnt_log.a
+          test -f build/engine/wasm-release-paired/libnt_log_stub.a
+          test -f build/engine/wasm-release-simd/libnt_core.a
+          test -f build/engine/wasm-release-simd/libnt_log.a
+          test -f build/engine/wasm-release-simd/libnt_log_stub.a
+          echo "Paired WASM release build verified"
+
+      - name: Run paired WASM smoke test (release baseline shell)
+        run: node tests/wasm/smoke_test.js wasm-release-paired
+
+      - name: Run standalone WASM smoke test (release SIMD)
+        run: node tests/wasm/smoke_test.js wasm-release-simd
+
+      - name: Run paired WASM release ctest
+        run: ctest --preset wasm-release-paired
+
+      - name: Run standalone WASM release SIMD ctest
+        run: ctest --preset wasm-release-simd
+
+      - name: Build paired WASM analysis artifacts
+        run: ./scripts/build_wasm_paired.sh wasm-analysis-paired
+
+      - name: Verify paired WASM analysis output
+        run: |
+          test -f build/examples/hello/wasm-analysis-paired/index.html
+          test -f build/examples/hello/wasm-analysis-paired/index.js
+          test -f build/examples/hello/wasm-analysis-paired/index.wasm
+          test -f build/examples/hello/wasm-analysis-paired/index_simd.wasm
+          test -f build/examples/hello/wasm-analysis-simd/index.html
+          test -f build/examples/hello/wasm-analysis-simd/index.js
+          test -f build/examples/hello/wasm-analysis-simd/index.wasm
+          test -f build/engine/wasm-analysis-paired/libnt_core.a
+          test -f build/engine/wasm-analysis-paired/libnt_log.a
+          test -f build/engine/wasm-analysis-paired/libnt_log_stub.a
+          test -f build/engine/wasm-analysis-simd/libnt_core.a
+          test -f build/engine/wasm-analysis-simd/libnt_log.a
+          test -f build/engine/wasm-analysis-simd/libnt_log_stub.a
+          echo "Paired WASM analysis build verified"
+
+      - name: Run paired WASM smoke test (analysis baseline shell)
+        run: node tests/wasm/smoke_test.js wasm-analysis-paired
+
+      - name: Run standalone WASM smoke test (analysis SIMD)
+        run: node tests/wasm/smoke_test.js wasm-analysis-simd
+
+      - name: Run paired WASM analysis ctest
+        run: ctest --preset wasm-analysis-paired
+
+      - name: Run standalone WASM analysis SIMD ctest
+        run: ctest --preset wasm-analysis-simd
+
+      - name: Verify packaged example SIMD artifacts
+        run: |
+          test -f build/examples/hello/wasm-debug-paired/index_simd.wasm
+          test -f build/examples/bench_shapes/wasm-debug-paired/index_simd.wasm
+          test -f build/examples/spinning_cube/wasm-debug-paired/index_simd.wasm
+          test -f build/examples/textured_quad/wasm-debug-paired/index_simd.wasm
+          test -f build/examples/sponza/wasm-debug-paired/index_simd.wasm
+          test -f build/examples/hello/wasm-release-paired/index_simd.wasm
+          test -f build/examples/bench_shapes/wasm-release-paired/index_simd.wasm
+          test -f build/examples/spinning_cube/wasm-release-paired/index_simd.wasm
+          test -f build/examples/textured_quad/wasm-release-paired/index_simd.wasm
+          test -f build/examples/sponza/wasm-release-paired/index_simd.wasm
+          test -f build/examples/hello/wasm-analysis-paired/index_simd.wasm
+          test -f build/examples/bench_shapes/wasm-analysis-paired/index_simd.wasm
+          test -f build/examples/spinning_cube/wasm-analysis-paired/index_simd.wasm
+          test -f build/examples/textured_quad/wasm-analysis-paired/index_simd.wasm
+          test -f build/examples/sponza/wasm-analysis-paired/index_simd.wasm
+          echo "Packaged example SIMD artifacts verified"
 
   native:
     name: Native Build & Test
@@ -284,31 +415,36 @@ jobs:
             done
           done
 
-      - name: Configure WASM release
-        run: emcmake cmake --preset wasm-release -DNT_CDN_URL="https://cdn.neotolis-engine.dev"
-
-      - name: Build WASM release
-        run: cmake --build --preset wasm-release
+      - name: Build paired WASM release for deploy
+        run: |
+          emcmake cmake --preset wasm-release-paired -DNT_CDN_URL="https://cdn.neotolis-engine.dev"
+          emcmake cmake --preset wasm-release-simd -DNT_CDN_URL="https://cdn.neotolis-engine.dev"
+          cmake --build --preset wasm-release-paired
+          cmake --build --preset wasm-release-simd
+          ./scripts/package_all_simd.sh wasm-release-paired wasm-release-simd
 
       - name: Measure sizes (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad sponza; do
-            bash scripts/size.sh $example --json > /tmp/size_${example}.json
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
+            PRESET=wasm-release-paired bash scripts/size.sh $example --json > /tmp/size_${example}.json
           done
 
       - name: Install wabt
         run: sudo apt-get update && sudo apt-get install -y wabt
 
-      - name: Configure WASM analysis
-        run: emcmake cmake --preset wasm-analysis
-
-      - name: Build WASM analysis
-        run: cmake --build --preset wasm-analysis
+      - name: Build WASM analysis paired
+        run: |
+          emcmake cmake --preset wasm-analysis-paired
+          emcmake cmake --preset wasm-analysis-simd
+          cmake --build --preset wasm-analysis-paired
+          cmake --build --preset wasm-analysis-simd
 
       - name: Generate size reports (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad sponza; do
-            bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
+            PRESET=wasm-analysis-paired bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
           done
 
       - name: Checkout gh-pages branch
@@ -323,7 +459,8 @@ jobs:
 
       - name: Update size history and reports (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad sponza; do
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
             mkdir -p "gh-pages-data/reports/$example"
             cp "/tmp/report_${example}.txt" "gh-pages-data/reports/$example/size-report.txt"
 
@@ -339,7 +476,8 @@ jobs:
 
       - name: Check for size regression
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad sponza; do
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
             TARGET_FILE="gh-pages-data/sizes/${example}.json"
             [ -f "$TARGET_FILE" ] || continue
             ENTRIES=$(jq length "$TARGET_FILE")
@@ -378,7 +516,7 @@ jobs:
 
       - name: Copy WASM examples to gh-pages
         run: |
-          for example_dir in build/examples/*/wasm-release; do
+          for example_dir in build/examples/*/wasm-release-paired; do
             example_name=$(basename $(dirname "$example_dir"))
             mkdir -p "gh-pages-data/wasm/$example_name"
             cp "$example_dir"/*.html "$example_dir"/*.js "$example_dir"/*.wasm "gh-pages-data/wasm/$example_name/"
@@ -462,28 +600,49 @@ jobs:
       - name: Install wabt
         run: sudo apt-get update && sudo apt-get install -y wabt
 
-      - name: Configure WASM release
-        run: emcmake cmake --preset wasm-release
+      - name: Build baseline WASM release artifacts
+        run: |
+          emcmake cmake --preset wasm-release
+          cmake --build --preset wasm-release
 
-      - name: Build WASM release
-        run: cmake --build --preset wasm-release
+      - name: Verify baseline WASM release output
+        run: |
+          test -f build/examples/hello/wasm-release/index.html
+          test -f build/examples/hello/wasm-release/index.js
+          test -f build/examples/hello/wasm-release/index.wasm
+          test -f build/engine/wasm-release/libnt_core.a
+          test -f build/engine/wasm-release/libnt_log.a
+          test -f build/engine/wasm-release/libnt_log_stub.a
+          echo "Baseline WASM release build verified"
+
+      - name: Run baseline WASM smoke test (release)
+        run: node tests/wasm/smoke_test.js wasm-release
+
+      - name: Run baseline WASM release ctest
+        run: ctest --preset wasm-release
+
+      - name: Build paired WASM release artifacts
+        run: ./scripts/build_wasm_paired.sh wasm-release-paired
 
       - name: Measure sizes (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad sponza; do
-            bash scripts/size.sh $example --json > /tmp/size_${example}.json
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
+            PRESET=wasm-release-paired bash scripts/size.sh $example --json > /tmp/size_${example}.json
           done
 
-      - name: Configure WASM analysis
-        run: emcmake cmake --preset wasm-analysis
-
-      - name: Build WASM analysis
-        run: cmake --build --preset wasm-analysis
+      - name: Build WASM analysis paired
+        run: |
+          emcmake cmake --preset wasm-analysis-paired
+          emcmake cmake --preset wasm-analysis-simd
+          cmake --build --preset wasm-analysis-paired
+          cmake --build --preset wasm-analysis-simd
 
       - name: Generate size reports (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad sponza; do
-            bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
+            PRESET=wasm-analysis-paired bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
           done
 
       - name: Fetch baseline from gh-pages
@@ -496,7 +655,8 @@ jobs:
 
       - name: Generate size comment
         run: |
-          EXAMPLES="hello bench_shapes spinning_cube textured_quad sponza"
+          source scripts/wasm_examples.sh
+          EXAMPLES="${WASM_EXAMPLES[*]}"
           PR_COMMIT=$(git rev-parse --short HEAD)
 
           # Format bytes as KB/MB with 3 decimal places
@@ -661,7 +821,8 @@ jobs:
 
       - name: Generate size report comment
         run: |
-          EXAMPLES="hello bench_shapes spinning_cube textured_quad sponza"
+          source scripts/wasm_examples.sh
+          EXAMPLES="${WASM_EXAMPLES[*]}"
           PR_COMMIT=$(git rev-parse --short HEAD)
 
           {
