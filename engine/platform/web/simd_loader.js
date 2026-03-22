@@ -8,6 +8,8 @@
     root.ntSupportsWasmSimd = api.ntSupportsWasmSimd;
     root.ntResolveWasmPath = api.ntResolveWasmPath;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function() {
+    // Minimal WASM module: (func (drop (i8x16.splat (i32.const 0))))
+    // Validation succeeds only when WebAssembly SIMD is supported.
     var SIMD_PROBE = new Uint8Array([
         0, 97, 115, 109, 1, 0, 0, 0,
         1, 4, 1, 96, 0, 0,

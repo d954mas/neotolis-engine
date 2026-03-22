@@ -63,7 +63,7 @@ jobs:
 
       - name: Build baseline WASM debug artifacts
         run: |
-          cmake --preset wasm-debug
+          emcmake cmake --preset wasm-debug
           cmake --build --preset wasm-debug
 
       - name: Verify baseline WASM debug output
@@ -87,7 +87,7 @@ jobs:
 
       - name: Build standalone WASM debug SIMD artifacts
         run: |
-          cmake --preset wasm-debug-simd
+          emcmake cmake --preset wasm-debug-simd
           cmake --build --preset wasm-debug-simd
 
       - name: Verify standalone WASM debug SIMD output
@@ -125,6 +125,27 @@ jobs:
 
       - name: Run paired WASM debug ctest
         run: ctest --preset wasm-debug-paired
+
+      - name: Build baseline WASM release artifacts
+        run: |
+          emcmake cmake --preset wasm-release
+          cmake --build --preset wasm-release
+
+      - name: Verify baseline WASM release output
+        run: |
+          test -f build/examples/hello/wasm-release/index.html
+          test -f build/examples/hello/wasm-release/index.js
+          test -f build/examples/hello/wasm-release/index.wasm
+          test -f build/engine/wasm-release/libnt_core.a
+          test -f build/engine/wasm-release/libnt_log.a
+          test -f build/engine/wasm-release/libnt_log_stub.a
+          echo "Baseline WASM release build verified"
+
+      - name: Run baseline WASM smoke test (release)
+        run: node tests/wasm/smoke_test.js wasm-release
+
+      - name: Run baseline WASM release ctest
+        run: ctest --preset wasm-release
 
       - name: Build paired WASM release artifacts
         run: ./scripts/build_wasm_paired.sh wasm-release-paired
@@ -534,6 +555,27 @@ jobs:
 
       - name: Install wabt
         run: sudo apt-get update && sudo apt-get install -y wabt
+
+      - name: Build baseline WASM release artifacts
+        run: |
+          emcmake cmake --preset wasm-release
+          cmake --build --preset wasm-release
+
+      - name: Verify baseline WASM release output
+        run: |
+          test -f build/examples/hello/wasm-release/index.html
+          test -f build/examples/hello/wasm-release/index.js
+          test -f build/examples/hello/wasm-release/index.wasm
+          test -f build/engine/wasm-release/libnt_core.a
+          test -f build/engine/wasm-release/libnt_log.a
+          test -f build/engine/wasm-release/libnt_log_stub.a
+          echo "Baseline WASM release build verified"
+
+      - name: Run baseline WASM smoke test (release)
+        run: node tests/wasm/smoke_test.js wasm-release
+
+      - name: Run baseline WASM release ctest
+        run: ctest --preset wasm-release
 
       - name: Build paired WASM release artifacts
         run: ./scripts/build_wasm_paired.sh wasm-release-paired

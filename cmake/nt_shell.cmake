@@ -23,6 +23,7 @@
 #   @NT_SHELL_KEYFRAMES@        - Literal "@keyframes" (CMake @ONLY workaround)
 #   @NT_SHELL_SIMD_LOADER_JS@   - Shared SIMD loader JavaScript source
 #   @NT_SHELL_SIMD_WASM_PATH@   - Alternate SIMD wasm path (or empty string)
+#   @NT_SHELL_LOCATE_FILE_BLOCK@ - Optional locateFile override for paired builds
 #
 # Example:
 #   nt_configure_shell(hello TITLE "Hello - Neotolis Engine")
@@ -45,8 +46,19 @@ function(nt_configure_shell target)
 
     # Set template variables for configure_file
     set(NT_SHELL_TITLE "${SHELL_TITLE}")
-    set(NT_SHELL_SIMD_WASM_PATH "${SHELL_SIMD_WASM_PATH}")
-    file(READ "${_NT_SHELL_MODULE_DIR}/../engine/platform/web/simd_loader.js" NT_SHELL_SIMD_LOADER_JS)
+    if(SHELL_SIMD_WASM_PATH)
+        set(NT_SHELL_SIMD_WASM_PATH "${SHELL_SIMD_WASM_PATH}")
+        file(READ "${_NT_SHELL_MODULE_DIR}/../engine/platform/web/simd_loader.js" NT_SHELL_SIMD_LOADER_JS)
+        set(NT_SHELL_LOCATE_FILE_BLOCK [=[
+            locateFile: function(path) {
+                return ntResolveWasmPath(path, '@NT_SHELL_SIMD_WASM_PATH@');
+            }
+]=])
+    else()
+        set(NT_SHELL_SIMD_WASM_PATH "")
+        set(NT_SHELL_SIMD_LOADER_JS "")
+        set(NT_SHELL_LOCATE_FILE_BLOCK "")
+    endif()
 
     # Handle FULLSCREEN_BUTTON: inject HTML/CSS/JS block or empty string
     if(SHELL_FULLSCREEN_BUTTON)

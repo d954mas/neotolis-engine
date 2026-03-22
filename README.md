@@ -58,11 +58,12 @@ cmake --build --preset wasm-debug-simd
 Explicit paired baseline+SIMD build in one command:
 
 ```bash
+source emsdk/emsdk_env.sh
 ./scripts/build_wasm_paired.sh wasm-debug-paired
 ```
 
-The paired build script configures the paired preset and its matching SIMD
-preset, builds both, then copies each SIMD wasm beside the paired example
+The paired build script uses `emcmake cmake --preset ...` for both configure steps,
+then builds both presets and copies each SIMD wasm beside the paired example
 output as `index_simd.wasm`. Baseline-only presets do not inject a SIMD path
 into the shell. Paired presets do inject that path, so the shell performs the
 SIMD probe and picks exactly one wasm at runtime.

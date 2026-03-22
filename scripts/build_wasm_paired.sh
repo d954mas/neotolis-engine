@@ -20,8 +20,8 @@ esac
 
 EXAMPLES=(hello bench_shapes spinning_cube textured_quad sponza)
 
-cmake --preset "${PAIRED_PRESET}"
-cmake --preset "${SIMD_PRESET}"
+emcmake cmake --preset "${PAIRED_PRESET}"
+emcmake cmake --preset "${SIMD_PRESET}"
 cmake --build --preset "${PAIRED_PRESET}"
 cmake --build --preset "${SIMD_PRESET}"
 

@@ -68,10 +68,7 @@
 
         var Module = {
             canvas: document.getElementById('canvas'),
-            locateFile: function(path) {
-                return ntResolveWasmPath(path, '@NT_SHELL_SIMD_WASM_PATH@');
-            }
-        };
+@NT_SHELL_LOCATE_FILE_BLOCK@        };
 
         document.getElementById('canvas').addEventListener('webglcontextlost', function(e) {
             e.preventDefault();

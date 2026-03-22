@@ -299,16 +299,16 @@ endif()
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---
 find_program(NT_NODE_EXECUTABLE NAMES node nodejs)
 
-if(NT_NODE_EXECUTABLE)
-    add_test(
-        NAME test_wasm_simd_loader
-        COMMAND
-            "${NT_NODE_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/wasm/simd_loader_test.js"
-    )
-endif()
-
 if(EMSCRIPTEN)
+    if(NT_NODE_EXECUTABLE)
+        add_test(
+            NAME test_wasm_simd_loader
+            COMMAND
+                "${NT_NODE_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/wasm/simd_loader_test.js"
+        )
+    endif()
+
     add_executable(wasm_smoke wasm/smoke_entry.c)
     target_link_libraries(wasm_smoke PRIVATE nt_core)
 
