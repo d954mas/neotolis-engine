@@ -55,7 +55,7 @@ endif()
 # WASM-specific settings
 if(EMSCRIPTEN)
     set_target_properties(textured_quad PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
-    nt_configure_shell(textured_quad TITLE "Textured Cube - Neotolis Engine")
+    nt_configure_shell(textured_quad TITLE "Textured Cube - Neotolis Engine" SIMD_WASM_PATH "${NT_WASM_SIMD_WASM_PATH}")
     target_link_options(textured_quad PRIVATE
         "SHELL:-sUSE_WEBGL2=1"
         "SHELL:-sMAX_WEBGL_VERSION=2"

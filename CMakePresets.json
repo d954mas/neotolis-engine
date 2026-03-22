@@ -28,6 +28,42 @@
             }
         },
         {
+            "name": "wasm-debug-paired",
+            "displayName": "WASM Debug Paired",
+            "inherits": "wasm-debug",
+            "binaryDir": "${sourceDir}/build/_cmake/wasm-debug-paired",
+            "cacheVariables": {
+                "NT_WASM_SIMD_WASM_PATH": "index_simd.wasm"
+            }
+        },
+        {
+            "name": "wasm-release-paired",
+            "displayName": "WASM Release Paired",
+            "inherits": "wasm-release",
+            "binaryDir": "${sourceDir}/build/_cmake/wasm-release-paired",
+            "cacheVariables": {
+                "NT_WASM_SIMD_WASM_PATH": "index_simd.wasm"
+            }
+        },
+        {
+            "name": "wasm-debug-simd",
+            "displayName": "WASM Debug SIMD",
+            "inherits": "wasm-debug",
+            "binaryDir": "${sourceDir}/build/_cmake/wasm-debug-simd",
+            "cacheVariables": {
+                "NT_WASM_ENABLE_SIMD": "ON"
+            }
+        },
+        {
+            "name": "wasm-release-simd",
+            "displayName": "WASM Release SIMD",
+            "inherits": "wasm-release",
+            "binaryDir": "${sourceDir}/build/_cmake/wasm-release-simd",
+            "cacheVariables": {
+                "NT_WASM_ENABLE_SIMD": "ON"
+            }
+        },
+        {
             "name": "native-debug",
             "displayName": "Native Debug",
             "generator": "Ninja",
@@ -57,6 +93,24 @@
             "cacheVariables": {
                 "NT_WASM_ANALYSIS": "ON"
             }
+        },
+        {
+            "name": "wasm-analysis-paired",
+            "displayName": "WASM Analysis Paired",
+            "inherits": "wasm-analysis",
+            "binaryDir": "${sourceDir}/build/_cmake/wasm-analysis-paired",
+            "cacheVariables": {
+                "NT_WASM_SIMD_WASM_PATH": "index_simd.wasm"
+            }
+        },
+        {
+            "name": "wasm-analysis-simd",
+            "displayName": "WASM Analysis SIMD",
+            "inherits": "wasm-release-simd",
+            "binaryDir": "${sourceDir}/build/_cmake/wasm-analysis-simd",
+            "cacheVariables": {
+                "NT_WASM_ANALYSIS": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -69,6 +123,22 @@
             "configurePreset": "wasm-release"
         },
         {
+            "name": "wasm-debug-paired",
+            "configurePreset": "wasm-debug-paired"
+        },
+        {
+            "name": "wasm-release-paired",
+            "configurePreset": "wasm-release-paired"
+        },
+        {
+            "name": "wasm-debug-simd",
+            "configurePreset": "wasm-debug-simd"
+        },
+        {
+            "name": "wasm-release-simd",
+            "configurePreset": "wasm-release-simd"
+        },
+        {
             "name": "native-debug",
             "configurePreset": "native-debug"
         },
@@ -79,12 +149,76 @@
         {
             "name": "wasm-analysis",
             "configurePreset": "wasm-analysis"
+        },
+        {
+            "name": "wasm-analysis-paired",
+            "configurePreset": "wasm-analysis-paired"
+        },
+        {
+            "name": "wasm-analysis-simd",
+            "configurePreset": "wasm-analysis-simd"
         }
     ],
     "testPresets": [
         {
             "name": "wasm-debug",
             "configurePreset": "wasm-debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "wasm-debug-paired",
+            "configurePreset": "wasm-debug-paired",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "wasm-debug-simd",
+            "configurePreset": "wasm-debug-simd",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "wasm-release",
+            "configurePreset": "wasm-release",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "wasm-release-paired",
+            "configurePreset": "wasm-release-paired",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "wasm-release-simd",
+            "configurePreset": "wasm-release-simd",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "wasm-analysis",
+            "configurePreset": "wasm-analysis",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "wasm-analysis-paired",
+            "configurePreset": "wasm-analysis-paired",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "wasm-analysis-simd",
+            "configurePreset": "wasm-analysis-simd",
             "output": {
                 "outputOnFailure": true
             }

@@ -1,6 +1,7 @@
 # cmake/nt_shell.cmake
 #
-# nt_configure_shell(<target> [TITLE <title>] [SHELL_FILE <path>] [FULLSCREEN_BUTTON])
+# nt_configure_shell(<target> [TITLE <title>] [SHELL_FILE <path>] [FULLSCREEN_BUTTON]
+#                    [SIMD_WASM_PATH <path>])
 #
 # Configures an HTML shell template for WASM builds. Processes the template
 # through configure_file(@ONLY) to resolve @VAR@ placeholders, then applies
@@ -13,11 +14,15 @@
 #                     through configure_file(@ONLY) for @VAR@ resolution.
 #   FULLSCREEN_BUTTON (optional flag) When present, enables a fullscreen
 #                     toggle bar below the canvas. OFF by default.
+#   SIMD_WASM_PATH <path> (optional) Alternate wasm path selected when the
+#                     browser validates a minimal SIMD probe.
 #
 # Template variables set for configure_file:
 #   @NT_SHELL_TITLE@            - Page title
 #   @NT_SHELL_FULLSCREEN_BLOCK@ - HTML/CSS/JS for fullscreen bar (or empty)
 #   @NT_SHELL_KEYFRAMES@        - Literal "@keyframes" (CMake @ONLY workaround)
+#   @NT_SHELL_SIMD_LOADER_JS@   - Shared SIMD loader JavaScript source
+#   @NT_SHELL_SIMD_WASM_PATH@   - Alternate SIMD wasm path (or empty string)
 #
 # Example:
 #   nt_configure_shell(hello TITLE "Hello - Neotolis Engine")
@@ -31,7 +36,7 @@ function(nt_configure_shell target)
         return()
     endif()
 
-    cmake_parse_arguments(SHELL "FULLSCREEN_BUTTON" "TITLE;SHELL_FILE" "" ${ARGN})
+    cmake_parse_arguments(SHELL "FULLSCREEN_BUTTON" "TITLE;SHELL_FILE;SIMD_WASM_PATH" "" ${ARGN})
 
     # Default title to target name
     if(NOT SHELL_TITLE)
@@ -40,6 +45,8 @@ function(nt_configure_shell target)
 
     # Set template variables for configure_file
     set(NT_SHELL_TITLE "${SHELL_TITLE}")
+    set(NT_SHELL_SIMD_WASM_PATH "${SHELL_SIMD_WASM_PATH}")
+    file(READ "${_NT_SHELL_MODULE_DIR}/../engine/platform/web/simd_loader.js" NT_SHELL_SIMD_LOADER_JS)
 
     # Handle FULLSCREEN_BUTTON: inject HTML/CSS/JS block or empty string
     if(SHELL_FULLSCREEN_BUTTON)

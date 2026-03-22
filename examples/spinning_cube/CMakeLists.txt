@@ -18,8 +18,7 @@ set_target_properties(spinning_cube PROPERTIES
 # WASM-specific settings
 if(EMSCRIPTEN)
     set_target_properties(spinning_cube PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
-
-    nt_configure_shell(spinning_cube TITLE "Spinning Shapes - Neotolis Engine")
+    nt_configure_shell(spinning_cube TITLE "Spinning Shapes - Neotolis Engine" SIMD_WASM_PATH "${NT_WASM_SIMD_WASM_PATH}")
 
     target_link_options(spinning_cube PRIVATE
         "SHELL:-sUSE_WEBGL2=1"

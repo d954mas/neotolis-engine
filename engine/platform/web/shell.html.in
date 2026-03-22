@@ -64,8 +64,13 @@
     @NT_SHELL_FULLSCREEN_BLOCK@
 
     <script>
+@NT_SHELL_SIMD_LOADER_JS@
+
         var Module = {
-            canvas: document.getElementById('canvas')
+            canvas: document.getElementById('canvas'),
+            locateFile: function(path) {
+                return ntResolveWasmPath(path, '@NT_SHELL_SIMD_WASM_PATH@');
+            }
         };
 
         document.getElementById('canvas').addEventListener('webglcontextlost', function(e) {

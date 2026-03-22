@@ -31,17 +31,69 @@ source emsdk/emsdk_env.sh
 
 ## Build
 
-Four CMake presets are available: `wasm-debug`, `wasm-release`, `native-debug`, `native-release`.
+Eleven primary CMake presets are available: `wasm-debug`, `wasm-debug-paired`, `wasm-debug-simd`, `wasm-release`, `wasm-release-paired`, `wasm-release-simd`, `wasm-analysis`, `wasm-analysis-paired`, `wasm-analysis-simd`, `native-debug`, `native-release`.
 
 ### WASM (requires emsdk activated)
+
+There are three explicit WASM modes for each build tier:
+
+- `wasm-debug` / `wasm-release` / `wasm-analysis` — baseline-only output.
+- `wasm-debug-paired` / `wasm-release-paired` / `wasm-analysis-paired` — baseline shell plus packaged `index_simd.wasm` beside it.
+- `wasm-debug-simd` / `wasm-release-simd` / `wasm-analysis-simd` — standalone SIMD output.
+
+Baseline-only build:
 
 ```bash
 emcmake cmake --preset wasm-debug
 cmake --build --preset wasm-debug
-
-emcmake cmake --preset wasm-release
-cmake --build --preset wasm-release
 ```
+
+Standalone SIMD build:
+
+```bash
+emcmake cmake --preset wasm-debug-simd
+cmake --build --preset wasm-debug-simd
+```
+
+Explicit paired baseline+SIMD build in one command:
+
+```bash
+./scripts/build_wasm_paired.sh wasm-debug-paired
+```
+
+The paired build script configures the paired preset and its matching SIMD
+preset, builds both, then copies each SIMD wasm beside the paired example
+output as `index_simd.wasm`. Baseline-only presets do not inject a SIMD path
+into the shell. Paired presets do inject that path, so the shell performs the
+SIMD probe and picks exactly one wasm at runtime.
+
+If you build presets separately, you can package examples manually:
+
+```bash
+./scripts/package_wasm_simd.sh hello wasm-debug-paired wasm-debug-simd
+```
+
+Recommended validation flow when you want confidence in both variants:
+
+```bash
+emcmake cmake --preset wasm-debug
+cmake --build --preset wasm-debug
+ctest --preset wasm-debug
+
+emcmake cmake --preset wasm-debug-simd
+cmake --build --preset wasm-debug-simd
+ctest --preset wasm-debug-simd
+
+./scripts/build_wasm_paired.sh wasm-debug-paired
+ctest --preset wasm-debug-paired
+node tests/wasm/smoke_test.js wasm-debug-paired
+node tests/wasm/smoke_test.js wasm-debug-simd
+```
+
+`test_wasm_simd_loader` verifies the SIMD capability probe and wasm-path
+switching logic directly in Node.js. `test_wasm_smoke` can be run against
+baseline-only, paired baseline, and standalone SIMD presets to confirm each
+produced module still loads.
 
 ### Native
 

@@ -18,8 +18,7 @@ set_target_properties(bench_shapes PROPERTIES
 # WASM-specific settings
 if(EMSCRIPTEN)
     set_target_properties(bench_shapes PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
-
-    nt_configure_shell(bench_shapes TITLE "Shape Benchmark - Neotolis Engine")
+    nt_configure_shell(bench_shapes TITLE "Shape Benchmark - Neotolis Engine" SIMD_WASM_PATH "${NT_WASM_SIMD_WASM_PATH}")
 
     target_link_options(bench_shapes PRIVATE
         "SHELL:-sUSE_WEBGL2=1"

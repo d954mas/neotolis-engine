@@ -18,7 +18,7 @@ if(EMSCRIPTEN)
     set_target_properties(hello PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")
 
     # Shell configuration (replaces hardcoded --shell-file)
-    nt_configure_shell(hello TITLE "Hello - Neotolis Engine")
+    nt_configure_shell(hello TITLE "Hello - Neotolis Engine" SIMD_WASM_PATH "${NT_WASM_SIMD_WASM_PATH}")
 
     target_link_options(hello PRIVATE
         "SHELL:-sUSE_WEBGL2=1"
