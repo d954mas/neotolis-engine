@@ -13,6 +13,13 @@ if(NT_WASM_ENABLE_SIMD AND NT_WASM_SIMD_WASM_PATH)
     message(FATAL_ERROR "NT_WASM_ENABLE_SIMD and NT_WASM_SIMD_WASM_PATH cannot be enabled together. Use a paired preset for baseline+SIMD output or a standalone SIMD preset.")
 endif()
 
+if(NT_WASM_SIMD_WASM_PATH AND NOT NT_WASM_ENABLE_SIMD)
+    message(WARNING "NT_WASM_SIMD_WASM_PATH is set to \"${NT_WASM_SIMD_WASM_PATH}\". "
+        "The HTML shell will reference this file, but this build does not produce it. "
+        "Use scripts/build_wasm_paired.sh or build the matching SIMD preset and run "
+        "scripts/package_wasm_simd.sh to place the SIMD wasm beside the baseline output.")
+endif()
+
 # Emscripten optimizations
 if(EMSCRIPTEN)
     if(NT_WASM_ENABLE_SIMD)
