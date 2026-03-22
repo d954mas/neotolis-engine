@@ -21,11 +21,11 @@ layout(std140) uniform Lighting {
 };
 
 /* Alpha cutoff passed as material param */
-uniform float u_alpha_cutoff;
+uniform vec4 u_alpha_cutoff;
 
 void main() {
     vec4 albedo = texture(u_diffuse, v_uv) * v_color;
-    if (albedo.a < u_alpha_cutoff) discard;
+    if (albedo.a < u_alpha_cutoff.x) discard;
     vec3 N = normalize(v_world_normal);
     vec3 L = normalize(light_dir.xyz);
     float NdotL = max(dot(N, L), 0.0);
