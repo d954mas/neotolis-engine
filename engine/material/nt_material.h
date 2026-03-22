@@ -129,4 +129,10 @@ void nt_material_destroy(nt_material_t mat);
 bool nt_material_valid(nt_material_t mat);
 const nt_material_info_t *nt_material_get_info(nt_material_t mat);
 
+/* ---- Runtime param mutation ---- */
+
+bool nt_material_has_param(nt_material_t mat, const char *name);
+void nt_material_set_param(nt_material_t mat, const char *name, const float value[4]);
+void nt_material_set_param_component(nt_material_t mat, const char *name, uint8_t index, float value);
+
 #endif /* NT_MATERIAL_H */

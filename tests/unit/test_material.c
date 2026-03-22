@@ -401,6 +401,95 @@ void test_create_stores_entity_params(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_hash32_str("u_dissolve").value, info->entity_param_hashes[0]);
 }
 
+/* ---- Test: has_param returns true for existing param ---- */
+
+void test_has_param_returns_true(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    nt_material_t mat = nt_material_create(&d);
+    TEST_ASSERT_TRUE(nt_material_has_param(mat, "u_roughness"));
+}
+
+/* ---- Test: has_param returns false for unknown param ---- */
+
+void test_has_param_returns_false(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    nt_material_t mat = nt_material_create(&d);
+    TEST_ASSERT_FALSE(nt_material_has_param(mat, "u_nonexistent"));
+}
+
+/* ---- Test: has_param returns false for invalid handle ---- */
+
+void test_has_param_invalid_handle(void) {
+    TEST_ASSERT_FALSE(nt_material_has_param(NT_MATERIAL_INVALID, "u_roughness"));
+}
+
+/* ---- Test: set_param updates all four components ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_set_param_updates_all_four(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    d.params[0].name = "u_color";
+    d.params[0].value[0] = 0.0F;
+    d.params[0].value[1] = 0.0F;
+    d.params[0].value[2] = 0.0F;
+    d.params[0].value[3] = 0.0F;
+    d.param_count = 1;
+    nt_material_t mat = nt_material_create(&d);
+
+    float new_val[4] = {1.0F, 0.5F, 0.25F, 1.0F};
+    nt_material_set_param(mat, "u_color", new_val);
+
+    const nt_material_info_t *info = nt_material_get_info(mat);
+    TEST_ASSERT_NOT_NULL(info);
+    for (int c = 0; c < 4; c++) {
+        uint32_t expected_bits;
+        uint32_t actual_bits;
+        memcpy(&expected_bits, &new_val[c], sizeof(uint32_t));
+        memcpy(&actual_bits, &info->params[0][c], sizeof(uint32_t));
+        TEST_ASSERT_EQUAL_UINT32(expected_bits, actual_bits);
+    }
+}
+
+/* ---- Test: set_param_component updates only one component ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_set_param_component_updates_one(void) {
+    nt_material_create_desc_t d = make_test_desc();
+    /* d already has u_roughness = {0.5, 0, 0, 0} */
+    nt_material_t mat = nt_material_create(&d);
+
+    nt_material_set_param_component(mat, "u_roughness", 0, 0.8F);
+
+    const nt_material_info_t *info = nt_material_get_info(mat);
+    TEST_ASSERT_NOT_NULL(info);
+
+    /* Component 0 should be 0.8 */
+    float expected = 0.8F;
+    uint32_t expected_bits;
+    uint32_t actual_bits;
+    memcpy(&expected_bits, &expected, sizeof(uint32_t));
+    memcpy(&actual_bits, &info->params[0][0], sizeof(uint32_t));
+    TEST_ASSERT_EQUAL_UINT32(expected_bits, actual_bits);
+
+    /* Components 1-3 should still be 0.0 */
+    float zero = 0.0F;
+    uint32_t zero_bits;
+    memcpy(&zero_bits, &zero, sizeof(uint32_t));
+    for (int c = 1; c < 4; c++) {
+        memcpy(&actual_bits, &info->params[0][c], sizeof(uint32_t));
+        TEST_ASSERT_EQUAL_UINT32(zero_bits, actual_bits);
+    }
+}
+
+/* ---- Test: set_param with invalid handle does not crash ---- */
+
+void test_set_param_invalid_handle(void) {
+    float val[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    /* Should early-return without crashing */
+    nt_material_set_param(NT_MATERIAL_INVALID, "u_roughness", val);
+    TEST_PASS();
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -439,6 +528,14 @@ int main(void) {
 
     /* Query edge cases */
     RUN_TEST(test_get_info_returns_null_for_invalid);
+
+    /* set_param API */
+    RUN_TEST(test_has_param_returns_true);
+    RUN_TEST(test_has_param_returns_false);
+    RUN_TEST(test_has_param_invalid_handle);
+    RUN_TEST(test_set_param_updates_all_four);
+    RUN_TEST(test_set_param_component_updates_one);
+    RUN_TEST(test_set_param_invalid_handle);
 
     return UNITY_END();
 }
