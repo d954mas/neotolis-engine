@@ -82,9 +82,9 @@ measure_file() {
     FILE_GZIPS+=("$gz")
 }
 
-# When paired builds produce both index.wasm and index_simd.wasm, a player
-# downloads only one variant.  Count only the larger wasm in engine/total
-# totals; record the smaller one as informational (excluded from sums).
+# Paired builds produce both index.wasm and index_simd.wasm but a player
+# downloads only one.  Show both files with real sizes; count only the
+# larger one in engine/total sums.
 _baseline_wasm=""
 _simd_wasm=""
 for file in "$OUTPUT_DIR"/*; do
@@ -96,23 +96,23 @@ for file in "$OUTPUT_DIR"/*; do
     esac
 done
 
-# Pick the larger wasm for totals, record the other as info-only
 if [ -n "$_simd_wasm" ] && [ -n "$_baseline_wasm" ]; then
     _base_sz=$(wc -c < "$_baseline_wasm" | tr -d ' ')
     _simd_sz=$(wc -c < "$_simd_wasm" | tr -d ' ')
     if [ "$_simd_sz" -ge "$_base_sz" ]; then
         measure_file "$_simd_wasm" ""
-        _info_wasm="$_baseline_wasm"
+        # Show baseline but don't add to totals
+        _base_gz=$(gzip -c "$_baseline_wasm" | wc -c | tr -d ' ')
+        FILE_NAMES+=("index.wasm")
+        FILE_RAWS+=("$_base_sz")
+        FILE_GZIPS+=("$_base_gz")
     else
         measure_file "$_baseline_wasm" ""
-        _info_wasm="$_simd_wasm"
+        _simd_gz=$(gzip -c "$_simd_wasm" | wc -c | tr -d ' ')
+        FILE_NAMES+=("index_simd.wasm")
+        FILE_RAWS+=("$_simd_sz")
+        FILE_GZIPS+=("$_simd_gz")
     fi
-    # Record info-only entry (not added to totals)
-    _info_raw=$(wc -c < "$_info_wasm" | tr -d ' ')
-    _info_gz=$(gzip -c "$_info_wasm" | wc -c | tr -d ' ')
-    FILE_NAMES+=("$(basename "$_info_wasm") (alt)")
-    FILE_RAWS+=("$_info_raw")
-    FILE_GZIPS+=("$_info_gz")
 elif [ -n "$_baseline_wasm" ]; then
     measure_file "$_baseline_wasm" ""
 elif [ -n "$_simd_wasm" ]; then
