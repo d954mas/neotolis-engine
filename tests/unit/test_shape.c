@@ -374,6 +374,25 @@ void test_shape_capsule_rot_count(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_shape_renderer_test_instance_count(NT_SHAPE_TEST_CAPSULE));
 }
 
+/* ---- 33. Index type matches compile-time limit ---- */
+
+void test_shape_index_type_default_uint16(void) {
+    /* Default MAX_VERTICES=16384 should select uint16 */
+    TEST_ASSERT_EQUAL_size_t(sizeof(uint16_t), sizeof(nt_shape_index_t));
+    TEST_ASSERT_EQUAL_UINT8(1, NT_SHAPE_INDEX_TYPE);
+}
+
+/* ---- 34. Mesh with new index type works ---- */
+
+void test_shape_mesh_batch_indices(void) {
+    float positions[] = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+    nt_shape_index_t indices[] = {0, 1, 2};
+    float color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+    nt_shape_renderer_mesh(positions, 3, indices, 3, color);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_shape_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(3, nt_shape_renderer_test_index_count());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_shape_init_shutdown);
@@ -406,5 +425,7 @@ int main(void) {
     RUN_TEST(test_shape_mesh_wire_counts);
     RUN_TEST(test_shape_cylinder_rot_count);
     RUN_TEST(test_shape_capsule_rot_count);
+    RUN_TEST(test_shape_index_type_default_uint16);
+    RUN_TEST(test_shape_mesh_batch_indices);
     return UNITY_END();
 }
