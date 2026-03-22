@@ -179,6 +179,38 @@ jobs:
       - name: Run standalone WASM release SIMD ctest
         run: ctest --preset wasm-release-simd
 
+      - name: Build paired WASM analysis artifacts
+        run: ./scripts/build_wasm_paired.sh wasm-analysis-paired
+
+      - name: Verify paired WASM analysis output
+        run: |
+          test -f build/examples/hello/wasm-analysis-paired/index.html
+          test -f build/examples/hello/wasm-analysis-paired/index.js
+          test -f build/examples/hello/wasm-analysis-paired/index.wasm
+          test -f build/examples/hello/wasm-analysis-paired/index_simd.wasm
+          test -f build/examples/hello/wasm-analysis-simd/index.html
+          test -f build/examples/hello/wasm-analysis-simd/index.js
+          test -f build/examples/hello/wasm-analysis-simd/index.wasm
+          test -f build/engine/wasm-analysis-paired/libnt_core.a
+          test -f build/engine/wasm-analysis-paired/libnt_log.a
+          test -f build/engine/wasm-analysis-paired/libnt_log_stub.a
+          test -f build/engine/wasm-analysis-simd/libnt_core.a
+          test -f build/engine/wasm-analysis-simd/libnt_log.a
+          test -f build/engine/wasm-analysis-simd/libnt_log_stub.a
+          echo "Paired WASM analysis build verified"
+
+      - name: Run paired WASM smoke test (analysis baseline shell)
+        run: node tests/wasm/smoke_test.js wasm-analysis-paired
+
+      - name: Run standalone WASM smoke test (analysis SIMD)
+        run: node tests/wasm/smoke_test.js wasm-analysis-simd
+
+      - name: Run paired WASM analysis ctest
+        run: ctest --preset wasm-analysis-paired
+
+      - name: Run standalone WASM analysis SIMD ctest
+        run: ctest --preset wasm-analysis-simd
+
       - name: Verify packaged example SIMD artifacts
         run: |
           test -f build/examples/hello/wasm-debug-paired/index_simd.wasm
@@ -191,6 +223,11 @@ jobs:
           test -f build/examples/spinning_cube/wasm-release-paired/index_simd.wasm
           test -f build/examples/textured_quad/wasm-release-paired/index_simd.wasm
           test -f build/examples/sponza/wasm-release-paired/index_simd.wasm
+          test -f build/examples/hello/wasm-analysis-paired/index_simd.wasm
+          test -f build/examples/bench_shapes/wasm-analysis-paired/index_simd.wasm
+          test -f build/examples/spinning_cube/wasm-analysis-paired/index_simd.wasm
+          test -f build/examples/textured_quad/wasm-analysis-paired/index_simd.wasm
+          test -f build/examples/sponza/wasm-analysis-paired/index_simd.wasm
           echo "Packaged example SIMD artifacts verified"
 
   native:

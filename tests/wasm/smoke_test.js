@@ -13,6 +13,11 @@ const path = require('path');
 async function main() {
     const args = process.argv.slice(2);
     const moduleFlagIndex = args.indexOf('--module');
+    if (moduleFlagIndex >= 0 && !args[moduleFlagIndex + 1]) {
+        console.error('WASM smoke test FAILED: --module requires a path argument');
+        process.exit(1);
+    }
+
     const preset = moduleFlagIndex >= 0 ? null : (args[0] || 'wasm-debug');
     const wasmPath = moduleFlagIndex >= 0
         ? path.resolve(args[moduleFlagIndex + 1])

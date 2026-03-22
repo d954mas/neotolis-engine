@@ -65,11 +65,10 @@
 
     <script>
 @NT_SHELL_SIMD_LOADER_JS@
-
-        var ntLoggedWasmVariant = false;
+@NT_SHELL_SIMD_RUNTIME_STATE@
         var Module = {
-            canvas: document.getElementById('canvas'),
-@NT_SHELL_LOCATE_FILE_BLOCK@        };
+            canvas: document.getElementById('canvas')@NT_SHELL_LOCATE_FILE_PROPERTY@
+        };
 
         document.getElementById('canvas').addEventListener('webglcontextlost', function(e) {
             e.preventDefault();

@@ -109,7 +109,6 @@
             "inherits": "wasm-analysis",
             "binaryDir": "${sourceDir}/build/_cmake/wasm-analysis-simd",
             "cacheVariables": {
-                "NT_WASM_ANALYSIS": "ON",
                 "NT_WASM_ENABLE_SIMD": "ON"
             }
         }
