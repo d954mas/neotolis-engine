@@ -297,9 +297,9 @@ if(NOT EMSCRIPTEN)
 endif()
 
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---
-find_program(NT_NODE_EXECUTABLE NAMES node nodejs)
-
 if(EMSCRIPTEN)
+    find_program(NT_NODE_EXECUTABLE NAMES node nodejs)
+
     if(NT_NODE_EXECUTABLE)
         add_test(
             NAME test_wasm_simd_loader
