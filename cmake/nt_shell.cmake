@@ -50,19 +50,18 @@ function(nt_configure_shell target)
     if(SHELL_SIMD_WASM_PATH)
         set(NT_SHELL_SIMD_WASM_PATH "${SHELL_SIMD_WASM_PATH}")
         file(READ "${_NT_SHELL_MODULE_DIR}/../engine/platform/web/simd_loader.js" NT_SHELL_SIMD_LOADER_JS)
-        set(NT_SHELL_SIMD_RUNTIME_STATE "        var ntLoggedWasmVariant = false;
-")
+        set(NT_SHELL_SIMD_RUNTIME_STATE "")
         set(_nt_shell_locate_file_property_template [=[,
-            locateFile: function(path) {
+            locateFile: function(path, scriptDirectory) {
                 var resolved = ntResolveWasmLoad(path, '@NT_SHELL_SIMD_WASM_PATH@');
-                if (!ntLoggedWasmVariant && typeof path === 'string' && path.endsWith('.wasm')) {
-                    ntLoggedWasmVariant = true;
+                if (!Module._ntSimdLogged && typeof path === 'string' && path.endsWith('.wasm')) {
+                    Module._ntSimdLogged = true;
                     Module.ntWasmVariant = resolved.variant;
                     if (typeof console !== 'undefined' && typeof console.info === 'function') {
                         console.info('[Neotolis] Loading WASM variant:', resolved.variant, resolved.path);
                     }
                 }
-                return resolved.path;
+                return (scriptDirectory || '') + resolved.path;
             }]=])
         string(CONFIGURE "${_nt_shell_locate_file_property_template}" NT_SHELL_LOCATE_FILE_PROPERTY @ONLY)
     else()

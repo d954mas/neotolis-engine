@@ -421,13 +421,12 @@ jobs:
           emcmake cmake --preset wasm-release-simd -DNT_CDN_URL="https://cdn.neotolis-engine.dev"
           cmake --build --preset wasm-release-paired
           cmake --build --preset wasm-release-simd
-          for example in hello bench_shapes spinning_cube textured_quad sponza; do
-            ./scripts/package_wasm_simd.sh "$example" wasm-release-paired wasm-release-simd
-          done
+          ./scripts/package_all_simd.sh wasm-release-paired wasm-release-simd
 
       - name: Measure sizes (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad sponza; do
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
             PRESET=wasm-release-paired bash scripts/size.sh $example --json > /tmp/size_${example}.json
           done
 
@@ -443,7 +442,8 @@ jobs:
 
       - name: Generate size reports (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad sponza; do
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
             PRESET=wasm-analysis-paired bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
           done
 
@@ -459,7 +459,8 @@ jobs:
 
       - name: Update size history and reports (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad sponza; do
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
             mkdir -p "gh-pages-data/reports/$example"
             cp "/tmp/report_${example}.txt" "gh-pages-data/reports/$example/size-report.txt"
 
@@ -475,7 +476,8 @@ jobs:
 
       - name: Check for size regression
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad sponza; do
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
             TARGET_FILE="gh-pages-data/sizes/${example}.json"
             [ -f "$TARGET_FILE" ] || continue
             ENTRIES=$(jq length "$TARGET_FILE")
@@ -624,7 +626,8 @@ jobs:
 
       - name: Measure sizes (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad sponza; do
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
             PRESET=wasm-release-paired bash scripts/size.sh $example --json > /tmp/size_${example}.json
           done
 
@@ -637,7 +640,8 @@ jobs:
 
       - name: Generate size reports (all examples)
         run: |
-          for example in hello bench_shapes spinning_cube textured_quad sponza; do
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
             PRESET=wasm-analysis-paired bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
           done
 
@@ -651,7 +655,8 @@ jobs:
 
       - name: Generate size comment
         run: |
-          EXAMPLES="hello bench_shapes spinning_cube textured_quad sponza"
+          source scripts/wasm_examples.sh
+          EXAMPLES="${WASM_EXAMPLES[*]}"
           PR_COMMIT=$(git rev-parse --short HEAD)
 
           # Format bytes as KB/MB with 3 decimal places
@@ -816,7 +821,8 @@ jobs:
 
       - name: Generate size report comment
         run: |
-          EXAMPLES="hello bench_shapes spinning_cube textured_quad sponza"
+          source scripts/wasm_examples.sh
+          EXAMPLES="${WASM_EXAMPLES[*]}"
           PR_COMMIT=$(git rev-parse --short HEAD)
 
           {

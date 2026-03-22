@@ -23,7 +23,8 @@ function run() {
     assert.strictEqual(ntSupportsWasmSimd(wasmNo), false);
     assert.strictEqual(ntSupportsWasmSimd(wasmThrows), false);
     assert.strictEqual(ntSupportsWasmSimd({}), false);
-    assert.strictEqual(ntSupportsWasmSimd(null), false);
+    // null wasmApi falls back to global WebAssembly; Node.js supports SIMD
+    assert.strictEqual(ntSupportsWasmSimd(null), true);
 
     assert.strictEqual(ntResolveWasmPath('index.wasm', 'index_simd.wasm', wasmOk), 'index_simd.wasm');
     assert.strictEqual(ntResolveWasmPath('index.wasm', 'index_simd.wasm', wasmNo), 'index.wasm');
@@ -42,6 +43,13 @@ function run() {
         path: 'index.wasm',
         variant: 'baseline'
     });
+
+    // Verify the probe bytes are valid WASM when SIMD is supported.
+    // Node.js 16+ supports WASM SIMD, so this catches broken probe bytes in CI.
+    if (typeof WebAssembly !== 'undefined' && typeof WebAssembly.validate === 'function') {
+        assert.strictEqual(ntSupportsWasmSimd(WebAssembly), true,
+            'SIMD probe must pass WebAssembly.validate() in Node.js (which supports SIMD)');
+    }
 
     console.log('SIMD loader test PASSED');
 }

@@ -86,13 +86,7 @@
         {
             "label": "Package SIMD wasm (debug)",
             "type": "shell",
-            "command": "for %e in (hello bench_shapes spinning_cube textured_quad sponza) do @copy /y build\\examples\\%e\\wasm-debug-simd\\index.wasm build\\examples\\%e\\wasm-debug-paired\\index_simd.wasm",
-            "options": {
-                "shell": {
-                    "executable": "cmd.exe",
-                    "args": ["/c"]
-                }
-            },
+            "command": "bash scripts/package_all_simd.sh wasm-debug-paired wasm-debug-simd",
             "problemMatcher": []
         },
         {
@@ -127,13 +121,7 @@
         {
             "label": "Package SIMD wasm (release)",
             "type": "shell",
-            "command": "for %e in (hello bench_shapes spinning_cube textured_quad sponza) do @copy /y build\\examples\\%e\\wasm-release-simd\\index.wasm build\\examples\\%e\\wasm-release-paired\\index_simd.wasm",
-            "options": {
-                "shell": {
-                    "executable": "cmd.exe",
-                    "args": ["/c"]
-                }
-            },
+            "command": "bash scripts/package_all_simd.sh wasm-release-paired wasm-release-simd",
             "problemMatcher": []
         },
         {

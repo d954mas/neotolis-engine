@@ -23,8 +23,8 @@ emcmake cmake --preset "${SIMD_PRESET}"
 cmake --build --preset "${PAIRED_PRESET}"
 cmake --build --preset "${SIMD_PRESET}"
 
-for example_dir in build/examples/*; do
-    [ -d "${example_dir}" ] || continue
-    example="$(basename "${example_dir}")"
+source "$(dirname "$0")/wasm_examples.sh"
+
+for example in "${WASM_EXAMPLES[@]}"; do
     "$(dirname "$0")/package_wasm_simd.sh" "${example}" "${PAIRED_PRESET}" "${SIMD_PRESET}"
 done
