@@ -415,31 +415,36 @@ jobs:
             done
           done
 
-      - name: Configure WASM release
-        run: emcmake cmake --preset wasm-release -DNT_CDN_URL="https://cdn.neotolis-engine.dev"
-
-      - name: Build WASM release
-        run: cmake --build --preset wasm-release
+      - name: Build paired WASM release for deploy
+        run: |
+          emcmake cmake --preset wasm-release-paired -DNT_CDN_URL="https://cdn.neotolis-engine.dev"
+          emcmake cmake --preset wasm-release-simd -DNT_CDN_URL="https://cdn.neotolis-engine.dev"
+          cmake --build --preset wasm-release-paired
+          cmake --build --preset wasm-release-simd
+          for example in hello bench_shapes spinning_cube textured_quad sponza; do
+            ./scripts/package_wasm_simd.sh "$example" wasm-release-paired wasm-release-simd
+          done
 
       - name: Measure sizes (all examples)
         run: |
           for example in hello bench_shapes spinning_cube textured_quad sponza; do
-            bash scripts/size.sh $example --json > /tmp/size_${example}.json
+            PRESET=wasm-release-paired bash scripts/size.sh $example --json > /tmp/size_${example}.json
           done
 
       - name: Install wabt
         run: sudo apt-get update && sudo apt-get install -y wabt
 
-      - name: Configure WASM analysis
-        run: emcmake cmake --preset wasm-analysis
-
-      - name: Build WASM analysis
-        run: cmake --build --preset wasm-analysis
+      - name: Build WASM analysis paired
+        run: |
+          emcmake cmake --preset wasm-analysis-paired
+          emcmake cmake --preset wasm-analysis-simd
+          cmake --build --preset wasm-analysis-paired
+          cmake --build --preset wasm-analysis-simd
 
       - name: Generate size reports (all examples)
         run: |
           for example in hello bench_shapes spinning_cube textured_quad sponza; do
-            bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
+            PRESET=wasm-analysis-paired bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
           done
 
       - name: Checkout gh-pages branch
@@ -509,7 +514,7 @@ jobs:
 
       - name: Copy WASM examples to gh-pages
         run: |
-          for example_dir in build/examples/*/wasm-release; do
+          for example_dir in build/examples/*/wasm-release-paired; do
             example_name=$(basename $(dirname "$example_dir"))
             mkdir -p "gh-pages-data/wasm/$example_name"
             cp "$example_dir"/*.html "$example_dir"/*.js "$example_dir"/*.wasm "gh-pages-data/wasm/$example_name/"
@@ -620,19 +625,20 @@ jobs:
       - name: Measure sizes (all examples)
         run: |
           for example in hello bench_shapes spinning_cube textured_quad sponza; do
-            bash scripts/size.sh $example --json > /tmp/size_${example}.json
+            PRESET=wasm-release-paired bash scripts/size.sh $example --json > /tmp/size_${example}.json
           done
 
-      - name: Configure WASM analysis
-        run: emcmake cmake --preset wasm-analysis
-
-      - name: Build WASM analysis
-        run: cmake --build --preset wasm-analysis
+      - name: Build WASM analysis paired
+        run: |
+          emcmake cmake --preset wasm-analysis-paired
+          emcmake cmake --preset wasm-analysis-simd
+          cmake --build --preset wasm-analysis-paired
+          cmake --build --preset wasm-analysis-simd
 
       - name: Generate size reports (all examples)
         run: |
           for example in hello bench_shapes spinning_cube textured_quad sponza; do
-            bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
+            PRESET=wasm-analysis-paired bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
           done
 
       - name: Fetch baseline from gh-pages

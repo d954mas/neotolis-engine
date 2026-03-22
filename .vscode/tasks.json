@@ -9,9 +9,9 @@
             "problemMatcher": []
         },
         {
-            "label": "Configure wasm-debug",
+            "label": "Configure wasm-debug-paired",
             "type": "shell",
-            "command": "emcmake cmake --preset wasm-debug",
+            "command": "emcmake cmake --preset wasm-debug-paired && emcmake cmake --preset wasm-debug-simd",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -21,9 +21,9 @@
             "problemMatcher": []
         },
         {
-            "label": "Configure wasm-release",
+            "label": "Configure wasm-release-paired",
             "type": "shell",
-            "command": "emcmake cmake --preset wasm-release",
+            "command": "emcmake cmake --preset wasm-release-paired && emcmake cmake --preset wasm-release-simd",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -63,23 +63,90 @@
             "problemMatcher": "$gcc"
         },
         {
-            "label": "Build wasm-debug",
+            "label": "Build native-debug (build_sponza_packs)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target build_sponza_packs",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build wasm-debug-paired (cmake)",
             "type": "cmake",
             "command": "build",
-            "preset": "wasm-debug",
+            "preset": "wasm-debug-paired",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build wasm-debug-simd (cmake)",
+            "type": "cmake",
+            "command": "build",
+            "preset": "wasm-debug-simd",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Package SIMD wasm (debug)",
+            "type": "shell",
+            "command": "for %e in (hello bench_shapes spinning_cube textured_quad sponza) do @copy /y build\\examples\\%e\\wasm-debug-simd\\index.wasm build\\examples\\%e\\wasm-debug-paired\\index_simd.wasm",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build wasm-debug-paired",
+            "dependsOn": [
+                "Configure wasm-debug-paired",
+                "Build wasm-debug-paired (cmake)",
+                "Build wasm-debug-simd (cmake)",
+                "Package SIMD wasm (debug)"
+            ],
+            "dependsOrder": "sequence",
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build wasm-release-paired (cmake)",
+            "type": "cmake",
+            "command": "build",
+            "preset": "wasm-release-paired",
             "problemMatcher": "$gcc"
         },
         {
-            "label": "Build wasm-release",
+            "label": "Build wasm-release-simd (cmake)",
             "type": "cmake",
             "command": "build",
-            "preset": "wasm-release",
-            "group": "build",
+            "preset": "wasm-release-simd",
             "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Package SIMD wasm (release)",
+            "type": "shell",
+            "command": "for %e in (hello bench_shapes spinning_cube textured_quad sponza) do @copy /y build\\examples\\%e\\wasm-release-simd\\index.wasm build\\examples\\%e\\wasm-release-paired\\index_simd.wasm",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build wasm-release-paired",
+            "dependsOn": [
+                "Configure wasm-release-paired",
+                "Build wasm-release-paired (cmake)",
+                "Build wasm-release-simd (cmake)",
+                "Package SIMD wasm (release)"
+            ],
+            "dependsOrder": "sequence",
+            "group": "build",
+            "problemMatcher": []
         },
         {
             "label": "Run tests (native-debug)",
@@ -95,7 +162,7 @@
         {
             "label": "Ensure server (debug :8080)",
             "type": "shell",
-            "command": "curl -s -o nul http://localhost:8080 >nul 2>&1 && (echo Server already running on :8080) || (start /b python -m http.server 8080 -d \"${workspaceFolder}/build/examples/hello/wasm-debug\" & timeout /t 1 >nul)",
+            "command": "curl -s -o nul http://localhost:8080 >nul 2>&1 && (echo Server already running on :8080) || (start /b python -m http.server 8080 -d \"${workspaceFolder}/build/examples/hello/wasm-debug-paired\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -107,7 +174,7 @@
         {
             "label": "Ensure server (release :8081)",
             "type": "shell",
-            "command": "curl -s -o nul http://localhost:8081 >nul 2>&1 && (echo Server already running on :8081) || (start /b python -m http.server 8081 -d \"${workspaceFolder}/build/examples/hello/wasm-release\" & timeout /t 1 >nul)",
+            "command": "curl -s -o nul http://localhost:8081 >nul 2>&1 && (echo Server already running on :8081) || (start /b python -m http.server 8081 -d \"${workspaceFolder}/build/examples/hello/wasm-release-paired\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -118,20 +185,20 @@
         },
         {
             "label": "Build & Serve WASM (debug)",
-            "dependsOn": ["Build wasm-debug", "Ensure server (debug :8080)"],
+            "dependsOn": ["Build wasm-debug-paired", "Ensure server (debug :8080)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         },
         {
             "label": "Build & Serve WASM (release)",
-            "dependsOn": ["Build wasm-release", "Ensure server (release :8081)"],
+            "dependsOn": ["Build wasm-release-paired", "Ensure server (release :8081)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         },
         {
             "label": "Ensure server bench_shapes (debug :8082)",
             "type": "shell",
-            "command": "curl -s -o nul http://localhost:8082 >nul 2>&1 && (echo Server already running on :8082) || (start /b python -m http.server 8082 -d \"${workspaceFolder}/build/examples/bench_shapes/wasm-debug\" & timeout /t 1 >nul)",
+            "command": "curl -s -o nul http://localhost:8082 >nul 2>&1 && (echo Server already running on :8082) || (start /b python -m http.server 8082 -d \"${workspaceFolder}/build/examples/bench_shapes/wasm-debug-paired\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -143,7 +210,7 @@
         {
             "label": "Ensure server bench_shapes (release :8083)",
             "type": "shell",
-            "command": "curl -s -o nul http://localhost:8083 >nul 2>&1 && (echo Server already running on :8083) || (start /b python -m http.server 8083 -d \"${workspaceFolder}/build/examples/bench_shapes/wasm-release\" & timeout /t 1 >nul)",
+            "command": "curl -s -o nul http://localhost:8083 >nul 2>&1 && (echo Server already running on :8083) || (start /b python -m http.server 8083 -d \"${workspaceFolder}/build/examples/bench_shapes/wasm-release-paired\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -154,20 +221,20 @@
         },
         {
             "label": "Build & Serve bench_shapes (debug)",
-            "dependsOn": ["Build wasm-debug", "Ensure server bench_shapes (debug :8082)"],
+            "dependsOn": ["Build wasm-debug-paired", "Ensure server bench_shapes (debug :8082)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         },
         {
             "label": "Build & Serve bench_shapes (release)",
-            "dependsOn": ["Build wasm-release", "Ensure server bench_shapes (release :8083)"],
+            "dependsOn": ["Build wasm-release-paired", "Ensure server bench_shapes (release :8083)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         },
         {
             "label": "Ensure server spinning_cube (debug :8084)",
             "type": "shell",
-            "command": "curl -s -o nul http://localhost:8084 >nul 2>&1 && (echo Server already running on :8084) || (start /b python -m http.server 8084 -d \"${workspaceFolder}/build/examples/spinning_cube/wasm-debug\" & timeout /t 1 >nul)",
+            "command": "curl -s -o nul http://localhost:8084 >nul 2>&1 && (echo Server already running on :8084) || (start /b python -m http.server 8084 -d \"${workspaceFolder}/build/examples/spinning_cube/wasm-debug-paired\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -179,7 +246,7 @@
         {
             "label": "Ensure server spinning_cube (release :8085)",
             "type": "shell",
-            "command": "curl -s -o nul http://localhost:8085 >nul 2>&1 && (echo Server already running on :8085) || (start /b python -m http.server 8085 -d \"${workspaceFolder}/build/examples/spinning_cube/wasm-release\" & timeout /t 1 >nul)",
+            "command": "curl -s -o nul http://localhost:8085 >nul 2>&1 && (echo Server already running on :8085) || (start /b python -m http.server 8085 -d \"${workspaceFolder}/build/examples/spinning_cube/wasm-release-paired\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -190,20 +257,20 @@
         },
         {
             "label": "Build & Serve spinning_cube (debug)",
-            "dependsOn": ["Build wasm-debug", "Ensure server spinning_cube (debug :8084)"],
+            "dependsOn": ["Build wasm-debug-paired", "Ensure server spinning_cube (debug :8084)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         },
         {
             "label": "Build & Serve spinning_cube (release)",
-            "dependsOn": ["Build wasm-release", "Ensure server spinning_cube (release :8085)"],
+            "dependsOn": ["Build wasm-release-paired", "Ensure server spinning_cube (release :8085)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         },
         {
             "label": "Ensure server textured_quad (debug :8086)",
             "type": "shell",
-            "command": "curl -s -o nul http://localhost:8086 >nul 2>&1 && (echo Server already running on :8086) || (start /b python -m http.server 8086 -d \"${workspaceFolder}/build/examples/textured_quad/wasm-debug\" & timeout /t 1 >nul)",
+            "command": "curl -s -o nul http://localhost:8086 >nul 2>&1 && (echo Server already running on :8086) || (start /b python -m http.server 8086 -d \"${workspaceFolder}/build/examples/textured_quad/wasm-debug-paired\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -215,7 +282,7 @@
         {
             "label": "Ensure server textured_quad (release :8087)",
             "type": "shell",
-            "command": "curl -s -o nul http://localhost:8087 >nul 2>&1 && (echo Server already running on :8087) || (start /b python -m http.server 8087 -d \"${workspaceFolder}/build/examples/textured_quad/wasm-release\" & timeout /t 1 >nul)",
+            "command": "curl -s -o nul http://localhost:8087 >nul 2>&1 && (echo Server already running on :8087) || (start /b python -m http.server 8087 -d \"${workspaceFolder}/build/examples/textured_quad/wasm-release-paired\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -226,27 +293,20 @@
         },
         {
             "label": "Build & Serve textured_quad (debug)",
-            "dependsOn": ["Build wasm-debug", "Ensure server textured_quad (debug :8086)"],
+            "dependsOn": ["Build wasm-debug-paired", "Ensure server textured_quad (debug :8086)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         },
         {
             "label": "Build & Serve textured_quad (release)",
-            "dependsOn": ["Build wasm-release", "Ensure server textured_quad (release :8087)"],
+            "dependsOn": ["Build wasm-release-paired", "Ensure server textured_quad (release :8087)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         },
         {
-            "label": "Build native-debug (build_sponza_packs)",
-            "type": "shell",
-            "command": "cmake --build build/_cmake/native-debug --target build_sponza_packs",
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
             "label": "Ensure server sponza (debug :8088)",
             "type": "shell",
-            "command": "curl -s -o nul http://localhost:8088 >nul 2>&1 && (echo Server already running on :8088) || (start /b python -m http.server 8088 -d \"${workspaceFolder}/build/examples/sponza/wasm-debug\" & timeout /t 1 >nul)",
+            "command": "curl -s -o nul http://localhost:8088 >nul 2>&1 && (echo Server already running on :8088) || (start /b python -m http.server 8088 -d \"${workspaceFolder}/build/examples/sponza/wasm-debug-paired\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -258,7 +318,7 @@
         {
             "label": "Ensure server sponza (release :8089)",
             "type": "shell",
-            "command": "curl -s -o nul http://localhost:8089 >nul 2>&1 && (echo Server already running on :8089) || (start /b python -m http.server 8089 -d \"${workspaceFolder}/build/examples/sponza/wasm-release\" & timeout /t 1 >nul)",
+            "command": "curl -s -o nul http://localhost:8089 >nul 2>&1 && (echo Server already running on :8089) || (start /b python -m http.server 8089 -d \"${workspaceFolder}/build/examples/sponza/wasm-release-paired\" & timeout /t 1 >nul)",
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
@@ -269,13 +329,13 @@
         },
         {
             "label": "Build & Serve sponza (debug)",
-            "dependsOn": ["Build wasm-debug", "Ensure server sponza (debug :8088)"],
+            "dependsOn": ["Build wasm-debug-paired", "Ensure server sponza (debug :8088)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         },
         {
             "label": "Build & Serve sponza (release)",
-            "dependsOn": ["Build wasm-release", "Ensure server sponza (release :8089)"],
+            "dependsOn": ["Build wasm-release-paired", "Ensure server sponza (release :8089)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
         }
