@@ -288,5 +288,55 @@
       "raw": 219641285,
       "gzip": 126302735
     }
+  },
+  {
+    "commit": "c123291",
+    "date": "2026-03-22T13:01:52Z",
+    "files": {
+      "index.html": {
+        "raw": 2445,
+        "gzip": 1227
+      },
+      "index.js": {
+        "raw": 23098,
+        "gzip": 9523
+      },
+      "index_simd.wasm": {
+        "raw": 68103,
+        "gzip": 31846
+      },
+      "index.wasm": {
+        "raw": 66000,
+        "gzip": 31959
+      },
+      "assets/sponza_core.ntpack": {
+        "raw": 19400,
+        "gzip": 3214
+      },
+      "assets/sponza_full.ntpack": {
+        "raw": 172919968,
+        "gzip": 99471849
+      },
+      "assets/sponza_geo.ntpack": {
+        "raw": 5976128,
+        "gzip": 3656209
+      },
+      "assets/sponza_tex.ntpack": {
+        "raw": 40635348,
+        "gzip": 23129234
+      }
+    },
+    "engine": {
+      "raw": 93646,
+      "gzip": 42596
+    },
+    "resources": {
+      "raw": 219550844,
+      "gzip": 126260506
+    },
+    "total": {
+      "raw": 219644490,
+      "gzip": 126303102
+    }
   }
 ]
