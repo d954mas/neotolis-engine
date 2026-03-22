@@ -419,9 +419,7 @@ void test_has_param_returns_false(void) {
 
 /* ---- Test: has_param returns false for invalid handle ---- */
 
-void test_has_param_invalid_handle(void) {
-    TEST_ASSERT_FALSE(nt_material_has_param(NT_MATERIAL_INVALID, "u_roughness"));
-}
+void test_has_param_invalid_handle(void) { TEST_ASSERT_FALSE(nt_material_has_param(NT_MATERIAL_INVALID, "u_roughness")); }
 
 /* ---- Test: set_param updates all four components ---- */
 

@@ -193,3 +193,67 @@ const nt_material_info_t *nt_material_get_info(nt_material_t mat) {
     uint32_t slot_index = nt_pool_slot_index(mat.id);
     return &s_mat.slots[slot_index].info;
 }
+
+/* ---- Runtime param mutation ---- */
+
+/* Returns param index for given name hash, or -1 if not found */
+static int find_param_index(const nt_material_info_t *info, uint32_t name_hash) {
+    for (uint8_t i = 0; i < info->param_count; i++) {
+        if (info->param_name_hashes[i] == name_hash) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+bool nt_material_has_param(nt_material_t mat, const char *name) {
+    if (!s_mat.initialized || mat.id == 0) {
+        return false;
+    }
+    if (!nt_pool_valid(&s_mat.pool, mat.id)) {
+        return false;
+    }
+    uint32_t slot_index = nt_pool_slot_index(mat.id);
+    const nt_material_info_t *info = &s_mat.slots[slot_index].info;
+    uint32_t h = nt_hash32_str(name).value;
+    return find_param_index(info, h) >= 0;
+}
+
+void nt_material_set_param(nt_material_t mat, const char *name, const float value[4]) {
+    NT_ASSERT(s_mat.initialized);
+    if (!s_mat.initialized || mat.id == 0) {
+        return;
+    }
+    if (!nt_pool_valid(&s_mat.pool, mat.id)) {
+        return;
+    }
+    uint32_t slot_index = nt_pool_slot_index(mat.id);
+    nt_material_info_t *info = &s_mat.slots[slot_index].info;
+    uint32_t h = nt_hash32_str(name).value;
+    int idx = find_param_index(info, h);
+    NT_ASSERT(idx >= 0 && "material param not found -- use nt_material_has_param to check");
+    if (idx < 0) {
+        return;
+    }
+    memcpy(info->params[idx], value, sizeof(float) * 4);
+}
+
+void nt_material_set_param_component(nt_material_t mat, const char *name, uint8_t index, float value) {
+    NT_ASSERT(s_mat.initialized);
+    NT_ASSERT(index <= 3 && "component index must be 0-3");
+    if (!s_mat.initialized || mat.id == 0 || index > 3) {
+        return;
+    }
+    if (!nt_pool_valid(&s_mat.pool, mat.id)) {
+        return;
+    }
+    uint32_t slot_index = nt_pool_slot_index(mat.id);
+    nt_material_info_t *info = &s_mat.slots[slot_index].info;
+    uint32_t h = nt_hash32_str(name).value;
+    int idx = find_param_index(info, h);
+    NT_ASSERT(idx >= 0 && "material param not found -- use nt_material_has_param to check");
+    if (idx < 0) {
+        return;
+    }
+    info->params[idx][index] = value;
+}
