@@ -66,7 +66,8 @@ The paired build script uses `emcmake cmake --preset ...` for both configure ste
 then builds both presets and copies each SIMD wasm beside the paired example
 output as `index_simd.wasm`. Baseline-only presets do not inject a SIMD path
 into the shell. Paired presets do inject that path, so the shell performs the
-SIMD probe and picks exactly one wasm at runtime.
+SIMD probe, logs the selected wasm variant in the browser console, and picks
+exactly one wasm at runtime.
 
 If you build presets separately, you can package examples manually:
 

@@ -66,6 +66,7 @@
     <script>
 @NT_SHELL_SIMD_LOADER_JS@
 
+        var ntLoggedWasmVariant = false;
         var Module = {
             canvas: document.getElementById('canvas'),
 @NT_SHELL_LOCATE_FILE_BLOCK@        };

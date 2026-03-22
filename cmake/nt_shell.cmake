@@ -51,7 +51,15 @@ function(nt_configure_shell target)
         file(READ "${_NT_SHELL_MODULE_DIR}/../engine/platform/web/simd_loader.js" NT_SHELL_SIMD_LOADER_JS)
         set(NT_SHELL_LOCATE_FILE_BLOCK [=[
             locateFile: function(path) {
-                return ntResolveWasmPath(path, '@NT_SHELL_SIMD_WASM_PATH@');
+                var resolved = ntResolveWasmLoad(path, '@NT_SHELL_SIMD_WASM_PATH@');
+                if (!ntLoggedWasmVariant && typeof path === 'string' && path.endsWith('.wasm')) {
+                    ntLoggedWasmVariant = true;
+                    Module.ntWasmVariant = resolved.variant;
+                    if (typeof console !== 'undefined' && typeof console.info === 'function') {
+                        console.info('[Neotolis] Loading WASM variant:', resolved.variant, resolved.path);
+                    }
+                }
+                return resolved.path;
             }
 ]=])
     else()
