@@ -195,9 +195,7 @@ static nt_material_info_t *get_mutable_info(nt_material_t mat) {
     return &s_mat.slots[nt_pool_slot_index(mat.id)].info;
 }
 
-const nt_material_info_t *nt_material_get_info(nt_material_t mat) {
-    return get_mutable_info(mat);
-}
+const nt_material_info_t *nt_material_get_info(nt_material_t mat) { return get_mutable_info(mat); }
 
 /* ---- Runtime param mutation ---- */
 
@@ -211,14 +209,15 @@ static int find_param_index(const nt_material_info_t *info, uint32_t name_hash) 
     return -1;
 }
 
-bool nt_material_has_param(nt_material_t mat, const char *name) {
+bool nt_material_has_param_h(nt_material_t mat, nt_hash32_t name_hash) {
     const nt_material_info_t *info = get_mutable_info(mat);
     if (!info) {
         return false;
     }
-    uint32_t h = nt_hash32_str(name).value;
-    return find_param_index(info, h) >= 0;
+    return find_param_index(info, name_hash.value) >= 0;
 }
+
+bool nt_material_has_param(nt_material_t mat, const char *name) { return nt_material_has_param_h(mat, nt_hash32_str(name)); }
 
 /* Resolve info + param index, or return -1 on failure (asserts in debug) */
 static int resolve_param(nt_material_t mat, uint32_t name_hash, nt_material_info_t **out_info) {
@@ -237,7 +236,7 @@ static int resolve_param(nt_material_t mat, uint32_t name_hash, nt_material_info
 }
 
 void nt_material_set_param_h(nt_material_t mat, nt_hash32_t name_hash, const float value[4]) {
-    nt_material_info_t *info;
+    nt_material_info_t *info = NULL;
     int idx = resolve_param(mat, name_hash.value, &info);
     if (idx < 0) {
         return;
@@ -252,7 +251,7 @@ void nt_material_set_param_component_h(nt_material_t mat, nt_hash32_t name_hash,
     if (index > 3) {
         return;
     }
-    nt_material_info_t *info;
+    nt_material_info_t *info = NULL;
     int idx = resolve_param(mat, name_hash.value, &info);
     if (idx < 0) {
         return;
