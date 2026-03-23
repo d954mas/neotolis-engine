@@ -117,9 +117,9 @@ static bool texture_needs_alpha(const nt_glb_scene_t *scene, uint32_t tex_index,
     return false;
 }
 
-/* --- Add all textures with per-role format and optional resize --- */
+/* --- Add all textures with per-role format, optional resize, and optional compression --- */
 
-static nt_build_result_t add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t max_size) {
+static nt_build_result_t add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t max_size, const nt_tex_compress_opts_t *compress_opts) {
     tex_role_t *roles = build_texture_roles(scene);
     if (!roles) {
         return NT_BUILD_ERR_IO;
@@ -147,7 +147,17 @@ static nt_build_result_t add_textures(NtBuilderContext *ctx, const nt_glb_scene_
             break;
         }
 
-        nt_build_result_t r = nt_builder_add_texture_from_memory_ex(ctx, scene->textures[i].data, scene->textures[i].size, tex_rid(i), &opts);
+        /* Select compression per texture role:
+         * Normal maps use UASTC for higher quality, everything else uses the provided preset (ETC1S).
+         * NULL compress_opts = raw v1 format (no compression). */
+        const nt_tex_compress_opts_t *tex_compress = compress_opts;
+        nt_tex_compress_opts_t normal_compress = {0};
+        if (compress_opts != NULL && roles[i] == TEX_ROLE_NORMAL) {
+            normal_compress = nt_tex_compress_uastc_mid();
+            tex_compress = &normal_compress;
+        }
+
+        nt_build_result_t r = nt_builder_add_texture_from_memory_compressed(ctx, scene->textures[i].data, scene->textures[i].size, tex_rid(i), &opts, tex_compress);
         if (r != NT_BUILD_OK) {
             (void)fprintf(stderr, "ERROR: failed to add texture %u: %d\n", i, r);
             free(roles);
@@ -494,10 +504,14 @@ static nt_build_result_t populate_core(NtBuilderContext *ctx, const nt_glb_scene
 
 static nt_build_result_t populate_geo(NtBuilderContext *ctx, const nt_glb_scene_t *scene) { return add_meshes(ctx, scene, true); }
 
-static nt_build_result_t populate_tex(NtBuilderContext *ctx, const nt_glb_scene_t *scene) { return add_textures(ctx, scene, 512); }
+static nt_build_result_t populate_tex(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
+    nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_mid();
+    return add_textures(ctx, scene, 512, &compress);
+}
 
 static nt_build_result_t populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
-    nt_build_result_t r = add_textures(ctx, scene, 0);
+    nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_mid();
+    nt_build_result_t r = add_textures(ctx, scene, 0, &compress);
     if (r != NT_BUILD_OK) {
         return r;
     }
@@ -575,6 +589,19 @@ int main(int argc, char *argv[]) {
 
     nt_builder_free_glb_scene(&scene);
 
-    (void)printf("=== Done ===\n");
+    /* Print pack size summary (D-22) */
+    (void)printf("\n=== Pack Size Summary ===\n");
+    static const char *pack_names[] = {"sponza_core.ntpack", "sponza_geo.ntpack", "sponza_tex.ntpack", "sponza_full.ntpack"};
+    for (int i = 0; i < 4; i++) {
+        FILE *f = fopen(pack_path(out_dir, pack_names[i]), "rb");
+        if (f) {
+            (void)fseek(f, 0, SEEK_END);
+            long sz = ftell(f);
+            (void)fclose(f);
+            (void)printf("  %-24s %8.1f KB\n", pack_names[i], (double)sz / 1024.0);
+        }
+    }
+
+    (void)printf("\n=== Done ===\n");
     return 0;
 }
