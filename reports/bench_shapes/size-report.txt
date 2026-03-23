@@ -1,5 +1,5 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: 6cdfeb0
+# Commit: ebbb2b9
 
 ## WASM Section Sizes
 
@@ -13,18 +13,18 @@ Memory                 7 B
 Global                 9 B
 Export                59 B
 Elem                  22 B
-Code               59878 B
+Code               59923 B
 Data                8175 B
 Custom              3187 B
 ---------------- ----------
-TOTAL              72016 B
+TOTAL              72061 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
 10865 B   frame
-10779 B   main
+10824 B   main
  3469 B   rebuild_shapes
  3102 B   fmt_fp
  2803 B   emit_capsule_wire
@@ -55,7 +55,7 @@ TOTAL              72016 B
   361 B   nt_input_web_on_pointer_up
 
 Total functions: 82
-Total code size: 59740 B
+Total code size: 59785 B
 
 ## Per-Module Contributions
 
@@ -65,12 +65,12 @@ Module                         Size
 ------------------------ ----------
 libnt_app.a                 1430 B
 libnt_core.a                2178 B
-libnt_gfx.a                34142 B
+libnt_gfx.a                34514 B
 libnt_input.a              16446 B
 libnt_shape_renderer.a   1140902 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)           1199038 B
+TOTAL (linked)           1199410 B
 
 Not linked to bench_shapes:
 libnt_app_stub.a            1428 B
@@ -79,17 +79,17 @@ libnt_drawable_comp.a       2668 B
 libnt_entity.a              2996 B
 libnt_fs.a                  2620 B
 libnt_fs_stub.a             2620 B
-libnt_gfx_stub.a           20970 B
+libnt_gfx_stub.a           21294 B
 libnt_hash.a                4028 B
 libnt_http.a                6710 B
 libnt_http_stub.a           3210 B
 libnt_input_stub.a         11148 B
 libnt_log.a                 1424 B
 libnt_log_stub.a             484 B
-libnt_material.a            4292 B
+libnt_material.a            4312 B
 libnt_material_comp.a       1990 B
 libnt_mesh_comp.a           1914 B
-libnt_mesh_renderer.a       6696 B
+libnt_mesh_renderer.a       7900 B
 libnt_pool.a                1278 B
 libnt_render.a              5910 B
 libnt_resource.a          149572 B
