@@ -25,17 +25,18 @@
 #endif
 #endif
 
+/* Handler type: receives stringified expression, file, and line.
+   Handler MUST NOT return (use longjmp or abort).
+   Always defined so tests can link against it in any build mode. */
+typedef void (*nt_assert_handler_t)(const char *expr, const char *file, int line);
+extern nt_assert_handler_t nt_assert_handler;
+
 /* NT_ASSERT_MODE levels:
    0 (OFF)  — ((void)0), no checks, minimal binary.
    1 (TRAP) — __builtin_trap() on failure, no strings.
    2 (FULL) — hookable handler with expr/file/line strings (tests). */
 
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
-
-/* Handler type: receives stringified expression, file, and line.
-   Handler MUST NOT return (use longjmp or abort). */
-typedef void (*nt_assert_handler_t)(const char *expr, const char *file, int line);
-extern nt_assert_handler_t nt_assert_handler;
 
 #define NT_ASSERT(cond)                                                                                                                                                                                \
     do {                                                                                                                                                                                               \

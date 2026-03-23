@@ -2,8 +2,6 @@
 
 #include <stddef.h>
 
-/* Handler variable — defined only in FULL mode (tests set this to intercept
-   assert failures via longjmp). NULL by default → falls through to trap. */
-#if NT_ASSERT_MODE == NT_ASSERT_FULL
+/* Always defined so tests can link against it in any build mode.
+   Only FULL mode macro actually calls the handler; TRAP/OFF ignore it. */
 nt_assert_handler_t nt_assert_handler = NULL;
-#endif
