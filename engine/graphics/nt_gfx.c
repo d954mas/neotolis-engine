@@ -72,6 +72,7 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 
 /* ---- Lifecycle ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc);
     NT_ASSERT(desc->max_shaders > 0 && "nt_gfx_desc_t.max_shaders is 0 -- use nt_gfx_desc_defaults() or set explicitly");
