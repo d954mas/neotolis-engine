@@ -201,6 +201,16 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_render_items COMMAND test_render_items)
 
+    # --- Sort module tests ---
+    add_executable(test_sort unit/test_sort.c)
+    target_link_libraries(test_sort PRIVATE nt_sort unity)
+    nt_set_warning_flags(test_sort)
+    nt_set_sanitizer_flags(test_sort)
+    set_target_properties(test_sort PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_sort COMMAND test_sort)
+
     # --- Material module tests ---
     add_executable(test_material unit/test_material.c)
     target_link_libraries(test_material PRIVATE nt_material nt_resource nt_hash unity)
