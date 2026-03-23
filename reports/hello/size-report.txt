@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis-paired)
-# Commit: c123291
+# Commit: bacded0
 
 ## WASM Section Sizes
 
@@ -63,37 +63,37 @@ Total code size: 15318 B
 
 Module                         Size
 ------------------------ ----------
-libnt_app.a                 1428 B
-libnt_core.a                1780 B
+libnt_app.a                 1430 B
+libnt_core.a                2178 B
 libnt_input.a              16446 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)             23594 B
+TOTAL (linked)             23994 B
 
 Not linked to hello:
 libnt_app_stub.a            1428 B
-libnt_comp_storage.a        1778 B
+libnt_comp_storage.a        1802 B
 libnt_drawable_comp.a       2668 B
-libnt_entity.a              2942 B
+libnt_entity.a              2996 B
 libnt_fs.a                  2620 B
 libnt_fs_stub.a             2620 B
-libnt_gfx.a                36228 B
-libnt_gfx_stub.a           23082 B
+libnt_gfx.a                34142 B
+libnt_gfx_stub.a           20970 B
 libnt_hash.a                4028 B
 libnt_http.a                6710 B
 libnt_http_stub.a           3210 B
 libnt_input_stub.a         11148 B
 libnt_log.a                 1424 B
 libnt_log_stub.a             484 B
-libnt_material.a            2830 B
+libnt_material.a            4292 B
 libnt_material_comp.a       1990 B
 libnt_mesh_comp.a           1914 B
-libnt_mesh_renderer.a       6886 B
-libnt_pool.a                1256 B
+libnt_mesh_renderer.a       6696 B
+libnt_pool.a                1278 B
 libnt_render.a              1528 B
-libnt_resource.a          149510 B
-libnt_shape_renderer.a   1141276 B
-libnt_time.a                 866 B
+libnt_resource.a          149572 B
+libnt_shape_renderer.a   1140902 B
+libnt_time.a                 868 B
 libnt_transform_comp.a      4536 B
 libnt_window_stub.a         1838 B
 
