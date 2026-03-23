@@ -2,6 +2,7 @@
 #include "nt_builder_internal.h"
 #include "hash/nt_hash.h"
 #include "nt_crc32.h"
+#include <time.h>
 /* clang-format on */
 
 /* --- Entry data management --- */
@@ -328,6 +329,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     /* Phase 1: Import all deferred assets */
     NT_LOG_INFO("Importing %u assets...", ctx->pending_count);
+    clock_t t_import_start = clock();
     uint32_t fail_count = 0;
 
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
@@ -383,8 +385,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
     }
 
+    clock_t t_import_end = clock();
+    double import_secs = (double)(t_import_end - t_import_start) / (double)CLOCKS_PER_SEC;
+
     if (ctx->has_error) {
-        NT_LOG_ERROR("Build failed: %u/%u assets failed. No .ntpack written.", fail_count, ctx->pending_count);
+        NT_LOG_ERROR("Build failed: %u/%u assets failed (%.1fs). No .ntpack written.", fail_count, ctx->pending_count, import_secs);
         return NT_BUILD_ERR_VALIDATION;
     }
 
@@ -439,7 +444,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     }
 
     /* Summary */
-    NT_LOG_INFO("Build complete: %s", ctx->output_path);
+    NT_LOG_INFO("Build complete: %s (%.1fs)", ctx->output_path, import_secs);
     NT_LOG_INFO("  Assets: %u total (%u meshes, %u textures, %u shaders, %u blobs)", ctx->entry_count, ctx->mesh_count, ctx->texture_count, ctx->shader_count, ctx->blob_count);
     if (ctx->dedup_count > 0) {
         NT_LOG_INFO("  Deduplicated: %u assets (saved %.3f MB)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / (1024.0 * 1024.0));

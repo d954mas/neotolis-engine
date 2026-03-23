@@ -505,12 +505,12 @@ static nt_build_result_t populate_core(NtBuilderContext *ctx, const nt_glb_scene
 static nt_build_result_t populate_geo(NtBuilderContext *ctx, const nt_glb_scene_t *scene) { return add_meshes(ctx, scene, true); }
 
 static nt_build_result_t populate_tex(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
-    nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_mid();
+    nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_low();
     return add_textures(ctx, scene, 512, &compress);
 }
 
 static nt_build_result_t populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
-    nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_mid();
+    nt_tex_compress_opts_t compress = nt_tex_compress_uastc_high();
     nt_build_result_t r = add_textures(ctx, scene, 0, &compress);
     if (r != NT_BUILD_OK) {
         return r;
