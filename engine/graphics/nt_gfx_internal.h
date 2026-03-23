@@ -58,4 +58,7 @@ void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_in
 
 bool nt_gfx_backend_recreate_all_resources(void);
 
+/* GPU caps detection (implemented per-platform in gl/nt_gfx_gl_ctx_*.c and stub) */
+nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void);
+
 #endif /* NT_GFX_INTERNAL_H */

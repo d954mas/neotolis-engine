@@ -107,6 +107,9 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
         return;
     }
 
+    /* Detect GPU compressed texture capabilities */
+    g_nt_gfx.gpu_caps = nt_gfx_gl_ctx_detect_gpu_caps();
+
     g_nt_gfx.initialized = true;
 }
 
@@ -143,6 +146,8 @@ void nt_gfx_shutdown(void) {
     memset(s_global_blocks, 0, sizeof(s_global_blocks));
     s_global_block_count = 0;
 }
+
+const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void) { return &g_nt_gfx.gpu_caps; }
 
 /* ---- Frame / Pass ---- */
 
