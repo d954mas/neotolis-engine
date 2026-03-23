@@ -1,5 +1,5 @@
 # Size Report: sponza (wasm-analysis-paired)
-# Commit: bacded0
+# Commit: 55b640d
 
 ## WASM Section Sizes
 
