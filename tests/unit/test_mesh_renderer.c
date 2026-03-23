@@ -516,6 +516,53 @@ void test_draw_list_mixed_color_modes(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_instance_total());
 }
 
+/* ---- Test: mixed color modes with multiple instances per run ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_draw_list_mixed_color_modes_multi_instance(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat_none = create_test_material_ex(NT_COLOR_MODE_NONE);
+    nt_material_t mat_rgba8 = create_test_material_ex(NT_COLOR_MODE_RGBA8);
+    nt_material_t mat_float4 = create_test_material_ex(NT_COLOR_MODE_FLOAT4);
+
+    /* 3 entities per material = 9 total, 3 runs with different strides */
+    nt_entity_t entities[9];
+    nt_render_item_t items[9];
+    uint32_t idx = 0;
+
+    /* Run 0: 3x NONE (stride 48) */
+    for (int i = 0; i < 3; i++) {
+        entities[idx] = create_test_entity(mesh, mat_none);
+        items[idx].sort_key = idx;
+        items[idx].entity = entities[idx].id;
+        items[idx].batch_key = nt_batch_key(mat_none.id, mesh.id);
+        idx++;
+    }
+    /* Run 1: 3x RGBA8 (stride 56) */
+    for (int i = 0; i < 3; i++) {
+        entities[idx] = create_test_entity(mesh, mat_rgba8);
+        items[idx].sort_key = idx;
+        items[idx].entity = entities[idx].id;
+        items[idx].batch_key = nt_batch_key(mat_rgba8.id, mesh.id);
+        idx++;
+    }
+    /* Run 2: 3x FLOAT4 (stride 64) */
+    for (int i = 0; i < 3; i++) {
+        entities[idx] = create_test_entity(mesh, mat_float4);
+        items[idx].sort_key = idx;
+        items[idx].entity = entities[idx].id;
+        items[idx].batch_key = nt_batch_key(mat_float4.id, mesh.id);
+        idx++;
+    }
+
+    nt_mesh_renderer_draw_list(items, 9);
+
+    TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(9, nt_mesh_renderer_test_instance_total());
+    /* 3 different color modes = 3 pipelines */
+    TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_pipeline_cache_count());
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -535,6 +582,7 @@ int main(void) {
     RUN_TEST(test_draw_list_color_mode_rgba8);
     RUN_TEST(test_pipeline_cache_different_color_modes);
     RUN_TEST(test_draw_list_mixed_color_modes);
+    RUN_TEST(test_draw_list_mixed_color_modes_multi_instance);
     /* Stream format mapping */
     RUN_TEST(test_stream_to_format_float32);
     RUN_TEST(test_stream_to_format_float16);

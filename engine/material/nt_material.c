@@ -161,6 +161,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
     slot->info.depth_test = desc->depth_test;
     slot->info.depth_write = desc->depth_write;
     slot->info.cull_mode = desc->cull_mode;
+    NT_ASSERT(desc->color_mode <= NT_COLOR_MODE_FLOAT4 && "invalid color_mode -- use NT_COLOR_MODE_NONE/RGBA8/FLOAT4");
     slot->info.color_mode = desc->color_mode;
 
     /* Debug label (caller must ensure static storage / string literal) */

@@ -361,6 +361,11 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     s_mesh_renderer.frame_draw_calls = 0;
     s_mesh_renderer.frame_instance_total = 0;
 
+    /* Restore generic attribute 7 to white once per draw_list call.
+     * NONE mode shaders read this as identity color. Protects against
+     * other renderers or user code changing the value between frames. */
+    nt_gfx_set_vertex_attrib_default(7, 1.0F, 1.0F, 1.0F, 1.0F);
+
     /* Process items in chunks of max_instances.
      * Each chunk: pack instance data -> upload -> draw with offsets.
      * Typically 1 chunk (items < max_instances). */
@@ -390,6 +395,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             nt_material_t run_mat = *nt_material_comp_handle(first_entity);
             const nt_material_info_t *mat_info = nt_material_get_info(run_mat);
             nt_color_mode_t color_mode = (mat_info != NULL) ? mat_info->color_mode : NT_COLOR_MODE_NONE;
+            NT_ASSERT(color_mode <= NT_COLOR_MODE_FLOAT4); /* corrupted material = programmer error */
             uint16_t stride = s_instance_layouts[color_mode].stride;
 
             for (uint32_t i = scan; i < run_end; i++) {

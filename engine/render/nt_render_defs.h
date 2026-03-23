@@ -21,7 +21,7 @@ _Static_assert(sizeof(nt_frame_uniforms_t) == 256, "globals must be 256 bytes fo
 
 typedef enum {
     NT_COLOR_MODE_NONE = 0, /* No per-instance color, 48 bytes */
-    NT_COLOR_MODE_RGBA8,    /* 4 bytes packed color, 52 bytes */
+    NT_COLOR_MODE_RGBA8,    /* 4 bytes packed color, 56 bytes (4 pad) */
     NT_COLOR_MODE_FLOAT4,   /* 16 bytes float color, 64 bytes */
 } nt_color_mode_t;
 
