@@ -15,6 +15,16 @@
 #define NT_ASSERT_TRAP 1
 #define NT_ASSERT_FULL 2
 
+/* NT_ASSERT_MODE default: debug → FULL, release → TRAP.
+   CMake can override via -DNT_ASSERT_MODE=<level>. */
+#ifndef NT_ASSERT_MODE
+#ifdef NT_DEBUG
+#define NT_ASSERT_MODE NT_ASSERT_FULL
+#else
+#define NT_ASSERT_MODE NT_ASSERT_TRAP
+#endif
+#endif
+
 /* NT_ASSERT_MODE levels:
    0 (OFF)  — ((void)0), no checks, minimal binary.
    1 (TRAP) — __builtin_trap() on failure, no strings.
