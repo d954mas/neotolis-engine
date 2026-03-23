@@ -3,6 +3,13 @@
 
 #include "core/nt_platform.h"
 
+/* Asserts are contracts, not error handling.
+   A failed assert means the program is broken — continuing would mask bugs.
+   Release default is TRAP (immediate crash, no strings, minimal overhead).
+   OFF mode available via -DNT_ASSERT_MODE=0 for final production builds.
+   Never use asserts for conditions that can legitimately occur at runtime
+   (missing files, user input, etc) — those are error handling. */
+
 /* Assert mode constants (for readability in headers, not needed in CMake). */
 #define NT_ASSERT_OFF 0
 #define NT_ASSERT_TRAP 1

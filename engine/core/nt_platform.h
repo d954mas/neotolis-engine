@@ -24,7 +24,7 @@
 #ifdef NT_DEBUG
 #define NT_ASSERT_MODE 2 /* full: handler available for tests, trap fallback */
 #else
-#define NT_ASSERT_MODE 0 /* release: off */
+#define NT_ASSERT_MODE 1 /* release: trap (no strings, minimal overhead) */
 #endif
 #endif
 
