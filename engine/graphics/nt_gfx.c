@@ -644,6 +644,13 @@ void nt_gfx_set_instance_offset(uint32_t byte_offset) {
     nt_gfx_backend_set_instance_offset(byte_offset);
 }
 
+void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    nt_gfx_backend_set_vertex_attrib_default(location, x, y, z, w);
+}
+
 /* ---- Uniform buffer ---- */
 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot) {
