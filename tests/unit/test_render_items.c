@@ -90,7 +90,8 @@ void test_sort_by_key_ascending(void) {
     nt_render_item_t items[5] = {
         {.sort_key = 50, .entity = 1}, {.sort_key = 10, .entity = 2}, {.sort_key = 40, .entity = 3}, {.sort_key = 20, .entity = 4}, {.sort_key = 30, .entity = 5},
     };
-    nt_sort_by_key(items, 5);
+    nt_render_item_t scratch[5];
+    nt_sort_by_key(items, 5, scratch);
     TEST_ASSERT_EQUAL_UINT64(10, items[0].sort_key);
     TEST_ASSERT_EQUAL_UINT64(20, items[1].sort_key);
     TEST_ASSERT_EQUAL_UINT64(30, items[2].sort_key);
@@ -100,12 +101,13 @@ void test_sort_by_key_ascending(void) {
 
 void test_sort_by_key_empty(void) {
     /* Should not crash */
-    nt_sort_by_key(NULL, 0);
+    nt_sort_by_key(NULL, 0, NULL);
 }
 
 void test_sort_by_key_single(void) {
     nt_render_item_t item = {.sort_key = 42, .entity = 1};
-    nt_sort_by_key(&item, 1);
+    nt_render_item_t scratch[1];
+    nt_sort_by_key(&item, 1, scratch);
     TEST_ASSERT_EQUAL_UINT64(42, item.sort_key);
 }
 

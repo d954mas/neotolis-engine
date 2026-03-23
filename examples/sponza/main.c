@@ -118,6 +118,7 @@ static nt_resource_t s_fs_alpha;
 
 static nt_material_t s_materials[MAX_SCENE_NODES];
 static nt_entity_t s_entities[MAX_SCENE_NODES];
+static nt_render_item_t s_sort_scratch[MAX_SCENE_NODES];
 static uint32_t s_entity_count;
 static bool s_scene_loaded;
 static bool s_full_quality;  /* true = full pack has higher priority */
@@ -494,7 +495,7 @@ static void frame(void) {
     uniforms.near_far[1] = 100.0F;
 
     /* Build render items (only if scene loaded) */
-    nt_render_item_t items[MAX_SCENE_NODES];
+    static nt_render_item_t items[MAX_SCENE_NODES];
     uint32_t item_count = 0;
 
     if (s_scene_loaded) {
@@ -536,7 +537,7 @@ static void frame(void) {
         }
 
         /* Sort items by sort_key */
-        nt_sort_by_key(items, item_count);
+        nt_sort_by_key(items, item_count, s_sort_scratch);
     }
 
     /* ---- Render ---- */

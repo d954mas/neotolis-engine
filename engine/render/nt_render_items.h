@@ -4,6 +4,17 @@
 #include <string.h>
 
 #include "render/nt_render_defs.h"
+#include "sort/nt_sort.h"
+
+/* ---- Sort (typed radix sort for render items, defined in nt_render_items.c) ---- */
+
+/**
+ * Sort render items by sort_key (ascending, stable).
+ * @param items   Array to sort in-place. Must not be NULL when count >= 2.
+ * @param count   Number of items.
+ * @param scratch Separate buffer of at least @p count items. Must not be NULL or equal to @p items.
+ */
+void nt_sort_by_key(nt_render_item_t *items, uint32_t count, nt_render_item_t *scratch);
 
 /* ---- Sort key helpers (inline, no component knowledge) ---- */
 
@@ -44,6 +55,5 @@ static inline uint32_t nt_batch_key(uint32_t material_id, uint32_t mesh_id) { re
 /* ---- Declared functions (implemented in nt_render_items.c) ---- */
 
 float nt_calc_view_depth(uint32_t entity_id, const float view_pos[3], const float view_fwd[3]);
-void nt_sort_by_key(nt_render_item_t *items, uint32_t count);
 
 #endif /* NT_RENDER_ITEMS_H */

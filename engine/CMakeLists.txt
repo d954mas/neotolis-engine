@@ -19,6 +19,7 @@ add_subdirectory(resource)
 add_subdirectory(http)
 add_subdirectory(fs)
 add_subdirectory(renderers)
+add_subdirectory(sort)
 add_subdirectory(render)
 
 if(EMSCRIPTEN)

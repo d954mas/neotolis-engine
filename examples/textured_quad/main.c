@@ -91,6 +91,7 @@ static int16_t s_hires_prio = 20;
 #define NUM_CUBES 5
 
 static nt_entity_t s_cubes[NUM_CUBES];
+static nt_render_item_t s_sort_scratch[NUM_CUBES];
 
 /* clang-format off */
 static const float s_cube_positions[NUM_CUBES][3] = {
@@ -324,7 +325,7 @@ static void frame(void) {
         }
 
         /* ---- Sort: order by sort_key (material+mesh grouping) ---- */
-        nt_sort_by_key(items, item_count);
+        nt_sort_by_key(items, item_count, s_sort_scratch);
 
         /* ---- Draw: mesh renderer handles pipeline, instancing, batching ---- */
         nt_mesh_renderer_draw_list(items, item_count);

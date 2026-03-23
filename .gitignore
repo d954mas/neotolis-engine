@@ -40,6 +40,7 @@ package-lock.json
 #codex branch diff
 branch_diff.patch
 diff_*.txt
+*.patch
 
 # Claude local settings
 .claude/settings.local.json
