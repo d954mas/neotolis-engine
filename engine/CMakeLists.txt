@@ -21,6 +21,7 @@ add_subdirectory(fs)
 add_subdirectory(renderers)
 add_subdirectory(sort)
 add_subdirectory(render)
+add_subdirectory(basisu)
 
 if(EMSCRIPTEN)
     add_subdirectory(platform/web)
