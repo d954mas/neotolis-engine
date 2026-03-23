@@ -5,11 +5,10 @@ layout(location = 1) in vec3 a_normal;
 layout(location = 2) in vec2 a_uv;
 layout(location = 3) in vec4 a_tangent;
 
-layout(location = 4) in vec4 a_world_col0;
-layout(location = 5) in vec4 a_world_col1;
-layout(location = 6) in vec4 a_world_col2;
-layout(location = 7) in vec4 a_world_col3;
-layout(location = 8) in vec4 a_color;
+layout(location = 4) in vec4 a_world_row0;
+layout(location = 5) in vec4 a_world_row1;
+layout(location = 6) in vec4 a_world_row2;
+layout(location = 7) in vec4 a_color;
 
 layout(std140) uniform Globals {
     mat4 view_proj;
@@ -27,7 +26,12 @@ out mat3 v_tbn;
 out vec4 v_color;
 
 void main() {
-    mat4 world = mat4(a_world_col0, a_world_col1, a_world_col2, a_world_col3);
+    mat4 world = mat4(
+        vec4(a_world_row0.x, a_world_row1.x, a_world_row2.x, 0.0),
+        vec4(a_world_row0.y, a_world_row1.y, a_world_row2.y, 0.0),
+        vec4(a_world_row0.z, a_world_row1.z, a_world_row2.z, 0.0),
+        vec4(a_world_row0.w, a_world_row1.w, a_world_row2.w, 1.0)
+    );
     mat3 world3 = mat3(world);
     vec3 N = normalize(world3 * a_normal);
     vec3 T = normalize(world3 * a_tangent.xyz);
