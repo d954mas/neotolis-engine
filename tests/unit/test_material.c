@@ -1,8 +1,10 @@
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <setjmp.h>
 #include <stdio.h>
 #include <string.h>
 
 /* clang-format off */
+#include "core/nt_assert.h"
 #include "material/nt_material.h"
 #include "resource/nt_resource.h"
 #include "hash/nt_hash.h"
@@ -479,12 +481,28 @@ void test_set_param_component_updates_one(void) {
     }
 }
 
-/* ---- Test: set_param with invalid handle does not crash ---- */
+/* ---- Assert-catching helper (setjmp/longjmp via hookable nt_assert_handler) ---- */
+
+static jmp_buf s_assert_jmp;
+
+static void test_assert_handler(const char *expr, const char *file, int line) {
+    (void)expr;
+    (void)file;
+    (void)line;
+    longjmp(s_assert_jmp, 1);
+}
+
+/* ---- Test: set_param with invalid handle fires NT_ASSERT ---- */
 
 void test_set_param_invalid_handle(void) {
     float val[4] = {1.0F, 1.0F, 1.0F, 1.0F};
-    /* Should early-return without crashing */
-    nt_material_set_param(NT_MATERIAL_INVALID, "u_roughness", val);
+    nt_assert_handler = test_assert_handler;
+    if (setjmp(s_assert_jmp) == 0) {
+        nt_material_set_param(NT_MATERIAL_INVALID, "u_roughness", val);
+        nt_assert_handler = NULL;
+        TEST_FAIL_MESSAGE("Expected NT_ASSERT to fire for invalid handle");
+    }
+    nt_assert_handler = NULL;
     TEST_PASS();
 }
 

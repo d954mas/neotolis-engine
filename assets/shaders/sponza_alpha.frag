@@ -20,7 +20,7 @@ layout(std140) uniform Lighting {
     vec4 ambient;
 };
 
-/* Alpha cutoff passed as material param */
+/* Alpha cutoff passed as material param (.x = threshold, .yzw unused) */
 uniform vec4 u_alpha_cutoff;
 
 void main() {

@@ -190,6 +190,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
 
 /* ---- Lifecycle ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     NT_ASSERT(!s_mesh_renderer.initialized);
     NT_ASSERT(desc);

@@ -34,6 +34,7 @@ static struct {
 
 /* ---- Lifecycle ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_result_t nt_material_init(const nt_material_desc_t *desc) {
     NT_ASSERT(!s_mat.initialized);      /* double init */
     NT_ASSERT(desc);                    /* NULL descriptor */
@@ -182,16 +183,20 @@ bool nt_material_valid(nt_material_t mat) {
     return nt_pool_valid(&s_mat.pool, mat.id);
 }
 
-const nt_material_info_t *nt_material_get_info(nt_material_t mat) {
-    NT_ASSERT(s_mat.initialized); /* query before init */
-    if (mat.id == 0 || !s_mat.initialized) {
+/* Returns mutable info pointer for a valid handle, or NULL */
+static nt_material_info_t *get_mutable_info(nt_material_t mat) {
+    if (!s_mat.initialized || mat.id == 0) {
         return NULL;
     }
     if (!nt_pool_valid(&s_mat.pool, mat.id)) {
         return NULL;
     }
-    uint32_t slot_index = nt_pool_slot_index(mat.id);
-    return &s_mat.slots[slot_index].info;
+    return &s_mat.slots[nt_pool_slot_index(mat.id)].info;
+}
+
+const nt_material_info_t *nt_material_get_info(nt_material_t mat) {
+    NT_ASSERT(s_mat.initialized); /* query before init */
+    return get_mutable_info(mat);
 }
 
 /* ---- Runtime param mutation ---- */
@@ -207,53 +212,52 @@ static int find_param_index(const nt_material_info_t *info, uint32_t name_hash) 
 }
 
 bool nt_material_has_param(nt_material_t mat, const char *name) {
-    if (!s_mat.initialized || mat.id == 0) {
+    const nt_material_info_t *info = get_mutable_info(mat);
+    if (!info) {
         return false;
     }
-    if (!nt_pool_valid(&s_mat.pool, mat.id)) {
-        return false;
-    }
-    uint32_t slot_index = nt_pool_slot_index(mat.id);
-    const nt_material_info_t *info = &s_mat.slots[slot_index].info;
     uint32_t h = nt_hash32_str(name).value;
     return find_param_index(info, h) >= 0;
 }
 
-void nt_material_set_param(nt_material_t mat, const char *name, const float value[4]) {
-    NT_ASSERT(s_mat.initialized);
-    if (!s_mat.initialized || mat.id == 0) {
-        return;
+/* Resolve info + param index, or return -1 on failure (asserts in debug) */
+static int resolve_param(nt_material_t mat, uint32_t name_hash, nt_material_info_t **out_info) {
+    nt_material_info_t *info = get_mutable_info(mat);
+    NT_ASSERT(info && "set_param on invalid material handle");
+    if (!info) {
+        return -1;
     }
-    if (!nt_pool_valid(&s_mat.pool, mat.id)) {
-        return;
-    }
-    uint32_t slot_index = nt_pool_slot_index(mat.id);
-    nt_material_info_t *info = &s_mat.slots[slot_index].info;
-    uint32_t h = nt_hash32_str(name).value;
-    int idx = find_param_index(info, h);
+    int idx = find_param_index(info, name_hash);
     NT_ASSERT(idx >= 0 && "material param not found -- use nt_material_has_param to check");
+    if (idx < 0) {
+        return -1;
+    }
+    *out_info = info;
+    return idx;
+}
+
+void nt_material_set_param_h(nt_material_t mat, nt_hash32_t name_hash, const float value[4]) {
+    nt_material_info_t *info;
+    int idx = resolve_param(mat, name_hash.value, &info);
     if (idx < 0) {
         return;
     }
     memcpy(info->params[idx], value, sizeof(float) * 4);
 }
 
-void nt_material_set_param_component(nt_material_t mat, const char *name, uint8_t index, float value) {
-    NT_ASSERT(s_mat.initialized);
+void nt_material_set_param(nt_material_t mat, const char *name, const float value[4]) { nt_material_set_param_h(mat, nt_hash32_str(name), value); }
+
+void nt_material_set_param_component_h(nt_material_t mat, nt_hash32_t name_hash, uint8_t index, float value) {
     NT_ASSERT(index <= 3 && "component index must be 0-3");
-    if (!s_mat.initialized || mat.id == 0 || index > 3) {
+    if (index > 3) {
         return;
     }
-    if (!nt_pool_valid(&s_mat.pool, mat.id)) {
-        return;
-    }
-    uint32_t slot_index = nt_pool_slot_index(mat.id);
-    nt_material_info_t *info = &s_mat.slots[slot_index].info;
-    uint32_t h = nt_hash32_str(name).value;
-    int idx = find_param_index(info, h);
-    NT_ASSERT(idx >= 0 && "material param not found -- use nt_material_has_param to check");
+    nt_material_info_t *info;
+    int idx = resolve_param(mat, name_hash.value, &info);
     if (idx < 0) {
         return;
     }
     info->params[idx][index] = value;
 }
+
+void nt_material_set_param_component(nt_material_t mat, const char *name, uint8_t index, float value) { nt_material_set_param_component_h(mat, nt_hash32_str(name), index, value); }

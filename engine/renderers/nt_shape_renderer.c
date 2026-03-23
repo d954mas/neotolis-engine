@@ -1364,6 +1364,7 @@ void nt_shape_renderer_capsule_wire_rot(const float center[3], float radius, flo
 
 /* ---- Mesh ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const nt_shape_index_t *indices, uint32_t num_indices, const float color[4]) {
     if (s_shape.vertex_count + num_vertices > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + num_indices > NT_SHAPE_RENDERER_MAX_INDICES) {
         nt_shape_renderer_flush();

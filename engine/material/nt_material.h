@@ -2,6 +2,7 @@
 #define NT_MATERIAL_H
 
 #include "core/nt_types.h"
+#include "hash/nt_hash.h"
 #include "resource/nt_resource.h"
 
 /* ---- Compile-time limits ---- */
@@ -134,5 +135,9 @@ const nt_material_info_t *nt_material_get_info(nt_material_t mat);
 bool nt_material_has_param(nt_material_t mat, const char *name);
 void nt_material_set_param(nt_material_t mat, const char *name, const float value[4]);
 void nt_material_set_param_component(nt_material_t mat, const char *name, uint8_t index, float value);
+
+/* Hash-based overloads -- cache nt_hash32_str() result to avoid per-frame rehashing */
+void nt_material_set_param_h(nt_material_t mat, nt_hash32_t name_hash, const float value[4]);
+void nt_material_set_param_component_h(nt_material_t mat, nt_hash32_t name_hash, uint8_t index, float value);
 
 #endif /* NT_MATERIAL_H */
