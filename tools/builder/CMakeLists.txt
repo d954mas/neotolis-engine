@@ -1,3 +1,37 @@
+# Basis Universal encoder (C++ static library, native only)
+enable_language(CXX)
+
+file(GLOB BASISU_ENCODER_SOURCES "${CMAKE_SOURCE_DIR}/deps/basisu/encoder/*.cpp")
+file(GLOB BASISU_ENCODER_3RDPARTY "${CMAKE_SOURCE_DIR}/deps/basisu/encoder/3rdparty/*.cpp")
+set(BASISU_TRANSCODER_SRC "${CMAKE_SOURCE_DIR}/deps/basisu/transcoder/basisu_transcoder.cpp")
+
+add_library(nt_basisu_encoder STATIC
+    nt_basisu_encoder.cpp
+    ${BASISU_ENCODER_SOURCES}
+    ${BASISU_ENCODER_3RDPARTY}
+    ${BASISU_TRANSCODER_SRC}
+)
+target_include_directories(nt_basisu_encoder PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/deps/basisu/encoder
+    ${CMAKE_SOURCE_DIR}/deps/basisu/transcoder
+)
+# Encoder requires KTX2 support enabled in transcoder
+target_compile_definitions(nt_basisu_encoder PRIVATE
+    BASISD_SUPPORT_KTX2=1
+    BASISD_SUPPORT_KTX2_ZSTD=0
+    _CRT_SECURE_NO_WARNINGS
+)
+# Suppress warnings in vendored C++ code
+target_compile_options(nt_basisu_encoder PRIVATE -w)
+# Static CRT: remove _DLL so CRT calls resolve to static symbols
+target_compile_options(nt_basisu_encoder PRIVATE -U_DLL)
+set_target_properties(nt_basisu_encoder PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tools/builder/${NT_PRESET_NAME}"
+)
+
 # nt_builder static library
 add_library(nt_builder STATIC
     nt_builder.c
@@ -12,7 +46,7 @@ add_library(nt_builder STATIC
     nt_builder_tangent.c
 )
 target_include_directories(nt_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(nt_builder PUBLIC nt_shared nt_core nt_log cgltf stb_image stb_image_resize2 nt_hash mikktspace)
+target_link_libraries(nt_builder PUBLIC nt_shared nt_core nt_log cgltf stb_image stb_image_resize2 nt_hash mikktspace nt_basisu_encoder)
 # Builder uses standard C I/O (fopen, strdup, strncpy) -- suppress MSVC deprecation
 target_compile_definitions(nt_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE NT_LOG_DOMAIN_DEFAULT="builder")
 # Static CRT: remove _DLL so CRT calls resolve to static symbols
