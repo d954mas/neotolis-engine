@@ -71,6 +71,14 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle) { (void)backen
 
 void nt_gfx_backend_set_instance_offset(uint32_t byte_offset) { (void)byte_offset; }
 
+void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w) {
+    (void)location;
+    (void)x;
+    (void)y;
+    (void)z;
+    (void)w;
+}
+
 void nt_gfx_backend_bind_uniform_buffer(uint32_t backend_handle, uint32_t slot) {
     (void)backend_handle;
     (void)slot;

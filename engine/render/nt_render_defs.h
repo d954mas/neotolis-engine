@@ -17,7 +17,26 @@ typedef struct {
 
 _Static_assert(sizeof(nt_frame_uniforms_t) == 256, "globals must be 256 bytes for std140");
 
-/* ---- Per-instance data for mesh rendering (80 bytes) ---- */
+/* ---- Color mode for per-instance color precision ---- */
+
+typedef enum {
+    NT_COLOR_MODE_NONE = 0, /* No per-instance color, 48 bytes */
+    NT_COLOR_MODE_RGBA8,    /* 4 bytes packed color, 52 bytes */
+    NT_COLOR_MODE_FLOAT4,   /* 16 bytes float color, 64 bytes */
+} nt_color_mode_t;
+
+/* ---- Instance stride constants (bytes per instance by color mode) ---- */
+
+#define NT_INSTANCE_STRIDE_NONE 48   /* mat4x3 only */
+#define NT_INSTANCE_STRIDE_RGBA8 52  /* mat4x3 + uint8[4] */
+#define NT_INSTANCE_STRIDE_FLOAT4 64 /* mat4x3 + float[4] */
+#define NT_INSTANCE_STRIDE_MAX 64    /* worst-case for buffer sizing */
+
+_Static_assert(NT_INSTANCE_STRIDE_NONE == 3 * 4 * 4, "NONE = 3 rows of vec4");
+_Static_assert(NT_INSTANCE_STRIDE_RGBA8 == 3 * 4 * 4 + 4, "RGBA8 = mat4x3 + 4 bytes");
+_Static_assert(NT_INSTANCE_STRIDE_FLOAT4 == 3 * 4 * 4 + 4 * 4, "FLOAT4 = mat4x3 + vec4");
+
+/* ---- Legacy per-instance data (used by mesh renderer until Plan 02 migration) ---- */
 
 typedef struct {
     float world_matrix[16]; /* mat4, 64 bytes */
