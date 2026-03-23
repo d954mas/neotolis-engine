@@ -332,6 +332,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
+        NT_LOG_INFO("  [%u/%u] %s", i + 1, ctx->pending_count, pe->path);
         nt_build_result_t ret = NT_BUILD_OK;
 
         switch (pe->kind) {

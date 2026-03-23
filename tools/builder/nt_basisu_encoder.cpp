@@ -5,20 +5,30 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <thread>
+
+static basisu::job_pool *s_job_pool = nullptr;
 
 extern "C" {
 
-void nt_basisu_encoder_init(void) { basisu::basisu_encoder_init(); }
+void nt_basisu_encoder_init(void) {
+    basisu::basisu_encoder_init();
+    if (!s_job_pool) {
+        uint32_t threads = std::thread::hardware_concurrency();
+        /* Reserve 1 core for OS/user — standard practice for offline tools */
+        if (threads > 1) {
+            threads--;
+        }
+        s_job_pool = new basisu::job_pool(threads);
+    }
+}
 
 nt_basisu_encode_result_t nt_basisu_encode(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha,
                                            bool uastc, uint32_t quality, float rdo_quality, bool gen_mipmaps) {
     nt_basisu_encode_result_t result = {};
 
-    // Job pool required by basis_compressor::init (1 = calling thread only, no extra threads)
-    basisu::job_pool job_pool(1);
-
     basisu::basis_compressor_params params;
-    params.m_pJob_pool = &job_pool;
+    params.m_pJob_pool = s_job_pool;
 
     // Create source image from RGBA pixels (constructor: pImage, width, height, comps)
     basisu::image src_image(rgba_pixels, width, height, 4);
