@@ -224,10 +224,19 @@ typedef struct {
     uint32_t instances; /* total objects drawn via instanced calls */
 } nt_gfx_frame_stats_t;
 
+/* ---- GPU compressed texture format capabilities ---- */
+
+typedef struct {
+    bool has_astc; /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
+    bool has_bc7;  /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
+    bool has_etc2; /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
+} nt_gfx_gpu_caps_t;
+
 /* ---- Global state ---- */
 
 typedef struct {
     nt_gfx_frame_stats_t frame_stats;
+    nt_gfx_gpu_caps_t gpu_caps;
     bool context_lost;
     bool context_restored;
     bool initialized;
@@ -258,6 +267,9 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 
 void nt_gfx_init(const nt_gfx_desc_t *desc);
 void nt_gfx_shutdown(void);
+
+/* GPU compressed format capabilities (valid after nt_gfx_init) */
+const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void);
 
 /* ---- Frame / Pass ---- */
 

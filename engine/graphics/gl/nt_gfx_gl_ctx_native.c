@@ -20,3 +20,12 @@ bool nt_gfx_gl_ctx_is_lost(void) {
     /* Desktop GL contexts do not suffer context loss like WebGL */
     return false;
 }
+
+nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
+    nt_gfx_gpu_caps_t caps = {0};
+    caps.has_bc7 = GLAD_GL_ARB_texture_compression_bptc != 0;
+    caps.has_astc = GLAD_GL_KHR_texture_compression_astc_ldr != 0;
+    /* ETC2 is core in GL 4.3+; for GL 3.3, check GL_ARB_ES3_compatibility */
+    caps.has_etc2 = GLAD_GL_ARB_ES3_compatibility != 0;
+    return caps;
+}
