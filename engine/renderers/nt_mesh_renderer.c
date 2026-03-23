@@ -26,9 +26,9 @@ static struct {
     uint16_t max_pipelines;
     uint16_t count;
 
-    nt_buffer_t instance_buf; /* dynamic vertex buffer for nt_mesh_instance_t */
+    nt_buffer_t instance_buf; /* dynamic vertex buffer for instance data */
 
-    nt_mesh_instance_t *instance_data; /* CPU staging array [max_instances] */
+    uint8_t *instance_data; /* CPU staging byte buffer [max_instances * NT_INSTANCE_STRIDE_MAX] */
     uint16_t max_instances;
 
     /* Per-frame tracking for test accessors */
@@ -38,20 +38,96 @@ static struct {
     bool initialized;
 } s_mesh_renderer;
 
-/* ---- Instance layout (vertex attributes with divisor=1) ---- */
+/* ---- Instance layout per color mode (per D-15: locations 4-6 for mat4x3, 7 for color) ---- */
 
-static const nt_vertex_layout_t s_instance_layout = {
-    .attr_count = 5,
-    .stride = 80, /* sizeof(nt_mesh_instance_t) */
-    .attrs =
-        {
-            {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 0},  /* world_matrix col 0 */
-            {.location = 5, .format = NT_FORMAT_FLOAT4, .offset = 16}, /* world_matrix col 1 */
-            {.location = 6, .format = NT_FORMAT_FLOAT4, .offset = 32}, /* world_matrix col 2 */
-            {.location = 7, .format = NT_FORMAT_FLOAT4, .offset = 48}, /* world_matrix col 3 */
-            {.location = 8, .format = NT_FORMAT_FLOAT4, .offset = 64}, /* color */
+/* clang-format off */
+static const struct {
+    nt_vertex_layout_t layout;
+    uint16_t stride;
+} s_instance_layouts[3] = {
+    [NT_COLOR_MODE_NONE] = {
+        .layout = {
+            .attr_count = 3,
+            .stride = NT_INSTANCE_STRIDE_NONE,
+            .attrs = {
+                {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 0},
+                {.location = 5, .format = NT_FORMAT_FLOAT4, .offset = 16},
+                {.location = 6, .format = NT_FORMAT_FLOAT4, .offset = 32},
+            },
         },
+        .stride = NT_INSTANCE_STRIDE_NONE,
+    },
+    [NT_COLOR_MODE_RGBA8] = {
+        .layout = {
+            .attr_count = 4,
+            .stride = NT_INSTANCE_STRIDE_RGBA8,
+            .attrs = {
+                {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 0},
+                {.location = 5, .format = NT_FORMAT_FLOAT4, .offset = 16},
+                {.location = 6, .format = NT_FORMAT_FLOAT4, .offset = 32},
+                {.location = 7, .format = NT_FORMAT_UBYTE4N, .offset = 48},
+            },
+        },
+        .stride = NT_INSTANCE_STRIDE_RGBA8,
+    },
+    [NT_COLOR_MODE_FLOAT4] = {
+        .layout = {
+            .attr_count = 4,
+            .stride = NT_INSTANCE_STRIDE_FLOAT4,
+            .attrs = {
+                {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 0},
+                {.location = 5, .format = NT_FORMAT_FLOAT4, .offset = 16},
+                {.location = 6, .format = NT_FORMAT_FLOAT4, .offset = 32},
+                {.location = 7, .format = NT_FORMAT_FLOAT4, .offset = 48},
+            },
+        },
+        .stride = NT_INSTANCE_STRIDE_FLOAT4,
+    },
 };
+/* clang-format on */
+
+/* ---- Pack helpers ---- */
+
+/* Pack mat4x3: extract 3 rows from column-major mat4 (cglm convention).
+ * row0 = (m[0], m[4], m[8],  m[12]) -- first basis components + translation x
+ * row1 = (m[1], m[5], m[9],  m[13]) -- second basis + translation y
+ * row2 = (m[2], m[6], m[10], m[14]) -- third basis + translation z
+ * Row 3 (0,0,0,1) is reconstructed in the vertex shader. */
+static void pack_mat4x3(uint8_t *dst, const float *m) {
+    float rows[12];
+    rows[0] = m[0];
+    rows[1] = m[4];
+    rows[2] = m[8];
+    rows[3] = m[12];
+    rows[4] = m[1];
+    rows[5] = m[5];
+    rows[6] = m[9];
+    rows[7] = m[13];
+    rows[8] = m[2];
+    rows[9] = m[6];
+    rows[10] = m[10];
+    rows[11] = m[14];
+    memcpy(dst, rows, 48);
+}
+
+/* Float-to-uint8 with clamping and rounding (same pattern as shape renderer) */
+static inline uint8_t float_to_u8(float v) {
+    if (v <= 0.0F) {
+        return 0;
+    }
+    if (v >= 1.0F) {
+        return 255;
+    }
+    return (uint8_t)((v * 255.0F) + 0.5F);
+}
+
+/* Pack float[4] color to RGBA8 (4 bytes) */
+static void pack_rgba8(uint8_t *dst, const float color[4]) {
+    dst[0] = float_to_u8(color[0]);
+    dst[1] = float_to_u8(color[1]);
+    dst[2] = float_to_u8(color[2]);
+    dst[3] = float_to_u8(color[3]);
+}
 
 /* ---- Stream type to vertex format mapping ---- */
 
@@ -105,7 +181,8 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
 
     /* Full pipeline signature: layout + shaders + render state.
      * Multiplicative hash combining to avoid collisions. */
-    uint32_t state_bits = ((uint32_t)mat_info->blend_mode) | ((uint32_t)mat_info->depth_test << 4) | ((uint32_t)mat_info->depth_write << 5) | ((uint32_t)mat_info->cull_mode << 6);
+    uint32_t state_bits = ((uint32_t)mat_info->blend_mode) | ((uint32_t)mat_info->depth_test << 4) | ((uint32_t)mat_info->depth_write << 5) | ((uint32_t)mat_info->cull_mode << 6) |
+                          ((uint32_t)mat_info->color_mode << 8);
     uint64_t key = mesh_info->layout_hash;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_vs;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_fs;
@@ -159,7 +236,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     desc.vertex_shader = (nt_shader_t){.id = mat_info->resolved_vs};
     desc.fragment_shader = (nt_shader_t){.id = mat_info->resolved_fs};
     desc.layout = layout;
-    desc.instance_layout = s_instance_layout;
+    desc.instance_layout = s_instance_layouts[mat_info->color_mode].layout;
     desc.depth_test = mat_info->depth_test;
     desc.depth_write = mat_info->depth_write;
     desc.depth_func = NT_DEPTH_LESS;
@@ -173,14 +250,14 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
 
     nt_pipeline_t pip = nt_gfx_make_pipeline(&desc);
 
-    /* Store in cache — full cache is a configuration bug, not a runtime recovery case */
+    /* Store in cache -- full cache is a configuration bug, not a runtime recovery case */
     NT_ASSERT(s_mesh_renderer.count < s_mesh_renderer.max_pipelines);
     if (s_mesh_renderer.count < s_mesh_renderer.max_pipelines) {
         s_mesh_renderer.entries[s_mesh_renderer.count].key = key;
         s_mesh_renderer.entries[s_mesh_renderer.count].pipeline = pip;
         s_mesh_renderer.count++;
     } else {
-        NT_LOG_ERROR("pipeline cache full — increase max_pipelines in desc");
+        NT_LOG_ERROR("pipeline cache full -- increase max_pipelines in desc");
         nt_gfx_destroy_pipeline(pip);
         return (nt_pipeline_t){0};
     }
@@ -212,8 +289,8 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
         return NT_ERR_INIT_FAILED;
     }
 
-    /* Allocate CPU staging array */
-    s_mesh_renderer.instance_data = (nt_mesh_instance_t *)calloc(desc->max_instances, sizeof(nt_mesh_instance_t));
+    /* Allocate CPU staging byte buffer (worst-case stride) */
+    s_mesh_renderer.instance_data = (uint8_t *)calloc(desc->max_instances, NT_INSTANCE_STRIDE_MAX);
     if (!s_mesh_renderer.instance_data) {
         free(s_mesh_renderer.entries);
         s_mesh_renderer.entries = NULL;
@@ -225,7 +302,7 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     s_mesh_renderer.instance_buf = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
         .usage = NT_USAGE_STREAM,
-        .size = (uint32_t)desc->max_instances * (uint32_t)sizeof(nt_mesh_instance_t),
+        .size = (uint32_t)desc->max_instances * (uint32_t)NT_INSTANCE_STRIDE_MAX,
         .data = NULL,
         .label = "mesh_renderer_instance",
     });
@@ -238,6 +315,11 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
         NT_LOG_ERROR("failed to create instance buffer");
         return NT_ERR_INIT_FAILED;
     }
+
+    /* Set generic attribute 7 to white -- when color attribute is disabled
+     * (NONE mode), shaders read (1,1,1,1) as identity for multiplication.
+     * Must be called after GL context exists. */
+    nt_gfx_set_vertex_attrib_default(7, 1.0F, 1.0F, 1.0F, 1.0F);
 
     s_mesh_renderer.initialized = true;
     return NT_OK;
@@ -259,7 +341,7 @@ void nt_mesh_renderer_shutdown(void) {
     /* Free pipeline cache */
     free(s_mesh_renderer.entries);
 
-    /* Free CPU staging array */
+    /* Free CPU staging byte buffer */
     free(s_mesh_renderer.instance_data);
 
     memset(&s_mesh_renderer, 0, sizeof(s_mesh_renderer));
@@ -290,42 +372,70 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     s_mesh_renderer.frame_instance_total = 0;
 
     /* Process items in chunks of max_instances.
-     * Each chunk: pack instance data → upload → draw with offsets.
+     * Each chunk: pack instance data -> upload -> draw with offsets.
      * Typically 1 chunk (items < max_instances). */
     uint32_t chunk_start = 0;
     nt_material_t prev_mat = {0};
     nt_mesh_t prev_mesh = {0};
 
     while (chunk_start < count) {
-        /* ---- Pack chunk into staging buffer ---- */
         uint32_t chunk_count = count - chunk_start;
         if (chunk_count > s_mesh_renderer.max_instances) {
             chunk_count = s_mesh_renderer.max_instances;
         }
+        uint32_t chunk_end = chunk_start + chunk_count;
 
-        for (uint32_t i = 0; i < chunk_count; i++) {
-            nt_entity_t e = {.id = items[chunk_start + i].entity};
-            const float *world = nt_transform_comp_world_matrix(e);
-            const float *color = nt_drawable_comp_color(e);
-            memcpy(s_mesh_renderer.instance_data[i].world_matrix, world, sizeof(s_mesh_renderer.instance_data[0].world_matrix));
-            memcpy(s_mesh_renderer.instance_data[i].color, color, sizeof(s_mesh_renderer.instance_data[0].color));
+        /* ---- Pack all instances in this chunk into byte buffer ---- */
+        /* First pass: pack at variable stride per draw group */
+        uint32_t byte_offset = 0;
+        uint32_t scan = chunk_start;
+        while (scan < chunk_end) {
+            uint32_t run_end = scan + 1;
+            while (run_end < chunk_end && items[run_end].batch_key == items[scan].batch_key) {
+                run_end++;
+            }
+
+            /* Determine color mode for this run */
+            nt_entity_t first_entity = {.id = items[scan].entity};
+            nt_material_t run_mat = *nt_material_comp_handle(first_entity);
+            const nt_material_info_t *mat_info = nt_material_get_info(run_mat);
+            nt_color_mode_t color_mode = (mat_info != NULL) ? mat_info->color_mode : NT_COLOR_MODE_NONE;
+            uint16_t stride = s_instance_layouts[color_mode].stride;
+
+            for (uint32_t i = scan; i < run_end; i++) {
+                nt_entity_t e = {.id = items[i].entity};
+                uint8_t *dst = s_mesh_renderer.instance_data + byte_offset;
+
+                const float *world = nt_transform_comp_world_matrix(e);
+                pack_mat4x3(dst, world);
+
+                if (color_mode == NT_COLOR_MODE_RGBA8) {
+                    const float *color = nt_drawable_comp_color(e);
+                    pack_rgba8(dst + 48, color);
+                } else if (color_mode == NT_COLOR_MODE_FLOAT4) {
+                    const float *color = nt_drawable_comp_color(e);
+                    memcpy(dst + 48, color, 16);
+                }
+                /* NONE: nothing after the 48 bytes */
+
+                byte_offset += stride;
+            }
+            scan = run_end;
         }
 
-        /* ---- Single GPU upload for this chunk ---- */
-        nt_gfx_update_buffer(s_mesh_renderer.instance_buf, s_mesh_renderer.instance_data, chunk_count * (uint32_t)sizeof(nt_mesh_instance_t));
+        /* ---- Single GPU upload for packed byte data ---- */
+        nt_gfx_update_buffer(s_mesh_renderer.instance_buf, s_mesh_renderer.instance_data, byte_offset);
         nt_gfx_bind_instance_buffer(s_mesh_renderer.instance_buf);
 
         /* ---- Draw runs within this chunk ---- */
         uint32_t run_start = chunk_start;
-        uint32_t chunk_end = chunk_start + chunk_count;
-        uint32_t instance_offset = 0;
+        uint32_t draw_byte_offset = 0;
 
         while (run_start < chunk_end) {
             nt_entity_t entity = {.id = items[run_start].entity};
             nt_material_t run_mat = *nt_material_comp_handle(entity);
             nt_mesh_t run_mesh = *nt_mesh_comp_handle(entity);
 
-            /* Detect run end via batch_key (clamped to chunk boundary) */
             uint32_t run_end = run_start + 1;
             while (run_end < chunk_end && items[run_end].batch_key == items[run_start].batch_key) {
                 run_end++;
@@ -338,8 +448,10 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
 
             NT_ASSERT(mat_info && mat_info->ready && mesh_info); /* caller must filter not-ready items */
             if (!mat_info || !mat_info->ready || !mesh_info) {
+                /* Still need to advance byte offset for skipped runs */
+                nt_color_mode_t cm = (mat_info != NULL) ? mat_info->color_mode : NT_COLOR_MODE_NONE;
+                draw_byte_offset += instance_count * s_instance_layouts[cm].stride;
                 run_start = run_end;
-                instance_offset += instance_count;
                 continue;
             }
 
@@ -373,7 +485,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                 prev_mesh = run_mesh;
             }
 
-            nt_gfx_set_instance_offset(instance_offset * (uint32_t)sizeof(nt_mesh_instance_t));
+            nt_gfx_set_instance_offset(draw_byte_offset);
 
             if (mesh_info->index_count > 0) {
                 nt_gfx_draw_indexed_instanced(0, mesh_info->index_count, mesh_info->vertex_count, instance_count);
@@ -384,7 +496,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
             s_mesh_renderer.frame_draw_calls++;
             s_mesh_renderer.frame_instance_total += instance_count;
 
-            instance_offset += instance_count;
+            draw_byte_offset += instance_count * s_instance_layouts[mat_info->color_mode].stride;
             run_start = run_end;
         }
 
