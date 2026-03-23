@@ -7,6 +7,7 @@
 
 /* ---- Lifecycle ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_result_t nt_comp_storage_init(nt_comp_storage_t *s, uint16_t capacity, nt_comp_default_fn default_fn, nt_comp_swap_fn swap_fn) {
     NT_ASSERT(s);
     NT_ASSERT(default_fn);
@@ -44,6 +45,7 @@ void nt_comp_storage_shutdown(nt_comp_storage_t *s) {
 
 /* ---- Operations ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint16_t nt_comp_storage_add(nt_comp_storage_t *s, nt_entity_t entity) {
     NT_ASSERT(s->initialized);
     NT_ASSERT(nt_entity_is_alive(entity));

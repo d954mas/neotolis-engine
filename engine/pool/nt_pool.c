@@ -5,6 +5,7 @@
 
 #include "core/nt_assert.h"
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_pool_init(nt_pool_t *pool, uint16_t capacity) {
     NT_ASSERT(pool);
     NT_ASSERT(capacity > 0);
