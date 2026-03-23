@@ -532,7 +532,7 @@ static nt_result_t pack_alloc(uint32_t pack_id, int16_t priority, uint8_t pack_t
         }
     }
 
-    NT_ASSERT(0); /* pack slots full -- raise MAX_PACKS */
+    NT_ASSERT(0);              /* pack slots full -- raise MAX_PACKS */
     return NT_ERR_INVALID_ARG; /* unreachable, satisfies compiler */
 }
 

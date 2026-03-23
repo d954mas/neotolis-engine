@@ -86,6 +86,24 @@
             }
         },
         {
+            "name": "native-debug-test",
+            "displayName": "Native Debug Test (FULL asserts)",
+            "inherits": "native-debug",
+            "binaryDir": "${sourceDir}/build/_cmake/native-debug-test",
+            "cacheVariables": {
+                "NT_ASSERT_MODE": "2"
+            }
+        },
+        {
+            "name": "native-release-test",
+            "displayName": "Native Release Test (FULL asserts)",
+            "inherits": "native-release",
+            "binaryDir": "${sourceDir}/build/_cmake/native-release-test",
+            "cacheVariables": {
+                "NT_ASSERT_MODE": "2"
+            }
+        },
+        {
             "name": "wasm-analysis",
             "displayName": "WASM Analysis",
             "inherits": "wasm-release",
@@ -145,6 +163,14 @@
         {
             "name": "native-release",
             "configurePreset": "native-release"
+        },
+        {
+            "name": "native-debug-test",
+            "configurePreset": "native-debug-test"
+        },
+        {
+            "name": "native-release-test",
+            "configurePreset": "native-release-test"
         },
         {
             "name": "wasm-analysis",
@@ -226,6 +252,20 @@
         {
             "name": "native-debug",
             "configurePreset": "native-debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "native-debug-test",
+            "configurePreset": "native-debug-test",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "native-release-test",
+            "configurePreset": "native-release-test",
             "output": {
                 "outputOnFailure": true
             }
