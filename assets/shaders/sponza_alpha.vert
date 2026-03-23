@@ -16,7 +16,6 @@ layout(std140) uniform Globals {
 out vec2 v_uv;
 out vec3 v_world_normal;
 out vec3 v_world_pos;
-out vec4 v_color;
 
 void main() {
     mat4 world = mat4(
@@ -28,6 +27,5 @@ void main() {
     v_world_normal = normalize(mat3(world) * a_normal);
     v_uv = a_uv;
     v_world_pos = (world * vec4(a_position, 1.0)).xyz;
-    v_color = vec4(1.0);
     gl_Position = view_proj * world * vec4(a_position, 1.0);
 }
