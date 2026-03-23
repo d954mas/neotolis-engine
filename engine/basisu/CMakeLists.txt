@@ -31,6 +31,14 @@ target_compile_definitions(nt_basisu_transcoder PRIVATE
     BASISD_SUPPORT_ETC2_EAC_A8=1
 )
 
+# Match ASAN runtime: release static CRT + _ITERATOR_DEBUG_LEVEL=0 in debug
+target_compile_definitions(nt_basisu_transcoder PRIVATE
+    $<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>
+)
+
 set_target_properties(nt_basisu_transcoder PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/engine/${NT_PRESET_NAME}"
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:>"
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
 )

@@ -35,4 +35,4 @@ nt_add_module(nt_gfx_stub LOG_DOMAIN "gfx_stub"
     nt_gfx_internal.h
 )
 
-target_link_libraries(nt_gfx_stub PUBLIC nt_core nt_pool nt_log_stub nt_hash)
+target_link_libraries(nt_gfx_stub PUBLIC nt_core nt_pool nt_log_stub nt_hash nt_basisu_transcoder)
