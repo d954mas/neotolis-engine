@@ -46,6 +46,7 @@
 #include "render/nt_render_util.h"
 #include "renderers/nt_mesh_renderer.h"
 #include "resource/nt_resource.h"
+#include "sort/nt_sort.h"
 #include "time/nt_time.h"
 #include "transform_comp/nt_transform_comp.h"
 #include "window/nt_window.h"
@@ -118,6 +119,7 @@ static nt_resource_t s_fs_alpha;
 
 static nt_material_t s_materials[MAX_SCENE_NODES];
 static nt_entity_t s_entities[MAX_SCENE_NODES];
+static nt_render_item_t s_sort_scratch[MAX_SCENE_NODES];
 static uint32_t s_entity_count;
 static bool s_scene_loaded;
 static bool s_full_quality;  /* true = full pack has higher priority */
@@ -536,7 +538,7 @@ static void frame(void) {
         }
 
         /* Sort items by sort_key */
-        nt_sort_by_key(items, item_count);
+        nt_sort_by_key(items, item_count, s_sort_scratch);
     }
 
     /* ---- Render ---- */
