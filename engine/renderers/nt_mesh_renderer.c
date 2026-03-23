@@ -41,47 +41,35 @@ static struct {
 /* ---- Instance layout per color mode (per D-15: locations 4-6 for mat4x3, 7 for color) ---- */
 
 /* clang-format off */
-static const struct {
-    nt_vertex_layout_t layout;
-    uint16_t stride;
-} s_instance_layouts[3] = {
+static const nt_vertex_layout_t s_instance_layouts[3] = {
     [NT_COLOR_MODE_NONE] = {
-        .layout = {
-            .attr_count = 3,
-            .stride = NT_INSTANCE_STRIDE_NONE,
-            .attrs = {
-                {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 0},
-                {.location = 5, .format = NT_FORMAT_FLOAT4, .offset = 16},
-                {.location = 6, .format = NT_FORMAT_FLOAT4, .offset = 32},
-            },
-        },
+        .attr_count = 3,
         .stride = NT_INSTANCE_STRIDE_NONE,
+        .attrs = {
+            {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 0},
+            {.location = 5, .format = NT_FORMAT_FLOAT4, .offset = 16},
+            {.location = 6, .format = NT_FORMAT_FLOAT4, .offset = 32},
+        },
     },
     [NT_COLOR_MODE_RGBA8] = {
-        .layout = {
-            .attr_count = 4,
-            .stride = NT_INSTANCE_STRIDE_RGBA8,
-            .attrs = {
-                {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 0},
-                {.location = 5, .format = NT_FORMAT_FLOAT4, .offset = 16},
-                {.location = 6, .format = NT_FORMAT_FLOAT4, .offset = 32},
-                {.location = 7, .format = NT_FORMAT_UBYTE4N, .offset = 48},
-            },
-        },
+        .attr_count = 4,
         .stride = NT_INSTANCE_STRIDE_RGBA8,
+        .attrs = {
+            {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 0},
+            {.location = 5, .format = NT_FORMAT_FLOAT4, .offset = 16},
+            {.location = 6, .format = NT_FORMAT_FLOAT4, .offset = 32},
+            {.location = 7, .format = NT_FORMAT_UBYTE4N, .offset = 48},
+        },
     },
     [NT_COLOR_MODE_FLOAT4] = {
-        .layout = {
-            .attr_count = 4,
-            .stride = NT_INSTANCE_STRIDE_FLOAT4,
-            .attrs = {
-                {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 0},
-                {.location = 5, .format = NT_FORMAT_FLOAT4, .offset = 16},
-                {.location = 6, .format = NT_FORMAT_FLOAT4, .offset = 32},
-                {.location = 7, .format = NT_FORMAT_FLOAT4, .offset = 48},
-            },
-        },
+        .attr_count = 4,
         .stride = NT_INSTANCE_STRIDE_FLOAT4,
+        .attrs = {
+            {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 0},
+            {.location = 5, .format = NT_FORMAT_FLOAT4, .offset = 16},
+            {.location = 6, .format = NT_FORMAT_FLOAT4, .offset = 32},
+            {.location = 7, .format = NT_FORMAT_FLOAT4, .offset = 48},
+        },
     },
 };
 /* clang-format on */
@@ -92,22 +80,24 @@ static const struct {
  * row0 = (m[0], m[4], m[8],  m[12]) -- first basis components + translation x
  * row1 = (m[1], m[5], m[9],  m[13]) -- second basis + translation y
  * row2 = (m[2], m[6], m[10], m[14]) -- third basis + translation z
- * Row 3 (0,0,0,1) is reconstructed in the vertex shader. */
-static void pack_mat4x3(uint8_t *dst, const float *m) {
-    float rows[12];
-    rows[0] = m[0];
-    rows[1] = m[4];
-    rows[2] = m[8];
-    rows[3] = m[12];
-    rows[4] = m[1];
-    rows[5] = m[5];
-    rows[6] = m[9];
-    rows[7] = m[13];
-    rows[8] = m[2];
-    rows[9] = m[6];
-    rows[10] = m[10];
-    rows[11] = m[14];
-    memcpy(dst, rows, 48);
+ * Row 3 (0,0,0,1) is reconstructed in the vertex shader.
+ * Transpose: column-major cols → row-major rows with stride-4 gather. */
+static void pack_mat4x3(float *dst, const float *m) {
+    /* row 0 */
+    dst[0] = m[0];
+    dst[1] = m[4];
+    dst[2] = m[8];
+    dst[3] = m[12];
+    /* row 1 */
+    dst[4] = m[1];
+    dst[5] = m[5];
+    dst[6] = m[9];
+    dst[7] = m[13];
+    /* row 2 */
+    dst[8] = m[2];
+    dst[9] = m[6];
+    dst[10] = m[10];
+    dst[11] = m[14];
 }
 
 /* Float-to-uint8 with clamping and rounding (same pattern as shape renderer) */
@@ -236,7 +226,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
     desc.vertex_shader = (nt_shader_t){.id = mat_info->resolved_vs};
     desc.fragment_shader = (nt_shader_t){.id = mat_info->resolved_fs};
     desc.layout = layout;
-    desc.instance_layout = s_instance_layouts[mat_info->color_mode].layout;
+    desc.instance_layout = s_instance_layouts[mat_info->color_mode];
     desc.depth_test = mat_info->depth_test;
     desc.depth_write = mat_info->depth_write;
     desc.depth_func = NT_DEPTH_LESS;
@@ -407,7 +397,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                 uint8_t *dst = s_mesh_renderer.instance_data + byte_offset;
 
                 const float *world = nt_transform_comp_world_matrix(e);
-                pack_mat4x3(dst, world);
+                pack_mat4x3((float *)dst, world);
 
                 if (color_mode == NT_COLOR_MODE_RGBA8) {
                     const float *color = nt_drawable_comp_color(e);

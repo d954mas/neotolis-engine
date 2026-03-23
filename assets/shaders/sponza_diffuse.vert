@@ -7,7 +7,6 @@ layout(location = 2) in vec2 a_uv;
 layout(location = 4) in vec4 a_world_row0;
 layout(location = 5) in vec4 a_world_row1;
 layout(location = 6) in vec4 a_world_row2;
-layout(location = 7) in vec4 a_color;
 
 layout(std140) uniform Globals {
     mat4 view_proj; mat4 view; mat4 proj;
@@ -29,6 +28,6 @@ void main() {
     v_world_normal = normalize(mat3(world) * a_normal);
     v_uv = a_uv;
     v_world_pos = (world * vec4(a_position, 1.0)).xyz;
-    v_color = a_color;
+    v_color = vec4(1.0);
     gl_Position = view_proj * world * vec4(a_position, 1.0);
 }

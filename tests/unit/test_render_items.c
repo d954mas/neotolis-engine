@@ -32,11 +32,6 @@ void test_globals_size(void) {
     TEST_ASSERT_EQUAL_UINT32(256, sizeof(nt_frame_uniforms_t));
 }
 
-void test_instance_size(void) {
-    /* _Static_assert in nt_render_defs.h guarantees 80 bytes at compile time */
-    TEST_ASSERT_EQUAL_UINT32(80, sizeof(nt_mesh_instance_t));
-}
-
 void test_render_item_size(void) {
     /* _Static_assert in nt_render_defs.h guarantees 16 bytes at compile time */
     TEST_ASSERT_EQUAL_UINT32(16, sizeof(nt_render_item_t));
@@ -200,7 +195,7 @@ int main(void) {
     UNITY_BEGIN();
     /* Struct sizes */
     RUN_TEST(test_globals_size);
-    RUN_TEST(test_instance_size);
+
     RUN_TEST(test_render_item_size);
     /* Sort key opaque */
     RUN_TEST(test_sort_key_opaque_encoding);
