@@ -118,7 +118,7 @@ static inline uint8_t float_to_u8(float v) {
     if (v >= 1.0F) {
         return 255;
     }
-    return (uint8_t)(v * 255.0F + 0.5F);
+    return (uint8_t)((v * 255.0F) + 0.5F);
 }
 
 /* Pack float[4] color to RGBA8 (4 bytes) */
