@@ -16,6 +16,11 @@
  * Generated signature:
  *   void func_name(item_type *items, uint32_t count, item_type *scratch);
  *
+ * Contract (checked via NT_ASSERT when core/nt_assert.h is included before this header):
+ * - items != NULL when count >= 2
+ * - scratch != NULL when count >= 2
+ * - items != scratch (must be separate buffers)
+ *
  * Properties:
  * - Stable sort (equal keys preserve input order).
  * - Zero heap allocation: uses @p scratch + 8 KB stack histograms.
@@ -29,10 +34,20 @@
  *   my_sort(items, count, scratch);
  */
 
+/* NT_ASSERT bridge: use project assert if available, otherwise noop */
+#ifdef NT_ASSERT
+#define NT_SORT_ASSERT_(cond) NT_ASSERT(cond)
+#else
+#define NT_SORT_ASSERT_(cond) ((void)0)
+#endif
+
 /* clang-format off */
 #define NT_SORT_DEFINE(func_name, item_type)                                                  \
 void func_name(item_type *items, uint32_t count, item_type *scratch) {                        \
     if (count < 2) { return; }                                                                \
+    NT_SORT_ASSERT_(items != NULL);                                                           \
+    NT_SORT_ASSERT_(scratch != NULL);                                                         \
+    NT_SORT_ASSERT_(items != scratch);                                                        \
                                                                                               \
     /* Phase 1: Build all 8 histograms in a single pass (8 KB on stack). */                   \
     uint32_t histograms_[8][256] = {{0}};                                                     \

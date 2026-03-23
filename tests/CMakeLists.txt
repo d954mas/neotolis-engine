@@ -211,17 +211,6 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_sort COMMAND test_sort)
 
-    # --- Radix sort benchmark (qsort vs radix, native only) ---
-    add_executable(test_radix_benchmark unit/test_radix_benchmark.c)
-    target_link_libraries(test_radix_benchmark PRIVATE nt_render nt_entity nt_drawable_comp nt_transform_comp nt_gfx_stub nt_time unity)
-    target_compile_options(test_radix_benchmark PRIVATE -U_DLL)
-    nt_set_warning_flags(test_radix_benchmark)
-    nt_set_sanitizer_flags(test_radix_benchmark)
-    set_target_properties(test_radix_benchmark PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_radix_benchmark COMMAND test_radix_benchmark)
-
     # --- Material module tests ---
     add_executable(test_material unit/test_material.c)
     target_link_libraries(test_material PRIVATE nt_material nt_resource nt_hash unity)
@@ -327,35 +316,6 @@ if(EMSCRIPTEN)
             COMMAND
                 "${NT_NODE_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/wasm/simd_loader_test.js"
-        )
-    endif()
-
-    # --- WASM sort benchmark ---
-    add_executable(wasm_sort_bench wasm/sort_bench_entry.c)
-    target_link_libraries(wasm_sort_bench PRIVATE nt_sort nt_time)
-
-    nt_set_warning_flags(wasm_sort_bench)
-    nt_set_sanitizer_flags(wasm_sort_bench)
-
-    set_target_properties(wasm_sort_bench PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-
-    target_link_options(wasm_sort_bench PRIVATE
-        "SHELL:-sMODULARIZE"
-        "SHELL:-sEXPORT_NAME=createModule"
-        "SHELL:-sENVIRONMENT=node"
-        "SHELL:-sEXPORTED_FUNCTIONS=['_main']"
-        "SHELL:-sEXPORTED_RUNTIME_METHODS=['ccall']"
-    )
-    if(NT_NODE_EXECUTABLE)
-        add_test(
-            NAME test_wasm_sort_bench
-            COMMAND
-                "${NT_NODE_EXECUTABLE}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/wasm/sort_bench_test.js"
-                --module
-                "$<TARGET_FILE:wasm_sort_bench>"
         )
     endif()
 

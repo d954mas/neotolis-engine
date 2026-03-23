@@ -8,6 +8,12 @@
 
 /* ---- Sort (typed radix sort for render items, defined in nt_render_items.c) ---- */
 
+/**
+ * Sort render items by sort_key (ascending, stable).
+ * @param items   Array to sort in-place. Must not be NULL when count >= 2.
+ * @param count   Number of items.
+ * @param scratch Separate buffer of at least @p count items. Must not be NULL or equal to @p items.
+ */
 void nt_sort_by_key(nt_render_item_t *items, uint32_t count, nt_render_item_t *scratch);
 
 /* ---- Sort key helpers (inline, no component knowledge) ---- */
