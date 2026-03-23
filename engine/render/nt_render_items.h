@@ -44,6 +44,5 @@ static inline uint32_t nt_batch_key(uint32_t material_id, uint32_t mesh_id) { re
 /* ---- Declared functions (implemented in nt_render_items.c) ---- */
 
 float nt_calc_view_depth(uint32_t entity_id, const float view_pos[3], const float view_fwd[3]);
-void nt_sort_by_key(nt_render_item_t *items, uint32_t count);
 
 #endif /* NT_RENDER_ITEMS_H */

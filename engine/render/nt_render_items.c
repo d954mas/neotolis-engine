@@ -1,7 +1,5 @@
 #include "render/nt_render_items.h"
 
-#include <stdlib.h>
-
 #include "entity/nt_entity.h"
 #include "transform_comp/nt_transform_comp.h"
 
@@ -17,19 +15,4 @@ float nt_calc_view_depth(uint32_t entity_id, const float view_pos[3], const floa
     float dz = m[14] - view_pos[2];
 
     return (dx * view_fwd[0]) + (dy * view_fwd[1]) + (dz * view_fwd[2]);
-}
-
-/* ---- Sort by key ---- */
-
-static int compare_render_items(const void *a, const void *b) {
-    const nt_render_item_t *ia = (const nt_render_item_t *)a;
-    const nt_render_item_t *ib = (const nt_render_item_t *)b;
-    return (ia->sort_key > ib->sort_key) - (ia->sort_key < ib->sort_key);
-}
-
-void nt_sort_by_key(nt_render_item_t *items, uint32_t count) {
-    if (count < 2) {
-        return;
-    }
-    qsort(items, count, sizeof(nt_render_item_t), compare_render_items);
 }
