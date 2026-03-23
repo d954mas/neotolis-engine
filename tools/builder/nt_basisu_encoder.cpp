@@ -14,7 +14,11 @@ nt_basisu_encode_result_t nt_basisu_encode(const uint8_t *rgba_pixels, uint32_t 
                                            bool uastc, uint32_t quality, float rdo_quality, bool gen_mipmaps) {
     nt_basisu_encode_result_t result = {};
 
+    // Job pool required by basis_compressor::init (1 = calling thread only, no extra threads)
+    basisu::job_pool job_pool(1);
+
     basisu::basis_compressor_params params;
+    params.m_pJob_pool = &job_pool;
 
     // Create source image from RGBA pixels (constructor: pImage, width, height, comps)
     basisu::image src_image(rgba_pixels, width, height, 4);
