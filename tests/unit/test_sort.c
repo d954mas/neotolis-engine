@@ -11,11 +11,8 @@ void tearDown(void) {}
 
 void test_sort_ascending(void) {
     nt_render_item_t items[5] = {
-        {.sort_key = 50, .entity = 1, .batch_key = 0},
-        {.sort_key = 10, .entity = 2, .batch_key = 0},
-        {.sort_key = 40, .entity = 3, .batch_key = 0},
-        {.sort_key = 20, .entity = 4, .batch_key = 0},
-        {.sort_key = 30, .entity = 5, .batch_key = 0},
+        {.sort_key = 50, .entity = 1, .batch_key = 0}, {.sort_key = 10, .entity = 2, .batch_key = 0}, {.sort_key = 40, .entity = 3, .batch_key = 0},
+        {.sort_key = 20, .entity = 4, .batch_key = 0}, {.sort_key = 30, .entity = 5, .batch_key = 0},
     };
     nt_render_item_t scratch[5];
 
@@ -116,11 +113,8 @@ void test_sort_reverse(void) {
 
 void test_sort_duplicates(void) {
     nt_render_item_t items[5] = {
-        {.sort_key = 3, .entity = 1, .batch_key = 0},
-        {.sort_key = 1, .entity = 2, .batch_key = 0},
-        {.sort_key = 3, .entity = 3, .batch_key = 0},
-        {.sort_key = 1, .entity = 4, .batch_key = 0},
-        {.sort_key = 2, .entity = 5, .batch_key = 0},
+        {.sort_key = 3, .entity = 1, .batch_key = 0}, {.sort_key = 1, .entity = 2, .batch_key = 0}, {.sort_key = 3, .entity = 3, .batch_key = 0},
+        {.sort_key = 1, .entity = 4, .batch_key = 0}, {.sort_key = 2, .entity = 5, .batch_key = 0},
     };
     nt_render_item_t scratch[5];
 
