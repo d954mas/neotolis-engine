@@ -4,6 +4,11 @@
 #include <string.h>
 
 #include "render/nt_render_defs.h"
+#include "sort/nt_sort.h"
+
+/* ---- Sort (typed radix sort for render items, defined in nt_render_items.c) ---- */
+
+void nt_sort_by_key(nt_render_item_t *items, uint32_t count, nt_render_item_t *scratch);
 
 /* ---- Sort key helpers (inline, no component knowledge) ---- */
 

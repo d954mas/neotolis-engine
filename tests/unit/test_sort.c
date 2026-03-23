@@ -2,6 +2,9 @@
 #include "sort/nt_sort.h"
 #include "unity.h"
 
+/* Instantiate sort locally — test does not depend on nt_render */
+NT_SORT_DEFINE(test_sort_fn, nt_render_item_t)
+
 /* ---- setUp / tearDown (sort has no global state) ---- */
 
 void setUp(void) {}
@@ -16,7 +19,7 @@ void test_sort_ascending(void) {
     };
     nt_render_item_t scratch[5];
 
-    nt_sort_by_key(items, 5, scratch);
+    test_sort_fn(items, 5, scratch);
 
     TEST_ASSERT_EQUAL_UINT64(10, items[0].sort_key);
     TEST_ASSERT_EQUAL_UINT64(20, items[1].sort_key);
@@ -35,7 +38,7 @@ void test_sort_preserves_payload(void) {
     };
     nt_render_item_t scratch[3];
 
-    nt_sort_by_key(items, 3, scratch);
+    test_sort_fn(items, 3, scratch);
 
     /* After sort: key 10 -> entity 200, key 20 -> entity 300, key 30 -> entity 100 */
     TEST_ASSERT_EQUAL_UINT64(10, items[0].sort_key);
@@ -55,7 +58,7 @@ void test_sort_preserves_payload(void) {
 
 void test_sort_empty(void) {
     /* count=0, NULL items -- must not crash */
-    nt_sort_by_key(NULL, 0, NULL);
+    test_sort_fn(NULL, 0, NULL);
 }
 
 /* ---- test_sort_single ---- */
@@ -64,7 +67,7 @@ void test_sort_single(void) {
     nt_render_item_t item = {.sort_key = 42, .entity = 1, .batch_key = 7};
     nt_render_item_t scratch[1];
 
-    nt_sort_by_key(&item, 1, scratch);
+    test_sort_fn(&item, 1, scratch);
 
     TEST_ASSERT_EQUAL_UINT64(42, item.sort_key);
     TEST_ASSERT_EQUAL_UINT32(1, item.entity);
@@ -82,7 +85,7 @@ void test_sort_already_sorted(void) {
     };
     nt_render_item_t scratch[4];
 
-    nt_sort_by_key(items, 4, scratch);
+    test_sort_fn(items, 4, scratch);
 
     TEST_ASSERT_EQUAL_UINT64(1, items[0].sort_key);
     TEST_ASSERT_EQUAL_UINT64(2, items[1].sort_key);
@@ -101,7 +104,7 @@ void test_sort_reverse(void) {
     };
     nt_render_item_t scratch[4];
 
-    nt_sort_by_key(items, 4, scratch);
+    test_sort_fn(items, 4, scratch);
 
     TEST_ASSERT_EQUAL_UINT64(1, items[0].sort_key);
     TEST_ASSERT_EQUAL_UINT64(2, items[1].sort_key);
@@ -118,7 +121,7 @@ void test_sort_duplicates(void) {
     };
     nt_render_item_t scratch[5];
 
-    nt_sort_by_key(items, 5, scratch);
+    test_sort_fn(items, 5, scratch);
 
     TEST_ASSERT_EQUAL_UINT64(1, items[0].sort_key);
     TEST_ASSERT_EQUAL_UINT64(1, items[1].sort_key);
@@ -138,7 +141,7 @@ void test_sort_stability(void) {
     };
     nt_render_item_t scratch[3];
 
-    nt_sort_by_key(items, 3, scratch);
+    test_sort_fn(items, 3, scratch);
 
     TEST_ASSERT_EQUAL_UINT32(1, items[0].entity);
     TEST_ASSERT_EQUAL_UINT32(2, items[1].entity);
@@ -157,7 +160,7 @@ void test_sort_large_keys(void) {
     };
     nt_render_item_t scratch[4];
 
-    nt_sort_by_key(items, 4, scratch);
+    test_sort_fn(items, 4, scratch);
 
     TEST_ASSERT_EQUAL_UINT64(0x0000000000000001ULL, items[0].sort_key);
     TEST_ASSERT_EQUAL_UINT64(0x0000000100000000ULL, items[1].sort_key);
@@ -177,7 +180,7 @@ void test_sort_pass_skip(void) {
     };
     nt_render_item_t scratch[4];
 
-    nt_sort_by_key(items, 4, scratch);
+    test_sort_fn(items, 4, scratch);
 
     TEST_ASSERT_EQUAL_UINT64(0xAAAAAAAAAAAA0001ULL, items[0].sort_key);
     TEST_ASSERT_EQUAL_UINT64(0xAAAAAAAAAAAA0002ULL, items[1].sort_key);

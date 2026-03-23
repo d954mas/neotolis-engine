@@ -1,17 +1,20 @@
-// NOLINTBEGIN(concurrency-mt-unsafe,cert-msc30-c,cert-msc50-cpp)
+// NOLINTBEGIN(concurrency-mt-unsafe,cert-msc30-c,cert-msc50-cpp,cert-msc32-c,cert-msc51-cpp)
+/**
+ * WASM sort benchmark — qsort vs radix sort.
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "render/nt_render_items.h"
+#include "render/nt_render_defs.h"
+#include "sort/nt_sort.h"
 #include "time/nt_time.h"
-#include "unity.h"
 
-void setUp(void) {}
-void tearDown(void) {}
+/* Instantiate sort locally (WASM benchmark does not link nt_render) */
+NT_SORT_DEFINE(bench_sort, nt_render_item_t)
 
 #define BENCH_MAX 4096
-#define BENCH_ITERS 500
+#define BENCH_ITERS 200
 
 static nt_render_item_t s_items[BENCH_MAX];
 static nt_render_item_t s_scratch[BENCH_MAX];
@@ -23,7 +26,7 @@ static int compare_render_items(const void *a, const void *b) {
     return (ia->sort_key > ib->sort_key) - (ia->sort_key < ib->sort_key);
 }
 
-static void bench_size(uint32_t count) {
+static int bench_size(uint32_t count) {
     for (uint32_t i = 0; i < count; ++i) {
         s_items[i].sort_key = ((uint64_t)(unsigned)rand() << 32) | (uint64_t)(unsigned)rand();
         s_items[i].entity = i;
@@ -43,7 +46,7 @@ static void bench_size(uint32_t count) {
     double rstart = nt_time_now();
     for (int iter = 0; iter < BENCH_ITERS; ++iter) {
         memcpy(s_items, s_backup, count * sizeof(nt_render_item_t));
-        nt_sort_by_key(s_items, count, s_scratch);
+        bench_sort(s_items, count, s_scratch);
     }
     double rms = ((nt_time_now() - rstart) / BENCH_ITERS) * 1000.0;
 
@@ -53,26 +56,32 @@ static void bench_size(uint32_t count) {
     /* Verify correctness */
     memcpy(s_items, s_backup, count * sizeof(nt_render_item_t));
     qsort(s_backup, count, sizeof(nt_render_item_t), compare_render_items);
-    nt_sort_by_key(s_items, count, s_scratch);
+    bench_sort(s_items, count, s_scratch);
 
     for (uint32_t i = 0; i < count; ++i) {
-        TEST_ASSERT_EQUAL_UINT64(s_backup[i].sort_key, s_items[i].sort_key);
+        if (s_backup[i].sort_key != s_items[i].sort_key) {
+            printf("  MISMATCH at %u\n", i);
+            return 1;
+        }
     }
+    return 0;
 }
-
-void test_benchmark_256(void) { bench_size(256); }
-void test_benchmark_1000(void) { bench_size(1000); }
-void test_benchmark_2000(void) { bench_size(2000); }
-void test_benchmark_4096(void) { bench_size(4096); }
 
 int main(void) {
-    srand((unsigned)nt_time_nanos());
-    printf("Radix sort benchmark (iters=%d)\n", BENCH_ITERS);
-    UNITY_BEGIN();
-    RUN_TEST(test_benchmark_256);
-    RUN_TEST(test_benchmark_1000);
-    RUN_TEST(test_benchmark_2000);
-    RUN_TEST(test_benchmark_4096);
-    return UNITY_END();
+    srand(42);
+    printf("WASM sort benchmark (iters=%d)\n", BENCH_ITERS);
+
+    int fail = 0;
+    fail |= bench_size(256);
+    fail |= bench_size(1000);
+    fail |= bench_size(2000);
+    fail |= bench_size(4096);
+
+    if (fail) {
+        printf("BENCHMARK FAILED\n");
+        return 1;
+    }
+    printf("All passed.\n");
+    return 0;
 }
-// NOLINTEND(concurrency-mt-unsafe,cert-msc30-c,cert-msc50-cpp)
+// NOLINTEND(concurrency-mt-unsafe,cert-msc30-c,cert-msc50-cpp,cert-msc32-c,cert-msc51-cpp)

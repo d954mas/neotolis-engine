@@ -1,7 +1,12 @@
 #include "render/nt_render_items.h"
 
 #include "entity/nt_entity.h"
+#include "sort/nt_sort.h"
 #include "transform_comp/nt_transform_comp.h"
+
+/* ---- Instantiate typed radix sort for render items ---- */
+
+NT_SORT_DEFINE(nt_sort_by_key, nt_render_item_t)
 
 /* ---- View depth calculation ---- */
 

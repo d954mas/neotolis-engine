@@ -6,7 +6,6 @@
 #include "render/nt_render_defs.h"
 #include "render/nt_render_items.h"
 #include "render/nt_render_util.h"
-#include "sort/nt_sort.h"
 #include "transform_comp/nt_transform_comp.h"
 #include "unity.h"
 

@@ -46,7 +46,6 @@
 #include "render/nt_render_util.h"
 #include "renderers/nt_mesh_renderer.h"
 #include "resource/nt_resource.h"
-#include "sort/nt_sort.h"
 #include "time/nt_time.h"
 #include "transform_comp/nt_transform_comp.h"
 #include "window/nt_window.h"
@@ -496,7 +495,7 @@ static void frame(void) {
     uniforms.near_far[1] = 100.0F;
 
     /* Build render items (only if scene loaded) */
-    nt_render_item_t items[MAX_SCENE_NODES];
+    static nt_render_item_t items[MAX_SCENE_NODES];
     uint32_t item_count = 0;
 
     if (s_scene_loaded) {

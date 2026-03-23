@@ -38,7 +38,6 @@
 #include "render/nt_render_items.h"
 #include "renderers/nt_mesh_renderer.h"
 #include "resource/nt_resource.h"
-#include "sort/nt_sort.h"
 #include "time/nt_time.h"
 #include "transform_comp/nt_transform_comp.h"
 #include "window/nt_window.h"
