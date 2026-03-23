@@ -8,6 +8,7 @@ layout(location = 3) in vec4 a_tangent;
 layout(location = 4) in vec4 a_world_row0;
 layout(location = 5) in vec4 a_world_row1;
 layout(location = 6) in vec4 a_world_row2;
+layout(location = 7) in vec4 a_color;
 
 layout(std140) uniform Globals {
     mat4 view_proj;
@@ -22,6 +23,7 @@ layout(std140) uniform Globals {
 out vec2 v_uv;
 out vec3 v_world_pos;
 out mat3 v_tbn;
+out vec4 v_color;
 
 void main() {
     mat4 world = mat4(
@@ -37,5 +39,6 @@ void main() {
     v_tbn = mat3(T, B, N);
     v_uv = a_uv;
     v_world_pos = (world * vec4(a_position, 1.0)).xyz;
+    v_color = a_color;
     gl_Position = view_proj * world * vec4(a_position, 1.0);
 }

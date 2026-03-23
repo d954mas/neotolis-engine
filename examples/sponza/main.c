@@ -269,7 +269,7 @@ static void load_scene_from_manifest(void) {
             .depth_test = true,
             .depth_write = true,
             .cull_mode = NT_CULL_BACK,
-            .color_mode = NT_COLOR_MODE_NONE,
+            .color_mode = NT_COLOR_MODE_RGBA8,
         };
 
         /* Textures and attr_map depend on shader type */

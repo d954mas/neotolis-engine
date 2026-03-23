@@ -3,6 +3,7 @@ precision highp float;
 in vec2 v_uv;
 in vec3 v_world_normal;
 in vec3 v_world_pos;
+in vec4 v_color;
 
 out vec4 frag_color;
 
@@ -23,7 +24,7 @@ layout(std140) uniform Lighting {
 uniform vec4 u_alpha_cutoff;
 
 void main() {
-    vec4 albedo = texture(u_diffuse, v_uv);
+    vec4 albedo = texture(u_diffuse, v_uv) * v_color;
     if (albedo.a < u_alpha_cutoff.x) discard;
     vec3 N = normalize(v_world_normal);
     vec3 L = normalize(light_dir.xyz);
