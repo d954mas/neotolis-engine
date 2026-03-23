@@ -13,19 +13,19 @@
 /* ---- Hash functions (xxHash backend) ---- */
 
 nt_hash32_t nt_hash32(const void *data, uint32_t size) {
-    NT_ASSERT_ALWAYS(data != NULL);
+    NT_ASSERT(data != NULL);
     return (nt_hash32_t){XXH32(data, (size_t)size, 0)};
 }
 
 nt_hash64_t nt_hash64(const void *data, uint32_t size) {
-    NT_ASSERT_ALWAYS(data != NULL);
+    NT_ASSERT(data != NULL);
     return (nt_hash64_t){XXH64(data, (size_t)size, 0)};
 }
 
 /* ---- String helpers ---- */
 
 nt_hash32_t nt_hash32_str(const char *s) {
-    NT_ASSERT_ALWAYS(s != NULL);
+    NT_ASSERT(s != NULL);
     nt_hash32_t h = nt_hash32((const void *)s, (uint32_t)strlen(s));
 #if NT_HASH_LABELS
     nt_hash_register_label32(h, s);
@@ -34,7 +34,7 @@ nt_hash32_t nt_hash32_str(const char *s) {
 }
 
 nt_hash64_t nt_hash64_str(const char *s) {
-    NT_ASSERT_ALWAYS(s != NULL);
+    NT_ASSERT(s != NULL);
     nt_hash64_t h = nt_hash64((const void *)s, (uint32_t)strlen(s));
 #if NT_HASH_LABELS
     nt_hash_register_label64(h, s);

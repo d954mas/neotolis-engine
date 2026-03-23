@@ -10,13 +10,13 @@ void nt_pool_init(nt_pool_t *pool, uint16_t capacity) {
     NT_ASSERT(capacity > 0);
 
     pool->slots = (nt_pool_slot_t *)calloc(capacity + 1, sizeof(nt_pool_slot_t));
-    NT_ASSERT_ALWAYS(pool->slots); /* alloc fail at init = fatal */
+    NT_ASSERT(pool->slots); /* alloc fail at init = fatal */
 
     pool->free_queue = (uint32_t *)malloc(capacity * sizeof(uint32_t));
     if (!pool->free_queue) {
         free(pool->slots);
         pool->slots = NULL;
-        NT_ASSERT_ALWAYS(pool->free_queue); /* alloc fail at init = fatal */
+        NT_ASSERT(pool->free_queue); /* alloc fail at init = fatal */
     }
 
     /* Fill free queue: stack with indices 1..capacity, lowest index on top */

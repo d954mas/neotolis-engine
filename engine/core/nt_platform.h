@@ -16,7 +16,16 @@
 #define NT_RELEASE 1
 #else
 #define NT_DEBUG 1
-#define NT_ENABLE_ASSERTS 1
+#endif
+
+/* Assert mode: 0=off, 1=trap, 2=full (handler+strings).
+   CMake can override via -DNT_ASSERT_MODE=<level>. */
+#ifndef NT_ASSERT_MODE
+#ifdef NT_DEBUG
+#define NT_ASSERT_MODE 2 /* full: handler available for tests, trap fallback */
+#else
+#define NT_ASSERT_MODE 0 /* release: off */
+#endif
 #endif
 
 #endif /* NT_PLATFORM_H */

@@ -482,7 +482,7 @@ void nt_resource_step(void) {
 static inline nt_resource_t resource_make(uint16_t index, uint16_t gen) { return (nt_resource_t){.id = ((uint32_t)gen << 16) | index}; }
 
 static nt_resource_t slot_alloc(uint64_t resource_id, uint8_t asset_type) {
-    NT_ASSERT_ALWAYS(s_resource.queue_top > 0); /* slot pool full -- raise MAX_SLOTS */
+    NT_ASSERT(s_resource.queue_top > 0); /* slot pool full -- raise MAX_SLOTS */
 
     s_resource.queue_top--;
     uint16_t index = s_resource.free_queue[s_resource.queue_top];
@@ -532,7 +532,7 @@ static nt_result_t pack_alloc(uint32_t pack_id, int16_t priority, uint8_t pack_t
         }
     }
 
-    NT_ASSERT_ALWAYS(0);       /* pack slots full -- raise MAX_PACKS */
+    NT_ASSERT(0);       /* pack slots full -- raise MAX_PACKS */
     return NT_ERR_INVALID_ARG; /* unreachable, satisfies compiler */
 }
 
@@ -678,7 +678,7 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
         }
 
         uint32_t idx = asset_alloc();
-        NT_ASSERT_ALWAYS(idx != UINT32_MAX); /* asset array full -- raise limits */
+        NT_ASSERT(idx != UINT32_MAX); /* asset array full -- raise limits */
 
         NtAssetMeta *meta = &s_resource.assets[idx];
         meta->resource_id = entries[i].resource_id;
@@ -876,7 +876,7 @@ nt_result_t nt_resource_register(nt_hash32_t pack_id, nt_hash64_t resource_id, u
     }
 
     uint32_t idx = asset_alloc();
-    NT_ASSERT_ALWAYS(idx != UINT32_MAX); /* asset array full -- raise limits */
+    NT_ASSERT(idx != UINT32_MAX); /* asset array full -- raise limits */
 
     NtAssetMeta *meta = &s_resource.assets[idx];
     meta->resource_id = resource_id.value;
@@ -918,10 +918,10 @@ void nt_resource_unregister(nt_hash32_t pack_id, nt_hash64_t resource_id) {
 
 static nt_result_t resource_load(uint32_t pack_id, const char *path, uint8_t io_type) {
     int16_t idx = find_pack(pack_id);
-    NT_ASSERT_ALWAYS(idx >= 0); /* programmer error: load called on unmounted pack */
+    NT_ASSERT(idx >= 0); /* programmer error: load called on unmounted pack */
 
     NtPackMeta *pack = &s_resource.packs[idx];
-    NT_ASSERT_ALWAYS(pack->pack_state == NT_PACK_STATE_NONE); /* not already loading */
+    NT_ASSERT(pack->pack_state == NT_PACK_STATE_NONE); /* not already loading */
 
     strncpy(pack->load_path, path, 255);
     pack->load_path[255] = '\0';

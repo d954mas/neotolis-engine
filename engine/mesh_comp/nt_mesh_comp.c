@@ -63,6 +63,6 @@ void nt_mesh_comp_remove(nt_entity_t entity) { nt_comp_storage_remove(&s_storage
 
 nt_mesh_t *nt_mesh_comp_handle(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
-    NT_ASSERT_ALWAYS(idx != NT_INVALID_COMP_INDEX);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return &s_mesh_handles[idx];
 }

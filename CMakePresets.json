@@ -42,7 +42,8 @@
             "inherits": "wasm-release",
             "binaryDir": "${sourceDir}/build/_cmake/wasm-release-paired",
             "cacheVariables": {
-                "NT_WASM_SIMD_WASM_PATH": "index_simd.wasm"
+                "NT_WASM_SIMD_WASM_PATH": "index_simd.wasm",
+                "NT_ASSERT_MODE": "1"
             }
         },
         {
@@ -60,7 +61,8 @@
             "inherits": "wasm-release",
             "binaryDir": "${sourceDir}/build/_cmake/wasm-release-simd",
             "cacheVariables": {
-                "NT_WASM_ENABLE_SIMD": "ON"
+                "NT_WASM_ENABLE_SIMD": "ON",
+                "NT_ASSERT_MODE": "1"
             }
         },
         {

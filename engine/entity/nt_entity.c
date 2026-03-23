@@ -93,7 +93,7 @@ void nt_entity_destroy(nt_entity_t entity) {
     uint16_t gen = nt_entity_generation(entity);
 
     /* Bounds check */
-    NT_ASSERT_ALWAYS(index > 0 && index <= s_entity.max_entities);
+    NT_ASSERT(index > 0 && index <= s_entity.max_entities);
 
     /* Double destroy: slot already dead */
     if (!s_entity.alive[index]) {
@@ -102,7 +102,7 @@ void nt_entity_destroy(nt_entity_t entity) {
     }
 
     /* Stale handle: slot alive but generation mismatch (old handle for recycled slot) */
-    NT_ASSERT_ALWAYS(s_entity.generations[index] == gen);
+    NT_ASSERT(s_entity.generations[index] == gen);
 
     /* Call on_destroy callbacks WHILE entity is still alive.
        Callbacks may call comp_get() which asserts is_alive. */
@@ -134,13 +134,13 @@ bool nt_entity_is_alive(nt_entity_t entity) {
 }
 
 void nt_entity_set_enabled(nt_entity_t entity, bool enabled) {
-    NT_ASSERT_ALWAYS(nt_entity_is_alive(entity));
+    NT_ASSERT(nt_entity_is_alive(entity));
     uint16_t index = nt_entity_index(entity);
     s_entity.enabled[index] = enabled;
 }
 
 bool nt_entity_is_enabled(nt_entity_t entity) {
-    NT_ASSERT_ALWAYS(nt_entity_is_alive(entity));
+    NT_ASSERT(nt_entity_is_alive(entity));
     uint16_t index = nt_entity_index(entity);
     return s_entity.enabled[index];
 }
