@@ -7,6 +7,7 @@
 
 /* ---- Lifecycle ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_result_t nt_comp_storage_init(nt_comp_storage_t *s, uint16_t capacity, nt_comp_default_fn default_fn, nt_comp_swap_fn swap_fn) {
     NT_ASSERT(s);
     NT_ASSERT(default_fn);
@@ -14,7 +15,7 @@ nt_result_t nt_comp_storage_init(nt_comp_storage_t *s, uint16_t capacity, nt_com
     if (capacity == 0) {
         return NT_ERR_INVALID_ARG;
     }
-    NT_ASSERT_ALWAYS(nt_entity_max() > 0);
+    NT_ASSERT(nt_entity_max() > 0);
     NT_ASSERT(capacity <= nt_entity_max());
 
     memset(s, 0, sizeof(*s));
@@ -44,9 +45,10 @@ void nt_comp_storage_shutdown(nt_comp_storage_t *s) {
 
 /* ---- Operations ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint16_t nt_comp_storage_add(nt_comp_storage_t *s, nt_entity_t entity) {
     NT_ASSERT(s->initialized);
-    NT_ASSERT_ALWAYS(nt_entity_is_alive(entity));
+    NT_ASSERT(nt_entity_is_alive(entity));
 
     uint16_t eidx = nt_entity_index(entity);
 
@@ -72,7 +74,7 @@ bool nt_comp_storage_has(const nt_comp_storage_t *s, nt_entity_t entity) {
     if (!s->initialized) {
         return false;
     }
-    NT_ASSERT_ALWAYS(entity.id != 0);
+    NT_ASSERT(entity.id != 0);
     if (!nt_entity_is_alive(entity)) {
         return false;
     }
@@ -81,7 +83,7 @@ bool nt_comp_storage_has(const nt_comp_storage_t *s, nt_entity_t entity) {
 }
 
 void nt_comp_storage_remove(nt_comp_storage_t *s, nt_entity_t entity) {
-    NT_ASSERT_ALWAYS(nt_entity_is_alive(entity));
+    NT_ASSERT(nt_entity_is_alive(entity));
 
     uint16_t eidx = nt_entity_index(entity);
     uint16_t dense_idx = s->entity_to_index[eidx];
@@ -106,7 +108,7 @@ void nt_comp_storage_remove(nt_comp_storage_t *s, nt_entity_t entity) {
 uint16_t nt_comp_storage_count(const nt_comp_storage_t *s) { return s->count; }
 
 uint16_t nt_comp_storage_index(const nt_comp_storage_t *s, nt_entity_t entity) {
-    NT_ASSERT_ALWAYS(nt_entity_is_alive(entity));
+    NT_ASSERT(nt_entity_is_alive(entity));
     uint16_t eidx = nt_entity_index(entity);
     return s->entity_to_index[eidx];
 }

@@ -7,8 +7,6 @@
 
 #include <string.h>
 
-_Static_assert(NT_SHAPE_RENDERER_MAX_VERTICES <= 65535, "uint16 index limit");
-
 #define NT_SHAPE_SEGMENTS 16
 
 /* Derived template sizes (compile-time, used for stack arrays) */
@@ -179,7 +177,7 @@ static struct {
     nt_buffer_t batch_vbo;
     nt_buffer_t batch_ibo;
     nt_shape_renderer_vertex_t vertices[NT_SHAPE_RENDERER_MAX_VERTICES];
-    uint16_t indices[NT_SHAPE_RENDERER_MAX_INDICES];
+    nt_shape_index_t indices[NT_SHAPE_RENDERER_MAX_INDICES];
     uint32_t vertex_count;
     uint32_t index_count;
 
@@ -675,8 +673,8 @@ void nt_shape_renderer_init(void) {
     /* CPU batch buffers (triangle, mesh) */
     s_shape.batch_vbo = nt_gfx_make_buffer(
         &(nt_buffer_desc_t){.type = NT_BUFFER_VERTEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_VERTICES * (uint32_t)sizeof(nt_shape_renderer_vertex_t), .label = "shape_batch_vbo"});
-    s_shape.batch_ibo =
-        nt_gfx_make_buffer(&(nt_buffer_desc_t){.type = NT_BUFFER_INDEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_INDICES * (uint32_t)sizeof(uint16_t), .label = "shape_batch_ibo"});
+    s_shape.batch_ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_INDEX, .usage = NT_USAGE_STREAM, .size = NT_SHAPE_RENDERER_MAX_INDICES * (uint32_t)sizeof(nt_shape_index_t), .index_type = NT_SHAPE_INDEX_TYPE, .label = "shape_batch_ibo"});
 
     /* Instanced shape buffer (shared across types, reused per draw) */
     s_shape.inst_buf = nt_gfx_make_buffer(
@@ -793,7 +791,7 @@ void nt_shape_renderer_flush(void) {
     /* Flush CPU-batched shapes (triangle, mesh) */
     if (s_shape.index_count > 0) {
         nt_gfx_update_buffer(s_shape.batch_vbo, s_shape.vertices, s_shape.vertex_count * (uint32_t)sizeof(nt_shape_renderer_vertex_t));
-        nt_gfx_update_buffer(s_shape.batch_ibo, s_shape.indices, s_shape.index_count * (uint32_t)sizeof(uint16_t));
+        nt_gfx_update_buffer(s_shape.batch_ibo, s_shape.indices, s_shape.index_count * (uint32_t)sizeof(nt_shape_index_t));
 
         nt_gfx_bind_pipeline(s_shape.batch_pip_active);
         nt_gfx_bind_vertex_buffer(s_shape.batch_vbo);
@@ -934,17 +932,17 @@ void nt_shape_renderer_triangle(const float a[3], const float b[3], const float 
         nt_shape_renderer_flush();
     }
 
-    uint16_t base = (uint16_t)s_shape.vertex_count;
+    nt_shape_index_t base = (nt_shape_index_t)s_shape.vertex_count;
     nt_shape_renderer_vertex_t *v = &s_shape.vertices[s_shape.vertex_count];
 
     set_vertex(&v[0], a, color);
     set_vertex(&v[1], b, color);
     set_vertex(&v[2], c, color);
 
-    uint16_t *idx = &s_shape.indices[s_shape.index_count];
+    nt_shape_index_t *idx = &s_shape.indices[s_shape.index_count];
     idx[0] = base;
-    idx[1] = (uint16_t)(base + 1);
-    idx[2] = (uint16_t)(base + 2);
+    idx[1] = (nt_shape_index_t)(base + 1);
+    idx[2] = (nt_shape_index_t)(base + 2);
 
     s_shape.vertex_count += 3;
     s_shape.index_count += 3;
@@ -1366,7 +1364,8 @@ void nt_shape_renderer_capsule_wire_rot(const float center[3], float radius, flo
 
 /* ---- Mesh ---- */
 
-void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const uint16_t *indices, uint32_t num_indices, const float color[4]) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const nt_shape_index_t *indices, uint32_t num_indices, const float color[4]) {
     if (s_shape.vertex_count + num_vertices > NT_SHAPE_RENDERER_MAX_VERTICES || s_shape.index_count + num_indices > NT_SHAPE_RENDERER_MAX_INDICES) {
         nt_shape_renderer_flush();
     }
@@ -1385,7 +1384,7 @@ void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const
         }
     }
 
-    uint16_t base = (uint16_t)s_shape.vertex_count;
+    nt_shape_index_t base = (nt_shape_index_t)s_shape.vertex_count;
 
     /* Copy positions into vertex buffer with color */
     for (uint32_t i = 0; i < num_vertices; i++) {
@@ -1396,11 +1395,11 @@ void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const
 
     /* Copy indices with base offset */
     for (uint32_t i = 0; i < num_indices; i++) {
-        s_shape.indices[s_shape.index_count++] = (uint16_t)(base + indices[i]);
+        s_shape.indices[s_shape.index_count++] = (nt_shape_index_t)(base + indices[i]);
     }
 }
 
-void nt_shape_renderer_mesh_wire(const float *positions, uint32_t num_vertices, const uint16_t *indices, uint32_t num_indices, const float color[4]) {
+void nt_shape_renderer_mesh_wire(const float *positions, uint32_t num_vertices, const nt_shape_index_t *indices, uint32_t num_indices, const float color[4]) {
     /* For each triangle (3 consecutive indices), emit 3 wireframe edges */
     for (uint32_t i = 0; (i + 2) < num_indices; i += 3) {
         if (indices[i] >= num_vertices || indices[i + 1] >= num_vertices || indices[i + 2] >= num_vertices) {

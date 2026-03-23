@@ -856,7 +856,11 @@ const TextureAssetRef* material_get_textures(const MaterialAssetHeader* h)
 
 ## 16.4 One material, one copy
 
-No duplicated material data. Material is created once (either from code via descriptor or loaded from pack asset in the future) and lives in a single pool slot. Multiple entities reference the same material handle. Per-entity variation goes through components (color, future shader params), not material mutation.
+No duplicated material data. Material is created once (either from code via descriptor or loaded from pack asset in the future) and lives in a single pool slot. Multiple entities reference the same material handle.
+
+Per-entity variation (e.g. per-character color, dissolve progress) goes through entity param components, not material mutation — each entity carries its own values, the material stays shared.
+
+Material-wide params (e.g. global alpha cutoff, roughness) can be mutated at runtime via `nt_material_set_param` / `nt_material_set_param_component`. This changes the value for all entities sharing that material. The renderer re-reads params every frame; no version bump is needed. Hash-based overloads (`_h` suffix) accept a pre-computed `nt_hash32_t` to avoid per-frame string hashing.
 
 ## 16.5 Render state and material
 
@@ -1568,7 +1572,18 @@ Builder must check: references between assets, resource types, mesh/material/sha
 - ASSERT
 - PANIC
 
-## 24.2 Error policy
+## 24.2 Assert policy
+
+Asserts are contracts, not error handling. A failed assert means the program is broken beyond recovery — continuing would mask bugs.
+
+- **NT_ASSERT** — single macro, three compile-time modes via `NT_ASSERT_MODE`:
+  - `0 (OFF)` — `((void)0)`, zero overhead. Available via CMake override (`-DNT_ASSERT_MODE=0`) for final production builds where binary size is critical.
+  - `1 (TRAP)` — `__builtin_trap()`, no strings, minimal binary impact. **Release default.**
+  - `2 (FULL)` — hookable handler with `expr/file/line` strings. **Debug default.** Tests use the handler to catch and verify assert failures via `setjmp`/`longjmp`.
+- Release ships with TRAP (1): contract violations crash immediately instead of continuing with corrupted state. No string bloat, no handler overhead — just a single branch + trap instruction per assert.
+- Never use asserts for conditions that can legitimately occur at runtime (missing files, user input, network errors) — those are error handling (see below).
+
+## 24.3 Error policy
 
 ### Fatal
 
@@ -1583,7 +1598,7 @@ Builder must check: references between assets, resource types, mesh/material/sha
 - resource load fail → asset state failed + log
 - audio decode failure → clip state failed + log
 
-## 24.3 Debug overlay
+## 24.4 Debug overlay
 
 Recommended stats: frame time, fixed step count, draw call count, batch count, loaded resource count, active pack count, temp memory usage, audio voice count.
 

@@ -276,8 +276,14 @@ jobs:
       - name: Smoke test builder (debug)
         run: ./build/tools/builder/native-debug/builder
 
-      - name: Run tests
-        run: xvfb-run ctest --preset native-debug
+      - name: Configure native debug tests (FULL asserts)
+        run: cmake --preset native-debug-test
+
+      - name: Build native debug tests
+        run: cmake --build --preset native-debug-test
+
+      - name: Run tests (debug)
+        run: xvfb-run ctest --preset native-debug-test
 
       - name: Configure native release
         run: cmake --preset native-release
@@ -304,6 +310,15 @@ jobs:
 
       - name: Smoke test builder (release)
         run: ./build/tools/builder/native-release/builder
+
+      - name: Configure native release tests (FULL asserts)
+        run: cmake --preset native-release-test
+
+      - name: Build native release tests
+        run: cmake --build --preset native-release-test
+
+      - name: Run tests (release)
+        run: xvfb-run ctest --preset native-release-test
 
       - name: Upload textured_quad packs
         uses: actions/upload-artifact@v4

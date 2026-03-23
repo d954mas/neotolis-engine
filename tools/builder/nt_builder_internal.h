@@ -10,7 +10,7 @@
 #include <string.h>
 
 /* Always-on assert for builder (never compiled out by NDEBUG).
-   Mirrors engine NT_ASSERT_ALWAYS but without engine header deps. */
+   Mirrors engine NT_ASSERT but without engine header deps. */
 #define NT_BUILD_ASSERT(cond)                                                                                                                                                                          \
     do {                                                                                                                                                                                               \
         if (!(cond)) {                                                                                                                                                                                 \

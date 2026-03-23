@@ -89,18 +89,18 @@ void nt_drawable_comp_remove(nt_entity_t entity) { nt_comp_storage_remove(&s_sto
 
 nt_hash32_t *nt_drawable_comp_tag(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
-    NT_ASSERT_ALWAYS(idx != NT_INVALID_COMP_INDEX);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return &s_tags[idx];
 }
 
 bool *nt_drawable_comp_visible(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
-    NT_ASSERT_ALWAYS(idx != NT_INVALID_COMP_INDEX);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return &s_visible[idx];
 }
 
 float *nt_drawable_comp_color(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
-    NT_ASSERT_ALWAYS(idx != NT_INVALID_COMP_INDEX);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return s_colors[idx];
 }

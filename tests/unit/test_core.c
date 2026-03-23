@@ -1,3 +1,4 @@
+#include "core/nt_assert.h"
 #include "core/nt_core.h"
 #include "core/nt_platform.h"
 #include "unity.h"
@@ -56,7 +57,7 @@ void test_debug_build_defines(void) {
     /* This test runs in debug builds (ctest --preset native-debug) */
 #ifdef NT_DEBUG
     TEST_ASSERT_EQUAL_INT(1, NT_DEBUG);
-    TEST_ASSERT_EQUAL_INT(1, NT_ENABLE_ASSERTS);
+    TEST_ASSERT_EQUAL_INT(NT_ASSERT_FULL, NT_ASSERT_MODE);
 #else
     /* In release builds, NT_RELEASE should be defined instead */
     TEST_ASSERT_EQUAL_INT(1, NT_RELEASE);

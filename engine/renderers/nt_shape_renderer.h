@@ -17,6 +17,16 @@
 #define NT_SHAPE_RENDERER_MAX_LINES 8192
 #endif
 
+/* ---- Index type (auto-selected by MAX_VERTICES) ---- */
+
+#if NT_SHAPE_RENDERER_MAX_VERTICES > 65535
+typedef uint32_t nt_shape_index_t;
+#define NT_SHAPE_INDEX_TYPE 2 /* nt_gfx index_type for uint32 */
+#else
+typedef uint16_t nt_shape_index_t;
+#define NT_SHAPE_INDEX_TYPE 1 /* nt_gfx index_type for uint16 */
+#endif
+
 /* ---- Vertex format ---- */
 
 typedef struct {
@@ -91,8 +101,8 @@ void nt_shape_renderer_capsule_wire_rot(const float center[3], float radius, flo
 
 /* ---- Mesh ---- */
 
-void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const uint16_t *indices, uint32_t num_indices, const float color[4]);
-void nt_shape_renderer_mesh_wire(const float *positions, uint32_t num_vertices, const uint16_t *indices, uint32_t num_indices, const float color[4]);
+void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const nt_shape_index_t *indices, uint32_t num_indices, const float color[4]);
+void nt_shape_renderer_mesh_wire(const float *positions, uint32_t num_vertices, const nt_shape_index_t *indices, uint32_t num_indices, const float color[4]);
 
 /* ---- Test accessors (test builds only) ---- */
 

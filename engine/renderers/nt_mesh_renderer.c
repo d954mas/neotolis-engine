@@ -190,6 +190,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info,
 
 /* ---- Lifecycle ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc) {
     NT_ASSERT(!s_mesh_renderer.initialized);
     NT_ASSERT(desc);
@@ -359,7 +360,7 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                 /* Apply material params as uniforms */
                 for (uint8_t p = 0; p < mat_info->param_count; p++) {
                     if (mat_info->param_names[p] != NULL) {
-                        nt_gfx_set_uniform_float(mat_info->param_names[p], mat_info->params[p][0]);
+                        nt_gfx_set_uniform_vec4(mat_info->param_names[p], mat_info->params[p]);
                     }
                 }
 

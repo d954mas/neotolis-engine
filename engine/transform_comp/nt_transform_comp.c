@@ -95,31 +95,31 @@ void nt_transform_comp_remove(nt_entity_t entity) { nt_comp_storage_remove(&s_st
 
 float *nt_transform_comp_position(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
-    NT_ASSERT_ALWAYS(idx != NT_INVALID_COMP_INDEX);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return s_trs[idx].position;
 }
 
 float *nt_transform_comp_rotation(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
-    NT_ASSERT_ALWAYS(idx != NT_INVALID_COMP_INDEX);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return s_trs[idx].rotation;
 }
 
 float *nt_transform_comp_scale(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
-    NT_ASSERT_ALWAYS(idx != NT_INVALID_COMP_INDEX);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return s_trs[idx].scale;
 }
 
 bool *nt_transform_comp_dirty(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
-    NT_ASSERT_ALWAYS(idx != NT_INVALID_COMP_INDEX);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return &s_dirty[idx];
 }
 
 const float *nt_transform_comp_world_matrix(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
-    NT_ASSERT_ALWAYS(idx != NT_INVALID_COMP_INDEX);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return (const float *)s_world_matrices[idx];
 }
 

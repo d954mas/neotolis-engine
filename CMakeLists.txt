@@ -8,6 +8,10 @@ include(cmake/nt_shell.cmake)
 
 option(NT_WASM_ENABLE_SIMD "Build WASM targets with -msimd128 enabled." OFF)
 set(NT_WASM_SIMD_WASM_PATH "" CACHE STRING "Alternate SIMD wasm path injected into the HTML shell.")
+set(NT_ASSERT_MODE "" CACHE STRING "Assert mode override: 0=off, 1=trap, 2=full. Empty=auto (debug→2, release→0).")
+if(NOT NT_ASSERT_MODE STREQUAL "")
+    add_compile_definitions(NT_ASSERT_MODE=${NT_ASSERT_MODE})
+endif()
 
 if(NT_WASM_ENABLE_SIMD AND NT_WASM_SIMD_WASM_PATH)
     message(FATAL_ERROR "NT_WASM_ENABLE_SIMD and NT_WASM_SIMD_WASM_PATH cannot be enabled together. Use a paired preset for baseline+SIMD output or a standalone SIMD preset.")

@@ -1,6 +1,8 @@
 nt_add_module(nt_core LOG_DOMAIN "core"
+    nt_assert.c
     nt_core.c
     nt_core.h
+    nt_assert.h
     nt_types.h
     nt_platform.h
 )

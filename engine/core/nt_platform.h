@@ -16,7 +16,6 @@
 #define NT_RELEASE 1
 #else
 #define NT_DEBUG 1
-#define NT_ENABLE_ASSERTS 1
 #endif
 
 #endif /* NT_PLATFORM_H */
