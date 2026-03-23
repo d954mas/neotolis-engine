@@ -3,6 +3,7 @@
 
 #include "core/nt_types.h"
 #include "hash/nt_hash.h"
+#include "render/nt_render_defs.h"
 #include "resource/nt_resource.h"
 
 /* ---- Compile-time limits ---- */
@@ -73,7 +74,8 @@ typedef struct {
     bool depth_test;
     bool depth_write;
     nt_cull_mode_t cull_mode;
-    const char *label; /* debug name — must be string literal or static storage */
+    nt_color_mode_t color_mode; /* NT_COLOR_MODE_NONE (0) via zero-init */
+    const char *label;          /* debug name — must be string literal or static storage */
 } nt_material_create_desc_t;
 
 /* ---- Init descriptor ---- */
@@ -112,6 +114,7 @@ typedef struct {
     bool depth_test;
     bool depth_write;
     nt_cull_mode_t cull_mode;
+    nt_color_mode_t color_mode;
     uint32_t version;
     bool ready;
     const char *label; /* debug name (string literal, static storage) */

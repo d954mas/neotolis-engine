@@ -74,7 +74,7 @@ static nt_mesh_t create_test_mesh(void) {
 
 /* ---- Helper: create a real GFX shader and register it as a resource, then create material ---- */
 
-static nt_material_t create_test_material(void) {
+static nt_material_t create_test_material_ex(nt_color_mode_t color_mode) {
     /* Create actual GFX shader handles so pipeline creation validates them */
     nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){
         .type = NT_SHADER_VERTEX,
@@ -118,6 +118,7 @@ static nt_material_t create_test_material(void) {
     desc.depth_test = true;
     desc.depth_write = true;
     desc.cull_mode = NT_CULL_BACK;
+    desc.color_mode = color_mode;
     desc.label = "test_material";
 
     nt_material_t mat = nt_material_create(&desc);
@@ -126,6 +127,8 @@ static nt_material_t create_test_material(void) {
 
     return mat;
 }
+
+static nt_material_t create_test_material(void) { return create_test_material_ex(NT_COLOR_MODE_NONE); }
 
 /* ---- Helper: create a fully-equipped test entity ---- */
 
@@ -429,6 +432,137 @@ void test_stream_to_format_uint16(void) {
     TEST_ASSERT_EQUAL(NT_FORMAT_SHORT4, nt_stream_to_vertex_format(NT_STREAM_UINT16, 4, 0));
 }
 
+/* ---- Test: FLOAT4 color mode produces valid draw ---- */
+
+void test_draw_list_color_mode_float4(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material_ex(NT_COLOR_MODE_FLOAT4);
+    nt_entity_t e = create_test_entity(mesh, mat);
+
+    nt_render_item_t items[1];
+    items[0].sort_key = 0;
+    items[0].entity = e.id;
+    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
+
+    nt_mesh_renderer_draw_list(items, 1);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_instance_total());
+}
+
+/* ---- Test: RGBA8 color mode produces valid draw ---- */
+
+void test_draw_list_color_mode_rgba8(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat = create_test_material_ex(NT_COLOR_MODE_RGBA8);
+    nt_entity_t e = create_test_entity(mesh, mat);
+
+    nt_render_item_t items[1];
+    items[0].sort_key = 0;
+    items[0].entity = e.id;
+    items[0].batch_key = nt_batch_key(mat.id, mesh.id);
+
+    nt_mesh_renderer_draw_list(items, 1);
+
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(1, nt_mesh_renderer_test_instance_total());
+}
+
+/* ---- Test: different color modes produce different pipeline cache entries ---- */
+
+void test_pipeline_cache_different_color_modes(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat_none = create_test_material_ex(NT_COLOR_MODE_NONE);
+    nt_material_t mat_float4 = create_test_material_ex(NT_COLOR_MODE_FLOAT4);
+
+    nt_entity_t e0 = create_test_entity(mesh, mat_none);
+    nt_entity_t e1 = create_test_entity(mesh, mat_float4);
+
+    nt_render_item_t items[2];
+    items[0].sort_key = 0;
+    items[0].entity = e0.id;
+    items[0].batch_key = nt_batch_key(mat_none.id, mesh.id);
+    items[1].sort_key = 1;
+    items[1].entity = e1.id;
+    items[1].batch_key = nt_batch_key(mat_float4.id, mesh.id);
+
+    nt_mesh_renderer_draw_list(items, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_pipeline_cache_count());
+}
+
+/* ---- Test: mixed color modes within a single draw_list call ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_draw_list_mixed_color_modes(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat_none = create_test_material_ex(NT_COLOR_MODE_NONE);
+    nt_material_t mat_float4 = create_test_material_ex(NT_COLOR_MODE_FLOAT4);
+
+    nt_entity_t e0 = create_test_entity(mesh, mat_none);
+    nt_entity_t e1 = create_test_entity(mesh, mat_float4);
+
+    nt_render_item_t items[2];
+    items[0].sort_key = 0;
+    items[0].entity = e0.id;
+    items[0].batch_key = nt_batch_key(mat_none.id, mesh.id);
+    items[1].sort_key = 1;
+    items[1].entity = e1.id;
+    items[1].batch_key = nt_batch_key(mat_float4.id, mesh.id);
+
+    nt_mesh_renderer_draw_list(items, 2);
+
+    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(2, nt_mesh_renderer_test_instance_total());
+}
+
+/* ---- Test: mixed color modes with multiple instances per run ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_draw_list_mixed_color_modes_multi_instance(void) {
+    nt_mesh_t mesh = create_test_mesh();
+    nt_material_t mat_none = create_test_material_ex(NT_COLOR_MODE_NONE);
+    nt_material_t mat_rgba8 = create_test_material_ex(NT_COLOR_MODE_RGBA8);
+    nt_material_t mat_float4 = create_test_material_ex(NT_COLOR_MODE_FLOAT4);
+
+    /* 3 entities per material = 9 total, 3 runs with different strides */
+    nt_entity_t entities[9];
+    nt_render_item_t items[9];
+    uint32_t idx = 0;
+
+    /* Run 0: 3x NONE (stride 48) */
+    for (int i = 0; i < 3; i++) {
+        entities[idx] = create_test_entity(mesh, mat_none);
+        items[idx].sort_key = idx;
+        items[idx].entity = entities[idx].id;
+        items[idx].batch_key = nt_batch_key(mat_none.id, mesh.id);
+        idx++;
+    }
+    /* Run 1: 3x RGBA8 (stride 56) */
+    for (int i = 0; i < 3; i++) {
+        entities[idx] = create_test_entity(mesh, mat_rgba8);
+        items[idx].sort_key = idx;
+        items[idx].entity = entities[idx].id;
+        items[idx].batch_key = nt_batch_key(mat_rgba8.id, mesh.id);
+        idx++;
+    }
+    /* Run 2: 3x FLOAT4 (stride 64) */
+    for (int i = 0; i < 3; i++) {
+        entities[idx] = create_test_entity(mesh, mat_float4);
+        items[idx].sort_key = idx;
+        items[idx].entity = entities[idx].id;
+        items[idx].batch_key = nt_batch_key(mat_float4.id, mesh.id);
+        idx++;
+    }
+
+    nt_mesh_renderer_draw_list(items, 9);
+
+    TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(9, nt_mesh_renderer_test_instance_total());
+    /* 3 different color modes = 3 pipelines */
+    TEST_ASSERT_EQUAL_UINT32(3, nt_mesh_renderer_test_pipeline_cache_count());
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -443,6 +577,12 @@ int main(void) {
     RUN_TEST(test_pipeline_cache_reuse);
     RUN_TEST(test_pipeline_cache_different_layouts);
     RUN_TEST(test_restore_gpu);
+    /* Color mode tests */
+    RUN_TEST(test_draw_list_color_mode_float4);
+    RUN_TEST(test_draw_list_color_mode_rgba8);
+    RUN_TEST(test_pipeline_cache_different_color_modes);
+    RUN_TEST(test_draw_list_mixed_color_modes);
+    RUN_TEST(test_draw_list_mixed_color_modes_multi_instance);
     /* Stream format mapping */
     RUN_TEST(test_stream_to_format_float32);
     RUN_TEST(test_stream_to_format_float16);

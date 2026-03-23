@@ -72,8 +72,14 @@ void nt_gfx_get_global_blocks(const nt_global_block_t **blocks, uint32_t *count)
 
 /* ---- Lifecycle ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_gfx_init(const nt_gfx_desc_t *desc) {
     NT_ASSERT(desc);
+    NT_ASSERT(desc->max_shaders > 0 && "nt_gfx_desc_t.max_shaders is 0 -- use nt_gfx_desc_defaults() or set explicitly");
+    NT_ASSERT(desc->max_pipelines > 0 && "nt_gfx_desc_t.max_pipelines is 0 -- use nt_gfx_desc_defaults() or set explicitly");
+    NT_ASSERT(desc->max_buffers > 0 && "nt_gfx_desc_t.max_buffers is 0 -- use nt_gfx_desc_defaults() or set explicitly");
+    NT_ASSERT(desc->max_textures > 0 && "nt_gfx_desc_t.max_textures is 0 -- use nt_gfx_desc_defaults() or set explicitly");
+    NT_ASSERT(desc->max_meshes > 0 && "nt_gfx_desc_t.max_meshes is 0 -- use nt_gfx_desc_defaults() or set explicitly");
     memset(&s_gfx, 0, sizeof(s_gfx));
     memset(&g_nt_gfx, 0, sizeof(g_nt_gfx));
 
@@ -642,6 +648,13 @@ void nt_gfx_set_instance_offset(uint32_t byte_offset) {
         return;
     }
     nt_gfx_backend_set_instance_offset(byte_offset);
+}
+
+void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    nt_gfx_backend_set_vertex_attrib_default(location, x, y, z, w);
 }
 
 /* ---- Uniform buffer ---- */

@@ -23,35 +23,26 @@ Runtime binds one texture per atlas, draws all sprites in a single instanced dra
 
 ### 2. Compact Instance Data (mat4x3 + configurable color)
 
-**Status:** planned
+**Status:** done
 **Scope:** mesh renderer, material, shaders
 
-Current `nt_mesh_instance_t` = 80 bytes (mat4 + float4 color).
-Proposed: mat4x3 + configurable color mode = 48-64 bytes.
+Instance data reduced from 80 bytes to 48-64 bytes depending on color mode.
 
-**Changes:**
-- Drop last row of world matrix (always `0,0,0,1`) — shader reconstructs. Saves 16 bytes.
-- Material stores color mode enum:
-
-```c
-typedef enum {
-    NT_INSTANCE_COLOR_NONE = 0,   // 48 bytes — mat4x3 only
-    NT_INSTANCE_COLOR_UBYTE4,     // 52 bytes — mat4x3 + uint8[4]
-    NT_INSTANCE_COLOR_FLOAT4,     // 64 bytes — mat4x3 + float[4]
-} nt_instance_color_mode_t;
-```
-
-- Mesh renderer reads color mode from material, packs accordingly
-- Pipeline cache key already includes material — different layouts = different pipelines automatically
-- If shader reads color but material says `COLOR_NONE` — data error, catch with debug assert at material creation
-- Builder does not validate this (materials are runtime constructs) — validation at `nt_material_create` in debug builds only
-- Shape renderer already uses UBYTE4N — no changes needed there
+**Implementation:**
+- `nt_color_mode_t` enum: `NT_COLOR_MODE_NONE` (48B), `NT_COLOR_MODE_RGBA8` (56B), `NT_COLOR_MODE_FLOAT4` (64B)
+- Color mode set per material at creation time (immutable, pipeline-affecting)
+- mat4x3: 3 rows extracted from column-major mat4, shader reconstructs 4th row `(0,0,0,1)`
+- CPU staging: `uint8_t` byte buffer with variable stride per draw group
+- Pipeline cache key includes `color_mode` at bits 8-9
+- `glVertexAttrib4f(7, 1,1,1,1)` at init — identity for shaders that multiply by color when attribute disabled
+- Sponza shaders use NONE mode (no per-instance color, no v_color varying)
+- Shape renderer unchanged (already compact: 44B)
 
 **Savings:** 80 → 48 bytes (no color) = 40% reduction. 1000 instances = 32KB less upload per frame.
 
 ### 3. Radix Sort for Render Items
 
-**Status:** planned
+**Status:** done
 **Scope:** `nt_render_items.c`
 
 Replace `qsort` with LSD radix sort (8-bit, 8 passes for full uint64 sort_key).
