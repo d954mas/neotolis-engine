@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 55b640d
+# Commit: e5e1017
 
 ## WASM Section Sizes
 
@@ -7,39 +7,39 @@ Section                Size
 ---------------- ----------
 Type                 188 B
 Import               465 B
-Function             123 B
+Function             115 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                82 B
-Elem                  63 B
-Code               55438 B
+Elem                  60 B
+Code               58007 B
 Data                8324 B
-Custom              3945 B
+Custom              3864 B
 ---------------- ----------
-TOTAL              68648 B
+TOTAL              71125 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-16060 B   frame
- 5291 B   main
+19488 B   frame
+ 5290 B   main
  3103 B   fmt_fp
  2627 B   printf_core
  2041 B   __rem_pio2f
  1759 B   nt_hash64_str
  1106 B   nt_hash32
   931 B   nt_input_web_on_blur
-  871 B   nt_gfx_activate_mesh
+  872 B   nt_gfx_activate_mesh
   806 B   nt_gfx_make_texture
   706 B   nt_input_web_on_pointer_move
   667 B   nt_input_web_on_pointer_down
   650 B   pop_arg_long_double
   548 B   emmalloc_memalign
   513 B   nt_resource_request
+  512 B   __memcpy
   509 B   claim_more_memory
-  508 B   __memcpy
   478 B   pack_alloc
   470 B   find_pack
   465 B   vsnprintf
@@ -54,8 +54,8 @@ TOTAL              68648 B
   366 B   nt_gfx_activate_shader
   362 B   cosf
 
-Total functions: 122
-Total code size: 55251 B
+Total functions: 114
+Total code size: 57830 B
 
 ## Per-Module Contributions
 
@@ -78,13 +78,13 @@ libnt_material.a            4292 B
 libnt_material_comp.a       1990 B
 libnt_mesh_comp.a           1914 B
 libnt_mesh_renderer.a       6696 B
-libnt_render.a              1528 B
+libnt_render.a              5910 B
 libnt_resource.a          149572 B
 libnt_time.a                 868 B
 libnt_transform_comp.a      4536 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)            253188 B
+TOTAL (linked)            257570 B
 
 Not linked to textured_quad:
 libnt_app_stub.a            1428 B
@@ -95,6 +95,7 @@ libnt_input_stub.a         11148 B
 libnt_log_stub.a             484 B
 libnt_pool.a                1278 B
 libnt_shape_renderer.a   1140902 B
+libnt_sort.a                 366 B
 libnt_window_stub.a         1838 B
 
 
