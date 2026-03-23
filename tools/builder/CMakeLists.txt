@@ -21,11 +21,20 @@ target_compile_definitions(nt_basisu_encoder PRIVATE
     BASISD_SUPPORT_KTX2=1
     BASISD_SUPPORT_KTX2_ZSTD=0
     _CRT_SECURE_NO_WARNINGS
+    # Match ASAN runtime's iterator debug level (0) to avoid /failifmismatch link error
+    $<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>
 )
 # Suppress warnings in vendored C++ code
 target_compile_options(nt_basisu_encoder PRIVATE -w)
-# Static CRT: remove _DLL so CRT calls resolve to static symbols
+# Static CRT: remove _DLL so CRT calls resolve to static symbols.
+# Use MSVC_RUNTIME_LIBRARY to match ASAN runtime (static release CRT) --
+# C++ MSVC headers embed /failifmismatch directives that must agree with clang_rt.asan_cxx.
+set_target_properties(nt_basisu_encoder PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:>"
+)
 target_compile_options(nt_basisu_encoder PRIVATE -U_DLL)
+# Match sanitizer flags with the rest of the builder targets
+nt_set_sanitizer_flags(nt_basisu_encoder)
 set_target_properties(nt_basisu_encoder PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
