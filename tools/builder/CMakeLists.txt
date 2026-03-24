@@ -57,6 +57,7 @@ add_library(nt_builder STATIC
     nt_builder_mesh.c
     nt_builder_texture.c
     nt_builder_shader.c
+    nt_builder_include.c
     nt_builder_glob.c
     nt_builder_scene.c
     nt_builder_blob.c

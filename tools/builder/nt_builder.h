@@ -124,6 +124,12 @@ nt_build_result_t nt_builder_add_shader(NtBuilderContext *ctx, const char *path,
 /* --- Force mode (add or replace, no duplicate error) --- */
 void nt_builder_set_force(NtBuilderContext *ctx, bool force);
 
+/* --- Asset roots (search paths for #include and file lookup) --- */
+#ifndef NT_BUILD_MAX_ASSET_ROOTS
+#define NT_BUILD_MAX_ASSET_ROOTS 8
+#endif
+nt_build_result_t nt_builder_add_asset_root(NtBuilderContext *ctx, const char *path);
+
 /* --- Batch addition (glob patterns) --- */
 nt_build_result_t nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const NtStreamLayout *layout, uint32_t stream_count);
 nt_build_result_t nt_builder_add_textures(NtBuilderContext *ctx, const char *pattern);

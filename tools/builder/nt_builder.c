@@ -309,6 +309,9 @@ static void nt_builder_free_context(NtBuilderContext *ctx) {
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         nt_builder_free_entry(&ctx->pending[i]);
     }
+    for (uint32_t i = 0; i < ctx->asset_root_count; i++) {
+        free(ctx->asset_roots[i]);
+    }
     free(ctx);
 }
 
@@ -776,6 +779,23 @@ void nt_builder_set_force(NtBuilderContext *ctx, bool force) {
     if (ctx) {
         ctx->force = force;
     }
+}
+
+nt_build_result_t nt_builder_add_asset_root(NtBuilderContext *ctx, const char *path) {
+    if (!ctx || !path) {
+        return NT_BUILD_ERR_VALIDATION;
+    }
+    if (ctx->asset_root_count >= NT_BUILD_MAX_ASSET_ROOTS) {
+        NT_LOG_ERROR("asset root limit reached (%d max)", NT_BUILD_MAX_ASSET_ROOTS);
+        return NT_BUILD_ERR_LIMIT;
+    }
+    char *normalized = nt_builder_normalize_path(path);
+    if (!normalized) {
+        return NT_BUILD_ERR_IO;
+    }
+    ctx->asset_roots[ctx->asset_root_count++] = normalized;
+    NT_LOG_INFO("asset root [%u]: %s", ctx->asset_root_count - 1, normalized);
+    return NT_BUILD_OK;
 }
 
 /* --- Rename: change resource_id key, keep source file --- */
