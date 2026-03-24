@@ -6,6 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Suppress GLFW/GLX internal leaks (X11 extension query cache) */
+const char *__lsan_default_suppressions(void);                                           // NOLINT(bugprone-reserved-identifier)
+const char *__lsan_default_suppressions(void) { return "leak:extensionSupportedGLX\n"; } // NOLINT(bugprone-reserved-identifier)
+
 /* clang-format off */
 #include "nt_blob_format.h"
 #include "nt_builder.h"
