@@ -36,6 +36,11 @@ target_compile_definitions(nt_basisu_transcoder PRIVATE
     $<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>
 )
 
+# Link C++ stdlib — needed on Linux where C linker doesn't pull it automatically
+if(NOT WIN32 AND NOT EMSCRIPTEN)
+    target_link_libraries(nt_basisu_transcoder PUBLIC stdc++)
+endif()
+
 set_target_properties(nt_basisu_transcoder PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/engine/${NT_PRESET_NAME}"
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:>"

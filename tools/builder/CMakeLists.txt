@@ -39,6 +39,10 @@ set_target_properties(nt_basisu_encoder PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:>"
 )
 target_compile_options(nt_basisu_encoder PRIVATE -U_DLL)
+# Link C++ stdlib — needed on Linux where C linker doesn't pull it automatically
+if(NOT WIN32)
+    target_link_libraries(nt_basisu_encoder PUBLIC stdc++)
+endif()
 set_target_properties(nt_basisu_encoder PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
