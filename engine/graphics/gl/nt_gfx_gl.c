@@ -77,6 +77,14 @@ static GLuint s_instance_gl_buf;          /* GL name of last bound instance buff
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
 
+/* ---- Transcode buffer (reused across textures, freed after idle) ---- */
+
+#define NT_TRANSCODE_BUF_IDLE_FRAMES 60 /* ~1s at 60fps */
+
+static uint8_t *s_transcode_buf = NULL;
+static uint32_t s_transcode_buf_size = 0;
+static uint32_t s_transcode_buf_idle = 0;
+
 /* ---- GL state cache (skip redundant JS interop calls) ---- */
 
 static struct {
@@ -317,11 +325,14 @@ void nt_gfx_backend_shutdown(void) {
     free(s_buffer_gl);
     free(s_buffer_targets);
     free(s_texture_gl);
+    free(s_transcode_buf);
 
     s_pipelines = NULL;
     s_buffer_gl = NULL;
     s_buffer_targets = NULL;
     s_texture_gl = NULL;
+    s_transcode_buf = NULL;
+    s_transcode_buf_size = 0;
 
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
@@ -339,7 +350,17 @@ void nt_gfx_backend_begin_frame(void) {
      * Desktop swap is handled by the window layer. */
 }
 
-void nt_gfx_backend_end_frame(void) { /* No-op: swap handled externally. */ }
+void nt_gfx_backend_end_frame(void) {
+    /* Free transcode buffer after idle period */
+    if (s_transcode_buf != NULL) {
+        s_transcode_buf_idle++;
+        if (s_transcode_buf_idle > NT_TRANSCODE_BUF_IDLE_FRAMES) {
+            free(s_transcode_buf);
+            s_transcode_buf = NULL;
+            s_transcode_buf_size = 0;
+        }
+    }
+}
 
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) {
     glViewport(0, 0, (GLsizei)g_nt_window.fb_width, (GLsizei)g_nt_window.fb_height);
@@ -932,10 +953,18 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
         return 0;
     }
     uint32_t buf_size = is_compressed ? blocks0 * bpb : lw0 * lh0 * 4;
-    uint8_t *transcode_buf = (uint8_t *)malloc(buf_size);
-    if (!transcode_buf) {
-        return 0;
+    /* Grow shared transcode buffer if needed (reused across textures) */
+    if (buf_size > s_transcode_buf_size) {
+        free(s_transcode_buf);
+        s_transcode_buf = (uint8_t *)malloc(buf_size);
+        if (!s_transcode_buf) {
+            s_transcode_buf_size = 0;
+            return 0;
+        }
+        s_transcode_buf_size = buf_size;
     }
+    s_transcode_buf_idle = 0;
+    uint8_t *transcode_buf = s_transcode_buf;
 
     GLuint tex;
     glGenTextures(1, &tex);
@@ -948,7 +977,6 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
 
     /* Start transcoding session once for all mip levels */
     if (!nt_basisu_start_transcoding(basis_data, basis_size)) {
-        free(transcode_buf);
         glDeleteTextures(1, &tex);
         return 0;
     }
@@ -993,7 +1021,6 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
     }
 
     nt_basisu_stop_transcoding();
-    free(transcode_buf);
 
     if (!ok) {
         glDeleteTextures(1, &tex);
