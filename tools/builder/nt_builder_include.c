@@ -36,6 +36,9 @@ static bool include_buf_init(nt_include_buf_t *buf, uint32_t initial_cap) {
 static bool include_buf_append(nt_include_buf_t *buf, const char *data, uint32_t len) {
     while (buf->size + len > buf->capacity) {
         uint32_t new_cap = buf->capacity * 2;
+        if (new_cap < buf->capacity) {
+            return false; /* uint32 overflow */
+        }
         char *new_data = (char *)realloc(buf->data, new_cap);
         if (!new_data) {
             return false;
@@ -114,7 +117,9 @@ char *nt_builder_find_file(const char *filename, const char *relative_to_dir, co
     if (relative_to_dir) {
         char *candidate = join_path(relative_to_dir, filename);
         if (candidate && file_exists(candidate)) {
-            return candidate;
+            char *normalized = nt_builder_normalize_path(candidate);
+            free(candidate);
+            return normalized;
         }
         free(candidate);
     }
@@ -124,7 +129,9 @@ char *nt_builder_find_file(const char *filename, const char *relative_to_dir, co
         for (uint32_t i = 0; i < ctx->asset_root_count; i++) {
             char *candidate = join_path(ctx->asset_roots[i], filename);
             if (candidate && file_exists(candidate)) {
-                return candidate;
+                char *normalized = nt_builder_normalize_path(candidate);
+                free(candidate);
+                return normalized;
             }
             free(candidate);
         }
