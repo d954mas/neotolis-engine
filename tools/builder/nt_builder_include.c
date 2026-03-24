@@ -217,8 +217,8 @@ static char *resolve_recursive(const char *source, uint32_t src_len, const char 
                     after_pragma++;
                 }
                 if (strncmp(after_pragma, "once", 4) == 0) {
-                    char c = (after_pragma + 4 < line_end) ? after_pragma[4] : '\0';
-                    if (c == '\0' || c == ' ' || c == '\t' || c == '\r' || c == '/') {
+                    const char *ap4 = after_pragma + 4;
+                    if (ap4 >= line_end || *ap4 == ' ' || *ap4 == '\t' || *ap4 == '\r' || *ap4 == '/') {
                         /* Register file in once set and skip this line from output */
                         if (file_path && !is_in_once_set(state, file_path)) {
                             ok = add_to_once_set(state, file_path);
