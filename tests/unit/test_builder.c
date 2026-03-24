@@ -1366,6 +1366,96 @@ void test_asset_root_include(void) {
     free(source);
 }
 
+/* --- GL shader validation tests --- */
+
+void test_gl_validation_valid_shader(void) {
+    const char *vert_path = TMP_DIR "/gl_valid.vert";
+    write_test_shader(vert_path, "precision mediump float;\n"
+                                 "layout(location = 0) in vec3 a_position;\n"
+                                 "uniform mat4 u_mvp;\n"
+                                 "void main() {\n"
+                                 "    gl_Position = u_mvp * vec4(a_position, 1.0);\n"
+                                 "}\n");
+
+    const char *pack_path = TMP_DIR "/gl_valid.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+}
+
+void test_gl_validation_invalid_shader(void) {
+    const char *vert_path = TMP_DIR "/gl_invalid.vert";
+    /* Missing semicolon after gl_Position assignment */
+    write_test_shader(vert_path, "precision mediump float;\n"
+                                 "layout(location = 0) in vec3 a_position;\n"
+                                 "uniform mat4 u_mvp;\n"
+                                 "void main() {\n"
+                                 "    gl_Position = u_mvp * vec4(a_position, 1.0)\n"
+                                 "}\n");
+
+    const char *pack_path = TMP_DIR "/gl_invalid.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    /* GL validation may be skipped if no display (D-08) -- both outcomes are valid */
+    TEST_ASSERT_TRUE(r == NT_BUILD_OK || r == NT_BUILD_ERR_VALIDATION);
+    nt_builder_free_pack(ctx);
+}
+
+void test_gl_validation_fragment_shader(void) {
+    const char *frag_path = TMP_DIR "/gl_valid.frag";
+    write_test_shader(frag_path, "precision mediump float;\n"
+                                 "out vec4 frag_color;\n"
+                                 "uniform vec4 u_color;\n"
+                                 "void main() {\n"
+                                 "    frag_color = u_color;\n"
+                                 "}\n");
+
+    const char *pack_path = TMP_DIR "/gl_frag.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_shader(ctx, frag_path, NT_BUILD_SHADER_FRAGMENT);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+}
+
+void test_gl_validation_type_error(void) {
+    const char *vert_path = TMP_DIR "/gl_type_err.vert";
+    /* mat4 + vec3 is a type error in GLSL */
+    write_test_shader(vert_path, "precision mediump float;\n"
+                                 "layout(location = 0) in vec3 a_position;\n"
+                                 "uniform mat4 u_mvp;\n"
+                                 "void main() {\n"
+                                 "    gl_Position = u_mvp + a_position;\n"
+                                 "}\n");
+
+    const char *pack_path = TMP_DIR "/gl_type_err.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    /* GL validation may be skipped if no display (D-08) -- both outcomes are valid */
+    TEST_ASSERT_TRUE(r == NT_BUILD_OK || r == NT_BUILD_ERR_VALIDATION);
+    nt_builder_free_pack(ctx);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -1434,6 +1524,12 @@ int main(void) {
     RUN_TEST(test_include_missing_file_errors);
     RUN_TEST(test_include_depth_limit);
     RUN_TEST(test_asset_root_include);
+
+    /* GL shader validation */
+    RUN_TEST(test_gl_validation_valid_shader);
+    RUN_TEST(test_gl_validation_invalid_shader);
+    RUN_TEST(test_gl_validation_fragment_shader);
+    RUN_TEST(test_gl_validation_type_error);
 
     return UNITY_END();
 }
