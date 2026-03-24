@@ -250,18 +250,6 @@ jobs:
       - name: Configure native debug
         run: cmake --preset native-debug
 
-      - name: Build native debug
-        run: cmake --build --preset native-debug --target build_tq_packs
-
-      - name: Build asset packs (textured_quad)
-        run: ./build/examples/textured_quad/native-debug/build_tq_packs build/examples/textured_quad
-
-      - name: Build sponza pack builder
-        run: cmake --build --preset native-debug --target build_sponza_packs
-
-      - name: Build asset packs (sponza)
-        run: ./build/examples/sponza/native-debug/build_sponza_packs build/examples/sponza
-
       - name: Build native debug (all targets)
         run: cmake --build --preset native-debug
 
@@ -288,16 +276,15 @@ jobs:
       - name: Configure native release
         run: cmake --preset native-release
 
-      - name: Build native release
-        run: cmake --build --preset native-release
+      - name: Build pack builders (release, no ASAN — fast encoding)
+        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs
 
-      - name: Build asset packs (textured_quad, release)
-        run: ./build/examples/textured_quad/native-release/build_tq_packs build/examples/textured_quad
+      - name: Build asset packs (release)
+        run: |
+          ./build/examples/textured_quad/native-release/build_tq_packs build/examples/textured_quad
+          ./build/examples/sponza/native-release/build_sponza_packs build/examples/sponza
 
-      - name: Build asset packs (sponza, release)
-        run: ./build/examples/sponza/native-release/build_sponza_packs build/examples/sponza
-
-      - name: Rebuild native release (with packs)
+      - name: Build native release (all targets)
         run: cmake --build --preset native-release
 
       - name: Verify native release output

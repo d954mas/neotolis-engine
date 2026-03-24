@@ -30,7 +30,13 @@ uint32_t nt_basisu_get_level_count(const void *basis_data, uint32_t basis_size);
  * Returns false if level_index is out of range or data is invalid. */
 bool nt_basisu_get_level_desc(const void *basis_data, uint32_t basis_size, uint32_t level_index, uint32_t *out_width, uint32_t *out_height, uint32_t *out_total_blocks);
 
+/* Begin/end transcoding session. Call start once, transcode multiple levels, then stop.
+ * More efficient than transcode_level which starts/stops per call. */
+bool nt_basisu_start_transcoding(const void *basis_data, uint32_t basis_size);
+void nt_basisu_stop_transcoding(void);
+
 /* Transcode a single mip level to the specified GPU format.
+ * Caller must call nt_basisu_start_transcoding() first.
  * output: buffer to receive transcoded data (caller allocates)
  * output_blocks: number of blocks that fit in output buffer
  * format: target GPU format

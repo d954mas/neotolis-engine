@@ -2,6 +2,8 @@
 
 #include "basisu_transcoder.h"
 
+#include <cassert>
+
 /* ---- Format mapping ---- */
 
 static basist::transcoder_texture_format to_basist_format(nt_basisu_format_t fmt) {
@@ -24,6 +26,7 @@ static basist::transcoder_texture_format to_basist_format(nt_basisu_format_t fmt
 /* ---- Static transcoder instance ---- */
 
 static basist::basisu_transcoder s_transcoder;
+static bool s_transcoding_active = false;
 
 /* ---- Public API ---- */
 
@@ -43,17 +46,26 @@ bool nt_basisu_get_level_desc(const void *basis_data, uint32_t basis_size, uint3
                                              *out_total_blocks);
 }
 
+bool nt_basisu_start_transcoding(const void *basis_data, uint32_t basis_size) {
+    assert(!s_transcoding_active);
+    bool ok = s_transcoder.start_transcoding(basis_data, basis_size);
+    if (ok) {
+        s_transcoding_active = true;
+    }
+    return ok;
+}
+
+void nt_basisu_stop_transcoding(void) {
+    assert(s_transcoding_active);
+    s_transcoder.stop_transcoding();
+    s_transcoding_active = false;
+}
+
 bool nt_basisu_transcode_level(const void *basis_data, uint32_t basis_size, uint32_t level_index, void *output,
                                uint32_t output_blocks, nt_basisu_format_t format) {
-    if (!s_transcoder.start_transcoding(basis_data, basis_size)) {
-        return false;
-    }
-
-    bool ok = s_transcoder.transcode_image_level(basis_data, basis_size, 0, level_index, output, output_blocks,
-                                                 to_basist_format(format));
-
-    s_transcoder.stop_transcoding();
-    return ok;
+    assert(s_transcoding_active);
+    return s_transcoder.transcode_image_level(basis_data, basis_size, 0, level_index, output, output_blocks,
+                                              to_basist_format(format));
 }
 
 uint32_t nt_basisu_bytes_per_block(nt_basisu_format_t format) {

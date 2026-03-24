@@ -12,6 +12,7 @@
  * Usage: build_sponza_packs <output_dir>
  */
 
+#include "nt_basisu_encoder.h"
 #include "nt_builder.h"
 
 #include "cgltf.h"
@@ -506,14 +507,14 @@ static nt_build_result_t populate_geo(NtBuilderContext *ctx, const nt_glb_scene_
 
 static nt_build_result_t populate_tex(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     /* TODO(#95): enable after builder cache */
-    /* nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_low(); */
-    return add_textures(ctx, scene, 512, NULL);
+     nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_low(); 
+    return add_textures(ctx, scene, 512, &compress);
 }
 
 static nt_build_result_t populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     /* TODO(#95): enable after builder cache */
-    /* nt_tex_compress_opts_t compress = nt_tex_compress_uastc_high(); */
-    nt_build_result_t r = add_textures(ctx, scene, 0, NULL);
+     nt_tex_compress_opts_t compress = nt_tex_compress_uastc_high(); 
+    nt_build_result_t r = add_textures(ctx, scene, 0, &compress);
     if (r != NT_BUILD_OK) {
         return r;
     }
@@ -604,6 +605,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    nt_basisu_encoder_shutdown();
     (void)printf("\n=== Done ===\n");
     return 0;
 }

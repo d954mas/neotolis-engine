@@ -912,13 +912,24 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uint32_t basis_size, uint32_t base_width, uint32_t base_height, uint32_t level_count, nt_texture_filter_t min_filter,
                                                   nt_texture_filter_t mag_filter, nt_texture_wrap_t wrap_u, nt_texture_wrap_t wrap_v, uint32_t transcode_target) {
-    (void)base_width;
-    (void)base_height;
-
     nt_basisu_format_t target = (nt_basisu_format_t)transcode_target;
     bool is_compressed = (target != NT_BASISU_FORMAT_RGBA32);
     uint32_t gl_internal = nt_basisu_gl_internal_format(target);
     uint32_t bpb = nt_basisu_bytes_per_block(target);
+
+    /* Query level 0 size to preallocate transcode buffer (reused for all mips) */
+    uint32_t lw0 = 0;
+    uint32_t lh0 = 0;
+    uint32_t blocks0 = 0;
+    if (!nt_basisu_get_level_desc(basis_data, basis_size, 0, &lw0, &lh0, &blocks0)) {
+        return 0;
+    }
+    NT_ASSERT(lw0 == base_width && lh0 == base_height);
+    uint32_t buf_size = is_compressed ? blocks0 * bpb : lw0 * lh0 * 4;
+    uint8_t *transcode_buf = (uint8_t *)malloc(buf_size);
+    if (!transcode_buf) {
+        return 0;
+    }
 
     GLuint tex;
     glGenTextures(1, &tex);
@@ -929,13 +940,21 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (GLint)map_texture_wrap(wrap_u));
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (GLint)map_texture_wrap(wrap_v));
 
+    /* Start transcoding session once for all mip levels */
+    if (!nt_basisu_start_transcoding(basis_data, basis_size)) {
+        free(transcode_buf);
+        glDeleteTextures(1, &tex);
+        return 0;
+    }
+
+    bool ok = true;
     for (uint32_t level = 0; level < level_count; level++) {
         uint32_t lw = 0;
         uint32_t lh = 0;
         uint32_t total_blocks = 0;
         if (!nt_basisu_get_level_desc(basis_data, basis_size, level, &lw, &lh, &total_blocks)) {
-            glDeleteTextures(1, &tex);
-            return 0;
+            ok = false;
+            break;
         }
 
         uint32_t output_size;
@@ -947,27 +966,32 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
             total_blocks = lw * lh; /* for transcode_level: output_blocks = pixel count */
         }
 
-        /* Allocate transcode output buffer (heap -- not hot path, only at load time) */
-        uint8_t *output = (uint8_t *)malloc(output_size);
-        if (!output) {
-            glDeleteTextures(1, &tex);
-            return 0;
-        }
-
-        if (!nt_basisu_transcode_level(basis_data, basis_size, level, output, total_blocks, target)) {
-            free(output);
-            glDeleteTextures(1, &tex);
-            return 0;
+        if (!nt_basisu_transcode_level(basis_data, basis_size, level, transcode_buf, total_blocks, target)) {
+            ok = false;
+            break;
         }
 
         if (is_compressed) {
-            glCompressedTexImage2D(GL_TEXTURE_2D, (GLint)level, (GLenum)gl_internal, (GLsizei)lw, (GLsizei)lh, 0, (GLsizei)output_size, output);
+            glCompressedTexImage2D(GL_TEXTURE_2D, (GLint)level, (GLenum)gl_internal, (GLsizei)lw, (GLsizei)lh, 0, (GLsizei)output_size, transcode_buf);
         } else {
             /* RGBA32 fallback: regular upload */
-            glTexImage2D(GL_TEXTURE_2D, (GLint)level, GL_RGBA8, (GLsizei)lw, (GLsizei)lh, 0, GL_RGBA, GL_UNSIGNED_BYTE, output);
+            glTexImage2D(GL_TEXTURE_2D, (GLint)level, GL_RGBA8, (GLsizei)lw, (GLsizei)lh, 0, GL_RGBA, GL_UNSIGNED_BYTE, transcode_buf);
         }
 
-        free(output);
+        GLenum gl_err = glGetError();
+        if (gl_err != GL_NO_ERROR) {
+            NT_LOG_ERROR("compressed texture upload failed: GL error 0x%04X (level %u, format 0x%04X)", gl_err, level, gl_internal);
+            ok = false;
+            break;
+        }
+    }
+
+    nt_basisu_stop_transcoding();
+    free(transcode_buf);
+
+    if (!ok) {
+        glDeleteTextures(1, &tex);
+        return 0;
     }
 
     /* Find free texture slot (same pattern as existing create_texture) */

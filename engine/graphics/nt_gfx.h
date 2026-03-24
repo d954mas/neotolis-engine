@@ -331,6 +331,7 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 /* ---- Asset activators (called by nt_resource via callback registration) ---- */
 
 uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size);
+int32_t nt_gfx_texture_activate_cost(const uint8_t *data, uint32_t size);
 uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size);
 uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size);
 void nt_gfx_deactivate_texture(uint32_t handle);

@@ -1173,10 +1173,10 @@ void test_activation_budget_limits(void) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_activation_budget_skips_expensive(void) {
+void test_activation_budget_guarantees_minimum_one(void) {
     s_activate_call_count = 0;
     nt_resource_set_activator(NT_ASSET_TEXTURE, fake_activate, fake_deactivate);
-    nt_resource_set_activate_budget(1); /* budget 1, texture cost 4: can't fit */
+    nt_resource_set_activate_budget(1); /* budget 1, texture cost 4: over budget */
 
     nt_hash32_t pid = nt_hash32_str("budget_skip_pack");
     nt_hash64_t rid = nt_hash64_str("budget_skip_res");
@@ -1186,8 +1186,8 @@ void test_activation_budget_skips_expensive(void) {
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_budget_skip.ntpack"));
     nt_resource_step();
 
-    /* Budget 1 < cost 4: texture should NOT be activated */
-    TEST_ASSERT_EQUAL_UINT32(0, s_activate_call_count);
+    /* Budget 1 < cost 4, but guarantee minimum 1 per frame prevents starvation */
+    TEST_ASSERT_EQUAL_UINT32(1, s_activate_call_count);
 
     (void)remove("build/test_budget_skip.ntpack");
 }
@@ -1660,7 +1660,7 @@ int main(void) {
     RUN_TEST(test_activation_called_on_step);
     RUN_TEST(test_activation_sets_runtime_handle);
     RUN_TEST(test_activation_budget_limits);
-    RUN_TEST(test_activation_budget_skips_expensive);
+    RUN_TEST(test_activation_budget_guarantees_minimum_one);
     RUN_TEST(test_no_activator_stays_registered);
 
     /* Retry policy tests */

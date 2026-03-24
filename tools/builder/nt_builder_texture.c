@@ -15,6 +15,36 @@ static bool s_encoder_initialized = false;
 /* No mapping needed — builder and runtime share nt_texture_pixel_format_t.
  * BPP lookup uses nt_texture_bpp() from nt_texture_format.h. */
 
+/* Resize RGBA pixels to fit within max_size, preserving aspect ratio.
+ * Returns resized buffer (caller frees) or NULL if no resize needed.
+ * On resize, *out_w and *out_h are updated. */
+static unsigned char *resize_if_needed(const unsigned char *pixels, int w, int h, uint32_t max_size, int *out_w, int *out_h) {
+    if (max_size == 0 || ((uint32_t)w <= max_size && (uint32_t)h <= max_size)) {
+        *out_w = w;
+        *out_h = h;
+        return NULL;
+    }
+    if ((uint32_t)w >= (uint32_t)h) {
+        *out_w = (int)max_size;
+        *out_h = (int)((uint32_t)h * max_size / (uint32_t)w);
+    } else {
+        *out_h = (int)max_size;
+        *out_w = (int)((uint32_t)w * max_size / (uint32_t)h);
+    }
+    if (*out_w < 1) {
+        *out_w = 1;
+    }
+    if (*out_h < 1) {
+        *out_h = 1;
+    }
+    unsigned char *resized = (unsigned char *)malloc((size_t)*out_w * (size_t)*out_h * 4);
+    if (!resized) {
+        return NULL;
+    }
+    stbir_resize_uint8_linear(pixels, w, h, 0, resized, *out_w, *out_h, 0, STBIR_RGBA);
+    return resized;
+}
+
 /* Strip RGBA8 source pixels to target channel count */
 static uint8_t *strip_channels(const uint8_t *rgba, uint32_t pixel_count, uint32_t target_channels) {
     if (target_channels >= 4) {
@@ -37,31 +67,12 @@ static nt_build_result_t import_texture_pixels(NtBuilderContext *ctx, unsigned c
     nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
     uint32_t max_size = opts ? opts->max_size : 0;
 
-    int out_w = w;
-    int out_h = h;
-    unsigned char *resized = NULL;
-
-    /* Resize if needed */
-    if (max_size > 0 && ((uint32_t)w > max_size || (uint32_t)h > max_size)) {
-        if ((uint32_t)w >= (uint32_t)h) {
-            out_w = (int)max_size;
-            out_h = (int)((uint32_t)h * max_size / (uint32_t)w);
-        } else {
-            out_h = (int)max_size;
-            out_w = (int)((uint32_t)w * max_size / (uint32_t)h);
-        }
-        if (out_w < 1) {
-            out_w = 1;
-        }
-        if (out_h < 1) {
-            out_h = 1;
-        }
-        resized = (unsigned char *)malloc((size_t)out_w * (size_t)out_h * 4);
-        if (!resized) {
-            stbi_image_free(pixels);
-            return NT_BUILD_ERR_IO;
-        }
-        stbir_resize_uint8_linear(pixels, w, h, 0, resized, out_w, out_h, 0, STBIR_RGBA);
+    int out_w = 0;
+    int out_h = 0;
+    unsigned char *resized = resize_if_needed(pixels, w, h, max_size, &out_w, &out_h);
+    if (max_size > 0 && !resized && ((uint32_t)w > max_size || (uint32_t)h > max_size)) {
+        stbi_image_free(pixels);
+        return NT_BUILD_ERR_IO;
     }
 
     const unsigned char *src = resized ? resized : pixels;
@@ -189,31 +200,12 @@ static nt_build_result_t import_texture_compressed(NtBuilderContext *ctx, unsign
     nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
     uint32_t max_size = opts ? opts->max_size : 0;
 
-    int out_w = w;
-    int out_h = h;
-    unsigned char *resized = NULL;
-
-    /* Resize if needed (same logic as import_texture_pixels) */
-    if (max_size > 0 && ((uint32_t)w > max_size || (uint32_t)h > max_size)) {
-        if ((uint32_t)w >= (uint32_t)h) {
-            out_w = (int)max_size;
-            out_h = (int)((uint32_t)h * max_size / (uint32_t)w);
-        } else {
-            out_h = (int)max_size;
-            out_w = (int)((uint32_t)w * max_size / (uint32_t)h);
-        }
-        if (out_w < 1) {
-            out_w = 1;
-        }
-        if (out_h < 1) {
-            out_h = 1;
-        }
-        resized = (unsigned char *)malloc((size_t)out_w * (size_t)out_h * 4);
-        if (!resized) {
-            stbi_image_free(pixels);
-            return NT_BUILD_ERR_IO;
-        }
-        stbir_resize_uint8_linear(pixels, w, h, 0, resized, out_w, out_h, 0, STBIR_RGBA);
+    int out_w = 0;
+    int out_h = 0;
+    unsigned char *resized = resize_if_needed(pixels, w, h, max_size, &out_w, &out_h);
+    if (max_size > 0 && !resized && ((uint32_t)w > max_size || (uint32_t)h > max_size)) {
+        stbi_image_free(pixels);
+        return NT_BUILD_ERR_IO;
     }
 
     const unsigned char *src = resized ? resized : pixels;

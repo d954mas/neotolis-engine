@@ -48,6 +48,7 @@ typedef enum {
 
 typedef uint32_t (*nt_activate_fn)(const uint8_t *data, uint32_t size);
 typedef void (*nt_deactivate_fn)(uint32_t runtime_handle);
+typedef int32_t (*nt_activate_cost_fn)(const uint8_t *data, uint32_t size);
 
 /* ---- Resource handle ---- */
 
@@ -118,6 +119,7 @@ void nt_resource_pack_progress(nt_hash32_t pack_id, uint32_t *received, uint32_t
 /* ---- Activator registration ---- */
 
 void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_deactivate_fn deactivate);
+void nt_resource_set_activate_cost(uint8_t asset_type, nt_activate_cost_fn cost_fn);
 
 /* ---- Activation budget ---- */
 

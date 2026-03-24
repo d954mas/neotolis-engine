@@ -43,6 +43,7 @@ typedef enum {
 typedef struct {
     nt_activate_fn activate;
     nt_deactivate_fn deactivate;
+    nt_activate_cost_fn cost_fn;
 } NtActivatorEntry;
 
 /* ---- Per-asset metadata (one per asset from all packs) ---- */

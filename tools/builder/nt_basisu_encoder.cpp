@@ -80,21 +80,24 @@ nt_basisu_encode_result_t nt_basisu_encode(const uint8_t *rgba_pixels, uint32_t 
     memcpy(result.data, output.data(), output.size());
     result.size = static_cast<uint32_t>(output.size());
 
-    // Get mip count from the basis file info
-    basist::basisu_transcoder_init();
-    basist::basisu_transcoder transcoder;
-    if (transcoder.validate_header(result.data, result.size)) {
-        basist::basisu_image_info image_info;
-        if (transcoder.get_image_info(result.data, result.size, image_info, 0)) {
-            result.mip_count = image_info.m_total_levels;
-        } else {
-            result.mip_count = 1;
+    // Compute mip count from dimensions (gen_mipmaps=true → full chain down to 1x1)
+    if (gen_mipmaps) {
+        uint32_t max_dim = width > height ? width : height;
+        result.mip_count = 1;
+        while (max_dim > 1) {
+            max_dim >>= 1;
+            result.mip_count++;
         }
     } else {
         result.mip_count = 1;
     }
 
     return result;
+}
+
+void nt_basisu_encoder_shutdown(void) {
+    delete s_job_pool;
+    s_job_pool = nullptr;
 }
 
 void nt_basisu_encode_free(nt_basisu_encode_result_t *result) {

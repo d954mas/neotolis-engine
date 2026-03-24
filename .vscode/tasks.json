@@ -49,6 +49,13 @@
             "problemMatcher": "$gcc"
         },
         {
+            "label": "Build pack builders (release)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-release --target build_tq_packs build_sponza_packs build_assets",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
             "label": "Build native-debug (build_tq_packs)",
             "type": "shell",
             "command": "cmake --build build/_cmake/native-debug --target build_tq_packs",

@@ -139,7 +139,7 @@ static void resource_handle_load_failure(NtPackMeta *pack) {
 
 /* ---- Activation cost helper ---- */
 
-static int32_t resource_get_activate_cost(uint8_t asset_type) {
+static int32_t resource_get_activate_cost_default(uint8_t asset_type) {
     switch (asset_type) {
     case NT_ASSET_MESH:
         return NT_ACTIVATE_COST_MESH;
@@ -150,6 +150,13 @@ static int32_t resource_get_activate_cost(uint8_t asset_type) {
     default:
         return 1;
     }
+}
+
+static int32_t resource_get_activate_cost(uint8_t asset_type, const uint8_t *data, uint32_t size) {
+    if (asset_type < NT_RESOURCE_MAX_ASSET_TYPES && s_resource.activators[asset_type].cost_fn) {
+        return s_resource.activators[asset_type].cost_fn(data, size);
+    }
+    return resource_get_activate_cost_default(asset_type);
 }
 
 /* ---- Lifecycle ---- */
@@ -328,8 +335,12 @@ void nt_resource_step(void) {
                     continue;
                 }
 
-                int32_t cost = resource_get_activate_cost(atype);
-                if (cost > budget) {
+                const uint8_t *asset_data = pack->blob + meta->offset;
+                int32_t cost = resource_get_activate_cost(atype, asset_data, meta->size);
+                /* Guarantee at least 1 activation per frame — prevents starvation
+                 * when all remaining assets exceed budget */
+                bool first_in_frame = (budget == s_resource.activate_budget);
+                if (cost > budget && !first_in_frame) {
                     continue;
                 }
 
@@ -345,8 +356,7 @@ void nt_resource_step(void) {
                     }
                 }
                 if (handle == 0) {
-                    const uint8_t *data = pack->blob + meta->offset;
-                    handle = s_resource.activators[atype].activate(data, meta->size);
+                    handle = s_resource.activators[atype].activate(asset_data, meta->size);
                 }
                 if (handle != 0) {
                     meta->state = NT_ASSET_STATE_READY;
@@ -988,6 +998,11 @@ void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_d
     NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
     s_resource.activators[asset_type].activate = activate;
     s_resource.activators[asset_type].deactivate = deactivate;
+}
+
+void nt_resource_set_activate_cost(uint8_t asset_type, nt_activate_cost_fn cost_fn) {
+    NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
+    s_resource.activators[asset_type].cost_fn = cost_fn;
 }
 
 /* ---- Activation budget ---- */

@@ -26,6 +26,7 @@ target_compile_definitions(nt_basisu_encoder PRIVATE
 )
 # Suppress warnings in vendored C++ code
 target_compile_options(nt_basisu_encoder PRIVATE -w)
+# No sanitizers for encoder — vendored code has upstream UB (NaN→uchar in basisu_bc7enc.cpp:1660)
 # Static CRT: remove _DLL so CRT calls resolve to static symbols.
 # Use MSVC_RUNTIME_LIBRARY to match ASAN runtime (static release CRT) --
 # C++ MSVC headers embed /failifmismatch directives that must agree with clang_rt.asan_cxx.
@@ -33,8 +34,6 @@ set_target_properties(nt_basisu_encoder PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:>"
 )
 target_compile_options(nt_basisu_encoder PRIVATE -U_DLL)
-# Match sanitizer flags with the rest of the builder targets
-nt_set_sanitizer_flags(nt_basisu_encoder)
 set_target_properties(nt_basisu_encoder PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
@@ -55,7 +54,7 @@ add_library(nt_builder STATIC
     nt_builder_tangent.c
 )
 target_include_directories(nt_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(nt_builder PUBLIC nt_shared nt_core nt_log cgltf stb_image stb_image_resize2 nt_hash mikktspace nt_basisu_encoder)
+target_link_libraries(nt_builder PUBLIC nt_shared nt_core nt_log nt_time cgltf stb_image stb_image_resize2 nt_hash mikktspace nt_basisu_encoder)
 # Builder uses standard C I/O (fopen, strdup, strncpy) -- suppress MSVC deprecation
 target_compile_definitions(nt_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE NT_LOG_DOMAIN_DEFAULT="builder")
 # Static CRT: remove _DLL so CRT calls resolve to static symbols
