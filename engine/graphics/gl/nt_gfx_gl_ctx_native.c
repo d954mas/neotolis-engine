@@ -25,7 +25,19 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     nt_gfx_gpu_caps_t caps = {0};
     caps.has_bc7 = GLAD_GL_ARB_texture_compression_bptc != 0;
     caps.has_astc = GLAD_GL_KHR_texture_compression_astc_ldr != 0;
-    /* ETC2 is core in GL 4.3+; for GL 3.3, check GL_ARB_ES3_compatibility */
     caps.has_etc2 = GLAD_GL_ARB_ES3_compatibility != 0;
+
+    /* BC7 is core in GL 4.2+, ETC2 in GL 4.3+ — available without extensions */
+    GLint major = 0;
+    GLint minor = 0;
+    glGetIntegerv(GL_MAJOR_VERSION, &major);
+    glGetIntegerv(GL_MINOR_VERSION, &minor);
+    int gl_ver = (major * 10) + minor;
+    if (gl_ver >= 42) {
+        caps.has_bc7 = true;
+    }
+    if (gl_ver >= 43) {
+        caps.has_etc2 = true;
+    }
     return caps;
 }

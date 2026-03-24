@@ -183,9 +183,17 @@ nt_build_result_t nt_builder_import_texture_raw(NtBuilderContext *ctx, const uin
     if (!ctx || !rgba_pixels || width == 0 || height == 0) {
         return NT_BUILD_ERR_VALIDATION;
     }
+    if (width > NT_BUILD_MAX_TEXTURE_SIZE || height > NT_BUILD_MAX_TEXTURE_SIZE) {
+        NT_LOG_ERROR("texture raw: %ux%u exceeds max %u", width, height, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
+        return NT_BUILD_ERR_LIMIT;
+    }
 
     /* Create a malloc'd copy -- import_texture_pixels frees via stbi_image_free (= free) */
-    uint32_t data_size = width * height * 4;
+    uint64_t data_size64 = (uint64_t)width * (uint64_t)height * 4;
+    if (data_size64 > UINT32_MAX) {
+        return NT_BUILD_ERR_LIMIT;
+    }
+    uint32_t data_size = (uint32_t)data_size64;
     unsigned char *pixels = (unsigned char *)malloc(data_size);
     if (!pixels) {
         return NT_BUILD_ERR_IO;

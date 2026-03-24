@@ -15,9 +15,11 @@ void nt_basisu_encoder_init(void) {
     basisu::basisu_encoder_init();
     if (!s_job_pool) {
         uint32_t threads = std::thread::hardware_concurrency();
-        /* Reserve 1 core for OS/user — standard practice for offline tools */
-        if (threads > 1) {
-            threads--;
+        /* hardware_concurrency() may return 0 in containers/CI — clamp to at least 1 */
+        if (threads <= 1) {
+            threads = 1;
+        } else {
+            threads--; /* Reserve 1 core for OS/user */
         }
         s_job_pool = new basisu::job_pool(threads);
     }
@@ -80,14 +82,10 @@ nt_basisu_encode_result_t nt_basisu_encode(const uint8_t *rgba_pixels, uint32_t 
     memcpy(result.data, output.data(), output.size());
     result.size = static_cast<uint32_t>(output.size());
 
-    // Compute mip count from dimensions (gen_mipmaps=true → full chain down to 1x1)
-    if (gen_mipmaps) {
-        uint32_t max_dim = width > height ? width : height;
-        result.mip_count = 1;
-        while (max_dim > 1) {
-            max_dim >>= 1;
-            result.mip_count++;
-        }
+    // Get mip count from encoded .basis file via transcoder (authoritative source)
+    static basist::basisu_transcoder transcoder;
+    if (transcoder.validate_header(result.data, result.size)) {
+        result.mip_count = transcoder.get_total_image_levels(result.data, result.size, 0);
     } else {
         result.mip_count = 1;
     }
