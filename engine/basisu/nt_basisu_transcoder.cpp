@@ -32,18 +32,12 @@ static bool s_transcoding_active = false;
 
 void nt_basisu_transcoder_global_init(void) { basist::basisu_transcoder_init(); }
 
-bool nt_basisu_validate_header(const void *basis_data, uint32_t basis_size) {
-    return s_transcoder.validate_header(basis_data, basis_size);
-}
+bool nt_basisu_validate_header(const void *basis_data, uint32_t basis_size) { return s_transcoder.validate_header(basis_data, basis_size); }
 
-uint32_t nt_basisu_get_level_count(const void *basis_data, uint32_t basis_size) {
-    return s_transcoder.get_total_image_levels(basis_data, basis_size, 0);
-}
+uint32_t nt_basisu_get_level_count(const void *basis_data, uint32_t basis_size) { return s_transcoder.get_total_image_levels(basis_data, basis_size, 0); }
 
-bool nt_basisu_get_level_desc(const void *basis_data, uint32_t basis_size, uint32_t level_index,
-                              uint32_t *out_width, uint32_t *out_height, uint32_t *out_total_blocks) {
-    return s_transcoder.get_image_level_desc(basis_data, basis_size, 0, level_index, *out_width, *out_height,
-                                             *out_total_blocks);
+bool nt_basisu_get_level_desc(const void *basis_data, uint32_t basis_size, uint32_t level_index, uint32_t *out_width, uint32_t *out_height, uint32_t *out_total_blocks) {
+    return s_transcoder.get_image_level_desc(basis_data, basis_size, 0, level_index, *out_width, *out_height, *out_total_blocks);
 }
 
 bool nt_basisu_start_transcoding(const void *basis_data, uint32_t basis_size) {
@@ -61,11 +55,9 @@ void nt_basisu_stop_transcoding(void) {
     s_transcoding_active = false;
 }
 
-bool nt_basisu_transcode_level(const void *basis_data, uint32_t basis_size, uint32_t level_index, void *output,
-                               uint32_t output_blocks, nt_basisu_format_t format) {
+bool nt_basisu_transcode_level(const void *basis_data, uint32_t basis_size, uint32_t level_index, void *output, uint32_t output_blocks, nt_basisu_format_t format) {
     assert(s_transcoding_active);
-    return s_transcoder.transcode_image_level(basis_data, basis_size, 0, level_index, output, output_blocks,
-                                              to_basist_format(format));
+    return s_transcoder.transcode_image_level(basis_data, basis_size, 0, level_index, output, output_blocks, to_basist_format(format));
 }
 
 uint32_t nt_basisu_bytes_per_block(nt_basisu_format_t format) {

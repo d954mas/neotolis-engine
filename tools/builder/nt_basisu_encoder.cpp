@@ -25,8 +25,7 @@ void nt_basisu_encoder_init(void) {
     }
 }
 
-nt_basisu_encode_result_t nt_basisu_encode(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha,
-                                           bool uastc, uint32_t quality, float rdo_quality, bool gen_mipmaps) {
+nt_basisu_encode_result_t nt_basisu_encode(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha, bool uastc, uint32_t quality, float rdo_quality, bool gen_mipmaps) {
     nt_basisu_encode_result_t result = {};
 
     basisu::basis_compressor_params params;
