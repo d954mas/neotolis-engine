@@ -15,16 +15,17 @@
 #   FULLSCREEN_BUTTON (optional flag) When present, enables a fullscreen
 #                     toggle bar below the canvas. OFF by default.
 #   SIMD_WASM_PATH <path> (optional) Alternate wasm path selected when the
-#                     browser validates a minimal SIMD probe.
+#                     browser validates a minimal SIMD probe. When set, the
+#                     shell dynamically loads the matching JS+WASM pair
+#                     (index_simd.js + index_simd.wasm) instead of the
+#                     baseline (index.js + index.wasm).
 #
 # Template variables set for configure_file:
 #   @NT_SHELL_TITLE@            - Page title
 #   @NT_SHELL_FULLSCREEN_BLOCK@ - HTML/CSS/JS for fullscreen bar (or empty)
 #   @NT_SHELL_KEYFRAMES@        - Literal "@keyframes" (CMake @ONLY workaround)
 #   @NT_SHELL_SIMD_LOADER_JS@   - Shared SIMD loader JavaScript source
-#   @NT_SHELL_SIMD_WASM_PATH@   - Alternate SIMD wasm path (or empty string)
-#   @NT_SHELL_LOCATE_FILE_PROPERTY@ - Optional locateFile property for paired builds
-#   @NT_SHELL_SIMD_RUNTIME_STATE@ - Optional paired-build runtime JS state
+#   @NT_SHELL_SCRIPT_BLOCK@     - Script loading: direct {{{ SCRIPT }}} or dynamic loader
 #
 # Example:
 #   nt_configure_shell(hello TITLE "Hello - Neotolis Engine")
@@ -48,27 +49,34 @@ function(nt_configure_shell target)
     # Set template variables for configure_file
     set(NT_SHELL_TITLE "${SHELL_TITLE}")
     if(SHELL_SIMD_WASM_PATH)
-        set(NT_SHELL_SIMD_WASM_PATH "${SHELL_SIMD_WASM_PATH}")
         file(READ "${_NT_SHELL_MODULE_DIR}/../engine/platform/web/simd_loader.js" NT_SHELL_SIMD_LOADER_JS)
-        set(NT_SHELL_SIMD_RUNTIME_STATE "")
-        set(_nt_shell_locate_file_property_template [=[,
-            locateFile: function(path, scriptDirectory) {
-                var resolved = ntResolveWasmLoad(path, '@NT_SHELL_SIMD_WASM_PATH@');
-                if (!Module._ntSimdLogged && typeof path === 'string' && path.endsWith('.wasm')) {
-                    Module._ntSimdLogged = true;
-                    Module.ntWasmVariant = resolved.variant;
-                    if (typeof console !== 'undefined' && typeof console.info === 'function') {
-                        console.info('[Neotolis] Loading WASM variant:', resolved.variant, resolved.path);
-                    }
-                }
-                return (scriptDirectory || '') + resolved.path;
-            }]=])
-        string(CONFIGURE "${_nt_shell_locate_file_property_template}" NT_SHELL_LOCATE_FILE_PROPERTY @ONLY)
+        # SIMD paired build: hide Emscripten's {{{ SCRIPT }}} in a <template> (not
+        # executed by the browser), then dynamically load the correct JS+WASM pair.
+        # Baseline JS can't instantiate SIMD WASM (different import tables), so we
+        # must load index_simd.js for the SIMD variant.
+        set(NT_SHELL_SCRIPT_BLOCK [=[<template id="nt-emscripten">{{{ SCRIPT }}}</template>
+    <script>
+    (function() {
+        var useSimd = typeof ntSupportsWasmSimd === 'function' && ntSupportsWasmSimd();
+        var variant = useSimd ? 'simd' : 'baseline';
+        var scriptSrc = useSimd ? 'index_simd.js' : 'index.js';
+        console.info('[Neotolis] Loading WASM variant:', variant, scriptSrc);
+        if (useSimd) {
+            Module.locateFile = function(path, dir) {
+                if (typeof path === 'string' && path.endsWith('.wasm'))
+                    return (dir || '') + 'index_simd.wasm';
+                return (dir || '') + path;
+            };
+        }
+        var s = document.createElement('script');
+        s.src = scriptSrc;
+        s.async = true;
+        document.body.appendChild(s);
+    })();
+    </script>]=])
     else()
-        set(NT_SHELL_SIMD_WASM_PATH "")
         set(NT_SHELL_SIMD_LOADER_JS "")
-        set(NT_SHELL_SIMD_RUNTIME_STATE "")
-        set(NT_SHELL_LOCATE_FILE_PROPERTY "")
+        set(NT_SHELL_SCRIPT_BLOCK "{{{ SCRIPT }}}")
     endif()
 
     # Handle FULLSCREEN_BUTTON: inject HTML/CSS/JS block or empty string

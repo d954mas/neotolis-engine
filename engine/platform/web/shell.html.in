@@ -65,9 +65,8 @@
 
     <script>
 @NT_SHELL_SIMD_LOADER_JS@
-@NT_SHELL_SIMD_RUNTIME_STATE@
         var Module = {
-            canvas: document.getElementById('canvas')@NT_SHELL_LOCATE_FILE_PROPERTY@
+            canvas: document.getElementById('canvas')
         };
 
         document.getElementById('canvas').addEventListener('webglcontextlost', function(e) {
@@ -81,6 +80,6 @@
             overlay.style.display = 'flex';
         };
     </script>
-    {{{ SCRIPT }}}
+    @NT_SHELL_SCRIPT_BLOCK@
 </body>
 </html>

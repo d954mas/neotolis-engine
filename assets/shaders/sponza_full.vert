@@ -5,20 +5,8 @@ layout(location = 1) in vec3 a_normal;
 layout(location = 2) in vec2 a_uv;
 layout(location = 3) in vec4 a_tangent;
 
-layout(location = 4) in vec4 a_world_row0;
-layout(location = 5) in vec4 a_world_row1;
-layout(location = 6) in vec4 a_world_row2;
-layout(location = 7) in vec4 a_color;
-
-layout(std140) uniform Globals {
-    mat4 view_proj;
-    mat4 view;
-    mat4 proj;
-    vec4 camera_pos;
-    vec4 time;
-    vec4 resolution;
-    vec4 near_far;
-};
+#include "common/instance.glsl"
+#include "common/globals.glsl"
 
 out vec2 v_uv;
 out vec3 v_world_pos;
