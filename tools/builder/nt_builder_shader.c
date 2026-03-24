@@ -121,15 +121,24 @@ nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *pa
         return NT_BUILD_ERR_VALIDATION;
     }
 
-    char *stripped = (char *)malloc((size_t)file_size + 1);
+    /* Resolve #include directives (D-11, D-12, D-13) */
+    uint32_t resolved_len = 0;
+    char *resolved = nt_builder_resolve_includes(raw_source, file_size, path, ctx, &resolved_len);
+    free(raw_source);
+    if (!resolved) {
+        NT_LOG_ERROR("%s: include resolution failed", path);
+        return NT_BUILD_ERR_VALIDATION;
+    }
+
+    char *stripped = (char *)malloc((size_t)resolved_len + 1);
     if (!stripped) {
-        free(raw_source);
+        free(resolved);
         return NT_BUILD_ERR_IO;
     }
 
     uint32_t stripped_len = 0;
-    strip_comments(raw_source, file_size, stripped, &stripped_len);
-    free(raw_source);
+    strip_comments(resolved, resolved_len, stripped, &stripped_len);
+    free(resolved);
 
     collapse_whitespace(stripped, &stripped_len);
 

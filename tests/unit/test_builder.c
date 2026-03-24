@@ -1179,6 +1179,190 @@ void test_glb_scene_parse(void) {
     TEST_ASSERT_EQUAL_UINT32(0, scene.mesh_count);
 }
 
+/* --- Helper: read shader source from a single-shader pack --- */
+
+static char *read_shader_source_from_pack(const char *pack_path, uint32_t *out_code_size) {
+    FILE *f = fopen(pack_path, "rb");
+    if (!f) {
+        return NULL;
+    }
+
+    NtPackHeader hdr;
+    if (fread(&hdr, sizeof(hdr), 1, f) != 1) {
+        (void)fclose(f);
+        return NULL;
+    }
+    NtAssetEntry entry;
+    if (fread(&entry, sizeof(entry), 1, f) != 1) {
+        (void)fclose(f);
+        return NULL;
+    }
+    (void)fseek(f, (long)entry.offset, SEEK_SET);
+    NtShaderCodeHeader shdr;
+    if (fread(&shdr, sizeof(shdr), 1, f) != 1) {
+        (void)fclose(f);
+        return NULL;
+    }
+
+    char *source = (char *)malloc(shdr.code_size);
+    if (!source) {
+        (void)fclose(f);
+        return NULL;
+    }
+    if (fread(source, 1, shdr.code_size, f) != shdr.code_size) {
+        free(source);
+        (void)fclose(f);
+        return NULL;
+    }
+    (void)fclose(f);
+    if (out_code_size) {
+        *out_code_size = shdr.code_size;
+    }
+    return source;
+}
+
+/* --- Include resolver tests --- */
+
+void test_include_basic(void) {
+    MKDIR(TMP_DIR "/inc");
+    write_test_shader(TMP_DIR "/inc/common.glsl", "vec3 apply_transform(vec3 p, mat4 m) { return (m * vec4(p, 1.0)).xyz; }\n");
+    write_test_shader(TMP_DIR "/inc_main.vert", "precision mediump float;\n"
+                                                "#include \"inc/common.glsl\"\n"
+                                                "layout(location = 0) in vec3 a_position;\n"
+                                                "uniform mat4 u_mvp;\n"
+                                                "void main() {\n"
+                                                "    gl_Position = u_mvp * vec4(apply_transform(a_position, u_mvp), 1.0);\n"
+                                                "}\n");
+
+    const char *pack_path = TMP_DIR "/inc_basic.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_shader(ctx, TMP_DIR "/inc_main.vert", NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Verify included content is present and #include is resolved */
+    char *source = read_shader_source_from_pack(pack_path, NULL);
+    TEST_ASSERT_NOT_NULL(source);
+    TEST_ASSERT_NOT_NULL(strstr(source, "apply_transform"));
+    TEST_ASSERT_NULL(strstr(source, "#include"));
+    free(source);
+}
+
+void test_include_pragma_once(void) {
+    MKDIR(TMP_DIR "/once");
+    write_test_shader(TMP_DIR "/once/shared.glsl", "#pragma once\n"
+                                                   "const float PI = 3.14159;\n");
+    write_test_shader(TMP_DIR "/once/a.glsl", "#include \"shared.glsl\"\n");
+    write_test_shader(TMP_DIR "/once_main.vert", "precision mediump float;\n"
+                                                 "#include \"once/shared.glsl\"\n"
+                                                 "#include \"once/a.glsl\"\n"
+                                                 "layout(location = 0) in vec3 a_position;\n"
+                                                 "uniform mat4 u_mvp;\n"
+                                                 "void main() {\n"
+                                                 "    gl_Position = u_mvp * vec4(a_position * PI, 1.0);\n"
+                                                 "}\n");
+
+    const char *pack_path = TMP_DIR "/inc_once.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_shader(ctx, TMP_DIR "/once_main.vert", NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Verify PI appears exactly once */
+    char *source = read_shader_source_from_pack(pack_path, NULL);
+    TEST_ASSERT_NOT_NULL(source);
+
+    int count = 0;
+    const char *p = source;
+    while ((p = strstr(p, "const float PI")) != NULL) {
+        count++;
+        p += 14;
+    }
+    TEST_ASSERT_EQUAL(1, count);
+    free(source);
+}
+
+void test_include_missing_file_errors(void) {
+    write_test_shader(TMP_DIR "/missing_inc.vert", "precision mediump float;\n"
+                                                   "#include \"nonexistent.glsl\"\n"
+                                                   "layout(location = 0) in vec3 a_position;\n"
+                                                   "uniform mat4 u_mvp;\n"
+                                                   "void main() { gl_Position = u_mvp * vec4(a_position, 1.0); }\n");
+
+    const char *pack_path = TMP_DIR "/inc_missing.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_shader(ctx, TMP_DIR "/missing_inc.vert", NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+}
+
+void test_include_depth_limit(void) {
+    MKDIR(TMP_DIR "/depth");
+    /* Self-include without #pragma once -- triggers infinite recursion / depth limit */
+    write_test_shader(TMP_DIR "/depth/loop.glsl", "#include \"loop.glsl\"\n");
+    write_test_shader(TMP_DIR "/depth_main.vert", "precision mediump float;\n"
+                                                  "#include \"depth/loop.glsl\"\n"
+                                                  "layout(location = 0) in vec3 a_position;\n"
+                                                  "uniform mat4 u_mvp;\n"
+                                                  "void main() { gl_Position = u_mvp * vec4(a_position, 1.0); }\n");
+
+    const char *pack_path = TMP_DIR "/inc_depth.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_shader(ctx, TMP_DIR "/depth_main.vert", NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+}
+
+void test_asset_root_include(void) {
+    MKDIR(TMP_DIR "/root_a");
+    write_test_shader(TMP_DIR "/root_a/helpers.glsl", "float helper_fn(float x) { return x * 2.0; }\n");
+    write_test_shader(TMP_DIR "/root_shader.vert", "precision mediump float;\n"
+                                                   "#include \"helpers.glsl\"\n"
+                                                   "layout(location = 0) in vec3 a_position;\n"
+                                                   "uniform mat4 u_mvp;\n"
+                                                   "void main() { gl_Position = u_mvp * vec4(a_position * helper_fn(1.0), 1.0); }\n");
+
+    const char *pack_path = TMP_DIR "/inc_root.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_asset_root(ctx, TMP_DIR "/root_a");
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_add_shader(ctx, TMP_DIR "/root_shader.vert", NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Verify included content from asset root */
+    char *source = read_shader_source_from_pack(pack_path, NULL);
+    TEST_ASSERT_NOT_NULL(source);
+    TEST_ASSERT_NOT_NULL(strstr(source, "helper_fn"));
+    free(source);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -1240,6 +1424,13 @@ int main(void) {
 
     /* Scene parse */
     RUN_TEST(test_glb_scene_parse);
+
+    /* Include resolver */
+    RUN_TEST(test_include_basic);
+    RUN_TEST(test_include_pragma_once);
+    RUN_TEST(test_include_missing_file_errors);
+    RUN_TEST(test_include_depth_limit);
+    RUN_TEST(test_asset_root_include);
 
     return UNITY_END();
 }
