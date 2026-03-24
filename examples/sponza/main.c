@@ -417,6 +417,9 @@ static void frame(void) {
     /* geo READY -> hide loading screen, start tex download */
     if (!s_tex_loading && nt_resource_pack_state(s_geo_pack_id) == NT_PACK_STATE_READY) {
         s_tex_loading = true;
+        /* Loading screen gone — player sees the scene. Restore default time budget
+         * to avoid frame spikes while textures stream in during gameplay. */
+        nt_resource_set_activate_time_budget(NT_RESOURCE_ACTIVATE_TIME_BUDGET_MS);
 #ifdef NT_PLATFORM_WEB
         nt_platform_web_loading_complete();
 #endif
@@ -654,7 +657,6 @@ int main(void) {
 
     /* 6. Register GFX activators */
     nt_resource_set_activator(NT_ASSET_TEXTURE, nt_gfx_activate_texture, nt_gfx_deactivate_texture);
-    nt_resource_set_activate_cost(NT_ASSET_TEXTURE, nt_gfx_texture_activate_cost);
     nt_resource_set_activator(NT_ASSET_MESH, nt_gfx_activate_mesh, nt_gfx_deactivate_mesh);
     nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
 
@@ -721,8 +723,8 @@ int main(void) {
     s_full_pack_id = nt_hash32_str("sponza_full");
     nt_resource_mount(s_full_pack_id, 10); /* starts low, promoted to 50 when loaded */
 
-    /* 16. Sponza needs ~400 activation units total — set budget high enough */
-    nt_resource_set_activate_budget(1024);
+    /* 16. Unlimited activation budget during loading screen (0 = no time limit) */
+    nt_resource_set_activate_time_budget(0);
 
     /* 17. Loading screen stays until geo pack is ready (see frame()) */
 

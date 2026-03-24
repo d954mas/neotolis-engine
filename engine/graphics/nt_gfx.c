@@ -836,35 +836,6 @@ static uint32_t activate_texture_v2(const uint8_t *data, uint32_t size) {
     return id;
 }
 
-/* Texture activation cost: log2 scaling by dimension.
- * 64→1, 128→1, 256→2, 512→4, 1024→8, 2048→16.
- * Compressed textures +50% for transcode overhead. */
-int32_t nt_gfx_texture_activate_cost(const uint8_t *data, uint32_t size) {
-    if (size < sizeof(NtTextureAssetHeader)) {
-        return 1;
-    }
-    const NtTextureAssetHeader *hdr = (const NtTextureAssetHeader *)data;
-    uint32_t max_dim = hdr->width > hdr->height ? hdr->width : hdr->height;
-
-    /* 1 << max(0, log2(max_dim) - 6): each doubling above 64 doubles cost */
-    int32_t cost = 1;
-    uint32_t dim = max_dim >> 7; /* divide by 128: 64→0, 128→1, 256→2, 512→4 */
-    while (dim > 0) {
-        cost <<= 1;
-        dim >>= 1;
-    }
-
-    /* Compressed texture: +50% for transcode */
-    if (hdr->version == NT_TEXTURE_VERSION_V2 && size >= sizeof(NtTextureAssetHeaderV2)) {
-        const NtTextureAssetHeaderV2 *v2 = (const NtTextureAssetHeaderV2 *)data;
-        if (v2->compression == NT_TEXTURE_COMPRESSION_BASIS) {
-            cost += cost / 2;
-        }
-    }
-
-    return cost;
-}
-
 uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     if (!data || size < sizeof(NtTextureAssetHeader)) {
         NT_LOG_ERROR("activate_texture: blob too small");

@@ -34,7 +34,7 @@ static struct {
     uint16_t next_mount_seq;      /* monotonic counter for mount order tiebreak */
     uint32_t asset_hwm;           /* high-water mark in assets[] */
     uint64_t placeholder_texture; /* resource_id for fallback texture, 0 = none */
-    int32_t activate_budget;      /* per-frame budget, default NT_RESOURCE_ACTIVATE_BUDGET */
+    float activate_time_budget_ms; /* per-step time limit, 0 = unlimited */
     /* Retry policy (global) */
     uint32_t retry_max_attempts; /* 0 = infinite */
     uint32_t retry_base_delay_ms;
@@ -137,27 +137,7 @@ static void resource_handle_load_failure(NtPackMeta *pack) {
     NT_LOG_INFO("pack 0x%08X attempt %d, retry in %ums", pack->pack_id, pack->attempt_count, pack->retry_delay_ms);
 }
 
-/* ---- Activation cost helper ---- */
-
-static int32_t resource_get_activate_cost_default(uint8_t asset_type) {
-    switch (asset_type) {
-    case NT_ASSET_MESH:
-        return NT_ACTIVATE_COST_MESH;
-    case NT_ASSET_SHADER_CODE:
-        return NT_ACTIVATE_COST_SHADER;
-    case NT_ASSET_TEXTURE:
-        return NT_ACTIVATE_COST_TEXTURE;
-    default:
-        return 1;
-    }
-}
-
-static int32_t resource_get_activate_cost(uint8_t asset_type, const uint8_t *data, uint32_t size) {
-    if (asset_type < NT_RESOURCE_MAX_ASSET_TYPES && s_resource.activators[asset_type].cost_fn) {
-        return s_resource.activators[asset_type].cost_fn(data, size);
-    }
-    return resource_get_activate_cost_default(asset_type);
-}
+/* ---- Activation time helpers ---- */
 
 /* ---- Lifecycle ---- */
 
@@ -176,7 +156,7 @@ nt_result_t nt_resource_init(const nt_resource_desc_t *desc) {
         s_resource.free_queue[i] = (uint16_t)(NT_RESOURCE_MAX_SLOTS - i); /* top has lowest */
     }
 
-    s_resource.activate_budget = NT_RESOURCE_ACTIVATE_BUDGET;
+    s_resource.activate_time_budget_ms = NT_RESOURCE_ACTIVATE_TIME_BUDGET_MS;
     s_resource.retry_max_attempts = 0; /* infinite by default */
     s_resource.retry_base_delay_ms = 500;
     s_resource.retry_max_delay_ms = 10000;
@@ -302,11 +282,15 @@ void nt_resource_step(void) {
     }
 
     /* ===================================================
-     *  Phase B: Activate assets within budget
+     *  Phase B: Activate assets within time budget
      * =================================================== */
     {
-        int32_t budget = s_resource.activate_budget;
-        for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS && budget > 0; pi++) {
+        double t_start = nt_time_now();
+        float budget_ms = s_resource.activate_time_budget_ms;
+        bool activated_any = false;
+        uint32_t activated_count = 0;
+
+        for (uint16_t pi = 0; pi < NT_RESOURCE_MAX_PACKS; pi++) {
             NtPackMeta *pack = &s_resource.packs[pi];
             if (!pack->mounted || pack->pack_state != NT_PACK_STATE_READY) {
                 continue;
@@ -315,7 +299,7 @@ void nt_resource_step(void) {
                 continue; /* blob evicted */
             }
 
-            for (uint32_t ai = 0; ai < s_resource.asset_hwm && budget > 0; ai++) {
+            for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
                 NtAssetMeta *meta = &s_resource.assets[ai];
                 if (meta->resource_id == 0) {
                     continue;
@@ -335,16 +319,17 @@ void nt_resource_step(void) {
                     continue;
                 }
 
-                const uint8_t *asset_data = pack->blob + meta->offset;
-                int32_t cost = resource_get_activate_cost(atype, asset_data, meta->size);
-                /* Guarantee at least 1 activation per frame — prevents starvation
-                 * when all remaining assets exceed budget */
-                bool first_in_frame = (budget == s_resource.activate_budget);
-                if (cost > budget && !first_in_frame) {
-                    continue;
+                /* Check time budget (0 = unlimited).
+                 * Guarantee at least 1 activation per step — prevents starvation. */
+                if (activated_any && budget_ms > 0.0F) {
+                    double elapsed_ms = (nt_time_now() - t_start) * 1000.0;
+                    if (elapsed_ms >= (double)budget_ms) {
+                        goto budget_exhausted;
+                    }
                 }
 
                 /* Deduplicate: if marked as dedup, find the original (same pack+offset+size, already READY) */
+                const uint8_t *asset_data = pack->blob + meta->offset;
                 uint32_t handle = 0;
                 if (meta->is_dedup) {
                     for (uint32_t di = 0; di < s_resource.asset_hwm; di++) {
@@ -366,8 +351,14 @@ void nt_resource_step(void) {
                     meta->state = NT_ASSET_STATE_FAILED;
                 }
                 pack->blob_last_access_ms = resource_get_time_ms();
-                budget -= cost;
+                activated_any = true;
+                activated_count++;
             }
+        }
+    budget_exhausted:
+        if (activated_count > 0) {
+            double elapsed_ms = (nt_time_now() - t_start) * 1000.0;
+            NT_LOG_INFO("activated %u assets (%.1fms / %.1fms budget)", activated_count, elapsed_ms, (double)budget_ms);
         }
     }
 
@@ -1000,14 +991,9 @@ void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_d
     s_resource.activators[asset_type].deactivate = deactivate;
 }
 
-void nt_resource_set_activate_cost(uint8_t asset_type, nt_activate_cost_fn cost_fn) {
-    NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
-    s_resource.activators[asset_type].cost_fn = cost_fn;
-}
+/* ---- Activation time budget ---- */
 
-/* ---- Activation budget ---- */
-
-void nt_resource_set_activate_budget(int32_t budget) { s_resource.activate_budget = budget; }
+void nt_resource_set_activate_time_budget(float max_ms) { s_resource.activate_time_budget_ms = max_ms; }
 
 /* ---- Retry policy ---- */
 

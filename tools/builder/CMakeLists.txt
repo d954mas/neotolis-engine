@@ -20,12 +20,15 @@ target_include_directories(nt_basisu_encoder PRIVATE
 target_compile_definitions(nt_basisu_encoder PRIVATE
     BASISD_SUPPORT_KTX2=1
     BASISD_SUPPORT_KTX2_ZSTD=0
+    BASISU_SUPPORT_SSE=1
     _CRT_SECURE_NO_WARNINGS
     # Match ASAN runtime's iterator debug level (0) to avoid /failifmismatch link error
     $<$<CONFIG:Debug>:_ITERATOR_DEBUG_LEVEL=0>
 )
 # Suppress warnings in vendored C++ code
 target_compile_options(nt_basisu_encoder PRIVATE -w)
+# SSE4.1 for SIMD-accelerated encoding (native builder only, not WASM)
+target_compile_options(nt_basisu_encoder PRIVATE -msse4.1)
 # No sanitizers for encoder — vendored code has upstream UB (NaN→uchar in basisu_bc7enc.cpp:1660)
 # Static CRT: remove _DLL so CRT calls resolve to static symbols.
 # Use MSVC_RUNTIME_LIBRARY to match ASAN runtime (static release CRT) --

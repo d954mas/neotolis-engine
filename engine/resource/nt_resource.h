@@ -18,19 +18,10 @@
 #define NT_RESOURCE_MAX_SLOTS 2048
 #endif
 
-/* ---- Activation budget (overridable) ---- */
+/* ---- Activation time budget (ms per nt_resource_step call) ---- */
 
-#ifndef NT_ACTIVATE_COST_MESH
-#define NT_ACTIVATE_COST_MESH 1
-#endif
-#ifndef NT_ACTIVATE_COST_SHADER
-#define NT_ACTIVATE_COST_SHADER 2
-#endif
-#ifndef NT_ACTIVATE_COST_TEXTURE
-#define NT_ACTIVATE_COST_TEXTURE 4
-#endif
-#ifndef NT_RESOURCE_ACTIVATE_BUDGET
-#define NT_RESOURCE_ACTIVATE_BUDGET 16
+#ifndef NT_RESOURCE_ACTIVATE_TIME_BUDGET_MS
+#define NT_RESOURCE_ACTIVATE_TIME_BUDGET_MS 8.0f
 #endif
 
 /* ---- Pack state (game-visible for polling) ---- */
@@ -48,7 +39,6 @@ typedef enum {
 
 typedef uint32_t (*nt_activate_fn)(const uint8_t *data, uint32_t size);
 typedef void (*nt_deactivate_fn)(uint32_t runtime_handle);
-typedef int32_t (*nt_activate_cost_fn)(const uint8_t *data, uint32_t size);
 
 /* ---- Resource handle ---- */
 
@@ -119,11 +109,13 @@ void nt_resource_pack_progress(nt_hash32_t pack_id, uint32_t *received, uint32_t
 /* ---- Activator registration ---- */
 
 void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_deactivate_fn deactivate);
-void nt_resource_set_activate_cost(uint8_t asset_type, nt_activate_cost_fn cost_fn);
 
-/* ---- Activation budget ---- */
+/* ---- Activation time budget ---- */
 
-void nt_resource_set_activate_budget(int32_t budget);
+/* Set max milliseconds spent activating assets per nt_resource_step() call.
+ * 0 = unlimited (activate all pending assets immediately).
+ * Default: NT_RESOURCE_ACTIVATE_TIME_BUDGET_MS (2ms). */
+void nt_resource_set_activate_time_budget(float max_ms);
 
 /* ---- Retry policy ---- */
 

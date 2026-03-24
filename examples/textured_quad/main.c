@@ -374,7 +374,6 @@ int main(void) {
 
     /* Register GFX activators */
     nt_resource_set_activator(NT_ASSET_TEXTURE, nt_gfx_activate_texture, nt_gfx_deactivate_texture);
-    nt_resource_set_activate_cost(NT_ASSET_TEXTURE, nt_gfx_texture_activate_cost);
     nt_resource_set_activator(NT_ASSET_MESH, nt_gfx_activate_mesh, nt_gfx_deactivate_mesh);
     nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
 
@@ -486,8 +485,8 @@ int main(void) {
     nt_resource_load_auto(s_base_pack_id, "assets/base.ntpack");
 #endif
 
-    /* Bump activation budget so base pack activates in first frame */
-    nt_resource_set_activate_budget(64);
+    /* Unlimited activation during init — small scene, activates in first frame */
+    nt_resource_set_activate_time_budget(0);
 
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
