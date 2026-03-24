@@ -767,10 +767,10 @@ static uint32_t activate_texture_v2(const uint8_t *data, uint32_t size) {
             NT_LOG_ERROR("activate_texture: unsupported format %u", hdr2->format);
             return 0;
         }
-        /* Validate data_size matches expected pixel payload */
-        uint32_t expected = hdr2->width * hdr2->height * bpp;
-        if (hdr2->data_size < expected) {
-            NT_LOG_ERROR("activate_texture: RAW data_size %u < expected %u", hdr2->data_size, expected);
+        /* Validate data_size matches expected pixel payload (use uint64 to avoid overflow) */
+        uint64_t expected = (uint64_t)hdr2->width * (uint64_t)hdr2->height * bpp;
+        if (expected > UINT32_MAX || hdr2->data_size < (uint32_t)expected) {
+            NT_LOG_ERROR("activate_texture: RAW data_size %u < expected %u", hdr2->data_size, (uint32_t)expected);
             return 0;
         }
         const uint8_t *pixels = data + sizeof(NtTextureAssetHeaderV2);
