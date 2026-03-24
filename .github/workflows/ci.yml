@@ -247,32 +247,7 @@ jobs:
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev wayland-protocols libxkbcommon-dev libgl-dev xvfb
 
-      - name: Configure native debug
-        run: cmake --preset native-debug
-
-      - name: Build native debug (all targets)
-        run: cmake --build --preset native-debug
-
-      - name: Verify native debug output
-        run: |
-          test -f build/tools/builder/native-debug/builder
-          test -f build/engine/native-debug/libnt_core.a
-          test -f build/engine/native-debug/libnt_log.a
-          test -f build/engine/native-debug/libnt_log_stub.a
-          echo "Native debug build verified"
-
-      - name: Smoke test builder (debug)
-        run: ./build/tools/builder/native-debug/builder
-
-      - name: Configure native debug tests (FULL asserts)
-        run: cmake --preset native-debug-test
-
-      - name: Build native debug tests
-        run: cmake --build --preset native-debug-test
-
-      - name: Run tests (debug)
-        run: xvfb-run ctest --preset native-debug-test
-
+      # Release first — builds packs that debug/WASM need
       - name: Configure native release
         run: cmake --preset native-release
 
@@ -306,6 +281,33 @@ jobs:
 
       - name: Run tests (release)
         run: xvfb-run ctest --preset native-release-test
+
+      # Debug after release — packs already on disk from release build
+      - name: Configure native debug
+        run: cmake --preset native-debug
+
+      - name: Build native debug (all targets)
+        run: cmake --build --preset native-debug
+
+      - name: Verify native debug output
+        run: |
+          test -f build/tools/builder/native-debug/builder
+          test -f build/engine/native-debug/libnt_core.a
+          test -f build/engine/native-debug/libnt_log.a
+          test -f build/engine/native-debug/libnt_log_stub.a
+          echo "Native debug build verified"
+
+      - name: Smoke test builder (debug)
+        run: ./build/tools/builder/native-debug/builder
+
+      - name: Configure native debug tests (FULL asserts)
+        run: cmake --preset native-debug-test
+
+      - name: Build native debug tests
+        run: cmake --build --preset native-debug-test
+
+      - name: Run tests (debug)
+        run: xvfb-run ctest --preset native-debug-test
 
       - name: Upload textured_quad packs
         uses: actions/upload-artifact@v4
