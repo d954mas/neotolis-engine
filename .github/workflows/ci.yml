@@ -115,6 +115,7 @@ jobs:
           test -f build/examples/hello/wasm-debug-paired/index.js
           test -f build/examples/hello/wasm-debug-paired/index.wasm
           test -f build/examples/hello/wasm-debug-paired/index_simd.wasm
+          test -f build/examples/hello/wasm-debug-paired/index_simd.js
           test -f build/engine/wasm-debug-paired/libnt_core.a
           test -f build/engine/wasm-debug-paired/libnt_log.a
           test -f build/engine/wasm-debug-paired/libnt_log_stub.a
@@ -156,6 +157,7 @@ jobs:
           test -f build/examples/hello/wasm-release-paired/index.js
           test -f build/examples/hello/wasm-release-paired/index.wasm
           test -f build/examples/hello/wasm-release-paired/index_simd.wasm
+          test -f build/examples/hello/wasm-release-paired/index_simd.js
           test -f build/examples/hello/wasm-release-simd/index.html
           test -f build/examples/hello/wasm-release-simd/index.js
           test -f build/examples/hello/wasm-release-simd/index.wasm
@@ -188,6 +190,7 @@ jobs:
           test -f build/examples/hello/wasm-analysis-paired/index.js
           test -f build/examples/hello/wasm-analysis-paired/index.wasm
           test -f build/examples/hello/wasm-analysis-paired/index_simd.wasm
+          test -f build/examples/hello/wasm-analysis-paired/index_simd.js
           test -f build/examples/hello/wasm-analysis-simd/index.html
           test -f build/examples/hello/wasm-analysis-simd/index.js
           test -f build/examples/hello/wasm-analysis-simd/index.wasm
@@ -214,6 +217,7 @@ jobs:
       - name: Verify packaged example SIMD artifacts
         run: |
           test -f build/examples/hello/wasm-debug-paired/index_simd.wasm
+          test -f build/examples/hello/wasm-debug-paired/index_simd.js
           test -f build/examples/bench_shapes/wasm-debug-paired/index_simd.wasm
           test -f build/examples/spinning_cube/wasm-debug-paired/index_simd.wasm
           test -f build/examples/textured_quad/wasm-debug-paired/index_simd.wasm

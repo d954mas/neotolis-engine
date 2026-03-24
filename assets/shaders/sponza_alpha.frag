@@ -9,16 +9,8 @@ out vec4 frag_color;
 
 uniform sampler2D u_diffuse;
 
-layout(std140) uniform Globals {
-    mat4 view_proj; mat4 view; mat4 proj;
-    vec4 camera_pos; vec4 time; vec4 resolution; vec4 near_far;
-};
-
-layout(std140) uniform Lighting {
-    vec4 light_dir;
-    vec4 light_color;
-    vec4 ambient;
-};
+#include "common/globals.glsl"
+#include "common/lighting.glsl"
 
 /* Alpha cutoff passed as material param (.x = threshold, .yzw unused) */
 uniform vec4 u_alpha_cutoff;

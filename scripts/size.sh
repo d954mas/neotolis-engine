@@ -82,41 +82,70 @@ measure_file() {
     FILE_GZIPS+=("$gz")
 }
 
-# Paired builds produce both index.wasm and index_simd.wasm but a player
-# downloads only one.  Show both files with real sizes; count only the
-# larger one in engine/total sums.
+# Paired builds produce both index.wasm/index_simd.wasm and
+# index.js/index_simd.js but a player downloads only one variant.
+# Show both files with real sizes; count only the larger one in
+# engine/total sums.
 _baseline_wasm=""
 _simd_wasm=""
+_baseline_js=""
+_simd_js=""
 for file in "$OUTPUT_DIR"/*; do
     [ -f "$file" ] || continue
     case "$(basename "$file")" in
         index.wasm)      _baseline_wasm="$file" ;;
         index_simd.wasm) _simd_wasm="$file" ;;
+        index.js)        _baseline_js="$file" ;;
+        index_simd.js)   _simd_js="$file" ;;
         *) measure_file "$file" "" ;;
     esac
 done
 
+# Show-only helper: add file to display list without counting in totals
+show_file() {
+    local file="$1"
+    local fname
+    fname="$(basename "$file")"
+    local raw gz
+    raw=$(wc -c < "$file" | tr -d ' ')
+    gz=$(gzip -c "$file" | wc -c | tr -d ' ')
+    FILE_NAMES+=("$fname")
+    FILE_RAWS+=("$raw")
+    FILE_GZIPS+=("$gz")
+}
+
+# WASM: count larger variant, show both
 if [ -n "$_simd_wasm" ] && [ -n "$_baseline_wasm" ]; then
     _base_sz=$(wc -c < "$_baseline_wasm" | tr -d ' ')
     _simd_sz=$(wc -c < "$_simd_wasm" | tr -d ' ')
     if [ "$_simd_sz" -ge "$_base_sz" ]; then
         measure_file "$_simd_wasm" ""
-        # Show baseline but don't add to totals
-        _base_gz=$(gzip -c "$_baseline_wasm" | wc -c | tr -d ' ')
-        FILE_NAMES+=("index.wasm")
-        FILE_RAWS+=("$_base_sz")
-        FILE_GZIPS+=("$_base_gz")
+        show_file "$_baseline_wasm"
     else
         measure_file "$_baseline_wasm" ""
-        _simd_gz=$(gzip -c "$_simd_wasm" | wc -c | tr -d ' ')
-        FILE_NAMES+=("index_simd.wasm")
-        FILE_RAWS+=("$_simd_sz")
-        FILE_GZIPS+=("$_simd_gz")
+        show_file "$_simd_wasm"
     fi
 elif [ -n "$_baseline_wasm" ]; then
     measure_file "$_baseline_wasm" ""
 elif [ -n "$_simd_wasm" ]; then
     measure_file "$_simd_wasm" ""
+fi
+
+# JS: count larger variant, show both
+if [ -n "$_simd_js" ] && [ -n "$_baseline_js" ]; then
+    _base_sz=$(wc -c < "$_baseline_js" | tr -d ' ')
+    _simd_sz=$(wc -c < "$_simd_js" | tr -d ' ')
+    if [ "$_simd_sz" -ge "$_base_sz" ]; then
+        measure_file "$_simd_js" ""
+        show_file "$_baseline_js"
+    else
+        measure_file "$_baseline_js" ""
+        show_file "$_simd_js"
+    fi
+elif [ -n "$_baseline_js" ]; then
+    measure_file "$_baseline_js" ""
+elif [ -n "$_simd_js" ]; then
+    measure_file "$_simd_js" ""
 fi
 
 # Include asset packs (assets/ subdirectory) if present

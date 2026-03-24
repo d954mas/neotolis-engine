@@ -122,6 +122,10 @@ struct NtBuilderContext {
     /* Deduplication stats */
     uint32_t dedup_count;
     uint32_t dedup_saved_bytes;
+
+    /* Asset root search paths (D-09) */
+    char *asset_roots[NT_BUILD_MAX_ASSET_ROOTS];
+    uint32_t asset_root_count;
 };
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
@@ -224,5 +228,11 @@ static inline void nt_builder_convert_component(float value, nt_stream_type_t ty
 
 /* File I/O utilities */
 char *nt_builder_read_file(const char *path, uint32_t *out_size);
+
+/* Include resolver (D-11, D-12, D-13) */
+char *nt_builder_resolve_includes(const char *source, uint32_t source_len, const char *source_path, const NtBuilderContext *ctx, uint32_t *out_len);
+
+/* File lookup via asset roots */
+char *nt_builder_find_file(const char *filename, const char *relative_to_dir, const NtBuilderContext *ctx);
 
 #endif /* NT_BUILDER_INTERNAL_H */
