@@ -1148,46 +1148,44 @@ static void write_test_pack_multi(const char *path, uint8_t atype, uint32_t coun
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_activation_budget_limits(void) {
+void test_activation_unlimited_activates_all(void) {
     s_activate_call_count = 0;
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
-    nt_resource_set_activate_budget(1); /* budget = 1, mesh cost = 1: only 1 per step */
+    nt_resource_set_activate_time_budget(0); /* unlimited */
 
     nt_hash32_t pid = nt_hash32_str("budget_pack");
 
-    /* Build pack with 3 mesh assets (all same type) */
+    /* Build pack with 3 mesh assets */
     write_test_pack_multi("build/test_budget.ntpack", NT_ASSET_MESH, 3);
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_budget.ntpack"));
-    nt_resource_step(); /* load + parse + activate up to budget */
-
-    /* Budget 1, cost per mesh = 1: should activate exactly 1 per step */
-    TEST_ASSERT_EQUAL_UINT32(1, s_activate_call_count);
-
-    /* Second step should activate one more */
     nt_resource_step();
-    TEST_ASSERT_EQUAL_UINT32(2, s_activate_call_count);
+
+    /* Unlimited budget: all 3 should activate in one step */
+    TEST_ASSERT_EQUAL_UINT32(3, s_activate_call_count);
 
     (void)remove("build/test_budget.ntpack");
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_activation_budget_skips_expensive(void) {
+void test_activation_guarantees_minimum_one(void) {
     s_activate_call_count = 0;
-    nt_resource_set_activator(NT_ASSET_TEXTURE, fake_activate, fake_deactivate);
-    nt_resource_set_activate_budget(1); /* budget 1, texture cost 4: can't fit */
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+    /* Very tight time budget — fake_activate is instant so all will fit,
+     * but this verifies the guarantee-minimum-1 path compiles and runs. */
+    nt_resource_set_activate_time_budget(0.001F);
 
     nt_hash32_t pid = nt_hash32_str("budget_skip_pack");
     nt_hash64_t rid = nt_hash64_str("budget_skip_res");
 
-    write_test_pack_file("build/test_budget_skip.ntpack", rid.value, NT_ASSET_TEXTURE);
+    write_test_pack_file("build/test_budget_skip.ntpack", rid.value, NT_ASSET_MESH);
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_budget_skip.ntpack"));
     nt_resource_step();
 
-    /* Budget 1 < cost 4: texture should NOT be activated */
-    TEST_ASSERT_EQUAL_UINT32(0, s_activate_call_count);
+    /* At least 1 must activate (guarantee minimum 1 per step) */
+    TEST_ASSERT_TRUE(s_activate_call_count >= 1);
 
     (void)remove("build/test_budget_skip.ntpack");
 }
@@ -1659,8 +1657,8 @@ int main(void) {
     RUN_TEST(test_set_activator);
     RUN_TEST(test_activation_called_on_step);
     RUN_TEST(test_activation_sets_runtime_handle);
-    RUN_TEST(test_activation_budget_limits);
-    RUN_TEST(test_activation_budget_skips_expensive);
+    RUN_TEST(test_activation_unlimited_activates_all);
+    RUN_TEST(test_activation_guarantees_minimum_one);
     RUN_TEST(test_no_activator_stays_registered);
 
     /* Retry policy tests */

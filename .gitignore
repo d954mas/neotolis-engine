@@ -45,6 +45,7 @@ diff_*.txt
 # Claude local settings
 .claude/settings.local.json
 .claude/settings.json
+.claude/worktrees/
 
 # GSD tooling (Claude Code workflow engine)
 .claude/get-shit-done/

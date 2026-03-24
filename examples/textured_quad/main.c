@@ -485,8 +485,8 @@ int main(void) {
     nt_resource_load_auto(s_base_pack_id, "assets/base.ntpack");
 #endif
 
-    /* Bump activation budget so base pack activates in first frame */
-    nt_resource_set_activate_budget(64);
+    /* Unlimited activation during init — small scene, activates in first frame */
+    nt_resource_set_activate_time_budget(0);
 
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();

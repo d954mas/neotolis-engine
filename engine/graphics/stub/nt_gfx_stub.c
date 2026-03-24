@@ -48,6 +48,21 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     return 1;
 }
 
+uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uint32_t basis_size, uint32_t base_width, uint32_t base_height, uint32_t level_count, nt_texture_filter_t min_filter,
+                                                  nt_texture_filter_t mag_filter, nt_texture_wrap_t wrap_u, nt_texture_wrap_t wrap_v, uint32_t transcode_target) {
+    (void)basis_data;
+    (void)basis_size;
+    (void)base_width;
+    (void)base_height;
+    (void)level_count;
+    (void)min_filter;
+    (void)mag_filter;
+    (void)wrap_u;
+    (void)wrap_v;
+    (void)transcode_target;
+    return 1;
+}
+
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle) { (void)backend_handle; }
 
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
@@ -135,3 +150,5 @@ void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_in
 }
 
 bool nt_gfx_backend_recreate_all_resources(void) { return true; }
+
+nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) { return (nt_gfx_gpu_caps_t){0}; }

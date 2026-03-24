@@ -3,13 +3,13 @@
 
 **Version:** v0.3-consolidated  
 **Status:** Architectural baseline + implementation-oriented spec  
-**Language target:** C17  
-**Primary runtime target:** Web / WASM + WebGL 2  
-**Secondary future target:** WebGPU  
+**Language target:** C17 (vendored C++ allowed behind extern "C" boundary)
+**Primary runtime target:** Web / WASM + WebGL 2
+**Secondary future target:** WebGPU
 
 This document consolidates all architectural decisions from v0.1 overview, v0.2 technical spec, and subsequent design sessions into a single authoritative reference.
 
-Language baseline is C17 for broader compiler and Emscripten toolchain support.
+Language baseline is C17 for broader compiler and Emscripten toolchain support. Vendored C++ dependencies (e.g. Basis Universal transcoder/encoder) are permitted when no C alternative exists, provided they are isolated behind `extern "C"` wrappers and `enable_language(CXX)` is scoped to their subdirectory CMakeLists — not the root.
 
 ---
 
@@ -1493,7 +1493,7 @@ Pack loaded → AssetMeta registered (REGISTERED)
 
 ## 23.1 Builder model
 
-Builder is a standalone C binary. Rules are written in code.
+Builder is a standalone native binary (C17, with vendored C++ for Basis Universal encoder behind extern "C"). Rules are written in code.
 
 ```c
 start_pack("base");
@@ -1704,7 +1704,7 @@ These decisions are **locked** unless a strong reason appears:
 4. No system registry
 5. Sparse unique component storages
 6. Hierarchy lives in entity system
-7. Builder is standalone C binary
+7. Builder is standalone native binary (C17 + vendored C++ behind extern "C")
 8. Builder rules are code
 9. Runtime formats are custom binary
 10. Custom pack format (NTPACK) — flat binary, no ZIP

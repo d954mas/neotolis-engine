@@ -149,30 +149,30 @@
             "name": "Build Textured Quad Packs",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/examples/textured_quad/native-debug/build_tq_packs.exe",
+            "program": "${workspaceFolder}/build/examples/textured_quad/native-release/build_tq_packs.exe",
             "args": ["build/examples/textured_quad"],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "preLaunchTask": "Build native-debug (build_tq_packs)"
+            "preLaunchTask": "Build pack builders (release)"
         },
         {
             "name": "Build Assets",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/examples/builder_demo/native-debug/build_assets.exe",
+            "program": "${workspaceFolder}/build/examples/builder_demo/native-release/build_assets.exe",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "preLaunchTask": "Build native-debug (build_assets)"
+            "preLaunchTask": "Build pack builders (release)"
         },
         {
             "name": "Build Sponza Packs",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/examples/sponza/native-debug/build_sponza_packs.exe",
+            "program": "${workspaceFolder}/build/examples/sponza/native-release/build_sponza_packs.exe",
             "args": ["build/examples/sponza"],
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "preLaunchTask": "Build native-debug (build_sponza_packs)"
+            "preLaunchTask": "Build pack builders (release)"
         },
         {
             "name": "Debug Desktop sponza",

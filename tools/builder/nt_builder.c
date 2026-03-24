@@ -2,6 +2,7 @@
 #include "nt_builder_internal.h"
 #include "hash/nt_hash.h"
 #include "nt_crc32.h"
+#include "time/nt_time.h"
 /* clang-format on */
 
 /* --- Entry data management --- */
@@ -81,6 +82,14 @@ static void nt_builder_free_tex_raw_data(NtBuildTexRawData *td) {
     free(td);
 }
 
+static void nt_builder_free_tex_mem_compressed_data(NtBuildTexMemCompressedData *td) {
+    if (!td) {
+        return;
+    }
+    free(td->data);
+    free(td);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void nt_builder_free_entry_data(NtBuildEntry *entry) {
     if (!entry->data) {
@@ -101,6 +110,9 @@ static void nt_builder_free_entry_data(NtBuildEntry *entry) {
         break;
     case NT_BUILD_ASSET_TEXTURE_RAW:
         nt_builder_free_tex_raw_data((NtBuildTexRawData *)entry->data);
+        break;
+    case NT_BUILD_ASSET_TEXTURE_MEM_COMPRESSED:
+        nt_builder_free_tex_mem_compressed_data((NtBuildTexMemCompressedData *)entry->data);
         break;
     default:
         free(entry->data);
@@ -317,10 +329,12 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     /* Phase 1: Import all deferred assets */
     NT_LOG_INFO("Importing %u assets...", ctx->pending_count);
+    double t_import_start = nt_time_now();
     uint32_t fail_count = 0;
 
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
+        NT_LOG_INFO("  [%u/%u] %s", i + 1, ctx->pending_count, pe->path);
         nt_build_result_t ret = NT_BUILD_OK;
 
         switch (pe->kind) {
@@ -357,6 +371,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             ret = nt_builder_import_texture_raw(ctx, trd->pixels, trd->width, trd->height, pe->resource_id, &trd->opts);
             break;
         }
+        case NT_BUILD_ASSET_TEXTURE_MEM_COMPRESSED: {
+            NtBuildTexMemCompressedData *tcd = (NtBuildTexMemCompressedData *)pe->data;
+            ret = nt_builder_import_texture_from_memory_compressed(ctx, tcd->data, tcd->size, pe->resource_id, &tcd->opts, &tcd->compress);
+            break;
+        }
         }
 
         if (ret != NT_BUILD_OK) {
@@ -366,8 +385,10 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
     }
 
+    double import_secs = nt_time_now() - t_import_start;
+
     if (ctx->has_error) {
-        NT_LOG_ERROR("Build failed: %u/%u assets failed. No .ntpack written.", fail_count, ctx->pending_count);
+        NT_LOG_ERROR("Build failed: %u/%u assets failed (%.1fs). No .ntpack written.", fail_count, ctx->pending_count, import_secs);
         return NT_BUILD_ERR_VALIDATION;
     }
 
@@ -422,7 +443,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     }
 
     /* Summary */
-    NT_LOG_INFO("Build complete: %s", ctx->output_path);
+    NT_LOG_INFO("Build complete: %s (%.1fs)", ctx->output_path, import_secs);
     NT_LOG_INFO("  Assets: %u total (%u meshes, %u textures, %u shaders, %u blobs)", ctx->entry_count, ctx->mesh_count, ctx->texture_count, ctx->shader_count, ctx->blob_count);
     if (ctx->dedup_count > 0) {
         NT_LOG_INFO("  Deduplicated: %u assets (saved %.3f MB)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / (1024.0 * 1024.0));
@@ -681,6 +702,72 @@ nt_build_result_t nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_
     entry->rename_key = NULL;
     entry->resource_id = rid;
     entry->kind = NT_BUILD_ASSET_TEXTURE_RAW;
+    entry->data = td;
+    return NT_BUILD_OK;
+}
+
+/* --- Public add_texture_from_memory_compressed --- */
+
+nt_build_result_t nt_builder_add_texture_from_memory_compressed(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts,
+                                                                const nt_tex_compress_opts_t *compress_opts) {
+    if (!ctx || !data || size == 0 || !resource_id) {
+        return NT_BUILD_ERR_VALIDATION;
+    }
+
+    /* NULL compress_opts = fall through to uncompressed path */
+    if (!compress_opts) {
+        return nt_builder_add_texture_from_memory_ex(ctx, data, size, resource_id, opts);
+    }
+
+    uint64_t rid = nt_hash64_str(resource_id).value;
+
+    int32_t existing = nt_builder_find_entry(ctx, rid);
+    if (existing >= 0 && !ctx->force) {
+        NT_LOG_ERROR("duplicate resource_id for compressed texture '%s'", resource_id);
+        return NT_BUILD_ERR_DUPLICATE;
+    }
+
+    NtBuildTexMemCompressedData *td = (NtBuildTexMemCompressedData *)calloc(1, sizeof(NtBuildTexMemCompressedData));
+    if (!td) {
+        return NT_BUILD_ERR_IO;
+    }
+    td->data = (uint8_t *)malloc(size);
+    if (!td->data) {
+        free(td);
+        return NT_BUILD_ERR_IO;
+    }
+    memcpy(td->data, data, size);
+    td->size = size;
+    td->compress = *compress_opts;
+    if (opts) {
+        td->opts = *opts;
+    } else {
+        td->opts.format = NT_TEXTURE_FORMAT_RGBA8;
+        td->opts.max_size = 0;
+    }
+
+    if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
+        NT_LOG_ERROR("Asset limit reached (%d max)", NT_BUILD_MAX_ASSETS);
+        free(td->data);
+        free(td);
+        return NT_BUILD_ERR_LIMIT;
+    }
+
+    if (existing >= 0) {
+        nt_builder_free_entry(&ctx->pending[existing]);
+        ctx->pending[existing].path = strdup(resource_id);
+        ctx->pending[existing].rename_key = NULL;
+        ctx->pending[existing].resource_id = rid;
+        ctx->pending[existing].kind = NT_BUILD_ASSET_TEXTURE_MEM_COMPRESSED;
+        ctx->pending[existing].data = td;
+        return NT_BUILD_OK;
+    }
+
+    NtBuildEntry *entry = &ctx->pending[ctx->pending_count++];
+    entry->path = strdup(resource_id);
+    entry->rename_key = NULL;
+    entry->resource_id = rid;
+    entry->kind = NT_BUILD_ASSET_TEXTURE_MEM_COMPRESSED;
     entry->data = td;
     return NT_BUILD_OK;
 }

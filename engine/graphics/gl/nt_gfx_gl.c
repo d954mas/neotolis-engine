@@ -8,6 +8,9 @@
  * Only remaining #ifdef: GL headers and glClearDepthf vs glClearDepth.
  */
 
+#ifdef NT_HAS_BASISU
+#include "basisu/nt_basisu_transcoder.h"
+#endif
 #include "core/nt_assert.h"
 #include "core/nt_platform.h"
 #include "graphics/gl/nt_gfx_gl_ctx.h"
@@ -73,6 +76,14 @@ static GLuint *s_texture_gl;              /* GL texture names, indexed by slot *
 static GLuint s_instance_gl_buf;          /* GL name of last bound instance buffer */
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
+
+/* ---- Transcode buffer (reused across textures, freed after idle) ---- */
+
+#define NT_TRANSCODE_BUF_IDLE_FRAMES 60 /* ~1s at 60fps */
+
+static uint8_t *s_transcode_buf = NULL;
+static uint32_t s_transcode_buf_size = 0;
+static uint32_t s_transcode_buf_idle = 0;
 
 /* ---- GL state cache (skip redundant JS interop calls) ---- */
 
@@ -314,11 +325,14 @@ void nt_gfx_backend_shutdown(void) {
     free(s_buffer_gl);
     free(s_buffer_targets);
     free(s_texture_gl);
+    free(s_transcode_buf);
 
     s_pipelines = NULL;
     s_buffer_gl = NULL;
     s_buffer_targets = NULL;
     s_texture_gl = NULL;
+    s_transcode_buf = NULL;
+    s_transcode_buf_size = 0;
 
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
@@ -336,7 +350,17 @@ void nt_gfx_backend_begin_frame(void) {
      * Desktop swap is handled by the window layer. */
 }
 
-void nt_gfx_backend_end_frame(void) { /* No-op: swap handled externally. */ }
+void nt_gfx_backend_end_frame(void) {
+    /* Free transcode buffer after idle period */
+    if (s_transcode_buf != NULL) {
+        s_transcode_buf_idle++;
+        if (s_transcode_buf_idle > NT_TRANSCODE_BUF_IDLE_FRAMES) {
+            free(s_transcode_buf);
+            s_transcode_buf = NULL;
+            s_transcode_buf_size = 0;
+        }
+    }
+}
 
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) {
     glViewport(0, 0, (GLsizei)g_nt_window.fb_width, (GLsizei)g_nt_window.fb_height);
@@ -906,6 +930,126 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
 
     return slot;
 }
+
+#ifdef NT_HAS_BASISU
+/* Per-mip transcode + compressed upload (Basis Universal) */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uint32_t basis_size, uint32_t base_width, uint32_t base_height, uint32_t level_count, nt_texture_filter_t min_filter,
+                                                  nt_texture_filter_t mag_filter, nt_texture_wrap_t wrap_u, nt_texture_wrap_t wrap_v, uint32_t transcode_target) {
+    nt_basisu_format_t target = (nt_basisu_format_t)transcode_target;
+    bool is_compressed = (target != NT_BASISU_FORMAT_RGBA32);
+    uint32_t gl_internal = nt_basisu_gl_internal_format(target);
+    uint32_t bpb = nt_basisu_bytes_per_block(target);
+
+    /* Query level 0 size to preallocate transcode buffer (reused for all mips) */
+    uint32_t lw0 = 0;
+    uint32_t lh0 = 0;
+    uint32_t blocks0 = 0;
+    if (!nt_basisu_get_level_desc(basis_data, basis_size, 0, &lw0, &lh0, &blocks0)) {
+        return 0;
+    }
+    if (lw0 != base_width || lh0 != base_height) {
+        NT_LOG_ERROR("compressed texture: header/basis dimension mismatch (%ux%u vs %ux%u)", base_width, base_height, lw0, lh0);
+        return 0;
+    }
+    uint32_t buf_size = is_compressed ? blocks0 * bpb : lw0 * lh0 * 4;
+    /* Grow shared transcode buffer if needed (reused across textures) */
+    if (buf_size > s_transcode_buf_size) {
+        free(s_transcode_buf);
+        s_transcode_buf = (uint8_t *)malloc(buf_size);
+        if (!s_transcode_buf) {
+            s_transcode_buf_size = 0;
+            return 0;
+        }
+        s_transcode_buf_size = buf_size;
+    }
+    s_transcode_buf_idle = 0;
+    uint8_t *transcode_buf = s_transcode_buf;
+
+    GLuint tex;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (GLint)map_texture_filter(min_filter));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (GLint)map_texture_filter(mag_filter));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (GLint)map_texture_wrap(wrap_u));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (GLint)map_texture_wrap(wrap_v));
+
+    /* Start transcoding session once for all mip levels */
+    if (!nt_basisu_start_transcoding(basis_data, basis_size)) {
+        glDeleteTextures(1, &tex);
+        return 0;
+    }
+
+    bool ok = true;
+    for (uint32_t level = 0; level < level_count; level++) {
+        uint32_t lw = 0;
+        uint32_t lh = 0;
+        uint32_t total_blocks = 0;
+        if (!nt_basisu_get_level_desc(basis_data, basis_size, level, &lw, &lh, &total_blocks)) {
+            ok = false;
+            break;
+        }
+
+        uint32_t output_size;
+        if (is_compressed) {
+            output_size = total_blocks * bpb;
+        } else {
+            /* RGBA32 fallback: 4 bytes per pixel */
+            output_size = lw * lh * 4;
+            total_blocks = lw * lh; /* for transcode_level: output_blocks = pixel count */
+        }
+
+        if (!nt_basisu_transcode_level(basis_data, basis_size, level, transcode_buf, total_blocks, target)) {
+            ok = false;
+            break;
+        }
+
+        if (is_compressed) {
+            glCompressedTexImage2D(GL_TEXTURE_2D, (GLint)level, (GLenum)gl_internal, (GLsizei)lw, (GLsizei)lh, 0, (GLsizei)output_size, transcode_buf);
+        } else {
+            /* RGBA32 fallback: regular upload */
+            glTexImage2D(GL_TEXTURE_2D, (GLint)level, GL_RGBA8, (GLsizei)lw, (GLsizei)lh, 0, GL_RGBA, GL_UNSIGNED_BYTE, transcode_buf);
+        }
+
+        GLenum gl_err = glGetError();
+        if (gl_err != GL_NO_ERROR) {
+            NT_LOG_ERROR("compressed texture upload failed: GL error 0x%04X (level %u, format 0x%04X)", gl_err, level, gl_internal);
+            ok = false;
+            break;
+        }
+    }
+
+    nt_basisu_stop_transcoding();
+
+    if (!ok) {
+        glDeleteTextures(1, &tex);
+        return 0;
+    }
+
+    /* Find free texture slot (same pattern as existing create_texture) */
+    uint32_t slot = 0;
+    for (uint32_t i = 1; i <= s_init_desc.max_textures; i++) {
+        if (s_texture_gl[i] == 0) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot == 0) {
+        glDeleteTextures(1, &tex);
+        return 0;
+    }
+    s_texture_gl[slot] = tex;
+
+    /* Invalidate cache */
+    uint32_t active_slot_c = s_gl_cache.active_texture - GL_TEXTURE0;
+    if (active_slot_c < NT_GFX_MAX_TEXTURE_SLOTS) {
+        s_gl_cache.bound_textures[active_slot_c] = 0;
+    }
+
+    return slot;
+}
+#endif /* NT_HAS_BASISU */
 
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
     if (backend_handle == 0 || backend_handle > s_init_desc.max_textures) {
