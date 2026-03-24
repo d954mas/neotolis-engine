@@ -167,7 +167,7 @@ static bool add_to_once_set(nt_include_state_t *state, const char *path) {
 /* --- Recursive include resolver --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity,misc-no-recursion)
-static char *resolve_recursive(const char *source, uint32_t src_len, const char *source_dir, nt_include_state_t *state, uint32_t *out_len) {
+static char *resolve_recursive(const char *source, uint32_t src_len, const char *source_dir, const char *file_path, nt_include_state_t *state, uint32_t *out_len) {
     if (state->depth >= NT_INCLUDE_MAX_DEPTH) {
         NT_LOG_ERROR("include depth limit exceeded (%u)", NT_INCLUDE_MAX_DEPTH);
         return NULL;
@@ -180,10 +180,18 @@ static char *resolve_recursive(const char *source, uint32_t src_len, const char 
 
     state->depth++;
 
+    /* Locals freed in cleanup label */
+    char *filename = NULL;
+    char *found_path = NULL;
+    char *inc_source = NULL;
+    char *inc_dir = NULL;
+    char *resolved = NULL;
+    bool ok = true;
+
     const char *p = source;
     const char *end = source + src_len;
 
-    while (p < end) {
+    while (p < end && ok) {
         /* Find end of current line */
         const char *line_start = p;
         const char *line_end = p;
@@ -208,9 +216,11 @@ static char *resolve_recursive(const char *source, uint32_t src_len, const char 
                 while (after_pragma < line_end && (*after_pragma == ' ' || *after_pragma == '\t')) {
                     after_pragma++;
                 }
-                if (strncmp(after_pragma, "once", 4) == 0) {
-                    /* Mark current file as once -- skip this line from output */
-                    /* Advance past newline */
+                if (strncmp(after_pragma, "once", 4) == 0 && (after_pragma[4] == '\0' || after_pragma[4] == ' ' || after_pragma[4] == '\t' || after_pragma[4] == '/' || after_pragma + 4 >= line_end)) {
+                    /* Register file in once set and skip this line from output */
+                    if (file_path && !is_in_once_set(state, file_path)) {
+                        ok = add_to_once_set(state, file_path);
+                    }
                     p = (line_end < end) ? line_end + 1 : line_end;
                     continue;
                 }
@@ -237,105 +247,73 @@ static char *resolve_recursive(const char *source, uint32_t src_len, const char 
                     }
                     if (fname_end < line_end && *fname_end == '"') {
                         uint32_t fname_len = (uint32_t)(fname_end - fname_start);
-                        char *filename = (char *)malloc(fname_len + 1);
+                        filename = (char *)malloc(fname_len + 1);
                         if (!filename) {
-                            free(out.data);
-                            state->depth--;
-                            return NULL;
+                            ok = false;
+                            break;
                         }
                         memcpy(filename, fname_start, fname_len);
                         filename[fname_len] = '\0';
 
                         /* Find the file */
-                        char *found_path = nt_builder_find_file(filename, source_dir, state->ctx);
+                        found_path = nt_builder_find_file(filename, source_dir, state->ctx);
                         if (!found_path) {
                             NT_LOG_ERROR("include file not found: \"%s\" (searched relative to %s and %u asset roots)", filename, source_dir ? source_dir : "(none)",
                                          state->ctx ? state->ctx->asset_root_count : 0);
-                            free(filename);
-                            free(out.data);
-                            state->depth--;
-                            return NULL;
+                            ok = false;
+                            break;
                         }
                         free(filename);
+                        filename = NULL;
 
                         /* Check pragma once -- skip if already included */
                         if (is_in_once_set(state, found_path)) {
                             free(found_path);
-                            /* Skip this line, advance past newline */
+                            found_path = NULL;
                             p = (line_end < end) ? line_end + 1 : line_end;
                             continue;
                         }
 
                         /* Read the included file */
                         uint32_t inc_size = 0;
-                        char *inc_source = nt_builder_read_file(found_path, &inc_size);
+                        inc_source = nt_builder_read_file(found_path, &inc_size);
                         if (!inc_source) {
                             NT_LOG_ERROR("failed to read include file: %s", found_path);
-                            free(found_path);
-                            free(out.data);
-                            state->depth--;
-                            return NULL;
-                        }
-
-                        /* Check if included file starts with #pragma once */
-                        bool has_pragma_once = false;
-                        {
-                            const char *fp = inc_source;
-                            while (*fp == ' ' || *fp == '\t' || *fp == '\n' || *fp == '\r') {
-                                fp++;
-                            }
-                            if (strncmp(fp, "#pragma", 7) == 0) {
-                                const char *ap = fp + 7;
-                                while (*ap == ' ' || *ap == '\t') {
-                                    ap++;
-                                }
-                                if (strncmp(ap, "once", 4) == 0) {
-                                    has_pragma_once = true;
-                                }
-                            }
-                        }
-
-                        if (has_pragma_once) {
-                            if (!add_to_once_set(state, found_path)) {
-                                free(inc_source);
-                                free(found_path);
-                                free(out.data);
-                                state->depth--;
-                                return NULL;
-                            }
+                            ok = false;
+                            break;
                         }
 
                         /* Extract directory for nested relative includes */
-                        char *inc_dir = extract_dir(found_path);
+                        inc_dir = extract_dir(found_path);
 
                         /* Recurse */
                         uint32_t resolved_len = 0;
-                        char *resolved = resolve_recursive(inc_source, inc_size, inc_dir, state, &resolved_len);
+                        resolved = resolve_recursive(inc_source, inc_size, inc_dir, found_path, state, &resolved_len);
                         free(inc_source);
+                        inc_source = NULL;
                         free(inc_dir);
+                        inc_dir = NULL;
                         free(found_path);
+                        found_path = NULL;
 
                         if (!resolved) {
-                            free(out.data);
-                            state->depth--;
-                            return NULL;
+                            ok = false;
+                            break;
                         }
 
                         /* Append resolved content */
-                        if (!include_buf_append(&out, resolved, resolved_len)) {
-                            free(resolved);
-                            free(out.data);
-                            state->depth--;
-                            return NULL;
-                        }
+                        ok = include_buf_append(&out, resolved, resolved_len);
                         free(resolved);
+                        resolved = NULL;
+                        if (!ok) {
+                            break;
+                        }
 
                         /* Ensure trailing newline after included content */
                         if (out.size > 0 && out.data[out.size - 1] != '\n') {
-                            if (!include_buf_append(&out, "\n", 1)) {
-                                free(out.data);
-                                state->depth--;
-                                return NULL;
+                            ok = include_buf_append(&out, "\n", 1);
+                            if (!ok) {
+                                break;
                             }
                         }
 
@@ -350,17 +328,14 @@ static char *resolve_recursive(const char *source, uint32_t src_len, const char 
         }
 
         /* Default: copy line verbatim (including newline) */
-        if (!include_buf_append(&out, line_start, line_len)) {
-            free(out.data);
-            state->depth--;
-            return NULL;
+        ok = include_buf_append(&out, line_start, line_len);
+        if (!ok) {
+            break;
         }
         if (line_end < end) {
-            /* Include the newline */
-            if (!include_buf_append(&out, "\n", 1)) {
-                free(out.data);
-                state->depth--;
-                return NULL;
+            ok = include_buf_append(&out, "\n", 1);
+            if (!ok) {
+                break;
             }
             p = line_end + 1;
         } else {
@@ -368,7 +343,18 @@ static char *resolve_recursive(const char *source, uint32_t src_len, const char 
         }
     }
 
+    /* Cleanup temporaries */
+    free(filename);
+    free(found_path);
+    free(inc_source);
+    free(inc_dir);
+    free(resolved);
     state->depth--;
+
+    if (!ok) {
+        free(out.data);
+        return NULL;
+    }
 
     /* Null-terminate */
     if (!include_buf_append(&out, "\0", 1)) {
@@ -407,7 +393,7 @@ char *nt_builder_resolve_includes(const char *source, uint32_t source_len, const
     /* Extract source directory for relative includes */
     char *source_dir = extract_dir(source_path);
 
-    char *result = resolve_recursive(source, source_len, source_dir, &state, out_len);
+    char *result = resolve_recursive(source, source_len, source_dir, source_path, &state, out_len);
 
     free(source_dir);
 

@@ -50,21 +50,24 @@ function(nt_configure_shell target)
     set(NT_SHELL_TITLE "${SHELL_TITLE}")
     if(SHELL_SIMD_WASM_PATH)
         file(READ "${_NT_SHELL_MODULE_DIR}/../engine/platform/web/simd_loader.js" NT_SHELL_SIMD_LOADER_JS)
+        # Derive SIMD JS filename from SIMD WASM path (e.g. index_simd.wasm → index_simd.js)
+        set(_nt_simd_wasm "${SHELL_SIMD_WASM_PATH}")
+        string(REGEX REPLACE "\\.wasm$" ".js" _nt_simd_js "${_nt_simd_wasm}")
         # SIMD paired build: hide Emscripten's {{{ SCRIPT }}} in a <template> (not
         # executed by the browser), then dynamically load the correct JS+WASM pair.
         # Baseline JS can't instantiate SIMD WASM (different import tables), so we
-        # must load index_simd.js for the SIMD variant.
-        set(NT_SHELL_SCRIPT_BLOCK [=[<template id="nt-emscripten">{{{ SCRIPT }}}</template>
+        # must load the matching SIMD JS for the SIMD variant.
+        set(_nt_shell_script_block_template [=[<template id="nt-emscripten">{{{ SCRIPT }}}</template>
     <script>
     (function() {
         var useSimd = typeof ntSupportsWasmSimd === 'function' && ntSupportsWasmSimd();
         var variant = useSimd ? 'simd' : 'baseline';
-        var scriptSrc = useSimd ? 'index_simd.js' : 'index.js';
+        var scriptSrc = useSimd ? '@_nt_simd_js@' : 'index.js';
         console.info('[Neotolis] Loading WASM variant:', variant, scriptSrc);
         if (useSimd) {
             Module.locateFile = function(path, dir) {
                 if (typeof path === 'string' && path.endsWith('.wasm'))
-                    return (dir || '') + 'index_simd.wasm';
+                    return (dir || '') + '@_nt_simd_wasm@';
                 return (dir || '') + path;
             };
         }
@@ -74,6 +77,7 @@ function(nt_configure_shell target)
         document.body.appendChild(s);
     })();
     </script>]=])
+        string(CONFIGURE "${_nt_shell_script_block_template}" NT_SHELL_SCRIPT_BLOCK @ONLY)
     else()
         set(NT_SHELL_SIMD_LOADER_JS "")
         set(NT_SHELL_SCRIPT_BLOCK "{{{ SCRIPT }}}")

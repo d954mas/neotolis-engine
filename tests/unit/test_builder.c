@@ -1370,6 +1370,46 @@ void test_asset_root_include(void) {
     free(source);
 }
 
+/* --- Bug #3 repro: pragma once after comment --- */
+
+void test_include_pragma_once_after_comment(void) {
+    MKDIR(TMP_DIR "/once_late");
+    write_test_shader(TMP_DIR "/once_late/lib.glsl", "/* library header */\n"
+                                                     "#pragma once\n"
+                                                     "float late_fn(float x) { return x * 2.0; }\n");
+    write_test_shader(TMP_DIR "/once_late_main.vert", "precision mediump float;\n"
+                                                      "#include \"once_late/lib.glsl\"\n"
+                                                      "#include \"once_late/lib.glsl\"\n"
+                                                      "layout(location = 0) in vec3 a_position;\n"
+                                                      "uniform mat4 u_mvp;\n"
+                                                      "void main() { gl_Position = u_mvp * vec4(a_position * late_fn(1.0), 1.0); }\n");
+
+    const char *pack_path = TMP_DIR "/inc_once_late.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_shader(ctx, TMP_DIR "/once_late_main.vert", NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL_MESSAGE(NT_BUILD_OK, r, "pragma once after comment should still prevent double inclusion");
+    nt_builder_free_pack(ctx);
+
+    char *source = read_shader_source_from_pack(pack_path, NULL);
+    TEST_ASSERT_NOT_NULL(source);
+
+    /* Count definitions: "float late_fn" appears once from the include, and once more
+       if #pragma once fails to deduplicate. The call site in main() has just "late_fn(1.0)". */
+    int count = 0;
+    const char *p = source;
+    while ((p = strstr(p, "float late_fn")) != NULL) {
+        count++;
+        p += 13;
+    }
+    TEST_ASSERT_EQUAL_MESSAGE(1, count, "float late_fn definition should appear exactly once with pragma once");
+    free(source);
+}
+
 /* --- GL shader validation tests --- */
 
 void test_gl_validation_valid_shader(void) {
@@ -1528,6 +1568,7 @@ int main(void) {
     RUN_TEST(test_include_missing_file_errors);
     RUN_TEST(test_include_depth_limit);
     RUN_TEST(test_asset_root_include);
+    RUN_TEST(test_include_pragma_once_after_comment);
 
     /* GL shader validation */
     RUN_TEST(test_gl_validation_valid_shader);
