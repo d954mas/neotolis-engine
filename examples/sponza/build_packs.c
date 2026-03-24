@@ -506,15 +506,15 @@ static nt_build_result_t populate_core(NtBuilderContext *ctx, const nt_glb_scene
 static nt_build_result_t populate_geo(NtBuilderContext *ctx, const nt_glb_scene_t *scene) { return add_meshes(ctx, scene, true); }
 
 static nt_build_result_t populate_tex(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
-    /* TODO(#95): enable after builder cache */
-     nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_low(); 
-    return add_textures(ctx, scene, 512, &compress);
+    /* TODO(#95): enable after builder cache — tex pack gzipped: 22.5MB raw → 6.4MB basis (-71%) */
+    /* nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_low(); */
+    return add_textures(ctx, scene, 512, NULL);
 }
 
 static nt_build_result_t populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
-    /* TODO(#95): enable after builder cache */
-     nt_tex_compress_opts_t compress = nt_tex_compress_uastc_high(); 
-    nt_build_result_t r = add_textures(ctx, scene, 0, &compress);
+    /* TODO(#95): enable after builder cache — full pack gzipped: 97MB raw → 72MB basis (-25%) */
+    /* nt_tex_compress_opts_t compress = nt_tex_compress_uastc_high(); */
+    nt_build_result_t r = add_textures(ctx, scene, 0, NULL);
     if (r != NT_BUILD_OK) {
         return r;
     }

@@ -41,11 +41,7 @@ bool nt_gfx_gl_ctx_is_lost(void) { return s_gl_context <= 0 || emscripten_is_web
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wextra-semi"
 EM_JS(int, nt_gfx_js_detect_gpu_caps, (void), {
-    var gl = Module['ctx'];
-    if (!gl) {
-        var canvas = Module['canvas'];
-        if (canvas) gl = canvas.getContext('webgl2');
-    }
+    var gl = GL.currentContext ? GL.currentContext.GLctx : null;
     if (!gl) return 0;
     var caps = 0;
     if (gl.getExtension('WEBGL_compressed_texture_astc')) caps |= 1;

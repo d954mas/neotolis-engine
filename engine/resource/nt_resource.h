@@ -114,7 +114,7 @@ void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_d
 
 /* Set max milliseconds spent activating assets per nt_resource_step() call.
  * 0 = unlimited (activate all pending assets immediately).
- * Default: NT_RESOURCE_ACTIVATE_TIME_BUDGET_MS (2ms). */
+ * Default: NT_RESOURCE_ACTIVATE_TIME_BUDGET_MS (8ms). */
 void nt_resource_set_activate_time_budget(float max_ms);
 
 /* ---- Retry policy ---- */
