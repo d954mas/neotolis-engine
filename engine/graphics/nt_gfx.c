@@ -3,7 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef NT_HAS_BASISU
 #include "basisu/nt_basisu_transcoder.h"
+#endif
 #include "core/nt_assert.h"
 #include "hash/nt_hash.h"
 #include "log/nt_log.h"
@@ -11,8 +13,10 @@
 #include "nt_shader_format.h"
 #include "nt_texture_format.h"
 
+#ifdef NT_HAS_BASISU
 /* Lazy transcoder initialization (one-time, at first v2 texture activation) */
 static bool s_transcoder_initialized = false;
+#endif
 
 /* ---- Buffer metadata (minimal info kept for runtime validation) ---- */
 
@@ -727,7 +731,7 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
 
 /* ---- Asset activators ---- */
 
-/* Activate a v2 compressed texture (Basis Universal transcode + compressed upload) */
+/* Activate a v2 texture (RAW or Basis Universal compressed) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint32_t activate_texture_v2(const uint8_t *data, uint32_t size) {
     const NtTextureAssetHeaderV2 *hdr2 = (const NtTextureAssetHeaderV2 *)data;
@@ -738,24 +742,35 @@ static uint32_t activate_texture_v2(const uint8_t *data, uint32_t size) {
         return 0;
     }
 
-    /* RAW compression: handle same as v1 (raw pixels after v2 header) */
+    /* RAW compression: uncompressed pixel data after header */
     if (hdr2->compression == NT_TEXTURE_COMPRESSION_RAW) {
         nt_pixel_format_t pixel_fmt;
+        uint32_t bpp;
         switch (hdr2->format) {
         case NT_TEXTURE_FORMAT_RGBA8:
             pixel_fmt = NT_PIXEL_RGBA8;
+            bpp = 4;
             break;
         case NT_TEXTURE_FORMAT_RGB8:
             pixel_fmt = NT_PIXEL_RGB8;
+            bpp = 3;
             break;
         case NT_TEXTURE_FORMAT_RG8:
             pixel_fmt = NT_PIXEL_RG8;
+            bpp = 2;
             break;
         case NT_TEXTURE_FORMAT_R8:
             pixel_fmt = NT_PIXEL_R8;
+            bpp = 1;
             break;
         default:
-            NT_LOG_ERROR("activate_texture: v2 unsupported format");
+            NT_LOG_ERROR("activate_texture: unsupported format %u", hdr2->format);
+            return 0;
+        }
+        /* Validate data_size matches expected pixel payload */
+        uint32_t expected = hdr2->width * hdr2->height * bpp;
+        if (hdr2->data_size < expected) {
+            NT_LOG_ERROR("activate_texture: RAW data_size %u < expected %u", hdr2->data_size, expected);
             return 0;
         }
         const uint8_t *pixels = data + sizeof(NtTextureAssetHeaderV2);
@@ -781,6 +796,10 @@ static uint32_t activate_texture_v2(const uint8_t *data, uint32_t size) {
         return 0;
     }
 
+#ifndef NT_HAS_BASISU
+    NT_LOG_ERROR("activate_texture: BASIS compression not available (built without NT_BASISU)");
+    return 0;
+#else
     /* Lazy transcoder init */
     if (!s_transcoder_initialized) {
         nt_basisu_transcoder_global_init();
@@ -834,72 +853,25 @@ static uint32_t activate_texture_v2(const uint8_t *data, uint32_t size) {
     uint32_t slot = nt_pool_slot_index(id);
     s_gfx.texture_backends[slot] = backend;
     return id;
+#endif /* NT_HAS_BASISU */
 }
 
 uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
-    if (!data || size < sizeof(NtTextureAssetHeader)) {
+    if (!data || size < sizeof(NtTextureAssetHeaderV2)) {
         NT_LOG_ERROR("activate_texture: blob too small");
         return 0;
     }
-    const NtTextureAssetHeader *hdr = (const NtTextureAssetHeader *)data;
+    const NtTextureAssetHeaderV2 *hdr = (const NtTextureAssetHeaderV2 *)data;
     if (hdr->magic != NT_TEXTURE_MAGIC) {
         NT_LOG_ERROR("activate_texture: bad magic");
         return 0;
     }
-    if (hdr->version != NT_TEXTURE_VERSION && hdr->version != NT_TEXTURE_VERSION_V2) {
+    if (hdr->version != NT_TEXTURE_VERSION_V2) {
         NT_LOG_ERROR("activate_texture: unsupported version %u", hdr->version);
         return 0;
     }
 
-    /* v2 compressed texture path */
-    if (hdr->version == NT_TEXTURE_VERSION_V2) {
-        if (size < sizeof(NtTextureAssetHeaderV2)) {
-            NT_LOG_ERROR("activate_texture: v2 blob too small");
-            return 0;
-        }
-        return activate_texture_v2(data, size);
-    }
-
-    /* v1 path (unchanged) */
-    nt_pixel_format_t pixel_fmt;
-    switch (hdr->format) {
-    case NT_TEXTURE_FORMAT_RGBA8:
-        pixel_fmt = NT_PIXEL_RGBA8;
-        break;
-    case NT_TEXTURE_FORMAT_RGB8:
-        pixel_fmt = NT_PIXEL_RGB8;
-        break;
-    case NT_TEXTURE_FORMAT_RG8:
-        pixel_fmt = NT_PIXEL_RG8;
-        break;
-    case NT_TEXTURE_FORMAT_R8:
-        pixel_fmt = NT_PIXEL_R8;
-        break;
-    default:
-        NT_LOG_ERROR("activate_texture: unsupported format");
-        return 0;
-    }
-    uint32_t bpp = nt_texture_bpp((nt_texture_pixel_format_t)hdr->format);
-    uint32_t pixel_size = hdr->width * hdr->height * bpp;
-    if (sizeof(NtTextureAssetHeader) + pixel_size > size) {
-        NT_LOG_ERROR("activate_texture: blob truncated");
-        return 0;
-    }
-    const uint8_t *pixels = data + sizeof(NtTextureAssetHeader);
-    nt_texture_desc_t desc = {
-        .width = hdr->width,
-        .height = hdr->height,
-        .data = pixels,
-        .format = pixel_fmt,
-        .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
-        .mag_filter = NT_FILTER_LINEAR,
-        .wrap_u = NT_WRAP_REPEAT,
-        .wrap_v = NT_WRAP_REPEAT,
-        .gen_mipmaps = (hdr->mip_count == 1),
-        .label = NULL,
-    };
-    nt_texture_t tex = nt_gfx_make_texture(&desc);
-    return tex.id;
+    return activate_texture_v2(data, size);
 }
 
 uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {

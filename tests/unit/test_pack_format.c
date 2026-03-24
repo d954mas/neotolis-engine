@@ -194,7 +194,7 @@ void test_mesh_header_field_offsets(void) {
 
 /* --- Texture header tests --- */
 
-void test_texture_header_size(void) { TEST_ASSERT_EQUAL_UINT(20, sizeof(NtTextureAssetHeader)); }
+void test_texture_header_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtTextureAssetHeaderV2)); }
 
 void test_texture_magic_value(void) {
     TEST_ASSERT_EQUAL_HEX32(0x58455454, NT_TEXTURE_MAGIC);
@@ -209,13 +209,15 @@ void test_texture_magic_value(void) {
 }
 
 void test_texture_header_field_offsets(void) {
-    TEST_ASSERT_EQUAL_UINT(0, offsetof(NtTextureAssetHeader, magic));
-    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtTextureAssetHeader, version));
-    TEST_ASSERT_EQUAL_UINT(6, offsetof(NtTextureAssetHeader, format));
-    TEST_ASSERT_EQUAL_UINT(8, offsetof(NtTextureAssetHeader, width));
-    TEST_ASSERT_EQUAL_UINT(12, offsetof(NtTextureAssetHeader, height));
-    TEST_ASSERT_EQUAL_UINT(16, offsetof(NtTextureAssetHeader, mip_count));
-    TEST_ASSERT_EQUAL_UINT(18, offsetof(NtTextureAssetHeader, _pad));
+    TEST_ASSERT_EQUAL_UINT(0, offsetof(NtTextureAssetHeaderV2, magic));
+    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtTextureAssetHeaderV2, version));
+    TEST_ASSERT_EQUAL_UINT(6, offsetof(NtTextureAssetHeaderV2, format));
+    TEST_ASSERT_EQUAL_UINT(8, offsetof(NtTextureAssetHeaderV2, width));
+    TEST_ASSERT_EQUAL_UINT(12, offsetof(NtTextureAssetHeaderV2, height));
+    TEST_ASSERT_EQUAL_UINT(16, offsetof(NtTextureAssetHeaderV2, mip_count));
+    TEST_ASSERT_EQUAL_UINT(18, offsetof(NtTextureAssetHeaderV2, compression));
+    TEST_ASSERT_EQUAL_UINT(19, offsetof(NtTextureAssetHeaderV2, _pad));
+    TEST_ASSERT_EQUAL_UINT(20, offsetof(NtTextureAssetHeaderV2, data_size));
 }
 
 void test_texture_format_enum(void) { TEST_ASSERT_EQUAL_UINT(1, NT_TEXTURE_FORMAT_RGBA8); }

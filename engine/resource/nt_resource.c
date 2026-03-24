@@ -31,9 +31,9 @@ static struct {
     uint16_t free_queue[NT_RESOURCE_MAX_SLOTS];
     uint16_t slot_map[NT_SLOT_MAP_SIZE];
     uint16_t queue_top;
-    uint16_t next_mount_seq;      /* monotonic counter for mount order tiebreak */
-    uint32_t asset_hwm;           /* high-water mark in assets[] */
-    uint64_t placeholder_texture; /* resource_id for fallback texture, 0 = none */
+    uint16_t next_mount_seq;       /* monotonic counter for mount order tiebreak */
+    uint32_t asset_hwm;            /* high-water mark in assets[] */
+    uint64_t placeholder_texture;  /* resource_id for fallback texture, 0 = none */
     float activate_time_budget_ms; /* per-step time limit, 0 = unlimited */
     /* Retry policy (global) */
     uint32_t retry_max_attempts; /* 0 = infinite */

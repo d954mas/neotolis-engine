@@ -423,18 +423,20 @@ void test_activate_texture_valid_blob(void) {
     uint32_t w = 2;
     uint32_t h = 2;
     uint32_t pixel_size = w * h * 4;
-    uint32_t blob_size = (uint32_t)sizeof(NtTextureAssetHeader) + pixel_size;
-    uint8_t blob[sizeof(NtTextureAssetHeader) + 16];
-    NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)blob;
+    uint32_t blob_size = (uint32_t)sizeof(NtTextureAssetHeaderV2) + pixel_size;
+    uint8_t blob[sizeof(NtTextureAssetHeaderV2) + 16];
+    NtTextureAssetHeaderV2 *hdr = (NtTextureAssetHeaderV2 *)blob;
     memset(blob, 0, sizeof(blob));
     hdr->magic = NT_TEXTURE_MAGIC;
-    hdr->version = NT_TEXTURE_VERSION;
+    hdr->version = NT_TEXTURE_VERSION_V2;
     hdr->format = NT_TEXTURE_FORMAT_RGBA8;
     hdr->width = w;
     hdr->height = h;
     hdr->mip_count = 1;
+    hdr->compression = NT_TEXTURE_COMPRESSION_RAW;
+    hdr->data_size = pixel_size;
     /* Fill pixel data with non-zero */
-    memset(blob + sizeof(NtTextureAssetHeader), 0xFF, pixel_size);
+    memset(blob + sizeof(NtTextureAssetHeaderV2), 0xFF, pixel_size);
     uint32_t handle = nt_gfx_activate_texture(blob, blob_size);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, handle);
     nt_gfx_deactivate_texture(handle);
@@ -443,8 +445,8 @@ void test_activate_texture_valid_blob(void) {
 /* ---- Activator: texture bad magic ---- */
 
 void test_activate_texture_bad_magic(void) {
-    uint8_t blob[sizeof(NtTextureAssetHeader) + 16];
-    NtTextureAssetHeader *hdr = (NtTextureAssetHeader *)blob;
+    uint8_t blob[sizeof(NtTextureAssetHeaderV2) + 16];
+    NtTextureAssetHeaderV2 *hdr = (NtTextureAssetHeaderV2 *)blob;
     memset(blob, 0, sizeof(blob));
     hdr->magic = 0xDEADBEEF;
     hdr->width = 2;

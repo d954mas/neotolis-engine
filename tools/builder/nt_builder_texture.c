@@ -94,21 +94,23 @@ static nt_build_result_t import_texture_pixels(NtBuilderContext *ctx, unsigned c
         final_data = src;
     }
 
-    /* Write header */
-    NtTextureAssetHeader tex_hdr;
+    /* Write v2 header (RAW compression — uncompressed pixel data) */
+    uint32_t data_size = pixel_count * bpp;
+    NtTextureAssetHeaderV2 tex_hdr;
     memset(&tex_hdr, 0, sizeof(tex_hdr));
     tex_hdr.magic = NT_TEXTURE_MAGIC;
-    tex_hdr.version = NT_TEXTURE_VERSION;
+    tex_hdr.version = NT_TEXTURE_VERSION_V2;
     tex_hdr.format = (uint16_t)fmt;
     tex_hdr.width = (uint32_t)out_w;
     tex_hdr.height = (uint32_t)out_h;
     tex_hdr.mip_count = 1;
+    tex_hdr.compression = (uint8_t)NT_TEXTURE_COMPRESSION_RAW;
     tex_hdr._pad = 0;
+    tex_hdr.data_size = data_size;
 
-    uint32_t data_size = pixel_count * bpp;
-    uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeader) + data_size;
+    uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeaderV2) + data_size;
 
-    nt_build_result_t ret = nt_builder_append_data(ctx, &tex_hdr, (uint32_t)sizeof(NtTextureAssetHeader));
+    nt_build_result_t ret = nt_builder_append_data(ctx, &tex_hdr, (uint32_t)sizeof(NtTextureAssetHeaderV2));
     if (ret == NT_BUILD_OK) {
         ret = nt_builder_append_data(ctx, final_data, data_size);
     }
@@ -121,7 +123,7 @@ static nt_build_result_t import_texture_pixels(NtBuilderContext *ctx, unsigned c
         return ret;
     }
 
-    return nt_builder_register_asset(ctx, resource_id, NT_ASSET_TEXTURE, NT_TEXTURE_VERSION, total_asset_size);
+    return nt_builder_register_asset(ctx, resource_id, NT_ASSET_TEXTURE, NT_TEXTURE_VERSION_V2, total_asset_size);
 }
 
 /* --- Texture import from file (called from finish_pack) --- */

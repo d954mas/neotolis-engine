@@ -60,7 +60,7 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
     (void)wrap_u;
     (void)wrap_v;
     (void)transcode_target;
-    return 0;
+    return 1;
 }
 
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle) { (void)backend_handle; }

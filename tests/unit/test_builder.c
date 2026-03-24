@@ -303,12 +303,15 @@ void test_texture_round_trip(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_TEXTURE, entry.asset_type);
 
     (void)fseek(f, (long)entry.offset, SEEK_SET);
-    NtTextureAssetHeader tex;
+    NtTextureAssetHeaderV2 tex;
     TEST_ASSERT_EQUAL(1, fread(&tex, sizeof(tex), 1, f));
     TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, tex.magic);
+    TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_VERSION_V2, tex.version);
     TEST_ASSERT_EQUAL_UINT32(2, tex.width);
     TEST_ASSERT_EQUAL_UINT32(2, tex.height);
     TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_FORMAT_RGBA8, tex.format);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex.compression);
+    TEST_ASSERT_EQUAL_UINT32(2 * 2 * 4, tex.data_size);
 
     (void)fclose(f);
 }
@@ -863,13 +866,15 @@ void test_e2e_real_assets(void) {
     TEST_ASSERT_EQUAL_MEMORY(&expected_neg, &vy, 4);
     TEST_ASSERT_EQUAL_MEMORY(&expected_pos, &vz, 4);
 
-    /* Verify texture data */
-    NtTextureAssetHeader *th = (NtTextureAssetHeader *)(pack + tex_e->offset);
+    /* Verify texture data (v2 header) */
+    NtTextureAssetHeaderV2 *th = (NtTextureAssetHeaderV2 *)(pack + tex_e->offset);
     TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, th->magic);
+    TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_VERSION_V2, th->version);
     TEST_ASSERT_EQUAL_UINT32(512, th->width);
     TEST_ASSERT_EQUAL_UINT32(512, th->height);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, th->compression);
     /* First pixel should be non-zero (Lenna top-left is skin tone) */
-    uint8_t *pixel0 = pack + tex_e->offset + sizeof(NtTextureAssetHeader);
+    uint8_t *pixel0 = pack + tex_e->offset + sizeof(NtTextureAssetHeaderV2);
     TEST_ASSERT_TRUE(pixel0[0] > 100);  /* R */
     TEST_ASSERT_TRUE(pixel0[3] == 255); /* A = opaque */
 
@@ -1066,11 +1071,13 @@ void test_tex_from_memory(void) {
     TEST_ASSERT_EQUAL_UINT8(NT_ASSET_TEXTURE, entry.asset_type);
 
     (void)fseek(f, (long)entry.offset, SEEK_SET);
-    NtTextureAssetHeader tex;
+    NtTextureAssetHeaderV2 tex;
     TEST_ASSERT_EQUAL(1, fread(&tex, sizeof(tex), 1, f));
     TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, tex.magic);
+    TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_VERSION_V2, tex.version);
     TEST_ASSERT_EQUAL_UINT32(2, tex.width);
     TEST_ASSERT_EQUAL_UINT32(2, tex.height);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex.compression);
 
     (void)fclose(f);
 }

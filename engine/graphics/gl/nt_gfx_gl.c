@@ -8,7 +8,9 @@
  * Only remaining #ifdef: GL headers and glClearDepthf vs glClearDepth.
  */
 
+#ifdef NT_HAS_BASISU
 #include "basisu/nt_basisu_transcoder.h"
+#endif
 #include "core/nt_assert.h"
 #include "core/nt_platform.h"
 #include "graphics/gl/nt_gfx_gl_ctx.h"
@@ -908,6 +910,7 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     return slot;
 }
 
+#ifdef NT_HAS_BASISU
 /* Per-mip transcode + compressed upload (Basis Universal) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uint32_t basis_size, uint32_t base_width, uint32_t base_height, uint32_t level_count, nt_texture_filter_t min_filter,
@@ -924,7 +927,10 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
     if (!nt_basisu_get_level_desc(basis_data, basis_size, 0, &lw0, &lh0, &blocks0)) {
         return 0;
     }
-    NT_ASSERT(lw0 == base_width && lh0 == base_height);
+    if (lw0 != base_width || lh0 != base_height) {
+        NT_LOG_ERROR("compressed texture: header/basis dimension mismatch (%ux%u vs %ux%u)", base_width, base_height, lw0, lh0);
+        return 0;
+    }
     uint32_t buf_size = is_compressed ? blocks0 * bpb : lw0 * lh0 * 4;
     uint8_t *transcode_buf = (uint8_t *)malloc(buf_size);
     if (!transcode_buf) {
@@ -1016,6 +1022,7 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
 
     return slot;
 }
+#endif /* NT_HAS_BASISU */
 
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle) {
     if (backend_handle == 0 || backend_handle > s_init_desc.max_textures) {
