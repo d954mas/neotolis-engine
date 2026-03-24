@@ -4,11 +4,11 @@ enable_language(CXX)
 
 add_library(nt_basisu_transcoder STATIC
     nt_basisu_transcoder.cpp
-    ${CMAKE_SOURCE_DIR}/deps/basisu/transcoder/basisu_transcoder.cpp
+    ${NT_ENGINE_ROOT}/deps/basisu/transcoder/basisu_transcoder.cpp
 )
 
 target_include_directories(nt_basisu_transcoder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(nt_basisu_transcoder PRIVATE ${CMAKE_SOURCE_DIR}/deps/basisu/transcoder)
+target_include_directories(nt_basisu_transcoder PRIVATE ${NT_ENGINE_ROOT}/deps/basisu/transcoder)
 
 # -fno-strict-aliasing required by Basis transcoder (TEX-10)
 target_compile_options(nt_basisu_transcoder PRIVATE -fno-strict-aliasing)

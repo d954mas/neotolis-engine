@@ -1,9 +1,9 @@
 # Basis Universal encoder (C++ static library, native only)
 enable_language(CXX)
 
-file(GLOB BASISU_ENCODER_SOURCES "${CMAKE_SOURCE_DIR}/deps/basisu/encoder/*.cpp")
-file(GLOB BASISU_ENCODER_3RDPARTY "${CMAKE_SOURCE_DIR}/deps/basisu/encoder/3rdparty/*.cpp")
-set(BASISU_TRANSCODER_SRC "${CMAKE_SOURCE_DIR}/deps/basisu/transcoder/basisu_transcoder.cpp")
+file(GLOB BASISU_ENCODER_SOURCES "${NT_ENGINE_ROOT}/deps/basisu/encoder/*.cpp")
+file(GLOB BASISU_ENCODER_3RDPARTY "${NT_ENGINE_ROOT}/deps/basisu/encoder/3rdparty/*.cpp")
+set(BASISU_TRANSCODER_SRC "${NT_ENGINE_ROOT}/deps/basisu/transcoder/basisu_transcoder.cpp")
 
 add_library(nt_basisu_encoder STATIC
     nt_basisu_encoder.cpp
@@ -13,8 +13,8 @@ add_library(nt_basisu_encoder STATIC
 )
 target_include_directories(nt_basisu_encoder PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/deps/basisu/encoder
-    ${CMAKE_SOURCE_DIR}/deps/basisu/transcoder
+    ${NT_ENGINE_ROOT}/deps/basisu/encoder
+    ${NT_ENGINE_ROOT}/deps/basisu/transcoder
 )
 # Encoder requires KTX2 support enabled in transcoder
 target_compile_definitions(nt_basisu_encoder PRIVATE

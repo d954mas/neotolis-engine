@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.25)
 project(neotolis-engine LANGUAGES C)
 
+# Engine root — use instead of CMAKE_SOURCE_DIR for paths to deps/
+# (CMAKE_SOURCE_DIR points to the top-level project, not engine root when used as submodule)
+set(NT_ENGINE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH "Engine source root" FORCE)
+
 # Warning and sanitizer flag functions (applied per-target, not globally)
 include(cmake/warnings.cmake)
 include(cmake/nt_module.cmake)
