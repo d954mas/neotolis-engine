@@ -1,32 +1,32 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: ebbb2b9
+# Commit: 469ada9
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 170 B
-Import               381 B
-Function              89 B
+Import               388 B
+Function             103 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                59 B
-Elem                  30 B
-Code               56287 B
-Data                8192 B
-Custom              3193 B
+Elem                  55 B
+Code               58017 B
+Data                8539 B
+Custom              4478 B
 ---------------- ----------
-TOTAL              68422 B
+TOTAL              71830 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-15051 B   frame
-11792 B   main
- 3102 B   fmt_fp
- 2621 B   printf_core
+15119 B   frame
+11925 B   main
+ 3103 B   fmt_fp
+ 2622 B   printf_core
  2041 B   __rem_pio2f
  1296 B   nt_gfx_make_pipeline
  1264 B   nt_shape_renderer_flush
@@ -45,6 +45,7 @@ TOTAL              68422 B
   458 B   nt_window_init
   415 B   attempt_allocate
   393 B   apply_rotation
+  385 B   __dynamic_cast
   382 B   sinf
   381 B   nt_gfx_make_buffer
   370 B   __memset
@@ -52,10 +53,9 @@ TOTAL              68422 B
   340 B   emmalloc_free
   337 B   nt_input_web_on_pointer_up
   322 B   nt_gfx_bind_instance_buffer
-  313 B   pop_arg
 
-Total functions: 88
-Total code size: 56146 B
+Total functions: 102
+Total code size: 57857 B
 
 ## Per-Module Contributions
 
@@ -66,21 +66,22 @@ Module                         Size
 libnt_app.a                 1430 B
 libnt_core.a                2178 B
 libnt_drawable_comp.a       2668 B
-libnt_gfx.a                34514 B
+libnt_gfx.a                39160 B
 libnt_input.a              16446 B
 libnt_shape_renderer.a   1140902 B
 libnt_transform_comp.a      4536 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)           1206614 B
+TOTAL (linked)           1211260 B
 
 Not linked to spinning_cube:
 libnt_app_stub.a            1428 B
+libnt_basisu_transcoder.a 1329370 B
 libnt_comp_storage.a        1802 B
 libnt_entity.a              2996 B
 libnt_fs.a                  2620 B
 libnt_fs_stub.a             2620 B
-libnt_gfx_stub.a           21294 B
+libnt_gfx_stub.a           22272 B
 libnt_hash.a                4028 B
 libnt_http.a                6710 B
 libnt_http_stub.a           3210 B
@@ -93,7 +94,7 @@ libnt_mesh_comp.a           1914 B
 libnt_mesh_renderer.a       7900 B
 libnt_pool.a                1278 B
 libnt_render.a              5910 B
-libnt_resource.a          149572 B
+libnt_resource.a          149818 B
 libnt_sort.a                 366 B
 libnt_time.a                 868 B
 libnt_window_stub.a         1838 B
@@ -102,4 +103,4 @@ libnt_window_stub.a         1838 B
 ## Data Segments Summary
 
 Segments: 22
-Total data size: 8039 B
+Total data size: 8385 B
