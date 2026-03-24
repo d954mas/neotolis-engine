@@ -327,8 +327,7 @@ jobs:
         run: |
           cmake -S tests/submodule -B build/submodule-test \
             -DENGINE_ROOT=${{ github.workspace }} \
-            -DCMAKE_C_COMPILER=clang -G Ninja \
-            -DNT_BASISU=OFF
+            -DCMAKE_C_COMPILER=clang -G Ninja
           cmake --build build/submodule-test
           ./build/submodule-test/submodule_test
 
