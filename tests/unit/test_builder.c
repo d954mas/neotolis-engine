@@ -404,8 +404,10 @@ void test_duplicate_path_errors(void) {
 
 void test_force_add_replaces(void) {
     const char *vert_path = TMP_DIR "/force.vert";
+    /* Source must be valid as fragment shader since force-replace changes stage to FRAGMENT */
     write_test_shader(vert_path, "precision mediump float;\n"
-                                 "void main() { gl_Position = vec4(0); }\n");
+                                 "out vec4 frag_color;\n"
+                                 "void main() { frag_color = vec4(1); }\n");
 
     const char *pack_path = TMP_DIR "/force_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
@@ -923,9 +925,10 @@ void test_rename_changes_resource_id(void) {
 /* --- Force + glob test --- */
 
 void test_force_glob_override(void) {
-    /* Write two shaders to tmp dir */
+    /* Write two shaders to tmp dir.
+       a.vert must be valid as fragment shader since force-override changes its stage. */
     MKDIR(TMP_DIR "/force_glob");
-    write_test_shader(TMP_DIR "/force_glob/a.vert", "precision mediump float;\nvoid main() { gl_Position = vec4(0); }\n");
+    write_test_shader(TMP_DIR "/force_glob/a.vert", "precision mediump float;\nout vec4 frag_color;\nvoid main() { frag_color = vec4(0); }\n");
     write_test_shader(TMP_DIR "/force_glob/b.vert", "precision mediump float;\nvoid main() { gl_Position = vec4(1); }\n");
 
     const char *pack_path = TMP_DIR "/force_glob.ntpack";

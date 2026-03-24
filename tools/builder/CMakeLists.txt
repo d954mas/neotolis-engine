@@ -64,7 +64,7 @@ add_library(nt_builder STATIC
     nt_builder_tangent.c
 )
 target_include_directories(nt_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(nt_builder PUBLIC nt_shared nt_core nt_log nt_time cgltf stb_image stb_image_resize2 nt_hash mikktspace nt_basisu_encoder)
+target_link_libraries(nt_builder PUBLIC nt_shared nt_core nt_log nt_time cgltf stb_image stb_image_resize2 nt_hash mikktspace nt_basisu_encoder glfw glad)
 # Builder uses standard C I/O (fopen, strdup, strncpy) -- suppress MSVC deprecation
 target_compile_definitions(nt_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE NT_LOG_DOMAIN_DEFAULT="builder")
 # Static CRT: remove _DLL so CRT calls resolve to static symbols
