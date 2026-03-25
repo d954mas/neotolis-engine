@@ -5,18 +5,6 @@
 #include "miniz.h"
 /* clang-format on */
 
-/* ---- Size formatting ---- */
-
-static void nt_format_size(uint32_t bytes, char *buf, size_t buf_size) {
-    if (bytes >= 1024 * 1024) {
-        (void)snprintf(buf, buf_size, "%.1fM", (double)bytes / (1024.0 * 1024.0));
-    } else if (bytes >= 1024) {
-        (void)snprintf(buf, buf_size, "%.1fK", (double)bytes / 1024.0);
-    } else {
-        (void)snprintf(buf, buf_size, "%uB", bytes);
-    }
-}
-
 /* ---- Name resolution from .h file ---- */
 
 #define MAX_NAME_ENTRIES 1024
@@ -202,30 +190,7 @@ static int32_t find_duplicate_original(const NtAssetEntry *entries, uint32_t cur
     return -1;
 }
 
-/* ---- Header path derivation ---- */
-
-static char *derive_header_path(const char *pack_path) {
-    size_t path_len = strlen(pack_path);
-    char *hdr_path = (char *)malloc(path_len + 4);
-    if (!hdr_path) {
-        return NULL;
-    }
-    (void)memcpy(hdr_path, pack_path, path_len + 1);
-    /* Find last .ntpack extension and replace with .h */
-    const char *ext = strstr(hdr_path, ".ntpack");
-    if (ext) {
-        size_t ext_offset = (size_t)(ext - hdr_path);
-        hdr_path[ext_offset] = '.';
-        hdr_path[ext_offset + 1] = 'h';
-        hdr_path[ext_offset + 2] = '\0';
-    } else {
-        /* No .ntpack extension, append .h */
-        hdr_path[path_len] = '.';
-        hdr_path[path_len + 1] = 'h';
-        hdr_path[path_len + 2] = '\0';
-    }
-    return hdr_path;
-}
+/* ---- Header path derivation (uses shared utility from nt_builder_internal.h) ---- */
 
 /* ---- Per-type summary accumulators ---- */
 
@@ -469,11 +434,9 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
     NameEntry *name_entries = (NameEntry *)calloc(MAX_NAME_ENTRIES, sizeof(NameEntry));
     uint32_t name_count = 0;
     if (name_entries) {
-        char *hdr_path = derive_header_path(pack_path);
-        if (hdr_path) {
-            name_count = parse_header_file(hdr_path, name_entries, MAX_NAME_ENTRIES);
-            free(hdr_path);
-        }
+        char hdr_path[512];
+        nt_builder_pack_to_header_path(pack_path, hdr_path, sizeof(hdr_path));
+        name_count = parse_header_file(hdr_path, name_entries, MAX_NAME_ENTRIES);
     }
 
     /* Allocate compression buffer (reuse for all assets) */

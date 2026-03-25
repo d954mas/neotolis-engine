@@ -71,37 +71,11 @@ static int sort_entry_cmp(const void *a, const void *b) { return strcmp(((const 
 static void derive_header_path(const char *pack_path, const char *header_dir, char *header_path, size_t size) {
     if (header_dir) {
         /* Extract pack filename stem, put .h in header_dir */
-        const char *slash = strrchr(pack_path, '/');
-        const char *bslash = strrchr(pack_path, '\\');
-        const char *filename = pack_path;
-        if (slash && slash > filename) {
-            filename = slash + 1;
-        }
-        if (bslash && bslash + 1 > filename) {
-            filename = bslash + 1;
-        }
-        /* Copy filename, replace extension with .h */
         char stem[256];
-        strncpy(stem, filename, sizeof(stem) - 1);
-        stem[sizeof(stem) - 1] = '\0';
-        char *dot = strrchr(stem, '.');
-        if (dot) {
-            *dot = '\0';
-        }
+        nt_builder_pack_stem(pack_path, stem, sizeof(stem));
         (void)snprintf(header_path, size, "%s/%s.h", header_dir, stem);
     } else {
-        /* Default: .h next to .ntpack */
-        strncpy(header_path, pack_path, size - 1);
-        header_path[size - 1] = '\0';
-        char *dot = strrchr(header_path, '.');
-        if (dot && (size_t)(dot - header_path) < size - 3) {
-            strcpy(dot, ".h"); /* NOLINT(clang-analyzer-security.insecureAPI.strcpy) */
-        } else {
-            size_t cur_len = strlen(header_path);
-            if (cur_len + 2 < size) {
-                strncat(header_path, ".h", size - cur_len - 1);
-            }
-        }
+        nt_builder_pack_to_header_path(pack_path, header_path, size);
     }
 }
 

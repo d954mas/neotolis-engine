@@ -253,6 +253,52 @@ static inline void nt_builder_convert_component(float value, nt_stream_type_t ty
     }
 }
 
+/* Size formatting: bytes → human-readable string ("1.2K", "3.5M", "42B") */
+static inline void nt_format_size(uint32_t bytes, char *buf, size_t buf_size) {
+    if (bytes >= 1024 * 1024) {
+        (void)snprintf(buf, buf_size, "%.1fM", (double)bytes / (1024.0 * 1024.0));
+    } else if (bytes >= 1024) {
+        (void)snprintf(buf, buf_size, "%.1fK", (double)bytes / 1024.0);
+    } else {
+        (void)snprintf(buf, buf_size, "%uB", bytes);
+    }
+}
+
+/* Pack path utilities (shared between codegen and dump) */
+
+/* Extract filename stem from pack path (no directory, no extension).
+ * "build/foo/demo.ntpack" → "demo" */
+static inline void nt_builder_pack_stem(const char *pack_path, char *stem, size_t stem_size) {
+    const char *slash = strrchr(pack_path, '/');
+    const char *bslash = strrchr(pack_path, '\\');
+    const char *filename = pack_path;
+    if (slash && slash > filename) {
+        filename = slash + 1;
+    }
+    if (bslash && bslash + 1 > filename) {
+        filename = bslash + 1;
+    }
+    strncpy(stem, filename, stem_size - 1);
+    stem[stem_size - 1] = '\0';
+    char *dot = strrchr(stem, '.');
+    if (dot) {
+        *dot = '\0';
+    }
+}
+
+/* Derive .h header path from .ntpack path (replace extension).
+ * "build/foo/demo.ntpack" → "build/foo/demo.h" */
+static inline void nt_builder_pack_to_header_path(const char *pack_path, char *header_path, size_t size) {
+    strncpy(header_path, pack_path, size - 1);
+    header_path[size - 1] = '\0';
+    char *dot = strrchr(header_path, '.');
+    if (dot && (size_t)(dot - header_path) < size - 3) {
+        dot[0] = '.';
+        dot[1] = 'h';
+        dot[2] = '\0';
+    }
+}
+
 /* Codegen: generate .h header with ASSET_* constants */
 nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);
 

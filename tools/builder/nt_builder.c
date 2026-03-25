@@ -571,17 +571,15 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         char size_str[64];
         uint32_t raw_sz = ctx->entries[i].size;
         uint32_t gz_sz = gz_sizes[i];
+        char raw_str[16];
+        char gz_str[16];
+        nt_format_size(raw_sz, raw_str, sizeof(raw_str));
         if (raw_sz > 0 && gz_sz > 0) {
+            nt_format_size(gz_sz, gz_str, sizeof(gz_str));
             uint32_t pct = (gz_sz * 100) / raw_sz;
-            if (raw_sz >= 1024 * 1024) {
-                (void)snprintf(size_str, sizeof(size_str), "%.1fM (%.1fM gz %u%%)", (double)raw_sz / (1024.0 * 1024.0), (double)gz_sz / (1024.0 * 1024.0), pct);
-            } else if (raw_sz >= 1024) {
-                (void)snprintf(size_str, sizeof(size_str), "%.1fK (%.1fK gz %u%%)", (double)raw_sz / 1024.0, (double)gz_sz / 1024.0, pct);
-            } else {
-                (void)snprintf(size_str, sizeof(size_str), "%uB (%uB gz %u%%)", raw_sz, gz_sz, pct);
-            }
+            (void)snprintf(size_str, sizeof(size_str), "%s (%s gz %u%%)", raw_str, gz_str, pct);
         } else {
-            (void)snprintf(size_str, sizeof(size_str), "%u B", raw_sz);
+            (void)snprintf(size_str, sizeof(size_str), "%s", raw_str);
         }
 
         NT_LOG_INFO("  %-4u %-40s %-10s %-24s %.2fs", i, display, type_name, size_str, import_times[i]);
@@ -603,14 +601,12 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         NT_LOG_INFO("  BLOB:    %u asset%s", ctx->blob_count, ctx->blob_count > 1 ? "s" : "");
     }
     if (total_gz > 0 && raw_total > 0) {
+        char total_raw_str[16];
+        char total_gz_str[16];
+        nt_format_size(raw_total, total_raw_str, sizeof(total_raw_str));
+        nt_format_size(total_gz, total_gz_str, sizeof(total_gz_str));
         uint32_t total_pct = (total_gz * 100) / raw_total;
-        if (raw_total >= 1024 * 1024) {
-            NT_LOG_INFO("  Total:   %.1fM raw -> %.1fM gz (%u%%)", (double)raw_total / (1024.0 * 1024.0), (double)total_gz / (1024.0 * 1024.0), total_pct);
-        } else if (raw_total >= 1024) {
-            NT_LOG_INFO("  Total:   %.1fK raw -> %.1fK gz (%u%%)", (double)raw_total / 1024.0, (double)total_gz / 1024.0, total_pct);
-        } else {
-            NT_LOG_INFO("  Total:   %u B raw -> %u B gz (%u%%)", raw_total, total_gz, total_pct);
-        }
+        NT_LOG_INFO("  Total:   %s raw -> %s gz (%u%%)", total_raw_str, total_gz_str, total_pct);
     }
     if (ctx->dedup_count > 0) {
         NT_LOG_INFO("  Dedup:   %u assets (saved %.1fK)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / 1024.0);
