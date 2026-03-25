@@ -29,11 +29,9 @@ static const char *type_prefix_for_kind(nt_build_asset_kind_t kind) {
 #define NT_CODEGEN_MAX_IDENTIFIER 128
 #endif
 
-static bool path_to_identifier(const char *path, const char *type_prefix, char *out, size_t out_size) {
+static void path_to_identifier(const char *path, const char *type_prefix, char *out, size_t out_size) {
     int written = snprintf(out, out_size, "ASSET_%s_", type_prefix);
-    if (written < 0 || (size_t)written >= out_size) {
-        return false;
-    }
+    NT_BUILD_ASSERT(written > 0 && (size_t)written < out_size && "identifier prefix too long");
 
     /* Convert full path including extension -- extension is part of identity
      * (e.g., sponza_alpha.vert vs sponza_alpha.frag must produce different identifiers) */
@@ -51,10 +49,9 @@ static bool path_to_identifier(const char *path, const char *type_prefix, char *
 
     /* Detect truncation: path had more chars to convert */
     if (p < end) {
-        NT_LOG_WARN("Codegen: identifier truncated at %zu chars for '%s' (increase NT_CODEGEN_MAX_IDENTIFIER)", out_size, path);
-        return false;
+        NT_LOG_ERROR("Codegen: identifier truncated at %zu chars for '%s'", out_size, path);
+        NT_BUILD_ASSERT(0 && "identifier too long -- increase NT_CODEGEN_MAX_IDENTIFIER");
     }
-    return true;
 }
 
 /* --- Sorted index for deterministic, diffable output --- */
