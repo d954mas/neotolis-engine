@@ -41,7 +41,7 @@ static bool path_to_identifier(const char *path, const char *type_prefix, char *
     const char *p = path;
     for (; p < end && (size_t)written < out_size - 1; p++) {
         char c = *p;
-        if (c == '/' || c == '.' || c == '-' || c == ' ') {
+        if (c == '/' || c == '\\' || c == '.' || c == '-' || c == ' ') {
             out[written++] = '_';
         } else {
             out[written++] = (char)toupper((unsigned char)c);
@@ -97,7 +97,10 @@ static void derive_header_path(const char *pack_path, const char *header_dir, ch
         if (dot && (size_t)(dot - header_path) < size - 3) {
             strcpy(dot, ".h"); /* NOLINT(clang-analyzer-security.insecureAPI.strcpy) */
         } else {
-            strncat(header_path, ".h", size - strlen(header_path) - 1);
+            size_t cur_len = strlen(header_path);
+            if (cur_len + 2 < size) {
+                strncat(header_path, ".h", size - cur_len - 1);
+            }
         }
     }
 }
@@ -163,26 +166,38 @@ static void derive_func_prefix(const char *header_path, char *prefix, size_t pre
 
 /* --- Collision detection --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void check_identifier_collisions(const NtBuilderContext *ctx) {
-    char identifiers[NT_BUILD_MAX_ASSETS][NT_CODEGEN_MAX_IDENTIFIER];
     uint32_t count = ctx->pending_count;
+    if (count == 0) {
+        return;
+    }
+
+    /* Heap-allocate identifier table -- not hot path, avoids large stack frame */
+    char(*identifiers)[NT_CODEGEN_MAX_IDENTIFIER] = (char(*)[NT_CODEGEN_MAX_IDENTIFIER])malloc((size_t)count * NT_CODEGEN_MAX_IDENTIFIER);
+    if (!identifiers) {
+        return;
+    }
 
     for (uint32_t i = 0; i < count; i++) {
         const NtBuildEntry *pe = &ctx->pending[i];
         const char *prefix = type_prefix_for_kind(pe->kind);
         const char *logical_path = pe->rename_key ? pe->rename_key : pe->path;
-        path_to_identifier(logical_path, prefix, identifiers[i], sizeof(identifiers[i]));
+        path_to_identifier(logical_path, prefix, identifiers[i], NT_CODEGEN_MAX_IDENTIFIER);
     }
 
     /* O(n^2) is fine for small asset counts */
     for (uint32_t i = 0; i < count; i++) {
         for (uint32_t j = i + 1; j < count; j++) {
             if (strcmp(identifiers[i], identifiers[j]) == 0) {
-                NT_LOG_WARN("Codegen: identifier collision '%s' between '%s' and '%s'", identifiers[i], ctx->pending[i].rename_key ? ctx->pending[i].rename_key : ctx->pending[i].path,
-                            ctx->pending[j].rename_key ? ctx->pending[j].rename_key : ctx->pending[j].path);
+                NT_LOG_ERROR("Codegen: identifier collision '%s' between '%s' and '%s'", identifiers[i], ctx->pending[i].rename_key ? ctx->pending[i].rename_key : ctx->pending[i].path,
+                             ctx->pending[j].rename_key ? ctx->pending[j].rename_key : ctx->pending[j].path);
+                free(identifiers);
+                NT_BUILD_ASSERT(0 && "codegen identifier collision -- rename one of the conflicting assets");
             }
         }
     }
+    free(identifiers);
 }
 
 /* --- Shared: write sorted entries to FILE --- */
