@@ -3,6 +3,9 @@
 #include "hash/nt_hash.h"
 #include "nt_crc32.h"
 #include "time/nt_time.h"
+/* Avoid zlib-compat macros (compress, compress2) colliding with struct field names */
+#define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
+#include "miniz.h"
 /* clang-format on */
 
 /* --- Entry data management --- */
@@ -15,25 +18,37 @@ static void nt_builder_free_mesh_data(NtBuildMeshData *md) {
         free((char *)md->layout[s].engine_name);
         free((char *)md->layout[s].gltf_name);
     }
+    free(md->mesh_name);
+    free(md->file_path);
     free(md);
 }
 
-static NtBuildMeshData *nt_builder_copy_mesh_data(const NtStreamLayout *layout, uint32_t stream_count) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static NtBuildMeshData *nt_builder_copy_mesh_data(const nt_mesh_opts_t *opts) {
     NtBuildMeshData *md = (NtBuildMeshData *)calloc(1, sizeof(NtBuildMeshData));
     if (!md) {
         return NULL;
     }
-    md->stream_count = stream_count;
-    memcpy(md->layout, layout, stream_count * sizeof(NtStreamLayout));
-    for (uint32_t s = 0; s < stream_count; s++) {
-        if (layout[s].engine_name) {
-            md->layout[s].engine_name = strdup(layout[s].engine_name);
+    md->stream_count = opts->stream_count;
+    md->tangent_mode = opts->tangent_mode;
+    md->mesh_index = UINT32_MAX; /* sentinel: not used */
+    memcpy(md->layout, opts->layout, opts->stream_count * sizeof(NtStreamLayout));
+    for (uint32_t s = 0; s < opts->stream_count; s++) {
+        if (opts->layout[s].engine_name) {
+            md->layout[s].engine_name = strdup(opts->layout[s].engine_name);
             NT_BUILD_ASSERT(md->layout[s].engine_name && "strdup engine_name failed");
         }
-        if (layout[s].gltf_name) {
-            md->layout[s].gltf_name = strdup(layout[s].gltf_name);
+        if (opts->layout[s].gltf_name) {
+            md->layout[s].gltf_name = strdup(opts->layout[s].gltf_name);
             NT_BUILD_ASSERT(md->layout[s].gltf_name && "strdup gltf_name failed");
         }
+    }
+    if (opts->mesh_name) {
+        md->mesh_name = strdup(opts->mesh_name);
+        NT_BUILD_ASSERT(md->mesh_name && "strdup mesh_name failed");
+    }
+    if (opts->use_mesh_index) {
+        md->mesh_index = opts->mesh_index;
     }
     return md;
 }
@@ -140,38 +155,23 @@ static void nt_builder_free_entry(NtBuildEntry *entry) {
     entry->rename_key = NULL;
 }
 
-static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data) {
-    if (!ctx || !path) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
+void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data) {
+    NT_BUILD_ASSERT(ctx && "ctx is NULL");
+    NT_BUILD_ASSERT(path && "path is NULL");
 
     char *norm_path = nt_builder_normalize_path(path);
-    if (!norm_path) {
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(norm_path && "normalize_path failed");
 
     uint64_t resource_id = nt_hash64_str(norm_path).value;
 
     int32_t existing = nt_builder_find_entry(ctx, resource_id);
     if (existing >= 0) {
-        if (ctx->force) {
-            nt_builder_free_entry(&ctx->pending[existing]);
-            ctx->pending[existing].path = norm_path;
-            ctx->pending[existing].resource_id = resource_id;
-            ctx->pending[existing].kind = kind;
-            ctx->pending[existing].data = data;
-            return NT_BUILD_OK;
-        }
         NT_LOG_ERROR("duplicate resource_id 0x%016llX  existing: %s  new:      %s", (unsigned long long)resource_id, ctx->pending[existing].path, norm_path);
         free(norm_path);
-        return NT_BUILD_ERR_DUPLICATE;
+        NT_BUILD_ASSERT(0 && "duplicate resource_id in same pack");
     }
 
-    if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
-        NT_LOG_ERROR("Asset limit reached (%d max)", NT_BUILD_MAX_ASSETS);
-        free(norm_path);
-        return NT_BUILD_ERR_LIMIT;
-    }
+    NT_BUILD_ASSERT(ctx->pending_count < NT_BUILD_MAX_ASSETS && "asset limit reached");
 
     NtBuildEntry *entry = &ctx->pending[ctx->pending_count++];
     entry->path = norm_path;
@@ -179,7 +179,6 @@ static nt_build_result_t nt_builder_add_entry(NtBuilderContext *ctx, const char 
     entry->resource_id = resource_id;
     entry->kind = kind;
     entry->data = data;
-    return NT_BUILD_OK;
 }
 
 /* --- Core pack writer --- */
@@ -198,6 +197,7 @@ NtBuilderContext *nt_builder_start_pack(const char *output_path) {
 
     strncpy(ctx->output_path, output_path, sizeof(ctx->output_path) - 1);
     ctx->output_path[sizeof(ctx->output_path) - 1] = '\0';
+    ctx->gzip_estimate = false; /* off by default — enable with set_gzip_estimate */
 
     NT_LOG_INFO("Starting pack: %s", output_path);
     return ctx;
@@ -312,7 +312,24 @@ static void nt_builder_free_context(NtBuilderContext *ctx) {
     for (uint32_t i = 0; i < ctx->asset_root_count; i++) {
         free(ctx->asset_roots[i]);
     }
+    free(ctx->header_dir);
     free(ctx);
+}
+
+/* --- Codegen options --- */
+
+void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir) {
+    if (!ctx) {
+        return;
+    }
+    free(ctx->header_dir);
+    ctx->header_dir = dir ? strdup(dir) : NULL;
+}
+
+void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled) {
+    if (ctx) {
+        ctx->gzip_estimate = enabled;
+    }
 }
 
 void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx); }
@@ -334,16 +351,20 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_LOG_INFO("Importing %u assets...", ctx->pending_count);
     double t_import_start = nt_time_now();
     uint32_t fail_count = 0;
+    double import_times[NT_BUILD_MAX_ASSETS];
+    memset(import_times, 0, sizeof(import_times));
 
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
         NT_LOG_INFO("  [%u/%u] %s", i + 1, ctx->pending_count, pe->path);
+        double t_asset_start = nt_time_now();
         nt_build_result_t ret = NT_BUILD_OK;
 
         switch (pe->kind) {
         case NT_BUILD_ASSET_MESH: {
             NtBuildMeshData *md = (NtBuildMeshData *)pe->data;
-            ret = nt_builder_import_mesh(ctx, pe->path, md->layout, md->stream_count, pe->resource_id);
+            const char *file_path = md->file_path ? md->file_path : pe->path;
+            ret = nt_builder_import_mesh(ctx, file_path, md->layout, md->stream_count, md->tangent_mode, md->mesh_name, md->mesh_index, pe->resource_id);
             break;
         }
         case NT_BUILD_ASSET_TEXTURE:
@@ -381,8 +402,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
         }
 
+        import_times[i] = nt_time_now() - t_asset_start;
+
         if (ret != NT_BUILD_OK) {
-            ctx->has_error = true;
             fail_count++;
             NT_LOG_ERROR("  FAILED: %s", pe->path);
         }
@@ -390,7 +412,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     double import_secs = nt_time_now() - t_import_start;
 
-    if (ctx->has_error) {
+    if (fail_count > 0) {
         NT_LOG_ERROR("Build failed: %u/%u assets failed (%.1fs). No .ntpack written.", fail_count, ctx->pending_count, import_secs);
         return NT_BUILD_ERR_VALIDATION;
     }
@@ -398,6 +420,36 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     /* Phase 2: Compute layout and write pack file */
     uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (ctx->entry_count * sizeof(NtAssetEntry)));
     uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
+
+    /* Compute gzip sizes BEFORE shifting offsets (entries still data_buf-relative) */
+    uint32_t gz_sizes[NT_BUILD_MAX_ASSETS];
+    memset(gz_sizes, 0, sizeof(gz_sizes));
+    uint32_t total_gz = 0;
+    double gzip_secs = 0.0;
+    if (ctx->gzip_estimate) {
+        double t_gzip_start = nt_time_now();
+        /* Find max asset size to allocate one compression buffer */
+        uint32_t max_asset_size = 0;
+        for (uint32_t i = 0; i < ctx->entry_count; i++) {
+            if (ctx->entries[i].size > max_asset_size) {
+                max_asset_size = ctx->entries[i].size;
+            }
+        }
+        if (max_asset_size > 0) {
+            mz_ulong comp_bound = mz_compressBound((mz_ulong)max_asset_size);
+            uint8_t *comp_buf = (uint8_t *)malloc(comp_bound);
+            if (comp_buf) {
+                for (uint32_t i = 0; i < ctx->entry_count; i++) {
+                    mz_ulong comp_len = comp_bound;
+                    int rc = mz_compress2(comp_buf, &comp_len, ctx->data_buf + ctx->entries[i].offset, (mz_ulong)ctx->entries[i].size, 6);
+                    gz_sizes[i] = (rc == MZ_OK) ? (uint32_t)comp_len : ctx->entries[i].size;
+                    total_gz += gz_sizes[i];
+                }
+                free(comp_buf);
+            }
+        }
+        gzip_secs = nt_time_now() - t_gzip_start;
+    }
 
     /* entry->offset is relative to data_buf start (set in register_asset).
      * Shift to absolute file offset by adding header_size. */
@@ -416,6 +468,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     header.header_size = header_size;
     header.total_size = total_size;
     header.checksum = checksum;
+
+    double t_write_start = nt_time_now();
 
     FILE *file = fopen(ctx->output_path, "wb");
     if (!file) {
@@ -439,55 +493,87 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     (void)fclose(file);
 
+    double write_secs = nt_time_now() - t_write_start;
+
     if (!write_ok) {
         NT_LOG_ERROR("Failed to write pack file");
         (void)remove(ctx->output_path);
         return NT_BUILD_ERR_IO;
     }
 
-    /* Summary */
-    NT_LOG_INFO("Build complete: %s (%.1fs)", ctx->output_path, import_secs);
-    NT_LOG_INFO("  Assets: %u total (%u meshes, %u textures, %u shaders, %u blobs)", ctx->entry_count, ctx->mesh_count, ctx->texture_count, ctx->shader_count, ctx->blob_count);
-    if (ctx->dedup_count > 0) {
-        NT_LOG_INFO("  Deduplicated: %u assets (saved %.3f MB)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / (1024.0 * 1024.0));
-        for (uint32_t i = 0; i < ctx->entry_count; i++) {
-            for (uint32_t j = 0; j < i; j++) {
-                if (ctx->entries[i].offset == ctx->entries[j].offset && ctx->entries[i].size == ctx->entries[j].size) {
-                    /* Find names by matching resource_id in pending[] */
-                    const char *dup_name = "?";
-                    const char *orig_name = "?";
-                    for (uint32_t pi = 0; pi < ctx->pending_count; pi++) {
-                        if (ctx->pending[pi].resource_id == ctx->entries[i].resource_id) {
-                            dup_name = ctx->pending[pi].path ? ctx->pending[pi].path : "?";
-                        }
-                        if (ctx->pending[pi].resource_id == ctx->entries[j].resource_id) {
-                            orig_name = ctx->pending[pi].path ? ctx->pending[pi].path : "?";
-                        }
-                    }
-                    NT_LOG_INFO("    %s -> %s", dup_name, orig_name);
-                    break;
-                }
-            }
-        }
-    }
-    if (total_size >= 1024 * 1024) {
-        NT_LOG_INFO("  Pack size: %.3f MB (%u bytes)", (double)total_size / (1024.0 * 1024.0), total_size);
-    } else if (total_size >= 1024) {
-        NT_LOG_INFO("  Pack size: %.3f KB (%u bytes)", (double)total_size / 1024.0, total_size);
-    } else {
-        NT_LOG_INFO("  Pack size: %u bytes", total_size);
-    }
-    NT_LOG_INFO("  CRC32: 0x%08X", checksum);
+    /* Generate codegen header (.h with ASSET_* constants) */
+    nt_build_result_t codegen_result = nt_builder_generate_header(ctx);
+    NT_BUILD_ASSERT(codegen_result == NT_BUILD_OK && "codegen header generation failed -- check header_dir exists and is writable");
 
+    /* Enhanced summary */
+    double total_secs = nt_time_now() - t_import_start;
+    NT_LOG_INFO("Build complete: %s", ctx->output_path);
+    NT_LOG_INFO("");
+
+    /* Per-asset table */
+    NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "#", "Name", "Type", "Size", "Time");
+    NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "--", "----", "----", "----", "----");
+    static const char *kind_names[] = {"MESH", "TEX", "SHADER", "BLOB", "MESH", "TEX|MEM", "TEX|RAW", "TEX|CMP"};
     for (uint32_t i = 0; i < ctx->entry_count; i++) {
-        const char *path = ctx->pending[i].path ? ctx->pending[i].path : "(unknown)";
-        const char *rkey = ctx->pending[i].rename_key;
-        if (rkey) {
-            NT_LOG_INFO("  %s -> 0x%016llX (renamed: %s)", path, (unsigned long long)ctx->pending[i].resource_id, rkey);
-        } else {
-            NT_LOG_INFO("  %s -> 0x%016llX", path, (unsigned long long)ctx->pending[i].resource_id);
+        const char *path = (i < ctx->pending_count && ctx->pending[i].path) ? ctx->pending[i].path : "(unknown)";
+        const char *rkey = (i < ctx->pending_count) ? ctx->pending[i].rename_key : NULL;
+        const char *display = rkey ? rkey : path;
+        const char *type_name = "UNKNOWN";
+        if (i < ctx->pending_count && (uint32_t)ctx->pending[i].kind < 8) {
+            type_name = kind_names[ctx->pending[i].kind];
         }
+
+        /* Format size with gzip */
+        char size_str[64];
+        uint32_t raw_sz = ctx->entries[i].size;
+        uint32_t gz_sz = gz_sizes[i];
+        char raw_str[16];
+        char gz_str[16];
+        nt_format_size(raw_sz, raw_str, sizeof(raw_str));
+        if (raw_sz > 0 && gz_sz > 0) {
+            nt_format_size(gz_sz, gz_str, sizeof(gz_str));
+            uint32_t pct = (gz_sz * 100) / raw_sz;
+            (void)snprintf(size_str, sizeof(size_str), "%s (%s gz %u%%)", raw_str, gz_str, pct);
+        } else {
+            (void)snprintf(size_str, sizeof(size_str), "%s", raw_str);
+        }
+
+        NT_LOG_INFO("  %-4u %-40s %-10s %-24s %.2fs", i, display, type_name, size_str, import_times[i]);
     }
+
+    /* Per-type summary */
+    NT_LOG_INFO("");
+    uint32_t raw_total = ctx->data_size;
+    if (ctx->mesh_count > 0) {
+        NT_LOG_INFO("  MESH:    %u asset%s", ctx->mesh_count, ctx->mesh_count > 1 ? "s" : "");
+    }
+    if (ctx->texture_count > 0) {
+        NT_LOG_INFO("  TEX:     %u asset%s", ctx->texture_count, ctx->texture_count > 1 ? "s" : "");
+    }
+    if (ctx->shader_count > 0) {
+        NT_LOG_INFO("  SHADER:  %u asset%s", ctx->shader_count, ctx->shader_count > 1 ? "s" : "");
+    }
+    if (ctx->blob_count > 0) {
+        NT_LOG_INFO("  BLOB:    %u asset%s", ctx->blob_count, ctx->blob_count > 1 ? "s" : "");
+    }
+    if (total_gz > 0 && raw_total > 0) {
+        char total_raw_str[16];
+        char total_gz_str[16];
+        nt_format_size(raw_total, total_raw_str, sizeof(total_raw_str));
+        nt_format_size(total_gz, total_gz_str, sizeof(total_gz_str));
+        uint32_t total_pct = (total_gz * 100) / raw_total;
+        NT_LOG_INFO("  Total:   %s raw -> %s gz (%u%%)", total_raw_str, total_gz_str, total_pct);
+    }
+    if (ctx->dedup_count > 0) {
+        NT_LOG_INFO("  Dedup:   %u assets (saved %.1fK)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / 1024.0);
+    }
+    NT_LOG_INFO("");
+    if (ctx->gzip_estimate) {
+        NT_LOG_INFO("  Timing: encode %.1fs | gzip %.1fs | write %.1fs | total %.1fs", import_secs, gzip_secs, write_secs, total_secs);
+    } else {
+        NT_LOG_INFO("  Timing: encode %.1fs | write %.1fs | total %.1fs (gzip skipped)", import_secs, write_secs, total_secs);
+    }
+    NT_LOG_INFO("  CRC32:  0x%08X", checksum);
 
     return NT_BUILD_OK;
 }
@@ -503,112 +589,71 @@ static uint64_t nt_builder_path_id(const char *path) {
 
 /* --- Public add_* --- */
 
-nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count) {
-    if (!layout || stream_count == 0 || stream_count > NT_MESH_MAX_STREAMS) {
-        return NT_BUILD_ERR_VALIDATION;
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const nt_mesh_opts_t *opts) {
+    NT_BUILD_ASSERT(opts && opts->layout && opts->stream_count > 0 && opts->stream_count <= NT_MESH_MAX_STREAMS && "invalid mesh opts");
+    NtBuildMeshData *md = nt_builder_copy_mesh_data(opts);
+    NT_BUILD_ASSERT(md && "copy_mesh_data alloc failed");
+
+    /* Build logical path for resource_id:
+     *   mesh_name set  -> "path/mesh_name" (or "path/resource_name" if override)
+     *   mesh_index set -> "path/index"     (or "path/resource_name" if override)
+     *   neither        -> "path" (single-mesh mode)
+     */
+    char logical_path[1024];
+    if (opts->mesh_name != NULL) {
+        const char *suffix = opts->resource_name ? opts->resource_name : opts->mesh_name;
+        (void)snprintf(logical_path, sizeof(logical_path), "%s/%s", path, suffix);
+        md->file_path = strdup(path);
+        NT_BUILD_ASSERT(md->file_path && "strdup file_path failed");
+    } else if (opts->use_mesh_index) {
+        if (opts->resource_name) {
+            (void)snprintf(logical_path, sizeof(logical_path), "%s/%s", path, opts->resource_name);
+        } else {
+            (void)snprintf(logical_path, sizeof(logical_path), "%s/%u", path, opts->mesh_index);
+        }
+        md->file_path = strdup(path);
+        NT_BUILD_ASSERT(md->file_path && "strdup file_path failed");
+    } else {
+        (void)snprintf(logical_path, sizeof(logical_path), "%s", path);
+        /* file_path stays NULL -- use entry->path directly */
     }
-    NtBuildMeshData *md = nt_builder_copy_mesh_data(layout, stream_count);
-    if (!md) {
-        return NT_BUILD_ERR_IO;
-    }
-    nt_build_result_t r = nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_MESH, md);
-    if (r != NT_BUILD_OK) {
-        nt_builder_free_mesh_data(md);
-    }
-    return r;
+
+    nt_builder_add_entry(ctx, logical_path, NT_BUILD_ASSET_MESH, md);
 }
 
-nt_build_result_t nt_builder_add_texture(NtBuilderContext *ctx, const char *path) { return nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_TEXTURE, NULL); }
+void nt_builder_add_texture(NtBuilderContext *ctx, const char *path) { nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_TEXTURE, NULL); }
 
-nt_build_result_t nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage) {
+void nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage) {
     NtBuildShaderData *sd = nt_builder_copy_shader_data(stage);
-    if (!sd) {
-        return NT_BUILD_ERR_IO;
-    }
-    nt_build_result_t r = nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_SHADER, sd);
-    if (r != NT_BUILD_OK) {
-        free(sd);
-    }
-    return r;
+    NT_BUILD_ASSERT(sd && "copy_shader_data alloc failed");
+    nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_SHADER, sd);
 }
 
 /* --- Public add_blob --- */
 
-nt_build_result_t nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id) {
-    if (!ctx || !data || size == 0 || !resource_id) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-
-    uint64_t rid = nt_hash64_str(resource_id).value;
-
-    int32_t existing = nt_builder_find_entry(ctx, rid);
-    if (existing >= 0 && !ctx->force) {
-        NT_LOG_ERROR("duplicate resource_id for blob '%s'", resource_id);
-        return NT_BUILD_ERR_DUPLICATE;
-    }
+void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id) {
+    NT_BUILD_ASSERT(ctx && data && size > 0 && resource_id && "invalid blob args");
 
     NtBuildBlobData *bd = (NtBuildBlobData *)calloc(1, sizeof(NtBuildBlobData));
-    if (!bd) {
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(bd && "blob alloc failed");
     bd->data = malloc(size);
-    if (!bd->data) {
-        free(bd);
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(bd->data && "blob data alloc failed");
     memcpy(bd->data, data, size);
     bd->size = size;
 
-    if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
-        NT_LOG_ERROR("Asset limit reached (%d max)", NT_BUILD_MAX_ASSETS);
-        free(bd->data);
-        free(bd);
-        return NT_BUILD_ERR_LIMIT;
-    }
-
-    if (existing >= 0) {
-        nt_builder_free_entry(&ctx->pending[existing]);
-        ctx->pending[existing].path = strdup(resource_id);
-        ctx->pending[existing].rename_key = NULL;
-        ctx->pending[existing].resource_id = rid;
-        ctx->pending[existing].kind = NT_BUILD_ASSET_BLOB;
-        ctx->pending[existing].data = bd;
-        return NT_BUILD_OK;
-    }
-
-    NtBuildEntry *entry = &ctx->pending[ctx->pending_count++];
-    entry->path = strdup(resource_id);
-    entry->rename_key = NULL;
-    entry->resource_id = rid;
-    entry->kind = NT_BUILD_ASSET_BLOB;
-    entry->data = bd;
-    return NT_BUILD_OK;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_BLOB, bd);
 }
 
 /* --- Public add_texture_from_memory --- */
 
-nt_build_result_t nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts) {
-    if (!ctx || !data || size == 0 || !resource_id) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-
-    uint64_t rid = nt_hash64_str(resource_id).value;
-
-    int32_t existing = nt_builder_find_entry(ctx, rid);
-    if (existing >= 0 && !ctx->force) {
-        NT_LOG_ERROR("duplicate resource_id for texture '%s'", resource_id);
-        return NT_BUILD_ERR_DUPLICATE;
-    }
+void nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts) {
+    NT_BUILD_ASSERT(ctx && data && size > 0 && resource_id && "invalid texture_from_memory args");
 
     NtBuildTexMemData *td = (NtBuildTexMemData *)calloc(1, sizeof(NtBuildTexMemData));
-    if (!td) {
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(td && "tex_mem alloc failed");
     td->data = (uint8_t *)malloc(size);
-    if (!td->data) {
-        free(td);
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(td->data && "tex_mem data alloc failed");
     memcpy(td->data, data, size);
     td->size = size;
     if (opts) {
@@ -618,61 +663,23 @@ nt_build_result_t nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, c
         td->opts.max_size = 0;
     }
 
-    if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
-        NT_LOG_ERROR("Asset limit reached (%d max)", NT_BUILD_MAX_ASSETS);
-        free(td->data);
-        free(td);
-        return NT_BUILD_ERR_LIMIT;
-    }
-
-    if (existing >= 0) {
-        nt_builder_free_entry(&ctx->pending[existing]);
-        ctx->pending[existing].path = strdup(resource_id);
-        ctx->pending[existing].rename_key = NULL;
-        ctx->pending[existing].resource_id = rid;
-        ctx->pending[existing].kind = NT_BUILD_ASSET_TEXTURE_MEM;
-        ctx->pending[existing].data = td;
-        return NT_BUILD_OK;
-    }
-
-    NtBuildEntry *entry = &ctx->pending[ctx->pending_count++];
-    entry->path = strdup(resource_id);
-    entry->rename_key = NULL;
-    entry->resource_id = rid;
-    entry->kind = NT_BUILD_ASSET_TEXTURE_MEM;
-    entry->data = td;
-    return NT_BUILD_OK;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE_MEM, td);
 }
 
-nt_build_result_t nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id) {
-    return nt_builder_add_texture_from_memory_ex(ctx, data, size, resource_id, NULL);
+void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id) {
+    nt_builder_add_texture_from_memory_ex(ctx, data, size, resource_id, NULL);
 }
 
 /* --- Public add_texture_raw --- */
 
-nt_build_result_t nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts) {
-    if (!ctx || !rgba_pixels || width == 0 || height == 0 || !resource_id) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-
-    uint64_t rid = nt_hash64_str(resource_id).value;
-
-    int32_t existing = nt_builder_find_entry(ctx, rid);
-    if (existing >= 0 && !ctx->force) {
-        NT_LOG_ERROR("duplicate resource_id for raw texture '%s'", resource_id);
-        return NT_BUILD_ERR_DUPLICATE;
-    }
+void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts) {
+    NT_BUILD_ASSERT(ctx && rgba_pixels && width > 0 && height > 0 && resource_id && "invalid texture_raw args");
 
     uint32_t data_size = width * height * 4;
     NtBuildTexRawData *td = (NtBuildTexRawData *)calloc(1, sizeof(NtBuildTexRawData));
-    if (!td) {
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(td && "tex_raw alloc failed");
     td->pixels = (uint8_t *)malloc(data_size);
-    if (!td->pixels) {
-        free(td);
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(td->pixels && "tex_raw pixels alloc failed");
     memcpy(td->pixels, rgba_pixels, data_size);
     td->width = width;
     td->height = height;
@@ -683,62 +690,25 @@ nt_build_result_t nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_
         td->opts.max_size = 0;
     }
 
-    if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
-        NT_LOG_ERROR("Asset limit reached (%d max)", NT_BUILD_MAX_ASSETS);
-        free(td->pixels);
-        free(td);
-        return NT_BUILD_ERR_LIMIT;
-    }
-
-    if (existing >= 0) {
-        nt_builder_free_entry(&ctx->pending[existing]);
-        ctx->pending[existing].path = strdup(resource_id);
-        ctx->pending[existing].rename_key = NULL;
-        ctx->pending[existing].resource_id = rid;
-        ctx->pending[existing].kind = NT_BUILD_ASSET_TEXTURE_RAW;
-        ctx->pending[existing].data = td;
-        return NT_BUILD_OK;
-    }
-
-    NtBuildEntry *entry = &ctx->pending[ctx->pending_count++];
-    entry->path = strdup(resource_id);
-    entry->rename_key = NULL;
-    entry->resource_id = rid;
-    entry->kind = NT_BUILD_ASSET_TEXTURE_RAW;
-    entry->data = td;
-    return NT_BUILD_OK;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE_RAW, td);
 }
 
 /* --- Public add_texture_from_memory_compressed --- */
 
-nt_build_result_t nt_builder_add_texture_from_memory_compressed(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts,
-                                                                const nt_tex_compress_opts_t *compress_opts) {
-    if (!ctx || !data || size == 0 || !resource_id) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
+void nt_builder_add_texture_from_memory_compressed(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts,
+                                                   const nt_tex_compress_opts_t *compress_opts) {
+    NT_BUILD_ASSERT(ctx && data && size > 0 && resource_id && "invalid texture_from_memory_compressed args");
 
     /* NULL compress_opts = fall through to uncompressed path */
     if (!compress_opts) {
-        return nt_builder_add_texture_from_memory_ex(ctx, data, size, resource_id, opts);
-    }
-
-    uint64_t rid = nt_hash64_str(resource_id).value;
-
-    int32_t existing = nt_builder_find_entry(ctx, rid);
-    if (existing >= 0 && !ctx->force) {
-        NT_LOG_ERROR("duplicate resource_id for compressed texture '%s'", resource_id);
-        return NT_BUILD_ERR_DUPLICATE;
+        nt_builder_add_texture_from_memory_ex(ctx, data, size, resource_id, opts);
+        return;
     }
 
     NtBuildTexMemCompressedData *td = (NtBuildTexMemCompressedData *)calloc(1, sizeof(NtBuildTexMemCompressedData));
-    if (!td) {
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(td && "tex_compressed alloc failed");
     td->data = (uint8_t *)malloc(size);
-    if (!td->data) {
-        free(td);
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(td->data && "tex_compressed data alloc failed");
     memcpy(td->data, data, size);
     td->size = size;
     td->compress = *compress_opts;
@@ -749,36 +719,7 @@ nt_build_result_t nt_builder_add_texture_from_memory_compressed(NtBuilderContext
         td->opts.max_size = 0;
     }
 
-    if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
-        NT_LOG_ERROR("Asset limit reached (%d max)", NT_BUILD_MAX_ASSETS);
-        free(td->data);
-        free(td);
-        return NT_BUILD_ERR_LIMIT;
-    }
-
-    if (existing >= 0) {
-        nt_builder_free_entry(&ctx->pending[existing]);
-        ctx->pending[existing].path = strdup(resource_id);
-        ctx->pending[existing].rename_key = NULL;
-        ctx->pending[existing].resource_id = rid;
-        ctx->pending[existing].kind = NT_BUILD_ASSET_TEXTURE_MEM_COMPRESSED;
-        ctx->pending[existing].data = td;
-        return NT_BUILD_OK;
-    }
-
-    NtBuildEntry *entry = &ctx->pending[ctx->pending_count++];
-    entry->path = strdup(resource_id);
-    entry->rename_key = NULL;
-    entry->resource_id = rid;
-    entry->kind = NT_BUILD_ASSET_TEXTURE_MEM_COMPRESSED;
-    entry->data = td;
-    return NT_BUILD_OK;
-}
-
-void nt_builder_set_force(NtBuilderContext *ctx, bool force) {
-    if (ctx) {
-        ctx->force = force;
-    }
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE_MEM_COMPRESSED, td);
 }
 
 nt_build_result_t nt_builder_add_asset_root(NtBuilderContext *ctx, const char *path) {
@@ -800,30 +741,20 @@ nt_build_result_t nt_builder_add_asset_root(NtBuilderContext *ctx, const char *p
 
 /* --- Rename: change resource_id key, keep source file --- */
 
-nt_build_result_t nt_builder_rename(NtBuilderContext *ctx, const char *old_path, const char *new_path) {
-    if (!ctx || !old_path || !new_path) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
+void nt_builder_rename(NtBuilderContext *ctx, const char *old_path, const char *new_path) {
+    NT_BUILD_ASSERT(ctx && old_path && new_path && "invalid rename args");
 
     uint64_t old_id = nt_builder_path_id(old_path);
     int32_t idx = nt_builder_find_entry(ctx, old_id);
-    if (idx < 0) {
-        NT_LOG_ERROR("rename: '%s' not found in pending assets", old_path);
-        return NT_BUILD_ERR_VALIDATION;
-    }
+    NT_BUILD_ASSERT(idx >= 0 && "rename: old_path not found in pending assets");
 
     uint64_t new_id = nt_builder_path_id(new_path);
 
     int32_t collision = nt_builder_find_entry(ctx, new_id);
-    if (collision >= 0 && collision != idx) {
-        NT_LOG_ERROR("rename: new path '%s' collides with existing '%s'", new_path, ctx->pending[collision].path);
-        return NT_BUILD_ERR_DUPLICATE;
-    }
+    NT_BUILD_ASSERT((collision < 0 || collision == idx) && "rename: new_path collides with existing");
 
     ctx->pending[idx].resource_id = new_id;
 
     free(ctx->pending[idx].rename_key);
     ctx->pending[idx].rename_key = nt_builder_normalize_path(new_path);
-
-    return NT_BUILD_OK;
 }

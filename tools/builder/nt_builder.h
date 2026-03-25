@@ -3,10 +3,24 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"    /* nt_stream_type_t */
 #include "nt_texture_format.h" /* nt_texture_pixel_format_t */
+
+/* Always-on assert for builder (never compiled out by NDEBUG).
+   A failed assert means the build is broken -- pack would be invalid. */
+#ifndef NT_BUILD_ASSERT
+#define NT_BUILD_ASSERT(cond)                                                                                                                                                                          \
+    do {                                                                                                                                                                                               \
+        if (!(cond)) {                                                                                                                                                                                 \
+            (void)fprintf(stderr, "FATAL: %s:%d: assertion failed: %s\n", __FILE__, __LINE__, #cond);                                                                                                  \
+            abort();                                                                                                                                                                                   \
+        }                                                                                                                                                                                              \
+    } while (0)
+#endif
 
 /* Build limits (game can override before including this header) */
 #ifndef NT_BUILD_MAX_ASSETS
@@ -55,11 +69,15 @@ typedef enum {
     NT_TANGENT_NONE = 3,    /* skip tangent attribute entirely */
 } nt_tangent_mode_t;
 
-/* Mesh options for scene mesh extraction */
+/* Mesh options for add_mesh and scene mesh extraction */
 typedef struct {
     const NtStreamLayout *layout;
     uint32_t stream_count;
     nt_tangent_mode_t tangent_mode;
+    const char *mesh_name;     /* select mesh by name in multi-mesh glb (NULL = not used) */
+    uint32_t mesh_index;       /* select mesh by index (only when use_mesh_index is true) */
+    bool use_mesh_index;       /* true = select by mesh_index */
+    const char *resource_name; /* optional rid suffix override (NULL = auto) */
 } nt_mesh_opts_t;
 
 /* --- glTF scene types (parse/inspect/extract) --- */
@@ -117,12 +135,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx);
 void nt_builder_free_pack(NtBuilderContext *ctx);
 
 /* --- Asset addition (single file) --- */
-nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count);
-nt_build_result_t nt_builder_add_texture(NtBuilderContext *ctx, const char *path);
-nt_build_result_t nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage);
-
-/* --- Force mode (add or replace, no duplicate error) --- */
-void nt_builder_set_force(NtBuilderContext *ctx, bool force);
+void nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const nt_mesh_opts_t *opts);
+void nt_builder_add_texture(NtBuilderContext *ctx, const char *path);
+void nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage);
 
 /* --- Asset roots (search paths for #include and file lookup) --- */
 #ifndef NT_BUILD_MAX_ASSET_ROOTS
@@ -131,20 +146,20 @@ void nt_builder_set_force(NtBuilderContext *ctx, bool force);
 nt_build_result_t nt_builder_add_asset_root(NtBuilderContext *ctx, const char *path);
 
 /* --- Batch addition (glob patterns) --- */
-nt_build_result_t nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const NtStreamLayout *layout, uint32_t stream_count);
-nt_build_result_t nt_builder_add_textures(NtBuilderContext *ctx, const char *pattern);
-nt_build_result_t nt_builder_add_shaders(NtBuilderContext *ctx, const char *pattern, nt_build_shader_stage_t stage);
+void nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const nt_mesh_opts_t *opts);
+void nt_builder_add_textures(NtBuilderContext *ctx, const char *pattern);
+void nt_builder_add_shaders(NtBuilderContext *ctx, const char *pattern, nt_build_shader_stage_t stage);
 
 /* --- Rename (change resource_id key, keep source file) --- */
-nt_build_result_t nt_builder_rename(NtBuilderContext *ctx, const char *old_path, const char *new_path);
+void nt_builder_rename(NtBuilderContext *ctx, const char *old_path, const char *new_path);
 
 /* --- Scene API (parse/inspect/extract multi-mesh glTF) --- */
 nt_build_result_t nt_builder_parse_glb_scene(nt_glb_scene_t *scene, const char *path);
-nt_build_result_t nt_builder_add_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const char *resource_id, const nt_mesh_opts_t *opts);
+void nt_builder_add_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const char *resource_id, const nt_mesh_opts_t *opts);
 void nt_builder_free_glb_scene(nt_glb_scene_t *scene);
 
 /* --- Blob API (generic binary data asset) --- */
-nt_build_result_t nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id);
+void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id);
 
 /* --- Texture options (game controls format and resize per-texture) --- */
 
@@ -176,15 +191,24 @@ static inline nt_tex_compress_opts_t nt_tex_compress_uastc_mid(void) { return (n
 static inline nt_tex_compress_opts_t nt_tex_compress_uastc_high(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 4, .rdo_quality = 0.0F}; }
 
 /* --- Texture from memory API --- */
-nt_build_result_t nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id);
-nt_build_result_t nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts);
+void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id);
+void nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts);
 
 /* --- Texture from raw RGBA pixels (no image decode needed) --- */
-nt_build_result_t nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts);
+void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts);
 
 /* --- Texture from memory with compression (NULL compress_opts = raw v1 format) --- */
-nt_build_result_t nt_builder_add_texture_from_memory_compressed(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts,
-                                                                const nt_tex_compress_opts_t *compress_opts);
+void nt_builder_add_texture_from_memory_compressed(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts,
+                                                   const nt_tex_compress_opts_t *compress_opts);
+
+/* --- Codegen options --- */
+void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);
+
+/* --- Gzip estimation (off by default, enable for transport size analysis) --- */
+void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
+
+/* --- Merge per-pack .h headers into a combined header --- */
+void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, const char *output_path);
 
 /* --- Utilities --- */
 nt_build_result_t nt_builder_dump_pack(const char *pack_path);

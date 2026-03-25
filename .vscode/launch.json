@@ -156,15 +156,6 @@
             "preLaunchTask": "Build pack builders (release)"
         },
         {
-            "name": "Build Assets",
-            "type": "cppvsdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/build/examples/builder_demo/native-release/build_assets.exe",
-            "cwd": "${workspaceFolder}",
-            "console": "integratedTerminal",
-            "preLaunchTask": "Build pack builders (release)"
-        },
-        {
             "name": "Build Sponza Packs",
             "type": "cppvsdbg",
             "request": "launch",

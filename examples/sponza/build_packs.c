@@ -81,9 +81,7 @@ typedef enum { TEX_ROLE_DIFFUSE, TEX_ROLE_NORMAL, TEX_ROLE_SPECULAR, TEX_ROLE_UN
 /* Build a lookup: texture_index -> role (based on how materials reference it) */
 static tex_role_t *build_texture_roles(const nt_glb_scene_t *scene) {
     tex_role_t *roles = (tex_role_t *)calloc(scene->texture_count > 0 ? scene->texture_count : 1, sizeof(tex_role_t));
-    if (!roles) {
-        return NULL;
-    }
+    NT_BUILD_ASSERT(roles && "build_texture_roles: alloc failed");
     for (uint32_t i = 0; i < scene->texture_count; i++) {
         roles[i] = TEX_ROLE_UNKNOWN;
     }
@@ -120,11 +118,9 @@ static bool texture_needs_alpha(const nt_glb_scene_t *scene, uint32_t tex_index,
 
 /* --- Add all textures with per-role format, optional resize, and optional compression --- */
 
-static nt_build_result_t add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t max_size, const nt_tex_compress_opts_t *compress_opts) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t max_size, const nt_tex_compress_opts_t *compress_opts) {
     tex_role_t *roles = build_texture_roles(scene);
-    if (!roles) {
-        return NT_BUILD_ERR_IO;
-    }
     cgltf_data *gltf = (cgltf_data *)scene->_internal;
 
     uint32_t added = 0;
@@ -152,23 +148,18 @@ static nt_build_result_t add_textures(NtBuilderContext *ctx, const nt_glb_scene_
          * Normal maps use UASTC for higher quality, everything else uses the provided preset (ETC1S).
          * NULL compress_opts = raw v1 format (no compression). */
         const nt_tex_compress_opts_t *tex_compress = compress_opts;
-        nt_tex_compress_opts_t normal_compress = {0};
+        nt_tex_compress_opts_t normal_compress;
+        memset(&normal_compress, 0, sizeof(normal_compress));
         if (compress_opts != NULL && roles[i] == TEX_ROLE_NORMAL) {
             normal_compress = nt_tex_compress_uastc_mid();
             tex_compress = &normal_compress;
         }
 
-        nt_build_result_t r = nt_builder_add_texture_from_memory_compressed(ctx, scene->textures[i].data, scene->textures[i].size, tex_rid(i), &opts, tex_compress);
-        if (r != NT_BUILD_OK) {
-            (void)fprintf(stderr, "ERROR: failed to add texture %u: %d\n", i, r);
-            free(roles);
-            return r;
-        }
+        nt_builder_add_texture_from_memory_compressed(ctx, scene->textures[i].data, scene->textures[i].size, tex_rid(i), &opts, tex_compress);
         added++;
     }
     (void)printf("  Textures added: %u / %u\n", added, scene->texture_count);
     free(roles);
-    return NT_BUILD_OK;
 }
 
 /* --- Add placeholder textures (role-specific, same resource IDs) --- */
@@ -196,11 +187,8 @@ static void init_checker(void) {
 static const uint8_t s_flat_normal_rg[4] = {128, 128, 0, 0}; /* (0,0,1) in RG8 — Z reconstructed in shader */
 static const uint8_t s_rough_rg[4] = {0, 255, 0, 0};         /* max roughness in RG8: R=0, G=255 (roughness=1.0 → no specular) */
 
-static nt_build_result_t add_placeholder_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
+static void add_placeholder_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     tex_role_t *roles = build_texture_roles(scene);
-    if (!roles) {
-        return NT_BUILD_ERR_IO;
-    }
 
     uint32_t added = 0;
     for (uint32_t i = 0; i < scene->texture_count; i++) {
@@ -218,35 +206,24 @@ static nt_build_result_t add_placeholder_textures(NtBuilderContext *ctx, const n
             continue;
         }
 
-        nt_build_result_t r = nt_builder_add_texture_raw(ctx, pixels, 1, 1, tex_rid(i), &opts);
-        if (r != NT_BUILD_OK) {
-            (void)fprintf(stderr, "ERROR: failed to add placeholder texture %u: %d\n", i, r);
-            free(roles);
-            return r;
-        }
+        nt_builder_add_texture_raw(ctx, pixels, 1, 1, tex_rid(i), &opts);
         added++;
     }
     (void)printf("  Placeholder textures added: %u (normal + specular only)\n", added);
     free(roles);
-    return NT_BUILD_OK;
 }
 
 /* --- Add fallback checkerboard texture (used as runtime placeholder for all unloaded textures) --- */
 
-static nt_build_result_t add_fallback_checker(NtBuilderContext *ctx) {
+static void add_fallback_checker(NtBuilderContext *ctx) {
     nt_tex_opts_t opts = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = 0};
-    nt_build_result_t r = nt_builder_add_texture_raw(ctx, s_checker, CHECKER_SIZE, CHECKER_SIZE, "sponza/fallback_checker", &opts);
-    if (r != NT_BUILD_OK) {
-        (void)fprintf(stderr, "ERROR: failed to add fallback checker: %d\n", r);
-    } else {
-        (void)printf("  Fallback checkerboard added\n");
-    }
-    return r;
+    nt_builder_add_texture_raw(ctx, s_checker, CHECKER_SIZE, CHECKER_SIZE, "sponza/fallback_checker", &opts);
+    (void)printf("  Fallback checkerboard added\n");
 }
 
 /* --- Add all 6 shader files --- */
 
-static nt_build_result_t add_shaders(NtBuilderContext *ctx) {
+static void add_shaders(NtBuilderContext *ctx) {
     static const struct {
         const char *path;
         nt_build_shader_stage_t stage;
@@ -256,20 +233,15 @@ static nt_build_result_t add_shaders(NtBuilderContext *ctx) {
     };
 
     for (int i = 0; i < 6; i++) {
-        nt_build_result_t r = nt_builder_add_shader(ctx, shaders[i].path, shaders[i].stage);
-        if (r != NT_BUILD_OK) {
-            (void)fprintf(stderr, "ERROR: failed to add shader %s: %d\n", shaders[i].path, r);
-            return r;
-        }
+        nt_builder_add_shader(ctx, shaders[i].path, shaders[i].stage);
     }
     (void)printf("  Shaders added: 6\n");
-    return NT_BUILD_OK;
 }
 
 /* --- Build manifest blob (scene layout info, no mesh data dependency) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static nt_build_result_t build_manifest_blob(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
+static void build_manifest_blob(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     cgltf_data *gltf = (cgltf_data *)scene->_internal;
 
     /* First pass: count manifest entries */
@@ -286,7 +258,7 @@ static nt_build_result_t build_manifest_blob(NtBuilderContext *ctx, const nt_glb
     uint32_t manifest_size = (uint32_t)sizeof(SponzaManifestHeader) + (manifest_count * (uint32_t)sizeof(SponzaManifestNode));
     uint8_t *manifest_buf = (uint8_t *)calloc(manifest_size > 0 ? manifest_size : 1, 1);
     if (!manifest_buf) {
-        return NT_BUILD_ERR_IO;
+        return;
     }
 
     SponzaManifestHeader *hdr = (SponzaManifestHeader *)manifest_buf;
@@ -352,18 +324,14 @@ static nt_build_result_t build_manifest_blob(NtBuilderContext *ctx, const nt_glb
 
     (void)printf("  Manifest entries: %u\n", entry_idx);
 
-    nt_build_result_t r = nt_builder_add_blob(ctx, manifest_buf, manifest_size, "sponza/manifest");
+    nt_builder_add_blob(ctx, manifest_buf, manifest_size, "sponza/manifest");
     free(manifest_buf);
-    if (r != NT_BUILD_OK) {
-        (void)fprintf(stderr, "ERROR: failed to add manifest blob: %d\n", r);
-    }
-    return r;
 }
 
 /* --- Add all meshes (no manifest) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static nt_build_result_t add_meshes(NtBuilderContext *ctx, const nt_glb_scene_t *scene, bool use_base_quality) {
+static void add_meshes(NtBuilderContext *ctx, const nt_glb_scene_t *scene, bool use_base_quality) {
     NtStreamLayout layout_full[] = {
         {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
         {"normal", "NORMAL", NT_STREAM_FLOAT32, 3, false},
@@ -434,48 +402,35 @@ static nt_build_result_t add_meshes(NtBuilderContext *ctx, const nt_glb_scene_t 
                 .stream_count = stream_count,
                 .tangent_mode = tangent_mode,
             };
-            nt_build_result_t r = nt_builder_add_scene_mesh(ctx, scene, mi, pi, rid, &opts);
-            if (r != NT_BUILD_OK) {
-                (void)fprintf(stderr, "ERROR: failed to add mesh %u/%u: %d\n", mi, pi, r);
-                return r;
-            }
+            nt_builder_add_scene_mesh(ctx, scene, mi, pi, rid, &opts);
             meshes_added++;
         }
     }
 
     (void)printf("  Meshes added: %u\n", meshes_added);
-    return NT_BUILD_OK;
 }
 
 /* --- Add all meshes and build scene manifest (for full pack) --- */
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt_glb_scene_t *scene, bool use_base_quality) {
-    nt_build_result_t r = add_meshes(ctx, scene, use_base_quality);
-    if (r != NT_BUILD_OK) {
-        return r;
-    }
-    return build_manifest_blob(ctx, scene);
+static void add_meshes_and_manifest(NtBuilderContext *ctx, const nt_glb_scene_t *scene, bool use_base_quality) {
+    add_meshes(ctx, scene, use_base_quality);
+    build_manifest_blob(ctx, scene);
 }
 
 /* --- Main --- */
 
-static nt_build_result_t build_pack(const char *out_dir, const char *name, const nt_glb_scene_t *scene, nt_build_result_t (*populate)(NtBuilderContext *, const nt_glb_scene_t *)) {
+static nt_build_result_t build_pack(const char *out_dir, const char *hdr_dir, const char *name, const nt_glb_scene_t *scene, void (*populate)(NtBuilderContext *, const nt_glb_scene_t *)) {
     (void)printf("--- Building %s ---\n", name);
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, name));
     if (!ctx) {
         (void)fprintf(stderr, "Failed to start %s\n", name);
         return NT_BUILD_ERR_IO;
     }
-    nt_builder_set_force(ctx, true);
+    nt_builder_set_header_dir(ctx, hdr_dir);
 
-    nt_build_result_t r = populate(ctx, scene);
-    if (r != NT_BUILD_OK) {
-        nt_builder_free_pack(ctx);
-        return r;
-    }
+    populate(ctx, scene);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     nt_builder_free_pack(ctx);
     if (r != NT_BUILD_OK) {
         (void)fprintf(stderr, "%s failed: %d\n", name, r);
@@ -487,55 +442,42 @@ static nt_build_result_t build_pack(const char *out_dir, const char *name, const
 
 /* Pack population callbacks */
 
-static nt_build_result_t populate_core(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
-    nt_build_result_t r = add_shaders(ctx);
-    if (r != NT_BUILD_OK) {
-        return r;
-    }
-    r = build_manifest_blob(ctx, scene);
-    if (r != NT_BUILD_OK) {
-        return r;
-    }
-    r = add_fallback_checker(ctx);
-    if (r != NT_BUILD_OK) {
-        return r;
-    }
-    return add_placeholder_textures(ctx, scene);
+static void populate_core(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
+    add_shaders(ctx);
+    build_manifest_blob(ctx, scene);
+    add_fallback_checker(ctx);
+    add_placeholder_textures(ctx, scene);
 }
 
-static nt_build_result_t populate_geo(NtBuilderContext *ctx, const nt_glb_scene_t *scene) { return add_meshes(ctx, scene, true); }
+static void populate_geo(NtBuilderContext *ctx, const nt_glb_scene_t *scene) { add_meshes(ctx, scene, true); }
 
-static nt_build_result_t populate_tex(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
+static void populate_tex(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     /* TODO(#95): enable after builder cache — tex pack gzipped: 22.5MB raw → 6.4MB basis (-71%) */
     /* nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_low(); */
-    return add_textures(ctx, scene, 512, NULL);
+    add_textures(ctx, scene, 512, NULL);
 }
 
-static nt_build_result_t populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
+static void populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     /* TODO(#95): enable after builder cache — full pack gzipped: 97MB raw → 72MB basis (-25%) */
     /* nt_tex_compress_opts_t compress = nt_tex_compress_uastc_high(); */
-    nt_build_result_t r = add_textures(ctx, scene, 0, NULL);
-    if (r != NT_BUILD_OK) {
-        return r;
-    }
-    r = add_shaders(ctx);
-    if (r != NT_BUILD_OK) {
-        return r;
-    }
-    return add_meshes_and_manifest(ctx, scene, false);
+    add_textures(ctx, scene, 0, NULL);
+    add_shaders(ctx);
+    add_meshes_and_manifest(ctx, scene, false);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        (void)fprintf(stderr, "Usage: build_sponza_packs <output_dir>\n");
+        (void)fprintf(stderr, "Usage: build_sponza_packs <pack_dir>\n");
         return 1;
     }
     const char *out_dir = argv[1];
+    const char *header_dir = "examples/sponza/generated";
 
     (void)printf("=== Build Sponza Packs -> %s ===\n\n", out_dir);
 
     MKDIR(out_dir);
+    MKDIR(header_dir);
     init_checker();
 
     /* Parse Sponza scene */
@@ -563,32 +505,46 @@ int main(int argc, char *argv[]) {
     (void)printf("\n");
 
     /* ---- Pack 1: sponza_core.ntpack (shaders + manifest + placeholder textures) ---- */
-    r = build_pack(out_dir, "sponza_core.ntpack", &scene, populate_core);
+    r = build_pack(out_dir, header_dir, "sponza_core.ntpack", &scene, populate_core);
     if (r != NT_BUILD_OK) {
         nt_builder_free_glb_scene(&scene);
         return 1;
     }
 
     /* ---- Pack 2: sponza_geo.ntpack (all meshes, base quality) ---- */
-    r = build_pack(out_dir, "sponza_geo.ntpack", &scene, populate_geo);
+    r = build_pack(out_dir, header_dir, "sponza_geo.ntpack", &scene, populate_geo);
     if (r != NT_BUILD_OK) {
         nt_builder_free_glb_scene(&scene);
         return 1;
     }
 
     /* ---- Pack 3: sponza_tex.ntpack (all textures, 512px max) ---- */
-    r = build_pack(out_dir, "sponza_tex.ntpack", &scene, populate_tex);
+    r = build_pack(out_dir, header_dir, "sponza_tex.ntpack", &scene, populate_tex);
     if (r != NT_BUILD_OK) {
         nt_builder_free_glb_scene(&scene);
         return 1;
     }
 
     /* ---- Pack 4: sponza_full.ntpack (full quality everything) ---- */
-    r = build_pack(out_dir, "sponza_full.ntpack", &scene, populate_full);
+    r = build_pack(out_dir, header_dir, "sponza_full.ntpack", &scene, populate_full);
     if (r != NT_BUILD_OK) {
         nt_builder_free_glb_scene(&scene);
         return 1;
     }
+
+    /* Generate combined header from per-pack .h files */
+    char core_hdr[512];
+    char geo_hdr[512];
+    char tex_hdr[512];
+    char full_hdr[512];
+    (void)snprintf(core_hdr, sizeof(core_hdr), "%s/sponza_core.h", header_dir);
+    (void)snprintf(geo_hdr, sizeof(geo_hdr), "%s/sponza_geo.h", header_dir);
+    (void)snprintf(tex_hdr, sizeof(tex_hdr), "%s/sponza_tex.h", header_dir);
+    (void)snprintf(full_hdr, sizeof(full_hdr), "%s/sponza_full.h", header_dir);
+    const char *pack_headers[] = {core_hdr, geo_hdr, tex_hdr, full_hdr};
+    char combined_header[512];
+    (void)snprintf(combined_header, sizeof(combined_header), "%s/sponza_assets.h", header_dir);
+    nt_builder_merge_headers(pack_headers, 4, combined_header);
 
     nt_builder_free_glb_scene(&scene);
 

@@ -9,15 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Always-on assert for builder (never compiled out by NDEBUG).
-   Mirrors engine NT_ASSERT but without engine header deps. */
-#define NT_BUILD_ASSERT(cond)                                                                                                                                                                          \
-    do {                                                                                                                                                                                               \
-        if (!(cond)) {                                                                                                                                                                                 \
-            (void)fprintf(stderr, "FATAL: %s:%d: assertion failed: %s\n", __FILE__, __LINE__, #cond);                                                                                                  \
-            abort();                                                                                                                                                                                   \
-        }                                                                                                                                                                                              \
-    } while (0)
+/* NT_BUILD_ASSERT is defined in nt_builder.h (public, usable by game build scripts) */
 
 /* Initial data buffer capacity (1 MB, doubles on overflow) */
 #define NT_BUILD_INITIAL_CAPACITY (1024 * 1024)
@@ -38,6 +30,10 @@ typedef enum {
 typedef struct {
     NtStreamLayout layout[NT_MESH_MAX_STREAMS]; /* deep-copied from user */
     uint32_t stream_count;
+    nt_tangent_mode_t tangent_mode;
+    char *mesh_name;     /* owned copy, NULL if not used */
+    uint32_t mesh_index; /* UINT32_MAX if not used */
+    char *file_path;     /* owned copy of actual file path (for multi-mesh logical path) */
 } NtBuildMeshData;
 
 /* Type-specific data for shader entries */
@@ -110,8 +106,6 @@ struct NtBuilderContext {
     uint32_t entry_count;
 
     /* Mode flags */
-    bool force;
-    bool has_error;
 
     /* Per-type counters for summary */
     uint32_t mesh_count;
@@ -126,6 +120,12 @@ struct NtBuilderContext {
     /* Asset root search paths (D-09) */
     char *asset_roots[NT_BUILD_MAX_ASSET_ROOTS];
     uint32_t asset_root_count;
+
+    /* Codegen: custom header output directory (NULL = next to pack) */
+    char *header_dir;
+
+    /* Gzip estimation in summary (default: off) */
+    bool gzip_estimate;
 };
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
@@ -133,7 +133,8 @@ nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data
 nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size);
 
 /* Internal import functions -- called from finish_pack */
-nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, uint64_t resource_id);
+nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name,
+                                         uint32_t mesh_index, uint64_t resource_id);
 nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *path, uint64_t resource_id);
 nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint64_t resource_id);
 nt_build_result_t nt_builder_import_blob(NtBuilderContext *ctx, const void *data, uint32_t size, uint64_t resource_id);
@@ -164,17 +165,14 @@ static inline float nt_builder_clampf(float v, float lo, float hi) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static inline void nt_builder_convert_component(float value, nt_stream_type_t type, bool normalized, uint8_t *out_ptr, bool *warned_f16) {
+static inline void nt_builder_convert_component(float value, nt_stream_type_t type, bool normalized, uint8_t *out_ptr) {
     switch (type) {
     case NT_STREAM_FLOAT32: {
         memcpy(out_ptr, &value, sizeof(float));
         break;
     }
     case NT_STREAM_FLOAT16: {
-        if (!*warned_f16 && (value > 65504.0F || value < -65504.0F)) {
-            NT_LOG_WARN("float16 overflow (value=%.6g exceeds +-65504)", (double)value);
-            *warned_f16 = true;
-        }
+        NT_BUILD_ASSERT((value <= 65504.0F && value >= -65504.0F) && "float16 overflow -- value exceeds +-65504, use FLOAT32 for this stream");
         uint16_t h = nt_builder_float32_to_float16(value);
         memcpy(out_ptr, &h, sizeof(uint16_t));
         break;
@@ -225,6 +223,58 @@ static inline void nt_builder_convert_component(float value, nt_stream_type_t ty
     }
     }
 }
+
+/* Size formatting: bytes → human-readable string ("1.2K", "3.5M", "42B") */
+static inline void nt_format_size(uint32_t bytes, char *buf, size_t buf_size) {
+    if (bytes >= 1024 * 1024) {
+        (void)snprintf(buf, buf_size, "%.1fM", (double)bytes / (1024.0 * 1024.0));
+    } else if (bytes >= 1024) {
+        (void)snprintf(buf, buf_size, "%.1fK", (double)bytes / 1024.0);
+    } else {
+        (void)snprintf(buf, buf_size, "%uB", bytes);
+    }
+}
+
+/* Pack path utilities (shared between codegen and dump) */
+
+/* Extract filename stem from pack path (no directory, no extension).
+ * "build/foo/demo.ntpack" → "demo" */
+static inline void nt_builder_pack_stem(const char *pack_path, char *stem, size_t stem_size) {
+    const char *slash = strrchr(pack_path, '/');
+    const char *bslash = strrchr(pack_path, '\\');
+    const char *filename = pack_path;
+    if (slash && slash > filename) {
+        filename = slash + 1;
+    }
+    if (bslash && bslash + 1 > filename) {
+        filename = bslash + 1;
+    }
+    strncpy(stem, filename, stem_size - 1);
+    stem[stem_size - 1] = '\0';
+    char *dot = strrchr(stem, '.');
+    if (dot) {
+        *dot = '\0';
+    }
+}
+
+/* Derive .h header path from .ntpack path (replace extension).
+ * "build/foo/demo.ntpack" → "build/foo/demo.h" */
+static inline void nt_builder_pack_to_header_path(const char *pack_path, char *header_path, size_t size) {
+    strncpy(header_path, pack_path, size - 1);
+    header_path[size - 1] = '\0';
+    char *dot = strrchr(header_path, '.');
+    if (dot && (size_t)(dot - header_path) < size - 3) {
+        dot[0] = '.';
+        dot[1] = 'h';
+        dot[2] = '\0';
+    }
+}
+
+/* Deferred entry addition (shared between add_* and scene_mesh) */
+void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data);
+
+/* Codegen: generate .h header with ASSET_* constants */
+nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);
 
 /* File I/O utilities */
 char *nt_builder_read_file(const char *path, uint32_t *out_size);

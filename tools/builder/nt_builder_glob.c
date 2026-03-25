@@ -177,14 +177,12 @@ static bool glob_iterate(const char *pattern, glob_callback_fn callback, void *u
 
 typedef struct {
     NtBuilderContext *ctx;
-    nt_build_result_t last_result;
     uint32_t match_count;
     void *type_data; /* per-type params, NULL for texture */
 } GlobCallbackData;
 
 typedef struct {
-    const NtStreamLayout *layout;
-    uint32_t stream_count;
+    const nt_mesh_opts_t *opts;
 } GlobMeshParams;
 
 typedef struct {
@@ -197,70 +195,47 @@ static void mesh_glob_callback(const char *full_path, void *user) {
     GlobCallbackData *cb = (GlobCallbackData *)user;
     GlobMeshParams *p = (GlobMeshParams *)cb->type_data;
     cb->match_count++;
-    nt_build_result_t r = nt_builder_add_mesh(cb->ctx, full_path, p->layout, p->stream_count);
-    if (r != NT_BUILD_OK) {
-        cb->last_result = r;
-    }
+    nt_builder_add_mesh(cb->ctx, full_path, p->opts);
 }
 
 static void texture_glob_callback(const char *full_path, void *user) {
     GlobCallbackData *cb = (GlobCallbackData *)user;
     cb->match_count++;
-    nt_build_result_t r = nt_builder_add_texture(cb->ctx, full_path);
-    if (r != NT_BUILD_OK) {
-        cb->last_result = r;
-    }
+    nt_builder_add_texture(cb->ctx, full_path);
 }
 
 static void shader_glob_callback(const char *full_path, void *user) {
     GlobCallbackData *cb = (GlobCallbackData *)user;
     GlobShaderParams *p = (GlobShaderParams *)cb->type_data;
     cb->match_count++;
-    nt_build_result_t r = nt_builder_add_shader(cb->ctx, full_path, p->stage);
-    if (r != NT_BUILD_OK) {
-        cb->last_result = r;
-    }
+    nt_builder_add_shader(cb->ctx, full_path, p->stage);
 }
 
 /* --- Public batch API --- */
 
-static nt_build_result_t nt_builder_glob_add(NtBuilderContext *ctx, const char *pattern, glob_callback_fn callback, void *type_data) {
+static void nt_builder_glob_add(NtBuilderContext *ctx, const char *pattern, glob_callback_fn callback, void *type_data) {
     GlobCallbackData cb;
     memset(&cb, 0, sizeof(cb));
     cb.ctx = ctx;
-    cb.last_result = NT_BUILD_OK;
     cb.type_data = type_data;
 
-    if (!glob_iterate(pattern, callback, &cb)) {
-        return NT_BUILD_ERR_LIMIT;
-    }
-
-    if (cb.match_count == 0) {
-        NT_LOG_ERROR("no files matched pattern '%s'", pattern);
-        return NT_BUILD_ERR_VALIDATION;
-    }
-    return cb.last_result;
+    NT_BUILD_ASSERT(glob_iterate(pattern, callback, &cb) && "glob overflow");
+    NT_BUILD_ASSERT(cb.match_count > 0 && "no files matched pattern");
 }
 
-nt_build_result_t nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const NtStreamLayout *layout, uint32_t stream_count) {
-    if (!ctx || !pattern || !layout) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-    GlobMeshParams p = {layout, stream_count};
-    return nt_builder_glob_add(ctx, pattern, mesh_glob_callback, &p);
+void nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const nt_mesh_opts_t *opts) {
+    NT_BUILD_ASSERT(ctx && pattern && opts && "invalid add_meshes args");
+    GlobMeshParams p = {opts};
+    nt_builder_glob_add(ctx, pattern, mesh_glob_callback, &p);
 }
 
-nt_build_result_t nt_builder_add_textures(NtBuilderContext *ctx, const char *pattern) {
-    if (!ctx || !pattern) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-    return nt_builder_glob_add(ctx, pattern, texture_glob_callback, NULL);
+void nt_builder_add_textures(NtBuilderContext *ctx, const char *pattern) {
+    NT_BUILD_ASSERT(ctx && pattern && "invalid add_textures args");
+    nt_builder_glob_add(ctx, pattern, texture_glob_callback, NULL);
 }
 
-nt_build_result_t nt_builder_add_shaders(NtBuilderContext *ctx, const char *pattern, nt_build_shader_stage_t stage) {
-    if (!ctx || !pattern) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
+void nt_builder_add_shaders(NtBuilderContext *ctx, const char *pattern, nt_build_shader_stage_t stage) {
+    NT_BUILD_ASSERT(ctx && pattern && "invalid add_shaders args");
     GlobShaderParams p = {stage};
-    return nt_builder_glob_add(ctx, pattern, shader_glob_callback, &p);
+    nt_builder_glob_add(ctx, pattern, shader_glob_callback, &p);
 }

@@ -51,28 +51,31 @@
         {
             "label": "Build pack builders (release)",
             "type": "shell",
-            "command": "cmake --build build/_cmake/native-release --target build_tq_packs build_sponza_packs build_assets",
+            "command": "cmake --build build/_cmake/native-release --target build_tq_packs build_sponza_packs",
             "group": "build",
             "problemMatcher": "$gcc"
         },
         {
-            "label": "Build native-debug (build_tq_packs)",
+            "label": "Build & run pack builders (release)",
             "type": "shell",
-            "command": "cmake --build build/_cmake/native-debug --target build_tq_packs",
+            "command": "cmake --build build/_cmake/native-release --target build_tq_packs build_sponza_packs && build\\examples\\textured_quad\\native-release\\build_tq_packs.exe build/examples/textured_quad && build\\examples\\sponza\\native-release\\build_sponza_packs.exe build/examples/sponza",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
             "group": "build",
             "problemMatcher": "$gcc"
         },
         {
-            "label": "Build native-debug (build_assets)",
+            "label": "Build & run TQ packs (debug)",
             "type": "shell",
-            "command": "cmake --build build/_cmake/native-debug --target build_assets",
+            "command": "cmake --build build/_cmake/native-debug --target build_tq_packs && build\\examples\\textured_quad\\native-debug\\build_tq_packs.exe build/examples/textured_quad",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
             "group": "build",
             "problemMatcher": "$gcc"
         },
         {
-            "label": "Build native-debug (build_sponza_packs)",
+            "label": "Build & run Sponza packs (debug)",
             "type": "shell",
-            "command": "cmake --build build/_cmake/native-debug --target build_sponza_packs",
+            "command": "cmake --build build/_cmake/native-debug --target build_sponza_packs && build\\examples\\sponza\\native-debug\\build_sponza_packs.exe build/examples/sponza",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
             "group": "build",
             "problemMatcher": "$gcc"
         },

@@ -34,9 +34,10 @@ static nt_build_result_t nt_validate_stream_layout(const char *path, const NtStr
     return NT_BUILD_OK;
 }
 
-/* --- glTF parsing --- */
+/* --- glTF parsing with multi-mesh support --- */
 
-static nt_build_result_t nt_parse_gltf(const char *path, cgltf_data **out_data, cgltf_primitive **out_prim) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static nt_build_result_t nt_parse_gltf_mesh(const char *path, const char *mesh_name, uint32_t mesh_index, cgltf_data **out_data, cgltf_primitive **out_prim) {
     cgltf_options options;
     memset(&options, 0, sizeof(options));
 
@@ -59,20 +60,66 @@ static nt_build_result_t nt_parse_gltf(const char *path, cgltf_data **out_data, 
         NT_LOG_WARN("%s: glTF validation issues (cgltf error %d)", path, (int)result);
     }
 
-    if ((*out_data)->meshes_count != 1) {
-        NT_LOG_ERROR("%s: expected 1 mesh, found %zu", path, (*out_data)->meshes_count);
-        cgltf_free(*out_data);
-        *out_data = NULL;
-        return NT_BUILD_ERR_VALIDATION;
+    /* Determine which mesh/primitive to select */
+    cgltf_size sel_mesh = 0;
+
+    if (mesh_name != NULL) {
+        /* Select mesh by name */
+        bool found = false;
+        for (cgltf_size i = 0; i < (*out_data)->meshes_count; i++) {
+            if ((*out_data)->meshes[i].name != NULL && strcmp((*out_data)->meshes[i].name, mesh_name) == 0) {
+                sel_mesh = i;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            NT_LOG_ERROR("%s: mesh '%s' not found", path, mesh_name);
+            cgltf_free(*out_data);
+            *out_data = NULL;
+            return NT_BUILD_ERR_VALIDATION;
+        }
+    } else if (mesh_index != UINT32_MAX) {
+        /* Select mesh by index */
+        if (mesh_index >= (uint32_t)(*out_data)->meshes_count) {
+            NT_LOG_ERROR("%s: mesh_index %u out of range (meshes_count=%zu)", path, mesh_index, (*out_data)->meshes_count);
+            cgltf_free(*out_data);
+            *out_data = NULL;
+            return NT_BUILD_ERR_VALIDATION;
+        }
+        sel_mesh = mesh_index;
+    } else {
+        /* Single-mesh mode (D-11): expect exactly 1 mesh, 1 primitive */
+        if ((*out_data)->meshes_count != 1) {
+            NT_LOG_ERROR("%s: expected 1 mesh, found %zu", path, (*out_data)->meshes_count);
+            cgltf_free(*out_data);
+            *out_data = NULL;
+            return NT_BUILD_ERR_VALIDATION;
+        }
+        if ((*out_data)->meshes[0].primitives_count != 1) {
+            NT_LOG_ERROR("%s: expected 1 primitive, found %zu", path, (*out_data)->meshes[0].primitives_count);
+            cgltf_free(*out_data);
+            *out_data = NULL;
+            return NT_BUILD_ERR_VALIDATION;
+        }
     }
-    if ((*out_data)->meshes[0].primitives_count != 1) {
-        NT_LOG_ERROR("%s: expected 1 primitive, found %zu", path, (*out_data)->meshes[0].primitives_count);
+
+    if ((*out_data)->meshes[sel_mesh].primitives_count < 1) {
+        NT_LOG_ERROR("%s: mesh[%zu] has no primitives", path, sel_mesh);
         cgltf_free(*out_data);
         *out_data = NULL;
         return NT_BUILD_ERR_VALIDATION;
     }
 
-    *out_prim = &(*out_data)->meshes[0].primitives[0];
+    if ((*out_data)->meshes[sel_mesh].primitives_count > 1) {
+        NT_LOG_ERROR("%s: mesh[%zu] has %zu primitives, add_mesh supports only single-primitive meshes (use scene API for multi-primitive)", path, sel_mesh,
+                     (*out_data)->meshes[sel_mesh].primitives_count);
+        cgltf_free(*out_data);
+        *out_data = NULL;
+        return NT_BUILD_ERR_VALIDATION;
+    }
+
+    *out_prim = &(*out_data)->meshes[sel_mesh].primitives[0];
 
     if ((*out_prim)->type != cgltf_primitive_type_triangles) {
         NT_LOG_ERROR("%s: primitive type %d is not TRIANGLES (only triangles supported)", path, (int)(*out_prim)->type);
@@ -158,8 +205,6 @@ static uint8_t *nt_interleave_vertices(const NtStreamLayout *layout, uint32_t st
         return NULL;
     }
 
-    bool warned_f16 = false;
-
     for (uint32_t v = 0; v < vertex_count; v++) {
         uint8_t *dst = vertex_buf + ((size_t)v * vertex_stride);
         uint32_t offset = 0;
@@ -167,7 +212,7 @@ static uint8_t *nt_interleave_vertices(const NtStreamLayout *layout, uint32_t st
             uint32_t comp_size = nt_stream_type_size((uint8_t)layout[s].type);
             for (uint8_t c = 0; c < layout[s].count; c++) {
                 float val = stream_floats[s][((size_t)v * layout[s].count) + c];
-                nt_builder_convert_component(val, layout[s].type, layout[s].normalized, dst + offset, &warned_f16);
+                nt_builder_convert_component(val, layout[s].type, layout[s].normalized, dst + offset);
                 offset += comp_size;
             }
         }
@@ -180,7 +225,9 @@ static uint8_t *nt_interleave_vertices(const NtStreamLayout *layout, uint32_t st
 /* --- Mesh import (called from finish_pack) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, uint64_t resource_id) {
+nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name,
+                                         uint32_t mesh_index, uint64_t resource_id) {
+    (void)tangent_mode; /* reserved for future tangent support in add_mesh path */
     if (!ctx || !path || !layout) {
         return NT_BUILD_ERR_VALIDATION;
     }
@@ -192,7 +239,7 @@ nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path
 
     cgltf_data *data = NULL;
     cgltf_primitive *prim = NULL;
-    ret = nt_parse_gltf(path, &data, &prim);
+    ret = nt_parse_gltf_mesh(path, mesh_name, mesh_index, &data, &prim);
     if (ret != NT_BUILD_OK) {
         return ret;
     }

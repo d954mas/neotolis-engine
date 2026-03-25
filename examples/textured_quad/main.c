@@ -44,6 +44,7 @@
 
 #include "math/nt_math.h"
 #include "nt_pack_format.h"
+#include "tq_assets.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -398,10 +399,10 @@ int main(void) {
     nt_mesh_renderer_init(&mr_desc);
 
     /* Request resource handles (instanced shaders) */
-    s_mesh_handle = nt_resource_request(nt_hash64_str("assets/meshes/cube.glb"), NT_ASSET_MESH);
-    s_vs_handle = nt_resource_request(nt_hash64_str("assets/shaders/mesh_inst.vert"), NT_ASSET_SHADER_CODE);
-    s_fs_handle = nt_resource_request(nt_hash64_str("assets/shaders/mesh_inst.frag"), NT_ASSET_SHADER_CODE);
-    s_lenna_handle = nt_resource_request(nt_hash64_str("textures/lenna"), NT_ASSET_TEXTURE);
+    s_mesh_handle = nt_resource_request(ASSET_MESH_ASSETS_MESHES_CUBE_GLB, NT_ASSET_MESH);
+    s_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT, NT_ASSET_SHADER_CODE);
+    s_fs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG, NT_ASSET_SHADER_CODE);
+    s_lenna_handle = nt_resource_request(ASSET_TEXTURE_TEXTURES_LENNA, NT_ASSET_TEXTURE);
 
     /* Create material from resource handles */
     s_cube_material = nt_material_create(&(nt_material_create_desc_t){
