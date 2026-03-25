@@ -25,10 +25,10 @@ static const char *type_prefix_for_kind(nt_build_asset_kind_t kind) {
     }
 }
 
-static void path_to_identifier(const char *path, const char *type_prefix, char *out, size_t out_size) {
+static bool path_to_identifier(const char *path, const char *type_prefix, char *out, size_t out_size) {
     int written = snprintf(out, out_size, "ASSET_%s_", type_prefix);
     if (written < 0 || (size_t)written >= out_size) {
-        return;
+        return false;
     }
 
     /* Find extension to strip: last '.' that is after the last '/' */
@@ -40,7 +40,8 @@ static void path_to_identifier(const char *path, const char *type_prefix, char *
         ext = path + strlen(path); /* no extension to strip */
     }
 
-    for (const char *p = path; p < ext && (size_t)written < out_size - 1; p++) {
+    const char *p = path;
+    for (; p < ext && (size_t)written < out_size - 1; p++) {
         char c = *p;
         if (c == '/' || c == '.' || c == '-' || c == ' ') {
             out[written++] = '_';
@@ -49,6 +50,13 @@ static void path_to_identifier(const char *path, const char *type_prefix, char *
         }
     }
     out[written] = '\0';
+
+    /* Detect truncation: path had more chars to convert */
+    if (p < ext) {
+        NT_LOG_WARN("Codegen: identifier truncated at %zu chars for '%s' (increase NT_CODEGEN_MAX_IDENTIFIER)", out_size, path);
+        return false;
+    }
+    return true;
 }
 
 /* --- Header path derivation --- */
@@ -125,8 +133,12 @@ static void derive_func_prefix(const char *header_path, char *prefix, size_t pre
 
 /* --- Collision detection --- */
 
+#ifndef NT_CODEGEN_MAX_IDENTIFIER
+#define NT_CODEGEN_MAX_IDENTIFIER 128
+#endif
+
 static void check_identifier_collisions(const NtBuilderContext *ctx) {
-    char identifiers[NT_BUILD_MAX_ASSETS][512];
+    char identifiers[NT_BUILD_MAX_ASSETS][NT_CODEGEN_MAX_IDENTIFIER];
     uint32_t count = ctx->pending_count;
 
     for (uint32_t i = 0; i < count; i++) {
@@ -193,7 +205,7 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
 
             const char *logical_path = pe->rename_key ? pe->rename_key : pe->path;
 
-            char identifier[512];
+            char identifier[NT_CODEGEN_MAX_IDENTIFIER];
             path_to_identifier(logical_path, prefix, identifier, sizeof(identifier));
 
             (void)fprintf(f, "#define %s ((nt_hash64_t){0x%016llXULL}) /* %s */\n", identifier, (unsigned long long)pe->resource_id, logical_path);

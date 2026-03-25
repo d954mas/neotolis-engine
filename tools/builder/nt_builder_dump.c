@@ -92,10 +92,41 @@ static uint32_t estimate_gzip_size(const uint8_t *data, uint32_t size, uint8_t *
 
 /* ---- Texture format detection ---- */
 
-/* Basis Universal file flags offset: 21 bytes from start of .basis data.
- * cBASISHeaderFlagETC1S = 1 means ETC1S mode. Absence means UASTC. */
-#define BASIS_FLAGS_OFFSET 21
-#define BASIS_FLAG_ETC1S 1
+/*
+ * Basis Universal file header layout (from basisu_file_headers.h):
+ *
+ *   offset  0: m_sig          (2 bytes)  signature 0x4273 ('sB')
+ *   offset  2: m_ver          (2 bytes)  file version
+ *   offset  4: m_header_size  (2 bytes)
+ *   offset  6: m_header_crc16 (2 bytes)
+ *   offset  8: m_data_size    (4 bytes)
+ *   offset 12: m_data_crc16   (2 bytes)
+ *   offset 14: m_total_slices (3 bytes)
+ *   offset 17: m_total_images (3 bytes)
+ *   offset 20: m_tex_format   (1 byte)   basis_tex_format enum: 0=ETC1S, 1=UASTC
+ *   offset 21: m_flags        (2 bytes)
+ *   ...
+ *
+ * We read m_tex_format directly — more reliable than checking header flags.
+ */
+#define BASIS_SIG_OFFSET 0
+#define BASIS_SIG_VALUE 0x4273 /* 'sB' little-endian */
+#define BASIS_TEX_FORMAT_OFFSET 20
+#define BASIS_MIN_HEADER_SIZE 23 /* enough to read through m_tex_format */
+#define BASIS_TEX_FORMAT_ETC1S 0
+#define BASIS_TEX_FORMAT_UASTC 1
+
+/* Returns 0=ETC1S, 1=UASTC, -1=unknown/too small/bad signature */
+static int basis_detect_mode(const uint8_t *basis_data, uint32_t basis_size) {
+    if (basis_size < BASIS_MIN_HEADER_SIZE) {
+        return -1;
+    }
+    uint16_t sig = (uint16_t)(basis_data[BASIS_SIG_OFFSET] | ((uint16_t)basis_data[BASIS_SIG_OFFSET + 1] << 8));
+    if (sig != BASIS_SIG_VALUE) {
+        return -1;
+    }
+    return (int)basis_data[BASIS_TEX_FORMAT_OFFSET];
+}
 
 static const char *texture_format_str(const uint8_t *asset_data, uint32_t asset_size) {
     if (!asset_data || asset_size < sizeof(NtTextureAssetHeader)) {
@@ -106,19 +137,33 @@ static const char *texture_format_str(const uint8_t *asset_data, uint32_t asset_
         return "TEX|RAW";
     }
     if (hdr->compression == NT_TEXTURE_COMPRESSION_BASIS) {
-        /* Read Basis flags from the encoded data after the texture header */
         const uint8_t *basis_data = asset_data + sizeof(NtTextureAssetHeader);
         uint32_t basis_size = asset_size - (uint32_t)sizeof(NtTextureAssetHeader);
-        if (basis_size > BASIS_FLAGS_OFFSET + 1) {
-            uint16_t flags = (uint16_t)(basis_data[BASIS_FLAGS_OFFSET] | ((uint16_t)basis_data[BASIS_FLAGS_OFFSET + 1] << 8));
-            if (flags & BASIS_FLAG_ETC1S) {
-                return "TEX|ETC1S";
-            }
+        int mode = basis_detect_mode(basis_data, basis_size);
+        if (mode == BASIS_TEX_FORMAT_ETC1S) {
+            return "TEX|ETC1S";
+        }
+        if (mode == BASIS_TEX_FORMAT_UASTC) {
             return "TEX|UASTC";
         }
         return "TEX|BASIS";
     }
     return "TEX";
+}
+
+/* ---- Truncate long names (keep tail, prefix with "...") ---- */
+
+#define DUMP_NAME_WIDTH 40
+
+static const char *truncate_name(const char *name, char *buf, size_t buf_size) {
+    size_t len = strlen(name);
+    if (len <= DUMP_NAME_WIDTH) {
+        return name;
+    }
+    /* Show "..." + last (DUMP_NAME_WIDTH - 3) chars */
+    size_t tail = DUMP_NAME_WIDTH - 3;
+    (void)snprintf(buf, buf_size, "...%s", name + len - tail);
+    return buf;
 }
 
 /* ---- Asset type name ---- */
@@ -210,15 +255,13 @@ static void accumulate_texture_stats(DumpStats *st, const uint8_t *asset_data, u
     if (thdr->compression == NT_TEXTURE_COMPRESSION_RAW) {
         st->tex_raw_fmt++;
     } else if (thdr->compression == NT_TEXTURE_COMPRESSION_BASIS) {
-        uint32_t basis_data_size = asset_size - (uint32_t)sizeof(NtTextureAssetHeader);
         const uint8_t *basis_data = asset_data + sizeof(NtTextureAssetHeader);
-        if (basis_data_size > BASIS_FLAGS_OFFSET + 1) {
-            uint16_t flags = (uint16_t)(basis_data[BASIS_FLAGS_OFFSET] | ((uint16_t)basis_data[BASIS_FLAGS_OFFSET + 1] << 8));
-            if (flags & BASIS_FLAG_ETC1S) {
-                st->tex_etc1s++;
-            } else {
-                st->tex_uastc++;
-            }
+        uint32_t basis_size = asset_size - (uint32_t)sizeof(NtTextureAssetHeader);
+        int mode = basis_detect_mode(basis_data, basis_size);
+        if (mode == BASIS_TEX_FORMAT_ETC1S) {
+            st->tex_etc1s++;
+        } else if (mode == BASIS_TEX_FORMAT_UASTC) {
+            st->tex_uastc++;
         }
     }
 }
@@ -447,8 +490,8 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
     NT_LOG_INFO("Pack: %s (v%u, %u assets)", pack_path, header->version, header->asset_count);
     NT_LOG_INFO("CRC32: 0x%08X %s", header->checksum, crc_status);
     NT_LOG_INFO("");
-    NT_LOG_INFO("  %-3s %-30s %-10s %-28s %s", "#", "Name", "Type", "Size", "Note");
-    NT_LOG_INFO("  %-3s %-30s %-10s %-28s %s", "-", "----", "----", "----", "----");
+    NT_LOG_INFO("  %-3s %-40s %-10s %-28s %s", "#", "Name", "Type", "Size", "Note");
+    NT_LOG_INFO("  %-3s %-40s %-10s %-28s %s", "-", "----", "----", "----", "----");
 
     /* Per-type accumulators */
     DumpStats stats;
@@ -491,7 +534,9 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
             (void)snprintf(note_str, sizeof(note_str), "dup #%d", dup_of);
         }
 
-        NT_LOG_INFO("  %-3u %-30.30s %-10s %-28s %s", i, name, type_tag, size_str, note_str);
+        char trunc_buf[DUMP_NAME_WIDTH + 1];
+        const char *display_name = truncate_name(name, trunc_buf, sizeof(trunc_buf));
+        NT_LOG_INFO("  %-3u %-40s %-10s %-28s %s", i, display_name, type_tag, size_str, note_str);
 
         /* Accumulate per-type stats */
         accumulate_stats(&stats, e, asset_data, gz_size, dup_of);
