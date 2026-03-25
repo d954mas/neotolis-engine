@@ -15,25 +15,37 @@ static void nt_builder_free_mesh_data(NtBuildMeshData *md) {
         free((char *)md->layout[s].engine_name);
         free((char *)md->layout[s].gltf_name);
     }
+    free(md->mesh_name);
+    free(md->file_path);
     free(md);
 }
 
-static NtBuildMeshData *nt_builder_copy_mesh_data(const NtStreamLayout *layout, uint32_t stream_count) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static NtBuildMeshData *nt_builder_copy_mesh_data(const nt_mesh_opts_t *opts) {
     NtBuildMeshData *md = (NtBuildMeshData *)calloc(1, sizeof(NtBuildMeshData));
     if (!md) {
         return NULL;
     }
-    md->stream_count = stream_count;
-    memcpy(md->layout, layout, stream_count * sizeof(NtStreamLayout));
-    for (uint32_t s = 0; s < stream_count; s++) {
-        if (layout[s].engine_name) {
-            md->layout[s].engine_name = strdup(layout[s].engine_name);
+    md->stream_count = opts->stream_count;
+    md->tangent_mode = opts->tangent_mode;
+    md->mesh_index = UINT32_MAX; /* sentinel: not used */
+    memcpy(md->layout, opts->layout, opts->stream_count * sizeof(NtStreamLayout));
+    for (uint32_t s = 0; s < opts->stream_count; s++) {
+        if (opts->layout[s].engine_name) {
+            md->layout[s].engine_name = strdup(opts->layout[s].engine_name);
             NT_BUILD_ASSERT(md->layout[s].engine_name && "strdup engine_name failed");
         }
-        if (layout[s].gltf_name) {
-            md->layout[s].gltf_name = strdup(layout[s].gltf_name);
+        if (opts->layout[s].gltf_name) {
+            md->layout[s].gltf_name = strdup(opts->layout[s].gltf_name);
             NT_BUILD_ASSERT(md->layout[s].gltf_name && "strdup gltf_name failed");
         }
+    }
+    if (opts->mesh_name) {
+        md->mesh_name = strdup(opts->mesh_name);
+        NT_BUILD_ASSERT(md->mesh_name && "strdup mesh_name failed");
+    }
+    if (opts->use_mesh_index) {
+        md->mesh_index = opts->mesh_index;
     }
     return md;
 }
@@ -343,7 +355,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         switch (pe->kind) {
         case NT_BUILD_ASSET_MESH: {
             NtBuildMeshData *md = (NtBuildMeshData *)pe->data;
-            ret = nt_builder_import_mesh(ctx, pe->path, md->layout, md->stream_count, pe->resource_id);
+            const char *file_path = md->file_path ? md->file_path : pe->path;
+            ret = nt_builder_import_mesh(ctx, file_path, md->layout, md->stream_count, md->tangent_mode, md->mesh_name, md->mesh_index, pe->resource_id);
             break;
         }
         case NT_BUILD_ASSET_TEXTURE:
@@ -503,15 +516,40 @@ static uint64_t nt_builder_path_id(const char *path) {
 
 /* --- Public add_* --- */
 
-nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count) {
-    if (!layout || stream_count == 0 || stream_count > NT_MESH_MAX_STREAMS) {
+nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const nt_mesh_opts_t *opts) {
+    if (!opts || !opts->layout || opts->stream_count == 0 || opts->stream_count > NT_MESH_MAX_STREAMS) {
         return NT_BUILD_ERR_VALIDATION;
     }
-    NtBuildMeshData *md = nt_builder_copy_mesh_data(layout, stream_count);
+    NtBuildMeshData *md = nt_builder_copy_mesh_data(opts);
     if (!md) {
         return NT_BUILD_ERR_IO;
     }
-    nt_build_result_t r = nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_MESH, md);
+
+    /* Build logical path for resource_id:
+     *   mesh_name set  -> "path/mesh_name" (or "path/resource_name" if override)
+     *   mesh_index set -> "path/index"     (or "path/resource_name" if override)
+     *   neither        -> "path" (single-mesh mode)
+     */
+    char logical_path[1024];
+    if (opts->mesh_name != NULL) {
+        const char *suffix = opts->resource_name ? opts->resource_name : opts->mesh_name;
+        (void)snprintf(logical_path, sizeof(logical_path), "%s/%s", path, suffix);
+        md->file_path = strdup(path);
+        NT_BUILD_ASSERT(md->file_path && "strdup file_path failed");
+    } else if (opts->use_mesh_index) {
+        if (opts->resource_name) {
+            (void)snprintf(logical_path, sizeof(logical_path), "%s/%s", path, opts->resource_name);
+        } else {
+            (void)snprintf(logical_path, sizeof(logical_path), "%s/%u", path, opts->mesh_index);
+        }
+        md->file_path = strdup(path);
+        NT_BUILD_ASSERT(md->file_path && "strdup file_path failed");
+    } else {
+        (void)snprintf(logical_path, sizeof(logical_path), "%s", path);
+        /* file_path stays NULL -- use entry->path directly */
+    }
+
+    nt_build_result_t r = nt_builder_add_entry(ctx, logical_path, NT_BUILD_ASSET_MESH, md);
     if (r != NT_BUILD_OK) {
         nt_builder_free_mesh_data(md);
     }

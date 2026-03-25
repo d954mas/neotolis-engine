@@ -55,7 +55,7 @@ int main(int argc, char *argv[]) {
             (void)fprintf(stderr, "Failed to start base pack\n");
             return 1;
         }
-        nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", layout, 2);
+        nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", &(nt_mesh_opts_t){.layout = layout, .stream_count = 2});
         nt_builder_add_shader(ctx, "assets/shaders/mesh.vert", NT_BUILD_SHADER_VERTEX);
         nt_builder_add_shader(ctx, "assets/shaders/mesh.frag", NT_BUILD_SHADER_FRAGMENT);
         nt_builder_add_shader(ctx, "assets/shaders/mesh_inst.vert", NT_BUILD_SHADER_VERTEX);

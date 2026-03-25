@@ -38,6 +38,10 @@ typedef enum {
 typedef struct {
     NtStreamLayout layout[NT_MESH_MAX_STREAMS]; /* deep-copied from user */
     uint32_t stream_count;
+    nt_tangent_mode_t tangent_mode;
+    char *mesh_name;     /* owned copy, NULL if not used */
+    uint32_t mesh_index; /* UINT32_MAX if not used */
+    char *file_path;     /* owned copy of actual file path (for multi-mesh logical path) */
 } NtBuildMeshData;
 
 /* Type-specific data for shader entries */
@@ -133,7 +137,8 @@ nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data
 nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size);
 
 /* Internal import functions -- called from finish_pack */
-nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, uint64_t resource_id);
+nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name,
+                                         uint32_t mesh_index, uint64_t resource_id);
 nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *path, uint64_t resource_id);
 nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint64_t resource_id);
 nt_build_result_t nt_builder_import_blob(NtBuilderContext *ctx, const void *data, uint32_t size, uint64_t resource_id);

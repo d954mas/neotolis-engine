@@ -183,8 +183,7 @@ typedef struct {
 } GlobCallbackData;
 
 typedef struct {
-    const NtStreamLayout *layout;
-    uint32_t stream_count;
+    const nt_mesh_opts_t *opts;
 } GlobMeshParams;
 
 typedef struct {
@@ -197,7 +196,7 @@ static void mesh_glob_callback(const char *full_path, void *user) {
     GlobCallbackData *cb = (GlobCallbackData *)user;
     GlobMeshParams *p = (GlobMeshParams *)cb->type_data;
     cb->match_count++;
-    nt_build_result_t r = nt_builder_add_mesh(cb->ctx, full_path, p->layout, p->stream_count);
+    nt_build_result_t r = nt_builder_add_mesh(cb->ctx, full_path, p->opts);
     if (r != NT_BUILD_OK) {
         cb->last_result = r;
     }
@@ -242,11 +241,11 @@ static nt_build_result_t nt_builder_glob_add(NtBuilderContext *ctx, const char *
     return cb.last_result;
 }
 
-nt_build_result_t nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const NtStreamLayout *layout, uint32_t stream_count) {
-    if (!ctx || !pattern || !layout) {
+nt_build_result_t nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const nt_mesh_opts_t *opts) {
+    if (!ctx || !pattern || !opts) {
         return NT_BUILD_ERR_VALIDATION;
     }
-    GlobMeshParams p = {layout, stream_count};
+    GlobMeshParams p = {opts};
     return nt_builder_glob_add(ctx, pattern, mesh_glob_callback, &p);
 }
 

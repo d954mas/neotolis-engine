@@ -334,7 +334,7 @@ void test_mesh_round_trip(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, layout, 1);
+    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
     r = nt_builder_finish_pack(ctx);
@@ -378,7 +378,7 @@ void test_missing_position_attribute_errors(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     /* add_mesh is deferred -- succeeds */
-    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, layout, 1);
+    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
     /* finish_pack fails during import */
@@ -669,7 +669,7 @@ void test_multi_asset_pack(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, layout, 1);
+    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
     r = nt_builder_add_texture(ctx, png_path);
@@ -807,7 +807,7 @@ void test_e2e_real_assets(void) {
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, "assets/shaders/mesh.vert", NT_BUILD_SHADER_VERTEX));
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, "assets/shaders/mesh.frag", NT_BUILD_SHADER_FRAGMENT));
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", layout, 2));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", &(nt_mesh_opts_t){.layout = layout, .stream_count = 2}));
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_texture(ctx, "assets/textures/lenna.png"));
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
@@ -1500,6 +1500,264 @@ void test_gl_validation_type_error(void) {
     nt_builder_free_pack(ctx);
 }
 
+/* --- Multi-mesh glb helper ---
+ * Writes a minimal valid .glb with 2 named meshes: "FirstMesh" and "SecondMesh".
+ * Each mesh has 1 primitive with 3 vertices (triangle) + 3 uint16 indices.
+ */
+static void write_test_multi_mesh_glb(const char *path) {
+    /* JSON chunk -- two meshes, each with its own accessors/bufferViews.
+     * Mesh 0 "FirstMesh": positions at bv0, indices at bv1
+     * Mesh 1 "SecondMesh": positions at bv2, indices at bv3
+     * Binary layout: [pos0 36B][idx0 6B+2pad][pos1 36B][idx1 6B+2pad] = 88 bytes */
+    const char *json_str = "{"
+                           "\"asset\":{\"version\":\"2.0\"},"
+                           "\"meshes\":["
+                           "{\"name\":\"FirstMesh\",\"primitives\":[{\"attributes\":{\"POSITION\":0},\"indices\":1}]},"
+                           "{\"name\":\"SecondMesh\",\"primitives\":[{\"attributes\":{\"POSITION\":2},\"indices\":3}]}"
+                           "],"
+                           "\"accessors\":["
+                           "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\","
+                           "\"max\":[1.0,1.0,0.0],\"min\":[0.0,0.0,0.0]},"
+                           "{\"bufferView\":1,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"},"
+                           "{\"bufferView\":2,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\","
+                           "\"max\":[2.0,2.0,0.0],\"min\":[0.0,0.0,0.0]},"
+                           "{\"bufferView\":3,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}"
+                           "],"
+                           "\"bufferViews\":["
+                           "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},"
+                           "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":6},"
+                           "{\"buffer\":0,\"byteOffset\":44,\"byteLength\":36},"
+                           "{\"buffer\":0,\"byteOffset\":80,\"byteLength\":6}"
+                           "],"
+                           "\"buffers\":[{\"byteLength\":88}]"
+                           "}";
+
+    uint32_t json_len = (uint32_t)strlen(json_str);
+    uint32_t json_padded = (json_len + 3U) & ~3U;
+    uint32_t json_padding = json_padded - json_len;
+
+    /* Binary data: two sets of (3 position vec3 + 3 uint16 indices + 2-byte pad) */
+    float positions0[] = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+    uint16_t indices0[] = {0, 1, 2};
+    uint16_t pad0 = 0;
+    float positions1[] = {0.0F, 0.0F, 0.0F, 2.0F, 0.0F, 0.0F, 0.0F, 2.0F, 0.0F};
+    uint16_t indices1[] = {0, 1, 2};
+    uint16_t pad1 = 0;
+
+    uint32_t bin_data_size = 88;
+    uint32_t bin_padded = (bin_data_size + 3U) & ~3U;
+
+    uint32_t glb_magic = 0x46546C67;
+    uint32_t glb_version = 2;
+    uint32_t json_chunk_type = 0x4E4F534A;
+    uint32_t bin_chunk_type = 0x004E4942;
+    uint32_t total_length = 12 + 8 + json_padded + 8 + bin_padded;
+
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        return;
+    }
+
+    (void)fwrite(&glb_magic, 4, 1, f);
+    (void)fwrite(&glb_version, 4, 1, f);
+    (void)fwrite(&total_length, 4, 1, f);
+
+    (void)fwrite(&json_padded, 4, 1, f);
+    (void)fwrite(&json_chunk_type, 4, 1, f);
+    (void)fwrite(json_str, 1, json_len, f);
+    for (uint32_t i = 0; i < json_padding; i++) {
+        char space = ' ';
+        (void)fwrite(&space, 1, 1, f);
+    }
+
+    (void)fwrite(&bin_padded, 4, 1, f);
+    (void)fwrite(&bin_chunk_type, 4, 1, f);
+    (void)fwrite(positions0, sizeof(positions0), 1, f);
+    (void)fwrite(indices0, sizeof(indices0), 1, f);
+    (void)fwrite(&pad0, sizeof(pad0), 1, f);
+    (void)fwrite(positions1, sizeof(positions1), 1, f);
+    (void)fwrite(indices1, sizeof(indices1), 1, f);
+    (void)fwrite(&pad1, sizeof(pad1), 1, f);
+
+    (void)fclose(f);
+}
+
+/* --- Multi-mesh add_mesh tests --- */
+
+void test_add_mesh_by_name(void) {
+    const char *glb_path = TMP_DIR "/multi_mesh.glb";
+    write_test_multi_mesh_glb(glb_path);
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+
+    const char *pack_path = TMP_DIR "/by_name.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_name = "SecondMesh"});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Verify resource_id = hash(normalized("path/SecondMesh")) */
+    char logical[512];
+    (void)snprintf(logical, sizeof(logical), "%s/SecondMesh", glb_path);
+    nt_hash64_t expected_id = nt_builder_normalize_and_hash(logical);
+
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    NtPackHeader hdr;
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
+    TEST_ASSERT_EQUAL_UINT16(1, hdr.asset_count);
+    NtAssetEntry entry;
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
+    TEST_ASSERT_EQUAL_HEX64(expected_id.value, entry.resource_id);
+    TEST_ASSERT_EQUAL_UINT8(NT_ASSET_MESH, entry.asset_type);
+
+    /* Verify it's the second mesh (vertices go up to 2.0) */
+    (void)fseek(f, (long)entry.offset, SEEK_SET);
+    NtMeshAssetHeader mesh;
+    TEST_ASSERT_EQUAL(1, fread(&mesh, sizeof(mesh), 1, f));
+    TEST_ASSERT_EQUAL_UINT32(NT_MESH_MAGIC, mesh.magic);
+    TEST_ASSERT_EQUAL_UINT32(3, mesh.vertex_count);
+
+    (void)fclose(f);
+}
+
+void test_add_mesh_by_index(void) {
+    const char *glb_path = TMP_DIR "/multi_mesh_idx.glb";
+    write_test_multi_mesh_glb(glb_path);
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+
+    const char *pack_path = TMP_DIR "/by_index.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_index = 1, .use_mesh_index = true});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Verify resource_id = hash(normalized("path/1")) */
+    char logical[512];
+    (void)snprintf(logical, sizeof(logical), "%s/1", glb_path);
+    nt_hash64_t expected_id = nt_builder_normalize_and_hash(logical);
+
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    NtPackHeader hdr;
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
+    NtAssetEntry entry;
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
+    TEST_ASSERT_EQUAL_HEX64(expected_id.value, entry.resource_id);
+    (void)fclose(f);
+}
+
+void test_add_mesh_single_unchanged(void) {
+    /* Existing single-mesh glb, opts-based call, same result as before */
+    const char *glb_path = TMP_DIR "/single_unch.glb";
+    write_test_glb(glb_path);
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+
+    const char *pack_path = TMP_DIR "/single_unch.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Resource ID should be hash of the path alone (no suffix) */
+    nt_hash64_t expected_id = nt_builder_normalize_and_hash(glb_path);
+
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    NtPackHeader hdr;
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
+    NtAssetEntry entry;
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
+    TEST_ASSERT_EQUAL_HEX64(expected_id.value, entry.resource_id);
+    TEST_ASSERT_EQUAL_UINT8(NT_ASSET_MESH, entry.asset_type);
+    (void)fclose(f);
+}
+
+void test_add_mesh_by_name_not_found(void) {
+    const char *glb_path = TMP_DIR "/multi_mesh_nf.glb";
+    write_test_multi_mesh_glb(glb_path);
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+
+    const char *pack_path = TMP_DIR "/name_nf.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_name = "NonExistent"});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r); /* add is deferred */
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r); /* import fails */
+    nt_builder_free_pack(ctx);
+}
+
+void test_add_mesh_by_index_out_of_range(void) {
+    const char *glb_path = TMP_DIR "/multi_mesh_oor.glb";
+    write_test_multi_mesh_glb(glb_path);
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+
+    const char *pack_path = TMP_DIR "/index_oor.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_index = 99, .use_mesh_index = true});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r); /* add is deferred */
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r); /* import fails */
+    nt_builder_free_pack(ctx);
+}
+
+void test_add_mesh_resource_name_override(void) {
+    const char *glb_path = TMP_DIR "/multi_mesh_rn.glb";
+    write_test_multi_mesh_glb(glb_path);
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+
+    const char *pack_path = TMP_DIR "/res_name.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_name = "SecondMesh", .resource_name = "custom"});
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Verify resource_id = hash(normalized("path/custom")) */
+    char logical[512];
+    (void)snprintf(logical, sizeof(logical), "%s/custom", glb_path);
+    nt_hash64_t expected_id = nt_builder_normalize_and_hash(logical);
+
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    NtPackHeader hdr;
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
+    NtAssetEntry entry;
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
+    TEST_ASSERT_EQUAL_HEX64(expected_id.value, entry.resource_id);
+    (void)fclose(f);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -1575,6 +1833,14 @@ int main(void) {
     RUN_TEST(test_gl_validation_invalid_shader);
     RUN_TEST(test_gl_validation_fragment_shader);
     RUN_TEST(test_gl_validation_type_error);
+
+    /* Multi-mesh add_mesh */
+    RUN_TEST(test_add_mesh_by_name);
+    RUN_TEST(test_add_mesh_by_index);
+    RUN_TEST(test_add_mesh_single_unchanged);
+    RUN_TEST(test_add_mesh_by_name_not_found);
+    RUN_TEST(test_add_mesh_by_index_out_of_range);
+    RUN_TEST(test_add_mesh_resource_name_override);
 
     return UNITY_END();
 }

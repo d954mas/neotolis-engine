@@ -55,11 +55,15 @@ typedef enum {
     NT_TANGENT_NONE = 3,    /* skip tangent attribute entirely */
 } nt_tangent_mode_t;
 
-/* Mesh options for scene mesh extraction */
+/* Mesh options for add_mesh and scene mesh extraction */
 typedef struct {
     const NtStreamLayout *layout;
     uint32_t stream_count;
     nt_tangent_mode_t tangent_mode;
+    const char *mesh_name;     /* select mesh by name in multi-mesh glb (NULL = not used) */
+    uint32_t mesh_index;       /* select mesh by index (only when use_mesh_index is true) */
+    bool use_mesh_index;       /* true = select by mesh_index */
+    const char *resource_name; /* optional rid suffix override (NULL = auto) */
 } nt_mesh_opts_t;
 
 /* --- glTF scene types (parse/inspect/extract) --- */
@@ -117,7 +121,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx);
 void nt_builder_free_pack(NtBuilderContext *ctx);
 
 /* --- Asset addition (single file) --- */
-nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count);
+nt_build_result_t nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const nt_mesh_opts_t *opts);
 nt_build_result_t nt_builder_add_texture(NtBuilderContext *ctx, const char *path);
 nt_build_result_t nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage);
 
@@ -131,7 +135,7 @@ void nt_builder_set_force(NtBuilderContext *ctx, bool force);
 nt_build_result_t nt_builder_add_asset_root(NtBuilderContext *ctx, const char *path);
 
 /* --- Batch addition (glob patterns) --- */
-nt_build_result_t nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const NtStreamLayout *layout, uint32_t stream_count);
+nt_build_result_t nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const nt_mesh_opts_t *opts);
 nt_build_result_t nt_builder_add_textures(NtBuilderContext *ctx, const char *pattern);
 nt_build_result_t nt_builder_add_shaders(NtBuilderContext *ctx, const char *pattern, nt_build_shader_stage_t stage);
 
