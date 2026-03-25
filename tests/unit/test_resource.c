@@ -60,7 +60,7 @@ static uint8_t *build_test_pack(uint32_t asset_count, uint32_t *out_size) {
         entries[i].format_version = 1;
         entries[i].asset_type = (uint8_t)(NT_ASSET_MESH + (i % 3)); /* rotate types */
         entries[i]._pad = 0;
-        entries[i]._pad2 = 0;
+        entries[i].meta_offset = 0;
         entries[i].offset = data_offset;
         entries[i].size = data_per_asset;
 
@@ -303,7 +303,7 @@ static uint8_t *build_pack_with_rid(uint64_t rid, uint8_t atype, uint32_t *out_s
     entry->format_version = 1;
     entry->asset_type = atype;
     entry->_pad = 0;
-    entry->_pad2 = 0;
+    entry->meta_offset = 0;
     entry->offset = header_size;
     entry->size = data_per_asset;
 
@@ -1131,7 +1131,7 @@ static void write_test_pack_multi(const char *path, uint8_t atype, uint32_t coun
         entries[i].format_version = 1;
         entries[i].asset_type = atype;
         entries[i]._pad = 0;
-        entries[i]._pad2 = 0;
+        entries[i].meta_offset = 0;
         entries[i].offset = data_offset;
         entries[i].size = data_per_asset;
         uint32_t aligned = (data_per_asset + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
@@ -1468,7 +1468,7 @@ static uint8_t *build_blob_pack(uint64_t rid, uint32_t payload_size, uint8_t fil
     entry->format_version = 1;
     entry->asset_type = NT_ASSET_BLOB;
     entry->_pad = 0;
-    entry->_pad2 = 0;
+    entry->meta_offset = 0;
     entry->offset = header_size;
     entry->size = asset_data_size;
 
