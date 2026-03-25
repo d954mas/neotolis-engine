@@ -60,7 +60,7 @@ void test_align_up_macro(void) {
 
 void test_pack_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(0, offsetof(NtPackHeader, magic));
-    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtPackHeader, _reserved));
+    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtPackHeader, meta_count));
     TEST_ASSERT_EQUAL_UINT(8, offsetof(NtPackHeader, version));
     TEST_ASSERT_EQUAL_UINT(10, offsetof(NtPackHeader, asset_count));
     TEST_ASSERT_EQUAL_UINT(12, offsetof(NtPackHeader, header_size));
@@ -75,7 +75,7 @@ void test_asset_entry_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(16, offsetof(NtAssetEntry, format_version));
     TEST_ASSERT_EQUAL_UINT(18, offsetof(NtAssetEntry, asset_type));
     TEST_ASSERT_EQUAL_UINT(19, offsetof(NtAssetEntry, _pad));
-    TEST_ASSERT_EQUAL_UINT(20, offsetof(NtAssetEntry, _pad2));
+    TEST_ASSERT_EQUAL_UINT(20, offsetof(NtAssetEntry, meta_offset));
 }
 
 /* --- Asset type enum --- */
