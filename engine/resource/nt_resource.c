@@ -408,6 +408,7 @@ void nt_resource_step(void) {
         slot->state = NT_ASSET_STATE_REGISTERED;
         slot->resolve_prio = INT16_MIN;
         slot->resolve_seq = 0;
+        slot->resolve_asset_idx = 0;
     }
 
     /* D.2: Single pass over assets -- O(A) via slot_map lookup */
@@ -451,6 +452,7 @@ void nt_resource_step(void) {
             slot->state = NT_ASSET_STATE_READY;
             slot->resolve_prio = prio;
             slot->resolve_seq = seq;
+            slot->resolve_asset_idx = (uint16_t)ai;
         }
     }
 
@@ -582,6 +584,9 @@ void nt_resource_unmount(nt_hash32_t pack_id) {
         free((void *)pack->blob);
     }
 
+    /* Free resident metadata */
+    free(pack->meta_data);
+
     memset(&s_resource.packs[pack_idx], 0, sizeof(NtPackMeta));
     s_resource.needs_resolve = true;
 }
@@ -689,6 +694,8 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
         meta->offset = entries[i].offset;
         meta->size = entries[i].size;
         meta->runtime_handle = 0;
+        /* UINT32_MAX = no metadata; non-zero entry offset is absolute (fixed to relative below) */
+        meta->meta_offset = (entries[i].meta_offset != 0) ? entries[i].meta_offset : UINT32_MAX;
 
         /* Detect dedup: check if a previous entry in this pack has same offset+size */
         meta->is_dedup = 0;
@@ -707,8 +714,43 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
         }
     }
 
-    /* Update pack metadata */
+    /* Parse metadata section */
     NtPackMeta *pack = &s_resource.packs[pack_idx];
+
+    if (h->meta_count > 0) {
+        /* Find meta section: earliest non-zero meta_offset among entries */
+        uint32_t meta_section_start = blob_size; /* sentinel */
+        for (uint16_t i = 0; i < h->asset_count; i++) {
+            if (entries[i].meta_offset != 0 && entries[i].meta_offset < meta_section_start) {
+                meta_section_start = entries[i].meta_offset;
+            }
+        }
+
+        if (meta_section_start < blob_size) {
+            uint32_t meta_section_size = blob_size - meta_section_start;
+            /* Copy meta section to resident memory (survives blob eviction) */
+            pack->meta_data = (uint8_t *)malloc(meta_section_size);
+            if (pack->meta_data) {
+                memcpy(pack->meta_data, blob + meta_section_start, meta_section_size);
+                pack->meta_size = meta_section_size;
+                pack->meta_count = h->meta_count;
+
+                /* Convert asset meta_offsets from absolute to meta_data-relative */
+                for (uint32_t ai2 = 0; ai2 < s_resource.asset_hwm; ai2++) {
+                    NtAssetMeta *am = &s_resource.assets[ai2];
+                    if (am->pack_index == (uint16_t)pack_idx && am->meta_offset != UINT32_MAX) {
+                        if (am->meta_offset >= meta_section_start) {
+                            am->meta_offset -= meta_section_start;
+                        } else {
+                            am->meta_offset = UINT32_MAX; /* invalid, clear */
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /* Update pack metadata */
     pack->blob = blob;
     pack->blob_size = blob_size;
     if (pack->pack_state != NT_PACK_STATE_READY) {
@@ -844,6 +886,85 @@ const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size) {
         *out_size = meta->size - (uint32_t)sizeof(NtBlobAssetHeader);
     }
     return pack->blob + meta->offset + sizeof(NtBlobAssetHeader);
+}
+
+/* ---- Metadata query ---- */
+
+const void *nt_resource_get_meta(nt_resource_t handle, uint32_t kind, uint32_t *out_size) {
+    if (out_size) {
+        *out_size = 0;
+    }
+    if (handle.id == 0) {
+        return NULL;
+    }
+
+    uint16_t index = nt_resource_slot_index(handle);
+    uint16_t gen = nt_resource_generation(handle);
+
+    if (index == 0 || index > NT_RESOURCE_MAX_SLOTS) {
+        return NULL;
+    }
+    if (s_resource.slots[index].generation != gen) {
+        return NULL; /* stale handle */
+    }
+
+    const NtResourceSlot *slot = &s_resource.slots[index];
+
+    /* Get the resolved asset index */
+    uint16_t ai = slot->resolve_asset_idx;
+    if (ai >= s_resource.asset_hwm) {
+        return NULL;
+    }
+
+    const NtAssetMeta *ameta = &s_resource.assets[ai];
+    if (ameta->resource_id == 0) {
+        return NULL;
+    }
+    if (ameta->meta_offset == UINT32_MAX) {
+        return NULL; /* no metadata for this asset */
+    }
+
+    /* Find pack's resident meta data */
+    if (ameta->pack_index >= NT_RESOURCE_MAX_PACKS) {
+        return NULL;
+    }
+    const NtPackMeta *pack = &s_resource.packs[ameta->pack_index];
+    if (!pack->mounted || pack->meta_data == NULL) {
+        return NULL;
+    }
+
+    /* Scan NtMetaEntryHeader records from the asset's meta_offset */
+    uint32_t scan_offset = ameta->meta_offset;
+    if (scan_offset >= pack->meta_size) {
+        return NULL;
+    }
+
+    while (scan_offset + sizeof(NtMetaEntryHeader) <= pack->meta_size) {
+        NtMetaEntryHeader mh;
+        memcpy(&mh, pack->meta_data + scan_offset, sizeof(NtMetaEntryHeader));
+
+        if (mh.resource_id != ameta->resource_id) {
+            break; /* end of entries for this asset */
+        }
+
+        uint32_t payload_offset = scan_offset + (uint32_t)sizeof(NtMetaEntryHeader);
+        uint32_t padded_size = (mh.size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+
+        if (mh.kind == kind) {
+            if (payload_offset + mh.size > pack->meta_size) {
+                return NULL; /* corrupt */
+            }
+            if (out_size) {
+                *out_size = mh.size;
+            }
+            return pack->meta_data + payload_offset;
+        }
+
+        /* Move to next entry */
+        scan_offset = payload_offset + padded_size;
+    }
+
+    return NULL; /* kind not found */
 }
 
 /* ---- Virtual packs ---- */

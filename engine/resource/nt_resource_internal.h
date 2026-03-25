@@ -58,6 +58,7 @@ typedef struct {
     uint8_t state;           /* nt_asset_state_t */
     uint8_t is_dedup;        /* 1 = shares data with another asset in same pack (same offset+size) */
     uint8_t _pad;
+    uint32_t meta_offset; /* byte offset into pack's meta_data buffer (UINT32_MAX = no meta) */
 } NtAssetMeta;
 
 /* ---- Per-pack metadata ---- */
@@ -72,6 +73,10 @@ typedef struct {
     uint8_t blob_policy; /* nt_blob_policy_t */
     const uint8_t *blob; /* loaded pack data */
     uint32_t blob_size;  /* size of loaded blob */
+    /* Metadata section (resident, survives blob eviction) */
+    uint8_t *meta_data;  /* heap-copied meta section (NULL if no metadata) */
+    uint32_t meta_size;  /* total bytes in meta section */
+    uint32_t meta_count; /* number of NtMetaEntryHeader records */
     /* Loading progress */
     uint32_t bytes_received;
     uint32_t bytes_total;
@@ -93,13 +98,15 @@ typedef struct {
 /* ---- Per unique ResourceId requested by game ---- */
 
 typedef struct {
-    uint64_t resource_id;    /* nt_hash64 value */
-    uint32_t runtime_handle; /* current best resolved handle */
-    uint16_t generation;     /* for stale detection */
-    int16_t resolve_prio;    /* priority of current winner; Phase 25: use for O(1) activation */
-    uint8_t asset_type;      /* nt_asset_type_t */
-    uint8_t state;           /* nt_asset_state_t of resolved entry */
-    uint16_t resolve_seq;    /* mount_seq of current winner; tiebreak + Phase 25 O(1) activation */
+    uint64_t resource_id;       /* nt_hash64 value */
+    uint32_t runtime_handle;    /* current best resolved handle */
+    uint16_t generation;        /* for stale detection */
+    int16_t resolve_prio;       /* priority of current winner; Phase 25: use for O(1) activation */
+    uint8_t asset_type;         /* nt_asset_type_t */
+    uint8_t state;              /* nt_asset_state_t of resolved entry */
+    uint16_t resolve_seq;       /* mount_seq of current winner; tiebreak + Phase 25 O(1) activation */
+    uint16_t resolve_asset_idx; /* index into assets[] of resolved winner (for metadata lookup) */
+    uint16_t _pad2;             /* alignment padding */
 } NtResourceSlot;
 
 #endif /* NT_RESOURCE_INTERNAL_H */

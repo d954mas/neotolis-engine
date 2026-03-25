@@ -1968,6 +1968,68 @@ void test_merge_sorted_output(void) {
     free(content);
 }
 
+/* --- Metadata in built packs --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_builder_mesh_has_aabb_meta(void) {
+    const char *glb_path = TMP_DIR "/meta_tri.glb";
+    write_test_glb(glb_path);
+
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+    };
+
+    const char *pack_path = TMP_DIR "/meta_mesh.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
+
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Read the output pack and verify meta section */
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+
+    (void)fseek(f, 0, SEEK_END);
+    long file_len = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    TEST_ASSERT_TRUE(file_len > 0);
+    uint32_t file_size = (uint32_t)file_len;
+
+    uint8_t *blob = (uint8_t *)malloc(file_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    TEST_ASSERT_EQUAL(1, fread(blob, file_size, 1, f));
+    (void)fclose(f);
+
+    NtPackHeader hdr;
+    memcpy(&hdr, blob, sizeof(hdr));
+    TEST_ASSERT_EQUAL_HEX32(NT_PACK_MAGIC, hdr.magic);
+    TEST_ASSERT_TRUE(hdr.meta_count > 0); /* at least 1 AABB entry */
+
+    /* Find the asset entry and verify meta_offset is non-zero */
+    NtAssetEntry entry;
+    memcpy(&entry, blob + sizeof(NtPackHeader), sizeof(entry));
+    TEST_ASSERT_TRUE(entry.meta_offset != 0);
+
+    /* Read NtMetaEntryHeader at meta_offset */
+    TEST_ASSERT_TRUE(entry.meta_offset + sizeof(NtMetaEntryHeader) <= file_size);
+    NtMetaEntryHeader mh;
+    memcpy(&mh, blob + entry.meta_offset, sizeof(mh));
+    TEST_ASSERT_EQUAL_UINT64(entry.resource_id, mh.resource_id);
+    TEST_ASSERT_EQUAL_HEX32(nt_hash32_str("aabb").value, mh.kind);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(NtAabbData), mh.size);
+
+    /* Read AABB data -- triangle has min=[0,0,0], max=[1,1,0] */
+    NtAabbData aabb;
+    memcpy(&aabb, blob + entry.meta_offset + sizeof(NtMetaEntryHeader), sizeof(aabb));
+    TEST_ASSERT_TRUE(aabb.max[0] > aabb.min[0] || aabb.max[1] > aabb.min[1] || aabb.max[2] > aabb.min[2]);
+
+    free(blob);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -2060,6 +2122,9 @@ int main(void) {
     RUN_TEST(test_merge_combined_header);
     RUN_TEST(test_merge_dedup);
     RUN_TEST(test_merge_sorted_output);
+
+    /* Metadata in built packs */
+    RUN_TEST(test_builder_mesh_has_aabb_meta);
 
     return UNITY_END();
 }

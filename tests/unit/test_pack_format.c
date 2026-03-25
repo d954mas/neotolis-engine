@@ -222,6 +222,42 @@ void test_texture_header_field_offsets(void) {
 
 void test_texture_format_enum(void) { TEST_ASSERT_EQUAL_UINT(1, NT_TEXTURE_FORMAT_RGBA8); }
 
+/* --- Metadata struct tests --- */
+
+void test_NtMetaEntryHeader_size(void) { TEST_ASSERT_EQUAL_UINT(16, sizeof(NtMetaEntryHeader)); }
+
+void test_NtAabbData_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtAabbData)); }
+
+void test_NtMetaEntryHeader_field_offsets(void) {
+    TEST_ASSERT_EQUAL_UINT(0, offsetof(NtMetaEntryHeader, resource_id));
+    TEST_ASSERT_EQUAL_UINT(8, offsetof(NtMetaEntryHeader, kind));
+    TEST_ASSERT_EQUAL_UINT(12, offsetof(NtMetaEntryHeader, size));
+}
+
+void test_NtPackHeader_meta_count_offset(void) {
+    /* meta_count is at byte offset 4 */
+    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtPackHeader, meta_count));
+    NtPackHeader h;
+    memset(&h, 0, sizeof(h));
+    h.meta_count = 42;
+    uint8_t *bytes = (uint8_t *)&h;
+    uint32_t val;
+    memcpy(&val, bytes + 4, sizeof(val));
+    TEST_ASSERT_EQUAL_UINT32(42, val);
+}
+
+void test_NtAssetEntry_meta_offset_offset(void) {
+    /* meta_offset is at byte offset 20 */
+    TEST_ASSERT_EQUAL_UINT(20, offsetof(NtAssetEntry, meta_offset));
+    NtAssetEntry e;
+    memset(&e, 0, sizeof(e));
+    e.meta_offset = 1234;
+    uint8_t *bytes = (uint8_t *)&e;
+    uint32_t val;
+    memcpy(&val, bytes + 20, sizeof(val));
+    TEST_ASSERT_EQUAL_UINT32(1234, val);
+}
+
 /* --- Shader code header tests --- */
 
 void test_shader_code_header_size(void) { TEST_ASSERT_EQUAL_UINT(12, sizeof(NtShaderCodeHeader)); }
@@ -285,6 +321,13 @@ int main(void) {
     RUN_TEST(test_texture_magic_value);
     RUN_TEST(test_texture_header_field_offsets);
     RUN_TEST(test_texture_format_enum);
+
+    /* Metadata struct tests */
+    RUN_TEST(test_NtMetaEntryHeader_size);
+    RUN_TEST(test_NtAabbData_size);
+    RUN_TEST(test_NtMetaEntryHeader_field_offsets);
+    RUN_TEST(test_NtPackHeader_meta_count_offset);
+    RUN_TEST(test_NtAssetEntry_meta_offset_offset);
 
     /* Shader code header tests */
     RUN_TEST(test_shader_code_header_size);

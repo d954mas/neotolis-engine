@@ -1572,6 +1572,158 @@ void test_get_blob_null_for_invalid_handle(void) {
     TEST_ASSERT_EQUAL_UINT32(0, data_size);
 }
 
+/* ---- Metadata test helpers ---- */
+
+/*
+ * Build a NTPACK blob with one fake mesh asset and an AABB metadata entry.
+ * The mesh asset data is just zeros (we don't actually parse mesh data in the
+ * metadata tests, only the meta section). Returns malloc'd blob (caller frees).
+ */
+static uint8_t *build_meta_pack(uint64_t rid, const NtAabbData *aabb, uint32_t *out_size) {
+    uint32_t asset_data_size = 64; /* fake mesh data */
+    uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
+    uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
+    uint32_t aligned_data = (asset_data_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+
+    /* Meta section: one NtMetaEntryHeader + NtAabbData payload */
+    uint32_t meta_entry_size = (uint32_t)sizeof(NtMetaEntryHeader) + (uint32_t)sizeof(NtAabbData);
+    uint32_t aligned_meta = (meta_entry_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+
+    uint32_t total_size = header_size + aligned_data + aligned_meta;
+    uint8_t *blob = (uint8_t *)calloc(1, total_size);
+    if (!blob) {
+        return NULL;
+    }
+
+    uint32_t meta_section_start = header_size + aligned_data;
+
+    NtPackHeader *h = (NtPackHeader *)blob;
+    h->magic = NT_PACK_MAGIC;
+    h->version = NT_PACK_VERSION;
+    h->asset_count = 1;
+    h->meta_count = 1;
+    h->header_size = header_size;
+    h->total_size = total_size;
+
+    NtAssetEntry *entry = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
+    entry->resource_id = rid;
+    entry->format_version = 1;
+    entry->asset_type = NT_ASSET_MESH;
+    entry->_pad = 0;
+    entry->offset = header_size;
+    entry->size = asset_data_size;
+    entry->meta_offset = meta_section_start;
+
+    /* Write meta entry header + AABB data */
+    NtMetaEntryHeader *mh = (NtMetaEntryHeader *)(blob + meta_section_start);
+    mh->resource_id = rid;
+    mh->kind = nt_hash32_str("aabb").value;
+    mh->size = (uint32_t)sizeof(NtAabbData);
+    memcpy(blob + meta_section_start + sizeof(NtMetaEntryHeader), aabb, sizeof(NtAabbData));
+
+    /* CRC32 over data region (everything after header) */
+    h->checksum = nt_crc32(blob + header_size, total_size - header_size);
+
+    *out_size = total_size;
+    return blob;
+}
+
+/* ---- Metadata query tests ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_resource_get_meta_aabb(void) {
+    nt_hash32_t pid = nt_hash32_str("meta_aabb_pack");
+    nt_hash64_t rid = nt_hash64_str("meshes/test_cube");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    NtAabbData test_aabb = {{-1.0F, -2.0F, -3.0F}, {1.0F, 2.0F, 3.0F}};
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_meta_pack(rid.value, &test_aabb, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    /* Request as mesh and step to trigger resolve */
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    TEST_ASSERT_TRUE(h.id != 0);
+
+    /* Mesh won't be READY without activator, but resolve should set resolve_asset_idx.
+     * We need an activator that marks mesh as READY so resolve picks a winner. */
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+    nt_resource_step();
+
+    /* Query metadata */
+    uint32_t meta_size = 0;
+    const void *meta_ptr = nt_resource_get_meta(h, nt_hash32_str("aabb").value, &meta_size);
+    TEST_ASSERT_NOT_NULL(meta_ptr);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(NtAabbData), meta_size);
+
+    /* Verify AABB data matches what was written (bitwise compare via memcmp) */
+    NtAabbData expected = {{-1.0F, -2.0F, -3.0F}, {1.0F, 2.0F, 3.0F}};
+    TEST_ASSERT_EQUAL_MEMORY(&expected, meta_ptr, sizeof(NtAabbData));
+
+    free(blob);
+}
+
+void test_resource_get_meta_absent(void) {
+    nt_hash32_t pid = nt_hash32_str("meta_absent_pack");
+    nt_hash64_t rid = nt_hash64_str("meta_absent_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    /* Build a blob pack with no metadata (meta_count=0) */
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_blob_pack(rid.value, 32, 0xAB, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_BLOB);
+    nt_resource_step();
+
+    uint32_t meta_size = 99;
+    const void *meta_ptr = nt_resource_get_meta(h, nt_hash32_str("aabb").value, &meta_size);
+    TEST_ASSERT_NULL(meta_ptr);
+    TEST_ASSERT_EQUAL_UINT32(0, meta_size);
+
+    free(blob);
+}
+
+void test_resource_get_meta_invalid_handle(void) {
+    nt_resource_t invalid = NT_RESOURCE_INVALID;
+    uint32_t sz = 99;
+    const void *p = nt_resource_get_meta(invalid, 0, &sz);
+    TEST_ASSERT_NULL(p);
+    TEST_ASSERT_EQUAL_UINT32(0, sz);
+}
+
+void test_resource_get_meta_wrong_kind(void) {
+    nt_hash32_t pid = nt_hash32_str("meta_wrong_kind");
+    nt_hash64_t rid = nt_hash64_str("meshes/wrong_kind");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    NtAabbData test_aabb = {{0.0F, 0.0F, 0.0F}, {1.0F, 1.0F, 1.0F}};
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_meta_pack(rid.value, &test_aabb, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+    nt_resource_step();
+
+    /* Query with a different kind -- should return NULL */
+    uint32_t meta_size = 99;
+    const void *meta_ptr = nt_resource_get_meta(h, nt_hash32_str("nonexistent").value, &meta_size);
+    TEST_ASSERT_NULL(meta_ptr);
+    TEST_ASSERT_EQUAL_UINT32(0, meta_size);
+
+    free(blob);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -1688,6 +1840,12 @@ int main(void) {
     RUN_TEST(test_get_blob_returns_data);
     RUN_TEST(test_get_blob_null_for_non_blob);
     RUN_TEST(test_get_blob_null_for_invalid_handle);
+
+    /* Metadata query tests */
+    RUN_TEST(test_resource_get_meta_aabb);
+    RUN_TEST(test_resource_get_meta_absent);
+    RUN_TEST(test_resource_get_meta_invalid_handle);
+    RUN_TEST(test_resource_get_meta_wrong_kind);
 
     return UNITY_END();
 }
