@@ -111,6 +111,14 @@ static nt_build_result_t nt_parse_gltf_mesh(const char *path, const char *mesh_n
         return NT_BUILD_ERR_VALIDATION;
     }
 
+    if ((*out_data)->meshes[sel_mesh].primitives_count > 1) {
+        NT_LOG_ERROR("%s: mesh[%zu] has %zu primitives, add_mesh supports only single-primitive meshes (use scene API for multi-primitive)", path, sel_mesh,
+                     (*out_data)->meshes[sel_mesh].primitives_count);
+        cgltf_free(*out_data);
+        *out_data = NULL;
+        return NT_BUILD_ERR_VALIDATION;
+    }
+
     *out_prim = &(*out_data)->meshes[sel_mesh].primitives[0];
 
     if ((*out_prim)->type != cgltf_primitive_type_triangles) {

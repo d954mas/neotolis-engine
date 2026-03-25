@@ -260,8 +260,8 @@ jobs:
 
       - name: Build asset packs (release)
         run: |
-          ./build/examples/textured_quad/native-release/build_tq_packs build/examples/textured_quad
-          ./build/examples/sponza/native-release/build_sponza_packs build/examples/sponza
+          ./build/examples/textured_quad/native-release/build_tq_packs build/examples/textured_quad examples/textured_quad/generated
+          ./build/examples/sponza/native-release/build_sponza_packs build/examples/sponza examples/sponza/generated
 
       - name: Build native release (all targets)
         run: cmake --build --preset native-release

@@ -138,11 +138,18 @@ static void derive_func_prefix(const char *header_path, char *prefix, size_t pre
     prefix[wi] = '\0';
 }
 
+/* --- Shared entry type for codegen output --- */
+
+typedef struct {
+    const char *path; /* logical path (borrowed) */
+    uint64_t resource_id;
+    nt_build_asset_kind_t kind;
+} CodegenEntry;
+
 /* --- Collision detection --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void check_identifier_collisions(const NtBuilderContext *ctx) {
-    uint32_t count = ctx->pending_count;
+static void check_codegen_collisions(const CodegenEntry *entries, uint32_t count) {
     if (count == 0) {
         return;
     }
@@ -154,18 +161,15 @@ static void check_identifier_collisions(const NtBuilderContext *ctx) {
     }
 
     for (uint32_t i = 0; i < count; i++) {
-        const NtBuildEntry *pe = &ctx->pending[i];
-        const char *prefix = type_prefix_for_kind(pe->kind);
-        const char *logical_path = pe->rename_key ? pe->rename_key : pe->path;
-        path_to_identifier(logical_path, prefix, identifiers[i], NT_CODEGEN_MAX_IDENTIFIER);
+        const char *prefix = type_prefix_for_kind(entries[i].kind);
+        path_to_identifier(entries[i].path, prefix, identifiers[i], NT_CODEGEN_MAX_IDENTIFIER);
     }
 
     /* O(n^2) is fine for small asset counts */
     for (uint32_t i = 0; i < count; i++) {
         for (uint32_t j = i + 1; j < count; j++) {
             if (strcmp(identifiers[i], identifiers[j]) == 0) {
-                NT_LOG_ERROR("Codegen: identifier collision '%s' between '%s' and '%s'", identifiers[i], ctx->pending[i].rename_key ? ctx->pending[i].rename_key : ctx->pending[i].path,
-                             ctx->pending[j].rename_key ? ctx->pending[j].rename_key : ctx->pending[j].path);
+                NT_LOG_ERROR("Codegen: identifier collision '%s' between '%s' and '%s'", identifiers[i], entries[i].path, entries[j].path);
                 free(identifiers);
                 NT_BUILD_ASSERT(0 && "codegen identifier collision -- rename one of the conflicting assets");
             }
@@ -175,12 +179,6 @@ static void check_identifier_collisions(const NtBuilderContext *ctx) {
 }
 
 /* --- Shared: write sorted entries to FILE --- */
-
-typedef struct {
-    const char *path; /* logical path (borrowed) */
-    uint64_t resource_id;
-    nt_build_asset_kind_t kind;
-} CodegenEntry;
 
 static void write_sorted_defines(FILE *f, const CodegenEntry *entries, uint32_t count) {
     /* Build sort index per type group */
@@ -248,8 +246,17 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
     char func_prefix[128];
     derive_func_prefix(header_path, func_prefix, sizeof(func_prefix));
 
+    /* Build CodegenEntry array from pending */
+    CodegenEntry ce[NT_BUILD_MAX_ASSETS];
+    for (uint32_t i = 0; i < ctx->pending_count; i++) {
+        const NtBuildEntry *pe = &ctx->pending[i];
+        ce[i].path = pe->rename_key ? pe->rename_key : pe->path;
+        ce[i].resource_id = pe->resource_id;
+        ce[i].kind = pe->kind;
+    }
+
     /* Check for identifier collisions before writing */
-    check_identifier_collisions(ctx);
+    check_codegen_collisions(ce, ctx->pending_count);
 
     FILE *f = fopen(header_path, "w");
     if (!f) {
@@ -262,15 +269,6 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
     (void)fprintf(f, "#ifndef %s\n", guard);
     (void)fprintf(f, "#define %s\n\n", guard);
     (void)fprintf(f, "#include \"hash/nt_hash.h\"\n\n");
-
-    /* Build CodegenEntry array from pending */
-    CodegenEntry ce[NT_BUILD_MAX_ASSETS];
-    for (uint32_t i = 0; i < ctx->pending_count; i++) {
-        const NtBuildEntry *pe = &ctx->pending[i];
-        ce[i].path = pe->rename_key ? pe->rename_key : pe->path;
-        ce[i].resource_id = pe->resource_id;
-        ce[i].kind = pe->kind;
-    }
 
     write_sorted_defines(f, ce, ctx->pending_count);
     write_register_labels(f, func_prefix, ce, ctx->pending_count);
@@ -351,6 +349,9 @@ nt_build_result_t nt_builder_generate_registry_header(const NtBuilderRegistry *r
         ce[i].resource_id = reg->entries[i].hash;
         ce[i].kind = reg->entries[i].kind;
     }
+
+    /* No collision check needed -- registry deduplicates by hash,
+     * and cross-pack duplicates (same path in multiple packs) are legitimate */
 
     write_sorted_defines(f, ce, reg->count);
     write_register_labels(f, func_prefix, ce, reg->count);

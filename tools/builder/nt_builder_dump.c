@@ -463,8 +463,9 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
     /* Print each entry */
     for (uint32_t i = 0; i < count; i++) {
         const NtAssetEntry *e = &entries[i];
-        const uint8_t *asset_data = (e->offset < file_size) ? (buffer + e->offset) : NULL;
-        uint32_t asset_size = e->size;
+        bool in_bounds = (e->offset < file_size) && (e->size <= file_size - e->offset);
+        const uint8_t *asset_data = in_bounds ? (buffer + e->offset) : NULL;
+        uint32_t asset_size = in_bounds ? e->size : 0;
 
         /* Name resolution */
         char fallback_name[32];
