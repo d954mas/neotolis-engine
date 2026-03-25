@@ -280,49 +280,134 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
     return NT_BUILD_OK;
 }
 
-/* --- Registry: accumulate assets from finish_pack --- */
+/* --- Merge per-pack .h headers into a combined header --- */
 
-void nt_builder_register_to_registry(const NtBuilderContext *ctx) {
-    NtBuilderRegistry *reg = ctx->registry;
-    if (!reg) {
-        return;
+/* Parse a single #define ASSET_XXX_YYY ((nt_hash64_t){0x...ULL}) line */
+typedef struct {
+    char identifier[NT_CODEGEN_MAX_IDENTIFIER];
+    uint64_t hash;
+    char comment_path[256]; /* logical path from comment */
+    nt_build_asset_kind_t kind;
+} MergeEntry;
+
+static nt_build_asset_kind_t kind_from_identifier(const char *id) {
+    if (strstr(id, "ASSET_MESH_") == id) {
+        return NT_BUILD_ASSET_MESH;
+    }
+    if (strstr(id, "ASSET_TEXTURE_") == id) {
+        return NT_BUILD_ASSET_TEXTURE;
+    }
+    if (strstr(id, "ASSET_SHADER_") == id) {
+        return NT_BUILD_ASSET_SHADER;
+    }
+    if (strstr(id, "ASSET_BLOB_") == id) {
+        return NT_BUILD_ASSET_BLOB;
+    }
+    return NT_BUILD_ASSET_BLOB; /* fallback */
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+nt_build_result_t nt_builder_merge_headers(const char *const *header_paths, uint32_t count, const char *output_path) {
+    if (!header_paths || count == 0 || !output_path) {
+        return NT_BUILD_ERR_VALIDATION;
     }
 
-    for (uint32_t i = 0; i < ctx->pending_count; i++) {
-        const NtBuildEntry *pe = &ctx->pending[i];
-        const char *logical_path = pe->rename_key ? pe->rename_key : pe->path;
-        uint64_t hash = pe->resource_id;
+    MergeEntry *entries = (MergeEntry *)calloc(NT_BUILD_MAX_ASSETS, sizeof(MergeEntry));
+    if (!entries) {
+        return NT_BUILD_ERR_IO;
+    }
+    uint32_t entry_count = 0;
 
-        /* Dedup: skip if hash already registered */
-        bool found = false;
-        for (uint32_t r = 0; r < reg->count; r++) {
-            if (reg->entries[r].hash == hash) {
-                found = true;
-                break;
-            }
-        }
-        if (found) {
+    for (uint32_t hi = 0; hi < count; hi++) {
+        FILE *f = fopen(header_paths[hi], "r");
+        if (!f) {
+            NT_LOG_WARN("merge_headers: could not open '%s', skipping", header_paths[hi]);
             continue;
         }
 
-        if (reg->count >= NT_BUILD_MAX_ASSETS) {
-            NT_LOG_WARN("Registry full (%d max), skipping '%s'", NT_BUILD_MAX_ASSETS, logical_path);
-            break;
+        char line[1024];
+        while (fgets(line, (int)sizeof(line), f) != NULL) {
+            /* Look for #define ASSET_... lines */
+            if (strncmp(line, "#define ASSET_", 14) != 0) {
+                continue;
+            }
+
+            /* Parse: #define IDENTIFIER ((nt_hash64_t){0xHEXULL}) / * comment * / */
+            char id_buf[NT_CODEGEN_MAX_IDENTIFIER];
+            char hex_buf[32];
+            memset(id_buf, 0, sizeof(id_buf));
+            memset(hex_buf, 0, sizeof(hex_buf));
+
+            const char *p = line + 8; /* skip "#define " */
+            /* Read identifier */
+            size_t wi = 0;
+            while (*p && *p != ' ' && *p != '\t' && wi < sizeof(id_buf) - 1) {
+                id_buf[wi++] = *p++;
+            }
+            id_buf[wi] = '\0';
+
+            /* Find 0x hex value */
+            const char *hex_start = strstr(p, "0x");
+            if (!hex_start) {
+                continue;
+            }
+            wi = 0;
+            const char *hp = hex_start;
+            while (*hp && *hp != 'U' && *hp != 'u' && *hp != '}' && wi < sizeof(hex_buf) - 1) {
+                hex_buf[wi++] = *hp++;
+            }
+            hex_buf[wi] = '\0';
+
+            char *end_ptr = NULL;
+            uint64_t hash = strtoull(hex_buf, &end_ptr, 16);
+
+            /* Find comment path between slash-star delimiters */
+            char comment[256] = {0};
+            const char *cs = strstr(p, "/*");
+            if (cs) {
+                cs += 3; /* skip opening delimiter + space */
+                wi = 0;
+                while (*cs && *cs != '*' && wi < sizeof(comment) - 1) {
+                    comment[wi++] = *cs++;
+                }
+                /* Trim trailing space */
+                while (wi > 0 && comment[wi - 1] == ' ') {
+                    wi--;
+                }
+                comment[wi] = '\0';
+            }
+
+            /* Dedup by hash */
+            bool found = false;
+            for (uint32_t e = 0; e < entry_count; e++) {
+                if (entries[e].hash == hash) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found || entry_count >= NT_BUILD_MAX_ASSETS) {
+                continue;
+            }
+
+            strncpy(entries[entry_count].identifier, id_buf, NT_CODEGEN_MAX_IDENTIFIER - 1);
+            entries[entry_count].hash = hash;
+            strncpy(entries[entry_count].comment_path, comment, sizeof(entries[entry_count].comment_path) - 1);
+            entries[entry_count].kind = kind_from_identifier(id_buf);
+            entry_count++;
         }
-
-        reg->entries[reg->count].hash = hash;
-        reg->entries[reg->count].path = strdup(logical_path);
-        reg->entries[reg->count].kind = pe->kind;
-        reg->count++;
+        (void)fclose(f);
     }
-}
 
-/* --- Registry: generate combined header --- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_generate_registry_header(const NtBuilderRegistry *reg, const char *output_path) {
-    if (!reg || !output_path) {
-        return NT_BUILD_ERR_VALIDATION;
+    /* Build CodegenEntry array for shared write functions */
+    CodegenEntry *ce = (CodegenEntry *)calloc(entry_count > 0 ? entry_count : 1, sizeof(CodegenEntry));
+    if (!ce) {
+        free(entries);
+        return NT_BUILD_ERR_IO;
+    }
+    for (uint32_t i = 0; i < entry_count; i++) {
+        ce[i].path = entries[i].comment_path;
+        ce[i].resource_id = entries[i].hash;
+        ce[i].kind = entries[i].kind;
     }
 
     char guard[256];
@@ -333,7 +418,9 @@ nt_build_result_t nt_builder_generate_registry_header(const NtBuilderRegistry *r
 
     FILE *f = fopen(output_path, "w");
     if (!f) {
-        NT_LOG_ERROR("Could not write registry header: %s", output_path);
+        NT_LOG_ERROR("Could not write merged header: %s", output_path);
+        free(ce);
+        free(entries);
         return NT_BUILD_ERR_IO;
     }
 
@@ -342,23 +429,15 @@ nt_build_result_t nt_builder_generate_registry_header(const NtBuilderRegistry *r
     (void)fprintf(f, "#define %s\n\n", guard);
     (void)fprintf(f, "#include \"hash/nt_hash.h\"\n\n");
 
-    /* Build CodegenEntry array from registry */
-    CodegenEntry ce[NT_BUILD_MAX_ASSETS];
-    for (uint32_t i = 0; i < reg->count; i++) {
-        ce[i].path = reg->entries[i].path;
-        ce[i].resource_id = reg->entries[i].hash;
-        ce[i].kind = reg->entries[i].kind;
-    }
-
-    /* No collision check needed -- registry deduplicates by hash,
-     * and cross-pack duplicates (same path in multiple packs) are legitimate */
-
-    write_sorted_defines(f, ce, reg->count);
-    write_register_labels(f, func_prefix, ce, reg->count);
+    write_sorted_defines(f, ce, entry_count);
+    write_register_labels(f, func_prefix, ce, entry_count);
 
     (void)fprintf(f, "#endif /* %s */\n", guard);
     (void)fclose(f);
 
-    NT_LOG_INFO("Generated registry header: %s (%u assets)", output_path, reg->count);
+    NT_LOG_INFO("Generated merged header: %s (%u assets from %u packs)", output_path, entry_count, count);
+
+    free(ce);
+    free(entries);
     return NT_BUILD_OK;
 }

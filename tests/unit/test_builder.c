@@ -242,10 +242,9 @@ void test_shader_round_trip(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -289,10 +288,9 @@ void test_texture_round_trip(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_texture(ctx, png_path);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_texture(ctx, png_path);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -334,10 +332,9 @@ void test_mesh_round_trip(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -378,73 +375,12 @@ void test_missing_position_attribute_errors(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     /* add_mesh is deferred -- succeeds */
-    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
 
     /* finish_pack fails during import */
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
-}
-
-void test_duplicate_path_errors(void) {
-    const char *vert_path = TMP_DIR "/dup.vert";
-    write_test_shader(vert_path, "precision mediump float;\n"
-                                 "void main() { gl_Position = vec4(0); }\n");
-
-    const char *pack_path = TMP_DIR "/dup_test.ntpack";
-    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
-    TEST_ASSERT_NOT_NULL(ctx);
-
-    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-
-    /* Second add with same path = duplicate error */
-    r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_ERR_DUPLICATE, r);
-
-    nt_builder_free_pack(ctx);
-}
-
-void test_force_add_replaces(void) {
-    const char *vert_path = TMP_DIR "/force.vert";
-    /* Source must be valid as fragment shader since force-replace changes stage to FRAGMENT */
-    write_test_shader(vert_path, "precision mediump float;\n"
-                                 "out vec4 frag_color;\n"
-                                 "void main() { frag_color = vec4(1); }\n");
-
-    const char *pack_path = TMP_DIR "/force_test.ntpack";
-    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
-    TEST_ASSERT_NOT_NULL(ctx);
-
-    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-
-    /* Force mode: replaces without error */
-    nt_builder_set_force(ctx, true);
-    r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_FRAGMENT);
-    nt_builder_set_force(ctx, false);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-
-    r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-    nt_builder_free_pack(ctx);
-
-    /* Verify 1 asset, stage = FRAGMENT (replaced) */
-    FILE *f = fopen(pack_path, "rb");
-    TEST_ASSERT_NOT_NULL(f);
-    NtPackHeader hdr;
-    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
-    TEST_ASSERT_EQUAL_UINT16(1, hdr.asset_count);
-
-    NtAssetEntry entry;
-    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
-    (void)fseek(f, (long)entry.offset, SEEK_SET);
-    NtShaderCodeHeader shdr;
-    TEST_ASSERT_EQUAL(1, fread(&shdr, sizeof(shdr), 1, f));
-    TEST_ASSERT_EQUAL_UINT8(NT_SHADER_STAGE_FRAGMENT, shdr.stage);
-
-    (void)fclose(f);
 }
 
 void test_empty_shader_errors(void) {
@@ -456,11 +392,10 @@ void test_empty_shader_errors(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     /* add is deferred -- succeeds */
-    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
     /* finish_pack fails during import */
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 }
@@ -476,11 +411,10 @@ void test_shader_with_version_errors(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     /* add is deferred -- succeeds */
-    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
     /* finish_pack fails during import */
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 }
@@ -501,10 +435,9 @@ void test_shader_comment_stripping(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -551,12 +484,10 @@ void test_asset_alignment(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_shader(ctx, v_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-    r = nt_builder_add_shader(ctx, f_path, NT_BUILD_SHADER_FRAGMENT);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, v_path, NT_BUILD_SHADER_VERTEX);
+    nt_builder_add_shader(ctx, f_path, NT_BUILD_SHADER_FRAGMENT);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -587,9 +518,8 @@ void test_crc32_verification(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-    r = nt_builder_finish_pack(ctx);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -624,9 +554,8 @@ void test_dump_valid_pack(void) {
 
     const char *pack_path = TMP_DIR "/dump_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
-    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-    r = nt_builder_finish_pack(ctx);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -667,13 +596,10 @@ void test_dump_gzip_sizes(void) {
 
     const char *pack_path = TMP_DIR "/dump_gz_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
-    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-    r = nt_builder_add_texture(ctx, png_path);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-    r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-    r = nt_builder_finish_pack(ctx);
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
+    nt_builder_add_texture(ctx, png_path);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -690,9 +616,8 @@ void test_dump_name_resolution(void) {
 
     const char *pack_path = TMP_DIR "/dump_name_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
-    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-    r = nt_builder_finish_pack(ctx);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -718,9 +643,8 @@ void test_dump_without_header(void) {
 
     const char *pack_path = TMP_DIR "/dump_nohdr_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
-    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-    r = nt_builder_finish_pack(ctx);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -753,16 +677,11 @@ void test_multi_asset_pack(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
+    nt_builder_add_texture(ctx, png_path);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
-    r = nt_builder_add_texture(ctx, png_path);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-
-    r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -822,9 +741,8 @@ void test_shader_stage_correct(void) {
 
     const char *pack_path = TMP_DIR "/stage_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
-    nt_build_result_t r = nt_builder_add_shader(ctx, frag_path, NT_BUILD_SHADER_FRAGMENT);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
-    r = nt_builder_finish_pack(ctx);
+    nt_builder_add_shader(ctx, frag_path, NT_BUILD_SHADER_FRAGMENT);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -855,13 +773,11 @@ void test_glob_shaders(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_shaders(ctx, "tests/fixtures/*.vert", NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shaders(ctx, "tests/fixtures/*.vert", NT_BUILD_SHADER_VERTEX);
 
-    r = nt_builder_add_shaders(ctx, "tests/fixtures/*.frag", NT_BUILD_SHADER_FRAGMENT);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shaders(ctx, "tests/fixtures/*.frag", NT_BUILD_SHADER_FRAGMENT);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -889,10 +805,10 @@ void test_e2e_real_assets(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, "assets/shaders/mesh.vert", NT_BUILD_SHADER_VERTEX));
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, "assets/shaders/mesh.frag", NT_BUILD_SHADER_FRAGMENT));
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", &(nt_mesh_opts_t){.layout = layout, .stream_count = 2}));
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_texture(ctx, "assets/textures/lenna.png"));
+    nt_builder_add_shader(ctx, "assets/shaders/mesh.vert", NT_BUILD_SHADER_VERTEX);
+    nt_builder_add_shader(ctx, "assets/shaders/mesh.frag", NT_BUILD_SHADER_FRAGMENT);
+    nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", &(nt_mesh_opts_t){.layout = layout, .stream_count = 2});
+    nt_builder_add_texture(ctx, "assets/textures/lenna.png");
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
@@ -989,13 +905,13 @@ void test_rename_changes_resource_id(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX));
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
     nt_hash64_t old_id = nt_builder_normalize_and_hash(vert_path);
     nt_hash64_t new_id = nt_builder_normalize_and_hash("renamed/shader.vert");
     TEST_ASSERT_TRUE(old_id.value != new_id.value);
 
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_rename(ctx, vert_path, "renamed/shader.vert"));
+    nt_builder_rename(ctx, vert_path, "renamed/shader.vert");
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
@@ -1010,54 +926,6 @@ void test_rename_changes_resource_id(void) {
     (void)fclose(f);
 }
 
-/* --- Force + glob test --- */
-
-void test_force_glob_override(void) {
-    /* Write two shaders to tmp dir.
-       a.vert must be valid as fragment shader since force-override changes its stage. */
-    MKDIR(TMP_DIR "/force_glob");
-    write_test_shader(TMP_DIR "/force_glob/a.vert", "precision mediump float;\nout vec4 frag_color;\nvoid main() { frag_color = vec4(0); }\n");
-    write_test_shader(TMP_DIR "/force_glob/b.vert", "precision mediump float;\nvoid main() { gl_Position = vec4(1); }\n");
-
-    const char *pack_path = TMP_DIR "/force_glob.ntpack";
-    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
-    TEST_ASSERT_NOT_NULL(ctx);
-
-    /* Glob adds both */
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shaders(ctx, TMP_DIR "/force_glob/*.vert", NT_BUILD_SHADER_VERTEX));
-
-    /* Force override a.vert as FRAGMENT */
-    nt_builder_set_force(ctx, true);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, TMP_DIR "/force_glob/a.vert", NT_BUILD_SHADER_FRAGMENT));
-    nt_builder_set_force(ctx, false);
-
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
-    nt_builder_free_pack(ctx);
-
-    /* Verify: 2 assets, a.vert is FRAGMENT */
-    FILE *f = fopen(pack_path, "rb");
-    TEST_ASSERT_NOT_NULL(f);
-    NtPackHeader hdr;
-    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
-    TEST_ASSERT_EQUAL_UINT16(2, hdr.asset_count);
-
-    bool found_fragment = false;
-    for (uint16_t i = 0; i < hdr.asset_count; i++) {
-        NtAssetEntry entry;
-        TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
-        long cur = ftell(f);
-        (void)fseek(f, (long)entry.offset, SEEK_SET);
-        NtShaderCodeHeader sh;
-        TEST_ASSERT_EQUAL(1, fread(&sh, sizeof(sh), 1, f));
-        if (sh.stage == NT_SHADER_STAGE_FRAGMENT) {
-            found_fragment = true;
-        }
-        (void)fseek(f, cur, SEEK_SET);
-    }
-    TEST_ASSERT_TRUE(found_fragment);
-    (void)fclose(f);
-}
-
 /* --- free_pack without finish --- */
 
 void test_free_pack_without_finish(void) {
@@ -1066,7 +934,7 @@ void test_free_pack_without_finish(void) {
 
     const char *vert_path = TMP_DIR "/nofin.vert";
     write_test_shader(vert_path, "precision mediump float;\nvoid main() { gl_Position = vec4(0); }\n");
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX));
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
     /* Free without finish — should not crash or leak */
     nt_builder_free_pack(ctx);
@@ -1082,10 +950,9 @@ void test_blob_import(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_blob(ctx, test_data, sizeof(test_data), "test/blob");
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_blob(ctx, test_data, sizeof(test_data), "test/blob");
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -1140,10 +1007,9 @@ void test_tex_from_memory(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_size, "test/texture_mem");
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_size, "test/texture_mem");
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -1329,10 +1195,9 @@ void test_include_basic(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_shader(ctx, TMP_DIR "/inc_main.vert", NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, TMP_DIR "/inc_main.vert", NT_BUILD_SHADER_VERTEX);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -1362,10 +1227,9 @@ void test_include_pragma_once(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_shader(ctx, TMP_DIR "/once_main.vert", NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, TMP_DIR "/once_main.vert", NT_BUILD_SHADER_VERTEX);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -1394,10 +1258,9 @@ void test_include_missing_file_errors(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_shader(ctx, TMP_DIR "/missing_inc.vert", NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, TMP_DIR "/missing_inc.vert", NT_BUILD_SHADER_VERTEX);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 }
@@ -1416,10 +1279,9 @@ void test_include_depth_limit(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_shader(ctx, TMP_DIR "/depth_main.vert", NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, TMP_DIR "/depth_main.vert", NT_BUILD_SHADER_VERTEX);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 }
@@ -1440,8 +1302,7 @@ void test_asset_root_include(void) {
     nt_build_result_t r = nt_builder_add_asset_root(ctx, TMP_DIR "/root_a");
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
 
-    r = nt_builder_add_shader(ctx, TMP_DIR "/root_shader.vert", NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, TMP_DIR "/root_shader.vert", NT_BUILD_SHADER_VERTEX);
 
     r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
@@ -1472,10 +1333,9 @@ void test_include_pragma_once_after_comment(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_shader(ctx, TMP_DIR "/once_late_main.vert", NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, TMP_DIR "/once_late_main.vert", NT_BUILD_SHADER_VERTEX);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL_MESSAGE(NT_BUILD_OK, r, "pragma once after comment should still prevent double inclusion");
     nt_builder_free_pack(ctx);
 
@@ -1509,10 +1369,9 @@ void test_gl_validation_valid_shader(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 }
@@ -1531,10 +1390,9 @@ void test_gl_validation_invalid_shader(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     /* GL validation may be skipped if no display (D-08) -- both outcomes are valid */
     TEST_ASSERT_TRUE(r == NT_BUILD_OK || r == NT_BUILD_ERR_VALIDATION);
     nt_builder_free_pack(ctx);
@@ -1553,10 +1411,9 @@ void test_gl_validation_fragment_shader(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_shader(ctx, frag_path, NT_BUILD_SHADER_FRAGMENT);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, frag_path, NT_BUILD_SHADER_FRAGMENT);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 }
@@ -1575,10 +1432,9 @@ void test_gl_validation_type_error(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     /* GL validation may be skipped if no display (D-08) -- both outcomes are valid */
     TEST_ASSERT_TRUE(r == NT_BUILD_OK || r == NT_BUILD_ERR_VALIDATION);
     nt_builder_free_pack(ctx);
@@ -1678,10 +1534,9 @@ void test_add_mesh_by_name(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_name = "SecondMesh"});
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_name = "SecondMesh"});
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -1720,10 +1575,9 @@ void test_add_mesh_by_index(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_index = 1, .use_mesh_index = true});
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_index = 1, .use_mesh_index = true});
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -1753,10 +1607,9 @@ void test_add_mesh_single_unchanged(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -1784,10 +1637,10 @@ void test_add_mesh_by_name_not_found(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_name = "NonExistent"});
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r); /* add is deferred */
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_name = "NonExistent"});
+    /* add is deferred */
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r); /* import fails */
     nt_builder_free_pack(ctx);
 }
@@ -1802,10 +1655,10 @@ void test_add_mesh_by_index_out_of_range(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_index = 99, .use_mesh_index = true});
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r); /* add is deferred */
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_index = 99, .use_mesh_index = true});
+    /* add is deferred */
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r); /* import fails */
     nt_builder_free_pack(ctx);
 }
@@ -1820,10 +1673,9 @@ void test_add_mesh_resource_name_override(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_name = "SecondMesh", .resource_name = "custom"});
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_name = "SecondMesh", .resource_name = "custom"});
 
-    r = nt_builder_finish_pack(ctx);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
@@ -1882,8 +1734,8 @@ void test_codegen_generates_header(void) {
 
     NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
     nt_mesh_opts_t opts = {.layout = layout, .stream_count = 1};
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, glb_path, &opts));
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX));
+    nt_builder_add_mesh(ctx, glb_path, &opts);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
@@ -1917,7 +1769,7 @@ void test_codegen_hash_matches_runtime(void) {
 
     NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
     nt_mesh_opts_t opts = {.layout = layout, .stream_count = 1};
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, glb_path, &opts));
+    nt_builder_add_mesh(ctx, glb_path, &opts);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
@@ -1955,7 +1807,7 @@ void test_codegen_path_to_identifier(void) {
 
     NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
     nt_mesh_opts_t opts = {.layout = layout, .stream_count = 1};
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, glb_path, &opts));
+    nt_builder_add_mesh(ctx, glb_path, &opts);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
@@ -1982,8 +1834,8 @@ void test_codegen_renamed_assets(void) {
 
     NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
     nt_mesh_opts_t opts = {.layout = layout, .stream_count = 1};
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, glb_path, &opts));
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_rename(ctx, glb_path, "meshes/my_cube"));
+    nt_builder_add_mesh(ctx, glb_path, &opts);
+    nt_builder_rename(ctx, glb_path, "meshes/my_cube");
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
@@ -2004,37 +1856,36 @@ void test_codegen_renamed_assets(void) {
     free(content);
 }
 
-/* --- Registry tests --- */
+/* --- Merge tests --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_registry_combined_header(void) {
-    const char *glb_path = TMP_DIR "/reg_tri.glb";
+void test_merge_combined_header(void) {
+    const char *glb_path = TMP_DIR "/merge_tri.glb";
     write_test_glb(glb_path);
-    const char *vert_path = TMP_DIR "/reg_test.vert";
+    const char *vert_path = TMP_DIR "/merge_test.vert";
     write_test_shader(vert_path, "precision mediump float;\nvoid main() { gl_Position = vec4(0); }\n");
 
-    NtBuilderRegistry *reg = nt_builder_create_registry();
-    TEST_ASSERT_NOT_NULL(reg);
+    MKDIR(TMP_DIR "/merge_hdr");
 
     /* Pack 1: mesh */
-    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/reg_pack1.ntpack");
-    nt_builder_set_registry(ctx, reg);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/merge_pack1.ntpack");
+    nt_builder_set_header_dir(ctx, TMP_DIR "/merge_hdr");
     NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1}));
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
     /* Pack 2: shader */
-    ctx = nt_builder_start_pack(TMP_DIR "/reg_pack2.ntpack");
-    nt_builder_set_registry(ctx, reg);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX));
+    ctx = nt_builder_start_pack(TMP_DIR "/merge_pack2.ntpack");
+    nt_builder_set_header_dir(ctx, TMP_DIR "/merge_hdr");
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
-    /* Generate combined header */
-    const char *combined_path = TMP_DIR "/reg_assets.h";
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_generate_registry_header(reg, combined_path));
-    nt_builder_free_registry(reg);
+    /* Merge per-pack headers */
+    const char *headers[] = {TMP_DIR "/merge_hdr/merge_pack1.h", TMP_DIR "/merge_hdr/merge_pack2.h"};
+    const char *combined_path = TMP_DIR "/merge_assets.h";
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_merge_headers(headers, 2, combined_path));
 
     /* Verify combined header */
     char *content = read_text_file(combined_path);
@@ -2046,31 +1897,31 @@ void test_registry_combined_header(void) {
     free(content);
 }
 
-void test_registry_dedup(void) {
-    const char *glb_path = TMP_DIR "/reg_dedup_tri.glb";
+void test_merge_dedup(void) {
+    const char *glb_path = TMP_DIR "/merge_dedup_tri.glb";
     write_test_glb(glb_path);
 
-    NtBuilderRegistry *reg = nt_builder_create_registry();
+    MKDIR(TMP_DIR "/merge_dedup_hdr");
+
     NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
 
-    /* Two packs with the same mesh (same path = same hash) */
-    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/reg_dup1.ntpack");
-    nt_builder_set_registry(ctx, reg);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1}));
+    /* Two packs with the same mesh (same path = same hash, each in its own context) */
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/merge_dup1.ntpack");
+    nt_builder_set_header_dir(ctx, TMP_DIR "/merge_dedup_hdr");
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
-    ctx = nt_builder_start_pack(TMP_DIR "/reg_dup2.ntpack");
-    nt_builder_set_force(ctx, true);
-    nt_builder_set_registry(ctx, reg);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1}));
+    ctx = nt_builder_start_pack(TMP_DIR "/merge_dup2.ntpack");
+    nt_builder_set_header_dir(ctx, TMP_DIR "/merge_dedup_hdr");
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
-    /* Combined header should have the define only once */
-    const char *combined_path = TMP_DIR "/reg_dedup.h";
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_generate_registry_header(reg, combined_path));
-    nt_builder_free_registry(reg);
+    /* Merge — combined header should have the define only once */
+    const char *headers[] = {TMP_DIR "/merge_dedup_hdr/merge_dup1.h", TMP_DIR "/merge_dedup_hdr/merge_dup2.h"};
+    const char *combined_path = TMP_DIR "/merge_dedup.h";
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_merge_headers(headers, 2, combined_path));
 
     char *content = read_text_file(combined_path);
     TEST_ASSERT_NOT_NULL(content);
@@ -2086,30 +1937,31 @@ void test_registry_dedup(void) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_registry_sorted_output(void) {
-    NtBuilderRegistry *reg = nt_builder_create_registry();
-    const char *vert_path = TMP_DIR "/reg_sort_a.vert";
+void test_merge_sorted_output(void) {
+    const char *vert_path = TMP_DIR "/merge_sort_a.vert";
     write_test_shader(vert_path, "precision mediump float;\nvoid main() { gl_Position = vec4(0); }\n");
-    const char *frag_path = TMP_DIR "/reg_sort_b.frag";
+    const char *frag_path = TMP_DIR "/merge_sort_b.frag";
     write_test_shader(frag_path, "precision mediump float;\nvoid main() {}\n");
 
+    MKDIR(TMP_DIR "/merge_sort_hdr");
+
     /* Add shaders in reverse order: b before a */
-    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/reg_sort.ntpack");
-    nt_builder_set_registry(ctx, reg);
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, frag_path, NT_BUILD_SHADER_FRAGMENT));
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX));
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/merge_sort.ntpack");
+    nt_builder_set_header_dir(ctx, TMP_DIR "/merge_sort_hdr");
+    nt_builder_add_shader(ctx, frag_path, NT_BUILD_SHADER_FRAGMENT);
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
 
-    const char *combined_path = TMP_DIR "/reg_sorted.h";
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_generate_registry_header(reg, combined_path));
-    nt_builder_free_registry(reg);
+    const char *headers[] = {TMP_DIR "/merge_sort_hdr/merge_sort.h"};
+    const char *combined_path = TMP_DIR "/merge_sorted.h";
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_merge_headers(headers, 1, combined_path));
 
     /* In sorted output, "a" should appear before "b" */
     char *content = read_text_file(combined_path);
     TEST_ASSERT_NOT_NULL(content);
-    const char *pos_a = strstr(content, "reg_sort_a");
-    const char *pos_b = strstr(content, "reg_sort_b");
+    const char *pos_a = strstr(content, "merge_sort_a");
+    const char *pos_b = strstr(content, "merge_sort_b");
     TEST_ASSERT_NOT_NULL(pos_a);
     TEST_ASSERT_NOT_NULL(pos_b);
     TEST_ASSERT_TRUE_MESSAGE(pos_a < pos_b, "Assets should be sorted by name (a before b)");
@@ -2134,8 +1986,6 @@ int main(void) {
 
     /* Validation errors */
     RUN_TEST(test_missing_position_attribute_errors);
-    RUN_TEST(test_duplicate_path_errors);
-    RUN_TEST(test_force_add_replaces);
     RUN_TEST(test_empty_shader_errors);
     RUN_TEST(test_shader_with_version_errors);
 
@@ -2165,9 +2015,6 @@ int main(void) {
 
     /* Rename */
     RUN_TEST(test_rename_changes_resource_id);
-
-    /* Force + glob override */
-    RUN_TEST(test_force_glob_override);
 
     /* Lifecycle */
     RUN_TEST(test_free_pack_without_finish);
@@ -2209,10 +2056,10 @@ int main(void) {
     RUN_TEST(test_codegen_path_to_identifier);
     RUN_TEST(test_codegen_renamed_assets);
 
-    /* Registry */
-    RUN_TEST(test_registry_combined_header);
-    RUN_TEST(test_registry_dedup);
-    RUN_TEST(test_registry_sorted_output);
+    /* Merge */
+    RUN_TEST(test_merge_combined_header);
+    RUN_TEST(test_merge_dedup);
+    RUN_TEST(test_merge_sorted_output);
 
     return UNITY_END();
 }

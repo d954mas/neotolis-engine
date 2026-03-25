@@ -150,30 +150,13 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene) {
 
 /* --- Add scene mesh (deferred) --- */
 
-nt_build_result_t nt_builder_add_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const char *resource_id, const nt_mesh_opts_t *opts) {
-    if (!ctx || !scene || !resource_id || !opts || !opts->layout) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-    if (mesh_index >= scene->mesh_count) {
-        NT_LOG_ERROR("mesh_index %u out of range (mesh_count=%u)", mesh_index, scene->mesh_count);
-        return NT_BUILD_ERR_VALIDATION;
-    }
-    if (primitive_index >= scene->meshes[mesh_index].primitive_count) {
-        NT_LOG_ERROR("primitive_index %u out of range (primitive_count=%u)", primitive_index, scene->meshes[mesh_index].primitive_count);
-        return NT_BUILD_ERR_VALIDATION;
-    }
-
-    uint64_t rid = nt_hash64_str(resource_id).value;
-
-    if (ctx->pending_count >= NT_BUILD_MAX_ASSETS) {
-        NT_LOG_ERROR("Asset limit reached (%d max)", NT_BUILD_MAX_ASSETS);
-        return NT_BUILD_ERR_LIMIT;
-    }
+void nt_builder_add_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const char *resource_id, const nt_mesh_opts_t *opts) {
+    NT_BUILD_ASSERT(ctx && scene && resource_id && opts && opts->layout && "invalid scene_mesh args");
+    NT_BUILD_ASSERT(mesh_index < scene->mesh_count && "mesh_index out of range");
+    NT_BUILD_ASSERT(primitive_index < scene->meshes[mesh_index].primitive_count && "primitive_index out of range");
 
     NtBuildSceneMeshData *smd = (NtBuildSceneMeshData *)calloc(1, sizeof(NtBuildSceneMeshData));
-    if (!smd) {
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(smd && "scene_mesh alloc failed");
     smd->scene = scene;
     smd->mesh_index = mesh_index;
     smd->primitive_index = primitive_index;
@@ -190,13 +173,7 @@ nt_build_result_t nt_builder_add_scene_mesh(NtBuilderContext *ctx, const nt_glb_
         }
     }
 
-    NtBuildEntry *entry = &ctx->pending[ctx->pending_count++];
-    entry->path = strdup(resource_id);
-    entry->rename_key = NULL;
-    entry->resource_id = rid;
-    entry->kind = NT_BUILD_ASSET_SCENE_MESH;
-    entry->data = smd;
-    return NT_BUILD_OK;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_SCENE_MESH, smd);
 }
 
 /* --- Import scene mesh (called from finish_pack) --- */

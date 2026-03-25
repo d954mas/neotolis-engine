@@ -114,8 +114,6 @@ struct NtBuilderContext {
     uint32_t entry_count;
 
     /* Mode flags */
-    bool force;
-    bool has_error;
 
     /* Per-type counters for summary */
     uint32_t mesh_count;
@@ -136,22 +134,6 @@ struct NtBuilderContext {
 
     /* Gzip estimation in summary (default: off) */
     bool gzip_estimate;
-
-    /* Asset registry for combined header (NULL = no registry) */
-    NtBuilderRegistry *registry;
-};
-
-/* --- Asset registry (combined header across packs) --- */
-
-typedef struct {
-    uint64_t hash;
-    char *path; /* logical path (owned, heap) */
-    nt_build_asset_kind_t kind;
-} NtRegistryEntry;
-
-struct NtBuilderRegistry {
-    NtRegistryEntry entries[NT_BUILD_MAX_ASSETS];
-    uint32_t count;
 };
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
@@ -299,11 +281,11 @@ static inline void nt_builder_pack_to_header_path(const char *pack_path, char *h
     }
 }
 
+/* Deferred entry addition (shared between add_* and scene_mesh) */
+void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data);
+
 /* Codegen: generate .h header with ASSET_* constants */
 nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);
-
-/* Codegen: register assets into attached registry (called from finish_pack) */
-void nt_builder_register_to_registry(const NtBuilderContext *ctx);
 
 /* File I/O utilities */
 char *nt_builder_read_file(const char *path, uint32_t *out_size);
