@@ -299,6 +299,19 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
     return NT_BUILD_OK;
 }
 
+/* --- Metadata accumulation --- */
+
+void nt_builder_add_meta(NtBuilderContext *ctx, uint64_t resource_id, uint32_t kind, const void *data, uint32_t size) {
+    NT_BUILD_ASSERT(size <= 256 && "metadata entry exceeds 256 byte limit (D-12)");
+    NT_BUILD_ASSERT(ctx->meta_count < NT_BUILD_MAX_META_ENTRIES && "metadata entry limit exceeded");
+    NtBuildMetaEntry *m = &ctx->meta_pending[ctx->meta_count++];
+    m->resource_id = resource_id;
+    m->kind = kind;
+    m->size = size;
+    memset(m->data, 0, sizeof(m->data));
+    memcpy(m->data, data, size);
+}
+
 /* --- Cleanup --- */
 
 static void nt_builder_free_context(NtBuilderContext *ctx) {
@@ -417,6 +430,55 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         return NT_BUILD_ERR_VALIDATION;
     }
 
+    /* Phase 1b: Write meta section to data_buf (appended after asset data).
+     * Meta entries grouped by resource_id (D-05), covered by CRC32. */
+    if (ctx->meta_count > 0) {
+        /* Sort meta_pending by resource_id (insertion sort -- count is small) */
+        for (uint32_t i = 1; i < ctx->meta_count; i++) {
+            NtBuildMetaEntry key = ctx->meta_pending[i];
+            uint32_t j = i;
+            while (j > 0 && ctx->meta_pending[j - 1].resource_id > key.resource_id) {
+                ctx->meta_pending[j] = ctx->meta_pending[j - 1];
+                j--;
+            }
+            ctx->meta_pending[j] = key;
+        }
+
+        /* Align meta section start to 4 bytes */
+        uint32_t meta_section_start = (ctx->data_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+        if (meta_section_start > ctx->data_size) {
+            uint8_t zeros[4] = {0};
+            nt_builder_append_data(ctx, zeros, meta_section_start - ctx->data_size);
+        }
+
+        /* Write each meta entry: NtMetaEntryHeader + payload */
+        for (uint32_t m = 0; m < ctx->meta_count; m++) {
+            NtBuildMetaEntry *me = &ctx->meta_pending[m];
+            uint32_t meta_data_offset = ctx->data_size;
+
+            /* Set meta_offset for first entry of each resource_id */
+            for (uint32_t a = 0; a < ctx->entry_count; a++) {
+                if (ctx->entries[a].resource_id == me->resource_id && ctx->entries[a].meta_offset == 0) {
+                    ctx->entries[a].meta_offset = meta_data_offset;
+                    break;
+                }
+            }
+
+            NtMetaEntryHeader mh;
+            mh.resource_id = me->resource_id;
+            mh.kind = me->kind;
+            mh.size = me->size;
+            nt_builder_append_data(ctx, &mh, (uint32_t)sizeof(NtMetaEntryHeader));
+
+            nt_builder_append_data(ctx, me->data, me->size);
+            uint32_t padded_size = (me->size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+            if (padded_size > me->size) {
+                uint8_t pad[4] = {0};
+                nt_builder_append_data(ctx, pad, padded_size - me->size);
+            }
+        }
+    }
+
     /* Phase 2: Compute layout and write pack file */
     uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (ctx->entry_count * sizeof(NtAssetEntry)));
     uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
@@ -455,6 +517,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
      * Shift to absolute file offset by adding header_size. */
     for (uint32_t i = 0; i < ctx->entry_count; i++) {
         ctx->entries[i].offset += header_size;
+        if (ctx->entries[i].meta_offset != 0) {
+            ctx->entries[i].meta_offset += header_size;
+        }
     }
 
     uint32_t total_size = header_size + ctx->data_size;
@@ -463,6 +528,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NtPackHeader header;
     memset(&header, 0, sizeof(header));
     header.magic = NT_PACK_MAGIC;
+    header.meta_count = ctx->meta_count;
     header.version = NT_PACK_VERSION;
     header.asset_count = (uint16_t)ctx->entry_count;
     header.header_size = header_size;
@@ -563,6 +629,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         nt_format_size(total_gz, total_gz_str, sizeof(total_gz_str));
         uint32_t total_pct = (total_gz * 100) / raw_total;
         NT_LOG_INFO("  Total:   %s raw -> %s gz (%u%%)", total_raw_str, total_gz_str, total_pct);
+    }
+    if (ctx->meta_count > 0) {
+        NT_LOG_INFO("  META:    %u entries", ctx->meta_count);
     }
     if (ctx->dedup_count > 0) {
         NT_LOG_INFO("  Dedup:   %u assets (saved %.1fK)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / 1024.0);
