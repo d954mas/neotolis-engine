@@ -167,7 +167,7 @@ void test_stream_stride_mixed_precision(void) {
 
 /* --- Mesh header tests --- */
 
-void test_mesh_header_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtMeshAssetHeader)); }
+void test_mesh_header_size(void) { TEST_ASSERT_EQUAL_UINT(48, sizeof(NtMeshAssetHeader)); }
 
 void test_mesh_magic_value(void) {
     TEST_ASSERT_EQUAL_HEX32(0x4853454D, NT_MESH_MAGIC);
@@ -190,6 +190,8 @@ void test_mesh_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(12, offsetof(NtMeshAssetHeader, index_count));
     TEST_ASSERT_EQUAL_UINT(16, offsetof(NtMeshAssetHeader, vertex_data_size));
     TEST_ASSERT_EQUAL_UINT(20, offsetof(NtMeshAssetHeader, index_data_size));
+    TEST_ASSERT_EQUAL_UINT(24, offsetof(NtMeshAssetHeader, aabb_min));
+    TEST_ASSERT_EQUAL_UINT(36, offsetof(NtMeshAssetHeader, aabb_max));
 }
 
 /* --- Texture header tests --- */
@@ -224,14 +226,12 @@ void test_texture_format_enum(void) { TEST_ASSERT_EQUAL_UINT(1, NT_TEXTURE_FORMA
 
 /* --- Metadata struct tests --- */
 
-void test_NtMetaEntryHeader_size(void) { TEST_ASSERT_EQUAL_UINT(16, sizeof(NtMetaEntryHeader)); }
-
-void test_NtAabbData_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtAabbData)); }
+void test_NtMetaEntryHeader_size(void) { TEST_ASSERT_EQUAL_UINT(20, sizeof(NtMetaEntryHeader)); }
 
 void test_NtMetaEntryHeader_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(0, offsetof(NtMetaEntryHeader, resource_id));
     TEST_ASSERT_EQUAL_UINT(8, offsetof(NtMetaEntryHeader, kind));
-    TEST_ASSERT_EQUAL_UINT(12, offsetof(NtMetaEntryHeader, size));
+    TEST_ASSERT_EQUAL_UINT(16, offsetof(NtMetaEntryHeader, size));
 }
 
 void test_NtPackHeader_meta_count_offset(void) {
@@ -324,7 +324,6 @@ int main(void) {
 
     /* Metadata struct tests */
     RUN_TEST(test_NtMetaEntryHeader_size);
-    RUN_TEST(test_NtAabbData_size);
     RUN_TEST(test_NtMetaEntryHeader_field_offsets);
     RUN_TEST(test_NtPackHeader_meta_count_offset);
     RUN_TEST(test_NtAssetEntry_meta_offset_offset);

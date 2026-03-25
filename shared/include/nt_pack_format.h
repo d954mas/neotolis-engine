@@ -84,23 +84,16 @@ typedef struct {
 _Static_assert(sizeof(NtPackHeader) == 24, "PackHeader must be 24 bytes");
 _Static_assert(sizeof(NtAssetEntry) == 24, "AssetEntry must be 24 bytes");
 
-/* MetaEntry header (D-03): variable-size, 16 bytes header + size bytes data.
+/* MetaEntry header: variable-size, 20 bytes header + size bytes data.
  * Written contiguously per-asset in meta section. */
 #pragma pack(push, 1)
 typedef struct {
     uint64_t resource_id; /* 0:  which asset this metadata belongs to */
-    uint32_t kind;        /* 8:  hash32 of metadata type name */
-    uint32_t size;        /* 12: payload size in bytes (max 256 per D-12) */
+    uint64_t kind;        /* 8:  hash64 of metadata type name */
+    uint32_t size;        /* 16: payload size in bytes (max 256 per D-12) */
     /* uint8_t data[size] follows immediately */
 } NtMetaEntryHeader;
 #pragma pack(pop)
-_Static_assert(sizeof(NtMetaEntryHeader) == 16, "NtMetaEntryHeader must be 16 bytes");
-
-/* AABB metadata payload: 6 floats = 24 bytes (D-07) */
-typedef struct {
-    float min[3];
-    float max[3];
-} NtAabbData;
-_Static_assert(sizeof(NtAabbData) == 24, "NtAabbData must be 24 bytes");
+_Static_assert(sizeof(NtMetaEntryHeader) == 20, "NtMetaEntryHeader must be 20 bytes");
 
 #endif /* NT_PACK_FORMAT_H */

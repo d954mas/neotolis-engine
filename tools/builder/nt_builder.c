@@ -301,7 +301,7 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
 
 /* --- Metadata accumulation --- */
 
-void nt_builder_add_meta(NtBuilderContext *ctx, uint64_t resource_id, uint32_t kind, const void *data, uint32_t size) {
+void nt_builder_add_meta(NtBuilderContext *ctx, uint64_t resource_id, uint64_t kind, const void *data, uint32_t size) {
     NT_BUILD_ASSERT(size <= 256 && "metadata entry exceeds 256 byte limit (D-12)");
     NT_BUILD_ASSERT(ctx->meta_count < NT_BUILD_MAX_META_ENTRIES && "metadata entry limit exceeded");
     NtBuildMetaEntry *m = &ctx->meta_pending[ctx->meta_count++];
@@ -351,19 +351,12 @@ void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx);
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
-    if (!ctx) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
+    NT_BUILD_ASSERT(ctx && "finish_pack called with NULL context");
+    NT_BUILD_ASSERT(ctx->pending_count > 0 && "finish_pack called with no assets added");
 
-    if (ctx->pending_count == 0) {
-        NT_LOG_ERROR("No assets added");
-        return NT_BUILD_ERR_VALIDATION;
-    }
-
-    /* Phase 1: Import all deferred assets */
+    /* Phase 1: Import all deferred assets (crash on first failure) */
     NT_LOG_INFO("Importing %u assets...", ctx->pending_count);
     double t_import_start = nt_time_now();
-    uint32_t fail_count = 0;
     double import_times[NT_BUILD_MAX_ASSETS];
     memset(import_times, 0, sizeof(import_times));
 
@@ -417,18 +410,10 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
         import_times[i] = nt_time_now() - t_asset_start;
 
-        if (ret != NT_BUILD_OK) {
-            fail_count++;
-            NT_LOG_ERROR("  FAILED: %s", pe->path);
-        }
+        NT_BUILD_ASSERT(ret == NT_BUILD_OK && "asset import failed -- see error above");
     }
 
     double import_secs = nt_time_now() - t_import_start;
-
-    if (fail_count > 0) {
-        NT_LOG_ERROR("Build failed: %u/%u assets failed (%.1fs). No .ntpack written.", fail_count, ctx->pending_count, import_secs);
-        return NT_BUILD_ERR_VALIDATION;
-    }
 
     /* Phase 1b: Write meta section to data_buf (appended after asset data).
      * Meta entries grouped by resource_id (D-05), covered by CRC32. */

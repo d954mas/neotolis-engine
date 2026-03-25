@@ -224,9 +224,7 @@ void test_hash_different_strings_differ(void) {
 void test_start_pack_returns_context(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/test_ctx.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
-    /* Finish immediately with no assets should return error */
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
+    /* finish_pack with 0 assets now asserts -- just test context creation */
     nt_builder_free_pack(ctx);
 }
 
@@ -1968,18 +1966,18 @@ void test_merge_sorted_output(void) {
     free(content);
 }
 
-/* --- Metadata in built packs --- */
+/* --- AABB in mesh header --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_builder_mesh_has_aabb_meta(void) {
-    const char *glb_path = TMP_DIR "/meta_tri.glb";
+void test_builder_mesh_has_aabb(void) {
+    const char *glb_path = TMP_DIR "/aabb_tri.glb";
     write_test_glb(glb_path);
 
     NtStreamLayout layout[] = {
         {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
     };
 
-    const char *pack_path = TMP_DIR "/meta_mesh.ntpack";
+    const char *pack_path = TMP_DIR "/aabb_mesh.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
@@ -1989,7 +1987,7 @@ void test_builder_mesh_has_aabb_meta(void) {
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     nt_builder_free_pack(ctx);
 
-    /* Read the output pack and verify meta section */
+    /* Read the output pack and verify mesh header AABB */
     FILE *f = fopen(pack_path, "rb");
     TEST_ASSERT_NOT_NULL(f);
 
@@ -2007,25 +2005,20 @@ void test_builder_mesh_has_aabb_meta(void) {
     NtPackHeader hdr;
     memcpy(&hdr, blob, sizeof(hdr));
     TEST_ASSERT_EQUAL_HEX32(NT_PACK_MAGIC, hdr.magic);
-    TEST_ASSERT_TRUE(hdr.meta_count > 0); /* at least 1 AABB entry */
 
-    /* Find the asset entry and verify meta_offset is non-zero */
+    /* Read asset entry */
     NtAssetEntry entry;
     memcpy(&entry, blob + sizeof(NtPackHeader), sizeof(entry));
-    TEST_ASSERT_TRUE(entry.meta_offset != 0);
 
-    /* Read NtMetaEntryHeader at meta_offset */
-    TEST_ASSERT_TRUE(entry.meta_offset + sizeof(NtMetaEntryHeader) <= file_size);
-    NtMetaEntryHeader mh;
-    memcpy(&mh, blob + entry.meta_offset, sizeof(mh));
-    TEST_ASSERT_EQUAL_UINT64(entry.resource_id, mh.resource_id);
-    TEST_ASSERT_EQUAL_HEX32(nt_hash32_str("aabb").value, mh.kind);
-    TEST_ASSERT_EQUAL_UINT32(sizeof(NtAabbData), mh.size);
+    /* Read mesh header at asset offset — AABB should be in header */
+    TEST_ASSERT_TRUE(entry.offset + sizeof(NtMeshAssetHeader) <= file_size);
+    NtMeshAssetHeader mesh_hdr;
+    memcpy(&mesh_hdr, blob + entry.offset, sizeof(mesh_hdr));
+    TEST_ASSERT_EQUAL_HEX32(NT_MESH_MAGIC, mesh_hdr.magic);
+    TEST_ASSERT_EQUAL_UINT16(NT_MESH_VERSION, mesh_hdr.version);
 
-    /* Read AABB data -- triangle has min=[0,0,0], max=[1,1,0] */
-    NtAabbData aabb;
-    memcpy(&aabb, blob + entry.meta_offset + sizeof(NtMetaEntryHeader), sizeof(aabb));
-    TEST_ASSERT_TRUE(aabb.max[0] > aabb.min[0] || aabb.max[1] > aabb.min[1] || aabb.max[2] > aabb.min[2]);
+    /* Triangle has min=[0,0,0], max=[1,1,0] — at least one axis should differ */
+    TEST_ASSERT_TRUE(mesh_hdr.aabb_max[0] > mesh_hdr.aabb_min[0] || mesh_hdr.aabb_max[1] > mesh_hdr.aabb_min[1]);
 
     free(blob);
 }
@@ -2046,10 +2039,7 @@ int main(void) {
     RUN_TEST(test_texture_round_trip);
     RUN_TEST(test_mesh_round_trip);
 
-    /* Validation errors */
-    RUN_TEST(test_missing_position_attribute_errors);
-    RUN_TEST(test_empty_shader_errors);
-    RUN_TEST(test_shader_with_version_errors);
+    /* Validation errors (builder now asserts on bad input -- cannot test in-process) */
 
     /* Comment stripping */
     RUN_TEST(test_shader_comment_stripping);
@@ -2093,23 +2083,20 @@ int main(void) {
     /* Include resolver */
     RUN_TEST(test_include_basic);
     RUN_TEST(test_include_pragma_once);
-    RUN_TEST(test_include_missing_file_errors);
-    RUN_TEST(test_include_depth_limit);
+    /* test_include_missing_file_errors, test_include_depth_limit: builder asserts on bad input */
     RUN_TEST(test_asset_root_include);
     RUN_TEST(test_include_pragma_once_after_comment);
 
     /* GL shader validation */
     RUN_TEST(test_gl_validation_valid_shader);
-    RUN_TEST(test_gl_validation_invalid_shader);
+    /* test_gl_validation_invalid_shader, test_gl_validation_type_error: builder asserts on bad input */
     RUN_TEST(test_gl_validation_fragment_shader);
-    RUN_TEST(test_gl_validation_type_error);
 
     /* Multi-mesh add_mesh */
     RUN_TEST(test_add_mesh_by_name);
     RUN_TEST(test_add_mesh_by_index);
     RUN_TEST(test_add_mesh_single_unchanged);
-    RUN_TEST(test_add_mesh_by_name_not_found);
-    RUN_TEST(test_add_mesh_by_index_out_of_range);
+    /* test_add_mesh_by_name_not_found, test_add_mesh_by_index_out_of_range: builder asserts on bad input */
     RUN_TEST(test_add_mesh_resource_name_override);
 
     /* Codegen */
@@ -2123,8 +2110,8 @@ int main(void) {
     RUN_TEST(test_merge_dedup);
     RUN_TEST(test_merge_sorted_output);
 
-    /* Metadata in built packs */
-    RUN_TEST(test_builder_mesh_has_aabb_meta);
+    /* AABB in mesh header */
+    RUN_TEST(test_builder_mesh_has_aabb);
 
     return UNITY_END();
 }

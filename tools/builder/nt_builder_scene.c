@@ -11,7 +11,7 @@
 
 /* --- AABB extraction from POSITION accessor --- */
 
-static bool nt_extract_aabb(const cgltf_primitive *prim, NtAabbData *out) {
+static void nt_extract_aabb(const cgltf_primitive *prim, float out_min[3], float out_max[3]) {
     const cgltf_accessor *pos_acc = NULL;
     for (cgltf_size a = 0; a < prim->attributes_count; a++) {
         if (prim->attributes[a].name != NULL && strcmp(prim->attributes[a].name, "POSITION") == 0) {
@@ -20,33 +20,34 @@ static bool nt_extract_aabb(const cgltf_primitive *prim, NtAabbData *out) {
         }
     }
     if (!pos_acc) {
-        return false;
+        memset(out_min, 0, 3 * sizeof(float));
+        memset(out_max, 0, 3 * sizeof(float));
+        return;
     }
 
     if (pos_acc->has_min && pos_acc->has_max) {
         for (int i = 0; i < 3; i++) {
-            out->min[i] = (float)pos_acc->min[i];
-            out->max[i] = (float)pos_acc->max[i];
+            out_min[i] = (float)pos_acc->min[i];
+            out_max[i] = (float)pos_acc->max[i];
         }
-        return true;
+        return;
     }
 
-    out->min[0] = out->min[1] = out->min[2] = FLT_MAX;
-    out->max[0] = out->max[1] = out->max[2] = -FLT_MAX;
+    out_min[0] = out_min[1] = out_min[2] = FLT_MAX;
+    out_max[0] = out_max[1] = out_max[2] = -FLT_MAX;
 
     float tmp[3];
     for (cgltf_size v = 0; v < pos_acc->count; v++) {
         cgltf_accessor_read_float(pos_acc, v, tmp, 3);
         for (int i = 0; i < 3; i++) {
-            if (tmp[i] < out->min[i]) {
-                out->min[i] = tmp[i];
+            if (tmp[i] < out_min[i]) {
+                out_min[i] = tmp[i];
             }
-            if (tmp[i] > out->max[i]) {
-                out->max[i] = tmp[i];
+            if (tmp[i] > out_max[i]) {
+                out_max[i] = tmp[i];
             }
         }
     }
-    return true;
 }
 
 /* --- Helper: get texture index from cgltf_texture_view -> images array --- */
@@ -514,6 +515,7 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
         mesh_hdr.index_count = index_count;
         mesh_hdr.vertex_data_size = vertex_data_size;
         mesh_hdr.index_data_size = index_data_size;
+        nt_extract_aabb(prim, mesh_hdr.aabb_min, mesh_hdr.aabb_max);
 
         NtStreamDesc descs[NT_MESH_MAX_STREAMS];
         memset(descs, 0, sizeof(descs));
@@ -541,14 +543,6 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
 
         if (ret == NT_BUILD_OK) {
             ret = nt_builder_register_asset(ctx, resource_id, NT_ASSET_MESH, NT_MESH_VERSION, total_asset_size);
-        }
-
-        /* Extract and store AABB metadata (META-01) */
-        if (ret == NT_BUILD_OK) {
-            NtAabbData aabb;
-            if (nt_extract_aabb(prim, &aabb)) {
-                nt_builder_add_meta(ctx, resource_id, nt_hash32_str("aabb").value, &aabb, sizeof(aabb));
-            }
         }
 
         free(vertex_buf);

@@ -88,7 +88,7 @@ typedef struct {
 /* Builder-side meta entry for accumulation (max 256 bytes payload per D-12) */
 typedef struct {
     uint64_t resource_id;
-    uint32_t kind;
+    uint64_t kind;
     uint32_t size;
     uint8_t data[256];
 } NtBuildMetaEntry;
@@ -163,7 +163,7 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
                                                nt_tangent_mode_t tangent_mode, uint64_t resource_id);
 
 /* Metadata accumulation (called from import functions) */
-void nt_builder_add_meta(NtBuilderContext *ctx, uint64_t resource_id, uint32_t kind, const void *data, uint32_t size);
+void nt_builder_add_meta(NtBuilderContext *ctx, uint64_t resource_id, uint64_t kind, const void *data, uint32_t size);
 
 /* Tangent computation (MikkTSpace wrapper) */
 nt_build_result_t nt_builder_compute_tangents(const float *positions, const float *normals, const float *uvs, const uint32_t *indices, uint32_t vertex_count, uint32_t index_count,
