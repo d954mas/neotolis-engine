@@ -1842,6 +1842,168 @@ void test_add_mesh_resource_name_override(void) {
     (void)fclose(f);
 }
 
+/* --- Codegen tests --- */
+
+/* Helper: read file into malloc'd buffer, returns NULL on failure */
+static char *read_text_file(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return NULL;
+    }
+    (void)fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    if (sz <= 0) {
+        (void)fclose(f);
+        return NULL;
+    }
+    char *buf = (char *)malloc((size_t)sz + 1);
+    if (!buf) {
+        (void)fclose(f);
+        return NULL;
+    }
+    size_t rd = fread(buf, 1, (size_t)sz, f);
+    buf[rd] = '\0';
+    (void)fclose(f);
+    return buf;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_codegen_generates_header(void) {
+    /* Build pack with mesh + shader */
+    const char *glb_path = TMP_DIR "/codegen_tri.glb";
+    write_test_glb(glb_path);
+    const char *vert_path = TMP_DIR "/codegen_test.vert";
+    write_test_shader(vert_path, "precision mediump float;\nvoid main() { gl_Position = vec4(0); }\n");
+
+    const char *pack_path = TMP_DIR "/codegen_test.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    nt_mesh_opts_t opts = {.layout = layout, .stream_count = 1};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, glb_path, &opts));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX));
+
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* .h file should exist next to .ntpack */
+    const char *header_path = TMP_DIR "/codegen_test.h";
+    char *content = read_text_file(header_path);
+    TEST_ASSERT_NOT_NULL_MESSAGE(content, "Generated .h file should exist");
+
+    /* Verify content */
+    TEST_ASSERT_NOT_NULL(strstr(content, "#define ASSET_MESH_"));
+    TEST_ASSERT_NOT_NULL(strstr(content, "#define ASSET_SHADER_"));
+    TEST_ASSERT_NOT_NULL(strstr(content, "#ifndef"));
+    TEST_ASSERT_NOT_NULL(strstr(content, "nt_hash64_t"));
+    TEST_ASSERT_NOT_NULL(strstr(content, "register_labels"));
+    TEST_ASSERT_NOT_NULL(strstr(content, "NT_HASH_LABELS"));
+    TEST_ASSERT_NOT_NULL(strstr(content, "#endif"));
+
+    free(content);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_codegen_hash_matches_runtime(void) {
+    const char *glb_path = TMP_DIR "/codegen_hash_tri.glb";
+    write_test_glb(glb_path);
+
+    const char *pack_path = TMP_DIR "/codegen_hash.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    nt_mesh_opts_t opts = {.layout = layout, .stream_count = 1};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, glb_path, &opts));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    /* Read generated .h */
+    const char *header_path = TMP_DIR "/codegen_hash.h";
+    char *content = read_text_file(header_path);
+    TEST_ASSERT_NOT_NULL_MESSAGE(content, "Generated .h file should exist");
+
+    /* Parse hex value from #define line: #define ASSET_MESH_... ((nt_hash64_t){0x...ULL}) */
+    const char *hex_start = strstr(content, "0x");
+    TEST_ASSERT_NOT_NULL_MESSAGE(hex_start, "Should contain hex value");
+
+    char *end_ptr = NULL;
+    uint64_t generated_hash = strtoull(hex_start, &end_ptr, 16);
+    TEST_ASSERT_TRUE(generated_hash != 0);
+
+    /* Compare against runtime hash of normalized path */
+    nt_hash64_t runtime_hash = nt_builder_normalize_and_hash(glb_path);
+    TEST_ASSERT_EQUAL_HEX64(runtime_hash.value, generated_hash);
+
+    free(content);
+}
+
+void test_codegen_path_to_identifier(void) {
+    /* Build pack with path "assets/meshes/cube.glb" -- but use local glb */
+    MKDIR(TMP_DIR "/codegen_id");
+    MKDIR(TMP_DIR "/codegen_id/assets");
+    MKDIR(TMP_DIR "/codegen_id/assets/meshes");
+    const char *glb_path = TMP_DIR "/codegen_id/assets/meshes/cube.glb";
+    write_test_glb(glb_path);
+
+    const char *pack_path = TMP_DIR "/codegen_id.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    nt_mesh_opts_t opts = {.layout = layout, .stream_count = 1};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, glb_path, &opts));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    char *content = read_text_file(TMP_DIR "/codegen_id.h");
+    TEST_ASSERT_NOT_NULL(content);
+
+    /* The path normalized is "build/tests/tmp/codegen_id/assets/meshes/cube.glb"
+     * Identifier: strip extension, uppercase, replace / with _
+     * -> ASSET_MESH_BUILD_TESTS_TMP_CODEGEN_ID_ASSETS_MESHES_CUBE */
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(content, "ASSET_MESH_"), "Should contain ASSET_MESH_ prefix");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(content, "ASSETS_MESHES_CUBE"), "Should contain path-based identifier");
+
+    free(content);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_codegen_renamed_assets(void) {
+    const char *glb_path = TMP_DIR "/codegen_rename_tri.glb";
+    write_test_glb(glb_path);
+
+    const char *pack_path = TMP_DIR "/codegen_rename.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    nt_mesh_opts_t opts = {.layout = layout, .stream_count = 1};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, glb_path, &opts));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_rename(ctx, glb_path, "meshes/my_cube"));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    char *content = read_text_file(TMP_DIR "/codegen_rename.h");
+    TEST_ASSERT_NOT_NULL(content);
+
+    /* Should use rename_key for identifier */
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(content, "ASSET_MESH_MESHES_MY_CUBE"), "Should use renamed path for identifier");
+
+    /* Hash should match rename key */
+    const char *hex_start = strstr(content, "0x");
+    TEST_ASSERT_NOT_NULL(hex_start);
+    char *end_ptr = NULL;
+    uint64_t generated_hash = strtoull(hex_start, &end_ptr, 16);
+    nt_hash64_t expected_hash = nt_builder_normalize_and_hash("meshes/my_cube");
+    TEST_ASSERT_EQUAL_HEX64(expected_hash.value, generated_hash);
+
+    free(content);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -1928,6 +2090,12 @@ int main(void) {
     RUN_TEST(test_add_mesh_by_name_not_found);
     RUN_TEST(test_add_mesh_by_index_out_of_range);
     RUN_TEST(test_add_mesh_resource_name_override);
+
+    /* Codegen */
+    RUN_TEST(test_codegen_generates_header);
+    RUN_TEST(test_codegen_hash_matches_runtime);
+    RUN_TEST(test_codegen_path_to_identifier);
+    RUN_TEST(test_codegen_renamed_assets);
 
     return UNITY_END();
 }
