@@ -33,12 +33,12 @@ static const char *pack_path(const char *dir, const char *name) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 3) {
-        (void)fprintf(stderr, "Usage: build_tq_packs <pack_dir> <header_dir>\n");
+    if (argc < 2) {
+        (void)fprintf(stderr, "Usage: build_tq_packs <pack_dir>\n");
         return 1;
     }
     const char *out_dir = argv[1];
-    const char *header_dir = argv[2];
+    const char *header_dir = "examples/textured_quad/generated";
 
     (void)printf("=== Build Textured Cube Packs → %s ===\n\n", out_dir);
 

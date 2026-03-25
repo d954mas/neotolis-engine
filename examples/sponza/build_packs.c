@@ -532,12 +532,12 @@ static nt_build_result_t populate_full(NtBuilderContext *ctx, const nt_glb_scene
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 int main(int argc, char *argv[]) {
-    if (argc < 3) {
-        (void)fprintf(stderr, "Usage: build_sponza_packs <pack_dir> <header_dir>\n");
+    if (argc < 2) {
+        (void)fprintf(stderr, "Usage: build_sponza_packs <pack_dir>\n");
         return 1;
     }
     const char *out_dir = argv[1];
-    const char *header_dir = argv[2];
+    const char *header_dir = "examples/sponza/generated";
 
     (void)printf("=== Build Sponza Packs -> %s ===\n\n", out_dir);
 
