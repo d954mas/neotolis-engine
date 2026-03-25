@@ -379,9 +379,10 @@ void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, c
                     break;
                 }
             }
-            if (found || entry_count >= NT_BUILD_MAX_ASSETS) {
+            if (found) {
                 continue;
             }
+            NT_BUILD_ASSERT(entry_count < NT_BUILD_MAX_ASSETS && "merge_headers: too many unique assets -- increase NT_BUILD_MAX_ASSETS");
 
             strncpy(entries[entry_count].identifier, id_buf, NT_CODEGEN_MAX_IDENTIFIER - 1);
             entries[entry_count].hash = hash;

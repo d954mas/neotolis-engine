@@ -503,9 +503,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     /* Generate codegen header (.h with ASSET_* constants) */
     nt_build_result_t codegen_result = nt_builder_generate_header(ctx);
-    if (codegen_result != NT_BUILD_OK) {
-        NT_LOG_WARN("Codegen header generation failed (pack is still valid)");
-    }
+    NT_BUILD_ASSERT(codegen_result == NT_BUILD_OK && "codegen header generation failed -- check header_dir exists and is writable");
 
     /* Enhanced summary */
     double total_secs = nt_time_now() - t_import_start;
