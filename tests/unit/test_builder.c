@@ -648,6 +648,90 @@ void test_dump_invalid_file_errors(void) {
     TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
 }
 
+/* --- Dump with gzip estimation tests --- */
+
+void test_dump_gzip_sizes(void) {
+    /* Build a pack with mesh + texture + shader to exercise gzip estimation */
+    const char *glb_path = TMP_DIR "/dump_gz_tri.glb";
+    const char *png_path = TMP_DIR "/dump_gz_tex.png";
+    const char *vert_path = TMP_DIR "/dump_gz.vert";
+    write_test_glb(glb_path);
+    write_test_png(png_path);
+    write_test_shader(vert_path, "precision mediump float;\n"
+                                 "layout(location = 0) in vec3 a_pos;\n"
+                                 "void main() { gl_Position = vec4(a_pos, 1.0); }\n");
+
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+    };
+
+    const char *pack_path = TMP_DIR "/dump_gz_test.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, layout, 1);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    r = nt_builder_add_texture(ctx, png_path);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Dump with gzip estimation should succeed */
+    r = nt_builder_dump_pack(pack_path);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+}
+
+void test_dump_name_resolution(void) {
+    /* Build a pack with a shader */
+    const char *vert_path = TMP_DIR "/dump_name.vert";
+    write_test_shader(vert_path, "precision mediump float;\n"
+                                 "void main() { gl_Position = vec4(0); }\n");
+
+    const char *pack_path = TMP_DIR "/dump_name_test.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Write a fake .h file next to .ntpack with known hash-to-name mapping */
+    nt_hash64_t h = nt_builder_normalize_and_hash(vert_path);
+    char header_path[512];
+    (void)snprintf(header_path, sizeof(header_path), "%s", TMP_DIR "/dump_name_test.h");
+    FILE *hf = fopen(header_path, "w");
+    TEST_ASSERT_NOT_NULL(hf);
+    (void)fprintf(hf, "#define ASSET_DUMP_NAME_VERT ((nt_hash64_t){0x%016llXULL}) /* %s */\n", (unsigned long long)h.value, vert_path);
+    (void)fclose(hf);
+
+    /* Dump should succeed and use names from .h file */
+    r = nt_builder_dump_pack(pack_path);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+}
+
+void test_dump_without_header(void) {
+    /* Build a pack without .h file - should fall back to truncated hex hashes */
+    const char *vert_path = TMP_DIR "/dump_nohdr.vert";
+    write_test_shader(vert_path, "precision mediump float;\n"
+                                 "void main() { gl_Position = vec4(0); }\n");
+
+    const char *pack_path = TMP_DIR "/dump_nohdr_test.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    nt_build_result_t r = nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Remove any .h file that might exist */
+    (void)remove(TMP_DIR "/dump_nohdr_test.h");
+
+    /* Dump should succeed with truncated hex hashes */
+    r = nt_builder_dump_pack(pack_path);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+}
+
 /* --- Multi-asset pack test --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1791,6 +1875,9 @@ int main(void) {
     /* Dump utility */
     RUN_TEST(test_dump_valid_pack);
     RUN_TEST(test_dump_invalid_file_errors);
+    RUN_TEST(test_dump_gzip_sizes);
+    RUN_TEST(test_dump_name_resolution);
+    RUN_TEST(test_dump_without_header);
 
     /* Multi-asset and stage */
     RUN_TEST(test_multi_asset_pack);
