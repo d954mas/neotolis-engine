@@ -112,6 +112,9 @@ typedef struct {
 /* Opaque builder context */
 typedef struct NtBuilderContext NtBuilderContext;
 
+/* Opaque asset registry -- accumulates assets across multiple packs for combined header */
+typedef struct NtBuilderRegistry NtBuilderRegistry;
+
 /* --- Core API ---
  * Lifecycle: start_pack → add_* → finish_pack → free_pack.
  * Caller must always call free_pack when done, whether finish succeeded or not.
@@ -189,6 +192,21 @@ nt_build_result_t nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_
 /* --- Texture from memory with compression (NULL compress_opts = raw v1 format) --- */
 nt_build_result_t nt_builder_add_texture_from_memory_compressed(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts,
                                                                 const nt_tex_compress_opts_t *compress_opts);
+
+/* --- Codegen options --- */
+void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);
+
+/* --- Gzip estimation (on by default, disable for faster rebuilds) --- */
+void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
+
+/* --- Asset registry (combined header across packs) ---
+ * Lifecycle: create → attach to each pack context → finish packs → generate → free.
+ * finish_pack automatically registers assets into the attached registry.
+ */
+NtBuilderRegistry *nt_builder_create_registry(void);
+void nt_builder_set_registry(NtBuilderContext *ctx, NtBuilderRegistry *reg);
+nt_build_result_t nt_builder_generate_registry_header(const NtBuilderRegistry *reg, const char *output_path);
+void nt_builder_free_registry(NtBuilderRegistry *reg);
 
 /* --- Utilities --- */
 nt_build_result_t nt_builder_dump_pack(const char *pack_path);

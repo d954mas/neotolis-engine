@@ -52,6 +52,7 @@
 
 #include "math/nt_math.h"
 #include "nt_pack_format.h"
+#include "sponza_assets.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -405,7 +406,7 @@ static void frame(void) {
     if (!s_geo_loading && nt_resource_pack_state(s_core_pack_id) == NT_PACK_STATE_READY) {
         s_geo_loading = true;
         /* Checkerboard from core pack becomes the fallback for all unloaded textures */
-        nt_resource_set_placeholder_texture(nt_hash64_str("sponza/fallback_checker"));
+        nt_resource_set_placeholder_texture(ASSET_TEXTURE_SPONZA_FALLBACK_CHECKER);
         nt_log_info("Core pack ready, starting geo download...");
 #ifdef NT_CDN_URL
         nt_resource_load_auto(s_geo_pack_id, NT_CDN_URL "/sponza/sponza_geo.ntpack");
@@ -678,16 +679,16 @@ int main(void) {
     nt_mesh_renderer_init(&mr_desc);
 
     /* 11. Request shader resource handles (6 shaders, 3 permutations) */
-    s_vs_full = nt_resource_request(nt_hash64_str("assets/shaders/sponza_full.vert"), NT_ASSET_SHADER_CODE);
-    s_fs_full = nt_resource_request(nt_hash64_str("assets/shaders/sponza_full.frag"), NT_ASSET_SHADER_CODE);
-    s_vs_diffuse = nt_resource_request(nt_hash64_str("assets/shaders/sponza_diffuse.vert"), NT_ASSET_SHADER_CODE);
-    s_fs_diffuse = nt_resource_request(nt_hash64_str("assets/shaders/sponza_diffuse.frag"), NT_ASSET_SHADER_CODE);
-    s_vs_alpha = nt_resource_request(nt_hash64_str("assets/shaders/sponza_alpha.vert"), NT_ASSET_SHADER_CODE);
-    s_fs_alpha = nt_resource_request(nt_hash64_str("assets/shaders/sponza_alpha.frag"), NT_ASSET_SHADER_CODE);
+    s_vs_full = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_FULL_VERT, NT_ASSET_SHADER_CODE);
+    s_fs_full = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_FULL_FRAG, NT_ASSET_SHADER_CODE);
+    s_vs_diffuse = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_DIFFUSE_VERT, NT_ASSET_SHADER_CODE);
+    s_fs_diffuse = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_DIFFUSE_FRAG, NT_ASSET_SHADER_CODE);
+    s_vs_alpha = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_ALPHA_VERT, NT_ASSET_SHADER_CODE);
+    s_fs_alpha = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPONZA_ALPHA_FRAG, NT_ASSET_SHADER_CODE);
 
     /* 12. Request manifest and fallback texture resource handles */
-    s_manifest_handle = nt_resource_request(nt_hash64_str("sponza/manifest"), NT_ASSET_BLOB);
-    s_fallback_handle = nt_resource_request(nt_hash64_str("sponza/fallback_checker"), NT_ASSET_TEXTURE);
+    s_manifest_handle = nt_resource_request(ASSET_BLOB_SPONZA_MANIFEST, NT_ASSET_BLOB);
+    s_fallback_handle = nt_resource_request(ASSET_TEXTURE_SPONZA_FALLBACK_CHECKER, NT_ASSET_TEXTURE);
 
     /* 13. Create frame uniforms UBO (updated each frame) */
     s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){

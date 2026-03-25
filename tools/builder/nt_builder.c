@@ -213,6 +213,7 @@ NtBuilderContext *nt_builder_start_pack(const char *output_path) {
 
     strncpy(ctx->output_path, output_path, sizeof(ctx->output_path) - 1);
     ctx->output_path[sizeof(ctx->output_path) - 1] = '\0';
+    ctx->gzip_estimate = false; /* off by default — enable with set_gzip_estimate */
 
     NT_LOG_INFO("Starting pack: %s", output_path);
     return ctx;
@@ -327,7 +328,44 @@ static void nt_builder_free_context(NtBuilderContext *ctx) {
     for (uint32_t i = 0; i < ctx->asset_root_count; i++) {
         free(ctx->asset_roots[i]);
     }
+    free(ctx->header_dir);
     free(ctx);
+}
+
+/* --- Codegen options --- */
+
+void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir) {
+    if (!ctx) {
+        return;
+    }
+    free(ctx->header_dir);
+    ctx->header_dir = dir ? strdup(dir) : NULL;
+}
+
+void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled) {
+    if (ctx) {
+        ctx->gzip_estimate = enabled;
+    }
+}
+
+/* --- Asset registry --- */
+
+NtBuilderRegistry *nt_builder_create_registry(void) { return (NtBuilderRegistry *)calloc(1, sizeof(NtBuilderRegistry)); }
+
+void nt_builder_set_registry(NtBuilderContext *ctx, NtBuilderRegistry *reg) {
+    if (ctx) {
+        ctx->registry = reg;
+    }
+}
+
+void nt_builder_free_registry(NtBuilderRegistry *reg) {
+    if (!reg) {
+        return;
+    }
+    for (uint32_t i = 0; i < reg->count; i++) {
+        free(reg->entries[i].path);
+    }
+    free(reg);
 }
 
 void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx); }
@@ -424,7 +462,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     uint32_t gz_sizes[NT_BUILD_MAX_ASSETS];
     memset(gz_sizes, 0, sizeof(gz_sizes));
     uint32_t total_gz = 0;
-    {
+    double gzip_secs = 0.0;
+    if (ctx->gzip_estimate) {
+        double t_gzip_start = nt_time_now();
         /* Find max asset size to allocate one compression buffer */
         uint32_t max_asset_size = 0;
         for (uint32_t i = 0; i < ctx->entry_count; i++) {
@@ -445,6 +485,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 free(comp_buf);
             }
         }
+        gzip_secs = nt_time_now() - t_gzip_start;
     }
 
     /* entry->offset is relative to data_buf start (set in register_asset).
@@ -501,6 +542,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     nt_build_result_t codegen_result = nt_builder_generate_header(ctx);
     if (codegen_result != NT_BUILD_OK) {
         NT_LOG_WARN("Codegen header generation failed (pack is still valid)");
+    }
+
+    /* Register assets into registry (if attached) */
+    if (ctx->registry) {
+        nt_builder_register_to_registry(ctx);
     }
 
     /* Enhanced summary */
@@ -570,7 +616,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         NT_LOG_INFO("  Dedup:   %u assets (saved %.1fK)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / 1024.0);
     }
     NT_LOG_INFO("");
-    NT_LOG_INFO("  Timing: encode %.1fs | write %.1fs | total %.1fs", import_secs, write_secs, total_secs);
+    if (ctx->gzip_estimate) {
+        NT_LOG_INFO("  Timing: encode %.1fs | gzip %.1fs | write %.1fs | total %.1fs", import_secs, gzip_secs, write_secs, total_secs);
+    } else {
+        NT_LOG_INFO("  Timing: encode %.1fs | write %.1fs | total %.1fs (gzip skipped)", import_secs, write_secs, total_secs);
+    }
     NT_LOG_INFO("  CRC32:  0x%08X", checksum);
 
     return NT_BUILD_OK;

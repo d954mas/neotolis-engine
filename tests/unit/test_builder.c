@@ -1963,10 +1963,10 @@ void test_codegen_path_to_identifier(void) {
     TEST_ASSERT_NOT_NULL(content);
 
     /* The path normalized is "build/tests/tmp/codegen_id/assets/meshes/cube.glb"
-     * Identifier: strip extension, uppercase, replace / with _
-     * -> ASSET_MESH_BUILD_TESTS_TMP_CODEGEN_ID_ASSETS_MESHES_CUBE */
+     * Identifier: uppercase, replace /. with _, keep extension
+     * -> ASSET_MESH_BUILD_TESTS_TMP_CODEGEN_ID_ASSETS_MESHES_CUBE_GLB */
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(content, "ASSET_MESH_"), "Should contain ASSET_MESH_ prefix");
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(content, "ASSETS_MESHES_CUBE"), "Should contain path-based identifier");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(content, "ASSETS_MESHES_CUBE_GLB"), "Should contain path-based identifier with extension");
 
     free(content);
 }
@@ -2001,6 +2001,118 @@ void test_codegen_renamed_assets(void) {
     nt_hash64_t expected_hash = nt_builder_normalize_and_hash("meshes/my_cube");
     TEST_ASSERT_EQUAL_HEX64(expected_hash.value, generated_hash);
 
+    free(content);
+}
+
+/* --- Registry tests --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_registry_combined_header(void) {
+    const char *glb_path = TMP_DIR "/reg_tri.glb";
+    write_test_glb(glb_path);
+    const char *vert_path = TMP_DIR "/reg_test.vert";
+    write_test_shader(vert_path, "precision mediump float;\nvoid main() { gl_Position = vec4(0); }\n");
+
+    NtBuilderRegistry *reg = nt_builder_create_registry();
+    TEST_ASSERT_NOT_NULL(reg);
+
+    /* Pack 1: mesh */
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/reg_pack1.ntpack");
+    nt_builder_set_registry(ctx, reg);
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1}));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    /* Pack 2: shader */
+    ctx = nt_builder_start_pack(TMP_DIR "/reg_pack2.ntpack");
+    nt_builder_set_registry(ctx, reg);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    /* Generate combined header */
+    const char *combined_path = TMP_DIR "/reg_assets.h";
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_generate_registry_header(reg, combined_path));
+    nt_builder_free_registry(reg);
+
+    /* Verify combined header */
+    char *content = read_text_file(combined_path);
+    TEST_ASSERT_NOT_NULL(content);
+    TEST_ASSERT_NOT_NULL(strstr(content, "ASSET_MESH_"));
+    TEST_ASSERT_NOT_NULL(strstr(content, "ASSET_SHADER_"));
+    TEST_ASSERT_NOT_NULL(strstr(content, "register_labels"));
+    TEST_ASSERT_NOT_NULL(strstr(content, "#ifndef"));
+    free(content);
+}
+
+void test_registry_dedup(void) {
+    const char *glb_path = TMP_DIR "/reg_dedup_tri.glb";
+    write_test_glb(glb_path);
+
+    NtBuilderRegistry *reg = nt_builder_create_registry();
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+
+    /* Two packs with the same mesh (same path = same hash) */
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/reg_dup1.ntpack");
+    nt_builder_set_registry(ctx, reg);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1}));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    ctx = nt_builder_start_pack(TMP_DIR "/reg_dup2.ntpack");
+    nt_builder_set_force(ctx, true);
+    nt_builder_set_registry(ctx, reg);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1}));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    /* Combined header should have the define only once */
+    const char *combined_path = TMP_DIR "/reg_dedup.h";
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_generate_registry_header(reg, combined_path));
+    nt_builder_free_registry(reg);
+
+    char *content = read_text_file(combined_path);
+    TEST_ASSERT_NOT_NULL(content);
+    /* Count occurrences of ASSET_MESH_ -- should be exactly 1 */
+    uint32_t count = 0;
+    const char *p = content;
+    while ((p = strstr(p, "#define ASSET_MESH_")) != NULL) {
+        count++;
+        p++;
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, count);
+    free(content);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_registry_sorted_output(void) {
+    NtBuilderRegistry *reg = nt_builder_create_registry();
+    const char *vert_path = TMP_DIR "/reg_sort_a.vert";
+    write_test_shader(vert_path, "precision mediump float;\nvoid main() { gl_Position = vec4(0); }\n");
+    const char *frag_path = TMP_DIR "/reg_sort_b.frag";
+    write_test_shader(frag_path, "precision mediump float;\nvoid main() {}\n");
+
+    /* Add shaders in reverse order: b before a */
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/reg_sort.ntpack");
+    nt_builder_set_registry(ctx, reg);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, frag_path, NT_BUILD_SHADER_FRAGMENT));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX));
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    const char *combined_path = TMP_DIR "/reg_sorted.h";
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_generate_registry_header(reg, combined_path));
+    nt_builder_free_registry(reg);
+
+    /* In sorted output, "a" should appear before "b" */
+    char *content = read_text_file(combined_path);
+    TEST_ASSERT_NOT_NULL(content);
+    const char *pos_a = strstr(content, "reg_sort_a");
+    const char *pos_b = strstr(content, "reg_sort_b");
+    TEST_ASSERT_NOT_NULL(pos_a);
+    TEST_ASSERT_NOT_NULL(pos_b);
+    TEST_ASSERT_TRUE_MESSAGE(pos_a < pos_b, "Assets should be sorted by name (a before b)");
     free(content);
 }
 
@@ -2096,6 +2208,11 @@ int main(void) {
     RUN_TEST(test_codegen_hash_matches_runtime);
     RUN_TEST(test_codegen_path_to_identifier);
     RUN_TEST(test_codegen_renamed_assets);
+
+    /* Registry */
+    RUN_TEST(test_registry_combined_header);
+    RUN_TEST(test_registry_dedup);
+    RUN_TEST(test_registry_sorted_output);
 
     return UNITY_END();
 }

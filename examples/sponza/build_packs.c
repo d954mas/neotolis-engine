@@ -460,7 +460,8 @@ static nt_build_result_t add_meshes_and_manifest(NtBuilderContext *ctx, const nt
 
 /* --- Main --- */
 
-static nt_build_result_t build_pack(const char *out_dir, const char *name, const nt_glb_scene_t *scene, nt_build_result_t (*populate)(NtBuilderContext *, const nt_glb_scene_t *)) {
+static nt_build_result_t build_pack(const char *out_dir, const char *hdr_dir, const char *name, const nt_glb_scene_t *scene, nt_build_result_t (*populate)(NtBuilderContext *, const nt_glb_scene_t *),
+                                    NtBuilderRegistry *reg) {
     (void)printf("--- Building %s ---\n", name);
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, name));
     if (!ctx) {
@@ -468,6 +469,10 @@ static nt_build_result_t build_pack(const char *out_dir, const char *name, const
         return NT_BUILD_ERR_IO;
     }
     nt_builder_set_force(ctx, true);
+    nt_builder_set_header_dir(ctx, hdr_dir);
+    if (reg) {
+        nt_builder_set_registry(ctx, reg);
+    }
 
     nt_build_result_t r = populate(ctx, scene);
     if (r != NT_BUILD_OK) {
@@ -527,15 +532,17 @@ static nt_build_result_t populate_full(NtBuilderContext *ctx, const nt_glb_scene
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        (void)fprintf(stderr, "Usage: build_sponza_packs <output_dir>\n");
+    if (argc < 3) {
+        (void)fprintf(stderr, "Usage: build_sponza_packs <pack_dir> <header_dir>\n");
         return 1;
     }
     const char *out_dir = argv[1];
+    const char *header_dir = argv[2];
 
     (void)printf("=== Build Sponza Packs -> %s ===\n\n", out_dir);
 
     MKDIR(out_dir);
+    MKDIR(header_dir);
     init_checker();
 
     /* Parse Sponza scene */
@@ -562,34 +569,50 @@ int main(int argc, char *argv[]) {
     }
     (void)printf("\n");
 
+    /* Asset registry: collects all assets across packs for combined header */
+    NtBuilderRegistry *reg = nt_builder_create_registry();
+
     /* ---- Pack 1: sponza_core.ntpack (shaders + manifest + placeholder textures) ---- */
-    r = build_pack(out_dir, "sponza_core.ntpack", &scene, populate_core);
+    r = build_pack(out_dir, header_dir, "sponza_core.ntpack", &scene, populate_core, reg);
     if (r != NT_BUILD_OK) {
+        nt_builder_free_registry(reg);
         nt_builder_free_glb_scene(&scene);
         return 1;
     }
 
     /* ---- Pack 2: sponza_geo.ntpack (all meshes, base quality) ---- */
-    r = build_pack(out_dir, "sponza_geo.ntpack", &scene, populate_geo);
+    r = build_pack(out_dir, header_dir, "sponza_geo.ntpack", &scene, populate_geo, reg);
     if (r != NT_BUILD_OK) {
+        nt_builder_free_registry(reg);
         nt_builder_free_glb_scene(&scene);
         return 1;
     }
 
     /* ---- Pack 3: sponza_tex.ntpack (all textures, 512px max) ---- */
-    r = build_pack(out_dir, "sponza_tex.ntpack", &scene, populate_tex);
+    r = build_pack(out_dir, header_dir, "sponza_tex.ntpack", &scene, populate_tex, reg);
     if (r != NT_BUILD_OK) {
+        nt_builder_free_registry(reg);
         nt_builder_free_glb_scene(&scene);
         return 1;
     }
 
     /* ---- Pack 4: sponza_full.ntpack (full quality everything) ---- */
-    r = build_pack(out_dir, "sponza_full.ntpack", &scene, populate_full);
+    r = build_pack(out_dir, header_dir, "sponza_full.ntpack", &scene, populate_full, reg);
     if (r != NT_BUILD_OK) {
+        nt_builder_free_registry(reg);
         nt_builder_free_glb_scene(&scene);
         return 1;
     }
 
+    /* Generate combined header with all unique assets from all packs */
+    char combined_header[512];
+    (void)snprintf(combined_header, sizeof(combined_header), "%s/sponza_assets.h", header_dir);
+    r = nt_builder_generate_registry_header(reg, combined_header);
+    if (r != NT_BUILD_OK) {
+        (void)fprintf(stderr, "WARNING: combined header generation failed\n");
+    }
+
+    nt_builder_free_registry(reg);
     nt_builder_free_glb_scene(&scene);
 
     /* Print pack size summary (D-22) */

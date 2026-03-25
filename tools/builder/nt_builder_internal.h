@@ -130,6 +130,28 @@ struct NtBuilderContext {
     /* Asset root search paths (D-09) */
     char *asset_roots[NT_BUILD_MAX_ASSET_ROOTS];
     uint32_t asset_root_count;
+
+    /* Codegen: custom header output directory (NULL = next to pack) */
+    char *header_dir;
+
+    /* Gzip estimation in summary (default: true) */
+    bool gzip_estimate;
+
+    /* Asset registry for combined header (NULL = no registry) */
+    NtBuilderRegistry *registry;
+};
+
+/* --- Asset registry (combined header across packs) --- */
+
+typedef struct {
+    uint64_t hash;
+    char *path; /* logical path (owned, heap) */
+    nt_build_asset_kind_t kind;
+} NtRegistryEntry;
+
+struct NtBuilderRegistry {
+    NtRegistryEntry entries[NT_BUILD_MAX_ASSETS];
+    uint32_t count;
 };
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
@@ -233,6 +255,9 @@ static inline void nt_builder_convert_component(float value, nt_stream_type_t ty
 
 /* Codegen: generate .h header with ASSET_* constants */
 nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);
+
+/* Codegen: register assets into attached registry (called from finish_pack) */
+void nt_builder_register_to_registry(const NtBuilderContext *ctx);
 
 /* File I/O utilities */
 char *nt_builder_read_file(const char *path, uint32_t *out_size);

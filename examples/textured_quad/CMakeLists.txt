@@ -5,6 +5,8 @@ set(TQ_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/textured_quad")
 
 add_executable(textured_quad main.c)
 target_link_libraries(textured_quad PRIVATE nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource nt_material nt_shared nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp nt_mesh_renderer nt_render nt_hash)
+# Generated asset headers from builder (tq_assets.h etc.)
+target_include_directories(textured_quad PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 if(EMSCRIPTEN)
     target_link_libraries(textured_quad PRIVATE nt_platform_web nt_gfx nt_http nt_fs)
 else()
