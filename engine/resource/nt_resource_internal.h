@@ -58,7 +58,7 @@ typedef struct {
     uint8_t state;           /* nt_asset_state_t */
     uint8_t is_dedup;        /* 1 = shares data with another asset in same pack (same offset+size) */
     uint8_t _pad;
-    uint32_t meta_offset; /* byte offset into pack's meta_data buffer (0 = no meta) */
+    uint32_t meta_offset; /* byte offset into pack's meta_data buffer (UINT32_MAX = no meta) */
 } NtAssetMeta;
 
 /* ---- Per-pack metadata ---- */

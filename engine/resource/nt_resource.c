@@ -694,7 +694,8 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
         meta->offset = entries[i].offset;
         meta->size = entries[i].size;
         meta->runtime_handle = 0;
-        meta->meta_offset = entries[i].meta_offset; /* absolute for now, fixed below */
+        /* UINT32_MAX = no metadata; non-zero entry offset is absolute (fixed to relative below) */
+        meta->meta_offset = (entries[i].meta_offset != 0) ? entries[i].meta_offset : UINT32_MAX;
 
         /* Detect dedup: check if a previous entry in this pack has same offset+size */
         meta->is_dedup = 0;
@@ -737,11 +738,11 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
                 /* Convert asset meta_offsets from absolute to meta_data-relative */
                 for (uint32_t ai2 = 0; ai2 < s_resource.asset_hwm; ai2++) {
                     NtAssetMeta *am = &s_resource.assets[ai2];
-                    if (am->pack_index == (uint16_t)pack_idx && am->meta_offset != 0) {
+                    if (am->pack_index == (uint16_t)pack_idx && am->meta_offset != UINT32_MAX) {
                         if (am->meta_offset >= meta_section_start) {
                             am->meta_offset -= meta_section_start;
                         } else {
-                            am->meta_offset = 0; /* invalid, clear */
+                            am->meta_offset = UINT32_MAX; /* invalid, clear */
                         }
                     }
                 }
@@ -919,7 +920,7 @@ const void *nt_resource_get_meta(nt_resource_t handle, uint32_t kind, uint32_t *
     if (ameta->resource_id == 0) {
         return NULL;
     }
-    if (ameta->meta_offset == 0) {
+    if (ameta->meta_offset == UINT32_MAX) {
         return NULL; /* no metadata for this asset */
     }
 
