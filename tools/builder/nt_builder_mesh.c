@@ -131,6 +131,50 @@ static nt_build_result_t nt_parse_gltf_mesh(const char *path, const char *mesh_n
     return NT_BUILD_OK;
 }
 
+/* --- AABB extraction from POSITION accessor --- */
+
+#include <float.h>
+
+static bool nt_extract_aabb(const cgltf_primitive *prim, NtAabbData *out) {
+    const cgltf_accessor *pos_acc = NULL;
+    for (cgltf_size a = 0; a < prim->attributes_count; a++) {
+        if (prim->attributes[a].name != NULL && strcmp(prim->attributes[a].name, "POSITION") == 0) {
+            pos_acc = prim->attributes[a].data;
+            break;
+        }
+    }
+    if (!pos_acc) {
+        return false;
+    }
+
+    if (pos_acc->has_min && pos_acc->has_max) {
+        /* Fast path: use pre-computed bounds from glTF exporter (D-08) */
+        for (int i = 0; i < 3; i++) {
+            out->min[i] = (float)pos_acc->min[i];
+            out->max[i] = (float)pos_acc->max[i];
+        }
+        return true;
+    }
+
+    /* Slow path: compute from vertex data (D-08 fallback) */
+    out->min[0] = out->min[1] = out->min[2] = FLT_MAX;
+    out->max[0] = out->max[1] = out->max[2] = -FLT_MAX;
+
+    float tmp[3];
+    for (cgltf_size v = 0; v < pos_acc->count; v++) {
+        cgltf_accessor_read_float(pos_acc, v, tmp, 3);
+        for (int i = 0; i < 3; i++) {
+            if (tmp[i] < out->min[i]) {
+                out->min[i] = tmp[i];
+            }
+            if (tmp[i] > out->max[i]) {
+                out->max[i] = tmp[i];
+            }
+        }
+    }
+    return true;
+}
+
 /* --- Vertex attribute extraction --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -337,6 +381,14 @@ nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path
 
         if (ret == NT_BUILD_OK) {
             ret = nt_builder_register_asset(ctx, resource_id, NT_ASSET_MESH, NT_MESH_VERSION, total_asset_size);
+        }
+
+        /* Extract and store AABB metadata (META-01) */
+        if (ret == NT_BUILD_OK) {
+            NtAabbData aabb;
+            if (nt_extract_aabb(prim, &aabb)) {
+                nt_builder_add_meta(ctx, resource_id, nt_hash32_str("aabb").value, &aabb, sizeof(aabb));
+            }
         }
 
         free(vertex_buf);

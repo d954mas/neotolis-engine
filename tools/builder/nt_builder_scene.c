@@ -7,6 +7,48 @@
 
 /* Uses nt_builder_convert_component() and nt_builder_clampf() from nt_builder_internal.h */
 
+#include <float.h>
+
+/* --- AABB extraction from POSITION accessor --- */
+
+static bool nt_extract_aabb(const cgltf_primitive *prim, NtAabbData *out) {
+    const cgltf_accessor *pos_acc = NULL;
+    for (cgltf_size a = 0; a < prim->attributes_count; a++) {
+        if (prim->attributes[a].name != NULL && strcmp(prim->attributes[a].name, "POSITION") == 0) {
+            pos_acc = prim->attributes[a].data;
+            break;
+        }
+    }
+    if (!pos_acc) {
+        return false;
+    }
+
+    if (pos_acc->has_min && pos_acc->has_max) {
+        for (int i = 0; i < 3; i++) {
+            out->min[i] = (float)pos_acc->min[i];
+            out->max[i] = (float)pos_acc->max[i];
+        }
+        return true;
+    }
+
+    out->min[0] = out->min[1] = out->min[2] = FLT_MAX;
+    out->max[0] = out->max[1] = out->max[2] = -FLT_MAX;
+
+    float tmp[3];
+    for (cgltf_size v = 0; v < pos_acc->count; v++) {
+        cgltf_accessor_read_float(pos_acc, v, tmp, 3);
+        for (int i = 0; i < 3; i++) {
+            if (tmp[i] < out->min[i]) {
+                out->min[i] = tmp[i];
+            }
+            if (tmp[i] > out->max[i]) {
+                out->max[i] = tmp[i];
+            }
+        }
+    }
+    return true;
+}
+
 /* --- Helper: get texture index from cgltf_texture_view -> images array --- */
 
 static uint32_t nt_scene_texture_image_index(const cgltf_texture_view *view, const cgltf_data *data) {
@@ -499,6 +541,14 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
 
         if (ret == NT_BUILD_OK) {
             ret = nt_builder_register_asset(ctx, resource_id, NT_ASSET_MESH, NT_MESH_VERSION, total_asset_size);
+        }
+
+        /* Extract and store AABB metadata (META-01) */
+        if (ret == NT_BUILD_OK) {
+            NtAabbData aabb;
+            if (nt_extract_aabb(prim, &aabb)) {
+                nt_builder_add_meta(ctx, resource_id, nt_hash32_str("aabb").value, &aabb, sizeof(aabb));
+            }
         }
 
         free(vertex_buf);
