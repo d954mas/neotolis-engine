@@ -81,9 +81,7 @@ typedef enum { TEX_ROLE_DIFFUSE, TEX_ROLE_NORMAL, TEX_ROLE_SPECULAR, TEX_ROLE_UN
 /* Build a lookup: texture_index -> role (based on how materials reference it) */
 static tex_role_t *build_texture_roles(const nt_glb_scene_t *scene) {
     tex_role_t *roles = (tex_role_t *)calloc(scene->texture_count > 0 ? scene->texture_count : 1, sizeof(tex_role_t));
-    if (!roles) {
-        return NULL;
-    }
+    NT_BUILD_ASSERT(roles && "build_texture_roles: alloc failed");
     for (uint32_t i = 0; i < scene->texture_count; i++) {
         roles[i] = TEX_ROLE_UNKNOWN;
     }
@@ -123,9 +121,6 @@ static bool texture_needs_alpha(const nt_glb_scene_t *scene, uint32_t tex_index,
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t max_size, const nt_tex_compress_opts_t *compress_opts) {
     tex_role_t *roles = build_texture_roles(scene);
-    if (!roles) {
-        return;
-    }
     cgltf_data *gltf = (cgltf_data *)scene->_internal;
 
     uint32_t added = 0;
@@ -194,9 +189,6 @@ static const uint8_t s_rough_rg[4] = {0, 255, 0, 0};         /* max roughness in
 
 static void add_placeholder_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     tex_role_t *roles = build_texture_roles(scene);
-    if (!roles) {
-        return;
-    }
 
     uint32_t added = 0;
     for (uint32_t i = 0; i < scene->texture_count; i++) {
@@ -552,10 +544,7 @@ int main(int argc, char *argv[]) {
     const char *pack_headers[] = {core_hdr, geo_hdr, tex_hdr, full_hdr};
     char combined_header[512];
     (void)snprintf(combined_header, sizeof(combined_header), "%s/sponza_assets.h", header_dir);
-    r = nt_builder_merge_headers(pack_headers, 4, combined_header);
-    if (r != NT_BUILD_OK) {
-        (void)fprintf(stderr, "WARNING: combined header generation failed\n");
-    }
+    nt_builder_merge_headers(pack_headers, 4, combined_header);
 
     nt_builder_free_glb_scene(&scene);
 

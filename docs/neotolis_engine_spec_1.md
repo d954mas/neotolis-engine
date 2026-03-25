@@ -1578,26 +1578,23 @@ Rules:
 - `register_labels()` function under `#if NT_HASH_LABELS` registers all paths for debug hash lookup.
 - Identifier collisions (two assets producing the same `#define` name) are a fatal builder error.
 
-## 23.8 Asset registry (multi-pack projects)
+## 23.8 Combined headers (multi-pack projects)
 
-Projects with multiple packs use the asset registry to produce one combined header with all unique assets:
+Projects with multiple packs merge per-pack headers into one combined header after all packs are built:
 
 ```c
-NtBuilderRegistry *reg = nt_builder_create_registry();
+/* Each finish_pack generates a per-pack .h (e.g. core.h, textures.h) */
+nt_builder_set_header_dir(ctx, "examples/myproject/generated");
+nt_builder_finish_pack(ctx);
 
-ctx = nt_builder_start_pack("core.ntpack");
-nt_builder_set_registry(ctx, reg);
-/* ... add assets, finish_pack auto-registers into registry ... */
-
-ctx = nt_builder_start_pack("textures.ntpack");
-nt_builder_set_registry(ctx, reg);
-/* ... */
-
-nt_builder_generate_registry_header(reg, "src/generated/assets.h");
+/* After all packs: merge into one combined header */
+const char *headers[] = { "generated/core.h", "generated/textures.h" };
+nt_builder_merge_headers(headers, 2, "generated/assets.h");
 ```
 
 Rules:
-- Registry deduplicates by hash -- same asset in multiple packs produces one `#define`.
+- `merge_headers` reads per-pack `.h` files, deduplicates by hash, sorts, writes one combined header.
+- No runtime state needed during pack building — merge operates on already-generated files.
 - Game code includes the single combined header, not per-pack headers.
 - Per-pack headers are still generated for diagnostics and per-pack diffing.
 - `set_header_dir` controls where headers are written. Convention: `examples/{project}/generated/` in source tree so headers are visible in IDE and version control.

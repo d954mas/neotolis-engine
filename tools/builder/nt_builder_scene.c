@@ -448,7 +448,6 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
             goto cleanup_streams;
         }
 
-        bool warned_f16 = false;
         for (uint32_t v = 0; v < vertex_count; v++) {
             uint8_t *dst = vertex_buf + ((size_t)v * vertex_stride);
             uint32_t offset = 0;
@@ -456,7 +455,7 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
                 uint32_t comp_size = nt_stream_type_size((uint8_t)layout[s].type);
                 for (uint8_t c = 0; c < layout[s].count; c++) {
                     float val = stream_floats[s][((size_t)v * layout[s].count) + c];
-                    nt_builder_convert_component(val, layout[s].type, layout[s].normalized, dst + offset, &warned_f16);
+                    nt_builder_convert_component(val, layout[s].type, layout[s].normalized, dst + offset);
                     offset += comp_size;
                 }
             }

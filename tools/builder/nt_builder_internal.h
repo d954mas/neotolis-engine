@@ -9,15 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Always-on assert for builder (never compiled out by NDEBUG).
-   Mirrors engine NT_ASSERT but without engine header deps. */
-#define NT_BUILD_ASSERT(cond)                                                                                                                                                                          \
-    do {                                                                                                                                                                                               \
-        if (!(cond)) {                                                                                                                                                                                 \
-            (void)fprintf(stderr, "FATAL: %s:%d: assertion failed: %s\n", __FILE__, __LINE__, #cond);                                                                                                  \
-            abort();                                                                                                                                                                                   \
-        }                                                                                                                                                                                              \
-    } while (0)
+/* NT_BUILD_ASSERT is defined in nt_builder.h (public, usable by game build scripts) */
 
 /* Initial data buffer capacity (1 MB, doubles on overflow) */
 #define NT_BUILD_INITIAL_CAPACITY (1024 * 1024)
@@ -173,17 +165,14 @@ static inline float nt_builder_clampf(float v, float lo, float hi) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static inline void nt_builder_convert_component(float value, nt_stream_type_t type, bool normalized, uint8_t *out_ptr, bool *warned_f16) {
+static inline void nt_builder_convert_component(float value, nt_stream_type_t type, bool normalized, uint8_t *out_ptr) {
     switch (type) {
     case NT_STREAM_FLOAT32: {
         memcpy(out_ptr, &value, sizeof(float));
         break;
     }
     case NT_STREAM_FLOAT16: {
-        if (!*warned_f16 && (value > 65504.0F || value < -65504.0F)) {
-            NT_LOG_WARN("float16 overflow (value=%.6g exceeds +-65504)", (double)value);
-            *warned_f16 = true;
-        }
+        NT_BUILD_ASSERT((value <= 65504.0F && value >= -65504.0F) && "float16 overflow -- value exceeds +-65504, use FLOAT32 for this stream");
         uint16_t h = nt_builder_float32_to_float16(value);
         memcpy(out_ptr, &h, sizeof(uint16_t));
         break;

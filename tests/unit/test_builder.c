@@ -1885,7 +1885,7 @@ void test_merge_combined_header(void) {
     /* Merge per-pack headers */
     const char *headers[] = {TMP_DIR "/merge_hdr/merge_pack1.h", TMP_DIR "/merge_hdr/merge_pack2.h"};
     const char *combined_path = TMP_DIR "/merge_assets.h";
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_merge_headers(headers, 2, combined_path));
+    nt_builder_merge_headers(headers, 2, combined_path);
 
     /* Verify combined header */
     char *content = read_text_file(combined_path);
@@ -1921,7 +1921,7 @@ void test_merge_dedup(void) {
     /* Merge — combined header should have the define only once */
     const char *headers[] = {TMP_DIR "/merge_dedup_hdr/merge_dup1.h", TMP_DIR "/merge_dedup_hdr/merge_dup2.h"};
     const char *combined_path = TMP_DIR "/merge_dedup.h";
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_merge_headers(headers, 2, combined_path));
+    nt_builder_merge_headers(headers, 2, combined_path);
 
     char *content = read_text_file(combined_path);
     TEST_ASSERT_NOT_NULL(content);
@@ -1955,7 +1955,7 @@ void test_merge_sorted_output(void) {
 
     const char *headers[] = {TMP_DIR "/merge_sort_hdr/merge_sort.h"};
     const char *combined_path = TMP_DIR "/merge_sorted.h";
-    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_merge_headers(headers, 1, combined_path));
+    nt_builder_merge_headers(headers, 1, combined_path);
 
     /* In sorted output, "a" should appear before "b" */
     char *content = read_text_file(combined_path);

@@ -205,8 +205,6 @@ static uint8_t *nt_interleave_vertices(const NtStreamLayout *layout, uint32_t st
         return NULL;
     }
 
-    bool warned_f16 = false;
-
     for (uint32_t v = 0; v < vertex_count; v++) {
         uint8_t *dst = vertex_buf + ((size_t)v * vertex_stride);
         uint32_t offset = 0;
@@ -214,7 +212,7 @@ static uint8_t *nt_interleave_vertices(const NtStreamLayout *layout, uint32_t st
             uint32_t comp_size = nt_stream_type_size((uint8_t)layout[s].type);
             for (uint8_t c = 0; c < layout[s].count; c++) {
                 float val = stream_floats[s][((size_t)v * layout[s].count) + c];
-                nt_builder_convert_component(val, layout[s].type, layout[s].normalized, dst + offset, &warned_f16);
+                nt_builder_convert_component(val, layout[s].type, layout[s].normalized, dst + offset);
                 offset += comp_size;
             }
         }

@@ -3,10 +3,24 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "hash/nt_hash.h"
 #include "nt_mesh_format.h"    /* nt_stream_type_t */
 #include "nt_texture_format.h" /* nt_texture_pixel_format_t */
+
+/* Always-on assert for builder (never compiled out by NDEBUG).
+   A failed assert means the build is broken -- pack would be invalid. */
+#ifndef NT_BUILD_ASSERT
+#define NT_BUILD_ASSERT(cond)                                                                                                                                                                          \
+    do {                                                                                                                                                                                               \
+        if (!(cond)) {                                                                                                                                                                                 \
+            (void)fprintf(stderr, "FATAL: %s:%d: assertion failed: %s\n", __FILE__, __LINE__, #cond);                                                                                                  \
+            abort();                                                                                                                                                                                   \
+        }                                                                                                                                                                                              \
+    } while (0)
+#endif
 
 /* Build limits (game can override before including this header) */
 #ifndef NT_BUILD_MAX_ASSETS
@@ -194,7 +208,7 @@ void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);
 void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
 
 /* --- Merge per-pack .h headers into a combined header --- */
-nt_build_result_t nt_builder_merge_headers(const char *const *header_paths, uint32_t count, const char *output_path);
+void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, const char *output_path);
 
 /* --- Utilities --- */
 nt_build_result_t nt_builder_dump_pack(const char *pack_path);
