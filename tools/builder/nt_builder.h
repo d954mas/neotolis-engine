@@ -196,7 +196,7 @@ nt_build_result_t nt_builder_add_texture_from_memory_compressed(NtBuilderContext
 /* --- Codegen options --- */
 void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);
 
-/* --- Gzip estimation (on by default, disable for faster rebuilds) --- */
+/* --- Gzip estimation (off by default, enable for transport size analysis) --- */
 void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
 
 /* --- Asset registry (combined header across packs) ---

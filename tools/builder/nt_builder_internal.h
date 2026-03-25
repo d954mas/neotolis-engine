@@ -134,7 +134,7 @@ struct NtBuilderContext {
     /* Codegen: custom header output directory (NULL = next to pack) */
     char *header_dir;
 
-    /* Gzip estimation in summary (default: true) */
+    /* Gzip estimation in summary (default: off) */
     bool gzip_estimate;
 
     /* Asset registry for combined header (NULL = no registry) */
