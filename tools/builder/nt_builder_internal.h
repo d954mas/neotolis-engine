@@ -231,6 +231,9 @@ static inline void nt_builder_convert_component(float value, nt_stream_type_t ty
     }
 }
 
+/* Codegen: generate .h header with ASSET_* constants */
+nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);
+
 /* File I/O utilities */
 char *nt_builder_read_file(const char *path, uint32_t *out_size);
 

@@ -3,6 +3,9 @@
 #include "hash/nt_hash.h"
 #include "nt_crc32.h"
 #include "time/nt_time.h"
+/* Avoid zlib-compat macros (compress, compress2) colliding with struct field names */
+#define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
+#include "miniz.h"
 /* clang-format on */
 
 /* --- Entry data management --- */
@@ -346,10 +349,13 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_LOG_INFO("Importing %u assets...", ctx->pending_count);
     double t_import_start = nt_time_now();
     uint32_t fail_count = 0;
+    double import_times[NT_BUILD_MAX_ASSETS];
+    memset(import_times, 0, sizeof(import_times));
 
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
         NT_LOG_INFO("  [%u/%u] %s", i + 1, ctx->pending_count, pe->path);
+        double t_asset_start = nt_time_now();
         nt_build_result_t ret = NT_BUILD_OK;
 
         switch (pe->kind) {
@@ -394,6 +400,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
         }
 
+        import_times[i] = nt_time_now() - t_asset_start;
+
         if (ret != NT_BUILD_OK) {
             ctx->has_error = true;
             fail_count++;
@@ -412,6 +420,33 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (ctx->entry_count * sizeof(NtAssetEntry)));
     uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
 
+    /* Compute gzip sizes BEFORE shifting offsets (entries still data_buf-relative) */
+    uint32_t gz_sizes[NT_BUILD_MAX_ASSETS];
+    memset(gz_sizes, 0, sizeof(gz_sizes));
+    uint32_t total_gz = 0;
+    {
+        /* Find max asset size to allocate one compression buffer */
+        uint32_t max_asset_size = 0;
+        for (uint32_t i = 0; i < ctx->entry_count; i++) {
+            if (ctx->entries[i].size > max_asset_size) {
+                max_asset_size = ctx->entries[i].size;
+            }
+        }
+        if (max_asset_size > 0) {
+            mz_ulong comp_bound = mz_compressBound((mz_ulong)max_asset_size);
+            uint8_t *comp_buf = (uint8_t *)malloc(comp_bound);
+            if (comp_buf) {
+                for (uint32_t i = 0; i < ctx->entry_count; i++) {
+                    mz_ulong comp_len = comp_bound;
+                    int rc = mz_compress2(comp_buf, &comp_len, ctx->data_buf + ctx->entries[i].offset, (mz_ulong)ctx->entries[i].size, 6);
+                    gz_sizes[i] = (rc == MZ_OK) ? (uint32_t)comp_len : ctx->entries[i].size;
+                    total_gz += gz_sizes[i];
+                }
+                free(comp_buf);
+            }
+        }
+    }
+
     /* entry->offset is relative to data_buf start (set in register_asset).
      * Shift to absolute file offset by adding header_size. */
     for (uint32_t i = 0; i < ctx->entry_count; i++) {
@@ -429,6 +464,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     header.header_size = header_size;
     header.total_size = total_size;
     header.checksum = checksum;
+
+    double t_write_start = nt_time_now();
 
     FILE *file = fopen(ctx->output_path, "wb");
     if (!file) {
@@ -452,55 +489,89 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     (void)fclose(file);
 
+    double write_secs = nt_time_now() - t_write_start;
+
     if (!write_ok) {
         NT_LOG_ERROR("Failed to write pack file");
         (void)remove(ctx->output_path);
         return NT_BUILD_ERR_IO;
     }
 
-    /* Summary */
-    NT_LOG_INFO("Build complete: %s (%.1fs)", ctx->output_path, import_secs);
-    NT_LOG_INFO("  Assets: %u total (%u meshes, %u textures, %u shaders, %u blobs)", ctx->entry_count, ctx->mesh_count, ctx->texture_count, ctx->shader_count, ctx->blob_count);
-    if (ctx->dedup_count > 0) {
-        NT_LOG_INFO("  Deduplicated: %u assets (saved %.3f MB)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / (1024.0 * 1024.0));
-        for (uint32_t i = 0; i < ctx->entry_count; i++) {
-            for (uint32_t j = 0; j < i; j++) {
-                if (ctx->entries[i].offset == ctx->entries[j].offset && ctx->entries[i].size == ctx->entries[j].size) {
-                    /* Find names by matching resource_id in pending[] */
-                    const char *dup_name = "?";
-                    const char *orig_name = "?";
-                    for (uint32_t pi = 0; pi < ctx->pending_count; pi++) {
-                        if (ctx->pending[pi].resource_id == ctx->entries[i].resource_id) {
-                            dup_name = ctx->pending[pi].path ? ctx->pending[pi].path : "?";
-                        }
-                        if (ctx->pending[pi].resource_id == ctx->entries[j].resource_id) {
-                            orig_name = ctx->pending[pi].path ? ctx->pending[pi].path : "?";
-                        }
-                    }
-                    NT_LOG_INFO("    %s -> %s", dup_name, orig_name);
-                    break;
-                }
-            }
-        }
+    /* Generate codegen header (.h with ASSET_* constants) */
+    nt_build_result_t codegen_result = nt_builder_generate_header(ctx);
+    if (codegen_result != NT_BUILD_OK) {
+        NT_LOG_WARN("Codegen header generation failed (pack is still valid)");
     }
-    if (total_size >= 1024 * 1024) {
-        NT_LOG_INFO("  Pack size: %.3f MB (%u bytes)", (double)total_size / (1024.0 * 1024.0), total_size);
-    } else if (total_size >= 1024) {
-        NT_LOG_INFO("  Pack size: %.3f KB (%u bytes)", (double)total_size / 1024.0, total_size);
-    } else {
-        NT_LOG_INFO("  Pack size: %u bytes", total_size);
-    }
-    NT_LOG_INFO("  CRC32: 0x%08X", checksum);
 
+    /* Enhanced summary */
+    double total_secs = nt_time_now() - t_import_start;
+    NT_LOG_INFO("Build complete: %s", ctx->output_path);
+    NT_LOG_INFO("");
+
+    /* Per-asset table */
+    NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "#", "Name", "Type", "Size", "Time");
+    NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "--", "----", "----", "----", "----");
+    static const char *kind_names[] = {"MESH", "TEX", "SHADER", "BLOB", "MESH", "TEX|MEM", "TEX|RAW", "TEX|CMP"};
     for (uint32_t i = 0; i < ctx->entry_count; i++) {
-        const char *path = ctx->pending[i].path ? ctx->pending[i].path : "(unknown)";
-        const char *rkey = ctx->pending[i].rename_key;
-        if (rkey) {
-            NT_LOG_INFO("  %s -> 0x%016llX (renamed: %s)", path, (unsigned long long)ctx->pending[i].resource_id, rkey);
+        const char *path = (i < ctx->pending_count && ctx->pending[i].path) ? ctx->pending[i].path : "(unknown)";
+        const char *rkey = (i < ctx->pending_count) ? ctx->pending[i].rename_key : NULL;
+        const char *display = rkey ? rkey : path;
+        const char *type_name = "UNKNOWN";
+        if (i < ctx->pending_count && (uint32_t)ctx->pending[i].kind < 8) {
+            type_name = kind_names[ctx->pending[i].kind];
+        }
+
+        /* Format size with gzip */
+        char size_str[64];
+        uint32_t raw_sz = ctx->entries[i].size;
+        uint32_t gz_sz = gz_sizes[i];
+        if (raw_sz > 0 && gz_sz > 0) {
+            uint32_t pct = (gz_sz * 100) / raw_sz;
+            if (raw_sz >= 1024 * 1024) {
+                (void)snprintf(size_str, sizeof(size_str), "%.1fM (%.1fM gz %u%%)", (double)raw_sz / (1024.0 * 1024.0), (double)gz_sz / (1024.0 * 1024.0), pct);
+            } else if (raw_sz >= 1024) {
+                (void)snprintf(size_str, sizeof(size_str), "%.1fK (%.1fK gz %u%%)", (double)raw_sz / 1024.0, (double)gz_sz / 1024.0, pct);
+            } else {
+                (void)snprintf(size_str, sizeof(size_str), "%uB (%uB gz %u%%)", raw_sz, gz_sz, pct);
+            }
         } else {
-            NT_LOG_INFO("  %s -> 0x%016llX", path, (unsigned long long)ctx->pending[i].resource_id);
+            (void)snprintf(size_str, sizeof(size_str), "%u B", raw_sz);
+        }
+
+        NT_LOG_INFO("  %-4u %-40s %-10s %-24s %.2fs", i, display, type_name, size_str, import_times[i]);
+    }
+
+    /* Per-type summary */
+    NT_LOG_INFO("");
+    uint32_t raw_total = ctx->data_size;
+    if (ctx->mesh_count > 0) {
+        NT_LOG_INFO("  MESH:    %u asset%s", ctx->mesh_count, ctx->mesh_count > 1 ? "s" : "");
+    }
+    if (ctx->texture_count > 0) {
+        NT_LOG_INFO("  TEX:     %u asset%s", ctx->texture_count, ctx->texture_count > 1 ? "s" : "");
+    }
+    if (ctx->shader_count > 0) {
+        NT_LOG_INFO("  SHADER:  %u asset%s", ctx->shader_count, ctx->shader_count > 1 ? "s" : "");
+    }
+    if (ctx->blob_count > 0) {
+        NT_LOG_INFO("  BLOB:    %u asset%s", ctx->blob_count, ctx->blob_count > 1 ? "s" : "");
+    }
+    if (total_gz > 0 && raw_total > 0) {
+        uint32_t total_pct = (total_gz * 100) / raw_total;
+        if (raw_total >= 1024 * 1024) {
+            NT_LOG_INFO("  Total:   %.1fM raw -> %.1fM gz (%u%%)", (double)raw_total / (1024.0 * 1024.0), (double)total_gz / (1024.0 * 1024.0), total_pct);
+        } else if (raw_total >= 1024) {
+            NT_LOG_INFO("  Total:   %.1fK raw -> %.1fK gz (%u%%)", (double)raw_total / 1024.0, (double)total_gz / 1024.0, total_pct);
+        } else {
+            NT_LOG_INFO("  Total:   %u B raw -> %u B gz (%u%%)", raw_total, total_gz, total_pct);
         }
     }
+    if (ctx->dedup_count > 0) {
+        NT_LOG_INFO("  Dedup:   %u assets (saved %.1fK)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / 1024.0);
+    }
+    NT_LOG_INFO("");
+    NT_LOG_INFO("  Timing: encode %.1fs | write %.1fs | total %.1fs", import_secs, write_secs, total_secs);
+    NT_LOG_INFO("  CRC32:  0x%08X", checksum);
 
     return NT_BUILD_OK;
 }
