@@ -667,7 +667,7 @@ void test_dump_gzip_sizes(void) {
 
     const char *pack_path = TMP_DIR "/dump_gz_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
-    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, layout, 1);
+    nt_build_result_t r = nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
     r = nt_builder_add_texture(ctx, png_path);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
