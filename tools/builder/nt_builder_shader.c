@@ -226,63 +226,41 @@ static void collapse_whitespace(char *buf, uint32_t *len) {
     *len = wp;
 }
 
-/* --- Shader import (called from finish_pack) --- */
+/* --- Shader encode (called from finish_pack) --- */
+/* Takes already-resolved shader text (from add_shader), strips comments,
+ * collapses whitespace, validates, and writes to pack format. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint64_t resource_id) {
-    if (!ctx || !path) {
+nt_build_result_t nt_builder_encode_shader(NtBuilderContext *ctx, const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint64_t resource_id) {
+    if (!ctx || !resolved_text || text_len == 0) {
         return NT_BUILD_ERR_VALIDATION;
     }
 
-    uint32_t file_size = 0;
-    char *raw_source = nt_builder_read_file(path, &file_size);
-    if (!raw_source) {
-        NT_LOG_ERROR("%s: failed to read shader file", path);
-        return NT_BUILD_ERR_IO;
-    }
-
-    if (file_size == 0) {
-        NT_LOG_ERROR("%s: empty shader file", path);
-        free(raw_source);
-        return NT_BUILD_ERR_VALIDATION;
-    }
-
-    /* Resolve #include directives (D-11, D-12, D-13) */
-    uint32_t resolved_len = 0;
-    char *resolved = nt_builder_resolve_includes(raw_source, file_size, path, ctx, &resolved_len);
-    free(raw_source);
-    if (!resolved) {
-        NT_LOG_ERROR("%s: include resolution failed", path);
-        return NT_BUILD_ERR_VALIDATION;
-    }
-
-    char *stripped = (char *)malloc((size_t)resolved_len + 1);
+    char *stripped = (char *)malloc((size_t)text_len + 1);
     if (!stripped) {
-        free(resolved);
         return NT_BUILD_ERR_IO;
     }
 
     uint32_t stripped_len = 0;
-    strip_comments(resolved, resolved_len, stripped, &stripped_len);
-    free(resolved);
+    strip_comments((const char *)resolved_text, text_len, stripped, &stripped_len);
 
     collapse_whitespace(stripped, &stripped_len);
 
     if (strstr(stripped, "#version") != NULL) {
-        NT_LOG_ERROR("%s: #version directive found -- runtime adds it per platform, remove from source", path);
+        NT_LOG_ERROR("shader: #version directive found -- runtime adds it per platform, remove from source");
         free(stripped);
         return NT_BUILD_ERR_VALIDATION;
     }
 
     if (strstr(stripped, "void main") == NULL) {
-        NT_LOG_ERROR("%s: missing void main()", path);
+        NT_LOG_ERROR("shader: missing void main()");
         free(stripped);
         return NT_BUILD_ERR_VALIDATION;
     }
 
-    /* GL compile validation (D-01: validate at import time) */
+    /* GL compile validation (D-01: validate at encode time) */
     ensure_gl_context();
-    nt_build_result_t val_result = validate_shader(stripped, stage, path);
+    nt_build_result_t val_result = validate_shader(stripped, stage, "shader");
     if (val_result != NT_BUILD_OK) {
         free(stripped);
         return val_result; /* D-05: compile failure = pack build error */

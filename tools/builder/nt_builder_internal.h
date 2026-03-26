@@ -14,71 +14,27 @@
 /* Initial data buffer capacity (1 MB, doubles on overflow) */
 #define NT_BUILD_INITIAL_CAPACITY (1024 * 1024)
 
-/* Asset type tag for deferred entries */
+/* Asset type tag -- 4 unified kinds (source-agnostic) */
 typedef enum {
     NT_BUILD_ASSET_MESH = 0,
     NT_BUILD_ASSET_TEXTURE = 1,
     NT_BUILD_ASSET_SHADER = 2,
     NT_BUILD_ASSET_BLOB = 3,
-    NT_BUILD_ASSET_SCENE_MESH = 4,
-    NT_BUILD_ASSET_TEXTURE_MEM = 5,
-    NT_BUILD_ASSET_TEXTURE_RAW = 6,
-    NT_BUILD_ASSET_TEXTURE_MEM_COMPRESSED = 7,
 } nt_build_asset_kind_t;
-
-/* Type-specific data for mesh entries */
-typedef struct {
-    NtStreamLayout layout[NT_MESH_MAX_STREAMS]; /* deep-copied from user */
-    uint32_t stream_count;
-    nt_tangent_mode_t tangent_mode;
-    char *mesh_name;     /* owned copy, NULL if not used */
-    uint32_t mesh_index; /* UINT32_MAX if not used */
-    char *file_path;     /* owned copy of actual file path (for multi-mesh logical path) */
-} NtBuildMeshData;
 
 /* Type-specific data for shader entries */
 typedef struct {
     nt_build_shader_stage_t stage;
 } NtBuildShaderData;
 
-/* Type-specific data for blob entries */
+/* Texture decode options -- stored alongside decoded RGBA pixels */
 typedef struct {
-    void *data; /* deep-copied blob data (owned, heap) */
-    uint32_t size;
-} NtBuildBlobData;
-
-/* Type-specific data for scene mesh entries */
-typedef struct {
-    const nt_glb_scene_t *scene; /* borrowed reference, valid until free_glb_scene */
-    uint32_t mesh_index;
-    uint32_t primitive_index;
-    NtStreamLayout layout[NT_MESH_MAX_STREAMS];
-    uint32_t stream_count;
-    nt_tangent_mode_t tangent_mode;
-} NtBuildSceneMeshData;
-
-/* Type-specific data for texture-from-memory entries */
-typedef struct {
-    uint8_t *data; /* deep-copied image data (owned, heap) */
-    uint32_t size;
-    nt_tex_opts_t opts; /* format + resize options */
-} NtBuildTexMemData;
-
-/* Type-specific data for raw RGBA pixel texture entries */
-typedef struct {
-    uint8_t *pixels; /* deep-copied RGBA pixel data (owned, heap) */
     uint32_t width;
     uint32_t height;
-    nt_tex_opts_t opts; /* format + resize options */
-} NtBuildTexRawData;
-
-/* Type-specific data for compressed texture-from-memory entries */
-typedef struct {
-    uint8_t *data; /* deep-copied image data (owned, heap) */
-    uint32_t size;
-    nt_tex_opts_t opts;              /* format + resize options */
-    nt_tex_compress_opts_t compress; /* compression settings */
-} NtBuildTexMemCompressedData;
+    nt_tex_opts_t opts;              /* format + resize */
+    nt_tex_compress_opts_t compress; /* Basis compression settings */
+    bool has_compress;               /* true = use Basis path, false = raw path */
+} NtBuildTextureData;
 
 /* Metadata accumulation limit (Phase 37) */
 #ifndef NT_BUILD_MAX_META_ENTRIES
@@ -95,18 +51,17 @@ typedef struct {
 
 /* Deferred asset entry -- stored during add_*, processed in finish_pack */
 typedef struct {
-    char *path;                 /* normalized source file path (owned, heap) */
+    char *path;                 /* source path for logging (owned, heap) */
     char *rename_key;           /* renamed key path (owned, heap, NULL if not renamed) */
     uint64_t resource_id;       /* nt_hash64 value */
-    nt_build_asset_kind_t kind; /* mesh/texture/shader */
-    void *data;                 /* NtBuildMeshData* / NtBuildShaderData* / NULL (owned, heap) */
+    nt_build_asset_kind_t kind; /* MESH / TEXTURE / SHADER / BLOB */
+    void *data;                 /* NtBuildTextureData* / NtBuildShaderData* / NULL (owned, heap) */
 
-    /* Resolve phase: raw source bytes for early dedup comparison (Phase 38) */
-    uint8_t *resolved_data; /* raw file bytes (owned if resolved_owned, else borrowed) */
-    uint32_t resolved_size; /* byte count of resolved_data */
-    bool resolved_owned;    /* true = free resolved_data on cleanup */
+    /* Decoded intermediate representation (eager, populated at add_* time) */
+    uint8_t *decoded_data; /* intermediate bytes (always owned, always freed) */
+    uint32_t decoded_size; /* byte count */
 
-    /* Early dedup: index of original entry, -1 if not a duplicate (Phase 38) */
+    /* Early dedup: index of original entry, -1 if not a duplicate */
     int32_t dedup_original;
 } NtBuildEntry;
 
@@ -138,13 +93,8 @@ struct NtBuilderContext {
     uint32_t dedup_count;
     uint32_t dedup_saved_bytes;
 
-    /* Early dedup stats (Phase 38) */
+    /* Early dedup stats */
     uint32_t early_dedup_count;
-
-    /* Same-source-different-opts warnings (Phase 38, D-10/D-11) */
-    uint32_t dedup_warn_a[NT_BUILD_MAX_ASSETS]; /* first entry index of warning pair */
-    uint32_t dedup_warn_b[NT_BUILD_MAX_ASSETS]; /* second entry index of warning pair */
-    uint32_t dedup_warn_count;
 
     /* Metadata accumulation (Phase 37) */
     NtBuildMetaEntry meta_pending[NT_BUILD_MAX_META_ENTRIES];
@@ -165,18 +115,19 @@ struct NtBuilderContext {
 nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data, uint32_t size);
 nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t resource_id, nt_asset_type_t type, uint16_t format_version, uint32_t data_size);
 
-/* Internal import functions -- called from finish_pack */
-nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name,
-                                         uint32_t mesh_index, uint64_t resource_id);
-nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *path, uint64_t resource_id);
-nt_build_result_t nt_builder_import_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage, uint64_t resource_id);
-nt_build_result_t nt_builder_import_blob(NtBuilderContext *ctx, const void *data, uint32_t size, uint64_t resource_id);
-nt_build_result_t nt_builder_import_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, uint64_t resource_id, const nt_tex_opts_t *opts);
-nt_build_result_t nt_builder_import_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts);
-nt_build_result_t nt_builder_import_texture_from_memory_compressed(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, uint64_t resource_id, const nt_tex_opts_t *opts,
-                                                                   const nt_tex_compress_opts_t *compress_opts);
-nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
-                                               nt_tangent_mode_t tangent_mode, uint64_t resource_id);
+/* Internal decode functions -- called from add_* (eager decode) */
+nt_build_result_t nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h);
+nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h);
+nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name, uint32_t mesh_index,
+                                         uint8_t **out_data, uint32_t *out_size);
+nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
+                                               nt_tangent_mode_t tangent_mode, uint8_t **out_data, uint32_t *out_size);
+
+/* Internal encode functions -- called from finish_pack (encode phase) */
+nt_build_result_t nt_builder_encode_texture(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts);
+nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts,
+                                                       const nt_tex_compress_opts_t *compress_opts);
+nt_build_result_t nt_builder_encode_shader(NtBuilderContext *ctx, const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint64_t resource_id);
 
 /* Metadata accumulation (called from import functions) */
 void nt_builder_add_meta(NtBuilderContext *ctx, uint64_t resource_id, uint64_t kind, const void *data, uint32_t size);
@@ -189,11 +140,15 @@ void nt_extract_aabb(const struct cgltf_primitive *prim, float out_min[3], float
 nt_build_result_t nt_builder_compute_tangents(const float *positions, const float *normals, const float *uvs, const uint32_t *indices, uint32_t vertex_count, uint32_t index_count,
                                               float *out_tangents);
 
-/* Hash and path utilities (declared early — used by inline functions below) */
+/* Shared: build binary mesh output buffer from mesh components (used by mesh + scene decode) */
+nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uint32_t stream_count, float *stream_floats[], uint32_t vertex_count, const struct cgltf_primitive *prim,
+                                               uint8_t *index_buf, uint32_t index_count, uint8_t index_type, uint32_t index_data_size, uint8_t **out_data, uint32_t *out_size);
+
+/* Hash and path utilities (declared early -- used by inline functions below) */
 char *nt_builder_normalize_path(const char *path);
 uint16_t nt_builder_float32_to_float16(float value);
 
-/* Shared type conversion: float → target stream type (float16, int8, uint8, int16, uint16) */
+/* Shared type conversion: float -> target stream type (float16, int8, uint8, int16, uint16) */
 static inline float nt_builder_clampf(float v, float lo, float hi) {
     if (v < lo) {
         return lo;
@@ -264,7 +219,7 @@ static inline void nt_builder_convert_component(float value, nt_stream_type_t ty
     }
 }
 
-/* Size formatting: bytes → human-readable string ("1.2K", "3.5M", "42B") */
+/* Size formatting: bytes -> human-readable string ("1.2K", "3.5M", "42B") */
 static inline void nt_format_size(uint32_t bytes, char *buf, size_t buf_size) {
     if (bytes >= 1024 * 1024) {
         (void)snprintf(buf, buf_size, "%.1fM", (double)bytes / (1024.0 * 1024.0));
@@ -278,7 +233,7 @@ static inline void nt_format_size(uint32_t bytes, char *buf, size_t buf_size) {
 /* Pack path utilities (shared between codegen and dump) */
 
 /* Extract filename stem from pack path (no directory, no extension).
- * "build/foo/demo.ntpack" → "demo" */
+ * "build/foo/demo.ntpack" -> "demo" */
 static inline void nt_builder_pack_stem(const char *pack_path, char *stem, size_t stem_size) {
     const char *slash = strrchr(pack_path, '/');
     const char *bslash = strrchr(pack_path, '\\');
@@ -298,7 +253,7 @@ static inline void nt_builder_pack_stem(const char *pack_path, char *stem, size_
 }
 
 /* Derive .h header path from .ntpack path (replace extension).
- * "build/foo/demo.ntpack" → "build/foo/demo.h" */
+ * "build/foo/demo.ntpack" -> "build/foo/demo.h" */
 static inline void nt_builder_pack_to_header_path(const char *pack_path, char *header_path, size_t size) {
     strncpy(header_path, pack_path, size - 1);
     header_path[size - 1] = '\0';

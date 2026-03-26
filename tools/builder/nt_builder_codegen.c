@@ -9,20 +9,15 @@
 static const char *type_prefix_for_kind(nt_build_asset_kind_t kind) {
     switch (kind) {
     case NT_BUILD_ASSET_MESH:
-    case NT_BUILD_ASSET_SCENE_MESH:
         return "MESH";
     case NT_BUILD_ASSET_TEXTURE:
-    case NT_BUILD_ASSET_TEXTURE_MEM:
-    case NT_BUILD_ASSET_TEXTURE_RAW:
-    case NT_BUILD_ASSET_TEXTURE_MEM_COMPRESSED:
         return "TEXTURE";
     case NT_BUILD_ASSET_SHADER:
         return "SHADER";
     case NT_BUILD_ASSET_BLOB:
         return "BLOB";
-    default:
-        return "UNKNOWN";
     }
+    return "UNKNOWN";
 }
 
 #ifndef NT_CODEGEN_MAX_IDENTIFIER
