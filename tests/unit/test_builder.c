@@ -2304,6 +2304,152 @@ void test_early_dedup_pack_data_correct(void) {
     (void)fclose(f);
 }
 
+/* --- Cross-source dedup tests (38.1 pipeline refactoring) --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_dedup_cross_source_texture_file_vs_memory(void) {
+    /* Same PNG added as file path and from memory bytes.
+     * Both decode to identical RGBA pixels -> early dedup should merge. */
+    const char *png_path = TMP_DIR "/cross_tex.png";
+    write_test_png(png_path);
+
+    /* Read the PNG file bytes for memory-based addition */
+    FILE *f = fopen(png_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    (void)fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    uint8_t *png_data = (uint8_t *)malloc((size_t)len);
+    TEST_ASSERT_NOT_NULL(png_data);
+    TEST_ASSERT_EQUAL((size_t)len, fread(png_data, 1, (size_t)len, f));
+    (void)fclose(f);
+
+    const char *pack_path = TMP_DIR "/cross_tex_test.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Add same image via file path and via memory */
+    nt_builder_add_texture(ctx, png_path);
+    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)len, "textures/from_memory.png");
+
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+    free(png_data);
+
+    /* Read pack and verify both entries share same offset+size (deduped) */
+    FILE *pf = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(pf);
+    NtPackHeader hdr;
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, pf));
+    TEST_ASSERT_EQUAL_UINT16(2, hdr.asset_count);
+    NtAssetEntry entries[2];
+    TEST_ASSERT_EQUAL(1, fread(entries, sizeof(NtAssetEntry) * 2, 1, pf));
+    TEST_ASSERT_EQUAL_UINT32(entries[0].offset, entries[1].offset);
+    TEST_ASSERT_EQUAL_UINT32(entries[0].size, entries[1].size);
+    TEST_ASSERT_TRUE(entries[0].size > 0);
+    (void)fclose(pf);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_dedup_cross_source_mesh_file_vs_scene(void) {
+    /* Same mesh added as file and from parsed scene.
+     * Both decode to identical binary mesh buffer -> early dedup should merge. */
+    const char *glb_path = TMP_DIR "/cross_mesh.glb";
+    write_test_glb(glb_path);
+
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+    };
+    nt_mesh_opts_t mesh_opts = {.layout = layout, .stream_count = 1, .tangent_mode = NT_TANGENT_NONE};
+
+    /* Parse the scene for scene_mesh path */
+    nt_glb_scene_t scene = {0};
+    nt_build_result_t r = nt_builder_parse_glb_scene(&scene, glb_path);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+
+    const char *pack_path = TMP_DIR "/cross_mesh_test.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Add same mesh via file path and via scene */
+    nt_builder_add_mesh(ctx, glb_path, &mesh_opts);
+    nt_builder_add_scene_mesh(ctx, &scene, 0, 0, "meshes/from_scene", &mesh_opts);
+
+    r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+    nt_builder_free_glb_scene(&scene);
+
+    /* Read pack and verify both entries share same offset+size */
+    FILE *pf = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(pf);
+    NtPackHeader hdr;
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, pf));
+    TEST_ASSERT_EQUAL_UINT16(2, hdr.asset_count);
+    NtAssetEntry entries[2];
+    TEST_ASSERT_EQUAL(1, fread(entries, sizeof(NtAssetEntry) * 2, 1, pf));
+    TEST_ASSERT_EQUAL_UINT32(entries[0].offset, entries[1].offset);
+    TEST_ASSERT_EQUAL_UINT32(entries[0].size, entries[1].size);
+    TEST_ASSERT_TRUE(entries[0].size > 0);
+    (void)fclose(pf);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_dedup_cross_source_texture_memory_vs_raw(void) {
+    /* Same image added as PNG bytes and as raw RGBA pixels.
+     * Both store identical decoded RGBA -> early dedup should merge. */
+    const char *png_path = TMP_DIR "/cross_raw_tex.png";
+    write_test_png(png_path);
+
+    /* Read PNG bytes */
+    FILE *f = fopen(png_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    (void)fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    uint8_t *png_data = (uint8_t *)malloc((size_t)len);
+    TEST_ASSERT_NOT_NULL(png_data);
+    TEST_ASSERT_EQUAL((size_t)len, fread(png_data, 1, (size_t)len, f));
+    (void)fclose(f);
+
+    /* Known raw RGBA pixels from write_test_png: 2x2, 4 pixels.
+     * Row 0: red (255,0,0,255), green (0,255,0,255)
+     * Row 1: blue (0,0,255,255), white (255,255,255,255) */
+    const uint8_t raw_pixels[] = {
+        255, 0,   0,   255, /* red   */
+        0,   255, 0,   255, /* green */
+        0,   0,   255, 255, /* blue  */
+        255, 255, 255, 255, /* white */
+    };
+
+    const char *pack_path = TMP_DIR "/cross_raw_test.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_tex_opts_t opts = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = 0};
+    nt_builder_add_texture_from_memory_ex(ctx, png_data, (uint32_t)len, "tex/from_png", &opts);
+    nt_builder_add_texture_raw(ctx, raw_pixels, 2, 2, "tex/from_raw", &opts);
+    free(png_data);
+
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Read pack and verify both entries share same offset+size (deduped) */
+    FILE *pf = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(pf);
+    NtPackHeader hdr;
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, pf));
+    TEST_ASSERT_EQUAL_UINT16(2, hdr.asset_count);
+    NtAssetEntry entries[2];
+    TEST_ASSERT_EQUAL(1, fread(entries, sizeof(NtAssetEntry) * 2, 1, pf));
+    TEST_ASSERT_EQUAL_UINT32(entries[0].offset, entries[1].offset);
+    TEST_ASSERT_EQUAL_UINT32(entries[0].size, entries[1].size);
+    TEST_ASSERT_TRUE(entries[0].size > 0);
+    (void)fclose(pf);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -2406,6 +2552,11 @@ int main(void) {
     RUN_TEST(test_early_dedup_identical_shaders);
     RUN_TEST(test_early_dedup_different_kinds_not_deduped);
     RUN_TEST(test_early_dedup_pack_data_correct);
+
+    /* Cross-source dedup (38.1 pipeline refactoring) */
+    RUN_TEST(test_dedup_cross_source_texture_file_vs_memory);
+    RUN_TEST(test_dedup_cross_source_mesh_file_vs_scene);
+    RUN_TEST(test_dedup_cross_source_texture_memory_vs_raw);
 
     return UNITY_END();
 }
