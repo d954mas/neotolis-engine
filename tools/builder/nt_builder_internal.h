@@ -100,6 +100,14 @@ typedef struct {
     uint64_t resource_id;       /* nt_hash64 value */
     nt_build_asset_kind_t kind; /* mesh/texture/shader */
     void *data;                 /* NtBuildMeshData* / NtBuildShaderData* / NULL (owned, heap) */
+
+    /* Resolve phase: raw source bytes for early dedup comparison (Phase 38) */
+    uint8_t *resolved_data; /* raw file bytes (owned if resolved_owned, else borrowed) */
+    uint32_t resolved_size; /* byte count of resolved_data */
+    bool resolved_owned;    /* true = free resolved_data on cleanup */
+
+    /* Early dedup: index of original entry, -1 if not a duplicate (Phase 38) */
+    int32_t dedup_original;
 } NtBuildEntry;
 
 struct NtBuilderContext {
@@ -129,6 +137,14 @@ struct NtBuilderContext {
     /* Deduplication stats */
     uint32_t dedup_count;
     uint32_t dedup_saved_bytes;
+
+    /* Early dedup stats (Phase 38) */
+    uint32_t early_dedup_count;
+
+    /* Same-source-different-opts warnings (Phase 38, D-10/D-11) */
+    uint32_t dedup_warn_a[NT_BUILD_MAX_ASSETS]; /* first entry index of warning pair */
+    uint32_t dedup_warn_b[NT_BUILD_MAX_ASSETS]; /* second entry index of warning pair */
+    uint32_t dedup_warn_count;
 
     /* Metadata accumulation (Phase 37) */
     NtBuildMetaEntry meta_pending[NT_BUILD_MAX_META_ENTRIES];
