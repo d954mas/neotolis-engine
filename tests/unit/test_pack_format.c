@@ -14,7 +14,7 @@ void tearDown(void) {}
 
 /* --- Pack header struct size tests --- */
 
-void test_pack_header_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtPackHeader)); }
+void test_pack_header_size(void) { TEST_ASSERT_EQUAL_UINT(32, sizeof(NtPackHeader)); }
 
 void test_asset_entry_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtAssetEntry)); }
 
@@ -32,7 +32,7 @@ void test_pack_magic_value(void) {
     TEST_ASSERT_EQUAL_UINT8('K', bytes[3]);
 }
 
-void test_pack_version(void) { TEST_ASSERT_EQUAL_UINT(1, NT_PACK_VERSION); }
+void test_pack_version(void) { TEST_ASSERT_EQUAL_UINT(2, NT_PACK_VERSION); }
 
 void test_pack_align(void) {
     TEST_ASSERT_EQUAL_UINT(4, NT_PACK_ASSET_ALIGN);
@@ -60,12 +60,13 @@ void test_align_up_macro(void) {
 
 void test_pack_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(0, offsetof(NtPackHeader, magic));
-    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtPackHeader, _reserved));
+    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtPackHeader, meta_count));
     TEST_ASSERT_EQUAL_UINT(8, offsetof(NtPackHeader, version));
     TEST_ASSERT_EQUAL_UINT(10, offsetof(NtPackHeader, asset_count));
     TEST_ASSERT_EQUAL_UINT(12, offsetof(NtPackHeader, header_size));
     TEST_ASSERT_EQUAL_UINT(16, offsetof(NtPackHeader, total_size));
     TEST_ASSERT_EQUAL_UINT(20, offsetof(NtPackHeader, checksum));
+    TEST_ASSERT_EQUAL_UINT(24, offsetof(NtPackHeader, meta_offset));
 }
 
 void test_asset_entry_field_offsets(void) {
@@ -75,7 +76,7 @@ void test_asset_entry_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(16, offsetof(NtAssetEntry, format_version));
     TEST_ASSERT_EQUAL_UINT(18, offsetof(NtAssetEntry, asset_type));
     TEST_ASSERT_EQUAL_UINT(19, offsetof(NtAssetEntry, _pad));
-    TEST_ASSERT_EQUAL_UINT(20, offsetof(NtAssetEntry, _pad2));
+    TEST_ASSERT_EQUAL_UINT(20, offsetof(NtAssetEntry, meta_offset));
 }
 
 /* --- Asset type enum --- */
@@ -167,7 +168,7 @@ void test_stream_stride_mixed_precision(void) {
 
 /* --- Mesh header tests --- */
 
-void test_mesh_header_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtMeshAssetHeader)); }
+void test_mesh_header_size(void) { TEST_ASSERT_EQUAL_UINT(48, sizeof(NtMeshAssetHeader)); }
 
 void test_mesh_magic_value(void) {
     TEST_ASSERT_EQUAL_HEX32(0x4853454D, NT_MESH_MAGIC);
@@ -190,6 +191,8 @@ void test_mesh_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(12, offsetof(NtMeshAssetHeader, index_count));
     TEST_ASSERT_EQUAL_UINT(16, offsetof(NtMeshAssetHeader, vertex_data_size));
     TEST_ASSERT_EQUAL_UINT(20, offsetof(NtMeshAssetHeader, index_data_size));
+    TEST_ASSERT_EQUAL_UINT(24, offsetof(NtMeshAssetHeader, aabb_min));
+    TEST_ASSERT_EQUAL_UINT(36, offsetof(NtMeshAssetHeader, aabb_max));
 }
 
 /* --- Texture header tests --- */
@@ -221,6 +224,40 @@ void test_texture_header_field_offsets(void) {
 }
 
 void test_texture_format_enum(void) { TEST_ASSERT_EQUAL_UINT(1, NT_TEXTURE_FORMAT_RGBA8); }
+
+/* --- Metadata struct tests --- */
+
+void test_NtMetaEntryHeader_size(void) { TEST_ASSERT_EQUAL_UINT(20, sizeof(NtMetaEntryHeader)); }
+
+void test_NtMetaEntryHeader_field_offsets(void) {
+    TEST_ASSERT_EQUAL_UINT(0, offsetof(NtMetaEntryHeader, resource_id));
+    TEST_ASSERT_EQUAL_UINT(8, offsetof(NtMetaEntryHeader, kind));
+    TEST_ASSERT_EQUAL_UINT(16, offsetof(NtMetaEntryHeader, size));
+}
+
+void test_NtPackHeader_meta_count_offset(void) {
+    /* meta_count is at byte offset 4 */
+    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtPackHeader, meta_count));
+    NtPackHeader h;
+    memset(&h, 0, sizeof(h));
+    h.meta_count = 42;
+    uint8_t *bytes = (uint8_t *)&h;
+    uint32_t val;
+    memcpy(&val, bytes + 4, sizeof(val));
+    TEST_ASSERT_EQUAL_UINT32(42, val);
+}
+
+void test_NtAssetEntry_meta_offset_offset(void) {
+    /* meta_offset is at byte offset 20 */
+    TEST_ASSERT_EQUAL_UINT(20, offsetof(NtAssetEntry, meta_offset));
+    NtAssetEntry e;
+    memset(&e, 0, sizeof(e));
+    e.meta_offset = 1234;
+    uint8_t *bytes = (uint8_t *)&e;
+    uint32_t val;
+    memcpy(&val, bytes + 20, sizeof(val));
+    TEST_ASSERT_EQUAL_UINT32(1234, val);
+}
 
 /* --- Shader code header tests --- */
 
@@ -285,6 +322,12 @@ int main(void) {
     RUN_TEST(test_texture_magic_value);
     RUN_TEST(test_texture_header_field_offsets);
     RUN_TEST(test_texture_format_enum);
+
+    /* Metadata struct tests */
+    RUN_TEST(test_NtMetaEntryHeader_size);
+    RUN_TEST(test_NtMetaEntryHeader_field_offsets);
+    RUN_TEST(test_NtPackHeader_meta_count_offset);
+    RUN_TEST(test_NtAssetEntry_meta_offset_offset);
 
     /* Shader code header tests */
     RUN_TEST(test_shader_code_header_size);

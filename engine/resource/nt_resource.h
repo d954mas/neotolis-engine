@@ -88,6 +88,12 @@ uint8_t nt_resource_get_state(nt_resource_t handle);
  * Caller must copy data if it needs to persist beyond the current frame. */
 const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size);
 
+/* Get metadata for a resource by kind hash. Returns pointer to metadata bytes
+ * in resident pack memory, NULL if absent. Pointer valid until pack unmount.
+ * kind = nt_hash64_str("tag").value for example.
+ * Returns NULL + size 0 for absent metadata. */
+const void *nt_resource_get_meta(nt_resource_t handle, uint64_t kind, uint32_t *out_size);
+
 /* ---- Virtual packs ---- */
 
 nt_result_t nt_resource_create_pack(nt_hash32_t pack_id, int16_t priority);

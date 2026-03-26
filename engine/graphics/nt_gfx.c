@@ -866,10 +866,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_texture: bad magic");
         return 0;
     }
-    if (hdr->version != NT_TEXTURE_VERSION_V2) {
-        NT_LOG_ERROR("activate_texture: unsupported version %u", hdr->version);
-        return 0;
-    }
+    NT_ASSERT(hdr->version == NT_TEXTURE_VERSION_V2 && "activate_texture: version mismatch -- rebuild packs");
 
     return activate_texture_v2(data, size);
 }
@@ -884,10 +881,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_mesh: bad magic");
         return 0;
     }
-    if (hdr->version > NT_MESH_VERSION) {
-        NT_LOG_ERROR("activate_mesh: unsupported version");
-        return 0;
-    }
+    NT_ASSERT(hdr->version == NT_MESH_VERSION && "activate_mesh: version mismatch -- rebuild packs");
     if (hdr->index_type > 2) {
         NT_LOG_ERROR("activate_mesh: invalid index_type");
         return 0;
@@ -979,10 +973,7 @@ uint32_t nt_gfx_activate_shader(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_shader: bad magic");
         return 0;
     }
-    if (hdr->version > NT_SHADER_CODE_VERSION) {
-        NT_LOG_ERROR("activate_shader: unsupported version");
-        return 0;
-    }
+    NT_ASSERT(hdr->version == NT_SHADER_CODE_VERSION && "activate_shader: version mismatch -- rebuild packs");
     if (hdr->stage > NT_SHADER_STAGE_FRAGMENT) {
         NT_LOG_ERROR("activate_shader: invalid stage");
         return 0;

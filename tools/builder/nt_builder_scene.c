@@ -150,6 +150,7 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene) {
 
 /* --- Add scene mesh (deferred) --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_add_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const char *resource_id, const nt_mesh_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && scene && resource_id && opts && opts->layout && "invalid scene_mesh args");
     NT_BUILD_ASSERT(mesh_index < scene->mesh_count && "mesh_index out of range");
@@ -472,6 +473,7 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
         mesh_hdr.index_count = index_count;
         mesh_hdr.vertex_data_size = vertex_data_size;
         mesh_hdr.index_data_size = index_data_size;
+        nt_extract_aabb(prim, mesh_hdr.aabb_min, mesh_hdr.aabb_max);
 
         NtStreamDesc descs[NT_MESH_MAX_STREAMS];
         memset(descs, 0, sizeof(descs));

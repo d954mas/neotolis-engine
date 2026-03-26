@@ -131,6 +131,53 @@ static nt_build_result_t nt_parse_gltf_mesh(const char *path, const char *mesh_n
     return NT_BUILD_OK;
 }
 
+/* --- AABB extraction from POSITION accessor --- */
+
+#include <float.h>
+
+void nt_extract_aabb(const cgltf_primitive *prim, float out_min[3], float out_max[3]) {
+    const cgltf_accessor *pos_acc = NULL;
+    for (cgltf_size a = 0; a < prim->attributes_count; a++) {
+        if (prim->attributes[a].name != NULL && strcmp(prim->attributes[a].name, "POSITION") == 0) {
+            pos_acc = prim->attributes[a].data;
+            break;
+        }
+    }
+    if (!pos_acc) {
+        memset(out_min, 0, 3 * sizeof(float));
+        memset(out_max, 0, 3 * sizeof(float));
+        return;
+    }
+
+    NT_BUILD_ASSERT(pos_acc->type == cgltf_type_vec3 && "POSITION accessor must be VEC3");
+
+    if (pos_acc->has_min && pos_acc->has_max) {
+        /* Fast path: use pre-computed bounds from glTF exporter */
+        for (int i = 0; i < 3; i++) {
+            out_min[i] = (float)pos_acc->min[i];
+            out_max[i] = (float)pos_acc->max[i];
+        }
+        return;
+    }
+
+    /* Slow path: compute from vertex data */
+    out_min[0] = out_min[1] = out_min[2] = FLT_MAX;
+    out_max[0] = out_max[1] = out_max[2] = -FLT_MAX;
+
+    float tmp[3] = {0};
+    for (cgltf_size v = 0; v < pos_acc->count; v++) {
+        cgltf_accessor_read_float(pos_acc, v, tmp, 3);
+        for (int i = 0; i < 3; i++) {
+            if (tmp[i] < out_min[i]) {
+                out_min[i] = tmp[i];
+            }
+            if (tmp[i] > out_max[i]) {
+                out_max[i] = tmp[i];
+            }
+        }
+    }
+}
+
 /* --- Vertex attribute extraction --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -310,6 +357,7 @@ nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path
         mesh_hdr.index_count = index_count;
         mesh_hdr.vertex_data_size = vertex_data_size;
         mesh_hdr.index_data_size = index_data_size;
+        nt_extract_aabb(prim, mesh_hdr.aabb_min, mesh_hdr.aabb_max);
 
         NtStreamDesc descs[NT_MESH_MAX_STREAMS];
         memset(descs, 0, sizeof(descs));

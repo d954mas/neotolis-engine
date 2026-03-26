@@ -902,29 +902,33 @@ Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game cod
 ```c
 typedef struct {
     uint64_t resource_id;    /* nt_hash64 value */
-    uint8_t  asset_type;     /* nt_asset_type_t */
-    uint8_t  state;          /* nt_asset_state_t */
-    uint16_t format_version; /* per-type binary format version */
-    uint16_t pack_index;     /* index into packs[] */
-    uint16_t _pad;
     uint32_t offset;         /* byte offset in pack blob */
     uint32_t size;           /* asset data size */
     uint32_t runtime_handle; /* resolved handle, 0 = none */
-} NtAssetMeta; /* 28 bytes */
+    uint16_t format_version; /* per-type binary format version */
+    uint16_t pack_index;     /* index into packs[] */
+    uint8_t  asset_type;     /* nt_asset_type_t */
+    uint8_t  state;          /* nt_asset_state_t */
+    uint8_t  is_dedup;       /* 1 = shares data with another asset in same pack */
+    uint8_t  _pad;
+    uint32_t meta_offset;    /* byte offset into pack's resident meta_data buffer (NT_NO_METADATA = no meta) */
+} NtAssetMeta;
 ```
 
 ## 17.6 NtResourceSlot
 
 ```c
 typedef struct {
-    uint64_t resource_id;    /* nt_hash64 value */
-    uint32_t runtime_handle; /* current best resolved handle */
-    uint16_t generation;     /* stale detection */
-    int16_t  resolve_prio;   /* priority of current winner */
-    uint8_t  asset_type;     /* nt_asset_type_t */
-    uint8_t  state;          /* nt_asset_state_t of resolved entry */
-    uint16_t resolve_pack;   /* pack_index of current winner */
-} NtResourceSlot; /* 20 bytes */
+    uint64_t resource_id;       /* nt_hash64 value */
+    uint32_t runtime_handle;    /* current best resolved handle */
+    uint16_t generation;        /* stale detection */
+    int16_t  resolve_prio;      /* priority of current winner */
+    uint8_t  asset_type;        /* nt_asset_type_t */
+    uint8_t  state;             /* nt_asset_state_t of resolved entry */
+    uint16_t resolve_seq;       /* mount_seq of current winner (tiebreak) */
+    uint16_t resolve_asset_idx; /* index into assets[] of resolved winner (for metadata lookup) */
+    uint16_t _pad2;
+} NtResourceSlot;
 ```
 
 ## 17.7 Virtual packs
@@ -1123,63 +1127,90 @@ Custom flat binary format instead of ZIP. Rationale:
 
 ```text
 ┌──────────────────────────────────────┐
-│ PackHeader                            │
-│   magic: "NPAK"  (4 bytes)           │
-│   version: uint16                     │
-│   pack_id: uint32                     │
-│   asset_count: uint16                 │
+│ NtPackHeader (32 bytes, packed)       │
+│   magic: uint32     "NPAK"           │
+│   meta_count: uint32                 │
+│   version: uint16   NT_PACK_VERSION  │
+│   asset_count: uint16                │
 │   header_size: uint32  ← data start  │
 │   total_size: uint32                  │
 │   checksum: uint32     ← CRC32       │
+│   meta_offset: uint32  ← meta start  │
+│   _pad: uint32      (8-byte align)   │
 ├──────────────────────────────────────┤
-│ AssetEntry[0]                         │
+│ NtAssetEntry[0] (24 bytes, packed)    │
 │   resource_id: uint64                 │
 │   offset: uint32  ← from file start  │
 │   size: uint32                        │
 │   format_version: uint16              │
 │   asset_type: uint8                   │
+│   _pad: uint8                         │
+│   meta_offset: uint32  ← per-asset   │
 ├──────────────────────────────────────┤
-│ AssetEntry[1]                         │
-│   ...                                 │
-├──────────────────────────────────────┤
-│ AssetEntry[N-1]                       │
+│ NtAssetEntry[1..N-1]                  │
 │   ...                                 │
 ╞══════════════════════════════════════╡
-│ [padding to alignment]                │
+│ [padding to 8-byte alignment]         │
 │ [asset 0 binary data]                 │
 │ [asset 1 binary data]                 │
 │ ...                                   │
 │ [asset N-1 binary data]               │
+╞══════════════════════════════════════╡
+│ [meta section] (optional)             │
+│   NtMetaEntryHeader + payload ...     │
+│   grouped by resource_id              │
 └──────────────────────────────────────┘
 ```
 
-Assets aligned to 4 or 8 bytes within pack. Header/entries region aligned to 8 bytes before data start.
+Assets aligned to 4 bytes (NT_PACK_ASSET_ALIGN). Header/entries region aligned to 8 bytes (NT_PACK_DATA_ALIGN) before data start. Meta section appended after asset data, covered by CRC32. Resident copy made at parse time (survives blob eviction).
+
+## 19.2.1 Version policy
+
+No backwards compatibility. Runtime asserts `version == NT_PACK_VERSION`. Old packs must be rebuilt when format changes. This is intentional: the engine is in active development, and maintaining backwards compat for a format that changes frequently adds complexity without benefit. Builder and runtime always agree on version.
+
+## 19.2.2 Metadata section
+
+Optional section after asset data. Contains variable-length entries (NtMetaEntryHeader + payload) grouped by resource_id. Header-level `meta_offset` points to section start; per-asset `meta_offset` points to first entry for that asset. Used for game-defined metadata (tags, material bindings, custom properties). AABB is not metadata — it lives in NtMeshAssetHeader as inherent mesh data.
+
+```c
+NtMetaEntryHeader (20 bytes, packed):
+    uint64_t resource_id;  /* which asset */
+    uint64_t kind;         /* hash64 of metadata type name */
+    uint32_t size;         /* payload bytes (max 256) */
+    /* uint8_t data[size] follows immediately */
+```
+
+Query: `nt_resource_get_meta(handle, nt_hash64_str("tag").value, &size)` — returns pointer to resident memory, NULL if absent.
 
 ## 19.3 Runtime parsing
 
 ```c
-bool pack_parse(const uint8_t* blob, uint32_t blob_size, PackMeta* pack)
-{
-    const PackHeader* h = (const PackHeader*)blob;
+// Pseudocode — see nt_resource.c for actual implementation
+void parse_pack(const uint8_t* blob, uint32_t blob_size) {
+    const NtPackHeader* h = (const NtPackHeader*)blob;
 
-    if (h->magic != PACK_MAGIC) return false;
-    if (h->version > PACK_VERSION_MAX) return false;
-    if (h->header_size > blob_size) return false;
-    if (h->total_size != blob_size) return false;
+    NT_ASSERT(h->magic == NT_PACK_MAGIC);
+    NT_ASSERT(h->version == NT_PACK_VERSION);  /* no backwards compat */
 
-    const AssetEntry* entries = (const AssetEntry*)(blob + sizeof(PackHeader));
+    const NtAssetEntry* entries = (const NtAssetEntry*)(blob + sizeof(NtPackHeader));
 
-    for (uint16_t i = 0; i < h->asset_count; i++)
-    {
-        asset_registry_add(entries[i].resource_id,
-                          entries[i].asset_type,
-                          pack->pack_index,
-                          entries[i].offset,
-                          entries[i].size,
-                          entries[i].format_version);
+    for (uint16_t i = 0; i < h->asset_count; i++) {
+        NtAssetMeta* meta = asset_alloc();
+        meta->resource_id = entries[i].resource_id;
+        meta->offset = entries[i].offset;
+        meta->size = entries[i].size;
+        /* Convert per-asset meta_offset from absolute to meta_data-relative */
+        meta->meta_offset = (entries[i].meta_offset != 0)
+            ? entries[i].meta_offset - h->meta_offset
+            : NT_NO_METADATA;
     }
 
-    return true;
+    /* Copy meta section to resident memory (survives blob eviction) */
+    if (h->meta_count > 0 && h->meta_offset != 0) {
+        uint32_t meta_size = blob_size - h->meta_offset;
+        pack->meta_data = malloc(meta_size);
+        memcpy(pack->meta_data, blob + h->meta_offset, meta_size);
+    }
 }
 ```
 

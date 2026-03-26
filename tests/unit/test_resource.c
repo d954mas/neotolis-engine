@@ -13,8 +13,33 @@
 #include "nt_blob_format.h"
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
+#include "core/nt_assert.h"
 #include "unity.h"
 /* clang-format on */
+
+#include <setjmp.h>
+
+/* ---- Assert-catching helper (setjmp/longjmp via hookable nt_assert_handler) ---- */
+
+static jmp_buf s_assert_jmp;
+
+static void test_assert_trap(const char *expr, const char *file, int line) {
+    (void)expr;
+    (void)file;
+    (void)line;
+    longjmp(s_assert_jmp, 1);
+}
+
+#define EXPECT_ASSERT(code)                                                                                                                                                                            \
+    do {                                                                                                                                                                                               \
+        nt_assert_handler = test_assert_trap;                                                                                                                                                          \
+        if (setjmp(s_assert_jmp) == 0) {                                                                                                                                                               \
+            code;                                                                                                                                                                                      \
+            nt_assert_handler = NULL;                                                                                                                                                                  \
+            TEST_FAIL_MESSAGE("Expected NT_ASSERT to fire");                                                                                                                                           \
+        }                                                                                                                                                                                              \
+        nt_assert_handler = NULL;                                                                                                                                                                      \
+    } while (0)
 
 /* ---- Test blob builder ---- */
 
@@ -60,7 +85,7 @@ static uint8_t *build_test_pack(uint32_t asset_count, uint32_t *out_size) {
         entries[i].format_version = 1;
         entries[i].asset_type = (uint8_t)(NT_ASSET_MESH + (i % 3)); /* rotate types */
         entries[i]._pad = 0;
-        entries[i]._pad2 = 0;
+        entries[i].meta_offset = 0;
         entries[i].offset = data_offset;
         entries[i].size = data_per_asset;
 
@@ -157,9 +182,10 @@ void test_parse_bad_version(void) {
 
     NtPackHeader *h = (NtPackHeader *)blob;
     h->version = 99;
+    /* Recompute CRC after changing version */
+    h->checksum = nt_crc32(blob + h->header_size, blob_size - h->header_size);
 
-    nt_result_t r = nt_resource_parse_pack(pack_id, blob, blob_size);
-    TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, r);
+    EXPECT_ASSERT(nt_resource_parse_pack(pack_id, blob, blob_size));
     free(blob);
 }
 
@@ -303,7 +329,7 @@ static uint8_t *build_pack_with_rid(uint64_t rid, uint8_t atype, uint32_t *out_s
     entry->format_version = 1;
     entry->asset_type = atype;
     entry->_pad = 0;
-    entry->_pad2 = 0;
+    entry->meta_offset = 0;
     entry->offset = header_size;
     entry->size = data_per_asset;
 
@@ -1131,7 +1157,7 @@ static void write_test_pack_multi(const char *path, uint8_t atype, uint32_t coun
         entries[i].format_version = 1;
         entries[i].asset_type = atype;
         entries[i]._pad = 0;
-        entries[i]._pad2 = 0;
+        entries[i].meta_offset = 0;
         entries[i].offset = data_offset;
         entries[i].size = data_per_asset;
         uint32_t aligned = (data_per_asset + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
@@ -1468,7 +1494,7 @@ static uint8_t *build_blob_pack(uint64_t rid, uint32_t payload_size, uint8_t fil
     entry->format_version = 1;
     entry->asset_type = NT_ASSET_BLOB;
     entry->_pad = 0;
-    entry->_pad2 = 0;
+    entry->meta_offset = 0;
     entry->offset = header_size;
     entry->size = asset_data_size;
 
@@ -1570,6 +1596,162 @@ void test_get_blob_null_for_invalid_handle(void) {
     const uint8_t *data = nt_resource_get_blob(NT_RESOURCE_INVALID, &data_size);
     TEST_ASSERT_NULL(data);
     TEST_ASSERT_EQUAL_UINT32(0, data_size);
+}
+
+/* ---- Metadata test helpers ---- */
+
+/* Test payload for metadata tests (24 bytes, same size as old NtAabbData) */
+typedef struct {
+    float values[6];
+} TestMetaPayload;
+
+/*
+ * Build a NTPACK blob with one fake mesh asset and a metadata entry.
+ * The mesh asset data is just zeros (we don't actually parse mesh data in the
+ * metadata tests, only the meta section). Returns malloc'd blob (caller frees).
+ */
+static uint8_t *build_meta_pack(uint64_t rid, uint64_t kind, const void *payload, uint32_t payload_size, uint32_t *out_size) {
+    uint32_t asset_data_size = 64; /* fake mesh data */
+    uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
+    uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
+    uint32_t aligned_data = (asset_data_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+
+    /* Meta section: one NtMetaEntryHeader + payload */
+    uint32_t meta_entry_size = (uint32_t)sizeof(NtMetaEntryHeader) + payload_size;
+    uint32_t aligned_meta = (meta_entry_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+
+    uint32_t total_size = header_size + aligned_data + aligned_meta;
+    uint8_t *blob = (uint8_t *)calloc(1, total_size);
+    if (!blob) {
+        return NULL;
+    }
+
+    uint32_t meta_section_start = header_size + aligned_data;
+
+    NtPackHeader *h = (NtPackHeader *)blob;
+    h->magic = NT_PACK_MAGIC;
+    h->version = NT_PACK_VERSION;
+    h->asset_count = 1;
+    h->meta_count = 1;
+    h->meta_offset = meta_section_start;
+    h->header_size = header_size;
+    h->total_size = total_size;
+
+    NtAssetEntry *entry = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
+    entry->resource_id = rid;
+    entry->format_version = 1;
+    entry->asset_type = NT_ASSET_MESH;
+    entry->_pad = 0;
+    entry->offset = header_size;
+    entry->size = asset_data_size;
+    entry->meta_offset = meta_section_start;
+
+    /* Write meta entry header + payload */
+    NtMetaEntryHeader *mh = (NtMetaEntryHeader *)(blob + meta_section_start);
+    mh->resource_id = rid;
+    mh->kind = kind;
+    mh->size = payload_size;
+    memcpy(blob + meta_section_start + sizeof(NtMetaEntryHeader), payload, payload_size);
+
+    /* CRC32 over data region (everything after header) */
+    h->checksum = nt_crc32(blob + header_size, total_size - header_size);
+
+    *out_size = total_size;
+    return blob;
+}
+
+/* ---- Metadata query tests ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_resource_get_meta_aabb(void) {
+    nt_hash32_t pid = nt_hash32_str("meta_aabb_pack");
+    nt_hash64_t rid = nt_hash64_str("meshes/test_cube");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint64_t test_kind = nt_hash64_str("test_meta").value;
+    TestMetaPayload test_payload = {{-1.0F, -2.0F, -3.0F, 1.0F, 2.0F, 3.0F}};
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_meta_pack(rid.value, test_kind, &test_payload, (uint32_t)sizeof(test_payload), &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    TEST_ASSERT_TRUE(h.id != 0);
+
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+    nt_resource_step();
+
+    /* Query metadata */
+    uint32_t meta_size = 0;
+    const void *meta_ptr = nt_resource_get_meta(h, test_kind, &meta_size);
+    TEST_ASSERT_NOT_NULL(meta_ptr);
+    TEST_ASSERT_EQUAL_UINT32(sizeof(TestMetaPayload), meta_size);
+
+    /* Verify data matches what was written */
+    TEST_ASSERT_EQUAL_MEMORY(&test_payload, meta_ptr, sizeof(TestMetaPayload));
+
+    free(blob);
+}
+
+void test_resource_get_meta_absent(void) {
+    nt_hash32_t pid = nt_hash32_str("meta_absent_pack");
+    nt_hash64_t rid = nt_hash64_str("meta_absent_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    /* Build a blob pack with no metadata (meta_count=0) */
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_blob_pack(rid.value, 32, 0xAB, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_BLOB);
+    nt_resource_step();
+
+    uint32_t meta_size = 99;
+    const void *meta_ptr = nt_resource_get_meta(h, nt_hash64_str("nonexistent").value, &meta_size);
+    TEST_ASSERT_NULL(meta_ptr);
+    TEST_ASSERT_EQUAL_UINT32(0, meta_size);
+
+    free(blob);
+}
+
+void test_resource_get_meta_invalid_handle(void) {
+    nt_resource_t invalid = NT_RESOURCE_INVALID;
+    uint32_t sz = 99;
+    const void *p = nt_resource_get_meta(invalid, 0, &sz);
+    TEST_ASSERT_NULL(p);
+    TEST_ASSERT_EQUAL_UINT32(0, sz);
+}
+
+void test_resource_get_meta_wrong_kind(void) {
+    nt_hash32_t pid = nt_hash32_str("meta_wrong_kind");
+    nt_hash64_t rid = nt_hash64_str("meshes/wrong_kind");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint64_t stored_kind = nt_hash64_str("stored_kind").value;
+    TestMetaPayload payload = {{0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F}};
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_meta_pack(rid.value, stored_kind, &payload, (uint32_t)sizeof(payload), &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+    nt_resource_step();
+
+    /* Query with a different kind -- should return NULL */
+    uint32_t meta_size = 99;
+    const void *meta_ptr = nt_resource_get_meta(h, nt_hash64_str("nonexistent").value, &meta_size);
+    TEST_ASSERT_NULL(meta_ptr);
+    TEST_ASSERT_EQUAL_UINT32(0, meta_size);
+
+    free(blob);
 }
 
 /* ---- main ---- */
@@ -1688,6 +1870,12 @@ int main(void) {
     RUN_TEST(test_get_blob_returns_data);
     RUN_TEST(test_get_blob_null_for_non_blob);
     RUN_TEST(test_get_blob_null_for_invalid_handle);
+
+    /* Metadata query tests */
+    RUN_TEST(test_resource_get_meta_aabb);
+    RUN_TEST(test_resource_get_meta_absent);
+    RUN_TEST(test_resource_get_meta_invalid_handle);
+    RUN_TEST(test_resource_get_meta_wrong_kind);
 
     return UNITY_END();
 }

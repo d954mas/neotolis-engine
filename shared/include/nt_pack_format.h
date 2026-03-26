@@ -11,8 +11,7 @@
 
 /* Magic: ASCII "NPAK" read as uint32_t little-endian = 0x4B41504E */
 #define NT_PACK_MAGIC 0x4B41504E
-#define NT_PACK_VERSION 1
-#define NT_PACK_VERSION_MAX 1
+#define NT_PACK_VERSION 2
 /*
  * Alignment constants for zero-copy access.
  *
@@ -44,9 +43,9 @@ typedef enum {
 } nt_asset_type_t;
 
 /*
- * PackHeader: 24 bytes total (packed, naturally aligned).
- * magic(4) + _reserved(4) + version(2) + asset_count(2) +
- * header_size(4) + total_size(4) + checksum(4) = 24
+ * PackHeader: 32 bytes total (packed, 8-byte aligned for NtAssetEntry that follows).
+ * magic(4) + meta_count(4) + version(2) + asset_count(2) +
+ * header_size(4) + total_size(4) + checksum(4) + meta_offset(4) + _pad(4) = 32
  *
  * Fields ordered so every field sits on its natural alignment boundary
  * (uint32 at 4-byte, uint16 at 2-byte). This avoids slow unaligned
@@ -55,19 +54,21 @@ typedef enum {
 #pragma pack(push, 1)
 typedef struct {
     uint32_t magic;       /* 0:  NT_PACK_MAGIC ("NPAK") */
-    uint32_t _reserved;   /* 4:  must be 0 */
+    uint32_t meta_count;  /* 4:  number of NtMetaEntryHeader records (0 = no metadata) */
     uint16_t version;     /* 8:  NT_PACK_VERSION */
     uint16_t asset_count; /* 10: number of assets */
     uint32_t header_size; /* 12: offset where data region starts */
     uint32_t total_size;  /* 16: total file size in bytes */
     uint32_t checksum;    /* 20: CRC32 of data after header */
+    uint32_t meta_offset; /* 24: byte offset from file start to meta section (0 = no meta) */
+    uint32_t _pad;        /* 28: align to 32 bytes (NtAssetEntry requires 8-byte alignment) */
 } NtPackHeader;
 #pragma pack(pop)
 
 /*
  * AssetEntry: 24 bytes total (packed).
  * resource_id(8) + offset(4) + size(4) + format_version(2) +
- * asset_type(1) + _pad(1) + _pad2(4) = 24
+ * asset_type(1) + _pad(1) + meta_offset(4) = 24
  */
 #pragma pack(push, 1)
 typedef struct {
@@ -77,11 +78,23 @@ typedef struct {
     uint16_t format_version; /* 16: per-asset-type format version */
     uint8_t asset_type;      /* 18: nt_asset_type_t */
     uint8_t _pad;            /* 19: explicit padding */
-    uint32_t _pad2;          /* 20: align to 24 bytes */
+    uint32_t meta_offset;    /* 20: byte offset from file start to first meta entry for this asset (0 = no meta) */
 } NtAssetEntry;
 #pragma pack(pop)
 
-_Static_assert(sizeof(NtPackHeader) == 24, "PackHeader must be 24 bytes");
+_Static_assert(sizeof(NtPackHeader) == 32, "PackHeader must be 32 bytes");
 _Static_assert(sizeof(NtAssetEntry) == 24, "AssetEntry must be 24 bytes");
+
+/* MetaEntry header: variable-size, 20 bytes header + size bytes data.
+ * Written contiguously per-asset in meta section. */
+#pragma pack(push, 1)
+typedef struct {
+    uint64_t resource_id; /* 0:  which asset this metadata belongs to */
+    uint64_t kind;        /* 8:  hash64 of metadata type name */
+    uint32_t size;        /* 16: payload size in bytes (max 256 per D-12) */
+    /* uint8_t data[size] follows immediately */
+} NtMetaEntryHeader;
+#pragma pack(pop)
+_Static_assert(sizeof(NtMetaEntryHeader) == 20, "NtMetaEntryHeader must be 20 bytes");
 
 #endif /* NT_PACK_FORMAT_H */

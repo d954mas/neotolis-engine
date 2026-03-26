@@ -5,7 +5,7 @@
 
 /* Magic: ASCII "MESH" as uint32_t little-endian = 0x4853454D */
 #define NT_MESH_MAGIC 0x4853454D
-#define NT_MESH_VERSION 1
+#define NT_MESH_VERSION 2
 
 #define NT_MESH_MAX_STREAMS 8
 
@@ -45,10 +45,11 @@ _Static_assert(sizeof(NtStreamDesc) == 8, "NtStreamDesc must be 8 bytes");
 /*
  * NtMeshAssetHeader — binary header prepended to mesh data in ntpack.
  *
- * Layout (24 bytes):
+ * Layout (48 bytes):
  *   magic(4) + version(2) + stream_count(1) + index_type(1) +
  *   vertex_count(4) + index_count(4) +
- *   vertex_data_size(4) + index_data_size(4)
+ *   vertex_data_size(4) + index_data_size(4) +
+ *   aabb_min(12) + aabb_max(12)
  *
  * After header: NtStreamDesc[stream_count], then vertex data, then index data.
  *
@@ -67,10 +68,12 @@ typedef struct {
     uint32_t index_count;      /* number of indices (0 if index_type==0) */
     uint32_t vertex_data_size; /* total vertex data in bytes */
     uint32_t index_data_size;  /* total index data in bytes */
+    float aabb_min[3];         /* axis-aligned bounding box minimum (x, y, z) */
+    float aabb_max[3];         /* axis-aligned bounding box maximum (x, y, z) */
 } NtMeshAssetHeader;
 #pragma pack(pop)
 
-_Static_assert(sizeof(NtMeshAssetHeader) == 24, "NtMeshAssetHeader must be 24 bytes");
+_Static_assert(sizeof(NtMeshAssetHeader) == 48, "NtMeshAssetHeader must be 48 bytes");
 
 /* Byte size of one component of a given stream type */
 static inline uint32_t nt_stream_type_size(uint8_t type) {

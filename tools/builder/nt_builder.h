@@ -11,11 +11,17 @@
 #include "nt_texture_format.h" /* nt_texture_pixel_format_t */
 
 /* Always-on assert for builder (never compiled out by NDEBUG).
-   A failed assert means the build is broken -- pack would be invalid. */
+   A failed assert means the build is broken -- pack would be invalid.
+   Hookable handler for tests (setjmp/longjmp pattern, same as NT_ASSERT). */
+typedef void (*nt_build_assert_handler_t)(const char *expr, const char *file, int line);
+extern nt_build_assert_handler_t nt_build_assert_handler;
+
 #ifndef NT_BUILD_ASSERT
 #define NT_BUILD_ASSERT(cond)                                                                                                                                                                          \
     do {                                                                                                                                                                                               \
         if (!(cond)) {                                                                                                                                                                                 \
+            if (nt_build_assert_handler)                                                                                                                                                               \
+                nt_build_assert_handler(#cond, __FILE__, __LINE__);                                                                                                                                    \
             (void)fprintf(stderr, "FATAL: %s:%d: assertion failed: %s\n", __FILE__, __LINE__, #cond);                                                                                                  \
             abort();                                                                                                                                                                                   \
         }                                                                                                                                                                                              \

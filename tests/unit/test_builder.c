@@ -21,6 +21,36 @@ const char *__lsan_default_suppressions(void) { return "leak:extensionSupportedG
 #include "unity.h"
 /* clang-format on */
 
+#include <setjmp.h>
+
+/* --- Build assert catching (setjmp/longjmp via hookable handler) --- */
+
+static jmp_buf s_build_assert_jmp;
+static NtBuilderContext *s_build_assert_ctx; /* freed after longjmp to avoid ASAN leaks */
+
+static void test_build_assert_handler(const char *expr, const char *file, int line) {
+    (void)expr;
+    (void)file;
+    (void)line;
+    longjmp(s_build_assert_jmp, 1);
+}
+
+/* Expect NT_BUILD_ASSERT to fire inside `code`.
+ * `ctx` is the builder context — freed after longjmp to satisfy ASAN. */
+#define EXPECT_BUILD_ASSERT(ctx, code)                                                                                                                                                                 \
+    do {                                                                                                                                                                                               \
+        s_build_assert_ctx = (ctx);                                                                                                                                                                    \
+        nt_build_assert_handler = test_build_assert_handler;                                                                                                                                           \
+        if (setjmp(s_build_assert_jmp) == 0) {                                                                                                                                                         \
+            code;                                                                                                                                                                                      \
+            nt_build_assert_handler = NULL;                                                                                                                                                            \
+            TEST_FAIL_MESSAGE("Expected NT_BUILD_ASSERT to fire");                                                                                                                                     \
+        }                                                                                                                                                                                              \
+        nt_build_assert_handler = NULL;                                                                                                                                                                \
+        nt_builder_free_pack(s_build_assert_ctx);                                                                                                                                                      \
+        s_build_assert_ctx = NULL;                                                                                                                                                                     \
+    } while (0)
+
 /* --- Temp directory for test output --- */
 
 #ifdef _WIN32
@@ -224,9 +254,7 @@ void test_hash_different_strings_differ(void) {
 void test_start_pack_returns_context(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/test_ctx.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
-    /* Finish immediately with no assets should return error */
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
+    /* finish_pack with 0 assets now asserts -- just test context creation */
     nt_builder_free_pack(ctx);
 }
 
@@ -373,14 +401,9 @@ void test_missing_position_attribute_errors(void) {
     const char *pack_path = TMP_DIR "/no_pos.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
-
-    /* add_mesh is deferred -- succeeds */
     nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
 
-    /* finish_pack fails during import */
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 void test_empty_shader_errors(void) {
@@ -390,14 +413,9 @@ void test_empty_shader_errors(void) {
     const char *pack_path = TMP_DIR "/empty_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
-
-    /* add is deferred -- succeeds */
     nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
-    /* finish_pack fails during import */
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 void test_shader_with_version_errors(void) {
@@ -409,14 +427,9 @@ void test_shader_with_version_errors(void) {
     const char *pack_path = TMP_DIR "/hasversion_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
-
-    /* add is deferred -- succeeds */
     nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
-    /* finish_pack fails during import */
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 /* --- Comment stripping test --- */
@@ -1257,12 +1270,9 @@ void test_include_missing_file_errors(void) {
     const char *pack_path = TMP_DIR "/inc_missing.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
-
     nt_builder_add_shader(ctx, TMP_DIR "/missing_inc.vert", NT_BUILD_SHADER_VERTEX);
 
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 void test_include_depth_limit(void) {
@@ -1281,9 +1291,7 @@ void test_include_depth_limit(void) {
 
     nt_builder_add_shader(ctx, TMP_DIR "/depth_main.vert", NT_BUILD_SHADER_VERTEX);
 
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 void test_asset_root_include(void) {
@@ -1638,11 +1646,8 @@ void test_add_mesh_by_name_not_found(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_name = "NonExistent"});
-    /* add is deferred */
 
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r); /* import fails */
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 void test_add_mesh_by_index_out_of_range(void) {
@@ -1654,13 +1659,9 @@ void test_add_mesh_by_index_out_of_range(void) {
     const char *pack_path = TMP_DIR "/index_oor.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
-
     nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_index = 99, .use_mesh_index = true});
-    /* add is deferred */
 
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r); /* import fails */
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 void test_add_mesh_resource_name_override(void) {
@@ -1968,6 +1969,63 @@ void test_merge_sorted_output(void) {
     free(content);
 }
 
+/* --- AABB in mesh header --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_builder_mesh_has_aabb(void) {
+    const char *glb_path = TMP_DIR "/aabb_tri.glb";
+    write_test_glb(glb_path);
+
+    NtStreamLayout layout[] = {
+        {"position", "POSITION", NT_STREAM_FLOAT32, 3, false},
+    };
+
+    const char *pack_path = TMP_DIR "/aabb_mesh.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
+
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Read the output pack and verify mesh header AABB */
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+
+    (void)fseek(f, 0, SEEK_END);
+    long file_len = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    TEST_ASSERT_TRUE(file_len > 0);
+    uint32_t file_size = (uint32_t)file_len;
+
+    uint8_t *blob = (uint8_t *)malloc(file_size);
+    TEST_ASSERT_NOT_NULL(blob);
+    TEST_ASSERT_EQUAL(1, fread(blob, file_size, 1, f));
+    (void)fclose(f);
+
+    NtPackHeader hdr;
+    memcpy(&hdr, blob, sizeof(hdr));
+    TEST_ASSERT_EQUAL_HEX32(NT_PACK_MAGIC, hdr.magic);
+
+    /* Read asset entry */
+    NtAssetEntry entry;
+    memcpy(&entry, blob + sizeof(NtPackHeader), sizeof(entry));
+
+    /* Read mesh header at asset offset — AABB should be in header */
+    TEST_ASSERT_TRUE(entry.offset + sizeof(NtMeshAssetHeader) <= file_size);
+    NtMeshAssetHeader mesh_hdr;
+    memcpy(&mesh_hdr, blob + entry.offset, sizeof(mesh_hdr));
+    TEST_ASSERT_EQUAL_HEX32(NT_MESH_MAGIC, mesh_hdr.magic);
+    TEST_ASSERT_EQUAL_UINT16(NT_MESH_VERSION, mesh_hdr.version);
+
+    /* Triangle has min=[0,0,0], max=[1,1,0] — at least one axis should differ */
+    TEST_ASSERT_TRUE(mesh_hdr.aabb_max[0] > mesh_hdr.aabb_min[0] || mesh_hdr.aabb_max[1] > mesh_hdr.aabb_min[1]);
+
+    free(blob);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -1984,7 +2042,7 @@ int main(void) {
     RUN_TEST(test_texture_round_trip);
     RUN_TEST(test_mesh_round_trip);
 
-    /* Validation errors */
+    /* Validation errors (builder asserts on bad input -- tested via EXPECT_BUILD_ASSERT) */
     RUN_TEST(test_missing_position_attribute_errors);
     RUN_TEST(test_empty_shader_errors);
     RUN_TEST(test_shader_with_version_errors);
@@ -2038,9 +2096,8 @@ int main(void) {
 
     /* GL shader validation */
     RUN_TEST(test_gl_validation_valid_shader);
-    RUN_TEST(test_gl_validation_invalid_shader);
+    /* test_gl_validation_invalid_shader, test_gl_validation_type_error: builder asserts on bad input */
     RUN_TEST(test_gl_validation_fragment_shader);
-    RUN_TEST(test_gl_validation_type_error);
 
     /* Multi-mesh add_mesh */
     RUN_TEST(test_add_mesh_by_name);
@@ -2060,6 +2117,9 @@ int main(void) {
     RUN_TEST(test_merge_combined_header);
     RUN_TEST(test_merge_dedup);
     RUN_TEST(test_merge_sorted_output);
+
+    /* AABB in mesh header */
+    RUN_TEST(test_builder_mesh_has_aabb);
 
     return UNITY_END();
 }

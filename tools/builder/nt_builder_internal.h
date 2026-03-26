@@ -80,6 +80,19 @@ typedef struct {
     nt_tex_compress_opts_t compress; /* compression settings */
 } NtBuildTexMemCompressedData;
 
+/* Metadata accumulation limit (Phase 37) */
+#ifndef NT_BUILD_MAX_META_ENTRIES
+#define NT_BUILD_MAX_META_ENTRIES (NT_BUILD_MAX_ASSETS * 2)
+#endif
+
+/* Builder-side meta entry for accumulation (max 256 bytes payload per D-12) */
+typedef struct {
+    uint64_t resource_id;
+    uint64_t kind;
+    uint32_t size;
+    uint8_t data[256];
+} NtBuildMetaEntry;
+
 /* Deferred asset entry -- stored during add_*, processed in finish_pack */
 typedef struct {
     char *path;                 /* normalized source file path (owned, heap) */
@@ -117,6 +130,10 @@ struct NtBuilderContext {
     uint32_t dedup_count;
     uint32_t dedup_saved_bytes;
 
+    /* Metadata accumulation (Phase 37) */
+    NtBuildMetaEntry meta_pending[NT_BUILD_MAX_META_ENTRIES];
+    uint32_t meta_count;
+
     /* Asset root search paths (D-09) */
     char *asset_roots[NT_BUILD_MAX_ASSET_ROOTS];
     uint32_t asset_root_count;
@@ -144,6 +161,13 @@ nt_build_result_t nt_builder_import_texture_from_memory_compressed(NtBuilderCont
                                                                    const nt_tex_compress_opts_t *compress_opts);
 nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
                                                nt_tangent_mode_t tangent_mode, uint64_t resource_id);
+
+/* Metadata accumulation (called from import functions) */
+void nt_builder_add_meta(NtBuilderContext *ctx, uint64_t resource_id, uint64_t kind, const void *data, uint32_t size);
+
+/* AABB extraction from cgltf primitive POSITION accessor */
+struct cgltf_primitive;
+void nt_extract_aabb(const struct cgltf_primitive *prim, float out_min[3], float out_max[3]);
 
 /* Tangent computation (MikkTSpace wrapper) */
 nt_build_result_t nt_builder_compute_tangents(const float *positions, const float *normals, const float *uvs, const uint32_t *indices, uint32_t vertex_count, uint32_t index_count,
