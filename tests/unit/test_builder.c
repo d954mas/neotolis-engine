@@ -26,6 +26,7 @@ const char *__lsan_default_suppressions(void) { return "leak:extensionSupportedG
 /* --- Build assert catching (setjmp/longjmp via hookable handler) --- */
 
 static jmp_buf s_build_assert_jmp;
+static NtBuilderContext *s_build_assert_ctx; /* freed after longjmp to avoid ASAN leaks */
 
 static void test_build_assert_handler(const char *expr, const char *file, int line) {
     (void)expr;
@@ -34,9 +35,11 @@ static void test_build_assert_handler(const char *expr, const char *file, int li
     longjmp(s_build_assert_jmp, 1);
 }
 
-/* Expect NT_BUILD_ASSERT to fire inside `code`. Pass if it fires, fail if it doesn't. */
-#define EXPECT_BUILD_ASSERT(code)                                                                                                                                                                      \
+/* Expect NT_BUILD_ASSERT to fire inside `code`.
+ * `ctx` is the builder context — freed after longjmp to satisfy ASAN. */
+#define EXPECT_BUILD_ASSERT(ctx, code)                                                                                                                                                                 \
     do {                                                                                                                                                                                               \
+        s_build_assert_ctx = (ctx);                                                                                                                                                                    \
         nt_build_assert_handler = test_build_assert_handler;                                                                                                                                           \
         if (setjmp(s_build_assert_jmp) == 0) {                                                                                                                                                         \
             code;                                                                                                                                                                                      \
@@ -44,6 +47,8 @@ static void test_build_assert_handler(const char *expr, const char *file, int li
             TEST_FAIL_MESSAGE("Expected NT_BUILD_ASSERT to fire");                                                                                                                                     \
         }                                                                                                                                                                                              \
         nt_build_assert_handler = NULL;                                                                                                                                                                \
+        nt_builder_free_pack(s_build_assert_ctx);                                                                                                                                                      \
+        s_build_assert_ctx = NULL;                                                                                                                                                                     \
     } while (0)
 
 /* --- Temp directory for test output --- */
@@ -398,7 +403,7 @@ void test_missing_position_attribute_errors(void) {
     TEST_ASSERT_NOT_NULL(ctx);
     nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
 
-    EXPECT_BUILD_ASSERT(nt_builder_finish_pack(ctx));
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 void test_empty_shader_errors(void) {
@@ -410,7 +415,7 @@ void test_empty_shader_errors(void) {
     TEST_ASSERT_NOT_NULL(ctx);
     nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
-    EXPECT_BUILD_ASSERT(nt_builder_finish_pack(ctx));
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 void test_shader_with_version_errors(void) {
@@ -424,7 +429,7 @@ void test_shader_with_version_errors(void) {
     TEST_ASSERT_NOT_NULL(ctx);
     nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
-    EXPECT_BUILD_ASSERT(nt_builder_finish_pack(ctx));
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 /* --- Comment stripping test --- */
@@ -1267,7 +1272,7 @@ void test_include_missing_file_errors(void) {
     TEST_ASSERT_NOT_NULL(ctx);
     nt_builder_add_shader(ctx, TMP_DIR "/missing_inc.vert", NT_BUILD_SHADER_VERTEX);
 
-    EXPECT_BUILD_ASSERT(nt_builder_finish_pack(ctx));
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 void test_include_depth_limit(void) {
@@ -1286,7 +1291,7 @@ void test_include_depth_limit(void) {
 
     nt_builder_add_shader(ctx, TMP_DIR "/depth_main.vert", NT_BUILD_SHADER_VERTEX);
 
-    EXPECT_BUILD_ASSERT(nt_builder_finish_pack(ctx));
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 void test_asset_root_include(void) {
@@ -1642,7 +1647,7 @@ void test_add_mesh_by_name_not_found(void) {
 
     nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_name = "NonExistent"});
 
-    EXPECT_BUILD_ASSERT(nt_builder_finish_pack(ctx));
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 void test_add_mesh_by_index_out_of_range(void) {
@@ -1656,7 +1661,7 @@ void test_add_mesh_by_index_out_of_range(void) {
     TEST_ASSERT_NOT_NULL(ctx);
     nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_index = 99, .use_mesh_index = true});
 
-    EXPECT_BUILD_ASSERT(nt_builder_finish_pack(ctx));
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
 void test_add_mesh_resource_name_override(void) {
