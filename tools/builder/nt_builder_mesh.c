@@ -269,13 +269,80 @@ static uint8_t *nt_interleave_vertices(const NtStreamLayout *layout, uint32_t st
     return vertex_buf;
 }
 
-/* --- Mesh import (called from finish_pack) --- */
+/* --- Shared: build binary mesh output buffer from mesh components --- */
+
+nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uint32_t stream_count, float *stream_floats[], uint32_t vertex_count, const cgltf_primitive *prim, uint8_t *index_buf,
+                                               uint32_t index_count, uint8_t index_type, uint32_t index_data_size, uint8_t **out_data, uint32_t *out_size) {
+    uint32_t vertex_stride = 0;
+    for (uint32_t s = 0; s < stream_count; s++) {
+        vertex_stride += nt_stream_type_size((uint8_t)layout[s].type) * layout[s].count;
+    }
+
+    uint32_t vertex_data_size = 0;
+    uint8_t *vertex_buf = nt_interleave_vertices(layout, stream_count, stream_floats, vertex_count, vertex_stride, &vertex_data_size);
+    if (!vertex_buf) {
+        return NT_BUILD_ERR_IO;
+    }
+
+    NtMeshAssetHeader mesh_hdr;
+    memset(&mesh_hdr, 0, sizeof(mesh_hdr));
+    mesh_hdr.magic = NT_MESH_MAGIC;
+    mesh_hdr.version = NT_MESH_VERSION;
+    mesh_hdr.stream_count = (uint8_t)stream_count;
+    mesh_hdr.index_type = index_type;
+    mesh_hdr.vertex_count = vertex_count;
+    mesh_hdr.index_count = index_count;
+    mesh_hdr.vertex_data_size = vertex_data_size;
+    mesh_hdr.index_data_size = index_data_size;
+    if (prim) {
+        nt_extract_aabb(prim, mesh_hdr.aabb_min, mesh_hdr.aabb_max);
+    }
+
+    NtStreamDesc descs[NT_MESH_MAX_STREAMS];
+    memset(descs, 0, sizeof(descs));
+    for (uint32_t s = 0; s < stream_count; s++) {
+        descs[s].name_hash = nt_hash32_str(layout[s].engine_name).value;
+        descs[s].type = (uint8_t)layout[s].type;
+        descs[s].count = layout[s].count;
+        descs[s].normalized = layout[s].normalized ? 1 : 0;
+        descs[s]._pad = 0;
+    }
+
+    uint32_t descs_size = stream_count * (uint32_t)sizeof(NtStreamDesc);
+    uint32_t total = (uint32_t)sizeof(NtMeshAssetHeader) + descs_size + vertex_data_size + index_data_size;
+
+    uint8_t *buf = (uint8_t *)malloc(total);
+    if (!buf) {
+        free(vertex_buf);
+        return NT_BUILD_ERR_IO;
+    }
+
+    uint32_t off = 0;
+    memcpy(buf + off, &mesh_hdr, sizeof(NtMeshAssetHeader));
+    off += (uint32_t)sizeof(NtMeshAssetHeader);
+    memcpy(buf + off, descs, descs_size);
+    off += descs_size;
+    if (vertex_data_size > 0) {
+        memcpy(buf + off, vertex_buf, vertex_data_size);
+        off += vertex_data_size;
+    }
+    if (index_data_size > 0 && index_buf) {
+        memcpy(buf + off, index_buf, index_data_size);
+    }
+
+    free(vertex_buf);
+    *out_data = buf;
+    *out_size = total;
+    return NT_BUILD_OK;
+}
+
+/* --- Decode: glTF file -> binary mesh buffer (eager, called from add_mesh) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name,
-                                         uint32_t mesh_index, uint64_t resource_id) {
+nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout *layout, uint32_t stream_count, nt_tangent_mode_t tangent_mode, const char *mesh_name, uint32_t mesh_index,
+                                         uint8_t **out_data, uint32_t *out_size) {
     (void)tangent_mode; /* reserved for future tangent support in add_mesh path */
-    if (!ctx || !path || !layout) {
+    if (!path || !layout || !out_data || !out_size) {
         return NT_BUILD_ERR_VALIDATION;
     }
 
@@ -301,19 +368,6 @@ nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path
     }
 
     {
-        uint32_t vertex_stride = 0;
-        for (uint32_t s = 0; s < stream_count; s++) {
-            vertex_stride += nt_stream_type_size((uint8_t)layout[s].type) * layout[s].count;
-        }
-
-        uint32_t vertex_data_size = 0;
-        uint8_t *vertex_buf = nt_interleave_vertices(layout, stream_count, stream_floats, vertex_count, vertex_stride, &vertex_data_size);
-        if (!vertex_buf) {
-            NT_LOG_ERROR("%s: failed to allocate vertex buffer", path);
-            ret = NT_BUILD_ERR_IO;
-            goto cleanup_streams;
-        }
-
         uint32_t index_count = 0;
         uint8_t index_type = 0;
         uint8_t *index_buf = NULL;
@@ -323,7 +377,6 @@ nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path
             index_count = (uint32_t)prim->indices->count;
             if (index_count > NT_BUILD_MAX_INDICES) {
                 NT_LOG_ERROR("%s: index count %u exceeds max %d", path, index_count, NT_BUILD_MAX_INDICES);
-                free(vertex_buf);
                 ret = NT_BUILD_ERR_LIMIT;
                 goto cleanup_streams;
             }
@@ -338,7 +391,6 @@ nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path
 
             index_buf = (uint8_t *)calloc(index_data_size, 1);
             if (!index_buf) {
-                free(vertex_buf);
                 ret = NT_BUILD_ERR_IO;
                 goto cleanup_streams;
             }
@@ -347,47 +399,7 @@ nt_build_result_t nt_builder_import_mesh(NtBuilderContext *ctx, const char *path
             cgltf_accessor_unpack_indices(prim->indices, index_buf, idx_elem_size, index_count);
         }
 
-        NtMeshAssetHeader mesh_hdr;
-        memset(&mesh_hdr, 0, sizeof(mesh_hdr));
-        mesh_hdr.magic = NT_MESH_MAGIC;
-        mesh_hdr.version = NT_MESH_VERSION;
-        mesh_hdr.stream_count = (uint8_t)stream_count;
-        mesh_hdr.index_type = index_type;
-        mesh_hdr.vertex_count = vertex_count;
-        mesh_hdr.index_count = index_count;
-        mesh_hdr.vertex_data_size = vertex_data_size;
-        mesh_hdr.index_data_size = index_data_size;
-        nt_extract_aabb(prim, mesh_hdr.aabb_min, mesh_hdr.aabb_max);
-
-        NtStreamDesc descs[NT_MESH_MAX_STREAMS];
-        memset(descs, 0, sizeof(descs));
-        for (uint32_t s = 0; s < stream_count; s++) {
-            descs[s].name_hash = nt_hash32_str(layout[s].engine_name).value;
-            descs[s].type = (uint8_t)layout[s].type;
-            descs[s].count = layout[s].count;
-            descs[s].normalized = layout[s].normalized ? 1 : 0;
-            descs[s]._pad = 0;
-        }
-
-        uint32_t descs_size = stream_count * (uint32_t)sizeof(NtStreamDesc);
-        uint32_t total_asset_size = (uint32_t)sizeof(NtMeshAssetHeader) + descs_size + vertex_data_size + index_data_size;
-
-        ret = nt_builder_append_data(ctx, &mesh_hdr, (uint32_t)sizeof(NtMeshAssetHeader));
-        if (ret == NT_BUILD_OK) {
-            ret = nt_builder_append_data(ctx, descs, descs_size);
-        }
-        if (ret == NT_BUILD_OK && vertex_data_size > 0) {
-            ret = nt_builder_append_data(ctx, vertex_buf, vertex_data_size);
-        }
-        if (ret == NT_BUILD_OK && index_data_size > 0) {
-            ret = nt_builder_append_data(ctx, index_buf, index_data_size);
-        }
-
-        if (ret == NT_BUILD_OK) {
-            ret = nt_builder_register_asset(ctx, resource_id, NT_ASSET_MESH, NT_MESH_VERSION, total_asset_size);
-        }
-
-        free(vertex_buf);
+        ret = nt_builder_build_mesh_buffer(layout, stream_count, stream_floats, vertex_count, prim, index_buf, index_count, index_type, index_data_size, out_data, out_size);
         free(index_buf);
     }
 
