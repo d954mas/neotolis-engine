@@ -917,8 +917,8 @@ const void *nt_resource_get_meta(nt_resource_t handle, uint64_t kind, uint32_t *
     }
 
     const NtAssetMeta *ameta = &s_resource.assets[ai];
-    if (ameta->resource_id == 0) {
-        return NULL;
+    if (ameta->resource_id != slot->resource_id) {
+        return NULL; /* not yet resolved, or stale index */
     }
     if (ameta->meta_offset == UINT32_MAX) {
         return NULL; /* no metadata for this asset */

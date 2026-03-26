@@ -884,10 +884,7 @@ uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {
         NT_LOG_ERROR("activate_mesh: bad magic");
         return 0;
     }
-    if (hdr->version > NT_MESH_VERSION) {
-        NT_LOG_ERROR("activate_mesh: unsupported version");
-        return 0;
-    }
+    NT_ASSERT(hdr->version == NT_MESH_VERSION && "activate_mesh: version mismatch -- rebuild packs");
     if (hdr->index_type > 2) {
         NT_LOG_ERROR("activate_mesh: invalid index_type");
         return 0;
