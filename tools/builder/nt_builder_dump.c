@@ -393,9 +393,9 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
         return NT_BUILD_ERR_FORMAT;
     }
 
-    /* Validate version */
-    if (header->version > NT_PACK_VERSION_MAX) {
-        NT_LOG_ERROR("Unsupported version %u (max %u)", header->version, NT_PACK_VERSION_MAX);
+    /* Validate version -- no backwards compat */
+    if (header->version != NT_PACK_VERSION) {
+        NT_LOG_ERROR("Version mismatch %u (expected %u) -- rebuild packs", header->version, NT_PACK_VERSION);
         free(buffer);
         return NT_BUILD_ERR_FORMAT;
     }

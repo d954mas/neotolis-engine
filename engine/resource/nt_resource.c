@@ -408,7 +408,7 @@ void nt_resource_step(void) {
         slot->state = NT_ASSET_STATE_REGISTERED;
         slot->resolve_prio = INT16_MIN;
         slot->resolve_seq = 0;
-        slot->resolve_asset_idx = 0;
+        slot->resolve_asset_idx = UINT16_MAX;
     }
 
     /* D.2: Single pass over assets -- O(A) via slot_map lookup */
@@ -452,6 +452,7 @@ void nt_resource_step(void) {
             slot->state = NT_ASSET_STATE_READY;
             slot->resolve_prio = prio;
             slot->resolve_seq = seq;
+            NT_ASSERT(ai <= UINT16_MAX && "asset index exceeds uint16 -- raise resolve_asset_idx to uint32");
             slot->resolve_asset_idx = (uint16_t)ai;
         }
     }
@@ -640,11 +641,8 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
         return NT_ERR_INVALID_ARG;
     }
 
-    /* Validate version */
-    if (h->version > NT_PACK_VERSION_MAX) {
-        NT_LOG_ERROR("unsupported version");
-        return NT_ERR_INVALID_ARG;
-    }
+    /* Validate version -- no backwards compat, packs must match exactly */
+    NT_ASSERT(h->version == NT_PACK_VERSION && "pack version mismatch -- rebuild packs");
 
     /* Validate header_size */
     if (h->header_size > blob_size) {

@@ -439,7 +439,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         uint32_t meta_section_start = meta_section_start_databuf;
         if (meta_section_start > ctx->data_size) {
             uint8_t zeros[4] = {0};
-            nt_builder_append_data(ctx, zeros, meta_section_start - ctx->data_size);
+            NT_BUILD_ASSERT(nt_builder_append_data(ctx, zeros, meta_section_start - ctx->data_size) == NT_BUILD_OK);
         }
 
         /* Write each meta entry: NtMetaEntryHeader + payload */
@@ -459,13 +459,12 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             mh.resource_id = me->resource_id;
             mh.kind = me->kind;
             mh.size = me->size;
-            nt_builder_append_data(ctx, &mh, (uint32_t)sizeof(NtMetaEntryHeader));
-
-            nt_builder_append_data(ctx, me->data, me->size);
+            NT_BUILD_ASSERT(nt_builder_append_data(ctx, &mh, (uint32_t)sizeof(NtMetaEntryHeader)) == NT_BUILD_OK);
+            NT_BUILD_ASSERT(nt_builder_append_data(ctx, me->data, me->size) == NT_BUILD_OK);
             uint32_t padded_size = (me->size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
             if (padded_size > me->size) {
                 uint8_t pad[4] = {0};
-                nt_builder_append_data(ctx, pad, padded_size - me->size);
+                NT_BUILD_ASSERT(nt_builder_append_data(ctx, pad, padded_size - me->size) == NT_BUILD_OK);
             }
         }
     }

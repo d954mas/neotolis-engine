@@ -12,7 +12,6 @@
 /* Magic: ASCII "NPAK" read as uint32_t little-endian = 0x4B41504E */
 #define NT_PACK_MAGIC 0x4B41504E
 #define NT_PACK_VERSION 2
-#define NT_PACK_VERSION_MAX 2
 /*
  * Alignment constants for zero-copy access.
  *

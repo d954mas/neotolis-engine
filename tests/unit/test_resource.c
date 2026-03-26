@@ -13,8 +13,33 @@
 #include "nt_blob_format.h"
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
+#include "core/nt_assert.h"
 #include "unity.h"
 /* clang-format on */
+
+#include <setjmp.h>
+
+/* ---- Assert-catching helper (setjmp/longjmp via hookable nt_assert_handler) ---- */
+
+static jmp_buf s_assert_jmp;
+
+static void test_assert_trap(const char *expr, const char *file, int line) {
+    (void)expr;
+    (void)file;
+    (void)line;
+    longjmp(s_assert_jmp, 1);
+}
+
+#define EXPECT_ASSERT(code)                                                                                                                                                                            \
+    do {                                                                                                                                                                                               \
+        nt_assert_handler = test_assert_trap;                                                                                                                                                          \
+        if (setjmp(s_assert_jmp) == 0) {                                                                                                                                                               \
+            code;                                                                                                                                                                                      \
+            nt_assert_handler = NULL;                                                                                                                                                                  \
+            TEST_FAIL_MESSAGE("Expected NT_ASSERT to fire");                                                                                                                                           \
+        }                                                                                                                                                                                              \
+        nt_assert_handler = NULL;                                                                                                                                                                      \
+    } while (0)
 
 /* ---- Test blob builder ---- */
 
@@ -157,9 +182,10 @@ void test_parse_bad_version(void) {
 
     NtPackHeader *h = (NtPackHeader *)blob;
     h->version = 99;
+    /* Recompute CRC after changing version */
+    h->checksum = nt_crc32(blob + h->header_size, blob_size - h->header_size);
 
-    nt_result_t r = nt_resource_parse_pack(pack_id, blob, blob_size);
-    TEST_ASSERT_EQUAL(NT_ERR_INVALID_ARG, r);
+    EXPECT_ASSERT(nt_resource_parse_pack(pack_id, blob, blob_size));
     free(blob);
 }
 
