@@ -401,9 +401,9 @@ void test_missing_position_attribute_errors(void) {
     const char *pack_path = TMP_DIR "/no_pos.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
-    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
 
-    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
+    /* Eager decode: validation fires in add_mesh, not finish_pack */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1}));
 }
 
 void test_empty_shader_errors(void) {
@@ -415,6 +415,8 @@ void test_empty_shader_errors(void) {
     TEST_ASSERT_NOT_NULL(ctx);
     nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
+    /* Empty shader: add_shader succeeds (stores empty resolved text),
+     * encode_shader fails validation during finish_pack */
     EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
 }
 
@@ -1270,9 +1272,9 @@ void test_include_missing_file_errors(void) {
     const char *pack_path = TMP_DIR "/inc_missing.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
-    nt_builder_add_shader(ctx, TMP_DIR "/missing_inc.vert", NT_BUILD_SHADER_VERTEX);
 
-    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
+    /* Eager decode: include resolution fails in add_shader */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_add_shader(ctx, TMP_DIR "/missing_inc.vert", NT_BUILD_SHADER_VERTEX));
 }
 
 void test_include_depth_limit(void) {
@@ -1289,9 +1291,8 @@ void test_include_depth_limit(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_builder_add_shader(ctx, TMP_DIR "/depth_main.vert", NT_BUILD_SHADER_VERTEX);
-
-    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
+    /* Eager decode: depth limit fires in add_shader */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_add_shader(ctx, TMP_DIR "/depth_main.vert", NT_BUILD_SHADER_VERTEX));
 }
 
 void test_asset_root_include(void) {
@@ -1645,9 +1646,8 @@ void test_add_mesh_by_name_not_found(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_name = "NonExistent"});
-
-    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
+    /* Eager decode: mesh name lookup fails in add_mesh */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_name = "NonExistent"}));
 }
 
 void test_add_mesh_by_index_out_of_range(void) {
@@ -1659,9 +1659,9 @@ void test_add_mesh_by_index_out_of_range(void) {
     const char *pack_path = TMP_DIR "/index_oor.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
-    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_index = 99, .use_mesh_index = true});
 
-    EXPECT_BUILD_ASSERT(ctx, nt_builder_finish_pack(ctx));
+    /* Eager decode: index validation fails in add_mesh */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_index = 99, .use_mesh_index = true}));
 }
 
 void test_add_mesh_resource_name_override(void) {
