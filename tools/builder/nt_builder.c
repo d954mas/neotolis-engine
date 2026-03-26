@@ -1,5 +1,6 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
+#include "cgltf.h"
 #include "hash/nt_hash.h"
 #include "nt_crc32.h"
 #include "time/nt_time.h"
@@ -154,6 +155,10 @@ static void nt_builder_free_entry(NtBuildEntry *entry) {
     free(entry->path);
     free(entry->rename_key);
     nt_builder_free_entry_data(entry);
+    if (entry->resolved_owned) {
+        free(entry->resolved_data);
+    }
+    entry->resolved_data = NULL;
     entry->path = NULL;
     entry->rename_key = NULL;
 }
@@ -183,6 +188,10 @@ void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asse
     entry->resource_id = resource_id;
     entry->kind = kind;
     entry->data = data;
+    entry->resolved_data = NULL;
+    entry->resolved_size = 0;
+    entry->resolved_owned = false;
+    entry->dedup_original = -1;
 }
 
 /* --- Core pack writer --- */
@@ -351,6 +360,203 @@ void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled) {
 
 void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx); }
 
+/* --- Early dedup: resolve raw bytes and compare opts (Phase 38) --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void resolve_entry(NtBuildEntry *pe) {
+    switch (pe->kind) {
+    case NT_BUILD_ASSET_MESH: {
+        NtBuildMeshData *md = (NtBuildMeshData *)pe->data;
+        const char *file_path = md->file_path ? md->file_path : pe->path;
+        pe->resolved_data = (uint8_t *)nt_builder_read_file(file_path, &pe->resolved_size);
+        pe->resolved_owned = true;
+        NT_BUILD_ASSERT(pe->resolved_data && "resolve: failed to read mesh file");
+        break;
+    }
+    case NT_BUILD_ASSET_TEXTURE: {
+        pe->resolved_data = (uint8_t *)nt_builder_read_file(pe->path, &pe->resolved_size);
+        pe->resolved_owned = true;
+        NT_BUILD_ASSERT(pe->resolved_data && "resolve: failed to read texture file");
+        break;
+    }
+    case NT_BUILD_ASSET_SHADER: {
+        pe->resolved_data = (uint8_t *)nt_builder_read_file(pe->path, &pe->resolved_size);
+        pe->resolved_owned = true;
+        NT_BUILD_ASSERT(pe->resolved_data && "resolve: failed to read shader file");
+        break;
+    }
+    case NT_BUILD_ASSET_BLOB: {
+        NtBuildBlobData *bd = (NtBuildBlobData *)pe->data;
+        pe->resolved_data = (uint8_t *)bd->data;
+        pe->resolved_size = bd->size;
+        pe->resolved_owned = false;
+        break;
+    }
+    case NT_BUILD_ASSET_SCENE_MESH: {
+        NtBuildSceneMeshData *smd = (NtBuildSceneMeshData *)pe->data;
+        cgltf_data *gltf = (cgltf_data *)smd->scene->_internal;
+        if (gltf->buffers_count > 0 && gltf->buffers[0].data != NULL) {
+            pe->resolved_data = (uint8_t *)gltf->buffers[0].data;
+            pe->resolved_size = (uint32_t)gltf->buffers[0].size;
+        } else {
+            pe->resolved_data = NULL;
+            pe->resolved_size = 0;
+        }
+        pe->resolved_owned = false;
+        break;
+    }
+    case NT_BUILD_ASSET_TEXTURE_MEM: {
+        NtBuildTexMemData *tmd = (NtBuildTexMemData *)pe->data;
+        pe->resolved_data = tmd->data;
+        pe->resolved_size = tmd->size;
+        pe->resolved_owned = false;
+        break;
+    }
+    case NT_BUILD_ASSET_TEXTURE_RAW: {
+        NtBuildTexRawData *trd = (NtBuildTexRawData *)pe->data;
+        pe->resolved_data = trd->pixels;
+        pe->resolved_size = trd->width * trd->height * 4;
+        pe->resolved_owned = false;
+        break;
+    }
+    case NT_BUILD_ASSET_TEXTURE_MEM_COMPRESSED: {
+        NtBuildTexMemCompressedData *tcd = (NtBuildTexMemCompressedData *)pe->data;
+        pe->resolved_data = tcd->data;
+        pe->resolved_size = tcd->size;
+        pe->resolved_owned = false;
+        break;
+    }
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
+    if (a->kind != b->kind) {
+        return false;
+    }
+
+    switch (a->kind) {
+    case NT_BUILD_ASSET_TEXTURE:
+    case NT_BUILD_ASSET_BLOB:
+        return true; /* no opts */
+
+    case NT_BUILD_ASSET_MESH: {
+        const NtBuildMeshData *ma = (const NtBuildMeshData *)a->data;
+        const NtBuildMeshData *mb = (const NtBuildMeshData *)b->data;
+        if (ma->stream_count != mb->stream_count) {
+            return false;
+        }
+        if (ma->tangent_mode != mb->tangent_mode) {
+            return false;
+        }
+        if (ma->mesh_index != mb->mesh_index) {
+            return false;
+        }
+        /* NULL-safe mesh_name comparison */
+        if (ma->mesh_name != NULL && mb->mesh_name != NULL) {
+            if (strcmp(ma->mesh_name, mb->mesh_name) != 0) {
+                return false;
+            }
+        } else if (ma->mesh_name != mb->mesh_name) {
+            return false; /* one NULL, one not */
+        }
+        for (uint32_t s = 0; s < ma->stream_count; s++) {
+            if (ma->layout[s].type != mb->layout[s].type) {
+                return false;
+            }
+            if (ma->layout[s].count != mb->layout[s].count) {
+                return false;
+            }
+            if (ma->layout[s].normalized != mb->layout[s].normalized) {
+                return false;
+            }
+            /* NULL-safe gltf_name comparison */
+            const char *ga = ma->layout[s].gltf_name;
+            const char *gb = mb->layout[s].gltf_name;
+            if (ga != NULL && gb != NULL) {
+                if (strcmp(ga, gb) != 0) {
+                    return false;
+                }
+            } else if (ga != gb) {
+                return false; /* one NULL, one not */
+            }
+        }
+        return true;
+    }
+
+    case NT_BUILD_ASSET_SHADER: {
+        const NtBuildShaderData *sa = (const NtBuildShaderData *)a->data;
+        const NtBuildShaderData *sb = (const NtBuildShaderData *)b->data;
+        return sa->stage == sb->stage;
+    }
+
+    case NT_BUILD_ASSET_SCENE_MESH: {
+        const NtBuildSceneMeshData *sa = (const NtBuildSceneMeshData *)a->data;
+        const NtBuildSceneMeshData *sb = (const NtBuildSceneMeshData *)b->data;
+        if (sa->mesh_index != sb->mesh_index) {
+            return false;
+        }
+        if (sa->primitive_index != sb->primitive_index) {
+            return false;
+        }
+        if (sa->stream_count != sb->stream_count) {
+            return false;
+        }
+        if (sa->tangent_mode != sb->tangent_mode) {
+            return false;
+        }
+        for (uint32_t s = 0; s < sa->stream_count; s++) {
+            if (sa->layout[s].type != sb->layout[s].type) {
+                return false;
+            }
+            if (sa->layout[s].count != sb->layout[s].count) {
+                return false;
+            }
+            if (sa->layout[s].normalized != sb->layout[s].normalized) {
+                return false;
+            }
+            const char *ga = sa->layout[s].gltf_name;
+            const char *gb = sb->layout[s].gltf_name;
+            if (ga != NULL && gb != NULL) {
+                if (strcmp(ga, gb) != 0) {
+                    return false;
+                }
+            } else if (ga != gb) {
+                return false; /* one NULL, one not */
+            }
+        }
+        return true;
+    }
+
+    case NT_BUILD_ASSET_TEXTURE_MEM: {
+        const NtBuildTexMemData *ta = (const NtBuildTexMemData *)a->data;
+        const NtBuildTexMemData *tb = (const NtBuildTexMemData *)b->data;
+        return memcmp(&ta->opts, &tb->opts, sizeof(nt_tex_opts_t)) == 0;
+    }
+
+    case NT_BUILD_ASSET_TEXTURE_RAW: {
+        const NtBuildTexRawData *ta = (const NtBuildTexRawData *)a->data;
+        const NtBuildTexRawData *tb = (const NtBuildTexRawData *)b->data;
+        if (ta->width != tb->width || ta->height != tb->height) {
+            return false;
+        }
+        return memcmp(&ta->opts, &tb->opts, sizeof(nt_tex_opts_t)) == 0;
+    }
+
+    case NT_BUILD_ASSET_TEXTURE_MEM_COMPRESSED: {
+        const NtBuildTexMemCompressedData *ta = (const NtBuildTexMemCompressedData *)a->data;
+        const NtBuildTexMemCompressedData *tb = (const NtBuildTexMemCompressedData *)b->data;
+        if (memcmp(&ta->opts, &tb->opts, sizeof(nt_tex_opts_t)) != 0) {
+            return false;
+        }
+        return ta->compress.mode == tb->compress.mode && ta->compress.quality == tb->compress.quality && ta->compress.rdo_quality == tb->compress.rdo_quality;
+    }
+
+    default:
+        return false;
+    }
+}
+
 /* --- Finish: import all deferred entries, write pack --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -358,14 +564,97 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx && "finish_pack called with NULL context");
     NT_BUILD_ASSERT(ctx->pending_count > 0 && "finish_pack called with no assets added");
 
-    /* Phase 1: Import all deferred assets (crash on first failure) */
+    /* Phase 0: Resolve raw source bytes for early dedup comparison (Phase 38) */
     NT_LOG_INFO("Importing %u assets...", ctx->pending_count);
     double t_import_start = nt_time_now();
     double import_times[NT_BUILD_MAX_ASSETS];
     memset(import_times, 0, sizeof(import_times));
 
+    double t_resolve_start = nt_time_now();
+    for (uint32_t i = 0; i < ctx->pending_count; i++) {
+        resolve_entry(&ctx->pending[i]);
+    }
+
+    /* Phase 0.5: Early dedup -- O(n^2) comparison of kind + raw bytes + opts (D-05) */
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
+        if (pe->dedup_original >= 0) {
+            continue;
+        }
+        for (uint32_t j = i + 1; j < ctx->pending_count; j++) {
+            NtBuildEntry *candidate = &ctx->pending[j];
+            if (candidate->dedup_original >= 0) {
+                continue;
+            }
+            if (candidate->kind != pe->kind) {
+                continue;
+            }
+            /* Compare raw bytes */
+            if (pe->resolved_size != candidate->resolved_size) {
+                continue;
+            }
+            if (pe->resolved_size > 0 && memcmp(pe->resolved_data, candidate->resolved_data, pe->resolved_size) != 0) {
+                continue;
+            }
+            /* Bytes match -- check opts */
+            if (opts_equal(pe, candidate)) {
+                candidate->dedup_original = (int32_t)i;
+                ctx->early_dedup_count++;
+                NT_LOG_INFO("early dedup: [%u] %s -> [%u] %s", j, candidate->path, i, pe->path);
+            } else if (ctx->dedup_warn_count < NT_BUILD_MAX_ASSETS) {
+                /* Same source bytes but different opts -- record warning (D-10) */
+                ctx->dedup_warn_a[ctx->dedup_warn_count] = i;
+                ctx->dedup_warn_b[ctx->dedup_warn_count] = j;
+                ctx->dedup_warn_count++;
+            }
+        }
+    }
+    double resolve_secs = nt_time_now() - t_resolve_start;
+
+    /* Phase 1: Encode loop -- skip early-deduped entries, register deduped inline */
+    double t_encode_start = nt_time_now();
+    for (uint32_t i = 0; i < ctx->pending_count; i++) {
+        NtBuildEntry *pe = &ctx->pending[i];
+
+        if (pe->dedup_original >= 0) {
+            /* Early-deduped: create entry pointing to original's data.
+             * dedup_original always points to an earlier index (j < i impossible,
+             * since we set candidate->dedup_original = i where i < j), so the
+             * original's entry at entries[pe->dedup_original] is already populated. */
+            uint32_t orig_idx = (uint32_t)pe->dedup_original;
+            NtAssetEntry *orig_entry = &ctx->entries[orig_idx];
+            NtAssetEntry *dup_entry = &ctx->entries[ctx->entry_count];
+            dup_entry->resource_id = pe->resource_id;
+            dup_entry->asset_type = orig_entry->asset_type;
+            dup_entry->format_version = orig_entry->format_version;
+            dup_entry->size = orig_entry->size;
+            dup_entry->offset = orig_entry->offset;
+            dup_entry->meta_offset = UINT32_MAX; /* no meta for deduped entries */
+            dup_entry->_pad = 0;
+            ctx->entry_count++;
+            import_times[i] = 0.0;
+
+            /* Increment type counter for summary accuracy */
+            switch (orig_entry->asset_type) {
+            case NT_ASSET_MESH:
+                ctx->mesh_count++;
+                break;
+            case NT_ASSET_TEXTURE:
+                ctx->texture_count++;
+                break;
+            case NT_ASSET_SHADER_CODE:
+                ctx->shader_count++;
+                break;
+            case NT_ASSET_BLOB:
+                ctx->blob_count++;
+                break;
+            default:
+                break;
+            }
+            continue;
+        }
+
+        /* Normal import (existing switch on pe->kind) */
         NT_LOG_INFO("  [%u/%u] %s", i + 1, ctx->pending_count, pe->path);
         double t_asset_start = nt_time_now();
         nt_build_result_t ret = NT_BUILD_OK;
@@ -413,11 +702,10 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
 
         import_times[i] = nt_time_now() - t_asset_start;
-
         NT_BUILD_ASSERT(ret == NT_BUILD_OK && "asset import failed -- see error above");
     }
-
-    double import_secs = nt_time_now() - t_import_start;
+    NT_BUILD_ASSERT(ctx->entry_count == ctx->pending_count && "entry/pending count mismatch after encode");
+    double encode_secs = nt_time_now() - t_encode_start;
 
     /* Phase 1b: Write meta section to data_buf (appended after asset data).
      * Meta entries grouped by resource_id (D-05), covered by CRC32. */
@@ -568,8 +856,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_LOG_INFO("");
 
     /* Per-asset table */
-    NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "#", "Name", "Type", "Size", "Time");
-    NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "--", "----", "----", "----", "----");
+    NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s %-16s", "#", "Name", "Type", "Size", "Time", "Note");
+    NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s %-16s", "--", "----", "----", "----", "----", "----");
     static const char *kind_names[] = {"MESH", "TEX", "SHADER", "BLOB", "MESH", "TEX|MEM", "TEX|RAW", "TEX|CMP"};
     for (uint32_t i = 0; i < ctx->entry_count; i++) {
         const char *path = (i < ctx->pending_count && ctx->pending[i].path) ? ctx->pending[i].path : "(unknown)";
@@ -595,7 +883,17 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             (void)snprintf(size_str, sizeof(size_str), "%s", raw_str);
         }
 
-        NT_LOG_INFO("  %-4u %-40s %-10s %-24s %.2fs", i, display, type_name, size_str, import_times[i]);
+        /* Note column: early dedup annotation (D-13) */
+        char note_str[32] = "";
+        char time_str[16];
+        if (i < ctx->pending_count && ctx->pending[i].dedup_original >= 0) {
+            (void)snprintf(note_str, sizeof(note_str), "dup #%d (early)", ctx->pending[i].dedup_original);
+            (void)snprintf(time_str, sizeof(time_str), "--");
+        } else {
+            (void)snprintf(time_str, sizeof(time_str), "%.2fs", import_times[i]);
+        }
+
+        NT_LOG_INFO("  %-4u %-40s %-10s %-24s %-8s %s", i, display, type_name, size_str, time_str, note_str);
     }
 
     /* Per-type summary */
@@ -624,14 +922,29 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     if (ctx->meta_count > 0) {
         NT_LOG_INFO("  META:    %u entries", ctx->meta_count);
     }
-    if (ctx->dedup_count > 0) {
-        NT_LOG_INFO("  Dedup:   %u assets (saved %.1fK)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / 1024.0);
+    if (ctx->early_dedup_count > 0) {
+        NT_LOG_INFO("  Early dedup: %u assets (skipped encode)", ctx->early_dedup_count);
     }
+    if (ctx->dedup_count > 0) {
+        NT_LOG_INFO("  Late dedup:  %u assets (saved %.1fK)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / 1024.0);
+    }
+
+    /* Same-source-different-opts warnings (D-10, D-11) */
+    if (ctx->dedup_warn_count > 0) {
+        NT_LOG_INFO("");
+        NT_LOG_INFO("  WARNINGS: %u same-source-different-opts pairs:", ctx->dedup_warn_count);
+        for (uint32_t w = 0; w < ctx->dedup_warn_count; w++) {
+            uint32_t ai = ctx->dedup_warn_a[w];
+            uint32_t bi = ctx->dedup_warn_b[w];
+            NT_LOG_INFO("    [%u] %s  vs  [%u] %s", ai, ctx->pending[ai].path, bi, ctx->pending[bi].path);
+        }
+    }
+
     NT_LOG_INFO("");
     if (ctx->gzip_estimate) {
-        NT_LOG_INFO("  Timing: encode %.1fs | gzip %.1fs | write %.1fs | total %.1fs", import_secs, gzip_secs, write_secs, total_secs);
+        NT_LOG_INFO("  Timing: resolve %.1fs | encode %.1fs | gzip %.1fs | write %.1fs | total %.1fs", resolve_secs, encode_secs, gzip_secs, write_secs, total_secs);
     } else {
-        NT_LOG_INFO("  Timing: encode %.1fs | write %.1fs | total %.1fs (gzip skipped)", import_secs, write_secs, total_secs);
+        NT_LOG_INFO("  Timing: resolve %.1fs | encode %.1fs | write %.1fs | total %.1fs (gzip skipped)", resolve_secs, encode_secs, write_secs, total_secs);
     }
     NT_LOG_INFO("  CRC32:  0x%08X", checksum);
 
