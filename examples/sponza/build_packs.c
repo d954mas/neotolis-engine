@@ -461,7 +461,6 @@ static void populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     /* TODO(#95): enable after builder cache — full pack gzipped: 97MB raw → 72MB basis (-25%) */
     /* nt_tex_compress_opts_t compress = nt_tex_compress_uastc_high(); */
     add_textures(ctx, scene, 0, NULL);
-    add_shaders(ctx);
     add_meshes_and_manifest(ctx, scene, false);
 }
 
