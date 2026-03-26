@@ -932,11 +932,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     /* Same-source-different-opts warnings (D-10, D-11) */
     if (ctx->dedup_warn_count > 0) {
         NT_LOG_INFO("");
-        NT_LOG_INFO("  WARNINGS: %u same-source-different-opts pairs:", ctx->dedup_warn_count);
+        NT_LOG_WARN("  Same source, different opts (%u pairs):", ctx->dedup_warn_count);
         for (uint32_t w = 0; w < ctx->dedup_warn_count; w++) {
             uint32_t ai = ctx->dedup_warn_a[w];
             uint32_t bi = ctx->dedup_warn_b[w];
-            NT_LOG_INFO("    [%u] %s  vs  [%u] %s", ai, ctx->pending[ai].path, bi, ctx->pending[bi].path);
+            NT_LOG_WARN("    %s  vs  %s", ctx->pending[ai].path, ctx->pending[bi].path);
         }
     }
 
