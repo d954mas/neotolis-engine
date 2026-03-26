@@ -240,6 +240,32 @@ jobs:
           test -f build/examples/sponza/wasm-analysis-paired/index_simd.wasm
           echo "Packaged example SIMD artifacts verified"
 
+      - name: Install wabt
+        run: sudo apt-get update && sudo apt-get install -y wabt
+
+      - name: Measure sizes (all examples)
+        run: |
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
+            PRESET=wasm-release-paired bash scripts/size.sh "$example" --json > "/tmp/size_${example}.json"
+          done
+
+      - name: Generate size reports (all examples)
+        run: |
+          source scripts/wasm_examples.sh
+          for example in "${WASM_EXAMPLES[@]}"; do
+            PRESET=wasm-analysis-paired bash scripts/size-report.sh "$example" | tee "/tmp/report_${example}.txt"
+          done
+
+      - name: Upload size data
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-size-data
+          path: |
+            /tmp/size_*.json
+            /tmp/report_*.txt
+          retention-days: 1
+
   native:
     name: Native Build & Test
     runs-on: ubuntu-latest
@@ -353,17 +379,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create LFS file list
-        run: git lfs ls-files --long | cut -d ' ' -f1 | sort > .lfs-assets-id
-
-      - uses: actions/cache@v4
-        with:
-          path: .git/lfs/objects
-          key: lfs-${{ hashFiles('.lfs-assets-id') }}
-
-      - name: Pull LFS files
-        run: git lfs pull
-
       - name: Install dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y clang clang-tidy ninja-build \
@@ -381,26 +396,15 @@ jobs:
       - name: Run clang-tidy
         run: bash scripts/tidy.sh build/_cmake/native-debug
 
-  size-track:
-    name: Track Build Size
+  deploy:
+    name: Deploy
     runs-on: ubuntu-latest
-    needs: native
+    needs: [native, wasm]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-
-      - name: Create LFS file list
-        run: git lfs ls-files --long | cut -d ' ' -f1 | sort > .lfs-assets-id
-
-      - uses: actions/cache@v4
-        with:
-          path: .git/lfs/objects
-          key: lfs-${{ hashFiles('.lfs-assets-id') }}
-
-      - name: Pull LFS files
-        run: git lfs pull
 
       - name: Download textured_quad packs
         uses: actions/download-artifact@v4
@@ -455,29 +459,71 @@ jobs:
           cmake --build --preset wasm-release-simd
           ./scripts/package_all_simd.sh wasm-release-paired wasm-release-simd
 
-      - name: Measure sizes (all examples)
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages-data
+        continue-on-error: true
+
+      - name: Preserve old size chart page
         run: |
-          source scripts/wasm_examples.sh
-          for example in "${WASM_EXAMPLES[@]}"; do
-            PRESET=wasm-release-paired bash scripts/size.sh $example --json > /tmp/size_${example}.json
+          if [ -f "gh-pages-data/index.html" ] && ! [ -d "gh-pages-data/_astro" ]; then
+            mkdir -p gh-pages-data/sizes
+            cp gh-pages-data/index.html gh-pages-data/sizes/index.html
+          fi
+
+      - name: Copy WASM examples to gh-pages
+        run: |
+          for example_dir in build/examples/*/wasm-release-paired; do
+            example_name=$(basename $(dirname "$example_dir"))
+            mkdir -p "gh-pages-data/wasm/$example_name"
+            cp "$example_dir"/*.html "$example_dir"/*.js "$example_dir"/*.wasm "gh-pages-data/wasm/$example_name/"
           done
 
-      - name: Install wabt
-        run: sudo apt-get update && sudo apt-get install -y wabt
-
-      - name: Build WASM analysis paired
+      - name: Copy example cover images
         run: |
-          emcmake cmake --preset wasm-analysis-paired
-          emcmake cmake --preset wasm-analysis-simd
-          cmake --build --preset wasm-analysis-paired
-          cmake --build --preset wasm-analysis-simd
-
-      - name: Generate size reports (all examples)
-        run: |
-          source scripts/wasm_examples.sh
-          for example in "${WASM_EXAMPLES[@]}"; do
-            PRESET=wasm-analysis-paired bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
+          for promo_dir in examples/*/site_promo; do
+            example_name=$(basename $(dirname "$promo_dir"))
+            if [ -f "$promo_dir/cover.png" ]; then
+              mkdir -p "gh-pages-data/examples/$example_name"
+              cp "$promo_dir/cover.png" "gh-pages-data/examples/$example_name/cover.png"
+            fi
           done
+
+      - name: Build promo site
+        run: |
+          cd neotolis-engine-site
+          npm install
+          npm run build
+
+      - name: Copy site to deploy directory
+        run: cp -r neotolis-engine-site/dist/* gh-pages-data/
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy gh-pages-data --project-name=neotolis-engine --branch=main
+
+  persist-sizes:
+    name: Persist Size Data
+    runs-on: ubuntu-latest
+    needs: wasm
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+
+      - name: Download size data
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-size-data
+          path: /tmp
 
       - name: Checkout gh-pages branch
         uses: actions/checkout@v4
@@ -539,149 +585,30 @@ jobs:
             fi
           done
 
-      - name: Preserve old size chart page
-        run: |
-          if [ -f "gh-pages-data/index.html" ] && ! [ -d "gh-pages-data/_astro" ]; then
-            mkdir -p gh-pages-data/sizes
-            cp gh-pages-data/index.html gh-pages-data/sizes/index.html
-          fi
-
-      - name: Copy WASM examples to gh-pages
-        run: |
-          for example_dir in build/examples/*/wasm-release-paired; do
-            example_name=$(basename $(dirname "$example_dir"))
-            mkdir -p "gh-pages-data/wasm/$example_name"
-            cp "$example_dir"/*.html "$example_dir"/*.js "$example_dir"/*.wasm "gh-pages-data/wasm/$example_name/"
-          done
-
-      - name: Copy example cover images
-        run: |
-          for promo_dir in examples/*/site_promo; do
-            example_name=$(basename $(dirname "$promo_dir"))
-            if [ -f "$promo_dir/cover.png" ]; then
-              mkdir -p "gh-pages-data/examples/$example_name"
-              cp "$promo_dir/cover.png" "gh-pages-data/examples/$example_name/cover.png"
-            fi
-          done
-
-      - name: Build promo site
-        run: |
-          cd neotolis-engine-site
-          npm install
-          npm run build
-
-      - name: Copy site to deploy directory
-        run: cp -r neotolis-engine-site/dist/* gh-pages-data/
-
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy gh-pages-data --project-name=neotolis-engine --branch=main
-
-      - name: Prepare size data for persistence
-        run: |
-          mkdir -p /tmp/size-data
-          cp -r gh-pages-data/sizes /tmp/size-data/ 2>/dev/null || true
-          cp -r gh-pages-data/reports /tmp/size-data/ 2>/dev/null || true
-
       - name: Persist size data to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: /tmp/size-data
+          publish_dir: gh-pages-data
           keep_files: true
 
   pr-size-comment:
     name: PR Size Comment
     runs-on: ubuntu-latest
-    needs: native
+    needs: wasm
     if: github.event_name == 'pull_request'
     permissions:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-
-      - name: Create LFS file list
-        run: git lfs ls-files --long | cut -d ' ' -f1 | sort > .lfs-assets-id
-
-      - uses: actions/cache@v4
         with:
-          path: .git/lfs/objects
-          key: lfs-${{ hashFiles('.lfs-assets-id') }}
+          sparse-checkout: scripts
 
-      - name: Pull LFS files
-        run: git lfs pull
-
-      - name: Download textured_quad packs
+      - name: Download size data
         uses: actions/download-artifact@v4
         with:
-          name: tq-packs
-          path: build/examples/textured_quad
-
-      - name: Download sponza packs
-        uses: actions/download-artifact@v4
-        with:
-          name: sponza-packs
-          path: build/examples/sponza
-
-      - name: Read emsdk version
-        id: emsdk-version
-        run: echo "version=$(cat .emsdk-version)" >> $GITHUB_OUTPUT
-
-      - uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: ${{ steps.emsdk-version.outputs.version }}
-          actions-cache-folder: 'emsdk-cache'
-
-      - name: Install wabt
-        run: sudo apt-get update && sudo apt-get install -y wabt
-
-      - name: Build baseline WASM release artifacts
-        run: |
-          emcmake cmake --preset wasm-release
-          cmake --build --preset wasm-release
-
-      - name: Verify baseline WASM release output
-        run: |
-          test -f build/examples/hello/wasm-release/index.html
-          test -f build/examples/hello/wasm-release/index.js
-          test -f build/examples/hello/wasm-release/index.wasm
-          test -f build/engine/wasm-release/libnt_core.a
-          test -f build/engine/wasm-release/libnt_log.a
-          test -f build/engine/wasm-release/libnt_log_stub.a
-          echo "Baseline WASM release build verified"
-
-      - name: Run baseline WASM smoke test (release)
-        run: node tests/wasm/smoke_test.js wasm-release
-
-      - name: Run baseline WASM release ctest
-        run: ctest --preset wasm-release
-
-      - name: Build paired WASM release artifacts
-        run: ./scripts/build_wasm_paired.sh wasm-release-paired
-
-      - name: Measure sizes (all examples)
-        run: |
-          source scripts/wasm_examples.sh
-          for example in "${WASM_EXAMPLES[@]}"; do
-            PRESET=wasm-release-paired bash scripts/size.sh $example --json > /tmp/size_${example}.json
-          done
-
-      - name: Build WASM analysis paired
-        run: |
-          emcmake cmake --preset wasm-analysis-paired
-          emcmake cmake --preset wasm-analysis-simd
-          cmake --build --preset wasm-analysis-paired
-          cmake --build --preset wasm-analysis-simd
-
-      - name: Generate size reports (all examples)
-        run: |
-          source scripts/wasm_examples.sh
-          for example in "${WASM_EXAMPLES[@]}"; do
-            PRESET=wasm-analysis-paired bash scripts/size-report.sh $example | tee /tmp/report_${example}.txt
-          done
+          name: wasm-size-data
+          path: /tmp
 
       - name: Fetch baseline from gh-pages
         id: baseline
