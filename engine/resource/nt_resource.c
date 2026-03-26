@@ -503,6 +503,7 @@ static nt_resource_t slot_alloc(uint64_t resource_id, uint8_t asset_type) {
     slot->runtime_handle = 0;
     slot->resolve_prio = INT16_MIN;
     slot->resolve_seq = 0;
+    slot->resolve_asset_idx = UINT16_MAX;
     slot->asset_type = asset_type;
     slot->state = NT_ASSET_STATE_REGISTERED;
 
