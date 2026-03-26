@@ -49,10 +49,9 @@ static nt_build_result_t nt_parse_gltf_mesh(const char *path, const char *mesh_n
 
     result = cgltf_load_buffers(&options, *out_data, path);
     if (result != cgltf_result_success) {
-        NT_LOG_ERROR("%s: failed to load glTF buffers (cgltf error %d)", path, (int)result);
         cgltf_free(*out_data);
         *out_data = NULL;
-        return NT_BUILD_ERR_IO;
+        NT_BUILD_ASSERT(0 && "failed to load glTF buffers");
     }
 
     result = cgltf_validate(*out_data);
@@ -217,10 +216,7 @@ static nt_build_result_t nt_extract_vertex_streams(const char *path, const cgltf
 
         cgltf_size float_count = (cgltf_size)vertex_count * (cgltf_size)layout[s].count;
         stream_floats[s] = (float *)calloc(float_count, sizeof(float));
-        if (!stream_floats[s]) {
-            NT_LOG_ERROR("%s: failed to allocate float buffer for %s", path, layout[s].gltf_name ? layout[s].gltf_name : "(null)");
-            return NT_BUILD_ERR_IO;
-        }
+        NT_BUILD_ASSERT(stream_floats[s] && "failed to allocate float buffer for vertex stream");
 
         cgltf_size unpacked = cgltf_accessor_unpack_floats(acc, stream_floats[s], float_count);
         if (unpacked == 0) {
@@ -280,9 +276,7 @@ nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uin
 
     uint32_t vertex_data_size = 0;
     uint8_t *vertex_buf = nt_interleave_vertices(layout, stream_count, stream_floats, vertex_count, vertex_stride, &vertex_data_size);
-    if (!vertex_buf) {
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(vertex_buf && "interleave_vertices alloc failed");
 
     NtMeshAssetHeader mesh_hdr;
     memset(&mesh_hdr, 0, sizeof(mesh_hdr));
@@ -314,8 +308,8 @@ nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uin
     uint8_t *buf = (uint8_t *)malloc(total);
     if (!buf) {
         free(vertex_buf);
-        return NT_BUILD_ERR_IO;
     }
+    NT_BUILD_ASSERT(buf && "mesh buffer alloc failed");
 
     uint32_t off = 0;
     memcpy(buf + off, &mesh_hdr, sizeof(NtMeshAssetHeader));
@@ -390,10 +384,7 @@ nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout 
             }
 
             index_buf = (uint8_t *)calloc(index_data_size, 1);
-            if (!index_buf) {
-                ret = NT_BUILD_ERR_IO;
-                goto cleanup_streams;
-            }
+            NT_BUILD_ASSERT(index_buf && "index buffer alloc failed");
 
             size_t idx_elem_size = (index_type == 1) ? sizeof(uint16_t) : sizeof(uint32_t);
             cgltf_accessor_unpack_indices(prim->indices, index_buf, idx_elem_size, index_count);

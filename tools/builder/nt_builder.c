@@ -45,7 +45,7 @@ static void nt_builder_free_entry(NtBuildEntry *entry) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data) {
+void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data, uint8_t *decoded_data, uint32_t decoded_size) {
     NT_BUILD_ASSERT(ctx && "ctx is NULL");
     NT_BUILD_ASSERT(path && "path is NULL");
 
@@ -69,8 +69,8 @@ void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asse
     entry->resource_id = resource_id;
     entry->kind = kind;
     entry->data = data;
-    entry->decoded_data = NULL;
-    entry->decoded_size = 0;
+    entry->decoded_data = decoded_data;
+    entry->decoded_size = decoded_size;
     entry->dedup_original = -1;
 }
 
@@ -106,10 +106,7 @@ nt_build_result_t nt_builder_append_data(NtBuilderContext *ctx, const void *data
     while (ctx->data_size + size > ctx->data_capacity) {
         uint32_t new_capacity = ctx->data_capacity > 0 ? ctx->data_capacity * 2 : NT_BUILD_INITIAL_CAPACITY;
         uint8_t *new_buf = (uint8_t *)realloc(ctx->data_buf, new_capacity);
-        if (!new_buf) {
-            NT_LOG_ERROR("Failed to grow data buffer to %u bytes", new_capacity);
-            return NT_BUILD_ERR_IO;
-        }
+        NT_BUILD_ASSERT(new_buf && "append_data: realloc failed");
         ctx->data_buf = new_buf;
         ctx->data_capacity = new_capacity;
     }
@@ -522,10 +519,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     double t_write_start = nt_time_now();
 
     FILE *file = fopen(ctx->output_path, "wb");
-    if (!file) {
-        NT_LOG_ERROR("Cannot open output file: %s", ctx->output_path);
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(file && "finish_pack: cannot open output file");
 
     bool write_ok = true;
     write_ok = write_ok && (fwrite(&header, sizeof(header), 1, file) == 1);
@@ -546,9 +540,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     double write_secs = nt_time_now() - t_write_start;
 
     if (!write_ok) {
-        NT_LOG_ERROR("Failed to write pack file");
         (void)remove(ctx->output_path);
-        return NT_BUILD_ERR_IO;
+        NT_BUILD_ASSERT(0 && "finish_pack: failed to write pack file");
     }
 
     /* Generate codegen header (.h with ASSET_* constants) */
@@ -683,10 +676,7 @@ void nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const nt_mesh_
     free(resolved_path);
     NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_mesh: decode failed");
 
-    nt_builder_add_entry(ctx, logical_path, NT_BUILD_ASSET_MESH, NULL);
-    NtBuildEntry *e = &ctx->pending[ctx->pending_count - 1];
-    e->decoded_data = mesh_data;
-    e->decoded_size = mesh_size;
+    nt_builder_add_entry(ctx, logical_path, NT_BUILD_ASSET_MESH, NULL, mesh_data, mesh_size);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -721,10 +711,7 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path) {
     td->has_compress = false;
 
     /* Add entry with kind=TEXTURE */
-    nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_TEXTURE, td);
-    NtBuildEntry *e = &ctx->pending[ctx->pending_count - 1];
-    e->decoded_data = pixels;
-    e->decoded_size = w * h * 4;
+    nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_TEXTURE, td, pixels, w * h * 4);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -749,10 +736,7 @@ void nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_sha
     NT_BUILD_ASSERT(sd && "add_shader: alloc failed");
     sd->stage = stage;
 
-    nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_SHADER, sd);
-    NtBuildEntry *e = &ctx->pending[ctx->pending_count - 1];
-    e->decoded_data = (uint8_t *)resolved;
-    e->decoded_size = resolved_len;
+    nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_SHADER, sd, (uint8_t *)resolved, resolved_len);
 }
 
 /* --- Public add_blob --- */
@@ -773,10 +757,7 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
     memcpy(copy, &blob_hdr, sizeof(NtBlobAssetHeader));
     memcpy(copy + sizeof(NtBlobAssetHeader), data, size);
 
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_BLOB, NULL);
-    NtBuildEntry *e = &ctx->pending[ctx->pending_count - 1];
-    e->decoded_data = copy;
-    e->decoded_size = total_size;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_BLOB, NULL, copy, total_size);
 }
 
 /* --- Public add_texture_from_memory --- */
@@ -802,10 +783,7 @@ void nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, const uint8_t 
     }
     td->has_compress = false;
 
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, td);
-    NtBuildEntry *e = &ctx->pending[ctx->pending_count - 1];
-    e->decoded_data = pixels;
-    e->decoded_size = w * h * 4;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, td, pixels, w * h * 4);
 }
 
 void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id) {
@@ -835,10 +813,7 @@ void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixel
     }
     td->has_compress = false;
 
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, td);
-    NtBuildEntry *e = &ctx->pending[ctx->pending_count - 1];
-    e->decoded_data = pixels;
-    e->decoded_size = w * h * 4;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, td, pixels, w * h * 4);
 }
 
 /* --- Public add_texture_from_memory_compressed --- */
@@ -872,10 +847,7 @@ void nt_builder_add_texture_from_memory_compressed(NtBuilderContext *ctx, const 
     td->has_compress = true;
     td->compress = *compress_opts;
 
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, td);
-    NtBuildEntry *e = &ctx->pending[ctx->pending_count - 1];
-    e->decoded_data = pixels;
-    e->decoded_size = w * h * 4;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, td, pixels, w * h * 4);
 }
 
 nt_build_result_t nt_builder_add_asset_root(NtBuilderContext *ctx, const char *path) {

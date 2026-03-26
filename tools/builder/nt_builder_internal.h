@@ -266,7 +266,7 @@ static inline void nt_builder_pack_to_header_path(const char *pack_path, char *h
 }
 
 /* Deferred entry addition (shared between add_* and scene_mesh) */
-void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data);
+void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data, uint8_t *decoded_data, uint32_t decoded_size);
 
 /* Codegen: generate .h header with ASSET_* constants */
 nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);

@@ -64,6 +64,7 @@ static uint8_t *strip_channels(const uint8_t *rgba, uint32_t pixel_count, uint32
 
 /* --- Decode: image data -> RGBA pixels (eager, called from add_*) --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h) {
     if (!src_data || src_size == 0 || !out_pixels || !out_w || !out_h) {
         return NT_BUILD_ERR_VALIDATION;
@@ -73,10 +74,7 @@ nt_build_result_t nt_builder_decode_texture(const uint8_t *src_data, uint32_t sr
     int h = 0;
     int channels = 0;
     unsigned char *pixels = stbi_load_from_memory(src_data, (int)src_size, &w, &h, &channels, 4);
-    if (!pixels) {
-        NT_LOG_ERROR("texture decode: %s", stbi_failure_reason());
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(pixels && "texture decode: stbi_load_from_memory failed");
 
     if ((uint32_t)w > NT_BUILD_MAX_TEXTURE_SIZE || (uint32_t)h > NT_BUILD_MAX_TEXTURE_SIZE) {
         NT_LOG_ERROR("texture decode: %ux%u exceeds max %u", (uint32_t)w, (uint32_t)h, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
@@ -90,7 +88,7 @@ nt_build_result_t nt_builder_decode_texture(const uint8_t *src_data, uint32_t sr
     unsigned char *resized = resize_if_needed(pixels, w, h, max_size, &rw, &rh);
     if (max_size > 0 && !resized && ((uint32_t)w > max_size || (uint32_t)h > max_size)) {
         stbi_image_free(pixels);
-        return NT_BUILD_ERR_IO;
+        NT_BUILD_ASSERT(0 && "texture decode: resize_if_needed alloc failed");
     }
 
     if (resized) {
@@ -105,6 +103,7 @@ nt_build_result_t nt_builder_decode_texture(const uint8_t *src_data, uint32_t sr
     return NT_BUILD_OK;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h) {
     if (!rgba_pixels || width == 0 || height == 0 || !out_pixels || !out_w || !out_h) {
         return NT_BUILD_ERR_VALIDATION;
@@ -120,7 +119,7 @@ nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint
     int rh = 0;
     unsigned char *resized = resize_if_needed(rgba_pixels, (int)width, (int)height, max_size, &rw, &rh);
     if (max_size > 0 && !resized && (width > max_size || height > max_size)) {
-        return NT_BUILD_ERR_IO;
+        NT_BUILD_ASSERT(0 && "texture raw: resize_if_needed alloc failed");
     }
 
     if (resized) {
@@ -129,9 +128,7 @@ nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint
         /* Always return a malloc'd copy (caller owns) */
         uint32_t data_size = width * height * 4;
         uint8_t *copy = (uint8_t *)malloc(data_size);
-        if (!copy) {
-            return NT_BUILD_ERR_IO;
-        }
+        NT_BUILD_ASSERT(copy && "texture raw: malloc failed");
         memcpy(copy, rgba_pixels, data_size);
         *out_pixels = copy;
     }
@@ -152,9 +149,7 @@ nt_build_result_t nt_builder_encode_texture(NtBuilderContext *ctx, const uint8_t
     const uint8_t *final_data;
     if (bpp < 4) {
         stripped = strip_channels(rgba_pixels, pixel_count, bpp);
-        if (!stripped) {
-            return NT_BUILD_ERR_IO;
-        }
+        NT_BUILD_ASSERT(stripped && "texture encode: strip_channels alloc failed");
         final_data = stripped;
     } else {
         final_data = rgba_pixels;
@@ -207,10 +202,7 @@ nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, co
     bool uastc = (compress_opts->mode == NT_TEX_COMPRESS_UASTC);
     nt_basisu_encode_result_t enc = nt_basisu_encode(rgba_pixels, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->rdo_quality, true);
 
-    if (!enc.data) {
-        NT_LOG_ERROR("Basis encode failed (%ux%u, %s)", width, height, uastc ? "UASTC" : "ETC1S");
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(enc.data && "texture encode: Basis encode failed");
 
     /* Write v2 header */
     NtTextureAssetHeaderV2 tex_hdr;

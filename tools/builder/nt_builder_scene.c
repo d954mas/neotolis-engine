@@ -37,9 +37,8 @@ nt_build_result_t nt_builder_parse_glb_scene(nt_glb_scene_t *scene, const char *
 
     result = cgltf_load_buffers(&options, data, path);
     if (result != cgltf_result_success) {
-        NT_LOG_ERROR("%s: failed to load glTF buffers (cgltf error %d)", path, (int)result);
         cgltf_free(data);
-        return NT_BUILD_ERR_IO;
+        NT_BUILD_ASSERT(0 && "failed to load glTF buffers");
     }
 
     result = cgltf_validate(data);
@@ -161,10 +160,7 @@ void nt_builder_add_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scen
     nt_build_result_t r = nt_builder_decode_scene_mesh(scene, mesh_index, primitive_index, opts->layout, opts->stream_count, opts->tangent_mode, &mesh_data, &mesh_size);
     NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_scene_mesh: decode failed");
 
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_MESH, NULL);
-    NtBuildEntry *e = &ctx->pending[ctx->pending_count - 1];
-    e->decoded_data = mesh_data;
-    e->decoded_size = mesh_size;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_MESH, NULL, mesh_data, mesh_size);
 }
 
 /* --- Decode: scene mesh -> binary mesh buffer (eager, called from add_scene_mesh) --- */
@@ -282,10 +278,7 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
 
         cgltf_size float_count = (cgltf_size)count * (cgltf_size)layout[s].count;
         stream_floats[s] = (float *)calloc(float_count, sizeof(float));
-        if (!stream_floats[s]) {
-            ret = NT_BUILD_ERR_IO;
-            goto cleanup_streams;
-        }
+        NT_BUILD_ASSERT(stream_floats[s] && "scene mesh: float buffer alloc failed");
 
         cgltf_size unpacked = cgltf_accessor_unpack_floats(acc, stream_floats[s], float_count);
         if (unpacked == 0) {
@@ -329,10 +322,7 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
             }
 
             index_buf = (uint8_t *)calloc(index_data_size, 1);
-            if (!index_buf) {
-                ret = NT_BUILD_ERR_IO;
-                goto cleanup_streams;
-            }
+            NT_BUILD_ASSERT(index_buf && "scene mesh: index buffer alloc failed");
 
             size_t idx_elem_size = (index_type == 1) ? sizeof(uint16_t) : sizeof(uint32_t);
             cgltf_accessor_unpack_indices(prim->indices, index_buf, idx_elem_size, index_count);
@@ -371,11 +361,7 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
             uint32_t mikk_index_count = index_count;
             if (index_count > 0) {
                 idx32 = (uint32_t *)calloc(index_count, sizeof(uint32_t));
-                if (!idx32) {
-                    free(index_buf);
-                    ret = NT_BUILD_ERR_IO;
-                    goto cleanup_streams;
-                }
+                NT_BUILD_ASSERT(idx32 && "scene mesh: tangent idx32 alloc failed");
                 if (index_type == 1) {
                     const uint16_t *idx16 = (const uint16_t *)index_buf;
                     for (uint32_t i = 0; i < index_count; i++) {
@@ -388,23 +374,14 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
                 /* No indices -- generate sequential */
                 mikk_index_count = vertex_count;
                 idx32 = (uint32_t *)calloc(vertex_count, sizeof(uint32_t));
-                if (!idx32) {
-                    free(index_buf);
-                    ret = NT_BUILD_ERR_IO;
-                    goto cleanup_streams;
-                }
+                NT_BUILD_ASSERT(idx32 && "scene mesh: tangent sequential idx32 alloc failed");
                 for (uint32_t i = 0; i < vertex_count; i++) {
                     idx32[i] = i;
                 }
             }
 
             stream_floats[tangent_stream_idx] = (float *)calloc((size_t)vertex_count * 4, sizeof(float));
-            if (!stream_floats[tangent_stream_idx]) {
-                free(idx32);
-                free(index_buf);
-                ret = NT_BUILD_ERR_IO;
-                goto cleanup_streams;
-            }
+            NT_BUILD_ASSERT(stream_floats[tangent_stream_idx] && "scene mesh: tangent output alloc failed");
 
             ret = nt_builder_compute_tangents(pos_data, norm_data, uv_data, idx32, vertex_count, mikk_index_count, stream_floats[tangent_stream_idx]);
             free(idx32);
@@ -417,11 +394,7 @@ nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint
         /* Handle TANGENT_NONE: fill with zero */
         if (tangent_stream_idx >= 0 && tangent_mode == NT_TANGENT_NONE) {
             stream_floats[tangent_stream_idx] = (float *)calloc((size_t)vertex_count * layout[tangent_stream_idx].count, sizeof(float));
-            if (!stream_floats[tangent_stream_idx]) {
-                free(index_buf);
-                ret = NT_BUILD_ERR_IO;
-                goto cleanup_streams;
-            }
+            NT_BUILD_ASSERT(stream_floats[tangent_stream_idx] && "scene mesh: tangent zero-fill alloc failed");
         }
 
         /* Build final mesh buffer */

@@ -237,9 +237,7 @@ nt_build_result_t nt_builder_encode_shader(NtBuilderContext *ctx, const uint8_t 
     }
 
     char *stripped = (char *)malloc((size_t)text_len + 1);
-    if (!stripped) {
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(stripped && "shader encode: malloc failed");
 
     uint32_t stripped_len = 0;
     strip_comments((const char *)resolved_text, text_len, stripped, &stripped_len);
