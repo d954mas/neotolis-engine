@@ -149,6 +149,8 @@ void nt_extract_aabb(const cgltf_primitive *prim, float out_min[3], float out_ma
         return;
     }
 
+    NT_BUILD_ASSERT(pos_acc->type == cgltf_type_vec3 && "POSITION accessor must be VEC3");
+
     if (pos_acc->has_min && pos_acc->has_max) {
         /* Fast path: use pre-computed bounds from glTF exporter */
         for (int i = 0; i < 3; i++) {
@@ -162,7 +164,7 @@ void nt_extract_aabb(const cgltf_primitive *prim, float out_min[3], float out_ma
     out_min[0] = out_min[1] = out_min[2] = FLT_MAX;
     out_max[0] = out_max[1] = out_max[2] = -FLT_MAX;
 
-    float tmp[3];
+    float tmp[3] = {0};
     for (cgltf_size v = 0; v < pos_acc->count; v++) {
         cgltf_accessor_read_float(pos_acc, v, tmp, 3);
         for (int i = 0; i < 3; i++) {

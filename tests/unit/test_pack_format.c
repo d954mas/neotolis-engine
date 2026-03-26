@@ -14,7 +14,7 @@ void tearDown(void) {}
 
 /* --- Pack header struct size tests --- */
 
-void test_pack_header_size(void) { TEST_ASSERT_EQUAL_UINT(28, sizeof(NtPackHeader)); }
+void test_pack_header_size(void) { TEST_ASSERT_EQUAL_UINT(32, sizeof(NtPackHeader)); }
 
 void test_asset_entry_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtAssetEntry)); }
 

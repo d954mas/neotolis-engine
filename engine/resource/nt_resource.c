@@ -930,12 +930,13 @@ const void *nt_resource_get_meta(nt_resource_t handle, uint64_t kind, uint32_t *
         }
 
         uint32_t payload_offset = scan_offset + (uint32_t)sizeof(NtMetaEntryHeader);
-        uint32_t padded_size = (mh.size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+
+        /* Guard against corrupted mh.size causing overflow/infinite loop */
+        if (mh.size > pack->meta_size || payload_offset + mh.size > pack->meta_size) {
+            return NULL; /* corrupt */
+        }
 
         if (mh.kind == kind) {
-            if (payload_offset + mh.size > pack->meta_size) {
-                return NULL; /* corrupt */
-            }
             if (out_size) {
                 *out_size = mh.size;
             }
@@ -943,6 +944,7 @@ const void *nt_resource_get_meta(nt_resource_t handle, uint64_t kind, uint32_t *
         }
 
         /* Move to next entry */
+        uint32_t padded_size = (mh.size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
         scan_offset = payload_offset + padded_size;
     }
 
