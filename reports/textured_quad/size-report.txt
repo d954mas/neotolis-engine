@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 49a5c37
+# Commit: 987c6e0
 
 ## WASM Section Sizes
 
@@ -13,21 +13,21 @@ Memory                 7 B
 Global                 8 B
 Export                88 B
 Elem                 158 B
-Code              508320 B
-Data              232891 B
+Code              508351 B
+Data              232780 B
 Custom             36074 B
 ---------------- ----------
-TOTAL             778955 B
+TOTAL             778875 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
 32406 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
-30662 B   nt_gfx_activate_texture
+30637 B   nt_gfx_activate_texture
 28820 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 21621 B   basist::astc_ldr_t::xuastc_ldr_decompress_image(unsigned char const*, unsigned long, unsigned int&, unsigned int&, unsigned int&, unsigned int&, bool&, bool&, bool, bool (*)(unsigned int, unsigned int, unsigned int, unsigned int, bool, float, bool, void*), void*, bool (*)(unsigned int, unsigned int, astc_helpers::log_astc_block const&, void*), void*)
-19975 B   frame
+20046 B   frame
 18194 B   nt_basisu_transcode_level
 15319 B   basist::bc7f::pack_mode0_or_2_rgb(unsigned char*, basist::color_rgba const*, float, float, float, int, int, int, float, unsigned int, float*, unsigned int*)
 11625 B   basist::astc_hdr_transcode_to_bc6h(astc_helpers::log_astc_block const&, basist::bc6h_block&)
@@ -55,7 +55,7 @@ TOTAL             778955 B
  3977 B   astc_helpers::decode_block_xuastc_ldr(astc_helpers::log_astc_block const&, void*, unsigned int, unsigned int, astc_helpers::decode_mode, unsigned char const*, unsigned int, unsigned int, unsigned int, unsigned int)
 
 Total functions: 343
-Total code size: 507725 B
+Total code size: 507756 B
 
 ## Per-Module Contributions
 
@@ -68,7 +68,7 @@ libnt_core.a                2178 B
 libnt_drawable_comp.a       2668 B
 libnt_entity.a              2996 B
 libnt_fs.a                  2620 B
-libnt_gfx.a                39160 B
+libnt_gfx.a                38792 B
 libnt_hash.a                4028 B
 libnt_http.a                6710 B
 libnt_http_stub.a           3210 B
@@ -79,19 +79,19 @@ libnt_material_comp.a       1990 B
 libnt_mesh_comp.a           1914 B
 libnt_mesh_renderer.a       7900 B
 libnt_render.a              5910 B
-libnt_resource.a          149818 B
+libnt_resource.a          150536 B
 libnt_time.a                 868 B
 libnt_transform_comp.a      4536 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)            264058 B
+TOTAL (linked)            264408 B
 
 Not linked to textured_quad:
 libnt_app_stub.a            1428 B
 libnt_basisu_transcoder.a 1329370 B
 libnt_comp_storage.a        1802 B
 libnt_fs_stub.a             2620 B
-libnt_gfx_stub.a           22272 B
+libnt_gfx_stub.a           21904 B
 libnt_input_stub.a         11148 B
 libnt_log_stub.a             484 B
 libnt_pool.a                1278 B
@@ -103,4 +103,4 @@ libnt_window_stub.a         1838 B
 ## Data Segments Summary
 
 Segments: 236
-Total data size: 231149 B
+Total data size: 231038 B
