@@ -8,6 +8,9 @@
 #include "miniz.h"
 /* clang-format on */
 
+/* Global hookable handler for NT_BUILD_ASSERT (tests use setjmp/longjmp) */
+nt_build_assert_handler_t nt_build_assert_handler = NULL;
+
 /* --- Entry data management --- */
 
 static void nt_builder_free_mesh_data(NtBuildMeshData *md) {
@@ -417,6 +420,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     /* Phase 1b: Write meta section to data_buf (appended after asset data).
      * Meta entries grouped by resource_id (D-05), covered by CRC32. */
+    uint32_t meta_section_start_databuf = 0; /* data_buf-relative, before header shift */
     if (ctx->meta_count > 0) {
         /* Sort meta_pending by resource_id (insertion sort -- count is small) */
         for (uint32_t i = 1; i < ctx->meta_count; i++) {
@@ -430,7 +434,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
 
         /* Align meta section start to 4 bytes */
-        uint32_t meta_section_start = (ctx->data_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+        meta_section_start_databuf = (ctx->data_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+        uint32_t meta_section_start = meta_section_start_databuf;
         if (meta_section_start > ctx->data_size) {
             uint8_t zeros[4] = {0};
             nt_builder_append_data(ctx, zeros, meta_section_start - ctx->data_size);
@@ -514,6 +519,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     memset(&header, 0, sizeof(header));
     header.magic = NT_PACK_MAGIC;
     header.meta_count = ctx->meta_count;
+    header.meta_offset = (ctx->meta_count > 0) ? meta_section_start_databuf + header_size : 0;
     header.version = NT_PACK_VERSION;
     header.asset_count = (uint16_t)ctx->entry_count;
     header.header_size = header_size;

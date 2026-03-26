@@ -34,7 +34,7 @@ If specific build, check, or run commands appear in the repo, keep them up to da
 - **Platform abstraction** — all platform calls go through engine wrappers, never call browser/OS API directly from modules.
 - **No heap in hot path** — use compile-time limits (`#define`), preallocated storages, frame scratch memory.
 - **Builder validates, runtime is a safety net** — runtime checks only magic/version/type, handles fallbacks gracefully. No heavy validation at runtime.
-- **Asserts are contracts, not error handling** — `NT_ASSERT` documents invariants that must always hold. A failed assert means the program is broken beyond recovery — continuing would mask bugs. Release default is TRAP (immediate crash, no strings); OFF mode is available via CMake override for final production builds. Never use asserts for conditions that can legitimately occur at runtime (missing files, user input, network errors) — those are error handling.
+- **Fail early, prefer asserts** — when something is wrong, prefer crashing over silent fallbacks. `NT_ASSERT` for invariants and unexpected states, `NT_BUILD_ASSERT` in the builder. Error returns are fine as part of public API contracts (e.g. resource not found → return NULL), but don't use error codes to silently swallow problems that indicate bugs or broken data. Release default is TRAP (immediate crash, no strings); OFF mode is available via CMake override for final production builds. In the builder, bad input (missing file, bad format, validation failure) is an assert — the developer sees the problem instantly instead of waiting for the build to finish.
 
 ## Change rules
 

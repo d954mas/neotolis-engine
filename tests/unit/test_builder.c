@@ -21,6 +21,31 @@ const char *__lsan_default_suppressions(void) { return "leak:extensionSupportedG
 #include "unity.h"
 /* clang-format on */
 
+#include <setjmp.h>
+
+/* --- Build assert catching (setjmp/longjmp via hookable handler) --- */
+
+static jmp_buf s_build_assert_jmp;
+
+static void test_build_assert_handler(const char *expr, const char *file, int line) {
+    (void)expr;
+    (void)file;
+    (void)line;
+    longjmp(s_build_assert_jmp, 1);
+}
+
+/* Expect NT_BUILD_ASSERT to fire inside `code`. Pass if it fires, fail if it doesn't. */
+#define EXPECT_BUILD_ASSERT(code)                                                                                                                                                                      \
+    do {                                                                                                                                                                                               \
+        nt_build_assert_handler = test_build_assert_handler;                                                                                                                                           \
+        if (setjmp(s_build_assert_jmp) == 0) {                                                                                                                                                         \
+            code;                                                                                                                                                                                      \
+            nt_build_assert_handler = NULL;                                                                                                                                                            \
+            TEST_FAIL_MESSAGE("Expected NT_BUILD_ASSERT to fire");                                                                                                                                     \
+        }                                                                                                                                                                                              \
+        nt_build_assert_handler = NULL;                                                                                                                                                                \
+    } while (0)
+
 /* --- Temp directory for test output --- */
 
 #ifdef _WIN32
@@ -371,14 +396,9 @@ void test_missing_position_attribute_errors(void) {
     const char *pack_path = TMP_DIR "/no_pos.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
-
-    /* add_mesh is deferred -- succeeds */
     nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
 
-    /* finish_pack fails during import */
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT(nt_builder_finish_pack(ctx));
 }
 
 void test_empty_shader_errors(void) {
@@ -388,14 +408,9 @@ void test_empty_shader_errors(void) {
     const char *pack_path = TMP_DIR "/empty_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
-
-    /* add is deferred -- succeeds */
     nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
-    /* finish_pack fails during import */
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT(nt_builder_finish_pack(ctx));
 }
 
 void test_shader_with_version_errors(void) {
@@ -407,14 +422,9 @@ void test_shader_with_version_errors(void) {
     const char *pack_path = TMP_DIR "/hasversion_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
-
-    /* add is deferred -- succeeds */
     nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
-    /* finish_pack fails during import */
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT(nt_builder_finish_pack(ctx));
 }
 
 /* --- Comment stripping test --- */
@@ -1255,12 +1265,9 @@ void test_include_missing_file_errors(void) {
     const char *pack_path = TMP_DIR "/inc_missing.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
-
     nt_builder_add_shader(ctx, TMP_DIR "/missing_inc.vert", NT_BUILD_SHADER_VERTEX);
 
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT(nt_builder_finish_pack(ctx));
 }
 
 void test_include_depth_limit(void) {
@@ -1279,9 +1286,7 @@ void test_include_depth_limit(void) {
 
     nt_builder_add_shader(ctx, TMP_DIR "/depth_main.vert", NT_BUILD_SHADER_VERTEX);
 
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r);
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT(nt_builder_finish_pack(ctx));
 }
 
 void test_asset_root_include(void) {
@@ -1636,11 +1641,8 @@ void test_add_mesh_by_name_not_found(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_name = "NonExistent"});
-    /* add is deferred */
 
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r); /* import fails */
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT(nt_builder_finish_pack(ctx));
 }
 
 void test_add_mesh_by_index_out_of_range(void) {
@@ -1652,13 +1654,9 @@ void test_add_mesh_by_index_out_of_range(void) {
     const char *pack_path = TMP_DIR "/index_oor.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
-
     nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1, .mesh_index = 99, .use_mesh_index = true});
-    /* add is deferred */
 
-    nt_build_result_t r = nt_builder_finish_pack(ctx);
-    TEST_ASSERT_NOT_EQUAL(NT_BUILD_OK, r); /* import fails */
-    nt_builder_free_pack(ctx);
+    EXPECT_BUILD_ASSERT(nt_builder_finish_pack(ctx));
 }
 
 void test_add_mesh_resource_name_override(void) {
@@ -2039,7 +2037,10 @@ int main(void) {
     RUN_TEST(test_texture_round_trip);
     RUN_TEST(test_mesh_round_trip);
 
-    /* Validation errors (builder now asserts on bad input -- cannot test in-process) */
+    /* Validation errors (builder asserts on bad input -- tested via EXPECT_BUILD_ASSERT) */
+    RUN_TEST(test_missing_position_attribute_errors);
+    RUN_TEST(test_empty_shader_errors);
+    RUN_TEST(test_shader_with_version_errors);
 
     /* Comment stripping */
     RUN_TEST(test_shader_comment_stripping);
@@ -2083,7 +2084,8 @@ int main(void) {
     /* Include resolver */
     RUN_TEST(test_include_basic);
     RUN_TEST(test_include_pragma_once);
-    /* test_include_missing_file_errors, test_include_depth_limit: builder asserts on bad input */
+    RUN_TEST(test_include_missing_file_errors);
+    RUN_TEST(test_include_depth_limit);
     RUN_TEST(test_asset_root_include);
     RUN_TEST(test_include_pragma_once_after_comment);
 
@@ -2096,7 +2098,8 @@ int main(void) {
     RUN_TEST(test_add_mesh_by_name);
     RUN_TEST(test_add_mesh_by_index);
     RUN_TEST(test_add_mesh_single_unchanged);
-    /* test_add_mesh_by_name_not_found, test_add_mesh_by_index_out_of_range: builder asserts on bad input */
+    RUN_TEST(test_add_mesh_by_name_not_found);
+    RUN_TEST(test_add_mesh_by_index_out_of_range);
     RUN_TEST(test_add_mesh_resource_name_override);
 
     /* Codegen */

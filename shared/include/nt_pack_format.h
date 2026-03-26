@@ -11,8 +11,8 @@
 
 /* Magic: ASCII "NPAK" read as uint32_t little-endian = 0x4B41504E */
 #define NT_PACK_MAGIC 0x4B41504E
-#define NT_PACK_VERSION 1
-#define NT_PACK_VERSION_MAX 1
+#define NT_PACK_VERSION 2
+#define NT_PACK_VERSION_MAX 2
 /*
  * Alignment constants for zero-copy access.
  *
@@ -44,9 +44,9 @@ typedef enum {
 } nt_asset_type_t;
 
 /*
- * PackHeader: 24 bytes total (packed, naturally aligned).
+ * PackHeader: 28 bytes total (packed, naturally aligned).
  * magic(4) + meta_count(4) + version(2) + asset_count(2) +
- * header_size(4) + total_size(4) + checksum(4) = 24
+ * header_size(4) + total_size(4) + checksum(4) + meta_offset(4) = 28
  *
  * Fields ordered so every field sits on its natural alignment boundary
  * (uint32 at 4-byte, uint16 at 2-byte). This avoids slow unaligned
@@ -61,6 +61,7 @@ typedef struct {
     uint32_t header_size; /* 12: offset where data region starts */
     uint32_t total_size;  /* 16: total file size in bytes */
     uint32_t checksum;    /* 20: CRC32 of data after header */
+    uint32_t meta_offset; /* 24: byte offset from file start to meta section (0 = no meta) */
 } NtPackHeader;
 #pragma pack(pop)
 
@@ -81,7 +82,7 @@ typedef struct {
 } NtAssetEntry;
 #pragma pack(pop)
 
-_Static_assert(sizeof(NtPackHeader) == 24, "PackHeader must be 24 bytes");
+_Static_assert(sizeof(NtPackHeader) == 28, "PackHeader must be 28 bytes");
 _Static_assert(sizeof(NtAssetEntry) == 24, "AssetEntry must be 24 bytes");
 
 /* MetaEntry header: variable-size, 20 bytes header + size bytes data.

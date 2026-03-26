@@ -676,15 +676,8 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     /* Parse asset entries */
     const NtAssetEntry *entries = (const NtAssetEntry *)(blob + sizeof(NtPackHeader));
 
-    /* Pre-compute meta section start for offset conversion */
-    uint32_t meta_section_start = blob_size; /* sentinel */
-    if (h->meta_count > 0) {
-        for (uint16_t i = 0; i < h->asset_count; i++) {
-            if (entries[i].meta_offset != 0 && entries[i].meta_offset < meta_section_start) {
-                meta_section_start = entries[i].meta_offset;
-            }
-        }
-    }
+    /* Meta section start from header (no scan needed) */
+    uint32_t meta_section_start = h->meta_offset;
 
     for (uint16_t i = 0; i < h->asset_count; i++) {
         /* Validate entry offset is in data region and data fits within blob */
@@ -731,15 +724,14 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     /* Parse metadata section */
     NtPackMeta *pack = &s_resource.packs[pack_idx];
 
-    if (h->meta_count > 0 && meta_section_start < blob_size) {
+    if (h->meta_count > 0 && meta_section_start != 0 && meta_section_start < blob_size) {
         uint32_t meta_section_size = blob_size - meta_section_start;
         /* Copy meta section to resident memory (survives blob eviction) */
         pack->meta_data = (uint8_t *)malloc(meta_section_size);
-        if (pack->meta_data) {
-            memcpy(pack->meta_data, blob + meta_section_start, meta_section_size);
-            pack->meta_size = meta_section_size;
-            pack->meta_count = h->meta_count;
-        }
+        NT_ASSERT(pack->meta_data && "meta section malloc failed");
+        memcpy(pack->meta_data, blob + meta_section_start, meta_section_size);
+        pack->meta_size = meta_section_size;
+        pack->meta_count = h->meta_count;
     }
 
     /* Update pack metadata */

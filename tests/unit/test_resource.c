@@ -1607,6 +1607,7 @@ static uint8_t *build_meta_pack(uint64_t rid, uint64_t kind, const void *payload
     h->version = NT_PACK_VERSION;
     h->asset_count = 1;
     h->meta_count = 1;
+    h->meta_offset = meta_section_start;
     h->header_size = header_size;
     h->total_size = total_size;
 

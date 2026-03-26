@@ -14,7 +14,7 @@ void tearDown(void) {}
 
 /* --- Pack header struct size tests --- */
 
-void test_pack_header_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtPackHeader)); }
+void test_pack_header_size(void) { TEST_ASSERT_EQUAL_UINT(28, sizeof(NtPackHeader)); }
 
 void test_asset_entry_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtAssetEntry)); }
 
@@ -32,7 +32,7 @@ void test_pack_magic_value(void) {
     TEST_ASSERT_EQUAL_UINT8('K', bytes[3]);
 }
 
-void test_pack_version(void) { TEST_ASSERT_EQUAL_UINT(1, NT_PACK_VERSION); }
+void test_pack_version(void) { TEST_ASSERT_EQUAL_UINT(2, NT_PACK_VERSION); }
 
 void test_pack_align(void) {
     TEST_ASSERT_EQUAL_UINT(4, NT_PACK_ASSET_ALIGN);
@@ -66,6 +66,7 @@ void test_pack_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(12, offsetof(NtPackHeader, header_size));
     TEST_ASSERT_EQUAL_UINT(16, offsetof(NtPackHeader, total_size));
     TEST_ASSERT_EQUAL_UINT(20, offsetof(NtPackHeader, checksum));
+    TEST_ASSERT_EQUAL_UINT(24, offsetof(NtPackHeader, meta_offset));
 }
 
 void test_asset_entry_field_offsets(void) {
