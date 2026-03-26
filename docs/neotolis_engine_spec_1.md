@@ -902,29 +902,33 @@ Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game cod
 ```c
 typedef struct {
     uint64_t resource_id;    /* nt_hash64 value */
-    uint8_t  asset_type;     /* nt_asset_type_t */
-    uint8_t  state;          /* nt_asset_state_t */
-    uint16_t format_version; /* per-type binary format version */
-    uint16_t pack_index;     /* index into packs[] */
-    uint16_t _pad;
     uint32_t offset;         /* byte offset in pack blob */
     uint32_t size;           /* asset data size */
     uint32_t runtime_handle; /* resolved handle, 0 = none */
-} NtAssetMeta; /* 28 bytes */
+    uint16_t format_version; /* per-type binary format version */
+    uint16_t pack_index;     /* index into packs[] */
+    uint8_t  asset_type;     /* nt_asset_type_t */
+    uint8_t  state;          /* nt_asset_state_t */
+    uint8_t  is_dedup;       /* 1 = shares data with another asset in same pack */
+    uint8_t  _pad;
+    uint32_t meta_offset;    /* byte offset into pack's resident meta_data buffer (NT_NO_METADATA = no meta) */
+} NtAssetMeta;
 ```
 
 ## 17.6 NtResourceSlot
 
 ```c
 typedef struct {
-    uint64_t resource_id;    /* nt_hash64 value */
-    uint32_t runtime_handle; /* current best resolved handle */
-    uint16_t generation;     /* stale detection */
-    int16_t  resolve_prio;   /* priority of current winner */
-    uint8_t  asset_type;     /* nt_asset_type_t */
-    uint8_t  state;          /* nt_asset_state_t of resolved entry */
-    uint16_t resolve_pack;   /* pack_index of current winner */
-} NtResourceSlot; /* 20 bytes */
+    uint64_t resource_id;       /* nt_hash64 value */
+    uint32_t runtime_handle;    /* current best resolved handle */
+    uint16_t generation;        /* stale detection */
+    int16_t  resolve_prio;      /* priority of current winner */
+    uint8_t  asset_type;        /* nt_asset_type_t */
+    uint8_t  state;             /* nt_asset_state_t of resolved entry */
+    uint16_t resolve_seq;       /* mount_seq of current winner (tiebreak) */
+    uint16_t resolve_asset_idx; /* index into assets[] of resolved winner (for metadata lookup) */
+    uint16_t _pad2;
+} NtResourceSlot;
 ```
 
 ## 17.7 Virtual packs

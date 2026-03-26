@@ -676,6 +676,16 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     /* Parse asset entries */
     const NtAssetEntry *entries = (const NtAssetEntry *)(blob + sizeof(NtPackHeader));
 
+    /* Pre-compute meta section start for offset conversion */
+    uint32_t meta_section_start = blob_size; /* sentinel */
+    if (h->meta_count > 0) {
+        for (uint16_t i = 0; i < h->asset_count; i++) {
+            if (entries[i].meta_offset != 0 && entries[i].meta_offset < meta_section_start) {
+                meta_section_start = entries[i].meta_offset;
+            }
+        }
+    }
+
     for (uint16_t i = 0; i < h->asset_count; i++) {
         /* Validate entry offset is in data region and data fits within blob */
         if (entries[i].offset < h->header_size || entries[i].size > blob_size || entries[i].offset > blob_size - entries[i].size) {
@@ -694,8 +704,12 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
         meta->offset = entries[i].offset;
         meta->size = entries[i].size;
         meta->runtime_handle = 0;
-        /* UINT32_MAX = no metadata; non-zero entry offset is absolute (fixed to relative below) */
-        meta->meta_offset = (entries[i].meta_offset != 0) ? entries[i].meta_offset : UINT32_MAX;
+        /* Convert absolute meta_offset to meta_data-relative in one pass */
+        if (entries[i].meta_offset != 0 && entries[i].meta_offset >= meta_section_start) {
+            meta->meta_offset = entries[i].meta_offset - meta_section_start;
+        } else {
+            meta->meta_offset = NT_NO_METADATA;
+        }
 
         /* Detect dedup: check if a previous entry in this pack has same offset+size */
         meta->is_dedup = 0;
@@ -717,36 +731,14 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
     /* Parse metadata section */
     NtPackMeta *pack = &s_resource.packs[pack_idx];
 
-    if (h->meta_count > 0) {
-        /* Find meta section: earliest non-zero meta_offset among entries */
-        uint32_t meta_section_start = blob_size; /* sentinel */
-        for (uint16_t i = 0; i < h->asset_count; i++) {
-            if (entries[i].meta_offset != 0 && entries[i].meta_offset < meta_section_start) {
-                meta_section_start = entries[i].meta_offset;
-            }
-        }
-
-        if (meta_section_start < blob_size) {
-            uint32_t meta_section_size = blob_size - meta_section_start;
-            /* Copy meta section to resident memory (survives blob eviction) */
-            pack->meta_data = (uint8_t *)malloc(meta_section_size);
-            if (pack->meta_data) {
-                memcpy(pack->meta_data, blob + meta_section_start, meta_section_size);
-                pack->meta_size = meta_section_size;
-                pack->meta_count = h->meta_count;
-
-                /* Convert asset meta_offsets from absolute to meta_data-relative */
-                for (uint32_t ai2 = 0; ai2 < s_resource.asset_hwm; ai2++) {
-                    NtAssetMeta *am = &s_resource.assets[ai2];
-                    if (am->pack_index == (uint16_t)pack_idx && am->meta_offset != UINT32_MAX) {
-                        if (am->meta_offset >= meta_section_start) {
-                            am->meta_offset -= meta_section_start;
-                        } else {
-                            am->meta_offset = UINT32_MAX; /* invalid, clear */
-                        }
-                    }
-                }
-            }
+    if (h->meta_count > 0 && meta_section_start < blob_size) {
+        uint32_t meta_section_size = blob_size - meta_section_start;
+        /* Copy meta section to resident memory (survives blob eviction) */
+        pack->meta_data = (uint8_t *)malloc(meta_section_size);
+        if (pack->meta_data) {
+            memcpy(pack->meta_data, blob + meta_section_start, meta_section_size);
+            pack->meta_size = meta_section_size;
+            pack->meta_count = h->meta_count;
         }
     }
 
@@ -920,7 +912,7 @@ const void *nt_resource_get_meta(nt_resource_t handle, uint64_t kind, uint32_t *
     if (ameta->resource_id != slot->resource_id) {
         return NULL; /* not yet resolved, or stale index */
     }
-    if (ameta->meta_offset == UINT32_MAX) {
+    if (ameta->meta_offset == NT_NO_METADATA) {
         return NULL; /* no metadata for this asset */
     }
 

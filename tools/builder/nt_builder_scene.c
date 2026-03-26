@@ -7,49 +7,6 @@
 
 /* Uses nt_builder_convert_component() and nt_builder_clampf() from nt_builder_internal.h */
 
-#include <float.h>
-
-/* --- AABB extraction from POSITION accessor --- */
-
-static void nt_extract_aabb(const cgltf_primitive *prim, float out_min[3], float out_max[3]) {
-    const cgltf_accessor *pos_acc = NULL;
-    for (cgltf_size a = 0; a < prim->attributes_count; a++) {
-        if (prim->attributes[a].name != NULL && strcmp(prim->attributes[a].name, "POSITION") == 0) {
-            pos_acc = prim->attributes[a].data;
-            break;
-        }
-    }
-    if (!pos_acc) {
-        memset(out_min, 0, 3 * sizeof(float));
-        memset(out_max, 0, 3 * sizeof(float));
-        return;
-    }
-
-    if (pos_acc->has_min && pos_acc->has_max) {
-        for (int i = 0; i < 3; i++) {
-            out_min[i] = (float)pos_acc->min[i];
-            out_max[i] = (float)pos_acc->max[i];
-        }
-        return;
-    }
-
-    out_min[0] = out_min[1] = out_min[2] = FLT_MAX;
-    out_max[0] = out_max[1] = out_max[2] = -FLT_MAX;
-
-    float tmp[3];
-    for (cgltf_size v = 0; v < pos_acc->count; v++) {
-        cgltf_accessor_read_float(pos_acc, v, tmp, 3);
-        for (int i = 0; i < 3; i++) {
-            if (tmp[i] < out_min[i]) {
-                out_min[i] = tmp[i];
-            }
-            if (tmp[i] > out_max[i]) {
-                out_max[i] = tmp[i];
-            }
-        }
-    }
-}
-
 /* --- Helper: get texture index from cgltf_texture_view -> images array --- */
 
 static uint32_t nt_scene_texture_image_index(const cgltf_texture_view *view, const cgltf_data *data) {

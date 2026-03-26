@@ -135,7 +135,7 @@ static nt_build_result_t nt_parse_gltf_mesh(const char *path, const char *mesh_n
 
 #include <float.h>
 
-static void nt_extract_aabb(const cgltf_primitive *prim, float out_min[3], float out_max[3]) {
+void nt_extract_aabb(const cgltf_primitive *prim, float out_min[3], float out_max[3]) {
     const cgltf_accessor *pos_acc = NULL;
     for (cgltf_size a = 0; a < prim->attributes_count; a++) {
         if (prim->attributes[a].name != NULL && strcmp(prim->attributes[a].name, "POSITION") == 0) {
