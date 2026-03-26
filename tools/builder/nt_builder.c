@@ -158,6 +158,7 @@ static void nt_builder_free_entry(NtBuildEntry *entry) {
     entry->rename_key = NULL;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data) {
     NT_BUILD_ASSERT(ctx && "ctx is NULL");
     NT_BUILD_ASSERT(path && "path is NULL");

@@ -150,6 +150,7 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene) {
 
 /* --- Add scene mesh (deferred) --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_add_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const char *resource_id, const nt_mesh_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && scene && resource_id && opts && opts->layout && "invalid scene_mesh args");
     NT_BUILD_ASSERT(mesh_index < scene->mesh_count && "mesh_index out of range");
