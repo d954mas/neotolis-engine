@@ -748,7 +748,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
         if (ctx->cache_dir) {
             /* Note column: cache status per D-15 */
-            const char *note = "";
+            const char *note;
             if (pe->dedup_original >= 0) {
                 note = "dedup";
             } else {
@@ -762,7 +762,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 case NT_CACHE_MISS_OPTS:
                     note = "miss (opts)";
                     break;
-                case NT_CACHE_NONE:
+                default:
                     note = "";
                     break;
                 }
@@ -772,7 +772,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 NT_LOG_INFO("  %-4u %-40s %-10s %-24s %-8s %s", i, display, type_name, size_str, "--", note);
             } else {
                 char time_str[16];
-                snprintf(time_str, sizeof(time_str), "%.2fs", encode_times[i]);
+                (void)snprintf(time_str, sizeof(time_str), "%.2fs", encode_times[i]);
                 NT_LOG_INFO("  %-4u %-40s %-10s %-24s %-8s %s", i, display, type_name, size_str, time_str, note);
             }
         } else {
