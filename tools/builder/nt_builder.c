@@ -432,7 +432,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 increment_kind_counter(ctx, pe->kind);
                 NT_LOG_INFO("  [%u/%u] %s (cached)", i + 1, ctx->pending_count, pe->path);
                 (void)fflush(stdout); /* ensure visibility in CI/pipe environments */
-                continue; /* skip encode switch entirely */
+                continue;             /* skip encode switch entirely */
             }
 
             /* Cache miss -- record status, fall through to encode */
