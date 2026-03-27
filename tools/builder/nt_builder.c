@@ -21,6 +21,7 @@ static void nt_builder_free_entry_data(NtBuildEntry *entry) {
     if (entry->kind == NT_BUILD_ASSET_TEXTURE) {
         NtBuildTextureData *td = (NtBuildTextureData *)entry->data;
         free(td->source_data);
+        free(td->source_path);
     }
     /* TEXTURE -> NtBuildTextureData*, SHADER -> NtBuildShaderData*, others -> NULL */
     free(entry->data);
@@ -377,22 +378,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             bool pixels_owned = false;
 
             if (!pixels) {
-                /* Re-decode from source */
-                uint32_t rw = 0;
-                uint32_t rh = 0;
-                if (td->source_data) {
-                    /* Memory source -- re-decode from stored encoded bytes */
-                    nt_build_result_t dr = nt_builder_decode_texture(td->source_data, td->source_size, &td->opts, &pixels, &rw, &rh);
-                    NT_BUILD_ASSERT(dr == NT_BUILD_OK && "encode: re-decode texture from memory failed");
-                } else {
-                    /* File source -- re-read from path */
-                    uint32_t fsize = 0;
-                    uint8_t *fdata = (uint8_t *)nt_builder_read_file(pe->path, &fsize);
-                    NT_BUILD_ASSERT(fdata && "encode: re-read texture file failed");
-                    nt_build_result_t dr = nt_builder_decode_texture(fdata, fsize, &td->opts, &pixels, &rw, &rh);
-                    free(fdata);
-                    NT_BUILD_ASSERT(dr == NT_BUILD_OK && "encode: re-decode texture from file failed");
-                }
+                pixels = nt_builder_redecode_texture(pe);
                 pixels_owned = true;
             }
 
@@ -713,7 +699,7 @@ static uint64_t nt_builder_path_id(const char *path) {
 
 /* --- Texture data helper --- */
 
-/* Re-decode a texture entry for verification. Returns malloc'd RGBA buffer. Caller frees. */
+/* Re-decode a texture entry from stored source. Returns malloc'd RGBA buffer. Caller frees. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe) {
     const NtBuildTextureData *td = (const NtBuildTextureData *)pe->data;
@@ -723,13 +709,15 @@ static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe) {
     if (td->source_data) {
         nt_build_result_t r = nt_builder_decode_texture(td->source_data, td->source_size, &td->opts, &pixels, &w, &h);
         NT_BUILD_ASSERT(r == NT_BUILD_OK && "redecode_texture: decode from memory failed");
-    } else {
+    } else if (td->source_path) {
         uint32_t fsize = 0;
-        uint8_t *fdata = (uint8_t *)nt_builder_read_file(pe->path, &fsize);
+        uint8_t *fdata = (uint8_t *)nt_builder_read_file(td->source_path, &fsize);
         NT_BUILD_ASSERT(fdata && "redecode_texture: re-read file failed");
         nt_build_result_t r = nt_builder_decode_texture(fdata, fsize, &td->opts, &pixels, &w, &h);
         free(fdata);
         NT_BUILD_ASSERT(r == NT_BUILD_OK && "redecode_texture: decode from file failed");
+    } else {
+        NT_BUILD_ASSERT(0 && "redecode_texture: no source (raw texture should have decoded_data)");
     }
     return pixels;
 }
@@ -807,8 +795,11 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_te
     /* Read file */
     uint32_t file_size = 0;
     uint8_t *file_data = (uint8_t *)nt_builder_read_file(read_path, &file_size);
-    free(resolved_path);
     NT_BUILD_ASSERT(file_data && "add_texture: failed to read file");
+
+    /* Store resolved path for re-read at encode time (before freeing resolved_path) */
+    char *stored_path = strdup(read_path);
+    free(resolved_path);
 
     /* Decode to RGBA */
     uint8_t *pixels = NULL;
@@ -818,12 +809,12 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_te
     free(file_data);
     NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_texture: decode failed");
 
-    /* Hash decoded pixels, then free -- will re-read from file at encode time */
+    /* Hash decoded pixels, then free -- re-read from stored path at encode time */
     uint64_t hash = nt_hash64(pixels, w * h * 4).value;
     free(pixels);
 
     NtBuildTextureData *td = make_texture_data(w, h, opts);
-    /* td->source_data = NULL, td->source_size = 0 (re-read from path) */
+    td->source_path = stored_path;
     nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_TEXTURE, td, NULL, w * h * 4, hash);
 }
 

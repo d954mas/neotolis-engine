@@ -35,7 +35,8 @@ typedef struct {
     nt_tex_compress_opts_t compress; /* Basis compression settings */
     bool has_compress;               /* true = use Basis path, false = raw path */
     uint8_t *source_data;            /* deep-copied encoded image bytes for re-decode (owned, NULL if from file) */
-    uint32_t source_size;            /* 0 if from file (re-read via path) */
+    uint32_t source_size;            /* 0 if from file */
+    char *source_path;               /* resolved file path for re-read (owned, NULL if from memory) */
 } NtBuildTextureData;
 
 /* Metadata accumulation limit (Phase 37) */
