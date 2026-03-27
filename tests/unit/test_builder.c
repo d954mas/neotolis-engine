@@ -2489,7 +2489,7 @@ static void clean_cache_dir(const char *dir) {
     DIR *d = opendir(dir);
     if (d) {
         struct dirent *ent;
-        while ((ent = readdir(d)) != NULL) {
+        while ((ent = readdir(d)) != NULL) { // NOLINT(concurrency-mt-unsafe)
             size_t len = strlen(ent->d_name);
             if (len > 4 && strcmp(ent->d_name + len - 4, ".bin") == 0) {
                 char path[512];
@@ -2524,7 +2524,7 @@ static uint32_t count_bin_files(const char *dir) {
     DIR *d = opendir(dir);
     if (d) {
         struct dirent *ent;
-        while ((ent = readdir(d)) != NULL) {
+        while ((ent = readdir(d)) != NULL) { // NOLINT(concurrency-mt-unsafe)
             size_t len = strlen(ent->d_name);
             if (len > 4 && strcmp(ent->d_name + len - 4, ".bin") == 0) {
                 count++;
@@ -2561,7 +2561,7 @@ static bool cache_has_no_subdirs(const char *dir) {
         return true;
     }
     struct dirent *ent;
-    while ((ent = readdir(d)) != NULL) {
+    while ((ent = readdir(d)) != NULL) { // NOLINT(concurrency-mt-unsafe)
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
             continue;
         }
@@ -2799,7 +2799,7 @@ void test_cache_flat_files(void) {
         DIR *d = opendir(cache);
         TEST_ASSERT_NOT_NULL(d);
         struct dirent *ent;
-        while ((ent = readdir(d)) != NULL) {
+        while ((ent = readdir(d)) != NULL) { // NOLINT(concurrency-mt-unsafe)
             size_t len = strlen(ent->d_name);
             if (len > 4 && strcmp(ent->d_name + len - 4, ".bin") == 0) {
                 TEST_ASSERT_EQUAL_UINT32(37, (uint32_t)len);

@@ -159,7 +159,7 @@ nt_cache_status_t nt_builder_cache_lookup(const char *cache_dir, uint64_t decode
     DIR *d = opendir(cache_dir);
     if (d) {
         struct dirent *ent;
-        while ((ent = readdir(d)) != NULL) {
+        while ((ent = readdir(d)) != NULL) { // NOLINT(concurrency-mt-unsafe)
             if (strncmp(ent->d_name, prefix, prefix_len) == 0) {
                 (void)closedir(d);
                 return NT_CACHE_MISS_OPTS;
