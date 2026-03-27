@@ -180,9 +180,9 @@ static void init_checker(void) {
     }
 }
 
-/* RGB8 placeholders: shader reads .rg only, B unused (Z reconstructed in shader) */
-static const uint8_t s_flat_normal_rgb[3] = {128, 128, 255}; /* (0,0,1) — flat normal */
-static const uint8_t s_rough_rgb[3] = {0, 255, 0};           /* R=0, G=roughness(1.0), B=0 */
+/* add_texture_raw expects RGBA input; format=RGB8 strips to 3 channels at encode time */
+static const uint8_t s_flat_normal_rgba[4] = {128, 128, 255, 255}; /* (0,0,1) — flat normal */
+static const uint8_t s_rough_rgba[4] = {0, 255, 0, 255};           /* R=0, G=roughness(1.0), B=0 */
 
 static void add_placeholder_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     tex_role_t *roles = build_texture_roles(scene);
@@ -194,10 +194,10 @@ static void add_placeholder_textures(NtBuilderContext *ctx, const nt_glb_scene_t
 
         switch (roles[i]) {
         case TEX_ROLE_NORMAL:
-            pixels = s_flat_normal_rgb;
+            pixels = s_flat_normal_rgba;
             break;
         case TEX_ROLE_SPECULAR:
-            pixels = s_rough_rgb;
+            pixels = s_rough_rgba;
             break;
         default: /* diffuse + unknown — handled by runtime fallback */
             continue;
