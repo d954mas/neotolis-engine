@@ -239,7 +239,9 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
     case NT_BUILD_ASSET_TEXTURE: {
         const NtBuildTextureData *ta = (const NtBuildTextureData *)a->data;
         const NtBuildTextureData *tb = (const NtBuildTextureData *)b->data;
-        /* Compare format (pixel format affects encoding) */
+        /* max_size is NOT compared here — it's applied during decode (resize),
+         * so different max_size → different decoded pixels → different hash.
+         * Only encode-affecting options need comparison. */
         if (ta->opts.format != tb->opts.format) {
             return false;
         }
@@ -297,7 +299,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             if (pe->decoded_hash != candidate->decoded_hash) {
                 continue;
             }
-            /* Hash match -- verify with memcmp if both have decoded_data */
+            /* Hash match -- verify with memcmp */
             if (pe->decoded_data && candidate->decoded_data) {
                 if (memcmp(pe->decoded_data, candidate->decoded_data, pe->decoded_size) != 0) {
                     continue;
@@ -326,6 +328,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 if (!match) {
                     continue;
                 }
+            } else {
+                /* Non-texture types must always have decoded_data for memcmp verify */
+                NT_BUILD_ASSERT(0 && "hash match but no decoded_data on non-texture entry");
             }
             if (opts_equal(pe, candidate)) {
                 candidate->dedup_original = (int32_t)i;
@@ -361,7 +366,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             ret = nt_builder_append_data(ctx, pe->decoded_data, pe->decoded_size);
             if (ret == NT_BUILD_OK) {
                 nt_asset_type_t asset_type = (pe->kind == NT_BUILD_ASSET_MESH) ? NT_ASSET_MESH : NT_ASSET_BLOB;
-                uint16_t version = (pe->kind == NT_BUILD_ASSET_MESH) ? NT_MESH_VERSION : 1;
+                uint16_t version = (pe->kind == NT_BUILD_ASSET_MESH) ? NT_MESH_VERSION : NT_BLOB_VERSION;
                 ret = nt_builder_register_asset(ctx, pe->resource_id, asset_type, version, pe->decoded_size);
             }
             break;
