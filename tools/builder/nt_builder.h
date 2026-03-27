@@ -207,6 +207,10 @@ void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);
 /* --- Gzip estimation (off by default, enable for transport size analysis) --- */
 void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
 
+/* --- Builder cache (content-addressed, skips re-encoding unchanged assets) --- */
+#define NT_BUILDER_VERSION 1 /* Bump when encode logic changes to invalidate cache */
+void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir);
+
 /* --- Merge per-pack .h headers into a combined header --- */
 void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, const char *output_path);
 
