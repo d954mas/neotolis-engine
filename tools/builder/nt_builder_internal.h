@@ -69,6 +69,14 @@ typedef struct {
     int32_t dedup_original;
 } NtBuildEntry;
 
+/* Per-asset cache status (tracked during finish_pack) */
+typedef enum {
+    NT_CACHE_NONE = 0,      /* caching disabled or early-deduped entry */
+    NT_CACHE_HIT = 1,       /* exact cache file found */
+    NT_CACHE_MISS_NEW = 2,  /* no cache entry found for this decoded_hash */
+    NT_CACHE_MISS_OPTS = 3, /* decoded_hash found but opts_version_hash differs */
+} nt_cache_status_t;
+
 struct NtBuilderContext {
     char output_path[512];
 
@@ -118,6 +126,12 @@ struct NtBuilderContext {
 
     /* Gzip estimation in summary (default: off) */
     bool gzip_estimate;
+
+    /* Cache: content-addressed encode cache (D-08) */
+    char *cache_dir;           /* NULL = caching disabled, set by nt_builder_set_cache_dir */
+    uint32_t cache_hit_count;  /* per-build hit stats */
+    uint32_t cache_miss_count; /* per-build miss stats */
+    double cache_restore_secs; /* total time reading cache files */
 };
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
@@ -288,5 +302,12 @@ char *nt_builder_resolve_includes(const char *source, uint32_t source_len, const
 
 /* File lookup via asset roots */
 char *nt_builder_find_file(const char *filename, const char *relative_to_dir, const NtBuilderContext *ctx);
+
+/* Cache: internal functions (nt_builder_cache.c) */
+uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe);
+void nt_builder_build_cache_path(const char *cache_dir, uint64_t decoded_hash, uint64_t opts_hash, char *out, size_t out_size);
+nt_cache_status_t nt_builder_cache_lookup(const char *cache_dir, uint64_t decoded_hash, uint64_t opts_hash, uint8_t **out_data, uint32_t *out_size);
+bool nt_builder_cache_store(const char *cache_dir, uint64_t decoded_hash, uint64_t opts_hash, const uint8_t *data, uint32_t size);
+void nt_builder_ensure_cache_dir(const char *dir);
 
 #endif /* NT_BUILDER_INTERNAL_H */

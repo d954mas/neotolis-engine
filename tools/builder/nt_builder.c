@@ -3,6 +3,7 @@
 #include "hash/nt_hash.h"
 #include "nt_blob_format.h"
 #include "nt_crc32.h"
+#include "nt_shader_format.h"
 #include "time/nt_time.h"
 /* Avoid zlib-compat macros (compress, compress2) colliding with struct field names */
 #define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
@@ -206,6 +207,7 @@ static void nt_builder_free_context(NtBuilderContext *ctx) {
         free(ctx->asset_roots[i]);
     }
     free(ctx->header_dir);
+    free(ctx->cache_dir);
     free(ctx);
 }
 
@@ -230,6 +232,23 @@ void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx);
 /* Forward declaration for texture re-decode (defined below make_texture_data) */
 static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w, uint32_t *out_h);
 
+static void increment_kind_counter(NtBuilderContext *ctx, nt_build_asset_kind_t kind) {
+    switch (kind) {
+    case NT_BUILD_ASSET_MESH:
+        ctx->mesh_count++;
+        break;
+    case NT_BUILD_ASSET_TEXTURE:
+        ctx->texture_count++;
+        break;
+    case NT_BUILD_ASSET_SHADER:
+        ctx->shader_count++;
+        break;
+    case NT_BUILD_ASSET_BLOB:
+        ctx->blob_count++;
+        break;
+    }
+}
+
 /* --- Early dedup: compare decoded_data + encoding opts --- */
 
 static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
@@ -251,7 +270,8 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
             return false;
         }
         if (ta->has_compress) {
-            if (ta->compress.mode != tb->compress.mode || ta->compress.quality != tb->compress.quality || ta->compress.rdo_quality != tb->compress.rdo_quality) {
+            if (ta->compress.mode != tb->compress.mode || ta->compress.quality != tb->compress.quality || ta->compress.endpoint_rdo_quality != tb->compress.endpoint_rdo_quality ||
+                ta->compress.selector_rdo_quality != tb->compress.selector_rdo_quality) {
                 return false;
             }
         }
@@ -279,6 +299,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     double t_encode_start = nt_time_now();
     double encode_times[NT_BUILD_MAX_ASSETS];
     memset(encode_times, 0, sizeof(encode_times));
+    nt_cache_status_t cache_status[NT_BUILD_MAX_ASSETS];
+    memset(cache_status, 0, sizeof(cache_status));
+    double cache_restore_secs = 0.0;
 
     /* Phase 0: Early dedup on hash + size + opts */
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
@@ -356,8 +379,67 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             continue;
         }
 
-        NT_LOG_INFO("  [%u/%u] %s", i + 1, ctx->pending_count, pe->path);
         double t_asset_start = nt_time_now();
+
+        /* Cache check: skip encode if cached (D-11 pipeline: early dedup -> cache -> encode) */
+        uint64_t opts_hash = 0;
+        if (ctx->cache_dir) {
+            opts_hash = nt_builder_compute_opts_hash(pe);
+            uint8_t *cached_data = NULL;
+            uint32_t cached_size = 0;
+            nt_cache_status_t status = nt_builder_cache_lookup(ctx->cache_dir, pe->decoded_hash, opts_hash, &cached_data, &cached_size);
+
+            if (status == NT_CACHE_HIT) {
+                /* Cache hit -- inject cached encoded bytes (D-05: skip encode) */
+                double t_restore_start = nt_time_now();
+                nt_build_result_t cr = nt_builder_append_data(ctx, cached_data, cached_size);
+                NT_BUILD_ASSERT(cr == NT_BUILD_OK && "cache restore: append_data failed");
+                free(cached_data);
+
+                /* Derive asset_type and format_version from kind (deterministic 1:1 mapping) */
+                nt_asset_type_t asset_type;
+                uint16_t version;
+                switch (pe->kind) {
+                case NT_BUILD_ASSET_MESH:
+                    asset_type = NT_ASSET_MESH;
+                    version = NT_MESH_VERSION;
+                    break;
+                case NT_BUILD_ASSET_TEXTURE:
+                    asset_type = NT_ASSET_TEXTURE;
+                    version = NT_TEXTURE_VERSION_V2;
+                    break;
+                case NT_BUILD_ASSET_SHADER:
+                    asset_type = NT_ASSET_SHADER_CODE;
+                    version = NT_SHADER_CODE_VERSION;
+                    break;
+                case NT_BUILD_ASSET_BLOB:
+                    asset_type = NT_ASSET_BLOB;
+                    version = NT_BLOB_VERSION;
+                    break;
+                default:
+                    NT_BUILD_ASSERT(0 && "unknown asset kind in cache hit path");
+                    asset_type = 0;
+                    version = 0;
+                }
+                cr = nt_builder_register_asset(ctx, pe->resource_id, asset_type, version, cached_size);
+                NT_BUILD_ASSERT(cr == NT_BUILD_OK && "cache restore: register_asset failed");
+
+                cache_restore_secs += nt_time_now() - t_restore_start;
+                cache_status[i] = NT_CACHE_HIT;
+                ctx->cache_hit_count++;
+                encode_times[i] = 0.0; /* no encode time for cached assets */
+
+                increment_kind_counter(ctx, pe->kind);
+                NT_LOG_INFO("  [%u/%u] %s (cached)", i + 1, ctx->pending_count, pe->path);
+                (void)fflush(stdout); /* ensure visibility in CI/pipe environments */
+                continue;             /* skip encode switch entirely */
+            }
+
+            /* Cache miss -- record status, fall through to encode */
+            cache_status[i] = status;
+            ctx->cache_miss_count++;
+        }
+
         nt_build_result_t ret = NT_BUILD_OK;
 
         switch (pe->kind) {
@@ -403,24 +485,27 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
         }
 
-        encode_times[i] = nt_time_now() - t_asset_start;
         NT_BUILD_ASSERT(ret == NT_BUILD_OK && "asset encode failed -- see error above");
 
-        /* Per-type counters */
-        switch (pe->kind) {
-        case NT_BUILD_ASSET_MESH:
-            ctx->mesh_count++;
-            break;
-        case NT_BUILD_ASSET_TEXTURE:
-            ctx->texture_count++;
-            break;
-        case NT_BUILD_ASSET_SHADER:
-            ctx->shader_count++;
-            break;
-        case NT_BUILD_ASSET_BLOB:
-            ctx->blob_count++;
-            break;
+        increment_kind_counter(ctx, pe->kind);
+
+        /* Cache store: save encoded bytes for future builds (per D-13: raw bytes only) */
+        if (ctx->cache_dir && cache_status[i] != NT_CACHE_HIT) {
+            /* Just-registered entry is always at entry_count - 1 */
+            NT_BUILD_ASSERT(ctx->entry_count > 0);
+            const NtAssetEntry *registered = &ctx->entries[ctx->entry_count - 1];
+            /* Store encoded bytes from data_buf at the registered offset.
+             * Even if register_asset performed post-encode dedup (rewind),
+             * the bytes at registered->offset are still valid.
+             * registered->offset is data_buf-relative at this point (not yet shifted by header_size). */
+            if (!nt_builder_cache_store(ctx->cache_dir, pe->decoded_hash, opts_hash, ctx->data_buf + registered->offset, registered->size)) {
+                NT_LOG_WARN("cache store failed for %s", pe->path);
+            }
         }
+
+        encode_times[i] = nt_time_now() - t_asset_start;
+        NT_LOG_INFO("  [%u/%u] %s (%.2fs)", i + 1, ctx->pending_count, pe->path, encode_times[i]);
+        (void)fflush(stdout); /* ensure visibility in CI/pipe environments */
     }
 
     /* Register early-deduped entries (copy offset/size from original) */
@@ -465,6 +550,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     NT_BUILD_ASSERT(ctx->entry_count == ctx->pending_count && "entry/pending count mismatch after encode+dedup registration");
 
+    ctx->cache_restore_secs = cache_restore_secs;
     double encode_secs = nt_time_now() - t_encode_start;
 
     /* Phase 1b: Write meta section to data_buf (appended after asset data).
@@ -612,8 +698,13 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_LOG_INFO("");
 
     /* Per-asset table — iterate pending (has name/type/time), find matching entry (has size) */
-    NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "#", "Name", "Type", "Size", "Time");
-    NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "--", "----", "----", "----", "----");
+    if (ctx->cache_dir) {
+        NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s %s", "#", "Name", "Type", "Size", "Time", "Note");
+        NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s %s", "--", "----", "----", "----", "----", "----");
+    } else {
+        NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "#", "Name", "Type", "Size", "Time");
+        NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "--", "----", "----", "----", "----");
+    }
     static const char *kind_names[] = {"MESH", "TEX", "SHADER", "BLOB"};
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         const NtBuildEntry *pe = &ctx->pending[i];
@@ -644,7 +735,38 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             (void)snprintf(size_str, sizeof(size_str), "%s", raw_str);
         }
 
-        NT_LOG_INFO("  %-4u %-40s %-10s %-24s %.2fs", i, display, type_name, size_str, encode_times[i]);
+        if (ctx->cache_dir) {
+            /* Note column: cache status per D-15 */
+            const char *note;
+            if (pe->dedup_original >= 0) {
+                note = "dedup";
+            } else {
+                switch (cache_status[i]) {
+                case NT_CACHE_HIT:
+                    note = "cached";
+                    break;
+                case NT_CACHE_MISS_NEW:
+                    note = "miss (new)";
+                    break;
+                case NT_CACHE_MISS_OPTS:
+                    note = "miss (opts)";
+                    break;
+                default:
+                    note = "";
+                    break;
+                }
+            }
+            /* Cached assets show "--" in Time column per D-15 */
+            if (cache_status[i] == NT_CACHE_HIT) {
+                NT_LOG_INFO("  %-4u %-40s %-10s %-24s %-8s %s", i, display, type_name, size_str, "--", note);
+            } else {
+                char time_str[16];
+                (void)snprintf(time_str, sizeof(time_str), "%.2fs", encode_times[i]);
+                NT_LOG_INFO("  %-4u %-40s %-10s %-24s %-8s %s", i, display, type_name, size_str, time_str, note);
+            }
+        } else {
+            NT_LOG_INFO("  %-4u %-40s %-10s %-24s %.2fs", i, display, type_name, size_str, encode_times[i]);
+        }
     }
 
     /* Per-type summary */
@@ -685,8 +807,15 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     if (ctx->dedup_count > 0) {
         NT_LOG_INFO("  Dedup:   %u assets (saved %.1fK)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / 1024.0);
     }
+    if (ctx->cache_dir) {
+        NT_LOG_INFO("  Cache: %u hit / %u miss", ctx->cache_hit_count, ctx->cache_miss_count);
+    }
     NT_LOG_INFO("");
-    if (ctx->gzip_estimate) {
+    if (ctx->cache_dir && ctx->gzip_estimate) {
+        NT_LOG_INFO("  Timing: cache %.1fs | encode %.1fs | gzip %.1fs | write %.1fs | total %.1fs", ctx->cache_restore_secs, encode_secs, gzip_secs, write_secs, total_secs);
+    } else if (ctx->cache_dir) {
+        NT_LOG_INFO("  Timing: cache %.1fs | encode %.1fs | write %.1fs | total %.1fs", ctx->cache_restore_secs, encode_secs, write_secs, total_secs);
+    } else if (ctx->gzip_estimate) {
         NT_LOG_INFO("  Timing: encode %.1fs | gzip %.1fs | write %.1fs | total %.1fs", encode_secs, gzip_secs, write_secs, total_secs);
     } else {
         NT_LOG_INFO("  Timing: encode %.1fs | write %.1fs | total %.1fs (gzip skipped)", encode_secs, write_secs, total_secs);

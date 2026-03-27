@@ -189,6 +189,10 @@ nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, co
                                                        const nt_tex_compress_opts_t *compress_opts) {
     nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
 
+    /* Basis Universal encodes RGB or RGBA blocks — RG8/R8 have no Basis equivalent.
+     * Use RGB8 for 2/1-channel textures (normals, specular) with Basis compression. */
+    NT_BUILD_ASSERT((fmt == NT_TEXTURE_FORMAT_RGBA8 || fmt == NT_TEXTURE_FORMAT_RGB8) && "Basis compression requires RGBA8 or RGB8 format (RG8/R8 have no Basis equivalent)");
+
     /* Determine alpha from format (D-06) */
     bool has_alpha = (fmt == NT_TEXTURE_FORMAT_RGBA8);
 
@@ -200,7 +204,8 @@ nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, co
 
     /* Encode via Basis Universal */
     bool uastc = (compress_opts->mode == NT_TEX_COMPRESS_UASTC);
-    nt_basisu_encode_result_t enc = nt_basisu_encode(rgba_pixels, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->rdo_quality, true);
+    nt_basisu_encode_result_t enc =
+        nt_basisu_encode(rgba_pixels, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->endpoint_rdo_quality, compress_opts->selector_rdo_quality, true);
 
     NT_BUILD_ASSERT(enc.data && "texture encode: Basis encode failed");
 
