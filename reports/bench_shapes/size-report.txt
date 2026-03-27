@@ -1,5 +1,5 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: 97192f8
+# Commit: f230a7c
 
 ## WASM Section Sizes
 
