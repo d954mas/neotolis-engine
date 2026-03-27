@@ -365,8 +365,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         double t_asset_start = nt_time_now();
 
         /* Cache check: skip encode if cached (D-11 pipeline: early dedup -> cache -> encode) */
+        uint64_t opts_hash = 0;
         if (ctx->cache_dir) {
-            uint64_t opts_hash = nt_builder_compute_opts_hash(pe);
+            opts_hash = nt_builder_compute_opts_hash(pe);
             uint8_t *cached_data = NULL;
             uint32_t cached_size = 0;
             nt_cache_status_t status = nt_builder_cache_lookup(ctx->cache_dir, pe->decoded_hash, opts_hash, &cached_data, &cached_size);
@@ -500,7 +501,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
         /* Cache store: save encoded bytes for future builds (per D-13: raw bytes only) */
         if (ctx->cache_dir && cache_status[i] != NT_CACHE_HIT) {
-            uint64_t opts_hash = nt_builder_compute_opts_hash(pe);
             /* Find the just-registered entry to get offset and size */
             NtAssetEntry *registered = NULL;
             for (uint32_t ei = 0; ei < ctx->entry_count; ei++) {

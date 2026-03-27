@@ -3,7 +3,6 @@
 #include "hash/nt_hash.h"
 /* clang-format on */
 
-#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -176,9 +175,6 @@ nt_cache_status_t nt_builder_cache_lookup(const char *cache_dir, uint64_t decode
 /* --- Cache store --- */
 
 bool nt_builder_cache_store(const char *cache_dir, uint64_t decoded_hash, uint64_t opts_hash, const uint8_t *data, uint32_t size) {
-    /* Lazy directory creation (per Open Question 3 in RESEARCH) */
-    nt_builder_ensure_cache_dir(cache_dir);
-
     char path[1024];
     nt_builder_build_cache_path(cache_dir, decoded_hash, opts_hash, path, sizeof(path));
 
@@ -216,7 +212,9 @@ bool nt_builder_cache_store(const char *cache_dir, uint64_t decoded_hash, uint64
 
 void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir) {
     NT_BUILD_ASSERT(ctx && dir && "set_cache_dir: both ctx and dir required (D-08)");
+    NT_BUILD_ASSERT(strlen(dir) < 900 && "cache_dir too long (max ~900, leaves room for hash filename)");
     free(ctx->cache_dir);
     ctx->cache_dir = strdup(dir);
+    nt_builder_ensure_cache_dir(dir);
     NT_LOG_INFO("Cache directory: %s", dir);
 }

@@ -200,7 +200,8 @@ nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, co
 
     /* Encode via Basis Universal */
     bool uastc = (compress_opts->mode == NT_TEX_COMPRESS_UASTC);
-    nt_basisu_encode_result_t enc = nt_basisu_encode(rgba_pixels, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->endpoint_rdo_quality, compress_opts->selector_rdo_quality, true);
+    nt_basisu_encode_result_t enc =
+        nt_basisu_encode(rgba_pixels, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->endpoint_rdo_quality, compress_opts->selector_rdo_quality, true);
 
     NT_BUILD_ASSERT(enc.data && "texture encode: Basis encode failed");
 
