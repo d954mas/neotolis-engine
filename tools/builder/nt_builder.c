@@ -709,8 +709,13 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_LOG_INFO("");
 
     /* Per-asset table — iterate pending (has name/type/time), find matching entry (has size) */
-    NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "#", "Name", "Type", "Size", "Time");
-    NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "--", "----", "----", "----", "----");
+    if (ctx->cache_dir) {
+        NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s %s", "#", "Name", "Type", "Size", "Time", "Note");
+        NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s %s", "--", "----", "----", "----", "----", "----");
+    } else {
+        NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "#", "Name", "Type", "Size", "Time");
+        NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "--", "----", "----", "----", "----");
+    }
     static const char *kind_names[] = {"MESH", "TEX", "SHADER", "BLOB"};
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         const NtBuildEntry *pe = &ctx->pending[i];
@@ -741,7 +746,38 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             (void)snprintf(size_str, sizeof(size_str), "%s", raw_str);
         }
 
-        NT_LOG_INFO("  %-4u %-40s %-10s %-24s %.2fs", i, display, type_name, size_str, encode_times[i]);
+        if (ctx->cache_dir) {
+            /* Note column: cache status per D-15 */
+            const char *note;
+            if (pe->dedup_original >= 0) {
+                note = "dedup";
+            } else {
+                switch (cache_status[i]) {
+                case NT_CACHE_HIT:
+                    note = "cached";
+                    break;
+                case NT_CACHE_MISS_NEW:
+                    note = "miss (new)";
+                    break;
+                case NT_CACHE_MISS_OPTS:
+                    note = "miss (opts)";
+                    break;
+                default:
+                    note = "";
+                    break;
+                }
+            }
+            /* Cached assets show "--" in Time column per D-15 */
+            if (cache_status[i] == NT_CACHE_HIT) {
+                NT_LOG_INFO("  %-4u %-40s %-10s %-24s %-8s %s", i, display, type_name, size_str, "--", note);
+            } else {
+                char time_str[16];
+                (void)snprintf(time_str, sizeof(time_str), "%.2fs", encode_times[i]);
+                NT_LOG_INFO("  %-4u %-40s %-10s %-24s %-8s %s", i, display, type_name, size_str, time_str, note);
+            }
+        } else {
+            NT_LOG_INFO("  %-4u %-40s %-10s %-24s %.2fs", i, display, type_name, size_str, encode_times[i]);
+        }
     }
 
     /* Per-type summary */
@@ -782,8 +818,15 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     if (ctx->dedup_count > 0) {
         NT_LOG_INFO("  Dedup:   %u assets (saved %.1fK)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / 1024.0);
     }
+    if (ctx->cache_dir) {
+        NT_LOG_INFO("  Cache: %u hit / %u miss", ctx->cache_hit_count, ctx->cache_miss_count);
+    }
     NT_LOG_INFO("");
-    if (ctx->gzip_estimate) {
+    if (ctx->cache_dir && ctx->gzip_estimate) {
+        NT_LOG_INFO("  Timing: cache %.1fs | encode %.1fs | gzip %.1fs | write %.1fs | total %.1fs", ctx->cache_restore_secs, encode_secs, gzip_secs, write_secs, total_secs);
+    } else if (ctx->cache_dir) {
+        NT_LOG_INFO("  Timing: cache %.1fs | encode %.1fs | write %.1fs | total %.1fs", ctx->cache_restore_secs, encode_secs, write_secs, total_secs);
+    } else if (ctx->gzip_estimate) {
         NT_LOG_INFO("  Timing: encode %.1fs | gzip %.1fs | write %.1fs | total %.1fs", encode_secs, gzip_secs, write_secs, total_secs);
     } else {
         NT_LOG_INFO("  Timing: encode %.1fs | write %.1fs | total %.1fs (gzip skipped)", encode_secs, write_secs, total_secs);

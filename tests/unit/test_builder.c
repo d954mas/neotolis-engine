@@ -6,6 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Windows SDK must be included early (before stdnoreturn.h from C17 headers) */
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 /* Suppress GLFW/GLX internal leaks (X11 extension query cache) */
 const char *__lsan_default_suppressions(void);                                           // NOLINT(bugprone-reserved-identifier)
 const char *__lsan_default_suppressions(void) { return "leak:extensionSupportedGLX\n"; } // NOLINT(bugprone-reserved-identifier)
@@ -13,6 +19,7 @@ const char *__lsan_default_suppressions(void) { return "leak:extensionSupportedG
 /* clang-format off */
 #include "nt_blob_format.h"
 #include "nt_builder.h"
+#include "nt_builder_internal.h"
 #include "nt_crc32.h"
 #include "nt_mesh_format.h"
 #include "nt_pack_format.h"
@@ -57,6 +64,7 @@ static void test_build_assert_handler(const char *expr, const char *file, int li
 #include <direct.h>
 #define MKDIR(p) _mkdir(p)
 #else
+#include <dirent.h>
 #include <sys/stat.h>
 #define MKDIR(p) mkdir(p, 0755)
 #endif
@@ -2450,6 +2458,359 @@ void test_dedup_cross_source_texture_memory_vs_raw(void) {
     (void)fclose(pf);
 }
 
+/* ===== Cache tests (CACHE-01 through CACHE-05) ===== */
+
+static void clean_cache_dir(const char *dir) {
+#ifdef _WIN32
+    char pattern[512];
+    (void)snprintf(pattern, sizeof(pattern), "%s\\*.bin", dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(pattern, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            char path[512];
+            (void)snprintf(path, sizeof(path), "%s\\%s", dir, fd.cFileName);
+            (void)DeleteFileA(path);
+        } while (FindNextFileA(hFind, &fd));
+        (void)FindClose(hFind);
+    }
+    /* Also clean .bin.tmp files */
+    (void)snprintf(pattern, sizeof(pattern), "%s\\*.bin.tmp", dir);
+    hFind = FindFirstFileA(pattern, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            char path[512];
+            (void)snprintf(path, sizeof(path), "%s\\%s", dir, fd.cFileName);
+            (void)DeleteFileA(path);
+        } while (FindNextFileA(hFind, &fd));
+        (void)FindClose(hFind);
+    }
+#else
+    DIR *d = opendir(dir);
+    if (d) {
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL) {
+            size_t len = strlen(ent->d_name);
+            if (len > 4 && strcmp(ent->d_name + len - 4, ".bin") == 0) {
+                char path[512];
+                (void)snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+                (void)remove(path);
+            } else if (len > 8 && strcmp(ent->d_name + len - 8, ".bin.tmp") == 0) {
+                char path[512];
+                (void)snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+                (void)remove(path);
+            }
+        }
+        (void)closedir(d);
+    }
+#endif
+}
+
+/* Count .bin files in a directory. Returns count. */
+static uint32_t count_bin_files(const char *dir) {
+    uint32_t count = 0;
+#ifdef _WIN32
+    char pattern[512];
+    (void)snprintf(pattern, sizeof(pattern), "%s\\*.bin", dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(pattern, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            count++;
+        } while (FindNextFileA(hFind, &fd));
+        (void)FindClose(hFind);
+    }
+#else
+    DIR *d = opendir(dir);
+    if (d) {
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL) {
+            size_t len = strlen(ent->d_name);
+            if (len > 4 && strcmp(ent->d_name + len - 4, ".bin") == 0) {
+                count++;
+            }
+        }
+        (void)closedir(d);
+    }
+#endif
+    return count;
+}
+
+/* Check that no subdirectories exist in the cache dir (excluding . and ..) */
+static bool cache_has_no_subdirs(const char *dir) {
+#ifdef _WIN32
+    char pattern[512];
+    (void)snprintf(pattern, sizeof(pattern), "%s\\*", dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(pattern, &fd);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        return true;
+    }
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (strcmp(fd.cFileName, ".") != 0 && strcmp(fd.cFileName, "..") != 0) {
+                (void)FindClose(hFind);
+                return false;
+            }
+        }
+    } while (FindNextFileA(hFind, &fd));
+    (void)FindClose(hFind);
+#else
+    DIR *d = opendir(dir);
+    if (!d) {
+        return true;
+    }
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
+            continue;
+        }
+        /* Check if it's a directory by trying to opendir it */
+        char sub[1024];
+        (void)snprintf(sub, sizeof(sub), "%s/%s", dir, ent->d_name);
+        DIR *sd = opendir(sub);
+        if (sd) {
+            (void)closedir(sd);
+            (void)closedir(d);
+            return false;
+        }
+    }
+    (void)closedir(d);
+#endif
+    return true;
+}
+
+/* CACHE-01: Building same pack twice with cache produces identical output */
+void test_cache_hit_skips_encode(void) {
+    const char *pack1 = TMP_DIR "/cache_hit1.ntpack";
+    const char *pack2 = TMP_DIR "/cache_hit2.ntpack";
+    const char *cache = TMP_DIR "/cache";
+    MKDIR(TMP_DIR "/cache");
+    clean_cache_dir(cache);
+
+    write_test_png(TMP_DIR "/cache_tex.png");
+    write_test_shader(TMP_DIR "/cache_vs.glsl", "precision mediump float;\nlayout(location = 0) in vec3 a_pos;\nvoid main() { gl_Position = vec4(a_pos, 1.0); }\n");
+
+    /* Build 1: populates cache */
+    NtBuilderContext *ctx1 = nt_builder_start_pack(pack1);
+    nt_builder_set_cache_dir(ctx1, cache);
+    nt_builder_add_texture(ctx1, TMP_DIR "/cache_tex.png", NULL);
+    nt_builder_add_shader(ctx1, TMP_DIR "/cache_vs.glsl", NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx1));
+    nt_builder_free_pack(ctx1);
+
+    /* Build 2: should hit cache */
+    NtBuilderContext *ctx2 = nt_builder_start_pack(pack2);
+    nt_builder_set_cache_dir(ctx2, cache);
+    nt_builder_add_texture(ctx2, TMP_DIR "/cache_tex.png", NULL);
+    nt_builder_add_shader(ctx2, TMP_DIR "/cache_vs.glsl", NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx2));
+    nt_builder_free_pack(ctx2);
+
+    /* Verify byte-identical output packs */
+    uint32_t size1 = 0;
+    uint32_t size2 = 0;
+    uint8_t *data1 = (uint8_t *)nt_builder_read_file(pack1, &size1);
+    uint8_t *data2 = (uint8_t *)nt_builder_read_file(pack2, &size2);
+    TEST_ASSERT_NOT_NULL(data1);
+    TEST_ASSERT_NOT_NULL(data2);
+    TEST_ASSERT_EQUAL_UINT32(size1, size2);
+    TEST_ASSERT_EQUAL_MEMORY(data1, data2, size1);
+    free(data1);
+    free(data2);
+
+    /* Verify cache dir has .bin files */
+    TEST_ASSERT_TRUE(count_bin_files(cache) > 0);
+}
+
+/* CACHE-02: Changing texture format invalidates cache */
+void test_cache_invalidation_opts(void) {
+    const char *pack1 = TMP_DIR "/cache_opts1.ntpack";
+    const char *pack2 = TMP_DIR "/cache_opts2.ntpack";
+    const char *cache = TMP_DIR "/cache";
+    MKDIR(TMP_DIR "/cache");
+    clean_cache_dir(cache);
+
+    write_test_png(TMP_DIR "/cache_opts_tex.png");
+
+    /* Build 1: RGBA8 (default) */
+    nt_tex_opts_t opts1 = {.format = NT_TEXTURE_FORMAT_RGBA8};
+    NtBuilderContext *ctx1 = nt_builder_start_pack(pack1);
+    nt_builder_set_cache_dir(ctx1, cache);
+    nt_builder_add_texture(ctx1, TMP_DIR "/cache_opts_tex.png", &opts1);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx1));
+    nt_builder_free_pack(ctx1);
+
+    /* Build 2: RGB8 (different) -- should be a cache miss */
+    nt_tex_opts_t opts2 = {.format = NT_TEXTURE_FORMAT_RGB8};
+    NtBuilderContext *ctx2 = nt_builder_start_pack(pack2);
+    nt_builder_set_cache_dir(ctx2, cache);
+    nt_builder_add_texture(ctx2, TMP_DIR "/cache_opts_tex.png", &opts2);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx2));
+    nt_builder_free_pack(ctx2);
+
+    /* Verify: packs differ (RGB8 vs RGBA8 encoded differently) */
+    uint32_t size1 = 0;
+    uint32_t size2 = 0;
+    uint8_t *data1 = (uint8_t *)nt_builder_read_file(pack1, &size1);
+    uint8_t *data2 = (uint8_t *)nt_builder_read_file(pack2, &size2);
+    TEST_ASSERT_NOT_NULL(data1);
+    TEST_ASSERT_NOT_NULL(data2);
+    /* Different format -> different pack data (size or content) */
+    bool differ = (size1 != size2) || (memcmp(data1, data2, size1) != 0);
+    TEST_ASSERT_TRUE(differ);
+    free(data1);
+    free(data2);
+}
+
+/* CACHE-02: Version is included in opts hash (deterministic and nonzero) */
+void test_cache_version_in_opts_hash(void) {
+    /* Create a minimal NtBuildEntry for a blob (simplest kind) */
+    NtBuildEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.kind = NT_BUILD_ASSET_BLOB;
+    entry.data = NULL;
+
+    uint64_t hash1 = nt_builder_compute_opts_hash(&entry);
+    uint64_t hash2 = nt_builder_compute_opts_hash(&entry);
+    TEST_ASSERT_TRUE(hash1 != 0);
+    TEST_ASSERT_EQUAL_UINT64(hash1, hash2);
+
+    /* Different kind -> different hash */
+    NtBuildEntry entry2;
+    memset(&entry2, 0, sizeof(entry2));
+    entry2.kind = NT_BUILD_ASSET_MESH;
+    entry2.data = NULL;
+    uint64_t hash3 = nt_builder_compute_opts_hash(&entry2);
+    TEST_ASSERT_TRUE(hash3 != hash1);
+}
+
+/* CACHE-03: Custom cache dir receives .bin files */
+void test_cache_dir_configurable(void) {
+    const char *pack = TMP_DIR "/cache_custom.ntpack";
+    const char *cache = TMP_DIR "/custom_cache";
+    const char *other_cache = TMP_DIR "/other_cache";
+    MKDIR(cache);
+    MKDIR(other_cache);
+    clean_cache_dir(cache);
+    clean_cache_dir(other_cache);
+
+    write_test_shader(TMP_DIR "/cache_custom_vs.glsl", "precision mediump float;\nlayout(location = 0) in vec3 a_pos;\nvoid main() { gl_Position = vec4(a_pos, 1.0); }\n");
+
+    NtBuilderContext *ctx = nt_builder_start_pack(pack);
+    nt_builder_set_cache_dir(ctx, cache);
+    nt_builder_add_shader(ctx, TMP_DIR "/cache_custom_vs.glsl", NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    /* Verify .bin files appear in the custom directory */
+    TEST_ASSERT_TRUE(count_bin_files(cache) > 0);
+
+    /* Verify no .bin files in a different directory (proves cache dir is respected) */
+    TEST_ASSERT_EQUAL_UINT32(0, count_bin_files(other_cache));
+}
+
+/* CACHE-03: Clearing cache forces full rebuild with correct output */
+void test_cache_clear_forces_rebuild(void) {
+    const char *pack1 = TMP_DIR "/cache_clear1.ntpack";
+    const char *pack2 = TMP_DIR "/cache_clear2.ntpack";
+    const char *cache = TMP_DIR "/cache";
+    MKDIR(TMP_DIR "/cache");
+    clean_cache_dir(cache);
+
+    write_test_png(TMP_DIR "/cache_clear_tex.png");
+
+    /* Build 1: populates cache */
+    NtBuilderContext *ctx1 = nt_builder_start_pack(pack1);
+    nt_builder_set_cache_dir(ctx1, cache);
+    nt_builder_add_texture(ctx1, TMP_DIR "/cache_clear_tex.png", NULL);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx1));
+    nt_builder_free_pack(ctx1);
+
+    /* Clear cache */
+    clean_cache_dir(cache);
+    TEST_ASSERT_EQUAL_UINT32(0, count_bin_files(cache));
+
+    /* Build 2: should rebuild from scratch (all miss) */
+    NtBuilderContext *ctx2 = nt_builder_start_pack(pack2);
+    nt_builder_set_cache_dir(ctx2, cache);
+    nt_builder_add_texture(ctx2, TMP_DIR "/cache_clear_tex.png", NULL);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx2));
+    nt_builder_free_pack(ctx2);
+
+    /* Verify output pack is byte-identical (rebuild produces same result) */
+    uint32_t size1 = 0;
+    uint32_t size2 = 0;
+    uint8_t *data1 = (uint8_t *)nt_builder_read_file(pack1, &size1);
+    uint8_t *data2 = (uint8_t *)nt_builder_read_file(pack2, &size2);
+    TEST_ASSERT_NOT_NULL(data1);
+    TEST_ASSERT_NOT_NULL(data2);
+    TEST_ASSERT_EQUAL_UINT32(size1, size2);
+    TEST_ASSERT_EQUAL_MEMORY(data1, data2, size1);
+    free(data1);
+    free(data2);
+}
+
+/* CACHE-04: Flat file layout -- .bin files, no subdirectories, no index */
+void test_cache_flat_files(void) {
+    const char *pack = TMP_DIR "/cache_flat.ntpack";
+    const char *cache = TMP_DIR "/cache";
+    MKDIR(TMP_DIR "/cache");
+    clean_cache_dir(cache);
+
+    write_test_png(TMP_DIR "/cache_flat_tex.png");
+    write_test_shader(TMP_DIR "/cache_flat_vs.glsl", "precision mediump float;\nlayout(location = 0) in vec3 a_pos;\nvoid main() { gl_Position = vec4(a_pos, 1.0); }\n");
+
+    NtBuilderContext *ctx = nt_builder_start_pack(pack);
+    nt_builder_set_cache_dir(ctx, cache);
+    nt_builder_add_texture(ctx, TMP_DIR "/cache_flat_tex.png", NULL);
+    nt_builder_add_shader(ctx, TMP_DIR "/cache_flat_vs.glsl", NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+
+    /* Verify: 2 unique assets -> 2 cache files */
+    uint32_t bin_count = count_bin_files(cache);
+    TEST_ASSERT_EQUAL_UINT32(2, bin_count);
+
+    /* Verify: no subdirectories */
+    TEST_ASSERT_TRUE(cache_has_no_subdirs(cache));
+
+    /* Verify: filenames match {16hex}_{16hex}.bin pattern (37 chars total) */
+#ifdef _WIN32
+    {
+        char pattern[512];
+        (void)snprintf(pattern, sizeof(pattern), "%s\\*.bin", cache);
+        WIN32_FIND_DATAA fd;
+        HANDLE hFind = FindFirstFileA(pattern, &fd);
+        TEST_ASSERT_TRUE(hFind != INVALID_HANDLE_VALUE);
+        do {
+            size_t name_len = strlen(fd.cFileName);
+            /* {16hex}_{16hex}.bin = 16 + 1 + 16 + 4 = 37 chars */
+            TEST_ASSERT_EQUAL_UINT32(37, (uint32_t)name_len);
+            /* Underscore separator at position 16 */
+            TEST_ASSERT_EQUAL_CHAR('_', fd.cFileName[16]);
+            /* .bin suffix */
+            TEST_ASSERT_EQUAL_STRING(".bin", fd.cFileName + name_len - 4);
+        } while (FindNextFileA(hFind, &fd));
+        (void)FindClose(hFind);
+    }
+#else
+    {
+        DIR *d = opendir(cache);
+        TEST_ASSERT_NOT_NULL(d);
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL) {
+            size_t len = strlen(ent->d_name);
+            if (len > 4 && strcmp(ent->d_name + len - 4, ".bin") == 0) {
+                TEST_ASSERT_EQUAL_UINT32(37, (uint32_t)len);
+                TEST_ASSERT_EQUAL_CHAR('_', ent->d_name[16]);
+            }
+        }
+        (void)closedir(d);
+    }
+#endif
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -2557,6 +2918,14 @@ int main(void) {
     RUN_TEST(test_dedup_cross_source_texture_file_vs_memory);
     RUN_TEST(test_dedup_cross_source_mesh_file_vs_scene);
     RUN_TEST(test_dedup_cross_source_texture_memory_vs_raw);
+
+    /* Cache */
+    RUN_TEST(test_cache_hit_skips_encode);
+    RUN_TEST(test_cache_invalidation_opts);
+    RUN_TEST(test_cache_version_in_opts_hash);
+    RUN_TEST(test_cache_dir_configurable);
+    RUN_TEST(test_cache_clear_forces_rebuild);
+    RUN_TEST(test_cache_flat_files);
 
     return UNITY_END();
 }
