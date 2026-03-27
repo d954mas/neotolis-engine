@@ -459,8 +459,8 @@ static void populate_tex(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
 static void populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     /* Overlay pack: full-res textures + meshes + manifest.
      * Shaders come from sponza_core (always loaded first). */
-    nt_tex_compress_opts_t color = nt_tex_compress_uastc_high();
-    nt_tex_compress_opts_t normal = nt_tex_compress_uastc_highest();
+    nt_tex_compress_opts_t color = nt_tex_compress_uastc_default();
+    nt_tex_compress_opts_t normal = nt_tex_compress_uastc_default();
     add_textures(ctx, scene, 0, &color, &normal);
     add_meshes_and_manifest(ctx, scene, false);
 }
