@@ -232,6 +232,23 @@ void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx);
 /* Forward declaration for texture re-decode (defined below make_texture_data) */
 static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w, uint32_t *out_h);
 
+static void increment_kind_counter(NtBuilderContext *ctx, nt_build_asset_kind_t kind) {
+    switch (kind) {
+    case NT_BUILD_ASSET_MESH:
+        ctx->mesh_count++;
+        break;
+    case NT_BUILD_ASSET_TEXTURE:
+        ctx->texture_count++;
+        break;
+    case NT_BUILD_ASSET_SHADER:
+        ctx->shader_count++;
+        break;
+    case NT_BUILD_ASSET_BLOB:
+        ctx->blob_count++;
+        break;
+    }
+}
+
 /* --- Early dedup: compare decoded_data + encoding opts --- */
 
 static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
@@ -412,21 +429,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 ctx->cache_hit_count++;
                 encode_times[i] = 0.0; /* no encode time for cached assets */
 
-                /* Per-type counters (same as encode path) */
-                switch (pe->kind) {
-                case NT_BUILD_ASSET_MESH:
-                    ctx->mesh_count++;
-                    break;
-                case NT_BUILD_ASSET_TEXTURE:
-                    ctx->texture_count++;
-                    break;
-                case NT_BUILD_ASSET_SHADER:
-                    ctx->shader_count++;
-                    break;
-                case NT_BUILD_ASSET_BLOB:
-                    ctx->blob_count++;
-                    break;
-                }
+                increment_kind_counter(ctx, pe->kind);
                 NT_LOG_INFO("  [%u/%u] %s (cached)", i + 1, ctx->pending_count, pe->path);
                 continue; /* skip encode switch entirely */
             }
@@ -483,38 +486,19 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
         NT_BUILD_ASSERT(ret == NT_BUILD_OK && "asset encode failed -- see error above");
 
-        /* Per-type counters */
-        switch (pe->kind) {
-        case NT_BUILD_ASSET_MESH:
-            ctx->mesh_count++;
-            break;
-        case NT_BUILD_ASSET_TEXTURE:
-            ctx->texture_count++;
-            break;
-        case NT_BUILD_ASSET_SHADER:
-            ctx->shader_count++;
-            break;
-        case NT_BUILD_ASSET_BLOB:
-            ctx->blob_count++;
-            break;
-        }
+        increment_kind_counter(ctx, pe->kind);
 
         /* Cache store: save encoded bytes for future builds (per D-13: raw bytes only) */
         if (ctx->cache_dir && cache_status[i] != NT_CACHE_HIT) {
-            /* Find the just-registered entry to get offset and size */
-            NtAssetEntry *registered = NULL;
-            for (uint32_t ei = 0; ei < ctx->entry_count; ei++) {
-                if (ctx->entries[ei].resource_id == pe->resource_id) {
-                    registered = &ctx->entries[ei];
-                    break;
-                }
-            }
-            if (registered) {
-                /* Store encoded bytes from data_buf at the registered offset.
-                 * Even if register_asset performed post-encode dedup (rewind),
-                 * the bytes at registered->offset are still valid (see Pitfall 1 in RESEARCH).
-                 * registered->offset is data_buf-relative at this point (not yet shifted by header_size). */
-                nt_builder_cache_store(ctx->cache_dir, pe->decoded_hash, opts_hash, ctx->data_buf + registered->offset, registered->size);
+            /* Just-registered entry is always at entry_count - 1 */
+            NT_BUILD_ASSERT(ctx->entry_count > 0);
+            const NtAssetEntry *registered = &ctx->entries[ctx->entry_count - 1];
+            /* Store encoded bytes from data_buf at the registered offset.
+             * Even if register_asset performed post-encode dedup (rewind),
+             * the bytes at registered->offset are still valid.
+             * registered->offset is data_buf-relative at this point (not yet shifted by header_size). */
+            if (!nt_builder_cache_store(ctx->cache_dir, pe->decoded_hash, opts_hash, ctx->data_buf + registered->offset, registered->size)) {
+                NT_LOG_WARN("cache store failed for %s", pe->path);
             }
         }
 

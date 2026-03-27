@@ -76,6 +76,7 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         break;
     }
 
+    NT_BUILD_ASSERT(pos <= sizeof(buf) && "opts_hash: buffer overflow — increase buf size");
     nt_hash64_t h = nt_hash64(buf, pos);
     return h.value;
 }

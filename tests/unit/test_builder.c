@@ -2811,6 +2811,49 @@ void test_cache_flat_files(void) {
 #endif
 }
 
+/* Cache + early dedup interaction: original cached, duplicate early-deduped.
+ * Build 1: A + B(=copy of A) → A encoded+cached, B early-deduped to A → pack valid.
+ * Build 2: A hits cache, B early-deduped to A → pack identical to build 1. */
+void test_cache_with_dedup(void) {
+    const char *pack1 = TMP_DIR "/cache_dedup1.ntpack";
+    const char *pack2 = TMP_DIR "/cache_dedup2.ntpack";
+    const char *cache = TMP_DIR "/cache";
+    MKDIR(cache);
+    clean_cache_dir(cache);
+
+    /* Two files with identical content but different paths → early dedup */
+    write_test_shader(TMP_DIR "/cache_dedup_a.glsl", "attribute vec4 p;\nvoid main() { gl_Position = p; }");
+    write_test_shader(TMP_DIR "/cache_dedup_b.glsl", "attribute vec4 p;\nvoid main() { gl_Position = p; }");
+
+    /* Build 1: A encoded+cached, B early-deduped to A */
+    NtBuilderContext *ctx1 = nt_builder_start_pack(pack1);
+    nt_builder_set_cache_dir(ctx1, cache);
+    nt_builder_add_shader(ctx1, TMP_DIR "/cache_dedup_a.glsl", NT_BUILD_SHADER_VERTEX);
+    nt_builder_add_shader(ctx1, TMP_DIR "/cache_dedup_b.glsl", NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx1));
+    nt_builder_free_pack(ctx1);
+
+    /* Build 2: A from cache hit, B from early dedup */
+    NtBuilderContext *ctx2 = nt_builder_start_pack(pack2);
+    nt_builder_set_cache_dir(ctx2, cache);
+    nt_builder_add_shader(ctx2, TMP_DIR "/cache_dedup_a.glsl", NT_BUILD_SHADER_VERTEX);
+    nt_builder_add_shader(ctx2, TMP_DIR "/cache_dedup_b.glsl", NT_BUILD_SHADER_VERTEX);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx2));
+    nt_builder_free_pack(ctx2);
+
+    /* Verify byte-identical packs */
+    uint32_t size1 = 0;
+    uint8_t *data1 = (uint8_t *)nt_builder_read_file(pack1, &size1);
+    uint32_t size2 = 0;
+    uint8_t *data2 = (uint8_t *)nt_builder_read_file(pack2, &size2);
+    TEST_ASSERT_NOT_NULL(data1);
+    TEST_ASSERT_NOT_NULL(data2);
+    TEST_ASSERT_EQUAL_UINT32(size1, size2);
+    TEST_ASSERT_EQUAL_MEMORY(data1, data2, size1);
+    free(data1);
+    free(data2);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -2926,6 +2969,7 @@ int main(void) {
     RUN_TEST(test_cache_dir_configurable);
     RUN_TEST(test_cache_clear_forces_rebuild);
     RUN_TEST(test_cache_flat_files);
+    RUN_TEST(test_cache_with_dedup);
 
     return UNITY_END();
 }
