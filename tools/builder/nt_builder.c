@@ -608,23 +608,28 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_LOG_INFO("Build complete: %s", ctx->output_path);
     NT_LOG_INFO("");
 
-    /* Per-asset table */
+    /* Per-asset table — iterate pending (has name/type/time), find matching entry (has size) */
     NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "#", "Name", "Type", "Size", "Time");
     NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "--", "----", "----", "----", "----");
     static const char *kind_names[] = {"MESH", "TEX", "SHADER", "BLOB"};
-    for (uint32_t i = 0; i < ctx->entry_count; i++) {
-        const char *path = (i < ctx->pending_count && ctx->pending[i].path) ? ctx->pending[i].path : "(unknown)";
-        const char *rkey = (i < ctx->pending_count) ? ctx->pending[i].rename_key : NULL;
-        const char *display = rkey ? rkey : path;
-        const char *type_name = "UNKNOWN";
-        if (i < ctx->pending_count && (uint32_t)ctx->pending[i].kind < 4) {
-            type_name = kind_names[ctx->pending[i].kind];
+    for (uint32_t i = 0; i < ctx->pending_count; i++) {
+        const NtBuildEntry *pe = &ctx->pending[i];
+        const char *display = pe->rename_key ? pe->rename_key : pe->path;
+        const char *type_name = ((uint32_t)pe->kind < 4) ? kind_names[pe->kind] : "UNKNOWN";
+
+        /* Find corresponding NtAssetEntry by resource_id */
+        uint32_t raw_sz = 0;
+        uint32_t gz_sz = 0;
+        for (uint32_t ei = 0; ei < ctx->entry_count; ei++) {
+            if (ctx->entries[ei].resource_id == pe->resource_id) {
+                raw_sz = ctx->entries[ei].size;
+                gz_sz = gz_sizes[ei];
+                break;
+            }
         }
 
         /* Format size with gzip */
         char size_str[64];
-        uint32_t raw_sz = ctx->entries[i].size;
-        uint32_t gz_sz = gz_sizes[i];
         char raw_str[16];
         char gz_str[16];
         nt_format_size(raw_sz, raw_str, sizeof(raw_str));
@@ -799,6 +804,7 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_te
 
     /* Store resolved path for re-read at encode time (before freeing resolved_path) */
     char *stored_path = strdup(read_path);
+    NT_BUILD_ASSERT(stored_path && "add_texture: strdup failed");
     free(resolved_path);
 
     /* Decode to RGBA */
