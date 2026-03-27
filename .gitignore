@@ -39,6 +39,7 @@ package-lock.json
 
 #codex branch diff
 branch_diff.patch
+diff.txt
 diff_*.txt
 *.patch
 

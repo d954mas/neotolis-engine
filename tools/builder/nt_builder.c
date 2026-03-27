@@ -431,6 +431,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
                 increment_kind_counter(ctx, pe->kind);
                 NT_LOG_INFO("  [%u/%u] %s (cached)", i + 1, ctx->pending_count, pe->path);
+                (void)fflush(stdout); /* ensure visibility in CI/pipe environments */
                 continue; /* skip encode switch entirely */
             }
 
@@ -504,6 +505,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
         encode_times[i] = nt_time_now() - t_asset_start;
         NT_LOG_INFO("  [%u/%u] %s (%.2fs)", i + 1, ctx->pending_count, pe->path, encode_times[i]);
+        (void)fflush(stdout); /* ensure visibility in CI/pipe environments */
     }
 
     /* Register early-deduped entries (copy offset/size from original) */

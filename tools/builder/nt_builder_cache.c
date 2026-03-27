@@ -205,15 +205,18 @@ bool nt_builder_cache_store(const char *cache_dir, uint64_t decoded_hash, uint64
         return false;
     }
 
-    /* Atomic rename (overwrite on POSIX, may need remove on Windows) */
+    /* Atomic rename (overwrite on POSIX, atomic replace on Windows) */
 #ifdef _WIN32
-    /* Windows rename fails if destination exists; remove first */
-    (void)remove(path);
-#endif
+    if (!MoveFileExA(tmp_path, path, MOVEFILE_REPLACE_EXISTING)) {
+        (void)remove(tmp_path);
+        return false;
+    }
+#else
     if (rename(tmp_path, path) != 0) {
         (void)remove(tmp_path);
         return false;
     }
+#endif
 
     return true;
 }

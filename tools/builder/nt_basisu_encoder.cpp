@@ -15,11 +15,13 @@ void nt_basisu_encoder_init(void) {
     basisu::basisu_encoder_init();
     if (!s_job_pool) {
         uint32_t threads = std::thread::hardware_concurrency();
-        /* hardware_concurrency() may return 0 in containers/CI — clamp to at least 1 */
-        if (threads <= 1) {
+        /* Default: reserve 1 core for interactive use.
+         * NT_BUILDER_ALL_CORES=1: use all cores (CI, dedicated build machines). */
+        if (threads > 1 && !std::getenv("NT_BUILDER_ALL_CORES")) { // NOLINT(concurrency-mt-unsafe)
+            threads--;
+        }
+        if (threads < 1) {
             threads = 1;
-        } else {
-            threads--; /* Reserve 1 core for OS/user */
         }
         s_job_pool = new basisu::job_pool(threads);
     }
