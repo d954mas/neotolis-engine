@@ -3,6 +3,7 @@
 #include "hash/nt_hash.h"
 #include "nt_blob_format.h"
 #include "nt_crc32.h"
+#include "nt_shader_format.h"
 #include "time/nt_time.h"
 /* Avoid zlib-compat macros (compress, compress2) colliding with struct field names */
 #define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
@@ -206,6 +207,7 @@ static void nt_builder_free_context(NtBuilderContext *ctx) {
         free(ctx->asset_roots[i]);
     }
     free(ctx->header_dir);
+    free(ctx->cache_dir);
     free(ctx);
 }
 
@@ -279,6 +281,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     double t_encode_start = nt_time_now();
     double encode_times[NT_BUILD_MAX_ASSETS];
     memset(encode_times, 0, sizeof(encode_times));
+    nt_cache_status_t cache_status[NT_BUILD_MAX_ASSETS];
+    memset(cache_status, 0, sizeof(cache_status));
+    double cache_restore_secs = 0.0;
 
     /* Phase 0: Early dedup on hash + size + opts */
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
@@ -358,6 +363,77 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
         NT_LOG_INFO("  [%u/%u] %s", i + 1, ctx->pending_count, pe->path);
         double t_asset_start = nt_time_now();
+
+        /* Cache check: skip encode if cached (D-11 pipeline: early dedup -> cache -> encode) */
+        if (ctx->cache_dir) {
+            uint64_t opts_hash = nt_builder_compute_opts_hash(pe);
+            uint8_t *cached_data = NULL;
+            uint32_t cached_size = 0;
+            nt_cache_status_t status = nt_builder_cache_lookup(ctx->cache_dir, pe->decoded_hash, opts_hash, &cached_data, &cached_size);
+
+            if (status == NT_CACHE_HIT) {
+                /* Cache hit -- inject cached encoded bytes (D-05: skip encode) */
+                double t_restore_start = nt_time_now();
+                nt_build_result_t cr = nt_builder_append_data(ctx, cached_data, cached_size);
+                NT_BUILD_ASSERT(cr == NT_BUILD_OK && "cache restore: append_data failed");
+                free(cached_data);
+
+                /* Derive asset_type and format_version from kind (deterministic 1:1 mapping) */
+                nt_asset_type_t asset_type;
+                uint16_t version;
+                switch (pe->kind) {
+                case NT_BUILD_ASSET_MESH:
+                    asset_type = NT_ASSET_MESH;
+                    version = NT_MESH_VERSION;
+                    break;
+                case NT_BUILD_ASSET_TEXTURE:
+                    asset_type = NT_ASSET_TEXTURE;
+                    version = NT_TEXTURE_VERSION_V2;
+                    break;
+                case NT_BUILD_ASSET_SHADER:
+                    asset_type = NT_ASSET_SHADER_CODE;
+                    version = NT_SHADER_CODE_VERSION;
+                    break;
+                case NT_BUILD_ASSET_BLOB:
+                    asset_type = NT_ASSET_BLOB;
+                    version = NT_BLOB_VERSION;
+                    break;
+                default:
+                    NT_BUILD_ASSERT(0 && "unknown asset kind in cache hit path");
+                    asset_type = 0;
+                    version = 0;
+                }
+                cr = nt_builder_register_asset(ctx, pe->resource_id, asset_type, version, cached_size);
+                NT_BUILD_ASSERT(cr == NT_BUILD_OK && "cache restore: register_asset failed");
+
+                cache_restore_secs += nt_time_now() - t_restore_start;
+                cache_status[i] = NT_CACHE_HIT;
+                ctx->cache_hit_count++;
+                encode_times[i] = 0.0; /* no encode time for cached assets */
+
+                /* Per-type counters (same as encode path) */
+                switch (pe->kind) {
+                case NT_BUILD_ASSET_MESH:
+                    ctx->mesh_count++;
+                    break;
+                case NT_BUILD_ASSET_TEXTURE:
+                    ctx->texture_count++;
+                    break;
+                case NT_BUILD_ASSET_SHADER:
+                    ctx->shader_count++;
+                    break;
+                case NT_BUILD_ASSET_BLOB:
+                    ctx->blob_count++;
+                    break;
+                }
+                continue; /* skip encode switch entirely */
+            }
+
+            /* Cache miss -- record status, fall through to encode */
+            cache_status[i] = status;
+            ctx->cache_miss_count++;
+        }
+
         nt_build_result_t ret = NT_BUILD_OK;
 
         switch (pe->kind) {
@@ -421,6 +497,26 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             ctx->blob_count++;
             break;
         }
+
+        /* Cache store: save encoded bytes for future builds (per D-13: raw bytes only) */
+        if (ctx->cache_dir && cache_status[i] != NT_CACHE_HIT) {
+            uint64_t opts_hash = nt_builder_compute_opts_hash(pe);
+            /* Find the just-registered entry to get offset and size */
+            NtAssetEntry *registered = NULL;
+            for (uint32_t ei = 0; ei < ctx->entry_count; ei++) {
+                if (ctx->entries[ei].resource_id == pe->resource_id) {
+                    registered = &ctx->entries[ei];
+                    break;
+                }
+            }
+            if (registered) {
+                /* Store encoded bytes from data_buf at the registered offset.
+                 * Even if register_asset performed post-encode dedup (rewind),
+                 * the bytes at registered->offset are still valid (see Pitfall 1 in RESEARCH).
+                 * registered->offset is data_buf-relative at this point (not yet shifted by header_size). */
+                nt_builder_cache_store(ctx->cache_dir, pe->decoded_hash, opts_hash, ctx->data_buf + registered->offset, registered->size);
+            }
+        }
     }
 
     /* Register early-deduped entries (copy offset/size from original) */
@@ -465,6 +561,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     NT_BUILD_ASSERT(ctx->entry_count == ctx->pending_count && "entry/pending count mismatch after encode+dedup registration");
 
+    ctx->cache_restore_secs = cache_restore_secs;
     double encode_secs = nt_time_now() - t_encode_start;
 
     /* Phase 1b: Write meta section to data_buf (appended after asset data).
