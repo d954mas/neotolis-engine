@@ -107,6 +107,7 @@ static bool validate_shader_compile(const char *source, GLenum gl_type, const ch
 
 static nt_build_result_t validate_shader(const char *source, nt_build_shader_stage_t stage, const char *path) {
     if (!s_gl_available) {
+        NT_LOG_WARN("  %s: GL compile validation skipped (no GL context)", path);
         return NT_BUILD_OK; /* D-08: skip if no context */
     }
 
@@ -244,25 +245,13 @@ nt_build_result_t nt_builder_encode_shader(NtBuilderContext *ctx, const uint8_t 
 
     collapse_whitespace(stripped, &stripped_len);
 
-    if (strstr(stripped, "#version") != NULL) {
-        NT_LOG_ERROR("shader: #version directive found -- runtime adds it per platform, remove from source");
-        free(stripped);
-        return NT_BUILD_ERR_VALIDATION;
-    }
-
-    if (strstr(stripped, "void main") == NULL) {
-        NT_LOG_ERROR("shader: missing void main()");
-        free(stripped);
-        return NT_BUILD_ERR_VALIDATION;
-    }
+    NT_BUILD_ASSERT(strstr(stripped, "#version") == NULL && "shader: #version directive found -- runtime adds it per platform, remove from source");
+    NT_BUILD_ASSERT(strstr(stripped, "void main") != NULL && "shader: missing void main()");
 
     /* GL compile validation (D-01: validate at encode time) */
     ensure_gl_context();
     nt_build_result_t val_result = validate_shader(stripped, stage, "shader");
-    if (val_result != NT_BUILD_OK) {
-        free(stripped);
-        return val_result; /* D-05: compile failure = pack build error */
-    }
+    NT_BUILD_ASSERT(val_result == NT_BUILD_OK && "shader: GL compile failed -- see error above");
 
     uint32_t code_size = stripped_len + 1;
 
