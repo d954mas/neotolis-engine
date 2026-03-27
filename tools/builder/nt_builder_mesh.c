@@ -306,9 +306,6 @@ nt_build_result_t nt_builder_build_mesh_buffer(const NtStreamLayout *layout, uin
     uint32_t total = (uint32_t)sizeof(NtMeshAssetHeader) + descs_size + vertex_data_size + index_data_size;
 
     uint8_t *buf = (uint8_t *)malloc(total);
-    if (!buf) {
-        free(vertex_buf);
-    }
     NT_BUILD_ASSERT(buf && "mesh buffer alloc failed");
 
     uint32_t off = 0;
