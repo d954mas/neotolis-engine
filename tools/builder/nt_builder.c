@@ -253,7 +253,8 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
             return false;
         }
         if (ta->has_compress) {
-            if (ta->compress.mode != tb->compress.mode || ta->compress.quality != tb->compress.quality || ta->compress.rdo_quality != tb->compress.rdo_quality) {
+            if (ta->compress.mode != tb->compress.mode || ta->compress.quality != tb->compress.quality || ta->compress.endpoint_rdo_quality != tb->compress.endpoint_rdo_quality ||
+                ta->compress.selector_rdo_quality != tb->compress.selector_rdo_quality) {
                 return false;
             }
         }
@@ -361,7 +362,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             continue;
         }
 
-        NT_LOG_INFO("  [%u/%u] %s", i + 1, ctx->pending_count, pe->path);
         double t_asset_start = nt_time_now();
 
         /* Cache check: skip encode if cached (D-11 pipeline: early dedup -> cache -> encode) */
@@ -426,6 +426,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                     ctx->blob_count++;
                     break;
                 }
+                NT_LOG_INFO("  [%u/%u] %s (cached)", i + 1, ctx->pending_count, pe->path);
                 continue; /* skip encode switch entirely */
             }
 
@@ -479,7 +480,6 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
         }
 
-        encode_times[i] = nt_time_now() - t_asset_start;
         NT_BUILD_ASSERT(ret == NT_BUILD_OK && "asset encode failed -- see error above");
 
         /* Per-type counters */
@@ -517,6 +517,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 nt_builder_cache_store(ctx->cache_dir, pe->decoded_hash, opts_hash, ctx->data_buf + registered->offset, registered->size);
             }
         }
+
+        encode_times[i] = nt_time_now() - t_asset_start;
+        NT_LOG_INFO("  [%u/%u] %s (%.2fs)", i + 1, ctx->pending_count, pe->path, encode_times[i]);
     }
 
     /* Register early-deduped entries (copy offset/size from original) */

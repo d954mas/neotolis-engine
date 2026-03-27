@@ -150,19 +150,31 @@ typedef enum {
 } nt_tex_compress_mode_t;
 
 struct nt_tex_compress_opts_t {
-    nt_tex_compress_mode_t mode; /* ETC1S or UASTC */
-    uint32_t quality;            /* ETC1S: 1-255 (higher=better), UASTC: 0-5 (pack level) */
-    float rdo_quality;           /* ETC1S: rate-distortion optimization (0.0 = disabled), UASTC: unused */
+    nt_tex_compress_mode_t mode;    /* ETC1S or UASTC */
+    uint32_t quality;               /* ETC1S: 1-255 (higher=better), UASTC: 0-4 (pack level) */
+    float endpoint_rdo_quality;     /* ETC1S: endpoint RDO threshold (0.0 = disabled). UASTC: RDO lambda (0.0 = disabled) */
+    float selector_rdo_quality;     /* ETC1S: selector RDO threshold (0.0 = disabled). UASTC: ignored */
 };
 
-/* --- Compression presets (D-04) --- */
+/* --- Compression presets (5 levels: lowest → highest) --- */
 
-static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_low(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 64, .rdo_quality = 1.0F}; }
-static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_mid(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 128, .rdo_quality = 1.5F}; }
-static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_high(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 200, .rdo_quality = 0.0F}; }
-static inline nt_tex_compress_opts_t nt_tex_compress_uastc_low(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 0, .rdo_quality = 0.0F}; }
-static inline nt_tex_compress_opts_t nt_tex_compress_uastc_mid(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 2, .rdo_quality = 0.0F}; }
-static inline nt_tex_compress_opts_t nt_tex_compress_uastc_high(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 4, .rdo_quality = 0.0F}; }
+/* ETC1S: variable-rate, smaller files, good for diffuse/color.
+ * Basis defaults: quality=128, endpoint_rdo=1.5, selector_rdo=1.25
+ * quality: 1-255 (encode effort). RDO: block merging for smaller files (0 = off). */
+static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_lowest(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 1, .endpoint_rdo_quality = 1.5F, .selector_rdo_quality = 1.25F}; }
+static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_low(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 64, .endpoint_rdo_quality = 1.5F, .selector_rdo_quality = 1.25F}; }
+static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_default(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 128, .endpoint_rdo_quality = 1.5F, .selector_rdo_quality = 1.25F}; }
+static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_high(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 200, .endpoint_rdo_quality = 1.5F, .selector_rdo_quality = 1.25F}; }
+static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_highest(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 255, .endpoint_rdo_quality = 0.0F, .selector_rdo_quality = 0.0F}; }
+
+/* UASTC: fixed-rate GPU blocks, higher quality. RDO makes blocks similar for better gzip/zstd.
+ * Basis defaults: pack_level=2, rdo_lambda=1.0, dict_size=32768 (set in encoder).
+ * quality: 0-4 (pack level / mode search depth). endpoint_rdo: RDO lambda (0 = off). */
+static inline nt_tex_compress_opts_t nt_tex_compress_uastc_lowest(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 0, .endpoint_rdo_quality = 2.0F}; }
+static inline nt_tex_compress_opts_t nt_tex_compress_uastc_low(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 1, .endpoint_rdo_quality = 1.5F}; }
+static inline nt_tex_compress_opts_t nt_tex_compress_uastc_default(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 2, .endpoint_rdo_quality = 1.0F}; }
+static inline nt_tex_compress_opts_t nt_tex_compress_uastc_high(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 3, .endpoint_rdo_quality = 0.5F}; }
+static inline nt_tex_compress_opts_t nt_tex_compress_uastc_highest(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 4, .endpoint_rdo_quality = 0.0F}; }
 
 /* --- Core API ---
  * Lifecycle: start_pack → add_* → finish_pack → free_pack.

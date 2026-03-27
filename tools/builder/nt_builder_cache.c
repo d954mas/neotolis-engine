@@ -54,9 +54,13 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
             memcpy(buf + pos, &quality, sizeof(quality));
             pos += (uint32_t)sizeof(quality);
 
-            float rdo = td->compress.rdo_quality;
-            memcpy(buf + pos, &rdo, sizeof(rdo));
-            pos += (uint32_t)sizeof(rdo);
+            float endpoint_rdo = td->compress.endpoint_rdo_quality;
+            memcpy(buf + pos, &endpoint_rdo, sizeof(endpoint_rdo));
+            pos += (uint32_t)sizeof(endpoint_rdo);
+
+            float selector_rdo = td->compress.selector_rdo_quality;
+            memcpy(buf + pos, &selector_rdo, sizeof(selector_rdo));
+            pos += (uint32_t)sizeof(selector_rdo);
         }
         break;
     }

@@ -2,8 +2,8 @@
  * Build four .ntpack packs for the Sponza demo (progressive loading):
  *   sponza_core.ntpack -- shaders + manifest + placeholder textures (~60-80 KB)
  *   sponza_geo.ntpack  -- all meshes, float16/int16 (~2-3 MB)
- *   sponza_tex.ntpack  -- all textures, 512px max (~43 MB)
- *   sponza_full.ntpack -- full quality meshes + textures + manifest (overlay, shaders from core)
+ *   sponza_tex.ntpack  -- all textures, 512px max, ETC1S compressed
+ *   sponza_full.ntpack -- full quality meshes + textures + manifest (overlay, UASTC compressed)
  *
  * All packs share resource_ids -- pack stacking (priority) resolves at runtime.
  * Core loads first for instant feedback, geo next for visible geometry, then
@@ -117,9 +117,11 @@ static bool texture_needs_alpha(const nt_glb_scene_t *scene, uint32_t tex_index,
 }
 
 /* --- Add all textures with per-role format, optional resize, and optional compression --- */
+/* color_compress: compression for diffuse/specular/unknown textures (NULL = no compression)
+ * normal_compress: compression for normal maps (NULL = no compression) */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t max_size, const nt_tex_compress_opts_t *compress_opts) {
+static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t max_size, const nt_tex_compress_opts_t *color_compress, const nt_tex_compress_opts_t *normal_compress) {
     tex_role_t *roles = build_texture_roles(scene);
     cgltf_data *gltf = (cgltf_data *)scene->_internal;
 
@@ -144,18 +146,7 @@ static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uin
             break;
         }
 
-        /* Select compression per texture role:
-         * Normal maps use UASTC for higher quality, everything else uses the provided preset (ETC1S).
-         * NULL compress_opts = raw v1 format (no compression). */
-        const nt_tex_compress_opts_t *tex_compress = compress_opts;
-        nt_tex_compress_opts_t normal_compress;
-        memset(&normal_compress, 0, sizeof(normal_compress));
-        if (compress_opts != NULL && roles[i] == TEX_ROLE_NORMAL) {
-            normal_compress = nt_tex_compress_uastc_mid();
-            tex_compress = &normal_compress;
-        }
-
-        opts.compress = tex_compress;
+        opts.compress = (roles[i] == TEX_ROLE_NORMAL) ? normal_compress : color_compress;
         nt_builder_add_texture_from_memory(ctx, scene->textures[i].data, scene->textures[i].size, tex_rid(i), &opts);
         added++;
     }
@@ -420,7 +411,8 @@ static void add_meshes_and_manifest(NtBuilderContext *ctx, const nt_glb_scene_t 
 
 /* --- Main --- */
 
-static nt_build_result_t build_pack(const char *out_dir, const char *hdr_dir, const char *name, const nt_glb_scene_t *scene, void (*populate)(NtBuilderContext *, const nt_glb_scene_t *)) {
+static nt_build_result_t build_pack(const char *out_dir, const char *hdr_dir, const char *cache_dir, const char *name, const nt_glb_scene_t *scene,
+                                    void (*populate)(NtBuilderContext *, const nt_glb_scene_t *)) {
     (void)printf("--- Building %s ---\n", name);
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, name));
     if (!ctx) {
@@ -428,6 +420,7 @@ static nt_build_result_t build_pack(const char *out_dir, const char *hdr_dir, co
         return NT_BUILD_ERR_IO;
     }
     nt_builder_set_header_dir(ctx, hdr_dir);
+    nt_builder_set_cache_dir(ctx, cache_dir);
 
     populate(ctx, scene);
 
@@ -453,17 +446,17 @@ static void populate_core(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
 static void populate_geo(NtBuilderContext *ctx, const nt_glb_scene_t *scene) { add_meshes(ctx, scene, true); }
 
 static void populate_tex(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
-    /* TODO(#95): enable after builder cache — tex pack gzipped: 22.5MB raw → 6.4MB basis (-71%) */
-    /* nt_tex_compress_opts_t compress = nt_tex_compress_etc1s_low(); */
-    add_textures(ctx, scene, 512, NULL);
+    nt_tex_compress_opts_t color = nt_tex_compress_etc1s_default();
+    nt_tex_compress_opts_t normal = nt_tex_compress_uastc_default();
+    add_textures(ctx, scene, 512, &color, &normal);
 }
 
 static void populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     /* Overlay pack: full-res textures + meshes + manifest.
      * Shaders come from sponza_core (always loaded first). */
-    /* TODO(#95): enable after builder cache — full pack gzipped: 97MB raw → 72MB basis (-25%) */
-    /* nt_tex_compress_opts_t compress = nt_tex_compress_uastc_high(); */
-    add_textures(ctx, scene, 0, NULL);
+    nt_tex_compress_opts_t color = nt_tex_compress_uastc_high();
+    nt_tex_compress_opts_t normal = nt_tex_compress_uastc_highest();
+    add_textures(ctx, scene, 0, &color, &normal);
     add_meshes_and_manifest(ctx, scene, false);
 }
 
@@ -475,10 +468,13 @@ int main(int argc, char *argv[]) {
     }
     const char *out_dir = argv[1];
     const char *header_dir = "examples/sponza/generated";
+    char cache_dir[512];
+    (void)snprintf(cache_dir, sizeof(cache_dir), "%s/_cache", out_dir);
 
     (void)printf("=== Build Sponza Packs -> %s ===\n\n", out_dir);
 
     MKDIR(out_dir);
+    MKDIR(cache_dir);
     MKDIR(header_dir);
     init_checker();
 
@@ -507,28 +503,28 @@ int main(int argc, char *argv[]) {
     (void)printf("\n");
 
     /* ---- Pack 1: sponza_core.ntpack (shaders + manifest + placeholder textures) ---- */
-    r = build_pack(out_dir, header_dir, "sponza_core.ntpack", &scene, populate_core);
+    r = build_pack(out_dir, header_dir, cache_dir, "sponza_core.ntpack", &scene, populate_core);
     if (r != NT_BUILD_OK) {
         nt_builder_free_glb_scene(&scene);
         return 1;
     }
 
     /* ---- Pack 2: sponza_geo.ntpack (all meshes, base quality) ---- */
-    r = build_pack(out_dir, header_dir, "sponza_geo.ntpack", &scene, populate_geo);
+    r = build_pack(out_dir, header_dir, cache_dir, "sponza_geo.ntpack", &scene, populate_geo);
     if (r != NT_BUILD_OK) {
         nt_builder_free_glb_scene(&scene);
         return 1;
     }
 
-    /* ---- Pack 3: sponza_tex.ntpack (all textures, 512px max) ---- */
-    r = build_pack(out_dir, header_dir, "sponza_tex.ntpack", &scene, populate_tex);
+    /* ---- Pack 3: sponza_tex.ntpack (all textures, 512px max, ETC1S compressed) ---- */
+    r = build_pack(out_dir, header_dir, cache_dir, "sponza_tex.ntpack", &scene, populate_tex);
     if (r != NT_BUILD_OK) {
         nt_builder_free_glb_scene(&scene);
         return 1;
     }
 
-    /* ---- Pack 4: sponza_full.ntpack (full quality everything) ---- */
-    r = build_pack(out_dir, header_dir, "sponza_full.ntpack", &scene, populate_full);
+    /* ---- Pack 4: sponza_full.ntpack (full quality, UASTC compressed) ---- */
+    r = build_pack(out_dir, header_dir, cache_dir, "sponza_full.ntpack", &scene, populate_full);
     if (r != NT_BUILD_OK) {
         nt_builder_free_glb_scene(&scene);
         return 1;

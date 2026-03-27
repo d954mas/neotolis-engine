@@ -25,7 +25,8 @@ void nt_basisu_encoder_init(void) {
     }
 }
 
-nt_basisu_encode_result_t nt_basisu_encode(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha, bool uastc, uint32_t quality, float rdo_quality, bool gen_mipmaps) {
+nt_basisu_encode_result_t nt_basisu_encode(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha, bool uastc, uint32_t quality, float endpoint_rdo, float selector_rdo,
+                                           bool gen_mipmaps) {
     nt_basisu_encode_result_t result = {};
 
     basisu::basis_compressor_params params;
@@ -39,12 +40,19 @@ nt_basisu_encode_result_t nt_basisu_encode(const uint8_t *rgba_pixels, uint32_t 
     if (uastc) {
         params.set_format_mode(basist::basis_tex_format::cUASTC_LDR_4x4);
         params.m_pack_uastc_ldr_4x4_flags = quality; // 0-4 pack level
+        if (endpoint_rdo > 0.0f) {
+            params.m_rdo_uastc_ldr_4x4 = true;
+            params.m_rdo_uastc_ldr_4x4_quality_scalar = endpoint_rdo;
+            params.m_rdo_uastc_ldr_4x4_dict_size = 32768;
+        }
     } else {
         params.set_format_mode(basist::basis_tex_format::cETC1S);
         params.m_quality_level = static_cast<int>(quality); // 1-255
-        if (rdo_quality > 0.0f) {
-            params.m_endpoint_rdo_thresh = rdo_quality;
-            params.m_selector_rdo_thresh = rdo_quality;
+        if (endpoint_rdo > 0.0f) {
+            params.m_endpoint_rdo_thresh = endpoint_rdo;
+        }
+        if (selector_rdo > 0.0f) {
+            params.m_selector_rdo_thresh = selector_rdo;
         }
     }
 
