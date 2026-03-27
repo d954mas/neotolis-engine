@@ -133,20 +133,25 @@ static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uin
         }
 
         nt_tex_opts_t opts = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = max_size};
+        const nt_tex_compress_opts_t *tex_compress = color_compress;
         switch (roles[i]) {
         case TEX_ROLE_DIFFUSE:
             opts.format = texture_needs_alpha(scene, i, gltf) ? NT_TEXTURE_FORMAT_RGBA8 : NT_TEXTURE_FORMAT_RGB8;
             break;
         case TEX_ROLE_NORMAL:
+            /* RG8 for RAW (placeholders), RGB8 for Basis (Basis has no 2-channel mode) */
+            opts.format = normal_compress ? NT_TEXTURE_FORMAT_RGB8 : NT_TEXTURE_FORMAT_RG8;
+            tex_compress = normal_compress;
+            break;
         case TEX_ROLE_SPECULAR:
-            opts.format = NT_TEXTURE_FORMAT_RG8;
+            opts.format = color_compress ? NT_TEXTURE_FORMAT_RGB8 : NT_TEXTURE_FORMAT_RG8;
             break;
         case TEX_ROLE_UNKNOWN:
             opts.format = NT_TEXTURE_FORMAT_RGBA8;
             break;
         }
 
-        opts.compress = (roles[i] == TEX_ROLE_NORMAL) ? normal_compress : color_compress;
+        opts.compress = tex_compress;
         nt_builder_add_texture_from_memory(ctx, scene->textures[i].data, scene->textures[i].size, tex_rid(i), &opts);
         added++;
     }
@@ -175,9 +180,9 @@ static void init_checker(void) {
     }
 }
 
-/* RG8 format: only first 2 bytes used per pixel */
-static const uint8_t s_flat_normal_rg[4] = {128, 128, 0, 0}; /* (0,0,1) in RG8 — Z reconstructed in shader */
-static const uint8_t s_rough_rg[4] = {0, 255, 0, 0};         /* max roughness in RG8: R=0, G=255 (roughness=1.0 → no specular) */
+/* RGB8 placeholders: shader reads .rg only, B unused (Z reconstructed in shader) */
+static const uint8_t s_flat_normal_rgb[3] = {128, 128, 255}; /* (0,0,1) — flat normal */
+static const uint8_t s_rough_rgb[3] = {0, 255, 0};           /* R=0, G=roughness(1.0), B=0 */
 
 static void add_placeholder_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
     tex_role_t *roles = build_texture_roles(scene);
@@ -185,14 +190,14 @@ static void add_placeholder_textures(NtBuilderContext *ctx, const nt_glb_scene_t
     uint32_t added = 0;
     for (uint32_t i = 0; i < scene->texture_count; i++) {
         const uint8_t *pixels = NULL;
-        nt_tex_opts_t opts = {.format = NT_TEXTURE_FORMAT_RG8, .max_size = 0};
+        nt_tex_opts_t opts = {.format = NT_TEXTURE_FORMAT_RGB8, .max_size = 0};
 
         switch (roles[i]) {
         case TEX_ROLE_NORMAL:
-            pixels = s_flat_normal_rg;
+            pixels = s_flat_normal_rgb;
             break;
         case TEX_ROLE_SPECULAR:
-            pixels = s_rough_rg;
+            pixels = s_rough_rgb;
             break;
         default: /* diffuse + unknown — handled by runtime fallback */
             continue;

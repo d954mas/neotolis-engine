@@ -89,14 +89,23 @@ void nt_builder_build_cache_path(const char *cache_dir, uint64_t decoded_hash, u
 
 /* --- Directory creation --- */
 
+static bool dir_exists(const char *dir) {
+#ifdef _WIN32
+    DWORD attr = GetFileAttributesA(dir);
+    return (attr != INVALID_FILE_ATTRIBUTES) && (attr & FILE_ATTRIBUTE_DIRECTORY);
+#else
+    struct stat st;
+    return stat(dir, &st) == 0 && S_ISDIR(st.st_mode);
+#endif
+}
+
 void nt_builder_ensure_cache_dir(const char *dir) {
 #ifdef _WIN32
     (void)_mkdir(dir);
-    /* Ignore ERROR_ALREADY_EXISTS */
 #else
     (void)mkdir(dir, 0755);
-    /* Ignore EEXIST */
 #endif
+    NT_BUILD_ASSERT(dir_exists(dir) && "cache dir creation failed — check that parent directory exists");
 }
 
 /* --- Cache lookup --- */

@@ -1639,6 +1639,26 @@ Generated asset headers are committed to git. This is intentional:
 - New contributors can build and run without first running the builder.
 - Header files are small (one line per asset) and compress well in git.
 
+## 23.10 Builder cache
+
+Content-addressed encode cache. Opt-in via `nt_builder_set_cache_dir(ctx, path)`. Skips re-encoding unchanged assets on repeat builds.
+
+**Cache key:** `decoded_hash` (xxHash64 of decoded source bytes) × `opts_hash` (hash of encode-affecting options + `NT_BUILDER_VERSION`).
+
+**Storage:** flat directory of `.bin` files named `{decoded_hash}_{opts_hash}.bin`. No index file, no subdirectories. Cached data is raw encoded asset bytes (post-encode, pre-pack-header).
+
+**Pipeline order:** early dedup → cache lookup → encode → cache store. Dedup runs first so duplicates never hit cache. Cache stores only unique encoded results.
+
+**Invalidation:**
+- Source data changes → different `decoded_hash` → automatic miss.
+- Encode options change (format, compression, quality) → different `opts_hash` → automatic miss.
+- Encoder logic changes → bump `NT_BUILDER_VERSION` → all `opts_hash` values change → full cache miss.
+- Manual: delete cache directory contents.
+
+**Safety:** write-to-temp + atomic rename. Cache failures (read/write) fall through to normal encode — never break the build.
+
+**Build summary** reports per-asset cache status (cached / miss-new / miss-opts) and aggregate hit/miss counts.
+
 ---
 
 # 24. Logging, Errors, Debugging
@@ -1822,7 +1842,7 @@ These do not block implementation:
 - camera component/structure definition
 - whether some renderer-specific caches are worth adding later
 - whether pack hot-reload becomes needed
-- whether asset build database is needed immediately or later
+- ~~whether asset build database is needed immediately or later~~ → resolved: content-addressed builder cache (§23.10)
 - 3D audio / positional sound
 - sound groups / mix buses
 - desktop audio backend library choice (miniaudio recommended)
