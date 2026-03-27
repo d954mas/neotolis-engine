@@ -34,6 +34,12 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
     switch (pe->kind) {
     case NT_BUILD_ASSET_TEXTURE: {
         const NtBuildTextureData *td = (const NtBuildTextureData *)pe->data;
+        /* Dimensions affect encoded header (width/height stored in NtTextureAssetHeader).
+         * Two textures with same pixels but different aspect ratios must not share cache. */
+        memcpy(buf + pos, &td->width, sizeof(td->width));
+        pos += (uint32_t)sizeof(td->width);
+        memcpy(buf + pos, &td->height, sizeof(td->height));
+        pos += (uint32_t)sizeof(td->height);
         /* format (encode-affecting, same as opts_equal) */
         uint32_t format = (uint32_t)td->opts.format;
         memcpy(buf + pos, &format, sizeof(format));
