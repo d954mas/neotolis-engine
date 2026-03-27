@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
             return 1;
         }
         nt_builder_set_header_dir(ctx, HEADER_DIR);
-        nt_builder_add_texture(ctx, "assets/textures/lenna_pixel.png");
+        nt_builder_add_texture(ctx, "assets/textures/lenna_pixel.png", NULL);
         nt_builder_rename(ctx, "assets/textures/lenna_pixel.png", "textures/lenna");
         nt_build_result_t r = nt_builder_finish_pack(ctx);
         nt_builder_free_pack(ctx);
@@ -108,7 +108,7 @@ int main(int argc, char *argv[]) {
             return 1;
         }
         nt_builder_set_header_dir(ctx, HEADER_DIR);
-        nt_builder_add_texture(ctx, "assets/textures/lenna.png");
+        nt_builder_add_texture(ctx, "assets/textures/lenna.png", NULL);
         nt_builder_rename(ctx, "assets/textures/lenna.png", "textures/lenna");
         nt_build_result_t r = nt_builder_finish_pack(ctx);
         nt_builder_free_pack(ctx);

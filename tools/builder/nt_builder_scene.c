@@ -37,9 +37,8 @@ nt_build_result_t nt_builder_parse_glb_scene(nt_glb_scene_t *scene, const char *
 
     result = cgltf_load_buffers(&options, data, path);
     if (result != cgltf_result_success) {
-        NT_LOG_ERROR("%s: failed to load glTF buffers (cgltf error %d)", path, (int)result);
         cgltf_free(data);
-        return NT_BUILD_ERR_IO;
+        NT_BUILD_ASSERT(0 && "failed to load glTF buffers");
     }
 
     result = cgltf_validate(data);
@@ -148,7 +147,7 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene) {
     memset(scene, 0, sizeof(nt_glb_scene_t));
 }
 
-/* --- Add scene mesh (deferred) --- */
+/* --- Add scene mesh (eager decode) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_add_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const char *resource_id, const nt_mesh_opts_t *opts) {
@@ -156,33 +155,21 @@ void nt_builder_add_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scen
     NT_BUILD_ASSERT(mesh_index < scene->mesh_count && "mesh_index out of range");
     NT_BUILD_ASSERT(primitive_index < scene->meshes[mesh_index].primitive_count && "primitive_index out of range");
 
-    NtBuildSceneMeshData *smd = (NtBuildSceneMeshData *)calloc(1, sizeof(NtBuildSceneMeshData));
-    NT_BUILD_ASSERT(smd && "scene_mesh alloc failed");
-    smd->scene = scene;
-    smd->mesh_index = mesh_index;
-    smd->primitive_index = primitive_index;
-    smd->stream_count = opts->stream_count;
-    smd->tangent_mode = opts->tangent_mode;
-    /* Deep-copy layout strings */
-    memcpy(smd->layout, opts->layout, opts->stream_count * sizeof(NtStreamLayout));
-    for (uint32_t s = 0; s < opts->stream_count; s++) {
-        if (opts->layout[s].engine_name != NULL) {
-            smd->layout[s].engine_name = strdup(opts->layout[s].engine_name);
-        }
-        if (opts->layout[s].gltf_name != NULL) {
-            smd->layout[s].gltf_name = strdup(opts->layout[s].gltf_name);
-        }
-    }
+    uint8_t *mesh_data = NULL;
+    uint32_t mesh_size = 0;
+    nt_build_result_t r = nt_builder_decode_scene_mesh(scene, mesh_index, primitive_index, opts->layout, opts->stream_count, opts->tangent_mode, &mesh_data, &mesh_size);
+    NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_scene_mesh: decode failed");
 
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_SCENE_MESH, smd);
+    uint64_t hash = nt_hash64(mesh_data, mesh_size).value;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_MESH, NULL, mesh_data, mesh_size, hash);
 }
 
-/* --- Import scene mesh (called from finish_pack) --- */
+/* --- Decode: scene mesh -> binary mesh buffer (eager, called from add_scene_mesh) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
-                                               nt_tangent_mode_t tangent_mode, uint64_t resource_id) {
-    if (!ctx || !scene || !layout) {
+nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
+                                               nt_tangent_mode_t tangent_mode, uint8_t **out_data, uint32_t *out_size) {
+    if (!scene || !layout || !out_data || !out_size) {
         return NT_BUILD_ERR_VALIDATION;
     }
 
@@ -292,10 +279,7 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
 
         cgltf_size float_count = (cgltf_size)count * (cgltf_size)layout[s].count;
         stream_floats[s] = (float *)calloc(float_count, sizeof(float));
-        if (!stream_floats[s]) {
-            ret = NT_BUILD_ERR_IO;
-            goto cleanup_streams;
-        }
+        NT_BUILD_ASSERT(stream_floats[s] && "scene mesh: float buffer alloc failed");
 
         cgltf_size unpacked = cgltf_accessor_unpack_floats(acc, stream_floats[s], float_count);
         if (unpacked == 0) {
@@ -316,201 +300,113 @@ nt_build_result_t nt_builder_import_scene_mesh(NtBuilderContext *ctx, const nt_g
     }
 
     /* Extract indices */
-    uint32_t index_count = 0;
-    uint8_t index_type = 0;
-    uint8_t *index_buf = NULL;
-    uint32_t index_data_size = 0;
+    {
+        uint32_t index_count = 0;
+        uint8_t index_type = 0;
+        uint8_t *index_buf = NULL;
+        uint32_t index_data_size = 0;
 
-    if (prim->indices != NULL) {
-        index_count = (uint32_t)prim->indices->count;
-        if (index_count > NT_BUILD_MAX_INDICES) {
-            NT_LOG_ERROR("mesh[%u] prim[%u]: index count %u exceeds max %d", mesh_index, primitive_index, index_count, NT_BUILD_MAX_INDICES);
-            ret = NT_BUILD_ERR_LIMIT;
-            goto cleanup_streams;
-        }
-
-        if (vertex_count <= 65535) {
-            index_type = 1;
-            index_data_size = index_count * (uint32_t)sizeof(uint16_t);
-        } else {
-            index_type = 2;
-            index_data_size = index_count * (uint32_t)sizeof(uint32_t);
-        }
-
-        index_buf = (uint8_t *)calloc(index_data_size, 1);
-        if (!index_buf) {
-            ret = NT_BUILD_ERR_IO;
-            goto cleanup_streams;
-        }
-
-        size_t idx_elem_size = (index_type == 1) ? sizeof(uint16_t) : sizeof(uint32_t);
-        cgltf_accessor_unpack_indices(prim->indices, index_buf, idx_elem_size, index_count);
-    }
-
-    /* Compute tangents if needed */
-    if (tangent_stream_idx >= 0 && need_compute_tangent) {
-        /* Need POSITION, NORMAL, TEXCOORD_0 float data + indices as uint32 */
-        float *pos_data = NULL;
-        float *norm_data = NULL;
-        float *uv_data = NULL;
-
-        for (uint32_t s = 0; s < stream_count; s++) {
-            if (layout[s].gltf_name != NULL) {
-                if (strcmp(layout[s].gltf_name, "POSITION") == 0) {
-                    pos_data = stream_floats[s];
-                }
-                if (strcmp(layout[s].gltf_name, "NORMAL") == 0) {
-                    norm_data = stream_floats[s];
-                }
-                if (strcmp(layout[s].gltf_name, "TEXCOORD_0") == 0) {
-                    uv_data = stream_floats[s];
-                }
-            }
-        }
-
-        if (!pos_data || !norm_data || !uv_data) {
-            NT_LOG_ERROR("mesh[%u] prim[%u]: tangent computation requires POSITION, NORMAL, TEXCOORD_0", mesh_index, primitive_index);
-            free(index_buf);
-            ret = NT_BUILD_ERR_VALIDATION;
-            goto cleanup_streams;
-        }
-
-        /* Build uint32 index array for MikkTSpace */
-        uint32_t *idx32 = NULL;
-        uint32_t mikk_index_count = index_count;
-        if (index_count > 0) {
-            idx32 = (uint32_t *)calloc(index_count, sizeof(uint32_t));
-            if (!idx32) {
-                free(index_buf);
-                ret = NT_BUILD_ERR_IO;
+        if (prim->indices != NULL) {
+            index_count = (uint32_t)prim->indices->count;
+            if (index_count > NT_BUILD_MAX_INDICES) {
+                NT_LOG_ERROR("mesh[%u] prim[%u]: index count %u exceeds max %d", mesh_index, primitive_index, index_count, NT_BUILD_MAX_INDICES);
+                ret = NT_BUILD_ERR_LIMIT;
                 goto cleanup_streams;
             }
-            if (index_type == 1) {
-                const uint16_t *idx16 = (const uint16_t *)index_buf;
-                for (uint32_t i = 0; i < index_count; i++) {
-                    idx32[i] = idx16[i];
+
+            if (vertex_count <= 65535) {
+                index_type = 1;
+                index_data_size = index_count * (uint32_t)sizeof(uint16_t);
+            } else {
+                index_type = 2;
+                index_data_size = index_count * (uint32_t)sizeof(uint32_t);
+            }
+
+            index_buf = (uint8_t *)calloc(index_data_size, 1);
+            NT_BUILD_ASSERT(index_buf && "scene mesh: index buffer alloc failed");
+
+            size_t idx_elem_size = (index_type == 1) ? sizeof(uint16_t) : sizeof(uint32_t);
+            cgltf_accessor_unpack_indices(prim->indices, index_buf, idx_elem_size, index_count);
+        }
+
+        /* Compute tangents if needed */
+        if (tangent_stream_idx >= 0 && need_compute_tangent) {
+            /* Need POSITION, NORMAL, TEXCOORD_0 float data + indices as uint32 */
+            float *pos_data = NULL;
+            float *norm_data = NULL;
+            float *uv_data = NULL;
+
+            for (uint32_t s = 0; s < stream_count; s++) {
+                if (layout[s].gltf_name != NULL) {
+                    if (strcmp(layout[s].gltf_name, "POSITION") == 0) {
+                        pos_data = stream_floats[s];
+                    }
+                    if (strcmp(layout[s].gltf_name, "NORMAL") == 0) {
+                        norm_data = stream_floats[s];
+                    }
+                    if (strcmp(layout[s].gltf_name, "TEXCOORD_0") == 0) {
+                        uv_data = stream_floats[s];
+                    }
+                }
+            }
+
+            if (!pos_data || !norm_data || !uv_data) {
+                NT_LOG_ERROR("mesh[%u] prim[%u]: tangent computation requires POSITION, NORMAL, TEXCOORD_0", mesh_index, primitive_index);
+                free(index_buf);
+                ret = NT_BUILD_ERR_VALIDATION;
+                goto cleanup_streams;
+            }
+
+            /* Build uint32 index array for MikkTSpace */
+            uint32_t *idx32 = NULL;
+            uint32_t mikk_index_count = index_count;
+            if (index_count > 0) {
+                idx32 = (uint32_t *)calloc(index_count, sizeof(uint32_t));
+                NT_BUILD_ASSERT(idx32 && "scene mesh: tangent idx32 alloc failed");
+                if (index_type == 1) {
+                    const uint16_t *idx16 = (const uint16_t *)index_buf;
+                    for (uint32_t i = 0; i < index_count; i++) {
+                        idx32[i] = idx16[i];
+                    }
+                } else {
+                    memcpy(idx32, index_buf, index_count * sizeof(uint32_t));
                 }
             } else {
-                memcpy(idx32, index_buf, index_count * sizeof(uint32_t));
-            }
-        } else {
-            /* No indices -- generate sequential */
-            mikk_index_count = vertex_count;
-            idx32 = (uint32_t *)calloc(vertex_count, sizeof(uint32_t));
-            if (!idx32) {
-                free(index_buf);
-                ret = NT_BUILD_ERR_IO;
-                goto cleanup_streams;
-            }
-            for (uint32_t i = 0; i < vertex_count; i++) {
-                idx32[i] = i;
-            }
-        }
-
-        stream_floats[tangent_stream_idx] = (float *)calloc((size_t)vertex_count * 4, sizeof(float));
-        if (!stream_floats[tangent_stream_idx]) {
-            free(idx32);
-            free(index_buf);
-            ret = NT_BUILD_ERR_IO;
-            goto cleanup_streams;
-        }
-
-        ret = nt_builder_compute_tangents(pos_data, norm_data, uv_data, idx32, vertex_count, mikk_index_count, stream_floats[tangent_stream_idx]);
-        free(idx32);
-        if (ret != NT_BUILD_OK) {
-            free(index_buf);
-            goto cleanup_streams;
-        }
-    }
-
-    /* Handle TANGENT_NONE: fill with zero */
-    if (tangent_stream_idx >= 0 && tangent_mode == NT_TANGENT_NONE) {
-        stream_floats[tangent_stream_idx] = (float *)calloc((size_t)vertex_count * layout[tangent_stream_idx].count, sizeof(float));
-        if (!stream_floats[tangent_stream_idx]) {
-            free(index_buf);
-            ret = NT_BUILD_ERR_IO;
-            goto cleanup_streams;
-        }
-    }
-
-    /* Compute vertex stride */
-    {
-        uint32_t vertex_stride = 0;
-        for (uint32_t s = 0; s < stream_count; s++) {
-            vertex_stride += nt_stream_type_size((uint8_t)layout[s].type) * layout[s].count;
-        }
-
-        /* Interleave vertices */
-        uint32_t vertex_data_size = vertex_count * vertex_stride;
-        uint8_t *vertex_buf = (uint8_t *)calloc(vertex_data_size > 0 ? vertex_data_size : 1, 1);
-        if (!vertex_buf) {
-            free(index_buf);
-            ret = NT_BUILD_ERR_IO;
-            goto cleanup_streams;
-        }
-
-        for (uint32_t v = 0; v < vertex_count; v++) {
-            uint8_t *dst = vertex_buf + ((size_t)v * vertex_stride);
-            uint32_t offset = 0;
-            for (uint32_t s = 0; s < stream_count; s++) {
-                uint32_t comp_size = nt_stream_type_size((uint8_t)layout[s].type);
-                for (uint8_t c = 0; c < layout[s].count; c++) {
-                    float val = stream_floats[s][((size_t)v * layout[s].count) + c];
-                    nt_builder_convert_component(val, layout[s].type, layout[s].normalized, dst + offset);
-                    offset += comp_size;
+                /* No indices -- generate sequential */
+                mikk_index_count = vertex_count;
+                idx32 = (uint32_t *)calloc(vertex_count, sizeof(uint32_t));
+                NT_BUILD_ASSERT(idx32 && "scene mesh: tangent sequential idx32 alloc failed");
+                for (uint32_t i = 0; i < vertex_count; i++) {
+                    idx32[i] = i;
                 }
             }
+
+            stream_floats[tangent_stream_idx] = (float *)calloc((size_t)vertex_count * 4, sizeof(float));
+            NT_BUILD_ASSERT(stream_floats[tangent_stream_idx] && "scene mesh: tangent output alloc failed");
+
+            ret = nt_builder_compute_tangents(pos_data, norm_data, uv_data, idx32, vertex_count, mikk_index_count, stream_floats[tangent_stream_idx]);
+            free(idx32);
+            if (ret != NT_BUILD_OK) {
+                free(index_buf);
+                goto cleanup_streams;
+            }
         }
 
-        /* Build mesh header and write */
-        NtMeshAssetHeader mesh_hdr;
-        memset(&mesh_hdr, 0, sizeof(mesh_hdr));
-        mesh_hdr.magic = NT_MESH_MAGIC;
-        mesh_hdr.version = NT_MESH_VERSION;
-        mesh_hdr.stream_count = (uint8_t)stream_count;
-        mesh_hdr.index_type = index_type;
-        mesh_hdr.vertex_count = vertex_count;
-        mesh_hdr.index_count = index_count;
-        mesh_hdr.vertex_data_size = vertex_data_size;
-        mesh_hdr.index_data_size = index_data_size;
-        nt_extract_aabb(prim, mesh_hdr.aabb_min, mesh_hdr.aabb_max);
-
-        NtStreamDesc descs[NT_MESH_MAX_STREAMS];
-        memset(descs, 0, sizeof(descs));
-        for (uint32_t s = 0; s < stream_count; s++) {
-            descs[s].name_hash = nt_hash32_str(layout[s].engine_name).value;
-            descs[s].type = (uint8_t)layout[s].type;
-            descs[s].count = layout[s].count;
-            descs[s].normalized = layout[s].normalized ? 1 : 0;
-            descs[s]._pad = 0;
+        /* Handle TANGENT_NONE: fill with zero */
+        if (tangent_stream_idx >= 0 && tangent_mode == NT_TANGENT_NONE) {
+            stream_floats[tangent_stream_idx] = (float *)calloc((size_t)vertex_count * layout[tangent_stream_idx].count, sizeof(float));
+            NT_BUILD_ASSERT(stream_floats[tangent_stream_idx] && "scene mesh: tangent zero-fill alloc failed");
         }
 
-        uint32_t descs_size = stream_count * (uint32_t)sizeof(NtStreamDesc);
-        uint32_t total_asset_size = (uint32_t)sizeof(NtMeshAssetHeader) + descs_size + vertex_data_size + index_data_size;
-
-        ret = nt_builder_append_data(ctx, &mesh_hdr, (uint32_t)sizeof(NtMeshAssetHeader));
-        if (ret == NT_BUILD_OK) {
-            ret = nt_builder_append_data(ctx, descs, descs_size);
-        }
-        if (ret == NT_BUILD_OK && vertex_data_size > 0) {
-            ret = nt_builder_append_data(ctx, vertex_buf, vertex_data_size);
-        }
-        if (ret == NT_BUILD_OK && index_data_size > 0) {
-            ret = nt_builder_append_data(ctx, index_buf, index_data_size);
-        }
-
-        if (ret == NT_BUILD_OK) {
-            ret = nt_builder_register_asset(ctx, resource_id, NT_ASSET_MESH, NT_MESH_VERSION, total_asset_size);
-        }
-
-        free(vertex_buf);
+        /* Build final mesh buffer */
+        ret = nt_builder_build_mesh_buffer(layout, stream_count, stream_floats, vertex_count, prim, index_buf, index_count, index_type, index_data_size, out_data, out_size);
+        free(index_buf);
     }
-
-    free(index_buf);
 
 cleanup_streams:
     for (uint32_t s = 0; s < stream_count; s++) {
         free(stream_floats[s]);
     }
+    /* DON'T free scene data -- borrowed reference */
     return ret;
 }

@@ -12,7 +12,7 @@
 /* Lazy encoder initialization */
 static bool s_encoder_initialized = false;
 
-/* No mapping needed — builder and runtime share nt_texture_pixel_format_t.
+/* No mapping needed -- builder and runtime share nt_texture_pixel_format_t.
  * BPP lookup uses nt_texture_bpp() from nt_texture_format.h. */
 
 /* Resize RGBA pixels to fit within max_size, preserving aspect ratio.
@@ -62,47 +62,108 @@ static uint8_t *strip_channels(const uint8_t *rgba, uint32_t pixel_count, uint32
     return out;
 }
 
-/* Shared import logic for both file and memory paths */
-static nt_build_result_t import_texture_pixels(NtBuilderContext *ctx, unsigned char *pixels, int w, int h, uint64_t resource_id, const nt_tex_opts_t *opts) {
-    nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
-    uint32_t max_size = opts ? opts->max_size : 0;
+/* --- Decode: image data -> RGBA pixels (eager, called from add_*) --- */
 
-    int out_w = 0;
-    int out_h = 0;
-    unsigned char *resized = resize_if_needed(pixels, w, h, max_size, &out_w, &out_h);
-    if (max_size > 0 && !resized && ((uint32_t)w > max_size || (uint32_t)h > max_size)) {
-        stbi_image_free(pixels);
-        return NT_BUILD_ERR_IO;
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+nt_build_result_t nt_builder_decode_texture(const uint8_t *src_data, uint32_t src_size, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h) {
+    if (!src_data || src_size == 0 || !out_pixels || !out_w || !out_h) {
+        return NT_BUILD_ERR_VALIDATION;
     }
 
-    const unsigned char *src = resized ? resized : pixels;
-    uint32_t pixel_count = (uint32_t)out_w * (uint32_t)out_h;
+    int w = 0;
+    int h = 0;
+    int channels = 0;
+    unsigned char *pixels = stbi_load_from_memory(src_data, (int)src_size, &w, &h, &channels, 4);
+    NT_BUILD_ASSERT(pixels && "texture decode: stbi_load_from_memory failed");
+
+    if ((uint32_t)w > NT_BUILD_MAX_TEXTURE_SIZE || (uint32_t)h > NT_BUILD_MAX_TEXTURE_SIZE) {
+        NT_LOG_ERROR("texture decode: %ux%u exceeds max %u", (uint32_t)w, (uint32_t)h, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
+        stbi_image_free(pixels);
+        return NT_BUILD_ERR_LIMIT;
+    }
+
+    uint32_t max_size = opts ? opts->max_size : 0;
+    int rw = 0;
+    int rh = 0;
+    unsigned char *resized = resize_if_needed(pixels, w, h, max_size, &rw, &rh);
+    if (max_size > 0 && !resized && ((uint32_t)w > max_size || (uint32_t)h > max_size)) {
+        stbi_image_free(pixels);
+        NT_BUILD_ASSERT(0 && "texture decode: resize_if_needed alloc failed");
+    }
+
+    if (resized) {
+        stbi_image_free(pixels);
+        *out_pixels = (uint8_t *)resized;
+    } else {
+        /* Transfer ownership: stbi uses malloc, caller uses free -- compatible */
+        *out_pixels = (uint8_t *)pixels;
+    }
+    *out_w = (uint32_t)rw;
+    *out_h = (uint32_t)rh;
+    return NT_BUILD_OK;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_pixels, uint32_t *out_w, uint32_t *out_h) {
+    if (!rgba_pixels || width == 0 || height == 0 || !out_pixels || !out_w || !out_h) {
+        return NT_BUILD_ERR_VALIDATION;
+    }
+
+    if (width > NT_BUILD_MAX_TEXTURE_SIZE || height > NT_BUILD_MAX_TEXTURE_SIZE) {
+        NT_LOG_ERROR("texture raw: %ux%u exceeds max %u", width, height, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
+        return NT_BUILD_ERR_LIMIT;
+    }
+
+    uint32_t max_size = opts ? opts->max_size : 0;
+    int rw = 0;
+    int rh = 0;
+    unsigned char *resized = resize_if_needed(rgba_pixels, (int)width, (int)height, max_size, &rw, &rh);
+    if (max_size > 0 && !resized && (width > max_size || height > max_size)) {
+        NT_BUILD_ASSERT(0 && "texture raw: resize_if_needed alloc failed");
+    }
+
+    if (resized) {
+        *out_pixels = (uint8_t *)resized;
+    } else {
+        /* Always return a malloc'd copy (caller owns) */
+        uint32_t data_size = width * height * 4;
+        uint8_t *copy = (uint8_t *)malloc(data_size);
+        NT_BUILD_ASSERT(copy && "texture raw: malloc failed");
+        memcpy(copy, rgba_pixels, data_size);
+        *out_pixels = copy;
+    }
+    *out_w = (uint32_t)rw;
+    *out_h = (uint32_t)rh;
+    return NT_BUILD_OK;
+}
+
+/* --- Encode: RGBA pixels -> pack format (called from finish_pack) --- */
+
+nt_build_result_t nt_builder_encode_texture(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts) {
+    nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
+    uint32_t pixel_count = width * height;
     uint32_t bpp = nt_texture_bpp(fmt);
 
     /* Strip channels if needed */
     uint8_t *stripped = NULL;
     const uint8_t *final_data;
     if (bpp < 4) {
-        stripped = strip_channels(src, pixel_count, bpp);
-        if (!stripped) {
-            free(resized);
-            stbi_image_free(pixels);
-            return NT_BUILD_ERR_IO;
-        }
+        stripped = strip_channels(rgba_pixels, pixel_count, bpp);
+        NT_BUILD_ASSERT(stripped && "texture encode: strip_channels alloc failed");
         final_data = stripped;
     } else {
-        final_data = src;
+        final_data = rgba_pixels;
     }
 
-    /* Write v2 header (RAW compression — uncompressed pixel data) */
+    /* Write v2 header (RAW compression -- uncompressed pixel data) */
     uint32_t data_size = pixel_count * bpp;
     NtTextureAssetHeaderV2 tex_hdr;
     memset(&tex_hdr, 0, sizeof(tex_hdr));
     tex_hdr.magic = NT_TEXTURE_MAGIC;
     tex_hdr.version = NT_TEXTURE_VERSION_V2;
     tex_hdr.format = (uint16_t)fmt;
-    tex_hdr.width = (uint32_t)out_w;
-    tex_hdr.height = (uint32_t)out_h;
+    tex_hdr.width = width;
+    tex_hdr.height = height;
     tex_hdr.mip_count = 1;
     tex_hdr.compression = (uint8_t)NT_TEXTURE_COMPRESSION_RAW;
     tex_hdr._pad = 0;
@@ -116,8 +177,6 @@ static nt_build_result_t import_texture_pixels(NtBuilderContext *ctx, unsigned c
     }
 
     free(stripped);
-    free(resized);
-    stbi_image_free(pixels);
 
     if (ret != NT_BUILD_OK) {
         return ret;
@@ -126,99 +185,9 @@ static nt_build_result_t import_texture_pixels(NtBuilderContext *ctx, unsigned c
     return nt_builder_register_asset(ctx, resource_id, NT_ASSET_TEXTURE, NT_TEXTURE_VERSION_V2, total_asset_size);
 }
 
-/* --- Texture import from file (called from finish_pack) --- */
-
-nt_build_result_t nt_builder_import_texture(NtBuilderContext *ctx, const char *path, uint64_t resource_id) {
-    if (!ctx || !path) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-
-    int w = 0;
-    int h = 0;
-    int channels = 0;
-    unsigned char *pixels = stbi_load(path, &w, &h, &channels, 4);
-    if (!pixels) {
-        NT_LOG_ERROR("%s: %s", path, stbi_failure_reason());
-        return NT_BUILD_ERR_IO;
-    }
-
-    if ((uint32_t)w > NT_BUILD_MAX_TEXTURE_SIZE || (uint32_t)h > NT_BUILD_MAX_TEXTURE_SIZE) {
-        NT_LOG_ERROR("%s: %ux%u exceeds max %u", path, (uint32_t)w, (uint32_t)h, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
-        stbi_image_free(pixels);
-        return NT_BUILD_ERR_LIMIT;
-    }
-
-    /* File-based textures use default opts (RGBA8, no resize) */
-    return import_texture_pixels(ctx, pixels, w, h, resource_id, NULL);
-}
-
-/* --- Texture import from memory (called from finish_pack) --- */
-
-nt_build_result_t nt_builder_import_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, uint64_t resource_id, const nt_tex_opts_t *opts) {
-    if (!ctx || !data || size == 0) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-
-    int w = 0;
-    int h = 0;
-    int channels = 0;
-    unsigned char *pixels = stbi_load_from_memory(data, (int)size, &w, &h, &channels, 4);
-    if (!pixels) {
-        NT_LOG_ERROR("texture from memory: %s", stbi_failure_reason());
-        return NT_BUILD_ERR_IO;
-    }
-
-    if ((uint32_t)w > NT_BUILD_MAX_TEXTURE_SIZE || (uint32_t)h > NT_BUILD_MAX_TEXTURE_SIZE) {
-        NT_LOG_ERROR("texture from memory: %ux%u exceeds max %u", (uint32_t)w, (uint32_t)h, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
-        stbi_image_free(pixels);
-        return NT_BUILD_ERR_LIMIT;
-    }
-
-    return import_texture_pixels(ctx, pixels, w, h, resource_id, opts);
-}
-
-/* --- Texture import from raw RGBA pixels (called from finish_pack) --- */
-
-nt_build_result_t nt_builder_import_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts) {
-    if (!ctx || !rgba_pixels || width == 0 || height == 0) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-    if (width > NT_BUILD_MAX_TEXTURE_SIZE || height > NT_BUILD_MAX_TEXTURE_SIZE) {
-        NT_LOG_ERROR("texture raw: %ux%u exceeds max %u", width, height, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
-        return NT_BUILD_ERR_LIMIT;
-    }
-
-    /* Create a malloc'd copy -- import_texture_pixels frees via stbi_image_free (= free) */
-    uint64_t data_size64 = (uint64_t)width * (uint64_t)height * 4;
-    if (data_size64 > UINT32_MAX) {
-        return NT_BUILD_ERR_LIMIT;
-    }
-    uint32_t data_size = (uint32_t)data_size64;
-    unsigned char *pixels = (unsigned char *)malloc(data_size);
-    if (!pixels) {
-        return NT_BUILD_ERR_IO;
-    }
-    memcpy(pixels, rgba_pixels, data_size);
-
-    return import_texture_pixels(ctx, pixels, (int)width, (int)height, resource_id, opts);
-}
-
-/* --- Compressed texture import (Basis Universal encoding) --- */
-
-static nt_build_result_t import_texture_compressed(NtBuilderContext *ctx, unsigned char *pixels, int w, int h, uint64_t resource_id, const nt_tex_opts_t *opts,
-                                                   const nt_tex_compress_opts_t *compress_opts) {
+nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts,
+                                                       const nt_tex_compress_opts_t *compress_opts) {
     nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
-    uint32_t max_size = opts ? opts->max_size : 0;
-
-    int out_w = 0;
-    int out_h = 0;
-    unsigned char *resized = resize_if_needed(pixels, w, h, max_size, &out_w, &out_h);
-    if (max_size > 0 && !resized && ((uint32_t)w > max_size || (uint32_t)h > max_size)) {
-        stbi_image_free(pixels);
-        return NT_BUILD_ERR_IO;
-    }
-
-    const unsigned char *src = resized ? resized : pixels;
 
     /* Determine alpha from format (D-06) */
     bool has_alpha = (fmt == NT_TEXTURE_FORMAT_RGBA8);
@@ -231,15 +200,9 @@ static nt_build_result_t import_texture_compressed(NtBuilderContext *ctx, unsign
 
     /* Encode via Basis Universal */
     bool uastc = (compress_opts->mode == NT_TEX_COMPRESS_UASTC);
-    nt_basisu_encode_result_t enc = nt_basisu_encode(src, (uint32_t)out_w, (uint32_t)out_h, has_alpha, uastc, compress_opts->quality, compress_opts->rdo_quality, true);
+    nt_basisu_encode_result_t enc = nt_basisu_encode(rgba_pixels, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->rdo_quality, true);
 
-    free(resized);
-    stbi_image_free(pixels);
-
-    if (!enc.data) {
-        NT_LOG_ERROR("Basis encode failed (%ux%u, %s)", (uint32_t)out_w, (uint32_t)out_h, uastc ? "UASTC" : "ETC1S");
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(enc.data && "texture encode: Basis encode failed");
 
     /* Write v2 header */
     NtTextureAssetHeaderV2 tex_hdr;
@@ -247,8 +210,8 @@ static nt_build_result_t import_texture_compressed(NtBuilderContext *ctx, unsign
     tex_hdr.magic = NT_TEXTURE_MAGIC;
     tex_hdr.version = NT_TEXTURE_VERSION_V2;
     tex_hdr.format = (uint16_t)fmt;
-    tex_hdr.width = (uint32_t)out_w;
-    tex_hdr.height = (uint32_t)out_h;
+    tex_hdr.width = width;
+    tex_hdr.height = height;
     tex_hdr.mip_count = (uint16_t)enc.mip_count;
     tex_hdr.compression = (uint8_t)NT_TEXTURE_COMPRESSION_BASIS;
     tex_hdr._pad = 0;
@@ -268,35 +231,4 @@ static nt_build_result_t import_texture_compressed(NtBuilderContext *ctx, unsign
     }
 
     return nt_builder_register_asset(ctx, resource_id, NT_ASSET_TEXTURE, NT_TEXTURE_VERSION_V2, total_asset_size);
-}
-
-/* --- Texture import from memory with compression (called from finish_pack) --- */
-
-nt_build_result_t nt_builder_import_texture_from_memory_compressed(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, uint64_t resource_id, const nt_tex_opts_t *opts,
-                                                                   const nt_tex_compress_opts_t *compress_opts) {
-    if (!ctx || !data || size == 0) {
-        return NT_BUILD_ERR_VALIDATION;
-    }
-
-    /* NULL compress_opts = fall back to v1 raw path */
-    if (!compress_opts) {
-        return nt_builder_import_texture_from_memory(ctx, data, size, resource_id, opts);
-    }
-
-    int w = 0;
-    int h = 0;
-    int channels = 0;
-    unsigned char *pixels = stbi_load_from_memory(data, (int)size, &w, &h, &channels, 4);
-    if (!pixels) {
-        NT_LOG_ERROR("compressed texture from memory: %s", stbi_failure_reason());
-        return NT_BUILD_ERR_IO;
-    }
-
-    if ((uint32_t)w > NT_BUILD_MAX_TEXTURE_SIZE || (uint32_t)h > NT_BUILD_MAX_TEXTURE_SIZE) {
-        NT_LOG_ERROR("compressed texture from memory: %ux%u exceeds max %u", (uint32_t)w, (uint32_t)h, (uint32_t)NT_BUILD_MAX_TEXTURE_SIZE);
-        stbi_image_free(pixels);
-        return NT_BUILD_ERR_LIMIT;
-    }
-
-    return import_texture_compressed(ctx, pixels, w, h, resource_id, opts, compress_opts);
 }

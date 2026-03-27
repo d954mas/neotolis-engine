@@ -178,12 +178,16 @@ static bool glob_iterate(const char *pattern, glob_callback_fn callback, void *u
 typedef struct {
     NtBuilderContext *ctx;
     uint32_t match_count;
-    void *type_data; /* per-type params, NULL for texture */
+    void *type_data; /* per-type params */
 } GlobCallbackData;
 
 typedef struct {
     const nt_mesh_opts_t *opts;
 } GlobMeshParams;
+
+typedef struct {
+    const nt_tex_opts_t *opts;
+} GlobTextureParams;
 
 typedef struct {
     nt_build_shader_stage_t stage;
@@ -200,8 +204,9 @@ static void mesh_glob_callback(const char *full_path, void *user) {
 
 static void texture_glob_callback(const char *full_path, void *user) {
     GlobCallbackData *cb = (GlobCallbackData *)user;
+    GlobTextureParams *p = (GlobTextureParams *)cb->type_data;
     cb->match_count++;
-    nt_builder_add_texture(cb->ctx, full_path);
+    nt_builder_add_texture(cb->ctx, full_path, p ? p->opts : NULL);
 }
 
 static void shader_glob_callback(const char *full_path, void *user) {
@@ -229,9 +234,10 @@ void nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const nt_
     nt_builder_glob_add(ctx, pattern, mesh_glob_callback, &p);
 }
 
-void nt_builder_add_textures(NtBuilderContext *ctx, const char *pattern) {
+void nt_builder_add_textures(NtBuilderContext *ctx, const char *pattern, const nt_tex_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && pattern && "invalid add_textures args");
-    nt_builder_glob_add(ctx, pattern, texture_glob_callback, NULL);
+    GlobTextureParams p = {opts};
+    nt_builder_glob_add(ctx, pattern, texture_glob_callback, &p);
 }
 
 void nt_builder_add_shaders(NtBuilderContext *ctx, const char *pattern, nt_build_shader_stage_t stage) {

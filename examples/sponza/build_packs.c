@@ -3,7 +3,7 @@
  *   sponza_core.ntpack -- shaders + manifest + placeholder textures (~60-80 KB)
  *   sponza_geo.ntpack  -- all meshes, float16/int16 (~2-3 MB)
  *   sponza_tex.ntpack  -- all textures, 512px max (~43 MB)
- *   sponza_full.ntpack -- full quality meshes + textures + shaders + manifest
+ *   sponza_full.ntpack -- full quality meshes + textures + manifest (overlay, shaders from core)
  *
  * All packs share resource_ids -- pack stacking (priority) resolves at runtime.
  * Core loads first for instant feedback, geo next for visible geometry, then
@@ -155,7 +155,8 @@ static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uin
             tex_compress = &normal_compress;
         }
 
-        nt_builder_add_texture_from_memory_compressed(ctx, scene->textures[i].data, scene->textures[i].size, tex_rid(i), &opts, tex_compress);
+        opts.compress = tex_compress;
+        nt_builder_add_texture_from_memory(ctx, scene->textures[i].data, scene->textures[i].size, tex_rid(i), &opts);
         added++;
     }
     (void)printf("  Textures added: %u / %u\n", added, scene->texture_count);
@@ -458,10 +459,11 @@ static void populate_tex(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
 }
 
 static void populate_full(NtBuilderContext *ctx, const nt_glb_scene_t *scene) {
+    /* Overlay pack: full-res textures + meshes + manifest.
+     * Shaders come from sponza_core (always loaded first). */
     /* TODO(#95): enable after builder cache — full pack gzipped: 97MB raw → 72MB basis (-25%) */
     /* nt_tex_compress_opts_t compress = nt_tex_compress_uastc_high(); */
     add_textures(ctx, scene, 0, NULL);
-    add_shaders(ctx);
     add_meshes_and_manifest(ctx, scene, false);
 }
 
