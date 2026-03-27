@@ -2822,8 +2822,8 @@ void test_cache_with_dedup(void) {
     clean_cache_dir(cache);
 
     /* Two files with identical content but different paths → early dedup */
-    write_test_shader(TMP_DIR "/cache_dedup_a.glsl", "attribute vec4 p;\nvoid main() { gl_Position = p; }");
-    write_test_shader(TMP_DIR "/cache_dedup_b.glsl", "attribute vec4 p;\nvoid main() { gl_Position = p; }");
+    write_test_shader(TMP_DIR "/cache_dedup_a.glsl", "precision mediump float;\nlayout(location = 0) in vec3 a_pos;\nvoid main() { gl_Position = vec4(a_pos, 1.0); }\n");
+    write_test_shader(TMP_DIR "/cache_dedup_b.glsl", "precision mediump float;\nlayout(location = 0) in vec3 a_pos;\nvoid main() { gl_Position = vec4(a_pos, 1.0); }\n");
 
     /* Build 1: A encoded+cached, B early-deduped to A */
     NtBuilderContext *ctx1 = nt_builder_start_pack(pack1);
