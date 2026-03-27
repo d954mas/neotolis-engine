@@ -228,7 +228,7 @@ void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled) {
 void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx); }
 
 /* Forward declaration for texture re-decode (defined below make_texture_data) */
-static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe);
+static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w, uint32_t *out_h);
 
 /* --- Early dedup: compare decoded_data + encoding opts --- */
 
@@ -312,11 +312,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                 bool a_owned = false;
                 bool b_owned = false;
                 if (!a_data) {
-                    a_data = nt_builder_redecode_texture(pe);
+                    a_data = nt_builder_redecode_texture(pe, NULL, NULL);
                     a_owned = true;
                 }
                 if (!b_data) {
-                    b_data = nt_builder_redecode_texture(candidate);
+                    b_data = nt_builder_redecode_texture(candidate, NULL, NULL);
                     b_owned = true;
                 }
                 bool match = (a_data && b_data) ? (memcmp(a_data, b_data, pe->decoded_size) == 0) : true;
@@ -378,7 +378,10 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             bool pixels_owned = false;
 
             if (!pixels) {
-                pixels = nt_builder_redecode_texture(pe);
+                uint32_t rw = 0;
+                uint32_t rh = 0;
+                pixels = nt_builder_redecode_texture(pe, &rw, &rh);
+                NT_BUILD_ASSERT(rw == td->width && rh == td->height && "redecode produced different dimensions");
                 pixels_owned = true;
             }
 
@@ -706,7 +709,7 @@ static uint64_t nt_builder_path_id(const char *path) {
 
 /* Re-decode a texture entry from stored source. Returns malloc'd RGBA buffer. Caller frees. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe) {
+static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w, uint32_t *out_h) {
     const NtBuildTextureData *td = (const NtBuildTextureData *)pe->data;
     uint8_t *pixels = NULL;
     uint32_t w = 0;
@@ -723,6 +726,12 @@ static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe) {
         NT_BUILD_ASSERT(r == NT_BUILD_OK && "redecode_texture: decode from file failed");
     } else {
         NT_BUILD_ASSERT(0 && "redecode_texture: no source (raw texture should have decoded_data)");
+    }
+    if (out_w) {
+        *out_w = w;
+    }
+    if (out_h) {
+        *out_h = h;
     }
     return pixels;
 }

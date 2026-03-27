@@ -245,13 +245,22 @@ nt_build_result_t nt_builder_encode_shader(NtBuilderContext *ctx, const uint8_t 
 
     collapse_whitespace(stripped, &stripped_len);
 
-    NT_BUILD_ASSERT(strstr(stripped, "#version") == NULL && "shader: #version directive found -- runtime adds it per platform, remove from source");
-    NT_BUILD_ASSERT(strstr(stripped, "void main") != NULL && "shader: missing void main()");
+    if (strstr(stripped, "#version") != NULL) {
+        free(stripped);
+        NT_BUILD_ASSERT(0 && "shader: #version directive found -- runtime adds it per platform, remove from source");
+    }
+    if (strstr(stripped, "void main") == NULL) {
+        free(stripped);
+        NT_BUILD_ASSERT(0 && "shader: missing void main()");
+    }
 
     /* GL compile validation (D-01: validate at encode time) */
     ensure_gl_context();
     nt_build_result_t val_result = validate_shader(stripped, stage, "shader");
-    NT_BUILD_ASSERT(val_result == NT_BUILD_OK && "shader: GL compile failed -- see error above");
+    if (val_result != NT_BUILD_OK) {
+        free(stripped);
+        NT_BUILD_ASSERT(0 && "shader: GL compile failed -- see error above");
+    }
 
     uint32_t code_size = stripped_len + 1;
 
