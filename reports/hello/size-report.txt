@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis-paired)
-# Commit: 987c6e0
+# Commit: 97192f8
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                41 B
 Elem                  14 B
-Code               15379 B
+Code               16661 B
 Data                 831 B
 Custom              1148 B
 ---------------- ----------
-TOTAL              17687 B
+TOTAL              18969 B
 
 ## Top 30 Functions by Size
 
@@ -25,17 +25,17 @@ TOTAL              17687 B
 --------  ----
  3101 B   fmt_fp
  2625 B   printf_core
- 1301 B   frame
-  836 B   nt_input_web_on_blur
-  680 B   nt_input_web_on_pointer_move
+ 2160 B   nt_input_web_on_blur
+ 1373 B   frame
+  690 B   nt_input_web_on_pointer_move
+  651 B   nt_input_web_on_pointer_down
   650 B   pop_arg_long_double
-  641 B   nt_input_web_on_pointer_down
   508 B   __memcpy
-  463 B   main
-  445 B   nt_window_init
+  454 B   main
   374 B   __stdio_write
   370 B   __memset
   323 B   __vfprintf_internal
+  320 B   nt_window_init
   316 B   pop_arg
   313 B   nt_input_web_on_pointer_up
   281 B   wctomb
@@ -55,7 +55,7 @@ TOTAL              17687 B
    41 B   __small_printf
 
 Total functions: 36
-Total code size: 15318 B
+Total code size: 16600 B
 
 ## Per-Module Contributions
 

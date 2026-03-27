@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: 987c6e0
+# Commit: 97192f8
 
 ## WASM Section Sizes
 
@@ -7,44 +7,42 @@ Section                Size
 ---------------- ----------
 Type                 170 B
 Import               388 B
-Function             103 B
+Function             102 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                59 B
 Elem                  55 B
-Code               58017 B
-Data                8539 B
-Custom              4478 B
+Code               73743 B
+Data                8538 B
+Custom              4461 B
 ---------------- ----------
-TOTAL              71830 B
+TOTAL              87537 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-15119 B   frame
-11925 B   main
- 3103 B   fmt_fp
+23775 B   main
+18256 B   frame
+ 3102 B   fmt_fp
  2622 B   printf_core
+ 2327 B   nt_input_web_on_blur
  2041 B   __rem_pio2f
  1296 B   nt_gfx_make_pipeline
  1264 B   nt_shape_renderer_flush
  1239 B   nt_hash32_str
-  931 B   nt_input_web_on_blur
   775 B   nt_gfx_bind_pipeline
-  706 B   nt_input_web_on_pointer_move
-  667 B   nt_input_web_on_pointer_down
+  716 B   nt_input_web_on_pointer_move
+  677 B   nt_input_web_on_pointer_down
   650 B   pop_arg_long_double
-  559 B   push_instance
   555 B   emmalloc_memalign
+  540 B   push_instance
   516 B   claim_more_memory
   512 B   __memcpy
   464 B   emit_wire_edge
   464 B   vsnprintf
-  458 B   nt_window_init
   415 B   attempt_allocate
-  393 B   apply_rotation
   385 B   __dynamic_cast
   382 B   sinf
   381 B   nt_gfx_make_buffer
@@ -52,10 +50,12 @@ TOTAL              71830 B
   362 B   cosf
   340 B   emmalloc_free
   337 B   nt_input_web_on_pointer_up
+  329 B   nt_window_init
   322 B   nt_gfx_bind_instance_buffer
+  313 B   pop_arg
 
-Total functions: 102
-Total code size: 57857 B
+Total functions: 101
+Total code size: 73583 B
 
 ## Per-Module Contributions
 
@@ -103,4 +103,4 @@ libnt_window_stub.a         1838 B
 ## Data Segments Summary
 
 Segments: 22
-Total data size: 8385 B
+Total data size: 8384 B
