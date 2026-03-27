@@ -316,7 +316,7 @@ void test_texture_round_trip(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_builder_add_texture(ctx, png_path);
+    nt_builder_add_texture(ctx, png_path, NULL);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
@@ -612,7 +612,7 @@ void test_dump_gzip_sizes(void) {
     const char *pack_path = TMP_DIR "/dump_gz_test.ntpack";
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
-    nt_builder_add_texture(ctx, png_path);
+    nt_builder_add_texture(ctx, png_path, NULL);
     nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
@@ -693,7 +693,7 @@ void test_multi_asset_pack(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
-    nt_builder_add_texture(ctx, png_path);
+    nt_builder_add_texture(ctx, png_path, NULL);
     nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
@@ -823,7 +823,7 @@ void test_e2e_real_assets(void) {
     nt_builder_add_shader(ctx, "assets/shaders/mesh.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/mesh.frag", NT_BUILD_SHADER_FRAGMENT);
     nt_builder_add_mesh(ctx, "assets/meshes/cube.glb", &(nt_mesh_opts_t){.layout = layout, .stream_count = 2});
-    nt_builder_add_texture(ctx, "assets/textures/lenna.png");
+    nt_builder_add_texture(ctx, "assets/textures/lenna.png", NULL);
 
     TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
     nt_builder_free_pack(ctx);
@@ -1022,7 +1022,7 @@ void test_tex_from_memory(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_size, "test/texture_mem");
+    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_size, "test/texture_mem", NULL);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
@@ -2049,8 +2049,8 @@ void test_early_dedup_identical_textures(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "textures/original.png");
-    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "textures/duplicate.png");
+    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "textures/original.png", NULL);
+    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "textures/duplicate.png", NULL);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
@@ -2127,8 +2127,8 @@ void test_early_dedup_different_opts_not_deduped(void) {
 
     nt_tex_opts_t opts_a = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = 0};
     nt_tex_opts_t opts_b = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = 256};
-    nt_builder_add_texture_from_memory_ex(ctx, png_data, (uint32_t)png_len, "textures/no_resize.png", &opts_a);
-    nt_builder_add_texture_from_memory_ex(ctx, png_data, (uint32_t)png_len, "textures/resized.png", &opts_b);
+    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "textures/no_resize.png", &opts_a);
+    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "textures/resized.png", &opts_b);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
@@ -2213,7 +2213,7 @@ void test_early_dedup_different_kinds_not_deduped(void) {
 
     /* Add same bytes as blob and as texture -- different kinds */
     nt_builder_add_blob(ctx, png_data, (uint32_t)png_len, "data/as_blob");
-    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "data/as_texture");
+    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "data/as_texture", NULL);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
@@ -2257,8 +2257,8 @@ void test_early_dedup_pack_data_correct(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "textures/first.png");
-    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "textures/second.png");
+    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "textures/first.png", NULL);
+    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "textures/second.png", NULL);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
@@ -2329,8 +2329,8 @@ void test_dedup_cross_source_texture_file_vs_memory(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     /* Add same image via file path and via memory */
-    nt_builder_add_texture(ctx, png_path);
-    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)len, "textures/from_memory.png");
+    nt_builder_add_texture(ctx, png_path, NULL);
+    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)len, "textures/from_memory.png", NULL);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
     TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
@@ -2428,7 +2428,7 @@ void test_dedup_cross_source_texture_memory_vs_raw(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     nt_tex_opts_t opts = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = 0};
-    nt_builder_add_texture_from_memory_ex(ctx, png_data, (uint32_t)len, "tex/from_png", &opts);
+    nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)len, "tex/from_png", &opts);
     nt_builder_add_texture_raw(ctx, raw_pixels, 2, 2, "tex/from_raw", &opts);
     free(png_data);
 

@@ -160,7 +160,8 @@ void nt_builder_add_scene_mesh(NtBuilderContext *ctx, const nt_glb_scene_t *scen
     nt_build_result_t r = nt_builder_decode_scene_mesh(scene, mesh_index, primitive_index, opts->layout, opts->stream_count, opts->tangent_mode, &mesh_data, &mesh_size);
     NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_scene_mesh: decode failed");
 
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_MESH, NULL, mesh_data, mesh_size);
+    uint64_t hash = nt_hash64(mesh_data, mesh_size).value;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_MESH, NULL, mesh_data, mesh_size, hash);
 }
 
 /* --- Decode: scene mesh -> binary mesh buffer (eager, called from add_scene_mesh) --- */

@@ -132,6 +132,38 @@ typedef struct {
 /* Opaque builder context */
 typedef struct NtBuilderContext NtBuilderContext;
 
+/* --- Texture options (game controls format and resize per-texture) --- */
+
+typedef struct nt_tex_compress_opts_t nt_tex_compress_opts_t;
+
+typedef struct {
+    nt_texture_pixel_format_t format;       /* output pixel format (default: NT_TEXTURE_FORMAT_RGBA8) */
+    uint32_t max_size;                      /* 0 = no resize, otherwise max(w,h) clamped to this */
+    const nt_tex_compress_opts_t *compress; /* NULL = raw/uncompressed, non-NULL = Basis compress */
+} nt_tex_opts_t;
+
+/* --- Texture compression options (Basis Universal encoding) --- */
+
+typedef enum {
+    NT_TEX_COMPRESS_ETC1S = 1, /* ETC1S mode -- small size, good for color/diffuse textures */
+    NT_TEX_COMPRESS_UASTC = 2, /* UASTC mode -- higher quality, good for normal maps */
+} nt_tex_compress_mode_t;
+
+struct nt_tex_compress_opts_t {
+    nt_tex_compress_mode_t mode; /* ETC1S or UASTC */
+    uint32_t quality;            /* ETC1S: 1-255 (higher=better), UASTC: 0-5 (pack level) */
+    float rdo_quality;           /* ETC1S: rate-distortion optimization (0.0 = disabled), UASTC: unused */
+};
+
+/* --- Compression presets (D-04) --- */
+
+static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_low(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 64, .rdo_quality = 1.0F}; }
+static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_mid(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 128, .rdo_quality = 1.5F}; }
+static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_high(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 200, .rdo_quality = 0.0F}; }
+static inline nt_tex_compress_opts_t nt_tex_compress_uastc_low(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 0, .rdo_quality = 0.0F}; }
+static inline nt_tex_compress_opts_t nt_tex_compress_uastc_mid(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 2, .rdo_quality = 0.0F}; }
+static inline nt_tex_compress_opts_t nt_tex_compress_uastc_high(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 4, .rdo_quality = 0.0F}; }
+
 /* --- Core API ---
  * Lifecycle: start_pack → add_* → finish_pack → free_pack.
  * Caller must always call free_pack when done, whether finish succeeded or not.
@@ -140,9 +172,11 @@ NtBuilderContext *nt_builder_start_pack(const char *output_path);
 nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx);
 void nt_builder_free_pack(NtBuilderContext *ctx);
 
-/* --- Asset addition (single file) --- */
+/* --- Asset addition (single file, opts can be NULL = defaults) --- */
 void nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const nt_mesh_opts_t *opts);
-void nt_builder_add_texture(NtBuilderContext *ctx, const char *path);
+void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_tex_opts_t *opts);
+void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts);
+void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts);
 void nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage);
 
 /* --- Asset roots (search paths for #include and file lookup) --- */
@@ -153,7 +187,7 @@ nt_build_result_t nt_builder_add_asset_root(NtBuilderContext *ctx, const char *p
 
 /* --- Batch addition (glob patterns) --- */
 void nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const nt_mesh_opts_t *opts);
-void nt_builder_add_textures(NtBuilderContext *ctx, const char *pattern);
+void nt_builder_add_textures(NtBuilderContext *ctx, const char *pattern, const nt_tex_opts_t *opts);
 void nt_builder_add_shaders(NtBuilderContext *ctx, const char *pattern, nt_build_shader_stage_t stage);
 
 /* --- Rename (change resource_id key, keep source file) --- */
@@ -166,46 +200,6 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene);
 
 /* --- Blob API (generic binary data asset) --- */
 void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id);
-
-/* --- Texture options (game controls format and resize per-texture) --- */
-
-typedef struct {
-    nt_texture_pixel_format_t format; /* output pixel format (default: NT_TEXTURE_FORMAT_RGBA8) */
-    uint32_t max_size;                /* 0 = no resize, otherwise max(w,h) clamped to this */
-} nt_tex_opts_t;
-
-/* --- Texture compression options (Basis Universal encoding) --- */
-
-typedef enum {
-    NT_TEX_COMPRESS_ETC1S = 1, /* ETC1S mode -- small size, good for color/diffuse textures */
-    NT_TEX_COMPRESS_UASTC = 2, /* UASTC mode -- higher quality, good for normal maps */
-} nt_tex_compress_mode_t;
-
-typedef struct {
-    nt_tex_compress_mode_t mode; /* ETC1S or UASTC */
-    uint32_t quality;            /* ETC1S: 1-255 (higher=better), UASTC: 0-5 (pack level) */
-    float rdo_quality;           /* ETC1S: rate-distortion optimization (0.0 = disabled), UASTC: unused */
-} nt_tex_compress_opts_t;
-
-/* --- Compression presets (D-04) --- */
-
-static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_low(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 64, .rdo_quality = 1.0F}; }
-static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_mid(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 128, .rdo_quality = 1.5F}; }
-static inline nt_tex_compress_opts_t nt_tex_compress_etc1s_high(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_ETC1S, .quality = 200, .rdo_quality = 0.0F}; }
-static inline nt_tex_compress_opts_t nt_tex_compress_uastc_low(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 0, .rdo_quality = 0.0F}; }
-static inline nt_tex_compress_opts_t nt_tex_compress_uastc_mid(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 2, .rdo_quality = 0.0F}; }
-static inline nt_tex_compress_opts_t nt_tex_compress_uastc_high(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 4, .rdo_quality = 0.0F}; }
-
-/* --- Texture from memory API --- */
-void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id);
-void nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts);
-
-/* --- Texture from raw RGBA pixels (no image decode needed) --- */
-void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts);
-
-/* --- Texture from memory with compression (NULL compress_opts = raw v1 format) --- */
-void nt_builder_add_texture_from_memory_compressed(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts,
-                                                   const nt_tex_compress_opts_t *compress_opts);
 
 /* --- Codegen options --- */
 void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);

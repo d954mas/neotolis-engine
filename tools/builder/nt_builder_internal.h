@@ -31,9 +31,11 @@ typedef struct {
 typedef struct {
     uint32_t width;
     uint32_t height;
-    nt_tex_opts_t opts;              /* format + resize */
+    nt_tex_opts_t opts;              /* format + resize (compress ptr zeroed, use has_compress) */
     nt_tex_compress_opts_t compress; /* Basis compression settings */
     bool has_compress;               /* true = use Basis path, false = raw path */
+    uint8_t *source_data;            /* deep-copied encoded image bytes for re-decode (owned, NULL if from file) */
+    uint32_t source_size;            /* 0 if from file (re-read via path) */
 } NtBuildTextureData;
 
 /* Metadata accumulation limit (Phase 37) */
@@ -58,8 +60,9 @@ typedef struct {
     void *data;                 /* NtBuildTextureData* / NtBuildShaderData* / NULL (owned, heap) */
 
     /* Decoded intermediate representation (eager, populated at add_* time) */
-    uint8_t *decoded_data; /* intermediate bytes (always owned, always freed) */
-    uint32_t decoded_size; /* byte count */
+    uint8_t *decoded_data; /* NULL for file/memory textures (freed after hash) */
+    uint32_t decoded_size; /* always set (RGBA size for textures even if freed) */
+    uint64_t decoded_hash; /* xxh64 of decoded_data, computed at add_* time */
 
     /* Early dedup: index of original entry, -1 if not a duplicate */
     int32_t dedup_original;
@@ -95,6 +98,11 @@ struct NtBuilderContext {
 
     /* Early dedup stats */
     uint32_t early_dedup_count;
+
+    /* Same-decoded-different-opts warning pairs */
+    uint32_t dedup_warn_a[NT_BUILD_MAX_ASSETS];
+    uint32_t dedup_warn_b[NT_BUILD_MAX_ASSETS];
+    uint32_t dedup_warn_count;
 
     /* Metadata accumulation (Phase 37) */
     NtBuildMetaEntry meta_pending[NT_BUILD_MAX_META_ENTRIES];
@@ -266,7 +274,7 @@ static inline void nt_builder_pack_to_header_path(const char *pack_path, char *h
 }
 
 /* Deferred entry addition (shared between add_* and scene_mesh) */
-void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data, uint8_t *decoded_data, uint32_t decoded_size);
+void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data, uint8_t *decoded_data, uint32_t decoded_size, uint64_t decoded_hash);
 
 /* Codegen: generate .h header with ASSET_* constants */
 nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);

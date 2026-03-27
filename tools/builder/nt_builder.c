@@ -18,6 +18,10 @@ static void nt_builder_free_entry_data(NtBuildEntry *entry) {
     if (!entry->data) {
         return;
     }
+    if (entry->kind == NT_BUILD_ASSET_TEXTURE) {
+        NtBuildTextureData *td = (NtBuildTextureData *)entry->data;
+        free(td->source_data);
+    }
     /* TEXTURE -> NtBuildTextureData*, SHADER -> NtBuildShaderData*, others -> NULL */
     free(entry->data);
     entry->data = NULL;
@@ -45,7 +49,7 @@ static void nt_builder_free_entry(NtBuildEntry *entry) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data, uint8_t *decoded_data, uint32_t decoded_size) {
+void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asset_kind_t kind, void *data, uint8_t *decoded_data, uint32_t decoded_size, uint64_t decoded_hash) {
     NT_BUILD_ASSERT(ctx && "ctx is NULL");
     NT_BUILD_ASSERT(path && "path is NULL");
 
@@ -71,6 +75,7 @@ void nt_builder_add_entry(NtBuilderContext *ctx, const char *path, nt_build_asse
     entry->data = data;
     entry->decoded_data = decoded_data;
     entry->decoded_size = decoded_size;
+    entry->decoded_hash = decoded_hash;
     entry->dedup_original = -1;
 }
 
@@ -221,6 +226,9 @@ void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled) {
 
 void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx); }
 
+/* Forward declaration for texture re-decode (defined below make_texture_data) */
+static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe);
+
 /* --- Early dedup: compare decoded_data + encoding opts --- */
 
 static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
@@ -240,14 +248,7 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
             return false;
         }
         if (ta->has_compress) {
-            if (ta->compress.mode != tb->compress.mode) {
-                return false;
-            }
-            if (ta->compress.quality != tb->compress.quality) {
-                return false;
-            }
-            /* Compare rdo_quality only for ETC1S where it matters */
-            if (ta->compress.mode == NT_TEX_COMPRESS_ETC1S && ta->compress.rdo_quality != tb->compress.rdo_quality) {
+            if (ta->compress.mode != tb->compress.mode || ta->compress.quality != tb->compress.quality || ta->compress.rdo_quality != tb->compress.rdo_quality) {
                 return false;
             }
         }
@@ -276,7 +277,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     double encode_times[NT_BUILD_MAX_ASSETS];
     memset(encode_times, 0, sizeof(encode_times));
 
-    /* Phase 0: Early dedup on decoded_data + opts */
+    /* Phase 0: Early dedup on hash + size + opts */
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
         if (pe->dedup_original >= 0) {
@@ -293,13 +294,47 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             if (pe->decoded_size != candidate->decoded_size) {
                 continue;
             }
-            if (pe->decoded_size > 0 && memcmp(pe->decoded_data, candidate->decoded_data, pe->decoded_size) != 0) {
+            if (pe->decoded_hash != candidate->decoded_hash) {
                 continue;
+            }
+            /* Hash match -- verify with memcmp if both have decoded_data */
+            if (pe->decoded_data && candidate->decoded_data) {
+                if (memcmp(pe->decoded_data, candidate->decoded_data, pe->decoded_size) != 0) {
+                    continue;
+                }
+            } else if (pe->kind == NT_BUILD_ASSET_TEXTURE) {
+                /* Re-decode textures for verification when decoded_data was freed */
+                uint8_t *a_data = pe->decoded_data;
+                uint8_t *b_data = candidate->decoded_data;
+                bool a_owned = false;
+                bool b_owned = false;
+                if (!a_data) {
+                    a_data = nt_builder_redecode_texture(pe);
+                    a_owned = true;
+                }
+                if (!b_data) {
+                    b_data = nt_builder_redecode_texture(candidate);
+                    b_owned = true;
+                }
+                bool match = (a_data && b_data) ? (memcmp(a_data, b_data, pe->decoded_size) == 0) : true;
+                if (a_owned) {
+                    free(a_data);
+                }
+                if (b_owned) {
+                    free(b_data);
+                }
+                if (!match) {
+                    continue;
+                }
             }
             if (opts_equal(pe, candidate)) {
                 candidate->dedup_original = (int32_t)i;
                 ctx->early_dedup_count++;
                 NT_LOG_INFO("early dedup: [%u] %s -> [%u] %s", j, candidate->path, i, pe->path);
+            } else if (ctx->dedup_warn_count < NT_BUILD_MAX_ASSETS) {
+                ctx->dedup_warn_a[ctx->dedup_warn_count] = i;
+                ctx->dedup_warn_b[ctx->dedup_warn_count] = j;
+                ctx->dedup_warn_count++;
             }
         }
     }
@@ -333,10 +368,37 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
         case NT_BUILD_ASSET_TEXTURE: {
             NtBuildTextureData *td = (NtBuildTextureData *)pe->data;
+            uint8_t *pixels = pe->decoded_data; /* non-NULL for raw textures */
+            bool pixels_owned = false;
+
+            if (!pixels) {
+                /* Re-decode from source */
+                uint32_t rw = 0;
+                uint32_t rh = 0;
+                if (td->source_data) {
+                    /* Memory source -- re-decode from stored encoded bytes */
+                    nt_build_result_t dr = nt_builder_decode_texture(td->source_data, td->source_size, &td->opts, &pixels, &rw, &rh);
+                    NT_BUILD_ASSERT(dr == NT_BUILD_OK && "encode: re-decode texture from memory failed");
+                } else {
+                    /* File source -- re-read from path */
+                    uint32_t fsize = 0;
+                    uint8_t *fdata = (uint8_t *)nt_builder_read_file(pe->path, &fsize);
+                    NT_BUILD_ASSERT(fdata && "encode: re-read texture file failed");
+                    nt_build_result_t dr = nt_builder_decode_texture(fdata, fsize, &td->opts, &pixels, &rw, &rh);
+                    free(fdata);
+                    NT_BUILD_ASSERT(dr == NT_BUILD_OK && "encode: re-decode texture from file failed");
+                }
+                pixels_owned = true;
+            }
+
             if (td->has_compress) {
-                ret = nt_builder_encode_texture_compressed(ctx, pe->decoded_data, td->width, td->height, pe->resource_id, &td->opts, &td->compress);
+                ret = nt_builder_encode_texture_compressed(ctx, pixels, td->width, td->height, pe->resource_id, &td->opts, &td->compress);
             } else {
-                ret = nt_builder_encode_texture(ctx, pe->decoded_data, td->width, td->height, pe->resource_id, &td->opts);
+                ret = nt_builder_encode_texture(ctx, pixels, td->width, td->height, pe->resource_id, &td->opts);
+            }
+
+            if (pixels_owned) {
+                free(pixels);
             }
             break;
         }
@@ -406,6 +468,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             break;
         }
     }
+
+    NT_BUILD_ASSERT(ctx->entry_count == ctx->pending_count && "entry/pending count mismatch after encode+dedup registration");
 
     double encode_secs = nt_time_now() - t_encode_start;
 
@@ -613,6 +677,12 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     if (ctx->early_dedup_count > 0) {
         NT_LOG_INFO("  Early dedup: %u assets skipped", ctx->early_dedup_count);
     }
+    if (ctx->dedup_warn_count > 0) {
+        NT_LOG_WARN("  Same data, different opts (%u pairs):", ctx->dedup_warn_count);
+        for (uint32_t w = 0; w < ctx->dedup_warn_count; w++) {
+            NT_LOG_WARN("    %s  vs  %s", ctx->pending[ctx->dedup_warn_a[w]].path, ctx->pending[ctx->dedup_warn_b[w]].path);
+        }
+    }
     if (ctx->dedup_count > 0) {
         NT_LOG_INFO("  Dedup:   %u assets (saved %.1fK)", ctx->dedup_count, (double)ctx->dedup_saved_bytes / 1024.0);
     }
@@ -634,6 +704,47 @@ static uint64_t nt_builder_path_id(const char *path) {
     uint64_t id = nt_hash64_str(norm ? norm : path).value;
     free(norm);
     return id;
+}
+
+/* --- Texture data helper --- */
+
+/* Re-decode a texture entry for verification. Returns malloc'd RGBA buffer. Caller frees. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe) {
+    const NtBuildTextureData *td = (const NtBuildTextureData *)pe->data;
+    uint8_t *pixels = NULL;
+    uint32_t w = 0;
+    uint32_t h = 0;
+    if (td->source_data) {
+        nt_build_result_t r = nt_builder_decode_texture(td->source_data, td->source_size, &td->opts, &pixels, &w, &h);
+        NT_BUILD_ASSERT(r == NT_BUILD_OK && "redecode_texture: decode from memory failed");
+    } else {
+        uint32_t fsize = 0;
+        uint8_t *fdata = (uint8_t *)nt_builder_read_file(pe->path, &fsize);
+        NT_BUILD_ASSERT(fdata && "redecode_texture: re-read file failed");
+        nt_build_result_t r = nt_builder_decode_texture(fdata, fsize, &td->opts, &pixels, &w, &h);
+        free(fdata);
+        NT_BUILD_ASSERT(r == NT_BUILD_OK && "redecode_texture: decode from file failed");
+    }
+    return pixels;
+}
+
+static NtBuildTextureData *make_texture_data(uint32_t w, uint32_t h, const nt_tex_opts_t *opts) {
+    NtBuildTextureData *td = (NtBuildTextureData *)calloc(1, sizeof(NtBuildTextureData));
+    NT_BUILD_ASSERT(td && "texture data alloc failed");
+    td->width = w;
+    td->height = h;
+    if (opts) {
+        td->opts = *opts;
+        td->opts.compress = NULL; /* don't store dangling pointer */
+        if (opts->compress) {
+            td->has_compress = true;
+            td->compress = *opts->compress;
+        }
+    } else {
+        td->opts.format = NT_TEXTURE_FORMAT_RGBA8;
+    }
+    return td;
 }
 
 /* --- Public add_* (eager decode) --- */
@@ -676,11 +787,12 @@ void nt_builder_add_mesh(NtBuilderContext *ctx, const char *path, const nt_mesh_
     free(resolved_path);
     NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_mesh: decode failed");
 
-    nt_builder_add_entry(ctx, logical_path, NT_BUILD_ASSET_MESH, NULL, mesh_data, mesh_size);
+    uint64_t hash = nt_hash64(mesh_data, mesh_size).value;
+    nt_builder_add_entry(ctx, logical_path, NT_BUILD_ASSET_MESH, NULL, mesh_data, mesh_size, hash);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_builder_add_texture(NtBuilderContext *ctx, const char *path) {
+void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_tex_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && path && "invalid add_texture args");
 
     /* Resolve actual file path via asset roots */
@@ -693,25 +805,21 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path) {
     free(resolved_path);
     NT_BUILD_ASSERT(file_data && "add_texture: failed to read file");
 
-    /* Decode to RGBA (default opts: no resize, RGBA8) */
+    /* Decode to RGBA */
     uint8_t *pixels = NULL;
     uint32_t w = 0;
     uint32_t h = 0;
-    nt_build_result_t r = nt_builder_decode_texture(file_data, file_size, NULL, &pixels, &w, &h);
+    nt_build_result_t r = nt_builder_decode_texture(file_data, file_size, opts, &pixels, &w, &h);
     free(file_data);
     NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_texture: decode failed");
 
-    /* Create texture data */
-    NtBuildTextureData *td = (NtBuildTextureData *)calloc(1, sizeof(NtBuildTextureData));
-    NT_BUILD_ASSERT(td && "add_texture: alloc failed");
-    td->width = w;
-    td->height = h;
-    td->opts.format = NT_TEXTURE_FORMAT_RGBA8;
-    td->opts.max_size = 0;
-    td->has_compress = false;
+    /* Hash decoded pixels, then free -- will re-read from file at encode time */
+    uint64_t hash = nt_hash64(pixels, w * h * 4).value;
+    free(pixels);
 
-    /* Add entry with kind=TEXTURE */
-    nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_TEXTURE, td, pixels, w * h * 4);
+    NtBuildTextureData *td = make_texture_data(w, h, opts);
+    /* td->source_data = NULL, td->source_size = 0 (re-read from path) */
+    nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_TEXTURE, td, NULL, w * h * 4, hash);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -736,7 +844,8 @@ void nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_sha
     NT_BUILD_ASSERT(sd && "add_shader: alloc failed");
     sd->stage = stage;
 
-    nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_SHADER, sd, (uint8_t *)resolved, resolved_len);
+    uint64_t hash = nt_hash64(resolved, resolved_len).value;
+    nt_builder_add_entry(ctx, path, NT_BUILD_ASSET_SHADER, sd, (uint8_t *)resolved, resolved_len, hash);
 }
 
 /* --- Public add_blob --- */
@@ -757,12 +866,13 @@ void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size,
     memcpy(copy, &blob_hdr, sizeof(NtBlobAssetHeader));
     memcpy(copy + sizeof(NtBlobAssetHeader), data, size);
 
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_BLOB, NULL, copy, total_size);
+    uint64_t hash = nt_hash64(copy, total_size).value;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_BLOB, NULL, copy, total_size, hash);
 }
 
 /* --- Public add_texture_from_memory --- */
 
-void nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts) {
+void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && data && size > 0 && resource_id && "invalid texture_from_memory args");
 
     uint8_t *pixels = NULL;
@@ -771,23 +881,17 @@ void nt_builder_add_texture_from_memory_ex(NtBuilderContext *ctx, const uint8_t 
     nt_build_result_t r = nt_builder_decode_texture(data, size, opts, &pixels, &w, &h);
     NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_texture_from_memory: decode failed");
 
-    NtBuildTextureData *td = (NtBuildTextureData *)calloc(1, sizeof(NtBuildTextureData));
-    NT_BUILD_ASSERT(td && "add_texture_from_memory: alloc failed");
-    td->width = w;
-    td->height = h;
-    if (opts) {
-        td->opts = *opts;
-    } else {
-        td->opts.format = NT_TEXTURE_FORMAT_RGBA8;
-        td->opts.max_size = 0;
-    }
-    td->has_compress = false;
+    /* Hash decoded pixels, then free -- deep copy source for re-decode at encode time */
+    uint64_t hash = nt_hash64(pixels, w * h * 4).value;
+    free(pixels);
 
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, td, pixels, w * h * 4);
-}
+    NtBuildTextureData *td = make_texture_data(w, h, opts);
+    td->source_data = (uint8_t *)malloc(size);
+    NT_BUILD_ASSERT(td->source_data && "add_texture_from_memory: source copy alloc failed");
+    memcpy(td->source_data, data, size);
+    td->source_size = size;
 
-void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id) {
-    nt_builder_add_texture_from_memory_ex(ctx, data, size, resource_id, NULL);
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, td, NULL, w * h * 4, hash);
 }
 
 /* --- Public add_texture_raw --- */
@@ -801,53 +905,9 @@ void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixel
     nt_build_result_t r = nt_builder_decode_texture_raw(rgba_pixels, width, height, opts, &pixels, &w, &h);
     NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_texture_raw: decode failed");
 
-    NtBuildTextureData *td = (NtBuildTextureData *)calloc(1, sizeof(NtBuildTextureData));
-    NT_BUILD_ASSERT(td && "add_texture_raw: alloc failed");
-    td->width = w;
-    td->height = h;
-    if (opts) {
-        td->opts = *opts;
-    } else {
-        td->opts.format = NT_TEXTURE_FORMAT_RGBA8;
-        td->opts.max_size = 0;
-    }
-    td->has_compress = false;
-
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, td, pixels, w * h * 4);
-}
-
-/* --- Public add_texture_from_memory_compressed --- */
-
-void nt_builder_add_texture_from_memory_compressed(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts,
-                                                   const nt_tex_compress_opts_t *compress_opts) {
-    NT_BUILD_ASSERT(ctx && data && size > 0 && resource_id && "invalid texture_from_memory_compressed args");
-
-    /* NULL compress_opts = fall through to uncompressed path */
-    if (!compress_opts) {
-        nt_builder_add_texture_from_memory_ex(ctx, data, size, resource_id, opts);
-        return;
-    }
-
-    uint8_t *pixels = NULL;
-    uint32_t w = 0;
-    uint32_t h = 0;
-    nt_build_result_t r = nt_builder_decode_texture(data, size, opts, &pixels, &w, &h);
-    NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_texture_from_memory_compressed: decode failed");
-
-    NtBuildTextureData *td = (NtBuildTextureData *)calloc(1, sizeof(NtBuildTextureData));
-    NT_BUILD_ASSERT(td && "add_texture_from_memory_compressed: alloc failed");
-    td->width = w;
-    td->height = h;
-    if (opts) {
-        td->opts = *opts;
-    } else {
-        td->opts.format = NT_TEXTURE_FORMAT_RGBA8;
-        td->opts.max_size = 0;
-    }
-    td->has_compress = true;
-    td->compress = *compress_opts;
-
-    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, td, pixels, w * h * 4);
+    /* Hash and keep decoded_data -- can't re-derive from source */
+    uint64_t hash = nt_hash64(pixels, w * h * 4).value;
+    nt_builder_add_entry(ctx, resource_id, NT_BUILD_ASSET_TEXTURE, make_texture_data(w, h, opts), pixels, w * h * 4, hash);
 }
 
 nt_build_result_t nt_builder_add_asset_root(NtBuilderContext *ctx, const char *path) {
@@ -859,9 +919,7 @@ nt_build_result_t nt_builder_add_asset_root(NtBuilderContext *ctx, const char *p
         return NT_BUILD_ERR_LIMIT;
     }
     char *normalized = nt_builder_normalize_path(path);
-    if (!normalized) {
-        return NT_BUILD_ERR_IO;
-    }
+    NT_BUILD_ASSERT(normalized && "asset root path normalize failed");
     ctx->asset_roots[ctx->asset_root_count++] = normalized;
     NT_LOG_INFO("asset root [%u]: %s", ctx->asset_root_count - 1, normalized);
     return NT_BUILD_OK;

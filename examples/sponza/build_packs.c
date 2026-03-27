@@ -155,7 +155,8 @@ static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uin
             tex_compress = &normal_compress;
         }
 
-        nt_builder_add_texture_from_memory_compressed(ctx, scene->textures[i].data, scene->textures[i].size, tex_rid(i), &opts, tex_compress);
+        opts.compress = tex_compress;
+        nt_builder_add_texture_from_memory(ctx, scene->textures[i].data, scene->textures[i].size, tex_rid(i), &opts);
         added++;
     }
     (void)printf("  Textures added: %u / %u\n", added, scene->texture_count);
