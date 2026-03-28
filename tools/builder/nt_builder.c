@@ -401,7 +401,8 @@ static int parallel_encode_worker(void *arg) {
             }
 
             if (td->has_compress) {
-                ret = nt_builder_encode_texture_compressed_to_buf(pixels, td->width, td->height, &td->opts, &td->compress, &result->data, &result->size, &result->type, &result->format_version);
+                ret = nt_builder_encode_texture_compressed_to_buf(pixels, td->width, td->height, &td->opts, &td->compress, pctx->basis_threads, &result->data, &result->size, &result->type,
+                                                                  &result->format_version);
             } else {
                 ret = nt_builder_encode_texture_to_buf(pixels, td->width, td->height, &td->opts, &result->data, &result->size, &result->type, &result->format_version);
             }
@@ -618,7 +619,16 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             num_threads = work_count;
         }
 
-        NT_LOG_INFO("Parallel encode: %u items on %u threads", work_count, num_threads);
+        /* Adaptive Basis thread count: distribute threads across workers.
+         * Many textures → pool(1) per worker (external parallelism).
+         * Few textures  → pool(N) per worker (Basis internal parallelism). */
+        uint32_t basis_threads = ctx->thread_count / work_count;
+        if (basis_threads < 1) {
+            basis_threads = 1;
+        }
+        pctx.basis_threads = basis_threads;
+
+        NT_LOG_INFO("Parallel encode: %u items on %u threads (Basis pool(%u) per worker)", work_count, num_threads, basis_threads);
 
         thrd_t *threads = (thrd_t *)malloc(num_threads * sizeof(thrd_t));
         NT_BUILD_ASSERT(threads && "parallel: thread array malloc failed");
@@ -677,7 +687,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                     pixels_owned = true;
                 }
                 if (td->has_compress) {
-                    ret = nt_builder_encode_texture_compressed_to_buf(pixels, td->width, td->height, &td->opts, &td->compress, &results[i].data, &results[i].size, &results[i].type,
+                    ret = nt_builder_encode_texture_compressed_to_buf(pixels, td->width, td->height, &td->opts, &td->compress, 1, &results[i].data, &results[i].size, &results[i].type,
                                                                       &results[i].format_version);
                 } else {
                     ret = nt_builder_encode_texture_to_buf(pixels, td->width, td->height, &td->opts, &results[i].data, &results[i].size, &results[i].type, &results[i].format_version);

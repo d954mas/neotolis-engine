@@ -41,6 +41,11 @@ nt_basisu_encode_result_t nt_basisu_encode(const uint8_t *rgba_pixels, uint32_t 
 nt_basisu_encode_result_t nt_basisu_encode_parallel(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha, bool uastc, uint32_t quality, float endpoint_rdo, float selector_rdo,
                                                     bool gen_mipmaps);
 
+/* Thread-safe encode with explicit Basis thread count per call.
+ * Creates local job_pool(basis_threads). For benchmarking different strategies. */
+nt_basisu_encode_result_t nt_basisu_encode_with_threads(uint32_t basis_threads, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha, bool uastc, uint32_t quality,
+                                                        float endpoint_rdo, float selector_rdo, bool gen_mipmaps);
+
 /* Free encoder output data */
 void nt_basisu_encode_free(nt_basisu_encode_result_t *result);
 

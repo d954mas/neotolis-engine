@@ -287,6 +287,17 @@ if(NOT EMSCRIPTEN)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
 
+    # --- Parallel encode benchmark (not a CTest, manual run only) ---
+    add_executable(bench_parallel bench_parallel.c)
+    target_link_libraries(bench_parallel PRIVATE nt_builder)
+    target_compile_definitions(bench_parallel PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    target_compile_options(bench_parallel PRIVATE -U_DLL)
+    nt_set_warning_flags(bench_parallel)
+    nt_set_sanitizer_flags(bench_parallel)
+    set_target_properties(bench_parallel PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+
     # --- Mesh renderer tests ---
     add_executable(test_mesh_renderer unit/test_mesh_renderer.c)
     target_link_libraries(test_mesh_renderer PRIVATE

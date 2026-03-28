@@ -184,7 +184,7 @@ nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, u
 }
 
 nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts,
-                                                              uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type, uint16_t *out_version) {
+                                                              uint32_t basis_threads, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type, uint16_t *out_version) {
     nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
 
     /* Basis Universal encodes RGB or RGBA blocks -- RG8/R8 have no Basis equivalent.
@@ -194,10 +194,11 @@ nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgb
     /* Determine alpha from format (D-06) */
     bool has_alpha = (fmt == NT_TEXTURE_FORMAT_RGBA8);
 
-    /* Encode via Basis Universal -- uses nt_basisu_encode_parallel with per-call local pool (D-01/D-04) */
+    /* Encode via Basis Universal -- adaptive pool size per worker */
     bool uastc = (compress_opts->mode == NT_TEX_COMPRESS_UASTC);
+    uint32_t bt = (basis_threads > 0) ? basis_threads : 1;
     nt_basisu_encode_result_t enc =
-        nt_basisu_encode_parallel(rgba_pixels, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->endpoint_rdo_quality, compress_opts->selector_rdo_quality, true);
+        nt_basisu_encode_with_threads(bt, rgba_pixels, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->endpoint_rdo_quality, compress_opts->selector_rdo_quality, true);
 
     NT_BUILD_ASSERT(enc.data && "texture encode: Basis encode failed");
 
@@ -255,7 +256,7 @@ nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, co
     uint32_t buf_size = 0;
     nt_asset_type_t type;
     uint16_t version;
-    nt_build_result_t ret = nt_builder_encode_texture_compressed_to_buf(rgba_pixels, width, height, opts, compress_opts, &buf, &buf_size, &type, &version);
+    nt_build_result_t ret = nt_builder_encode_texture_compressed_to_buf(rgba_pixels, width, height, opts, compress_opts, 1, &buf, &buf_size, &type, &version);
     if (ret != NT_BUILD_OK) {
         return ret;
     }
