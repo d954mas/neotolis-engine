@@ -565,7 +565,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    nt_basisu_encoder_shutdown();
     (void)printf("\n=== Done ===\n");
     return 0;
 }

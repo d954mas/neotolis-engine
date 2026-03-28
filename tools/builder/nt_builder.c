@@ -342,6 +342,9 @@ static void derive_asset_type(nt_build_asset_kind_t kind, nt_asset_type_t *out_t
         *out_type = NT_ASSET_BLOB;
         *out_version = NT_BLOB_VERSION;
         break;
+    default:
+        NT_BUILD_ASSERT(0 && "derive_asset_type: unknown asset kind");
+        break;
     }
 }
 
@@ -429,6 +432,9 @@ static int parallel_encode_worker(void *arg) {
 }
 
 /* --- Finish: dedup decoded entries, encode non-duplicates, write pack --- */
+
+/* Guard: stack arrays in finish_pack sized to NT_BUILD_MAX_ASSETS. If the limit grows, revisit. */
+_Static_assert(sizeof(NtEncodeResult) * NT_BUILD_MAX_ASSETS <= 64 * 1024, "NtEncodeResult stack array exceeds 64 KB — move to heap");
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
@@ -534,12 +540,17 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_LOG_INFO("Encoding %u assets (%u early-deduped)...", ctx->pending_count, ctx->early_dedup_count);
 
     /* Pre-encode shaders (GL context is thread-bound, cannot parallelize per D-05) */
+    uint32_t shader_done = 0;
+    uint32_t shader_total = 0;
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
-        NtBuildEntry *pe = &ctx->pending[i];
-        if (pe->dedup_original >= 0) {
+        if (ctx->pending[i].dedup_original >= 0 || ctx->pending[i].kind != NT_BUILD_ASSET_SHADER) {
             continue;
         }
-        if (pe->kind != NT_BUILD_ASSET_SHADER) {
+        shader_total++;
+    }
+    for (uint32_t i = 0; i < ctx->pending_count; i++) {
+        NtBuildEntry *pe = &ctx->pending[i];
+        if (pe->dedup_original >= 0 || pe->kind != NT_BUILD_ASSET_SHADER) {
             continue;
         }
 
@@ -548,7 +559,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         nt_build_result_t ret = nt_builder_encode_shader_to_buf(pe->decoded_data, pe->decoded_size, sd->stage, &results[i].data, &results[i].size, &results[i].type, &results[i].format_version);
         NT_BUILD_ASSERT(ret == NT_BUILD_OK && "shader encode failed");
         results[i].encode_secs = nt_time_now() - t_start;
-        NT_LOG_INFO("  [%u/%u] %s (%.2fs)", i + 1, ctx->pending_count, pe->path, results[i].encode_secs);
+        shader_done++;
+        NT_LOG_INFO("  [%u/%u] %s (%.2fs)", shader_done, shader_total, pe->path, results[i].encode_secs);
         (void)fflush(stdout);
     }
 
@@ -1027,7 +1039,9 @@ static uint64_t nt_builder_path_id(const char *path) {
 
 /* --- Texture data helper --- */
 
-/* Re-decode a texture entry from stored source. Returns malloc'd RGBA buffer. Caller frees. */
+/* Re-decode a texture entry from stored source. Returns malloc'd RGBA buffer. Caller frees.
+ * Thread-safe: reads only from pe (immutable after add_*), uses fopen/fread (per-fd) and
+ * stbi_load_from_memory (thread-local error state). Called from parallel encode workers. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint8_t *nt_builder_redecode_texture(const NtBuildEntry *pe, uint32_t *out_w, uint32_t *out_h) {
     const NtBuildTextureData *td = (const NtBuildTextureData *)pe->data;

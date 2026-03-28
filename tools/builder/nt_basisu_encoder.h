@@ -11,9 +11,6 @@ extern "C" {
 /* One-time encoder initialization (call before first encode) */
 void nt_basisu_encoder_init(void);
 
-/* Shut down encoder */
-void nt_basisu_encoder_shutdown(void);
-
 /* Encode result -- caller must free output_data via nt_basisu_encode_free() */
 typedef struct {
     uint8_t *data;      /* Basis file data (caller frees via nt_basisu_encode_free) */

@@ -86,8 +86,6 @@ nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t
     return result;
 }
 
-void nt_basisu_encoder_shutdown(void) { /* no global state to clean up */ }
-
 void nt_basisu_encode_free(nt_basisu_encode_result_t *result) {
     if (result && result->data) {
         free(result->data);
