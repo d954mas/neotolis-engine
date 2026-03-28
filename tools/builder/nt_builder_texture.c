@@ -198,7 +198,7 @@ nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgb
     bool uastc = (compress_opts->mode == NT_TEX_COMPRESS_UASTC);
     uint32_t bt = (basis_threads > 0) ? basis_threads : 1;
     nt_basisu_encode_result_t enc =
-        nt_basisu_encode_with_threads(bt, rgba_pixels, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->endpoint_rdo_quality, compress_opts->selector_rdo_quality, true);
+        nt_basisu_encode(bt, rgba_pixels, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->endpoint_rdo_quality, compress_opts->selector_rdo_quality, true);
 
     NT_BUILD_ASSERT(enc.data && "texture encode: Basis encode failed");
 

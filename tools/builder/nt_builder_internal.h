@@ -94,8 +94,8 @@ typedef struct {
     /* Read-only context for workers */
     NtBuildEntry *pending;
     uint32_t pending_count;
-    uint32_t basis_threads;          /* Basis job_pool size per worker: max(1, thread_count/work_count) */
-    _Atomic uint32_t done_count;     /* atomic: completed items (for progress logging) */
+    uint32_t basis_threads;      /* Basis job_pool size per worker: max(1, thread_count/work_count) */
+    _Atomic uint32_t done_count; /* atomic: completed items (for progress logging) */
 } NtParallelContext;
 
 /* Per-asset cache status (tracked during finish_pack) */
