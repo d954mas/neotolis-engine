@@ -246,9 +246,6 @@ void nt_builder_set_threads(NtBuilderContext *ctx, uint32_t thread_count) {
 
 void nt_builder_set_threads_auto(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx && "set_threads_auto called with NULL context");
-    /* Mirror the logic from nt_basisu_encoder_init() (per D-11):
-     * Default: hardware_concurrency() - 1 (reserve 1 core for interactive use).
-     * NT_BUILDER_ALL_CORES=1: use all cores (CI, dedicated build machines). */
     uint32_t threads = 0;
 #ifdef _WIN32
     SYSTEM_INFO si;
@@ -258,9 +255,6 @@ void nt_builder_set_threads_auto(NtBuilderContext *ctx) {
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     threads = (n > 0) ? (uint32_t)n : 1;
 #endif
-    if (threads > 1 && !getenv("NT_BUILDER_ALL_CORES")) { // NOLINT(concurrency-mt-unsafe)
-        threads--;
-    }
     if (threads < 1) {
         threads = 1;
     }
@@ -371,6 +365,7 @@ static int parallel_encode_worker(void *arg) {
         NtBuildEntry *pe = &pctx->pending[pi];
         NtEncodeResult *result = &pctx->results[pi];
 
+        double t_asset_start = nt_time_now();
         nt_build_result_t ret = NT_BUILD_OK;
 
         switch (pe->kind) {
@@ -418,9 +413,15 @@ static int parallel_encode_worker(void *arg) {
             break;
         }
 
+        result->encode_secs = nt_time_now() - t_asset_start;
+
         if (ret != NT_BUILD_OK) {
             atomic_store(&pctx->error_flag, 1);
             NT_LOG_ERROR("parallel encode failed for asset [%u] %s", pi, pe->path);
+        } else {
+            uint32_t done = atomic_fetch_add(&pctx->done_count, 1) + 1;
+            NT_LOG_INFO("  [%u/%u] %s (%.2fs)", done, pctx->work_count, pe->path, result->encode_secs);
+            (void)fflush(stdout);
         }
     }
     return 0;
@@ -609,6 +610,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         pctx.work_count = work_count;
         atomic_init(&pctx.next_work, 0);
         atomic_init(&pctx.error_flag, 0);
+        atomic_init(&pctx.done_count, 0);
         pctx.results = results;
         pctx.pending = ctx->pending;
         pctx.pending_count = ctx->pending_count;
@@ -651,10 +653,10 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         /* Per D-13: Check for errors after join */
         NT_BUILD_ASSERT(!atomic_load(&pctx.error_flag) && "parallel encode: one or more assets failed -- see errors above");
 
-        /* Record approximate per-asset encode times (not per-asset in parallel -- record total) */
+        /* Copy real per-asset encode times from worker results */
         for (uint32_t wi = 0; wi < work_count; wi++) {
             uint32_t pi = work_indices[wi];
-            encode_times[pi] = parallel_secs / (double)work_count; /* approximate */
+            encode_times[pi] = results[pi].encode_secs;
         }
 
     } else if (work_count > 0) {

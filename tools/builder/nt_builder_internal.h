@@ -77,6 +77,7 @@ typedef struct {
     nt_asset_type_t type;    /* asset type for register_asset (NT_ASSET_MESH, NT_ASSET_TEXTURE, etc.) */
     uint16_t format_version; /* format version for register_asset */
     bool from_cache;         /* true = loaded from cache, false = freshly encoded */
+    double encode_secs;      /* wall time for this asset's encode (set by worker or single-threaded loop) */
 } NtEncodeResult;
 
 /* Shared state between main thread and encode workers (per D-08) */
@@ -93,7 +94,8 @@ typedef struct {
     /* Read-only context for workers */
     NtBuildEntry *pending;
     uint32_t pending_count;
-    uint32_t basis_threads; /* Basis job_pool size per worker: max(1, thread_count/work_count) */
+    uint32_t basis_threads;          /* Basis job_pool size per worker: max(1, thread_count/work_count) */
+    _Atomic uint32_t done_count;     /* atomic: completed items (for progress logging) */
 } NtParallelContext;
 
 /* Per-asset cache status (tracked during finish_pack) */

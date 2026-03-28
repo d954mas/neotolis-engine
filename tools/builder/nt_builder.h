@@ -238,9 +238,8 @@ void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir);
  * When > 0, finish_pack spawns workers for encode phase. Assembly remains sequential per D-17. */
 void nt_builder_set_threads(NtBuilderContext *ctx, uint32_t thread_count);
 
-/* Auto-detect thread count (per D-11): hardware_concurrency() - 1 by default,
- * all cores when NT_BUILDER_ALL_CORES env var is set. Same logic as nt_basisu_encoder_init().
- * Convenience wrapper -- equivalent to set_threads(auto_detected_count). */
+/* Auto-detect thread count: hardware_concurrency() cores.
+ * Convenience wrapper -- equivalent to set_threads(hardware_concurrency()). */
 void nt_builder_set_threads_auto(NtBuilderContext *ctx);
 
 /* --- Merge per-pack .h headers into a combined header --- */
