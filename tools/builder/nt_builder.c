@@ -434,7 +434,7 @@ static int parallel_encode_worker(void *arg) {
 /* --- Finish: dedup decoded entries, encode non-duplicates, write pack --- */
 
 /* Guard: stack arrays in finish_pack sized to NT_BUILD_MAX_ASSETS. If the limit grows, revisit. */
-_Static_assert(sizeof(NtEncodeResult) * NT_BUILD_MAX_ASSETS <= 64 * 1024, "NtEncodeResult stack array exceeds 64 KB — move to heap");
+_Static_assert(sizeof(NtEncodeResult) * (size_t)NT_BUILD_MAX_ASSETS <= (size_t)64U * 1024U, "NtEncodeResult stack array exceeds 64 KB — move to heap");
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
