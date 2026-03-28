@@ -94,7 +94,7 @@ typedef struct {
     /* Read-only context for workers */
     NtBuildEntry *pending;
     uint32_t pending_count;
-    uint32_t basis_threads;      /* Basis job_pool size per worker: max(1, thread_count/work_count) */
+    uint32_t encode_threads;     /* internal threads per encode call: max(1, thread_count/work_count) */
     _Atomic uint32_t done_count; /* atomic: completed items (for progress logging) */
 } NtParallelContext;
 
@@ -188,7 +188,7 @@ nt_build_result_t nt_builder_encode_shader(NtBuilderContext *ctx, const uint8_t 
 nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_data, uint32_t *out_size,
                                                    nt_asset_type_t *out_type, uint16_t *out_version);
 nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts,
-                                                              uint32_t basis_threads, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type, uint16_t *out_version);
+                                                              uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type, uint16_t *out_version);
 nt_build_result_t nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type,
                                                   uint16_t *out_version);
 
