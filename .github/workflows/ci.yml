@@ -306,8 +306,6 @@ jobs:
           restore-keys: builder-cache-
 
       - name: Build asset packs (release)
-        env:
-          NT_BUILDER_ALL_CORES: "1"
         run: |
           ./build/examples/textured_quad/native-release/build_tq_packs build/examples/textured_quad
           ./build/examples/sponza/native-release/build_sponza_packs build/examples/sponza

@@ -5,6 +5,7 @@
 #include "nt_builder.h"
 #include "nt_pack_format.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -69,6 +70,34 @@ typedef struct {
     int32_t dedup_original;
 } NtBuildEntry;
 
+/* Per-asset encode result -- produced by workers, consumed by sequential assembly */
+typedef struct {
+    uint8_t *data;           /* encoded bytes (malloc'd by encode function, freed after assembly) */
+    uint32_t size;           /* encoded byte count */
+    nt_asset_type_t type;    /* asset type for register_asset (NT_ASSET_MESH, NT_ASSET_TEXTURE, etc.) */
+    uint16_t format_version; /* format version for register_asset */
+    bool from_cache;         /* true = loaded from cache, false = freshly encoded */
+    double encode_secs;      /* wall time for this asset's encode (set by worker or single-threaded loop) */
+} NtEncodeResult;
+
+/* Shared state between main thread and encode workers (per D-08) */
+typedef struct {
+    /* Work items: indices into pending[] that need encoding (cache misses, non-deduped, non-shader) */
+    uint32_t *work_indices;
+    uint32_t work_count;
+    _Atomic uint32_t next_work;  /* atomic: next index to claim */
+    _Atomic uint32_t error_flag; /* 0 = ok, 1 = error occurred (per D-13) */
+
+    /* Per-asset results (indexed by pending[] index, sized to pending_count) */
+    NtEncodeResult *results;
+
+    /* Read-only context for workers */
+    NtBuildEntry *pending;
+    uint32_t pending_count;
+    uint32_t encode_threads;     /* internal threads per encode call: max(1, thread_count/work_count) */
+    _Atomic uint32_t done_count; /* atomic: completed items (for progress logging) */
+} NtParallelContext;
+
 /* Per-asset cache status (tracked during finish_pack) */
 typedef enum {
     NT_CACHE_NONE = 0,      /* caching disabled or early-deduped entry */
@@ -132,6 +161,9 @@ struct NtBuilderContext {
     uint32_t cache_hit_count;  /* per-build hit stats */
     uint32_t cache_miss_count; /* per-build miss stats */
     double cache_restore_secs; /* total time reading cache files */
+
+    /* Parallel encoding: thread count (0 = single-threaded, per D-12) */
+    uint32_t thread_count;
 };
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
@@ -151,6 +183,14 @@ nt_build_result_t nt_builder_encode_texture(NtBuilderContext *ctx, const uint8_t
 nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts,
                                                        const nt_tex_compress_opts_t *compress_opts);
 nt_build_result_t nt_builder_encode_shader(NtBuilderContext *ctx, const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint64_t resource_id);
+
+/* Thread-safe encode functions -- return independent buffers (no shared state) */
+nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_data, uint32_t *out_size,
+                                                   nt_asset_type_t *out_type, uint16_t *out_version);
+nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts,
+                                                              uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type, uint16_t *out_version);
+nt_build_result_t nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type,
+                                                  uint16_t *out_version);
 
 /* Metadata accumulation (called from import functions) */
 void nt_builder_add_meta(NtBuilderContext *ctx, uint64_t resource_id, uint64_t kind, const void *data, uint32_t size);

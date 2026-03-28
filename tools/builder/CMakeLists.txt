@@ -49,6 +49,17 @@ set_target_properties(nt_basisu_encoder PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tools/builder/${NT_PRESET_NAME}"
 )
 
+# tinycthread (C11 threads API -- vendored from glfw/deps for cross-platform threading)
+add_library(tinycthread STATIC
+    "${NT_ENGINE_ROOT}/deps/tinycthread/tinycthread.c"
+)
+target_include_directories(tinycthread PUBLIC "${NT_ENGINE_ROOT}/deps/tinycthread")
+target_compile_definitions(tinycthread PRIVATE _CRT_SECURE_NO_WARNINGS)
+# Suppress warnings in vendored C code (upstream has sign-conversion warnings)
+target_compile_options(tinycthread PRIVATE -w)
+# Static CRT: remove _DLL so CRT calls resolve to static symbols (match builder)
+target_compile_options(tinycthread PRIVATE -U_DLL)
+
 # nt_builder static library
 add_library(nt_builder STATIC
     nt_builder.c
@@ -66,7 +77,7 @@ add_library(nt_builder STATIC
     nt_builder_cache.c
 )
 target_include_directories(nt_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(nt_builder PUBLIC nt_shared nt_core nt_log nt_time cgltf stb_image stb_image_resize2 nt_hash mikktspace nt_basisu_encoder glfw glad miniz)
+target_link_libraries(nt_builder PUBLIC nt_shared nt_core nt_log nt_time cgltf stb_image stb_image_resize2 nt_hash mikktspace nt_basisu_encoder glfw glad miniz tinycthread)
 # Builder uses standard C I/O (fopen, strdup, strncpy) -- suppress MSVC deprecation
 target_compile_definitions(nt_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE NT_LOG_DOMAIN_DEFAULT="builder")
 # Static CRT: remove _DLL so CRT calls resolve to static symbols

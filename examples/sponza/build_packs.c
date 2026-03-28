@@ -426,6 +426,7 @@ static nt_build_result_t build_pack(const char *out_dir, const char *hdr_dir, co
     }
     nt_builder_set_header_dir(ctx, hdr_dir);
     nt_builder_set_cache_dir(ctx, cache_dir);
+    nt_builder_set_threads_auto(ctx);
 
     populate(ctx, scene);
 
@@ -564,7 +565,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    nt_basisu_encoder_shutdown();
     (void)printf("\n=== Done ===\n");
     return 0;
 }

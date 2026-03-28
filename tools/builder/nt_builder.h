@@ -233,6 +233,15 @@ void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
 #define NT_BUILDER_VERSION 1 /* Bump when encode logic changes to invalidate cache */
 void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir);
 
+/* --- Parallel encoding (multi-threaded asset encode in finish_pack) --- */
+/* thread_count: number of worker threads. 0 or no call = single-threaded (backward compatible per D-12).
+ * When > 0, finish_pack spawns workers for encode phase. Assembly remains sequential per D-17. */
+void nt_builder_set_threads(NtBuilderContext *ctx, uint32_t thread_count);
+
+/* Auto-detect thread count: hardware_concurrency() cores.
+ * Convenience wrapper -- equivalent to set_threads(hardware_concurrency()). */
+void nt_builder_set_threads_auto(NtBuilderContext *ctx);
+
 /* --- Merge per-pack .h headers into a combined header --- */
 void nt_builder_merge_headers(const char *const *header_paths, uint32_t count, const char *output_path);
 

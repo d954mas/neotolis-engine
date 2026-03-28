@@ -11,9 +11,6 @@ extern "C" {
 /* One-time encoder initialization (call before first encode) */
 void nt_basisu_encoder_init(void);
 
-/* Shut down encoder and free thread pool */
-void nt_basisu_encoder_shutdown(void);
-
 /* Encode result -- caller must free output_data via nt_basisu_encode_free() */
 typedef struct {
     uint8_t *data;      /* Basis file data (caller frees via nt_basisu_encode_free) */
@@ -22,6 +19,11 @@ typedef struct {
 } nt_basisu_encode_result_t;
 
 /* Encode RGBA pixels to Basis Universal format.
+ * Thread-safe: creates a local job_pool(basis_threads) per call, no shared state.
+ *
+ * basis_threads: Basis internal thread count (1 = caller thread only, N = N total threads).
+ *   Use 1 when parallelizing across many textures externally.
+ *   Use N when encoding few textures and want Basis to parallelize internally.
  * rgba_pixels: RGBA8 pixel data (width * height * 4 bytes)
  * width, height: image dimensions
  * has_alpha: true if alpha channel is meaningful (false = RGB-only optimization)
@@ -32,8 +34,8 @@ typedef struct {
  * gen_mipmaps: true = encoder generates full mip chain
  * Returns: result with data pointer and size. data=NULL on failure.
  */
-nt_basisu_encode_result_t nt_basisu_encode(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha, bool uastc, uint32_t quality, float endpoint_rdo, float selector_rdo,
-                                           bool gen_mipmaps);
+nt_basisu_encode_result_t nt_basisu_encode(uint32_t basis_threads, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha, bool uastc, uint32_t quality, float endpoint_rdo,
+                                           float selector_rdo, bool gen_mipmaps);
 
 /* Free encoder output data */
 void nt_basisu_encode_free(nt_basisu_encode_result_t *result);

@@ -2854,6 +2854,228 @@ void test_cache_with_dedup(void) {
     free(data2);
 }
 
+/* --- Parallel encode tests (Phase 40) --- */
+
+void test_parallel_deterministic(void) {
+    /* Build same pack twice: once with 1 thread, once with 4 threads.
+     * Output must be byte-identical (PAR-02). */
+    const char *pack1 = TMP_DIR "/par_det_1.ntpack";
+    const char *pack2 = TMP_DIR "/par_det_4.ntpack";
+    const char *png_path = TMP_DIR "/par_det_tex.png";
+    const char *glb_path = TMP_DIR "/par_det_tri.glb";
+    const char *vert_path = TMP_DIR "/par_det.vert";
+    write_test_png(png_path);
+    write_test_glb(glb_path);
+    write_test_shader(vert_path, "precision mediump float;\n"
+                                 "layout(location = 0) in vec3 a_pos;\n"
+                                 "void main() { gl_Position = vec4(a_pos, 1.0); }\n");
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+
+    /* Build 1: single-threaded via set_threads(1) */
+    {
+        NtBuilderContext *ctx = nt_builder_start_pack(pack1);
+        nt_builder_set_threads(ctx, 1);
+        nt_builder_add_texture(ctx, png_path, NULL);
+        nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
+        nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+        nt_build_result_t r = nt_builder_finish_pack(ctx);
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+        nt_builder_free_pack(ctx);
+    }
+
+    /* Build 2: 4 threads */
+    {
+        NtBuilderContext *ctx = nt_builder_start_pack(pack2);
+        nt_builder_set_threads(ctx, 4);
+        nt_builder_add_texture(ctx, png_path, NULL);
+        nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
+        nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+        nt_build_result_t r = nt_builder_finish_pack(ctx);
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+        nt_builder_free_pack(ctx);
+    }
+
+    /* Binary compare */
+    uint32_t size1 = 0;
+    uint32_t size2 = 0;
+    uint8_t *data1 = (uint8_t *)nt_builder_read_file(pack1, &size1);
+    uint8_t *data2 = (uint8_t *)nt_builder_read_file(pack2, &size2);
+    TEST_ASSERT_NOT_NULL(data1);
+    TEST_ASSERT_NOT_NULL(data2);
+    TEST_ASSERT_EQUAL_UINT32(size1, size2);
+    TEST_ASSERT_EQUAL_MEMORY(data1, data2, size1);
+    free(data1);
+    free(data2);
+}
+
+void test_parallel_basic(void) {
+    /* Build with 4 threads, verify output is valid and all assets present (PAR-01). */
+    const char *pack_path = TMP_DIR "/par_basic.ntpack";
+    const char *png_path = TMP_DIR "/par_basic_tex.png";
+    const char *glb_path = TMP_DIR "/par_basic_tri.glb";
+    const char *vert_path = TMP_DIR "/par_basic.vert";
+    write_test_png(png_path);
+    write_test_glb(glb_path);
+    write_test_shader(vert_path, "precision mediump float;\n"
+                                 "layout(location = 0) in vec3 a_pos;\n"
+                                 "void main() { gl_Position = vec4(a_pos, 1.0); }\n");
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    nt_builder_set_threads(ctx, 4);
+    nt_builder_add_texture(ctx, png_path, NULL);
+    nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
+    nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+    uint8_t blob_data[] = {0xDE, 0xAD, 0xBE, 0xEF};
+    nt_builder_add_blob(ctx, blob_data, sizeof(blob_data), "test/blob");
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Verify pack is valid by reading header */
+    uint32_t pack_size = 0;
+    uint8_t *pack_data = (uint8_t *)nt_builder_read_file(pack_path, &pack_size);
+    TEST_ASSERT_NOT_NULL(pack_data);
+    TEST_ASSERT_TRUE(pack_size > sizeof(NtPackHeader));
+    NtPackHeader *hdr = (NtPackHeader *)pack_data;
+    TEST_ASSERT_EQUAL_UINT32(NT_PACK_MAGIC, hdr->magic);
+    TEST_ASSERT_EQUAL(4, hdr->asset_count); /* texture + mesh + shader + blob */
+    free(pack_data);
+}
+
+void test_set_threads_zero_is_singlethreaded(void) {
+    /* No call to set_threads = single-threaded, same as set_threads(0) (D-12). */
+    const char *pack1 = TMP_DIR "/thr_default.ntpack";
+    const char *pack2 = TMP_DIR "/thr_zero.ntpack";
+    const char *png_path = TMP_DIR "/thr_tex.png";
+    write_test_png(png_path);
+
+    {
+        NtBuilderContext *ctx = nt_builder_start_pack(pack1);
+        /* No set_threads call -- default 0 */
+        nt_builder_add_texture(ctx, png_path, NULL);
+        nt_build_result_t r = nt_builder_finish_pack(ctx);
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+        nt_builder_free_pack(ctx);
+    }
+    {
+        NtBuilderContext *ctx = nt_builder_start_pack(pack2);
+        nt_builder_set_threads(ctx, 0);
+        nt_builder_add_texture(ctx, png_path, NULL);
+        nt_build_result_t r = nt_builder_finish_pack(ctx);
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+        nt_builder_free_pack(ctx);
+    }
+
+    uint32_t size1 = 0;
+    uint32_t size2 = 0;
+    uint8_t *data1 = (uint8_t *)nt_builder_read_file(pack1, &size1);
+    uint8_t *data2 = (uint8_t *)nt_builder_read_file(pack2, &size2);
+    TEST_ASSERT_NOT_NULL(data1);
+    TEST_ASSERT_NOT_NULL(data2);
+    TEST_ASSERT_EQUAL_UINT32(size1, size2);
+    TEST_ASSERT_EQUAL_MEMORY(data1, data2, size1);
+    free(data1);
+    free(data2);
+}
+
+void test_parallel_with_cache(void) {
+    /* Build with threads + cache, rebuild, verify cache hits in parallel mode. */
+    const char *pack_path = TMP_DIR "/par_cache.ntpack";
+    const char *cache_dir = TMP_DIR "/par_cache_dir";
+    const char *png_path = TMP_DIR "/par_cache_tex.png";
+    const char *glb_path = TMP_DIR "/par_cache_tri.glb";
+    MKDIR(cache_dir);
+    clean_cache_dir(cache_dir);
+    write_test_png(png_path);
+    write_test_glb(glb_path);
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+
+    /* Build 1: populates cache */
+    {
+        NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+        nt_builder_set_threads(ctx, 4);
+        nt_builder_set_cache_dir(ctx, cache_dir);
+        nt_builder_add_texture(ctx, png_path, NULL);
+        nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
+        nt_build_result_t r = nt_builder_finish_pack(ctx);
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+        nt_builder_free_pack(ctx);
+    }
+
+    uint32_t size1 = 0;
+    uint8_t *data1 = (uint8_t *)nt_builder_read_file(pack_path, &size1);
+
+    /* Build 2: should get cache hits */
+    {
+        NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+        nt_builder_set_threads(ctx, 4);
+        nt_builder_set_cache_dir(ctx, cache_dir);
+        nt_builder_add_texture(ctx, png_path, NULL);
+        nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
+        nt_build_result_t r = nt_builder_finish_pack(ctx);
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+        nt_builder_free_pack(ctx);
+    }
+
+    uint32_t size2 = 0;
+    uint8_t *data2 = (uint8_t *)nt_builder_read_file(pack_path, &size2);
+    TEST_ASSERT_EQUAL_UINT32(size1, size2);
+    TEST_ASSERT_EQUAL_MEMORY(data1, data2, size1);
+    free(data1);
+    free(data2);
+}
+
+void test_parallel_with_dedup(void) {
+    /* Build with threads + duplicate assets, verify dedup + parallel encode. */
+    const char *pack1 = TMP_DIR "/par_dedup_1.ntpack";
+    const char *pack2 = TMP_DIR "/par_dedup_4.ntpack";
+    const char *png_path = TMP_DIR "/par_dedup_tex.png";
+    const char *glb_path = TMP_DIR "/par_dedup_tri.glb";
+    const char *vert_path = TMP_DIR "/par_dedup.vert";
+    write_test_png(png_path);
+    write_test_glb(glb_path);
+    write_test_shader(vert_path, "precision mediump float;\n"
+                                 "layout(location = 0) in vec3 a_pos;\n"
+                                 "void main() { gl_Position = vec4(a_pos, 1.0); }\n");
+
+    NtStreamLayout layout[] = {{"position", "POSITION", NT_STREAM_FLOAT32, 3, false}};
+
+    /* Same assets added twice (will early-dedup) + other assets (will encode) */
+    for (int pass = 0; pass < 2; pass++) {
+        const char *path = (pass == 0) ? pack1 : pack2;
+        NtBuilderContext *ctx = nt_builder_start_pack(path);
+        nt_builder_set_threads(ctx, (pass == 0) ? 1 : 4);
+
+        /* Two identical textures (early dedup) -- use from_memory to control resource_id */
+        nt_builder_add_texture(ctx, png_path, NULL);
+        uint32_t img_size = 0;
+        uint8_t *img_data = (uint8_t *)nt_builder_read_file(png_path, &img_size);
+        nt_builder_add_texture_from_memory(ctx, img_data, img_size, "dup/texture", NULL);
+        free(img_data);
+
+        nt_builder_add_mesh(ctx, glb_path, &(nt_mesh_opts_t){.layout = layout, .stream_count = 1});
+        nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
+
+        nt_build_result_t r = nt_builder_finish_pack(ctx);
+        TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+        nt_builder_free_pack(ctx);
+    }
+
+    /* Verify byte-identical output */
+    uint32_t size1 = 0;
+    uint32_t size2 = 0;
+    uint8_t *data1 = (uint8_t *)nt_builder_read_file(pack1, &size1);
+    uint8_t *data2 = (uint8_t *)nt_builder_read_file(pack2, &size2);
+    TEST_ASSERT_EQUAL_UINT32(size1, size2);
+    TEST_ASSERT_EQUAL_MEMORY(data1, data2, size1);
+    free(data1);
+    free(data2);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -2970,6 +3192,13 @@ int main(void) {
     RUN_TEST(test_cache_clear_forces_rebuild);
     RUN_TEST(test_cache_flat_files);
     RUN_TEST(test_cache_with_dedup);
+
+    /* Parallel encode */
+    RUN_TEST(test_parallel_deterministic);
+    RUN_TEST(test_parallel_basic);
+    RUN_TEST(test_set_threads_zero_is_singlethreaded);
+    RUN_TEST(test_parallel_with_cache);
+    RUN_TEST(test_parallel_with_dedup);
 
     return UNITY_END();
 }
