@@ -5,11 +5,14 @@
 #include "nt_blob_format.h"
 #include "nt_crc32.h"
 #include "nt_shader_format.h"
+#include "tinycthread.h"
 #include "time/nt_time.h"
 /* Avoid zlib-compat macros (compress, compress2) colliding with struct field names */
 #define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
 #include "miniz.h"
 /* clang-format on */
+
+#include <stdatomic.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -348,6 +351,80 @@ static void derive_asset_type(nt_build_asset_kind_t kind, nt_asset_type_t *out_t
     }
 }
 
+/* --- Parallel encode worker (called by tinycthread, picks assets from atomic queue) --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static int parallel_encode_worker(void *arg) {
+    NtParallelContext *pctx = (NtParallelContext *)arg;
+
+    for (;;) {
+        /* Claim next work item atomically */
+        uint32_t idx = atomic_fetch_add(&pctx->next_work, 1);
+        if (idx >= pctx->work_count) {
+            break;
+        }
+        if (atomic_load(&pctx->error_flag)) {
+            break;
+        }
+
+        uint32_t pi = pctx->work_indices[idx];
+        NtBuildEntry *pe = &pctx->pending[pi];
+        NtEncodeResult *result = &pctx->results[pi];
+
+        nt_build_result_t ret = NT_BUILD_OK;
+
+        switch (pe->kind) {
+        case NT_BUILD_ASSET_MESH:
+        case NT_BUILD_ASSET_BLOB: {
+            /* Mesh/blob: decoded data IS the final binary -- copy to independent buffer */
+            result->data = (uint8_t *)malloc(pe->decoded_size);
+            if (!result->data) {
+                ret = NT_BUILD_ERR_IO;
+                break;
+            }
+            memcpy(result->data, pe->decoded_data, pe->decoded_size);
+            result->size = pe->decoded_size;
+            derive_asset_type(pe->kind, &result->type, &result->format_version);
+            break;
+        }
+        case NT_BUILD_ASSET_TEXTURE: {
+            NtBuildTextureData *td = (NtBuildTextureData *)pe->data;
+            uint8_t *pixels = pe->decoded_data;
+            bool pixels_owned = false;
+
+            if (!pixels) {
+                uint32_t rw = 0;
+                uint32_t rh = 0;
+                pixels = nt_builder_redecode_texture(pe, &rw, &rh);
+                NT_BUILD_ASSERT(rw == td->width && rh == td->height && "redecode produced different dimensions");
+                pixels_owned = true;
+            }
+
+            if (td->has_compress) {
+                ret = nt_builder_encode_texture_compressed_to_buf(pixels, td->width, td->height, &td->opts, &td->compress, &result->data, &result->size, &result->type, &result->format_version);
+            } else {
+                ret = nt_builder_encode_texture_to_buf(pixels, td->width, td->height, &td->opts, &result->data, &result->size, &result->type, &result->format_version);
+            }
+
+            if (pixels_owned) {
+                free(pixels);
+            }
+            break;
+        }
+        case NT_BUILD_ASSET_SHADER:
+            /* Shaders already pre-encoded -- should not appear in work queue */
+            NT_BUILD_ASSERT(0 && "shader in parallel work queue -- should be pre-encoded");
+            break;
+        }
+
+        if (ret != NT_BUILD_OK) {
+            atomic_store(&pctx->error_flag, 1);
+            NT_LOG_ERROR("parallel encode failed for asset [%u] %s", pi, pe->path);
+        }
+    }
+    return 0;
+}
+
 /* --- Finish: dedup decoded entries, encode non-duplicates, write pack --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -510,64 +587,116 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
     }
 
-    /* Phase 1b: Encode loop (currently single-threaded, Plan 02 will parallelize) */
+    /* Phase 1b: Encode (parallel if thread_count > 0, else single-threaded) */
+    /* Build work queue: indices of entries needing encode (not cached, not deduped, not shader) */
+    uint32_t work_indices[NT_BUILD_MAX_ASSETS];
+    uint32_t work_count = 0;
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
-        NtBuildEntry *pe = &ctx->pending[i];
-        if (pe->dedup_original >= 0) {
+        if (ctx->pending[i].dedup_original >= 0) {
             continue;
         }
         if (results[i].data != NULL) {
-            continue; /* already filled by shader pre-encode or cache hit */
+            continue; /* cached or pre-encoded shader */
+        }
+        work_indices[work_count++] = i;
+    }
+
+    if (work_count > 0 && ctx->thread_count > 0) {
+        /* --- PARALLEL ENCODE (per D-05/D-08) --- */
+        NtParallelContext pctx;
+        pctx.work_indices = work_indices;
+        pctx.work_count = work_count;
+        atomic_init(&pctx.next_work, 0);
+        atomic_init(&pctx.error_flag, 0);
+        pctx.results = results;
+        pctx.pending = ctx->pending;
+        pctx.pending_count = ctx->pending_count;
+
+        /* Determine actual thread count (cap at work_count -- no idle threads) */
+        uint32_t num_threads = ctx->thread_count;
+        if (num_threads > work_count) {
+            num_threads = work_count;
         }
 
-        double t_asset_start = nt_time_now();
-        nt_build_result_t ret = NT_BUILD_OK;
+        NT_LOG_INFO("Parallel encode: %u items on %u threads", work_count, num_threads);
 
-        switch (pe->kind) {
-        case NT_BUILD_ASSET_MESH:
-        case NT_BUILD_ASSET_BLOB: {
-            /* Decoded data is the final binary -- copy to independent buffer */
-            results[i].data = (uint8_t *)malloc(pe->decoded_size);
-            NT_BUILD_ASSERT(results[i].data && "encode: malloc failed for mesh/blob");
-            memcpy(results[i].data, pe->decoded_data, pe->decoded_size);
-            results[i].size = pe->decoded_size;
-            derive_asset_type(pe->kind, &results[i].type, &results[i].format_version);
-            break;
+        thrd_t *threads = (thrd_t *)malloc(num_threads * sizeof(thrd_t));
+        NT_BUILD_ASSERT(threads && "parallel: thread array malloc failed");
+
+        double t_parallel_start = nt_time_now();
+
+        for (uint32_t t = 0; t < num_threads; t++) {
+            int rc = thrd_create(&threads[t], parallel_encode_worker, &pctx);
+            NT_BUILD_ASSERT(rc == thrd_success && "parallel: thrd_create failed");
         }
-        case NT_BUILD_ASSET_TEXTURE: {
-            NtBuildTextureData *td = (NtBuildTextureData *)pe->data;
-            uint8_t *pixels = pe->decoded_data;
-            bool pixels_owned = false;
+        for (uint32_t t = 0; t < num_threads; t++) {
+            (void)thrd_join(threads[t], NULL);
+        }
 
-            if (!pixels) {
-                uint32_t rw = 0;
-                uint32_t rh = 0;
-                pixels = nt_builder_redecode_texture(pe, &rw, &rh);
-                NT_BUILD_ASSERT(rw == td->width && rh == td->height && "redecode produced different dimensions");
-                pixels_owned = true;
+        free((void *)threads);
+
+        double parallel_secs = nt_time_now() - t_parallel_start;
+        NT_LOG_INFO("Parallel encode complete: %.2fs (%u items, %u threads)", parallel_secs, work_count, num_threads);
+
+        /* Per D-13: Check for errors after join */
+        NT_BUILD_ASSERT(!atomic_load(&pctx.error_flag) && "parallel encode: one or more assets failed -- see errors above");
+
+        /* Record approximate per-asset encode times (not per-asset in parallel -- record total) */
+        for (uint32_t wi = 0; wi < work_count; wi++) {
+            uint32_t pi = work_indices[wi];
+            encode_times[pi] = parallel_secs / (double)work_count; /* approximate */
+        }
+
+    } else if (work_count > 0) {
+        /* --- SINGLE-THREADED ENCODE (backward compatible, per D-12) --- */
+        for (uint32_t wi = 0; wi < work_count; wi++) {
+            uint32_t i = work_indices[wi];
+            NtBuildEntry *pe = &ctx->pending[i];
+            double t_asset_start = nt_time_now();
+            nt_build_result_t ret = NT_BUILD_OK;
+
+            switch (pe->kind) {
+            case NT_BUILD_ASSET_MESH:
+            case NT_BUILD_ASSET_BLOB: {
+                results[i].data = (uint8_t *)malloc(pe->decoded_size);
+                NT_BUILD_ASSERT(results[i].data && "encode: malloc failed");
+                memcpy(results[i].data, pe->decoded_data, pe->decoded_size);
+                results[i].size = pe->decoded_size;
+                derive_asset_type(pe->kind, &results[i].type, &results[i].format_version);
+                break;
+            }
+            case NT_BUILD_ASSET_TEXTURE: {
+                NtBuildTextureData *td = (NtBuildTextureData *)pe->data;
+                uint8_t *pixels = pe->decoded_data;
+                bool pixels_owned = false;
+                if (!pixels) {
+                    uint32_t rw = 0;
+                    uint32_t rh = 0;
+                    pixels = nt_builder_redecode_texture(pe, &rw, &rh);
+                    NT_BUILD_ASSERT(rw == td->width && rh == td->height && "redecode produced different dimensions");
+                    pixels_owned = true;
+                }
+                if (td->has_compress) {
+                    ret = nt_builder_encode_texture_compressed_to_buf(pixels, td->width, td->height, &td->opts, &td->compress, &results[i].data, &results[i].size, &results[i].type,
+                                                                      &results[i].format_version);
+                } else {
+                    ret = nt_builder_encode_texture_to_buf(pixels, td->width, td->height, &td->opts, &results[i].data, &results[i].size, &results[i].type, &results[i].format_version);
+                }
+                if (pixels_owned) {
+                    free(pixels);
+                }
+                break;
+            }
+            case NT_BUILD_ASSET_SHADER:
+                break; /* already pre-encoded above */
             }
 
-            if (td->has_compress) {
-                ret = nt_builder_encode_texture_compressed_to_buf(pixels, td->width, td->height, &td->opts, &td->compress, &results[i].data, &results[i].size, &results[i].type,
-                                                                  &results[i].format_version);
-            } else {
-                ret = nt_builder_encode_texture_to_buf(pixels, td->width, td->height, &td->opts, &results[i].data, &results[i].size, &results[i].type, &results[i].format_version);
-            }
+            NT_BUILD_ASSERT(ret == NT_BUILD_OK && "asset encode failed -- see error above");
 
-            if (pixels_owned) {
-                free(pixels);
-            }
-            break;
+            encode_times[i] = nt_time_now() - t_asset_start;
+            NT_LOG_INFO("  [%u/%u] %s (%.2fs)", i + 1, ctx->pending_count, pe->path, encode_times[i]);
+            (void)fflush(stdout);
         }
-        case NT_BUILD_ASSET_SHADER:
-            break; /* already pre-encoded above */
-        }
-
-        NT_BUILD_ASSERT(ret == NT_BUILD_OK && "asset encode failed -- see error above");
-
-        encode_times[i] = nt_time_now() - t_asset_start;
-        NT_LOG_INFO("  [%u/%u] %s (%.2fs)", i + 1, ctx->pending_count, pe->path, encode_times[i]);
-        (void)fflush(stdout);
     }
 
     /* Phase 1c: Sequential assembly (per D-06/D-17) -- append in declaration order */
@@ -898,6 +1027,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     }
     if (ctx->cache_dir) {
         NT_LOG_INFO("  Cache: %u hit / %u miss", ctx->cache_hit_count, ctx->cache_miss_count);
+    }
+    if (ctx->thread_count > 0) {
+        NT_LOG_INFO("  Threads: %u", ctx->thread_count);
     }
     NT_LOG_INFO("");
     if (ctx->cache_dir && ctx->gzip_estimate) {

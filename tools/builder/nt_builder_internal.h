@@ -5,6 +5,7 @@
 #include "nt_builder.h"
 #include "nt_pack_format.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -77,6 +78,22 @@ typedef struct {
     uint16_t format_version; /* format version for register_asset */
     bool from_cache;         /* true = loaded from cache, false = freshly encoded */
 } NtEncodeResult;
+
+/* Shared state between main thread and encode workers (per D-08) */
+typedef struct {
+    /* Work items: indices into pending[] that need encoding (cache misses, non-deduped, non-shader) */
+    uint32_t *work_indices;
+    uint32_t work_count;
+    _Atomic uint32_t next_work;  /* atomic: next index to claim */
+    _Atomic uint32_t error_flag; /* 0 = ok, 1 = error occurred (per D-13) */
+
+    /* Per-asset results (indexed by pending[] index, sized to pending_count) */
+    NtEncodeResult *results;
+
+    /* Read-only context for workers */
+    NtBuildEntry *pending;
+    uint32_t pending_count;
+} NtParallelContext;
 
 /* Per-asset cache status (tracked during finish_pack) */
 typedef enum {

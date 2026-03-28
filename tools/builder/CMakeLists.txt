@@ -57,6 +57,8 @@ target_include_directories(tinycthread PUBLIC "${NT_ENGINE_ROOT}/deps/tinycthrea
 target_compile_definitions(tinycthread PRIVATE _CRT_SECURE_NO_WARNINGS)
 # Suppress warnings in vendored C code (upstream has sign-conversion warnings)
 target_compile_options(tinycthread PRIVATE -w)
+# Static CRT: remove _DLL so CRT calls resolve to static symbols (match builder)
+target_compile_options(tinycthread PRIVATE -U_DLL)
 
 # nt_builder static library
 add_library(nt_builder STATIC
