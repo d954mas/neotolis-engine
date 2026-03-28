@@ -227,13 +227,14 @@ static void collapse_whitespace(char *buf, uint32_t *len) {
     *len = wp;
 }
 
-/* --- Shader encode (called from finish_pack) --- */
+/* --- Shader encode to independent buffer (thread-safe except for GL validation) --- */
 /* Takes already-resolved shader text (from add_shader), strips comments,
- * collapses whitespace, validates, and writes to pack format. */
+ * collapses whitespace, validates, and returns contiguous buffer. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_build_result_t nt_builder_encode_shader(NtBuilderContext *ctx, const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint64_t resource_id) {
-    if (!ctx || !resolved_text || text_len == 0) {
+nt_build_result_t nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type,
+                                                  uint16_t *out_version) {
+    if (!resolved_text || text_len == 0) {
         return NT_BUILD_ERR_VALIDATION;
     }
 
@@ -273,17 +274,40 @@ nt_build_result_t nt_builder_encode_shader(NtBuilderContext *ctx, const uint8_t 
     shader_hdr.code_size = code_size;
 
     uint32_t total_asset_size = (uint32_t)sizeof(NtShaderCodeHeader) + code_size;
+    uint8_t *buf = (uint8_t *)malloc(total_asset_size);
+    NT_BUILD_ASSERT(buf && "shader encode: malloc failed");
 
-    nt_build_result_t ret = nt_builder_append_data(ctx, &shader_hdr, (uint32_t)sizeof(NtShaderCodeHeader));
-    if (ret == NT_BUILD_OK) {
-        ret = nt_builder_append_data(ctx, stripped, code_size);
-    }
+    memcpy(buf, &shader_hdr, sizeof(NtShaderCodeHeader));
+    memcpy(buf + sizeof(NtShaderCodeHeader), stripped, code_size);
 
     free(stripped);
 
+    *out_data = buf;
+    *out_size = total_asset_size;
+    *out_type = NT_ASSET_SHADER_CODE;
+    *out_version = NT_SHADER_CODE_VERSION;
+    return NT_BUILD_OK;
+}
+
+/* --- Original shader encode wrapper (calls _to_buf + append + register) --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+nt_build_result_t nt_builder_encode_shader(NtBuilderContext *ctx, const uint8_t *resolved_text, uint32_t text_len, nt_build_shader_stage_t stage, uint64_t resource_id) {
+    if (!ctx) {
+        return NT_BUILD_ERR_VALIDATION;
+    }
+    uint8_t *buf = NULL;
+    uint32_t buf_size = 0;
+    nt_asset_type_t type;
+    uint16_t version;
+    nt_build_result_t ret = nt_builder_encode_shader_to_buf(resolved_text, text_len, stage, &buf, &buf_size, &type, &version);
     if (ret != NT_BUILD_OK) {
         return ret;
     }
-
-    return nt_builder_register_asset(ctx, resource_id, NT_ASSET_SHADER_CODE, NT_SHADER_CODE_VERSION, total_asset_size);
+    ret = nt_builder_append_data(ctx, buf, buf_size);
+    if (ret == NT_BUILD_OK) {
+        ret = nt_builder_register_asset(ctx, resource_id, type, version, buf_size);
+    }
+    free(buf);
+    return ret;
 }

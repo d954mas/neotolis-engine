@@ -9,9 +9,6 @@
 #pragma clang diagnostic pop
 /* clang-format on */
 
-/* Lazy encoder initialization */
-static bool s_encoder_initialized = false;
-
 /* No mapping needed -- builder and runtime share nt_texture_pixel_format_t.
  * BPP lookup uses nt_texture_bpp() from nt_texture_format.h. */
 
@@ -137,9 +134,10 @@ nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint
     return NT_BUILD_OK;
 }
 
-/* --- Encode: RGBA pixels -> pack format (called from finish_pack) --- */
+/* --- Encode: RGBA pixels -> independent buffer (thread-safe, no shared state) --- */
 
-nt_build_result_t nt_builder_encode_texture(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts) {
+nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_data, uint32_t *out_size,
+                                                   nt_asset_type_t *out_type, uint16_t *out_version) {
     nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
     uint32_t pixel_count = width * height;
     uint32_t bpp = nt_texture_bpp(fmt);
@@ -155,7 +153,7 @@ nt_build_result_t nt_builder_encode_texture(NtBuilderContext *ctx, const uint8_t
         final_data = rgba_pixels;
     }
 
-    /* Write v2 header (RAW compression -- uncompressed pixel data) */
+    /* Build v2 header (RAW compression -- uncompressed pixel data) */
     uint32_t data_size = pixel_count * bpp;
     NtTextureAssetHeaderV2 tex_hdr;
     memset(&tex_hdr, 0, sizeof(tex_hdr));
@@ -170,46 +168,40 @@ nt_build_result_t nt_builder_encode_texture(NtBuilderContext *ctx, const uint8_t
     tex_hdr.data_size = data_size;
 
     uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeaderV2) + data_size;
+    uint8_t *buf = (uint8_t *)malloc(total_asset_size);
+    NT_BUILD_ASSERT(buf && "texture encode: malloc failed");
 
-    nt_build_result_t ret = nt_builder_append_data(ctx, &tex_hdr, (uint32_t)sizeof(NtTextureAssetHeaderV2));
-    if (ret == NT_BUILD_OK) {
-        ret = nt_builder_append_data(ctx, final_data, data_size);
-    }
+    memcpy(buf, &tex_hdr, sizeof(NtTextureAssetHeaderV2));
+    memcpy(buf + sizeof(NtTextureAssetHeaderV2), final_data, data_size);
 
     free(stripped);
 
-    if (ret != NT_BUILD_OK) {
-        return ret;
-    }
-
-    return nt_builder_register_asset(ctx, resource_id, NT_ASSET_TEXTURE, NT_TEXTURE_VERSION_V2, total_asset_size);
+    *out_data = buf;
+    *out_size = total_asset_size;
+    *out_type = NT_ASSET_TEXTURE;
+    *out_version = NT_TEXTURE_VERSION_V2;
+    return NT_BUILD_OK;
 }
 
-nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts,
-                                                       const nt_tex_compress_opts_t *compress_opts) {
+nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts,
+                                                              uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type, uint16_t *out_version) {
     nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
 
-    /* Basis Universal encodes RGB or RGBA blocks — RG8/R8 have no Basis equivalent.
+    /* Basis Universal encodes RGB or RGBA blocks -- RG8/R8 have no Basis equivalent.
      * Use RGB8 for 2/1-channel textures (normals, specular) with Basis compression. */
     NT_BUILD_ASSERT((fmt == NT_TEXTURE_FORMAT_RGBA8 || fmt == NT_TEXTURE_FORMAT_RGB8) && "Basis compression requires RGBA8 or RGB8 format (RG8/R8 have no Basis equivalent)");
 
     /* Determine alpha from format (D-06) */
     bool has_alpha = (fmt == NT_TEXTURE_FORMAT_RGBA8);
 
-    /* Lazy-init encoder */
-    if (!s_encoder_initialized) {
-        nt_basisu_encoder_init();
-        s_encoder_initialized = true;
-    }
-
-    /* Encode via Basis Universal */
+    /* Encode via Basis Universal -- uses nt_basisu_encode_parallel with per-call local pool (D-01/D-04) */
     bool uastc = (compress_opts->mode == NT_TEX_COMPRESS_UASTC);
     nt_basisu_encode_result_t enc =
-        nt_basisu_encode(rgba_pixels, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->endpoint_rdo_quality, compress_opts->selector_rdo_quality, true);
+        nt_basisu_encode_parallel(rgba_pixels, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->endpoint_rdo_quality, compress_opts->selector_rdo_quality, true);
 
     NT_BUILD_ASSERT(enc.data && "texture encode: Basis encode failed");
 
-    /* Write v2 header */
+    /* Build v2 header */
     NtTextureAssetHeaderV2 tex_hdr;
     memset(&tex_hdr, 0, sizeof(tex_hdr));
     tex_hdr.magic = NT_TEXTURE_MAGIC;
@@ -223,17 +215,54 @@ nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, co
     tex_hdr.data_size = enc.size;
 
     uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeaderV2) + enc.size;
+    uint8_t *buf = (uint8_t *)malloc(total_asset_size);
+    NT_BUILD_ASSERT(buf && "texture encode: malloc failed");
 
-    nt_build_result_t ret = nt_builder_append_data(ctx, &tex_hdr, (uint32_t)sizeof(NtTextureAssetHeaderV2));
-    if (ret == NT_BUILD_OK) {
-        ret = nt_builder_append_data(ctx, enc.data, enc.size);
-    }
+    memcpy(buf, &tex_hdr, sizeof(NtTextureAssetHeaderV2));
+    memcpy(buf + sizeof(NtTextureAssetHeaderV2), enc.data, enc.size);
 
     nt_basisu_encode_free(&enc);
 
+    *out_data = buf;
+    *out_size = total_asset_size;
+    *out_type = NT_ASSET_TEXTURE;
+    *out_version = NT_TEXTURE_VERSION_V2;
+    return NT_BUILD_OK;
+}
+
+/* --- Original encode wrappers (thin wrappers calling _to_buf + append + register) --- */
+
+nt_build_result_t nt_builder_encode_texture(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts) {
+    uint8_t *buf = NULL;
+    uint32_t buf_size = 0;
+    nt_asset_type_t type;
+    uint16_t version;
+    nt_build_result_t ret = nt_builder_encode_texture_to_buf(rgba_pixels, width, height, opts, &buf, &buf_size, &type, &version);
     if (ret != NT_BUILD_OK) {
         return ret;
     }
+    ret = nt_builder_append_data(ctx, buf, buf_size);
+    if (ret == NT_BUILD_OK) {
+        ret = nt_builder_register_asset(ctx, resource_id, type, version, buf_size);
+    }
+    free(buf);
+    return ret;
+}
 
-    return nt_builder_register_asset(ctx, resource_id, NT_ASSET_TEXTURE, NT_TEXTURE_VERSION_V2, total_asset_size);
+nt_build_result_t nt_builder_encode_texture_compressed(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts,
+                                                       const nt_tex_compress_opts_t *compress_opts) {
+    uint8_t *buf = NULL;
+    uint32_t buf_size = 0;
+    nt_asset_type_t type;
+    uint16_t version;
+    nt_build_result_t ret = nt_builder_encode_texture_compressed_to_buf(rgba_pixels, width, height, opts, compress_opts, &buf, &buf_size, &type, &version);
+    if (ret != NT_BUILD_OK) {
+        return ret;
+    }
+    ret = nt_builder_append_data(ctx, buf, buf_size);
+    if (ret == NT_BUILD_OK) {
+        ret = nt_builder_register_asset(ctx, resource_id, type, version, buf_size);
+    }
+    free(buf);
+    return ret;
 }

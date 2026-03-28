@@ -10,6 +10,12 @@
 #include "miniz.h"
 /* clang-format on */
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
 /* Global hookable handler for NT_BUILD_ASSERT (tests use setjmp/longjmp) */
 nt_build_assert_handler_t nt_build_assert_handler = NULL;
 
@@ -225,6 +231,36 @@ void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled) {
     if (ctx) {
         ctx->gzip_estimate = enabled;
     }
+}
+
+/* --- Parallel encoding options --- */
+
+void nt_builder_set_threads(NtBuilderContext *ctx, uint32_t thread_count) {
+    NT_BUILD_ASSERT(ctx && "set_threads called with NULL context");
+    ctx->thread_count = thread_count;
+}
+
+void nt_builder_set_threads_auto(NtBuilderContext *ctx) {
+    NT_BUILD_ASSERT(ctx && "set_threads_auto called with NULL context");
+    /* Mirror the logic from nt_basisu_encoder_init() (per D-11):
+     * Default: hardware_concurrency() - 1 (reserve 1 core for interactive use).
+     * NT_BUILDER_ALL_CORES=1: use all cores (CI, dedicated build machines). */
+    uint32_t threads = 0;
+#ifdef _WIN32
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    threads = (uint32_t)si.dwNumberOfProcessors;
+#else
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    threads = (n > 0) ? (uint32_t)n : 1;
+#endif
+    if (threads > 1 && !getenv("NT_BUILDER_ALL_CORES")) { // NOLINT(concurrency-mt-unsafe)
+        threads--;
+    }
+    if (threads < 1) {
+        threads = 1;
+    }
+    ctx->thread_count = threads;
 }
 
 void nt_builder_free_pack(NtBuilderContext *ctx) { nt_builder_free_context(ctx); }

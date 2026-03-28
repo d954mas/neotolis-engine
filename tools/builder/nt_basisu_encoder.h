@@ -35,6 +35,12 @@ typedef struct {
 nt_basisu_encode_result_t nt_basisu_encode(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha, bool uastc, uint32_t quality, float endpoint_rdo, float selector_rdo,
                                            bool gen_mipmaps);
 
+/* Thread-safe encode: creates local job_pool(1) per call.
+ * Use from worker threads -- does NOT use shared s_job_pool.
+ * Requires nt_basisu_encoder_init() called beforehand on main thread. */
+nt_basisu_encode_result_t nt_basisu_encode_parallel(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, bool has_alpha, bool uastc, uint32_t quality, float endpoint_rdo, float selector_rdo,
+                                                    bool gen_mipmaps);
+
 /* Free encoder output data */
 void nt_basisu_encode_free(nt_basisu_encode_result_t *result);
 
