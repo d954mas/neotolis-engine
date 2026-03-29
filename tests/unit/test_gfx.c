@@ -1,3 +1,4 @@
+#include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
 #include "graphics/nt_gfx_internal.h"
 #include "nt_mesh_format.h"
@@ -5,7 +6,30 @@
 #include "nt_texture_format.h"
 #include "unity.h"
 
+#include <setjmp.h>
 #include <string.h>
+
+/* --- Assert catching (setjmp/longjmp via hookable handler) --- */
+
+static jmp_buf s_assert_jmp;
+
+static void test_assert_handler(const char *expr, const char *file, int line) {
+    (void)expr;
+    (void)file;
+    (void)line;
+    longjmp(s_assert_jmp, 1);
+}
+
+#define EXPECT_ASSERT(code)                                                                                                                                                                            \
+    do {                                                                                                                                                                                               \
+        nt_assert_handler = test_assert_handler;                                                                                                                                                       \
+        if (setjmp(s_assert_jmp) == 0) {                                                                                                                                                               \
+            code;                                                                                                                                                                                      \
+            nt_assert_handler = NULL;                                                                                                                                                                  \
+            TEST_FAIL_MESSAGE("Expected NT_ASSERT to fire");                                                                                                                                           \
+        }                                                                                                                                                                                              \
+        nt_assert_handler = NULL;                                                                                                                                                                      \
+    } while (0)
 
 /* 4x4 RGBA8 test pixel data (64 bytes) */
 static const uint8_t s_test_pixels_4x4[4 * 4 * 4] = {
@@ -737,6 +761,30 @@ void test_gfx_make_texture_rg16ui(void) {
     nt_gfx_destroy_texture(tex);
 }
 
+/* ---- RG16UI: assert fires on non-NEAREST filter ---- */
+
+void test_gfx_make_texture_rg16ui_rejects_linear(void) {
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .format = NT_PIXEL_RG16UI,
+        .min_filter = NT_FILTER_LINEAR,
+        .data = s_test_rg16ui_4x4,
+    }));
+}
+
+/* ---- RG16UI: assert fires on gen_mipmaps ---- */
+
+void test_gfx_make_texture_rg16ui_rejects_mipmaps(void) {
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .format = NT_PIXEL_RG16UI,
+        .gen_mipmaps = true,
+        .data = s_test_rg16ui_4x4,
+    }));
+}
+
 /* ---- GPU caps: max_texture_size accessible ---- */
 
 void test_gfx_gpu_caps_max_texture_size(void) {
@@ -839,6 +887,8 @@ int main(void) {
     /* New pixel format tests */
     RUN_TEST(test_gfx_make_texture_rgba16f);
     RUN_TEST(test_gfx_make_texture_rg16ui);
+    RUN_TEST(test_gfx_make_texture_rg16ui_rejects_linear);
+    RUN_TEST(test_gfx_make_texture_rg16ui_rejects_mipmaps);
     /* GPU caps tests */
     RUN_TEST(test_gfx_gpu_caps_max_texture_size);
     /* Texture update tests */

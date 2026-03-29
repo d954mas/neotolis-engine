@@ -932,13 +932,9 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
 }
 
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data) {
-    if (backend_handle == 0 || backend_handle > s_init_desc.max_textures) {
-        return;
-    }
+    NT_ASSERT(backend_handle != 0 && backend_handle <= s_init_desc.max_textures && "backend_update_texture: invalid handle");
     GLuint tex = s_texture_gl[backend_handle];
-    if (tex == 0) {
-        return;
-    }
+    NT_ASSERT(tex != 0 && "backend_update_texture: no GL texture at handle");
 
     glBindTexture(GL_TEXTURE_2D, tex);
 

@@ -741,16 +741,8 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
         return;
     }
     uint32_t slot = nt_pool_slot_index(buf.id);
-    NT_ASSERT(s_gfx.buffer_metas[slot].usage != NT_USAGE_IMMUTABLE);
-    if (s_gfx.buffer_metas[slot].usage == NT_USAGE_IMMUTABLE) {
-        NT_LOG_ERROR("update_buffer: cannot update immutable buffer");
-        return;
-    }
-    NT_ASSERT(size <= s_gfx.buffer_metas[slot].size);
-    if (size > s_gfx.buffer_metas[slot].size) {
-        NT_LOG_ERROR("update_buffer: size exceeds buffer capacity");
-        return;
-    }
+    NT_ASSERT(s_gfx.buffer_metas[slot].usage != NT_USAGE_IMMUTABLE && "update_buffer: cannot update immutable buffer");
+    NT_ASSERT(size <= s_gfx.buffer_metas[slot].size && "update_buffer: size exceeds buffer capacity");
     nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], data, size);
 }
 
@@ -821,6 +813,7 @@ static uint32_t activate_texture_v2(const uint8_t *data, uint32_t size) {
             NT_LOG_ERROR("activate_texture: RAW data_size %u < expected %u", hdr2->data_size, (uint32_t)expected);
             return 0;
         }
+        NT_ASSERT(hdr2->width <= UINT16_MAX && hdr2->height <= UINT16_MAX && "activate_texture: dimensions exceed uint16");
         const uint8_t *pixels = data + sizeof(NtTextureAssetHeaderV2);
         nt_texture_desc_t desc = {
             .width = (uint16_t)hdr2->width,
