@@ -39,5 +39,10 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     if (gl_ver >= 43) {
         caps.has_etc2 = true;
     }
+
+    GLint max_tex_size = 0;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_tex_size);
+    caps.max_texture_size = (uint32_t)max_tex_size;
+
     return caps;
 }

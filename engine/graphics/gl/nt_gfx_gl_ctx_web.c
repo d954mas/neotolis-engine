@@ -52,11 +52,23 @@ EM_JS(int, nt_gfx_js_detect_gpu_caps, (void), {
 #pragma clang diagnostic pop
 // clang-format on
 
+// clang-format off
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wextra-semi"
+EM_JS(int, nt_gfx_js_max_texture_size, (void), {
+    var gl = GL.currentContext ? GL.currentContext.GLctx : null;
+    if (!gl) return 0;
+    return gl.getParameter(gl.MAX_TEXTURE_SIZE) || 0;
+});
+#pragma clang diagnostic pop
+// clang-format on
+
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     int bits = nt_gfx_js_detect_gpu_caps();
     nt_gfx_gpu_caps_t caps = {0};
     caps.has_astc = (bits & 1) != 0;
     caps.has_bc7 = (bits & 2) != 0;
     caps.has_etc2 = (bits & 4) != 0;
+    caps.max_texture_size = (uint32_t)nt_gfx_js_max_texture_size();
     return caps;
 }

@@ -76,6 +76,16 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uin
     (void)size;
 }
 
+void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data) {
+    (void)backend_handle;
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)format;
+    (void)data;
+}
+
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) { (void)backend_handle; }
 
 void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) { (void)backend_handle; }
@@ -151,4 +161,4 @@ void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_in
 
 bool nt_gfx_backend_recreate_all_resources(void) { return true; }
 
-nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) { return (nt_gfx_gpu_caps_t){0}; }
+nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) { return (nt_gfx_gpu_caps_t){.max_texture_size = 4096}; }
