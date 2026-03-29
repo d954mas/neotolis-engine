@@ -25,7 +25,8 @@
  *   band[i].curve_count for all bands (derived at runtime, not stored).
  *
  *   Curves store quadratic Bezier control points as float16 (IEEE 754
- *   half-precision). Runtime uploads directly to RGBA16F texture.
+ *   half-precision), 12 bytes each. Runtime repacks to 2 RGBA16F texels
+ *   (16 bytes) per curve on glyph cache miss — pad .ba of second texel.
  *   Bands store uint16 indices — direct upload to RG16UI texture.
  */
 
