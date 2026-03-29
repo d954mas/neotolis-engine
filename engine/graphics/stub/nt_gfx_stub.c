@@ -76,6 +76,16 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uin
     (void)size;
 }
 
+void nt_gfx_backend_update_texture(uint32_t backend_handle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, nt_pixel_format_t format, const void *data) {
+    (void)backend_handle;
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)format;
+    (void)data;
+}
+
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle) { (void)backend_handle; }
 
 void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) { (void)backend_handle; }

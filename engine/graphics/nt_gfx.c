@@ -28,6 +28,15 @@ typedef struct {
     uint32_t size;
 } nt_gfx_buffer_meta_t;
 
+/* ---- Texture metadata (format + dimensions for update_texture validation) ---- */
+
+typedef struct {
+    uint16_t width;
+    uint16_t height;
+    uint8_t format; /* nt_pixel_format_t */
+    uint8_t _pad[3];
+} nt_gfx_texture_meta_t;
+
 /* ---- Global state ---- */
 
 nt_gfx_t g_nt_gfx;
@@ -50,7 +59,8 @@ static struct {
     uint32_t *buffer_backends;
     uint32_t *texture_backends;
 
-    nt_gfx_buffer_meta_t *buffer_metas; /* minimal buffer metadata for runtime validation */
+    nt_gfx_buffer_meta_t *buffer_metas;   /* minimal buffer metadata for runtime validation */
+    nt_gfx_texture_meta_t *texture_metas; /* format + dimensions for update_texture validation */
 
     nt_pool_t mesh_pool;
     nt_gfx_mesh_info_t *mesh_table; /* [capacity+1], index 0 reserved */
@@ -102,6 +112,7 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
     s_gfx.texture_backends = (uint32_t *)calloc(desc->max_textures + 1, sizeof(uint32_t));
 
     s_gfx.buffer_metas = (nt_gfx_buffer_meta_t *)calloc(desc->max_buffers + 1, sizeof(nt_gfx_buffer_meta_t));
+    s_gfx.texture_metas = (nt_gfx_texture_meta_t *)calloc(desc->max_textures + 1, sizeof(nt_gfx_texture_meta_t));
 
     s_gfx.render_state = NT_GFX_STATE_IDLE;
 
@@ -145,6 +156,7 @@ void nt_gfx_shutdown(void) {
     free(s_gfx.buffer_backends);
     free(s_gfx.texture_backends);
     free(s_gfx.buffer_metas);
+    free(s_gfx.texture_metas);
     free(s_gfx.mesh_table);
 
     memset(&s_gfx, 0, sizeof(s_gfx));
@@ -366,6 +378,13 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     }
     nt_texture_desc_t local_desc = *desc;
 
+    /* Integer textures: NEAREST only, no mipmaps (D-02) */
+    if (local_desc.format == NT_PIXEL_RG16UI) {
+        NT_ASSERT(local_desc.min_filter == NT_FILTER_NEAREST && "integer texture requires NEAREST min_filter");
+        NT_ASSERT(local_desc.mag_filter == NT_FILTER_NEAREST && "integer texture requires NEAREST mag_filter");
+        NT_ASSERT(!local_desc.gen_mipmaps && "integer texture does not support mipmaps");
+    }
+
     /* Clamp mipmap min_filter when no mipmaps — prevents GL incomplete texture */
     if (!local_desc.gen_mipmaps && local_desc.min_filter > NT_FILTER_LINEAR) {
         local_desc.min_filter = (local_desc.min_filter & 1) ? NT_FILTER_LINEAR : NT_FILTER_NEAREST;
@@ -393,6 +412,9 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
 
     uint32_t slot = nt_pool_slot_index(id);
     s_gfx.texture_backends[slot] = backend;
+    s_gfx.texture_metas[slot].width = (uint16_t)local_desc.width;
+    s_gfx.texture_metas[slot].height = (uint16_t)local_desc.height;
+    s_gfx.texture_metas[slot].format = (uint8_t)local_desc.format;
 
     result.id = id;
     return result;
@@ -445,6 +467,7 @@ void nt_gfx_destroy_texture(nt_texture_t tex) {
     uint32_t slot = nt_pool_slot_index(tex.id);
     nt_gfx_backend_destroy_texture(s_gfx.texture_backends[slot]);
     s_gfx.texture_backends[slot] = 0;
+    memset(&s_gfx.texture_metas[slot], 0, sizeof(nt_gfx_texture_meta_t));
     nt_pool_free(&s_gfx.texture_pool, tex.id);
 }
 
@@ -723,6 +746,23 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
         return;
     }
     nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], data, size);
+}
+
+/* ---- Texture update ---- */
+
+void nt_gfx_update_texture(nt_texture_t tex, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const void *data) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
+        NT_LOG_ERROR("update_texture: invalid handle");
+        return;
+    }
+    NT_ASSERT(data != NULL && "update_texture: NULL data pointer");
+    uint32_t slot = nt_pool_slot_index(tex.id);
+    NT_ASSERT(x + w <= s_gfx.texture_metas[slot].width && "update_texture: x+w exceeds texture width");
+    NT_ASSERT(y + h <= s_gfx.texture_metas[slot].height && "update_texture: y+h exceeds texture height");
+    nt_gfx_backend_update_texture(s_gfx.texture_backends[slot], x, y, w, h, (nt_pixel_format_t)s_gfx.texture_metas[slot].format, data);
 }
 
 /* ---- Mesh side table helpers ---- */
