@@ -948,10 +948,12 @@ typedef enum {
     NT_ASSET_MESH = 1,
     NT_ASSET_TEXTURE = 2,
     NT_ASSET_SHADER_CODE = 3,
+    NT_ASSET_BLOB = 4,        /* generic binary data (game-defined) */
+    NT_ASSET_FONT = 5,        /* font glyph data (Slug format) */
 } nt_asset_type_t;
 ```
 
-Additional types (material, audio, sprite, font) will be added as needed.
+Additional types (material, audio, sprite) will be added as needed.
 
 ## 17.9 Placeholder policy
 
@@ -1838,7 +1840,7 @@ These do not block implementation:
 - precise bit packing of sort keys
 - future WebGPU backend details
 - exact sprite asset format and animation system
-- exact text rendering strategy and string pool design
+- ~~exact text rendering strategy and string pool design~~ → resolved: Slug-based GPU vector rendering (§17.8 NT_ASSET_FONT)
 - camera component/structure definition
 - whether some renderer-specific caches are worth adding later
 - whether pack hot-reload becomes needed
