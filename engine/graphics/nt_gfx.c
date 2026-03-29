@@ -35,7 +35,8 @@ typedef struct {
     uint16_t height;
     uint8_t format;    /* nt_pixel_format_t */
     uint8_t mip_count; /* 1 = base only, >1 = has mip chain */
-    uint8_t _pad[2];
+    bool compressed;   /* true for Basis/GPU-compressed textures */
+    uint8_t _pad;
 } nt_gfx_texture_meta_t;
 
 /* ---- Global state ---- */
@@ -376,8 +377,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         NT_LOG_ERROR("make_texture: zero dimension");
         return result;
     }
-    if (g_nt_gfx.gpu_caps.max_texture_size > 0 &&
-        (desc->width > g_nt_gfx.gpu_caps.max_texture_size || desc->height > g_nt_gfx.gpu_caps.max_texture_size)) {
+    if (g_nt_gfx.gpu_caps.max_texture_size > 0 && (desc->width > g_nt_gfx.gpu_caps.max_texture_size || desc->height > g_nt_gfx.gpu_caps.max_texture_size)) {
 #ifdef NT_DEBUG
         NT_ASSERT(0 && "make_texture: dimensions exceed GPU max_texture_size");
 #endif
@@ -780,6 +780,7 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
     NT_ASSERT(data != NULL && "update_texture: NULL data pointer");
     NT_ASSERT(w > 0 && h > 0 && "update_texture: zero-size region");
     uint32_t slot = nt_pool_slot_index(tex.id);
+    NT_ASSERT(!s_gfx.texture_metas[slot].compressed && "update_texture: compressed textures cannot be sub-updated");
     NT_ASSERT(s_gfx.texture_metas[slot].mip_count <= 1 && "update_texture: mipmapped textures not supported, use per-level API when available");
     NT_ASSERT(x + w <= s_gfx.texture_metas[slot].width && "update_texture: x+w exceeds texture width");
     NT_ASSERT(y + h <= s_gfx.texture_metas[slot].height && "update_texture: y+h exceeds texture height");
@@ -798,8 +799,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     const NtTextureAssetHeaderV2 *hdr2 = (const NtTextureAssetHeaderV2 *)data;
 
     /* Validate dimensions against GPU caps */
-    if (g_nt_gfx.gpu_caps.max_texture_size > 0 &&
-        (hdr2->width > g_nt_gfx.gpu_caps.max_texture_size || hdr2->height > g_nt_gfx.gpu_caps.max_texture_size)) {
+    if (g_nt_gfx.gpu_caps.max_texture_size > 0 && (hdr2->width > g_nt_gfx.gpu_caps.max_texture_size || hdr2->height > g_nt_gfx.gpu_caps.max_texture_size)) {
         NT_LOG_ERROR("activate_texture: %ux%u exceeds GPU max_texture_size %u", hdr2->width, hdr2->height, g_nt_gfx.gpu_caps.max_texture_size);
         return 0;
     }
@@ -924,6 +924,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     s_gfx.texture_metas[slot].width = (uint16_t)hdr2->width;
     s_gfx.texture_metas[slot].height = (uint16_t)hdr2->height;
     s_gfx.texture_metas[slot].mip_count = (uint8_t)(levels > 255 ? 255 : levels);
+    s_gfx.texture_metas[slot].compressed = true;
     return id;
 #endif /* NT_HAS_BASISU */
 }
