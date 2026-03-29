@@ -748,6 +748,17 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uin
     glBufferSubData(target, 0, (GLsizeiptr)size, data);
 }
 
+void nt_gfx_backend_update_texture(uint32_t backend_handle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, nt_pixel_format_t format, const void *data) {
+    /* TODO(41-02): implement GL texture sub-update */
+    (void)backend_handle;
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    (void)format;
+    (void)data;
+}
+
 void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) {
     if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
         return;
