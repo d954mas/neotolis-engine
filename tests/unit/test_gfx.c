@@ -13,6 +13,17 @@ static const uint8_t s_test_pixels_4x4[4 * 4 * 4] = {
     255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
 };
 
+/* 4x4 RGBA16F test data (128 bytes = 4*4*8, 0x3C00 = half-float 1.0) */
+static const uint16_t s_test_half_4x4[4 * 4 * 4] = {
+    0x3C00, 0, 0, 0x3C00, 0, 0x3C00, 0, 0x3C00, 0, 0, 0x3C00, 0x3C00, 0x3C00, 0x3C00, 0, 0x3C00, 0x3C00, 0, 0, 0x3C00, 0, 0x3C00, 0, 0x3C00, 0, 0, 0x3C00, 0x3C00, 0x3C00, 0x3C00, 0, 0x3C00,
+    0x3C00, 0, 0, 0x3C00, 0, 0x3C00, 0, 0x3C00, 0, 0, 0x3C00, 0x3C00, 0x3C00, 0x3C00, 0, 0x3C00, 0x3C00, 0, 0, 0x3C00, 0, 0x3C00, 0, 0x3C00, 0, 0, 0x3C00, 0x3C00, 0x3C00, 0x3C00, 0, 0x3C00,
+};
+
+/* 4x4 RG16UI test data (64 bytes = 4*4*4) */
+static const uint16_t s_test_rg16ui_4x4[4 * 4 * 2] = {
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
+};
+
 void setUp(void) { nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 8, .max_meshes = 8}); }
 
 void tearDown(void) { nt_gfx_shutdown(); }
@@ -699,6 +710,77 @@ void test_register_global_block_cleared_on_shutdown(void) {
     TEST_ASSERT_EQUAL_UINT32(0, count);
 }
 
+/* ---- RGBA16F texture creation ---- */
+
+void test_gfx_make_texture_rgba16f(void) {
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .format = NT_PIXEL_RGBA16F,
+        .data = s_test_half_4x4,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+    nt_gfx_destroy_texture(tex);
+}
+
+/* ---- RG16UI texture creation ---- */
+
+void test_gfx_make_texture_rg16ui(void) {
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .format = NT_PIXEL_RG16UI,
+        .data = s_test_rg16ui_4x4,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+    nt_gfx_destroy_texture(tex);
+}
+
+/* ---- GPU caps: max_texture_size accessible ---- */
+
+void test_gfx_gpu_caps_max_texture_size(void) {
+    const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
+    TEST_ASSERT_NOT_NULL(caps);
+    /* Stub returns 0 -- just confirm field is accessible without crash */
+    TEST_ASSERT_EQUAL_UINT32(0, caps->max_texture_size);
+}
+
+/* ---- update_texture: valid sub-region ---- */
+
+void test_gfx_update_texture_valid(void) {
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .data = s_test_pixels_4x4,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+    uint8_t sub_data[2 * 2 * 4]; /* 2x2 RGBA8 */
+    memset(sub_data, 128, sizeof(sub_data));
+    nt_gfx_update_texture(tex, 0, 0, 2, 2, sub_data);
+    nt_gfx_destroy_texture(tex);
+}
+
+/* ---- update_texture: full region ---- */
+
+void test_gfx_update_texture_full(void) {
+    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+        .width = 4,
+        .height = 4,
+        .data = s_test_pixels_4x4,
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+    nt_gfx_update_texture(tex, 0, 0, 4, 4, s_test_pixels_4x4);
+    nt_gfx_destroy_texture(tex);
+}
+
+/* ---- update_texture: invalid handle ---- */
+
+void test_gfx_update_texture_invalid_handle(void) {
+    nt_texture_t tex = {0};
+    uint8_t data[16] = {0};
+    nt_gfx_update_texture(tex, 0, 0, 1, 1, data); /* should log error, not crash */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_gfx_pool_alloc_returns_nonzero);
@@ -753,5 +835,14 @@ int main(void) {
     RUN_TEST(test_register_global_block);
     RUN_TEST(test_register_global_block_max);
     RUN_TEST(test_register_global_block_cleared_on_shutdown);
+    /* New pixel format tests */
+    RUN_TEST(test_gfx_make_texture_rgba16f);
+    RUN_TEST(test_gfx_make_texture_rg16ui);
+    /* GPU caps tests */
+    RUN_TEST(test_gfx_gpu_caps_max_texture_size);
+    /* Texture update tests */
+    RUN_TEST(test_gfx_update_texture_valid);
+    RUN_TEST(test_gfx_update_texture_full);
+    RUN_TEST(test_gfx_update_texture_invalid_handle);
     return UNITY_END();
 }

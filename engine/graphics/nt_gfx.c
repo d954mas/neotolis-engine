@@ -363,6 +363,7 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
     return result;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     nt_texture_t result = {0};
     if (!desc) {
