@@ -80,6 +80,9 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
     case NT_BUILD_ASSET_BLOB:
         /* No additional fields -- kind + version sufficient */
         break;
+    case NT_BUILD_ASSET_FONT:
+        /* Font decoded_data is the final binary (like mesh) -- no additional opts */
+        break;
     }
 
     NT_BUILD_ASSERT(pos <= sizeof(buf) && "opts_hash: buffer overflow — increase buf size");

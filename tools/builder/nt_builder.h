@@ -7,6 +7,7 @@
 #include <stdlib.h>
 
 #include "hash/nt_hash.h"
+#include "nt_font_format.h"    /* NtFontAssetHeader, NtFontGlyphEntry, etc. */
 #include "nt_mesh_format.h"    /* nt_stream_type_t */
 #include "nt_texture_format.h" /* nt_texture_pixel_format_t */
 
@@ -85,6 +86,15 @@ typedef struct {
     bool use_mesh_index;       /* true = select by mesh_index */
     const char *resource_name; /* optional rid suffix override (NULL = auto) */
 } nt_mesh_opts_t;
+
+/* Font options for add_font */
+typedef struct {
+    const char *charset;       /* UTF-8 string of characters to include (required, NULL = assert) */
+    const char *resource_name; /* optional resource_id override (NULL = derive from path) */
+} nt_font_opts_t;
+
+/* Printable ASCII charset (U+0020-U+007E, 95 characters) */
+#define NT_CHARSET_ASCII " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
 
 /* --- glTF scene types (parse/inspect/extract) --- */
 
@@ -200,6 +210,7 @@ void nt_builder_add_texture(NtBuilderContext *ctx, const char *path, const nt_te
 void nt_builder_add_texture_from_memory(NtBuilderContext *ctx, const uint8_t *data, uint32_t size, const char *resource_id, const nt_tex_opts_t *opts);
 void nt_builder_add_texture_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *resource_id, const nt_tex_opts_t *opts);
 void nt_builder_add_shader(NtBuilderContext *ctx, const char *path, nt_build_shader_stage_t stage);
+void nt_builder_add_font(NtBuilderContext *ctx, const char *path, const nt_font_opts_t *opts);
 
 /* --- Asset roots (search paths for #include and file lookup) --- */
 #ifndef NT_BUILD_MAX_ASSET_ROOTS
@@ -211,6 +222,7 @@ nt_build_result_t nt_builder_add_asset_root(NtBuilderContext *ctx, const char *p
 void nt_builder_add_meshes(NtBuilderContext *ctx, const char *pattern, const nt_mesh_opts_t *opts);
 void nt_builder_add_textures(NtBuilderContext *ctx, const char *pattern, const nt_tex_opts_t *opts);
 void nt_builder_add_shaders(NtBuilderContext *ctx, const char *pattern, nt_build_shader_stage_t stage);
+void nt_builder_add_fonts(NtBuilderContext *ctx, const char *pattern, const nt_font_opts_t *opts);
 
 /* --- Rename (change resource_id key, keep source file) --- */
 void nt_builder_rename(NtBuilderContext *ctx, const char *old_path, const char *new_path);

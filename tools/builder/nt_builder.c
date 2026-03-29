@@ -34,7 +34,11 @@ static void nt_builder_free_entry_data(NtBuildEntry *entry) {
         free(td->source_data);
         free(td->source_path);
     }
-    /* TEXTURE -> NtBuildTextureData*, SHADER -> NtBuildShaderData*, others -> NULL */
+    if (entry->kind == NT_BUILD_ASSET_FONT) {
+        NtBuildFontData *fd = (NtBuildFontData *)entry->data;
+        free(fd->charset);
+    }
+    /* TEXTURE -> NtBuildTextureData*, SHADER -> NtBuildShaderData*, FONT -> NtBuildFontData*, others -> NULL */
     free(entry->data);
     entry->data = NULL;
 }
@@ -280,6 +284,9 @@ static void increment_kind_counter(NtBuilderContext *ctx, nt_build_asset_kind_t 
     case NT_BUILD_ASSET_BLOB:
         ctx->blob_count++;
         break;
+    case NT_BUILD_ASSET_FONT:
+        ctx->font_count++;
+        break;
     }
 }
 
@@ -318,6 +325,7 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
     }
     case NT_BUILD_ASSET_MESH:
     case NT_BUILD_ASSET_BLOB:
+    case NT_BUILD_ASSET_FONT:
         return true; /* no encoding opts -- everything is in decoded_data */
     }
     return false;
@@ -342,6 +350,10 @@ static void derive_asset_type(nt_build_asset_kind_t kind, nt_asset_type_t *out_t
         *out_type = NT_ASSET_BLOB;
         *out_version = NT_BLOB_VERSION;
         break;
+    case NT_BUILD_ASSET_FONT:
+        *out_type = NT_ASSET_FONT;
+        *out_version = NT_FONT_VERSION;
+        break;
     default:
         NT_BUILD_ASSERT(0 && "derive_asset_type: unknown asset kind");
         break;
@@ -354,7 +366,8 @@ static void derive_asset_type(nt_build_asset_kind_t kind, nt_asset_type_t *out_t
 static nt_build_result_t encode_one_asset(const NtBuildEntry *pe, NtEncodeResult *result, uint32_t encode_threads) {
     switch (pe->kind) {
     case NT_BUILD_ASSET_MESH:
-    case NT_BUILD_ASSET_BLOB: {
+    case NT_BUILD_ASSET_BLOB:
+    case NT_BUILD_ASSET_FONT: {
         result->data = (uint8_t *)malloc(pe->decoded_size);
         if (!result->data) {
             return NT_BUILD_ERR_IO;
@@ -780,6 +793,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         case NT_BUILD_ASSET_BLOB:
             ctx->blob_count++;
             break;
+        case NT_BUILD_ASSET_FONT:
+            ctx->font_count++;
+            break;
         }
     }
 
@@ -1018,6 +1034,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     }
     if (ctx->blob_count > 0) {
         NT_LOG_INFO("  BLOB:    %u asset%s", ctx->blob_count, ctx->blob_count > 1 ? "s" : "");
+    }
+    if (ctx->font_count > 0) {
+        NT_LOG_INFO("  FONT:    %u asset%s", ctx->font_count, ctx->font_count > 1 ? "s" : "");
     }
     if (total_gz > 0 && raw_total > 0) {
         char total_raw_str[16];
