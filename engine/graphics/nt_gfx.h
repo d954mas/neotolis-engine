@@ -110,10 +110,12 @@ typedef enum {
 } nt_depth_func_t;
 
 typedef enum {
-    NT_PIXEL_RGBA8 = 0, /* 4 bpp, 8 bits per channel */
-    NT_PIXEL_RGB8 = 1,  /* 3 bpp, no alpha */
-    NT_PIXEL_RG8 = 2,   /* 2 bpp, two channels */
-    NT_PIXEL_R8 = 3,    /* 1 bpp, single channel */
+    NT_PIXEL_RGBA8 = 0,   /* 4 bpp, 8 bits per channel */
+    NT_PIXEL_RGB8 = 1,    /* 3 bpp, no alpha */
+    NT_PIXEL_RG8 = 2,     /* 2 bpp, two channels */
+    NT_PIXEL_R8 = 3,      /* 1 bpp, single channel */
+    NT_PIXEL_RGBA16F = 4, /* 8 bpp, half-float (Slug curve data) */
+    NT_PIXEL_RG16UI = 5,  /* 4 bpp, unsigned integer (Slug band data) */
 } nt_pixel_format_t;
 
 typedef enum {
@@ -227,9 +229,10 @@ typedef struct {
 /* ---- GPU compressed texture format capabilities ---- */
 
 typedef struct {
-    bool has_astc; /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
-    bool has_bc7;  /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
-    bool has_etc2; /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
+    bool has_astc;             /* ASTC 4x4 LDR (WEBGL_compressed_texture_astc / KHR_texture_compression_astc_ldr) */
+    bool has_bc7;              /* BC7 / BPTC (EXT_texture_compression_bptc / ARB_texture_compression_bptc) */
+    bool has_etc2;             /* ETC2 + EAC (WEBGL_compressed_texture_etc / core GL 4.3+) */
+    uint32_t max_texture_size; /* GL_MAX_TEXTURE_SIZE, queried at init */
 } nt_gfx_gpu_caps_t;
 
 /* ---- Global state ---- */
@@ -327,6 +330,10 @@ void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_
 /* ---- Buffer update ---- */
 
 void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size);
+
+/* ---- Texture update ---- */
+
+void nt_gfx_update_texture(nt_texture_t tex, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const void *data);
 
 /* ---- Asset activators (called by nt_resource via callback registration) ---- */
 
