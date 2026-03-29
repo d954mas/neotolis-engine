@@ -18,16 +18,11 @@
  *
  *     kerns_ptr   = base + data_offset
  *     curves_ptr  = kerns_ptr + kern_count * sizeof(NtFontKernEntry)   [8]
- *     bands_ptr   = curves_ptr + curve_count * sizeof(NtFontCurve)     [12]
- *     index_ptr   = bands_ptr + band_count * sizeof(NtFontBand)        [4]
- *
- *   Index table: uint16_t[] — curve indices per band. Size = sum of
- *   band[i].curve_count for all bands (derived at runtime, not stored).
  *
  *   Curves store quadratic Bezier control points as float16 (IEEE 754
  *   half-precision), 12 bytes each. Runtime repacks to 2 RGBA16F texels
  *   (16 bytes) per curve on glyph cache miss — pad .ba of second texel.
- *   Bands store uint16 indices — direct upload to RG16UI texture.
+ *   Band decomposition happens at runtime (not stored in pack).
  */
 
 /* NtFontAssetHeader — 16 bytes. Font-level metadata. */
@@ -56,8 +51,7 @@ typedef struct {
     int16_t bbox_y1;      /* 16: bounding box top in font units (bearing_y = bbox_y1) */
     uint16_t curve_count; /* 18: number of unique quadratic Bezier curves */
     uint8_t kern_count;   /* 20: number of kern pairs for this glyph */
-    uint8_t band_count;   /* 21: number of horizontal bands */
-    uint16_t index_count; /* 22: total curve indices across all bands (enables O(1) bounds check) */
+    uint8_t _reserved[3]; /* 21: reserved (pad to 24 bytes) */
 } NtFontGlyphEntry;       /* 24 bytes total */
 #pragma pack(pop)
 _Static_assert(sizeof(NtFontGlyphEntry) == 24, "NtFontGlyphEntry must be 24 bytes");
@@ -81,14 +75,5 @@ typedef struct {
 } NtFontCurve;         /* 12 bytes total */
 #pragma pack(pop)
 _Static_assert(sizeof(NtFontCurve) == 12, "NtFontCurve must be 12 bytes");
-
-/* NtFontBand — 4 bytes. References into per-glyph curve index table. */
-#pragma pack(push, 1)
-typedef struct {
-    uint16_t curve_start; /* 0: start index into per-glyph index table */
-    uint16_t curve_count; /* 2: number of curve indices for this band */
-} NtFontBand;             /* 4 bytes total */
-#pragma pack(pop)
-_Static_assert(sizeof(NtFontBand) == 4, "NtFontBand must be 4 bytes");
 
 #endif /* NT_FONT_FORMAT_H */
