@@ -33,8 +33,9 @@ typedef struct {
 typedef struct {
     uint16_t width;
     uint16_t height;
-    uint8_t format; /* nt_pixel_format_t */
-    uint8_t _pad[3];
+    uint8_t format;    /* nt_pixel_format_t */
+    uint8_t mip_count; /* 1 = base only, >1 = has mip chain */
+    uint8_t _pad[2];
 } nt_gfx_texture_meta_t;
 
 /* ---- Global state ---- */
@@ -375,6 +376,14 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         NT_LOG_ERROR("make_texture: zero dimension");
         return result;
     }
+    if (g_nt_gfx.gpu_caps.max_texture_size > 0 &&
+        (desc->width > g_nt_gfx.gpu_caps.max_texture_size || desc->height > g_nt_gfx.gpu_caps.max_texture_size)) {
+#ifdef NT_DEBUG
+        NT_ASSERT(0 && "make_texture: dimensions exceed GPU max_texture_size");
+#endif
+        NT_LOG_ERROR("make_texture: %ux%u exceeds GPU max_texture_size %u", desc->width, desc->height, g_nt_gfx.gpu_caps.max_texture_size);
+        return result;
+    }
     nt_texture_desc_t local_desc = *desc;
 
     /* Mipmaps require initial data — GL cannot generate from empty storage */
@@ -420,6 +429,17 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     s_gfx.texture_metas[slot].width = local_desc.width;
     s_gfx.texture_metas[slot].height = local_desc.height;
     s_gfx.texture_metas[slot].format = (uint8_t)local_desc.format;
+    s_gfx.texture_metas[slot].mip_count = 1;
+    if (local_desc.gen_mipmaps && local_desc.data) {
+        /* floor(log2(max(w,h))) + 1 */
+        uint16_t max_dim = local_desc.width > local_desc.height ? local_desc.width : local_desc.height;
+        uint8_t levels = 1;
+        while (max_dim > 1) {
+            max_dim >>= 1;
+            levels++;
+        }
+        s_gfx.texture_metas[slot].mip_count = levels;
+    }
     // #endregion
 
     result.id = id;
@@ -760,6 +780,7 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
     NT_ASSERT(data != NULL && "update_texture: NULL data pointer");
     NT_ASSERT(w > 0 && h > 0 && "update_texture: zero-size region");
     uint32_t slot = nt_pool_slot_index(tex.id);
+    NT_ASSERT(s_gfx.texture_metas[slot].mip_count <= 1 && "update_texture: mipmapped textures not supported, use per-level API when available");
     NT_ASSERT(x + w <= s_gfx.texture_metas[slot].width && "update_texture: x+w exceeds texture width");
     NT_ASSERT(y + h <= s_gfx.texture_metas[slot].height && "update_texture: y+h exceeds texture height");
     nt_gfx_backend_update_texture(s_gfx.texture_backends[slot], x, y, w, h, (nt_pixel_format_t)s_gfx.texture_metas[slot].format, data);
@@ -773,8 +794,15 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 
 /* Activate a v2 texture (RAW or Basis Universal compressed) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint32_t activate_texture_v2(const uint8_t *data, uint32_t size) {
+static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     const NtTextureAssetHeaderV2 *hdr2 = (const NtTextureAssetHeaderV2 *)data;
+
+    /* Validate dimensions against GPU caps */
+    if (g_nt_gfx.gpu_caps.max_texture_size > 0 &&
+        (hdr2->width > g_nt_gfx.gpu_caps.max_texture_size || hdr2->height > g_nt_gfx.gpu_caps.max_texture_size)) {
+        NT_LOG_ERROR("activate_texture: %ux%u exceeds GPU max_texture_size %u", hdr2->width, hdr2->height, g_nt_gfx.gpu_caps.max_texture_size);
+        return 0;
+    }
 
     /* Validate data size (subtraction safe — caller verified size >= sizeof header) */
     if (hdr2->data_size > size - sizeof(NtTextureAssetHeaderV2)) {
@@ -893,6 +921,9 @@ static uint32_t activate_texture_v2(const uint8_t *data, uint32_t size) {
 
     uint32_t slot = nt_pool_slot_index(id);
     s_gfx.texture_backends[slot] = backend;
+    s_gfx.texture_metas[slot].width = (uint16_t)hdr2->width;
+    s_gfx.texture_metas[slot].height = (uint16_t)hdr2->height;
+    s_gfx.texture_metas[slot].mip_count = (uint8_t)(levels > 255 ? 255 : levels);
     return id;
 #endif /* NT_HAS_BASISU */
 }
@@ -909,7 +940,7 @@ uint32_t nt_gfx_activate_texture(const uint8_t *data, uint32_t size) {
     }
     NT_ASSERT(hdr->version == NT_TEXTURE_VERSION_V2 && "activate_texture: version mismatch -- rebuild packs");
 
-    return activate_texture_v2(data, size);
+    return activate_texture_impl(data, size);
 }
 
 uint32_t nt_gfx_activate_mesh(const uint8_t *data, uint32_t size) {

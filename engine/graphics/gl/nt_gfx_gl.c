@@ -897,6 +897,9 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
 
     /* Upload pixel data (may be NULL for storage-only allocation) */
     glTexImage2D(GL_TEXTURE_2D, 0, (GLint)gl.internal, (GLsizei)desc->width, (GLsizei)desc->height, 0, gl.format, gl.type, desc->data);
+#ifdef NT_DEBUG
+    NT_ASSERT(glGetError() == GL_NO_ERROR && "glTexImage2D failed — check format/dimensions");
+#endif
 
     if (!gl.align4) {
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);

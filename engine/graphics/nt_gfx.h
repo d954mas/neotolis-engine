@@ -331,7 +331,7 @@ void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_
 
 void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
-/* ---- Texture update ---- */
+/* ---- Texture update (non-mipmapped textures only, level 0) ---- */
 
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);
 
