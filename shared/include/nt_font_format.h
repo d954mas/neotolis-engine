@@ -47,16 +47,16 @@ _Static_assert(sizeof(NtFontAssetHeader) == 16, "NtFontAssetHeader must be 16 by
 #pragma pack(push, 1)
 typedef struct {
     uint32_t codepoint;   /* 0:  Unicode codepoint (bsearch key) */
-    int16_t advance;      /* 4:  horizontal advance in font units */
-    int16_t bbox_x0;      /* 6:  bounding box left in font units */
-    int16_t bbox_y0;      /* 8:  bounding box bottom in font units */
-    int16_t bbox_x1;      /* 10: bounding box right in font units */
-    int16_t bbox_y1;      /* 12: bounding box top in font units (bearing_y = bbox_y1) */
-    uint32_t data_offset; /* 14: byte offset from NtFontAssetHeader start to per-glyph data */
-    uint8_t curve_count;  /* 18: number of unique quadratic Bezier curves */
-    uint8_t band_count;   /* 19: number of horizontal bands */
+    uint32_t data_offset; /* 4:  byte offset from NtFontAssetHeader start to per-glyph data */
+    int16_t advance;      /* 8:  horizontal advance in font units */
+    int16_t bbox_x0;      /* 10: bounding box left in font units */
+    int16_t bbox_y0;      /* 12: bounding box bottom in font units */
+    int16_t bbox_x1;      /* 14: bounding box right in font units */
+    int16_t bbox_y1;      /* 16: bounding box top in font units (bearing_y = bbox_y1) */
+    uint16_t curve_count; /* 18: number of unique quadratic Bezier curves */
     uint8_t kern_count;   /* 20: number of kern pairs for this glyph */
-    uint8_t _pad[3];      /* 21: align to 24 bytes */
+    uint8_t band_count;   /* 21: number of horizontal bands */
+    uint8_t _pad[2];      /* 22: align to 24 bytes */
 } NtFontGlyphEntry;       /* 24 bytes total */
 #pragma pack(pop)
 _Static_assert(sizeof(NtFontGlyphEntry) == 24, "NtFontGlyphEntry must be 24 bytes");
