@@ -748,17 +748,6 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uin
     glBufferSubData(target, 0, (GLsizeiptr)size, data);
 }
 
-void nt_gfx_backend_update_texture(uint32_t backend_handle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, nt_pixel_format_t format, const void *data) {
-    /* TODO(41-02): implement GL texture sub-update */
-    (void)backend_handle;
-    (void)x;
-    (void)y;
-    (void)w;
-    (void)h;
-    (void)format;
-    (void)data;
-}
-
 void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) {
     if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
         return;
@@ -861,6 +850,41 @@ void nt_gfx_backend_set_uniform_block(uint32_t pipeline_backend, const char *blo
 
 /* ---- Texture management ---- */
 
+/* Map nt_pixel_format_t to GL upload format and type.
+   Used by both create_texture and update_texture to ensure consistent mapping. */
+static void nt_gfx_gl_pixel_format(nt_pixel_format_t format, GLenum *out_fmt, GLenum *out_type) {
+    switch (format) {
+    case NT_PIXEL_RGB8:
+        *out_fmt = GL_RGB;
+        *out_type = GL_UNSIGNED_BYTE;
+        break;
+    case NT_PIXEL_RG8:
+        *out_fmt = GL_RG;
+        *out_type = GL_UNSIGNED_BYTE;
+        break;
+    case NT_PIXEL_R8:
+        *out_fmt = GL_RED;
+        *out_type = GL_UNSIGNED_BYTE;
+        break;
+    case NT_PIXEL_RGBA16F:
+        *out_fmt = GL_RGBA;
+        *out_type = GL_HALF_FLOAT;
+        break;
+    case NT_PIXEL_RG16UI:
+        *out_fmt = GL_RG_INTEGER;
+        *out_type = GL_UNSIGNED_SHORT;
+        break;
+    case NT_PIXEL_RGBA8:
+    default:
+        *out_fmt = GL_RGBA;
+        *out_type = GL_UNSIGNED_BYTE;
+        break;
+    }
+}
+
+/* Returns true if pixel format rows are naturally 4-byte aligned */
+static bool nt_gfx_gl_is_4byte_aligned(nt_pixel_format_t format) { return format == NT_PIXEL_RGBA8 || format == NT_PIXEL_RGBA16F || format == NT_PIXEL_RG16UI; }
+
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     GLuint tex;
     glGenTextures(1, &tex);
@@ -874,34 +898,33 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
 
     /* Map pixel format to GL constants */
     GLenum internal_fmt = GL_RGBA8;
-    GLenum pixel_fmt = GL_RGBA;
-    GLenum pixel_type = GL_UNSIGNED_BYTE;
+    GLenum pixel_fmt;
+    GLenum pixel_type;
+    nt_gfx_gl_pixel_format(desc->format, &pixel_fmt, &pixel_type);
     switch (desc->format) {
     case NT_PIXEL_RGB8:
         internal_fmt = GL_RGB8;
-        pixel_fmt = GL_RGB;
-        pixel_type = GL_UNSIGNED_BYTE;
         break;
     case NT_PIXEL_RG8:
         internal_fmt = GL_RG8;
-        pixel_fmt = GL_RG;
-        pixel_type = GL_UNSIGNED_BYTE;
         break;
     case NT_PIXEL_R8:
         internal_fmt = GL_R8;
-        pixel_fmt = GL_RED;
-        pixel_type = GL_UNSIGNED_BYTE;
+        break;
+    case NT_PIXEL_RGBA16F:
+        internal_fmt = GL_RGBA16F;
+        break;
+    case NT_PIXEL_RG16UI:
+        internal_fmt = GL_RG16UI;
         break;
     case NT_PIXEL_RGBA8:
     default:
         internal_fmt = GL_RGBA8;
-        pixel_fmt = GL_RGBA;
-        pixel_type = GL_UNSIGNED_BYTE;
         break;
     }
 
     /* Set alignment for non-4-byte-aligned formats (RGB8=3, RG8=2, R8=1) */
-    if (desc->format != NT_PIXEL_RGBA8) {
+    if (!nt_gfx_gl_is_4byte_aligned(desc->format)) {
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     }
 
@@ -909,7 +932,7 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     glTexImage2D(GL_TEXTURE_2D, 0, (GLint)internal_fmt, (GLsizei)desc->width, (GLsizei)desc->height, 0, pixel_fmt, pixel_type, desc->data);
 
     /* Restore default alignment */
-    if (desc->format != NT_PIXEL_RGBA8) {
+    if (!nt_gfx_gl_is_4byte_aligned(desc->format)) {
         glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     }
 
@@ -940,6 +963,39 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc) {
     }
 
     return slot;
+}
+
+void nt_gfx_backend_update_texture(uint32_t backend_handle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, nt_pixel_format_t format, const void *data) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_textures) {
+        return;
+    }
+    GLuint tex = s_texture_gl[backend_handle];
+    if (tex == 0) {
+        return;
+    }
+
+    glBindTexture(GL_TEXTURE_2D, tex);
+
+    GLenum gl_fmt;
+    GLenum gl_type;
+    nt_gfx_gl_pixel_format(format, &gl_fmt, &gl_type);
+
+    /* Set alignment for non-4-byte-aligned formats */
+    if (!nt_gfx_gl_is_4byte_aligned(format)) {
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    }
+
+    glTexSubImage2D(GL_TEXTURE_2D, 0, (GLint)x, (GLint)y, (GLsizei)w, (GLsizei)h, gl_fmt, gl_type, data);
+
+    if (!nt_gfx_gl_is_4byte_aligned(format)) {
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    }
+
+    /* Invalidate state cache: glBindTexture dirtied the active unit's binding */
+    uint32_t active_slot = s_gl_cache.active_texture - GL_TEXTURE0;
+    if (active_slot < NT_GFX_MAX_TEXTURE_SLOTS) {
+        s_gl_cache.bound_textures[active_slot] = 0;
+    }
 }
 
 #ifdef NT_HAS_BASISU
