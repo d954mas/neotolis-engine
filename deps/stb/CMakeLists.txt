@@ -16,3 +16,13 @@ target_compile_options(stb_image_resize2 PRIVATE -U_DLL)
 if(NOT WIN32 AND NOT EMSCRIPTEN)
     target_link_libraries(stb_image_resize2 PUBLIC m)
 endif()
+
+# stb_truetype -- TrueType font parser (single-header, vendored, builder-only)
+add_library(stb_truetype STATIC stb_truetype_impl.c)
+target_include_directories(stb_truetype PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_options(stb_truetype PRIVATE -U_DLL)
+# Suppress warnings in vendored code
+target_compile_options(stb_truetype PRIVATE -w)
+if(NOT WIN32 AND NOT EMSCRIPTEN)
+    target_link_libraries(stb_truetype PUBLIC m)
+endif()
