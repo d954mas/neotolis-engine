@@ -199,8 +199,8 @@ typedef struct {
 } nt_buffer_desc_t;
 
 typedef struct {
-    uint32_t width;
-    uint32_t height;
+    uint16_t width;
+    uint16_t height;
     const void *data;               /* raw pixel data (width * height * bpp bytes) */
     nt_pixel_format_t format;       /* default: NT_PIXEL_RGBA8 */
     nt_texture_filter_t min_filter; /* default: NT_FILTER_NEAREST */
@@ -333,7 +333,7 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
 /* ---- Texture update ---- */
 
-void nt_gfx_update_texture(nt_texture_t tex, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const void *data);
+void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);
 
 /* ---- Asset activators (called by nt_resource via callback registration) ---- */
 

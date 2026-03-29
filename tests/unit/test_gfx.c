@@ -263,15 +263,16 @@ void test_gfx_make_texture_null_desc(void) {
     TEST_ASSERT_EQUAL_UINT32(0, tex.id);
 }
 
-/* ---- Texture: NULL data ---- */
+/* ---- Texture: NULL data allocates storage for later update_texture ---- */
 
 void test_gfx_make_texture_null_data(void) {
     nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
-        .data = NULL,
     });
-    TEST_ASSERT_EQUAL_UINT32(0, tex.id);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
+    nt_gfx_update_texture(tex, 0, 0, 4, 4, s_test_pixels_4x4);
+    nt_gfx_destroy_texture(tex);
 }
 
 /* ---- Texture: zero width ---- */

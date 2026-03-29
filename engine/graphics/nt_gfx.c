@@ -366,11 +366,9 @@ nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     nt_texture_t result = {0};
+
+    // #region validate
     if (!desc) {
-        return result;
-    }
-    if (!desc->data) {
-        NT_LOG_ERROR("make_texture: NULL data");
         return result;
     }
     if (desc->width == 0 || desc->height == 0) {
@@ -378,6 +376,9 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         return result;
     }
     nt_texture_desc_t local_desc = *desc;
+
+    /* Mipmaps require initial data — GL cannot generate from empty storage */
+    NT_ASSERT((!local_desc.gen_mipmaps || local_desc.data) && "make_texture: gen_mipmaps requires data");
 
     /* Integer textures: NEAREST only, no mipmaps (D-02) */
     if (local_desc.format == NT_PIXEL_RG16UI) {
@@ -391,13 +392,14 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         local_desc.min_filter = (local_desc.min_filter & 1) ? NT_FILTER_LINEAR : NT_FILTER_NEAREST;
         NT_LOG_INFO("make_texture: min_filter clamped (gen_mipmaps=false)");
     }
-
     /* Validate mag_filter: only NEAREST or LINEAR allowed */
     if (local_desc.mag_filter > NT_FILTER_LINEAR) {
         NT_LOG_INFO("make_texture: mag_filter clamped to LINEAR");
         local_desc.mag_filter = NT_FILTER_LINEAR;
     }
+    // #endregion
 
+    // #region allocate
     uint32_t id = nt_pool_alloc(&s_gfx.texture_pool);
     if (id == 0) {
         NT_LOG_ERROR("texture pool full");
@@ -410,12 +412,15 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         nt_pool_free(&s_gfx.texture_pool, id);
         return result;
     }
+    // #endregion
 
+    // #region store meta
     uint32_t slot = nt_pool_slot_index(id);
     s_gfx.texture_backends[slot] = backend;
-    s_gfx.texture_metas[slot].width = (uint16_t)local_desc.width;
-    s_gfx.texture_metas[slot].height = (uint16_t)local_desc.height;
+    s_gfx.texture_metas[slot].width = local_desc.width;
+    s_gfx.texture_metas[slot].height = local_desc.height;
     s_gfx.texture_metas[slot].format = (uint8_t)local_desc.format;
+    // #endregion
 
     result.id = id;
     return result;
@@ -751,7 +756,8 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
 
 /* ---- Texture update ---- */
 
-void nt_gfx_update_texture(nt_texture_t tex, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const void *data) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data) {
     if (g_nt_gfx.context_lost) {
         return;
     }
@@ -760,6 +766,7 @@ void nt_gfx_update_texture(nt_texture_t tex, uint32_t x, uint32_t y, uint32_t w,
         return;
     }
     NT_ASSERT(data != NULL && "update_texture: NULL data pointer");
+    NT_ASSERT(w > 0 && h > 0 && "update_texture: zero-size region");
     uint32_t slot = nt_pool_slot_index(tex.id);
     NT_ASSERT(x + w <= s_gfx.texture_metas[slot].width && "update_texture: x+w exceeds texture width");
     NT_ASSERT(y + h <= s_gfx.texture_metas[slot].height && "update_texture: y+h exceeds texture height");
@@ -816,8 +823,8 @@ static uint32_t activate_texture_v2(const uint8_t *data, uint32_t size) {
         }
         const uint8_t *pixels = data + sizeof(NtTextureAssetHeaderV2);
         nt_texture_desc_t desc = {
-            .width = hdr2->width,
-            .height = hdr2->height,
+            .width = (uint16_t)hdr2->width,
+            .height = (uint16_t)hdr2->height,
             .data = pixels,
             .format = pixel_fmt,
             .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,

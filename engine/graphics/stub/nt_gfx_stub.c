@@ -76,7 +76,7 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uin
     (void)size;
 }
 
-void nt_gfx_backend_update_texture(uint32_t backend_handle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, nt_pixel_format_t format, const void *data) {
+void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data) {
     (void)backend_handle;
     (void)x;
     (void)y;
