@@ -1,29 +1,29 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 9a78218
+# Commit: 216d027
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 531 B
-Import               528 B
+Import               535 B
 Function             346 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                88 B
 Elem                 158 B
-Code              598697 B
-Data              232780 B
-Custom             36215 B
+Code              599110 B
+Data              232764 B
+Custom             36244 B
 ---------------- ----------
-TOTAL             869363 B
+TOTAL             869796 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-51777 B   nt_gfx_activate_texture
+51915 B   nt_gfx_activate_texture
 34973 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 33293 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 21848 B   basist::astc_ldr_t::xuastc_ldr_decompress_image(unsigned char const*, unsigned long, unsigned int&, unsigned int&, unsigned int&, unsigned int&, bool&, bool&, bool, bool (*)(unsigned int, unsigned int, unsigned int, unsigned int, bool, float, bool, void*), void*, bool (*)(unsigned int, unsigned int, astc_helpers::log_astc_block const&, void*), void*)
@@ -40,7 +40,7 @@ TOTAL             869363 B
 10772 B   basist::basisu_lowlevel_xuastc_ldr_transcoder::transcode_slice(basist::basis_tex_format, bool, void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)::$_5::__invoke(unsigned int, unsigned int, astc_helpers::log_astc_block const&, void*)
 10650 B   basist::astc_6x6_hdr::fast_encode_bc6h_2subsets_pattern(unsigned int, unsigned int, unsigned short const*, basist::vec3F const*, float const*, double&, basist::bc6h_logical_block&, long long, int, int, int, basist::astc_6x6_hdr::fast_bc6h_params const&)
 10333 B   basist::basisu_lowlevel_xuastc_ldr_transcoder::transcode_slice(basist::basis_tex_format, bool, void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)::$_3::__invoke(unsigned int, unsigned int, astc_helpers::log_astc_block const&, void*)
- 9408 B   astc_helpers::decode_block(astc_helpers::log_astc_block const&, void*, unsigned int, unsigned int, astc_helpers::decode_mode)
+ 9418 B   astc_helpers::decode_block(astc_helpers::log_astc_block const&, void*, unsigned int, unsigned int, astc_helpers::decode_mode)
  8639 B   basist::bc7f::fast_pack_bc7_rgba_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
  8190 B   basist::bc7f::fast_pack_bc7_rgba_partial_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
  8125 B   basist::encode_bc1(void*, unsigned char const*, unsigned int)
@@ -49,13 +49,13 @@ TOTAL             869363 B
  7332 B   basist::etc1f::pack_etc1(unsigned char*, basist::color_rgba const*, basist::etc1f::pack_etc1_state&)
  6481 B   basist::bc7f::fast_pack_bc7_rgb_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
  6374 B   basist::bc7f::fast_pack_bc7_rgb_partial_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
- 5619 B   main
+ 5660 B   main
  5179 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  4822 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
  4528 B   basist::astc_6x6_hdr::assign_weights_4(basist::vec3F const*, float const*, unsigned char*, int, int, int, int, int, int, long long, bool, basist::astc_6x6_hdr::fast_bc6h_params const&)
 
 Total functions: 344
-Total code size: 598099 B
+Total code size: 598512 B
 
 ## Per-Module Contributions
 
@@ -68,7 +68,7 @@ libnt_core.a                2178 B
 libnt_drawable_comp.a       2668 B
 libnt_entity.a              2996 B
 libnt_fs.a                  2620 B
-libnt_gfx.a                38792 B
+libnt_gfx.a                40476 B
 libnt_hash.a                4028 B
 libnt_http.a                6710 B
 libnt_http_stub.a           3210 B
@@ -84,14 +84,14 @@ libnt_time.a                 868 B
 libnt_transform_comp.a      4536 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)            264408 B
+TOTAL (linked)            266092 B
 
 Not linked to textured_quad:
 libnt_app_stub.a            1428 B
 libnt_basisu_transcoder.a 1329370 B
 libnt_comp_storage.a        1802 B
 libnt_fs_stub.a             2620 B
-libnt_gfx_stub.a           21904 B
+libnt_gfx_stub.a           22732 B
 libnt_input_stub.a         11148 B
 libnt_log_stub.a             484 B
 libnt_pool.a                1278 B
@@ -103,4 +103,4 @@ libnt_window_stub.a         1838 B
 ## Data Segments Summary
 
 Segments: 236
-Total data size: 231038 B
+Total data size: 231022 B

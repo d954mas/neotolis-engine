@@ -1,32 +1,32 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: 9a78218
+# Commit: 216d027
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 196 B
-Import               402 B
+Import               409 B
 Function              97 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                59 B
 Elem                  46 B
-Code               75451 B
+Code               75500 B
 Data                8523 B
-Custom              4472 B
+Custom              4501 B
 ---------------- ----------
-TOTAL              89267 B
+TOTAL              89352 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-22837 B   main
+22884 B   main
 11495 B   frame
  3341 B   rebuild_shapes
- 3102 B   fmt_fp
+ 3103 B   fmt_fp
  2896 B   emit_capsule_wire
  2628 B   printf_core
  2494 B   nt_input_web_on_blur
@@ -55,7 +55,7 @@ TOTAL              89267 B
   361 B   nt_input_web_on_pointer_up
 
 Total functions: 96
-Total code size: 75293 B
+Total code size: 75342 B
 
 ## Per-Module Contributions
 
@@ -65,12 +65,12 @@ Module                         Size
 ------------------------ ----------
 libnt_app.a                 1430 B
 libnt_core.a                2178 B
-libnt_gfx.a                38792 B
+libnt_gfx.a                40476 B
 libnt_input.a              16446 B
 libnt_shape_renderer.a   1140902 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)           1203688 B
+TOTAL (linked)           1205372 B
 
 Not linked to bench_shapes:
 libnt_app_stub.a            1428 B
@@ -80,7 +80,7 @@ libnt_drawable_comp.a       2668 B
 libnt_entity.a              2996 B
 libnt_fs.a                  2620 B
 libnt_fs_stub.a             2620 B
-libnt_gfx_stub.a           21904 B
+libnt_gfx_stub.a           22732 B
 libnt_hash.a                4028 B
 libnt_http.a                6710 B
 libnt_http_stub.a           3210 B
