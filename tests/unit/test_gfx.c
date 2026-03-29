@@ -336,15 +336,13 @@ void test_gfx_make_texture_npot(void) {
 
 /* ---- Texture: mag_filter clamped from mipmap variant ---- */
 
-void test_gfx_make_texture_mag_filter_clamped(void) {
-    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+void test_gfx_make_texture_mag_filter_rejects_mipmap(void) {
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
         .data = s_test_pixels_4x4,
         .mag_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
-    nt_gfx_destroy_texture(tex);
+    }));
 }
 
 /* ---- Texture: gen_mipmaps with mipmap min_filter ---- */
@@ -361,20 +359,16 @@ void test_gfx_make_texture_gen_mipmaps(void) {
     nt_gfx_destroy_texture(tex);
 }
 
-/* ---- Texture: mipmap min_filter clamped when gen_mipmaps=false ---- */
+/* ---- Texture: mipmap min_filter rejected when gen_mipmaps=false ---- */
 
 void test_gfx_make_texture_mipmap_filter_no_mipmaps(void) {
-    /* Without gen_mipmaps, mipmap min_filter would create incomplete texture.
-       Engine must clamp to non-mipmap variant and still return valid handle. */
-    nt_texture_t tex = nt_gfx_make_texture(&(nt_texture_desc_t){
+    EXPECT_ASSERT(nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = 4,
         .height = 4,
         .data = s_test_pixels_4x4,
         .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
         .gen_mipmaps = false,
-    });
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, tex.id);
-    nt_gfx_destroy_texture(tex);
+    }));
 }
 
 /* ---- Texture: bind with valid handle ---- */
@@ -790,8 +784,7 @@ void test_gfx_make_texture_rg16ui_rejects_mipmaps(void) {
 void test_gfx_gpu_caps_max_texture_size(void) {
     const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
     TEST_ASSERT_NOT_NULL(caps);
-    /* Stub returns 0 -- just confirm field is accessible without crash */
-    TEST_ASSERT_EQUAL_UINT32(0, caps->max_texture_size);
+    TEST_ASSERT_EQUAL_UINT32(4096, caps->max_texture_size);
 }
 
 /* ---- update_texture: valid sub-region ---- */
@@ -857,7 +850,7 @@ int main(void) {
     RUN_TEST(test_gfx_make_texture_zero_width);
     RUN_TEST(test_gfx_make_texture_zero_height);
     RUN_TEST(test_gfx_make_texture_npot);
-    RUN_TEST(test_gfx_make_texture_mag_filter_clamped);
+    RUN_TEST(test_gfx_make_texture_mag_filter_rejects_mipmap);
     RUN_TEST(test_gfx_make_texture_gen_mipmaps);
     RUN_TEST(test_gfx_make_texture_mipmap_filter_no_mipmaps);
     RUN_TEST(test_gfx_bind_texture_valid);

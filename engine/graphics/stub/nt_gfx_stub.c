@@ -161,4 +161,4 @@ void nt_gfx_backend_draw_indexed_instanced(uint32_t first_index, uint32_t num_in
 
 bool nt_gfx_backend_recreate_all_resources(void) { return true; }
 
-nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) { return (nt_gfx_gpu_caps_t){0}; }
+nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) { return (nt_gfx_gpu_caps_t){.max_texture_size = 4096}; }

@@ -377,7 +377,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         NT_LOG_ERROR("make_texture: zero dimension");
         return result;
     }
-    if (g_nt_gfx.gpu_caps.max_texture_size > 0 && (desc->width > g_nt_gfx.gpu_caps.max_texture_size || desc->height > g_nt_gfx.gpu_caps.max_texture_size)) {
+    if (desc->width > g_nt_gfx.gpu_caps.max_texture_size || desc->height > g_nt_gfx.gpu_caps.max_texture_size) {
 #ifdef NT_DEBUG
         NT_ASSERT(0 && "make_texture: dimensions exceed GPU max_texture_size");
 #endif
@@ -396,16 +396,10 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         NT_ASSERT(!local_desc.gen_mipmaps && "integer texture does not support mipmaps");
     }
 
-    /* Clamp mipmap min_filter when no mipmaps — prevents GL incomplete texture */
-    if (!local_desc.gen_mipmaps && local_desc.min_filter > NT_FILTER_LINEAR) {
-        local_desc.min_filter = (local_desc.min_filter & 1) ? NT_FILTER_LINEAR : NT_FILTER_NEAREST;
-        NT_LOG_INFO("make_texture: min_filter clamped (gen_mipmaps=false)");
-    }
-    /* Validate mag_filter: only NEAREST or LINEAR allowed */
-    if (local_desc.mag_filter > NT_FILTER_LINEAR) {
-        NT_LOG_INFO("make_texture: mag_filter clamped to LINEAR");
-        local_desc.mag_filter = NT_FILTER_LINEAR;
-    }
+    /* Mipmap min_filter requires gen_mipmaps */
+    NT_ASSERT((local_desc.gen_mipmaps || local_desc.min_filter <= NT_FILTER_LINEAR) && "make_texture: mipmap filter requires gen_mipmaps");
+    /* mag_filter: only NEAREST or LINEAR allowed */
+    NT_ASSERT(local_desc.mag_filter <= NT_FILTER_LINEAR && "make_texture: mag_filter must be NEAREST or LINEAR");
     // #endregion
 
     // #region allocate
@@ -799,7 +793,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     const NtTextureAssetHeaderV2 *hdr2 = (const NtTextureAssetHeaderV2 *)data;
 
     /* Validate dimensions against GPU caps */
-    if (g_nt_gfx.gpu_caps.max_texture_size > 0 && (hdr2->width > g_nt_gfx.gpu_caps.max_texture_size || hdr2->height > g_nt_gfx.gpu_caps.max_texture_size)) {
+    if (hdr2->width > g_nt_gfx.gpu_caps.max_texture_size || hdr2->height > g_nt_gfx.gpu_caps.max_texture_size) {
         NT_LOG_ERROR("activate_texture: %ux%u exceeds GPU max_texture_size %u", hdr2->width, hdr2->height, g_nt_gfx.gpu_caps.max_texture_size);
         return 0;
     }
