@@ -57,7 +57,7 @@ typedef struct {
     uint16_t curve_count; /* 18: number of unique quadratic Bezier curves */
     uint8_t kern_count;   /* 20: number of kern pairs for this glyph */
     uint8_t band_count;   /* 21: number of horizontal bands */
-    uint8_t _pad[2];      /* 22: align to 24 bytes */
+    uint16_t index_count; /* 22: total curve indices across all bands (enables O(1) bounds check) */
 } NtFontGlyphEntry;       /* 24 bytes total */
 #pragma pack(pop)
 _Static_assert(sizeof(NtFontGlyphEntry) == 24, "NtFontGlyphEntry must be 24 bytes");

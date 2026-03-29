@@ -343,7 +343,7 @@ void test_font_glyph_entry_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(18, offsetof(NtFontGlyphEntry, curve_count));
     TEST_ASSERT_EQUAL_UINT(20, offsetof(NtFontGlyphEntry, kern_count));
     TEST_ASSERT_EQUAL_UINT(21, offsetof(NtFontGlyphEntry, band_count));
-    TEST_ASSERT_EQUAL_UINT(22, offsetof(NtFontGlyphEntry, _pad));
+    TEST_ASSERT_EQUAL_UINT(22, offsetof(NtFontGlyphEntry, index_count));
 }
 
 void test_font_kern_entry_size(void) { TEST_ASSERT_EQUAL_UINT(8, sizeof(NtFontKernEntry)); }
