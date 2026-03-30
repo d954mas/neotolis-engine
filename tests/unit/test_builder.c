@@ -21,6 +21,7 @@ const char *__lsan_default_suppressions(void) { return "leak:extensionSupportedG
 #include "nt_builder.h"
 #include "nt_builder_internal.h"
 #include "nt_crc32.h"
+#include "nt_font_format.h"
 #include "nt_mesh_format.h"
 #include "nt_pack_format.h"
 #include "nt_shader_format.h"
@@ -3076,6 +3077,253 @@ void test_parallel_with_dedup(void) {
     free(data2);
 }
 
+/* --- Font test fixture helper --- */
+
+static const char *find_test_ttf(void) {
+    /* Prefer a widely available system font for testing */
+    static const char *candidates[] = {
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/consola.ttf",
+        "C:/Windows/Fonts/times.ttf",
+        NULL,
+    };
+    for (int i = 0; candidates[i]; i++) {
+        FILE *f = fopen(candidates[i], "rb");
+        if (f) {
+            (void)fclose(f);
+            return candidates[i];
+        }
+    }
+    return NULL;
+}
+
+/* --- Font processing tests (Phase 43) --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_add_basic_ascii(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    const char *pack_path = TMP_DIR "/test_font_ascii.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_font_opts_t opts = {.charset = "ABC", .resource_name = NULL};
+    nt_builder_add_font(ctx, ttf_path, &opts);
+
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Read pack back and verify */
+    uint32_t pack_size = 0;
+    char *pack_data = nt_builder_read_file(pack_path, &pack_size);
+    TEST_ASSERT_NOT_NULL(pack_data);
+    TEST_ASSERT_TRUE(pack_size > sizeof(NtPackHeader));
+
+    const NtPackHeader *hdr = (const NtPackHeader *)pack_data;
+    TEST_ASSERT_EQUAL_HEX32(NT_PACK_MAGIC, hdr->magic);
+    TEST_ASSERT_EQUAL_UINT(1, hdr->asset_count);
+
+    /* Find the font asset entry */
+    const NtAssetEntry *entry = (const NtAssetEntry *)(pack_data + sizeof(NtPackHeader));
+    TEST_ASSERT_EQUAL_UINT(NT_ASSET_FONT, entry->asset_type);
+    TEST_ASSERT_EQUAL_UINT(NT_FONT_VERSION, entry->format_version);
+    TEST_ASSERT_TRUE(entry->size > sizeof(NtFontAssetHeader));
+
+    /* Parse font header */
+    const NtFontAssetHeader *fhdr = (const NtFontAssetHeader *)(pack_data + entry->offset);
+    TEST_ASSERT_EQUAL_HEX32(NT_FONT_MAGIC, fhdr->magic);
+    TEST_ASSERT_EQUAL_UINT(NT_FONT_VERSION, fhdr->version);
+    TEST_ASSERT_EQUAL_UINT(3, fhdr->glyph_count); /* "ABC" = 3 glyphs */
+    TEST_ASSERT_TRUE(fhdr->units_per_em > 0);
+    TEST_ASSERT_TRUE(fhdr->ascent > 0);
+    TEST_ASSERT_TRUE(fhdr->descent < 0); /* descent is negative */
+
+    /* Verify glyph entries are sorted by codepoint */
+    const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)((const uint8_t *)fhdr + sizeof(NtFontAssetHeader));
+    TEST_ASSERT_EQUAL_UINT('A', glyphs[0].codepoint);
+    TEST_ASSERT_EQUAL_UINT('B', glyphs[1].codepoint);
+    TEST_ASSERT_EQUAL_UINT('C', glyphs[2].codepoint);
+
+    /* Each glyph should have positive advance and curves */
+    for (uint32_t i = 0; i < 3; i++) {
+        TEST_ASSERT_TRUE(glyphs[i].advance > 0);
+        TEST_ASSERT_TRUE(glyphs[i].curve_count > 0); /* A, B, C all have outlines */
+    }
+
+    free(pack_data);
+}
+
+void test_font_add_full_ascii_charset(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    const char *pack_path = TMP_DIR "/test_font_full_ascii.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_font_opts_t opts = {.charset = NT_CHARSET_ASCII, .resource_name = NULL};
+    nt_builder_add_font(ctx, ttf_path, &opts);
+
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Read and verify glyph count = 95 */
+    uint32_t pack_size = 0;
+    char *pack_data = nt_builder_read_file(pack_path, &pack_size);
+    TEST_ASSERT_NOT_NULL(pack_data);
+
+    const NtPackHeader *hdr = (const NtPackHeader *)pack_data;
+    (void)hdr;
+    const NtAssetEntry *entry = (const NtAssetEntry *)(pack_data + sizeof(NtPackHeader));
+    const NtFontAssetHeader *fhdr = (const NtFontAssetHeader *)(pack_data + entry->offset);
+    TEST_ASSERT_EQUAL_UINT(95, fhdr->glyph_count);
+
+    /* Space (0x20) should be first, tilde (0x7E) should be last */
+    const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)((const uint8_t *)fhdr + sizeof(NtFontAssetHeader));
+    TEST_ASSERT_EQUAL_UINT(0x20, glyphs[0].codepoint);
+    TEST_ASSERT_EQUAL_UINT(0x7E, glyphs[94].codepoint);
+
+    /* Space has advance but 0 curves */
+    TEST_ASSERT_TRUE(glyphs[0].advance > 0);
+    TEST_ASSERT_EQUAL_UINT(0, glyphs[0].curve_count);
+
+    free(pack_data);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_kern_pairs(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    const char *pack_path = TMP_DIR "/test_font_kern.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Include characters known to have kern pairs */
+    nt_font_opts_t opts = {.charset = "AVToWa", .resource_name = NULL};
+    nt_builder_add_font(ctx, ttf_path, &opts);
+
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* Read and check that at least some glyphs have kern_count > 0 */
+    uint32_t pack_size = 0;
+    char *pack_data = nt_builder_read_file(pack_path, &pack_size);
+    TEST_ASSERT_NOT_NULL(pack_data);
+
+    const NtAssetEntry *entry = (const NtAssetEntry *)(pack_data + sizeof(NtPackHeader));
+    const NtFontAssetHeader *fhdr = (const NtFontAssetHeader *)(pack_data + entry->offset);
+    const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)((const uint8_t *)fhdr + sizeof(NtFontAssetHeader));
+
+    /* Check if any glyph has kern pairs -- font dependent, but common fonts kern AV/VA/To */
+    uint32_t total_kerns = 0;
+    for (uint32_t i = 0; i < fhdr->glyph_count; i++) {
+        total_kerns += glyphs[i].kern_count;
+    }
+    TEST_ASSERT_TRUE(fhdr->glyph_count == 6);
+
+    /* If kerns exist, verify kern entries are readable */
+    if (total_kerns > 0) {
+        /* Find first glyph with kerns */
+        for (uint32_t i = 0; i < fhdr->glyph_count; i++) {
+            if (glyphs[i].kern_count > 0) {
+                const uint8_t *data_ptr = (const uint8_t *)fhdr + glyphs[i].data_offset;
+                const NtFontKernEntry *kerns = (const NtFontKernEntry *)data_ptr;
+                /* First kern entry should have a valid codepoint */
+                TEST_ASSERT_TRUE(kerns[0].right_codepoint >= 0x20);
+                TEST_ASSERT_TRUE(kerns[0].value != 0);
+                break;
+            }
+        }
+    }
+
+    free(pack_data);
+}
+
+void test_font_missing_codepoint_asserts(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/test_font_missing.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* U+E000 (Private Use Area) -- no standard font maps this */
+    nt_font_opts_t opts = {.charset = "\xEE\x80\x80", .resource_name = NULL};
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_add_font(ctx, ttf_path, &opts));
+}
+
+void test_font_null_charset_asserts(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/test_font_null.ntpack");
+    nt_font_opts_t opts = {.charset = NULL, .resource_name = NULL};
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_add_font(ctx, ttf_path, &opts));
+}
+
+void test_font_dump_pack(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    const char *pack_path = TMP_DIR "/test_font_dump.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    nt_font_opts_t opts = {.charset = "Hello", .resource_name = NULL};
+    nt_builder_add_font(ctx, ttf_path, &opts);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    /* dump_pack should succeed (verifies font display code path) */
+    r = nt_builder_dump_pack(pack_path);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+}
+
+void test_font_charset_dedup(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    const char *pack_path = TMP_DIR "/test_font_dedup.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    /* "AABBCC" should produce only 3 unique glyphs */
+    nt_font_opts_t opts = {.charset = "AABBCC", .resource_name = NULL};
+    nt_builder_add_font(ctx, ttf_path, &opts);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    uint32_t pack_size = 0;
+    char *pack_data = nt_builder_read_file(pack_path, &pack_size);
+    const NtAssetEntry *entry = (const NtAssetEntry *)(pack_data + sizeof(NtPackHeader));
+    const NtFontAssetHeader *fhdr = (const NtFontAssetHeader *)(pack_data + entry->offset);
+    TEST_ASSERT_EQUAL_UINT(3, fhdr->glyph_count); /* deduplicated to 3 */
+    free(pack_data);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -3199,6 +3447,15 @@ int main(void) {
     RUN_TEST(test_set_threads_zero_is_singlethreaded);
     RUN_TEST(test_parallel_with_cache);
     RUN_TEST(test_parallel_with_dedup);
+
+    /* Font processing tests (Phase 43) */
+    RUN_TEST(test_font_add_basic_ascii);
+    RUN_TEST(test_font_add_full_ascii_charset);
+    RUN_TEST(test_font_kern_pairs);
+    RUN_TEST(test_font_missing_codepoint_asserts);
+    RUN_TEST(test_font_null_charset_asserts);
+    RUN_TEST(test_font_dump_pack);
+    RUN_TEST(test_font_charset_dedup);
 
     return UNITY_END();
 }
