@@ -30,7 +30,7 @@
  *     Per contour (contour_count times):
  *       uint16_t segment_count
  *       int16_t  start_x, start_y             // moveto point
- *       uint8_t  type_bits[ceil(segment_count/8)]  // bit=1: quad, bit=0: line (LSB first)
+ *       uint8_t  type_bits[ALIGN2(ceil(segment_count/8))]  // bit=1: quad, bit=0: line (LSB first, 2-byte aligned)
  *
  *       Per segment (segment_count times, sequential, DELTA-ENCODED):
  *         if line  (bit=0): int16_t dp2x, dp2y                  (4 bytes)
