@@ -14,7 +14,11 @@
 
 /* Suppress GLFW/GLX internal leaks (X11 extension query cache) */
 const char *__lsan_default_suppressions(void);                                           // NOLINT(bugprone-reserved-identifier)
-const char *__lsan_default_suppressions(void) { return "leak:extensionSupportedGLX\n"; } // NOLINT(bugprone-reserved-identifier)
+const char *__lsan_default_suppressions(void) { // NOLINT(bugprone-reserved-identifier)
+    return "leak:extensionSupportedGLX\n"
+           "leak:nt_builder_decode_font\n"  /* EXPECT_BUILD_ASSERT + longjmp leaks internal allocs */
+           "leak:nt_builder_add_font\n";
+}
 
 /* clang-format off */
 #include "nt_blob_format.h"

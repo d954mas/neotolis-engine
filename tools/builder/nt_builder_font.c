@@ -860,18 +860,19 @@ void nt_builder_add_font(NtBuilderContext *ctx, const char *path, const nt_font_
     char *resolved_path = nt_builder_find_file(path, NULL, ctx);
     const char *decode_path = resolved_path ? resolved_path : path;
 
-    /* Allocate font-specific data */
-    NtBuildFontData *fd = (NtBuildFontData *)calloc(1, sizeof(NtBuildFontData));
-    NT_BUILD_ASSERT(fd && "add_font: font data alloc failed");
-    fd->charset = strdup(opts->charset);
-    NT_BUILD_ASSERT(fd->charset && "add_font: strdup failed");
-
-    /* Decode TTF -> final NT_ASSET_FONT binary */
+    /* Decode TTF -> final NT_ASSET_FONT binary (before alloc — if decode asserts,
+     * nothing is leaked; EXPECT_BUILD_ASSERT in tests relies on this order) */
     uint8_t *data = NULL;
     uint32_t size = 0;
     nt_build_result_t r = nt_builder_decode_font(decode_path, opts->charset, &data, &size);
     free(resolved_path);
     NT_BUILD_ASSERT(r == NT_BUILD_OK && "add_font: decode failed");
+
+    /* Allocate font-specific data (after successful decode — no leak on assert) */
+    NtBuildFontData *fd = (NtBuildFontData *)calloc(1, sizeof(NtBuildFontData));
+    NT_BUILD_ASSERT(fd && "add_font: font data alloc failed");
+    fd->charset = strdup(opts->charset);
+    NT_BUILD_ASSERT(fd->charset && "add_font: strdup failed");
 
     /* Hash decoded data and register deferred entry */
     uint64_t hash = nt_hash64(data, size).value;
