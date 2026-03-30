@@ -1,6 +1,7 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
 #include "nt_crc32.h"
+#include "nt_font_format.h"
 #include "nt_texture_format.h"
 #include "miniz.h"
 /* clang-format on */
@@ -166,6 +167,8 @@ static const char *nt_asset_type_name(uint8_t type) {
         return "SHADER";
     case NT_ASSET_BLOB:
         return "BLOB";
+    case NT_ASSET_FONT:
+        return "FONT";
     default:
         return "UNKNOWN";
     }
@@ -192,6 +195,59 @@ static int32_t find_duplicate_original(const NtAssetEntry *entries, uint32_t cur
 
 /* ---- Header path derivation (uses shared utility from nt_builder_internal.h) ---- */
 
+/* ---- Font-specific detail printer ---- */
+
+static void print_font_details(const uint8_t *asset_data, uint32_t asset_size) {
+    if (!asset_data || asset_size < sizeof(NtFontAssetHeader)) {
+        return;
+    }
+    const NtFontAssetHeader *fhdr = (const NtFontAssetHeader *)asset_data;
+    if (fhdr->magic != NT_FONT_MAGIC) {
+        return;
+    }
+
+    NT_LOG_INFO("         glyphs: %u  units_per_em: %u  ascent: %d  descent: %d", fhdr->glyph_count, fhdr->units_per_em, fhdr->ascent, fhdr->descent);
+
+    /* Print character list: show all included codepoints as readable text */
+    if (fhdr->glyph_count == 0) {
+        return;
+    }
+    const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(asset_data + sizeof(NtFontAssetHeader));
+    uint32_t max_glyphs = (asset_size - (uint32_t)sizeof(NtFontAssetHeader)) / (uint32_t)sizeof(NtFontGlyphEntry);
+    uint32_t count = fhdr->glyph_count;
+    if (count > max_glyphs) {
+        count = max_glyphs;
+    }
+
+    // #region Build character list string -- encode codepoints as UTF-8
+    char chars[1024];
+    uint32_t pos = 0;
+    for (uint32_t g = 0; g < count && pos < sizeof(chars) - 5; g++) {
+        uint32_t cp = glyphs[g].codepoint;
+        if (cp < 0x20) {
+            continue; /* skip control characters */
+        }
+        if (cp < 0x80) {
+            chars[pos++] = (char)cp;
+        } else if (cp < 0x800) {
+            chars[pos++] = (char)(0xC0 | (cp >> 6));
+            chars[pos++] = (char)(0x80 | (cp & 0x3F));
+        } else if (cp < 0x10000) {
+            chars[pos++] = (char)(0xE0 | (cp >> 12));
+            chars[pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+            chars[pos++] = (char)(0x80 | (cp & 0x3F));
+        } else {
+            chars[pos++] = (char)(0xF0 | (cp >> 18));
+            chars[pos++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+            chars[pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+            chars[pos++] = (char)(0x80 | (cp & 0x3F));
+        }
+    }
+    chars[pos] = '\0';
+    // #endregion
+    NT_LOG_INFO("         chars: %s", chars);
+}
+
 /* ---- Per-type summary accumulators ---- */
 
 typedef struct {
@@ -206,6 +262,8 @@ typedef struct {
     uint32_t shader_raw;
     uint32_t blob_count;
     uint32_t blob_raw;
+    uint32_t font_count;
+    uint32_t font_raw;
     uint32_t total_raw;
     uint32_t total_gz;
     uint32_t dup_count;
@@ -260,6 +318,10 @@ static void accumulate_stats(DumpStats *st, const NtAssetEntry *e, const uint8_t
         st->blob_count++;
         st->blob_raw += asset_size;
         break;
+    case NT_ASSET_FONT:
+        st->font_count++;
+        st->font_raw += asset_size;
+        break;
     default:
         break;
     }
@@ -313,6 +375,9 @@ static void print_summary(const DumpStats *st) {
     }
     if (st->blob_count > 0) {
         print_type_line("BLOB:", st->blob_count, st->blob_raw);
+    }
+    if (st->font_count > 0) {
+        print_type_line("FONT:", st->font_count, st->font_raw);
     }
     if (st->dup_count > 0) {
         char sz[16];
@@ -501,6 +566,11 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
         char trunc_buf[DUMP_NAME_WIDTH + 1];
         const char *display_name = truncate_name(name, trunc_buf, sizeof(trunc_buf));
         NT_LOG_INFO("  %-3u %-40s %-10s %-28s %s", i, display_name, type_tag, size_str, note_str);
+
+        /* Font-specific detail line */
+        if (e->asset_type == NT_ASSET_FONT && asset_data) {
+            print_font_details(asset_data, asset_size);
+        }
 
         /* Accumulate per-type stats */
         accumulate_stats(&stats, e, asset_data, gz_size, dup_of);
