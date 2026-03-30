@@ -206,7 +206,7 @@ static void print_font_details(const uint8_t *asset_data, uint32_t asset_size) {
         return;
     }
 
-    NT_LOG_INFO("         glyphs: %u  units_per_em: %u  ascent: %d  descent: %d", fhdr->glyph_count, fhdr->units_per_em, fhdr->ascent, fhdr->descent);
+    NT_LOG_INFO("    glyphs: %u  units_per_em: %u  ascent: %d  descent: %d", fhdr->glyph_count, fhdr->units_per_em, fhdr->ascent, fhdr->descent);
 
     /* Print character list: show all included codepoints as readable text */
     if (fhdr->glyph_count == 0) {
@@ -245,7 +245,7 @@ static void print_font_details(const uint8_t *asset_data, uint32_t asset_size) {
     }
     chars[pos] = '\0';
     // #endregion
-    NT_LOG_INFO("         chars: %s", chars);
+    NT_LOG_INFO("    chars: %s", chars);
 }
 
 /* ---- Per-type summary accumulators ---- */

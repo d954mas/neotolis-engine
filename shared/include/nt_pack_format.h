@@ -40,7 +40,7 @@ typedef enum {
     NT_ASSET_TEXTURE = 2,
     NT_ASSET_SHADER_CODE = 3, /* individual VS or FS source */
     NT_ASSET_BLOB = 4,        /* generic binary data (game-defined) */
-    NT_ASSET_FONT = 5,        /* font glyph data (Slug format) */
+    NT_ASSET_FONT = 5,        /* font glyph data (contour-based vector outlines) */
 } nt_asset_type_t;
 
 /*
