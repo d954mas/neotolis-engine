@@ -2519,12 +2519,25 @@ static stbtt_int32 stbtt__GetGlyphGPOSInfoAdvance(const stbtt_fontinfo *info, in
       stbtt_uint16 lookupType = ttUSHORT(lookupTable);
       stbtt_uint16 subTableCount = ttUSHORT(lookupTable + 4);
       stbtt_uint8 *subTableOffsets = lookupTable + 6;
-      if (lookupType != 2) // Pair Adjustment Positioning Subtable
+      /* [NEOTOLIS PATCH] Handle Extension Positioning (LookupType 9).
+       * Most modern fonts wrap PairPos in Extension lookups to exceed 16-bit
+       * offsets. Without this, GPOS kerning returns 0 for NotoSans, Arial, etc.
+       * Upstream stb issue: https://github.com/nothings/stb/issues/1598
+       * Remove this patch if upstream adds Extension support. */
+      if (lookupType != 2 && lookupType != 9)
          continue;
 
       for (sti=0; sti<subTableCount; sti++) {
          stbtt_uint16 subtableOffset = ttUSHORT(subTableOffsets + 2 * sti);
          stbtt_uint8 *table = lookupTable + subtableOffset;
+
+         /* [NEOTOLIS PATCH] Unwrap Extension Positioning (type 9) → real subtable */
+         if (lookupType == 9) {
+            stbtt_uint16 extType = ttUSHORT(table + 2);
+            if (extType != 2) continue; /* only unwrap PairPos */
+            stbtt_uint32 extOffset = ttULONG(table + 4);
+            table = table + extOffset;
+         }
          stbtt_uint16 posFormat = ttUSHORT(table);
          stbtt_uint16 coverageOffset = ttUSHORT(table + 2);
          stbtt_int32 coverageIndex = stbtt__GetCoverageIndex(table + coverageOffset, glyph1);
