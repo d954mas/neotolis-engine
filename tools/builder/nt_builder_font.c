@@ -344,27 +344,32 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
                 memset(bitmask, 0, bitmask_bytes);
                 wp += bitmask_bytes;
 
-                /* Build bitmask and write segment data */
-                uint16_t seg = 0;
+                /* Build bitmask and write delta-encoded segment data.
+                 * All coordinates are int16 deltas from previous chain endpoint
+                 * (start_x/y for first segment, p2 of previous segment after). */
+                int16_t prev_x = sx;
+                int16_t prev_y = sy;
                 for (uint16_t s = 0; s < cs->segment_count; s++) {
                     NT_BUILD_ASSERT(vi < nv && "unexpected end of vertices");
-                    (void)seg;
                     if (verts[vi].type == STBTT_vcurve) {
                         bitmask[s / 8] |= (uint8_t)(1U << (s % 8));
-                        int16_t p1x = verts[vi].cx;
-                        int16_t p1y = verts[vi].cy;
-                        int16_t p2x = verts[vi].x;
-                        int16_t p2y = verts[vi].y;
-                        memcpy(wp, &p1x, 2); wp += 2;
-                        memcpy(wp, &p1y, 2); wp += 2;
-                        memcpy(wp, &p2x, 2); wp += 2;
-                        memcpy(wp, &p2y, 2); wp += 2;
+                        int16_t dp1x = (int16_t)(verts[vi].cx - prev_x);
+                        int16_t dp1y = (int16_t)(verts[vi].cy - prev_y);
+                        int16_t dp2x = (int16_t)(verts[vi].x - prev_x);
+                        int16_t dp2y = (int16_t)(verts[vi].y - prev_y);
+                        memcpy(wp, &dp1x, 2); wp += 2;
+                        memcpy(wp, &dp1y, 2); wp += 2;
+                        memcpy(wp, &dp2x, 2); wp += 2;
+                        memcpy(wp, &dp2y, 2); wp += 2;
+                        prev_x = verts[vi].x;
+                        prev_y = verts[vi].y;
                     } else {
-                        /* line: bit stays 0 */
-                        int16_t p2x = verts[vi].x;
-                        int16_t p2y = verts[vi].y;
-                        memcpy(wp, &p2x, 2); wp += 2;
-                        memcpy(wp, &p2y, 2); wp += 2;
+                        int16_t dp2x = (int16_t)(verts[vi].x - prev_x);
+                        int16_t dp2y = (int16_t)(verts[vi].y - prev_y);
+                        memcpy(wp, &dp2x, 2); wp += 2;
+                        memcpy(wp, &dp2y, 2); wp += 2;
+                        prev_x = verts[vi].x;
+                        prev_y = verts[vi].y;
                     }
                     vi++;
                 }

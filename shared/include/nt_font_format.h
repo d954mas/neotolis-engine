@@ -32,15 +32,22 @@
  *       int16_t  start_x, start_y             // moveto point
  *       uint8_t  type_bits[ceil(segment_count/8)]  // bit=1: quad, bit=0: line (LSB first)
  *
- *       Per segment (segment_count times, sequential):
- *         if line  (bit=0): int16_t p2x, p2y                   (4 bytes)
- *         if quad  (bit=1): int16_t p1x, p1y, p2x, p2y         (8 bytes)
+ *       Per segment (segment_count times, sequential, DELTA-ENCODED):
+ *         if line  (bit=0): int16_t dp2x, dp2y                  (4 bytes)
+ *         if quad  (bit=1): int16_t dp1x, dp1y, dp2x, dp2y      (8 bytes)
  *
  *     Endpoint sharing: p0 of each segment = p2 of the previous segment
  *     (or start_x/y for the first segment in a contour).
  *
- *     Coordinates are int16 in font design units (exact from TTF).
- *     Runtime at cache miss expands to GPU texture:
+ *     Delta encoding: all segment coordinates are int16 deltas relative
+ *     to the previous chain endpoint (start_x/y for first segment,
+ *     absolute p2 of previous segment thereafter). Reconstruct:
+ *       p1 = prev + (dp1x, dp1y)
+ *       p2 = prev + (dp2x, dp2y)
+ *       prev = p2  (for next segment)
+ *
+ *     Coordinates are int16 in font design units.
+ *     Runtime at cache miss reconstructs absolute coords and expands:
  *       - Lines: compute p1 = midpoint(p0, p2), write (p0, p1, p2) as float
  *       - Quads: write (p0, p1, p2) as float
  *     Band decomposition happens at runtime (not stored in pack).
