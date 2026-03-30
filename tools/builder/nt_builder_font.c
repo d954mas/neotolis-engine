@@ -91,23 +91,153 @@ static uint32_t parse_charset(const char *charset_utf8, uint32_t *out_codepoints
     return count;
 }
 
-/* --- Per-glyph shape info (first pass) --- */
+/* --- Contour analysis: compute curve data size from stb vertices --- */
 
-#define NT_FONT_MAX_CONTOURS 256
+static uint32_t compute_curve_data_size(const stbtt_vertex *verts, int nv, uint16_t *out_total_segments) {
+    if (nv == 0) {
+        *out_total_segments = 0;
+        return 0;
+    }
 
-typedef struct {
-    uint16_t segment_count;
-    uint16_t quad_count; /* rest are lines */
-} ContourStats;
+    uint32_t size = 2; /* contour_count uint16 */
+    uint16_t total_segs = 0;
+    uint16_t cur_segs = 0;
+    uint16_t cur_quads = 0;
+    bool in_contour = false;
+
+    for (int v = 0; v < nv; v++) {
+        switch (verts[v].type) {
+        case STBTT_vmove:
+            if (in_contour) {
+                /* Finalize previous contour */
+                uint32_t bm = ((uint32_t)cur_segs + 7) / 8;
+                size += 6 + bm + (uint32_t)cur_quads * 8 + (uint32_t)(cur_segs - cur_quads) * 4;
+            }
+            in_contour = true;
+            cur_segs = 0;
+            cur_quads = 0;
+            break;
+        case STBTT_vline:
+            cur_segs++;
+            total_segs++;
+            break;
+        case STBTT_vcurve:
+            cur_segs++;
+            cur_quads++;
+            total_segs++;
+            break;
+        case STBTT_vcubic:
+            NT_BUILD_ASSERT(0 && "cubic curves not supported (CFF font?)");
+            break;
+        default:
+            break;
+        }
+    }
+    /* Finalize last contour */
+    if (in_contour && cur_segs > 0) {
+        uint32_t bm = ((uint32_t)cur_segs + 7) / 8;
+        size += 6 + bm + (uint32_t)cur_quads * 8 + (uint32_t)(cur_segs - cur_quads) * 4;
+    }
+
+    *out_total_segments = total_segs;
+    return (total_segs > 0) ? size : 0;
+}
+
+/* --- Write contour data from stb vertices (delta-encoded) --- */
+
+static void write_contour_data(const stbtt_vertex *verts, int nv, uint8_t *wp) {
+    /* Count contours */
+    uint16_t contour_count = 0;
+    for (int v = 0; v < nv; v++) {
+        if (verts[v].type == STBTT_vmove) {
+            contour_count++;
+        }
+    }
+    memcpy(wp, &contour_count, 2);
+    wp += 2;
+
+    int vi = 0;
+    for (uint16_t ci = 0; ci < contour_count; ci++) {
+        /* Find moveto */
+        while (vi < nv && verts[vi].type != STBTT_vmove) {
+            vi++;
+        }
+
+        // #region Count segments in this contour (look ahead)
+        uint16_t seg_count = 0;
+        for (int peek = vi + 1; peek < nv && verts[peek].type != STBTT_vmove; peek++) {
+            if (verts[peek].type == STBTT_vline || verts[peek].type == STBTT_vcurve) {
+                seg_count++;
+            }
+        }
+        // #endregion
+
+        // #region Contour header
+        memcpy(wp, &seg_count, 2);
+        wp += 2;
+        int16_t sx = verts[vi].x;
+        int16_t sy = verts[vi].y;
+        memcpy(wp, &sx, 2);
+        wp += 2;
+        memcpy(wp, &sy, 2);
+        wp += 2;
+        vi++;
+        // #endregion
+
+        // #region Bitmask + delta-encoded segments
+        uint32_t bitmask_bytes = ((uint32_t)seg_count + 7) / 8;
+        uint8_t *bitmask = wp;
+        memset(bitmask, 0, bitmask_bytes);
+        wp += bitmask_bytes;
+
+        int16_t prev_x = sx;
+        int16_t prev_y = sy;
+        for (uint16_t s = 0; s < seg_count; s++) {
+            if (verts[vi].type == STBTT_vcurve) {
+                bitmask[s / 8] |= (uint8_t)(1U << (s % 8));
+                int16_t dp1x = (int16_t)(verts[vi].cx - prev_x);
+                int16_t dp1y = (int16_t)(verts[vi].cy - prev_y);
+                int16_t dp2x = (int16_t)(verts[vi].x - prev_x);
+                int16_t dp2y = (int16_t)(verts[vi].y - prev_y);
+                memcpy(wp, &dp1x, 2);
+                wp += 2;
+                memcpy(wp, &dp1y, 2);
+                wp += 2;
+                memcpy(wp, &dp2x, 2);
+                wp += 2;
+                memcpy(wp, &dp2y, 2);
+                wp += 2;
+            } else {
+                int16_t dp2x = (int16_t)(verts[vi].x - prev_x);
+                int16_t dp2y = (int16_t)(verts[vi].y - prev_y);
+                memcpy(wp, &dp2x, 2);
+                wp += 2;
+                memcpy(wp, &dp2y, 2);
+                wp += 2;
+            }
+            prev_x = verts[vi].x;
+            prev_y = verts[vi].y;
+            vi++;
+        }
+        // #endregion
+    }
+}
+
+/* --- Per-glyph info (single-pass analysis) --- */
 
 typedef struct {
     int glyph_idx;
     uint16_t total_segments;
-    uint16_t contour_count;
     uint16_t kern_count;
-    uint32_t curve_data_size; /* contour data bytes for this glyph */
-    ContourStats contours[NT_FONT_MAX_CONTOURS];
+    uint32_t curve_data_size;
 } GlyphInfo;
+
+/* --- Stored kern pair (from first pass, reused in second pass) --- */
+
+typedef struct {
+    uint16_t right_glyph_index;
+    int16_t value;
+} KernPair;
 
 /* --- nt_builder_decode_font: TTF -> final NT_ASSET_FONT binary --- */
 
@@ -134,26 +264,31 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     NT_BUILD_ASSERT(ok && "decode_font: stbtt_InitFont failed");
     // #endregion
 
-    // #region GPOS warning (BLD-08, D-14)
-    if (font.gpos != 0 && font.kern == 0) {
-        NT_LOG_WARN("%s: GPOS table present but no kern table -- kerning may be incomplete", path);
-    }
-    // #endregion
-
     // #region Extract font-level metrics
     int ascent = 0;
     int descent = 0;
     int line_gap = 0;
     stbtt_GetFontVMetrics(&font, &ascent, &descent, &line_gap);
 
-    /* Compute units_per_em from stbtt_ScaleForPixelHeight */
     float scale = stbtt_ScaleForPixelHeight(&font, 1.0F);
     uint16_t units_per_em = (uint16_t)((1.0F / scale) + 0.5F);
     // #endregion
 
-    // #region First pass -- analyze contours and count kerns per glyph
+    // #region Single analysis pass — shapes, kerns, sizes
     GlyphInfo *ginfo = (GlyphInfo *)calloc(glyph_count, sizeof(GlyphInfo));
     NT_BUILD_ASSERT(ginfo && "decode_font: glyph info alloc failed");
+
+    /* Vertex cache: store shapes from analysis to avoid double stbtt_GetGlyphShape.
+     * Allocated as void* array to satisfy strict pointer conversion rules. */
+    void **vert_cache_raw = (void **)calloc(glyph_count, sizeof(void *));
+    int *vert_counts = (int *)calloc(glyph_count, sizeof(int));
+    NT_BUILD_ASSERT(vert_cache_raw && vert_counts && "decode_font: vertex cache alloc failed");
+
+    /* Kern pair storage: flat array, indexed per-glyph via offset+count */
+    uint32_t kern_capacity = glyph_count * 16; /* initial estimate, grows if needed */
+    KernPair *kern_pairs = (KernPair *)malloc(kern_capacity * sizeof(KernPair));
+    uint32_t *kern_offsets = (uint32_t *)calloc(glyph_count, sizeof(uint32_t));
+    NT_BUILD_ASSERT(kern_pairs && kern_offsets && "decode_font: kern storage alloc failed");
 
     uint32_t total_kerns = 0;
     uint32_t total_curve_data = 0;
@@ -163,69 +298,29 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
         NT_BUILD_ASSERT(glyph_idx != 0 && "codepoint not in font (D-09)");
         ginfo[i].glyph_idx = glyph_idx;
 
-        /* Analyze contours: count segments, lines vs quads */
-        stbtt_vertex *verts = NULL;
-        int nv = stbtt_GetGlyphShape(&font, glyph_idx, &verts);
-        uint16_t cc = 0;  /* contour count */
-        uint16_t ts = 0;  /* total segments */
-        uint32_t cdata = 2; /* start with contour_count uint16 */
-
-        for (int v = 0; v < nv; v++) {
-            switch (verts[v].type) {
-            case STBTT_vmove:
-                NT_BUILD_ASSERT(cc < NT_FONT_MAX_CONTOURS && "too many contours");
-                if (cc > 0) {
-                    /* Finalize previous contour size */
-                    ContourStats *prev = &ginfo[i].contours[cc - 1];
-                    uint32_t bitmask_bytes = ((uint32_t)prev->segment_count + 7) / 8;
-                    cdata += 6 + bitmask_bytes; /* header: seg_count + start_x + start_y + bitmask */
-                    cdata += (uint32_t)prev->quad_count * 8;
-                    cdata += (uint32_t)(prev->segment_count - prev->quad_count) * 4;
-                }
-                cc++;
-                ginfo[i].contours[cc - 1].segment_count = 0;
-                ginfo[i].contours[cc - 1].quad_count = 0;
-                break;
-            case STBTT_vline:
-                ginfo[i].contours[cc - 1].segment_count++;
-                ts++;
-                break;
-            case STBTT_vcurve:
-                ginfo[i].contours[cc - 1].segment_count++;
-                ginfo[i].contours[cc - 1].quad_count++;
-                ts++;
-                break;
-            case STBTT_vcubic:
-                NT_BUILD_ASSERT(0 && "cubic curves not supported (CFF font?)");
-                break;
-            default:
-                break;
-            }
-        }
-        /* Finalize last contour */
-        if (cc > 0) {
-            ContourStats *last = &ginfo[i].contours[cc - 1];
-            uint32_t bitmask_bytes = ((uint32_t)last->segment_count + 7) / 8;
-            cdata += 6 + bitmask_bytes;
-            cdata += (uint32_t)last->quad_count * 8;
-            cdata += (uint32_t)(last->segment_count - last->quad_count) * 4;
-        }
-
-        stbtt_FreeShape(&font, verts);
-        ginfo[i].contour_count = cc;
-        ginfo[i].total_segments = ts;
-        ginfo[i].curve_data_size = (ts > 0) ? cdata : 0;
+        /* Analyze shape and cache vertices */
+        vert_counts[i] = stbtt_GetGlyphShape(&font, glyph_idx, (stbtt_vertex **)&vert_cache_raw[i]);
+        ginfo[i].curve_data_size = compute_curve_data_size((stbtt_vertex *)vert_cache_raw[i], vert_counts[i], &ginfo[i].total_segments);
         total_curve_data += ginfo[i].curve_data_size;
 
-        /* Count kern pairs for this glyph (left glyph = current, right = other) */
+        /* Collect kern pairs (single pass, stored for reuse) */
+        kern_offsets[i] = total_kerns;
         uint32_t kc = 0;
         for (uint32_t j = 0; j < glyph_count; j++) {
             if (j == i) {
                 continue;
             }
-            int other_idx = stbtt_FindGlyphIndex(&font, (int)codepoints[j]);
-            int kern = stbtt_GetGlyphKernAdvance(&font, glyph_idx, other_idx);
+            int kern = stbtt_GetGlyphKernAdvance(&font, glyph_idx, ginfo[j].glyph_idx != 0 ? ginfo[j].glyph_idx : stbtt_FindGlyphIndex(&font, (int)codepoints[j]));
             if (kern != 0) {
+                /* Grow kern_pairs if needed */
+                if (total_kerns + kc >= kern_capacity) {
+                    kern_capacity *= 2;
+                    KernPair *grown = (KernPair *)realloc(kern_pairs, kern_capacity * sizeof(KernPair));
+                    NT_BUILD_ASSERT(grown && "decode_font: kern realloc failed");
+                    kern_pairs = grown;
+                }
+                kern_pairs[total_kerns + kc].right_glyph_index = (uint16_t)j;
+                kern_pairs[total_kerns + kc].value = (int16_t)kern;
                 kc++;
             }
         }
@@ -258,7 +353,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     hdr->line_gap = (int16_t)line_gap;
     // #endregion
 
-    // #region Build glyph entries and data blocks
+    // #region Build glyph entries and data blocks (no re-parsing)
     NtFontGlyphEntry *entries = (NtFontGlyphEntry *)(buffer + header_size);
     uint32_t data_offset = header_size + glyph_table_size;
 
@@ -276,109 +371,32 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
         stbtt_GetGlyphHMetrics(&font, ginfo[i].glyph_idx, &advance, &lsb);
         ge->advance = (int16_t)advance;
 
-        int x0 = 0;
-        int y0 = 0;
-        int x1 = 0;
-        int y1 = 0;
-        int has_box = stbtt_GetGlyphBox(&font, ginfo[i].glyph_idx, &x0, &y0, &x1, &y1);
-        if (has_box) {
-            ge->bbox_x0 = (int16_t)x0;
-            ge->bbox_y0 = (int16_t)y0;
-            ge->bbox_x1 = (int16_t)x1;
-            ge->bbox_y1 = (int16_t)y1;
+        int bx0 = 0;
+        int by0 = 0;
+        int bx1 = 0;
+        int by1 = 0;
+        if (stbtt_GetGlyphBox(&font, ginfo[i].glyph_idx, &bx0, &by0, &bx1, &by1)) {
+            ge->bbox_x0 = (int16_t)bx0;
+            ge->bbox_y0 = (int16_t)by0;
+            ge->bbox_x1 = (int16_t)bx1;
+            ge->bbox_y1 = (int16_t)by1;
         }
 
-        /* Write kern entries sorted by right_glyph_index (j = glyph table index) */
-        NtFontKernEntry *kern_ptr = (NtFontKernEntry *)(buffer + data_offset);
-        uint32_t kw = 0;
-        for (uint32_t j = 0; j < glyph_count && kw < ginfo[i].kern_count; j++) {
-            if (j == i) {
-                continue;
-            }
-            int other_idx = stbtt_FindGlyphIndex(&font, (int)codepoints[j]);
-            int kern = stbtt_GetGlyphKernAdvance(&font, ginfo[i].glyph_idx, other_idx);
-            if (kern != 0) {
-                kern_ptr[kw].right_glyph_index = (uint16_t)j;
-                kern_ptr[kw].value = (int16_t)kern;
-                kw++;
-            }
+        /* Write cached kern pairs */
+        NtFontKernEntry *kern_dst = (NtFontKernEntry *)(buffer + data_offset);
+        for (uint16_t k = 0; k < ginfo[i].kern_count; k++) {
+            kern_dst[k].right_glyph_index = kern_pairs[kern_offsets[i] + k].right_glyph_index;
+            kern_dst[k].value = kern_pairs[kern_offsets[i] + k].value;
         }
         data_offset += (uint32_t)(ginfo[i].kern_count * sizeof(NtFontKernEntry));
 
-        /* Write contour-based curve data */
+        /* Write contour data from cached vertices */
         if (ginfo[i].total_segments > 0) {
-            uint8_t *wp = buffer + data_offset; /* write pointer */
-
-            /* contour_count */
-            memcpy(wp, &ginfo[i].contour_count, 2);
-            wp += 2;
-
-            /* Get shape again for writing */
-            stbtt_vertex *verts = NULL;
-            int nv = stbtt_GetGlyphShape(&font, ginfo[i].glyph_idx, &verts);
-            int vi = 0; /* vertex index */
-
-            for (uint16_t ci = 0; ci < ginfo[i].contour_count; ci++) {
-                ContourStats *cs = &ginfo[i].contours[ci];
-
-                /* Find the moveto for this contour */
-                while (vi < nv && verts[vi].type != STBTT_vmove) {
-                    vi++;
-                }
-                NT_BUILD_ASSERT(vi < nv && "expected moveto");
-
-                /* Contour header: segment_count + start_x + start_y */
-                memcpy(wp, &cs->segment_count, 2);
-                wp += 2;
-                int16_t sx = verts[vi].x;
-                int16_t sy = verts[vi].y;
-                memcpy(wp, &sx, 2);
-                wp += 2;
-                memcpy(wp, &sy, 2);
-                wp += 2;
-                vi++; /* past moveto */
-
-                /* Type bitmask: bit=1 for quad, bit=0 for line (LSB first) */
-                uint32_t bitmask_bytes = ((uint32_t)cs->segment_count + 7) / 8;
-                uint8_t *bitmask = wp;
-                memset(bitmask, 0, bitmask_bytes);
-                wp += bitmask_bytes;
-
-                /* Build bitmask and write delta-encoded segment data.
-                 * All coordinates are int16 deltas from previous chain endpoint
-                 * (start_x/y for first segment, p2 of previous segment after). */
-                int16_t prev_x = sx;
-                int16_t prev_y = sy;
-                for (uint16_t s = 0; s < cs->segment_count; s++) {
-                    NT_BUILD_ASSERT(vi < nv && "unexpected end of vertices");
-                    if (verts[vi].type == STBTT_vcurve) {
-                        bitmask[s / 8] |= (uint8_t)(1U << (s % 8));
-                        int16_t dp1x = (int16_t)(verts[vi].cx - prev_x);
-                        int16_t dp1y = (int16_t)(verts[vi].cy - prev_y);
-                        int16_t dp2x = (int16_t)(verts[vi].x - prev_x);
-                        int16_t dp2y = (int16_t)(verts[vi].y - prev_y);
-                        memcpy(wp, &dp1x, 2); wp += 2;
-                        memcpy(wp, &dp1y, 2); wp += 2;
-                        memcpy(wp, &dp2x, 2); wp += 2;
-                        memcpy(wp, &dp2y, 2); wp += 2;
-                        prev_x = verts[vi].x;
-                        prev_y = verts[vi].y;
-                    } else {
-                        int16_t dp2x = (int16_t)(verts[vi].x - prev_x);
-                        int16_t dp2y = (int16_t)(verts[vi].y - prev_y);
-                        memcpy(wp, &dp2x, 2); wp += 2;
-                        memcpy(wp, &dp2y, 2); wp += 2;
-                        prev_x = verts[vi].x;
-                        prev_y = verts[vi].y;
-                    }
-                    vi++;
-                }
-            }
-
-            stbtt_FreeShape(&font, verts);
+            write_contour_data((stbtt_vertex *)vert_cache_raw[i], vert_counts[i], buffer + data_offset);
             data_offset += ginfo[i].curve_data_size;
         }
     }
+    NT_BUILD_ASSERT(data_offset == total_size && "buffer size mismatch after writing all glyphs");
     // #endregion
 
     // #region Build log (BLD-07, D-13)
@@ -392,6 +410,13 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     // #endregion
 
     // #region Cleanup and return
+    for (uint32_t i = 0; i < glyph_count; i++) {
+        stbtt_FreeShape(&font, (stbtt_vertex *)vert_cache_raw[i]);
+    }
+    free(vert_cache_raw); /* NOLINT(bugprone-multi-level-implicit-pointer-conversion) */
+    free(vert_counts);
+    free(kern_pairs);
+    free(kern_offsets);
     free(ginfo);
     free(file_data);
     *out_data = buffer;
