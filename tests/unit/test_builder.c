@@ -3080,12 +3080,9 @@ void test_parallel_with_dedup(void) {
 /* --- Font test fixture helper --- */
 
 static const char *find_test_ttf(void) {
-    /* Prefer a widely available system font for testing */
+    /* Prefer committed fixture (cross-platform), fall back to system fonts */
     static const char *candidates[] = {
-        "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/consola.ttf",
-        "C:/Windows/Fonts/times.ttf",
-        NULL,
+        "tests/fixtures/Roboto-Regular.ttf", "../tests/fixtures/Roboto-Regular.ttf", "../../tests/fixtures/Roboto-Regular.ttf", "C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/consola.ttf", NULL,
     };
     for (int i = 0; candidates[i]; i++) {
         FILE *f = fopen(candidates[i], "rb");

@@ -108,7 +108,7 @@ static uint32_t parse_charset(const char *charset_utf8, uint32_t *out_codepoints
     return count;
 }
 
-/* --- Bulk GPOS kern pair extraction (replaces O(N²) per-pair lookup) --- */
+/* --- Bulk GPOS kern pair extraction (replaces O(N^2) per-pair lookup) --- */
 
 /* Big-endian readers (same as stb_truetype internals) */
 static uint16_t gpos_u16(const uint8_t *p) { return (uint16_t)((p[0] << 8) | p[1]); }
@@ -122,7 +122,7 @@ static int gpos_get_class(const uint8_t *class_def, uint16_t glyph_id) {
         uint16_t start = gpos_u16(class_def + 2);
         uint16_t count = gpos_u16(class_def + 4);
         if (glyph_id >= start && glyph_id < start + count) {
-            return gpos_u16(class_def + 6 + (glyph_id - start) * 2);
+            return gpos_u16(class_def + 6 + ((size_t)(glyph_id - start) * 2));
         }
         return 0;
     }
@@ -134,7 +134,7 @@ static int gpos_get_class(const uint8_t *class_def, uint16_t glyph_id) {
         int hi = range_count - 1;
         while (lo <= hi) {
             int mid = (lo + hi) / 2;
-            const uint8_t *r = ranges + mid * 6;
+            const uint8_t *r = ranges + ((size_t)mid * 6);
             uint16_t range_start = gpos_u16(r);
             uint16_t range_end = gpos_u16(r + 2);
             if (glyph_id < range_start) {
@@ -160,7 +160,7 @@ static int gpos_coverage_index(const uint8_t *cov, uint16_t glyph_id) {
         int hi = count - 1;
         while (lo <= hi) {
             int mid = (lo + hi) / 2;
-            uint16_t g = gpos_u16(cov + 4 + mid * 2);
+            uint16_t g = gpos_u16(cov + 4 + ((size_t)mid * 2));
             if (glyph_id < g) {
                 hi = mid - 1;
             } else if (glyph_id > g) {
@@ -177,7 +177,7 @@ static int gpos_coverage_index(const uint8_t *cov, uint16_t glyph_id) {
         int hi = range_count - 1;
         while (lo <= hi) {
             int mid = (lo + hi) / 2;
-            const uint8_t *r = cov + 4 + mid * 6;
+            const uint8_t *r = cov + 4 + ((size_t)mid * 6);
             uint16_t range_start = gpos_u16(r);
             uint16_t range_end = gpos_u16(r + 2);
             if (glyph_id < range_start) {
@@ -200,13 +200,26 @@ typedef struct {
     int16_t value;
 } KernTriple;
 
+/* Grow triples array if needed */
+static void kern_triples_push(KernTriple **triples, uint32_t *capacity, uint32_t *count, uint16_t left, uint16_t right, int16_t value) {
+    if (*count >= *capacity) {
+        *capacity = *capacity > 0 ? (*capacity) * 2 : 1024;
+        KernTriple *grown = (KernTriple *)realloc(*triples, (size_t)(*capacity) * sizeof(KernTriple));
+        NT_BUILD_ASSERT(grown && "kern_triples_push: realloc failed");
+        *triples = grown;
+    }
+    (*triples)[*count].left = left;
+    (*triples)[*count].right = right;
+    (*triples)[*count].value = value;
+    (*count)++;
+}
+
 /* Extract all kern pairs from GPOS PairPos tables (Format 1 + 2).
  * charset_glyph_ids: array of stb glyph indices for each charset position.
  * out_triples/out_capacity: caller-owned dynamic array (realloc'd as needed).
- * Returns total pair count. O(K) for Format 1, O(N²) with O(1) lookup for Format 2. */
+ * Returns total pair count. O(K) for Format 1, O(N^2) with O(1) lookup for Format 2. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint32_t extract_gpos_kern_pairs(const stbtt_fontinfo *font, const int *charset_glyph_ids, uint32_t charset_count,
-                                        KernTriple **out_triples, uint32_t *out_capacity) {
+static uint32_t extract_gpos_kern_pairs(const stbtt_fontinfo *font, const int *charset_glyph_ids, uint32_t charset_count, KernTriple **out_triples, uint32_t *out_capacity) {
     if (!font->gpos) {
         return 0;
     }
@@ -216,7 +229,7 @@ static uint32_t extract_gpos_kern_pairs(const stbtt_fontinfo *font, const int *c
         return 0; /* only GPOS major version 1 */
     }
 
-    /* Build glyph_id → charset_index lookup (for filtering).
+    /* Build glyph_id -> charset_index lookup (for filtering).
      * glyph_ids can be up to ~65535, use a flat lookup if small enough. */
     uint16_t max_gid = 0;
     for (uint32_t i = 0; i < charset_count; i++) {
@@ -240,7 +253,7 @@ static uint32_t extract_gpos_kern_pairs(const stbtt_fontinfo *font, const int *c
     uint16_t lookup_count = gpos_u16(lookup_list);
 
     for (uint16_t li = 0; li < lookup_count; li++) {
-        const uint8_t *lookup = lookup_list + gpos_u16(lookup_list + 2 + li * 2);
+        const uint8_t *lookup = lookup_list + gpos_u16(lookup_list + 2 + ((size_t)li * 2));
         uint16_t lookup_type = gpos_u16(lookup);
         uint16_t sub_count = gpos_u16(lookup + 4);
 
@@ -249,7 +262,7 @@ static uint32_t extract_gpos_kern_pairs(const stbtt_fontinfo *font, const int *c
         }
 
         for (uint16_t si = 0; si < sub_count; si++) {
-            const uint8_t *table = lookup + gpos_u16(lookup + 6 + si * 2);
+            const uint8_t *table = lookup + gpos_u16(lookup + 6 + ((size_t)si * 2));
 
             /* Unwrap Extension */
             if (lookup_type == 9) {
@@ -267,7 +280,7 @@ static uint32_t extract_gpos_kern_pairs(const stbtt_fontinfo *font, const int *c
                 continue; /* only xAdvance for first glyph */
             }
 
-            // #region Format 1: iterate all PairSets → O(K)
+            // #region Format 1: iterate all PairSets -> O(K)
             if (pos_format == 1) {
                 uint16_t pair_set_count = gpos_u16(table + 8);
                 const uint8_t *cov = table + gpos_u16(table + 2);
@@ -277,13 +290,12 @@ static uint32_t extract_gpos_kern_pairs(const stbtt_fontinfo *font, const int *c
                     uint16_t cov_fmt = gpos_u16(cov);
                     uint16_t g1 = 0;
                     if (cov_fmt == 1) {
-                        g1 = gpos_u16(cov + 4 + ps * 2);
+                        g1 = gpos_u16(cov + 4 + ((size_t)ps * 2));
                     } else {
                         /* Coverage Format 2: find glyph at coverage index ps */
                         uint16_t rc = gpos_u16(cov + 2);
-                        uint16_t accumulated = 0;
                         for (uint16_t ri = 0; ri < rc; ri++) {
-                            const uint8_t *rr = cov + 4 + ri * 6;
+                            const uint8_t *rr = cov + 4 + ((size_t)ri * 6);
                             uint16_t rs = gpos_u16(rr);
                             uint16_t re = gpos_u16(rr + 2);
                             uint16_t start_idx = gpos_u16(rr + 4);
@@ -292,8 +304,6 @@ static uint32_t extract_gpos_kern_pairs(const stbtt_fontinfo *font, const int *c
                                 g1 = rs + (ps - start_idx);
                                 break;
                             }
-                            accumulated += range_size;
-                            (void)accumulated;
                         }
                     }
 
@@ -302,34 +312,24 @@ static uint32_t extract_gpos_kern_pairs(const stbtt_fontinfo *font, const int *c
                     }
                     uint16_t left_idx = gid_to_index[g1] - 1;
 
-                    const uint8_t *pair_set = table + gpos_u16(table + 10 + ps * 2);
+                    const uint8_t *pair_set = table + gpos_u16(table + 10 + ((size_t)ps * 2));
                     uint16_t pv_count = gpos_u16(pair_set);
 
                     for (uint16_t pv = 0; pv < pv_count; pv++) {
-                        const uint8_t *entry = pair_set + 2 + pv * 4; /* secondGlyph(2) + xAdvance(2) */
+                        const uint8_t *entry = pair_set + 2 + ((size_t)pv * 4); /* secondGlyph(2) + xAdvance(2) */
                         uint16_t g2 = gpos_u16(entry);
                         int16_t val = gpos_s16(entry + 2);
                         if (val == 0 || g2 > max_gid || gid_to_index[g2] == 0) {
                             continue;
                         }
                         uint16_t right_idx = gid_to_index[g2] - 1;
-
-                        if (pair_count >= capacity) {
-                            capacity = capacity > 0 ? capacity * 2 : 1024;
-                            KernTriple *grown = (KernTriple *)realloc(triples, capacity * sizeof(KernTriple));
-                            NT_BUILD_ASSERT(grown && "extract_gpos: kern realloc failed");
-                            triples = grown;
-                        }
-                        triples[pair_count].left = left_idx;
-                        triples[pair_count].right = right_idx;
-                        triples[pair_count].value = val;
-                        pair_count++;
+                        kern_triples_push(&triples, &capacity, &pair_count, left_idx, right_idx, val);
                     }
                 }
             }
             // #endregion
 
-            // #region Format 2: iterate charset × charset with class matrix → O(N²) but O(1) per pair
+            // #region Format 2: iterate charset x charset with class matrix -> O(N^2) but O(1) per pair
             if (pos_format == 2) {
                 const uint8_t *class_def1 = table + gpos_u16(table + 8);
                 const uint8_t *class_def2 = table + gpos_u16(table + 10);
@@ -352,21 +352,11 @@ static uint32_t extract_gpos_kern_pairs(const stbtt_fontinfo *font, const int *c
                         if (c2 < 0 || c2 >= class2_count) {
                             continue;
                         }
-                        int16_t val = gpos_s16(class_records + (c1 * class2_count + c2) * 2);
+                        int16_t val = gpos_s16(class_records + ((size_t)((c1 * class2_count) + c2) * 2));
                         if (val == 0) {
                             continue;
                         }
-
-                        if (pair_count >= capacity) {
-                            capacity = capacity > 0 ? capacity * 2 : 1024;
-                            KernTriple *grown = (KernTriple *)realloc(triples, capacity * sizeof(KernTriple));
-                            NT_BUILD_ASSERT(grown && "extract_gpos: kern realloc failed");
-                            triples = grown;
-                        }
-                        triples[pair_count].left = (uint16_t)gi;
-                        triples[pair_count].right = (uint16_t)gj;
-                        triples[pair_count].value = val;
-                        pair_count++;
+                        kern_triples_push(&triples, &capacity, &pair_count, (uint16_t)gi, (uint16_t)gj, val);
                     }
                 }
             }
@@ -378,6 +368,92 @@ static uint32_t extract_gpos_kern_pairs(const stbtt_fontinfo *font, const int *c
     *out_triples = triples;
     *out_capacity = capacity;
     return pair_count;
+}
+
+/* Extract kern pairs from legacy 'kern' table (fonts without GPOS).
+ * Format 0 only: sorted array of (glyph1<<16 | glyph2, value) pairs.
+ * Returns total pair count. */
+static uint32_t extract_legacy_kern_pairs(const stbtt_fontinfo *font, const int *charset_glyph_ids, uint32_t charset_count, KernTriple **out_triples, uint32_t *out_capacity) {
+    if (!font->kern) {
+        return 0;
+    }
+
+    const uint8_t *data = font->data + font->kern;
+
+    /* Must have at least 1 subtable */
+    if (gpos_u16(data + 2) < 1) {
+        return 0;
+    }
+    /* Subtable coverage field (offset 8 in kern subtable header):
+     * bit 0 = horizontal (must be 1), bits 1-7 = format/flags (must be 0 for Format 0).
+     * Checking == 1 accepts only horizontal Format 0 with no cross-stream or override. */
+    if (gpos_u16(data + 8) != 1) {
+        return 0;
+    }
+
+    uint16_t n_pairs = gpos_u16(data + 10);
+    const uint8_t *pairs_data = data + 18;
+
+    /* Build glyph_id -> charset_index lookup */
+    uint16_t max_gid = 0;
+    for (uint32_t i = 0; i < charset_count; i++) {
+        if (charset_glyph_ids[i] > max_gid) {
+            max_gid = (uint16_t)charset_glyph_ids[i];
+        }
+    }
+    uint16_t *gid_to_index = (uint16_t *)calloc((size_t)max_gid + 1, sizeof(uint16_t));
+    NT_BUILD_ASSERT(gid_to_index && "extract_legacy_kern: gid lookup alloc failed");
+    for (uint32_t i = 0; i < charset_count; i++) {
+        gid_to_index[charset_glyph_ids[i]] = (uint16_t)(i + 1);
+    }
+
+    uint32_t pair_count = 0;
+    KernTriple *triples = *out_triples;
+    uint32_t capacity = *out_capacity;
+
+    /* Linear scan of all kern pairs, filter by charset membership */
+    for (uint16_t pi = 0; pi < n_pairs; pi++) {
+        const uint8_t *pe = pairs_data + ((size_t)pi * 6);
+        uint16_t g1 = gpos_u16(pe);
+        uint16_t g2 = gpos_u16(pe + 2);
+        int16_t val = gpos_s16(pe + 4);
+        if (val == 0) {
+            continue;
+        }
+        if (g1 > max_gid || gid_to_index[g1] == 0) {
+            continue;
+        }
+        if (g2 > max_gid || gid_to_index[g2] == 0) {
+            continue;
+        }
+        uint16_t left_idx = gid_to_index[g1] - 1;
+        uint16_t right_idx = gid_to_index[g2] - 1;
+        kern_triples_push(&triples, &capacity, &pair_count, left_idx, right_idx, val);
+    }
+
+    free(gid_to_index);
+    *out_triples = triples;
+    *out_capacity = capacity;
+    return pair_count;
+}
+
+/* Sort kern triples by (left, right) for grouping into per-glyph arrays */
+static int kern_triple_compare(const void *a, const void *b) {
+    const KernTriple *ta = (const KernTriple *)a;
+    const KernTriple *tb = (const KernTriple *)b;
+    if (ta->left < tb->left) {
+        return -1;
+    }
+    if (ta->left > tb->left) {
+        return 1;
+    }
+    if (ta->right < tb->right) {
+        return -1;
+    }
+    if (ta->right > tb->right) {
+        return 1;
+    }
+    return 0;
 }
 
 /* --- Contour analysis: compute curve data size from stb vertices --- */
@@ -534,7 +610,7 @@ typedef struct {
     uint32_t curve_data_size;
 } GlyphInfo;
 
-/* --- Stored kern pair (from first pass, reused in second pass) --- */
+/* --- Stored kern pair (per-glyph, used for writing to pack) --- */
 
 typedef struct {
     uint16_t right_glyph_index;
@@ -579,30 +655,27 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     uint16_t units_per_em = (uint16_t)((1.0F / scale) + 0.5F);
     // #endregion
 
-    // #region Resolve all glyph indices upfront (avoids redundant FindGlyphIndex in kern loop)
+    // #region Resolve all glyph indices upfront
     GlyphInfo *ginfo = (GlyphInfo *)calloc(glyph_count, sizeof(GlyphInfo));
     NT_BUILD_ASSERT(ginfo && "decode_font: glyph info alloc failed");
+
+    int *charset_glyph_ids = (int *)malloc((size_t)glyph_count * sizeof(int));
+    NT_BUILD_ASSERT(charset_glyph_ids && "decode_font: charset_glyph_ids alloc failed");
 
     for (uint32_t i = 0; i < glyph_count; i++) {
         ginfo[i].glyph_idx = stbtt_FindGlyphIndex(&font, (int)codepoints[i]);
         NT_BUILD_ASSERT(ginfo[i].glyph_idx != 0 && "codepoint not in font (D-09)");
+        charset_glyph_ids[i] = ginfo[i].glyph_idx;
     }
     // #endregion
 
-    // #region Single analysis pass — shapes, kerns, sizes
+    // #region Single analysis pass -- shapes + sizes (no kern here)
     /* Vertex cache: store shapes from analysis to avoid double stbtt_GetGlyphShape.
      * Allocated as void* array to satisfy strict pointer conversion rules. */
     void **vert_cache_raw = (void **)calloc(glyph_count, sizeof(void *));
     int *vert_counts = (int *)calloc(glyph_count, sizeof(int));
     NT_BUILD_ASSERT(vert_cache_raw && vert_counts && "decode_font: vertex cache alloc failed");
 
-    /* Kern pair storage: flat array, indexed per-glyph via offset+count */
-    uint32_t kern_capacity = glyph_count * 16; /* initial estimate, grows if needed */
-    KernPair *kern_pairs = (KernPair *)malloc(kern_capacity * sizeof(KernPair));
-    uint32_t *kern_offsets = (uint32_t *)calloc(glyph_count, sizeof(uint32_t));
-    NT_BUILD_ASSERT(kern_pairs && kern_offsets && "decode_font: kern storage alloc failed");
-
-    uint32_t total_kerns = 0;
     uint32_t total_curve_data = 0;
 
     for (uint32_t i = 0; i < glyph_count; i++) {
@@ -610,37 +683,68 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
         vert_counts[i] = stbtt_GetGlyphShape(&font, ginfo[i].glyph_idx, (stbtt_vertex **)&vert_cache_raw[i]);
         ginfo[i].curve_data_size = compute_curve_data_size((stbtt_vertex *)vert_cache_raw[i], vert_counts[i], &ginfo[i].total_segments, &ginfo[i].contour_count);
         total_curve_data += ginfo[i].curve_data_size;
-
-        /* Collect kern pairs (single pass, stored for reuse) */
-        kern_offsets[i] = total_kerns;
-        uint32_t kc = 0;
-        for (uint32_t j = 0; j < glyph_count; j++) {
-            /* No skip for j==i: self-kern pairs (e.g. CC, TT) are valid in GPOS class-based tables */
-            int kern = stbtt_GetGlyphKernAdvance(&font, ginfo[i].glyph_idx, ginfo[j].glyph_idx);
-            if (kern != 0) {
-                /* Grow kern_pairs if needed */
-                if (total_kerns + kc >= kern_capacity) {
-                    kern_capacity *= 2;
-                    KernPair *grown = (KernPair *)realloc(kern_pairs, kern_capacity * sizeof(KernPair));
-                    NT_BUILD_ASSERT(grown && "decode_font: kern realloc failed");
-                    kern_pairs = grown;
-                }
-                kern_pairs[total_kerns + kc].right_glyph_index = (uint16_t)j;
-                kern_pairs[total_kerns + kc].value = (int16_t)kern;
-                kc++;
-            }
-        }
-        if (kc > UINT16_MAX) {
-            kc = UINT16_MAX;
-        }
-        ginfo[i].kern_count = (uint16_t)kc;
-        /* Kern pairs are sorted by right_glyph_index because j iterates ascending.
-         * Assert this invariant — bsearch at runtime depends on it. */
-        for (uint32_t k = 1; k < kc; k++) {
-            NT_BUILD_ASSERT(kern_pairs[total_kerns + k].right_glyph_index > kern_pairs[total_kerns + k - 1].right_glyph_index && "kern pairs must be sorted by right_glyph_index");
-        }
-        total_kerns += kc;
     }
+    // #endregion
+
+    // #region Bulk kern extraction (GPOS or legacy kern table)
+    KernTriple *triples = NULL;
+    uint32_t triple_capacity = 0;
+    uint32_t triple_count = 0;
+
+    if (font.gpos) {
+        NT_BUILD_ASSERT((uint32_t)font.gpos < file_size && "GPOS table offset exceeds font file bounds");
+        triple_count = extract_gpos_kern_pairs(&font, charset_glyph_ids, glyph_count, &triples, &triple_capacity);
+    } else if (font.kern) {
+        NT_BUILD_ASSERT((uint32_t)font.kern < file_size && "kern table offset exceeds font file bounds");
+        triple_count = extract_legacy_kern_pairs(&font, charset_glyph_ids, glyph_count, &triples, &triple_capacity);
+    }
+
+    /* Sort triples by (left, right) for grouping */
+    if (triple_count > 1) {
+        qsort(triples, triple_count, sizeof(KernTriple), kern_triple_compare);
+    }
+
+    /* Group into per-glyph kern counts + flat KernPair array */
+    KernPair *kern_pairs = NULL;
+    uint32_t *kern_offsets = (uint32_t *)calloc(glyph_count, sizeof(uint32_t));
+    NT_BUILD_ASSERT(kern_offsets && "decode_font: kern_offsets alloc failed");
+
+    if (triple_count > 0) {
+        kern_pairs = (KernPair *)malloc((size_t)triple_count * sizeof(KernPair));
+        NT_BUILD_ASSERT(kern_pairs && "decode_font: kern_pairs alloc failed");
+    }
+
+    uint32_t total_kerns = 0;
+    {
+        uint32_t ti = 0;
+        for (uint32_t gi = 0; gi < glyph_count; gi++) {
+            kern_offsets[gi] = total_kerns;
+            uint32_t kc = 0;
+            while (ti < triple_count && triples[ti].left == gi) {
+                /* Deduplicate: skip if same (left, right) as previous -- keep first occurrence */
+                if (kc > 0 && kern_pairs[total_kerns + kc - 1].right_glyph_index == triples[ti].right) {
+                    ti++;
+                    continue;
+                }
+                kern_pairs[total_kerns + kc].right_glyph_index = triples[ti].right;
+                kern_pairs[total_kerns + kc].value = triples[ti].value;
+                kc++;
+                ti++;
+            }
+            if (kc > UINT16_MAX) {
+                kc = UINT16_MAX;
+            }
+            ginfo[gi].kern_count = (uint16_t)kc;
+            /* Kern pairs are sorted by right_glyph_index because triples were sorted by (left, right).
+             * Assert this invariant -- bsearch at runtime depends on it. */
+            for (uint32_t k = 1; k < kc; k++) {
+                NT_BUILD_ASSERT(kern_pairs[total_kerns + k].right_glyph_index > kern_pairs[total_kerns + k - 1].right_glyph_index && "kern pairs must be sorted by right_glyph_index");
+            }
+            total_kerns += kc;
+        }
+    }
+    free(triples);
+    free(charset_glyph_ids);
     // #endregion
 
     // #region Compute output size and allocate
