@@ -15,12 +15,13 @@
 /* Initial data buffer capacity (1 MB, doubles on overflow) */
 #define NT_BUILD_INITIAL_CAPACITY (1024 * 1024)
 
-/* Asset type tag -- 4 unified kinds (source-agnostic) */
+/* Asset type tag -- 5 unified kinds (source-agnostic) */
 typedef enum {
     NT_BUILD_ASSET_MESH = 0,
     NT_BUILD_ASSET_TEXTURE = 1,
     NT_BUILD_ASSET_SHADER = 2,
     NT_BUILD_ASSET_BLOB = 3,
+    NT_BUILD_ASSET_FONT = 4,
 } nt_build_asset_kind_t;
 
 /* Type-specific data for shader entries */
@@ -39,6 +40,11 @@ typedef struct {
     uint32_t source_size;            /* 0 if from file */
     char *source_path;               /* resolved file path for re-read (owned, NULL if from memory) */
 } NtBuildTextureData;
+
+/* Type-specific data for font entries */
+typedef struct {
+    char *charset; /* deep copy of opts.charset (owned) */
+} NtBuildFontData;
 
 /* Metadata accumulation limit (Phase 37) */
 #ifndef NT_BUILD_MAX_META_ENTRIES
@@ -129,6 +135,7 @@ struct NtBuilderContext {
     uint32_t texture_count;
     uint32_t shader_count;
     uint32_t blob_count;
+    uint32_t font_count;
 
     /* Deduplication stats */
     uint32_t dedup_count;
@@ -177,6 +184,9 @@ nt_build_result_t nt_builder_decode_mesh(const char *path, const NtStreamLayout 
                                          uint8_t **out_data, uint32_t *out_size);
 nt_build_result_t nt_builder_decode_scene_mesh(const nt_glb_scene_t *scene, uint32_t mesh_index, uint32_t primitive_index, const NtStreamLayout *layout, uint32_t stream_count,
                                                nt_tangent_mode_t tangent_mode, uint8_t **out_data, uint32_t *out_size);
+
+/* Font decode: TTF -> final NT_ASSET_FONT binary (like mesh path) */
+nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, uint8_t **out_data, uint32_t *out_size);
 
 /* Internal encode functions -- called from finish_pack (encode phase) */
 nt_build_result_t nt_builder_encode_texture(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, uint64_t resource_id, const nt_tex_opts_t *opts);

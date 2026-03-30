@@ -16,6 +16,8 @@ static const char *type_prefix_for_kind(nt_build_asset_kind_t kind) {
         return "SHADER";
     case NT_BUILD_ASSET_BLOB:
         return "BLOB";
+    case NT_BUILD_ASSET_FONT:
+        return "FONT";
     }
     return "UNKNOWN";
 }
