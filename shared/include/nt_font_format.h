@@ -5,10 +5,10 @@
 
 /* Magic: ASCII "FONT" as uint32_t little-endian = 0x544E4F46 */
 #define NT_FONT_MAGIC 0x544E4F46
-#define NT_FONT_VERSION 1
+#define NT_FONT_VERSION 2
 
 /*
- * Font asset binary layout:
+ * Font asset binary layout (v2 — contour-based, int16 coordinates):
  *
  *   Offset 0: NtFontAssetHeader (16 bytes)
  *   Offset 16: NtFontGlyphEntry[glyph_count] (24 bytes each)
@@ -16,17 +16,34 @@
  *   Per-glyph data blocks follow glyph entries. Each glyph's data_offset
  *   is relative to the start of NtFontAssetHeader. Data block order:
  *
- *     kerns_ptr   = base + data_offset
- *     curves_ptr  = kerns_ptr + kern_count * sizeof(NtFontKernEntry)   [8]
- *
- *   Curves store quadratic Bezier control points as float16 (IEEE 754
- *   half-precision), 12 bytes each. Runtime repacks to 2 RGBA16F texels
- *   (16 bytes) per curve on glyph cache miss — pad .ba of second texel.
- *   Band decomposition happens at runtime (not stored in pack).
+ *     kerns_ptr    = base + data_offset
+ *     contours_ptr = kerns_ptr + kern_count * sizeof(NtFontKernEntry)
  *
  *   Kern entries use glyph_index (position in glyph table) instead of
  *   raw codepoint — compact 4-byte pairs. Runtime already knows glyph
  *   indices from the bsearch lookup, so no extra conversion needed.
+ *
+ *   Contour data layout (sequential, variable-length):
+ *
+ *     uint16_t contour_count
+ *
+ *     Per contour (contour_count times):
+ *       uint16_t segment_count
+ *       int16_t  start_x, start_y             // moveto point
+ *       uint8_t  type_bits[ceil(segment_count/8)]  // bit=1: quad, bit=0: line (LSB first)
+ *
+ *       Per segment (segment_count times, sequential):
+ *         if line  (bit=0): int16_t p2x, p2y                   (4 bytes)
+ *         if quad  (bit=1): int16_t p1x, p1y, p2x, p2y         (8 bytes)
+ *
+ *     Endpoint sharing: p0 of each segment = p2 of the previous segment
+ *     (or start_x/y for the first segment in a contour).
+ *
+ *     Coordinates are int16 in font design units (exact from TTF).
+ *     Runtime at cache miss expands to GPU texture:
+ *       - Lines: compute p1 = midpoint(p0, p2), write (p0, p1, p2) as float
+ *       - Quads: write (p0, p1, p2) as float
+ *     Band decomposition happens at runtime (not stored in pack).
  */
 
 /* NtFontAssetHeader — 16 bytes. Font-level metadata. */
@@ -53,7 +70,7 @@ typedef struct {
     int16_t bbox_y0;      /* 12: bounding box bottom in font units */
     int16_t bbox_x1;      /* 14: bounding box right in font units */
     int16_t bbox_y1;      /* 16: bounding box top in font units (bearing_y = bbox_y1) */
-    uint16_t curve_count; /* 18: number of unique quadratic Bezier curves */
+    uint16_t curve_count; /* 18: total segments (lines+quads) across all contours */
     uint16_t kern_count;  /* 20: number of kern pairs for this glyph */
     uint8_t _reserved[2]; /* 22: reserved (pad to 24 bytes) */
 } NtFontGlyphEntry;       /* 24 bytes total */
@@ -68,15 +85,5 @@ typedef struct {
 } NtFontKernEntry;              /* 4 bytes total */
 #pragma pack(pop)
 _Static_assert(sizeof(NtFontKernEntry) == 4, "NtFontKernEntry must be 4 bytes");
-
-/* NtFontCurve — 12 bytes. Quadratic Bezier, 3 control points as float16 raw bits. */
-#pragma pack(push, 1)
-typedef struct {
-    uint16_t p0x, p0y; /* 0: start point (float16 bits) */
-    uint16_t p1x, p1y; /* 4: control point (float16 bits) */
-    uint16_t p2x, p2y; /* 8: end point (float16 bits) */
-} NtFontCurve;         /* 12 bytes total */
-#pragma pack(pop)
-_Static_assert(sizeof(NtFontCurve) == 12, "NtFontCurve must be 12 bytes");
 
 #endif /* NT_FONT_FORMAT_H */

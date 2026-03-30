@@ -112,7 +112,7 @@ static FontBreakdown analyze(const uint8_t *data, uint32_t size) {
         b.total_kerns += entries[i].kern_count;
     }
     b.kern_data = (uint32_t)(b.total_kerns * sizeof(NtFontKernEntry));
-    b.curve_data = (uint32_t)(b.total_curves * sizeof(NtFontCurve));
+    b.curve_data = b.total - b.header - b.glyph_table - b.kern_data;
     return b;
 }
 

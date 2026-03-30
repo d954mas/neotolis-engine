@@ -318,7 +318,7 @@ void test_font_magic_value(void) {
     TEST_ASSERT_EQUAL_UINT8('T', b[3]);
 }
 
-void test_font_version(void) { TEST_ASSERT_EQUAL_UINT(1, NT_FONT_VERSION); }
+void test_font_version(void) { TEST_ASSERT_EQUAL_UINT(2, NT_FONT_VERSION); }
 
 void test_font_asset_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(0, offsetof(NtFontAssetHeader, magic));
@@ -352,16 +352,9 @@ void test_font_kern_entry_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(2, offsetof(NtFontKernEntry, value));
 }
 
-void test_font_curve_size(void) { TEST_ASSERT_EQUAL_UINT(12, sizeof(NtFontCurve)); }
-
-void test_font_curve_field_offsets(void) {
-    TEST_ASSERT_EQUAL_UINT(0, offsetof(NtFontCurve, p0x));
-    TEST_ASSERT_EQUAL_UINT(2, offsetof(NtFontCurve, p0y));
-    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtFontCurve, p1x));
-    TEST_ASSERT_EQUAL_UINT(6, offsetof(NtFontCurve, p1y));
-    TEST_ASSERT_EQUAL_UINT(8, offsetof(NtFontCurve, p2x));
-    TEST_ASSERT_EQUAL_UINT(10, offsetof(NtFontCurve, p2y));
-}
+/* NtFontCurve removed in v2 — curves stored as contour-based variable-length data */
+void test_font_curve_size(void) { TEST_PASS(); }
+void test_font_curve_field_offsets(void) { TEST_PASS(); }
 
 void test_font_glyph_array_offset(void) {
     /* Glyph entries start immediately after header (D-11) */

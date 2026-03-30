@@ -93,10 +93,20 @@ static uint32_t parse_charset(const char *charset_utf8, uint32_t *out_codepoints
 
 /* --- Per-glyph shape info (first pass) --- */
 
+#define NT_FONT_MAX_CONTOURS 256
+
+typedef struct {
+    uint16_t segment_count;
+    uint16_t quad_count; /* rest are lines */
+} ContourStats;
+
 typedef struct {
     int glyph_idx;
-    uint16_t curve_count;
+    uint16_t total_segments;
+    uint16_t contour_count;
     uint16_t kern_count;
+    uint32_t curve_data_size; /* contour data bytes for this glyph */
+    ContourStats contours[NT_FONT_MAX_CONTOURS];
 } GlyphInfo;
 
 /* --- nt_builder_decode_font: TTF -> final NT_ASSET_FONT binary --- */
@@ -141,29 +151,49 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     uint16_t units_per_em = (uint16_t)((1.0F / scale) + 0.5F);
     // #endregion
 
-    // #region First pass -- count curves and kerns per glyph
+    // #region First pass -- analyze contours and count kerns per glyph
     GlyphInfo *ginfo = (GlyphInfo *)calloc(glyph_count, sizeof(GlyphInfo));
     NT_BUILD_ASSERT(ginfo && "decode_font: glyph info alloc failed");
 
-    uint32_t total_curves = 0;
     uint32_t total_kerns = 0;
+    uint32_t total_curve_data = 0;
 
     for (uint32_t i = 0; i < glyph_count; i++) {
         int glyph_idx = stbtt_FindGlyphIndex(&font, (int)codepoints[i]);
         NT_BUILD_ASSERT(glyph_idx != 0 && "codepoint not in font (D-09)");
         ginfo[i].glyph_idx = glyph_idx;
 
-        /* Count curves */
+        /* Analyze contours: count segments, lines vs quads */
         stbtt_vertex *verts = NULL;
         int nv = stbtt_GetGlyphShape(&font, glyph_idx, &verts);
-        uint16_t curves = 0;
+        uint16_t cc = 0;  /* contour count */
+        uint16_t ts = 0;  /* total segments */
+        uint32_t cdata = 2; /* start with contour_count uint16 */
+
         for (int v = 0; v < nv; v++) {
             switch (verts[v].type) {
             case STBTT_vmove:
+                NT_BUILD_ASSERT(cc < NT_FONT_MAX_CONTOURS && "too many contours");
+                if (cc > 0) {
+                    /* Finalize previous contour size */
+                    ContourStats *prev = &ginfo[i].contours[cc - 1];
+                    uint32_t bitmask_bytes = ((uint32_t)prev->segment_count + 7) / 8;
+                    cdata += 6 + bitmask_bytes; /* header: seg_count + start_x + start_y + bitmask */
+                    cdata += (uint32_t)prev->quad_count * 8;
+                    cdata += (uint32_t)(prev->segment_count - prev->quad_count) * 4;
+                }
+                cc++;
+                ginfo[i].contours[cc - 1].segment_count = 0;
+                ginfo[i].contours[cc - 1].quad_count = 0;
                 break;
-            case STBTT_vline: /* fall through — both line and curve produce one NtFontCurve */
+            case STBTT_vline:
+                ginfo[i].contours[cc - 1].segment_count++;
+                ts++;
+                break;
             case STBTT_vcurve:
-                curves++;
+                ginfo[i].contours[cc - 1].segment_count++;
+                ginfo[i].contours[cc - 1].quad_count++;
+                ts++;
                 break;
             case STBTT_vcubic:
                 NT_BUILD_ASSERT(0 && "cubic curves not supported (CFF font?)");
@@ -172,9 +202,20 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
                 break;
             }
         }
+        /* Finalize last contour */
+        if (cc > 0) {
+            ContourStats *last = &ginfo[i].contours[cc - 1];
+            uint32_t bitmask_bytes = ((uint32_t)last->segment_count + 7) / 8;
+            cdata += 6 + bitmask_bytes;
+            cdata += (uint32_t)last->quad_count * 8;
+            cdata += (uint32_t)(last->segment_count - last->quad_count) * 4;
+        }
+
         stbtt_FreeShape(&font, verts);
-        ginfo[i].curve_count = curves;
-        total_curves += curves;
+        ginfo[i].contour_count = cc;
+        ginfo[i].total_segments = ts;
+        ginfo[i].curve_data_size = (ts > 0) ? cdata : 0;
+        total_curve_data += ginfo[i].curve_data_size;
 
         /* Count kern pairs for this glyph (left glyph = current, right = other) */
         uint32_t kc = 0;
@@ -188,7 +229,6 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
                 kc++;
             }
         }
-        /* Cap at UINT16_MAX (kern_count is uint16) */
         if (kc > UINT16_MAX) {
             kc = UINT16_MAX;
         }
@@ -200,7 +240,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     // #region Compute output size and allocate
     uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
     uint32_t glyph_table_size = glyph_count * (uint32_t)sizeof(NtFontGlyphEntry);
-    uint32_t data_blocks_size = (total_kerns * (uint32_t)sizeof(NtFontKernEntry)) + (total_curves * (uint32_t)sizeof(NtFontCurve));
+    uint32_t data_blocks_size = (total_kerns * (uint32_t)sizeof(NtFontKernEntry)) + total_curve_data;
     uint32_t total_size = header_size + glyph_table_size + data_blocks_size;
 
     uint8_t *buffer = (uint8_t *)calloc(total_size, 1);
@@ -227,7 +267,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
         memset(ge, 0, sizeof(*ge));
         ge->codepoint = codepoints[i];
         ge->data_offset = data_offset;
-        ge->curve_count = ginfo[i].curve_count;
+        ge->curve_count = ginfo[i].total_segments;
         ge->kern_count = ginfo[i].kern_count;
 
         /* Metrics */
@@ -247,7 +287,6 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
             ge->bbox_x1 = (int16_t)x1;
             ge->bbox_y1 = (int16_t)y1;
         }
-        /* else: all bbox fields remain 0 (space, empty glyph) */
 
         /* Write kern entries sorted by right_glyph_index (j = glyph table index) */
         NtFontKernEntry *kern_ptr = (NtFontKernEntry *)(buffer + data_offset);
@@ -266,60 +305,74 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
         }
         data_offset += (uint32_t)(ginfo[i].kern_count * sizeof(NtFontKernEntry));
 
-        /* Write curve entries */
-        NtFontCurve *curve_ptr = (NtFontCurve *)(buffer + data_offset);
-        stbtt_vertex *verts = NULL;
-        int nv = stbtt_GetGlyphShape(&font, ginfo[i].glyph_idx, &verts);
-        uint32_t cw = 0;
-        float prev_x = 0.0F;
-        float prev_y = 0.0F;
+        /* Write contour-based curve data */
+        if (ginfo[i].total_segments > 0) {
+            uint8_t *wp = buffer + data_offset; /* write pointer */
 
-        for (int v = 0; v < nv; v++) {
-            switch (verts[v].type) {
-            case STBTT_vmove:
-                prev_x = (float)verts[v].x;
-                prev_y = (float)verts[v].y;
-                break;
-            case STBTT_vline: {
-                /* Promote to degenerate quadratic: p1 = midpoint(p0, p2) */
-                float p2x = (float)verts[v].x;
-                float p2y = (float)verts[v].y;
-                float p1x = (prev_x + p2x) * 0.5F;
-                float p1y = (prev_y + p2y) * 0.5F;
-                curve_ptr[cw].p0x = nt_builder_float32_to_float16(prev_x);
-                curve_ptr[cw].p0y = nt_builder_float32_to_float16(prev_y);
-                curve_ptr[cw].p1x = nt_builder_float32_to_float16(p1x);
-                curve_ptr[cw].p1y = nt_builder_float32_to_float16(p1y);
-                curve_ptr[cw].p2x = nt_builder_float32_to_float16(p2x);
-                curve_ptr[cw].p2y = nt_builder_float32_to_float16(p2y);
-                cw++;
-                prev_x = p2x;
-                prev_y = p2y;
-                break;
+            /* contour_count */
+            memcpy(wp, &ginfo[i].contour_count, 2);
+            wp += 2;
+
+            /* Get shape again for writing */
+            stbtt_vertex *verts = NULL;
+            int nv = stbtt_GetGlyphShape(&font, ginfo[i].glyph_idx, &verts);
+            int vi = 0; /* vertex index */
+
+            for (uint16_t ci = 0; ci < ginfo[i].contour_count; ci++) {
+                ContourStats *cs = &ginfo[i].contours[ci];
+
+                /* Find the moveto for this contour */
+                while (vi < nv && verts[vi].type != STBTT_vmove) {
+                    vi++;
+                }
+                NT_BUILD_ASSERT(vi < nv && "expected moveto");
+
+                /* Contour header: segment_count + start_x + start_y */
+                memcpy(wp, &cs->segment_count, 2);
+                wp += 2;
+                int16_t sx = verts[vi].x;
+                int16_t sy = verts[vi].y;
+                memcpy(wp, &sx, 2);
+                wp += 2;
+                memcpy(wp, &sy, 2);
+                wp += 2;
+                vi++; /* past moveto */
+
+                /* Type bitmask: bit=1 for quad, bit=0 for line (LSB first) */
+                uint32_t bitmask_bytes = ((uint32_t)cs->segment_count + 7) / 8;
+                uint8_t *bitmask = wp;
+                memset(bitmask, 0, bitmask_bytes);
+                wp += bitmask_bytes;
+
+                /* Build bitmask and write segment data */
+                uint16_t seg = 0;
+                for (uint16_t s = 0; s < cs->segment_count; s++) {
+                    NT_BUILD_ASSERT(vi < nv && "unexpected end of vertices");
+                    (void)seg;
+                    if (verts[vi].type == STBTT_vcurve) {
+                        bitmask[s / 8] |= (uint8_t)(1U << (s % 8));
+                        int16_t p1x = verts[vi].cx;
+                        int16_t p1y = verts[vi].cy;
+                        int16_t p2x = verts[vi].x;
+                        int16_t p2y = verts[vi].y;
+                        memcpy(wp, &p1x, 2); wp += 2;
+                        memcpy(wp, &p1y, 2); wp += 2;
+                        memcpy(wp, &p2x, 2); wp += 2;
+                        memcpy(wp, &p2y, 2); wp += 2;
+                    } else {
+                        /* line: bit stays 0 */
+                        int16_t p2x = verts[vi].x;
+                        int16_t p2y = verts[vi].y;
+                        memcpy(wp, &p2x, 2); wp += 2;
+                        memcpy(wp, &p2y, 2); wp += 2;
+                    }
+                    vi++;
+                }
             }
-            case STBTT_vcurve: {
-                /* Quadratic Bezier: p0 = prev, p1 = (cx,cy), p2 = (x,y) */
-                float p1x = (float)verts[v].cx;
-                float p1y = (float)verts[v].cy;
-                float p2x = (float)verts[v].x;
-                float p2y = (float)verts[v].y;
-                curve_ptr[cw].p0x = nt_builder_float32_to_float16(prev_x);
-                curve_ptr[cw].p0y = nt_builder_float32_to_float16(prev_y);
-                curve_ptr[cw].p1x = nt_builder_float32_to_float16(p1x);
-                curve_ptr[cw].p1y = nt_builder_float32_to_float16(p1y);
-                curve_ptr[cw].p2x = nt_builder_float32_to_float16(p2x);
-                curve_ptr[cw].p2y = nt_builder_float32_to_float16(p2y);
-                cw++;
-                prev_x = p2x;
-                prev_y = p2y;
-                break;
-            }
-            default:
-                break;
-            }
+
+            stbtt_FreeShape(&font, verts);
+            data_offset += ginfo[i].curve_data_size;
         }
-        stbtt_FreeShape(&font, verts);
-        data_offset += (uint32_t)(ginfo[i].curve_count * sizeof(NtFontCurve));
     }
     // #endregion
 
