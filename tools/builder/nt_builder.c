@@ -369,9 +369,7 @@ static nt_build_result_t encode_one_asset(const NtBuildEntry *pe, NtEncodeResult
     case NT_BUILD_ASSET_BLOB:
     case NT_BUILD_ASSET_FONT: {
         result->data = (uint8_t *)malloc(pe->decoded_size);
-        if (!result->data) {
-            return NT_BUILD_ERR_IO;
-        }
+        NT_BUILD_ASSERT(result->data && "encode: alloc failed (OOM)");
         memcpy(result->data, pe->decoded_data, pe->decoded_size);
         result->size = pe->decoded_size;
         derive_asset_type(pe->kind, &result->type, &result->format_version);

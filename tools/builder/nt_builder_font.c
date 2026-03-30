@@ -9,11 +9,8 @@
 
 /* --- Font processing: TTF -> NT_ASSET_FONT binary --- */
 
-/* Maximum codepoints per font (builder-side limit, stack-allocated).
- * Format supports up to 65535 (uint16). Override via game's build script if needed. */
-#ifndef NT_FONT_MAX_CODEPOINTS
-#define NT_FONT_MAX_CODEPOINTS 4096
-#endif
+/* Format limit: uint16 glyph_count = 65535 max codepoints */
+#define NT_FONT_MAX_CODEPOINTS UINT16_MAX
 
 /* --- UTF-8 decoder (builder-only, clarity over speed) --- */
 
@@ -261,10 +258,10 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     }
 
     // #region Parse charset
-    uint32_t codepoints[NT_FONT_MAX_CODEPOINTS];
+    uint32_t *codepoints = (uint32_t *)malloc(NT_FONT_MAX_CODEPOINTS * sizeof(uint32_t));
+    NT_BUILD_ASSERT(codepoints && "decode_font: codepoint buffer alloc failed");
     uint32_t glyph_count = parse_charset(charset, codepoints, NT_FONT_MAX_CODEPOINTS);
     NT_BUILD_ASSERT(glyph_count > 0 && "charset is empty");
-    NT_BUILD_ASSERT(glyph_count <= UINT16_MAX && "glyph count exceeds uint16 format limit (65535)");
     // #endregion
 
     // #region Init stb_truetype
@@ -438,6 +435,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     free(vert_counts);
     free(kern_pairs);
     free(kern_offsets);
+    free(codepoints);
     free(ginfo);
     free(file_data);
     *out_data = buffer;
