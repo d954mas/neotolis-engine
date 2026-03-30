@@ -25,14 +25,15 @@ static uint32_t utf8_decode(const uint8_t **p) {
         return c;
     }
     if ((c & 0xE0) == 0xC0) {
-        NT_BUILD_ASSERT(UTF8_CONT((*p)[1]) && "malformed UTF-8: bad continuation byte");
+        NT_BUILD_ASSERT((*p)[1] != 0 && UTF8_CONT((*p)[1]) && "malformed/truncated UTF-8 (2-byte)");
         uint32_t cp = (c & 0x1FU) << 6U;
         cp |= (uint32_t)(*++(*p)) & 0x3FU;
         (*p)++;
         return cp;
     }
     if ((c & 0xF0) == 0xE0) {
-        NT_BUILD_ASSERT(UTF8_CONT((*p)[1]) && UTF8_CONT((*p)[2]) && "malformed UTF-8: bad continuation byte");
+        NT_BUILD_ASSERT((*p)[1] != 0 && (*p)[2] != 0 && "truncated UTF-8 (3-byte)");
+        NT_BUILD_ASSERT(UTF8_CONT((*p)[1]) && UTF8_CONT((*p)[2]) && "malformed UTF-8 (3-byte)");
         uint32_t cp = (c & 0x0FU) << 12U;
         cp |= ((uint32_t)(*++(*p)) & 0x3FU) << 6U;
         cp |= (uint32_t)(*++(*p)) & 0x3FU;
@@ -40,7 +41,8 @@ static uint32_t utf8_decode(const uint8_t **p) {
         return cp;
     }
     if ((c & 0xF8) == 0xF0) {
-        NT_BUILD_ASSERT(UTF8_CONT((*p)[1]) && UTF8_CONT((*p)[2]) && UTF8_CONT((*p)[3]) && "malformed UTF-8: bad continuation byte");
+        NT_BUILD_ASSERT((*p)[1] != 0 && (*p)[2] != 0 && (*p)[3] != 0 && "truncated UTF-8 (4-byte)");
+        NT_BUILD_ASSERT(UTF8_CONT((*p)[1]) && UTF8_CONT((*p)[2]) && UTF8_CONT((*p)[3]) && "malformed UTF-8 (4-byte)");
         uint32_t cp = (c & 0x07U) << 18U;
         cp |= ((uint32_t)(*++(*p)) & 0x3FU) << 12U;
         cp |= ((uint32_t)(*++(*p)) & 0x3FU) << 6U;
@@ -280,7 +282,10 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     int line_gap = 0;
     stbtt_GetFontVMetrics(&font, &ascent, &descent, &line_gap);
 
-    float scale = stbtt_ScaleForPixelHeight(&font, 1.0F);
+    /* units_per_em: use ScaleForMappingEmToPixels, NOT ScaleForPixelHeight.
+     * PixelHeight maps to (ascent-descent), EmToPixels maps to actual EM size. */
+    float scale = stbtt_ScaleForMappingEmToPixels(&font, 1.0F);
+    NT_BUILD_ASSERT(scale > 0.0F && "decode_font: invalid em scale");
     uint16_t units_per_em = (uint16_t)((1.0F / scale) + 0.5F);
     // #endregion
 
