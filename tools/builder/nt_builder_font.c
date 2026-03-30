@@ -96,7 +96,7 @@ static uint32_t parse_charset(const char *charset_utf8, uint32_t *out_codepoints
 typedef struct {
     int glyph_idx;
     uint16_t curve_count;
-    uint8_t kern_count;
+    uint16_t kern_count;
 } GlyphInfo;
 
 /* --- nt_builder_decode_font: TTF -> final NT_ASSET_FONT binary --- */
@@ -111,6 +111,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     uint32_t codepoints[NT_FONT_MAX_CODEPOINTS];
     uint32_t glyph_count = parse_charset(charset, codepoints, NT_FONT_MAX_CODEPOINTS);
     NT_BUILD_ASSERT(glyph_count > 0 && "charset is empty");
+    NT_BUILD_ASSERT(glyph_count <= UINT16_MAX && "glyph count exceeds uint16 format limit (65535)");
     // #endregion
 
     // #region Init stb_truetype
@@ -187,11 +188,11 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
                 kc++;
             }
         }
-        /* Cap at 255 (kern_count is uint8) */
-        if (kc > 255) {
-            kc = 255;
+        /* Cap at UINT16_MAX (kern_count is uint16) */
+        if (kc > UINT16_MAX) {
+            kc = UINT16_MAX;
         }
-        ginfo[i].kern_count = (uint8_t)kc;
+        ginfo[i].kern_count = (uint16_t)kc;
         total_kerns += kc;
     }
     // #endregion
@@ -248,7 +249,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
         }
         /* else: all bbox fields remain 0 (space, empty glyph) */
 
-        /* Write kern entries sorted by right_codepoint */
+        /* Write kern entries sorted by right_glyph_index (j = glyph table index) */
         NtFontKernEntry *kern_ptr = (NtFontKernEntry *)(buffer + data_offset);
         uint32_t kw = 0;
         for (uint32_t j = 0; j < glyph_count && kw < ginfo[i].kern_count; j++) {
@@ -258,9 +259,8 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
             int other_idx = stbtt_FindGlyphIndex(&font, (int)codepoints[j]);
             int kern = stbtt_GetGlyphKernAdvance(&font, ginfo[i].glyph_idx, other_idx);
             if (kern != 0) {
-                kern_ptr[kw].right_codepoint = codepoints[j];
+                kern_ptr[kw].right_glyph_index = (uint16_t)j;
                 kern_ptr[kw].value = (int16_t)kern;
-                kern_ptr[kw]._pad = 0;
                 kw++;
             }
         }

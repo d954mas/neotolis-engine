@@ -3242,8 +3242,8 @@ void test_font_kern_pairs(void) {
             if (glyphs[i].kern_count > 0) {
                 const uint8_t *data_ptr = (const uint8_t *)fhdr + glyphs[i].data_offset;
                 const NtFontKernEntry *kerns = (const NtFontKernEntry *)data_ptr;
-                /* First kern entry should have a valid codepoint */
-                TEST_ASSERT_TRUE(kerns[0].right_codepoint >= 0x20);
+                /* First kern entry should have a valid glyph index */
+                TEST_ASSERT_TRUE(kerns[0].right_glyph_index < fhdr->glyph_count);
                 TEST_ASSERT_TRUE(kerns[0].value != 0);
                 break;
             }

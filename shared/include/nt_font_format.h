@@ -23,6 +23,10 @@
  *   half-precision), 12 bytes each. Runtime repacks to 2 RGBA16F texels
  *   (16 bytes) per curve on glyph cache miss — pad .ba of second texel.
  *   Band decomposition happens at runtime (not stored in pack).
+ *
+ *   Kern entries use glyph_index (position in glyph table) instead of
+ *   raw codepoint — compact 4-byte pairs. Runtime already knows glyph
+ *   indices from the bsearch lookup, so no extra conversion needed.
  */
 
 /* NtFontAssetHeader — 16 bytes. Font-level metadata. */
@@ -50,21 +54,20 @@ typedef struct {
     int16_t bbox_x1;      /* 14: bounding box right in font units */
     int16_t bbox_y1;      /* 16: bounding box top in font units (bearing_y = bbox_y1) */
     uint16_t curve_count; /* 18: number of unique quadratic Bezier curves */
-    uint8_t kern_count;   /* 20: number of kern pairs for this glyph */
-    uint8_t _reserved[3]; /* 21: reserved (pad to 24 bytes) */
+    uint16_t kern_count;  /* 20: number of kern pairs for this glyph */
+    uint8_t _reserved[2]; /* 22: reserved (pad to 24 bytes) */
 } NtFontGlyphEntry;       /* 24 bytes total */
 #pragma pack(pop)
 _Static_assert(sizeof(NtFontGlyphEntry) == 24, "NtFontGlyphEntry must be 24 bytes");
 
-/* NtFontKernEntry — 8 bytes. Kern pair, sorted by right_codepoint for bsearch. */
+/* NtFontKernEntry — 4 bytes. Kern pair, sorted by right_glyph_index for bsearch. */
 #pragma pack(push, 1)
 typedef struct {
-    uint32_t right_codepoint; /* 0: right glyph codepoint (bsearch key, sorted ascending) */
-    int16_t value;            /* 4: kern adjustment in font units */
-    uint16_t _pad;            /* 6: align to 8 bytes */
-} NtFontKernEntry;            /* 8 bytes total */
+    uint16_t right_glyph_index; /* 0: index into glyph table (bsearch key, sorted ascending) */
+    int16_t value;              /* 2: kern adjustment in font units */
+} NtFontKernEntry;              /* 4 bytes total */
 #pragma pack(pop)
-_Static_assert(sizeof(NtFontKernEntry) == 8, "NtFontKernEntry must be 8 bytes");
+_Static_assert(sizeof(NtFontKernEntry) == 4, "NtFontKernEntry must be 4 bytes");
 
 /* NtFontCurve — 12 bytes. Quadratic Bezier, 3 control points as float16 raw bits. */
 #pragma pack(push, 1)

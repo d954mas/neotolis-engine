@@ -342,15 +342,14 @@ void test_font_glyph_entry_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(16, offsetof(NtFontGlyphEntry, bbox_y1));
     TEST_ASSERT_EQUAL_UINT(18, offsetof(NtFontGlyphEntry, curve_count));
     TEST_ASSERT_EQUAL_UINT(20, offsetof(NtFontGlyphEntry, kern_count));
-    TEST_ASSERT_EQUAL_UINT(21, offsetof(NtFontGlyphEntry, _reserved));
+    TEST_ASSERT_EQUAL_UINT(22, offsetof(NtFontGlyphEntry, _reserved));
 }
 
-void test_font_kern_entry_size(void) { TEST_ASSERT_EQUAL_UINT(8, sizeof(NtFontKernEntry)); }
+void test_font_kern_entry_size(void) { TEST_ASSERT_EQUAL_UINT(4, sizeof(NtFontKernEntry)); }
 
 void test_font_kern_entry_field_offsets(void) {
-    TEST_ASSERT_EQUAL_UINT(0, offsetof(NtFontKernEntry, right_codepoint));
-    TEST_ASSERT_EQUAL_UINT(4, offsetof(NtFontKernEntry, value));
-    TEST_ASSERT_EQUAL_UINT(6, offsetof(NtFontKernEntry, _pad));
+    TEST_ASSERT_EQUAL_UINT(0, offsetof(NtFontKernEntry, right_glyph_index));
+    TEST_ASSERT_EQUAL_UINT(2, offsetof(NtFontKernEntry, value));
 }
 
 void test_font_curve_size(void) { TEST_ASSERT_EQUAL_UINT(12, sizeof(NtFontCurve)); }
