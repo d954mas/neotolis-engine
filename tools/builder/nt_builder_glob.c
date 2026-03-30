@@ -193,6 +193,10 @@ typedef struct {
     nt_build_shader_stage_t stage;
 } GlobShaderParams;
 
+typedef struct {
+    const nt_font_opts_t *opts;
+} GlobFontParams;
+
 /* --- Callbacks --- */
 
 static void mesh_glob_callback(const char *full_path, void *user) {
@@ -214,6 +218,13 @@ static void shader_glob_callback(const char *full_path, void *user) {
     GlobShaderParams *p = (GlobShaderParams *)cb->type_data;
     cb->match_count++;
     nt_builder_add_shader(cb->ctx, full_path, p->stage);
+}
+
+static void font_glob_callback(const char *full_path, void *user) {
+    GlobCallbackData *cb = (GlobCallbackData *)user;
+    GlobFontParams *p = (GlobFontParams *)cb->type_data;
+    cb->match_count++;
+    nt_builder_add_font(cb->ctx, full_path, p->opts);
 }
 
 /* --- Public batch API --- */
@@ -244,4 +255,10 @@ void nt_builder_add_shaders(NtBuilderContext *ctx, const char *pattern, nt_build
     NT_BUILD_ASSERT(ctx && pattern && "invalid add_shaders args");
     GlobShaderParams p = {stage};
     nt_builder_glob_add(ctx, pattern, shader_glob_callback, &p);
+}
+
+void nt_builder_add_fonts(NtBuilderContext *ctx, const char *pattern, const nt_font_opts_t *opts) {
+    NT_BUILD_ASSERT(ctx && pattern && opts && "invalid add_fonts args");
+    GlobFontParams p = {opts};
+    nt_builder_glob_add(ctx, pattern, font_glob_callback, &p);
 }

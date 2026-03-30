@@ -956,11 +956,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "#", "Name", "Type", "Size", "Time");
         NT_LOG_INFO("  %-4s %-40s %-10s %-24s %-8s", "--", "----", "----", "----", "----");
     }
-    static const char *kind_names[] = {"MESH", "TEX", "SHADER", "BLOB"};
+    static const char *kind_names[] = {"MESH", "TEX", "SHADER", "BLOB", "FONT"};
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         const NtBuildEntry *pe = &ctx->pending[i];
         const char *display = pe->rename_key ? pe->rename_key : pe->path;
-        const char *type_name = ((uint32_t)pe->kind < 4) ? kind_names[pe->kind] : "UNKNOWN";
+        const char *type_name = ((uint32_t)pe->kind < 5) ? kind_names[pe->kind] : "UNKNOWN";
 
         /* Find corresponding NtAssetEntry by resource_id */
         uint32_t raw_sz = 0;
