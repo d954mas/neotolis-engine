@@ -76,12 +76,10 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         pos += (uint32_t)sizeof(stage);
         break;
     }
+    case NT_BUILD_ASSET_FONT:
     case NT_BUILD_ASSET_MESH:
     case NT_BUILD_ASSET_BLOB:
         /* No additional fields -- kind + version sufficient */
-        break;
-    case NT_BUILD_ASSET_FONT:
-        /* Font decoded_data is the final binary (like mesh) -- no additional opts */
         break;
     }
 

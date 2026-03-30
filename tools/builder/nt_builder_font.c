@@ -19,22 +19,25 @@ static uint32_t utf8_decode(const uint8_t **p) {
     if (c < 0x80) {
         (*p)++;
         return c;
-    } else if ((c & 0xE0) == 0xC0) {
-        uint32_t cp = (c & 0x1Fu) << 6u;
-        cp |= (uint32_t)(*++(*p)) & 0x3Fu;
+    }
+    if ((c & 0xE0) == 0xC0) {
+        uint32_t cp = (c & 0x1FU) << 6U;
+        cp |= (uint32_t)(*++(*p)) & 0x3FU;
         (*p)++;
         return cp;
-    } else if ((c & 0xF0) == 0xE0) {
-        uint32_t cp = (c & 0x0Fu) << 12u;
-        cp |= ((uint32_t)(*++(*p)) & 0x3Fu) << 6u;
-        cp |= (uint32_t)(*++(*p)) & 0x3Fu;
+    }
+    if ((c & 0xF0) == 0xE0) {
+        uint32_t cp = (c & 0x0FU) << 12U;
+        cp |= ((uint32_t)(*++(*p)) & 0x3FU) << 6U;
+        cp |= (uint32_t)(*++(*p)) & 0x3FU;
         (*p)++;
         return cp;
-    } else if ((c & 0xF8) == 0xF0) {
-        uint32_t cp = (c & 0x07u) << 18u;
-        cp |= ((uint32_t)(*++(*p)) & 0x3Fu) << 12u;
-        cp |= ((uint32_t)(*++(*p)) & 0x3Fu) << 6u;
-        cp |= (uint32_t)(*++(*p)) & 0x3Fu;
+    }
+    if ((c & 0xF8) == 0xF0) {
+        uint32_t cp = (c & 0x07U) << 18U;
+        cp |= ((uint32_t)(*++(*p)) & 0x3FU) << 12U;
+        cp |= ((uint32_t)(*++(*p)) & 0x3FU) << 6U;
+        cp |= (uint32_t)(*++(*p)) & 0x3FU;
         (*p)++;
         return cp;
     }
@@ -133,8 +136,8 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     stbtt_GetFontVMetrics(&font, &ascent, &descent, &line_gap);
 
     /* Compute units_per_em from stbtt_ScaleForPixelHeight */
-    float scale = stbtt_ScaleForPixelHeight(&font, 1.0f);
-    uint16_t units_per_em = (uint16_t)(1.0f / scale + 0.5f);
+    float scale = stbtt_ScaleForPixelHeight(&font, 1.0F);
+    uint16_t units_per_em = (uint16_t)((1.0F / scale) + 0.5F);
     // #endregion
 
     // #region First pass -- count curves and kerns per glyph
@@ -157,9 +160,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
             switch (verts[v].type) {
             case STBTT_vmove:
                 break;
-            case STBTT_vline:
-                curves++;
-                break;
+            case STBTT_vline: /* fall through — both line and curve produce one NtFontCurve */
             case STBTT_vcurve:
                 curves++;
                 break;
@@ -198,7 +199,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     // #region Compute output size and allocate
     uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
     uint32_t glyph_table_size = glyph_count * (uint32_t)sizeof(NtFontGlyphEntry);
-    uint32_t data_blocks_size = total_kerns * (uint32_t)sizeof(NtFontKernEntry) + total_curves * (uint32_t)sizeof(NtFontCurve);
+    uint32_t data_blocks_size = (total_kerns * (uint32_t)sizeof(NtFontKernEntry)) + (total_curves * (uint32_t)sizeof(NtFontCurve));
     uint32_t total_size = header_size + glyph_table_size + data_blocks_size;
 
     uint8_t *buffer = (uint8_t *)calloc(total_size, 1);
@@ -270,8 +271,8 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
         stbtt_vertex *verts = NULL;
         int nv = stbtt_GetGlyphShape(&font, ginfo[i].glyph_idx, &verts);
         uint32_t cw = 0;
-        float prev_x = 0.0f;
-        float prev_y = 0.0f;
+        float prev_x = 0.0F;
+        float prev_y = 0.0F;
 
         for (int v = 0; v < nv; v++) {
             switch (verts[v].type) {
@@ -283,8 +284,8 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
                 /* Promote to degenerate quadratic: p1 = midpoint(p0, p2) */
                 float p2x = (float)verts[v].x;
                 float p2y = (float)verts[v].y;
-                float p1x = (prev_x + p2x) * 0.5f;
-                float p1y = (prev_y + p2y) * 0.5f;
+                float p1x = (prev_x + p2x) * 0.5F;
+                float p1y = (prev_y + p2y) * 0.5F;
                 curve_ptr[cw].p0x = nt_builder_float32_to_float16(prev_x);
                 curve_ptr[cw].p0y = nt_builder_float32_to_float16(prev_y);
                 curve_ptr[cw].p1x = nt_builder_float32_to_float16(p1x);
@@ -343,6 +344,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
 
 /* --- nt_builder_add_font: public API --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_add_font(NtBuilderContext *ctx, const char *path, const nt_font_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && path && "invalid add_font args");
     NT_BUILD_ASSERT(opts && opts->charset && "charset is required (D-05/D-09)");
