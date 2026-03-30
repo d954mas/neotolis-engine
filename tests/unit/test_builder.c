@@ -22,6 +22,7 @@ const char *__lsan_default_suppressions(void) { return "leak:extensionSupportedG
 #include "nt_builder_internal.h"
 #include "nt_crc32.h"
 #include "nt_font_format.h"
+#include "stb_truetype.h"
 #include "nt_mesh_format.h"
 #include "nt_pack_format.h"
 #include "nt_shader_format.h"
@@ -3321,6 +3322,99 @@ void test_font_charset_dedup(void) {
     free(pack_data);
 }
 
+/* Helper: find kern value for a (left_codepoint, right_codepoint) pair in packed font data */
+static int16_t find_kern_value(const uint8_t *font_data, uint32_t left_cp, uint32_t right_cp) {
+    const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)font_data;
+    const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(font_data + sizeof(NtFontAssetHeader));
+
+    /* Find left glyph index */
+    uint16_t left_idx = UINT16_MAX;
+    uint16_t right_idx = UINT16_MAX;
+    for (uint16_t i = 0; i < hdr->glyph_count; i++) {
+        if (glyphs[i].codepoint == left_cp) {
+            left_idx = i;
+        }
+        if (glyphs[i].codepoint == right_cp) {
+            right_idx = i;
+        }
+    }
+    if (left_idx == UINT16_MAX || right_idx == UINT16_MAX) {
+        return 0;
+    }
+
+    /* Search kern entries for right_idx */
+    const NtFontKernEntry *kerns = (const NtFontKernEntry *)(font_data + glyphs[left_idx].data_offset);
+    for (uint16_t k = 0; k < glyphs[left_idx].kern_count; k++) {
+        if (kerns[k].right_glyph_index == right_idx) {
+            return kerns[k].value;
+        }
+    }
+    return 0;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_font_kern_values(void) {
+    const char *ttf_path = find_test_ttf();
+    if (!ttf_path) {
+        TEST_IGNORE_MESSAGE("No TTF font found for testing");
+        return;
+    }
+
+    const char *pack_path = TMP_DIR "/test_font_kern_values.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    nt_font_opts_t opts = {.charset = NT_CHARSET_ASCII, .resource_name = NULL};
+    nt_builder_add_font(ctx, ttf_path, &opts);
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    uint32_t pack_size = 0;
+    char *pack_data = nt_builder_read_file(pack_path, &pack_size);
+    TEST_ASSERT_NOT_NULL(pack_data);
+    const NtAssetEntry *entry = (const NtAssetEntry *)(pack_data + sizeof(NtPackHeader));
+    const uint8_t *font_data = (const uint8_t *)pack_data + entry->offset;
+    const NtFontAssetHeader *fhdr = (const NtFontAssetHeader *)font_data;
+
+    /* Verify specific kern pairs match stb_truetype per-pair API.
+     * Reference values from fonttools for Roboto-Regular.ttf:
+     * AV=-87, To=-99, AW=-69, Va=-46, Ta=-113, LT=-275, TT=16 */
+    stbtt_fontinfo stb_font;
+    uint32_t ttf_size = 0;
+    char *ttf_data = nt_builder_read_file(ttf_path, &ttf_size);
+    TEST_ASSERT_NOT_NULL(ttf_data);
+    int ok = stbtt_InitFont(&stb_font, (const unsigned char *)ttf_data, stbtt_GetFontOffsetForIndex((const unsigned char *)ttf_data, 0));
+    TEST_ASSERT_TRUE(ok);
+
+    /* Check every kern pair in our pack against stb per-pair API */
+    const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(font_data + sizeof(NtFontAssetHeader));
+    uint32_t total_checked = 0;
+    for (uint16_t i = 0; i < fhdr->glyph_count; i++) {
+        if (glyphs[i].kern_count == 0) {
+            continue;
+        }
+        const NtFontKernEntry *kerns = (const NtFontKernEntry *)(font_data + glyphs[i].data_offset);
+        int g1 = stbtt_FindGlyphIndex(&stb_font, (int)glyphs[i].codepoint);
+        for (uint16_t k = 0; k < glyphs[i].kern_count; k++) {
+            uint16_t ri = kerns[k].right_glyph_index;
+            int g2 = stbtt_FindGlyphIndex(&stb_font, (int)glyphs[ri].codepoint);
+            int stb_val = stbtt_GetGlyphKernAdvance(&stb_font, g1, g2);
+            TEST_ASSERT_EQUAL_INT16(stb_val, kerns[k].value);
+            total_checked++;
+        }
+    }
+
+    /* Must have found some kern pairs */
+    TEST_ASSERT_TRUE(total_checked > 50);
+
+    /* Spot-check known pairs (non-zero kern expected for common pairs) */
+    TEST_ASSERT_TRUE(find_kern_value(font_data, 'A', 'V') != 0);
+    TEST_ASSERT_TRUE(find_kern_value(font_data, 'T', 'o') != 0);
+    TEST_ASSERT_TRUE(find_kern_value(font_data, 'L', 'T') != 0);
+
+    free(ttf_data);
+    free(pack_data);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -3453,6 +3547,7 @@ int main(void) {
     RUN_TEST(test_font_null_charset_asserts);
     RUN_TEST(test_font_dump_pack);
     RUN_TEST(test_font_charset_dedup);
+    RUN_TEST(test_font_kern_values);
 
     return UNITY_END();
 }
