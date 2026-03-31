@@ -74,6 +74,15 @@ typedef struct {
     bool is_tofu;
 } nt_glyph_cache_entry_t;
 
+/* ---- Text measurement (pure CPU, no GPU calls) ---- */
+
+typedef struct {
+    float width;
+    float height;
+} nt_text_size_t;
+
+nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size);
+
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_font_init(const nt_font_desc_t *desc);

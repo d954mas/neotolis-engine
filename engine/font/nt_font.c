@@ -1107,6 +1107,89 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
     return 0;
 }
 
+// #region UTF-8 decoder
+/* Hoehrmann DFA UTF-8 decoder (MIT license: http://bjoern.hoehrmann.de/utf-8/decoder/dfa/) */
+#define UTF8_ACCEPT 0
+#define UTF8_REJECT 12
+
+static const uint8_t s_utf8d[] = {
+    // clang-format off
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,  9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
+    7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+    8,8,2,2,2,2,2,2,2,2,2,2,2,2,2,2,  2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+    10,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3, 11,6,6,6,5,8,8,8,8,8,8,8,8,8,8,8,
+    0,12,24,36,60,96,84,12,12,12,48,72, 12,12,12,12,12,12,12,12,12,12,12,12,
+    12,0,12,12,12,12,12,0,12,0,12,12,   12,24,12,12,12,12,12,24,12,24,12,12,
+    12,12,12,12,12,12,12,24,12,12,12,12, 12,24,12,12,12,12,12,12,12,24,12,12,
+    12,12,12,12,12,12,12,36,12,36,12,12, 12,36,12,12,12,12,12,36,12,36,12,12,
+    12,36,12,12,12,12,12,12,12,12,12,12,
+    // clang-format on
+};
+
+static uint32_t utf8_decode(uint32_t *state, uint32_t *codep, uint32_t byte) {
+    uint32_t type = s_utf8d[byte];
+    *codep = (*state != UTF8_ACCEPT) ? (byte & 0x3Fu) | (*codep << 6) : (0xFFu >> type) & byte;
+    *state = s_utf8d[256 + *state + type];
+    return *state;
+}
+// #endregion
+
+// #region Measurement
+nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) {
+    nt_text_size_t result = {0.0f, 0.0f};
+    if (!utf8 || !*utf8) {
+        return result;
+    }
+
+    nt_font_metrics_t metrics = nt_font_get_metrics(font);
+    if (metrics.units_per_em == 0) {
+        return result;
+    }
+    float scale = size / (float)metrics.units_per_em;
+
+    uint32_t state = UTF8_ACCEPT;
+    uint32_t codepoint = 0;
+    uint32_t prev_cp = 0;
+    float pen_x = 0.0f;
+    float min_y = 0.0f;
+    float max_y = 0.0f;
+
+    for (const uint8_t *p = (const uint8_t *)utf8; *p; p++) {
+        if (utf8_decode(&state, &codepoint, *p) != UTF8_ACCEPT) {
+            continue;
+        }
+
+        if (prev_cp != 0) {
+            int16_t kern = nt_font_get_kern(font, prev_cp, codepoint);
+            pen_x += (float)kern * scale;
+        }
+
+        const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph(font, codepoint);
+        if (g) {
+            if ((float)g->bbox_y0 * scale < min_y) {
+                min_y = (float)g->bbox_y0 * scale;
+            }
+            if ((float)g->bbox_y1 * scale > max_y) {
+                max_y = (float)g->bbox_y1 * scale;
+            }
+            pen_x += (float)g->advance * scale;
+        }
+        prev_cp = codepoint;
+    }
+
+    result.width = pen_x;
+    result.height = max_y - min_y;
+    if (result.height < size) {
+        result.height = size; /* Minimum height = requested size */
+    }
+    return result;
+}
+// #endregion
+
 /* ---- Test-only: register font data for headless testing ---- */
 
 #ifdef NT_FONT_TEST_ACCESS
