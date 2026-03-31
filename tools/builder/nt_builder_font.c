@@ -17,10 +17,6 @@
 /* Check continuation byte: must be 10xxxxxx */
 #define UTF8_CONT(b) (((b) & 0xC0) == 0x80)
 
-/* Bitmask size for N segments, rounded up to 2-byte alignment.
- * Ensures int16 data after bitmask is naturally aligned. */
-#define BITMASK_BYTES(n) ((((uint32_t)(n) + 7) / 8 + 1) & ~1U)
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint32_t utf8_decode(const uint8_t **p) {
     uint32_t c = **p;
@@ -476,7 +472,7 @@ static uint32_t compute_curve_data_size(const stbtt_vertex *verts, int nv, uint1
         switch (verts[v].type) {
         case STBTT_vmove:
             if (in_contour && cur_segs > 0) {
-                uint32_t bm = BITMASK_BYTES(cur_segs);
+                uint32_t bm = NT_FONT_BITMASK_BYTES(cur_segs);
                 size += 6 + bm + (uint32_t)cur_quads * 8 + (uint32_t)(cur_segs - cur_quads) * 4;
                 cc++;
             }
@@ -502,7 +498,7 @@ static uint32_t compute_curve_data_size(const stbtt_vertex *verts, int nv, uint1
     }
     /* Finalize last contour */
     if (in_contour && cur_segs > 0) {
-        uint32_t bm = BITMASK_BYTES(cur_segs);
+        uint32_t bm = NT_FONT_BITMASK_BYTES(cur_segs);
         size += 6 + bm + (uint32_t)cur_quads * 8 + (uint32_t)(cur_segs - cur_quads) * 4;
         cc++;
     }
@@ -553,7 +549,7 @@ static void write_contour_data(const stbtt_vertex *verts, int nv, uint16_t conto
         // #endregion
 
         // #region Bitmask + delta-encoded segments
-        uint32_t bitmask_bytes = BITMASK_BYTES(seg_count);
+        uint32_t bitmask_bytes = NT_FONT_BITMASK_BYTES(seg_count);
         uint8_t *bitmask = wp;
         memset(bitmask, 0, bitmask_bytes);
         wp += bitmask_bytes;

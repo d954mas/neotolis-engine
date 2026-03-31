@@ -211,6 +211,20 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_sort COMMAND test_sort)
 
+    # --- Font module tests ---
+    add_executable(test_font unit/test_font.c)
+    target_link_libraries(test_font PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool unity)
+    target_compile_definitions(test_font PRIVATE NT_FONT_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_font PRIVATE -U_DLL)
+    target_compile_definitions(nt_font PRIVATE NT_FONT_TEST_ACCESS)
+    target_compile_options(nt_font PRIVATE -U_DLL)
+    nt_set_warning_flags(test_font)
+    nt_set_sanitizer_flags(test_font)
+    set_target_properties(test_font PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_font COMMAND test_font)
+
     # --- Material module tests ---
     add_executable(test_material unit/test_material.c)
     target_link_libraries(test_material PRIVATE nt_material nt_resource nt_hash unity)

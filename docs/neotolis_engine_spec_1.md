@@ -563,10 +563,12 @@ Sprite is a separate render kind, not a special mode of mesh.
 ```c
 typedef struct TextComponent
 {
-    FontAssetRef font;
+    nt_font_t font;    /* handle from nt_font_create / nt_font_add */
     StringId text;
 } TextComponent;
 ```
+
+`nt_font_t` is a pool-backed handle to a font instance. A font instance owns GPU textures (curve + band) and a glyph cache. Font data comes from one or more `nt_resource_t` assets attached via `nt_font_add()`, allowing fallback chains (base font + CJK extension pack, etc.). Glyphs are decoded and uploaded to GPU on first lookup, not on asset load.
 
 StringId references a string in a string pool/intern table (detail deferred to implementation phase).
 
@@ -954,6 +956,38 @@ typedef enum {
 ```
 
 Additional types (material, audio, sprite) will be added as needed.
+
+### NT_ASSET_FONT binary format
+
+Builder produces font assets from TTF/OTF sources. Binary layout:
+
+```
+NtFontAssetHeader (16 bytes)
+  magic:        u32   (0x544E4F46 "FONT")
+  version:      u16   (2)
+  glyph_count:  u16
+  units_per_em: u16
+  ascent:       i16
+  descent:      i16   (negative)
+  line_gap:     i16
+
+NtFontGlyphEntry[glyph_count] (24 bytes each, sorted by codepoint for bsearch)
+  codepoint:    u32
+  data_offset:  u32   (byte offset from header start)
+  advance:      i16
+  bbox:         i16 x4 (x0, y0, x1, y1)
+  curve_count:  u16
+  kern_count:   u16
+  _reserved:    u8 x2
+
+Per-glyph data (at data_offset):
+  NtFontKernEntry[kern_count] (4 bytes each, sorted by right_glyph_index)
+    right_glyph_index: u16
+    value:             i16
+  Contour data (delta-encoded int16 coordinates, line/quadratic bitmask)
+```
+
+Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier curves (lines promoted to degenerate quadratics). At lookup time, contours are decoded into float control points, decomposed into horizontal bands, and uploaded to GPU textures for Slug-style vector rendering. Glyphs are cached with LRU eviction — not immutable once loaded.
 
 ## 17.9 Placeholder policy
 
@@ -1840,7 +1874,7 @@ These do not block implementation:
 - precise bit packing of sort keys
 - future WebGPU backend details
 - exact sprite asset format and animation system
-- ~~exact text rendering strategy and string pool design~~ → resolved: Slug-based GPU vector rendering (§17.8 NT_ASSET_FONT)
+- ~~exact text rendering strategy and string pool design~~ → resolved: Slug-based GPU vector rendering (§17.8 NT_ASSET_FONT), font module API (§9.5)
 - camera component/structure definition
 - whether some renderer-specific caches are worth adding later
 - whether pack hot-reload becomes needed
