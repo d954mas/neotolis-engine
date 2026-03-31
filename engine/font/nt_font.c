@@ -784,11 +784,7 @@ void nt_font_step(void) {
 
             /* If version changed (reload), invalidate cache + hash table */
             if (slot->resource_handles[ri] != 0) {
-                memset(slot->cache, 0, (size_t)slot->max_glyphs * sizeof(nt_font_cache_slot_t));
-                memset(slot->hash_table, 0, (size_t)slot->hash_table_size * sizeof(uint16_t));
-                slot->glyphs_cached = 0;
-                slot->curve_write_head = 0;
-                slot->tofu_generated = false;
+                flush_cache(slot);
             }
 
             slot->resource_handles[ri] = ver;
