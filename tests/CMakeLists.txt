@@ -225,6 +225,19 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_font COMMAND test_font)
 
+    # --- Text renderer module tests ---
+    add_executable(test_text_renderer unit/test_text_renderer.c)
+    target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_material unity)
+    target_compile_definitions(test_text_renderer PRIVATE NT_TEXT_RENDERER_TEST_ACCESS NT_FONT_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
+    target_compile_definitions(nt_text_renderer PRIVATE NT_TEXT_RENDERER_TEST_ACCESS)
+    target_compile_options(test_text_renderer PRIVATE -U_DLL)
+    nt_set_warning_flags(test_text_renderer)
+    nt_set_sanitizer_flags(test_text_renderer)
+    set_target_properties(test_text_renderer PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_text_renderer COMMAND test_text_renderer)
+
     # --- Material module tests ---
     add_executable(test_material unit/test_material.c)
     target_link_libraries(test_material PRIVATE nt_material nt_resource nt_hash unity)
