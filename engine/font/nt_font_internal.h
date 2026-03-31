@@ -21,7 +21,7 @@ typedef struct {
 
     /* Resources (D-17, D-18) */
     nt_resource_t resources[NT_FONT_MAX_RESOURCES];
-    uint32_t resource_versions[NT_FONT_MAX_RESOURCES];
+    uint32_t resource_handles[NT_FONT_MAX_RESOURCES];
     uint8_t resource_count;
 
     /* GPU textures (D-06, D-11) */
@@ -58,7 +58,10 @@ typedef struct {
 
 typedef struct {
     nt_pool_t pool;
-    nt_font_slot_t *slots; /* [capacity+1], index 0 reserved */
+    nt_font_slot_t *slots;   /* [capacity+1], index 0 reserved */
+    void *data_entries;       /* nt_font_data_entry_t[], allocated in init */
+    uint32_t data_capacity;   /* max_fonts * NT_FONT_MAX_RESOURCES */
+    uint32_t data_count;      /* high-water mark */
     bool initialized;
 } nt_font_state_t;
 

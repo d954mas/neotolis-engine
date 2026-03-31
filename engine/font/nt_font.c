@@ -38,17 +38,10 @@ static uint16_t nt_float32_to_float16(float value) {
 
 /* ---- Font data storage (side table for pack blobs accessed via activator) ---- */
 
-#define NT_FONT_MAX_DATA_ENTRIES 64
-
 typedef struct {
     const uint8_t *data;
     uint32_t size;
 } nt_font_data_entry_t;
-
-static struct {
-    nt_font_data_entry_t entries[NT_FONT_MAX_DATA_ENTRIES];
-    uint32_t count;
-} s_font_data;
 
 /* ---- Module state ---- */
 
@@ -56,38 +49,55 @@ static nt_font_state_t s_font;
 
 /* ---- Font activator callbacks ---- */
 
+static nt_font_data_entry_t *font_data_entries(void) {
+    return (nt_font_data_entry_t *)s_font.data_entries;
+}
+
 static uint32_t activate_font(const uint8_t *data, uint32_t size) {
     /* Store pointer to pack data for later access by font module.
      * The data pointer is valid as long as the pack remains mounted. */
-    NT_ASSERT(s_font_data.count < NT_FONT_MAX_DATA_ENTRIES);
-    uint32_t idx = s_font_data.count++;
-    s_font_data.entries[idx].data = data;
-    s_font_data.entries[idx].size = size;
+    nt_font_data_entry_t *entries = font_data_entries();
+
+    /* Reuse freed slot if available */
+    for (uint32_t i = 0; i < s_font.data_count; i++) {
+        if (entries[i].data == NULL) {
+            entries[i].data = data;
+            entries[i].size = size;
+            return i + 1;
+        }
+    }
+
+    NT_ASSERT(s_font.data_count < s_font.data_capacity);
+    uint32_t idx = s_font.data_count++;
+    entries[idx].data = data;
+    entries[idx].size = size;
     return idx + 1; /* 1-based handle (0 = failure in resource system) */
 }
 
 static void deactivate_font(uint32_t runtime_handle) {
-    if (runtime_handle == 0 || runtime_handle > s_font_data.count) {
+    if (runtime_handle == 0 || runtime_handle > s_font.data_count) {
         return;
     }
+    nt_font_data_entry_t *entries = font_data_entries();
     uint32_t idx = runtime_handle - 1;
-    s_font_data.entries[idx].data = NULL;
-    s_font_data.entries[idx].size = 0;
+    entries[idx].data = NULL;
+    entries[idx].size = 0;
 }
 
 /* Get font data from activation handle */
 static const uint8_t *get_font_data(uint32_t runtime_handle, uint32_t *out_size) {
-    if (runtime_handle == 0 || runtime_handle > s_font_data.count) {
+    if (runtime_handle == 0 || runtime_handle > s_font.data_count) {
         if (out_size) {
             *out_size = 0;
         }
         return NULL;
     }
+    nt_font_data_entry_t *entries = font_data_entries();
     uint32_t idx = runtime_handle - 1;
     if (out_size) {
-        *out_size = s_font_data.entries[idx].size;
+        *out_size = entries[idx].size;
     }
-    return s_font_data.entries[idx].data;
+    return entries[idx].data;
 }
 
 /* ---- Internal helpers ---- */
@@ -179,11 +189,11 @@ static const NtFontGlyphEntry *find_glyph_in_pack(const uint8_t *blob, uint32_t 
 /* Find glyph across all resources (first wins, per D-18) */
 static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, uint8_t *out_resource_index, const NtFontGlyphEntry **out_glyph_entry) {
     for (uint8_t i = 0; i < slot->resource_count; i++) {
-        if (slot->resource_versions[i] == 0) {
+        if (slot->resource_handles[i] == 0) {
             continue; /* not loaded yet */
         }
         uint32_t blob_size = 0;
-        const uint8_t *blob = get_font_data(slot->resource_versions[i], &blob_size);
+        const uint8_t *blob = get_font_data(slot->resource_handles[i], &blob_size);
         if (!blob) {
             continue;
         }
@@ -648,11 +658,14 @@ nt_result_t nt_font_init(const nt_font_desc_t *desc) {
     s_font.slots = (nt_font_slot_t *)calloc((size_t)desc->max_fonts + 1, sizeof(nt_font_slot_t));
     NT_ASSERT(s_font.slots);
 
+    /* Font data side table: max_fonts * max_resources_per_font */
+    s_font.data_capacity = (uint32_t)desc->max_fonts * NT_FONT_MAX_RESOURCES;
+    s_font.data_entries = calloc(s_font.data_capacity, sizeof(nt_font_data_entry_t));
+    NT_ASSERT(s_font.data_entries);
+    s_font.data_count = 0;
+
     /* Register font activator for NT_ASSET_FONT resources */
     nt_resource_set_activator(NT_ASSET_FONT, activate_font, deactivate_font);
-
-    /* Reset font data storage */
-    memset(&s_font_data, 0, sizeof(s_font_data));
 
     s_font.initialized = true;
     return NT_OK;
@@ -675,9 +688,9 @@ void nt_font_shutdown(void) {
     }
     // #endregion
     free(s_font.slots);
+    free(s_font.data_entries);
     nt_pool_shutdown(&s_font.pool);
     memset(&s_font, 0, sizeof(s_font));
-    memset(&s_font_data, 0, sizeof(s_font_data));
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -686,6 +699,43 @@ void nt_font_step(void) {
     if (!s_font.initialized) {
         return;
     }
+
+    // #region Context restore: re-create GPU textures
+    if (g_nt_gfx.context_restored) {
+        for (uint32_t i = 1; i <= s_font.pool.capacity; i++) {
+            if (!nt_pool_slot_alive(&s_font.pool, i)) {
+                continue;
+            }
+            nt_font_slot_t *slot = &s_font.slots[i];
+
+            nt_gfx_destroy_texture(slot->curve_texture);
+            nt_gfx_destroy_texture(slot->band_texture);
+
+            slot->curve_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
+                .width = slot->curve_tex_width,
+                .height = slot->curve_tex_height,
+                .format = NT_PIXEL_RGBA16F,
+                .min_filter = NT_FILTER_NEAREST,
+                .mag_filter = NT_FILTER_NEAREST,
+                .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+                .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+                .label = "font_curve",
+            });
+            slot->band_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
+                .width = slot->band_count,
+                .height = slot->band_tex_height,
+                .format = NT_PIXEL_RG16UI,
+                .min_filter = NT_FILTER_NEAREST,
+                .mag_filter = NT_FILTER_NEAREST,
+                .wrap_u = NT_WRAP_CLAMP_TO_EDGE,
+                .wrap_v = NT_WRAP_CLAMP_TO_EDGE,
+                .label = "font_band",
+            });
+
+            flush_cache(slot);
+        }
+    }
+    // #endregion
 
     for (uint32_t i = 1; i <= s_font.pool.capacity; i++) {
         if (!nt_pool_slot_alive(&s_font.pool, i)) {
@@ -701,7 +751,7 @@ void nt_font_step(void) {
             if (ver == 0) {
                 continue; /* resource not ready yet */
             }
-            if (ver == slot->resource_versions[ri]) {
+            if (ver == slot->resource_handles[ri]) {
                 continue; /* no change */
             }
 
@@ -733,7 +783,7 @@ void nt_font_step(void) {
             // #endregion
 
             /* If version changed (reload), invalidate cache + hash table */
-            if (slot->resource_versions[ri] != 0) {
+            if (slot->resource_handles[ri] != 0) {
                 memset(slot->cache, 0, (size_t)slot->max_glyphs * sizeof(nt_font_cache_slot_t));
                 memset(slot->hash_table, 0, (size_t)slot->hash_table_size * sizeof(uint16_t));
                 slot->glyphs_cached = 0;
@@ -741,7 +791,7 @@ void nt_font_step(void) {
                 slot->tofu_generated = false;
             }
 
-            slot->resource_versions[ri] = ver;
+            slot->resource_handles[ri] = ver;
         }
         // #endregion
     }
@@ -852,7 +902,7 @@ void nt_font_add(nt_font_t font, nt_resource_t resource) {
     NT_ASSERT(slot->resource_count < NT_FONT_MAX_RESOURCES);
 
     slot->resources[slot->resource_count] = resource;
-    slot->resource_versions[slot->resource_count] = 0; /* resolved in step */
+    slot->resource_handles[slot->resource_count] = 0; /* resolved in step */
     slot->resource_count++;
 }
 
@@ -918,7 +968,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t code
 
     // #region Decode contour data
     uint32_t blob_size = 0;
-    const uint8_t *blob = get_font_data(slot->resource_versions[res_idx], &blob_size);
+    const uint8_t *blob = get_font_data(slot->resource_handles[res_idx], &blob_size);
     NT_ASSERT(blob);
 
     /* Contour data is at: data_offset + kern_count * sizeof(NtFontKernEntry) */
@@ -1013,11 +1063,11 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
 
     /* Find left glyph in resources to access its kern entries */
     for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
-        if (slot->resource_versions[ri] == 0) {
+        if (slot->resource_handles[ri] == 0) {
             continue;
         }
         uint32_t blob_size = 0;
-        const uint8_t *blob = get_font_data(slot->resource_versions[ri], &blob_size);
+        const uint8_t *blob = get_font_data(slot->resource_handles[ri], &blob_size);
         if (!blob) {
             continue;
         }
