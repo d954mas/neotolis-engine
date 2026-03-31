@@ -775,8 +775,7 @@ void nt_font_step(void) {
             uint32_t blob_size = 0;
             const uint8_t *blob = get_font_data(ver, &blob_size);
             if (!blob || blob_size < sizeof(NtFontAssetHeader)) {
-                NT_LOG_WARN("font resource %u: activation returned invalid data (blob=%p, size=%u)",
-                            (unsigned)ri, (const void *)blob, (unsigned)blob_size);
+                NT_LOG_WARN("font resource %u: activation returned invalid data (blob=%p, size=%u)", (unsigned)ri, (const void *)blob, (unsigned)blob_size);
                 continue;
             }
 

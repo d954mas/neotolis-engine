@@ -17,7 +17,6 @@
 /* Check continuation byte: must be 10xxxxxx */
 #define UTF8_CONT(b) (((b) & 0xC0) == 0x80)
 
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint32_t utf8_decode(const uint8_t **p) {
     uint32_t c = **p;
