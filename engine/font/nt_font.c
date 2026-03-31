@@ -313,6 +313,7 @@ static void flush_cache(nt_font_slot_t *slot) {
  * cache_idx is (re)allocated after this call returns. */
 static void ensure_curve_space(nt_font_slot_t *slot, uint32_t needed_texels) {
     uint32_t total = (uint32_t)slot->curve_tex_width * slot->curve_tex_height;
+    NT_ASSERT(needed_texels <= total); /* single glyph exceeds entire curve texture */
     if (slot->curve_write_head + needed_texels > total) {
         flush_cache(slot);
     }
@@ -324,6 +325,9 @@ static void ensure_curve_space(nt_font_slot_t *slot, uint32_t needed_texels) {
 static void generate_tofu(nt_font_slot_t *slot) {
     if (slot->tofu_generated) {
         return;
+    }
+    if (!slot->metrics_set) {
+        return; /* resources not loaded yet — tofu impossible, lookup returns NULL */
     }
 
     /* Tofu dimensions from metrics */
