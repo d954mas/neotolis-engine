@@ -20,8 +20,8 @@ typedef struct {
     bool metrics_set;          /* true after first resource parsed */
 
     /* Resources (D-17, D-18) */
-    nt_resource_t resources[NT_FONT_MAX_RESOURCES];
-    uint32_t resource_handles[NT_FONT_MAX_RESOURCES];
+    nt_resource_t resources[NT_FONT_MAX_SOURCES_PER_FONT];
+    uint32_t resource_handles[NT_FONT_MAX_SOURCES_PER_FONT];
     uint8_t resource_count;
 
     /* GPU textures (D-06, D-11) */
@@ -63,7 +63,7 @@ typedef struct {
     nt_pool_t pool;
     nt_font_slot_t *slots;  /* [capacity+1], index 0 reserved */
     void *data_entries;     /* nt_font_data_entry_t[], allocated in init */
-    uint32_t data_capacity; /* max_fonts * NT_FONT_MAX_RESOURCES */
+    uint32_t data_capacity; /* max_fonts * NT_FONT_MAX_SOURCES_PER_FONT */
     uint32_t data_count;    /* high-water mark */
     uint32_t frame_counter; /* module-level LRU tick, incremented each step */
     bool initialized;

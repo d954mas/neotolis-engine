@@ -7,34 +7,11 @@
 #include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
+#include "math/nt_math.h"
 #include "nt_font_format.h"
 #include "nt_pack_format.h"
 #include "pool/nt_pool.h"
 #include "resource/nt_resource.h"
-
-/* ---- Float16 conversion (runtime port from builder, per D-02) ---- */
-
-static uint16_t nt_float32_to_float16(float value) {
-    union {
-        float f;
-        uint32_t u;
-    } conv;
-    conv.f = value;
-    uint32_t sign = (conv.u >> 16) & 0x8000U;
-    int32_t exponent = (int32_t)((conv.u >> 23) & 0xFFU) - 127 + 15;
-    uint32_t mantissa = conv.u & 0x007FFFFFU;
-    if (exponent <= 0) {
-        return (uint16_t)sign;
-    }
-    if (exponent >= 31) {
-        return (uint16_t)(sign | 0x7C00U);
-    }
-    return (uint16_t)(sign | ((uint32_t)exponent << 10) | (mantissa >> 13));
-}
-
-/* ---- Bitmask byte size (matches builder's BITMASK_BYTES) ---- */
-
-#define BITMASK_BYTES(n) ((((uint32_t)(n) + 15U) / 8U) & ~1U)
 
 /* ---- Font data storage (side table for pack blobs accessed via activator) ---- */
 
@@ -477,7 +454,7 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         memcpy(&start_y, rp, 2);
         rp += 2;
 
-        uint32_t bitmask_bytes = BITMASK_BYTES(seg_count);
+        uint32_t bitmask_bytes = NT_FONT_BITMASK_BYTES(seg_count);
         const uint8_t *bitmask = rp;
         rp += bitmask_bytes;
 
@@ -696,7 +673,7 @@ nt_result_t nt_font_init(const nt_font_desc_t *desc) {
     NT_ASSERT(s_font.slots);
 
     /* Font data side table: max_fonts * max_resources_per_font */
-    s_font.data_capacity = (uint32_t)desc->max_fonts * NT_FONT_MAX_RESOURCES;
+    s_font.data_capacity = (uint32_t)desc->max_fonts * NT_FONT_MAX_SOURCES_PER_FONT;
     s_font.data_entries = calloc(s_font.data_capacity, sizeof(nt_font_data_entry_t));
     NT_ASSERT(s_font.data_entries);
     s_font.data_count = 0;
@@ -798,6 +775,8 @@ void nt_font_step(void) {
             uint32_t blob_size = 0;
             const uint8_t *blob = get_font_data(ver, &blob_size);
             if (!blob || blob_size < sizeof(NtFontAssetHeader)) {
+                NT_LOG_WARN("font resource %u: activation returned invalid data (blob=%p, size=%u)",
+                            (unsigned)ri, (const void *)blob, (unsigned)blob_size);
                 continue;
             }
 
@@ -943,7 +922,7 @@ void nt_font_add(nt_font_t font, nt_resource_t resource) {
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
 
     nt_font_slot_t *slot = get_slot(font);
-    NT_ASSERT(slot->resource_count < NT_FONT_MAX_RESOURCES);
+    NT_ASSERT(slot->resource_count < NT_FONT_MAX_SOURCES_PER_FONT);
     for (uint8_t i = 0; i < slot->resource_count; i++) {
         NT_ASSERT(slot->resources[i].id != resource.id); /* duplicate resource */
     }
@@ -1006,7 +985,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t code
     bool found = find_glyph_in_resources(slot, codepoint, &res_idx, &glyph_entry);
 
     if (!found) {
-        /* Generate tofu if needed, then return tofu entry via hash */
+        NT_LOG_WARN("glyph U+%04X not found in any font resource, returning tofu", codepoint);
         generate_tofu(slot);
         nt_font_cache_slot_t *tofu = hash_lookup(slot, 0xFFFFFFFFU);
         return tofu ? &tofu->entry : NULL;

@@ -7,7 +7,7 @@
 
 /* ---- Compile-time limits ---- */
 
-#define NT_FONT_MAX_RESOURCES 8
+#define NT_FONT_MAX_SOURCES_PER_FONT 8
 
 /* ---- Handle type ---- */
 
