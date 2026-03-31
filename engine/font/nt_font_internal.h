@@ -35,7 +35,6 @@ typedef struct {
     /* Glyph cache (D-13, D-14, D-15) */
     nt_font_cache_slot_t *cache; /* [max_glyphs] array */
     uint16_t glyphs_cached;
-    uint32_t frame_counter; /* incremented each step for LRU */
 
     /* Curve texture packing (D-07) */
     uint32_t curve_write_head; /* next free texel offset (linear allocator) */
@@ -66,6 +65,7 @@ typedef struct {
     void *data_entries;       /* nt_font_data_entry_t[], allocated in init */
     uint32_t data_capacity;   /* max_fonts * NT_FONT_MAX_RESOURCES */
     uint32_t data_count;      /* high-water mark */
+    uint32_t frame_counter;   /* module-level LRU tick, incremented each step */
     bool initialized;
 } nt_font_state_t;
 

@@ -147,14 +147,43 @@ static void hash_insert(nt_font_slot_t *slot, uint32_t codepoint, uint16_t slot_
     }
 }
 
-/* Rebuild entire hash table from live cache entries */
-static void hash_rebuild(nt_font_slot_t *slot) {
-    memset(slot->hash_table, 0, (size_t)slot->hash_table_size * sizeof(uint16_t));
-    for (uint16_t i = 0; i < slot->max_glyphs; i++) {
-        if (slot->cache[i].entry.codepoint != 0) {
-            hash_insert(slot, slot->cache[i].entry.codepoint, i);
+/* Remove one entry by codepoint with backshift to keep probe chains intact.
+ * Called by evict_lru before clearing the cache slot — O(cluster) instead of O(N) rebuild. */
+static void hash_remove(nt_font_slot_t *slot, uint32_t codepoint) {
+    uint16_t mask = (uint16_t)(slot->hash_table_size - 1);
+    uint16_t pos = (uint16_t)(codepoint & mask);
+
+    /* Find the entry */
+    for (;;) {
+        if (slot->hash_table[pos] == 0) {
+            return; /* not found — nothing to remove */
+        }
+        uint16_t idx = (uint16_t)(slot->hash_table[pos] - 1);
+        if (slot->cache[idx].entry.codepoint == codepoint) {
+            break;
+        }
+        pos = (uint16_t)((pos + 1) & mask);
+    }
+
+    /* Backshift: move subsequent entries back to fill the gap */
+    uint16_t empty = pos;
+    for (;;) {
+        pos = (uint16_t)((pos + 1) & mask);
+        if (slot->hash_table[pos] == 0) {
+            break; /* end of cluster */
+        }
+        uint16_t idx = (uint16_t)(slot->hash_table[pos] - 1);
+        uint16_t home = (uint16_t)(slot->cache[idx].entry.codepoint & mask);
+        /* Check if this entry's home is at or before the empty slot (wrapping) */
+        bool should_move = (empty <= pos)
+                               ? (home <= empty || home > pos)
+                               : (home <= empty && home > pos);
+        if (should_move) {
+            slot->hash_table[empty] = slot->hash_table[pos];
+            empty = pos;
         }
     }
+    slot->hash_table[empty] = 0;
 }
 
 /* ---- Glyph bsearch comparator ---- */
@@ -235,8 +264,9 @@ static int compare_kern_right(const void *key, const void *elem) {
 /* ---- LRU eviction (D-15, D-23) ---- */
 
 static uint16_t evict_lru(nt_font_slot_t *slot) {
-    uint32_t min_frame = UINT32_MAX;
+    uint32_t max_age = 0;
     uint16_t victim = 0;
+    bool found = false;
     for (uint16_t i = 0; i < slot->max_glyphs; i++) {
         nt_font_cache_slot_t *cs = &slot->cache[i];
         if (cs->entry.codepoint == 0) {
@@ -245,12 +275,17 @@ static uint16_t evict_lru(nt_font_slot_t *slot) {
         if (cs->entry.is_tofu) {
             continue; /* never evict tofu (D-23) */
         }
-        if (cs->lru_frame < min_frame) {
-            min_frame = cs->lru_frame;
+        uint32_t age = s_font.frame_counter - cs->lru_frame; /* unsigned wrap-safe */
+        if (age >= max_age) {
+            max_age = age;
             victim = i;
+            found = true;
         }
     }
-    NT_ASSERT(min_frame != UINT32_MAX); /* no evictable entry found */
+    NT_ASSERT(found); /* no evictable entry found */
+
+    /* Remove from hash table before clearing slot */
+    hash_remove(slot, slot->cache[victim].entry.codepoint);
 
     /* Clear victim */
     memset(&slot->cache[victim], 0, sizeof(nt_font_cache_slot_t));
@@ -405,7 +440,7 @@ static void generate_tofu(nt_font_slot_t *slot) {
     cs->entry.bbox_x1 = tofu_w;
     cs->entry.bbox_y1 = y1;
     cs->entry.is_tofu = true;
-    cs->lru_frame = slot->frame_counter;
+    cs->lru_frame = s_font.frame_counter;
 
     slot->curve_write_head += needed_texels;
     slot->glyphs_cached++;
@@ -513,9 +548,10 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
 }
 
 /* Upload a glyph to GPU textures and fill cache entry.
- * Single-pass band decomposition: iterate bands × curves, write directly to staging. */
+ * Allocates cache slot internally (after ensure_curve_space) to avoid
+ * the flush-invalidates-slot bug. Returns allocated cache_idx. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontGlyphEntry *glyph, const nt_curve_t *curves, uint16_t curve_count, uint8_t resource_index) {
+static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph, const nt_curve_t *curves, uint16_t curve_count, uint8_t resource_index) {
     float bbox_y0 = (float)glyph->bbox_y0;
     float bbox_y1 = (float)glyph->bbox_y1;
     float band_height = (bbox_y1 - bbox_y0) / (float)slot->band_count;
@@ -555,6 +591,15 @@ static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontG
     // #endregion
 
     ensure_curve_space(slot, needed_texels);
+
+    // #region Allocate cache slot (after ensure_curve_space to avoid flush-invalidates-slot)
+    uint16_t cache_idx;
+    if (slot->glyphs_cached < slot->max_glyphs) {
+        cache_idx = free_stack_pop(slot);
+    } else {
+        cache_idx = evict_lru(slot);
+    }
+    // #endregion
 
     // #region Write curve data to temp buffer, band by band
     uint32_t curve_offset = slot->curve_write_head;
@@ -627,12 +672,13 @@ static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontG
     cs->entry.bbox_x1 = glyph->bbox_x1;
     cs->entry.bbox_y1 = glyph->bbox_y1;
     cs->entry.is_tofu = false;
-    cs->lru_frame = slot->frame_counter;
+    cs->lru_frame = s_font.frame_counter;
     cs->resource_index = resource_index;
     // #endregion
 
     slot->curve_write_head = curve_offset + local_pos;
     slot->glyphs_cached++;
+    return cache_idx;
 }
 
 /* ---- Lifecycle ---- */
@@ -731,13 +777,14 @@ void nt_font_step(void) {
     }
     // #endregion
 
+    s_font.frame_counter++;
+
     for (uint32_t i = 1; i <= s_font.pool.capacity; i++) {
         if (!nt_pool_slot_alive(&s_font.pool, i)) {
             continue;
         }
 
         nt_font_slot_t *slot = &s_font.slots[i];
-        slot->frame_counter++;
 
         // #region Resolve resources
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
@@ -769,6 +816,8 @@ void nt_font_step(void) {
                 slot->metrics.line_height = (int16_t)(hdr->ascent - hdr->descent + hdr->line_gap);
                 slot->metrics_set = true;
             } else {
+                /* All resources on one nt_font_t must share identical metrics.
+                 * If combining Latin + CJK, normalize in the builder. */
                 NT_ASSERT(slot->metrics.units_per_em == hdr->units_per_em);
                 NT_ASSERT(slot->metrics.ascent == hdr->ascent);
                 NT_ASSERT(slot->metrics.descent == hdr->descent);
@@ -947,7 +996,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t code
     // #region Cache hit check (hash table)
     nt_font_cache_slot_t *hit = hash_lookup(slot, codepoint);
     if (hit) {
-        hit->lru_frame = slot->frame_counter;
+        hit->lru_frame = s_font.frame_counter;
         return &hit->entry;
     }
     // #endregion
@@ -978,18 +1027,8 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t code
     uint16_t curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH);
     // #endregion
 
-    // #region Allocate cache slot
-    uint16_t cache_idx;
-    if (slot->glyphs_cached < slot->max_glyphs) {
-        cache_idx = free_stack_pop(slot);
-    } else {
-        cache_idx = evict_lru(slot);
-        hash_rebuild(slot);
-    }
-    // #endregion
-
-    // #region Upload and fill cache
-    upload_glyph(slot, cache_idx, glyph_entry, s_decode_curves, curve_count, res_idx);
+    // #region Upload, allocate slot, fill cache
+    uint16_t cache_idx = upload_glyph(slot, glyph_entry, s_decode_curves, curve_count, res_idx);
     hash_insert(slot, codepoint, cache_idx);
     // #endregion
 
