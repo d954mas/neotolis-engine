@@ -35,7 +35,7 @@ typedef struct {
     uint16_t curve_texture_width;  /* RGBA16F texture width (POT recommended) */
     uint16_t curve_texture_height; /* RGBA16F texture height */
     uint16_t band_texture_height;  /* RG16UI texture height = max_glyphs */
-    uint8_t band_count;            /* bands per glyph (default: 8) */
+    uint8_t band_count;            /* bands per glyph (1-32, required) */
 } nt_font_create_desc_t;
 
 /* ---- Metrics (from font asset header) ---- */
