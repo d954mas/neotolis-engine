@@ -37,15 +37,21 @@ typedef struct {
     uint16_t glyphs_cached;
     uint32_t frame_counter; /* incremented each step for LRU */
 
-    /* Curve texture packing (D-07, D-12) */
+    /* Curve texture packing (D-07) */
     uint32_t curve_write_head; /* next free texel offset (linear allocator) */
-    uint16_t *curve_staging;   /* CPU mirror of curve texture (4 × uint16 per texel) */
 
     /* Tofu (D-22, D-23) */
     bool tofu_generated;
 
     /* Max glyphs (= band_tex_height, D-08) */
     uint16_t max_glyphs;
+
+    /* Codepoint → cache slot hash table (open addressing, POT size) */
+    uint16_t *hash_table;      /* values: slot_index + 1 (0 = empty) */
+    uint16_t hash_table_size;  /* POT, = max_glyphs * 2 */
+
+    /* Cache generation (bumped on full flush, for Phase 45 batch invalidation) */
+    uint32_t cache_generation;
 } nt_font_slot_t;
 
 /* ---- Module state ---- */

@@ -34,22 +34,16 @@ void main() {
     v_color = a_color;
 
     // Apply dilation: expand quad outward to prevent edge clipping
-    vec2 pos = a_position;
-    vec2 tc = a_texcoord;
-    if (u_dilation > 0.0) {
-        // Compute expansion direction from texcoord relative to glyph center
-        vec2 center = (a_glyph_bounds.xy + a_glyph_bounds.zw) * 0.5;
-        vec2 dir = sign(a_texcoord - center);
-        tc += dir * u_dilation;
+    vec2 center = (a_glyph_bounds.xy + a_glyph_bounds.zw) * 0.5;
+    vec2 dir = sign(a_texcoord - center);
+    vec2 tc = a_texcoord + dir * u_dilation;
 
-        // Scale position by same ratio
-        vec2 bbox_size = a_glyph_bounds.zw - a_glyph_bounds.xy;
-        vec2 scale = vec2(1.0);
-        if (bbox_size.x > 0.0) scale.x = 1.0 + (2.0 * u_dilation) / bbox_size.x;
-        if (bbox_size.y > 0.0) scale.y = 1.0 + (2.0 * u_dilation) / bbox_size.y;
-        vec2 pos_center = (a_glyph_bounds.xy + a_glyph_bounds.zw) * 0.5;
-        pos = pos_center + (a_position - pos_center) * scale;
-    }
+    // Scale position by same ratio
+    vec2 bbox_size = a_glyph_bounds.zw - a_glyph_bounds.xy;
+    vec2 scale = vec2(1.0);
+    if (bbox_size.x > 0.0) scale.x = 1.0 + (2.0 * u_dilation) / bbox_size.x;
+    if (bbox_size.y > 0.0) scale.y = 1.0 + (2.0 * u_dilation) / bbox_size.y;
+    vec2 pos = center + (a_position - center) * scale;
 
     v_texcoord = tc;
     gl_Position = view_proj * vec4(pos, 0.0, 1.0);

@@ -106,6 +106,10 @@ nt_texture_t nt_font_get_band_texture(nt_font_t font);
 uint8_t nt_font_get_band_count(nt_font_t font);
 uint16_t nt_font_get_curve_texture_width(nt_font_t font);
 
+/* ---- Cache generation (for Phase 45 batch invalidation) ---- */
+
+uint32_t nt_font_get_cache_generation(nt_font_t font);
+
 /* ---- Kern pair lookup (for nt_text shaping in Phase 45) ---- */
 
 int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right_codepoint);
