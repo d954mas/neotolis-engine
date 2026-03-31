@@ -1013,3 +1013,9 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
     }
     return 0;
 }
+
+/* ---- Test-only: register font data for headless testing ---- */
+
+#ifdef NT_FONT_TEST_ACCESS
+uint32_t nt_font_test_register_data(const uint8_t *data, uint32_t size) { return activate_font(data, size); }
+#endif
