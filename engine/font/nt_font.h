@@ -110,4 +110,10 @@ uint16_t nt_font_get_curve_texture_width(nt_font_t font);
 
 int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right_codepoint);
 
+/* ---- Test access (test-only) ---- */
+
+#ifdef NT_FONT_TEST_ACCESS
+uint32_t nt_font_test_register_data(const uint8_t *data, uint32_t size);
+#endif
+
 #endif /* NT_FONT_H */

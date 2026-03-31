@@ -39,9 +39,13 @@ typedef struct {
 
     /* Curve texture packing (D-07, D-12) */
     uint32_t curve_write_head; /* next free texel offset (linear allocator) */
+    uint16_t *curve_staging;   /* CPU mirror of curve texture (4 × uint16 per texel) */
 
     /* Tofu (D-22, D-23) */
     bool tofu_generated;
+
+    /* Max glyphs (= band_tex_height, D-08) */
+    uint16_t max_glyphs;
 } nt_font_slot_t;
 
 /* ---- Module state ---- */
