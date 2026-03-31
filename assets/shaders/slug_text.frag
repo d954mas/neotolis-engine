@@ -5,21 +5,19 @@ precision highp int;
 // Ported from HLSL reference (github.com/EricLengyel/Slug, MIT license)
 // Computes per-pixel winding numbers via band/curve texelFetch
 
-uniform sampler2D u_curve_texture;   // RGBA16F -- curve control points as float16
-uniform usampler2D u_band_texture;   // RG16UI -- (curve_start, curve_count) per band
-uniform int u_curve_tex_width;       // For linear-to-2D addressing
+uniform sampler2D u_curve_texture; // RGBA16F -- curve control points as float16
+uniform usampler2D u_band_texture; // RG16UI -- (curve_start, curve_count) per band
+uniform int u_curve_tex_width;     // For linear-to-2D addressing
 
 in vec2 v_texcoord;
-flat in uvec4 v_glyph;              // curve_offset, band_row, curve_count, band_count
-flat in vec4 v_glyph_bounds;        // bbox (x0, y0, x1, y1) in em-space
+flat in uvec4 v_glyph;       // curve_offset, band_row, curve_count, band_count
+flat in vec4 v_glyph_bounds; // bbox (x0, y0, x1, y1) in em-space
 in vec4 v_color;
 
 out vec4 frag_color;
 
 // Convert linear texel offset to 2D texture coordinates for texelFetch
-ivec2 CurveTexCoord(uint offset) {
-    return ivec2(int(offset) % u_curve_tex_width, int(offset) / u_curve_tex_width);
-}
+ivec2 CurveTexCoord(uint offset) { return ivec2(int(offset) % u_curve_tex_width, int(offset) / u_curve_tex_width); }
 
 // Solve horizontal ray crossing for one quadratic Bezier curve.
 // p0, p1, p2 are control points relative to the current fragment position.
@@ -34,7 +32,8 @@ float SolveQuadratic(vec2 p0, vec2 p1, vec2 p2, float pixelSize) {
     // Degenerate check: near-linear curve
     if (abs(a.y) < 1.0e-5) {
         // Linear fallback
-        if (abs(b.y) < 1.0e-5) return 0.0;
+        if (abs(b.y) < 1.0e-5)
+            return 0.0;
         float t = p0.y / (2.0 * b.y);
         if (t >= 0.0 && t <= 1.0) {
             // Evaluate x at root t: x(t) = (1-t)^2*p0.x + 2*(1-t)*t*p1.x + t^2*p2.x
@@ -50,7 +49,8 @@ float SolveQuadratic(vec2 p0, vec2 p1, vec2 p2, float pixelSize) {
 
     // Discriminant
     float disc = b.y * b.y - a.y * p0.y;
-    if (disc < 0.0) return 0.0;
+    if (disc < 0.0)
+        return 0.0;
 
     float d = sqrt(disc);
     float ra = 1.0 / a.y;
@@ -91,7 +91,8 @@ float SolveQuadraticVert(vec2 p0, vec2 p1, vec2 p2, float pixelSize) {
 
     // Degenerate check
     if (abs(a.x) < 1.0e-5) {
-        if (abs(b.x) < 1.0e-5) return 0.0;
+        if (abs(b.x) < 1.0e-5)
+            return 0.0;
         float t = p0.x / (2.0 * b.x);
         if (t >= 0.0 && t <= 1.0) {
             float omt = 1.0 - t;
@@ -104,7 +105,8 @@ float SolveQuadraticVert(vec2 p0, vec2 p1, vec2 p2, float pixelSize) {
     }
 
     float disc = b.x * b.x - a.x * p0.x;
-    if (disc < 0.0) return 0.0;
+    if (disc < 0.0)
+        return 0.0;
 
     float d = sqrt(disc);
     float ra = 1.0 / a.x;
@@ -178,9 +180,11 @@ void main() {
     float coverage = CalcCoverage(v_texcoord);
 
     // Skip fully transparent pixels
-    if (coverage < 1.0 / 255.0) discard;
+    if (coverage < 1.0 / 255.0)
+        discard;
 
     // Premultiplied alpha output (D-27, SHD-04)
     // Blend mode: ONE, ONE_MINUS_SRC_ALPHA
-    frag_color = vec4(v_color.rgb * coverage, coverage);
+    float alpha = coverage * v_color.a;
+    frag_color = vec4(v_color.rgb * alpha, alpha);
 }

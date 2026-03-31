@@ -175,9 +175,7 @@ static void hash_remove(nt_font_slot_t *slot, uint32_t codepoint) {
         uint16_t idx = (uint16_t)(slot->hash_table[pos] - 1);
         uint16_t home = (uint16_t)(slot->cache[idx].entry.codepoint & mask);
         /* Check if this entry's home is at or before the empty slot (wrapping) */
-        bool should_move = (empty <= pos)
-                               ? (home <= empty || home > pos)
-                               : (home <= empty && home > pos);
+        bool should_move = (empty <= pos) ? (home <= empty || home > pos) : (home <= empty && home > pos);
         if (should_move) {
             slot->hash_table[empty] = slot->hash_table[pos];
             empty = pos;
@@ -850,7 +848,8 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     NT_ASSERT(desc->curve_texture_height > 0);
     NT_ASSERT(desc->band_texture_height > 0);
 
-    uint8_t band_count = desc->band_count > 0 ? desc->band_count : 8; /* default 8 per D-03 */
+    NT_ASSERT(desc->band_count > 0 && desc->band_count <= 32);
+    uint8_t band_count = desc->band_count;
 
     uint32_t id = nt_pool_alloc(&s_font.pool);
     if (id == 0) {

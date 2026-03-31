@@ -41,8 +41,10 @@ void main() {
     // Scale position by same ratio
     vec2 bbox_size = a_glyph_bounds.zw - a_glyph_bounds.xy;
     vec2 scale = vec2(1.0);
-    if (bbox_size.x > 0.0) scale.x = 1.0 + (2.0 * u_dilation) / bbox_size.x;
-    if (bbox_size.y > 0.0) scale.y = 1.0 + (2.0 * u_dilation) / bbox_size.y;
+    if (bbox_size.x > 0.0)
+        scale.x = 1.0 + (2.0 * u_dilation) / bbox_size.x;
+    if (bbox_size.y > 0.0)
+        scale.y = 1.0 + (2.0 * u_dilation) / bbox_size.y;
     vec2 pos = center + (a_position - center) * scale;
 
     v_texcoord = tc;

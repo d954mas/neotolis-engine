@@ -46,12 +46,12 @@ typedef struct {
     uint16_t max_glyphs;
 
     /* Free slot stack (O(1) alloc/free) */
-    uint16_t *free_stack;      /* [max_glyphs] */
-    uint16_t free_top;         /* next free index to pop */
+    uint16_t *free_stack; /* [max_glyphs] */
+    uint16_t free_top;    /* next free index to pop */
 
     /* Codepoint → cache slot hash table (open addressing, POT size) */
-    uint16_t *hash_table;      /* values: slot_index + 1 (0 = empty) */
-    uint16_t hash_table_size;  /* POT, = max_glyphs * 2 */
+    uint16_t *hash_table;     /* values: slot_index + 1 (0 = empty) */
+    uint16_t hash_table_size; /* POT, = max_glyphs * 2 */
 
     /* Cache generation (bumped on full flush, for Phase 45 batch invalidation) */
     uint32_t cache_generation;
@@ -61,11 +61,11 @@ typedef struct {
 
 typedef struct {
     nt_pool_t pool;
-    nt_font_slot_t *slots;   /* [capacity+1], index 0 reserved */
-    void *data_entries;       /* nt_font_data_entry_t[], allocated in init */
-    uint32_t data_capacity;   /* max_fonts * NT_FONT_MAX_RESOURCES */
-    uint32_t data_count;      /* high-water mark */
-    uint32_t frame_counter;   /* module-level LRU tick, incremented each step */
+    nt_font_slot_t *slots;  /* [capacity+1], index 0 reserved */
+    void *data_entries;     /* nt_font_data_entry_t[], allocated in init */
+    uint32_t data_capacity; /* max_fonts * NT_FONT_MAX_RESOURCES */
+    uint32_t data_count;    /* high-water mark */
+    uint32_t frame_counter; /* module-level LRU tick, incremented each step */
     bool initialized;
 } nt_font_state_t;
 
