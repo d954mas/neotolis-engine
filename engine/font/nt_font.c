@@ -49,9 +49,7 @@ static nt_font_state_t s_font;
 
 /* ---- Font activator callbacks ---- */
 
-static nt_font_data_entry_t *font_data_entries(void) {
-    return (nt_font_data_entry_t *)s_font.data_entries;
-}
+static nt_font_data_entry_t *font_data_entries(void) { return (nt_font_data_entry_t *)s_font.data_entries; }
 
 static uint32_t activate_font(const uint8_t *data, uint32_t size) {
     /* Store pointer to pack data for later access by font module.
@@ -269,7 +267,7 @@ static uint16_t evict_lru(nt_font_slot_t *slot) {
 
 /* Static temp buffer for GPU upload (no CPU mirror needed).
  * Max texels per glyph: NT_FONT_MAX_CURVES_PER_GLYPH * bands * 2.
- * 512 curves * 32 bands * 2 texels * 4 uint16 = 256KB worst case.
+ * 256 curves * 32 bands * 2 texels * 4 uint16 = 128KB worst case.
  * Realistic: 40 curves * 8 bands * 2 * 4 = 2.5KB. */
 static uint16_t s_curve_upload[NT_FONT_MAX_CURVES_PER_GLYPH * 32 * 2 * 4];
 
@@ -288,8 +286,7 @@ static uint16_t free_stack_pop(nt_font_slot_t *slot) {
 
 /* Flush entire cache when curve texture is full */
 static void flush_cache(nt_font_slot_t *slot) {
-    NT_LOG_WARN("font cache flush: curve texture full (%ux%u), consider larger curve_texture_width/height",
-                slot->curve_tex_width, slot->curve_tex_height);
+    NT_LOG_WARN("font cache flush: curve texture full (%ux%u), consider larger curve_texture_width/height", slot->curve_tex_width, slot->curve_tex_height);
     memset(slot->cache, 0, (size_t)slot->max_glyphs * sizeof(nt_font_cache_slot_t));
     memset(slot->hash_table, 0, (size_t)slot->hash_table_size * sizeof(uint16_t));
     free_stack_reset(slot);
@@ -524,28 +521,27 @@ static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontG
     float band_height = (bbox_y1 - bbox_y0) / (float)slot->band_count;
     NT_ASSERT(slot->band_count <= 32);
 
+    // #region Precompute per-curve Y bounds
+    float curve_y_min[NT_FONT_MAX_CURVES_PER_GLYPH];
+    float curve_y_max[NT_FONT_MAX_CURVES_PER_GLYPH];
+    for (uint16_t ci = 0; ci < curve_count; ci++) {
+        float a = curves[ci].p0y;
+        float b = curves[ci].p1y;
+        float c = curves[ci].p2y;
+        float lo = a < b ? a : b;
+        float hi = a > b ? a : b;
+        curve_y_min[ci] = lo < c ? lo : c;
+        curve_y_max[ci] = hi > c ? hi : c;
+    }
+    // #endregion
+
     // #region Count total band-curve pairs (needed to reserve texture space)
     uint16_t band_curve_counts[32] = {0};
     for (uint16_t ci = 0; ci < curve_count; ci++) {
-        float cy_min = curves[ci].p0y;
-        if (curves[ci].p1y < cy_min) {
-            cy_min = curves[ci].p1y;
-        }
-        if (curves[ci].p2y < cy_min) {
-            cy_min = curves[ci].p2y;
-        }
-        float cy_max = curves[ci].p0y;
-        if (curves[ci].p1y > cy_max) {
-            cy_max = curves[ci].p1y;
-        }
-        if (curves[ci].p2y > cy_max) {
-            cy_max = curves[ci].p2y;
-        }
-
         for (uint8_t b = 0; b < slot->band_count; b++) {
             float band_bot = bbox_y0 + ((float)b * band_height);
             float band_top = band_bot + band_height;
-            if (cy_max >= band_bot && cy_min <= band_top) {
+            if (curve_y_max[ci] >= band_bot && curve_y_min[ci] <= band_top) {
                 band_curve_counts[b]++;
             }
         }
@@ -560,33 +556,18 @@ static void upload_glyph(nt_font_slot_t *slot, uint16_t cache_idx, const NtFontG
 
     ensure_curve_space(slot, needed_texels);
 
-    // #region Single-pass: write curve data to temp buffer, band by band
+    // #region Write curve data to temp buffer, band by band
     uint32_t curve_offset = slot->curve_write_head;
     uint16_t band_offsets[32] = {0};
 
-    uint32_t local_pos = 0; /* position within s_curve_upload */
+    uint32_t local_pos = 0;
     for (uint8_t b = 0; b < slot->band_count; b++) {
         band_offsets[b] = (uint16_t)(local_pos / 2);
 
+        float band_bot = bbox_y0 + ((float)b * band_height);
+        float band_top = band_bot + band_height;
         for (uint16_t ci = 0; ci < curve_count; ci++) {
-            float cy_min = curves[ci].p0y;
-            if (curves[ci].p1y < cy_min) {
-                cy_min = curves[ci].p1y;
-            }
-            if (curves[ci].p2y < cy_min) {
-                cy_min = curves[ci].p2y;
-            }
-            float cy_max = curves[ci].p0y;
-            if (curves[ci].p1y > cy_max) {
-                cy_max = curves[ci].p1y;
-            }
-            if (curves[ci].p2y > cy_max) {
-                cy_max = curves[ci].p2y;
-            }
-
-            float band_bot = bbox_y0 + ((float)b * band_height);
-            float band_top = band_bot + band_height;
-            if (cy_max < band_bot || cy_min > band_top) {
+            if (curve_y_max[ci] < band_bot || curve_y_min[ci] > band_top) {
                 continue;
             }
 
