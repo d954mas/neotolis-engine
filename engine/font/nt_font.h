@@ -97,6 +97,8 @@ nt_font_stats_t nt_font_get_stats(nt_font_t font);
 
 /* ---- Glyph lookup (exposed for nt_text in Phase 45) ---- */
 
+/* Returns pointer into internal cache. Valid until next lookup that triggers
+ * eviction or flush. Copy needed data immediately — do not store the pointer. */
 const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t codepoint);
 
 /* ---- GPU texture access (for nt_text to bind before draw) ---- */

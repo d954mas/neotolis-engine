@@ -262,8 +262,10 @@ static uint16_t evict_lru(nt_font_slot_t *slot) {
 
 /* ---- Curve texture space management ---- */
 
-/* Max curves per glyph (512 handles any real-world glyph) */
-#define NT_FONT_MAX_CURVES_PER_GLYPH 512
+/* Max curves per glyph (256 handles any real-world glyph, override via -D) */
+#ifndef NT_FONT_MAX_CURVES_PER_GLYPH
+#define NT_FONT_MAX_CURVES_PER_GLYPH 256
+#endif
 
 /* Static temp buffer for GPU upload (no CPU mirror needed).
  * Max texels per glyph: NT_FONT_MAX_CURVES_PER_GLYPH * bands * 2.
@@ -271,19 +273,37 @@ static uint16_t evict_lru(nt_font_slot_t *slot) {
  * Realistic: 40 curves * 8 bands * 2 * 4 = 2.5KB. */
 static uint16_t s_curve_upload[NT_FONT_MAX_CURVES_PER_GLYPH * 32 * 2 * 4];
 
+/* Reset free stack to all slots available (0..max_glyphs-1) */
+static void free_stack_reset(nt_font_slot_t *slot) {
+    for (uint16_t i = 0; i < slot->max_glyphs; i++) {
+        slot->free_stack[i] = (uint16_t)(slot->max_glyphs - 1 - i); /* top of stack = 0 */
+    }
+    slot->free_top = slot->max_glyphs;
+}
+
+static uint16_t free_stack_pop(nt_font_slot_t *slot) {
+    NT_ASSERT(slot->free_top > 0);
+    return slot->free_stack[--slot->free_top];
+}
+
 /* Flush entire cache when curve texture is full */
 static void flush_cache(nt_font_slot_t *slot) {
     NT_LOG_WARN("font cache flush: curve texture full (%ux%u), consider larger curve_texture_width/height",
                 slot->curve_tex_width, slot->curve_tex_height);
     memset(slot->cache, 0, (size_t)slot->max_glyphs * sizeof(nt_font_cache_slot_t));
     memset(slot->hash_table, 0, (size_t)slot->hash_table_size * sizeof(uint16_t));
+    free_stack_reset(slot);
     slot->glyphs_cached = 0;
     slot->curve_write_head = 0;
     slot->tofu_generated = false;
     slot->cache_generation++;
 }
 
-/* Ensure enough texels, flushing if needed */
+/* Ensure enough texels, flushing if needed.
+ * WARNING: flush_cache invalidates ALL cache entries, hash table, and bumps
+ * cache_generation. Callers (upload_glyph, generate_tofu) must handle the
+ * case where the cache was reset mid-operation. Currently safe because
+ * cache_idx is (re)allocated after this call returns. */
 static void ensure_curve_space(nt_font_slot_t *slot, uint32_t needed_texels) {
     uint32_t total = (uint32_t)slot->curve_tex_width * slot->curve_tex_height;
     if (slot->curve_write_head + needed_texels > total) {
@@ -310,21 +330,13 @@ static void generate_tofu(nt_font_slot_t *slot) {
     uint32_t needed_texels = 4 * 2;
 
     /* Ensure we have cache slot space */
+    ensure_curve_space(slot, needed_texels);
     uint16_t cache_idx;
     if (slot->glyphs_cached < slot->max_glyphs) {
-        /* Find empty slot */
-        cache_idx = 0;
-        for (uint16_t i = 0; i < slot->max_glyphs; i++) {
-            if (slot->cache[i].entry.codepoint == 0) {
-                cache_idx = i;
-                break;
-            }
-        }
+        cache_idx = free_stack_pop(slot);
     } else {
         cache_idx = evict_lru(slot);
     }
-
-    ensure_curve_space(slot, needed_texels);
 
     /* Rectangle corners: (0, y0), (tofu_w, y0), (tofu_w, y1), (0, y1) */
     /* clang-format off */
@@ -682,6 +694,7 @@ void nt_font_shutdown(void) {
         }
         nt_font_slot_t *slot = &s_font.slots[i];
         free(slot->cache);
+        free(slot->free_stack);
         free(slot->hash_table);
         nt_gfx_destroy_texture(slot->curve_texture);
         nt_gfx_destroy_texture(slot->band_texture);
@@ -853,9 +866,13 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     });
     // #endregion
 
-    // #region Allocate cache and hash table
+    // #region Allocate cache, free stack, hash table
     slot->cache = (nt_font_cache_slot_t *)calloc(desc->band_texture_height, sizeof(nt_font_cache_slot_t));
     NT_ASSERT(slot->cache);
+
+    slot->free_stack = (uint16_t *)calloc(desc->band_texture_height, sizeof(uint16_t));
+    NT_ASSERT(slot->free_stack);
+    free_stack_reset(slot);
 
     /* Codepoint hash table: POT size, load factor ≤ 0.5 */
     slot->hash_table_size = next_pot16((uint16_t)(desc->band_texture_height * 2));
@@ -874,6 +891,7 @@ void nt_font_destroy(nt_font_t font) {
 
     nt_font_slot_t *slot = get_slot(font);
     free(slot->cache);
+    free(slot->free_stack);
     free(slot->hash_table);
     nt_gfx_destroy_texture(slot->curve_texture);
     nt_gfx_destroy_texture(slot->band_texture);
@@ -890,12 +908,16 @@ bool nt_font_valid(nt_font_t font) {
 
 /* ---- Resource management ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_font_add(nt_font_t font, nt_resource_t resource) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
 
     nt_font_slot_t *slot = get_slot(font);
     NT_ASSERT(slot->resource_count < NT_FONT_MAX_RESOURCES);
+    for (uint8_t i = 0; i < slot->resource_count; i++) {
+        NT_ASSERT(slot->resources[i].id != resource.id); /* duplicate resource */
+    }
 
     slot->resources[slot->resource_count] = resource;
     slot->resource_handles[slot->resource_count] = 0; /* resolved in step */
@@ -978,14 +1000,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t code
     // #region Allocate cache slot
     uint16_t cache_idx;
     if (slot->glyphs_cached < slot->max_glyphs) {
-        /* Find empty slot */
-        cache_idx = 0;
-        for (uint16_t i = 0; i < slot->max_glyphs; i++) {
-            if (slot->cache[i].entry.codepoint == 0) {
-                cache_idx = i;
-                break;
-            }
-        }
+        cache_idx = free_stack_pop(slot);
     } else {
         cache_idx = evict_lru(slot);
         hash_rebuild(slot);

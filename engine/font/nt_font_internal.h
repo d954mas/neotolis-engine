@@ -46,6 +46,10 @@ typedef struct {
     /* Max glyphs (= band_tex_height, D-08) */
     uint16_t max_glyphs;
 
+    /* Free slot stack (O(1) alloc/free) */
+    uint16_t *free_stack;      /* [max_glyphs] */
+    uint16_t free_top;         /* next free index to pop */
+
     /* Codepoint → cache slot hash table (open addressing, POT size) */
     uint16_t *hash_table;      /* values: slot_index + 1 (0 = empty) */
     uint16_t hash_table_size;  /* POT, = max_glyphs * 2 */
