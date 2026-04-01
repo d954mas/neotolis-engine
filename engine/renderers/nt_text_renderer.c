@@ -245,7 +245,7 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     float gd0, gd1, gd2, gd3;
     pack_uint_as_float(&gd0, g->curve_offset);
     pack_uint_as_float(&gd1, (uint32_t)g->band_row);
-    pack_uint_as_float(&gd2, (uint32_t)g->curve_count);
+    pack_uint_as_float(&gd2, g->curve_offset_x);
     pack_uint_as_float(&gd3, (uint32_t)band_count);
 
     /* 4 vertices per quad: BL, BR, TR, TL */

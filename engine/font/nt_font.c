@@ -277,10 +277,10 @@ static uint16_t evict_lru(nt_font_slot_t *slot) {
 #endif
 
 /* Static temp buffer for GPU upload (no CPU mirror needed).
- * Max texels per glyph: NT_FONT_MAX_CURVES_PER_GLYPH * bands * 2.
- * 256 curves * 32 bands * 2 texels * 4 uint16 = 128KB worst case.
- * Realistic: 40 curves * 8 bands * 2 * 4 = 2.5KB. */
-static uint16_t s_curve_upload[NT_FONT_MAX_CURVES_PER_GLYPH * 32 * 2 * 4];
+ * Max texels per glyph: NT_FONT_MAX_CURVES_PER_GLYPH * bands * 2 * 2 (Y+X bands).
+ * 256 curves * 32 bands * 2 texels * 2 axes * 4 uint16 = 256KB worst case.
+ * Realistic: 40 curves * 8 bands * 2 * 2 * 4 = 5KB. */
+static uint16_t s_curve_upload[NT_FONT_MAX_CURVES_PER_GLYPH * 32 * 2 * 4 * 2];
 
 /* Reset free stack to all slots available (0..max_glyphs-1) */
 static void free_stack_reset(nt_font_slot_t *slot) {
@@ -338,8 +338,8 @@ static void generate_tofu(nt_font_slot_t *slot) {
 
     /* 4 line segments forming a rectangle: bottom, right, top, left
      * Each line promoted to degenerate quadratic: p1 = midpoint(p0, p2)
-     * 4 curves x 2 texels = 8 texels needed */
-    uint32_t needed_texels = 4 * 2;
+     * 4 curves x 2 texels x 2 (Y-bands + X-bands) = 16 texels needed */
+    uint32_t needed_texels = 4 * 2 * 2;
 
     /* Ensure we have cache slot space */
     ensure_curve_space(slot, needed_texels);
@@ -383,36 +383,52 @@ static void generate_tofu(nt_font_slot_t *slot) {
         s_curve_upload[t1 + 3] = 0;
     }
 
-    /* Upload curve data for tofu to GPU */
+    /* Duplicate same 4 curves for X-bands (appended after Y-band data) */
+    uint32_t x_curve_offset = curve_offset + 4 * 2; /* after Y-band curves */
+    for (int seg = 0; seg < 4; seg++) {
+        uint32_t src0 = (uint32_t)seg * 2 * 4;
+        uint32_t dst0 = (uint32_t)(4 + seg) * 2 * 4;
+        for (int k = 0; k < 8; k++) {
+            s_curve_upload[dst0 + k] = s_curve_upload[src0 + k];
+        }
+    }
+
+    /* Upload all curve data (Y + X) to GPU */
     uint32_t remaining = needed_texels;
     uint32_t src_texel = 0;
     uint32_t dst_texel = curve_offset;
     while (remaining > 0) {
-        uint16_t row = (uint16_t)(dst_texel / slot->curve_tex_width);
-        uint16_t col = (uint16_t)(dst_texel % slot->curve_tex_width);
-        uint16_t w = (uint16_t)(slot->curve_tex_width - col);
-        if (w > remaining) {
-            w = (uint16_t)remaining;
+        uint16_t row2 = (uint16_t)(dst_texel / slot->curve_tex_width);
+        uint16_t col2 = (uint16_t)(dst_texel % slot->curve_tex_width);
+        uint16_t w2 = (uint16_t)(slot->curve_tex_width - col2);
+        if (w2 > remaining) {
+            w2 = (uint16_t)remaining;
         }
-        nt_gfx_update_texture(slot->curve_texture, col, row, w, 1, &s_curve_upload[(size_t)src_texel * 4]);
-        remaining -= w;
-        src_texel += w;
-        dst_texel += w;
+        nt_gfx_update_texture(slot->curve_texture, col2, row2, w2, 1, &s_curve_upload[(size_t)src_texel * 4]);
+        remaining -= w2;
+        src_texel += w2;
+        dst_texel += w2;
     }
 
-    /* Upload band data for tofu -- all 4 curves are in each band (simple rectangle) */
-    uint16_t band_data[32 * 2] = {0};
+    /* Upload band data for tofu -- all 4 curves in every Y-band and X-band */
+    uint16_t band_data[64 * 2] = {0};
     for (uint8_t b = 0; b < slot->band_count; b++) {
-        band_data[(b * 2) + 0] = 0; /* curve_start: relative index, all curves in every band */
-        band_data[(b * 2) + 1] = 4; /* curve_count (all 4 segments) */
+        band_data[(b * 2) + 0] = 0; /* Y-band: curve_start */
+        band_data[(b * 2) + 1] = 4; /* Y-band: curve_count */
     }
-    nt_gfx_update_texture(slot->band_texture, 0, cache_idx, slot->band_count, 1, band_data);
+    uint8_t xoff = slot->band_count;
+    for (uint8_t b = 0; b < slot->band_count; b++) {
+        band_data[((xoff + b) * 2) + 0] = 0; /* X-band: curve_start */
+        band_data[((xoff + b) * 2) + 1] = 4; /* X-band: curve_count */
+    }
+    nt_gfx_update_texture(slot->band_texture, 0, cache_idx, (uint16_t)(slot->band_count * 2), 1, band_data);
 
     /* Fill cache entry */
     nt_font_cache_slot_t *cs = &slot->cache[cache_idx];
     cs->entry.codepoint = 0xFFFFFFFFU; /* sentinel (D-22) */
     cs->entry.curve_offset = curve_offset;
-    cs->entry.curve_count = 4;
+    cs->entry.curve_offset_x = x_curve_offset;
+    cs->entry.curve_count = 8;
     cs->entry.band_row = cache_idx;
     cs->entry.advance = tofu_w;
     cs->entry.bbox_x0 = 0;
@@ -596,40 +612,65 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
 static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph, const nt_curve_t *curves, uint16_t curve_count, uint8_t resource_index) {
     float bbox_y0 = (float)glyph->bbox_y0;
     float bbox_y1 = (float)glyph->bbox_y1;
+    float bbox_x0 = (float)glyph->bbox_x0;
+    float bbox_x1 = (float)glyph->bbox_x1;
     float band_height = (bbox_y1 - bbox_y0) / (float)slot->band_count;
+    float band_width = (bbox_x1 > bbox_x0) ? (bbox_x1 - bbox_x0) / (float)slot->band_count : 0.0F;
     NT_ASSERT(slot->band_count <= 32);
 
-    // #region Precompute per-curve Y bounds
+    // #region Precompute per-curve Y and X bounds
     float curve_y_min[NT_FONT_MAX_CURVES_PER_GLYPH];
     float curve_y_max[NT_FONT_MAX_CURVES_PER_GLYPH];
+    float curve_x_min[NT_FONT_MAX_CURVES_PER_GLYPH];
+    float curve_x_max[NT_FONT_MAX_CURVES_PER_GLYPH];
     for (uint16_t ci = 0; ci < curve_count; ci++) {
-        float a = curves[ci].p0y;
-        float b = curves[ci].p1y;
-        float c = curves[ci].p2y;
-        float lo = a < b ? a : b;
-        float hi = a > b ? a : b;
-        curve_y_min[ci] = lo < c ? lo : c;
-        curve_y_max[ci] = hi > c ? hi : c;
+        float ay = curves[ci].p0y, by = curves[ci].p1y, cy = curves[ci].p2y;
+        float loy = ay < by ? ay : by;
+        float hiy = ay > by ? ay : by;
+        curve_y_min[ci] = loy < cy ? loy : cy;
+        curve_y_max[ci] = hiy > cy ? hiy : cy;
+
+        float ax = curves[ci].p0x, bx = curves[ci].p1x, cx = curves[ci].p2x;
+        float lox = ax < bx ? ax : bx;
+        float hix = ax > bx ? ax : bx;
+        curve_x_min[ci] = lox < cx ? lox : cx;
+        curve_x_max[ci] = hix > cx ? hix : cx;
     }
     // #endregion
 
-    // #region Count total band-curve pairs (needed to reserve texture space)
-    uint16_t band_curve_counts[32] = {0};
+    // #region Count Y-band and X-band curve pairs
+    /* Epsilon margin on band boundaries to avoid edge-case misses where
+     * floating-point rounding places a curve in one band but the shader
+     * maps the pixel to the adjacent band. */
+    float y_margin = band_height * 0.01F;
+    float x_margin = band_width * 0.01F;
+
+    uint16_t yband_counts[32] = {0};
+    uint16_t xband_counts[32] = {0};
     for (uint16_t ci = 0; ci < curve_count; ci++) {
         for (uint8_t b = 0; b < slot->band_count; b++) {
-            float band_bot = bbox_y0 + ((float)b * band_height);
-            float band_top = band_bot + band_height;
-            if (curve_y_max[ci] >= band_bot && curve_y_min[ci] <= band_top) {
-                band_curve_counts[b]++;
+            float ybot = bbox_y0 + ((float)b * band_height) - y_margin;
+            float ytop = ybot + band_height + y_margin * 2.0F;
+            if (curve_y_max[ci] >= ybot && curve_y_min[ci] <= ytop) {
+                yband_counts[b]++;
+            }
+            if (band_width > 0.0F) {
+                float xleft = bbox_x0 + ((float)b * band_width) - x_margin;
+                float xright = xleft + band_width + x_margin * 2.0F;
+                if (curve_x_max[ci] >= xleft && curve_x_min[ci] <= xright) {
+                    xband_counts[b]++;
+                }
             }
         }
     }
 
-    uint32_t total_band_curves = 0;
+    uint32_t y_total = 0;
+    uint32_t x_total = 0;
     for (uint8_t b = 0; b < slot->band_count; b++) {
-        total_band_curves += band_curve_counts[b];
+        y_total += yband_counts[b];
+        x_total += xband_counts[b];
     }
-    uint32_t needed_texels = total_band_curves * 2;
+    uint32_t needed_texels = (y_total + x_total) * 2;
     // #endregion
 
     ensure_curve_space(slot, needed_texels);
@@ -643,21 +684,19 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     }
     // #endregion
 
-    // #region Write curve data to temp buffer, band by band
-    uint32_t curve_offset = slot->curve_write_head;
-    uint16_t band_offsets[32] = {0};
+    // #region Write Y-band curves to temp buffer
+    uint32_t curve_offset_y = slot->curve_write_head;
+    uint16_t yband_offsets[32] = {0};
 
     uint32_t local_pos = 0;
     for (uint8_t b = 0; b < slot->band_count; b++) {
-        band_offsets[b] = (uint16_t)(local_pos / 2);
-
-        float band_bot = bbox_y0 + ((float)b * band_height);
-        float band_top = band_bot + band_height;
+        yband_offsets[b] = (uint16_t)(local_pos / 2);
+        float ybot = bbox_y0 + ((float)b * band_height) - y_margin;
+        float ytop = ybot + band_height + y_margin * 2.0F;
         for (uint16_t ci = 0; ci < curve_count; ci++) {
-            if (curve_y_max[ci] < band_bot || curve_y_min[ci] > band_top) {
+            if (curve_y_max[ci] < ybot || curve_y_min[ci] > ytop) {
                 continue;
             }
-
             uint32_t t0 = local_pos * 4;
             uint32_t t1 = t0 + 4;
             s_curve_upload[t0 + 0] = nt_float32_to_float16(curves[ci].p0x);
@@ -673,11 +712,41 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     }
     // #endregion
 
+    // #region Write X-band curves to temp buffer (after Y-band data)
+    uint32_t y_local_pos = local_pos;
+    uint32_t curve_offset_x = curve_offset_y + y_local_pos;
+    uint16_t xband_offsets[32] = {0};
+
+    for (uint8_t b = 0; b < slot->band_count; b++) {
+        xband_offsets[b] = (uint16_t)((local_pos - y_local_pos) / 2);
+        if (band_width > 0.0F) {
+            float xleft = bbox_x0 + ((float)b * band_width) - x_margin;
+            float xright = xleft + band_width + x_margin * 2.0F;
+            for (uint16_t ci = 0; ci < curve_count; ci++) {
+                if (curve_x_max[ci] < xleft || curve_x_min[ci] > xright) {
+                    continue;
+                }
+                uint32_t t0 = local_pos * 4;
+                uint32_t t1 = t0 + 4;
+                s_curve_upload[t0 + 0] = nt_float32_to_float16(curves[ci].p0x);
+                s_curve_upload[t0 + 1] = nt_float32_to_float16(curves[ci].p0y);
+                s_curve_upload[t0 + 2] = nt_float32_to_float16(curves[ci].p1x);
+                s_curve_upload[t0 + 3] = nt_float32_to_float16(curves[ci].p1y);
+                s_curve_upload[t1 + 0] = nt_float32_to_float16(curves[ci].p2x);
+                s_curve_upload[t1 + 1] = nt_float32_to_float16(curves[ci].p2y);
+                s_curve_upload[t1 + 2] = 0;
+                s_curve_upload[t1 + 3] = 0;
+                local_pos += 2;
+            }
+        }
+    }
+    // #endregion
+
     // #region Upload curve data to GPU from temp buffer
     if (needed_texels > 0) {
         uint32_t remaining = needed_texels;
         uint32_t src_texel = 0;
-        uint32_t dst_texel = curve_offset;
+        uint32_t dst_texel = curve_offset_y;
         while (remaining > 0) {
             uint16_t row = (uint16_t)(dst_texel / slot->curve_tex_width);
             uint16_t col = (uint16_t)(dst_texel % slot->curve_tex_width);
@@ -693,20 +762,26 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     }
     // #endregion
 
-    // #region Upload band data to GPU (RG16UI: curve_start, curve_count per band)
-    uint16_t band_upload[32 * 2] = {0};
+    // #region Upload band data to GPU (Y-bands + X-bands in one row)
+    uint16_t band_upload[64 * 2] = {0}; /* 32 Y-bands + 32 X-bands, RG16UI each */
     for (uint8_t b = 0; b < slot->band_count; b++) {
-        band_upload[(b * 2) + 0] = band_offsets[b];
-        band_upload[(b * 2) + 1] = band_curve_counts[b];
+        band_upload[(b * 2) + 0] = yband_offsets[b];
+        band_upload[(b * 2) + 1] = yband_counts[b];
     }
-    nt_gfx_update_texture(slot->band_texture, 0, cache_idx, slot->band_count, 1, band_upload);
+    uint8_t xoff = slot->band_count;
+    for (uint8_t b = 0; b < slot->band_count; b++) {
+        band_upload[((xoff + b) * 2) + 0] = xband_offsets[b];
+        band_upload[((xoff + b) * 2) + 1] = xband_counts[b];
+    }
+    nt_gfx_update_texture(slot->band_texture, 0, cache_idx, (uint16_t)(slot->band_count * 2), 1, band_upload);
     // #endregion
 
     // #region Fill cache entry
     nt_font_cache_slot_t *cs = &slot->cache[cache_idx];
     cs->entry.codepoint = glyph->codepoint;
-    cs->entry.curve_offset = curve_offset;
-    cs->entry.curve_count = (uint16_t)total_band_curves;
+    cs->entry.curve_offset = curve_offset_y;
+    cs->entry.curve_offset_x = curve_offset_x;
+    cs->entry.curve_count = (uint16_t)(y_total + x_total);
     cs->entry.band_row = cache_idx;
     cs->entry.advance = glyph->advance;
     cs->entry.bbox_x0 = glyph->bbox_x0;
@@ -718,7 +793,7 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     cs->resource_index = resource_index;
     // #endregion
 
-    slot->curve_write_head = curve_offset + local_pos;
+    slot->curve_write_head = curve_offset_y + local_pos;
     slot->glyphs_cached++;
     return cache_idx;
 }
@@ -804,7 +879,7 @@ void nt_font_step(void) {
                 .label = "font_curve",
             });
             slot->band_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-                .width = slot->band_count,
+                .width = (uint16_t)(slot->band_count * 2),
                 .height = slot->band_tex_height,
                 .format = NT_PIXEL_RG16UI,
                 .min_filter = NT_FILTER_NEAREST,
@@ -928,7 +1003,7 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     });
 
     slot->band_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = band_count,
+        .width = (uint16_t)(band_count * 2), /* Y-bands + X-bands */
         .height = desc->band_texture_height,
         .format = NT_PIXEL_RG16UI,
         .min_filter = NT_FILTER_NEAREST,

@@ -63,10 +63,11 @@ typedef struct {
 
 typedef struct {
     uint32_t codepoint;
-    uint32_t curve_offset; /* texel offset into curve texture */
-    uint16_t curve_count;  /* number of curve texels used */
-    uint16_t band_row;     /* row in band texture */
-    int16_t advance;       /* horizontal advance (font units) */
+    uint32_t curve_offset;   /* texel offset for Y-band curves */
+    uint32_t curve_offset_x; /* texel offset for X-band curves */
+    uint16_t curve_count;    /* number of curve texels used */
+    uint16_t band_row;       /* row in band texture */
+    int16_t advance;         /* horizontal advance (font units) */
     int16_t bbox_x0;
     int16_t bbox_y0;
     int16_t bbox_x1;

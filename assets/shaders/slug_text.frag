@@ -133,46 +133,48 @@ float SolveQuadraticVert(vec2 p0, vec2 p1, vec2 p2, float pixelSize) {
     return result;
 }
 
-// Main coverage computation via band/curve lookup
+// Main coverage computation via Y-band + X-band curve lookup
 float CalcCoverage(vec2 coord) {
-    uint curve_offset = v_glyph.x;
-    uint band_row = v_glyph.y;
-    uint band_count = v_glyph.w;
+    uint curve_offset_y = v_glyph.x;
+    uint band_row       = v_glyph.y;
+    uint curve_offset_x = v_glyph.z;
+    uint band_count     = v_glyph.w;
 
-    // Map em-space coordinate to band index
-    float bbox_height = v_glyph_bounds.w - v_glyph_bounds.y;
-    float band_y = (coord.y - v_glyph_bounds.y) / bbox_height * float(band_count);
-    int band_idx = clamp(int(band_y), 0, int(band_count) - 1);
-
-    // Fetch band data: R = curve_start_index (relative), G = curve_count_in_band
-    uvec4 band = texelFetch(u_band_texture, ivec2(band_idx, int(band_row)), 0);
-    uint band_curve_start = band.r;
-    uint band_curve_count = band.g;
-
-    // Pixel size for anti-aliasing
     vec2 pixelSize = fwidth(coord);
+    float bbox_height = v_glyph_bounds.w - v_glyph_bounds.y;
+    float bbox_width  = v_glyph_bounds.z - v_glyph_bounds.x;
 
-    // Accumulate winding numbers
+    // ---- Y-band: horizontal winding (ray cast +X) ----
+    float band_y = (coord.y - v_glyph_bounds.y) / bbox_height * float(band_count);
+    int yband_idx = clamp(int(band_y), 0, int(band_count) - 1);
+    uvec4 yband = texelFetch(u_band_texture, ivec2(yband_idx, int(band_row)), 0);
+
     float windingH = 0.0;
-    float windingV = 0.0;
-
-    uint curveBase = curve_offset + band_curve_start * 2u;
-    for (uint i = 0u; i < band_curve_count; i++) {
-        // Each curve uses 2 texels: texel0 = (p0.x, p0.y, p1.x, p1.y), texel1 = (p2.x, p2.y, -, -)
-        uint texelIdx = curveBase + i * 2u;
-        vec4 d0 = texelFetch(u_curve_texture, CurveTexCoord(texelIdx), 0);
-        vec4 d1 = texelFetch(u_curve_texture, CurveTexCoord(texelIdx + 1u), 0);
-
-        // Control points relative to current fragment coordinate
-        vec2 p0 = d0.xy - coord;
-        vec2 p1 = d0.zw - coord;
-        vec2 p2 = d1.xy - coord;
-
+    uint ycurveBase = curve_offset_y + yband.r * 2u;
+    for (uint i = 0u; i < yband.g; i++) {
+        uint ti = ycurveBase + i * 2u;
+        vec4 d0 = texelFetch(u_curve_texture, CurveTexCoord(ti), 0);
+        vec4 d1 = texelFetch(u_curve_texture, CurveTexCoord(ti + 1u), 0);
+        vec2 p0 = d0.xy - coord; vec2 p1 = d0.zw - coord; vec2 p2 = d1.xy - coord;
         windingH += SolveQuadratic(p0, p1, p2, pixelSize.x);
+    }
+
+    // ---- X-band: vertical winding (ray cast +Y) ----
+    float band_x = (coord.x - v_glyph_bounds.x) / bbox_width * float(band_count);
+    int xband_idx = clamp(int(band_x), 0, int(band_count) - 1);
+    uvec4 xband = texelFetch(u_band_texture, ivec2(int(band_count) + xband_idx, int(band_row)), 0);
+
+    float windingV = 0.0;
+    uint xcurveBase = curve_offset_x + xband.r * 2u;
+    for (uint i = 0u; i < xband.g; i++) {
+        uint ti = xcurveBase + i * 2u;
+        vec4 d0 = texelFetch(u_curve_texture, CurveTexCoord(ti), 0);
+        vec4 d1 = texelFetch(u_curve_texture, CurveTexCoord(ti + 1u), 0);
+        vec2 p0 = d0.xy - coord; vec2 p1 = d0.zw - coord; vec2 p2 = d1.xy - coord;
         windingV += SolveQuadraticVert(p0, p1, p2, pixelSize.y);
     }
 
-    // Combined 2D anti-aliased fill
+    // Combined 2D anti-aliased fill coverage
     return min(abs(windingH), 1.0) * min(abs(windingV), 1.0);
 }
 

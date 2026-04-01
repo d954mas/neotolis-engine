@@ -7,7 +7,7 @@ precision highp int;
 // Stride: 64 bytes per vertex, 4 vertices per glyph quad (2 triangles = 6 indices)
 // location 0: vec2  a_position    - screen/world quad corner (float32 x2)
 // location 1: vec2  a_texcoord    - em-space coordinate (float32 x2)
-// location 2: vec4  a_glyph_data  - packed as floatBitsToUint: (curve_offset, band_row, curve_count, band_count)
+// location 2: vec4  a_glyph_data  - packed as floatBitsToUint: (curve_offset_y, band_row, curve_offset_x, band_count)
 // location 3: vec4  a_glyph_bounds - bbox x0/y0/x1/y1 in em-space (float32 x4)
 // location 4: vec4  a_color       - text color RGBA (float32 x4)
 
