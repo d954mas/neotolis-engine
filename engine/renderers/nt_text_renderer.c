@@ -123,10 +123,6 @@ void nt_text_renderer_init(void) {
     /* Generate quad indices */
     generate_quad_indices();
 
-    /* Flush staging buffer before font cache clears texture data,
-     * so all queued glyphs are drawn with valid curve/band offsets. */
-    nt_font_set_pre_flush_callback(nt_text_renderer_flush);
-
     /* Create dynamic vertex buffer */
     s_text.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_VERTEX,
@@ -297,9 +293,19 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
         NT_LOG_WARN("nt_text_renderer_draw: no font set");
         return;
     }
+    if (!s_text.initialized) {
+        NT_LOG_WARN("nt_text_renderer_draw: not initialized");
+        return;
+    }
+
+    /* Register pre-flush callback so font cache flush draws our staging
+     * buffer before invalidating texture offsets. Active only while we
+     * have vertices in flight; cleared in flush(). */
+    nt_font_set_pre_flush_callback(nt_text_renderer_flush);
 
     nt_font_metrics_t metrics = nt_font_get_metrics(s_text.font);
     if (metrics.units_per_em == 0) {
+        NT_LOG_WARN("nt_text_renderer_draw: units_per_em=0");
         return;
     }
     float scale = size / (float)metrics.units_per_em;
@@ -363,7 +369,6 @@ void nt_text_renderer_flush(void) {
     /* Upload staging buffer to GPU */
     nt_gfx_update_buffer(s_text.vbo, s_text.vertices, s_text.vertex_count * (uint32_t)sizeof(nt_text_vertex_t));
 
-    /* Bind pipeline and resources */
     nt_gfx_bind_pipeline(s_text.pipeline);
     nt_gfx_bind_vertex_buffer(s_text.vbo);
     nt_gfx_bind_index_buffer(s_text.ibo);
@@ -377,12 +382,25 @@ void nt_text_renderer_flush(void) {
         nt_gfx_set_uniform_int("u_curve_tex_width", (int)nt_font_get_curve_texture_width(s_text.font));
     }
 
+    /* Debug: log flush state once after glyph count changes (resize triggers this) */
+    {
+        static uint32_t s_dbg_prev_glyphs;
+        if (s_text.glyph_count != s_dbg_prev_glyphs) {
+            NT_LOG_INFO("flush: glyphs=%u verts=%u pipeline=%u curve_tex=%u band_tex=%u tex_w=%u",
+                        s_text.glyph_count, s_text.vertex_count, s_text.pipeline.id,
+                        nt_font_get_curve_texture(s_text.font).id, nt_font_get_band_texture(s_text.font).id,
+                        (unsigned)nt_font_get_curve_texture_width(s_text.font));
+            s_dbg_prev_glyphs = s_text.glyph_count;
+        }
+    }
+
     /* Single draw call per flush */
     nt_gfx_draw_indexed(0, s_text.glyph_count * 6, s_text.vertex_count);
 
-    /* Reset staging buffer */
+    /* Reset staging buffer and release pre-flush callback */
     s_text.vertex_count = 0;
     s_text.glyph_count = 0;
+    nt_font_set_pre_flush_callback(NULL);
 }
 // #endregion
 

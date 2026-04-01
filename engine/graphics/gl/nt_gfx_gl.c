@@ -121,6 +121,18 @@ static GLint pipeline_get_uniform(const char *name) {
 }
 
 static void nt_gfx_gl_cache_reset(void) {
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ZERO);
+    glDisable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(0.0F, 0.0F);
+    glActiveTexture(GL_TEXTURE0);
+
     s_gl_cache.vao = 0;
     s_gl_cache.program = 0;
     s_gl_cache.depth_test = false;
@@ -363,9 +375,12 @@ void nt_gfx_backend_end_frame(void) {
 }
 
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) {
-    /* Reset GL state cache so all bindings are re-issued this pass.
-     * Needed because window resize on some platforms (Windows modal resize)
-     * may implicitly reset GL state without going through nt_gfx API. */
+    /* Reset GL state cache so all pipeline binds re-issue GL calls.
+     * Required because window resize (Windows modal loop) or driver
+     * may change GL state without going through nt_gfx API, leaving
+     * the cache stale. Without this, a pipeline bound before resize
+     * (e.g. text with depth_write=false) poisons state for the next
+     * frame's pipelines that skip re-binding due to cache hits. */
     nt_gfx_gl_cache_reset();
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;

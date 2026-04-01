@@ -458,10 +458,10 @@ typedef struct {
 
 static nt_curve_t s_decode_curves[NT_FONT_MAX_CURVES_PER_GLYPH];
 
-/* Temporary point buffers for contour decoding (static to avoid ~72 KB on stack) */
-static int32_t s_decode_pts_x[8192];
-static int32_t s_decode_pts_y[8192];
-static uint8_t s_decode_pts_on[8192];
+/* Temporary point buffers for contour decoding (static to avoid stack overflow) */
+static int32_t s_decode_pts_x[NT_FONT_MAX_POINTS_PER_CONTOUR];
+static int32_t s_decode_pts_y[NT_FONT_MAX_POINTS_PER_CONTOUR];
+static uint8_t s_decode_pts_on[NT_FONT_MAX_POINTS_PER_CONTOUR];
 
 /* Read variable-length delta: int8 or sentinel + int16 */
 static inline int16_t read_varlen_delta(const uint8_t **rp) {
@@ -517,7 +517,7 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         int32_t *pts_x = s_decode_pts_x;
         int32_t *pts_y = s_decode_pts_y;
         uint8_t *pts_on = s_decode_pts_on;
-        NT_ASSERT(point_count <= 8192);
+        NT_ASSERT(point_count <= NT_FONT_MAX_POINTS_PER_CONTOUR);
 
         pts_x[0] = first_x;
         pts_y[0] = first_y;
@@ -1105,7 +1105,7 @@ nt_font_stats_t nt_font_get_stats(nt_font_t font) {
         .max_glyphs = slot->max_glyphs,
         .curve_texels_used = slot->curve_write_head,
         .curve_texels_total = (uint32_t)slot->curve_tex_width * slot->curve_tex_height,
-        .band_texels_used = (uint32_t)slot->glyphs_cached * slot->band_count * 2,  /* Y + X bands */
+        .band_texels_used = (uint32_t)slot->glyphs_cached * slot->band_count * 2, /* Y + X bands */
         .band_texels_total = (uint32_t)slot->band_count * 2 * slot->band_tex_height,
     };
 }
