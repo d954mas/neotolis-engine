@@ -847,7 +847,7 @@ void nt_builder_add_font(NtBuilderContext *ctx, const char *path, const nt_font_
     /* Build logical path for resource_id */
     char logical_path[1024];
     if (opts->resource_name) {
-        (void)snprintf(logical_path, sizeof(logical_path), "%s/%s", path, opts->resource_name);
+        (void)snprintf(logical_path, sizeof(logical_path), "%s", opts->resource_name);
     } else {
         (void)snprintf(logical_path, sizeof(logical_path), "%s", path);
     }
