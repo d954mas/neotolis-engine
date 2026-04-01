@@ -212,8 +212,8 @@ static void frame(void) {
 #ifdef NT_PLATFORM_WEB
         nt_platform_web_loading_complete();
 #endif
-        nt_log_info("Base pack ready, starting CJK download...");
-        nt_resource_load_auto(s_cjk_pack_id, "assets/text_cjk.ntpack");
+        // nt_log_info("Base pack ready, starting CJK download...");
+        // nt_resource_load_auto(s_cjk_pack_id, "assets/text_cjk.ntpack");
     }
 
     /* Trackball camera update */
@@ -287,16 +287,29 @@ static void frame(void) {
     nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));
     nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
+    /* DEBUG: skip ALL text rendering to test if clear color works */
+#if 0
     /* Step font system -- resolves pending resources, uploads GPU data */
     nt_font_step();
 
     /* Draw text */
-    nt_text_renderer_set_material(s_text_material);
-    nt_text_renderer_set_font(s_font);
-
-    draw_text_scene();
-
-    nt_text_renderer_flush();
+    {
+        double t0 = nt_time_now();
+        nt_text_renderer_set_material(s_text_material);
+        double t1 = nt_time_now();
+        nt_text_renderer_set_font(s_font);
+        draw_text_scene();
+        double t2 = nt_time_now();
+        nt_text_renderer_flush();
+        double t3 = nt_time_now();
+        double ms_mat = (t1 - t0) * 1000.0;
+        double ms_draw = (t2 - t1) * 1000.0;
+        double ms_flush = (t3 - t2) * 1000.0;
+        if (ms_mat > 1.0 || ms_draw > 1.0 || ms_flush > 1.0) {
+            nt_log_info("set_material: %.1f ms | draw: %.1f ms | flush: %.1f ms", ms_mat, ms_draw, ms_flush);
+        }
+    }
+#endif
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();

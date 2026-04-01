@@ -436,7 +436,7 @@ typedef struct {
 
 static nt_curve_t s_decode_curves[NT_FONT_MAX_CURVES_PER_GLYPH];
 
-/* Read variable-length delta (v3 encoding): int8 or sentinel + int16 */
+/* Read variable-length delta: int8 or sentinel + int16 */
 static inline int16_t read_varlen_delta(const uint8_t **rp) {
     uint8_t b = **rp;
     (*rp)++;
@@ -449,7 +449,16 @@ static inline int16_t read_varlen_delta(const uint8_t **rp) {
     return val;
 }
 
-/* Decode variable-length delta-encoded contour data into absolute float curves (v3) */
+/* Emit one quadratic curve to the output buffer */
+static inline void emit_curve(nt_curve_t *curves, uint16_t *total, uint16_t max_c, float p0x, float p0y, float p1x, float p1y, float p2x, float p2y) {
+    if (*total < max_c) {
+        curves[*total] = (nt_curve_t){p0x, p0y, p1x, p1y, p2x, p2y};
+        (*total)++;
+    }
+}
+
+/* Decode v4 point-based contour data into absolute float curves.
+ * Handles implicit midpoints between consecutive off-curve points. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves, uint16_t max_curves) {
     const uint8_t *rp = contour_data;
@@ -460,69 +469,116 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
     uint16_t total_curves = 0;
 
     for (uint16_t ci = 0; ci < contour_count; ci++) {
-        uint16_t seg_count;
-        memcpy(&seg_count, rp, 2);
+        uint16_t point_count;
+        memcpy(&point_count, rp, 2);
         rp += 2;
 
-        int16_t start_x;
-        int16_t start_y;
-        memcpy(&start_x, rp, 2);
+        uint32_t flags_bytes = NT_FONT_BITMASK_BYTES(point_count);
+        const uint8_t *flags = rp;
+        rp += flags_bytes;
+
+        // #region Read all points (absolute coordinates)
+        /* First point is absolute int16 */
+        int16_t first_x;
+        int16_t first_y;
+        memcpy(&first_x, rp, 2);
         rp += 2;
-        memcpy(&start_y, rp, 2);
+        memcpy(&first_y, rp, 2);
         rp += 2;
 
-        uint32_t bitmask_bytes = NT_FONT_BITMASK_BYTES(seg_count);
-        const uint8_t *bitmask = rp;
-        rp += bitmask_bytes;
+        /* Decode all points into a local buffer (stack-allocated, max ~8K points) */
+        int32_t pts_x[8192];
+        int32_t pts_y[8192];
+        uint8_t pts_on[8192];
+        NT_ASSERT(point_count <= 8192);
 
-        int32_t prev_x = start_x;
-        int32_t prev_y = start_y;
+        pts_x[0] = first_x;
+        pts_y[0] = first_y;
+        pts_on[0] = (flags[0] & 1U) != 0;
 
-        for (uint16_t s = 0; s < seg_count; s++) {
-            bool is_quad = (bitmask[s / 8] & (1U << (s % 8))) != 0;
+        int32_t px = first_x;
+        int32_t py = first_y;
+        for (uint16_t p = 1; p < point_count; p++) {
+            int16_t dx = read_varlen_delta(&rp);
+            int16_t dy = read_varlen_delta(&rp);
+            px += dx;
+            py += dy;
+            pts_x[p] = px;
+            pts_y[p] = py;
+            pts_on[p] = (flags[p / 8] & (1U << (p % 8))) != 0;
+        }
+        // #endregion
 
-            float fp0x = (float)prev_x;
-            float fp0y = (float)prev_y;
+        // #region Convert points to quadratic curves (TrueType rules)
+        /* Walk the closed contour: point[0] → point[1] → ... → point[n-1] → point[0] */
+        uint16_t n = point_count;
+        uint16_t i = 0;
 
-            if (is_quad) {
-                // #region Quadratic curve
-                int16_t dp1x = read_varlen_delta(&rp);
-                int16_t dp1y = read_varlen_delta(&rp);
-                int16_t dp2x = read_varlen_delta(&rp);
-                int16_t dp2y = read_varlen_delta(&rp);
+        /* Find first on-curve point to start from */
+        uint16_t start = 0;
+        while (start < n && !pts_on[start]) {
+            start++;
+        }
+        if (start == n) {
+            /* All off-curve: start from implicit midpoint of first two */
+            start = 0;
+        }
 
-                float fp1x = (float)(prev_x + dp1x);
-                float fp1y = (float)(prev_y + dp1y);
-                float fp2x = (float)(prev_x + dp2x);
-                float fp2y = (float)(prev_y + dp2y);
+        /* Current on-curve position */
+        float cur_x;
+        float cur_y;
+        if (pts_on[start]) {
+            cur_x = (float)pts_x[start];
+            cur_y = (float)pts_y[start];
+            i = (start + 1) % n;
+        } else {
+            /* All off-curve: midpoint between point[0] and point[1] */
+            cur_x = (float)(pts_x[0] + pts_x[1]) * 0.5F;
+            cur_y = (float)(pts_y[0] + pts_y[1]) * 0.5F;
+            i = 0;
+        }
 
-                if (total_curves < max_curves) {
-                    curves[total_curves] = (nt_curve_t){fp0x, fp0y, fp1x, fp1y, fp2x, fp2y};
-                    total_curves++;
-                }
-                prev_x = prev_x + dp2x;
-                prev_y = prev_y + dp2y;
-                // #endregion
+        uint16_t steps = 0;
+        while (steps < n) {
+            uint16_t idx = i % n;
+
+            if (pts_on[idx]) {
+                /* On-curve → Line segment (degenerate quad) */
+                float ex = (float)pts_x[idx];
+                float ey = (float)pts_y[idx];
+                emit_curve(curves, &total_curves, max_curves, cur_x, cur_y, (cur_x + ex) * 0.5F, (cur_y + ey) * 0.5F, ex, ey);
+                cur_x = ex;
+                cur_y = ey;
+                i = (idx + 1) % n;
+                steps++;
             } else {
-                // #region Line (promote to degenerate quadratic)
-                int16_t dp2x = read_varlen_delta(&rp);
-                int16_t dp2y = read_varlen_delta(&rp);
+                /* Off-curve: control point for quadratic */
+                float cx = (float)pts_x[idx];
+                float cy = (float)pts_y[idx];
+                uint16_t next = (idx + 1) % n;
 
-                float fp2x = (float)(prev_x + dp2x);
-                float fp2y = (float)(prev_y + dp2y);
-                /* Degenerate quadratic: p1 = midpoint(p0, p2) */
-                float fp1x = (fp0x + fp2x) * 0.5F;
-                float fp1y = (fp0y + fp2y) * 0.5F;
-
-                if (total_curves < max_curves) {
-                    curves[total_curves] = (nt_curve_t){fp0x, fp0y, fp1x, fp1y, fp2x, fp2y};
-                    total_curves++;
+                if (pts_on[next]) {
+                    /* off → on: standard quad */
+                    float ex = (float)pts_x[next];
+                    float ey = (float)pts_y[next];
+                    emit_curve(curves, &total_curves, max_curves, cur_x, cur_y, cx, cy, ex, ey);
+                    cur_x = ex;
+                    cur_y = ey;
+                    i = (next + 1) % n;
+                    steps += 2;
+                } else {
+                    /* off → off: implicit midpoint is the endpoint */
+                    float mx = (cx + (float)pts_x[next]) * 0.5F;
+                    float my = (cy + (float)pts_y[next]) * 0.5F;
+                    emit_curve(curves, &total_curves, max_curves, cur_x, cur_y, cx, cy, mx, my);
+                    cur_x = mx;
+                    cur_y = my;
+                    i = next; /* don't skip next — it becomes the control for the next segment */
+                    steps++;
                 }
-                prev_x = prev_x + dp2x;
-                prev_y = prev_y + dp2y;
-                // #endregion
             }
         }
+        // #endregion
     }
     return total_curves;
 }
@@ -989,7 +1045,6 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t code
     bool found = find_glyph_in_resources(slot, codepoint, &res_idx, &glyph_entry);
 
     if (!found) {
-        NT_LOG_WARN("glyph U+%04X not found in any font resource, returning tofu", codepoint);
         generate_tofu(slot);
         nt_font_cache_slot_t *tofu = hash_lookup(slot, 0xFFFFFFFFU);
         return tofu ? &tofu->entry : NULL;
@@ -1006,7 +1061,11 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t code
     const uint8_t *contour_data = blob + contour_offset;
 
     NT_ASSERT(glyph_entry->curve_count <= NT_FONT_MAX_CURVES_PER_GLYPH);
-    uint16_t curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH);
+    uint16_t curve_count = 0;
+    if (glyph_entry->curve_count > 0) {
+        curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH);
+    }
+    NT_LOG_INFO("cache miss U+%04X: %u curves (expected %u)", codepoint, curve_count, glyph_entry->curve_count);
     // #endregion
 
     // #region Upload, allocate slot, fill cache

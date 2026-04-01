@@ -51,7 +51,7 @@
         {
             "label": "Build pack builders (release)",
             "type": "shell",
-            "command": "cmake --build build/_cmake/native-release --target build_tq_packs build_sponza_packs",
+            "command": "cmake --build build/_cmake/native-release --target build_tq_packs build_sponza_packs build_text_packs",
             "group": "build",
             "problemMatcher": "$gcc"
         },
@@ -338,9 +338,18 @@
             "problemMatcher": []
         },
         {
-            "label": "Build text_demo (debug)",
+            "label": "Quick build native-debug (no -Werror)",
             "type": "shell",
-            "command": "cmake --build build/_cmake/native-debug --target text_demo",
+            "command": "cmake -S . -B build/_cmake/native-debug -DNT_NO_WERROR=ON --preset native-debug && cmake --build build/_cmake/native-debug",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Quick build native-release (no -Werror)",
+            "type": "shell",
+            "command": "cmake -S . -B build/_cmake/native-release -DNT_NO_WERROR=ON --preset native-release && cmake --build build/_cmake/native-release",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
             "group": "build",
             "problemMatcher": "$gcc"
         },

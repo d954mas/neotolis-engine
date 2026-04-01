@@ -5,10 +5,10 @@
 
 /* Magic: ASCII "FONT" as uint32_t little-endian = 0x544E4F46 */
 #define NT_FONT_MAGIC 0x544E4F46
-#define NT_FONT_VERSION 3
+#define NT_FONT_VERSION 4
 
 /*
- * Font asset binary layout (v3 — variable-length delta encoding):
+ * Font asset binary layout (v4 — point-based contours with implicit midpoints):
  *
  *   Offset 0: NtFontAssetHeader (16 bytes)
  *   Offset 16: NtFontGlyphEntry[glyph_count] (24 bytes each)
@@ -23,44 +23,42 @@
  *   raw codepoint — compact 4-byte pairs. Runtime already knows glyph
  *   indices from the bsearch lookup, so no extra conversion needed.
  *
- *   Contour data layout (sequential, variable-length):
+ *   Contour data layout (v4 — point-based, like TrueType):
  *
  *     uint16_t contour_count
  *
  *     Per contour (contour_count times):
- *       uint16_t segment_count
- *       int16_t  start_x, start_y             // moveto point (always int16)
- *       uint8_t  type_bits[ALIGN2(ceil(segment_count/8))]  // bit=1: quad, bit=0: line (LSB first, 2-byte aligned)
+ *       uint16_t point_count
+ *       uint8_t  on_curve_flags[ALIGN2(ceil(point_count/8))]
+ *           bit=1: on-curve point, bit=0: off-curve (control) point
+ *           LSB first, 2-byte aligned
  *
- *       Per segment (segment_count times, sequential, DELTA-ENCODED):
- *         if line  (bit=0): varlen dp2x, dp2y
- *         if quad  (bit=1): varlen dp1x, dp1y, dp2x, dp2y
+ *       First point: int16_t x, int16_t y  (absolute coordinates)
+ *       Subsequent points (point_count - 1):
+ *         varlen dx, varlen dy  (delta from previous point)
  *
- *     Variable-length coordinate encoding (v3):
- *       Each delta coordinate is encoded as:
- *         - If value in [-127, +127]: 1 byte (int8)
- *         - Otherwise: 0x80 sentinel byte + int16 LE (3 bytes total)
- *       The value -128 (0x80) is reserved as the sentinel marker.
- *       ~90% of CJK deltas fit in int8, saving ~40% on curve data.
+ *     Variable-length coordinate encoding:
+ *       - If value in [-127, +127]: 1 byte (int8)
+ *       - Otherwise: 0x80 sentinel byte + int16 LE (3 bytes total)
  *
- *     Endpoint sharing: p0 of each segment = p2 of the previous segment
- *     (or start_x/y for the first segment in a contour).
+ *     Implicit midpoint rule (TrueType convention):
+ *       Two consecutive off-curve points imply an on-curve midpoint
+ *       between them. The decoder inserts these automatically.
+ *       This saves ~19% of coordinate data for CJK glyphs.
  *
- *     Delta encoding: all segment coordinates are deltas relative
- *     to the previous chain endpoint (start_x/y for first segment,
- *     absolute p2 of previous segment thereafter). Reconstruct:
- *       p1 = prev + (dp1x, dp1y)
- *       p2 = prev + (dp2x, dp2y)
- *       prev = p2  (for next segment)
+ *     Decoding rules (point sequence → quadratic curves):
+ *       - on → on:  LINE segment (promote to degenerate quad: p1 = midpoint)
+ *       - on → off → on:  QUAD segment (off-curve = control point)
+ *       - on → off → off:  QUAD from on to midpoint(off1, off2), control = off1
+ *                           Then continue from midpoint as new on-curve start
+ *       - Contour closing: last point connects back to first point
  *
  *     Coordinates are in font design units.
- *     Runtime at cache miss reconstructs absolute coords and expands:
- *       - Lines: compute p1 = midpoint(p0, p2), write (p0, p1, p2) as float
- *       - Quads: write (p0, p1, p2) as float
- *     Band decomposition happens at runtime (not stored in pack).
+ *     Runtime at cache miss decodes points → produces nt_curve_t (p0,p1,p2)
+ *     → band decomposition → GPU upload (same as v3).
  */
 
-/* Sentinel byte for variable-length delta encoding (v3).
+/* Sentinel byte for variable-length delta encoding.
  * int8 value -128 (0x80) is reserved; real deltas of -128 use the 3-byte path. */
 #define NT_FONT_DELTA_SENTINEL ((uint8_t)0x80)
 

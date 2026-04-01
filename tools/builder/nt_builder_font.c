@@ -452,78 +452,12 @@ static int kern_triple_compare(const void *a, const void *b) {
     return 0;
 }
 
-/* --- Contour analysis: compute curve data size from stb vertices --- */
+/* --- v4 point-based contour encoding (implicit midpoints, like TrueType) --- */
 
 /* Variable-length delta size: 1 byte if fits in [-127,127], else 3 bytes (sentinel + int16) */
 static inline uint32_t varlen_size(int delta) {
     return (delta >= -127 && delta <= 127) ? 1 : 3;
 }
-
-static uint32_t compute_curve_data_size(const stbtt_vertex *verts, int nv, uint16_t *out_total_segments, uint16_t *out_contour_count) {
-    if (nv == 0) {
-        *out_total_segments = 0;
-        *out_contour_count = 0;
-        return 0;
-    }
-
-    uint32_t size = 2; /* contour_count uint16 */
-    uint16_t total_segs = 0;
-    uint16_t cc = 0;
-    uint16_t cur_segs = 0;
-    uint32_t cur_data = 0; /* variable-length coord data for current contour */
-    bool in_contour = false;
-    int prev_x = 0;
-    int prev_y = 0;
-
-    for (int v = 0; v < nv; v++) {
-        switch (verts[v].type) {
-        case STBTT_vmove:
-            if (in_contour && cur_segs > 0) {
-                uint32_t bm = NT_FONT_BITMASK_BYTES(cur_segs);
-                size += 6 + bm + cur_data;
-                cc++;
-            }
-            in_contour = true;
-            cur_segs = 0;
-            cur_data = 0;
-            prev_x = verts[v].x;
-            prev_y = verts[v].y;
-            break;
-        case STBTT_vline:
-            cur_data += varlen_size(verts[v].x - prev_x) + varlen_size(verts[v].y - prev_y);
-            prev_x = verts[v].x;
-            prev_y = verts[v].y;
-            cur_segs++;
-            total_segs++;
-            break;
-        case STBTT_vcurve:
-            cur_data += varlen_size(verts[v].cx - prev_x) + varlen_size(verts[v].cy - prev_y) +
-                        varlen_size(verts[v].x - prev_x) + varlen_size(verts[v].y - prev_y);
-            prev_x = verts[v].x;
-            prev_y = verts[v].y;
-            cur_segs++;
-            total_segs++;
-            break;
-        case STBTT_vcubic:
-            NT_BUILD_ASSERT(0 && "cubic curves not supported (CFF font?)");
-            break;
-        default:
-            break;
-        }
-    }
-    /* Finalize last contour */
-    if (in_contour && cur_segs > 0) {
-        uint32_t bm = NT_FONT_BITMASK_BYTES(cur_segs);
-        size += 6 + bm + cur_data;
-        cc++;
-    }
-
-    *out_total_segments = total_segs;
-    *out_contour_count = cc;
-    return (total_segs > 0) ? size : 0;
-}
-
-/* --- Write variable-length delta (v3 encoding) --- */
 
 static inline void write_varlen_delta(uint8_t **wp, int delta) {
     NT_BUILD_ASSERT(abs(delta) <= INT16_MAX && "delta overflow");
@@ -539,68 +473,175 @@ static inline void write_varlen_delta(uint8_t **wp, int delta) {
     }
 }
 
-/* --- Write contour data from stb vertices (variable-length delta-encoded, v3) --- */
+/* Temporary point buffer for one contour (used during encoding) */
+typedef struct {
+    int16_t x, y;
+    bool on_curve;
+} FontPoint;
+
+#define MAX_POINTS_PER_CONTOUR 8192
+static FontPoint s_points[MAX_POINTS_PER_CONTOUR];
+
+/* Convert stbtt vertices for one contour into compact point representation.
+ * Detects implicit midpoints inserted by stbtt and removes them.
+ * Returns number of points written to s_points. */
+static uint16_t vertices_to_points(const stbtt_vertex *verts, int start, int end) {
+    uint16_t np = 0;
+
+    /* First vertex is always vmove → on-curve start point */
+    NT_BUILD_ASSERT(verts[start].type == STBTT_vmove);
+    s_points[np++] = (FontPoint){verts[start].x, verts[start].y, true};
+
+    for (int vi = start + 1; vi < end; vi++) {
+        if (verts[vi].type == STBTT_vline) {
+            /* Line: add on-curve endpoint */
+            NT_BUILD_ASSERT(np < MAX_POINTS_PER_CONTOUR);
+            s_points[np++] = (FontPoint){verts[vi].x, verts[vi].y, true};
+        } else if (verts[vi].type == STBTT_vcurve) {
+            /* Quad curve: add off-curve control point */
+            NT_BUILD_ASSERT(np < MAX_POINTS_PER_CONTOUR);
+            s_points[np++] = (FontPoint){verts[vi].cx, verts[vi].cy, false};
+
+            /* Check if endpoint is an implicit midpoint (will be skipped).
+             * If next vertex is also vcurve, and current endpoint == midpoint
+             * of current control and next control, it's implicit. */
+            bool implicit = false;
+            if (vi + 1 < end && verts[vi + 1].type == STBTT_vcurve) {
+                int mid_x = (verts[vi].cx + verts[vi + 1].cx) >> 1;
+                int mid_y = (verts[vi].cy + verts[vi + 1].cy) >> 1;
+                if (verts[vi].x == mid_x && verts[vi].y == mid_y) {
+                    implicit = true;
+                }
+            }
+            if (!implicit) {
+                /* Explicit on-curve endpoint — keep it */
+                NT_BUILD_ASSERT(np < MAX_POINTS_PER_CONTOUR);
+                s_points[np++] = (FontPoint){verts[vi].x, verts[vi].y, true};
+            }
+        }
+    }
+
+    /* Remove trailing on-curve point if it equals the start (contour is closed implicitly) */
+    if (np > 1 && s_points[np - 1].on_curve && s_points[np - 1].x == s_points[0].x && s_points[np - 1].y == s_points[0].y) {
+        np--;
+    }
+
+    return np;
+}
+
+static uint32_t compute_curve_data_size(const stbtt_vertex *verts, int nv, uint16_t *out_total_segments, uint16_t *out_contour_count) {
+    if (nv == 0) {
+        *out_total_segments = 0;
+        *out_contour_count = 0;
+        return 0;
+    }
+
+    uint32_t size = 2; /* contour_count uint16 */
+    uint16_t total_segs = 0;
+    uint16_t cc = 0;
+
+    /* Find contour boundaries (vmove to vmove) */
+    for (int v = 0; v < nv; v++) {
+        if (verts[v].type != STBTT_vmove) {
+            continue;
+        }
+        int contour_end = v + 1;
+        while (contour_end < nv && verts[contour_end].type != STBTT_vmove) {
+            contour_end++;
+        }
+        /* Count segments in this contour */
+        uint16_t seg_count = 0;
+        for (int j = v + 1; j < contour_end; j++) {
+            if (verts[j].type == STBTT_vline || verts[j].type == STBTT_vcurve) {
+                seg_count++;
+            }
+        }
+        if (seg_count == 0) {
+            continue;
+        }
+
+        /* Convert to points to get accurate size */
+        uint16_t np = vertices_to_points(verts, v, contour_end);
+        uint32_t flags_bytes = NT_FONT_BITMASK_BYTES(np);
+
+        /* Size: point_count(2) + flags + first point(4) + deltas for rest */
+        uint32_t contour_size = 2 + flags_bytes + 4; /* header + first point absolute */
+        int prev_x = s_points[0].x;
+        int prev_y = s_points[0].y;
+        for (uint16_t p = 1; p < np; p++) {
+            contour_size += varlen_size(s_points[p].x - prev_x) + varlen_size(s_points[p].y - prev_y);
+            prev_x = s_points[p].x;
+            prev_y = s_points[p].y;
+        }
+        size += contour_size;
+        total_segs += seg_count;
+        cc++;
+    }
+
+    *out_total_segments = total_segs;
+    *out_contour_count = cc;
+    return (total_segs > 0) ? size : 0;
+}
+
+/* --- Write point-based contour data (v4) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void write_contour_data(const stbtt_vertex *verts, int nv, uint16_t contour_count, uint8_t *wp) {
     memcpy(wp, &contour_count, 2);
     wp += 2;
 
-    int vi = 0;
-    for (uint16_t ci = 0; ci < contour_count; ci++) {
-        /* Find next non-empty moveto (skip empty contours with 0 segments) */
+    for (int v = 0; v < nv; v++) {
+        if (verts[v].type != STBTT_vmove) {
+            continue;
+        }
+        int contour_end = v + 1;
+        while (contour_end < nv && verts[contour_end].type != STBTT_vmove) {
+            contour_end++;
+        }
+        /* Skip empty contours */
         uint16_t seg_count = 0;
-        while (vi < nv) {
-            if (verts[vi].type != STBTT_vmove) {
-                vi++;
-                continue;
+        for (int j = v + 1; j < contour_end; j++) {
+            if (verts[j].type == STBTT_vline || verts[j].type == STBTT_vcurve) {
+                seg_count++;
             }
-            seg_count = 0;
-            for (int peek = vi + 1; peek < nv && verts[peek].type != STBTT_vmove; peek++) {
-                if (verts[peek].type == STBTT_vline || verts[peek].type == STBTT_vcurve) {
-                    seg_count++;
-                }
-            }
-            if (seg_count > 0) {
-                break; /* found non-empty contour */
-            }
-            vi++; /* skip empty contour */
+        }
+        if (seg_count == 0) {
+            continue;
         }
 
-        // #region Contour header
-        memcpy(wp, &seg_count, 2);
+        /* Convert to compact points */
+        uint16_t np = vertices_to_points(verts, v, contour_end);
+
+        // #region Contour header: point_count + flags
+        memcpy(wp, &np, 2);
         wp += 2;
-        int16_t sx = verts[vi].x;
-        int16_t sy = verts[vi].y;
-        memcpy(wp, &sx, 2);
-        wp += 2;
-        memcpy(wp, &sy, 2);
-        wp += 2;
-        vi++;
+
+        uint32_t flags_bytes = NT_FONT_BITMASK_BYTES(np);
+        uint8_t *flags = wp;
+        memset(flags, 0, flags_bytes);
+        for (uint16_t p = 0; p < np; p++) {
+            if (s_points[p].on_curve) {
+                flags[p / 8] |= (uint8_t)(1U << (p % 8));
+            }
+        }
+        wp += flags_bytes;
         // #endregion
 
-        // #region Bitmask + variable-length delta-encoded segments
-        uint32_t bitmask_bytes = NT_FONT_BITMASK_BYTES(seg_count);
-        uint8_t *bitmask = wp;
-        memset(bitmask, 0, bitmask_bytes);
-        wp += bitmask_bytes;
+        // #region Coordinates: first absolute, rest varlen delta
+        int16_t fx = s_points[0].x;
+        int16_t fy = s_points[0].y;
+        memcpy(wp, &fx, 2);
+        wp += 2;
+        memcpy(wp, &fy, 2);
+        wp += 2;
 
-        int prev_x = sx;
-        int prev_y = sy;
-        for (uint16_t s = 0; s < seg_count; s++) {
-            if (verts[vi].type == STBTT_vcurve) {
-                bitmask[s / 8] |= (uint8_t)(1U << (s % 8));
-                write_varlen_delta(&wp, verts[vi].cx - prev_x);
-                write_varlen_delta(&wp, verts[vi].cy - prev_y);
-                write_varlen_delta(&wp, verts[vi].x - prev_x);
-                write_varlen_delta(&wp, verts[vi].y - prev_y);
-            } else {
-                write_varlen_delta(&wp, verts[vi].x - prev_x);
-                write_varlen_delta(&wp, verts[vi].y - prev_y);
-            }
-            prev_x = verts[vi].x;
-            prev_y = verts[vi].y;
-            vi++;
+        int prev_x = fx;
+        int prev_y = fy;
+        for (uint16_t p = 1; p < np; p++) {
+            write_varlen_delta(&wp, s_points[p].x - prev_x);
+            write_varlen_delta(&wp, s_points[p].y - prev_y);
+            prev_x = s_points[p].x;
+            prev_y = s_points[p].y;
         }
         // #endregion
     }
