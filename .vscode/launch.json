@@ -202,6 +202,24 @@
             "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
         },
         {
+            "name": "Debug WASM text_demo",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8090/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/text/wasm-debug-paired",
+            "preLaunchTask": "Build & Serve text (debug)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Run WASM text_demo (release)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8091/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/text/wasm-release-paired",
+            "preLaunchTask": "Build & Serve text (release)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
             "name": "Build Text Packs",
             "type": "cppvsdbg",
             "request": "launch",

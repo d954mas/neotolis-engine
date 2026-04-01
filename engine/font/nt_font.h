@@ -75,7 +75,23 @@ typedef struct {
     bool is_tofu;
 } nt_glyph_cache_entry_t;
 
-/* ---- Text measurement (may trigger glyph cache miss → GPU upload) ---- */
+/* ---- Glyph metrics (CPU-only, no GPU, no cache) ---- */
+
+typedef struct {
+    int16_t advance;
+    int16_t bbox_x0;
+    int16_t bbox_y0;
+    int16_t bbox_x1;
+    int16_t bbox_y1;
+    bool found; /* false = tofu fallback metrics */
+} nt_glyph_metrics_t;
+
+/* Lookup glyph metrics by codepoint without touching GPU or glyph cache.
+ * Returns advance + bbox from the font binary via bsearch.
+ * Missing glyphs return tofu metrics (advance = units_per_em/2). */
+nt_glyph_metrics_t nt_font_lookup_metrics(nt_font_t font, uint32_t codepoint);
+
+/* ---- Text measurement (pure CPU, no GPU calls) ---- */
 
 typedef struct {
     float width;

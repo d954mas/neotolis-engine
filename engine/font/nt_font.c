@@ -1247,11 +1247,45 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
     return 0;
 }
 
-/* UTF-8 decoder — shared header (core/nt_utf8.h) */
+// #region Metrics-only lookup (pure CPU, no GPU, no cache)
+nt_glyph_metrics_t nt_font_lookup_metrics(nt_font_t font, uint32_t codepoint) {
+    NT_ASSERT(s_font.initialized);
+    NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
 
-// #region Measurement
+    nt_font_slot_t *slot = get_slot(font);
+
+    /* Search glyph entry across all loaded resources */
+    uint8_t res_idx = 0;
+    const NtFontGlyphEntry *entry = NULL;
+    bool found = find_glyph_in_resources(slot, codepoint, &res_idx, &entry);
+
+    if (found) {
+        return (nt_glyph_metrics_t){
+            .advance = entry->advance,
+            .bbox_x0 = entry->bbox_x0,
+            .bbox_y0 = entry->bbox_y0,
+            .bbox_x1 = entry->bbox_x1,
+            .bbox_y1 = entry->bbox_y1,
+            .found = true,
+        };
+    }
+
+    /* Tofu fallback — same dimensions as generate_tofu() */
+    int16_t tofu_w = (int16_t)(slot->metrics.units_per_em / 2);
+    return (nt_glyph_metrics_t){
+        .advance = tofu_w,
+        .bbox_x0 = 0,
+        .bbox_y0 = slot->metrics.descent,
+        .bbox_x1 = tofu_w,
+        .bbox_y1 = slot->metrics.ascent,
+        .found = false,
+    };
+}
+// #endregion
+
+// #region Measurement (pure CPU, no GPU calls)
 nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) {
-    nt_text_size_t result = {0.0f, 0.0f};
+    nt_text_size_t result = {0.0F, 0.0F};
     if (!utf8 || !*utf8) {
         return result;
     }
@@ -1265,9 +1299,9 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) {
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
-    float pen_x = 0.0f;
-    float min_y = 0.0f;
-    float max_y = 0.0f;
+    float pen_x = 0.0F;
+    float min_y = 0.0F;
+    float max_y = 0.0F;
 
     for (const uint8_t *p = (const uint8_t *)utf8; *p; p++) {
         if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
@@ -1279,16 +1313,14 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) {
             pen_x += (float)kern * scale;
         }
 
-        const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph(font, codepoint);
-        if (g) {
-            if ((float)g->bbox_y0 * scale < min_y) {
-                min_y = (float)g->bbox_y0 * scale;
-            }
-            if ((float)g->bbox_y1 * scale > max_y) {
-                max_y = (float)g->bbox_y1 * scale;
-            }
-            pen_x += (float)g->advance * scale;
+        nt_glyph_metrics_t g = nt_font_lookup_metrics(font, codepoint);
+        if ((float)g.bbox_y0 * scale < min_y) {
+            min_y = (float)g.bbox_y0 * scale;
         }
+        if ((float)g.bbox_y1 * scale > max_y) {
+            max_y = (float)g.bbox_y1 * scale;
+        }
+        pen_x += (float)g.advance * scale;
         prev_cp = codepoint;
     }
 

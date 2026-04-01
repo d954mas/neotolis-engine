@@ -26,6 +26,9 @@ emsdk/
 # IDE
 .vscode/.chrome-profile/
 
+# Research tool binaries
+tools/research/*.exe
+
 # OS
 .DS_Store
 Thumbs.db

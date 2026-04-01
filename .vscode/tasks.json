@@ -338,6 +338,42 @@
             "problemMatcher": []
         },
         {
+            "label": "Ensure server text (debug :8090)",
+            "type": "shell",
+            "command": "curl -s -o nul http://localhost:8090 >nul 2>&1 && (echo Server already running on :8090) || (start /b python -m http.server 8090 -d \"${workspaceFolder}/build/examples/text/wasm-debug-paired\" & timeout /t 1 >nul)",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Ensure server text (release :8091)",
+            "type": "shell",
+            "command": "curl -s -o nul http://localhost:8091 >nul 2>&1 && (echo Server already running on :8091) || (start /b python -m http.server 8091 -d \"${workspaceFolder}/build/examples/text/wasm-release-paired\" & timeout /t 1 >nul)",
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve text (debug)",
+            "dependsOn": ["Build wasm-debug-paired", "Ensure server text (debug :8090)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve text (release)",
+            "dependsOn": ["Build wasm-release-paired", "Ensure server text (release :8091)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
             "label": "Quick build native-debug (no -Werror)",
             "type": "shell",
             "command": "cmake -S . -B build/_cmake/native-debug -DNT_NO_WERROR=ON --preset native-debug && cmake --build build/_cmake/native-debug",

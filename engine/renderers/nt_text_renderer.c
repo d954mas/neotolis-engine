@@ -11,15 +11,15 @@
 #include <string.h>
 
 // #region Vertex format
-/* 64 bytes per vertex, matching slug_text.vert contract */
+/* 68 bytes per vertex, matching slug_text.vert contract */
 typedef struct {
-    float position[2];     /* 8B: world-space quad corner */
+    float position[3];     /* 12B: world-space quad corner (full 3D) */
     float texcoord[2];     /* 8B: em-space coordinate */
-    float glyph_data[4];   /* 16B: packed uint via memcpy (curve_offset, band_row, curve_count, band_count) */
+    float glyph_data[4];   /* 16B: packed uint via memcpy (curve_offset, band_row, curve_offset_x, band_count) */
     float glyph_bounds[4]; /* 16B: bbox x0/y0/x1/y1 in em-space */
     float color[4];        /* 16B: RGBA float */
 } nt_text_vertex_t;
-_Static_assert(sizeof(nt_text_vertex_t) == 64, "text vertex stride must be 64 bytes");
+_Static_assert(sizeof(nt_text_vertex_t) == 68, "text vertex stride must be 68 bytes");
 // #endregion
 
 // #region Module state
@@ -73,17 +73,17 @@ static void create_pipeline(void) {
         nt_gfx_destroy_pipeline(s_text.pipeline);
     }
 
-    /* Slug vertex layout: 5 attributes, stride = 64 bytes */
+    /* Slug vertex layout: 5 attributes, stride = 68 bytes */
     nt_vertex_layout_t layout = {
         .attr_count = 5,
-        .stride = 64,
+        .stride = 68,
         .attrs =
             {
-                {.location = 0, .format = NT_FORMAT_FLOAT2, .offset = 0},  /* a_position */
-                {.location = 1, .format = NT_FORMAT_FLOAT2, .offset = 8},  /* a_texcoord */
-                {.location = 2, .format = NT_FORMAT_FLOAT4, .offset = 16}, /* a_glyph_data */
-                {.location = 3, .format = NT_FORMAT_FLOAT4, .offset = 32}, /* a_glyph_bounds */
-                {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 48}, /* a_color */
+                {.location = 0, .format = NT_FORMAT_FLOAT3, .offset = 0},  /* a_position */
+                {.location = 1, .format = NT_FORMAT_FLOAT2, .offset = 12}, /* a_texcoord */
+                {.location = 2, .format = NT_FORMAT_FLOAT4, .offset = 20}, /* a_glyph_data */
+                {.location = 3, .format = NT_FORMAT_FLOAT4, .offset = 36}, /* a_glyph_bounds */
+                {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 52}, /* a_color */
             },
     };
 
@@ -216,12 +216,11 @@ void nt_text_renderer_set_font(nt_font_t font) {
 // #region Vertex generation helpers
 static void pack_uint_as_float(float *out, uint32_t val) { memcpy(out, &val, 4); /* bit-preserving uint-to-float, never cast (Pitfall 1) */ }
 
-static void transform_point(float out[2], const float model[16], float x, float y) {
-    /* mat4 * vec4(x, y, 0, 1) -- projects to 2D (Z discarded).
-     * Correct for translation-only model matrices + view rotation.
-     * Model matrices with Z rotation/translation will lose the Z component. */
+static void transform_point(float out[3], const float model[16], float x, float y) {
+    /* mat4 * vec4(x, y, 0, 1) -- full 3D transform */
     out[0] = model[0] * x + model[4] * y + model[12];
     out[1] = model[1] * x + model[5] * y + model[13];
+    out[2] = model[2] * x + model[6] * y + model[14];
 }
 
 static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, const float color[4], uint8_t band_count) {
@@ -338,7 +337,7 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
-    float pen_x = 0.0f;
+    float pen_x = 0.0F;
 
     for (const uint8_t *p = (const uint8_t *)utf8; *p; p++) {
         if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
