@@ -110,8 +110,18 @@ static void build_cjk_charset(const char *font_path) {
     long sz = ftell(f);
     (void)fseek(f, 0, SEEK_SET);
     uint8_t *data = (uint8_t *)malloc((size_t)sz);
-    (void)fread(data, 1, (size_t)sz, f);
+    if (!data) {
+        (void)fclose(f);
+        (void)fprintf(stderr, "ERROR: malloc failed for font (%ld bytes)\n", sz);
+        return;
+    }
+    size_t read = fread(data, 1, (size_t)sz, f);
     (void)fclose(f);
+    if (read != (size_t)sz) {
+        (void)fprintf(stderr, "ERROR: fread returned %zu, expected %ld\n", read, sz);
+        free(data);
+        return;
+    }
 
     stbtt_fontinfo font;
     if (!stbtt_InitFont(&font, data, 0)) {
@@ -142,6 +152,7 @@ static void build_cjk_charset(const char *font_path) {
 
 static char s_path_buf[512];
 
+/* Returns pointer to static buffer — not reentrant, one call per expression */
 static const char *pack_path(const char *dir, const char *name) {
     (void)snprintf(s_path_buf, sizeof(s_path_buf), "%s/%s", dir, name);
     return s_path_buf;

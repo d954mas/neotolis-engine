@@ -6,7 +6,7 @@
 #include "log/nt_log.h"
 #include "material/nt_material.h"
 
-#include "core/nt_utf8.h"
+#include "utf8/nt_utf8.h"
 
 #include <string.h>
 
@@ -114,6 +114,10 @@ void nt_text_renderer_init(void) {
 
     /* Generate quad indices */
     generate_quad_indices();
+
+    /* Flush staging buffer before font cache clears texture data,
+     * so all queued glyphs are drawn with valid curve/band offsets. */
+    nt_font_set_pre_flush_callback(nt_text_renderer_flush);
 
     /* Create dynamic vertex buffer */
     s_text.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
@@ -251,10 +255,7 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     uint32_t vi = s_text.vertex_count;
     nt_text_vertex_t *v = &s_text.vertices[vi];
 
-    /* Vertex 0: bottom-left */
-    transform_point(v[0].position, model, x0, y0);
-    v[0].texcoord[0] = em_x0;
-    v[0].texcoord[1] = em_y0;
+    /* Shared fields — fill once in v[0], copy to v[1..3] */
     v[0].glyph_data[0] = gd0;
     v[0].glyph_data[1] = gd1;
     v[0].glyph_data[2] = gd2;
@@ -264,48 +265,26 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     v[0].glyph_bounds[2] = em_x1;
     v[0].glyph_bounds[3] = em_y1;
     memcpy(v[0].color, color, 16);
+    v[1] = v[0];
+    v[2] = v[0];
+    v[3] = v[0];
 
-    /* Vertex 1: bottom-right */
-    transform_point(v[1].position, model, x1, y0);
+    /* Unique per-corner: position + texcoord */
+    transform_point(v[0].position, model, x0, y0); /* BL */
+    v[0].texcoord[0] = em_x0;
+    v[0].texcoord[1] = em_y0;
+
+    transform_point(v[1].position, model, x1, y0); /* BR */
     v[1].texcoord[0] = em_x1;
     v[1].texcoord[1] = em_y0;
-    v[1].glyph_data[0] = gd0;
-    v[1].glyph_data[1] = gd1;
-    v[1].glyph_data[2] = gd2;
-    v[1].glyph_data[3] = gd3;
-    v[1].glyph_bounds[0] = em_x0;
-    v[1].glyph_bounds[1] = em_y0;
-    v[1].glyph_bounds[2] = em_x1;
-    v[1].glyph_bounds[3] = em_y1;
-    memcpy(v[1].color, color, 16);
 
-    /* Vertex 2: top-right */
-    transform_point(v[2].position, model, x1, y1);
+    transform_point(v[2].position, model, x1, y1); /* TR */
     v[2].texcoord[0] = em_x1;
     v[2].texcoord[1] = em_y1;
-    v[2].glyph_data[0] = gd0;
-    v[2].glyph_data[1] = gd1;
-    v[2].glyph_data[2] = gd2;
-    v[2].glyph_data[3] = gd3;
-    v[2].glyph_bounds[0] = em_x0;
-    v[2].glyph_bounds[1] = em_y0;
-    v[2].glyph_bounds[2] = em_x1;
-    v[2].glyph_bounds[3] = em_y1;
-    memcpy(v[2].color, color, 16);
 
-    /* Vertex 3: top-left */
-    transform_point(v[3].position, model, x0, y1);
+    transform_point(v[3].position, model, x0, y1); /* TL */
     v[3].texcoord[0] = em_x0;
     v[3].texcoord[1] = em_y1;
-    v[3].glyph_data[0] = gd0;
-    v[3].glyph_data[1] = gd1;
-    v[3].glyph_data[2] = gd2;
-    v[3].glyph_data[3] = gd3;
-    v[3].glyph_bounds[0] = em_x0;
-    v[3].glyph_bounds[1] = em_y0;
-    v[3].glyph_bounds[2] = em_x1;
-    v[3].glyph_bounds[3] = em_y1;
-    memcpy(v[3].color, color, 16);
 
     s_text.vertex_count += 4;
     s_text.glyph_count++;
@@ -330,9 +309,6 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
     }
     float scale = size / (float)metrics.units_per_em;
     uint8_t band_count = nt_font_get_band_count(s_text.font);
-
-    /* Cache generation before shaping (Pitfall 3) */
-    uint32_t gen_before = nt_font_get_cache_generation(s_text.font);
 
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
@@ -363,12 +339,6 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
 
         pen_x += (float)g->advance * scale;
         prev_cp = codepoint;
-    }
-
-    /* Check cache generation after loop (Pitfall 3) */
-    uint32_t gen_after = nt_font_get_cache_generation(s_text.font);
-    if (gen_after != gen_before) {
-        NT_LOG_WARN("font cache flushed during text shaping -- batch may contain stale glyph data");
     }
 }
 // #endregion

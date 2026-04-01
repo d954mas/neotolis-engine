@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
-#include "core/nt_utf8.h"
+#include "utf8/nt_utf8.h"
 #include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
 #include "math/nt_math.h"
@@ -280,7 +280,7 @@ static uint16_t evict_lru(nt_font_slot_t *slot) {
  * Max texels per glyph: NT_FONT_MAX_CURVES_PER_GLYPH * bands * 2 * 2 (Y+X bands).
  * 256 curves * 32 bands * 2 texels * 2 axes * 4 uint16 = 256KB worst case.
  * Realistic: 40 curves * 8 bands * 2 * 2 * 4 = 5KB. */
-static uint16_t s_curve_upload[NT_FONT_MAX_CURVES_PER_GLYPH * 32 * 2 * 4 * 2];
+static uint16_t s_curve_upload[NT_FONT_MAX_CURVES_PER_GLYPH * NT_FONT_MAX_BANDS * 2 * 4 * 2];
 
 /* Reset free stack to all slots available (0..max_glyphs-1) */
 static void free_stack_reset(nt_font_slot_t *slot) {
@@ -295,8 +295,13 @@ static uint16_t free_stack_pop(nt_font_slot_t *slot) {
     return slot->free_stack[--slot->free_top];
 }
 
-/* Flush entire cache when curve texture is full */
+/* Flush entire cache when curve texture is full.
+ * Pre-flush callback lets consumers (e.g. nt_text_renderer) draw their
+ * staging buffers while texture offsets are still valid. */
 static void flush_cache(nt_font_slot_t *slot) {
+    if (s_font.pre_flush_fn) {
+        s_font.pre_flush_fn();
+    }
     NT_LOG_WARN("font cache flush: curve texture full (%ux%u), consider larger curve_texture_width/height", slot->curve_tex_width, slot->curve_tex_height);
     memset(slot->cache, 0, (size_t)slot->max_glyphs * sizeof(nt_font_cache_slot_t));
     memset(slot->hash_table, 0, (size_t)slot->hash_table_size * sizeof(uint16_t));
@@ -411,7 +416,7 @@ static void generate_tofu(nt_font_slot_t *slot) {
     }
 
     /* Upload band data for tofu -- all 4 curves in every Y-band and X-band */
-    uint16_t band_data[64 * 2] = {0};
+    uint16_t band_data[NT_FONT_MAX_BANDS * 2 * 2] = {0};
     for (uint8_t b = 0; b < slot->band_count; b++) {
         band_data[(b * 2) + 0] = 0; /* Y-band: curve_start */
         band_data[(b * 2) + 1] = 4; /* Y-band: curve_count */
@@ -616,7 +621,7 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     float bbox_x1 = (float)glyph->bbox_x1;
     float band_height = (bbox_y1 - bbox_y0) / (float)slot->band_count;
     float band_width = (bbox_x1 > bbox_x0) ? (bbox_x1 - bbox_x0) / (float)slot->band_count : 0.0F;
-    NT_ASSERT(slot->band_count <= 32);
+    NT_ASSERT(slot->band_count <= NT_FONT_MAX_BANDS);
 
     // #region Precompute per-curve Y and X bounds
     float curve_y_min[NT_FONT_MAX_CURVES_PER_GLYPH];
@@ -645,8 +650,8 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     float y_margin = band_height * 0.01F;
     float x_margin = band_width * 0.01F;
 
-    uint16_t yband_counts[32] = {0};
-    uint16_t xband_counts[32] = {0};
+    uint16_t yband_counts[NT_FONT_MAX_BANDS] = {0};
+    uint16_t xband_counts[NT_FONT_MAX_BANDS] = {0};
     for (uint16_t ci = 0; ci < curve_count; ci++) {
         for (uint8_t b = 0; b < slot->band_count; b++) {
             float ybot = bbox_y0 + ((float)b * band_height) - y_margin;
@@ -686,7 +691,7 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
 
     // #region Write Y-band curves to temp buffer
     uint32_t curve_offset_y = slot->curve_write_head;
-    uint16_t yband_offsets[32] = {0};
+    uint16_t yband_offsets[NT_FONT_MAX_BANDS] = {0};
 
     uint32_t local_pos = 0;
     for (uint8_t b = 0; b < slot->band_count; b++) {
@@ -715,7 +720,7 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     // #region Write X-band curves to temp buffer (after Y-band data)
     uint32_t y_local_pos = local_pos;
     uint32_t curve_offset_x = curve_offset_y + y_local_pos;
-    uint16_t xband_offsets[32] = {0};
+    uint16_t xband_offsets[NT_FONT_MAX_BANDS] = {0};
 
     for (uint8_t b = 0; b < slot->band_count; b++) {
         xband_offsets[b] = (uint16_t)((local_pos - y_local_pos) / 2);
@@ -763,7 +768,7 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     // #endregion
 
     // #region Upload band data to GPU (Y-bands + X-bands in one row)
-    uint16_t band_upload[64 * 2] = {0}; /* 32 Y-bands + 32 X-bands, RG16UI each */
+    uint16_t band_upload[NT_FONT_MAX_BANDS * 2 * 2] = {0}; /* Y-bands + X-bands, RG16UI each */
     for (uint8_t b = 0; b < slot->band_count; b++) {
         band_upload[(b * 2) + 0] = yband_offsets[b];
         band_upload[(b * 2) + 1] = yband_counts[b];
@@ -968,7 +973,7 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     NT_ASSERT(desc->curve_texture_height > 0);
     NT_ASSERT(desc->band_texture_height > 0);
 
-    NT_ASSERT(desc->band_count > 0 && desc->band_count <= 32);
+    NT_ASSERT(desc->band_count > 0 && desc->band_count <= NT_FONT_MAX_BANDS);
     uint8_t band_count = desc->band_count;
 
     uint32_t id = nt_pool_alloc(&s_font.pool);
@@ -1247,6 +1252,12 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
         }
     }
     return 0;
+}
+
+/* ---- Pre-flush callback ---- */
+
+void nt_font_set_pre_flush_callback(nt_font_pre_flush_fn fn) {
+    s_font.pre_flush_fn = fn;
 }
 
 // #region Metrics-only lookup (pure CPU, no GPU, no cache)

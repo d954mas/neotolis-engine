@@ -8,6 +8,7 @@
 /* ---- Compile-time limits ---- */
 
 #define NT_FONT_MAX_SOURCES_PER_FONT 8
+#define NT_FONT_MAX_BANDS 16
 
 /* ---- Handle type ---- */
 
@@ -134,9 +135,19 @@ nt_texture_t nt_font_get_band_texture(nt_font_t font);
 uint8_t nt_font_get_band_count(nt_font_t font);
 uint16_t nt_font_get_curve_texture_width(nt_font_t font);
 
-/* ---- Cache generation (for Phase 45 batch invalidation) ---- */
+/* ---- Cache generation (for batch invalidation) ---- */
 
 uint32_t nt_font_get_cache_generation(nt_font_t font);
+
+/* ---- Pre-flush callback ---- */
+
+/* Called just before the glyph cache is cleared (texture data invalidated).
+ * Consumers that hold staging buffers with glyph texture offsets (e.g.
+ * nt_text_renderer) must register a callback to flush/draw those buffers
+ * before the offsets become stale. Without this, a cache flush mid-draw
+ * would silently render garbage from overwritten texture regions. */
+typedef void (*nt_font_pre_flush_fn)(void);
+void nt_font_set_pre_flush_callback(nt_font_pre_flush_fn fn);
 
 /* ---- Kern pair lookup (for nt_text shaping in Phase 45) ---- */
 

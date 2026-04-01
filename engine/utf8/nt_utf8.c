@@ -1,20 +1,7 @@
-#ifndef NT_UTF8_H
-#define NT_UTF8_H
-
-/*
- * Hoehrmann DFA UTF-8 decoder (MIT license: http://bjoern.hoehrmann.de/utf-8/decoder/dfa/)
- *
- * Header-only: static data + static inline function.
- * Used by nt_font.c and nt_text_renderer.c.
- */
-
-#include <stdint.h>
-
-#define NT_UTF8_ACCEPT 0
-#define NT_UTF8_REJECT 12
+#include "utf8/nt_utf8.h"
 
 // clang-format off
-static const uint8_t nt_utf8d[] = {
+const uint8_t nt_utf8d[364] = {
     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
     0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -31,11 +18,9 @@ static const uint8_t nt_utf8d[] = {
 };
 // clang-format on
 
-static inline uint32_t nt_utf8_decode(uint32_t *state, uint32_t *codep, uint32_t byte) {
+uint32_t nt_utf8_decode(uint32_t *state, uint32_t *codep, uint32_t byte) {
     uint32_t type = nt_utf8d[byte];
     *codep = (*state != NT_UTF8_ACCEPT) ? (byte & 0x3FU) | (*codep << 6) : (0xFFU >> type) & byte;
     *state = nt_utf8d[256 + *state + type];
     return *state;
 }
-
-#endif /* NT_UTF8_H */
