@@ -455,9 +455,7 @@ static int kern_triple_compare(const void *a, const void *b) {
 /* --- v4 point-based contour encoding (implicit midpoints, like TrueType) --- */
 
 /* Variable-length delta size: 1 byte if fits in [-127,127], else 3 bytes (sentinel + int16) */
-static inline uint32_t varlen_size(int delta) {
-    return (delta >= -127 && delta <= 127) ? 1 : 3;
-}
+static inline uint32_t varlen_size(int delta) { return (delta >= -127 && delta <= 127) ? 1 : 3; }
 
 static inline void write_varlen_delta(uint8_t **wp, int delta) {
     NT_BUILD_ASSERT(abs(delta) <= INT16_MAX && "delta overflow");
@@ -479,8 +477,7 @@ typedef struct {
     bool on_curve;
 } FontPoint;
 
-#define MAX_POINTS_PER_CONTOUR 8192
-static FontPoint s_points[MAX_POINTS_PER_CONTOUR];
+static FontPoint s_points[NT_FONT_MAX_POINTS_PER_CONTOUR];
 
 /* Convert stbtt vertices for one contour into compact point representation.
  * Detects implicit midpoints inserted by stbtt and removes them.
@@ -495,11 +492,11 @@ static uint16_t vertices_to_points(const stbtt_vertex *verts, int start, int end
     for (int vi = start + 1; vi < end; vi++) {
         if (verts[vi].type == STBTT_vline) {
             /* Line: add on-curve endpoint */
-            NT_BUILD_ASSERT(np < MAX_POINTS_PER_CONTOUR);
+            NT_BUILD_ASSERT(np < NT_FONT_MAX_POINTS_PER_CONTOUR);
             s_points[np++] = (FontPoint){verts[vi].x, verts[vi].y, true};
         } else if (verts[vi].type == STBTT_vcurve) {
             /* Quad curve: add off-curve control point */
-            NT_BUILD_ASSERT(np < MAX_POINTS_PER_CONTOUR);
+            NT_BUILD_ASSERT(np < NT_FONT_MAX_POINTS_PER_CONTOUR);
             s_points[np++] = (FontPoint){verts[vi].cx, verts[vi].cy, false};
 
             /* Check if endpoint is an implicit midpoint (will be skipped).
@@ -515,7 +512,7 @@ static uint16_t vertices_to_points(const stbtt_vertex *verts, int start, int end
             }
             if (!implicit) {
                 /* Explicit on-curve endpoint — keep it */
-                NT_BUILD_ASSERT(np < MAX_POINTS_PER_CONTOUR);
+                NT_BUILD_ASSERT(np < NT_FONT_MAX_POINTS_PER_CONTOUR);
                 s_points[np++] = (FontPoint){verts[vi].x, verts[vi].y, true};
             }
         }
@@ -871,8 +868,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
         char curve_str[16];
         nt_format_size(total_kerns * (uint32_t)sizeof(NtFontKernEntry), kern_str, sizeof(kern_str));
         nt_format_size(total_curve_data, curve_str, sizeof(curve_str));
-        NT_LOG_INFO("  FONT %s: %u glyphs, %s packed (TTF %s) | kerns: %u (%s) curves: %s", path, glyph_count,
-                    packed_str, ttf_str, total_kerns, kern_str, curve_str);
+        NT_LOG_INFO("  FONT %s: %u glyphs, %s packed (TTF %s) | kerns: %u (%s) curves: %s", path, glyph_count, packed_str, ttf_str, total_kerns, kern_str, curve_str);
     }
     // #endregion
 

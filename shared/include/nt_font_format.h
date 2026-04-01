@@ -102,6 +102,9 @@ typedef struct {
 #pragma pack(pop)
 _Static_assert(sizeof(NtFontKernEntry) == 4, "NtFontKernEntry must be 4 bytes");
 
+/* Maximum points per contour — shared limit between builder and runtime */
+#define NT_FONT_MAX_POINTS_PER_CONTOUR 4096
+
 /* Bitmask byte size for contour type bits (ceil(n/8), 2-byte aligned) */
 #define NT_FONT_BITMASK_BYTES(n) ((((uint32_t)(n) + 15U) / 8U) & ~1U)
 

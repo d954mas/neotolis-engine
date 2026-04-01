@@ -9,7 +9,6 @@
 
 #define NT_FONT_MAX_SOURCES_PER_FONT 8
 #define NT_FONT_MAX_BANDS 16
-#define NT_FONT_MAX_POINTS_PER_CONTOUR 4096
 
 /* ---- Handle type ---- */
 
