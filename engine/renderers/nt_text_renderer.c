@@ -293,11 +293,6 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
         NT_LOG_WARN("nt_text_renderer_draw: no font set");
         return;
     }
-    if (!s_text.initialized) {
-        NT_LOG_WARN("nt_text_renderer_draw: not initialized");
-        return;
-    }
-
     /* Register pre-flush callback so font cache flush draws our staging
      * buffer before invalidating texture offsets. Active only while we
      * have vertices in flight; cleared in flush(). */
@@ -305,7 +300,6 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
 
     nt_font_metrics_t metrics = nt_font_get_metrics(s_text.font);
     if (metrics.units_per_em == 0) {
-        NT_LOG_WARN("nt_text_renderer_draw: units_per_em=0");
         return;
     }
     float scale = size / (float)metrics.units_per_em;
@@ -380,18 +374,6 @@ void nt_text_renderer_flush(void) {
         nt_gfx_set_uniform_int("u_curve_texture", 0);
         nt_gfx_set_uniform_int("u_band_texture", 1);
         nt_gfx_set_uniform_int("u_curve_tex_width", (int)nt_font_get_curve_texture_width(s_text.font));
-    }
-
-    /* Debug: log flush state once after glyph count changes (resize triggers this) */
-    {
-        static uint32_t s_dbg_prev_glyphs;
-        if (s_text.glyph_count != s_dbg_prev_glyphs) {
-            NT_LOG_INFO("flush: glyphs=%u verts=%u pipeline=%u curve_tex=%u band_tex=%u tex_w=%u",
-                        s_text.glyph_count, s_text.vertex_count, s_text.pipeline.id,
-                        nt_font_get_curve_texture(s_text.font).id, nt_font_get_band_texture(s_text.font).id,
-                        (unsigned)nt_font_get_curve_texture_width(s_text.font));
-            s_dbg_prev_glyphs = s_text.glyph_count;
-        }
     }
 
     /* Single draw call per flush */

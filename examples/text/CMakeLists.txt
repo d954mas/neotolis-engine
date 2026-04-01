@@ -6,7 +6,7 @@ set(TEXT_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/text")
 add_executable(text_demo main.c)
 target_link_libraries(text_demo PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time
-    nt_resource nt_material nt_shared nt_font nt_text_renderer nt_shape_renderer
+    nt_resource nt_material nt_shared nt_font nt_text_renderer
     nt_render nt_hash
 )
 target_include_directories(text_demo PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/generated")

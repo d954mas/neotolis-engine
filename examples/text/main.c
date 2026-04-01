@@ -25,7 +25,6 @@
 #include "log/nt_log.h"
 #include "material/nt_material.h"
 #include "render/nt_render_defs.h"
-#include "renderers/nt_shape_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
 #include "time/nt_time.h"
@@ -76,7 +75,7 @@ static nt_hash32_t s_base_pack_id;
 static nt_hash32_t s_cjk_pack_id;
 static bool s_cjk_loading;
 
-/* ---- Resize debug ---- */
+/* ---- Resize tracking (skip trackball during window resize drag) ---- */
 static uint32_t s_prev_fb_w;
 static uint32_t s_prev_fb_h;
 
@@ -310,22 +309,6 @@ static void frame(void) {
     nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));
     nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
-    /* Debug axes via shape renderer */
-    nt_shape_renderer_set_vp((const float *)vp);
-    float cam_pos[3] = {cx, cy, cz};
-    nt_shape_renderer_set_cam_pos(cam_pos);
-    float red[4] = {1.0F, 0.0F, 0.0F, 1.0F};
-    float green[4] = {0.0F, 1.0F, 0.0F, 1.0F};
-    float blue[4] = {0.0F, 0.0F, 1.0F, 1.0F};
-    float origin[3] = {0.0F, 0.0F, 0.0F};
-    float ax[3] = {5.0F, 0.0F, 0.0F};
-    float ay[3] = {0.0F, 5.0F, 0.0F};
-    float az[3] = {0.0F, 0.0F, 5.0F};
-    nt_shape_renderer_line(origin, ax, red);
-    nt_shape_renderer_line(origin, ay, green);
-    nt_shape_renderer_line(origin, az, blue);
-    nt_shape_renderer_flush();
-
     /* Step font system -- resolves pending resources, uploads GPU data */
     double t_font_step = nt_time_now();
     nt_font_step();
@@ -339,12 +322,8 @@ static void frame(void) {
     draw_text_scene();
     t_draw = (nt_time_now() - t_draw) * 1000.0;
 
-    /* Resize debug: log state on first frame after resize */
-    if (g_nt_window.fb_width != s_prev_fb_w || g_nt_window.fb_height != s_prev_fb_h) {
-        nt_font_metrics_t dbg_m = nt_font_get_metrics(s_font);
-        nt_font_stats_t dbg_s = nt_font_get_stats(s_font);
-        nt_log_info("RESIZE %ux%u -> %ux%u | font.id=%u units_per_em=%u glyphs_cached=%u material.id=%u yaw=%.2f pitch=%.2f dist=%.1f", s_prev_fb_w, s_prev_fb_h, g_nt_window.fb_width,
-                    g_nt_window.fb_height, s_font.id, dbg_m.units_per_em, dbg_s.glyphs_cached, s_text_material.id, (double)s_yaw, (double)s_pitch, (double)s_cam_dist);
+    /* Track resize for trackball skip */
+    if (resized) {
         s_prev_fb_w = g_nt_window.fb_width;
         s_prev_fb_h = g_nt_window.fb_height;
     }
@@ -453,7 +432,6 @@ int main(void) {
     nt_material_init(&(nt_material_desc_t){.max_materials = 8});
 
     /* 9. Text renderer init */
-    nt_shape_renderer_init();
     nt_text_renderer_init();
 
     /* 10. Create frame uniforms UBO */
@@ -515,7 +493,6 @@ int main(void) {
     /* 17. Shutdown (native only) */
 #ifndef NT_PLATFORM_WEB
     nt_text_renderer_shutdown();
-    nt_shape_renderer_shutdown();
     nt_font_destroy(s_font);
     nt_font_shutdown();
     nt_material_destroy(s_text_material);
