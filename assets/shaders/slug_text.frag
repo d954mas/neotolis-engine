@@ -6,7 +6,7 @@ precision highp int;
 // Uses CalcRootCode, reference solvers, and CalcCoverage formula verbatim.
 
 uniform sampler2D u_curve_texture; // RGBA16F -- curve control points as float16
-uniform usampler2D u_band_texture; // RG16UI -- (curve_start, curve_count) per band
+uniform highp usampler2D u_band_texture; // RG16UI -- (curve_start, curve_count) per band
 uniform int u_curve_tex_width;     // For linear-to-2D addressing
 
 in vec2 v_texcoord;

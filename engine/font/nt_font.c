@@ -388,7 +388,7 @@ static void generate_tofu(nt_font_slot_t *slot) {
     for (int seg = 0; seg < 4; seg++) {
         uint32_t src0 = (uint32_t)seg * 2 * 4;
         uint32_t dst0 = (uint32_t)(4 + seg) * 2 * 4;
-        for (int k = 0; k < 8; k++) {
+        for (uint32_t k = 0; k < 8; k++) {
             s_curve_upload[dst0 + k] = s_curve_upload[src0 + k];
         }
     }
@@ -1082,7 +1082,9 @@ nt_font_metrics_t nt_font_get_metrics(nt_font_t font) {
         return (nt_font_metrics_t){0};
     }
     nt_font_slot_t *slot = get_slot(font);
-    NT_ASSERT(slot->metrics_set);
+    if (!slot->metrics_set) {
+        return (nt_font_metrics_t){0}; /* resources not loaded yet */
+    }
     return slot->metrics;
 }
 

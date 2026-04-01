@@ -363,6 +363,13 @@ void nt_gfx_backend_end_frame(void) {
 }
 
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) {
+    /* Reset GL state cache so all bindings are re-issued this pass.
+     * Needed because window resize on some platforms (Windows modal resize)
+     * may implicitly reset GL state without going through nt_gfx API. */
+    nt_gfx_gl_cache_reset();
+    s_bound_program = 0;
+    s_bound_pipeline_slot = 0;
+
     glViewport(0, 0, (GLsizei)g_nt_window.fb_width, (GLsizei)g_nt_window.fb_height);
     glClearColor(desc->clear_color[0], desc->clear_color[1], desc->clear_color[2], desc->clear_color[3]);
     nt_gl_clear_depth(desc->clear_depth);

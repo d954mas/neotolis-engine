@@ -374,6 +374,34 @@
             "problemMatcher": []
         },
         {
+            "label": "Quick build wasm-debug (no -Werror)",
+            "type": "shell",
+            "command": "emcmake cmake -S . -B build/_cmake/wasm-debug-paired -DNT_NO_WERROR=ON --preset wasm-debug-paired && cmake --build build/_cmake/wasm-debug-paired && emcmake cmake -S . -B build/_cmake/wasm-debug-simd -DNT_NO_WERROR=ON --preset wasm-debug-simd && cmake --build build/_cmake/wasm-debug-simd && bash scripts/package_all_simd.sh wasm-debug-paired wasm-debug-simd",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Quick build wasm-release (no -Werror)",
+            "type": "shell",
+            "command": "emcmake cmake -S . -B build/_cmake/wasm-release-paired -DNT_NO_WERROR=ON --preset wasm-release-paired && cmake --build build/_cmake/wasm-release-paired && emcmake cmake -S . -B build/_cmake/wasm-release-simd -DNT_NO_WERROR=ON --preset wasm-release-simd && cmake --build build/_cmake/wasm-release-simd && bash scripts/package_all_simd.sh wasm-release-paired wasm-release-simd",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Quick serve text (debug)",
+            "dependsOn": ["Quick build wasm-debug (no -Werror)", "Ensure server text (debug :8090)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Quick serve text (release)",
+            "dependsOn": ["Quick build wasm-release (no -Werror)", "Ensure server text (release :8091)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
             "label": "Quick build native-debug (no -Werror)",
             "type": "shell",
             "command": "cmake -S . -B build/_cmake/native-debug -DNT_NO_WERROR=ON --preset native-debug && cmake --build build/_cmake/native-debug",
