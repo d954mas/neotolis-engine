@@ -24,7 +24,7 @@ static uint32_t s_vpack_counter;
 /* ---- Test blob builder (identical to test_font.c) ---- */
 
 static uint8_t *build_test_font_blob(uint32_t *out_size) {
-    uint32_t contour_size = 18;
+    uint32_t contour_size = 14; /* v4: cc(2)+pc(2)+flags(2)+first(4)+deltas(4) */
     uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
     uint32_t glyphs_size = 3 * (uint32_t)sizeof(NtFontGlyphEntry);
     uint32_t total_size = header_size + glyphs_size + (3 * contour_size);
@@ -56,39 +56,40 @@ static uint8_t *build_test_font_blob(uint32_t *out_size) {
         entry.bbox_y0 = -200;
         entry.bbox_x1 = 400;
         entry.bbox_y1 = 800;
-        entry.curve_count = 2;
+        entry.curve_count = 3; /* 3 on-curve points in closed contour → 3 line segments */
         entry.kern_count = 0;
         memcpy(blob + header_size + ((size_t)g * sizeof(NtFontGlyphEntry)), &entry, sizeof(entry));
     }
 
+    /* Write v4 contour data per glyph: contour_count, then per-contour:
+     * point_count, flags_bitmask, first_point(abs), varlen_deltas */
     for (int g = 0; g < 3; g++) {
         uint8_t *wp = blob + data_base + ((size_t)g * contour_size);
+        /* contour_count = 1 */
         uint16_t cc = 1;
         memcpy(wp, &cc, 2);
         wp += 2;
-        uint16_t sc = 2;
-        memcpy(wp, &sc, 2);
+        /* point_count = 3 (triangle: 3 on-curve points → 3 line-segment curves) */
+        uint16_t pc = 3;
+        memcpy(wp, &pc, 2);
         wp += 2;
-        int16_t sx = 0;
-        int16_t sy = 0;
-        memcpy(wp, &sx, 2);
+        /* flags bitmask: NT_FONT_BITMASK_BYTES(3) = 2, all on-curve → bits 0,1,2 set */
+        wp[0] = 0x07;
+        wp[1] = 0x00;
         wp += 2;
-        memcpy(wp, &sy, 2);
+        /* first point absolute (0, 0) */
+        int16_t fx = 0;
+        int16_t fy = 0;
+        memcpy(wp, &fx, 2);
         wp += 2;
-        wp[0] = 0;
-        wp[1] = 0;
+        memcpy(wp, &fy, 2);
         wp += 2;
-        int16_t d1x = 400;
-        int16_t d1y = 0;
-        memcpy(wp, &d1x, 2);
-        wp += 2;
-        memcpy(wp, &d1y, 2);
-        wp += 2;
-        int16_t d2x = 0;
-        int16_t d2y = 800;
-        memcpy(wp, &d2x, 2);
-        wp += 2;
-        memcpy(wp, &d2y, 2);
+        /* delta point 1: (50, 0) — fits in int8, single byte each */
+        *wp++ = 50;
+        *wp++ = 0;
+        /* delta point 2: (-50, 50) — fits in int8 */
+        *wp++ = (uint8_t)(int8_t)-50;
+        *wp++ = 50;
     }
 
     *out_size = total_size;

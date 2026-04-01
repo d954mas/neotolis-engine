@@ -6,38 +6,9 @@
 #include "log/nt_log.h"
 #include "material/nt_material.h"
 
+#include "core/nt_utf8.h"
+
 #include <string.h>
-
-// #region UTF-8 decoder
-/* Hoehrmann DFA UTF-8 decoder (MIT license: http://bjoern.hoehrmann.de/utf-8/decoder/dfa/) */
-#define UTF8_ACCEPT 0
-#define UTF8_REJECT 12
-
-static const uint8_t s_utf8d[] = {
-    // clang-format off
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,  9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
-    7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-    8,8,2,2,2,2,2,2,2,2,2,2,2,2,2,2,  2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
-    10,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3, 11,6,6,6,5,8,8,8,8,8,8,8,8,8,8,8,
-    0,12,24,36,60,96,84,12,12,12,48,72, 12,12,12,12,12,12,12,12,12,12,12,12,
-    12,0,12,12,12,12,12,0,12,0,12,12,   12,24,12,12,12,12,12,24,12,24,12,12,
-    12,12,12,12,12,12,12,24,12,12,12,12, 12,24,12,12,12,12,12,12,12,24,12,12,
-    12,12,12,12,12,12,12,36,12,36,12,12, 12,36,12,12,12,12,12,36,12,36,12,12,
-    12,36,12,12,12,12,12,12,12,12,12,12,
-    // clang-format on
-};
-
-static uint32_t utf8_decode(uint32_t *state, uint32_t *codep, uint32_t byte) {
-    uint32_t type = s_utf8d[byte];
-    *codep = (*state != UTF8_ACCEPT) ? (byte & 0x3Fu) | (*codep << 6) : (0xFFu >> type) & byte;
-    *state = s_utf8d[256 + *state + type];
-    return *state;
-}
-// #endregion
 
 // #region Vertex format
 /* 64 bytes per vertex, matching slug_text.vert contract */
@@ -69,9 +40,6 @@ static struct {
 
     /* Cached pipeline state */
     uint32_t pipeline_material_version; /* version when pipeline was last created */
-
-    /* Dilation uniform */
-    float dilation;
 
     bool initialized;
 } s_text;
@@ -161,7 +129,7 @@ void nt_text_renderer_init(void) {
         .usage = NT_USAGE_IMMUTABLE,
         .data = s_quad_indices,
         .size = (uint32_t)sizeof(s_quad_indices),
-        .index_type = 1, /* uint16 */
+        .index_type = NT_INDEX_UINT16,
         .label = "text_ibo",
     });
 
@@ -201,7 +169,7 @@ void nt_text_renderer_restore_gpu(void) {
         .usage = NT_USAGE_IMMUTABLE,
         .data = s_quad_indices,
         .size = (uint32_t)sizeof(s_quad_indices),
-        .index_type = 1, /* uint16 */
+        .index_type = NT_INDEX_UINT16,
         .label = "text_ibo",
     });
 
@@ -249,7 +217,9 @@ void nt_text_renderer_set_font(nt_font_t font) {
 static void pack_uint_as_float(float *out, uint32_t val) { memcpy(out, &val, 4); /* bit-preserving uint-to-float, never cast (Pitfall 1) */ }
 
 static void transform_point(float out[2], const float model[16], float x, float y) {
-    /* mat4 * vec4(x, y, 0, 1) -- extract x,y from result */
+    /* mat4 * vec4(x, y, 0, 1) -- projects to 2D (Z discarded).
+     * Correct for translation-only model matrices + view rotation.
+     * Model matrices with Z rotation/translation will lose the Z component. */
     out[0] = model[0] * x + model[4] * y + model[12];
     out[1] = model[1] * x + model[5] * y + model[13];
 }
@@ -365,13 +335,13 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
     /* Cache generation before shaping (Pitfall 3) */
     uint32_t gen_before = nt_font_get_cache_generation(s_text.font);
 
-    uint32_t state = UTF8_ACCEPT;
+    uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
     float pen_x = 0.0f;
 
     for (const uint8_t *p = (const uint8_t *)utf8; *p; p++) {
-        if (utf8_decode(&state, &codepoint, *p) != UTF8_ACCEPT) {
+        if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
             continue;
         }
 
@@ -436,9 +406,6 @@ void nt_text_renderer_flush(void) {
         nt_gfx_bind_texture(nt_font_get_band_texture(s_text.font), 1);
         nt_gfx_set_uniform_int("u_curve_tex_width", (int)nt_font_get_curve_texture_width(s_text.font));
     }
-
-    /* Set uniforms */
-    nt_gfx_set_uniform_float("u_dilation", s_text.dilation);
 
     /* Single draw call per flush */
     nt_gfx_draw_indexed(0, s_text.glyph_count * 6, s_text.vertex_count);

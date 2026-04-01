@@ -14,6 +14,9 @@
 #define NT_TEXT_RENDERER_MAX_VERTICES (NT_TEXT_RENDERER_MAX_GLYPHS * 4)
 #define NT_TEXT_RENDERER_MAX_INDICES (NT_TEXT_RENDERER_MAX_GLYPHS * 6)
 
+/* uint16 index buffer: base = glyph_index * 4, must not overflow */
+_Static_assert(NT_TEXT_RENDERER_MAX_GLYPHS <= 16383, "NT_TEXT_RENDERER_MAX_GLYPHS > 16383 overflows uint16 index buffer");
+
 /* ---- Lifecycle ---- */
 
 void nt_text_renderer_init(void);

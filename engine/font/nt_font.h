@@ -74,7 +74,7 @@ typedef struct {
     bool is_tofu;
 } nt_glyph_cache_entry_t;
 
-/* ---- Text measurement (pure CPU, no GPU calls) ---- */
+/* ---- Text measurement (may trigger glyph cache miss → GPU upload) ---- */
 
 typedef struct {
     float width;

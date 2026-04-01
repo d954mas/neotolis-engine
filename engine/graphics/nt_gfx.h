@@ -4,6 +4,12 @@
 #include "core/nt_types.h"
 #include "nt_mesh_format.h"
 
+/* ---- Index buffer type constants ---- */
+
+#define NT_INDEX_NONE 0
+#define NT_INDEX_UINT16 1
+#define NT_INDEX_UINT32 2
+
 /* ---- Handle types (typed opaque handles backed by pool) ---- */
 
 typedef struct {
@@ -194,7 +200,7 @@ typedef struct {
     nt_buffer_usage_t usage;
     const void *data;
     uint32_t size;
-    uint8_t index_type; /* INDEX buffers: 0=none, 1=uint16(default), 2=uint32 */
+    uint8_t index_type; /* INDEX buffers: NT_INDEX_NONE/NT_INDEX_UINT16/NT_INDEX_UINT32 */
     const char *label;
 } nt_buffer_desc_t;
 

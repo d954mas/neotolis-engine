@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
+#include "core/nt_utf8.h"
 #include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
 #include "math/nt_math.h"
@@ -436,6 +437,11 @@ typedef struct {
 
 static nt_curve_t s_decode_curves[NT_FONT_MAX_CURVES_PER_GLYPH];
 
+/* Temporary point buffers for contour decoding (static to avoid ~72 KB on stack) */
+static int32_t s_decode_pts_x[8192];
+static int32_t s_decode_pts_y[8192];
+static uint8_t s_decode_pts_on[8192];
+
 /* Read variable-length delta: int8 or sentinel + int16 */
 static inline int16_t read_varlen_delta(const uint8_t **rp) {
     uint8_t b = **rp;
@@ -486,10 +492,10 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         memcpy(&first_y, rp, 2);
         rp += 2;
 
-        /* Decode all points into a local buffer (stack-allocated, max ~8K points) */
-        int32_t pts_x[8192];
-        int32_t pts_y[8192];
-        uint8_t pts_on[8192];
+        /* Decode all points into static buffers (avoids ~72 KB on stack) */
+        int32_t *pts_x = s_decode_pts_x;
+        int32_t *pts_y = s_decode_pts_y;
+        uint8_t *pts_on = s_decode_pts_on;
         NT_ASSERT(point_count <= 8192);
 
         pts_x[0] = first_x;
@@ -1065,7 +1071,6 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t code
     if (glyph_entry->curve_count > 0) {
         curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH);
     }
-    NT_LOG_INFO("cache miss U+%04X: %u curves (expected %u)", codepoint, curve_count, glyph_entry->curve_count);
     // #endregion
 
     // #region Upload, allocate slot, fill cache
@@ -1167,36 +1172,7 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
     return 0;
 }
 
-// #region UTF-8 decoder
-/* Hoehrmann DFA UTF-8 decoder (MIT license: http://bjoern.hoehrmann.de/utf-8/decoder/dfa/) */
-#define UTF8_ACCEPT 0
-#define UTF8_REJECT 12
-
-static const uint8_t s_utf8d[] = {
-    // clang-format off
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,  9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
-    7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-    8,8,2,2,2,2,2,2,2,2,2,2,2,2,2,2,  2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
-    10,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3, 11,6,6,6,5,8,8,8,8,8,8,8,8,8,8,8,
-    0,12,24,36,60,96,84,12,12,12,48,72, 12,12,12,12,12,12,12,12,12,12,12,12,
-    12,0,12,12,12,12,12,0,12,0,12,12,   12,24,12,12,12,12,12,24,12,24,12,12,
-    12,12,12,12,12,12,12,24,12,12,12,12, 12,24,12,12,12,12,12,12,12,24,12,12,
-    12,12,12,12,12,12,12,36,12,36,12,12, 12,36,12,12,12,12,12,36,12,36,12,12,
-    12,36,12,12,12,12,12,12,12,12,12,12,
-    // clang-format on
-};
-
-static uint32_t utf8_decode(uint32_t *state, uint32_t *codep, uint32_t byte) {
-    uint32_t type = s_utf8d[byte];
-    *codep = (*state != UTF8_ACCEPT) ? (byte & 0x3Fu) | (*codep << 6) : (0xFFu >> type) & byte;
-    *state = s_utf8d[256 + *state + type];
-    return *state;
-}
-// #endregion
+/* UTF-8 decoder — shared header (core/nt_utf8.h) */
 
 // #region Measurement
 nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) {
@@ -1211,7 +1187,7 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) {
     }
     float scale = size / (float)metrics.units_per_em;
 
-    uint32_t state = UTF8_ACCEPT;
+    uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
     float pen_x = 0.0f;
@@ -1219,7 +1195,7 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) {
     float max_y = 0.0f;
 
     for (const uint8_t *p = (const uint8_t *)utf8; *p; p++) {
-        if (utf8_decode(&state, &codepoint, *p) != UTF8_ACCEPT) {
+        if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
             continue;
         }
 
