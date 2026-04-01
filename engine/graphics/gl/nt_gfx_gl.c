@@ -357,9 +357,15 @@ bool nt_gfx_backend_is_context_lost(void) { return nt_gfx_gl_ctx_is_lost(); }
 /* ---- Frame / Pass ---- */
 
 void nt_gfx_backend_begin_frame(void) {
-    /* No-op: state machine is in nt_gfx.c.
-     * Emscripten handles swap via requestAnimationFrame.
-     * Desktop swap is handled by the window layer. */
+    /* Reset GL state cache so all pipeline binds re-issue GL calls.
+     * Required because window resize (Windows modal loop) or driver
+     * may change GL state without going through nt_gfx API, leaving
+     * the cache stale. Without this, a pipeline bound on the previous
+     * frame (e.g. text with depth_write=false) poisons state for this
+     * frame's pipelines that skip re-binding due to cache hits. */
+    nt_gfx_gl_cache_reset();
+    s_bound_program = 0;
+    s_bound_pipeline_slot = 0;
 }
 
 void nt_gfx_backend_end_frame(void) {
@@ -375,16 +381,6 @@ void nt_gfx_backend_end_frame(void) {
 }
 
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) {
-    /* Reset GL state cache so all pipeline binds re-issue GL calls.
-     * Required because window resize (Windows modal loop) or driver
-     * may change GL state without going through nt_gfx API, leaving
-     * the cache stale. Without this, a pipeline bound before resize
-     * (e.g. text with depth_write=false) poisons state for the next
-     * frame's pipelines that skip re-binding due to cache hits. */
-    nt_gfx_gl_cache_reset();
-    s_bound_program = 0;
-    s_bound_pipeline_slot = 0;
-
     glViewport(0, 0, (GLsizei)g_nt_window.fb_width, (GLsizei)g_nt_window.fb_height);
     glClearColor(desc->clear_color[0], desc->clear_color[1], desc->clear_color[2], desc->clear_color[3]);
     nt_gl_clear_depth(desc->clear_depth);
