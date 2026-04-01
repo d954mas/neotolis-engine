@@ -5,7 +5,6 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
-#include "utf8/nt_utf8.h"
 #include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
 #include "math/nt_math.h"
@@ -13,6 +12,7 @@
 #include "nt_pack_format.h"
 #include "pool/nt_pool.h"
 #include "resource/nt_resource.h"
+#include "utf8/nt_utf8.h"
 
 /* ---- Font data storage (side table for pack blobs accessed via activator) ---- */
 
@@ -1256,9 +1256,7 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
 
 /* ---- Pre-flush callback ---- */
 
-void nt_font_set_pre_flush_callback(nt_font_pre_flush_fn fn) {
-    s_font.pre_flush_fn = fn;
-}
+void nt_font_set_pre_flush_callback(nt_font_pre_flush_fn fn) { s_font.pre_flush_fn = fn; }
 
 // #region Metrics-only lookup (pure CPU, no GPU, no cache)
 nt_glyph_metrics_t nt_font_lookup_metrics(nt_font_t font, uint32_t codepoint) {

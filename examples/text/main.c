@@ -22,6 +22,7 @@
 #include "hash/nt_hash.h"
 #include "http/nt_http.h"
 #include "input/nt_input.h"
+#include "log/nt_log.h"
 #include "material/nt_material.h"
 #include "render/nt_render_defs.h"
 #include "renderers/nt_text_renderer.h"
@@ -73,6 +74,21 @@ static nt_buffer_t s_frame_ubo;
 static nt_hash32_t s_base_pack_id;
 static nt_hash32_t s_cjk_pack_id;
 static bool s_cjk_loading;
+
+/* ---- Profiling ---- */
+
+#define PROF_REPORT_DELAY 5.0 /* seconds after reset before reporting */
+
+static double s_prof_draw_sum;
+static double s_prof_draw_max;
+static double s_prof_flush_sum;
+static double s_prof_flush_max;
+static double s_prof_font_step_sum;
+static double s_prof_font_step_max;
+static uint32_t s_prof_frames;
+static double s_prof_reset_time;  /* time when counters were last reset */
+static bool s_prof_reported;      /* true after report printed for current period */
+static bool s_prof_cjk_reset;     /* true after CJK load triggered a reset */
 
 /* ---- Trackball: compose yaw/pitch into camera view ---- */
 
@@ -286,18 +302,80 @@ static void frame(void) {
     nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
     /* Step font system -- resolves pending resources, uploads GPU data */
+    double t_font_step = nt_time_now();
     nt_font_step();
+    t_font_step = (nt_time_now() - t_font_step) * 1000.0;
 
     /* Draw text */
     nt_text_renderer_set_material(s_text_material);
     nt_text_renderer_set_font(s_font);
+
+    double t_draw = nt_time_now();
     draw_text_scene();
+    t_draw = (nt_time_now() - t_draw) * 1000.0;
+
+    double t_flush = nt_time_now();
     nt_text_renderer_flush();
+    t_flush = (nt_time_now() - t_flush) * 1000.0;
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
     nt_window_swap_buffers();
+
+    // #region Profiling — accumulate
+    s_prof_draw_sum += t_draw;
+    s_prof_flush_sum += t_flush;
+    s_prof_font_step_sum += t_font_step;
+    if (t_draw > s_prof_draw_max) {
+        s_prof_draw_max = t_draw;
+    }
+    if (t_flush > s_prof_flush_max) {
+        s_prof_flush_max = t_flush;
+    }
+    if (t_font_step > s_prof_font_step_max) {
+        s_prof_font_step_max = t_font_step;
+    }
+    s_prof_frames++;
+    // #endregion
+
+    // #region Profiling — reset on CJK load
+    if (s_cjk_loading && !s_prof_cjk_reset && nt_resource_pack_state(s_cjk_pack_id) == NT_PACK_STATE_READY) {
+        s_prof_cjk_reset = true;
+        s_prof_reported = false;
+        s_prof_draw_sum = 0.0;
+        s_prof_draw_max = 0.0;
+        s_prof_flush_sum = 0.0;
+        s_prof_flush_max = 0.0;
+        s_prof_font_step_sum = 0.0;
+        s_prof_font_step_max = 0.0;
+        s_prof_frames = 0;
+        s_prof_reset_time = nt_time_now();
+        nt_log_info("--- profiling reset (CJK pack loaded) ---");
+    }
+    // #endregion
+
+    // #region Profiling — report once after 5s
+    if (!s_prof_reported && s_prof_frames > 0) {
+        double now = nt_time_now();
+        if (now - s_prof_reset_time >= PROF_REPORT_DELAY) {
+            double inv = 1.0 / (double)s_prof_frames;
+            nt_font_stats_t fs = nt_font_get_stats(s_font);
+            const char *label = s_prof_cjk_reset ? "after CJK" : "base";
+
+            nt_log_info("=== text profiling [%s] (%u frames, %.1fs) ===", label, s_prof_frames, now - s_prof_reset_time);
+            nt_log_info("  font_step  avg=%.3f ms  max=%.3f ms", s_prof_font_step_sum * inv, s_prof_font_step_max);
+            nt_log_info("  draw       avg=%.3f ms  max=%.3f ms", s_prof_draw_sum * inv, s_prof_draw_max);
+            nt_log_info("  flush      avg=%.3f ms  max=%.3f ms", s_prof_flush_sum * inv, s_prof_flush_max);
+            nt_log_info("  cache      %u/%u glyphs  curve %u/%u texels (%.0f%%)  band %u/%u texels (%.0f%%)",
+                        fs.glyphs_cached, fs.max_glyphs, fs.curve_texels_used, fs.curve_texels_total,
+                        fs.curve_texels_total > 0 ? 100.0 * fs.curve_texels_used / fs.curve_texels_total : 0.0,
+                        fs.band_texels_used, fs.band_texels_total,
+                        fs.band_texels_total > 0 ? 100.0 * fs.band_texels_used / fs.band_texels_total : 0.0);
+            s_prof_reported = true;
+        }
+    }
+    // #endregion
 }
 
 int main(void) {
