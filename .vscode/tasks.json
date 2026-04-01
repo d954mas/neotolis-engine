@@ -336,6 +336,21 @@
             "dependsOn": ["Build wasm-release-paired", "Ensure server sponza (release :8089)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
+        },
+        {
+            "label": "Build text_demo (debug)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target text_demo",
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build & run text packs (debug)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target build_text_packs && build\\examples\\text\\native-debug\\build_text_packs.exe build/examples/text",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
         }
     ]
 }

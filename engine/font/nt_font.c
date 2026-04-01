@@ -436,7 +436,20 @@ typedef struct {
 
 static nt_curve_t s_decode_curves[NT_FONT_MAX_CURVES_PER_GLYPH];
 
-/* Decode delta-encoded contour data into absolute float curves */
+/* Read variable-length delta (v3 encoding): int8 or sentinel + int16 */
+static inline int16_t read_varlen_delta(const uint8_t **rp) {
+    uint8_t b = **rp;
+    (*rp)++;
+    if (b != NT_FONT_DELTA_SENTINEL) {
+        return (int16_t)(int8_t)b;
+    }
+    int16_t val;
+    memcpy(&val, *rp, 2);
+    (*rp) += 2;
+    return val;
+}
+
+/* Decode variable-length delta-encoded contour data into absolute float curves (v3) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves, uint16_t max_curves) {
     const uint8_t *rp = contour_data;
@@ -473,18 +486,10 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
 
             if (is_quad) {
                 // #region Quadratic curve
-                int16_t dp1x;
-                int16_t dp1y;
-                int16_t dp2x;
-                int16_t dp2y;
-                memcpy(&dp1x, rp, 2);
-                rp += 2;
-                memcpy(&dp1y, rp, 2);
-                rp += 2;
-                memcpy(&dp2x, rp, 2);
-                rp += 2;
-                memcpy(&dp2y, rp, 2);
-                rp += 2;
+                int16_t dp1x = read_varlen_delta(&rp);
+                int16_t dp1y = read_varlen_delta(&rp);
+                int16_t dp2x = read_varlen_delta(&rp);
+                int16_t dp2y = read_varlen_delta(&rp);
 
                 float fp1x = (float)(prev_x + dp1x);
                 float fp1y = (float)(prev_y + dp1y);
@@ -500,12 +505,8 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
                 // #endregion
             } else {
                 // #region Line (promote to degenerate quadratic)
-                int16_t dp2x;
-                int16_t dp2y;
-                memcpy(&dp2x, rp, 2);
-                rp += 2;
-                memcpy(&dp2y, rp, 2);
-                rp += 2;
+                int16_t dp2x = read_varlen_delta(&rp);
+                int16_t dp2y = read_varlen_delta(&rp);
 
                 float fp2x = (float)(prev_x + dp2x);
                 float fp2y = (float)(prev_y + dp2y);

@@ -454,6 +454,11 @@ static int kern_triple_compare(const void *a, const void *b) {
 
 /* --- Contour analysis: compute curve data size from stb vertices --- */
 
+/* Variable-length delta size: 1 byte if fits in [-127,127], else 3 bytes (sentinel + int16) */
+static inline uint32_t varlen_size(int delta) {
+    return (delta >= -127 && delta <= 127) ? 1 : 3;
+}
+
 static uint32_t compute_curve_data_size(const stbtt_vertex *verts, int nv, uint16_t *out_total_segments, uint16_t *out_contour_count) {
     if (nv == 0) {
         *out_total_segments = 0;
@@ -465,28 +470,38 @@ static uint32_t compute_curve_data_size(const stbtt_vertex *verts, int nv, uint1
     uint16_t total_segs = 0;
     uint16_t cc = 0;
     uint16_t cur_segs = 0;
-    uint16_t cur_quads = 0;
+    uint32_t cur_data = 0; /* variable-length coord data for current contour */
     bool in_contour = false;
+    int prev_x = 0;
+    int prev_y = 0;
 
     for (int v = 0; v < nv; v++) {
         switch (verts[v].type) {
         case STBTT_vmove:
             if (in_contour && cur_segs > 0) {
                 uint32_t bm = NT_FONT_BITMASK_BYTES(cur_segs);
-                size += 6 + bm + (uint32_t)cur_quads * 8 + (uint32_t)(cur_segs - cur_quads) * 4;
+                size += 6 + bm + cur_data;
                 cc++;
             }
             in_contour = true;
             cur_segs = 0;
-            cur_quads = 0;
+            cur_data = 0;
+            prev_x = verts[v].x;
+            prev_y = verts[v].y;
             break;
         case STBTT_vline:
+            cur_data += varlen_size(verts[v].x - prev_x) + varlen_size(verts[v].y - prev_y);
+            prev_x = verts[v].x;
+            prev_y = verts[v].y;
             cur_segs++;
             total_segs++;
             break;
         case STBTT_vcurve:
+            cur_data += varlen_size(verts[v].cx - prev_x) + varlen_size(verts[v].cy - prev_y) +
+                        varlen_size(verts[v].x - prev_x) + varlen_size(verts[v].y - prev_y);
+            prev_x = verts[v].x;
+            prev_y = verts[v].y;
             cur_segs++;
-            cur_quads++;
             total_segs++;
             break;
         case STBTT_vcubic:
@@ -499,7 +514,7 @@ static uint32_t compute_curve_data_size(const stbtt_vertex *verts, int nv, uint1
     /* Finalize last contour */
     if (in_contour && cur_segs > 0) {
         uint32_t bm = NT_FONT_BITMASK_BYTES(cur_segs);
-        size += 6 + bm + (uint32_t)cur_quads * 8 + (uint32_t)(cur_segs - cur_quads) * 4;
+        size += 6 + bm + cur_data;
         cc++;
     }
 
@@ -508,7 +523,23 @@ static uint32_t compute_curve_data_size(const stbtt_vertex *verts, int nv, uint1
     return (total_segs > 0) ? size : 0;
 }
 
-/* --- Write contour data from stb vertices (delta-encoded) --- */
+/* --- Write variable-length delta (v3 encoding) --- */
+
+static inline void write_varlen_delta(uint8_t **wp, int delta) {
+    NT_BUILD_ASSERT(abs(delta) <= INT16_MAX && "delta overflow");
+    if (delta >= -127 && delta <= 127) {
+        **wp = (uint8_t)(int8_t)delta;
+        (*wp)++;
+    } else {
+        **wp = NT_FONT_DELTA_SENTINEL;
+        (*wp)++;
+        int16_t val = (int16_t)delta;
+        memcpy(*wp, &val, 2);
+        (*wp) += 2;
+    }
+}
+
+/* --- Write contour data from stb vertices (variable-length delta-encoded, v3) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void write_contour_data(const stbtt_vertex *verts, int nv, uint16_t contour_count, uint8_t *wp) {
@@ -548,7 +579,7 @@ static void write_contour_data(const stbtt_vertex *verts, int nv, uint16_t conto
         vi++;
         // #endregion
 
-        // #region Bitmask + delta-encoded segments
+        // #region Bitmask + variable-length delta-encoded segments
         uint32_t bitmask_bytes = NT_FONT_BITMASK_BYTES(seg_count);
         uint8_t *bitmask = wp;
         memset(bitmask, 0, bitmask_bytes);
@@ -559,34 +590,13 @@ static void write_contour_data(const stbtt_vertex *verts, int nv, uint16_t conto
         for (uint16_t s = 0; s < seg_count; s++) {
             if (verts[vi].type == STBTT_vcurve) {
                 bitmask[s / 8] |= (uint8_t)(1U << (s % 8));
-                int dp1x = verts[vi].cx - prev_x;
-                int dp1y = verts[vi].cy - prev_y;
-                int dp2x = verts[vi].x - prev_x;
-                int dp2y = verts[vi].y - prev_y;
-                NT_BUILD_ASSERT(abs(dp1x) <= INT16_MAX && abs(dp1y) <= INT16_MAX && "delta overflow in curve control point");
-                NT_BUILD_ASSERT(abs(dp2x) <= INT16_MAX && abs(dp2y) <= INT16_MAX && "delta overflow in curve endpoint");
-                int16_t d1x = (int16_t)dp1x;
-                int16_t d1y = (int16_t)dp1y;
-                int16_t d2x = (int16_t)dp2x;
-                int16_t d2y = (int16_t)dp2y;
-                memcpy(wp, &d1x, 2);
-                wp += 2;
-                memcpy(wp, &d1y, 2);
-                wp += 2;
-                memcpy(wp, &d2x, 2);
-                wp += 2;
-                memcpy(wp, &d2y, 2);
-                wp += 2;
+                write_varlen_delta(&wp, verts[vi].cx - prev_x);
+                write_varlen_delta(&wp, verts[vi].cy - prev_y);
+                write_varlen_delta(&wp, verts[vi].x - prev_x);
+                write_varlen_delta(&wp, verts[vi].y - prev_y);
             } else {
-                int dp2x = verts[vi].x - prev_x;
-                int dp2y = verts[vi].y - prev_y;
-                NT_BUILD_ASSERT(abs(dp2x) <= INT16_MAX && abs(dp2y) <= INT16_MAX && "delta overflow in line endpoint");
-                int16_t d2x = (int16_t)dp2x;
-                int16_t d2y = (int16_t)dp2y;
-                memcpy(wp, &d2x, 2);
-                wp += 2;
-                memcpy(wp, &d2y, 2);
-                wp += 2;
+                write_varlen_delta(&wp, verts[vi].x - prev_x);
+                write_varlen_delta(&wp, verts[vi].y - prev_y);
             }
             prev_x = verts[vi].x;
             prev_y = verts[vi].y;
@@ -816,7 +826,12 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
         char ttf_str[16];
         nt_format_size(total_size, packed_str, sizeof(packed_str));
         nt_format_size(file_size, ttf_str, sizeof(ttf_str));
-        NT_LOG_INFO("  FONT %s: %u glyphs, %s packed (TTF %s)", path, glyph_count, packed_str, ttf_str);
+        char kern_str[16];
+        char curve_str[16];
+        nt_format_size(total_kerns * (uint32_t)sizeof(NtFontKernEntry), kern_str, sizeof(kern_str));
+        nt_format_size(total_curve_data, curve_str, sizeof(curve_str));
+        NT_LOG_INFO("  FONT %s: %u glyphs, %s packed (TTF %s) | kerns: %u (%s) curves: %s", path, glyph_count,
+                    packed_str, ttf_str, total_kerns, kern_str, curve_str);
     }
     // #endregion
 

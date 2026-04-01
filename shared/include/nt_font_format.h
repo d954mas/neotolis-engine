@@ -5,10 +5,10 @@
 
 /* Magic: ASCII "FONT" as uint32_t little-endian = 0x544E4F46 */
 #define NT_FONT_MAGIC 0x544E4F46
-#define NT_FONT_VERSION 2
+#define NT_FONT_VERSION 3
 
 /*
- * Font asset binary layout (v2 — contour-based, int16 coordinates):
+ * Font asset binary layout (v3 — variable-length delta encoding):
  *
  *   Offset 0: NtFontAssetHeader (16 bytes)
  *   Offset 16: NtFontGlyphEntry[glyph_count] (24 bytes each)
@@ -29,29 +29,40 @@
  *
  *     Per contour (contour_count times):
  *       uint16_t segment_count
- *       int16_t  start_x, start_y             // moveto point
+ *       int16_t  start_x, start_y             // moveto point (always int16)
  *       uint8_t  type_bits[ALIGN2(ceil(segment_count/8))]  // bit=1: quad, bit=0: line (LSB first, 2-byte aligned)
  *
  *       Per segment (segment_count times, sequential, DELTA-ENCODED):
- *         if line  (bit=0): int16_t dp2x, dp2y                  (4 bytes)
- *         if quad  (bit=1): int16_t dp1x, dp1y, dp2x, dp2y      (8 bytes)
+ *         if line  (bit=0): varlen dp2x, dp2y
+ *         if quad  (bit=1): varlen dp1x, dp1y, dp2x, dp2y
+ *
+ *     Variable-length coordinate encoding (v3):
+ *       Each delta coordinate is encoded as:
+ *         - If value in [-127, +127]: 1 byte (int8)
+ *         - Otherwise: 0x80 sentinel byte + int16 LE (3 bytes total)
+ *       The value -128 (0x80) is reserved as the sentinel marker.
+ *       ~90% of CJK deltas fit in int8, saving ~40% on curve data.
  *
  *     Endpoint sharing: p0 of each segment = p2 of the previous segment
  *     (or start_x/y for the first segment in a contour).
  *
- *     Delta encoding: all segment coordinates are int16 deltas relative
+ *     Delta encoding: all segment coordinates are deltas relative
  *     to the previous chain endpoint (start_x/y for first segment,
  *     absolute p2 of previous segment thereafter). Reconstruct:
  *       p1 = prev + (dp1x, dp1y)
  *       p2 = prev + (dp2x, dp2y)
  *       prev = p2  (for next segment)
  *
- *     Coordinates are int16 in font design units.
+ *     Coordinates are in font design units.
  *     Runtime at cache miss reconstructs absolute coords and expands:
  *       - Lines: compute p1 = midpoint(p0, p2), write (p0, p1, p2) as float
  *       - Quads: write (p0, p1, p2) as float
  *     Band decomposition happens at runtime (not stored in pack).
  */
+
+/* Sentinel byte for variable-length delta encoding (v3).
+ * int8 value -128 (0x80) is reserved; real deltas of -128 use the 3-byte path. */
+#define NT_FONT_DELTA_SENTINEL ((uint8_t)0x80)
 
 /* NtFontAssetHeader — 16 bytes. Font-level metadata. */
 #pragma pack(push, 1)

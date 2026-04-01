@@ -8,6 +8,8 @@
 
 #include "nt_builder.h"
 
+#include "stb_truetype.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,15 +50,93 @@ static const char CYRILLIC_CHARSET[] =
     "\xd0\x81\xd1\x91"; /* Yo yo */
 /* clang-format on */
 
-/* CJK: specific characters used in demo (D-24) */
-/* Chinese: ni hao shi jie (Hello World) + Korean: annyeonghaseyo (Hello) */
-/* clang-format off */
-static const char CJK_CHARSET[] =
-    "\xe4\xbd\xa0\xe5\xa5\xbd"               /* ni hao */
-    "\xe4\xb8\x96\xe7\x95\x8c"               /* shi jie */
-    "\xec\x95\x88\xeb\x85\x95"               /* an nyeong */
-    "\xed\x95\x98\xec\x84\xb8\xec\x9a\x94"; /* ha se yo */
-/* clang-format on */
+/* ---- UTF-8 encoder for charset generation ---- */
+
+static uint32_t encode_utf8(char *buf, uint32_t cp) {
+    if (cp < 0x80) {
+        buf[0] = (char)cp;
+        return 1;
+    }
+    if (cp < 0x800) {
+        buf[0] = (char)(0xC0 | (cp >> 6));
+        buf[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if (cp < 0x10000) {
+        buf[0] = (char)(0xE0 | (cp >> 12));
+        buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        buf[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    buf[0] = (char)(0xF0 | (cp >> 18));
+    buf[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    buf[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    buf[3] = (char)(0x80 | (cp & 0x3F));
+    return 4;
+}
+
+/* CJK charset buffer — only includes codepoints actually present in the font.
+ * Scans CJK Unified, Hangul, Kana, and punctuation ranges via stbtt. */
+#define CJK_CHARSET_BUF_SIZE (128 * 1024)
+static char s_cjk_charset[CJK_CHARSET_BUF_SIZE];
+
+/* Add codepoints from [start, end] that exist in the font to the charset buffer. */
+static uint32_t charset_add_range_filtered(char *buf, uint32_t buf_size, uint32_t start, uint32_t end, const stbtt_fontinfo *font, uint32_t *glyph_count) {
+    uint32_t off = 0;
+    for (uint32_t cp = start; cp <= end; cp++) {
+        if (stbtt_FindGlyphIndex(font, (int)cp) == 0) {
+            continue; /* not in font */
+        }
+        char tmp[4];
+        uint32_t n = encode_utf8(tmp, cp);
+        if (off + n + 1 > buf_size) {
+            break;
+        }
+        memcpy(buf + off, tmp, n);
+        off += n;
+        (*glyph_count)++;
+    }
+    buf[off] = '\0';
+    return off;
+}
+
+static void build_cjk_charset(const char *font_path) {
+    /* Load font for cmap scanning */
+    FILE *f = fopen(font_path, "rb");
+    if (!f) {
+        return;
+    }
+    (void)fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    uint8_t *data = (uint8_t *)malloc((size_t)sz);
+    (void)fread(data, 1, (size_t)sz, f);
+    (void)fclose(f);
+
+    stbtt_fontinfo font;
+    if (!stbtt_InitFont(&font, data, 0)) {
+        free(data);
+        return;
+    }
+
+    uint32_t off = 0;
+    uint32_t count = 0;
+    /* CJK Unified Ideographs */
+    off += charset_add_range_filtered(s_cjk_charset + off, CJK_CHARSET_BUF_SIZE - off, 0x4E00, 0x9FFF, &font, &count);
+    /* CJK Unified Ideographs Extension A */
+    off += charset_add_range_filtered(s_cjk_charset + off, CJK_CHARSET_BUF_SIZE - off, 0x3400, 0x4DBF, &font, &count);
+    /* Hangul Syllables */
+    off += charset_add_range_filtered(s_cjk_charset + off, CJK_CHARSET_BUF_SIZE - off, 0xAC00, 0xD7AF, &font, &count);
+    /* Hangul Jamo */
+    off += charset_add_range_filtered(s_cjk_charset + off, CJK_CHARSET_BUF_SIZE - off, 0x1100, 0x11FF, &font, &count);
+    /* CJK Symbols and Punctuation */
+    off += charset_add_range_filtered(s_cjk_charset + off, CJK_CHARSET_BUF_SIZE - off, 0x3000, 0x303F, &font, &count);
+    /* Hiragana + Katakana */
+    off += charset_add_range_filtered(s_cjk_charset + off, CJK_CHARSET_BUF_SIZE - off, 0x3040, 0x30FF, &font, &count);
+
+    free(data);
+    (void)printf("  CJK charset: %u glyphs found in font (%u bytes)\n", count, off);
+}
 
 /* ---- Path helper ---- */
 
@@ -155,6 +235,10 @@ int main(int argc, char *argv[]) {
     // #region Pack 2: text_cjk.ntpack (CJK font resource)
     if (s_has_primary_font) {
         (void)printf("--- Building text_cjk.ntpack ---\n");
+
+        /* Generate full CJK charset — only codepoints present in the font */
+        build_cjk_charset(font_path);
+
         NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "text_cjk.ntpack"));
         if (!ctx) {
             (void)fprintf(stderr, "Failed to start text_cjk.ntpack\n");
@@ -163,10 +247,10 @@ int main(int argc, char *argv[]) {
         nt_builder_set_header_dir(ctx, header_dir);
         nt_builder_set_cache_dir(ctx, cache_dir);
 
-        /* CJK font resource */
+        /* CJK font resource — all glyphs from CJK+Hangul+Kana ranges */
         nt_builder_add_font(ctx, font_path,
                             &(nt_font_opts_t){
-                                .charset = CJK_CHARSET,
+                                .charset = s_cjk_charset,
                                 .resource_name = "text/font_cjk",
                             });
         (void)printf("  Font (CJK) added\n");
