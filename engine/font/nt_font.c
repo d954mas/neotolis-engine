@@ -1105,8 +1105,8 @@ nt_font_stats_t nt_font_get_stats(nt_font_t font) {
         .max_glyphs = slot->max_glyphs,
         .curve_texels_used = slot->curve_write_head,
         .curve_texels_total = (uint32_t)slot->curve_tex_width * slot->curve_tex_height,
-        .band_texels_used = (uint32_t)slot->glyphs_cached * slot->band_count,
-        .band_texels_total = (uint32_t)slot->band_count * slot->band_tex_height,
+        .band_texels_used = (uint32_t)slot->glyphs_cached * slot->band_count * 2,  /* Y + X bands */
+        .band_texels_total = (uint32_t)slot->band_count * 2 * slot->band_tex_height,
     };
 }
 
@@ -1316,6 +1316,9 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) {
 
     for (const uint8_t *p = (const uint8_t *)utf8; *p; p++) {
         if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
+            if (state == NT_UTF8_REJECT) {
+                state = NT_UTF8_ACCEPT; /* recover: skip bad byte, continue parsing */
+            }
             continue;
         }
 

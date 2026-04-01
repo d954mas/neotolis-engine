@@ -87,16 +87,24 @@ static void create_pipeline(void) {
             },
     };
 
+    /* Slug shader requires premultiplied alpha blend (ONE, ONE_MINUS_SRC_ALPHA).
+     * Material should be created with NT_BLEND_MODE_ALPHA for correct results. */
+    if (info->blend_mode != NT_BLEND_MODE_ALPHA) {
+        NT_LOG_WARN("text material '%s': expected NT_BLEND_MODE_ALPHA for Slug rendering", info->label ? info->label : "?");
+    }
+
+    /* Read render state from material — same pattern as mesh_renderer */
     s_text.pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
         .vertex_shader = (nt_shader_t){info->resolved_vs},
         .fragment_shader = (nt_shader_t){info->resolved_fs},
         .layout = layout,
-        .depth_test = true,
-        .depth_write = false,
+        .depth_test = info->depth_test,
+        .depth_write = info->depth_write,
         .depth_func = NT_DEPTH_LEQUAL,
-        .blend = true,
+        .blend = (info->blend_mode == NT_BLEND_MODE_ALPHA),
         .blend_src = NT_BLEND_ONE,
         .blend_dst = NT_BLEND_ONE_MINUS_SRC_ALPHA,
+        .cull_mode = (uint8_t)info->cull_mode,
         .label = "text_renderer",
     });
 
@@ -157,31 +165,18 @@ void nt_text_renderer_restore_gpu(void) {
         return;
     }
 
-    /* Regenerate index data */
-    generate_quad_indices();
+    /* Save state that survives context loss */
+    nt_material_t saved_material = s_text.material;
+    nt_font_t saved_font = s_text.font;
 
-    /* Recreate buffers */
-    s_text.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_VERTEX,
-        .usage = NT_USAGE_DYNAMIC,
-        .size = NT_TEXT_RENDERER_MAX_VERTICES * (uint32_t)sizeof(nt_text_vertex_t),
-        .label = "text_vbo",
-    });
+    /* Full shutdown → init cycle (frees pool slots, no leaks) */
+    nt_text_renderer_shutdown();
+    nt_text_renderer_init();
 
-    s_text.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_INDEX,
-        .usage = NT_USAGE_IMMUTABLE,
-        .data = s_quad_indices,
-        .size = (uint32_t)sizeof(s_quad_indices),
-        .index_type = NT_INDEX_UINT16,
-        .label = "text_ibo",
-    });
-
-    /* Recreate pipeline if material was set */
-    if (s_text.material.id != 0) {
-        s_text.pipeline_material_version = 0; /* force recreation */
-        create_pipeline();
-    }
+    /* Restore state */
+    s_text.material = saved_material;
+    s_text.font = saved_font;
+    s_text.pipeline_material_version = 0; /* force pipeline recreation on next flush */
 }
 // #endregion
 
@@ -317,6 +312,9 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
 
     for (const uint8_t *p = (const uint8_t *)utf8; *p; p++) {
         if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
+            if (state == NT_UTF8_REJECT) {
+                state = NT_UTF8_ACCEPT; /* recover: skip bad byte, continue parsing */
+            }
             continue;
         }
 
@@ -348,17 +346,18 @@ void nt_text_renderer_flush(void) {
     if (s_text.glyph_count == 0) {
         return;
     }
-    if (s_text.pipeline.id == 0) {
-        /* Pipeline not ready yet -- try to create it */
-        if (s_text.material.id != 0) {
+    /* Recreate pipeline if missing or material version changed (shader invalidation) */
+    if (s_text.material.id != 0) {
+        const nt_material_info_t *info = nt_material_get_info(s_text.material);
+        if (info && info->version != s_text.pipeline_material_version) {
             create_pipeline();
         }
-        if (s_text.pipeline.id == 0) {
-            NT_LOG_WARN("nt_text_renderer_flush: no pipeline -- discarding %u glyphs", s_text.glyph_count);
-            s_text.vertex_count = 0;
-            s_text.glyph_count = 0;
-            return;
-        }
+    }
+    if (s_text.pipeline.id == 0) {
+        NT_LOG_WARN("nt_text_renderer_flush: no pipeline -- discarding %u glyphs", s_text.glyph_count);
+        s_text.vertex_count = 0;
+        s_text.glyph_count = 0;
+        return;
     }
 
     /* Upload staging buffer to GPU */
