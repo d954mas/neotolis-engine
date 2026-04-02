@@ -1,0 +1,400 @@
+#include "renderers/nt_text_renderer.h"
+
+#include "core/nt_assert.h"
+#include "font/nt_font.h"
+#include "graphics/nt_gfx.h"
+#include "log/nt_log.h"
+#include "material/nt_material.h"
+
+#include "utf8/nt_utf8.h"
+
+#include <string.h>
+
+// #region Vertex format
+/* 68 bytes per vertex, matching slug_text.vert contract */
+typedef struct {
+    float position[3];     /* 12B: world-space quad corner (full 3D) */
+    float texcoord[2];     /* 8B: em-space coordinate */
+    float glyph_data[4];   /* 16B: packed uint via memcpy (curve_offset, band_row, curve_offset_x, band_count) */
+    float glyph_bounds[4]; /* 16B: bbox x0/y0/x1/y1 in em-space */
+    float color[4];        /* 16B: RGBA float */
+} nt_text_vertex_t;
+_Static_assert(sizeof(nt_text_vertex_t) == 68, "text vertex stride must be 68 bytes");
+// #endregion
+
+// #region Module state
+static struct {
+    /* GPU resources */
+    nt_pipeline_t pipeline;
+    nt_buffer_t vbo; /* dynamic vertex buffer */
+    nt_buffer_t ibo; /* immutable index buffer (pre-generated quad pattern) */
+
+    /* CPU staging buffer (compile-time arrays per D-14) */
+    nt_text_vertex_t vertices[NT_TEXT_RENDERER_MAX_VERTICES];
+    uint32_t vertex_count;
+    uint32_t glyph_count;
+
+    /* Current state (per D-04, D-05) */
+    nt_material_t material;
+    nt_font_t font;
+
+    /* Cached pipeline state */
+    uint32_t pipeline_material_version; /* version when pipeline was last created */
+
+    bool initialized;
+} s_text;
+
+static uint16_t s_quad_indices[NT_TEXT_RENDERER_MAX_INDICES];
+// #endregion
+
+// #region Index buffer generation
+static void generate_quad_indices(void) {
+    for (uint32_t i = 0; i < NT_TEXT_RENDERER_MAX_GLYPHS; i++) {
+        uint16_t base = (uint16_t)(i * 4);
+        uint32_t idx = i * 6;
+        s_quad_indices[idx + 0] = base;
+        s_quad_indices[idx + 1] = (uint16_t)(base + 1);
+        s_quad_indices[idx + 2] = (uint16_t)(base + 2);
+        s_quad_indices[idx + 3] = (uint16_t)(base + 2);
+        s_quad_indices[idx + 4] = (uint16_t)(base + 3);
+        s_quad_indices[idx + 5] = base;
+    }
+}
+// #endregion
+
+// #region Pipeline creation
+static void create_pipeline(void) {
+    const nt_material_info_t *info = nt_material_get_info(s_text.material);
+    if (!info || !info->ready) {
+        return;
+    }
+
+    if (s_text.pipeline.id != 0) {
+        nt_gfx_destroy_pipeline(s_text.pipeline);
+    }
+
+    /* Slug vertex layout: 5 attributes, stride = 68 bytes */
+    nt_vertex_layout_t layout = {
+        .attr_count = 5,
+        .stride = 68,
+        .attrs =
+            {
+                {.location = 0, .format = NT_FORMAT_FLOAT3, .offset = 0},  /* a_position */
+                {.location = 1, .format = NT_FORMAT_FLOAT2, .offset = 12}, /* a_texcoord */
+                {.location = 2, .format = NT_FORMAT_FLOAT4, .offset = 20}, /* a_glyph_data */
+                {.location = 3, .format = NT_FORMAT_FLOAT4, .offset = 36}, /* a_glyph_bounds */
+                {.location = 4, .format = NT_FORMAT_FLOAT4, .offset = 52}, /* a_color */
+            },
+    };
+
+    /* Slug shader requires premultiplied alpha blend (ONE, ONE_MINUS_SRC_ALPHA).
+     * Material should be created with NT_BLEND_MODE_ALPHA for correct results. */
+    if (info->blend_mode != NT_BLEND_MODE_ALPHA) {
+        NT_LOG_WARN("text material '%s': expected NT_BLEND_MODE_ALPHA for Slug rendering", info->label ? info->label : "?");
+    }
+
+    /* Read render state from material — same pattern as mesh_renderer */
+    s_text.pipeline = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = (nt_shader_t){info->resolved_vs},
+        .fragment_shader = (nt_shader_t){info->resolved_fs},
+        .layout = layout,
+        .depth_test = info->depth_test,
+        .depth_write = info->depth_write,
+        .depth_func = NT_DEPTH_LEQUAL,
+        .blend = (info->blend_mode == NT_BLEND_MODE_ALPHA),
+        .blend_src = NT_BLEND_ONE,
+        .blend_dst = NT_BLEND_ONE_MINUS_SRC_ALPHA,
+        .cull_mode = (uint8_t)info->cull_mode,
+        .label = "text_renderer",
+    });
+
+    /* Bind global UBO slot */
+    nt_gfx_set_uniform_block(s_text.pipeline, "Globals", 0);
+
+    s_text.pipeline_material_version = info->version;
+}
+// #endregion
+
+// #region Lifecycle
+void nt_text_renderer_init(void) {
+    NT_ASSERT(!s_text.initialized);
+    memset(&s_text, 0, sizeof(s_text));
+
+    /* Generate quad indices */
+    generate_quad_indices();
+
+    /* Register pre-flush callback so font cache clears draw our staging
+     * buffer while texture offsets are still valid. Safe when staging is
+     * empty — flush does early return on glyph_count == 0. */
+    nt_font_set_pre_flush_callback(nt_text_renderer_flush);
+
+    /* Create dynamic vertex buffer */
+    s_text.vbo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_VERTEX,
+        .usage = NT_USAGE_DYNAMIC,
+        .size = NT_TEXT_RENDERER_MAX_VERTICES * (uint32_t)sizeof(nt_text_vertex_t),
+        .label = "text_vbo",
+    });
+
+    /* Create immutable index buffer with pre-generated quad pattern */
+    s_text.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
+        .type = NT_BUFFER_INDEX,
+        .usage = NT_USAGE_IMMUTABLE,
+        .data = s_quad_indices,
+        .size = (uint32_t)sizeof(s_quad_indices),
+        .index_type = NT_INDEX_UINT16,
+        .label = "text_ibo",
+    });
+
+    s_text.initialized = true;
+}
+
+void nt_text_renderer_shutdown(void) {
+    if (!s_text.initialized) {
+        return;
+    }
+    if (s_text.pipeline.id != 0) {
+        nt_gfx_destroy_pipeline(s_text.pipeline);
+    }
+    nt_gfx_destroy_buffer(s_text.vbo);
+    nt_gfx_destroy_buffer(s_text.ibo);
+    nt_font_set_pre_flush_callback(NULL);
+    memset(&s_text, 0, sizeof(s_text));
+}
+
+void nt_text_renderer_restore_gpu(void) {
+    if (!s_text.initialized) {
+        return;
+    }
+
+    /* Save state that survives context loss */
+    nt_material_t saved_material = s_text.material;
+    nt_font_t saved_font = s_text.font;
+
+    /* Full shutdown → init cycle (frees pool slots, no leaks) */
+    nt_text_renderer_shutdown();
+    nt_text_renderer_init();
+
+    /* Restore state */
+    s_text.material = saved_material;
+    s_text.font = saved_font;
+    s_text.pipeline_material_version = 0; /* force pipeline recreation on next flush */
+}
+// #endregion
+
+// #region State setters
+void nt_text_renderer_set_material(nt_material_t mat) {
+    NT_ASSERT(s_text.initialized);
+    if (s_text.material.id == mat.id) {
+        return;
+    }
+
+    /* Auto-flush on material change (D-19) */
+    if (s_text.glyph_count > 0) {
+        nt_text_renderer_flush();
+    }
+
+    s_text.material = mat;
+    s_text.pipeline_material_version = 0; /* force pipeline recreation */
+    create_pipeline();
+}
+
+void nt_text_renderer_set_font(nt_font_t font) {
+    NT_ASSERT(s_text.initialized);
+    if (s_text.font.id == font.id) {
+        return;
+    }
+
+    /* Auto-flush on font change (D-18) */
+    if (s_text.glyph_count > 0) {
+        nt_text_renderer_flush();
+    }
+
+    s_text.font = font;
+}
+// #endregion
+
+// #region Vertex generation helpers
+static void pack_uint_as_float(float *out, uint32_t val) { memcpy(out, &val, 4); /* bit-preserving uint-to-float, never cast (Pitfall 1) */ }
+
+static void transform_point(float out[3], const float model[16], float x, float y) {
+    /* mat4 * vec4(x, y, 0, 1) -- full 3D transform */
+    out[0] = model[0] * x + model[4] * y + model[12];
+    out[1] = model[1] * x + model[5] * y + model[13];
+    out[2] = model[2] * x + model[6] * y + model[14];
+}
+
+static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, const float color[4], uint8_t band_count) {
+    if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
+        nt_text_renderer_flush();
+    }
+
+    /* Local quad corners (scaled from font units to target size) */
+    float x0 = pen_x + ((float)g->bbox_x0 * scale);
+    float y0 = (float)g->bbox_y0 * scale;
+    float x1 = pen_x + ((float)g->bbox_x1 * scale);
+    float y1 = (float)g->bbox_y1 * scale;
+
+    /* Em-space coordinates (unscaled, for shader) */
+    float em_x0 = (float)g->bbox_x0;
+    float em_y0 = (float)g->bbox_y0;
+    float em_x1 = (float)g->bbox_x1;
+    float em_y1 = (float)g->bbox_y1;
+
+    /* Pack glyph data as uint bit patterns */
+    float gd0;
+    float gd1;
+    float gd2;
+    float gd3;
+    pack_uint_as_float(&gd0, g->curve_offset);
+    pack_uint_as_float(&gd1, (uint32_t)g->band_row);
+    pack_uint_as_float(&gd2, g->curve_offset_x);
+    pack_uint_as_float(&gd3, (uint32_t)band_count);
+
+    /* 4 vertices per quad: BL, BR, TR, TL */
+    uint32_t vi = s_text.vertex_count;
+    nt_text_vertex_t *v = &s_text.vertices[vi];
+
+    /* Shared fields — fill once in v[0], copy to v[1..3] */
+    v[0].glyph_data[0] = gd0;
+    v[0].glyph_data[1] = gd1;
+    v[0].glyph_data[2] = gd2;
+    v[0].glyph_data[3] = gd3;
+    v[0].glyph_bounds[0] = em_x0;
+    v[0].glyph_bounds[1] = em_y0;
+    v[0].glyph_bounds[2] = em_x1;
+    v[0].glyph_bounds[3] = em_y1;
+    memcpy(v[0].color, color, 16);
+    v[1] = v[0];
+    v[2] = v[0];
+    v[3] = v[0];
+
+    /* Unique per-corner: position + texcoord */
+    transform_point(v[0].position, model, x0, y0); /* BL */
+    v[0].texcoord[0] = em_x0;
+    v[0].texcoord[1] = em_y0;
+
+    transform_point(v[1].position, model, x1, y0); /* BR */
+    v[1].texcoord[0] = em_x1;
+    v[1].texcoord[1] = em_y0;
+
+    transform_point(v[2].position, model, x1, y1); /* TR */
+    v[2].texcoord[0] = em_x1;
+    v[2].texcoord[1] = em_y1;
+
+    transform_point(v[3].position, model, x0, y1); /* TL */
+    v[3].texcoord[0] = em_x0;
+    v[3].texcoord[1] = em_y1;
+
+    s_text.vertex_count += 4;
+    s_text.glyph_count++;
+}
+// #endregion
+
+// #region Draw
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4]) {
+    NT_ASSERT(s_text.initialized);
+    if (!utf8 || !*utf8) {
+        return;
+    }
+    if (s_text.font.id == 0) {
+        NT_LOG_WARN("nt_text_renderer_draw: no font set");
+        return;
+    }
+
+    nt_font_metrics_t metrics = nt_font_get_metrics(s_text.font);
+    if (metrics.units_per_em == 0) {
+        return;
+    }
+    float scale = size / (float)metrics.units_per_em;
+    uint8_t band_count = nt_font_get_band_count(s_text.font);
+
+    uint32_t state = NT_UTF8_ACCEPT;
+    uint32_t codepoint = 0;
+    uint32_t prev_cp = 0;
+    float pen_x = 0.0F;
+
+    for (const uint8_t *p = (const uint8_t *)utf8; *p; p++) {
+        if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
+            if (state == NT_UTF8_REJECT) {
+                state = NT_UTF8_ACCEPT; /* recover: skip bad byte, continue parsing */
+            }
+            continue;
+        }
+
+        /* Apply kern pair */
+        if (prev_cp != 0) {
+            int16_t kern = nt_font_get_kern(s_text.font, prev_cp, codepoint);
+            pen_x += (float)kern * scale;
+        }
+
+        const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph(s_text.font, codepoint);
+        if (!g) {
+            prev_cp = codepoint;
+            continue;
+        }
+
+        /* Emit quad if glyph has visible bbox */
+        if (g->bbox_x1 > g->bbox_x0) {
+            emit_quad(g, model, scale, pen_x, color, band_count);
+        }
+
+        pen_x += (float)g->advance * scale;
+        prev_cp = codepoint;
+    }
+}
+// #endregion
+
+// #region Flush
+void nt_text_renderer_flush(void) {
+    if (s_text.glyph_count == 0) {
+        return;
+    }
+    /* Recreate pipeline if missing or material version changed (shader invalidation) */
+    if (s_text.material.id != 0) {
+        const nt_material_info_t *info = nt_material_get_info(s_text.material);
+        if (info && info->version != s_text.pipeline_material_version) {
+            create_pipeline();
+        }
+    }
+    if (s_text.pipeline.id == 0) {
+        NT_LOG_WARN("nt_text_renderer_flush: no pipeline -- discarding %u glyphs", s_text.glyph_count);
+        s_text.vertex_count = 0;
+        s_text.glyph_count = 0;
+        return;
+    }
+
+    /* Upload staging buffer to GPU */
+    nt_gfx_update_buffer(s_text.vbo, s_text.vertices, s_text.vertex_count * (uint32_t)sizeof(nt_text_vertex_t));
+
+    nt_gfx_bind_pipeline(s_text.pipeline);
+    nt_gfx_bind_vertex_buffer(s_text.vbo);
+    nt_gfx_bind_index_buffer(s_text.ibo);
+
+    /* Bind font textures */
+    if (s_text.font.id != 0) {
+        nt_gfx_bind_texture(nt_font_get_curve_texture(s_text.font), 0);
+        nt_gfx_bind_texture(nt_font_get_band_texture(s_text.font), 1);
+        nt_gfx_set_uniform_int("u_curve_texture", 0);
+        nt_gfx_set_uniform_int("u_band_texture", 1);
+        nt_gfx_set_uniform_int("u_curve_tex_width", (int)nt_font_get_curve_texture_width(s_text.font));
+    }
+
+    /* Single draw call per flush */
+    nt_gfx_draw_indexed(0, s_text.glyph_count * 6, s_text.vertex_count);
+
+    /* Reset staging buffer */
+    s_text.vertex_count = 0;
+    s_text.glyph_count = 0;
+}
+// #endregion
+
+// #region Test accessors
+#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+uint32_t nt_text_renderer_test_vertex_count(void) { return s_text.vertex_count; }
+uint32_t nt_text_renderer_test_glyph_count(void) { return s_text.glyph_count; }
+const void *nt_text_renderer_test_vertices(void) { return s_text.vertices; }
+bool nt_text_renderer_test_initialized(void) { return s_text.initialized; }
+#endif
+// #endregion

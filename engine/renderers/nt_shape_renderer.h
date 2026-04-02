@@ -21,10 +21,10 @@
 
 #if NT_SHAPE_RENDERER_MAX_VERTICES > 65535
 typedef uint32_t nt_shape_index_t;
-#define NT_SHAPE_INDEX_TYPE 2 /* nt_gfx index_type for uint32 */
+#define NT_SHAPE_INDEX_TYPE NT_INDEX_UINT32
 #else
 typedef uint16_t nt_shape_index_t;
-#define NT_SHAPE_INDEX_TYPE 1 /* nt_gfx index_type for uint16 */
+#define NT_SHAPE_INDEX_TYPE NT_INDEX_UINT16
 #endif
 
 /* ---- Vertex format ---- */

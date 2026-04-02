@@ -176,11 +176,11 @@ static void check_codegen_collisions(const CodegenEntry *entries, uint32_t count
 
 static void write_sorted_defines(FILE *f, const CodegenEntry *entries, uint32_t count) {
     /* Build sort index per type group */
-    const char *type_order[] = {"MESH", "TEXTURE", "SHADER", "BLOB"};
+    const char *type_order[] = {"MESH", "TEXTURE", "SHADER", "BLOB", "FONT"};
 
     SortEntry sorted[NT_BUILD_MAX_ASSETS];
 
-    for (int t = 0; t < 4; t++) {
+    for (int t = 0; t < 5; t++) {
         uint32_t group_count = 0;
         for (uint32_t i = 0; i < count; i++) {
             const char *prefix = type_prefix_for_kind(entries[i].kind);
@@ -297,6 +297,9 @@ static nt_build_asset_kind_t kind_from_identifier(const char *id) {
     }
     if (strstr(id, "ASSET_BLOB_") == id) {
         return NT_BUILD_ASSET_BLOB;
+    }
+    if (strstr(id, "ASSET_FONT_") == id) {
+        return NT_BUILD_ASSET_FONT;
     }
     return NT_BUILD_ASSET_BLOB; /* fallback */
 }

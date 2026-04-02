@@ -61,11 +61,12 @@ typedef struct {
 
 typedef struct {
     nt_pool_t pool;
-    nt_font_slot_t *slots;  /* [capacity+1], index 0 reserved */
-    void *data_entries;     /* nt_font_data_entry_t[], allocated in init */
-    uint32_t data_capacity; /* max_fonts * NT_FONT_MAX_SOURCES_PER_FONT */
-    uint32_t data_count;    /* high-water mark */
-    uint32_t frame_counter; /* module-level LRU tick, incremented each step */
+    nt_font_slot_t *slots;             /* [capacity+1], index 0 reserved */
+    void *data_entries;                /* nt_font_data_entry_t[], allocated in init */
+    uint32_t data_capacity;            /* max_fonts * NT_FONT_MAX_SOURCES_PER_FONT */
+    uint32_t data_count;               /* high-water mark */
+    uint32_t frame_counter;            /* module-level LRU tick, incremented each step */
+    nt_font_pre_flush_fn pre_flush_fn; /* called before cache clear, see nt_font.h */
     bool initialized;
 } nt_font_state_t;
 

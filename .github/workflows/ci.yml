@@ -67,6 +67,12 @@ jobs:
           name: sponza-packs
           path: build/examples/sponza
 
+      - name: Download text packs
+        uses: actions/download-artifact@v4
+        with:
+          name: text-packs
+          path: build/examples/text
+
       - name: Build baseline WASM debug artifacts
         run: |
           emcmake cmake --preset wasm-debug
@@ -228,16 +234,19 @@ jobs:
           test -f build/examples/spinning_cube/wasm-debug-paired/index_simd.wasm
           test -f build/examples/textured_quad/wasm-debug-paired/index_simd.wasm
           test -f build/examples/sponza/wasm-debug-paired/index_simd.wasm
+          test -f build/examples/text/wasm-debug-paired/index_simd.wasm
           test -f build/examples/hello/wasm-release-paired/index_simd.wasm
           test -f build/examples/bench_shapes/wasm-release-paired/index_simd.wasm
           test -f build/examples/spinning_cube/wasm-release-paired/index_simd.wasm
           test -f build/examples/textured_quad/wasm-release-paired/index_simd.wasm
           test -f build/examples/sponza/wasm-release-paired/index_simd.wasm
+          test -f build/examples/text/wasm-release-paired/index_simd.wasm
           test -f build/examples/hello/wasm-analysis-paired/index_simd.wasm
           test -f build/examples/bench_shapes/wasm-analysis-paired/index_simd.wasm
           test -f build/examples/spinning_cube/wasm-analysis-paired/index_simd.wasm
           test -f build/examples/textured_quad/wasm-analysis-paired/index_simd.wasm
           test -f build/examples/sponza/wasm-analysis-paired/index_simd.wasm
+          test -f build/examples/text/wasm-analysis-paired/index_simd.wasm
           echo "Packaged example SIMD artifacts verified"
 
       - name: Install wabt
@@ -294,7 +303,7 @@ jobs:
         run: cmake --preset native-release
 
       - name: Build pack builders (release, no ASAN — fast encoding)
-        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs
+        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs build_text_packs
 
       - name: Restore builder cache
         uses: actions/cache@v4
@@ -302,6 +311,7 @@ jobs:
           path: |
             build/examples/sponza/_cache
             build/examples/textured_quad/_cache
+            build/examples/text/_cache
           key: builder-cache-${{ github.sha }}
           restore-keys: builder-cache-
 
@@ -309,6 +319,7 @@ jobs:
         run: |
           ./build/examples/textured_quad/native-release/build_tq_packs build/examples/textured_quad
           ./build/examples/sponza/native-release/build_sponza_packs build/examples/sponza
+          ./build/examples/text/native-release/build_text_packs build/examples/text
 
       - name: Build native release (all targets)
         run: cmake --build --preset native-release
@@ -374,6 +385,13 @@ jobs:
           path: build/examples/sponza/*.ntpack
           retention-days: 1
 
+      - name: Upload text packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: text-packs
+          path: build/examples/text/*.ntpack
+          retention-days: 1
+
       - name: Submodule consumption test
         run: |
           cmake -S tests/submodule -B build/submodule-test \
@@ -426,6 +444,12 @@ jobs:
         with:
           name: sponza-packs
           path: build/examples/sponza
+
+      - name: Download text packs
+        uses: actions/download-artifact@v4
+        with:
+          name: text-packs
+          path: build/examples/text
 
       - uses: actions/setup-node@v4
         with:

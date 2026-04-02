@@ -8,6 +8,7 @@
 /* ---- Compile-time limits ---- */
 
 #define NT_FONT_MAX_SOURCES_PER_FONT 8
+#define NT_FONT_MAX_BANDS 16
 
 /* ---- Handle type ---- */
 
@@ -63,16 +64,42 @@ typedef struct {
 
 typedef struct {
     uint32_t codepoint;
-    uint32_t curve_offset; /* texel offset into curve texture */
-    uint16_t curve_count;  /* number of curve texels used */
-    uint16_t band_row;     /* row in band texture */
-    int16_t advance;       /* horizontal advance (font units) */
+    uint32_t curve_offset;   /* texel offset for Y-band curves */
+    uint32_t curve_offset_x; /* texel offset for X-band curves */
+    uint16_t curve_count;    /* number of curve texels used */
+    uint16_t band_row;       /* row in band texture */
+    int16_t advance;         /* horizontal advance (font units) */
     int16_t bbox_x0;
     int16_t bbox_y0;
     int16_t bbox_x1;
     int16_t bbox_y1;
     bool is_tofu;
 } nt_glyph_cache_entry_t;
+
+/* ---- Glyph metrics (CPU-only, no GPU, no cache) ---- */
+
+typedef struct {
+    int16_t advance;
+    int16_t bbox_x0;
+    int16_t bbox_y0;
+    int16_t bbox_x1;
+    int16_t bbox_y1;
+    bool found; /* false = tofu fallback metrics */
+} nt_glyph_metrics_t;
+
+/* Lookup glyph metrics by codepoint without touching GPU or glyph cache.
+ * Returns advance + bbox from the font binary via bsearch.
+ * Missing glyphs return tofu metrics (advance = units_per_em/2). */
+nt_glyph_metrics_t nt_font_lookup_metrics(nt_font_t font, uint32_t codepoint);
+
+/* ---- Text measurement (pure CPU, no GPU calls) ---- */
+
+typedef struct {
+    float width;
+    float height;
+} nt_text_size_t;
+
+nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size);
 
 /* ---- Lifecycle ---- */
 
@@ -108,9 +135,19 @@ nt_texture_t nt_font_get_band_texture(nt_font_t font);
 uint8_t nt_font_get_band_count(nt_font_t font);
 uint16_t nt_font_get_curve_texture_width(nt_font_t font);
 
-/* ---- Cache generation (for Phase 45 batch invalidation) ---- */
+/* ---- Cache generation (for batch invalidation) ---- */
 
 uint32_t nt_font_get_cache_generation(nt_font_t font);
+
+/* ---- Pre-flush callback ---- */
+
+/* Called just before the glyph cache is cleared (texture data invalidated).
+ * Consumers that hold staging buffers with glyph texture offsets (e.g.
+ * nt_text_renderer) must register a callback to flush/draw those buffers
+ * before the offsets become stale. Without this, a cache flush mid-draw
+ * would silently render garbage from overwritten texture regions. */
+typedef void (*nt_font_pre_flush_fn)(void);
+void nt_font_set_pre_flush_callback(nt_font_pre_flush_fn fn);
 
 /* ---- Kern pair lookup (for nt_text shaping in Phase 45) ---- */
 

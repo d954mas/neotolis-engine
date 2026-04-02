@@ -12,6 +12,7 @@
 #include "nt_pack_format.h"
 #include "pool/nt_pool.h"
 #include "resource/nt_resource.h"
+#include "utf8/nt_utf8.h"
 
 /* ---- Font data storage (side table for pack blobs accessed via activator) ---- */
 
@@ -276,10 +277,10 @@ static uint16_t evict_lru(nt_font_slot_t *slot) {
 #endif
 
 /* Static temp buffer for GPU upload (no CPU mirror needed).
- * Max texels per glyph: NT_FONT_MAX_CURVES_PER_GLYPH * bands * 2.
- * 256 curves * 32 bands * 2 texels * 4 uint16 = 128KB worst case.
- * Realistic: 40 curves * 8 bands * 2 * 4 = 2.5KB. */
-static uint16_t s_curve_upload[NT_FONT_MAX_CURVES_PER_GLYPH * 32 * 2 * 4];
+ * Max texels per glyph: NT_FONT_MAX_CURVES_PER_GLYPH * bands * 2 * 2 (Y+X bands).
+ * 256 curves * 32 bands * 2 texels * 2 axes * 4 uint16 = 256KB worst case.
+ * Realistic: 40 curves * 8 bands * 2 * 2 * 4 = 5KB. */
+static uint16_t s_curve_upload[NT_FONT_MAX_CURVES_PER_GLYPH * NT_FONT_MAX_BANDS * 2 * 4 * 2];
 
 /* Reset free stack to all slots available (0..max_glyphs-1) */
 static void free_stack_reset(nt_font_slot_t *slot) {
@@ -294,8 +295,13 @@ static uint16_t free_stack_pop(nt_font_slot_t *slot) {
     return slot->free_stack[--slot->free_top];
 }
 
-/* Flush entire cache when curve texture is full */
+/* Flush entire cache when curve texture is full.
+ * Pre-flush callback lets consumers (e.g. nt_text_renderer) draw their
+ * staging buffers while texture offsets are still valid. */
 static void flush_cache(nt_font_slot_t *slot) {
+    if (s_font.pre_flush_fn) {
+        s_font.pre_flush_fn();
+    }
     NT_LOG_WARN("font cache flush: curve texture full (%ux%u), consider larger curve_texture_width/height", slot->curve_tex_width, slot->curve_tex_height);
     memset(slot->cache, 0, (size_t)slot->max_glyphs * sizeof(nt_font_cache_slot_t));
     memset(slot->hash_table, 0, (size_t)slot->hash_table_size * sizeof(uint16_t));
@@ -337,8 +343,8 @@ static void generate_tofu(nt_font_slot_t *slot) {
 
     /* 4 line segments forming a rectangle: bottom, right, top, left
      * Each line promoted to degenerate quadratic: p1 = midpoint(p0, p2)
-     * 4 curves x 2 texels = 8 texels needed */
-    uint32_t needed_texels = 4 * 2;
+     * 4 curves x 2 texels x 2 (Y-bands + X-bands) = 16 texels needed */
+    uint32_t needed_texels = 4 * 2 * 2;
 
     /* Ensure we have cache slot space */
     ensure_curve_space(slot, needed_texels);
@@ -382,36 +388,52 @@ static void generate_tofu(nt_font_slot_t *slot) {
         s_curve_upload[t1 + 3] = 0;
     }
 
-    /* Upload curve data for tofu to GPU */
+    /* Duplicate same 4 curves for X-bands (appended after Y-band data) */
+    uint32_t x_curve_offset = curve_offset + (4 * 2); /* after Y-band curves */
+    for (int seg = 0; seg < 4; seg++) {
+        uint32_t src0 = (uint32_t)seg * 2 * 4;
+        uint32_t dst0 = (uint32_t)(4 + seg) * 2 * 4;
+        for (uint32_t k = 0; k < 8; k++) {
+            s_curve_upload[dst0 + k] = s_curve_upload[src0 + k];
+        }
+    }
+
+    /* Upload all curve data (Y + X) to GPU */
     uint32_t remaining = needed_texels;
     uint32_t src_texel = 0;
     uint32_t dst_texel = curve_offset;
     while (remaining > 0) {
-        uint16_t row = (uint16_t)(dst_texel / slot->curve_tex_width);
-        uint16_t col = (uint16_t)(dst_texel % slot->curve_tex_width);
-        uint16_t w = (uint16_t)(slot->curve_tex_width - col);
-        if (w > remaining) {
-            w = (uint16_t)remaining;
+        uint16_t row2 = (uint16_t)(dst_texel / slot->curve_tex_width);
+        uint16_t col2 = (uint16_t)(dst_texel % slot->curve_tex_width);
+        uint16_t w2 = (uint16_t)(slot->curve_tex_width - col2);
+        if (w2 > remaining) {
+            w2 = (uint16_t)remaining;
         }
-        nt_gfx_update_texture(slot->curve_texture, col, row, w, 1, &s_curve_upload[(size_t)src_texel * 4]);
-        remaining -= w;
-        src_texel += w;
-        dst_texel += w;
+        nt_gfx_update_texture(slot->curve_texture, col2, row2, w2, 1, &s_curve_upload[(size_t)src_texel * 4]);
+        remaining -= w2;
+        src_texel += w2;
+        dst_texel += w2;
     }
 
-    /* Upload band data for tofu -- all 4 curves are in each band (simple rectangle) */
-    uint16_t band_data[32 * 2] = {0};
+    /* Upload band data for tofu -- all 4 curves in every Y-band and X-band */
+    uint16_t band_data[NT_FONT_MAX_BANDS * 2 * 2] = {0};
     for (uint8_t b = 0; b < slot->band_count; b++) {
-        band_data[(b * 2) + 0] = 0; /* curve_start: relative index, all curves in every band */
-        band_data[(b * 2) + 1] = 4; /* curve_count (all 4 segments) */
+        band_data[(b * 2) + 0] = 0; /* Y-band: curve_start */
+        band_data[(b * 2) + 1] = 4; /* Y-band: curve_count */
     }
-    nt_gfx_update_texture(slot->band_texture, 0, cache_idx, slot->band_count, 1, band_data);
+    uint8_t xoff = slot->band_count;
+    for (uint8_t b = 0; b < slot->band_count; b++) {
+        band_data[((xoff + b) * 2) + 0] = 0; /* X-band: curve_start */
+        band_data[((xoff + b) * 2) + 1] = 4; /* X-band: curve_count */
+    }
+    nt_gfx_update_texture(slot->band_texture, 0, cache_idx, (uint16_t)(slot->band_count * 2), 1, band_data);
 
     /* Fill cache entry */
     nt_font_cache_slot_t *cs = &slot->cache[cache_idx];
     cs->entry.codepoint = 0xFFFFFFFFU; /* sentinel (D-22) */
     cs->entry.curve_offset = curve_offset;
-    cs->entry.curve_count = 4;
+    cs->entry.curve_offset_x = x_curve_offset;
+    cs->entry.curve_count = 8;
     cs->entry.band_row = cache_idx;
     cs->entry.advance = tofu_w;
     cs->entry.bbox_x0 = 0;
@@ -436,7 +458,34 @@ typedef struct {
 
 static nt_curve_t s_decode_curves[NT_FONT_MAX_CURVES_PER_GLYPH];
 
-/* Decode delta-encoded contour data into absolute float curves */
+/* Temporary point buffers for contour decoding (static to avoid stack overflow) */
+static int32_t s_decode_pts_x[NT_FONT_MAX_POINTS_PER_CONTOUR];
+static int32_t s_decode_pts_y[NT_FONT_MAX_POINTS_PER_CONTOUR];
+static uint8_t s_decode_pts_on[NT_FONT_MAX_POINTS_PER_CONTOUR];
+
+/* Read variable-length delta: int8 or sentinel + int16 */
+static inline int16_t read_varlen_delta(const uint8_t **rp) {
+    uint8_t b = **rp;
+    (*rp)++;
+    if (b != NT_FONT_DELTA_SENTINEL) {
+        return (int16_t)(int8_t)b;
+    }
+    int16_t val;
+    memcpy(&val, *rp, 2);
+    (*rp) += 2;
+    return val;
+}
+
+/* Emit one quadratic curve to the output buffer */
+static inline void emit_curve(nt_curve_t *curves, uint16_t *total, uint16_t max_c, float p0x, float p0y, float p1x, float p1y, float p2x, float p2y) {
+    if (*total < max_c) {
+        curves[*total] = (nt_curve_t){p0x, p0y, p1x, p1y, p2x, p2y};
+        (*total)++;
+    }
+}
+
+/* Decode v4 point-based contour data into absolute float curves.
+ * Handles implicit midpoints between consecutive off-curve points. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves, uint16_t max_curves) {
     const uint8_t *rp = contour_data;
@@ -447,81 +496,119 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
     uint16_t total_curves = 0;
 
     for (uint16_t ci = 0; ci < contour_count; ci++) {
-        uint16_t seg_count;
-        memcpy(&seg_count, rp, 2);
+        uint16_t point_count;
+        memcpy(&point_count, rp, 2);
         rp += 2;
 
-        int16_t start_x;
-        int16_t start_y;
-        memcpy(&start_x, rp, 2);
+        uint32_t flags_bytes = NT_FONT_BITMASK_BYTES(point_count);
+        const uint8_t *flags = rp;
+        rp += flags_bytes;
+
+        // #region Read all points (absolute coordinates)
+        /* First point is absolute int16 */
+        int16_t first_x;
+        int16_t first_y;
+        memcpy(&first_x, rp, 2);
         rp += 2;
-        memcpy(&start_y, rp, 2);
+        memcpy(&first_y, rp, 2);
         rp += 2;
 
-        uint32_t bitmask_bytes = NT_FONT_BITMASK_BYTES(seg_count);
-        const uint8_t *bitmask = rp;
-        rp += bitmask_bytes;
+        /* Decode all points into static buffers (avoids ~72 KB on stack) */
+        int32_t *pts_x = s_decode_pts_x;
+        int32_t *pts_y = s_decode_pts_y;
+        uint8_t *pts_on = s_decode_pts_on;
+        NT_ASSERT(point_count <= NT_FONT_MAX_POINTS_PER_CONTOUR);
 
-        int32_t prev_x = start_x;
-        int32_t prev_y = start_y;
+        pts_x[0] = first_x;
+        pts_y[0] = first_y;
+        pts_on[0] = (flags[0] & 1U) != 0;
 
-        for (uint16_t s = 0; s < seg_count; s++) {
-            bool is_quad = (bitmask[s / 8] & (1U << (s % 8))) != 0;
+        int32_t px = first_x;
+        int32_t py = first_y;
+        for (uint16_t p = 1; p < point_count; p++) {
+            int16_t dx = read_varlen_delta(&rp);
+            int16_t dy = read_varlen_delta(&rp);
+            px += dx;
+            py += dy;
+            pts_x[p] = px;
+            pts_y[p] = py;
+            pts_on[p] = (flags[p / 8] & (1U << (p % 8))) != 0;
+        }
+        // #endregion
 
-            float fp0x = (float)prev_x;
-            float fp0y = (float)prev_y;
+        // #region Convert points to quadratic curves (TrueType rules)
+        /* Walk the closed contour: point[0] → point[1] → ... → point[n-1] → point[0] */
+        uint16_t n = point_count;
+        if (n == 0) {
+            continue;
+        }
+        uint16_t i = 0;
 
-            if (is_quad) {
-                // #region Quadratic curve
-                int16_t dp1x;
-                int16_t dp1y;
-                int16_t dp2x;
-                int16_t dp2y;
-                memcpy(&dp1x, rp, 2);
-                rp += 2;
-                memcpy(&dp1y, rp, 2);
-                rp += 2;
-                memcpy(&dp2x, rp, 2);
-                rp += 2;
-                memcpy(&dp2y, rp, 2);
-                rp += 2;
+        /* Find first on-curve point to start from */
+        uint16_t start = 0;
+        while (start < n && !pts_on[start]) {
+            start++;
+        }
+        if (start == n) {
+            /* All off-curve: start from implicit midpoint of first two */
+            start = 0;
+        }
 
-                float fp1x = (float)(prev_x + dp1x);
-                float fp1y = (float)(prev_y + dp1y);
-                float fp2x = (float)(prev_x + dp2x);
-                float fp2y = (float)(prev_y + dp2y);
+        /* Current on-curve position */
+        float cur_x;
+        float cur_y;
+        if (pts_on[start]) {
+            cur_x = (float)pts_x[start];
+            cur_y = (float)pts_y[start];
+            i = (uint16_t)((start + 1) % n);
+        } else {
+            /* All off-curve: midpoint between point[0] and point[1] */
+            cur_x = (float)(pts_x[0] + pts_x[1]) * 0.5F;
+            cur_y = (float)(pts_y[0] + pts_y[1]) * 0.5F;
+            i = 0;
+        }
 
-                if (total_curves < max_curves) {
-                    curves[total_curves] = (nt_curve_t){fp0x, fp0y, fp1x, fp1y, fp2x, fp2y};
-                    total_curves++;
-                }
-                prev_x = prev_x + dp2x;
-                prev_y = prev_y + dp2y;
-                // #endregion
+        uint16_t steps = 0;
+        while (steps < n) {
+            uint16_t idx = i % n;
+
+            if (pts_on[idx]) {
+                /* On-curve → Line segment (degenerate quad) */
+                float ex = (float)pts_x[idx];
+                float ey = (float)pts_y[idx];
+                emit_curve(curves, &total_curves, max_curves, cur_x, cur_y, (cur_x + ex) * 0.5F, (cur_y + ey) * 0.5F, ex, ey);
+                cur_x = ex;
+                cur_y = ey;
+                i = (idx + 1) % n;
+                steps++;
             } else {
-                // #region Line (promote to degenerate quadratic)
-                int16_t dp2x;
-                int16_t dp2y;
-                memcpy(&dp2x, rp, 2);
-                rp += 2;
-                memcpy(&dp2y, rp, 2);
-                rp += 2;
+                /* Off-curve: control point for quadratic */
+                float cx = (float)pts_x[idx];
+                float cy = (float)pts_y[idx];
+                uint16_t next = (idx + 1) % n;
 
-                float fp2x = (float)(prev_x + dp2x);
-                float fp2y = (float)(prev_y + dp2y);
-                /* Degenerate quadratic: p1 = midpoint(p0, p2) */
-                float fp1x = (fp0x + fp2x) * 0.5F;
-                float fp1y = (fp0y + fp2y) * 0.5F;
-
-                if (total_curves < max_curves) {
-                    curves[total_curves] = (nt_curve_t){fp0x, fp0y, fp1x, fp1y, fp2x, fp2y};
-                    total_curves++;
+                if (pts_on[next]) {
+                    /* off → on: standard quad */
+                    float ex = (float)pts_x[next];
+                    float ey = (float)pts_y[next];
+                    emit_curve(curves, &total_curves, max_curves, cur_x, cur_y, cx, cy, ex, ey);
+                    cur_x = ex;
+                    cur_y = ey;
+                    i = (next + 1) % n;
+                    steps += 2;
+                } else {
+                    /* off → off: implicit midpoint is the endpoint */
+                    float mx = (cx + (float)pts_x[next]) * 0.5F;
+                    float my = (cy + (float)pts_y[next]) * 0.5F;
+                    emit_curve(curves, &total_curves, max_curves, cur_x, cur_y, cx, cy, mx, my);
+                    cur_x = mx;
+                    cur_y = my;
+                    i = next; /* don't skip next — it becomes the control for the next segment */
+                    steps++;
                 }
-                prev_x = prev_x + dp2x;
-                prev_y = prev_y + dp2y;
-                // #endregion
             }
         }
+        // #endregion
     }
     return total_curves;
 }
@@ -533,40 +620,69 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
 static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph, const nt_curve_t *curves, uint16_t curve_count, uint8_t resource_index) {
     float bbox_y0 = (float)glyph->bbox_y0;
     float bbox_y1 = (float)glyph->bbox_y1;
+    float bbox_x0 = (float)glyph->bbox_x0;
+    float bbox_x1 = (float)glyph->bbox_x1;
     float band_height = (bbox_y1 - bbox_y0) / (float)slot->band_count;
-    NT_ASSERT(slot->band_count <= 32);
+    float band_width = (bbox_x1 > bbox_x0) ? (bbox_x1 - bbox_x0) / (float)slot->band_count : 0.0F;
+    NT_ASSERT(slot->band_count <= NT_FONT_MAX_BANDS);
 
-    // #region Precompute per-curve Y bounds
+    // #region Precompute per-curve Y and X bounds
     float curve_y_min[NT_FONT_MAX_CURVES_PER_GLYPH];
     float curve_y_max[NT_FONT_MAX_CURVES_PER_GLYPH];
+    float curve_x_min[NT_FONT_MAX_CURVES_PER_GLYPH];
+    float curve_x_max[NT_FONT_MAX_CURVES_PER_GLYPH];
     for (uint16_t ci = 0; ci < curve_count; ci++) {
-        float a = curves[ci].p0y;
-        float b = curves[ci].p1y;
-        float c = curves[ci].p2y;
-        float lo = a < b ? a : b;
-        float hi = a > b ? a : b;
-        curve_y_min[ci] = lo < c ? lo : c;
-        curve_y_max[ci] = hi > c ? hi : c;
+        float ay = curves[ci].p0y;
+        float by = curves[ci].p1y;
+        float cy = curves[ci].p2y;
+        float loy = ay < by ? ay : by;
+        float hiy = ay > by ? ay : by;
+        curve_y_min[ci] = loy < cy ? loy : cy;
+        curve_y_max[ci] = hiy > cy ? hiy : cy;
+
+        float ax = curves[ci].p0x;
+        float bx = curves[ci].p1x;
+        float cx = curves[ci].p2x;
+        float lox = ax < bx ? ax : bx;
+        float hix = ax > bx ? ax : bx;
+        curve_x_min[ci] = lox < cx ? lox : cx;
+        curve_x_max[ci] = hix > cx ? hix : cx;
     }
     // #endregion
 
-    // #region Count total band-curve pairs (needed to reserve texture space)
-    uint16_t band_curve_counts[32] = {0};
+    // #region Count Y-band and X-band curve pairs
+    /* Epsilon margin on band boundaries to avoid edge-case misses where
+     * floating-point rounding places a curve in one band but the shader
+     * maps the pixel to the adjacent band. */
+    float y_margin = band_height * 0.01F;
+    float x_margin = band_width * 0.01F;
+
+    uint16_t yband_counts[NT_FONT_MAX_BANDS] = {0};
+    uint16_t xband_counts[NT_FONT_MAX_BANDS] = {0};
     for (uint16_t ci = 0; ci < curve_count; ci++) {
         for (uint8_t b = 0; b < slot->band_count; b++) {
-            float band_bot = bbox_y0 + ((float)b * band_height);
-            float band_top = band_bot + band_height;
-            if (curve_y_max[ci] >= band_bot && curve_y_min[ci] <= band_top) {
-                band_curve_counts[b]++;
+            float ybot = bbox_y0 + ((float)b * band_height) - y_margin;
+            float ytop = ybot + band_height + (y_margin * 2.0F);
+            if (curve_y_max[ci] >= ybot && curve_y_min[ci] <= ytop) {
+                yband_counts[b]++;
+            }
+            if (band_width > 0.0F) {
+                float xleft = bbox_x0 + ((float)b * band_width) - x_margin;
+                float xright = xleft + band_width + (x_margin * 2.0F);
+                if (curve_x_max[ci] >= xleft && curve_x_min[ci] <= xright) {
+                    xband_counts[b]++;
+                }
             }
         }
     }
 
-    uint32_t total_band_curves = 0;
+    uint32_t y_total = 0;
+    uint32_t x_total = 0;
     for (uint8_t b = 0; b < slot->band_count; b++) {
-        total_band_curves += band_curve_counts[b];
+        y_total += yband_counts[b];
+        x_total += xband_counts[b];
     }
-    uint32_t needed_texels = total_band_curves * 2;
+    uint32_t needed_texels = (y_total + x_total) * 2;
     // #endregion
 
     ensure_curve_space(slot, needed_texels);
@@ -580,21 +696,19 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     }
     // #endregion
 
-    // #region Write curve data to temp buffer, band by band
-    uint32_t curve_offset = slot->curve_write_head;
-    uint16_t band_offsets[32] = {0};
+    // #region Write Y-band curves to temp buffer
+    uint32_t curve_offset_y = slot->curve_write_head;
+    uint16_t yband_offsets[NT_FONT_MAX_BANDS] = {0};
 
     uint32_t local_pos = 0;
     for (uint8_t b = 0; b < slot->band_count; b++) {
-        band_offsets[b] = (uint16_t)(local_pos / 2);
-
-        float band_bot = bbox_y0 + ((float)b * band_height);
-        float band_top = band_bot + band_height;
+        yband_offsets[b] = (uint16_t)(local_pos / 2);
+        float ybot = bbox_y0 + ((float)b * band_height) - y_margin;
+        float ytop = ybot + band_height + (y_margin * 2.0F);
         for (uint16_t ci = 0; ci < curve_count; ci++) {
-            if (curve_y_max[ci] < band_bot || curve_y_min[ci] > band_top) {
+            if (curve_y_max[ci] < ybot || curve_y_min[ci] > ytop) {
                 continue;
             }
-
             uint32_t t0 = local_pos * 4;
             uint32_t t1 = t0 + 4;
             s_curve_upload[t0 + 0] = nt_float32_to_float16(curves[ci].p0x);
@@ -610,11 +724,41 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     }
     // #endregion
 
+    // #region Write X-band curves to temp buffer (after Y-band data)
+    uint32_t y_local_pos = local_pos;
+    uint32_t curve_offset_x = curve_offset_y + y_local_pos;
+    uint16_t xband_offsets[NT_FONT_MAX_BANDS] = {0};
+
+    for (uint8_t b = 0; b < slot->band_count; b++) {
+        xband_offsets[b] = (uint16_t)((local_pos - y_local_pos) / 2);
+        if (band_width > 0.0F) {
+            float xleft = bbox_x0 + ((float)b * band_width) - x_margin;
+            float xright = xleft + band_width + (x_margin * 2.0F);
+            for (uint16_t ci = 0; ci < curve_count; ci++) {
+                if (curve_x_max[ci] < xleft || curve_x_min[ci] > xright) {
+                    continue;
+                }
+                uint32_t t0 = local_pos * 4;
+                uint32_t t1 = t0 + 4;
+                s_curve_upload[t0 + 0] = nt_float32_to_float16(curves[ci].p0x);
+                s_curve_upload[t0 + 1] = nt_float32_to_float16(curves[ci].p0y);
+                s_curve_upload[t0 + 2] = nt_float32_to_float16(curves[ci].p1x);
+                s_curve_upload[t0 + 3] = nt_float32_to_float16(curves[ci].p1y);
+                s_curve_upload[t1 + 0] = nt_float32_to_float16(curves[ci].p2x);
+                s_curve_upload[t1 + 1] = nt_float32_to_float16(curves[ci].p2y);
+                s_curve_upload[t1 + 2] = 0;
+                s_curve_upload[t1 + 3] = 0;
+                local_pos += 2;
+            }
+        }
+    }
+    // #endregion
+
     // #region Upload curve data to GPU from temp buffer
     if (needed_texels > 0) {
         uint32_t remaining = needed_texels;
         uint32_t src_texel = 0;
-        uint32_t dst_texel = curve_offset;
+        uint32_t dst_texel = curve_offset_y;
         while (remaining > 0) {
             uint16_t row = (uint16_t)(dst_texel / slot->curve_tex_width);
             uint16_t col = (uint16_t)(dst_texel % slot->curve_tex_width);
@@ -630,20 +774,26 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     }
     // #endregion
 
-    // #region Upload band data to GPU (RG16UI: curve_start, curve_count per band)
-    uint16_t band_upload[32 * 2] = {0};
+    // #region Upload band data to GPU (Y-bands + X-bands in one row)
+    uint16_t band_upload[NT_FONT_MAX_BANDS * 2 * 2] = {0}; /* Y-bands + X-bands, RG16UI each */
     for (uint8_t b = 0; b < slot->band_count; b++) {
-        band_upload[(b * 2) + 0] = band_offsets[b];
-        band_upload[(b * 2) + 1] = band_curve_counts[b];
+        band_upload[(b * 2) + 0] = yband_offsets[b];
+        band_upload[(b * 2) + 1] = yband_counts[b];
     }
-    nt_gfx_update_texture(slot->band_texture, 0, cache_idx, slot->band_count, 1, band_upload);
+    uint8_t xoff = slot->band_count;
+    for (uint8_t b = 0; b < slot->band_count; b++) {
+        band_upload[((xoff + b) * 2) + 0] = xband_offsets[b];
+        band_upload[((xoff + b) * 2) + 1] = xband_counts[b];
+    }
+    nt_gfx_update_texture(slot->band_texture, 0, cache_idx, (uint16_t)(slot->band_count * 2), 1, band_upload);
     // #endregion
 
     // #region Fill cache entry
     nt_font_cache_slot_t *cs = &slot->cache[cache_idx];
     cs->entry.codepoint = glyph->codepoint;
-    cs->entry.curve_offset = curve_offset;
-    cs->entry.curve_count = (uint16_t)total_band_curves;
+    cs->entry.curve_offset = curve_offset_y;
+    cs->entry.curve_offset_x = curve_offset_x;
+    cs->entry.curve_count = (uint16_t)(y_total + x_total);
     cs->entry.band_row = cache_idx;
     cs->entry.advance = glyph->advance;
     cs->entry.bbox_x0 = glyph->bbox_x0;
@@ -655,7 +805,7 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     cs->resource_index = resource_index;
     // #endregion
 
-    slot->curve_write_head = curve_offset + local_pos;
+    slot->curve_write_head = curve_offset_y + local_pos;
     slot->glyphs_cached++;
     return cache_idx;
 }
@@ -741,7 +891,7 @@ void nt_font_step(void) {
                 .label = "font_curve",
             });
             slot->band_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-                .width = slot->band_count,
+                .width = (uint16_t)(slot->band_count * 2),
                 .height = slot->band_tex_height,
                 .format = NT_PIXEL_RG16UI,
                 .min_filter = NT_FILTER_NEAREST,
@@ -830,7 +980,7 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     NT_ASSERT(desc->curve_texture_height > 0);
     NT_ASSERT(desc->band_texture_height > 0);
 
-    NT_ASSERT(desc->band_count > 0 && desc->band_count <= 32);
+    NT_ASSERT(desc->band_count > 0 && desc->band_count <= NT_FONT_MAX_BANDS);
     uint8_t band_count = desc->band_count;
 
     uint32_t id = nt_pool_alloc(&s_font.pool);
@@ -865,7 +1015,7 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     });
 
     slot->band_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
-        .width = band_count,
+        .width = (uint16_t)(band_count * 2), /* Y-bands + X-bands */
         .height = desc->band_texture_height,
         .format = NT_PIXEL_RG16UI,
         .min_filter = NT_FILTER_NEAREST,
@@ -944,7 +1094,9 @@ nt_font_metrics_t nt_font_get_metrics(nt_font_t font) {
         return (nt_font_metrics_t){0};
     }
     nt_font_slot_t *slot = get_slot(font);
-    NT_ASSERT(slot->metrics_set);
+    if (!slot->metrics_set) {
+        return (nt_font_metrics_t){0}; /* resources not loaded yet */
+    }
     return slot->metrics;
 }
 
@@ -960,8 +1112,8 @@ nt_font_stats_t nt_font_get_stats(nt_font_t font) {
         .max_glyphs = slot->max_glyphs,
         .curve_texels_used = slot->curve_write_head,
         .curve_texels_total = (uint32_t)slot->curve_tex_width * slot->curve_tex_height,
-        .band_texels_used = (uint32_t)slot->glyphs_cached * slot->band_count,
-        .band_texels_total = (uint32_t)slot->band_count * slot->band_tex_height,
+        .band_texels_used = (uint32_t)slot->glyphs_cached * slot->band_count * 2, /* Y + X bands */
+        .band_texels_total = (uint32_t)slot->band_count * 2 * slot->band_tex_height,
     };
 }
 
@@ -988,7 +1140,6 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t code
     bool found = find_glyph_in_resources(slot, codepoint, &res_idx, &glyph_entry);
 
     if (!found) {
-        NT_LOG_WARN("glyph U+%04X not found in any font resource, returning tofu", codepoint);
         generate_tofu(slot);
         nt_font_cache_slot_t *tofu = hash_lookup(slot, 0xFFFFFFFFU);
         return tofu ? &tofu->entry : NULL;
@@ -1005,7 +1156,10 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t code
     const uint8_t *contour_data = blob + contour_offset;
 
     NT_ASSERT(glyph_entry->curve_count <= NT_FONT_MAX_CURVES_PER_GLYPH);
-    uint16_t curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH);
+    uint16_t curve_count = 0;
+    if (glyph_entry->curve_count > 0) {
+        curve_count = decode_contours(contour_data, s_decode_curves, NT_FONT_MAX_CURVES_PER_GLYPH);
+    }
     // #endregion
 
     // #region Upload, allocate slot, fill cache
@@ -1106,6 +1260,99 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
     }
     return 0;
 }
+
+/* ---- Pre-flush callback ---- */
+
+void nt_font_set_pre_flush_callback(nt_font_pre_flush_fn fn) { s_font.pre_flush_fn = fn; }
+
+// #region Metrics-only lookup (pure CPU, no GPU, no cache)
+nt_glyph_metrics_t nt_font_lookup_metrics(nt_font_t font, uint32_t codepoint) {
+    NT_ASSERT(s_font.initialized);
+    NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
+
+    nt_font_slot_t *slot = get_slot(font);
+
+    /* Search glyph entry across all loaded resources */
+    uint8_t res_idx = 0;
+    const NtFontGlyphEntry *entry = NULL;
+    bool found = find_glyph_in_resources(slot, codepoint, &res_idx, &entry);
+
+    if (found) {
+        return (nt_glyph_metrics_t){
+            .advance = entry->advance,
+            .bbox_x0 = entry->bbox_x0,
+            .bbox_y0 = entry->bbox_y0,
+            .bbox_x1 = entry->bbox_x1,
+            .bbox_y1 = entry->bbox_y1,
+            .found = true,
+        };
+    }
+
+    /* Tofu fallback — same dimensions as generate_tofu() */
+    int16_t tofu_w = (int16_t)(slot->metrics.units_per_em / 2);
+    return (nt_glyph_metrics_t){
+        .advance = tofu_w,
+        .bbox_x0 = 0,
+        .bbox_y0 = slot->metrics.descent,
+        .bbox_x1 = tofu_w,
+        .bbox_y1 = slot->metrics.ascent,
+        .found = false,
+    };
+}
+// #endregion
+
+// #region Measurement (pure CPU, no GPU calls)
+nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) {
+    nt_text_size_t result = {0.0F, 0.0F};
+    if (!utf8 || !*utf8) {
+        return result;
+    }
+
+    nt_font_metrics_t metrics = nt_font_get_metrics(font);
+    if (metrics.units_per_em == 0) {
+        return result;
+    }
+    float scale = size / (float)metrics.units_per_em;
+
+    uint32_t state = NT_UTF8_ACCEPT;
+    uint32_t codepoint = 0;
+    uint32_t prev_cp = 0;
+    float pen_x = 0.0F;
+    float min_y = 0.0F;
+    float max_y = 0.0F;
+
+    for (const uint8_t *p = (const uint8_t *)utf8; *p; p++) {
+        if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
+            if (state == NT_UTF8_REJECT) {
+                state = NT_UTF8_ACCEPT; /* recover: skip bad byte, continue parsing */
+            }
+            continue;
+        }
+
+        if (prev_cp != 0) {
+            int16_t kern = nt_font_get_kern(font, prev_cp, codepoint);
+            pen_x += (float)kern * scale;
+        }
+
+        nt_glyph_metrics_t g = nt_font_lookup_metrics(font, codepoint);
+        if ((float)g.bbox_y0 * scale < min_y) {
+            min_y = (float)g.bbox_y0 * scale;
+        }
+        if ((float)g.bbox_y1 * scale > max_y) {
+            max_y = (float)g.bbox_y1 * scale;
+        }
+        pen_x += (float)g.advance * scale;
+        prev_cp = codepoint;
+    }
+
+    result.width = pen_x;
+    result.height = max_y - min_y;
+    if (result.height < size) {
+        result.height = size; /* Minimum height = requested size */
+    }
+    return result;
+}
+// #endregion
 
 /* ---- Test-only: register font data for headless testing ---- */
 

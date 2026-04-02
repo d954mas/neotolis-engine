@@ -13,7 +13,7 @@ fi
 
 # Find all engine .c source files (exclude vendored deps/ and web-only files).
 SOURCES=$(find engine shared tools examples tests \
-    -name '*.c' | grep -v 'deps/\|/web/\|_web\.c')
+    -name '*.c' | grep -v 'deps/\|/web/\|_web\.c\|tools/research/')
 
 FILE_COUNT=$(echo "$SOURCES" | wc -w)
 echo "Running clang-tidy on $FILE_COUNT files..."

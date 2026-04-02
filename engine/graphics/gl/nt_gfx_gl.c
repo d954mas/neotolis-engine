@@ -121,6 +121,18 @@ static GLint pipeline_get_uniform(const char *name) {
 }
 
 static void nt_gfx_gl_cache_reset(void) {
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ZERO);
+    glDisable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(0.0F, 0.0F);
+    glActiveTexture(GL_TEXTURE0);
+
     s_gl_cache.vao = 0;
     s_gl_cache.program = 0;
     s_gl_cache.depth_test = false;
@@ -345,9 +357,15 @@ bool nt_gfx_backend_is_context_lost(void) { return nt_gfx_gl_ctx_is_lost(); }
 /* ---- Frame / Pass ---- */
 
 void nt_gfx_backend_begin_frame(void) {
-    /* No-op: state machine is in nt_gfx.c.
-     * Emscripten handles swap via requestAnimationFrame.
-     * Desktop swap is handled by the window layer. */
+    /* Reset GL state cache so all pipeline binds re-issue GL calls.
+     * Required because window resize (Windows modal loop) or driver
+     * may change GL state without going through nt_gfx API, leaving
+     * the cache stale. Without this, a pipeline bound on the previous
+     * frame (e.g. text with depth_write=false) poisons state for this
+     * frame's pipelines that skip re-binding due to cache hits. */
+    nt_gfx_gl_cache_reset();
+    s_bound_program = 0;
+    s_bound_pipeline_slot = 0;
 }
 
 void nt_gfx_backend_end_frame(void) {

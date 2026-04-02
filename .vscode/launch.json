@@ -200,6 +200,70 @@
             "webRoot": "${workspaceFolder}/build/examples/sponza/wasm-release-paired",
             "preLaunchTask": "Build & Serve sponza (release)",
             "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Debug WASM text_demo",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8090/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/text/wasm-debug-paired",
+            "preLaunchTask": "Build & Serve text (debug)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Run WASM text_demo (release)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8091/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/text/wasm-release-paired",
+            "preLaunchTask": "Build & Serve text (release)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Quick WASM text_demo (debug, no -Werror)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8090/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/text/wasm-debug-paired",
+            "preLaunchTask": "Quick serve text (debug)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Quick WASM text_demo (release, no -Werror)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8091/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/text/wasm-release-paired",
+            "preLaunchTask": "Quick serve text (release)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Build Text Packs",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/text/native-release/build_text_packs.exe",
+            "args": ["build/examples/text"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build pack builders (release)"
+        },
+        {
+            "name": "Debug Desktop text_demo",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/text/native-debug/text_demo.exe",
+            "cwd": "${workspaceFolder}/build/examples/text/native-debug",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Quick build native-debug (no -Werror)"
+        },
+        {
+            "name": "Run Desktop text_demo (release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/text/native-release/text_demo.exe",
+            "cwd": "${workspaceFolder}/build/examples/text/native-release",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Quick build native-release (no -Werror)"
         }
     ]
 }

@@ -318,7 +318,7 @@ void test_font_magic_value(void) {
     TEST_ASSERT_EQUAL_UINT8('T', b[3]);
 }
 
-void test_font_version(void) { TEST_ASSERT_EQUAL_UINT(2, NT_FONT_VERSION); }
+void test_font_version(void) { TEST_ASSERT_EQUAL_UINT(4, NT_FONT_VERSION); }
 
 void test_font_asset_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(0, offsetof(NtFontAssetHeader, magic));

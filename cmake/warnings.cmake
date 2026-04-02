@@ -5,7 +5,6 @@ function(nt_set_warning_flags target)
     target_compile_options(${target} PRIVATE
         -Wall
         -Wextra
-        -Werror
         -Wpedantic
         -Wshadow
         -Wconversion
@@ -15,6 +14,9 @@ function(nt_set_warning_flags target)
         # Documented suppressions:
         -Wno-unused-parameter    # Callback stubs often have unused params
     )
+    if(NOT NT_NO_WERROR)
+        target_compile_options(${target} PRIVATE -Werror)
+    endif()
 endfunction()
 
 function(nt_set_sanitizer_flags target)
