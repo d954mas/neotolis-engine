@@ -43,6 +43,8 @@ typedef enum {
 typedef struct {
     nt_activate_fn activate;
     nt_deactivate_fn deactivate;
+    nt_resolve_fn on_resolve;
+    nt_cleanup_fn on_cleanup;
 } NtActivatorEntry;
 
 /* ---- Per-asset metadata (one per asset from all packs) ---- */
@@ -108,7 +110,7 @@ typedef struct {
     uint8_t state;              /* nt_asset_state_t of resolved entry */
     uint16_t resolve_seq;       /* mount_seq of current winner; tiebreak + Phase 25 O(1) activation */
     uint16_t resolve_asset_idx; /* index into assets[] of resolved winner (for metadata lookup) */
-    uint16_t _pad2;             /* alignment padding */
+    void *user_data;            /* per-slot auxiliary data (managed by on_resolve/on_cleanup) */
 } NtResourceSlot;
 
 #endif /* NT_RESOURCE_INTERNAL_H */
