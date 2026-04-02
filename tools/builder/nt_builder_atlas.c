@@ -1413,12 +1413,13 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     hdr->vertex_offset = vertex_offset;
     hdr->total_vertex_count = total_vertex_count;
 
-    /* Texture resource IDs (D-05) */
-    uint64_t *tex_ids = (uint64_t *)(blob + sizeof(NtAtlasHeader));
+    /* Texture resource IDs (D-05) -- use memcpy for unaligned access safety */
+    uint8_t *tex_ids_ptr = blob + sizeof(NtAtlasHeader);
     for (uint32_t p = 0; p < page_count; p++) {
         char tex_path[512];
         (void)snprintf(tex_path, sizeof(tex_path), "%s/tex%u", state->name, p);
-        tex_ids[p] = nt_hash64_str(tex_path).value;
+        uint64_t tid = nt_hash64_str(tex_path).value;
+        memcpy(tex_ids_ptr + ((size_t)p * sizeof(uint64_t)), &tid, sizeof(uint64_t));
     }
 
     /* Regions */

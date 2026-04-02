@@ -3576,6 +3576,401 @@ void test_fan_triangulate_triangle(void) {
     TEST_ASSERT_EQUAL_UINT16(2, indices[2]);
 }
 
+/* --- Atlas round-trip test helpers --- */
+
+/* Create a solid-color RGBA sprite for testing. Caller must free returned pointer. */
+static uint8_t *make_test_sprite(uint32_t w, uint32_t h, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    uint8_t *pixels = (uint8_t *)malloc((size_t)w * h * 4);
+    for (uint32_t i = 0; i < w * h; i++) {
+        pixels[(i * 4) + 0] = r;
+        pixels[(i * 4) + 1] = g;
+        pixels[(i * 4) + 2] = b;
+        pixels[(i * 4) + 3] = a;
+    }
+    return pixels;
+}
+
+/* Read a file into a malloc'd buffer. Caller must free. */
+static uint8_t *read_file_bytes(const char *path, uint32_t *out_size) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return NULL;
+    }
+    (void)fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    if (len <= 0) {
+        (void)fclose(f);
+        return NULL;
+    }
+    uint8_t *buf = (uint8_t *)malloc((size_t)len);
+    if (!buf) {
+        (void)fclose(f);
+        return NULL;
+    }
+    (void)fread(buf, 1, (size_t)len, f);
+    (void)fclose(f);
+    *out_size = (uint32_t)len;
+    return buf;
+}
+
+/* --- Atlas round-trip tests --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_round_trip_basic(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_basic.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
+    uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
+
+    nt_builder_begin_atlas(ctx, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, "hero.png");
+    nt_builder_atlas_add_raw(ctx, s2, 16, 16, "goblin.png");
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+
+    free(s1);
+    free(s2);
+
+    /* Read .ntpack back */
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_basic.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_TRUE(file_size >= sizeof(NtPackHeader));
+
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    TEST_ASSERT_EQUAL_HEX32(NT_PACK_MAGIC, pack->magic);
+    /* At least 2 assets: 1 atlas metadata + 1 texture page (+ 2 region codegen entries that are deduped out) */
+    TEST_ASSERT_TRUE(pack->asset_count >= 2);
+
+    /* Find atlas entry */
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    /* Verify atlas header */
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)(buf + atlas_entry->offset);
+    TEST_ASSERT_EQUAL_HEX32(NT_ATLAS_MAGIC, ahdr->magic);
+    TEST_ASSERT_EQUAL(NT_ATLAS_VERSION, ahdr->version);
+    TEST_ASSERT_EQUAL(2, ahdr->region_count);
+    TEST_ASSERT_TRUE(ahdr->page_count >= 1);
+
+    free(buf);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_round_trip_regions(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_regions.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
+    uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
+
+    nt_builder_begin_atlas(ctx, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, "hero.png");
+    nt_builder_atlas_add_raw(ctx, s2, 16, 16, "goblin.png");
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+
+    free(s1);
+    free(s2);
+
+    /* Read .ntpack back */
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_regions.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    /* Find atlas entry */
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)ablob;
+    TEST_ASSERT_EQUAL(2, ahdr->region_count);
+
+    /* Skip texture_resource_ids to get to regions */
+    const uint8_t *ptr = ablob + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
+
+    uint64_t hero_hash = nt_hash64_str("hero.png").value;
+    uint64_t goblin_hash = nt_hash64_str("goblin.png").value;
+
+    /* Both regions should have source_w/source_h == 16 */
+    for (uint32_t r = 0; r < 2; r++) {
+        TEST_ASSERT_EQUAL(16, regions[r].source_w);
+        TEST_ASSERT_EQUAL(16, regions[r].source_h);
+        TEST_ASSERT_TRUE(regions[r].vertex_count >= 3); /* at least triangle in polygon mode */
+        /* Unity float disabled; origin_x/y are exactly 0.5f, compare as uint32_t bit pattern */
+        TEST_ASSERT_TRUE(regions[r].origin_x > 0.49F && regions[r].origin_x < 0.51F);
+        TEST_ASSERT_TRUE(regions[r].origin_y > 0.49F && regions[r].origin_y < 0.51F);
+    }
+
+    /* Verify name hashes (order may vary) */
+    bool found_hero = false;
+    bool found_goblin = false;
+    for (uint32_t r = 0; r < 2; r++) {
+        if (regions[r].name_hash == hero_hash) {
+            found_hero = true;
+        }
+        if (regions[r].name_hash == goblin_hash) {
+            found_goblin = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_hero);
+    TEST_ASSERT_TRUE(found_goblin);
+
+    free(buf);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_round_trip_vertices(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_verts.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
+    uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
+
+    nt_builder_begin_atlas(ctx, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, "hero.png");
+    nt_builder_atlas_add_raw(ctx, s2, 16, 16, "goblin.png");
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+
+    free(s1);
+    free(s2);
+
+    /* Read .ntpack back */
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_verts.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    /* Find atlas entry */
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)ablob;
+
+    /* Read vertex array at vertex_offset */
+    const NtAtlasVertex *verts = (const NtAtlasVertex *)(ablob + ahdr->vertex_offset);
+
+    /* All vertices must have valid atlas UVs in [0, 65535] */
+    for (uint32_t v = 0; v < ahdr->total_vertex_count; v++) {
+        TEST_ASSERT_TRUE(verts[v].atlas_u <= 65535);
+        TEST_ASSERT_TRUE(verts[v].atlas_v <= 65535);
+    }
+
+    /* Verify regions reference valid vertex ranges */
+    const uint8_t *ptr = ablob + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
+    for (uint32_t r = 0; r < ahdr->region_count; r++) {
+        uint32_t end = (uint32_t)regions[r].vertex_start + regions[r].vertex_count;
+        TEST_ASSERT_TRUE(end <= ahdr->total_vertex_count);
+    }
+
+    free(buf);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_duplicate_detection(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_dedup.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Same pixel data, different names */
+    uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
+
+    nt_builder_begin_atlas(ctx, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, "a.png");
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, "b.png");
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+
+    free(s1);
+
+    /* Read back */
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_dedup.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    /* Find atlas entry */
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)ablob;
+
+    /* Both regions present (region_count == 2) */
+    TEST_ASSERT_EQUAL(2, ahdr->region_count);
+
+    /* Both regions should share same page_index (dedup places identical sprites at same position) */
+    const uint8_t *ptr = ablob + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
+    TEST_ASSERT_EQUAL(regions[0].page_index, regions[1].page_index);
+
+    /* Vertex data should be identical (same atlas position) */
+    const NtAtlasVertex *verts = (const NtAtlasVertex *)(ablob + ahdr->vertex_offset);
+    TEST_ASSERT_EQUAL(regions[0].vertex_count, regions[1].vertex_count);
+    for (uint32_t v = 0; v < regions[0].vertex_count; v++) {
+        TEST_ASSERT_EQUAL(verts[regions[0].vertex_start + v].atlas_u, verts[regions[1].vertex_start + v].atlas_u);
+        TEST_ASSERT_EQUAL(verts[regions[0].vertex_start + v].atlas_v, verts[regions[1].vertex_start + v].atlas_v);
+    }
+
+    free(buf);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_multi_page(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_multi.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Small max_size forces multi-page: 8 sprites of 32x32 won't fit in 64x64 */
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.max_size = 64;
+    opts.power_of_two = false;
+
+    nt_builder_begin_atlas(ctx, "sprites", &opts);
+
+    /* Each sprite has different color so dedup doesn't collapse them */
+    for (uint32_t i = 0; i < 8; i++) {
+        char name[32];
+        (void)snprintf(name, sizeof(name), "spr%u.png", i);
+        uint8_t *s = make_test_sprite(32, 32, (uint8_t)(i * 30), (uint8_t)(255 - (i * 30)), 128, 255);
+        nt_builder_atlas_add_raw(ctx, s, 32, 32, name);
+        free(s);
+    }
+
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+
+    /* Read back */
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_multi.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    /* Find atlas entry */
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *pack_entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (pack_entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &pack_entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)(buf + atlas_entry->offset);
+    TEST_ASSERT_TRUE(ahdr->page_count > 1);
+
+    /* All regions should have valid page_index */
+    const uint8_t *ptr = (buf + atlas_entry->offset) + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
+    for (uint32_t r = 0; r < ahdr->region_count; r++) {
+        TEST_ASSERT_TRUE(regions[r].page_index < ahdr->page_count);
+    }
+
+    free(buf);
+}
+
+void test_atlas_codegen(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_codegen.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
+    uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
+
+    nt_builder_begin_atlas(ctx, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, "hero.png");
+    nt_builder_atlas_add_raw(ctx, s2, 16, 16, "goblin.png");
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+
+    free(s1);
+    free(s2);
+
+    /* Read generated .h file */
+    uint32_t h_size = 0;
+    uint8_t *h_buf = read_file_bytes(TMP_DIR "/atlas_rt_codegen.h", &h_size);
+    TEST_ASSERT_NOT_NULL(h_buf);
+    TEST_ASSERT_TRUE(h_size > 0);
+
+    /* Verify ASSET_ATLAS_ and ASSET_ATLAS_REGION_ defines exist */
+    TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "ASSET_ATLAS_SPRITES"));
+    TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "ASSET_ATLAS_REGION_SPRITES"));
+
+    free(h_buf);
+}
+
+void test_atlas_opts_defaults(void) {
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    TEST_ASSERT_EQUAL(2048, opts.max_size);
+    TEST_ASSERT_EQUAL(0, opts.padding);
+    TEST_ASSERT_EQUAL(0, opts.margin);
+    TEST_ASSERT_EQUAL(2, opts.extrude);
+    TEST_ASSERT_EQUAL(1, opts.alpha_threshold);
+    TEST_ASSERT_EQUAL(8, opts.max_vertices);
+    TEST_ASSERT_TRUE(opts.allow_rotate);
+    TEST_ASSERT_TRUE(opts.power_of_two);
+    TEST_ASSERT_TRUE(opts.polygon_mode);
+    TEST_ASSERT_FALSE(opts.debug_png);
+    TEST_ASSERT_NULL(opts.compress);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -3722,6 +4117,15 @@ int main(void) {
     RUN_TEST(test_rdp_simplify_reduction);
     RUN_TEST(test_fan_triangulate_quad);
     RUN_TEST(test_fan_triangulate_triangle);
+
+    /* Atlas round-trip tests (Phase 47 Plan 03) */
+    RUN_TEST(test_atlas_round_trip_basic);
+    RUN_TEST(test_atlas_round_trip_regions);
+    RUN_TEST(test_atlas_round_trip_vertices);
+    RUN_TEST(test_atlas_duplicate_detection);
+    RUN_TEST(test_atlas_multi_page);
+    RUN_TEST(test_atlas_codegen);
+    RUN_TEST(test_atlas_opts_defaults);
 
     return UNITY_END();
 }
