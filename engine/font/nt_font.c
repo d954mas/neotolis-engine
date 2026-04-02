@@ -389,7 +389,7 @@ static void generate_tofu(nt_font_slot_t *slot) {
     }
 
     /* Duplicate same 4 curves for X-bands (appended after Y-band data) */
-    uint32_t x_curve_offset = curve_offset + 4 * 2; /* after Y-band curves */
+    uint32_t x_curve_offset = curve_offset + (4 * 2); /* after Y-band curves */
     for (int seg = 0; seg < 4; seg++) {
         uint32_t src0 = (uint32_t)seg * 2 * 4;
         uint32_t dst0 = (uint32_t)(4 + seg) * 2 * 4;
@@ -539,6 +539,9 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         // #region Convert points to quadratic curves (TrueType rules)
         /* Walk the closed contour: point[0] → point[1] → ... → point[n-1] → point[0] */
         uint16_t n = point_count;
+        if (n == 0) {
+            continue;
+        }
         uint16_t i = 0;
 
         /* Find first on-curve point to start from */
@@ -557,7 +560,7 @@ static uint16_t decode_contours(const uint8_t *contour_data, nt_curve_t *curves,
         if (pts_on[start]) {
             cur_x = (float)pts_x[start];
             cur_y = (float)pts_y[start];
-            i = (start + 1) % n;
+            i = (uint16_t)((start + 1) % n);
         } else {
             /* All off-curve: midpoint between point[0] and point[1] */
             cur_x = (float)(pts_x[0] + pts_x[1]) * 0.5F;
@@ -629,13 +632,17 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     float curve_x_min[NT_FONT_MAX_CURVES_PER_GLYPH];
     float curve_x_max[NT_FONT_MAX_CURVES_PER_GLYPH];
     for (uint16_t ci = 0; ci < curve_count; ci++) {
-        float ay = curves[ci].p0y, by = curves[ci].p1y, cy = curves[ci].p2y;
+        float ay = curves[ci].p0y;
+        float by = curves[ci].p1y;
+        float cy = curves[ci].p2y;
         float loy = ay < by ? ay : by;
         float hiy = ay > by ? ay : by;
         curve_y_min[ci] = loy < cy ? loy : cy;
         curve_y_max[ci] = hiy > cy ? hiy : cy;
 
-        float ax = curves[ci].p0x, bx = curves[ci].p1x, cx = curves[ci].p2x;
+        float ax = curves[ci].p0x;
+        float bx = curves[ci].p1x;
+        float cx = curves[ci].p2x;
         float lox = ax < bx ? ax : bx;
         float hix = ax > bx ? ax : bx;
         curve_x_min[ci] = lox < cx ? lox : cx;
@@ -655,13 +662,13 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     for (uint16_t ci = 0; ci < curve_count; ci++) {
         for (uint8_t b = 0; b < slot->band_count; b++) {
             float ybot = bbox_y0 + ((float)b * band_height) - y_margin;
-            float ytop = ybot + band_height + y_margin * 2.0F;
+            float ytop = ybot + band_height + (y_margin * 2.0F);
             if (curve_y_max[ci] >= ybot && curve_y_min[ci] <= ytop) {
                 yband_counts[b]++;
             }
             if (band_width > 0.0F) {
                 float xleft = bbox_x0 + ((float)b * band_width) - x_margin;
-                float xright = xleft + band_width + x_margin * 2.0F;
+                float xright = xleft + band_width + (x_margin * 2.0F);
                 if (curve_x_max[ci] >= xleft && curve_x_min[ci] <= xright) {
                     xband_counts[b]++;
                 }
@@ -697,7 +704,7 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     for (uint8_t b = 0; b < slot->band_count; b++) {
         yband_offsets[b] = (uint16_t)(local_pos / 2);
         float ybot = bbox_y0 + ((float)b * band_height) - y_margin;
-        float ytop = ybot + band_height + y_margin * 2.0F;
+        float ytop = ybot + band_height + (y_margin * 2.0F);
         for (uint16_t ci = 0; ci < curve_count; ci++) {
             if (curve_y_max[ci] < ybot || curve_y_min[ci] > ytop) {
                 continue;
@@ -726,7 +733,7 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
         xband_offsets[b] = (uint16_t)((local_pos - y_local_pos) / 2);
         if (band_width > 0.0F) {
             float xleft = bbox_x0 + ((float)b * band_width) - x_margin;
-            float xright = xleft + band_width + x_margin * 2.0F;
+            float xright = xleft + band_width + (x_margin * 2.0F);
             for (uint16_t ci = 0; ci < curve_count; ci++) {
                 if (curve_x_max[ci] < xleft || curve_x_min[ci] > xright) {
                     continue;

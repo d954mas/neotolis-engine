@@ -230,9 +230,9 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     }
 
     /* Local quad corners (scaled from font units to target size) */
-    float x0 = pen_x + (float)g->bbox_x0 * scale;
+    float x0 = pen_x + ((float)g->bbox_x0 * scale);
     float y0 = (float)g->bbox_y0 * scale;
-    float x1 = pen_x + (float)g->bbox_x1 * scale;
+    float x1 = pen_x + ((float)g->bbox_x1 * scale);
     float y1 = (float)g->bbox_y1 * scale;
 
     /* Em-space coordinates (unscaled, for shader) */
@@ -242,7 +242,10 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     float em_y1 = (float)g->bbox_y1;
 
     /* Pack glyph data as uint bit patterns */
-    float gd0, gd1, gd2, gd3;
+    float gd0;
+    float gd1;
+    float gd2;
+    float gd3;
     pack_uint_as_float(&gd0, g->curve_offset);
     pack_uint_as_float(&gd1, (uint32_t)g->band_row);
     pack_uint_as_float(&gd2, g->curve_offset_x);

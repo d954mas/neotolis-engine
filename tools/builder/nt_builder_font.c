@@ -482,6 +482,7 @@ static FontPoint s_points[NT_FONT_MAX_POINTS_PER_CONTOUR];
 /* Convert stbtt vertices for one contour into compact point representation.
  * Detects implicit midpoints inserted by stbtt and removes them.
  * Returns number of points written to s_points. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint16_t vertices_to_points(const stbtt_vertex *verts, int start, int end) {
     uint16_t np = 0;
 
