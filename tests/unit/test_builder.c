@@ -3431,7 +3431,10 @@ typedef struct {
 void test_alpha_trim_fully_transparent(void) {
     uint8_t rgba[4 * 4 * 4];
     memset(rgba, 0, sizeof(rgba)); /* all pixels transparent (alpha=0) */
-    uint32_t ox = 0, oy = 0, ow = 0, oh = 0;
+    uint32_t ox = 0;
+    uint32_t oy = 0;
+    uint32_t ow = 0;
+    uint32_t oh = 0;
     bool result = nt_atlas_test_alpha_trim(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
     TEST_ASSERT_FALSE(result);
 }
@@ -3441,8 +3444,11 @@ void test_alpha_trim_single_pixel(void) {
     uint8_t rgba[4 * 4 * 4];
     memset(rgba, 0, sizeof(rgba));
     /* Set pixel at (2,1) to opaque: index = (1*4 + 2) * 4 = 24, alpha at offset 27 */
-    rgba[(1 * 4 + 2) * 4 + 3] = 255; /* alpha channel */
-    uint32_t ox = 0, oy = 0, ow = 0, oh = 0;
+    rgba[(((1 * 4) + 2) * 4) + 3] = 255; /* alpha channel */
+    uint32_t ox = 0;
+    uint32_t oy = 0;
+    uint32_t ow = 0;
+    uint32_t oh = 0;
     bool result = nt_atlas_test_alpha_trim(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
     TEST_ASSERT_TRUE(result);
     TEST_ASSERT_EQUAL_UINT32(2, ox);
@@ -3456,11 +3462,14 @@ void test_alpha_trim_l_shape(void) {
     uint8_t rgba[4 * 4 * 4];
     memset(rgba, 0, sizeof(rgba));
     /* L-shape: (0,0), (0,1), (0,2), (1,2) */
-    rgba[(0 * 4 + 0) * 4 + 3] = 255;
-    rgba[(1 * 4 + 0) * 4 + 3] = 255;
-    rgba[(2 * 4 + 0) * 4 + 3] = 255;
-    rgba[(2 * 4 + 1) * 4 + 3] = 255;
-    uint32_t ox = 0, oy = 0, ow = 0, oh = 0;
+    rgba[(((0 * 4) + 0) * 4) + 3] = 255;
+    rgba[(((1 * 4) + 0) * 4) + 3] = 255;
+    rgba[(((2 * 4) + 0) * 4) + 3] = 255;
+    rgba[(((2 * 4) + 1) * 4) + 3] = 255;
+    uint32_t ox = 0;
+    uint32_t oy = 0;
+    uint32_t ow = 0;
+    uint32_t oh = 0;
     bool result = nt_atlas_test_alpha_trim(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
     TEST_ASSERT_TRUE(result);
     TEST_ASSERT_EQUAL_UINT32(0, ox);
@@ -3474,10 +3483,13 @@ void test_alpha_trim_threshold(void) {
     uint8_t rgba[4 * 4 * 4];
     memset(rgba, 0, sizeof(rgba));
     /* Pixel at (1,1) with alpha=127 should be treated as transparent with threshold=128 */
-    rgba[(1 * 4 + 1) * 4 + 3] = 127;
+    rgba[(((1 * 4) + 1) * 4) + 3] = 127;
     /* Pixel at (2,2) with alpha=128 should be treated as opaque */
-    rgba[(2 * 4 + 2) * 4 + 3] = 128;
-    uint32_t ox = 0, oy = 0, ow = 0, oh = 0;
+    rgba[(((2 * 4) + 2) * 4) + 3] = 128;
+    uint32_t ox = 0;
+    uint32_t oy = 0;
+    uint32_t ow = 0;
+    uint32_t oh = 0;
     bool result = nt_atlas_test_alpha_trim(rgba, 4, 4, 128, &ox, &oy, &ow, &oh);
     TEST_ASSERT_TRUE(result);
     TEST_ASSERT_EQUAL_UINT32(2, ox);
@@ -3493,7 +3505,7 @@ void test_convex_hull_triangle(void) {
     uint32_t n = nt_atlas_test_convex_hull(pts, 3, out);
     TEST_ASSERT_EQUAL_UINT32(3, n);
     /* Verify CCW ordering: cross product of consecutive edges should be positive */
-    int64_t cross = (int64_t)(out[1].x - out[0].x) * (int64_t)(out[2].y - out[0].y) - (int64_t)(out[1].y - out[0].y) * (int64_t)(out[2].x - out[0].x);
+    int64_t cross = ((int64_t)(out[1].x - out[0].x) * (int64_t)(out[2].y - out[0].y)) - ((int64_t)(out[1].y - out[0].y) * (int64_t)(out[2].x - out[0].x));
     TEST_ASSERT_TRUE(cross > 0); /* CCW */
 }
 
