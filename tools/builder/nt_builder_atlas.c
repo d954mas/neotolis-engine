@@ -10,6 +10,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 /* --- Internal point type for geometry operations --- */
 
 typedef struct {
@@ -870,6 +875,208 @@ void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern) {
     NT_BUILD_ASSERT(data.match_count > 0 && "atlas_add_glob: no files matched pattern");
 }
 
+/* --- uint64_t sort comparator for atlas cache key (D-13) --- */
+
+static int uint64_cmp(const void *a, const void *b) {
+    uint64_t va = *(const uint64_t *)a;
+    uint64_t vb = *(const uint64_t *)b;
+    if (va < vb) {
+        return -1;
+    }
+    if (va > vb) {
+        return 1;
+    }
+    return 0;
+}
+
+/* --- Atlas cache key computation (D-13) --- */
+
+static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts, bool has_compress, const nt_tex_compress_opts_t *compress) {
+    /* Collect decoded hashes */
+    uint64_t *hashes = (uint64_t *)malloc(sprite_count * sizeof(uint64_t));
+    NT_BUILD_ASSERT(hashes && "compute_atlas_cache_key: alloc failed");
+    for (uint32_t i = 0; i < sprite_count; i++) {
+        hashes[i] = sprites[i].decoded_hash;
+    }
+
+    /* Sort for order-independence */
+    qsort(hashes, sprite_count, sizeof(uint64_t), uint64_cmp);
+
+    /* Build key buffer: sorted hashes + serialized opts */
+    size_t hash_bytes = sprite_count * sizeof(uint64_t);
+    /* Serialize opts fields (excluding compress pointer) */
+    uint8_t opts_buf[128];
+    uint32_t pos = 0;
+    memcpy(opts_buf + pos, &opts->max_size, sizeof(opts->max_size));
+    pos += (uint32_t)sizeof(opts->max_size);
+    memcpy(opts_buf + pos, &opts->padding, sizeof(opts->padding));
+    pos += (uint32_t)sizeof(opts->padding);
+    memcpy(opts_buf + pos, &opts->margin, sizeof(opts->margin));
+    pos += (uint32_t)sizeof(opts->margin);
+    memcpy(opts_buf + pos, &opts->extrude, sizeof(opts->extrude));
+    pos += (uint32_t)sizeof(opts->extrude);
+    memcpy(opts_buf + pos, &opts->alpha_threshold, sizeof(opts->alpha_threshold));
+    pos += (uint32_t)sizeof(opts->alpha_threshold);
+    memcpy(opts_buf + pos, &opts->max_vertices, sizeof(opts->max_vertices));
+    pos += (uint32_t)sizeof(opts->max_vertices);
+    memcpy(opts_buf + pos, &opts->format, sizeof(opts->format));
+    pos += (uint32_t)sizeof(opts->format);
+    uint8_t flags = (uint8_t)((opts->allow_rotate ? 1 : 0) | (opts->power_of_two ? 2 : 0) | (opts->polygon_mode ? 4 : 0) | (opts->debug_png ? 8 : 0));
+    opts_buf[pos++] = flags;
+    uint8_t hc = has_compress ? 1 : 0;
+    opts_buf[pos++] = hc;
+    if (has_compress) {
+        memcpy(opts_buf + pos, &compress->mode, sizeof(compress->mode));
+        pos += (uint32_t)sizeof(compress->mode);
+        memcpy(opts_buf + pos, &compress->quality, sizeof(compress->quality));
+        pos += (uint32_t)sizeof(compress->quality);
+    }
+
+    /* Combine into single buffer and hash */
+    size_t total = hash_bytes + pos;
+    uint8_t *buf = (uint8_t *)malloc(total);
+    NT_BUILD_ASSERT(buf && "compute_atlas_cache_key: alloc failed");
+    memcpy(buf, hashes, hash_bytes);
+    memcpy(buf + hash_bytes, opts_buf, pos);
+    free(hashes);
+
+    nt_hash64_t key = nt_hash64(buf, (uint32_t)total);
+    free(buf);
+    return key.value;
+}
+
+/* --- Atlas cache file I/O (D-13) --- */
+
+/* Cache file layout:
+ *   uint32_t placement_count
+ *   uint32_t page_count
+ *   uint32_t page_w[page_count]
+ *   uint32_t page_h[page_count]
+ *   AtlasPlacement placements[placement_count]
+ *   uint8_t page_pixels[page_count][page_w[i]*page_h[i]*4]
+ */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool atlas_cache_write(const char *cache_dir, uint64_t cache_key, const AtlasPlacement *placements, uint32_t placement_count, const uint32_t *page_w, const uint32_t *page_h,
+                              uint32_t page_count, uint8_t **page_pixels) {
+    char path[1024];
+    (void)snprintf(path, sizeof(path), "%s/atlas_%016llx.bin", cache_dir, (unsigned long long)cache_key);
+    char tmp_path[1040];
+    (void)snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+
+    FILE *f = fopen(tmp_path, "wb");
+    if (!f) {
+        return false;
+    }
+
+    (void)fwrite(&placement_count, sizeof(uint32_t), 1, f);
+    (void)fwrite(&page_count, sizeof(uint32_t), 1, f);
+    (void)fwrite(page_w, sizeof(uint32_t), page_count, f);
+    (void)fwrite(page_h, sizeof(uint32_t), page_count, f);
+    (void)fwrite(placements, sizeof(AtlasPlacement), placement_count, f);
+    for (uint32_t p = 0; p < page_count; p++) {
+        size_t pixel_bytes = (size_t)page_w[p] * page_h[p] * 4;
+        (void)fwrite(page_pixels[p], 1, pixel_bytes, f);
+    }
+
+    (void)fclose(f);
+
+    /* Atomic rename */
+#ifdef _WIN32
+    if (!MoveFileExA(tmp_path, path, MOVEFILE_REPLACE_EXISTING)) {
+        (void)remove(tmp_path);
+        return false;
+    }
+#else
+    if (rename(tmp_path, path) != 0) {
+        (void)remove(tmp_path);
+        return false;
+    }
+#endif
+    return true;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, AtlasPlacement **out_placements, uint32_t *out_placement_count, uint32_t *out_page_w, uint32_t *out_page_h,
+                             uint32_t *out_page_count, uint8_t ***out_page_pixels) {
+    char path[1024];
+    (void)snprintf(path, sizeof(path), "%s/atlas_%016llx.bin", cache_dir, (unsigned long long)cache_key);
+
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return false;
+    }
+
+    uint32_t placement_count = 0;
+    uint32_t page_count_val = 0;
+    if (fread(&placement_count, sizeof(uint32_t), 1, f) != 1 || fread(&page_count_val, sizeof(uint32_t), 1, f) != 1) {
+        (void)fclose(f);
+        return false;
+    }
+
+    if (page_count_val == 0 || page_count_val > ATLAS_MAX_PAGES || placement_count == 0 || placement_count > NT_BUILD_MAX_ASSETS) {
+        (void)fclose(f);
+        return false;
+    }
+
+    if (fread(out_page_w, sizeof(uint32_t), page_count_val, f) != page_count_val || fread(out_page_h, sizeof(uint32_t), page_count_val, f) != page_count_val) {
+        (void)fclose(f);
+        return false;
+    }
+
+    /* Validate page dimensions (max 16384 to bound allocation) */
+    for (uint32_t p = 0; p < page_count_val; p++) {
+        if (out_page_w[p] == 0 || out_page_w[p] > 16384 || out_page_h[p] == 0 || out_page_h[p] > 16384) {
+            (void)fclose(f);
+            return false;
+        }
+    }
+
+    /* NOLINTNEXTLINE(clang-analyzer-optin.taint.TaintedAlloc) -- placement_count bounded above */
+    AtlasPlacement *placements = (AtlasPlacement *)malloc((size_t)placement_count * sizeof(AtlasPlacement));
+    if (!placements) {
+        (void)fclose(f);
+        return false;
+    }
+    if (fread(placements, sizeof(AtlasPlacement), placement_count, f) != placement_count) {
+        free(placements);
+        (void)fclose(f);
+        return false;
+    }
+
+    /* NOLINTNEXTLINE(clang-analyzer-optin.taint.TaintedAlloc) -- page_count_val bounded above */
+    uint8_t **page_pixels_arr = (uint8_t **)calloc((size_t)page_count_val, sizeof(uint8_t *));
+    if (!page_pixels_arr) {
+        free(placements);
+        (void)fclose(f);
+        return false;
+    }
+
+    for (uint32_t p = 0; p < page_count_val; p++) {
+        size_t pixel_bytes = (size_t)out_page_w[p] * out_page_h[p] * 4;
+        /* NOLINTNEXTLINE(clang-analyzer-optin.taint.TaintedAlloc) -- dimensions bounded at 16384 above */
+        page_pixels_arr[p] = (uint8_t *)malloc(pixel_bytes);
+        if (!page_pixels_arr[p] || fread(page_pixels_arr[p], 1, pixel_bytes, f) != pixel_bytes) {
+            /* Cleanup on failure */
+            for (uint32_t q = 0; q <= p; q++) {
+                free(page_pixels_arr[q]);
+            }
+            free((void *)page_pixels_arr);
+            free(placements);
+            (void)fclose(f);
+            return false;
+        }
+    }
+
+    (void)fclose(f);
+
+    *out_placements = placements;
+    *out_placement_count = placement_count;
+    *out_page_count = page_count_val;
+    *out_page_pixels = page_pixels_arr;
+    return true;
+}
+
 /* --- Duplicate detection sort comparator --- */
 
 typedef struct {
@@ -914,6 +1121,10 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         bool has_pixels = alpha_trim(sprites[i].rgba, sprites[i].width, sprites[i].height, opts->alpha_threshold, &trim_x[i], &trim_y[i], &trim_w[i], &trim_h[i]);
         NT_BUILD_ASSERT(has_pixels && "end_atlas: sprite is fully transparent");
     }
+    // #endregion
+
+    // #region Atlas cache key computation (D-13)
+    state->cache_key = compute_atlas_cache_key(sprites, sprite_count, opts, state->has_compress, &state->compress);
     // #endregion
 
     // #region Step 2: Duplicate detection (ATLAS-12)
@@ -1048,91 +1259,115 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     }
     // #endregion
 
-    // #region Step 4: Tile packing
-    // NOLINTNEXTLINE(clang-analyzer-optin.portability.UnixAPI)
-    AtlasPlacement *placements = (AtlasPlacement *)malloc(unique_count * sizeof(AtlasPlacement));
-    NT_BUILD_ASSERT(placements && "end_atlas: alloc failed");
-
-    /* Build trim arrays for unique sprites only */
-    uint32_t *u_trim_w = (uint32_t *)malloc(unique_count * sizeof(uint32_t));
-    uint32_t *u_trim_h = (uint32_t *)malloc(unique_count * sizeof(uint32_t));
-    NT_BUILD_ASSERT(u_trim_w && u_trim_h && "end_atlas: alloc failed");
-    for (uint32_t i = 0; i < unique_count; i++) {
-        u_trim_w[i] = trim_w[unique_indices[i]];
-        u_trim_h[i] = trim_h[unique_indices[i]];
-    }
-
+    // #region Steps 4-5: Tile packing + composition (with atlas cache D-13)
+    AtlasPlacement *placements = NULL;
+    uint32_t placement_count = 0;
     uint32_t page_count = 0;
     uint32_t page_w[ATLAS_MAX_PAGES];
     uint32_t page_h[ATLAS_MAX_PAGES];
-    uint32_t placement_count = tile_pack(u_trim_w, u_trim_h, unique_count, opts, placements, &page_count, page_w, page_h);
-
-    /* Fill trim offsets and remap sprite_index back to original */
-    for (uint32_t i = 0; i < placement_count; i++) {
-        uint32_t unique_idx = placements[i].sprite_index; /* index into unique arrays */
-        uint32_t orig_idx = unique_indices[unique_idx];
-        placements[i].sprite_index = orig_idx;
-        placements[i].trim_x = trim_x[orig_idx];
-        placements[i].trim_y = trim_y[orig_idx];
-        placements[i].trimmed_w = trim_w[orig_idx];
-        placements[i].trimmed_h = trim_h[orig_idx];
-    }
-
-    free(u_trim_w);
-    free(u_trim_h);
-    // #endregion
-
-    // #region Step 5: Compose page RGBA + extrude + debug PNG (ATLAS-15, ATLAS-11, D-09)
-    uint8_t **page_pixels = (uint8_t **)calloc(page_count, sizeof(uint8_t *));
-    NT_BUILD_ASSERT(page_pixels && "end_atlas: alloc failed");
-
-    for (uint32_t p = 0; p < page_count; p++) {
-        page_pixels[p] = (uint8_t *)calloc((size_t)page_w[p] * page_h[p] * 4, 1);
-        NT_BUILD_ASSERT(page_pixels[p] && "end_atlas: page alloc failed");
-    }
-
-    /* Blit each placed sprite */
+    uint8_t **page_pixels = NULL;
     uint32_t extrude_val = opts->extrude;
-    for (uint32_t pi = 0; pi < placement_count; pi++) {
-        AtlasPlacement *pl = &placements[pi];
-        uint32_t idx = pl->sprite_index;
-        uint32_t inner_x = pl->x + extrude_val;
-        uint32_t inner_y = pl->y + extrude_val;
+    bool cache_hit = false;
 
-        /* Blit trimmed pixels */
-        blit_sprite(page_pixels[pl->page], page_w[pl->page], sprites[idx].rgba, sprites[idx].width, pl->trim_x, pl->trim_y, pl->trimmed_w, pl->trimmed_h, inner_x, inner_y, pl->rotation);
-
-        /* Extrude edge pixels (ATLAS-11) */
-        uint32_t blit_w = (pl->rotation == 1 || pl->rotation == 3) ? pl->trimmed_h : pl->trimmed_w;
-        uint32_t blit_h = (pl->rotation == 1 || pl->rotation == 3) ? pl->trimmed_w : pl->trimmed_h;
-        extrude_edges(page_pixels[pl->page], page_w[pl->page], page_h[pl->page], inner_x, inner_y, blit_w, blit_h, extrude_val);
+    /* Check atlas cache (D-13) */
+    if (ctx->cache_dir) {
+        cache_hit = atlas_cache_read(ctx->cache_dir, state->cache_key, &placements, &placement_count, page_w, page_h, &page_count, &page_pixels);
+        if (cache_hit) {
+            NT_LOG_INFO("Atlas cache hit: %s (key %016llx)", state->name, (unsigned long long)state->cache_key);
+        }
     }
 
-    /* Debug PNG output (D-09, D-10) */
-    if (opts->debug_png) {
+    if (!cache_hit) {
+        // #region Step 4: Tile packing
+        // NOLINTNEXTLINE(clang-analyzer-optin.portability.UnixAPI)
+        placements = (AtlasPlacement *)malloc(unique_count * sizeof(AtlasPlacement));
+        NT_BUILD_ASSERT(placements && "end_atlas: alloc failed");
+
+        /* Build trim arrays for unique sprites only */
+        uint32_t *u_trim_w = (uint32_t *)malloc(unique_count * sizeof(uint32_t));
+        uint32_t *u_trim_h = (uint32_t *)malloc(unique_count * sizeof(uint32_t));
+        NT_BUILD_ASSERT(u_trim_w && u_trim_h && "end_atlas: alloc failed");
+        for (uint32_t i = 0; i < unique_count; i++) {
+            u_trim_w[i] = trim_w[unique_indices[i]];
+            u_trim_h[i] = trim_h[unique_indices[i]];
+        }
+
+        placement_count = tile_pack(u_trim_w, u_trim_h, unique_count, opts, placements, &page_count, page_w, page_h);
+
+        /* Fill trim offsets and remap sprite_index back to original */
+        for (uint32_t i = 0; i < placement_count; i++) {
+            uint32_t unique_idx = placements[i].sprite_index; /* index into unique arrays */
+            uint32_t orig_idx = unique_indices[unique_idx];
+            placements[i].sprite_index = orig_idx;
+            placements[i].trim_x = trim_x[orig_idx];
+            placements[i].trim_y = trim_y[orig_idx];
+            placements[i].trimmed_w = trim_w[orig_idx];
+            placements[i].trimmed_h = trim_h[orig_idx];
+        }
+
+        free(u_trim_w);
+        free(u_trim_h);
+        // #endregion
+
+        // #region Step 5: Compose page RGBA + extrude + debug PNG (ATLAS-15, ATLAS-11, D-09)
+        page_pixels = (uint8_t **)calloc(page_count, sizeof(uint8_t *));
+        NT_BUILD_ASSERT(page_pixels && "end_atlas: alloc failed");
+
         for (uint32_t p = 0; p < page_count; p++) {
-            /* Draw outlines on a copy */
-            size_t page_bytes = (size_t)page_w[p] * page_h[p] * 4;
-            uint8_t *debug_page = (uint8_t *)malloc(page_bytes);
-            NT_BUILD_ASSERT(debug_page && "end_atlas: debug alloc failed");
-            memcpy(debug_page, page_pixels[p], page_bytes);
+            page_pixels[p] = (uint8_t *)calloc((size_t)page_w[p] * page_h[p] * 4, 1);
+            NT_BUILD_ASSERT(page_pixels[p] && "end_atlas: page alloc failed");
+        }
 
-            for (uint32_t pi = 0; pi < placement_count; pi++) {
-                if (placements[pi].page != p) {
-                    continue;
+        /* Blit each placed sprite */
+        for (uint32_t pi = 0; pi < placement_count; pi++) {
+            AtlasPlacement *pl = &placements[pi];
+            uint32_t idx = pl->sprite_index;
+            uint32_t inner_x = pl->x + extrude_val;
+            uint32_t inner_y = pl->y + extrude_val;
+
+            /* Blit trimmed pixels */
+            blit_sprite(page_pixels[pl->page], page_w[pl->page], sprites[idx].rgba, sprites[idx].width, pl->trim_x, pl->trim_y, pl->trimmed_w, pl->trimmed_h, inner_x, inner_y, pl->rotation);
+
+            /* Extrude edge pixels (ATLAS-11) */
+            uint32_t blit_w = (pl->rotation == 1 || pl->rotation == 3) ? pl->trimmed_h : pl->trimmed_w;
+            uint32_t blit_h = (pl->rotation == 1 || pl->rotation == 3) ? pl->trimmed_w : pl->trimmed_h;
+            extrude_edges(page_pixels[pl->page], page_w[pl->page], page_h[pl->page], inner_x, inner_y, blit_w, blit_h, extrude_val);
+        }
+
+        /* Debug PNG output (D-09, D-10) */
+        if (opts->debug_png) {
+            for (uint32_t p = 0; p < page_count; p++) {
+                /* Draw outlines on a copy */
+                size_t page_bytes = (size_t)page_w[p] * page_h[p] * 4;
+                uint8_t *debug_page = (uint8_t *)malloc(page_bytes);
+                NT_BUILD_ASSERT(debug_page && "end_atlas: debug alloc failed");
+                memcpy(debug_page, page_pixels[p], page_bytes);
+
+                for (uint32_t pi = 0; pi < placement_count; pi++) {
+                    if (placements[pi].page != p) {
+                        continue;
+                    }
+                    uint32_t rx = placements[pi].x + extrude_val;
+                    uint32_t ry = placements[pi].y + extrude_val;
+                    uint32_t rw = (placements[pi].rotation == 1 || placements[pi].rotation == 3) ? placements[pi].trimmed_h : placements[pi].trimmed_w;
+                    uint32_t rh = (placements[pi].rotation == 1 || placements[pi].rotation == 3) ? placements[pi].trimmed_w : placements[pi].trimmed_h;
+                    debug_draw_rect_outline(debug_page, page_w[p], page_h[p], rx, ry, rw, rh);
                 }
-                uint32_t rx = placements[pi].x + extrude_val;
-                uint32_t ry = placements[pi].y + extrude_val;
-                uint32_t rw = (placements[pi].rotation == 1 || placements[pi].rotation == 3) ? placements[pi].trimmed_h : placements[pi].trimmed_w;
-                uint32_t rh = (placements[pi].rotation == 1 || placements[pi].rotation == 3) ? placements[pi].trimmed_w : placements[pi].trimmed_h;
-                debug_draw_rect_outline(debug_page, page_w[p], page_h[p], rx, ry, rw, rh);
-            }
 
-            char debug_path[512];
-            (void)snprintf(debug_path, sizeof(debug_path), "%s_page%u.png", state->name, p);
-            stbi_write_png(debug_path, (int)page_w[p], (int)page_h[p], 4, debug_page, (int)(page_w[p] * 4));
-            NT_LOG_INFO("Debug PNG: %s (%ux%u)", debug_path, page_w[p], page_h[p]);
-            free(debug_page);
+                char debug_path[512];
+                (void)snprintf(debug_path, sizeof(debug_path), "%s_page%u.png", state->name, p);
+                stbi_write_png(debug_path, (int)page_w[p], (int)page_h[p], 4, debug_page, (int)(page_w[p] * 4));
+                NT_LOG_INFO("Debug PNG: %s (%ux%u)", debug_path, page_w[p], page_h[p]);
+                free(debug_page);
+            }
+        }
+        // #endregion
+
+        /* Write atlas cache on miss (D-13) */
+        if (ctx->cache_dir) {
+            if (atlas_cache_write(ctx->cache_dir, state->cache_key, placements, placement_count, page_w, page_h, page_count, page_pixels)) {
+                NT_LOG_INFO("Atlas cache stored: %s (key %016llx)", state->name, (unsigned long long)state->cache_key);
+            }
         }
     }
     // #endregion

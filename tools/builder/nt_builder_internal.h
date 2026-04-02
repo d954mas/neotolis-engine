@@ -68,6 +68,7 @@ typedef struct {
     NtAtlasSpriteInput *sprites;     /* dynamic array (heap) */
     uint32_t sprite_count;
     uint32_t sprite_capacity;
+    uint64_t cache_key; /* computed atlas cache key for D-13 */
 } NtBuildAtlasState;
 
 /* Metadata accumulation limit (Phase 37) */

@@ -1,5 +1,6 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
+#include "nt_atlas_format.h"
 #include "nt_crc32.h"
 #include "nt_font_format.h"
 #include "nt_texture_format.h"
@@ -248,6 +249,38 @@ static void print_font_details(const uint8_t *asset_data, uint32_t asset_size) {
     chars[pos] = '\0';
     // #endregion
     NT_LOG_INFO("    chars: %s", chars);
+}
+
+/* ---- Atlas-specific detail printer ---- */
+
+static void print_atlas_details(const uint8_t *asset_data, uint32_t asset_size) {
+    if (!asset_data || asset_size < sizeof(NtAtlasHeader)) {
+        return;
+    }
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)asset_data;
+    if (ahdr->magic != NT_ATLAS_MAGIC) {
+        return;
+    }
+
+    NT_LOG_INFO("    regions: %u  pages: %u  vertices: %u", ahdr->region_count, ahdr->page_count, ahdr->total_vertex_count);
+
+    /* Parse past texture resource IDs to reach regions */
+    const uint8_t *ptr = asset_data + sizeof(NtAtlasHeader);
+    ptr += (size_t)ahdr->page_count * sizeof(uint64_t);
+
+    /* Parse regions */
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
+    uint32_t max_regions = (asset_size - (uint32_t)(ptr - asset_data)) / (uint32_t)sizeof(NtAtlasRegion);
+    uint32_t count = ahdr->region_count;
+    if (count > max_regions) {
+        count = max_regions;
+    }
+
+    for (uint32_t r = 0; r < count; r++) {
+        const NtAtlasRegion *reg = &regions[r];
+        NT_LOG_INFO("    [%u] page:%u %ux%u verts:%u origin:(%.2f,%.2f)%s", r, reg->page_index, reg->source_w, reg->source_h, reg->vertex_count, (double)reg->origin_x, (double)reg->origin_y,
+                    reg->rotated ? " ROT" : "");
+    }
 }
 
 /* ---- Per-type summary accumulators ---- */
@@ -581,6 +614,11 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
         /* Font-specific detail line */
         if (e->asset_type == NT_ASSET_FONT && asset_data) {
             print_font_details(asset_data, asset_size);
+        }
+
+        /* Atlas-specific detail line */
+        if (e->asset_type == NT_ASSET_ATLAS && asset_data) {
+            print_atlas_details(asset_data, asset_size);
         }
 
         /* Accumulate per-type stats */
