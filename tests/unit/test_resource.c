@@ -2023,6 +2023,82 @@ void test_user_data_null_initially(void) {
     TEST_ASSERT_NULL(nt_resource_get_user_data(h));
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_on_resolve_fires_on_priority_change(void) {
+    reset_resolve_state();
+    s_activate_call_count = 0;
+    s_next_handle = 0xBEEF;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate_seq, fake_deactivate);
+    nt_resource_set_resolve_callbacks(NT_ASSET_MESH, mock_on_resolve, mock_on_cleanup);
+
+    nt_hash64_t rid = nt_hash64_str("prio_change_res");
+
+    /* Pack A at priority 10 */
+    nt_hash32_t pidA = nt_hash32_str("prio_packA");
+    write_test_pack_file("build/test_prio_a.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pidA, 10));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pidA, "build/test_prio_a.ntpack"));
+
+    /* Pack B at priority 0 (lower) */
+    nt_hash32_t pidB = nt_hash32_str("prio_packB");
+    write_test_pack_file("build/test_prio_b.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pidB, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pidB, "build/test_prio_b.ntpack"));
+
+    (void)nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step(); /* A wins (prio 10 > 0) → on_resolve fires */
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_resolve_call_count);
+    uint32_t first_handle = s_last_resolve_handle;
+
+    /* Lower A's priority below B → B becomes winner */
+    nt_resource_set_priority(pidA, -5);
+    nt_resource_step(); /* B wins now → on_resolve fires again */
+
+    TEST_ASSERT_EQUAL_UINT32(2, s_resolve_call_count);
+    TEST_ASSERT_NOT_EQUAL(first_handle, s_last_resolve_handle);
+    /* Merge: 42 + 1 = 43 */
+    TEST_ASSERT_EQUAL_UINT32(43, *(uint32_t *)s_last_resolve_user_data);
+
+    (void)remove("build/test_prio_a.ntpack");
+    (void)remove("build/test_prio_b.ntpack");
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_on_resolve_fires_on_invalidate(void) {
+    reset_resolve_state();
+    s_activate_call_count = 0;
+    s_next_handle = 0xBEEF;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate_seq, fake_deactivate);
+    nt_resource_set_resolve_callbacks(NT_ASSET_MESH, mock_on_resolve, mock_on_cleanup);
+
+    nt_hash32_t pid = nt_hash32_str("inv_resolve_pack");
+    nt_hash64_t rid = nt_hash64_str("inv_resolve_res");
+
+    write_test_pack_file("build/test_inv_resolve.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_inv_resolve.ntpack"));
+
+    (void)nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step(); /* activate (handle=0xBEEF) + resolve → on_resolve */
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_resolve_call_count);
+    TEST_ASSERT_EQUAL_UINT32(0xBEEF, s_last_resolve_handle);
+
+    /* Invalidate → deactivates, sets REGISTERED. Next step re-activates with new handle. */
+    nt_resource_invalidate(NT_ASSET_MESH);
+    nt_resource_step(); /* re-activate (handle=0xBEF0) + resolve */
+    nt_resource_step(); /* resolve may need extra step */
+
+    /* Same winner identity (resolve_asset_idx) but different handle → on_resolve must fire */
+    TEST_ASSERT_TRUE(s_resolve_call_count >= 2);
+    TEST_ASSERT_NOT_EQUAL(0xBEEF, s_last_resolve_handle);
+    /* Merge: 42 + 1 = 43 */
+    TEST_ASSERT_EQUAL_UINT32(43, *(uint32_t *)s_last_resolve_user_data);
+
+    (void)remove("build/test_inv_resolve.ntpack");
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -2155,6 +2231,8 @@ int main(void) {
     RUN_TEST(test_get_user_data_invalid_handle);
     RUN_TEST(test_no_on_resolve_without_registration);
     RUN_TEST(test_user_data_null_initially);
+    RUN_TEST(test_on_resolve_fires_on_priority_change);
+    RUN_TEST(test_on_resolve_fires_on_invalidate);
 
     return UNITY_END();
 }
