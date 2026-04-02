@@ -1,5 +1,5 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: d764b0d
+# Commit: 087f373
 
 ## WASM Section Sizes
 
@@ -94,7 +94,7 @@ libnt_mesh_comp.a           1914 B
 libnt_mesh_renderer.a       7900 B
 libnt_pool.a                1278 B
 libnt_render.a              5910 B
-libnt_resource.a          150536 B
+libnt_resource.a          168170 B
 libnt_sort.a                 366 B
 libnt_text_renderer.a    1170014 B
 libnt_time.a                 868 B
