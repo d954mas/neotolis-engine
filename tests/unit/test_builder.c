@@ -21,6 +21,7 @@ const char *__lsan_default_suppressions(void) { // NOLINT(bugprone-reserved-iden
 }
 
 /* clang-format off */
+#include "nt_atlas_format.h"
 #include "nt_blob_format.h"
 #include "nt_builder.h"
 #include "nt_builder_internal.h"
@@ -3419,6 +3420,150 @@ void test_font_kern_values(void) {
     free(pack_data);
 }
 
+/* --- Atlas geometry algorithm tests (Phase 47) --- */
+
+/* Point2D-compatible struct for test usage (matches internal Point2D in nt_builder_atlas.c) */
+typedef struct {
+    int32_t x, y;
+} TestPoint2D;
+
+/* alpha_trim: fully transparent 4x4 image returns false */
+void test_alpha_trim_fully_transparent(void) {
+    uint8_t rgba[4 * 4 * 4];
+    memset(rgba, 0, sizeof(rgba)); /* all pixels transparent (alpha=0) */
+    uint32_t ox = 0, oy = 0, ow = 0, oh = 0;
+    bool result = nt_atlas_test_alpha_trim(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
+    TEST_ASSERT_FALSE(result);
+}
+
+/* alpha_trim: single opaque pixel at (2,1) */
+void test_alpha_trim_single_pixel(void) {
+    uint8_t rgba[4 * 4 * 4];
+    memset(rgba, 0, sizeof(rgba));
+    /* Set pixel at (2,1) to opaque: index = (1*4 + 2) * 4 = 24, alpha at offset 27 */
+    rgba[(1 * 4 + 2) * 4 + 3] = 255; /* alpha channel */
+    uint32_t ox = 0, oy = 0, ow = 0, oh = 0;
+    bool result = nt_atlas_test_alpha_trim(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
+    TEST_ASSERT_TRUE(result);
+    TEST_ASSERT_EQUAL_UINT32(2, ox);
+    TEST_ASSERT_EQUAL_UINT32(1, oy);
+    TEST_ASSERT_EQUAL_UINT32(1, ow);
+    TEST_ASSERT_EQUAL_UINT32(1, oh);
+}
+
+/* alpha_trim: L-shape opaque pixels */
+void test_alpha_trim_l_shape(void) {
+    uint8_t rgba[4 * 4 * 4];
+    memset(rgba, 0, sizeof(rgba));
+    /* L-shape: (0,0), (0,1), (0,2), (1,2) */
+    rgba[(0 * 4 + 0) * 4 + 3] = 255;
+    rgba[(1 * 4 + 0) * 4 + 3] = 255;
+    rgba[(2 * 4 + 0) * 4 + 3] = 255;
+    rgba[(2 * 4 + 1) * 4 + 3] = 255;
+    uint32_t ox = 0, oy = 0, ow = 0, oh = 0;
+    bool result = nt_atlas_test_alpha_trim(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
+    TEST_ASSERT_TRUE(result);
+    TEST_ASSERT_EQUAL_UINT32(0, ox);
+    TEST_ASSERT_EQUAL_UINT32(0, oy);
+    TEST_ASSERT_EQUAL_UINT32(2, ow);
+    TEST_ASSERT_EQUAL_UINT32(3, oh);
+}
+
+/* alpha_trim: threshold=128 treats alpha=127 as transparent */
+void test_alpha_trim_threshold(void) {
+    uint8_t rgba[4 * 4 * 4];
+    memset(rgba, 0, sizeof(rgba));
+    /* Pixel at (1,1) with alpha=127 should be treated as transparent with threshold=128 */
+    rgba[(1 * 4 + 1) * 4 + 3] = 127;
+    /* Pixel at (2,2) with alpha=128 should be treated as opaque */
+    rgba[(2 * 4 + 2) * 4 + 3] = 128;
+    uint32_t ox = 0, oy = 0, ow = 0, oh = 0;
+    bool result = nt_atlas_test_alpha_trim(rgba, 4, 4, 128, &ox, &oy, &ow, &oh);
+    TEST_ASSERT_TRUE(result);
+    TEST_ASSERT_EQUAL_UINT32(2, ox);
+    TEST_ASSERT_EQUAL_UINT32(2, oy);
+    TEST_ASSERT_EQUAL_UINT32(1, ow);
+    TEST_ASSERT_EQUAL_UINT32(1, oh);
+}
+
+/* convex_hull: 3 points forming triangle returns all 3 in CCW order */
+void test_convex_hull_triangle(void) {
+    TestPoint2D pts[3] = {{0, 0}, {4, 0}, {2, 3}};
+    TestPoint2D out[16];
+    uint32_t n = nt_atlas_test_convex_hull(pts, 3, out);
+    TEST_ASSERT_EQUAL_UINT32(3, n);
+    /* Verify CCW ordering: cross product of consecutive edges should be positive */
+    int64_t cross = (int64_t)(out[1].x - out[0].x) * (int64_t)(out[2].y - out[0].y) - (int64_t)(out[1].y - out[0].y) * (int64_t)(out[2].x - out[0].x);
+    TEST_ASSERT_TRUE(cross > 0); /* CCW */
+}
+
+/* convex_hull: 5 points with 1 interior point returns 4-vertex hull */
+void test_convex_hull_with_interior(void) {
+    /* Square (0,0)-(4,0)-(4,4)-(0,4) with interior point (2,2) */
+    TestPoint2D pts[5] = {{0, 0}, {4, 0}, {4, 4}, {0, 4}, {2, 2}};
+    TestPoint2D out[16];
+    uint32_t n = nt_atlas_test_convex_hull(pts, 5, out);
+    TEST_ASSERT_EQUAL_UINT32(4, n); /* interior point excluded */
+}
+
+/* convex_hull: collinear points handled correctly */
+void test_convex_hull_collinear(void) {
+    TestPoint2D pts[4] = {{0, 0}, {1, 0}, {2, 0}, {3, 0}};
+    TestPoint2D out[16];
+    uint32_t n = nt_atlas_test_convex_hull(pts, 4, out);
+    /* Collinear points should produce a degenerate hull (2 points: endpoints) */
+    TEST_ASSERT_EQUAL_UINT32(2, n);
+}
+
+/* rdp_simplify: 4-vertex square with max_vertices=4 returns unchanged */
+void test_rdp_simplify_no_reduction(void) {
+    TestPoint2D hull[4] = {{0, 0}, {4, 0}, {4, 4}, {0, 4}};
+    TestPoint2D out[16];
+    uint32_t n = nt_atlas_test_rdp_simplify(hull, 4, 4, out);
+    TEST_ASSERT_EQUAL_UINT32(4, n);
+    /* Verify same points */
+    for (uint32_t i = 0; i < 4; i++) {
+        TEST_ASSERT_EQUAL_INT32(hull[i].x, out[i].x);
+        TEST_ASSERT_EQUAL_INT32(hull[i].y, out[i].y);
+    }
+}
+
+/* rdp_simplify: 8-vertex shape reduced to max_vertices=4 */
+void test_rdp_simplify_reduction(void) {
+    /* Octagon-ish shape: 8 vertices approximating a circle */
+    TestPoint2D hull[8] = {
+        {10, 0}, {20, 3}, {23, 10}, {20, 17}, {10, 20}, {3, 17}, {0, 10}, {3, 3},
+    };
+    TestPoint2D out[16];
+    uint32_t n = nt_atlas_test_rdp_simplify(hull, 8, 4, out);
+    TEST_ASSERT_EQUAL_UINT32(4, n);
+}
+
+/* fan_triangulate: 4 vertices produces 2 triangles */
+void test_fan_triangulate_quad(void) {
+    uint16_t indices[32];
+    uint32_t tri_count = nt_atlas_test_fan_triangulate(4, indices);
+    TEST_ASSERT_EQUAL_UINT32(2, tri_count);
+    /* Triangle 0: (0, 1, 2) */
+    TEST_ASSERT_EQUAL_UINT16(0, indices[0]);
+    TEST_ASSERT_EQUAL_UINT16(1, indices[1]);
+    TEST_ASSERT_EQUAL_UINT16(2, indices[2]);
+    /* Triangle 1: (0, 2, 3) */
+    TEST_ASSERT_EQUAL_UINT16(0, indices[3]);
+    TEST_ASSERT_EQUAL_UINT16(2, indices[4]);
+    TEST_ASSERT_EQUAL_UINT16(3, indices[5]);
+}
+
+/* fan_triangulate: 3 vertices produces 1 triangle */
+void test_fan_triangulate_triangle(void) {
+    uint16_t indices[32];
+    uint32_t tri_count = nt_atlas_test_fan_triangulate(3, indices);
+    TEST_ASSERT_EQUAL_UINT32(1, tri_count);
+    TEST_ASSERT_EQUAL_UINT16(0, indices[0]);
+    TEST_ASSERT_EQUAL_UINT16(1, indices[1]);
+    TEST_ASSERT_EQUAL_UINT16(2, indices[2]);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -3552,6 +3697,19 @@ int main(void) {
     RUN_TEST(test_font_dump_pack);
     RUN_TEST(test_font_charset_dedup);
     RUN_TEST(test_font_kern_values);
+
+    /* Atlas geometry algorithms (Phase 47) */
+    RUN_TEST(test_alpha_trim_fully_transparent);
+    RUN_TEST(test_alpha_trim_single_pixel);
+    RUN_TEST(test_alpha_trim_l_shape);
+    RUN_TEST(test_alpha_trim_threshold);
+    RUN_TEST(test_convex_hull_triangle);
+    RUN_TEST(test_convex_hull_with_interior);
+    RUN_TEST(test_convex_hull_collinear);
+    RUN_TEST(test_rdp_simplify_no_reduction);
+    RUN_TEST(test_rdp_simplify_reduction);
+    RUN_TEST(test_fan_triangulate_quad);
+    RUN_TEST(test_fan_triangulate_triangle);
 
     return UNITY_END();
 }
