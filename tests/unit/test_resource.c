@@ -1856,6 +1856,7 @@ void test_on_resolve_merge_on_reactivation(void) {
 
     TEST_ASSERT_EQUAL_UINT32(1, s_resolve_call_count);
     TEST_ASSERT_EQUAL_UINT32(42, *(uint32_t *)s_last_resolve_user_data);
+    void *first_user_data = s_last_resolve_user_data;
 
     /* Second pack with same resource_id at higher priority */
     nt_hash32_t pid2 = nt_hash32_str("merge_pack2");
@@ -1867,6 +1868,8 @@ void test_on_resolve_merge_on_reactivation(void) {
     TEST_ASSERT_EQUAL_UINT32(2, s_resolve_call_count);
     /* Merge incremented value: 42 + 1 = 43 */
     TEST_ASSERT_EQUAL_UINT32(43, *(uint32_t *)s_last_resolve_user_data);
+    /* Same pointer reused (merge, not re-alloc) */
+    TEST_ASSERT_EQUAL_PTR(first_user_data, s_last_resolve_user_data);
 
     (void)h;
     (void)remove("build/test_merge1.ntpack");

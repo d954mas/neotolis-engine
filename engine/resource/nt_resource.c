@@ -1166,7 +1166,7 @@ void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_d
 void nt_resource_set_resolve_callbacks(uint8_t asset_type, nt_resolve_fn on_resolve, nt_cleanup_fn on_cleanup) {
     NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
     NT_ASSERT((s_resource.activators[asset_type].on_resolve == NULL || s_resource.activators[asset_type].on_resolve == on_resolve) && "resolve callbacks already registered");
-    NT_ASSERT(on_resolve == NULL || on_cleanup != NULL && "on_resolve requires on_cleanup to avoid user_data leak");
+    NT_ASSERT((on_resolve == NULL || on_cleanup != NULL) && "on_resolve requires on_cleanup to avoid user_data leak");
     s_resource.activators[asset_type].on_resolve = on_resolve;
     s_resource.activators[asset_type].on_cleanup = on_cleanup;
 }
