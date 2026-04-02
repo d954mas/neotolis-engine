@@ -103,7 +103,8 @@ typedef struct {
 
 typedef struct {
     uint64_t resource_id;       /* nt_hash64 value */
-    uint32_t runtime_handle;    /* current best resolved handle */
+    uint32_t runtime_handle;      /* current best resolved handle */
+    uint32_t prev_runtime_handle; /* previous winner (for on_resolve/on_cleanup change detection) */
     uint16_t generation;        /* for stale detection */
     int16_t resolve_prio;       /* priority of current winner; Phase 25: use for O(1) activation */
     uint8_t asset_type;         /* nt_asset_type_t */

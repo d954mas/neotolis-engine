@@ -35,7 +35,9 @@ typedef enum {
     NT_PACK_STATE_FAILED,      /* load failed (may retry) */
 } nt_pack_state_t;
 
-/* ---- Activator callback types ---- */
+/* ---- Activator callback types ----
+ * WARNING: callbacks must not call resource API (mount/unmount/request/step).
+ * They fire during resolve iteration — modifying resource state is UB. */
 
 typedef uint32_t (*nt_activate_fn)(const uint8_t *data, uint32_t size);
 typedef void (*nt_deactivate_fn)(uint32_t runtime_handle);
