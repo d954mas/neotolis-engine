@@ -18,6 +18,8 @@ static const char *type_prefix_for_kind(nt_build_asset_kind_t kind) {
         return "BLOB";
     case NT_BUILD_ASSET_FONT:
         return "FONT";
+    case NT_BUILD_ASSET_ATLAS:
+        return "ATLAS";
     }
     return "UNKNOWN";
 }

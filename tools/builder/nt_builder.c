@@ -1,6 +1,7 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
 #include "hash/nt_hash.h"
+#include "nt_atlas_format.h"
 #include "nt_basisu_encoder.h"
 #include "nt_blob_format.h"
 #include "nt_crc32.h"
@@ -38,6 +39,7 @@ static void nt_builder_free_entry_data(NtBuildEntry *entry) {
         NtBuildFontData *fd = (NtBuildFontData *)entry->data;
         free(fd->charset);
     }
+    /* ATLAS entries use decoded_data for the serialized blob, no type-specific data struct */
     /* TEXTURE -> NtBuildTextureData*, SHADER -> NtBuildShaderData*, FONT -> NtBuildFontData*, others -> NULL */
     free(entry->data);
     entry->data = NULL;
@@ -287,6 +289,9 @@ static void increment_kind_counter(NtBuilderContext *ctx, nt_build_asset_kind_t 
     case NT_BUILD_ASSET_FONT:
         ctx->font_count++;
         break;
+    case NT_BUILD_ASSET_ATLAS:
+        ctx->atlas_count++;
+        break;
     }
 }
 
@@ -326,6 +331,7 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
     case NT_BUILD_ASSET_MESH:
     case NT_BUILD_ASSET_BLOB:
     case NT_BUILD_ASSET_FONT:
+    case NT_BUILD_ASSET_ATLAS:
         return true; /* no encoding opts -- everything is in decoded_data */
     }
     return false;
@@ -354,6 +360,10 @@ static void derive_asset_type(nt_build_asset_kind_t kind, nt_asset_type_t *out_t
         *out_type = NT_ASSET_FONT;
         *out_version = NT_FONT_VERSION;
         break;
+    case NT_BUILD_ASSET_ATLAS:
+        *out_type = NT_ASSET_ATLAS;
+        *out_version = NT_ATLAS_VERSION;
+        break;
     default:
         NT_BUILD_ASSERT(0 && "derive_asset_type: unknown asset kind");
         break;
@@ -367,7 +377,8 @@ static nt_build_result_t encode_one_asset(const NtBuildEntry *pe, NtEncodeResult
     switch (pe->kind) {
     case NT_BUILD_ASSET_MESH:
     case NT_BUILD_ASSET_BLOB:
-    case NT_BUILD_ASSET_FONT: {
+    case NT_BUILD_ASSET_FONT:
+    case NT_BUILD_ASSET_ATLAS: {
         result->data = (uint8_t *)malloc(pe->decoded_size);
         NT_BUILD_ASSERT(result->data && "encode: alloc failed (OOM)");
         memcpy(result->data, pe->decoded_data, pe->decoded_size);
@@ -793,6 +804,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
             break;
         case NT_BUILD_ASSET_FONT:
             ctx->font_count++;
+            break;
+        case NT_BUILD_ASSET_ATLAS:
+            ctx->atlas_count++;
             break;
         }
     }

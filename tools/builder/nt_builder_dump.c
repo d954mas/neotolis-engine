@@ -169,6 +169,8 @@ static const char *nt_asset_type_name(uint8_t type) {
         return "BLOB";
     case NT_ASSET_FONT:
         return "FONT";
+    case NT_ASSET_ATLAS:
+        return "ATLAS";
     default:
         return "UNKNOWN";
     }
@@ -264,6 +266,8 @@ typedef struct {
     uint32_t blob_raw;
     uint32_t font_count;
     uint32_t font_raw;
+    uint32_t atlas_count;
+    uint32_t atlas_raw;
     uint32_t total_raw;
     uint32_t total_gz;
     uint32_t dup_count;
@@ -322,6 +326,10 @@ static void accumulate_stats(DumpStats *st, const NtAssetEntry *e, const uint8_t
         st->font_count++;
         st->font_raw += asset_size;
         break;
+    case NT_ASSET_ATLAS:
+        st->atlas_count++;
+        st->atlas_raw += asset_size;
+        break;
     default:
         break;
     }
@@ -378,6 +386,9 @@ static void print_summary(const DumpStats *st) {
     }
     if (st->font_count > 0) {
         print_type_line("FONT:", st->font_count, st->font_raw);
+    }
+    if (st->atlas_count > 0) {
+        print_type_line("ATLAS:", st->atlas_count, st->atlas_raw);
     }
     if (st->dup_count > 0) {
         char sz[16];

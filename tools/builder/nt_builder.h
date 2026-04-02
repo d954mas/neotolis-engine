@@ -196,6 +196,41 @@ static inline nt_tex_compress_opts_t nt_tex_compress_uastc_default(void) { retur
 static inline nt_tex_compress_opts_t nt_tex_compress_uastc_high(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 3, .endpoint_rdo_quality = 0.5F}; }
 static inline nt_tex_compress_opts_t nt_tex_compress_uastc_highest(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 4, .endpoint_rdo_quality = 0.0F}; }
 
+/* --- Atlas options (begin_atlas configuration) --- */
+
+typedef struct {
+    const nt_tex_compress_opts_t *compress; /* NULL = raw RGBA (per D-01) */
+    nt_texture_pixel_format_t format;       /* output pixel format (default: NT_TEXTURE_FORMAT_RGBA8) */
+    uint32_t max_size;                      /* max atlas page dimension (default: 2048 per D-11) */
+    uint32_t padding;                       /* extra spacing between sprites after extrude (default: 0 per D-11) */
+    uint32_t margin;                        /* atlas edge margin (default: 0 per D-11) */
+    uint32_t extrude;                       /* edge pixel duplication count (default: 2 per D-11) */
+    uint8_t alpha_threshold;                /* alpha >= this = opaque for trimming (default: 1 per D-11) */
+    uint8_t max_vertices;                   /* max hull vertices per region (default: 8 per D-11) */
+    bool allow_rotate;                      /* try rotations for better packing (default: true per D-11) */
+    bool power_of_two;                      /* round atlas dims to POT (default: true per D-11) */
+    bool polygon_mode;                      /* true = convex hull, false = rect (default: true per D-11) */
+    bool debug_png;                         /* write debug atlas page PNGs (default: false per D-11) */
+} nt_atlas_opts_t;
+
+/* Default atlas options (all D-11 values) */
+static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
+    return (nt_atlas_opts_t){
+        .compress = NULL,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+        .max_size = 2048,
+        .padding = 0,
+        .margin = 0,
+        .extrude = 2,
+        .alpha_threshold = 1,
+        .max_vertices = 8,
+        .allow_rotate = true,
+        .power_of_two = true,
+        .polygon_mode = true,
+        .debug_png = false,
+    };
+}
+
 /* --- Core API ---
  * Lifecycle: start_pack → add_* → finish_pack → free_pack.
  * Caller must always call free_pack when done, whether finish succeeded or not.
@@ -234,6 +269,13 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene);
 
 /* --- Blob API (generic binary data asset) --- */
 void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id);
+
+/* --- Atlas API (begin/add/end pattern per D-02) --- */
+void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_atlas_opts_t *opts);
+void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const char *name_override);
+void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *name);
+void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern);
+void nt_builder_end_atlas(NtBuilderContext *ctx);
 
 /* --- Codegen options --- */
 void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);

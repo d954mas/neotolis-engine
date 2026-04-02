@@ -17,6 +17,16 @@ if(NOT WIN32 AND NOT EMSCRIPTEN)
     target_link_libraries(stb_image_resize2 PUBLIC m)
 endif()
 
+# stb_image_write -- PNG/BMP/TGA writer (single-header, vendored, builder-only)
+add_library(stb_image_write STATIC stb_image_write_impl.c)
+target_include_directories(stb_image_write PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_options(stb_image_write PRIVATE -U_DLL)
+# Suppress warnings in vendored code
+target_compile_options(stb_image_write PRIVATE -w)
+if(NOT WIN32 AND NOT EMSCRIPTEN)
+    target_link_libraries(stb_image_write PUBLIC m)
+endif()
+
 # stb_truetype -- TrueType font parser (single-header, vendored, builder-only)
 add_library(stb_truetype STATIC stb_truetype_impl.c)
 target_include_directories(stb_truetype PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

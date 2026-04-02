@@ -22,6 +22,7 @@ typedef enum {
     NT_BUILD_ASSET_SHADER = 2,
     NT_BUILD_ASSET_BLOB = 3,
     NT_BUILD_ASSET_FONT = 4,
+    NT_BUILD_ASSET_ATLAS = 5,
 } nt_build_asset_kind_t;
 
 /* Type-specific data for shader entries */
@@ -45,6 +46,28 @@ typedef struct {
 typedef struct {
     char *charset; /* deep copy of opts.charset (owned) */
 } NtBuildFontData;
+
+/* Input sprite for atlas packing (populated during atlas_add_*) */
+typedef struct {
+    uint8_t *rgba;         /* decoded RGBA pixels (owned, heap) */
+    uint32_t width;        /* decoded image width */
+    uint32_t height;       /* decoded image height */
+    char *name;            /* region name for hash (owned, heap) */
+    float origin_x;        /* default 0.5 */
+    float origin_y;        /* default 0.5 */
+    uint64_t decoded_hash; /* xxh64 of decoded RGBA pixels */
+} NtAtlasSpriteInput;
+
+/* Atlas build state (active between begin_atlas / end_atlas) */
+typedef struct {
+    char *name;                      /* atlas name for resource_id (owned) */
+    nt_atlas_opts_t opts;            /* copy of user opts (compress ptr zeroed, use has_compress) */
+    nt_tex_compress_opts_t compress; /* Basis compression settings */
+    bool has_compress;               /* true = use Basis path */
+    NtAtlasSpriteInput *sprites;     /* dynamic array (heap) */
+    uint32_t sprite_count;
+    uint32_t sprite_capacity;
+} NtBuildAtlasState;
 
 /* Metadata accumulation limit (Phase 37) */
 #ifndef NT_BUILD_MAX_META_ENTRIES
@@ -136,6 +159,10 @@ struct NtBuilderContext {
     uint32_t shader_count;
     uint32_t blob_count;
     uint32_t font_count;
+    uint32_t atlas_count;
+
+    /* Atlas: active atlas state (non-NULL between begin_atlas/end_atlas) */
+    NtBuildAtlasState *active_atlas;
 
     /* Deduplication stats */
     uint32_t dedup_count;
