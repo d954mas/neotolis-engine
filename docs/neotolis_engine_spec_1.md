@@ -878,7 +878,7 @@ Sort order is **not** a material property. Sorting is game-controlled: game code
 
 - `resource_id`: 64-bit xxHash of asset path (`nt_hash64_t`) — stable resource identity
 - `NtAssetMeta`: per-asset metadata entry (one per asset per pack)
-- `NtResourceSlot`: per unique resource requested by game code — holds resolved handle
+- `NtResourceSlot`: per unique resource requested by game code — holds resolved handle and optional user_data
 - `nt_resource_t`: generational handle to a slot — what game code holds and passes around
 
 Two-level system:
@@ -921,17 +921,39 @@ typedef struct {
 
 ```c
 typedef struct {
-    uint64_t resource_id;       /* nt_hash64 value */
-    uint32_t runtime_handle;    /* current best resolved handle */
-    uint16_t generation;        /* stale detection */
-    int16_t  resolve_prio;      /* priority of current winner */
-    uint8_t  asset_type;        /* nt_asset_type_t */
-    uint8_t  state;             /* nt_asset_state_t of resolved entry */
-    uint16_t resolve_seq;       /* mount_seq of current winner (tiebreak) */
-    uint16_t resolve_asset_idx; /* index into assets[] of resolved winner (for metadata lookup) */
-    uint16_t _pad2;
+    uint64_t resource_id;            /* nt_hash64 value */
+    uint32_t runtime_handle;         /* current best resolved handle */
+    uint16_t generation;             /* stale detection */
+    int16_t  resolve_prio;           /* priority of current winner */
+    uint8_t  asset_type;             /* nt_asset_type_t */
+    uint8_t  state;                  /* nt_asset_state_t of resolved entry */
+    uint16_t resolve_seq;            /* mount_seq of current winner (tiebreak) */
+    uint16_t resolve_asset_idx;      /* index into assets[] of resolved winner */
+    uint16_t prev_resolve_asset_idx; /* previous winner identity (change detection) */
+    uint32_t prev_runtime_handle;    /* previous handle (detect re-activation) */
+    void    *user_data;              /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 ```
+
+### 17.6.1 Resolve callbacks (on_resolve / on_cleanup)
+
+Per-asset-type callbacks for auxiliary data that persists across pack stacking. Registered separately from activate/deactivate — asset types that don't use them pay nothing.
+
+```c
+typedef void (*nt_resolve_fn)(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data);
+typedef void (*nt_cleanup_fn)(void *user_data);
+
+nt_resource_set_resolve_callbacks(asset_type, on_resolve, on_cleanup);
+void *nt_resource_get_user_data(handle);
+```
+
+**on_resolve** fires in Phase D when the winner changes for a slot (different asset identity or same identity with a new runtime_handle after re-activation). Receives blob data, runtime_handle, and in/out `user_data` pointer. `data` may be NULL when the winner's pack blob is not resident (placeholder, virtual pack, or evicted blob). The data pointer is valid only for the duration of the call — callbacks must copy if needed.
+
+**on_cleanup** fires when a slot loses its real winner (all packs unmounted) and during shutdown for remaining non-NULL user_data. `on_resolve` requires `on_cleanup` — registering resolve without cleanup is an assert.
+
+Winner change detection uses two factors: `resolve_asset_idx` (winner identity) and `runtime_handle` (detect re-activation from context loss / invalidate). Placeholder substitution does not trigger on_resolve — placeholders are visual fallbacks, not real winners.
+
+Callbacks must not call resource API (mount/unmount/request/step) — they fire during resolve iteration.
 
 ## 17.7 Virtual packs
 
