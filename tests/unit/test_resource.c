@@ -954,6 +954,52 @@ static uint32_t fake_activate_fail(const uint8_t *data, uint32_t size) {
     return 0; /* failure */
 }
 
+static uint32_t s_next_handle = 0xBEEF;
+
+static uint32_t fake_activate_seq(const uint8_t *data, uint32_t size) {
+    (void)data;
+    (void)size;
+    s_activate_call_count++;
+    return s_next_handle++;
+}
+
+/* ---- Mock on_resolve / on_cleanup for user_data tests ---- */
+
+static uint32_t s_resolve_call_count;
+static uint32_t s_cleanup_call_count;
+static void *s_last_resolve_user_data;
+static uint32_t s_last_resolve_handle;
+static uint32_t s_last_resolve_size;
+
+static void reset_resolve_state(void) {
+    s_resolve_call_count = 0;
+    s_cleanup_call_count = 0;
+    s_last_resolve_user_data = NULL;
+    s_last_resolve_handle = 0;
+    s_last_resolve_size = 0;
+}
+
+static void mock_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
+    (void)data;
+    s_resolve_call_count++;
+    s_last_resolve_handle = runtime_handle;
+    s_last_resolve_size = size;
+    if (*user_data == NULL) {
+        /* First activation -- allocate */
+        *user_data = malloc(sizeof(uint32_t));
+        *(uint32_t *)*user_data = 42;
+    } else {
+        /* Re-activation (merge) -- increment */
+        *(uint32_t *)*user_data += 1;
+    }
+    s_last_resolve_user_data = *user_data;
+}
+
+static void mock_on_cleanup(void *user_data) {
+    s_cleanup_call_count++;
+    free(user_data);
+}
+
 /* ---- Test pack file writer ---- */
 
 static void write_test_pack_file(const char *path, uint64_t rid, uint8_t atype) {
@@ -1754,6 +1800,226 @@ void test_resource_get_meta_wrong_kind(void) {
     free(blob);
 }
 
+/* ---- Resolve callbacks and user_data tests ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_on_resolve_fires_on_winner_change(void) {
+    reset_resolve_state();
+    s_activate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+    nt_resource_set_resolve_callbacks(NT_ASSET_MESH, mock_on_resolve, mock_on_cleanup);
+
+    nt_hash32_t pid = nt_hash32_str("resolve_pack");
+    nt_hash64_t rid = nt_hash64_str("resolve_test");
+
+    write_test_pack_file("build/test_resolve.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_resolve.ntpack"));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+
+    nt_resource_step(); /* I/O + parse + activate + resolve */
+
+    /* on_resolve should have fired once */
+    TEST_ASSERT_EQUAL_UINT32(1, s_resolve_call_count);
+    TEST_ASSERT_EQUAL_UINT32(0xBEEF, s_last_resolve_handle);
+    TEST_ASSERT_TRUE(s_last_resolve_size > 0);
+
+    /* user_data allocated with value 42 */
+    TEST_ASSERT_NOT_NULL(s_last_resolve_user_data);
+    TEST_ASSERT_EQUAL_UINT32(42, *(uint32_t *)s_last_resolve_user_data);
+
+    /* nt_resource_get confirms runtime handle */
+    TEST_ASSERT_EQUAL_UINT32(0xBEEF, nt_resource_get(h));
+
+    (void)remove("build/test_resolve.ntpack");
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_on_resolve_merge_on_reactivation(void) {
+    reset_resolve_state();
+    s_activate_call_count = 0;
+    s_next_handle = 0xBEEF;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate_seq, fake_deactivate);
+    nt_resource_set_resolve_callbacks(NT_ASSET_MESH, mock_on_resolve, mock_on_cleanup);
+
+    nt_hash64_t rid = nt_hash64_str("merge_test");
+
+    /* First pack at priority 0 */
+    nt_hash32_t pid1 = nt_hash32_str("merge_pack1");
+    write_test_pack_file("build/test_merge1.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid1, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid1, "build/test_merge1.ntpack"));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step(); /* activate + resolve -> on_resolve fires (first time, user_data=42) */
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_resolve_call_count);
+    TEST_ASSERT_EQUAL_UINT32(42, *(uint32_t *)s_last_resolve_user_data);
+
+    /* Second pack with same resource_id at higher priority */
+    nt_hash32_t pid2 = nt_hash32_str("merge_pack2");
+    write_test_pack_file("build/test_merge2.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid2, 10));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid2, "build/test_merge2.ntpack"));
+    nt_resource_step(); /* new winner from higher-prio pack -> on_resolve fires again (merge) */
+
+    TEST_ASSERT_EQUAL_UINT32(2, s_resolve_call_count);
+    /* Merge incremented value: 42 + 1 = 43 */
+    TEST_ASSERT_EQUAL_UINT32(43, *(uint32_t *)s_last_resolve_user_data);
+
+    (void)h;
+    (void)remove("build/test_merge1.ntpack");
+    (void)remove("build/test_merge2.ntpack");
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_on_cleanup_fires_on_unmount(void) {
+    reset_resolve_state();
+    s_activate_call_count = 0;
+    s_deactivate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+    nt_resource_set_resolve_callbacks(NT_ASSET_MESH, mock_on_resolve, mock_on_cleanup);
+
+    nt_hash32_t pid = nt_hash32_str("cleanup_unmount_pack");
+    nt_hash64_t rid = nt_hash64_str("cleanup_unmount_res");
+
+    write_test_pack_file("build/test_cleanup_unmount.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_cleanup_unmount.ntpack"));
+
+    (void)nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step(); /* activate + resolve -> on_resolve sets user_data */
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_resolve_call_count);
+    TEST_ASSERT_EQUAL_UINT32(0, s_cleanup_call_count);
+
+    /* Unmount pack -> deactivates asset, then step triggers resolve */
+    nt_resource_unmount(pid);
+    nt_resource_step(); /* resolve: winner goes to 0 -> on_cleanup fires */
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_cleanup_call_count);
+
+    (void)remove("build/test_cleanup_unmount.ntpack");
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_on_cleanup_fires_on_shutdown(void) {
+    reset_resolve_state();
+    s_activate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+    nt_resource_set_resolve_callbacks(NT_ASSET_MESH, mock_on_resolve, mock_on_cleanup);
+
+    nt_hash32_t pid = nt_hash32_str("cleanup_shutdown_pack");
+    nt_hash64_t rid = nt_hash64_str("cleanup_shutdown_res");
+
+    write_test_pack_file("build/test_cleanup_shutdown.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_cleanup_shutdown.ntpack"));
+
+    (void)nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step(); /* activate + resolve -> on_resolve sets user_data */
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_resolve_call_count);
+    TEST_ASSERT_EQUAL_UINT32(0, s_cleanup_call_count);
+
+    /* Shutdown should clean up remaining user_data */
+    nt_resource_shutdown();
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_cleanup_call_count);
+
+    /* Re-init so tearDown's shutdown doesn't crash */
+    nt_resource_init(&s_desc);
+
+    (void)remove("build/test_cleanup_shutdown.ntpack");
+}
+
+void test_get_user_data_valid_handle(void) {
+    reset_resolve_state();
+    s_activate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+    nt_resource_set_resolve_callbacks(NT_ASSET_MESH, mock_on_resolve, mock_on_cleanup);
+
+    nt_hash32_t pid = nt_hash32_str("ud_valid_pack");
+    nt_hash64_t rid = nt_hash64_str("ud_valid_res");
+
+    write_test_pack_file("build/test_ud_valid.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_ud_valid.ntpack"));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step(); /* activate + resolve -> on_resolve sets user_data */
+
+    void *ud = nt_resource_get_user_data(h);
+    TEST_ASSERT_NOT_NULL(ud);
+    TEST_ASSERT_EQUAL_PTR(s_last_resolve_user_data, ud);
+
+    (void)remove("build/test_ud_valid.ntpack");
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_get_user_data_invalid_handle(void) {
+    /* Invalid zero handle */
+    TEST_ASSERT_NULL(nt_resource_get_user_data((nt_resource_t){0}));
+
+    /* Request a resource to get a valid handle, then shutdown+reinit (stale generation) */
+    reset_resolve_state();
+    s_activate_call_count = 0;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+    nt_resource_set_resolve_callbacks(NT_ASSET_MESH, mock_on_resolve, mock_on_cleanup);
+
+    nt_hash32_t pid = nt_hash32_str("ud_invalid_pack");
+    nt_hash64_t rid = nt_hash64_str("ud_invalid_res");
+
+    write_test_pack_file("build/test_ud_invalid.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_ud_invalid.ntpack"));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step();
+
+    /* Handle is valid now */
+    TEST_ASSERT_NOT_NULL(nt_resource_get_user_data(h));
+
+    /* Shutdown + reinit: old handle becomes stale */
+    nt_resource_shutdown();
+    nt_resource_init(&s_desc);
+
+    TEST_ASSERT_NULL(nt_resource_get_user_data(h));
+
+    (void)remove("build/test_ud_invalid.ntpack");
+}
+
+void test_no_on_resolve_without_registration(void) {
+    reset_resolve_state();
+    s_activate_call_count = 0;
+    /* Register only activator, NOT resolve callbacks */
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate, fake_deactivate);
+
+    nt_hash32_t pid = nt_hash32_str("no_resolve_pack");
+    nt_hash64_t rid = nt_hash64_str("no_resolve_res");
+
+    write_test_pack_file("build/test_no_resolve.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid, "build/test_no_resolve.ntpack"));
+
+    (void)nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step(); /* Should not crash even without resolve callbacks */
+
+    /* on_resolve was never called */
+    TEST_ASSERT_EQUAL_UINT32(0, s_resolve_call_count);
+
+    (void)remove("build/test_no_resolve.ntpack");
+}
+
+void test_user_data_null_initially(void) {
+    /* Request a resource without any pack mounted or activation */
+    nt_hash64_t rid = nt_hash64_str("ud_null_initial");
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+
+    TEST_ASSERT_NULL(nt_resource_get_user_data(h));
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -1876,6 +2142,16 @@ int main(void) {
     RUN_TEST(test_resource_get_meta_absent);
     RUN_TEST(test_resource_get_meta_invalid_handle);
     RUN_TEST(test_resource_get_meta_wrong_kind);
+
+    /* Resolve callbacks and user_data tests */
+    RUN_TEST(test_on_resolve_fires_on_winner_change);
+    RUN_TEST(test_on_resolve_merge_on_reactivation);
+    RUN_TEST(test_on_cleanup_fires_on_unmount);
+    RUN_TEST(test_on_cleanup_fires_on_shutdown);
+    RUN_TEST(test_get_user_data_valid_handle);
+    RUN_TEST(test_get_user_data_invalid_handle);
+    RUN_TEST(test_no_on_resolve_without_registration);
+    RUN_TEST(test_user_data_null_initially);
 
     return UNITY_END();
 }
