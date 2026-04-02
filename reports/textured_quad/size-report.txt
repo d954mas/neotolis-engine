@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 71e6953
+# Commit: 24fddb9
 
 ## WASM Section Sizes
 
@@ -7,17 +7,17 @@ Section                Size
 ---------------- ----------
 Type                 531 B
 Import               535 B
-Function             346 B
+Function             347 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                88 B
 Elem                 158 B
-Code              599110 B
+Code              599191 B
 Data              232764 B
-Custom             36244 B
+Custom             36268 B
 ---------------- ----------
-TOTAL             869796 B
+TOTAL             869902 B
 
 ## Top 30 Functions by Size
 
@@ -27,7 +27,7 @@ TOTAL             869796 B
 34973 B   basist::basisu_lowlevel_etc1s_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, bool, unsigned int, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, bool, void*, unsigned int, unsigned int)
 33293 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 21848 B   basist::astc_ldr_t::xuastc_ldr_decompress_image(unsigned char const*, unsigned long, unsigned int&, unsigned int&, unsigned int&, unsigned int&, bool&, bool&, bool, bool (*)(unsigned int, unsigned int, unsigned int, unsigned int, bool, float, bool, void*), void*, bool (*)(unsigned int, unsigned int, astc_helpers::log_astc_block const&, void*), void*)
-21348 B   frame
+21360 B   frame
 20843 B   basist::astc_ldr_t::grid_weight_dct::decode_block_weights(float, unsigned int, astc_helpers::log_astc_block&, basist::bitwise_decoder*, basist::astc_ldr_t::astc_block_grid_data const*, basist::astc_ldr_t::grid_weight_dct::block_stats*, basisu::vector<float>&, basist::astc_ldr_t::dct_syms const*) const
 18903 B   nt_basisu_transcode_level
 15764 B   astc_helpers::decode_block_xuastc_ldr(astc_helpers::log_astc_block const&, void*, unsigned int, unsigned int, astc_helpers::decode_mode, unsigned char const*, unsigned int, unsigned int, unsigned int, unsigned int)
@@ -49,13 +49,13 @@ TOTAL             869796 B
  7332 B   basist::etc1f::pack_etc1(unsigned char*, basist::color_rgba const*, basist::etc1f::pack_etc1_state&)
  6481 B   basist::bc7f::fast_pack_bc7_rgb_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
  6374 B   basist::bc7f::fast_pack_bc7_rgb_partial_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
- 5660 B   main
+ 5526 B   main
  5179 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  4822 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
  4528 B   basist::astc_6x6_hdr::assign_weights_4(basist::vec3F const*, float const*, unsigned char*, int, int, int, int, int, int, long long, bool, basist::astc_6x6_hdr::fast_bc6h_params const&)
 
-Total functions: 344
-Total code size: 598512 B
+Total functions: 345
+Total code size: 598591 B
 
 ## Per-Module Contributions
 
@@ -68,7 +68,7 @@ libnt_core.a                2178 B
 libnt_drawable_comp.a       2668 B
 libnt_entity.a              2996 B
 libnt_fs.a                  2620 B
-libnt_gfx.a                40476 B
+libnt_gfx.a                40492 B
 libnt_hash.a                4028 B
 libnt_http.a                6710 B
 libnt_http_stub.a           3210 B
@@ -84,13 +84,13 @@ libnt_time.a                 868 B
 libnt_transform_comp.a      4536 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)            266092 B
+TOTAL (linked)            266108 B
 
 Not linked to textured_quad:
 libnt_app_stub.a            1428 B
 libnt_basisu_transcoder.a 1329370 B
 libnt_comp_storage.a        1802 B
-libnt_font.a              152986 B
+libnt_font.a              194546 B
 libnt_fs_stub.a             2620 B
 libnt_gfx_stub.a           22732 B
 libnt_input_stub.a         11148 B
@@ -98,6 +98,8 @@ libnt_log_stub.a             484 B
 libnt_pool.a                1278 B
 libnt_shape_renderer.a   1140902 B
 libnt_sort.a                 366 B
+libnt_text_renderer.a    1170014 B
+libnt_utf8.a                1000 B
 libnt_window_stub.a         1838 B
 
 

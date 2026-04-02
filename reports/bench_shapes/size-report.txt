@@ -1,34 +1,34 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: 71e6953
+# Commit: 24fddb9
 
 ## WASM Section Sizes
 
 Section                Size
 ---------------- ----------
 Type                 196 B
-Import               409 B
-Function              97 B
+Import               416 B
+Function              98 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                59 B
 Elem                  46 B
-Code               75500 B
+Code               75584 B
 Data                8523 B
-Custom              4501 B
+Custom              4543 B
 ---------------- ----------
-TOTAL              89352 B
+TOTAL              89486 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-22884 B   main
-11495 B   frame
+22739 B   main
+11508 B   frame
  3341 B   rebuild_shapes
  3103 B   fmt_fp
  2896 B   emit_capsule_wire
- 2628 B   printf_core
+ 2630 B   printf_core
  2494 B   nt_input_web_on_blur
  2041 B   __rem_pio2f
  2020 B   emit_cylinder_wire
@@ -54,8 +54,8 @@ TOTAL              89352 B
   362 B   cosf
   361 B   nt_input_web_on_pointer_up
 
-Total functions: 96
-Total code size: 75342 B
+Total functions: 97
+Total code size: 75424 B
 
 ## Per-Module Contributions
 
@@ -65,12 +65,12 @@ Module                         Size
 ------------------------ ----------
 libnt_app.a                 1430 B
 libnt_core.a                2178 B
-libnt_gfx.a                40476 B
+libnt_gfx.a                40492 B
 libnt_input.a              16446 B
 libnt_shape_renderer.a   1140902 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)           1205372 B
+TOTAL (linked)           1205388 B
 
 Not linked to bench_shapes:
 libnt_app_stub.a            1428 B
@@ -78,7 +78,7 @@ libnt_basisu_transcoder.a 1329370 B
 libnt_comp_storage.a        1802 B
 libnt_drawable_comp.a       2668 B
 libnt_entity.a              2996 B
-libnt_font.a              152986 B
+libnt_font.a              194546 B
 libnt_fs.a                  2620 B
 libnt_fs_stub.a             2620 B
 libnt_gfx_stub.a           22732 B
@@ -96,8 +96,10 @@ libnt_pool.a                1278 B
 libnt_render.a              5910 B
 libnt_resource.a          150536 B
 libnt_sort.a                 366 B
+libnt_text_renderer.a    1170014 B
 libnt_time.a                 868 B
 libnt_transform_comp.a      4536 B
+libnt_utf8.a                1000 B
 libnt_window_stub.a         1838 B
 
 
