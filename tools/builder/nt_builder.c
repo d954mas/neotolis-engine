@@ -292,6 +292,8 @@ static void increment_kind_counter(NtBuilderContext *ctx, nt_build_asset_kind_t 
     case NT_BUILD_ASSET_ATLAS:
         ctx->atlas_count++;
         break;
+    case NT_BUILD_ASSET_ATLAS_REGION:
+        break; /* codegen-only, no counter */
     }
 }
 
@@ -332,6 +334,7 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
     case NT_BUILD_ASSET_BLOB:
     case NT_BUILD_ASSET_FONT:
     case NT_BUILD_ASSET_ATLAS:
+    case NT_BUILD_ASSET_ATLAS_REGION:
         return true; /* no encoding opts -- everything is in decoded_data */
     }
     return false;
@@ -361,6 +364,7 @@ static void derive_asset_type(nt_build_asset_kind_t kind, nt_asset_type_t *out_t
         *out_version = NT_FONT_VERSION;
         break;
     case NT_BUILD_ASSET_ATLAS:
+    case NT_BUILD_ASSET_ATLAS_REGION:
         *out_type = NT_ASSET_ATLAS;
         *out_version = NT_ATLAS_VERSION;
         break;
@@ -378,7 +382,8 @@ static nt_build_result_t encode_one_asset(const NtBuildEntry *pe, NtEncodeResult
     case NT_BUILD_ASSET_MESH:
     case NT_BUILD_ASSET_BLOB:
     case NT_BUILD_ASSET_FONT:
-    case NT_BUILD_ASSET_ATLAS: {
+    case NT_BUILD_ASSET_ATLAS:
+    case NT_BUILD_ASSET_ATLAS_REGION: {
         result->data = (uint8_t *)malloc(pe->decoded_size);
         NT_BUILD_ASSERT(result->data && "encode: alloc failed (OOM)");
         memcpy(result->data, pe->decoded_data, pe->decoded_size);
@@ -808,6 +813,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         case NT_BUILD_ASSET_ATLAS:
             ctx->atlas_count++;
             break;
+        case NT_BUILD_ASSET_ATLAS_REGION:
+            break; /* codegen-only, no counter */
         }
     }
 

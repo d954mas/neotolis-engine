@@ -20,6 +20,8 @@ static const char *type_prefix_for_kind(nt_build_asset_kind_t kind) {
         return "FONT";
     case NT_BUILD_ASSET_ATLAS:
         return "ATLAS";
+    case NT_BUILD_ASSET_ATLAS_REGION:
+        return "ATLAS_REGION";
     }
     return "UNKNOWN";
 }
@@ -178,11 +180,11 @@ static void check_codegen_collisions(const CodegenEntry *entries, uint32_t count
 
 static void write_sorted_defines(FILE *f, const CodegenEntry *entries, uint32_t count) {
     /* Build sort index per type group */
-    const char *type_order[] = {"MESH", "TEXTURE", "SHADER", "BLOB", "FONT"};
+    const char *type_order[] = {"MESH", "TEXTURE", "SHADER", "BLOB", "FONT", "ATLAS", "ATLAS_REGION"};
 
     SortEntry sorted[NT_BUILD_MAX_ASSETS];
 
-    for (int t = 0; t < 5; t++) {
+    for (int t = 0; t < 7; t++) {
         uint32_t group_count = 0;
         for (uint32_t i = 0; i < count; i++) {
             const char *prefix = type_prefix_for_kind(entries[i].kind);
@@ -302,6 +304,13 @@ static nt_build_asset_kind_t kind_from_identifier(const char *id) {
     }
     if (strstr(id, "ASSET_FONT_") == id) {
         return NT_BUILD_ASSET_FONT;
+    }
+    /* Check ATLAS_REGION before ATLAS (prefix overlap) */
+    if (strstr(id, "ASSET_ATLAS_REGION_") == id) {
+        return NT_BUILD_ASSET_ATLAS_REGION;
+    }
+    if (strstr(id, "ASSET_ATLAS_") == id) {
+        return NT_BUILD_ASSET_ATLAS;
     }
     return NT_BUILD_ASSET_BLOB; /* fallback */
 }

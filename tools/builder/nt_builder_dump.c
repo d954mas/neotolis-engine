@@ -170,7 +170,7 @@ static const char *nt_asset_type_name(uint8_t type) {
     case NT_ASSET_FONT:
         return "FONT";
     case NT_ASSET_ATLAS:
-        return "ATLAS";
+        return "ATLAS"; /* also used for ATLAS_REGION (same asset_type) */
     default:
         return "UNKNOWN";
     }

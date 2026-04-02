@@ -45,13 +45,11 @@ static bool wildcard_match(const char *pattern, const char *str) {
 
 #define GLOB_MAX_MATCHES 1024
 
-typedef void (*glob_callback_fn)(const char *full_path, void *user);
-
 static int glob_strcmp(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
 
 /* Returns false if glob overflow (too many matches). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool glob_iterate(const char *pattern, glob_callback_fn callback, void *user) {
+bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn callback, void *user) {
     /* Split pattern into directory + filename pattern at last separator */
     const char *last_sep = NULL;
     for (const char *p = pattern; *p != '\0'; p++) {
@@ -229,13 +227,13 @@ static void font_glob_callback(const char *full_path, void *user) {
 
 /* --- Public batch API --- */
 
-static void nt_builder_glob_add(NtBuilderContext *ctx, const char *pattern, glob_callback_fn callback, void *type_data) {
+static void nt_builder_glob_add(NtBuilderContext *ctx, const char *pattern, nt_builder_glob_callback_fn callback, void *type_data) {
     GlobCallbackData cb;
     memset(&cb, 0, sizeof(cb));
     cb.ctx = ctx;
     cb.type_data = type_data;
 
-    NT_BUILD_ASSERT(glob_iterate(pattern, callback, &cb) && "glob overflow");
+    NT_BUILD_ASSERT(nt_builder_glob_iterate(pattern, callback, &cb) && "glob overflow");
     NT_BUILD_ASSERT(cb.match_count > 0 && "no files matched pattern");
 }
 

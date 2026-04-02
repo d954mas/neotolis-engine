@@ -15,7 +15,7 @@
 /* Initial data buffer capacity (1 MB, doubles on overflow) */
 #define NT_BUILD_INITIAL_CAPACITY (1024 * 1024)
 
-/* Asset type tag -- 5 unified kinds (source-agnostic) */
+/* Asset type tag -- unified kinds (source-agnostic) */
 typedef enum {
     NT_BUILD_ASSET_MESH = 0,
     NT_BUILD_ASSET_TEXTURE = 1,
@@ -23,6 +23,7 @@ typedef enum {
     NT_BUILD_ASSET_BLOB = 3,
     NT_BUILD_ASSET_FONT = 4,
     NT_BUILD_ASSET_ATLAS = 5,
+    NT_BUILD_ASSET_ATLAS_REGION = 6, /* codegen-only: region entry (no pack data, dedup_original >= 0) */
 } nt_build_asset_kind_t;
 
 /* Type-specific data for shader entries */
@@ -373,6 +374,10 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);
 
 /* File I/O utilities */
 char *nt_builder_read_file(const char *path, uint32_t *out_size);
+
+/* Glob callback type + sorted directory iteration (nt_builder_glob.c) */
+typedef void (*nt_builder_glob_callback_fn)(const char *full_path, void *user);
+bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn callback, void *user);
 
 /* Include resolver (D-11, D-12, D-13) */
 char *nt_builder_resolve_includes(const char *source, uint32_t source_len, const char *source_path, const NtBuilderContext *ctx, uint32_t *out_len);

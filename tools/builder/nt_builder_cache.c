@@ -80,6 +80,7 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
     case NT_BUILD_ASSET_MESH:
     case NT_BUILD_ASSET_BLOB:
     case NT_BUILD_ASSET_ATLAS:
+    case NT_BUILD_ASSET_ATLAS_REGION:
         /* No additional fields -- kind + version sufficient */
         break;
     }
