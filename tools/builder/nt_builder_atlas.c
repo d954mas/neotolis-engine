@@ -283,7 +283,7 @@ static void mask_free(AtlasMask *m) {
 static void mask_set_rect(AtlasMask *m, uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh) {
     for (uint32_t y = ry; y < ry + rh && y < m->height; y++) {
         for (uint32_t x = rx; x < rx + rw && x < m->width; x++) {
-            m->bits[y * m->row_bytes + x / 8] |= (uint8_t)(1u << (x % 8));
+            m->bits[(y * m->row_bytes) + (x / 8)] |= (uint8_t)(1U << (x % 8));
         }
     }
 }
@@ -293,11 +293,11 @@ static void mask_set_rect(AtlasMask *m, uint32_t rx, uint32_t ry, uint32_t rw, u
 static bool mask_test_rect(const AtlasMask *m, uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh, uint32_t *out_skip_x) {
     for (uint32_t y = ry; y < ry + rh && y < m->height; y++) {
         for (uint32_t x = rx; x < rx + rw && x < m->width; x++) {
-            if ((m->bits[y * m->row_bytes + x / 8] >> (x % 8)) & 1) {
+            if ((m->bits[(y * m->row_bytes) + (x / 8)] >> (x % 8)) & 1) {
                 /* Skip-ahead: find the end of the occupied run on this row */
                 if (out_skip_x) {
                     uint32_t skip = x + 1;
-                    while (skip < m->width && ((m->bits[y * m->row_bytes + skip / 8] >> (skip % 8)) & 1)) {
+                    while (skip < m->width && ((m->bits[(y * m->row_bytes) + (skip / 8)] >> (skip % 8)) & 1)) {
                         skip++;
                     }
                     *out_skip_x = skip;
@@ -366,8 +366,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, uint32
     uint32_t max_cell_w = 0;
     uint32_t max_cell_h = 0;
     for (uint32_t i = 0; i < sprite_count; i++) {
-        uint32_t cw = trim_w[i] + 2 * extrude + padding;
-        uint32_t ch = trim_h[i] + 2 * extrude + padding;
+        uint32_t cw = trim_w[i] + (2 * extrude) + padding;
+        uint32_t ch = trim_h[i] + (2 * extrude) + padding;
         total_area += (uint64_t)cw * ch;
         if (cw > max_cell_w) {
             max_cell_w = cw;
@@ -380,7 +380,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, uint32
     double side = sqrt((double)total_area * 1.2);
     uint32_t init_dim = (uint32_t)(side + 0.5);
     /* Clamp to at least the largest cell dimension + margins */
-    uint32_t min_dim = (max_cell_w > max_cell_h ? max_cell_w : max_cell_h) + 2 * margin;
+    uint32_t min_dim = (max_cell_w > max_cell_h ? max_cell_w : max_cell_h) + (2 * margin);
     if (init_dim < min_dim) {
         init_dim = min_dim;
     }
@@ -421,8 +421,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, uint32
         uint32_t th = trim_h[idx];
 
         /* Validate that each sprite can fit within max_size (Pitfall 4) */
-        uint32_t min_cell = tw + 2 * extrude + padding + 2 * margin;
-        uint32_t min_cell_h = th + 2 * extrude + padding + 2 * margin;
+        uint32_t min_cell = tw + (2 * extrude) + padding + (2 * margin);
+        uint32_t min_cell_h = th + (2 * extrude) + padding + (2 * margin);
         NT_BUILD_ASSERT(min_cell <= max_size && min_cell_h <= max_size && "sprite too large for max_size");
 
         /* Try rotations (ATLAS-04) */
@@ -437,15 +437,16 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, uint32
 
         for (uint32_t pi = 0; pi < page_count && !placed; pi++) {
             for (uint32_t r = 0; r < rot_count; r++) {
-                uint32_t cw, ch;
+                uint32_t cw;
+                uint32_t ch;
                 if (r == 0 || r == 2) {
                     /* 0 or 180: no dimension swap */
-                    cw = tw + 2 * extrude + padding;
-                    ch = th + 2 * extrude + padding;
+                    cw = tw + (2 * extrude) + padding;
+                    ch = th + (2 * extrude) + padding;
                 } else {
                     /* 90 or 270: swap dimensions */
-                    cw = th + 2 * extrude + padding;
-                    ch = tw + 2 * extrude + padding;
+                    cw = th + (2 * extrude) + padding;
+                    ch = tw + (2 * extrude) + padding;
                 }
 
                 uint32_t scan_max_x = page_w[pi] - margin;
@@ -492,8 +493,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, uint32
             page_h[new_page] = init_dim;
 
             /* Place on new page at (margin, margin) with no rotation */
-            uint32_t cw = tw + 2 * extrude + padding;
-            uint32_t ch = th + 2 * extrude + padding;
+            uint32_t cw = tw + (2 * extrude) + padding;
+            uint32_t ch = th + (2 * extrude) + padding;
             best_page = new_page;
             best_x = margin;
             best_y = margin;
@@ -598,6 +599,7 @@ static const char *extract_filename(const char *path) {
 
 /* --- Edge extrude: duplicate border pixels outward (ATLAS-11) --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh, uint32_t extrude_count) {
     if (extrude_count == 0) {
         return;
@@ -611,7 +613,7 @@ static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint3
         if (py >= e) {
             uint32_t dst_y = py - e;
             for (uint32_t x = px; x < px + sw && x < page_w; x++) {
-                memcpy(&page[((dst_y * page_w) + x) * 4], &page[((py * page_w) + x) * 4], 4);
+                memcpy(&page[((size_t)dst_y * page_w + x) * 4], &page[((size_t)py * page_w + x) * 4], 4);
             }
         }
         /* Bottom edge: duplicate row py+sh-1 to row py+sh-1+e */
@@ -619,7 +621,7 @@ static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint3
         uint32_t dst_y = src_y + e;
         if (dst_y < page_h) {
             for (uint32_t x = px; x < px + sw && x < page_w; x++) {
-                memcpy(&page[((dst_y * page_w) + x) * 4], &page[((src_y * page_w) + x) * 4], 4);
+                memcpy(&page[((size_t)dst_y * page_w + x) * 4], &page[((size_t)src_y * page_w + x) * 4], 4);
             }
         }
     }
@@ -636,7 +638,7 @@ static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint3
         if (px >= e) {
             uint32_t dst_x = px - e;
             for (uint32_t y = y_start; y < y_end; y++) {
-                memcpy(&page[((y * page_w) + dst_x) * 4], &page[((y * page_w) + px) * 4], 4);
+                memcpy(&page[((size_t)y * page_w + dst_x) * 4], &page[((size_t)y * page_w + px) * 4], 4);
             }
         }
         /* Right edge */
@@ -644,7 +646,7 @@ static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint3
         uint32_t dst_x = src_x + e;
         if (dst_x < page_w) {
             for (uint32_t y = y_start; y < y_end; y++) {
-                memcpy(&page[((y * page_w) + dst_x) * 4], &page[((y * page_w) + src_x) * 4], 4);
+                memcpy(&page[((size_t)y * page_w + dst_x) * 4], &page[((size_t)y * page_w + src_x) * 4], 4);
             }
         }
     }
@@ -653,6 +655,7 @@ static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint3
 
 /* --- Debug PNG: draw 2px outline around region (D-09, D-10) --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void debug_draw_rect_outline(uint8_t *page, uint32_t page_w, uint32_t page_h, uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh) {
     /* Bright magenta outline: 255,0,255,255 */
     static const uint8_t color[4] = {255, 0, 255, 255};
@@ -660,27 +663,27 @@ static void debug_draw_rect_outline(uint8_t *page, uint32_t page_w, uint32_t pag
         /* Top edge */
         if (ry + t < page_h) {
             for (uint32_t x = rx; x < rx + rw && x < page_w; x++) {
-                memcpy(&page[(((ry + t) * page_w) + x) * 4], color, 4);
+                memcpy(&page[((size_t)(ry + t) * page_w + x) * 4], color, 4);
             }
         }
         /* Bottom edge */
         uint32_t by = ry + rh - 1 - t;
         if (by < page_h && by >= ry) {
             for (uint32_t x = rx; x < rx + rw && x < page_w; x++) {
-                memcpy(&page[((by * page_w) + x) * 4], color, 4);
+                memcpy(&page[((size_t)by * page_w + x) * 4], color, 4);
             }
         }
         /* Left edge */
         if (rx + t < page_w) {
             for (uint32_t y = ry; y < ry + rh && y < page_h; y++) {
-                memcpy(&page[((y * page_w) + rx + t) * 4], color, 4);
+                memcpy(&page[((size_t)y * page_w + rx + t) * 4], color, 4);
             }
         }
         /* Right edge */
         uint32_t bx = rx + rw - 1 - t;
         if (bx < page_w && bx >= rx) {
             for (uint32_t y = ry; y < ry + rh && y < page_h; y++) {
-                memcpy(&page[((y * page_w) + bx) * 4], color, 4);
+                memcpy(&page[((size_t)y * page_w + bx) * 4], color, 4);
             }
         }
     }
@@ -696,8 +699,9 @@ static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rg
      * For rotation 3 (270CW): source(x,y) -> dest(y, trim_w-1-x) */
     for (uint32_t sy = 0; sy < trim_h; sy++) {
         for (uint32_t sx = 0; sx < trim_w; sx++) {
-            const uint8_t *src = &sprite_rgba[(((trim_y + sy) * sprite_w) + trim_x + sx) * 4];
-            uint32_t dx, dy;
+            const uint8_t *src = &sprite_rgba[((size_t)(trim_y + sy) * sprite_w + trim_x + sx) * 4];
+            uint32_t dx;
+            uint32_t dy;
             switch (rotation) {
             case 0:
                 dx = dest_x + sx;
@@ -720,13 +724,14 @@ static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rg
                 dy = dest_y + sy;
                 break;
             }
-            memcpy(&page[((dy * page_w) + dx) * 4], src, 4);
+            memcpy(&page[((size_t)dy * page_w + dx) * 4], src, 4);
         }
     }
 }
 
 /* --- Atlas API --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_atlas_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && "begin_atlas: ctx is NULL");
     NT_BUILD_ASSERT(name && "begin_atlas: name is NULL");
@@ -760,6 +765,7 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
     ctx->active_atlas = state;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const char *name_override) {
     NT_BUILD_ASSERT(ctx && path && "atlas_add: invalid args");
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add: no active atlas (call begin_atlas first)");
@@ -777,7 +783,9 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const char *n
     free(resolved_path);
 
     /* Decode PNG via stb_image (force RGBA) */
-    int w = 0, h = 0, channels = 0;
+    int w = 0;
+    int h = 0;
+    int channels = 0;
     uint8_t *pixels = stbi_load_from_memory(file_data, (int)file_size, &w, &h, &channels, 4);
     free(file_data);
     NT_BUILD_ASSERT(pixels && "atlas_add: stbi_load_from_memory failed");
@@ -805,6 +813,7 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const char *n
     sprite->decoded_hash = decoded_hash;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *name) {
     NT_BUILD_ASSERT(ctx && rgba_pixels && "atlas_add_raw: invalid args");
     NT_BUILD_ASSERT(name && "atlas_add_raw: name is required for raw pixels (D-07)");
@@ -851,6 +860,7 @@ static void atlas_glob_callback(const char *full_path, void *user) {
     nt_builder_atlas_add(d->ctx, full_path, NULL);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern) {
     NT_BUILD_ASSERT(ctx && pattern && "atlas_add_glob: invalid args");
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_glob: no active atlas");
@@ -964,21 +974,21 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         if (opts->polygon_mode) {
             /* Extract boundary pixels from alpha mask */
             uint32_t pt_count = 0;
-            Point2D *pts = (Point2D *)malloc(tw * th * sizeof(Point2D)); /* worst case */
+            Point2D *pts = (Point2D *)malloc((size_t)tw * th * sizeof(Point2D)); /* worst case */
             NT_BUILD_ASSERT(pts && "end_atlas: alloc failed");
 
             for (uint32_t y = 0; y < th; y++) {
                 for (uint32_t x = 0; x < tw; x++) {
-                    uint8_t alpha = sprites[idx].rgba[(((trim_y[idx] + y) * sprites[idx].width) + trim_x[idx] + x) * 4 + 3];
+                    uint8_t alpha = sprites[idx].rgba[(((size_t)(trim_y[idx] + y) * sprites[idx].width + trim_x[idx] + x) * 4) + 3];
                     if (alpha >= opts->alpha_threshold) {
                         /* Check if this is a boundary pixel */
                         bool is_boundary = (x == 0 || y == 0 || x == tw - 1 || y == th - 1);
                         if (!is_boundary) {
                             /* Check 4 neighbors */
-                            uint8_t left = sprites[idx].rgba[(((trim_y[idx] + y) * sprites[idx].width) + trim_x[idx] + x - 1) * 4 + 3];
-                            uint8_t right = sprites[idx].rgba[(((trim_y[idx] + y) * sprites[idx].width) + trim_x[idx] + x + 1) * 4 + 3];
-                            uint8_t up = sprites[idx].rgba[(((trim_y[idx] + y - 1) * sprites[idx].width) + trim_x[idx] + x) * 4 + 3];
-                            uint8_t down = sprites[idx].rgba[(((trim_y[idx] + y + 1) * sprites[idx].width) + trim_x[idx] + x) * 4 + 3];
+                            uint8_t left = sprites[idx].rgba[(((size_t)(trim_y[idx] + y) * sprites[idx].width + trim_x[idx] + x - 1) * 4) + 3];
+                            uint8_t right = sprites[idx].rgba[(((size_t)(trim_y[idx] + y) * sprites[idx].width + trim_x[idx] + x + 1) * 4) + 3];
+                            uint8_t up = sprites[idx].rgba[(((size_t)(trim_y[idx] + y - 1) * sprites[idx].width + trim_x[idx] + x) * 4) + 3];
+                            uint8_t down = sprites[idx].rgba[(((size_t)(trim_y[idx] + y + 1) * sprites[idx].width + trim_x[idx] + x) * 4) + 3];
                             is_boundary = (left < opts->alpha_threshold || right < opts->alpha_threshold || up < opts->alpha_threshold || down < opts->alpha_threshold);
                         }
                         if (is_boundary) {
@@ -1002,7 +1012,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                 vertex_counts[idx] = 4;
             } else {
                 /* Compute convex hull */
-                Point2D *hull = (Point2D *)malloc(pt_count * 2 * sizeof(Point2D));
+                Point2D *hull = (Point2D *)malloc((size_t)pt_count * 2 * sizeof(Point2D));
                 NT_BUILD_ASSERT(hull && "end_atlas: alloc failed");
                 uint32_t hull_count = convex_hull(pts, pt_count, hull);
                 free(pts);
@@ -1039,35 +1049,11 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     // #endregion
 
     // #region Step 4: Tile packing
+    // NOLINTNEXTLINE(clang-analyzer-optin.portability.UnixAPI)
     AtlasPlacement *placements = (AtlasPlacement *)malloc(unique_count * sizeof(AtlasPlacement));
     NT_BUILD_ASSERT(placements && "end_atlas: alloc failed");
 
     /* Build trim arrays for unique sprites only */
-    uint32_t *unique_trim_w = (uint32_t *)malloc(sprite_count * sizeof(uint32_t));
-    uint32_t *unique_trim_h = (uint32_t *)malloc(sprite_count * sizeof(uint32_t));
-    NT_BUILD_ASSERT(unique_trim_w && unique_trim_h && "end_atlas: alloc failed");
-    memcpy(unique_trim_w, trim_w, sprite_count * sizeof(uint32_t));
-    memcpy(unique_trim_h, trim_h, sprite_count * sizeof(uint32_t));
-
-    uint32_t page_count = 0;
-    uint32_t page_w[ATLAS_MAX_PAGES];
-    uint32_t page_h[ATLAS_MAX_PAGES];
-    /* tile_pack takes all sprites but only packs unique ones -- we pass unique trim data */
-    /* Actually tile_pack takes arrays indexed by sprite_index, so pass full arrays */
-    uint32_t placement_count = tile_pack(trim_w, trim_h, unique_count, opts, placements, &page_count, page_w, page_h);
-
-    /* Remap placement sprite_index from unique_indices order to actual sprite indices */
-    /* tile_pack's sorted order uses indices 0..unique_count-1, referencing into the trim arrays via sorted[si].index.
-     * The placement sprite_index is already the correct index into the original arrays since tile_pack
-     * operates on the trim_w/trim_h arrays we provided (full sprite-count sized arrays).
-     * However we only passed unique_count sprites... we need to remap. */
-    /* Actually let me reconsider: we passed trim_w/trim_h of size sprite_count but only unique_count items.
-     * The tile_pack uses sorted[si].index as the index into trim_w/trim_h. So we need to pass
-     * only the unique sprite trim data or remap. Let me create proper arrays for unique sprites. */
-
-    /* Re-pack with properly indexed arrays for unique sprites */
-    free(unique_trim_w);
-    free(unique_trim_h);
     uint32_t *u_trim_w = (uint32_t *)malloc(unique_count * sizeof(uint32_t));
     uint32_t *u_trim_h = (uint32_t *)malloc(unique_count * sizeof(uint32_t));
     NT_BUILD_ASSERT(u_trim_w && u_trim_h && "end_atlas: alloc failed");
@@ -1076,7 +1062,10 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         u_trim_h[i] = trim_h[unique_indices[i]];
     }
 
-    placement_count = tile_pack(u_trim_w, u_trim_h, unique_count, opts, placements, &page_count, page_w, page_h);
+    uint32_t page_count = 0;
+    uint32_t page_w[ATLAS_MAX_PAGES];
+    uint32_t page_h[ATLAS_MAX_PAGES];
+    uint32_t placement_count = tile_pack(u_trim_w, u_trim_h, unique_count, opts, placements, &page_count, page_w, page_h);
 
     /* Fill trim offsets and remap sprite_index back to original */
     for (uint32_t i = 0; i < placement_count; i++) {
@@ -1173,9 +1162,9 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     }
 
     /* Serialize blob: header + texture_resource_ids + regions + vertices */
-    uint32_t regions_offset = (uint32_t)sizeof(NtAtlasHeader) + page_count * (uint32_t)sizeof(uint64_t);
-    uint32_t vertex_offset = regions_offset + sprite_count * (uint32_t)sizeof(NtAtlasRegion);
-    uint32_t blob_size = vertex_offset + total_vertex_count * (uint32_t)sizeof(NtAtlasVertex);
+    uint32_t regions_offset = (uint32_t)sizeof(NtAtlasHeader) + (page_count * (uint32_t)sizeof(uint64_t));
+    uint32_t vertex_offset = regions_offset + (sprite_count * (uint32_t)sizeof(NtAtlasRegion));
+    uint32_t blob_size = vertex_offset + (total_vertex_count * (uint32_t)sizeof(NtAtlasVertex));
     uint8_t *blob = (uint8_t *)calloc(1, blob_size);
     NT_BUILD_ASSERT(blob && "end_atlas: blob alloc failed");
 
@@ -1240,7 +1229,8 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
              * For rotation 1 (90CW): atlas_px = inner_x + (trim_h - 1 - ly), atlas_py = inner_y + lx
              * For rotation 2 (180): atlas_px = inner_x + (trim_w - 1 - lx), atlas_py = inner_y + (trim_h - 1 - ly)
              * For rotation 3 (270CW): atlas_px = inner_x + ly, atlas_py = inner_y + (trim_w - 1 - lx) */
-            float atlas_px, atlas_py;
+            float atlas_px;
+            float atlas_py;
             switch (pl->rotation) {
             case 0:
                 atlas_px = (float)inner_x + (float)lx;
@@ -1264,8 +1254,8 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                 break;
             }
 
-            vtx->atlas_u = (uint16_t)((atlas_px * 65535.0F) / (float)atlas_w + 0.5F);
-            vtx->atlas_v = (uint16_t)((atlas_py * 65535.0F) / (float)atlas_h + 0.5F);
+            vtx->atlas_u = (uint16_t)(((atlas_px * 65535.0F) / (float)atlas_w) + 0.5F);
+            vtx->atlas_v = (uint16_t)(((atlas_py * 65535.0F) / (float)atlas_h) + 0.5F);
         }
     }
 
@@ -1315,6 +1305,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         /* Create a minimal entry with the atlas blob as decoded_data (size 0 signals codegen-only) */
         /* Actually: we set dedup_original on the entry manually after add_entry. */
         /* We need to create a small placeholder decoded_data for the entry system. */
+        // NOLINTNEXTLINE(clang-analyzer-unix.MallocSizeof)
         uint8_t *placeholder = (uint8_t *)calloc(1, sizeof(uint64_t));
         NT_BUILD_ASSERT(placeholder && "end_atlas: alloc failed");
         memcpy(placeholder, &region_hash, sizeof(uint64_t));
@@ -1352,7 +1343,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     free(dedup_map);
     free(unique_indices);
     free(vertex_counts);
-    free(hull_vertices);
+    free((void *)hull_vertices);
     free(placements);
     free(placement_lookup);
 
@@ -1360,7 +1351,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     for (uint32_t p = 0; p < page_count; p++) {
         free(page_pixels[p]);
     }
-    free(page_pixels);
+    free((void *)page_pixels);
 
     /* Free atlas state */
     free(state->sprites);
