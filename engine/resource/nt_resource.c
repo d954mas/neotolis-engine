@@ -500,6 +500,7 @@ void nt_resource_step(void) {
         }
         uint16_t prev_idx = slot->prev_resolve_asset_idx;
         uint16_t curr_idx = slot->resolve_asset_idx;
+        /* idx < asset_hwm = valid asset (real winner), idx >= asset_hwm = no real winner (UINT16_MAX sentinel) */
         if (curr_idx < s_resource.asset_hwm && (curr_idx != prev_idx || slot->runtime_handle != slot->prev_runtime_handle)) {
             /* Real winner appeared, changed, or re-activated with new handle -- fire on_resolve */
             uint8_t atype = slot->asset_type;
