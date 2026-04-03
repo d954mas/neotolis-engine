@@ -250,13 +250,15 @@ typedef struct {
     uint8_t rotation;      /* 0=none, 1=90CW, 2=180, 3=270CW */
 } AtlasPlacement;
 
-/* Binary mask for collision detection */
+/* Tile grid: 1 byte per tile cell (0=empty, non-zero=occupied).
+ * All packing operates at tile resolution for speed.
+ * tile_size (e.g. 8) means each cell covers tile_size x tile_size pixels. */
 typedef struct {
-    uint8_t *bits;      /* 1 bit per pixel, row-major */
-    uint32_t width;     /* atlas page width */
-    uint32_t height;    /* atlas page height */
-    uint32_t row_bytes; /* bytes per row: (width + 7) / 8 */
-} AtlasMask;
+    uint8_t *cells;     /* 1 byte per tile, row-major */
+    uint32_t tw;        /* grid width in tiles */
+    uint32_t th;        /* grid height in tiles */
+    uint32_t tile_size; /* pixels per tile side */
+} TileGrid;
 
 /* Sort entry for area-descending sort (ATLAS-03) */
 typedef struct {
@@ -264,54 +266,316 @@ typedef struct {
     uint32_t area;  /* trimmed_w * trimmed_h */
 } AreaSortEntry;
 
-/* --- Mask functions --- */
+/* --- Tile grid functions --- */
 
-static AtlasMask mask_create(uint32_t w, uint32_t h) {
-    AtlasMask m;
-    m.width = w;
-    m.height = h;
-    m.row_bytes = (w + 7) / 8;
-    size_t total = (size_t)m.row_bytes * h;
-    m.bits = (uint8_t *)calloc(1, total);
-    NT_BUILD_ASSERT(m.bits && "mask_create: alloc failed");
-    return m;
+static TileGrid tgrid_create(uint32_t tw, uint32_t th, uint32_t tile_size) {
+    TileGrid g;
+    g.tw = tw;
+    g.th = th;
+    g.tile_size = tile_size;
+    g.cells = (uint8_t *)calloc((size_t)tw * th, 1);
+    NT_BUILD_ASSERT(g.cells && "tgrid_create: alloc failed");
+    return g;
 }
 
-static void mask_free(AtlasMask *m) {
-    free(m->bits);
-    m->bits = NULL;
-    m->width = 0;
-    m->height = 0;
-    m->row_bytes = 0;
+static void tgrid_free(TileGrid *g) {
+    free(g->cells);
+    g->cells = NULL;
+    g->tw = 0;
+    g->th = 0;
 }
 
-static void mask_set_rect(AtlasMask *m, uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh) {
-    for (uint32_t y = ry; y < ry + rh && y < m->height; y++) {
-        for (uint32_t x = rx; x < rx + rw && x < m->width; x++) {
-            m->bits[(y * m->row_bytes) + (x / 8)] |= (uint8_t)(1U << (x % 8));
+static inline uint8_t tgrid_get(const TileGrid *g, uint32_t tx, uint32_t ty) { return g->cells[(ty * g->tw) + tx]; }
+
+static inline void tgrid_set(TileGrid *g, uint32_t tx, uint32_t ty) { g->cells[(ty * g->tw) + tx] = 1; }
+
+/* --- Polygon inflation: expand convex hull outward by N pixels --- */
+
+/* Offset each edge outward along its normal, recompute vertices as intersections. */
+static uint32_t polygon_inflate(const Point2D *hull, uint32_t n, float amount, Point2D *out) {
+    if (n < 3) {
+        memcpy(out, hull, n * sizeof(Point2D));
+        return n;
+    }
+
+    /* Compute offset edges (each stored as a point + direction on the offset line) */
+    float *ox = (float *)malloc(n * sizeof(float) * 4); /* [ax, ay, bx, by] per edge */
+    NT_BUILD_ASSERT(ox && "polygon_inflate: alloc failed");
+
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t j = (i + 1) % n;
+        float dx = (float)(hull[j].x - hull[i].x);
+        float dy = (float)(hull[j].y - hull[i].y);
+        float len = sqrtf((dx * dx) + (dy * dy));
+        if (len < 1e-6F) {
+            len = 1.0F;
+        }
+        /* Outward normal (CCW polygon: rotate edge direction CW 90) */
+        float nx = dy / len;
+        float ny = -dx / len;
+        ox[(i * 4) + 0] = (float)hull[i].x + (nx * amount);
+        ox[(i * 4) + 1] = (float)hull[i].y + (ny * amount);
+        ox[(i * 4) + 2] = (float)hull[j].x + (nx * amount);
+        ox[(i * 4) + 3] = (float)hull[j].y + (ny * amount);
+    }
+
+    /* Intersect adjacent offset edges to get inflated vertices */
+    uint32_t out_count = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t j = (i + 1) % n;
+        /* Line i: from (ax0,ay0) to (bx0,by0), line j: from (ax1,ay1) to (bx1,by1) */
+        float ax0 = ox[(i * 4) + 0];
+        float ay0 = ox[(i * 4) + 1];
+        float bx0 = ox[(i * 4) + 2];
+        float by0 = ox[(i * 4) + 3];
+        float ax1 = ox[(j * 4) + 0];
+        float ay1 = ox[(j * 4) + 1];
+        float bx1 = ox[(j * 4) + 2];
+        float by1 = ox[(j * 4) + 3];
+
+        float d0x = bx0 - ax0;
+        float d0y = by0 - ay0;
+        float d1x = bx1 - ax1;
+        float d1y = by1 - ay1;
+
+        float denom = (d0x * d1y) - (d0y * d1x);
+        if (fabsf(denom) < 1e-6F) {
+            /* Parallel edges: use midpoint of the two offset endpoints */
+            out[out_count].x = (int32_t)roundf((bx0 + ax1) * 0.5F);
+            out[out_count].y = (int32_t)roundf((by0 + ay1) * 0.5F);
+        } else {
+            float t = (((ax1 - ax0) * d1y) - ((ay1 - ay0) * d1x)) / denom;
+            out[out_count].x = (int32_t)roundf(ax0 + (t * d0x));
+            out[out_count].y = (int32_t)roundf(ay0 + (t * d0y));
+        }
+        out_count++;
+    }
+
+    free(ox);
+    return out_count;
+}
+
+/* Rotate polygon vertices by 0/90/180/270. tw/th = original trimmed sprite dims. */
+static void polygon_rotate(const Point2D *src, uint32_t n, uint8_t rotation, int32_t tw, int32_t th, Point2D *out) {
+    for (uint32_t i = 0; i < n; i++) {
+        switch (rotation) {
+        case 1: /* 90 CW */
+            out[i].x = th - 1 - src[i].y;
+            out[i].y = src[i].x;
+            break;
+        case 2: /* 180 */
+            out[i].x = tw - 1 - src[i].x;
+            out[i].y = th - 1 - src[i].y;
+            break;
+        case 3: /* 270 CW */
+            out[i].x = src[i].y;
+            out[i].y = tw - 1 - src[i].x;
+            break;
+        default: /* 0 */
+            out[i] = src[i];
+            break;
         }
     }
 }
 
-/* Test if any bit in rectangle is set. Returns true on collision.
- * out_skip_x: if collision found, set to the x position after the colliding bit (skip-ahead, ATLAS-02). */
-static bool mask_test_rect(const AtlasMask *m, uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh, uint32_t *out_skip_x) {
-    for (uint32_t y = ry; y < ry + rh && y < m->height; y++) {
-        for (uint32_t x = rx; x < rx + rw && x < m->width; x++) {
-            if ((m->bits[(y * m->row_bytes) + (x / 8)] >> (x % 8)) & 1) {
-                /* Skip-ahead: find the end of the occupied run on this row */
-                if (out_skip_x) {
-                    uint32_t skip = x + 1;
-                    while (skip < m->width && ((m->bits[(y * m->row_bytes) + (skip / 8)] >> (skip % 8)) & 1)) {
+/* Default tile size if opts->tile_size is 0 */
+#define TILE_SIZE_DEFAULT 8
+
+/* --- Triangle vs AABB overlap test (Separating Axis Theorem) --- */
+
+/* Project triangle and AABB onto axis, return true if projections are separated. */
+static bool sat_separated(const Point2D tri[3], int32_t rx, int32_t ry, int32_t rw, int32_t rh, int32_t ax, int32_t ay) {
+    /* Project triangle vertices onto axis */
+    int64_t t0 = ((int64_t)tri[0].x * ax) + ((int64_t)tri[0].y * ay);
+    int64_t t1 = ((int64_t)tri[1].x * ax) + ((int64_t)tri[1].y * ay);
+    int64_t t2 = ((int64_t)tri[2].x * ax) + ((int64_t)tri[2].y * ay);
+    int64_t tri_min = t0;
+    int64_t tri_max = t0;
+    if (t1 < tri_min) {
+        tri_min = t1;
+    }
+    if (t1 > tri_max) {
+        tri_max = t1;
+    }
+    if (t2 < tri_min) {
+        tri_min = t2;
+    }
+    if (t2 > tri_max) {
+        tri_max = t2;
+    }
+
+    /* Project AABB corners onto axis */
+    int32_t cx[4] = {rx, rx + rw, rx + rw, rx};
+    int32_t cy[4] = {ry, ry, ry + rh, ry + rh};
+    int64_t r0 = ((int64_t)cx[0] * ax) + ((int64_t)cy[0] * ay);
+    int64_t rect_min = r0;
+    int64_t rect_max = r0;
+    for (int k = 1; k < 4; k++) {
+        int64_t rp = ((int64_t)cx[k] * ax) + ((int64_t)cy[k] * ay);
+        if (rp < rect_min) {
+            rect_min = rp;
+        }
+        if (rp > rect_max) {
+            rect_max = rp;
+        }
+    }
+
+    return tri_max < rect_min || rect_max < tri_min;
+}
+
+/* Test if triangle (3 Point2D) overlaps axis-aligned rect [rx, rx+rw) x [ry, ry+rh).
+ * Uses Separating Axis Theorem: 3 triangle edge normals + 2 AABB axes. */
+static bool triangle_overlaps_rect(const Point2D tri[3], int32_t rx, int32_t ry, int32_t rw, int32_t rh) {
+    // #region AABB axes (X and Y)
+    if (sat_separated(tri, rx, ry, rw, rh, 1, 0)) {
+        return false;
+    }
+    if (sat_separated(tri, rx, ry, rw, rh, 0, 1)) {
+        return false;
+    }
+    // #endregion
+
+    // #region Triangle edge normals
+    for (int i = 0; i < 3; i++) {
+        int j = (i + 1) % 3;
+        int32_t ex = tri[j].x - tri[i].x;
+        int32_t ey = tri[j].y - tri[i].y;
+        /* Edge normal (perpendicular) */
+        int32_t nx = -ey;
+        int32_t ny = ex;
+        if (sat_separated(tri, rx, ry, rw, rh, nx, ny)) {
+            return false;
+        }
+    }
+    // #endregion
+
+    return true;
+}
+
+/* --- Rasterize convex hull polygon onto tile grid via fan triangulation --- */
+
+/* Create tile grid from inflated polygon. The polygon vertices are in pixel
+ * coordinates. The grid covers the polygon bounding box in tile units.
+ * Origin offset (in tiles) returned via out_ox, out_oy. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static TileGrid tgrid_from_polygon(const Point2D *hull, uint32_t hull_n, uint32_t sprite_tw, uint32_t sprite_th, uint32_t tile_size, int32_t *out_ox, int32_t *out_oy) {
+    (void)sprite_tw;
+    (void)sprite_th;
+
+    /* Compute polygon bounding box in pixels */
+    int32_t px_min = hull[0].x;
+    int32_t px_max = hull[0].x;
+    int32_t py_min = hull[0].y;
+    int32_t py_max = hull[0].y;
+    for (uint32_t i = 1; i < hull_n; i++) {
+        if (hull[i].x < px_min) {
+            px_min = hull[i].x;
+        }
+        if (hull[i].x > px_max) {
+            px_max = hull[i].x;
+        }
+        if (hull[i].y < py_min) {
+            py_min = hull[i].y;
+        }
+        if (hull[i].y > py_max) {
+            py_max = hull[i].y;
+        }
+    }
+
+    /* Convert bounding box to tile coordinates (floor for min, ceil for max) */
+    int32_t ts = (int32_t)tile_size;
+    int32_t tile_x0 = (px_min >= 0) ? (px_min / ts) : (((px_min - ts + 1) / ts));
+    int32_t tile_y0 = (py_min >= 0) ? (py_min / ts) : (((py_min - ts + 1) / ts));
+    int32_t tile_x1 = (px_max >= 0) ? ((px_max + ts) / ts) : ((px_max + 1) / ts);
+    int32_t tile_y1 = (py_max >= 0) ? ((py_max + ts) / ts) : ((py_max + 1) / ts);
+
+    uint32_t tw = (uint32_t)(tile_x1 - tile_x0);
+    uint32_t th = (uint32_t)(tile_y1 - tile_y0);
+    if (tw == 0) {
+        tw = 1;
+    }
+    if (th == 0) {
+        th = 1;
+    }
+
+    *out_ox = tile_x0;
+    *out_oy = tile_y0;
+
+    TileGrid g = tgrid_create(tw, th, tile_size);
+
+    /* Fan-triangulate the polygon from vertex 0 */
+    uint16_t indices[96]; /* max 32 vertices -> 30 tris -> 90 indices */
+    uint32_t tri_count = fan_triangulate(hull_n, indices);
+
+    /* For each tile cell, test if any triangle overlaps the tile rect */
+    for (uint32_t ty = 0; ty < th; ty++) {
+        for (uint32_t tx = 0; tx < tw; tx++) {
+            int32_t rx = (tile_x0 + (int32_t)tx) * ts;
+            int32_t ry = (tile_y0 + (int32_t)ty) * ts;
+            for (uint32_t t = 0; t < tri_count; t++) {
+                Point2D tri[3] = {hull[indices[(t * 3) + 0]], hull[indices[(t * 3) + 1]], hull[indices[(t * 3) + 2]]};
+                if (triangle_overlaps_rect(tri, rx, ry, ts, ts)) {
+                    tgrid_set(&g, tx, ty);
+                    break;
+                }
+            }
+        }
+    }
+
+    return g;
+}
+
+/* --- Tile grid collision test --- */
+
+/* Test if placing sprite grid at (tx,ty) on atlas grid collides.
+ * Sprite grid origin offset is (ox,oy) in tiles.
+ * out_skip: how many tile columns to skip ahead on collision. */
+static bool tgrid_test(const TileGrid *atlas, const TileGrid *sprite, int32_t tx, int32_t ty, int32_t ox, int32_t oy, uint32_t *out_skip) {
+    for (uint32_t sy = 0; sy < sprite->th; sy++) {
+        int32_t ay = ty + oy + (int32_t)sy;
+        if (ay < 0 || (uint32_t)ay >= atlas->th) {
+            continue;
+        }
+        for (uint32_t sx = 0; sx < sprite->tw; sx++) {
+            int32_t ax = tx + ox + (int32_t)sx;
+            if (ax < 0 || (uint32_t)ax >= atlas->tw) {
+                continue;
+            }
+            if (tgrid_get(sprite, sx, sy) && tgrid_get(atlas, (uint32_t)ax, (uint32_t)ay)) {
+                /* Collision — compute skip: advance past occupied atlas tiles */
+                if (out_skip) {
+                    uint32_t skip = (uint32_t)ax + 1;
+                    while (skip < atlas->tw && tgrid_get(atlas, skip, (uint32_t)ay)) {
                         skip++;
                     }
-                    *out_skip_x = skip;
+                    *out_skip = skip - (uint32_t)tx;
                 }
                 return true;
             }
         }
     }
     return false;
+}
+
+/* --- Tile grid stamp --- */
+
+/* Stamp sprite grid onto atlas grid at (tx,ty) with origin offset (ox,oy). */
+static void tgrid_stamp(TileGrid *atlas, const TileGrid *sprite, int32_t tx, int32_t ty, int32_t ox, int32_t oy) {
+    for (uint32_t sy = 0; sy < sprite->th; sy++) {
+        int32_t ay = ty + oy + (int32_t)sy;
+        if (ay < 0 || (uint32_t)ay >= atlas->th) {
+            continue;
+        }
+        for (uint32_t sx = 0; sx < sprite->tw; sx++) {
+            int32_t ax = tx + ox + (int32_t)sx;
+            if (ax < 0 || (uint32_t)ax >= atlas->tw) {
+                continue;
+            }
+            if (tgrid_get(sprite, sx, sy)) {
+                tgrid_set(atlas, (uint32_t)ax, (uint32_t)ay);
+            }
+        }
+    }
 }
 
 /* --- Area-descending sort comparator (ATLAS-03) --- */
@@ -344,17 +608,32 @@ static uint32_t next_pot(uint32_t v) {
     return v + 1;
 }
 
-/* --- Tile packer (ATLAS-02, ATLAS-03, ATLAS-04, ATLAS-18) --- */
+/* --- Tile packer with tile-grid collision (ATLAS-02, ATLAS-03, ATLAS-04, ATLAS-18) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, uint32_t sprite_count, const nt_atlas_opts_t *opts, AtlasPlacement *out_placements, uint32_t *out_page_count,
-                          uint32_t *out_page_w, uint32_t *out_page_h) {
+static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts,
+                          AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h) {
     uint32_t max_size = opts->max_size;
-    uint32_t padding = opts->padding;
     uint32_t margin = opts->margin;
     uint32_t extrude = opts->extrude;
+    uint32_t padding = opts->padding;
     bool allow_rotate = opts->allow_rotate;
     bool pot = opts->power_of_two;
+    float dilate = (float)extrude + ((float)padding * 0.5F);
+    uint32_t ts = opts->tile_size ? opts->tile_size : TILE_SIZE_DEFAULT;
+
+    // #region Build per-sprite inflated polygon tile grids
+    TileGrid *sprite_grids = (TileGrid *)calloc(sprite_count, sizeof(TileGrid));
+    int32_t *grid_ox = (int32_t *)calloc(sprite_count, sizeof(int32_t));
+    int32_t *grid_oy = (int32_t *)calloc(sprite_count, sizeof(int32_t));
+    NT_BUILD_ASSERT(sprite_grids && grid_ox && grid_oy && "tile_pack: alloc failed");
+
+    for (uint32_t i = 0; i < sprite_count; i++) {
+        Point2D inf_poly[32];
+        uint32_t inf_n = polygon_inflate(hull_verts[i], hull_counts[i], dilate, inf_poly);
+        sprite_grids[i] = tgrid_from_polygon(inf_poly, inf_n, trim_w[i], trim_h[i], ts, &grid_ox[i], &grid_oy[i]);
+    }
+    // #endregion
 
     // #region Sort sprites by area descending (ATLAS-03)
     AreaSortEntry *sorted = (AreaSortEntry *)malloc(sprite_count * sizeof(AreaSortEntry));
@@ -371,20 +650,18 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, uint32
     uint32_t max_cell_w = 0;
     uint32_t max_cell_h = 0;
     for (uint32_t i = 0; i < sprite_count; i++) {
-        uint32_t cw = trim_w[i] + (2 * extrude) + padding;
-        uint32_t ch = trim_h[i] + (2 * extrude) + padding;
-        total_area += (uint64_t)cw * ch;
-        if (cw > max_cell_w) {
-            max_cell_w = cw;
+        uint32_t mw = sprite_grids[i].tw * ts;
+        uint32_t mh = sprite_grids[i].th * ts;
+        total_area += (uint64_t)mw * mh;
+        if (mw > max_cell_w) {
+            max_cell_w = mw;
         }
-        if (ch > max_cell_h) {
-            max_cell_h = ch;
+        if (mh > max_cell_h) {
+            max_cell_h = mh;
         }
     }
-    /* Headroom factor 1.2 */
     double side = sqrt((double)total_area * 1.2);
     uint32_t init_dim = (uint32_t)(side + 0.5);
-    /* Clamp to at least the largest cell dimension + margins */
     uint32_t min_dim = (max_cell_w > max_cell_h ? max_cell_w : max_cell_h) + (2 * margin);
     if (init_dim < min_dim) {
         init_dim = min_dim;
@@ -400,85 +677,85 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, uint32
     }
     // #endregion
 
-    // #region Pack sprites onto pages
-    AtlasMask masks[ATLAS_MAX_PAGES];
+    // #region Pack sprites onto pages using tile-grid collision
+    uint32_t atlas_tw = (init_dim + ts - 1) / ts;
+    uint32_t atlas_th = atlas_tw;
+    TileGrid page_grids[ATLAS_MAX_PAGES];
     uint32_t page_count = 1;
     uint32_t page_w[ATLAS_MAX_PAGES];
     uint32_t page_h[ATLAS_MAX_PAGES];
-    /* Track bounding box per page for final sizing */
     uint32_t page_max_x[ATLAS_MAX_PAGES];
     uint32_t page_max_y[ATLAS_MAX_PAGES];
     memset(page_max_x, 0, sizeof(page_max_x));
     memset(page_max_y, 0, sizeof(page_max_y));
 
-    /* Initialize page dimensions to initial estimate */
     for (uint32_t p = 0; p < ATLAS_MAX_PAGES; p++) {
         page_w[p] = init_dim;
         page_h[p] = init_dim;
     }
-    masks[0] = mask_create(init_dim, init_dim);
+    page_grids[0] = tgrid_create(atlas_tw, atlas_th, ts);
 
+    uint32_t margin_tiles = (margin + ts - 1) / ts;
     uint32_t placement_count = 0;
 
     for (uint32_t si = 0; si < sprite_count; si++) {
         uint32_t idx = sorted[si].index;
-        uint32_t tw = trim_w[idx];
-        uint32_t th = trim_h[idx];
+        TileGrid *base_sg = &sprite_grids[idx];
+        int32_t base_ox = grid_ox[idx];
+        int32_t base_oy = grid_oy[idx];
 
-        /* Validate that each sprite can fit within max_size (Pitfall 4) */
-        uint32_t min_cell = tw + (2 * extrude) + padding + (2 * margin);
-        uint32_t min_cell_h = th + (2 * extrude) + padding + (2 * margin);
-        NT_BUILD_ASSERT(min_cell <= max_size && min_cell_h <= max_size && "sprite too large for max_size");
-
-        /* Try rotations (ATLAS-04) */
+        /* For rotations, build rotated tile grids from rotated inflated polygon. */
         uint32_t rot_count = allow_rotate ? 4 : 1;
+        TileGrid rot_sg[4];
+        int32_t rot_ox[4];
+        int32_t rot_oy[4];
+        rot_sg[0] = *base_sg; /* just reference, don't free */
+        rot_ox[0] = base_ox;
+        rot_oy[0] = base_oy;
+
+        if (allow_rotate) {
+            Point2D inf_poly[32];
+            uint32_t inf_n = polygon_inflate(hull_verts[idx], hull_counts[idx], dilate, inf_poly);
+            for (uint32_t r = 1; r <= 3; r++) {
+                Point2D rot_poly[32];
+                polygon_rotate(inf_poly, inf_n, (uint8_t)r, (int32_t)trim_w[idx], (int32_t)trim_h[idx], rot_poly);
+                uint32_t rtw = (r == 1 || r == 3) ? trim_h[idx] : trim_w[idx];
+                uint32_t rth = (r == 1 || r == 3) ? trim_w[idx] : trim_h[idx];
+                rot_sg[r] = tgrid_from_polygon(rot_poly, inf_n, rtw, rth, ts, &rot_ox[r], &rot_oy[r]);
+            }
+        }
+
         bool placed = false;
         uint32_t best_page = 0;
-        uint32_t best_x = UINT32_MAX;
-        uint32_t best_y = UINT32_MAX;
+        uint32_t best_tx = UINT32_MAX;
+        uint32_t best_ty = UINT32_MAX;
         uint8_t best_rot = 0;
-        uint32_t best_cw = 0;
-        uint32_t best_ch = 0;
 
         for (uint32_t pi = 0; pi < page_count && !placed; pi++) {
+            uint32_t scan_max_t = page_grids[pi].tw;
             for (uint32_t r = 0; r < rot_count; r++) {
-                uint32_t cw;
-                uint32_t ch;
-                if (r == 0 || r == 2) {
-                    /* 0 or 180: no dimension swap */
-                    cw = tw + (2 * extrude) + padding;
-                    ch = th + (2 * extrude) + padding;
-                } else {
-                    /* 90 or 270: swap dimensions */
-                    cw = th + (2 * extrude) + padding;
-                    ch = tw + (2 * extrude) + padding;
-                }
-
-                uint32_t scan_max_x = page_w[pi] - margin;
-                uint32_t scan_max_y = page_h[pi] - margin;
-
-                /* Scan placement positions left-to-right, top-to-bottom */
-                for (uint32_t sy = margin; sy + ch <= scan_max_y; sy++) {
-                    for (uint32_t sx = margin; sx + cw <= scan_max_x;) {
-                        uint32_t skip_x = 0;
-                        if (!mask_test_rect(&masks[pi], sx, sy, cw, ch, &skip_x)) {
-                            /* Found valid placement -- check if better than current best */
-                            if (sy < best_y || (sy == best_y && sx < best_x)) {
-                                best_page = pi;
-                                best_x = sx;
-                                best_y = sy;
-                                best_rot = (uint8_t)r;
-                                best_cw = cw;
-                                best_ch = ch;
-                                placed = true;
+                for (uint32_t ty = margin_tiles; ty < scan_max_t; ty++) {
+                    for (uint32_t tx = margin_tiles; tx < scan_max_t;) {
+                        uint32_t skip = 0;
+                        if (!tgrid_test(&page_grids[pi], &rot_sg[r], (int32_t)tx, (int32_t)ty, rot_ox[r], rot_oy[r], &skip)) {
+                            /* Verify the sprite fits within atlas pixel bounds (margin check) */
+                            int32_t abs_max_tx = (int32_t)tx + rot_ox[r] + (int32_t)rot_sg[r].tw;
+                            int32_t abs_max_ty = (int32_t)ty + rot_oy[r] + (int32_t)rot_sg[r].th;
+                            if (abs_max_tx <= (int32_t)scan_max_t && abs_max_ty <= (int32_t)scan_max_t) {
+                                if (ty < best_ty || (ty == best_ty && tx < best_tx)) {
+                                    best_page = pi;
+                                    best_tx = tx;
+                                    best_ty = ty;
+                                    best_rot = (uint8_t)r;
+                                    placed = true;
+                                }
                             }
-                            break; /* Found placement for this rotation, try next */
+                            break;
                         }
-                        /* Skip-ahead (ATLAS-02) */
-                        if (skip_x > sx + 1) {
-                            sx = skip_x;
+                        if (skip > 1) {
+                            tx += skip;
                         } else {
-                            sx++;
+                            tx++;
                         }
                     }
                     if (placed) {
@@ -493,31 +770,28 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, uint32
             NT_BUILD_ASSERT(page_count < ATLAS_MAX_PAGES && "atlas: too many pages");
             uint32_t new_page = page_count;
             page_count++;
-            masks[new_page] = mask_create(init_dim, init_dim);
+            page_grids[new_page] = tgrid_create(atlas_tw, atlas_th, ts);
             page_w[new_page] = init_dim;
             page_h[new_page] = init_dim;
 
-            /* Place on new page at (margin, margin) with no rotation */
-            uint32_t cw = tw + (2 * extrude) + padding;
-            uint32_t ch = th + (2 * extrude) + padding;
             best_page = new_page;
-            best_x = margin;
-            best_y = margin;
+            best_tx = margin_tiles;
+            best_ty = margin_tiles;
             best_rot = 0;
-            best_cw = cw;
-            best_ch = ch;
             placed = true;
         }
         // #endregion
 
         NT_BUILD_ASSERT(placed && "tile_pack: failed to place sprite");
 
-        /* Mark mask */
-        mask_set_rect(&masks[best_page], best_x, best_y, best_cw, best_ch);
+        /* Stamp onto page grid */
+        tgrid_stamp(&page_grids[best_page], &rot_sg[best_rot], (int32_t)best_tx, (int32_t)best_ty, rot_ox[best_rot], rot_oy[best_rot]);
 
-        /* Track bounding box */
-        uint32_t right = best_x + best_cw;
-        uint32_t bottom = best_y + best_ch;
+        /* Track bounding box in pixels */
+        int32_t abs_px = ((int32_t)best_tx + rot_ox[best_rot]) * (int32_t)ts;
+        int32_t abs_py = ((int32_t)best_ty + rot_oy[best_rot]) * (int32_t)ts;
+        uint32_t right = (uint32_t)(abs_px + (int32_t)(rot_sg[best_rot].tw * ts));
+        uint32_t bottom = (uint32_t)(abs_py + (int32_t)(rot_sg[best_rot].th * ts));
         if (right > page_max_x[best_page]) {
             page_max_x[best_page] = right;
         }
@@ -525,17 +799,24 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, uint32
             page_max_y[best_page] = bottom;
         }
 
-        /* Record placement */
+        /* Record placement — convert tile coords to pixel coords */
         AtlasPlacement *pl = &out_placements[placement_count++];
         pl->sprite_index = idx;
         pl->page = best_page;
-        pl->x = best_x;
-        pl->y = best_y;
-        pl->trimmed_w = tw;
-        pl->trimmed_h = th;
-        pl->trim_x = 0; /* Caller fills in trim offsets */
+        pl->x = best_tx * ts;
+        pl->y = best_ty * ts;
+        pl->trimmed_w = trim_w[idx];
+        pl->trimmed_h = trim_h[idx];
+        pl->trim_x = 0;
         pl->trim_y = 0;
         pl->rotation = best_rot;
+
+        /* Free rotated grids (but not rot_sg[0] which is base_sg) */
+        if (allow_rotate) {
+            tgrid_free(&rot_sg[1]);
+            tgrid_free(&rot_sg[2]);
+            tgrid_free(&rot_sg[3]);
+        }
     }
     // #endregion
 
@@ -547,7 +828,6 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, uint32
             fw = next_pot(fw);
             fh = next_pot(fh);
         }
-        /* Clamp to max_size */
         if (fw > max_size) {
             fw = max_size;
         }
@@ -561,8 +841,14 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, uint32
 
     /* Cleanup */
     for (uint32_t p = 0; p < page_count; p++) {
-        mask_free(&masks[p]);
+        tgrid_free(&page_grids[p]);
     }
+    for (uint32_t i = 0; i < sprite_count; i++) {
+        tgrid_free(&sprite_grids[i]);
+    }
+    free(sprite_grids);
+    free(grid_ox);
+    free(grid_oy);
     free(sorted);
 
     *out_page_count = page_count;
@@ -691,6 +977,86 @@ static void debug_draw_rect_outline(uint8_t *page, uint32_t page_w, uint32_t pag
                 memcpy(&page[((size_t)y * page_w + bx) * 4], color, 4);
             }
         }
+    }
+}
+
+/* --- Debug line drawing (Bresenham) for hull outlines --- */
+
+static void debug_draw_line(uint8_t *page, uint32_t pw, uint32_t ph, int32_t x0, int32_t y0, int32_t x1, int32_t y1, const uint8_t color[4]) {
+    int32_t dx = abs(x1 - x0);
+    int32_t dy = -abs(y1 - y0);
+    int32_t sx = (x0 < x1) ? 1 : -1;
+    int32_t sy = (y0 < y1) ? 1 : -1;
+    int32_t err = dx + dy;
+
+    for (;;) {
+        if (x0 >= 0 && (uint32_t)x0 < pw && y0 >= 0 && (uint32_t)y0 < ph) {
+            memcpy(&page[((size_t)y0 * pw + (uint32_t)x0) * 4], color, 4);
+        }
+        if (x0 == x1 && y0 == y1) {
+            break;
+        }
+        int32_t e2 = 2 * err;
+        if (e2 >= dy) {
+            err += dy;
+            x0 += sx;
+        }
+        if (e2 <= dx) {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+/* --- Draw convex hull outline on debug page --- */
+
+static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, const Point2D *hull, uint32_t vert_count, uint32_t inner_x, uint32_t inner_y, uint32_t trim_w, uint32_t trim_h,
+                                    uint8_t rotation) {
+    static const uint8_t color[4] = {255, 0, 255, 255};
+    if (vert_count < 2) {
+        return;
+    }
+
+    /* Transform hull vertex from local trimmed-sprite space to atlas pixel coords */
+    for (uint32_t i = 0; i < vert_count; i++) {
+        uint32_t next = (i + 1) % vert_count;
+        int32_t lx0 = hull[i].x;
+        int32_t ly0 = hull[i].y;
+        int32_t lx1 = hull[next].x;
+        int32_t ly1 = hull[next].y;
+
+        int32_t ax0;
+        int32_t ay0;
+        int32_t ax1;
+        int32_t ay1;
+        switch (rotation) {
+        case 1: /* 90 CW */
+            ax0 = (int32_t)inner_x + ((int32_t)trim_h - 1 - ly0);
+            ay0 = (int32_t)inner_y + lx0;
+            ax1 = (int32_t)inner_x + ((int32_t)trim_h - 1 - ly1);
+            ay1 = (int32_t)inner_y + lx1;
+            break;
+        case 2: /* 180 */
+            ax0 = (int32_t)inner_x + ((int32_t)trim_w - 1 - lx0);
+            ay0 = (int32_t)inner_y + ((int32_t)trim_h - 1 - ly0);
+            ax1 = (int32_t)inner_x + ((int32_t)trim_w - 1 - lx1);
+            ay1 = (int32_t)inner_y + ((int32_t)trim_h - 1 - ly1);
+            break;
+        case 3: /* 270 CW */
+            ax0 = (int32_t)inner_x + ly0;
+            ay0 = (int32_t)inner_y + ((int32_t)trim_w - 1 - lx0);
+            ax1 = (int32_t)inner_x + ly1;
+            ay1 = (int32_t)inner_y + ((int32_t)trim_w - 1 - lx1);
+            break;
+        default: /* 0 */
+            ax0 = (int32_t)inner_x + lx0;
+            ay0 = (int32_t)inner_y + ly0;
+            ax1 = (int32_t)inner_x + lx1;
+            ay1 = (int32_t)inner_y + ly1;
+            break;
+        }
+
+        debug_draw_line(page, pw, ph, ax0, ay0, ax1, ay1, color);
     }
 }
 
@@ -1283,20 +1649,25 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         placements = (AtlasPlacement *)malloc(unique_count * sizeof(AtlasPlacement));
         NT_BUILD_ASSERT(placements && "end_atlas: alloc failed");
 
-        /* Build trim arrays for unique sprites only */
+        /* Build arrays for unique sprites: trim dims + hull polygons */
         uint32_t *u_trim_w = (uint32_t *)malloc(unique_count * sizeof(uint32_t));
         uint32_t *u_trim_h = (uint32_t *)malloc(unique_count * sizeof(uint32_t));
-        NT_BUILD_ASSERT(u_trim_w && u_trim_h && "end_atlas: alloc failed");
+        Point2D **u_hulls = (Point2D **)malloc(unique_count * sizeof(Point2D *));
+        uint32_t *u_hull_counts = (uint32_t *)malloc(unique_count * sizeof(uint32_t));
+        NT_BUILD_ASSERT(u_trim_w && u_trim_h && u_hulls && u_hull_counts && "end_atlas: alloc failed");
         for (uint32_t i = 0; i < unique_count; i++) {
-            u_trim_w[i] = trim_w[unique_indices[i]];
-            u_trim_h[i] = trim_h[unique_indices[i]];
+            uint32_t oi = unique_indices[i];
+            u_trim_w[i] = trim_w[oi];
+            u_trim_h[i] = trim_h[oi];
+            u_hulls[i] = hull_vertices[oi];
+            u_hull_counts[i] = vertex_counts[oi];
         }
 
-        placement_count = tile_pack(u_trim_w, u_trim_h, unique_count, opts, placements, &page_count, page_w, page_h);
+        placement_count = tile_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, unique_count, opts, placements, &page_count, page_w, page_h);
 
         /* Fill trim offsets and remap sprite_index back to original */
         for (uint32_t i = 0; i < placement_count; i++) {
-            uint32_t unique_idx = placements[i].sprite_index; /* index into unique arrays */
+            uint32_t unique_idx = placements[i].sprite_index;
             uint32_t orig_idx = unique_indices[unique_idx];
             placements[i].sprite_index = orig_idx;
             placements[i].trim_x = trim_x[orig_idx];
@@ -1307,6 +1678,8 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
 
         free(u_trim_w);
         free(u_trim_h);
+        free((void *)u_hulls);
+        free(u_hull_counts);
         // #endregion
 
         // #region Step 5: Compose page RGBA + extrude + debug PNG (ATLAS-15, ATLAS-11, D-09)
@@ -1347,15 +1720,30 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                     if (placements[pi].page != p) {
                         continue;
                     }
-                    uint32_t rx = placements[pi].x + extrude_val;
-                    uint32_t ry = placements[pi].y + extrude_val;
-                    uint32_t rw = (placements[pi].rotation == 1 || placements[pi].rotation == 3) ? placements[pi].trimmed_h : placements[pi].trimmed_w;
-                    uint32_t rh = (placements[pi].rotation == 1 || placements[pi].rotation == 3) ? placements[pi].trimmed_w : placements[pi].trimmed_h;
-                    debug_draw_rect_outline(debug_page, page_w[p], page_h[p], rx, ry, rw, rh);
+                    uint32_t ix = placements[pi].x + extrude_val;
+                    uint32_t iy = placements[pi].y + extrude_val;
+                    uint32_t si = placements[pi].sprite_index;
+
+                    if (opts->polygon_mode && hull_vertices[si] && vertex_counts[si] >= 3) {
+                        debug_draw_hull_outline(debug_page, page_w[p], page_h[p], hull_vertices[si], vertex_counts[si], ix, iy, trim_w[si], trim_h[si], placements[pi].rotation);
+                    } else {
+                        uint32_t rw = (placements[pi].rotation == 1 || placements[pi].rotation == 3) ? placements[pi].trimmed_h : placements[pi].trimmed_w;
+                        uint32_t rh = (placements[pi].rotation == 1 || placements[pi].rotation == 3) ? placements[pi].trimmed_w : placements[pi].trimmed_h;
+                        debug_draw_rect_outline(debug_page, page_w[p], page_h[p], ix, iy, rw, rh);
+                    }
                 }
 
+                /* Write debug PNG next to the pack output file */
                 char debug_path[512];
-                (void)snprintf(debug_path, sizeof(debug_path), "%s_page%u.png", state->name, p);
+                const char *slash = strrchr(ctx->output_path, '/');
+                const char *bslash = strrchr(ctx->output_path, '\\');
+                const char *sep = (bslash > slash) ? bslash : slash;
+                if (sep) {
+                    size_t dir_len = (size_t)(sep - ctx->output_path) + 1;
+                    (void)snprintf(debug_path, sizeof(debug_path), "%.*s%s_page%u.png", (int)dir_len, ctx->output_path, state->name, p);
+                } else {
+                    (void)snprintf(debug_path, sizeof(debug_path), "%s_page%u.png", state->name, p);
+                }
                 stbi_write_png(debug_path, (int)page_w[p], (int)page_h[p], 4, debug_page, (int)(page_w[p] * 4));
                 NT_LOG_INFO("Debug PNG: %s (%ux%u)", debug_path, page_w[p], page_h[p]);
                 free(debug_page);
