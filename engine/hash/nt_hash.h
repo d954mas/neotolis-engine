@@ -11,6 +11,8 @@
 #define NT_HASH_LABELS 0
 #endif
 
+/* Initial debug label budget. When NT_HASH_LABELS is enabled, tables may grow
+ * past this value to accommodate larger content sets. */
 #ifndef NT_HASH_MAX_LABELS
 #define NT_HASH_MAX_LABELS 4096
 #endif

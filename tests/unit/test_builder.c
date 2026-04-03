@@ -3603,13 +3603,14 @@ static uint8_t *read_file_bytes(const char *path, uint32_t *out_size) {
         (void)fclose(f);
         return NULL;
     }
-    uint8_t *buf = (uint8_t *)malloc((size_t)len);
+    uint8_t *buf = (uint8_t *)malloc((size_t)len + 1U);
     if (!buf) {
         (void)fclose(f);
         return NULL;
     }
     (void)fread(buf, 1, (size_t)len, f);
     (void)fclose(f);
+    buf[len] = 0;
     *out_size = (uint32_t)len;
     return buf;
 }
@@ -3956,6 +3957,65 @@ void test_atlas_codegen(void) {
     free(h_buf);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_codegen_large(void) {
+    enum { LARGE_ATLAS_REGION_COUNT = 4200 };
+
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_codegen_large.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.polygon_mode = false;
+    nt_builder_begin_atlas(ctx, "sprites", &opts);
+
+    for (uint32_t i = 0; i < LARGE_ATLAS_REGION_COUNT; i++) {
+        char name[32];
+        uint8_t r = (uint8_t)(i & 0xFFU);
+        uint8_t g = (uint8_t)((i >> 8) & 0xFFU);
+        uint8_t *s = make_test_sprite(1, 1, r, g, 0, 255);
+        (void)snprintf(name, sizeof(name), "spr%04u.png", i);
+        nt_builder_atlas_add_raw(ctx, s, 1, 1, name);
+        free(s);
+    }
+
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_codegen_large.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)(buf + atlas_entry->offset);
+    TEST_ASSERT_EQUAL(LARGE_ATLAS_REGION_COUNT, ahdr->region_count);
+    TEST_ASSERT_TRUE(ahdr->total_vertex_count >= LARGE_ATLAS_REGION_COUNT * 4U);
+
+    free(buf);
+
+    uint32_t h_size = 0;
+    uint8_t *h_buf = read_file_bytes(TMP_DIR "/atlas_rt_codegen_large.h", &h_size);
+    TEST_ASSERT_NOT_NULL(h_buf);
+    TEST_ASSERT_TRUE(h_size > 0);
+    TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "ASSET_ATLAS_SPRITES"));
+    TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "ASSET_ATLAS_REGION_SPRITES_SPR4199_PNG"));
+    TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "sprites/spr4199.png"));
+    free(h_buf);
+}
+
 void test_atlas_opts_defaults(void) {
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     TEST_ASSERT_EQUAL(2048, opts.max_size);
@@ -4125,6 +4185,7 @@ int main(void) {
     RUN_TEST(test_atlas_duplicate_detection);
     RUN_TEST(test_atlas_multi_page);
     RUN_TEST(test_atlas_codegen);
+    RUN_TEST(test_atlas_codegen_large);
     RUN_TEST(test_atlas_opts_defaults);
 
     return UNITY_END();

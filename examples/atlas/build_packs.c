@@ -54,7 +54,9 @@ int main(int argc, char *argv[]) {
         (void)fprintf(stderr, "Failed to start pack\n");
         return 1;
     }
-    nt_builder_set_header_dir(ctx, HEADER_DIR);
+    if (argc < 5) { /* codegen only for default spineboy test */
+        nt_builder_set_header_dir(ctx, HEADER_DIR);
+    }
     nt_builder_set_cache_dir(ctx, "build/examples/atlas/_cache");
     /* --- Mesh + shaders (reuse textured_quad assets) --- */
 

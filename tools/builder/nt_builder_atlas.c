@@ -146,23 +146,6 @@ static uint32_t convex_hull(const Point2D *pts, uint32_t n, Point2D *out) {
     return k;
 }
 
-/* --- Perpendicular distance from point to line segment (squared) --- */
-
-static double perp_distance_sq(Point2D p, Point2D a, Point2D b) {
-    double dx = (double)(b.x - a.x);
-    double dy = (double)(b.y - a.y);
-    double len_sq = (dx * dx) + (dy * dy);
-    if (len_sq < 1e-12) {
-        /* Degenerate segment: distance to point a */
-        double px = (double)(p.x - a.x);
-        double py = (double)(p.y - a.y);
-        return (px * px) + (py * py);
-    }
-    /* Cross product gives area of parallelogram; divide by segment length for distance */
-    double cross = (dx * (double)(p.y - a.y)) - (dy * (double)(p.x - a.x));
-    return (cross * cross) / len_sq;
-}
-
 /* --- Convex hull simplification: min-area vertex removal --- */
 /* Iteratively remove the vertex whose removal adds the smallest triangle area.
  * For convex polygons, removing a vertex always makes the polygon LARGER —
@@ -2054,7 +2037,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                         }
                     }
                     if (!inside) {
-                        NT_LOG_ERROR("boundary pixel (%d,%d) outside inflated polygon (sprite %ux%u, inflate=%.1f)", pts[bi].x, pts[bi].y, tw, th, inflate_amount);
+                        NT_LOG_ERROR("boundary pixel (%d,%d) outside inflated polygon (sprite %ux%u, inflate=%.1f)", pts[bi].x, pts[bi].y, tw, th, (double)inflate_amount);
                     }
                     NT_BUILD_ASSERT(inside && "end_atlas: boundary pixel outside inflated polygon");
                 }
@@ -2377,28 +2360,23 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     }
     // #endregion
 
-    // #region Step 9: Register codegen-only region entries (D-12)
+    // #region Step 9: Store region info for codegen (no pack entries needed)
     for (uint32_t i = 0; i < sprite_count; i++) {
+        /* Grow region array if needed */
+        if (ctx->atlas_region_count >= ctx->atlas_region_capacity) {
+            uint32_t new_cap = (ctx->atlas_region_capacity == 0) ? 64 : ctx->atlas_region_capacity * 2;
+            NtAtlasRegionCodegen *new_arr = (NtAtlasRegionCodegen *)realloc(ctx->atlas_regions, new_cap * sizeof(NtAtlasRegionCodegen));
+            NT_BUILD_ASSERT(new_arr && "end_atlas: region codegen alloc failed");
+            ctx->atlas_regions = new_arr;
+            ctx->atlas_region_capacity = new_cap;
+        }
+
         char region_path[512];
         (void)snprintf(region_path, sizeof(region_path), "%s/%s", state->name, sprites[i].name);
 
-        /* Region entries: codegen-only, no pack data.
-         * Use dedup_original = 0 so encode pipeline skips them. */
-        uint64_t region_hash = nt_hash64_str(sprites[i].name).value;
-
-        /* Create a minimal entry with the atlas blob as decoded_data (size 0 signals codegen-only) */
-        /* Actually: we set dedup_original on the entry manually after add_entry. */
-        /* We need to create a small placeholder decoded_data for the entry system. */
-        // NOLINTNEXTLINE(clang-analyzer-unix.MallocSizeof)
-        uint8_t *placeholder = (uint8_t *)calloc(1, sizeof(uint64_t));
-        NT_BUILD_ASSERT(placeholder && "end_atlas: alloc failed");
-        memcpy(placeholder, &region_hash, sizeof(uint64_t));
-
-        nt_builder_add_entry(ctx, region_path, NT_BUILD_ASSET_ATLAS_REGION, NULL, placeholder, (uint32_t)sizeof(uint64_t), region_hash);
-
-        /* Mark as dedup so encode pipeline skips it -- point to entry 0 (atlas metadata) */
-        NtBuildEntry *re = &ctx->pending[ctx->pending_count - 1];
-        re->dedup_original = 0; /* index of any existing entry -- encode skips */
+        NtAtlasRegionCodegen *reg = &ctx->atlas_regions[ctx->atlas_region_count++];
+        reg->path = nt_builder_normalize_path(region_path);
+        reg->resource_id = nt_hash64_str(reg->path).value;
     }
     // #endregion
 

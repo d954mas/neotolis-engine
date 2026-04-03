@@ -59,6 +59,12 @@ typedef struct {
     uint64_t decoded_hash; /* xxh64 of decoded RGBA pixels */
 } NtAtlasSpriteInput;
 
+/* Atlas region entry for codegen (lightweight, no pack entry needed) */
+typedef struct {
+    char *path;            /* "atlas_name/region_name" (owned, heap) */
+    uint64_t resource_id;  /* nt_hash64 of path */
+} NtAtlasRegionCodegen;
+
 /* Atlas build state (active between begin_atlas / end_atlas) */
 typedef struct {
     char *name;                      /* atlas name for resource_id (owned) */
@@ -200,6 +206,11 @@ struct NtBuilderContext {
 
     /* Parallel encoding: thread count (0 = single-threaded, per D-12) */
     uint32_t thread_count;
+
+    /* Atlas region codegen entries (heap, populated by end_atlas, consumed by codegen) */
+    NtAtlasRegionCodegen *atlas_regions;
+    uint32_t atlas_region_count;
+    uint32_t atlas_region_capacity;
 };
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */

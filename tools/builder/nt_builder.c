@@ -224,6 +224,11 @@ static void nt_builder_free_context(NtBuilderContext *ctx) {
     }
     free(ctx->header_dir);
     free(ctx->cache_dir);
+    /* Free atlas region codegen entries */
+    for (uint32_t i = 0; i < ctx->atlas_region_count; i++) {
+        free(ctx->atlas_regions[i].path);
+    }
+    free(ctx->atlas_regions);
     free(ctx);
 }
 
@@ -468,8 +473,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx->pending_count > 0 && "finish_pack called with no assets added");
 
     double t_encode_start = nt_time_now();
-    nt_cache_status_t cache_status[NT_BUILD_MAX_ASSETS];
-    memset(cache_status, 0, sizeof(cache_status));
+    nt_cache_status_t *cache_status = (nt_cache_status_t *)calloc(ctx->pending_count, sizeof(nt_cache_status_t));
+    NT_BUILD_ASSERT(cache_status && "finish_pack: alloc failed");
     double cache_restore_secs = 0.0;
 
     /* Phase 0: Early dedup on hash + size + opts */
@@ -653,7 +658,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     /* Phase 1b: Encode (parallel if thread_count > 0, else single-threaded) */
     /* Build work queue: indices of entries needing encode (not cached, not deduped, not shader) */
-    uint32_t work_indices[NT_BUILD_MAX_ASSETS];
+    uint32_t *work_indices = (uint32_t *)malloc((size_t)ctx->pending_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(work_indices && "finish_pack: alloc failed");
     uint32_t work_count = 0;
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         if (ctx->pending[i].dedup_original >= 0) {
@@ -877,8 +883,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
 
     /* Compute gzip sizes BEFORE shifting offsets (entries still data_buf-relative) */
-    uint32_t gz_sizes[NT_BUILD_MAX_ASSETS];
-    memset(gz_sizes, 0, sizeof(gz_sizes));
+    uint32_t *gz_sizes = (uint32_t *)calloc(ctx->entry_count > 0 ? ctx->entry_count : 1, sizeof(uint32_t));
     uint32_t total_gz = 0;
     double gzip_secs = 0.0;
     if (ctx->gzip_estimate) {
@@ -1099,6 +1104,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     free(results);
     free(opts_hashes);
+    free(cache_status);
+    free(work_indices);
+    free(gz_sizes);
     return NT_BUILD_OK;
 }
 
