@@ -72,7 +72,8 @@ int main(int argc, char *argv[]) {
     opts.polygon_mode = true; /* convex hull packing */
     opts.max_vertices = 8;    /* up to 8-vertex hulls */
     opts.allow_rotate = true; /* try rotations for better fit */
-    opts.debug_png = true; opts.tile_size = 2;    /* write debug atlas pages as PNG */
+    opts.debug_png = true;    /* write debug atlas pages as PNG */
+    opts.tile_size = 4;
 
     nt_builder_begin_atlas(ctx, "spineboy", &opts);
 

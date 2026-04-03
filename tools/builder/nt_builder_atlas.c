@@ -250,13 +250,15 @@ typedef struct {
     uint8_t rotation;      /* 0=none, 1=90CW, 2=180, 3=270CW */
 } AtlasPlacement;
 
-/* Tile grid: 1 byte per tile cell (0=empty, non-zero=occupied).
+/* Tile grid: bitset storage, 1 bit per tile cell.
+ * Each row is an array of uint64_t words (row_words = ceil(tw/64)).
  * All packing operates at tile resolution for speed.
  * tile_size (e.g. 8) means each cell covers tile_size x tile_size pixels. */
 typedef struct {
-    uint8_t *cells;     /* 1 byte per tile, row-major */
+    uint64_t *rows;     /* row_words * th uint64_t words, row-major bitset */
     uint32_t tw;        /* grid width in tiles */
     uint32_t th;        /* grid height in tiles */
+    uint32_t row_words; /* ceil(tw / 64) — uint64_t words per row */
     uint32_t tile_size; /* pixels per tile side */
 } TileGrid;
 
@@ -272,22 +274,60 @@ static TileGrid tgrid_create(uint32_t tw, uint32_t th, uint32_t tile_size) {
     TileGrid g;
     g.tw = tw;
     g.th = th;
+    g.row_words = (tw + 63) / 64;
     g.tile_size = tile_size;
-    g.cells = (uint8_t *)calloc((size_t)tw * th, 1);
-    NT_BUILD_ASSERT(g.cells && "tgrid_create: alloc failed");
+    g.rows = (uint64_t *)calloc((size_t)g.row_words * th, sizeof(uint64_t));
+    NT_BUILD_ASSERT(g.rows && "tgrid_create: alloc failed");
     return g;
 }
 
 static void tgrid_free(TileGrid *g) {
-    free(g->cells);
-    g->cells = NULL;
+    free(g->rows);
+    g->rows = NULL;
     g->tw = 0;
     g->th = 0;
+    g->row_words = 0;
 }
 
-static inline uint8_t tgrid_get(const TileGrid *g, uint32_t tx, uint32_t ty) { return g->cells[(ty * g->tw) + tx]; }
+static inline uint8_t tgrid_get(const TileGrid *g, uint32_t tx, uint32_t ty) { return (uint8_t)((g->rows[((size_t)ty * g->row_words) + (tx >> 6)] >> (tx & 63)) & 1); }
 
-static inline void tgrid_set(TileGrid *g, uint32_t tx, uint32_t ty) { g->cells[(ty * g->tw) + tx] = 1; }
+static inline void tgrid_set(TileGrid *g, uint32_t tx, uint32_t ty) { g->rows[((size_t)ty * g->row_words) + (tx >> 6)] |= (1ULL << (tx & 63)); }
+
+/* Grow tile grid by doubling the smaller dimension. Copies existing cells.
+ * Returns old dimensions via out_old_tw/out_old_th for priority-area scanning. */
+static void tgrid_grow(TileGrid *g, uint32_t max_tw, uint32_t max_th, uint32_t *out_old_tw, uint32_t *out_old_th) {
+    uint32_t old_tw = g->tw;
+    uint32_t old_th = g->th;
+    uint32_t old_rw = g->row_words;
+    *out_old_tw = old_tw;
+    *out_old_th = old_th;
+
+    /* Double the smaller dimension (or width if equal) */
+    uint32_t new_tw = (old_tw <= old_th) ? old_tw * 2 : old_tw;
+    uint32_t new_th = (old_tw <= old_th) ? old_th : old_th * 2;
+    if (new_tw > max_tw) {
+        new_tw = max_tw;
+    }
+    if (new_th > max_th) {
+        new_th = max_th;
+    }
+    uint32_t new_rw = (new_tw + 63) / 64;
+
+    uint64_t *new_rows = (uint64_t *)calloc((size_t)new_rw * new_th, sizeof(uint64_t));
+    NT_BUILD_ASSERT(new_rows && "tgrid_grow: alloc failed");
+
+    /* Copy old rows (word count may differ if width changed) */
+    uint32_t copy_words = (old_rw < new_rw) ? old_rw : new_rw;
+    for (uint32_t y = 0; y < old_th; y++) {
+        memcpy(new_rows + ((size_t)y * new_rw), g->rows + ((size_t)y * old_rw), copy_words * sizeof(uint64_t));
+    }
+
+    free(g->rows);
+    g->rows = new_rows;
+    g->tw = new_tw;
+    g->th = new_th;
+    g->row_words = new_rw;
+}
 
 /* --- Polygon inflation: expand convex hull outward by N pixels --- */
 
@@ -377,9 +417,6 @@ static void polygon_rotate(const Point2D *src, uint32_t n, uint8_t rotation, int
         }
     }
 }
-
-/* Default tile size if opts->tile_size is 0 */
-#define TILE_SIZE_DEFAULT 8
 
 /* --- Triangle vs AABB overlap test (Separating Axis Theorem) --- */
 
@@ -525,30 +562,99 @@ static TileGrid tgrid_from_polygon(const Point2D *hull, uint32_t hull_n, uint32_
     return g;
 }
 
-/* --- Tile grid collision test --- */
+/* --- Tile grid collision test (bitset) --- */
+
+/* Count trailing zeros (portable). Returns 64 if v == 0. */
+static inline uint32_t tgrid_ctz64(uint64_t v) {
+    if (v == 0) {
+        return 64;
+    }
+#if defined(__GNUC__) || defined(__clang__)
+    return (uint32_t)__builtin_ctzll(v);
+#elif defined(_MSC_VER)
+    unsigned long idx;
+    _BitScanForward64(&idx, v);
+    return (uint32_t)idx;
+#else
+    uint32_t c = 0;
+    while ((v & 1) == 0) {
+        v >>= 1;
+        c++;
+    }
+    return c;
+#endif
+}
 
 /* Test if placing sprite grid at (tx,ty) on atlas grid collides.
  * Sprite grid origin offset is (ox,oy) in tiles.
- * out_skip: how many tile columns to skip ahead on collision. */
+ * out_skip: how many tile columns to skip ahead on collision.
+ * Uses word-level AND for fast collision detection. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool tgrid_test(const TileGrid *atlas, const TileGrid *sprite, int32_t tx, int32_t ty, int32_t ox, int32_t oy, uint32_t *out_skip) {
+    int32_t base_x = tx + ox;
+    int32_t base_y = ty + oy;
+
     for (uint32_t sy = 0; sy < sprite->th; sy++) {
-        int32_t ay = ty + oy + (int32_t)sy;
+        int32_t ay = base_y + (int32_t)sy;
         if (ay < 0 || (uint32_t)ay >= atlas->th) {
             continue;
         }
-        for (uint32_t sx = 0; sx < sprite->tw; sx++) {
-            int32_t ax = tx + ox + (int32_t)sx;
-            if (ax < 0 || (uint32_t)ax >= atlas->tw) {
+        const uint64_t *s_row = sprite->rows + ((size_t)sy * sprite->row_words);
+        const uint64_t *a_row = atlas->rows + ((size_t)(uint32_t)ay * atlas->row_words);
+
+        for (uint32_t sw = 0; sw < sprite->row_words; sw++) {
+            uint64_t s = s_row[sw];
+            if (s == 0) {
                 continue;
             }
-            if (tgrid_get(sprite, sx, sy) && tgrid_get(atlas, (uint32_t)ax, (uint32_t)ay)) {
-                /* Collision — compute skip: advance past occupied atlas tiles */
+            /* Sprite bit range: [base_x + sw*64 .. base_x + sw*64 + 63] maps to atlas columns */
+            int32_t col = base_x + (int32_t)(sw * 64);
+
+            /* Skip if entire word is out of atlas bounds */
+            if (col >= (int32_t)atlas->tw || col + 64 <= 0) {
+                continue;
+            }
+
+            /* Mask off bits that fall outside atlas bounds */
+            if (col < 0) {
+                s >>= (uint32_t)(-col);
+                col = 0;
+            }
+            if ((uint32_t)col + 64 > atlas->tw) {
+                uint32_t valid = atlas->tw - (uint32_t)col;
+                if (valid < 64) {
+                    s &= (1ULL << valid) - 1;
+                }
+            }
+            if (s == 0) {
+                continue;
+            }
+
+            uint32_t a_word = (uint32_t)col >> 6;
+            uint32_t a_bit = (uint32_t)col & 63;
+
+            /* Check overlap: sprite word shifted into atlas word(s) */
+            uint64_t hit = a_row[a_word] & (s << a_bit);
+            if (a_bit > 0 && (a_word + 1) < atlas->row_words) {
+                hit |= a_row[a_word + 1] & (s >> (64 - a_bit));
+            }
+
+            if (hit) {
+                /* Collision — compute skip via ctz */
                 if (out_skip) {
-                    uint32_t skip = (uint32_t)ax + 1;
-                    while (skip < atlas->tw && tgrid_get(atlas, skip, (uint32_t)ay)) {
-                        skip++;
+                    uint64_t hit_lo = a_row[a_word] & (s << a_bit);
+                    uint32_t hit_col;
+                    if (hit_lo) {
+                        hit_col = (a_word * 64) + tgrid_ctz64(hit_lo);
+                    } else {
+                        hit_col = ((a_word + 1) * 64) + tgrid_ctz64(a_row[a_word + 1] & (s >> (64 - a_bit)));
                     }
-                    *out_skip = skip - (uint32_t)tx;
+                    /* Advance past consecutive occupied atlas tiles */
+                    uint32_t skip_to = hit_col + 1;
+                    while (skip_to < atlas->tw && tgrid_get(atlas, skip_to, (uint32_t)ay)) {
+                        skip_to++;
+                    }
+                    *out_skip = skip_to - (uint32_t)tx;
                 }
                 return true;
             }
@@ -557,25 +663,203 @@ static bool tgrid_test(const TileGrid *atlas, const TileGrid *sprite, int32_t tx
     return false;
 }
 
-/* --- Tile grid stamp --- */
+/* --- Tile grid stamp (bitset) --- */
 
-/* Stamp sprite grid onto atlas grid at (tx,ty) with origin offset (ox,oy). */
+/* Stamp sprite grid onto atlas grid at (tx,ty) with origin offset (ox,oy).
+ * Uses word-level OR for fast stamping. */
 static void tgrid_stamp(TileGrid *atlas, const TileGrid *sprite, int32_t tx, int32_t ty, int32_t ox, int32_t oy) {
+    int32_t base_x = tx + ox;
+    int32_t base_y = ty + oy;
+
     for (uint32_t sy = 0; sy < sprite->th; sy++) {
-        int32_t ay = ty + oy + (int32_t)sy;
+        int32_t ay = base_y + (int32_t)sy;
         if (ay < 0 || (uint32_t)ay >= atlas->th) {
             continue;
         }
-        for (uint32_t sx = 0; sx < sprite->tw; sx++) {
-            int32_t ax = tx + ox + (int32_t)sx;
-            if (ax < 0 || (uint32_t)ax >= atlas->tw) {
+        const uint64_t *s_row = sprite->rows + ((size_t)sy * sprite->row_words);
+        uint64_t *a_row = atlas->rows + ((size_t)(uint32_t)ay * atlas->row_words);
+
+        for (uint32_t sw = 0; sw < sprite->row_words; sw++) {
+            uint64_t s = s_row[sw];
+            if (s == 0) {
                 continue;
             }
-            if (tgrid_get(sprite, sx, sy)) {
-                tgrid_set(atlas, (uint32_t)ax, (uint32_t)ay);
+            int32_t col = base_x + (int32_t)(sw * 64);
+            if (col >= (int32_t)atlas->tw || col + 64 <= 0) {
+                continue;
+            }
+            if (col < 0) {
+                s >>= (uint32_t)(-col);
+                col = 0;
+            }
+            if ((uint32_t)col + 64 > atlas->tw) {
+                uint32_t valid = atlas->tw - (uint32_t)col;
+                if (valid < 64) {
+                    s &= (1ULL << valid) - 1;
+                }
+            }
+            if (s == 0) {
+                continue;
+            }
+
+            uint32_t a_word = (uint32_t)col >> 6;
+            uint32_t a_bit = (uint32_t)col & 63;
+
+            a_row[a_word] |= (s << a_bit);
+            if (a_bit > 0 && (a_word + 1) < atlas->row_words) {
+                a_row[a_word + 1] |= (s >> (64 - a_bit));
             }
         }
     }
+}
+
+/* --- Row occupancy OR mask: pre-compute combined mask for quick rejection --- */
+
+/* Build OR of all atlas rows in [y0..y0+h). Result has a bit set if ANY row in the
+ * range has that column occupied. Allows fast skip: if OR-mask shows no gap wide
+ * enough for the sprite, skip the entire ty without per-position tgrid_test. */
+static void tgrid_row_or(const TileGrid *g, uint32_t y0, uint32_t h, uint64_t *out, uint32_t out_words) {
+    memset(out, 0, (size_t)out_words * sizeof(uint64_t));
+    uint32_t y_end = y0 + h;
+    if (y_end > g->th) {
+        y_end = g->th;
+    }
+    for (uint32_t y = y0; y < y_end; y++) {
+        const uint64_t *row = g->rows + ((size_t)y * g->row_words);
+        for (uint32_t w = 0; w < out_words && w < g->row_words; w++) {
+            out[w] |= row[w];
+        }
+    }
+}
+
+/* Check if OR-mask bit at position `col` is free (0). Quick single-bit test. */
+static inline bool tgrid_or_bit_free(const uint64_t *mask, uint32_t mask_words, uint32_t col) {
+    uint32_t w = col >> 6;
+    if (w >= mask_words) {
+        return false;
+    }
+    return (mask[w] & (1ULL << (col & 63))) == 0;
+}
+
+/* Find next zero bit in OR-mask at or after position `from`. Returns mask_bits if none. */
+static uint32_t tgrid_or_next_free(const uint64_t *mask, uint32_t mask_words, uint32_t mask_bits, uint32_t from) {
+    uint32_t w = from >> 6;
+    uint32_t b = from & 63;
+    while (w < mask_words) {
+        uint64_t v = mask[w] >> b;
+        if (v != UINT64_MAX >> b) {
+            /* There's a zero bit in this word at or after position b */
+            if (b > 0) {
+                /* Re-check from bit b: invert and find first set */
+                uint64_t inv = ~mask[w] & (UINT64_MAX << b);
+                if (inv) {
+                    return (w * 64) + tgrid_ctz64(inv);
+                }
+            } else {
+                uint64_t inv = ~mask[w];
+                if (inv) {
+                    return (w * 64) + tgrid_ctz64(inv);
+                }
+            }
+        }
+        w++;
+        b = 0;
+    }
+    return mask_bits;
+}
+
+/* --- Scan a rectangular region of the atlas grid for a valid placement --- */
+
+/* Try to place a sprite (with given rotation variants) within [ty_min..ty_max) x [tx_min..tx_max).
+ * Returns true if placed, with best position in out_tx/out_ty/out_rot.
+ * Uses OR-mask pre-rejection to skip positions where any sprite row would collide. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool scan_region(const TileGrid *atlas, const TileGrid *rot_sg, const int32_t *rot_ox, const int32_t *rot_oy, uint32_t rot_count, uint32_t tx_min, uint32_t ty_min, uint32_t tx_max,
+                        uint32_t ty_max, uint32_t *out_tx, uint32_t *out_ty, uint8_t *out_rot) {
+    uint32_t best_tx = UINT32_MAX;
+    uint32_t best_ty = UINT32_MAX;
+    bool found = false;
+
+    /* Allocate OR-mask buffer (reused across rows) */
+    uint64_t *or_mask = (uint64_t *)malloc((size_t)atlas->row_words * sizeof(uint64_t));
+    NT_BUILD_ASSERT(or_mask && "scan_region: alloc failed");
+
+    for (uint32_t r = 0; r < rot_count; r++) {
+        /* Early-out: if we already found at best_ty, later rotations only need to beat it */
+        uint32_t eff_ty_max = found ? (best_ty + 1) : ty_max;
+        if (eff_ty_max > ty_max) {
+            eff_ty_max = ty_max;
+        }
+
+        uint32_t sprite_tw = rot_sg[r].tw;
+
+        for (uint32_t ty = ty_min; ty < eff_ty_max; ty++) {
+            /* Pre-compute OR of atlas rows covered by sprite at this ty */
+            int32_t ay0 = (int32_t)ty + rot_oy[r];
+            uint32_t or_y0 = (ay0 >= 0) ? (uint32_t)ay0 : 0;
+            uint32_t or_h = rot_sg[r].th;
+            if (ay0 < 0) {
+                or_h = (or_h > (uint32_t)(-ay0)) ? or_h - (uint32_t)(-ay0) : 0;
+            }
+            tgrid_row_or(atlas, or_y0, or_h, or_mask, atlas->row_words);
+
+            for (uint32_t tx = tx_min; tx < tx_max;) {
+                /* Quick rejection: if first sprite column is occupied in OR-mask, skip ahead */
+                int32_t col0 = (int32_t)tx + rot_ox[r];
+                if (col0 >= 0 && (uint32_t)col0 < atlas->tw) {
+                    if (!tgrid_or_bit_free(or_mask, atlas->row_words, (uint32_t)col0)) {
+                        uint32_t next_free = tgrid_or_next_free(or_mask, atlas->row_words, atlas->tw, (uint32_t)col0 + 1);
+                        int32_t next_tx = (int32_t)next_free - rot_ox[r];
+                        if (next_tx <= (int32_t)tx) {
+                            next_tx = (int32_t)tx + 1;
+                        }
+                        tx = (uint32_t)next_tx;
+                        continue;
+                    }
+                }
+
+                uint32_t skip = 0;
+                if (!tgrid_test(atlas, &rot_sg[r], (int32_t)tx, (int32_t)ty, rot_ox[r], rot_oy[r], &skip)) {
+                    /* Verify the sprite fits within atlas bounds (min + max check) */
+                    int32_t abs_min_tx = (int32_t)tx + rot_ox[r];
+                    int32_t abs_min_ty = (int32_t)ty + rot_oy[r];
+                    int32_t abs_max_tx = abs_min_tx + (int32_t)rot_sg[r].tw;
+                    int32_t abs_max_ty = abs_min_ty + (int32_t)rot_sg[r].th;
+                    if (abs_min_tx >= 0 && abs_min_ty >= 0 && (uint32_t)abs_max_tx <= atlas->tw && (uint32_t)abs_max_ty <= atlas->th) {
+                        if (ty < best_ty || (ty == best_ty && tx < best_tx)) {
+                            best_tx = tx;
+                            best_ty = ty;
+                            *out_rot = (uint8_t)r;
+                            found = true;
+                        }
+                        break; /* first-fit in this row */
+                    }
+                    /* Bounds fail: if max exceeded, skip rest of row; if min negative, advance */
+                    if ((uint32_t)abs_max_tx > atlas->tw || (uint32_t)abs_max_ty > atlas->th) {
+                        break; /* sprite won't fit further right/down */
+                    }
+                    tx++;
+                    continue;
+                }
+                if (skip > 1) {
+                    tx += skip;
+                } else {
+                    tx++;
+                }
+            }
+            if (found) {
+                break;
+            }
+        }
+    }
+
+    free(or_mask);
+
+    if (found) {
+        *out_tx = best_tx;
+        *out_ty = best_ty;
+    }
+    return found;
 }
 
 /* --- Area-descending sort comparator (ATLAS-03) --- */
@@ -620,7 +904,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     bool allow_rotate = opts->allow_rotate;
     bool pot = opts->power_of_two;
     float dilate = (float)extrude + ((float)padding * 0.5F);
-    uint32_t ts = opts->tile_size ? opts->tile_size : TILE_SIZE_DEFAULT;
+    NT_BUILD_ASSERT(opts->tile_size > 0 && "tile_pack: tile_size must be > 0");
+    uint32_t ts = opts->tile_size;
 
     // #region Build per-sprite inflated polygon tile grids
     TileGrid *sprite_grids = (TileGrid *)calloc(sprite_count, sizeof(TileGrid));
@@ -660,7 +945,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             max_cell_h = mh;
         }
     }
-    double side = sqrt((double)total_area * 1.2);
+    /* Start small — page growth will expand as needed for tighter final fit */
+    double side = sqrt((double)total_area) * 0.5;
     uint32_t init_dim = (uint32_t)(side + 0.5);
     uint32_t min_dim = (max_cell_w > max_cell_h ? max_cell_w : max_cell_h) + (2 * margin);
     if (init_dim < min_dim) {
@@ -680,14 +966,20 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     // #region Pack sprites onto pages using tile-grid collision
     uint32_t atlas_tw = (init_dim + ts - 1) / ts;
     uint32_t atlas_th = atlas_tw;
+    uint32_t max_tw = (max_size + ts - 1) / ts; /* max grid size in tiles */
+    uint32_t max_th = max_tw;
     TileGrid page_grids[ATLAS_MAX_PAGES];
     uint32_t page_count = 1;
     uint32_t page_w[ATLAS_MAX_PAGES];
     uint32_t page_h[ATLAS_MAX_PAGES];
-    uint32_t page_max_x[ATLAS_MAX_PAGES];
+    uint32_t page_max_x[ATLAS_MAX_PAGES]; /* pixel bounding box for final page size */
     uint32_t page_max_y[ATLAS_MAX_PAGES];
+    uint32_t page_used_tw[ATLAS_MAX_PAGES]; /* used extent in tiles — scan limit */
+    uint32_t page_used_th[ATLAS_MAX_PAGES];
     memset(page_max_x, 0, sizeof(page_max_x));
     memset(page_max_y, 0, sizeof(page_max_y));
+    memset(page_used_tw, 0, sizeof(page_used_tw));
+    memset(page_used_th, 0, sizeof(page_used_th));
 
     for (uint32_t p = 0; p < ATLAS_MAX_PAGES; p++) {
         page_w[p] = init_dim;
@@ -731,41 +1023,71 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
         uint32_t best_ty = UINT32_MAX;
         uint8_t best_rot = 0;
 
-        for (uint32_t pi = 0; pi < page_count && !placed; pi++) {
-            uint32_t scan_max_t = page_grids[pi].tw;
-            for (uint32_t r = 0; r < rot_count; r++) {
-                for (uint32_t ty = margin_tiles; ty < scan_max_t; ty++) {
-                    for (uint32_t tx = margin_tiles; tx < scan_max_t;) {
-                        uint32_t skip = 0;
-                        if (!tgrid_test(&page_grids[pi], &rot_sg[r], (int32_t)tx, (int32_t)ty, rot_ox[r], rot_oy[r], &skip)) {
-                            /* Verify the sprite fits within atlas pixel bounds (margin check) */
-                            int32_t abs_max_tx = (int32_t)tx + rot_ox[r] + (int32_t)rot_sg[r].tw;
-                            int32_t abs_max_ty = (int32_t)ty + rot_oy[r] + (int32_t)rot_sg[r].th;
-                            if (abs_max_tx <= (int32_t)scan_max_t && abs_max_ty <= (int32_t)scan_max_t) {
-                                if (ty < best_ty || (ty == best_ty && tx < best_tx)) {
-                                    best_page = pi;
-                                    best_tx = tx;
-                                    best_ty = ty;
-                                    best_rot = (uint8_t)r;
-                                    placed = true;
-                                }
-                            }
-                            break;
-                        }
-                        if (skip > 1) {
-                            tx += skip;
-                        } else {
-                            tx++;
-                        }
-                    }
-                    if (placed) {
-                        break;
-                    }
-                }
+        /* Max sprite tile extent for scan limit (any rotation) */
+        uint32_t max_stw = rot_sg[0].tw;
+        uint32_t max_sth = rot_sg[0].th;
+        for (uint32_t r = 1; r < rot_count; r++) {
+            if (rot_sg[r].tw > max_stw) {
+                max_stw = rot_sg[r].tw;
+            }
+            if (rot_sg[r].th > max_sth) {
+                max_sth = rot_sg[r].th;
             }
         }
 
-        // #region Multi-page overflow (ATLAS-18)
+        // #region Try existing pages (scan limited to used extent + sprite size)
+        for (uint32_t pi = 0; pi < page_count && !placed; pi++) {
+            uint32_t scan_tw = page_used_tw[pi] + max_stw + 1;
+            uint32_t scan_th = page_used_th[pi] + max_sth + 1;
+            if (scan_tw > page_grids[pi].tw) {
+                scan_tw = page_grids[pi].tw;
+            }
+            if (scan_th > page_grids[pi].th) {
+                scan_th = page_grids[pi].th;
+            }
+            placed = scan_region(&page_grids[pi], rot_sg, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, scan_tw, scan_th, &best_tx, &best_ty, &best_rot);
+            if (placed) {
+                best_page = pi;
+            }
+        }
+        // #endregion
+
+        // #region Page growth: grow last page before creating new one
+        if (!placed) {
+            uint32_t pi = page_count - 1; /* grow last page */
+            while (!placed && (page_grids[pi].tw < max_tw || page_grids[pi].th < max_th)) {
+                uint32_t old_tw = 0;
+                uint32_t old_th = 0;
+                tgrid_grow(&page_grids[pi], max_tw, max_th, &old_tw, &old_th);
+                page_w[pi] = page_grids[pi].tw * ts;
+                page_h[pi] = page_grids[pi].th * ts;
+
+                /* Scan limit: used extent + sprite size, clamped to grid */
+                uint32_t g_scan_tw = page_used_tw[pi] + max_stw + 1;
+                uint32_t g_scan_th = page_used_th[pi] + max_sth + 1;
+                if (g_scan_tw > page_grids[pi].tw) {
+                    g_scan_tw = page_grids[pi].tw;
+                }
+                if (g_scan_th > page_grids[pi].th) {
+                    g_scan_th = page_grids[pi].th;
+                }
+
+                /* Priority area: try old region first to fill gaps */
+                placed = scan_region(&page_grids[pi], rot_sg, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, old_tw, old_th, &best_tx, &best_ty, &best_rot);
+
+                /* Then scan used extent */
+                if (!placed) {
+                    placed = scan_region(&page_grids[pi], rot_sg, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, g_scan_tw, g_scan_th, &best_tx, &best_ty, &best_rot);
+                }
+
+                if (placed) {
+                    best_page = pi;
+                }
+            }
+        }
+        // #endregion
+
+        // #region Multi-page overflow: new page only when growth exhausted (ATLAS-18)
         if (!placed) {
             NT_BUILD_ASSERT(page_count < ATLAS_MAX_PAGES && "atlas: too many pages");
             uint32_t new_page = page_count;
@@ -774,11 +1096,22 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             page_w[new_page] = init_dim;
             page_h[new_page] = init_dim;
 
-            best_page = new_page;
-            best_tx = margin_tiles;
-            best_ty = margin_tiles;
-            best_rot = 0;
-            placed = true;
+            placed = scan_region(&page_grids[new_page], rot_sg, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th, &best_tx, &best_ty, &best_rot);
+            if (!placed) {
+                /* New page too small — grow it */
+                while (!placed && (page_grids[new_page].tw < max_tw || page_grids[new_page].th < max_th)) {
+                    uint32_t old_tw = 0;
+                    uint32_t old_th = 0;
+                    tgrid_grow(&page_grids[new_page], max_tw, max_th, &old_tw, &old_th);
+                    page_w[new_page] = page_grids[new_page].tw * ts;
+                    page_h[new_page] = page_grids[new_page].th * ts;
+                    placed = scan_region(&page_grids[new_page], rot_sg, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th, &best_tx, &best_ty,
+                                         &best_rot);
+                }
+            }
+            if (placed) {
+                best_page = new_page;
+            }
         }
         // #endregion
 
@@ -797,6 +1130,16 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
         }
         if (bottom > page_max_y[best_page]) {
             page_max_y[best_page] = bottom;
+        }
+
+        /* Track used extent in tiles (for scan limiting) */
+        uint32_t used_right_t = (uint32_t)((int32_t)best_tx + rot_ox[best_rot]) + rot_sg[best_rot].tw;
+        uint32_t used_bottom_t = (uint32_t)((int32_t)best_ty + rot_oy[best_rot]) + rot_sg[best_rot].th;
+        if (used_right_t > page_used_tw[best_page]) {
+            page_used_tw[best_page] = used_right_t;
+        }
+        if (used_bottom_t > page_used_th[best_page]) {
+            page_used_th[best_page] = used_bottom_t;
         }
 
         /* Record placement — convert tile coords to pixel coords */
@@ -1126,6 +1469,8 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
         state->opts = nt_atlas_opts_defaults();
     }
     state->opts.compress = NULL; /* zeroed -- use has_compress flag */
+    NT_BUILD_ASSERT(state->opts.max_vertices <= 32 && "begin_atlas: max_vertices must be <= 32 (tile grid index buffer limit)");
+    NT_BUILD_ASSERT(state->opts.tile_size > 0 && state->opts.tile_size <= 32 && "begin_atlas: tile_size must be 1-32");
 
     /* Initialize sprite array */
     state->sprite_capacity = 64;
@@ -1287,6 +1632,8 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     pos += (uint32_t)sizeof(opts->max_vertices);
     memcpy(opts_buf + pos, &opts->format, sizeof(opts->format));
     pos += (uint32_t)sizeof(opts->format);
+    memcpy(opts_buf + pos, &opts->tile_size, sizeof(opts->tile_size));
+    pos += (uint32_t)sizeof(opts->tile_size);
     uint8_t flags = (uint8_t)((opts->allow_rotate ? 1 : 0) | (opts->power_of_two ? 2 : 0) | (opts->polygon_mode ? 4 : 0) | (opts->debug_png ? 8 : 0));
     opts_buf[pos++] = flags;
     uint8_t hc = has_compress ? 1 : 0;
@@ -1518,9 +1865,23 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
             while (dedup_map[orig] >= 0) {
                 orig = (uint32_t)dedup_map[orig];
             }
-            /* Verify trimmed pixels match */
+            /* Verify trimmed pixels match (dims + byte-level comparison) */
             if (trim_w[curr_idx] == trim_w[orig] && trim_h[curr_idx] == trim_h[orig]) {
-                dedup_map[curr_idx] = (int32_t)orig;
+                bool pixels_match = true;
+                uint32_t tw = trim_w[curr_idx];
+                uint32_t th = trim_h[curr_idx];
+                for (uint32_t row = 0; row < th && pixels_match; row++) {
+                    size_t off_a = (((size_t)(trim_y[curr_idx] + row) * sprites[curr_idx].width) + trim_x[curr_idx]) * 4;
+                    size_t off_b = (((size_t)(trim_y[orig] + row) * sprites[orig].width) + trim_x[orig]) * 4;
+                    const uint8_t *row_a = sprites[curr_idx].rgba + off_a;
+                    const uint8_t *row_b = sprites[orig].rgba + off_b;
+                    if (memcmp(row_a, row_b, ((size_t)tw) * 4) != 0) {
+                        pixels_match = false;
+                    }
+                }
+                if (pixels_match) {
+                    dedup_map[curr_idx] = (int32_t)orig;
+                }
             }
         }
     }

@@ -48,7 +48,7 @@ typedef struct {
     uint16_t vertex_start; /* 24: index into vertex array */
     uint8_t vertex_count;  /* 26: number of vertices for this region */
     uint8_t page_index;    /* 27: which texture page this region belongs to */
-    uint8_t rotated;       /* 28: 0=no rotation, 1=90 CW rotation applied in atlas */
+    uint8_t rotated;       /* 28: 0=none, 1=90 CW, 2=180, 3=270 CW */
     uint8_t _pad[3];       /* 29: align to 32 bytes */
 } NtAtlasRegion;           /* 32 bytes */
 #pragma pack(pop)
