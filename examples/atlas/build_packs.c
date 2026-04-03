@@ -9,6 +9,8 @@
  * Run from the project root directory.
  */
 
+#define NT_BUILD_MAX_ASSETS 16384
+#define GLOB_MAX_MATCHES 8192
 #include "nt_builder.h"
 
 #include <stdio.h>
@@ -54,7 +56,6 @@ int main(int argc, char *argv[]) {
     }
     nt_builder_set_header_dir(ctx, HEADER_DIR);
     nt_builder_set_cache_dir(ctx, "build/examples/atlas/_cache");
-
     /* --- Mesh + shaders (reuse textured_quad assets) --- */
 
     NtStreamLayout layout[] = {
@@ -68,18 +69,21 @@ int main(int argc, char *argv[]) {
     /* --- Atlas: pack spineboy sprites with polygon mode --- */
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
-    opts.max_size = 2048;
-    opts.polygon_mode = true; /* convex hull packing */
-    opts.max_vertices = 8;    /* up to 8-vertex hulls */
-    opts.allow_rotate = true; /* try rotations for better fit */
-    opts.debug_png = true;    /* write debug atlas pages as PNG */
-    opts.tile_size = 4;
+    opts.max_size = (argc >= 3) ? (uint32_t)atoi(argv[2]) : 2048;
+    opts.polygon_mode = true;
+    opts.max_vertices = 8;
+    opts.allow_rotate = true;
+    opts.debug_png = true;
+    opts.tile_size = (argc >= 4) ? (uint8_t)atoi(argv[3]) : 4;
+    const char *glob_pattern = (argc >= 5) ? argv[4] : "assets/sprites/spineboy/*.png";
+    const char *atlas_name = (argc >= 6) ? argv[5] : "spineboy";
+    if (argc >= 7 && argv[6][0] == 'r') {
+        opts.polygon_mode = false;
+    }
+    (void)printf("atlas=%s max=%u ts=%u poly=%s\n", atlas_name, opts.max_size, opts.tile_size, opts.polygon_mode ? "yes" : "no");
 
-    nt_builder_begin_atlas(ctx, "spineboy", &opts);
-
-    /* Add all spineboy sprites via glob */
-    nt_builder_atlas_add_glob(ctx, "assets/sprites/spineboy/*.png");
-
+    nt_builder_begin_atlas(ctx, atlas_name, &opts);
+    nt_builder_atlas_add_glob(ctx, glob_pattern);
     nt_builder_end_atlas(ctx);
 
     /* Finish and generate headers */

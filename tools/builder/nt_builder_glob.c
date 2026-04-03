@@ -43,7 +43,9 @@ static bool wildcard_match(const char *pattern, const char *str) {
 
 /* --- Sorted directory iteration --- */
 
-#define GLOB_MAX_MATCHES 1024
+#ifndef GLOB_MAX_MATCHES
+#define GLOB_MAX_MATCHES 8192
+#endif
 
 static int glob_strcmp(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
 
@@ -76,7 +78,7 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
     }
 
     /* Collect matching paths into array, then sort for deterministic order */
-    char *matches[GLOB_MAX_MATCHES];
+    char **matches = (char **)malloc((size_t)GLOB_MAX_MATCHES * sizeof(char *));
     uint32_t match_count = 0;
     bool overflow = false;
 
@@ -119,6 +121,7 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
     {
         DIR *dir = opendir(directory);
         if (!dir) {
+            free(matches);
             return true;
         }
 
@@ -160,6 +163,7 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
         for (uint32_t i = 0; i < match_count; i++) {
             free(matches[i]);
         }
+        free(matches);
         return false;
     }
 
@@ -168,6 +172,7 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
         callback(matches[i], user);
         free(matches[i]);
     }
+    free(matches);
     return true;
 }
 

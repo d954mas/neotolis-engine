@@ -460,8 +460,7 @@ static int parallel_encode_worker(void *arg) {
 
 /* --- Finish: dedup decoded entries, encode non-duplicates, write pack --- */
 
-/* Guard: stack arrays in finish_pack sized to NT_BUILD_MAX_ASSETS. If the limit grows, revisit. */
-_Static_assert(sizeof(NtEncodeResult) * (size_t)NT_BUILD_MAX_ASSETS <= (size_t)64U * 1024U, "NtEncodeResult stack array exceeds 64 KB — move to heap");
+/* NtEncodeResult array is heap-allocated in finish_pack to support large asset counts. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
@@ -538,11 +537,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
     }
 
-    /* Per-asset encode results (filled by cache/encode, consumed by assembly) */
-    NtEncodeResult results[NT_BUILD_MAX_ASSETS];
-    memset(results, 0, sizeof(results));
-    uint64_t opts_hashes[NT_BUILD_MAX_ASSETS];
-    memset(opts_hashes, 0, sizeof(opts_hashes));
+    /* Per-asset encode results (heap-allocated to support large asset counts) */
+    NtEncodeResult *results = (NtEncodeResult *)calloc(ctx->pending_count, sizeof(NtEncodeResult));
+    NT_BUILD_ASSERT(results && "finish_pack: alloc failed");
+    uint64_t *opts_hashes = (uint64_t *)calloc(ctx->pending_count, sizeof(uint64_t));
+    NT_BUILD_ASSERT(opts_hashes && "finish_pack: alloc failed");
 
     /* PAR-03: Initialize global state before any encode (thread-safe prerequisite).
      * Check if any pending non-deduped texture entry has compression. */
@@ -1098,6 +1097,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     }
     NT_LOG_INFO("  CRC32:  0x%08X", checksum);
 
+    free(results);
+    free(opts_hashes);
     return NT_BUILD_OK;
 }
 

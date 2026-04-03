@@ -9,116 +9,2024 @@
 #define ASSET_MESH_ASSETS_MESHES_CUBE_GLB ((nt_hash64_t){0xE41DD25FE1BAFFC5ULL}) /* assets/meshes/cube.glb */
 
 /* --- TEXTURE --- */
-#define ASSET_TEXTURE_SPINEBOY_TEX0 ((nt_hash64_t){0x77D96C7DFBAAA79DULL}) /* spineboy/tex0 */
+#define ASSET_TEXTURE_BIGATLAS_TEX0 ((nt_hash64_t){0xEBFB5B3811F5195FULL}) /* bigatlas/tex0 */
 
 /* --- SHADER --- */
 #define ASSET_SHADER_ASSETS_SHADERS_MESH_INST_FRAG ((nt_hash64_t){0x407D2737917D7489ULL}) /* assets/shaders/mesh_inst.frag */
 #define ASSET_SHADER_ASSETS_SHADERS_MESH_INST_VERT ((nt_hash64_t){0xABD22A1B5B29F6E6ULL}) /* assets/shaders/mesh_inst.vert */
 
 /* --- ATLAS --- */
-#define ASSET_ATLAS_SPINEBOY ((nt_hash64_t){0x0450A34A3746ACD9ULL}) /* spineboy */
+#define ASSET_ATLAS_BIGATLAS ((nt_hash64_t){0x43BCD9E69B63E0CCULL}) /* bigatlas */
 
 /* --- ATLAS_REGION --- */
-#define ASSET_ATLAS_REGION_SPINEBOY_CROSSHAIR_PNG ((nt_hash64_t){0xB19F6AE96343CB33ULL}) /* spineboy/crosshair.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_EYE_INDIFFERENT_PNG ((nt_hash64_t){0xE6C210E740F743FDULL}) /* spineboy/eye_indifferent.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_EYE_SURPRISED_PNG ((nt_hash64_t){0x3C1D430B9DDB7275ULL}) /* spineboy/eye_surprised.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_EYES_PNG ((nt_hash64_t){0x7D5B7D0ADD748764ULL}) /* spineboy/eyes.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_FRONT_BRACER_PNG ((nt_hash64_t){0x291A896671867E23ULL}) /* spineboy/front_bracer.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_FRONT_FIST_CLOSED_PNG ((nt_hash64_t){0x24BB1B51A52C4AA6ULL}) /* spineboy/front_fist_closed.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_FRONT_FIST_OPEN_PNG ((nt_hash64_t){0xBE83787ED3BFD1C4ULL}) /* spineboy/front_fist_open.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_FRONT_FOOT_PNG ((nt_hash64_t){0x06660384A7963218ULL}) /* spineboy/front_foot.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_FRONT_FOOT_BEND1_PNG ((nt_hash64_t){0x968B943065B3E5EEULL}) /* spineboy/front_foot_bend1.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_FRONT_FOOT_BEND2_PNG ((nt_hash64_t){0x96E7DC79A1925692ULL}) /* spineboy/front_foot_bend2.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_FRONT_SHIN_PNG ((nt_hash64_t){0x1055BA2EA80CE3C4ULL}) /* spineboy/front_shin.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_FRONT_THIGH_PNG ((nt_hash64_t){0xB792DBB88971DB58ULL}) /* spineboy/front_thigh.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_FRONT_UPPER_ARM_PNG ((nt_hash64_t){0x01E5CF5D6B249B96ULL}) /* spineboy/front_upper_arm.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_GOGGLES_PNG ((nt_hash64_t){0xF3B8FE06E2201458ULL}) /* spineboy/goggles.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_GUN_PNG ((nt_hash64_t){0xF728AE8DBCC64C90ULL}) /* spineboy/gun.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_HEAD_PNG ((nt_hash64_t){0x877049E252281BF6ULL}) /* spineboy/head.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_HOVERBOARD_BOARD_PNG ((nt_hash64_t){0xEB1C39B8C215EDCBULL}) /* spineboy/hoverboard-board.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_HOVERBOARD_THRUSTER_PNG ((nt_hash64_t){0xF6CE7CBF0B79870CULL}) /* spineboy/hoverboard-thruster.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_HOVERGLOW_SMALL_PNG ((nt_hash64_t){0xD7EBB171284C7B86ULL}) /* spineboy/hoverglow-small.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_MOUTH_GRIND_PNG ((nt_hash64_t){0xD771CA6E5711132AULL}) /* spineboy/mouth_grind.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_MOUTH_OOOO_PNG ((nt_hash64_t){0xAAEAD2285C2620FEULL}) /* spineboy/mouth_oooo.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_MOUTH_SMILE_PNG ((nt_hash64_t){0xE99A33AB5F714153ULL}) /* spineboy/mouth_smile.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE_GLOW_PNG ((nt_hash64_t){0x94DA201FF41B57ACULL}) /* spineboy/muzzle-glow.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE_RING_PNG ((nt_hash64_t){0x2DB004912B0A2709ULL}) /* spineboy/muzzle-ring.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE_PNG ((nt_hash64_t){0x9FBE721CF0AADDBDULL}) /* spineboy/muzzle.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE01_PNG ((nt_hash64_t){0x0796A0242CF6B1C3ULL}) /* spineboy/muzzle01.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE02_PNG ((nt_hash64_t){0xF5AA7A0EE445DF9BULL}) /* spineboy/muzzle02.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE03_PNG ((nt_hash64_t){0xFD75535A40B2BBE1ULL}) /* spineboy/muzzle03.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE04_PNG ((nt_hash64_t){0x937E6A6BDCD1BB9DULL}) /* spineboy/muzzle04.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_MUZZLE05_PNG ((nt_hash64_t){0x0C253558A853B1FFULL}) /* spineboy/muzzle05.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_NECK_PNG ((nt_hash64_t){0x650306633B8A3A11ULL}) /* spineboy/neck.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_PORTAL_BG_PNG ((nt_hash64_t){0x1C1EECAA3927A855ULL}) /* spineboy/portal-bg.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_PORTAL_FLARE1_PNG ((nt_hash64_t){0x47590F65A3C517DCULL}) /* spineboy/portal-flare1.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_PORTAL_FLARE2_PNG ((nt_hash64_t){0xE1EE4369BA523D2FULL}) /* spineboy/portal-flare2.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_PORTAL_FLARE3_PNG ((nt_hash64_t){0x73C4AA29EC64DF79ULL}) /* spineboy/portal-flare3.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_PORTAL_SHADE_PNG ((nt_hash64_t){0xA3B2805218155011ULL}) /* spineboy/portal-shade.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_PORTAL_STREAKS1_PNG ((nt_hash64_t){0xF9317950B5EBD28BULL}) /* spineboy/portal-streaks1.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_PORTAL_STREAKS2_PNG ((nt_hash64_t){0x7928EA4AD72AA220ULL}) /* spineboy/portal-streaks2.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_REAR_BRACER_PNG ((nt_hash64_t){0x83FE3AA5C4248834ULL}) /* spineboy/rear_bracer.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_REAR_FOOT_PNG ((nt_hash64_t){0x30F2E9D12150E6C4ULL}) /* spineboy/rear_foot.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_REAR_FOOT_BEND1_PNG ((nt_hash64_t){0x57545D03D636EF75ULL}) /* spineboy/rear_foot_bend1.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_REAR_FOOT_BEND2_PNG ((nt_hash64_t){0x5B5BCFDCCC19B97BULL}) /* spineboy/rear_foot_bend2.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_REAR_SHIN_PNG ((nt_hash64_t){0x1C88572FA2682253ULL}) /* spineboy/rear_shin.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_REAR_THIGH_PNG ((nt_hash64_t){0x4FC02ED954FF6EC0ULL}) /* spineboy/rear_thigh.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_REAR_UPPER_ARM_PNG ((nt_hash64_t){0x9FEE652FB6C4AA0DULL}) /* spineboy/rear_upper_arm.png */
-#define ASSET_ATLAS_REGION_SPINEBOY_TORSO_PNG ((nt_hash64_t){0x8D5F192B0EAADB6CULL}) /* spineboy/torso.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES__COPY_PNG ((nt_hash64_t){0x67E9E90DEB97C03BULL}) /* bigatlas/ages_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES__PNG ((nt_hash64_t){0x0349BE26144FCE3BULL}) /* bigatlas/ages_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES_10__COPY_PNG ((nt_hash64_t){0x61F6A42231956B85ULL}) /* bigatlas/ages_10_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES_10__PNG ((nt_hash64_t){0xF52F065E64613EDAULL}) /* bigatlas/ages_10_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES_13__COPY_PNG ((nt_hash64_t){0x99641E5C232B8C18ULL}) /* bigatlas/ages_13_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES_13__PNG ((nt_hash64_t){0xF3384E7FD7461F78ULL}) /* bigatlas/ages_13_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES_17__COPY_PNG ((nt_hash64_t){0xFD36D7ED325E629BULL}) /* bigatlas/ages_17_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES_17__PNG ((nt_hash64_t){0xC7AD0B343E3B938EULL}) /* bigatlas/ages_17_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES_18__COPY_PNG ((nt_hash64_t){0x7E6B8441CA8D30B8ULL}) /* bigatlas/ages_18_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES_18__PNG ((nt_hash64_t){0xB744E38CECF89F70ULL}) /* bigatlas/ages_18_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES_3__COPY_PNG ((nt_hash64_t){0xD282422667955161ULL}) /* bigatlas/ages_3_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES_3__PNG ((nt_hash64_t){0x03B0021A864AAC59ULL}) /* bigatlas/ages_3_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES_7__COPY_PNG ((nt_hash64_t){0xB878BA1BBEC45414ULL}) /* bigatlas/ages_7_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES_7__PNG ((nt_hash64_t){0x6D42BB68D43D3EE2ULL}) /* bigatlas/ages_7_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES_ALL__COPY_PNG ((nt_hash64_t){0x54C8D8D768E48045ULL}) /* bigatlas/ages_all_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AGES_ALL__PNG ((nt_hash64_t){0x5CBE1E7509BD5DDDULL}) /* bigatlas/ages_all_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_CLOCKWISE_COPY_PNG ((nt_hash64_t){0xA3414C2F530CCCD1ULL}) /* bigatlas/arrow_clockwise copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_CLOCKWISE_PNG ((nt_hash64_t){0xAD8EB7F0062E94E0ULL}) /* bigatlas/arrow_clockwise.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_CLOCKWISE__COPY_PNG ((nt_hash64_t){0x861D09FCCF48BE63ULL}) /* bigatlas/arrow_clockwise_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_CLOCKWISE__PNG ((nt_hash64_t){0x5B5C81A148BE8906ULL}) /* bigatlas/arrow_clockwise_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_COUNTERCLOCKWISE_COPY_PNG ((nt_hash64_t){0xFC8EDD8A430D1492ULL}) /* bigatlas/arrow_counterclockwise copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_COUNTERCLOCKWISE_PNG ((nt_hash64_t){0xACF5ACE782C72EF4ULL}) /* bigatlas/arrow_counterclockwise.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_COUNTERCLOCKWISE__COPY_PNG ((nt_hash64_t){0xBA14270280E26141ULL}) /* bigatlas/arrow_counterclockwise_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_COUNTERCLOCKWISE__PNG ((nt_hash64_t){0xA44D525178FF72F7ULL}) /* bigatlas/arrow_counterclockwise_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_CROSS_COPY_PNG ((nt_hash64_t){0x0AE76E885658CE6CULL}) /* bigatlas/arrow_cross copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_CROSS_PNG ((nt_hash64_t){0x8496E6AF1A1D1BFDULL}) /* bigatlas/arrow_cross.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_CROSS__COPY_PNG ((nt_hash64_t){0x0943DA565585F786ULL}) /* bigatlas/arrow_cross_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_CROSS__PNG ((nt_hash64_t){0x5FDF181D426EC834ULL}) /* bigatlas/arrow_cross_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_CROSS_DIVIDED_COPY_PNG ((nt_hash64_t){0xD0DE76D3C46B5D9BULL}) /* bigatlas/arrow_cross_divided copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_CROSS_DIVIDED_PNG ((nt_hash64_t){0x66D7C7D2848D4543ULL}) /* bigatlas/arrow_cross_divided.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_CROSS_DIVIDED__COPY_PNG ((nt_hash64_t){0x91ADCEC7B8F6DCB9ULL}) /* bigatlas/arrow_cross_divided_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_CROSS_DIVIDED__PNG ((nt_hash64_t){0xEB1F2F2EA3ECD9B0ULL}) /* bigatlas/arrow_cross_divided_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_DIAGONAL_COPY_PNG ((nt_hash64_t){0xA5925E4D806D4918ULL}) /* bigatlas/arrow_diagonal copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_DIAGONAL_PNG ((nt_hash64_t){0xC08ABA9EA773CB10ULL}) /* bigatlas/arrow_diagonal.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_DIAGONAL__COPY_PNG ((nt_hash64_t){0xFC2A064AB2478AD6ULL}) /* bigatlas/arrow_diagonal_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_DIAGONAL__PNG ((nt_hash64_t){0xD8E6119E6C24A073ULL}) /* bigatlas/arrow_diagonal_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_DIAGONAL_CROSS_COPY_PNG ((nt_hash64_t){0x04E1D81602C1D3E4ULL}) /* bigatlas/arrow_diagonal_cross copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_DIAGONAL_CROSS_PNG ((nt_hash64_t){0x200525B8BA9591D0ULL}) /* bigatlas/arrow_diagonal_cross.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_DIAGONAL_CROSS__COPY_PNG ((nt_hash64_t){0x342841DA64A96791ULL}) /* bigatlas/arrow_diagonal_cross_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_DIAGONAL_CROSS__PNG ((nt_hash64_t){0xE18423DABE812006ULL}) /* bigatlas/arrow_diagonal_cross_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_DIAGONAL_CROSS_DIVIDED_COPY_PNG ((nt_hash64_t){0x1CEA6C9BDE6F94EFULL}) /* bigatlas/arrow_diagonal_cross_divided copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_DIAGONAL_CROSS_DIVIDED_PNG ((nt_hash64_t){0xAF2C70BD880EF64DULL}) /* bigatlas/arrow_diagonal_cross_divided.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_DIAGONAL_CROSS_DIVIDED__COPY_PNG ((nt_hash64_t){0x47A0B2ABC66C1331ULL}) /* bigatlas/arrow_diagonal_cross_divided_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_DIAGONAL_CROSS_DIVIDED__PNG ((nt_hash64_t){0xD4543D1DC040DFFAULL}) /* bigatlas/arrow_diagonal_cross_divided_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_HORIZONTAL_COPY_PNG ((nt_hash64_t){0x3A8E69D01D7D91D9ULL}) /* bigatlas/arrow_horizontal copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_HORIZONTAL_PNG ((nt_hash64_t){0x5DCC565409EC774DULL}) /* bigatlas/arrow_horizontal.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_HORIZONTAL__COPY_PNG ((nt_hash64_t){0x7752B3484F3F6DBDULL}) /* bigatlas/arrow_horizontal_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_HORIZONTAL__PNG ((nt_hash64_t){0x6DF0443325DE5A16ULL}) /* bigatlas/arrow_horizontal_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_RESERVE_COPY_PNG ((nt_hash64_t){0xEF1FB2BEECEC40DEULL}) /* bigatlas/arrow_reserve copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_RESERVE_PNG ((nt_hash64_t){0x5D5D06F8A0B72A78ULL}) /* bigatlas/arrow_reserve.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_RESERVE__COPY_PNG ((nt_hash64_t){0xF9490520ACAD802CULL}) /* bigatlas/arrow_reserve_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_RESERVE__PNG ((nt_hash64_t){0xD17605A40DB87B95ULL}) /* bigatlas/arrow_reserve_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_RIGHT_COPY_PNG ((nt_hash64_t){0x3CFDB577EF3619ECULL}) /* bigatlas/arrow_right copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_RIGHT_PNG ((nt_hash64_t){0xF7F1947307B47284ULL}) /* bigatlas/arrow_right.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_RIGHT__COPY_PNG ((nt_hash64_t){0x14CF8F5F7FEEB192ULL}) /* bigatlas/arrow_right_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_RIGHT__PNG ((nt_hash64_t){0xFF4F4D402DF34F9CULL}) /* bigatlas/arrow_right_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_RIGHT_CURVE_COPY_PNG ((nt_hash64_t){0x5856398EECD39457ULL}) /* bigatlas/arrow_right_curve copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_RIGHT_CURVE_PNG ((nt_hash64_t){0xED44F6F36128CF4DULL}) /* bigatlas/arrow_right_curve.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_RIGHT_CURVE__COPY_PNG ((nt_hash64_t){0x1BDC294D96C926DFULL}) /* bigatlas/arrow_right_curve_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_RIGHT_CURVE__PNG ((nt_hash64_t){0x578C6DD77DCB8981ULL}) /* bigatlas/arrow_right_curve_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_ROTATE_COPY_PNG ((nt_hash64_t){0xF8A44E85DFDD59E5ULL}) /* bigatlas/arrow_rotate copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_ROTATE_PNG ((nt_hash64_t){0x5C4F986361A1CF79ULL}) /* bigatlas/arrow_rotate.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_ROTATE__COPY_PNG ((nt_hash64_t){0x3B01035EE8A9D77FULL}) /* bigatlas/arrow_rotate_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ARROW_ROTATE__PNG ((nt_hash64_t){0x5B6FF5C722D7E89DULL}) /* bigatlas/arrow_rotate_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AWARD_COPY_PNG ((nt_hash64_t){0x0C33CA5BA6F062BAULL}) /* bigatlas/award copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AWARD_PNG ((nt_hash64_t){0x68885614C33733E1ULL}) /* bigatlas/award.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AWARD__COPY_PNG ((nt_hash64_t){0x7B221EF4585D0FA5ULL}) /* bigatlas/award_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_AWARD__PNG ((nt_hash64_t){0x98FE24A9CD2A4EE2ULL}) /* bigatlas/award_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BLANK__COPY_PNG ((nt_hash64_t){0xA3FA28ADA8A7264AULL}) /* bigatlas/blank_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BLANK__PNG ((nt_hash64_t){0xD5E426B10C072F88ULL}) /* bigatlas/blank_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BLANK_PANEL__COPY_PNG ((nt_hash64_t){0xCD3E3047FC62334EULL}) /* bigatlas/blank_panel_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BLANK_PANEL__PNG ((nt_hash64_t){0x6053AD95D4B6FEF7ULL}) /* bigatlas/blank_panel_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BOOK_CLOSED_COPY_PNG ((nt_hash64_t){0x2DDAB9C8A18F07CEULL}) /* bigatlas/book_closed copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BOOK_CLOSED_PNG ((nt_hash64_t){0xABFE0FDE43AF9666ULL}) /* bigatlas/book_closed.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BOOK_CLOSED__COPY_PNG ((nt_hash64_t){0x405621D5B96B64B6ULL}) /* bigatlas/book_closed_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BOOK_CLOSED__PNG ((nt_hash64_t){0x94BDAF524F730289ULL}) /* bigatlas/book_closed_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BOOK_OPEN_COPY_PNG ((nt_hash64_t){0x95ADD548CB8B8463ULL}) /* bigatlas/book_open copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BOOK_OPEN_PNG ((nt_hash64_t){0x1EE1ED0347FC975CULL}) /* bigatlas/book_open.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BOOK_OPEN__COPY_PNG ((nt_hash64_t){0xF41D49D6FACA74CBULL}) /* bigatlas/book_open_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BOOK_OPEN__PNG ((nt_hash64_t){0xF7A710AC9D278841ULL}) /* bigatlas/book_open_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BOW_COPY_PNG ((nt_hash64_t){0xE1DC7AFA902055ABULL}) /* bigatlas/bow copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BOW_PNG ((nt_hash64_t){0x3DD9CDC53AA2406BULL}) /* bigatlas/bow.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BOW__COPY_PNG ((nt_hash64_t){0x2C78BF8EB5C05438ULL}) /* bigatlas/bow_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_BOW__PNG ((nt_hash64_t){0x64399163FFDB7B8CULL}) /* bigatlas/bow_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CAMPFIRE_COPY_PNG ((nt_hash64_t){0x563F5A60DDCAE0BEULL}) /* bigatlas/campfire copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CAMPFIRE_PNG ((nt_hash64_t){0xF3D4178C6B8E7E99ULL}) /* bigatlas/campfire.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CAMPFIRE__COPY_PNG ((nt_hash64_t){0xA09966863D2B00CFULL}) /* bigatlas/campfire_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CAMPFIRE__PNG ((nt_hash64_t){0x7AC6D3DA5492A66EULL}) /* bigatlas/campfire_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_COPY_PNG ((nt_hash64_t){0x984116BB2D7A9C54ULL}) /* bigatlas/card copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_PNG ((nt_hash64_t){0xD1532A1CE26851CFULL}) /* bigatlas/card.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD__COPY_PNG ((nt_hash64_t){0x0FDAE124C2663F44ULL}) /* bigatlas/card_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD__PNG ((nt_hash64_t){0xF387BD259663408FULL}) /* bigatlas/card_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_ADD_COPY_PNG ((nt_hash64_t){0x04B2881A35877DD2ULL}) /* bigatlas/card_add copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_ADD_PNG ((nt_hash64_t){0x060FC3AFE62E30A3ULL}) /* bigatlas/card_add.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_ADD__COPY_PNG ((nt_hash64_t){0xBF66E8027CBE3E89ULL}) /* bigatlas/card_add_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_ADD__PNG ((nt_hash64_t){0xA4E73FB3893E1CB5ULL}) /* bigatlas/card_add_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_DIAGONAL_COPY_PNG ((nt_hash64_t){0xA7AC56B8B5CCEE05ULL}) /* bigatlas/card_diagonal copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_DIAGONAL_PNG ((nt_hash64_t){0xB25FFC3A654D8932ULL}) /* bigatlas/card_diagonal.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_DIAGONAL__COPY_PNG ((nt_hash64_t){0x2768C522BD814DF3ULL}) /* bigatlas/card_diagonal_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_DIAGONAL__PNG ((nt_hash64_t){0xB45B781A3F38FA76ULL}) /* bigatlas/card_diagonal_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_DOWN_COPY_PNG ((nt_hash64_t){0xAB370CB7728C154BULL}) /* bigatlas/card_down copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_DOWN_PNG ((nt_hash64_t){0xBA41BD08B913DF05ULL}) /* bigatlas/card_down.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_DOWN__COPY_PNG ((nt_hash64_t){0x1CAD63EE3786A04DULL}) /* bigatlas/card_down_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_DOWN__PNG ((nt_hash64_t){0x54AA4E190B022F84ULL}) /* bigatlas/card_down_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_DOWN_OUTLINE_COPY_PNG ((nt_hash64_t){0x7D53A2F6AC05B517ULL}) /* bigatlas/card_down_outline copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_DOWN_OUTLINE_PNG ((nt_hash64_t){0xDCCFF4749E64A81EULL}) /* bigatlas/card_down_outline.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_DOWN_OUTLINE__COPY_PNG ((nt_hash64_t){0x542EB33C6130D957ULL}) /* bigatlas/card_down_outline_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_DOWN_OUTLINE__PNG ((nt_hash64_t){0x9E4D51E5C29EBCFBULL}) /* bigatlas/card_down_outline_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_FLIP_COPY_PNG ((nt_hash64_t){0x05F602DD4EB5D1ECULL}) /* bigatlas/card_flip copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_FLIP_PNG ((nt_hash64_t){0xAB2F98DEF6AB8A14ULL}) /* bigatlas/card_flip.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_FLIP__COPY_PNG ((nt_hash64_t){0xEE93E5A9D5680649ULL}) /* bigatlas/card_flip_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_FLIP__PNG ((nt_hash64_t){0xC44146A7411B31F8ULL}) /* bigatlas/card_flip_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_FLIPDOUBLE_COPY_PNG ((nt_hash64_t){0x7C4E866DC7D390C9ULL}) /* bigatlas/card_flipdouble copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_FLIPDOUBLE_PNG ((nt_hash64_t){0xBD2EF5ED4FBC15E5ULL}) /* bigatlas/card_flipdouble.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_FLIPDOUBLE__COPY_PNG ((nt_hash64_t){0xAAC7A10EEF92028EULL}) /* bigatlas/card_flipdouble_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_FLIPDOUBLE__PNG ((nt_hash64_t){0x76ADAD4C958D11E4ULL}) /* bigatlas/card_flipdouble_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_LIFT_COPY_PNG ((nt_hash64_t){0x3ADF2F86297FC56FULL}) /* bigatlas/card_lift copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_LIFT_PNG ((nt_hash64_t){0x1D21A7E2C8333ED8ULL}) /* bigatlas/card_lift.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_LIFT__COPY_PNG ((nt_hash64_t){0x5470AE01DDF5282CULL}) /* bigatlas/card_lift_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_LIFT__PNG ((nt_hash64_t){0xED8D0B29FED65E19ULL}) /* bigatlas/card_lift_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE_COPY_PNG ((nt_hash64_t){0xCBDD8DDD84777C69ULL}) /* bigatlas/card_outline copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE_PNG ((nt_hash64_t){0x052550C0BD0501F2ULL}) /* bigatlas/card_outline.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE__COPY_PNG ((nt_hash64_t){0x033E4F6EB090BB98ULL}) /* bigatlas/card_outline_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE__PNG ((nt_hash64_t){0x293B6D7041E68A44ULL}) /* bigatlas/card_outline_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE_LIFT_COPY_PNG ((nt_hash64_t){0x493CF8609EF5C9D2ULL}) /* bigatlas/card_outline_lift copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE_LIFT_PNG ((nt_hash64_t){0x1BF11E16634F5D5AULL}) /* bigatlas/card_outline_lift.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE_LIFT__COPY_PNG ((nt_hash64_t){0x56F7FA0170BC3751ULL}) /* bigatlas/card_outline_lift_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE_LIFT__PNG ((nt_hash64_t){0x43E84C0D7B37F989ULL}) /* bigatlas/card_outline_lift_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE_PLACE_COPY_PNG ((nt_hash64_t){0xC476BD1870E2D4F8ULL}) /* bigatlas/card_outline_place copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE_PLACE_PNG ((nt_hash64_t){0xD900279AE14912E6ULL}) /* bigatlas/card_outline_place.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE_PLACE__COPY_PNG ((nt_hash64_t){0x22290256D118F66DULL}) /* bigatlas/card_outline_place_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE_PLACE__PNG ((nt_hash64_t){0x2120EF3686AFF999ULL}) /* bigatlas/card_outline_place_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE_REMOVE_COPY_PNG ((nt_hash64_t){0xD738B4F86AFAF7AAULL}) /* bigatlas/card_outline_remove copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE_REMOVE_PNG ((nt_hash64_t){0x02BE12ABC25B9795ULL}) /* bigatlas/card_outline_remove.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE_REMOVE__COPY_PNG ((nt_hash64_t){0x172047C54476F2D3ULL}) /* bigatlas/card_outline_remove_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_OUTLINE_REMOVE__PNG ((nt_hash64_t){0xE07701D458651301ULL}) /* bigatlas/card_outline_remove_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_PLACE_COPY_PNG ((nt_hash64_t){0x24AC58E888157A8CULL}) /* bigatlas/card_place copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_PLACE_PNG ((nt_hash64_t){0x3DCE3A877CACE074ULL}) /* bigatlas/card_place.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_PLACE__COPY_PNG ((nt_hash64_t){0x9C9D5CE16AE2A513ULL}) /* bigatlas/card_place_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_PLACE__PNG ((nt_hash64_t){0xB3F7F93CCF5AD0E7ULL}) /* bigatlas/card_place_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_REMOVE_COPY_PNG ((nt_hash64_t){0x36E2CBE740A8EDA5ULL}) /* bigatlas/card_remove copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_REMOVE_PNG ((nt_hash64_t){0x7744BE475F3E568EULL}) /* bigatlas/card_remove.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_REMOVE__COPY_PNG ((nt_hash64_t){0x4C63CDA5AC38A916ULL}) /* bigatlas/card_remove_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_REMOVE__PNG ((nt_hash64_t){0x5E4C36F5431ABC0AULL}) /* bigatlas/card_remove_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_ROTATE_COPY_PNG ((nt_hash64_t){0xD3A6EDA0948EC013ULL}) /* bigatlas/card_rotate copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_ROTATE_PNG ((nt_hash64_t){0x3E80EB44A030A015ULL}) /* bigatlas/card_rotate.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_ROTATE__COPY_PNG ((nt_hash64_t){0xDC0FAB7D2EFD0B07ULL}) /* bigatlas/card_rotate_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_ROTATE__PNG ((nt_hash64_t){0xF095DBD4A26C2E56ULL}) /* bigatlas/card_rotate_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_SUBTRACT_COPY_PNG ((nt_hash64_t){0x58D80212437DE0D8ULL}) /* bigatlas/card_subtract copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_SUBTRACT_PNG ((nt_hash64_t){0x4B18375F2654A7AEULL}) /* bigatlas/card_subtract.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_SUBTRACT__COPY_PNG ((nt_hash64_t){0x9059118651170B54ULL}) /* bigatlas/card_subtract_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_SUBTRACT__PNG ((nt_hash64_t){0xAA6B3629E49C41CFULL}) /* bigatlas/card_subtract_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_COPY_PNG ((nt_hash64_t){0x86CBFB7C3DDC6255ULL}) /* bigatlas/card_tap copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_PNG ((nt_hash64_t){0x442AA76D38D61573ULL}) /* bigatlas/card_tap.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP__COPY_PNG ((nt_hash64_t){0xA7F5C121D0439875ULL}) /* bigatlas/card_tap_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP__PNG ((nt_hash64_t){0x75D9422AB7EC3625ULL}) /* bigatlas/card_tap_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_DOWN_COPY_PNG ((nt_hash64_t){0x1FB06D99DE04823DULL}) /* bigatlas/card_tap_down copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_DOWN_PNG ((nt_hash64_t){0x1312ED31EEE24574ULL}) /* bigatlas/card_tap_down.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_DOWN__COPY_PNG ((nt_hash64_t){0xF8218E136CF552B7ULL}) /* bigatlas/card_tap_down_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_DOWN__PNG ((nt_hash64_t){0xA579773CE084F922ULL}) /* bigatlas/card_tap_down_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_OUTLINE_COPY_PNG ((nt_hash64_t){0x9D2D2ADDB4DC3B61ULL}) /* bigatlas/card_tap_outline copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_OUTLINE_PNG ((nt_hash64_t){0x09B85D3D16BD0832ULL}) /* bigatlas/card_tap_outline.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_OUTLINE__COPY_PNG ((nt_hash64_t){0x4FC8A1ED263C4568ULL}) /* bigatlas/card_tap_outline_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_OUTLINE__PNG ((nt_hash64_t){0x6E1533ACA2A83B59ULL}) /* bigatlas/card_tap_outline_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_OUTLINE_DOWN_COPY_PNG ((nt_hash64_t){0xDD48E40956A283F3ULL}) /* bigatlas/card_tap_outline_down copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_OUTLINE_DOWN_PNG ((nt_hash64_t){0x07C01C72200E0D50ULL}) /* bigatlas/card_tap_outline_down.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_OUTLINE_DOWN__COPY_PNG ((nt_hash64_t){0x9BDB2193AC4673BDULL}) /* bigatlas/card_tap_outline_down_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_OUTLINE_DOWN__PNG ((nt_hash64_t){0x2EFD8D7E1FFE2EF3ULL}) /* bigatlas/card_tap_outline_down_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_OUTLINE_UP_COPY_PNG ((nt_hash64_t){0x0080F21126276595ULL}) /* bigatlas/card_tap_outline_up copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_OUTLINE_UP_PNG ((nt_hash64_t){0x8D9C012B6DCC2EDAULL}) /* bigatlas/card_tap_outline_up.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_OUTLINE_UP__COPY_PNG ((nt_hash64_t){0x9D45571B36BC1464ULL}) /* bigatlas/card_tap_outline_up_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_OUTLINE_UP__PNG ((nt_hash64_t){0x00BDC44175BDBD75ULL}) /* bigatlas/card_tap_outline_up_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_UP_COPY_PNG ((nt_hash64_t){0x8F2D9573065D934CULL}) /* bigatlas/card_tap_up copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_UP_PNG ((nt_hash64_t){0xEA895125D52F5D3EULL}) /* bigatlas/card_tap_up.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_UP__COPY_PNG ((nt_hash64_t){0xF60D46DA4E98DD24ULL}) /* bigatlas/card_tap_up_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TAP_UP__PNG ((nt_hash64_t){0xDDB5374FF6F4E72CULL}) /* bigatlas/card_tap_up_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TARGET_COPY_PNG ((nt_hash64_t){0x20C928DD80F58F09ULL}) /* bigatlas/card_target copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TARGET_PNG ((nt_hash64_t){0x3911118B06C2A6F3ULL}) /* bigatlas/card_target.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TARGET__COPY_PNG ((nt_hash64_t){0x07333ADEE9F61913ULL}) /* bigatlas/card_target_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARD_TARGET__PNG ((nt_hash64_t){0xEE3A280A12ACE766ULL}) /* bigatlas/card_target_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS__COPY_PNG ((nt_hash64_t){0xA59FFCF4EEA45A67ULL}) /* bigatlas/cards_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS__PNG ((nt_hash64_t){0x285CF92D8B351083ULL}) /* bigatlas/cards_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_COLLECTION_COPY_PNG ((nt_hash64_t){0x3B5A55AA0DE83BFEULL}) /* bigatlas/cards_collection copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_COLLECTION_PNG ((nt_hash64_t){0x57F27E2F27CAFB3CULL}) /* bigatlas/cards_collection.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_COLLECTION__COPY_PNG ((nt_hash64_t){0xA721CFA789F89584ULL}) /* bigatlas/cards_collection_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_COLLECTION__PNG ((nt_hash64_t){0xD4C13D53EE628272ULL}) /* bigatlas/cards_collection_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_COLLECTION_OUTLINE_COPY_PNG ((nt_hash64_t){0x402166BE72F7168BULL}) /* bigatlas/cards_collection_outline copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_COLLECTION_OUTLINE_PNG ((nt_hash64_t){0x76389C9A9147DA79ULL}) /* bigatlas/cards_collection_outline.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_COLLECTION_OUTLINE__COPY_PNG ((nt_hash64_t){0x90B11F33E82250D5ULL}) /* bigatlas/cards_collection_outline_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_COLLECTION_OUTLINE__PNG ((nt_hash64_t){0xAF825093D3D1A014ULL}) /* bigatlas/cards_collection_outline_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_DIAGONAL_COPY_PNG ((nt_hash64_t){0x3CBED02C2E5EB4DEULL}) /* bigatlas/cards_diagonal copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_DIAGONAL_PNG ((nt_hash64_t){0xC47120B3963FD1BCULL}) /* bigatlas/cards_diagonal.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_DIAGONAL__COPY_PNG ((nt_hash64_t){0x308D12ED5B7A29EFULL}) /* bigatlas/cards_diagonal_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_DIAGONAL__PNG ((nt_hash64_t){0x320FD573EABB95ADULL}) /* bigatlas/cards_diagonal_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_FAN_COPY_PNG ((nt_hash64_t){0xD13E0A067077CAEFULL}) /* bigatlas/cards_fan copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_FAN_PNG ((nt_hash64_t){0x619B8F2979E406F3ULL}) /* bigatlas/cards_fan.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_FAN__COPY_PNG ((nt_hash64_t){0xC3D9BA3E49F64A78ULL}) /* bigatlas/cards_fan_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_FAN__PNG ((nt_hash64_t){0xF717E449C83154D7ULL}) /* bigatlas/cards_fan_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_FAN_OUTLINE_COPY_PNG ((nt_hash64_t){0x205AB460D8B69FF7ULL}) /* bigatlas/cards_fan_outline copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_FAN_OUTLINE_PNG ((nt_hash64_t){0x6061FF6FC702F066ULL}) /* bigatlas/cards_fan_outline.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_FAN_OUTLINE__COPY_PNG ((nt_hash64_t){0x5A6F6E2F40D8E14DULL}) /* bigatlas/cards_fan_outline_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_FAN_OUTLINE__PNG ((nt_hash64_t){0x0822A3E93F9CBBF9ULL}) /* bigatlas/cards_fan_outline_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_FLIP_COPY_PNG ((nt_hash64_t){0x8B73564681B8CCFAULL}) /* bigatlas/cards_flip copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_FLIP_PNG ((nt_hash64_t){0x3ACD0BD5E3FC3436ULL}) /* bigatlas/cards_flip.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_FLIP__COPY_PNG ((nt_hash64_t){0x695183D28747BF47ULL}) /* bigatlas/cards_flip_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_FLIP__PNG ((nt_hash64_t){0xEE7B2D83CE9A0340ULL}) /* bigatlas/cards_flip_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_ORDER_COPY_PNG ((nt_hash64_t){0x6E8BDEC4A01D686DULL}) /* bigatlas/cards_order copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_ORDER_PNG ((nt_hash64_t){0xF7DD9CD76DC000F8ULL}) /* bigatlas/cards_order.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_ORDER__COPY_PNG ((nt_hash64_t){0xCC4A8729809D9F98ULL}) /* bigatlas/cards_order_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_ORDER__PNG ((nt_hash64_t){0x0BA938F302B54E48ULL}) /* bigatlas/cards_order_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_RETURN_COPY_PNG ((nt_hash64_t){0x9E1CE302BEA642B5ULL}) /* bigatlas/cards_return copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_RETURN_PNG ((nt_hash64_t){0x5511703C2B3BBBBBULL}) /* bigatlas/cards_return.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_RETURN__COPY_PNG ((nt_hash64_t){0x351EDE7B38888CF9ULL}) /* bigatlas/cards_return_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_RETURN__PNG ((nt_hash64_t){0x3BDEE42FFE13970DULL}) /* bigatlas/cards_return_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SEEK_COPY_PNG ((nt_hash64_t){0x3AB2058EFF1C5560ULL}) /* bigatlas/cards_seek copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SEEK_PNG ((nt_hash64_t){0x0AF1BA15FEAD1709ULL}) /* bigatlas/cards_seek.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SEEK__COPY_PNG ((nt_hash64_t){0x8B52D2150DC2E18AULL}) /* bigatlas/cards_seek_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SEEK__PNG ((nt_hash64_t){0x379F922E6EB649DBULL}) /* bigatlas/cards_seek_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SEEK_TOP_COPY_PNG ((nt_hash64_t){0x0228DF83869A2790ULL}) /* bigatlas/cards_seek_top copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SEEK_TOP_PNG ((nt_hash64_t){0x08E0CC7A7E56A253ULL}) /* bigatlas/cards_seek_top.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SEEK_TOP__COPY_PNG ((nt_hash64_t){0xADB16BD24C499E6DULL}) /* bigatlas/cards_seek_top_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SEEK_TOP__PNG ((nt_hash64_t){0xA2794179EE41C0DEULL}) /* bigatlas/cards_seek_top_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SHIFT_COPY_PNG ((nt_hash64_t){0xB3E9021F48FCA4ACULL}) /* bigatlas/cards_shift copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SHIFT_PNG ((nt_hash64_t){0xB133B4BA86647077ULL}) /* bigatlas/cards_shift.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SHIFT__COPY_PNG ((nt_hash64_t){0x1FCF2FDAED313F9EULL}) /* bigatlas/cards_shift_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SHIFT__PNG ((nt_hash64_t){0x1074B7C5479A3191ULL}) /* bigatlas/cards_shift_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SHUFFLE_COPY_PNG ((nt_hash64_t){0xB8C7F1E80F6EB50FULL}) /* bigatlas/cards_shuffle copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SHUFFLE_PNG ((nt_hash64_t){0xCF96FC337037F2AFULL}) /* bigatlas/cards_shuffle.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SHUFFLE__COPY_PNG ((nt_hash64_t){0x33B9C8A4E4A4D46CULL}) /* bigatlas/cards_shuffle_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SHUFFLE__PNG ((nt_hash64_t){0x0221A6CA89510898ULL}) /* bigatlas/cards_shuffle_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SKULL_COPY_PNG ((nt_hash64_t){0x9EB78C30F4F818F3ULL}) /* bigatlas/cards_skull copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SKULL_PNG ((nt_hash64_t){0xD42896F7CE1BE219ULL}) /* bigatlas/cards_skull.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SKULL__COPY_PNG ((nt_hash64_t){0x1FEF5A5B71F46362ULL}) /* bigatlas/cards_skull_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_SKULL__PNG ((nt_hash64_t){0x700F9DA209E698E1ULL}) /* bigatlas/cards_skull_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_STACK_COPY_PNG ((nt_hash64_t){0xFE6A56ABB96B560CULL}) /* bigatlas/cards_stack copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_STACK_PNG ((nt_hash64_t){0xB99CED315AA77E35ULL}) /* bigatlas/cards_stack.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_STACK__COPY_PNG ((nt_hash64_t){0xB2D57842BDF00309ULL}) /* bigatlas/cards_stack_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_STACK__PNG ((nt_hash64_t){0x5009890ADC6A9FBCULL}) /* bigatlas/cards_stack_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_STACK_CROSS_COPY_PNG ((nt_hash64_t){0x201F21C7A56EC6E5ULL}) /* bigatlas/cards_stack_cross copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_STACK_CROSS_PNG ((nt_hash64_t){0x22CACA1150C15B39ULL}) /* bigatlas/cards_stack_cross.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_STACK_CROSS__COPY_PNG ((nt_hash64_t){0x46EEE52E33E3679FULL}) /* bigatlas/cards_stack_cross_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_STACK_CROSS__PNG ((nt_hash64_t){0x097BFDDD950EF39FULL}) /* bigatlas/cards_stack_cross_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_STACK_HIGH_COPY_PNG ((nt_hash64_t){0xA3B949E3BB9257A0ULL}) /* bigatlas/cards_stack_high copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_STACK_HIGH_PNG ((nt_hash64_t){0x144FE689B9FF6A75ULL}) /* bigatlas/cards_stack_high.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_STACK_HIGH__COPY_PNG ((nt_hash64_t){0x647FC792D8BF5064ULL}) /* bigatlas/cards_stack_high_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_STACK_HIGH__PNG ((nt_hash64_t){0xA717F4641E946696ULL}) /* bigatlas/cards_stack_high_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_TAKE_COPY_PNG ((nt_hash64_t){0xCFE6807E8277D4E0ULL}) /* bigatlas/cards_take copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_TAKE_PNG ((nt_hash64_t){0xAE8DFFE91D933123ULL}) /* bigatlas/cards_take.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_TAKE__COPY_PNG ((nt_hash64_t){0x5737C63FBCFF0B6BULL}) /* bigatlas/cards_take_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_TAKE__PNG ((nt_hash64_t){0x33062939CF5AC899ULL}) /* bigatlas/cards_take_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_TEXT__COPY_PNG ((nt_hash64_t){0x30387175DE7FE7E6ULL}) /* bigatlas/cards_text_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_TEXT__PNG ((nt_hash64_t){0x9880ED6BFFA8CC03ULL}) /* bigatlas/cards_text_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_UNDER_COPY_PNG ((nt_hash64_t){0xED0B5711DA6A6D08ULL}) /* bigatlas/cards_under copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_UNDER_PNG ((nt_hash64_t){0xF4B09CC4FBB48EC8ULL}) /* bigatlas/cards_under.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_UNDER__COPY_PNG ((nt_hash64_t){0x3994CA5730A8798FULL}) /* bigatlas/cards_under_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CARDS_UNDER__PNG ((nt_hash64_t){0x954BF341CAC8BC3CULL}) /* bigatlas/cards_under_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER_COPY_PNG ((nt_hash64_t){0xC8CCAFED8EEAA5B5ULL}) /* bigatlas/character copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER_PNG ((nt_hash64_t){0x098600DC238E0F64ULL}) /* bigatlas/character.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER__COPY_PNG ((nt_hash64_t){0x973A065523A35233ULL}) /* bigatlas/character_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER__PNG ((nt_hash64_t){0xFB05276CCFDC52E2ULL}) /* bigatlas/character_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER_LIFT_COPY_PNG ((nt_hash64_t){0xEE2F7181F585C9BAULL}) /* bigatlas/character_lift copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER_LIFT_PNG ((nt_hash64_t){0xF4368DD26AB53CA7ULL}) /* bigatlas/character_lift.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER_LIFT__COPY_PNG ((nt_hash64_t){0x11D7226109B76942ULL}) /* bigatlas/character_lift_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER_LIFT__PNG ((nt_hash64_t){0xC47CE6E674FAFDDEULL}) /* bigatlas/character_lift_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER_PLACE_COPY_PNG ((nt_hash64_t){0xF8FCB16D49656DFAULL}) /* bigatlas/character_place copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER_PLACE_PNG ((nt_hash64_t){0xA9759671632EDECEULL}) /* bigatlas/character_place.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER_PLACE__COPY_PNG ((nt_hash64_t){0x60517F1CD971CD36ULL}) /* bigatlas/character_place_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER_PLACE__PNG ((nt_hash64_t){0x6E153D49674192D1ULL}) /* bigatlas/character_place_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER_REMOVE_COPY_PNG ((nt_hash64_t){0xE7200650C491CABCULL}) /* bigatlas/character_remove copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER_REMOVE_PNG ((nt_hash64_t){0xA96F1C7CBCEB7F3BULL}) /* bigatlas/character_remove.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER_REMOVE__COPY_PNG ((nt_hash64_t){0x79CA1B474F4C1CB0ULL}) /* bigatlas/character_remove_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHARACTER_REMOVE__PNG ((nt_hash64_t){0xB68AEE2E2E928DE0ULL}) /* bigatlas/character_remove_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_BISHOP_COPY_PNG ((nt_hash64_t){0x5B327960F1ADBC9DULL}) /* bigatlas/chess_bishop copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_BISHOP_PNG ((nt_hash64_t){0x3B79DBF69FF6E6D0ULL}) /* bigatlas/chess_bishop.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_BISHOP__COPY_PNG ((nt_hash64_t){0x83D60E92C5FDA48EULL}) /* bigatlas/chess_bishop_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_BISHOP__PNG ((nt_hash64_t){0x9835FC6AADBFE796ULL}) /* bigatlas/chess_bishop_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_KING_COPY_PNG ((nt_hash64_t){0xAC0530753EF62984ULL}) /* bigatlas/chess_king copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_KING_PNG ((nt_hash64_t){0x37F50BB3B2CE67D1ULL}) /* bigatlas/chess_king.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_KING__COPY_PNG ((nt_hash64_t){0x638970185B5F0BF9ULL}) /* bigatlas/chess_king_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_KING__PNG ((nt_hash64_t){0xB35C6DDCD00F5963ULL}) /* bigatlas/chess_king_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_KNIGHT_COPY_PNG ((nt_hash64_t){0xB683C34C7707C04CULL}) /* bigatlas/chess_knight copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_KNIGHT_PNG ((nt_hash64_t){0x7BFD98D890FE270EULL}) /* bigatlas/chess_knight.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_KNIGHT__COPY_PNG ((nt_hash64_t){0x7CCCD73B7311B463ULL}) /* bigatlas/chess_knight_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_KNIGHT__PNG ((nt_hash64_t){0x9B382FE3C0F95A28ULL}) /* bigatlas/chess_knight_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_PAWN_COPY_PNG ((nt_hash64_t){0x6CA33B3C05E6E62EULL}) /* bigatlas/chess_pawn copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_PAWN_PNG ((nt_hash64_t){0xAAF5B0FF8592F4BBULL}) /* bigatlas/chess_pawn.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_PAWN__COPY_PNG ((nt_hash64_t){0xC24E9673D5F84691ULL}) /* bigatlas/chess_pawn_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_PAWN__PNG ((nt_hash64_t){0x73933C605DC44F87ULL}) /* bigatlas/chess_pawn_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_QUEEN_COPY_PNG ((nt_hash64_t){0xE65D4B9AF61A6B99ULL}) /* bigatlas/chess_queen copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_QUEEN_PNG ((nt_hash64_t){0xF67C5FE142700E1FULL}) /* bigatlas/chess_queen.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_QUEEN__COPY_PNG ((nt_hash64_t){0xC01E14FB50E13808ULL}) /* bigatlas/chess_queen_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_QUEEN__PNG ((nt_hash64_t){0xAA6570BA61E553B6ULL}) /* bigatlas/chess_queen_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_ROOK_COPY_PNG ((nt_hash64_t){0xC91BC832CF021547ULL}) /* bigatlas/chess_rook copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_ROOK_PNG ((nt_hash64_t){0x2E785048D9A4097AULL}) /* bigatlas/chess_rook.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_ROOK__COPY_PNG ((nt_hash64_t){0x5D830F0E0800191BULL}) /* bigatlas/chess_rook_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHESS_ROOK__PNG ((nt_hash64_t){0x1A4EB9DAC5ABF74FULL}) /* bigatlas/chess_rook_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHOKING_HAZARD__COPY_PNG ((nt_hash64_t){0x4CC243375324CC11ULL}) /* bigatlas/choking_hazard_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHOKING_HAZARD__PNG ((nt_hash64_t){0xF0A045A4A9132103ULL}) /* bigatlas/choking_hazard_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHOKING_HAZARD_AGE__COPY_PNG ((nt_hash64_t){0x34705995A5156E8CULL}) /* bigatlas/choking_hazard_age_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHOKING_HAZARD_AGE__PNG ((nt_hash64_t){0x6D5226F90F74D62FULL}) /* bigatlas/choking_hazard_age_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHOKING_HAZARD_AGE_TEXT__COPY_PNG ((nt_hash64_t){0x261E88AD132DD7B6ULL}) /* bigatlas/choking_hazard_age_text_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHOKING_HAZARD_AGE_TEXT__PNG ((nt_hash64_t){0x2F89B7AF775FADFFULL}) /* bigatlas/choking_hazard_age_text_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHOKING_HAZARD_TEXT__COPY_PNG ((nt_hash64_t){0x93F8785B40B2EBFBULL}) /* bigatlas/choking_hazard_text_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CHOKING_HAZARD_TEXT__PNG ((nt_hash64_t){0xBF893CE58FE02B13ULL}) /* bigatlas/choking_hazard_text_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CROWN_A_COPY_PNG ((nt_hash64_t){0x251AA28A32F46871ULL}) /* bigatlas/crown_a copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CROWN_A_PNG ((nt_hash64_t){0x46F13D20C2BC7BB7ULL}) /* bigatlas/crown_a.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CROWN_A__COPY_PNG ((nt_hash64_t){0xE23B9FA5A388C135ULL}) /* bigatlas/crown_a_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CROWN_A__PNG ((nt_hash64_t){0xB64C64B41695EC6BULL}) /* bigatlas/crown_a_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CROWN_B_COPY_PNG ((nt_hash64_t){0x12456E96532EE412ULL}) /* bigatlas/crown_b copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CROWN_B_PNG ((nt_hash64_t){0x5E17DCA5A4C85FE9ULL}) /* bigatlas/crown_b.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CROWN_B__COPY_PNG ((nt_hash64_t){0x0D2EA376A3F51425ULL}) /* bigatlas/crown_b_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_CROWN_B__PNG ((nt_hash64_t){0x251B5F0C3B0489CDULL}) /* bigatlas/crown_b_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10_COPY_PNG ((nt_hash64_t){0xD415994629C8DA2EULL}) /* bigatlas/d10 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10_PNG ((nt_hash64_t){0x369864BA619749FAULL}) /* bigatlas/d10.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10__COPY_PNG ((nt_hash64_t){0x7EA6D3FB848E23FBULL}) /* bigatlas/d10_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10__PNG ((nt_hash64_t){0xAEFFAFD48A07DDBBULL}) /* bigatlas/d10_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10_NUMBER_COPY_PNG ((nt_hash64_t){0xA4FFF00A1757B3D4ULL}) /* bigatlas/d10_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10_NUMBER_PNG ((nt_hash64_t){0x1ACF59823CD7CF8FULL}) /* bigatlas/d10_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10_NUMBER__COPY_PNG ((nt_hash64_t){0x3D359D500D0F05DCULL}) /* bigatlas/d10_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10_NUMBER__PNG ((nt_hash64_t){0xA61190E9F2BFE0A5ULL}) /* bigatlas/d10_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10_OUTLINE_COPY_PNG ((nt_hash64_t){0xB0C520644C76B6A5ULL}) /* bigatlas/d10_outline copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10_OUTLINE_PNG ((nt_hash64_t){0x29BC799495EA5DB5ULL}) /* bigatlas/d10_outline.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10_OUTLINE__COPY_PNG ((nt_hash64_t){0x58C19CE89507ABBDULL}) /* bigatlas/d10_outline_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10_OUTLINE__PNG ((nt_hash64_t){0x5C3276E9A6C0EAEEULL}) /* bigatlas/d10_outline_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10_OUTLINE_NUMBER_COPY_PNG ((nt_hash64_t){0xD3C468DD13186F5CULL}) /* bigatlas/d10_outline_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10_OUTLINE_NUMBER_PNG ((nt_hash64_t){0xDBF2809F44507A89ULL}) /* bigatlas/d10_outline_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10_OUTLINE_NUMBER__COPY_PNG ((nt_hash64_t){0x043B7A92BD306357ULL}) /* bigatlas/d10_outline_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D10_OUTLINE_NUMBER__PNG ((nt_hash64_t){0xDDE1E7122AB8404CULL}) /* bigatlas/d10_outline_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12_COPY_PNG ((nt_hash64_t){0xA857F49EF658F678ULL}) /* bigatlas/d12 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12_PNG ((nt_hash64_t){0xF118171C8A54F460ULL}) /* bigatlas/d12.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12__COPY_PNG ((nt_hash64_t){0x1765F4DF301A2524ULL}) /* bigatlas/d12_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12__PNG ((nt_hash64_t){0x04EC48356F1BA360ULL}) /* bigatlas/d12_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12_NUMBER_COPY_PNG ((nt_hash64_t){0x6092F72750A6EF22ULL}) /* bigatlas/d12_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12_NUMBER_PNG ((nt_hash64_t){0xA1E997F963B052CAULL}) /* bigatlas/d12_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12_NUMBER__COPY_PNG ((nt_hash64_t){0xFFB86DA7B0F542B9ULL}) /* bigatlas/d12_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12_NUMBER__PNG ((nt_hash64_t){0x9DB53E956526A713ULL}) /* bigatlas/d12_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12_OUTLINE_COPY_PNG ((nt_hash64_t){0x92ABBFC4BAE84AF6ULL}) /* bigatlas/d12_outline copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12_OUTLINE_PNG ((nt_hash64_t){0x3107119011610370ULL}) /* bigatlas/d12_outline.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12_OUTLINE__COPY_PNG ((nt_hash64_t){0x609AFCFBDF722824ULL}) /* bigatlas/d12_outline_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12_OUTLINE__PNG ((nt_hash64_t){0x88B44E97D1185BEFULL}) /* bigatlas/d12_outline_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12_OUTLINE_NUMBER_COPY_PNG ((nt_hash64_t){0xF7124EE14A30EC13ULL}) /* bigatlas/d12_outline_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12_OUTLINE_NUMBER_PNG ((nt_hash64_t){0x7A571F6CF42D407AULL}) /* bigatlas/d12_outline_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12_OUTLINE_NUMBER__COPY_PNG ((nt_hash64_t){0x847DC903334E99FCULL}) /* bigatlas/d12_outline_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D12_OUTLINE_NUMBER__PNG ((nt_hash64_t){0xE7622F8F5BF218E8ULL}) /* bigatlas/d12_outline_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2_COPY_PNG ((nt_hash64_t){0x59B8CE73D9B18AEAULL}) /* bigatlas/d2 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2_PNG ((nt_hash64_t){0x3B1D2F86B734B25EULL}) /* bigatlas/d2.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20_COPY_PNG ((nt_hash64_t){0x81885D6E1FAA64FFULL}) /* bigatlas/d20 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20_PNG ((nt_hash64_t){0x6BFAF521F8B3E3C9ULL}) /* bigatlas/d20.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20__COPY_PNG ((nt_hash64_t){0x916F51F419EF6474ULL}) /* bigatlas/d20_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20__PNG ((nt_hash64_t){0x393E8C91D6882306ULL}) /* bigatlas/d20_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20_NUMBER_COPY_PNG ((nt_hash64_t){0x4DA29381242ED1C6ULL}) /* bigatlas/d20_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20_NUMBER_PNG ((nt_hash64_t){0x941B169A0B15A2DFULL}) /* bigatlas/d20_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20_NUMBER__COPY_PNG ((nt_hash64_t){0x3C48077F9877B996ULL}) /* bigatlas/d20_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20_NUMBER__PNG ((nt_hash64_t){0x877ACB7BC6B1DBF5ULL}) /* bigatlas/d20_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20_OUTLINE_COPY_PNG ((nt_hash64_t){0xA3DCBF50B200909CULL}) /* bigatlas/d20_outline copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20_OUTLINE_PNG ((nt_hash64_t){0x5449EF462AD65C2BULL}) /* bigatlas/d20_outline.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20_OUTLINE__COPY_PNG ((nt_hash64_t){0xFDCC5D04DE990B0FULL}) /* bigatlas/d20_outline_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20_OUTLINE__PNG ((nt_hash64_t){0x704295C4B782FB66ULL}) /* bigatlas/d20_outline_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20_OUTLINE_NUMBER_COPY_PNG ((nt_hash64_t){0x4DAB9C8B80D69790ULL}) /* bigatlas/d20_outline_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20_OUTLINE_NUMBER_PNG ((nt_hash64_t){0x3B10388F7B856B07ULL}) /* bigatlas/d20_outline_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20_OUTLINE_NUMBER__COPY_PNG ((nt_hash64_t){0x32D1DB2B25956CA1ULL}) /* bigatlas/d20_outline_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D20_OUTLINE_NUMBER__PNG ((nt_hash64_t){0xFE00F8375CB97F39ULL}) /* bigatlas/d20_outline_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2__COPY_PNG ((nt_hash64_t){0x9573EBFCA317C52AULL}) /* bigatlas/d2_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2__PNG ((nt_hash64_t){0x38386DA8730F370AULL}) /* bigatlas/d2_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2_NUMBER_COPY_PNG ((nt_hash64_t){0x3D69F2DEAB6A6DA0ULL}) /* bigatlas/d2_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2_NUMBER_PNG ((nt_hash64_t){0x31DF84DF584A06E9ULL}) /* bigatlas/d2_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2_NUMBER__COPY_PNG ((nt_hash64_t){0xE7391CF65F620E9AULL}) /* bigatlas/d2_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2_NUMBER__PNG ((nt_hash64_t){0xF879DCB42F89AC4DULL}) /* bigatlas/d2_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2_OUTLINE_COPY_PNG ((nt_hash64_t){0x1D63C115550280A9ULL}) /* bigatlas/d2_outline copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2_OUTLINE_PNG ((nt_hash64_t){0xA65B42D44097F5F0ULL}) /* bigatlas/d2_outline.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2_OUTLINE__COPY_PNG ((nt_hash64_t){0x9E9B8C7FF06C3161ULL}) /* bigatlas/d2_outline_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2_OUTLINE__PNG ((nt_hash64_t){0x469A4253D19C28DCULL}) /* bigatlas/d2_outline_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2_OUTLINE_NUMBER_COPY_PNG ((nt_hash64_t){0x8559F6D2B09FDCF0ULL}) /* bigatlas/d2_outline_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2_OUTLINE_NUMBER_PNG ((nt_hash64_t){0xDD00CC3A75F04747ULL}) /* bigatlas/d2_outline_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2_OUTLINE_NUMBER__COPY_PNG ((nt_hash64_t){0xDA61AF2A8DB59C8CULL}) /* bigatlas/d2_outline_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D2_OUTLINE_NUMBER__PNG ((nt_hash64_t){0x0F490C68135B20D5ULL}) /* bigatlas/d2_outline_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3_COPY_PNG ((nt_hash64_t){0x93DDB4F10041220AULL}) /* bigatlas/d3 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3_PNG ((nt_hash64_t){0xF881A857521E2954ULL}) /* bigatlas/d3.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3__COPY_PNG ((nt_hash64_t){0x206F6F47ACB15418ULL}) /* bigatlas/d3_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3__PNG ((nt_hash64_t){0x43BFE02FA81CEC0DULL}) /* bigatlas/d3_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3_NUMBER_COPY_PNG ((nt_hash64_t){0xD02583AF7BE318D1ULL}) /* bigatlas/d3_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3_NUMBER_PNG ((nt_hash64_t){0xFF65C5A3387D7BDFULL}) /* bigatlas/d3_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3_NUMBER__COPY_PNG ((nt_hash64_t){0x4BC008CB74892916ULL}) /* bigatlas/d3_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3_NUMBER__PNG ((nt_hash64_t){0xC821156A6AF16953ULL}) /* bigatlas/d3_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3_OUTLINE_COPY_PNG ((nt_hash64_t){0xEF2D1463F0F4C113ULL}) /* bigatlas/d3_outline copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3_OUTLINE_PNG ((nt_hash64_t){0xF90A2A7BF054AF70ULL}) /* bigatlas/d3_outline.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3_OUTLINE__COPY_PNG ((nt_hash64_t){0xFE1EFAB9ECE9B7BBULL}) /* bigatlas/d3_outline_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3_OUTLINE__PNG ((nt_hash64_t){0x15F92E0CB4E9EDB4ULL}) /* bigatlas/d3_outline_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3_OUTLINE_NUMBER_COPY_PNG ((nt_hash64_t){0x5B1B0278D3730A4CULL}) /* bigatlas/d3_outline_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3_OUTLINE_NUMBER_PNG ((nt_hash64_t){0xE2143AA1584436B7ULL}) /* bigatlas/d3_outline_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3_OUTLINE_NUMBER__COPY_PNG ((nt_hash64_t){0x85F34D45A10C5BD3ULL}) /* bigatlas/d3_outline_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D3_OUTLINE_NUMBER__PNG ((nt_hash64_t){0xB3E83C3C11636FEEULL}) /* bigatlas/d3_outline_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4_COPY_PNG ((nt_hash64_t){0xF4219FDC54F94F37ULL}) /* bigatlas/d4 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4_PNG ((nt_hash64_t){0x34FFD07463537E75ULL}) /* bigatlas/d4.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4__COPY_PNG ((nt_hash64_t){0x757E21CD3E875370ULL}) /* bigatlas/d4_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4__PNG ((nt_hash64_t){0x961C6CB0DBD1E86CULL}) /* bigatlas/d4_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4_NUMBER_COPY_PNG ((nt_hash64_t){0xCF898B125EE890DCULL}) /* bigatlas/d4_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4_NUMBER_PNG ((nt_hash64_t){0xECBF3D257E652576ULL}) /* bigatlas/d4_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4_NUMBER__COPY_PNG ((nt_hash64_t){0x3B93D33E84075AF2ULL}) /* bigatlas/d4_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4_NUMBER__PNG ((nt_hash64_t){0x39E61A8E4249433CULL}) /* bigatlas/d4_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4_OUTLINE_COPY_PNG ((nt_hash64_t){0xAF98E4DB7043C4DAULL}) /* bigatlas/d4_outline copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4_OUTLINE_PNG ((nt_hash64_t){0x175394A962151104ULL}) /* bigatlas/d4_outline.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4_OUTLINE__COPY_PNG ((nt_hash64_t){0x03D8352EB3279BF3ULL}) /* bigatlas/d4_outline_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4_OUTLINE__PNG ((nt_hash64_t){0xF5C11D74DD293C9EULL}) /* bigatlas/d4_outline_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4_OUTLINE_NUMBER_COPY_PNG ((nt_hash64_t){0x05B3CADEBF1A53ACULL}) /* bigatlas/d4_outline_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4_OUTLINE_NUMBER_PNG ((nt_hash64_t){0xCD497CFDC1DB6D5BULL}) /* bigatlas/d4_outline_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4_OUTLINE_NUMBER__COPY_PNG ((nt_hash64_t){0x7FA76CAD6E1E61B7ULL}) /* bigatlas/d4_outline_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D4_OUTLINE_NUMBER__PNG ((nt_hash64_t){0xABE685EAD881D892ULL}) /* bigatlas/d4_outline_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6_COPY_PNG ((nt_hash64_t){0x70FEC584134FA882ULL}) /* bigatlas/d6 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6_PNG ((nt_hash64_t){0x345E1D63B1E76353ULL}) /* bigatlas/d6.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6__COPY_PNG ((nt_hash64_t){0x33142F5506C5966DULL}) /* bigatlas/d6_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6__PNG ((nt_hash64_t){0x7F196E288F9D0E6BULL}) /* bigatlas/d6_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6_NUMBER_COPY_PNG ((nt_hash64_t){0x5C5EACE2AAFC6C59ULL}) /* bigatlas/d6_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6_NUMBER_PNG ((nt_hash64_t){0x9B341FB082588C05ULL}) /* bigatlas/d6_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6_NUMBER__COPY_PNG ((nt_hash64_t){0x7390B84B7E392575ULL}) /* bigatlas/d6_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6_NUMBER__PNG ((nt_hash64_t){0xF231EC58E6687776ULL}) /* bigatlas/d6_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6_OUTLINE_COPY_PNG ((nt_hash64_t){0x76C51D4AB96CA393ULL}) /* bigatlas/d6_outline copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6_OUTLINE_PNG ((nt_hash64_t){0x0F5BF2D427B715E3ULL}) /* bigatlas/d6_outline.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6_OUTLINE__COPY_PNG ((nt_hash64_t){0x5DCA9942DF75216FULL}) /* bigatlas/d6_outline_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6_OUTLINE__PNG ((nt_hash64_t){0x3AA92CAAE9CD3E6EULL}) /* bigatlas/d6_outline_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6_OUTLINE_NUMBER_COPY_PNG ((nt_hash64_t){0x411D2A6DEBFF7E95ULL}) /* bigatlas/d6_outline_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6_OUTLINE_NUMBER_PNG ((nt_hash64_t){0x3CCA075314625E4BULL}) /* bigatlas/d6_outline_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6_OUTLINE_NUMBER__COPY_PNG ((nt_hash64_t){0xA720A81A03A363AFULL}) /* bigatlas/d6_outline_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D6_OUTLINE_NUMBER__PNG ((nt_hash64_t){0xD67762EF15AC986CULL}) /* bigatlas/d6_outline_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8_COPY_PNG ((nt_hash64_t){0x6A55E8B6C7AA494CULL}) /* bigatlas/d8 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8_PNG ((nt_hash64_t){0x8EDE226152C9379EULL}) /* bigatlas/d8.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8__COPY_PNG ((nt_hash64_t){0x939B5193F6F64727ULL}) /* bigatlas/d8_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8__PNG ((nt_hash64_t){0x969DC71DBFC7B036ULL}) /* bigatlas/d8_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8_NUMBER_COPY_PNG ((nt_hash64_t){0xC2C216E7DE618AFCULL}) /* bigatlas/d8_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8_NUMBER_PNG ((nt_hash64_t){0x9B1B720EBB1CCB97ULL}) /* bigatlas/d8_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8_NUMBER__COPY_PNG ((nt_hash64_t){0xDF49E2214B253C1CULL}) /* bigatlas/d8_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8_NUMBER__PNG ((nt_hash64_t){0xADA905B1D9086DC8ULL}) /* bigatlas/d8_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8_OUTLINE_COPY_PNG ((nt_hash64_t){0xEB4C64F496B75C2FULL}) /* bigatlas/d8_outline copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8_OUTLINE_PNG ((nt_hash64_t){0xB2128084CCD5EF6EULL}) /* bigatlas/d8_outline.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8_OUTLINE__COPY_PNG ((nt_hash64_t){0x155DE21359A19E68ULL}) /* bigatlas/d8_outline_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8_OUTLINE__PNG ((nt_hash64_t){0x70D54F6E7E238F73ULL}) /* bigatlas/d8_outline_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8_OUTLINE_NUMBER_COPY_PNG ((nt_hash64_t){0xC4F6EC1A2E6810F8ULL}) /* bigatlas/d8_outline_number copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8_OUTLINE_NUMBER_PNG ((nt_hash64_t){0xCC4F7474B68FD599ULL}) /* bigatlas/d8_outline_number.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8_OUTLINE_NUMBER__COPY_PNG ((nt_hash64_t){0x23CC17108F5586F3ULL}) /* bigatlas/d8_outline_number_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_D8_OUTLINE_NUMBER__PNG ((nt_hash64_t){0x09D072E468DD3A19ULL}) /* bigatlas/d8_outline_number_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_COPY_PNG ((nt_hash64_t){0xF15A0B8B42C7296AULL}) /* bigatlas/dice copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_PNG ((nt_hash64_t){0x0F003726E48815A8ULL}) /* bigatlas/dice.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE__COPY_PNG ((nt_hash64_t){0xA4D7DE0900CD20D2ULL}) /* bigatlas/dice_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE__PNG ((nt_hash64_t){0x7EE7542F04E7C0A1ULL}) /* bigatlas/dice_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_1_COPY_PNG ((nt_hash64_t){0x48C7D6EEF0D525C8ULL}) /* bigatlas/dice_1 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_1_PNG ((nt_hash64_t){0xF187A407D5DBF5D7ULL}) /* bigatlas/dice_1.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_1__COPY_PNG ((nt_hash64_t){0x7100A837B1AFB454ULL}) /* bigatlas/dice_1_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_1__PNG ((nt_hash64_t){0x312C4EC145EABBEDULL}) /* bigatlas/dice_1_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_2_COPY_PNG ((nt_hash64_t){0xDBA6036464579F76ULL}) /* bigatlas/dice_2 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_2_PNG ((nt_hash64_t){0x205905F22AE5A633ULL}) /* bigatlas/dice_2.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_2__COPY_PNG ((nt_hash64_t){0x497F8A36401B90F5ULL}) /* bigatlas/dice_2_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_2__PNG ((nt_hash64_t){0xE166A98FB97CFCA4ULL}) /* bigatlas/dice_2_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_3_COPY_PNG ((nt_hash64_t){0x54C5717E19DF996BULL}) /* bigatlas/dice_3 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_3_PNG ((nt_hash64_t){0x6F66E5EFA54CE8B5ULL}) /* bigatlas/dice_3.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_3D_COPY_PNG ((nt_hash64_t){0x026965C753052548ULL}) /* bigatlas/dice_3D copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_3D_PNG ((nt_hash64_t){0xE3E00E60137D144BULL}) /* bigatlas/dice_3D.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_3D__COPY_PNG ((nt_hash64_t){0x716069B0D9BC29DEULL}) /* bigatlas/dice_3D_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_3D__PNG ((nt_hash64_t){0x944ED04B48D9044EULL}) /* bigatlas/dice_3D_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_3D_DETAILED_COPY_PNG ((nt_hash64_t){0x3ADF35BB1A0F9708ULL}) /* bigatlas/dice_3D_detailed copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_3D_DETAILED_PNG ((nt_hash64_t){0x8AFED4C3BF1E9DCDULL}) /* bigatlas/dice_3D_detailed.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_3D_DETAILED__COPY_PNG ((nt_hash64_t){0x3C9718770EC3FA53ULL}) /* bigatlas/dice_3D_detailed_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_3D_DETAILED__PNG ((nt_hash64_t){0x39491484861EBC2FULL}) /* bigatlas/dice_3D_detailed_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_3__COPY_PNG ((nt_hash64_t){0x9B7F002C810EB22CULL}) /* bigatlas/dice_3_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_3__PNG ((nt_hash64_t){0xB077D10C87CB8BD6ULL}) /* bigatlas/dice_3_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_4_COPY_PNG ((nt_hash64_t){0xC2D5BC3B0EC4EA00ULL}) /* bigatlas/dice_4 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_4_PNG ((nt_hash64_t){0x3DEEDE0F0C3A365DULL}) /* bigatlas/dice_4.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_4__COPY_PNG ((nt_hash64_t){0xBCB9654CE52979F3ULL}) /* bigatlas/dice_4_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_4__PNG ((nt_hash64_t){0xE54822E98F3A94DAULL}) /* bigatlas/dice_4_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_5_COPY_PNG ((nt_hash64_t){0x4ADF6F0B56C84BC7ULL}) /* bigatlas/dice_5 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_5_PNG ((nt_hash64_t){0xDDCE685A694A769AULL}) /* bigatlas/dice_5.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_5__COPY_PNG ((nt_hash64_t){0xDFED86B6F40BAAECULL}) /* bigatlas/dice_5_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_5__PNG ((nt_hash64_t){0xB6F0AFC045125110ULL}) /* bigatlas/dice_5_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_6_COPY_PNG ((nt_hash64_t){0x7C1263913ACDEAEDULL}) /* bigatlas/dice_6 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_6_PNG ((nt_hash64_t){0x31C90871793810B4ULL}) /* bigatlas/dice_6.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_6__COPY_PNG ((nt_hash64_t){0x13BB3D96C441FDC9ULL}) /* bigatlas/dice_6_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_6__PNG ((nt_hash64_t){0x397FF6B2D5EAD807ULL}) /* bigatlas/dice_6_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_CLOSE_COPY_PNG ((nt_hash64_t){0x4FB16C4468F642D6ULL}) /* bigatlas/dice_close copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_CLOSE_PNG ((nt_hash64_t){0xC4AAC3AF6588A1FAULL}) /* bigatlas/dice_close.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_CLOSE__COPY_PNG ((nt_hash64_t){0x6FF08E1B869481E0ULL}) /* bigatlas/dice_close_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_CLOSE__PNG ((nt_hash64_t){0xB28CDF695AB7719DULL}) /* bigatlas/dice_close_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_DETAILED_COPY_PNG ((nt_hash64_t){0x4E58627E758A0767ULL}) /* bigatlas/dice_detailed copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_DETAILED_PNG ((nt_hash64_t){0xDC4EC157E56598AAULL}) /* bigatlas/dice_detailed.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_DETAILED__COPY_PNG ((nt_hash64_t){0xE47F70CE0F517DEFULL}) /* bigatlas/dice_detailed_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_DETAILED__PNG ((nt_hash64_t){0x2C6969AFF87440B8ULL}) /* bigatlas/dice_detailed_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_EMPTY_COPY_PNG ((nt_hash64_t){0x09B0AEE2C2BD35B0ULL}) /* bigatlas/dice_empty copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_EMPTY_PNG ((nt_hash64_t){0xC63B46BB84D2BF48ULL}) /* bigatlas/dice_empty.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_EMPTY__COPY_PNG ((nt_hash64_t){0x5112D3B0C070FAB8ULL}) /* bigatlas/dice_empty_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_EMPTY__PNG ((nt_hash64_t){0x5CEA2FCAD85226FDULL}) /* bigatlas/dice_empty_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_OUT_COPY_PNG ((nt_hash64_t){0x5E0F1A4B4AD0852DULL}) /* bigatlas/dice_out copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_OUT_PNG ((nt_hash64_t){0x3F695EB32824DE58ULL}) /* bigatlas/dice_out.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_OUT__COPY_PNG ((nt_hash64_t){0x97D24B83861F1622ULL}) /* bigatlas/dice_out_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_OUT__PNG ((nt_hash64_t){0xCCAE4340AD8C9626ULL}) /* bigatlas/dice_out_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_QUESTION_COPY_PNG ((nt_hash64_t){0x3B4D309A829A9171ULL}) /* bigatlas/dice_question copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_QUESTION_PNG ((nt_hash64_t){0x15EA80543FAB4E76ULL}) /* bigatlas/dice_question.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_QUESTION__COPY_PNG ((nt_hash64_t){0x5DE8E493CE4C4816ULL}) /* bigatlas/dice_question_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_QUESTION__PNG ((nt_hash64_t){0xE517F97CF6CCEF4DULL}) /* bigatlas/dice_question_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_SHIELD_COPY_PNG ((nt_hash64_t){0x8BFA4521E47D14BDULL}) /* bigatlas/dice_shield copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_SHIELD_PNG ((nt_hash64_t){0xBB376410388610CCULL}) /* bigatlas/dice_shield.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_SHIELD__COPY_PNG ((nt_hash64_t){0xB6D1C2468CB61AA3ULL}) /* bigatlas/dice_shield_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_SHIELD__PNG ((nt_hash64_t){0x7CC75D53BE0ED0CEULL}) /* bigatlas/dice_shield_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_SKULL_COPY_PNG ((nt_hash64_t){0x4BA12C25DCE59FD8ULL}) /* bigatlas/dice_skull copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_SKULL_PNG ((nt_hash64_t){0xCF0CD84B1BDFFA3BULL}) /* bigatlas/dice_skull.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_SKULL__COPY_PNG ((nt_hash64_t){0x73CA8561EC3D73F0ULL}) /* bigatlas/dice_skull_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_SKULL__PNG ((nt_hash64_t){0x5C514503628A927EULL}) /* bigatlas/dice_skull_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_SWORD_COPY_PNG ((nt_hash64_t){0x42AB273A021EF441ULL}) /* bigatlas/dice_sword copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_SWORD_PNG ((nt_hash64_t){0x1F9373E868E405E9ULL}) /* bigatlas/dice_sword.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_SWORD__COPY_PNG ((nt_hash64_t){0x2ECB57D3C3FF6FB3ULL}) /* bigatlas/dice_sword_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DICE_SWORD__PNG ((nt_hash64_t){0x2B5FA9263D9B8C77ULL}) /* bigatlas/dice_sword_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_E_COPY_PNG ((nt_hash64_t){0xF3309A10B1AEEF1CULL}) /* bigatlas/direction_e copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_E_PNG ((nt_hash64_t){0x65B763A0298663B1ULL}) /* bigatlas/direction_e.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_E__COPY_PNG ((nt_hash64_t){0x3825D4333B482774ULL}) /* bigatlas/direction_e_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_E__PNG ((nt_hash64_t){0x1D667AB261C570EEULL}) /* bigatlas/direction_e_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_N_COPY_PNG ((nt_hash64_t){0x7EA9A8DA98B66223ULL}) /* bigatlas/direction_n copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_N_PNG ((nt_hash64_t){0xF47EDF7900D6F2D9ULL}) /* bigatlas/direction_n.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_N__COPY_PNG ((nt_hash64_t){0x96EC6C9AF56D2DF2ULL}) /* bigatlas/direction_n_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_N__PNG ((nt_hash64_t){0x57E07C7C2E29F66BULL}) /* bigatlas/direction_n_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_S_COPY_PNG ((nt_hash64_t){0xB52D6D8DB35872FDULL}) /* bigatlas/direction_s copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_S_PNG ((nt_hash64_t){0xAFAE4A7BE244F62BULL}) /* bigatlas/direction_s.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_S__COPY_PNG ((nt_hash64_t){0xADC3F1FC9B008487ULL}) /* bigatlas/direction_s_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_S__PNG ((nt_hash64_t){0x0919BDAC017CCEEBULL}) /* bigatlas/direction_s_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_W_COPY_PNG ((nt_hash64_t){0xB44E91FF8DD695C1ULL}) /* bigatlas/direction_w copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_W_PNG ((nt_hash64_t){0x5F03EF69486712CCULL}) /* bigatlas/direction_w.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_W__COPY_PNG ((nt_hash64_t){0x2C12A8386962097DULL}) /* bigatlas/direction_w_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DIRECTION_W__PNG ((nt_hash64_t){0xCBD5B5314714E1B4ULL}) /* bigatlas/direction_w_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DOLLAR_COPY_PNG ((nt_hash64_t){0x2FE98014B49A65F8ULL}) /* bigatlas/dollar copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DOLLAR_PNG ((nt_hash64_t){0x79E8EDE14AC0C8E7ULL}) /* bigatlas/dollar.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DOLLAR__COPY_PNG ((nt_hash64_t){0xF7EFC61B1A9802A3ULL}) /* bigatlas/dollar_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DOLLAR__PNG ((nt_hash64_t){0xC80C60BC87382996ULL}) /* bigatlas/dollar_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION__COPY_PNG ((nt_hash64_t){0x71BF0E88EC4D0F1CULL}) /* bigatlas/duration_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION__PNG ((nt_hash64_t){0x902B0A32847DC8EFULL}) /* bigatlas/duration_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_10__COPY_PNG ((nt_hash64_t){0x9BB51C8E67A7C278ULL}) /* bigatlas/duration_10_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_10__PNG ((nt_hash64_t){0x22D7B1B17BBF79DAULL}) /* bigatlas/duration_10_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_120__COPY_PNG ((nt_hash64_t){0xFDF9001131E10F6DULL}) /* bigatlas/duration_120_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_120__PNG ((nt_hash64_t){0x3A9DE2D0B8EF60EAULL}) /* bigatlas/duration_120_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_15__COPY_PNG ((nt_hash64_t){0xA3F1D15B7836EB2EULL}) /* bigatlas/duration_15_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_15__PNG ((nt_hash64_t){0xB10A458A2559AB42ULL}) /* bigatlas/duration_15_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_15_30__COPY_PNG ((nt_hash64_t){0x359F91D622EF75D8ULL}) /* bigatlas/duration_15_30_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_15_30__PNG ((nt_hash64_t){0x28AACA1E60074D74ULL}) /* bigatlas/duration_15_30_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_20__COPY_PNG ((nt_hash64_t){0x0F6D23AED4CDB781ULL}) /* bigatlas/duration_20_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_20__PNG ((nt_hash64_t){0x7FF718B72E1BB335ULL}) /* bigatlas/duration_20_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_30__COPY_PNG ((nt_hash64_t){0x0229C20D624A842EULL}) /* bigatlas/duration_30_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_30__PNG ((nt_hash64_t){0xB9335734067A8EEFULL}) /* bigatlas/duration_30_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_45__COPY_PNG ((nt_hash64_t){0xA101364CE6FC2CDAULL}) /* bigatlas/duration_45_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_45__PNG ((nt_hash64_t){0x6309F96E1DD250F3ULL}) /* bigatlas/duration_45_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_45_60__COPY_PNG ((nt_hash64_t){0x372A5F3ECF81ECCDULL}) /* bigatlas/duration_45_60_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_45_60__PNG ((nt_hash64_t){0x89EE72B709EB326DULL}) /* bigatlas/duration_45_60_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_60__COPY_PNG ((nt_hash64_t){0x609A3498EB3C47C4ULL}) /* bigatlas/duration_60_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_60__PNG ((nt_hash64_t){0xC773821AD17BA0BCULL}) /* bigatlas/duration_60_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_60_90__COPY_PNG ((nt_hash64_t){0x4C1D3C71592FE498ULL}) /* bigatlas/duration_60_90_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_60_90__PNG ((nt_hash64_t){0xB32B55553E9CF483ULL}) /* bigatlas/duration_60_90_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_90__COPY_PNG ((nt_hash64_t){0x400C380A6878CB1BULL}) /* bigatlas/duration_90_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_DURATION_90__PNG ((nt_hash64_t){0x51C9C7241CABF71FULL}) /* bigatlas/duration_90_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ELEPHANT_COPY_PNG ((nt_hash64_t){0x1DDACBF8C241DEFAULL}) /* bigatlas/elephant copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ELEPHANT_PNG ((nt_hash64_t){0xF32061362199841DULL}) /* bigatlas/elephant.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ELEPHANT__COPY_PNG ((nt_hash64_t){0xF64544AEEACC5CDFULL}) /* bigatlas/elephant_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ELEPHANT__PNG ((nt_hash64_t){0xAB5326BA2A5FCF71ULL}) /* bigatlas/elephant_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ELEPHANT_2_COPY_PNG ((nt_hash64_t){0xFE52869BFE6E73FCULL}) /* bigatlas/elephant_2 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ELEPHANT_2_PNG ((nt_hash64_t){0x786932B02E381F29ULL}) /* bigatlas/elephant_2.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ELEPHANT_3_COPY_PNG ((nt_hash64_t){0x14B6F58CEE6B7CD7ULL}) /* bigatlas/elephant_3 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ELEPHANT_3_PNG ((nt_hash64_t){0x2FD9E1A2F7C12451ULL}) /* bigatlas/elephant_3.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ELEPHANT_4_COPY_PNG ((nt_hash64_t){0xDE544AE9241BE3F7ULL}) /* bigatlas/elephant_4 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ELEPHANT_4_PNG ((nt_hash64_t){0x95510469AF908618ULL}) /* bigatlas/elephant_4.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ELEPHANT_5_COPY_PNG ((nt_hash64_t){0xE4DD23EB49B59F53ULL}) /* bigatlas/elephant_5 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ELEPHANT_5_PNG ((nt_hash64_t){0xD7ED942E456A84DBULL}) /* bigatlas/elephant_5.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ELEPHANT___COPY_PNG ((nt_hash64_t){0x0CA7E403CD843A09ULL}) /* bigatlas/elephant__ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_ELEPHANT___PNG ((nt_hash64_t){0x16444512B9A15CC6ULL}) /* bigatlas/elephant__.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE___COPY_PNG ((nt_hash64_t){0xB5417D899A585EB5ULL}) /* bigatlas/emote__ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE___PNG ((nt_hash64_t){0xEEB7DEBC4E7B3F60ULL}) /* bigatlas/emote__.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE____COPY_PNG ((nt_hash64_t){0xE78BD72486B3F5B5ULL}) /* bigatlas/emote___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE____PNG ((nt_hash64_t){0x79C88A143013436FULL}) /* bigatlas/emote___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE______COPY_PNG ((nt_hash64_t){0x245C5B40EAC49E9CULL}) /* bigatlas/emote_____ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE______PNG ((nt_hash64_t){0x17AA9C6C5E4B4D0DULL}) /* bigatlas/emote_____.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_ALERT_COPY_PNG ((nt_hash64_t){0x9ED44700C73EBC0EULL}) /* bigatlas/emote_alert copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_ALERT_PNG ((nt_hash64_t){0x2C46E69D5CCD384FULL}) /* bigatlas/emote_alert.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_ALERT__COPY_PNG ((nt_hash64_t){0x65997CFB1E079DC9ULL}) /* bigatlas/emote_alert_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_ALERT__PNG ((nt_hash64_t){0xA3419574CBE053DCULL}) /* bigatlas/emote_alert_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_ALERT____COPY_PNG ((nt_hash64_t){0x344ED644B14485C1ULL}) /* bigatlas/emote_alert___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_ALERT____PNG ((nt_hash64_t){0x778702003214C59AULL}) /* bigatlas/emote_alert___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_ANGER_COPY_PNG ((nt_hash64_t){0x7D899E2045ABA82FULL}) /* bigatlas/emote_anger copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_ANGER_PNG ((nt_hash64_t){0xA18A66BC137DCEE6ULL}) /* bigatlas/emote_anger.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_ANGER__COPY_PNG ((nt_hash64_t){0xDC77ADC89013C333ULL}) /* bigatlas/emote_anger_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_ANGER__PNG ((nt_hash64_t){0x11A0BA25D870CC43ULL}) /* bigatlas/emote_anger_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_ANGER____COPY_PNG ((nt_hash64_t){0x224A74F5FD814458ULL}) /* bigatlas/emote_anger___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_ANGER____PNG ((nt_hash64_t){0x9ABCA7FDCCA619ADULL}) /* bigatlas/emote_anger___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_BARS_COPY_PNG ((nt_hash64_t){0xCC23A7904B94A375ULL}) /* bigatlas/emote_bars copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_BARS_PNG ((nt_hash64_t){0xD118A852BA2E5997ULL}) /* bigatlas/emote_bars.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_BARS__COPY_PNG ((nt_hash64_t){0xA9F1F6BD510ECF66ULL}) /* bigatlas/emote_bars_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_BARS__PNG ((nt_hash64_t){0xA2916647F897AF2FULL}) /* bigatlas/emote_bars_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_BARS____COPY_PNG ((nt_hash64_t){0x291A6BE2201F63CEULL}) /* bigatlas/emote_bars___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_BARS____PNG ((nt_hash64_t){0x827C4F860AB60F0EULL}) /* bigatlas/emote_bars___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CASH_COPY_PNG ((nt_hash64_t){0x07C72C99FF6BA9E7ULL}) /* bigatlas/emote_cash copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CASH_PNG ((nt_hash64_t){0x7638A01F05E091BAULL}) /* bigatlas/emote_cash.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CASH__COPY_PNG ((nt_hash64_t){0x4CE4A9B88DBC6571ULL}) /* bigatlas/emote_cash_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CASH__PNG ((nt_hash64_t){0xF6FFCE087A893FDAULL}) /* bigatlas/emote_cash_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CASH____COPY_PNG ((nt_hash64_t){0xCE08EDB67531D42BULL}) /* bigatlas/emote_cash___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CASH____PNG ((nt_hash64_t){0x48656A0791031493ULL}) /* bigatlas/emote_cash___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CIRCLE_COPY_PNG ((nt_hash64_t){0xC824BB499E5B31CDULL}) /* bigatlas/emote_circle copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CIRCLE_PNG ((nt_hash64_t){0x25A041BA49146CAAULL}) /* bigatlas/emote_circle.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CIRCLE__COPY_PNG ((nt_hash64_t){0xC7D0FD120B6E0E56ULL}) /* bigatlas/emote_circle_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CIRCLE__PNG ((nt_hash64_t){0xF6DBF8756159BEBBULL}) /* bigatlas/emote_circle_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CIRCLE____COPY_PNG ((nt_hash64_t){0x4A6FB257D9B069DFULL}) /* bigatlas/emote_circle___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CIRCLE____PNG ((nt_hash64_t){0x901B0ED57CC3455EULL}) /* bigatlas/emote_circle___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CLOUD_COPY_PNG ((nt_hash64_t){0x450255DDD01AE679ULL}) /* bigatlas/emote_cloud copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CLOUD_PNG ((nt_hash64_t){0xCC94D7D7F297F362ULL}) /* bigatlas/emote_cloud.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CLOUD__COPY_PNG ((nt_hash64_t){0xCD76D89D9DBE7F64ULL}) /* bigatlas/emote_cloud_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CLOUD__PNG ((nt_hash64_t){0x6880CDF02ED17D58ULL}) /* bigatlas/emote_cloud_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CLOUD____COPY_PNG ((nt_hash64_t){0x03BE2DD9C319E39BULL}) /* bigatlas/emote_cloud___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CLOUD____PNG ((nt_hash64_t){0xF830B4929E806079ULL}) /* bigatlas/emote_cloud___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CROSS_COPY_PNG ((nt_hash64_t){0x6FEE217D07867BF6ULL}) /* bigatlas/emote_cross copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CROSS_PNG ((nt_hash64_t){0xD6A539C1FDB6BAB6ULL}) /* bigatlas/emote_cross.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CROSS__COPY_PNG ((nt_hash64_t){0xF05C44EF1C3FF4D9ULL}) /* bigatlas/emote_cross_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CROSS__PNG ((nt_hash64_t){0xE95949F44C7F51F9ULL}) /* bigatlas/emote_cross_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CROSS____COPY_PNG ((nt_hash64_t){0x28A7472CC4A010D8ULL}) /* bigatlas/emote_cross___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_CROSS____PNG ((nt_hash64_t){0x7EA5BFF852F2FC95ULL}) /* bigatlas/emote_cross___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS1_COPY_PNG ((nt_hash64_t){0x65B0AD6F128596E8ULL}) /* bigatlas/emote_dots1 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS1_PNG ((nt_hash64_t){0x559C88806C340B82ULL}) /* bigatlas/emote_dots1.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS1__COPY_PNG ((nt_hash64_t){0x56CC79CFC49623DDULL}) /* bigatlas/emote_dots1_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS1__PNG ((nt_hash64_t){0xEEFFFF31CD1C6A1CULL}) /* bigatlas/emote_dots1_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS1____COPY_PNG ((nt_hash64_t){0x706458237CB45A09ULL}) /* bigatlas/emote_dots1___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS1____PNG ((nt_hash64_t){0xDAC8622C8A5F7CD1ULL}) /* bigatlas/emote_dots1___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS2_COPY_PNG ((nt_hash64_t){0x452E9B59B928AC2EULL}) /* bigatlas/emote_dots2 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS2_PNG ((nt_hash64_t){0xB1560CA2BB8F7479ULL}) /* bigatlas/emote_dots2.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS2__COPY_PNG ((nt_hash64_t){0xCF4550FA705B829FULL}) /* bigatlas/emote_dots2_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS2__PNG ((nt_hash64_t){0x58BA8D1B2B82EDAAULL}) /* bigatlas/emote_dots2_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS2____COPY_PNG ((nt_hash64_t){0xE15DF17AB39BF557ULL}) /* bigatlas/emote_dots2___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS2____PNG ((nt_hash64_t){0x274FC8BABC80C0AFULL}) /* bigatlas/emote_dots2___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS3_COPY_PNG ((nt_hash64_t){0x7749DF5B43779059ULL}) /* bigatlas/emote_dots3 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS3_PNG ((nt_hash64_t){0x12553580B98BBB48ULL}) /* bigatlas/emote_dots3.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS3__COPY_PNG ((nt_hash64_t){0xEF734304DFC4ADAFULL}) /* bigatlas/emote_dots3_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS3__PNG ((nt_hash64_t){0xA1888E36873E8076ULL}) /* bigatlas/emote_dots3_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS3____COPY_PNG ((nt_hash64_t){0x6F4FEA66D703AFD1ULL}) /* bigatlas/emote_dots3___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DOTS3____PNG ((nt_hash64_t){0x93C3E368C976A107ULL}) /* bigatlas/emote_dots3___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DROP_COPY_PNG ((nt_hash64_t){0xC5096AA6C2E9712DULL}) /* bigatlas/emote_drop copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DROP_PNG ((nt_hash64_t){0x4C996BD53C24A7C4ULL}) /* bigatlas/emote_drop.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DROP__COPY_PNG ((nt_hash64_t){0x10ABECCAAEF5D01CULL}) /* bigatlas/emote_drop_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DROP__PNG ((nt_hash64_t){0x58533A73A26C79C1ULL}) /* bigatlas/emote_drop_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DROP____COPY_PNG ((nt_hash64_t){0xCFC6E95E1BC94E01ULL}) /* bigatlas/emote_drop___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DROP____PNG ((nt_hash64_t){0x32816CCAC45522D8ULL}) /* bigatlas/emote_drop___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DROPS_COPY_PNG ((nt_hash64_t){0xA3776B140F501FF7ULL}) /* bigatlas/emote_drops copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DROPS_PNG ((nt_hash64_t){0x01BFED18A478D861ULL}) /* bigatlas/emote_drops.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DROPS__COPY_PNG ((nt_hash64_t){0x87EE5AE1DA9F5CF5ULL}) /* bigatlas/emote_drops_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DROPS__PNG ((nt_hash64_t){0x8BFE37D63BE53492ULL}) /* bigatlas/emote_drops_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DROPS____COPY_PNG ((nt_hash64_t){0x99FBDA0027F73582ULL}) /* bigatlas/emote_drops___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_DROPS____PNG ((nt_hash64_t){0x46F02B2584D1A690ULL}) /* bigatlas/emote_drops___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_EXCLAMATION_COPY_PNG ((nt_hash64_t){0x6E9BF4F09D193928ULL}) /* bigatlas/emote_exclamation copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_EXCLAMATION_PNG ((nt_hash64_t){0x8B2E0E9EE35FC9F5ULL}) /* bigatlas/emote_exclamation.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_EXCLAMATION__COPY_PNG ((nt_hash64_t){0x6DE7CA6BB8559A0AULL}) /* bigatlas/emote_exclamation_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_EXCLAMATION__PNG ((nt_hash64_t){0xDB0C4C1F66C3F1DAULL}) /* bigatlas/emote_exclamation_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_EXCLAMATION____COPY_PNG ((nt_hash64_t){0x96018B916E025A93ULL}) /* bigatlas/emote_exclamation___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_EXCLAMATION____PNG ((nt_hash64_t){0x8D31DDF2A559A036ULL}) /* bigatlas/emote_exclamation___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_EXCLAMATIONS_COPY_PNG ((nt_hash64_t){0xF12F71F364F699C5ULL}) /* bigatlas/emote_exclamations copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_EXCLAMATIONS_PNG ((nt_hash64_t){0x08CF58B7936CD20CULL}) /* bigatlas/emote_exclamations.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_EXCLAMATIONS__COPY_PNG ((nt_hash64_t){0x00D96542D75DDB03ULL}) /* bigatlas/emote_exclamations_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_EXCLAMATIONS__PNG ((nt_hash64_t){0x20E551AC3F16AD4BULL}) /* bigatlas/emote_exclamations_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_EXCLAMATIONS____COPY_PNG ((nt_hash64_t){0x635D5F94A5CF686CULL}) /* bigatlas/emote_exclamations___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_EXCLAMATIONS____PNG ((nt_hash64_t){0x9A404D291374127FULL}) /* bigatlas/emote_exclamations___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACEANGRY_COPY_PNG ((nt_hash64_t){0x294DFD107F7FA5DEULL}) /* bigatlas/emote_faceAngry copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACEANGRY_PNG ((nt_hash64_t){0xD255E78E4028FFDDULL}) /* bigatlas/emote_faceAngry.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACEANGRY__COPY_PNG ((nt_hash64_t){0x324EC9EBFCF69A8CULL}) /* bigatlas/emote_faceAngry_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACEANGRY__PNG ((nt_hash64_t){0xF9DECA8EE8C45124ULL}) /* bigatlas/emote_faceAngry_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACEANGRY____COPY_PNG ((nt_hash64_t){0x7C98FC2540385B94ULL}) /* bigatlas/emote_faceAngry___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACEANGRY____PNG ((nt_hash64_t){0x6D2A32DCF1DE5AFDULL}) /* bigatlas/emote_faceAngry___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACEHAPPY_COPY_PNG ((nt_hash64_t){0x54739A72619CBCE8ULL}) /* bigatlas/emote_faceHappy copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACEHAPPY_PNG ((nt_hash64_t){0x6665A4BBFD70E0E7ULL}) /* bigatlas/emote_faceHappy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACEHAPPY__COPY_PNG ((nt_hash64_t){0x123C5B0016F03528ULL}) /* bigatlas/emote_faceHappy_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACEHAPPY__PNG ((nt_hash64_t){0x1B9BB5C2537C0FBFULL}) /* bigatlas/emote_faceHappy_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACEHAPPY____COPY_PNG ((nt_hash64_t){0x961DECA6B4387628ULL}) /* bigatlas/emote_faceHappy___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACEHAPPY____PNG ((nt_hash64_t){0xF7574118D96DE14AULL}) /* bigatlas/emote_faceHappy___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACESAD_COPY_PNG ((nt_hash64_t){0xE4808C0BD7A39D8CULL}) /* bigatlas/emote_faceSad copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACESAD_PNG ((nt_hash64_t){0xE499E715D574D994ULL}) /* bigatlas/emote_faceSad.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACESAD__COPY_PNG ((nt_hash64_t){0xD68EE22D78470690ULL}) /* bigatlas/emote_faceSad_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACESAD__PNG ((nt_hash64_t){0xC51A8FBCCB566734ULL}) /* bigatlas/emote_faceSad_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACESAD____COPY_PNG ((nt_hash64_t){0x34D8CD424DFA2C94ULL}) /* bigatlas/emote_faceSad___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_FACESAD____PNG ((nt_hash64_t){0xCDC4F8421E068134ULL}) /* bigatlas/emote_faceSad___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEART_COPY_PNG ((nt_hash64_t){0xA2003FF96ACCE162ULL}) /* bigatlas/emote_heart copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEART_PNG ((nt_hash64_t){0x21C81970BD7F8D33ULL}) /* bigatlas/emote_heart.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEARTBROKEN_COPY_PNG ((nt_hash64_t){0xAADB665F4EB7134FULL}) /* bigatlas/emote_heartBroken copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEARTBROKEN_PNG ((nt_hash64_t){0xD49F281A7CEEA9A4ULL}) /* bigatlas/emote_heartBroken.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEARTBROKEN__COPY_PNG ((nt_hash64_t){0x01B0840E59E41D98ULL}) /* bigatlas/emote_heartBroken_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEARTBROKEN__PNG ((nt_hash64_t){0xDB4C71CFB2EB64FCULL}) /* bigatlas/emote_heartBroken_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEARTBROKEN____COPY_PNG ((nt_hash64_t){0xA2D8BB0F26AF711DULL}) /* bigatlas/emote_heartBroken___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEARTBROKEN____PNG ((nt_hash64_t){0xCEA91070953E9854ULL}) /* bigatlas/emote_heartBroken___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEART__COPY_PNG ((nt_hash64_t){0xDDB33C55168CAECDULL}) /* bigatlas/emote_heart_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEART__PNG ((nt_hash64_t){0x87FA0B24EC8A2123ULL}) /* bigatlas/emote_heart_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEART____COPY_PNG ((nt_hash64_t){0x31230C1AB4E0231CULL}) /* bigatlas/emote_heart___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEART____PNG ((nt_hash64_t){0xE94BEF378021598CULL}) /* bigatlas/emote_heart___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEARTS_COPY_PNG ((nt_hash64_t){0xABD3FB6162BD0C61ULL}) /* bigatlas/emote_hearts copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEARTS_PNG ((nt_hash64_t){0x802E0D379BFF2B45ULL}) /* bigatlas/emote_hearts.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEARTS__COPY_PNG ((nt_hash64_t){0x818B966DBD99A2A1ULL}) /* bigatlas/emote_hearts_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEARTS__PNG ((nt_hash64_t){0x7868AB8A14FCC86AULL}) /* bigatlas/emote_hearts_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEARTS____COPY_PNG ((nt_hash64_t){0xE98FFCC7228EAA8AULL}) /* bigatlas/emote_hearts___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_HEARTS____PNG ((nt_hash64_t){0x1931D29388770DF9ULL}) /* bigatlas/emote_hearts___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_IDEA_COPY_PNG ((nt_hash64_t){0xA4A60F8F005F8C0EULL}) /* bigatlas/emote_idea copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_IDEA_PNG ((nt_hash64_t){0x04DCB2C952F2009AULL}) /* bigatlas/emote_idea.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_IDEA__COPY_PNG ((nt_hash64_t){0x22D8AFB55F7F2DB9ULL}) /* bigatlas/emote_idea_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_IDEA__PNG ((nt_hash64_t){0x46CE223C423FD6F4ULL}) /* bigatlas/emote_idea_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_IDEA____COPY_PNG ((nt_hash64_t){0x9C5C55C2A26CD4F5ULL}) /* bigatlas/emote_idea___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_IDEA____PNG ((nt_hash64_t){0x1901014B2443D194ULL}) /* bigatlas/emote_idea___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_LAUGH_COPY_PNG ((nt_hash64_t){0x1D5FE7FBF654C1FFULL}) /* bigatlas/emote_laugh copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_LAUGH_PNG ((nt_hash64_t){0x651E0B79968220A5ULL}) /* bigatlas/emote_laugh.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_LAUGH__COPY_PNG ((nt_hash64_t){0x1525878622FEB32AULL}) /* bigatlas/emote_laugh_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_LAUGH__PNG ((nt_hash64_t){0xBCEFDA70A3BE7927ULL}) /* bigatlas/emote_laugh_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_LAUGH____COPY_PNG ((nt_hash64_t){0x38B053B193179ED6ULL}) /* bigatlas/emote_laugh___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_LAUGH____PNG ((nt_hash64_t){0xD6C05BB1B88F73D0ULL}) /* bigatlas/emote_laugh___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_MUSIC_COPY_PNG ((nt_hash64_t){0xF93B9CCABCF06EE7ULL}) /* bigatlas/emote_music copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_MUSIC_PNG ((nt_hash64_t){0x50A17BAD4625C7E7ULL}) /* bigatlas/emote_music.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_MUSIC__COPY_PNG ((nt_hash64_t){0x46093B1EB892F396ULL}) /* bigatlas/emote_music_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_MUSIC__PNG ((nt_hash64_t){0x1E7DF235F1761B7CULL}) /* bigatlas/emote_music_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_MUSIC____COPY_PNG ((nt_hash64_t){0xC97BC001764012A7ULL}) /* bigatlas/emote_music___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_MUSIC____PNG ((nt_hash64_t){0x0B1B3BD2BF7800AEULL}) /* bigatlas/emote_music___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_QUESTION_COPY_PNG ((nt_hash64_t){0x8851FA7E510B29DCULL}) /* bigatlas/emote_question copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_QUESTION_PNG ((nt_hash64_t){0x665600CFF4A625BFULL}) /* bigatlas/emote_question.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_QUESTION__COPY_PNG ((nt_hash64_t){0xE793144EBFF45326ULL}) /* bigatlas/emote_question_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_QUESTION__PNG ((nt_hash64_t){0x9F6CFA769A2DA1F3ULL}) /* bigatlas/emote_question_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_QUESTION____COPY_PNG ((nt_hash64_t){0xBE6298668D94D3D7ULL}) /* bigatlas/emote_question___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_QUESTION____PNG ((nt_hash64_t){0xCF4ECB7E6BACF7F9ULL}) /* bigatlas/emote_question___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SLEEP_COPY_PNG ((nt_hash64_t){0x31EDF2875C9E08B3ULL}) /* bigatlas/emote_sleep copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SLEEP_PNG ((nt_hash64_t){0xD682B63D8E1BB6E6ULL}) /* bigatlas/emote_sleep.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SLEEP__COPY_PNG ((nt_hash64_t){0xAA132B7F60170556ULL}) /* bigatlas/emote_sleep_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SLEEP__PNG ((nt_hash64_t){0x3C5ADFEC2E74BEA5ULL}) /* bigatlas/emote_sleep_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SLEEP____COPY_PNG ((nt_hash64_t){0xFBF3BAAA84F3CF31ULL}) /* bigatlas/emote_sleep___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SLEEP____PNG ((nt_hash64_t){0x9BA1B32409371759ULL}) /* bigatlas/emote_sleep___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SLEEPS_COPY_PNG ((nt_hash64_t){0x0BB592240BC7AAC5ULL}) /* bigatlas/emote_sleeps copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SLEEPS_PNG ((nt_hash64_t){0xC125CA9EBA766E78ULL}) /* bigatlas/emote_sleeps.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SLEEPS__COPY_PNG ((nt_hash64_t){0xB01694B8835BF8BBULL}) /* bigatlas/emote_sleeps_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SLEEPS__PNG ((nt_hash64_t){0xC1E41516269CD07EULL}) /* bigatlas/emote_sleeps_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SLEEPS____COPY_PNG ((nt_hash64_t){0xB5C7C644017D27E3ULL}) /* bigatlas/emote_sleeps___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SLEEPS____PNG ((nt_hash64_t){0xFB13C4EED9533BD6ULL}) /* bigatlas/emote_sleeps___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_STAR_COPY_PNG ((nt_hash64_t){0x6C107B3BD00A6406ULL}) /* bigatlas/emote_star copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_STAR_PNG ((nt_hash64_t){0x04144003A123BDF1ULL}) /* bigatlas/emote_star.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_STAR__COPY_PNG ((nt_hash64_t){0xACB6EABDEDB1081BULL}) /* bigatlas/emote_star_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_STAR__PNG ((nt_hash64_t){0x8DCA7621FBD57628ULL}) /* bigatlas/emote_star_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_STAR____COPY_PNG ((nt_hash64_t){0x323C179BE08FFDECULL}) /* bigatlas/emote_star___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_STAR____PNG ((nt_hash64_t){0x5A5FDA6835DAFB86ULL}) /* bigatlas/emote_star___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_STARS_COPY_PNG ((nt_hash64_t){0xF424F62E9097E6F3ULL}) /* bigatlas/emote_stars copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_STARS_PNG ((nt_hash64_t){0xA7ACE193374EF4E9ULL}) /* bigatlas/emote_stars.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_STARS__COPY_PNG ((nt_hash64_t){0x495E14CFC1B4E8A5ULL}) /* bigatlas/emote_stars_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_STARS__PNG ((nt_hash64_t){0x847B3FFE599CAF11ULL}) /* bigatlas/emote_stars_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_STARS____COPY_PNG ((nt_hash64_t){0x4A86F21AACAA82B5ULL}) /* bigatlas/emote_stars___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_STARS____PNG ((nt_hash64_t){0x9585265E109D2FA4ULL}) /* bigatlas/emote_stars___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SWIRL_COPY_PNG ((nt_hash64_t){0xCB3BD2485E94FC13ULL}) /* bigatlas/emote_swirl copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SWIRL_PNG ((nt_hash64_t){0xEEC343B718D3AC92ULL}) /* bigatlas/emote_swirl.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SWIRL__COPY_PNG ((nt_hash64_t){0x649FF0ABFE3BCF8DULL}) /* bigatlas/emote_swirl_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SWIRL__PNG ((nt_hash64_t){0xE3D42CAAA8FE8795ULL}) /* bigatlas/emote_swirl_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SWIRL____COPY_PNG ((nt_hash64_t){0xEC253E2E94C2C616ULL}) /* bigatlas/emote_swirl___ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EMOTE_SWIRL____PNG ((nt_hash64_t){0x2B1E9384E893EC03ULL}) /* bigatlas/emote_swirl___.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EXPLODING_COPY_PNG ((nt_hash64_t){0xAD0038E04D61DAB7ULL}) /* bigatlas/exploding copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EXPLODING_PNG ((nt_hash64_t){0xF8C9D43BBA3A0654ULL}) /* bigatlas/exploding.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EXPLODING__COPY_PNG ((nt_hash64_t){0x8B042565C038761DULL}) /* bigatlas/exploding_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EXPLODING__PNG ((nt_hash64_t){0xAC0EE1E56BA0A670ULL}) /* bigatlas/exploding_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EXPLODING_6_COPY_PNG ((nt_hash64_t){0xAB37C63D61BB2296ULL}) /* bigatlas/exploding_6 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EXPLODING_6_PNG ((nt_hash64_t){0x74EC001468763535ULL}) /* bigatlas/exploding_6.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EXPLODING_6__COPY_PNG ((nt_hash64_t){0xCACF64AF791FD2B7ULL}) /* bigatlas/exploding_6_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_EXPLODING_6__PNG ((nt_hash64_t){0x75EE1E37A6D19FBFULL}) /* bigatlas/exploding_6_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FIRE_COPY_PNG ((nt_hash64_t){0x79791FB324F7F120ULL}) /* bigatlas/fire copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FIRE_PNG ((nt_hash64_t){0x1A1E3A2E28B49CA2ULL}) /* bigatlas/fire.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FIRE__COPY_PNG ((nt_hash64_t){0xCD26F91BCB204335ULL}) /* bigatlas/fire_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FIRE__PNG ((nt_hash64_t){0xB800441104ED55CFULL}) /* bigatlas/fire_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLAG_SQUARE_COPY_PNG ((nt_hash64_t){0xC56C2BA17300572AULL}) /* bigatlas/flag_square copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLAG_SQUARE_PNG ((nt_hash64_t){0xA8BF34DFE1E3F5D0ULL}) /* bigatlas/flag_square.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLAG_SQUARE__COPY_PNG ((nt_hash64_t){0x3F8603992E4359F9ULL}) /* bigatlas/flag_square_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLAG_SQUARE__PNG ((nt_hash64_t){0xEC4152BF4663FFB2ULL}) /* bigatlas/flag_square_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLAG_TRIANGLE_COPY_PNG ((nt_hash64_t){0x9AD98C2748FDA98DULL}) /* bigatlas/flag_triangle copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLAG_TRIANGLE_PNG ((nt_hash64_t){0x9F241FADDE27FAACULL}) /* bigatlas/flag_triangle.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLAG_TRIANGLE__COPY_PNG ((nt_hash64_t){0x83FCB0C5DB727D85ULL}) /* bigatlas/flag_triangle_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLAG_TRIANGLE__PNG ((nt_hash64_t){0xE326D957EF0A68DFULL}) /* bigatlas/flag_triangle_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLASK_EMPTY_COPY_PNG ((nt_hash64_t){0xAD1E11B418D986D8ULL}) /* bigatlas/flask_empty copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLASK_EMPTY_PNG ((nt_hash64_t){0xD9AD727D122EC83AULL}) /* bigatlas/flask_empty.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLASK_EMPTY__COPY_PNG ((nt_hash64_t){0x952F78B78973AB24ULL}) /* bigatlas/flask_empty_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLASK_EMPTY__PNG ((nt_hash64_t){0xF4C7B19E8171E686ULL}) /* bigatlas/flask_empty_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLASK_FULL_COPY_PNG ((nt_hash64_t){0x37378A1798ADD004ULL}) /* bigatlas/flask_full copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLASK_FULL_PNG ((nt_hash64_t){0x42C0D7A09F6D5006ULL}) /* bigatlas/flask_full.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLASK_FULL__COPY_PNG ((nt_hash64_t){0xB6BC7152D1FFAD8AULL}) /* bigatlas/flask_full_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLASK_FULL__PNG ((nt_hash64_t){0xEAE08F5E494C2797ULL}) /* bigatlas/flask_full_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLASK_HALF_COPY_PNG ((nt_hash64_t){0xE72240A7E2023FBCULL}) /* bigatlas/flask_half copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLASK_HALF_PNG ((nt_hash64_t){0xD1A3504C74B00D6CULL}) /* bigatlas/flask_half.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLASK_HALF__COPY_PNG ((nt_hash64_t){0xA8F051445CC099F1ULL}) /* bigatlas/flask_half_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLASK_HALF__PNG ((nt_hash64_t){0xA93F528AE0B3A2E1ULL}) /* bigatlas/flask_half_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_EMPTY_COPY_PNG ((nt_hash64_t){0x2AF2CC4DBB0CFB99ULL}) /* bigatlas/flip_empty copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_EMPTY_PNG ((nt_hash64_t){0xB4208A62354B45E5ULL}) /* bigatlas/flip_empty.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_EMPTY__COPY_PNG ((nt_hash64_t){0x62CF7E874FE842B3ULL}) /* bigatlas/flip_empty_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_EMPTY__PNG ((nt_hash64_t){0x17F62F35F87EBDE6ULL}) /* bigatlas/flip_empty_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_FULL_COPY_PNG ((nt_hash64_t){0xB0451BD9323F5E79ULL}) /* bigatlas/flip_full copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_FULL_PNG ((nt_hash64_t){0xE87CF0110F8967B2ULL}) /* bigatlas/flip_full.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_FULL__COPY_PNG ((nt_hash64_t){0xE25CD37E3A6B3302ULL}) /* bigatlas/flip_full_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_FULL__PNG ((nt_hash64_t){0x2A643A1763831599ULL}) /* bigatlas/flip_full_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_HALF_COPY_PNG ((nt_hash64_t){0x81EE4EE8C18CC28CULL}) /* bigatlas/flip_half copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_HALF_PNG ((nt_hash64_t){0x8FC2995022B2CE97ULL}) /* bigatlas/flip_half.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_HALF__COPY_PNG ((nt_hash64_t){0x7DA388E172CA742EULL}) /* bigatlas/flip_half_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_HALF__PNG ((nt_hash64_t){0x768132C41748851FULL}) /* bigatlas/flip_half_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_HEAD_COPY_PNG ((nt_hash64_t){0x624BE7B1349195E5ULL}) /* bigatlas/flip_head copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_HEAD_PNG ((nt_hash64_t){0x2F51CDA668A0B7E5ULL}) /* bigatlas/flip_head.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_HEAD__COPY_PNG ((nt_hash64_t){0xB3C24D6CAD3B7B69ULL}) /* bigatlas/flip_head_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_HEAD__PNG ((nt_hash64_t){0xFE7435FB787C6CB1ULL}) /* bigatlas/flip_head_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_TAILS_COPY_PNG ((nt_hash64_t){0x956FA135F7469D02ULL}) /* bigatlas/flip_tails copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_TAILS_PNG ((nt_hash64_t){0xFC6BC4DCCAA7AD2AULL}) /* bigatlas/flip_tails.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_TAILS__COPY_PNG ((nt_hash64_t){0x506D3287F4DC2FDBULL}) /* bigatlas/flip_tails_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_FLIP_TAILS__PNG ((nt_hash64_t){0x3D49969005ACC676ULL}) /* bigatlas/flip_tails_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE_COPY_PNG ((nt_hash64_t){0x7680358CBA1B05CEULL}) /* bigatlas/giraffe copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE_PNG ((nt_hash64_t){0xAD8C3939C5FFDC40ULL}) /* bigatlas/giraffe.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE__COPY_PNG ((nt_hash64_t){0x6E67F9310842D64CULL}) /* bigatlas/giraffe_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE__PNG ((nt_hash64_t){0x97117FD450A87250ULL}) /* bigatlas/giraffe_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE_1_COPY_PNG ((nt_hash64_t){0x194B219817B583DCULL}) /* bigatlas/giraffe_1 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE_1_PNG ((nt_hash64_t){0x4B75331E2457CC6FULL}) /* bigatlas/giraffe_1.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE_2_COPY_PNG ((nt_hash64_t){0x772E5E52202F4062ULL}) /* bigatlas/giraffe_2 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE_2_PNG ((nt_hash64_t){0x445549C919FC084CULL}) /* bigatlas/giraffe_2.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE_3_COPY_PNG ((nt_hash64_t){0xD8E6AABA3CBA62D6ULL}) /* bigatlas/giraffe_3 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE_3_PNG ((nt_hash64_t){0x9B9C17CBE46C8520ULL}) /* bigatlas/giraffe_3.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE_4_COPY_PNG ((nt_hash64_t){0x9F30B8A3808F8E91ULL}) /* bigatlas/giraffe_4 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE_4_PNG ((nt_hash64_t){0x7A43310D1D5754A6ULL}) /* bigatlas/giraffe_4.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE_5_COPY_PNG ((nt_hash64_t){0xE7D924A0A95D8625ULL}) /* bigatlas/giraffe_5 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE_5_PNG ((nt_hash64_t){0xEA0AC6081CABF8F2ULL}) /* bigatlas/giraffe_5.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE___COPY_PNG ((nt_hash64_t){0x394EF0B96A60F391ULL}) /* bigatlas/giraffe__ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_GIRAFFE___PNG ((nt_hash64_t){0x38795573A6BBE91FULL}) /* bigatlas/giraffe__.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_COPY_PNG ((nt_hash64_t){0x326626E763AD726CULL}) /* bigatlas/hand copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_PNG ((nt_hash64_t){0xBDC892FFCA0E2899ULL}) /* bigatlas/hand.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND__COPY_PNG ((nt_hash64_t){0x9F32B80F6AC12E7CULL}) /* bigatlas/hand_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND__PNG ((nt_hash64_t){0xA9C50B92AE276972ULL}) /* bigatlas/hand_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_CARD_COPY_PNG ((nt_hash64_t){0x90C7E43E3F83F626ULL}) /* bigatlas/hand_card copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_CARD_PNG ((nt_hash64_t){0x8E5D37837615F41FULL}) /* bigatlas/hand_card.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_CARD__COPY_PNG ((nt_hash64_t){0xEC38157906F70CBEULL}) /* bigatlas/hand_card_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_CARD__PNG ((nt_hash64_t){0x0C239C3A3F4C87BDULL}) /* bigatlas/hand_card_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_CROSS_COPY_PNG ((nt_hash64_t){0xC22C898842A555E6ULL}) /* bigatlas/hand_cross copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_CROSS_PNG ((nt_hash64_t){0x4E0A1CBBE6AECB27ULL}) /* bigatlas/hand_cross.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_CROSS__COPY_PNG ((nt_hash64_t){0xA4E8E644F0DFC66BULL}) /* bigatlas/hand_cross_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_CROSS__PNG ((nt_hash64_t){0x34AA887CD4D4371EULL}) /* bigatlas/hand_cross_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_CUBE_COPY_PNG ((nt_hash64_t){0x9AF2498D20861EFCULL}) /* bigatlas/hand_cube copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_CUBE_PNG ((nt_hash64_t){0xBC66B7F5E914AD50ULL}) /* bigatlas/hand_cube.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_CUBE__COPY_PNG ((nt_hash64_t){0x7818C35F7936FB4EULL}) /* bigatlas/hand_cube_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_CUBE__PNG ((nt_hash64_t){0x1BCB695624E8F336ULL}) /* bigatlas/hand_cube_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_HEXAGON_COPY_PNG ((nt_hash64_t){0x37B5AA474D784A9AULL}) /* bigatlas/hand_hexagon copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_HEXAGON_PNG ((nt_hash64_t){0xBC78D51E1CF305B9ULL}) /* bigatlas/hand_hexagon.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_HEXAGON__COPY_PNG ((nt_hash64_t){0xF0A82F27E7EDF1C8ULL}) /* bigatlas/hand_hexagon_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_HEXAGON__PNG ((nt_hash64_t){0x8CB707BBB3818330ULL}) /* bigatlas/hand_hexagon_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_TOKEN_COPY_PNG ((nt_hash64_t){0xFCA37D37D11E1750ULL}) /* bigatlas/hand_token copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_TOKEN_PNG ((nt_hash64_t){0x94332EC12A4EC211ULL}) /* bigatlas/hand_token.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_TOKEN__COPY_PNG ((nt_hash64_t){0x795573F43CD92083ULL}) /* bigatlas/hand_token_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_TOKEN__PNG ((nt_hash64_t){0xD4E840CDA2FB5476ULL}) /* bigatlas/hand_token_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_TOKEN_OPEN_COPY_PNG ((nt_hash64_t){0x771D907E24193896ULL}) /* bigatlas/hand_token_open copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_TOKEN_OPEN_PNG ((nt_hash64_t){0x7568E8A91B65D8CBULL}) /* bigatlas/hand_token_open.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_TOKEN_OPEN__COPY_PNG ((nt_hash64_t){0x39E40ECBAC51C583ULL}) /* bigatlas/hand_token_open_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HAND_TOKEN_OPEN__PNG ((nt_hash64_t){0x5C15B0FD6EDD5210ULL}) /* bigatlas/hand_token_open_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEAVY__COPY_PNG ((nt_hash64_t){0x3090C8746DCC8C63ULL}) /* bigatlas/heavy_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEAVY__PNG ((nt_hash64_t){0x102C5D05D9841A04ULL}) /* bigatlas/heavy_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEAVY_TEXT__COPY_PNG ((nt_hash64_t){0x245C23D659762933ULL}) /* bigatlas/heavy_text_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEAVY_TEXT__PNG ((nt_hash64_t){0xBB2CBC53C318DBD9ULL}) /* bigatlas/heavy_text_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_COPY_PNG ((nt_hash64_t){0xB9C4734D9D68F982ULL}) /* bigatlas/hexagon copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_PNG ((nt_hash64_t){0x6F8DB715280D71E8ULL}) /* bigatlas/hexagon.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON__COPY_PNG ((nt_hash64_t){0xE33EB660287A2D13ULL}) /* bigatlas/hexagon_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON__PNG ((nt_hash64_t){0x47515787171692B6ULL}) /* bigatlas/hexagon_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_IN_COPY_PNG ((nt_hash64_t){0x04C20139F8E83AEFULL}) /* bigatlas/hexagon_in copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_IN_PNG ((nt_hash64_t){0xE9D1A24AE445906EULL}) /* bigatlas/hexagon_in.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_IN__COPY_PNG ((nt_hash64_t){0xE06A1B2232FF0E3AULL}) /* bigatlas/hexagon_in_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_IN__PNG ((nt_hash64_t){0xFA1109EDA5CE3DAAULL}) /* bigatlas/hexagon_in_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_OUT_COPY_PNG ((nt_hash64_t){0xC8BB0A0758B8317BULL}) /* bigatlas/hexagon_out copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_OUT_PNG ((nt_hash64_t){0xFE2BE7D3FFE2FF7EULL}) /* bigatlas/hexagon_out.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_OUT__COPY_PNG ((nt_hash64_t){0x480D2306A924A983ULL}) /* bigatlas/hexagon_out_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_OUT__PNG ((nt_hash64_t){0x6FE4D34E357AB2BDULL}) /* bigatlas/hexagon_out_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_OUTLINE_COPY_PNG ((nt_hash64_t){0xF409FC9602F6A98BULL}) /* bigatlas/hexagon_outline copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_OUTLINE_PNG ((nt_hash64_t){0xE013D5D938373C4EULL}) /* bigatlas/hexagon_outline.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_OUTLINE__COPY_PNG ((nt_hash64_t){0xDEF9CB9054C6ED84ULL}) /* bigatlas/hexagon_outline_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_OUTLINE__PNG ((nt_hash64_t){0x57326AF925712B17ULL}) /* bigatlas/hexagon_outline_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_QUESTION_COPY_PNG ((nt_hash64_t){0xE4E0C503AC8965FDULL}) /* bigatlas/hexagon_question copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_QUESTION_PNG ((nt_hash64_t){0xCE1F3F08098F9849ULL}) /* bigatlas/hexagon_question.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_QUESTION__COPY_PNG ((nt_hash64_t){0x52DE1A09D8D1B676ULL}) /* bigatlas/hexagon_question_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_QUESTION__PNG ((nt_hash64_t){0xCD80F6565C445A05ULL}) /* bigatlas/hexagon_question_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_SWITCH_COPY_PNG ((nt_hash64_t){0xA0F34D62761B3A6AULL}) /* bigatlas/hexagon_switch copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_SWITCH_PNG ((nt_hash64_t){0x34FC679AF865D3ECULL}) /* bigatlas/hexagon_switch.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_SWITCH__COPY_PNG ((nt_hash64_t){0x5A879574A714D36AULL}) /* bigatlas/hexagon_switch_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_SWITCH__PNG ((nt_hash64_t){0xF72182F1DDDE7542ULL}) /* bigatlas/hexagon_switch_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_TILE_COPY_PNG ((nt_hash64_t){0xD7FCD4F6FF2810FDULL}) /* bigatlas/hexagon_tile copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_TILE_PNG ((nt_hash64_t){0x557B98B818B8506CULL}) /* bigatlas/hexagon_tile.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_TILE__COPY_PNG ((nt_hash64_t){0x9513AC9244F0443CULL}) /* bigatlas/hexagon_tile_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HEXAGON_TILE__PNG ((nt_hash64_t){0x43BC3491163395FAULL}) /* bigatlas/hexagon_tile_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HIPPO_COPY_PNG ((nt_hash64_t){0x99D6595D1BC193F4ULL}) /* bigatlas/hippo copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HIPPO_PNG ((nt_hash64_t){0x20D3B81D52031BD6ULL}) /* bigatlas/hippo.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HIPPO__COPY_PNG ((nt_hash64_t){0x61FF6BDCD9D993DDULL}) /* bigatlas/hippo_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HIPPO__PNG ((nt_hash64_t){0x8FDBCBF07AD44647ULL}) /* bigatlas/hippo_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HIPPO_2_COPY_PNG ((nt_hash64_t){0xAD63E77CDD1241D9ULL}) /* bigatlas/hippo_2 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HIPPO_2_PNG ((nt_hash64_t){0xF4849C1788AE55ADULL}) /* bigatlas/hippo_2.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HIPPO_3_COPY_PNG ((nt_hash64_t){0xE41B6D618CD515FCULL}) /* bigatlas/hippo_3 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HIPPO_3_PNG ((nt_hash64_t){0x1D97B2300A0F2667ULL}) /* bigatlas/hippo_3.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HIPPO_4_COPY_PNG ((nt_hash64_t){0xD9291131FF8FD10FULL}) /* bigatlas/hippo_4 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HIPPO_4_PNG ((nt_hash64_t){0x85D266C09A074E79ULL}) /* bigatlas/hippo_4.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HIPPO_5_COPY_PNG ((nt_hash64_t){0x5E568EACA071AF56ULL}) /* bigatlas/hippo_5 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HIPPO_5_PNG ((nt_hash64_t){0x26044C41B3914BDEULL}) /* bigatlas/hippo_5.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HIPPO___COPY_PNG ((nt_hash64_t){0xBB349C16B71A022BULL}) /* bigatlas/hippo__ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HIPPO___PNG ((nt_hash64_t){0x1BF51EE997A91B80ULL}) /* bigatlas/hippo__.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HOURGLASS_COPY_PNG ((nt_hash64_t){0x6CEF210B6F43469FULL}) /* bigatlas/hourglass copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HOURGLASS_PNG ((nt_hash64_t){0x0F7E1D1AF863701CULL}) /* bigatlas/hourglass.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HOURGLASS__COPY_PNG ((nt_hash64_t){0x5DE05FF5BDAA4724ULL}) /* bigatlas/hourglass_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HOURGLASS__PNG ((nt_hash64_t){0x4CFEC3CD66338429ULL}) /* bigatlas/hourglass_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HOURGLASS_BOTTOM_COPY_PNG ((nt_hash64_t){0x49EEB378F9B0B628ULL}) /* bigatlas/hourglass_bottom copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HOURGLASS_BOTTOM_PNG ((nt_hash64_t){0x6F002061CBCC032CULL}) /* bigatlas/hourglass_bottom.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HOURGLASS_BOTTOM__COPY_PNG ((nt_hash64_t){0xF67311C110B39631ULL}) /* bigatlas/hourglass_bottom_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HOURGLASS_BOTTOM__PNG ((nt_hash64_t){0x858A20A74A4FED35ULL}) /* bigatlas/hourglass_bottom_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HOURGLASS_TOP_COPY_PNG ((nt_hash64_t){0xE4DBE40A4A49BBCDULL}) /* bigatlas/hourglass_top copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HOURGLASS_TOP_PNG ((nt_hash64_t){0x59EB3CD00B6B97E4ULL}) /* bigatlas/hourglass_top.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HOURGLASS_TOP__COPY_PNG ((nt_hash64_t){0x2E8BA1E0D245B21DULL}) /* bigatlas/hourglass_top_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_HOURGLASS_TOP__PNG ((nt_hash64_t){0xDC8EC68E28653582ULL}) /* bigatlas/hourglass_top_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_INTERACTION__COPY_PNG ((nt_hash64_t){0x2A853667901C1465ULL}) /* bigatlas/interaction_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_INTERACTION__PNG ((nt_hash64_t){0xB1942611A6D26F6CULL}) /* bigatlas/interaction_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_INTERACTION_TEXT__COPY_PNG ((nt_hash64_t){0xD1BD563AB62C8D99ULL}) /* bigatlas/interaction_text_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_INTERACTION_TEXT__PNG ((nt_hash64_t){0xCC5AE54950035F04ULL}) /* bigatlas/interaction_text_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_KNOWLEDGE__COPY_PNG ((nt_hash64_t){0xBC3807F847ABDFF0ULL}) /* bigatlas/knowledge_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_KNOWLEDGE__PNG ((nt_hash64_t){0x55803FDF76958665ULL}) /* bigatlas/knowledge_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_KNOWLEDGE_TEXT__COPY_PNG ((nt_hash64_t){0xAD9EA6889B01D722ULL}) /* bigatlas/knowledge_text_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_KNOWLEDGE_TEXT__PNG ((nt_hash64_t){0xD403BC6C43F9229EULL}) /* bigatlas/knowledge_text_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LIGHT__COPY_PNG ((nt_hash64_t){0xF41E693075C9D3D4ULL}) /* bigatlas/light_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LIGHT__PNG ((nt_hash64_t){0x28BA9CF6F57E06DCULL}) /* bigatlas/light_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LIGHT_TEXT__COPY_PNG ((nt_hash64_t){0xED7BD729227E4057ULL}) /* bigatlas/light_text_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LIGHT_TEXT__PNG ((nt_hash64_t){0xE7070229D19B79A3ULL}) /* bigatlas/light_text_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LOCK_CLOSED_COPY_PNG ((nt_hash64_t){0x391552C8B6D23AEEULL}) /* bigatlas/lock_closed copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LOCK_CLOSED_PNG ((nt_hash64_t){0xB921878C1402C5ACULL}) /* bigatlas/lock_closed.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LOCK_CLOSED__COPY_PNG ((nt_hash64_t){0x67AEBAB25BF25421ULL}) /* bigatlas/lock_closed_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LOCK_CLOSED__PNG ((nt_hash64_t){0x37C6CABA279441C7ULL}) /* bigatlas/lock_closed_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LOCK_OPEN_COPY_PNG ((nt_hash64_t){0x8847E57C1303B3FFULL}) /* bigatlas/lock_open copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LOCK_OPEN_PNG ((nt_hash64_t){0xA797C3E8E49E353EULL}) /* bigatlas/lock_open.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LOCK_OPEN__COPY_PNG ((nt_hash64_t){0x57A60BAE48AB6EABULL}) /* bigatlas/lock_open_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LOCK_OPEN__PNG ((nt_hash64_t){0xB2DEE5944A5DB1CDULL}) /* bigatlas/lock_open_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LUCK__COPY_PNG ((nt_hash64_t){0x16AEAC9CAB8CC8D4ULL}) /* bigatlas/luck_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LUCK__PNG ((nt_hash64_t){0x905B0A5EF58A0C0CULL}) /* bigatlas/luck_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LUCK_TEXT__COPY_PNG ((nt_hash64_t){0x7AD3BEEDEC7856DEULL}) /* bigatlas/luck_text_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_LUCK_TEXT__PNG ((nt_hash64_t){0xBB69F49625C0D2DCULL}) /* bigatlas/luck_text_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MEDIUM__COPY_PNG ((nt_hash64_t){0x28B7AC806D201A0EULL}) /* bigatlas/medium_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MEDIUM__PNG ((nt_hash64_t){0x8B67D7984321DC38ULL}) /* bigatlas/medium_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MEDIUM_HEAVY__COPY_PNG ((nt_hash64_t){0xCE69507AE444E990ULL}) /* bigatlas/medium_heavy_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MEDIUM_HEAVY__PNG ((nt_hash64_t){0xE8EE9DD46E79C846ULL}) /* bigatlas/medium_heavy_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MEDIUM_HEAVY_TEXT__COPY_PNG ((nt_hash64_t){0x199BD7FEBD36218AULL}) /* bigatlas/medium_heavy_text_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MEDIUM_HEAVY_TEXT__PNG ((nt_hash64_t){0x26DA7FB3927426D7ULL}) /* bigatlas/medium_heavy_text_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MEDIUM_LIGHT__COPY_PNG ((nt_hash64_t){0xF9C87C453274D3EFULL}) /* bigatlas/medium_light_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MEDIUM_LIGHT__PNG ((nt_hash64_t){0x18BD36A4AF8B38EAULL}) /* bigatlas/medium_light_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MEDIUM_LIGHT_TEXT__COPY_PNG ((nt_hash64_t){0x1DACE70F4B83D476ULL}) /* bigatlas/medium_light_text_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MEDIUM_LIGHT_TEXT__PNG ((nt_hash64_t){0x52BC0286A5BC7B7EULL}) /* bigatlas/medium_light_text_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MEDIUM_TEXT__COPY_PNG ((nt_hash64_t){0xA9B9CFB4AF67E768ULL}) /* bigatlas/medium_text_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MEDIUM_TEXT__PNG ((nt_hash64_t){0x9EC65EC5DC34A1C7ULL}) /* bigatlas/medium_text_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MINIATURES__COPY_PNG ((nt_hash64_t){0x029919C2DF999F0EULL}) /* bigatlas/miniatures_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MINIATURES__PNG ((nt_hash64_t){0x28AAD90198AD4D2FULL}) /* bigatlas/miniatures_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MINIATURES_TEXT__COPY_PNG ((nt_hash64_t){0x45091476AA2C5293ULL}) /* bigatlas/miniatures_text_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MINIATURES_TEXT__PNG ((nt_hash64_t){0xEABDF6763CB5FE8BULL}) /* bigatlas/miniatures_text_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY_COPY_PNG ((nt_hash64_t){0x83D868F703029426ULL}) /* bigatlas/monkey copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY_PNG ((nt_hash64_t){0x422491DE0AC7AE2FULL}) /* bigatlas/monkey.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY__COPY_PNG ((nt_hash64_t){0xAAE5FC2477BB362AULL}) /* bigatlas/monkey_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY__PNG ((nt_hash64_t){0x21838027153B1765ULL}) /* bigatlas/monkey_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY_1_COPY_PNG ((nt_hash64_t){0x2EC037FFD477EE0AULL}) /* bigatlas/monkey_1 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY_1_PNG ((nt_hash64_t){0x2A19E49539FE2F88ULL}) /* bigatlas/monkey_1.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY_2_COPY_PNG ((nt_hash64_t){0x3B884EED1ADFEDECULL}) /* bigatlas/monkey_2 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY_2_PNG ((nt_hash64_t){0xD8D0C66FC80738BCULL}) /* bigatlas/monkey_2.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY_3_COPY_PNG ((nt_hash64_t){0x610E0511B51614BBULL}) /* bigatlas/monkey_3 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY_3_PNG ((nt_hash64_t){0x6B739B112BF3A92DULL}) /* bigatlas/monkey_3.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY_4_COPY_PNG ((nt_hash64_t){0xC11F5A5EAD548D9CULL}) /* bigatlas/monkey_4 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY_4_PNG ((nt_hash64_t){0x4139D3677ACC3802ULL}) /* bigatlas/monkey_4.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY_5_COPY_PNG ((nt_hash64_t){0x5901B8C0F271E1B8ULL}) /* bigatlas/monkey_5 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY_5_PNG ((nt_hash64_t){0x37FFB63C194A6098ULL}) /* bigatlas/monkey_5.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY___COPY_PNG ((nt_hash64_t){0x0C1B3DB61F85864BULL}) /* bigatlas/monkey__ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_MONKEY___PNG ((nt_hash64_t){0x420D61610F58B5C8ULL}) /* bigatlas/monkey__.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_NOTEPAD_COPY_PNG ((nt_hash64_t){0xBC8B7F0401D045D0ULL}) /* bigatlas/notepad copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_NOTEPAD_PNG ((nt_hash64_t){0xDA5A9470EEB8B258ULL}) /* bigatlas/notepad.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_NOTEPAD__COPY_PNG ((nt_hash64_t){0xD9903D730B1C623BULL}) /* bigatlas/notepad_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_NOTEPAD__PNG ((nt_hash64_t){0x46D4F3B8F8E1B156ULL}) /* bigatlas/notepad_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_NOTEPAD_WRITE_COPY_PNG ((nt_hash64_t){0x963F92FDEFC8AB6EULL}) /* bigatlas/notepad_write copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_NOTEPAD_WRITE_PNG ((nt_hash64_t){0x99F877B863F015FFULL}) /* bigatlas/notepad_write.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_NOTEPAD_WRITE__COPY_PNG ((nt_hash64_t){0x0B281172644E2BF3ULL}) /* bigatlas/notepad_write_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_NOTEPAD_WRITE__PNG ((nt_hash64_t){0x9F967DDA0755C8D5ULL}) /* bigatlas/notepad_write_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA_COPY_PNG ((nt_hash64_t){0x2A1C26D5780BE821ULL}) /* bigatlas/panda copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA_PNG ((nt_hash64_t){0x1DC41B66D3A6268EULL}) /* bigatlas/panda.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA__COPY_PNG ((nt_hash64_t){0x4122DAF19BC118E0ULL}) /* bigatlas/panda_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA__PNG ((nt_hash64_t){0x0458D4348FAC3713ULL}) /* bigatlas/panda_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA_1_COPY_PNG ((nt_hash64_t){0x4B90FEBB22E6231BULL}) /* bigatlas/panda_1 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA_1_PNG ((nt_hash64_t){0x472A98315FFF699AULL}) /* bigatlas/panda_1.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA_2_COPY_PNG ((nt_hash64_t){0x51C4ED26A356E3C4ULL}) /* bigatlas/panda_2 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA_2_PNG ((nt_hash64_t){0x5345E8641EE404D2ULL}) /* bigatlas/panda_2.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA_3_COPY_PNG ((nt_hash64_t){0x03FA1AE06765F7BDULL}) /* bigatlas/panda_3 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA_3_PNG ((nt_hash64_t){0x998554AAA31401B5ULL}) /* bigatlas/panda_3.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA_4_COPY_PNG ((nt_hash64_t){0xEB846520525A9F68ULL}) /* bigatlas/panda_4 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA_4_PNG ((nt_hash64_t){0x07C74042B99E0284ULL}) /* bigatlas/panda_4.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA_5_COPY_PNG ((nt_hash64_t){0x2AF4DC5ABCE55989ULL}) /* bigatlas/panda_5 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA_5_PNG ((nt_hash64_t){0x46BDE77C79D0D5B5ULL}) /* bigatlas/panda_5.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA___COPY_PNG ((nt_hash64_t){0xD72E151B98CF0D0AULL}) /* bigatlas/panda__ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PANDA___PNG ((nt_hash64_t){0x513FB4B95ABA4CC5ULL}) /* bigatlas/panda__.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT_COPY_PNG ((nt_hash64_t){0x1CFEADB51FF24561ULL}) /* bigatlas/parrot copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT_PNG ((nt_hash64_t){0xD6872FFA5D0094E2ULL}) /* bigatlas/parrot.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT__COPY_PNG ((nt_hash64_t){0xD1F5709A8389247AULL}) /* bigatlas/parrot_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT__PNG ((nt_hash64_t){0x368987C69D2BEB75ULL}) /* bigatlas/parrot_.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT_1_COPY_PNG ((nt_hash64_t){0x7306E726E11310F5ULL}) /* bigatlas/parrot_1 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT_1_PNG ((nt_hash64_t){0x478BBD53605A40B8ULL}) /* bigatlas/parrot_1.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT_2_COPY_PNG ((nt_hash64_t){0x290E5A077032C5CAULL}) /* bigatlas/parrot_2 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT_2_PNG ((nt_hash64_t){0xE8682C91697C472BULL}) /* bigatlas/parrot_2.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT_3_COPY_PNG ((nt_hash64_t){0x9EF08B8BE006C89FULL}) /* bigatlas/parrot_3 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT_3_PNG ((nt_hash64_t){0x75FB50ED2A544133ULL}) /* bigatlas/parrot_3.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT_4_COPY_PNG ((nt_hash64_t){0x678DBA3ADE124824ULL}) /* bigatlas/parrot_4 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT_4_PNG ((nt_hash64_t){0x1F4AD88ED73C708BULL}) /* bigatlas/parrot_4.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT_5_COPY_PNG ((nt_hash64_t){0xDBA5EA4C13287EFDULL}) /* bigatlas/parrot_5 copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT_5_PNG ((nt_hash64_t){0x110280D9DB894316ULL}) /* bigatlas/parrot_5.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT___COPY_PNG ((nt_hash64_t){0x723A7EF23CF817DEULL}) /* bigatlas/parrot__ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PARROT___PNG ((nt_hash64_t){0x3DDC22DA7C5C5C72ULL}) /* bigatlas/parrot__.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PAWN_COPY_PNG ((nt_hash64_t){0x5B66ED7EED2B331CULL}) /* bigatlas/pawn copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PAWN_PNG ((nt_hash64_t){0xF34EEF2A6FCC4E31ULL}) /* bigatlas/pawn.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PAWN__COPY_PNG ((nt_hash64_t){0x3E632229F076DFD2ULL}) /* bigatlas/pawn_ copy.png */
+#define ASSET_ATLAS_REGION_BIGATLAS_PAWN__PNG ((nt_hash64_t){0x5F656A3CC3BAE5B2ULL}) /* bigatlas/pawn_.png */
 
 #if NT_HASH_LABELS
 static inline void atlas_assets_register_labels(void) {
     (void)nt_hash64_str("assets/meshes/cube.glb");
     (void)nt_hash64_str("assets/shaders/mesh_inst.frag");
     (void)nt_hash64_str("assets/shaders/mesh_inst.vert");
-    (void)nt_hash64_str("spineboy");
-    (void)nt_hash64_str("spineboy/crosshair.png");
-    (void)nt_hash64_str("spineboy/eye_indifferent.png");
-    (void)nt_hash64_str("spineboy/eye_surprised.png");
-    (void)nt_hash64_str("spineboy/eyes.png");
-    (void)nt_hash64_str("spineboy/front_bracer.png");
-    (void)nt_hash64_str("spineboy/front_fist_closed.png");
-    (void)nt_hash64_str("spineboy/front_fist_open.png");
-    (void)nt_hash64_str("spineboy/front_foot.png");
-    (void)nt_hash64_str("spineboy/front_foot_bend1.png");
-    (void)nt_hash64_str("spineboy/front_foot_bend2.png");
-    (void)nt_hash64_str("spineboy/front_shin.png");
-    (void)nt_hash64_str("spineboy/front_thigh.png");
-    (void)nt_hash64_str("spineboy/front_upper_arm.png");
-    (void)nt_hash64_str("spineboy/goggles.png");
-    (void)nt_hash64_str("spineboy/gun.png");
-    (void)nt_hash64_str("spineboy/head.png");
-    (void)nt_hash64_str("spineboy/hoverboard-board.png");
-    (void)nt_hash64_str("spineboy/hoverboard-thruster.png");
-    (void)nt_hash64_str("spineboy/hoverglow-small.png");
-    (void)nt_hash64_str("spineboy/mouth_grind.png");
-    (void)nt_hash64_str("spineboy/mouth_oooo.png");
-    (void)nt_hash64_str("spineboy/mouth_smile.png");
-    (void)nt_hash64_str("spineboy/muzzle-glow.png");
-    (void)nt_hash64_str("spineboy/muzzle-ring.png");
-    (void)nt_hash64_str("spineboy/muzzle.png");
-    (void)nt_hash64_str("spineboy/muzzle01.png");
-    (void)nt_hash64_str("spineboy/muzzle02.png");
-    (void)nt_hash64_str("spineboy/muzzle03.png");
-    (void)nt_hash64_str("spineboy/muzzle04.png");
-    (void)nt_hash64_str("spineboy/muzzle05.png");
-    (void)nt_hash64_str("spineboy/neck.png");
-    (void)nt_hash64_str("spineboy/portal-bg.png");
-    (void)nt_hash64_str("spineboy/portal-flare1.png");
-    (void)nt_hash64_str("spineboy/portal-flare2.png");
-    (void)nt_hash64_str("spineboy/portal-flare3.png");
-    (void)nt_hash64_str("spineboy/portal-shade.png");
-    (void)nt_hash64_str("spineboy/portal-streaks1.png");
-    (void)nt_hash64_str("spineboy/portal-streaks2.png");
-    (void)nt_hash64_str("spineboy/rear_bracer.png");
-    (void)nt_hash64_str("spineboy/rear_foot.png");
-    (void)nt_hash64_str("spineboy/rear_foot_bend1.png");
-    (void)nt_hash64_str("spineboy/rear_foot_bend2.png");
-    (void)nt_hash64_str("spineboy/rear_shin.png");
-    (void)nt_hash64_str("spineboy/rear_thigh.png");
-    (void)nt_hash64_str("spineboy/rear_upper_arm.png");
-    (void)nt_hash64_str("spineboy/tex0");
-    (void)nt_hash64_str("spineboy/torso.png");
+    (void)nt_hash64_str("bigatlas");
+    (void)nt_hash64_str("bigatlas/ages_ copy.png");
+    (void)nt_hash64_str("bigatlas/ages_.png");
+    (void)nt_hash64_str("bigatlas/ages_10_ copy.png");
+    (void)nt_hash64_str("bigatlas/ages_10_.png");
+    (void)nt_hash64_str("bigatlas/ages_13_ copy.png");
+    (void)nt_hash64_str("bigatlas/ages_13_.png");
+    (void)nt_hash64_str("bigatlas/ages_17_ copy.png");
+    (void)nt_hash64_str("bigatlas/ages_17_.png");
+    (void)nt_hash64_str("bigatlas/ages_18_ copy.png");
+    (void)nt_hash64_str("bigatlas/ages_18_.png");
+    (void)nt_hash64_str("bigatlas/ages_3_ copy.png");
+    (void)nt_hash64_str("bigatlas/ages_3_.png");
+    (void)nt_hash64_str("bigatlas/ages_7_ copy.png");
+    (void)nt_hash64_str("bigatlas/ages_7_.png");
+    (void)nt_hash64_str("bigatlas/ages_all_ copy.png");
+    (void)nt_hash64_str("bigatlas/ages_all_.png");
+    (void)nt_hash64_str("bigatlas/arrow_clockwise copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_clockwise.png");
+    (void)nt_hash64_str("bigatlas/arrow_clockwise_ copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_clockwise_.png");
+    (void)nt_hash64_str("bigatlas/arrow_counterclockwise copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_counterclockwise.png");
+    (void)nt_hash64_str("bigatlas/arrow_counterclockwise_ copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_counterclockwise_.png");
+    (void)nt_hash64_str("bigatlas/arrow_cross copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_cross.png");
+    (void)nt_hash64_str("bigatlas/arrow_cross_ copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_cross_.png");
+    (void)nt_hash64_str("bigatlas/arrow_cross_divided copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_cross_divided.png");
+    (void)nt_hash64_str("bigatlas/arrow_cross_divided_ copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_cross_divided_.png");
+    (void)nt_hash64_str("bigatlas/arrow_diagonal copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_diagonal.png");
+    (void)nt_hash64_str("bigatlas/arrow_diagonal_ copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_diagonal_.png");
+    (void)nt_hash64_str("bigatlas/arrow_diagonal_cross copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_diagonal_cross.png");
+    (void)nt_hash64_str("bigatlas/arrow_diagonal_cross_ copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_diagonal_cross_.png");
+    (void)nt_hash64_str("bigatlas/arrow_diagonal_cross_divided copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_diagonal_cross_divided.png");
+    (void)nt_hash64_str("bigatlas/arrow_diagonal_cross_divided_ copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_diagonal_cross_divided_.png");
+    (void)nt_hash64_str("bigatlas/arrow_horizontal copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_horizontal.png");
+    (void)nt_hash64_str("bigatlas/arrow_horizontal_ copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_horizontal_.png");
+    (void)nt_hash64_str("bigatlas/arrow_reserve copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_reserve.png");
+    (void)nt_hash64_str("bigatlas/arrow_reserve_ copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_reserve_.png");
+    (void)nt_hash64_str("bigatlas/arrow_right copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_right.png");
+    (void)nt_hash64_str("bigatlas/arrow_right_ copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_right_.png");
+    (void)nt_hash64_str("bigatlas/arrow_right_curve copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_right_curve.png");
+    (void)nt_hash64_str("bigatlas/arrow_right_curve_ copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_right_curve_.png");
+    (void)nt_hash64_str("bigatlas/arrow_rotate copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_rotate.png");
+    (void)nt_hash64_str("bigatlas/arrow_rotate_ copy.png");
+    (void)nt_hash64_str("bigatlas/arrow_rotate_.png");
+    (void)nt_hash64_str("bigatlas/award copy.png");
+    (void)nt_hash64_str("bigatlas/award.png");
+    (void)nt_hash64_str("bigatlas/award_ copy.png");
+    (void)nt_hash64_str("bigatlas/award_.png");
+    (void)nt_hash64_str("bigatlas/blank_ copy.png");
+    (void)nt_hash64_str("bigatlas/blank_.png");
+    (void)nt_hash64_str("bigatlas/blank_panel_ copy.png");
+    (void)nt_hash64_str("bigatlas/blank_panel_.png");
+    (void)nt_hash64_str("bigatlas/book_closed copy.png");
+    (void)nt_hash64_str("bigatlas/book_closed.png");
+    (void)nt_hash64_str("bigatlas/book_closed_ copy.png");
+    (void)nt_hash64_str("bigatlas/book_closed_.png");
+    (void)nt_hash64_str("bigatlas/book_open copy.png");
+    (void)nt_hash64_str("bigatlas/book_open.png");
+    (void)nt_hash64_str("bigatlas/book_open_ copy.png");
+    (void)nt_hash64_str("bigatlas/book_open_.png");
+    (void)nt_hash64_str("bigatlas/bow copy.png");
+    (void)nt_hash64_str("bigatlas/bow.png");
+    (void)nt_hash64_str("bigatlas/bow_ copy.png");
+    (void)nt_hash64_str("bigatlas/bow_.png");
+    (void)nt_hash64_str("bigatlas/campfire copy.png");
+    (void)nt_hash64_str("bigatlas/campfire.png");
+    (void)nt_hash64_str("bigatlas/campfire_ copy.png");
+    (void)nt_hash64_str("bigatlas/campfire_.png");
+    (void)nt_hash64_str("bigatlas/card copy.png");
+    (void)nt_hash64_str("bigatlas/card.png");
+    (void)nt_hash64_str("bigatlas/card_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_.png");
+    (void)nt_hash64_str("bigatlas/card_add copy.png");
+    (void)nt_hash64_str("bigatlas/card_add.png");
+    (void)nt_hash64_str("bigatlas/card_add_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_add_.png");
+    (void)nt_hash64_str("bigatlas/card_diagonal copy.png");
+    (void)nt_hash64_str("bigatlas/card_diagonal.png");
+    (void)nt_hash64_str("bigatlas/card_diagonal_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_diagonal_.png");
+    (void)nt_hash64_str("bigatlas/card_down copy.png");
+    (void)nt_hash64_str("bigatlas/card_down.png");
+    (void)nt_hash64_str("bigatlas/card_down_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_down_.png");
+    (void)nt_hash64_str("bigatlas/card_down_outline copy.png");
+    (void)nt_hash64_str("bigatlas/card_down_outline.png");
+    (void)nt_hash64_str("bigatlas/card_down_outline_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_down_outline_.png");
+    (void)nt_hash64_str("bigatlas/card_flip copy.png");
+    (void)nt_hash64_str("bigatlas/card_flip.png");
+    (void)nt_hash64_str("bigatlas/card_flip_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_flip_.png");
+    (void)nt_hash64_str("bigatlas/card_flipdouble copy.png");
+    (void)nt_hash64_str("bigatlas/card_flipdouble.png");
+    (void)nt_hash64_str("bigatlas/card_flipdouble_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_flipdouble_.png");
+    (void)nt_hash64_str("bigatlas/card_lift copy.png");
+    (void)nt_hash64_str("bigatlas/card_lift.png");
+    (void)nt_hash64_str("bigatlas/card_lift_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_lift_.png");
+    (void)nt_hash64_str("bigatlas/card_outline copy.png");
+    (void)nt_hash64_str("bigatlas/card_outline.png");
+    (void)nt_hash64_str("bigatlas/card_outline_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_outline_.png");
+    (void)nt_hash64_str("bigatlas/card_outline_lift copy.png");
+    (void)nt_hash64_str("bigatlas/card_outline_lift.png");
+    (void)nt_hash64_str("bigatlas/card_outline_lift_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_outline_lift_.png");
+    (void)nt_hash64_str("bigatlas/card_outline_place copy.png");
+    (void)nt_hash64_str("bigatlas/card_outline_place.png");
+    (void)nt_hash64_str("bigatlas/card_outline_place_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_outline_place_.png");
+    (void)nt_hash64_str("bigatlas/card_outline_remove copy.png");
+    (void)nt_hash64_str("bigatlas/card_outline_remove.png");
+    (void)nt_hash64_str("bigatlas/card_outline_remove_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_outline_remove_.png");
+    (void)nt_hash64_str("bigatlas/card_place copy.png");
+    (void)nt_hash64_str("bigatlas/card_place.png");
+    (void)nt_hash64_str("bigatlas/card_place_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_place_.png");
+    (void)nt_hash64_str("bigatlas/card_remove copy.png");
+    (void)nt_hash64_str("bigatlas/card_remove.png");
+    (void)nt_hash64_str("bigatlas/card_remove_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_remove_.png");
+    (void)nt_hash64_str("bigatlas/card_rotate copy.png");
+    (void)nt_hash64_str("bigatlas/card_rotate.png");
+    (void)nt_hash64_str("bigatlas/card_rotate_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_rotate_.png");
+    (void)nt_hash64_str("bigatlas/card_subtract copy.png");
+    (void)nt_hash64_str("bigatlas/card_subtract.png");
+    (void)nt_hash64_str("bigatlas/card_subtract_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_subtract_.png");
+    (void)nt_hash64_str("bigatlas/card_tap copy.png");
+    (void)nt_hash64_str("bigatlas/card_tap.png");
+    (void)nt_hash64_str("bigatlas/card_tap_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_tap_.png");
+    (void)nt_hash64_str("bigatlas/card_tap_down copy.png");
+    (void)nt_hash64_str("bigatlas/card_tap_down.png");
+    (void)nt_hash64_str("bigatlas/card_tap_down_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_tap_down_.png");
+    (void)nt_hash64_str("bigatlas/card_tap_outline copy.png");
+    (void)nt_hash64_str("bigatlas/card_tap_outline.png");
+    (void)nt_hash64_str("bigatlas/card_tap_outline_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_tap_outline_.png");
+    (void)nt_hash64_str("bigatlas/card_tap_outline_down copy.png");
+    (void)nt_hash64_str("bigatlas/card_tap_outline_down.png");
+    (void)nt_hash64_str("bigatlas/card_tap_outline_down_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_tap_outline_down_.png");
+    (void)nt_hash64_str("bigatlas/card_tap_outline_up copy.png");
+    (void)nt_hash64_str("bigatlas/card_tap_outline_up.png");
+    (void)nt_hash64_str("bigatlas/card_tap_outline_up_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_tap_outline_up_.png");
+    (void)nt_hash64_str("bigatlas/card_tap_up copy.png");
+    (void)nt_hash64_str("bigatlas/card_tap_up.png");
+    (void)nt_hash64_str("bigatlas/card_tap_up_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_tap_up_.png");
+    (void)nt_hash64_str("bigatlas/card_target copy.png");
+    (void)nt_hash64_str("bigatlas/card_target.png");
+    (void)nt_hash64_str("bigatlas/card_target_ copy.png");
+    (void)nt_hash64_str("bigatlas/card_target_.png");
+    (void)nt_hash64_str("bigatlas/cards_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_.png");
+    (void)nt_hash64_str("bigatlas/cards_collection copy.png");
+    (void)nt_hash64_str("bigatlas/cards_collection.png");
+    (void)nt_hash64_str("bigatlas/cards_collection_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_collection_.png");
+    (void)nt_hash64_str("bigatlas/cards_collection_outline copy.png");
+    (void)nt_hash64_str("bigatlas/cards_collection_outline.png");
+    (void)nt_hash64_str("bigatlas/cards_collection_outline_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_collection_outline_.png");
+    (void)nt_hash64_str("bigatlas/cards_diagonal copy.png");
+    (void)nt_hash64_str("bigatlas/cards_diagonal.png");
+    (void)nt_hash64_str("bigatlas/cards_diagonal_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_diagonal_.png");
+    (void)nt_hash64_str("bigatlas/cards_fan copy.png");
+    (void)nt_hash64_str("bigatlas/cards_fan.png");
+    (void)nt_hash64_str("bigatlas/cards_fan_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_fan_.png");
+    (void)nt_hash64_str("bigatlas/cards_fan_outline copy.png");
+    (void)nt_hash64_str("bigatlas/cards_fan_outline.png");
+    (void)nt_hash64_str("bigatlas/cards_fan_outline_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_fan_outline_.png");
+    (void)nt_hash64_str("bigatlas/cards_flip copy.png");
+    (void)nt_hash64_str("bigatlas/cards_flip.png");
+    (void)nt_hash64_str("bigatlas/cards_flip_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_flip_.png");
+    (void)nt_hash64_str("bigatlas/cards_order copy.png");
+    (void)nt_hash64_str("bigatlas/cards_order.png");
+    (void)nt_hash64_str("bigatlas/cards_order_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_order_.png");
+    (void)nt_hash64_str("bigatlas/cards_return copy.png");
+    (void)nt_hash64_str("bigatlas/cards_return.png");
+    (void)nt_hash64_str("bigatlas/cards_return_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_return_.png");
+    (void)nt_hash64_str("bigatlas/cards_seek copy.png");
+    (void)nt_hash64_str("bigatlas/cards_seek.png");
+    (void)nt_hash64_str("bigatlas/cards_seek_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_seek_.png");
+    (void)nt_hash64_str("bigatlas/cards_seek_top copy.png");
+    (void)nt_hash64_str("bigatlas/cards_seek_top.png");
+    (void)nt_hash64_str("bigatlas/cards_seek_top_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_seek_top_.png");
+    (void)nt_hash64_str("bigatlas/cards_shift copy.png");
+    (void)nt_hash64_str("bigatlas/cards_shift.png");
+    (void)nt_hash64_str("bigatlas/cards_shift_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_shift_.png");
+    (void)nt_hash64_str("bigatlas/cards_shuffle copy.png");
+    (void)nt_hash64_str("bigatlas/cards_shuffle.png");
+    (void)nt_hash64_str("bigatlas/cards_shuffle_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_shuffle_.png");
+    (void)nt_hash64_str("bigatlas/cards_skull copy.png");
+    (void)nt_hash64_str("bigatlas/cards_skull.png");
+    (void)nt_hash64_str("bigatlas/cards_skull_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_skull_.png");
+    (void)nt_hash64_str("bigatlas/cards_stack copy.png");
+    (void)nt_hash64_str("bigatlas/cards_stack.png");
+    (void)nt_hash64_str("bigatlas/cards_stack_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_stack_.png");
+    (void)nt_hash64_str("bigatlas/cards_stack_cross copy.png");
+    (void)nt_hash64_str("bigatlas/cards_stack_cross.png");
+    (void)nt_hash64_str("bigatlas/cards_stack_cross_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_stack_cross_.png");
+    (void)nt_hash64_str("bigatlas/cards_stack_high copy.png");
+    (void)nt_hash64_str("bigatlas/cards_stack_high.png");
+    (void)nt_hash64_str("bigatlas/cards_stack_high_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_stack_high_.png");
+    (void)nt_hash64_str("bigatlas/cards_take copy.png");
+    (void)nt_hash64_str("bigatlas/cards_take.png");
+    (void)nt_hash64_str("bigatlas/cards_take_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_take_.png");
+    (void)nt_hash64_str("bigatlas/cards_text_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_text_.png");
+    (void)nt_hash64_str("bigatlas/cards_under copy.png");
+    (void)nt_hash64_str("bigatlas/cards_under.png");
+    (void)nt_hash64_str("bigatlas/cards_under_ copy.png");
+    (void)nt_hash64_str("bigatlas/cards_under_.png");
+    (void)nt_hash64_str("bigatlas/character copy.png");
+    (void)nt_hash64_str("bigatlas/character.png");
+    (void)nt_hash64_str("bigatlas/character_ copy.png");
+    (void)nt_hash64_str("bigatlas/character_.png");
+    (void)nt_hash64_str("bigatlas/character_lift copy.png");
+    (void)nt_hash64_str("bigatlas/character_lift.png");
+    (void)nt_hash64_str("bigatlas/character_lift_ copy.png");
+    (void)nt_hash64_str("bigatlas/character_lift_.png");
+    (void)nt_hash64_str("bigatlas/character_place copy.png");
+    (void)nt_hash64_str("bigatlas/character_place.png");
+    (void)nt_hash64_str("bigatlas/character_place_ copy.png");
+    (void)nt_hash64_str("bigatlas/character_place_.png");
+    (void)nt_hash64_str("bigatlas/character_remove copy.png");
+    (void)nt_hash64_str("bigatlas/character_remove.png");
+    (void)nt_hash64_str("bigatlas/character_remove_ copy.png");
+    (void)nt_hash64_str("bigatlas/character_remove_.png");
+    (void)nt_hash64_str("bigatlas/chess_bishop copy.png");
+    (void)nt_hash64_str("bigatlas/chess_bishop.png");
+    (void)nt_hash64_str("bigatlas/chess_bishop_ copy.png");
+    (void)nt_hash64_str("bigatlas/chess_bishop_.png");
+    (void)nt_hash64_str("bigatlas/chess_king copy.png");
+    (void)nt_hash64_str("bigatlas/chess_king.png");
+    (void)nt_hash64_str("bigatlas/chess_king_ copy.png");
+    (void)nt_hash64_str("bigatlas/chess_king_.png");
+    (void)nt_hash64_str("bigatlas/chess_knight copy.png");
+    (void)nt_hash64_str("bigatlas/chess_knight.png");
+    (void)nt_hash64_str("bigatlas/chess_knight_ copy.png");
+    (void)nt_hash64_str("bigatlas/chess_knight_.png");
+    (void)nt_hash64_str("bigatlas/chess_pawn copy.png");
+    (void)nt_hash64_str("bigatlas/chess_pawn.png");
+    (void)nt_hash64_str("bigatlas/chess_pawn_ copy.png");
+    (void)nt_hash64_str("bigatlas/chess_pawn_.png");
+    (void)nt_hash64_str("bigatlas/chess_queen copy.png");
+    (void)nt_hash64_str("bigatlas/chess_queen.png");
+    (void)nt_hash64_str("bigatlas/chess_queen_ copy.png");
+    (void)nt_hash64_str("bigatlas/chess_queen_.png");
+    (void)nt_hash64_str("bigatlas/chess_rook copy.png");
+    (void)nt_hash64_str("bigatlas/chess_rook.png");
+    (void)nt_hash64_str("bigatlas/chess_rook_ copy.png");
+    (void)nt_hash64_str("bigatlas/chess_rook_.png");
+    (void)nt_hash64_str("bigatlas/choking_hazard_ copy.png");
+    (void)nt_hash64_str("bigatlas/choking_hazard_.png");
+    (void)nt_hash64_str("bigatlas/choking_hazard_age_ copy.png");
+    (void)nt_hash64_str("bigatlas/choking_hazard_age_.png");
+    (void)nt_hash64_str("bigatlas/choking_hazard_age_text_ copy.png");
+    (void)nt_hash64_str("bigatlas/choking_hazard_age_text_.png");
+    (void)nt_hash64_str("bigatlas/choking_hazard_text_ copy.png");
+    (void)nt_hash64_str("bigatlas/choking_hazard_text_.png");
+    (void)nt_hash64_str("bigatlas/crown_a copy.png");
+    (void)nt_hash64_str("bigatlas/crown_a.png");
+    (void)nt_hash64_str("bigatlas/crown_a_ copy.png");
+    (void)nt_hash64_str("bigatlas/crown_a_.png");
+    (void)nt_hash64_str("bigatlas/crown_b copy.png");
+    (void)nt_hash64_str("bigatlas/crown_b.png");
+    (void)nt_hash64_str("bigatlas/crown_b_ copy.png");
+    (void)nt_hash64_str("bigatlas/crown_b_.png");
+    (void)nt_hash64_str("bigatlas/d10 copy.png");
+    (void)nt_hash64_str("bigatlas/d10.png");
+    (void)nt_hash64_str("bigatlas/d10_ copy.png");
+    (void)nt_hash64_str("bigatlas/d10_.png");
+    (void)nt_hash64_str("bigatlas/d10_number copy.png");
+    (void)nt_hash64_str("bigatlas/d10_number.png");
+    (void)nt_hash64_str("bigatlas/d10_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d10_number_.png");
+    (void)nt_hash64_str("bigatlas/d10_outline copy.png");
+    (void)nt_hash64_str("bigatlas/d10_outline.png");
+    (void)nt_hash64_str("bigatlas/d10_outline_ copy.png");
+    (void)nt_hash64_str("bigatlas/d10_outline_.png");
+    (void)nt_hash64_str("bigatlas/d10_outline_number copy.png");
+    (void)nt_hash64_str("bigatlas/d10_outline_number.png");
+    (void)nt_hash64_str("bigatlas/d10_outline_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d10_outline_number_.png");
+    (void)nt_hash64_str("bigatlas/d12 copy.png");
+    (void)nt_hash64_str("bigatlas/d12.png");
+    (void)nt_hash64_str("bigatlas/d12_ copy.png");
+    (void)nt_hash64_str("bigatlas/d12_.png");
+    (void)nt_hash64_str("bigatlas/d12_number copy.png");
+    (void)nt_hash64_str("bigatlas/d12_number.png");
+    (void)nt_hash64_str("bigatlas/d12_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d12_number_.png");
+    (void)nt_hash64_str("bigatlas/d12_outline copy.png");
+    (void)nt_hash64_str("bigatlas/d12_outline.png");
+    (void)nt_hash64_str("bigatlas/d12_outline_ copy.png");
+    (void)nt_hash64_str("bigatlas/d12_outline_.png");
+    (void)nt_hash64_str("bigatlas/d12_outline_number copy.png");
+    (void)nt_hash64_str("bigatlas/d12_outline_number.png");
+    (void)nt_hash64_str("bigatlas/d12_outline_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d12_outline_number_.png");
+    (void)nt_hash64_str("bigatlas/d2 copy.png");
+    (void)nt_hash64_str("bigatlas/d2.png");
+    (void)nt_hash64_str("bigatlas/d20 copy.png");
+    (void)nt_hash64_str("bigatlas/d20.png");
+    (void)nt_hash64_str("bigatlas/d20_ copy.png");
+    (void)nt_hash64_str("bigatlas/d20_.png");
+    (void)nt_hash64_str("bigatlas/d20_number copy.png");
+    (void)nt_hash64_str("bigatlas/d20_number.png");
+    (void)nt_hash64_str("bigatlas/d20_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d20_number_.png");
+    (void)nt_hash64_str("bigatlas/d20_outline copy.png");
+    (void)nt_hash64_str("bigatlas/d20_outline.png");
+    (void)nt_hash64_str("bigatlas/d20_outline_ copy.png");
+    (void)nt_hash64_str("bigatlas/d20_outline_.png");
+    (void)nt_hash64_str("bigatlas/d20_outline_number copy.png");
+    (void)nt_hash64_str("bigatlas/d20_outline_number.png");
+    (void)nt_hash64_str("bigatlas/d20_outline_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d20_outline_number_.png");
+    (void)nt_hash64_str("bigatlas/d2_ copy.png");
+    (void)nt_hash64_str("bigatlas/d2_.png");
+    (void)nt_hash64_str("bigatlas/d2_number copy.png");
+    (void)nt_hash64_str("bigatlas/d2_number.png");
+    (void)nt_hash64_str("bigatlas/d2_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d2_number_.png");
+    (void)nt_hash64_str("bigatlas/d2_outline copy.png");
+    (void)nt_hash64_str("bigatlas/d2_outline.png");
+    (void)nt_hash64_str("bigatlas/d2_outline_ copy.png");
+    (void)nt_hash64_str("bigatlas/d2_outline_.png");
+    (void)nt_hash64_str("bigatlas/d2_outline_number copy.png");
+    (void)nt_hash64_str("bigatlas/d2_outline_number.png");
+    (void)nt_hash64_str("bigatlas/d2_outline_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d2_outline_number_.png");
+    (void)nt_hash64_str("bigatlas/d3 copy.png");
+    (void)nt_hash64_str("bigatlas/d3.png");
+    (void)nt_hash64_str("bigatlas/d3_ copy.png");
+    (void)nt_hash64_str("bigatlas/d3_.png");
+    (void)nt_hash64_str("bigatlas/d3_number copy.png");
+    (void)nt_hash64_str("bigatlas/d3_number.png");
+    (void)nt_hash64_str("bigatlas/d3_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d3_number_.png");
+    (void)nt_hash64_str("bigatlas/d3_outline copy.png");
+    (void)nt_hash64_str("bigatlas/d3_outline.png");
+    (void)nt_hash64_str("bigatlas/d3_outline_ copy.png");
+    (void)nt_hash64_str("bigatlas/d3_outline_.png");
+    (void)nt_hash64_str("bigatlas/d3_outline_number copy.png");
+    (void)nt_hash64_str("bigatlas/d3_outline_number.png");
+    (void)nt_hash64_str("bigatlas/d3_outline_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d3_outline_number_.png");
+    (void)nt_hash64_str("bigatlas/d4 copy.png");
+    (void)nt_hash64_str("bigatlas/d4.png");
+    (void)nt_hash64_str("bigatlas/d4_ copy.png");
+    (void)nt_hash64_str("bigatlas/d4_.png");
+    (void)nt_hash64_str("bigatlas/d4_number copy.png");
+    (void)nt_hash64_str("bigatlas/d4_number.png");
+    (void)nt_hash64_str("bigatlas/d4_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d4_number_.png");
+    (void)nt_hash64_str("bigatlas/d4_outline copy.png");
+    (void)nt_hash64_str("bigatlas/d4_outline.png");
+    (void)nt_hash64_str("bigatlas/d4_outline_ copy.png");
+    (void)nt_hash64_str("bigatlas/d4_outline_.png");
+    (void)nt_hash64_str("bigatlas/d4_outline_number copy.png");
+    (void)nt_hash64_str("bigatlas/d4_outline_number.png");
+    (void)nt_hash64_str("bigatlas/d4_outline_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d4_outline_number_.png");
+    (void)nt_hash64_str("bigatlas/d6 copy.png");
+    (void)nt_hash64_str("bigatlas/d6.png");
+    (void)nt_hash64_str("bigatlas/d6_ copy.png");
+    (void)nt_hash64_str("bigatlas/d6_.png");
+    (void)nt_hash64_str("bigatlas/d6_number copy.png");
+    (void)nt_hash64_str("bigatlas/d6_number.png");
+    (void)nt_hash64_str("bigatlas/d6_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d6_number_.png");
+    (void)nt_hash64_str("bigatlas/d6_outline copy.png");
+    (void)nt_hash64_str("bigatlas/d6_outline.png");
+    (void)nt_hash64_str("bigatlas/d6_outline_ copy.png");
+    (void)nt_hash64_str("bigatlas/d6_outline_.png");
+    (void)nt_hash64_str("bigatlas/d6_outline_number copy.png");
+    (void)nt_hash64_str("bigatlas/d6_outline_number.png");
+    (void)nt_hash64_str("bigatlas/d6_outline_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d6_outline_number_.png");
+    (void)nt_hash64_str("bigatlas/d8 copy.png");
+    (void)nt_hash64_str("bigatlas/d8.png");
+    (void)nt_hash64_str("bigatlas/d8_ copy.png");
+    (void)nt_hash64_str("bigatlas/d8_.png");
+    (void)nt_hash64_str("bigatlas/d8_number copy.png");
+    (void)nt_hash64_str("bigatlas/d8_number.png");
+    (void)nt_hash64_str("bigatlas/d8_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d8_number_.png");
+    (void)nt_hash64_str("bigatlas/d8_outline copy.png");
+    (void)nt_hash64_str("bigatlas/d8_outline.png");
+    (void)nt_hash64_str("bigatlas/d8_outline_ copy.png");
+    (void)nt_hash64_str("bigatlas/d8_outline_.png");
+    (void)nt_hash64_str("bigatlas/d8_outline_number copy.png");
+    (void)nt_hash64_str("bigatlas/d8_outline_number.png");
+    (void)nt_hash64_str("bigatlas/d8_outline_number_ copy.png");
+    (void)nt_hash64_str("bigatlas/d8_outline_number_.png");
+    (void)nt_hash64_str("bigatlas/dice copy.png");
+    (void)nt_hash64_str("bigatlas/dice.png");
+    (void)nt_hash64_str("bigatlas/dice_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_.png");
+    (void)nt_hash64_str("bigatlas/dice_1 copy.png");
+    (void)nt_hash64_str("bigatlas/dice_1.png");
+    (void)nt_hash64_str("bigatlas/dice_1_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_1_.png");
+    (void)nt_hash64_str("bigatlas/dice_2 copy.png");
+    (void)nt_hash64_str("bigatlas/dice_2.png");
+    (void)nt_hash64_str("bigatlas/dice_2_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_2_.png");
+    (void)nt_hash64_str("bigatlas/dice_3 copy.png");
+    (void)nt_hash64_str("bigatlas/dice_3.png");
+    (void)nt_hash64_str("bigatlas/dice_3D copy.png");
+    (void)nt_hash64_str("bigatlas/dice_3D.png");
+    (void)nt_hash64_str("bigatlas/dice_3D_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_3D_.png");
+    (void)nt_hash64_str("bigatlas/dice_3D_detailed copy.png");
+    (void)nt_hash64_str("bigatlas/dice_3D_detailed.png");
+    (void)nt_hash64_str("bigatlas/dice_3D_detailed_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_3D_detailed_.png");
+    (void)nt_hash64_str("bigatlas/dice_3_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_3_.png");
+    (void)nt_hash64_str("bigatlas/dice_4 copy.png");
+    (void)nt_hash64_str("bigatlas/dice_4.png");
+    (void)nt_hash64_str("bigatlas/dice_4_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_4_.png");
+    (void)nt_hash64_str("bigatlas/dice_5 copy.png");
+    (void)nt_hash64_str("bigatlas/dice_5.png");
+    (void)nt_hash64_str("bigatlas/dice_5_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_5_.png");
+    (void)nt_hash64_str("bigatlas/dice_6 copy.png");
+    (void)nt_hash64_str("bigatlas/dice_6.png");
+    (void)nt_hash64_str("bigatlas/dice_6_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_6_.png");
+    (void)nt_hash64_str("bigatlas/dice_close copy.png");
+    (void)nt_hash64_str("bigatlas/dice_close.png");
+    (void)nt_hash64_str("bigatlas/dice_close_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_close_.png");
+    (void)nt_hash64_str("bigatlas/dice_detailed copy.png");
+    (void)nt_hash64_str("bigatlas/dice_detailed.png");
+    (void)nt_hash64_str("bigatlas/dice_detailed_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_detailed_.png");
+    (void)nt_hash64_str("bigatlas/dice_empty copy.png");
+    (void)nt_hash64_str("bigatlas/dice_empty.png");
+    (void)nt_hash64_str("bigatlas/dice_empty_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_empty_.png");
+    (void)nt_hash64_str("bigatlas/dice_out copy.png");
+    (void)nt_hash64_str("bigatlas/dice_out.png");
+    (void)nt_hash64_str("bigatlas/dice_out_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_out_.png");
+    (void)nt_hash64_str("bigatlas/dice_question copy.png");
+    (void)nt_hash64_str("bigatlas/dice_question.png");
+    (void)nt_hash64_str("bigatlas/dice_question_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_question_.png");
+    (void)nt_hash64_str("bigatlas/dice_shield copy.png");
+    (void)nt_hash64_str("bigatlas/dice_shield.png");
+    (void)nt_hash64_str("bigatlas/dice_shield_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_shield_.png");
+    (void)nt_hash64_str("bigatlas/dice_skull copy.png");
+    (void)nt_hash64_str("bigatlas/dice_skull.png");
+    (void)nt_hash64_str("bigatlas/dice_skull_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_skull_.png");
+    (void)nt_hash64_str("bigatlas/dice_sword copy.png");
+    (void)nt_hash64_str("bigatlas/dice_sword.png");
+    (void)nt_hash64_str("bigatlas/dice_sword_ copy.png");
+    (void)nt_hash64_str("bigatlas/dice_sword_.png");
+    (void)nt_hash64_str("bigatlas/direction_e copy.png");
+    (void)nt_hash64_str("bigatlas/direction_e.png");
+    (void)nt_hash64_str("bigatlas/direction_e_ copy.png");
+    (void)nt_hash64_str("bigatlas/direction_e_.png");
+    (void)nt_hash64_str("bigatlas/direction_n copy.png");
+    (void)nt_hash64_str("bigatlas/direction_n.png");
+    (void)nt_hash64_str("bigatlas/direction_n_ copy.png");
+    (void)nt_hash64_str("bigatlas/direction_n_.png");
+    (void)nt_hash64_str("bigatlas/direction_s copy.png");
+    (void)nt_hash64_str("bigatlas/direction_s.png");
+    (void)nt_hash64_str("bigatlas/direction_s_ copy.png");
+    (void)nt_hash64_str("bigatlas/direction_s_.png");
+    (void)nt_hash64_str("bigatlas/direction_w copy.png");
+    (void)nt_hash64_str("bigatlas/direction_w.png");
+    (void)nt_hash64_str("bigatlas/direction_w_ copy.png");
+    (void)nt_hash64_str("bigatlas/direction_w_.png");
+    (void)nt_hash64_str("bigatlas/dollar copy.png");
+    (void)nt_hash64_str("bigatlas/dollar.png");
+    (void)nt_hash64_str("bigatlas/dollar_ copy.png");
+    (void)nt_hash64_str("bigatlas/dollar_.png");
+    (void)nt_hash64_str("bigatlas/duration_ copy.png");
+    (void)nt_hash64_str("bigatlas/duration_.png");
+    (void)nt_hash64_str("bigatlas/duration_10_ copy.png");
+    (void)nt_hash64_str("bigatlas/duration_10_.png");
+    (void)nt_hash64_str("bigatlas/duration_120_ copy.png");
+    (void)nt_hash64_str("bigatlas/duration_120_.png");
+    (void)nt_hash64_str("bigatlas/duration_15_ copy.png");
+    (void)nt_hash64_str("bigatlas/duration_15_.png");
+    (void)nt_hash64_str("bigatlas/duration_15_30_ copy.png");
+    (void)nt_hash64_str("bigatlas/duration_15_30_.png");
+    (void)nt_hash64_str("bigatlas/duration_20_ copy.png");
+    (void)nt_hash64_str("bigatlas/duration_20_.png");
+    (void)nt_hash64_str("bigatlas/duration_30_ copy.png");
+    (void)nt_hash64_str("bigatlas/duration_30_.png");
+    (void)nt_hash64_str("bigatlas/duration_45_ copy.png");
+    (void)nt_hash64_str("bigatlas/duration_45_.png");
+    (void)nt_hash64_str("bigatlas/duration_45_60_ copy.png");
+    (void)nt_hash64_str("bigatlas/duration_45_60_.png");
+    (void)nt_hash64_str("bigatlas/duration_60_ copy.png");
+    (void)nt_hash64_str("bigatlas/duration_60_.png");
+    (void)nt_hash64_str("bigatlas/duration_60_90_ copy.png");
+    (void)nt_hash64_str("bigatlas/duration_60_90_.png");
+    (void)nt_hash64_str("bigatlas/duration_90_ copy.png");
+    (void)nt_hash64_str("bigatlas/duration_90_.png");
+    (void)nt_hash64_str("bigatlas/elephant copy.png");
+    (void)nt_hash64_str("bigatlas/elephant.png");
+    (void)nt_hash64_str("bigatlas/elephant_ copy.png");
+    (void)nt_hash64_str("bigatlas/elephant_.png");
+    (void)nt_hash64_str("bigatlas/elephant_2 copy.png");
+    (void)nt_hash64_str("bigatlas/elephant_2.png");
+    (void)nt_hash64_str("bigatlas/elephant_3 copy.png");
+    (void)nt_hash64_str("bigatlas/elephant_3.png");
+    (void)nt_hash64_str("bigatlas/elephant_4 copy.png");
+    (void)nt_hash64_str("bigatlas/elephant_4.png");
+    (void)nt_hash64_str("bigatlas/elephant_5 copy.png");
+    (void)nt_hash64_str("bigatlas/elephant_5.png");
+    (void)nt_hash64_str("bigatlas/elephant__ copy.png");
+    (void)nt_hash64_str("bigatlas/elephant__.png");
+    (void)nt_hash64_str("bigatlas/emote__ copy.png");
+    (void)nt_hash64_str("bigatlas/emote__.png");
+    (void)nt_hash64_str("bigatlas/emote___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote___.png");
+    (void)nt_hash64_str("bigatlas/emote_____ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_____.png");
+    (void)nt_hash64_str("bigatlas/emote_alert copy.png");
+    (void)nt_hash64_str("bigatlas/emote_alert.png");
+    (void)nt_hash64_str("bigatlas/emote_alert_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_alert_.png");
+    (void)nt_hash64_str("bigatlas/emote_alert___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_alert___.png");
+    (void)nt_hash64_str("bigatlas/emote_anger copy.png");
+    (void)nt_hash64_str("bigatlas/emote_anger.png");
+    (void)nt_hash64_str("bigatlas/emote_anger_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_anger_.png");
+    (void)nt_hash64_str("bigatlas/emote_anger___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_anger___.png");
+    (void)nt_hash64_str("bigatlas/emote_bars copy.png");
+    (void)nt_hash64_str("bigatlas/emote_bars.png");
+    (void)nt_hash64_str("bigatlas/emote_bars_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_bars_.png");
+    (void)nt_hash64_str("bigatlas/emote_bars___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_bars___.png");
+    (void)nt_hash64_str("bigatlas/emote_cash copy.png");
+    (void)nt_hash64_str("bigatlas/emote_cash.png");
+    (void)nt_hash64_str("bigatlas/emote_cash_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_cash_.png");
+    (void)nt_hash64_str("bigatlas/emote_cash___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_cash___.png");
+    (void)nt_hash64_str("bigatlas/emote_circle copy.png");
+    (void)nt_hash64_str("bigatlas/emote_circle.png");
+    (void)nt_hash64_str("bigatlas/emote_circle_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_circle_.png");
+    (void)nt_hash64_str("bigatlas/emote_circle___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_circle___.png");
+    (void)nt_hash64_str("bigatlas/emote_cloud copy.png");
+    (void)nt_hash64_str("bigatlas/emote_cloud.png");
+    (void)nt_hash64_str("bigatlas/emote_cloud_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_cloud_.png");
+    (void)nt_hash64_str("bigatlas/emote_cloud___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_cloud___.png");
+    (void)nt_hash64_str("bigatlas/emote_cross copy.png");
+    (void)nt_hash64_str("bigatlas/emote_cross.png");
+    (void)nt_hash64_str("bigatlas/emote_cross_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_cross_.png");
+    (void)nt_hash64_str("bigatlas/emote_cross___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_cross___.png");
+    (void)nt_hash64_str("bigatlas/emote_dots1 copy.png");
+    (void)nt_hash64_str("bigatlas/emote_dots1.png");
+    (void)nt_hash64_str("bigatlas/emote_dots1_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_dots1_.png");
+    (void)nt_hash64_str("bigatlas/emote_dots1___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_dots1___.png");
+    (void)nt_hash64_str("bigatlas/emote_dots2 copy.png");
+    (void)nt_hash64_str("bigatlas/emote_dots2.png");
+    (void)nt_hash64_str("bigatlas/emote_dots2_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_dots2_.png");
+    (void)nt_hash64_str("bigatlas/emote_dots2___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_dots2___.png");
+    (void)nt_hash64_str("bigatlas/emote_dots3 copy.png");
+    (void)nt_hash64_str("bigatlas/emote_dots3.png");
+    (void)nt_hash64_str("bigatlas/emote_dots3_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_dots3_.png");
+    (void)nt_hash64_str("bigatlas/emote_dots3___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_dots3___.png");
+    (void)nt_hash64_str("bigatlas/emote_drop copy.png");
+    (void)nt_hash64_str("bigatlas/emote_drop.png");
+    (void)nt_hash64_str("bigatlas/emote_drop_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_drop_.png");
+    (void)nt_hash64_str("bigatlas/emote_drop___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_drop___.png");
+    (void)nt_hash64_str("bigatlas/emote_drops copy.png");
+    (void)nt_hash64_str("bigatlas/emote_drops.png");
+    (void)nt_hash64_str("bigatlas/emote_drops_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_drops_.png");
+    (void)nt_hash64_str("bigatlas/emote_drops___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_drops___.png");
+    (void)nt_hash64_str("bigatlas/emote_exclamation copy.png");
+    (void)nt_hash64_str("bigatlas/emote_exclamation.png");
+    (void)nt_hash64_str("bigatlas/emote_exclamation_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_exclamation_.png");
+    (void)nt_hash64_str("bigatlas/emote_exclamation___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_exclamation___.png");
+    (void)nt_hash64_str("bigatlas/emote_exclamations copy.png");
+    (void)nt_hash64_str("bigatlas/emote_exclamations.png");
+    (void)nt_hash64_str("bigatlas/emote_exclamations_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_exclamations_.png");
+    (void)nt_hash64_str("bigatlas/emote_exclamations___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_exclamations___.png");
+    (void)nt_hash64_str("bigatlas/emote_faceAngry copy.png");
+    (void)nt_hash64_str("bigatlas/emote_faceAngry.png");
+    (void)nt_hash64_str("bigatlas/emote_faceAngry_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_faceAngry_.png");
+    (void)nt_hash64_str("bigatlas/emote_faceAngry___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_faceAngry___.png");
+    (void)nt_hash64_str("bigatlas/emote_faceHappy copy.png");
+    (void)nt_hash64_str("bigatlas/emote_faceHappy.png");
+    (void)nt_hash64_str("bigatlas/emote_faceHappy_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_faceHappy_.png");
+    (void)nt_hash64_str("bigatlas/emote_faceHappy___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_faceHappy___.png");
+    (void)nt_hash64_str("bigatlas/emote_faceSad copy.png");
+    (void)nt_hash64_str("bigatlas/emote_faceSad.png");
+    (void)nt_hash64_str("bigatlas/emote_faceSad_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_faceSad_.png");
+    (void)nt_hash64_str("bigatlas/emote_faceSad___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_faceSad___.png");
+    (void)nt_hash64_str("bigatlas/emote_heart copy.png");
+    (void)nt_hash64_str("bigatlas/emote_heart.png");
+    (void)nt_hash64_str("bigatlas/emote_heartBroken copy.png");
+    (void)nt_hash64_str("bigatlas/emote_heartBroken.png");
+    (void)nt_hash64_str("bigatlas/emote_heartBroken_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_heartBroken_.png");
+    (void)nt_hash64_str("bigatlas/emote_heartBroken___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_heartBroken___.png");
+    (void)nt_hash64_str("bigatlas/emote_heart_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_heart_.png");
+    (void)nt_hash64_str("bigatlas/emote_heart___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_heart___.png");
+    (void)nt_hash64_str("bigatlas/emote_hearts copy.png");
+    (void)nt_hash64_str("bigatlas/emote_hearts.png");
+    (void)nt_hash64_str("bigatlas/emote_hearts_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_hearts_.png");
+    (void)nt_hash64_str("bigatlas/emote_hearts___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_hearts___.png");
+    (void)nt_hash64_str("bigatlas/emote_idea copy.png");
+    (void)nt_hash64_str("bigatlas/emote_idea.png");
+    (void)nt_hash64_str("bigatlas/emote_idea_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_idea_.png");
+    (void)nt_hash64_str("bigatlas/emote_idea___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_idea___.png");
+    (void)nt_hash64_str("bigatlas/emote_laugh copy.png");
+    (void)nt_hash64_str("bigatlas/emote_laugh.png");
+    (void)nt_hash64_str("bigatlas/emote_laugh_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_laugh_.png");
+    (void)nt_hash64_str("bigatlas/emote_laugh___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_laugh___.png");
+    (void)nt_hash64_str("bigatlas/emote_music copy.png");
+    (void)nt_hash64_str("bigatlas/emote_music.png");
+    (void)nt_hash64_str("bigatlas/emote_music_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_music_.png");
+    (void)nt_hash64_str("bigatlas/emote_music___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_music___.png");
+    (void)nt_hash64_str("bigatlas/emote_question copy.png");
+    (void)nt_hash64_str("bigatlas/emote_question.png");
+    (void)nt_hash64_str("bigatlas/emote_question_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_question_.png");
+    (void)nt_hash64_str("bigatlas/emote_question___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_question___.png");
+    (void)nt_hash64_str("bigatlas/emote_sleep copy.png");
+    (void)nt_hash64_str("bigatlas/emote_sleep.png");
+    (void)nt_hash64_str("bigatlas/emote_sleep_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_sleep_.png");
+    (void)nt_hash64_str("bigatlas/emote_sleep___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_sleep___.png");
+    (void)nt_hash64_str("bigatlas/emote_sleeps copy.png");
+    (void)nt_hash64_str("bigatlas/emote_sleeps.png");
+    (void)nt_hash64_str("bigatlas/emote_sleeps_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_sleeps_.png");
+    (void)nt_hash64_str("bigatlas/emote_sleeps___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_sleeps___.png");
+    (void)nt_hash64_str("bigatlas/emote_star copy.png");
+    (void)nt_hash64_str("bigatlas/emote_star.png");
+    (void)nt_hash64_str("bigatlas/emote_star_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_star_.png");
+    (void)nt_hash64_str("bigatlas/emote_star___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_star___.png");
+    (void)nt_hash64_str("bigatlas/emote_stars copy.png");
+    (void)nt_hash64_str("bigatlas/emote_stars.png");
+    (void)nt_hash64_str("bigatlas/emote_stars_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_stars_.png");
+    (void)nt_hash64_str("bigatlas/emote_stars___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_stars___.png");
+    (void)nt_hash64_str("bigatlas/emote_swirl copy.png");
+    (void)nt_hash64_str("bigatlas/emote_swirl.png");
+    (void)nt_hash64_str("bigatlas/emote_swirl_ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_swirl_.png");
+    (void)nt_hash64_str("bigatlas/emote_swirl___ copy.png");
+    (void)nt_hash64_str("bigatlas/emote_swirl___.png");
+    (void)nt_hash64_str("bigatlas/exploding copy.png");
+    (void)nt_hash64_str("bigatlas/exploding.png");
+    (void)nt_hash64_str("bigatlas/exploding_ copy.png");
+    (void)nt_hash64_str("bigatlas/exploding_.png");
+    (void)nt_hash64_str("bigatlas/exploding_6 copy.png");
+    (void)nt_hash64_str("bigatlas/exploding_6.png");
+    (void)nt_hash64_str("bigatlas/exploding_6_ copy.png");
+    (void)nt_hash64_str("bigatlas/exploding_6_.png");
+    (void)nt_hash64_str("bigatlas/fire copy.png");
+    (void)nt_hash64_str("bigatlas/fire.png");
+    (void)nt_hash64_str("bigatlas/fire_ copy.png");
+    (void)nt_hash64_str("bigatlas/fire_.png");
+    (void)nt_hash64_str("bigatlas/flag_square copy.png");
+    (void)nt_hash64_str("bigatlas/flag_square.png");
+    (void)nt_hash64_str("bigatlas/flag_square_ copy.png");
+    (void)nt_hash64_str("bigatlas/flag_square_.png");
+    (void)nt_hash64_str("bigatlas/flag_triangle copy.png");
+    (void)nt_hash64_str("bigatlas/flag_triangle.png");
+    (void)nt_hash64_str("bigatlas/flag_triangle_ copy.png");
+    (void)nt_hash64_str("bigatlas/flag_triangle_.png");
+    (void)nt_hash64_str("bigatlas/flask_empty copy.png");
+    (void)nt_hash64_str("bigatlas/flask_empty.png");
+    (void)nt_hash64_str("bigatlas/flask_empty_ copy.png");
+    (void)nt_hash64_str("bigatlas/flask_empty_.png");
+    (void)nt_hash64_str("bigatlas/flask_full copy.png");
+    (void)nt_hash64_str("bigatlas/flask_full.png");
+    (void)nt_hash64_str("bigatlas/flask_full_ copy.png");
+    (void)nt_hash64_str("bigatlas/flask_full_.png");
+    (void)nt_hash64_str("bigatlas/flask_half copy.png");
+    (void)nt_hash64_str("bigatlas/flask_half.png");
+    (void)nt_hash64_str("bigatlas/flask_half_ copy.png");
+    (void)nt_hash64_str("bigatlas/flask_half_.png");
+    (void)nt_hash64_str("bigatlas/flip_empty copy.png");
+    (void)nt_hash64_str("bigatlas/flip_empty.png");
+    (void)nt_hash64_str("bigatlas/flip_empty_ copy.png");
+    (void)nt_hash64_str("bigatlas/flip_empty_.png");
+    (void)nt_hash64_str("bigatlas/flip_full copy.png");
+    (void)nt_hash64_str("bigatlas/flip_full.png");
+    (void)nt_hash64_str("bigatlas/flip_full_ copy.png");
+    (void)nt_hash64_str("bigatlas/flip_full_.png");
+    (void)nt_hash64_str("bigatlas/flip_half copy.png");
+    (void)nt_hash64_str("bigatlas/flip_half.png");
+    (void)nt_hash64_str("bigatlas/flip_half_ copy.png");
+    (void)nt_hash64_str("bigatlas/flip_half_.png");
+    (void)nt_hash64_str("bigatlas/flip_head copy.png");
+    (void)nt_hash64_str("bigatlas/flip_head.png");
+    (void)nt_hash64_str("bigatlas/flip_head_ copy.png");
+    (void)nt_hash64_str("bigatlas/flip_head_.png");
+    (void)nt_hash64_str("bigatlas/flip_tails copy.png");
+    (void)nt_hash64_str("bigatlas/flip_tails.png");
+    (void)nt_hash64_str("bigatlas/flip_tails_ copy.png");
+    (void)nt_hash64_str("bigatlas/flip_tails_.png");
+    (void)nt_hash64_str("bigatlas/giraffe copy.png");
+    (void)nt_hash64_str("bigatlas/giraffe.png");
+    (void)nt_hash64_str("bigatlas/giraffe_ copy.png");
+    (void)nt_hash64_str("bigatlas/giraffe_.png");
+    (void)nt_hash64_str("bigatlas/giraffe_1 copy.png");
+    (void)nt_hash64_str("bigatlas/giraffe_1.png");
+    (void)nt_hash64_str("bigatlas/giraffe_2 copy.png");
+    (void)nt_hash64_str("bigatlas/giraffe_2.png");
+    (void)nt_hash64_str("bigatlas/giraffe_3 copy.png");
+    (void)nt_hash64_str("bigatlas/giraffe_3.png");
+    (void)nt_hash64_str("bigatlas/giraffe_4 copy.png");
+    (void)nt_hash64_str("bigatlas/giraffe_4.png");
+    (void)nt_hash64_str("bigatlas/giraffe_5 copy.png");
+    (void)nt_hash64_str("bigatlas/giraffe_5.png");
+    (void)nt_hash64_str("bigatlas/giraffe__ copy.png");
+    (void)nt_hash64_str("bigatlas/giraffe__.png");
+    (void)nt_hash64_str("bigatlas/hand copy.png");
+    (void)nt_hash64_str("bigatlas/hand.png");
+    (void)nt_hash64_str("bigatlas/hand_ copy.png");
+    (void)nt_hash64_str("bigatlas/hand_.png");
+    (void)nt_hash64_str("bigatlas/hand_card copy.png");
+    (void)nt_hash64_str("bigatlas/hand_card.png");
+    (void)nt_hash64_str("bigatlas/hand_card_ copy.png");
+    (void)nt_hash64_str("bigatlas/hand_card_.png");
+    (void)nt_hash64_str("bigatlas/hand_cross copy.png");
+    (void)nt_hash64_str("bigatlas/hand_cross.png");
+    (void)nt_hash64_str("bigatlas/hand_cross_ copy.png");
+    (void)nt_hash64_str("bigatlas/hand_cross_.png");
+    (void)nt_hash64_str("bigatlas/hand_cube copy.png");
+    (void)nt_hash64_str("bigatlas/hand_cube.png");
+    (void)nt_hash64_str("bigatlas/hand_cube_ copy.png");
+    (void)nt_hash64_str("bigatlas/hand_cube_.png");
+    (void)nt_hash64_str("bigatlas/hand_hexagon copy.png");
+    (void)nt_hash64_str("bigatlas/hand_hexagon.png");
+    (void)nt_hash64_str("bigatlas/hand_hexagon_ copy.png");
+    (void)nt_hash64_str("bigatlas/hand_hexagon_.png");
+    (void)nt_hash64_str("bigatlas/hand_token copy.png");
+    (void)nt_hash64_str("bigatlas/hand_token.png");
+    (void)nt_hash64_str("bigatlas/hand_token_ copy.png");
+    (void)nt_hash64_str("bigatlas/hand_token_.png");
+    (void)nt_hash64_str("bigatlas/hand_token_open copy.png");
+    (void)nt_hash64_str("bigatlas/hand_token_open.png");
+    (void)nt_hash64_str("bigatlas/hand_token_open_ copy.png");
+    (void)nt_hash64_str("bigatlas/hand_token_open_.png");
+    (void)nt_hash64_str("bigatlas/heavy_ copy.png");
+    (void)nt_hash64_str("bigatlas/heavy_.png");
+    (void)nt_hash64_str("bigatlas/heavy_text_ copy.png");
+    (void)nt_hash64_str("bigatlas/heavy_text_.png");
+    (void)nt_hash64_str("bigatlas/hexagon copy.png");
+    (void)nt_hash64_str("bigatlas/hexagon.png");
+    (void)nt_hash64_str("bigatlas/hexagon_ copy.png");
+    (void)nt_hash64_str("bigatlas/hexagon_.png");
+    (void)nt_hash64_str("bigatlas/hexagon_in copy.png");
+    (void)nt_hash64_str("bigatlas/hexagon_in.png");
+    (void)nt_hash64_str("bigatlas/hexagon_in_ copy.png");
+    (void)nt_hash64_str("bigatlas/hexagon_in_.png");
+    (void)nt_hash64_str("bigatlas/hexagon_out copy.png");
+    (void)nt_hash64_str("bigatlas/hexagon_out.png");
+    (void)nt_hash64_str("bigatlas/hexagon_out_ copy.png");
+    (void)nt_hash64_str("bigatlas/hexagon_out_.png");
+    (void)nt_hash64_str("bigatlas/hexagon_outline copy.png");
+    (void)nt_hash64_str("bigatlas/hexagon_outline.png");
+    (void)nt_hash64_str("bigatlas/hexagon_outline_ copy.png");
+    (void)nt_hash64_str("bigatlas/hexagon_outline_.png");
+    (void)nt_hash64_str("bigatlas/hexagon_question copy.png");
+    (void)nt_hash64_str("bigatlas/hexagon_question.png");
+    (void)nt_hash64_str("bigatlas/hexagon_question_ copy.png");
+    (void)nt_hash64_str("bigatlas/hexagon_question_.png");
+    (void)nt_hash64_str("bigatlas/hexagon_switch copy.png");
+    (void)nt_hash64_str("bigatlas/hexagon_switch.png");
+    (void)nt_hash64_str("bigatlas/hexagon_switch_ copy.png");
+    (void)nt_hash64_str("bigatlas/hexagon_switch_.png");
+    (void)nt_hash64_str("bigatlas/hexagon_tile copy.png");
+    (void)nt_hash64_str("bigatlas/hexagon_tile.png");
+    (void)nt_hash64_str("bigatlas/hexagon_tile_ copy.png");
+    (void)nt_hash64_str("bigatlas/hexagon_tile_.png");
+    (void)nt_hash64_str("bigatlas/hippo copy.png");
+    (void)nt_hash64_str("bigatlas/hippo.png");
+    (void)nt_hash64_str("bigatlas/hippo_ copy.png");
+    (void)nt_hash64_str("bigatlas/hippo_.png");
+    (void)nt_hash64_str("bigatlas/hippo_2 copy.png");
+    (void)nt_hash64_str("bigatlas/hippo_2.png");
+    (void)nt_hash64_str("bigatlas/hippo_3 copy.png");
+    (void)nt_hash64_str("bigatlas/hippo_3.png");
+    (void)nt_hash64_str("bigatlas/hippo_4 copy.png");
+    (void)nt_hash64_str("bigatlas/hippo_4.png");
+    (void)nt_hash64_str("bigatlas/hippo_5 copy.png");
+    (void)nt_hash64_str("bigatlas/hippo_5.png");
+    (void)nt_hash64_str("bigatlas/hippo__ copy.png");
+    (void)nt_hash64_str("bigatlas/hippo__.png");
+    (void)nt_hash64_str("bigatlas/hourglass copy.png");
+    (void)nt_hash64_str("bigatlas/hourglass.png");
+    (void)nt_hash64_str("bigatlas/hourglass_ copy.png");
+    (void)nt_hash64_str("bigatlas/hourglass_.png");
+    (void)nt_hash64_str("bigatlas/hourglass_bottom copy.png");
+    (void)nt_hash64_str("bigatlas/hourglass_bottom.png");
+    (void)nt_hash64_str("bigatlas/hourglass_bottom_ copy.png");
+    (void)nt_hash64_str("bigatlas/hourglass_bottom_.png");
+    (void)nt_hash64_str("bigatlas/hourglass_top copy.png");
+    (void)nt_hash64_str("bigatlas/hourglass_top.png");
+    (void)nt_hash64_str("bigatlas/hourglass_top_ copy.png");
+    (void)nt_hash64_str("bigatlas/hourglass_top_.png");
+    (void)nt_hash64_str("bigatlas/interaction_ copy.png");
+    (void)nt_hash64_str("bigatlas/interaction_.png");
+    (void)nt_hash64_str("bigatlas/interaction_text_ copy.png");
+    (void)nt_hash64_str("bigatlas/interaction_text_.png");
+    (void)nt_hash64_str("bigatlas/knowledge_ copy.png");
+    (void)nt_hash64_str("bigatlas/knowledge_.png");
+    (void)nt_hash64_str("bigatlas/knowledge_text_ copy.png");
+    (void)nt_hash64_str("bigatlas/knowledge_text_.png");
+    (void)nt_hash64_str("bigatlas/light_ copy.png");
+    (void)nt_hash64_str("bigatlas/light_.png");
+    (void)nt_hash64_str("bigatlas/light_text_ copy.png");
+    (void)nt_hash64_str("bigatlas/light_text_.png");
+    (void)nt_hash64_str("bigatlas/lock_closed copy.png");
+    (void)nt_hash64_str("bigatlas/lock_closed.png");
+    (void)nt_hash64_str("bigatlas/lock_closed_ copy.png");
+    (void)nt_hash64_str("bigatlas/lock_closed_.png");
+    (void)nt_hash64_str("bigatlas/lock_open copy.png");
+    (void)nt_hash64_str("bigatlas/lock_open.png");
+    (void)nt_hash64_str("bigatlas/lock_open_ copy.png");
+    (void)nt_hash64_str("bigatlas/lock_open_.png");
+    (void)nt_hash64_str("bigatlas/luck_ copy.png");
+    (void)nt_hash64_str("bigatlas/luck_.png");
+    (void)nt_hash64_str("bigatlas/luck_text_ copy.png");
+    (void)nt_hash64_str("bigatlas/luck_text_.png");
+    (void)nt_hash64_str("bigatlas/medium_ copy.png");
+    (void)nt_hash64_str("bigatlas/medium_.png");
+    (void)nt_hash64_str("bigatlas/medium_heavy_ copy.png");
+    (void)nt_hash64_str("bigatlas/medium_heavy_.png");
+    (void)nt_hash64_str("bigatlas/medium_heavy_text_ copy.png");
+    (void)nt_hash64_str("bigatlas/medium_heavy_text_.png");
+    (void)nt_hash64_str("bigatlas/medium_light_ copy.png");
+    (void)nt_hash64_str("bigatlas/medium_light_.png");
+    (void)nt_hash64_str("bigatlas/medium_light_text_ copy.png");
+    (void)nt_hash64_str("bigatlas/medium_light_text_.png");
+    (void)nt_hash64_str("bigatlas/medium_text_ copy.png");
+    (void)nt_hash64_str("bigatlas/medium_text_.png");
+    (void)nt_hash64_str("bigatlas/miniatures_ copy.png");
+    (void)nt_hash64_str("bigatlas/miniatures_.png");
+    (void)nt_hash64_str("bigatlas/miniatures_text_ copy.png");
+    (void)nt_hash64_str("bigatlas/miniatures_text_.png");
+    (void)nt_hash64_str("bigatlas/monkey copy.png");
+    (void)nt_hash64_str("bigatlas/monkey.png");
+    (void)nt_hash64_str("bigatlas/monkey_ copy.png");
+    (void)nt_hash64_str("bigatlas/monkey_.png");
+    (void)nt_hash64_str("bigatlas/monkey_1 copy.png");
+    (void)nt_hash64_str("bigatlas/monkey_1.png");
+    (void)nt_hash64_str("bigatlas/monkey_2 copy.png");
+    (void)nt_hash64_str("bigatlas/monkey_2.png");
+    (void)nt_hash64_str("bigatlas/monkey_3 copy.png");
+    (void)nt_hash64_str("bigatlas/monkey_3.png");
+    (void)nt_hash64_str("bigatlas/monkey_4 copy.png");
+    (void)nt_hash64_str("bigatlas/monkey_4.png");
+    (void)nt_hash64_str("bigatlas/monkey_5 copy.png");
+    (void)nt_hash64_str("bigatlas/monkey_5.png");
+    (void)nt_hash64_str("bigatlas/monkey__ copy.png");
+    (void)nt_hash64_str("bigatlas/monkey__.png");
+    (void)nt_hash64_str("bigatlas/notepad copy.png");
+    (void)nt_hash64_str("bigatlas/notepad.png");
+    (void)nt_hash64_str("bigatlas/notepad_ copy.png");
+    (void)nt_hash64_str("bigatlas/notepad_.png");
+    (void)nt_hash64_str("bigatlas/notepad_write copy.png");
+    (void)nt_hash64_str("bigatlas/notepad_write.png");
+    (void)nt_hash64_str("bigatlas/notepad_write_ copy.png");
+    (void)nt_hash64_str("bigatlas/notepad_write_.png");
+    (void)nt_hash64_str("bigatlas/panda copy.png");
+    (void)nt_hash64_str("bigatlas/panda.png");
+    (void)nt_hash64_str("bigatlas/panda_ copy.png");
+    (void)nt_hash64_str("bigatlas/panda_.png");
+    (void)nt_hash64_str("bigatlas/panda_1 copy.png");
+    (void)nt_hash64_str("bigatlas/panda_1.png");
+    (void)nt_hash64_str("bigatlas/panda_2 copy.png");
+    (void)nt_hash64_str("bigatlas/panda_2.png");
+    (void)nt_hash64_str("bigatlas/panda_3 copy.png");
+    (void)nt_hash64_str("bigatlas/panda_3.png");
+    (void)nt_hash64_str("bigatlas/panda_4 copy.png");
+    (void)nt_hash64_str("bigatlas/panda_4.png");
+    (void)nt_hash64_str("bigatlas/panda_5 copy.png");
+    (void)nt_hash64_str("bigatlas/panda_5.png");
+    (void)nt_hash64_str("bigatlas/panda__ copy.png");
+    (void)nt_hash64_str("bigatlas/panda__.png");
+    (void)nt_hash64_str("bigatlas/parrot copy.png");
+    (void)nt_hash64_str("bigatlas/parrot.png");
+    (void)nt_hash64_str("bigatlas/parrot_ copy.png");
+    (void)nt_hash64_str("bigatlas/parrot_.png");
+    (void)nt_hash64_str("bigatlas/parrot_1 copy.png");
+    (void)nt_hash64_str("bigatlas/parrot_1.png");
+    (void)nt_hash64_str("bigatlas/parrot_2 copy.png");
+    (void)nt_hash64_str("bigatlas/parrot_2.png");
+    (void)nt_hash64_str("bigatlas/parrot_3 copy.png");
+    (void)nt_hash64_str("bigatlas/parrot_3.png");
+    (void)nt_hash64_str("bigatlas/parrot_4 copy.png");
+    (void)nt_hash64_str("bigatlas/parrot_4.png");
+    (void)nt_hash64_str("bigatlas/parrot_5 copy.png");
+    (void)nt_hash64_str("bigatlas/parrot_5.png");
+    (void)nt_hash64_str("bigatlas/parrot__ copy.png");
+    (void)nt_hash64_str("bigatlas/parrot__.png");
+    (void)nt_hash64_str("bigatlas/pawn copy.png");
+    (void)nt_hash64_str("bigatlas/pawn.png");
+    (void)nt_hash64_str("bigatlas/pawn_ copy.png");
+    (void)nt_hash64_str("bigatlas/pawn_.png");
+    (void)nt_hash64_str("bigatlas/tex0");
 }
 #endif
 

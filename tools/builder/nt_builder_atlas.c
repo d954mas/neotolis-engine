@@ -45,6 +45,7 @@ static bool alpha_trim(const uint8_t *alpha, uint32_t w, uint32_t h, uint8_t thr
 
     for (uint32_t y = 0; y < h; y++) {
         for (uint32_t x = 0; x < w; x++) {
+            // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult)
             if (alpha[(y * w) + x] >= threshold) {
                 if (x < min_x) {
                     min_x = x;
@@ -248,7 +249,9 @@ static uint32_t fan_triangulate(uint32_t vertex_count, uint16_t *indices) {
 /* --- Tile packer types --- */
 
 /* Maximum number of atlas pages (each page = one texture) */
-#define ATLAS_MAX_PAGES 16
+#ifndef ATLAS_MAX_PAGES
+#define ATLAS_MAX_PAGES 64
+#endif
 
 /* Sprite placement result after packing */
 typedef struct {
@@ -679,6 +682,7 @@ static bool tgrid_test(const TileGrid *atlas, const TileGrid *sprite, int32_t tx
 
 /* Stamp sprite grid onto atlas grid at (tx,ty) with origin offset (ox,oy).
  * Uses word-level OR for fast stamping. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void tgrid_stamp(TileGrid *atlas, const TileGrid *sprite, int32_t tx, int32_t ty, int32_t ox, int32_t oy) {
     int32_t base_x = tx + ox;
     int32_t base_y = ty + oy;
@@ -802,8 +806,6 @@ static bool scan_region(const TileGrid *atlas, const TileGrid *rot_sg, const int
         if (eff_ty_max > ty_max) {
             eff_ty_max = ty_max;
         }
-
-        uint32_t sprite_tw = rot_sg[r].tw;
 
         for (uint32_t ty = ty_min; ty < eff_ty_max; ty++) {
             /* Pre-compute OR of atlas rows covered by sprite at this ty */
@@ -957,8 +959,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             max_cell_h = mh;
         }
     }
-    /* Start small — page growth will expand as needed for tighter final fit */
-    double side = sqrt((double)total_area) * 0.5;
+    /* Start below total area — page growth will expand as needed for tighter final fit */
+    double side = sqrt((double)total_area) * 0.8;
     uint32_t init_dim = (uint32_t)(side + 0.5);
     uint32_t min_dim = (max_cell_w > max_cell_h ? max_cell_w : max_cell_h) + (2 * margin);
     if (init_dim < min_dim) {
@@ -2050,7 +2052,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
             u_hull_counts[i] = vertex_counts[oi];
         }
 
-        placement_count = tile_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, unique_count, opts, placements, &page_count, page_w, page_h);
+            placement_count = tile_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, unique_count, opts, placements, &page_count, page_w, page_h);
 
         /* Fill trim offsets and remap sprite_index back to original */
         for (uint32_t i = 0; i < placement_count; i++) {
@@ -2350,7 +2352,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     for (uint32_t i = 0; i < sprite_count; i++) {
         free(alpha_planes[i]);
     }
-    free(alpha_planes);
+    free((void *)alpha_planes);
 
     /* Free temporary arrays */
     free(trim_x);
