@@ -2,6 +2,7 @@
 #include "nt_builder_internal.h"
 #include "hash/nt_hash.h"
 #include "nt_atlas_format.h"
+#include "time/nt_time.h"
 #include "stb_image.h"
 #include "stb_image_write.h"
 /* clang-format on */
@@ -1355,8 +1356,16 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
 
     uint32_t margin_tiles = (margin + ts - 1) / ts;
     uint32_t placement_count = 0;
+    double pack_start_time = nt_time_now();
+    double last_log_time = pack_start_time;
 
     for (uint32_t si = 0; si < sprite_count; si++) {
+        /* Progress log every 10 seconds */
+        double now = nt_time_now();
+        if (now - last_log_time >= 10.0) {
+            NT_LOG_INFO("  packing: %u/%u sprites placed (%.0fs elapsed)", si, sprite_count, now - pack_start_time);
+            last_log_time = now;
+        }
         uint32_t idx = sorted[si].index;
         TileGrid *base_sg = &sprite_grids[idx];
         int32_t base_ox = grid_ox[idx];
