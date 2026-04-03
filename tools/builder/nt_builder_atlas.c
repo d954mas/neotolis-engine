@@ -21,9 +21,22 @@ typedef struct {
     int32_t x, y;
 } Point2D;
 
-/* --- Alpha trim: find tight bounding box of non-transparent pixels --- */
+/* --- Alpha plane: extract dense 1-byte alpha from RGBA --- */
 
-static bool alpha_trim(const uint8_t *rgba, uint32_t w, uint32_t h, uint8_t threshold, uint32_t *out_x, uint32_t *out_y, uint32_t *out_w, uint32_t *out_h) {
+static uint8_t *alpha_plane_extract(const uint8_t *rgba, uint32_t w, uint32_t h) {
+    uint32_t count = w * h;
+    uint8_t *alpha = (uint8_t *)malloc(count);
+    NT_BUILD_ASSERT(alpha && "alpha_plane_extract: alloc failed");
+    for (uint32_t i = 0; i < count; i++) {
+        alpha[i] = rgba[(i * 4) + 3];
+    }
+    return alpha;
+}
+
+/* --- Alpha trim: find tight bounding box of non-transparent pixels --- */
+/* Operates on dense alpha plane (1 byte per pixel). */
+
+static bool alpha_trim(const uint8_t *alpha, uint32_t w, uint32_t h, uint8_t threshold, uint32_t *out_x, uint32_t *out_y, uint32_t *out_w, uint32_t *out_h) {
     uint32_t min_x = w;
     uint32_t min_y = h;
     uint32_t max_x = 0;
@@ -32,8 +45,7 @@ static bool alpha_trim(const uint8_t *rgba, uint32_t w, uint32_t h, uint8_t thre
 
     for (uint32_t y = 0; y < h; y++) {
         for (uint32_t x = 0; x < w; x++) {
-            uint8_t alpha = rgba[(((y * w) + x) * 4) + 3];
-            if (alpha >= threshold) {
+            if (alpha[(y * w) + x] >= threshold) {
                 if (x < min_x) {
                     min_x = x;
                 }
@@ -1202,7 +1214,10 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
 
 #ifdef NT_BUILDER_ATLAS_TEST_ACCESS
 bool nt_atlas_test_alpha_trim(const uint8_t *rgba, uint32_t w, uint32_t h, uint8_t threshold, uint32_t *ox, uint32_t *oy, uint32_t *ow, uint32_t *oh) {
-    return alpha_trim(rgba, w, h, threshold, ox, oy, ow, oh);
+    uint8_t *ap = alpha_plane_extract(rgba, w, h);
+    bool result = alpha_trim(ap, w, h, threshold, ox, oy, ow, oh);
+    free(ap);
+    return result;
 }
 uint32_t nt_atlas_test_convex_hull(const void *pts, uint32_t n, void *out) { return convex_hull((const Point2D *)pts, n, (Point2D *)out); }
 uint32_t nt_atlas_test_rdp_simplify(const void *hull, uint32_t n, uint32_t max_v, void *out) { return rdp_simplify((const Point2D *)hull, n, max_v, (Point2D *)out); }
@@ -1407,29 +1422,35 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 
 static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rgba, uint32_t sprite_w, uint32_t trim_x, uint32_t trim_y, uint32_t trim_w, uint32_t trim_h, uint32_t dest_x,
                         uint32_t dest_y, uint8_t rotation) {
-    /* For rotation 0: copy trimmed rect directly.
-     * For rotation 1 (90CW): source(x,y) -> dest(trim_h-1-y, x)
-     * For rotation 2 (180): source(x,y) -> dest(trim_w-1-x, trim_h-1-y)
-     * For rotation 3 (270CW): source(x,y) -> dest(y, trim_w-1-x) */
+    /* Rotation 0: row-copy via memcpy (fast path) */
+    if (rotation == 0) {
+        for (uint32_t sy = 0; sy < trim_h; sy++) {
+            const uint8_t *src = &sprite_rgba[((size_t)(trim_y + sy) * sprite_w + trim_x) * 4];
+            uint8_t *dst = &page[((size_t)(dest_y + sy) * page_w + dest_x) * 4];
+            memcpy(dst, src, (size_t)trim_w * 4);
+        }
+        return;
+    }
+
+    /* Rotations 1/2/3: pixel-by-pixel with coordinate transform.
+     * 1 (90CW): source(x,y) -> dest(trim_h-1-y, x)
+     * 2 (180):  source(x,y) -> dest(trim_w-1-x, trim_h-1-y)
+     * 3 (270CW): source(x,y) -> dest(y, trim_w-1-x) */
     for (uint32_t sy = 0; sy < trim_h; sy++) {
         for (uint32_t sx = 0; sx < trim_w; sx++) {
             const uint8_t *src = &sprite_rgba[((size_t)(trim_y + sy) * sprite_w + trim_x + sx) * 4];
             uint32_t dx;
             uint32_t dy;
             switch (rotation) {
-            case 0:
-                dx = dest_x + sx;
-                dy = dest_y + sy;
-                break;
-            case 1: /* 90 CW */
+            case 1:
                 dx = dest_x + (trim_h - 1 - sy);
                 dy = dest_y + sx;
                 break;
-            case 2: /* 180 */
+            case 2:
                 dx = dest_x + (trim_w - 1 - sx);
                 dy = dest_y + (trim_h - 1 - sy);
                 break;
-            case 3: /* 270 CW */
+            case 3:
                 dx = dest_x + sy;
                 dy = dest_y + (trim_w - 1 - sx);
                 break;
@@ -1823,15 +1844,17 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     NtAtlasSpriteInput *sprites = state->sprites;
     const nt_atlas_opts_t *opts = &state->opts;
 
-    // #region Step 1: Alpha-trim all sprites (ATLAS-05)
+    // #region Step 1: Extract alpha planes + alpha-trim all sprites (ATLAS-05)
     uint32_t *trim_x = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
     uint32_t *trim_y = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
     uint32_t *trim_w = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
     uint32_t *trim_h = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
-    NT_BUILD_ASSERT(trim_x && trim_y && trim_w && trim_h && "end_atlas: alloc failed");
+    uint8_t **alpha_planes = (uint8_t **)calloc(sprite_count, sizeof(uint8_t *));
+    NT_BUILD_ASSERT(trim_x && trim_y && trim_w && trim_h && alpha_planes && "end_atlas: alloc failed");
 
     for (uint32_t i = 0; i < sprite_count; i++) {
-        bool has_pixels = alpha_trim(sprites[i].rgba, sprites[i].width, sprites[i].height, opts->alpha_threshold, &trim_x[i], &trim_y[i], &trim_w[i], &trim_h[i]);
+        alpha_planes[i] = alpha_plane_extract(sprites[i].rgba, sprites[i].width, sprites[i].height);
+        bool has_pixels = alpha_trim(alpha_planes[i], sprites[i].width, sprites[i].height, opts->alpha_threshold, &trim_x[i], &trim_y[i], &trim_w[i], &trim_h[i]);
         NT_BUILD_ASSERT(has_pixels && "end_atlas: sprite is fully transparent");
     }
     // #endregion
@@ -1910,23 +1933,26 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         uint32_t th = trim_h[idx];
 
         if (opts->polygon_mode) {
-            /* Extract boundary pixels from alpha mask */
+            /* Extract boundary pixels from alpha plane (dense, cache-friendly) */
+            const uint8_t *ap = alpha_planes[idx];
+            uint32_t aw = sprites[idx].width;
             uint32_t pt_count = 0;
             Point2D *pts = (Point2D *)malloc((size_t)tw * th * sizeof(Point2D)); /* worst case */
             NT_BUILD_ASSERT(pts && "end_atlas: alloc failed");
 
             for (uint32_t y = 0; y < th; y++) {
                 for (uint32_t x = 0; x < tw; x++) {
-                    uint8_t alpha = sprites[idx].rgba[(((size_t)(trim_y[idx] + y) * sprites[idx].width + trim_x[idx] + x) * 4) + 3];
-                    if (alpha >= opts->alpha_threshold) {
+                    uint8_t a = ap[((size_t)(trim_y[idx] + y) * aw) + trim_x[idx] + x];
+                    if (a >= opts->alpha_threshold) {
                         /* Check if this is a boundary pixel */
                         bool is_boundary = (x == 0 || y == 0 || x == tw - 1 || y == th - 1);
                         if (!is_boundary) {
                             /* Check 4 neighbors */
-                            uint8_t left = sprites[idx].rgba[(((size_t)(trim_y[idx] + y) * sprites[idx].width + trim_x[idx] + x - 1) * 4) + 3];
-                            uint8_t right = sprites[idx].rgba[(((size_t)(trim_y[idx] + y) * sprites[idx].width + trim_x[idx] + x + 1) * 4) + 3];
-                            uint8_t up = sprites[idx].rgba[(((size_t)(trim_y[idx] + y - 1) * sprites[idx].width + trim_x[idx] + x) * 4) + 3];
-                            uint8_t down = sprites[idx].rgba[(((size_t)(trim_y[idx] + y + 1) * sprites[idx].width + trim_x[idx] + x) * 4) + 3];
+                            size_t base = ((size_t)(trim_y[idx] + y) * aw) + trim_x[idx] + x;
+                            uint8_t left = ap[base - 1];
+                            uint8_t right = ap[base + 1];
+                            uint8_t up = ap[base - aw];
+                            uint8_t down = ap[base + aw];
                             is_boundary = (left < opts->alpha_threshold || right < opts->alpha_threshold || up < opts->alpha_threshold || down < opts->alpha_threshold);
                         }
                         if (is_boundary) {
@@ -2319,6 +2345,12 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         }
         hull_vertices[i] = NULL;
     }
+
+    /* Free alpha planes */
+    for (uint32_t i = 0; i < sprite_count; i++) {
+        free(alpha_planes[i]);
+    }
+    free(alpha_planes);
 
     /* Free temporary arrays */
     free(trim_x);
