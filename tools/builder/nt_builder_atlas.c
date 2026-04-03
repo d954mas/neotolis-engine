@@ -163,10 +163,14 @@ static double perp_distance_sq(Point2D p, Point2D a, Point2D b) {
     return (cross * cross) / len_sq;
 }
 
-/* --- RDP simplification: iteratively remove vertex with smallest distance --- */
+/* --- Convex hull simplification: min-area vertex removal --- */
+/* Iteratively remove the vertex whose removal adds the smallest triangle area.
+ * For convex polygons, removing a vertex always makes the polygon LARGER —
+ * the edge between neighbors passes OUTSIDE the removed vertex.
+ * Result is guaranteed to fully contain the original hull. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint32_t rdp_simplify(const Point2D *hull, uint32_t n, uint32_t max_vertices, Point2D *out) {
+static uint32_t hull_simplify(const Point2D *hull, uint32_t n, uint32_t max_vertices, Point2D *out) {
     if (n <= max_vertices) {
         memcpy(out, hull, n * sizeof(Point2D));
         return n;
@@ -174,17 +178,16 @@ static uint32_t rdp_simplify(const Point2D *hull, uint32_t n, uint32_t max_verti
 
     /* Boolean keep[] array -- start with all vertices kept */
     bool *keep = (bool *)malloc(n * sizeof(bool));
-    NT_BUILD_ASSERT(keep && "rdp_simplify: alloc failed");
+    NT_BUILD_ASSERT(keep && "hull_simplify: alloc failed");
     for (uint32_t i = 0; i < n; i++) {
         keep[i] = true;
     }
 
     uint32_t current_count = n;
 
-    // #region Iterative vertex removal
+    // #region Iterative vertex removal by minimum triangle area
     while (current_count > max_vertices) {
-        /* Find the vertex with smallest perpendicular distance to its neighbor edge */
-        double min_dist = 1e30;
+        double min_area = 1e30;
         uint32_t min_idx = 0;
 
         for (uint32_t i = 0; i < n; i++) {
@@ -204,12 +207,14 @@ static uint32_t rdp_simplify(const Point2D *hull, uint32_t n, uint32_t max_verti
             } while (!keep[next] && next != i);
 
             if (prev == i || next == i) {
-                continue; /* shouldn't happen with count > 2 */
+                continue;
             }
 
-            double dist = perp_distance_sq(hull[i], hull[prev], hull[next]);
-            if (dist < min_dist) {
-                min_dist = dist;
+            /* Triangle area = 0.5 * |cross(prev->i, prev->next)| */
+            double area = fabs((double)(hull[i].x - hull[prev].x) * (double)(hull[next].y - hull[prev].y) -
+                               (double)(hull[i].y - hull[prev].y) * (double)(hull[next].x - hull[prev].x));
+            if (area < min_area) {
+                min_area = area;
                 min_idx = i;
             }
         }
@@ -1222,7 +1227,7 @@ bool nt_atlas_test_alpha_trim(const uint8_t *rgba, uint32_t w, uint32_t h, uint8
     return result;
 }
 uint32_t nt_atlas_test_convex_hull(const void *pts, uint32_t n, void *out) { return convex_hull((const Point2D *)pts, n, (Point2D *)out); }
-uint32_t nt_atlas_test_rdp_simplify(const void *hull, uint32_t n, uint32_t max_v, void *out) { return rdp_simplify((const Point2D *)hull, n, max_v, (Point2D *)out); }
+uint32_t nt_atlas_test_rdp_simplify(const void *hull, uint32_t n, uint32_t max_v, void *out) { return hull_simplify((const Point2D *)hull, n, max_v, (Point2D *)out); }
 uint32_t nt_atlas_test_fan_triangulate(uint32_t vc, uint16_t *idx) { return fan_triangulate(vc, idx); }
 #endif
 
@@ -1424,26 +1429,22 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 
 static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rgba, uint32_t sprite_w, uint32_t trim_x, uint32_t trim_y, uint32_t trim_w, uint32_t trim_h, uint32_t dest_x,
                         uint32_t dest_y, uint8_t rotation) {
-    /* Rotation 0: row-copy via memcpy (fast path) */
-    if (rotation == 0) {
-        for (uint32_t sy = 0; sy < trim_h; sy++) {
-            const uint8_t *src = &sprite_rgba[((size_t)(trim_y + sy) * sprite_w + trim_x) * 4];
-            uint8_t *dst = &page[((size_t)(dest_y + sy) * page_w + dest_x) * 4];
-            memcpy(dst, src, (size_t)trim_w * 4);
-        }
-        return;
-    }
-
-    /* Rotations 1/2/3: pixel-by-pixel with coordinate transform.
-     * 1 (90CW): source(x,y) -> dest(trim_h-1-y, x)
-     * 2 (180):  source(x,y) -> dest(trim_w-1-x, trim_h-1-y)
-     * 3 (270CW): source(x,y) -> dest(y, trim_w-1-x) */
+    /* Blit only non-transparent pixels to avoid overwriting neighbors in polygon mode.
+     * Rotation 0: row-scan with alpha skip.
+     * Rotations 1/2/3: pixel-by-pixel with coordinate transform + alpha skip. */
     for (uint32_t sy = 0; sy < trim_h; sy++) {
         for (uint32_t sx = 0; sx < trim_w; sx++) {
             const uint8_t *src = &sprite_rgba[((size_t)(trim_y + sy) * sprite_w + trim_x + sx) * 4];
+            if (src[3] == 0) {
+                continue; /* skip fully transparent pixels */
+            }
             uint32_t dx;
             uint32_t dy;
             switch (rotation) {
+            case 0:
+                dx = dest_x + sx;
+                dy = dest_y + sy;
+                break;
             case 1:
                 dx = dest_x + (trim_h - 1 - sy);
                 dy = dest_y + sx;
@@ -1938,18 +1939,19 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
             /* Extract boundary pixels from alpha plane (dense, cache-friendly) */
             const uint8_t *ap = alpha_planes[idx];
             uint32_t aw = sprites[idx].width;
+            /* Collect boundary pixel CORNERS (not centers) so that the convex hull
+             * passes along the outer edge of pixels, fully covering all opaque area.
+             * Each boundary pixel contributes 4 corner points (x,y), (x+1,y), (x,y+1), (x+1,y+1). */
             uint32_t pt_count = 0;
-            Point2D *pts = (Point2D *)malloc((size_t)tw * th * sizeof(Point2D)); /* worst case */
+            Point2D *pts = (Point2D *)malloc((size_t)tw * th * 4 * sizeof(Point2D)); /* 4 corners per pixel */
             NT_BUILD_ASSERT(pts && "end_atlas: alloc failed");
 
             for (uint32_t y = 0; y < th; y++) {
                 for (uint32_t x = 0; x < tw; x++) {
                     uint8_t a = ap[((size_t)(trim_y[idx] + y) * aw) + trim_x[idx] + x];
                     if (a >= opts->alpha_threshold) {
-                        /* Check if this is a boundary pixel */
                         bool is_boundary = (x == 0 || y == 0 || x == tw - 1 || y == th - 1);
                         if (!is_boundary) {
-                            /* Check 4 neighbors */
                             size_t base = ((size_t)(trim_y[idx] + y) * aw) + trim_x[idx] + x;
                             uint8_t left = ap[base - 1];
                             uint8_t right = ap[base + 1];
@@ -1958,9 +1960,12 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                             is_boundary = (left < opts->alpha_threshold || right < opts->alpha_threshold || up < opts->alpha_threshold || down < opts->alpha_threshold);
                         }
                         if (is_boundary) {
-                            pts[pt_count].x = (int32_t)x;
-                            pts[pt_count].y = (int32_t)y;
-                            pt_count++;
+                            int32_t px = (int32_t)x;
+                            int32_t py = (int32_t)y;
+                            pts[pt_count++] = (Point2D){px, py};
+                            pts[pt_count++] = (Point2D){px + 1, py};
+                            pts[pt_count++] = (Point2D){px, py + 1};
+                            pts[pt_count++] = (Point2D){px + 1, py + 1};
                         }
                     }
                 }
@@ -1981,16 +1986,82 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                 Point2D *hull = (Point2D *)malloc((size_t)pt_count * 2 * sizeof(Point2D));
                 NT_BUILD_ASSERT(hull && "end_atlas: alloc failed");
                 uint32_t hull_count = convex_hull(pts, pt_count, hull);
-                free(pts);
 
-                /* Simplify to max_vertices */
+                /* Simplify hull to max_vertices (min-area vertex removal).
+                 * Vertex removal makes polygon smaller (chords cut inside).
+                 * Then inflate outward until all boundary pixels are covered. */
                 Point2D *simplified = (Point2D *)malloc(hull_count * sizeof(Point2D));
                 NT_BUILD_ASSERT(simplified && "end_atlas: alloc failed");
-                uint32_t simp_count = rdp_simplify(hull, hull_count, opts->max_vertices, simplified);
+                uint32_t simp_count = hull_simplify(hull, hull_count, opts->max_vertices, simplified);
                 free(hull);
 
-                hull_vertices[idx] = simplified;
-                vertex_counts[idx] = simp_count;
+                /* Determine polygon winding (CCW or CW) via signed area */
+                double signed_area = 0.0;
+                for (uint32_t si = 0; si < simp_count; si++) {
+                    uint32_t sj = (si + 1) % simp_count;
+                    signed_area += ((double)simplified[si].x * simplified[sj].y) - ((double)simplified[sj].x * simplified[si].y);
+                }
+                /* signed_area > 0 = CCW, < 0 = CW. For CCW: cross > 0 = inside. */
+                double outside_sign = (signed_area > 0) ? -1.0 : 1.0;
+
+                /* Find max distance from any boundary pixel OUTSIDE simplified polygon.
+                 * A point is outside if cross(edge, point) has the "outside" sign. */
+                float max_outside_dist = 0.0F;
+                for (uint32_t bi = 0; bi < pt_count; bi++) {
+                    for (uint32_t si = 0; si < simp_count; si++) {
+                        uint32_t sj = (si + 1) % simp_count;
+                        double ex = (double)(simplified[sj].x - simplified[si].x);
+                        double ey = (double)(simplified[sj].y - simplified[si].y);
+                        double len_sq = (ex * ex) + (ey * ey);
+                        if (len_sq < 1e-12) {
+                            continue;
+                        }
+                        double cross = (ex * (double)(pts[bi].y - simplified[si].y)) - (ey * (double)(pts[bi].x - simplified[si].x));
+                        /* cross * outside_sign > 0 means point is outside this edge */
+                        if ((cross * outside_sign) > 0) {
+                            double dist = fabs(cross) / sqrt(len_sq);
+                            if ((float)dist > max_outside_dist) {
+                                max_outside_dist = (float)dist;
+                            }
+                        }
+                    }
+                }
+
+                /* Inflate simplified polygon outward by max_outside_dist + 1px margin */
+                float inflate_amount = max_outside_dist + 1.0F;
+                Point2D *inflated = (Point2D *)malloc(simp_count * sizeof(Point2D));
+                NT_BUILD_ASSERT(inflated && "end_atlas: alloc failed");
+                uint32_t inf_count = polygon_inflate(simplified, simp_count, inflate_amount, inflated);
+                free(simplified);
+
+                /* Note: inflated polygon may extend beyond [0,tw]x[0,th] trimmed rect.
+                 * This is intentional — clamping would break convexity and coverage.
+                 * Runtime UV mapping handles out-of-bounds coordinates naturally. */
+
+                /* Verify: all boundary pixels must be inside the inflated polygon.
+                 * Test via fan triangulation (same as runtime rendering). */
+                for (uint32_t bi = 0; bi < pt_count; bi++) {
+                    bool inside = false;
+                    for (uint32_t ti = 1; ti + 1 < inf_count && !inside; ti++) {
+                        /* Triangle: inflated[0], inflated[ti], inflated[ti+1] */
+                        int64_t d0 = cross2d(inflated[0], inflated[ti], pts[bi]);
+                        int64_t d1 = cross2d(inflated[ti], inflated[ti + 1], pts[bi]);
+                        int64_t d2 = cross2d(inflated[ti + 1], inflated[0], pts[bi]);
+                        bool all_neg = (d0 <= 0) && (d1 <= 0) && (d2 <= 0);
+                        bool all_pos = (d0 >= 0) && (d1 >= 0) && (d2 >= 0);
+                        if (all_neg || all_pos) {
+                            inside = true;
+                        }
+                    }
+                    if (!inside) {
+                        NT_LOG_ERROR("boundary pixel (%d,%d) outside inflated polygon (sprite %ux%u, inflate=%.1f)", pts[bi].x, pts[bi].y, tw, th, inflate_amount);
+                    }
+                    NT_BUILD_ASSERT(inside && "end_atlas: boundary pixel outside inflated polygon");
+                }
+                free(pts);
+
+                hull_vertices[idx] = inflated;
+                vertex_counts[idx] = inf_count;
             }
         } else {
             /* Rect mode: 4-vertex rect */
