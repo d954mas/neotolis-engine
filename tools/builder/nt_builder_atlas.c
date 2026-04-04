@@ -1374,6 +1374,49 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
 
     uint32_t margin_tiles = (margin + ts - 1) / ts;
     uint32_t placement_count = 0;
+    uint32_t rot_count = allow_rotate ? 4 : 1;
+
+    // #region Precompute rotated + x4 sprite grids for all sprites
+    TileGrid *all_rot_sg = (TileGrid *)calloc((size_t)sprite_count * rot_count, sizeof(TileGrid));
+    TileGrid *all_rot_x4 = (TileGrid *)calloc((size_t)sprite_count * rot_count, sizeof(TileGrid));
+    int32_t *all_rot_ox = (int32_t *)calloc((size_t)sprite_count * rot_count, sizeof(int32_t));
+    int32_t *all_rot_oy = (int32_t *)calloc((size_t)sprite_count * rot_count, sizeof(int32_t));
+    uint32_t *all_max_stw = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
+    uint32_t *all_max_sth = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
+    NT_BUILD_ASSERT(all_rot_sg && all_rot_x4 && all_rot_ox && all_rot_oy && all_max_stw && all_max_sth && "tile_pack: alloc failed");
+
+    for (uint32_t i = 0; i < sprite_count; i++) {
+        uint32_t base = i * rot_count;
+        all_rot_sg[base] = sprite_grids[i]; /* shallow copy (shared rows pointer — don't free via all_rot_sg) */
+        all_rot_ox[base] = grid_ox[i];
+        all_rot_oy[base] = grid_oy[i];
+
+        if (allow_rotate) {
+            Point2D inf_poly[32];
+            uint32_t inf_n = polygon_inflate(hull_verts[i], hull_counts[i], dilate, inf_poly);
+            for (uint32_t r = 1; r <= 3; r++) {
+                Point2D rot_poly[32];
+                polygon_rotate(inf_poly, inf_n, (uint8_t)r, (int32_t)trim_w[i], (int32_t)trim_h[i], rot_poly);
+                uint32_t rtw = (r == 1 || r == 3) ? trim_h[i] : trim_w[i];
+                uint32_t rth = (r == 1 || r == 3) ? trim_w[i] : trim_h[i];
+                all_rot_sg[base + r] = tgrid_from_polygon(rot_poly, inf_n, rtw, rth, ts, &all_rot_ox[base + r], &all_rot_oy[base + r]);
+            }
+        }
+
+        all_max_stw[i] = all_rot_sg[base].tw;
+        all_max_sth[i] = all_rot_sg[base].th;
+        for (uint32_t r = 0; r < rot_count; r++) {
+            all_rot_x4[base + r] = tgrid_downsample_x4(&all_rot_sg[base + r]);
+            if (all_rot_sg[base + r].tw > all_max_stw[i]) {
+                all_max_stw[i] = all_rot_sg[base + r].tw;
+            }
+            if (all_rot_sg[base + r].th > all_max_sth[i]) {
+                all_max_sth[i] = all_rot_sg[base + r].th;
+            }
+        }
+    }
+    // #endregion
+
     NT_LOG_INFO("  tile_pack: %u sprites, grid %ux%u tiles (ts=%u), init=%upx", sprite_count, atlas_tw, atlas_th, ts, init_dim);
     double pack_start_time = nt_time_now();
     double last_log_time = pack_start_time;
@@ -1391,36 +1434,12 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
         uint64_t or_before = s_dbg_or_count;
         uint64_t test_before = s_dbg_test_count;
         uint32_t idx = sorted[si].index;
-        TileGrid *base_sg = &sprite_grids[idx];
-        int32_t base_ox = grid_ox[idx];
-        int32_t base_oy = grid_oy[idx];
 
-        /* For rotations, build rotated tile grids from rotated inflated polygon. */
-        uint32_t rot_count = allow_rotate ? 4 : 1;
-        TileGrid rot_sg[4];
-        int32_t rot_ox[4];
-        int32_t rot_oy[4];
-        rot_sg[0] = *base_sg; /* just reference, don't free */
-        rot_ox[0] = base_ox;
-        rot_oy[0] = base_oy;
-
-        if (allow_rotate) {
-            Point2D inf_poly[32];
-            uint32_t inf_n = polygon_inflate(hull_verts[idx], hull_counts[idx], dilate, inf_poly);
-            for (uint32_t r = 1; r <= 3; r++) {
-                Point2D rot_poly[32];
-                polygon_rotate(inf_poly, inf_n, (uint8_t)r, (int32_t)trim_w[idx], (int32_t)trim_h[idx], rot_poly);
-                uint32_t rtw = (r == 1 || r == 3) ? trim_h[idx] : trim_w[idx];
-                uint32_t rth = (r == 1 || r == 3) ? trim_w[idx] : trim_h[idx];
-                rot_sg[r] = tgrid_from_polygon(rot_poly, inf_n, rtw, rth, ts, &rot_ox[r], &rot_oy[r]);
-            }
-        }
-
-        /* Build x4 downsampled sprite grids for LOD */
-        TileGrid rot_sg_x4[4];
-        for (uint32_t r = 0; r < rot_count; r++) {
-            rot_sg_x4[r] = tgrid_downsample_x4(&rot_sg[r]);
-        }
+        uint32_t rbase = idx * rot_count;
+        TileGrid *rot_sg = &all_rot_sg[rbase];
+        TileGrid *rot_sg_x4 = &all_rot_x4[rbase];
+        int32_t *rot_ox = &all_rot_ox[rbase];
+        int32_t *rot_oy = &all_rot_oy[rbase];
 
         bool placed = false;
         uint32_t best_page = 0;
@@ -1428,17 +1447,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
         uint32_t best_ty = UINT32_MAX;
         uint8_t best_rot = 0;
 
-        /* Max sprite tile extent for scan limit (any rotation) */
-        uint32_t max_stw = rot_sg[0].tw;
-        uint32_t max_sth = rot_sg[0].th;
-        for (uint32_t r = 1; r < rot_count; r++) {
-            if (rot_sg[r].tw > max_stw) {
-                max_stw = rot_sg[r].tw;
-            }
-            if (rot_sg[r].th > max_sth) {
-                max_sth = rot_sg[r].th;
-            }
-        }
+        uint32_t max_stw = all_max_stw[idx];
+        uint32_t max_sth = all_max_sth[idx];
 
         // #region Try existing pages (scan limited to used extent + sprite size)
         for (uint32_t pi = 0; pi < page_count && !placed; pi++) {
@@ -1583,15 +1593,6 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
         pl->trim_y = 0;
         pl->rotation = best_rot;
 
-        /* Free rotated grids (but not rot_sg[0] which is base_sg) */
-        for (uint32_t fr = 0; fr < rot_count; fr++) {
-            tgrid_free(&rot_sg_x4[fr]);
-        }
-        if (allow_rotate) {
-            tgrid_free(&rot_sg[1]);
-            tgrid_free(&rot_sg[2]);
-            tgrid_free(&rot_sg[3]);
-        }
     }
     // #endregion
 
@@ -1615,6 +1616,24 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     // #endregion
 
     /* Cleanup */
+    for (uint32_t i = 0; i < sprite_count; i++) {
+        uint32_t rbase = i * rot_count;
+        for (uint32_t r = 0; r < rot_count; r++) {
+            tgrid_free(&all_rot_x4[rbase + r]);
+        }
+        /* rot_sg[0] shares rows with sprite_grids[i] — only free rotations 1-3 */
+        if (allow_rotate) {
+            tgrid_free(&all_rot_sg[rbase + 1]);
+            tgrid_free(&all_rot_sg[rbase + 2]);
+            tgrid_free(&all_rot_sg[rbase + 3]);
+        }
+    }
+    free(all_rot_sg);
+    free(all_rot_x4);
+    free(all_rot_ox);
+    free(all_rot_oy);
+    free(all_max_stw);
+    free(all_max_sth);
     for (uint32_t p = 0; p < page_count; p++) {
         tgrid_free(&page_grids[p]);
         coarse_free(&page_coarse[p]);
