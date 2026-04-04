@@ -4,6 +4,9 @@ build/
 *.a
 *.so
 *.dylib
+.claude/commands/autoresearch.md
+.claude/commands/autoresearch
+.claude/skills/autoresearch
 
 # CMake
 CMakeFiles/
