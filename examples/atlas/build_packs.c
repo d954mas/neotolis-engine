@@ -33,9 +33,25 @@ static const char *pack_path(const char *dir, const char *name) {
     return s_path_buf;
 }
 
+/* Glob callback that adds sprites with an optional count limit */
+typedef struct {
+    NtBuilderContext *ctx;
+    uint32_t count;
+    uint32_t limit; /* 0 = unlimited */
+} LimitedAddData;
+
+static void limited_add_callback(const char *path, void *user) {
+    LimitedAddData *d = (LimitedAddData *)user;
+    if (d->limit > 0 && d->count >= d->limit) {
+        return;
+    }
+    nt_builder_atlas_add(d->ctx, path, NULL);
+    d->count++;
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        (void)fprintf(stderr, "Usage: build_atlas_packs <pack_dir>\n");
+        (void)fprintf(stderr, "Usage: build_atlas_packs <pack_dir> [max_size] [tile_size] [glob] [name] [r=rect] [max_sprites]\n");
         return 1;
     }
     const char *out_dir = argv[1];
@@ -68,7 +84,7 @@ int main(int argc, char *argv[]) {
     nt_builder_add_shader(ctx, "assets/shaders/mesh_inst.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/mesh_inst.frag", NT_BUILD_SHADER_FRAGMENT);
 
-    /* --- Atlas: pack spineboy sprites with polygon mode --- */
+    /* --- Atlas: pack sprites with polygon mode --- */
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.max_size = (argc >= 3) ? (uint32_t)atoi(argv[2]) : 2048;
@@ -82,10 +98,17 @@ int main(int argc, char *argv[]) {
     if (argc >= 7 && argv[6][0] == 'r') {
         opts.polygon_mode = false;
     }
-    (void)printf("atlas=%s max=%u ts=%u poly=%s\n", atlas_name, opts.max_size, opts.tile_size, opts.polygon_mode ? "yes" : "no");
+    uint32_t max_sprites = (argc >= 8) ? (uint32_t)atoi(argv[7]) : 0;
+    (void)printf("atlas=%s max=%u ts=%u poly=%s max_sprites=%u\n", atlas_name, opts.max_size, opts.tile_size, opts.polygon_mode ? "yes" : "no", max_sprites);
 
     nt_builder_begin_atlas(ctx, atlas_name, &opts);
-    nt_builder_atlas_add_glob(ctx, glob_pattern);
+    if (max_sprites > 0) {
+        LimitedAddData data = {ctx, 0, max_sprites};
+        (void)nt_builder_glob_iterate(glob_pattern, limited_add_callback, &data);
+        (void)printf("Added %u sprites (limited to %u)\n", data.count, max_sprites);
+    } else {
+        nt_builder_atlas_add_glob(ctx, glob_pattern);
+    }
     nt_builder_end_atlas(ctx);
 
     /* Finish and generate headers */

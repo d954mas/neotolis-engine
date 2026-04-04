@@ -279,6 +279,10 @@ void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels,
 void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern);
 void nt_builder_end_atlas(NtBuilderContext *ctx);
 
+/* --- Glob utility (exposed for custom add loops) --- */
+typedef void (*nt_builder_glob_callback_fn)(const char *full_path, void *user);
+bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn callback, void *user);
+
 /* --- Codegen options --- */
 void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);
 

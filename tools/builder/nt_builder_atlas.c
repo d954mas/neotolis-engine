@@ -347,350 +347,213 @@ static uint32_t next_pot(uint32_t v) {
     return v + 1;
 }
 
-/* --- Quadtree acceleration for tile grid occupancy --- */
+/* --- Coarse block grid for scan acceleration --- */
 
-/* Quadtree overlays a TileGrid to track occupancy at multiple scales.
- * Leaf nodes correspond to BLOCK_SIZE x BLOCK_SIZE tile blocks.
- * Each internal node summarizes 4 children as EMPTY/MIXED/FULL.
- * Used to skip fully-occupied regions in O(1) during scan_region. */
+/* Flat 2D grid overlaying a TileGrid at COARSE_SIZE × COARSE_SIZE tile blocks.
+ * Each block is classified as EMPTY (all tiles free), FULL (all tiles occupied),
+ * or MIXED. Per-row nonfull counts enable O(1) "is this row entirely full?" checks
+ * for fast y-skip in scan_region. */
 
-#define QTREE_BLOCK_SHIFT 3                        /* log2(BLOCK_SIZE) */
-#define QTREE_BLOCK_SIZE (1U << QTREE_BLOCK_SHIFT) /* 8 tiles per leaf block */
+#define COARSE_SHIFT 3                       /* log2(COARSE_SIZE) */
+#define COARSE_SIZE (1U << COARSE_SHIFT)     /* 8 tiles per block */
 
-#define QTREE_EMPTY 0
-#define QTREE_MIXED 1
-#define QTREE_FULL 2
+#define BLOCK_EMPTY 0
+#define BLOCK_MIXED 1
+#define BLOCK_FULL 2
 
 typedef struct {
-    uint8_t *nodes;   /* EMPTY=0, MIXED=1, FULL=2 per node */
-    uint32_t levels;  /* number of levels (0 = leaf-only) */
-    uint32_t leaf_bw; /* leaf grid width  (blocks across) */
-    uint32_t leaf_bh; /* leaf grid height (blocks down)   */
-    uint32_t dim;     /* padded power-of-two dimension in blocks (max(leaf_bw,leaf_bh) rounded up) */
-    uint32_t node_count;
-} QuadTree;
+    uint8_t *cells;        /* bw × bh array: BLOCK_EMPTY / BLOCK_MIXED / BLOCK_FULL */
+    uint32_t bw, bh;       /* block grid dimensions */
+    uint16_t *row_nonfull;  /* per block-row: count of cells that are NOT FULL */
+} CoarseGrid;
 
-/* Total nodes in a complete quadtree: sum of 4^0 + 4^1 + ... + 4^(levels-1).
- * Equals (4^levels - 1) / 3. */
-static uint32_t qtree_total_nodes(uint32_t levels) {
-    if (levels == 0) {
-        return 0;
+static CoarseGrid coarse_create(uint32_t tw, uint32_t th) {
+    CoarseGrid cg;
+    cg.bw = (tw + COARSE_SIZE - 1) >> COARSE_SHIFT;
+    cg.bh = (th + COARSE_SIZE - 1) >> COARSE_SHIFT;
+    cg.cells = (uint8_t *)calloc((size_t)cg.bw * cg.bh, 1); /* all EMPTY */
+    cg.row_nonfull = (uint16_t *)malloc(cg.bh * sizeof(uint16_t));
+    NT_BUILD_ASSERT(cg.cells && cg.row_nonfull && "coarse_create: alloc failed");
+    for (uint32_t r = 0; r < cg.bh; r++) {
+        cg.row_nonfull[r] = (uint16_t)cg.bw; /* all blocks are EMPTY → all are nonfull */
     }
-    /* 4^levels via shift: 1 << (2*levels) */
-    uint32_t pow4 = 1U << (2U * levels);
-    return (pow4 - 1) / 3;
+    return cg;
 }
 
-/* Compute number of quadtree levels for a dim x dim leaf grid.
- * levels = ceil(log2(dim)) + 1 (so root covers everything). */
-static uint32_t qtree_compute_levels(uint32_t dim) {
-    if (dim <= 1) {
-        return 1;
-    }
-    uint32_t l = 0;
-    uint32_t v = dim - 1;
-    while (v > 0) {
-        v >>= 1;
-        l++;
-    }
-    return l + 1; /* +1 because level 0 = root, level (levels-1) = leaves */
+static void coarse_free(CoarseGrid *cg) {
+    free(cg->cells);
+    free(cg->row_nonfull);
+    cg->cells = NULL;
+    cg->row_nonfull = NULL;
 }
 
-/* Offset of the first node at a given level (0 = root). */
-static uint32_t qtree_level_offset(uint32_t level) {
-    if (level == 0) {
-        return 0;
+/* Classify a single block from the tile grid bitset.
+ * Block (bx, by) covers tiles [bx*8 .. bx*8+7] × [by*8 .. by*8+7]. */
+static uint8_t coarse_classify_block(const TileGrid *g, uint32_t bx, uint32_t by) {
+    uint32_t tx0 = bx << COARSE_SHIFT;
+    uint32_t ty0 = by << COARSE_SHIFT;
+    if (tx0 >= g->tw || ty0 >= g->th) {
+        return BLOCK_EMPTY;
     }
-    return (((uint32_t)1 << (2U * level)) - 1) / 3;
-}
-
-/* Create quadtree for a grid of tw x th tiles. */
-static QuadTree qtree_create(uint32_t tw, uint32_t th) {
-    QuadTree qt;
-    qt.leaf_bw = (tw + QTREE_BLOCK_SIZE - 1) >> QTREE_BLOCK_SHIFT;
-    qt.leaf_bh = (th + QTREE_BLOCK_SIZE - 1) >> QTREE_BLOCK_SHIFT;
-    uint32_t max_dim = (qt.leaf_bw > qt.leaf_bh) ? qt.leaf_bw : qt.leaf_bh;
-    /* Round up to power of two so the tree is complete */
-    qt.dim = next_pot(max_dim);
-    if (qt.dim == 0) {
-        qt.dim = 1;
-    }
-    qt.levels = qtree_compute_levels(qt.dim);
-    qt.node_count = qtree_total_nodes(qt.levels);
-    NT_BUILD_ASSERT(qt.node_count > 0 && "qtree_create: zero nodes");
-    // NOLINTNEXTLINE(clang-analyzer-optin.portability.UnixAPI)
-    qt.nodes = (uint8_t *)calloc(qt.node_count, 1); /* all EMPTY */
-    NT_BUILD_ASSERT(qt.nodes && "qtree_create: alloc failed");
-    return qt;
-}
-
-static void qtree_free(QuadTree *qt) {
-    free(qt->nodes);
-    qt->nodes = NULL;
-    qt->node_count = 0;
-}
-
-/* Classify a leaf block from the tile grid bitset.
- * Block (bx, by) covers tiles [bx*8 .. bx*8+7] x [by*8 .. by*8+7]. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint8_t qtree_classify_block(const TileGrid *g, uint32_t bx, uint32_t by) {
-    uint32_t tx0 = bx << QTREE_BLOCK_SHIFT;
-    uint32_t ty0 = by << QTREE_BLOCK_SHIFT;
-    uint32_t tx1 = tx0 + QTREE_BLOCK_SIZE;
-    uint32_t ty1 = ty0 + QTREE_BLOCK_SIZE;
+    uint32_t tx1 = tx0 + COARSE_SIZE;
+    uint32_t ty1 = ty0 + COARSE_SIZE;
     if (tx1 > g->tw) {
         tx1 = g->tw;
     }
     if (ty1 > g->th) {
         ty1 = g->th;
     }
-
-    /* Out-of-bounds blocks (after grid) are EMPTY */
-    if (tx0 >= g->tw || ty0 >= g->th) {
-        return QTREE_EMPTY;
-    }
-
     bool has_set = false;
     bool has_clear = false;
-
     for (uint32_t ty = ty0; ty < ty1; ty++) {
         const uint64_t *row = g->rows + ((size_t)ty * g->row_words);
-        /* Check tiles [tx0..tx1) in this row */
-        uint32_t w0 = tx0 >> 6;
-        uint32_t b0 = tx0 & 63;
-        uint32_t w1 = (tx1 - 1) >> 6;
-
-        if (w0 == w1) {
-            /* All bits in one word */
-            uint32_t count = tx1 - tx0;
-            uint64_t mask = (count < 64) ? ((1ULL << count) - 1) : UINT64_MAX;
-            uint64_t bits = (row[w0] >> b0) & mask;
-            if (bits != 0) {
+        for (uint32_t tx = tx0; tx < tx1; tx++) {
+            if (row[tx >> 6] & (1ULL << (tx & 63))) {
                 has_set = true;
-            }
-            if (bits != mask) {
-                has_clear = true;
-            }
-        } else {
-            /* First word */
-            uint64_t first_mask = UINT64_MAX << b0;
-            uint64_t first_bits = row[w0] & first_mask;
-            if (first_bits != 0) {
-                has_set = true;
-            }
-            if (first_bits != first_mask) {
-                has_clear = true;
-            }
-            /* Middle words (full) */
-            for (uint32_t w = w0 + 1; w < w1; w++) {
-                if (row[w] != 0) {
-                    has_set = true;
-                }
-                if (row[w] != UINT64_MAX) {
-                    has_clear = true;
-                }
-            }
-            /* Last word */
-            uint32_t b1 = ((tx1 - 1) & 63) + 1;
-            uint64_t last_mask = (b1 < 64) ? ((1ULL << b1) - 1) : UINT64_MAX;
-            uint64_t last_bits = row[w1] & last_mask;
-            if (last_bits != 0) {
-                has_set = true;
-            }
-            if (last_bits != last_mask) {
-                has_clear = true;
-            }
-        }
-        if (has_set && has_clear) {
-            return QTREE_MIXED;
-        }
-    }
-
-    if (has_set && !has_clear) {
-        return QTREE_FULL;
-    }
-    if (!has_set) {
-        return QTREE_EMPTY;
-    }
-    return QTREE_MIXED;
-}
-
-/* Rebuild the entire quadtree from the tile grid (used after growth). */
-static void qtree_rebuild(QuadTree *qt, const TileGrid *g) {
-    /* Classify all leaf blocks */
-    uint32_t leaf_off = qtree_level_offset(qt->levels - 1);
-    uint32_t leaf_dim = qt->dim; /* leaves span dim x dim */
-
-    for (uint32_t by = 0; by < leaf_dim; by++) {
-        for (uint32_t bx = 0; bx < leaf_dim; bx++) {
-            uint32_t idx = leaf_off + (by * leaf_dim) + bx;
-            if (bx < qt->leaf_bw && by < qt->leaf_bh) {
-                qt->nodes[idx] = qtree_classify_block(g, bx, by);
             } else {
-                qt->nodes[idx] = QTREE_EMPTY; /* padding */
+                has_clear = true;
+            }
+            if (has_set && has_clear) {
+                return BLOCK_MIXED;
             }
         }
     }
+    return has_set ? BLOCK_FULL : BLOCK_EMPTY;
+}
 
-    /* Propagate bottom-up */
-    for (int32_t lev = (int32_t)qt->levels - 2; lev >= 0; lev--) {
-        uint32_t off = qtree_level_offset((uint32_t)lev);
-        uint32_t child_off = qtree_level_offset((uint32_t)lev + 1);
-        uint32_t side = (uint32_t)1 << (uint32_t)lev; /* nodes per side at this level */
-        for (uint32_t ny = 0; ny < side; ny++) {
-            for (uint32_t nx = 0; nx < side; nx++) {
-                uint32_t parent = off + (ny * side) + nx;
-                uint32_t c_side = side * 2;
-                uint32_t cx = nx * 2;
-                uint32_t cy = ny * 2;
-                uint8_t c0 = qt->nodes[child_off + (cy * c_side) + cx];
-                uint8_t c1 = qt->nodes[child_off + (cy * c_side) + cx + 1];
-                uint8_t c2 = qt->nodes[child_off + ((cy + 1) * c_side) + cx];
-                uint8_t c3 = qt->nodes[child_off + ((cy + 1) * c_side) + cx + 1];
-                if (c0 == QTREE_FULL && c1 == QTREE_FULL && c2 == QTREE_FULL && c3 == QTREE_FULL) {
-                    qt->nodes[parent] = QTREE_FULL;
-                } else if (c0 == QTREE_EMPTY && c1 == QTREE_EMPTY && c2 == QTREE_EMPTY && c3 == QTREE_EMPTY) {
-                    qt->nodes[parent] = QTREE_EMPTY;
-                } else {
-                    qt->nodes[parent] = QTREE_MIXED;
-                }
+/* Rebuild entire coarse grid from tile grid (after growth). */
+static void coarse_rebuild(CoarseGrid *cg, const TileGrid *g) {
+    for (uint32_t by = 0; by < cg->bh; by++) {
+        uint16_t nonfull = 0;
+        for (uint32_t bx = 0; bx < cg->bw; bx++) {
+            uint8_t state = coarse_classify_block(g, bx, by);
+            cg->cells[by * cg->bw + bx] = state;
+            if (state != BLOCK_FULL) {
+                nonfull++;
             }
         }
+        cg->row_nonfull[by] = nonfull;
     }
 }
 
-/* Update quadtree after stamping a sprite at tile rect [tx0..tx0+stw) x [ty0..ty0+sth).
- * Only reclassifies affected leaf blocks, then propagates upward. */
-static void qtree_update_after_stamp(QuadTree *qt, const TileGrid *g, int32_t tx0, int32_t ty0, uint32_t stw, uint32_t sth) {
-    /* Convert tile range to block range */
-    uint32_t bx0 = (tx0 >= 0) ? ((uint32_t)tx0 >> QTREE_BLOCK_SHIFT) : 0;
-    uint32_t by0 = (ty0 >= 0) ? ((uint32_t)ty0 >> QTREE_BLOCK_SHIFT) : 0;
-    uint32_t tx_end = (uint32_t)tx0 + stw;
-    uint32_t ty_end = (uint32_t)ty0 + sth;
-    uint32_t bx1 = (tx_end + QTREE_BLOCK_SIZE - 1) >> QTREE_BLOCK_SHIFT;
-    uint32_t by1 = (ty_end + QTREE_BLOCK_SIZE - 1) >> QTREE_BLOCK_SHIFT;
-    if (bx1 > qt->leaf_bw) {
-        bx1 = qt->leaf_bw;
+/* Update coarse grid after stamping a sprite at tile rect [tx0..tx0+stw) × [ty0..ty0+sth). */
+static void coarse_update(CoarseGrid *cg, const TileGrid *g, int32_t tx0, int32_t ty0, uint32_t stw, uint32_t sth) {
+    uint32_t bx0 = (tx0 >= 0) ? ((uint32_t)tx0 >> COARSE_SHIFT) : 0;
+    uint32_t by0 = (ty0 >= 0) ? ((uint32_t)ty0 >> COARSE_SHIFT) : 0;
+    uint32_t bx1 = ((uint32_t)tx0 + stw + COARSE_SIZE - 1) >> COARSE_SHIFT;
+    uint32_t by1 = ((uint32_t)ty0 + sth + COARSE_SIZE - 1) >> COARSE_SHIFT;
+    if (bx1 > cg->bw) {
+        bx1 = cg->bw;
     }
-    if (by1 > qt->leaf_bh) {
-        by1 = qt->leaf_bh;
+    if (by1 > cg->bh) {
+        by1 = cg->bh;
     }
-
-    uint32_t leaf_off = qtree_level_offset(qt->levels - 1);
-    uint32_t leaf_dim = qt->dim;
-
-    /* Reclassify affected leaf blocks */
     for (uint32_t by = by0; by < by1; by++) {
         for (uint32_t bx = bx0; bx < bx1; bx++) {
-            uint32_t idx = leaf_off + (by * leaf_dim) + bx;
-            qt->nodes[idx] = qtree_classify_block(g, bx, by);
-        }
-    }
-
-    /* Propagate bottom-up through all ancestor levels */
-    for (int32_t lev = (int32_t)qt->levels - 2; lev >= 0; lev--) {
-        uint32_t off = qtree_level_offset((uint32_t)lev);
-        uint32_t child_off = qtree_level_offset((uint32_t)lev + 1);
-        uint32_t side = (uint32_t)1 << (uint32_t)lev;
-        uint32_t c_side = side * 2;
-
-        /* Affected parent block range at this level */
-        uint32_t pbx0 = bx0 >> 1;
-        uint32_t pby0 = by0 >> 1;
-        uint32_t pbx1 = (bx1 + 1) >> 1;
-        uint32_t pby1 = (by1 + 1) >> 1;
-        if (pbx1 > side) {
-            pbx1 = side;
-        }
-        if (pby1 > side) {
-            pby1 = side;
-        }
-
-        for (uint32_t ny = pby0; ny < pby1; ny++) {
-            for (uint32_t nx = pbx0; nx < pbx1; nx++) {
-                uint32_t parent = off + (ny * side) + nx;
-                uint32_t cx = nx * 2;
-                uint32_t cy = ny * 2;
-                uint8_t c0 = qt->nodes[child_off + (cy * c_side) + cx];
-                uint8_t c1 = qt->nodes[child_off + (cy * c_side) + cx + 1];
-                uint8_t c2 = qt->nodes[child_off + ((cy + 1) * c_side) + cx];
-                uint8_t c3 = qt->nodes[child_off + ((cy + 1) * c_side) + cx + 1];
-                if (c0 == QTREE_FULL && c1 == QTREE_FULL && c2 == QTREE_FULL && c3 == QTREE_FULL) {
-                    qt->nodes[parent] = QTREE_FULL;
-                } else if (c0 == QTREE_EMPTY && c1 == QTREE_EMPTY && c2 == QTREE_EMPTY && c3 == QTREE_EMPTY) {
-                    qt->nodes[parent] = QTREE_EMPTY;
-                } else {
-                    qt->nodes[parent] = QTREE_MIXED;
-                }
+            uint32_t idx = by * cg->bw + bx;
+            uint8_t old = cg->cells[idx];
+            uint8_t cur = coarse_classify_block(g, bx, by);
+            cg->cells[idx] = cur;
+            if (old != BLOCK_FULL && cur == BLOCK_FULL) {
+                cg->row_nonfull[by]--;
+            } else if (old == BLOCK_FULL && cur != BLOCK_FULL) {
+                cg->row_nonfull[by]++;
             }
         }
-
-        /* Shift range for next parent level */
-        bx0 = pbx0;
-        by0 = pby0;
-        bx1 = pbx1;
-        by1 = pby1;
     }
 }
 
-/* Check if a horizontal span of tiles [tx..tx+span_w) is fully occupied at block level.
- * Uses the leaf level of the quadtree for O(1)-per-block checks.
- * Returns true if ALL blocks covering the span are FULL. */
-static bool qtree_row_full(const QuadTree *qt, uint32_t tx, uint32_t ty, uint32_t span_w) {
-    uint32_t bx0 = tx >> QTREE_BLOCK_SHIFT;
-    uint32_t bx1 = (tx + span_w + QTREE_BLOCK_SIZE - 1) >> QTREE_BLOCK_SHIFT;
-    uint32_t by = ty >> QTREE_BLOCK_SHIFT;
-    if (by >= qt->leaf_bh) {
-        return false;
-    }
-    if (bx1 > qt->leaf_bw) {
-        bx1 = qt->leaf_bw;
-    }
+/* Grow coarse grid to match a grown tile grid. Rebuilds from scratch. */
+static void coarse_grow(CoarseGrid *cg, const TileGrid *g) {
+    coarse_free(cg);
+    *cg = coarse_create(g->tw, g->th);
+    coarse_rebuild(cg, g);
+}
 
-    uint32_t leaf_off = qtree_level_offset(qt->levels - 1);
-    uint32_t leaf_dim = qt->dim;
+/* --- x4 downsampled TileGrid (LOD) --- */
 
-    for (uint32_t bx = bx0; bx < bx1; bx++) {
-        if (qt->nodes[leaf_off + (by * leaf_dim) + bx] != QTREE_FULL) {
-            return false;
+/* Build a x4 downsampled TileGrid from src: each dst bit = OR of 4×4 src tiles.
+ * Used for cheap OR-mask computation (16× fewer rows×words) and fast collision pre-test. */
+static TileGrid tgrid_downsample_x4(const TileGrid *src) {
+    uint32_t dst_tw = (src->tw + 3) / 4;
+    uint32_t dst_th = (src->th + 3) / 4;
+    TileGrid dst = tgrid_create(dst_tw, dst_th, src->tile_size * 4);
+
+    for (uint32_t dy = 0; dy < dst_th; dy++) {
+        uint64_t *dst_row = dst.rows + ((size_t)dy * dst.row_words);
+        uint32_t sy0 = dy * 4;
+        uint32_t sy1 = sy0 + 4;
+        if (sy1 > src->th) {
+            sy1 = src->th;
+        }
+        for (uint32_t dx = 0; dx < dst_tw; dx++) {
+            uint32_t sx0 = dx * 4;
+            uint32_t sx1 = sx0 + 4;
+            if (sx1 > src->tw) {
+                sx1 = src->tw;
+            }
+            /* OR all bits in the 4×4 source block */
+            bool any_set = false;
+            for (uint32_t sy = sy0; sy < sy1 && !any_set; sy++) {
+                const uint64_t *src_row = src->rows + ((size_t)sy * src->row_words);
+                for (uint32_t sx = sx0; sx < sx1; sx++) {
+                    if (src_row[sx >> 6] & (1ULL << (sx & 63))) {
+                        any_set = true;
+                        break;
+                    }
+                }
+            }
+            if (any_set) {
+                dst_row[dx >> 6] |= (1ULL << (dx & 63));
+            }
         }
     }
-    return true;
+    return dst;
 }
 
-/* Find next tx >= start_tx where the block at (tx, ty) is NOT full.
- * Scans leaf blocks to skip FULL columns quickly.
- * Returns max_tx if all remaining blocks are FULL. */
-static uint32_t qtree_next_nonfull_tx(const QuadTree *qt, uint32_t start_tx, uint32_t ty, uint32_t max_tx) {
-    uint32_t by = ty >> QTREE_BLOCK_SHIFT;
-    if (by >= qt->leaf_bh) {
-        return start_tx; /* out of range, don't skip */
+/* Update x4 grid after stamping at tile rect [tx0..tx0+stw) × [ty0..ty0+sth).
+ * Only reclassifies affected x4 cells. */
+static void tgrid_x4_update(TileGrid *x4, const TileGrid *src, int32_t tx0, int32_t ty0, uint32_t stw, uint32_t sth) {
+    uint32_t dx0 = (tx0 >= 0) ? ((uint32_t)tx0 / 4) : 0;
+    uint32_t dy0 = (ty0 >= 0) ? ((uint32_t)ty0 / 4) : 0;
+    uint32_t dx1 = ((uint32_t)tx0 + stw + 3) / 4;
+    uint32_t dy1 = ((uint32_t)ty0 + sth + 3) / 4;
+    if (dx1 > x4->tw) {
+        dx1 = x4->tw;
     }
-
-    uint32_t leaf_off = qtree_level_offset(qt->levels - 1);
-    uint32_t leaf_dim = qt->dim;
-    uint32_t bx = start_tx >> QTREE_BLOCK_SHIFT;
-    uint32_t max_bx = (max_tx + QTREE_BLOCK_SIZE - 1) >> QTREE_BLOCK_SHIFT;
-    if (max_bx > qt->leaf_bw) {
-        max_bx = qt->leaf_bw;
+    if (dy1 > x4->th) {
+        dy1 = x4->th;
     }
-
-    while (bx < max_bx) {
-        if (qt->nodes[leaf_off + (by * leaf_dim) + bx] != QTREE_FULL) {
-            /* This block is not full, return the start of this block or start_tx */
-            uint32_t block_start = bx << QTREE_BLOCK_SHIFT;
-            return (block_start > start_tx) ? block_start : start_tx;
+    for (uint32_t dy = dy0; dy < dy1; dy++) {
+        uint64_t *dst_row = x4->rows + ((size_t)dy * x4->row_words);
+        uint32_t sy0 = dy * 4;
+        uint32_t sy1 = sy0 + 4;
+        if (sy1 > src->th) {
+            sy1 = src->th;
         }
-        bx++;
+        for (uint32_t dx = dx0; dx < dx1; dx++) {
+            uint32_t sx0 = dx * 4;
+            uint32_t sx1 = sx0 + 4;
+            if (sx1 > src->tw) {
+                sx1 = src->tw;
+            }
+            bool any_set = false;
+            for (uint32_t sy = sy0; sy < sy1 && !any_set; sy++) {
+                const uint64_t *src_row = src->rows + ((size_t)sy * src->row_words);
+                for (uint32_t sx = sx0; sx < sx1; sx++) {
+                    if (src_row[sx >> 6] & (1ULL << (sx & 63))) {
+                        any_set = true;
+                        break;
+                    }
+                }
+            }
+            if (any_set) {
+                dst_row[dx >> 6] |= (1ULL << (dx & 63));
+            } else {
+                dst_row[dx >> 6] &= ~(1ULL << (dx & 63));
+            }
+        }
     }
-    return max_tx;
-}
-
-/* Grow quadtree to match a grown tile grid. Rebuilds from scratch. */
-static void qtree_grow(QuadTree *qt, const TileGrid *g) {
-    qtree_free(qt);
-    *qt = qtree_create(g->tw, g->th);
-    qtree_rebuild(qt, g);
 }
 
 /* --- Polygon inflation: expand convex hull outward by N pixels --- */
@@ -1135,75 +998,225 @@ static uint32_t tgrid_or_next_free(const uint64_t *mask, uint32_t mask_words, ui
 
 /* --- Scan a rectangular region of the atlas grid for a valid placement --- */
 
+/* Debug counters for scan performance analysis */
+static uint64_t s_dbg_or_count;
+static uint64_t s_dbg_test_count;
+static uint64_t s_dbg_yskip_count;
+
 /* Try to place a sprite (with given rotation variants) within [ty_min..ty_max) x [tx_min..tx_max).
  * Returns true if placed, with best position in out_tx/out_ty/out_rot.
- * Uses quadtree skip + OR-mask pre-rejection to skip positions where any sprite row would collide. */
+ * Uses x4 LOD for cheap OR-mask, coarse grid for y-skip/x-skip, x1 OR-mask + tgrid_test as fallback. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool scan_region(const TileGrid *atlas, const QuadTree *qt, const TileGrid *rot_sg, const int32_t *rot_ox, const int32_t *rot_oy, uint32_t rot_count, uint32_t tx_min, uint32_t ty_min,
-                        uint32_t tx_max, uint32_t ty_max, uint32_t *out_tx, uint32_t *out_ty, uint8_t *out_rot) {
+static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileGrid *atlas_x4, const TileGrid *rot_sg, const TileGrid *rot_sg_x4, const int32_t *rot_ox, const int32_t *rot_oy,
+                        uint32_t rot_count, uint32_t tx_min, uint32_t ty_min, uint32_t tx_max, uint32_t ty_max, uint32_t *out_tx, uint32_t *out_ty, uint8_t *out_rot) {
     uint32_t best_tx = UINT32_MAX;
     uint32_t best_ty = UINT32_MAX;
     bool found = false;
 
-    /* Allocate OR-mask buffer (reused across rows) */
     uint64_t *or_mask = (uint64_t *)malloc((size_t)atlas->row_words * sizeof(uint64_t));
     NT_BUILD_ASSERT(or_mask && "scan_region: alloc failed");
 
+    /* x4 OR-mask: computed on the downsampled grid (16× cheaper per ty) */
+    uint64_t *or_mask_x4 = NULL;
+    if (atlas_x4) {
+        or_mask_x4 = (uint64_t *)malloc((size_t)atlas_x4->row_words * sizeof(uint64_t));
+        NT_BUILD_ASSERT(or_mask_x4 && "scan_region: alloc x4 or_mask");
+    }
+
+    uint32_t max_bw = cg ? cg->bw : 0;
+    uint8_t *col_free = NULL;
+    uint32_t *run_from = NULL;
+    if (max_bw > 0) {
+        col_free = (uint8_t *)malloc(max_bw);
+        run_from = (uint32_t *)malloc(max_bw * sizeof(uint32_t));
+        NT_BUILD_ASSERT(col_free && run_from && "scan_region: alloc");
+    }
+
     for (uint32_t r = 0; r < rot_count; r++) {
-        /* Early-out: if we already found at best_ty, later rotations only need to beat it */
         uint32_t eff_ty_max = found ? (best_ty + 1) : ty_max;
         if (eff_ty_max > ty_max) {
             eff_ty_max = ty_max;
         }
 
-        for (uint32_t ty = ty_min; ty < eff_ty_max; ty++) {
-            /* Pre-compute OR of atlas rows covered by sprite at this ty */
-            int32_t ay0 = (int32_t)ty + rot_oy[r];
-            uint32_t or_y0 = (ay0 >= 0) ? (uint32_t)ay0 : 0;
-            uint32_t or_h = rot_sg[r].th;
-            if (ay0 < 0) {
-                or_h = (or_h > (uint32_t)(-ay0)) ? or_h - (uint32_t)(-ay0) : 0;
+        uint32_t s_tw = rot_sg[r].tw;
+        uint32_t s_th = rot_sg[r].th;
+        uint32_t sprite_bw = (s_tw + COARSE_SIZE - 1) >> COARSE_SHIFT;
+
+        // #region Precompute by0_has_room: which block-row bands can fit the sprite?
+        /* For each possible starting block-row by0, check whether any contiguous run
+         * of non-FULL block columns across the band [by0..by0+band_bh) is wide enough
+         * for the sprite. This eliminates ~80-90% of ty values at high fill levels. */
+        uint32_t band_bh = (s_th + COARSE_SIZE - 1) >> COARSE_SHIFT;
+        uint8_t by0_has_room_buf[512]; /* max 256 block rows × 2 (generous) */
+        uint8_t *by0_has_room = by0_has_room_buf;
+        if (cg && cg->bh > 0) {
+            for (uint32_t by0 = 0; by0 < cg->bh; by0++) {
+                uint32_t by1 = by0 + band_bh;
+                if (by1 > cg->bh) {
+                    by1 = cg->bh;
+                }
+                uint32_t max_run = 0;
+                uint32_t cur_run = 0;
+                for (uint32_t bx = 0; bx < cg->bw; bx++) {
+                    bool col_has_space = false;
+                    for (uint32_t by = by0; by < by1; by++) {
+                        if (cg->cells[by * cg->bw + bx] != BLOCK_FULL) {
+                            col_has_space = true;
+                            break;
+                        }
+                    }
+                    if (col_has_space) {
+                        cur_run++;
+                        if (cur_run > max_run) {
+                            max_run = cur_run;
+                        }
+                    } else {
+                        cur_run = 0;
+                    }
+                }
+                by0_has_room[by0] = (max_run >= sprite_bw) ? 1 : 0;
             }
-            tgrid_row_or(atlas, or_y0, or_h, or_mask, atlas->row_words);
+        }
+        // #endregion
+
+        uint32_t cached_by0 = UINT32_MAX;
+        uint32_t cached_by1 = UINT32_MAX;
+
+        for (uint32_t ty = ty_min; ty < eff_ty_max; ty++) {
+            int32_t ay0_s = (int32_t)ty + rot_oy[r];
+            int32_t ay1_s = ay0_s + (int32_t)s_th;
+            uint32_t ay0 = (ay0_s >= 0) ? (uint32_t)ay0_s : 0;
+            uint32_t ay1 = ((uint32_t)ay1_s > atlas->th) ? atlas->th : (uint32_t)ay1_s;
+            uint32_t by0 = ay0 >> COARSE_SHIFT;
+            uint32_t by1 = (ay1 + COARSE_SIZE - 1) >> COARSE_SHIFT;
+            if (by1 > cg->bh) {
+                by1 = cg->bh;
+            }
+
+            // #region Y-skip: precomputed band check
+            if (cg && by0 < cg->bh && !by0_has_room[by0]) {
+                s_dbg_yskip_count++;
+                uint32_t next_tile_y = ((by0 + 1) << COARSE_SHIFT);
+                int32_t next_ty = (int32_t)next_tile_y - rot_oy[r];
+                if (next_ty > (int32_t)ty) {
+                    ty = (uint32_t)next_ty - 1;
+                }
+                continue;
+            }
+            // #endregion
+
+            // #region Recompute col_free + run_from when band shifts
+            if (cg && (by0 != cached_by0 || by1 != cached_by1)) {
+                cached_by0 = by0;
+                cached_by1 = by1;
+                for (uint32_t bx = 0; bx < cg->bw; bx++) {
+                    col_free[bx] = 0;
+                    for (uint32_t by = by0; by < by1; by++) {
+                        if (cg->cells[by * cg->bw + bx] != BLOCK_FULL) {
+                            col_free[bx] = 1;
+                            break;
+                        }
+                    }
+                }
+                for (int32_t bx = (int32_t)cg->bw - 1; bx >= 0; bx--) {
+                    if (col_free[bx]) {
+                        run_from[bx] = ((uint32_t)bx + 1 < cg->bw) ? run_from[bx + 1] + 1 : 1;
+                    } else {
+                        run_from[bx] = 0;
+                    }
+                }
+            }
+            // #endregion
+
+            // #region x4 OR-mask pre-check: skip ty if x4 OR-mask is all occupied
+            if (or_mask_x4 && atlas_x4) {
+                uint32_t x4_y0 = ay0 / 4;
+                uint32_t x4_h = (ay1 - ay0 + 3) / 4;
+                s_dbg_or_count++;
+                tgrid_row_or(atlas_x4, x4_y0, x4_h, or_mask_x4, atlas_x4->row_words);
+
+                /* Check if x4 OR-mask is completely full across scan range → skip ty */
+                bool x4_all_full = true;
+                uint32_t x4_tx_min = tx_min / 4;
+                uint32_t x4_tx_max = (tx_max + 3) / 4;
+                if (x4_tx_max > atlas_x4->tw) {
+                    x4_tx_max = atlas_x4->tw;
+                }
+                for (uint32_t c = x4_tx_min; c < x4_tx_max; c++) {
+                    if (!(or_mask_x4[c >> 6] & (1ULL << (c & 63)))) {
+                        x4_all_full = false;
+                        break;
+                    }
+                }
+                if (x4_all_full) {
+                    continue; /* every x4 column has occupancy → very unlikely to find space */
+                }
+            }
+            // #endregion
+
+            /* Compute full x1 OR-mask */
+            s_dbg_or_count++;
+            tgrid_row_or(atlas, ay0, ay1 - ay0, or_mask, atlas->row_words);
 
             for (uint32_t tx = tx_min; tx < tx_max;) {
-                /* Quadtree skip: if the block at sprite's first column is FULL, advance */
-                if (qt) {
-                    int32_t qt_col = (int32_t)tx + rot_ox[r];
-                    if (qt_col >= 0 && (uint32_t)qt_col < atlas->tw) {
-                        uint32_t qt_row = ((int32_t)ty + rot_oy[r] >= 0) ? (uint32_t)((int32_t)ty + rot_oy[r]) : 0;
-                        if (qtree_row_full(qt, (uint32_t)qt_col, qt_row, 1)) {
-                            uint32_t next_tx = qtree_next_nonfull_tx(qt, (uint32_t)qt_col, qt_row, atlas->tw);
-                            int32_t skip_tx = (int32_t)next_tx - rot_ox[r];
-                            if (skip_tx > (int32_t)tx) {
-                                tx = (uint32_t)skip_tx;
+                // #region X-skip: jump past block columns without a wide enough free-run
+                if (cg) {
+                    int32_t ax = (int32_t)tx + rot_ox[r];
+                    if (ax >= 0) {
+                        uint32_t bx = (uint32_t)ax >> COARSE_SHIFT;
+                        if (bx < cg->bw && run_from[bx] < sprite_bw) {
+                            uint32_t nbx = bx + 1;
+                            while (nbx < cg->bw && run_from[nbx] < sprite_bw) {
+                                nbx++;
+                            }
+                            int32_t next_tx = (int32_t)(nbx << COARSE_SHIFT) - rot_ox[r];
+                            if (next_tx > (int32_t)tx) {
+                                tx = (uint32_t)next_tx;
                                 continue;
                             }
                         }
                     }
                 }
+                // #endregion
 
-                /* Quick rejection: if first sprite column is occupied in OR-mask, skip ahead */
-                int32_t col0 = (int32_t)tx + rot_ox[r];
-                if (col0 >= 0 && (uint32_t)col0 < atlas->tw) {
-                    if (!tgrid_or_bit_free(or_mask, atlas->row_words, (uint32_t)col0)) {
-                        uint32_t next_free = tgrid_or_next_free(or_mask, atlas->row_words, atlas->tw, (uint32_t)col0 + 1);
-                        int32_t next_tx = (int32_t)next_free - rot_ox[r];
-                        if (next_tx <= (int32_t)tx) {
-                            next_tx = (int32_t)tx + 1;
+                /* Quick rejection via x4 OR-mask: check sprite's first x4-column */
+                if (or_mask_x4) {
+                    int32_t col0_x4 = ((int32_t)tx + rot_ox[r]) / 4;
+                    if (col0_x4 >= 0 && (uint32_t)col0_x4 < atlas_x4->tw) {
+                        if (or_mask_x4[(uint32_t)col0_x4 >> 6] & (1ULL << ((uint32_t)col0_x4 & 63))) {
+                            /* x4 column occupied — but might have free tiles within.
+                             * Fall through to x1 OR-mask check. */
+                        } else {
+                            /* x4 column FREE → 4 tile columns are all free → promising! */
+                            goto x1_check;
                         }
-                        tx = (uint32_t)next_tx;
-                        continue;
                     }
                 }
 
+                /* Quick rejection: x1 OR-mask column check */
+                {
+                    int32_t col0 = (int32_t)tx + rot_ox[r];
+                    if (col0 >= 0 && (uint32_t)col0 < atlas->tw) {
+                        if (!tgrid_or_bit_free(or_mask, atlas->row_words, (uint32_t)col0)) {
+                            uint32_t next_free = tgrid_or_next_free(or_mask, atlas->row_words, atlas->tw, (uint32_t)col0 + 1);
+                            int32_t next_tx = (int32_t)next_free - rot_ox[r];
+                            if (next_tx <= (int32_t)tx) {
+                                next_tx = (int32_t)tx + 1;
+                            }
+                            tx = (uint32_t)next_tx;
+                            continue;
+                        }
+                    }
+                }
+
+            x1_check:;
                 uint32_t skip = 0;
+                s_dbg_test_count++;
                 if (!tgrid_test(atlas, &rot_sg[r], (int32_t)tx, (int32_t)ty, rot_ox[r], rot_oy[r], &skip)) {
-                    /* Verify the sprite fits within atlas bounds (min + max check) */
                     int32_t abs_min_tx = (int32_t)tx + rot_ox[r];
                     int32_t abs_min_ty = (int32_t)ty + rot_oy[r];
-                    int32_t abs_max_tx = abs_min_tx + (int32_t)rot_sg[r].tw;
-                    int32_t abs_max_ty = abs_min_ty + (int32_t)rot_sg[r].th;
+                    int32_t abs_max_tx = abs_min_tx + (int32_t)s_tw;
+                    int32_t abs_max_ty = abs_min_ty + (int32_t)s_th;
                     if (abs_min_tx >= 0 && abs_min_ty >= 0 && (uint32_t)abs_max_tx <= atlas->tw && (uint32_t)abs_max_ty <= atlas->th) {
                         if (ty < best_ty || (ty == best_ty && tx < best_tx)) {
                             best_tx = tx;
@@ -1211,11 +1224,10 @@ static bool scan_region(const TileGrid *atlas, const QuadTree *qt, const TileGri
                             *out_rot = (uint8_t)r;
                             found = true;
                         }
-                        break; /* first-fit in this row */
+                        break;
                     }
-                    /* Bounds fail: if max exceeded, skip rest of row; if min negative, advance */
                     if ((uint32_t)abs_max_tx > atlas->tw || (uint32_t)abs_max_ty > atlas->th) {
-                        break; /* sprite won't fit further right/down */
+                        break;
                     }
                     tx++;
                     continue;
@@ -1232,6 +1244,9 @@ static bool scan_region(const TileGrid *atlas, const QuadTree *qt, const TileGri
         }
     }
 
+    free(run_from);
+    free(col_free);
+    free(or_mask_x4);
     free(or_mask);
 
     if (found) {
@@ -1333,39 +1348,48 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     uint32_t max_tw = (max_size + ts - 1) / ts; /* max grid size in tiles */
     uint32_t max_th = max_tw;
     TileGrid page_grids[ATLAS_MAX_PAGES];
-    QuadTree page_qtrees[ATLAS_MAX_PAGES];
+    TileGrid page_x4[ATLAS_MAX_PAGES]; /* x4 downsampled LOD for each page */
+    CoarseGrid page_coarse[ATLAS_MAX_PAGES];
     uint32_t page_count = 1;
     uint32_t page_w[ATLAS_MAX_PAGES];
     uint32_t page_h[ATLAS_MAX_PAGES];
-    uint32_t page_max_x[ATLAS_MAX_PAGES]; /* pixel bounding box for final page size */
+    uint32_t page_max_x[ATLAS_MAX_PAGES];
     uint32_t page_max_y[ATLAS_MAX_PAGES];
-    uint32_t page_used_tw[ATLAS_MAX_PAGES]; /* used extent in tiles — scan limit */
+    uint32_t page_used_tw[ATLAS_MAX_PAGES];
     uint32_t page_used_th[ATLAS_MAX_PAGES];
     memset(page_max_x, 0, sizeof(page_max_x));
     memset(page_max_y, 0, sizeof(page_max_y));
     memset(page_used_tw, 0, sizeof(page_used_tw));
     memset(page_used_th, 0, sizeof(page_used_th));
-    memset(page_qtrees, 0, sizeof(page_qtrees));
+    memset(page_coarse, 0, sizeof(page_coarse));
+    memset(page_x4, 0, sizeof(page_x4));
 
     for (uint32_t p = 0; p < ATLAS_MAX_PAGES; p++) {
         page_w[p] = init_dim;
         page_h[p] = init_dim;
     }
     page_grids[0] = tgrid_create(atlas_tw, atlas_th, ts);
-    page_qtrees[0] = qtree_create(atlas_tw, atlas_th);
+    page_coarse[0] = coarse_create(atlas_tw, atlas_th);
+    page_x4[0] = tgrid_downsample_x4(&page_grids[0]);
 
     uint32_t margin_tiles = (margin + ts - 1) / ts;
     uint32_t placement_count = 0;
+    NT_LOG_INFO("  tile_pack: %u sprites, grid %ux%u tiles (ts=%u), init=%upx", sprite_count, atlas_tw, atlas_th, ts, init_dim);
     double pack_start_time = nt_time_now();
     double last_log_time = pack_start_time;
+    s_dbg_or_count = 0;
+    s_dbg_test_count = 0;
+    s_dbg_yskip_count = 0;
 
     for (uint32_t si = 0; si < sprite_count; si++) {
         /* Progress log every 10 seconds */
-        double now = nt_time_now();
-        if (now - last_log_time >= 10.0) {
-            NT_LOG_INFO("  packing: %u/%u sprites placed (%.0fs elapsed)", si, sprite_count, now - pack_start_time);
-            last_log_time = now;
+        if (si % 50 == 0 || si == sprite_count - 1) {
+            NT_LOG_INFO("  placing sprite %u/%u (idx=%u, stw=%u sth=%u, grid=%ux%u, used=%ux%u)", si, sprite_count, sorted[si].index, sprite_grids[sorted[si].index].tw,
+                        sprite_grids[sorted[si].index].th, page_grids[0].tw, page_grids[0].th, page_used_tw[0], page_used_th[0]);
         }
+        double sprite_start = nt_time_now();
+        uint64_t or_before = s_dbg_or_count;
+        uint64_t test_before = s_dbg_test_count;
         uint32_t idx = sorted[si].index;
         TileGrid *base_sg = &sprite_grids[idx];
         int32_t base_ox = grid_ox[idx];
@@ -1390,6 +1414,12 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                 uint32_t rth = (r == 1 || r == 3) ? trim_w[idx] : trim_h[idx];
                 rot_sg[r] = tgrid_from_polygon(rot_poly, inf_n, rtw, rth, ts, &rot_ox[r], &rot_oy[r]);
             }
+        }
+
+        /* Build x4 downsampled sprite grids for LOD */
+        TileGrid rot_sg_x4[4];
+        for (uint32_t r = 0; r < rot_count; r++) {
+            rot_sg_x4[r] = tgrid_downsample_x4(&rot_sg[r]);
         }
 
         bool placed = false;
@@ -1420,7 +1450,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             if (scan_th > page_grids[pi].th) {
                 scan_th = page_grids[pi].th;
             }
-            placed = scan_region(&page_grids[pi], &page_qtrees[pi], rot_sg, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, scan_tw, scan_th, &best_tx, &best_ty, &best_rot);
+            placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, scan_tw, scan_th, &best_tx, &best_ty, &best_rot);
             if (placed) {
                 best_page = pi;
             }
@@ -1434,7 +1464,9 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                 uint32_t old_tw = 0;
                 uint32_t old_th = 0;
                 tgrid_grow(&page_grids[pi], max_tw, max_th, &old_tw, &old_th);
-                qtree_grow(&page_qtrees[pi], &page_grids[pi]);
+                coarse_grow(&page_coarse[pi], &page_grids[pi]);
+                tgrid_free(&page_x4[pi]);
+                page_x4[pi] = tgrid_downsample_x4(&page_grids[pi]);
                 page_w[pi] = page_grids[pi].tw * ts;
                 page_h[pi] = page_grids[pi].th * ts;
 
@@ -1449,11 +1481,11 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                 }
 
                 /* Priority area: try old region first to fill gaps */
-                placed = scan_region(&page_grids[pi], &page_qtrees[pi], rot_sg, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, old_tw, old_th, &best_tx, &best_ty, &best_rot);
+                placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, old_tw, old_th, &best_tx, &best_ty, &best_rot);
 
                 /* Then scan used extent */
                 if (!placed) {
-                    placed = scan_region(&page_grids[pi], &page_qtrees[pi], rot_sg, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, g_scan_tw, g_scan_th, &best_tx, &best_ty, &best_rot);
+                    placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, g_scan_tw, g_scan_th, &best_tx, &best_ty, &best_rot);
                 }
 
                 if (placed) {
@@ -1469,11 +1501,12 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             uint32_t new_page = page_count;
             page_count++;
             page_grids[new_page] = tgrid_create(atlas_tw, atlas_th, ts);
-            page_qtrees[new_page] = qtree_create(atlas_tw, atlas_th);
+            page_coarse[new_page] = coarse_create(atlas_tw, atlas_th);
+            page_x4[new_page] = tgrid_downsample_x4(&page_grids[new_page]);
             page_w[new_page] = init_dim;
             page_h[new_page] = init_dim;
 
-            placed = scan_region(&page_grids[new_page], &page_qtrees[new_page], rot_sg, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th,
+            placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th,
                                  &best_tx, &best_ty, &best_rot);
             if (!placed) {
                 /* New page too small — grow it */
@@ -1481,10 +1514,12 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                     uint32_t old_tw = 0;
                     uint32_t old_th = 0;
                     tgrid_grow(&page_grids[new_page], max_tw, max_th, &old_tw, &old_th);
-                    qtree_grow(&page_qtrees[new_page], &page_grids[new_page]);
+                    coarse_grow(&page_coarse[new_page], &page_grids[new_page]);
+                    tgrid_free(&page_x4[new_page]);
+                    page_x4[new_page] = tgrid_downsample_x4(&page_grids[new_page]);
                     page_w[new_page] = page_grids[new_page].tw * ts;
                     page_h[new_page] = page_grids[new_page].th * ts;
-                    placed = scan_region(&page_grids[new_page], &page_qtrees[new_page], rot_sg, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th,
+                    placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th,
                                          &best_tx, &best_ty, &best_rot);
                 }
             }
@@ -1496,12 +1531,22 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
 
         NT_BUILD_ASSERT(placed && "tile_pack: failed to place sprite");
 
-        /* Stamp onto page grid and update quadtree */
+        {
+            double sprite_elapsed = nt_time_now() - sprite_start;
+            if (sprite_elapsed > 1.0) {
+                NT_LOG_INFO("  SLOW sprite #%u/%u: %.1fs (or=%llu test=%llu grid=%ux%u stw=%u sth=%u)", si, sprite_count, sprite_elapsed,
+                            (unsigned long long)(s_dbg_or_count - or_before), (unsigned long long)(s_dbg_test_count - test_before), page_grids[best_page].tw, page_grids[best_page].th, rot_sg[best_rot].tw,
+                            rot_sg[best_rot].th);
+            }
+        }
+
+        /* Stamp onto page grid and update coarse grid */
         tgrid_stamp(&page_grids[best_page], &rot_sg[best_rot], (int32_t)best_tx, (int32_t)best_ty, rot_ox[best_rot], rot_oy[best_rot]);
         {
             int32_t stamp_tx = (int32_t)best_tx + rot_ox[best_rot];
             int32_t stamp_ty = (int32_t)best_ty + rot_oy[best_rot];
-            qtree_update_after_stamp(&page_qtrees[best_page], &page_grids[best_page], stamp_tx, stamp_ty, rot_sg[best_rot].tw, rot_sg[best_rot].th);
+            coarse_update(&page_coarse[best_page], &page_grids[best_page], stamp_tx, stamp_ty, rot_sg[best_rot].tw, rot_sg[best_rot].th);
+            tgrid_x4_update(&page_x4[best_page], &page_grids[best_page], stamp_tx, stamp_ty, rot_sg[best_rot].tw, rot_sg[best_rot].th);
         }
 
         /* Track bounding box in pixels */
@@ -1539,6 +1584,9 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
         pl->rotation = best_rot;
 
         /* Free rotated grids (but not rot_sg[0] which is base_sg) */
+        for (uint32_t fr = 0; fr < rot_count; fr++) {
+            tgrid_free(&rot_sg_x4[fr]);
+        }
         if (allow_rotate) {
             tgrid_free(&rot_sg[1]);
             tgrid_free(&rot_sg[2]);
@@ -1569,7 +1617,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     /* Cleanup */
     for (uint32_t p = 0; p < page_count; p++) {
         tgrid_free(&page_grids[p]);
-        qtree_free(&page_qtrees[p]);
+        coarse_free(&page_coarse[p]);
+        tgrid_free(&page_x4[p]);
     }
     for (uint32_t i = 0; i < sprite_count; i++) {
         tgrid_free(&sprite_grids[i]);
@@ -2213,6 +2262,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     NtAtlasSpriteInput *sprites = state->sprites;
     const nt_atlas_opts_t *opts = &state->opts;
 
+    NT_LOG_INFO("  end_atlas: %u sprites, starting pipeline...", sprite_count);
     // #region Step 1: Extract alpha planes + alpha-trim all sprites (ATLAS-05)
     uint32_t *trim_x = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
     uint32_t *trim_y = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
@@ -2290,6 +2340,8 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     }
     // #endregion
 
+    NT_LOG_INFO("  prep: %u sprites (%u unique), starting geometry...", sprite_count, unique_count);
+    double geom_start = nt_time_now();
     // #region Step 3: Geometry (convex hull + simplification) (ATLAS-06, ATLAS-07)
     /* For each unique sprite, compute hull vertices */
     uint32_t *vertex_counts = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
@@ -2468,6 +2520,8 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
             NT_LOG_INFO("Atlas cache hit: %s (key %016llx)", state->name, (unsigned long long)state->cache_key);
         }
     }
+
+    NT_LOG_INFO("  geometry done in %.1fs", nt_time_now() - geom_start);
 
     if (!cache_hit) {
         // #region Step 4: Tile packing
