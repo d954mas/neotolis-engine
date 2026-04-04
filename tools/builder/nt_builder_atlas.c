@@ -1628,6 +1628,10 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     free(grid_oy);
     free(sorted);
 
+    double pack_elapsed = nt_time_now() - pack_start_time;
+    NT_LOG_INFO("  tile_pack done: %u placed on %u pages in %.1fs (or=%llu test=%llu yskip=%llu)", placement_count, page_count, pack_elapsed,
+                (unsigned long long)s_dbg_or_count, (unsigned long long)s_dbg_test_count, (unsigned long long)s_dbg_yskip_count);
+
     *out_page_count = page_count;
     return placement_count;
 }
@@ -2263,6 +2267,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     const nt_atlas_opts_t *opts = &state->opts;
 
     NT_LOG_INFO("  end_atlas: %u sprites, starting pipeline...", sprite_count);
+    double bench_pipeline_start = nt_time_now();
     // #region Step 1: Extract alpha planes + alpha-trim all sprites (ATLAS-05)
     uint32_t *trim_x = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
     uint32_t *trim_y = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
@@ -2277,11 +2282,13 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         NT_BUILD_ASSERT(has_pixels && "end_atlas: sprite is fully transparent");
     }
     // #endregion
+    double bench_alpha_trim = nt_time_now() - bench_pipeline_start;
 
     // #region Atlas cache key computation (D-13)
     state->cache_key = compute_atlas_cache_key(sprites, sprite_count, opts, state->has_compress, &state->compress);
     // #endregion
 
+    double bench_dedup_start = nt_time_now();
     // #region Step 2: Duplicate detection (ATLAS-12)
     DedupSortEntry *dedup_entries = (DedupSortEntry *)malloc(sprite_count * sizeof(DedupSortEntry));
     NT_BUILD_ASSERT(dedup_entries && "end_atlas: alloc failed");
@@ -2339,6 +2346,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         }
     }
     // #endregion
+    double bench_dedup = nt_time_now() - bench_dedup_start;
 
     NT_LOG_INFO("  prep: %u sprites (%u unique), starting geometry...", sprite_count, unique_count);
     double geom_start = nt_time_now();
@@ -2521,9 +2529,13 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         }
     }
 
-    NT_LOG_INFO("  geometry done in %.1fs", nt_time_now() - geom_start);
+    double bench_geometry = nt_time_now() - geom_start;
+    NT_LOG_INFO("  geometry done in %.1fs", bench_geometry);
 
+    double bench_tile_pack = 0.0;
+    double bench_compose = 0.0;
     if (!cache_hit) {
+        double bench_pack_start = nt_time_now();
         // #region Step 4: Tile packing
         // NOLINTNEXTLINE(clang-analyzer-optin.portability.UnixAPI)
         placements = (AtlasPlacement *)malloc(unique_count * sizeof(AtlasPlacement));
@@ -2560,8 +2572,10 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         free(u_trim_h);
         free((void *)u_hulls);
         free(u_hull_counts);
+        bench_tile_pack = nt_time_now() - bench_pack_start;
         // #endregion
 
+        double bench_compose_start = nt_time_now();
         // #region Step 5: Compose page RGBA + extrude + debug PNG (ATLAS-15, ATLAS-11, D-09)
         page_pixels = (uint8_t **)calloc(page_count, sizeof(uint8_t *));
         NT_BUILD_ASSERT(page_pixels && "end_atlas: alloc failed");
@@ -2637,9 +2651,11 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                 NT_LOG_INFO("Atlas cache stored: %s (key %016llx)", state->name, (unsigned long long)state->cache_key);
             }
         }
+        bench_compose = nt_time_now() - bench_compose_start;
     }
     // #endregion
 
+    double bench_serialize_start = nt_time_now();
     // #region Step 6: Compute atlas UVs and serialize metadata (REGION-01)
     /* Count total vertices */
     uint32_t total_vertex_count = 0;
@@ -2866,5 +2882,9 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     ctx->atlas_count++;
     // #endregion
 
+    double bench_serialize = nt_time_now() - bench_serialize_start;
+    double bench_total = nt_time_now() - bench_pipeline_start;
     NT_LOG_INFO("Atlas packed: %u sprites (%u unique), %u pages", sprite_count, unique_count, page_count);
+    NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f tile_pack=%.1f compose=%.1f serialize=%.1f total=%.1f",
+                bench_alpha_trim * 1000.0, bench_dedup * 1000.0, bench_geometry * 1000.0, bench_tile_pack * 1000.0, bench_compose * 1000.0, bench_serialize * 1000.0, bench_total * 1000.0);
 }
