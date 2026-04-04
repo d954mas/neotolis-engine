@@ -1003,34 +1003,69 @@ static uint64_t s_dbg_or_count;
 static uint64_t s_dbg_test_count;
 static uint64_t s_dbg_yskip_count;
 
+/* Pre-allocated buffers for scan_region, reused across calls to avoid per-call malloc/free. */
+typedef struct {
+    uint64_t *or_mask;       /* row_words uint64_t */
+    uint64_t *or_mask_x4;   /* x4 row_words uint64_t */
+    uint8_t *col_free;      /* coarse bw bytes */
+    uint32_t *run_from;     /* coarse bw uint32_t */
+    uint32_t or_mask_cap;   /* allocated words for or_mask */
+    uint32_t or_mask_x4_cap;/* allocated words for or_mask_x4 */
+    uint32_t coarse_cap;    /* allocated coarse bw */
+} ScanBuffers;
+
+static ScanBuffers scan_buffers_create(void) {
+    ScanBuffers b = {0};
+    return b;
+}
+
+static void scan_buffers_free(ScanBuffers *b) {
+    free(b->or_mask);
+    free(b->or_mask_x4);
+    free(b->col_free);
+    free(b->run_from);
+    *b = (ScanBuffers){0};
+}
+
+/* Ensure scan buffers are large enough for the given atlas/coarse dimensions. */
+static void scan_buffers_ensure(ScanBuffers *b, uint32_t row_words, uint32_t x4_row_words, uint32_t coarse_bw) {
+    if (row_words > b->or_mask_cap) {
+        free(b->or_mask);
+        b->or_mask = (uint64_t *)malloc((size_t)row_words * sizeof(uint64_t));
+        NT_BUILD_ASSERT(b->or_mask && "scan_buffers_ensure: alloc failed");
+        b->or_mask_cap = row_words;
+    }
+    if (x4_row_words > 0 && x4_row_words > b->or_mask_x4_cap) {
+        free(b->or_mask_x4);
+        b->or_mask_x4 = (uint64_t *)malloc((size_t)x4_row_words * sizeof(uint64_t));
+        NT_BUILD_ASSERT(b->or_mask_x4 && "scan_buffers_ensure: alloc failed");
+        b->or_mask_x4_cap = x4_row_words;
+    }
+    if (coarse_bw > b->coarse_cap) {
+        free(b->col_free);
+        free(b->run_from);
+        b->col_free = (uint8_t *)malloc(coarse_bw);
+        b->run_from = (uint32_t *)malloc(coarse_bw * sizeof(uint32_t));
+        NT_BUILD_ASSERT(b->col_free && b->run_from && "scan_buffers_ensure: alloc failed");
+        b->coarse_cap = coarse_bw;
+    }
+}
+
 /* Try to place a sprite (with given rotation variants) within [ty_min..ty_max) x [tx_min..tx_max).
  * Returns true if placed, with best position in out_tx/out_ty/out_rot.
  * Uses x4 LOD for cheap OR-mask, coarse grid for y-skip/x-skip, x1 OR-mask + tgrid_test as fallback. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileGrid *atlas_x4, const TileGrid *rot_sg, const TileGrid *rot_sg_x4, const int32_t *rot_ox, const int32_t *rot_oy,
-                        uint32_t rot_count, uint32_t tx_min, uint32_t ty_min, uint32_t tx_max, uint32_t ty_max, uint32_t *out_tx, uint32_t *out_ty, uint8_t *out_rot) {
+                        uint32_t rot_count, uint32_t tx_min, uint32_t ty_min, uint32_t tx_max, uint32_t ty_max, uint32_t *out_tx, uint32_t *out_ty, uint8_t *out_rot, ScanBuffers *bufs) {
     uint32_t best_tx = UINT32_MAX;
     uint32_t best_ty = UINT32_MAX;
     bool found = false;
 
-    uint64_t *or_mask = (uint64_t *)malloc((size_t)atlas->row_words * sizeof(uint64_t));
-    NT_BUILD_ASSERT(or_mask && "scan_region: alloc failed");
-
-    /* x4 OR-mask: computed on the downsampled grid (16× cheaper per ty) */
-    uint64_t *or_mask_x4 = NULL;
-    if (atlas_x4) {
-        or_mask_x4 = (uint64_t *)malloc((size_t)atlas_x4->row_words * sizeof(uint64_t));
-        NT_BUILD_ASSERT(or_mask_x4 && "scan_region: alloc x4 or_mask");
-    }
-
-    uint32_t max_bw = cg ? cg->bw : 0;
-    uint8_t *col_free = NULL;
-    uint32_t *run_from = NULL;
-    if (max_bw > 0) {
-        col_free = (uint8_t *)malloc(max_bw);
-        run_from = (uint32_t *)malloc(max_bw * sizeof(uint32_t));
-        NT_BUILD_ASSERT(col_free && run_from && "scan_region: alloc");
-    }
+    scan_buffers_ensure(bufs, atlas->row_words, atlas_x4 ? atlas_x4->row_words : 0, cg ? cg->bw : 0);
+    uint64_t *or_mask = bufs->or_mask;
+    uint64_t *or_mask_x4 = atlas_x4 ? bufs->or_mask_x4 : NULL;
+    uint8_t *col_free = bufs->col_free;
+    uint32_t *run_from = bufs->run_from;
 
     for (uint32_t r = 0; r < rot_count; r++) {
         uint32_t eff_ty_max = found ? (best_ty + 1) : ty_max;
@@ -1244,11 +1279,6 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
         }
     }
 
-    free(run_from);
-    free(col_free);
-    free(or_mask_x4);
-    free(or_mask);
-
     if (found) {
         *out_tx = best_tx;
         *out_ty = best_ty;
@@ -1374,6 +1404,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
 
     uint32_t margin_tiles = (margin + ts - 1) / ts;
     uint32_t placement_count = 0;
+    ScanBuffers scan_bufs = scan_buffers_create();
     NT_LOG_INFO("  tile_pack: %u sprites, grid %ux%u tiles (ts=%u), init=%upx", sprite_count, atlas_tw, atlas_th, ts, init_dim);
     double pack_start_time = nt_time_now();
     double last_log_time = pack_start_time;
@@ -1450,7 +1481,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             if (scan_th > page_grids[pi].th) {
                 scan_th = page_grids[pi].th;
             }
-            placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, scan_tw, scan_th, &best_tx, &best_ty, &best_rot);
+            placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, scan_tw, scan_th, &best_tx, &best_ty, &best_rot, &scan_bufs);
             if (placed) {
                 best_page = pi;
             }
@@ -1481,11 +1512,11 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                 }
 
                 /* Priority area: try old region first to fill gaps */
-                placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, old_tw, old_th, &best_tx, &best_ty, &best_rot);
+                placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, old_tw, old_th, &best_tx, &best_ty, &best_rot, &scan_bufs);
 
                 /* Then scan used extent */
                 if (!placed) {
-                    placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, g_scan_tw, g_scan_th, &best_tx, &best_ty, &best_rot);
+                    placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, g_scan_tw, g_scan_th, &best_tx, &best_ty, &best_rot, &scan_bufs);
                 }
 
                 if (placed) {
@@ -1507,7 +1538,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             page_h[new_page] = init_dim;
 
             placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th,
-                                 &best_tx, &best_ty, &best_rot);
+                                 &best_tx, &best_ty, &best_rot, &scan_bufs);
             if (!placed) {
                 /* New page too small — grow it */
                 while (!placed && (page_grids[new_page].tw < max_tw || page_grids[new_page].th < max_th)) {
@@ -1520,7 +1551,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                     page_w[new_page] = page_grids[new_page].tw * ts;
                     page_h[new_page] = page_grids[new_page].th * ts;
                     placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th,
-                                         &best_tx, &best_ty, &best_rot);
+                                         &best_tx, &best_ty, &best_rot, &scan_bufs);
                 }
             }
             if (placed) {
@@ -1615,6 +1646,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     // #endregion
 
     /* Cleanup */
+    scan_buffers_free(&scan_bufs);
     for (uint32_t p = 0; p < page_count; p++) {
         tgrid_free(&page_grids[p]);
         coarse_free(&page_coarse[p]);
@@ -2534,6 +2566,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
 
     double bench_tile_pack = 0.0;
     double bench_compose = 0.0;
+    double bench_debug_png = 0.0;
     if (!cache_hit) {
         double bench_pack_start = nt_time_now();
         // #region Step 4: Tile packing
@@ -2601,6 +2634,9 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
             extrude_edges(page_pixels[pl->page], page_w[pl->page], page_h[pl->page], inner_x, inner_y, blit_w, blit_h, extrude_val);
         }
 
+        bench_compose = nt_time_now() - bench_compose_start;
+
+        double bench_debug_png_start = nt_time_now();
         /* Debug PNG output (D-09, D-10) */
         if (opts->debug_png) {
             for (uint32_t p = 0; p < page_count; p++) {
@@ -2651,7 +2687,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                 NT_LOG_INFO("Atlas cache stored: %s (key %016llx)", state->name, (unsigned long long)state->cache_key);
             }
         }
-        bench_compose = nt_time_now() - bench_compose_start;
+        bench_debug_png = nt_time_now() - bench_debug_png_start;
     }
     // #endregion
 
@@ -2833,6 +2869,34 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     }
     // #endregion
 
+    /* Compute used bounding box per page from placements (pre-POT, actual content extent) */
+    uint32_t bench_used_area = 0;
+    for (uint32_t p = 0; p < page_count; p++) {
+        uint32_t max_x = 0;
+        uint32_t max_y = 0;
+        for (uint32_t pi = 0; pi < placement_count; pi++) {
+            if (placements[pi].page != p) {
+                continue;
+            }
+            uint32_t tw = placements[pi].trimmed_w;
+            uint32_t th = placements[pi].trimmed_h;
+            if (placements[pi].rotation == 1 || placements[pi].rotation == 3) {
+                uint32_t tmp = tw;
+                tw = th;
+                th = tmp;
+            }
+            uint32_t right = placements[pi].x + tw + (extrude_val * 2);
+            uint32_t bottom = placements[pi].y + th + (extrude_val * 2);
+            if (right > max_x) {
+                max_x = right;
+            }
+            if (bottom > max_y) {
+                max_y = bottom;
+            }
+        }
+        bench_used_area += max_x * max_y;
+    }
+
     // #region Step 10: Cleanup
     /* Free sprite RGBA pixels and names */
     for (uint32_t i = 0; i < sprite_count; i++) {
@@ -2884,7 +2948,9 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
 
     double bench_serialize = nt_time_now() - bench_serialize_start;
     double bench_total = nt_time_now() - bench_pipeline_start;
+
     NT_LOG_INFO("Atlas packed: %u sprites (%u unique), %u pages", sprite_count, unique_count, page_count);
-    NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f tile_pack=%.1f compose=%.1f serialize=%.1f total=%.1f",
-                bench_alpha_trim * 1000.0, bench_dedup * 1000.0, bench_geometry * 1000.0, bench_tile_pack * 1000.0, bench_compose * 1000.0, bench_serialize * 1000.0, bench_total * 1000.0);
+    NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f tile_pack=%.1f compose=%.1f debug_png=%.1f serialize=%.1f total=%.1f pages=%u used_area=%u or_ops=%llu test_ops=%llu",
+                bench_alpha_trim * 1000.0, bench_dedup * 1000.0, bench_geometry * 1000.0, bench_tile_pack * 1000.0, bench_compose * 1000.0, bench_debug_png * 1000.0, bench_serialize * 1000.0,
+                bench_total * 1000.0, page_count, bench_used_area, (unsigned long long)s_dbg_or_count, (unsigned long long)s_dbg_test_count);
 }
