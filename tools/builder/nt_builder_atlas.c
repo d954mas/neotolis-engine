@@ -1278,6 +1278,9 @@ typedef struct {
     uint64_t test_count;
     uint64_t yskip_count;
     uint64_t used_area;
+    uint64_t frontier_area;
+    uint64_t trim_area;
+    uint64_t poly_area;
     uint64_t page_scan_count;
     uint64_t page_prune_count;
     uint64_t page_existing_hit_count;
@@ -1288,6 +1291,48 @@ typedef struct {
     uint64_t grid_fallback_count;
     AtlasTraceConfig trace;
 } PackStats;
+
+static uint64_t polygon_area_pixels(const Point2D *poly, uint32_t count) {
+    if (count < 3) {
+        return 0;
+    }
+
+    int64_t twice_area = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t j = (i + 1 == count) ? 0 : i + 1;
+        twice_area += ((int64_t)poly[i].x * (int64_t)poly[j].y) - ((int64_t)poly[j].x * (int64_t)poly[i].y);
+    }
+    if (twice_area < 0) {
+        twice_area = -twice_area;
+    }
+
+    return ((uint64_t)twice_area + 1ULL) >> 1U;
+}
+
+static void pack_stats_measure_payload(PackStats *stats, const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count,
+                                       const nt_atlas_opts_t *opts) {
+    float dilate = (float)opts->extrude + ((float)opts->padding * 0.5F);
+
+    stats->trim_area = 0;
+    stats->poly_area = 0;
+
+    for (uint32_t i = 0; i < sprite_count; i++) {
+        stats->trim_area += (uint64_t)trim_w[i] * (uint64_t)trim_h[i];
+
+        if (!hull_verts[i] || hull_counts[i] == 0) {
+            continue;
+        }
+
+        Point2D inflated[32];
+        uint32_t inflated_count = hull_counts[i];
+        if (dilate > 0.0F) {
+            inflated_count = polygon_inflate(hull_verts[i], hull_counts[i], dilate, inflated);
+        } else {
+            memcpy(inflated, hull_verts[i], hull_counts[i] * sizeof(Point2D));
+        }
+        stats->poly_area += polygon_area_pixels(inflated, inflated_count);
+    }
+}
 
 typedef struct {
     const AtlasTraceConfig *cfg;
@@ -1928,6 +1973,9 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     stats->test_count = 0;
     stats->yskip_count = 0;
     stats->used_area = 0;
+    stats->frontier_area = 0;
+    stats->trim_area = 0;
+    stats->poly_area = 0;
     stats->page_scan_count = 0;
     stats->page_prune_count = 0;
     stats->page_existing_hit_count = 0;
@@ -2231,6 +2279,13 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     for (uint32_t p = 0; p < page_count; p++) {
         uint32_t fw = page_max_x[p] + margin;
         uint32_t fh = page_max_y[p] + margin;
+        if (fw > max_size) {
+            fw = max_size;
+        }
+        if (fh > max_size) {
+            fh = max_size;
+        }
+        stats->frontier_area += (uint64_t)fw * (uint64_t)fh;
         if (pot) {
             fw = next_pot(fw);
             fh = next_pot(fh);
@@ -3163,6 +3218,7 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
     } else {
         p->placement_count = tile_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats);
     }
+    pack_stats_measure_payload(&p->stats, u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts);
 
     /* Fill trim offsets and remap sprite_index back to original */
     for (uint32_t i = 0; i < p->placement_count; i++) {
@@ -3548,12 +3604,17 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     for (uint32_t i = 0; i < p.page_count; i++) {
         p.stats.used_area += (uint64_t)p.page_w[i] * (uint64_t)p.page_h[i];
     }
+    uint64_t pot_waste_area = (p.stats.used_area > p.stats.frontier_area) ? (p.stats.used_area - p.stats.frontier_area) : 0;
+    double poly_frontier_fill = (p.stats.frontier_area > 0) ? ((double)p.stats.poly_area / (double)p.stats.frontier_area) : 0.0;
+    double poly_texture_fill = (p.stats.used_area > 0) ? ((double)p.stats.poly_area / (double)p.stats.used_area) : 0.0;
     NT_LOG_INFO("Atlas packed: %u sprites (%u unique), %u pages", p.sprite_count, p.unique_count, p.page_count);
-    NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f tile_pack=%.1f compose=%.1f debug_png=%.1f serialize=%.1f total=%.1f pages=%u used_area=%llu or_ops=%llu test_ops=%llu "
-                "page_scans=%llu page_prunes=%llu page_existing=%llu page_backfills=%llu page_new=%llu relevant=%llu candidates=%llu grid_fallbacks=%llu",
+    NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f tile_pack=%.1f compose=%.1f debug_png=%.1f serialize=%.1f total=%.1f pages=%u used_area=%llu frontier_area=%llu trim_area=%llu "
+                "poly_area=%llu pot_waste=%llu poly_frontier_fill=%.4f poly_texture_fill=%.4f or_ops=%llu test_ops=%llu page_scans=%llu page_prunes=%llu page_existing=%llu page_backfills=%llu "
+                "page_new=%llu relevant=%llu candidates=%llu grid_fallbacks=%llu",
                 bench_alpha_trim * 1000.0, bench_dedup * 1000.0, bench_geometry * 1000.0, bench_tile_pack * 1000.0, bench_compose * 1000.0, bench_debug_png * 1000.0, bench_serialize * 1000.0,
-                bench_total * 1000.0, p.page_count, (unsigned long long)p.stats.used_area, (unsigned long long)p.stats.or_count, (unsigned long long)p.stats.test_count,
-                (unsigned long long)p.stats.page_scan_count, (unsigned long long)p.stats.page_prune_count, (unsigned long long)p.stats.page_existing_hit_count,
+                bench_total * 1000.0, p.page_count, (unsigned long long)p.stats.used_area, (unsigned long long)p.stats.frontier_area, (unsigned long long)p.stats.trim_area,
+                (unsigned long long)p.stats.poly_area, (unsigned long long)pot_waste_area, poly_frontier_fill, poly_texture_fill, (unsigned long long)p.stats.or_count,
+                (unsigned long long)p.stats.test_count, (unsigned long long)p.stats.page_scan_count, (unsigned long long)p.stats.page_prune_count, (unsigned long long)p.stats.page_existing_hit_count,
                 (unsigned long long)p.stats.page_backfill_count, (unsigned long long)p.stats.page_new_count, (unsigned long long)p.stats.relevant_count, (unsigned long long)p.stats.candidate_count,
                 (unsigned long long)p.stats.grid_fallback_count);
 

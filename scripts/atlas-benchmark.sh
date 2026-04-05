@@ -94,6 +94,12 @@ SERIALIZE=$(extract_val "$BENCH_LINE" "serialize")
 TOTAL=$(extract_val "$BENCH_LINE" "total")
 PAGES=$(extract_val "$BENCH_LINE" "pages")
 USED_AREA=$(extract_val "$BENCH_LINE" "used_area")
+FRONTIER_AREA=$(extract_val "$BENCH_LINE" "frontier_area")
+TRIM_AREA=$(extract_val "$BENCH_LINE" "trim_area")
+POLY_AREA=$(extract_val "$BENCH_LINE" "poly_area")
+POT_WASTE=$(extract_val "$BENCH_LINE" "pot_waste")
+POLY_FRONTIER_FILL=$(extract_val "$BENCH_LINE" "poly_frontier_fill")
+POLY_TEXTURE_FILL=$(extract_val "$BENCH_LINE" "poly_texture_fill")
 OR_OPS=$(extract_val "$BENCH_LINE" "or_ops")
 TEST_OPS=$(extract_val "$BENCH_LINE" "test_ops")
 PAGE_SCANS=$(extract_val "$BENCH_LINE" "page_scans")
@@ -106,6 +112,12 @@ CANDIDATES=$(extract_val "$BENCH_LINE" "candidates")
 GRID_FALLBACKS=$(extract_val "$BENCH_LINE" "grid_fallbacks")
 
 USED_AREA=${USED_AREA:-0}
+FRONTIER_AREA=${FRONTIER_AREA:-0}
+TRIM_AREA=${TRIM_AREA:-0}
+POLY_AREA=${POLY_AREA:-0}
+POT_WASTE=${POT_WASTE:-0}
+POLY_FRONTIER_FILL=${POLY_FRONTIER_FILL:-0}
+POLY_TEXTURE_FILL=${POLY_TEXTURE_FILL:-0}
 OR_OPS=${OR_OPS:-0}
 TEST_OPS=${TEST_OPS:-0}
 PAGE_SCANS=${PAGE_SCANS:-0}
@@ -124,7 +136,9 @@ UNIQUE=$(echo "$PACKED_LINE" | sed 's/.*(\([0-9]*\) unique).*/\1/')
 echo ""
 echo "=== Benchmark Results ==="
 echo "Mode: ${MODE}, Sprites: ${SPRITES} (${UNIQUE} unique), Pages: ${PAGES}"
-echo "Used area: ${USED_AREA}px, OR ops: ${OR_OPS}, Test ops: ${TEST_OPS}"
+echo "Area: alloc=${USED_AREA}px, frontier=${FRONTIER_AREA}px, trim=${TRIM_AREA}px, poly=${POLY_AREA}px, pot_waste=${POT_WASTE}px"
+echo "Fill: poly/frontier=${POLY_FRONTIER_FILL}, poly/alloc=${POLY_TEXTURE_FILL}"
+echo "Ops: OR=${OR_OPS}, Test=${TEST_OPS}"
 echo "Pages: scans=${PAGE_SCANS}, prunes=${PAGE_PRUNES}, existing=${PAGE_EXISTING}, backfills=${PAGE_BACKFILLS}, new=${PAGE_NEW}"
 echo "Search: relevant=${RELEVANT}, candidates=${CANDIDATES}, grid_fallbacks=${GRID_FALLBACKS}"
 echo ""
@@ -170,10 +184,10 @@ fi
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 if [[ ! -f "$RESULTS_FILE" ]]; then
-    printf "timestamp\tcommit\tmode\tsprites\tunique\tpages\tused_area\tor_ops\ttest_ops\tpage_scans\tpage_prunes\tpage_existing\tpage_backfills\tpage_new\trelevant\tcandidates\tgrid_fallbacks\talpha_trim\tdedup\tgeometry\ttile_pack\tcompose\tdebug_png\tserialize\ttotal\n" > "$RESULTS_FILE"
+    printf "timestamp\tcommit\tmode\tsprites\tunique\tpages\tused_area\tfrontier_area\ttrim_area\tpoly_area\tpot_waste\tpoly_frontier_fill\tpoly_texture_fill\tor_ops\ttest_ops\tpage_scans\tpage_prunes\tpage_existing\tpage_backfills\tpage_new\trelevant\tcandidates\tgrid_fallbacks\talpha_trim\tdedup\tgeometry\ttile_pack\tcompose\tdebug_png\tserialize\ttotal\n" > "$RESULTS_FILE"
 fi
-printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-    "$TIMESTAMP" "$COMMIT" "$MODE" "$SPRITES" "$UNIQUE" "$PAGES" "$USED_AREA" "$OR_OPS" "$TEST_OPS" \
+printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+    "$TIMESTAMP" "$COMMIT" "$MODE" "$SPRITES" "$UNIQUE" "$PAGES" "$USED_AREA" "$FRONTIER_AREA" "$TRIM_AREA" "$POLY_AREA" "$POT_WASTE" "$POLY_FRONTIER_FILL" "$POLY_TEXTURE_FILL" "$OR_OPS" "$TEST_OPS" \
     "$PAGE_SCANS" "$PAGE_PRUNES" "$PAGE_EXISTING" "$PAGE_BACKFILLS" "$PAGE_NEW" "$RELEVANT" "$CANDIDATES" "$GRID_FALLBACKS" \
     "$ALPHA_TRIM" "$DEDUP" "$GEOMETRY" "$TILE_PACK" "$COMPOSE" "$DEBUG_PNG" "$SERIALIZE" "$TOTAL" \
     >> "$RESULTS_FILE"
