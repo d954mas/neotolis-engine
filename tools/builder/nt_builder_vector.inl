@@ -146,7 +146,7 @@ static bool vpack_point_in_poly(int32_t px, int32_t py, const Point2D *poly, uin
 }
 
 typedef struct {
-    Point2D verts[64];
+    Point2D verts[32];
     uint32_t count;
     int32_t min_x, min_y, max_x, max_y;
 } VPackNFP;
@@ -197,7 +197,7 @@ typedef struct {
 #define VPACK_NFP_CACHE_SIZE 32768U /* must be power of 2 */
 typedef struct {
     uint32_t key_a, key_b; /* shape hashes; both 0 = empty slot */
-    Point2D verts[64];
+    Point2D verts[32];
     uint32_t count;
 } VPackNFPCacheEntry;
 
