@@ -1165,7 +1165,9 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
             // #endregion
 
             // #region Incremental x1 OR-mask: slide window or full recompute
-            if (or_prev_ay0 != UINT32_MAX && ay0 == or_prev_ay0 + 1 && ay1 == or_prev_ay1 + 1 && or_steps_since_refresh < s_th) {
+            /* Refresh every s_th/4 steps to limit false rejections from monotone OR.
+             * Lower interval = better packing quality, higher interval = less OR work. */
+            if (or_prev_ay0 != UINT32_MAX && ay0 == or_prev_ay0 + 1 && ay1 == or_prev_ay1 + 1 && or_steps_since_refresh < ((s_th > 4) ? s_th / 4 : 1)) {
                 /* Slide by 1: OR in the new bottom row (conservative — only adds bits) */
                 uint32_t new_row = ay1 - 1;
                 if (new_row < atlas->th) {
@@ -2582,6 +2584,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
 
     double bench_tile_pack = 0.0;
     double bench_compose = 0.0;
+    double bench_debug_png = 0.0;
     if (!cache_hit) {
         double bench_pack_start = nt_time_now();
         // #region Step 4: Tile packing
@@ -2649,7 +2652,10 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
             extrude_edges(page_pixels[pl->page], page_w[pl->page], page_h[pl->page], inner_x, inner_y, blit_w, blit_h, extrude_val);
         }
 
+        bench_compose = nt_time_now() - bench_compose_start;
+
         /* Debug PNG output (D-09, D-10) */
+        double bench_debug_png_start = nt_time_now();
         if (opts->debug_png) {
             /* Use minimum compression for debug output — speed over file size */
             int saved_png_level = stbi_write_png_compression_level;
@@ -2695,6 +2701,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
             }
             stbi_write_png_compression_level = saved_png_level;
         }
+        bench_debug_png = nt_time_now() - bench_debug_png_start;
         // #endregion
 
         /* Write atlas cache on miss (D-13) */
@@ -2703,7 +2710,6 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                 NT_LOG_INFO("Atlas cache stored: %s (key %016llx)", state->name, (unsigned long long)state->cache_key);
             }
         }
-        bench_compose = nt_time_now() - bench_compose_start;
     }
     // #endregion
 
@@ -2937,6 +2943,26 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     double bench_serialize = nt_time_now() - bench_serialize_start;
     double bench_total = nt_time_now() - bench_pipeline_start;
     NT_LOG_INFO("Atlas packed: %u sprites (%u unique), %u pages", sprite_count, unique_count, page_count);
-    NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f tile_pack=%.1f compose=%.1f serialize=%.1f total=%.1f",
-                bench_alpha_trim * 1000.0, bench_dedup * 1000.0, bench_geometry * 1000.0, bench_tile_pack * 1000.0, bench_compose * 1000.0, bench_serialize * 1000.0, bench_total * 1000.0);
+    /* Compute tight used area from placement bounding box */
+    uint64_t bench_used_area = 0;
+    {
+        uint32_t max_right = 0;
+        uint32_t max_bottom = 0;
+        for (uint32_t pi = 0; pi < placement_count; pi++) {
+            uint32_t pl_w = (placements[pi].rotation == 1 || placements[pi].rotation == 3) ? placements[pi].trimmed_h : placements[pi].trimmed_w;
+            uint32_t pl_h = (placements[pi].rotation == 1 || placements[pi].rotation == 3) ? placements[pi].trimmed_w : placements[pi].trimmed_h;
+            uint32_t right = placements[pi].x + pl_w + (2 * extrude_val);
+            uint32_t bottom = placements[pi].y + pl_h + (2 * extrude_val);
+            if (right > max_right) {
+                max_right = right;
+            }
+            if (bottom > max_bottom) {
+                max_bottom = bottom;
+            }
+        }
+        bench_used_area = (uint64_t)max_right * max_bottom;
+    }
+    NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f tile_pack=%.1f compose=%.1f debug_png=%.1f serialize=%.1f total=%.1f pages=%u used_area=%llu or_ops=%llu test_ops=%llu",
+                bench_alpha_trim * 1000.0, bench_dedup * 1000.0, bench_geometry * 1000.0, bench_tile_pack * 1000.0, bench_compose * 1000.0, bench_debug_png * 1000.0, bench_serialize * 1000.0,
+                bench_total * 1000.0, page_count, (unsigned long long)bench_used_area, (unsigned long long)s_dbg_or_count, (unsigned long long)s_dbg_test_count);
 }
