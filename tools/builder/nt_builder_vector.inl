@@ -350,46 +350,36 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             }
 
             VPackNFP *nfp = &nfps[nfp_count];
-            // #region NFP cache lookup + offset
-            {
-                int32_t off_x = page->placed[i].x;
-                int32_t off_y = page->placed[i].y;
-                if (exp->use_nfp_cache) {
-                    uint32_t ka = page->placed[i].shape_hash;
-                    uint32_t kb = orient_neg_hashes[ori];
-                    uint32_t slot = (ka * 2654435761u ^ kb) & (VPACK_NFP_CACHE_SIZE - 1);
-                    VPackNFPCacheEntry *ce = &nfp_cache[slot];
-                    if (ce->key_a == ka && ce->key_b == kb && ce->count > 0) {
-                        stats->nfp_cache_hit_count++;
-                        nfp->count = ce->count;
-                        for (uint32_t v = 0; v < ce->count; v++) {
-                            nfp->verts[v].x = ce->verts[v].x + off_x;
-                            nfp->verts[v].y = ce->verts[v].y + off_y;
-                        }
-                    } else {
-                        if (ce->count > 0)
-                            stats->nfp_cache_collision_count++;
-                        stats->nfp_cache_miss_count++;
-                        nfp->count = vpack_minkowski(page->placed[i].poly, page->placed[i].count, orient_neg[ori], cur_count, nfp->verts);
-                        ce->key_a = ka;
-                        ce->key_b = kb;
-                        ce->count = nfp->count;
-                        memcpy(ce->verts, nfp->verts, nfp->count * sizeof(Point2D));
-                        for (uint32_t v = 0; v < nfp->count; v++) {
-                            nfp->verts[v].x += off_x;
-                            nfp->verts[v].y += off_y;
-                        }
-                    }
+            // #region NFP cache lookup
+            if (exp->use_nfp_cache) {
+                uint32_t ka = page->placed[i].shape_hash;
+                uint32_t kb = orient_neg_hashes[ori];
+                uint32_t slot = (ka * 2654435761u ^ kb) & (VPACK_NFP_CACHE_SIZE - 1);
+                VPackNFPCacheEntry *ce = &nfp_cache[slot];
+                if (ce->key_a == ka && ce->key_b == kb && ce->count > 0) {
+                    stats->nfp_cache_hit_count++;
+                    nfp->count = ce->count;
+                    memcpy(nfp->verts, ce->verts, ce->count * sizeof(Point2D));
                 } else {
-                    nfp->count = vpack_minkowski(page->placed[i].poly, page->placed[i].count, orient_neg[ori], cur_count, nfp->verts);
-                    for (uint32_t v = 0; v < nfp->count; v++) {
-                        nfp->verts[v].x += off_x;
-                        nfp->verts[v].y += off_y;
+                    if (ce->count > 0) {
+                        stats->nfp_cache_collision_count++;
                     }
+                    stats->nfp_cache_miss_count++;
+                    nfp->count = vpack_minkowski(page->placed[i].poly, page->placed[i].count, orient_neg[ori], cur_count, nfp->verts);
+                    ce->key_a = ka;
+                    ce->key_b = kb;
+                    ce->count = nfp->count;
+                    memcpy(ce->verts, nfp->verts, nfp->count * sizeof(Point2D));
                 }
+            } else {
+                nfp->count = vpack_minkowski(page->placed[i].poly, page->placed[i].count, orient_neg[ori], cur_count, nfp->verts);
             }
             // #endregion
             stats->or_count++;
+            for (uint32_t v = 0; v < nfp->count; v++) {
+                nfp->verts[v].x += page->placed[i].x;
+                nfp->verts[v].y += page->placed[i].y;
+            }
             vpack_calc_aabb(nfp->verts, nfp->count, &nfp->min_x, &nfp->min_y, &nfp->max_x, &nfp->max_y);
 
             if (need_candidates) {
