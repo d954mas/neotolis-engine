@@ -263,43 +263,17 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
 
         int32_t min_edge = (int32_t)margin > (int32_t)extrude ? (int32_t)margin : (int32_t)extrude;
 
-        /* Dedup identical orientations: hash polygon vertices, skip duplicates */
-        bool orient_skip[8] = {false};
-        if (orient_count > 1) {
-            uint64_t orient_keys[8];
-            for (uint32_t r = 0; r < orient_count; r++) {
-                int32_t mn_x, mn_y, mx_x, mx_y;
-                vpack_calc_aabb(orient_polys[r], orient_counts[r], &mn_x, &mn_y, &mx_x, &mx_y);
-                uint64_t key = ((uint64_t)(uint32_t)(mx_x - mn_x) << 32) | (uint64_t)(uint32_t)(mx_y - mn_y);
-                for (uint32_t v = 0; v < orient_counts[r]; v++) {
-                    key ^= ((uint64_t)(uint32_t)(orient_polys[r][v].x - mn_x) << 16) | (uint64_t)(uint32_t)(orient_polys[r][v].y - mn_y);
-                    key = (key << 7) | (key >> 57);
-                }
-                orient_keys[r] = key;
-            }
-            for (uint32_t r = 1; r < orient_count; r++) {
-                for (uint32_t p = 0; p < r; p++) {
-                    if (!orient_skip[p] && orient_keys[r] == orient_keys[p]) {
-                        orient_skip[r] = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        /* Try all non-duplicate orientations, pick best placement */
+        /* Try all orientations, pick best placement across all */
         bool found_any = false;
         int32_t best_x = 0;
         int32_t best_y = 0;
         uint8_t best_orient = 0;
         uint64_t best_score = UINT64_MAX;
-        uint32_t best_orient_idx = 0;
+        uint32_t best_orient_idx = 0; /* which orient_polys[] was used */
 
     try_place:;
 
         for (uint32_t ori = 0; ori < orient_count; ori++) {
-            if (orient_skip[ori])
-                continue;
             Point2D *cur_poly = orient_polys[ori];
             uint32_t cur_count = orient_counts[ori];
 
