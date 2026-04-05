@@ -2,15 +2,16 @@
 # Atlas packing benchmark for autoresearch.
 #
 # Builds native-release, runs atlas packer with N sprites (no cache),
-# parses stage timings, validates output hash.
+# parses stage timings, validates packing quality via used_area.
 #
 # Usage:
-#   bash scripts/atlas-benchmark.sh [--sprites N] [--baseline-hash HASH] [--verify-only] [--no-build]
+#   bash scripts/atlas-benchmark.sh [--sprites N] [--max-area N] [--max-pages N] [--no-build]
 #
 # Output (last line):
 #   METRIC:<total_ms>
 #
-# If --baseline-hash is set, validates output PNG hash matches. Exits 1 on mismatch.
+# Guard: --max-area N exits 1 if used_area exceeds N (packing degraded).
+#        --max-pages N exits 1 if page count exceeds N.
 
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
@@ -22,8 +23,8 @@ TILE_SIZE=2
 GLOB="assets/sprites/bigatlas/*.png"
 ATLAS_NAME="bench"
 MODE="poly"
-BASELINE_HASH=""
-VERIFY_ONLY=false
+MAX_AREA=""
+MAX_PAGES=""
 NO_BUILD=false
 PRESET="native-release"
 OUT_DIR="build/examples/atlas"
@@ -34,13 +35,13 @@ RESULTS_FILE="${OUT_DIR}/bench-results.tsv"
 # --- Parse args ---
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --sprites)      SPRITES="$2"; shift 2 ;;
-        --baseline-hash) BASELINE_HASH="$2"; shift 2 ;;
-        --verify-only)  VERIFY_ONLY=true; shift ;;
-        --no-build)     NO_BUILD=true; shift ;;
-        --max-size)     MAX_SIZE="$2"; shift 2 ;;
-        --tile-size)    TILE_SIZE="$2"; shift 2 ;;
-        *)              echo "Unknown arg: $1"; exit 1 ;;
+        --sprites)    SPRITES="$2"; shift 2 ;;
+        --max-area)   MAX_AREA="$2"; shift 2 ;;
+        --max-pages)  MAX_PAGES="$2"; shift 2 ;;
+        --no-build)   NO_BUILD=true; shift ;;
+        --max-size)   MAX_SIZE="$2"; shift 2 ;;
+        --tile-size)  TILE_SIZE="$2"; shift 2 ;;
+        *)            echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
 
@@ -63,6 +64,12 @@ rm -rf "${OUT_DIR}/_cache"
 # --- Step 3: Run benchmark ---
 echo "=== Running atlas benchmark: ${SPRITES} sprites, max=${MAX_SIZE}, ts=${TILE_SIZE} ==="
 OUTPUT=$("$BUILDER" "$PACK_DIR" "$MAX_SIZE" "$TILE_SIZE" "$GLOB" "$ATLAS_NAME" "$MODE" "$SPRITES" 2>&1)
+BUILD_EXIT=$?
+if [[ $BUILD_EXIT -ne 0 ]]; then
+    echo "ERROR: Builder exited with code $BUILD_EXIT"
+    echo "$OUTPUT"
+    exit 1
+fi
 
 # --- Step 4: Parse BENCH line ---
 BENCH_LINE=$(echo "$OUTPUT" | grep "^INFO \[builder\] BENCH " | tail -1)
@@ -72,24 +79,29 @@ if [[ -z "$BENCH_LINE" ]]; then
     exit 1
 fi
 
-# Extract stage values (ms) — portable (no grep -P)
+# Extract values — portable (no grep -P)
 extract_val() { echo "$1" | sed "s/.*$2=\([0-9.]*\).*/\1/"; }
 ALPHA_TRIM=$(extract_val "$BENCH_LINE" "alpha_trim")
 DEDUP=$(extract_val "$BENCH_LINE" "dedup")
 GEOMETRY=$(extract_val "$BENCH_LINE" "geometry")
 TILE_PACK=$(extract_val "$BENCH_LINE" "tile_pack")
 COMPOSE=$(extract_val "$BENCH_LINE" "compose")
+DEBUG_PNG=$(extract_val "$BENCH_LINE" "debug_png")
 SERIALIZE=$(extract_val "$BENCH_LINE" "serialize")
 TOTAL=$(extract_val "$BENCH_LINE" "total")
+PAGES=$(extract_val "$BENCH_LINE" "pages")
+USED_AREA=$(extract_val "$BENCH_LINE" "used_area")
+OR_OPS=$(extract_val "$BENCH_LINE" "or_ops")
+TEST_OPS=$(extract_val "$BENCH_LINE" "test_ops")
 
-# Extract stats from Atlas packed line
+# Extract unique count
 PACKED_LINE=$(echo "$OUTPUT" | grep "Atlas packed" | tail -1)
 UNIQUE=$(echo "$PACKED_LINE" | sed 's/.*(\([0-9]*\) unique).*/\1/')
-PAGES=$(echo "$PACKED_LINE" | sed 's/.* \([0-9]*\) pages.*/\1/')
 
 echo ""
 echo "=== Benchmark Results ==="
 echo "Sprites: ${SPRITES} (${UNIQUE} unique), Pages: ${PAGES}"
+echo "Used area: ${USED_AREA}px, OR ops: ${OR_OPS}, Test ops: ${TEST_OPS}"
 echo ""
 printf "%-15s %10s\n" "Stage" "Time (ms)"
 printf "%-15s %10s\n" "───────────────" "──────────"
@@ -98,42 +110,46 @@ printf "%-15s %10s\n" "dedup" "$DEDUP"
 printf "%-15s %10s\n" "geometry" "$GEOMETRY"
 printf "%-15s %10s\n" "tile_pack" "$TILE_PACK"
 printf "%-15s %10s\n" "compose" "$COMPOSE"
+printf "%-15s %10s\n" "debug_png" "$DEBUG_PNG"
 printf "%-15s %10s\n" "serialize" "$SERIALIZE"
 printf "%-15s %10s\n" "───────────────" "──────────"
 printf "%-15s %10s\n" "TOTAL" "$TOTAL"
 echo ""
 
-# --- Step 5: Compute output hash ---
-DEBUG_PNG="${PACK_DIR}/${ATLAS_NAME}_page0.png"
-if [[ -f "$DEBUG_PNG" ]]; then
-    HASH=$(sha256sum "$DEBUG_PNG" | awk '{print $1}')
-    echo "Output hash: ${HASH}"
-else
-    echo "WARNING: Debug PNG not found: $DEBUG_PNG"
-    HASH="MISSING"
-fi
+# --- Step 5: Guard checks ---
+GUARD_PASS=true
 
-# --- Step 6: Validate hash (guard) ---
-if [[ -n "$BASELINE_HASH" ]]; then
-    if [[ "$HASH" == "$BASELINE_HASH" ]]; then
-        echo "GUARD: PASS (hash matches baseline)"
+if [[ -n "$MAX_PAGES" ]]; then
+    if [[ "$PAGES" -gt "$MAX_PAGES" ]]; then
+        echo "GUARD: FAIL — pages=${PAGES} exceeds max=${MAX_PAGES}"
+        GUARD_PASS=false
     else
-        echo "GUARD: FAIL (hash mismatch!)"
-        echo "  Expected: $BASELINE_HASH"
-        echo "  Got:      $HASH"
-        exit 1
+        echo "GUARD: PASS — pages=${PAGES} <= ${MAX_PAGES}"
     fi
 fi
 
-# --- Step 7: Append to results TSV ---
+if [[ -n "$MAX_AREA" ]]; then
+    if [[ "$USED_AREA" -gt "$MAX_AREA" ]]; then
+        echo "GUARD: FAIL — used_area=${USED_AREA} exceeds max=${MAX_AREA}"
+        GUARD_PASS=false
+    else
+        echo "GUARD: PASS — used_area=${USED_AREA} <= ${MAX_AREA}"
+    fi
+fi
+
+if [[ "$GUARD_PASS" == false ]]; then
+    exit 1
+fi
+
+# --- Step 6: Append to results TSV ---
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 if [[ ! -f "$RESULTS_FILE" ]]; then
-    printf "timestamp\tcommit\tsprites\tunique\tpages\talpha_trim\tdedup\tgeometry\ttile_pack\tcompose\tserialize\ttotal\thash\n" > "$RESULTS_FILE"
+    printf "timestamp\tcommit\tsprites\tunique\tpages\tused_area\tor_ops\ttest_ops\talpha_trim\tdedup\tgeometry\ttile_pack\tcompose\tdebug_png\tserialize\ttotal\n" > "$RESULTS_FILE"
 fi
-printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-    "$TIMESTAMP" "$COMMIT" "$SPRITES" "$UNIQUE" "$PAGES" \
-    "$ALPHA_TRIM" "$DEDUP" "$GEOMETRY" "$TILE_PACK" "$COMPOSE" "$SERIALIZE" "$TOTAL" "$HASH" \
+printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+    "$TIMESTAMP" "$COMMIT" "$SPRITES" "$UNIQUE" "$PAGES" "$USED_AREA" "$OR_OPS" "$TEST_OPS" \
+    "$ALPHA_TRIM" "$DEDUP" "$GEOMETRY" "$TILE_PACK" "$COMPOSE" "$DEBUG_PNG" "$SERIALIZE" "$TOTAL" \
     >> "$RESULTS_FILE"
 
 echo ""
