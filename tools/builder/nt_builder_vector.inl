@@ -134,7 +134,7 @@ static bool vpack_intersect_axis_i(Point2D p1, Point2D p2, bool is_x_axis, int32
 }
 
 /* Strictly-inside test for CCW convex polygon (all cross products > 0). */
-static inline bool vpack_point_in_poly(int32_t px, int32_t py, const Point2D *poly, uint32_t count) {
+static bool vpack_point_in_poly(int32_t px, int32_t py, const Point2D *poly, uint32_t count) {
     if (count < 3)
         return false;
     for (uint32_t i = 0; i < count; i++) {
