@@ -621,7 +621,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
 
     VPackPlaced *placed = (VPackPlaced *)malloc(sprite_count * sizeof(VPackPlaced));
     VPackNFP *nfps = (VPackNFP *)malloc(sprite_count * sizeof(VPackNFP));
-    uint32_t cand_cap = 64 * 1024;
+    uint32_t cand_cap = 1024;
     VPackCand *cands = (VPackCand *)malloc(cand_cap * sizeof(VPackCand));
     NT_BUILD_ASSERT(placed && nfps && cands && "vector_pack: alloc failed");
 
