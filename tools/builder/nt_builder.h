@@ -211,6 +211,7 @@ typedef struct {
     bool power_of_two;                      /* round atlas dims to POT (default: true per D-11) */
     bool polygon_mode;                      /* true = convex hull, false = rect (default: true per D-11) */
     bool debug_png;                         /* write debug atlas page PNGs (default: false per D-11) */
+    bool vector_pack;                       /* use precise NFP vector packing (default: false) */
     uint8_t tile_size;                      /* packing grid cell size in pixels (default: 4, valid: 1-32) */
 } nt_atlas_opts_t;
 
@@ -229,6 +230,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .power_of_two = true,
         .polygon_mode = true,
         .debug_png = false,
+        .vector_pack = false,
         .tile_size = 4,
     };
 }

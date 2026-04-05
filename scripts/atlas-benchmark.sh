@@ -41,6 +41,9 @@ while [[ $# -gt 0 ]]; do
         --no-build)   NO_BUILD=true; shift ;;
         --max-size)   MAX_SIZE="$2"; shift 2 ;;
         --tile-size)  TILE_SIZE="$2"; shift 2 ;;
+        --glob)       GLOB="$2"; shift 2 ;;
+        --name)       ATLAS_NAME="$2"; shift 2 ;;
+        --mode)       MODE="$2"; shift 2 ;;
         *)            echo "Unknown arg: $1"; exit 1 ;;
     esac
 done

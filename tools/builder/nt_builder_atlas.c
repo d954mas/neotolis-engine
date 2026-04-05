@@ -1771,6 +1771,8 @@ static int area_sort_cmp(const void *a, const void *b) {
     return 0;
 }
 
+#include "nt_builder_vector.inl"
+
 /* --- Tile packer with tile-grid collision (ATLAS-02, ATLAS-03, ATLAS-04, ATLAS-18) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -3149,7 +3151,12 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         u_hull_counts[i] = p->vertex_counts[oi];
     }
 
-    p->placement_count = tile_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats);
+    if (p->opts->vector_pack) {
+        NT_LOG_INFO("  vector_pack: %u sprites (NFP mode)", p->unique_count);
+        p->placement_count = vector_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats);
+    } else {
+        p->placement_count = tile_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats);
+    }
 
     /* Fill trim offsets and remap sprite_index back to original */
     for (uint32_t i = 0; i < p->placement_count; i++) {
@@ -3368,8 +3375,14 @@ static void pipeline_serialize(AtlasPipeline *p) {
                 break;
             }
 
-            vtx->atlas_u = (uint16_t)(((atlas_px * 65535.0F) / (float)atlas_w) + 0.5F);
-            vtx->atlas_v = (uint16_t)(((atlas_py * 65535.0F) / (float)atlas_h) + 0.5F);
+            float tmp_u = ((atlas_px * 65535.0F) / (float)atlas_w) + 0.5F;
+            float tmp_v = ((atlas_py * 65535.0F) / (float)atlas_h) + 0.5F;
+            if (tmp_u < 0.0F) { tmp_u = 0.0F; }
+            if (tmp_v < 0.0F) { tmp_v = 0.0F; }
+            if (tmp_u > 65535.0F) { tmp_u = 65535.0F; }
+            if (tmp_v > 65535.0F) { tmp_v = 65535.0F; }
+            vtx->atlas_u = (uint16_t)tmp_u;
+            vtx->atlas_v = (uint16_t)tmp_v;
         }
     }
 

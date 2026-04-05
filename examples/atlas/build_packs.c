@@ -98,6 +98,9 @@ int main(int argc, char *argv[]) {
     if (argc >= 7 && argv[6][0] == 'r') {
         opts.polygon_mode = false;
     }
+    if (argc >= 7 && argv[6][0] == 'v') {
+        opts.vector_pack = true;
+    }
     uint32_t max_sprites = (argc >= 8) ? (uint32_t)atoi(argv[7]) : 0;
     (void)printf("atlas=%s max=%u ts=%u poly=%s max_sprites=%u\n", atlas_name, opts.max_size, opts.tile_size, opts.polygon_mode ? "yes" : "no", max_sprites);
 
