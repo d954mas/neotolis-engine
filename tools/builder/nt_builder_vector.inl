@@ -303,7 +303,6 @@ typedef struct {
 } VPackParResult;
 
 typedef struct {
-    /* Per-batch read-only state (set by main before signaling) */
     const VPackCand *cands;
     uint32_t cand_count;
     const VPackNFP *nfps;
@@ -316,6 +315,11 @@ typedef struct {
     int32_t poly_max_x, poly_max_y;
     uint32_t used_w, used_h, margin;
     bool power_of_two;
+} VPackScanCtx;
+
+typedef struct {
+    /* Per-batch read-only state (set by main before signaling) */
+    VPackScanCtx scan;
     /* Per-thread results (heap-allocated, sized to num_workers+1) */
     VPackParResult *results;
     /* Sync: mutex+cond for sleep-wake (no spin) */
@@ -337,35 +341,32 @@ static inline bool vpack_par_better(uint64_t score, uint32_t cand_index, uint64_
     return (score < best_score) || (score == best_score && cand_index < best_cand_index);
 }
 
-static void vpack_par_process_chunks(VPackParCtx *ctx, uint32_t tid, VPackParResult *out_result) {
+static void vpack_scan_candidate_range(const VPackScanCtx *scan, uint32_t start, uint32_t end, VPackParResult *out_result) {
     uint64_t local_best = out_result->score;
     uint32_t local_best_cand = out_result->cand_index;
     uint64_t local_tests = 0;
-    uint32_t total_threads = ctx->num_workers + 1;
-    uint32_t start = (uint32_t)(((uint64_t)ctx->cand_count * tid) / total_threads);
-    uint32_t end = (uint32_t)(((uint64_t)ctx->cand_count * (tid + 1)) / total_threads);
     for (uint32_t c = start; c < end; c++) {
-        int32_t cx = ctx->cands[c].x;
-        int32_t cy = ctx->cands[c].y;
-        if (cx < ctx->eff_min_x || cy < ctx->eff_min_y || cx > ctx->fast_max_x || cy > ctx->fast_max_y)
+        int32_t cx = scan->cands[c].x;
+        int32_t cy = scan->cands[c].y;
+        if (cx < scan->eff_min_x || cy < scan->eff_min_y || cx > scan->fast_max_x || cy > scan->fast_max_y)
             continue;
-        uint64_t score = vpack_score_candidate(cx, cy, ctx->poly_max_x, ctx->poly_max_y, ctx->used_w, ctx->used_h, ctx->margin, ctx->power_of_two);
-        if (!vpack_par_better(score, c, local_best, local_best_cand))
+        uint64_t score = vpack_score_candidate(cx, cy, scan->poly_max_x, scan->poly_max_y, scan->used_w, scan->used_h, scan->margin, scan->power_of_two);
+        if (score >= local_best)
             continue;
         bool safe = true;
-        if (ctx->use_grid && cx >= 0 && cy >= 0) {
+        if (scan->use_grid && cx >= 0 && cy >= 0) {
             int32_t gcx = cx / VPACK_GRID_CELL;
             int32_t gcy = cy / VPACK_GRID_CELL;
-            if (gcx < (int32_t)ctx->grid_dim && gcy < (int32_t)ctx->grid_dim) {
-                const uint64_t *cell = ctx->nfp_grid[gcy * (int32_t)ctx->grid_dim + gcx];
-                for (uint32_t w = 0; w < ctx->nfp_words && safe; w++) {
+            if (gcx < (int32_t)scan->grid_dim && gcy < (int32_t)scan->grid_dim) {
+                const uint64_t *cell = scan->nfp_grid[gcy * (int32_t)scan->grid_dim + gcx];
+                for (uint32_t w = 0; w < scan->nfp_words && safe; w++) {
                     uint64_t bits = cell[w];
                     while (bits) {
                         uint32_t bit_idx = (uint32_t)__builtin_ctzll(bits);
                         uint32_t i = w * 64 + bit_idx;
-                        if (cx >= ctx->nfps[i].min_x && cx <= ctx->nfps[i].max_x && cy >= ctx->nfps[i].min_y && cy <= ctx->nfps[i].max_y) {
+                        if (cx >= scan->nfps[i].min_x && cx <= scan->nfps[i].max_x && cy >= scan->nfps[i].min_y && cy <= scan->nfps[i].max_y) {
                             local_tests++;
-                            if (vpack_point_in_poly(cx, cy, ctx->nfps[i].verts, ctx->nfps[i].count)) {
+                            if (vpack_point_in_poly(cx, cy, scan->nfps[i].verts, scan->nfps[i].count)) {
                                 safe = false;
                                 break;
                             }
@@ -375,10 +376,10 @@ static void vpack_par_process_chunks(VPackParCtx *ctx, uint32_t tid, VPackParRes
                 }
             }
         } else {
-            for (uint32_t i = 0; i < ctx->nfp_count && safe; i++) {
-                if (cx >= ctx->nfps[i].min_x && cx <= ctx->nfps[i].max_x && cy >= ctx->nfps[i].min_y && cy <= ctx->nfps[i].max_y) {
+            for (uint32_t i = 0; i < scan->nfp_count && safe; i++) {
+                if (cx >= scan->nfps[i].min_x && cx <= scan->nfps[i].max_x && cy >= scan->nfps[i].min_y && cy <= scan->nfps[i].max_y) {
                     local_tests++;
-                    if (vpack_point_in_poly(cx, cy, ctx->nfps[i].verts, ctx->nfps[i].count)) {
+                    if (vpack_point_in_poly(cx, cy, scan->nfps[i].verts, scan->nfps[i].count)) {
                         safe = false;
                     }
                 }
@@ -392,6 +393,13 @@ static void vpack_par_process_chunks(VPackParCtx *ctx, uint32_t tid, VPackParRes
     out_result->score = local_best;
     out_result->cand_index = local_best_cand;
     out_result->test_count = local_tests;
+}
+
+static void vpack_par_process_chunks(VPackParCtx *ctx, uint32_t tid, VPackParResult *out_result) {
+    uint32_t total_threads = ctx->num_workers + 1;
+    uint32_t start = (uint32_t)(((uint64_t)ctx->scan.cand_count * tid) / total_threads);
+    uint32_t end = (uint32_t)(((uint64_t)ctx->scan.cand_count * (tid + 1)) / total_threads);
+    vpack_scan_candidate_range(&ctx->scan, start, end, out_result);
 }
 
 static int vpack_par_worker(void *arg) {
@@ -648,29 +656,32 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             eff_min_y = -poly_min_y;
         if ((int32_t)extrude > eff_min_y)
             eff_min_y = (int32_t)extrude;
+        VPackScanCtx scan = {
+            .cands = *cands,
+            .cand_count = cand_count,
+            .nfps = nfps,
+            .nfp_count = nfp_count,
+            .nfp_words = nfp_words,
+            .nfp_grid = (const uint64_t(*)[VPACK_GRID_WORDS])nfp_grid,
+            .grid_dim = grid_dim,
+            .use_grid = use_grid,
+            .eff_min_x = eff_min_x,
+            .eff_min_y = eff_min_y,
+            .fast_max_x = fast_max_x,
+            .fast_max_y = fast_max_y,
+            .poly_max_x = poly_max_x,
+            .poly_max_y = poly_max_y,
+            .used_w = page->used_w,
+            .used_h = page->used_h,
+            .margin = margin,
+            .power_of_two = power_of_two,
+        };
 
         // #region Candidate testing (single-threaded or parallel)
         if (par && par->num_workers > 0 && cand_count >= VPACK_PAR_MIN_CANDIDATES) {
             /* Parallel: dispatch to thread pool */
             mtx_lock(&par->mtx);
-            par->cands = *cands;
-            par->cand_count = cand_count;
-            par->nfps = nfps;
-            par->nfp_count = nfp_count;
-            par->nfp_words = nfp_words;
-            par->nfp_grid = (const uint64_t(*)[VPACK_GRID_WORDS])nfp_grid;
-            par->grid_dim = grid_dim;
-            par->use_grid = use_grid;
-            par->eff_min_x = eff_min_x;
-            par->eff_min_y = eff_min_y;
-            par->fast_max_x = fast_max_x;
-            par->fast_max_y = fast_max_y;
-            par->poly_max_x = poly_max_x;
-            par->poly_max_y = poly_max_y;
-            par->used_w = page->used_w;
-            par->used_h = page->used_h;
-            par->margin = margin;
-            par->power_of_two = power_of_two;
+            par->scan = scan;
             for (uint32_t t = 0; t <= par->num_workers; t++) {
                 par->results[t].score = *io_best_score;
                 par->results[t].cand_index = UINT32_MAX;
@@ -714,57 +725,17 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 found_on_page = true;
             }
         } else {
-            /* Single-threaded: original loop */
-            for (uint32_t c = 0; c < cand_count; c++) {
-                int32_t cx = (*cands)[c].x;
-                int32_t cy = (*cands)[c].y;
-                if (cx < eff_min_x || cy < eff_min_y || cx > fast_max_x || cy > fast_max_y)
-                    continue;
-                uint64_t score = vpack_score_candidate(cx, cy, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
-                if (score >= *io_best_score)
-                    continue;
-                bool safe = true;
-                if (use_grid && cx >= 0 && cy >= 0) {
-                    int32_t gcx = cx / VPACK_GRID_CELL;
-                    int32_t gcy = cy / VPACK_GRID_CELL;
-                    if (gcx < (int32_t)grid_dim && gcy < (int32_t)grid_dim) {
-                        uint64_t *cell = nfp_grid[gcy * (int32_t)grid_dim + gcx];
-                        for (uint32_t w = 0; w < nfp_words && safe; w++) {
-                            uint64_t bits = cell[w];
-                            while (bits) {
-                                uint32_t bit_idx = (uint32_t)__builtin_ctzll(bits);
-                                uint32_t i = w * 64 + bit_idx;
-                                if (cx >= nfps[i].min_x && cx <= nfps[i].max_x && cy >= nfps[i].min_y && cy <= nfps[i].max_y) {
-                                    stats->test_count++;
-                                    if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
-                                        safe = false;
-                                        break;
-                                    }
-                                }
-                                bits &= bits - 1;
-                            }
-                        }
-                    }
-                } else {
-                    for (uint32_t i = 0; i < nfp_count; i++) {
-                        if (cx >= nfps[i].min_x && cx <= nfps[i].max_x && cy >= nfps[i].min_y && cy <= nfps[i].max_y) {
-                            stats->test_count++;
-                            if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
-                                safe = false;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (safe) {
-                    *out_best_page = page_index;
-                    *out_best_x = cx;
-                    *out_best_y = cy;
-                    *out_best_orient = (uint8_t)ori;
-                    *out_best_orient_idx = ori;
-                    *io_best_score = score;
-                    found_on_page = true;
-                }
+            VPackParResult result = {.score = *io_best_score, .cand_index = UINT32_MAX, .test_count = 0};
+            vpack_scan_candidate_range(&scan, 0, cand_count, &result);
+            stats->test_count += result.test_count;
+            if (result.cand_index != UINT32_MAX) {
+                *io_best_score = result.score;
+                *out_best_page = page_index;
+                *out_best_x = (*cands)[result.cand_index].x;
+                *out_best_y = (*cands)[result.cand_index].y;
+                *out_best_orient = (uint8_t)ori;
+                *out_best_orient_idx = ori;
+                found_on_page = true;
             }
         }
         // #endregion
