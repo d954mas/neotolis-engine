@@ -280,7 +280,13 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
 
     try_place:;
 
-        for (uint32_t ori = 0; ori < orient_count; ori++) {
+        /* Optimization: try orientation 0 first. Only try remaining orientations
+         * if orient 0 failed to place OR its placement extends the page frontier
+         * (i.e., increases pages_used_w or pages_used_h). When orient 0 fits
+         * within the current frontier, it's very unlikely other orientations help. */
+        uint32_t effective_orient_count = orient_count;
+
+        for (uint32_t ori = 0; ori < effective_orient_count; ori++) {
             Point2D *cur_poly = orient_polys[ori];
             uint32_t cur_count = orient_counts[ori];
 
@@ -471,6 +477,16 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
                 }
             }
             // #endregion
+
+            /* After orientation 0: if placement fits within current page frontier,
+             * skip remaining orientations — they won't improve POT area. */
+            if (ori == 0 && found_any && orient_count > 1) {
+                int32_t bpx = best_x + poly_max_x;
+                int32_t bpy = best_y + poly_max_y;
+                if (bpx <= (int32_t)pages_used_w[current_page] && bpy <= (int32_t)pages_used_h[current_page]) {
+                    break; /* orient 0 fits within frontier — skip 1..7 */
+                }
+            }
 
         } /* end orientation loop */
 
