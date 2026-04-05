@@ -506,16 +506,18 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             }
         }
 
+        /* Pre-compute effective min bounds from all lower-bound checks */
+        int32_t eff_min_x = min_cand_x;
+        if (-poly_min_x > eff_min_x) eff_min_x = -poly_min_x;
+        if ((int32_t)extrude > eff_min_x) eff_min_x = (int32_t)extrude;
+        int32_t eff_min_y = min_cand_y;
+        if (-poly_min_y > eff_min_y) eff_min_y = -poly_min_y;
+        if ((int32_t)extrude > eff_min_y) eff_min_y = (int32_t)extrude;
+
         for (uint32_t c = 0; c < cand_count; c++) {
             int32_t cx = (*cands)[c].x;
             int32_t cy = (*cands)[c].y;
-            if (cx < min_cand_x || cy < min_cand_y)
-                continue;
-            if (cx + poly_min_x < 0 || cy + poly_min_y < 0)
-                continue;
-            if (cx < (int32_t)extrude || cy < (int32_t)extrude)
-                continue;
-            if (cx > fast_max_x || cy > fast_max_y)
+            if (cx < eff_min_x || cy < eff_min_y || cx > fast_max_x || cy > fast_max_y)
                 continue;
 
             uint64_t score = vpack_score_candidate(cx, cy, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
