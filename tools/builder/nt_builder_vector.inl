@@ -327,9 +327,16 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         int32_t max_cand_x = orient_max_cand[ori][0];
         int32_t max_cand_y = orient_max_cand[ori][1];
 
+        /* Pre-compute effective min bounds for candidate generation and testing */
+        int32_t eff_min_x = min_cand_x;
+        if (-poly_min_x > eff_min_x) eff_min_x = -poly_min_x;
+        if ((int32_t)extrude > eff_min_x) eff_min_x = (int32_t)extrude;
+        int32_t eff_min_y = min_cand_y;
+        if (-poly_min_y > eff_min_y) eff_min_y = -poly_min_y;
+        if ((int32_t)extrude > eff_min_y) eff_min_y = (int32_t)extrude;
         uint32_t cand_count = 0;
-        VPackBounds bounds = {min_cand_x, min_cand_y, max_cand_x, max_cand_y};
-        vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, min_cand_y, &bounds);
+        VPackBounds bounds = {eff_min_x, eff_min_y, max_cand_x, max_cand_y};
+        vpack_add_cand(cands, &cand_count, cand_cap, eff_min_x, eff_min_y, &bounds);
 
         uint32_t nfp_count = 0;
         for (uint32_t ri = 0; ri < relevant_count; ri++) {
@@ -505,14 +512,6 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                     fast_max_y = yb;
             }
         }
-
-        /* Pre-compute effective min bounds from all lower-bound checks */
-        int32_t eff_min_x = min_cand_x;
-        if (-poly_min_x > eff_min_x) eff_min_x = -poly_min_x;
-        if ((int32_t)extrude > eff_min_x) eff_min_x = (int32_t)extrude;
-        int32_t eff_min_y = min_cand_y;
-        if (-poly_min_y > eff_min_y) eff_min_y = -poly_min_y;
-        if ((int32_t)extrude > eff_min_y) eff_min_y = (int32_t)extrude;
 
         for (uint32_t c = 0; c < cand_count; c++) {
             int32_t cx = (*cands)[c].x;
