@@ -154,14 +154,7 @@ typedef struct {
 
 typedef struct {
     int32_t x, y;
-    uint64_t score;
 } VPackCand;
-
-static int vpack_cand_cmp(const void *a, const void *b) {
-    uint64_t sa = ((const VPackCand *)a)->score;
-    uint64_t sb = ((const VPackCand *)b)->score;
-    return (sa > sb) - (sa < sb);
-}
 
 /* Bounds for early candidate rejection (set per-sprite before candidate generation) */
 typedef struct {
@@ -490,39 +483,21 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         }
         bool use_grid = (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS);
 
-        // #region Pre-compute scores and sort candidates (best-first for earlier pruning)
-        {
-            uint32_t write = 0;
-            for (uint32_t c = 0; c < cand_count; c++) {
-                int32_t cx = (*cands)[c].x;
-                int32_t cy = (*cands)[c].y;
-                if (cx < min_cand_x || cy < min_cand_y)
-                    continue;
-                if (cx + poly_min_x < 0 || cy + poly_min_y < 0)
-                    continue;
-                if (cx < (int32_t)extrude || cy < (int32_t)extrude)
-                    continue;
-                if (cx > max_cand_x || cy > max_cand_y)
-                    continue;
-                uint64_t s = vpack_score_candidate(cx, cy, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
-                if (s >= *io_best_score)
-                    continue;
-                (*cands)[write].x = cx;
-                (*cands)[write].y = cy;
-                (*cands)[write].score = s;
-                write++;
-            }
-            cand_count = write;
-            qsort(*cands, cand_count, sizeof(VPackCand), vpack_cand_cmp);
-        }
-        // #endregion
-
         for (uint32_t c = 0; c < cand_count; c++) {
             int32_t cx = (*cands)[c].x;
             int32_t cy = (*cands)[c].y;
+            if (cx < min_cand_x || cy < min_cand_y)
+                continue;
+            if (cx + poly_min_x < 0 || cy + poly_min_y < 0)
+                continue;
+            if (cx < (int32_t)extrude || cy < (int32_t)extrude)
+                continue;
+            if (cx > max_cand_x || cy > max_cand_y)
+                continue;
 
-            if ((*cands)[c].score >= *io_best_score) {
-                break; /* sorted — all remaining are worse */
+            uint64_t score = vpack_score_candidate(cx, cy, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
+            if (score >= *io_best_score) {
+                continue;
             }
 
             bool safe = true;
@@ -564,7 +539,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 *out_best_y = cy;
                 *out_best_orient = (uint8_t)ori;
                 *out_best_orient_idx = ori;
-                *io_best_score = (*cands)[c].score;
+                *io_best_score = score;
                 found_on_page = true;
             }
         }
