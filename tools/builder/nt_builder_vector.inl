@@ -197,7 +197,7 @@ typedef struct {
 #define VPACK_NFP_CACHE_SIZE 32768U /* must be power of 2 */
 typedef struct {
     uint32_t key_a, key_b; /* shape hashes; both 0 = empty slot */
-    Point2D verts[32]; /* max nA+nB where each polygon ≤ 16 vertices */
+    Point2D verts[32];     /* max nA+nB where each polygon ≤ 16 vertices */
     uint32_t count;
 } VPackNFPCacheEntry;
 
@@ -294,14 +294,12 @@ static uint64_t vpack_page_lower_bound(const int32_t orient_aabb[8][4], const in
 }
 
 // #region Parallel candidate test thread pool
-#define VPACK_PAR_CHUNK 512
 #define VPACK_PAR_MIN_CANDIDATES 4096
 
 typedef struct {
     uint64_t score;
-    int32_t x, y;
+    uint32_t cand_index;
     uint64_t test_count;
-    bool found;
 } VPackParResult;
 
 typedef struct {
@@ -318,16 +316,13 @@ typedef struct {
     int32_t poly_max_x, poly_max_y;
     uint32_t used_w, used_h, margin;
     bool power_of_two;
-    _Atomic uint64_t shared_best;
-    _Atomic uint32_t next_chunk;
     /* Per-thread results (heap-allocated, sized to num_workers+1) */
     VPackParResult *results;
     /* Sync: mutex+cond for sleep-wake (no spin) */
     mtx_t mtx;
-    cnd_t cnd_work;   /* main signals: work available */
-    cnd_t cnd_done;   /* workers signal: batch complete */
+    cnd_t cnd_work; /* main signals: work available */
+    cnd_t cnd_done; /* workers signal: batch complete */
     uint32_t num_workers;
-    uint32_t workers_waiting;
     uint32_t workers_done;
     bool batch_ready;
     bool shutdown;
@@ -338,70 +333,65 @@ typedef struct {
     uint32_t tid;
 } VPackWorkerArg;
 
-static void vpack_par_process_chunks(VPackParCtx *ctx, uint32_t tid) {
-    uint64_t local_best = ctx->results[tid].score;
-    int32_t local_x = ctx->results[tid].x;
-    int32_t local_y = ctx->results[tid].y;
+static inline bool vpack_par_better(uint64_t score, uint32_t cand_index, uint64_t best_score, uint32_t best_cand_index) {
+    return (score < best_score) || (score == best_score && cand_index < best_cand_index);
+}
+
+static void vpack_par_process_chunks(VPackParCtx *ctx, uint32_t tid, VPackParResult *out_result) {
+    uint64_t local_best = out_result->score;
+    uint32_t local_best_cand = out_result->cand_index;
     uint64_t local_tests = 0;
-    for (;;) {
-        uint32_t start = atomic_fetch_add(&ctx->next_chunk, VPACK_PAR_CHUNK);
-        if (start >= ctx->cand_count)
-            break;
-        uint32_t end = start + VPACK_PAR_CHUNK;
-        if (end > ctx->cand_count)
-            end = ctx->cand_count;
-        for (uint32_t c = start; c < end; c++) {
-            int32_t cx = ctx->cands[c].x;
-            int32_t cy = ctx->cands[c].y;
-            if (cx < ctx->eff_min_x || cy < ctx->eff_min_y || cx > ctx->fast_max_x || cy > ctx->fast_max_y)
-                continue;
-            uint64_t score = vpack_score_candidate(cx, cy, ctx->poly_max_x, ctx->poly_max_y, ctx->used_w, ctx->used_h, ctx->margin, ctx->power_of_two);
-            if (score >= local_best)
-                continue;
-            bool safe = true;
-            if (ctx->use_grid && cx >= 0 && cy >= 0) {
-                int32_t gcx = cx / VPACK_GRID_CELL;
-                int32_t gcy = cy / VPACK_GRID_CELL;
-                if (gcx < (int32_t)ctx->grid_dim && gcy < (int32_t)ctx->grid_dim) {
-                    const uint64_t *cell = ctx->nfp_grid[gcy * (int32_t)ctx->grid_dim + gcx];
-                    for (uint32_t w = 0; w < ctx->nfp_words && safe; w++) {
-                        uint64_t bits = cell[w];
-                        while (bits) {
-                            uint32_t bit_idx = (uint32_t)__builtin_ctzll(bits);
-                            uint32_t i = w * 64 + bit_idx;
-                            if (cx >= ctx->nfps[i].min_x && cx <= ctx->nfps[i].max_x && cy >= ctx->nfps[i].min_y && cy <= ctx->nfps[i].max_y) {
-                                local_tests++;
-                                if (vpack_point_in_poly(cx, cy, ctx->nfps[i].verts, ctx->nfps[i].count)) {
-                                    safe = false;
-                                    break;
-                                }
+    uint32_t total_threads = ctx->num_workers + 1;
+    uint32_t start = (uint32_t)(((uint64_t)ctx->cand_count * tid) / total_threads);
+    uint32_t end = (uint32_t)(((uint64_t)ctx->cand_count * (tid + 1)) / total_threads);
+    for (uint32_t c = start; c < end; c++) {
+        int32_t cx = ctx->cands[c].x;
+        int32_t cy = ctx->cands[c].y;
+        if (cx < ctx->eff_min_x || cy < ctx->eff_min_y || cx > ctx->fast_max_x || cy > ctx->fast_max_y)
+            continue;
+        uint64_t score = vpack_score_candidate(cx, cy, ctx->poly_max_x, ctx->poly_max_y, ctx->used_w, ctx->used_h, ctx->margin, ctx->power_of_two);
+        if (!vpack_par_better(score, c, local_best, local_best_cand))
+            continue;
+        bool safe = true;
+        if (ctx->use_grid && cx >= 0 && cy >= 0) {
+            int32_t gcx = cx / VPACK_GRID_CELL;
+            int32_t gcy = cy / VPACK_GRID_CELL;
+            if (gcx < (int32_t)ctx->grid_dim && gcy < (int32_t)ctx->grid_dim) {
+                const uint64_t *cell = ctx->nfp_grid[gcy * (int32_t)ctx->grid_dim + gcx];
+                for (uint32_t w = 0; w < ctx->nfp_words && safe; w++) {
+                    uint64_t bits = cell[w];
+                    while (bits) {
+                        uint32_t bit_idx = (uint32_t)__builtin_ctzll(bits);
+                        uint32_t i = w * 64 + bit_idx;
+                        if (cx >= ctx->nfps[i].min_x && cx <= ctx->nfps[i].max_x && cy >= ctx->nfps[i].min_y && cy <= ctx->nfps[i].max_y) {
+                            local_tests++;
+                            if (vpack_point_in_poly(cx, cy, ctx->nfps[i].verts, ctx->nfps[i].count)) {
+                                safe = false;
+                                break;
                             }
-                            bits &= bits - 1;
                         }
-                    }
-                }
-            } else {
-                for (uint32_t i = 0; i < ctx->nfp_count && safe; i++) {
-                    if (cx >= ctx->nfps[i].min_x && cx <= ctx->nfps[i].max_x && cy >= ctx->nfps[i].min_y && cy <= ctx->nfps[i].max_y) {
-                        local_tests++;
-                        if (vpack_point_in_poly(cx, cy, ctx->nfps[i].verts, ctx->nfps[i].count)) {
-                            safe = false;
-                        }
+                        bits &= bits - 1;
                     }
                 }
             }
-            if (safe && (score < local_best || (score == local_best && (cy < local_y || (cy == local_y && cx < local_x))))) {
-                local_best = score;
-                local_x = cx;
-                local_y = cy;
-                ctx->results[tid].found = true;
+        } else {
+            for (uint32_t i = 0; i < ctx->nfp_count && safe; i++) {
+                if (cx >= ctx->nfps[i].min_x && cx <= ctx->nfps[i].max_x && cy >= ctx->nfps[i].min_y && cy <= ctx->nfps[i].max_y) {
+                    local_tests++;
+                    if (vpack_point_in_poly(cx, cy, ctx->nfps[i].verts, ctx->nfps[i].count)) {
+                        safe = false;
+                    }
+                }
             }
         }
+        if (safe) {
+            local_best = score;
+            local_best_cand = c;
+        }
     }
-    ctx->results[tid].score = local_best;
-    ctx->results[tid].x = local_x;
-    ctx->results[tid].y = local_y;
-    ctx->results[tid].test_count += local_tests;
+    out_result->score = local_best;
+    out_result->cand_index = local_best_cand;
+    out_result->test_count = local_tests;
 }
 
 static int vpack_par_worker(void *arg) {
@@ -410,19 +400,19 @@ static int vpack_par_worker(void *arg) {
     uint32_t tid = wa->tid;
     for (;;) {
         mtx_lock(&ctx->mtx);
-        ctx->workers_waiting++;
         while (!ctx->batch_ready && !ctx->shutdown)
             cnd_wait(&ctx->cnd_work, &ctx->mtx);
-        ctx->workers_waiting--;
         if (ctx->shutdown) {
             mtx_unlock(&ctx->mtx);
             break;
         }
         mtx_unlock(&ctx->mtx);
 
-        vpack_par_process_chunks(ctx, tid);
+        VPackParResult result = ctx->results[tid];
+        vpack_par_process_chunks(ctx, tid, &result);
 
         mtx_lock(&ctx->mtx);
+        ctx->results[tid] = result;
         ctx->workers_done++;
         if (ctx->workers_done == ctx->num_workers) {
             ctx->batch_ready = false;
@@ -439,9 +429,9 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                            const int32_t orient_max_cand[8][2], uint32_t orient_count, int32_t worst_poly_min_x, int32_t worst_poly_min_y, int32_t worst_poly_max_x, int32_t worst_poly_max_y,
                            int32_t global_min_cand_x, int32_t global_min_cand_y, int32_t global_max_cand_x, int32_t global_max_cand_y, uint32_t extrude, uint32_t margin, bool power_of_two,
                            VPackNFP *nfps, uint64_t (*nfp_grid)[VPACK_GRID_WORDS], VPackCand **cands, uint32_t *cand_cap, uint32_t *relevant_buf, VPackNFPCacheEntry *nfp_cache,
-                           const uint32_t orient_neg_hashes[8], const VPackExperimentConfig *exp, PackStats *stats, uint64_t *io_best_score, uint32_t page_index,
-                           uint32_t grid_dim, uint64_t *dirty_bits_buf, VPackParCtx *par,
-                           uint32_t *out_best_page, int32_t *out_best_x, int32_t *out_best_y, uint8_t *out_best_orient, uint32_t *out_best_orient_idx) {
+                           const uint32_t orient_neg_hashes[8], const VPackExperimentConfig *exp, PackStats *stats, uint64_t *io_best_score, uint32_t page_index, uint32_t grid_dim,
+                           uint64_t *dirty_bits_buf, uint32_t *dirty_cells_buf, VPackParCtx *par, uint32_t *out_best_page, int32_t *out_best_x, int32_t *out_best_y, uint8_t *out_best_orient,
+                           uint32_t *out_best_orient_idx) {
     uint32_t relevant_count = 0;
     for (uint32_t i = 0; i < page->count; i++) {
         int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - worst_poly_max_x;
@@ -550,8 +540,8 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         stats->candidate_count += cand_count;
 
         uint32_t nfp_words = (nfp_count + 63) / 64;
-        uint32_t dirty_cells[4096];
-        uint32_t dirty_count = 0;
+        size_t dirty_cell_cap = (size_t)grid_dim * grid_dim;
+        size_t dirty_count = 0;
         if (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS) {
             if (exp->use_dirty_bits) {
                 size_t dirty_words = ((size_t)grid_dim * grid_dim + 63) / 64;
@@ -578,8 +568,8 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                             uint64_t db = (uint64_t)1 << (ci % 64);
                             if (!(dirty_bits_buf[dw] & db)) {
                                 dirty_bits_buf[dw] |= db;
-                                if (dirty_count < 4096)
-                                    dirty_cells[dirty_count++] = ci;
+                                NT_BUILD_ASSERT(dirty_count < dirty_cell_cap && "vector_pack: dirty cell overflow");
+                                dirty_cells_buf[dirty_count++] = ci;
                             }
                             nfp_grid[ci][word] |= bit;
                         }
@@ -605,15 +595,15 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                         for (int32_t gx = gx0; gx <= gx1; gx++) {
                             uint32_t ci = (uint32_t)gy * grid_dim + (uint32_t)gx;
                             if (nfp_grid[ci][0] == 0 && word == 0) {
-                                if (dirty_count < 4096)
-                                    dirty_cells[dirty_count++] = ci;
+                                NT_BUILD_ASSERT(dirty_count < dirty_cell_cap && "vector_pack: dirty cell overflow");
+                                dirty_cells_buf[dirty_count++] = ci;
                             }
                             nfp_grid[ci][word] |= bit;
                         }
                     }
                 }
             }
-            stats->dirty_cell_count += dirty_count;
+            stats->dirty_cell_count += (uint64_t)dirty_count;
         } else if (nfp_count > 0) {
             stats->grid_fallback_count++;
         }
@@ -649,21 +639,26 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
 
         /* Pre-compute effective min bounds from all lower-bound checks */
         int32_t eff_min_x = min_cand_x;
-        if (-poly_min_x > eff_min_x) eff_min_x = -poly_min_x;
-        if ((int32_t)extrude > eff_min_x) eff_min_x = (int32_t)extrude;
+        if (-poly_min_x > eff_min_x)
+            eff_min_x = -poly_min_x;
+        if ((int32_t)extrude > eff_min_x)
+            eff_min_x = (int32_t)extrude;
         int32_t eff_min_y = min_cand_y;
-        if (-poly_min_y > eff_min_y) eff_min_y = -poly_min_y;
-        if ((int32_t)extrude > eff_min_y) eff_min_y = (int32_t)extrude;
+        if (-poly_min_y > eff_min_y)
+            eff_min_y = -poly_min_y;
+        if ((int32_t)extrude > eff_min_y)
+            eff_min_y = (int32_t)extrude;
 
         // #region Candidate testing (single-threaded or parallel)
         if (par && par->num_workers > 0 && cand_count >= VPACK_PAR_MIN_CANDIDATES) {
             /* Parallel: dispatch to thread pool */
+            mtx_lock(&par->mtx);
             par->cands = *cands;
             par->cand_count = cand_count;
             par->nfps = nfps;
             par->nfp_count = nfp_count;
             par->nfp_words = nfp_words;
-            par->nfp_grid = (const uint64_t (*)[VPACK_GRID_WORDS])nfp_grid;
+            par->nfp_grid = (const uint64_t(*)[VPACK_GRID_WORDS])nfp_grid;
             par->grid_dim = grid_dim;
             par->use_grid = use_grid;
             par->eff_min_x = eff_min_x;
@@ -676,25 +671,20 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             par->used_h = page->used_h;
             par->margin = margin;
             par->power_of_two = power_of_two;
-            atomic_store_explicit(&par->shared_best, *io_best_score, memory_order_relaxed);
-            atomic_store_explicit(&par->next_chunk, 0, memory_order_relaxed);
-            /* Init all thread results (including main = tid 0) */
             for (uint32_t t = 0; t <= par->num_workers; t++) {
                 par->results[t].score = *io_best_score;
-                par->results[t].x = 0;
-                par->results[t].y = 0;
+                par->results[t].cand_index = UINT32_MAX;
                 par->results[t].test_count = 0;
-                par->results[t].found = false;
             }
-            /* Signal workers */
-            mtx_lock(&par->mtx);
             par->workers_done = 0;
             par->batch_ready = true;
             cnd_broadcast(&par->cnd_work);
             mtx_unlock(&par->mtx);
 
             /* Main thread also processes chunks (tid=0) */
-            vpack_par_process_chunks(par, 0);
+            VPackParResult main_result = par->results[0];
+            vpack_par_process_chunks(par, 0, &main_result);
+            par->results[0] = main_result;
 
             /* Wait for all workers to finish this batch */
             mtx_lock(&par->mtx);
@@ -703,17 +693,25 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             mtx_unlock(&par->mtx);
 
             /* Reduce: find global best across all threads */
+            uint64_t reduce_score = *io_best_score;
+            uint32_t reduce_cand = UINT32_MAX;
             for (uint32_t t = 0; t <= par->num_workers; t++) {
                 stats->test_count += par->results[t].test_count;
-                if (par->results[t].found && par->results[t].score < *io_best_score) {
-                    *io_best_score = par->results[t].score;
-                    *out_best_page = page_index;
-                    *out_best_x = par->results[t].x;
-                    *out_best_y = par->results[t].y;
-                    *out_best_orient = (uint8_t)ori;
-                    *out_best_orient_idx = ori;
-                    found_on_page = true;
+                if (par->results[t].cand_index == UINT32_MAX)
+                    continue;
+                if (vpack_par_better(par->results[t].score, par->results[t].cand_index, reduce_score, reduce_cand)) {
+                    reduce_score = par->results[t].score;
+                    reduce_cand = par->results[t].cand_index;
                 }
+            }
+            if (reduce_cand != UINT32_MAX) {
+                *io_best_score = reduce_score;
+                *out_best_page = page_index;
+                *out_best_x = (*cands)[reduce_cand].x;
+                *out_best_y = (*cands)[reduce_cand].y;
+                *out_best_orient = (uint8_t)ori;
+                *out_best_orient_idx = ori;
+                found_on_page = true;
             }
         } else {
             /* Single-threaded: original loop */
@@ -771,11 +769,11 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         }
         // #endregion
 
-        for (uint32_t d = 0; d < dirty_count; d++) {
+        for (size_t d = 0; d < dirty_count; d++) {
             if (exp->use_dirty_bits) {
-                memset(nfp_grid[dirty_cells[d]], 0, sizeof(uint64_t[VPACK_GRID_WORDS]));
+                memset(nfp_grid[dirty_cells_buf[d]], 0, sizeof(uint64_t[VPACK_GRID_WORDS]));
             } else {
-                memset(nfp_grid[dirty_cells[d]], 0, (size_t)nfp_words * sizeof(uint64_t));
+                memset(nfp_grid[dirty_cells_buf[d]], 0, (size_t)nfp_words * sizeof(uint64_t));
             }
         }
 
@@ -869,9 +867,12 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     uint32_t *relevant_buf = (uint32_t *)malloc(sprite_count * sizeof(uint32_t));
     NT_BUILD_ASSERT(relevant_buf && "vector_pack: alloc failed");
 
-    size_t dirty_words = ((size_t)grid_dim * grid_dim + 63) / 64;
+    size_t grid_cell_count = (size_t)grid_dim * grid_dim;
+    size_t dirty_words = (grid_cell_count + 63) / 64;
     uint64_t *dirty_bits_buf = (uint64_t *)malloc(dirty_words * sizeof(uint64_t));
     NT_BUILD_ASSERT(dirty_bits_buf && "vector_pack: dirty_bits alloc failed");
+    uint32_t *dirty_cells_buf = (uint32_t *)malloc(grid_cell_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(dirty_cells_buf && "vector_pack: dirty_cells alloc failed");
 
     // #region Thread pool for parallel candidate testing
     VPackParCtx par_ctx;
@@ -889,8 +890,6 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
         mtx_init(&par_ctx.mtx, mtx_plain);
         cnd_init(&par_ctx.cnd_work);
         cnd_init(&par_ctx.cnd_done);
-        atomic_init(&par_ctx.shared_best, UINT64_MAX);
-        atomic_init(&par_ctx.next_chunk, 0);
         par_threads = (thrd_t *)malloc(num_workers * sizeof(thrd_t));
         par_args = (VPackWorkerArg *)malloc(num_workers * sizeof(VPackWorkerArg));
         NT_BUILD_ASSERT(par_threads && par_args && "vector_pack: thread alloc failed");
@@ -1029,7 +1028,8 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             stats->page_scan_count++;
             if (vpack_try_page(&pages[pi], orient_neg, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y, worst_poly_max_x,
                                worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, extrude, margin, opts->power_of_two, nfps, nfp_grid, &cands, &cand_cap,
-                               relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, pi, grid_dim, dirty_bits_buf, par, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx)) {
+                               relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, pi, grid_dim, dirty_bits_buf, dirty_cells_buf, par, &best_page, &best_x, &best_y, &best_orient,
+                               &best_orient_idx)) {
                 found_any = true;
             }
         }
@@ -1058,7 +1058,8 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             stats->page_scan_count++;
             found_any = vpack_try_page(&pages[new_page], orient_neg, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y, worst_poly_max_x,
                                        worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, extrude, margin, opts->power_of_two, nfps, nfp_grid, &cands,
-                                       &cand_cap, relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, new_page, grid_dim, dirty_bits_buf, par, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx);
+                                       &cand_cap, relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, new_page, grid_dim, dirty_bits_buf, dirty_cells_buf, par, &best_page, &best_x,
+                                       &best_y, &best_orient, &best_orient_idx);
             NT_BUILD_ASSERT(found_any && "vector_pack: empty page should accept placement");
         }
 
@@ -1184,6 +1185,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     free(nfp_grid);
     free(nfp_cache);
     free(relevant_buf);
+    free(dirty_cells_buf);
     free(dirty_bits_buf);
     /* Shutdown thread pool */
     if (num_workers > 0) {

@@ -139,6 +139,12 @@ static int dedup_sort_cmp(const void *a, const void *b) {
     if (ea->hash > eb->hash) {
         return 1;
     }
+    if (ea->index < eb->index) {
+        return -1;
+    }
+    if (ea->index > eb->index) {
+        return 1;
+    }
     return 0;
 }
 // #endregion
@@ -1854,11 +1860,17 @@ static int area_sort_cmp(const void *a, const void *b) {
     if (ea->area < eb->area) {
         return 1;
     }
+    if (ea->index < eb->index) {
+        return -1;
+    }
+    if (ea->index > eb->index) {
+        return 1;
+    }
     return 0;
 }
 
 #include "tinycthread.h"
-#include <stdatomic.h>
+/* nt_builder_vector.inl uses tinycthread declarations above. */
 #include "nt_builder_vector.inl"
 
 /* --- Tile packer with tile-grid collision (ATLAS-02, ATLAS-03, ATLAS-04, ATLAS-18) --- */

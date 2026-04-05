@@ -14,6 +14,7 @@
 #include "nt_builder.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef _WIN32
@@ -73,7 +74,17 @@ int main(int argc, char *argv[]) {
     if (argc < 5) { /* codegen only for default spineboy test */
         nt_builder_set_header_dir(ctx, HEADER_DIR);
     }
-    nt_builder_set_threads_auto(ctx);
+    const char *threads_env = getenv("NT_BUILDER_THREADS");
+    if (threads_env && threads_env[0] != '\0') {
+        uint32_t threads = (uint32_t)strtoul(threads_env, NULL, 10);
+        if (threads > 0) {
+            nt_builder_set_threads(ctx, threads);
+        } else {
+            nt_builder_set_threads_auto(ctx);
+        }
+    } else {
+        nt_builder_set_threads_auto(ctx);
+    }
     nt_builder_set_cache_dir(ctx, "build/examples/atlas/_cache");
     /* --- Mesh + shaders (reuse textured_quad assets) --- */
 
