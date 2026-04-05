@@ -352,7 +352,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             VPackBounds bounds = {min_cand_x, min_cand_y, max_cand_x, max_cand_y};
             vpack_add_cand(&cands, &cand_count, &cand_cap, min_cand_x, min_cand_y, &bounds);
 
-            // #region Build NFPs against relevant placed sprites
+            // #region Build NFPs against relevant placed sprites (with best-score pruning)
             uint32_t nfp_count = 0;
             for (uint32_t ri = 0; ri < relevant_count; ri++) {
                 uint32_t i = relevant[ri];
@@ -365,6 +365,36 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
                     continue;
                 }
 
+                /* Score pruning: if NFP's lowest-scoring vertex can't beat best_score,
+                 * still compute NFP for collision but skip candidate generation. */
+                bool need_candidates = true;
+                if (found_any) {
+                    /* Best possible candidate from this NFP: vertex at (est_min_x, est_min_y) */
+                    uint32_t opt_nw = (uint32_t)(est_min_x > 0 ? est_min_x : 0) + poly_max_x;
+                    uint32_t opt_nh = (uint32_t)(est_min_y > 0 ? est_min_y : 0) + poly_max_y;
+                    uint32_t cw = pages_used_w[current_page];
+                    uint32_t ch = pages_used_h[current_page];
+                    if (opt_nw < cw)
+                        opt_nw = cw;
+                    if (opt_nh < ch)
+                        opt_nh = ch;
+                    opt_nw += margin;
+                    opt_nh += margin;
+                    if (opts->power_of_two) {
+                        uint32_t pw = 1;
+                        while (pw < opt_nw)
+                            pw <<= 1;
+                        uint32_t ph = 1;
+                        while (ph < opt_nh)
+                            ph <<= 1;
+                        opt_nw = pw;
+                        opt_nh = ph;
+                    }
+                    uint64_t opt_score = ((uint64_t)opt_nw * opt_nh) << 16;
+                    if (opt_score > best_score)
+                        need_candidates = false;
+                }
+
                 VPackNFP *nfp = &nfps[nfp_count];
                 nfp->count = vpack_minkowski(placed[i].poly, placed[i].count, orient_neg[ori], cur_count, nfp->verts);
                 stats->or_count++;
@@ -375,18 +405,20 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
                 }
                 vpack_calc_aabb(nfp->verts, nfp->count, &nfp->min_x, &nfp->min_y, &nfp->max_x, &nfp->max_y);
 
-                for (uint32_t v = 0; v < nfp->count; v++) {
-                    vpack_add_cand(&cands, &cand_count, &cand_cap, nfp->verts[v].x, nfp->verts[v].y, &bounds);
-                }
-
-                for (uint32_t e = 0; e < nfp->count; e++) {
-                    uint32_t en = (e + 1 == nfp->count) ? 0 : e + 1;
-                    float out_val;
-                    if (vpack_intersect_axis(nfp->verts[e], nfp->verts[en], true, (float)min_cand_x, &out_val)) {
-                        vpack_add_float_cand(&cands, &cand_count, &cand_cap, (float)min_cand_x, out_val, &bounds);
+                if (need_candidates) {
+                    for (uint32_t v = 0; v < nfp->count; v++) {
+                        vpack_add_cand(&cands, &cand_count, &cand_cap, nfp->verts[v].x, nfp->verts[v].y, &bounds);
                     }
-                    if (vpack_intersect_axis(nfp->verts[e], nfp->verts[en], false, (float)min_cand_y, &out_val)) {
-                        vpack_add_float_cand(&cands, &cand_count, &cand_cap, out_val, (float)min_cand_y, &bounds);
+
+                    for (uint32_t e = 0; e < nfp->count; e++) {
+                        uint32_t en = (e + 1 == nfp->count) ? 0 : e + 1;
+                        float out_val;
+                        if (vpack_intersect_axis(nfp->verts[e], nfp->verts[en], true, (float)min_cand_x, &out_val)) {
+                            vpack_add_float_cand(&cands, &cand_count, &cand_cap, (float)min_cand_x, out_val, &bounds);
+                        }
+                        if (vpack_intersect_axis(nfp->verts[e], nfp->verts[en], false, (float)min_cand_y, &out_val)) {
+                            vpack_add_float_cand(&cands, &cand_count, &cand_cap, out_val, (float)min_cand_y, &bounds);
+                        }
                     }
                 }
                 nfp_count++;
