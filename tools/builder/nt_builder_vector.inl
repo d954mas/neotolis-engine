@@ -262,16 +262,6 @@ static void vpack_calc_aabb(const Point2D *poly, uint32_t count, int32_t *min_x,
     }
 }
 
-static inline uint32_t vpack_next_pot(uint32_t v) {
-    v--;
-    v |= v >> 1;
-    v |= v >> 2;
-    v |= v >> 4;
-    v |= v >> 8;
-    v |= v >> 16;
-    return v + 1;
-}
-
 static uint64_t vpack_score_candidate(int32_t cx, int32_t cy, int32_t poly_max_x, int32_t poly_max_y, uint32_t cur_w, uint32_t cur_h, uint32_t margin, bool power_of_two) {
     uint32_t nw = (uint32_t)cx + (uint32_t)poly_max_x;
     uint32_t nh = (uint32_t)cy + (uint32_t)poly_max_y;
@@ -282,8 +272,14 @@ static uint64_t vpack_score_candidate(int32_t cx, int32_t cy, int32_t poly_max_x
     nw += margin;
     nh += margin;
     if (power_of_two) {
-        nw = vpack_next_pot(nw);
-        nh = vpack_next_pot(nh);
+        uint32_t pw = 1;
+        while (pw < nw)
+            pw <<= 1;
+        uint32_t ph = 1;
+        while (ph < nh)
+            ph <<= 1;
+        nw = pw;
+        nh = ph;
     }
     return ((uint64_t)nw * nh << 16) | ((uint64_t)(cx + cy) & 0xFFFF);
 }
