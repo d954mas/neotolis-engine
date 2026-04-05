@@ -614,7 +614,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     NT_BUILD_ASSERT(sorted && "vector_pack: alloc failed");
     for (uint32_t i = 0; i < sprite_count; i++) {
         sorted[i].index = i;
-        sorted[i].area = trim_w[i] * trim_h[i];
+        sorted[i].area = trim_w[i] > trim_h[i] ? trim_w[i] : trim_h[i];
     }
     qsort(sorted, sprite_count, sizeof(AreaSortEntry), area_sort_cmp);
     // #endregion
