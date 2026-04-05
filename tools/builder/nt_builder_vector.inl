@@ -154,18 +154,7 @@ typedef struct {
 
 typedef struct {
     int32_t x, y;
-    uint64_t dist;
 } VPackCand;
-
-static int vpack_cand_cmp(const void *a, const void *b) {
-    const VPackCand *ca = (const VPackCand *)a;
-    const VPackCand *cb = (const VPackCand *)b;
-    if (ca->dist < cb->dist)
-        return -1;
-    if (ca->dist > cb->dist)
-        return 1;
-    return 0;
-}
 
 /* Bounds for early candidate rejection (set per-sprite before candidate generation) */
 typedef struct {
@@ -181,7 +170,6 @@ static inline void vpack_add_cand(VPackCand **cands, uint32_t *c_count, uint32_t
     }
     (*cands)[*c_count].x = x;
     (*cands)[*c_count].y = y;
-    (*cands)[*c_count].dist = 0; /* scored later with page context */
     (*c_count)++;
 }
 
@@ -207,7 +195,7 @@ typedef struct {
 } VPackPlaced;
 
 /* NFP cache: direct-mapped hash table keyed by (placed_shape_hash, incoming_shape_hash) */
-#define VPACK_NFP_CACHE_SIZE 16384 /* must be power of 2 */
+#define VPACK_NFP_CACHE_SIZE 16384U /* must be power of 2 */
 typedef struct {
     uint32_t key_a, key_b; /* shape hashes; both 0 = empty slot */
     Point2D verts[64];
@@ -373,8 +361,9 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                     nfp->count = ce->count;
                     memcpy(nfp->verts, ce->verts, ce->count * sizeof(Point2D));
                 } else {
-                    if (ce->count > 0)
+                    if (ce->count > 0) {
                         stats->nfp_cache_collision_count++;
+                    }
                     stats->nfp_cache_miss_count++;
                     nfp->count = vpack_minkowski(page->placed[i].poly, page->placed[i].count, orient_neg[ori], cur_count, nfp->verts);
                     ce->key_a = ka;
@@ -507,8 +496,9 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 continue;
 
             uint64_t score = vpack_score_candidate(cx, cy, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
-            if (score >= *io_best_score)
+            if (score >= *io_best_score) {
                 continue;
+            }
 
             bool safe = true;
             if (use_grid && cx >= 0 && cy >= 0) {
