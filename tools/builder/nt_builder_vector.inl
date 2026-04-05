@@ -846,7 +846,10 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             pl->y = best_y;
             for (uint32_t v = 0; v < win_count; v++)
                 pl->poly[v] = win_poly[v];
-            vpack_calc_aabb(win_poly, win_count, &pl->aabb_min_x, &pl->aabb_min_y, &pl->aabb_max_x, &pl->aabb_max_y);
+            pl->aabb_min_x = orient_aabb[best_orient_idx][0];
+            pl->aabb_min_y = orient_aabb[best_orient_idx][1];
+            pl->aabb_max_x = orient_aabb[best_orient_idx][2];
+            pl->aabb_max_y = orient_aabb[best_orient_idx][3];
             pl->shape_hash = vpack_shape_hash(win_poly, win_count);
             pages[best_page].count++;
 
