@@ -1013,6 +1013,9 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
     uint32_t best_ty = UINT32_MAX;
     bool found = false;
 
+    uint64_t *or_mask = (uint64_t *)malloc((size_t)atlas->row_words * sizeof(uint64_t));
+    NT_BUILD_ASSERT(or_mask && "scan_region: alloc failed");
+
     /* x4 OR-mask: computed on the downsampled grid (16× cheaper per ty) */
     uint64_t *or_mask_x4 = NULL;
     if (atlas_x4) {
@@ -1151,6 +1154,10 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
             }
             // #endregion
 
+            /* Compute full x1 OR-mask */
+            s_dbg_or_count++;
+            tgrid_row_or(atlas, ay0, ay1 - ay0, or_mask, atlas->row_words);
+
             for (uint32_t tx = tx_min; tx < tx_max;) {
                 // #region X-skip: jump past block columns without a wide enough free-run
                 if (cg) {
@@ -1172,6 +1179,37 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
                 }
                 // #endregion
 
+                /* Quick rejection via x4 OR-mask: check sprite's first x4-column */
+                if (or_mask_x4) {
+                    int32_t col0_x4 = ((int32_t)tx + rot_ox[r]) / 4;
+                    if (col0_x4 >= 0 && (uint32_t)col0_x4 < atlas_x4->tw) {
+                        if (or_mask_x4[(uint32_t)col0_x4 >> 6] & (1ULL << ((uint32_t)col0_x4 & 63))) {
+                            /* x4 column occupied — but might have free tiles within.
+                             * Fall through to x1 OR-mask check. */
+                        } else {
+                            /* x4 column FREE → 4 tile columns are all free → promising! */
+                            goto x1_check;
+                        }
+                    }
+                }
+
+                /* Quick rejection: x1 OR-mask column check */
+                {
+                    int32_t col0 = (int32_t)tx + rot_ox[r];
+                    if (col0 >= 0 && (uint32_t)col0 < atlas->tw) {
+                        if (!tgrid_or_bit_free(or_mask, atlas->row_words, (uint32_t)col0)) {
+                            uint32_t next_free = tgrid_or_next_free(or_mask, atlas->row_words, atlas->tw, (uint32_t)col0 + 1);
+                            int32_t next_tx = (int32_t)next_free - rot_ox[r];
+                            if (next_tx <= (int32_t)tx) {
+                                next_tx = (int32_t)tx + 1;
+                            }
+                            tx = (uint32_t)next_tx;
+                            continue;
+                        }
+                    }
+                }
+
+            x1_check:;
                 uint32_t skip = 0;
                 s_dbg_test_count++;
                 if (!tgrid_test(atlas, &rot_sg[r], (int32_t)tx, (int32_t)ty, rot_ox[r], rot_oy[r], &skip)) {
@@ -1209,6 +1247,7 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
     free(run_from);
     free(col_free);
     free(or_mask_x4);
+    free(or_mask);
 
     if (found) {
         *out_tx = best_tx;
