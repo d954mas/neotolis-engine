@@ -137,13 +137,12 @@ static bool vpack_intersect_axis_i(Point2D p1, Point2D p2, bool is_x_axis, int32
 static bool vpack_point_in_poly(int32_t px, int32_t py, const Point2D *poly, uint32_t count) {
     if (count < 3)
         return false;
-    for (uint32_t i = 0; i < count; i++) {
-        uint32_t j = (i + 1 == count) ? 0 : i + 1;
-        if (vpack_cross(poly[i].x, poly[i].y, poly[j].x, poly[j].y, px, py) <= 0) {
+    uint32_t last = count - 1;
+    for (uint32_t i = 0; i < last; i++) {
+        if (vpack_cross(poly[i].x, poly[i].y, poly[i + 1].x, poly[i + 1].y, px, py) <= 0)
             return false;
-        }
     }
-    return true;
+    return vpack_cross(poly[last].x, poly[last].y, poly[0].x, poly[0].y, px, py) > 0;
 }
 
 typedef struct {
