@@ -212,12 +212,41 @@ static uint32_t vpack_shape_hash(const Point2D *poly, uint32_t count) {
     return h;
 }
 
+#define VPACK_PLACE_GRID_CELL 256
+#define VPACK_PLACE_GRID_DIM ((4096 / VPACK_PLACE_GRID_CELL) + 1) /* 17 */
+#define VPACK_PLACE_GRID_MAX_PER_CELL 256
+
+typedef struct {
+    uint16_t indices[VPACK_PLACE_GRID_MAX_PER_CELL];
+    uint16_t count;
+} VPackPlaceCell;
+
 typedef struct {
     VPackPlaced *placed;
     uint32_t count;
     uint32_t used_w;
     uint32_t used_h;
+    VPackPlaceCell *pgrid; /* spatial grid for placed sprites */
 } VPackPage;
+
+static void vpack_pgrid_insert(VPackPage *page, uint32_t placed_idx) {
+    VPackPlaced *pl = &page->placed[placed_idx];
+    int32_t gx0 = (pl->x + pl->aabb_min_x) / VPACK_PLACE_GRID_CELL;
+    int32_t gy0 = (pl->y + pl->aabb_min_y) / VPACK_PLACE_GRID_CELL;
+    int32_t gx1 = (pl->x + pl->aabb_max_x) / VPACK_PLACE_GRID_CELL;
+    int32_t gy1 = (pl->y + pl->aabb_max_y) / VPACK_PLACE_GRID_CELL;
+    if (gx0 < 0) gx0 = 0;
+    if (gy0 < 0) gy0 = 0;
+    if (gx1 >= VPACK_PLACE_GRID_DIM) gx1 = VPACK_PLACE_GRID_DIM - 1;
+    if (gy1 >= VPACK_PLACE_GRID_DIM) gy1 = VPACK_PLACE_GRID_DIM - 1;
+    for (int32_t gy = gy0; gy <= gy1; gy++) {
+        for (int32_t gx = gx0; gx <= gx1; gx++) {
+            VPackPlaceCell *cell = &page->pgrid[gy * VPACK_PLACE_GRID_DIM + gx];
+            if (cell->count < VPACK_PLACE_GRID_MAX_PER_CELL)
+                cell->indices[cell->count++] = (uint16_t)placed_idx;
+        }
+    }
+}
 
 typedef struct {
     bool use_axis_i;
@@ -301,19 +330,54 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                            VPackNFP *nfps, uint64_t (*nfp_grid)[VPACK_GRID_WORDS], VPackCand **cands, uint32_t *cand_cap, uint32_t *relevant_buf, VPackNFPCacheEntry *nfp_cache,
                            const uint32_t orient_neg_hashes[8], const VPackExperimentConfig *exp, PackStats *stats, uint64_t *io_best_score, uint32_t page_index, uint32_t *out_best_page,
                            int32_t *out_best_x, int32_t *out_best_y, uint8_t *out_best_orient, uint32_t *out_best_orient_idx) {
+    // #region Build relevant list via placement grid
     uint32_t relevant_count = 0;
-    for (uint32_t i = 0; i < page->count; i++) {
-        int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - worst_poly_max_x;
-        int32_t est_max_x = page->placed[i].x + page->placed[i].aabb_max_x - worst_poly_min_x;
-        int32_t est_min_y = page->placed[i].y + page->placed[i].aabb_min_y - worst_poly_max_y;
-        int32_t est_max_y = page->placed[i].y + page->placed[i].aabb_max_y - worst_poly_min_y;
-        if (est_max_x < global_min_cand_x || est_min_x > global_max_cand_x || est_max_y < global_min_cand_y || est_min_y > global_max_cand_y) {
-            stats->yskip_count++;
-            continue;
+    if (page->pgrid) {
+        /* Compute grid cell range that overlaps with the global candidate region expanded by worst poly */
+        int32_t search_min_x = global_min_cand_x + worst_poly_min_x;
+        int32_t search_max_x = global_max_cand_x + worst_poly_max_x;
+        int32_t search_min_y = global_min_cand_y + worst_poly_min_y;
+        int32_t search_max_y = global_max_cand_y + worst_poly_max_y;
+        int32_t gx0 = search_min_x / VPACK_PLACE_GRID_CELL;
+        int32_t gy0 = search_min_y / VPACK_PLACE_GRID_CELL;
+        int32_t gx1 = search_max_x / VPACK_PLACE_GRID_CELL;
+        int32_t gy1 = search_max_y / VPACK_PLACE_GRID_CELL;
+        if (gx0 < 0) gx0 = 0;
+        if (gy0 < 0) gy0 = 0;
+        if (gx1 >= VPACK_PLACE_GRID_DIM) gx1 = VPACK_PLACE_GRID_DIM - 1;
+        if (gy1 >= VPACK_PLACE_GRID_DIM) gy1 = VPACK_PLACE_GRID_DIM - 1;
+        /* Collect unique placed sprite indices from grid cells */
+        uint8_t *seen = (uint8_t *)calloc((page->count + 7) / 8, 1);
+        for (int32_t gy = gy0; gy <= gy1; gy++) {
+            for (int32_t gx = gx0; gx <= gx1; gx++) {
+                VPackPlaceCell *cell = &page->pgrid[gy * VPACK_PLACE_GRID_DIM + gx];
+                for (uint16_t ci = 0; ci < cell->count; ci++) {
+                    uint32_t idx = cell->indices[ci];
+                    uint32_t byte = idx / 8;
+                    uint8_t bit = (uint8_t)(1u << (idx % 8));
+                    if (!(seen[byte] & bit)) {
+                        seen[byte] |= bit;
+                        relevant_buf[relevant_count++] = idx;
+                    }
+                }
+            }
         }
-        relevant_buf[relevant_count++] = i;
+        free(seen);
+    } else {
+        for (uint32_t i = 0; i < page->count; i++) {
+            int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - worst_poly_max_x;
+            int32_t est_max_x = page->placed[i].x + page->placed[i].aabb_max_x - worst_poly_min_x;
+            int32_t est_min_y = page->placed[i].y + page->placed[i].aabb_min_y - worst_poly_max_y;
+            int32_t est_max_y = page->placed[i].y + page->placed[i].aabb_max_y - worst_poly_min_y;
+            if (est_max_x < global_min_cand_x || est_min_x > global_max_cand_x || est_max_y < global_min_cand_y || est_min_y > global_max_cand_y) {
+                stats->yskip_count++;
+                continue;
+            }
+            relevant_buf[relevant_count++] = i;
+        }
     }
     stats->relevant_count += relevant_count;
+    // #endregion
 
     bool found_on_page = false;
     for (uint32_t ori = 0; ori < orient_count; ori++) {
@@ -663,6 +727,8 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     VPackPage pages[ATLAS_MAX_PAGES];
     memset(pages, 0, sizeof(pages));
     pages[0].placed = placed;
+    pages[0].pgrid = (VPackPlaceCell *)calloc((size_t)VPACK_PLACE_GRID_DIM * VPACK_PLACE_GRID_DIM, sizeof(VPackPlaceCell));
+    NT_BUILD_ASSERT(pages[0].pgrid && "vector_pack: pgrid alloc failed");
     uint32_t page_count = 1;
 
     uint32_t *relevant_buf = (uint32_t *)malloc(sprite_count * sizeof(uint32_t));
@@ -813,7 +879,8 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
 
             uint32_t new_page = page_count++;
             pages[new_page].placed = (VPackPlaced *)malloc(sprite_count * sizeof(VPackPlaced));
-            NT_BUILD_ASSERT(pages[new_page].placed && "vector_pack: alloc failed");
+            pages[new_page].pgrid = (VPackPlaceCell *)calloc((size_t)VPACK_PLACE_GRID_DIM * VPACK_PLACE_GRID_DIM, sizeof(VPackPlaceCell));
+            NT_BUILD_ASSERT(pages[new_page].placed && pages[new_page].pgrid && "vector_pack: alloc failed");
             pages[new_page].count = 0;
             pages[new_page].used_w = 0;
             pages[new_page].used_h = 0;
@@ -847,7 +914,9 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
                 pl->poly[v] = win_poly[v];
             vpack_calc_aabb(win_poly, win_count, &pl->aabb_min_x, &pl->aabb_min_y, &pl->aabb_max_x, &pl->aabb_max_y);
             pl->shape_hash = vpack_shape_hash(win_poly, win_count);
+            uint32_t placed_idx = pages[best_page].count;
             pages[best_page].count++;
+            vpack_pgrid_insert(&pages[best_page], placed_idx);
 
             out_placements[idx].sprite_index = idx;
             out_placements[idx].page = best_page;
@@ -936,8 +1005,11 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     free(inf_polys);
     free(inf_counts);
     free(sorted);
-    for (uint32_t i = 1; i < page_count; i++)
-        free(pages[i].placed);
+    for (uint32_t i = 0; i < page_count; i++) {
+        free(pages[i].pgrid);
+        if (i > 0)
+            free(pages[i].placed);
+    }
     free(placed);
     free(nfps);
     free(cands);
