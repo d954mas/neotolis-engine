@@ -76,27 +76,61 @@ static bool vpack_intersect(Point2D p1, Point2D p2, Point2D p3, Point2D p4, floa
     return true;
 }
 
-static bool vpack_intersect_axis(Point2D p1, Point2D p2, bool is_x_axis, float margin, float *out_val) {
+static bool vpack_intersect_axis_f(Point2D p1, Point2D p2, bool is_x_axis, float axis, float *out_val) {
     if (is_x_axis) {
-        if (p1.x == p2.x) {
+        if (p1.x == p2.x)
             return false;
-        }
-        if ((p1.x < margin && p2.x >= margin) || (p1.x >= margin && p2.x < margin)) {
-            float t = (margin - (float)p1.x) / (float)(p2.x - p1.x);
+        if (((float)p1.x < axis && (float)p2.x >= axis) || ((float)p1.x >= axis && (float)p2.x < axis)) {
+            float t = (axis - (float)p1.x) / (float)(p2.x - p1.x);
             *out_val = (float)p1.y + t * (float)(p2.y - p1.y);
             return true;
         }
     } else {
-        if (p1.y == p2.y) {
+        if (p1.y == p2.y)
             return false;
-        }
-        if ((p1.y < margin && p2.y >= margin) || (p1.y >= margin && p2.y < margin)) {
-            float t = (margin - (float)p1.y) / (float)(p2.y - p1.y);
+        if (((float)p1.y < axis && (float)p2.y >= axis) || ((float)p1.y >= axis && (float)p2.y < axis)) {
+            float t = (axis - (float)p1.y) / (float)(p2.y - p1.y);
             *out_val = (float)p1.x + t * (float)(p2.x - p1.x);
             return true;
         }
     }
     return false;
+}
+
+/* Integer axis intersection: computes floor and ceil of crossing point.
+ * Returns true if edge (p1→p2) crosses the line x=M (is_x_axis) or y=M (!is_x_axis).
+ * out_floor/out_ceil: integer bounds of the other coordinate at the crossing. */
+static bool vpack_intersect_axis_i(Point2D p1, Point2D p2, bool is_x_axis, int32_t M, int32_t *out_floor, int32_t *out_ceil) {
+    if (is_x_axis) {
+        int32_t dx = p2.x - p1.x;
+        if (dx == 0)
+            return false;
+        if (!((p1.x < M && p2.x >= M) || (p1.x >= M && p2.x < M)))
+            return false;
+        /* y = p1.y + (M - p1.x) * dy / dx — exact integer division with floor/ceil */
+        int64_t num = (int64_t)(M - p1.x) * (p2.y - p1.y);
+        int32_t base = p1.y + (int32_t)(num / dx);
+        int64_t rem = num % dx;
+        /* Adjust for truncation-toward-zero: need true floor and ceil */
+        if (rem != 0 && ((rem < 0) != (dx < 0)))
+            base--; /* truncation was ceiling, adjust to floor */
+        *out_floor = base;
+        *out_ceil = (rem == 0) ? base : base + 1;
+    } else {
+        int32_t dy = p2.y - p1.y;
+        if (dy == 0)
+            return false;
+        if (!((p1.y < M && p2.y >= M) || (p1.y >= M && p2.y < M)))
+            return false;
+        int64_t num = (int64_t)(M - p1.y) * (p2.x - p1.x);
+        int32_t base = p1.x + (int32_t)(num / dy);
+        int64_t rem = num % dy;
+        if (rem != 0 && ((rem < 0) != (dy < 0)))
+            base--;
+        *out_floor = base;
+        *out_ceil = (rem == 0) ? base : base + 1;
+    }
+    return true;
 }
 
 /* Strictly-inside test for CCW convex polygon (all cross products > 0). */
@@ -122,6 +156,16 @@ typedef struct {
     int32_t x, y;
     uint64_t dist;
 } VPackCand;
+
+static int vpack_cand_cmp(const void *a, const void *b) {
+    const VPackCand *ca = (const VPackCand *)a;
+    const VPackCand *cb = (const VPackCand *)b;
+    if (ca->dist < cb->dist)
+        return -1;
+    if (ca->dist > cb->dist)
+        return 1;
+    return 0;
+}
 
 /* Bounds for early candidate rejection (set per-sprite before candidate generation) */
 typedef struct {
@@ -159,7 +203,27 @@ typedef struct {
     uint32_t count;
     int32_t x, y;
     int32_t aabb_min_x, aabb_min_y, aabb_max_x, aabb_max_y; /* polygon AABB (relative, not offset by x,y) */
+    uint32_t shape_hash;
 } VPackPlaced;
+
+/* NFP cache: direct-mapped hash table keyed by (placed_shape_hash, incoming_shape_hash) */
+#define VPACK_NFP_CACHE_SIZE 16384 /* must be power of 2 */
+typedef struct {
+    uint32_t key_a, key_b; /* shape hashes; both 0 = empty slot */
+    Point2D verts[64];
+    uint32_t count;
+} VPackNFPCacheEntry;
+
+static uint32_t vpack_shape_hash(const Point2D *poly, uint32_t count) {
+    uint32_t h = 2166136261u; /* FNV-1a offset basis */
+    for (uint32_t i = 0; i < count; i++) {
+        h ^= (uint32_t)poly[i].x;
+        h *= 16777619u;
+        h ^= (uint32_t)poly[i].y;
+        h *= 16777619u;
+    }
+    return h;
+}
 
 typedef struct {
     VPackPlaced *placed;
@@ -167,6 +231,26 @@ typedef struct {
     uint32_t used_w;
     uint32_t used_h;
 } VPackPage;
+
+typedef struct {
+    bool use_axis_i;
+    bool use_nfp_cache;
+    bool use_orient_dedup;
+    bool use_dirty_bits;
+} VPackExperimentConfig;
+
+static VPackExperimentConfig vpack_experiment_config_get(void) {
+    static bool initialized = false;
+    static VPackExperimentConfig cfg;
+    if (!initialized) {
+        cfg.use_axis_i = !atlas_trace_env_truthy(getenv("NT_VPACK_DISABLE_AXIS_I"));
+        cfg.use_nfp_cache = !atlas_trace_env_truthy(getenv("NT_VPACK_DISABLE_NFP_CACHE"));
+        cfg.use_orient_dedup = !atlas_trace_env_truthy(getenv("NT_VPACK_DISABLE_ORIENT_DEDUP"));
+        cfg.use_dirty_bits = !atlas_trace_env_truthy(getenv("NT_VPACK_DISABLE_DIRTY_BITS"));
+        initialized = true;
+    }
+    return cfg;
+}
 
 #define VPACK_GRID_CELL 64
 #define VPACK_GRID_DIM ((4096 / VPACK_GRID_CELL) + 1)
@@ -227,8 +311,9 @@ static uint64_t vpack_page_lower_bound(const int32_t orient_aabb[8][4], const in
 static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32], const uint32_t orient_counts[8], const int32_t orient_aabb[8][4], const int32_t orient_min_cand[8][2],
                            const int32_t orient_max_cand[8][2], uint32_t orient_count, int32_t worst_poly_min_x, int32_t worst_poly_min_y, int32_t worst_poly_max_x, int32_t worst_poly_max_y,
                            int32_t global_min_cand_x, int32_t global_min_cand_y, int32_t global_max_cand_x, int32_t global_max_cand_y, uint32_t extrude, uint32_t margin, bool power_of_two,
-                           VPackNFP *nfps, uint64_t (*nfp_grid)[VPACK_GRID_WORDS], VPackCand **cands, uint32_t *cand_cap, uint32_t *relevant_buf, PackStats *stats, uint64_t *io_best_score,
-                           uint32_t page_index, uint32_t *out_best_page, int32_t *out_best_x, int32_t *out_best_y, uint8_t *out_best_orient, uint32_t *out_best_orient_idx) {
+                           VPackNFP *nfps, uint64_t (*nfp_grid)[VPACK_GRID_WORDS], VPackCand **cands, uint32_t *cand_cap, uint32_t *relevant_buf, VPackNFPCacheEntry *nfp_cache,
+                           const uint32_t orient_neg_hashes[8], const VPackExperimentConfig *exp, PackStats *stats, uint64_t *io_best_score, uint32_t page_index, uint32_t *out_best_page,
+                           int32_t *out_best_x, int32_t *out_best_y, uint8_t *out_best_orient, uint32_t *out_best_orient_idx) {
     uint32_t relevant_count = 0;
     for (uint32_t i = 0; i < page->count; i++) {
         int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - worst_poly_max_x;
@@ -277,7 +362,30 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             }
 
             VPackNFP *nfp = &nfps[nfp_count];
-            nfp->count = vpack_minkowski(page->placed[i].poly, page->placed[i].count, orient_neg[ori], cur_count, nfp->verts);
+            // #region NFP cache lookup
+            if (exp->use_nfp_cache) {
+                uint32_t ka = page->placed[i].shape_hash;
+                uint32_t kb = orient_neg_hashes[ori];
+                uint32_t slot = (ka * 2654435761u ^ kb) & (VPACK_NFP_CACHE_SIZE - 1);
+                VPackNFPCacheEntry *ce = &nfp_cache[slot];
+                if (ce->key_a == ka && ce->key_b == kb && ce->count > 0) {
+                    stats->nfp_cache_hit_count++;
+                    nfp->count = ce->count;
+                    memcpy(nfp->verts, ce->verts, ce->count * sizeof(Point2D));
+                } else {
+                    if (ce->count > 0)
+                        stats->nfp_cache_collision_count++;
+                    stats->nfp_cache_miss_count++;
+                    nfp->count = vpack_minkowski(page->placed[i].poly, page->placed[i].count, orient_neg[ori], cur_count, nfp->verts);
+                    ce->key_a = ka;
+                    ce->key_b = kb;
+                    ce->count = nfp->count;
+                    memcpy(ce->verts, nfp->verts, nfp->count * sizeof(Point2D));
+                }
+            } else {
+                nfp->count = vpack_minkowski(page->placed[i].poly, page->placed[i].count, orient_neg[ori], cur_count, nfp->verts);
+            }
+            // #endregion
             stats->or_count++;
             for (uint32_t v = 0; v < nfp->count; v++) {
                 nfp->verts[v].x += page->placed[i].x;
@@ -291,12 +399,24 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 }
                 for (uint32_t e = 0; e < nfp->count; e++) {
                     uint32_t en = (e + 1 == nfp->count) ? 0 : e + 1;
-                    float out_val;
-                    if (vpack_intersect_axis(nfp->verts[e], nfp->verts[en], true, (float)min_cand_x, &out_val)) {
-                        vpack_add_float_cand(cands, &cand_count, cand_cap, (float)min_cand_x, out_val, &bounds);
-                    }
-                    if (vpack_intersect_axis(nfp->verts[e], nfp->verts[en], false, (float)min_cand_y, &out_val)) {
-                        vpack_add_float_cand(cands, &cand_count, cand_cap, out_val, (float)min_cand_y, &bounds);
+                    if (exp->use_axis_i) {
+                        int32_t vf, vc;
+                        if (vpack_intersect_axis_i(nfp->verts[e], nfp->verts[en], true, min_cand_x, &vf, &vc)) {
+                            vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vf, &bounds);
+                            if (vc != vf)
+                                vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vc, &bounds);
+                        }
+                        if (vpack_intersect_axis_i(nfp->verts[e], nfp->verts[en], false, min_cand_y, &vf, &vc)) {
+                            vpack_add_cand(cands, &cand_count, cand_cap, vf, min_cand_y, &bounds);
+                            if (vc != vf)
+                                vpack_add_cand(cands, &cand_count, cand_cap, vc, min_cand_y, &bounds);
+                        }
+                    } else {
+                        float out_val;
+                        if (vpack_intersect_axis_f(nfp->verts[e], nfp->verts[en], true, (float)min_cand_x, &out_val))
+                            vpack_add_float_cand(cands, &cand_count, cand_cap, (float)min_cand_x, out_val, &bounds);
+                        if (vpack_intersect_axis_f(nfp->verts[e], nfp->verts[en], false, (float)min_cand_y, &out_val))
+                            vpack_add_float_cand(cands, &cand_count, cand_cap, out_val, (float)min_cand_y, &bounds);
                     }
                 }
             }
@@ -308,32 +428,67 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         uint32_t dirty_cells[4096];
         uint32_t dirty_count = 0;
         if (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS) {
-            for (uint32_t n = 0; n < nfp_count; n++) {
-                int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
-                int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
-                int32_t gx1 = nfps[n].max_x / VPACK_GRID_CELL;
-                int32_t gy1 = nfps[n].max_y / VPACK_GRID_CELL;
-                if (gx0 < 0)
-                    gx0 = 0;
-                if (gy0 < 0)
-                    gy0 = 0;
-                if (gx1 >= VPACK_GRID_DIM)
-                    gx1 = VPACK_GRID_DIM - 1;
-                if (gy1 >= VPACK_GRID_DIM)
-                    gy1 = VPACK_GRID_DIM - 1;
-                uint32_t word = n / 64;
-                uint64_t bit = (uint64_t)1 << (n % 64);
-                for (int32_t gy = gy0; gy <= gy1; gy++) {
-                    for (int32_t gx = gx0; gx <= gx1; gx++) {
-                        uint32_t ci = (uint32_t)gy * VPACK_GRID_DIM + (uint32_t)gx;
-                        if (nfp_grid[ci][0] == 0 && word == 0) {
-                            if (dirty_count < 4096)
-                                dirty_cells[dirty_count++] = ci;
+            if (exp->use_dirty_bits) {
+                uint64_t dirty_bits[(VPACK_GRID_DIM * VPACK_GRID_DIM + 63) / 64];
+                memset(dirty_bits, 0, sizeof(dirty_bits));
+                for (uint32_t n = 0; n < nfp_count; n++) {
+                    int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
+                    int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
+                    int32_t gx1 = nfps[n].max_x / VPACK_GRID_CELL;
+                    int32_t gy1 = nfps[n].max_y / VPACK_GRID_CELL;
+                    if (gx0 < 0)
+                        gx0 = 0;
+                    if (gy0 < 0)
+                        gy0 = 0;
+                    if (gx1 >= VPACK_GRID_DIM)
+                        gx1 = VPACK_GRID_DIM - 1;
+                    if (gy1 >= VPACK_GRID_DIM)
+                        gy1 = VPACK_GRID_DIM - 1;
+                    uint32_t word = n / 64;
+                    uint64_t bit = (uint64_t)1 << (n % 64);
+                    for (int32_t gy = gy0; gy <= gy1; gy++) {
+                        for (int32_t gx = gx0; gx <= gx1; gx++) {
+                            uint32_t ci = (uint32_t)gy * VPACK_GRID_DIM + (uint32_t)gx;
+                            uint32_t dw = ci / 64;
+                            uint64_t db = (uint64_t)1 << (ci % 64);
+                            if (!(dirty_bits[dw] & db)) {
+                                dirty_bits[dw] |= db;
+                                if (dirty_count < 4096)
+                                    dirty_cells[dirty_count++] = ci;
+                            }
+                            nfp_grid[ci][word] |= bit;
                         }
-                        nfp_grid[ci][word] |= bit;
+                    }
+                }
+            } else {
+                for (uint32_t n = 0; n < nfp_count; n++) {
+                    int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
+                    int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
+                    int32_t gx1 = nfps[n].max_x / VPACK_GRID_CELL;
+                    int32_t gy1 = nfps[n].max_y / VPACK_GRID_CELL;
+                    if (gx0 < 0)
+                        gx0 = 0;
+                    if (gy0 < 0)
+                        gy0 = 0;
+                    if (gx1 >= VPACK_GRID_DIM)
+                        gx1 = VPACK_GRID_DIM - 1;
+                    if (gy1 >= VPACK_GRID_DIM)
+                        gy1 = VPACK_GRID_DIM - 1;
+                    uint32_t word = n / 64;
+                    uint64_t bit = (uint64_t)1 << (n % 64);
+                    for (int32_t gy = gy0; gy <= gy1; gy++) {
+                        for (int32_t gx = gx0; gx <= gx1; gx++) {
+                            uint32_t ci = (uint32_t)gy * VPACK_GRID_DIM + (uint32_t)gx;
+                            if (nfp_grid[ci][0] == 0 && word == 0) {
+                                if (dirty_count < 4096)
+                                    dirty_cells[dirty_count++] = ci;
+                            }
+                            nfp_grid[ci][word] |= bit;
+                        }
                     }
                 }
             }
+            stats->dirty_cell_count += dirty_count;
         } else if (nfp_count > 0) {
             stats->grid_fallback_count++;
         }
@@ -400,7 +555,11 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         }
 
         for (uint32_t d = 0; d < dirty_count; d++) {
-            memset(nfp_grid[dirty_cells[d]], 0, (size_t)nfp_words * sizeof(uint64_t));
+            if (exp->use_dirty_bits) {
+                memset(nfp_grid[dirty_cells[d]], 0, sizeof(uint64_t[VPACK_GRID_WORDS]));
+            } else {
+                memset(nfp_grid[dirty_cells[d]], 0, (size_t)nfp_words * sizeof(uint64_t));
+            }
         }
 
         if (found_on_page && *out_best_page == page_index && *out_best_x == min_cand_x && *out_best_y == min_cand_y)
@@ -417,6 +576,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     uint32_t padding = opts->padding;
     uint32_t margin = opts->margin;
     uint32_t max_size = opts->max_size;
+    VPackExperimentConfig exp = vpack_experiment_config_get();
 
     // #region Initialize stats
     stats->or_count = 0;
@@ -434,6 +594,11 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     stats->relevant_count = 0;
     stats->candidate_count = 0;
     stats->grid_fallback_count = 0;
+    stats->nfp_cache_hit_count = 0;
+    stats->nfp_cache_miss_count = 0;
+    stats->nfp_cache_collision_count = 0;
+    stats->orient_dedup_saved_count = 0;
+    stats->dirty_cell_count = 0;
     // #endregion
 
     // #region Inflate polygons by extrude+padding/2 (same spacing as tile_pack)
@@ -473,17 +638,21 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     uint64_t(*nfp_grid)[VPACK_GRID_WORDS] = (uint64_t(*)[VPACK_GRID_WORDS])calloc((size_t)VPACK_GRID_DIM * VPACK_GRID_DIM, sizeof(uint64_t[VPACK_GRID_WORDS]));
     NT_BUILD_ASSERT(nfp_grid && "vector_pack: grid alloc failed");
 
+    /* NFP cache: avoid recomputing Minkowski for identical shape pairs */
+    VPackNFPCacheEntry *nfp_cache = (VPackNFPCacheEntry *)calloc(VPACK_NFP_CACHE_SIZE, sizeof(VPackNFPCacheEntry));
+    NT_BUILD_ASSERT(nfp_cache && "vector_pack: cache alloc failed");
+
     VPackPage pages[ATLAS_MAX_PAGES];
     memset(pages, 0, sizeof(pages));
     pages[0].placed = placed;
     uint32_t page_count = 1;
 
-    uint32_t orient_count = opts->allow_rotate ? 8 : 1;
     uint32_t *relevant_buf = (uint32_t *)malloc(sprite_count * sizeof(uint32_t));
     NT_BUILD_ASSERT(relevant_buf && "vector_pack: alloc failed");
 
     for (uint32_t s = 0; s < sprite_count; s++) {
         uint32_t idx = sorted[s].index;
+        uint32_t orient_count = opts->allow_rotate ? 8 : 1;
 
         /* Build transformed+inflated polygons for all orientations */
         Point2D orient_polys[8][32];
@@ -501,6 +670,44 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             }
         }
 
+        // #region Deduplicate orientations (skip transforms that produce identical polygons)
+        uint8_t orient_orig[8]; /* maps compacted index → original 0-7 orientation flag */
+        for (uint32_t r = 0; r < orient_count; r++)
+            orient_orig[r] = (uint8_t)r;
+        if (exp.use_orient_dedup) {
+            uint32_t source_orient_count = orient_count;
+            uint32_t dedup_count = 0;
+            for (uint32_t r = 0; r < source_orient_count; r++) {
+                bool dup = false;
+                int32_t r_aabb[4];
+                vpack_calc_aabb(orient_polys[r], orient_counts[r], &r_aabb[0], &r_aabb[1], &r_aabb[2], &r_aabb[3]);
+                for (uint32_t p = 0; p < dedup_count && !dup; p++) {
+                    if (orient_counts[p] != orient_counts[r])
+                        continue;
+                    int32_t p_aabb[4];
+                    vpack_calc_aabb(orient_polys[p], orient_counts[p], &p_aabb[0], &p_aabb[1], &p_aabb[2], &p_aabb[3]);
+                    bool same = true;
+                    for (uint32_t v = 0; v < orient_counts[r] && same; v++) {
+                        if ((orient_polys[r][v].x - r_aabb[0]) != (orient_polys[p][v].x - p_aabb[0]) || (orient_polys[r][v].y - r_aabb[1]) != (orient_polys[p][v].y - p_aabb[1]))
+                            same = false;
+                    }
+                    if (same)
+                        dup = true;
+                }
+                if (!dup) {
+                    if (dedup_count != r) {
+                        memcpy(orient_polys[dedup_count], orient_polys[r], orient_counts[r] * sizeof(Point2D));
+                        orient_counts[dedup_count] = orient_counts[r];
+                    }
+                    orient_orig[dedup_count] = (uint8_t)r;
+                    dedup_count++;
+                }
+            }
+            stats->orient_dedup_saved_count += (uint64_t)(source_orient_count - dedup_count);
+            orient_count = dedup_count;
+        }
+        // #endregion
+
         int32_t min_edge = (int32_t)margin > (int32_t)extrude ? (int32_t)margin : (int32_t)extrude;
 
         /* Try all orientations, pick best placement across all */
@@ -514,6 +721,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
 
         /* Pre-compute per-orientation AABBs, bounds, negated polys */
         Point2D orient_neg[8][32];
+        uint32_t orient_neg_hashes[8];
         int32_t orient_aabb[8][4];     /* min_x, min_y, max_x, max_y */
         int32_t orient_min_cand[8][2]; /* min_cand_x, min_cand_y */
         int32_t orient_max_cand[8][2]; /* max_cand_x, max_cand_y */
@@ -524,6 +732,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
         int32_t global_max_cand_x = 0, global_max_cand_y = 0;
         for (uint32_t ori = 0; ori < orient_count; ori++) {
             vpack_negate(orient_polys[ori], orient_counts[ori], orient_neg[ori]);
+            orient_neg_hashes[ori] = vpack_shape_hash(orient_neg[ori], orient_counts[ori]);
             vpack_calc_aabb(orient_polys[ori], orient_counts[ori], &orient_aabb[ori][0], &orient_aabb[ori][1], &orient_aabb[ori][2], &orient_aabb[ori][3]);
             int32_t mcx = min_edge - orient_aabb[ori][0];
             if (mcx < min_edge)
@@ -565,7 +774,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             stats->page_scan_count++;
             if (vpack_try_page(&pages[pi], orient_neg, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y, worst_poly_max_x,
                                worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, extrude, margin, opts->power_of_two, nfps, nfp_grid, &cands, &cand_cap,
-                               relevant_buf, stats, &best_score, pi, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx)) {
+                               relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, pi, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx)) {
                 found_any = true;
             }
         }
@@ -594,7 +803,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             stats->page_scan_count++;
             found_any = vpack_try_page(&pages[new_page], orient_neg, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y, worst_poly_max_x,
                                        worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, extrude, margin, opts->power_of_two, nfps, nfp_grid, &cands,
-                                       &cand_cap, relevant_buf, stats, &best_score, new_page, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx);
+                                       &cand_cap, relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, new_page, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx);
             NT_BUILD_ASSERT(found_any && "vector_pack: empty page should accept placement");
         }
 
@@ -612,14 +821,14 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
                 }
             }
 
-            pages[best_page].placed[pages[best_page].count].count = win_count;
-            pages[best_page].placed[pages[best_page].count].x = best_x;
-            pages[best_page].placed[pages[best_page].count].y = best_y;
-            for (uint32_t v = 0; v < win_count; v++) {
-                pages[best_page].placed[pages[best_page].count].poly[v] = win_poly[v];
-            }
-            vpack_calc_aabb(win_poly, win_count, &pages[best_page].placed[pages[best_page].count].aabb_min_x, &pages[best_page].placed[pages[best_page].count].aabb_min_y,
-                            &pages[best_page].placed[pages[best_page].count].aabb_max_x, &pages[best_page].placed[pages[best_page].count].aabb_max_y);
+            VPackPlaced *pl = &pages[best_page].placed[pages[best_page].count];
+            pl->count = win_count;
+            pl->x = best_x;
+            pl->y = best_y;
+            for (uint32_t v = 0; v < win_count; v++)
+                pl->poly[v] = win_poly[v];
+            vpack_calc_aabb(win_poly, win_count, &pl->aabb_min_x, &pl->aabb_min_y, &pl->aabb_max_x, &pl->aabb_max_y);
+            pl->shape_hash = vpack_shape_hash(win_poly, win_count);
             pages[best_page].count++;
 
             out_placements[idx].sprite_index = idx;
@@ -627,7 +836,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             NT_BUILD_ASSERT(best_x >= (int32_t)extrude && best_y >= (int32_t)extrude && "vector_pack: placement too close to edge for extrude");
             out_placements[idx].x = (uint32_t)(best_x - (int32_t)extrude);
             out_placements[idx].y = (uint32_t)(best_y - (int32_t)extrude);
-            out_placements[idx].rotation = best_orient;
+            out_placements[idx].rotation = orient_orig[best_orient];
 
             if (best_x + win_poly_max_x > (int32_t)pages[best_page].used_w)
                 pages[best_page].used_w = (uint32_t)(best_x + win_poly_max_x);
@@ -715,6 +924,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     free(nfps);
     free(cands);
     free(nfp_grid);
+    free(nfp_cache);
     free(relevant_buf);
     // #endregion
 

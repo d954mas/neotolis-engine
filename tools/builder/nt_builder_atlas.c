@@ -1289,6 +1289,11 @@ typedef struct {
     uint64_t relevant_count;
     uint64_t candidate_count;
     uint64_t grid_fallback_count;
+    uint64_t nfp_cache_hit_count;
+    uint64_t nfp_cache_miss_count;
+    uint64_t nfp_cache_collision_count;
+    uint64_t orient_dedup_saved_count;
+    uint64_t dirty_cell_count;
     AtlasTraceConfig trace;
 } PackStats;
 
@@ -1984,6 +1989,11 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     stats->relevant_count = 0;
     stats->candidate_count = 0;
     stats->grid_fallback_count = 0;
+    stats->nfp_cache_hit_count = 0;
+    stats->nfp_cache_miss_count = 0;
+    stats->nfp_cache_collision_count = 0;
+    stats->orient_dedup_saved_count = 0;
+    stats->dirty_cell_count = 0;
     stats->trace = atlas_trace_config_get();
     if (stats->trace.enabled) {
         NT_LOG_INFO("  TRACE atlas scan enabled (slow=%.1fs progress=%.1fs)", stats->trace.slow_scan_sec, stats->trace.progress_sec);
@@ -3617,6 +3627,9 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                 (unsigned long long)p.stats.test_count, (unsigned long long)p.stats.page_scan_count, (unsigned long long)p.stats.page_prune_count, (unsigned long long)p.stats.page_existing_hit_count,
                 (unsigned long long)p.stats.page_backfill_count, (unsigned long long)p.stats.page_new_count, (unsigned long long)p.stats.relevant_count, (unsigned long long)p.stats.candidate_count,
                 (unsigned long long)p.stats.grid_fallback_count);
+    NT_LOG_INFO("BENCH_VPACK nfp_cache_hits=%llu nfp_cache_misses=%llu nfp_cache_collisions=%llu orient_dedup_saved=%llu dirty_cells=%llu", (unsigned long long)p.stats.nfp_cache_hit_count,
+                (unsigned long long)p.stats.nfp_cache_miss_count, (unsigned long long)p.stats.nfp_cache_collision_count, (unsigned long long)p.stats.orient_dedup_saved_count,
+                (unsigned long long)p.stats.dirty_cell_count);
 
     pipeline_cleanup(&p);
 }

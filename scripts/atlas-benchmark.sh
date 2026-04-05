@@ -81,6 +81,7 @@ if [[ -z "$BENCH_LINE" ]]; then
     echo "$OUTPUT"
     exit 1
 fi
+BENCH_VPACK_LINE=$(echo "$OUTPUT" | grep "^INFO \[builder\] BENCH_VPACK " | tail -1)
 
 # Extract values — portable (no grep -P)
 extract_val() { echo "$1" | sed "s/.*$2=\([0-9.]*\).*/\1/"; }
@@ -110,6 +111,11 @@ PAGE_NEW=$(extract_val "$BENCH_LINE" "page_new")
 RELEVANT=$(extract_val "$BENCH_LINE" "relevant")
 CANDIDATES=$(extract_val "$BENCH_LINE" "candidates")
 GRID_FALLBACKS=$(extract_val "$BENCH_LINE" "grid_fallbacks")
+NFP_CACHE_HITS=$(extract_val "${BENCH_VPACK_LINE:-}" "nfp_cache_hits")
+NFP_CACHE_MISSES=$(extract_val "${BENCH_VPACK_LINE:-}" "nfp_cache_misses")
+NFP_CACHE_COLLISIONS=$(extract_val "${BENCH_VPACK_LINE:-}" "nfp_cache_collisions")
+ORIENT_DEDUP_SAVED=$(extract_val "${BENCH_VPACK_LINE:-}" "orient_dedup_saved")
+DIRTY_CELLS=$(extract_val "${BENCH_VPACK_LINE:-}" "dirty_cells")
 
 USED_AREA=${USED_AREA:-0}
 FRONTIER_AREA=${FRONTIER_AREA:-0}
@@ -128,6 +134,11 @@ PAGE_NEW=${PAGE_NEW:-0}
 RELEVANT=${RELEVANT:-0}
 CANDIDATES=${CANDIDATES:-0}
 GRID_FALLBACKS=${GRID_FALLBACKS:-0}
+NFP_CACHE_HITS=${NFP_CACHE_HITS:-0}
+NFP_CACHE_MISSES=${NFP_CACHE_MISSES:-0}
+NFP_CACHE_COLLISIONS=${NFP_CACHE_COLLISIONS:-0}
+ORIENT_DEDUP_SAVED=${ORIENT_DEDUP_SAVED:-0}
+DIRTY_CELLS=${DIRTY_CELLS:-0}
 
 # Extract unique count
 PACKED_LINE=$(echo "$OUTPUT" | grep "Atlas packed" | tail -1)
@@ -141,6 +152,7 @@ echo "Fill: poly/frontier=${POLY_FRONTIER_FILL}, poly/alloc=${POLY_TEXTURE_FILL}
 echo "Ops: OR=${OR_OPS}, Test=${TEST_OPS}"
 echo "Pages: scans=${PAGE_SCANS}, prunes=${PAGE_PRUNES}, existing=${PAGE_EXISTING}, backfills=${PAGE_BACKFILLS}, new=${PAGE_NEW}"
 echo "Search: relevant=${RELEVANT}, candidates=${CANDIDATES}, grid_fallbacks=${GRID_FALLBACKS}"
+echo "Vector: nfp_cache_hits=${NFP_CACHE_HITS}, misses=${NFP_CACHE_MISSES}, collisions=${NFP_CACHE_COLLISIONS}, orient_dedup_saved=${ORIENT_DEDUP_SAVED}, dirty_cells=${DIRTY_CELLS}"
 echo ""
 printf "%-15s %10s\n" "Stage" "Time (ms)"
 printf "%-15s %10s\n" "───────────────" "──────────"
@@ -184,11 +196,11 @@ fi
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 if [[ ! -f "$RESULTS_FILE" ]]; then
-    printf "timestamp\tcommit\tmode\tsprites\tunique\tpages\tused_area\tfrontier_area\ttrim_area\tpoly_area\tpot_waste\tpoly_frontier_fill\tpoly_texture_fill\tor_ops\ttest_ops\tpage_scans\tpage_prunes\tpage_existing\tpage_backfills\tpage_new\trelevant\tcandidates\tgrid_fallbacks\talpha_trim\tdedup\tgeometry\ttile_pack\tcompose\tdebug_png\tserialize\ttotal\n" > "$RESULTS_FILE"
+    printf "timestamp\tcommit\tmode\tsprites\tunique\tpages\tused_area\tfrontier_area\ttrim_area\tpoly_area\tpot_waste\tpoly_frontier_fill\tpoly_texture_fill\tor_ops\ttest_ops\tpage_scans\tpage_prunes\tpage_existing\tpage_backfills\tpage_new\trelevant\tcandidates\tgrid_fallbacks\tnfp_cache_hits\tnfp_cache_misses\tnfp_cache_collisions\torient_dedup_saved\tdirty_cells\talpha_trim\tdedup\tgeometry\ttile_pack\tcompose\tdebug_png\tserialize\ttotal\n" > "$RESULTS_FILE"
 fi
-printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
     "$TIMESTAMP" "$COMMIT" "$MODE" "$SPRITES" "$UNIQUE" "$PAGES" "$USED_AREA" "$FRONTIER_AREA" "$TRIM_AREA" "$POLY_AREA" "$POT_WASTE" "$POLY_FRONTIER_FILL" "$POLY_TEXTURE_FILL" "$OR_OPS" "$TEST_OPS" \
-    "$PAGE_SCANS" "$PAGE_PRUNES" "$PAGE_EXISTING" "$PAGE_BACKFILLS" "$PAGE_NEW" "$RELEVANT" "$CANDIDATES" "$GRID_FALLBACKS" \
+    "$PAGE_SCANS" "$PAGE_PRUNES" "$PAGE_EXISTING" "$PAGE_BACKFILLS" "$PAGE_NEW" "$RELEVANT" "$CANDIDATES" "$GRID_FALLBACKS" "$NFP_CACHE_HITS" "$NFP_CACHE_MISSES" "$NFP_CACHE_COLLISIONS" "$ORIENT_DEDUP_SAVED" "$DIRTY_CELLS" \
     "$ALPHA_TRIM" "$DEDUP" "$GEOMETRY" "$TILE_PACK" "$COMPOSE" "$DEBUG_PNG" "$SERIALIZE" "$TOTAL" \
     >> "$RESULTS_FILE"
 
