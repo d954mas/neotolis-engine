@@ -186,7 +186,7 @@ static inline bool vpack_rect_overlap(int32_t ax0, int32_t ay0, int32_t ax1, int
 }
 
 typedef struct {
-    Point2D poly[32];
+    Point2D poly[16];
     uint32_t count;
     int32_t x, y;
     int32_t aabb_min_x, aabb_min_y, aabb_max_x, aabb_max_y; /* polygon AABB (relative, not offset by x,y) */
