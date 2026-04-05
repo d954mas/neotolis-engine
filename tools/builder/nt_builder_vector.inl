@@ -194,7 +194,7 @@ typedef struct {
 } VPackPlaced;
 
 /* NFP cache: direct-mapped hash table keyed by (placed_shape_hash, incoming_shape_hash) */
-#define VPACK_NFP_CACHE_SIZE 8192U /* must be power of 2 */
+#define VPACK_NFP_CACHE_SIZE 32768U /* must be power of 2 */
 typedef struct {
     uint32_t key_a, key_b; /* shape hashes; both 0 = empty slot */
     Point2D verts[32];
