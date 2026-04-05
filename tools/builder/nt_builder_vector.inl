@@ -293,13 +293,137 @@ static uint64_t vpack_page_lower_bound(const int32_t orient_aabb[8][4], const in
     return best;
 }
 
+// #region Parallel candidate test thread pool
+#define VPACK_PAR_MAX_THREADS 16
+#define VPACK_PAR_CHUNK 512
+#define VPACK_PAR_MIN_CANDIDATES 4096
+
+typedef struct {
+    const VPackCand *cands;
+    uint32_t cand_count;
+    const VPackNFP *nfps;
+    uint32_t nfp_count;
+    uint32_t nfp_words;
+    const uint64_t (*nfp_grid)[VPACK_GRID_WORDS];
+    uint32_t grid_dim;
+    bool use_grid;
+    int32_t eff_min_x, eff_min_y, fast_max_x, fast_max_y;
+    int32_t poly_max_x, poly_max_y;
+    uint32_t used_w, used_h, margin;
+    bool power_of_two;
+    _Atomic uint64_t shared_best;
+    _Atomic uint32_t next_chunk;
+    struct {
+        uint64_t score;
+        int32_t x, y;
+        uint64_t test_count;
+    } results[VPACK_PAR_MAX_THREADS];
+    _Atomic uint32_t phase;
+    _Atomic uint32_t workers_done;
+    _Atomic bool shutdown;
+    uint32_t num_workers;
+} VPackParCtx;
+
+typedef struct {
+    VPackParCtx *ctx;
+    uint32_t tid;
+} VPackWorkerArg;
+
+static void vpack_par_process_chunks(VPackParCtx *ctx, uint32_t tid) {
+    uint64_t local_best = ctx->results[tid].score;
+    int32_t local_x = ctx->results[tid].x;
+    int32_t local_y = ctx->results[tid].y;
+    uint64_t local_tests = 0;
+    for (;;) {
+        uint32_t start = atomic_fetch_add(&ctx->next_chunk, VPACK_PAR_CHUNK);
+        if (start >= ctx->cand_count)
+            break;
+        uint32_t end = start + VPACK_PAR_CHUNK;
+        if (end > ctx->cand_count)
+            end = ctx->cand_count;
+        for (uint32_t c = start; c < end; c++) {
+            int32_t cx = ctx->cands[c].x;
+            int32_t cy = ctx->cands[c].y;
+            if (cx < ctx->eff_min_x || cy < ctx->eff_min_y || cx > ctx->fast_max_x || cy > ctx->fast_max_y)
+                continue;
+            uint64_t score = vpack_score_candidate(cx, cy, ctx->poly_max_x, ctx->poly_max_y, ctx->used_w, ctx->used_h, ctx->margin, ctx->power_of_two);
+            if (score >= atomic_load_explicit(&ctx->shared_best, memory_order_relaxed))
+                continue;
+            bool safe = true;
+            if (ctx->use_grid && cx >= 0 && cy >= 0) {
+                int32_t gcx = cx / VPACK_GRID_CELL;
+                int32_t gcy = cy / VPACK_GRID_CELL;
+                if (gcx < (int32_t)ctx->grid_dim && gcy < (int32_t)ctx->grid_dim) {
+                    const uint64_t *cell = ctx->nfp_grid[gcy * (int32_t)ctx->grid_dim + gcx];
+                    for (uint32_t w = 0; w < ctx->nfp_words && safe; w++) {
+                        uint64_t bits = cell[w];
+                        while (bits) {
+                            uint32_t bit_idx = (uint32_t)__builtin_ctzll(bits);
+                            uint32_t i = w * 64 + bit_idx;
+                            if (cx >= ctx->nfps[i].min_x && cx <= ctx->nfps[i].max_x && cy >= ctx->nfps[i].min_y && cy <= ctx->nfps[i].max_y) {
+                                local_tests++;
+                                if (vpack_point_in_poly(cx, cy, ctx->nfps[i].verts, ctx->nfps[i].count)) {
+                                    safe = false;
+                                    break;
+                                }
+                            }
+                            bits &= bits - 1;
+                        }
+                    }
+                }
+            } else {
+                for (uint32_t i = 0; i < ctx->nfp_count && safe; i++) {
+                    if (cx >= ctx->nfps[i].min_x && cx <= ctx->nfps[i].max_x && cy >= ctx->nfps[i].min_y && cy <= ctx->nfps[i].max_y) {
+                        local_tests++;
+                        if (vpack_point_in_poly(cx, cy, ctx->nfps[i].verts, ctx->nfps[i].count)) {
+                            safe = false;
+                        }
+                    }
+                }
+            }
+            if (safe && score < local_best) {
+                local_best = score;
+                local_x = cx;
+                local_y = cy;
+                uint64_t cur = atomic_load_explicit(&ctx->shared_best, memory_order_relaxed);
+                while (score < cur)
+                    if (atomic_compare_exchange_weak_explicit(&ctx->shared_best, &cur, score, memory_order_relaxed, memory_order_relaxed))
+                        break;
+            }
+        }
+    }
+    ctx->results[tid].score = local_best;
+    ctx->results[tid].x = local_x;
+    ctx->results[tid].y = local_y;
+    ctx->results[tid].test_count += local_tests;
+}
+
+static int vpack_par_worker(void *arg) {
+    VPackWorkerArg *wa = (VPackWorkerArg *)arg;
+    VPackParCtx *ctx = wa->ctx;
+    uint32_t tid = wa->tid;
+    uint32_t last_phase = 0;
+    while (!atomic_load_explicit(&ctx->shutdown, memory_order_relaxed)) {
+        uint32_t phase = atomic_load_explicit(&ctx->phase, memory_order_acquire);
+        if (phase == last_phase) {
+            thrd_yield();
+            continue;
+        }
+        last_phase = phase;
+        vpack_par_process_chunks(ctx, tid);
+        atomic_fetch_add_explicit(&ctx->workers_done, 1, memory_order_release);
+    }
+    return 0;
+}
+// #endregion
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32], const uint32_t orient_counts[8], const int32_t orient_aabb[8][4], const int32_t orient_min_cand[8][2],
                            const int32_t orient_max_cand[8][2], uint32_t orient_count, int32_t worst_poly_min_x, int32_t worst_poly_min_y, int32_t worst_poly_max_x, int32_t worst_poly_max_y,
                            int32_t global_min_cand_x, int32_t global_min_cand_y, int32_t global_max_cand_x, int32_t global_max_cand_y, uint32_t extrude, uint32_t margin, bool power_of_two,
                            VPackNFP *nfps, uint64_t (*nfp_grid)[VPACK_GRID_WORDS], VPackCand **cands, uint32_t *cand_cap, uint32_t *relevant_buf, VPackNFPCacheEntry *nfp_cache,
                            const uint32_t orient_neg_hashes[8], const VPackExperimentConfig *exp, PackStats *stats, uint64_t *io_best_score, uint32_t page_index,
-                           uint32_t grid_dim, uint64_t *dirty_bits_buf,
+                           uint32_t grid_dim, uint64_t *dirty_bits_buf, VPackParCtx *par,
                            uint32_t *out_best_page, int32_t *out_best_x, int32_t *out_best_y, uint8_t *out_best_orient, uint32_t *out_best_orient_idx) {
     uint32_t relevant_count = 0;
     for (uint32_t i = 0; i < page->count; i++) {
@@ -514,61 +638,114 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         if (-poly_min_y > eff_min_y) eff_min_y = -poly_min_y;
         if ((int32_t)extrude > eff_min_y) eff_min_y = (int32_t)extrude;
 
-        for (uint32_t c = 0; c < cand_count; c++) {
-            int32_t cx = (*cands)[c].x;
-            int32_t cy = (*cands)[c].y;
-            if (cx < eff_min_x || cy < eff_min_y || cx > fast_max_x || cy > fast_max_y)
-                continue;
-
-            uint64_t score = vpack_score_candidate(cx, cy, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
-            if (score >= *io_best_score) {
-                continue;
+        // #region Candidate testing (single-threaded or parallel)
+        if (par && par->num_workers > 0 && cand_count >= VPACK_PAR_MIN_CANDIDATES) {
+            /* Parallel: dispatch to thread pool */
+            par->cands = *cands;
+            par->cand_count = cand_count;
+            par->nfps = nfps;
+            par->nfp_count = nfp_count;
+            par->nfp_words = nfp_words;
+            par->nfp_grid = (const uint64_t (*)[VPACK_GRID_WORDS])nfp_grid;
+            par->grid_dim = grid_dim;
+            par->use_grid = use_grid;
+            par->eff_min_x = eff_min_x;
+            par->eff_min_y = eff_min_y;
+            par->fast_max_x = fast_max_x;
+            par->fast_max_y = fast_max_y;
+            par->poly_max_x = poly_max_x;
+            par->poly_max_y = poly_max_y;
+            par->used_w = page->used_w;
+            par->used_h = page->used_h;
+            par->margin = margin;
+            par->power_of_two = power_of_two;
+            atomic_store_explicit(&par->shared_best, *io_best_score, memory_order_relaxed);
+            atomic_store_explicit(&par->next_chunk, 0, memory_order_relaxed);
+            /* Init all thread results (including main = tid 0) */
+            for (uint32_t t = 0; t <= par->num_workers; t++) {
+                par->results[t].score = UINT64_MAX;
+                par->results[t].x = 0;
+                par->results[t].y = 0;
+                par->results[t].test_count = 0;
             }
+            atomic_store_explicit(&par->workers_done, 0, memory_order_relaxed);
+            atomic_fetch_add_explicit(&par->phase, 1, memory_order_release); /* wake workers */
 
-            bool safe = true;
-            if (use_grid && cx >= 0 && cy >= 0) {
-                int32_t gcx = cx / VPACK_GRID_CELL;
-                int32_t gcy = cy / VPACK_GRID_CELL;
-                if (gcx < (int32_t)grid_dim && gcy < (int32_t)grid_dim) {
-                    uint64_t *cell = nfp_grid[gcy * (int32_t)grid_dim + gcx];
-                    for (uint32_t w = 0; w < nfp_words && safe; w++) {
-                        uint64_t bits = cell[w];
-                        while (bits) {
-                            uint32_t bit_idx = (uint32_t)__builtin_ctzll(bits);
-                            uint32_t i = w * 64 + bit_idx;
-                            if (cx >= nfps[i].min_x && cx <= nfps[i].max_x && cy >= nfps[i].min_y && cy <= nfps[i].max_y) {
-                                stats->test_count++;
-                                if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
-                                    safe = false;
-                                    break;
+            /* Main thread also processes chunks (tid=0) */
+            vpack_par_process_chunks(par, 0);
+
+            /* Wait for all workers */
+            while (atomic_load_explicit(&par->workers_done, memory_order_acquire) < par->num_workers)
+                thrd_yield();
+
+            /* Reduce: find global best across all threads */
+            for (uint32_t t = 0; t <= par->num_workers; t++) {
+                stats->test_count += par->results[t].test_count;
+                if (par->results[t].score < *io_best_score) {
+                    *io_best_score = par->results[t].score;
+                    *out_best_page = page_index;
+                    *out_best_x = par->results[t].x;
+                    *out_best_y = par->results[t].y;
+                    *out_best_orient = (uint8_t)ori;
+                    *out_best_orient_idx = ori;
+                    found_on_page = true;
+                }
+            }
+        } else {
+            /* Single-threaded: original loop */
+            for (uint32_t c = 0; c < cand_count; c++) {
+                int32_t cx = (*cands)[c].x;
+                int32_t cy = (*cands)[c].y;
+                if (cx < eff_min_x || cy < eff_min_y || cx > fast_max_x || cy > fast_max_y)
+                    continue;
+                uint64_t score = vpack_score_candidate(cx, cy, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
+                if (score >= *io_best_score)
+                    continue;
+                bool safe = true;
+                if (use_grid && cx >= 0 && cy >= 0) {
+                    int32_t gcx = cx / VPACK_GRID_CELL;
+                    int32_t gcy = cy / VPACK_GRID_CELL;
+                    if (gcx < (int32_t)grid_dim && gcy < (int32_t)grid_dim) {
+                        uint64_t *cell = nfp_grid[gcy * (int32_t)grid_dim + gcx];
+                        for (uint32_t w = 0; w < nfp_words && safe; w++) {
+                            uint64_t bits = cell[w];
+                            while (bits) {
+                                uint32_t bit_idx = (uint32_t)__builtin_ctzll(bits);
+                                uint32_t i = w * 64 + bit_idx;
+                                if (cx >= nfps[i].min_x && cx <= nfps[i].max_x && cy >= nfps[i].min_y && cy <= nfps[i].max_y) {
+                                    stats->test_count++;
+                                    if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
+                                        safe = false;
+                                        break;
+                                    }
                                 }
+                                bits &= bits - 1;
                             }
-                            bits &= bits - 1;
+                        }
+                    }
+                } else {
+                    for (uint32_t i = 0; i < nfp_count; i++) {
+                        if (cx >= nfps[i].min_x && cx <= nfps[i].max_x && cy >= nfps[i].min_y && cy <= nfps[i].max_y) {
+                            stats->test_count++;
+                            if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
+                                safe = false;
+                                break;
+                            }
                         }
                     }
                 }
-            } else {
-                for (uint32_t i = 0; i < nfp_count; i++) {
-                    if (cx >= nfps[i].min_x && cx <= nfps[i].max_x && cy >= nfps[i].min_y && cy <= nfps[i].max_y) {
-                        stats->test_count++;
-                        if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
-                            safe = false;
-                            break;
-                        }
-                    }
+                if (safe) {
+                    *out_best_page = page_index;
+                    *out_best_x = cx;
+                    *out_best_y = cy;
+                    *out_best_orient = (uint8_t)ori;
+                    *out_best_orient_idx = ori;
+                    *io_best_score = score;
+                    found_on_page = true;
                 }
-            }
-
-            if (safe) {
-                *out_best_page = page_index;
-                *out_best_x = cx;
-                *out_best_y = cy;
-                *out_best_orient = (uint8_t)ori;
-                *out_best_orient_idx = ori;
-                *io_best_score = score;
-                found_on_page = true;
             }
         }
+        // #endregion
 
         for (uint32_t d = 0; d < dirty_count; d++) {
             if (exp->use_dirty_bits) {
@@ -587,7 +764,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts,
-                            AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats) {
+                            AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats, uint32_t thread_count) {
     uint32_t extrude = opts->extrude;
     uint32_t padding = opts->padding;
     uint32_t margin = opts->margin;
@@ -670,6 +847,33 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     size_t dirty_words = ((size_t)grid_dim * grid_dim + 63) / 64;
     uint64_t *dirty_bits_buf = (uint64_t *)malloc(dirty_words * sizeof(uint64_t));
     NT_BUILD_ASSERT(dirty_bits_buf && "vector_pack: dirty_bits alloc failed");
+
+    // #region Thread pool for parallel candidate testing
+    VPackParCtx par_ctx;
+    memset(&par_ctx, 0, sizeof(par_ctx));
+    thrd_t par_threads[VPACK_PAR_MAX_THREADS];
+    VPackWorkerArg par_args[VPACK_PAR_MAX_THREADS];
+    uint32_t num_workers = 0;
+    if (thread_count > 1) {
+        num_workers = thread_count - 1; /* main thread is also a worker */
+        if (num_workers > VPACK_PAR_MAX_THREADS)
+            num_workers = VPACK_PAR_MAX_THREADS;
+        par_ctx.num_workers = num_workers;
+        atomic_init(&par_ctx.phase, 0);
+        atomic_init(&par_ctx.workers_done, 0);
+        atomic_init(&par_ctx.shutdown, false);
+        atomic_init(&par_ctx.shared_best, UINT64_MAX);
+        atomic_init(&par_ctx.next_chunk, 0);
+        for (uint32_t t = 0; t < num_workers; t++) {
+            par_args[t].ctx = &par_ctx;
+            par_args[t].tid = t + 1; /* tid 0 = main thread */
+            int rc = thrd_create(&par_threads[t], vpack_par_worker, &par_args[t]);
+            NT_BUILD_ASSERT(rc == thrd_success && "vector_pack: worker thread create failed");
+        }
+        NT_LOG_INFO("  vector_pack: %u candidate-test workers + main thread", num_workers);
+    }
+    VPackParCtx *par = (num_workers > 0) ? &par_ctx : NULL;
+    // #endregion
 
     for (uint32_t s = 0; s < sprite_count; s++) {
         uint32_t idx = sorted[s].index;
@@ -795,7 +999,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             stats->page_scan_count++;
             if (vpack_try_page(&pages[pi], orient_neg, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y, worst_poly_max_x,
                                worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, extrude, margin, opts->power_of_two, nfps, nfp_grid, &cands, &cand_cap,
-                               relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, pi, grid_dim, dirty_bits_buf, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx)) {
+                               relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, pi, grid_dim, dirty_bits_buf, par, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx)) {
                 found_any = true;
             }
         }
@@ -824,7 +1028,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             stats->page_scan_count++;
             found_any = vpack_try_page(&pages[new_page], orient_neg, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y, worst_poly_max_x,
                                        worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, extrude, margin, opts->power_of_two, nfps, nfp_grid, &cands,
-                                       &cand_cap, relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, new_page, grid_dim, dirty_bits_buf, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx);
+                                       &cand_cap, relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, new_page, grid_dim, dirty_bits_buf, par, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx);
             NT_BUILD_ASSERT(found_any && "vector_pack: empty page should accept placement");
         }
 
@@ -951,6 +1155,13 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     free(nfp_cache);
     free(relevant_buf);
     free(dirty_bits_buf);
+    /* Shutdown thread pool */
+    if (num_workers > 0) {
+        atomic_store(&par_ctx.shutdown, true);
+        atomic_fetch_add(&par_ctx.phase, 1); /* wake workers to see shutdown */
+        for (uint32_t t = 0; t < num_workers; t++)
+            thrd_join(par_threads[t], NULL);
+    }
     // #endregion
 
     return sprite_count;

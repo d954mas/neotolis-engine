@@ -1857,6 +1857,8 @@ static int area_sort_cmp(const void *a, const void *b) {
     return 0;
 }
 
+#include "tinycthread.h"
+#include <stdatomic.h>
 #include "nt_builder_vector.inl"
 
 /* --- Tile packer with tile-grid collision (ATLAS-02, ATLAS-03, ATLAS-04, ATLAS-18) --- */
@@ -2958,6 +2960,7 @@ typedef struct {
 
     /* Packing statistics (per-call, no static globals) */
     PackStats stats;
+    uint32_t thread_count;
 } AtlasPipeline;
 
 /* --- pipeline_alpha_trim: extract alpha planes + find tight bounding box --- */
@@ -3224,7 +3227,7 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
 
     if (p->opts->vector_pack) {
         NT_LOG_INFO("  vector_pack: %u sprites (NFP mode)", p->unique_count);
-        p->placement_count = vector_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats);
+        p->placement_count = vector_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats, p->thread_count);
     } else {
         p->placement_count = tile_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats);
     }
@@ -3565,6 +3568,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     p.sprite_count = state->sprite_count;
     p.sprites = state->sprites;
     p.opts = &state->opts;
+    p.thread_count = ctx->thread_count;
 
     NT_LOG_INFO("  end_atlas: %u sprites, starting pipeline...", p.sprite_count);
     double t0 = nt_time_now();
