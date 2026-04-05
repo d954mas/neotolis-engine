@@ -2630,6 +2630,8 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
 
         /* Debug PNG output (D-09, D-10) */
         if (opts->debug_png) {
+            /* Use minimum compression for debug output — speed over file size */
+            stbi_write_png_compression_level = 1;
             for (uint32_t p = 0; p < page_count; p++) {
                 /* Draw outlines on a copy */
                 size_t page_bytes = (size_t)page_w[p] * page_h[p] * 4;
