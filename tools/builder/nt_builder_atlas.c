@@ -974,6 +974,130 @@ static void tgrid_row_or(const TileGrid *g, uint32_t y0, uint32_t h, uint64_t *o
     }
 }
 
+/* --- Sparse table for O(1) OR range queries on tile grid rows ---
+ * Precompute sparse[k][y] = OR of rows [y, y+2^k) for each level k.
+ * Query OR([y0, y0+h)): k = floor(log2(h)), result = sparse[k][y0] | sparse[k][y0+h-2^k].
+ * Since OR is idempotent, overlapping ranges give exact results. */
+
+#define OR_SPARSE_MAX_K 12 /* log2(4096) = 12, supports sprites up to 4096 tiles tall */
+
+typedef struct {
+    uint64_t *levels[OR_SPARSE_MAX_K]; /* levels[k] = row_words * th entries */
+    uint32_t row_words;
+    uint32_t th;
+    uint32_t max_k; /* highest level built */
+} OrSparseTable;
+
+static OrSparseTable or_sparse_build(const TileGrid *g, uint32_t max_h) {
+    OrSparseTable st;
+    st.row_words = g->row_words;
+    st.th = g->th;
+    st.max_k = 0;
+    memset(st.levels, 0, sizeof(st.levels));
+
+    /* Level 0: each entry is a single row */
+    size_t level_bytes = (size_t)g->row_words * g->th * sizeof(uint64_t);
+    st.levels[0] = (uint64_t *)malloc(level_bytes);
+    NT_BUILD_ASSERT(st.levels[0] && "or_sparse_build: alloc failed");
+    memcpy(st.levels[0], g->rows, level_bytes);
+
+    /* Build higher levels until 2^k covers max_h */
+    for (uint32_t k = 1; (1U << k) <= max_h && k < OR_SPARSE_MAX_K; k++) {
+        uint32_t half = 1U << (k - 1);
+        st.levels[k] = (uint64_t *)malloc(level_bytes);
+        NT_BUILD_ASSERT(st.levels[k] && "or_sparse_build: alloc failed");
+        uint32_t valid_rows = (g->th >= half) ? g->th - half : 0;
+        for (uint32_t y = 0; y < g->th; y++) {
+            uint64_t *dst = st.levels[k] + (size_t)y * g->row_words;
+            const uint64_t *a = st.levels[k - 1] + (size_t)y * g->row_words;
+            if (y + half < g->th) {
+                const uint64_t *b = st.levels[k - 1] + (size_t)(y + half) * g->row_words;
+                for (uint32_t w = 0; w < g->row_words; w++) {
+                    dst[w] = a[w] | b[w];
+                }
+            } else {
+                memcpy(dst, a, (size_t)g->row_words * sizeof(uint64_t));
+            }
+        }
+        st.max_k = k;
+    }
+    return st;
+}
+
+static void or_sparse_free(OrSparseTable *st) {
+    for (uint32_t k = 0; k <= st->max_k; k++) {
+        free(st->levels[k]);
+    }
+    memset(st, 0, sizeof(*st));
+}
+
+/* Incrementally update sparse table after stamping rows [y0, y0+h).
+ * Only recomputes entries whose range overlaps the stamped region. */
+static void or_sparse_update(OrSparseTable *st, const TileGrid *g, uint32_t stamp_y0, uint32_t stamp_h) {
+    uint32_t stamp_y1 = stamp_y0 + stamp_h;
+    if (stamp_y1 > g->th) {
+        stamp_y1 = g->th;
+    }
+    uint32_t rw = st->row_words;
+
+    /* Level 0: copy affected rows from tile grid */
+    for (uint32_t y = stamp_y0; y < stamp_y1; y++) {
+        memcpy(st->levels[0] + (size_t)y * rw, g->rows + (size_t)y * rw, (size_t)rw * sizeof(uint64_t));
+    }
+
+    /* Higher levels: recompute entries whose range [y, y+2^k) overlaps [stamp_y0, stamp_y1) */
+    for (uint32_t k = 1; k <= st->max_k; k++) {
+        uint32_t half = 1U << (k - 1);
+        /* Entry y is affected if [y, y+2^k) overlaps [stamp_y0, stamp_y1).
+         * That means: y < stamp_y1 AND y + 2^k > stamp_y0.
+         * So: y >= max(0, stamp_y0 - 2^k + 1) AND y < stamp_y1. */
+        uint32_t upd_y0 = (stamp_y0 >= (1U << k)) ? stamp_y0 - (1U << k) + 1 : 0;
+        uint32_t upd_y1 = stamp_y1;
+        if (upd_y1 > g->th) {
+            upd_y1 = g->th;
+        }
+        for (uint32_t y = upd_y0; y < upd_y1; y++) {
+            uint64_t *dst = st->levels[k] + (size_t)y * rw;
+            const uint64_t *a = st->levels[k - 1] + (size_t)y * rw;
+            if (y + half < g->th) {
+                const uint64_t *b = st->levels[k - 1] + (size_t)(y + half) * rw;
+                for (uint32_t w = 0; w < rw; w++) {
+                    dst[w] = a[w] | b[w];
+                }
+            } else {
+                memcpy(dst, a, (size_t)rw * sizeof(uint64_t));
+            }
+        }
+    }
+}
+
+/* Query OR of rows [y0, y0+h). Result written to out (row_words uint64_t). */
+static void or_sparse_query(const OrSparseTable *st, uint32_t y0, uint32_t h, uint64_t *out) {
+    if (h == 0 || y0 >= st->th) {
+        memset(out, 0, (size_t)st->row_words * sizeof(uint64_t));
+        return;
+    }
+    uint32_t y1 = y0 + h;
+    if (y1 > st->th) {
+        y1 = st->th;
+        h = y1 - y0;
+    }
+    if (h == 0) {
+        memset(out, 0, (size_t)st->row_words * sizeof(uint64_t));
+        return;
+    }
+    /* Find k such that 2^k <= h */
+    uint32_t k = 0;
+    while ((1U << (k + 1)) <= h && k + 1 <= st->max_k) {
+        k++;
+    }
+    const uint64_t *a = st->levels[k] + (size_t)y0 * st->row_words;
+    const uint64_t *b = st->levels[k] + (size_t)(y1 - (1U << k)) * st->row_words;
+    for (uint32_t w = 0; w < st->row_words; w++) {
+        out[w] = a[w] | b[w];
+    }
+}
+
 /* Check if OR-mask bit at position `col` is free (0). Quick single-bit test. */
 static inline bool tgrid_or_bit_free(const uint64_t *mask, uint32_t mask_words, uint32_t col) {
     uint32_t w = col >> 6;
@@ -1019,10 +1143,10 @@ static uint64_t s_dbg_yskip_count;
 
 /* Try to place a sprite (with given rotation variants) within [ty_min..ty_max) x [tx_min..tx_max).
  * Returns true if placed, with best position in out_tx/out_ty/out_rot.
- * Uses x4 LOD for cheap OR-mask, coarse grid for y-skip/x-skip, x1 OR-mask + tgrid_test as fallback. */
+ * Uses x4 LOD for cheap OR-mask, coarse grid for y-skip/x-skip, sparse table OR-mask + tgrid_test as fallback. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileGrid *atlas_x4, const TileGrid *rot_sg, const TileGrid *rot_sg_x4, const int32_t *rot_ox, const int32_t *rot_oy,
-                        uint32_t rot_count, uint32_t tx_min, uint32_t ty_min, uint32_t tx_max, uint32_t ty_max, uint32_t *out_tx, uint32_t *out_ty, uint8_t *out_rot) {
+static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileGrid *atlas_x4, const OrSparseTable *or_st, const TileGrid *rot_sg, const TileGrid *rot_sg_x4, const int32_t *rot_ox,
+                        const int32_t *rot_oy, uint32_t rot_count, uint32_t tx_min, uint32_t ty_min, uint32_t tx_max, uint32_t ty_max, uint32_t *out_tx, uint32_t *out_ty, uint8_t *out_rot) {
     uint32_t best_tx = UINT32_MAX;
     uint32_t best_ty = UINT32_MAX;
     bool found = false;
@@ -1096,13 +1220,7 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
         uint32_t cached_by0 = UINT32_MAX;
         uint32_t cached_by1 = UINT32_MAX;
 
-        /* Sliding OR-mask state: track the previous window to enable incremental updates.
-         * When ty advances by 1 (window shifts by 1 row), just OR in the new bottom row
-         * instead of recomputing from scratch. The mask becomes monotonically conservative
-         * (only gains set bits). Recompute from scratch every s_th steps or after y-skip. */
-        uint32_t or_prev_ay0 = UINT32_MAX;
-        uint32_t or_prev_ay1 = UINT32_MAX;
-        uint32_t or_steps_since_refresh = 0;
+        /* OR-mask is now precomputed via sparse table — O(row_words) query per ty */
 
         for (uint32_t ty = ty_min; ty < eff_ty_max; ty++) {
             int32_t ay0_s = (int32_t)ty + rot_oy[r];
@@ -1123,7 +1241,6 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
                 if (next_ty > (int32_t)ty) {
                     ty = (uint32_t)next_ty - 1;
                 }
-                or_prev_ay0 = UINT32_MAX; /* invalidate sliding OR after skip */
                 continue;
             }
             // #endregion
@@ -1172,33 +1289,14 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
                     }
                 }
                 if (x4_all_full) {
-                    or_prev_ay0 = UINT32_MAX; /* invalidate after skip */
                     continue;
                 }
             }
             // #endregion
 
-            // #region Incremental x1 OR-mask: slide window or full recompute
-            /* Refresh every s_th/4 steps to limit false rejections from monotone OR.
-             * Lower interval = better packing quality, higher interval = less OR work. */
-            if (or_prev_ay0 != UINT32_MAX && ay0 == or_prev_ay0 + 1 && ay1 == or_prev_ay1 + 1 && or_steps_since_refresh < ((s_th > 4) ? s_th / 4 : 1)) {
-                /* Slide by 1: OR in the new bottom row (conservative — only adds bits) */
-                uint32_t new_row = ay1 - 1;
-                if (new_row < atlas->th) {
-                    const uint64_t *row = atlas->rows + ((size_t)new_row * atlas->row_words);
-                    for (uint32_t w = 0; w < atlas->row_words; w++) {
-                        or_mask[w] |= row[w];
-                    }
-                }
-                or_steps_since_refresh++;
-            } else {
-                /* Full recompute */
-                s_dbg_or_count++;
-                tgrid_row_or(atlas, ay0, ay1 - ay0, or_mask, atlas->row_words);
-                or_steps_since_refresh = 0;
-            }
-            or_prev_ay0 = ay0;
-            or_prev_ay1 = ay1;
+            // #region Sparse table OR-mask query: O(row_words) exact lookup
+            s_dbg_or_count++;
+            or_sparse_query(or_st, ay0, ay1 - ay0, or_mask);
             // #endregion
 
             for (uint32_t tx = tx_min; tx < tx_max;) {
@@ -1356,6 +1454,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     uint64_t total_area = 0;
     uint32_t max_cell_w = 0;
     uint32_t max_cell_h = 0;
+    uint32_t global_max_sth = 0; /* max sprite tile height (any rotation) for sparse table */
     for (uint32_t i = 0; i < sprite_count; i++) {
         uint32_t mw = sprite_grids[i].tw * ts;
         uint32_t mh = sprite_grids[i].th * ts;
@@ -1365,6 +1464,12 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
         }
         if (mh > max_cell_h) {
             max_cell_h = mh;
+        }
+        if (sprite_grids[i].th > global_max_sth) {
+            global_max_sth = sprite_grids[i].th;
+        }
+        if (sprite_grids[i].tw > global_max_sth) {
+            global_max_sth = sprite_grids[i].tw; /* rotation can swap w/h */
         }
     }
     /* Start below total area — page growth will expand as needed for tighter final fit */
@@ -1414,6 +1519,9 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     page_grids[0] = tgrid_create(atlas_tw, atlas_th, ts);
     page_coarse[0] = coarse_create(atlas_tw, atlas_th);
     page_x4[0] = tgrid_downsample_x4(&page_grids[0]);
+    OrSparseTable page_or_st[ATLAS_MAX_PAGES];
+    memset(page_or_st, 0, sizeof(page_or_st));
+    page_or_st[0] = or_sparse_build(&page_grids[0], global_max_sth);
 
     uint32_t margin_tiles = (margin + ts - 1) / ts;
     uint32_t placement_count = 0;
@@ -1493,7 +1601,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             if (scan_th > page_grids[pi].th) {
                 scan_th = page_grids[pi].th;
             }
-            placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, scan_tw, scan_th, &best_tx, &best_ty, &best_rot);
+            placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, scan_tw, scan_th, &best_tx, &best_ty, &best_rot);
             if (placed) {
                 best_page = pi;
             }
@@ -1510,6 +1618,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                 coarse_grow(&page_coarse[pi], &page_grids[pi]);
                 tgrid_free(&page_x4[pi]);
                 page_x4[pi] = tgrid_downsample_x4(&page_grids[pi]);
+                or_sparse_free(&page_or_st[pi]);
+                page_or_st[pi] = or_sparse_build(&page_grids[pi], global_max_sth);
                 page_w[pi] = page_grids[pi].tw * ts;
                 page_h[pi] = page_grids[pi].th * ts;
 
@@ -1524,11 +1634,11 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                 }
 
                 /* Priority area: try old region first to fill gaps */
-                placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, old_tw, old_th, &best_tx, &best_ty, &best_rot);
+                placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, old_tw, old_th, &best_tx, &best_ty, &best_rot);
 
                 /* Then scan used extent */
                 if (!placed) {
-                    placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, g_scan_tw, g_scan_th, &best_tx, &best_ty, &best_rot);
+                    placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, g_scan_tw, g_scan_th, &best_tx, &best_ty, &best_rot);
                 }
 
                 if (placed) {
@@ -1546,10 +1656,11 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             page_grids[new_page] = tgrid_create(atlas_tw, atlas_th, ts);
             page_coarse[new_page] = coarse_create(atlas_tw, atlas_th);
             page_x4[new_page] = tgrid_downsample_x4(&page_grids[new_page]);
+            page_or_st[new_page] = or_sparse_build(&page_grids[new_page], global_max_sth);
             page_w[new_page] = init_dim;
             page_h[new_page] = init_dim;
 
-            placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th,
+            placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], &page_or_st[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th,
                                  &best_tx, &best_ty, &best_rot);
             if (!placed) {
                 /* New page too small — grow it */
@@ -1560,9 +1671,11 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                     coarse_grow(&page_coarse[new_page], &page_grids[new_page]);
                     tgrid_free(&page_x4[new_page]);
                     page_x4[new_page] = tgrid_downsample_x4(&page_grids[new_page]);
+                    or_sparse_free(&page_or_st[new_page]);
+                    page_or_st[new_page] = or_sparse_build(&page_grids[new_page], global_max_sth);
                     page_w[new_page] = page_grids[new_page].tw * ts;
                     page_h[new_page] = page_grids[new_page].th * ts;
-                    placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th,
+                    placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], &page_or_st[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th,
                                          &best_tx, &best_ty, &best_rot);
                 }
             }
@@ -1583,13 +1696,19 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             }
         }
 
-        /* Stamp onto page grid and update coarse grid */
+        /* Stamp onto page grid and update coarse grid + sparse table */
         tgrid_stamp(&page_grids[best_page], &rot_sg[best_rot], (int32_t)best_tx, (int32_t)best_ty, rot_ox[best_rot], rot_oy[best_rot]);
         {
             int32_t stamp_tx = (int32_t)best_tx + rot_ox[best_rot];
             int32_t stamp_ty = (int32_t)best_ty + rot_oy[best_rot];
-            coarse_update(&page_coarse[best_page], &page_grids[best_page], stamp_tx, stamp_ty, rot_sg[best_rot].tw, rot_sg[best_rot].th);
-            tgrid_x4_update(&page_x4[best_page], &page_grids[best_page], stamp_tx, stamp_ty, rot_sg[best_rot].tw, rot_sg[best_rot].th);
+            uint32_t stamp_sth = rot_sg[best_rot].th;
+            coarse_update(&page_coarse[best_page], &page_grids[best_page], stamp_tx, stamp_ty, rot_sg[best_rot].tw, stamp_sth);
+            tgrid_x4_update(&page_x4[best_page], &page_grids[best_page], stamp_tx, stamp_ty, rot_sg[best_rot].tw, stamp_sth);
+            /* Incremental sparse table update — only recompute rows affected by stamp */
+            if (page_or_st[best_page].levels[0]) {
+                uint32_t sty = (stamp_ty >= 0) ? (uint32_t)stamp_ty : 0;
+                or_sparse_update(&page_or_st[best_page], &page_grids[best_page], sty, stamp_sth);
+            }
         }
 
         /* Track bounding box in pixels */
@@ -1659,6 +1778,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
 
     /* Cleanup */
     for (uint32_t p = 0; p < page_count; p++) {
+        or_sparse_free(&page_or_st[p]);
         tgrid_free(&page_grids[p]);
         coarse_free(&page_coarse[p]);
         tgrid_free(&page_x4[p]);
