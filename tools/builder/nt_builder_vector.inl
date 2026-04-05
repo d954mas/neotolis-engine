@@ -329,7 +329,29 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         int32_t max_cand_y = orient_max_cand[ori][1];
 
         uint32_t cand_count = 0;
-        VPackBounds bounds = {min_cand_x, min_cand_y, max_cand_x, max_cand_y};
+        // #region Tighten candidate bounds from best_score
+        int32_t eff_max_cand_x = max_cand_x;
+        int32_t eff_max_cand_y = max_cand_y;
+        if (*io_best_score != UINT64_MAX) {
+            uint32_t best_area = (uint32_t)(*io_best_score >> 16);
+            /* max cx so that area(nw,nh) could beat best: nw*nh < best_area
+             * nw = max(cx+poly_max_x, cur_w)+margin → cx < (best_area/(cur_h+margin)) - poly_max_x
+             * Similarly for cy */
+            uint32_t min_h = page->used_h + margin;
+            if (min_h > 0) {
+                int32_t xb = (int32_t)(best_area / min_h) - poly_max_x - (int32_t)margin;
+                if (xb < eff_max_cand_x)
+                    eff_max_cand_x = xb;
+            }
+            uint32_t min_w = page->used_w + margin;
+            if (min_w > 0) {
+                int32_t yb = (int32_t)(best_area / min_w) - poly_max_y - (int32_t)margin;
+                if (yb < eff_max_cand_y)
+                    eff_max_cand_y = yb;
+            }
+        }
+        // #endregion
+        VPackBounds bounds = {min_cand_x, min_cand_y, eff_max_cand_x, eff_max_cand_y};
         vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, min_cand_y, &bounds);
 
         uint32_t nfp_count = 0;
