@@ -334,15 +334,11 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         uint32_t nfp_count = 0;
         for (uint32_t ri = 0; ri < relevant_count; ri++) {
             uint32_t i = relevant_buf[ri];
-            int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - poly_max_x;
-            int32_t est_max_x = page->placed[i].x + page->placed[i].aabb_max_x - poly_min_x;
-            int32_t est_min_y = page->placed[i].y + page->placed[i].aabb_min_y - poly_max_y;
-            int32_t est_max_y = page->placed[i].y + page->placed[i].aabb_max_y - poly_min_y;
-            if (est_max_x < min_cand_x || est_min_x > max_cand_x || est_max_y < min_cand_y || est_min_y > max_cand_y)
-                continue;
 
             bool need_candidates = true;
             if (*io_best_score != UINT64_MAX) {
+                int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - poly_max_x;
+                int32_t est_min_y = page->placed[i].y + page->placed[i].aabb_min_y - poly_max_y;
                 uint64_t opt_score = vpack_score_candidate((est_min_x > 0) ? est_min_x : 0, (est_min_y > 0) ? est_min_y : 0, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
                 if (opt_score > *io_best_score)
                     need_candidates = false;
