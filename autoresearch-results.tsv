@@ -1,0 +1,2 @@
+айiteration	timestamp	tile_pack_ms	test_ops	or_ops	result	description
+0	baseline	33388.2	244747781	15046640	baseline	8-orient vector_pack: full NFP per orientation

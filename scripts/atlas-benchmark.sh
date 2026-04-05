@@ -96,6 +96,26 @@ PAGES=$(extract_val "$BENCH_LINE" "pages")
 USED_AREA=$(extract_val "$BENCH_LINE" "used_area")
 OR_OPS=$(extract_val "$BENCH_LINE" "or_ops")
 TEST_OPS=$(extract_val "$BENCH_LINE" "test_ops")
+PAGE_SCANS=$(extract_val "$BENCH_LINE" "page_scans")
+PAGE_PRUNES=$(extract_val "$BENCH_LINE" "page_prunes")
+PAGE_EXISTING=$(extract_val "$BENCH_LINE" "page_existing")
+PAGE_BACKFILLS=$(extract_val "$BENCH_LINE" "page_backfills")
+PAGE_NEW=$(extract_val "$BENCH_LINE" "page_new")
+RELEVANT=$(extract_val "$BENCH_LINE" "relevant")
+CANDIDATES=$(extract_val "$BENCH_LINE" "candidates")
+GRID_FALLBACKS=$(extract_val "$BENCH_LINE" "grid_fallbacks")
+
+USED_AREA=${USED_AREA:-0}
+OR_OPS=${OR_OPS:-0}
+TEST_OPS=${TEST_OPS:-0}
+PAGE_SCANS=${PAGE_SCANS:-0}
+PAGE_PRUNES=${PAGE_PRUNES:-0}
+PAGE_EXISTING=${PAGE_EXISTING:-0}
+PAGE_BACKFILLS=${PAGE_BACKFILLS:-0}
+PAGE_NEW=${PAGE_NEW:-0}
+RELEVANT=${RELEVANT:-0}
+CANDIDATES=${CANDIDATES:-0}
+GRID_FALLBACKS=${GRID_FALLBACKS:-0}
 
 # Extract unique count
 PACKED_LINE=$(echo "$OUTPUT" | grep "Atlas packed" | tail -1)
@@ -103,8 +123,10 @@ UNIQUE=$(echo "$PACKED_LINE" | sed 's/.*(\([0-9]*\) unique).*/\1/')
 
 echo ""
 echo "=== Benchmark Results ==="
-echo "Sprites: ${SPRITES} (${UNIQUE} unique), Pages: ${PAGES}"
+echo "Mode: ${MODE}, Sprites: ${SPRITES} (${UNIQUE} unique), Pages: ${PAGES}"
 echo "Used area: ${USED_AREA}px, OR ops: ${OR_OPS}, Test ops: ${TEST_OPS}"
+echo "Pages: scans=${PAGE_SCANS}, prunes=${PAGE_PRUNES}, existing=${PAGE_EXISTING}, backfills=${PAGE_BACKFILLS}, new=${PAGE_NEW}"
+echo "Search: relevant=${RELEVANT}, candidates=${CANDIDATES}, grid_fallbacks=${GRID_FALLBACKS}"
 echo ""
 printf "%-15s %10s\n" "Stage" "Time (ms)"
 printf "%-15s %10s\n" "───────────────" "──────────"
@@ -148,10 +170,11 @@ fi
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 if [[ ! -f "$RESULTS_FILE" ]]; then
-    printf "timestamp\tcommit\tsprites\tunique\tpages\tused_area\tor_ops\ttest_ops\talpha_trim\tdedup\tgeometry\ttile_pack\tcompose\tdebug_png\tserialize\ttotal\n" > "$RESULTS_FILE"
+    printf "timestamp\tcommit\tmode\tsprites\tunique\tpages\tused_area\tor_ops\ttest_ops\tpage_scans\tpage_prunes\tpage_existing\tpage_backfills\tpage_new\trelevant\tcandidates\tgrid_fallbacks\talpha_trim\tdedup\tgeometry\ttile_pack\tcompose\tdebug_png\tserialize\ttotal\n" > "$RESULTS_FILE"
 fi
-printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-    "$TIMESTAMP" "$COMMIT" "$SPRITES" "$UNIQUE" "$PAGES" "$USED_AREA" "$OR_OPS" "$TEST_OPS" \
+printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+    "$TIMESTAMP" "$COMMIT" "$MODE" "$SPRITES" "$UNIQUE" "$PAGES" "$USED_AREA" "$OR_OPS" "$TEST_OPS" \
+    "$PAGE_SCANS" "$PAGE_PRUNES" "$PAGE_EXISTING" "$PAGE_BACKFILLS" "$PAGE_NEW" "$RELEVANT" "$CANDIDATES" "$GRID_FALLBACKS" \
     "$ALPHA_TRIM" "$DEDUP" "$GEOMETRY" "$TILE_PACK" "$COMPOSE" "$DEBUG_PNG" "$SERIALIZE" "$TOTAL" \
     >> "$RESULTS_FILE"
 

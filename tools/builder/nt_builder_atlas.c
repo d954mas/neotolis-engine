@@ -1277,6 +1277,15 @@ typedef struct {
     uint64_t or_count;
     uint64_t test_count;
     uint64_t yskip_count;
+    uint64_t used_area;
+    uint64_t page_scan_count;
+    uint64_t page_prune_count;
+    uint64_t page_existing_hit_count;
+    uint64_t page_backfill_count;
+    uint64_t page_new_count;
+    uint64_t relevant_count;
+    uint64_t candidate_count;
+    uint64_t grid_fallback_count;
     AtlasTraceConfig trace;
 } PackStats;
 
@@ -1918,6 +1927,15 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     stats->or_count = 0;
     stats->test_count = 0;
     stats->yskip_count = 0;
+    stats->used_area = 0;
+    stats->page_scan_count = 0;
+    stats->page_prune_count = 0;
+    stats->page_existing_hit_count = 0;
+    stats->page_backfill_count = 0;
+    stats->page_new_count = 0;
+    stats->relevant_count = 0;
+    stats->candidate_count = 0;
+    stats->grid_fallback_count = 0;
     stats->trace = atlas_trace_config_get();
     if (stats->trace.enabled) {
         NT_LOG_INFO("  TRACE atlas scan enabled (slow=%.1fs progress=%.1fs)", stats->trace.slow_scan_sec, stats->trace.progress_sec);
@@ -2468,6 +2486,8 @@ static int uint64_cmp(const void *a, const void *b) {
 /* --- Atlas cache key computation (D-13) --- */
 
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts, bool has_compress, const nt_tex_compress_opts_t *compress) {
+    enum { ATLAS_CACHE_KEY_VERSION = 2 };
+
     /* Collect decoded hashes */
     uint64_t *hashes = (uint64_t *)malloc(sprite_count * sizeof(uint64_t));
     NT_BUILD_ASSERT(hashes && "compute_atlas_cache_key: alloc failed");
@@ -2499,8 +2519,9 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     pos += (uint32_t)sizeof(opts->format);
     memcpy(opts_buf + pos, &opts->tile_size, sizeof(opts->tile_size));
     pos += (uint32_t)sizeof(opts->tile_size);
-    uint8_t flags = (uint8_t)((opts->allow_rotate ? 1 : 0) | (opts->power_of_two ? 2 : 0) | (opts->polygon_mode ? 4 : 0) | (opts->debug_png ? 8 : 0));
+    uint8_t flags = (uint8_t)((opts->allow_rotate ? 1 : 0) | (opts->power_of_two ? 2 : 0) | (opts->polygon_mode ? 4 : 0) | (opts->debug_png ? 8 : 0) | (opts->vector_pack ? 16 : 0));
     opts_buf[pos++] = flags;
+    opts_buf[pos++] = (uint8_t)ATLAS_CACHE_KEY_VERSION;
     uint8_t hc = has_compress ? 1 : 0;
     opts_buf[pos++] = hc;
     if (has_compress) {
@@ -3343,10 +3364,18 @@ static void pipeline_serialize(AtlasPipeline *p) {
 
             float tmp_u = ((atlas_px * 65535.0F) / (float)atlas_w) + 0.5F;
             float tmp_v = ((atlas_py * 65535.0F) / (float)atlas_h) + 0.5F;
-            if (tmp_u < 0.0F) { tmp_u = 0.0F; }
-            if (tmp_v < 0.0F) { tmp_v = 0.0F; }
-            if (tmp_u > 65535.0F) { tmp_u = 65535.0F; }
-            if (tmp_v > 65535.0F) { tmp_v = 65535.0F; }
+            if (tmp_u < 0.0F) {
+                tmp_u = 0.0F;
+            }
+            if (tmp_v < 0.0F) {
+                tmp_v = 0.0F;
+            }
+            if (tmp_u > 65535.0F) {
+                tmp_u = 65535.0F;
+            }
+            if (tmp_v > 65535.0F) {
+                tmp_v = 65535.0F;
+            }
             vtx->atlas_u = (uint16_t)tmp_u;
             vtx->atlas_v = (uint16_t)tmp_v;
         }
@@ -3515,10 +3544,18 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     double bench_serialize = nt_time_now() - t0;
 
     double bench_total = nt_time_now() - t_total;
+    p.stats.used_area = 0;
+    for (uint32_t i = 0; i < p.page_count; i++) {
+        p.stats.used_area += (uint64_t)p.page_w[i] * (uint64_t)p.page_h[i];
+    }
     NT_LOG_INFO("Atlas packed: %u sprites (%u unique), %u pages", p.sprite_count, p.unique_count, p.page_count);
-    NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f tile_pack=%.1f compose=%.1f debug_png=%.1f serialize=%.1f total=%.1f pages=%u or_ops=%llu test_ops=%llu", bench_alpha_trim * 1000.0,
-                bench_dedup * 1000.0, bench_geometry * 1000.0, bench_tile_pack * 1000.0, bench_compose * 1000.0, bench_debug_png * 1000.0, bench_serialize * 1000.0, bench_total * 1000.0, p.page_count,
-                (unsigned long long)p.stats.or_count, (unsigned long long)p.stats.test_count);
+    NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f tile_pack=%.1f compose=%.1f debug_png=%.1f serialize=%.1f total=%.1f pages=%u used_area=%llu or_ops=%llu test_ops=%llu "
+                "page_scans=%llu page_prunes=%llu page_existing=%llu page_backfills=%llu page_new=%llu relevant=%llu candidates=%llu grid_fallbacks=%llu",
+                bench_alpha_trim * 1000.0, bench_dedup * 1000.0, bench_geometry * 1000.0, bench_tile_pack * 1000.0, bench_compose * 1000.0, bench_debug_png * 1000.0, bench_serialize * 1000.0,
+                bench_total * 1000.0, p.page_count, (unsigned long long)p.stats.used_area, (unsigned long long)p.stats.or_count, (unsigned long long)p.stats.test_count,
+                (unsigned long long)p.stats.page_scan_count, (unsigned long long)p.stats.page_prune_count, (unsigned long long)p.stats.page_existing_hit_count,
+                (unsigned long long)p.stats.page_backfill_count, (unsigned long long)p.stats.page_new_count, (unsigned long long)p.stats.relevant_count, (unsigned long long)p.stats.candidate_count,
+                (unsigned long long)p.stats.grid_fallback_count);
 
     pipeline_cleanup(&p);
 }
