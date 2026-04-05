@@ -1046,10 +1046,6 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
         NT_BUILD_ASSERT(col_free && run_from && "scan_region: alloc");
     }
 
-    /* Per-column refcount for exact incremental OR-mask (allocated once, reset per rotation) */
-    uint16_t *or_refcount = (uint16_t *)calloc(atlas->tw, sizeof(uint16_t));
-    NT_BUILD_ASSERT(or_refcount && "scan_region: refcount alloc failed");
-
     for (uint32_t r = 0; r < rot_count; r++) {
         uint32_t eff_ty_max = found ? (best_ty + 1) : ty_max;
         if (eff_ty_max > ty_max) {
@@ -1100,13 +1096,13 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
         uint32_t cached_by0 = UINT32_MAX;
         uint32_t cached_by1 = UINT32_MAX;
 
-        /* Exact incremental OR-mask via per-column refcounts.
-         * refcount[col] = number of rows in window [ay0,ay1) with column col occupied.
-         * or_mask bit = (refcount > 0). On slide by 1: decrement departing row bits,
-         * increment arriving row bits, update or_mask. Exact result, no quality loss. */
+        /* Sliding OR-mask state: track the previous window to enable incremental updates.
+         * When ty advances by 1 (window shifts by 1 row), just OR in the new bottom row
+         * instead of recomputing from scratch. The mask becomes monotonically conservative
+         * (only gains set bits). Recompute from scratch every s_th steps or after y-skip. */
         uint32_t or_prev_ay0 = UINT32_MAX;
         uint32_t or_prev_ay1 = UINT32_MAX;
-        memset(or_refcount, 0, atlas->tw * sizeof(uint16_t));
+        uint32_t or_steps_since_refresh = 0;
 
         for (uint32_t ty = ty_min; ty < eff_ty_max; ty++) {
             int32_t ay0_s = (int32_t)ty + rot_oy[r];
@@ -1182,60 +1178,24 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
             }
             // #endregion
 
-            // #region Exact incremental x1 OR-mask via refcount
-            if (or_prev_ay0 != UINT32_MAX && ay0 == or_prev_ay0 + 1 && ay1 == or_prev_ay1 + 1) {
-                /* Slide by 1: remove departing row, add arriving row */
-                uint32_t rw = atlas->row_words;
-                /* Remove old top row (or_prev_ay0) */
-                if (or_prev_ay0 < atlas->th) {
-                    const uint64_t *old_row = atlas->rows + ((size_t)or_prev_ay0 * rw);
-                    for (uint32_t w = 0; w < rw; w++) {
-                        uint64_t bits = old_row[w];
-                        while (bits) {
-                            uint32_t b = tgrid_ctz64(bits);
-                            uint32_t col = w * 64 + b;
-                            or_refcount[col]--;
-                            if (or_refcount[col] == 0) {
-                                or_mask[w] &= ~(1ULL << b);
-                            }
-                            bits &= bits - 1;
-                        }
-                    }
-                }
-                /* Add new bottom row (ay1 - 1) */
-                uint32_t new_row_y = ay1 - 1;
-                if (new_row_y < atlas->th) {
-                    const uint64_t *new_row = atlas->rows + ((size_t)new_row_y * rw);
-                    for (uint32_t w = 0; w < rw; w++) {
-                        uint64_t bits = new_row[w];
-                        while (bits) {
-                            uint32_t b = tgrid_ctz64(bits);
-                            uint32_t col = w * 64 + b;
-                            if (or_refcount[col] == 0) {
-                                or_mask[w] |= (1ULL << b);
-                            }
-                            or_refcount[col]++;
-                            bits &= bits - 1;
-                        }
-                    }
-                }
-            } else {
-                /* Full recompute: rebuild refcounts and OR-mask from scratch */
-                s_dbg_or_count++;
-                memset(or_refcount, 0, atlas->tw * sizeof(uint16_t));
-                memset(or_mask, 0, (size_t)atlas->row_words * sizeof(uint64_t));
-                for (uint32_t y = ay0; y < ay1 && y < atlas->th; y++) {
-                    const uint64_t *row = atlas->rows + ((size_t)y * atlas->row_words);
+            // #region Incremental x1 OR-mask: slide window or full recompute
+            /* Refresh every s_th/4 steps to limit false rejections from monotone OR.
+             * Lower interval = better packing quality, higher interval = less OR work. */
+            if (or_prev_ay0 != UINT32_MAX && ay0 == or_prev_ay0 + 1 && ay1 == or_prev_ay1 + 1 && or_steps_since_refresh < ((s_th > 4) ? s_th / 4 : 1)) {
+                /* Slide by 1: OR in the new bottom row (conservative — only adds bits) */
+                uint32_t new_row = ay1 - 1;
+                if (new_row < atlas->th) {
+                    const uint64_t *row = atlas->rows + ((size_t)new_row * atlas->row_words);
                     for (uint32_t w = 0; w < atlas->row_words; w++) {
-                        uint64_t bits = row[w];
-                        or_mask[w] |= bits;
-                        while (bits) {
-                            uint32_t b = tgrid_ctz64(bits);
-                            or_refcount[w * 64 + b]++;
-                            bits &= bits - 1;
-                        }
+                        or_mask[w] |= row[w];
                     }
                 }
+                or_steps_since_refresh++;
+            } else {
+                /* Full recompute */
+                s_dbg_or_count++;
+                tgrid_row_or(atlas, ay0, ay1 - ay0, or_mask, atlas->row_words);
+                or_steps_since_refresh = 0;
             }
             or_prev_ay0 = ay0;
             or_prev_ay1 = ay1;
@@ -1329,7 +1289,6 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
 
     free(run_from);
     free(col_free);
-    free(or_refcount);
     free(or_mask_x4);
     free(or_mask);
 
