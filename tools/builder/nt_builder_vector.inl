@@ -310,38 +310,8 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
         }
         // #endregion
 
-        // #region NFP-NFP edge intersections
-        for (uint32_t i = 0; i < nfp_count; i++) {
-            for (uint32_t j = i + 1; j < nfp_count; j++) {
-                if (!vpack_rect_overlap(nfps[i].min_x, nfps[i].min_y, nfps[i].max_x, nfps[i].max_y, nfps[j].min_x, nfps[j].min_y, nfps[j].max_x, nfps[j].max_y)) {
-                    continue;
-                }
-                for (uint32_t ei = 0; ei < nfps[i].count; ei++) {
-                    uint32_t ein = (ei + 1 == nfps[i].count) ? 0 : ei + 1;
-                    int32_t eiax0 = nfps[i].verts[ei].x < nfps[i].verts[ein].x ? nfps[i].verts[ei].x : nfps[i].verts[ein].x;
-                    int32_t eiay0 = nfps[i].verts[ei].y < nfps[i].verts[ein].y ? nfps[i].verts[ei].y : nfps[i].verts[ein].y;
-                    int32_t eiax1 = nfps[i].verts[ei].x > nfps[i].verts[ein].x ? nfps[i].verts[ei].x : nfps[i].verts[ein].x;
-                    int32_t eiay1 = nfps[i].verts[ei].y > nfps[i].verts[ein].y ? nfps[i].verts[ei].y : nfps[i].verts[ein].y;
-
-                    for (uint32_t ej = 0; ej < nfps[j].count; ej++) {
-                        uint32_t ejn = (ej + 1 == nfps[j].count) ? 0 : ej + 1;
-                        int32_t ejbx0 = nfps[j].verts[ej].x < nfps[j].verts[ejn].x ? nfps[j].verts[ej].x : nfps[j].verts[ejn].x;
-                        int32_t ejby0 = nfps[j].verts[ej].y < nfps[j].verts[ejn].y ? nfps[j].verts[ej].y : nfps[j].verts[ejn].y;
-                        int32_t ejbx1 = nfps[j].verts[ej].x > nfps[j].verts[ejn].x ? nfps[j].verts[ej].x : nfps[j].verts[ejn].x;
-                        int32_t ejby1 = nfps[j].verts[ej].y > nfps[j].verts[ejn].y ? nfps[j].verts[ej].y : nfps[j].verts[ejn].y;
-
-                        if (!vpack_rect_overlap(eiax0, eiay0, eiax1, eiay1, ejbx0, ejby0, ejbx1, ejby1))
-                            continue;
-
-                        float ox, oy;
-                        if (vpack_intersect(nfps[i].verts[ei], nfps[i].verts[ein], nfps[j].verts[ej], nfps[j].verts[ejn], &ox, &oy)) {
-                            vpack_add_float_cand(&cands, &cand_count, &cand_cap, ox, oy, &bounds);
-                        }
-                    }
-                }
-            }
-        }
-        // #endregion
+        /* NFP-NFP edge intersections skipped: O(nfp^2 * edges^2) cost for marginal
+         * quality gain. NFP vertices + axis intersections provide sufficient candidates. */
 
         // #region Score candidates by resulting POT page area, then sort
         {
