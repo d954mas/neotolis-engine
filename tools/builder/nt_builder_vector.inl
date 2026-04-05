@@ -308,10 +308,45 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             }
             nfp_count++;
         }
-        // #endregion
+// #endregion
 
-        /* NFP-NFP edge intersections skipped: O(nfp^2 * edges^2) cost for marginal
-         * quality gain. NFP vertices + axis intersections provide sufficient candidates. */
+/* NFP-NFP edge intersections skipped: O(nfp^2 * edges^2) cost for marginal
+ * quality gain. NFP vertices + axis intersections provide sufficient candidates. */
+
+// #region Build spatial grid for NFP lookup
+/* Grid cells of 64px — each cell stores a bitmask of which NFPs overlap it.
+ * Limits point-in-poly tests to NFPs actually covering the candidate position. */
+#define VPACK_GRID_CELL 64
+#define VPACK_GRID_DIM ((4096 / VPACK_GRID_CELL) + 1)           /* 65 cells max */
+#define VPACK_NFP_WORDS ((1528 + 63) / 64)                      /* max sprites per page as 64-bit words */
+        uint64_t nfp_grid[VPACK_GRID_DIM * VPACK_GRID_DIM][24]; /* 24 words = 1536 NFPs max */
+        uint32_t nfp_words = (nfp_count + 63) / 64;
+        if (nfp_count > 0 && nfp_words <= 24) {
+            memset(nfp_grid, 0, sizeof(nfp_grid));
+            for (uint32_t n = 0; n < nfp_count; n++) {
+                int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
+                int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
+                int32_t gx1 = nfps[n].max_x / VPACK_GRID_CELL;
+                int32_t gy1 = nfps[n].max_y / VPACK_GRID_CELL;
+                if (gx0 < 0)
+                    gx0 = 0;
+                if (gy0 < 0)
+                    gy0 = 0;
+                if (gx1 >= VPACK_GRID_DIM)
+                    gx1 = VPACK_GRID_DIM - 1;
+                if (gy1 >= VPACK_GRID_DIM)
+                    gy1 = VPACK_GRID_DIM - 1;
+                uint32_t word = n / 64;
+                uint64_t bit = (uint64_t)1 << (n % 64);
+                for (int32_t gy = gy0; gy <= gy1; gy++) {
+                    for (int32_t gx = gx0; gx <= gx1; gx++) {
+                        nfp_grid[gy * VPACK_GRID_DIM + gx][word] |= bit;
+                    }
+                }
+            }
+        }
+        bool use_grid = (nfp_count > 0 && nfp_words <= 24);
+        // #endregion
 
         // #region Score candidates by resulting POT page area, then sort
         {
@@ -367,12 +402,32 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
 
             /* Collision: candidate must be outside ALL NFPs */
             bool safe = true;
-            for (uint32_t i = 0; i < nfp_count; i++) {
-                if (cx >= nfps[i].min_x && cx <= nfps[i].max_x && cy >= nfps[i].min_y && cy <= nfps[i].max_y) {
-                    stats->test_count++;
-                    if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
-                        safe = false;
-                        break;
+            if (use_grid && cx >= 0 && cy >= 0) {
+                int32_t gcx = cx / VPACK_GRID_CELL;
+                int32_t gcy = cy / VPACK_GRID_CELL;
+                if (gcx < VPACK_GRID_DIM && gcy < VPACK_GRID_DIM) {
+                    uint64_t *cell = nfp_grid[gcy * VPACK_GRID_DIM + gcx];
+                    for (uint32_t w = 0; w < nfp_words && safe; w++) {
+                        uint64_t bits = cell[w];
+                        while (bits) {
+                            uint32_t bit_idx = (uint32_t)__builtin_ctzll(bits);
+                            uint32_t i = w * 64 + bit_idx;
+                            stats->test_count++;
+                            if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
+                                safe = false;
+                            }
+                            bits &= bits - 1; /* clear lowest set bit */
+                        }
+                    }
+                }
+            } else {
+                for (uint32_t i = 0; i < nfp_count; i++) {
+                    if (cx >= nfps[i].min_x && cx <= nfps[i].max_x && cy >= nfps[i].min_y && cy <= nfps[i].max_y) {
+                        stats->test_count++;
+                        if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
+                            safe = false;
+                            break;
+                        }
                     }
                 }
             }
