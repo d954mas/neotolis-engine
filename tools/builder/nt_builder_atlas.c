@@ -16,12 +16,56 @@
 #include <windows.h>
 #endif
 
-/* --- Internal point type for geometry operations --- */
+/* ===================================================================
+ * Atlas Builder — sprite atlas packing pipeline
+ * ===================================================================
+ *
+ * Packs individual sprite images into atlas texture pages.
+ * Produces binary atlas metadata (NtAtlasHeader + regions + vertices)
+ * and RGBA texture pages (fed into the texture encode pipeline).
+ *
+ * -- Pipeline (nt_builder_end_atlas) ----------------------------------
+ *
+ *  pipeline_alpha_trim     Extract alpha plane, find tight bounding box
+ *  pipeline_cache_check    Hash inputs, return early on cache hit
+ *  pipeline_dedup          Detect duplicate sprites (hash + pixels)
+ *  pipeline_geometry       Convex hull -> simplify -> inflate polygon
+ *  --- skip on cache hit ---
+ *  pipeline_tile_pack      Place sprites on atlas pages (tile-grid collision)
+ *  pipeline_compose        Blit trimmed pixels + extrude edges
+ *  pipeline_debug_png      Optional outline visualization
+ *  pipeline_cache_write    Store result for next build
+ *  --- always ---
+ *  pipeline_serialize      Compute atlas UVs, write binary blob
+ *  pipeline_register       Add atlas + texture entries to context
+ *  pipeline_cleanup        Free all temporary allocations
+ *
+ * -- File layout ------------------------------------------------------
+ *
+ *  Toolbox regions contain helper functions grouped by concern.
+ *  Pipeline step functions (pipeline_*) and the orchestrator
+ *  (nt_builder_end_atlas) are at the bottom of the file.
+ *
+ * -- Packing strategy -------------------------------------------------
+ *
+ *  Sprites sorted by area (descending), placed one by one.
+ *  Each sprite alpha silhouette is:
+ *    1. Convex hull (Andrews monotone chain)
+ *    2. Simplified to max_vertices (min-area vertex removal)
+ *    3. Inflated to cover all boundary pixels
+ *    4. Rasterized onto tile grid (1 bit per tile_size x tile_size cell)
+ *
+ *  Placement uses multi-level acceleration:
+ *    - Coarse grid (8x8 tile blocks) for y-skip and x-skip
+ *    - x4 downsampled OR-mask for cheap ty rejection
+ *    - Sparse table OR-mask for O(row_words) exact column check
+ *    - Word-level AND (tgrid_test) for final collision with skip
+ *
+ *  Pages grow dynamically (double smaller dimension).
+ *  New pages only when max_size exhausted (ATLAS-18).
+ * =================================================================== */
 
-typedef struct {
-    int32_t x, y;
-} Point2D;
-
+// #region Alpha trim — extract alpha plane, find tight bounding box
 /* --- Alpha plane: extract dense 1-byte alpha from RGBA --- */
 
 static uint8_t *alpha_plane_extract(const uint8_t *rgba, uint32_t w, uint32_t h) {
@@ -75,7 +119,35 @@ static bool alpha_trim(const uint8_t *alpha, uint32_t w, uint32_t h, uint8_t thr
     *out_h = max_y - min_y + 1;
     return true;
 }
+// #endregion
 
+// #region Duplicate detection — identify identical sprites by hash
+/* --- Duplicate detection sort comparator --- */
+
+typedef struct {
+    uint32_t index;
+    uint64_t hash;
+} DedupSortEntry;
+
+static int dedup_sort_cmp(const void *a, const void *b) {
+    const DedupSortEntry *ea = (const DedupSortEntry *)a;
+    const DedupSortEntry *eb = (const DedupSortEntry *)b;
+    if (ea->hash < eb->hash) {
+        return -1;
+    }
+    if (ea->hash > eb->hash) {
+        return 1;
+    }
+    return 0;
+}
+// #endregion
+
+// #region Geometry — convex hull, simplification, polygon operations
+/* --- Internal point type for geometry operations --- */
+
+typedef struct {
+    int32_t x, y;
+} Point2D;
 /* --- 2D cross product for hull orientation --- */
 
 static int64_t cross2d(Point2D o, Point2D a, Point2D b) { return ((int64_t)(a.x - o.x) * (int64_t)(b.y - o.y)) - ((int64_t)(a.y - o.y) * (int64_t)(b.x - o.x)); }
@@ -146,7 +218,6 @@ static uint32_t convex_hull(const Point2D *pts, uint32_t n, Point2D *out) {
     k--;
     return k;
 }
-
 /* --- Convex hull simplification: min-area vertex removal --- */
 /* Iteratively remove the vertex whose removal adds the smallest triangle area.
  * For convex polygons, removing a vertex always makes the polygon LARGER —
@@ -233,329 +304,6 @@ static uint32_t fan_triangulate(uint32_t vertex_count, uint16_t *indices) {
     }
     return tri_count;
 }
-
-/* --- Tile packer types --- */
-
-/* Maximum number of atlas pages (each page = one texture) */
-#ifndef ATLAS_MAX_PAGES
-#define ATLAS_MAX_PAGES 64
-#endif
-
-/* Sprite placement result after packing */
-typedef struct {
-    uint32_t sprite_index; /* index into original sprite array */
-    uint32_t page;         /* which atlas page (0-based) */
-    uint32_t x, y;         /* placement position in atlas (top-left of cell including extrude) */
-    uint32_t trimmed_w;    /* trimmed sprite width */
-    uint32_t trimmed_h;    /* trimmed sprite height */
-    uint32_t trim_x;       /* trim offset from source image left */
-    uint32_t trim_y;       /* trim offset from source image top */
-    uint8_t rotation;      /* 0=none, 1=90CW, 2=180, 3=270CW */
-} AtlasPlacement;
-
-/* Tile grid: bitset storage, 1 bit per tile cell.
- * Each row is an array of uint64_t words (row_words = ceil(tw/64)).
- * All packing operates at tile resolution for speed.
- * tile_size (e.g. 8) means each cell covers tile_size x tile_size pixels. */
-typedef struct {
-    uint64_t *rows;     /* row_words * th uint64_t words, row-major bitset */
-    uint32_t tw;        /* grid width in tiles */
-    uint32_t th;        /* grid height in tiles */
-    uint32_t row_words; /* ceil(tw / 64) — uint64_t words per row */
-    uint32_t tile_size; /* pixels per tile side */
-} TileGrid;
-
-/* Sort entry for area-descending sort (ATLAS-03) */
-typedef struct {
-    uint32_t index; /* index into sprites[] */
-    uint32_t area;  /* trimmed_w * trimmed_h */
-} AreaSortEntry;
-
-/* --- Tile grid functions --- */
-
-static TileGrid tgrid_create(uint32_t tw, uint32_t th, uint32_t tile_size) {
-    TileGrid g;
-    g.tw = tw;
-    g.th = th;
-    g.row_words = (tw + 63) / 64;
-    g.tile_size = tile_size;
-    g.rows = (uint64_t *)calloc((size_t)g.row_words * th, sizeof(uint64_t));
-    NT_BUILD_ASSERT(g.rows && "tgrid_create: alloc failed");
-    return g;
-}
-
-static void tgrid_free(TileGrid *g) {
-    free(g->rows);
-    g->rows = NULL;
-    g->tw = 0;
-    g->th = 0;
-    g->row_words = 0;
-}
-
-static inline uint8_t tgrid_get(const TileGrid *g, uint32_t tx, uint32_t ty) { return (uint8_t)((g->rows[((size_t)ty * g->row_words) + (tx >> 6)] >> (tx & 63)) & 1); }
-
-static inline void tgrid_set(TileGrid *g, uint32_t tx, uint32_t ty) { g->rows[((size_t)ty * g->row_words) + (tx >> 6)] |= (1ULL << (tx & 63)); }
-
-/* Grow tile grid by doubling the smaller dimension. Copies existing cells.
- * Returns old dimensions via out_old_tw/out_old_th for priority-area scanning. */
-static void tgrid_grow(TileGrid *g, uint32_t max_tw, uint32_t max_th, uint32_t *out_old_tw, uint32_t *out_old_th) {
-    uint32_t old_tw = g->tw;
-    uint32_t old_th = g->th;
-    uint32_t old_rw = g->row_words;
-    *out_old_tw = old_tw;
-    *out_old_th = old_th;
-
-    /* Double the smaller dimension (or width if equal) */
-    uint32_t new_tw = (old_tw <= old_th) ? old_tw * 2 : old_tw;
-    uint32_t new_th = (old_tw <= old_th) ? old_th : old_th * 2;
-    if (new_tw > max_tw) {
-        new_tw = max_tw;
-    }
-    if (new_th > max_th) {
-        new_th = max_th;
-    }
-    uint32_t new_rw = (new_tw + 63) / 64;
-
-    uint64_t *new_rows = (uint64_t *)calloc((size_t)new_rw * new_th, sizeof(uint64_t));
-    NT_BUILD_ASSERT(new_rows && "tgrid_grow: alloc failed");
-
-    /* Copy old rows (word count may differ if width changed) */
-    uint32_t copy_words = (old_rw < new_rw) ? old_rw : new_rw;
-    for (uint32_t y = 0; y < old_th; y++) {
-        memcpy(new_rows + ((size_t)y * new_rw), g->rows + ((size_t)y * old_rw), copy_words * sizeof(uint64_t));
-    }
-
-    free(g->rows);
-    g->rows = new_rows;
-    g->tw = new_tw;
-    g->th = new_th;
-    g->row_words = new_rw;
-}
-
-/* --- Round up to next power of two --- */
-
-static uint32_t next_pot(uint32_t v) {
-    if (v == 0) {
-        return 1;
-    }
-    v--;
-    v |= v >> 1;
-    v |= v >> 2;
-    v |= v >> 4;
-    v |= v >> 8;
-    v |= v >> 16;
-    return v + 1;
-}
-
-/* --- Coarse block grid for scan acceleration --- */
-
-/* Flat 2D grid overlaying a TileGrid at COARSE_SIZE × COARSE_SIZE tile blocks.
- * Each block is classified as EMPTY (all tiles free), FULL (all tiles occupied),
- * or MIXED. Per-row nonfull counts enable O(1) "is this row entirely full?" checks
- * for fast y-skip in scan_region. */
-
-#define COARSE_SHIFT 3                       /* log2(COARSE_SIZE) */
-#define COARSE_SIZE (1U << COARSE_SHIFT)     /* 8 tiles per block */
-
-#define BLOCK_EMPTY 0
-#define BLOCK_MIXED 1
-#define BLOCK_FULL 2
-
-typedef struct {
-    uint8_t *cells;        /* bw × bh array: BLOCK_EMPTY / BLOCK_MIXED / BLOCK_FULL */
-    uint32_t bw, bh;       /* block grid dimensions */
-    uint16_t *row_nonfull;  /* per block-row: count of cells that are NOT FULL */
-} CoarseGrid;
-
-static CoarseGrid coarse_create(uint32_t tw, uint32_t th) {
-    CoarseGrid cg;
-    cg.bw = (tw + COARSE_SIZE - 1) >> COARSE_SHIFT;
-    cg.bh = (th + COARSE_SIZE - 1) >> COARSE_SHIFT;
-    cg.cells = (uint8_t *)calloc((size_t)cg.bw * cg.bh, 1); /* all EMPTY */
-    cg.row_nonfull = (uint16_t *)malloc(cg.bh * sizeof(uint16_t));
-    NT_BUILD_ASSERT(cg.cells && cg.row_nonfull && "coarse_create: alloc failed");
-    for (uint32_t r = 0; r < cg.bh; r++) {
-        cg.row_nonfull[r] = (uint16_t)cg.bw; /* all blocks are EMPTY → all are nonfull */
-    }
-    return cg;
-}
-
-static void coarse_free(CoarseGrid *cg) {
-    free(cg->cells);
-    free(cg->row_nonfull);
-    cg->cells = NULL;
-    cg->row_nonfull = NULL;
-}
-
-/* Classify a single block from the tile grid bitset.
- * Block (bx, by) covers tiles [bx*8 .. bx*8+7] × [by*8 .. by*8+7]. */
-static uint8_t coarse_classify_block(const TileGrid *g, uint32_t bx, uint32_t by) {
-    uint32_t tx0 = bx << COARSE_SHIFT;
-    uint32_t ty0 = by << COARSE_SHIFT;
-    if (tx0 >= g->tw || ty0 >= g->th) {
-        return BLOCK_EMPTY;
-    }
-    uint32_t tx1 = tx0 + COARSE_SIZE;
-    uint32_t ty1 = ty0 + COARSE_SIZE;
-    if (tx1 > g->tw) {
-        tx1 = g->tw;
-    }
-    if (ty1 > g->th) {
-        ty1 = g->th;
-    }
-    bool has_set = false;
-    bool has_clear = false;
-    for (uint32_t ty = ty0; ty < ty1; ty++) {
-        const uint64_t *row = g->rows + ((size_t)ty * g->row_words);
-        for (uint32_t tx = tx0; tx < tx1; tx++) {
-            if (row[tx >> 6] & (1ULL << (tx & 63))) {
-                has_set = true;
-            } else {
-                has_clear = true;
-            }
-            if (has_set && has_clear) {
-                return BLOCK_MIXED;
-            }
-        }
-    }
-    return has_set ? BLOCK_FULL : BLOCK_EMPTY;
-}
-
-/* Rebuild entire coarse grid from tile grid (after growth). */
-static void coarse_rebuild(CoarseGrid *cg, const TileGrid *g) {
-    for (uint32_t by = 0; by < cg->bh; by++) {
-        uint16_t nonfull = 0;
-        for (uint32_t bx = 0; bx < cg->bw; bx++) {
-            uint8_t state = coarse_classify_block(g, bx, by);
-            cg->cells[by * cg->bw + bx] = state;
-            if (state != BLOCK_FULL) {
-                nonfull++;
-            }
-        }
-        cg->row_nonfull[by] = nonfull;
-    }
-}
-
-/* Update coarse grid after stamping a sprite at tile rect [tx0..tx0+stw) × [ty0..ty0+sth). */
-static void coarse_update(CoarseGrid *cg, const TileGrid *g, int32_t tx0, int32_t ty0, uint32_t stw, uint32_t sth) {
-    uint32_t bx0 = (tx0 >= 0) ? ((uint32_t)tx0 >> COARSE_SHIFT) : 0;
-    uint32_t by0 = (ty0 >= 0) ? ((uint32_t)ty0 >> COARSE_SHIFT) : 0;
-    uint32_t bx1 = ((uint32_t)tx0 + stw + COARSE_SIZE - 1) >> COARSE_SHIFT;
-    uint32_t by1 = ((uint32_t)ty0 + sth + COARSE_SIZE - 1) >> COARSE_SHIFT;
-    if (bx1 > cg->bw) {
-        bx1 = cg->bw;
-    }
-    if (by1 > cg->bh) {
-        by1 = cg->bh;
-    }
-    for (uint32_t by = by0; by < by1; by++) {
-        for (uint32_t bx = bx0; bx < bx1; bx++) {
-            uint32_t idx = by * cg->bw + bx;
-            uint8_t old = cg->cells[idx];
-            uint8_t cur = coarse_classify_block(g, bx, by);
-            cg->cells[idx] = cur;
-            if (old != BLOCK_FULL && cur == BLOCK_FULL) {
-                cg->row_nonfull[by]--;
-            } else if (old == BLOCK_FULL && cur != BLOCK_FULL) {
-                cg->row_nonfull[by]++;
-            }
-        }
-    }
-}
-
-/* Grow coarse grid to match a grown tile grid. Rebuilds from scratch. */
-static void coarse_grow(CoarseGrid *cg, const TileGrid *g) {
-    coarse_free(cg);
-    *cg = coarse_create(g->tw, g->th);
-    coarse_rebuild(cg, g);
-}
-
-/* --- x4 downsampled TileGrid (LOD) --- */
-
-/* Build a x4 downsampled TileGrid from src: each dst bit = OR of 4×4 src tiles.
- * Used for cheap OR-mask computation (16× fewer rows×words) and fast collision pre-test. */
-static TileGrid tgrid_downsample_x4(const TileGrid *src) {
-    uint32_t dst_tw = (src->tw + 3) / 4;
-    uint32_t dst_th = (src->th + 3) / 4;
-    TileGrid dst = tgrid_create(dst_tw, dst_th, src->tile_size * 4);
-
-    for (uint32_t dy = 0; dy < dst_th; dy++) {
-        uint64_t *dst_row = dst.rows + ((size_t)dy * dst.row_words);
-        uint32_t sy0 = dy * 4;
-        uint32_t sy1 = sy0 + 4;
-        if (sy1 > src->th) {
-            sy1 = src->th;
-        }
-        for (uint32_t dx = 0; dx < dst_tw; dx++) {
-            uint32_t sx0 = dx * 4;
-            uint32_t sx1 = sx0 + 4;
-            if (sx1 > src->tw) {
-                sx1 = src->tw;
-            }
-            /* OR all bits in the 4×4 source block */
-            bool any_set = false;
-            for (uint32_t sy = sy0; sy < sy1 && !any_set; sy++) {
-                const uint64_t *src_row = src->rows + ((size_t)sy * src->row_words);
-                for (uint32_t sx = sx0; sx < sx1; sx++) {
-                    if (src_row[sx >> 6] & (1ULL << (sx & 63))) {
-                        any_set = true;
-                        break;
-                    }
-                }
-            }
-            if (any_set) {
-                dst_row[dx >> 6] |= (1ULL << (dx & 63));
-            }
-        }
-    }
-    return dst;
-}
-
-/* Update x4 grid after stamping at tile rect [tx0..tx0+stw) × [ty0..ty0+sth).
- * Only reclassifies affected x4 cells. */
-static void tgrid_x4_update(TileGrid *x4, const TileGrid *src, int32_t tx0, int32_t ty0, uint32_t stw, uint32_t sth) {
-    uint32_t dx0 = (tx0 >= 0) ? ((uint32_t)tx0 / 4) : 0;
-    uint32_t dy0 = (ty0 >= 0) ? ((uint32_t)ty0 / 4) : 0;
-    uint32_t dx1 = ((uint32_t)tx0 + stw + 3) / 4;
-    uint32_t dy1 = ((uint32_t)ty0 + sth + 3) / 4;
-    if (dx1 > x4->tw) {
-        dx1 = x4->tw;
-    }
-    if (dy1 > x4->th) {
-        dy1 = x4->th;
-    }
-    for (uint32_t dy = dy0; dy < dy1; dy++) {
-        uint64_t *dst_row = x4->rows + ((size_t)dy * x4->row_words);
-        uint32_t sy0 = dy * 4;
-        uint32_t sy1 = sy0 + 4;
-        if (sy1 > src->th) {
-            sy1 = src->th;
-        }
-        for (uint32_t dx = dx0; dx < dx1; dx++) {
-            uint32_t sx0 = dx * 4;
-            uint32_t sx1 = sx0 + 4;
-            if (sx1 > src->tw) {
-                sx1 = src->tw;
-            }
-            bool any_set = false;
-            for (uint32_t sy = sy0; sy < sy1 && !any_set; sy++) {
-                const uint64_t *src_row = src->rows + ((size_t)sy * src->row_words);
-                for (uint32_t sx = sx0; sx < sx1; sx++) {
-                    if (src_row[sx >> 6] & (1ULL << (sx & 63))) {
-                        any_set = true;
-                        break;
-                    }
-                }
-            }
-            if (any_set) {
-                dst_row[dx >> 6] |= (1ULL << (dx & 63));
-            } else {
-                dst_row[dx >> 6] &= ~(1ULL << (dx & 63));
-            }
-        }
-    }
-}
-
 /* --- Polygon inflation: expand convex hull outward by N pixels --- */
 
 /* Offset each edge outward along its normal, recompute vertices as intersections. */
@@ -644,7 +392,6 @@ static void polygon_rotate(const Point2D *src, uint32_t n, uint8_t rotation, int
         }
     }
 }
-
 /* --- Triangle vs AABB overlap test (Separating Axis Theorem) --- */
 
 /* Project triangle and AABB onto axis, return true if projections are separated. */
@@ -715,7 +462,114 @@ static bool triangle_overlaps_rect(const Point2D tri[3], int32_t rx, int32_t ry,
 
     return true;
 }
+// #endregion
 
+// #region Tile grid — 2D bitset occupancy grid for sprite placement
+
+/* Maximum number of atlas pages (each page = one texture) */
+#ifndef ATLAS_MAX_PAGES
+#define ATLAS_MAX_PAGES 64
+#endif
+
+/* Sprite placement result after packing */
+typedef struct {
+    uint32_t sprite_index; /* index into original sprite array */
+    uint32_t page;         /* which atlas page (0-based) */
+    uint32_t x, y;         /* placement position in atlas (top-left of cell including extrude) */
+    uint32_t trimmed_w;    /* trimmed sprite width */
+    uint32_t trimmed_h;    /* trimmed sprite height */
+    uint32_t trim_x;       /* trim offset from source image left */
+    uint32_t trim_y;       /* trim offset from source image top */
+    uint8_t rotation;      /* 0=none, 1=90CW, 2=180, 3=270CW */
+} AtlasPlacement;
+
+/* Tile grid: bitset storage, 1 bit per tile cell.
+ * Each row is an array of uint64_t words (row_words = ceil(tw/64)).
+ * All packing operates at tile resolution for speed.
+ * tile_size (e.g. 8) means each cell covers tile_size x tile_size pixels. */
+typedef struct {
+    uint64_t *rows;     /* row_words * th uint64_t words, row-major bitset */
+    uint32_t tw;        /* grid width in tiles */
+    uint32_t th;        /* grid height in tiles */
+    uint32_t row_words; /* ceil(tw / 64) — uint64_t words per row */
+    uint32_t tile_size; /* pixels per tile side */
+} TileGrid;
+
+/* --- Tile grid functions --- */
+
+static TileGrid tgrid_create(uint32_t tw, uint32_t th, uint32_t tile_size) {
+    TileGrid g;
+    g.tw = tw;
+    g.th = th;
+    g.row_words = (tw + 63) / 64;
+    g.tile_size = tile_size;
+    g.rows = (uint64_t *)calloc((size_t)g.row_words * th, sizeof(uint64_t));
+    NT_BUILD_ASSERT(g.rows && "tgrid_create: alloc failed");
+    return g;
+}
+
+static void tgrid_free(TileGrid *g) {
+    free(g->rows);
+    g->rows = NULL;
+    g->tw = 0;
+    g->th = 0;
+    g->row_words = 0;
+}
+
+static inline uint8_t tgrid_get(const TileGrid *g, uint32_t tx, uint32_t ty) { return (uint8_t)((g->rows[((size_t)ty * g->row_words) + (tx >> 6)] >> (tx & 63)) & 1); }
+
+static inline void tgrid_set(TileGrid *g, uint32_t tx, uint32_t ty) { g->rows[((size_t)ty * g->row_words) + (tx >> 6)] |= (1ULL << (tx & 63)); }
+
+/* Grow tile grid by doubling the smaller dimension. Copies existing cells.
+ * Returns old dimensions via out_old_tw/out_old_th for priority-area scanning. */
+static void tgrid_grow(TileGrid *g, uint32_t max_tw, uint32_t max_th, uint32_t *out_old_tw, uint32_t *out_old_th) {
+    uint32_t old_tw = g->tw;
+    uint32_t old_th = g->th;
+    uint32_t old_rw = g->row_words;
+    *out_old_tw = old_tw;
+    *out_old_th = old_th;
+
+    /* Double the smaller dimension (or width if equal) */
+    uint32_t new_tw = (old_tw <= old_th) ? old_tw * 2 : old_tw;
+    uint32_t new_th = (old_tw <= old_th) ? old_th : old_th * 2;
+    if (new_tw > max_tw) {
+        new_tw = max_tw;
+    }
+    if (new_th > max_th) {
+        new_th = max_th;
+    }
+    uint32_t new_rw = (new_tw + 63) / 64;
+
+    uint64_t *new_rows = (uint64_t *)calloc((size_t)new_rw * new_th, sizeof(uint64_t));
+    NT_BUILD_ASSERT(new_rows && "tgrid_grow: alloc failed");
+
+    /* Copy old rows (word count may differ if width changed) */
+    uint32_t copy_words = (old_rw < new_rw) ? old_rw : new_rw;
+    for (uint32_t y = 0; y < old_th; y++) {
+        memcpy(new_rows + ((size_t)y * new_rw), g->rows + ((size_t)y * old_rw), copy_words * sizeof(uint64_t));
+    }
+
+    free(g->rows);
+    g->rows = new_rows;
+    g->tw = new_tw;
+    g->th = new_th;
+    g->row_words = new_rw;
+}
+
+/* --- Round up to next power of two --- */
+
+static uint32_t next_pot(uint32_t v) {
+    if (v == 0) {
+        return 1;
+    }
+    v--;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    return v + 1;
+}
 /* --- Rasterize convex hull polygon onto tile grid via fan triangulation --- */
 
 /* Create tile grid from inflated polygon. The polygon vertices are in pixel
@@ -788,7 +642,6 @@ static TileGrid tgrid_from_polygon(const Point2D *hull, uint32_t hull_n, uint32_
 
     return g;
 }
-
 /* --- Tile grid collision test (bitset) --- */
 
 /* Count trailing zeros (portable). Returns 64 if v == 0. */
@@ -954,7 +807,6 @@ static void tgrid_stamp(TileGrid *atlas, const TileGrid *sprite, int32_t tx, int
         }
     }
 }
-
 /* --- Row occupancy OR mask: pre-compute combined mask for quick rejection --- */
 
 /* Build OR of all atlas rows in [y0..y0+h). Result has a bit set if ANY row in the
@@ -973,7 +825,216 @@ static void tgrid_row_or(const TileGrid *g, uint32_t y0, uint32_t h, uint64_t *o
         }
     }
 }
+/* --- x4 downsampled TileGrid (LOD) --- */
 
+/* Build a x4 downsampled TileGrid from src: each dst bit = OR of 4×4 src tiles.
+ * Used for cheap OR-mask computation (16× fewer rows×words) and fast collision pre-test. */
+static TileGrid tgrid_downsample_x4(const TileGrid *src) {
+    uint32_t dst_tw = (src->tw + 3) / 4;
+    uint32_t dst_th = (src->th + 3) / 4;
+    TileGrid dst = tgrid_create(dst_tw, dst_th, src->tile_size * 4);
+
+    for (uint32_t dy = 0; dy < dst_th; dy++) {
+        uint64_t *dst_row = dst.rows + ((size_t)dy * dst.row_words);
+        uint32_t sy0 = dy * 4;
+        uint32_t sy1 = sy0 + 4;
+        if (sy1 > src->th) {
+            sy1 = src->th;
+        }
+        for (uint32_t dx = 0; dx < dst_tw; dx++) {
+            uint32_t sx0 = dx * 4;
+            uint32_t sx1 = sx0 + 4;
+            if (sx1 > src->tw) {
+                sx1 = src->tw;
+            }
+            /* OR all bits in the 4×4 source block */
+            bool any_set = false;
+            for (uint32_t sy = sy0; sy < sy1 && !any_set; sy++) {
+                const uint64_t *src_row = src->rows + ((size_t)sy * src->row_words);
+                for (uint32_t sx = sx0; sx < sx1; sx++) {
+                    if (src_row[sx >> 6] & (1ULL << (sx & 63))) {
+                        any_set = true;
+                        break;
+                    }
+                }
+            }
+            if (any_set) {
+                dst_row[dx >> 6] |= (1ULL << (dx & 63));
+            }
+        }
+    }
+    return dst;
+}
+
+/* Update x4 grid after stamping at tile rect [tx0..tx0+stw) × [ty0..ty0+sth).
+ * Only reclassifies affected x4 cells. */
+static void tgrid_x4_update(TileGrid *x4, const TileGrid *src, int32_t tx0, int32_t ty0, uint32_t stw, uint32_t sth) {
+    uint32_t dx0 = (tx0 >= 0) ? ((uint32_t)tx0 / 4) : 0;
+    uint32_t dy0 = (ty0 >= 0) ? ((uint32_t)ty0 / 4) : 0;
+    uint32_t dx1 = ((uint32_t)tx0 + stw + 3) / 4;
+    uint32_t dy1 = ((uint32_t)ty0 + sth + 3) / 4;
+    if (dx1 > x4->tw) {
+        dx1 = x4->tw;
+    }
+    if (dy1 > x4->th) {
+        dy1 = x4->th;
+    }
+    for (uint32_t dy = dy0; dy < dy1; dy++) {
+        uint64_t *dst_row = x4->rows + ((size_t)dy * x4->row_words);
+        uint32_t sy0 = dy * 4;
+        uint32_t sy1 = sy0 + 4;
+        if (sy1 > src->th) {
+            sy1 = src->th;
+        }
+        for (uint32_t dx = dx0; dx < dx1; dx++) {
+            uint32_t sx0 = dx * 4;
+            uint32_t sx1 = sx0 + 4;
+            if (sx1 > src->tw) {
+                sx1 = src->tw;
+            }
+            bool any_set = false;
+            for (uint32_t sy = sy0; sy < sy1 && !any_set; sy++) {
+                const uint64_t *src_row = src->rows + ((size_t)sy * src->row_words);
+                for (uint32_t sx = sx0; sx < sx1; sx++) {
+                    if (src_row[sx >> 6] & (1ULL << (sx & 63))) {
+                        any_set = true;
+                        break;
+                    }
+                }
+            }
+            if (any_set) {
+                dst_row[dx >> 6] |= (1ULL << (dx & 63));
+            } else {
+                dst_row[dx >> 6] &= ~(1ULL << (dx & 63));
+            }
+        }
+    }
+}
+// #endregion
+
+// #region Scan acceleration — coarse grid, sparse OR table, scan loop
+/* --- Coarse block grid for scan acceleration --- */
+
+/* Flat 2D grid overlaying a TileGrid at COARSE_SIZE × COARSE_SIZE tile blocks.
+ * Each block is classified as EMPTY (all tiles free), FULL (all tiles occupied),
+ * or MIXED. Per-row nonfull counts enable O(1) "is this row entirely full?" checks
+ * for fast y-skip in scan_region. */
+
+#define COARSE_SHIFT 3                       /* log2(COARSE_SIZE) */
+#define COARSE_SIZE (1U << COARSE_SHIFT)     /* 8 tiles per block */
+
+#define BLOCK_EMPTY 0
+#define BLOCK_MIXED 1
+#define BLOCK_FULL 2
+
+typedef struct {
+    uint8_t *cells;        /* bw × bh array: BLOCK_EMPTY / BLOCK_MIXED / BLOCK_FULL */
+    uint32_t bw, bh;       /* block grid dimensions */
+    uint16_t *row_nonfull;  /* per block-row: count of cells that are NOT FULL */
+} CoarseGrid;
+
+static CoarseGrid coarse_create(uint32_t tw, uint32_t th) {
+    CoarseGrid cg;
+    cg.bw = (tw + COARSE_SIZE - 1) >> COARSE_SHIFT;
+    cg.bh = (th + COARSE_SIZE - 1) >> COARSE_SHIFT;
+    cg.cells = (uint8_t *)calloc((size_t)cg.bw * cg.bh, 1); /* all EMPTY */
+    cg.row_nonfull = (uint16_t *)malloc(cg.bh * sizeof(uint16_t));
+    NT_BUILD_ASSERT(cg.cells && cg.row_nonfull && "coarse_create: alloc failed");
+    for (uint32_t r = 0; r < cg.bh; r++) {
+        cg.row_nonfull[r] = (uint16_t)cg.bw; /* all blocks are EMPTY → all are nonfull */
+    }
+    return cg;
+}
+
+static void coarse_free(CoarseGrid *cg) {
+    free(cg->cells);
+    free(cg->row_nonfull);
+    cg->cells = NULL;
+    cg->row_nonfull = NULL;
+}
+
+/* Classify a single block from the tile grid bitset.
+ * Block (bx, by) covers tiles [bx*8 .. bx*8+7] × [by*8 .. by*8+7]. */
+static uint8_t coarse_classify_block(const TileGrid *g, uint32_t bx, uint32_t by) {
+    uint32_t tx0 = bx << COARSE_SHIFT;
+    uint32_t ty0 = by << COARSE_SHIFT;
+    if (tx0 >= g->tw || ty0 >= g->th) {
+        return BLOCK_EMPTY;
+    }
+    uint32_t tx1 = tx0 + COARSE_SIZE;
+    uint32_t ty1 = ty0 + COARSE_SIZE;
+    if (tx1 > g->tw) {
+        tx1 = g->tw;
+    }
+    if (ty1 > g->th) {
+        ty1 = g->th;
+    }
+    bool has_set = false;
+    bool has_clear = false;
+    for (uint32_t ty = ty0; ty < ty1; ty++) {
+        const uint64_t *row = g->rows + ((size_t)ty * g->row_words);
+        for (uint32_t tx = tx0; tx < tx1; tx++) {
+            if (row[tx >> 6] & (1ULL << (tx & 63))) {
+                has_set = true;
+            } else {
+                has_clear = true;
+            }
+            if (has_set && has_clear) {
+                return BLOCK_MIXED;
+            }
+        }
+    }
+    return has_set ? BLOCK_FULL : BLOCK_EMPTY;
+}
+
+/* Rebuild entire coarse grid from tile grid (after growth). */
+static void coarse_rebuild(CoarseGrid *cg, const TileGrid *g) {
+    for (uint32_t by = 0; by < cg->bh; by++) {
+        uint16_t nonfull = 0;
+        for (uint32_t bx = 0; bx < cg->bw; bx++) {
+            uint8_t state = coarse_classify_block(g, bx, by);
+            cg->cells[by * cg->bw + bx] = state;
+            if (state != BLOCK_FULL) {
+                nonfull++;
+            }
+        }
+        cg->row_nonfull[by] = nonfull;
+    }
+}
+
+/* Update coarse grid after stamping a sprite at tile rect [tx0..tx0+stw) × [ty0..ty0+sth). */
+static void coarse_update(CoarseGrid *cg, const TileGrid *g, int32_t tx0, int32_t ty0, uint32_t stw, uint32_t sth) {
+    uint32_t bx0 = (tx0 >= 0) ? ((uint32_t)tx0 >> COARSE_SHIFT) : 0;
+    uint32_t by0 = (ty0 >= 0) ? ((uint32_t)ty0 >> COARSE_SHIFT) : 0;
+    uint32_t bx1 = ((uint32_t)tx0 + stw + COARSE_SIZE - 1) >> COARSE_SHIFT;
+    uint32_t by1 = ((uint32_t)ty0 + sth + COARSE_SIZE - 1) >> COARSE_SHIFT;
+    if (bx1 > cg->bw) {
+        bx1 = cg->bw;
+    }
+    if (by1 > cg->bh) {
+        by1 = cg->bh;
+    }
+    for (uint32_t by = by0; by < by1; by++) {
+        for (uint32_t bx = bx0; bx < bx1; bx++) {
+            uint32_t idx = by * cg->bw + bx;
+            uint8_t old = cg->cells[idx];
+            uint8_t cur = coarse_classify_block(g, bx, by);
+            cg->cells[idx] = cur;
+            if (old != BLOCK_FULL && cur == BLOCK_FULL) {
+                cg->row_nonfull[by]--;
+            } else if (old == BLOCK_FULL && cur != BLOCK_FULL) {
+                cg->row_nonfull[by]++;
+            }
+        }
+    }
+}
+
+/* Grow coarse grid to match a grown tile grid. Rebuilds from scratch. */
+static void coarse_grow(CoarseGrid *cg, const TileGrid *g) {
+    coarse_free(cg);
+    *cg = coarse_create(g->tw, g->th);
+    coarse_rebuild(cg, g);
+}
 /* --- Sparse table for O(1) OR range queries on tile grid rows ---
  * Precompute sparse[k][y] = OR of rows [y, y+2^k) for each level k.
  * Query OR([y0, y0+h)): k = floor(log2(h)), result = sparse[k][y0] | sparse[k][y0+h-2^k].
@@ -1133,20 +1194,22 @@ static uint32_t tgrid_or_next_free(const uint64_t *mask, uint32_t mask_words, ui
     }
     return mask_bits;
 }
-
 /* --- Scan a rectangular region of the atlas grid for a valid placement --- */
 
-/* Debug counters for scan performance analysis */
-static uint64_t s_dbg_or_count;
-static uint64_t s_dbg_test_count;
-static uint64_t s_dbg_yskip_count;
+/* Per-call packing statistics (thread-safe: no static globals) */
+typedef struct {
+    uint64_t or_count;
+    uint64_t test_count;
+    uint64_t yskip_count;
+} PackStats;
 
 /* Try to place a sprite (with given rotation variants) within [ty_min..ty_max) x [tx_min..tx_max).
  * Returns true if placed, with best position in out_tx/out_ty/out_rot.
  * Uses x4 LOD for cheap OR-mask, coarse grid for y-skip/x-skip, sparse table OR-mask + tgrid_test as fallback. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileGrid *atlas_x4, const OrSparseTable *or_st, const TileGrid *rot_sg, const TileGrid *rot_sg_x4, const int32_t *rot_ox,
-                        const int32_t *rot_oy, uint32_t rot_count, uint32_t tx_min, uint32_t ty_min, uint32_t tx_max, uint32_t ty_max, uint32_t *out_tx, uint32_t *out_ty, uint8_t *out_rot) {
+                        const int32_t *rot_oy, uint32_t rot_count, uint32_t tx_min, uint32_t ty_min, uint32_t tx_max, uint32_t ty_max, uint32_t *out_tx, uint32_t *out_ty, uint8_t *out_rot,
+                        PackStats *stats) {
     uint32_t best_tx = UINT32_MAX;
     uint32_t best_ty = UINT32_MAX;
     bool found = false;
@@ -1235,7 +1298,7 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
 
             // #region Y-skip: precomputed band check
             if (cg && by0 < cg->bh && !by0_has_room[by0]) {
-                s_dbg_yskip_count++;
+                stats->yskip_count++;
                 uint32_t next_tile_y = ((by0 + 1) << COARSE_SHIFT);
                 int32_t next_ty = (int32_t)next_tile_y - rot_oy[r];
                 if (next_ty > (int32_t)ty) {
@@ -1272,7 +1335,7 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
             if (or_mask_x4 && atlas_x4) {
                 uint32_t x4_y0 = ay0 / 4;
                 uint32_t x4_h = (ay1 - ay0 + 3) / 4;
-                s_dbg_or_count++;
+                stats->or_count++;
                 tgrid_row_or(atlas_x4, x4_y0, x4_h, or_mask_x4, atlas_x4->row_words);
 
                 /* Check if x4 OR-mask is completely full across scan range → skip ty */
@@ -1295,7 +1358,7 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
             // #endregion
 
             // #region Sparse table OR-mask query: O(row_words) exact lookup
-            s_dbg_or_count++;
+            stats->or_count++;
             or_sparse_query(or_st, ay0, ay1 - ay0, or_mask);
             // #endregion
 
@@ -1352,7 +1415,7 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
 
             x1_check:;
                 uint32_t skip = 0;
-                s_dbg_test_count++;
+                stats->test_count++;
                 if (!tgrid_test(atlas, &rot_sg[r], (int32_t)tx, (int32_t)ty, rot_ox[r], rot_oy[r], &skip)) {
                     int32_t abs_min_tx = (int32_t)tx + rot_ox[r];
                     int32_t abs_min_ty = (int32_t)ty + rot_oy[r];
@@ -1396,7 +1459,15 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
     }
     return found;
 }
+// #endregion
 
+// #region Tile packing — sort sprites by area, place on atlas pages
+
+/* Sort entry for area-descending sort (ATLAS-03) */
+typedef struct {
+    uint32_t index; /* index into sprites[] */
+    uint32_t area;  /* trimmed_w * trimmed_h */
+} AreaSortEntry;
 /* --- Area-descending sort comparator (ATLAS-03) --- */
 
 static int area_sort_cmp(const void *a, const void *b) {
@@ -1416,7 +1487,7 @@ static int area_sort_cmp(const void *a, const void *b) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts,
-                          AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h) {
+                          AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats) {
     uint32_t max_size = opts->max_size;
     uint32_t margin = opts->margin;
     uint32_t extrude = opts->extrude;
@@ -1528,9 +1599,9 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     NT_LOG_INFO("  tile_pack: %u sprites, grid %ux%u tiles (ts=%u), init=%upx", sprite_count, atlas_tw, atlas_th, ts, init_dim);
     double pack_start_time = nt_time_now();
     double last_log_time = pack_start_time;
-    s_dbg_or_count = 0;
-    s_dbg_test_count = 0;
-    s_dbg_yskip_count = 0;
+    stats->or_count = 0;
+    stats->test_count = 0;
+    stats->yskip_count = 0;
 
     for (uint32_t si = 0; si < sprite_count; si++) {
         /* Progress log every 10 seconds */
@@ -1539,8 +1610,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                         sprite_grids[sorted[si].index].th, page_grids[0].tw, page_grids[0].th, page_used_tw[0], page_used_th[0]);
         }
         double sprite_start = nt_time_now();
-        uint64_t or_before = s_dbg_or_count;
-        uint64_t test_before = s_dbg_test_count;
+        uint64_t or_before = stats->or_count;
+        uint64_t test_before = stats->test_count;
         uint32_t idx = sorted[si].index;
         TileGrid *base_sg = &sprite_grids[idx];
         int32_t base_ox = grid_ox[idx];
@@ -1601,7 +1672,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             if (scan_th > page_grids[pi].th) {
                 scan_th = page_grids[pi].th;
             }
-            placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, scan_tw, scan_th, &best_tx, &best_ty, &best_rot);
+            placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, scan_tw, scan_th, &best_tx, &best_ty, &best_rot, stats);
             if (placed) {
                 best_page = pi;
             }
@@ -1634,11 +1705,11 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                 }
 
                 /* Priority area: try old region first to fill gaps */
-                placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, old_tw, old_th, &best_tx, &best_ty, &best_rot);
+                placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, old_tw, old_th, &best_tx, &best_ty, &best_rot, stats);
 
                 /* Then scan used extent */
                 if (!placed) {
-                    placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, g_scan_tw, g_scan_th, &best_tx, &best_ty, &best_rot);
+                    placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, g_scan_tw, g_scan_th, &best_tx, &best_ty, &best_rot, stats);
                 }
 
                 if (placed) {
@@ -1661,7 +1732,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             page_h[new_page] = init_dim;
 
             placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], &page_or_st[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th,
-                                 &best_tx, &best_ty, &best_rot);
+                                 &best_tx, &best_ty, &best_rot, stats);
             if (!placed) {
                 /* New page too small — grow it */
                 while (!placed && (page_grids[new_page].tw < max_tw || page_grids[new_page].th < max_th)) {
@@ -1676,7 +1747,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                     page_w[new_page] = page_grids[new_page].tw * ts;
                     page_h[new_page] = page_grids[new_page].th * ts;
                     placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], &page_or_st[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th,
-                                         &best_tx, &best_ty, &best_rot);
+                                         &best_tx, &best_ty, &best_rot, stats);
                 }
             }
             if (placed) {
@@ -1691,7 +1762,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             double sprite_elapsed = nt_time_now() - sprite_start;
             if (sprite_elapsed > 1.0) {
                 NT_LOG_INFO("  SLOW sprite #%u/%u: %.1fs (or=%llu test=%llu grid=%ux%u stw=%u sth=%u)", si, sprite_count, sprite_elapsed,
-                            (unsigned long long)(s_dbg_or_count - or_before), (unsigned long long)(s_dbg_test_count - test_before), page_grids[best_page].tw, page_grids[best_page].th, rot_sg[best_rot].tw,
+                            (unsigned long long)(stats->or_count - or_before), (unsigned long long)(stats->test_count - test_before), page_grids[best_page].tw, page_grids[best_page].th, rot_sg[best_rot].tw,
                             rot_sg[best_rot].th);
             }
         }
@@ -1793,46 +1864,75 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
 
     double pack_elapsed = nt_time_now() - pack_start_time;
     NT_LOG_INFO("  tile_pack done: %u placed on %u pages in %.1fs (or=%llu test=%llu yskip=%llu)", placement_count, page_count, pack_elapsed,
-                (unsigned long long)s_dbg_or_count, (unsigned long long)s_dbg_test_count, (unsigned long long)s_dbg_yskip_count);
+                (unsigned long long)stats->or_count, (unsigned long long)stats->test_count, (unsigned long long)stats->yskip_count);
 
     *out_page_count = page_count;
     return placement_count;
 }
+// #endregion
 
-/* --- Test-access wrappers (geometry algorithms are static, tests call these) --- */
+// #region Composition — blit trimmed pixels, extrude edges
+/* --- Blit trimmed sprite pixels to atlas page --- */
 
-#ifdef NT_BUILDER_ATLAS_TEST_ACCESS
-bool nt_atlas_test_alpha_trim(const uint8_t *rgba, uint32_t w, uint32_t h, uint8_t threshold, uint32_t *ox, uint32_t *oy, uint32_t *ow, uint32_t *oh) {
-    uint8_t *ap = alpha_plane_extract(rgba, w, h);
-    bool result = alpha_trim(ap, w, h, threshold, ox, oy, ow, oh);
-    free(ap);
-    return result;
-}
-uint32_t nt_atlas_test_convex_hull(const void *pts, uint32_t n, void *out) { return convex_hull((const Point2D *)pts, n, (Point2D *)out); }
-uint32_t nt_atlas_test_rdp_simplify(const void *hull, uint32_t n, uint32_t max_v, void *out) { return hull_simplify((const Point2D *)hull, n, max_v, (Point2D *)out); }
-uint32_t nt_atlas_test_fan_triangulate(uint32_t vc, uint16_t *idx) { return fan_triangulate(vc, idx); }
-#endif
-
-/* --- Atlas sprite array growth --- */
-
-static void atlas_grow_sprites(NtBuildAtlasState *state) {
-    uint32_t new_cap = state->sprite_capacity * 2;
-    NtAtlasSpriteInput *new_arr = (NtAtlasSpriteInput *)realloc(state->sprites, new_cap * sizeof(NtAtlasSpriteInput));
-    NT_BUILD_ASSERT(new_arr && "atlas_grow_sprites: realloc failed");
-    state->sprites = new_arr;
-    state->sprite_capacity = new_cap;
-}
-
-/* --- Extract filename with extension from path (D-06) --- */
-
-static const char *extract_filename(const char *path) {
-    const char *last = path;
-    for (const char *p = path; *p; p++) {
-        if (*p == '/' || *p == '\\') {
-            last = p + 1;
+static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rgba, uint32_t sprite_w, uint32_t trim_x, uint32_t trim_y, uint32_t trim_w, uint32_t trim_h, uint32_t dest_x,
+                        uint32_t dest_y, uint8_t rotation) {
+    /* Blit only non-transparent pixels to avoid overwriting neighbors in polygon mode.
+     * Rotation 0: fast row-scan with run-length memcpy for opaque spans.
+     * Rotations 1/2/3: pixel-by-pixel with coordinate transform + alpha skip. */
+    // #region Rotation 0 fast path: row-wise scan with opaque span memcpy
+    if (rotation == 0) {
+        for (uint32_t sy = 0; sy < trim_h; sy++) {
+            const uint8_t *src_row = &sprite_rgba[((size_t)(trim_y + sy) * sprite_w + trim_x) * 4];
+            uint8_t *dst_row = &page[((size_t)(dest_y + sy) * page_w + dest_x) * 4];
+            uint32_t sx = 0;
+            while (sx < trim_w) {
+                /* Skip transparent pixels */
+                while (sx < trim_w && src_row[sx * 4 + 3] == 0) {
+                    sx++;
+                }
+                if (sx >= trim_w) {
+                    break;
+                }
+                /* Find end of opaque run */
+                uint32_t run_start = sx;
+                while (sx < trim_w && src_row[sx * 4 + 3] != 0) {
+                    sx++;
+                }
+                memcpy(&dst_row[run_start * 4], &src_row[run_start * 4], (size_t)(sx - run_start) * 4);
+            }
+        }
+        return;
+    }
+    // #endregion
+    for (uint32_t sy = 0; sy < trim_h; sy++) {
+        for (uint32_t sx = 0; sx < trim_w; sx++) {
+            const uint8_t *src = &sprite_rgba[((size_t)(trim_y + sy) * sprite_w + trim_x + sx) * 4];
+            if (src[3] == 0) {
+                continue; /* skip fully transparent pixels */
+            }
+            uint32_t dx;
+            uint32_t dy;
+            switch (rotation) {
+            case 1:
+                dx = dest_x + (trim_h - 1 - sy);
+                dy = dest_y + sx;
+                break;
+            case 2:
+                dx = dest_x + (trim_w - 1 - sx);
+                dy = dest_y + (trim_h - 1 - sy);
+                break;
+            case 3:
+                dx = dest_x + sy;
+                dy = dest_y + (trim_w - 1 - sx);
+                break;
+            default:
+                dx = dest_x + sx;
+                dy = dest_y + sy;
+                break;
+            }
+            memcpy(&page[((size_t)dy * page_w + dx) * 4], src, 4);
         }
     }
-    return last;
 }
 
 /* --- Edge extrude: duplicate border pixels outward (ATLAS-11) --- */
@@ -1890,7 +1990,9 @@ static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint3
     }
     // #endregion
 }
+// #endregion
 
+// #region Debug PNG — optional outline visualization
 /* --- Debug PNG: draw 2px outline around region (D-09, D-10) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2006,213 +2108,9 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
         debug_draw_line(page, pw, ph, ax0, ay0, ax1, ay1, color);
     }
 }
+// #endregion
 
-/* --- Blit trimmed sprite pixels to atlas page --- */
-
-static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rgba, uint32_t sprite_w, uint32_t trim_x, uint32_t trim_y, uint32_t trim_w, uint32_t trim_h, uint32_t dest_x,
-                        uint32_t dest_y, uint8_t rotation) {
-    /* Blit only non-transparent pixels to avoid overwriting neighbors in polygon mode.
-     * Rotation 0: fast row-scan with run-length memcpy for opaque spans.
-     * Rotations 1/2/3: pixel-by-pixel with coordinate transform + alpha skip. */
-    // #region Rotation 0 fast path: row-wise scan with opaque span memcpy
-    if (rotation == 0) {
-        for (uint32_t sy = 0; sy < trim_h; sy++) {
-            const uint8_t *src_row = &sprite_rgba[((size_t)(trim_y + sy) * sprite_w + trim_x) * 4];
-            uint8_t *dst_row = &page[((size_t)(dest_y + sy) * page_w + dest_x) * 4];
-            uint32_t sx = 0;
-            while (sx < trim_w) {
-                /* Skip transparent pixels */
-                while (sx < trim_w && src_row[sx * 4 + 3] == 0) {
-                    sx++;
-                }
-                if (sx >= trim_w) {
-                    break;
-                }
-                /* Find end of opaque run */
-                uint32_t run_start = sx;
-                while (sx < trim_w && src_row[sx * 4 + 3] != 0) {
-                    sx++;
-                }
-                memcpy(&dst_row[run_start * 4], &src_row[run_start * 4], (size_t)(sx - run_start) * 4);
-            }
-        }
-        return;
-    }
-    // #endregion
-    for (uint32_t sy = 0; sy < trim_h; sy++) {
-        for (uint32_t sx = 0; sx < trim_w; sx++) {
-            const uint8_t *src = &sprite_rgba[((size_t)(trim_y + sy) * sprite_w + trim_x + sx) * 4];
-            if (src[3] == 0) {
-                continue; /* skip fully transparent pixels */
-            }
-            uint32_t dx;
-            uint32_t dy;
-            switch (rotation) {
-            case 1:
-                dx = dest_x + (trim_h - 1 - sy);
-                dy = dest_y + sx;
-                break;
-            case 2:
-                dx = dest_x + (trim_w - 1 - sx);
-                dy = dest_y + (trim_h - 1 - sy);
-                break;
-            case 3:
-                dx = dest_x + sy;
-                dy = dest_y + (trim_w - 1 - sx);
-                break;
-            default:
-                dx = dest_x + sx;
-                dy = dest_y + sy;
-                break;
-            }
-            memcpy(&page[((size_t)dy * page_w + dx) * 4], src, 4);
-        }
-    }
-}
-
-/* --- Atlas API --- */
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_atlas_opts_t *opts) {
-    NT_BUILD_ASSERT(ctx && "begin_atlas: ctx is NULL");
-    NT_BUILD_ASSERT(name && "begin_atlas: name is NULL");
-    NT_BUILD_ASSERT(!ctx->active_atlas && "begin_atlas: nested atlas not allowed");
-
-    NtBuildAtlasState *state = (NtBuildAtlasState *)calloc(1, sizeof(NtBuildAtlasState));
-    NT_BUILD_ASSERT(state && "begin_atlas: alloc failed");
-
-    state->name = strdup(name);
-    NT_BUILD_ASSERT(state->name && "begin_atlas: strdup failed");
-
-    /* Copy opts or use defaults */
-    if (opts) {
-        state->opts = *opts;
-        /* Handle compress pointer: deep-copy, then zero pointer in opts */
-        if (opts->compress) {
-            state->compress = *opts->compress;
-            state->has_compress = true;
-        }
-    } else {
-        state->opts = nt_atlas_opts_defaults();
-    }
-    state->opts.compress = NULL; /* zeroed -- use has_compress flag */
-    NT_BUILD_ASSERT(state->opts.max_vertices <= 32 && "begin_atlas: max_vertices must be <= 32 (tile grid index buffer limit)");
-    NT_BUILD_ASSERT(state->opts.tile_size > 0 && state->opts.tile_size <= 32 && "begin_atlas: tile_size must be 1-32");
-
-    /* Initialize sprite array */
-    state->sprite_capacity = 64;
-    state->sprites = (NtAtlasSpriteInput *)calloc(state->sprite_capacity, sizeof(NtAtlasSpriteInput));
-    NT_BUILD_ASSERT(state->sprites && "begin_atlas: alloc failed");
-    state->sprite_count = 0;
-
-    ctx->active_atlas = state;
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const char *name_override) {
-    NT_BUILD_ASSERT(ctx && path && "atlas_add: invalid args");
-    NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add: no active atlas (call begin_atlas first)");
-
-    NtBuildAtlasState *state = ctx->active_atlas;
-
-    /* Resolve file path via asset roots */
-    char *resolved_path = nt_builder_find_file(path, NULL, ctx);
-    const char *read_path = resolved_path ? resolved_path : path;
-
-    /* Read file */
-    uint32_t file_size = 0;
-    uint8_t *file_data = (uint8_t *)nt_builder_read_file(read_path, &file_size);
-    NT_BUILD_ASSERT(file_data && "atlas_add: failed to read file");
-    free(resolved_path);
-
-    /* Decode PNG via stb_image (force RGBA) */
-    int w = 0;
-    int h = 0;
-    int channels = 0;
-    uint8_t *pixels = stbi_load_from_memory(file_data, (int)file_size, &w, &h, &channels, 4);
-    free(file_data);
-    NT_BUILD_ASSERT(pixels && "atlas_add: stbi_load_from_memory failed");
-
-    /* Determine region name (D-06, D-07) */
-    const char *region_name = name_override ? name_override : extract_filename(path);
-
-    /* Compute decoded hash */
-    uint64_t decoded_hash = nt_hash64(pixels, (uint32_t)w * (uint32_t)h * 4).value;
-
-    /* Grow array if needed */
-    if (state->sprite_count >= state->sprite_capacity) {
-        atlas_grow_sprites(state);
-    }
-
-    /* Fill sprite input */
-    NtAtlasSpriteInput *sprite = &state->sprites[state->sprite_count++];
-    sprite->rgba = pixels; /* take ownership */
-    sprite->width = (uint32_t)w;
-    sprite->height = (uint32_t)h;
-    sprite->name = strdup(region_name);
-    NT_BUILD_ASSERT(sprite->name && "atlas_add: strdup failed");
-    sprite->origin_x = 0.5F;
-    sprite->origin_y = 0.5F;
-    sprite->decoded_hash = decoded_hash;
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *name) {
-    NT_BUILD_ASSERT(ctx && rgba_pixels && "atlas_add_raw: invalid args");
-    NT_BUILD_ASSERT(name && "atlas_add_raw: name is required for raw pixels (D-07)");
-    NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_raw: no active atlas (call begin_atlas first)");
-
-    NtBuildAtlasState *state = ctx->active_atlas;
-
-    /* Deep-copy RGBA pixels */
-    uint32_t pixel_bytes = width * height * 4;
-    uint8_t *pixels = (uint8_t *)malloc(pixel_bytes);
-    NT_BUILD_ASSERT(pixels && "atlas_add_raw: alloc failed");
-    memcpy(pixels, rgba_pixels, pixel_bytes);
-
-    /* Compute decoded hash */
-    uint64_t decoded_hash = nt_hash64(pixels, pixel_bytes).value;
-
-    /* Grow array if needed */
-    if (state->sprite_count >= state->sprite_capacity) {
-        atlas_grow_sprites(state);
-    }
-
-    /* Fill sprite input */
-    NtAtlasSpriteInput *sprite = &state->sprites[state->sprite_count++];
-    sprite->rgba = pixels;
-    sprite->width = width;
-    sprite->height = height;
-    sprite->name = strdup(name);
-    NT_BUILD_ASSERT(sprite->name && "atlas_add_raw: strdup failed");
-    sprite->origin_x = 0.5F;
-    sprite->origin_y = 0.5F;
-    sprite->decoded_hash = decoded_hash;
-}
-
-/* --- Glob callback for atlas --- */
-
-typedef struct {
-    NtBuilderContext *ctx;
-    uint32_t match_count;
-} AtlasGlobData;
-
-static void atlas_glob_callback(const char *full_path, void *user) {
-    AtlasGlobData *d = (AtlasGlobData *)user;
-    d->match_count++;
-    nt_builder_atlas_add(d->ctx, full_path, NULL);
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern) {
-    NT_BUILD_ASSERT(ctx && pattern && "atlas_add_glob: invalid args");
-    NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_glob: no active atlas");
-
-    AtlasGlobData data = {.ctx = ctx, .match_count = 0};
-    NT_BUILD_ASSERT(nt_builder_glob_iterate(pattern, atlas_glob_callback, &data) && "atlas_add_glob: glob overflow");
-    NT_BUILD_ASSERT(data.match_count > 0 && "atlas_add_glob: no files matched pattern");
-}
-
+// #region Atlas cache — disk caching for incremental builds
 /* --- uint64_t sort comparator for atlas cache key (D-13) --- */
 
 static int uint64_cmp(const void *a, const void *b) {
@@ -2416,104 +2314,300 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, AtlasPla
     *out_page_pixels = page_pixels_arr;
     return true;
 }
+// #endregion
 
-/* --- Duplicate detection sort comparator --- */
+/* --- Test-access wrappers (geometry algorithms are static, tests call these) --- */
 
-typedef struct {
-    uint32_t index;
-    uint64_t hash;
-} DedupSortEntry;
+#ifdef NT_BUILDER_ATLAS_TEST_ACCESS
+bool nt_atlas_test_alpha_trim(const uint8_t *rgba, uint32_t w, uint32_t h, uint8_t threshold, uint32_t *ox, uint32_t *oy, uint32_t *ow, uint32_t *oh) {
+    uint8_t *ap = alpha_plane_extract(rgba, w, h);
+    bool result = alpha_trim(ap, w, h, threshold, ox, oy, ow, oh);
+    free(ap);
+    return result;
+}
+uint32_t nt_atlas_test_convex_hull(const void *pts, uint32_t n, void *out) { return convex_hull((const Point2D *)pts, n, (Point2D *)out); }
+uint32_t nt_atlas_test_rdp_simplify(const void *hull, uint32_t n, uint32_t max_v, void *out) { return hull_simplify((const Point2D *)hull, n, max_v, (Point2D *)out); }
+uint32_t nt_atlas_test_fan_triangulate(uint32_t vc, uint16_t *idx) { return fan_triangulate(vc, idx); }
+#endif
 
-static int dedup_sort_cmp(const void *a, const void *b) {
-    const DedupSortEntry *ea = (const DedupSortEntry *)a;
-    const DedupSortEntry *eb = (const DedupSortEntry *)b;
-    if (ea->hash < eb->hash) {
-        return -1;
-    }
-    if (ea->hash > eb->hash) {
-        return 1;
-    }
-    return 0;
+// #region Atlas public API — begin, add, end
+/* --- Atlas sprite array growth --- */
+
+static void atlas_grow_sprites(NtBuildAtlasState *state) {
+    uint32_t new_cap = state->sprite_capacity * 2;
+    NtAtlasSpriteInput *new_arr = (NtAtlasSpriteInput *)realloc(state->sprites, new_cap * sizeof(NtAtlasSpriteInput));
+    NT_BUILD_ASSERT(new_arr && "atlas_grow_sprites: realloc failed");
+    state->sprites = new_arr;
+    state->sprite_capacity = new_cap;
 }
 
-/* --- end_atlas: the main atlas pipeline --- */
+/* --- Extract filename with extension from path (D-06) --- */
+
+static const char *extract_filename(const char *path) {
+    const char *last = path;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/' || *p == '\\') {
+            last = p + 1;
+        }
+    }
+    return last;
+}
+
+/* --- Atlas API --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_builder_end_atlas(NtBuilderContext *ctx) {
-    NT_BUILD_ASSERT(ctx && "end_atlas: ctx is NULL");
-    NT_BUILD_ASSERT(ctx->active_atlas && "end_atlas: no active atlas");
+void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_atlas_opts_t *opts) {
+    NT_BUILD_ASSERT(ctx && "begin_atlas: ctx is NULL");
+    NT_BUILD_ASSERT(name && "begin_atlas: name is NULL");
+    NT_BUILD_ASSERT(!ctx->active_atlas && "begin_atlas: nested atlas not allowed");
+
+    NtBuildAtlasState *state = (NtBuildAtlasState *)calloc(1, sizeof(NtBuildAtlasState));
+    NT_BUILD_ASSERT(state && "begin_atlas: alloc failed");
+
+    state->name = strdup(name);
+    NT_BUILD_ASSERT(state->name && "begin_atlas: strdup failed");
+
+    /* Copy opts or use defaults */
+    if (opts) {
+        state->opts = *opts;
+        /* Handle compress pointer: deep-copy, then zero pointer in opts */
+        if (opts->compress) {
+            state->compress = *opts->compress;
+            state->has_compress = true;
+        }
+    } else {
+        state->opts = nt_atlas_opts_defaults();
+    }
+    state->opts.compress = NULL; /* zeroed -- use has_compress flag */
+    NT_BUILD_ASSERT(state->opts.max_vertices <= 32 && "begin_atlas: max_vertices must be <= 32 (tile grid index buffer limit)");
+    NT_BUILD_ASSERT(state->opts.tile_size > 0 && state->opts.tile_size <= 32 && "begin_atlas: tile_size must be 1-32");
+
+    /* Initialize sprite array */
+    state->sprite_capacity = 64;
+    state->sprites = (NtAtlasSpriteInput *)calloc(state->sprite_capacity, sizeof(NtAtlasSpriteInput));
+    NT_BUILD_ASSERT(state->sprites && "begin_atlas: alloc failed");
+    state->sprite_count = 0;
+
+    ctx->active_atlas = state;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const char *name_override) {
+    NT_BUILD_ASSERT(ctx && path && "atlas_add: invalid args");
+    NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add: no active atlas (call begin_atlas first)");
 
     NtBuildAtlasState *state = ctx->active_atlas;
-    NT_BUILD_ASSERT(state->sprite_count > 0 && "end_atlas: atlas has no sprites");
 
-    uint32_t sprite_count = state->sprite_count;
-    NtAtlasSpriteInput *sprites = state->sprites;
-    const nt_atlas_opts_t *opts = &state->opts;
+    /* Resolve file path via asset roots */
+    char *resolved_path = nt_builder_find_file(path, NULL, ctx);
+    const char *read_path = resolved_path ? resolved_path : path;
 
-    NT_LOG_INFO("  end_atlas: %u sprites, starting pipeline...", sprite_count);
-    double bench_pipeline_start = nt_time_now();
-    // #region Step 1: Extract alpha planes + alpha-trim all sprites (ATLAS-05)
-    uint32_t *trim_x = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
-    uint32_t *trim_y = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
-    uint32_t *trim_w = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
-    uint32_t *trim_h = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
-    uint8_t **alpha_planes = (uint8_t **)calloc(sprite_count, sizeof(uint8_t *));
-    NT_BUILD_ASSERT(trim_x && trim_y && trim_w && trim_h && alpha_planes && "end_atlas: alloc failed");
+    /* Read file */
+    uint32_t file_size = 0;
+    uint8_t *file_data = (uint8_t *)nt_builder_read_file(read_path, &file_size);
+    NT_BUILD_ASSERT(file_data && "atlas_add: failed to read file");
+    free(resolved_path);
 
-    for (uint32_t i = 0; i < sprite_count; i++) {
-        alpha_planes[i] = alpha_plane_extract(sprites[i].rgba, sprites[i].width, sprites[i].height);
-        bool has_pixels = alpha_trim(alpha_planes[i], sprites[i].width, sprites[i].height, opts->alpha_threshold, &trim_x[i], &trim_y[i], &trim_w[i], &trim_h[i]);
-        NT_BUILD_ASSERT(has_pixels && "end_atlas: sprite is fully transparent");
+    /* Decode PNG via stb_image (force RGBA) */
+    int w = 0;
+    int h = 0;
+    int channels = 0;
+    uint8_t *pixels = stbi_load_from_memory(file_data, (int)file_size, &w, &h, &channels, 4);
+    free(file_data);
+    NT_BUILD_ASSERT(pixels && "atlas_add: stbi_load_from_memory failed");
+
+    /* Determine region name (D-06, D-07) */
+    const char *region_name = name_override ? name_override : extract_filename(path);
+
+    /* Compute decoded hash */
+    uint64_t decoded_hash = nt_hash64(pixels, (uint32_t)w * (uint32_t)h * 4).value;
+
+    /* Grow array if needed */
+    if (state->sprite_count >= state->sprite_capacity) {
+        atlas_grow_sprites(state);
     }
-    // #endregion
-    double bench_alpha_trim = nt_time_now() - bench_pipeline_start;
 
-    // #region Atlas cache key computation (D-13)
-    state->cache_key = compute_atlas_cache_key(sprites, sprite_count, opts, state->has_compress, &state->compress);
-    // #endregion
+    /* Fill sprite input */
+    NtAtlasSpriteInput *sprite = &state->sprites[state->sprite_count++];
+    sprite->rgba = pixels; /* take ownership */
+    sprite->width = (uint32_t)w;
+    sprite->height = (uint32_t)h;
+    sprite->name = strdup(region_name);
+    NT_BUILD_ASSERT(sprite->name && "atlas_add: strdup failed");
+    sprite->origin_x = 0.5F;
+    sprite->origin_y = 0.5F;
+    sprite->decoded_hash = decoded_hash;
+}
 
-    double bench_dedup_start = nt_time_now();
-    // #region Step 2: Duplicate detection (ATLAS-12)
-    DedupSortEntry *dedup_entries = (DedupSortEntry *)malloc(sprite_count * sizeof(DedupSortEntry));
-    NT_BUILD_ASSERT(dedup_entries && "end_atlas: alloc failed");
-    for (uint32_t i = 0; i < sprite_count; i++) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *name) {
+    NT_BUILD_ASSERT(ctx && rgba_pixels && "atlas_add_raw: invalid args");
+    NT_BUILD_ASSERT(name && "atlas_add_raw: name is required for raw pixels (D-07)");
+    NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_raw: no active atlas (call begin_atlas first)");
+
+    NtBuildAtlasState *state = ctx->active_atlas;
+
+    /* Deep-copy RGBA pixels */
+    uint32_t pixel_bytes = width * height * 4;
+    uint8_t *pixels = (uint8_t *)malloc(pixel_bytes);
+    NT_BUILD_ASSERT(pixels && "atlas_add_raw: alloc failed");
+    memcpy(pixels, rgba_pixels, pixel_bytes);
+
+    /* Compute decoded hash */
+    uint64_t decoded_hash = nt_hash64(pixels, pixel_bytes).value;
+
+    /* Grow array if needed */
+    if (state->sprite_count >= state->sprite_capacity) {
+        atlas_grow_sprites(state);
+    }
+
+    /* Fill sprite input */
+    NtAtlasSpriteInput *sprite = &state->sprites[state->sprite_count++];
+    sprite->rgba = pixels;
+    sprite->width = width;
+    sprite->height = height;
+    sprite->name = strdup(name);
+    NT_BUILD_ASSERT(sprite->name && "atlas_add_raw: strdup failed");
+    sprite->origin_x = 0.5F;
+    sprite->origin_y = 0.5F;
+    sprite->decoded_hash = decoded_hash;
+}
+
+/* --- Glob callback for atlas --- */
+
+typedef struct {
+    NtBuilderContext *ctx;
+    uint32_t match_count;
+} AtlasGlobData;
+
+static void atlas_glob_callback(const char *full_path, void *user) {
+    AtlasGlobData *d = (AtlasGlobData *)user;
+    d->match_count++;
+    nt_builder_atlas_add(d->ctx, full_path, NULL);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern) {
+    NT_BUILD_ASSERT(ctx && pattern && "atlas_add_glob: invalid args");
+    NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_glob: no active atlas");
+
+    AtlasGlobData data = {.ctx = ctx, .match_count = 0};
+    NT_BUILD_ASSERT(nt_builder_glob_iterate(pattern, atlas_glob_callback, &data) && "atlas_add_glob: glob overflow");
+    NT_BUILD_ASSERT(data.match_count > 0 && "atlas_add_glob: no files matched pattern");
+}
+// #endregion
+
+// #region Main pipeline — nt_builder_end_atlas
+
+/* --- Pipeline state: carries data between pipeline steps --- */
+
+typedef struct {
+    NtBuilderContext *ctx;
+    NtBuildAtlasState *state;
+    uint32_t sprite_count;
+    NtAtlasSpriteInput *sprites;
+    const nt_atlas_opts_t *opts;
+
+    /* Alpha trim */
+    uint32_t *trim_x, *trim_y, *trim_w, *trim_h;
+    uint8_t **alpha_planes;
+
+    /* Dedup */
+    int32_t *dedup_map;
+    uint32_t *unique_indices;
+    uint32_t unique_count;
+
+    /* Geometry */
+    uint32_t *vertex_counts;
+    Point2D **hull_vertices;
+
+    /* Packing + composition */
+    AtlasPlacement *placements;
+    uint32_t placement_count;
+    uint32_t page_count;
+    uint32_t page_w[ATLAS_MAX_PAGES];
+    uint32_t page_h[ATLAS_MAX_PAGES];
+    uint8_t **page_pixels;
+    bool cache_hit;
+
+    /* Packing statistics (per-call, no static globals) */
+    PackStats stats;
+} AtlasPipeline;
+
+/* --- pipeline_alpha_trim: extract alpha planes + find tight bounding box --- */
+
+static void pipeline_alpha_trim(AtlasPipeline *p) {
+    p->trim_x = (uint32_t *)calloc(p->sprite_count, sizeof(uint32_t));
+    p->trim_y = (uint32_t *)calloc(p->sprite_count, sizeof(uint32_t));
+    p->trim_w = (uint32_t *)calloc(p->sprite_count, sizeof(uint32_t));
+    p->trim_h = (uint32_t *)calloc(p->sprite_count, sizeof(uint32_t));
+    p->alpha_planes = (uint8_t **)calloc(p->sprite_count, sizeof(uint8_t *));
+    NT_BUILD_ASSERT(p->trim_x && p->trim_y && p->trim_w && p->trim_h && p->alpha_planes && "pipeline_alpha_trim: alloc failed");
+
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        p->alpha_planes[i] = alpha_plane_extract(p->sprites[i].rgba, p->sprites[i].width, p->sprites[i].height);
+        bool has_pixels = alpha_trim(p->alpha_planes[i], p->sprites[i].width, p->sprites[i].height, p->opts->alpha_threshold, &p->trim_x[i], &p->trim_y[i], &p->trim_w[i], &p->trim_h[i]);
+        NT_BUILD_ASSERT(has_pixels && "pipeline_alpha_trim: sprite is fully transparent");
+    }
+}
+
+/* --- pipeline_cache_check: compute cache key and try loading cached result --- */
+
+static void pipeline_cache_check(AtlasPipeline *p) {
+    p->state->cache_key = compute_atlas_cache_key(p->sprites, p->sprite_count, p->opts, p->state->has_compress, &p->state->compress);
+
+    if (p->ctx->cache_dir) {
+        p->cache_hit = atlas_cache_read(p->ctx->cache_dir, p->state->cache_key, &p->placements, &p->placement_count, p->page_w, p->page_h, &p->page_count, &p->page_pixels);
+        if (p->cache_hit) {
+            NT_LOG_INFO("Atlas cache hit: %s (key %016llx)", p->state->name, (unsigned long long)p->state->cache_key);
+        }
+    }
+}
+
+/* --- pipeline_dedup: detect duplicate sprites by hash + pixel comparison --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void pipeline_dedup(AtlasPipeline *p) {
+    DedupSortEntry *dedup_entries = (DedupSortEntry *)malloc(p->sprite_count * sizeof(DedupSortEntry));
+    NT_BUILD_ASSERT(dedup_entries && "pipeline_dedup: alloc failed");
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
         dedup_entries[i].index = i;
-        dedup_entries[i].hash = sprites[i].decoded_hash;
+        dedup_entries[i].hash = p->sprites[i].decoded_hash;
     }
-    qsort(dedup_entries, sprite_count, sizeof(DedupSortEntry), dedup_sort_cmp);
+    qsort(dedup_entries, p->sprite_count, sizeof(DedupSortEntry), dedup_sort_cmp);
 
     /* Map duplicate -> original. -1 = unique. */
-    int32_t *dedup_map = (int32_t *)malloc(sprite_count * sizeof(int32_t));
-    NT_BUILD_ASSERT(dedup_map && "end_atlas: alloc failed");
-    for (uint32_t i = 0; i < sprite_count; i++) {
-        dedup_map[i] = -1;
+    p->dedup_map = (int32_t *)malloc(p->sprite_count * sizeof(int32_t));
+    NT_BUILD_ASSERT(p->dedup_map && "pipeline_dedup: alloc failed");
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        p->dedup_map[i] = -1;
     }
 
-    for (uint32_t i = 1; i < sprite_count; i++) {
+    for (uint32_t i = 1; i < p->sprite_count; i++) {
         if (dedup_entries[i].hash == dedup_entries[i - 1].hash) {
             uint32_t curr_idx = dedup_entries[i].index;
             uint32_t prev_idx = dedup_entries[i - 1].index;
             /* Find the original (follow chain) */
             uint32_t orig = prev_idx;
-            while (dedup_map[orig] >= 0) {
-                orig = (uint32_t)dedup_map[orig];
+            while (p->dedup_map[orig] >= 0) {
+                orig = (uint32_t)p->dedup_map[orig];
             }
             /* Verify trimmed pixels match (dims + byte-level comparison) */
-            if (trim_w[curr_idx] == trim_w[orig] && trim_h[curr_idx] == trim_h[orig]) {
+            if (p->trim_w[curr_idx] == p->trim_w[orig] && p->trim_h[curr_idx] == p->trim_h[orig]) {
                 bool pixels_match = true;
-                uint32_t tw = trim_w[curr_idx];
-                uint32_t th = trim_h[curr_idx];
+                uint32_t tw = p->trim_w[curr_idx];
+                uint32_t th = p->trim_h[curr_idx];
                 for (uint32_t row = 0; row < th && pixels_match; row++) {
-                    size_t off_a = (((size_t)(trim_y[curr_idx] + row) * sprites[curr_idx].width) + trim_x[curr_idx]) * 4;
-                    size_t off_b = (((size_t)(trim_y[orig] + row) * sprites[orig].width) + trim_x[orig]) * 4;
-                    const uint8_t *row_a = sprites[curr_idx].rgba + off_a;
-                    const uint8_t *row_b = sprites[orig].rgba + off_b;
+                    size_t off_a = (((size_t)(p->trim_y[curr_idx] + row) * p->sprites[curr_idx].width) + p->trim_x[curr_idx]) * 4;
+                    size_t off_b = (((size_t)(p->trim_y[orig] + row) * p->sprites[orig].width) + p->trim_x[orig]) * 4;
+                    const uint8_t *row_a = p->sprites[curr_idx].rgba + off_a;
+                    const uint8_t *row_b = p->sprites[orig].rgba + off_b;
                     if (memcmp(row_a, row_b, ((size_t)tw) * 4) != 0) {
                         pixels_match = false;
                     }
                 }
                 if (pixels_match) {
-                    dedup_map[curr_idx] = (int32_t)orig;
+                    p->dedup_map[curr_idx] = (int32_t)orig;
                 }
             }
         }
@@ -2521,53 +2615,52 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     free(dedup_entries);
 
     /* Count unique sprites */
-    uint32_t unique_count = 0;
-    uint32_t *unique_indices = (uint32_t *)malloc(sprite_count * sizeof(uint32_t));
-    NT_BUILD_ASSERT(unique_indices && "end_atlas: alloc failed");
-    for (uint32_t i = 0; i < sprite_count; i++) {
-        if (dedup_map[i] < 0) {
-            unique_indices[unique_count++] = i;
+    p->unique_count = 0;
+    p->unique_indices = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(p->unique_indices && "pipeline_dedup: alloc failed");
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        if (p->dedup_map[i] < 0) {
+            p->unique_indices[p->unique_count++] = i;
         }
     }
-    // #endregion
-    double bench_dedup = nt_time_now() - bench_dedup_start;
+}
 
-    NT_LOG_INFO("  prep: %u sprites (%u unique), starting geometry...", sprite_count, unique_count);
-    double geom_start = nt_time_now();
-    // #region Step 3: Geometry (convex hull + simplification) (ATLAS-06, ATLAS-07)
-    /* For each unique sprite, compute hull vertices */
-    uint32_t *vertex_counts = (uint32_t *)calloc(sprite_count, sizeof(uint32_t));
-    Point2D **hull_vertices = (Point2D **)calloc(sprite_count, sizeof(Point2D *));
-    NT_BUILD_ASSERT(vertex_counts && hull_vertices && "end_atlas: alloc failed");
+/* --- pipeline_geometry: convex hull + simplification + inflation per unique sprite --- */
 
-    for (uint32_t ui = 0; ui < unique_count; ui++) {
-        uint32_t idx = unique_indices[ui];
-        uint32_t tw = trim_w[idx];
-        uint32_t th = trim_h[idx];
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void pipeline_geometry(AtlasPipeline *p) {
+    p->vertex_counts = (uint32_t *)calloc(p->sprite_count, sizeof(uint32_t));
+    p->hull_vertices = (Point2D **)calloc(p->sprite_count, sizeof(Point2D *));
+    NT_BUILD_ASSERT(p->vertex_counts && p->hull_vertices && "pipeline_geometry: alloc failed");
 
-        if (opts->polygon_mode) {
+    for (uint32_t ui = 0; ui < p->unique_count; ui++) {
+        uint32_t idx = p->unique_indices[ui];
+        uint32_t tw = p->trim_w[idx];
+        uint32_t th = p->trim_h[idx];
+
+        if (p->opts->polygon_mode) {
             /* Extract boundary pixels from alpha plane (dense, cache-friendly) */
-            const uint8_t *ap = alpha_planes[idx];
-            uint32_t aw = sprites[idx].width;
+            const uint8_t *ap = p->alpha_planes[idx];
+            uint32_t aw = p->sprites[idx].width;
             /* Collect boundary pixel CORNERS (not centers) so that the convex hull
              * passes along the outer edge of pixels, fully covering all opaque area.
              * Each boundary pixel contributes 4 corner points (x,y), (x+1,y), (x,y+1), (x+1,y+1). */
             uint32_t pt_count = 0;
             Point2D *pts = (Point2D *)malloc((size_t)tw * th * 4 * sizeof(Point2D)); /* 4 corners per pixel */
-            NT_BUILD_ASSERT(pts && "end_atlas: alloc failed");
+            NT_BUILD_ASSERT(pts && "pipeline_geometry: alloc failed");
 
             for (uint32_t y = 0; y < th; y++) {
                 for (uint32_t x = 0; x < tw; x++) {
-                    uint8_t a = ap[((size_t)(trim_y[idx] + y) * aw) + trim_x[idx] + x];
-                    if (a >= opts->alpha_threshold) {
+                    uint8_t a = ap[((size_t)(p->trim_y[idx] + y) * aw) + p->trim_x[idx] + x];
+                    if (a >= p->opts->alpha_threshold) {
                         bool is_boundary = (x == 0 || y == 0 || x == tw - 1 || y == th - 1);
                         if (!is_boundary) {
-                            size_t base = ((size_t)(trim_y[idx] + y) * aw) + trim_x[idx] + x;
+                            size_t base = ((size_t)(p->trim_y[idx] + y) * aw) + p->trim_x[idx] + x;
                             uint8_t left = ap[base - 1];
                             uint8_t right = ap[base + 1];
                             uint8_t up = ap[base - aw];
                             uint8_t down = ap[base + aw];
-                            is_boundary = (left < opts->alpha_threshold || right < opts->alpha_threshold || up < opts->alpha_threshold || down < opts->alpha_threshold);
+                            is_boundary = (left < p->opts->alpha_threshold || right < p->opts->alpha_threshold || up < p->opts->alpha_threshold || down < p->opts->alpha_threshold);
                         }
                         if (is_boundary) {
                             int32_t px = (int32_t)x;
@@ -2584,25 +2677,21 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
             if (pt_count < 3) {
                 /* Degenerate: use rect */
                 free(pts);
-                hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
-                NT_BUILD_ASSERT(hull_vertices[idx] && "end_atlas: alloc failed");
-                hull_vertices[idx][0] = (Point2D){0, 0};
-                hull_vertices[idx][1] = (Point2D){(int32_t)tw, 0};
-                hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
-                hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
-                vertex_counts[idx] = 4;
+                p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
+                NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
+                p->hull_vertices[idx][0] = (Point2D){0, 0};
+                p->hull_vertices[idx][1] = (Point2D){(int32_t)tw, 0};
+                p->hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
+                p->hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
+                p->vertex_counts[idx] = 4;
             } else {
-                /* Compute convex hull */
                 Point2D *hull = (Point2D *)malloc((size_t)pt_count * 2 * sizeof(Point2D));
-                NT_BUILD_ASSERT(hull && "end_atlas: alloc failed");
+                NT_BUILD_ASSERT(hull && "pipeline_geometry: alloc failed");
                 uint32_t hull_count = convex_hull(pts, pt_count, hull);
 
-                /* Simplify hull to max_vertices (min-area vertex removal).
-                 * Vertex removal makes polygon smaller (chords cut inside).
-                 * Then inflate outward until all boundary pixels are covered. */
                 Point2D *simplified = (Point2D *)malloc(hull_count * sizeof(Point2D));
-                NT_BUILD_ASSERT(simplified && "end_atlas: alloc failed");
-                uint32_t simp_count = hull_simplify(hull, hull_count, opts->max_vertices, simplified);
+                NT_BUILD_ASSERT(simplified && "pipeline_geometry: alloc failed");
+                uint32_t simp_count = hull_simplify(hull, hull_count, p->opts->max_vertices, simplified);
                 free(hull);
 
                 /* Determine polygon winding (CCW or CW) via signed area */
@@ -2611,11 +2700,9 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                     uint32_t sj = (si + 1) % simp_count;
                     signed_area += ((double)simplified[si].x * simplified[sj].y) - ((double)simplified[sj].x * simplified[si].y);
                 }
-                /* signed_area > 0 = CCW, < 0 = CW. For CCW: cross > 0 = inside. */
                 double outside_sign = (signed_area > 0) ? -1.0 : 1.0;
 
-                /* Find max distance from any boundary pixel OUTSIDE simplified polygon.
-                 * A point is outside if cross(edge, point) has the "outside" sign. */
+                /* Find max distance from any boundary pixel OUTSIDE simplified polygon */
                 float max_outside_dist = 0.0F;
                 for (uint32_t bi = 0; bi < pt_count; bi++) {
                     for (uint32_t si = 0; si < simp_count; si++) {
@@ -2627,7 +2714,6 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                             continue;
                         }
                         double cross = (ex * (double)(pts[bi].y - simplified[si].y)) - (ey * (double)(pts[bi].x - simplified[si].x));
-                        /* cross * outside_sign > 0 means point is outside this edge */
                         if ((cross * outside_sign) > 0) {
                             double dist = fabs(cross) / sqrt(len_sq);
                             if ((float)dist > max_outside_dist) {
@@ -2640,20 +2726,14 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                 /* Inflate simplified polygon outward by max_outside_dist + 1px margin */
                 float inflate_amount = max_outside_dist + 1.0F;
                 Point2D *inflated = (Point2D *)malloc(simp_count * sizeof(Point2D));
-                NT_BUILD_ASSERT(inflated && "end_atlas: alloc failed");
+                NT_BUILD_ASSERT(inflated && "pipeline_geometry: alloc failed");
                 uint32_t inf_count = polygon_inflate(simplified, simp_count, inflate_amount, inflated);
                 free(simplified);
 
-                /* Note: inflated polygon may extend beyond [0,tw]x[0,th] trimmed rect.
-                 * This is intentional — clamping would break convexity and coverage.
-                 * Runtime UV mapping handles out-of-bounds coordinates naturally. */
-
-                /* Verify: all boundary pixels must be inside the inflated polygon.
-                 * Test via fan triangulation (same as runtime rendering). */
+                /* Verify: all boundary pixels must be inside the inflated polygon */
                 for (uint32_t bi = 0; bi < pt_count; bi++) {
                     bool inside = false;
                     for (uint32_t ti = 1; ti + 1 < inf_count && !inside; ti++) {
-                        /* Triangle: inflated[0], inflated[ti], inflated[ti+1] */
                         int64_t d0 = cross2d(inflated[0], inflated[ti], pts[bi]);
                         int64_t d1 = cross2d(inflated[ti], inflated[ti + 1], pts[bi]);
                         int64_t d2 = cross2d(inflated[ti + 1], inflated[0], pts[bi]);
@@ -2666,281 +2746,250 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                     if (!inside) {
                         NT_LOG_ERROR("boundary pixel (%d,%d) outside inflated polygon (sprite %ux%u, inflate=%.1f)", pts[bi].x, pts[bi].y, tw, th, (double)inflate_amount);
                     }
-                    NT_BUILD_ASSERT(inside && "end_atlas: boundary pixel outside inflated polygon");
+                    NT_BUILD_ASSERT(inside && "pipeline_geometry: boundary pixel outside inflated polygon");
                 }
                 free(pts);
 
-                hull_vertices[idx] = inflated;
-                vertex_counts[idx] = inf_count;
+                p->hull_vertices[idx] = inflated;
+                p->vertex_counts[idx] = inf_count;
             }
         } else {
             /* Rect mode: 4-vertex rect */
-            hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
-            NT_BUILD_ASSERT(hull_vertices[idx] && "end_atlas: alloc failed");
-            hull_vertices[idx][0] = (Point2D){0, 0};
-            hull_vertices[idx][1] = (Point2D){(int32_t)tw, 0};
-            hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
-            hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
-            vertex_counts[idx] = 4;
+            p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
+            NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
+            p->hull_vertices[idx][0] = (Point2D){0, 0};
+            p->hull_vertices[idx][1] = (Point2D){(int32_t)tw, 0};
+            p->hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
+            p->hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
+            p->vertex_counts[idx] = 4;
         }
     }
 
     /* Copy vertex data for duplicates from their originals */
-    for (uint32_t i = 0; i < sprite_count; i++) {
-        if (dedup_map[i] >= 0) {
-            uint32_t orig = (uint32_t)dedup_map[i];
-            vertex_counts[i] = vertex_counts[orig];
-            hull_vertices[i] = hull_vertices[orig]; /* shared pointer, don't double-free */
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        if (p->dedup_map[i] >= 0) {
+            uint32_t orig = (uint32_t)p->dedup_map[i];
+            p->vertex_counts[i] = p->vertex_counts[orig];
+            p->hull_vertices[i] = p->hull_vertices[orig]; /* shared pointer, don't double-free */
         }
     }
-    // #endregion
+}
 
-    // #region Steps 4-5: Tile packing + composition (with atlas cache D-13)
-    AtlasPlacement *placements = NULL;
-    uint32_t placement_count = 0;
-    uint32_t page_count = 0;
-    uint32_t page_w[ATLAS_MAX_PAGES];
-    uint32_t page_h[ATLAS_MAX_PAGES];
-    uint8_t **page_pixels = NULL;
-    uint32_t extrude_val = opts->extrude;
-    bool cache_hit = false;
+/* --- pipeline_tile_pack: sort sprites by area, place on atlas pages via tile-grid collision --- */
 
-    /* Check atlas cache (D-13) */
-    if (ctx->cache_dir) {
-        cache_hit = atlas_cache_read(ctx->cache_dir, state->cache_key, &placements, &placement_count, page_w, page_h, &page_count, &page_pixels);
-        if (cache_hit) {
-            NT_LOG_INFO("Atlas cache hit: %s (key %016llx)", state->name, (unsigned long long)state->cache_key);
-        }
+static void pipeline_tile_pack(AtlasPipeline *p) {
+    // NOLINTNEXTLINE(clang-analyzer-optin.portability.UnixAPI)
+    p->placements = (AtlasPlacement *)malloc(p->unique_count * sizeof(AtlasPlacement));
+    NT_BUILD_ASSERT(p->placements && "pipeline_tile_pack: alloc failed");
+
+    /* Build arrays for unique sprites: trim dims + hull polygons */
+    uint32_t *u_trim_w = (uint32_t *)malloc(p->unique_count * sizeof(uint32_t));
+    uint32_t *u_trim_h = (uint32_t *)malloc(p->unique_count * sizeof(uint32_t));
+    Point2D **u_hulls = (Point2D **)malloc(p->unique_count * sizeof(Point2D *));
+    uint32_t *u_hull_counts = (uint32_t *)malloc(p->unique_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(u_trim_w && u_trim_h && u_hulls && u_hull_counts && "pipeline_tile_pack: alloc failed");
+    for (uint32_t i = 0; i < p->unique_count; i++) {
+        uint32_t oi = p->unique_indices[i];
+        u_trim_w[i] = p->trim_w[oi];
+        u_trim_h[i] = p->trim_h[oi];
+        u_hulls[i] = p->hull_vertices[oi];
+        u_hull_counts[i] = p->vertex_counts[oi];
     }
 
-    double bench_geometry = nt_time_now() - geom_start;
-    NT_LOG_INFO("  geometry done in %.1fs", bench_geometry);
+    p->placement_count = tile_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats);
 
-    double bench_tile_pack = 0.0;
-    double bench_compose = 0.0;
-    double bench_debug_png = 0.0;
-    if (!cache_hit) {
-        double bench_pack_start = nt_time_now();
-        // #region Step 4: Tile packing
-        // NOLINTNEXTLINE(clang-analyzer-optin.portability.UnixAPI)
-        placements = (AtlasPlacement *)malloc(unique_count * sizeof(AtlasPlacement));
-        NT_BUILD_ASSERT(placements && "end_atlas: alloc failed");
+    /* Fill trim offsets and remap sprite_index back to original */
+    for (uint32_t i = 0; i < p->placement_count; i++) {
+        uint32_t unique_idx = p->placements[i].sprite_index;
+        uint32_t orig_idx = p->unique_indices[unique_idx];
+        p->placements[i].sprite_index = orig_idx;
+        p->placements[i].trim_x = p->trim_x[orig_idx];
+        p->placements[i].trim_y = p->trim_y[orig_idx];
+        p->placements[i].trimmed_w = p->trim_w[orig_idx];
+        p->placements[i].trimmed_h = p->trim_h[orig_idx];
+    }
 
-        /* Build arrays for unique sprites: trim dims + hull polygons */
-        uint32_t *u_trim_w = (uint32_t *)malloc(unique_count * sizeof(uint32_t));
-        uint32_t *u_trim_h = (uint32_t *)malloc(unique_count * sizeof(uint32_t));
-        Point2D **u_hulls = (Point2D **)malloc(unique_count * sizeof(Point2D *));
-        uint32_t *u_hull_counts = (uint32_t *)malloc(unique_count * sizeof(uint32_t));
-        NT_BUILD_ASSERT(u_trim_w && u_trim_h && u_hulls && u_hull_counts && "end_atlas: alloc failed");
-        for (uint32_t i = 0; i < unique_count; i++) {
-            uint32_t oi = unique_indices[i];
-            u_trim_w[i] = trim_w[oi];
-            u_trim_h[i] = trim_h[oi];
-            u_hulls[i] = hull_vertices[oi];
-            u_hull_counts[i] = vertex_counts[oi];
-        }
+    free(u_trim_w);
+    free(u_trim_h);
+    free((void *)u_hulls);
+    free(u_hull_counts);
+}
 
-        placement_count = tile_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, unique_count, opts, placements, &page_count, page_w, page_h);
+/* --- pipeline_compose: blit trimmed pixels onto pages + extrude edges --- */
 
-        /* Fill trim offsets and remap sprite_index back to original */
-        for (uint32_t i = 0; i < placement_count; i++) {
-            uint32_t unique_idx = placements[i].sprite_index;
-            uint32_t orig_idx = unique_indices[unique_idx];
-            placements[i].sprite_index = orig_idx;
-            placements[i].trim_x = trim_x[orig_idx];
-            placements[i].trim_y = trim_y[orig_idx];
-            placements[i].trimmed_w = trim_w[orig_idx];
-            placements[i].trimmed_h = trim_h[orig_idx];
-        }
+static void pipeline_compose(AtlasPipeline *p) {
+    uint32_t extrude_val = p->opts->extrude;
 
-        free(u_trim_w);
-        free(u_trim_h);
-        free((void *)u_hulls);
-        free(u_hull_counts);
-        bench_tile_pack = nt_time_now() - bench_pack_start;
-        // #endregion
+    p->page_pixels = (uint8_t **)calloc(p->page_count, sizeof(uint8_t *));
+    NT_BUILD_ASSERT(p->page_pixels && "pipeline_compose: alloc failed");
 
-        double bench_compose_start = nt_time_now();
-        // #region Step 5: Compose page RGBA + extrude + debug PNG (ATLAS-15, ATLAS-11, D-09)
-        page_pixels = (uint8_t **)calloc(page_count, sizeof(uint8_t *));
-        NT_BUILD_ASSERT(page_pixels && "end_atlas: alloc failed");
+    for (uint32_t pg = 0; pg < p->page_count; pg++) {
+        p->page_pixels[pg] = (uint8_t *)calloc((size_t)p->page_w[pg] * p->page_h[pg] * 4, 1);
+        NT_BUILD_ASSERT(p->page_pixels[pg] && "pipeline_compose: page alloc failed");
+    }
 
-        for (uint32_t p = 0; p < page_count; p++) {
-            page_pixels[p] = (uint8_t *)calloc((size_t)page_w[p] * page_h[p] * 4, 1);
-            NT_BUILD_ASSERT(page_pixels[p] && "end_atlas: page alloc failed");
-        }
+    /* Blit each placed sprite */
+    for (uint32_t pi = 0; pi < p->placement_count; pi++) {
+        AtlasPlacement *pl = &p->placements[pi];
+        uint32_t idx = pl->sprite_index;
+        uint32_t inner_x = pl->x + extrude_val;
+        uint32_t inner_y = pl->y + extrude_val;
 
-        /* Blit each placed sprite */
-        for (uint32_t pi = 0; pi < placement_count; pi++) {
-            AtlasPlacement *pl = &placements[pi];
-            uint32_t idx = pl->sprite_index;
-            uint32_t inner_x = pl->x + extrude_val;
-            uint32_t inner_y = pl->y + extrude_val;
+        blit_sprite(p->page_pixels[pl->page], p->page_w[pl->page], p->sprites[idx].rgba, p->sprites[idx].width, pl->trim_x, pl->trim_y, pl->trimmed_w, pl->trimmed_h, inner_x, inner_y, pl->rotation);
 
-            /* Blit trimmed pixels */
-            blit_sprite(page_pixels[pl->page], page_w[pl->page], sprites[idx].rgba, sprites[idx].width, pl->trim_x, pl->trim_y, pl->trimmed_w, pl->trimmed_h, inner_x, inner_y, pl->rotation);
+        uint32_t blit_w = (pl->rotation == 1 || pl->rotation == 3) ? pl->trimmed_h : pl->trimmed_w;
+        uint32_t blit_h = (pl->rotation == 1 || pl->rotation == 3) ? pl->trimmed_w : pl->trimmed_h;
+        extrude_edges(p->page_pixels[pl->page], p->page_w[pl->page], p->page_h[pl->page], inner_x, inner_y, blit_w, blit_h, extrude_val);
+    }
+}
 
-            /* Extrude edge pixels (ATLAS-11) */
-            uint32_t blit_w = (pl->rotation == 1 || pl->rotation == 3) ? pl->trimmed_h : pl->trimmed_w;
-            uint32_t blit_h = (pl->rotation == 1 || pl->rotation == 3) ? pl->trimmed_w : pl->trimmed_h;
-            extrude_edges(page_pixels[pl->page], page_w[pl->page], page_h[pl->page], inner_x, inner_y, blit_w, blit_h, extrude_val);
-        }
+/* --- pipeline_debug_png: optional outline visualization --- */
 
-        bench_compose = nt_time_now() - bench_compose_start;
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void pipeline_debug_png(AtlasPipeline *p) {
+    if (!p->opts->debug_png) {
+        return;
+    }
+    uint32_t extrude_val = p->opts->extrude;
 
-        /* Debug PNG output (D-09, D-10) */
-        double bench_debug_png_start = nt_time_now();
-        if (opts->debug_png) {
-            /* Use minimum compression for debug output — speed over file size */
-            int saved_png_level = stbi_write_png_compression_level;
-            stbi_write_png_compression_level = 1;
-            for (uint32_t p = 0; p < page_count; p++) {
-                /* Draw outlines on a copy */
-                size_t page_bytes = (size_t)page_w[p] * page_h[p] * 4;
-                uint8_t *debug_page = (uint8_t *)malloc(page_bytes);
-                NT_BUILD_ASSERT(debug_page && "end_atlas: debug alloc failed");
-                memcpy(debug_page, page_pixels[p], page_bytes);
+    for (uint32_t pg = 0; pg < p->page_count; pg++) {
+        size_t page_bytes = (size_t)p->page_w[pg] * p->page_h[pg] * 4;
+        uint8_t *debug_page = (uint8_t *)malloc(page_bytes);
+        NT_BUILD_ASSERT(debug_page && "pipeline_debug_png: alloc failed");
+        memcpy(debug_page, p->page_pixels[pg], page_bytes);
 
-                for (uint32_t pi = 0; pi < placement_count; pi++) {
-                    if (placements[pi].page != p) {
-                        continue;
-                    }
-                    uint32_t ix = placements[pi].x + extrude_val;
-                    uint32_t iy = placements[pi].y + extrude_val;
-                    uint32_t si = placements[pi].sprite_index;
-
-                    if (opts->polygon_mode && hull_vertices[si] && vertex_counts[si] >= 3) {
-                        debug_draw_hull_outline(debug_page, page_w[p], page_h[p], hull_vertices[si], vertex_counts[si], ix, iy, trim_w[si], trim_h[si], placements[pi].rotation);
-                    } else {
-                        uint32_t rw = (placements[pi].rotation == 1 || placements[pi].rotation == 3) ? placements[pi].trimmed_h : placements[pi].trimmed_w;
-                        uint32_t rh = (placements[pi].rotation == 1 || placements[pi].rotation == 3) ? placements[pi].trimmed_w : placements[pi].trimmed_h;
-                        debug_draw_rect_outline(debug_page, page_w[p], page_h[p], ix, iy, rw, rh);
-                    }
-                }
-
-                /* Write debug PNG next to the pack output file */
-                char debug_path[512];
-                const char *slash = strrchr(ctx->output_path, '/');
-                const char *bslash = strrchr(ctx->output_path, '\\');
-                const char *sep = (bslash > slash) ? bslash : slash;
-                if (sep) {
-                    size_t dir_len = (size_t)(sep - ctx->output_path) + 1;
-                    (void)snprintf(debug_path, sizeof(debug_path), "%.*s%s_page%u.png", (int)dir_len, ctx->output_path, state->name, p);
-                } else {
-                    (void)snprintf(debug_path, sizeof(debug_path), "%s_page%u.png", state->name, p);
-                }
-                stbi_write_png(debug_path, (int)page_w[p], (int)page_h[p], 4, debug_page, (int)(page_w[p] * 4));
-                NT_LOG_INFO("Debug PNG: %s (%ux%u)", debug_path, page_w[p], page_h[p]);
-                free(debug_page);
+        for (uint32_t pi = 0; pi < p->placement_count; pi++) {
+            if (p->placements[pi].page != pg) {
+                continue;
             }
-            stbi_write_png_compression_level = saved_png_level;
-        }
-        bench_debug_png = nt_time_now() - bench_debug_png_start;
-        // #endregion
+            uint32_t ix = p->placements[pi].x + extrude_val;
+            uint32_t iy = p->placements[pi].y + extrude_val;
+            uint32_t si = p->placements[pi].sprite_index;
 
-        /* Write atlas cache on miss (D-13) */
-        if (ctx->cache_dir) {
-            if (atlas_cache_write(ctx->cache_dir, state->cache_key, placements, placement_count, page_w, page_h, page_count, page_pixels)) {
-                NT_LOG_INFO("Atlas cache stored: %s (key %016llx)", state->name, (unsigned long long)state->cache_key);
+            if (p->opts->polygon_mode && p->hull_vertices[si] && p->vertex_counts[si] >= 3) {
+                debug_draw_hull_outline(debug_page, p->page_w[pg], p->page_h[pg], p->hull_vertices[si], p->vertex_counts[si], ix, iy, p->trim_w[si], p->trim_h[si], p->placements[pi].rotation);
+            } else {
+                uint32_t rw = (p->placements[pi].rotation == 1 || p->placements[pi].rotation == 3) ? p->placements[pi].trimmed_h : p->placements[pi].trimmed_w;
+                uint32_t rh = (p->placements[pi].rotation == 1 || p->placements[pi].rotation == 3) ? p->placements[pi].trimmed_w : p->placements[pi].trimmed_h;
+                debug_draw_rect_outline(debug_page, p->page_w[pg], p->page_h[pg], ix, iy, rw, rh);
             }
         }
-    }
-    // #endregion
 
-    double bench_serialize_start = nt_time_now();
-    // #region Step 6: Compute atlas UVs and serialize metadata (REGION-01)
+        char debug_path[512];
+        const char *slash = strrchr(p->ctx->output_path, '/');
+        const char *bslash = strrchr(p->ctx->output_path, '\\');
+        const char *sep = (bslash > slash) ? bslash : slash;
+        if (sep) {
+            size_t dir_len = (size_t)(sep - p->ctx->output_path) + 1;
+            (void)snprintf(debug_path, sizeof(debug_path), "%.*s%s_page%u.png", (int)dir_len, p->ctx->output_path, p->state->name, pg);
+        } else {
+            (void)snprintf(debug_path, sizeof(debug_path), "%s_page%u.png", p->state->name, pg);
+        }
+        stbi_write_png(debug_path, (int)p->page_w[pg], (int)p->page_h[pg], 4, debug_page, (int)(p->page_w[pg] * 4));
+        NT_LOG_INFO("Debug PNG: %s (%ux%u)", debug_path, p->page_w[pg], p->page_h[pg]);
+        free(debug_page);
+    }
+}
+
+/* --- pipeline_cache_write: store packing result for next build --- */
+
+static void pipeline_cache_write(AtlasPipeline *p) {
+    if (p->ctx->cache_dir) {
+        if (atlas_cache_write(p->ctx->cache_dir, p->state->cache_key, p->placements, p->placement_count, p->page_w, p->page_h, p->page_count, p->page_pixels)) {
+            NT_LOG_INFO("Atlas cache stored: %s (key %016llx)", p->state->name, (unsigned long long)p->state->cache_key);
+        }
+    }
+}
+
+/* --- pipeline_serialize: compute atlas UVs, write binary blob --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void pipeline_serialize(AtlasPipeline *p) {
+    uint32_t extrude_val = p->opts->extrude;
+
     /* Count total vertices */
     uint32_t total_vertex_count = 0;
-    for (uint32_t i = 0; i < sprite_count; i++) {
-        total_vertex_count += vertex_counts[i];
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        total_vertex_count += p->vertex_counts[i];
     }
 
     /* Build placement lookup: original_sprite_index -> placement index */
-    /* For duplicates, the lookup points to the original's placement */
-    uint32_t *placement_lookup = (uint32_t *)malloc(sprite_count * sizeof(uint32_t));
-    NT_BUILD_ASSERT(placement_lookup && "end_atlas: alloc failed");
-    memset(placement_lookup, 0xFF, sprite_count * sizeof(uint32_t)); /* UINT32_MAX = unset */
+    uint32_t *placement_lookup = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(placement_lookup && "pipeline_serialize: alloc failed");
+    memset(placement_lookup, 0xFF, p->sprite_count * sizeof(uint32_t));
 
-    for (uint32_t pi = 0; pi < placement_count; pi++) {
-        placement_lookup[placements[pi].sprite_index] = pi;
+    for (uint32_t pi = 0; pi < p->placement_count; pi++) {
+        placement_lookup[p->placements[pi].sprite_index] = pi;
     }
-    /* Fill duplicate lookups */
-    for (uint32_t i = 0; i < sprite_count; i++) {
-        if (dedup_map[i] >= 0) {
-            uint32_t orig = (uint32_t)dedup_map[i];
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        if (p->dedup_map[i] >= 0) {
+            uint32_t orig = (uint32_t)p->dedup_map[i];
             placement_lookup[i] = placement_lookup[orig];
         }
     }
 
     /* Serialize blob: header + texture_resource_ids + regions + vertices */
-    uint32_t regions_offset = (uint32_t)sizeof(NtAtlasHeader) + (page_count * (uint32_t)sizeof(uint64_t));
-    uint32_t vertex_offset = regions_offset + (sprite_count * (uint32_t)sizeof(NtAtlasRegion));
+    uint32_t regions_offset = (uint32_t)sizeof(NtAtlasHeader) + (p->page_count * (uint32_t)sizeof(uint64_t));
+    uint32_t vertex_offset = regions_offset + (p->sprite_count * (uint32_t)sizeof(NtAtlasRegion));
     uint32_t blob_size = vertex_offset + (total_vertex_count * (uint32_t)sizeof(NtAtlasVertex));
     uint8_t *blob = (uint8_t *)calloc(1, blob_size);
-    NT_BUILD_ASSERT(blob && "end_atlas: blob alloc failed");
+    NT_BUILD_ASSERT(blob && "pipeline_serialize: blob alloc failed");
 
     /* Header */
     NtAtlasHeader *hdr = (NtAtlasHeader *)blob;
     hdr->magic = NT_ATLAS_MAGIC;
     hdr->version = NT_ATLAS_VERSION;
-    hdr->region_count = (uint16_t)sprite_count;
-    hdr->page_count = (uint16_t)page_count;
+    hdr->region_count = (uint16_t)p->sprite_count;
+    hdr->page_count = (uint16_t)p->page_count;
     hdr->_pad = 0;
     hdr->vertex_offset = vertex_offset;
     hdr->total_vertex_count = total_vertex_count;
 
-    /* Texture resource IDs (D-05) -- use memcpy for unaligned access safety */
+    /* Texture resource IDs (D-05) */
     uint8_t *tex_ids_ptr = blob + sizeof(NtAtlasHeader);
-    for (uint32_t p = 0; p < page_count; p++) {
+    for (uint32_t pg = 0; pg < p->page_count; pg++) {
         char tex_path[512];
-        (void)snprintf(tex_path, sizeof(tex_path), "%s/tex%u", state->name, p);
+        (void)snprintf(tex_path, sizeof(tex_path), "%s/tex%u", p->state->name, pg);
         uint64_t tid = nt_hash64_str(tex_path).value;
-        memcpy(tex_ids_ptr + ((size_t)p * sizeof(uint64_t)), &tid, sizeof(uint64_t));
+        memcpy(tex_ids_ptr + ((size_t)pg * sizeof(uint64_t)), &tid, sizeof(uint64_t));
     }
 
-    /* Regions */
+    /* Regions + vertices */
     NtAtlasRegion *regions = (NtAtlasRegion *)(blob + regions_offset);
     NtAtlasVertex *vertices = (NtAtlasVertex *)(blob + vertex_offset);
     uint32_t vertex_cursor = 0;
 
-    for (uint32_t i = 0; i < sprite_count; i++) {
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
         uint32_t pi = placement_lookup[i];
-        NT_BUILD_ASSERT(pi != UINT32_MAX && "end_atlas: sprite has no placement");
-        AtlasPlacement *pl = &placements[pi];
+        NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
+        AtlasPlacement *pl = &p->placements[pi];
 
         NtAtlasRegion *reg = &regions[i];
-        reg->name_hash = nt_hash64_str(sprites[i].name).value;
-        reg->source_w = (uint16_t)sprites[i].width;
-        reg->source_h = (uint16_t)sprites[i].height;
-        reg->trim_offset_x = (int16_t)trim_x[i];
-        reg->trim_offset_y = (int16_t)trim_y[i];
-        reg->origin_x = sprites[i].origin_x;
-        reg->origin_y = sprites[i].origin_y;
+        reg->name_hash = nt_hash64_str(p->sprites[i].name).value;
+        reg->source_w = (uint16_t)p->sprites[i].width;
+        reg->source_h = (uint16_t)p->sprites[i].height;
+        reg->trim_offset_x = (int16_t)p->trim_x[i];
+        reg->trim_offset_y = (int16_t)p->trim_y[i];
+        reg->origin_x = p->sprites[i].origin_x;
+        reg->origin_y = p->sprites[i].origin_y;
         reg->vertex_start = (uint16_t)vertex_cursor;
-        reg->vertex_count = (uint8_t)vertex_counts[i];
+        reg->vertex_count = (uint8_t)p->vertex_counts[i];
         reg->page_index = (uint8_t)pl->page;
         reg->rotated = pl->rotation;
         memset(reg->_pad, 0, sizeof(reg->_pad));
 
-        /* Write vertices with atlas UVs */
         uint32_t inner_x = pl->x + extrude_val;
         uint32_t inner_y = pl->y + extrude_val;
-        uint32_t atlas_w = page_w[pl->page];
-        uint32_t atlas_h = page_h[pl->page];
+        uint32_t atlas_w = p->page_w[pl->page];
+        uint32_t atlas_h = p->page_h[pl->page];
 
-        for (uint32_t v = 0; v < vertex_counts[i]; v++) {
+        for (uint32_t v = 0; v < p->vertex_counts[i]; v++) {
             NtAtlasVertex *vtx = &vertices[vertex_cursor++];
-            int32_t lx = hull_vertices[i][v].x;
-            int32_t ly = hull_vertices[i][v].y;
+            int32_t lx = p->hull_vertices[i][v].x;
+            int32_t ly = p->hull_vertices[i][v].y;
             vtx->local_x = (int16_t)lx;
             vtx->local_y = (int16_t)ly;
 
-            /* Transform local position to atlas UV coordinates.
-             * Handle rotation: local coords are in trimmed-sprite space.
-             * For rotation 0: atlas_px = inner_x + lx
-             * For rotation 1 (90CW): atlas_px = inner_x + (trim_h - 1 - ly), atlas_py = inner_y + lx
-             * For rotation 2 (180): atlas_px = inner_x + (trim_w - 1 - lx), atlas_py = inner_y + (trim_h - 1 - ly)
-             * For rotation 3 (270CW): atlas_px = inner_x + ly, atlas_py = inner_y + (trim_w - 1 - lx) */
             float atlas_px;
             float atlas_py;
             switch (pl->rotation) {
@@ -2949,16 +2998,16 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                 atlas_py = (float)inner_y + (float)ly;
                 break;
             case 1:
-                atlas_px = (float)inner_x + (float)((int32_t)trim_h[pl->sprite_index] - 1 - ly);
+                atlas_px = (float)inner_x + (float)((int32_t)p->trim_h[pl->sprite_index] - 1 - ly);
                 atlas_py = (float)inner_y + (float)lx;
                 break;
             case 2:
-                atlas_px = (float)inner_x + (float)((int32_t)trim_w[pl->sprite_index] - 1 - lx);
-                atlas_py = (float)inner_y + (float)((int32_t)trim_h[pl->sprite_index] - 1 - ly);
+                atlas_px = (float)inner_x + (float)((int32_t)p->trim_w[pl->sprite_index] - 1 - lx);
+                atlas_py = (float)inner_y + (float)((int32_t)p->trim_h[pl->sprite_index] - 1 - ly);
                 break;
             case 3:
                 atlas_px = (float)inner_x + (float)ly;
-                atlas_py = (float)inner_y + (float)((int32_t)trim_w[pl->sprite_index] - 1 - lx);
+                atlas_py = (float)inner_y + (float)((int32_t)p->trim_w[pl->sprite_index] - 1 - lx);
                 break;
             default:
                 atlas_px = (float)inner_x + (float)lx;
@@ -2971,132 +3020,174 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         }
     }
 
-    NT_BUILD_ASSERT(vertex_cursor == total_vertex_count && "end_atlas: vertex count mismatch");
-    // #endregion
+    NT_BUILD_ASSERT(vertex_cursor == total_vertex_count && "pipeline_serialize: vertex count mismatch");
 
-    // #region Step 7: Register atlas metadata entry (D-04)
+    /* Register atlas metadata entry (D-04) */
     uint64_t blob_hash = nt_hash64(blob, blob_size).value;
-    nt_builder_add_entry(ctx, state->name, NT_BUILD_ASSET_ATLAS, NULL, blob, blob_size, blob_hash);
-    // #endregion
+    nt_builder_add_entry(p->ctx, p->state->name, NT_BUILD_ASSET_ATLAS, NULL, blob, blob_size, blob_hash);
 
-    // #region Step 8: Register texture page entries
-    for (uint32_t p = 0; p < page_count; p++) {
+    free(placement_lookup);
+}
+
+/* --- pipeline_register: add texture page entries + codegen info --- */
+
+static void pipeline_register(AtlasPipeline *p) {
+    /* Register texture page entries */
+    for (uint32_t pg = 0; pg < p->page_count; pg++) {
         char tex_path[512];
-        (void)snprintf(tex_path, sizeof(tex_path), "%s/tex%u", state->name, p);
+        (void)snprintf(tex_path, sizeof(tex_path), "%s/tex%u", p->state->name, pg);
 
-        uint32_t pixel_bytes = page_w[p] * page_h[p] * 4;
-        uint64_t tex_hash = nt_hash64(page_pixels[p], pixel_bytes).value;
+        uint32_t pixel_bytes = p->page_w[pg] * p->page_h[pg] * 4;
+        uint64_t tex_hash = nt_hash64(p->page_pixels[pg], pixel_bytes).value;
 
-        /* Create NtBuildTextureData for the encode pipeline */
         NtBuildTextureData *td = (NtBuildTextureData *)calloc(1, sizeof(NtBuildTextureData));
-        NT_BUILD_ASSERT(td && "end_atlas: alloc failed");
-        td->width = page_w[p];
-        td->height = page_h[p];
-        td->opts.format = opts->format;
-        td->opts.max_size = 0; /* already at final size */
+        NT_BUILD_ASSERT(td && "pipeline_register: alloc failed");
+        td->width = p->page_w[pg];
+        td->height = p->page_h[pg];
+        td->opts.format = p->opts->format;
+        td->opts.max_size = 0;
         td->opts.compress = NULL;
-        if (state->has_compress) {
-            td->compress = state->compress;
+        if (p->state->has_compress) {
+            td->compress = p->state->compress;
             td->has_compress = true;
         }
-        /* Page pixels are decoded_data -- owned by the entry */
-        nt_builder_add_entry(ctx, tex_path, NT_BUILD_ASSET_TEXTURE, td, page_pixels[p], pixel_bytes, tex_hash);
-        page_pixels[p] = NULL; /* ownership transferred to entry */
+        nt_builder_add_entry(p->ctx, tex_path, NT_BUILD_ASSET_TEXTURE, td, p->page_pixels[pg], pixel_bytes, tex_hash);
+        p->page_pixels[pg] = NULL; /* ownership transferred */
     }
-    // #endregion
 
-    // #region Step 9: Store region info for codegen (no pack entries needed)
-    for (uint32_t i = 0; i < sprite_count; i++) {
-        /* Grow region array if needed */
-        if (ctx->atlas_region_count >= ctx->atlas_region_capacity) {
-            uint32_t new_cap = (ctx->atlas_region_capacity == 0) ? 64 : ctx->atlas_region_capacity * 2;
-            NtAtlasRegionCodegen *new_arr = (NtAtlasRegionCodegen *)realloc(ctx->atlas_regions, new_cap * sizeof(NtAtlasRegionCodegen));
-            NT_BUILD_ASSERT(new_arr && "end_atlas: region codegen alloc failed");
-            ctx->atlas_regions = new_arr;
-            ctx->atlas_region_capacity = new_cap;
+    /* Store region info for codegen */
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        if (p->ctx->atlas_region_count >= p->ctx->atlas_region_capacity) {
+            uint32_t new_cap = (p->ctx->atlas_region_capacity == 0) ? 64 : p->ctx->atlas_region_capacity * 2;
+            NtAtlasRegionCodegen *new_arr = (NtAtlasRegionCodegen *)realloc(p->ctx->atlas_regions, new_cap * sizeof(NtAtlasRegionCodegen));
+            NT_BUILD_ASSERT(new_arr && "pipeline_register: alloc failed");
+            p->ctx->atlas_regions = new_arr;
+            p->ctx->atlas_region_capacity = new_cap;
         }
 
         char region_path[512];
-        (void)snprintf(region_path, sizeof(region_path), "%s/%s", state->name, sprites[i].name);
+        (void)snprintf(region_path, sizeof(region_path), "%s/%s", p->state->name, p->sprites[i].name);
 
-        NtAtlasRegionCodegen *reg = &ctx->atlas_regions[ctx->atlas_region_count++];
+        NtAtlasRegionCodegen *reg = &p->ctx->atlas_regions[p->ctx->atlas_region_count++];
         reg->path = nt_builder_normalize_path(region_path);
         reg->resource_id = nt_hash64_str(reg->path).value;
     }
-    // #endregion
+}
 
-    // #region Step 10: Cleanup
+/* --- pipeline_cleanup: free all temporary allocations --- */
+
+static void pipeline_cleanup(AtlasPipeline *p) {
     /* Free sprite RGBA pixels and names */
-    for (uint32_t i = 0; i < sprite_count; i++) {
-        free(sprites[i].rgba);
-        sprites[i].rgba = NULL;
-        free(sprites[i].name);
-        sprites[i].name = NULL;
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        free(p->sprites[i].rgba);
+        p->sprites[i].rgba = NULL;
+        free(p->sprites[i].name);
+        p->sprites[i].name = NULL;
     }
 
     /* Free hull vertices (careful: duplicates share pointers) */
-    for (uint32_t i = 0; i < sprite_count; i++) {
-        if (dedup_map[i] < 0 && hull_vertices[i]) {
-            free(hull_vertices[i]);
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        if (p->dedup_map[i] < 0 && p->hull_vertices[i]) {
+            free(p->hull_vertices[i]);
         }
-        hull_vertices[i] = NULL;
+        p->hull_vertices[i] = NULL;
     }
 
     /* Free alpha planes */
-    for (uint32_t i = 0; i < sprite_count; i++) {
-        free(alpha_planes[i]);
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        free(p->alpha_planes[i]);
     }
-    free((void *)alpha_planes);
+    free((void *)p->alpha_planes);
 
-    /* Free temporary arrays */
-    free(trim_x);
-    free(trim_y);
-    free(trim_w);
-    free(trim_h);
-    free(dedup_map);
-    free(unique_indices);
-    free(vertex_counts);
-    free((void *)hull_vertices);
-    free(placements);
-    free(placement_lookup);
+    free(p->trim_x);
+    free(p->trim_y);
+    free(p->trim_w);
+    free(p->trim_h);
+    free(p->dedup_map);
+    free(p->unique_indices);
+    free(p->vertex_counts);
+    free((void *)p->hull_vertices);
+    free(p->placements);
 
     /* Free remaining page pixels (any not transferred to entries) */
-    for (uint32_t p = 0; p < page_count; p++) {
-        free(page_pixels[p]);
+    for (uint32_t pg = 0; pg < p->page_count; pg++) {
+        free(p->page_pixels[pg]);
     }
-    free((void *)page_pixels);
+    free((void *)p->page_pixels);
 
     /* Free atlas state */
-    free(state->sprites);
-    free(state->name);
-    free(state);
-    ctx->active_atlas = NULL;
-    ctx->atlas_count++;
-    // #endregion
-
-    double bench_serialize = nt_time_now() - bench_serialize_start;
-    double bench_total = nt_time_now() - bench_pipeline_start;
-    NT_LOG_INFO("Atlas packed: %u sprites (%u unique), %u pages", sprite_count, unique_count, page_count);
-    /* Compute tight used area from placement bounding box */
-    uint64_t bench_used_area = 0;
-    {
-        uint32_t max_right = 0;
-        uint32_t max_bottom = 0;
-        for (uint32_t pi = 0; pi < placement_count; pi++) {
-            uint32_t pl_w = (placements[pi].rotation == 1 || placements[pi].rotation == 3) ? placements[pi].trimmed_h : placements[pi].trimmed_w;
-            uint32_t pl_h = (placements[pi].rotation == 1 || placements[pi].rotation == 3) ? placements[pi].trimmed_w : placements[pi].trimmed_h;
-            uint32_t right = placements[pi].x + pl_w + (2 * extrude_val);
-            uint32_t bottom = placements[pi].y + pl_h + (2 * extrude_val);
-            if (right > max_right) {
-                max_right = right;
-            }
-            if (bottom > max_bottom) {
-                max_bottom = bottom;
-            }
-        }
-        bench_used_area = (uint64_t)max_right * max_bottom;
-    }
-    NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f tile_pack=%.1f compose=%.1f debug_png=%.1f serialize=%.1f total=%.1f pages=%u used_area=%llu or_ops=%llu test_ops=%llu",
-                bench_alpha_trim * 1000.0, bench_dedup * 1000.0, bench_geometry * 1000.0, bench_tile_pack * 1000.0, bench_compose * 1000.0, bench_debug_png * 1000.0, bench_serialize * 1000.0,
-                bench_total * 1000.0, page_count, (unsigned long long)bench_used_area, (unsigned long long)s_dbg_or_count, (unsigned long long)s_dbg_test_count);
+    free(p->state->sprites);
+    free(p->state->name);
+    free(p->state);
+    p->ctx->active_atlas = NULL;
+    p->ctx->atlas_count++;
 }
+
+/* --- nt_builder_end_atlas: orchestrator — calls pipeline steps in order --- */
+
+void nt_builder_end_atlas(NtBuilderContext *ctx) {
+    NT_BUILD_ASSERT(ctx && "end_atlas: ctx is NULL");
+    NT_BUILD_ASSERT(ctx->active_atlas && "end_atlas: no active atlas");
+
+    NtBuildAtlasState *state = ctx->active_atlas;
+    NT_BUILD_ASSERT(state->sprite_count > 0 && "end_atlas: atlas has no sprites");
+
+    AtlasPipeline p = {0};
+    p.ctx = ctx;
+    p.state = state;
+    p.sprite_count = state->sprite_count;
+    p.sprites = state->sprites;
+    p.opts = &state->opts;
+
+    NT_LOG_INFO("  end_atlas: %u sprites, starting pipeline...", p.sprite_count);
+    double t0 = nt_time_now();
+    double t_total = t0;
+
+    pipeline_alpha_trim(&p);
+    double bench_alpha_trim = nt_time_now() - t0;
+
+    pipeline_cache_check(&p);
+
+    t0 = nt_time_now();
+    pipeline_dedup(&p);
+    double bench_dedup = nt_time_now() - t0;
+
+    NT_LOG_INFO("  prep: %u sprites (%u unique), starting geometry...", p.sprite_count, p.unique_count);
+    t0 = nt_time_now();
+    pipeline_geometry(&p);
+    double bench_geometry = nt_time_now() - t0;
+    NT_LOG_INFO("  geometry done in %.1fs", bench_geometry);
+
+    double bench_tile_pack = 0.0;
+    double bench_compose = 0.0;
+    double bench_debug_png = 0.0;
+    if (!p.cache_hit) {
+        t0 = nt_time_now();
+        pipeline_tile_pack(&p);
+        bench_tile_pack = nt_time_now() - t0;
+
+        t0 = nt_time_now();
+        pipeline_compose(&p);
+        bench_compose = nt_time_now() - t0;
+
+        t0 = nt_time_now();
+        pipeline_debug_png(&p);
+        bench_debug_png = nt_time_now() - t0;
+
+        pipeline_cache_write(&p);
+    }
+
+    t0 = nt_time_now();
+    pipeline_serialize(&p);
+    pipeline_register(&p);
+    double bench_serialize = nt_time_now() - t0;
+
+    double bench_total = nt_time_now() - t_total;
+    NT_LOG_INFO("Atlas packed: %u sprites (%u unique), %u pages", p.sprite_count, p.unique_count, p.page_count);
+    NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f tile_pack=%.1f compose=%.1f debug_png=%.1f serialize=%.1f total=%.1f pages=%u or_ops=%llu test_ops=%llu", bench_alpha_trim * 1000.0,
+                bench_dedup * 1000.0, bench_geometry * 1000.0, bench_tile_pack * 1000.0, bench_compose * 1000.0, bench_debug_png * 1000.0, bench_serialize * 1000.0, bench_total * 1000.0, p.page_count,
+                (unsigned long long)p.stats.or_count, (unsigned long long)p.stats.test_count);
+
+    pipeline_cleanup(&p);
+}
+// #endregion

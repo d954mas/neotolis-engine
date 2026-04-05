@@ -17,7 +17,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 # --- Defaults ---
-SPRITES=1288
+SPRITES=1289
 MAX_SIZE=4096
 TILE_SIZE=2
 GLOB="assets/sprites/bigatlas/*.png"
