@@ -235,6 +235,13 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     VPackCand *cands = (VPackCand *)malloc(cand_cap * sizeof(VPackCand));
     NT_BUILD_ASSERT(placed && nfps && cands && "vector_pack: alloc failed");
 
+    /* Pre-allocate NFP spatial grid on heap (reused across orientations+sprites) */
+#define VPACK_GRID_CELL 64
+#define VPACK_GRID_DIM ((4096 / VPACK_GRID_CELL) + 1)
+#define VPACK_GRID_WORDS 24
+    uint64_t(*nfp_grid)[VPACK_GRID_WORDS] = (uint64_t(*)[VPACK_GRID_WORDS])calloc((size_t)VPACK_GRID_DIM * VPACK_GRID_DIM, sizeof(uint64_t[VPACK_GRID_WORDS]));
+    NT_BUILD_ASSERT(nfp_grid && "vector_pack: grid alloc failed");
+
     uint32_t current_page = 0;
     uint32_t placed_on_page = 0;
     uint32_t pages_used_w[16] = {0};
@@ -337,21 +344,15 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
                 }
                 nfp_count++;
             }
-// #endregion
+            // #endregion
 
-/* NFP-NFP edge intersections skipped: O(nfp^2 * edges^2) cost for marginal
- * quality gain. NFP vertices + axis intersections provide sufficient candidates. */
+            /* NFP-NFP edge intersections skipped: O(nfp^2 * edges^2) cost for marginal
+             * quality gain. NFP vertices + axis intersections provide sufficient candidates. */
 
-// #region Build spatial grid for NFP lookup
-/* Grid cells of 64px — each cell stores a bitmask of which NFPs overlap it.
- * Limits point-in-poly tests to NFPs actually covering the candidate position. */
-#define VPACK_GRID_CELL 64
-#define VPACK_GRID_DIM ((4096 / VPACK_GRID_CELL) + 1)               /* 65 cells max */
-#define VPACK_NFP_WORDS ((1528 + 63) / 64)                          /* max sprites per page as 64-bit words */
-            uint64_t nfp_grid[VPACK_GRID_DIM * VPACK_GRID_DIM][24]; /* 24 words = 1536 NFPs max */
+            // #region Build spatial grid for NFP lookup
             uint32_t nfp_words = (nfp_count + 63) / 64;
-            if (nfp_count > 0 && nfp_words <= 24) {
-                memset(nfp_grid, 0, sizeof(nfp_grid));
+            if (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS) {
+                memset(nfp_grid, 0, (size_t)VPACK_GRID_DIM * VPACK_GRID_DIM * sizeof(uint64_t[VPACK_GRID_WORDS]));
                 for (uint32_t n = 0; n < nfp_count; n++) {
                     int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
                     int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
@@ -374,7 +375,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
                     }
                 }
             }
-            bool use_grid = (nfp_count > 0 && nfp_words <= 24);
+            bool use_grid = (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS);
             // #endregion
 
             // #region Score candidates by resulting POT page area, then sort
@@ -553,6 +554,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     free(placed);
     free(nfps);
     free(cands);
+    free(nfp_grid);
     // #endregion
 
     return sprite_count;
