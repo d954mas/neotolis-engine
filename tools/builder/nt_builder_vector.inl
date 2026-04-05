@@ -688,7 +688,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
         uint8_t orient_orig[8]; /* maps compacted index → original 0-7 orientation flag */
         for (uint32_t r = 0; r < orient_count; r++)
             orient_orig[r] = (uint8_t)r;
-        if (exp.use_orient_dedup) {
+        if (exp.use_orient_dedup && orient_count > 2) {
             uint32_t source_orient_count = orient_count;
             uint32_t dedup_count = 0;
             for (uint32_t r = 0; r < source_orient_count; r++) {
