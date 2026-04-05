@@ -485,9 +485,9 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             }
             // #endregion
 
-            /* Clear dirtied grid cells for next orientation (cheaper than full memset) */
+            /* Clear only the used words of dirtied grid cells */
             for (uint32_t d = 0; d < dirty_count; d++) {
-                memset(nfp_grid[dirty_cells[d]], 0, sizeof(uint64_t[VPACK_GRID_WORDS]));
+                memset(nfp_grid[dirty_cells[d]], 0, (size_t)nfp_words * sizeof(uint64_t));
             }
 
             /* After orientation 0: if placement fits within current page frontier,
