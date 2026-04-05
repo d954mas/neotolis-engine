@@ -146,7 +146,7 @@ static bool vpack_point_in_poly(int32_t px, int32_t py, const Point2D *poly, uin
 }
 
 typedef struct {
-    Point2D verts[32];
+    Point2D verts[32]; /* max nA+nB where each polygon ≤ 16 vertices */
     uint32_t count;
     int32_t min_x, min_y, max_x, max_y;
 } VPackNFP;
@@ -197,7 +197,7 @@ typedef struct {
 #define VPACK_NFP_CACHE_SIZE 32768U /* must be power of 2 */
 typedef struct {
     uint32_t key_a, key_b; /* shape hashes; both 0 = empty slot */
-    Point2D verts[32];
+    Point2D verts[32]; /* max nA+nB where each polygon ≤ 16 vertices */
     uint32_t count;
 } VPackNFPCacheEntry;
 
@@ -240,7 +240,8 @@ static VPackExperimentConfig vpack_experiment_config_get(void) {
 }
 
 #define VPACK_GRID_CELL 128
-#define VPACK_GRID_DIM ((4096 / VPACK_GRID_CELL) + 1)
+#define VPACK_GRID_MAX_SIZE 4096 /* max atlas size supported by NFP grid — increase if needed */
+#define VPACK_GRID_DIM ((VPACK_GRID_MAX_SIZE / VPACK_GRID_CELL) + 1)
 /* Keep enough words to cover large single-page runs without disabling broad-phase. */
 #define VPACK_GRID_WORDS 64
 
@@ -299,8 +300,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                            const int32_t orient_max_cand[8][2], uint32_t orient_count, int32_t worst_poly_min_x, int32_t worst_poly_min_y, int32_t worst_poly_max_x, int32_t worst_poly_max_y,
                            int32_t global_min_cand_x, int32_t global_min_cand_y, int32_t global_max_cand_x, int32_t global_max_cand_y, uint32_t extrude, uint32_t margin, bool power_of_two,
                            VPackNFP *nfps, uint64_t (*nfp_grid)[VPACK_GRID_WORDS], VPackCand **cands, uint32_t *cand_cap, uint32_t *relevant_buf, VPackNFPCacheEntry *nfp_cache,
-                           const uint32_t orient_neg_hashes[8], const VPackExperimentConfig *exp, PackStats *stats, uint64_t *io_best_score, uint32_t page_index, uint32_t *out_best_page,
-                           int32_t *out_best_x, int32_t *out_best_y, uint8_t *out_best_orient, uint32_t *out_best_orient_idx) {
+                           const uint32_t orient_neg_hashes[8], const VPackExperimentConfig *exp, PackStats *stats, uint64_t *io_best_score, uint32_t page_index, uint32_t *out_best_page, int32_t *out_best_x, int32_t *out_best_y, uint8_t *out_best_orient, uint32_t *out_best_orient_idx) {
     uint32_t relevant_count = 0;
     for (uint32_t i = 0; i < page->count; i++) {
         int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - worst_poly_max_x;
@@ -651,6 +651,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     NT_BUILD_ASSERT(placed && nfps && cands && "vector_pack: alloc failed");
 
     /* Pre-allocate NFP spatial grid on heap (reused across orientations+sprites) */
+    NT_BUILD_ASSERT(max_size <= VPACK_GRID_MAX_SIZE && "vector_pack: max_size exceeds VPACK_GRID_MAX_SIZE — increase VPACK_GRID_MAX_SIZE");
     uint64_t(*nfp_grid)[VPACK_GRID_WORDS] = (uint64_t(*)[VPACK_GRID_WORDS])calloc((size_t)VPACK_GRID_DIM * VPACK_GRID_DIM, sizeof(uint64_t[VPACK_GRID_WORDS]));
     NT_BUILD_ASSERT(nfp_grid && "vector_pack: grid alloc failed");
 

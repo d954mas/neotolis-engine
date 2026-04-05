@@ -2805,7 +2805,7 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
         state->opts = nt_atlas_opts_defaults();
     }
     state->opts.compress = NULL; /* zeroed -- use has_compress flag */
-    NT_BUILD_ASSERT(state->opts.max_vertices <= 32 && "begin_atlas: max_vertices must be <= 32 (tile grid index buffer limit)");
+    NT_BUILD_ASSERT(state->opts.max_vertices <= 16 && "begin_atlas: max_vertices must be <= 16 (NFP buffer limit: nA+nB <= 32)");
     NT_BUILD_ASSERT(state->opts.tile_size > 0 && state->opts.tile_size <= 32 && "begin_atlas: tile_size must be 1-32");
 
     /* Initialize sprite array */
