@@ -318,13 +318,6 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
 
     bool found_on_page = false;
     for (uint32_t ori = 0; ori < orient_count; ori++) {
-        // #region Skip orientation if its lower bound can't beat best score
-        if (*io_best_score != UINT64_MAX) {
-            uint64_t ori_lb = vpack_score_candidate(orient_min_cand[ori][0], orient_min_cand[ori][1], orient_aabb[ori][2], orient_aabb[ori][3], page->used_w, page->used_h, margin, power_of_two);
-            if (ori_lb >= *io_best_score)
-                continue;
-        }
-        // #endregion
         uint32_t cur_count = orient_counts[ori];
         int32_t poly_min_x = orient_aabb[ori][0];
         int32_t poly_min_y = orient_aabb[ori][1];
