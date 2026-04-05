@@ -248,6 +248,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     uint32_t pages_used_h[16] = {0};
 
     uint32_t orient_count = opts->allow_rotate ? 8 : 1;
+    uint32_t *relevant_buf = (uint32_t *)malloc(sprite_count * sizeof(uint32_t));
 
     for (uint32_t s = 0; s < sprite_count; s++) {
         uint32_t idx = sorted[s].index;
@@ -278,54 +279,94 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
         uint64_t best_score = UINT64_MAX;
         uint32_t best_orient_idx = 0; /* which orient_polys[] was used */
 
+        /* Pre-compute per-orientation AABBs, bounds, negated polys */
+        Point2D orient_neg[8][32];
+        int32_t orient_aabb[8][4];     /* min_x, min_y, max_x, max_y */
+        int32_t orient_min_cand[8][2]; /* min_cand_x, min_cand_y */
+        int32_t orient_max_cand[8][2]; /* max_cand_x, max_cand_y */
+        /* Worst-case AABB across all orientations for shared placed-sprite pre-filter */
+        int32_t worst_poly_max_x = 0, worst_poly_max_y = 0;
+        int32_t worst_poly_min_x = 0, worst_poly_min_y = 0;
+        int32_t global_min_cand_x = INT32_MAX, global_min_cand_y = INT32_MAX;
+        int32_t global_max_cand_x = 0, global_max_cand_y = 0;
+        for (uint32_t ori = 0; ori < orient_count; ori++) {
+            vpack_negate(orient_polys[ori], orient_counts[ori], orient_neg[ori]);
+            vpack_calc_aabb(orient_polys[ori], orient_counts[ori], &orient_aabb[ori][0], &orient_aabb[ori][1], &orient_aabb[ori][2], &orient_aabb[ori][3]);
+            int32_t mcx = min_edge - orient_aabb[ori][0];
+            if (mcx < min_edge)
+                mcx = min_edge;
+            int32_t mcy = min_edge - orient_aabb[ori][1];
+            if (mcy < min_edge)
+                mcy = min_edge;
+            orient_min_cand[ori][0] = mcx;
+            orient_min_cand[ori][1] = mcy;
+            orient_max_cand[ori][0] = (int32_t)max_size - (int32_t)margin - orient_aabb[ori][2] - 1;
+            orient_max_cand[ori][1] = (int32_t)max_size - (int32_t)margin - orient_aabb[ori][3] - 1;
+            if (orient_aabb[ori][2] > worst_poly_max_x)
+                worst_poly_max_x = orient_aabb[ori][2];
+            if (orient_aabb[ori][3] > worst_poly_max_y)
+                worst_poly_max_y = orient_aabb[ori][3];
+            if (orient_aabb[ori][0] < worst_poly_min_x)
+                worst_poly_min_x = orient_aabb[ori][0];
+            if (orient_aabb[ori][1] < worst_poly_min_y)
+                worst_poly_min_y = orient_aabb[ori][1];
+            if (mcx < global_min_cand_x)
+                global_min_cand_x = mcx;
+            if (mcy < global_min_cand_y)
+                global_min_cand_y = mcy;
+            if (orient_max_cand[ori][0] > global_max_cand_x)
+                global_max_cand_x = orient_max_cand[ori][0];
+            if (orient_max_cand[ori][1] > global_max_cand_y)
+                global_max_cand_y = orient_max_cand[ori][1];
+        }
+
     try_place:;
 
-        /* Optimization: try orientation 0 first. Only try remaining orientations
-         * if orient 0 failed to place OR its placement extends the page frontier
-         * (i.e., increases pages_used_w or pages_used_h). When orient 0 fits
-         * within the current frontier, it's very unlikely other orientations help. */
-        uint32_t effective_orient_count = orient_count;
+        // #region Build placed-sprite relevance list (shared across orientations)
+        /* AABB pre-filter using worst-case bounds — computed once, used for all 8 orientations.
+         * A placed sprite skipped here would be skipped for ALL orientations. */
+        uint32_t *relevant = relevant_buf;
+        uint32_t relevant_count = 0;
+        for (uint32_t i = 0; i < placed_on_page; i++) {
+            int32_t est_min_x = placed[i].x + placed[i].aabb_min_x - worst_poly_max_x;
+            int32_t est_max_x = placed[i].x + placed[i].aabb_max_x - worst_poly_min_x;
+            int32_t est_min_y = placed[i].y + placed[i].aabb_min_y - worst_poly_max_y;
+            int32_t est_max_y = placed[i].y + placed[i].aabb_max_y - worst_poly_min_y;
+            if (est_max_x < global_min_cand_x || est_min_x > global_max_cand_x || est_max_y < global_min_cand_y || est_min_y > global_max_cand_y) {
+                stats->yskip_count++;
+                continue;
+            }
+            relevant[relevant_count++] = i;
+        }
+        // #endregion
 
-        for (uint32_t ori = 0; ori < effective_orient_count; ori++) {
+        for (uint32_t ori = 0; ori < orient_count; ori++) {
             Point2D *cur_poly = orient_polys[ori];
             uint32_t cur_count = orient_counts[ori];
-
-            Point2D sprite_neg[32];
-            vpack_negate(cur_poly, cur_count, sprite_neg);
-
-            int32_t poly_min_x, poly_min_y, poly_max_x, poly_max_y;
-            vpack_calc_aabb(cur_poly, cur_count, &poly_min_x, &poly_min_y, &poly_max_x, &poly_max_y);
-
-            int32_t min_cand_x = min_edge - poly_min_x;
-            if (min_cand_x < min_edge)
-                min_cand_x = min_edge;
-            int32_t min_cand_y = min_edge - poly_min_y;
-            if (min_cand_y < min_edge)
-                min_cand_y = min_edge;
-            int32_t max_cand_x = (int32_t)max_size - (int32_t)margin - poly_max_x - 1;
-            int32_t max_cand_y = (int32_t)max_size - (int32_t)margin - poly_max_y - 1;
+            int32_t poly_min_x = orient_aabb[ori][0], poly_min_y = orient_aabb[ori][1];
+            int32_t poly_max_x = orient_aabb[ori][2], poly_max_y = orient_aabb[ori][3];
+            int32_t min_cand_x = orient_min_cand[ori][0], min_cand_y = orient_min_cand[ori][1];
+            int32_t max_cand_x = orient_max_cand[ori][0], max_cand_y = orient_max_cand[ori][1];
 
             uint32_t cand_count = 0;
             VPackBounds bounds = {min_cand_x, min_cand_y, max_cand_x, max_cand_y};
             vpack_add_cand(&cands, &cand_count, &cand_cap, min_cand_x, min_cand_y, &bounds);
 
-            // #region Build NFPs against placed sprites (with AABB pre-filter)
+            // #region Build NFPs against relevant placed sprites
             uint32_t nfp_count = 0;
-            for (uint32_t i = 0; i < placed_on_page; i++) {
-                /* AABB pre-filter: estimate NFP bounding box from placed + sprite AABBs.
-                 * If estimated NFP doesn't overlap feasible region, the placed sprite
-                 * is too far away -- no candidate in [min_cand, max_cand] can collide. */
+            for (uint32_t ri = 0; ri < relevant_count; ri++) {
+                uint32_t i = relevant[ri];
+                /* Per-orientation AABB re-check (tighter than worst-case) */
                 int32_t est_min_x = placed[i].x + placed[i].aabb_min_x - poly_max_x;
                 int32_t est_max_x = placed[i].x + placed[i].aabb_max_x - poly_min_x;
                 int32_t est_min_y = placed[i].y + placed[i].aabb_min_y - poly_max_y;
                 int32_t est_max_y = placed[i].y + placed[i].aabb_max_y - poly_min_y;
                 if (est_max_x < min_cand_x || est_min_x > max_cand_x || est_max_y < min_cand_y || est_min_y > max_cand_y) {
-                    stats->yskip_count++;
                     continue;
                 }
 
                 VPackNFP *nfp = &nfps[nfp_count];
-                nfp->count = vpack_minkowski(placed[i].poly, placed[i].count, sprite_neg, cur_count, nfp->verts);
+                nfp->count = vpack_minkowski(placed[i].poly, placed[i].count, orient_neg[ori], cur_count, nfp->verts);
                 stats->or_count++;
 
                 for (uint32_t v = 0; v < nfp->count; v++) {
@@ -569,6 +610,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     free(nfps);
     free(cands);
     free(nfp_grid);
+    free(relevant_buf);
     // #endregion
 
     return sprite_count;
