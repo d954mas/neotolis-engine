@@ -277,6 +277,9 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             Point2D *cur_poly = orient_polys[ori];
             uint32_t cur_count = orient_counts[ori];
 
+            Point2D sprite_neg[32];
+            vpack_negate(cur_poly, cur_count, sprite_neg);
+
             int32_t poly_min_x, poly_min_y, poly_max_x, poly_max_y;
             vpack_calc_aabb(cur_poly, cur_count, &poly_min_x, &poly_min_y, &poly_max_x, &poly_max_y);
 
@@ -288,37 +291,6 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
                 min_cand_y = min_edge;
             int32_t max_cand_x = (int32_t)max_size - (int32_t)margin - poly_max_x - 1;
             int32_t max_cand_y = (int32_t)max_size - (int32_t)margin - poly_max_y - 1;
-
-            /* Early exit: compute the best possible score this orientation could achieve
-             * (placement at min_cand). If it can't beat best_score, skip entirely. */
-            if (found_any) {
-                uint32_t opt_w = (uint32_t)min_cand_x + poly_max_x;
-                uint32_t opt_h = (uint32_t)min_cand_y + poly_max_y;
-                uint32_t cw = pages_used_w[current_page];
-                uint32_t ch = pages_used_h[current_page];
-                if (opt_w < cw)
-                    opt_w = cw;
-                if (opt_h < ch)
-                    opt_h = ch;
-                opt_w += margin;
-                opt_h += margin;
-                if (opts->power_of_two) {
-                    uint32_t pw = 1;
-                    while (pw < opt_w)
-                        pw <<= 1;
-                    uint32_t ph = 1;
-                    while (ph < opt_h)
-                        ph <<= 1;
-                    opt_w = pw;
-                    opt_h = ph;
-                }
-                uint64_t opt_score = ((uint64_t)opt_w * opt_h) << 16;
-                if (opt_score > best_score)
-                    continue;
-            }
-
-            Point2D sprite_neg[32];
-            vpack_negate(cur_poly, cur_count, sprite_neg);
 
             uint32_t cand_count = 0;
             VPackBounds bounds = {min_cand_x, min_cand_y, max_cand_x, max_cand_y};
