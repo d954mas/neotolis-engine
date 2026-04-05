@@ -386,26 +386,30 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 for (uint32_t v = 0; v < nfp->count; v++) {
                     vpack_add_cand(cands, &cand_count, cand_cap, nfp->verts[v].x, nfp->verts[v].y, &bounds);
                 }
-                for (uint32_t e = 0; e < nfp->count; e++) {
-                    uint32_t en = (e + 1 == nfp->count) ? 0 : e + 1;
-                    if (exp->use_axis_i) {
-                        int32_t vf, vc;
-                        if (vpack_intersect_axis_i(nfp->verts[e], nfp->verts[en], true, min_cand_x, &vf, &vc)) {
-                            vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vf, &bounds);
-                            if (vc != vf)
-                                vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vc, &bounds);
+                /* Axis-intersection candidates: only when no best found yet.
+                 * Once we have a placement, vertex candidates are sufficient. */
+                if (*io_best_score == UINT64_MAX) {
+                    for (uint32_t e = 0; e < nfp->count; e++) {
+                        uint32_t en = (e + 1 == nfp->count) ? 0 : e + 1;
+                        if (exp->use_axis_i) {
+                            int32_t vf, vc;
+                            if (vpack_intersect_axis_i(nfp->verts[e], nfp->verts[en], true, min_cand_x, &vf, &vc)) {
+                                vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vf, &bounds);
+                                if (vc != vf)
+                                    vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vc, &bounds);
+                            }
+                            if (vpack_intersect_axis_i(nfp->verts[e], nfp->verts[en], false, min_cand_y, &vf, &vc)) {
+                                vpack_add_cand(cands, &cand_count, cand_cap, vf, min_cand_y, &bounds);
+                                if (vc != vf)
+                                    vpack_add_cand(cands, &cand_count, cand_cap, vc, min_cand_y, &bounds);
+                            }
+                        } else {
+                            float out_val;
+                            if (vpack_intersect_axis_f(nfp->verts[e], nfp->verts[en], true, (float)min_cand_x, &out_val))
+                                vpack_add_float_cand(cands, &cand_count, cand_cap, (float)min_cand_x, out_val, &bounds);
+                            if (vpack_intersect_axis_f(nfp->verts[e], nfp->verts[en], false, (float)min_cand_y, &out_val))
+                                vpack_add_float_cand(cands, &cand_count, cand_cap, out_val, (float)min_cand_y, &bounds);
                         }
-                        if (vpack_intersect_axis_i(nfp->verts[e], nfp->verts[en], false, min_cand_y, &vf, &vc)) {
-                            vpack_add_cand(cands, &cand_count, cand_cap, vf, min_cand_y, &bounds);
-                            if (vc != vf)
-                                vpack_add_cand(cands, &cand_count, cand_cap, vc, min_cand_y, &bounds);
-                        }
-                    } else {
-                        float out_val;
-                        if (vpack_intersect_axis_f(nfp->verts[e], nfp->verts[en], true, (float)min_cand_x, &out_val))
-                            vpack_add_float_cand(cands, &cand_count, cand_cap, (float)min_cand_x, out_val, &bounds);
-                        if (vpack_intersect_axis_f(nfp->verts[e], nfp->verts[en], false, (float)min_cand_y, &out_val))
-                            vpack_add_float_cand(cands, &cand_count, cand_cap, out_val, (float)min_cand_y, &bounds);
                     }
                 }
             }
