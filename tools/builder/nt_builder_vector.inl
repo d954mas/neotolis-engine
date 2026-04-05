@@ -482,6 +482,34 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         }
         bool use_grid = (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS);
 
+        /* Pre-compute upper coordinate bounds from io_best_score for fast rejection */
+        int32_t fast_max_x = max_cand_x;
+        int32_t fast_max_y = max_cand_y;
+        if (*io_best_score != UINT64_MAX && power_of_two) {
+            uint32_t best_area = (uint32_t)(*io_best_score >> 16);
+            /* Find max cx such that POT(cx+poly_max_x+margin) * POT(cur_h+margin) <= best_area */
+            uint32_t fixed_h = page->used_h + margin;
+            uint32_t pot_h = 1;
+            while (pot_h < fixed_h)
+                pot_h <<= 1;
+            if (pot_h > 0) {
+                uint32_t max_pot_w = best_area / pot_h;
+                int32_t xb = (int32_t)max_pot_w - poly_max_x - (int32_t)margin;
+                if (xb < fast_max_x)
+                    fast_max_x = xb;
+            }
+            uint32_t fixed_w = page->used_w + margin;
+            uint32_t pot_w = 1;
+            while (pot_w < fixed_w)
+                pot_w <<= 1;
+            if (pot_w > 0) {
+                uint32_t max_pot_h = best_area / pot_w;
+                int32_t yb = (int32_t)max_pot_h - poly_max_y - (int32_t)margin;
+                if (yb < fast_max_y)
+                    fast_max_y = yb;
+            }
+        }
+
         for (uint32_t c = 0; c < cand_count; c++) {
             int32_t cx = (*cands)[c].x;
             int32_t cy = (*cands)[c].y;
@@ -491,7 +519,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 continue;
             if (cx < (int32_t)extrude || cy < (int32_t)extrude)
                 continue;
-            if (cx > max_cand_x || cy > max_cand_y)
+            if (cx > fast_max_x || cy > fast_max_y)
                 continue;
 
             uint64_t score = vpack_score_candidate(cx, cy, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
