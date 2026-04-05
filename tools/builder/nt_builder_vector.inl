@@ -239,7 +239,7 @@ static VPackExperimentConfig vpack_experiment_config_get(void) {
     return cfg;
 }
 
-#define VPACK_GRID_CELL 64
+#define VPACK_GRID_CELL 128
 #define VPACK_GRID_DIM ((4096 / VPACK_GRID_CELL) + 1)
 /* Keep enough words to cover large single-page runs without disabling broad-phase. */
 #define VPACK_GRID_WORDS 64
