@@ -243,7 +243,7 @@ static VPackExperimentConfig vpack_experiment_config_get(void) {
 #define VPACK_GRID_CELL 128
 #define VPACK_GRID_DIM ((4096 / VPACK_GRID_CELL) + 1)
 /* Keep enough words to cover large single-page runs without disabling broad-phase. */
-#define VPACK_GRID_WORDS 64
+#define VPACK_GRID_WORDS 32
 
 static void vpack_calc_aabb(const Point2D *poly, uint32_t count, int32_t *min_x, int32_t *min_y, int32_t *max_x, int32_t *max_y) {
     if (count == 0)
