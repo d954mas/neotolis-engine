@@ -7,6 +7,7 @@
 #include "stb_image_write.h"
 /* clang-format on */
 
+#include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1240,10 +1241,166 @@ static uint32_t tgrid_or_first_set_in_range(const uint64_t *mask, uint32_t mask_
 
 /* Per-call packing statistics (thread-safe: no static globals) */
 typedef struct {
+    bool enabled;
+    double slow_scan_sec;
+    double progress_sec;
+} AtlasTraceConfig;
+
+typedef struct {
     uint64_t or_count;
     uint64_t test_count;
     uint64_t yskip_count;
+    AtlasTraceConfig trace;
 } PackStats;
+
+typedef struct {
+    const AtlasTraceConfig *cfg;
+    const char *stage;
+    uint32_t sprite_order;
+    uint32_t sprite_count;
+    uint32_t sprite_index;
+    uint32_t page_index;
+    uint32_t tx_min;
+    uint32_t ty_min;
+    uint32_t tx_max;
+    uint32_t ty_max;
+    uint32_t max_stw;
+    uint32_t max_sth;
+    uint32_t page_used_tw;
+    uint32_t page_used_th;
+} ScanTraceParams;
+
+typedef struct {
+    uint64_t rotation_passes;
+    uint64_t ty_rows;
+    uint64_t tx_steps;
+    uint64_t x4_full_rows;
+    uint64_t run_skip_count;
+    uint64_t run_skip_tiles;
+    uint64_t or_width_skip_count;
+    uint64_t or_width_skip_tiles;
+    uint64_t tests;
+    uint64_t collision_hits;
+    uint64_t collision_skip_one;
+    uint64_t collision_skip_many;
+    uint64_t collision_skip_tiles;
+    uint64_t fits;
+    uint32_t last_rot;
+    uint32_t last_ty;
+    uint32_t last_tx;
+} ScanTraceStats;
+
+static bool atlas_trace_str_ieq(const char *a, const char *b) {
+    while (*a != '\0' && *b != '\0') {
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) {
+            return false;
+        }
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static bool atlas_trace_env_truthy(const char *value) {
+    if (!value || value[0] == '\0') {
+        return false;
+    }
+    if ((value[0] == '0' && value[1] == '\0') || atlas_trace_str_ieq(value, "false") || atlas_trace_str_ieq(value, "off") || atlas_trace_str_ieq(value, "no")) {
+        return false;
+    }
+    return true;
+}
+
+static double atlas_trace_env_seconds(const char *name, double fallback) {
+    const char *value = getenv(name);
+    if (!value || value[0] == '\0') {
+        return fallback;
+    }
+    char *end = NULL;
+    double parsed = strtod(value, &end);
+    if (end == value || parsed < 0.0) {
+        return fallback;
+    }
+    return parsed;
+}
+
+static AtlasTraceConfig atlas_trace_config_get(void) {
+    static bool initialized = false;
+    static AtlasTraceConfig cfg;
+    if (!initialized) {
+        cfg.enabled = atlas_trace_env_truthy(getenv("NT_ATLAS_TRACE"));
+        cfg.slow_scan_sec = atlas_trace_env_seconds("NT_ATLAS_TRACE_SLOW_SEC", 1.0);
+        cfg.progress_sec = atlas_trace_env_seconds("NT_ATLAS_TRACE_PROGRESS_SEC", 2.0);
+        initialized = true;
+    }
+    return cfg;
+}
+
+static void coarse_count_states(const CoarseGrid *cg, uint32_t *out_empty, uint32_t *out_mixed, uint32_t *out_full) {
+    uint32_t empty = 0;
+    uint32_t mixed = 0;
+    uint32_t full = 0;
+    if (cg) {
+        uint32_t count = cg->bw * cg->bh;
+        for (uint32_t i = 0; i < count; i++) {
+            uint8_t cell = cg->cells[i];
+            if (cell == BLOCK_EMPTY) {
+                empty++;
+            } else if (cell == BLOCK_FULL) {
+                full++;
+            } else {
+                mixed++;
+            }
+        }
+    }
+    if (out_empty) {
+        *out_empty = empty;
+    }
+    if (out_mixed) {
+        *out_mixed = mixed;
+    }
+    if (out_full) {
+        *out_full = full;
+    }
+}
+
+static void scan_trace_format_best(char *dst, size_t dst_size, bool found, uint32_t best_tx, uint32_t best_ty, uint8_t best_rot) {
+    if (found) {
+        (void)snprintf(dst, dst_size, "%u,%u r%u", best_tx, best_ty, (unsigned)best_rot);
+    } else {
+        (void)snprintf(dst, dst_size, "none");
+    }
+}
+
+static void scan_trace_log_progress(const ScanTraceParams *trace, const ScanTraceStats *diag, double elapsed, bool found, uint32_t best_tx, uint32_t best_ty, uint8_t best_rot, uint64_t yskip_rows) {
+    char best_buf[32];
+    scan_trace_format_best(best_buf, sizeof(best_buf), found, best_tx, best_ty, best_rot);
+    NT_LOG_INFO("  TRACE progress sprite %u/%u idx=%u page=%u stage=%s elapsed=%.1fs cursor=r%u ty=%u tx=%u range=%ux%u used=%ux%u best=%s ty_rows=%llu tx_steps=%llu yskip=%llu x4=%llu "
+                "run=%llu(+%llu) or=%llu(+%llu) tests=%llu hits=%llu skip1=%llu skipN=%llu(+%llu)",
+                trace->sprite_order, trace->sprite_count, trace->sprite_index, trace->page_index, trace->stage ? trace->stage : "scan", elapsed, diag->last_rot, diag->last_ty, diag->last_tx,
+                trace->tx_max - trace->tx_min, trace->ty_max - trace->ty_min, trace->page_used_tw, trace->page_used_th, best_buf, (unsigned long long)diag->ty_rows, (unsigned long long)diag->tx_steps,
+                (unsigned long long)yskip_rows, (unsigned long long)diag->x4_full_rows, (unsigned long long)diag->run_skip_count, (unsigned long long)diag->run_skip_tiles,
+                (unsigned long long)diag->or_width_skip_count, (unsigned long long)diag->or_width_skip_tiles, (unsigned long long)diag->tests, (unsigned long long)diag->collision_hits,
+                (unsigned long long)diag->collision_skip_one, (unsigned long long)diag->collision_skip_many, (unsigned long long)diag->collision_skip_tiles);
+}
+
+static void scan_trace_log_summary(const ScanTraceParams *trace, const ScanTraceStats *diag, const TileGrid *atlas, const CoarseGrid *cg, double elapsed, bool found, uint32_t best_tx,
+                                   uint32_t best_ty, uint8_t best_rot, uint64_t yskip_rows) {
+    uint32_t empty_blocks = 0;
+    uint32_t mixed_blocks = 0;
+    uint32_t full_blocks = 0;
+    char best_buf[32];
+    scan_trace_format_best(best_buf, sizeof(best_buf), found, best_tx, best_ty, best_rot);
+    coarse_count_states(cg, &empty_blocks, &mixed_blocks, &full_blocks);
+    NT_LOG_INFO("  TRACE summary sprite %u/%u idx=%u page=%u stage=%s result=%s elapsed=%.1fs atlas=%ux%u range=%ux%u used=%ux%u sprite=%ux%u best=%s ty_rows=%llu tx_steps=%llu yskip=%llu x4=%llu "
+                "run=%llu(+%llu) or=%llu(+%llu) tests=%llu hits=%llu skip1=%llu skipN=%llu(+%llu) coarse[e=%u m=%u f=%u]",
+                trace->sprite_order, trace->sprite_count, trace->sprite_index, trace->page_index, trace->stage ? trace->stage : "scan", found ? "placed" : "miss", elapsed, atlas->tw, atlas->th,
+                trace->tx_max - trace->tx_min, trace->ty_max - trace->ty_min, trace->page_used_tw, trace->page_used_th, trace->max_stw, trace->max_sth, best_buf, (unsigned long long)diag->ty_rows,
+                (unsigned long long)diag->tx_steps, (unsigned long long)yskip_rows, (unsigned long long)diag->x4_full_rows, (unsigned long long)diag->run_skip_count,
+                (unsigned long long)diag->run_skip_tiles, (unsigned long long)diag->or_width_skip_count, (unsigned long long)diag->or_width_skip_tiles, (unsigned long long)diag->tests,
+                (unsigned long long)diag->collision_hits, (unsigned long long)diag->collision_skip_one, (unsigned long long)diag->collision_skip_many, (unsigned long long)diag->collision_skip_tiles,
+                empty_blocks, mixed_blocks, full_blocks);
+}
 
 /* Try to place a sprite (with given rotation variants) within [ty_min..ty_max) x [tx_min..tx_max).
  * Returns true if placed, with best position in out_tx/out_ty/out_rot.
@@ -1251,10 +1408,22 @@ typedef struct {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileGrid *atlas_x4, const OrSparseTable *or_st, const TileGrid *rot_sg, const TileGrid *rot_sg_x4, const int32_t *rot_ox,
                         const int32_t *rot_oy, uint32_t rot_count, uint32_t tx_min, uint32_t ty_min, uint32_t tx_max, uint32_t ty_max, uint32_t *out_tx, uint32_t *out_ty, uint8_t *out_rot,
-                        PackStats *stats) {
+                        const ScanTraceParams *trace, PackStats *stats) {
     uint32_t best_tx = UINT32_MAX;
     uint32_t best_ty = UINT32_MAX;
     bool found = false;
+    bool trace_enabled = trace && trace->cfg && trace->cfg->enabled;
+    ScanTraceStats trace_stats;
+    memset(&trace_stats, 0, sizeof(trace_stats));
+    double trace_start = 0.0;
+    double next_progress_time = 0.0;
+    uint64_t yskip_before = stats->yskip_count;
+    if (trace_enabled) {
+        trace_start = nt_time_now();
+        if (trace->cfg->progress_sec > 0.0) {
+            next_progress_time = trace_start + trace->cfg->progress_sec;
+        }
+    }
 
     uint64_t *or_mask = (uint64_t *)malloc((size_t)atlas->row_words * sizeof(uint64_t));
     NT_BUILD_ASSERT(or_mask && "scan_region: alloc failed");
@@ -1282,6 +1451,12 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
     }
 
     for (uint32_t r = 0; r < rot_count; r++) {
+        if (trace_enabled) {
+            trace_stats.rotation_passes++;
+            trace_stats.last_rot = r;
+            trace_stats.last_ty = ty_min;
+            trace_stats.last_tx = tx_min;
+        }
         uint32_t eff_ty_max = found ? (best_ty + 1) : ty_max;
         if (eff_ty_max > ty_max) {
             eff_ty_max = ty_max;
@@ -1332,6 +1507,18 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
         /* OR-mask is now precomputed via sparse table — O(row_words) query per ty */
 
         for (uint32_t ty = ty_min; ty < eff_ty_max; ty++) {
+            if (trace_enabled) {
+                trace_stats.ty_rows++;
+                trace_stats.last_ty = ty;
+                trace_stats.last_tx = tx_min;
+                if (next_progress_time > 0.0 && (trace_stats.ty_rows & 255ULL) == 0) {
+                    double now = nt_time_now();
+                    if (now >= next_progress_time) {
+                        scan_trace_log_progress(trace, &trace_stats, now - trace_start, found, best_tx, best_ty, *out_rot, stats->yskip_count - yskip_before);
+                        next_progress_time = now + trace->cfg->progress_sec;
+                    }
+                }
+            }
             int32_t ay0_s = (int32_t)ty + rot_oy[r];
             int32_t ay1_s = ay0_s + (int32_t)s_th;
             uint32_t ay0 = (ay0_s >= 0) ? (uint32_t)ay0_s : 0;
@@ -1398,6 +1585,9 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
                     }
                 }
                 if (x4_all_full) {
+                    if (trace_enabled) {
+                        trace_stats.x4_full_rows++;
+                    }
                     continue;
                 }
             }
@@ -1409,6 +1599,17 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
             // #endregion
 
             for (uint32_t tx = tx_min; tx < tx_max;) {
+                if (trace_enabled) {
+                    trace_stats.tx_steps++;
+                    trace_stats.last_tx = tx;
+                    if (next_progress_time > 0.0 && (trace_stats.tx_steps & 4095ULL) == 0) {
+                        double now = nt_time_now();
+                        if (now >= next_progress_time) {
+                            scan_trace_log_progress(trace, &trace_stats, now - trace_start, found, best_tx, best_ty, *out_rot, stats->yskip_count - yskip_before);
+                            next_progress_time = now + trace->cfg->progress_sec;
+                        }
+                    }
+                }
                 // #region X-skip: jump past block columns without a wide enough free-run
                 if (cg) {
                     int32_t ax = (int32_t)tx + rot_ox[r];
@@ -1421,6 +1622,10 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
                             }
                             int32_t next_tx = (int32_t)(nbx << COARSE_SHIFT) - rot_ox[r];
                             if (next_tx > (int32_t)tx) {
+                                if (trace_enabled) {
+                                    trace_stats.run_skip_count++;
+                                    trace_stats.run_skip_tiles += (uint64_t)(next_tx - (int32_t)tx);
+                                }
                                 tx = (uint32_t)next_tx;
                                 continue;
                             }
@@ -1462,6 +1667,10 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
                             if (next_tx <= (int32_t)tx) {
                                 next_tx = (int32_t)tx + 1;
                             }
+                            if (trace_enabled) {
+                                trace_stats.or_width_skip_count++;
+                                trace_stats.or_width_skip_tiles += (uint64_t)(next_tx - (int32_t)tx);
+                            }
                             tx = (uint32_t)next_tx;
                             continue;
                         }
@@ -1471,6 +1680,9 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
             x1_check:;
                 uint32_t skip = 0;
                 stats->test_count++;
+                if (trace_enabled) {
+                    trace_stats.tests++;
+                }
                 if (!tgrid_test(atlas, &rot_sg[r], (int32_t)tx, (int32_t)ty, rot_ox[r], rot_oy[r], &skip)) {
                     int32_t abs_min_tx = (int32_t)tx + rot_ox[r];
                     int32_t abs_min_ty = (int32_t)ty + rot_oy[r];
@@ -1482,6 +1694,9 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
                             best_ty = ty;
                             *out_rot = (uint8_t)r;
                             found = true;
+                            if (trace_enabled) {
+                                trace_stats.fits++;
+                            }
                         }
                         break;
                     }
@@ -1490,6 +1705,15 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
                     }
                     tx++;
                     continue;
+                }
+                if (trace_enabled) {
+                    trace_stats.collision_hits++;
+                    if (skip > 1) {
+                        trace_stats.collision_skip_many++;
+                        trace_stats.collision_skip_tiles += skip;
+                    } else {
+                        trace_stats.collision_skip_one++;
+                    }
                 }
                 if (skip > 1) {
                     tx += skip;
@@ -1509,6 +1733,13 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
     free(col_free);
     free(or_mask_x4);
     free(or_mask);
+
+    if (trace_enabled) {
+        double elapsed = nt_time_now() - trace_start;
+        if (elapsed >= trace->cfg->slow_scan_sec) {
+            scan_trace_log_summary(trace, &trace_stats, atlas, cg, elapsed, found, best_tx, best_ty, *out_rot, stats->yskip_count - yskip_before);
+        }
+    }
 
     if (found) {
         *out_tx = best_tx;
@@ -1655,10 +1886,13 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     uint32_t placement_count = 0;
     NT_LOG_INFO("  tile_pack: %u sprites, grid %ux%u tiles (ts=%u), init=%upx", sprite_count, atlas_tw, atlas_th, ts, init_dim);
     double pack_start_time = nt_time_now();
-    double last_log_time = pack_start_time;
     stats->or_count = 0;
     stats->test_count = 0;
     stats->yskip_count = 0;
+    stats->trace = atlas_trace_config_get();
+    if (stats->trace.enabled) {
+        NT_LOG_INFO("  TRACE atlas scan enabled (slow=%.1fs progress=%.1fs)", stats->trace.slow_scan_sec, stats->trace.progress_sec);
+    }
 
     for (uint32_t si = 0; si < sprite_count; si++) {
         /* Progress log every 10 seconds */
@@ -1729,8 +1963,24 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             if (scan_th > page_grids[pi].th) {
                 scan_th = page_grids[pi].th;
             }
+            ScanTraceParams trace_existing = {
+                .cfg = &stats->trace,
+                .stage = "existing",
+                .sprite_order = si + 1,
+                .sprite_count = sprite_count,
+                .sprite_index = idx,
+                .page_index = pi,
+                .tx_min = margin_tiles,
+                .ty_min = margin_tiles,
+                .tx_max = scan_tw,
+                .ty_max = scan_th,
+                .max_stw = max_stw,
+                .max_sth = max_sth,
+                .page_used_tw = page_used_tw[pi],
+                .page_used_th = page_used_th[pi],
+            };
             placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, scan_tw, scan_th, &best_tx,
-                                 &best_ty, &best_rot, stats);
+                                 &best_ty, &best_rot, &trace_existing, stats);
             if (placed) {
                 best_page = pi;
             }
@@ -1751,11 +2001,31 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                 page_or_st[pi] = or_sparse_build(&page_grids[pi], global_max_sth);
                 page_w[pi] = page_grids[pi].tw * ts;
                 page_h[pi] = page_grids[pi].th * ts;
+                if (stats->trace.enabled) {
+                    NT_LOG_INFO("  TRACE grow page=%u sprite=%u/%u idx=%u old=%ux%u new=%ux%u used=%ux%u", pi, si + 1, sprite_count, idx, old_tw, old_th, page_grids[pi].tw, page_grids[pi].th,
+                                page_used_tw[pi], page_used_th[pi]);
+                }
 
                 /* Scan full grid: growth added empty space at the edges.
                  * OR-mask skip will jump past the full old area in O(row_words). */
+                ScanTraceParams trace_grow = {
+                    .cfg = &stats->trace,
+                    .stage = "grow",
+                    .sprite_order = si + 1,
+                    .sprite_count = sprite_count,
+                    .sprite_index = idx,
+                    .page_index = pi,
+                    .tx_min = margin_tiles,
+                    .ty_min = margin_tiles,
+                    .tx_max = page_grids[pi].tw,
+                    .ty_max = page_grids[pi].th,
+                    .max_stw = max_stw,
+                    .max_sth = max_sth,
+                    .page_used_tw = page_used_tw[pi],
+                    .page_used_th = page_used_th[pi],
+                };
                 placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[pi].tw,
-                                     page_grids[pi].th, &best_tx, &best_ty, &best_rot, stats);
+                                     page_grids[pi].th, &best_tx, &best_ty, &best_rot, &trace_grow, stats);
 
                 if (placed) {
                     best_page = pi;
@@ -1775,9 +2045,28 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             page_or_st[new_page] = or_sparse_build(&page_grids[new_page], global_max_sth);
             page_w[new_page] = init_dim;
             page_h[new_page] = init_dim;
+            if (stats->trace.enabled) {
+                NT_LOG_INFO("  TRACE new page=%u sprite=%u/%u idx=%u size=%ux%u", new_page, si + 1, sprite_count, idx, page_grids[new_page].tw, page_grids[new_page].th);
+            }
 
+            ScanTraceParams trace_new_page = {
+                .cfg = &stats->trace,
+                .stage = "new_page",
+                .sprite_order = si + 1,
+                .sprite_count = sprite_count,
+                .sprite_index = idx,
+                .page_index = new_page,
+                .tx_min = margin_tiles,
+                .ty_min = margin_tiles,
+                .tx_max = page_grids[new_page].tw,
+                .ty_max = page_grids[new_page].th,
+                .max_stw = max_stw,
+                .max_sth = max_sth,
+                .page_used_tw = page_used_tw[new_page],
+                .page_used_th = page_used_th[new_page],
+            };
             placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], &page_or_st[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles,
-                                 page_grids[new_page].tw, page_grids[new_page].th, &best_tx, &best_ty, &best_rot, stats);
+                                 page_grids[new_page].tw, page_grids[new_page].th, &best_tx, &best_ty, &best_rot, &trace_new_page, stats);
             if (!placed) {
                 /* New page too small — grow it */
                 while (!placed && (page_grids[new_page].tw < max_tw || page_grids[new_page].th < max_th)) {
@@ -1791,8 +2080,28 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                     page_or_st[new_page] = or_sparse_build(&page_grids[new_page], global_max_sth);
                     page_w[new_page] = page_grids[new_page].tw * ts;
                     page_h[new_page] = page_grids[new_page].th * ts;
+                    if (stats->trace.enabled) {
+                        NT_LOG_INFO("  TRACE grow page=%u sprite=%u/%u idx=%u old=%ux%u new=%ux%u used=%ux%u", new_page, si + 1, sprite_count, idx, old_tw, old_th, page_grids[new_page].tw,
+                                    page_grids[new_page].th, page_used_tw[new_page], page_used_th[new_page]);
+                    }
+                    ScanTraceParams trace_new_page_grow = {
+                        .cfg = &stats->trace,
+                        .stage = "new_page_grow",
+                        .sprite_order = si + 1,
+                        .sprite_count = sprite_count,
+                        .sprite_index = idx,
+                        .page_index = new_page,
+                        .tx_min = margin_tiles,
+                        .ty_min = margin_tiles,
+                        .tx_max = page_grids[new_page].tw,
+                        .ty_max = page_grids[new_page].th,
+                        .max_stw = max_stw,
+                        .max_sth = max_sth,
+                        .page_used_tw = page_used_tw[new_page],
+                        .page_used_th = page_used_th[new_page],
+                    };
                     placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], &page_or_st[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles,
-                                         margin_tiles, page_grids[new_page].tw, page_grids[new_page].th, &best_tx, &best_ty, &best_rot, stats);
+                                         margin_tiles, page_grids[new_page].tw, page_grids[new_page].th, &best_tx, &best_ty, &best_rot, &trace_new_page_grow, stats);
                 }
             }
             if (placed) {
