@@ -966,9 +966,22 @@ static void tgrid_row_or(const TileGrid *g, uint32_t y0, uint32_t h, uint64_t *o
     if (y_end > g->th) {
         y_end = g->th;
     }
-    for (uint32_t y = y0; y < y_end; y++) {
+    uint32_t rw = (out_words < g->row_words) ? out_words : g->row_words;
+
+    /* Process 4 rows at a time for better ILP */
+    uint32_t y = y0;
+    for (; y + 4 <= y_end; y += 4) {
+        const uint64_t *r0 = g->rows + ((size_t)y * g->row_words);
+        const uint64_t *r1 = r0 + g->row_words;
+        const uint64_t *r2 = r1 + g->row_words;
+        const uint64_t *r3 = r2 + g->row_words;
+        for (uint32_t w = 0; w < rw; w++) {
+            out[w] |= r0[w] | r1[w] | r2[w] | r3[w];
+        }
+    }
+    for (; y < y_end; y++) {
         const uint64_t *row = g->rows + ((size_t)y * g->row_words);
-        for (uint32_t w = 0; w < out_words && w < g->row_words; w++) {
+        for (uint32_t w = 0; w < rw; w++) {
             out[w] |= row[w];
         }
     }
