@@ -1089,6 +1089,10 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
         uint32_t or_prev_ay0 = UINT32_MAX;
         uint32_t or_prev_ay1 = UINT32_MAX;
         uint32_t or_steps_since_refresh = 0;
+        /* Same for x4 OR-mask */
+        uint32_t x4_prev_y0 = UINT32_MAX;
+        uint32_t x4_prev_h = 0;
+        uint32_t x4_steps_since_refresh = 0;
 
         for (uint32_t ty = ty_min; ty < eff_ty_max; ty++) {
             int32_t ay0_s = (int32_t)ty + rot_oy[r];
@@ -1110,6 +1114,7 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
                     ty = (uint32_t)next_ty - 1;
                 }
                 or_prev_ay0 = UINT32_MAX; /* invalidate sliding OR after skip */
+                x4_prev_y0 = UINT32_MAX;
                 continue;
             }
             // #endregion
@@ -1141,8 +1146,25 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
             if (or_mask_x4 && atlas_x4) {
                 uint32_t x4_y0 = ay0 / 4;
                 uint32_t x4_h = (ay1 - ay0 + 3) / 4;
-                s_dbg_or_count++;
-                tgrid_row_or(atlas_x4, x4_y0, x4_h, or_mask_x4, atlas_x4->row_words);
+                uint32_t x4_max_steps = (x4_h > 0) ? x4_h : 1;
+
+                if (x4_prev_y0 != UINT32_MAX && x4_y0 == x4_prev_y0 + 1 && x4_h == x4_prev_h && x4_steps_since_refresh < x4_max_steps) {
+                    /* Slide by 1: OR in new bottom x4 row */
+                    uint32_t new_x4_row = x4_y0 + x4_h - 1;
+                    if (new_x4_row < atlas_x4->th) {
+                        const uint64_t *row = atlas_x4->rows + ((size_t)new_x4_row * atlas_x4->row_words);
+                        for (uint32_t w = 0; w < atlas_x4->row_words; w++) {
+                            or_mask_x4[w] |= row[w];
+                        }
+                    }
+                    x4_steps_since_refresh++;
+                } else {
+                    s_dbg_or_count++;
+                    tgrid_row_or(atlas_x4, x4_y0, x4_h, or_mask_x4, atlas_x4->row_words);
+                    x4_steps_since_refresh = 0;
+                }
+                x4_prev_y0 = x4_y0;
+                x4_prev_h = x4_h;
 
                 /* Check if x4 OR-mask is completely full across scan range → skip ty */
                 bool x4_all_full = true;
