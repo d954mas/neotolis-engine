@@ -865,44 +865,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
         // #endregion
     }
 
-    // #region Shape diversity diagnostic
-    {
-        /* Count unique polygon shapes among all placed sprites (across all pages).
-         * Shape = normalized vertex positions (relative to AABB min). */
-        uint32_t total_placed = 0;
-        for (uint32_t p = 0; p < page_count; p++)
-            total_placed += pages[p].count;
-        uint64_t *shape_hashes = (uint64_t *)malloc(total_placed * sizeof(uint64_t));
-        uint32_t hash_idx = 0;
-        for (uint32_t p = 0; p < page_count; p++) {
-            for (uint32_t pi = 0; pi < pages[p].count; pi++) {
-                VPackPlaced *pl = &pages[p].placed[pi];
-                int32_t mn_x = pl->aabb_min_x, mn_y = pl->aabb_min_y;
-                uint64_t h = (uint64_t)pl->count;
-                for (uint32_t v = 0; v < pl->count; v++) {
-                    h ^= ((uint64_t)(uint32_t)(pl->poly[v].x - mn_x) << 16) | (uint64_t)(uint32_t)(pl->poly[v].y - mn_y);
-                    h = (h << 7) | (h >> 57);
-                }
-                shape_hashes[hash_idx++] = h;
-            }
-        }
-        /* Count unique hashes */
-        uint32_t unique_shapes = 0;
-        for (uint32_t i = 0; i < hash_idx; i++) {
-            bool dup = false;
-            for (uint32_t j = 0; j < i; j++) {
-                if (shape_hashes[j] == shape_hashes[i]) {
-                    dup = true;
-                    break;
-                }
-            }
-            if (!dup)
-                unique_shapes++;
-        }
-        NT_LOG_INFO("  vector_pack shapes: %u placed, %u unique shapes (%.0f%% reuse)", total_placed, unique_shapes, total_placed > 0 ? (1.0 - (double)unique_shapes / total_placed) * 100.0 : 0.0);
-        free(shape_hashes);
-    }
-    // #endregion
+    /* Shape diversity diagnostic removed — O(n²) cost not worth the log line */
 
     // #region POT expansion
     *out_page_count = page_count;
