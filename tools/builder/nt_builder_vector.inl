@@ -668,10 +668,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
 
     for (uint32_t s = 0; s < sprite_count; s++) {
         uint32_t idx = sorted[s].index;
-        uint32_t orient_count = opts->allow_rotate ? 2 : 1;
-        /* For large sprites (early in sort), single orientation is sufficient */
-        if (orient_count == 2 && s < (sprite_count * 9) / 10)
-            orient_count = 1;
+        uint32_t orient_count = opts->allow_rotate ? 8 : 1;
 
         /* Build transformed+inflated polygons for all orientations */
         Point2D orient_polys[8][32];
@@ -693,7 +690,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
         uint8_t orient_orig[8]; /* maps compacted index → original 0-7 orientation flag */
         for (uint32_t r = 0; r < orient_count; r++)
             orient_orig[r] = (uint8_t)r;
-        if (exp.use_orient_dedup && orient_count > 2) {
+        if (exp.use_orient_dedup) {
             uint32_t source_orient_count = orient_count;
             uint32_t dedup_count = 0;
             for (uint32_t r = 0; r < source_orient_count; r++) {
