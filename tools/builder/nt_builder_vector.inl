@@ -523,9 +523,10 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
                 memset(nfp_grid[dirty_cells[d]], 0, (size_t)nfp_words * sizeof(uint64_t));
             }
 
-            /* All 8 orientations are tried. Score pruning in the linear scan
-             * (score >= best_score → skip) naturally eliminates redundant work
-             * when an earlier orientation already found a good placement. */
+            /* Early exit: if this orientation found a placement at minimum possible
+             * position (min_cand), no other orientation can beat it. */
+            if (found_any && best_x == min_cand_x && best_y == min_cand_y)
+                break;
 
         } /* end orientation loop */
 
