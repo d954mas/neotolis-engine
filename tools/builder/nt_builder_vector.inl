@@ -133,8 +133,13 @@ static int vpack_cand_cmp(const void *a, const void *b) {
     return 0;
 }
 
-static inline void vpack_add_cand(VPackCand **cands, uint32_t *c_count, uint32_t *c_cap, int32_t x, int32_t y) {
-    if (x < 0 || y < 0)
+/* Bounds for early candidate rejection (set per-sprite before candidate generation) */
+typedef struct {
+    int32_t min_x, min_y, max_x, max_y;
+} VPackBounds;
+
+static inline void vpack_add_cand(VPackCand **cands, uint32_t *c_count, uint32_t *c_cap, int32_t x, int32_t y, const VPackBounds *b) {
+    if (x < b->min_x || y < b->min_y || x > b->max_x || y > b->max_y)
         return;
     if (*c_count >= *c_cap) {
         *c_cap = (*c_cap == 0) ? 1024 : (*c_cap * 2);
@@ -142,17 +147,17 @@ static inline void vpack_add_cand(VPackCand **cands, uint32_t *c_count, uint32_t
     }
     (*cands)[*c_count].x = x;
     (*cands)[*c_count].y = y;
-    (*cands)[*c_count].dist = (uint64_t)x * x + (uint64_t)y * y;
+    (*cands)[*c_count].dist = 0; /* scored later with page context */
     (*c_count)++;
 }
 
-static inline void vpack_add_float_cand(VPackCand **cands, uint32_t *c_count, uint32_t *c_cap, float fx, float fy) {
+static inline void vpack_add_float_cand(VPackCand **cands, uint32_t *c_count, uint32_t *c_cap, float fx, float fy, const VPackBounds *b) {
     int32_t ix = (int32_t)floorf(fx);
     int32_t iy = (int32_t)floorf(fy);
-    vpack_add_cand(cands, c_count, c_cap, ix, iy);
-    vpack_add_cand(cands, c_count, c_cap, ix + 1, iy);
-    vpack_add_cand(cands, c_count, c_cap, ix, iy + 1);
-    vpack_add_cand(cands, c_count, c_cap, ix + 1, iy + 1);
+    vpack_add_cand(cands, c_count, c_cap, ix, iy, b);
+    vpack_add_cand(cands, c_count, c_cap, ix + 1, iy, b);
+    vpack_add_cand(cands, c_count, c_cap, ix, iy + 1, b);
+    vpack_add_cand(cands, c_count, c_cap, ix + 1, iy + 1, b);
 }
 
 static inline bool vpack_rect_overlap(int32_t ax0, int32_t ay0, int32_t ax1, int32_t ay1, int32_t bx0, int32_t by0, int32_t bx1, int32_t by1) {
@@ -259,7 +264,8 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
 
     try_place:;
         uint32_t cand_count = 0;
-        vpack_add_cand(&cands, &cand_count, &cand_cap, min_cand_x, min_cand_y);
+        VPackBounds bounds = {min_cand_x, min_cand_y, max_cand_x, max_cand_y};
+        vpack_add_cand(&cands, &cand_count, &cand_cap, min_cand_x, min_cand_y, &bounds);
 
         // #region Build NFPs against placed sprites (with AABB pre-filter)
         uint32_t nfp_count = 0;
@@ -287,17 +293,17 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             vpack_calc_aabb(nfp->verts, nfp->count, &nfp->min_x, &nfp->min_y, &nfp->max_x, &nfp->max_y);
 
             for (uint32_t v = 0; v < nfp->count; v++) {
-                vpack_add_cand(&cands, &cand_count, &cand_cap, nfp->verts[v].x, nfp->verts[v].y);
+                vpack_add_cand(&cands, &cand_count, &cand_cap, nfp->verts[v].x, nfp->verts[v].y, &bounds);
             }
 
             for (uint32_t e = 0; e < nfp->count; e++) {
                 uint32_t en = (e + 1 == nfp->count) ? 0 : e + 1;
                 float out_val;
                 if (vpack_intersect_axis(nfp->verts[e], nfp->verts[en], true, (float)min_cand_x, &out_val)) {
-                    vpack_add_float_cand(&cands, &cand_count, &cand_cap, (float)min_cand_x, out_val);
+                    vpack_add_float_cand(&cands, &cand_count, &cand_cap, (float)min_cand_x, out_val, &bounds);
                 }
                 if (vpack_intersect_axis(nfp->verts[e], nfp->verts[en], false, (float)min_cand_y, &out_val)) {
-                    vpack_add_float_cand(&cands, &cand_count, &cand_cap, out_val, (float)min_cand_y);
+                    vpack_add_float_cand(&cands, &cand_count, &cand_cap, out_val, (float)min_cand_y, &bounds);
                 }
             }
             nfp_count++;
@@ -329,7 +335,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
 
                         float ox, oy;
                         if (vpack_intersect(nfps[i].verts[ei], nfps[i].verts[ein], nfps[j].verts[ej], nfps[j].verts[ejn], &ox, &oy)) {
-                            vpack_add_float_cand(&cands, &cand_count, &cand_cap, ox, oy);
+                            vpack_add_float_cand(&cands, &cand_count, &cand_cap, ox, oy, &bounds);
                         }
                     }
                 }
@@ -337,7 +343,35 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
         }
         // #endregion
 
-        // #region Sort candidates and find first valid placement
+        // #region Score candidates by resulting POT page area, then sort
+        {
+            uint32_t cur_w = pages_used_w[current_page];
+            uint32_t cur_h = pages_used_h[current_page];
+            for (uint32_t c = 0; c < cand_count; c++) {
+                uint32_t nw = (uint32_t)cands[c].x + poly_max_x;
+                uint32_t nh = (uint32_t)cands[c].y + poly_max_y;
+                if (nw < cur_w)
+                    nw = cur_w;
+                if (nh < cur_h)
+                    nh = cur_h;
+                nw += margin;
+                nh += margin;
+                if (opts->power_of_two) {
+                    uint32_t pw = 1;
+                    while (pw < nw)
+                        pw <<= 1;
+                    uint32_t ph = 1;
+                    while (ph < nh)
+                        ph <<= 1;
+                    nw = pw;
+                    nh = ph;
+                }
+                /* Primary: POT area (24 bits). Secondary: Manhattan distance (16 bits). */
+                uint64_t area = (uint64_t)nw * nh;
+                uint64_t manh = (uint64_t)(cands[c].x + cands[c].y);
+                cands[c].dist = (area << 16) | (manh & 0xFFFF);
+            }
+        }
         qsort(cands, cand_count, sizeof(VPackCand), vpack_cand_cmp);
 
         bool found = false;
