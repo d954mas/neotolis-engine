@@ -328,6 +328,7 @@ typedef struct {
     cnd_t cnd_done; /* workers signal: batch complete */
     uint32_t num_workers;
     uint32_t workers_done;
+    uint32_t batch_seq;
     bool batch_ready;
     bool shutdown;
 } VPackParCtx;
@@ -406,14 +407,16 @@ static int vpack_par_worker(void *arg) {
     VPackWorkerArg *wa = (VPackWorkerArg *)arg;
     VPackParCtx *ctx = wa->ctx;
     uint32_t tid = wa->tid;
+    uint32_t seen_batch_seq = 0;
     for (;;) {
         mtx_lock(&ctx->mtx);
-        while (!ctx->batch_ready && !ctx->shutdown)
+        while ((!ctx->batch_ready || ctx->batch_seq == seen_batch_seq) && !ctx->shutdown)
             cnd_wait(&ctx->cnd_work, &ctx->mtx);
         if (ctx->shutdown) {
             mtx_unlock(&ctx->mtx);
             break;
         }
+        seen_batch_seq = ctx->batch_seq;
         mtx_unlock(&ctx->mtx);
 
         VPackParResult result = ctx->results[tid];
@@ -688,6 +691,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 par->results[t].test_count = 0;
             }
             par->workers_done = 0;
+            par->batch_seq++;
             par->batch_ready = true;
             cnd_broadcast(&par->cnd_work);
             mtx_unlock(&par->mtx);
