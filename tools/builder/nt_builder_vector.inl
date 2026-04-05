@@ -335,15 +335,6 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         for (uint32_t ri = 0; ri < relevant_count; ri++) {
             uint32_t i = relevant_buf[ri];
 
-            bool need_candidates = true;
-            if (*io_best_score != UINT64_MAX) {
-                int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - poly_max_x;
-                int32_t est_min_y = page->placed[i].y + page->placed[i].aabb_min_y - poly_max_y;
-                uint64_t opt_score = vpack_score_candidate((est_min_x > 0) ? est_min_x : 0, (est_min_y > 0) ? est_min_y : 0, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
-                if (opt_score > *io_best_score)
-                    need_candidates = false;
-            }
-
             VPackNFP *nfp = &nfps[nfp_count];
             // #region NFP cache lookup
             if (exp->use_nfp_cache) {
@@ -377,7 +368,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             }
             vpack_calc_aabb(nfp->verts, nfp->count, &nfp->min_x, &nfp->min_y, &nfp->max_x, &nfp->max_y);
 
-            if (need_candidates) {
+            {
                 for (uint32_t v = 0; v < nfp->count; v++) {
                     vpack_add_cand(cands, &cand_count, cand_cap, nfp->verts[v].x, nfp->verts[v].y, &bounds);
                 }
