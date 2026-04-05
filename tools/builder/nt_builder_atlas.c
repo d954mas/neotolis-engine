@@ -1082,6 +1082,14 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
         uint32_t cached_by0 = UINT32_MAX;
         uint32_t cached_by1 = UINT32_MAX;
 
+        /* Sliding OR-mask state: track the previous window to enable incremental updates.
+         * When ty advances by 1 (window shifts by 1 row), just OR in the new bottom row
+         * instead of recomputing from scratch. The mask becomes monotonically conservative
+         * (only gains set bits). Recompute from scratch every s_th steps or after y-skip. */
+        uint32_t or_prev_ay0 = UINT32_MAX;
+        uint32_t or_prev_ay1 = UINT32_MAX;
+        uint32_t or_steps_since_refresh = 0;
+
         for (uint32_t ty = ty_min; ty < eff_ty_max; ty++) {
             int32_t ay0_s = (int32_t)ty + rot_oy[r];
             int32_t ay1_s = ay0_s + (int32_t)s_th;
@@ -1101,6 +1109,7 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
                 if (next_ty > (int32_t)ty) {
                     ty = (uint32_t)next_ty - 1;
                 }
+                or_prev_ay0 = UINT32_MAX; /* invalidate sliding OR after skip */
                 continue;
             }
             // #endregion
@@ -1149,14 +1158,32 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
                     }
                 }
                 if (x4_all_full) {
-                    continue; /* every x4 column has occupancy → very unlikely to find space */
+                    or_prev_ay0 = UINT32_MAX; /* invalidate after skip */
+                    continue;
                 }
             }
             // #endregion
 
-            /* Compute full x1 OR-mask */
-            s_dbg_or_count++;
-            tgrid_row_or(atlas, ay0, ay1 - ay0, or_mask, atlas->row_words);
+            // #region Incremental x1 OR-mask: slide window or full recompute
+            if (or_prev_ay0 != UINT32_MAX && ay0 == or_prev_ay0 + 1 && ay1 == or_prev_ay1 + 1 && or_steps_since_refresh < s_th) {
+                /* Slide by 1: OR in the new bottom row (conservative — only adds bits) */
+                uint32_t new_row = ay1 - 1;
+                if (new_row < atlas->th) {
+                    const uint64_t *row = atlas->rows + ((size_t)new_row * atlas->row_words);
+                    for (uint32_t w = 0; w < atlas->row_words; w++) {
+                        or_mask[w] |= row[w];
+                    }
+                }
+                or_steps_since_refresh++;
+            } else {
+                /* Full recompute */
+                s_dbg_or_count++;
+                tgrid_row_or(atlas, ay0, ay1 - ay0, or_mask, atlas->row_words);
+                or_steps_since_refresh = 0;
+            }
+            or_prev_ay0 = ay0;
+            or_prev_ay1 = ay1;
+            // #endregion
 
             for (uint32_t tx = tx_min; tx < tx_max;) {
                 // #region X-skip: jump past block columns without a wide enough free-run
