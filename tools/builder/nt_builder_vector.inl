@@ -391,13 +391,27 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             bool use_grid = (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS);
             // #endregion
 
-            // #region Score candidates by resulting POT page area, then sort
+            // #region Score + find best valid candidate (linear scan, no qsort)
             {
                 uint32_t cur_w = pages_used_w[current_page];
                 uint32_t cur_h = pages_used_h[current_page];
                 for (uint32_t c = 0; c < cand_count; c++) {
-                    uint32_t nw = (uint32_t)cands[c].x + poly_max_x;
-                    uint32_t nh = (uint32_t)cands[c].y + poly_max_y;
+                    int32_t cx = cands[c].x;
+                    int32_t cy = cands[c].y;
+
+                    /* Bounds check */
+                    if (cx < min_cand_x || cy < min_cand_y)
+                        continue;
+                    if (cx + poly_min_x < 0 || cy + poly_min_y < 0)
+                        continue;
+                    if (cx < (int32_t)extrude || cy < (int32_t)extrude)
+                        continue;
+                    if (cx > max_cand_x || cy > max_cand_y)
+                        continue;
+
+                    /* Score this candidate */
+                    uint32_t nw = (uint32_t)cx + poly_max_x;
+                    uint32_t nh = (uint32_t)cy + poly_max_y;
                     if (nw < cur_w)
                         nw = cur_w;
                     if (nh < cur_h)
@@ -414,73 +428,51 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
                         nw = pw;
                         nh = ph;
                     }
-                    /* Primary: POT area (24 bits). Secondary: Manhattan distance (16 bits). */
-                    uint64_t area = (uint64_t)nw * nh;
-                    uint64_t manh = (uint64_t)(cands[c].x + cands[c].y);
-                    cands[c].dist = (area << 16) | (manh & 0xFFFF);
-                }
-            }
-            qsort(cands, cand_count, sizeof(VPackCand), vpack_cand_cmp);
+                    uint64_t score = ((uint64_t)nw * nh << 16) | ((uint64_t)(cx + cy) & 0xFFFF);
 
-            for (uint32_t c = 0; c < cand_count; c++) {
-                int32_t cx = cands[c].x;
-                int32_t cy = cands[c].y;
+                    /* Prune: can't beat current best */
+                    if (score >= best_score)
+                        continue;
 
-                /* Deduplicate: skip identical (x,y) — duplicates are adjacent after sort-by-distance */
-                if (c > 0 && cx == cands[c - 1].x && cy == cands[c - 1].y)
-                    continue;
-
-                /* Bounds check (precomputed poly AABB — no per-candidate recalc) */
-                if (cx < min_cand_x || cy < min_cand_y)
-                    continue;
-                if (cx + poly_min_x < 0 || cy + poly_min_y < 0)
-                    continue;
-                if (cx < (int32_t)extrude || cy < (int32_t)extrude)
-                    continue;
-                if (cx > max_cand_x || cy > max_cand_y)
-                    continue;
-
-                /* Collision: candidate must be outside ALL NFPs */
-                bool safe = true;
-                if (use_grid && cx >= 0 && cy >= 0) {
-                    int32_t gcx = cx / VPACK_GRID_CELL;
-                    int32_t gcy = cy / VPACK_GRID_CELL;
-                    if (gcx < VPACK_GRID_DIM && gcy < VPACK_GRID_DIM) {
-                        uint64_t *cell = nfp_grid[gcy * VPACK_GRID_DIM + gcx];
-                        for (uint32_t w = 0; w < nfp_words && safe; w++) {
-                            uint64_t bits = cell[w];
-                            while (bits) {
-                                uint32_t bit_idx = (uint32_t)__builtin_ctzll(bits);
-                                uint32_t i = w * 64 + bit_idx;
+                    /* Collision check */
+                    bool safe = true;
+                    if (use_grid && cx >= 0 && cy >= 0) {
+                        int32_t gcx = cx / VPACK_GRID_CELL;
+                        int32_t gcy = cy / VPACK_GRID_CELL;
+                        if (gcx < VPACK_GRID_DIM && gcy < VPACK_GRID_DIM) {
+                            uint64_t *cell = nfp_grid[gcy * VPACK_GRID_DIM + gcx];
+                            for (uint32_t w = 0; w < nfp_words && safe; w++) {
+                                uint64_t bits = cell[w];
+                                while (bits) {
+                                    uint32_t bit_idx = (uint32_t)__builtin_ctzll(bits);
+                                    uint32_t i = w * 64 + bit_idx;
+                                    stats->test_count++;
+                                    if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
+                                        safe = false;
+                                    }
+                                    bits &= bits - 1;
+                                }
+                            }
+                        }
+                    } else {
+                        for (uint32_t i = 0; i < nfp_count; i++) {
+                            if (cx >= nfps[i].min_x && cx <= nfps[i].max_x && cy >= nfps[i].min_y && cy <= nfps[i].max_y) {
                                 stats->test_count++;
                                 if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
                                     safe = false;
+                                    break;
                                 }
-                                bits &= bits - 1; /* clear lowest set bit */
                             }
                         }
                     }
-                } else {
-                    for (uint32_t i = 0; i < nfp_count; i++) {
-                        if (cx >= nfps[i].min_x && cx <= nfps[i].max_x && cy >= nfps[i].min_y && cy <= nfps[i].max_y) {
-                            stats->test_count++;
-                            if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
-                                safe = false;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (safe) {
-                    if (cands[c].dist < best_score) {
+                    if (safe) {
                         best_x = cx;
                         best_y = cy;
                         best_orient = (uint8_t)ori;
-                        best_score = cands[c].dist;
+                        best_score = score;
                         best_orient_idx = ori;
                         found_any = true;
                     }
-                    break; /* first valid candidate per orientation (sorted by score) */
                 }
             }
             // #endregion
