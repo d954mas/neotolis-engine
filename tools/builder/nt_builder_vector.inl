@@ -348,6 +348,9 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 if (opt_score > *io_best_score)
                     need_candidates = false;
             }
+            /* Cap candidate-generating NFPs to limit candidate explosion for dense pages */
+            if (nfp_count >= 512 && need_candidates)
+                need_candidates = false;
 
             VPackNFP *nfp = &nfps[nfp_count];
             // #region NFP cache lookup
