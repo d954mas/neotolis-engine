@@ -355,10 +355,11 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             /* NFP-NFP edge intersections skipped: O(nfp^2 * edges^2) cost for marginal
              * quality gain. NFP vertices + axis intersections provide sufficient candidates. */
 
-            // #region Build spatial grid for NFP lookup
+            // #region Build spatial grid for NFP lookup (dirty-cell tracking avoids full memset)
             uint32_t nfp_words = (nfp_count + 63) / 64;
+            uint32_t dirty_cells[4096]; /* track dirtied cell indices for targeted clear */
+            uint32_t dirty_count = 0;
             if (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS) {
-                memset(nfp_grid, 0, (size_t)VPACK_GRID_DIM * VPACK_GRID_DIM * sizeof(uint64_t[VPACK_GRID_WORDS]));
                 for (uint32_t n = 0; n < nfp_count; n++) {
                     int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
                     int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
@@ -376,7 +377,13 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
                     uint64_t bit = (uint64_t)1 << (n % 64);
                     for (int32_t gy = gy0; gy <= gy1; gy++) {
                         for (int32_t gx = gx0; gx <= gx1; gx++) {
-                            nfp_grid[gy * VPACK_GRID_DIM + gx][word] |= bit;
+                            uint32_t ci = (uint32_t)gy * VPACK_GRID_DIM + (uint32_t)gx;
+                            if (nfp_grid[ci][0] == 0 && word == 0) {
+                                /* First touch on this cell — track for cleanup */
+                                if (dirty_count < 4096)
+                                    dirty_cells[dirty_count++] = ci;
+                            }
+                            nfp_grid[ci][word] |= bit;
                         }
                     }
                 }
@@ -477,6 +484,11 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
                 }
             }
             // #endregion
+
+            /* Clear dirtied grid cells for next orientation (cheaper than full memset) */
+            for (uint32_t d = 0; d < dirty_count; d++) {
+                memset(nfp_grid[dirty_cells[d]], 0, sizeof(uint64_t[VPACK_GRID_WORDS]));
+            }
 
             /* After orientation 0: if placement fits within current page frontier,
              * skip remaining orientations — they won't improve POT area. */
