@@ -515,6 +515,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                                 stats->test_count++;
                                 if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
                                     safe = false;
+                                    break;
                                 }
                             }
                             bits &= bits - 1;
