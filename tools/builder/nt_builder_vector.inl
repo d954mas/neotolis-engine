@@ -755,7 +755,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
 
         uint32_t page_count_before = page_count;
         for (uint32_t pi = 0; pi < page_count_before; pi++) {
-            if (best_score != UINT64_MAX) {
+            if (best_score != UINT64_MAX && page_count_before > 1) {
                 uint64_t page_lb = vpack_page_lower_bound(orient_aabb, orient_min_cand, orient_count, pages[pi].used_w, pages[pi].used_h, margin, opts->power_of_two);
                 if (page_lb >= best_score) {
                     stats->page_prune_count++;
