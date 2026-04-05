@@ -409,30 +409,70 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         stats->candidate_count += cand_count;
 
         uint32_t nfp_words = (nfp_count + 63) / 64;
-        int32_t grid_gx0 = VPACK_GRID_DIM, grid_gy0 = VPACK_GRID_DIM;
-        int32_t grid_gx1 = -1, grid_gy1 = -1;
+        uint32_t dirty_cells[4096];
+        uint32_t dirty_count = 0;
         if (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS) {
-            for (uint32_t n = 0; n < nfp_count; n++) {
-                int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
-                int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
-                int32_t gx1 = nfps[n].max_x / VPACK_GRID_CELL;
-                int32_t gy1 = nfps[n].max_y / VPACK_GRID_CELL;
-                if (gx0 < 0) gx0 = 0;
-                if (gy0 < 0) gy0 = 0;
-                if (gx1 >= VPACK_GRID_DIM) gx1 = VPACK_GRID_DIM - 1;
-                if (gy1 >= VPACK_GRID_DIM) gy1 = VPACK_GRID_DIM - 1;
-                if (gx0 < grid_gx0) grid_gx0 = gx0;
-                if (gy0 < grid_gy0) grid_gy0 = gy0;
-                if (gx1 > grid_gx1) grid_gx1 = gx1;
-                if (gy1 > grid_gy1) grid_gy1 = gy1;
-                uint32_t word = n / 64;
-                uint64_t bit = (uint64_t)1 << (n % 64);
-                for (int32_t gy = gy0; gy <= gy1; gy++) {
-                    for (int32_t gx = gx0; gx <= gx1; gx++) {
-                        nfp_grid[(uint32_t)gy * VPACK_GRID_DIM + (uint32_t)gx][word] |= bit;
+            if (exp->use_dirty_bits) {
+                uint64_t dirty_bits[(VPACK_GRID_DIM * VPACK_GRID_DIM + 63) / 64];
+                memset(dirty_bits, 0, sizeof(dirty_bits));
+                for (uint32_t n = 0; n < nfp_count; n++) {
+                    int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
+                    int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
+                    int32_t gx1 = nfps[n].max_x / VPACK_GRID_CELL;
+                    int32_t gy1 = nfps[n].max_y / VPACK_GRID_CELL;
+                    if (gx0 < 0)
+                        gx0 = 0;
+                    if (gy0 < 0)
+                        gy0 = 0;
+                    if (gx1 >= VPACK_GRID_DIM)
+                        gx1 = VPACK_GRID_DIM - 1;
+                    if (gy1 >= VPACK_GRID_DIM)
+                        gy1 = VPACK_GRID_DIM - 1;
+                    uint32_t word = n / 64;
+                    uint64_t bit = (uint64_t)1 << (n % 64);
+                    for (int32_t gy = gy0; gy <= gy1; gy++) {
+                        for (int32_t gx = gx0; gx <= gx1; gx++) {
+                            uint32_t ci = (uint32_t)gy * VPACK_GRID_DIM + (uint32_t)gx;
+                            uint32_t dw = ci / 64;
+                            uint64_t db = (uint64_t)1 << (ci % 64);
+                            if (!(dirty_bits[dw] & db)) {
+                                dirty_bits[dw] |= db;
+                                if (dirty_count < 4096)
+                                    dirty_cells[dirty_count++] = ci;
+                            }
+                            nfp_grid[ci][word] |= bit;
+                        }
+                    }
+                }
+            } else {
+                for (uint32_t n = 0; n < nfp_count; n++) {
+                    int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
+                    int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
+                    int32_t gx1 = nfps[n].max_x / VPACK_GRID_CELL;
+                    int32_t gy1 = nfps[n].max_y / VPACK_GRID_CELL;
+                    if (gx0 < 0)
+                        gx0 = 0;
+                    if (gy0 < 0)
+                        gy0 = 0;
+                    if (gx1 >= VPACK_GRID_DIM)
+                        gx1 = VPACK_GRID_DIM - 1;
+                    if (gy1 >= VPACK_GRID_DIM)
+                        gy1 = VPACK_GRID_DIM - 1;
+                    uint32_t word = n / 64;
+                    uint64_t bit = (uint64_t)1 << (n % 64);
+                    for (int32_t gy = gy0; gy <= gy1; gy++) {
+                        for (int32_t gx = gx0; gx <= gx1; gx++) {
+                            uint32_t ci = (uint32_t)gy * VPACK_GRID_DIM + (uint32_t)gx;
+                            if (nfp_grid[ci][0] == 0 && word == 0) {
+                                if (dirty_count < 4096)
+                                    dirty_cells[dirty_count++] = ci;
+                            }
+                            nfp_grid[ci][word] |= bit;
+                        }
                     }
                 }
             }
+            stats->dirty_cell_count += dirty_count;
         } else if (nfp_count > 0) {
             stats->grid_fallback_count++;
         }
@@ -528,12 +568,11 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             }
         }
 
-        /* Clear only the grid region used by this orientation */
-        if (use_grid) {
-            for (int32_t gy = grid_gy0; gy <= grid_gy1; gy++) {
-                for (int32_t gx = grid_gx0; gx <= grid_gx1; gx++) {
-                    memset(nfp_grid[(uint32_t)gy * VPACK_GRID_DIM + (uint32_t)gx], 0, (size_t)nfp_words * sizeof(uint64_t));
-                }
+        for (uint32_t d = 0; d < dirty_count; d++) {
+            if (exp->use_dirty_bits) {
+                memset(nfp_grid[dirty_cells[d]], 0, sizeof(uint64_t[VPACK_GRID_WORDS]));
+            } else {
+                memset(nfp_grid[dirty_cells[d]], 0, (size_t)nfp_words * sizeof(uint64_t));
             }
         }
 
