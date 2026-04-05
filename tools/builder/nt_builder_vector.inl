@@ -240,8 +240,6 @@ static VPackExperimentConfig vpack_experiment_config_get(void) {
 }
 
 #define VPACK_GRID_CELL 128
-#define VPACK_GRID_MAX_SIZE 4096 /* max atlas size supported by NFP grid — increase if needed */
-#define VPACK_GRID_DIM ((VPACK_GRID_MAX_SIZE / VPACK_GRID_CELL) + 1)
 /* Keep enough words to cover large single-page runs without disabling broad-phase. */
 #define VPACK_GRID_WORDS 64
 
@@ -300,7 +298,9 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                            const int32_t orient_max_cand[8][2], uint32_t orient_count, int32_t worst_poly_min_x, int32_t worst_poly_min_y, int32_t worst_poly_max_x, int32_t worst_poly_max_y,
                            int32_t global_min_cand_x, int32_t global_min_cand_y, int32_t global_max_cand_x, int32_t global_max_cand_y, uint32_t extrude, uint32_t margin, bool power_of_two,
                            VPackNFP *nfps, uint64_t (*nfp_grid)[VPACK_GRID_WORDS], VPackCand **cands, uint32_t *cand_cap, uint32_t *relevant_buf, VPackNFPCacheEntry *nfp_cache,
-                           const uint32_t orient_neg_hashes[8], const VPackExperimentConfig *exp, PackStats *stats, uint64_t *io_best_score, uint32_t page_index, uint32_t *out_best_page, int32_t *out_best_x, int32_t *out_best_y, uint8_t *out_best_orient, uint32_t *out_best_orient_idx) {
+                           const uint32_t orient_neg_hashes[8], const VPackExperimentConfig *exp, PackStats *stats, uint64_t *io_best_score, uint32_t page_index,
+                           uint32_t grid_dim, uint64_t *dirty_bits_buf,
+                           uint32_t *out_best_page, int32_t *out_best_x, int32_t *out_best_y, uint8_t *out_best_orient, uint32_t *out_best_orient_idx) {
     uint32_t relevant_count = 0;
     for (uint32_t i = 0; i < page->count; i++) {
         int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - worst_poly_max_x;
@@ -413,8 +413,8 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         uint32_t dirty_count = 0;
         if (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS) {
             if (exp->use_dirty_bits) {
-                uint64_t dirty_bits[(VPACK_GRID_DIM * VPACK_GRID_DIM + 63) / 64];
-                memset(dirty_bits, 0, sizeof(dirty_bits));
+                size_t dirty_words = ((size_t)grid_dim * grid_dim + 63) / 64;
+                memset(dirty_bits_buf, 0, dirty_words * sizeof(uint64_t));
                 for (uint32_t n = 0; n < nfp_count; n++) {
                     int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
                     int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
@@ -424,19 +424,19 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                         gx0 = 0;
                     if (gy0 < 0)
                         gy0 = 0;
-                    if (gx1 >= VPACK_GRID_DIM)
-                        gx1 = VPACK_GRID_DIM - 1;
-                    if (gy1 >= VPACK_GRID_DIM)
-                        gy1 = VPACK_GRID_DIM - 1;
+                    if (gx1 >= (int32_t)grid_dim)
+                        gx1 = (int32_t)grid_dim - 1;
+                    if (gy1 >= (int32_t)grid_dim)
+                        gy1 = (int32_t)grid_dim - 1;
                     uint32_t word = n / 64;
                     uint64_t bit = (uint64_t)1 << (n % 64);
                     for (int32_t gy = gy0; gy <= gy1; gy++) {
                         for (int32_t gx = gx0; gx <= gx1; gx++) {
-                            uint32_t ci = (uint32_t)gy * VPACK_GRID_DIM + (uint32_t)gx;
+                            uint32_t ci = (uint32_t)gy * grid_dim + (uint32_t)gx;
                             uint32_t dw = ci / 64;
                             uint64_t db = (uint64_t)1 << (ci % 64);
-                            if (!(dirty_bits[dw] & db)) {
-                                dirty_bits[dw] |= db;
+                            if (!(dirty_bits_buf[dw] & db)) {
+                                dirty_bits_buf[dw] |= db;
                                 if (dirty_count < 4096)
                                     dirty_cells[dirty_count++] = ci;
                             }
@@ -454,15 +454,15 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                         gx0 = 0;
                     if (gy0 < 0)
                         gy0 = 0;
-                    if (gx1 >= VPACK_GRID_DIM)
-                        gx1 = VPACK_GRID_DIM - 1;
-                    if (gy1 >= VPACK_GRID_DIM)
-                        gy1 = VPACK_GRID_DIM - 1;
+                    if (gx1 >= (int32_t)grid_dim)
+                        gx1 = (int32_t)grid_dim - 1;
+                    if (gy1 >= (int32_t)grid_dim)
+                        gy1 = (int32_t)grid_dim - 1;
                     uint32_t word = n / 64;
                     uint64_t bit = (uint64_t)1 << (n % 64);
                     for (int32_t gy = gy0; gy <= gy1; gy++) {
                         for (int32_t gx = gx0; gx <= gx1; gx++) {
-                            uint32_t ci = (uint32_t)gy * VPACK_GRID_DIM + (uint32_t)gx;
+                            uint32_t ci = (uint32_t)gy * grid_dim + (uint32_t)gx;
                             if (nfp_grid[ci][0] == 0 && word == 0) {
                                 if (dirty_count < 4096)
                                     dirty_cells[dirty_count++] = ci;
@@ -529,8 +529,8 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             if (use_grid && cx >= 0 && cy >= 0) {
                 int32_t gcx = cx / VPACK_GRID_CELL;
                 int32_t gcy = cy / VPACK_GRID_CELL;
-                if (gcx < VPACK_GRID_DIM && gcy < VPACK_GRID_DIM) {
-                    uint64_t *cell = nfp_grid[gcy * VPACK_GRID_DIM + gcx];
+                if (gcx < (int32_t)grid_dim && gcy < (int32_t)grid_dim) {
+                    uint64_t *cell = nfp_grid[gcy * (int32_t)grid_dim + gcx];
                     for (uint32_t w = 0; w < nfp_words && safe; w++) {
                         uint64_t bits = cell[w];
                         while (bits) {
@@ -651,8 +651,8 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     NT_BUILD_ASSERT(placed && nfps && cands && "vector_pack: alloc failed");
 
     /* Pre-allocate NFP spatial grid on heap (reused across orientations+sprites) */
-    NT_BUILD_ASSERT(max_size <= VPACK_GRID_MAX_SIZE && "vector_pack: max_size exceeds VPACK_GRID_MAX_SIZE — increase VPACK_GRID_MAX_SIZE");
-    uint64_t(*nfp_grid)[VPACK_GRID_WORDS] = (uint64_t(*)[VPACK_GRID_WORDS])calloc((size_t)VPACK_GRID_DIM * VPACK_GRID_DIM, sizeof(uint64_t[VPACK_GRID_WORDS]));
+    uint32_t grid_dim = max_size / VPACK_GRID_CELL + 1;
+    uint64_t(*nfp_grid)[VPACK_GRID_WORDS] = (uint64_t(*)[VPACK_GRID_WORDS])calloc((size_t)grid_dim * grid_dim, sizeof(uint64_t[VPACK_GRID_WORDS]));
     NT_BUILD_ASSERT(nfp_grid && "vector_pack: grid alloc failed");
 
     /* NFP cache: avoid recomputing Minkowski for identical shape pairs */
@@ -666,6 +666,10 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
 
     uint32_t *relevant_buf = (uint32_t *)malloc(sprite_count * sizeof(uint32_t));
     NT_BUILD_ASSERT(relevant_buf && "vector_pack: alloc failed");
+
+    size_t dirty_words = ((size_t)grid_dim * grid_dim + 63) / 64;
+    uint64_t *dirty_bits_buf = (uint64_t *)malloc(dirty_words * sizeof(uint64_t));
+    NT_BUILD_ASSERT(dirty_bits_buf && "vector_pack: dirty_bits alloc failed");
 
     for (uint32_t s = 0; s < sprite_count; s++) {
         uint32_t idx = sorted[s].index;
@@ -791,7 +795,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             stats->page_scan_count++;
             if (vpack_try_page(&pages[pi], orient_neg, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y, worst_poly_max_x,
                                worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, extrude, margin, opts->power_of_two, nfps, nfp_grid, &cands, &cand_cap,
-                               relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, pi, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx)) {
+                               relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, pi, grid_dim, dirty_bits_buf, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx)) {
                 found_any = true;
             }
         }
@@ -820,7 +824,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             stats->page_scan_count++;
             found_any = vpack_try_page(&pages[new_page], orient_neg, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y, worst_poly_max_x,
                                        worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, extrude, margin, opts->power_of_two, nfps, nfp_grid, &cands,
-                                       &cand_cap, relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, new_page, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx);
+                                       &cand_cap, relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, new_page, grid_dim, dirty_bits_buf, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx);
             NT_BUILD_ASSERT(found_any && "vector_pack: empty page should accept placement");
         }
 
@@ -946,6 +950,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     free(nfp_grid);
     free(nfp_cache);
     free(relevant_buf);
+    free(dirty_bits_buf);
     // #endregion
 
     return sprite_count;
