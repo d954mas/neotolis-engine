@@ -609,18 +609,12 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     }
     // #endregion
 
-    // #region Sort by polygon area descending (Shoelace formula, more accurate than bbox)
+    // #region Sort by area descending
     AreaSortEntry *sorted = (AreaSortEntry *)malloc(sprite_count * sizeof(AreaSortEntry));
     NT_BUILD_ASSERT(sorted && "vector_pack: alloc failed");
     for (uint32_t i = 0; i < sprite_count; i++) {
         sorted[i].index = i;
-        /* Compute polygon area via Shoelace (2x area to avoid division) */
-        int64_t twice_area = 0;
-        for (uint32_t v = 0; v < hull_counts[i]; v++) {
-            uint32_t nv = (v + 1 == hull_counts[i]) ? 0 : v + 1;
-            twice_area += (int64_t)hull_verts[i][v].x * hull_verts[i][nv].y - (int64_t)hull_verts[i][nv].x * hull_verts[i][v].y;
-        }
-        sorted[i].area = (uint32_t)(twice_area < 0 ? -twice_area : twice_area);
+        sorted[i].area = trim_w[i] * trim_h[i];
     }
     qsort(sorted, sprite_count, sizeof(AreaSortEntry), area_sort_cmp);
     // #endregion
