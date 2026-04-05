@@ -240,74 +240,103 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     uint32_t pages_used_w[16] = {0};
     uint32_t pages_used_h[16] = {0};
 
+    uint32_t orient_count = opts->allow_rotate ? 8 : 1;
+
     for (uint32_t s = 0; s < sprite_count; s++) {
         uint32_t idx = sorted[s].index;
 
-        Point2D sprite_neg[32];
-        vpack_negate(inf_polys[idx], inf_counts[idx], sprite_neg);
-
-        // #region Compute inflated polygon AABB (once per sprite, reused in all checks)
-        int32_t poly_min_x, poly_min_y, poly_max_x, poly_max_y;
-        vpack_calc_aabb(inf_polys[idx], inf_counts[idx], &poly_min_x, &poly_min_y, &poly_max_x, &poly_max_y);
+        /* Build transformed+inflated polygons for all orientations */
+        Point2D orient_polys[8][32];
+        uint32_t orient_counts[8];
+        orient_counts[0] = inf_counts[idx];
+        memcpy(orient_polys[0], inf_polys[idx], inf_counts[idx] * sizeof(Point2D));
+        for (uint32_t r = 1; r < orient_count; r++) {
+            Point2D raw[32];
+            polygon_transform(hull_verts[idx], hull_counts[idx], (uint8_t)r, (int32_t)trim_w[idx], (int32_t)trim_h[idx], raw);
+            if (dilate > 0.0F) {
+                orient_counts[r] = polygon_inflate(raw, hull_counts[idx], dilate, orient_polys[r]);
+            } else {
+                memcpy(orient_polys[r], raw, hull_counts[idx] * sizeof(Point2D));
+                orient_counts[r] = hull_counts[idx];
+            }
+        }
 
         int32_t min_edge = (int32_t)margin > (int32_t)extrude ? (int32_t)margin : (int32_t)extrude;
-        int32_t min_cand_x = min_edge - poly_min_x;
-        if (min_cand_x < min_edge)
-            min_cand_x = min_edge;
-        int32_t min_cand_y = min_edge - poly_min_y;
-        if (min_cand_y < min_edge)
-            min_cand_y = min_edge;
 
-        int32_t max_cand_x = (int32_t)max_size - (int32_t)margin - poly_max_x - 1;
-        int32_t max_cand_y = (int32_t)max_size - (int32_t)margin - poly_max_y - 1;
-        // #endregion
+        /* Try all orientations, pick best placement across all */
+        bool found_any = false;
+        int32_t best_x = 0;
+        int32_t best_y = 0;
+        uint8_t best_orient = 0;
+        uint64_t best_score = UINT64_MAX;
+        uint32_t best_orient_idx = 0; /* which orient_polys[] was used */
 
     try_place:;
-        uint32_t cand_count = 0;
-        VPackBounds bounds = {min_cand_x, min_cand_y, max_cand_x, max_cand_y};
-        vpack_add_cand(&cands, &cand_count, &cand_cap, min_cand_x, min_cand_y, &bounds);
 
-        // #region Build NFPs against placed sprites (with AABB pre-filter)
-        uint32_t nfp_count = 0;
-        for (uint32_t i = 0; i < placed_on_page; i++) {
-            /* AABB pre-filter: estimate NFP bounding box from placed + sprite AABBs.
-             * If estimated NFP doesn't overlap feasible region, the placed sprite
-             * is too far away -- no candidate in [min_cand, max_cand] can collide. */
-            int32_t est_min_x = placed[i].x + placed[i].aabb_min_x - poly_max_x;
-            int32_t est_max_x = placed[i].x + placed[i].aabb_max_x - poly_min_x;
-            int32_t est_min_y = placed[i].y + placed[i].aabb_min_y - poly_max_y;
-            int32_t est_max_y = placed[i].y + placed[i].aabb_max_y - poly_min_y;
-            if (est_max_x < min_cand_x || est_min_x > max_cand_x || est_max_y < min_cand_y || est_min_y > max_cand_y) {
-                stats->yskip_count++;
-                continue;
-            }
+        for (uint32_t ori = 0; ori < orient_count; ori++) {
+            Point2D *cur_poly = orient_polys[ori];
+            uint32_t cur_count = orient_counts[ori];
 
-            VPackNFP *nfp = &nfps[nfp_count];
-            nfp->count = vpack_minkowski(placed[i].poly, placed[i].count, sprite_neg, inf_counts[idx], nfp->verts);
-            stats->or_count++;
+            Point2D sprite_neg[32];
+            vpack_negate(cur_poly, cur_count, sprite_neg);
 
-            for (uint32_t v = 0; v < nfp->count; v++) {
-                nfp->verts[v].x += placed[i].x;
-                nfp->verts[v].y += placed[i].y;
-            }
-            vpack_calc_aabb(nfp->verts, nfp->count, &nfp->min_x, &nfp->min_y, &nfp->max_x, &nfp->max_y);
+            int32_t poly_min_x, poly_min_y, poly_max_x, poly_max_y;
+            vpack_calc_aabb(cur_poly, cur_count, &poly_min_x, &poly_min_y, &poly_max_x, &poly_max_y);
 
-            for (uint32_t v = 0; v < nfp->count; v++) {
-                vpack_add_cand(&cands, &cand_count, &cand_cap, nfp->verts[v].x, nfp->verts[v].y, &bounds);
-            }
+            int32_t min_cand_x = min_edge - poly_min_x;
+            if (min_cand_x < min_edge)
+                min_cand_x = min_edge;
+            int32_t min_cand_y = min_edge - poly_min_y;
+            if (min_cand_y < min_edge)
+                min_cand_y = min_edge;
+            int32_t max_cand_x = (int32_t)max_size - (int32_t)margin - poly_max_x - 1;
+            int32_t max_cand_y = (int32_t)max_size - (int32_t)margin - poly_max_y - 1;
 
-            for (uint32_t e = 0; e < nfp->count; e++) {
-                uint32_t en = (e + 1 == nfp->count) ? 0 : e + 1;
-                float out_val;
-                if (vpack_intersect_axis(nfp->verts[e], nfp->verts[en], true, (float)min_cand_x, &out_val)) {
-                    vpack_add_float_cand(&cands, &cand_count, &cand_cap, (float)min_cand_x, out_val, &bounds);
+            uint32_t cand_count = 0;
+            VPackBounds bounds = {min_cand_x, min_cand_y, max_cand_x, max_cand_y};
+            vpack_add_cand(&cands, &cand_count, &cand_cap, min_cand_x, min_cand_y, &bounds);
+
+            // #region Build NFPs against placed sprites (with AABB pre-filter)
+            uint32_t nfp_count = 0;
+            for (uint32_t i = 0; i < placed_on_page; i++) {
+                /* AABB pre-filter: estimate NFP bounding box from placed + sprite AABBs.
+                 * If estimated NFP doesn't overlap feasible region, the placed sprite
+                 * is too far away -- no candidate in [min_cand, max_cand] can collide. */
+                int32_t est_min_x = placed[i].x + placed[i].aabb_min_x - poly_max_x;
+                int32_t est_max_x = placed[i].x + placed[i].aabb_max_x - poly_min_x;
+                int32_t est_min_y = placed[i].y + placed[i].aabb_min_y - poly_max_y;
+                int32_t est_max_y = placed[i].y + placed[i].aabb_max_y - poly_min_y;
+                if (est_max_x < min_cand_x || est_min_x > max_cand_x || est_max_y < min_cand_y || est_min_y > max_cand_y) {
+                    stats->yskip_count++;
+                    continue;
                 }
-                if (vpack_intersect_axis(nfp->verts[e], nfp->verts[en], false, (float)min_cand_y, &out_val)) {
-                    vpack_add_float_cand(&cands, &cand_count, &cand_cap, out_val, (float)min_cand_y, &bounds);
+
+                VPackNFP *nfp = &nfps[nfp_count];
+                nfp->count = vpack_minkowski(placed[i].poly, placed[i].count, sprite_neg, cur_count, nfp->verts);
+                stats->or_count++;
+
+                for (uint32_t v = 0; v < nfp->count; v++) {
+                    nfp->verts[v].x += placed[i].x;
+                    nfp->verts[v].y += placed[i].y;
                 }
+                vpack_calc_aabb(nfp->verts, nfp->count, &nfp->min_x, &nfp->min_y, &nfp->max_x, &nfp->max_y);
+
+                for (uint32_t v = 0; v < nfp->count; v++) {
+                    vpack_add_cand(&cands, &cand_count, &cand_cap, nfp->verts[v].x, nfp->verts[v].y, &bounds);
+                }
+
+                for (uint32_t e = 0; e < nfp->count; e++) {
+                    uint32_t en = (e + 1 == nfp->count) ? 0 : e + 1;
+                    float out_val;
+                    if (vpack_intersect_axis(nfp->verts[e], nfp->verts[en], true, (float)min_cand_x, &out_val)) {
+                        vpack_add_float_cand(&cands, &cand_count, &cand_cap, (float)min_cand_x, out_val, &bounds);
+                    }
+                    if (vpack_intersect_axis(nfp->verts[e], nfp->verts[en], false, (float)min_cand_y, &out_val)) {
+                        vpack_add_float_cand(&cands, &cand_count, &cand_cap, out_val, (float)min_cand_y, &bounds);
+                    }
+                }
+                nfp_count++;
             }
-            nfp_count++;
-        }
 // #endregion
 
 /* NFP-NFP edge intersections skipped: O(nfp^2 * edges^2) cost for marginal
@@ -317,131 +346,135 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
 /* Grid cells of 64px — each cell stores a bitmask of which NFPs overlap it.
  * Limits point-in-poly tests to NFPs actually covering the candidate position. */
 #define VPACK_GRID_CELL 64
-#define VPACK_GRID_DIM ((4096 / VPACK_GRID_CELL) + 1)           /* 65 cells max */
-#define VPACK_NFP_WORDS ((1528 + 63) / 64)                      /* max sprites per page as 64-bit words */
-        uint64_t nfp_grid[VPACK_GRID_DIM * VPACK_GRID_DIM][24]; /* 24 words = 1536 NFPs max */
-        uint32_t nfp_words = (nfp_count + 63) / 64;
-        if (nfp_count > 0 && nfp_words <= 24) {
-            memset(nfp_grid, 0, sizeof(nfp_grid));
-            for (uint32_t n = 0; n < nfp_count; n++) {
-                int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
-                int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
-                int32_t gx1 = nfps[n].max_x / VPACK_GRID_CELL;
-                int32_t gy1 = nfps[n].max_y / VPACK_GRID_CELL;
-                if (gx0 < 0)
-                    gx0 = 0;
-                if (gy0 < 0)
-                    gy0 = 0;
-                if (gx1 >= VPACK_GRID_DIM)
-                    gx1 = VPACK_GRID_DIM - 1;
-                if (gy1 >= VPACK_GRID_DIM)
-                    gy1 = VPACK_GRID_DIM - 1;
-                uint32_t word = n / 64;
-                uint64_t bit = (uint64_t)1 << (n % 64);
-                for (int32_t gy = gy0; gy <= gy1; gy++) {
-                    for (int32_t gx = gx0; gx <= gx1; gx++) {
-                        nfp_grid[gy * VPACK_GRID_DIM + gx][word] |= bit;
+#define VPACK_GRID_DIM ((4096 / VPACK_GRID_CELL) + 1)               /* 65 cells max */
+#define VPACK_NFP_WORDS ((1528 + 63) / 64)                          /* max sprites per page as 64-bit words */
+            uint64_t nfp_grid[VPACK_GRID_DIM * VPACK_GRID_DIM][24]; /* 24 words = 1536 NFPs max */
+            uint32_t nfp_words = (nfp_count + 63) / 64;
+            if (nfp_count > 0 && nfp_words <= 24) {
+                memset(nfp_grid, 0, sizeof(nfp_grid));
+                for (uint32_t n = 0; n < nfp_count; n++) {
+                    int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
+                    int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
+                    int32_t gx1 = nfps[n].max_x / VPACK_GRID_CELL;
+                    int32_t gy1 = nfps[n].max_y / VPACK_GRID_CELL;
+                    if (gx0 < 0)
+                        gx0 = 0;
+                    if (gy0 < 0)
+                        gy0 = 0;
+                    if (gx1 >= VPACK_GRID_DIM)
+                        gx1 = VPACK_GRID_DIM - 1;
+                    if (gy1 >= VPACK_GRID_DIM)
+                        gy1 = VPACK_GRID_DIM - 1;
+                    uint32_t word = n / 64;
+                    uint64_t bit = (uint64_t)1 << (n % 64);
+                    for (int32_t gy = gy0; gy <= gy1; gy++) {
+                        for (int32_t gx = gx0; gx <= gx1; gx++) {
+                            nfp_grid[gy * VPACK_GRID_DIM + gx][word] |= bit;
+                        }
                     }
                 }
             }
-        }
-        bool use_grid = (nfp_count > 0 && nfp_words <= 24);
-        // #endregion
+            bool use_grid = (nfp_count > 0 && nfp_words <= 24);
+            // #endregion
 
-        // #region Score candidates by resulting POT page area, then sort
-        {
-            uint32_t cur_w = pages_used_w[current_page];
-            uint32_t cur_h = pages_used_h[current_page];
-            for (uint32_t c = 0; c < cand_count; c++) {
-                uint32_t nw = (uint32_t)cands[c].x + poly_max_x;
-                uint32_t nh = (uint32_t)cands[c].y + poly_max_y;
-                if (nw < cur_w)
-                    nw = cur_w;
-                if (nh < cur_h)
-                    nh = cur_h;
-                nw += margin;
-                nh += margin;
-                if (opts->power_of_two) {
-                    uint32_t pw = 1;
-                    while (pw < nw)
-                        pw <<= 1;
-                    uint32_t ph = 1;
-                    while (ph < nh)
-                        ph <<= 1;
-                    nw = pw;
-                    nh = ph;
+            // #region Score candidates by resulting POT page area, then sort
+            {
+                uint32_t cur_w = pages_used_w[current_page];
+                uint32_t cur_h = pages_used_h[current_page];
+                for (uint32_t c = 0; c < cand_count; c++) {
+                    uint32_t nw = (uint32_t)cands[c].x + poly_max_x;
+                    uint32_t nh = (uint32_t)cands[c].y + poly_max_y;
+                    if (nw < cur_w)
+                        nw = cur_w;
+                    if (nh < cur_h)
+                        nh = cur_h;
+                    nw += margin;
+                    nh += margin;
+                    if (opts->power_of_two) {
+                        uint32_t pw = 1;
+                        while (pw < nw)
+                            pw <<= 1;
+                        uint32_t ph = 1;
+                        while (ph < nh)
+                            ph <<= 1;
+                        nw = pw;
+                        nh = ph;
+                    }
+                    /* Primary: POT area (24 bits). Secondary: Manhattan distance (16 bits). */
+                    uint64_t area = (uint64_t)nw * nh;
+                    uint64_t manh = (uint64_t)(cands[c].x + cands[c].y);
+                    cands[c].dist = (area << 16) | (manh & 0xFFFF);
                 }
-                /* Primary: POT area (24 bits). Secondary: Manhattan distance (16 bits). */
-                uint64_t area = (uint64_t)nw * nh;
-                uint64_t manh = (uint64_t)(cands[c].x + cands[c].y);
-                cands[c].dist = (area << 16) | (manh & 0xFFFF);
             }
-        }
-        qsort(cands, cand_count, sizeof(VPackCand), vpack_cand_cmp);
+            qsort(cands, cand_count, sizeof(VPackCand), vpack_cand_cmp);
 
-        bool found = false;
-        int32_t best_x = 0;
-        int32_t best_y = 0;
-        for (uint32_t c = 0; c < cand_count; c++) {
-            int32_t cx = cands[c].x;
-            int32_t cy = cands[c].y;
+            for (uint32_t c = 0; c < cand_count; c++) {
+                int32_t cx = cands[c].x;
+                int32_t cy = cands[c].y;
 
-            /* Deduplicate: skip identical (x,y) — duplicates are adjacent after sort-by-distance */
-            if (c > 0 && cx == cands[c - 1].x && cy == cands[c - 1].y)
-                continue;
+                /* Deduplicate: skip identical (x,y) — duplicates are adjacent after sort-by-distance */
+                if (c > 0 && cx == cands[c - 1].x && cy == cands[c - 1].y)
+                    continue;
 
-            /* Bounds check (precomputed poly AABB — no per-candidate recalc) */
-            if (cx < min_cand_x || cy < min_cand_y)
-                continue;
-            if (cx + poly_min_x < 0 || cy + poly_min_y < 0)
-                continue;
-            if (cx < (int32_t)extrude || cy < (int32_t)extrude)
-                continue;
-            if (cx > max_cand_x || cy > max_cand_y)
-                continue;
+                /* Bounds check (precomputed poly AABB — no per-candidate recalc) */
+                if (cx < min_cand_x || cy < min_cand_y)
+                    continue;
+                if (cx + poly_min_x < 0 || cy + poly_min_y < 0)
+                    continue;
+                if (cx < (int32_t)extrude || cy < (int32_t)extrude)
+                    continue;
+                if (cx > max_cand_x || cy > max_cand_y)
+                    continue;
 
-            /* Collision: candidate must be outside ALL NFPs */
-            bool safe = true;
-            if (use_grid && cx >= 0 && cy >= 0) {
-                int32_t gcx = cx / VPACK_GRID_CELL;
-                int32_t gcy = cy / VPACK_GRID_CELL;
-                if (gcx < VPACK_GRID_DIM && gcy < VPACK_GRID_DIM) {
-                    uint64_t *cell = nfp_grid[gcy * VPACK_GRID_DIM + gcx];
-                    for (uint32_t w = 0; w < nfp_words && safe; w++) {
-                        uint64_t bits = cell[w];
-                        while (bits) {
-                            uint32_t bit_idx = (uint32_t)__builtin_ctzll(bits);
-                            uint32_t i = w * 64 + bit_idx;
+                /* Collision: candidate must be outside ALL NFPs */
+                bool safe = true;
+                if (use_grid && cx >= 0 && cy >= 0) {
+                    int32_t gcx = cx / VPACK_GRID_CELL;
+                    int32_t gcy = cy / VPACK_GRID_CELL;
+                    if (gcx < VPACK_GRID_DIM && gcy < VPACK_GRID_DIM) {
+                        uint64_t *cell = nfp_grid[gcy * VPACK_GRID_DIM + gcx];
+                        for (uint32_t w = 0; w < nfp_words && safe; w++) {
+                            uint64_t bits = cell[w];
+                            while (bits) {
+                                uint32_t bit_idx = (uint32_t)__builtin_ctzll(bits);
+                                uint32_t i = w * 64 + bit_idx;
+                                stats->test_count++;
+                                if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
+                                    safe = false;
+                                }
+                                bits &= bits - 1; /* clear lowest set bit */
+                            }
+                        }
+                    }
+                } else {
+                    for (uint32_t i = 0; i < nfp_count; i++) {
+                        if (cx >= nfps[i].min_x && cx <= nfps[i].max_x && cy >= nfps[i].min_y && cy <= nfps[i].max_y) {
                             stats->test_count++;
                             if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
                                 safe = false;
+                                break;
                             }
-                            bits &= bits - 1; /* clear lowest set bit */
                         }
                     }
                 }
-            } else {
-                for (uint32_t i = 0; i < nfp_count; i++) {
-                    if (cx >= nfps[i].min_x && cx <= nfps[i].max_x && cy >= nfps[i].min_y && cy <= nfps[i].max_y) {
-                        stats->test_count++;
-                        if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
-                            safe = false;
-                            break;
-                        }
+                if (safe) {
+                    if (cands[c].dist < best_score) {
+                        best_x = cx;
+                        best_y = cy;
+                        best_orient = (uint8_t)ori;
+                        best_score = cands[c].dist;
+                        best_orient_idx = ori;
+                        found_any = true;
                     }
+                    break; /* first valid candidate per orientation (sorted by score) */
                 }
             }
-            if (safe) {
-                best_x = cx;
-                best_y = cy;
-                found = true;
-                break;
-            }
-        }
-        // #endregion
+            // #endregion
+
+        } /* end orientation loop */
 
         // #region Page overflow
-        if (!found) {
+        if (!found_any) {
             current_page++;
             placed_on_page = 0;
             if (current_page >= 16) {
@@ -460,30 +493,34 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
         }
         // #endregion
 
-        // #region Save placement
-        placed[placed_on_page].count = inf_counts[idx];
-        placed[placed_on_page].x = best_x;
-        placed[placed_on_page].y = best_y;
-        for (uint32_t v = 0; v < inf_counts[idx]; v++) {
-            placed[placed_on_page].poly[v] = inf_polys[idx][v];
+        // #region Save placement (using winning orientation's polygon)
+        {
+            Point2D *win_poly = orient_polys[best_orient_idx];
+            uint32_t win_count = orient_counts[best_orient_idx];
+            int32_t win_poly_max_x, win_poly_max_y, win_trash;
+            vpack_calc_aabb(win_poly, win_count, &win_trash, &win_trash, &win_poly_max_x, &win_poly_max_y);
+
+            placed[placed_on_page].count = win_count;
+            placed[placed_on_page].x = best_x;
+            placed[placed_on_page].y = best_y;
+            for (uint32_t v = 0; v < win_count; v++) {
+                placed[placed_on_page].poly[v] = win_poly[v];
+            }
+            vpack_calc_aabb(win_poly, win_count, &placed[placed_on_page].aabb_min_x, &placed[placed_on_page].aabb_min_y, &placed[placed_on_page].aabb_max_x, &placed[placed_on_page].aabb_max_y);
+            placed_on_page++;
+
+            out_placements[idx].sprite_index = idx;
+            out_placements[idx].page = current_page;
+            NT_BUILD_ASSERT(best_x >= (int32_t)extrude && best_y >= (int32_t)extrude && "vector_pack: placement too close to edge for extrude");
+            out_placements[idx].x = (uint32_t)(best_x - (int32_t)extrude);
+            out_placements[idx].y = (uint32_t)(best_y - (int32_t)extrude);
+            out_placements[idx].rotation = best_orient;
+
+            if (best_x + win_poly_max_x > (int32_t)pages_used_w[current_page])
+                pages_used_w[current_page] = best_x + win_poly_max_x;
+            if (best_y + win_poly_max_y > (int32_t)pages_used_h[current_page])
+                pages_used_h[current_page] = best_y + win_poly_max_y;
         }
-        vpack_calc_aabb(inf_polys[idx], inf_counts[idx], &placed[placed_on_page].aabb_min_x, &placed[placed_on_page].aabb_min_y, &placed[placed_on_page].aabb_max_x,
-                        &placed[placed_on_page].aabb_max_y);
-        placed_on_page++;
-
-        out_placements[idx].sprite_index = idx;
-        out_placements[idx].page = current_page;
-        /* pipeline_serialize does: inner_x = pl->x + extrude, atlas_px = inner_x + lx.
-         * For atlas_px to equal (best_x + lx), we need pl->x = best_x - extrude. */
-        NT_BUILD_ASSERT(best_x >= (int32_t)extrude && best_y >= (int32_t)extrude && "vector_pack: placement too close to edge for extrude");
-        out_placements[idx].x = (uint32_t)(best_x - (int32_t)extrude);
-        out_placements[idx].y = (uint32_t)(best_y - (int32_t)extrude);
-        out_placements[idx].rotation = 0;
-
-        if (best_x + poly_max_x > (int32_t)pages_used_w[current_page])
-            pages_used_w[current_page] = best_x + poly_max_x;
-        if (best_y + poly_max_y > (int32_t)pages_used_h[current_page])
-            pages_used_h[current_page] = best_y + poly_max_y;
         // #endregion
     }
 

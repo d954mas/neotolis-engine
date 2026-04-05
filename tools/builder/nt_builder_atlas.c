@@ -371,25 +371,52 @@ static uint32_t polygon_inflate(const Point2D *hull, uint32_t n, float amount, P
     return out_count;
 }
 
-/* Rotate polygon vertices by 0/90/180/270. tw/th = original trimmed sprite dims. */
-static void polygon_rotate(const Point2D *src, uint32_t n, uint8_t rotation, int32_t tw, int32_t th, Point2D *out) {
+/* 3-bit transform flags (dihedral group D4 — all 8 symmetries of a rectangle).
+ *   bit 0 (1): flip horizontal
+ *   bit 1 (2): flip vertical
+ *   bit 2 (4): diagonal flip (swap x,y — applied first)
+ * Apply order: diagonal → flip H → flip V.
+ *
+ * Mapping from old rotation values:
+ *   rot=0 → flags=0 (identity)        rot=1 (90°CW)  → flags=5
+ *   rot=2 (180°) → flags=3            rot=3 (270°CW) → flags=6
+ * New transforms: 1=flipH, 2=flipV, 4=diagonal, 7=anti-diagonal
+ *
+ * Dimension swap: if (flags & 4) then output dims are (th, tw), else (tw, th). */
+
+static inline void transform_point(int32_t sx, int32_t sy, uint8_t flags, int32_t tw, int32_t th, int32_t *ox, int32_t *oy) {
+    int32_t x = sx;
+    int32_t y = sy;
+    if (flags & 4) {
+        int32_t t = x;
+        x = y;
+        y = t;
+    }
+    int32_t w = (flags & 4) ? th : tw;
+    int32_t h = (flags & 4) ? tw : th;
+    if (flags & 1) {
+        x = w - 1 - x;
+    }
+    if (flags & 2) {
+        y = h - 1 - y;
+    }
+    *ox = x;
+    *oy = y;
+}
+
+/* Transform polygon vertices using 3-bit flags. tw/th = original trimmed sprite dims.
+ * If the transform reverses winding (odd popcount), vertices are reversed to restore CCW. */
+static void polygon_transform(const Point2D *src, uint32_t n, uint8_t flags, int32_t tw, int32_t th, Point2D *out) {
     for (uint32_t i = 0; i < n; i++) {
-        switch (rotation) {
-        case 1: /* 90 CW */
-            out[i].x = th - 1 - src[i].y;
-            out[i].y = src[i].x;
-            break;
-        case 2: /* 180 */
-            out[i].x = tw - 1 - src[i].x;
-            out[i].y = th - 1 - src[i].y;
-            break;
-        case 3: /* 270 CW */
-            out[i].x = src[i].y;
-            out[i].y = tw - 1 - src[i].x;
-            break;
-        default: /* 0 */
-            out[i] = src[i];
-            break;
+        transform_point(src[i].x, src[i].y, flags, tw, th, &out[i].x, &out[i].y);
+    }
+    /* Odd number of reflections reverses winding — reverse vertex order to restore CCW */
+    uint32_t parity = (uint32_t)((flags & 1) + ((flags >> 1) & 1) + ((flags >> 2) & 1));
+    if ((parity & 1) && n > 1) {
+        for (uint32_t i = 0; i < n / 2; i++) {
+            Point2D tmp = out[i];
+            out[i] = out[n - 1 - i];
+            out[n - 1 - i] = tmp;
         }
     }
 }
@@ -1910,11 +1937,12 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
         int32_t base_ox = grid_ox[idx];
         int32_t base_oy = grid_oy[idx];
 
-        /* For rotations, build rotated tile grids from rotated inflated polygon. */
-        uint32_t rot_count = allow_rotate ? 4 : 1;
-        TileGrid rot_sg[4];
-        int32_t rot_ox[4];
-        int32_t rot_oy[4];
+        /* For rotations/flips, build transformed tile grids from transformed inflated polygon.
+         * 3-bit flags: bit0=flipH, bit1=flipV, bit2=diagonal. 8 orientations total. */
+        uint32_t rot_count = allow_rotate ? 8 : 1;
+        TileGrid rot_sg[8];
+        int32_t rot_ox[8];
+        int32_t rot_oy[8];
         rot_sg[0] = *base_sg; /* just reference, don't free */
         rot_ox[0] = base_ox;
         rot_oy[0] = base_oy;
@@ -1922,17 +1950,17 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
         if (allow_rotate) {
             Point2D inf_poly[32];
             uint32_t inf_n = polygon_inflate(hull_verts[idx], hull_counts[idx], dilate, inf_poly);
-            for (uint32_t r = 1; r <= 3; r++) {
+            for (uint32_t r = 1; r < 8; r++) {
                 Point2D rot_poly[32];
-                polygon_rotate(inf_poly, inf_n, (uint8_t)r, (int32_t)trim_w[idx], (int32_t)trim_h[idx], rot_poly);
-                uint32_t rtw = (r == 1 || r == 3) ? trim_h[idx] : trim_w[idx];
-                uint32_t rth = (r == 1 || r == 3) ? trim_w[idx] : trim_h[idx];
+                polygon_transform(inf_poly, inf_n, (uint8_t)r, (int32_t)trim_w[idx], (int32_t)trim_h[idx], rot_poly);
+                uint32_t rtw = (r & 4) ? trim_h[idx] : trim_w[idx];
+                uint32_t rth = (r & 4) ? trim_w[idx] : trim_h[idx];
                 rot_sg[r] = tgrid_from_polygon(rot_poly, inf_n, rtw, rth, ts, &rot_ox[r], &rot_oy[r]);
             }
         }
 
         /* Build x4 downsampled sprite grids for LOD */
-        TileGrid rot_sg_x4[4];
+        TileGrid rot_sg_x4[8];
         for (uint32_t r = 0; r < rot_count; r++) {
             rot_sg_x4[r] = tgrid_downsample_x4(&rot_sg[r]);
         }
@@ -2171,14 +2199,12 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
         pl->trim_y = 0;
         pl->rotation = best_rot;
 
-        /* Free rotated grids (but not rot_sg[0] which is base_sg) */
+        /* Free transformed grids (but not rot_sg[0] which is base_sg) */
         for (uint32_t fr = 0; fr < rot_count; fr++) {
             tgrid_free(&rot_sg_x4[fr]);
         }
-        if (allow_rotate) {
-            tgrid_free(&rot_sg[1]);
-            tgrid_free(&rot_sg[2]);
-            tgrid_free(&rot_sg[3]);
+        for (uint32_t fr = 1; fr < rot_count; fr++) {
+            tgrid_free(&rot_sg[fr]);
         }
     }
     // #endregion
@@ -2265,26 +2291,11 @@ static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rg
             if (src[3] == 0) {
                 continue; /* skip fully transparent pixels */
             }
-            uint32_t dx;
-            uint32_t dy;
-            switch (rotation) {
-            case 1:
-                dx = dest_x + (trim_h - 1 - sy);
-                dy = dest_y + sx;
-                break;
-            case 2:
-                dx = dest_x + (trim_w - 1 - sx);
-                dy = dest_y + (trim_h - 1 - sy);
-                break;
-            case 3:
-                dx = dest_x + sy;
-                dy = dest_y + (trim_w - 1 - sx);
-                break;
-            default:
-                dx = dest_x + sx;
-                dy = dest_y + sy;
-                break;
-            }
+            int32_t tx;
+            int32_t ty;
+            transform_point((int32_t)sx, (int32_t)sy, rotation, (int32_t)trim_w, (int32_t)trim_h, &tx, &ty);
+            uint32_t dx = dest_x + (uint32_t)tx;
+            uint32_t dy = dest_y + (uint32_t)ty;
             memcpy(&page[((size_t)dy * page_w + dx) * 4], src, 4);
         }
     }
@@ -2424,42 +2435,16 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
     /* Transform hull vertex from local trimmed-sprite space to atlas pixel coords */
     for (uint32_t i = 0; i < vert_count; i++) {
         uint32_t next = (i + 1) % vert_count;
-        int32_t lx0 = hull[i].x;
-        int32_t ly0 = hull[i].y;
-        int32_t lx1 = hull[next].x;
-        int32_t ly1 = hull[next].y;
-
-        int32_t ax0;
-        int32_t ay0;
-        int32_t ax1;
-        int32_t ay1;
-        switch (rotation) {
-        case 1: /* 90 CW */
-            ax0 = (int32_t)inner_x + ((int32_t)trim_h - 1 - ly0);
-            ay0 = (int32_t)inner_y + lx0;
-            ax1 = (int32_t)inner_x + ((int32_t)trim_h - 1 - ly1);
-            ay1 = (int32_t)inner_y + lx1;
-            break;
-        case 2: /* 180 */
-            ax0 = (int32_t)inner_x + ((int32_t)trim_w - 1 - lx0);
-            ay0 = (int32_t)inner_y + ((int32_t)trim_h - 1 - ly0);
-            ax1 = (int32_t)inner_x + ((int32_t)trim_w - 1 - lx1);
-            ay1 = (int32_t)inner_y + ((int32_t)trim_h - 1 - ly1);
-            break;
-        case 3: /* 270 CW */
-            ax0 = (int32_t)inner_x + ly0;
-            ay0 = (int32_t)inner_y + ((int32_t)trim_w - 1 - lx0);
-            ax1 = (int32_t)inner_x + ly1;
-            ay1 = (int32_t)inner_y + ((int32_t)trim_w - 1 - lx1);
-            break;
-        default: /* 0 */
-            ax0 = (int32_t)inner_x + lx0;
-            ay0 = (int32_t)inner_y + ly0;
-            ax1 = (int32_t)inner_x + lx1;
-            ay1 = (int32_t)inner_y + ly1;
-            break;
-        }
-
+        int32_t tx0;
+        int32_t ty0;
+        int32_t tx1;
+        int32_t ty1;
+        transform_point(hull[i].x, hull[i].y, rotation, (int32_t)trim_w, (int32_t)trim_h, &tx0, &ty0);
+        transform_point(hull[next].x, hull[next].y, rotation, (int32_t)trim_w, (int32_t)trim_h, &tx1, &ty1);
+        int32_t ax0 = (int32_t)inner_x + tx0;
+        int32_t ay0 = (int32_t)inner_y + ty0;
+        int32_t ax1 = (int32_t)inner_x + tx1;
+        int32_t ay1 = (int32_t)inner_y + ty1;
         debug_draw_line(page, pw, ph, ax0, ay0, ax1, ay1, color);
     }
 }
@@ -3197,8 +3182,8 @@ static void pipeline_compose(AtlasPipeline *p) {
 
         blit_sprite(p->page_pixels[pl->page], p->page_w[pl->page], p->sprites[idx].rgba, p->sprites[idx].width, pl->trim_x, pl->trim_y, pl->trimmed_w, pl->trimmed_h, inner_x, inner_y, pl->rotation);
 
-        uint32_t blit_w = (pl->rotation == 1 || pl->rotation == 3) ? pl->trimmed_h : pl->trimmed_w;
-        uint32_t blit_h = (pl->rotation == 1 || pl->rotation == 3) ? pl->trimmed_w : pl->trimmed_h;
+        uint32_t blit_w = (pl->rotation & 4) ? pl->trimmed_h : pl->trimmed_w;
+        uint32_t blit_h = (pl->rotation & 4) ? pl->trimmed_w : pl->trimmed_h;
         extrude_edges(p->page_pixels[pl->page], p->page_w[pl->page], p->page_h[pl->page], inner_x, inner_y, blit_w, blit_h, extrude_val);
     }
 }
@@ -3229,8 +3214,8 @@ static void pipeline_debug_png(AtlasPipeline *p) {
             if (p->opts->polygon_mode && p->hull_vertices[si] && p->vertex_counts[si] >= 3) {
                 debug_draw_hull_outline(debug_page, p->page_w[pg], p->page_h[pg], p->hull_vertices[si], p->vertex_counts[si], ix, iy, p->trim_w[si], p->trim_h[si], p->placements[pi].rotation);
             } else {
-                uint32_t rw = (p->placements[pi].rotation == 1 || p->placements[pi].rotation == 3) ? p->placements[pi].trimmed_h : p->placements[pi].trimmed_w;
-                uint32_t rh = (p->placements[pi].rotation == 1 || p->placements[pi].rotation == 3) ? p->placements[pi].trimmed_w : p->placements[pi].trimmed_h;
+                uint32_t rw = (p->placements[pi].rotation & 4) ? p->placements[pi].trimmed_h : p->placements[pi].trimmed_w;
+                uint32_t rh = (p->placements[pi].rotation & 4) ? p->placements[pi].trimmed_w : p->placements[pi].trimmed_h;
                 debug_draw_rect_outline(debug_page, p->page_w[pg], p->page_h[pg], ix, iy, rw, rh);
             }
         }
@@ -3350,30 +3335,11 @@ static void pipeline_serialize(AtlasPipeline *p) {
             vtx->local_x = (int16_t)lx;
             vtx->local_y = (int16_t)ly;
 
-            float atlas_px;
-            float atlas_py;
-            switch (pl->rotation) {
-            case 0:
-                atlas_px = (float)inner_x + (float)lx;
-                atlas_py = (float)inner_y + (float)ly;
-                break;
-            case 1:
-                atlas_px = (float)inner_x + (float)((int32_t)p->trim_h[pl->sprite_index] - 1 - ly);
-                atlas_py = (float)inner_y + (float)lx;
-                break;
-            case 2:
-                atlas_px = (float)inner_x + (float)((int32_t)p->trim_w[pl->sprite_index] - 1 - lx);
-                atlas_py = (float)inner_y + (float)((int32_t)p->trim_h[pl->sprite_index] - 1 - ly);
-                break;
-            case 3:
-                atlas_px = (float)inner_x + (float)ly;
-                atlas_py = (float)inner_y + (float)((int32_t)p->trim_w[pl->sprite_index] - 1 - lx);
-                break;
-            default:
-                atlas_px = (float)inner_x + (float)lx;
-                atlas_py = (float)inner_y + (float)ly;
-                break;
-            }
+            int32_t tx;
+            int32_t ty;
+            transform_point(lx, ly, pl->rotation, (int32_t)p->trim_w[pl->sprite_index], (int32_t)p->trim_h[pl->sprite_index], &tx, &ty);
+            float atlas_px = (float)inner_x + (float)tx;
+            float atlas_py = (float)inner_y + (float)ty;
 
             float tmp_u = ((atlas_px * 65535.0F) / (float)atlas_w) + 0.5F;
             float tmp_v = ((atlas_py * 65535.0F) / (float)atlas_h) + 0.5F;
