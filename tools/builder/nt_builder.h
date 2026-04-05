@@ -206,7 +206,7 @@ typedef struct {
     uint32_t margin;                        /* atlas edge margin (default: 0 per D-11) */
     uint32_t extrude;                       /* edge pixel duplication count (default: 2 per D-11) */
     uint8_t alpha_threshold;                /* alpha >= this = opaque for trimming (default: 1 per D-11) */
-    uint8_t max_vertices;                   /* max hull vertices per region (default: 8 per D-11) */
+    uint8_t max_vertices;                   /* max hull vertices per region (default: 8 per D-11, sprite contours >16 unsupported) */
     bool allow_rotate;                      /* try rotations for better packing (default: true per D-11) */
     bool power_of_two;                      /* round atlas dims to POT (default: true per D-11) */
     bool polygon_mode;                      /* true = convex hull, false = rect (default: true per D-11) */

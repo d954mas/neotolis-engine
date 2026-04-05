@@ -60,4 +60,4 @@ diff_*.txt
 .claude/gsd-local-patches/
 .claude/agents/gsd-*.md
 .claude/commands/gsd/
-.claude/hooks/gsd-*
+.claude/hooks/gsd-*autoresearch-results.tsv

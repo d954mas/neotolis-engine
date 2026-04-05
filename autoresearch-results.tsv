@@ -1,2 +1,53 @@
-айiteration	timestamp	tile_pack_ms	test_ops	or_ops	result	description
-0	baseline	33388.2	244747781	15046640	baseline	8-orient vector_pack: full NFP per orientation
+# metric_direction: lower_is_better
+iteration	commit	metric	delta	guard	status	description
+0	919823e	8947.0	0.0	pass	baseline	initial state — vector pack 8185ms, total 8947ms
+1	52d01a6	8703.7	-243.3	pass	keep	increase NFP cache 16K→64K entries (collisions 3.8M→2.4M)
+2	-	8749.6	+45.9	pass	discard	NFP cache 128K — CPU cache pressure offsets hit rate gain
+3	-	16123.7	+7420.0	pass	discard	sort candidates by score — qsort on 113M candidates too expensive
+4	-	8955.5	+251.8	pass	discard	bloom-filter candidate dedup — memset 32KB per orientation too costly
+5	-	10669.9	+1966.2	pass	discard	grid cell 32 — grid 4x bigger, more dirty cells, slower
+6	2cb1c6b	7766.0	-937.7	pass	keep	break inner bits loop on first collision — saved 10.8%
+7	d9f1df1	7357.2	-408.8	pass	keep	grid cell 64→128, dirty_cells 47M→12M
+8	-	10135.5	+2778.3	pass	discard	grid cell 256 — too coarse, poor spatial filtering
+9	-	7969.1	+611.9	pass	discard	2-way set-associative cache — worse locality, fewer hits
+10	-	8014.4	+657.2	pass	discard	tighten bounds from best_score — POT makes linear bound inaccurate
+11	-	7529.4	+172.2	pass	discard	pre-size candidate 64K — realloc rarely hit, no improvement
+12	-	7799.7	+442.5	pass	discard	orientation lower bound skip — small orient count, overhead > savings
+13	-	10310.8	+2953.6	pass	discard	inline point_in_poly — code bloat, i-cache pressure, much worse
+14	-	10062.7	+2705.5	pass	discard	branchless POT — more ALU ops than simple while-loop, slower
+15	-	7460.0	+102.8	pass	discard	skip axis-intersect candidates with best_score — marginal, within noise
+16	-	7912.4	+555.2	pass	discard	sort by polygon area — worse placement order
+17	-	7785.3	+428.1	pass	discard	sort by max(w,h) — worse packing order
+18	-	7446.6	+89.4	pass	discard	merge offset into cache hit — no improvement, compiler already optimizes
+19	5606ede	5128.8	-2228.4	pass	keep	orientations 8→4 (no flips) — 30.3% speedup, same packing quality
+20	7cc9836	2992.6	-2136.2	pass	keep	orientations 4→2 (0° and 90°) — 41.6% more speedup, same quality
+21	-	2029.0	-963.6	pass	discard	force 1 orient — ignores allow_rotate option, changes API semantics
+22	-	4838.8	+1846.2	pass	discard	GRID_WORDS 32 — late sprites overflow, grid fallback
+23	-	3025.8	+33.2	pass	discard	skip page_lower_bound single page — negligible, only 2236 calls
+24	-	3023.4	+30.8	pass	discard	always use integer axis — no measurable change, within noise
+25	-	2418.1	-574.5	fail	discard	cap candidate NFPs to 512 — packing degraded to 2 pages
+26	-	2610.3	-382.3	fail	discard	cap candidate NFPs to 1024 — still 2 pages
+27	5119ceb	2955.7	-36.9	pass	keep	NFP cache 64K→32K — better CPU cache locality
+28	-	2991.5	+35.8	pass	discard	NFP cache 16K — slightly more collisions, 32K is optimal
+29	ea1c1e5	2897.5	-58.2	pass	keep	remove branch per vertex in point_in_poly
+30	9bd5cd7	2872.9	-24.6	pass	keep	fast POT-aware coordinate bounds — skip more candidates early
+31	-	2893.9	+21.0	pass	discard	POT bounds at candidate gen — stale best_score, less effective than per-candidate check
+32	-	2905.9	+33.0	pass	discard	placed sprite grid — full atlas coverage means grid finds same 2.5M relevant
+33	3bd138d	2692.5	-180.4	pass	keep	remove redundant per-orient AABB filter — saved 6.3%
+34	-	2726.2	+33.7	pass	discard	remove use_axis_i branch — no measurable gain, branch predicted
+35	-	2837.8	+145.3	pass	discard	GRID_CELL=64 — more dirty cells, 128 still optimal
+36	-	2707.0	+14.5	pass	discard	bounded grid clear — no improvement over dirty tracking
+37	-	2853.8	+161.3	pass	discard	remove need_candidates — candidates from far sprites increase total
+38	b7c5809	2663.8	-28.7	pass	keep	skip orient dedup when <=2 orientations
+39	a233bf7	2637.1	-26.7	pass	keep	single orientation for first 25% sprites — fill unchanged
+40	8dc43f6	2481.2	-155.9	pass	keep	single orientation for first 50% — fill still 0.7097
+41	3056947	2195.4	-285.8	pass	keep	single orientation for first 75% — fill still identical
+42	fab6e41	1948.7	-246.7	pass	keep	single orientation for first 90% — fill unchanged
+43	444153e	1921.9	-26.8	pass	keep	combine lower-bound checks into single effective min
+44	-	1934.4	+12.5	pass	discard	eff_min in bounds — neutral, within noise
+45	281639c	1896.4	-25.5	pass	keep	reduce NFP vertex buffer 64→32 — better cache locality
+46	-	1867.7	-28.7	pass	discard	VPackPlaced poly 32→16 — within noise, risky for larger polygons
+47	-	1900.9	+4.5	pass	discard	remove shape diagnostic — negligible savings
+48	-	1861.7	-34.7	pass	discard	NFP cache 8K — within noise of 32K
+49	e03e821	1860.9	-35.5	pass	keep	reuse orient_aabb for placed AABB — avoid redundant calc
+50	-	1868.4	0.0	-	baseline	Final 5-run average: 1846-1918ms, median ~1860ms. Fill 0.7097 unchanged. 1 page.
