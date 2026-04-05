@@ -876,10 +876,24 @@ static bool tgrid_test(const TileGrid *atlas, const TileGrid *sprite, int32_t tx
                     } else {
                         hit_col = ((a_word + 1) * 64) + tgrid_ctz64(a_row[a_word + 1] & (s >> (64 - a_bit)));
                     }
-                    /* Advance past consecutive occupied atlas tiles */
+                    /* Advance past consecutive occupied atlas tiles using word-level scan */
                     uint32_t skip_to = hit_col + 1;
-                    while (skip_to < atlas->tw && tgrid_get(atlas, skip_to, (uint32_t)ay)) {
-                        skip_to++;
+                    uint32_t sw2 = skip_to >> 6;
+                    uint32_t sb2 = skip_to & 63;
+                    while (sw2 < atlas->row_words) {
+                        uint64_t inv = ~a_row[sw2];
+                        if (sb2 > 0) {
+                            inv &= UINT64_MAX << sb2;
+                        }
+                        if (inv) {
+                            skip_to = (sw2 * 64) + tgrid_ctz64(inv);
+                            break;
+                        }
+                        sw2++;
+                        sb2 = 0;
+                    }
+                    if (sw2 >= atlas->row_words) {
+                        skip_to = atlas->tw;
                     }
                     *out_skip = skip_to - (uint32_t)tx;
                 }
