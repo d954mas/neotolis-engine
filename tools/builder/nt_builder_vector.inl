@@ -294,11 +294,18 @@ static uint64_t vpack_page_lower_bound(const int32_t orient_aabb[8][4], const in
 }
 
 // #region Parallel candidate test thread pool
-#define VPACK_PAR_MAX_THREADS 16
 #define VPACK_PAR_CHUNK 512
 #define VPACK_PAR_MIN_CANDIDATES 4096
 
 typedef struct {
+    uint64_t score;
+    int32_t x, y;
+    uint64_t test_count;
+    bool found;
+} VPackParResult;
+
+typedef struct {
+    /* Per-batch read-only state (set by main before signaling) */
     const VPackCand *cands;
     uint32_t cand_count;
     const VPackNFP *nfps;
@@ -313,15 +320,17 @@ typedef struct {
     bool power_of_two;
     _Atomic uint64_t shared_best;
     _Atomic uint32_t next_chunk;
-    struct {
-        uint64_t score;
-        int32_t x, y;
-        uint64_t test_count;
-    } results[VPACK_PAR_MAX_THREADS];
-    _Atomic uint32_t phase;
-    _Atomic uint32_t workers_done;
-    _Atomic bool shutdown;
+    /* Per-thread results (heap-allocated, sized to num_workers+1) */
+    VPackParResult *results;
+    /* Sync: mutex+cond for sleep-wake (no spin) */
+    mtx_t mtx;
+    cnd_t cnd_work;   /* main signals: work available */
+    cnd_t cnd_done;   /* workers signal: batch complete */
     uint32_t num_workers;
+    uint32_t workers_waiting;
+    uint32_t workers_done;
+    bool batch_ready;
+    bool shutdown;
 } VPackParCtx;
 
 typedef struct {
@@ -347,7 +356,7 @@ static void vpack_par_process_chunks(VPackParCtx *ctx, uint32_t tid) {
             if (cx < ctx->eff_min_x || cy < ctx->eff_min_y || cx > ctx->fast_max_x || cy > ctx->fast_max_y)
                 continue;
             uint64_t score = vpack_score_candidate(cx, cy, ctx->poly_max_x, ctx->poly_max_y, ctx->used_w, ctx->used_h, ctx->margin, ctx->power_of_two);
-            if (score >= atomic_load_explicit(&ctx->shared_best, memory_order_relaxed))
+            if (score >= local_best)
                 continue;
             bool safe = true;
             if (ctx->use_grid && cx >= 0 && cy >= 0) {
@@ -381,14 +390,11 @@ static void vpack_par_process_chunks(VPackParCtx *ctx, uint32_t tid) {
                     }
                 }
             }
-            if (safe && score < local_best) {
+            if (safe && (score < local_best || (score == local_best && (cy < local_y || (cy == local_y && cx < local_x))))) {
                 local_best = score;
                 local_x = cx;
                 local_y = cy;
-                uint64_t cur = atomic_load_explicit(&ctx->shared_best, memory_order_relaxed);
-                while (score < cur)
-                    if (atomic_compare_exchange_weak_explicit(&ctx->shared_best, &cur, score, memory_order_relaxed, memory_order_relaxed))
-                        break;
+                ctx->results[tid].found = true;
             }
         }
     }
@@ -402,16 +408,27 @@ static int vpack_par_worker(void *arg) {
     VPackWorkerArg *wa = (VPackWorkerArg *)arg;
     VPackParCtx *ctx = wa->ctx;
     uint32_t tid = wa->tid;
-    uint32_t last_phase = 0;
-    while (!atomic_load_explicit(&ctx->shutdown, memory_order_relaxed)) {
-        uint32_t phase = atomic_load_explicit(&ctx->phase, memory_order_acquire);
-        if (phase == last_phase) {
-            thrd_yield();
-            continue;
+    for (;;) {
+        mtx_lock(&ctx->mtx);
+        ctx->workers_waiting++;
+        while (!ctx->batch_ready && !ctx->shutdown)
+            cnd_wait(&ctx->cnd_work, &ctx->mtx);
+        ctx->workers_waiting--;
+        if (ctx->shutdown) {
+            mtx_unlock(&ctx->mtx);
+            break;
         }
-        last_phase = phase;
+        mtx_unlock(&ctx->mtx);
+
         vpack_par_process_chunks(ctx, tid);
-        atomic_fetch_add_explicit(&ctx->workers_done, 1, memory_order_release);
+
+        mtx_lock(&ctx->mtx);
+        ctx->workers_done++;
+        if (ctx->workers_done == ctx->num_workers) {
+            ctx->batch_ready = false;
+            cnd_signal(&ctx->cnd_done);
+        }
+        mtx_unlock(&ctx->mtx);
     }
     return 0;
 }
@@ -663,25 +680,32 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             atomic_store_explicit(&par->next_chunk, 0, memory_order_relaxed);
             /* Init all thread results (including main = tid 0) */
             for (uint32_t t = 0; t <= par->num_workers; t++) {
-                par->results[t].score = UINT64_MAX;
+                par->results[t].score = *io_best_score;
                 par->results[t].x = 0;
                 par->results[t].y = 0;
                 par->results[t].test_count = 0;
+                par->results[t].found = false;
             }
-            atomic_store_explicit(&par->workers_done, 0, memory_order_relaxed);
-            atomic_fetch_add_explicit(&par->phase, 1, memory_order_release); /* wake workers */
+            /* Signal workers */
+            mtx_lock(&par->mtx);
+            par->workers_done = 0;
+            par->batch_ready = true;
+            cnd_broadcast(&par->cnd_work);
+            mtx_unlock(&par->mtx);
 
             /* Main thread also processes chunks (tid=0) */
             vpack_par_process_chunks(par, 0);
 
-            /* Wait for all workers */
-            while (atomic_load_explicit(&par->workers_done, memory_order_acquire) < par->num_workers)
-                thrd_yield();
+            /* Wait for all workers to finish this batch */
+            mtx_lock(&par->mtx);
+            while (par->workers_done < par->num_workers)
+                cnd_wait(&par->cnd_done, &par->mtx);
+            mtx_unlock(&par->mtx);
 
             /* Reduce: find global best across all threads */
             for (uint32_t t = 0; t <= par->num_workers; t++) {
                 stats->test_count += par->results[t].test_count;
-                if (par->results[t].score < *io_best_score) {
+                if (par->results[t].found && par->results[t].score < *io_best_score) {
                     *io_best_score = par->results[t].score;
                     *out_best_page = page_index;
                     *out_best_x = par->results[t].x;
@@ -770,6 +794,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     uint32_t margin = opts->margin;
     uint32_t max_size = opts->max_size;
     VPackExperimentConfig exp = vpack_experiment_config_get();
+    NT_LOG_INFO("  vector_pack: thread_count=%u, sprites=%u", thread_count, sprite_count);
 
     // #region Initialize stats
     stats->or_count = 0;
@@ -851,22 +876,27 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     // #region Thread pool for parallel candidate testing
     VPackParCtx par_ctx;
     memset(&par_ctx, 0, sizeof(par_ctx));
-    thrd_t par_threads[VPACK_PAR_MAX_THREADS];
-    VPackWorkerArg par_args[VPACK_PAR_MAX_THREADS];
+    thrd_t *par_threads = NULL;
+    VPackWorkerArg *par_args = NULL;
     uint32_t num_workers = 0;
     if (thread_count > 1) {
-        num_workers = thread_count - 1; /* main thread is also a worker */
-        if (num_workers > VPACK_PAR_MAX_THREADS)
-            num_workers = VPACK_PAR_MAX_THREADS;
+        num_workers = thread_count - 1; /* main thread is also a worker (tid=0) */
+        if (num_workers > 7)
+            num_workers = 7; /* cap: more threads = more sync overhead per dispatch */
         par_ctx.num_workers = num_workers;
-        atomic_init(&par_ctx.phase, 0);
-        atomic_init(&par_ctx.workers_done, 0);
-        atomic_init(&par_ctx.shutdown, false);
+        par_ctx.results = (VPackParResult *)calloc(num_workers + 1, sizeof(VPackParResult));
+        NT_BUILD_ASSERT(par_ctx.results && "vector_pack: par results alloc failed");
+        mtx_init(&par_ctx.mtx, mtx_plain);
+        cnd_init(&par_ctx.cnd_work);
+        cnd_init(&par_ctx.cnd_done);
         atomic_init(&par_ctx.shared_best, UINT64_MAX);
         atomic_init(&par_ctx.next_chunk, 0);
+        par_threads = (thrd_t *)malloc(num_workers * sizeof(thrd_t));
+        par_args = (VPackWorkerArg *)malloc(num_workers * sizeof(VPackWorkerArg));
+        NT_BUILD_ASSERT(par_threads && par_args && "vector_pack: thread alloc failed");
         for (uint32_t t = 0; t < num_workers; t++) {
             par_args[t].ctx = &par_ctx;
-            par_args[t].tid = t + 1; /* tid 0 = main thread */
+            par_args[t].tid = t + 1;
             int rc = thrd_create(&par_threads[t], vpack_par_worker, &par_args[t]);
             NT_BUILD_ASSERT(rc == thrd_success && "vector_pack: worker thread create failed");
         }
@@ -1157,10 +1187,18 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     free(dirty_bits_buf);
     /* Shutdown thread pool */
     if (num_workers > 0) {
-        atomic_store(&par_ctx.shutdown, true);
-        atomic_fetch_add(&par_ctx.phase, 1); /* wake workers to see shutdown */
+        mtx_lock(&par_ctx.mtx);
+        par_ctx.shutdown = true;
+        cnd_broadcast(&par_ctx.cnd_work);
+        mtx_unlock(&par_ctx.mtx);
         for (uint32_t t = 0; t < num_workers; t++)
             thrd_join(par_threads[t], NULL);
+        mtx_destroy(&par_ctx.mtx);
+        cnd_destroy(&par_ctx.cnd_work);
+        cnd_destroy(&par_ctx.cnd_done);
+        free(par_ctx.results);
+        free(par_threads);
+        free(par_args);
     }
     // #endregion
 
