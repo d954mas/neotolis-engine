@@ -483,17 +483,40 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         }
         bool use_grid = (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS);
 
+        // #region Deduplicate candidates via bloom-filter bitset
+        {
+            #define VPACK_DEDUP_BITS (1u << 18) /* 256K bits = 32KB */
+            uint64_t dedup_bits[VPACK_DEDUP_BITS / 64];
+            memset(dedup_bits, 0, sizeof(dedup_bits));
+            uint32_t write = 0;
+            for (uint32_t c = 0; c < cand_count; c++) {
+                int32_t cx = (*cands)[c].x;
+                int32_t cy = (*cands)[c].y;
+                if (cx < min_cand_x || cy < min_cand_y)
+                    continue;
+                if (cx + poly_min_x < 0 || cy + poly_min_y < 0)
+                    continue;
+                if (cx < (int32_t)extrude || cy < (int32_t)extrude)
+                    continue;
+                if (cx > max_cand_x || cy > max_cand_y)
+                    continue;
+                uint32_t h = ((uint32_t)cx * 2654435761u ^ (uint32_t)cy * 2246822519u) & (VPACK_DEDUP_BITS - 1);
+                uint64_t bit = (uint64_t)1 << (h & 63u);
+                if (dedup_bits[h >> 6] & bit)
+                    continue;
+                dedup_bits[h >> 6] |= bit;
+                (*cands)[write].x = cx;
+                (*cands)[write].y = cy;
+                write++;
+            }
+            cand_count = write;
+            #undef VPACK_DEDUP_BITS
+        }
+        // #endregion
+
         for (uint32_t c = 0; c < cand_count; c++) {
             int32_t cx = (*cands)[c].x;
             int32_t cy = (*cands)[c].y;
-            if (cx < min_cand_x || cy < min_cand_y)
-                continue;
-            if (cx + poly_min_x < 0 || cy + poly_min_y < 0)
-                continue;
-            if (cx < (int32_t)extrude || cy < (int32_t)extrude)
-                continue;
-            if (cx > max_cand_x || cy > max_cand_y)
-                continue;
 
             uint64_t score = vpack_score_candidate(cx, cy, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
             if (score >= *io_best_score) {
