@@ -123,16 +123,6 @@ typedef struct {
     uint64_t dist;
 } VPackCand;
 
-static int vpack_cand_cmp(const void *a, const void *b) {
-    const VPackCand *ca = (const VPackCand *)a;
-    const VPackCand *cb = (const VPackCand *)b;
-    if (ca->dist < cb->dist)
-        return -1;
-    if (ca->dist > cb->dist)
-        return 1;
-    return 0;
-}
-
 /* Bounds for early candidate rejection (set per-sprite before candidate generation) */
 typedef struct {
     int32_t min_x, min_y, max_x, max_y;
@@ -180,7 +170,8 @@ typedef struct {
 
 #define VPACK_GRID_CELL 64
 #define VPACK_GRID_DIM ((4096 / VPACK_GRID_CELL) + 1)
-#define VPACK_GRID_WORDS 24
+/* Keep enough words to cover large single-page runs without disabling broad-phase. */
+#define VPACK_GRID_WORDS 64
 
 static void vpack_calc_aabb(const Point2D *poly, uint32_t count, int32_t *min_x, int32_t *min_y, int32_t *max_x, int32_t *max_y) {
     if (count == 0)
@@ -375,9 +366,11 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                         while (bits) {
                             uint32_t bit_idx = (uint32_t)__builtin_ctzll(bits);
                             uint32_t i = w * 64 + bit_idx;
-                            stats->test_count++;
-                            if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
-                                safe = false;
+                            if (cx >= nfps[i].min_x && cx <= nfps[i].max_x && cy >= nfps[i].min_y && cy <= nfps[i].max_y) {
+                                stats->test_count++;
+                                if (vpack_point_in_poly(cx, cy, nfps[i].verts, nfps[i].count)) {
+                                    safe = false;
+                                }
                             }
                             bits &= bits - 1;
                         }
