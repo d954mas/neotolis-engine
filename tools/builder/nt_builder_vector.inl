@@ -194,8 +194,10 @@ typedef struct {
     uint32_t shape_hash;
 } VPackPlaced;
 
-/* NFP cache: direct-mapped hash table keyed by (placed_shape_hash, incoming_shape_hash) */
-#define VPACK_NFP_CACHE_SIZE 65536U /* must be power of 2 */
+/* NFP cache: 2-way set-associative hash table keyed by (placed_shape_hash, incoming_shape_hash) */
+#define VPACK_NFP_CACHE_SETS 32768U /* must be power of 2 */
+#define VPACK_NFP_CACHE_WAYS 2U
+#define VPACK_NFP_CACHE_SIZE (VPACK_NFP_CACHE_SETS * VPACK_NFP_CACHE_WAYS)
 typedef struct {
     uint32_t key_a, key_b; /* shape hashes; both 0 = empty slot */
     Point2D verts[64];
@@ -350,26 +352,31 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             }
 
             VPackNFP *nfp = &nfps[nfp_count];
-            // #region NFP cache lookup
+            // #region NFP cache lookup (2-way set-associative)
             if (exp->use_nfp_cache) {
                 uint32_t ka = page->placed[i].shape_hash;
                 uint32_t kb = orient_neg_hashes[ori];
-                uint32_t slot = (ka * 2654435761u ^ kb) & (VPACK_NFP_CACHE_SIZE - 1);
-                VPackNFPCacheEntry *ce = &nfp_cache[slot];
-                if (ce->key_a == ka && ce->key_b == kb && ce->count > 0) {
+                uint32_t set = (ka * 2654435761u ^ kb) & (VPACK_NFP_CACHE_SETS - 1);
+                VPackNFPCacheEntry *way0 = &nfp_cache[set * VPACK_NFP_CACHE_WAYS];
+                VPackNFPCacheEntry *way1 = &nfp_cache[set * VPACK_NFP_CACHE_WAYS + 1];
+                if (way0->key_a == ka && way0->key_b == kb && way0->count > 0) {
                     stats->nfp_cache_hit_count++;
-                    nfp->count = ce->count;
-                    memcpy(nfp->verts, ce->verts, ce->count * sizeof(Point2D));
+                    nfp->count = way0->count;
+                    memcpy(nfp->verts, way0->verts, way0->count * sizeof(Point2D));
+                } else if (way1->key_a == ka && way1->key_b == kb && way1->count > 0) {
+                    stats->nfp_cache_hit_count++;
+                    nfp->count = way1->count;
+                    memcpy(nfp->verts, way1->verts, way1->count * sizeof(Point2D));
                 } else {
-                    if (ce->count > 0) {
+                    VPackNFPCacheEntry *victim = (way0->count == 0) ? way0 : way1;
+                    if (victim->count > 0)
                         stats->nfp_cache_collision_count++;
-                    }
                     stats->nfp_cache_miss_count++;
                     nfp->count = vpack_minkowski(page->placed[i].poly, page->placed[i].count, orient_neg[ori], cur_count, nfp->verts);
-                    ce->key_a = ka;
-                    ce->key_b = kb;
-                    ce->count = nfp->count;
-                    memcpy(ce->verts, nfp->verts, nfp->count * sizeof(Point2D));
+                    victim->key_a = ka;
+                    victim->key_b = kb;
+                    victim->count = nfp->count;
+                    memcpy(victim->verts, nfp->verts, nfp->count * sizeof(Point2D));
                 }
             } else {
                 nfp->count = vpack_minkowski(page->placed[i].poly, page->placed[i].count, orient_neg[ori], cur_count, nfp->verts);
