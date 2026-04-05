@@ -1876,8 +1876,33 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rgba, uint32_t sprite_w, uint32_t trim_x, uint32_t trim_y, uint32_t trim_w, uint32_t trim_h, uint32_t dest_x,
                         uint32_t dest_y, uint8_t rotation) {
     /* Blit only non-transparent pixels to avoid overwriting neighbors in polygon mode.
-     * Rotation 0: row-scan with alpha skip.
+     * Rotation 0: fast row-scan with run-length memcpy for opaque spans.
      * Rotations 1/2/3: pixel-by-pixel with coordinate transform + alpha skip. */
+    // #region Rotation 0 fast path: row-wise scan with opaque span memcpy
+    if (rotation == 0) {
+        for (uint32_t sy = 0; sy < trim_h; sy++) {
+            const uint8_t *src_row = &sprite_rgba[((size_t)(trim_y + sy) * sprite_w + trim_x) * 4];
+            uint8_t *dst_row = &page[((size_t)(dest_y + sy) * page_w + dest_x) * 4];
+            uint32_t sx = 0;
+            while (sx < trim_w) {
+                /* Skip transparent pixels */
+                while (sx < trim_w && src_row[sx * 4 + 3] == 0) {
+                    sx++;
+                }
+                if (sx >= trim_w) {
+                    break;
+                }
+                /* Find end of opaque run */
+                uint32_t run_start = sx;
+                while (sx < trim_w && src_row[sx * 4 + 3] != 0) {
+                    sx++;
+                }
+                memcpy(&dst_row[run_start * 4], &src_row[run_start * 4], (size_t)(sx - run_start) * 4);
+            }
+        }
+        return;
+    }
+    // #endregion
     for (uint32_t sy = 0; sy < trim_h; sy++) {
         for (uint32_t sx = 0; sx < trim_w; sx++) {
             const uint8_t *src = &sprite_rgba[((size_t)(trim_y + sy) * sprite_w + trim_x + sx) * 4];
@@ -1887,10 +1912,6 @@ static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rg
             uint32_t dx;
             uint32_t dy;
             switch (rotation) {
-            case 0:
-                dx = dest_x + sx;
-                dy = dest_y + sy;
-                break;
             case 1:
                 dx = dest_x + (trim_h - 1 - sy);
                 dy = dest_y + sx;
@@ -2631,6 +2652,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         /* Debug PNG output (D-09, D-10) */
         if (opts->debug_png) {
             /* Use minimum compression for debug output — speed over file size */
+            int saved_png_level = stbi_write_png_compression_level;
             stbi_write_png_compression_level = 1;
             for (uint32_t p = 0; p < page_count; p++) {
                 /* Draw outlines on a copy */
@@ -2671,6 +2693,7 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
                 NT_LOG_INFO("Debug PNG: %s (%ux%u)", debug_path, page_w[p], page_h[p]);
                 free(debug_page);
             }
+            stbi_write_png_compression_level = saved_png_level;
         }
         // #endregion
 
