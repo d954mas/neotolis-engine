@@ -482,15 +482,9 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
                 memset(nfp_grid[dirty_cells[d]], 0, (size_t)nfp_words * sizeof(uint64_t));
             }
 
-            /* After orientation 0: if placement fits within current page frontier,
-             * skip remaining orientations — they won't improve POT area. */
-            if (ori == 0 && found_any && orient_count > 1) {
-                int32_t bpx = best_x + poly_max_x;
-                int32_t bpy = best_y + poly_max_y;
-                if (bpx <= (int32_t)pages_used_w[current_page] && bpy <= (int32_t)pages_used_h[current_page]) {
-                    break; /* orient 0 fits within frontier — skip 1..7 */
-                }
-            }
+            /* All 8 orientations are tried. Score pruning in the linear scan
+             * (score >= best_score → skip) naturally eliminates redundant work
+             * when an earlier orientation already found a good placement. */
 
         } /* end orientation loop */
 
