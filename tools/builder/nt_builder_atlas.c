@@ -748,7 +748,7 @@ static bool tgrid_test(const TileGrid *atlas, const TileGrid *sprite, int32_t tx
                     if (sw2 >= atlas->row_words) {
                         skip_to = atlas->tw;
                     }
-                    *out_skip = skip_to - (uint32_t)tx;
+                    *out_skip = skip_to - hit_col;
                 }
                 return true;
             }
@@ -920,8 +920,8 @@ static void tgrid_x4_update(TileGrid *x4, const TileGrid *src, int32_t tx0, int3
  * or MIXED. Per-row nonfull counts enable O(1) "is this row entirely full?" checks
  * for fast y-skip in scan_region. */
 
-#define COARSE_SHIFT 3                       /* log2(COARSE_SIZE) */
-#define COARSE_SIZE (1U << COARSE_SHIFT)     /* 8 tiles per block */
+#define COARSE_SHIFT 3                   /* log2(COARSE_SIZE) */
+#define COARSE_SIZE (1U << COARSE_SHIFT) /* 8 tiles per block */
 
 #define BLOCK_EMPTY 0
 #define BLOCK_MIXED 1
@@ -930,7 +930,7 @@ static void tgrid_x4_update(TileGrid *x4, const TileGrid *src, int32_t tx0, int3
 typedef struct {
     uint8_t *cells;        /* bw × bh array: BLOCK_EMPTY / BLOCK_MIXED / BLOCK_FULL */
     uint32_t bw, bh;       /* block grid dimensions */
-    uint16_t *row_nonfull;  /* per block-row: count of cells that are NOT FULL */
+    uint16_t *row_nonfull; /* per block-row: count of cells that are NOT FULL */
 } CoarseGrid;
 
 static CoarseGrid coarse_create(uint32_t tw, uint32_t th) {
@@ -1194,6 +1194,48 @@ static uint32_t tgrid_or_next_free(const uint64_t *mask, uint32_t mask_words, ui
     }
     return mask_bits;
 }
+/* Find first SET bit in OR-mask within [from, from+width). Returns from+width if all free.
+ * Word-level scan: O(width/64 + 2). Used to reject positions where the sprite's
+ * full tile width doesn't fit in the OR-mask gap. */
+static uint32_t tgrid_or_first_set_in_range(const uint64_t *mask, uint32_t mask_words, uint32_t from, uint32_t width) {
+    uint32_t end = from + width;
+    uint32_t w = from >> 6;
+    uint32_t b = from & 63;
+
+    /* First partial word */
+    if (b > 0 && w < mask_words) {
+        uint64_t bits = mask[w] >> b;
+        uint32_t avail = 64 - b;
+        if (avail > width) {
+            bits &= (1ULL << width) - 1;
+        }
+        if (bits) {
+            return from + tgrid_ctz64(bits);
+        }
+        w++;
+        from = w * 64;
+    }
+
+    /* Full words */
+    while (w < mask_words && (w * 64 + 64) <= end) {
+        if (mask[w]) {
+            return (w * 64) + tgrid_ctz64(mask[w]);
+        }
+        w++;
+    }
+
+    /* Last partial word */
+    if (w < mask_words && (w * 64) < end) {
+        uint32_t tail = end - (w * 64);
+        uint64_t bits = mask[w] & ((1ULL << tail) - 1);
+        if (bits) {
+            return (w * 64) + tgrid_ctz64(bits);
+        }
+    }
+
+    return end; /* all free */
+}
+
 /* --- Scan a rectangular region of the atlas grid for a valid placement --- */
 
 /* Per-call packing statistics (thread-safe: no static globals) */
@@ -1233,6 +1275,12 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
         NT_BUILD_ASSERT(col_free && run_from && "scan_region: alloc");
     }
 
+    uint8_t *by0_has_room = NULL;
+    if (cg && cg->bh > 0) {
+        by0_has_room = (uint8_t *)malloc(cg->bh);
+        NT_BUILD_ASSERT(by0_has_room && "scan_region: alloc by0_has_room failed");
+    }
+
     for (uint32_t r = 0; r < rot_count; r++) {
         uint32_t eff_ty_max = found ? (best_ty + 1) : ty_max;
         if (eff_ty_max > ty_max) {
@@ -1248,9 +1296,7 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
          * of non-FULL block columns across the band [by0..by0+band_bh) is wide enough
          * for the sprite. This eliminates ~80-90% of ty values at high fill levels. */
         uint32_t band_bh = (s_th + COARSE_SIZE - 1) >> COARSE_SHIFT;
-        uint8_t by0_has_room_buf[512]; /* max 256 block rows × 2 (generous) */
-        uint8_t *by0_has_room = by0_has_room_buf;
-        if (cg && cg->bh > 0) {
+        if (by0_has_room) {
             for (uint32_t by0 = 0; by0 < cg->bh; by0++) {
                 uint32_t by1 = by0 + band_bh;
                 if (by1 > cg->bh) {
@@ -1297,7 +1343,7 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
             }
 
             // #region Y-skip: precomputed band check
-            if (cg && by0 < cg->bh && !by0_has_room[by0]) {
+            if (by0_has_room && by0 < cg->bh && !by0_has_room[by0]) {
                 stats->yskip_count++;
                 uint32_t next_tile_y = ((by0 + 1) << COARSE_SHIFT);
                 int32_t next_ty = (int32_t)next_tile_y - rot_oy[r];
@@ -1397,12 +1443,21 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
                     }
                 }
 
-                /* Quick rejection: x1 OR-mask column check */
+                /* Quick rejection: x1 OR-mask width check.
+                 * Check that the sprite's full tile width has consecutive free columns
+                 * in the OR-mask. Skips positions where a gap is too narrow — avoids
+                 * expensive tgrid_test calls that would inevitably collide. */
                 {
                     int32_t col0 = (int32_t)tx + rot_ox[r];
                     if (col0 >= 0 && (uint32_t)col0 < atlas->tw) {
-                        if (!tgrid_or_bit_free(or_mask, atlas->row_words, (uint32_t)col0)) {
-                            uint32_t next_free = tgrid_or_next_free(or_mask, atlas->row_words, atlas->tw, (uint32_t)col0 + 1);
+                        uint32_t check_w = s_tw;
+                        if ((uint32_t)col0 + check_w > atlas->tw) {
+                            check_w = atlas->tw - (uint32_t)col0;
+                        }
+                        uint32_t first_set = tgrid_or_first_set_in_range(or_mask, atlas->row_words, (uint32_t)col0, check_w);
+                        if (first_set < (uint32_t)col0 + check_w) {
+                            /* Gap too narrow — skip past the obstacle */
+                            uint32_t next_free = tgrid_or_next_free(or_mask, atlas->row_words, atlas->tw, first_set + 1);
                             int32_t next_tx = (int32_t)next_free - rot_ox[r];
                             if (next_tx <= (int32_t)tx) {
                                 next_tx = (int32_t)tx + 1;
@@ -1448,6 +1503,8 @@ static bool scan_region(const TileGrid *atlas, const CoarseGrid *cg, const TileG
         }
     }
 
+    if (by0_has_room)
+        free(by0_has_room);
     free(run_from);
     free(col_free);
     free(or_mask_x4);
@@ -1672,7 +1729,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             if (scan_th > page_grids[pi].th) {
                 scan_th = page_grids[pi].th;
             }
-            placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, scan_tw, scan_th, &best_tx, &best_ty, &best_rot, stats);
+            placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, scan_tw, scan_th, &best_tx,
+                                 &best_ty, &best_rot, stats);
             if (placed) {
                 best_page = pi;
             }
@@ -1694,23 +1752,10 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                 page_w[pi] = page_grids[pi].tw * ts;
                 page_h[pi] = page_grids[pi].th * ts;
 
-                /* Scan limit: used extent + sprite size, clamped to grid */
-                uint32_t g_scan_tw = page_used_tw[pi] + max_stw + 1;
-                uint32_t g_scan_th = page_used_th[pi] + max_sth + 1;
-                if (g_scan_tw > page_grids[pi].tw) {
-                    g_scan_tw = page_grids[pi].tw;
-                }
-                if (g_scan_th > page_grids[pi].th) {
-                    g_scan_th = page_grids[pi].th;
-                }
-
-                /* Priority area: try old region first to fill gaps */
-                placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, old_tw, old_th, &best_tx, &best_ty, &best_rot, stats);
-
-                /* Then scan used extent */
-                if (!placed) {
-                    placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, g_scan_tw, g_scan_th, &best_tx, &best_ty, &best_rot, stats);
-                }
+                /* Scan full grid: growth added empty space at the edges.
+                 * OR-mask skip will jump past the full old area in O(row_words). */
+                placed = scan_region(&page_grids[pi], &page_coarse[pi], &page_x4[pi], &page_or_st[pi], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[pi].tw,
+                                     page_grids[pi].th, &best_tx, &best_ty, &best_rot, stats);
 
                 if (placed) {
                     best_page = pi;
@@ -1731,8 +1776,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
             page_w[new_page] = init_dim;
             page_h[new_page] = init_dim;
 
-            placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], &page_or_st[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th,
-                                 &best_tx, &best_ty, &best_rot, stats);
+            placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], &page_or_st[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles,
+                                 page_grids[new_page].tw, page_grids[new_page].th, &best_tx, &best_ty, &best_rot, stats);
             if (!placed) {
                 /* New page too small — grow it */
                 while (!placed && (page_grids[new_page].tw < max_tw || page_grids[new_page].th < max_th)) {
@@ -1746,8 +1791,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                     page_or_st[new_page] = or_sparse_build(&page_grids[new_page], global_max_sth);
                     page_w[new_page] = page_grids[new_page].tw * ts;
                     page_h[new_page] = page_grids[new_page].th * ts;
-                    placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], &page_or_st[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles, margin_tiles, page_grids[new_page].tw, page_grids[new_page].th,
-                                         &best_tx, &best_ty, &best_rot, stats);
+                    placed = scan_region(&page_grids[new_page], &page_coarse[new_page], &page_x4[new_page], &page_or_st[new_page], rot_sg, rot_sg_x4, rot_ox, rot_oy, rot_count, margin_tiles,
+                                         margin_tiles, page_grids[new_page].tw, page_grids[new_page].th, &best_tx, &best_ty, &best_rot, stats);
                 }
             }
             if (placed) {
@@ -1761,9 +1806,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
         {
             double sprite_elapsed = nt_time_now() - sprite_start;
             if (sprite_elapsed > 1.0) {
-                NT_LOG_INFO("  SLOW sprite #%u/%u: %.1fs (or=%llu test=%llu grid=%ux%u stw=%u sth=%u)", si, sprite_count, sprite_elapsed,
-                            (unsigned long long)(stats->or_count - or_before), (unsigned long long)(stats->test_count - test_before), page_grids[best_page].tw, page_grids[best_page].th, rot_sg[best_rot].tw,
-                            rot_sg[best_rot].th);
+                NT_LOG_INFO("  SLOW sprite #%u/%u: %.1fs (or=%llu test=%llu grid=%ux%u stw=%u sth=%u)", si, sprite_count, sprite_elapsed, (unsigned long long)(stats->or_count - or_before),
+                            (unsigned long long)(stats->test_count - test_before), page_grids[best_page].tw, page_grids[best_page].th, rot_sg[best_rot].tw, rot_sg[best_rot].th);
             }
         }
 
@@ -1863,8 +1907,8 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     free(sorted);
 
     double pack_elapsed = nt_time_now() - pack_start_time;
-    NT_LOG_INFO("  tile_pack done: %u placed on %u pages in %.1fs (or=%llu test=%llu yskip=%llu)", placement_count, page_count, pack_elapsed,
-                (unsigned long long)stats->or_count, (unsigned long long)stats->test_count, (unsigned long long)stats->yskip_count);
+    NT_LOG_INFO("  tile_pack done: %u placed on %u pages in %.1fs (or=%llu test=%llu yskip=%llu)", placement_count, page_count, pack_elapsed, (unsigned long long)stats->or_count,
+                (unsigned long long)stats->test_count, (unsigned long long)stats->yskip_count);
 
     *out_page_count = page_count;
     return placement_count;
