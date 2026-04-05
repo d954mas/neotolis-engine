@@ -340,7 +340,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - poly_max_x;
                 int32_t est_min_y = page->placed[i].y + page->placed[i].aabb_min_y - poly_max_y;
                 uint64_t opt_score = vpack_score_candidate((est_min_x > 0) ? est_min_x : 0, (est_min_y > 0) ? est_min_y : 0, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
-                if (opt_score > *io_best_score)
+                if ((opt_score >> 16) > (*io_best_score >> 16))
                     need_candidates = false;
             }
 
@@ -525,11 +525,13 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 continue;
 
             uint64_t score = vpack_score_candidate(cx, cy, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
-            if (score >= *io_best_score) {
+            /* Filter by area component only — tie-break refined after collision test */
+            if ((score >> 16) > (*io_best_score >> 16)) {
                 continue;
             }
 
             bool safe = true;
+            uint32_t contact_count = 0;
             if (use_grid && cx >= 0 && cy >= 0) {
                 int32_t gcx = cx / VPACK_GRID_CELL;
                 int32_t gcy = cy / VPACK_GRID_CELL;
@@ -546,6 +548,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                                     safe = false;
                                     break;
                                 }
+                                contact_count++;
                             }
                             bits &= bits - 1;
                         }
@@ -559,17 +562,32 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                             safe = false;
                             break;
                         }
+                        contact_count++;
                     }
                 }
             }
 
             if (safe) {
+                /* Refine score: area (primary) | inverted contact (secondary) | aspect (tertiary)
+                 * Higher contact = more neighbors = denser packing → lower tie-break value */
+                uint32_t area_bits = (uint32_t)(score >> 16);
+                uint32_t inv_contact = (contact_count > 255) ? 0 : (255 - contact_count);
+                uint32_t nw_s = (uint32_t)cx + (uint32_t)poly_max_x;
+                uint32_t nh_s = (uint32_t)cy + (uint32_t)poly_max_y;
+                if (nw_s < page->used_w) nw_s = page->used_w;
+                if (nh_s < page->used_h) nh_s = page->used_h;
+                uint32_t aspect = (nw_s > nh_s) ? (nw_s - nh_s) : (nh_s - nw_s);
+                uint32_t aspect8 = (aspect > 255) ? 255 : aspect;
+                uint64_t refined = ((uint64_t)area_bits << 16) | ((uint64_t)inv_contact << 8) | aspect8;
+                if (refined >= *io_best_score)
+                    continue;
+
                 *out_best_page = page_index;
                 *out_best_x = cx;
                 *out_best_y = cy;
                 *out_best_orient = (uint8_t)ori;
                 *out_best_orient_idx = ori;
-                *io_best_score = score;
+                *io_best_score = refined;
                 found_on_page = true;
             }
         }
@@ -794,7 +812,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
         for (uint32_t pi = 0; pi < page_count_before; pi++) {
             if (best_score != UINT64_MAX) {
                 uint64_t page_lb = vpack_page_lower_bound(orient_aabb, orient_min_cand, orient_count, pages[pi].used_w, pages[pi].used_h, margin, opts->power_of_two);
-                if (page_lb >= best_score) {
+                if ((page_lb >> 16) > (best_score >> 16)) {
                     stats->page_prune_count++;
                     continue;
                 }
