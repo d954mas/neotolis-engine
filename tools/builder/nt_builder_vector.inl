@@ -619,12 +619,8 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
     VPackNFPCacheEntry *cache_set = &nfp_cache[cache_set_idx * VPACK_NFP_CACHE_WAYS];
 
     if (use_nfp_cache) {
+        /* Lock-free read via seqlock; on BUSY just fall through to compute. */
         VPackCacheReadResult cache_result = vpack_try_read_nfp_cache(cache_set, cache_a, cache_b, pl_i->x, pl_i->y, out_nfp);
-        if (cache_result == VPACK_CACHE_READ_BUSY && cache_mtx) {
-            mtx_lock(cache_mtx);
-            cache_result = vpack_read_nfp_cache_locked(cache_set, cache_a, cache_b, pl_i->x, pl_i->y, out_nfp);
-            mtx_unlock(cache_mtx);
-        }
         if (cache_result == VPACK_CACHE_READ_HIT) {
             local_stats->cache_hits++;
             return true;
@@ -635,6 +631,7 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
             local_stats->cache_misses++;
         }
     }
+    (void)cache_mtx;
 
     Point2D local_verts[VPACK_NFP_MAX_VERTS];
     uint16_t local_ring_offsets[VPACK_NFP_MAX_RINGS + 1];
@@ -691,16 +688,16 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
     free(nfp_ring_lengths);
 
     if (use_nfp_cache) {
-        if (cache_mtx) {
-            mtx_lock(cache_mtx);
-        }
+        /* Lock-free write via CAS on the version word. If another writer owns the
+         * slot (odd version or CAS fails), just skip — the other writer publishes
+         * the same data (function of keys only), so the cache stays consistent. */
         VPackNFPCacheEntry *slot = vpack_select_nfp_cache_slot_locked(cache_set, cache_a, cache_b);
         uint32_t version = atomic_load_explicit(&slot->version, memory_order_relaxed);
-        atomic_store_explicit(&slot->version, version + 1u, memory_order_seq_cst);
-        vpack_store_local_nfp_in_cache(slot, cache_a, cache_b, local_verts, local_ring_offsets, local_ring_count, local_min_x, local_min_y, local_max_x, local_max_y);
-        atomic_store_explicit(&slot->version, version + 2u, memory_order_release);
-        if (cache_mtx) {
-            mtx_unlock(cache_mtx);
+        if ((version & 1u) == 0) {
+            if (atomic_compare_exchange_strong_explicit(&slot->version, &version, version + 1u, memory_order_acq_rel, memory_order_relaxed)) {
+                vpack_store_local_nfp_in_cache(slot, cache_a, cache_b, local_verts, local_ring_offsets, local_ring_count, local_min_x, local_min_y, local_max_x, local_max_y);
+                atomic_store_explicit(&slot->version, version + 2u, memory_order_release);
+            }
         }
     }
 
