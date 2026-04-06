@@ -446,6 +446,77 @@ static uint32_t binary_count_components(const uint8_t *M, uint32_t tw, uint32_t 
     return comp_count;
 }
 
+static bool binary_is_boundary_pixel(const uint8_t *binary, uint32_t tw, uint32_t th, uint32_t x, uint32_t y) {
+    size_t i = ((size_t)y * tw) + x;
+    if (!binary[i]) {
+        return false;
+    }
+    if (x == 0 || !binary[i - 1]) {
+        return true;
+    }
+    if (x + 1 >= tw || !binary[i + 1]) {
+        return true;
+    }
+    if (y == 0 || !binary[i - tw]) {
+        return true;
+    }
+    if (y + 1 >= th || !binary[i + tw]) {
+        return true;
+    }
+    return false;
+}
+
+static Point2D *binary_build_convex_polygon(const uint8_t *binary, uint32_t tw, uint32_t th, uint32_t max_vertices, uint32_t *out_count) {
+    uint32_t boundary_pixel_count = 0;
+    for (uint32_t y = 0; y < th; y++) {
+        for (uint32_t x = 0; x < tw; x++) {
+            if (binary_is_boundary_pixel(binary, tw, th, x, y)) {
+                boundary_pixel_count++;
+            }
+        }
+    }
+    NT_BUILD_ASSERT(boundary_pixel_count > 0 && "binary_build_convex_polygon: empty mask");
+
+    uint32_t point_count = boundary_pixel_count * 4;
+    Point2D *points = (Point2D *)malloc((size_t)point_count * sizeof(Point2D));
+    NT_BUILD_ASSERT(points && "binary_build_convex_polygon: alloc failed");
+
+    uint32_t p = 0;
+    for (uint32_t y = 0; y < th; y++) {
+        for (uint32_t x = 0; x < tw; x++) {
+            if (!binary_is_boundary_pixel(binary, tw, th, x, y)) {
+                continue;
+            }
+            points[p++] = (Point2D){(int32_t)x, (int32_t)y};
+            points[p++] = (Point2D){(int32_t)x + 1, (int32_t)y};
+            points[p++] = (Point2D){(int32_t)x + 1, (int32_t)y + 1};
+            points[p++] = (Point2D){(int32_t)x, (int32_t)y + 1};
+        }
+    }
+
+    Point2D *hull = (Point2D *)malloc((size_t)point_count * 2 * sizeof(Point2D));
+    NT_BUILD_ASSERT(hull && "binary_build_convex_polygon: alloc failed");
+    uint32_t hull_count = convex_hull(points, point_count, hull);
+    free(points);
+
+    NT_BUILD_ASSERT(hull_count >= 3 && "binary_build_convex_polygon: convex hull is degenerate");
+    if (hull_count > max_vertices) {
+        Point2D *reduced = (Point2D *)malloc((size_t)hull_count * sizeof(Point2D));
+        NT_BUILD_ASSERT(reduced && "binary_build_convex_polygon: alloc failed");
+        hull_count = hull_simplify(hull, hull_count, max_vertices, reduced);
+        free(hull);
+        hull = reduced;
+    }
+
+    Point2D *result = (Point2D *)malloc((size_t)hull_count * sizeof(Point2D));
+    NT_BUILD_ASSERT(result && "binary_build_convex_polygon: alloc failed");
+    memcpy(result, hull, (size_t)hull_count * sizeof(Point2D));
+    free(hull);
+
+    *out_count = hull_count;
+    return result;
+}
+
 /* --- Contour tracing: extract alpha boundary as CCW polygon --- */
 
 /* Traces the outer boundary of opaque pixels on a binary grid.
@@ -3199,6 +3270,23 @@ uint32_t nt_atlas_test_ear_clip(const void *poly, uint32_t n, uint16_t *idx) { r
 uint32_t nt_atlas_test_trace_contour(const uint8_t *bin, uint32_t tw, uint32_t th, void *out, uint32_t max_out) { return trace_contour(bin, tw, th, (Point2D *)out, max_out); }
 uint32_t nt_atlas_test_remove_collinear(const void *in, uint32_t n, void *out) { return remove_collinear((const Point2D *)in, n, (Point2D *)out); }
 bool nt_atlas_test_point_in_polygon(const void *poly, uint32_t n, int32_t px, int32_t py) { return point_in_polygon((const Point2D *)poly, n, (Point2D){px, py}); }
+bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, const int8_t *ring_signs, uint32_t ring_count, int32_t px, int32_t py) {
+    NT_BUILD_ASSERT(ring_count <= VPACK_NFP_MAX_RINGS && "nt_atlas_test_vpack_point_in_nfp: too many rings");
+    NT_BUILD_ASSERT(vert_count <= VPACK_NFP_MAX_VERTS && "nt_atlas_test_vpack_point_in_nfp: too many vertices");
+
+    VPackNFP nfp = {0};
+    nfp.ring_count = (uint8_t)ring_count;
+    for (uint32_t r = 0; r < ring_count; r++) {
+        nfp.ring_offsets[r] = ring_offsets[r];
+        nfp.ring_signs[r] = ring_signs[r];
+    }
+    nfp.ring_offsets[ring_count] = ring_offsets[ring_count];
+    for (uint32_t v = 0; v < vert_count; v++) {
+        nfp.verts[v].x = verts_xy[v * 2];
+        nfp.verts[v].y = verts_xy[(v * 2) + 1];
+    }
+    return vpack_point_in_nfp(px, py, &nfp);
+}
 #endif
 
 // #region Atlas public API — begin, add, end
@@ -3538,6 +3626,10 @@ static void pipeline_geometry(AtlasPipeline *p) {
              * trace can produce one simple polygon containing all pixels.
              * The resulting polygon will be K pixels wider on every side (acceptable —
              * acts like extra padding). Limit K to avoid pathological cases. */
+            uint8_t *binary_source = (uint8_t *)malloc((size_t)tw * th);
+            NT_BUILD_ASSERT(binary_source && "pipeline_geometry: alloc failed");
+            memcpy(binary_source, binary, (size_t)tw * th);
+            const char *convex_reason = NULL;
             uint8_t *cc_visited = (uint8_t *)calloc((size_t)tw * th, 1);
             int32_t *cc_stack = (int32_t *)malloc((size_t)tw * th * 2 * sizeof(int32_t));
             NT_BUILD_ASSERT(cc_visited && cc_stack && "pipeline_geometry: alloc failed");
@@ -3555,112 +3647,109 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 }
                 free(scratch);
                 if (comp_count > 1) {
-                    NT_LOG_WARN("pipeline_geometry: sprite '%s' could not merge to 1 component after %u dilations (still %u)", p->sprites[idx].name, closing_k, comp_count);
+                    convex_reason = "disjoint components";
                 }
             }
             free(cc_stack);
             free(cc_visited);
             // #endregion
 
-            /* Trace outer contour (CCW). Worst-case contour length is
-             * 2*(tw*th) for maximally jagged shapes (checkerboard). */
-            uint32_t max_contour = 2 * tw * th + 4;
-            Point2D *contour = (Point2D *)malloc(max_contour * sizeof(Point2D));
-            NT_BUILD_ASSERT(contour && "pipeline_geometry: alloc failed");
-            uint32_t contour_count = trace_contour(binary, tw, th, contour, max_contour);
-            free(binary);
+            if (!convex_reason) {
+                /* Trace outer contour (CCW). Worst-case contour length is
+                 * 2*(tw*th) for maximally jagged shapes (checkerboard). */
+                uint32_t max_contour = 2 * tw * th + 4;
+                Point2D *contour = (Point2D *)malloc(max_contour * sizeof(Point2D));
+                NT_BUILD_ASSERT(contour && "pipeline_geometry: alloc failed");
+                uint32_t contour_count = trace_contour(binary, tw, th, contour, max_contour);
 
-            if (contour_count < 3) {
-                /* Degenerate: use rect */
-                free(contour);
-                p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
-                NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
-                p->hull_vertices[idx][0] = (Point2D){0, 0};
-                p->hull_vertices[idx][1] = (Point2D){(int32_t)tw, 0};
-                p->hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
-                p->hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
-                p->vertex_counts[idx] = 4;
-            } else {
-                /* Remove collinear vertices */
-                Point2D *clean = (Point2D *)malloc(contour_count * sizeof(Point2D));
-                NT_BUILD_ASSERT(clean && "pipeline_geometry: alloc failed");
-                uint32_t clean_count = remove_collinear(contour, contour_count, clean);
-                free(contour);
-
-                /* Simplify with RDP. Start with small epsilon for coverage, grow if needed.
-                 * The Clipper2 inflate amount below MUST be >= RDP epsilon to guarantee
-                 * the inflated polygon covers all pixels the RDP might have cut. */
-                Point2D *simplified = (Point2D *)malloc(clean_count * sizeof(Point2D));
-                NT_BUILD_ASSERT(simplified && "pipeline_geometry: alloc failed");
-                double eps = 0.5;
-                uint32_t simp_count = rdp_simplify(clean, clean_count, eps, simplified);
-                uint32_t target = p->opts->max_vertices;
-                while (simp_count > target && eps < 100.0) {
-                    eps *= 1.5;
-                    simp_count = rdp_simplify(clean, clean_count, eps, simplified);
-                }
-                free(clean);
-
-                /* Inflate via Clipper2 (handles concave corners correctly).
-                 * Inflate amount = RDP epsilon + 1 pixel, rounded up — guarantees
-                 * every pixel center within RDP deviation is inside the inflated polygon. */
-                double inflate_amt = eps + 1.0;
-                int32_t *simp_xy = (int32_t *)malloc(simp_count * 2 * sizeof(int32_t));
-                NT_BUILD_ASSERT(simp_xy && "pipeline_geometry: alloc failed");
-                for (uint32_t v = 0; v < simp_count; v++) {
-                    simp_xy[v * 2] = simplified[v].x;
-                    simp_xy[v * 2 + 1] = simplified[v].y;
-                }
-                free(simplified);
-
-                int32_t *inflated_xy = NULL;
-                uint32_t inf_count = nt_clipper2_inflate(simp_xy, simp_count, inflate_amt, &inflated_xy);
-                free(simp_xy);
-
-                /* Trust Clipper2 — only fail on obvious degenerate output (too few vertices). */
-                bool sane_result = (inf_count >= 3 && inflated_xy != NULL);
-
-                if (sane_result) {
-                    /* If Clipper2 produced too many vertices (edge splits at concave corners),
-                     * apply RDP again to get under max_vertices. */
-                    Point2D *result = (Point2D *)malloc(inf_count * sizeof(Point2D));
-                    NT_BUILD_ASSERT(result && "pipeline_geometry: alloc failed");
-                    for (uint32_t v = 0; v < inf_count; v++) {
-                        result[v].x = inflated_xy[v * 2];
-                        result[v].y = inflated_xy[v * 2 + 1];
-                    }
-                    free(inflated_xy);
-
-                    uint32_t final_target = p->opts->max_vertices;
-                    if (inf_count > final_target) {
-                        Point2D *reduced = (Point2D *)malloc(inf_count * sizeof(Point2D));
-                        NT_BUILD_ASSERT(reduced && "pipeline_geometry: alloc failed");
-                        double eps2 = 1.0;
-                        uint32_t red_count = rdp_simplify(result, inf_count, eps2, reduced);
-                        while (red_count > final_target && eps2 < 100.0) {
-                            eps2 *= 1.5;
-                            red_count = rdp_simplify(result, inf_count, eps2, reduced);
-                        }
-                        free(result);
-                        result = reduced;
-                        inf_count = red_count;
-                    }
-                    NT_BUILD_ASSERT(inf_count <= p->opts->max_vertices && "pipeline_geometry: failed to reduce polygon to max_vertices");
-
-                    p->hull_vertices[idx] = result;
-                    p->vertex_counts[idx] = inf_count;
+                if (contour_count < 3) {
+                    free(contour);
+                    convex_reason = "degenerate contour";
                 } else {
-                    /* Clipper2 inflate failed — fallback to rect */
-                    free(inflated_xy);
-                    p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
-                    NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
-                    p->hull_vertices[idx][0] = (Point2D){0, 0};
-                    p->hull_vertices[idx][1] = (Point2D){(int32_t)tw, 0};
-                    p->hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
-                    p->hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
-                    p->vertex_counts[idx] = 4;
+                    /* Remove collinear vertices */
+                    Point2D *clean = (Point2D *)malloc(contour_count * sizeof(Point2D));
+                    NT_BUILD_ASSERT(clean && "pipeline_geometry: alloc failed");
+                    uint32_t clean_count = remove_collinear(contour, contour_count, clean);
+                    free(contour);
+
+                    /* Simplify with RDP. Start with small epsilon for coverage, grow if needed.
+                     * The Clipper2 inflate amount below MUST be >= RDP epsilon to guarantee
+                     * the inflated polygon covers all pixels the RDP might have cut. */
+                    Point2D *simplified = (Point2D *)malloc(clean_count * sizeof(Point2D));
+                    NT_BUILD_ASSERT(simplified && "pipeline_geometry: alloc failed");
+                    double eps = 0.5;
+                    uint32_t simp_count = rdp_simplify(clean, clean_count, eps, simplified);
+                    uint32_t target = p->opts->max_vertices;
+                    while (simp_count > target && eps < 100.0) {
+                        eps *= 1.5;
+                        simp_count = rdp_simplify(clean, clean_count, eps, simplified);
+                    }
+                    free(clean);
+
+                    /* Inflate via Clipper2 (handles concave corners correctly).
+                     * Inflate amount = RDP epsilon + 1 pixel, rounded up — guarantees
+                     * every pixel center within RDP deviation is inside the inflated polygon. */
+                    double inflate_amt = eps + 1.0;
+                    int32_t *simp_xy = (int32_t *)malloc(simp_count * 2 * sizeof(int32_t));
+                    NT_BUILD_ASSERT(simp_xy && "pipeline_geometry: alloc failed");
+                    for (uint32_t v = 0; v < simp_count; v++) {
+                        simp_xy[v * 2] = simplified[v].x;
+                        simp_xy[v * 2 + 1] = simplified[v].y;
+                    }
+                    free(simplified);
+
+                    int32_t *inflated_xy = NULL;
+                    uint32_t inf_count = nt_clipper2_inflate(simp_xy, simp_count, inflate_amt, &inflated_xy);
+                    free(simp_xy);
+
+                    /* Trust Clipper2 — only fail on obvious degenerate output (too few vertices). */
+                    bool sane_result = (inf_count >= 3 && inflated_xy != NULL);
+
+                    if (sane_result) {
+                        /* If Clipper2 produced too many vertices (edge splits at concave corners),
+                         * apply RDP again to get under max_vertices. */
+                        Point2D *result = (Point2D *)malloc(inf_count * sizeof(Point2D));
+                        NT_BUILD_ASSERT(result && "pipeline_geometry: alloc failed");
+                        for (uint32_t v = 0; v < inf_count; v++) {
+                            result[v].x = inflated_xy[v * 2];
+                            result[v].y = inflated_xy[v * 2 + 1];
+                        }
+                        free(inflated_xy);
+
+                        uint32_t final_target = p->opts->max_vertices;
+                        if (inf_count > final_target) {
+                            Point2D *reduced = (Point2D *)malloc(inf_count * sizeof(Point2D));
+                            NT_BUILD_ASSERT(reduced && "pipeline_geometry: alloc failed");
+                            double eps2 = 1.0;
+                            uint32_t red_count = rdp_simplify(result, inf_count, eps2, reduced);
+                            while (red_count > final_target && eps2 < 100.0) {
+                                eps2 *= 1.5;
+                                red_count = rdp_simplify(result, inf_count, eps2, reduced);
+                            }
+                            free(result);
+                            result = reduced;
+                            inf_count = red_count;
+                        }
+                        if (inf_count <= p->opts->max_vertices) {
+                            p->hull_vertices[idx] = result;
+                            p->vertex_counts[idx] = inf_count;
+                        } else {
+                            free(result);
+                            convex_reason = "inflate simplification exceeded max_vertices";
+                        }
+                    } else {
+                        /* Clipper2 inflate failed — fallback to rect */
+                        free(inflated_xy);
+                        convex_reason = "Clipper2 inflate failed";
+                    }
                 }
             }
+            if (convex_reason) {
+                NT_LOG_WARN("pipeline_geometry: sprite '%s' using convex fallback (%s)", p->sprites[idx].name, convex_reason);
+                p->hull_vertices[idx] = binary_build_convex_polygon(binary_source, tw, th, p->opts->max_vertices, &p->vertex_counts[idx]);
+            }
+            free(binary_source);
+            free(binary);
         } else {
             /* Rect mode: 4-vertex rect */
             p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
@@ -3829,6 +3918,7 @@ static void pipeline_cache_write(AtlasPipeline *p) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void pipeline_serialize(AtlasPipeline *p) {
     uint32_t extrude_val = p->opts->extrude;
+    const uint32_t max_region_tri_count = (uint32_t)(UINT8_MAX / 3U);
 
     /* Count total vertices and indices.
      * Pre-triangulated sprites (multi-component) have an exact triangle count;
@@ -3837,6 +3927,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
     uint32_t total_vertex_count = 0;
     uint32_t total_index_count = 0;
     for (uint32_t i = 0; i < p->sprite_count; i++) {
+        NT_BUILD_ASSERT(p->vertex_counts[i] <= UINT8_MAX && "pipeline_serialize: region vertex_count exceeds uint8_t");
         total_vertex_count += p->vertex_counts[i];
         uint32_t tri = 0;
         if (p->pre_tri_indices[i] && p->pre_tri_counts[i] > 0) {
@@ -3844,9 +3935,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
         } else if (p->vertex_counts[i] >= 3) {
             tri = p->vertex_counts[i] - 2;
         }
-        if (tri > 85) {
-            tri = 85;
-        }
+        NT_BUILD_ASSERT(tri <= max_region_tri_count && "pipeline_serialize: region index_count exceeds uint8_t");
         total_index_count += tri * 3;
     }
 
@@ -3877,6 +3966,8 @@ static void pipeline_serialize(AtlasPipeline *p) {
     NtAtlasHeader *hdr = (NtAtlasHeader *)blob;
     hdr->magic = NT_ATLAS_MAGIC;
     hdr->version = NT_ATLAS_VERSION;
+    NT_BUILD_ASSERT(p->sprite_count <= UINT16_MAX && "pipeline_serialize: region_count exceeds uint16_t");
+    NT_BUILD_ASSERT(p->page_count <= UINT16_MAX && "pipeline_serialize: page_count exceeds uint16_t");
     hdr->region_count = (uint16_t)p->sprite_count;
     hdr->page_count = (uint16_t)p->page_count;
     hdr->_pad = 0;
@@ -3921,10 +4012,10 @@ static void pipeline_serialize(AtlasPipeline *p) {
         uint32_t idx_count = tri_count * 3;
         /* Region index_count is uint8_t (max 255 indices = max 85 triangles).
          * Truncate if needed — should not happen for typical sprites. */
-        if (idx_count > 255) {
-            idx_count = 255 - (255 % 3);
-            tri_count = idx_count / 3;
-        }
+        NT_BUILD_ASSERT(idx_count <= UINT8_MAX && "pipeline_serialize: region index_count exceeds uint8_t");
+        NT_BUILD_ASSERT(vertex_cursor <= UINT16_MAX && "pipeline_serialize: vertex_start exceeds uint16_t");
+        NT_BUILD_ASSERT(index_cursor <= UINT16_MAX && "pipeline_serialize: index_start exceeds uint16_t");
+        NT_BUILD_ASSERT(pl->page <= UINT8_MAX && "pipeline_serialize: page_index exceeds uint8_t");
 
         NtAtlasRegion *reg = &regions[i];
         reg->name_hash = nt_hash64_str(p->sprites[i].name).value;

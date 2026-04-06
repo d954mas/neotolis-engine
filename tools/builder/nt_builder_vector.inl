@@ -147,10 +147,21 @@ typedef struct {
     int32_t min_x, min_y, max_x, max_y;
 } VPackNFP;
 
-/* Returns true iff (px, py) is blocked by this NFP — point lies inside any ring.
- * Conservative: ignores ring signs (no pocket-fitting). This is safe for screen-space
- * polygons where Clipper2 winding interpretation is ambiguous. */
+/* Returns true iff (px, py) is blocked by this NFP.
+ * Outer rings (+1) block placement; hole rings (-1) reopen valid pockets. */
+static bool vpack_point_in_ring(int32_t px, int32_t py, const Point2D *ring, uint32_t n) {
+    bool inside = false;
+    for (uint32_t i = 0, j = n - 1; i < n; j = i++) {
+        if (((ring[i].y > py) != (ring[j].y > py)) && (px < (int32_t)(((int64_t)(ring[j].x - ring[i].x) * (int64_t)(py - ring[i].y)) / (int64_t)(ring[j].y - ring[i].y) + ring[i].x))) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
 static bool vpack_point_in_nfp(int32_t px, int32_t py, const VPackNFP *nfp) {
+    bool inside_outer = false;
+    bool inside_hole = false;
     for (uint8_t r = 0; r < nfp->ring_count; r++) {
         uint32_t start = nfp->ring_offsets[r];
         uint32_t end = nfp->ring_offsets[r + 1];
@@ -158,17 +169,15 @@ static bool vpack_point_in_nfp(int32_t px, int32_t py, const VPackNFP *nfp) {
         if (n < 3)
             continue;
         const Point2D *ring = &nfp->verts[start];
-        bool inside = false;
-        for (uint32_t i = 0, j = n - 1; i < n; j = i++) {
-            if (((ring[i].y > py) != (ring[j].y > py)) && (px < (int32_t)(((int64_t)(ring[j].x - ring[i].x) * (int64_t)(py - ring[i].y)) / (int64_t)(ring[j].y - ring[i].y) + ring[i].x))) {
-                inside = !inside;
-            }
-        }
-        if (inside) {
-            return true;
+        if (!vpack_point_in_ring(px, py, ring, n))
+            continue;
+        if (nfp->ring_signs[r] < 0) {
+            inside_hole = true;
+        } else {
+            inside_outer = true;
         }
     }
-    return false;
+    return inside_outer && !inside_hole;
 }
 
 typedef struct {
@@ -285,6 +294,55 @@ static void vpack_calc_aabb(const Point2D *poly, uint32_t count, int32_t *min_x,
             *min_y = poly[i].y;
         if (poly[i].y > *max_y)
             *max_y = poly[i].y;
+    }
+}
+
+static void vpack_init_single_ring_nfp(VPackNFP *nfp, const Point2D *ring, uint32_t count, int32_t off_x, int32_t off_y, int8_t sign) {
+    NT_BUILD_ASSERT(count >= 3 && count <= VPACK_NFP_MAX_VERTS && "vpack: single-ring NFP is invalid");
+    nfp->ring_count = 1;
+    nfp->ring_offsets[0] = 0;
+    nfp->ring_offsets[1] = (uint16_t)count;
+    nfp->ring_signs[0] = sign;
+    for (uint32_t v = 0; v < count; v++) {
+        nfp->verts[v].x = ring[v].x + off_x;
+        nfp->verts[v].y = ring[v].y + off_y;
+    }
+    vpack_calc_aabb(nfp->verts, count, &nfp->min_x, &nfp->min_y, &nfp->max_x, &nfp->max_y);
+}
+
+static void vpack_add_nfp_candidates(const VPackNFP *nfp, int32_t min_cand_x, int32_t min_cand_y, VPackCand **cands, uint32_t *cand_count, uint32_t *cand_cap, const VPackBounds *bounds,
+                                     bool use_axis_i) {
+    for (uint32_t v = 0; v < nfp->ring_offsets[nfp->ring_count]; v++) {
+        vpack_add_cand(cands, cand_count, cand_cap, nfp->verts[v].x, nfp->verts[v].y, bounds);
+    }
+    for (uint32_t r = 0; r < nfp->ring_count; r++) {
+        uint32_t rs = nfp->ring_offsets[r];
+        uint32_t re = nfp->ring_offsets[r + 1];
+        uint32_t rn = re - rs;
+        for (uint32_t e = 0; e < rn; e++) {
+            uint32_t en = (e + 1 == rn) ? 0 : e + 1;
+            Point2D pa = nfp->verts[rs + e];
+            Point2D pb = nfp->verts[rs + en];
+            if (use_axis_i) {
+                int32_t vf, vc;
+                if (vpack_intersect_axis_i(pa, pb, true, min_cand_x, &vf, &vc)) {
+                    vpack_add_cand(cands, cand_count, cand_cap, min_cand_x, vf, bounds);
+                    if (vc != vf)
+                        vpack_add_cand(cands, cand_count, cand_cap, min_cand_x, vc, bounds);
+                }
+                if (vpack_intersect_axis_i(pa, pb, false, min_cand_y, &vf, &vc)) {
+                    vpack_add_cand(cands, cand_count, cand_cap, vf, min_cand_y, bounds);
+                    if (vc != vf)
+                        vpack_add_cand(cands, cand_count, cand_cap, vc, min_cand_y, bounds);
+                }
+            } else {
+                float out_val;
+                if (vpack_intersect_axis_f(pa, pb, true, (float)min_cand_x, &out_val))
+                    vpack_add_float_cand(cands, cand_count, cand_cap, (float)min_cand_x, out_val, bounds);
+                if (vpack_intersect_axis_f(pa, pb, false, (float)min_cand_y, &out_val))
+                    vpack_add_float_cand(cands, cand_count, cand_cap, out_val, (float)min_cand_y, bounds);
+            }
+        }
     }
 }
 
@@ -560,50 +618,35 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 vpack_calc_aabb(nfp->verts, nfp_total_verts, &nfp->min_x, &nfp->min_y, &nfp->max_x, &nfp->max_y);
 
                 if (need_candidates) {
-                    /* Candidate seeds: every vertex of every ring */
-                    for (uint32_t v = 0; v < nfp_total_verts; v++) {
-                        vpack_add_cand(cands, &cand_count, cand_cap, nfp->verts[v].x, nfp->verts[v].y, &bounds);
-                    }
-                    /* Edge-axis intersections, per ring (do not cross ring boundaries) */
-                    for (uint32_t r = 0; r < nfp_ring_count; r++) {
-                        uint32_t rs = nfp->ring_offsets[r];
-                        uint32_t re = nfp->ring_offsets[r + 1];
-                        uint32_t rn = re - rs;
-                        for (uint32_t e = 0; e < rn; e++) {
-                            uint32_t en = (e + 1 == rn) ? 0 : e + 1;
-                            Point2D pa = nfp->verts[rs + e];
-                            Point2D pb = nfp->verts[rs + en];
-                            if (exp->use_axis_i) {
-                                int32_t vf, vc;
-                                if (vpack_intersect_axis_i(pa, pb, true, min_cand_x, &vf, &vc)) {
-                                    vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vf, &bounds);
-                                    if (vc != vf)
-                                        vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vc, &bounds);
-                                }
-                                if (vpack_intersect_axis_i(pa, pb, false, min_cand_y, &vf, &vc)) {
-                                    vpack_add_cand(cands, &cand_count, cand_cap, vf, min_cand_y, &bounds);
-                                    if (vc != vf)
-                                        vpack_add_cand(cands, &cand_count, cand_cap, vc, min_cand_y, &bounds);
-                                }
-                            } else {
-                                float out_val;
-                                if (vpack_intersect_axis_f(pa, pb, true, (float)min_cand_x, &out_val))
-                                    vpack_add_float_cand(cands, &cand_count, cand_cap, (float)min_cand_x, out_val, &bounds);
-                                if (vpack_intersect_axis_f(pa, pb, false, (float)min_cand_y, &out_val))
-                                    vpack_add_float_cand(cands, &cand_count, cand_cap, out_val, (float)min_cand_y, &bounds);
-                            }
-                        }
-                    }
+                    vpack_add_nfp_candidates(nfp, min_cand_x, min_cand_y, cands, &cand_count, cand_cap, &bounds, exp->use_axis_i);
                 }
                 nfp_count++;
             } else {
                 /* Clipper2 NFP failed or exceeded limits — skip this constraint.
                  * Other NFPs from other placed sprites will still constrain candidates. */
+                Point2D placed_hull[VPACK_PLACED_MAX_VERTS * 2];
+                Point2D incoming_hull[VPACK_PLACED_MAX_VERTS * 2];
+                Point2D convex_sum[VPACK_PLACED_MAX_VERTS * 2];
+                Point2D convex_clean[VPACK_PLACED_MAX_VERTS * 2];
+                uint32_t placed_hull_count = convex_hull(pl_i->poly, pl_i->count, placed_hull);
+                uint32_t incoming_hull_count = convex_hull(orient_neg[ori], cur_count, incoming_hull);
+                uint32_t convex_count = vpack_minkowski(placed_hull, placed_hull_count, incoming_hull, incoming_hull_count, convex_sum);
+                convex_count = remove_collinear(convex_sum, convex_count, convex_clean);
+                NT_BUILD_ASSERT(convex_count >= 3 && "vpack: convex NFP fallback failed");
+                vpack_init_single_ring_nfp(nfp, convex_clean, convex_count, pl_i->x, pl_i->y, 1);
+
                 if (nfp_total_verts > VPACK_NFP_MAX_VERTS) {
-                    NT_LOG_WARN("vpack: NFP vertex count %u exceeds limit %u, skipping", nfp_total_verts, VPACK_NFP_MAX_VERTS);
+                    NT_LOG_WARN("vpack: NFP vertex count %u exceeds limit %u, using convex fallback", nfp_total_verts, VPACK_NFP_MAX_VERTS);
                 } else if (nfp_ring_count > VPACK_NFP_MAX_RINGS) {
-                    NT_LOG_WARN("vpack: NFP ring count %u exceeds limit %u, skipping", nfp_ring_count, VPACK_NFP_MAX_RINGS);
+                    NT_LOG_WARN("vpack: NFP ring count %u exceeds limit %u, using convex fallback", nfp_ring_count, VPACK_NFP_MAX_RINGS);
+                } else {
+                    NT_LOG_WARN("vpack: Clipper2 NFP failed, using convex fallback");
                 }
+
+                if (need_candidates) {
+                    vpack_add_nfp_candidates(nfp, min_cand_x, min_cand_y, cands, &cand_count, cand_cap, &bounds, exp->use_axis_i);
+                }
+                nfp_count++;
             }
             free(nfp_xy);
             free(nfp_ring_lengths);

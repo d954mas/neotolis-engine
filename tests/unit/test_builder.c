@@ -3427,6 +3427,8 @@ typedef struct {
     int32_t x, y;
 } TestPoint2D;
 
+bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, const int8_t *ring_signs, uint32_t ring_count, int32_t px, int32_t py);
+
 /* alpha_trim: fully transparent 4x4 image returns false */
 void test_alpha_trim_fully_transparent(void) {
     uint8_t rgba[4 * 4 * 4];
@@ -3574,6 +3576,18 @@ void test_fan_triangulate_triangle(void) {
     TEST_ASSERT_EQUAL_UINT16(0, indices[0]);
     TEST_ASSERT_EQUAL_UINT16(1, indices[1]);
     TEST_ASSERT_EQUAL_UINT16(2, indices[2]);
+}
+
+void test_vpack_point_in_nfp_hole_pocket(void) {
+    const int32_t verts_xy[] = {
+        0, 0, 10, 0, 10, 10, 0, 10, 3, 3, 3, 7, 7, 7, 7, 3,
+    };
+    const uint16_t ring_offsets[] = {0, 4, 8};
+    const int8_t ring_signs[] = {1, -1};
+
+    TEST_ASSERT_TRUE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, ring_signs, 2, 1, 1));
+    TEST_ASSERT_FALSE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, ring_signs, 2, 5, 5));
+    TEST_ASSERT_FALSE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, ring_signs, 2, 12, 12));
 }
 
 /* --- Atlas round-trip test helpers --- */
@@ -3787,8 +3801,9 @@ void test_atlas_round_trip_vertices(void) {
     const uint8_t *ablob = buf + atlas_entry->offset;
     const NtAtlasHeader *ahdr = (const NtAtlasHeader *)ablob;
 
-    /* Read vertex array at vertex_offset */
+    /* Read vertex/index arrays at their serialized offsets */
     const NtAtlasVertex *verts = (const NtAtlasVertex *)(ablob + ahdr->vertex_offset);
+    const uint16_t *indices = (const uint16_t *)(ablob + ahdr->index_offset);
 
     /* All vertices must have valid atlas UVs in [0, 65535] */
     for (uint32_t v = 0; v < ahdr->total_vertex_count; v++) {
@@ -3796,13 +3811,62 @@ void test_atlas_round_trip_vertices(void) {
         TEST_ASSERT_TRUE(verts[v].atlas_v <= 65535);
     }
 
-    /* Verify regions reference valid vertex ranges */
+    /* Verify regions reference valid vertex/index ranges */
     const uint8_t *ptr = ablob + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
     const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
     for (uint32_t r = 0; r < ahdr->region_count; r++) {
-        uint32_t end = (uint32_t)regions[r].vertex_start + regions[r].vertex_count;
-        TEST_ASSERT_TRUE(end <= ahdr->total_vertex_count);
+        uint32_t vertex_end = (uint32_t)regions[r].vertex_start + regions[r].vertex_count;
+        uint32_t index_end = (uint32_t)regions[r].index_start + regions[r].index_count;
+        TEST_ASSERT_TRUE(vertex_end <= ahdr->total_vertex_count);
+        TEST_ASSERT_TRUE(index_end <= ahdr->total_index_count);
+        TEST_ASSERT_EQUAL_UINT32(0, (uint32_t)regions[r].index_count % 3U);
+        for (uint32_t i = 0; i < regions[r].index_count; i++) {
+            TEST_ASSERT_TRUE(indices[regions[r].index_start + i] < regions[r].vertex_count);
+        }
     }
+
+    free(buf);
+}
+
+void test_atlas_polygon_mode_uses_convex_fallback_on_disjoint_sprite(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_disjoint_convex.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 255, 255, 255, 0);
+    s[(((0 * 16) + 0) * 4) + 3] = 255;
+    s[(((15 * 16) + 15) * 4) + 3] = 255;
+
+    nt_builder_begin_atlas(ctx, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, "split.png");
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_disjoint_convex.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)ablob;
+    const uint8_t *ptr = ablob + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
+    TEST_ASSERT_EQUAL_UINT32(1, ahdr->region_count);
+    TEST_ASSERT_TRUE(regions[0].vertex_count > 4);
 
     free(buf);
 }
@@ -4177,11 +4241,13 @@ int main(void) {
     RUN_TEST(test_rdp_simplify_reduction);
     RUN_TEST(test_fan_triangulate_quad);
     RUN_TEST(test_fan_triangulate_triangle);
+    RUN_TEST(test_vpack_point_in_nfp_hole_pocket);
 
     /* Atlas round-trip tests (Phase 47 Plan 03) */
     RUN_TEST(test_atlas_round_trip_basic);
     RUN_TEST(test_atlas_round_trip_regions);
     RUN_TEST(test_atlas_round_trip_vertices);
+    RUN_TEST(test_atlas_polygon_mode_uses_convex_fallback_on_disjoint_sprite);
     RUN_TEST(test_atlas_duplicate_detection);
     RUN_TEST(test_atlas_multi_page);
     RUN_TEST(test_atlas_codegen);
