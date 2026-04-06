@@ -306,7 +306,7 @@ typedef struct {
 /* NFP cache: 4-way set-associative table keyed by (placed_shape_hash, incoming_shape_hash).
  * 16384 total entries @ ~570 B each ≈ 9.3 MB — fits L3. 4 ways gives better LRU
  * approximation than 2 ways at the same total footprint, reducing collisions. */
-#define VPACK_NFP_CACHE_SIZE 32768U /* total entries; must be power of 2 */
+#define VPACK_NFP_CACHE_SIZE 65536U /* total entries; must be power of 2 */
 #define VPACK_NFP_CACHE_WAYS 8U
 #define VPACK_NFP_CACHE_SET_COUNT (VPACK_NFP_CACHE_SIZE / VPACK_NFP_CACHE_WAYS)
 #define VPACK_NFP_CACHE_READ_RETRIES 4U
