@@ -3425,16 +3425,155 @@ static void pipeline_geometry(AtlasPipeline *p) {
             const uint8_t *ap = p->alpha_planes[idx];
             uint32_t aw = p->sprites[idx].width;
 
-            /* Build binary mask for trimmed region */
+            /* Build binary mask for trimmed region, count opaque pixels */
             uint8_t *binary = (uint8_t *)calloc((size_t)tw * th, 1);
             NT_BUILD_ASSERT(binary && "pipeline_geometry: alloc failed");
+            uint32_t opaque_total = 0;
+            int32_t start_x = -1;
+            int32_t start_y = -1;
             for (uint32_t y = 0; y < th; y++) {
                 for (uint32_t x = 0; x < tw; x++) {
                     uint8_t a = ap[((size_t)(p->trim_y[idx] + y) * aw) + p->trim_x[idx] + x];
                     if (a >= p->opts->alpha_threshold) {
                         binary[(y * tw) + x] = 1;
+                        opaque_total++;
+                        if (start_x < 0) {
+                            start_x = (int32_t)x;
+                            start_y = (int32_t)y;
+                        }
                     }
                 }
+            }
+
+            /* Connected-component check via 4-connected flood fill from start.
+             * If reachable count < total opaque, sprite has disjoint regions
+             * → fall back to convex hull (which covers everything). */
+            bool multi_component = false;
+            if (opaque_total > 0) {
+                uint8_t *visited = (uint8_t *)calloc((size_t)tw * th, 1);
+                int32_t *stack = (int32_t *)malloc((size_t)tw * th * 2 * sizeof(int32_t));
+                NT_BUILD_ASSERT(visited && stack && "pipeline_geometry: alloc failed");
+                uint32_t reachable = 0;
+                uint32_t sp = 0;
+                stack[sp * 2] = start_x;
+                stack[sp * 2 + 1] = start_y;
+                sp++;
+                visited[(start_y * (int32_t)tw) + start_x] = 1;
+                while (sp > 0) {
+                    sp--;
+                    int32_t cx = stack[sp * 2];
+                    int32_t cy = stack[sp * 2 + 1];
+                    reachable++;
+                    static const int32_t dx[4] = {1, -1, 0, 0};
+                    static const int32_t dy[4] = {0, 0, 1, -1};
+                    for (int d = 0; d < 4; d++) {
+                        int32_t nx = cx + dx[d];
+                        int32_t ny = cy + dy[d];
+                        if (nx < 0 || ny < 0 || nx >= (int32_t)tw || ny >= (int32_t)th) {
+                            continue;
+                        }
+                        size_t ni = (size_t)ny * tw + (size_t)nx;
+                        if (binary[ni] && !visited[ni]) {
+                            visited[ni] = 1;
+                            stack[sp * 2] = nx;
+                            stack[sp * 2 + 1] = ny;
+                            sp++;
+                        }
+                    }
+                }
+                free(visited);
+                free(stack);
+                if (reachable < opaque_total) {
+                    multi_component = true;
+                }
+            }
+
+            /* Multi-component sprites can't be handled by single-contour trace.
+             * Use convex hull of ALL opaque pixel corners as fallback (covers everything). */
+            if (multi_component) {
+                free(binary);
+                uint32_t pt_count = 0;
+                Point2D *pts = (Point2D *)malloc((size_t)tw * th * 4 * sizeof(Point2D));
+                NT_BUILD_ASSERT(pts && "pipeline_geometry: alloc failed");
+                for (uint32_t y = 0; y < th; y++) {
+                    for (uint32_t x = 0; x < tw; x++) {
+                        uint8_t a2 = ap[((size_t)(p->trim_y[idx] + y) * aw) + p->trim_x[idx] + x];
+                        if (a2 >= p->opts->alpha_threshold) {
+                            pts[pt_count++] = (Point2D){(int32_t)x, (int32_t)y};
+                            pts[pt_count++] = (Point2D){(int32_t)x + 1, (int32_t)y};
+                            pts[pt_count++] = (Point2D){(int32_t)x, (int32_t)y + 1};
+                            pts[pt_count++] = (Point2D){(int32_t)x + 1, (int32_t)y + 1};
+                        }
+                    }
+                }
+                Point2D *hull = (Point2D *)malloc((size_t)pt_count * 2 * sizeof(Point2D));
+                NT_BUILD_ASSERT(hull && "pipeline_geometry: alloc failed");
+                uint32_t hull_n = convex_hull(pts, pt_count, hull);
+                free(pts);
+                Point2D *hull_simp = (Point2D *)malloc(hull_n * sizeof(Point2D));
+                NT_BUILD_ASSERT(hull_simp && "pipeline_geometry: alloc failed");
+                uint32_t hs_count = hull_simplify(hull, hull_n, p->opts->max_vertices, hull_simp);
+
+                /* Compute max cut depth: distance from each REMOVED hull vertex to
+                 * the closest simplified hull edge. Fast (O(hull_n × hs_count)). */
+                double sa = 0.0;
+                for (uint32_t si = 0; si < hs_count; si++) {
+                    uint32_t sj = (si + 1) % hs_count;
+                    sa += ((double)hull_simp[si].x * hull_simp[sj].y) - ((double)hull_simp[sj].x * hull_simp[si].y);
+                }
+                double outside_sign = (sa > 0) ? -1.0 : 1.0;
+                float max_dist = 0.0F;
+                for (uint32_t hi = 0; hi < hull_n; hi++) {
+                    for (uint32_t si = 0; si < hs_count; si++) {
+                        uint32_t sj = (si + 1) % hs_count;
+                        double exx = (double)(hull_simp[sj].x - hull_simp[si].x);
+                        double eyy = (double)(hull_simp[sj].y - hull_simp[si].y);
+                        double lsq = (exx * exx) + (eyy * eyy);
+                        if (lsq < 1e-12) {
+                            continue;
+                        }
+                        double cr = (exx * (double)(hull[hi].y - hull_simp[si].y)) - (eyy * (double)(hull[hi].x - hull_simp[si].x));
+                        if ((cr * outside_sign) > 0) {
+                            double d = fabs(cr) / sqrt(lsq);
+                            if ((float)d > max_dist) {
+                                max_dist = (float)d;
+                            }
+                        }
+                    }
+                }
+                free(hull);
+                double fb_inflate = (double)max_dist + 1.0;
+                int32_t *hs_xy = (int32_t *)malloc(hs_count * 2 * sizeof(int32_t));
+                NT_BUILD_ASSERT(hs_xy && "pipeline_geometry: alloc failed");
+                for (uint32_t v = 0; v < hs_count; v++) {
+                    hs_xy[v * 2] = hull_simp[v].x;
+                    hs_xy[v * 2 + 1] = hull_simp[v].y;
+                }
+                free(hull_simp);
+                int32_t *hs_inflated = NULL;
+                uint32_t hs_inf_count = nt_clipper2_inflate(hs_xy, hs_count, fb_inflate, &hs_inflated);
+                free(hs_xy);
+                if (hs_inf_count >= 3 && hs_inflated) {
+                    Point2D *fb = (Point2D *)malloc(hs_inf_count * sizeof(Point2D));
+                    NT_BUILD_ASSERT(fb && "pipeline_geometry: alloc failed");
+                    for (uint32_t v = 0; v < hs_inf_count; v++) {
+                        fb[v].x = hs_inflated[v * 2];
+                        fb[v].y = hs_inflated[v * 2 + 1];
+                    }
+                    free(hs_inflated);
+                    p->hull_vertices[idx] = fb;
+                    p->vertex_counts[idx] = hs_inf_count;
+                } else {
+                    free(hs_inflated);
+                    p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
+                    NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
+                    p->hull_vertices[idx][0] = (Point2D){0, 0};
+                    p->hull_vertices[idx][1] = (Point2D){(int32_t)tw, 0};
+                    p->hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
+                    p->hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
+                    p->vertex_counts[idx] = 4;
+                }
+                continue; /* skip the single-component contour path */
             }
 
             /* Trace outer contour (CCW). Worst-case contour length is
@@ -3462,20 +3601,24 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 uint32_t clean_count = remove_collinear(contour, contour_count, clean);
                 free(contour);
 
-                /* Simplify with RDP (epsilon-based). Iterate epsilon if result > max_vertices. */
+                /* Simplify with RDP. Start with small epsilon for coverage, grow if needed.
+                 * The Clipper2 inflate amount below MUST be >= RDP epsilon to guarantee
+                 * the inflated polygon covers all pixels the RDP might have cut. */
                 Point2D *simplified = (Point2D *)malloc(clean_count * sizeof(Point2D));
                 NT_BUILD_ASSERT(simplified && "pipeline_geometry: alloc failed");
-                double eps = 2.0;
+                double eps = 0.5;
                 uint32_t simp_count = rdp_simplify(clean, clean_count, eps, simplified);
-                /* Cap at max_vertices - 4 to leave headroom for Clipper2 inflate adding corners */
-                uint32_t target = (p->opts->max_vertices > 4) ? ((uint32_t)p->opts->max_vertices - 4) : 4;
+                uint32_t target = p->opts->max_vertices;
                 while (simp_count > target && eps < 100.0) {
                     eps *= 1.5;
                     simp_count = rdp_simplify(clean, clean_count, eps, simplified);
                 }
                 free(clean);
 
-                /* Inflate via Clipper2 (handles concave corners correctly) */
+                /* Inflate via Clipper2 (handles concave corners correctly).
+                 * Inflate amount = RDP epsilon + 1 pixel, rounded up — guarantees
+                 * every pixel center within RDP deviation is inside the inflated polygon. */
+                double inflate_amt = eps + 1.0;
                 int32_t *simp_xy = (int32_t *)malloc(simp_count * 2 * sizeof(int32_t));
                 NT_BUILD_ASSERT(simp_xy && "pipeline_geometry: alloc failed");
                 for (uint32_t v = 0; v < simp_count; v++) {
@@ -3485,7 +3628,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 free(simplified);
 
                 int32_t *inflated_xy = NULL;
-                uint32_t inf_count = nt_clipper2_inflate(simp_xy, simp_count, 1.0, &inflated_xy);
+                uint32_t inf_count = nt_clipper2_inflate(simp_xy, simp_count, inflate_amt, &inflated_xy);
                 free(simp_xy);
 
                 /* Sanity check: Clipper2 can return bizarre results for degenerate inputs.
@@ -3529,6 +3672,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                         inf_count = red_count;
                     }
 
+                    /* Multi-component sprites are handled before trace_contour. */
                     p->hull_vertices[idx] = result;
                     p->vertex_counts[idx] = inf_count;
                 } else {

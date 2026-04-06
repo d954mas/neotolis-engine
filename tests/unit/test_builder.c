@@ -4023,7 +4023,7 @@ void test_atlas_opts_defaults(void) {
     TEST_ASSERT_EQUAL(0, opts.margin);
     TEST_ASSERT_EQUAL(2, opts.extrude);
     TEST_ASSERT_EQUAL(1, opts.alpha_threshold);
-    TEST_ASSERT_EQUAL(8, opts.max_vertices);
+    TEST_ASSERT_EQUAL(16, opts.max_vertices);
     TEST_ASSERT_TRUE(opts.allow_rotate);
     TEST_ASSERT_TRUE(opts.power_of_two);
     TEST_ASSERT_TRUE(opts.polygon_mode);
