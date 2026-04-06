@@ -1231,7 +1231,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     stats->dirty_cell_count = 0;
     // #endregion
 
-    // #region Inflate polygons by extrude+padding/2 (same spacing as tile_pack)
+    // #region Build exact pack polygons once (inflate by extrude+padding/2)
     float dilate = (float)extrude + ((float)padding * 0.5F);
     Point2D **inf_polys = (Point2D **)malloc(sprite_count * sizeof(Point2D *));
     uint32_t *inf_counts = (uint32_t *)malloc(sprite_count * sizeof(uint32_t));
@@ -1335,20 +1335,17 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
         uint32_t idx = sorted[s].index;
         uint32_t orient_count = opts->allow_rotate ? 8 : 1;
 
-        /* Build transformed+inflated polygons for all orientations */
+        /* Transform exact pack polygon for all orientations.
+         * Orthogonal D4 transforms preserve the exact offset shape, so we can
+         * reuse the once-built inflated polygon instead of
+         * inflating per orientation. */
         Point2D orient_polys[8][32];
         uint32_t orient_counts[8];
         orient_counts[0] = inf_counts[idx];
         memcpy(orient_polys[0], inf_polys[idx], inf_counts[idx] * sizeof(Point2D));
         for (uint32_t r = 1; r < orient_count; r++) {
-            Point2D raw[32];
-            polygon_transform(hull_verts[idx], hull_counts[idx], (uint8_t)r, (int32_t)trim_w[idx], (int32_t)trim_h[idx], raw);
-            if (dilate > 0.0F) {
-                orient_counts[r] = polygon_inflate(raw, hull_counts[idx], dilate, orient_polys[r]);
-            } else {
-                memcpy(orient_polys[r], raw, hull_counts[idx] * sizeof(Point2D));
-                orient_counts[r] = hull_counts[idx];
-            }
+            polygon_transform(inf_polys[idx], inf_counts[idx], (uint8_t)r, (int32_t)trim_w[idx], (int32_t)trim_h[idx], orient_polys[r]);
+            orient_counts[r] = inf_counts[idx];
         }
 
         // #region Deduplicate orientations (skip transforms that produce identical polygons)
