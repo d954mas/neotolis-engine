@@ -177,12 +177,15 @@ static bool vpack_intersect_axis_i(Point2D p1, Point2D p2, bool is_x_axis, int32
 #define VPACK_NFP_MAX_VERTS 64
 /* Multi-ring NFP: rings describe forbidden zones (one or more disjoint outer
  * boundaries for concave inputs). No hole-packing - sprite holes are not modeled
- * in pipeline_geometry, so NFPs never need pocket fitting. */
+ * in pipeline_geometry, so NFPs never need pocket fitting.
+ *
+ * Layout puts AABB first so the broad-phase bounds check in the candidate scan
+ * touches cache line 0 instead of fetching the last cache line of the struct. */
 typedef struct {
-    Point2D verts[VPACK_NFP_MAX_VERTS];
-    uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1]; /* ring_offsets[r+1] - ring_offsets[r] = vertex count of ring r; ring_offsets[ring_count] = total */
-    uint8_t ring_count;
-    int32_t min_x, min_y, max_x, max_y;
+    int32_t min_x, min_y, max_x, max_y;             /* 16B — hot: broad-phase bounds check */
+    uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1]; /* 18B — warm */
+    uint8_t ring_count;                             /* 1B */
+    Point2D verts[VPACK_NFP_MAX_VERTS];             /* 512B — cold: touched only after broad-phase passes */
 } VPackNFP;
 
 /* Even-odd ray cast point-in-polygon. Winding-independent. */
