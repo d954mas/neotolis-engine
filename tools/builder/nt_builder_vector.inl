@@ -304,7 +304,7 @@ typedef struct {
  * 16384 total entries @ ~570 B each ≈ 9.3 MB — fits L3. 4 ways gives better LRU
  * approximation than 2 ways at the same total footprint, reducing collisions. */
 #define VPACK_NFP_CACHE_SIZE 16384U /* total entries; must be power of 2 */
-#define VPACK_NFP_CACHE_WAYS 4U
+#define VPACK_NFP_CACHE_WAYS 8U
 #define VPACK_NFP_CACHE_SET_COUNT (VPACK_NFP_CACHE_SIZE / VPACK_NFP_CACHE_WAYS)
 #define VPACK_NFP_CACHE_READ_RETRIES 4U
 typedef struct {
