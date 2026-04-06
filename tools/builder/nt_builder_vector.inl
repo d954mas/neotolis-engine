@@ -307,15 +307,21 @@ typedef struct {
 #define VPACK_NFP_CACHE_WAYS 8U
 #define VPACK_NFP_CACHE_SET_COUNT (VPACK_NFP_CACHE_SIZE / VPACK_NFP_CACHE_WAYS)
 #define VPACK_NFP_CACHE_READ_RETRIES 4U
+/* Cache entry stores NFP coordinates as int16 instead of int32. Atlas coords live
+ * in [-4100, +4100] at worst, well within int16 range. Halves memory traffic on
+ * the hit path (3.5M hits × 256 bytes saved). */
 typedef struct {
     atomic_uint version;   /* even = stable snapshot, odd = writer in progress */
     uint32_t key_a, key_b; /* shape hashes; both 0 = empty slot */
-    Point2D verts[VPACK_NFP_MAX_VERTS];
+    int16_t verts_xy[VPACK_NFP_MAX_VERTS * 2]; /* interleaved x,y pairs */
     uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1];
     uint8_t ring_count;
-    int32_t min_x, min_y, max_x, max_y;
+    int16_t min_x, min_y, max_x, max_y;
 } VPackNFPCacheEntry;
 
+/* Copy Point2D (int32) source to VPackNFP output, applying offset. Used for the
+ * terminal store in vpack_compute_nfp_one when a freshly computed NFP is written
+ * to out_nfp (no cache involvement). */
 static void vpack_copy_local_nfp_to_out(const Point2D *verts, const uint16_t *ring_offsets, uint8_t ring_count, int32_t min_x, int32_t min_y, int32_t max_x, int32_t max_y, int32_t off_x,
                                         int32_t off_y, VPackNFP *out_nfp) {
     out_nfp->ring_count = ring_count;
@@ -333,6 +339,24 @@ static void vpack_copy_local_nfp_to_out(const Point2D *verts, const uint16_t *ri
     out_nfp->max_y = max_y + off_y;
 }
 
+/* Copy cache slot (int16) to VPackNFP output, applying offset. Hot hit path. */
+static void vpack_copy_cache_slot_to_out(const VPackNFPCacheEntry *slot, int32_t off_x, int32_t off_y, VPackNFP *out_nfp) {
+    uint8_t rc = slot->ring_count;
+    out_nfp->ring_count = rc;
+    uint32_t total = slot->ring_offsets[rc];
+    for (uint8_t r = 0; r <= rc; r++) {
+        out_nfp->ring_offsets[r] = slot->ring_offsets[r];
+    }
+    for (uint32_t v = 0; v < total; v++) {
+        out_nfp->verts[v].x = (int32_t)slot->verts_xy[v * 2] + off_x;
+        out_nfp->verts[v].y = (int32_t)slot->verts_xy[(v * 2) + 1] + off_y;
+    }
+    out_nfp->min_x = (int32_t)slot->min_x + off_x;
+    out_nfp->min_y = (int32_t)slot->min_y + off_y;
+    out_nfp->max_x = (int32_t)slot->max_x + off_x;
+    out_nfp->max_y = (int32_t)slot->max_y + off_y;
+}
+
 static void vpack_store_local_nfp_in_cache(VPackNFPCacheEntry *slot, uint32_t key_a, uint32_t key_b, const Point2D *verts, const uint16_t *ring_offsets, uint8_t ring_count, int32_t min_x,
                                            int32_t min_y, int32_t max_x, int32_t max_y) {
     slot->ring_count = ring_count;
@@ -341,12 +365,16 @@ static void vpack_store_local_nfp_in_cache(VPackNFPCacheEntry *slot, uint32_t ke
     }
     uint32_t total = ring_offsets[ring_count];
     for (uint32_t v = 0; v < total; v++) {
-        slot->verts[v] = verts[v];
+        /* Range-check: all atlas coords fit in int16. */
+        NT_BUILD_ASSERT(verts[v].x >= INT16_MIN && verts[v].x <= INT16_MAX && "vpack: cache store x out of int16 range");
+        NT_BUILD_ASSERT(verts[v].y >= INT16_MIN && verts[v].y <= INT16_MAX && "vpack: cache store y out of int16 range");
+        slot->verts_xy[v * 2] = (int16_t)verts[v].x;
+        slot->verts_xy[(v * 2) + 1] = (int16_t)verts[v].y;
     }
-    slot->min_x = min_x;
-    slot->min_y = min_y;
-    slot->max_x = max_x;
-    slot->max_y = max_y;
+    slot->min_x = (int16_t)min_x;
+    slot->min_y = (int16_t)min_y;
+    slot->max_x = (int16_t)max_x;
+    slot->max_y = (int16_t)max_y;
     slot->key_a = key_a;
     slot->key_b = key_b;
 }
@@ -369,7 +397,7 @@ static VPackCacheReadResult vpack_try_read_nfp_cache_slot(const VPackNFPCacheEnt
         uint32_t slot_key_b = slot->key_b;
         bool occupied = slot_key_a != 0 || slot_key_b != 0;
         if (slot_key_a == key_a && slot_key_b == key_b) {
-            vpack_copy_local_nfp_to_out(slot->verts, slot->ring_offsets, slot->ring_count, slot->min_x, slot->min_y, slot->max_x, slot->max_y, off_x, off_y, out_nfp);
+            vpack_copy_cache_slot_to_out(slot, off_x, off_y, out_nfp);
         }
         uint32_t version1 = atomic_load_explicit(&slot->version, memory_order_acquire);
         if (version0 == version1 && (version1 & 1u) == 0) {
@@ -389,7 +417,7 @@ static VPackCacheReadResult vpack_read_nfp_cache_locked(const VPackNFPCacheEntry
         const VPackNFPCacheEntry *slot = &set[way];
         bool slot_occupied = slot->key_a != 0 || slot->key_b != 0;
         if (slot->key_a == key_a && slot->key_b == key_b) {
-            vpack_copy_local_nfp_to_out(slot->verts, slot->ring_offsets, slot->ring_count, slot->min_x, slot->min_y, slot->max_x, slot->max_y, off_x, off_y, out_nfp);
+            vpack_copy_cache_slot_to_out(slot, off_x, off_y, out_nfp);
             return VPACK_CACHE_READ_HIT;
         }
         if (slot_occupied) {
