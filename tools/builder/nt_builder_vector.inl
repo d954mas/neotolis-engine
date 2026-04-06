@@ -742,7 +742,7 @@ static uint64_t vpack_page_lower_bound(const int32_t orient_aabb[8][4], const in
 }
 
 // #region Parallel candidate test thread pool
-#define VPACK_PAR_MIN_CANDIDATES 4096
+#define VPACK_PAR_MIN_CANDIDATES 1024
 
 typedef struct {
     uint64_t score;
