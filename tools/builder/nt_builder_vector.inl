@@ -232,6 +232,41 @@ typedef struct {
     int32_t min_x, min_y, max_x, max_y;
 } VPackNFPCacheEntry;
 
+static void vpack_copy_local_nfp_to_out(const Point2D *verts, const uint16_t *ring_offsets, uint8_t ring_count, int32_t min_x, int32_t min_y, int32_t max_x, int32_t max_y, int32_t off_x,
+                                        int32_t off_y, VPackNFP *out_nfp) {
+    out_nfp->ring_count = ring_count;
+    uint32_t total = ring_offsets[ring_count];
+    for (uint8_t r = 0; r <= ring_count; r++) {
+        out_nfp->ring_offsets[r] = ring_offsets[r];
+    }
+    for (uint32_t v = 0; v < total; v++) {
+        out_nfp->verts[v].x = verts[v].x + off_x;
+        out_nfp->verts[v].y = verts[v].y + off_y;
+    }
+    out_nfp->min_x = min_x + off_x;
+    out_nfp->min_y = min_y + off_y;
+    out_nfp->max_x = max_x + off_x;
+    out_nfp->max_y = max_y + off_y;
+}
+
+static void vpack_store_local_nfp_in_cache(VPackNFPCacheEntry *slot, uint32_t key_a, uint32_t key_b, const Point2D *verts, const uint16_t *ring_offsets, uint8_t ring_count, int32_t min_x,
+                                           int32_t min_y, int32_t max_x, int32_t max_y) {
+    slot->ring_count = ring_count;
+    for (uint8_t r = 0; r <= ring_count; r++) {
+        slot->ring_offsets[r] = ring_offsets[r];
+    }
+    uint32_t total = ring_offsets[ring_count];
+    for (uint32_t v = 0; v < total; v++) {
+        slot->verts[v] = verts[v];
+    }
+    slot->min_x = min_x;
+    slot->min_y = min_y;
+    slot->max_x = max_x;
+    slot->max_y = max_y;
+    slot->key_a = key_a;
+    slot->key_b = key_b;
+}
+
 static uint32_t vpack_shape_hash(const Point2D *poly, uint32_t count) {
     uint32_t h = 2166136261u; /* FNV-1a offset basis */
     for (uint32_t i = 0; i < count; i++) {
@@ -339,6 +374,137 @@ static void vpack_add_nfp_candidates(const VPackNFP *nfp, int32_t min_cand_x, in
     }
 }
 
+/* Per-thread accumulator for NFP build statistics. Merged into global stats after
+ * the parallel section completes. Avoids atomic increments inside the hot loop. */
+typedef struct {
+    uint64_t or_count;
+    uint64_t cache_hits;
+    uint64_t cache_misses;
+    uint64_t cache_collisions;
+} VPackNFPBuildLocalStats;
+
+/* Compute NFP for one (placed, orient_neg) pair. Writes to *out_nfp with placement
+ * offset applied. Updates per-thread local stats. Cache accesses are protected by
+ * cache_mtx (NULL = no locking,
+ * sequential mode).
+ *
+ * Returns true on success (out_nfp populated), false on failure (caller skips item).
+ *
+ * This function is called both from sequential and parallel code paths. The result
+ *
+ * is bit-exact identical regardless of execution mode because:
+ *  - cache hit checks and slot reads are serialized
+ *  - cache writes publish a fully built local copy
+ *  - Clipper2 NFP is a pure
+ * function of inputs
+ *  - per-thread stats are merged in deterministic order */
+static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_poly, uint32_t neg_count, uint32_t neg_hash, VPackNFPCacheEntry *nfp_cache, mtx_t *cache_mtx, bool use_nfp_cache,
+                                  VPackNFP *out_nfp, VPackNFPBuildLocalStats *local_stats) {
+    uint32_t cache_a = pl_i->shape_hash;
+    uint32_t cache_b = neg_hash;
+    /* Hash combine: golden-ratio multipliers for good distribution. */
+    uint32_t cache_idx = (cache_a * 2654435761u ^ cache_b * 1597334677u) & (VPACK_NFP_CACHE_SIZE - 1);
+    VPackNFPCacheEntry *slot = &nfp_cache[cache_idx];
+    Point2D local_verts[VPACK_NFP_MAX_VERTS];
+    uint16_t local_ring_offsets[VPACK_NFP_MAX_RINGS + 1];
+    uint8_t local_ring_count = 0;
+    int32_t local_min_x = 0, local_min_y = 0, local_max_x = 0, local_max_y = 0;
+
+    if (use_nfp_cache) {
+        if (cache_mtx) {
+            mtx_lock(cache_mtx);
+        }
+        bool cache_hit = slot->key_a == cache_a && slot->key_b == cache_b;
+        if (cache_hit) {
+            local_stats->cache_hits++;
+            vpack_copy_local_nfp_to_out(slot->verts, slot->ring_offsets, slot->ring_count, slot->min_x, slot->min_y, slot->max_x, slot->max_y, pl_i->x, pl_i->y, out_nfp);
+            if (cache_mtx) {
+                mtx_unlock(cache_mtx);
+            }
+            return true;
+        }
+        if (slot->key_a != 0 || slot->key_b != 0) {
+            local_stats->cache_collisions++;
+        } else {
+            local_stats->cache_misses++;
+        }
+        if (cache_mtx) {
+            mtx_unlock(cache_mtx);
+        }
+    }
+
+    int32_t placed_xy[VPACK_PLACED_MAX_VERTS * 2];
+    int32_t neg_xy[VPACK_PLACED_MAX_VERTS * 2];
+    NT_BUILD_ASSERT(pl_i->count <= VPACK_PLACED_MAX_VERTS && "vpack: placed poly exceeds max verts");
+    NT_BUILD_ASSERT(neg_count <= VPACK_PLACED_MAX_VERTS && "vpack: incoming poly exceeds max verts");
+    for (uint32_t v = 0; v < pl_i->count; v++) {
+        placed_xy[v * 2] = pl_i->poly[v].x;
+        placed_xy[(v * 2) + 1] = pl_i->poly[v].y;
+    }
+    for (uint32_t v = 0; v < neg_count; v++) {
+        neg_xy[v * 2] = neg_poly[v].x;
+        neg_xy[(v * 2) + 1] = neg_poly[v].y;
+    }
+
+    int32_t *nfp_xy = NULL;
+    uint32_t *nfp_ring_lengths = NULL;
+    uint32_t nfp_ring_count = 0;
+    uint32_t nfp_total_verts = nt_clipper2_minkowski_nfp(placed_xy, pl_i->count, neg_xy, neg_count, &nfp_xy, &nfp_ring_lengths, &nfp_ring_count);
+    local_stats->or_count++;
+
+    bool nfp_ok = (nfp_total_verts >= 3 && nfp_xy && nfp_ring_count > 0 && nfp_ring_count <= VPACK_NFP_MAX_RINGS && nfp_total_verts <= VPACK_NFP_MAX_VERTS);
+    if (nfp_ok) {
+        local_ring_count = (uint8_t)nfp_ring_count;
+        local_ring_offsets[0] = 0;
+        uint32_t v_cursor = 0;
+        for (uint32_t r = 0; r < nfp_ring_count; r++) {
+            uint32_t rl = nfp_ring_lengths[r];
+            for (uint32_t v = 0; v < rl; v++) {
+                local_verts[v_cursor].x = nfp_xy[v_cursor * 2];
+                local_verts[v_cursor].y = nfp_xy[(v_cursor * 2) + 1];
+                v_cursor++;
+            }
+            local_ring_offsets[r + 1] = (uint16_t)v_cursor;
+        }
+        vpack_calc_aabb(local_verts, v_cursor, &local_min_x, &local_min_y, &local_max_x, &local_max_y);
+    } else {
+        /* Clipper2 NFP failed — fall back to convex hull pair (always valid). */
+        Point2D placed_hull[VPACK_PLACED_MAX_VERTS * 2];
+        Point2D incoming_hull[VPACK_PLACED_MAX_VERTS * 2];
+        Point2D convex_sum[VPACK_PLACED_MAX_VERTS * 2];
+        Point2D convex_clean[VPACK_PLACED_MAX_VERTS * 2];
+        uint32_t placed_hull_count = convex_hull(pl_i->poly, pl_i->count, placed_hull);
+        uint32_t incoming_hull_count = convex_hull(neg_poly, neg_count, incoming_hull);
+        uint32_t convex_count = vpack_minkowski(placed_hull, placed_hull_count, incoming_hull, incoming_hull_count, convex_sum);
+        convex_count = remove_collinear(convex_sum, convex_count, convex_clean);
+        NT_BUILD_ASSERT(convex_count >= 3 && "vpack: convex NFP fallback failed");
+
+        local_ring_count = 1;
+        local_ring_offsets[0] = 0;
+        local_ring_offsets[1] = (uint16_t)convex_count;
+        for (uint32_t v = 0; v < convex_count; v++) {
+            local_verts[v] = convex_clean[v];
+        }
+        vpack_calc_aabb(local_verts, convex_count, &local_min_x, &local_min_y, &local_max_x, &local_max_y);
+        nfp_ok = true;
+    }
+    free(nfp_xy);
+    free(nfp_ring_lengths);
+
+    if (use_nfp_cache) {
+        if (cache_mtx) {
+            mtx_lock(cache_mtx);
+        }
+        vpack_store_local_nfp_in_cache(slot, cache_a, cache_b, local_verts, local_ring_offsets, local_ring_count, local_min_x, local_min_y, local_max_x, local_max_y);
+        if (cache_mtx) {
+            mtx_unlock(cache_mtx);
+        }
+    }
+
+    vpack_copy_local_nfp_to_out(local_verts, local_ring_offsets, local_ring_count, local_min_x, local_min_y, local_max_x, local_max_y, pl_i->x, pl_i->y, out_nfp);
+    return true;
+}
+
 static uint64_t vpack_score_candidate(int32_t cx, int32_t cy, int32_t poly_max_x, int32_t poly_max_y, uint32_t cur_w, uint32_t cur_h, uint32_t margin, bool power_of_two) {
     uint32_t nw = (uint32_t)cx + (uint32_t)poly_max_x;
     uint32_t nh = (uint32_t)cy + (uint32_t)poly_max_y;
@@ -396,15 +562,42 @@ typedef struct {
     bool power_of_two;
 } VPackScanCtx;
 
+/* Batch type for thread pool dispatch. */
+typedef enum {
+    VPACK_BATCH_SCAN_CANDIDATES, /* parallel candidate testing */
+    VPACK_BATCH_NFP_BUILD,       /* parallel NFP build (Clipper2 calls) */
+} VPackBatchKind;
+
+/* NFP build batch state. Workers compute one chunk of relevant items. */
+typedef struct {
+    const VPackPlaced *placed_arr; /* page->placed */
+    const uint32_t *relevant_buf;  /* indices into placed_arr */
+    uint32_t relevant_count;       /* number of items in batch */
+    const Point2D (*orient_neg)[8][32];
+    const uint32_t *orient_counts;
+    const uint32_t *orient_neg_hashes;
+    uint32_t ori;
+    VPackNFP *nfps_out;  /* indexed by ri (per-thread writes own ri) */
+    bool *nfp_valid_out; /* per-ri validity flag */
+    VPackNFPCacheEntry *nfp_cache;
+    bool use_nfp_cache;
+    /* Per-thread local stats — main aggregates after batch completes */
+    VPackNFPBuildLocalStats *thread_stats;
+} VPackNFPBuildCtx;
+
 typedef struct {
     /* Per-batch read-only state (set by main before signaling) */
+    VPackBatchKind batch_kind;
     VPackScanCtx scan;
-    /* Per-thread results (heap-allocated, sized to num_workers+1) */
+    VPackNFPBuildCtx nfp_build;
+    /* Per-thread results (heap-allocated, sized to num_workers+1) — used by SCAN */
     VPackParResult *results;
     /* Sync: mutex+cond for sleep-wake (no spin) */
     mtx_t mtx;
     cnd_t cnd_work; /* main signals: work available */
     cnd_t cnd_done; /* workers signal: batch complete */
+    /* Cache write mutex — separate from batch sync to avoid contention */
+    mtx_t cache_mtx;
     uint32_t num_workers;
     uint32_t workers_done;
     uint32_t batch_seq;
@@ -482,6 +675,26 @@ static void vpack_par_process_chunks(VPackParCtx *ctx, uint32_t tid, VPackParRes
     vpack_scan_candidate_range(&ctx->scan, start, end, out_result);
 }
 
+/* NFP build chunk processor — each thread handles its slice of relevant items.
+ * Writes nfps_out[ri] for ri in [start, end). Per-thread stats accumulated locally. */
+static void vpack_par_process_nfp_chunks(VPackParCtx *ctx, uint32_t tid) {
+    uint32_t total_threads = ctx->num_workers + 1;
+    uint32_t start = (uint32_t)(((uint64_t)ctx->nfp_build.relevant_count * tid) / total_threads);
+    uint32_t end = (uint32_t)(((uint64_t)ctx->nfp_build.relevant_count * (tid + 1)) / total_threads);
+    VPackNFPBuildLocalStats *local = &ctx->nfp_build.thread_stats[tid];
+    *local = (VPackNFPBuildLocalStats){0};
+    uint32_t ori = ctx->nfp_build.ori;
+    for (uint32_t ri = start; ri < end; ri++) {
+        uint32_t i = ctx->nfp_build.relevant_buf[ri];
+        const VPackPlaced *pl_i = &ctx->nfp_build.placed_arr[i];
+        const Point2D *neg_poly = (*ctx->nfp_build.orient_neg)[ori];
+        uint32_t neg_count = ctx->nfp_build.orient_counts[ori];
+        uint32_t neg_hash = ctx->nfp_build.orient_neg_hashes[ori];
+        ctx->nfp_build.nfp_valid_out[ri] =
+            vpack_compute_nfp_one(pl_i, neg_poly, neg_count, neg_hash, ctx->nfp_build.nfp_cache, &ctx->cache_mtx, ctx->nfp_build.use_nfp_cache, &ctx->nfp_build.nfps_out[ri], local);
+    }
+}
+
 static int vpack_par_worker(void *arg) {
     VPackWorkerArg *wa = (VPackWorkerArg *)arg;
     VPackParCtx *ctx = wa->ctx;
@@ -496,19 +709,30 @@ static int vpack_par_worker(void *arg) {
             break;
         }
         seen_batch_seq = ctx->batch_seq;
+        VPackBatchKind kind = ctx->batch_kind;
         mtx_unlock(&ctx->mtx);
 
-        VPackParResult result = ctx->results[tid];
-        vpack_par_process_chunks(ctx, tid, &result);
-
-        mtx_lock(&ctx->mtx);
-        ctx->results[tid] = result;
-        ctx->workers_done++;
-        if (ctx->workers_done == ctx->num_workers) {
-            ctx->batch_ready = false;
-            cnd_signal(&ctx->cnd_done);
+        if (kind == VPACK_BATCH_SCAN_CANDIDATES) {
+            VPackParResult result = ctx->results[tid];
+            vpack_par_process_chunks(ctx, tid, &result);
+            mtx_lock(&ctx->mtx);
+            ctx->results[tid] = result;
+            ctx->workers_done++;
+            if (ctx->workers_done == ctx->num_workers) {
+                ctx->batch_ready = false;
+                cnd_signal(&ctx->cnd_done);
+            }
+            mtx_unlock(&ctx->mtx);
+        } else { /* VPACK_BATCH_NFP_BUILD */
+            vpack_par_process_nfp_chunks(ctx, tid);
+            mtx_lock(&ctx->mtx);
+            ctx->workers_done++;
+            if (ctx->workers_done == ctx->num_workers) {
+                ctx->batch_ready = false;
+                cnd_signal(&ctx->cnd_done);
+            }
+            mtx_unlock(&ctx->mtx);
         }
-        mtx_unlock(&ctx->mtx);
     }
     return 0;
 }
@@ -518,7 +742,7 @@ static int vpack_par_worker(void *arg) {
 static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32], const uint32_t orient_counts[8], const int32_t orient_aabb[8][4], const int32_t orient_min_cand[8][2],
                            const int32_t orient_max_cand[8][2], uint32_t orient_count, int32_t worst_poly_min_x, int32_t worst_poly_min_y, int32_t worst_poly_max_x, int32_t worst_poly_max_y,
                            int32_t global_min_cand_x, int32_t global_min_cand_y, int32_t global_max_cand_x, int32_t global_max_cand_y, uint32_t extrude, uint32_t margin, bool power_of_two,
-                           VPackNFP *nfps, uint64_t (*nfp_grid)[VPACK_GRID_WORDS], VPackCand **cands, uint32_t *cand_cap, uint32_t *relevant_buf, VPackNFPCacheEntry *nfp_cache,
+                           VPackNFP *nfps, uint64_t (*nfp_grid)[VPACK_GRID_WORDS], VPackCand **cands, uint32_t *cand_cap, uint32_t *relevant_buf, bool *nfp_valid_buf, VPackNFPCacheEntry *nfp_cache,
                            const uint32_t orient_neg_hashes[8], const VPackExperimentConfig *exp, PackStats *stats, uint64_t *io_best_score, uint32_t page_index, uint32_t grid_dim,
                            uint64_t *dirty_bits_buf, uint32_t *dirty_cells_buf, VPackParCtx *par, uint32_t *out_best_page, int32_t *out_best_x, int32_t *out_best_y, uint8_t *out_best_orient,
                            uint32_t *out_best_orient_idx) {
@@ -552,8 +776,68 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         VPackBounds bounds = {min_cand_x, min_cand_y, max_cand_x, max_cand_y};
         vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, min_cand_y, &bounds);
 
+        // #region NFP build phase — parallel or sequential
+        /* Build NFPs for all relevant items into nfps[ri] (indexed by ri, deterministic).
+         * Each item is independent — safe to parallelize.
+         * Phase 2 (sequential) compacts valid NFPs and generates candidates in ri order. */
+        if (par && par->num_workers > 0 && relevant_count >= 4) {
+            /* Parallel NFP build: dispatch to thread pool */
+            mtx_lock(&par->mtx);
+            par->batch_kind = VPACK_BATCH_NFP_BUILD;
+            par->nfp_build.placed_arr = page->placed;
+            par->nfp_build.relevant_buf = relevant_buf;
+            par->nfp_build.relevant_count = relevant_count;
+            par->nfp_build.orient_neg = (const Point2D(*)[8][32])orient_neg;
+            par->nfp_build.orient_counts = orient_counts;
+            par->nfp_build.orient_neg_hashes = orient_neg_hashes;
+            par->nfp_build.ori = ori;
+            par->nfp_build.nfps_out = nfps;
+            par->nfp_build.nfp_valid_out = nfp_valid_buf;
+            par->nfp_build.nfp_cache = nfp_cache;
+            par->nfp_build.use_nfp_cache = exp->use_nfp_cache;
+            par->workers_done = 0;
+            par->batch_seq++;
+            par->batch_ready = true;
+            cnd_broadcast(&par->cnd_work);
+            mtx_unlock(&par->mtx);
+
+            /* Main thread also processes its chunk (tid=0) */
+            vpack_par_process_nfp_chunks(par, 0);
+
+            /* Wait for all workers to finish this batch */
+            mtx_lock(&par->mtx);
+            while (par->workers_done < par->num_workers)
+                cnd_wait(&par->cnd_done, &par->mtx);
+            mtx_unlock(&par->mtx);
+
+            /* Aggregate per-thread stats into global stats */
+            for (uint32_t t = 0; t <= par->num_workers; t++) {
+                stats->or_count += par->nfp_build.thread_stats[t].or_count;
+                stats->nfp_cache_hit_count += par->nfp_build.thread_stats[t].cache_hits;
+                stats->nfp_cache_miss_count += par->nfp_build.thread_stats[t].cache_misses;
+                stats->nfp_cache_collision_count += par->nfp_build.thread_stats[t].cache_collisions;
+            }
+        } else {
+            /* Sequential NFP build (small relevant_count or no thread pool) */
+            VPackNFPBuildLocalStats local = {0};
+            for (uint32_t ri = 0; ri < relevant_count; ri++) {
+                uint32_t i = relevant_buf[ri];
+                const VPackPlaced *pl_i = &page->placed[i];
+                nfp_valid_buf[ri] = vpack_compute_nfp_one(pl_i, orient_neg[ori], cur_count, orient_neg_hashes[ori], nfp_cache, NULL, exp->use_nfp_cache, &nfps[ri], &local);
+            }
+            stats->or_count += local.or_count;
+            stats->nfp_cache_hit_count += local.cache_hits;
+            stats->nfp_cache_miss_count += local.cache_misses;
+            stats->nfp_cache_collision_count += local.cache_collisions;
+        }
+
+        /* Phase 2 (sequential): compact valid NFPs and generate candidates in ri order.
+         * need_candidates is computed per-ri using io_best_score (constant during this orient). */
         uint32_t nfp_count = 0;
         for (uint32_t ri = 0; ri < relevant_count; ri++) {
+            if (!nfp_valid_buf[ri]) {
+                continue;
+            }
             uint32_t i = relevant_buf[ri];
 
             bool need_candidates = true;
@@ -561,140 +845,21 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - poly_max_x;
                 int32_t est_min_y = page->placed[i].y + page->placed[i].aabb_min_y - poly_max_y;
                 uint64_t opt_score = vpack_score_candidate((est_min_x > 0) ? est_min_x : 0, (est_min_y > 0) ? est_min_y : 0, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
-                if (opt_score > *io_best_score)
+                if (opt_score > *io_best_score) {
                     need_candidates = false;
+                }
             }
 
-            // #region Full multi-ring NFP via Clipper2 (MinkowskiSum + Union) with cache
-            /* Compute the No-Fit Polygon as the union of MinkowskiSum convolution loops.
-             * For concave inputs the NFP may have multiple outer rings (disjoint
-             * forbidden zones) and inner hole rings (pockets where the incoming
-             * polygon fits inside the placed polygon). All rings are kept.
-             *
-             * Cache: NFP is shape-pair invariant (depends only on local-coord polygons,
-             * not on placement). Cache stores NFP in local coords; placement-specific
-             * offset is applied when copying into nfps[nfp_count]. */
-            const VPackPlaced *pl_i = &page->placed[i];
-            VPackNFP *nfp = &nfps[nfp_count];
-
-            uint32_t cache_a = pl_i->shape_hash;
-            uint32_t cache_b = orient_neg_hashes[ori];
-            /* Hash combine: use golden-ratio multipliers for good distribution.
-             * Avoids structural collisions when cache_a/cache_b have low entropy in low bits. */
-            uint32_t cache_idx = (cache_a * 2654435761u ^ cache_b * 1597334677u) & (VPACK_NFP_CACHE_SIZE - 1);
-            VPackNFPCacheEntry *slot = &nfp_cache[cache_idx];
-            bool cache_hit = exp->use_nfp_cache && slot->key_a == cache_a && slot->key_b == cache_b;
-            bool nfp_ok;
-
-            if (cache_hit) {
-                stats->nfp_cache_hit_count++;
-                nfp_ok = true;
-            } else {
-                if (exp->use_nfp_cache) {
-                    if (slot->key_a != 0 || slot->key_b != 0) {
-                        stats->nfp_cache_collision_count++;
-                    } else {
-                        stats->nfp_cache_miss_count++;
-                    }
-                }
-
-                int32_t placed_xy[VPACK_PLACED_MAX_VERTS * 2];
-                int32_t neg_xy[VPACK_PLACED_MAX_VERTS * 2];
-                NT_BUILD_ASSERT(pl_i->count <= VPACK_PLACED_MAX_VERTS && "vpack: placed poly exceeds max verts");
-                NT_BUILD_ASSERT(cur_count <= VPACK_PLACED_MAX_VERTS && "vpack: incoming poly exceeds max verts");
-                for (uint32_t v = 0; v < pl_i->count; v++) {
-                    placed_xy[v * 2] = pl_i->poly[v].x;
-                    placed_xy[(v * 2) + 1] = pl_i->poly[v].y;
-                }
-                for (uint32_t v = 0; v < cur_count; v++) {
-                    neg_xy[v * 2] = orient_neg[ori][v].x;
-                    neg_xy[(v * 2) + 1] = orient_neg[ori][v].y;
-                }
-
-                int32_t *nfp_xy = NULL;
-                uint32_t *nfp_ring_lengths = NULL;
-                uint32_t nfp_ring_count = 0;
-                uint32_t nfp_total_verts = nt_clipper2_minkowski_nfp(placed_xy, pl_i->count, neg_xy, cur_count, &nfp_xy, &nfp_ring_lengths, &nfp_ring_count);
-                stats->or_count++;
-
-                nfp_ok = (nfp_total_verts >= 3 && nfp_xy && nfp_ring_count > 0 && nfp_ring_count <= VPACK_NFP_MAX_RINGS && nfp_total_verts <= VPACK_NFP_MAX_VERTS);
-                if (nfp_ok) {
-                    /* Store in cache slot in LOCAL coords (no placement offset) */
-                    slot->key_a = cache_a;
-                    slot->key_b = cache_b;
-                    slot->ring_count = (uint8_t)nfp_ring_count;
-                    slot->ring_offsets[0] = 0;
-                    uint32_t v_cursor = 0;
-                    for (uint32_t r = 0; r < nfp_ring_count; r++) {
-                        uint32_t rl = nfp_ring_lengths[r];
-                        for (uint32_t v = 0; v < rl; v++) {
-                            slot->verts[v_cursor].x = nfp_xy[v_cursor * 2];
-                            slot->verts[v_cursor].y = nfp_xy[(v_cursor * 2) + 1];
-                            v_cursor++;
-                        }
-                        slot->ring_offsets[r + 1] = (uint16_t)v_cursor;
-                    }
-                    vpack_calc_aabb(slot->verts, v_cursor, &slot->min_x, &slot->min_y, &slot->max_x, &slot->max_y);
-                } else {
-                    /* Clipper2 NFP failed — fall back to convex hull pair (always valid).
-                     * Cached so future identical pairs hit immediately. */
-                    Point2D placed_hull[VPACK_PLACED_MAX_VERTS * 2];
-                    Point2D incoming_hull[VPACK_PLACED_MAX_VERTS * 2];
-                    Point2D convex_sum[VPACK_PLACED_MAX_VERTS * 2];
-                    Point2D convex_clean[VPACK_PLACED_MAX_VERTS * 2];
-                    uint32_t placed_hull_count = convex_hull(pl_i->poly, pl_i->count, placed_hull);
-                    uint32_t incoming_hull_count = convex_hull(orient_neg[ori], cur_count, incoming_hull);
-                    uint32_t convex_count = vpack_minkowski(placed_hull, placed_hull_count, incoming_hull, incoming_hull_count, convex_sum);
-                    convex_count = remove_collinear(convex_sum, convex_count, convex_clean);
-                    NT_BUILD_ASSERT(convex_count >= 3 && "vpack: convex NFP fallback failed");
-
-                    if (nfp_total_verts > VPACK_NFP_MAX_VERTS) {
-                        NT_LOG_WARN("vpack: NFP vertex count %u exceeds limit %u, using convex fallback", nfp_total_verts, VPACK_NFP_MAX_VERTS);
-                    } else if (nfp_ring_count > VPACK_NFP_MAX_RINGS) {
-                        NT_LOG_WARN("vpack: NFP ring count %u exceeds limit %u, using convex fallback", nfp_ring_count, VPACK_NFP_MAX_RINGS);
-                    } else {
-                        NT_LOG_WARN("vpack: Clipper2 NFP failed, using convex fallback");
-                    }
-
-                    /* Store convex fallback in slot too — same shape pair will hit fast next time */
-                    slot->key_a = cache_a;
-                    slot->key_b = cache_b;
-                    slot->ring_count = 1;
-                    slot->ring_offsets[0] = 0;
-                    slot->ring_offsets[1] = (uint16_t)convex_count;
-                    for (uint32_t v = 0; v < convex_count; v++) {
-                        slot->verts[v] = convex_clean[v];
-                    }
-                    vpack_calc_aabb(slot->verts, convex_count, &slot->min_x, &slot->min_y, &slot->max_x, &slot->max_y);
-                    nfp_ok = true;
-                }
-                free(nfp_xy);
-                free(nfp_ring_lengths);
+            /* Compact: move valid NFP from nfps[ri] down to nfps[nfp_count] if needed */
+            if (nfp_count != ri) {
+                nfps[nfp_count] = nfps[ri];
             }
-
-            if (nfp_ok) {
-                /* Build offset NFP for nfps[nfp_count] from cache slot (local coords + offset) */
-                nfp->ring_count = slot->ring_count;
-                uint32_t total = slot->ring_offsets[slot->ring_count];
-                for (uint8_t r = 0; r <= slot->ring_count; r++) {
-                    nfp->ring_offsets[r] = slot->ring_offsets[r];
-                }
-                for (uint32_t v = 0; v < total; v++) {
-                    nfp->verts[v].x = slot->verts[v].x + pl_i->x;
-                    nfp->verts[v].y = slot->verts[v].y + pl_i->y;
-                }
-                nfp->min_x = slot->min_x + pl_i->x;
-                nfp->max_x = slot->max_x + pl_i->x;
-                nfp->min_y = slot->min_y + pl_i->y;
-                nfp->max_y = slot->max_y + pl_i->y;
-
-                if (need_candidates) {
-                    vpack_add_nfp_candidates(nfp, min_cand_x, min_cand_y, cands, &cand_count, cand_cap, &bounds, exp->use_axis_i);
-                }
-                nfp_count++;
+            if (need_candidates) {
+                vpack_add_nfp_candidates(&nfps[nfp_count], min_cand_x, min_cand_y, cands, &cand_count, cand_cap, &bounds, exp->use_axis_i);
             }
-            // #endregion
+            nfp_count++;
         }
+        // #endregion
         stats->candidate_count += cand_count;
 
         uint32_t nfp_words = (nfp_count + 63) / 64;
@@ -831,6 +996,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         if (par && par->num_workers > 0 && cand_count >= VPACK_PAR_MIN_CANDIDATES) {
             /* Parallel: dispatch to thread pool */
             mtx_lock(&par->mtx);
+            par->batch_kind = VPACK_BATCH_SCAN_CANDIDATES;
             par->scan = scan;
             for (uint32_t t = 0; t <= par->num_workers; t++) {
                 par->results[t].score = *io_best_score;
@@ -994,7 +1160,8 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     uint32_t page_count = 1;
 
     uint32_t *relevant_buf = (uint32_t *)malloc(sprite_count * sizeof(uint32_t));
-    NT_BUILD_ASSERT(relevant_buf && "vector_pack: alloc failed");
+    bool *nfp_valid_buf = (bool *)malloc(sprite_count * sizeof(bool));
+    NT_BUILD_ASSERT(relevant_buf && nfp_valid_buf && "vector_pack: alloc failed");
 
     size_t grid_cell_count = (size_t)grid_dim * grid_dim;
     size_t dirty_words = (grid_cell_count + 63) / 64;
@@ -1015,8 +1182,10 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             num_workers = 7; /* cap: more threads = more sync overhead per dispatch */
         par_ctx.num_workers = num_workers;
         par_ctx.results = (VPackParResult *)calloc(num_workers + 1, sizeof(VPackParResult));
-        NT_BUILD_ASSERT(par_ctx.results && "vector_pack: par results alloc failed");
+        par_ctx.nfp_build.thread_stats = (VPackNFPBuildLocalStats *)calloc(num_workers + 1, sizeof(VPackNFPBuildLocalStats));
+        NT_BUILD_ASSERT(par_ctx.results && par_ctx.nfp_build.thread_stats && "vector_pack: par results alloc failed");
         mtx_init(&par_ctx.mtx, mtx_plain);
+        mtx_init(&par_ctx.cache_mtx, mtx_plain);
         cnd_init(&par_ctx.cnd_work);
         cnd_init(&par_ctx.cnd_done);
         par_threads = (thrd_t *)malloc(num_workers * sizeof(thrd_t));
@@ -1157,8 +1326,8 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             stats->page_scan_count++;
             if (vpack_try_page(&pages[pi], orient_neg, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y, worst_poly_max_x,
                                worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, extrude, margin, opts->power_of_two, nfps, nfp_grid, &cands, &cand_cap,
-                               relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, pi, grid_dim, dirty_bits_buf, dirty_cells_buf, par, &best_page, &best_x, &best_y, &best_orient,
-                               &best_orient_idx)) {
+                               relevant_buf, nfp_valid_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, pi, grid_dim, dirty_bits_buf, dirty_cells_buf, par, &best_page, &best_x, &best_y,
+                               &best_orient, &best_orient_idx)) {
                 found_any = true;
             }
         }
@@ -1187,8 +1356,8 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             stats->page_scan_count++;
             found_any = vpack_try_page(&pages[new_page], orient_neg, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y, worst_poly_max_x,
                                        worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, extrude, margin, opts->power_of_two, nfps, nfp_grid, &cands,
-                                       &cand_cap, relevant_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, new_page, grid_dim, dirty_bits_buf, dirty_cells_buf, par, &best_page, &best_x,
-                                       &best_y, &best_orient, &best_orient_idx);
+                                       &cand_cap, relevant_buf, nfp_valid_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, new_page, grid_dim, dirty_bits_buf, dirty_cells_buf, par,
+                                       &best_page, &best_x, &best_y, &best_orient, &best_orient_idx);
             NT_BUILD_ASSERT(found_any && "vector_pack: empty page should accept placement");
         }
 
@@ -1314,6 +1483,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     free(nfp_grid);
     free(nfp_cache);
     free(relevant_buf);
+    free(nfp_valid_buf);
     free(dirty_cells_buf);
     free(dirty_bits_buf);
     /* Shutdown thread pool */
@@ -1325,9 +1495,11 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
         for (uint32_t t = 0; t < num_workers; t++)
             thrd_join(par_threads[t], NULL);
         mtx_destroy(&par_ctx.mtx);
+        mtx_destroy(&par_ctx.cache_mtx);
         cnd_destroy(&par_ctx.cnd_work);
         cnd_destroy(&par_ctx.cnd_done);
         free(par_ctx.results);
+        free(par_ctx.nfp_build.thread_stats);
         free(par_threads);
         free(par_args);
     }

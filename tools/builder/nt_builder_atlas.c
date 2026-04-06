@@ -3919,8 +3919,10 @@ static void pipeline_serialize(AtlasPipeline *p) {
     const uint32_t max_region_tri_count = (uint32_t)(UINT8_MAX / 3U);
 
     /* Count total vertices and indices for UNIQUE sprites only.
-     * Duplicates share vertex_start/index_start with their original — no need to
-     * store the same vertex/index data twice in the blob.
+     * Duplicates are sprites with identical pixel data — they share placement with
+     * their original (occupying the same atlas position), so they share vertex_start
+     * and index_start in the blob. This both saves space and fits big atlases (4812+
+     * sprites) within uint16 vertex/index_start limits.
      * Pre-triangulated sprites (multi-component) have an exact triangle count;
      * single-component polygons use fan/ear-clip triangulation = (n - 2) triangles.
      * region->index_count is uint8_t (max 255) → cap triangles per region at 85. */
@@ -3991,7 +3993,11 @@ static void pipeline_serialize(AtlasPipeline *p) {
     /* Regions + vertices + indices.
      * Two-pass: pass 1 writes vertex/index data only for unique sprites and records
      * their start offsets. Pass 2 fills NtAtlasRegion structures, with duplicates
-     * sharing vertex_start/index_start with their original. */
+     * sharing vertex_start/index_start with their original.
+     *
+     * Sharing is correct because duplicates have identical pixel data and are placed
+     * at the SAME atlas position (placement_lookup propagates orig's placement to
+     * duplicates), so they have the same atlas_u/v and same local geometry. */
     NtAtlasRegion *regions = (NtAtlasRegion *)(blob + regions_offset);
     NtAtlasVertex *vertices = (NtAtlasVertex *)(blob + vertex_offset);
     uint16_t *indices = (uint16_t *)(blob + index_offset);
