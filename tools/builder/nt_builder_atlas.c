@@ -10,6 +10,7 @@
 
 #include <ctype.h>
 #include <math.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 

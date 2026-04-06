@@ -224,7 +224,9 @@ typedef struct {
 /* NFP cache: direct-mapped hash table keyed by (placed_shape_hash, incoming_shape_hash).
  * 16384 entries × ~2KB per entry = ~32MB. Builder-only, fits comfortably. */
 #define VPACK_NFP_CACHE_SIZE 16384U /* must be power of 2 */
+#define VPACK_NFP_CACHE_READ_RETRIES 4U
 typedef struct {
+    atomic_uint version;   /* even = stable snapshot, odd = writer in progress */
     uint32_t key_a, key_b; /* shape hashes; both 0 = empty slot */
     Point2D verts[VPACK_NFP_MAX_VERTS];
     uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1];
@@ -265,6 +267,45 @@ static void vpack_store_local_nfp_in_cache(VPackNFPCacheEntry *slot, uint32_t ke
     slot->max_y = max_y;
     slot->key_a = key_a;
     slot->key_b = key_b;
+}
+
+typedef enum {
+    VPACK_CACHE_READ_EMPTY,
+    VPACK_CACHE_READ_OCCUPIED,
+    VPACK_CACHE_READ_BUSY,
+    VPACK_CACHE_READ_HIT,
+} VPackCacheReadResult;
+
+static VPackCacheReadResult vpack_read_nfp_cache_locked(const VPackNFPCacheEntry *slot, uint32_t key_a, uint32_t key_b, int32_t off_x, int32_t off_y, VPackNFP *out_nfp) {
+    bool occupied = slot->key_a != 0 || slot->key_b != 0;
+    if (slot->key_a == key_a && slot->key_b == key_b) {
+        vpack_copy_local_nfp_to_out(slot->verts, slot->ring_offsets, slot->ring_count, slot->min_x, slot->min_y, slot->max_x, slot->max_y, off_x, off_y, out_nfp);
+        return VPACK_CACHE_READ_HIT;
+    }
+    return occupied ? VPACK_CACHE_READ_OCCUPIED : VPACK_CACHE_READ_EMPTY;
+}
+
+static VPackCacheReadResult vpack_try_read_nfp_cache(const VPackNFPCacheEntry *slot, uint32_t key_a, uint32_t key_b, int32_t off_x, int32_t off_y, VPackNFP *out_nfp) {
+    for (uint32_t attempt = 0; attempt < VPACK_NFP_CACHE_READ_RETRIES; attempt++) {
+        uint32_t version0 = atomic_load_explicit(&slot->version, memory_order_acquire);
+        if ((version0 & 1u) != 0) {
+            continue;
+        }
+        uint32_t slot_key_a = slot->key_a;
+        uint32_t slot_key_b = slot->key_b;
+        bool occupied = slot_key_a != 0 || slot_key_b != 0;
+        if (slot_key_a == key_a && slot_key_b == key_b) {
+            vpack_copy_local_nfp_to_out(slot->verts, slot->ring_offsets, slot->ring_count, slot->min_x, slot->min_y, slot->max_x, slot->max_y, off_x, off_y, out_nfp);
+        }
+        uint32_t version1 = atomic_load_explicit(&slot->version, memory_order_acquire);
+        if (version0 == version1 && (version1 & 1u) == 0) {
+            if (slot_key_a == key_a && slot_key_b == key_b) {
+                return VPACK_CACHE_READ_HIT;
+            }
+            return occupied ? VPACK_CACHE_READ_OCCUPIED : VPACK_CACHE_READ_EMPTY;
+        }
+    }
+    return VPACK_CACHE_READ_BUSY;
 }
 
 static uint32_t vpack_shape_hash(const Point2D *poly, uint32_t count) {
@@ -405,34 +446,29 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
     /* Hash combine: golden-ratio multipliers for good distribution. */
     uint32_t cache_idx = (cache_a * 2654435761u ^ cache_b * 1597334677u) & (VPACK_NFP_CACHE_SIZE - 1);
     VPackNFPCacheEntry *slot = &nfp_cache[cache_idx];
-    Point2D local_verts[VPACK_NFP_MAX_VERTS];
-    uint16_t local_ring_offsets[VPACK_NFP_MAX_RINGS + 1];
-    uint8_t local_ring_count = 0;
-    int32_t local_min_x = 0, local_min_y = 0, local_max_x = 0, local_max_y = 0;
 
     if (use_nfp_cache) {
-        if (cache_mtx) {
+        VPackCacheReadResult cache_result = vpack_try_read_nfp_cache(slot, cache_a, cache_b, pl_i->x, pl_i->y, out_nfp);
+        if (cache_result == VPACK_CACHE_READ_BUSY && cache_mtx) {
             mtx_lock(cache_mtx);
+            cache_result = vpack_read_nfp_cache_locked(slot, cache_a, cache_b, pl_i->x, pl_i->y, out_nfp);
+            mtx_unlock(cache_mtx);
         }
-        bool cache_hit = slot->key_a == cache_a && slot->key_b == cache_b;
-        if (cache_hit) {
+        if (cache_result == VPACK_CACHE_READ_HIT) {
             local_stats->cache_hits++;
-            vpack_copy_local_nfp_to_out(slot->verts, slot->ring_offsets, slot->ring_count, slot->min_x, slot->min_y, slot->max_x, slot->max_y, pl_i->x, pl_i->y, out_nfp);
-            if (cache_mtx) {
-                mtx_unlock(cache_mtx);
-            }
             return true;
         }
-        if (slot->key_a != 0 || slot->key_b != 0) {
+        if (cache_result == VPACK_CACHE_READ_OCCUPIED) {
             local_stats->cache_collisions++;
         } else {
             local_stats->cache_misses++;
         }
-        if (cache_mtx) {
-            mtx_unlock(cache_mtx);
-        }
     }
 
+    Point2D local_verts[VPACK_NFP_MAX_VERTS];
+    uint16_t local_ring_offsets[VPACK_NFP_MAX_RINGS + 1];
+    uint8_t local_ring_count = 0;
+    int32_t local_min_x = 0, local_min_y = 0, local_max_x = 0, local_max_y = 0;
     int32_t placed_xy[VPACK_PLACED_MAX_VERTS * 2];
     int32_t neg_xy[VPACK_PLACED_MAX_VERTS * 2];
     NT_BUILD_ASSERT(pl_i->count <= VPACK_PLACED_MAX_VERTS && "vpack: placed poly exceeds max verts");
@@ -495,7 +531,10 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
         if (cache_mtx) {
             mtx_lock(cache_mtx);
         }
+        uint32_t version = atomic_load_explicit(&slot->version, memory_order_relaxed);
+        atomic_store_explicit(&slot->version, version + 1u, memory_order_seq_cst);
         vpack_store_local_nfp_in_cache(slot, cache_a, cache_b, local_verts, local_ring_offsets, local_ring_count, local_min_x, local_min_y, local_max_x, local_max_y);
+        atomic_store_explicit(&slot->version, version + 2u, memory_order_release);
         if (cache_mtx) {
             mtx_unlock(cache_mtx);
         }
@@ -1153,6 +1192,9 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     /* NFP cache: avoid recomputing Minkowski for identical shape pairs */
     VPackNFPCacheEntry *nfp_cache = (VPackNFPCacheEntry *)calloc(VPACK_NFP_CACHE_SIZE, sizeof(VPackNFPCacheEntry));
     NT_BUILD_ASSERT(nfp_cache && "vector_pack: cache alloc failed");
+    for (uint32_t i = 0; i < VPACK_NFP_CACHE_SIZE; i++) {
+        atomic_init(&nfp_cache[i].version, 0);
+    }
 
     VPackPage pages[ATLAS_MAX_PAGES];
     memset(pages, 0, sizeof(pages));
