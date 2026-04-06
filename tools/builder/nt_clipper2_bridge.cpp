@@ -8,8 +8,6 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
-#include <utility>
-#include <vector>
 
 using namespace Clipper2Lib;
 
@@ -101,43 +99,29 @@ extern "C" uint32_t nt_clipper2_triangulate(const int32_t *xy_in, uint32_t n, ui
     return tri_count;
 }
 
-extern "C" uint32_t nt_clipper2_minkowski_nfp(const int32_t *pattern_xy, uint32_t np, const int32_t *path_xy, uint32_t n, int32_t **verts_out, uint32_t **ring_lengths_out, int8_t **ring_signs_out,
+extern "C" uint32_t nt_clipper2_minkowski_nfp(const int32_t *pattern_xy, uint32_t np, const int32_t *path_xy, uint32_t n, int32_t **verts_out, uint32_t **ring_lengths_out,
                                               uint32_t *ring_count_out) {
     if (verts_out)
         *verts_out = nullptr;
     if (ring_lengths_out)
         *ring_lengths_out = nullptr;
-    if (ring_signs_out)
-        *ring_signs_out = nullptr;
     if (ring_count_out)
         *ring_count_out = 0;
-    if (np < 3 || n < 3 || !pattern_xy || !path_xy || !verts_out || !ring_lengths_out || !ring_signs_out || !ring_count_out)
+    if (np < 3 || n < 3 || !pattern_xy || !path_xy || !verts_out || !ring_lengths_out || !ring_count_out)
         return 0;
 
     Path64 pattern = to_path64(pattern_xy, np);
     Path64 path = to_path64(path_xy, n);
 
-    /* Flip Y on input: our polygons are in screen-space (Y-down) but Clipper2 uses
-     * Cartesian (Y-up) convention for topology classification (PolyTree depth, IsHole).
-     * Flipping Y makes Clipper2 see truly Cartesian coordinates so PolyTree gives
-     * correct outer/hole nesting. We flip Y back on output to return screen-space coords. */
-    for (auto &p : pattern) {
-        p.y = -p.y;
-    }
-    for (auto &p : path) {
-        p.y = -p.y;
-    }
-
-    /* Now ensure CCW Cartesian winding (positive area) — required by MinkowskiSum. */
+    /* Normalize to Cartesian CCW (positive area) — required for MinkowskiSum + Union. */
     if (Area(pattern) < 0)
         std::reverse(pattern.begin(), pattern.end());
     if (Area(path) < 0)
         std::reverse(path.begin(), path.end());
 
     /* MinkowskiSum returns convolution loops for concave inputs. To get the actual
-     * NFP boundary, union them with NonZero fill rule. The result may have multiple
-     * outer rings (disjoint forbidden zones) and inner hole rings (pockets where the
-     * incoming polygon fits inside the placed polygon). */
+     * NFP boundary, union them with NonZero fill rule. May have multiple disjoint
+     * forbidden zones (rings) for concave inputs. */
     Paths64 convolution = MinkowskiSum(pattern, path, true /* is_closed */);
     if (convolution.empty())
         return 0;
@@ -155,11 +139,9 @@ extern "C" uint32_t nt_clipper2_minkowski_nfp(const int32_t *pattern_xy, uint32_
 
     auto *verts = static_cast<int32_t *>(malloc(total_verts * 2 * sizeof(int32_t)));
     auto *ring_lengths = static_cast<uint32_t *>(malloc(nfp.size() * sizeof(uint32_t)));
-    auto *ring_signs = static_cast<int8_t *>(malloc(nfp.size() * sizeof(int8_t)));
-    if (!verts || !ring_lengths || !ring_signs) {
+    if (!verts || !ring_lengths) {
         free(verts);
         free(ring_lengths);
-        free(ring_signs);
         return 0;
     }
 
@@ -167,25 +149,15 @@ extern "C" uint32_t nt_clipper2_minkowski_nfp(const int32_t *pattern_xy, uint32_
     for (size_t r = 0; r < nfp.size(); r++) {
         const Path64 &ring = nfp[r];
         ring_lengths[r] = static_cast<uint32_t>(ring.size());
-        /* TODO(holes): emit +1 for all rings until we have a verified outer/hole
-         * classifier for screen-space (Y-down) inputs. PolyTree::IsHole() and
-         * Area-based detection both gave wrong topology for spineboy NFPs in
-         * empirical tests — caused massive overlap when fed to hole-aware logic.
-         * vpack_point_in_nfp interprets all-+1 as "block any ring" (safe).
-         * Re-enable hole packing once a real classifier is in place + integration
-         * test confirms opaque-pixel count matches tile_pack baseline. */
-        ring_signs[r] = 1;
         for (size_t i = 0; i < ring.size(); i++) {
             verts[v_cursor * 2] = static_cast<int32_t>(ring[i].x);
-            /* Flip Y back to screen-space (Y-down) for the caller. */
-            verts[(v_cursor * 2) + 1] = static_cast<int32_t>(-ring[i].y);
+            verts[(v_cursor * 2) + 1] = static_cast<int32_t>(ring[i].y);
             v_cursor++;
         }
     }
 
     *verts_out = verts;
     *ring_lengths_out = ring_lengths;
-    *ring_signs_out = ring_signs;
     *ring_count_out = static_cast<uint32_t>(nfp.size());
     return total_verts;
 }

@@ -3427,7 +3427,7 @@ typedef struct {
     int32_t x, y;
 } TestPoint2D;
 
-bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, const int8_t *ring_signs, uint32_t ring_count, int32_t px, int32_t py);
+bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, uint32_t ring_count, int32_t px, int32_t py);
 
 /* alpha_trim: fully transparent 4x4 image returns false */
 void test_alpha_trim_fully_transparent(void) {
@@ -3578,16 +3578,18 @@ void test_fan_triangulate_triangle(void) {
     TEST_ASSERT_EQUAL_UINT16(2, indices[2]);
 }
 
-void test_vpack_point_in_nfp_hole_pocket(void) {
+void test_vpack_point_in_nfp_block_any_ring(void) {
+    /* Two disjoint outer rings — point inside any of them is blocked.
+     * Sprite holes are not modeled, so all NFP rings are forbidden zones. */
     const int32_t verts_xy[] = {
-        0, 0, 10, 0, 10, 10, 0, 10, 3, 3, 3, 7, 7, 7, 7, 3,
+        0, 0, 10, 0, 10, 10, 0, 10, 20, 0, 30, 0, 30, 10, 20, 10,
     };
     const uint16_t ring_offsets[] = {0, 4, 8};
-    const int8_t ring_signs[] = {1, -1};
 
-    TEST_ASSERT_TRUE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, ring_signs, 2, 1, 1));
-    TEST_ASSERT_FALSE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, ring_signs, 2, 5, 5));
-    TEST_ASSERT_FALSE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, ring_signs, 2, 12, 12));
+    TEST_ASSERT_TRUE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 5, 5));   /* in first ring */
+    TEST_ASSERT_TRUE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 25, 5));  /* in second ring */
+    TEST_ASSERT_FALSE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 15, 5)); /* between rings */
+    TEST_ASSERT_FALSE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 50, 50));/* outside both */
 }
 
 /* --- Atlas round-trip test helpers --- */
@@ -4241,7 +4243,7 @@ int main(void) {
     RUN_TEST(test_rdp_simplify_reduction);
     RUN_TEST(test_fan_triangulate_quad);
     RUN_TEST(test_fan_triangulate_triangle);
-    RUN_TEST(test_vpack_point_in_nfp_hole_pocket);
+    RUN_TEST(test_vpack_point_in_nfp_block_any_ring);
 
     /* Atlas round-trip tests (Phase 47 Plan 03) */
     RUN_TEST(test_atlas_round_trip_basic);

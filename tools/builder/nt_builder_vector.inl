@@ -139,18 +139,17 @@ static bool vpack_intersect_axis_i(Point2D p1, Point2D p2, bool is_x_axis, int32
  * Generous limits — concave pair NFPs can produce many vertices. */
 #define VPACK_NFP_MAX_RINGS 32
 #define VPACK_NFP_MAX_VERTS 1024
+/* Multi-ring NFP: rings describe forbidden zones (one or more disjoint outer
+ * boundaries for concave inputs). No hole-packing — sprite holes are not modeled
+ * in pipeline_geometry, so NFPs never need pocket fitting. */
 typedef struct {
     Point2D verts[VPACK_NFP_MAX_VERTS];
     uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1]; /* ring_offsets[r+1] - ring_offsets[r] = vertex count of ring r; ring_offsets[ring_count] = total */
-    int8_t ring_signs[VPACK_NFP_MAX_RINGS];         /* +1 outer / -1 hole */
     uint8_t ring_count;
     int32_t min_x, min_y, max_x, max_y;
 } VPackNFP;
 
-/* Returns true iff (px, py) is blocked by this NFP.
- * Outer rings (+1) block placement; hole rings (-1) reopen valid pockets where
- * the incoming polygon fits inside a concavity of the placed polygon.
- * Sign assignment comes from PolyTree depth in nt_clipper2_minkowski_nfp. */
+/* Even-odd ray cast point-in-polygon. Winding-independent. */
 static bool vpack_point_in_ring(int32_t px, int32_t py, const Point2D *ring, uint32_t n) {
     bool inside = false;
     for (uint32_t i = 0, j = n - 1; i < n; j = i++) {
@@ -161,25 +160,19 @@ static bool vpack_point_in_ring(int32_t px, int32_t py, const Point2D *ring, uin
     return inside;
 }
 
+/* Returns true iff (px, py) is blocked by this NFP — point lies inside any ring. */
 static bool vpack_point_in_nfp(int32_t px, int32_t py, const VPackNFP *nfp) {
-    bool inside_outer = false;
-    bool inside_hole = false;
     for (uint8_t r = 0; r < nfp->ring_count; r++) {
         uint32_t start = nfp->ring_offsets[r];
         uint32_t end = nfp->ring_offsets[r + 1];
         uint32_t n = end - start;
         if (n < 3)
             continue;
-        const Point2D *ring = &nfp->verts[start];
-        if (!vpack_point_in_ring(px, py, ring, n))
-            continue;
-        if (nfp->ring_signs[r] < 0) {
-            inside_hole = true;
-        } else {
-            inside_outer = true;
+        if (vpack_point_in_ring(px, py, &nfp->verts[start], n)) {
+            return true;
         }
     }
-    return inside_outer && !inside_hole;
+    return false;
 }
 
 typedef struct {
@@ -235,7 +228,6 @@ typedef struct {
     uint32_t key_a, key_b; /* shape hashes; both 0 = empty slot */
     Point2D verts[VPACK_NFP_MAX_VERTS];
     uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1];
-    int8_t ring_signs[VPACK_NFP_MAX_RINGS];
     uint8_t ring_count;
     int32_t min_x, min_y, max_x, max_y;
 } VPackNFPCacheEntry;
@@ -299,12 +291,11 @@ static void vpack_calc_aabb(const Point2D *poly, uint32_t count, int32_t *min_x,
     }
 }
 
-static void vpack_init_single_ring_nfp(VPackNFP *nfp, const Point2D *ring, uint32_t count, int32_t off_x, int32_t off_y, int8_t sign) {
+static void vpack_init_single_ring_nfp(VPackNFP *nfp, const Point2D *ring, uint32_t count, int32_t off_x, int32_t off_y) {
     NT_BUILD_ASSERT(count >= 3 && count <= VPACK_NFP_MAX_VERTS && "vpack: single-ring NFP is invalid");
     nfp->ring_count = 1;
     nfp->ring_offsets[0] = 0;
     nfp->ring_offsets[1] = (uint16_t)count;
-    nfp->ring_signs[0] = sign;
     for (uint32_t v = 0; v < count; v++) {
         nfp->verts[v].x = ring[v].x + off_x;
         nfp->verts[v].y = ring[v].y + off_y;
@@ -622,9 +613,8 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
 
                 int32_t *nfp_xy = NULL;
                 uint32_t *nfp_ring_lengths = NULL;
-                int8_t *nfp_ring_signs = NULL;
                 uint32_t nfp_ring_count = 0;
-                uint32_t nfp_total_verts = nt_clipper2_minkowski_nfp(placed_xy, pl_i->count, neg_xy, cur_count, &nfp_xy, &nfp_ring_lengths, &nfp_ring_signs, &nfp_ring_count);
+                uint32_t nfp_total_verts = nt_clipper2_minkowski_nfp(placed_xy, pl_i->count, neg_xy, cur_count, &nfp_xy, &nfp_ring_lengths, &nfp_ring_count);
                 stats->or_count++;
 
                 nfp_ok = (nfp_total_verts >= 3 && nfp_xy && nfp_ring_count > 0 && nfp_ring_count <= VPACK_NFP_MAX_RINGS && nfp_total_verts <= VPACK_NFP_MAX_VERTS);
@@ -637,7 +627,6 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                     uint32_t v_cursor = 0;
                     for (uint32_t r = 0; r < nfp_ring_count; r++) {
                         uint32_t rl = nfp_ring_lengths[r];
-                        slot->ring_signs[r] = nfp_ring_signs[r];
                         for (uint32_t v = 0; v < rl; v++) {
                             slot->verts[v_cursor].x = nfp_xy[v_cursor * 2];
                             slot->verts[v_cursor].y = nfp_xy[(v_cursor * 2) + 1];
@@ -673,7 +662,6 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                     slot->ring_count = 1;
                     slot->ring_offsets[0] = 0;
                     slot->ring_offsets[1] = (uint16_t)convex_count;
-                    slot->ring_signs[0] = 1;
                     for (uint32_t v = 0; v < convex_count; v++) {
                         slot->verts[v] = convex_clean[v];
                     }
@@ -682,7 +670,6 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 }
                 free(nfp_xy);
                 free(nfp_ring_lengths);
-                free(nfp_ring_signs);
             }
 
             if (nfp_ok) {
@@ -691,9 +678,6 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 uint32_t total = slot->ring_offsets[slot->ring_count];
                 for (uint8_t r = 0; r <= slot->ring_count; r++) {
                     nfp->ring_offsets[r] = slot->ring_offsets[r];
-                }
-                for (uint8_t r = 0; r < slot->ring_count; r++) {
-                    nfp->ring_signs[r] = slot->ring_signs[r];
                 }
                 for (uint32_t v = 0; v < total; v++) {
                     nfp->verts[v].x = slot->verts[v].x + pl_i->x;

@@ -3270,17 +3270,15 @@ uint32_t nt_atlas_test_ear_clip(const void *poly, uint32_t n, uint16_t *idx) { r
 uint32_t nt_atlas_test_trace_contour(const uint8_t *bin, uint32_t tw, uint32_t th, void *out, uint32_t max_out) { return trace_contour(bin, tw, th, (Point2D *)out, max_out); }
 uint32_t nt_atlas_test_remove_collinear(const void *in, uint32_t n, void *out) { return remove_collinear((const Point2D *)in, n, (Point2D *)out); }
 bool nt_atlas_test_point_in_polygon(const void *poly, uint32_t n, int32_t px, int32_t py) { return point_in_polygon((const Point2D *)poly, n, (Point2D){px, py}); }
-bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, const int8_t *ring_signs, uint32_t ring_count, int32_t px, int32_t py) {
+bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, uint32_t ring_count, int32_t px, int32_t py) {
     NT_BUILD_ASSERT(ring_count <= VPACK_NFP_MAX_RINGS && "nt_atlas_test_vpack_point_in_nfp: too many rings");
     NT_BUILD_ASSERT(vert_count <= VPACK_NFP_MAX_VERTS && "nt_atlas_test_vpack_point_in_nfp: too many vertices");
 
     VPackNFP nfp = {0};
     nfp.ring_count = (uint8_t)ring_count;
-    for (uint32_t r = 0; r < ring_count; r++) {
+    for (uint32_t r = 0; r <= ring_count; r++) {
         nfp.ring_offsets[r] = ring_offsets[r];
-        nfp.ring_signs[r] = ring_signs[r];
     }
-    nfp.ring_offsets[ring_count] = ring_offsets[ring_count];
     for (uint32_t v = 0; v < vert_count; v++) {
         nfp.verts[v].x = verts_xy[v * 2];
         nfp.verts[v].y = verts_xy[(v * 2) + 1];
@@ -3920,7 +3918,9 @@ static void pipeline_serialize(AtlasPipeline *p) {
     uint32_t extrude_val = p->opts->extrude;
     const uint32_t max_region_tri_count = (uint32_t)(UINT8_MAX / 3U);
 
-    /* Count total vertices and indices.
+    /* Count total vertices and indices for UNIQUE sprites only.
+     * Duplicates share vertex_start/index_start with their original — no need to
+     * store the same vertex/index data twice in the blob.
      * Pre-triangulated sprites (multi-component) have an exact triangle count;
      * single-component polygons use fan/ear-clip triangulation = (n - 2) triangles.
      * region->index_count is uint8_t (max 255) → cap triangles per region at 85. */
@@ -3928,6 +3928,9 @@ static void pipeline_serialize(AtlasPipeline *p) {
     uint32_t total_index_count = 0;
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         NT_BUILD_ASSERT(p->vertex_counts[i] <= UINT8_MAX && "pipeline_serialize: region vertex_count exceeds uint8_t");
+        if (p->dedup_map[i] >= 0) {
+            continue; /* Duplicate — its vertex/index storage is shared with the original */
+        }
         total_vertex_count += p->vertex_counts[i];
         uint32_t tri = 0;
         if (p->pre_tri_indices[i] && p->pre_tri_counts[i] > 0) {
@@ -3985,20 +3988,32 @@ static void pipeline_serialize(AtlasPipeline *p) {
         memcpy(tex_ids_ptr + ((size_t)pg * sizeof(uint64_t)), &tid, sizeof(uint64_t));
     }
 
-    /* Regions + vertices + indices */
+    /* Regions + vertices + indices.
+     * Two-pass: pass 1 writes vertex/index data only for unique sprites and records
+     * their start offsets. Pass 2 fills NtAtlasRegion structures, with duplicates
+     * sharing vertex_start/index_start with their original. */
     NtAtlasRegion *regions = (NtAtlasRegion *)(blob + regions_offset);
     NtAtlasVertex *vertices = (NtAtlasVertex *)(blob + vertex_offset);
     uint16_t *indices = (uint16_t *)(blob + index_offset);
     uint32_t vertex_cursor = 0;
     uint32_t index_cursor = 0;
 
+    /* Per-sprite recorded start offsets — populated for originals in pass 1, then
+     * propagated from original to duplicates before pass 2. */
+    uint32_t *sprite_vertex_start = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
+    uint32_t *sprite_index_start = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
+    uint32_t *sprite_idx_count = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(sprite_vertex_start && sprite_index_start && sprite_idx_count && "pipeline_serialize: alloc failed");
+
+    /* Pass 1: write vertex/index data only for unique sprites */
     for (uint32_t i = 0; i < p->sprite_count; i++) {
+        if (p->dedup_map[i] >= 0) {
+            continue; /* duplicate — handled in propagation step */
+        }
         uint32_t pi = placement_lookup[i];
         NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
         AtlasPlacement *pl = &p->placements[pi];
 
-        /* Triangulate: use pre-computed indices for multi-component sprites,
-         * else triangulate the polygon outline. */
         uint16_t local_indices[256];
         const uint16_t *src_indices;
         uint32_t tri_count;
@@ -4010,27 +4025,13 @@ static void pipeline_serialize(AtlasPipeline *p) {
             src_indices = local_indices;
         }
         uint32_t idx_count = tri_count * 3;
-        /* Region index_count is uint8_t (max 255 indices = max 85 triangles).
-         * Truncate if needed — should not happen for typical sprites. */
         NT_BUILD_ASSERT(idx_count <= UINT8_MAX && "pipeline_serialize: region index_count exceeds uint8_t");
         NT_BUILD_ASSERT(vertex_cursor <= UINT16_MAX && "pipeline_serialize: vertex_start exceeds uint16_t");
         NT_BUILD_ASSERT(index_cursor <= UINT16_MAX && "pipeline_serialize: index_start exceeds uint16_t");
-        NT_BUILD_ASSERT(pl->page <= UINT8_MAX && "pipeline_serialize: page_index exceeds uint8_t");
 
-        NtAtlasRegion *reg = &regions[i];
-        reg->name_hash = nt_hash64_str(p->sprites[i].name).value;
-        reg->source_w = (uint16_t)p->sprites[i].width;
-        reg->source_h = (uint16_t)p->sprites[i].height;
-        reg->trim_offset_x = (int16_t)p->trim_x[i];
-        reg->trim_offset_y = (int16_t)p->trim_y[i];
-        reg->origin_x = p->sprites[i].origin_x;
-        reg->origin_y = p->sprites[i].origin_y;
-        reg->vertex_start = (uint16_t)vertex_cursor;
-        reg->vertex_count = (uint8_t)p->vertex_counts[i];
-        reg->page_index = (uint8_t)pl->page;
-        reg->rotated = pl->rotation;
-        reg->index_start = (uint16_t)index_cursor;
-        reg->index_count = (uint8_t)idx_count;
+        sprite_vertex_start[i] = vertex_cursor;
+        sprite_index_start[i] = index_cursor;
+        sprite_idx_count[i] = idx_count;
 
         /* Write triangle indices (local: 0..vertex_count-1) */
         memcpy(&indices[index_cursor], src_indices, idx_count * sizeof(uint16_t));
@@ -4075,6 +4076,43 @@ static void pipeline_serialize(AtlasPipeline *p) {
 
     NT_BUILD_ASSERT(vertex_cursor == total_vertex_count && "pipeline_serialize: vertex count mismatch");
     NT_BUILD_ASSERT(index_cursor == total_index_count && "pipeline_serialize: index count mismatch");
+
+    /* Propagate offsets from originals to duplicates */
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        if (p->dedup_map[i] >= 0) {
+            uint32_t orig = (uint32_t)p->dedup_map[i];
+            sprite_vertex_start[i] = sprite_vertex_start[orig];
+            sprite_index_start[i] = sprite_index_start[orig];
+            sprite_idx_count[i] = sprite_idx_count[orig];
+        }
+    }
+
+    /* Pass 2: fill region structures (one per sprite, including duplicates) */
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        uint32_t pi = placement_lookup[i];
+        NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
+        AtlasPlacement *pl = &p->placements[pi];
+        NT_BUILD_ASSERT(pl->page <= UINT8_MAX && "pipeline_serialize: page_index exceeds uint8_t");
+
+        NtAtlasRegion *reg = &regions[i];
+        reg->name_hash = nt_hash64_str(p->sprites[i].name).value;
+        reg->source_w = (uint16_t)p->sprites[i].width;
+        reg->source_h = (uint16_t)p->sprites[i].height;
+        reg->trim_offset_x = (int16_t)p->trim_x[i];
+        reg->trim_offset_y = (int16_t)p->trim_y[i];
+        reg->origin_x = p->sprites[i].origin_x;
+        reg->origin_y = p->sprites[i].origin_y;
+        reg->vertex_start = (uint16_t)sprite_vertex_start[i];
+        reg->vertex_count = (uint8_t)p->vertex_counts[i];
+        reg->page_index = (uint8_t)pl->page;
+        reg->rotated = pl->rotation;
+        reg->index_start = (uint16_t)sprite_index_start[i];
+        reg->index_count = (uint8_t)sprite_idx_count[i];
+    }
+
+    free(sprite_vertex_start);
+    free(sprite_index_start);
+    free(sprite_idx_count);
 
     /* Register atlas metadata entry (D-04) */
     uint64_t blob_hash = nt_hash64(blob, blob_size).value;
