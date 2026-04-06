@@ -221,9 +221,11 @@ typedef struct {
     uint32_t shape_hash;
 } VPackPlaced;
 
-/* NFP cache: direct-mapped hash table keyed by (placed_shape_hash, incoming_shape_hash).
- * 16384 entries × ~2KB per entry = ~32MB. Builder-only, fits comfortably. */
-#define VPACK_NFP_CACHE_SIZE 16384U /* must be power of 2 */
+/* NFP cache: 2-way set-associative table keyed by (placed_shape_hash, incoming_shape_hash).
+ * 16384 total entries × ~2KB per entry = ~32MB. Builder-only, fits comfortably. */
+#define VPACK_NFP_CACHE_SIZE 16384U /* total entries; must be power of 2 */
+#define VPACK_NFP_CACHE_WAYS 2U
+#define VPACK_NFP_CACHE_SET_COUNT (VPACK_NFP_CACHE_SIZE / VPACK_NFP_CACHE_WAYS)
 #define VPACK_NFP_CACHE_READ_RETRIES 4U
 typedef struct {
     atomic_uint version;   /* even = stable snapshot, odd = writer in progress */
@@ -271,21 +273,13 @@ static void vpack_store_local_nfp_in_cache(VPackNFPCacheEntry *slot, uint32_t ke
 
 typedef enum {
     VPACK_CACHE_READ_EMPTY,
+    VPACK_CACHE_READ_AVAILABLE,
     VPACK_CACHE_READ_OCCUPIED,
     VPACK_CACHE_READ_BUSY,
     VPACK_CACHE_READ_HIT,
 } VPackCacheReadResult;
 
-static VPackCacheReadResult vpack_read_nfp_cache_locked(const VPackNFPCacheEntry *slot, uint32_t key_a, uint32_t key_b, int32_t off_x, int32_t off_y, VPackNFP *out_nfp) {
-    bool occupied = slot->key_a != 0 || slot->key_b != 0;
-    if (slot->key_a == key_a && slot->key_b == key_b) {
-        vpack_copy_local_nfp_to_out(slot->verts, slot->ring_offsets, slot->ring_count, slot->min_x, slot->min_y, slot->max_x, slot->max_y, off_x, off_y, out_nfp);
-        return VPACK_CACHE_READ_HIT;
-    }
-    return occupied ? VPACK_CACHE_READ_OCCUPIED : VPACK_CACHE_READ_EMPTY;
-}
-
-static VPackCacheReadResult vpack_try_read_nfp_cache(const VPackNFPCacheEntry *slot, uint32_t key_a, uint32_t key_b, int32_t off_x, int32_t off_y, VPackNFP *out_nfp) {
+static VPackCacheReadResult vpack_try_read_nfp_cache_slot(const VPackNFPCacheEntry *slot, uint32_t key_a, uint32_t key_b, int32_t off_x, int32_t off_y, VPackNFP *out_nfp) {
     for (uint32_t attempt = 0; attempt < VPACK_NFP_CACHE_READ_RETRIES; attempt++) {
         uint32_t version0 = atomic_load_explicit(&slot->version, memory_order_acquire);
         if ((version0 & 1u) != 0) {
@@ -306,6 +300,77 @@ static VPackCacheReadResult vpack_try_read_nfp_cache(const VPackNFPCacheEntry *s
         }
     }
     return VPACK_CACHE_READ_BUSY;
+}
+
+static VPackCacheReadResult vpack_read_nfp_cache_locked(const VPackNFPCacheEntry *set, uint32_t key_a, uint32_t key_b, int32_t off_x, int32_t off_y, VPackNFP *out_nfp) {
+    bool saw_empty = false;
+    bool saw_occupied = false;
+    for (uint32_t way = 0; way < VPACK_NFP_CACHE_WAYS; way++) {
+        const VPackNFPCacheEntry *slot = &set[way];
+        bool slot_occupied = slot->key_a != 0 || slot->key_b != 0;
+        if (slot->key_a == key_a && slot->key_b == key_b) {
+            vpack_copy_local_nfp_to_out(slot->verts, slot->ring_offsets, slot->ring_count, slot->min_x, slot->min_y, slot->max_x, slot->max_y, off_x, off_y, out_nfp);
+            return VPACK_CACHE_READ_HIT;
+        }
+        if (slot_occupied) {
+            saw_occupied = true;
+        } else {
+            saw_empty = true;
+        }
+    }
+    if (saw_empty) {
+        return saw_occupied ? VPACK_CACHE_READ_AVAILABLE : VPACK_CACHE_READ_EMPTY;
+    }
+    return VPACK_CACHE_READ_OCCUPIED;
+}
+
+static VPackCacheReadResult vpack_try_read_nfp_cache(const VPackNFPCacheEntry *set, uint32_t key_a, uint32_t key_b, int32_t off_x, int32_t off_y, VPackNFP *out_nfp) {
+    for (uint32_t attempt = 0; attempt < VPACK_NFP_CACHE_READ_RETRIES; attempt++) {
+        bool saw_busy = false;
+        bool saw_empty = false;
+        bool saw_occupied = false;
+        for (uint32_t way = 0; way < VPACK_NFP_CACHE_WAYS; way++) {
+            VPackCacheReadResult slot_result = vpack_try_read_nfp_cache_slot(&set[way], key_a, key_b, off_x, off_y, out_nfp);
+            if (slot_result == VPACK_CACHE_READ_HIT) {
+                return VPACK_CACHE_READ_HIT;
+            }
+            if (slot_result == VPACK_CACHE_READ_BUSY) {
+                saw_busy = true;
+            } else if (slot_result == VPACK_CACHE_READ_OCCUPIED) {
+                saw_occupied = true;
+            } else {
+                saw_empty = true;
+            }
+        }
+        if (!saw_busy) {
+            if (saw_empty) {
+                return saw_occupied ? VPACK_CACHE_READ_AVAILABLE : VPACK_CACHE_READ_EMPTY;
+            }
+            return VPACK_CACHE_READ_OCCUPIED;
+        }
+    }
+    return VPACK_CACHE_READ_BUSY;
+}
+
+static VPackNFPCacheEntry *vpack_select_nfp_cache_slot_locked(VPackNFPCacheEntry *set, uint32_t key_a, uint32_t key_b) {
+    VPackNFPCacheEntry *empty_slot = NULL;
+    VPackNFPCacheEntry *victim = &set[0];
+    uint32_t victim_version = atomic_load_explicit(&victim->version, memory_order_relaxed);
+    for (uint32_t way = 0; way < VPACK_NFP_CACHE_WAYS; way++) {
+        VPackNFPCacheEntry *slot = &set[way];
+        if (slot->key_a == key_a && slot->key_b == key_b) {
+            return slot;
+        }
+        if (!empty_slot && slot->key_a == 0 && slot->key_b == 0) {
+            empty_slot = slot;
+        }
+        uint32_t version = atomic_load_explicit(&slot->version, memory_order_relaxed);
+        if (version < victim_version) {
+            victim = slot;
+            victim_version = version;
+        }
+    }
+    return empty_slot ? empty_slot : victim;
 }
 
 static uint32_t vpack_shape_hash(const Point2D *poly, uint32_t count) {
@@ -444,14 +509,14 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
     uint32_t cache_a = pl_i->shape_hash;
     uint32_t cache_b = neg_hash;
     /* Hash combine: golden-ratio multipliers for good distribution. */
-    uint32_t cache_idx = (cache_a * 2654435761u ^ cache_b * 1597334677u) & (VPACK_NFP_CACHE_SIZE - 1);
-    VPackNFPCacheEntry *slot = &nfp_cache[cache_idx];
+    uint32_t cache_set_idx = (cache_a * 2654435761u ^ cache_b * 1597334677u) & (VPACK_NFP_CACHE_SET_COUNT - 1);
+    VPackNFPCacheEntry *cache_set = &nfp_cache[cache_set_idx * VPACK_NFP_CACHE_WAYS];
 
     if (use_nfp_cache) {
-        VPackCacheReadResult cache_result = vpack_try_read_nfp_cache(slot, cache_a, cache_b, pl_i->x, pl_i->y, out_nfp);
+        VPackCacheReadResult cache_result = vpack_try_read_nfp_cache(cache_set, cache_a, cache_b, pl_i->x, pl_i->y, out_nfp);
         if (cache_result == VPACK_CACHE_READ_BUSY && cache_mtx) {
             mtx_lock(cache_mtx);
-            cache_result = vpack_read_nfp_cache_locked(slot, cache_a, cache_b, pl_i->x, pl_i->y, out_nfp);
+            cache_result = vpack_read_nfp_cache_locked(cache_set, cache_a, cache_b, pl_i->x, pl_i->y, out_nfp);
             mtx_unlock(cache_mtx);
         }
         if (cache_result == VPACK_CACHE_READ_HIT) {
@@ -531,6 +596,7 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
         if (cache_mtx) {
             mtx_lock(cache_mtx);
         }
+        VPackNFPCacheEntry *slot = vpack_select_nfp_cache_slot_locked(cache_set, cache_a, cache_b);
         uint32_t version = atomic_load_explicit(&slot->version, memory_order_relaxed);
         atomic_store_explicit(&slot->version, version + 1u, memory_order_seq_cst);
         vpack_store_local_nfp_in_cache(slot, cache_a, cache_b, local_verts, local_ring_offsets, local_ring_count, local_min_x, local_min_y, local_max_x, local_max_y);
