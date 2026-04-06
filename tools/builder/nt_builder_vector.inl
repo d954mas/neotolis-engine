@@ -512,8 +512,10 @@ static VPackExperimentConfig vpack_experiment_config_get(void) {
 }
 
 #define VPACK_GRID_CELL 128
-/* Keep enough words to cover large single-page runs without disabling broad-phase. */
-#define VPACK_GRID_WORDS 64
+/* Each cell holds a bitmap of NFPs that overlap it. nfp_words grows with the
+ * number of NFPs in the current orient. Cap determines when we fall back to
+ * linear scan. 32 * 64 = 2048 NFPs is plenty (bigatlas max relevant ≈ 1180). */
+#define VPACK_GRID_WORDS 32
 
 static void vpack_calc_aabb(const Point2D *poly, uint32_t count, int32_t *min_x, int32_t *min_y, int32_t *max_x, int32_t *max_y) {
     if (count == 0)
