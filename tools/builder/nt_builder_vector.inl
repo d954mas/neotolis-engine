@@ -1402,8 +1402,8 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     uint32_t num_workers = 0;
     if (thread_count > 1) {
         num_workers = thread_count - 1; /* main thread is also a worker (tid=0) */
-        if (num_workers > 7)
-            num_workers = 7; /* cap: more threads = more sync overhead per dispatch */
+        if (num_workers > 15)
+            num_workers = 15; /* cap: more threads = more sync overhead per dispatch */
         par_ctx.num_workers = num_workers;
         par_ctx.results = (VPackParResult *)calloc(num_workers + 1, sizeof(VPackParResult));
         par_ctx.nfp_build.thread_stats = (VPackNFPBuildLocalStats *)calloc(num_workers + 1, sizeof(VPackNFPBuildLocalStats));
