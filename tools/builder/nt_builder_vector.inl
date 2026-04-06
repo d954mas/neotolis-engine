@@ -605,8 +605,14 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
                                   bool use_nfp_cache, VPackNFP *out_nfp, VPackNFPBuildLocalStats *local_stats) {
     uint32_t cache_a = pl_i->shape_hash;
     uint32_t cache_b = neg_hash;
-    /* Hash combine: golden-ratio multipliers for good distribution. */
-    uint32_t cache_set_idx = (cache_a * 2654435761u ^ cache_b * 1597334677u) & (VPACK_NFP_CACHE_SET_COUNT - 1);
+    /* Hash combine: golden-ratio multipliers then xor-shift mix to smear high
+     * and low bits before masking. Helps reduce clustering when keys cluster
+     * in either half of the 32-bit space. */
+    uint32_t cache_mix = cache_a * 2654435761u ^ cache_b * 1597334677u;
+    cache_mix ^= cache_mix >> 16;
+    cache_mix *= 0x85ebca6bu;
+    cache_mix ^= cache_mix >> 13;
+    uint32_t cache_set_idx = cache_mix & (VPACK_NFP_CACHE_SET_COUNT - 1);
     VPackNFPCacheEntry *cache_set = &nfp_cache[cache_set_idx * VPACK_NFP_CACHE_WAYS];
 
     if (use_nfp_cache) {
