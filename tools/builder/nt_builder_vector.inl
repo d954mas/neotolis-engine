@@ -147,10 +147,10 @@ typedef struct {
     int32_t min_x, min_y, max_x, max_y;
 } VPackNFP;
 
-/* Returns true iff (px, py) is blocked by this NFP — point lies inside any ring.
- * Conservative: ignores ring signs (no pocket-fitting). This is safe for screen-space
- * polygons where Clipper2 winding interpretation is ambiguous. Pocket-fitting can be
- * re-enabled once sign detection in nt_clipper2_minkowski_nfp is verified for Y-down. */
+/* Returns true iff (px, py) is blocked by this NFP.
+ * Outer rings (+1) block placement; hole rings (-1) reopen valid pockets where
+ * the incoming polygon fits inside a concavity of the placed polygon.
+ * Sign assignment comes from PolyTree depth in nt_clipper2_minkowski_nfp. */
 static bool vpack_point_in_ring(int32_t px, int32_t py, const Point2D *ring, uint32_t n) {
     bool inside = false;
     for (uint32_t i = 0, j = n - 1; i < n; j = i++) {
@@ -162,6 +162,8 @@ static bool vpack_point_in_ring(int32_t px, int32_t py, const Point2D *ring, uin
 }
 
 static bool vpack_point_in_nfp(int32_t px, int32_t py, const VPackNFP *nfp) {
+    bool inside_outer = false;
+    bool inside_hole = false;
     for (uint8_t r = 0; r < nfp->ring_count; r++) {
         uint32_t start = nfp->ring_offsets[r];
         uint32_t end = nfp->ring_offsets[r + 1];
@@ -169,11 +171,15 @@ static bool vpack_point_in_nfp(int32_t px, int32_t py, const VPackNFP *nfp) {
         if (n < 3)
             continue;
         const Point2D *ring = &nfp->verts[start];
-        if (vpack_point_in_ring(px, py, ring, n)) {
-            return true;
+        if (!vpack_point_in_ring(px, py, ring, n))
+            continue;
+        if (nfp->ring_signs[r] < 0) {
+            inside_hole = true;
+        } else {
+            inside_outer = true;
         }
     }
-    return false;
+    return inside_outer && !inside_hole;
 }
 
 typedef struct {

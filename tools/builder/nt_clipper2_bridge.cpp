@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
+#include <vector>
 
 using namespace Clipper2Lib;
 
@@ -115,10 +117,18 @@ extern "C" uint32_t nt_clipper2_minkowski_nfp(const int32_t *pattern_xy, uint32_
     Path64 pattern = to_path64(pattern_xy, np);
     Path64 path = to_path64(path_xy, n);
 
-    /* Normalize both inputs to Cartesian CCW (positive Area). Our polygons come in
-     * screen-space (Y-down) where CCW = negative Cartesian Area. Clipper2 MinkowskiSum
-     * and Union expect Cartesian CCW; without this normalization NFP boundary winding
-     * is inverted and Union(NonZero) produces invalid (or empty) regions. */
+    /* Flip Y on input: our polygons are in screen-space (Y-down) but Clipper2 uses
+     * Cartesian (Y-up) convention for topology classification (PolyTree depth, IsHole).
+     * Flipping Y makes Clipper2 see truly Cartesian coordinates so PolyTree gives
+     * correct outer/hole nesting. We flip Y back on output to return screen-space coords. */
+    for (auto &p : pattern) {
+        p.y = -p.y;
+    }
+    for (auto &p : path) {
+        p.y = -p.y;
+    }
+
+    /* Now ensure CCW Cartesian winding (positive area) — required by MinkowskiSum. */
     if (Area(pattern) < 0)
         std::reverse(pattern.begin(), pattern.end());
     if (Area(path) < 0)
@@ -126,24 +136,16 @@ extern "C" uint32_t nt_clipper2_minkowski_nfp(const int32_t *pattern_xy, uint32_
 
     /* MinkowskiSum returns convolution loops for concave inputs. To get the actual
      * NFP boundary, union them with NonZero fill rule. The result may have multiple
-     * outer rings (disjoint forbidden zones) and inner rings (pockets where the
+     * outer rings (disjoint forbidden zones) and inner hole rings (pockets where the
      * incoming polygon fits inside the placed polygon). */
     Paths64 convolution = MinkowskiSum(pattern, path, true /* is_closed */);
     if (convolution.empty())
         return 0;
 
-    /* Optimization: when convolution is a single loop (typical for convex × convex),
-     * Union is identity — skip the expensive call. Bit-exact equivalent. */
-    Paths64 nfp;
-    if (convolution.size() == 1) {
-        nfp = std::move(convolution);
-    } else {
-        nfp = Union(convolution, FillRule::NonZero);
-    }
+    Paths64 nfp = Union(convolution, FillRule::NonZero);
     if (nfp.empty())
         return 0;
 
-    /* Concatenate all rings into the output buffers. */
     uint32_t total_verts = 0;
     for (const Path64 &ring : nfp) {
         total_verts += static_cast<uint32_t>(ring.size());
@@ -165,12 +167,18 @@ extern "C" uint32_t nt_clipper2_minkowski_nfp(const int32_t *pattern_xy, uint32_
     for (size_t r = 0; r < nfp.size(); r++) {
         const Path64 &ring = nfp[r];
         ring_lengths[r] = static_cast<uint32_t>(ring.size());
-        /* Clipper2 reports outer rings with positive area, holes with negative.
-         * Note: this depends on input winding being canonical. */
-        ring_signs[r] = (Area(ring) > 0) ? static_cast<int8_t>(1) : static_cast<int8_t>(-1);
+        /* TODO(holes): emit +1 for all rings until we have a verified outer/hole
+         * classifier for screen-space (Y-down) inputs. PolyTree::IsHole() and
+         * Area-based detection both gave wrong topology for spineboy NFPs in
+         * empirical tests — caused massive overlap when fed to hole-aware logic.
+         * vpack_point_in_nfp interprets all-+1 as "block any ring" (safe).
+         * Re-enable hole packing once a real classifier is in place + integration
+         * test confirms opaque-pixel count matches tile_pack baseline. */
+        ring_signs[r] = 1;
         for (size_t i = 0; i < ring.size(); i++) {
             verts[v_cursor * 2] = static_cast<int32_t>(ring[i].x);
-            verts[(v_cursor * 2) + 1] = static_cast<int32_t>(ring[i].y);
+            /* Flip Y back to screen-space (Y-down) for the caller. */
+            verts[(v_cursor * 2) + 1] = static_cast<int32_t>(-ring[i].y);
             v_cursor++;
         }
     }
