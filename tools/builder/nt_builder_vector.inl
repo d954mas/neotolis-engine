@@ -219,8 +219,50 @@ typedef struct {
     int32_t min_x, min_y, max_x, max_y;
 } VPackBounds;
 
-static inline void vpack_add_cand(VPackCand **cands, uint32_t *c_count, uint32_t *c_cap, int32_t x, int32_t y, const VPackBounds *b) {
+typedef struct {
+    uint64_t *seen_bits;
+    uint32_t *dirty_words;
+    uint32_t dirty_word_cap;
+    uint32_t dirty_count;
+    uint32_t max_size;
+} VPackCandDedup;
+
+static inline bool vpack_try_mark_cand_seen(int32_t x, int32_t y, VPackCandDedup *dedup) {
+    if (!dedup || !dedup->seen_bits) {
+        return true;
+    }
+    if ((uint32_t)x >= dedup->max_size || (uint32_t)y >= dedup->max_size) {
+        NT_BUILD_ASSERT(false && "vpack: candidate out of dedup bounds");
+        return false;
+    }
+    size_t bit_index = (size_t)(uint32_t)y * dedup->max_size + (uint32_t)x;
+    uint32_t word_index = (uint32_t)(bit_index >> 6);
+    uint64_t bit = (uint64_t)1 << (bit_index & 63);
+    if (dedup->seen_bits[word_index] & bit) {
+        return false;
+    }
+    if (dedup->seen_bits[word_index] == 0) {
+        NT_BUILD_ASSERT(dedup->dirty_count < dedup->dirty_word_cap && "vpack: candidate dedup dirty overflow");
+        dedup->dirty_words[dedup->dirty_count++] = word_index;
+    }
+    dedup->seen_bits[word_index] |= bit;
+    return true;
+}
+
+static inline void vpack_clear_seen_cands(VPackCandDedup *dedup) {
+    if (!dedup || !dedup->seen_bits) {
+        return;
+    }
+    for (uint32_t i = 0; i < dedup->dirty_count; i++) {
+        dedup->seen_bits[dedup->dirty_words[i]] = 0;
+    }
+    dedup->dirty_count = 0;
+}
+
+static inline void vpack_add_cand(VPackCand **cands, uint32_t *c_count, uint32_t *c_cap, int32_t x, int32_t y, const VPackBounds *b, VPackCandDedup *dedup) {
     if (x < b->min_x || y < b->min_y || x > b->max_x || y > b->max_y)
+        return;
+    if (!vpack_try_mark_cand_seen(x, y, dedup))
         return;
     if (*c_count >= *c_cap) {
         *c_cap = (*c_cap == 0) ? 1024 : (*c_cap * 2);
@@ -231,13 +273,13 @@ static inline void vpack_add_cand(VPackCand **cands, uint32_t *c_count, uint32_t
     (*c_count)++;
 }
 
-static inline void vpack_add_float_cand(VPackCand **cands, uint32_t *c_count, uint32_t *c_cap, float fx, float fy, const VPackBounds *b) {
+static inline void vpack_add_float_cand(VPackCand **cands, uint32_t *c_count, uint32_t *c_cap, float fx, float fy, const VPackBounds *b, VPackCandDedup *dedup) {
     int32_t ix = (int32_t)floorf(fx);
     int32_t iy = (int32_t)floorf(fy);
-    vpack_add_cand(cands, c_count, c_cap, ix, iy, b);
-    vpack_add_cand(cands, c_count, c_cap, ix + 1, iy, b);
-    vpack_add_cand(cands, c_count, c_cap, ix, iy + 1, b);
-    vpack_add_cand(cands, c_count, c_cap, ix + 1, iy + 1, b);
+    vpack_add_cand(cands, c_count, c_cap, ix, iy, b, dedup);
+    vpack_add_cand(cands, c_count, c_cap, ix + 1, iy, b, dedup);
+    vpack_add_cand(cands, c_count, c_cap, ix, iy + 1, b, dedup);
+    vpack_add_cand(cands, c_count, c_cap, ix + 1, iy + 1, b, dedup);
 }
 
 static inline bool vpack_rect_overlap(int32_t ax0, int32_t ay0, int32_t ax1, int32_t ay1, int32_t bx0, int32_t by0, int32_t bx1, int32_t by1) {
@@ -470,9 +512,9 @@ static void vpack_init_single_ring_nfp(VPackNFP *nfp, const Point2D *ring, uint3
 }
 
 static void vpack_add_nfp_candidates(const VPackNFP *nfp, int32_t min_cand_x, int32_t min_cand_y, VPackCand **cands, uint32_t *cand_count, uint32_t *cand_cap, const VPackBounds *bounds,
-                                     bool use_axis_i) {
+                                     bool use_axis_i, VPackCandDedup *dedup) {
     for (uint32_t v = 0; v < nfp->ring_offsets[nfp->ring_count]; v++) {
-        vpack_add_cand(cands, cand_count, cand_cap, nfp->verts[v].x, nfp->verts[v].y, bounds);
+        vpack_add_cand(cands, cand_count, cand_cap, nfp->verts[v].x, nfp->verts[v].y, bounds, dedup);
     }
     for (uint32_t r = 0; r < nfp->ring_count; r++) {
         uint32_t rs = nfp->ring_offsets[r];
@@ -485,21 +527,21 @@ static void vpack_add_nfp_candidates(const VPackNFP *nfp, int32_t min_cand_x, in
             if (use_axis_i) {
                 int32_t vf, vc;
                 if (vpack_intersect_axis_i(pa, pb, true, min_cand_x, &vf, &vc)) {
-                    vpack_add_cand(cands, cand_count, cand_cap, min_cand_x, vf, bounds);
+                    vpack_add_cand(cands, cand_count, cand_cap, min_cand_x, vf, bounds, dedup);
                     if (vc != vf)
-                        vpack_add_cand(cands, cand_count, cand_cap, min_cand_x, vc, bounds);
+                        vpack_add_cand(cands, cand_count, cand_cap, min_cand_x, vc, bounds, dedup);
                 }
                 if (vpack_intersect_axis_i(pa, pb, false, min_cand_y, &vf, &vc)) {
-                    vpack_add_cand(cands, cand_count, cand_cap, vf, min_cand_y, bounds);
+                    vpack_add_cand(cands, cand_count, cand_cap, vf, min_cand_y, bounds, dedup);
                     if (vc != vf)
-                        vpack_add_cand(cands, cand_count, cand_cap, vc, min_cand_y, bounds);
+                        vpack_add_cand(cands, cand_count, cand_cap, vc, min_cand_y, bounds, dedup);
                 }
             } else {
                 float out_val;
                 if (vpack_intersect_axis_f(pa, pb, true, (float)min_cand_x, &out_val))
-                    vpack_add_float_cand(cands, cand_count, cand_cap, (float)min_cand_x, out_val, bounds);
+                    vpack_add_float_cand(cands, cand_count, cand_cap, (float)min_cand_x, out_val, bounds, dedup);
                 if (vpack_intersect_axis_f(pa, pb, false, (float)min_cand_y, &out_val))
-                    vpack_add_float_cand(cands, cand_count, cand_cap, out_val, (float)min_cand_y, bounds);
+                    vpack_add_float_cand(cands, cand_count, cand_cap, out_val, (float)min_cand_y, bounds, dedup);
             }
         }
     }
@@ -868,8 +910,9 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                            int32_t worst_poly_min_y, int32_t worst_poly_max_x, int32_t worst_poly_max_y, int32_t global_min_cand_x, int32_t global_min_cand_y, int32_t global_max_cand_x,
                            int32_t global_max_cand_y, uint32_t extrude, uint32_t margin, bool power_of_two, VPackNFP *nfps, uint64_t (*nfp_grid)[VPACK_GRID_WORDS], VPackCand **cands,
                            uint32_t *cand_cap, uint32_t *relevant_buf, bool *nfp_valid_buf, VPackNFPCacheEntry *nfp_cache, const uint32_t orient_neg_hashes[8], const VPackExperimentConfig *exp,
-                           PackStats *stats, uint64_t *io_best_score, uint32_t page_index, uint32_t grid_dim, uint64_t *dirty_bits_buf, uint32_t *dirty_cells_buf, VPackParCtx *par,
-                           uint32_t *out_best_page, int32_t *out_best_x, int32_t *out_best_y, uint8_t *out_best_orient, uint32_t *out_best_orient_idx) {
+                           PackStats *stats, uint64_t *io_best_score, uint32_t page_index, uint32_t grid_dim, uint32_t max_size, uint64_t *dirty_bits_buf, uint32_t *dirty_cells_buf,
+                           uint64_t *cand_seen_bits, uint32_t *cand_dirty_words, uint32_t cand_seen_word_count, VPackParCtx *par, uint32_t *out_best_page, int32_t *out_best_x, int32_t *out_best_y,
+                           uint8_t *out_best_orient, uint32_t *out_best_orient_idx) {
     uint32_t relevant_count = 0;
     for (uint32_t i = 0; i < page->count; i++) {
         int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - worst_poly_max_x;
@@ -898,7 +941,14 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
 
         uint32_t cand_count = 0;
         VPackBounds bounds = {min_cand_x, min_cand_y, max_cand_x, max_cand_y};
-        vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, min_cand_y, &bounds);
+        VPackCandDedup cand_dedup = {
+            .seen_bits = cand_seen_bits,
+            .dirty_words = cand_dirty_words,
+            .dirty_word_cap = cand_seen_word_count,
+            .dirty_count = 0,
+            .max_size = max_size,
+        };
+        vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, min_cand_y, &bounds, &cand_dedup);
 
         // #region NFP build phase - parallel or sequential
         /* Build NFPs for all relevant items into nfps[ri] (indexed by ri, deterministic).
@@ -981,7 +1031,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 nfps[nfp_count] = nfps[ri];
             }
             if (need_candidates) {
-                vpack_add_nfp_candidates(&nfps[nfp_count], min_cand_x, min_cand_y, cands, &cand_count, cand_cap, &bounds, exp->use_axis_i);
+                vpack_add_nfp_candidates(&nfps[nfp_count], min_cand_x, min_cand_y, cands, &cand_count, cand_cap, &bounds, exp->use_axis_i, &cand_dedup);
             }
             nfp_count++;
         }
@@ -1190,6 +1240,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 memset(nfp_grid[dirty_cells_buf[d]], 0, (size_t)nfp_words * sizeof(uint64_t));
             }
         }
+        vpack_clear_seen_cands(&cand_dedup);
 
         if (found_on_page && *out_best_page == page_index && *out_best_x == min_cand_x && *out_best_y == min_cand_y)
             break;
@@ -1298,6 +1349,11 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     NT_BUILD_ASSERT(dirty_bits_buf && "vector_pack: dirty_bits alloc failed");
     uint32_t *dirty_cells_buf = (uint32_t *)malloc(grid_cell_count * sizeof(uint32_t));
     NT_BUILD_ASSERT(dirty_cells_buf && "vector_pack: dirty_cells alloc failed");
+    size_t cand_seen_bit_count = (size_t)max_size * max_size;
+    uint32_t cand_seen_word_count = (uint32_t)((cand_seen_bit_count + 63) / 64);
+    uint64_t *cand_seen_bits = (uint64_t *)calloc(cand_seen_word_count, sizeof(uint64_t));
+    uint32_t *cand_dirty_words = (uint32_t *)malloc((size_t)cand_seen_word_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(cand_seen_bits && cand_dirty_words && "vector_pack: candidate dedup alloc failed");
 
     // #region Thread pool for parallel candidate testing
     VPackParCtx par_ctx;
@@ -1452,8 +1508,8 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             stats->page_scan_count++;
             if (vpack_try_page(&pages[pi], orient_neg, orient_neg_xy, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y, worst_poly_max_x,
                                worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, extrude, margin, opts->power_of_two, nfps, nfp_grid, &cands, &cand_cap,
-                               relevant_buf, nfp_valid_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, pi, grid_dim, dirty_bits_buf, dirty_cells_buf, par, &best_page, &best_x, &best_y,
-                               &best_orient, &best_orient_idx)) {
+                               relevant_buf, nfp_valid_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, pi, grid_dim, max_size, dirty_bits_buf, dirty_cells_buf, cand_seen_bits,
+                               cand_dirty_words, cand_seen_word_count, par, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx)) {
                 found_any = true;
             }
         }
@@ -1482,8 +1538,8 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             stats->page_scan_count++;
             found_any = vpack_try_page(&pages[new_page], orient_neg, orient_neg_xy, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y,
                                        worst_poly_max_x, worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, extrude, margin, opts->power_of_two, nfps,
-                                       nfp_grid, &cands, &cand_cap, relevant_buf, nfp_valid_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, new_page, grid_dim, dirty_bits_buf,
-                                       dirty_cells_buf, par, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx);
+                                       nfp_grid, &cands, &cand_cap, relevant_buf, nfp_valid_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, new_page, grid_dim, max_size, dirty_bits_buf,
+                                       dirty_cells_buf, cand_seen_bits, cand_dirty_words, cand_seen_word_count, par, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx);
             NT_BUILD_ASSERT(found_any && "vector_pack: empty page should accept placement");
         }
 
@@ -1610,6 +1666,8 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     free(nfp_valid_buf);
     free(dirty_cells_buf);
     free(dirty_bits_buf);
+    free(cand_dirty_words);
+    free(cand_seen_bits);
     /* Shutdown thread pool */
     if (num_workers > 0) {
         mtx_lock(&par_ctx.mtx);
