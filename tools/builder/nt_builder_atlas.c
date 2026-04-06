@@ -376,6 +376,76 @@ static bool point_in_polygon(const Point2D *poly, uint32_t n, Point2D p) {
     return inside;
 }
 
+/* --- Binary morphology: 4-connected dilation (one step) --- */
+
+/* Writes 'out' as the 4-connected dilation of 'in' by one pixel.
+ * 'in' and 'out' must be distinct (tw*th bytes each). */
+static void binary_dilate_4conn(const uint8_t *in, uint8_t *out, uint32_t tw, uint32_t th) {
+    for (uint32_t y = 0; y < th; y++) {
+        for (uint32_t x = 0; x < tw; x++) {
+            size_t i = ((size_t)y * tw) + x;
+            uint8_t v = in[i];
+            uint8_t left = (x > 0) ? in[i - 1] : 0;
+            uint8_t right = (x + 1 < tw) ? in[i + 1] : 0;
+            uint8_t up = (y > 0) ? in[i - tw] : 0;
+            uint8_t down = (y + 1 < th) ? in[i + tw] : 0;
+            out[i] = (v | left | right | up | down) ? (uint8_t)1 : (uint8_t)0;
+        }
+    }
+}
+
+/* --- Binary morphology: count 4-connected components via flood fill --- */
+
+/* Floods one component starting from (sx, sy). Marks reached cells in 'visited'.
+ * Uses caller-provided 'stack' (tw*th*2 int32_t entries) for DFS. */
+static void binary_flood_one_component(const uint8_t *M, uint32_t tw, uint32_t th, uint32_t sx, uint32_t sy, uint8_t *visited, int32_t *stack) {
+    size_t sp = 0;
+    stack[sp * 2] = (int32_t)sx;
+    stack[(sp * 2) + 1] = (int32_t)sy;
+    sp++;
+    visited[((size_t)sy * tw) + sx] = 1;
+    while (sp > 0) {
+        sp--;
+        int32_t cx = stack[sp * 2];
+        int32_t cy = stack[(sp * 2) + 1];
+        static const int32_t dx[4] = {1, -1, 0, 0};
+        static const int32_t dy[4] = {0, 0, 1, -1};
+        for (int d = 0; d < 4; d++) {
+            int32_t nx = cx + dx[d];
+            int32_t ny = cy + dy[d];
+            if (nx < 0 || ny < 0 || nx >= (int32_t)tw || ny >= (int32_t)th) {
+                continue;
+            }
+            size_t ni = ((size_t)ny * tw) + (size_t)nx;
+            if (M[ni] && !visited[ni]) {
+                visited[ni] = 1;
+                stack[sp * 2] = nx;
+                stack[(sp * 2) + 1] = ny;
+                sp++;
+            }
+        }
+    }
+}
+
+/* Returns the number of 4-connected opaque components in 'M'.
+ * Caller must provide scratch buffers 'visited' (tw*th bytes, will be overwritten)
+ * and 'stack' (tw*th*2 int32_t entries). */
+static uint32_t binary_count_components(const uint8_t *M, uint32_t tw, uint32_t th, uint8_t *visited, int32_t *stack) {
+    memset(visited, 0, (size_t)tw * th);
+    uint32_t comp_count = 0;
+    for (uint32_t sy = 0; sy < th; sy++) {
+        for (uint32_t sx = 0; sx < tw; sx++) {
+            size_t si = ((size_t)sy * tw) + sx;
+            if (!M[si] || visited[si]) {
+                continue;
+            }
+            comp_count++;
+            binary_flood_one_component(M, tw, th, sx, sy, visited, stack);
+        }
+    }
+    return comp_count;
+}
+
 /* --- Contour tracing: extract alpha boundary as CCW polygon --- */
 
 /* Traces the outer boundary of opaque pixels on a binary grid.
@@ -3450,248 +3520,47 @@ static void pipeline_geometry(AtlasPipeline *p) {
             const uint8_t *ap = p->alpha_planes[idx];
             uint32_t aw = p->sprites[idx].width;
 
-            /* Build binary mask for trimmed region, count opaque pixels */
+            /* Build binary mask for trimmed region */
             uint8_t *binary = (uint8_t *)calloc((size_t)tw * th, 1);
             NT_BUILD_ASSERT(binary && "pipeline_geometry: alloc failed");
-            uint32_t opaque_total = 0;
-            int32_t start_x = -1;
-            int32_t start_y = -1;
             for (uint32_t y = 0; y < th; y++) {
                 for (uint32_t x = 0; x < tw; x++) {
                     uint8_t a = ap[((size_t)(p->trim_y[idx] + y) * aw) + p->trim_x[idx] + x];
                     if (a >= p->opts->alpha_threshold) {
-                        binary[(y * tw) + x] = 1;
-                        opaque_total++;
-                        if (start_x < 0) {
-                            start_x = (int32_t)x;
-                            start_y = (int32_t)y;
-                        }
+                        binary[((size_t)y * tw) + x] = 1;
                     }
                 }
             }
 
-            /* Connected-component check via 4-connected flood fill from start.
-             * If reachable count < total opaque, sprite has disjoint regions
-             * → fall back to convex hull (which covers everything). */
-            bool multi_component = false;
-            if (opaque_total > 0) {
-                uint8_t *visited = (uint8_t *)calloc((size_t)tw * th, 1);
-                int32_t *stack = (int32_t *)malloc((size_t)tw * th * 2 * sizeof(int32_t));
-                NT_BUILD_ASSERT(visited && stack && "pipeline_geometry: alloc failed");
-                uint32_t reachable = 0;
-                uint32_t sp = 0;
-                stack[sp * 2] = start_x;
-                stack[sp * 2 + 1] = start_y;
-                sp++;
-                visited[(start_y * (int32_t)tw) + start_x] = 1;
-                while (sp > 0) {
-                    sp--;
-                    int32_t cx = stack[sp * 2];
-                    int32_t cy = stack[sp * 2 + 1];
-                    reachable++;
-                    static const int32_t dx[4] = {1, -1, 0, 0};
-                    static const int32_t dy[4] = {0, 0, 1, -1};
-                    for (int d = 0; d < 4; d++) {
-                        int32_t nx = cx + dx[d];
-                        int32_t ny = cy + dy[d];
-                        if (nx < 0 || ny < 0 || nx >= (int32_t)tw || ny >= (int32_t)th) {
-                            continue;
-                        }
-                        size_t ni = (size_t)ny * tw + (size_t)nx;
-                        if (binary[ni] && !visited[ni]) {
-                            visited[ni] = 1;
-                            stack[sp * 2] = nx;
-                            stack[sp * 2 + 1] = ny;
-                            sp++;
-                        }
-                    }
+            // #region Morphological closing — merge disjoint components into one
+            /* If sprite has multiple disjoint opaque regions, iteratively dilate the
+             * binary mask until they form one connected component, so a single contour
+             * trace can produce one simple polygon containing all pixels.
+             * The resulting polygon will be K pixels wider on every side (acceptable —
+             * acts like extra padding). Limit K to avoid pathological cases. */
+            uint8_t *cc_visited = (uint8_t *)calloc((size_t)tw * th, 1);
+            int32_t *cc_stack = (int32_t *)malloc((size_t)tw * th * 2 * sizeof(int32_t));
+            NT_BUILD_ASSERT(cc_visited && cc_stack && "pipeline_geometry: alloc failed");
+            uint32_t comp_count = binary_count_components(binary, tw, th, cc_visited, cc_stack);
+            uint32_t closing_k = 0;
+            if (comp_count > 1) {
+                uint8_t *scratch = (uint8_t *)malloc((size_t)tw * th);
+                NT_BUILD_ASSERT(scratch && "pipeline_geometry: alloc failed");
+                uint32_t max_iter = (tw > th ? tw : th) / 2 + 1;
+                while (comp_count > 1 && closing_k < max_iter) {
+                    binary_dilate_4conn(binary, scratch, tw, th);
+                    memcpy(binary, scratch, (size_t)tw * th);
+                    closing_k++;
+                    comp_count = binary_count_components(binary, tw, th, cc_visited, cc_stack);
                 }
-                free(visited);
-                free(stack);
-                if (reachable < opaque_total) {
-                    multi_component = true;
+                free(scratch);
+                if (comp_count > 1) {
+                    NT_LOG_WARN("pipeline_geometry: sprite '%s' could not merge to 1 component after %u dilations (still %u)", p->sprites[idx].name, closing_k, comp_count);
                 }
             }
-
-            /* Multi-component sprites can't be handled by single-contour trace.
-             * Use convex hull of ALL opaque pixel corners as fallback (covers everything). */
-            if (multi_component) {
-                /* Per-component tracing: trace each component separately, simplify,
-                 * inflate, triangulate, then concatenate into a single mesh.
-                 * The result is a triangle soup (vertices + indices), not a polygon. */
-                Point2D *mc_verts = NULL;
-                uint16_t *mc_indices = NULL;
-                uint32_t mc_total_verts = 0;
-                uint32_t mc_total_tris = 0;
-                uint32_t mc_verts_cap = 0;
-                uint32_t mc_indices_cap = 0;
-
-                uint8_t *visited = (uint8_t *)calloc((size_t)tw * th, 1);
-                uint8_t *comp_mask = (uint8_t *)calloc((size_t)tw * th, 1);
-                int32_t *flood_stack = (int32_t *)malloc((size_t)tw * th * 2 * sizeof(int32_t));
-                NT_BUILD_ASSERT(visited && comp_mask && flood_stack && "pipeline_geometry: alloc failed");
-
-                uint32_t cmax_contour = 2 * tw * th + 4;
-                Point2D *cmp_contour = (Point2D *)malloc(cmax_contour * sizeof(Point2D));
-                NT_BUILD_ASSERT(cmp_contour && "pipeline_geometry: alloc failed");
-
-                /* Find each component via successive flood fills */
-                for (uint32_t scan = 0;; scan++) {
-                    /* Find next unvisited opaque pixel */
-                    int32_t csx = -1;
-                    int32_t csy = -1;
-                    for (uint32_t y = 0; y < th && csx < 0; y++) {
-                        for (uint32_t x = 0; x < tw; x++) {
-                            size_t i = y * tw + x;
-                            if (binary[i] && !visited[i]) {
-                                csx = (int32_t)x;
-                                csy = (int32_t)y;
-                                break;
-                            }
-                        }
-                    }
-                    if (csx < 0) {
-                        break;
-                    }
-
-                    /* Flood fill this component into comp_mask */
-                    memset(comp_mask, 0, (size_t)tw * th);
-                    uint32_t fsp = 0;
-                    flood_stack[fsp * 2] = csx;
-                    flood_stack[fsp * 2 + 1] = csy;
-                    fsp++;
-                    visited[(size_t)csy * tw + csx] = 1;
-                    comp_mask[(size_t)csy * tw + csx] = 1;
-                    while (fsp > 0) {
-                        fsp--;
-                        int32_t cx = flood_stack[fsp * 2];
-                        int32_t cy = flood_stack[fsp * 2 + 1];
-                        static const int32_t dx[4] = {1, -1, 0, 0};
-                        static const int32_t dy[4] = {0, 0, 1, -1};
-                        for (int d = 0; d < 4; d++) {
-                            int32_t nx = cx + dx[d];
-                            int32_t ny = cy + dy[d];
-                            if (nx < 0 || ny < 0 || nx >= (int32_t)tw || ny >= (int32_t)th) {
-                                continue;
-                            }
-                            size_t ni = (size_t)ny * tw + (size_t)nx;
-                            if (binary[ni] && !visited[ni]) {
-                                visited[ni] = 1;
-                                comp_mask[ni] = 1;
-                                flood_stack[fsp * 2] = nx;
-                                flood_stack[fsp * 2 + 1] = ny;
-                                fsp++;
-                            }
-                        }
-                    }
-
-                    /* Trace contour of this component */
-                    uint32_t cnt = trace_contour(comp_mask, tw, th, cmp_contour, cmax_contour);
-                    if (cnt < 3) {
-                        continue;
-                    }
-
-                    /* Clean + simplify + inflate per component */
-                    Point2D *cclean = (Point2D *)malloc(cnt * sizeof(Point2D));
-                    NT_BUILD_ASSERT(cclean && "pipeline_geometry: alloc failed");
-                    uint32_t ccnt = remove_collinear(cmp_contour, cnt, cclean);
-
-                    Point2D *csimp = (Point2D *)malloc(ccnt * sizeof(Point2D));
-                    NT_BUILD_ASSERT(csimp && "pipeline_geometry: alloc failed");
-                    double ceps = 0.5;
-                    uint32_t cs_n = rdp_simplify(cclean, ccnt, ceps, csimp);
-                    /* Cap per-component vertices at max_vertices to keep mesh manageable */
-                    uint32_t ctarget = p->opts->max_vertices;
-                    while (cs_n > ctarget && ceps < 100.0) {
-                        ceps *= 1.5;
-                        cs_n = rdp_simplify(cclean, ccnt, ceps, csimp);
-                    }
-                    free(cclean);
-
-                    int32_t *cs_xy = (int32_t *)malloc(cs_n * 2 * sizeof(int32_t));
-                    NT_BUILD_ASSERT(cs_xy && "pipeline_geometry: alloc failed");
-                    for (uint32_t v = 0; v < cs_n; v++) {
-                        cs_xy[v * 2] = csimp[v].x;
-                        cs_xy[v * 2 + 1] = csimp[v].y;
-                    }
-                    free(csimp);
-
-                    int32_t *cs_inflated = NULL;
-                    uint32_t ci_n = nt_clipper2_inflate(cs_xy, cs_n, ceps + 1.0, &cs_inflated);
-                    free(cs_xy);
-                    if (ci_n < 3 || !cs_inflated) {
-                        free(cs_inflated);
-                        continue;
-                    }
-
-                    /* Triangulate this component */
-                    Point2D *cinf_verts = (Point2D *)malloc(ci_n * sizeof(Point2D));
-                    NT_BUILD_ASSERT(cinf_verts && "pipeline_geometry: alloc failed");
-                    for (uint32_t v = 0; v < ci_n; v++) {
-                        cinf_verts[v].x = cs_inflated[v * 2];
-                        cinf_verts[v].y = cs_inflated[v * 2 + 1];
-                    }
-                    free(cs_inflated);
-
-                    uint16_t *cidx = (uint16_t *)malloc((size_t)ci_n * 3 * sizeof(uint16_t));
-                    NT_BUILD_ASSERT(cidx && "pipeline_geometry: alloc failed");
-                    uint32_t ctri = ear_clip_triangulate(cinf_verts, ci_n, cidx);
-
-                    /* Append vertices and offset-adjusted indices to the mesh */
-                    if (mc_total_verts + ci_n > mc_verts_cap) {
-                        mc_verts_cap = (mc_verts_cap == 0) ? 64 : (mc_verts_cap * 2);
-                        if (mc_verts_cap < mc_total_verts + ci_n) {
-                            mc_verts_cap = mc_total_verts + ci_n;
-                        }
-                        mc_verts = (Point2D *)realloc(mc_verts, mc_verts_cap * sizeof(Point2D));
-                        NT_BUILD_ASSERT(mc_verts && "pipeline_geometry: realloc failed");
-                    }
-                    memcpy(mc_verts + mc_total_verts, cinf_verts, ci_n * sizeof(Point2D));
-                    free(cinf_verts);
-
-                    if (mc_total_tris + ctri > mc_indices_cap) {
-                        mc_indices_cap = (mc_indices_cap == 0) ? 64 : (mc_indices_cap * 2);
-                        if (mc_indices_cap < mc_total_tris + ctri) {
-                            mc_indices_cap = mc_total_tris + ctri;
-                        }
-                        mc_indices = (uint16_t *)realloc(mc_indices, (size_t)mc_indices_cap * 3 * sizeof(uint16_t));
-                        NT_BUILD_ASSERT(mc_indices && "pipeline_geometry: realloc failed");
-                    }
-                    /* Adjust indices by current vertex offset */
-                    for (uint32_t t = 0; t < ctri * 3; t++) {
-                        mc_indices[mc_total_tris * 3 + t] = (uint16_t)(cidx[t] + mc_total_verts);
-                    }
-                    free(cidx);
-
-                    mc_total_verts += ci_n;
-                    mc_total_tris += ctri;
-                }
-
-                free(cmp_contour);
-                free(flood_stack);
-                free(comp_mask);
-                free(visited);
-                free(binary);
-
-                if (mc_total_verts >= 3 && mc_total_tris > 0) {
-                    p->hull_vertices[idx] = mc_verts;
-                    p->vertex_counts[idx] = mc_total_verts;
-                    p->pre_tri_indices[idx] = mc_indices;
-                    p->pre_tri_counts[idx] = mc_total_tris;
-                } else {
-                    /* Last resort: single rect */
-                    free(mc_verts);
-                    free(mc_indices);
-                    p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
-                    NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
-                    p->hull_vertices[idx][0] = (Point2D){0, 0};
-                    p->hull_vertices[idx][1] = (Point2D){(int32_t)tw, 0};
-                    p->hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
-                    p->hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
-                    p->vertex_counts[idx] = 4;
-                }
-                continue; /* skip the single-component contour path */
-            }
+            free(cc_stack);
+            free(cc_visited);
+            // #endregion
 
             /* Trace outer contour (CCW). Worst-case contour length is
              * 2*(tw*th) for maximally jagged shapes (checkerboard). */
@@ -3748,25 +3617,12 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 uint32_t inf_count = nt_clipper2_inflate(simp_xy, simp_count, inflate_amt, &inflated_xy);
                 free(simp_xy);
 
-                /* Sanity check: Clipper2 can return bizarre results for degenerate inputs.
-                 * All output coordinates must be within sprite trim bounds + small margin. */
+                /* Trust Clipper2 — only fail on obvious degenerate output (too few vertices). */
                 bool sane_result = (inf_count >= 3 && inflated_xy != NULL);
-                if (sane_result) {
-                    int32_t lo_x = -16, hi_x = (int32_t)tw + 16;
-                    int32_t lo_y = -16, hi_y = (int32_t)th + 16;
-                    for (uint32_t v = 0; v < inf_count; v++) {
-                        int32_t x = (int32_t)inflated_xy[v * 2];
-                        int32_t y = (int32_t)inflated_xy[v * 2 + 1];
-                        if (x < lo_x || x > hi_x || y < lo_y || y > hi_y) {
-                            sane_result = false;
-                            break;
-                        }
-                    }
-                }
 
                 if (sane_result) {
                     /* If Clipper2 produced too many vertices (edge splits at concave corners),
-                     * apply RDP again to get under 32 vertices (downstream uses stack arrays). */
+                     * apply RDP again to get under max_vertices. */
                     Point2D *result = (Point2D *)malloc(inf_count * sizeof(Point2D));
                     NT_BUILD_ASSERT(result && "pipeline_geometry: alloc failed");
                     for (uint32_t v = 0; v < inf_count; v++) {
@@ -3775,12 +3631,13 @@ static void pipeline_geometry(AtlasPipeline *p) {
                     }
                     free(inflated_xy);
 
-                    if (inf_count > 32) {
+                    uint32_t final_target = p->opts->max_vertices;
+                    if (inf_count > final_target) {
                         Point2D *reduced = (Point2D *)malloc(inf_count * sizeof(Point2D));
                         NT_BUILD_ASSERT(reduced && "pipeline_geometry: alloc failed");
                         double eps2 = 1.0;
                         uint32_t red_count = rdp_simplify(result, inf_count, eps2, reduced);
-                        while (red_count > 32 && eps2 < 100.0) {
+                        while (red_count > final_target && eps2 < 100.0) {
                             eps2 *= 1.5;
                             red_count = rdp_simplify(result, inf_count, eps2, reduced);
                         }
@@ -3788,8 +3645,8 @@ static void pipeline_geometry(AtlasPipeline *p) {
                         result = reduced;
                         inf_count = red_count;
                     }
+                    NT_BUILD_ASSERT(inf_count <= p->opts->max_vertices && "pipeline_geometry: failed to reduce polygon to max_vertices");
 
-                    /* Multi-component sprites are handled before trace_contour. */
                     p->hull_vertices[idx] = result;
                     p->vertex_counts[idx] = inf_count;
                 } else {

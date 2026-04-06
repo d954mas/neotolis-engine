@@ -133,25 +133,43 @@ static bool vpack_intersect_axis_i(Point2D p1, Point2D p2, bool is_x_axis, int32
     return true;
 }
 
-/* Point-in-polygon test (ray casting, even-odd rule) — handles concave polygons. */
-static bool vpack_point_in_poly(int32_t px, int32_t py, const Point2D *poly, uint32_t count) {
-    if (count < 3)
-        return false;
-    bool inside = false;
-    for (uint32_t i = 0, j = count - 1; i < count; j = i++) {
-        if (((poly[i].y > py) != (poly[j].y > py)) && (px < (int32_t)(((int64_t)(poly[j].x - poly[i].x) * (int64_t)(py - poly[i].y)) / (int64_t)(poly[j].y - poly[i].y) + poly[i].x))) {
-            inside = !inside;
-        }
-    }
-    return inside;
-}
-
-#define VPACK_NFP_MAX_VERTS 128
+/* Multi-ring NFP: outer rings (+1) describe forbidden zones; hole rings (-1)
+ * describe pockets where the incoming polygon fits inside the placed polygon.
+ * A point is "blocked" iff it lies in some outer ring but not inside any hole.
+ * Generous limits — concave pair NFPs can produce many vertices. */
+#define VPACK_NFP_MAX_RINGS 32
+#define VPACK_NFP_MAX_VERTS 1024
 typedef struct {
-    Point2D verts[VPACK_NFP_MAX_VERTS]; /* Clipper2 Minkowski on concave polys can have more verts */
-    uint32_t count;
+    Point2D verts[VPACK_NFP_MAX_VERTS];
+    uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1]; /* ring_offsets[r+1] - ring_offsets[r] = vertex count of ring r; ring_offsets[ring_count] = total */
+    int8_t ring_signs[VPACK_NFP_MAX_RINGS];         /* +1 outer / -1 hole */
+    uint8_t ring_count;
     int32_t min_x, min_y, max_x, max_y;
 } VPackNFP;
+
+/* Returns true iff (px, py) is blocked by this NFP — point lies inside any ring.
+ * Conservative: ignores ring signs (no pocket-fitting). This is safe for screen-space
+ * polygons where Clipper2 winding interpretation is ambiguous. */
+static bool vpack_point_in_nfp(int32_t px, int32_t py, const VPackNFP *nfp) {
+    for (uint8_t r = 0; r < nfp->ring_count; r++) {
+        uint32_t start = nfp->ring_offsets[r];
+        uint32_t end = nfp->ring_offsets[r + 1];
+        uint32_t n = end - start;
+        if (n < 3)
+            continue;
+        const Point2D *ring = &nfp->verts[start];
+        bool inside = false;
+        for (uint32_t i = 0, j = n - 1; i < n; j = i++) {
+            if (((ring[i].y > py) != (ring[j].y > py)) && (px < (int32_t)(((int64_t)(ring[j].x - ring[i].x) * (int64_t)(py - ring[i].y)) / (int64_t)(ring[j].y - ring[i].y) + ring[i].x))) {
+                inside = !inside;
+            }
+        }
+        if (inside) {
+            return true;
+        }
+    }
+    return false;
+}
 
 typedef struct {
     int32_t x, y;
@@ -187,20 +205,28 @@ static inline bool vpack_rect_overlap(int32_t ax0, int32_t ay0, int32_t ax1, int
     return !(ax1 < bx0 || ax0 > bx1 || ay1 < by0 || ay0 > by1);
 }
 
+/* Inflated pack polygon: polygon_inflate may add vertices at concave splits,
+ * so this is wider than the final ≤max_vertices polygon stored in the atlas blob.
+ * Capacity 32 matches polygon_inflate's hard cap. */
+#define VPACK_PLACED_MAX_VERTS 32
 typedef struct {
-    Point2D poly[32];
+    Point2D poly[VPACK_PLACED_MAX_VERTS];
     uint32_t count;
     int32_t x, y;
     int32_t aabb_min_x, aabb_min_y, aabb_max_x, aabb_max_y; /* polygon AABB (relative, not offset by x,y) */
     uint32_t shape_hash;
 } VPackPlaced;
 
-/* NFP cache: direct-mapped hash table keyed by (placed_shape_hash, incoming_shape_hash) */
-#define VPACK_NFP_CACHE_SIZE 32768U /* must be power of 2 */
+/* NFP cache: direct-mapped hash table keyed by (placed_shape_hash, incoming_shape_hash).
+ * Smaller capacity than the old cache because each entry is now larger (multi-ring NFP). */
+#define VPACK_NFP_CACHE_SIZE 4096U /* must be power of 2 */
 typedef struct {
     uint32_t key_a, key_b; /* shape hashes; both 0 = empty slot */
-    Point2D verts[32];     /* max nA+nB where each polygon ≤ 16 vertices */
-    uint32_t count;
+    Point2D verts[VPACK_NFP_MAX_VERTS];
+    uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1];
+    int8_t ring_signs[VPACK_NFP_MAX_RINGS];
+    uint8_t ring_count;
+    int32_t min_x, min_y, max_x, max_y;
 } VPackNFPCacheEntry;
 
 static uint32_t vpack_shape_hash(const Point2D *poly, uint32_t count) {
@@ -369,7 +395,7 @@ static void vpack_scan_candidate_range(const VPackScanCtx *scan, uint32_t start,
                         uint32_t i = w * 64 + bit_idx;
                         if (cx >= scan->nfps[i].min_x && cx <= scan->nfps[i].max_x && cy >= scan->nfps[i].min_y && cy <= scan->nfps[i].max_y) {
                             local_tests++;
-                            if (vpack_point_in_poly(cx, cy, scan->nfps[i].verts, scan->nfps[i].count)) {
+                            if (vpack_point_in_nfp(cx, cy, &scan->nfps[i])) {
                                 safe = false;
                                 break;
                             }
@@ -382,7 +408,7 @@ static void vpack_scan_candidate_range(const VPackScanCtx *scan, uint32_t start,
             for (uint32_t i = 0; i < scan->nfp_count && safe; i++) {
                 if (cx >= scan->nfps[i].min_x && cx <= scan->nfps[i].max_x && cy >= scan->nfps[i].min_y && cy <= scan->nfps[i].max_y) {
                     local_tests++;
-                    if (vpack_point_in_poly(cx, cy, scan->nfps[i].verts, scan->nfps[i].count)) {
+                    if (vpack_point_in_nfp(cx, cy, &scan->nfps[i])) {
                         safe = false;
                     }
                 }
@@ -488,71 +514,100 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                     need_candidates = false;
             }
 
-            // #region Full-polygon NFP via Clipper2 MinkowskiSum
-            /* Clipper2 MinkowskiSum handles concave polygons directly (convolution + union).
-             * Result may be non-convex — we use ray-cast point-in-polygon for collision testing. */
+            // #region Full multi-ring NFP via Clipper2 (MinkowskiSum + Union)
+            /* Compute the No-Fit Polygon as the union of MinkowskiSum convolution loops.
+             * For concave inputs the NFP may have multiple outer rings (disjoint
+             * forbidden zones) and inner hole rings (pockets where the incoming
+             * polygon fits inside the placed polygon). All rings are kept. */
             const VPackPlaced *pl_i = &page->placed[i];
             VPackNFP *nfp = &nfps[nfp_count];
 
-            /* Convert placed and negated-incoming polygons to flat xy */
-            int32_t placed_xy[32 * 2];
-            int32_t neg_xy[32 * 2];
-            for (uint32_t v = 0; v < pl_i->count && v < 32; v++) {
+            int32_t placed_xy[VPACK_PLACED_MAX_VERTS * 2];
+            int32_t neg_xy[VPACK_PLACED_MAX_VERTS * 2];
+            NT_BUILD_ASSERT(pl_i->count <= VPACK_PLACED_MAX_VERTS && "vpack: placed poly exceeds max verts");
+            NT_BUILD_ASSERT(cur_count <= VPACK_PLACED_MAX_VERTS && "vpack: incoming poly exceeds max verts");
+            for (uint32_t v = 0; v < pl_i->count; v++) {
                 placed_xy[v * 2] = pl_i->poly[v].x;
-                placed_xy[v * 2 + 1] = pl_i->poly[v].y;
+                placed_xy[(v * 2) + 1] = pl_i->poly[v].y;
             }
-            for (uint32_t v = 0; v < cur_count && v < 32; v++) {
+            for (uint32_t v = 0; v < cur_count; v++) {
                 neg_xy[v * 2] = orient_neg[ori][v].x;
-                neg_xy[v * 2 + 1] = orient_neg[ori][v].y;
+                neg_xy[(v * 2) + 1] = orient_neg[ori][v].y;
             }
+
             int32_t *nfp_xy = NULL;
-            uint32_t nfp_verts = nt_clipper2_minkowski_sum(placed_xy, pl_i->count, neg_xy, cur_count, &nfp_xy);
+            uint32_t *nfp_ring_lengths = NULL;
+            int8_t *nfp_ring_signs = NULL;
+            uint32_t nfp_ring_count = 0;
+            uint32_t nfp_total_verts = nt_clipper2_minkowski_nfp(placed_xy, pl_i->count, neg_xy, cur_count, &nfp_xy, &nfp_ring_lengths, &nfp_ring_signs, &nfp_ring_count);
             stats->or_count++;
 
-            if (nfp_verts >= 3 && nfp_xy && nfp_verts <= VPACK_NFP_MAX_VERTS) {
-                nfp->count = nfp_verts;
-                for (uint32_t v = 0; v < nfp_verts; v++) {
-                    nfp->verts[v].x = nfp_xy[v * 2] + pl_i->x;
-                    nfp->verts[v].y = nfp_xy[v * 2 + 1] + pl_i->y;
+            bool nfp_ok = (nfp_total_verts >= 3 && nfp_xy && nfp_ring_count > 0 && nfp_ring_count <= VPACK_NFP_MAX_RINGS && nfp_total_verts <= VPACK_NFP_MAX_VERTS);
+            if (nfp_ok) {
+                nfp->ring_count = (uint8_t)nfp_ring_count;
+                nfp->ring_offsets[0] = 0;
+                uint32_t v_cursor = 0;
+                for (uint32_t r = 0; r < nfp_ring_count; r++) {
+                    uint32_t rl = nfp_ring_lengths[r];
+                    nfp->ring_signs[r] = nfp_ring_signs[r];
+                    for (uint32_t v = 0; v < rl; v++) {
+                        nfp->verts[v_cursor].x = nfp_xy[(v_cursor * 2)] + pl_i->x;
+                        nfp->verts[v_cursor].y = nfp_xy[(v_cursor * 2) + 1] + pl_i->y;
+                        v_cursor++;
+                    }
+                    nfp->ring_offsets[r + 1] = (uint16_t)v_cursor;
                 }
-                vpack_calc_aabb(nfp->verts, nfp->count, &nfp->min_x, &nfp->min_y, &nfp->max_x, &nfp->max_y);
+                vpack_calc_aabb(nfp->verts, nfp_total_verts, &nfp->min_x, &nfp->min_y, &nfp->max_x, &nfp->max_y);
 
                 if (need_candidates) {
-                    for (uint32_t v = 0; v < nfp->count; v++) {
+                    /* Candidate seeds: every vertex of every ring */
+                    for (uint32_t v = 0; v < nfp_total_verts; v++) {
                         vpack_add_cand(cands, &cand_count, cand_cap, nfp->verts[v].x, nfp->verts[v].y, &bounds);
                     }
-                    for (uint32_t e = 0; e < nfp->count; e++) {
-                        uint32_t en = (e + 1 == nfp->count) ? 0 : e + 1;
-                        if (exp->use_axis_i) {
-                            int32_t vf, vc;
-                            if (vpack_intersect_axis_i(nfp->verts[e], nfp->verts[en], true, min_cand_x, &vf, &vc)) {
-                                vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vf, &bounds);
-                                if (vc != vf)
-                                    vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vc, &bounds);
+                    /* Edge-axis intersections, per ring (do not cross ring boundaries) */
+                    for (uint32_t r = 0; r < nfp_ring_count; r++) {
+                        uint32_t rs = nfp->ring_offsets[r];
+                        uint32_t re = nfp->ring_offsets[r + 1];
+                        uint32_t rn = re - rs;
+                        for (uint32_t e = 0; e < rn; e++) {
+                            uint32_t en = (e + 1 == rn) ? 0 : e + 1;
+                            Point2D pa = nfp->verts[rs + e];
+                            Point2D pb = nfp->verts[rs + en];
+                            if (exp->use_axis_i) {
+                                int32_t vf, vc;
+                                if (vpack_intersect_axis_i(pa, pb, true, min_cand_x, &vf, &vc)) {
+                                    vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vf, &bounds);
+                                    if (vc != vf)
+                                        vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vc, &bounds);
+                                }
+                                if (vpack_intersect_axis_i(pa, pb, false, min_cand_y, &vf, &vc)) {
+                                    vpack_add_cand(cands, &cand_count, cand_cap, vf, min_cand_y, &bounds);
+                                    if (vc != vf)
+                                        vpack_add_cand(cands, &cand_count, cand_cap, vc, min_cand_y, &bounds);
+                                }
+                            } else {
+                                float out_val;
+                                if (vpack_intersect_axis_f(pa, pb, true, (float)min_cand_x, &out_val))
+                                    vpack_add_float_cand(cands, &cand_count, cand_cap, (float)min_cand_x, out_val, &bounds);
+                                if (vpack_intersect_axis_f(pa, pb, false, (float)min_cand_y, &out_val))
+                                    vpack_add_float_cand(cands, &cand_count, cand_cap, out_val, (float)min_cand_y, &bounds);
                             }
-                            if (vpack_intersect_axis_i(nfp->verts[e], nfp->verts[en], false, min_cand_y, &vf, &vc)) {
-                                vpack_add_cand(cands, &cand_count, cand_cap, vf, min_cand_y, &bounds);
-                                if (vc != vf)
-                                    vpack_add_cand(cands, &cand_count, cand_cap, vc, min_cand_y, &bounds);
-                            }
-                        } else {
-                            float out_val;
-                            if (vpack_intersect_axis_f(nfp->verts[e], nfp->verts[en], true, (float)min_cand_x, &out_val))
-                                vpack_add_float_cand(cands, &cand_count, cand_cap, (float)min_cand_x, out_val, &bounds);
-                            if (vpack_intersect_axis_f(nfp->verts[e], nfp->verts[en], false, (float)min_cand_y, &out_val))
-                                vpack_add_float_cand(cands, &cand_count, cand_cap, out_val, (float)min_cand_y, &bounds);
                         }
                     }
                 }
                 nfp_count++;
             } else {
-                /* Clipper2 Minkowski failed or returned too many verts — skip this NFP.
+                /* Clipper2 NFP failed or exceeded limits — skip this constraint.
                  * Other NFPs from other placed sprites will still constrain candidates. */
-                if (nfp_verts > VPACK_NFP_MAX_VERTS) {
-                    NT_LOG_WARN("vpack: NFP vertex count %u exceeds limit %u, skipping", nfp_verts, VPACK_NFP_MAX_VERTS);
+                if (nfp_total_verts > VPACK_NFP_MAX_VERTS) {
+                    NT_LOG_WARN("vpack: NFP vertex count %u exceeds limit %u, skipping", nfp_total_verts, VPACK_NFP_MAX_VERTS);
+                } else if (nfp_ring_count > VPACK_NFP_MAX_RINGS) {
+                    NT_LOG_WARN("vpack: NFP ring count %u exceeds limit %u, skipping", nfp_ring_count, VPACK_NFP_MAX_RINGS);
                 }
             }
             free(nfp_xy);
+            free(nfp_ring_lengths);
+            free(nfp_ring_signs);
             // #endregion
         }
         stats->candidate_count += cand_count;
@@ -805,7 +860,10 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     uint32_t *inf_counts = (uint32_t *)malloc(sprite_count * sizeof(uint32_t));
     NT_BUILD_ASSERT(inf_polys && inf_counts && "vector_pack: alloc failed");
     for (uint32_t i = 0; i < sprite_count; i++) {
-        inf_polys[i] = (Point2D *)malloc(hull_counts[i] * sizeof(Point2D));
+        /* polygon_inflate contract: output buffer must hold at least max(n, 32) entries
+         * because Clipper2 inflate may insert extra vertices at concave splits. */
+        size_t alloc_n = (hull_counts[i] > VPACK_PLACED_MAX_VERTS) ? hull_counts[i] : VPACK_PLACED_MAX_VERTS;
+        inf_polys[i] = (Point2D *)malloc(alloc_n * sizeof(Point2D));
         NT_BUILD_ASSERT(inf_polys[i] && "vector_pack: alloc failed");
         if (dilate > 0.0F) {
             inf_counts[i] = polygon_inflate(hull_verts[i], hull_counts[i], dilate, inf_polys[i]);
@@ -813,6 +871,7 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
             memcpy(inf_polys[i], hull_verts[i], hull_counts[i] * sizeof(Point2D));
             inf_counts[i] = hull_counts[i];
         }
+        NT_BUILD_ASSERT(inf_counts[i] <= VPACK_PLACED_MAX_VERTS && "vector_pack: inflated polygon exceeds VPACK_PLACED_MAX_VERTS");
     }
     // #endregion
 

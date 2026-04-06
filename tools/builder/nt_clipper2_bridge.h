@@ -32,14 +32,21 @@ uint32_t nt_clipper2_inflate(const int32_t *xy_in, uint32_t n, double delta, int
  * Returns number of triangles (0 on failure). */
 uint32_t nt_clipper2_triangulate(const int32_t *xy_in, uint32_t n, uint16_t **indices_out);
 
-/* --- Minkowski Sum ---
- * Computes Minkowski sum of two polygons (handles concave).
- * Result may be multiple paths (union of convolutions).
+/* --- Minkowski Sum / NFP ---
+ * Computes the No-Fit Polygon as Minkowski sum of two polygons (handles concave).
+ * Internally: MinkowskiSum produces convolution loops, then Union(NonZero) merges
+ * them into the actual NFP (one or more outer rings, possibly with hole rings).
+ *
  * Input:  pattern xy[np*2], path xy[n*2]
- * Output: single merged polygon xy[out_n*2], heap-allocated. Caller frees.
- *         (Takes the largest path from the result.)
- * Returns number of vertices in output (0 on failure). */
-uint32_t nt_clipper2_minkowski_sum(const int32_t *pattern_xy, uint32_t np, const int32_t *path_xy, uint32_t n, int32_t **xy_out);
+ * Output:
+ *   verts_out         flat xy pairs for all rings, concatenated  (heap-allocated)
+ *   ring_lengths_out  vertex count per ring                       (heap-allocated)
+ *   ring_signs_out    +1 = outer (CCW), -1 = hole (CW)            (heap-allocated)
+ *   ring_count_out    number of rings (0 on failure)
+ *
+ * All output arrays caller-freed via free(). Returns total vertex count (0 on failure). */
+uint32_t nt_clipper2_minkowski_nfp(const int32_t *pattern_xy, uint32_t np, const int32_t *path_xy, uint32_t n, int32_t **verts_out, uint32_t **ring_lengths_out, int8_t **ring_signs_out,
+                                   uint32_t *ring_count_out);
 
 #ifdef __cplusplus
 }
