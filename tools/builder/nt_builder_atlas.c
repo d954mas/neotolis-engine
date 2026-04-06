@@ -942,13 +942,14 @@ static uint32_t next_pot(uint32_t v) {
     v |= v >> 16;
     return v + 1;
 }
-/* --- Rasterize convex hull polygon onto tile grid via fan triangulation --- */
+/* --- Rasterize polygon or pre-triangulated mesh onto tile grid --- */
 
-/* Create tile grid from inflated polygon. The polygon vertices are in pixel
- * coordinates. The grid covers the polygon bounding box in tile units.
- * Origin offset (in tiles) returned via out_ox, out_oy. */
+/* Create tile grid from polygon (single-component) or pre-triangulated mesh
+ * (multi-component). If pre_indices is non-NULL, it's used directly as a triangle
+ * list. Otherwise the function triangulates 'hull' as a single polygon outline. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static TileGrid tgrid_from_polygon(const Point2D *hull, uint32_t hull_n, uint32_t sprite_tw, uint32_t sprite_th, uint32_t tile_size, int32_t *out_ox, int32_t *out_oy) {
+static TileGrid tgrid_from_polygon(const Point2D *hull, uint32_t hull_n, uint32_t sprite_tw, uint32_t sprite_th, uint32_t tile_size, int32_t *out_ox, int32_t *out_oy, const uint16_t *pre_indices,
+                                   uint32_t pre_tri_count) {
     (void)sprite_tw;
     (void)sprite_th;
 
@@ -993,9 +994,18 @@ static TileGrid tgrid_from_polygon(const Point2D *hull, uint32_t hull_n, uint32_
 
     TileGrid g = tgrid_create(tw, th, tile_size);
 
-    /* Triangulate polygon (fan for convex, ear-clip for concave) */
-    uint16_t indices[96]; /* max 32 vertices -> 30 tris -> 90 indices */
-    uint32_t tri_count = ear_clip_triangulate(hull, hull_n, indices);
+    /* Use pre-computed triangulation if provided (multi-component mesh),
+     * otherwise triangulate the polygon outline. */
+    uint16_t local_indices[96]; /* max 32 vertices -> 30 tris -> 90 indices */
+    const uint16_t *indices;
+    uint32_t tri_count;
+    if (pre_indices) {
+        indices = pre_indices;
+        tri_count = pre_tri_count;
+    } else {
+        tri_count = ear_clip_triangulate(hull, hull_n, local_indices);
+        indices = local_indices;
+    }
 
     /* For each tile cell, test if any triangle overlaps the tile rect */
     for (uint32_t ty = 0; ty < th; ty++) {
@@ -2214,8 +2224,8 @@ static int area_sort_cmp(const void *a, const void *b) {
 /* --- Tile packer with tile-grid collision (ATLAS-02, ATLAS-03, ATLAS-04, ATLAS-18) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts,
-                          AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats) {
+static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint16_t **pre_tri_indices, const uint32_t *pre_tri_counts,
+                          uint32_t sprite_count, const nt_atlas_opts_t *opts, AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats) {
     uint32_t max_size = opts->max_size;
     uint32_t margin = opts->margin;
     uint32_t extrude = opts->extrude;
@@ -2233,9 +2243,15 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
     NT_BUILD_ASSERT(sprite_grids && grid_ox && grid_oy && "tile_pack: alloc failed");
 
     for (uint32_t i = 0; i < sprite_count; i++) {
-        Point2D inf_poly[32];
-        uint32_t inf_n = polygon_inflate(hull_verts[i], hull_counts[i], dilate, inf_poly);
-        sprite_grids[i] = tgrid_from_polygon(inf_poly, inf_n, trim_w[i], trim_h[i], ts, &grid_ox[i], &grid_oy[i]);
+        if (pre_tri_indices && pre_tri_indices[i]) {
+            /* Multi-component pre-triangulated mesh — rasterize triangles directly.
+             * The dilate margin is approximated by tile-grid dilation later if needed. */
+            sprite_grids[i] = tgrid_from_polygon(hull_verts[i], hull_counts[i], trim_w[i], trim_h[i], ts, &grid_ox[i], &grid_oy[i], pre_tri_indices[i], pre_tri_counts[i]);
+        } else {
+            Point2D inf_poly[32];
+            uint32_t inf_n = polygon_inflate(hull_verts[i], hull_counts[i], dilate, inf_poly);
+            sprite_grids[i] = tgrid_from_polygon(inf_poly, inf_n, trim_w[i], trim_h[i], ts, &grid_ox[i], &grid_oy[i], NULL, 0);
+        }
     }
     // #endregion
 
@@ -2366,8 +2382,11 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
         int32_t base_oy = grid_oy[idx];
 
         /* For rotations/flips, build transformed tile grids from transformed inflated polygon.
-         * 3-bit flags: bit0=flipH, bit1=flipV, bit2=diagonal. 8 orientations total. */
-        uint32_t rot_count = allow_rotate ? 8 : 1;
+         * 3-bit flags: bit0=flipH, bit1=flipV, bit2=diagonal. 8 orientations total.
+         * Multi-component sprites (pre-triangulated) skip rotation — triangle soup
+         * can't be ROTATED via polygon_transform. */
+        bool is_multi = (pre_tri_indices && pre_tri_indices[idx] != NULL);
+        uint32_t rot_count = (allow_rotate && !is_multi) ? 8 : 1;
         TileGrid rot_sg[8];
         int32_t rot_ox[8];
         int32_t rot_oy[8];
@@ -2375,7 +2394,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
         rot_ox[0] = base_ox;
         rot_oy[0] = base_oy;
 
-        if (allow_rotate) {
+        if (allow_rotate && !is_multi) {
             Point2D inf_poly[32];
             uint32_t inf_n = polygon_inflate(hull_verts[idx], hull_counts[idx], dilate, inf_poly);
             for (uint32_t r = 1; r < 8; r++) {
@@ -2383,7 +2402,7 @@ static uint32_t tile_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2
                 polygon_transform(inf_poly, inf_n, (uint8_t)r, (int32_t)trim_w[idx], (int32_t)trim_h[idx], rot_poly);
                 uint32_t rtw = (r & 4) ? trim_h[idx] : trim_w[idx];
                 uint32_t rth = (r & 4) ? trim_w[idx] : trim_h[idx];
-                rot_sg[r] = tgrid_from_polygon(rot_poly, inf_n, rtw, rth, ts, &rot_ox[r], &rot_oy[r]);
+                rot_sg[r] = tgrid_from_polygon(rot_poly, inf_n, rtw, rth, ts, &rot_ox[r], &rot_oy[r], NULL, 0);
             }
         }
 
@@ -3302,6 +3321,10 @@ typedef struct {
     /* Geometry */
     uint32_t *vertex_counts;
     Point2D **hull_vertices;
+    /* Pre-triangulated mesh (NULL for normal polygon sprites; non-NULL for
+     * multi-component sprites where the "hull" is a triangle soup, not an outline). */
+    uint16_t **pre_tri_indices;
+    uint32_t *pre_tri_counts;
 
     /* Packing + composition */
     AtlasPlacement *placements;
@@ -3414,7 +3437,9 @@ static void pipeline_dedup(AtlasPipeline *p) {
 static void pipeline_geometry(AtlasPipeline *p) {
     p->vertex_counts = (uint32_t *)calloc(p->sprite_count, sizeof(uint32_t));
     p->hull_vertices = (Point2D **)calloc(p->sprite_count, sizeof(Point2D *));
-    NT_BUILD_ASSERT(p->vertex_counts && p->hull_vertices && "pipeline_geometry: alloc failed");
+    p->pre_tri_indices = (uint16_t **)calloc(p->sprite_count, sizeof(uint16_t *));
+    p->pre_tri_counts = (uint32_t *)calloc(p->sprite_count, sizeof(uint32_t));
+    NT_BUILD_ASSERT(p->vertex_counts && p->hull_vertices && p->pre_tri_indices && p->pre_tri_counts && "pipeline_geometry: alloc failed");
 
     for (uint32_t ui = 0; ui < p->unique_count; ui++) {
         uint32_t idx = p->unique_indices[ui];
@@ -3491,80 +3516,172 @@ static void pipeline_geometry(AtlasPipeline *p) {
             /* Multi-component sprites can't be handled by single-contour trace.
              * Use convex hull of ALL opaque pixel corners as fallback (covers everything). */
             if (multi_component) {
-                free(binary);
-                uint32_t pt_count = 0;
-                Point2D *pts = (Point2D *)malloc((size_t)tw * th * 4 * sizeof(Point2D));
-                NT_BUILD_ASSERT(pts && "pipeline_geometry: alloc failed");
-                for (uint32_t y = 0; y < th; y++) {
-                    for (uint32_t x = 0; x < tw; x++) {
-                        uint8_t a2 = ap[((size_t)(p->trim_y[idx] + y) * aw) + p->trim_x[idx] + x];
-                        if (a2 >= p->opts->alpha_threshold) {
-                            pts[pt_count++] = (Point2D){(int32_t)x, (int32_t)y};
-                            pts[pt_count++] = (Point2D){(int32_t)x + 1, (int32_t)y};
-                            pts[pt_count++] = (Point2D){(int32_t)x, (int32_t)y + 1};
-                            pts[pt_count++] = (Point2D){(int32_t)x + 1, (int32_t)y + 1};
-                        }
-                    }
-                }
-                Point2D *hull = (Point2D *)malloc((size_t)pt_count * 2 * sizeof(Point2D));
-                NT_BUILD_ASSERT(hull && "pipeline_geometry: alloc failed");
-                uint32_t hull_n = convex_hull(pts, pt_count, hull);
-                free(pts);
-                Point2D *hull_simp = (Point2D *)malloc(hull_n * sizeof(Point2D));
-                NT_BUILD_ASSERT(hull_simp && "pipeline_geometry: alloc failed");
-                uint32_t hs_count = hull_simplify(hull, hull_n, p->opts->max_vertices, hull_simp);
+                /* Per-component tracing: trace each component separately, simplify,
+                 * inflate, triangulate, then concatenate into a single mesh.
+                 * The result is a triangle soup (vertices + indices), not a polygon. */
+                Point2D *mc_verts = NULL;
+                uint16_t *mc_indices = NULL;
+                uint32_t mc_total_verts = 0;
+                uint32_t mc_total_tris = 0;
+                uint32_t mc_verts_cap = 0;
+                uint32_t mc_indices_cap = 0;
 
-                /* Compute max cut depth: distance from each REMOVED hull vertex to
-                 * the closest simplified hull edge. Fast (O(hull_n × hs_count)). */
-                double sa = 0.0;
-                for (uint32_t si = 0; si < hs_count; si++) {
-                    uint32_t sj = (si + 1) % hs_count;
-                    sa += ((double)hull_simp[si].x * hull_simp[sj].y) - ((double)hull_simp[sj].x * hull_simp[si].y);
-                }
-                double outside_sign = (sa > 0) ? -1.0 : 1.0;
-                float max_dist = 0.0F;
-                for (uint32_t hi = 0; hi < hull_n; hi++) {
-                    for (uint32_t si = 0; si < hs_count; si++) {
-                        uint32_t sj = (si + 1) % hs_count;
-                        double exx = (double)(hull_simp[sj].x - hull_simp[si].x);
-                        double eyy = (double)(hull_simp[sj].y - hull_simp[si].y);
-                        double lsq = (exx * exx) + (eyy * eyy);
-                        if (lsq < 1e-12) {
-                            continue;
-                        }
-                        double cr = (exx * (double)(hull[hi].y - hull_simp[si].y)) - (eyy * (double)(hull[hi].x - hull_simp[si].x));
-                        if ((cr * outside_sign) > 0) {
-                            double d = fabs(cr) / sqrt(lsq);
-                            if ((float)d > max_dist) {
-                                max_dist = (float)d;
+                uint8_t *visited = (uint8_t *)calloc((size_t)tw * th, 1);
+                uint8_t *comp_mask = (uint8_t *)calloc((size_t)tw * th, 1);
+                int32_t *flood_stack = (int32_t *)malloc((size_t)tw * th * 2 * sizeof(int32_t));
+                NT_BUILD_ASSERT(visited && comp_mask && flood_stack && "pipeline_geometry: alloc failed");
+
+                uint32_t cmax_contour = 2 * tw * th + 4;
+                Point2D *cmp_contour = (Point2D *)malloc(cmax_contour * sizeof(Point2D));
+                NT_BUILD_ASSERT(cmp_contour && "pipeline_geometry: alloc failed");
+
+                /* Find each component via successive flood fills */
+                for (uint32_t scan = 0;; scan++) {
+                    /* Find next unvisited opaque pixel */
+                    int32_t csx = -1;
+                    int32_t csy = -1;
+                    for (uint32_t y = 0; y < th && csx < 0; y++) {
+                        for (uint32_t x = 0; x < tw; x++) {
+                            size_t i = y * tw + x;
+                            if (binary[i] && !visited[i]) {
+                                csx = (int32_t)x;
+                                csy = (int32_t)y;
+                                break;
                             }
                         }
                     }
-                }
-                free(hull);
-                double fb_inflate = (double)max_dist + 1.0;
-                int32_t *hs_xy = (int32_t *)malloc(hs_count * 2 * sizeof(int32_t));
-                NT_BUILD_ASSERT(hs_xy && "pipeline_geometry: alloc failed");
-                for (uint32_t v = 0; v < hs_count; v++) {
-                    hs_xy[v * 2] = hull_simp[v].x;
-                    hs_xy[v * 2 + 1] = hull_simp[v].y;
-                }
-                free(hull_simp);
-                int32_t *hs_inflated = NULL;
-                uint32_t hs_inf_count = nt_clipper2_inflate(hs_xy, hs_count, fb_inflate, &hs_inflated);
-                free(hs_xy);
-                if (hs_inf_count >= 3 && hs_inflated) {
-                    Point2D *fb = (Point2D *)malloc(hs_inf_count * sizeof(Point2D));
-                    NT_BUILD_ASSERT(fb && "pipeline_geometry: alloc failed");
-                    for (uint32_t v = 0; v < hs_inf_count; v++) {
-                        fb[v].x = hs_inflated[v * 2];
-                        fb[v].y = hs_inflated[v * 2 + 1];
+                    if (csx < 0) {
+                        break;
                     }
-                    free(hs_inflated);
-                    p->hull_vertices[idx] = fb;
-                    p->vertex_counts[idx] = hs_inf_count;
+
+                    /* Flood fill this component into comp_mask */
+                    memset(comp_mask, 0, (size_t)tw * th);
+                    uint32_t fsp = 0;
+                    flood_stack[fsp * 2] = csx;
+                    flood_stack[fsp * 2 + 1] = csy;
+                    fsp++;
+                    visited[(size_t)csy * tw + csx] = 1;
+                    comp_mask[(size_t)csy * tw + csx] = 1;
+                    while (fsp > 0) {
+                        fsp--;
+                        int32_t cx = flood_stack[fsp * 2];
+                        int32_t cy = flood_stack[fsp * 2 + 1];
+                        static const int32_t dx[4] = {1, -1, 0, 0};
+                        static const int32_t dy[4] = {0, 0, 1, -1};
+                        for (int d = 0; d < 4; d++) {
+                            int32_t nx = cx + dx[d];
+                            int32_t ny = cy + dy[d];
+                            if (nx < 0 || ny < 0 || nx >= (int32_t)tw || ny >= (int32_t)th) {
+                                continue;
+                            }
+                            size_t ni = (size_t)ny * tw + (size_t)nx;
+                            if (binary[ni] && !visited[ni]) {
+                                visited[ni] = 1;
+                                comp_mask[ni] = 1;
+                                flood_stack[fsp * 2] = nx;
+                                flood_stack[fsp * 2 + 1] = ny;
+                                fsp++;
+                            }
+                        }
+                    }
+
+                    /* Trace contour of this component */
+                    uint32_t cnt = trace_contour(comp_mask, tw, th, cmp_contour, cmax_contour);
+                    if (cnt < 3) {
+                        continue;
+                    }
+
+                    /* Clean + simplify + inflate per component */
+                    Point2D *cclean = (Point2D *)malloc(cnt * sizeof(Point2D));
+                    NT_BUILD_ASSERT(cclean && "pipeline_geometry: alloc failed");
+                    uint32_t ccnt = remove_collinear(cmp_contour, cnt, cclean);
+
+                    Point2D *csimp = (Point2D *)malloc(ccnt * sizeof(Point2D));
+                    NT_BUILD_ASSERT(csimp && "pipeline_geometry: alloc failed");
+                    double ceps = 0.5;
+                    uint32_t cs_n = rdp_simplify(cclean, ccnt, ceps, csimp);
+                    /* Cap per-component vertices at max_vertices to keep mesh manageable */
+                    uint32_t ctarget = p->opts->max_vertices;
+                    while (cs_n > ctarget && ceps < 100.0) {
+                        ceps *= 1.5;
+                        cs_n = rdp_simplify(cclean, ccnt, ceps, csimp);
+                    }
+                    free(cclean);
+
+                    int32_t *cs_xy = (int32_t *)malloc(cs_n * 2 * sizeof(int32_t));
+                    NT_BUILD_ASSERT(cs_xy && "pipeline_geometry: alloc failed");
+                    for (uint32_t v = 0; v < cs_n; v++) {
+                        cs_xy[v * 2] = csimp[v].x;
+                        cs_xy[v * 2 + 1] = csimp[v].y;
+                    }
+                    free(csimp);
+
+                    int32_t *cs_inflated = NULL;
+                    uint32_t ci_n = nt_clipper2_inflate(cs_xy, cs_n, ceps + 1.0, &cs_inflated);
+                    free(cs_xy);
+                    if (ci_n < 3 || !cs_inflated) {
+                        free(cs_inflated);
+                        continue;
+                    }
+
+                    /* Triangulate this component */
+                    Point2D *cinf_verts = (Point2D *)malloc(ci_n * sizeof(Point2D));
+                    NT_BUILD_ASSERT(cinf_verts && "pipeline_geometry: alloc failed");
+                    for (uint32_t v = 0; v < ci_n; v++) {
+                        cinf_verts[v].x = cs_inflated[v * 2];
+                        cinf_verts[v].y = cs_inflated[v * 2 + 1];
+                    }
+                    free(cs_inflated);
+
+                    uint16_t *cidx = (uint16_t *)malloc((size_t)ci_n * 3 * sizeof(uint16_t));
+                    NT_BUILD_ASSERT(cidx && "pipeline_geometry: alloc failed");
+                    uint32_t ctri = ear_clip_triangulate(cinf_verts, ci_n, cidx);
+
+                    /* Append vertices and offset-adjusted indices to the mesh */
+                    if (mc_total_verts + ci_n > mc_verts_cap) {
+                        mc_verts_cap = (mc_verts_cap == 0) ? 64 : (mc_verts_cap * 2);
+                        if (mc_verts_cap < mc_total_verts + ci_n) {
+                            mc_verts_cap = mc_total_verts + ci_n;
+                        }
+                        mc_verts = (Point2D *)realloc(mc_verts, mc_verts_cap * sizeof(Point2D));
+                        NT_BUILD_ASSERT(mc_verts && "pipeline_geometry: realloc failed");
+                    }
+                    memcpy(mc_verts + mc_total_verts, cinf_verts, ci_n * sizeof(Point2D));
+                    free(cinf_verts);
+
+                    if (mc_total_tris + ctri > mc_indices_cap) {
+                        mc_indices_cap = (mc_indices_cap == 0) ? 64 : (mc_indices_cap * 2);
+                        if (mc_indices_cap < mc_total_tris + ctri) {
+                            mc_indices_cap = mc_total_tris + ctri;
+                        }
+                        mc_indices = (uint16_t *)realloc(mc_indices, (size_t)mc_indices_cap * 3 * sizeof(uint16_t));
+                        NT_BUILD_ASSERT(mc_indices && "pipeline_geometry: realloc failed");
+                    }
+                    /* Adjust indices by current vertex offset */
+                    for (uint32_t t = 0; t < ctri * 3; t++) {
+                        mc_indices[mc_total_tris * 3 + t] = (uint16_t)(cidx[t] + mc_total_verts);
+                    }
+                    free(cidx);
+
+                    mc_total_verts += ci_n;
+                    mc_total_tris += ctri;
+                }
+
+                free(cmp_contour);
+                free(flood_stack);
+                free(comp_mask);
+                free(visited);
+                free(binary);
+
+                if (mc_total_verts >= 3 && mc_total_tris > 0) {
+                    p->hull_vertices[idx] = mc_verts;
+                    p->vertex_counts[idx] = mc_total_verts;
+                    p->pre_tri_indices[idx] = mc_indices;
+                    p->pre_tri_counts[idx] = mc_total_tris;
                 } else {
-                    free(hs_inflated);
+                    /* Last resort: single rect */
+                    free(mc_verts);
+                    free(mc_indices);
                     p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
                     NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
                     p->hull_vertices[idx][0] = (Point2D){0, 0};
@@ -3705,6 +3822,8 @@ static void pipeline_geometry(AtlasPipeline *p) {
             uint32_t orig = (uint32_t)p->dedup_map[i];
             p->vertex_counts[i] = p->vertex_counts[orig];
             p->hull_vertices[i] = p->hull_vertices[orig]; /* shared pointer, don't double-free */
+            p->pre_tri_indices[i] = p->pre_tri_indices[orig];
+            p->pre_tri_counts[i] = p->pre_tri_counts[orig];
         }
     }
 }
@@ -3716,25 +3835,30 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
     p->placements = (AtlasPlacement *)malloc(p->unique_count * sizeof(AtlasPlacement));
     NT_BUILD_ASSERT(p->placements && "pipeline_tile_pack: alloc failed");
 
-    /* Build arrays for unique sprites: trim dims + hull polygons */
+    /* Build arrays for unique sprites: trim dims + hull polygons + pre-tri */
     uint32_t *u_trim_w = (uint32_t *)malloc(p->unique_count * sizeof(uint32_t));
     uint32_t *u_trim_h = (uint32_t *)malloc(p->unique_count * sizeof(uint32_t));
     Point2D **u_hulls = (Point2D **)malloc(p->unique_count * sizeof(Point2D *));
     uint32_t *u_hull_counts = (uint32_t *)malloc(p->unique_count * sizeof(uint32_t));
-    NT_BUILD_ASSERT(u_trim_w && u_trim_h && u_hulls && u_hull_counts && "pipeline_tile_pack: alloc failed");
+    uint16_t **u_pre_tri = (uint16_t **)malloc(p->unique_count * sizeof(uint16_t *));
+    uint32_t *u_pre_tri_counts = (uint32_t *)malloc(p->unique_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(u_trim_w && u_trim_h && u_hulls && u_hull_counts && u_pre_tri && u_pre_tri_counts && "pipeline_tile_pack: alloc failed");
     for (uint32_t i = 0; i < p->unique_count; i++) {
         uint32_t oi = p->unique_indices[i];
         u_trim_w[i] = p->trim_w[oi];
         u_trim_h[i] = p->trim_h[oi];
         u_hulls[i] = p->hull_vertices[oi];
         u_hull_counts[i] = p->vertex_counts[oi];
+        u_pre_tri[i] = p->pre_tri_indices[oi];
+        u_pre_tri_counts[i] = p->pre_tri_counts[oi];
     }
 
     if (p->opts->vector_pack) {
         NT_LOG_INFO("  vector_pack: %u sprites (NFP mode)", p->unique_count);
         p->placement_count = vector_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats, p->thread_count);
     } else {
-        p->placement_count = tile_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats);
+        p->placement_count =
+            tile_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, u_pre_tri, u_pre_tri_counts, p->unique_count, p->opts, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats);
     }
     pack_stats_measure_payload(&p->stats, u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts);
 
@@ -3753,6 +3877,8 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
     free(u_trim_h);
     free((void *)u_hulls);
     free(u_hull_counts);
+    free((void *)u_pre_tri);
+    free(u_pre_tri_counts);
 }
 
 /* --- pipeline_compose: blit trimmed pixels onto pages + extrude edges --- */
@@ -3847,14 +3973,24 @@ static void pipeline_cache_write(AtlasPipeline *p) {
 static void pipeline_serialize(AtlasPipeline *p) {
     uint32_t extrude_val = p->opts->extrude;
 
-    /* Count total vertices and indices */
+    /* Count total vertices and indices.
+     * Pre-triangulated sprites (multi-component) have an exact triangle count;
+     * single-component polygons use fan/ear-clip triangulation = (n - 2) triangles.
+     * region->index_count is uint8_t (max 255) → cap triangles per region at 85. */
     uint32_t total_vertex_count = 0;
     uint32_t total_index_count = 0;
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         total_vertex_count += p->vertex_counts[i];
-        if (p->vertex_counts[i] >= 3) {
-            total_index_count += (p->vertex_counts[i] - 2) * 3;
+        uint32_t tri = 0;
+        if (p->pre_tri_indices[i] && p->pre_tri_counts[i] > 0) {
+            tri = p->pre_tri_counts[i];
+        } else if (p->vertex_counts[i] >= 3) {
+            tri = p->vertex_counts[i] - 2;
         }
+        if (tri > 85) {
+            tri = 85;
+        }
+        total_index_count += tri * 3;
     }
 
     /* Build placement lookup: original_sprite_index -> placement index */
@@ -3913,10 +4049,25 @@ static void pipeline_serialize(AtlasPipeline *p) {
         NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
         AtlasPlacement *pl = &p->placements[pi];
 
-        /* Triangulate polygon (ear-clip handles both convex and concave) */
-        uint16_t local_indices[96]; /* max 32 verts -> 30 tris -> 90 indices */
-        uint32_t tri_count = ear_clip_triangulate(p->hull_vertices[i], p->vertex_counts[i], local_indices);
+        /* Triangulate: use pre-computed indices for multi-component sprites,
+         * else triangulate the polygon outline. */
+        uint16_t local_indices[256];
+        const uint16_t *src_indices;
+        uint32_t tri_count;
+        if (p->pre_tri_indices[i] && p->pre_tri_counts[i] > 0) {
+            src_indices = p->pre_tri_indices[i];
+            tri_count = p->pre_tri_counts[i];
+        } else {
+            tri_count = ear_clip_triangulate(p->hull_vertices[i], p->vertex_counts[i], local_indices);
+            src_indices = local_indices;
+        }
         uint32_t idx_count = tri_count * 3;
+        /* Region index_count is uint8_t (max 255 indices = max 85 triangles).
+         * Truncate if needed — should not happen for typical sprites. */
+        if (idx_count > 255) {
+            idx_count = 255 - (255 % 3);
+            tri_count = idx_count / 3;
+        }
 
         NtAtlasRegion *reg = &regions[i];
         reg->name_hash = nt_hash64_str(p->sprites[i].name).value;
@@ -3934,7 +4085,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
         reg->index_count = (uint8_t)idx_count;
 
         /* Write triangle indices (local: 0..vertex_count-1) */
-        memcpy(&indices[index_cursor], local_indices, idx_count * sizeof(uint16_t));
+        memcpy(&indices[index_cursor], src_indices, idx_count * sizeof(uint16_t));
         index_cursor += idx_count;
 
         uint32_t inner_x = pl->x + extrude_val;
@@ -4040,12 +4191,14 @@ static void pipeline_cleanup(AtlasPipeline *p) {
         p->sprites[i].name = NULL;
     }
 
-    /* Free hull vertices (careful: duplicates share pointers) */
+    /* Free hull vertices and pre-triangulation (careful: duplicates share pointers) */
     for (uint32_t i = 0; i < p->sprite_count; i++) {
-        if (p->dedup_map[i] < 0 && p->hull_vertices[i]) {
+        if (p->dedup_map[i] < 0) {
             free(p->hull_vertices[i]);
+            free(p->pre_tri_indices[i]);
         }
         p->hull_vertices[i] = NULL;
+        p->pre_tri_indices[i] = NULL;
     }
 
     /* Free alpha planes */
@@ -4062,6 +4215,8 @@ static void pipeline_cleanup(AtlasPipeline *p) {
     free(p->unique_indices);
     free(p->vertex_counts);
     free((void *)p->hull_vertices);
+    free((void *)p->pre_tri_indices);
+    free(p->pre_tri_counts);
     free(p->placements);
 
     /* Free remaining page pixels (any not transferred to entries) */
