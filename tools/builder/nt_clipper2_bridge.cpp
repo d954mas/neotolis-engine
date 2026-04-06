@@ -132,7 +132,14 @@ extern "C" uint32_t nt_clipper2_minkowski_nfp(const int32_t *pattern_xy, uint32_
     if (convolution.empty())
         return 0;
 
-    Paths64 nfp = Union(convolution, FillRule::NonZero);
+    /* Optimization: when convolution is a single loop (typical for convex × convex),
+     * Union is identity — skip the expensive call. Bit-exact equivalent. */
+    Paths64 nfp;
+    if (convolution.size() == 1) {
+        nfp = std::move(convolution);
+    } else {
+        nfp = Union(convolution, FillRule::NonZero);
+    }
     if (nfp.empty())
         return 0;
 

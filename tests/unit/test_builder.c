@@ -3579,15 +3579,13 @@ void test_fan_triangulate_triangle(void) {
 }
 
 void test_vpack_point_in_nfp_hole_pocket(void) {
-    const int32_t verts_xy[] = {
-        0, 0, 10, 0, 10, 10, 0, 10, 3, 3, 3, 7, 7, 7, 7, 3,
-    };
-    const uint16_t ring_offsets[] = {0, 4, 8};
-    const int8_t ring_signs[] = {1, -1};
-
-    TEST_ASSERT_TRUE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, ring_signs, 2, 1, 1));
-    TEST_ASSERT_FALSE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, ring_signs, 2, 5, 5));
-    TEST_ASSERT_FALSE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, ring_signs, 2, 12, 12));
+    /* IGNORED: vpack_point_in_nfp currently uses safe "block any ring" mode
+     * because Clipper2 NFP sign detection (Cartesian Area-based) gave incorrect
+     * results for screen-space polygons in production — caused massive overlap on
+     * spineboy. Re-enable once nt_clipper2_minkowski_nfp ring sign detection is
+     * verified by integration test (e.g. opaque-pixel count matches tile_pack
+     * baseline within rounding noise). */
+    TEST_IGNORE_MESSAGE("vpack hole-packing disabled — see comment");
 }
 
 /* --- Atlas round-trip test helpers --- */
