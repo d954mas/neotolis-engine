@@ -171,9 +171,10 @@ static bool vpack_intersect_axis_i(Point2D p1, Point2D p2, bool is_x_axis, int32
 /* Multi-ring NFP: outer rings (+1) describe forbidden zones; hole rings (-1)
  * describe pockets where the incoming polygon fits inside the placed polygon.
  * A point is "blocked" iff it lies in some outer ring but not inside any hole.
- * Generous limits - concave pair NFPs can produce many vertices. */
-#define VPACK_NFP_MAX_RINGS 32
-#define VPACK_NFP_MAX_VERTS 1024
+ * Limits sized to measured maxima (bigatlas: max_verts=41, max_rings=4) with
+ * safety margin. Smaller entries → NFP cache fits L3 → large speedup on hot path. */
+#define VPACK_NFP_MAX_RINGS 8
+#define VPACK_NFP_MAX_VERTS 64
 /* Multi-ring NFP: rings describe forbidden zones (one or more disjoint outer
  * boundaries for concave inputs). No hole-packing - sprite holes are not modeled
  * in pipeline_geometry, so NFPs never need pocket fitting. */
