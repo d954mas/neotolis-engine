@@ -49,6 +49,38 @@ set_target_properties(nt_basisu_encoder PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tools/builder/${NT_PRESET_NAME}"
 )
 
+# Clipper2 (polygon clipping, offset, Minkowski, CDT — C++ static lib with C API)
+set(CLIPPER2_DIR "${NT_ENGINE_ROOT}/deps/clipper2/CPP/Clipper2Lib")
+add_library(nt_clipper2 STATIC
+    "${CLIPPER2_DIR}/src/clipper.engine.cpp"
+    "${CLIPPER2_DIR}/src/clipper.offset.cpp"
+    "${CLIPPER2_DIR}/src/clipper.rectclip.cpp"
+    "${CLIPPER2_DIR}/src/clipper.triangulation.cpp"
+)
+target_include_directories(nt_clipper2 PUBLIC "${CLIPPER2_DIR}/include")
+target_compile_definitions(nt_clipper2 PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(nt_clipper2 PRIVATE -w)
+target_compile_options(nt_clipper2 PRIVATE -U_DLL)
+set_target_properties(nt_clipper2 PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:>"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tools/builder/${NT_PRESET_NAME}"
+)
+
+# Clipper2 C bridge (C++ → extern "C" wrapper for inflate, triangulate, Minkowski)
+add_library(nt_clipper2_bridge STATIC nt_clipper2_bridge.cpp)
+target_include_directories(nt_clipper2_bridge PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(nt_clipper2_bridge PUBLIC nt_clipper2)
+target_compile_definitions(nt_clipper2_bridge PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(nt_clipper2_bridge PRIVATE -w -U_DLL)
+set_target_properties(nt_clipper2_bridge PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:>"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tools/builder/${NT_PRESET_NAME}"
+)
+
 # tinycthread (C11 threads API -- vendored from glfw/deps for cross-platform threading)
 add_library(tinycthread STATIC
     "${NT_ENGINE_ROOT}/deps/tinycthread/tinycthread.c"
@@ -79,7 +111,7 @@ add_library(nt_builder STATIC
     nt_builder_atlas.c
 )
 target_include_directories(nt_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(nt_builder PUBLIC nt_shared nt_core nt_log nt_time cgltf stb_image stb_image_resize2 stb_truetype stb_image_write nt_hash mikktspace nt_basisu_encoder glfw glad miniz tinycthread)
+target_link_libraries(nt_builder PUBLIC nt_shared nt_core nt_log nt_time cgltf stb_image stb_image_resize2 stb_truetype stb_image_write nt_hash mikktspace nt_basisu_encoder glfw glad miniz tinycthread nt_clipper2_bridge)
 # Builder uses standard C I/O (fopen, strdup, strncpy) -- suppress MSVC deprecation
 target_compile_definitions(nt_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE NT_LOG_DOMAIN_DEFAULT="builder" NT_BUILDER_ATLAS_TEST_ACCESS)
 # Static CRT: remove _DLL so CRT calls resolve to static symbols

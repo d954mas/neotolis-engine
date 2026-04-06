@@ -133,20 +133,22 @@ static bool vpack_intersect_axis_i(Point2D p1, Point2D p2, bool is_x_axis, int32
     return true;
 }
 
-/* Strictly-inside test for CCW convex polygon (all cross products > 0). */
+/* Point-in-polygon test (ray casting, even-odd rule) — handles concave polygons. */
 static bool vpack_point_in_poly(int32_t px, int32_t py, const Point2D *poly, uint32_t count) {
     if (count < 3)
         return false;
-    uint32_t last = count - 1;
-    for (uint32_t i = 0; i < last; i++) {
-        if (vpack_cross(poly[i].x, poly[i].y, poly[i + 1].x, poly[i + 1].y, px, py) <= 0)
-            return false;
+    bool inside = false;
+    for (uint32_t i = 0, j = count - 1; i < count; j = i++) {
+        if (((poly[i].y > py) != (poly[j].y > py)) && (px < (int32_t)(((int64_t)(poly[j].x - poly[i].x) * (int64_t)(py - poly[i].y)) / (int64_t)(poly[j].y - poly[i].y) + poly[i].x))) {
+            inside = !inside;
+        }
     }
-    return vpack_cross(poly[last].x, poly[last].y, poly[0].x, poly[0].y, px, py) > 0;
+    return inside;
 }
 
+#define VPACK_NFP_MAX_VERTS 128
 typedef struct {
-    Point2D verts[32]; /* max nA+nB where each polygon ≤ 16 vertices */
+    Point2D verts[VPACK_NFP_MAX_VERTS]; /* Clipper2 Minkowski on concave polys can have more verts */
     uint32_t count;
     int32_t min_x, min_y, max_x, max_y;
 } VPackNFP;
@@ -486,67 +488,72 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                     need_candidates = false;
             }
 
+            // #region Full-polygon NFP via Clipper2 MinkowskiSum
+            /* Clipper2 MinkowskiSum handles concave polygons directly (convolution + union).
+             * Result may be non-convex — we use ray-cast point-in-polygon for collision testing. */
+            const VPackPlaced *pl_i = &page->placed[i];
             VPackNFP *nfp = &nfps[nfp_count];
-            // #region NFP cache lookup
-            if (exp->use_nfp_cache) {
-                uint32_t ka = page->placed[i].shape_hash;
-                uint32_t kb = orient_neg_hashes[ori];
-                uint32_t slot = (ka * 2654435761u ^ kb) & (VPACK_NFP_CACHE_SIZE - 1);
-                VPackNFPCacheEntry *ce = &nfp_cache[slot];
-                if (ce->key_a == ka && ce->key_b == kb && ce->count > 0) {
-                    stats->nfp_cache_hit_count++;
-                    nfp->count = ce->count;
-                    memcpy(nfp->verts, ce->verts, ce->count * sizeof(Point2D));
-                } else {
-                    if (ce->count > 0) {
-                        stats->nfp_cache_collision_count++;
-                    }
-                    stats->nfp_cache_miss_count++;
-                    nfp->count = vpack_minkowski(page->placed[i].poly, page->placed[i].count, orient_neg[ori], cur_count, nfp->verts);
-                    ce->key_a = ka;
-                    ce->key_b = kb;
-                    ce->count = nfp->count;
-                    memcpy(ce->verts, nfp->verts, nfp->count * sizeof(Point2D));
-                }
-            } else {
-                nfp->count = vpack_minkowski(page->placed[i].poly, page->placed[i].count, orient_neg[ori], cur_count, nfp->verts);
-            }
-            // #endregion
-            stats->or_count++;
-            for (uint32_t v = 0; v < nfp->count; v++) {
-                nfp->verts[v].x += page->placed[i].x;
-                nfp->verts[v].y += page->placed[i].y;
-            }
-            vpack_calc_aabb(nfp->verts, nfp->count, &nfp->min_x, &nfp->min_y, &nfp->max_x, &nfp->max_y);
 
-            if (need_candidates) {
-                for (uint32_t v = 0; v < nfp->count; v++) {
-                    vpack_add_cand(cands, &cand_count, cand_cap, nfp->verts[v].x, nfp->verts[v].y, &bounds);
+            /* Convert placed and negated-incoming polygons to flat xy */
+            int32_t placed_xy[32 * 2];
+            int32_t neg_xy[32 * 2];
+            for (uint32_t v = 0; v < pl_i->count && v < 32; v++) {
+                placed_xy[v * 2] = pl_i->poly[v].x;
+                placed_xy[v * 2 + 1] = pl_i->poly[v].y;
+            }
+            for (uint32_t v = 0; v < cur_count && v < 32; v++) {
+                neg_xy[v * 2] = orient_neg[ori][v].x;
+                neg_xy[v * 2 + 1] = orient_neg[ori][v].y;
+            }
+            int32_t *nfp_xy = NULL;
+            uint32_t nfp_verts = nt_clipper2_minkowski_sum(placed_xy, pl_i->count, neg_xy, cur_count, &nfp_xy);
+            stats->or_count++;
+
+            if (nfp_verts >= 3 && nfp_xy && nfp_verts <= VPACK_NFP_MAX_VERTS) {
+                nfp->count = nfp_verts;
+                for (uint32_t v = 0; v < nfp_verts; v++) {
+                    nfp->verts[v].x = nfp_xy[v * 2] + pl_i->x;
+                    nfp->verts[v].y = nfp_xy[v * 2 + 1] + pl_i->y;
                 }
-                for (uint32_t e = 0; e < nfp->count; e++) {
-                    uint32_t en = (e + 1 == nfp->count) ? 0 : e + 1;
-                    if (exp->use_axis_i) {
-                        int32_t vf, vc;
-                        if (vpack_intersect_axis_i(nfp->verts[e], nfp->verts[en], true, min_cand_x, &vf, &vc)) {
-                            vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vf, &bounds);
-                            if (vc != vf)
-                                vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vc, &bounds);
+                vpack_calc_aabb(nfp->verts, nfp->count, &nfp->min_x, &nfp->min_y, &nfp->max_x, &nfp->max_y);
+
+                if (need_candidates) {
+                    for (uint32_t v = 0; v < nfp->count; v++) {
+                        vpack_add_cand(cands, &cand_count, cand_cap, nfp->verts[v].x, nfp->verts[v].y, &bounds);
+                    }
+                    for (uint32_t e = 0; e < nfp->count; e++) {
+                        uint32_t en = (e + 1 == nfp->count) ? 0 : e + 1;
+                        if (exp->use_axis_i) {
+                            int32_t vf, vc;
+                            if (vpack_intersect_axis_i(nfp->verts[e], nfp->verts[en], true, min_cand_x, &vf, &vc)) {
+                                vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vf, &bounds);
+                                if (vc != vf)
+                                    vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, vc, &bounds);
+                            }
+                            if (vpack_intersect_axis_i(nfp->verts[e], nfp->verts[en], false, min_cand_y, &vf, &vc)) {
+                                vpack_add_cand(cands, &cand_count, cand_cap, vf, min_cand_y, &bounds);
+                                if (vc != vf)
+                                    vpack_add_cand(cands, &cand_count, cand_cap, vc, min_cand_y, &bounds);
+                            }
+                        } else {
+                            float out_val;
+                            if (vpack_intersect_axis_f(nfp->verts[e], nfp->verts[en], true, (float)min_cand_x, &out_val))
+                                vpack_add_float_cand(cands, &cand_count, cand_cap, (float)min_cand_x, out_val, &bounds);
+                            if (vpack_intersect_axis_f(nfp->verts[e], nfp->verts[en], false, (float)min_cand_y, &out_val))
+                                vpack_add_float_cand(cands, &cand_count, cand_cap, out_val, (float)min_cand_y, &bounds);
                         }
-                        if (vpack_intersect_axis_i(nfp->verts[e], nfp->verts[en], false, min_cand_y, &vf, &vc)) {
-                            vpack_add_cand(cands, &cand_count, cand_cap, vf, min_cand_y, &bounds);
-                            if (vc != vf)
-                                vpack_add_cand(cands, &cand_count, cand_cap, vc, min_cand_y, &bounds);
-                        }
-                    } else {
-                        float out_val;
-                        if (vpack_intersect_axis_f(nfp->verts[e], nfp->verts[en], true, (float)min_cand_x, &out_val))
-                            vpack_add_float_cand(cands, &cand_count, cand_cap, (float)min_cand_x, out_val, &bounds);
-                        if (vpack_intersect_axis_f(nfp->verts[e], nfp->verts[en], false, (float)min_cand_y, &out_val))
-                            vpack_add_float_cand(cands, &cand_count, cand_cap, out_val, (float)min_cand_y, &bounds);
                     }
                 }
+                nfp_count++;
+            } else {
+                /* Clipper2 Minkowski failed or returned too many verts — skip this NFP.
+                 * Other NFPs from other placed sprites will still constrain candidates. */
+                if (nfp_verts > VPACK_NFP_MAX_VERTS) {
+                    NT_LOG_WARN("vpack: NFP vertex count %u exceeds limit %u, skipping", nfp_verts, VPACK_NFP_MAX_VERTS);
+                }
             }
-            nfp_count++;
+            free(nfp_xy);
+            // #endregion
         }
         stats->candidate_count += cand_count;
 
@@ -820,7 +827,10 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
     // #endregion
 
     VPackPlaced *placed = (VPackPlaced *)malloc(sprite_count * sizeof(VPackPlaced));
-    VPackNFP *nfps = (VPackNFP *)malloc(sprite_count * sizeof(VPackNFP));
+    /* With triangle decomposition: up to T_p * T_i NFPs per placed sprite.
+     * For 8-vertex polygons: 6 tris each → 36 NFPs per pair. Allocate generously. */
+    uint32_t max_nfps = sprite_count * 36 + 64;
+    VPackNFP *nfps = (VPackNFP *)malloc(max_nfps * sizeof(VPackNFP));
     uint32_t cand_cap = 1024;
     VPackCand *cands = (VPackCand *)malloc(cand_cap * sizeof(VPackCand));
     NT_BUILD_ASSERT(placed && nfps && cands && "vector_pack: alloc failed");

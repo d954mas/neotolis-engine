@@ -209,7 +209,7 @@ typedef struct {
     uint8_t max_vertices;                   /* max hull vertices per region (default: 8 per D-11, sprite contours >16 unsupported) */
     bool allow_rotate;                      /* try rotations for better packing (default: true per D-11) */
     bool power_of_two;                      /* round atlas dims to POT (default: true per D-11) */
-    bool polygon_mode;                      /* true = convex hull, false = rect (default: true per D-11) */
+    bool polygon_mode;                      /* true = concave contour polygon, false = rect (default: true) */
     bool debug_png;                         /* write debug atlas page PNGs (default: false per D-11) */
     bool vector_pack;                       /* use precise NFP vector packing (default: false) */
     uint8_t tile_size;                      /* packing grid cell size in pixels (default: 4, valid: 1-32) */

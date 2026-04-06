@@ -5,22 +5,23 @@
 
 /* Magic: ASCII "ATLS" as uint32_t little-endian = 0x534C5441 */
 #define NT_ATLAS_MAGIC 0x534C5441
-#define NT_ATLAS_VERSION 1
+#define NT_ATLAS_VERSION 2
 
 /*
- * Atlas asset binary layout:
+ * Atlas asset binary layout (v2):
  *
- *   Offset 0: NtAtlasHeader (20 bytes)
- *   Offset 20: uint64_t texture_resource_ids[page_count]
+ *   Offset 0: NtAtlasHeader (28 bytes)
+ *   Then: uint64_t texture_resource_ids[page_count]
  *   Then: NtAtlasRegion regions[region_count]
- *   Then: NtAtlasVertex vertices[total_vertex_count]
+ *   Then: NtAtlasVertex vertices[total_vertex_count]  (at vertex_offset)
+ *   Then: uint16_t  indices[total_index_count]   (at index_offset)
  *
- * vertex_offset (in header) is the byte offset from header start
- * to the vertex array, so runtime can jump directly to vertices.
+ * vertex_offset / index_offset are byte offsets from header start.
  *
- * Triangle indices are NOT serialized -- fan triangulation is
- * deterministic (vertex 0 as pivot) and trivially regenerated
- * at runtime: triangle i = (0, i+1, i+2).
+ * Indices are local per region (0 .. vertex_count-1).
+ * Runtime offsets them by vertex_start when building GPU buffers.
+ * Triangle list: every 3 consecutive indices form one triangle.
+ * Convex regions use fan triangulation; concave use ear-clipping.
  */
 
 #pragma pack(push, 1)
@@ -32,9 +33,11 @@ typedef struct {
     uint16_t _pad;               /* 10: alignment padding */
     uint32_t vertex_offset;      /* 12: byte offset from header start to vertex array */
     uint32_t total_vertex_count; /* 16: total NtAtlasVertex entries across all regions */
-} NtAtlasHeader;                 /* 20 bytes */
+    uint32_t index_offset;       /* 20: byte offset from header start to index array */
+    uint32_t total_index_count;  /* 24: total uint16_t index entries across all regions */
+} NtAtlasHeader;                 /* 28 bytes */
 #pragma pack(pop)
-_Static_assert(sizeof(NtAtlasHeader) == 20, "NtAtlasHeader must be 20 bytes");
+_Static_assert(sizeof(NtAtlasHeader) == 28, "NtAtlasHeader must be 28 bytes");
 
 #pragma pack(push, 1)
 typedef struct {
@@ -49,7 +52,8 @@ typedef struct {
     uint8_t vertex_count;  /* 26: number of vertices for this region */
     uint8_t page_index;    /* 27: which texture page this region belongs to */
     uint8_t rotated;       /* 28: 3-bit transform: bit0=flipH, bit1=flipV, bit2=diagonal */
-    uint8_t _pad[3];       /* 29: align to 32 bytes */
+    uint8_t index_count;   /* 29: number of triangle indices for this region */
+    uint16_t index_start;  /* 30: index into the index array */
 } NtAtlasRegion;           /* 32 bytes */
 #pragma pack(pop)
 _Static_assert(sizeof(NtAtlasRegion) == 32, "NtAtlasRegion must be 32 bytes");

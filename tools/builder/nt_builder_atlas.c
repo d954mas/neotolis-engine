@@ -1,5 +1,6 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
+#include "nt_clipper2_bridge.h"
 #include "hash/nt_hash.h"
 #include "nt_atlas_format.h"
 #include "time/nt_time.h"
@@ -30,7 +31,7 @@
  *  pipeline_alpha_trim     Extract alpha plane, find tight bounding box
  *  pipeline_cache_check    Hash inputs, return early on cache hit
  *  pipeline_dedup          Detect duplicate sprites (hash + pixels)
- *  pipeline_geometry       Convex hull -> simplify -> inflate polygon
+ *  pipeline_geometry       Polygon outline -> simplify -> inflate (convex hull or concave contour)
  *  --- skip on cache hit ---
  *  pipeline_tile_pack      Place sprites on atlas pages (tile-grid collision)
  *  pipeline_compose        Blit trimmed pixels + extrude edges
@@ -311,69 +312,406 @@ static uint32_t fan_triangulate(uint32_t vertex_count, uint16_t *indices) {
     }
     return tri_count;
 }
-/* --- Polygon inflation: expand convex hull outward by N pixels --- */
+/* --- Point-in-triangle test (for ear-clipping) --- */
 
-/* Offset each edge outward along its normal, recompute vertices as intersections. */
-static uint32_t polygon_inflate(const Point2D *hull, uint32_t n, float amount, Point2D *out) {
+static bool point_in_triangle(Point2D a, Point2D b, Point2D c, Point2D p) {
+    int64_t d1 = cross2d(a, b, p);
+    int64_t d2 = cross2d(b, c, p);
+    int64_t d3 = cross2d(c, a, p);
+    bool has_neg = (d1 < 0) || (d2 < 0) || (d3 < 0);
+    bool has_pos = (d1 > 0) || (d2 > 0) || (d3 > 0);
+    return !(has_neg && has_pos);
+}
+
+/* --- Triangulation via Clipper2 Constrained Delaunay Triangulation --- */
+
+/* Triangulates a simple polygon (convex or concave). Uses Clipper2 CDT
+ * for better triangle quality than ear-clipping. Falls back to fan_triangulate
+ * on failure (e.g., self-intersecting input).
+ * Input:  polygon vertices (CCW winding), vertex count n.
+ * Output: triangle indices (local 0..n-1) written to 'indices'.
+ * Returns number of triangles. */
+static uint32_t ear_clip_triangulate(const Point2D *poly, uint32_t n, uint16_t *indices) {
     if (n < 3) {
+        return 0;
+    }
+    if (n == 3) {
+        indices[0] = 0;
+        indices[1] = 1;
+        indices[2] = 2;
+        return 1;
+    }
+    /* Convert to flat xy and call Clipper2 CDT via bridge */
+    int32_t stack_xy[64];
+    int32_t *xy = (n <= 32) ? stack_xy : (int32_t *)malloc(n * 2 * sizeof(int32_t));
+    NT_BUILD_ASSERT(xy && "triangulate: alloc failed");
+    for (uint32_t i = 0; i < n; i++) {
+        xy[i * 2] = poly[i].x;
+        xy[i * 2 + 1] = poly[i].y;
+    }
+    uint16_t *cdt_indices = NULL;
+    uint32_t tri_count = nt_clipper2_triangulate(xy, n, &cdt_indices);
+    if (xy != stack_xy) {
+        free(xy);
+    }
+    if (tri_count == 0 || !cdt_indices) {
+        /* Clipper2 CDT failed (degenerate/self-intersecting) — fallback to fan */
+        free(cdt_indices);
+        return fan_triangulate(n, indices);
+    }
+    memcpy(indices, cdt_indices, tri_count * 3 * sizeof(uint16_t));
+    free(cdt_indices);
+    return tri_count;
+}
+
+/* --- Point-in-polygon test (ray casting, even-odd rule) --- */
+
+static bool point_in_polygon(const Point2D *poly, uint32_t n, Point2D p) {
+    bool inside = false;
+    for (uint32_t i = 0, j = n - 1; i < n; j = i++) {
+        if (((poly[i].y > p.y) != (poly[j].y > p.y)) && (p.x < (int32_t)(((int64_t)(poly[j].x - poly[i].x) * (int64_t)(p.y - poly[i].y)) / (int64_t)(poly[j].y - poly[i].y) + poly[i].x))) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+/* --- Contour tracing: extract alpha boundary as CCW polygon --- */
+
+/* Traces the outer boundary of opaque pixels on a binary grid.
+ * Uses CW edge-following (inside on the right) with right-turn priority.
+ * Returns vertex count. Output polygon is CCW (reversed from CW trace). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static uint32_t trace_contour(const uint8_t *binary, uint32_t tw, uint32_t th, Point2D *out, uint32_t max_out) {
+    /* Find topmost-leftmost opaque pixel */
+    int32_t sx = -1;
+    int32_t sy = -1;
+    for (uint32_t y = 0; y < th && sx < 0; y++) {
+        for (uint32_t x = 0; x < tw; x++) {
+            if (binary[(y * tw) + x]) {
+                sx = (int32_t)x;
+                sy = (int32_t)y;
+                break;
+            }
+        }
+    }
+    if (sx < 0) {
+        return 0;
+    }
+
+/* Pixel lookup macro (out-of-bounds = 0) */
+#define BIN_AT(px, py) (((px) >= 0 && (py) >= 0 && (uint32_t)(px) < tw && (uint32_t)(py) < th) ? binary[((uint32_t)(py) * tw) + (uint32_t)(px)] : 0)
+
+    /* Check if an outgoing edge exists in direction d at corner (cx, cy).
+     * An edge exists when the two pixels on either side of that edge differ.
+     *   d=0 right: TR vs BR   d=1 down: BL vs BR
+     *   d=2 left:  TL vs BL   d=3 up:   TL vs TR */
+    // clang-format off
+#define EDGE_EXISTS(cx, cy, d) ( \
+    ((d) == 0) ? (BIN_AT((cx), (cy) - 1) != BIN_AT((cx), (cy))) : \
+    ((d) == 1) ? (BIN_AT((cx) - 1, (cy)) != BIN_AT((cx), (cy))) : \
+    ((d) == 2) ? (BIN_AT((cx) - 1, (cy) - 1) != BIN_AT((cx) - 1, (cy))) : \
+                 (BIN_AT((cx) - 1, (cy) - 1) != BIN_AT((cx), (cy) - 1)))
+    // clang-format on
+
+    /* Start at top-left corner of start pixel.
+     * The topmost-leftmost opaque pixel guarantees this corner is not a saddle
+     * (TL and TR are transparent), so position-only stop check is safe. */
+    int32_t cx = sx;
+    int32_t cy = sy;
+    int dir = 0; /* initial: right (top edge of start pixel is a boundary) */
+    uint32_t count = 0;
+
+    /* Record starting corner and take first step */
+    out[count++] = (Point2D){cx, cy};
+
+    /* Pick direction and step — inline to keep the loop compact */
+    int r_ = (dir + 1) & 3;
+    int s_ = dir;
+    int l_ = (dir + 3) & 3;
+    int b_ = (dir + 2) & 3;
+    // clang-format off
+    if      (EDGE_EXISTS(cx, cy, r_)) dir = r_;
+    else if (EDGE_EXISTS(cx, cy, s_)) dir = s_;
+    else if (EDGE_EXISTS(cx, cy, l_)) dir = l_;
+    else                              dir = b_;
+    // clang-format on
+    if (dir == 0) {
+        cx++;
+    } else if (dir == 1) {
+        cy++;
+    } else if (dir == 2) {
+        cx--;
+    } else {
+        cy--;
+    }
+
+    /* Trace until we return to the starting position */
+    while (cx != sx || cy != sy) {
+        NT_BUILD_ASSERT(count < max_out && "trace_contour: exceeded max vertices");
+        out[count++] = (Point2D){cx, cy};
+        r_ = (dir + 1) & 3;
+        s_ = dir;
+        l_ = (dir + 3) & 3;
+        b_ = (dir + 2) & 3;
+        // clang-format off
+        if      (EDGE_EXISTS(cx, cy, r_)) dir = r_;
+        else if (EDGE_EXISTS(cx, cy, s_)) dir = s_;
+        else if (EDGE_EXISTS(cx, cy, l_)) dir = l_;
+        else                              dir = b_;
+        // clang-format on
+        if (dir == 0) {
+            cx++;
+        } else if (dir == 1) {
+            cy++;
+        } else if (dir == 2) {
+            cx--;
+        } else {
+            cy--;
+        }
+    }
+
+#undef EDGE_EXISTS
+#undef BIN_AT
+
+    /* Reverse to CCW (trace was CW) */
+    for (uint32_t i = 0; i < count / 2; i++) {
+        Point2D tmp = out[i];
+        out[i] = out[count - 1 - i];
+        out[count - 1 - i] = tmp;
+    }
+
+    return count;
+}
+
+/* --- Remove collinear vertices from a polygon --- */
+
+static uint32_t remove_collinear(const Point2D *in, uint32_t n, Point2D *out) {
+    if (n < 3) {
+        memcpy(out, in, n * sizeof(Point2D));
+        return n;
+    }
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t prev = (i + n - 1) % n;
+        uint32_t next = (i + 1) % n;
+        int64_t cross = cross2d(in[prev], in[i], in[next]);
+        if (cross != 0) {
+            out[count++] = in[i];
+        }
+    }
+    return (count >= 3) ? count : n; /* keep all if degenerate */
+}
+
+/* --- Ramer-Douglas-Peucker simplification for closed polygons --- */
+
+/* Squared perpendicular distance from point p to line segment (a, b). */
+static double rdp_dist_sq(Point2D a, Point2D b, Point2D p) {
+    double dx = (double)(b.x - a.x);
+    double dy = (double)(b.y - a.y);
+    double len_sq = (dx * dx) + (dy * dy);
+    if (len_sq < 1e-12) {
+        double ex = (double)(p.x - a.x);
+        double ey = (double)(p.y - a.y);
+        return (ex * ex) + (ey * ey);
+    }
+    double cross = (dx * (double)(p.y - a.y)) - (dy * (double)(p.x - a.x));
+    return (cross * cross) / len_sq;
+}
+
+/* Recursive RDP on an open sub-range [start..end] of a polygon. */
+static void rdp_recurse(const Point2D *pts, bool *keep, uint32_t start, uint32_t end, double eps_sq) {
+    if (end <= start + 1) {
+        return;
+    }
+    double max_dist = 0.0;
+    uint32_t max_idx = start;
+    for (uint32_t i = start + 1; i < end; i++) {
+        double d = rdp_dist_sq(pts[start], pts[end], pts[i]);
+        if (d > max_dist) {
+            max_dist = d;
+            max_idx = i;
+        }
+    }
+    if (max_dist > eps_sq) {
+        keep[max_idx] = true;
+        rdp_recurse(pts, keep, start, max_idx, eps_sq);
+        rdp_recurse(pts, keep, max_idx, end, eps_sq);
+    }
+}
+
+/* RDP simplification for a closed polygon. epsilon controls max deviation in pixels.
+ * Output polygon has at least 3 vertices. Returns vertex count. */
+static uint32_t rdp_simplify(const Point2D *poly, uint32_t n, double epsilon, Point2D *out) {
+    if (n <= 3) {
+        memcpy(out, poly, n * sizeof(Point2D));
+        return n;
+    }
+    double eps_sq = epsilon * epsilon;
+
+    /* Find the two most distant vertices to use as split points */
+    uint32_t i0 = 0;
+    uint32_t i1 = 0;
+    int64_t max_dist_sq = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        for (uint32_t j = i + 1; j < n; j++) {
+            int64_t dx = (int64_t)(poly[j].x - poly[i].x);
+            int64_t dy = (int64_t)(poly[j].y - poly[i].y);
+            int64_t d = (dx * dx) + (dy * dy);
+            if (d > max_dist_sq) {
+                max_dist_sq = d;
+                i0 = i;
+                i1 = j;
+            }
+        }
+    }
+
+    /* Linearize closed polygon into two open chains: i0→i1 and i1→i0 (wrapping) */
+    uint32_t chain_len = n + 1; /* worst case: entire polygon + wrap */
+    Point2D *chain = (Point2D *)malloc(chain_len * sizeof(Point2D));
+    bool *keep = (bool *)calloc(chain_len, sizeof(bool));
+    NT_BUILD_ASSERT(chain && keep && "rdp_simplify: alloc failed");
+
+    /* Chain A: i0 → i1 */
+    uint32_t a_len = 0;
+    uint32_t *a_map = (uint32_t *)malloc(chain_len * sizeof(uint32_t));
+    NT_BUILD_ASSERT(a_map && "rdp_simplify: alloc failed");
+    for (uint32_t i = i0;; i = (i + 1) % n) {
+        a_map[a_len] = i;
+        chain[a_len] = poly[i];
+        a_len++;
+        if (i == i1) {
+            break;
+        }
+    }
+
+    bool *keep_a = (bool *)calloc(a_len, sizeof(bool));
+    NT_BUILD_ASSERT(keep_a && "rdp_simplify: alloc failed");
+    keep_a[0] = true;
+    keep_a[a_len - 1] = true;
+    rdp_recurse(chain, keep_a, 0, a_len - 1, eps_sq);
+
+    /* Chain B: i1 → i0 (wrapping) */
+    uint32_t b_len = 0;
+    uint32_t *b_map = (uint32_t *)malloc(chain_len * sizeof(uint32_t));
+    NT_BUILD_ASSERT(b_map && "rdp_simplify: alloc failed");
+    for (uint32_t i = i1;; i = (i + 1) % n) {
+        b_map[b_len] = i;
+        chain[b_len] = poly[i];
+        b_len++;
+        if (i == i0) {
+            break;
+        }
+    }
+
+    bool *keep_b = (bool *)calloc(b_len, sizeof(bool));
+    NT_BUILD_ASSERT(keep_b && "rdp_simplify: alloc failed");
+    keep_b[0] = true;
+    keep_b[b_len - 1] = true;
+    rdp_recurse(chain, keep_b, 0, b_len - 1, eps_sq);
+
+    /* Merge: mark kept vertices in original polygon */
+    bool *keep_final = (bool *)calloc(n, sizeof(bool));
+    NT_BUILD_ASSERT(keep_final && "rdp_simplify: alloc failed");
+    for (uint32_t i = 0; i < a_len; i++) {
+        if (keep_a[i]) {
+            keep_final[a_map[i]] = true;
+        }
+    }
+    for (uint32_t i = 0; i < b_len; i++) {
+        if (keep_b[i]) {
+            keep_final[b_map[i]] = true;
+        }
+    }
+
+    /* Collect kept vertices in order */
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        if (keep_final[i]) {
+            out[count++] = poly[i];
+        }
+    }
+
+    free(keep_final);
+    free(keep_b);
+    free(b_map);
+    free(keep_a);
+    free(a_map);
+    free(keep);
+    free(chain);
+
+    return (count >= 3) ? count : n;
+}
+
+/* --- Polygon inflation via Clipper2 (handles concave corners correctly) --- */
+
+/* Inflates a polygon by 'amount' pixels. Output buffer 'out' must hold at least
+ * max(n, 32) Point2D entries — Clipper2 may add vertices at concave splits,
+ * but we cap the result to fit downstream stack arrays. */
+static uint32_t polygon_inflate(const Point2D *hull, uint32_t n, float amount, Point2D *out) {
+    if (n < 3 || amount <= 0.0F) {
         memcpy(out, hull, n * sizeof(Point2D));
         return n;
     }
-
-    /* Compute offset edges (each stored as a point + direction on the offset line) */
-    float *ox = (float *)malloc(n * sizeof(float) * 4); /* [ax, ay, bx, by] per edge */
-    NT_BUILD_ASSERT(ox && "polygon_inflate: alloc failed");
-
+    /* Convert Point2D → flat xy array for bridge */
+    int32_t stack_xy[64];
+    int32_t *xy = (n <= 32) ? stack_xy : (int32_t *)malloc(n * 2 * sizeof(int32_t));
+    NT_BUILD_ASSERT(xy && "polygon_inflate: alloc failed");
     for (uint32_t i = 0; i < n; i++) {
-        uint32_t j = (i + 1) % n;
-        float dx = (float)(hull[j].x - hull[i].x);
-        float dy = (float)(hull[j].y - hull[i].y);
-        float len = sqrtf((dx * dx) + (dy * dy));
-        if (len < 1e-6F) {
-            len = 1.0F;
-        }
-        /* Outward normal (CCW polygon: rotate edge direction CW 90) */
-        float nx = dy / len;
-        float ny = -dx / len;
-        ox[(i * 4) + 0] = (float)hull[i].x + (nx * amount);
-        ox[(i * 4) + 1] = (float)hull[i].y + (ny * amount);
-        ox[(i * 4) + 2] = (float)hull[j].x + (nx * amount);
-        ox[(i * 4) + 3] = (float)hull[j].y + (ny * amount);
+        xy[i * 2] = hull[i].x;
+        xy[i * 2 + 1] = hull[i].y;
     }
-
-    /* Intersect adjacent offset edges to get inflated vertices */
-    uint32_t out_count = 0;
-    for (uint32_t i = 0; i < n; i++) {
-        uint32_t j = (i + 1) % n;
-        /* Line i: from (ax0,ay0) to (bx0,by0), line j: from (ax1,ay1) to (bx1,by1) */
-        float ax0 = ox[(i * 4) + 0];
-        float ay0 = ox[(i * 4) + 1];
-        float bx0 = ox[(i * 4) + 2];
-        float by0 = ox[(i * 4) + 3];
-        float ax1 = ox[(j * 4) + 0];
-        float ay1 = ox[(j * 4) + 1];
-        float bx1 = ox[(j * 4) + 2];
-        float by1 = ox[(j * 4) + 3];
-
-        float d0x = bx0 - ax0;
-        float d0y = by0 - ay0;
-        float d1x = bx1 - ax1;
-        float d1y = by1 - ay1;
-
-        float denom = (d0x * d1y) - (d0y * d1x);
-        if (fabsf(denom) < 1e-6F) {
-            /* Parallel edges: use midpoint of the two offset endpoints */
-            out[out_count].x = (int32_t)roundf((bx0 + ax1) * 0.5F);
-            out[out_count].y = (int32_t)roundf((by0 + ay1) * 0.5F);
-        } else {
-            float t = (((ax1 - ax0) * d1y) - ((ay1 - ay0) * d1x)) / denom;
-            out[out_count].x = (int32_t)roundf(ax0 + (t * d0x));
-            out[out_count].y = (int32_t)roundf(ay0 + (t * d0y));
-        }
-        out_count++;
+    int32_t *inflated_xy = NULL;
+    uint32_t out_count = nt_clipper2_inflate(xy, n, (double)amount, &inflated_xy);
+    if (xy != stack_xy) {
+        free(xy);
     }
-
-    free(ox);
+    if (out_count == 0 || !inflated_xy) {
+        /* Clipper2 failed (e.g. polygon collapsed on deflate) — copy unchanged */
+        free(inflated_xy);
+        memcpy(out, hull, n * sizeof(Point2D));
+        return n;
+    }
+    /* Cap output at 32 vertices — downstream uses stack arrays of this size.
+     * If Clipper2 returned more (rare), the caller's out buffer must be sized accordingly. */
+    if (out_count > 32) {
+        out_count = 32;
+    }
+    /* Sanity check: inflated coordinates must be within reasonable bounds (~input range + amount).
+     * If Clipper2 returned something weird, fall back to the input. */
+    int32_t in_min_x = hull[0].x, in_max_x = hull[0].x;
+    int32_t in_min_y = hull[0].y, in_max_y = hull[0].y;
+    for (uint32_t i = 1; i < n; i++) {
+        if (hull[i].x < in_min_x)
+            in_min_x = hull[i].x;
+        if (hull[i].x > in_max_x)
+            in_max_x = hull[i].x;
+        if (hull[i].y < in_min_y)
+            in_min_y = hull[i].y;
+        if (hull[i].y > in_max_y)
+            in_max_y = hull[i].y;
+    }
+    int32_t margin = (int32_t)(amount * 4.0F) + 16;
+    bool sane = true;
+    for (uint32_t i = 0; i < out_count; i++) {
+        int32_t x = (int32_t)inflated_xy[i * 2];
+        int32_t y = (int32_t)inflated_xy[i * 2 + 1];
+        if (x < in_min_x - margin || x > in_max_x + margin || y < in_min_y - margin || y > in_max_y + margin) {
+            sane = false;
+            break;
+        }
+    }
+    if (!sane) {
+        NT_LOG_WARN("polygon_inflate: Clipper2 returned out-of-bounds vertices, using input unchanged");
+        free(inflated_xy);
+        memcpy(out, hull, n * sizeof(Point2D));
+        return n;
+    }
+    for (uint32_t i = 0; i < out_count; i++) {
+        out[i].x = inflated_xy[i * 2];
+        out[i].y = inflated_xy[i * 2 + 1];
+    }
+    free(inflated_xy);
     return out_count;
 }
 
@@ -655,9 +993,9 @@ static TileGrid tgrid_from_polygon(const Point2D *hull, uint32_t hull_n, uint32_
 
     TileGrid g = tgrid_create(tw, th, tile_size);
 
-    /* Fan-triangulate the polygon from vertex 0 */
+    /* Triangulate polygon (fan for convex, ear-clip for concave) */
     uint16_t indices[96]; /* max 32 vertices -> 30 tris -> 90 indices */
-    uint32_t tri_count = fan_triangulate(hull_n, indices);
+    uint32_t tri_count = ear_clip_triangulate(hull, hull_n, indices);
 
     /* For each tile cell, test if any triangle overlaps the tile rect */
     for (uint32_t ty = 0; ty < th; ty++) {
@@ -2768,6 +3106,10 @@ bool nt_atlas_test_alpha_trim(const uint8_t *rgba, uint32_t w, uint32_t h, uint8
 uint32_t nt_atlas_test_convex_hull(const void *pts, uint32_t n, void *out) { return convex_hull((const Point2D *)pts, n, (Point2D *)out); }
 uint32_t nt_atlas_test_rdp_simplify(const void *hull, uint32_t n, uint32_t max_v, void *out) { return hull_simplify((const Point2D *)hull, n, max_v, (Point2D *)out); }
 uint32_t nt_atlas_test_fan_triangulate(uint32_t vc, uint16_t *idx) { return fan_triangulate(vc, idx); }
+uint32_t nt_atlas_test_ear_clip(const void *poly, uint32_t n, uint16_t *idx) { return ear_clip_triangulate((const Point2D *)poly, n, idx); }
+uint32_t nt_atlas_test_trace_contour(const uint8_t *bin, uint32_t tw, uint32_t th, void *out, uint32_t max_out) { return trace_contour(bin, tw, th, (Point2D *)out, max_out); }
+uint32_t nt_atlas_test_remove_collinear(const void *in, uint32_t n, void *out) { return remove_collinear((const Point2D *)in, n, (Point2D *)out); }
+bool nt_atlas_test_point_in_polygon(const void *poly, uint32_t n, int32_t px, int32_t py) { return point_in_polygon((const Point2D *)poly, n, (Point2D){px, py}); }
 #endif
 
 // #region Atlas public API — begin, add, end
@@ -3066,7 +3408,7 @@ static void pipeline_dedup(AtlasPipeline *p) {
     }
 }
 
-/* --- pipeline_geometry: convex hull + simplification + inflation per unique sprite --- */
+/* --- pipeline_geometry: contour trace + simplification + inflation per unique sprite --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void pipeline_geometry(AtlasPipeline *p) {
@@ -3080,44 +3422,32 @@ static void pipeline_geometry(AtlasPipeline *p) {
         uint32_t th = p->trim_h[idx];
 
         if (p->opts->polygon_mode) {
-            /* Extract boundary pixels from alpha plane (dense, cache-friendly) */
             const uint8_t *ap = p->alpha_planes[idx];
             uint32_t aw = p->sprites[idx].width;
-            /* Collect boundary pixel CORNERS (not centers) so that the convex hull
-             * passes along the outer edge of pixels, fully covering all opaque area.
-             * Each boundary pixel contributes 4 corner points (x,y), (x+1,y), (x,y+1), (x+1,y+1). */
-            uint32_t pt_count = 0;
-            Point2D *pts = (Point2D *)malloc((size_t)tw * th * 4 * sizeof(Point2D)); /* 4 corners per pixel */
-            NT_BUILD_ASSERT(pts && "pipeline_geometry: alloc failed");
 
+            /* Build binary mask for trimmed region */
+            uint8_t *binary = (uint8_t *)calloc((size_t)tw * th, 1);
+            NT_BUILD_ASSERT(binary && "pipeline_geometry: alloc failed");
             for (uint32_t y = 0; y < th; y++) {
                 for (uint32_t x = 0; x < tw; x++) {
                     uint8_t a = ap[((size_t)(p->trim_y[idx] + y) * aw) + p->trim_x[idx] + x];
                     if (a >= p->opts->alpha_threshold) {
-                        bool is_boundary = (x == 0 || y == 0 || x == tw - 1 || y == th - 1);
-                        if (!is_boundary) {
-                            size_t base = ((size_t)(p->trim_y[idx] + y) * aw) + p->trim_x[idx] + x;
-                            uint8_t left = ap[base - 1];
-                            uint8_t right = ap[base + 1];
-                            uint8_t up = ap[base - aw];
-                            uint8_t down = ap[base + aw];
-                            is_boundary = (left < p->opts->alpha_threshold || right < p->opts->alpha_threshold || up < p->opts->alpha_threshold || down < p->opts->alpha_threshold);
-                        }
-                        if (is_boundary) {
-                            int32_t px = (int32_t)x;
-                            int32_t py = (int32_t)y;
-                            pts[pt_count++] = (Point2D){px, py};
-                            pts[pt_count++] = (Point2D){px + 1, py};
-                            pts[pt_count++] = (Point2D){px, py + 1};
-                            pts[pt_count++] = (Point2D){px + 1, py + 1};
-                        }
+                        binary[(y * tw) + x] = 1;
                     }
                 }
             }
 
-            if (pt_count < 3) {
+            /* Trace outer contour (CCW). Worst-case contour length is
+             * 2*(tw*th) for maximally jagged shapes (checkerboard). */
+            uint32_t max_contour = 2 * tw * th + 4;
+            Point2D *contour = (Point2D *)malloc(max_contour * sizeof(Point2D));
+            NT_BUILD_ASSERT(contour && "pipeline_geometry: alloc failed");
+            uint32_t contour_count = trace_contour(binary, tw, th, contour, max_contour);
+            free(binary);
+
+            if (contour_count < 3) {
                 /* Degenerate: use rect */
-                free(pts);
+                free(contour);
                 p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
                 NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
                 p->hull_vertices[idx][0] = (Point2D){0, 0};
@@ -3126,73 +3456,92 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 p->hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
                 p->vertex_counts[idx] = 4;
             } else {
-                Point2D *hull = (Point2D *)malloc((size_t)pt_count * 2 * sizeof(Point2D));
-                NT_BUILD_ASSERT(hull && "pipeline_geometry: alloc failed");
-                uint32_t hull_count = convex_hull(pts, pt_count, hull);
+                /* Remove collinear vertices */
+                Point2D *clean = (Point2D *)malloc(contour_count * sizeof(Point2D));
+                NT_BUILD_ASSERT(clean && "pipeline_geometry: alloc failed");
+                uint32_t clean_count = remove_collinear(contour, contour_count, clean);
+                free(contour);
 
-                Point2D *simplified = (Point2D *)malloc(hull_count * sizeof(Point2D));
+                /* Simplify with RDP (epsilon-based). Iterate epsilon if result > max_vertices. */
+                Point2D *simplified = (Point2D *)malloc(clean_count * sizeof(Point2D));
                 NT_BUILD_ASSERT(simplified && "pipeline_geometry: alloc failed");
-                uint32_t simp_count = hull_simplify(hull, hull_count, p->opts->max_vertices, simplified);
-                free(hull);
-
-                /* Determine polygon winding (CCW or CW) via signed area */
-                double signed_area = 0.0;
-                for (uint32_t si = 0; si < simp_count; si++) {
-                    uint32_t sj = (si + 1) % simp_count;
-                    signed_area += ((double)simplified[si].x * simplified[sj].y) - ((double)simplified[sj].x * simplified[si].y);
+                double eps = 2.0;
+                uint32_t simp_count = rdp_simplify(clean, clean_count, eps, simplified);
+                /* Cap at max_vertices - 4 to leave headroom for Clipper2 inflate adding corners */
+                uint32_t target = (p->opts->max_vertices > 4) ? ((uint32_t)p->opts->max_vertices - 4) : 4;
+                while (simp_count > target && eps < 100.0) {
+                    eps *= 1.5;
+                    simp_count = rdp_simplify(clean, clean_count, eps, simplified);
                 }
-                double outside_sign = (signed_area > 0) ? -1.0 : 1.0;
+                free(clean);
 
-                /* Find max distance from any boundary pixel OUTSIDE simplified polygon */
-                float max_outside_dist = 0.0F;
-                for (uint32_t bi = 0; bi < pt_count; bi++) {
-                    for (uint32_t si = 0; si < simp_count; si++) {
-                        uint32_t sj = (si + 1) % simp_count;
-                        double ex = (double)(simplified[sj].x - simplified[si].x);
-                        double ey = (double)(simplified[sj].y - simplified[si].y);
-                        double len_sq = (ex * ex) + (ey * ey);
-                        if (len_sq < 1e-12) {
-                            continue;
-                        }
-                        double cross = (ex * (double)(pts[bi].y - simplified[si].y)) - (ey * (double)(pts[bi].x - simplified[si].x));
-                        if ((cross * outside_sign) > 0) {
-                            double dist = fabs(cross) / sqrt(len_sq);
-                            if ((float)dist > max_outside_dist) {
-                                max_outside_dist = (float)dist;
-                            }
-                        }
-                    }
+                /* Inflate via Clipper2 (handles concave corners correctly) */
+                int32_t *simp_xy = (int32_t *)malloc(simp_count * 2 * sizeof(int32_t));
+                NT_BUILD_ASSERT(simp_xy && "pipeline_geometry: alloc failed");
+                for (uint32_t v = 0; v < simp_count; v++) {
+                    simp_xy[v * 2] = simplified[v].x;
+                    simp_xy[v * 2 + 1] = simplified[v].y;
                 }
-
-                /* Inflate simplified polygon outward by max_outside_dist + 1px margin */
-                float inflate_amount = max_outside_dist + 1.0F;
-                Point2D *inflated = (Point2D *)malloc(simp_count * sizeof(Point2D));
-                NT_BUILD_ASSERT(inflated && "pipeline_geometry: alloc failed");
-                uint32_t inf_count = polygon_inflate(simplified, simp_count, inflate_amount, inflated);
                 free(simplified);
 
-                /* Verify: all boundary pixels must be inside the inflated polygon */
-                for (uint32_t bi = 0; bi < pt_count; bi++) {
-                    bool inside = false;
-                    for (uint32_t ti = 1; ti + 1 < inf_count && !inside; ti++) {
-                        int64_t d0 = cross2d(inflated[0], inflated[ti], pts[bi]);
-                        int64_t d1 = cross2d(inflated[ti], inflated[ti + 1], pts[bi]);
-                        int64_t d2 = cross2d(inflated[ti + 1], inflated[0], pts[bi]);
-                        bool all_neg = (d0 <= 0) && (d1 <= 0) && (d2 <= 0);
-                        bool all_pos = (d0 >= 0) && (d1 >= 0) && (d2 >= 0);
-                        if (all_neg || all_pos) {
-                            inside = true;
+                int32_t *inflated_xy = NULL;
+                uint32_t inf_count = nt_clipper2_inflate(simp_xy, simp_count, 1.0, &inflated_xy);
+                free(simp_xy);
+
+                /* Sanity check: Clipper2 can return bizarre results for degenerate inputs.
+                 * All output coordinates must be within sprite trim bounds + small margin. */
+                bool sane_result = (inf_count >= 3 && inflated_xy != NULL);
+                if (sane_result) {
+                    int32_t lo_x = -16, hi_x = (int32_t)tw + 16;
+                    int32_t lo_y = -16, hi_y = (int32_t)th + 16;
+                    for (uint32_t v = 0; v < inf_count; v++) {
+                        int32_t x = (int32_t)inflated_xy[v * 2];
+                        int32_t y = (int32_t)inflated_xy[v * 2 + 1];
+                        if (x < lo_x || x > hi_x || y < lo_y || y > hi_y) {
+                            sane_result = false;
+                            break;
                         }
                     }
-                    if (!inside) {
-                        NT_LOG_ERROR("boundary pixel (%d,%d) outside inflated polygon (sprite %ux%u, inflate=%.1f)", pts[bi].x, pts[bi].y, tw, th, (double)inflate_amount);
-                    }
-                    NT_BUILD_ASSERT(inside && "pipeline_geometry: boundary pixel outside inflated polygon");
                 }
-                free(pts);
 
-                p->hull_vertices[idx] = inflated;
-                p->vertex_counts[idx] = inf_count;
+                if (sane_result) {
+                    /* If Clipper2 produced too many vertices (edge splits at concave corners),
+                     * apply RDP again to get under 32 vertices (downstream uses stack arrays). */
+                    Point2D *result = (Point2D *)malloc(inf_count * sizeof(Point2D));
+                    NT_BUILD_ASSERT(result && "pipeline_geometry: alloc failed");
+                    for (uint32_t v = 0; v < inf_count; v++) {
+                        result[v].x = inflated_xy[v * 2];
+                        result[v].y = inflated_xy[v * 2 + 1];
+                    }
+                    free(inflated_xy);
+
+                    if (inf_count > 32) {
+                        Point2D *reduced = (Point2D *)malloc(inf_count * sizeof(Point2D));
+                        NT_BUILD_ASSERT(reduced && "pipeline_geometry: alloc failed");
+                        double eps2 = 1.0;
+                        uint32_t red_count = rdp_simplify(result, inf_count, eps2, reduced);
+                        while (red_count > 32 && eps2 < 100.0) {
+                            eps2 *= 1.5;
+                            red_count = rdp_simplify(result, inf_count, eps2, reduced);
+                        }
+                        free(result);
+                        result = reduced;
+                        inf_count = red_count;
+                    }
+
+                    p->hull_vertices[idx] = result;
+                    p->vertex_counts[idx] = inf_count;
+                } else {
+                    /* Clipper2 inflate failed — fallback to rect */
+                    free(inflated_xy);
+                    p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
+                    NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
+                    p->hull_vertices[idx][0] = (Point2D){0, 0};
+                    p->hull_vertices[idx][1] = (Point2D){(int32_t)tw, 0};
+                    p->hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
+                    p->hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
+                    p->vertex_counts[idx] = 4;
+                }
             }
         } else {
             /* Rect mode: 4-vertex rect */
@@ -3354,10 +3703,14 @@ static void pipeline_cache_write(AtlasPipeline *p) {
 static void pipeline_serialize(AtlasPipeline *p) {
     uint32_t extrude_val = p->opts->extrude;
 
-    /* Count total vertices */
+    /* Count total vertices and indices */
     uint32_t total_vertex_count = 0;
+    uint32_t total_index_count = 0;
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         total_vertex_count += p->vertex_counts[i];
+        if (p->vertex_counts[i] >= 3) {
+            total_index_count += (p->vertex_counts[i] - 2) * 3;
+        }
     }
 
     /* Build placement lookup: original_sprite_index -> placement index */
@@ -3375,10 +3728,11 @@ static void pipeline_serialize(AtlasPipeline *p) {
         }
     }
 
-    /* Serialize blob: header + texture_resource_ids + regions + vertices */
+    /* Serialize blob: header + texture_resource_ids + regions + vertices + indices */
     uint32_t regions_offset = (uint32_t)sizeof(NtAtlasHeader) + (p->page_count * (uint32_t)sizeof(uint64_t));
     uint32_t vertex_offset = regions_offset + (p->sprite_count * (uint32_t)sizeof(NtAtlasRegion));
-    uint32_t blob_size = vertex_offset + (total_vertex_count * (uint32_t)sizeof(NtAtlasVertex));
+    uint32_t index_offset = vertex_offset + (total_vertex_count * (uint32_t)sizeof(NtAtlasVertex));
+    uint32_t blob_size = index_offset + (total_index_count * (uint32_t)sizeof(uint16_t));
     uint8_t *blob = (uint8_t *)calloc(1, blob_size);
     NT_BUILD_ASSERT(blob && "pipeline_serialize: blob alloc failed");
 
@@ -3391,6 +3745,8 @@ static void pipeline_serialize(AtlasPipeline *p) {
     hdr->_pad = 0;
     hdr->vertex_offset = vertex_offset;
     hdr->total_vertex_count = total_vertex_count;
+    hdr->index_offset = index_offset;
+    hdr->total_index_count = total_index_count;
 
     /* Texture resource IDs (D-05) */
     uint8_t *tex_ids_ptr = blob + sizeof(NtAtlasHeader);
@@ -3401,15 +3757,22 @@ static void pipeline_serialize(AtlasPipeline *p) {
         memcpy(tex_ids_ptr + ((size_t)pg * sizeof(uint64_t)), &tid, sizeof(uint64_t));
     }
 
-    /* Regions + vertices */
+    /* Regions + vertices + indices */
     NtAtlasRegion *regions = (NtAtlasRegion *)(blob + regions_offset);
     NtAtlasVertex *vertices = (NtAtlasVertex *)(blob + vertex_offset);
+    uint16_t *indices = (uint16_t *)(blob + index_offset);
     uint32_t vertex_cursor = 0;
+    uint32_t index_cursor = 0;
 
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         uint32_t pi = placement_lookup[i];
         NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
         AtlasPlacement *pl = &p->placements[pi];
+
+        /* Triangulate polygon (ear-clip handles both convex and concave) */
+        uint16_t local_indices[96]; /* max 32 verts -> 30 tris -> 90 indices */
+        uint32_t tri_count = ear_clip_triangulate(p->hull_vertices[i], p->vertex_counts[i], local_indices);
+        uint32_t idx_count = tri_count * 3;
 
         NtAtlasRegion *reg = &regions[i];
         reg->name_hash = nt_hash64_str(p->sprites[i].name).value;
@@ -3423,7 +3786,12 @@ static void pipeline_serialize(AtlasPipeline *p) {
         reg->vertex_count = (uint8_t)p->vertex_counts[i];
         reg->page_index = (uint8_t)pl->page;
         reg->rotated = pl->rotation;
-        memset(reg->_pad, 0, sizeof(reg->_pad));
+        reg->index_start = (uint16_t)index_cursor;
+        reg->index_count = (uint8_t)idx_count;
+
+        /* Write triangle indices (local: 0..vertex_count-1) */
+        memcpy(&indices[index_cursor], local_indices, idx_count * sizeof(uint16_t));
+        index_cursor += idx_count;
 
         uint32_t inner_x = pl->x + extrude_val;
         uint32_t inner_y = pl->y + extrude_val;
@@ -3463,6 +3831,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
     }
 
     NT_BUILD_ASSERT(vertex_cursor == total_vertex_count && "pipeline_serialize: vertex count mismatch");
+    NT_BUILD_ASSERT(index_cursor == total_index_count && "pipeline_serialize: index count mismatch");
 
     /* Register atlas metadata entry (D-04) */
     uint64_t blob_hash = nt_hash64(blob, blob_size).value;
