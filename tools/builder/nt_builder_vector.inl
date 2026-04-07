@@ -513,9 +513,12 @@ static VPackExperimentConfig vpack_experiment_config_get(void) {
 
 #define VPACK_GRID_CELL 128
 /* Each cell holds a bitmap of NFPs that overlap it. nfp_words grows with the
- * number of NFPs in the current orient. Cap determines when we fall back to
- * linear scan. 32 * 64 = 2048 NFPs is plenty (bigatlas max relevant ≈ 1180). */
-#define VPACK_GRID_WORDS 32
+ * number of NFPs in the current orient. 64 * 64 = 4096 NFPs. Larger than
+ * realistic workloads so grid path stays active. Measured: 32 is slightly
+ * better for small workloads (<2048 relevant) but hits grid_fallbacks on
+ * the full 4812 bigatlas, which regresses net. 64 is neutral-or-better on
+ * both workloads. */
+#define VPACK_GRID_WORDS 64
 
 static void vpack_calc_aabb(const Point2D *poly, uint32_t count, int32_t *min_x, int32_t *min_y, int32_t *max_x, int32_t *max_y) {
     if (count == 0)
