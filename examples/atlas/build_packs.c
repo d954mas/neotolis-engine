@@ -52,7 +52,7 @@ static void limited_add_callback(const char *path, void *user) {
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        (void)fprintf(stderr, "Usage: build_atlas_packs <pack_dir> [max_size] [tile_size] [glob] [name] [r=rect] [max_sprites]\n");
+        (void)fprintf(stderr, "Usage: build_atlas_packs <pack_dir> [max_size] [glob] [name] [r=rect] [max_sprites]\n");
         return 1;
     }
     const char *out_dir = argv[1];
@@ -71,7 +71,7 @@ int main(int argc, char *argv[]) {
         (void)fprintf(stderr, "Failed to start pack\n");
         return 1;
     }
-    if (argc < 5) { /* codegen only for default spineboy test */
+    if (argc < 4) { /* codegen only for default spineboy test */
         nt_builder_set_header_dir(ctx, HEADER_DIR);
     }
     const char *threads_env = getenv("NT_BUILDER_THREADS");
@@ -104,17 +104,13 @@ int main(int argc, char *argv[]) {
     opts.max_vertices = 8;
     opts.allow_rotate = true;
     opts.debug_png = true;
-    opts.tile_size = (argc >= 4) ? (uint8_t)atoi(argv[3]) : 4;
-    const char *glob_pattern = (argc >= 5) ? argv[4] : "assets/sprites/spineboy/*.png";
-    const char *atlas_name = (argc >= 6) ? argv[5] : "spineboy";
-    if (argc >= 7 && argv[6][0] == 'r') {
+    const char *glob_pattern = (argc >= 4) ? argv[3] : "assets/sprites/spineboy/*.png";
+    const char *atlas_name = (argc >= 5) ? argv[4] : "spineboy";
+    if (argc >= 6 && argv[5][0] == 'r') {
         opts.polygon_mode = false;
     }
-    if (argc >= 7 && argv[6][0] == 'v') {
-        opts.vector_pack = true;
-    }
-    uint32_t max_sprites = (argc >= 8) ? (uint32_t)atoi(argv[7]) : 0;
-    (void)printf("atlas=%s max=%u ts=%u poly=%s max_sprites=%u\n", atlas_name, opts.max_size, opts.tile_size, opts.polygon_mode ? "yes" : "no", max_sprites);
+    uint32_t max_sprites = (argc >= 7) ? (uint32_t)atoi(argv[6]) : 0;
+    (void)printf("atlas=%s max=%u poly=%s max_sprites=%u\n", atlas_name, opts.max_size, opts.polygon_mode ? "yes" : "no", max_sprites);
 
     nt_builder_begin_atlas(ctx, atlas_name, &opts);
     if (max_sprites > 0) {
