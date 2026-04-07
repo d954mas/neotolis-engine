@@ -24,6 +24,7 @@ const char *__lsan_default_suppressions(void) { // NOLINT(bugprone-reserved-iden
 #include "nt_atlas_format.h"
 #include "nt_blob_format.h"
 #include "nt_builder.h"
+#include "nt_builder_atlas_geometry.h"
 #include "nt_builder_internal.h"
 #include "nt_crc32.h"
 #include "nt_font_format.h"
@@ -3422,11 +3423,16 @@ void test_font_kern_values(void) {
 
 /* --- Atlas geometry algorithm tests (Phase 47) --- */
 
-/* Point2D-compatible struct for test usage (matches internal Point2D in nt_builder_atlas.c) */
-typedef struct {
-    int32_t x, y;
-} TestPoint2D;
+/* alpha_trim takes a dense alpha plane; tests start from RGBA so wrap the
+ * extract+trim+free sequence in one helper. */
+static bool atlas_trim_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint8_t threshold, uint32_t *ox, uint32_t *oy, uint32_t *ow, uint32_t *oh) {
+    uint8_t *ap = alpha_plane_extract(rgba, w, h);
+    bool result = alpha_trim(ap, w, h, threshold, ox, oy, ow, oh);
+    free(ap);
+    return result;
+}
 
+/* vpack internals stay static; tests reach in via this thin wrapper defined in nt_builder_atlas_vpack.c. */
 bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, uint32_t ring_count, int32_t px, int32_t py);
 
 /* alpha_trim: fully transparent 4x4 image returns false */
@@ -3437,7 +3443,7 @@ void test_alpha_trim_fully_transparent(void) {
     uint32_t oy = 0;
     uint32_t ow = 0;
     uint32_t oh = 0;
-    bool result = nt_atlas_test_alpha_trim(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
+    bool result = atlas_trim_rgba(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
     TEST_ASSERT_FALSE(result);
 }
 
@@ -3451,7 +3457,7 @@ void test_alpha_trim_single_pixel(void) {
     uint32_t oy = 0;
     uint32_t ow = 0;
     uint32_t oh = 0;
-    bool result = nt_atlas_test_alpha_trim(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
+    bool result = atlas_trim_rgba(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
     TEST_ASSERT_TRUE(result);
     TEST_ASSERT_EQUAL_UINT32(2, ox);
     TEST_ASSERT_EQUAL_UINT32(1, oy);
@@ -3472,7 +3478,7 @@ void test_alpha_trim_l_shape(void) {
     uint32_t oy = 0;
     uint32_t ow = 0;
     uint32_t oh = 0;
-    bool result = nt_atlas_test_alpha_trim(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
+    bool result = atlas_trim_rgba(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
     TEST_ASSERT_TRUE(result);
     TEST_ASSERT_EQUAL_UINT32(0, ox);
     TEST_ASSERT_EQUAL_UINT32(0, oy);
@@ -3492,7 +3498,7 @@ void test_alpha_trim_threshold(void) {
     uint32_t oy = 0;
     uint32_t ow = 0;
     uint32_t oh = 0;
-    bool result = nt_atlas_test_alpha_trim(rgba, 4, 4, 128, &ox, &oy, &ow, &oh);
+    bool result = atlas_trim_rgba(rgba, 4, 4, 128, &ox, &oy, &ow, &oh);
     TEST_ASSERT_TRUE(result);
     TEST_ASSERT_EQUAL_UINT32(2, ox);
     TEST_ASSERT_EQUAL_UINT32(2, oy);
@@ -3502,9 +3508,9 @@ void test_alpha_trim_threshold(void) {
 
 /* convex_hull: 3 points forming triangle returns all 3 in CCW order */
 void test_convex_hull_triangle(void) {
-    TestPoint2D pts[3] = {{0, 0}, {4, 0}, {2, 3}};
-    TestPoint2D out[16];
-    uint32_t n = nt_atlas_test_convex_hull(pts, 3, out);
+    Point2D pts[3] = {{0, 0}, {4, 0}, {2, 3}};
+    Point2D out[16];
+    uint32_t n = convex_hull(pts, 3, out);
     TEST_ASSERT_EQUAL_UINT32(3, n);
     /* Verify CCW ordering: cross product of consecutive edges should be positive */
     int64_t cross = ((int64_t)(out[1].x - out[0].x) * (int64_t)(out[2].y - out[0].y)) - ((int64_t)(out[1].y - out[0].y) * (int64_t)(out[2].x - out[0].x));
@@ -3514,26 +3520,26 @@ void test_convex_hull_triangle(void) {
 /* convex_hull: 5 points with 1 interior point returns 4-vertex hull */
 void test_convex_hull_with_interior(void) {
     /* Square (0,0)-(4,0)-(4,4)-(0,4) with interior point (2,2) */
-    TestPoint2D pts[5] = {{0, 0}, {4, 0}, {4, 4}, {0, 4}, {2, 2}};
-    TestPoint2D out[16];
-    uint32_t n = nt_atlas_test_convex_hull(pts, 5, out);
+    Point2D pts[5] = {{0, 0}, {4, 0}, {4, 4}, {0, 4}, {2, 2}};
+    Point2D out[16];
+    uint32_t n = convex_hull(pts, 5, out);
     TEST_ASSERT_EQUAL_UINT32(4, n); /* interior point excluded */
 }
 
 /* convex_hull: collinear points handled correctly */
 void test_convex_hull_collinear(void) {
-    TestPoint2D pts[4] = {{0, 0}, {1, 0}, {2, 0}, {3, 0}};
-    TestPoint2D out[16];
-    uint32_t n = nt_atlas_test_convex_hull(pts, 4, out);
+    Point2D pts[4] = {{0, 0}, {1, 0}, {2, 0}, {3, 0}};
+    Point2D out[16];
+    uint32_t n = convex_hull(pts, 4, out);
     /* Collinear points should produce a degenerate hull (2 points: endpoints) */
     TEST_ASSERT_EQUAL_UINT32(2, n);
 }
 
 /* rdp_simplify: 4-vertex square with max_vertices=4 returns unchanged */
 void test_rdp_simplify_no_reduction(void) {
-    TestPoint2D hull[4] = {{0, 0}, {4, 0}, {4, 4}, {0, 4}};
-    TestPoint2D out[16];
-    uint32_t n = nt_atlas_test_rdp_simplify(hull, 4, 4, out);
+    Point2D hull[4] = {{0, 0}, {4, 0}, {4, 4}, {0, 4}};
+    Point2D out[16];
+    uint32_t n = hull_simplify(hull, 4, 4, out);
     TEST_ASSERT_EQUAL_UINT32(4, n);
     /* Verify same points */
     for (uint32_t i = 0; i < 4; i++) {
@@ -3545,18 +3551,18 @@ void test_rdp_simplify_no_reduction(void) {
 /* rdp_simplify: 8-vertex shape reduced to max_vertices=4 */
 void test_rdp_simplify_reduction(void) {
     /* Octagon-ish shape: 8 vertices approximating a circle */
-    TestPoint2D hull[8] = {
+    Point2D hull[8] = {
         {10, 0}, {20, 3}, {23, 10}, {20, 17}, {10, 20}, {3, 17}, {0, 10}, {3, 3},
     };
-    TestPoint2D out[16];
-    uint32_t n = nt_atlas_test_rdp_simplify(hull, 8, 4, out);
+    Point2D out[16];
+    uint32_t n = hull_simplify(hull, 8, 4, out);
     TEST_ASSERT_EQUAL_UINT32(4, n);
 }
 
 /* fan_triangulate: 4 vertices produces 2 triangles */
 void test_fan_triangulate_quad(void) {
     uint16_t indices[32];
-    uint32_t tri_count = nt_atlas_test_fan_triangulate(4, indices);
+    uint32_t tri_count = fan_triangulate(4, indices);
     TEST_ASSERT_EQUAL_UINT32(2, tri_count);
     /* Triangle 0: (0, 1, 2) */
     TEST_ASSERT_EQUAL_UINT16(0, indices[0]);
@@ -3571,7 +3577,7 @@ void test_fan_triangulate_quad(void) {
 /* fan_triangulate: 3 vertices produces 1 triangle */
 void test_fan_triangulate_triangle(void) {
     uint16_t indices[32];
-    uint32_t tri_count = nt_atlas_test_fan_triangulate(3, indices);
+    uint32_t tri_count = fan_triangulate(3, indices);
     TEST_ASSERT_EQUAL_UINT32(1, tri_count);
     TEST_ASSERT_EQUAL_UINT16(0, indices[0]);
     TEST_ASSERT_EQUAL_UINT16(1, indices[1]);
@@ -3586,10 +3592,10 @@ void test_vpack_point_in_nfp_block_any_ring(void) {
     };
     const uint16_t ring_offsets[] = {0, 4, 8};
 
-    TEST_ASSERT_TRUE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 5, 5));   /* in first ring */
-    TEST_ASSERT_TRUE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 25, 5));  /* in second ring */
-    TEST_ASSERT_FALSE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 15, 5)); /* between rings */
-    TEST_ASSERT_FALSE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 50, 50));/* outside both */
+    TEST_ASSERT_TRUE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 5, 5));    /* in first ring */
+    TEST_ASSERT_TRUE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 25, 5));   /* in second ring */
+    TEST_ASSERT_FALSE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 15, 5));  /* between rings */
+    TEST_ASSERT_FALSE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 50, 50)); /* outside both */
 }
 
 /* --- Atlas round-trip test helpers --- */

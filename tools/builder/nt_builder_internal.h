@@ -61,8 +61,8 @@ typedef struct {
 
 /* Atlas region entry for codegen (lightweight, no pack entry needed) */
 typedef struct {
-    char *path;            /* "atlas_name/region_name" (owned, heap) */
-    uint64_t resource_id;  /* nt_hash64 of path */
+    char *path;           /* "atlas_name/region_name" (owned, heap) */
+    uint64_t resource_id; /* nt_hash64 of path */
 } NtAtlasRegionCodegen;
 
 /* Atlas build state (active between begin_atlas / end_atlas) */
@@ -404,16 +404,7 @@ nt_cache_status_t nt_builder_cache_lookup(const char *cache_dir, uint64_t decode
 bool nt_builder_cache_store(const char *cache_dir, uint64_t decoded_hash, uint64_t opts_hash, const uint8_t *data, uint32_t size);
 void nt_builder_ensure_cache_dir(const char *dir);
 
-/* Test-access wrappers for atlas geometry algorithms (static functions in nt_builder_atlas.c) */
-#ifdef NT_BUILDER_ATLAS_TEST_ACCESS
-bool nt_atlas_test_alpha_trim(const uint8_t *rgba, uint32_t w, uint32_t h, uint8_t threshold, uint32_t *ox, uint32_t *oy, uint32_t *ow, uint32_t *oh);
-uint32_t nt_atlas_test_convex_hull(const void *pts, uint32_t n, void *out);
-uint32_t nt_atlas_test_rdp_simplify(const void *hull, uint32_t n, uint32_t max_v, void *out);
-uint32_t nt_atlas_test_fan_triangulate(uint32_t vc, uint16_t *idx);
-uint32_t nt_atlas_test_ear_clip(const void *poly, uint32_t n, uint16_t *idx);
-uint32_t nt_atlas_test_trace_contour(const uint8_t *bin, uint32_t tw, uint32_t th, void *out, uint32_t max_out);
-uint32_t nt_atlas_test_remove_collinear(const void *in, uint32_t n, void *out);
-bool nt_atlas_test_point_in_polygon(const void *poly, uint32_t n, int32_t px, int32_t py);
-#endif
+/* Atlas geometry primitives now live in nt_builder_atlas_geometry.h and are
+ * called directly by tests. Vpack-internal test access is in nt_builder_atlas_vpack.c. */
 
 #endif /* NT_BUILDER_INTERNAL_H */

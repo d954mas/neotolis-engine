@@ -109,6 +109,8 @@ add_library(nt_builder STATIC
     nt_builder_cache.c
     nt_builder_font.c
     nt_builder_atlas.c
+    nt_builder_atlas_geometry.c
+    nt_builder_atlas_vpack.c
 )
 target_include_directories(nt_builder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(nt_builder PUBLIC nt_shared nt_core nt_log nt_time cgltf stb_image stb_image_resize2 stb_truetype stb_image_write nt_hash mikktspace nt_basisu_encoder glfw glad miniz tinycthread nt_clipper2_bridge)

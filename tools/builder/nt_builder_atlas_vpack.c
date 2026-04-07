@@ -1,8 +1,74 @@
-// NFP Vector Packing Implementation
-// Minkowski-sum based No-Fit Polygon packer for atlas sprite placement.
-// Included from nt_builder_atlas.c (has access to Point2D, polygon_inflate, etc.)
+/*
+ * NFP Vector Packing — Minkowski-sum based No-Fit Polygon packer for
+ * atlas sprite placement. Formerly inlined into nt_builder_atlas.c as
+ * nt_builder_vector.inl; promoted to a proper module in Phase 162.
+ */
 
-static inline int64_t vpack_cross(int64_t ax, int64_t ay, int64_t bx, int64_t by, int64_t cx, int64_t cy) { return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax); }
+/* clang-format off */
+#include "nt_builder_atlas_vpack.h"
+#include "nt_builder_atlas_geometry.h"
+#include "nt_builder.h"             /* NT_BUILD_ASSERT */
+#include "nt_clipper2_bridge.h"     /* nt_clipper2_minkowski_nfp */
+#include "log/nt_log.h"             /* NT_LOG_INFO, NT_LOG_ERROR */
+#include "time/nt_time.h"           /* nt_time_now */
+#include "tinycthread.h"            /* mtx_t, cnd_t, thrd_t (parallel NFP build) */
+/* clang-format on */
+
+#include <ctype.h>
+#include <math.h>
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* --- Area-descending sort entry (moved from tile_pack region) --- */
+
+typedef struct {
+    uint32_t index; /* index into sprites[] */
+    uint32_t area;  /* trimmed_w * trimmed_h */
+} AreaSortEntry;
+
+static int area_sort_cmp(const void *a, const void *b) {
+    const AreaSortEntry *ea = (const AreaSortEntry *)a;
+    const AreaSortEntry *eb = (const AreaSortEntry *)b;
+    if (ea->area > eb->area) {
+        return -1;
+    }
+    if (ea->area < eb->area) {
+        return 1;
+    }
+    if (ea->index < eb->index) {
+        return -1;
+    }
+    if (ea->index > eb->index) {
+        return 1;
+    }
+    return 0;
+}
+
+/* --- Env-var truthy check (consumed by VPACK DISABLE_* flags) --- */
+
+static bool atlas_trace_str_ieq(const char *a, const char *b) {
+    while (*a != '\0' && *b != '\0') {
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) {
+            return false;
+        }
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static bool atlas_trace_env_truthy(const char *value) {
+    if (!value || value[0] == '\0') {
+        return false;
+    }
+    if ((value[0] == '0' && value[1] == '\0') || atlas_trace_str_ieq(value, "false") || atlas_trace_str_ieq(value, "off") || atlas_trace_str_ieq(value, "no")) {
+        return false;
+    }
+    return true;
+}
 
 /* Negate polygon vertices (no reversal needed), pack int32 xy pairs for
  * Clipper2, and return the shape hash in one pass. 2D negation = 180deg
@@ -286,10 +352,6 @@ static inline void vpack_add_float_cand(VPackCand **cands, uint32_t *c_count, ui
     vpack_add_cand(cands, c_count, c_cap, ix + 1, iy + 1, b, dedup);
 }
 
-static inline bool vpack_rect_overlap(int32_t ax0, int32_t ay0, int32_t ax1, int32_t ay1, int32_t bx0, int32_t by0, int32_t bx1, int32_t by1) {
-    return !(ax1 < bx0 || ax0 > bx1 || ay1 < by0 || ay0 > by1);
-}
-
 /* Inflated pack polygon: polygon_inflate may add vertices at concave splits,
  * so this is wider than the final <=max_vertices polygon stored in the atlas blob.
  * Capacity 32 matches
@@ -314,8 +376,8 @@ typedef struct {
  * in [-4100, +4100] at worst, well within int16 range. Halves memory traffic on
  * the hit path (3.5M hits × 256 bytes saved). */
 typedef struct {
-    atomic_uint version;   /* even = stable snapshot, odd = writer in progress */
-    uint32_t key_a, key_b; /* shape hashes; both 0 = empty slot */
+    atomic_uint version;                       /* even = stable snapshot, odd = writer in progress */
+    uint32_t key_a, key_b;                     /* shape hashes; both 0 = empty slot */
     int16_t verts_xy[VPACK_NFP_MAX_VERTS * 2]; /* interleaved x,y pairs */
     uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1];
     uint8_t ring_count;
@@ -1317,8 +1379,8 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts,
-                            AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats, uint32_t thread_count) {
+uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts,
+                     AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats, uint32_t thread_count) {
     uint32_t extrude = opts->extrude;
     uint32_t padding = opts->padding;
     uint32_t margin = opts->margin;
@@ -1756,3 +1818,23 @@ static uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Poin
 
     return sprite_count;
 }
+
+/* --- Test-access wrapper (vpack internals remain static) --- */
+
+#ifdef NT_BUILDER_ATLAS_TEST_ACCESS
+bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, uint32_t ring_count, int32_t px, int32_t py) {
+    NT_BUILD_ASSERT(ring_count <= VPACK_NFP_MAX_RINGS && "nt_atlas_test_vpack_point_in_nfp: too many rings");
+    NT_BUILD_ASSERT(vert_count <= VPACK_NFP_MAX_VERTS && "nt_atlas_test_vpack_point_in_nfp: too many vertices");
+
+    VPackNFP nfp = {0};
+    nfp.ring_count = (uint8_t)ring_count;
+    for (uint32_t r = 0; r <= ring_count; r++) {
+        nfp.ring_offsets[r] = ring_offsets[r];
+    }
+    for (uint32_t v = 0; v < vert_count; v++) {
+        nfp.verts[v].x = verts_xy[v * 2];
+        nfp.verts[v].y = verts_xy[(v * 2) + 1];
+    }
+    return vpack_point_in_nfp(px, py, &nfp);
+}
+#endif
