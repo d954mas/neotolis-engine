@@ -1677,18 +1677,14 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
     double poly_frontier_fill = (p.stats.frontier_area > 0) ? ((double)p.stats.poly_area / (double)p.stats.frontier_area) : 0.0;
     double poly_texture_fill = (p.stats.used_area > 0) ? ((double)p.stats.poly_area / (double)p.stats.used_area) : 0.0;
     NT_LOG_INFO("Atlas packed: %u sprites (%u unique), %u pages", p.sprite_count, p.unique_count, p.page_count);
-    NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f pack=%.1f compose=%.1f debug_png=%.1f serialize=%.1f total=%.1f pages=%u used_area=%llu frontier_area=%llu trim_area=%llu "
-                "poly_area=%llu pot_waste=%llu poly_frontier_fill=%.4f poly_texture_fill=%.4f or_ops=%llu test_ops=%llu page_scans=%llu page_prunes=%llu page_existing=%llu page_backfills=%llu "
-                "page_new=%llu relevant=%llu candidates=%llu grid_fallbacks=%llu",
+    NT_LOG_INFO("BENCH alpha_trim=%.1f dedup=%.1f geometry=%.1f pack=%.1f compose=%.1f debug_png=%.1f serialize=%.1f total=%.1f pages=%u "
+                "used_area=%llu frontier_area=%llu trim_area=%llu poly_area=%llu pot_waste=%llu fill_frontier=%.4f fill_texture=%.4f "
+                "or_ops=%llu test_ops=%llu page_scans=%llu page_existing=%llu page_new=%llu cache_hits=%llu cache_misses=%llu",
                 bench_alpha_trim * 1000.0, bench_dedup * 1000.0, bench_geometry * 1000.0, bench_tile_pack * 1000.0, bench_compose * 1000.0, bench_debug_png * 1000.0, bench_serialize * 1000.0,
                 bench_total * 1000.0, p.page_count, (unsigned long long)p.stats.used_area, (unsigned long long)p.stats.frontier_area, (unsigned long long)p.stats.trim_area,
                 (unsigned long long)p.stats.poly_area, (unsigned long long)pot_waste_area, poly_frontier_fill, poly_texture_fill, (unsigned long long)p.stats.or_count,
-                (unsigned long long)p.stats.test_count, (unsigned long long)p.stats.page_scan_count, (unsigned long long)p.stats.page_prune_count, (unsigned long long)p.stats.page_existing_hit_count,
-                (unsigned long long)p.stats.page_backfill_count, (unsigned long long)p.stats.page_new_count, (unsigned long long)p.stats.relevant_count, (unsigned long long)p.stats.candidate_count,
-                (unsigned long long)p.stats.grid_fallback_count);
-    NT_LOG_INFO("BENCH_VPACK nfp_cache_hits=%llu nfp_cache_misses=%llu nfp_cache_collisions=%llu orient_dedup_saved=%llu dirty_cells=%llu", (unsigned long long)p.stats.nfp_cache_hit_count,
-                (unsigned long long)p.stats.nfp_cache_miss_count, (unsigned long long)p.stats.nfp_cache_collision_count, (unsigned long long)p.stats.orient_dedup_saved_count,
-                (unsigned long long)p.stats.dirty_cell_count);
+                (unsigned long long)p.stats.test_count, (unsigned long long)p.stats.page_scan_count, (unsigned long long)p.stats.page_existing_hit_count, (unsigned long long)p.stats.page_new_count,
+                (unsigned long long)p.stats.nfp_cache_hit_count, (unsigned long long)p.stats.nfp_cache_miss_count);
 
     pipeline_cleanup(&p);
 }

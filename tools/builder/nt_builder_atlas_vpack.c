@@ -14,13 +14,16 @@
 #include "tinycthread.h"            /* mtx_t, cnd_t, thrd_t (parallel NFP build) */
 /* clang-format on */
 
-#include <ctype.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* --- Public helpers --- */
+
+void pack_stats_reset(PackStats *stats) { memset(stats, 0, sizeof(*stats)); }
 
 /* --- Area-descending sort entry (moved from tile_pack region) --- */
 
@@ -45,29 +48,6 @@ static int area_sort_cmp(const void *a, const void *b) {
         return 1;
     }
     return 0;
-}
-
-/* --- Env-var truthy check (consumed by VPACK DISABLE_* flags) --- */
-
-static bool atlas_trace_str_ieq(const char *a, const char *b) {
-    while (*a != '\0' && *b != '\0') {
-        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) {
-            return false;
-        }
-        a++;
-        b++;
-    }
-    return *a == '\0' && *b == '\0';
-}
-
-static bool atlas_trace_env_truthy(const char *value) {
-    if (!value || value[0] == '\0') {
-        return false;
-    }
-    if ((value[0] == '0' && value[1] == '\0') || atlas_trace_str_ieq(value, "false") || atlas_trace_str_ieq(value, "off") || atlas_trace_str_ieq(value, "no")) {
-        return false;
-    }
-    return true;
 }
 
 /* Negate polygon vertices (no reversal needed), pack int32 xy pairs for
@@ -174,27 +154,6 @@ static bool vpack_intersect(Point2D p1, Point2D p2, Point2D p3, Point2D p4, floa
     *ox = (float)p1.x + (float)(t_num * s1_x) / (float)d;
     *oy = (float)p1.y + (float)(t_num * s1_y) / (float)d;
     return true;
-}
-
-static bool vpack_intersect_axis_f(Point2D p1, Point2D p2, bool is_x_axis, float axis, float *out_val) {
-    if (is_x_axis) {
-        if (p1.x == p2.x)
-            return false;
-        if (((float)p1.x < axis && (float)p2.x >= axis) || ((float)p1.x >= axis && (float)p2.x < axis)) {
-            float t = (axis - (float)p1.x) / (float)(p2.x - p1.x);
-            *out_val = (float)p1.y + t * (float)(p2.y - p1.y);
-            return true;
-        }
-    } else {
-        if (p1.y == p2.y)
-            return false;
-        if (((float)p1.y < axis && (float)p2.y >= axis) || ((float)p1.y >= axis && (float)p2.y < axis)) {
-            float t = (axis - (float)p1.y) / (float)(p2.y - p1.y);
-            *out_val = (float)p1.x + t * (float)(p2.x - p1.x);
-            return true;
-        }
-    }
-    return false;
 }
 
 /* Integer axis intersection: computes floor and ceil of crossing point.
@@ -341,15 +300,6 @@ static inline void vpack_add_cand(VPackCand **cands, uint32_t *c_count, uint32_t
     (*cands)[*c_count].x = x;
     (*cands)[*c_count].y = y;
     (*c_count)++;
-}
-
-static inline void vpack_add_float_cand(VPackCand **cands, uint32_t *c_count, uint32_t *c_cap, float fx, float fy, const VPackBounds *b, VPackCandDedup *dedup) {
-    int32_t ix = (int32_t)floorf(fx);
-    int32_t iy = (int32_t)floorf(fy);
-    vpack_add_cand(cands, c_count, c_cap, ix, iy, b, dedup);
-    vpack_add_cand(cands, c_count, c_cap, ix + 1, iy, b, dedup);
-    vpack_add_cand(cands, c_count, c_cap, ix, iy + 1, b, dedup);
-    vpack_add_cand(cands, c_count, c_cap, ix + 1, iy + 1, b, dedup);
 }
 
 /* Inflated pack polygon: polygon_inflate may add vertices at concave splits,
@@ -553,26 +503,6 @@ typedef struct {
     uint32_t used_h;
 } VPackPage;
 
-typedef struct {
-    bool use_axis_i;
-    bool use_nfp_cache;
-    bool use_orient_dedup;
-    bool use_dirty_bits;
-} VPackExperimentConfig;
-
-static VPackExperimentConfig vpack_experiment_config_get(void) {
-    static bool initialized = false;
-    static VPackExperimentConfig cfg;
-    if (!initialized) {
-        cfg.use_axis_i = !atlas_trace_env_truthy(getenv("NT_VPACK_DISABLE_AXIS_I"));
-        cfg.use_nfp_cache = !atlas_trace_env_truthy(getenv("NT_VPACK_DISABLE_NFP_CACHE"));
-        cfg.use_orient_dedup = !atlas_trace_env_truthy(getenv("NT_VPACK_DISABLE_ORIENT_DEDUP"));
-        cfg.use_dirty_bits = !atlas_trace_env_truthy(getenv("NT_VPACK_DISABLE_DIRTY_BITS"));
-        initialized = true;
-    }
-    return cfg;
-}
-
 #define VPACK_GRID_CELL 128
 /* Each cell holds a bitmap of NFPs that overlap it. nfp_words grows with the
  * number of NFPs in the current orient. 64 * 64 = 4096 NFPs. Larger than
@@ -612,7 +542,7 @@ static void vpack_init_single_ring_nfp(VPackNFP *nfp, const Point2D *ring, uint3
 }
 
 static void vpack_add_nfp_candidates(const VPackNFP *nfp, int32_t min_cand_x, int32_t min_cand_y, VPackCand **cands, uint32_t *cand_count, uint32_t *cand_cap, const VPackBounds *bounds,
-                                     bool use_axis_i, VPackCandDedup *dedup) {
+                                     VPackCandDedup *dedup) {
     for (uint32_t v = 0; v < nfp->ring_offsets[nfp->ring_count]; v++) {
         vpack_add_cand(cands, cand_count, cand_cap, nfp->verts[v].x, nfp->verts[v].y, bounds, dedup);
     }
@@ -624,24 +554,19 @@ static void vpack_add_nfp_candidates(const VPackNFP *nfp, int32_t min_cand_x, in
             uint32_t en = (e + 1 == rn) ? 0 : e + 1;
             Point2D pa = nfp->verts[rs + e];
             Point2D pb = nfp->verts[rs + en];
-            if (use_axis_i) {
-                int32_t vf, vc;
-                if (vpack_intersect_axis_i(pa, pb, true, min_cand_x, &vf, &vc)) {
-                    vpack_add_cand(cands, cand_count, cand_cap, min_cand_x, vf, bounds, dedup);
-                    if (vc != vf)
-                        vpack_add_cand(cands, cand_count, cand_cap, min_cand_x, vc, bounds, dedup);
+            int32_t vf;
+            int32_t vc;
+            if (vpack_intersect_axis_i(pa, pb, true, min_cand_x, &vf, &vc)) {
+                vpack_add_cand(cands, cand_count, cand_cap, min_cand_x, vf, bounds, dedup);
+                if (vc != vf) {
+                    vpack_add_cand(cands, cand_count, cand_cap, min_cand_x, vc, bounds, dedup);
                 }
-                if (vpack_intersect_axis_i(pa, pb, false, min_cand_y, &vf, &vc)) {
-                    vpack_add_cand(cands, cand_count, cand_cap, vf, min_cand_y, bounds, dedup);
-                    if (vc != vf)
-                        vpack_add_cand(cands, cand_count, cand_cap, vc, min_cand_y, bounds, dedup);
+            }
+            if (vpack_intersect_axis_i(pa, pb, false, min_cand_y, &vf, &vc)) {
+                vpack_add_cand(cands, cand_count, cand_cap, vf, min_cand_y, bounds, dedup);
+                if (vc != vf) {
+                    vpack_add_cand(cands, cand_count, cand_cap, vc, min_cand_y, bounds, dedup);
                 }
-            } else {
-                float out_val;
-                if (vpack_intersect_axis_f(pa, pb, true, (float)min_cand_x, &out_val))
-                    vpack_add_float_cand(cands, cand_count, cand_cap, (float)min_cand_x, out_val, bounds, dedup);
-                if (vpack_intersect_axis_f(pa, pb, false, (float)min_cand_y, &out_val))
-                    vpack_add_float_cand(cands, cand_count, cand_cap, out_val, (float)min_cand_y, bounds, dedup);
             }
         }
     }
@@ -671,33 +596,28 @@ typedef struct {
  *  - Clipper2 NFP is a pure
  * function of inputs
  *  - per-thread stats are merged in deterministic order */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_poly, const int32_t *neg_xy, uint32_t neg_count, uint32_t neg_hash, VPackNFPCacheEntry *nfp_cache, mtx_t *cache_mtx,
-                                  bool use_nfp_cache, VPackNFP *out_nfp, VPackNFPBuildLocalStats *local_stats) {
+                                  VPackNFP *out_nfp, VPackNFPBuildLocalStats *local_stats) {
     uint32_t cache_a = pl_i->shape_hash;
     uint32_t cache_b = neg_hash;
     /* Hash combine: golden-ratio multipliers then xor-shift mix to smear high
      * and low bits before masking. Helps reduce clustering when keys cluster
      * in either half of the 32-bit space. */
-    uint32_t cache_mix = cache_a * 2654435761u ^ cache_b * 1597334677u;
+    uint32_t cache_mix = (cache_a * 2654435761U) ^ (cache_b * 1597334677U);
     cache_mix ^= cache_mix >> 16;
-    cache_mix *= 0x85ebca6bu;
+    cache_mix *= 0x85ebca6bU;
     cache_mix ^= cache_mix >> 13;
     uint32_t cache_set_idx = cache_mix & (VPACK_NFP_CACHE_SET_COUNT - 1);
     VPackNFPCacheEntry *cache_set = &nfp_cache[cache_set_idx * VPACK_NFP_CACHE_WAYS];
 
-    if (use_nfp_cache) {
-        /* Lock-free read via seqlock; on BUSY just fall through to compute. */
-        VPackCacheReadResult cache_result = vpack_try_read_nfp_cache(cache_set, cache_a, cache_b, pl_i->x, pl_i->y, out_nfp);
-        if (cache_result == VPACK_CACHE_READ_HIT) {
-            local_stats->cache_hits++;
-            return true;
-        }
-        if (cache_result == VPACK_CACHE_READ_OCCUPIED) {
-            local_stats->cache_collisions++;
-        } else {
-            local_stats->cache_misses++;
-        }
+    /* Lock-free read via seqlock; on BUSY just fall through to compute. */
+    VPackCacheReadResult cache_result = vpack_try_read_nfp_cache(cache_set, cache_a, cache_b, pl_i->x, pl_i->y, out_nfp);
+    if (cache_result == VPACK_CACHE_READ_HIT) {
+        local_stats->cache_hits++;
+        return true;
     }
+    local_stats->cache_misses++;
     (void)cache_mtx;
 
     Point2D local_verts[VPACK_NFP_MAX_VERTS];
@@ -754,16 +674,16 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
     free(nfp_xy);
     free(nfp_ring_lengths);
 
-    if (use_nfp_cache) {
-        /* Lock-free write via CAS on the version word. If another writer owns the
-         * slot (odd version or CAS fails), just skip — the other writer publishes
-         * the same data (function of keys only), so the cache stays consistent. */
+    /* Lock-free write via CAS on the version word. If another writer owns the
+     * slot (odd version or CAS fails), just skip — the other writer publishes
+     * the same data (function of keys only), so the cache stays consistent. */
+    {
         VPackNFPCacheEntry *slot = vpack_select_nfp_cache_slot_locked(cache_set, cache_a, cache_b);
         uint32_t version = atomic_load_explicit(&slot->version, memory_order_relaxed);
-        if ((version & 1u) == 0) {
-            if (atomic_compare_exchange_strong_explicit(&slot->version, &version, version + 1u, memory_order_acq_rel, memory_order_relaxed)) {
+        if ((version & 1U) == 0) {
+            if (atomic_compare_exchange_strong_explicit(&slot->version, &version, version + 1U, memory_order_acq_rel, memory_order_relaxed)) {
                 vpack_store_local_nfp_in_cache(slot, cache_a, cache_b, local_verts, local_ring_offsets, local_ring_count, local_min_x, local_min_y, local_max_x, local_max_y);
-                atomic_store_explicit(&slot->version, version + 2u, memory_order_release);
+                atomic_store_explicit(&slot->version, version + 2U, memory_order_release);
             }
         }
     }
@@ -848,7 +768,6 @@ typedef struct {
     VPackNFP *nfps_out;  /* indexed by ri (per-thread writes own ri) */
     bool *nfp_valid_out; /* per-ri validity flag */
     VPackNFPCacheEntry *nfp_cache;
-    bool use_nfp_cache;
     /* Per-thread local stats - main aggregates after batch completes */
     VPackNFPBuildLocalStats *thread_stats;
 } VPackNFPBuildCtx;
@@ -968,8 +887,7 @@ static void vpack_par_process_nfp_chunks(VPackParCtx *ctx, uint32_t tid) {
         const int32_t *neg_xy = (*ctx->nfp_build.orient_neg_xy)[ori];
         uint32_t neg_count = ctx->nfp_build.orient_counts[ori];
         uint32_t neg_hash = ctx->nfp_build.orient_neg_hashes[ori];
-        ctx->nfp_build.nfp_valid_out[ri] =
-            vpack_compute_nfp_one(pl_i, neg_poly, neg_xy, neg_count, neg_hash, ctx->nfp_build.nfp_cache, &ctx->cache_mtx, ctx->nfp_build.use_nfp_cache, &ctx->nfp_build.nfps_out[ri], local);
+        ctx->nfp_build.nfp_valid_out[ri] = vpack_compute_nfp_one(pl_i, neg_poly, neg_xy, neg_count, neg_hash, ctx->nfp_build.nfp_cache, &ctx->cache_mtx, &ctx->nfp_build.nfps_out[ri], local);
     }
 }
 
@@ -1021,10 +939,10 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                            const int32_t orient_aabb[8][4], const int32_t orient_min_cand[8][2], const int32_t orient_max_cand[8][2], uint32_t orient_count, int32_t worst_poly_min_x,
                            int32_t worst_poly_min_y, int32_t worst_poly_max_x, int32_t worst_poly_max_y, int32_t global_min_cand_x, int32_t global_min_cand_y, int32_t global_max_cand_x,
                            int32_t global_max_cand_y, uint32_t extrude, uint32_t margin, bool power_of_two, VPackNFP *nfps, uint64_t (*nfp_grid)[VPACK_GRID_WORDS], VPackCand **cands,
-                           uint32_t *cand_cap, uint32_t *relevant_buf, bool *nfp_valid_buf, VPackNFPCacheEntry *nfp_cache, const uint32_t orient_neg_hashes[8], const VPackExperimentConfig *exp,
-                           PackStats *stats, uint64_t *io_best_score, uint32_t page_index, uint32_t grid_dim, uint32_t max_size, uint64_t *dirty_bits_buf, uint32_t *dirty_cells_buf,
-                           uint64_t *cand_seen_bits, uint32_t *cand_dirty_words, uint32_t cand_seen_word_count, VPackParCtx *par, uint32_t *out_best_page, int32_t *out_best_x, int32_t *out_best_y,
-                           uint8_t *out_best_orient, uint32_t *out_best_orient_idx) {
+                           uint32_t *cand_cap, uint32_t *relevant_buf, bool *nfp_valid_buf, VPackNFPCacheEntry *nfp_cache, const uint32_t orient_neg_hashes[8], PackStats *stats,
+                           uint64_t *io_best_score, uint32_t page_index, uint32_t grid_dim, uint32_t max_size, uint64_t *dirty_bits_buf, uint32_t *dirty_cells_buf, uint64_t *cand_seen_bits,
+                           uint32_t *cand_dirty_words, uint32_t cand_seen_word_count, VPackParCtx *par, uint32_t *out_best_page, int32_t *out_best_x, int32_t *out_best_y, uint8_t *out_best_orient,
+                           uint32_t *out_best_orient_idx) {
     uint32_t relevant_count = 0;
     for (uint32_t i = 0; i < page->count; i++) {
         int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - worst_poly_max_x;
@@ -1032,12 +950,10 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         int32_t est_min_y = page->placed[i].y + page->placed[i].aabb_min_y - worst_poly_max_y;
         int32_t est_max_y = page->placed[i].y + page->placed[i].aabb_max_y - worst_poly_min_y;
         if (est_max_x < global_min_cand_x || est_min_x > global_max_cand_x || est_max_y < global_min_cand_y || est_min_y > global_max_cand_y) {
-            stats->yskip_count++;
             continue;
         }
         relevant_buf[relevant_count++] = i;
     }
-    stats->relevant_count += relevant_count;
 
     bool found_on_page = false;
     for (uint32_t ori = 0; ori < orient_count; ori++) {
@@ -1082,7 +998,6 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             par->nfp_build.nfps_out = nfps;
             par->nfp_build.nfp_valid_out = nfp_valid_buf;
             par->nfp_build.nfp_cache = nfp_cache;
-            par->nfp_build.use_nfp_cache = exp->use_nfp_cache;
             par->workers_done = 0;
             /* Scale active threads with work: at least 1 item per thread,
              * capped at num_workers+1. Each Clipper2 call is ~50µs so we want
@@ -1112,7 +1027,6 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 stats->or_count += par->nfp_build.thread_stats[t].or_count;
                 stats->nfp_cache_hit_count += par->nfp_build.thread_stats[t].cache_hits;
                 stats->nfp_cache_miss_count += par->nfp_build.thread_stats[t].cache_misses;
-                stats->nfp_cache_collision_count += par->nfp_build.thread_stats[t].cache_collisions;
             }
         } else {
             /* Sequential NFP build (small relevant_count or no thread pool) */
@@ -1120,12 +1034,11 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             for (uint32_t ri = 0; ri < relevant_count; ri++) {
                 uint32_t i = relevant_buf[ri];
                 const VPackPlaced *pl_i = &page->placed[i];
-                nfp_valid_buf[ri] = vpack_compute_nfp_one(pl_i, orient_neg[ori], orient_neg_xy[ori], cur_count, orient_neg_hashes[ori], nfp_cache, NULL, exp->use_nfp_cache, &nfps[ri], &local);
+                nfp_valid_buf[ri] = vpack_compute_nfp_one(pl_i, orient_neg[ori], orient_neg_xy[ori], cur_count, orient_neg_hashes[ori], nfp_cache, NULL, &nfps[ri], &local);
             }
             stats->or_count += local.or_count;
             stats->nfp_cache_hit_count += local.cache_hits;
             stats->nfp_cache_miss_count += local.cache_misses;
-            stats->nfp_cache_collision_count += local.cache_collisions;
         }
 
         /* Phase 2 (sequential): compact valid NFPs and generate candidates in ri order.
@@ -1152,80 +1065,51 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 nfps[nfp_count] = nfps[ri];
             }
             if (need_candidates) {
-                vpack_add_nfp_candidates(&nfps[nfp_count], min_cand_x, min_cand_y, cands, &cand_count, cand_cap, &bounds, exp->use_axis_i, &cand_dedup);
+                vpack_add_nfp_candidates(&nfps[nfp_count], min_cand_x, min_cand_y, cands, &cand_count, cand_cap, &bounds, &cand_dedup);
             }
             nfp_count++;
         }
         // #endregion
-        stats->candidate_count += cand_count;
 
         uint32_t nfp_words = (nfp_count + 63) / 64;
         size_t dirty_cell_cap = (size_t)grid_dim * grid_dim;
         size_t dirty_count = 0;
         if (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS) {
-            if (exp->use_dirty_bits) {
-                size_t dirty_words = ((size_t)grid_dim * grid_dim + 63) / 64;
-                memset(dirty_bits_buf, 0, dirty_words * sizeof(uint64_t));
-                for (uint32_t n = 0; n < nfp_count; n++) {
-                    int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
-                    int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
-                    int32_t gx1 = nfps[n].max_x / VPACK_GRID_CELL;
-                    int32_t gy1 = nfps[n].max_y / VPACK_GRID_CELL;
-                    if (gx0 < 0)
-                        gx0 = 0;
-                    if (gy0 < 0)
-                        gy0 = 0;
-                    if (gx1 >= (int32_t)grid_dim)
-                        gx1 = (int32_t)grid_dim - 1;
-                    if (gy1 >= (int32_t)grid_dim)
-                        gy1 = (int32_t)grid_dim - 1;
-                    uint32_t word = n / 64;
-                    uint64_t bit = (uint64_t)1 << (n % 64);
-                    for (int32_t gy = gy0; gy <= gy1; gy++) {
-                        for (int32_t gx = gx0; gx <= gx1; gx++) {
-                            uint32_t ci = (uint32_t)gy * grid_dim + (uint32_t)gx;
-                            uint32_t dw = ci / 64;
-                            uint64_t db = (uint64_t)1 << (ci % 64);
-                            if (!(dirty_bits_buf[dw] & db)) {
-                                dirty_bits_buf[dw] |= db;
-                                NT_BUILD_ASSERT(dirty_count < dirty_cell_cap && "vector_pack: dirty cell overflow");
-                                dirty_cells_buf[dirty_count++] = ci;
-                            }
-                            nfp_grid[ci][word] |= bit;
-                        }
-                    }
+            size_t dirty_words = (((size_t)grid_dim * grid_dim) + 63) / 64;
+            memset(dirty_bits_buf, 0, dirty_words * sizeof(uint64_t));
+            for (uint32_t n = 0; n < nfp_count; n++) {
+                int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
+                int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
+                int32_t gx1 = nfps[n].max_x / VPACK_GRID_CELL;
+                int32_t gy1 = nfps[n].max_y / VPACK_GRID_CELL;
+                if (gx0 < 0) {
+                    gx0 = 0;
                 }
-            } else {
-                for (uint32_t n = 0; n < nfp_count; n++) {
-                    int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
-                    int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
-                    int32_t gx1 = nfps[n].max_x / VPACK_GRID_CELL;
-                    int32_t gy1 = nfps[n].max_y / VPACK_GRID_CELL;
-                    if (gx0 < 0)
-                        gx0 = 0;
-                    if (gy0 < 0)
-                        gy0 = 0;
-                    if (gx1 >= (int32_t)grid_dim)
-                        gx1 = (int32_t)grid_dim - 1;
-                    if (gy1 >= (int32_t)grid_dim)
-                        gy1 = (int32_t)grid_dim - 1;
-                    uint32_t word = n / 64;
-                    uint64_t bit = (uint64_t)1 << (n % 64);
-                    for (int32_t gy = gy0; gy <= gy1; gy++) {
-                        for (int32_t gx = gx0; gx <= gx1; gx++) {
-                            uint32_t ci = (uint32_t)gy * grid_dim + (uint32_t)gx;
-                            if (nfp_grid[ci][0] == 0 && word == 0) {
-                                NT_BUILD_ASSERT(dirty_count < dirty_cell_cap && "vector_pack: dirty cell overflow");
-                                dirty_cells_buf[dirty_count++] = ci;
-                            }
-                            nfp_grid[ci][word] |= bit;
+                if (gy0 < 0) {
+                    gy0 = 0;
+                }
+                if (gx1 >= (int32_t)grid_dim) {
+                    gx1 = (int32_t)grid_dim - 1;
+                }
+                if (gy1 >= (int32_t)grid_dim) {
+                    gy1 = (int32_t)grid_dim - 1;
+                }
+                uint32_t word = n / 64;
+                uint64_t bit = (uint64_t)1 << (n % 64);
+                for (int32_t gy = gy0; gy <= gy1; gy++) {
+                    for (int32_t gx = gx0; gx <= gx1; gx++) {
+                        uint32_t ci = ((uint32_t)gy * grid_dim) + (uint32_t)gx;
+                        uint32_t dw = ci / 64;
+                        uint64_t db = (uint64_t)1 << (ci % 64);
+                        if (!(dirty_bits_buf[dw] & db)) {
+                            dirty_bits_buf[dw] |= db;
+                            NT_BUILD_ASSERT(dirty_count < dirty_cell_cap && "vector_pack: dirty cell overflow");
+                            dirty_cells_buf[dirty_count++] = ci;
                         }
+                        nfp_grid[ci][word] |= bit;
                     }
                 }
             }
-            stats->dirty_cell_count += (uint64_t)dirty_count;
-        } else if (nfp_count > 0) {
-            stats->grid_fallback_count++;
         }
         bool use_grid = (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS);
 
@@ -1363,16 +1247,13 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         // #endregion
 
         for (size_t d = 0; d < dirty_count; d++) {
-            if (exp->use_dirty_bits) {
-                memset(nfp_grid[dirty_cells_buf[d]], 0, sizeof(uint64_t[VPACK_GRID_WORDS]));
-            } else {
-                memset(nfp_grid[dirty_cells_buf[d]], 0, (size_t)nfp_words * sizeof(uint64_t));
-            }
+            memset(nfp_grid[dirty_cells_buf[d]], 0, sizeof(uint64_t[VPACK_GRID_WORDS]));
         }
         vpack_clear_seen_cands(&cand_dedup);
 
-        if (found_on_page && *out_best_page == page_index && *out_best_x == min_cand_x && *out_best_y == min_cand_y)
+        if (found_on_page && *out_best_page == page_index && *out_best_x == min_cand_x && *out_best_y == min_cand_y) {
             break;
+        }
     }
 
     return found_on_page;
@@ -1385,31 +1266,9 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
     uint32_t padding = opts->padding;
     uint32_t margin = opts->margin;
     uint32_t max_size = opts->max_size;
-    VPackExperimentConfig exp = vpack_experiment_config_get();
     NT_LOG_INFO("  vector_pack: thread_count=%u, sprites=%u", thread_count, sprite_count);
 
-    // #region Initialize stats
-    stats->or_count = 0;
-    stats->test_count = 0;
-    stats->yskip_count = 0;
-    stats->used_area = 0;
-    stats->frontier_area = 0;
-    stats->trim_area = 0;
-    stats->poly_area = 0;
-    stats->page_scan_count = 0;
-    stats->page_prune_count = 0;
-    stats->page_existing_hit_count = 0;
-    stats->page_backfill_count = 0;
-    stats->page_new_count = 0;
-    stats->relevant_count = 0;
-    stats->candidate_count = 0;
-    stats->grid_fallback_count = 0;
-    stats->nfp_cache_hit_count = 0;
-    stats->nfp_cache_miss_count = 0;
-    stats->nfp_cache_collision_count = 0;
-    stats->orient_dedup_saved_count = 0;
-    stats->dirty_cell_count = 0;
-    // #endregion
+    pack_stats_reset(stats);
 
     // #region Build exact pack polygons once (inflate by extrude+padding/2)
     float dilate = (float)extrude + ((float)padding * 0.5F);
@@ -1535,9 +1394,10 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
 
         // #region Deduplicate orientations (skip transforms that produce identical polygons)
         uint8_t orient_orig[8]; /* maps compacted index -> original 0-7 orientation flag */
-        for (uint32_t r = 0; r < orient_count; r++)
+        for (uint32_t r = 0; r < orient_count; r++) {
             orient_orig[r] = (uint8_t)r;
-        if (exp.use_orient_dedup) {
+        }
+        {
             uint32_t source_orient_count = orient_count;
             uint32_t dedup_count = 0;
             for (uint32_t r = 0; r < source_orient_count; r++) {
@@ -1545,17 +1405,20 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
                 int32_t r_aabb[4];
                 vpack_calc_aabb(orient_polys[r], orient_counts[r], &r_aabb[0], &r_aabb[1], &r_aabb[2], &r_aabb[3]);
                 for (uint32_t p = 0; p < dedup_count && !dup; p++) {
-                    if (orient_counts[p] != orient_counts[r])
+                    if (orient_counts[p] != orient_counts[r]) {
                         continue;
+                    }
                     int32_t p_aabb[4];
                     vpack_calc_aabb(orient_polys[p], orient_counts[p], &p_aabb[0], &p_aabb[1], &p_aabb[2], &p_aabb[3]);
                     bool same = true;
                     for (uint32_t v = 0; v < orient_counts[r] && same; v++) {
-                        if ((orient_polys[r][v].x - r_aabb[0]) != (orient_polys[p][v].x - p_aabb[0]) || (orient_polys[r][v].y - r_aabb[1]) != (orient_polys[p][v].y - p_aabb[1]))
+                        if ((orient_polys[r][v].x - r_aabb[0]) != (orient_polys[p][v].x - p_aabb[0]) || (orient_polys[r][v].y - r_aabb[1]) != (orient_polys[p][v].y - p_aabb[1])) {
                             same = false;
+                        }
                     }
-                    if (same)
+                    if (same) {
                         dup = true;
+                    }
                 }
                 if (!dup) {
                     if (dedup_count != r) {
@@ -1566,7 +1429,6 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
                     dedup_count++;
                 }
             }
-            stats->orient_dedup_saved_count += (uint64_t)(source_orient_count - dedup_count);
             orient_count = dedup_count;
         }
         // #endregion
@@ -1625,20 +1487,20 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
                 global_max_cand_y = orient_max_cand[ori][1];
         }
 
+        double sprite_start = nt_time_now();
         uint32_t page_count_before = page_count;
         for (uint32_t pi = 0; pi < page_count_before; pi++) {
             if (best_score != UINT64_MAX) {
                 uint64_t page_lb = vpack_page_lower_bound(orient_aabb, orient_min_cand, orient_count, pages[pi].used_w, pages[pi].used_h, margin, opts->power_of_two);
                 if (page_lb >= best_score) {
-                    stats->page_prune_count++;
                     continue;
                 }
             }
             stats->page_scan_count++;
             if (vpack_try_page(&pages[pi], orient_neg, orient_neg_xy, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y, worst_poly_max_x,
                                worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, extrude, margin, opts->power_of_two, nfps, nfp_grid, &cands, &cand_cap,
-                               relevant_buf, nfp_valid_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, pi, grid_dim, max_size, dirty_bits_buf, dirty_cells_buf, cand_seen_bits,
-                               cand_dirty_words, cand_seen_word_count, par, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx)) {
+                               relevant_buf, nfp_valid_buf, nfp_cache, orient_neg_hashes, stats, &best_score, pi, grid_dim, max_size, dirty_bits_buf, dirty_cells_buf, cand_seen_bits, cand_dirty_words,
+                               cand_seen_word_count, par, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx)) {
                 found_any = true;
             }
         }
@@ -1667,7 +1529,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
             stats->page_scan_count++;
             found_any = vpack_try_page(&pages[new_page], orient_neg, orient_neg_xy, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y,
                                        worst_poly_max_x, worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, extrude, margin, opts->power_of_two, nfps,
-                                       nfp_grid, &cands, &cand_cap, relevant_buf, nfp_valid_buf, nfp_cache, orient_neg_hashes, &exp, stats, &best_score, new_page, grid_dim, max_size, dirty_bits_buf,
+                                       nfp_grid, &cands, &cand_cap, relevant_buf, nfp_valid_buf, nfp_cache, orient_neg_hashes, stats, &best_score, new_page, grid_dim, max_size, dirty_bits_buf,
                                        dirty_cells_buf, cand_seen_bits, cand_dirty_words, cand_seen_word_count, par, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx);
             NT_BUILD_ASSERT(found_any && "vector_pack: empty page should accept placement");
         }
@@ -1681,9 +1543,6 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
 
             if (pages[best_page].count > 0) {
                 stats->page_existing_hit_count++;
-                if (best_page + 1 < page_count_before) {
-                    stats->page_backfill_count++;
-                }
             }
 
             VPackPlaced *pl = &pages[best_page].placed[pages[best_page].count];
@@ -1704,52 +1563,21 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
             out_placements[idx].y = (uint32_t)(best_y - (int32_t)extrude);
             out_placements[idx].rotation = orient_orig[best_orient];
 
-            if (best_x + win_poly_max_x > (int32_t)pages[best_page].used_w)
+            if (best_x + win_poly_max_x > (int32_t)pages[best_page].used_w) {
                 pages[best_page].used_w = (uint32_t)(best_x + win_poly_max_x);
-            if (best_y + win_poly_max_y > (int32_t)pages[best_page].used_h)
+            }
+            if (best_y + win_poly_max_y > (int32_t)pages[best_page].used_h) {
                 pages[best_page].used_h = (uint32_t)(best_y + win_poly_max_y);
+            }
         }
         // #endregion
-    }
 
-    // #region Shape diversity diagnostic
-    {
-        /* Count unique polygon shapes among all placed sprites (across all pages).
-         * Shape = normalized vertex positions (relative to AABB min). */
-        uint32_t total_placed = 0;
-        for (uint32_t p = 0; p < page_count; p++)
-            total_placed += pages[p].count;
-        uint64_t *shape_hashes = (uint64_t *)malloc(total_placed * sizeof(uint64_t));
-        uint32_t hash_idx = 0;
-        for (uint32_t p = 0; p < page_count; p++) {
-            for (uint32_t pi = 0; pi < pages[p].count; pi++) {
-                VPackPlaced *pl = &pages[p].placed[pi];
-                int32_t mn_x = pl->aabb_min_x, mn_y = pl->aabb_min_y;
-                uint64_t h = (uint64_t)pl->count;
-                for (uint32_t v = 0; v < pl->count; v++) {
-                    h ^= ((uint64_t)(uint32_t)(pl->poly_xy[v * 2] - mn_x) << 16) | (uint64_t)(uint32_t)(pl->poly_xy[(v * 2) + 1] - mn_y);
-                    h = (h << 7) | (h >> 57);
-                }
-                shape_hashes[hash_idx++] = h;
-            }
+        /* Slow-sprite warning: replaces the per-sprite SLOW log that lived in tile_pack. */
+        double sprite_elapsed = nt_time_now() - sprite_start;
+        if (sprite_elapsed > 1.0) {
+            NT_LOG_WARN("  SLOW sprite #%u/%u: %.1fs (idx=%u, page=%u)", s, sprite_count, sprite_elapsed, idx, best_page);
         }
-        /* Count unique hashes */
-        uint32_t unique_shapes = 0;
-        for (uint32_t i = 0; i < hash_idx; i++) {
-            bool dup = false;
-            for (uint32_t j = 0; j < i; j++) {
-                if (shape_hashes[j] == shape_hashes[i]) {
-                    dup = true;
-                    break;
-                }
-            }
-            if (!dup)
-                unique_shapes++;
-        }
-        NT_LOG_INFO("  vector_pack shapes: %u placed, %u unique shapes (%.0f%% reuse)", total_placed, unique_shapes, total_placed > 0 ? (1.0 - (double)unique_shapes / total_placed) * 100.0 : 0.0);
-        free(shape_hashes);
     }
-    // #endregion
 
     // #region POT expansion
     *out_page_count = page_count;

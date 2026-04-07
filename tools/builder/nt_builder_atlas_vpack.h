@@ -39,27 +39,21 @@ typedef struct {
 
 /* Per-call packing statistics (thread-safe: no static globals) */
 typedef struct {
-    uint64_t or_count;
-    uint64_t test_count;
-    uint64_t yskip_count;
-    uint64_t used_area;
-    uint64_t frontier_area;
-    uint64_t trim_area;
-    uint64_t poly_area;
-    uint64_t page_scan_count;
-    uint64_t page_prune_count;
-    uint64_t page_existing_hit_count;
-    uint64_t page_backfill_count;
-    uint64_t page_new_count;
-    uint64_t relevant_count;
-    uint64_t candidate_count;
-    uint64_t grid_fallback_count;
-    uint64_t nfp_cache_hit_count;
-    uint64_t nfp_cache_miss_count;
-    uint64_t nfp_cache_collision_count;
-    uint64_t orient_dedup_saved_count;
-    uint64_t dirty_cell_count;
+    uint64_t or_count;                /* Clipper2 NFP build calls */
+    uint64_t test_count;              /* candidate scans (point-in-NFP tests) */
+    uint64_t used_area;               /* sum of final page area (post POT) */
+    uint64_t frontier_area;           /* sum of final page area pre-POT */
+    uint64_t trim_area;               /* sum of trimmed sprite areas */
+    uint64_t poly_area;               /* sum of inflated polygon areas */
+    uint64_t page_scan_count;         /* number of try_page calls */
+    uint64_t page_existing_hit_count; /* sprites placed on a non-empty page */
+    uint64_t page_new_count;          /* new pages allocated */
+    uint64_t nfp_cache_hit_count;     /* NFP cache hits */
+    uint64_t nfp_cache_miss_count;    /* NFP cache misses (Clipper2 invoked) */
 } PackStats;
+
+/* Zero all PackStats counters in one place. */
+void pack_stats_reset(PackStats *stats);
 
 /* Pack sprites via NFP/Minkowski vector packing. */
 uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts,
