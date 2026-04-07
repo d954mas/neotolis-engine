@@ -2969,7 +2969,12 @@ static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint3
         return;
     }
     /* px, py = position of the inner (trimmed) sprite rect within the page.
-     * sw, sh = trimmed sprite dimensions. */
+     * sw, sh = trimmed sprite dimensions.
+     *
+     * Skip-transparent on source pixel: only duplicate edge pixels that have
+     * alpha > 0. Otherwise we'd write transparent into the surrounding area
+     * and could overwrite opaque pixels of a neighboring sprite that has been
+     * placed nearby (polygon packing allows tighter neighbor placement). */
 
     // #region Top and bottom edge extrusion
     for (uint32_t e = 1; e <= extrude_count; e++) {
@@ -2977,7 +2982,10 @@ static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint3
         if (py >= e) {
             uint32_t dst_y = py - e;
             for (uint32_t x = px; x < px + sw && x < page_w; x++) {
-                memcpy(&page[((size_t)dst_y * page_w + x) * 4], &page[((size_t)py * page_w + x) * 4], 4);
+                const uint8_t *src_pix = &page[((size_t)py * page_w + x) * 4];
+                if (src_pix[3] != 0) {
+                    memcpy(&page[((size_t)dst_y * page_w + x) * 4], src_pix, 4);
+                }
             }
         }
         /* Bottom edge: duplicate row py+sh-1 to row py+sh-1+e */
@@ -2985,7 +2993,10 @@ static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint3
         uint32_t dst_y = src_y + e;
         if (dst_y < page_h) {
             for (uint32_t x = px; x < px + sw && x < page_w; x++) {
-                memcpy(&page[((size_t)dst_y * page_w + x) * 4], &page[((size_t)src_y * page_w + x) * 4], 4);
+                const uint8_t *src_pix = &page[((size_t)src_y * page_w + x) * 4];
+                if (src_pix[3] != 0) {
+                    memcpy(&page[((size_t)dst_y * page_w + x) * 4], src_pix, 4);
+                }
             }
         }
     }
@@ -3002,7 +3013,10 @@ static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint3
         if (px >= e) {
             uint32_t dst_x = px - e;
             for (uint32_t y = y_start; y < y_end; y++) {
-                memcpy(&page[((size_t)y * page_w + dst_x) * 4], &page[((size_t)y * page_w + px) * 4], 4);
+                const uint8_t *src_pix = &page[((size_t)y * page_w + px) * 4];
+                if (src_pix[3] != 0) {
+                    memcpy(&page[((size_t)y * page_w + dst_x) * 4], src_pix, 4);
+                }
             }
         }
         /* Right edge */
@@ -3010,7 +3024,10 @@ static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint3
         uint32_t dst_x = src_x + e;
         if (dst_x < page_w) {
             for (uint32_t y = y_start; y < y_end; y++) {
-                memcpy(&page[((size_t)y * page_w + dst_x) * 4], &page[((size_t)y * page_w + src_x) * 4], 4);
+                const uint8_t *src_pix = &page[((size_t)y * page_w + src_x) * 4];
+                if (src_pix[3] != 0) {
+                    memcpy(&page[((size_t)y * page_w + dst_x) * 4], src_pix, 4);
+                }
             }
         }
     }
