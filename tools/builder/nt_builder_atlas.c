@@ -737,10 +737,6 @@ typedef struct {
     /* Geometry */
     uint32_t *vertex_counts;
     Point2D **hull_vertices;
-    /* Pre-triangulated mesh (NULL for normal polygon sprites; non-NULL for
-     * multi-component sprites where the "hull" is a triangle soup, not an outline). */
-    uint16_t **pre_tri_indices;
-    uint32_t *pre_tri_counts;
 
     /* Packing + composition */
     AtlasPlacement *placements;
@@ -853,9 +849,7 @@ static void pipeline_dedup(AtlasPipeline *p) {
 static void pipeline_geometry(AtlasPipeline *p) {
     p->vertex_counts = (uint32_t *)calloc(p->sprite_count, sizeof(uint32_t));
     p->hull_vertices = (Point2D **)calloc(p->sprite_count, sizeof(Point2D *));
-    p->pre_tri_indices = (uint16_t **)calloc(p->sprite_count, sizeof(uint16_t *));
-    p->pre_tri_counts = (uint32_t *)calloc(p->sprite_count, sizeof(uint32_t));
-    NT_BUILD_ASSERT(p->vertex_counts && p->hull_vertices && p->pre_tri_indices && p->pre_tri_counts && "pipeline_geometry: alloc failed");
+    NT_BUILD_ASSERT(p->vertex_counts && p->hull_vertices && "pipeline_geometry: alloc failed");
 
     for (uint32_t ui = 0; ui < p->unique_count; ui++) {
         uint32_t idx = p->unique_indices[ui];
@@ -1160,8 +1154,6 @@ static void pipeline_geometry(AtlasPipeline *p) {
             uint32_t orig = (uint32_t)p->dedup_map[i];
             p->vertex_counts[i] = p->vertex_counts[orig];
             p->hull_vertices[i] = p->hull_vertices[orig]; /* shared pointer, don't double-free */
-            p->pre_tri_indices[i] = p->pre_tri_indices[orig];
-            p->pre_tri_counts[i] = p->pre_tri_counts[orig];
         }
     }
 }
@@ -1169,8 +1161,11 @@ static void pipeline_geometry(AtlasPipeline *p) {
 /* --- pipeline_tile_pack: sort sprites by area, place on atlas pages via tile-grid collision --- */
 
 static void pipeline_tile_pack(AtlasPipeline *p) {
+    /* calloc so trailing padding in AtlasPlacement is deterministic — the struct
+     * is fwrite'd directly into the atlas cache file and uninitialized padding
+     * produces noisy diffs between otherwise identical builds. */
     // NOLINTNEXTLINE(clang-analyzer-optin.portability.UnixAPI)
-    p->placements = (AtlasPlacement *)malloc(p->unique_count * sizeof(AtlasPlacement));
+    p->placements = (AtlasPlacement *)calloc(p->unique_count, sizeof(AtlasPlacement));
     NT_BUILD_ASSERT(p->placements && "pipeline_tile_pack: alloc failed");
 
     /* Build arrays for unique sprites: trim dims + hull polygons */
@@ -1317,12 +1312,8 @@ static void pipeline_serialize(AtlasPipeline *p) {
             continue; /* Duplicate — its vertex/index storage is shared with the original */
         }
         total_vertex_count += p->vertex_counts[i];
-        uint32_t tri = 0;
-        if (p->pre_tri_indices[i] && p->pre_tri_counts[i] > 0) {
-            tri = p->pre_tri_counts[i];
-        } else if (p->vertex_counts[i] >= 3) {
-            tri = p->vertex_counts[i] - 2;
-        }
+        /* Single-component fan/ear-clip triangulation: (n - 2) triangles. */
+        uint32_t tri = (p->vertex_counts[i] >= 3) ? p->vertex_counts[i] - 2 : 0;
         NT_BUILD_ASSERT(tri <= max_region_tri_count && "pipeline_serialize: region index_count exceeds uint8_t");
         total_index_count += tri * 3;
     }
@@ -1402,17 +1393,13 @@ static void pipeline_serialize(AtlasPipeline *p) {
         uint32_t pi = placement_lookup[i];
         NT_BUILD_ASSERT(pi != UINT32_MAX && "pipeline_serialize: sprite has no placement");
         AtlasPlacement *pl = &p->placements[pi];
+        /* Pass 1 only runs on originals, and originals have pl->sprite_index == i
+         * (the packer remaps back before returning). Use i directly — cheaper and
+         * doesn't rely on the invariant holding through future refactors. */
+        NT_BUILD_ASSERT(pl->sprite_index == i && "pipeline_serialize: Pass 1 invariant broken (non-original placement)");
 
         uint16_t local_indices[256];
-        const uint16_t *src_indices;
-        uint32_t tri_count;
-        if (p->pre_tri_indices[i] && p->pre_tri_counts[i] > 0) {
-            src_indices = p->pre_tri_indices[i];
-            tri_count = p->pre_tri_counts[i];
-        } else {
-            tri_count = ear_clip_triangulate(p->hull_vertices[i], p->vertex_counts[i], local_indices);
-            src_indices = local_indices;
-        }
+        uint32_t tri_count = ear_clip_triangulate(p->hull_vertices[i], p->vertex_counts[i], local_indices);
         uint32_t idx_count = tri_count * 3;
         NT_BUILD_ASSERT(idx_count <= UINT8_MAX && "pipeline_serialize: region index_count exceeds uint8_t");
         NT_BUILD_ASSERT(vertex_cursor <= UINT16_MAX && "pipeline_serialize: vertex_start exceeds uint16_t");
@@ -1423,7 +1410,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
         sprite_idx_count[i] = idx_count;
 
         /* Write triangle indices (local: 0..vertex_count-1) */
-        memcpy(&indices[index_cursor], src_indices, idx_count * sizeof(uint16_t));
+        memcpy(&indices[index_cursor], local_indices, idx_count * sizeof(uint16_t));
         index_cursor += idx_count;
 
         uint32_t inner_x = pl->x + extrude_val;
@@ -1440,7 +1427,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
 
             int32_t tx;
             int32_t ty;
-            transform_point(lx, ly, pl->rotation, (int32_t)p->trim_w[pl->sprite_index], (int32_t)p->trim_h[pl->sprite_index], &tx, &ty);
+            transform_point(lx, ly, pl->rotation, (int32_t)p->trim_w[i], (int32_t)p->trim_h[i], &tx, &ty);
             float atlas_px = (float)inner_x + (float)tx;
             float atlas_py = (float)inner_y + (float)ty;
 
@@ -1570,10 +1557,8 @@ static void pipeline_cleanup(AtlasPipeline *p) {
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         if (p->dedup_map[i] < 0) {
             free(p->hull_vertices[i]);
-            free(p->pre_tri_indices[i]);
         }
         p->hull_vertices[i] = NULL;
-        p->pre_tri_indices[i] = NULL;
     }
 
     /* Free alpha planes */
@@ -1590,8 +1575,6 @@ static void pipeline_cleanup(AtlasPipeline *p) {
     free(p->unique_indices);
     free(p->vertex_counts);
     free((void *)p->hull_vertices);
-    free((void *)p->pre_tri_indices);
-    free(p->pre_tri_counts);
     free(p->placements);
 
     /* Free remaining page pixels (any not transferred to entries) */

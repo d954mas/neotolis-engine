@@ -863,10 +863,17 @@ uint32_t polygon_inflate(const Point2D *hull, uint32_t n, float amount, Point2D 
         memcpy(out, hull, n * sizeof(Point2D));
         return n;
     }
-    /* Cap output at 32 vertices — downstream uses stack arrays of this size.
-     * If Clipper2 returned more (rare), the caller's out buffer must be sized accordingly. */
+    /* Downstream callers size the output buffer for 32 vertices (the NFP packer
+     * has hard-coded stack arrays). If Clipper2 introduced more vertices at
+     * concave splits, silently truncating would drop geometry and could leave
+     * alpha pixels uncovered. Warn and fall back to the input polygon — callers
+     * that really need the inflated result have a post-verify pass that will
+     * catch the coverage loss and trigger a bbox fallback. */
     if (out_count > 32) {
-        out_count = 32;
+        NT_LOG_WARN("polygon_inflate: Clipper2 produced %u vertices (cap 32), using input unchanged", out_count);
+        free(inflated_xy);
+        memcpy(out, hull, n * sizeof(Point2D));
+        return n;
     }
     /* Sanity check: inflated coordinates must be within reasonable bounds (~input range + amount).
      * If Clipper2 returned something weird, fall back to the input. */
