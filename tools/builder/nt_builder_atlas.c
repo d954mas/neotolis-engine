@@ -843,6 +843,155 @@ static void pipeline_dedup(AtlasPipeline *p) {
     }
 }
 
+/* --- pipeline_geometry: strategy framework ---------------------------------
+ *
+ * pipeline_geometry runs four simplification strategies on each unique sprite
+ * contour and keeps whichever produces the smallest estimated final inflated
+ * polygon area. Each strategy returns a GeometryCandidate that owns its polygon
+ * heap allocation until the caller either adopts it (transfers ownership) or
+ * frees it via geometry_maybe_adopt().
+ *
+ * Score = polygon_area + perimeter * d + pi * d^2, where d is the required
+ * Clipper2 inflate amount. Same formula for all strategies so they're
+ * directly comparable. */
+
+typedef struct {
+    Point2D *poly;      /* heap-allocated, caller frees if not adopted */
+    uint32_t count;     /* vertex count */
+    double inflate_amt; /* required Clipper2 inflate amount (pixels) */
+    double est_area;    /* scoring key — lower is better */
+    bool valid;         /* false = strategy declined / produced degenerate output */
+} GeometryCandidate;
+
+static double geometry_estimate_inflated_area(const Point2D *poly, uint32_t count, double inflate_amt) {
+    double perim = 0.0;
+    for (uint32_t v = 0; v < count; v++) {
+        uint32_t vn = (v + 1) % count;
+        double dx = (double)(poly[vn].x - poly[v].x);
+        double dy = (double)(poly[vn].y - poly[v].y);
+        perim += sqrt((dx * dx) + (dy * dy));
+    }
+    return (double)polygon_area_pixels(poly, count) + (perim * inflate_amt) + (3.14159 * inflate_amt * inflate_amt);
+}
+
+/* If candidate is better than current, free current->poly and take candidate.
+ * Otherwise free candidate->poly. Either way ownership is resolved on return. */
+static void geometry_maybe_adopt(GeometryCandidate *current, GeometryCandidate candidate) {
+    if (!candidate.valid) {
+        return;
+    }
+    if (!current->valid || candidate.est_area < current->est_area) {
+        free(current->poly);
+        *current = candidate;
+    } else {
+        free(candidate.poly);
+    }
+}
+
+/* Strategy 1: Ramer-Douglas-Peucker with epsilon growth + bisection to hit target.
+ * Baseline — RDP preserves contour shape best for organic sprites. */
+static GeometryCandidate strategy_rdp(const Point2D *clean, uint32_t clean_count, uint32_t target) {
+    GeometryCandidate result = {0};
+    Point2D *poly = (Point2D *)malloc(clean_count * sizeof(Point2D));
+    NT_BUILD_ASSERT(poly && "strategy_rdp: alloc failed");
+
+    double eps = 0.5;
+    uint32_t count = rdp_simplify(clean, clean_count, eps, poly);
+    double prev_eps = -1.0;
+    while (count > target && eps < 100.0) {
+        prev_eps = eps;
+        eps *= 1.5;
+        count = rdp_simplify(clean, clean_count, eps, poly);
+    }
+    /* Bisect [prev_eps, eps] for the smallest eps that still fits target. */
+    if (count <= target && prev_eps > 0.0 && (eps - prev_eps) > 0.5) {
+        double lo = prev_eps;
+        double hi = eps;
+        for (int bs = 0; bs < 12; bs++) {
+            double mid = (lo + hi) * 0.5;
+            uint32_t mid_count = rdp_simplify(clean, clean_count, mid, poly);
+            if (mid_count <= target) {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        eps = hi;
+        count = rdp_simplify(clean, clean_count, eps, poly);
+    }
+
+    result.poly = poly;
+    result.count = count;
+    result.inflate_amt = eps + 1.0;
+    result.est_area = geometry_estimate_inflated_area(poly, count, result.inflate_amt);
+    result.valid = true;
+    return result;
+}
+
+/* Strategy 2: greedy perpendicular-distance simplification, exactly target verts.
+ * Inflate amount comes from measuring actual pixel coverage loss, not eps. */
+static GeometryCandidate strategy_perp(const Point2D *clean, uint32_t clean_count, uint32_t target, const uint8_t *binary_source, uint32_t tw, uint32_t th) {
+    GeometryCandidate result = {0};
+    Point2D *poly = (Point2D *)malloc(clean_count * sizeof(Point2D));
+    NT_BUILD_ASSERT(poly && "strategy_perp: alloc failed");
+
+    double dummy_dev = 0.0;
+    uint32_t count = hull_simplify_perp(clean, clean_count, target, poly, &dummy_dev);
+
+    /* True inflate = max distance from any opaque pixel center outside the
+     * candidate polygon to the polygon boundary. Catches cases where the
+     * simplified polygon cut between two clean contour vertices. */
+    double max_outside = polygon_max_outside_pixel_distance(poly, count, binary_source, tw, th);
+
+    result.poly = poly;
+    result.count = count;
+    result.inflate_amt = max_outside + 1.0;
+    result.est_area = geometry_estimate_inflated_area(poly, count, result.inflate_amt);
+    result.valid = true;
+    return result;
+}
+
+/* Strategy 3: trim bounding rectangle. Always 4 vertices, trivially contains
+ * every alpha pixel (they live inside the trim bbox by construction). For
+ * mostly-rectangular sprites (muzzle, icons, tiles) this is optimal. */
+static GeometryCandidate strategy_rect(uint32_t tw, uint32_t th) {
+    GeometryCandidate result = {0};
+    Point2D *poly = (Point2D *)malloc(4 * sizeof(Point2D));
+    NT_BUILD_ASSERT(poly && "strategy_rect: alloc failed");
+    poly[0] = (Point2D){0, 0};
+    poly[1] = (Point2D){(int32_t)tw, 0};
+    poly[2] = (Point2D){(int32_t)tw, (int32_t)th};
+    poly[3] = (Point2D){0, (int32_t)th};
+
+    result.poly = poly;
+    result.count = 4;
+    result.inflate_amt = 1.0;
+    result.est_area = geometry_estimate_inflated_area(poly, 4, result.inflate_amt);
+    result.valid = true;
+    return result;
+}
+
+/* Strategy 4: convex hull of the binary mask via Andrew's monotone chain,
+ * simplified down to target vertices. Wins on convex-ish shapes where the
+ * hull is already within max_vertices. */
+static GeometryCandidate strategy_convex(const uint8_t *binary_source, uint32_t tw, uint32_t th, uint32_t target) {
+    GeometryCandidate result = {0};
+    uint32_t count = 0;
+    Point2D *poly = binary_build_convex_polygon(binary_source, tw, th, target, &count);
+    if (!poly || count < 3) {
+        free(poly);
+        return result; /* invalid */
+    }
+    double max_outside = polygon_max_outside_pixel_distance(poly, count, binary_source, tw, th);
+
+    result.poly = poly;
+    result.count = count;
+    result.inflate_amt = max_outside + 1.0;
+    result.est_area = geometry_estimate_inflated_area(poly, count, result.inflate_amt);
+    result.valid = true;
+    return result;
+}
+
 /* --- pipeline_geometry: contour trace + simplification + inflation per unique sprite --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -924,138 +1073,20 @@ static void pipeline_geometry(AtlasPipeline *p) {
                     uint32_t clean_count = remove_collinear(contour, contour_count, clean);
                     free(contour);
 
-                    /* Simplify with RDP. Start with small epsilon for coverage, grow if needed.
-                     * The Clipper2 inflate amount below MUST be >= RDP epsilon to guarantee
-                     * the inflated polygon covers all pixels the RDP might have cut. */
-                    Point2D *simplified = (Point2D *)malloc(clean_count * sizeof(Point2D));
-                    NT_BUILD_ASSERT(simplified && "pipeline_geometry: alloc failed");
-                    double eps = 0.5;
-                    uint32_t simp_count = rdp_simplify(clean, clean_count, eps, simplified);
+                    /* Run 4 simplification strategies, keep lowest estimated
+                     * final inflated area. Each strategy returns a candidate
+                     * polygon + required inflate amount; geometry_maybe_adopt
+                     * handles ownership (frees the loser each step). */
                     uint32_t target = p->opts->max_vertices;
-                    double prev_eps = -1.0;
-                    while (simp_count > target && eps < 100.0) {
-                        prev_eps = eps;
-                        eps *= 1.5;
-                        simp_count = rdp_simplify(clean, clean_count, eps, simplified);
-                    }
-                    /* Bisect [prev_eps, eps] for smallest eps that fits target. */
-                    if (simp_count <= target && prev_eps > 0.0 && (eps - prev_eps) > 0.5) {
-                        double lo = prev_eps;
-                        double hi = eps;
-                        for (int bs = 0; bs < 12; bs++) {
-                            double mid = (lo + hi) * 0.5;
-                            uint32_t mid_count = rdp_simplify(clean, clean_count, mid, simplified);
-                            if (mid_count <= target) {
-                                hi = mid;
-                            } else {
-                                lo = mid;
-                            }
-                        }
-                        eps = hi;
-                        simp_count = rdp_simplify(clean, clean_count, eps, simplified);
-                    }
-                    double inflate_amt = eps + 1.0;
-                    /* Multi-strategy: try several simplification algorithms, keep the one
-                     * that produces the smallest final inflated polygon area. */
+                    GeometryCandidate best = strategy_rdp(clean, clean_count, target);
+                    geometry_maybe_adopt(&best, strategy_perp(clean, clean_count, target, binary_source, tw, th));
+                    geometry_maybe_adopt(&best, strategy_rect(tw, th));
+                    geometry_maybe_adopt(&best, strategy_convex(binary_source, tw, th, target));
+                    NT_BUILD_ASSERT(best.valid && "pipeline_geometry: RDP baseline should never be invalid");
 
-                    /* Helper to compute final inflated polygon area estimate. */
-                    double best_perim = 0.0;
-                    {
-                        for (uint32_t v = 0; v < simp_count; v++) {
-                            uint32_t vn = (v + 1) % simp_count;
-                            double dx = (double)(simplified[vn].x - simplified[v].x);
-                            double dy = (double)(simplified[vn].y - simplified[v].y);
-                            best_perim += sqrt((dx * dx) + (dy * dy));
-                        }
-                    }
-                    double best_est = (double)polygon_area_pixels(simplified, simp_count) + (best_perim * inflate_amt) + (3.14159 * inflate_amt * inflate_amt);
-
-                    /* Strategy 2: greedy perpendicular-distance simplification, exactly target verts. */
-                    {
-                        Point2D *alt = (Point2D *)malloc(clean_count * sizeof(Point2D));
-                        NT_BUILD_ASSERT(alt && "pipeline_geometry: alloc failed");
-                        double dummy_dev = 0.0;
-                        uint32_t alt_count = hull_simplify_perp(clean, clean_count, target, alt, &dummy_dev);
-                        /* True inflate = max distance from any OUTSIDE opaque pixel center
-                         * to the candidate polygon's boundary. Testing pixel centers (not
-                         * clean vertices) catches cases where the simplified polygon cuts
-                         * between two in-polygon vertices. */
-                        double max_outside_dist = polygon_max_outside_pixel_distance(alt, alt_count, binary_source, tw, th);
-                        double alt_inflate = max_outside_dist + 1.0;
-                        double alt_perim = 0.0;
-                        for (uint32_t v = 0; v < alt_count; v++) {
-                            uint32_t vn = (v + 1) % alt_count;
-                            double dx = (double)(alt[vn].x - alt[v].x);
-                            double dy = (double)(alt[vn].y - alt[v].y);
-                            alt_perim += sqrt((dx * dx) + (dy * dy));
-                        }
-                        double alt_est = (double)polygon_area_pixels(alt, alt_count) + (alt_perim * alt_inflate) + (3.14159 * alt_inflate * alt_inflate);
-                        if (alt_est < best_est) {
-                            free(simplified);
-                            simplified = alt;
-                            simp_count = alt_count;
-                            inflate_amt = alt_inflate;
-                            best_est = alt_est;
-                        } else {
-                            free(alt);
-                        }
-                    }
-
-                    /* Strategy 3a: trim bounding rectangle. Always 4 vertices, trivially
-                     * contains all alpha pixels (since they live inside the trim bbox by
-                     * definition). For nearly-rectangular alphas (muzzle, tiles) this is
-                     * the tightest possible polygon. */
-                    {
-                        Point2D rect[4] = {
-                            {0, 0},
-                            {(int32_t)tw, 0},
-                            {(int32_t)tw, (int32_t)th},
-                            {0, (int32_t)th},
-                        };
-                        double rect_area = (double)tw * (double)th;
-                        double rect_perim = 2.0 * ((double)tw + (double)th);
-                        double rect_inflate = 1.0;
-                        double rect_est = rect_area + (rect_perim * rect_inflate) + (3.14159 * rect_inflate * rect_inflate);
-                        if (rect_est < best_est) {
-                            free(simplified);
-                            simplified = (Point2D *)malloc(4 * sizeof(Point2D));
-                            NT_BUILD_ASSERT(simplified && "pipeline_geometry: alloc failed");
-                            memcpy(simplified, rect, 4 * sizeof(Point2D));
-                            simp_count = 4;
-                            inflate_amt = rect_inflate;
-                            best_est = rect_est;
-                        }
-                    }
-
-                    /* Strategy 3: convex hull of binary mask. For mostly-rectangular alphas
-                     * (muzzle, icons, tiles) this is ~4 vertices ≈ trim bbox, zero inflate. */
-                    {
-                        uint32_t hull_count = 0;
-                        Point2D *hull = binary_build_convex_polygon(binary_source, tw, th, target, &hull_count);
-                        if (hull && hull_count >= 3) {
-                            double max_outside_dist = polygon_max_outside_pixel_distance(hull, hull_count, binary_source, tw, th);
-                            double hull_inflate = max_outside_dist + 1.0;
-                            double hull_perim = 0.0;
-                            for (uint32_t v = 0; v < hull_count; v++) {
-                                uint32_t vn = (v + 1) % hull_count;
-                                double dx = (double)(hull[vn].x - hull[v].x);
-                                double dy = (double)(hull[vn].y - hull[v].y);
-                                hull_perim += sqrt((dx * dx) + (dy * dy));
-                            }
-                            double hull_est = (double)polygon_area_pixels(hull, hull_count) + (hull_perim * hull_inflate) + (3.14159 * hull_inflate * hull_inflate);
-                            if (hull_est < best_est) {
-                                free(simplified);
-                                simplified = hull;
-                                simp_count = hull_count;
-                                inflate_amt = hull_inflate;
-                                best_est = hull_est;
-                            } else {
-                                free(hull);
-                            }
-                        } else if (hull) {
-                            free(hull);
-                        }
-                    }
+                    Point2D *simplified = best.poly;
+                    uint32_t simp_count = best.count;
+                    double inflate_amt = best.inflate_amt;
 
                     free(clean);
                     int32_t *simp_xy = (int32_t *)malloc(simp_count * 2 * sizeof(int32_t));
