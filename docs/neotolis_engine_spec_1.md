@@ -974,10 +974,11 @@ typedef enum {
     NT_ASSET_SHADER_CODE = 3,
     NT_ASSET_BLOB = 4,        /* generic binary data (game-defined) */
     NT_ASSET_FONT = 5,        /* font glyph data (Slug format) */
+    NT_ASSET_ATLAS = 6,       /* atlas region metadata (vertices + UVs + origin) */
 } nt_asset_type_t;
 ```
 
-Additional types (material, audio, sprite) will be added as needed.
+Additional types (material, audio) will be added as needed.
 
 ### NT_ASSET_FONT binary format
 
@@ -1010,6 +1011,56 @@ Per-glyph data (at data_offset):
 ```
 
 Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier curves (lines promoted to degenerate quadratics). At lookup time, contours are decoded into float control points, decomposed into horizontal bands, and uploaded to GPU textures for Slug-style vector rendering. Glyphs are cached with LRU eviction — not immutable once loaded.
+
+### NT_ASSET_ATLAS binary format
+
+Builder produces atlas assets from a set of sprite PNGs (or raw RGBA buffers). One atlas yields **two kinds of pack entries**: a single `NT_ASSET_ATLAS` blob with region metadata, plus N `NT_ASSET_TEXTURE` page entries (named `<atlas>/tex0`, `<atlas>/tex1`, …). Runtime keeps a 1:N relationship — one metadata blob references N textures.
+
+Binary layout (`shared/include/nt_atlas_format.h`, packed):
+
+```
+NtAtlasHeader (28 bytes)
+  magic:               u32  (0x534C5441 "ATLS")
+  version:             u16  (2)
+  region_count:        u16  (one entry per source sprite)
+  page_count:          u16  (number of texture pages)
+  _pad:                u16
+  vertex_offset:       u32  (byte offset from header start)
+  total_vertex_count:  u32
+  index_offset:        u32  (byte offset from header start)
+  total_index_count:   u32
+
+texture_resource_ids[page_count]: u64
+  Each entry is nt_hash64_str("<atlas_name>/tex<N>") matching the
+  page texture's resource_id in the same pack.
+
+NtAtlasRegion[region_count] (32 bytes each)
+  name_hash:      u64   (xxh64 of region name)
+  source_w:       u16   (original image width pre-trim)
+  source_h:       u16
+  trim_offset_x:  i16   (pixels removed from left)
+  trim_offset_y:  i16
+  origin_x:       f32   (origin in source-image space)
+  origin_y:       f32
+  vertex_start:   u16   (index into vertex array)
+  vertex_count:   u8    (vertices for this region; ≤ max_vertices)
+  page_index:     u8    (which texture page)
+  rotated:        u8    (3-bit D4 transform mask: bit0=flipH, bit1=flipV, bit2=diagonal)
+  index_count:    u8    (triangle indices for this region; ≤ 255 → ≤ 85 triangles)
+  index_start:    u16   (index into the index array)
+
+NtAtlasVertex[total_vertex_count] (8 bytes each, at vertex_offset)
+  local_x:   i16  (pixels relative to source-image origin)
+  local_y:   i16
+  atlas_u:   u16  (normalized 0..65535 over atlas page width)
+  atlas_v:   u16  (normalized 0..65535 over atlas page height)
+
+uint16[total_index_count] (at index_offset)
+  Triangle list, indices local per region (0 .. vertex_count-1).
+  Runtime offsets them by vertex_start when building GPU buffers.
+```
+
+Runtime is intentionally trivial: `mmap` the blob, read header, slice arrays. No parsing, no allocation. UVs are pre-normalized, triangles are pre-built (fan triangulation for convex regions, Clipper2 CDT for concave). Duplicate sprites share `vertex_start`/`index_start` so a 4200-region atlas still fits in `uint16_t` cursor space.
 
 ## 17.9 Placeholder policy
 
@@ -1625,15 +1676,24 @@ add_texture(const char* path);
 add_shader(const char* path);
 add_material(const char* path);
 add_audio(const char* path);
+add_font(const char* path);
 
 add_meshes(const char* pattern);
 add_textures(const char* pattern);
 add_shaders(const char* pattern);
 add_materials(const char* pattern);
 add_audios(const char* pattern);
+add_fonts(const char* pattern);
+
+/* Atlas: groups N source sprites into 1 metadata blob + M texture pages */
+begin_atlas(const char* name, const nt_atlas_opts_t* opts);
+atlas_add(const char* path, const char* name_override);
+atlas_add_raw(const uint8_t* rgba, uint32_t w, uint32_t h, const char* name);
+atlas_add_glob(const char* pattern);
+end_atlas(void);
 ```
 
-Prefer typed wildcard functions over one untyped `add_files()`.
+Prefer typed wildcard functions over one untyped `add_files()`. Atlas uses a `begin/add*/end` pattern because one atlas requires its full sprite set before packing can start — this is the only place in the API where multi-call grouping is required.
 
 ## 23.5 Builder stages
 
@@ -1716,6 +1776,89 @@ Content-addressed encode cache. Opt-in via `nt_builder_set_cache_dir(ctx, path)`
 **Safety:** write-to-temp + atomic rename. Cache failures (read/write) fall through to normal encode — never break the build.
 
 **Build summary** reports per-asset cache status (cached / miss-new / miss-opts) and aggregate hit/miss counts.
+
+## 23.11 Atlas builder
+
+The atlas builder packs a set of sprite images into one or more atlas pages and emits compact runtime metadata (`NT_ASSET_ATLAS`, see §17.8). It is the only "grouping" producer in the builder — every other importer is single-asset.
+
+**API shape (begin/add*/end):**
+
+```c
+nt_atlas_opts_t opts = nt_atlas_opts_defaults();  /* sane defaults per below */
+opts.max_size = 2048;
+opts.max_vertices = 8;
+opts.polygon_mode = true;
+
+nt_builder_begin_atlas(ctx, "spineboy", &opts);
+nt_builder_atlas_add_glob(ctx, "assets/sprites/spineboy/*.png");
+nt_builder_end_atlas(ctx);
+```
+
+`begin_atlas` opens an atlas state on the context. Subsequent `atlas_add*` calls feed sprites in. `end_atlas` runs the full pipeline and registers entries. Nested atlases are not allowed (asserts).
+
+### 23.11.1 Pipeline
+
+`end_atlas` runs ten stages in order:
+
+1. **alpha_trim** — extract alpha plane, find tight bbox per sprite (rejects fully transparent inputs).
+2. **cache_check** — compute atlas-level cache key (sorted sprite hashes + serialized opts + version), try loading cached placement+pages.
+3. **dedup** — hash + byte-level compare to find identical sprites; duplicates share `vertex_start`/`index_start` in the final blob.
+4. **geometry** — for each unique sprite: build binary mask, optional morphological closing for disjoint components, contour trace, multi-strategy simplification (RDP / perpendicular distance / bbox / convex hull — pick lowest estimated final area), Clipper2 inflate by `extrude + padding/2`, post-verify pixel coverage with fallback to bbox.
+5. **tile_pack** — call `vector_pack` (NFP packer, see below) to assign each unique sprite to a page and (x, y) position.
+6. **compose** — blit trimmed pixels onto page buffers, run edge-extrude.
+7. **debug_png** — optional outline visualization (when `opts.debug_png`).
+8. **cache_write** — persist placement+pages for next build.
+9. **serialize** — pack `NtAtlasHeader + texture_resource_ids + regions + vertices + indices` into one blob, register as `NT_ASSET_ATLAS`.
+10. **register** — add `NT_ASSET_TEXTURE` entries for each page texture, populate region codegen entries.
+
+Stages 5–8 are skipped on cache hit; serialize/register always run.
+
+### 23.11.2 Vector packer
+
+The packer is **NFP/Minkowski-based** (`nt_builder_atlas_vpack.c`). For each candidate position the incoming polygon is tested against the union of No-Fit Polygons of all already-placed sprites. Properties:
+
+- **Sub-pixel exact** — no quantization to a tile grid.
+- **Concave-aware** — Clipper2 `MinkowskiSum + Union(NonZero)` produces multi-ring NFPs for concave inputs; rings are forbidden zones.
+- **8 D4 orientations** — flipH, flipV, diagonal flip and combinations. Identity-equivalent orientations are deduplicated.
+- **NFP cache** — 8-way set-associative seqlock cache keyed by `(placed_shape_hash, incoming_shape_hash)`. Lock-free reads via version counter, CAS writes. Same shape pair across different sprites reuses the cached NFP.
+- **Parallel build** — when `nt_builder_set_threads(ctx, N)` is called, NFP construction and candidate scanning run on a thread pool. Per-thread stat accumulators merge into global stats deterministically.
+- **Page growth** — sprites that don't fit allocate a new page (up to `ATLAS_MAX_PAGES = 64`); new pages start with the same dimensions as the first.
+
+### 23.11.3 Atlas options
+
+```c
+typedef struct {
+    const nt_tex_compress_opts_t *compress;  /* NULL = raw RGBA */
+    nt_texture_pixel_format_t format;        /* RGBA8 default */
+    uint32_t max_size;       /* max atlas page dimension (default 2048) */
+    uint32_t padding;        /* extra spacing between sprites (default 0) */
+    uint32_t margin;         /* atlas edge margin (default 0) */
+    uint32_t extrude;        /* edge pixel duplication count (default 2) */
+    uint8_t alpha_threshold; /* alpha >= threshold = opaque (default 1) */
+    uint8_t max_vertices;    /* max polygon vertices per region (default 16, hard cap) */
+    bool allow_rotate;       /* try 8 D4 orientations (default true) */
+    bool power_of_two;       /* round atlas dims to POT (default true) */
+    bool polygon_mode;       /* concave contour vs 4-vertex bbox (default true) */
+    bool debug_png;          /* write debug atlas page PNGs (default false) */
+} nt_atlas_opts_t;
+```
+
+**Hard limits:**
+- `max_vertices ≤ 16`. NFP buffers are stack-sized for `nA + nB ≤ 32`.
+- Per-region `index_count` is `uint8_t` → ≤ 85 triangles per region.
+- Per-atlas `vertex_start`/`index_start` are `uint16_t` → ≤ 65535 cumulative across the atlas. Dedup helps; large atlases with many unique high-vertex sprites can hit this — builder asserts.
+
+### 23.11.4 Atlas cache
+
+Separate from the per-asset builder cache (§23.10) because atlas placement is a global decision over the whole sprite set.
+
+**Cache key:** `xxh64(sorted(decoded_hashes) + serialized_opts + ATLAS_CACHE_KEY_VERSION + compress_settings)`. Sorted sprite hashes make the key independent of `atlas_add` order.
+
+**Storage:** one `atlas_<key>.bin` file per cache hit, containing the placement table and the composed page pixels. On hit, the pipeline skips pack/compose/debug_png/cache_write entirely.
+
+**Invalidation:** any change to source pixels, opts, or `ATLAS_CACHE_KEY_VERSION` produces a fresh key. The version constant is bumped when the packer's behavior changes in a way that would silently produce different output.
+
+**Failure mode:** atomic temp+rename writes; read/write failures fall through to a fresh build, never break it.
 
 ---
 
@@ -1895,7 +2038,8 @@ These do not block implementation:
 - exact binary layout of each runtime format header
 - precise bit packing of sort keys
 - future WebGPU backend details
-- exact sprite asset format and animation system
+- ~~exact sprite asset format~~ → resolved: `NT_ASSET_ATLAS` (§17.8) builder-side. Runtime sprite renderer + `SpriteComponent` consumer is still pending — atlas blob is produced and validated end-to-end but not yet consumed by a runtime sprite module.
+- sprite animation system
 - ~~exact text rendering strategy and string pool design~~ → resolved: Slug-based GPU vector rendering (§17.8 NT_ASSET_FONT), font module API (§9.5)
 - camera component/structure definition
 - whether some renderer-specific caches are worth adding later
