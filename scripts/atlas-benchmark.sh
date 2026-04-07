@@ -19,7 +19,6 @@ cd "$(git rev-parse --show-toplevel)"
 # --- Defaults ---
 SPRITES=10000
 MAX_SIZE=4096
-TILE_SIZE=2
 GLOB="assets/sprites/bigatlas/*.png"
 ATLAS_NAME="bench"
 MODE="poly"
@@ -40,7 +39,6 @@ while [[ $# -gt 0 ]]; do
         --max-pages)  MAX_PAGES="$2"; shift 2 ;;
         --no-build)   NO_BUILD=true; shift ;;
         --max-size)   MAX_SIZE="$2"; shift 2 ;;
-        --tile-size)  TILE_SIZE="$2"; shift 2 ;;
         --glob)       GLOB="$2"; shift 2 ;;
         --name)       ATLAS_NAME="$2"; shift 2 ;;
         --mode)       MODE="$2"; shift 2 ;;
@@ -65,8 +63,8 @@ echo "=== Clearing cache ==="
 rm -rf "${OUT_DIR}/_cache"
 
 # --- Step 3: Run benchmark ---
-echo "=== Running atlas benchmark: ${SPRITES} sprites, max=${MAX_SIZE}, ts=${TILE_SIZE} ==="
-OUTPUT=$("$BUILDER" "$PACK_DIR" "$MAX_SIZE" "$TILE_SIZE" "$GLOB" "$ATLAS_NAME" "$MODE" "$SPRITES" 2>&1)
+echo "=== Running atlas benchmark: ${SPRITES} sprites, max=${MAX_SIZE} ==="
+OUTPUT=$("$BUILDER" "$PACK_DIR" "$MAX_SIZE" "$GLOB" "$ATLAS_NAME" "$MODE" "$SPRITES" 2>&1)
 BUILD_EXIT=$?
 if [[ $BUILD_EXIT -ne 0 ]]; then
     echo "ERROR: Builder exited with code $BUILD_EXIT"
@@ -81,14 +79,12 @@ if [[ -z "$BENCH_LINE" ]]; then
     echo "$OUTPUT"
     exit 1
 fi
-BENCH_VPACK_LINE=$(echo "$OUTPUT" | grep "^INFO \[builder\] BENCH_VPACK " | tail -1)
-
 # Extract values — portable (no grep -P)
 extract_val() { echo "$1" | sed "s/.*$2=\([0-9.]*\).*/\1/"; }
 ALPHA_TRIM=$(extract_val "$BENCH_LINE" "alpha_trim")
 DEDUP=$(extract_val "$BENCH_LINE" "dedup")
 GEOMETRY=$(extract_val "$BENCH_LINE" "geometry")
-TILE_PACK=$(extract_val "$BENCH_LINE" "tile_pack")
+PACK=$(extract_val "$BENCH_LINE" "pack")
 COMPOSE=$(extract_val "$BENCH_LINE" "compose")
 DEBUG_PNG=$(extract_val "$BENCH_LINE" "debug_png")
 SERIALIZE=$(extract_val "$BENCH_LINE" "serialize")
@@ -99,23 +95,15 @@ FRONTIER_AREA=$(extract_val "$BENCH_LINE" "frontier_area")
 TRIM_AREA=$(extract_val "$BENCH_LINE" "trim_area")
 POLY_AREA=$(extract_val "$BENCH_LINE" "poly_area")
 POT_WASTE=$(extract_val "$BENCH_LINE" "pot_waste")
-POLY_FRONTIER_FILL=$(extract_val "$BENCH_LINE" "poly_frontier_fill")
-POLY_TEXTURE_FILL=$(extract_val "$BENCH_LINE" "poly_texture_fill")
+POLY_FRONTIER_FILL=$(extract_val "$BENCH_LINE" "fill_frontier")
+POLY_TEXTURE_FILL=$(extract_val "$BENCH_LINE" "fill_texture")
 OR_OPS=$(extract_val "$BENCH_LINE" "or_ops")
 TEST_OPS=$(extract_val "$BENCH_LINE" "test_ops")
 PAGE_SCANS=$(extract_val "$BENCH_LINE" "page_scans")
-PAGE_PRUNES=$(extract_val "$BENCH_LINE" "page_prunes")
 PAGE_EXISTING=$(extract_val "$BENCH_LINE" "page_existing")
-PAGE_BACKFILLS=$(extract_val "$BENCH_LINE" "page_backfills")
 PAGE_NEW=$(extract_val "$BENCH_LINE" "page_new")
-RELEVANT=$(extract_val "$BENCH_LINE" "relevant")
-CANDIDATES=$(extract_val "$BENCH_LINE" "candidates")
-GRID_FALLBACKS=$(extract_val "$BENCH_LINE" "grid_fallbacks")
-NFP_CACHE_HITS=$(extract_val "${BENCH_VPACK_LINE:-}" "nfp_cache_hits")
-NFP_CACHE_MISSES=$(extract_val "${BENCH_VPACK_LINE:-}" "nfp_cache_misses")
-NFP_CACHE_COLLISIONS=$(extract_val "${BENCH_VPACK_LINE:-}" "nfp_cache_collisions")
-ORIENT_DEDUP_SAVED=$(extract_val "${BENCH_VPACK_LINE:-}" "orient_dedup_saved")
-DIRTY_CELLS=$(extract_val "${BENCH_VPACK_LINE:-}" "dirty_cells")
+NFP_CACHE_HITS=$(extract_val "$BENCH_LINE" "cache_hits")
+NFP_CACHE_MISSES=$(extract_val "$BENCH_LINE" "cache_misses")
 
 USED_AREA=${USED_AREA:-0}
 FRONTIER_AREA=${FRONTIER_AREA:-0}
@@ -127,18 +115,10 @@ POLY_TEXTURE_FILL=${POLY_TEXTURE_FILL:-0}
 OR_OPS=${OR_OPS:-0}
 TEST_OPS=${TEST_OPS:-0}
 PAGE_SCANS=${PAGE_SCANS:-0}
-PAGE_PRUNES=${PAGE_PRUNES:-0}
 PAGE_EXISTING=${PAGE_EXISTING:-0}
-PAGE_BACKFILLS=${PAGE_BACKFILLS:-0}
 PAGE_NEW=${PAGE_NEW:-0}
-RELEVANT=${RELEVANT:-0}
-CANDIDATES=${CANDIDATES:-0}
-GRID_FALLBACKS=${GRID_FALLBACKS:-0}
 NFP_CACHE_HITS=${NFP_CACHE_HITS:-0}
 NFP_CACHE_MISSES=${NFP_CACHE_MISSES:-0}
-NFP_CACHE_COLLISIONS=${NFP_CACHE_COLLISIONS:-0}
-ORIENT_DEDUP_SAVED=${ORIENT_DEDUP_SAVED:-0}
-DIRTY_CELLS=${DIRTY_CELLS:-0}
 
 # Extract unique count
 PACKED_LINE=$(echo "$OUTPUT" | grep "Atlas packed" | tail -1)
@@ -150,16 +130,15 @@ echo "Mode: ${MODE}, Sprites: ${SPRITES} (${UNIQUE} unique), Pages: ${PAGES}"
 echo "Area: alloc=${USED_AREA}px, frontier=${FRONTIER_AREA}px, trim=${TRIM_AREA}px, poly=${POLY_AREA}px, pot_waste=${POT_WASTE}px"
 echo "Fill: poly/frontier=${POLY_FRONTIER_FILL}, poly/alloc=${POLY_TEXTURE_FILL}"
 echo "Ops: OR=${OR_OPS}, Test=${TEST_OPS}"
-echo "Pages: scans=${PAGE_SCANS}, prunes=${PAGE_PRUNES}, existing=${PAGE_EXISTING}, backfills=${PAGE_BACKFILLS}, new=${PAGE_NEW}"
-echo "Search: relevant=${RELEVANT}, candidates=${CANDIDATES}, grid_fallbacks=${GRID_FALLBACKS}"
-echo "Vector: nfp_cache_hits=${NFP_CACHE_HITS}, misses=${NFP_CACHE_MISSES}, collisions=${NFP_CACHE_COLLISIONS}, orient_dedup_saved=${ORIENT_DEDUP_SAVED}, dirty_cells=${DIRTY_CELLS}"
+echo "Pages: scans=${PAGE_SCANS}, existing=${PAGE_EXISTING}, new=${PAGE_NEW}"
+echo "Cache: hits=${NFP_CACHE_HITS}, misses=${NFP_CACHE_MISSES}"
 echo ""
 printf "%-15s %10s\n" "Stage" "Time (ms)"
 printf "%-15s %10s\n" "───────────────" "──────────"
 printf "%-15s %10s\n" "alpha_trim" "$ALPHA_TRIM"
 printf "%-15s %10s\n" "dedup" "$DEDUP"
 printf "%-15s %10s\n" "geometry" "$GEOMETRY"
-printf "%-15s %10s\n" "tile_pack" "$TILE_PACK"
+printf "%-15s %10s\n" "pack" "$PACK"
 printf "%-15s %10s\n" "compose" "$COMPOSE"
 printf "%-15s %10s\n" "debug_png" "$DEBUG_PNG"
 printf "%-15s %10s\n" "serialize" "$SERIALIZE"
@@ -196,12 +175,12 @@ fi
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 if [[ ! -f "$RESULTS_FILE" ]]; then
-    printf "timestamp\tcommit\tmode\tsprites\tunique\tpages\tused_area\tfrontier_area\ttrim_area\tpoly_area\tpot_waste\tpoly_frontier_fill\tpoly_texture_fill\tor_ops\ttest_ops\tpage_scans\tpage_prunes\tpage_existing\tpage_backfills\tpage_new\trelevant\tcandidates\tgrid_fallbacks\tnfp_cache_hits\tnfp_cache_misses\tnfp_cache_collisions\torient_dedup_saved\tdirty_cells\talpha_trim\tdedup\tgeometry\ttile_pack\tcompose\tdebug_png\tserialize\ttotal\n" > "$RESULTS_FILE"
+    printf "timestamp\tcommit\tmode\tsprites\tunique\tpages\tused_area\tfrontier_area\ttrim_area\tpoly_area\tpot_waste\tpoly_frontier_fill\tpoly_texture_fill\tor_ops\ttest_ops\tpage_scans\tpage_existing\tpage_new\tnfp_cache_hits\tnfp_cache_misses\talpha_trim\tdedup\tgeometry\tpack\tcompose\tdebug_png\tserialize\ttotal\n" > "$RESULTS_FILE"
 fi
-printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
     "$TIMESTAMP" "$COMMIT" "$MODE" "$SPRITES" "$UNIQUE" "$PAGES" "$USED_AREA" "$FRONTIER_AREA" "$TRIM_AREA" "$POLY_AREA" "$POT_WASTE" "$POLY_FRONTIER_FILL" "$POLY_TEXTURE_FILL" "$OR_OPS" "$TEST_OPS" \
-    "$PAGE_SCANS" "$PAGE_PRUNES" "$PAGE_EXISTING" "$PAGE_BACKFILLS" "$PAGE_NEW" "$RELEVANT" "$CANDIDATES" "$GRID_FALLBACKS" "$NFP_CACHE_HITS" "$NFP_CACHE_MISSES" "$NFP_CACHE_COLLISIONS" "$ORIENT_DEDUP_SAVED" "$DIRTY_CELLS" \
-    "$ALPHA_TRIM" "$DEDUP" "$GEOMETRY" "$TILE_PACK" "$COMPOSE" "$DEBUG_PNG" "$SERIALIZE" "$TOTAL" \
+    "$PAGE_SCANS" "$PAGE_EXISTING" "$PAGE_NEW" "$NFP_CACHE_HITS" "$NFP_CACHE_MISSES" \
+    "$ALPHA_TRIM" "$DEDUP" "$GEOMETRY" "$PACK" "$COMPOSE" "$DEBUG_PNG" "$SERIALIZE" "$TOTAL" \
     >> "$RESULTS_FILE"
 
 echo ""
