@@ -441,6 +441,77 @@ static bool point_in_polygon(const Point2D *poly, uint32_t n, Point2D p) {
     return inside;
 }
 
+/* Float-coord point-in-polygon (even-odd rule) — used to test pixel centers
+ * (which live at non-integer (x+0.5, y+0.5) positions) against an integer
+ * polygon. */
+static bool point_in_polygon_f(const Point2D *poly, uint32_t n, double px, double py) {
+    bool inside = false;
+    for (uint32_t i = 0, j = n - 1; i < n; j = i++) {
+        double xi = (double)poly[i].x;
+        double yi = (double)poly[i].y;
+        double xj = (double)poly[j].x;
+        double yj = (double)poly[j].y;
+        if (((yi > py) != (yj > py)) && (px < ((xj - xi) * (py - yi) / (yj - yi)) + xi)) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+/* Computes the maximum distance from any opaque pixel center (alpha >= threshold)
+ * to the candidate polygon's boundary, for pixel centers that lie OUTSIDE the
+ * polygon. Returns 0 if every opaque pixel center is inside the polygon.
+ * Used to determine the minimum Clipper2 inflate amount needed so the inflated
+ * polygon fully encloses every opaque pixel center (stricter than the clean
+ * contour vertices, which sit at integer pixel corners and miss +0.5 offsets). */
+static double polygon_max_outside_pixel_distance(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th) {
+    double max_d = 0.0;
+    for (uint32_t y = 0; y < th; y++) {
+        for (uint32_t x = 0; x < tw; x++) {
+            if (binary[((size_t)y * tw) + x] == 0) {
+                continue;
+            }
+            double cx = (double)x + 0.5;
+            double cy = (double)y + 0.5;
+            if (point_in_polygon_f(poly, poly_count, cx, cy)) {
+                continue;
+            }
+            /* Outside: compute distance to nearest polygon edge. */
+            double min_d_sq = 1e30;
+            for (uint32_t i = 0; i < poly_count; i++) {
+                uint32_t j = (i + 1) % poly_count;
+                /* Distance from (cx,cy) to segment (poly[i], poly[j]). */
+                double ax = (double)poly[i].x;
+                double ay = (double)poly[i].y;
+                double bx = (double)poly[j].x;
+                double by = (double)poly[j].y;
+                double dx = bx - ax;
+                double dy = by - ay;
+                double len_sq = (dx * dx) + (dy * dy);
+                double t = (len_sq > 0.0) ? (((cx - ax) * dx) + ((cy - ay) * dy)) / len_sq : 0.0;
+                if (t < 0.0) {
+                    t = 0.0;
+                } else if (t > 1.0) {
+                    t = 1.0;
+                }
+                double qx = ax + (t * dx);
+                double qy = ay + (t * dy);
+                double pdx = cx - qx;
+                double pdy = cy - qy;
+                double d_sq = (pdx * pdx) + (pdy * pdy);
+                if (d_sq < min_d_sq) {
+                    min_d_sq = d_sq;
+                }
+            }
+            double d = sqrt(min_d_sq);
+            if (d > max_d) {
+                max_d = d;
+            }
+        }
+    }
+    return max_d;
+}
+
 /* --- Binary morphology: 4-connected dilation (one step) --- */
 
 /* Writes 'out' as the 4-connected dilation of 'in' by one pixel.
@@ -3804,25 +3875,11 @@ static void pipeline_geometry(AtlasPipeline *p) {
                         NT_BUILD_ASSERT(alt && "pipeline_geometry: alloc failed");
                         double dummy_dev = 0.0;
                         uint32_t alt_count = hull_simplify_perp(clean, clean_count, target, alt, &dummy_dev);
-                        /* True inflate = max distance from any clean vertex outside alt. */
-                        double max_outside_dist = 0.0;
-                        for (uint32_t i = 0; i < clean_count; i++) {
-                            if (point_in_polygon(alt, alt_count, clean[i])) {
-                                continue;
-                            }
-                            double min_d_sq = 1e30;
-                            for (uint32_t j = 0; j < alt_count; j++) {
-                                uint32_t k = (j + 1) % alt_count;
-                                double d_sq = rdp_dist_sq(alt[j], alt[k], clean[i]);
-                                if (d_sq < min_d_sq) {
-                                    min_d_sq = d_sq;
-                                }
-                            }
-                            double d = sqrt(min_d_sq);
-                            if (d > max_outside_dist) {
-                                max_outside_dist = d;
-                            }
-                        }
+                        /* True inflate = max distance from any OUTSIDE opaque pixel center
+                         * to the candidate polygon's boundary. Testing pixel centers (not
+                         * clean vertices) catches cases where the simplified polygon cuts
+                         * between two in-polygon vertices. */
+                        double max_outside_dist = polygon_max_outside_pixel_distance(alt, alt_count, binary_source, tw, th);
                         double alt_inflate = max_outside_dist + 1.0;
                         double alt_perim = 0.0;
                         for (uint32_t v = 0; v < alt_count; v++) {
@@ -3875,24 +3932,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                         uint32_t hull_count = 0;
                         Point2D *hull = binary_build_convex_polygon(binary_source, tw, th, target, &hull_count);
                         if (hull && hull_count >= 3) {
-                            double max_outside_dist = 0.0;
-                            for (uint32_t i = 0; i < clean_count; i++) {
-                                if (point_in_polygon(hull, hull_count, clean[i])) {
-                                    continue;
-                                }
-                                double min_d_sq = 1e30;
-                                for (uint32_t j = 0; j < hull_count; j++) {
-                                    uint32_t k = (j + 1) % hull_count;
-                                    double d_sq = rdp_dist_sq(hull[j], hull[k], clean[i]);
-                                    if (d_sq < min_d_sq) {
-                                        min_d_sq = d_sq;
-                                    }
-                                }
-                                double d = sqrt(min_d_sq);
-                                if (d > max_outside_dist) {
-                                    max_outside_dist = d;
-                                }
-                            }
+                            double max_outside_dist = polygon_max_outside_pixel_distance(hull, hull_count, binary_source, tw, th);
                             double hull_inflate = max_outside_dist + 1.0;
                             double hull_perim = 0.0;
                             for (uint32_t v = 0; v < hull_count; v++) {
@@ -3958,8 +3998,26 @@ static void pipeline_geometry(AtlasPipeline *p) {
                             inf_count = red_count;
                         }
                         if (inf_count <= p->opts->max_vertices) {
-                            p->hull_vertices[idx] = result;
-                            p->vertex_counts[idx] = inf_count;
+                            /* Post-verify: every opaque pixel center must lie inside the
+                             * final polygon. Secondary RDP can cut vertices and shrink the
+                             * polygon; if that leaves any opaque pixel outside, fall back
+                             * to the trim bounding rectangle (guaranteed correct). */
+                            double post_max = polygon_max_outside_pixel_distance(result, inf_count, binary_source, tw, th);
+                            if (post_max <= 0.0) {
+                                p->hull_vertices[idx] = result;
+                                p->vertex_counts[idx] = inf_count;
+                            } else {
+                                /* Polygon lost pixels — fall back to trim bbox (4 verts,
+                                 * trivially contains everything). */
+                                free(result);
+                                p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
+                                NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
+                                p->hull_vertices[idx][0] = (Point2D){0, 0};
+                                p->hull_vertices[idx][1] = (Point2D){(int32_t)tw, 0};
+                                p->hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
+                                p->hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
+                                p->vertex_counts[idx] = 4;
+                            }
                         } else {
                             free(result);
                             convex_reason = "inflate simplification exceeded max_vertices";
