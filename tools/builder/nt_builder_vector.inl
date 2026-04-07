@@ -805,6 +805,7 @@ typedef struct {
     /* Cache write mutex - separate from batch sync to avoid contention */
     mtx_t cache_mtx;
     uint32_t num_workers;
+    uint32_t active_threads; /* 1..num_workers+1; excess threads skip work */
     uint32_t workers_done;
     uint32_t batch_seq;
     bool batch_ready;
@@ -875,20 +876,28 @@ static void vpack_scan_candidate_range(const VPackScanCtx *scan, uint32_t start,
 }
 
 static void vpack_par_process_chunks(VPackParCtx *ctx, uint32_t tid, VPackParResult *out_result) {
-    uint32_t total_threads = ctx->num_workers + 1;
-    uint32_t start = (uint32_t)(((uint64_t)ctx->scan.cand_count * tid) / total_threads);
-    uint32_t end = (uint32_t)(((uint64_t)ctx->scan.cand_count * (tid + 1)) / total_threads);
+    uint32_t active = ctx->active_threads;
+    if (tid >= active) {
+        return;
+    }
+    uint32_t start = (uint32_t)(((uint64_t)ctx->scan.cand_count * tid) / active);
+    uint32_t end = (uint32_t)(((uint64_t)ctx->scan.cand_count * (tid + 1)) / active);
     vpack_scan_candidate_range(&ctx->scan, start, end, out_result);
 }
 
 /* NFP build chunk processor - each thread handles its slice of relevant items.
  * Writes nfps_out[ri] for ri in [start, end). Per-thread stats accumulated locally. */
 static void vpack_par_process_nfp_chunks(VPackParCtx *ctx, uint32_t tid) {
-    uint32_t total_threads = ctx->num_workers + 1;
-    uint32_t start = (uint32_t)(((uint64_t)ctx->nfp_build.relevant_count * tid) / total_threads);
-    uint32_t end = (uint32_t)(((uint64_t)ctx->nfp_build.relevant_count * (tid + 1)) / total_threads);
     VPackNFPBuildLocalStats *local = &ctx->nfp_build.thread_stats[tid];
     *local = (VPackNFPBuildLocalStats){0};
+    /* Dynamic worker pool: dispatching to 32 threads for 10 items means 22
+     * threads get nothing. Excess threads fast-path skip. */
+    uint32_t active = ctx->active_threads;
+    if (tid >= active) {
+        return;
+    }
+    uint32_t start = (uint32_t)(((uint64_t)ctx->nfp_build.relevant_count * tid) / active);
+    uint32_t end = (uint32_t)(((uint64_t)ctx->nfp_build.relevant_count * (tid + 1)) / active);
     uint32_t ori = ctx->nfp_build.ori;
     for (uint32_t ri = start; ri < end; ri++) {
         uint32_t i = ctx->nfp_build.relevant_buf[ri];
@@ -1013,6 +1022,15 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             par->nfp_build.nfp_cache = nfp_cache;
             par->nfp_build.use_nfp_cache = exp->use_nfp_cache;
             par->workers_done = 0;
+            /* Scale active threads with work: at least 1 item per thread,
+             * capped at num_workers+1. Each Clipper2 call is ~50µs so we want
+             * roughly >= 2 calls per thread to amortize dispatch/wake cost. */
+            uint32_t nfp_active = relevant_count / 2;
+            if (nfp_active < 1)
+                nfp_active = 1;
+            if (nfp_active > par->num_workers + 1)
+                nfp_active = par->num_workers + 1;
+            par->active_threads = nfp_active;
             par->batch_seq++;
             par->batch_ready = true;
             cnd_broadcast(&par->cnd_work);
@@ -1221,6 +1239,14 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
                 par->results[t].test_count = 0;
             }
             par->workers_done = 0;
+            /* Scale active threads with candidate count; 128 candidates per
+             * thread amortizes dispatch. */
+            uint32_t scan_active = cand_count / 128;
+            if (scan_active < 1)
+                scan_active = 1;
+            if (scan_active > par->num_workers + 1)
+                scan_active = par->num_workers + 1;
+            par->active_threads = scan_active;
             par->batch_seq++;
             par->batch_ready = true;
             cnd_broadcast(&par->cnd_work);
