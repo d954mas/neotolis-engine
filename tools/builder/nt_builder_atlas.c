@@ -299,6 +299,70 @@ static uint32_t hull_simplify(const Point2D *hull, uint32_t n, uint32_t max_vert
     return count;
 }
 
+/* Greedy perpendicular-distance simplification: iteratively removes the vertex with
+ * smallest perpendicular distance to its prev-next chord until exactly max_vertices
+ * remain. Always produces exactly min(n, max_vertices) vertices (no RDP discontinuity).
+ * out_max_dev returns the largest perpendicular deviation seen during removals — but
+ * callers that need the exact inflate amount should post-compute it from the final
+ * polygon (this tracker is only a coarse upper bound). */
+static uint32_t hull_simplify_perp(const Point2D *hull, uint32_t n, uint32_t max_vertices, Point2D *out, double *out_max_dev) {
+    if (n <= max_vertices) {
+        memcpy(out, hull, n * sizeof(Point2D));
+        *out_max_dev = 0.0;
+        return n;
+    }
+    bool *keep = (bool *)malloc(n * sizeof(bool));
+    NT_BUILD_ASSERT(keep && "hull_simplify_perp: alloc failed");
+    for (uint32_t i = 0; i < n; i++) {
+        keep[i] = true;
+    }
+    uint32_t current_count = n;
+    double max_dev = 0.0;
+    while (current_count > max_vertices) {
+        double min_dev = 1e30;
+        uint32_t min_idx = 0;
+        for (uint32_t i = 0; i < n; i++) {
+            if (!keep[i]) {
+                continue;
+            }
+            uint32_t prev = i;
+            do {
+                prev = (prev == 0) ? (n - 1) : (prev - 1);
+            } while (!keep[prev] && prev != i);
+            uint32_t next = i;
+            do {
+                next = (next + 1) % n;
+            } while (!keep[next] && next != i);
+            if (prev == i || next == i) {
+                continue;
+            }
+            double dx = (double)(hull[next].x - hull[prev].x);
+            double dy = (double)(hull[next].y - hull[prev].y);
+            double base = sqrt((dx * dx) + (dy * dy));
+            double cross = fabs(((double)(hull[i].x - hull[prev].x) * dy) - ((double)(hull[i].y - hull[prev].y) * dx));
+            double dev = (base > 0.0) ? (cross / base) : 0.0;
+            if (dev < min_dev) {
+                min_dev = dev;
+                min_idx = i;
+            }
+        }
+        if (min_dev > max_dev) {
+            max_dev = min_dev;
+        }
+        keep[min_idx] = false;
+        current_count--;
+    }
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        if (keep[i]) {
+            out[count++] = hull[i];
+        }
+    }
+    free(keep);
+    *out_max_dev = max_dev;
+    return count;
+}
+
 /* --- Fan triangulation from vertex 0 --- */
 
 static uint32_t fan_triangulate(uint32_t vertex_count, uint16_t *indices) {
@@ -3679,16 +3743,163 @@ static void pipeline_geometry(AtlasPipeline *p) {
                     double eps = 0.5;
                     uint32_t simp_count = rdp_simplify(clean, clean_count, eps, simplified);
                     uint32_t target = p->opts->max_vertices;
+                    double prev_eps = -1.0;
                     while (simp_count > target && eps < 100.0) {
+                        prev_eps = eps;
                         eps *= 1.5;
                         simp_count = rdp_simplify(clean, clean_count, eps, simplified);
                     }
-                    free(clean);
-
-                    /* Inflate via Clipper2 (handles concave corners correctly).
-                     * Inflate amount = RDP epsilon + 1 pixel, rounded up — guarantees
-                     * every pixel center within RDP deviation is inside the inflated polygon. */
+                    /* Bisect [prev_eps, eps] for smallest eps that fits target. */
+                    if (simp_count <= target && prev_eps > 0.0 && (eps - prev_eps) > 0.5) {
+                        double lo = prev_eps;
+                        double hi = eps;
+                        for (int bs = 0; bs < 12; bs++) {
+                            double mid = (lo + hi) * 0.5;
+                            uint32_t mid_count = rdp_simplify(clean, clean_count, mid, simplified);
+                            if (mid_count <= target) {
+                                hi = mid;
+                            } else {
+                                lo = mid;
+                            }
+                        }
+                        eps = hi;
+                        simp_count = rdp_simplify(clean, clean_count, eps, simplified);
+                    }
                     double inflate_amt = eps + 1.0;
+                    /* Multi-strategy: try several simplification algorithms, keep the one
+                     * that produces the smallest final inflated polygon area. */
+
+                    /* Helper to compute final inflated polygon area estimate. */
+                    double best_perim = 0.0;
+                    {
+                        for (uint32_t v = 0; v < simp_count; v++) {
+                            uint32_t vn = (v + 1) % simp_count;
+                            double dx = (double)(simplified[vn].x - simplified[v].x);
+                            double dy = (double)(simplified[vn].y - simplified[v].y);
+                            best_perim += sqrt((dx * dx) + (dy * dy));
+                        }
+                    }
+                    double best_est = (double)polygon_area_pixels(simplified, simp_count) + (best_perim * inflate_amt) + (3.14159 * inflate_amt * inflate_amt);
+
+                    /* Strategy 2: greedy perpendicular-distance simplification, exactly target verts. */
+                    {
+                        Point2D *alt = (Point2D *)malloc(clean_count * sizeof(Point2D));
+                        NT_BUILD_ASSERT(alt && "pipeline_geometry: alloc failed");
+                        double dummy_dev = 0.0;
+                        uint32_t alt_count = hull_simplify_perp(clean, clean_count, target, alt, &dummy_dev);
+                        /* True inflate = max distance from any clean vertex outside alt. */
+                        double max_outside_dist = 0.0;
+                        for (uint32_t i = 0; i < clean_count; i++) {
+                            if (point_in_polygon(alt, alt_count, clean[i])) {
+                                continue;
+                            }
+                            double min_d_sq = 1e30;
+                            for (uint32_t j = 0; j < alt_count; j++) {
+                                uint32_t k = (j + 1) % alt_count;
+                                double d_sq = rdp_dist_sq(alt[j], alt[k], clean[i]);
+                                if (d_sq < min_d_sq) {
+                                    min_d_sq = d_sq;
+                                }
+                            }
+                            double d = sqrt(min_d_sq);
+                            if (d > max_outside_dist) {
+                                max_outside_dist = d;
+                            }
+                        }
+                        double alt_inflate = max_outside_dist + 1.0;
+                        double alt_perim = 0.0;
+                        for (uint32_t v = 0; v < alt_count; v++) {
+                            uint32_t vn = (v + 1) % alt_count;
+                            double dx = (double)(alt[vn].x - alt[v].x);
+                            double dy = (double)(alt[vn].y - alt[v].y);
+                            alt_perim += sqrt((dx * dx) + (dy * dy));
+                        }
+                        double alt_est = (double)polygon_area_pixels(alt, alt_count) + (alt_perim * alt_inflate) + (3.14159 * alt_inflate * alt_inflate);
+                        if (alt_est < best_est) {
+                            free(simplified);
+                            simplified = alt;
+                            simp_count = alt_count;
+                            inflate_amt = alt_inflate;
+                            best_est = alt_est;
+                        } else {
+                            free(alt);
+                        }
+                    }
+
+                    /* Strategy 3a: trim bounding rectangle. Always 4 vertices, trivially
+                     * contains all alpha pixels (since they live inside the trim bbox by
+                     * definition). For nearly-rectangular alphas (muzzle, tiles) this is
+                     * the tightest possible polygon. */
+                    {
+                        Point2D rect[4] = {
+                            {0, 0},
+                            {(int32_t)tw, 0},
+                            {(int32_t)tw, (int32_t)th},
+                            {0, (int32_t)th},
+                        };
+                        double rect_area = (double)tw * (double)th;
+                        double rect_perim = 2.0 * ((double)tw + (double)th);
+                        double rect_inflate = 1.0;
+                        double rect_est = rect_area + (rect_perim * rect_inflate) + (3.14159 * rect_inflate * rect_inflate);
+                        if (rect_est < best_est) {
+                            free(simplified);
+                            simplified = (Point2D *)malloc(4 * sizeof(Point2D));
+                            NT_BUILD_ASSERT(simplified && "pipeline_geometry: alloc failed");
+                            memcpy(simplified, rect, 4 * sizeof(Point2D));
+                            simp_count = 4;
+                            inflate_amt = rect_inflate;
+                            best_est = rect_est;
+                        }
+                    }
+
+                    /* Strategy 3: convex hull of binary mask. For mostly-rectangular alphas
+                     * (muzzle, icons, tiles) this is ~4 vertices ≈ trim bbox, zero inflate. */
+                    {
+                        uint32_t hull_count = 0;
+                        Point2D *hull = binary_build_convex_polygon(binary_source, tw, th, target, &hull_count);
+                        if (hull && hull_count >= 3) {
+                            double max_outside_dist = 0.0;
+                            for (uint32_t i = 0; i < clean_count; i++) {
+                                if (point_in_polygon(hull, hull_count, clean[i])) {
+                                    continue;
+                                }
+                                double min_d_sq = 1e30;
+                                for (uint32_t j = 0; j < hull_count; j++) {
+                                    uint32_t k = (j + 1) % hull_count;
+                                    double d_sq = rdp_dist_sq(hull[j], hull[k], clean[i]);
+                                    if (d_sq < min_d_sq) {
+                                        min_d_sq = d_sq;
+                                    }
+                                }
+                                double d = sqrt(min_d_sq);
+                                if (d > max_outside_dist) {
+                                    max_outside_dist = d;
+                                }
+                            }
+                            double hull_inflate = max_outside_dist + 1.0;
+                            double hull_perim = 0.0;
+                            for (uint32_t v = 0; v < hull_count; v++) {
+                                uint32_t vn = (v + 1) % hull_count;
+                                double dx = (double)(hull[vn].x - hull[v].x);
+                                double dy = (double)(hull[vn].y - hull[v].y);
+                                hull_perim += sqrt((dx * dx) + (dy * dy));
+                            }
+                            double hull_est = (double)polygon_area_pixels(hull, hull_count) + (hull_perim * hull_inflate) + (3.14159 * hull_inflate * hull_inflate);
+                            if (hull_est < best_est) {
+                                free(simplified);
+                                simplified = hull;
+                                simp_count = hull_count;
+                                inflate_amt = hull_inflate;
+                                best_est = hull_est;
+                            } else {
+                                free(hull);
+                            }
+                        } else if (hull) {
+                            free(hull);
+                        }
+                    }
+
+                    free(clean);
                     int32_t *simp_xy = (int32_t *)malloc(simp_count * 2 * sizeof(int32_t));
                     NT_BUILD_ASSERT(simp_xy && "pipeline_geometry: alloc failed");
                     for (uint32_t v = 0; v < simp_count; v++) {
