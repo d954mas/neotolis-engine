@@ -16,6 +16,9 @@ CTestTestfile.cmake
 .cache/
 compile_commands.json
 
+# CTest output (created when ctest is run from repo root)
+Testing/
+
 # Emscripten local SDK
 emsdk/
 
