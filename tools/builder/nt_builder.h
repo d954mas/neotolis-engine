@@ -208,7 +208,7 @@ typedef struct {
     uint32_t max_size;                      /* max atlas page dimension (default: 2048 per D-11) */
     uint32_t padding;                       /* extra spacing between sprites after extrude (default: 0 per D-11) */
     uint32_t margin;                        /* atlas edge margin (default: 0 per D-11) */
-    uint32_t extrude;                       /* edge pixel duplication count (default: 2 per D-11) */
+    uint32_t extrude;                       /* AABB edge pixel duplication count (default: 0 with polygon_mode=true; must stay 0 in polygon mode) */
     uint8_t alpha_threshold;                /* alpha >= this = opaque for trimming (default: 1 per D-11) */
     uint8_t max_vertices;                   /* max polygon vertices per region (default: 16; downstream stack arrays limit to 32) */
     bool allow_rotate;                      /* try rotations for better packing (default: true per D-11) */
@@ -228,11 +228,11 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .compress = NULL,
         .format = NT_TEXTURE_FORMAT_RGBA8,
         .max_size = 2048,
-        .padding = 0,
+        .padding = 2,
         .margin = 0,
-        .extrude = 2,
+        .extrude = 0,
         .alpha_threshold = 1,
-        .max_vertices = 16,
+        .max_vertices = 8,
         .allow_rotate = true,
         .power_of_two = true,
         .polygon_mode = true,

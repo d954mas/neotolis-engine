@@ -3526,10 +3526,9 @@ static bool atlas_trim_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint8_t
 /* vpack internals stay static; tests reach in via this thin wrapper defined in nt_builder_atlas_vpack.c. */
 bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, uint32_t ring_count, int32_t px, int32_t py);
 
-/* extrude_dilate stays static; test access via this wrapper defined in nt_builder_atlas.c.
- * inside_mask is laid out in blit-space (sw x sh bytes), value 1 = inside sprite
- * silhouette, 0 = outside. NULL mask = treat all pixels as "outside" (useful
- * for tests that just exercise the dilation algorithm without masking). */
+/* edge-extrude helper stays static; test access via this wrapper defined in
+ * nt_builder_atlas.c. The wrapper signature still exposes the old scratch/
+ * frontier/mask arguments, but AABB extrude ignores them. */
 void nt_atlas_test_extrude_dilate(uint8_t *page, uint8_t *scratch, uint32_t *frontier_a, uint32_t *frontier_b, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh,
                                   const uint8_t *inside_mask, uint32_t extrude_count);
 
@@ -3738,15 +3737,14 @@ static uint8_t *read_file_bytes(const char *path, uint32_t *out_size) {
 /* --- Atlas round-trip tests --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-/* --- extrude_dilate: L-shaped sprite with transparent AABB corners --- */
+/* --- AABB edge extrude: preserves trim-rect interior --- */
 
-/* L-shape (5x5) placed at (2,2) inside a 12x12 page. Verifies that:
- *  - pixels outside the sprite but within extrude_count=2 get filled
- *    from their nearest opaque neighbor (full RGBA copy)
- *  - the CONCAVE corner at the L's notch, whose AABB corner is transparent,
- *    gets filled by dilation (the old extrude_edges left this as zero)
- *  - pixels further than extrude_count from any opaque stay zero */
-void test_extrude_dilate_l_shape(void) {
+/* L-shape (5x5) placed at (2,2) inside a 12x12 page. Verifies the classic
+ * AABB edge extrude contract:
+ *  - only rows/columns at the trim rect boundary are copied outward
+ *  - transparent pixels INSIDE the trim rect stay untouched
+ *  - transparent columns/rows on the trim boundary copy as transparent */
+void test_extrude_edges_aabb_l_shape(void) {
     /* Page layout (. = empty, █ = red opaque):
      *
      *   . . . . . . . . . . . .
@@ -3762,9 +3760,8 @@ void test_extrude_dilate_l_shape(void) {
      *   . . . . . . . . . . . .
      *   . . . . . . . . . . . .
      *
-     * The AABB of the sprite is rows 2..6, cols 2..4. The concave corner
-     * at (3, 3) — inside the AABB but with transparent pixel — is the
-     * case AABB-stretch extrude could not cover before.
+     * The trim AABB is rows 2..6, cols 2..4. The concave corner at (3,3)
+     * is transparent INSIDE the trim rect and must remain transparent.
      */
     const uint32_t W = 12;
     const uint32_t H = 12;
@@ -3793,97 +3790,61 @@ void test_extrude_dilate_l_shape(void) {
         page[off + 3] = A;
     }
 
-    /* Scratch + frontier buffers sized for the dilation window: sprite AABB 3x5 + 2*extrude = 7x9 */
     const uint32_t px = 2;
     const uint32_t py = 2;
     const uint32_t sw = 3;
     const uint32_t sh = 5;
     const uint32_t extrude = 2;
-    const size_t bbox_cells = (size_t)(sw + (2 * extrude)) * (sh + (2 * extrude));
-    uint8_t *scratch = (uint8_t *)malloc(bbox_cells * 4);
-    uint32_t *frontier_a = (uint32_t *)malloc(bbox_cells * sizeof(uint32_t));
-    uint32_t *frontier_b = (uint32_t *)malloc(bbox_cells * sizeof(uint32_t));
-    TEST_ASSERT_NOT_NULL(scratch);
-    TEST_ASSERT_NOT_NULL(frontier_a);
-    TEST_ASSERT_NOT_NULL(frontier_b);
-
-    /* Pass NULL mask: this test validates the iterative dilation algorithm
-     * itself (concave fill, AABB corners, radius bounds). The polygon mask
-     * behaviour is verified by test_atlas_real_pipeline_preserves_hole which
-     * runs the full end-to-end path. */
-    nt_atlas_test_extrude_dilate(page, scratch, frontier_a, frontier_b, W, H, px, py, sw, sh, NULL, extrude);
+    nt_atlas_test_extrude_dilate(page, NULL, NULL, NULL, W, H, px, py, sw, sh, NULL, extrude);
 
     /* Assertions:
      *
-     * 1. Concave corner (3, 3) — inside AABB, was transparent before dilation.
-     *    After 1 pass it has a red neighbor at (2, 3) (vertical bar) — must be red.
+     * 1. Concave corner (3,3) is INSIDE the trim rect and remains transparent.
      */
     const uint8_t *pix_3_3 = &page[((size_t)3 * W + 3) * 4];
-    TEST_ASSERT_EQUAL_UINT8(R, pix_3_3[0]);
-    TEST_ASSERT_EQUAL_UINT8(G, pix_3_3[1]);
-    TEST_ASSERT_EQUAL_UINT8(B, pix_3_3[2]);
-    TEST_ASSERT_EQUAL_UINT8(A, pix_3_3[3]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix_3_3[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix_3_3[3]);
 
-    /* 2. Pixel (1, 2) — 1 pixel left of vertical bar top. After pass 1 it has a
-     *    red neighbor at (2, 2) to its east. Must be red. */
+    /* 2. Left band duplicates the left trim column outward. */
     const uint8_t *pix_1_2 = &page[((size_t)2 * W + 1) * 4];
     TEST_ASSERT_EQUAL_UINT8(R, pix_1_2[0]);
     TEST_ASSERT_EQUAL_UINT8(A, pix_1_2[3]);
 
-    /* 3. Pixel (0, 2) — 2 pixels left. After pass 2 it gets red from (1, 2)
-     *    which was filled in pass 1. Must be red. */
+    /* 3. Two-pixel extrude duplicates one more column outward. */
     const uint8_t *pix_0_2 = &page[((size_t)2 * W + 0) * 4];
     TEST_ASSERT_EQUAL_UINT8(R, pix_0_2[0]);
     TEST_ASSERT_EQUAL_UINT8(A, pix_0_2[3]);
 
-    /* 4. Pixel (2, 0) — 2 rows above the top of vertical bar. Within extrude=2,
-     *    should be filled. */
+    /* 4. Top band duplicates the top trim row. */
     const uint8_t *pix_2_0 = &page[((size_t)0 * W + 2) * 4];
     TEST_ASSERT_EQUAL_UINT8(R, pix_2_0[0]);
     TEST_ASSERT_EQUAL_UINT8(A, pix_2_0[3]);
 
-    /* 5. Pixel (6, 6) — 2 pixels right of the foot's right end (4, 6), and
-     *    2 rows down too. It IS within the dilation bbox (px+sw+extrude = 7,
-     *    py+sh+extrude = 9), but is it within 2 pixels of any opaque source?
-     *    Opaque at (4, 6). Distance to (6, 6) = 2 (straight). After pass 1
-     *    (5, 6) gets red. After pass 2 (6, 6) gets red from (5, 6). */
-    const uint8_t *pix_6_6 = &page[((size_t)6 * W + 6) * 4];
-    TEST_ASSERT_EQUAL_UINT8(R, pix_6_6[0]);
-    TEST_ASSERT_EQUAL_UINT8(A, pix_6_6[3]);
+    /* 5. Bottom-right corner band gets filled via row-copy then column-copy. */
+    const uint8_t *pix_6_8 = &page[((size_t)8 * W + 6) * 4];
+    TEST_ASSERT_EQUAL_UINT8(R, pix_6_8[0]);
+    TEST_ASSERT_EQUAL_UINT8(A, pix_6_8[3]);
 
-    /* 6. Pixel (7, 2) — 5 pixels right of the top of vertical bar (2, 2),
-     *    way beyond extrude=2 radius. Stays transparent. */
+    /* 6. Transparent pixels on the trim boundary stay transparent when copied. */
+    const uint8_t *pix_6_2 = &page[((size_t)2 * W + 6) * 4];
+    TEST_ASSERT_EQUAL_UINT8(0, pix_6_2[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix_6_2[3]);
+
+    /* 7. Farther than the extrude band stays transparent. */
     const uint8_t *pix_7_2 = &page[((size_t)2 * W + 7) * 4];
     TEST_ASSERT_EQUAL_UINT8(0, pix_7_2[0]);
     TEST_ASSERT_EQUAL_UINT8(0, pix_7_2[3]);
-
-    /* 7. Pixel (6, 0) — top-right of the bbox. Nearest opaque is (2, 2) at
-     *    Chebyshev distance max(4, 2) = 4, way beyond extrude=2. Stays zero.
-     *    (Note: (0,0) would seem like a good "far" case, but it's at Chebyshev
-     *    distance 2 from (2,2) via diagonal, so 8-connected dilation reaches
-     *    it through (1,1) → (0,0).) */
-    const uint8_t *pix_6_0 = &page[((size_t)0 * W + 6) * 4];
-    TEST_ASSERT_EQUAL_UINT8(0, pix_6_0[0]);
-    TEST_ASSERT_EQUAL_UINT8(0, pix_6_0[3]);
-
-    free(scratch);
-    free(frontier_a);
-    free(frontier_b);
     free(page);
 }
 
-/* --- extrude_dilate: binary mask preserves interior hole ---
+/* --- AABB edge extrude: preserves interior hole ---
  *
- * Letter "O" sprite — opaque ring around a transparent center. Without the
- * inside-sprite mask, iterative dilation would fill the center from the
- * ring's neighbors and the rendered "O" would look like a solid disc.
- *
- * With a binary mask covering the entire 6x6 sprite rectangle (sprite
- * silhouette after morphological closing on an "O" is the whole bounding
- * area), dilation skips every pixel inside the mask — preserving the hole.
+ * Letter "O" sprite — opaque ring around a transparent center. AABB extrude
+ * only duplicates rows/columns OUTSIDE the trim rect, so the transparent
+ * center stays untouched with no inside-mask logic.
  */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_extrude_dilate_binary_mask_preserves_hole(void) {
+void test_extrude_edges_preserve_hole(void) {
     const uint32_t W = 10;
     const uint32_t H = 10;
     uint8_t *page = (uint8_t *)calloc((size_t)W * H * 4, 1);
@@ -3913,26 +3874,10 @@ void test_extrude_dilate_binary_mask_preserves_hole(void) {
     }
 
     const uint32_t extrude = 1;
-    const size_t bbox_cells = (size_t)(sw + (2 * extrude)) * (sh + (2 * extrude));
-    uint8_t *scratch = (uint8_t *)malloc(bbox_cells * 4);
-    uint32_t *frontier_a = (uint32_t *)malloc(bbox_cells * sizeof(uint32_t));
-    uint32_t *frontier_b = (uint32_t *)malloc(bbox_cells * sizeof(uint32_t));
-    TEST_ASSERT_NOT_NULL(scratch);
-    TEST_ASSERT_NOT_NULL(frontier_a);
-    TEST_ASSERT_NOT_NULL(frontier_b);
+    nt_atlas_test_extrude_dilate(page, NULL, NULL, NULL, W, H, px, py, sw, sh, NULL, extrude);
 
-    /* Inside-sprite mask: all 1s for the full 6x6 sprite area. This matches
-     * what pipeline_geometry saves for an "O" — morphological closing leaves
-     * the whole bounding box as the "sprite area" because the outer contour
-     * encloses the center hole. */
-    uint8_t *inside_mask = (uint8_t *)malloc((size_t)sw * sh);
-    TEST_ASSERT_NOT_NULL(inside_mask);
-    memset(inside_mask, 1, (size_t)sw * sh);
-
-    nt_atlas_test_extrude_dilate(page, scratch, frontier_a, frontier_b, W, H, px, py, sw, sh, inside_mask, extrude);
-
-    /* Central hole pixels (page (4,4), (5,4), (4,5), (5,5)) must stay
-     * transparent — mask=1 → dilation skips them. */
+    /* Central hole pixels stay transparent because AABB extrude never writes
+     * inside the trim rect. */
     for (uint32_t cy = 4; cy <= 5; cy++) {
         for (uint32_t cx = 4; cx <= 5; cx++) {
             const uint8_t *p = &page[((size_t)cy * W + cx) * 4];
@@ -3941,16 +3886,12 @@ void test_extrude_dilate_binary_mask_preserves_hole(void) {
         }
     }
 
-    /* External pixel (1, 4) — 1 pixel left of the ring's left edge, outside
-     * the mask. Should be filled with R (extrude band). */
+    /* External pixel (1,4) — 1 pixel left of the ring's left edge — should be
+     * filled with the left edge color. */
     const uint8_t *ext_pix = &page[((size_t)4 * W + 1) * 4];
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(R, ext_pix[0], "exterior extrude pixel should be filled");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(A, ext_pix[3], "exterior extrude pixel should have full alpha");
 
-    free(scratch);
-    free(inside_mask);
-    free(frontier_a);
-    free(frontier_b);
     free(page);
 }
 
@@ -3961,9 +3902,8 @@ void test_extrude_dilate_binary_mask_preserves_hole(void) {
  * then reads the resulting page texture from the .ntpack file and verifies
  * the central hole pixel is still transparent.
  *
- * This is the regression test that catches the "post-inflate hull used as
- * mask" bug: if pipeline_compose feeds the wrong polygon into extrude_dilate
- * the central hole would be filled by dilation and this test would fail. */
+ * Regression guard: the production blit + edge-extrude path must keep the
+ * ring center transparent after compose. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_real_pipeline_preserves_hole(void) {
     (void)MKDIR(TMP_DIR);
@@ -3993,7 +3933,7 @@ void test_atlas_real_pipeline_preserves_hole(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_ring_e2e.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
 
-    /* Default opts → polygon_mode=true, extrude=2, premultiplied=true */
+    /* Default opts → polygon_mode=true, extrude=0, premultiplied=true */
     nt_builder_begin_atlas(ctx, "ring", NULL);
     nt_builder_atlas_add_raw(ctx, pixels, W, H, "ring.png");
     nt_builder_end_atlas(ctx);
@@ -4033,7 +3973,7 @@ void test_atlas_real_pipeline_preserves_hole(void) {
      * neighbor on EACH of its four 4-connected sides (above, below, left,
      * right). For our ring sprite, the only such pixels are the 4x4 inner
      * hole pixels. Scanning for "first opaque" would find an extruded
-     * pixel from the dilation band instead. */
+     * pixel from the AABB edge band instead. */
     int32_t hole_x = -1;
     int32_t hole_y = -1;
     for (uint32_t y = 1; y + 1 < page_h && hole_x < 0; y++) {
@@ -4073,18 +4013,30 @@ void test_atlas_real_pipeline_preserves_hole(void) {
             }
         }
     }
-    TEST_ASSERT_TRUE_MESSAGE(hole_x >= 0, "no enclosed transparent pixel found — dilation may have filled the hole");
+    TEST_ASSERT_TRUE_MESSAGE(hole_x >= 0, "no enclosed transparent pixel found — edge extrude may have filled the hole");
 
     const uint8_t *hole_pix = &page_pixels[((size_t)(uint32_t)hole_y * page_w + (uint32_t)hole_x) * 4];
 
     /* The hole MUST be transparent. */
-    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, hole_pix[3], "ring hole was filled by dilation — polygon mask not preserving interior");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, hole_pix[3], "ring hole was filled by edge extrude");
     /* In premultiplied alpha, RGB of an alpha=0 pixel must also be 0. */
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, hole_pix[0], "ring hole RGB should be zero in premultiplied");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, hole_pix[1], "ring hole RGB should be zero in premultiplied");
     TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, hole_pix[2], "ring hole RGB should be zero in premultiplied");
 
     free(pack);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_polygon_mode_rejects_extrude(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poly_extrude_assert.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.polygon_mode = true;
+    opts.extrude = 2;
+
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "poly", &opts));
 }
 
 void test_atlas_round_trip_basic(void) {
@@ -4538,11 +4490,11 @@ void test_atlas_codegen_large(void) {
 void test_atlas_opts_defaults(void) {
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     TEST_ASSERT_EQUAL(2048, opts.max_size);
-    TEST_ASSERT_EQUAL(0, opts.padding);
+    TEST_ASSERT_EQUAL(2, opts.padding);
     TEST_ASSERT_EQUAL(0, opts.margin);
-    TEST_ASSERT_EQUAL(2, opts.extrude);
+    TEST_ASSERT_EQUAL(0, opts.extrude);
     TEST_ASSERT_EQUAL(1, opts.alpha_threshold);
-    TEST_ASSERT_EQUAL(16, opts.max_vertices);
+    TEST_ASSERT_EQUAL(8, opts.max_vertices);
     TEST_ASSERT_TRUE(opts.allow_rotate);
     TEST_ASSERT_TRUE(opts.power_of_two);
     TEST_ASSERT_TRUE(opts.polygon_mode);
@@ -4701,10 +4653,11 @@ int main(void) {
     /* Premultiplied alpha (Phase 48 Plan 1.1) */
     RUN_TEST(test_texture_premultiplied_encoding);
 
-    /* Iterative dilation extrude (Phase 48 Plan 1.2) */
-    RUN_TEST(test_extrude_dilate_l_shape);
-    RUN_TEST(test_extrude_dilate_binary_mask_preserves_hole);
+    /* AABB edge extrude */
+    RUN_TEST(test_extrude_edges_aabb_l_shape);
+    RUN_TEST(test_extrude_edges_preserve_hole);
     RUN_TEST(test_atlas_real_pipeline_preserves_hole);
+    RUN_TEST(test_atlas_polygon_mode_rejects_extrude);
 
     /* Atlas round-trip tests (Phase 47 Plan 03) */
     RUN_TEST(test_atlas_round_trip_basic);

@@ -175,184 +175,66 @@ static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rg
     }
 }
 
-/* --- Edge extrude: iterative 8-connected alpha dilation (ATLAS-11) ---
+/* --- Edge extrude: AABB row/column duplication (Unity-style) ---
  *
- * Replaces the previous AABB-stretch extrude_edges. Each pass grows the
- * sprite's visible area outward by 1 pixel from any opaque neighbor,
- * regardless of shape. After `extrude_count` passes, every transparent
- * pixel within that radius of any original opaque pixel has received a
- * full RGBA copy from its nearest opaque neighbor.
+ * This is the classic atlas bleed used by most engines and packers:
+ * duplicate the trimmed sprite rect's outermost rows/columns outward by
+ * `extrude_count` pixels. It is intentionally rectangle-based, not
+ * silhouette-aware — transparent pixels inside the trim rect stay untouched,
+ * and transparent corners on anti-aliased shapes remain transparent.
  *
- * Why iterative dilation instead of AABB stretch:
- *
- *   AABB stretch reads row `py` (top of bounding box) and copies it N rows
- *   upward. On anti-aliased sprites (glyphs, curved shapes) the topmost
- *   AABB row has transparent pixels in the corner columns, so those corner
- *   columns of the extrude zone never get filled. Same for left/right/
- *   bottom. Concave polygon parts (L-shape, letter 'A' interior) also
- *   fall outside the AABB-stretch paths and stay transparent.
- *
- *   Iterative dilation works per-pixel from the real silhouette: each
- *   pass walks one step out from any opaque pixel, following any shape.
- *   Corners, concave notches, thin strokes — all covered.
- *
- * Safety: NFP packing inflates each sprite's polygon by `extrude +
- * padding/2` before placement, so neighboring sprites' extrude zones
- * cannot overlap. We can freely dilate within the per-sprite window
- * without worrying about writing into a neighbor's pixels. The
- * `dst[3] != 0` skip below is a cheap guard against Clipper2 inflate
- * rounding on concave polygons, not a correctness requirement.
- *
- * Pass 1 uses a full window scan with a scratch snapshot (frozen read
- * source): without the snapshot, a pixel filled in the current pass
- * could be read by its neighbor later in the same pass, growing the
- * front anisotropically (faster along the iteration order).
- *
- * Passes 2..N use frontier tracking: instead of rescanning the whole
- * window, iterate the pixels filled in the previous pass and push their
- * colors into any still-transparent 8-neighbors. Frontier tracking cuts
- * pass 2+ cost from O(window_area) to O(frontier_size) ≈ O(sprite
- * perimeter). First-write-wins semantics when two frontier pixels share
- * a transparent neighbor: the dst[3] != 0 skip makes the second writer
- * skip the already-filled target.
- *
- * Neighbor order is 4-connected first (N, E, S, W), then diagonals
- * (NE, SE, SW, NW). First opaque neighbor wins. Straight neighbors are
- * distance 1 in Euclidean terms, diagonals are √2 — checking straights
- * first gives a small nearest-neighbor preference at no runtime cost. */
-
-/* 8-connected neighbors, 4-connected first. File-scope so both passes share. */
-static const int32_t k_dx8[8] = {0, +1, 0, -1, +1, +1, -1, -1};
-static const int32_t k_dy8[8] = {-1, 0, +1, 0, -1, +1, +1, -1};
-
-/* Inside-sprite mask check for a blit-space pixel. Returns true if (bx, by)
- * is inside the sprite silhouette (including closing bridges), meaning the
- * dilation must not touch this pixel. The mask is laid out in blit-space
- * (sw x sh) so a linear lookup is all that's needed. */
-static inline bool extrude_is_inside(const uint8_t *inside_mask, uint32_t sw, uint32_t sh, int32_t bx, int32_t by) {
-    if (!inside_mask) {
-        return false;
-    }
-    if (bx < 0 || by < 0 || bx >= (int32_t)sw || by >= (int32_t)sh) {
-        return false;
-    }
-    return inside_mask[(size_t)by * sw + (uint32_t)bx] != 0;
-}
-
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void extrude_dilate(uint8_t *page, uint8_t *scratch, uint32_t *frontier_a, uint32_t *frontier_b, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh,
-                           const uint8_t *inside_mask, uint32_t extrude_count) {
+ * The builder still uses polygon packing when enabled, but compose keeps the
+ * bleed logic simple and predictable. When no visual gap between neighboring
+ * extrude bands is desired, increase `opts.padding`; `margin` only affects
+ * the page border. */
+static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh, uint32_t extrude_count) {
     if (extrude_count == 0) {
         return;
     }
 
-    /* Compute dilation window in page coordinates, clipped to page bounds. */
-    int32_t bx0 = (int32_t)px - (int32_t)extrude_count;
-    int32_t by0 = (int32_t)py - (int32_t)extrude_count;
-    int32_t bx1 = (int32_t)(px + sw) + (int32_t)extrude_count;
-    int32_t by1 = (int32_t)(py + sh) + (int32_t)extrude_count;
-    if (bx0 < 0) {
-        bx0 = 0;
-    }
-    if (by0 < 0) {
-        by0 = 0;
-    }
-    if (bx1 > (int32_t)page_w) {
-        bx1 = (int32_t)page_w;
-    }
-    if (by1 > (int32_t)page_h) {
-        by1 = (int32_t)page_h;
-    }
-    if (bx1 <= bx0 || by1 <= by0) {
-        return;
-    }
-    uint32_t bbox_w = (uint32_t)(bx1 - bx0);
-    uint32_t bbox_h = (uint32_t)(by1 - by0);
-
-    /* inside_mask is in blit-local coords (sw x sh), mirrors the sprite's
-     * shape after morphological closing. Dilation skips pixels inside this
-     * mask: they're either opaque sprite content or intentional interior
-     * holes ('O' center, gap between dot+stem of 'i', etc.). Without this
-     * check dilation would fill any transparent pixel surrounded by opaque
-     * neighbors and destroy those holes. */
-
-    /* Pass 1: full window scan with snapshot. Records newly-filled pixels
-     * into frontier_a as page-space pixel offsets. */
-    for (uint32_t y = 0; y < bbox_h; y++) {
-        const uint8_t *src_row = &page[((size_t)((uint32_t)by0 + y) * page_w + (uint32_t)bx0) * 4];
-        uint8_t *dst_row = &scratch[(size_t)y * bbox_w * 4];
-        memcpy(dst_row, src_row, (size_t)bbox_w * 4);
-    }
-
-    uint32_t front_cur_count = 0;
-    for (uint32_t y = 0; y < bbox_h; y++) {
-        for (uint32_t x = 0; x < bbox_w; x++) {
-            int32_t page_x = bx0 + (int32_t)x;
-            int32_t page_y = by0 + (int32_t)y;
-            int32_t bx_local = page_x - (int32_t)px;
-            int32_t by_local = page_y - (int32_t)py;
-            if (extrude_is_inside(inside_mask, sw, sh, bx_local, by_local)) {
-                continue; /* inside sprite silhouette — don't dilate */
+    // #region Top and bottom edge extrusion
+    for (uint32_t e = 1; e <= extrude_count; e++) {
+        if (py >= e) {
+            uint32_t dst_y = py - e;
+            for (uint32_t x = px; x < px + sw && x < page_w; x++) {
+                memcpy(&page[((size_t)dst_y * page_w + x) * 4], &page[((size_t)py * page_w + x) * 4], 4);
             }
-            uint8_t *dst = &page[((size_t)(uint32_t)page_y * page_w + (uint32_t)page_x) * 4];
-            if (dst[3] != 0) {
-                continue; /* already opaque — part of the sprite */
-            }
-            for (uint32_t n = 0; n < 8; n++) {
-                int32_t nx = (int32_t)x + k_dx8[n];
-                int32_t ny = (int32_t)y + k_dy8[n];
-                if (nx < 0 || nx >= (int32_t)bbox_w || ny < 0 || ny >= (int32_t)bbox_h) {
-                    continue;
-                }
-                const uint8_t *nb = &scratch[((size_t)(uint32_t)ny * bbox_w + (uint32_t)nx) * 4];
-                if (nb[3] != 0) {
-                    dst[0] = nb[0];
-                    dst[1] = nb[1];
-                    dst[2] = nb[2];
-                    dst[3] = nb[3];
-                    frontier_a[front_cur_count++] = (uint32_t)page_y * page_w + (uint32_t)page_x;
-                    break;
-                }
+        }
+
+        uint32_t src_y = py + sh - 1;
+        uint32_t dst_y = src_y + e;
+        if (dst_y < page_h) {
+            for (uint32_t x = px; x < px + sw && x < page_w; x++) {
+                memcpy(&page[((size_t)dst_y * page_w + x) * 4], &page[((size_t)src_y * page_w + x) * 4], 4);
             }
         }
     }
+    // #endregion
 
-    /* Passes 2..N: iterate current frontier, push colors outward. */
-    uint32_t *front_cur = frontier_a;
-    uint32_t *front_next = frontier_b;
-    for (uint32_t pass = 1; pass < extrude_count && front_cur_count > 0; pass++) {
-        uint32_t front_next_count = 0;
-        for (uint32_t i = 0; i < front_cur_count; i++) {
-            uint32_t offset = front_cur[i];
-            const uint8_t *src = &page[(size_t)offset * 4];
-            int32_t fx = (int32_t)(offset % page_w);
-            int32_t fy = (int32_t)(offset / page_w);
-            for (uint32_t n = 0; n < 8; n++) {
-                int32_t nx = fx + k_dx8[n];
-                int32_t ny = fy + k_dy8[n];
-                if (nx < bx0 || nx >= bx1 || ny < by0 || ny >= by1) {
-                    continue; /* outside dilation window */
-                }
-                if (extrude_is_inside(inside_mask, sw, sh, nx - (int32_t)px, ny - (int32_t)py)) {
-                    continue; /* target inside sprite silhouette — preserve hole */
-                }
-                uint8_t *target = &page[((size_t)(uint32_t)ny * page_w + (uint32_t)nx) * 4];
-                if (target[3] != 0) {
-                    continue; /* already opaque (original, prior frontier, or same pass) */
-                }
-                target[0] = src[0];
-                target[1] = src[1];
-                target[2] = src[2];
-                target[3] = src[3];
-                front_next[front_next_count++] = (uint32_t)ny * page_w + (uint32_t)nx;
+    // #region Left and right edge extrusion (includes corner band)
+    for (uint32_t e = 1; e <= extrude_count; e++) {
+        uint32_t y_start = (py >= extrude_count) ? py - extrude_count : 0;
+        uint32_t y_end = py + sh + extrude_count;
+        if (y_end > page_h) {
+            y_end = page_h;
+        }
+
+        if (px >= e) {
+            uint32_t dst_x = px - e;
+            for (uint32_t y = y_start; y < y_end; y++) {
+                memcpy(&page[((size_t)y * page_w + dst_x) * 4], &page[((size_t)y * page_w + px) * 4], 4);
             }
         }
-        /* Swap frontiers for next pass. */
-        uint32_t *swap_tmp = front_cur;
-        front_cur = front_next;
-        front_next = swap_tmp;
-        front_cur_count = front_next_count;
+
+        uint32_t src_x = px + sw - 1;
+        uint32_t dst_x = src_x + e;
+        if (dst_x < page_w) {
+            for (uint32_t y = y_start; y < y_end; y++) {
+                memcpy(&page[((size_t)y * page_w + dst_x) * 4], &page[((size_t)y * page_w + src_x) * 4], 4);
+            }
+        }
     }
+    // #endregion
 }
 // #endregion
 
@@ -709,6 +591,14 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
      * is a caller bug — there's no alpha channel to multiply by. */
     NT_BUILD_ASSERT((!state->opts.premultiplied || state->opts.format == NT_TEXTURE_FORMAT_RGBA8) && "begin_atlas: premultiplied=true requires NT_TEXTURE_FORMAT_RGBA8");
 
+    /* Simple AABB edge extrude is only safe when packing also reserves a
+     * rectangular footprint. Tight/polygon packing uses inflated sprite
+     * hulls, so writing a trim-AABB extrude band could spill outside the
+     * reserved area and collide with neighbors. This is a config error:
+     * polygon packing must use padding-only, or rect packing if AABB
+     * extrude is needed. */
+    NT_BUILD_ASSERT((!state->opts.polygon_mode || state->opts.extrude == 0) && "begin_atlas: polygon_mode=true requires extrude=0 (AABB extrude is only valid for rect packing)");
+
     /* Initialize sprite array */
     state->sprite_capacity = 64;
     state->sprites = (NtAtlasSpriteInput *)calloc(state->sprite_capacity, sizeof(NtAtlasSpriteInput));
@@ -847,14 +737,6 @@ typedef struct {
     /* Geometry */
     uint32_t *vertex_counts;
     Point2D **hull_vertices;
-    /* Pixel-exact binary mask of the sprite's shape after morphological
-     * closing. 1 byte per pixel in trim-local coords (trim_w[i] * trim_h[i]
-     * bytes per sprite). pipeline_compose pre-rotates this into the
-     * dilation window to mask "inside sprite" pixels from the extrude pass.
-     * Using a rasterized binary mask (not a simplified polygon) avoids the
-     * simplification/inflate rounding problem where a cut-inside polygon
-     * would mistakenly mark real opaque pixels as "outside the sprite". */
-    uint8_t **binary_masks;
 
     /* Packing + composition */
     AtlasPlacement *placements;
@@ -1116,8 +998,7 @@ static GeometryCandidate strategy_convex(const uint8_t *binary_source, uint32_t 
 static void pipeline_geometry(AtlasPipeline *p) {
     p->vertex_counts = (uint32_t *)calloc(p->sprite_count, sizeof(uint32_t));
     p->hull_vertices = (Point2D **)calloc(p->sprite_count, sizeof(Point2D *));
-    p->binary_masks = (uint8_t **)calloc(p->sprite_count, sizeof(uint8_t *));
-    NT_BUILD_ASSERT(p->vertex_counts && p->hull_vertices && p->binary_masks && "pipeline_geometry: alloc failed");
+    NT_BUILD_ASSERT(p->vertex_counts && p->hull_vertices && "pipeline_geometry: alloc failed");
 
     for (uint32_t ui = 0; ui < p->unique_count; ui++) {
         uint32_t idx = p->unique_indices[ui];
@@ -1173,91 +1054,6 @@ static void pipeline_geometry(AtlasPipeline *p) {
             free(cc_stack);
             free(cc_visited);
             // #endregion
-
-            /* Build the pixel-exact inside-sprite mask for dilation: opaque
-             * pixels (after closing) PLUS any closed-hole transparent pixels
-             * unreachable from the trim boundary. BFS from boundary
-             * transparent pixels, mark "outside". Unmarked = inside.
-             *
-             * This preserves:
-             *   - opaque pixels (directly marked)
-             *   - closed holes inside rings ('O' center)
-             *   - text holes enclosed by an opaque background
-             *   - gaps between dot and stem of 'i' after closing
-             *
-             * Open regions (concave notches of 'L', inside of 'C') are
-             * reachable from the boundary and correctly marked as outside,
-             * so dilation fills them as part of the extrude band. */
-            p->binary_masks[idx] = (uint8_t *)malloc((size_t)tw * th);
-            NT_BUILD_ASSERT(p->binary_masks[idx] && "pipeline_geometry: binary mask alloc failed");
-            {
-                uint8_t *visited = (uint8_t *)calloc((size_t)tw * th, 1);
-                int32_t *fill_queue = (int32_t *)malloc((size_t)tw * th * 2 * sizeof(int32_t));
-                NT_BUILD_ASSERT(visited && fill_queue && "pipeline_geometry: flood fill alloc failed");
-                size_t qhead = 0;
-                size_t qtail = 0;
-                /* Seed boundary transparent pixels */
-                for (uint32_t x = 0; x < tw; x++) {
-                    if (binary[x] == 0 && visited[x] == 0) {
-                        visited[x] = 1;
-                        fill_queue[qtail * 2] = (int32_t)x;
-                        fill_queue[qtail * 2 + 1] = 0;
-                        qtail++;
-                    }
-                    size_t bot_idx = (size_t)(th - 1) * tw + x;
-                    if (binary[bot_idx] == 0 && visited[bot_idx] == 0) {
-                        visited[bot_idx] = 1;
-                        fill_queue[qtail * 2] = (int32_t)x;
-                        fill_queue[qtail * 2 + 1] = (int32_t)(th - 1);
-                        qtail++;
-                    }
-                }
-                for (uint32_t y = 1; y < th - 1; y++) {
-                    size_t left_idx = (size_t)y * tw;
-                    if (binary[left_idx] == 0 && visited[left_idx] == 0) {
-                        visited[left_idx] = 1;
-                        fill_queue[qtail * 2] = 0;
-                        fill_queue[qtail * 2 + 1] = (int32_t)y;
-                        qtail++;
-                    }
-                    size_t right_idx = (size_t)y * tw + (tw - 1);
-                    if (binary[right_idx] == 0 && visited[right_idx] == 0) {
-                        visited[right_idx] = 1;
-                        fill_queue[qtail * 2] = (int32_t)(tw - 1);
-                        fill_queue[qtail * 2 + 1] = (int32_t)y;
-                        qtail++;
-                    }
-                }
-                /* BFS through transparent pixels only (opaque pixels block) */
-                static const int32_t ff_dx[4] = {0, +1, 0, -1};
-                static const int32_t ff_dy[4] = {-1, 0, +1, 0};
-                while (qhead < qtail) {
-                    int32_t cx = fill_queue[qhead * 2];
-                    int32_t cy = fill_queue[qhead * 2 + 1];
-                    qhead++;
-                    for (uint32_t d = 0; d < 4; d++) {
-                        int32_t nx = cx + ff_dx[d];
-                        int32_t ny = cy + ff_dy[d];
-                        if (nx < 0 || nx >= (int32_t)tw || ny < 0 || ny >= (int32_t)th) {
-                            continue;
-                        }
-                        size_t nidx = (size_t)ny * tw + (uint32_t)nx;
-                        if (binary[nidx] != 0 || visited[nidx] != 0) {
-                            continue;
-                        }
-                        visited[nidx] = 1;
-                        fill_queue[qtail * 2] = nx;
-                        fill_queue[qtail * 2 + 1] = ny;
-                        qtail++;
-                    }
-                }
-                /* inside = opaque OR (transparent AND not reached from boundary) */
-                for (size_t i = 0; i < (size_t)tw * th; i++) {
-                    p->binary_masks[idx][i] = (binary[i] != 0 || visited[i] == 0) ? 1 : 0;
-                }
-                free(visited);
-                free(fill_queue);
-            }
 
             if (!convex_reason) {
                 /* Trace outer contour (CCW). Worst-case contour length is
@@ -1372,10 +1168,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
             free(binary_source);
             free(binary);
         } else {
-            /* Rect mode: 4-vertex rect + binary mask filled with 1s. The
-             * mask covers the entire trim AABB so dilation treats the whole
-             * rectangle as "inside sprite" — producing the classic AABB
-             * extrude band around the outside. */
+            /* Rect mode: 4-vertex trim bounding box. */
             p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
             NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
             p->hull_vertices[idx][0] = (Point2D){0, 0};
@@ -1383,10 +1176,6 @@ static void pipeline_geometry(AtlasPipeline *p) {
             p->hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
             p->hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
             p->vertex_counts[idx] = 4;
-
-            p->binary_masks[idx] = (uint8_t *)malloc((size_t)tw * th);
-            NT_BUILD_ASSERT(p->binary_masks[idx] && "pipeline_geometry: binary mask alloc failed");
-            memset(p->binary_masks[idx], 1, (size_t)tw * th);
         }
     }
 
@@ -1396,7 +1185,6 @@ static void pipeline_geometry(AtlasPipeline *p) {
             uint32_t orig = (uint32_t)p->dedup_map[i];
             p->vertex_counts[i] = p->vertex_counts[orig];
             p->hull_vertices[i] = p->hull_vertices[orig]; /* shared pointer, don't double-free */
-            p->binary_masks[i] = p->binary_masks[orig];   /* shared pointer, don't double-free */
         }
     }
 }
@@ -1460,39 +1248,7 @@ static void pipeline_compose(AtlasPipeline *p) {
         NT_BUILD_ASSERT(p->page_pixels[pg] && "pipeline_compose: page alloc failed");
     }
 
-    /* Dilation scratch buffers reused across all placements. extrude_dilate
-     * needs four buffers sized for the largest sprite's dilation window:
-     *   - scratch: RGBA snapshot for pass 1 (max_bbox_side^2 * 4 bytes)
-     *   - inside_mask: pixel-exact binary "inside sprite" mask pre-rotated
-     *     into blit orientation (max_bbox_side^2 bytes)
-     *   - frontier_a/b: ping-pong lists of filled pixels as page-space
-     *     uint32 offsets (max_bbox_side^2 * 4 bytes each, worst case
-     *     is an all-transparent window that gets fully filled). */
-    uint8_t *dilate_scratch = NULL;
-    uint8_t *dilate_inside_mask = NULL;
-    uint32_t *dilate_frontier_a = NULL;
-    uint32_t *dilate_frontier_b = NULL;
-    if (extrude_val > 0) {
-        uint32_t max_bbox_side = 0;
-        for (uint32_t pi = 0; pi < p->placement_count; pi++) {
-            uint32_t blit_w = (p->placements[pi].rotation & 4) ? p->placements[pi].trimmed_h : p->placements[pi].trimmed_w;
-            uint32_t blit_h = (p->placements[pi].rotation & 4) ? p->placements[pi].trimmed_w : p->placements[pi].trimmed_h;
-            uint32_t side = (blit_w > blit_h ? blit_w : blit_h) + (2U * extrude_val);
-            if (side > max_bbox_side) {
-                max_bbox_side = side;
-            }
-        }
-        if (max_bbox_side > 0) {
-            size_t bbox_cells = (size_t)max_bbox_side * max_bbox_side;
-            dilate_scratch = (uint8_t *)malloc(bbox_cells * 4);
-            dilate_inside_mask = (uint8_t *)malloc(bbox_cells);
-            dilate_frontier_a = (uint32_t *)malloc(bbox_cells * sizeof(uint32_t));
-            dilate_frontier_b = (uint32_t *)malloc(bbox_cells * sizeof(uint32_t));
-            NT_BUILD_ASSERT(dilate_scratch && dilate_inside_mask && dilate_frontier_a && dilate_frontier_b && "pipeline_compose: dilate alloc failed");
-        }
-    }
-
-    /* Blit each placed sprite, then dilate its extrude zone. */
+    /* Blit each placed sprite, then duplicate the trim AABB edges outward. */
     for (uint32_t pi = 0; pi < p->placement_count; pi++) {
         AtlasPlacement *pl = &p->placements[pi];
         uint32_t idx = pl->sprite_index;
@@ -1503,36 +1259,8 @@ static void pipeline_compose(AtlasPipeline *p) {
 
         uint32_t blit_w = (pl->rotation & 4) ? pl->trimmed_h : pl->trimmed_w;
         uint32_t blit_h = (pl->rotation & 4) ? pl->trimmed_w : pl->trimmed_h;
-
-        /* Pre-rotate the pixel-exact inside-sprite mask from trim-local
-         * coords into blit orientation. This matches where the sprite got
-         * blitted on the page so extrude_dilate can do an O(1) mask lookup
-         * per window pixel. */
-        const uint8_t *rotated_mask = NULL;
-        if (extrude_val > 0 && p->binary_masks[idx]) {
-            uint32_t tw = pl->trimmed_w;
-            uint32_t th = pl->trimmed_h;
-            /* Fill with 0 first — only the blit_w x blit_h area is populated below. */
-            memset(dilate_inside_mask, 0, (size_t)blit_w * blit_h);
-            for (int32_t ty = 0; ty < (int32_t)th; ty++) {
-                for (int32_t tx = 0; tx < (int32_t)tw; tx++) {
-                    int32_t bx;
-                    int32_t by;
-                    transform_point(tx, ty, pl->rotation, (int32_t)tw, (int32_t)th, &bx, &by);
-                    dilate_inside_mask[(size_t)by * blit_w + (uint32_t)bx] = p->binary_masks[idx][(size_t)ty * tw + (uint32_t)tx];
-                }
-            }
-            rotated_mask = dilate_inside_mask;
-        }
-
-        extrude_dilate(p->page_pixels[pl->page], dilate_scratch, dilate_frontier_a, dilate_frontier_b, p->page_w[pl->page], p->page_h[pl->page], inner_x, inner_y, blit_w, blit_h, rotated_mask,
-                       extrude_val);
+        extrude_edges(p->page_pixels[pl->page], p->page_w[pl->page], p->page_h[pl->page], inner_x, inner_y, blit_w, blit_h, extrude_val);
     }
-
-    free(dilate_scratch);
-    free(dilate_inside_mask);
-    free(dilate_frontier_a);
-    free(dilate_frontier_b);
 }
 
 /* --- pipeline_debug_png: optional outline visualization --- */
@@ -1858,14 +1586,12 @@ static void pipeline_cleanup(AtlasPipeline *p) {
         p->sprites[i].name = NULL;
     }
 
-    /* Free hull vertices and binary masks (duplicates share pointers via dedup_map) */
+    /* Free hull vertices (duplicates share pointers via dedup_map) */
     for (uint32_t i = 0; i < p->sprite_count; i++) {
         if (p->dedup_map[i] < 0) {
             free(p->hull_vertices[i]);
-            free(p->binary_masks[i]);
         }
         p->hull_vertices[i] = NULL;
-        p->binary_masks[i] = NULL;
     }
 
     /* Free alpha planes */
@@ -1882,7 +1608,6 @@ static void pipeline_cleanup(AtlasPipeline *p) {
     free(p->unique_indices);
     free(p->vertex_counts);
     free((void *)p->hull_vertices);
-    free((void *)p->binary_masks);
     free(p->placements);
 
     /* Free remaining page pixels (any not transferred to entries) */
@@ -1994,6 +1719,10 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
 #ifdef NT_BUILDER_ATLAS_TEST_ACCESS
 void nt_atlas_test_extrude_dilate(uint8_t *page, uint8_t *scratch, uint32_t *frontier_a, uint32_t *frontier_b, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh,
                                   const uint8_t *inside_mask, uint32_t extrude_count) {
-    extrude_dilate(page, scratch, frontier_a, frontier_b, page_w, page_h, px, py, sw, sh, inside_mask, extrude_count);
+    (void)scratch;
+    (void)frontier_a;
+    (void)frontier_b;
+    (void)inside_mask;
+    extrude_edges(page, page_w, page_h, px, py, sw, sh, extrude_count);
 }
 #endif

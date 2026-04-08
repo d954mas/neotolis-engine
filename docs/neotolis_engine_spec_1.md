@@ -1805,7 +1805,7 @@ nt_builder_end_atlas(ctx);
 3. **dedup** — hash + byte-level compare to find identical sprites; duplicates share `vertex_start`/`index_start` in the final blob.
 4. **geometry** — for each unique sprite: build binary mask, optional morphological closing for disjoint components, contour trace, multi-strategy simplification (RDP / perpendicular distance / bbox / convex hull — pick lowest estimated final area), Clipper2 inflate by `extrude + padding/2`, post-verify pixel coverage with fallback to bbox.
 5. **tile_pack** — call `vector_pack` (NFP packer, see below) to assign each unique sprite to a page and (x, y) position.
-6. **compose** — blit trimmed pixels onto page buffers, run edge-extrude.
+6. **compose** — blit trimmed pixels onto page buffers, run AABB edge-extrude only when packing uses rectangles; in polygon mode, require `extrude=0` and rely on `padding`.
 7. **debug_png** — optional outline visualization (when `opts.debug_png`).
 8. **cache_write** — persist placement+pages for next build.
 9. **serialize** — pack `NtAtlasHeader + texture_resource_ids + regions + vertices + indices` into one blob, register as `NT_ASSET_ATLAS`.
@@ -1833,7 +1833,7 @@ typedef struct {
     uint32_t max_size;       /* max atlas page dimension (default 2048) */
     uint32_t padding;        /* extra spacing between sprites (default 0) */
     uint32_t margin;         /* atlas edge margin (default 0) */
-    uint32_t extrude;        /* edge pixel duplication count (default 2) */
+    uint32_t extrude;        /* AABB edge pixel duplication count (default 0 with polygon_mode=true; invalid if >0 in polygon mode) */
     uint8_t alpha_threshold; /* alpha >= threshold = opaque (default 1) */
     uint8_t max_vertices;    /* max polygon vertices per region (default 16, hard cap) */
     bool allow_rotate;       /* try 8 D4 orientations (default true) */
