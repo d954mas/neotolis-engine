@@ -1016,12 +1016,12 @@ Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier cu
 
 Builder produces atlas assets from a set of sprite PNGs (or raw RGBA buffers). One atlas yields **two kinds of pack entries**: a single `NT_ASSET_ATLAS` blob with region metadata, plus N `NT_ASSET_TEXTURE` page entries (named `<atlas>/tex0`, `<atlas>/tex1`, …). Runtime keeps a 1:N relationship — one metadata blob references N textures.
 
-Binary layout (`shared/include/nt_atlas_format.h`, packed):
+Binary layout (`shared/include/nt_atlas_format.h`, packed, **v3**):
 
 ```
 NtAtlasHeader (28 bytes)
   magic:               u32  (0x534C5441 "ATLS")
-  version:             u16  (2)
+  version:             u16  (3)
   region_count:        u16  (one entry per source sprite)
   page_count:          u16  (number of texture pages)
   _pad:                u16
@@ -1034,7 +1034,7 @@ texture_resource_ids[page_count]: u64
   Each entry is nt_hash64_str("<atlas_name>/tex<N>") matching the
   page texture's resource_id in the same pack.
 
-NtAtlasRegion[region_count] (32 bytes each)
+NtAtlasRegion[region_count] (36 bytes each)
   name_hash:      u64   (xxh64 of region name)
   source_w:       u16   (original image width pre-trim)
   source_h:       u16
@@ -1042,12 +1042,12 @@ NtAtlasRegion[region_count] (32 bytes each)
   trim_offset_y:  i16
   origin_x:       f32   (origin in source-image space)
   origin_y:       f32
-  vertex_start:   u16   (index into vertex array)
+  vertex_start:   u32   (index into vertex array — u32 in v3, was u16 in v2)
+  index_start:    u32   (index into the index array — u32 in v3, was u16 in v2)
   vertex_count:   u8    (vertices for this region; ≤ max_vertices)
   page_index:     u8    (which texture page)
-  rotated:        u8    (3-bit D4 transform mask: bit0=flipH, bit1=flipV, bit2=diagonal)
-  index_count:    u8    (triangle indices for this region; ≤ 255 → ≤ 85 triangles)
-  index_start:    u16   (index into the index array)
+  transform:      u8    (3-bit D4 mask: bit0=flipH, bit1=flipV, bit2=diagonal)
+  index_count:    u8    (triangle indices for this region; ≤ 255)
 
 NtAtlasVertex[total_vertex_count] (8 bytes each, at vertex_offset)
   local_x:   i16  (pixels relative to source-image origin)
@@ -1060,7 +1060,14 @@ uint16[total_index_count] (at index_offset)
   Runtime offsets them by vertex_start when building GPU buffers.
 ```
 
-Runtime is intentionally trivial: `mmap` the blob, read header, slice arrays. No parsing, no allocation. UVs are pre-normalized, triangles are pre-built (fan triangulation for convex regions, Clipper2 CDT for concave). Duplicate sprites share `vertex_start`/`index_start` so a 4200-region atlas still fits in `uint16_t` cursor space.
+Runtime is intentionally trivial: `mmap` the blob, read header, slice arrays. No parsing, no allocation. UVs are pre-normalized, triangles are pre-built (fan triangulation for convex regions, Clipper2 CDT for concave). Duplicate sprites share `vertex_start`/`index_start`; the u32 cursors let a single atlas carry more than 64K vertices/indices, which v2's u16 cursors could not.
+
+**v2 → v3 changes:**
+
+- `NtAtlasRegion.rotated` renamed to `transform` (same 3-bit D4 flags; name reflects its real meaning — it is a transform mask, not a bool).
+- `NtAtlasRegion.vertex_start` and `.index_start` widened from u16 to u32. Large atlases with many unique high-vertex sprites overflow 65535 cumulative vertices/indices, and the builder used to assert on that limit.
+- `NtAtlasRegion` grew from 32 bytes to 36 bytes (enforced by `_Static_assert` in `shared/include/nt_atlas_format.h`).
+- `NtAtlasHeader` layout is unchanged. Only `version` bumps 2 → 3.
 
 ## 17.9 Placeholder policy
 
@@ -1831,22 +1838,25 @@ typedef struct {
     const nt_tex_compress_opts_t *compress;  /* NULL = raw RGBA */
     nt_texture_pixel_format_t format;        /* RGBA8 default */
     uint32_t max_size;       /* max atlas page dimension (default 2048) */
-    uint32_t padding;        /* extra spacing between sprites (default 0) */
+    uint32_t padding;        /* extra spacing between sprites after extrude (default 2) */
     uint32_t margin;         /* atlas edge margin (default 0) */
-    uint32_t extrude;        /* AABB edge pixel duplication count (default 0 with polygon_mode=true; invalid if >0 in polygon mode) */
+    uint32_t extrude;        /* AABB edge pixel duplication count (default 0; must be 0 when polygon_mode=true) */
     uint8_t alpha_threshold; /* alpha >= threshold = opaque (default 1) */
-    uint8_t max_vertices;    /* max polygon vertices per region (default 16, hard cap) */
+    uint8_t max_vertices;    /* max polygon vertices per region (default 8, hard cap 16) */
     bool allow_transform;    /* try 8 D4 orientations (4 rotations × 2 flips; default true) */
     bool power_of_two;       /* round atlas dims to POT (default true) */
     bool polygon_mode;       /* concave contour vs 4-vertex bbox (default true) */
     bool debug_png;          /* write debug atlas page PNGs (default false) */
+    bool premultiplied;      /* premultiply RGB by alpha during texture encode (default true) */
 } nt_atlas_opts_t;
 ```
 
+**Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline with `premultiplied = true`, which writes `RGB' = (RGB * A + 127) / 255` into the page before `strip_channels` (RAW path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. Setting `premultiplied = false` logs a warning and is only valid for NEAREST-filtered or fully-opaque atlases; combining it with a non-RGBA8 `format` is a hard assert.
+
 **Hard limits:**
 - `max_vertices ≤ 16`. NFP buffers are stack-sized for `nA + nB ≤ 32`.
-- Per-region `index_count` is `uint8_t` → ≤ 85 triangles per region.
-- Per-atlas `vertex_start`/`index_start` are `uint16_t` → ≤ 65535 cumulative across the atlas. Dedup helps; large atlases with many unique high-vertex sprites can hit this — builder asserts.
+- Per-region `index_count` is `uint8_t` → ≤ 255 indices per region. With `max_vertices ≤ 16` an ear-clipped/fan triangulation produces at most `(16 - 2) * 3 = 42` indices, so one byte is sufficient.
+- Per-atlas `vertex_start` / `index_start` are `uint32_t` (v3). v2 used `uint16_t` and asserted at ~65K cumulative entries — v3 lifts that limit.
 
 ### 23.11.4 Atlas cache
 
