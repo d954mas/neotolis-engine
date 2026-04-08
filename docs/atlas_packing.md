@@ -25,7 +25,7 @@ PNG files
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
-│ Step 5: Compose      │  Blit pixels, write PNG debug, encode to NEOPAK
+│ Step 5: Compose      │  Blit pixels, dilate extrude zone, write debug PNG
 └──────────────────────┘
 ```
 
@@ -128,6 +128,77 @@ warning from `end_atlas`. Valid only for:
 Mixing `premultiplied = true` with a non-RGBA8 pixel format is a hard
 error — `begin_atlas` asserts. Alpha must exist for premultiplication to
 mean anything.
+
+## Edge Dilation (Extrude)
+
+After each sprite is blitted into its atlas page, `extrude_dilate` grows
+the sprite's visible area outward by `opts.extrude` pixels. Transparent
+pixels around the sprite take on the full RGBA of their nearest opaque
+neighbor, expanding the silhouette into a band of width `extrude`.
+
+### Why extrude matters
+
+When the GPU bilinearly filters a sprite edge, it blends four neighboring
+texels. Without extrude, one of those texels may be transparent
+`(0, 0, 0, 0)` — the sprite's edge visually fades into the gap over half
+a pixel. With extrude, the "phantom" texels outside the sprite carry the
+sprite's own edge color, so bilinear sampling at the exact boundary
+returns the full edge color instead of a half-faded average.
+
+Extrude also covers UV rounding: floating-point UV computation on some
+GPUs can drift by a fraction of a pixel. A 2px extrude band tolerates up
+to 2px of drift with no visible seam.
+
+### Iterative 8-connected dilation
+
+The old implementation used AABB stretch: copy the top/bottom/left/right
+row/column of the sprite's AABB outward by N pixels. This left holes in
+the extrude zone on anti-aliased and concave sprites — AA glyph corners
+are transparent in the AABB edge rows, so AABB-stretch skipped them,
+and concave polygon notches (L-shapes, letter interiors) fell outside
+the AABB-stretch paths entirely.
+
+The current implementation is iterative 8-connected dilation (the same
+approach used by TexturePacker, Spine, Unity Sprite Atlas). Each pass
+grows the sprite's filled region by one pixel from any opaque neighbor,
+regardless of shape:
+
+```
+Pass 1: for each transparent pixel with an opaque neighbor,
+        copy that neighbor's RGBA (4-connected first, then diagonals)
+Pass 2: repeat — now "opaque neighbors" include Pass 1's new pixels
+...
+Pass N: N-pixel wide band filled
+```
+
+After N = `opts.extrude` passes, every transparent pixel within Chebyshev
+distance N of any original opaque pixel carries an RGBA copy of its
+nearest opaque neighbor.
+
+### Safety against neighbor overlap
+
+NFP packing inflates each sprite's polygon by `extrude + padding/2`
+before placement. Two sprites' extrude zones cannot overlap — there's
+always at least `2 * (extrude + padding/2)` pixels of clearance between
+their opaque pixels. Dilation writes freely into its per-sprite window
+without worrying about neighbors.
+
+### Scratch buffer
+
+Each dilation pass reads from a frozen snapshot of the window. Without
+the snapshot, a pixel filled in the current pass would be read by its
+neighbor later in the same pass, growing the front anisotropically
+(faster in the iteration direction). `pipeline_compose` allocates one
+scratch buffer sized for the largest sprite's dilation window
+(`(max_side + 2*extrude)² * 4 bytes`) and reuses it across placements.
+
+### Cost
+
+Dilation is O(bbox_window_area × passes) per sprite. For a 64×64 sprite
+with extrude=2, that's about 70K ops per sprite. For a 1000-sprite atlas
+the total compose cost is ~50-100 ms — a fraction of NFP packing time.
+Atlas-level caching means this only runs on first build; subsequent
+builds skip compose entirely.
 
 ## Per-Sprite Tile Grid
 

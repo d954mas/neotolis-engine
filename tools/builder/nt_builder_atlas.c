@@ -203,18 +203,31 @@ static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rg
  * `dst[3] != 0` skip below is a cheap guard against Clipper2 inflate
  * rounding on concave polygons, not a correctness requirement.
  *
- * Snapshot per pass: dilation reads from `scratch` (frozen start-of-pass
- * state) and writes to `page`. Without the snapshot, a pixel filled in
- * the current pass could be read by its neighbor later in the same pass,
- * growing the front anisotropically (faster along the iteration order).
+ * Pass 1 uses a full window scan with a scratch snapshot (frozen read
+ * source): without the snapshot, a pixel filled in the current pass
+ * could be read by its neighbor later in the same pass, growing the
+ * front anisotropically (faster along the iteration order).
+ *
+ * Passes 2..N use frontier tracking: instead of rescanning the whole
+ * window, iterate the pixels filled in the previous pass and push their
+ * colors into any still-transparent 8-neighbors. Frontier tracking cuts
+ * pass 2+ cost from O(window_area) to O(frontier_size) ≈ O(sprite
+ * perimeter). First-write-wins semantics when two frontier pixels share
+ * a transparent neighbor: the dst[3] != 0 skip makes the second writer
+ * skip the already-filled target.
  *
  * Neighbor order is 4-connected first (N, E, S, W), then diagonals
  * (NE, SE, SW, NW). First opaque neighbor wins. Straight neighbors are
  * distance 1 in Euclidean terms, diagonals are √2 — checking straights
  * first gives a small nearest-neighbor preference at no runtime cost. */
 
+/* 8-connected neighbors, 4-connected first. File-scope so both passes share. */
+static const int32_t k_dx8[8] = {0, +1, 0, -1, +1, +1, -1, -1};
+static const int32_t k_dy8[8] = {-1, 0, +1, 0, -1, +1, +1, -1};
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void extrude_dilate(uint8_t *page, uint8_t *scratch, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh, uint32_t extrude_count) {
+static void extrude_dilate(uint8_t *page, uint8_t *scratch, uint32_t *frontier_a, uint32_t *frontier_b, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh,
+                           uint32_t extrude_count) {
     if (extrude_count == 0) {
         return;
     }
@@ -242,42 +255,77 @@ static void extrude_dilate(uint8_t *page, uint8_t *scratch, uint32_t page_w, uin
     uint32_t bbox_w = (uint32_t)(bx1 - bx0);
     uint32_t bbox_h = (uint32_t)(by1 - by0);
 
-    /* 8-connected neighbors, 4-connected first. */
-    static const int32_t dx8[8] = {0, +1, 0, -1, +1, +1, -1, -1};
-    static const int32_t dy8[8] = {-1, 0, +1, 0, -1, +1, +1, -1};
+    /* Pass 1: full window scan with snapshot. Records newly-filled pixels
+     * into frontier_a as page-space pixel offsets. */
+    for (uint32_t y = 0; y < bbox_h; y++) {
+        const uint8_t *src_row = &page[((size_t)((uint32_t)by0 + y) * page_w + (uint32_t)bx0) * 4];
+        uint8_t *dst_row = &scratch[(size_t)y * bbox_w * 4];
+        memcpy(dst_row, src_row, (size_t)bbox_w * 4);
+    }
 
-    for (uint32_t pass = 0; pass < extrude_count; pass++) {
-        /* Snapshot current window state into scratch (frozen read source). */
-        for (uint32_t y = 0; y < bbox_h; y++) {
-            const uint8_t *src_row = &page[((size_t)((uint32_t)by0 + y) * page_w + (uint32_t)bx0) * 4];
-            uint8_t *dst_row = &scratch[(size_t)y * bbox_w * 4];
-            memcpy(dst_row, src_row, (size_t)bbox_w * 4);
-        }
-
-        /* Dilate: read from scratch, write to page. */
-        for (uint32_t y = 0; y < bbox_h; y++) {
-            for (uint32_t x = 0; x < bbox_w; x++) {
-                uint8_t *dst = &page[((size_t)((uint32_t)by0 + y) * page_w + ((uint32_t)bx0 + x)) * 4];
-                if (dst[3] != 0) {
-                    continue; /* already opaque */
+    uint32_t front_cur_count = 0;
+    for (uint32_t y = 0; y < bbox_h; y++) {
+        for (uint32_t x = 0; x < bbox_w; x++) {
+            uint8_t *dst = &page[((size_t)((uint32_t)by0 + y) * page_w + ((uint32_t)bx0 + x)) * 4];
+            if (dst[3] != 0) {
+                continue; /* already opaque — part of the sprite */
+            }
+            for (uint32_t n = 0; n < 8; n++) {
+                int32_t nx = (int32_t)x + k_dx8[n];
+                int32_t ny = (int32_t)y + k_dy8[n];
+                if (nx < 0 || nx >= (int32_t)bbox_w || ny < 0 || ny >= (int32_t)bbox_h) {
+                    continue;
                 }
-                for (uint32_t n = 0; n < 8; n++) {
-                    int32_t nx = (int32_t)x + dx8[n];
-                    int32_t ny = (int32_t)y + dy8[n];
-                    if (nx < 0 || nx >= (int32_t)bbox_w || ny < 0 || ny >= (int32_t)bbox_h) {
-                        continue;
-                    }
-                    const uint8_t *nb = &scratch[((size_t)(uint32_t)ny * bbox_w + (uint32_t)nx) * 4];
-                    if (nb[3] != 0) {
-                        dst[0] = nb[0];
-                        dst[1] = nb[1];
-                        dst[2] = nb[2];
-                        dst[3] = nb[3];
-                        break;
-                    }
+                const uint8_t *nb = &scratch[((size_t)(uint32_t)ny * bbox_w + (uint32_t)nx) * 4];
+                if (nb[3] != 0) {
+                    dst[0] = nb[0];
+                    dst[1] = nb[1];
+                    dst[2] = nb[2];
+                    dst[3] = nb[3];
+                    frontier_a[front_cur_count++] = ((uint32_t)by0 + y) * page_w + ((uint32_t)bx0 + x);
+                    break;
                 }
             }
         }
+    }
+
+    /* Passes 2..N: iterate current frontier, push colors outward.
+     * Each pass builds the next frontier from just-filled pixels.
+     * First-write-wins: if two frontier pixels share a transparent
+     * target, the first to reach it claims it; the second sees dst[3] != 0
+     * and skips. Target bounds are checked against the window bbox. */
+    uint32_t *front_cur = frontier_a;
+    uint32_t *front_next = frontier_b;
+    for (uint32_t pass = 1; pass < extrude_count && front_cur_count > 0; pass++) {
+        uint32_t front_next_count = 0;
+        for (uint32_t i = 0; i < front_cur_count; i++) {
+            uint32_t offset = front_cur[i];
+            const uint8_t *src = &page[(size_t)offset * 4];
+            /* Extract page-space (x, y) from the flat offset. */
+            int32_t fx = (int32_t)(offset % page_w);
+            int32_t fy = (int32_t)(offset / page_w);
+            for (uint32_t n = 0; n < 8; n++) {
+                int32_t nx = fx + k_dx8[n];
+                int32_t ny = fy + k_dy8[n];
+                if (nx < bx0 || nx >= bx1 || ny < by0 || ny >= by1) {
+                    continue; /* outside dilation window */
+                }
+                uint8_t *target = &page[((size_t)(uint32_t)ny * page_w + (uint32_t)nx) * 4];
+                if (target[3] != 0) {
+                    continue; /* already opaque (original, prior frontier, or same pass) */
+                }
+                target[0] = src[0];
+                target[1] = src[1];
+                target[2] = src[2];
+                target[3] = src[3];
+                front_next[front_next_count++] = (uint32_t)ny * page_w + (uint32_t)nx;
+            }
+        }
+        /* Swap frontiers for next pass. */
+        uint32_t *swap_tmp = front_cur;
+        front_cur = front_next;
+        front_next = swap_tmp;
+        front_cur_count = front_next_count;
     }
 }
 // #endregion
@@ -1284,9 +1332,15 @@ static void pipeline_compose(AtlasPipeline *p) {
         NT_BUILD_ASSERT(p->page_pixels[pg] && "pipeline_compose: page alloc failed");
     }
 
-    /* One scratch buffer sized for the largest sprite's dilation window,
-     * reused across all placements. Size = (max_side + 2*extrude)^2 * 4. */
+    /* Dilation scratch buffers reused across all placements. extrude_dilate
+     * needs three buffers sized for the largest sprite's dilation window:
+     *   - scratch: RGBA snapshot for pass 1 (max_bbox_side^2 * 4 bytes)
+     *   - frontier_a/b: ping-pong lists of filled pixels as page-space
+     *     uint32 offsets (max_bbox_side^2 * 4 bytes each, worst case
+     *     is an all-transparent window that gets fully filled). */
     uint8_t *dilate_scratch = NULL;
+    uint32_t *dilate_frontier_a = NULL;
+    uint32_t *dilate_frontier_b = NULL;
     if (extrude_val > 0) {
         uint32_t max_bbox_side = 0;
         for (uint32_t pi = 0; pi < p->placement_count; pi++) {
@@ -1298,8 +1352,11 @@ static void pipeline_compose(AtlasPipeline *p) {
             }
         }
         if (max_bbox_side > 0) {
-            dilate_scratch = (uint8_t *)malloc((size_t)max_bbox_side * max_bbox_side * 4);
-            NT_BUILD_ASSERT(dilate_scratch && "pipeline_compose: dilate scratch alloc failed");
+            size_t bbox_cells = (size_t)max_bbox_side * max_bbox_side;
+            dilate_scratch = (uint8_t *)malloc(bbox_cells * 4);
+            dilate_frontier_a = (uint32_t *)malloc(bbox_cells * sizeof(uint32_t));
+            dilate_frontier_b = (uint32_t *)malloc(bbox_cells * sizeof(uint32_t));
+            NT_BUILD_ASSERT(dilate_scratch && dilate_frontier_a && dilate_frontier_b && "pipeline_compose: dilate alloc failed");
         }
     }
 
@@ -1314,10 +1371,12 @@ static void pipeline_compose(AtlasPipeline *p) {
 
         uint32_t blit_w = (pl->rotation & 4) ? pl->trimmed_h : pl->trimmed_w;
         uint32_t blit_h = (pl->rotation & 4) ? pl->trimmed_w : pl->trimmed_h;
-        extrude_dilate(p->page_pixels[pl->page], dilate_scratch, p->page_w[pl->page], p->page_h[pl->page], inner_x, inner_y, blit_w, blit_h, extrude_val);
+        extrude_dilate(p->page_pixels[pl->page], dilate_scratch, dilate_frontier_a, dilate_frontier_b, p->page_w[pl->page], p->page_h[pl->page], inner_x, inner_y, blit_w, blit_h, extrude_val);
     }
 
     free(dilate_scratch);
+    free(dilate_frontier_a);
+    free(dilate_frontier_b);
 }
 
 /* --- pipeline_debug_png: optional outline visualization --- */
@@ -1774,7 +1833,8 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
 /* --- Test-access wrapper (atlas internals remain static) --- */
 
 #ifdef NT_BUILDER_ATLAS_TEST_ACCESS
-void nt_atlas_test_extrude_dilate(uint8_t *page, uint8_t *scratch, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh, uint32_t extrude_count) {
-    extrude_dilate(page, scratch, page_w, page_h, px, py, sw, sh, extrude_count);
+void nt_atlas_test_extrude_dilate(uint8_t *page, uint8_t *scratch, uint32_t *frontier_a, uint32_t *frontier_b, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh,
+                                  uint32_t extrude_count) {
+    extrude_dilate(page, scratch, frontier_a, frontier_b, page_w, page_h, px, py, sw, sh, extrude_count);
 }
 #endif
