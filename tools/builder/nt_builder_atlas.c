@@ -1743,11 +1743,6 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
  * Thin pass-through so unit tests can exercise extrude_edges without
  * making it non-static. Builder is a developer tool, not a shippable
  * runtime, so the extra symbol has no practical cost. */
-void nt_atlas_test_extrude_dilate(uint8_t *page, uint8_t *scratch, uint32_t *frontier_a, uint32_t *frontier_b, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh,
-                                  const uint8_t *inside_mask, uint32_t extrude_count) {
-    (void)scratch;
-    (void)frontier_a;
-    (void)frontier_b;
-    (void)inside_mask;
+void nt_atlas_test_extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh, uint32_t extrude_count) {
     extrude_edges(page, page_w, page_h, px, py, sw, sh, extrude_count);
 }

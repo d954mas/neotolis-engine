@@ -3527,10 +3527,8 @@ static bool atlas_trim_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint8_t
 bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, uint32_t ring_count, int32_t px, int32_t py);
 
 /* edge-extrude helper stays static; test access via this wrapper defined in
- * nt_builder_atlas.c. The wrapper signature still exposes the old scratch/
- * frontier/mask arguments, but AABB extrude ignores them. */
-void nt_atlas_test_extrude_dilate(uint8_t *page, uint8_t *scratch, uint32_t *frontier_a, uint32_t *frontier_b, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh,
-                                  const uint8_t *inside_mask, uint32_t extrude_count);
+ * nt_builder_atlas.c. */
+void nt_atlas_test_extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh, uint32_t extrude_count);
 
 /* alpha_trim: fully transparent 4x4 image returns false */
 void test_alpha_trim_fully_transparent(void) {
@@ -3795,7 +3793,7 @@ void test_extrude_edges_aabb_l_shape(void) {
     const uint32_t sw = 3;
     const uint32_t sh = 5;
     const uint32_t extrude = 2;
-    nt_atlas_test_extrude_dilate(page, NULL, NULL, NULL, W, H, px, py, sw, sh, NULL, extrude);
+    nt_atlas_test_extrude_edges(page, W, H, px, py, sw, sh, extrude);
 
     /* Assertions:
      *
@@ -3874,7 +3872,7 @@ void test_extrude_edges_preserve_hole(void) {
     }
 
     const uint32_t extrude = 1;
-    nt_atlas_test_extrude_dilate(page, NULL, NULL, NULL, W, H, px, py, sw, sh, NULL, extrude);
+    nt_atlas_test_extrude_edges(page, W, H, px, py, sw, sh, extrude);
 
     /* Central hole pixels stay transparent because AABB extrude never writes
      * inside the trim rect. */
