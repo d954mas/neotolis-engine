@@ -1061,6 +1061,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     if (ctx->font_count > 0) {
         NT_LOG_INFO("  FONT:    %u asset%s", ctx->font_count, ctx->font_count > 1 ? "s" : "");
     }
+    if (ctx->atlas_count > 0) {
+        NT_LOG_INFO("  ATLAS:   %u asset%s", ctx->atlas_count, ctx->atlas_count > 1 ? "s" : "");
+    }
     if (total_gz > 0 && raw_total > 0) {
         char total_raw_str[16];
         char total_gz_str[16];

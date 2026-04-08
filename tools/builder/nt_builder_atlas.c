@@ -1614,12 +1614,13 @@ static void pipeline_cleanup(AtlasPipeline *p) {
     }
     free((void *)p->page_pixels);
 
-    /* Free atlas state */
+    /* Free atlas state. atlas_count is bumped by increment_kind_counter when
+     * pipeline_register calls nt_builder_add_entry for the atlas metadata
+     * blob — no additional bump here (would double-count). */
     free(p->state->sprites);
     free(p->state->name);
     free(p->state);
     p->ctx->active_atlas = NULL;
-    p->ctx->atlas_count++;
 }
 
 /* --- nt_builder_end_atlas: orchestrator — calls pipeline steps in order --- */
