@@ -3526,6 +3526,9 @@ static bool atlas_trim_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint8_t
 /* vpack internals stay static; tests reach in via this thin wrapper defined in nt_builder_atlas_vpack.c. */
 bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, uint32_t ring_count, int32_t px, int32_t py);
 
+/* extrude_dilate stays static; test access via this wrapper defined in nt_builder_atlas.c. */
+void nt_atlas_test_extrude_dilate(uint8_t *page, uint8_t *scratch, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh, uint32_t extrude_count);
+
 /* alpha_trim: fully transparent 4x4 image returns false */
 void test_alpha_trim_fully_transparent(void) {
     uint8_t rgba[4 * 4 * 4];
@@ -3731,6 +3734,129 @@ static uint8_t *read_file_bytes(const char *path, uint32_t *out_size) {
 /* --- Atlas round-trip tests --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* --- extrude_dilate: L-shaped sprite with transparent AABB corners --- */
+
+/* L-shape (5x5) placed at (2,2) inside a 12x12 page. Verifies that:
+ *  - pixels outside the sprite but within extrude_count=2 get filled
+ *    from their nearest opaque neighbor (full RGBA copy)
+ *  - the CONCAVE corner at the L's notch, whose AABB corner is transparent,
+ *    gets filled by dilation (the old extrude_edges left this as zero)
+ *  - pixels further than extrude_count from any opaque stay zero */
+void test_extrude_dilate_l_shape(void) {
+    /* Page layout (. = empty, █ = red opaque):
+     *
+     *   . . . . . . . . . . . .
+     *   . . . . . . . . . . . .
+     *   . . █ . . . . . . . . .    ← rows 2..6: L shape
+     *   . . █ . . . . . . . . .
+     *   . . █ . . . . . . . . .
+     *   . . █ . . . . . . . . .
+     *   . . █ █ █ . . . . . . .    ← row 6: bottom of L
+     *   . . . . . . . . . . . .
+     *   . . . . . . . . . . . .
+     *   . . . . . . . . . . . .
+     *   . . . . . . . . . . . .
+     *   . . . . . . . . . . . .
+     *
+     * The AABB of the sprite is rows 2..6, cols 2..4. The concave corner
+     * at (3, 3) — inside the AABB but with transparent pixel — is the
+     * case AABB-stretch extrude could not cover before.
+     */
+    const uint32_t W = 12;
+    const uint32_t H = 12;
+    uint8_t *page = (uint8_t *)calloc((size_t)W * H * 4, 1);
+    TEST_ASSERT_NOT_NULL(page);
+
+    /* Paint the L in red (255, 0, 0, 255) */
+    const uint8_t R = 255;
+    const uint8_t G = 0;
+    const uint8_t B = 0;
+    const uint8_t A = 255;
+    /* vertical bar: col 2, rows 2..6 */
+    for (uint32_t y = 2; y <= 6; y++) {
+        size_t off = ((size_t)y * W + 2) * 4;
+        page[off + 0] = R;
+        page[off + 1] = G;
+        page[off + 2] = B;
+        page[off + 3] = A;
+    }
+    /* horizontal foot: row 6, cols 3..4 */
+    for (uint32_t x = 3; x <= 4; x++) {
+        size_t off = ((size_t)6 * W + x) * 4;
+        page[off + 0] = R;
+        page[off + 1] = G;
+        page[off + 2] = B;
+        page[off + 3] = A;
+    }
+
+    /* Scratch buffer sized for the dilation window: sprite AABB 3x5 + 2*extrude = 7x9 */
+    const uint32_t px = 2;
+    const uint32_t py = 2;
+    const uint32_t sw = 3;
+    const uint32_t sh = 5;
+    const uint32_t extrude = 2;
+    uint8_t *scratch = (uint8_t *)malloc((size_t)(sw + (2 * extrude)) * (sh + (2 * extrude)) * 4);
+    TEST_ASSERT_NOT_NULL(scratch);
+
+    nt_atlas_test_extrude_dilate(page, scratch, W, H, px, py, sw, sh, extrude);
+
+    /* Assertions:
+     *
+     * 1. Concave corner (3, 3) — inside AABB, was transparent before dilation.
+     *    After 1 pass it has a red neighbor at (2, 3) (vertical bar) — must be red.
+     */
+    const uint8_t *pix_3_3 = &page[((size_t)3 * W + 3) * 4];
+    TEST_ASSERT_EQUAL_UINT8(R, pix_3_3[0]);
+    TEST_ASSERT_EQUAL_UINT8(G, pix_3_3[1]);
+    TEST_ASSERT_EQUAL_UINT8(B, pix_3_3[2]);
+    TEST_ASSERT_EQUAL_UINT8(A, pix_3_3[3]);
+
+    /* 2. Pixel (1, 2) — 1 pixel left of vertical bar top. After pass 1 it has a
+     *    red neighbor at (2, 2) to its east. Must be red. */
+    const uint8_t *pix_1_2 = &page[((size_t)2 * W + 1) * 4];
+    TEST_ASSERT_EQUAL_UINT8(R, pix_1_2[0]);
+    TEST_ASSERT_EQUAL_UINT8(A, pix_1_2[3]);
+
+    /* 3. Pixel (0, 2) — 2 pixels left. After pass 2 it gets red from (1, 2)
+     *    which was filled in pass 1. Must be red. */
+    const uint8_t *pix_0_2 = &page[((size_t)2 * W + 0) * 4];
+    TEST_ASSERT_EQUAL_UINT8(R, pix_0_2[0]);
+    TEST_ASSERT_EQUAL_UINT8(A, pix_0_2[3]);
+
+    /* 4. Pixel (2, 0) — 2 rows above the top of vertical bar. Within extrude=2,
+     *    should be filled. */
+    const uint8_t *pix_2_0 = &page[((size_t)0 * W + 2) * 4];
+    TEST_ASSERT_EQUAL_UINT8(R, pix_2_0[0]);
+    TEST_ASSERT_EQUAL_UINT8(A, pix_2_0[3]);
+
+    /* 5. Pixel (6, 6) — 2 pixels right of the foot's right end (4, 6), and
+     *    2 rows down too. It IS within the dilation bbox (px+sw+extrude = 7,
+     *    py+sh+extrude = 9), but is it within 2 pixels of any opaque source?
+     *    Opaque at (4, 6). Distance to (6, 6) = 2 (straight). After pass 1
+     *    (5, 6) gets red. After pass 2 (6, 6) gets red from (5, 6). */
+    const uint8_t *pix_6_6 = &page[((size_t)6 * W + 6) * 4];
+    TEST_ASSERT_EQUAL_UINT8(R, pix_6_6[0]);
+    TEST_ASSERT_EQUAL_UINT8(A, pix_6_6[3]);
+
+    /* 6. Pixel (7, 2) — 5 pixels right of the top of vertical bar (2, 2),
+     *    way beyond extrude=2 radius. Stays transparent. */
+    const uint8_t *pix_7_2 = &page[((size_t)2 * W + 7) * 4];
+    TEST_ASSERT_EQUAL_UINT8(0, pix_7_2[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix_7_2[3]);
+
+    /* 7. Pixel (6, 0) — top-right of the bbox. Nearest opaque is (2, 2) at
+     *    Chebyshev distance max(4, 2) = 4, way beyond extrude=2. Stays zero.
+     *    (Note: (0,0) would seem like a good "far" case, but it's at Chebyshev
+     *    distance 2 from (2,2) via diagonal, so 8-connected dilation reaches
+     *    it through (1,1) → (0,0).) */
+    const uint8_t *pix_6_0 = &page[((size_t)0 * W + 6) * 4];
+    TEST_ASSERT_EQUAL_UINT8(0, pix_6_0[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix_6_0[3]);
+
+    free(scratch);
+    free(page);
+}
+
 void test_atlas_round_trip_basic(void) {
     (void)MKDIR(TMP_DIR);
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_basic.ntpack");
@@ -4344,6 +4470,9 @@ int main(void) {
 
     /* Premultiplied alpha (Phase 48 Plan 1.1) */
     RUN_TEST(test_texture_premultiplied_encoding);
+
+    /* Iterative dilation extrude (Phase 48 Plan 1.2) */
+    RUN_TEST(test_extrude_dilate_l_shape);
 
     /* Atlas round-trip tests (Phase 47 Plan 03) */
     RUN_TEST(test_atlas_round_trip_basic);
