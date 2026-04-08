@@ -358,7 +358,7 @@ bool point_in_polygon(const Point2D *poly, uint32_t n, Point2D p) {
 /* Float-coord point-in-polygon (even-odd rule) — used to test pixel centers
  * (which live at non-integer (x+0.5, y+0.5) positions) against an integer
  * polygon. */
-static bool point_in_polygon_f(const Point2D *poly, uint32_t n, double px, double py) {
+bool point_in_polygon_f(const Point2D *poly, uint32_t n, double px, double py) {
     bool inside = false;
     for (uint32_t i = 0, j = n - 1; i < n; j = i++) {
         double xi = (double)poly[i].x;

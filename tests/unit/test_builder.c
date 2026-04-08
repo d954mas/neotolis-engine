@@ -3526,9 +3526,12 @@ static bool atlas_trim_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint8_t
 /* vpack internals stay static; tests reach in via this thin wrapper defined in nt_builder_atlas_vpack.c. */
 bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, uint32_t ring_count, int32_t px, int32_t py);
 
-/* extrude_dilate stays static; test access via this wrapper defined in nt_builder_atlas.c. */
+/* extrude_dilate stays static; test access via this wrapper defined in nt_builder_atlas.c.
+ * inside_mask is laid out in blit-space (sw x sh bytes), value 1 = inside sprite
+ * silhouette, 0 = outside. NULL mask = treat all pixels as "outside" (useful
+ * for tests that just exercise the dilation algorithm without masking). */
 void nt_atlas_test_extrude_dilate(uint8_t *page, uint8_t *scratch, uint32_t *frontier_a, uint32_t *frontier_b, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh,
-                                  uint32_t extrude_count);
+                                  const uint8_t *inside_mask, uint32_t extrude_count);
 
 /* alpha_trim: fully transparent 4x4 image returns false */
 void test_alpha_trim_fully_transparent(void) {
@@ -3804,7 +3807,11 @@ void test_extrude_dilate_l_shape(void) {
     TEST_ASSERT_NOT_NULL(frontier_a);
     TEST_ASSERT_NOT_NULL(frontier_b);
 
-    nt_atlas_test_extrude_dilate(page, scratch, frontier_a, frontier_b, W, H, px, py, sw, sh, extrude);
+    /* Pass NULL mask: this test validates the iterative dilation algorithm
+     * itself (concave fill, AABB corners, radius bounds). The polygon mask
+     * behaviour is verified by test_atlas_real_pipeline_preserves_hole which
+     * runs the full end-to-end path. */
+    nt_atlas_test_extrude_dilate(page, scratch, frontier_a, frontier_b, W, H, px, py, sw, sh, NULL, extrude);
 
     /* Assertions:
      *
@@ -3863,6 +3870,221 @@ void test_extrude_dilate_l_shape(void) {
     free(frontier_a);
     free(frontier_b);
     free(page);
+}
+
+/* --- extrude_dilate: binary mask preserves interior hole ---
+ *
+ * Letter "O" sprite — opaque ring around a transparent center. Without the
+ * inside-sprite mask, iterative dilation would fill the center from the
+ * ring's neighbors and the rendered "O" would look like a solid disc.
+ *
+ * With a binary mask covering the entire 6x6 sprite rectangle (sprite
+ * silhouette after morphological closing on an "O" is the whole bounding
+ * area), dilation skips every pixel inside the mask — preserving the hole.
+ */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_extrude_dilate_binary_mask_preserves_hole(void) {
+    const uint32_t W = 10;
+    const uint32_t H = 10;
+    uint8_t *page = (uint8_t *)calloc((size_t)W * H * 4, 1);
+    TEST_ASSERT_NOT_NULL(page);
+
+    const uint8_t R = 255;
+    const uint8_t G = 100;
+    const uint8_t B = 50;
+    const uint8_t A = 255;
+
+    /* Paint the ring at page (2,2)..(7,7), with 4x4 hole at (3,3)..(6,6). */
+    const uint32_t px = 2;
+    const uint32_t py = 2;
+    const uint32_t sw = 6;
+    const uint32_t sh = 6;
+    for (uint32_t y = py; y < py + sh; y++) {
+        for (uint32_t x = px; x < px + sw; x++) {
+            bool on_border = (y == py) || (y == py + sh - 1) || (x == px) || (x == px + sw - 1);
+            if (on_border) {
+                size_t off = ((size_t)y * W + x) * 4;
+                page[off + 0] = R;
+                page[off + 1] = G;
+                page[off + 2] = B;
+                page[off + 3] = A;
+            }
+        }
+    }
+
+    const uint32_t extrude = 1;
+    const size_t bbox_cells = (size_t)(sw + (2 * extrude)) * (sh + (2 * extrude));
+    uint8_t *scratch = (uint8_t *)malloc(bbox_cells * 4);
+    uint32_t *frontier_a = (uint32_t *)malloc(bbox_cells * sizeof(uint32_t));
+    uint32_t *frontier_b = (uint32_t *)malloc(bbox_cells * sizeof(uint32_t));
+    TEST_ASSERT_NOT_NULL(scratch);
+    TEST_ASSERT_NOT_NULL(frontier_a);
+    TEST_ASSERT_NOT_NULL(frontier_b);
+
+    /* Inside-sprite mask: all 1s for the full 6x6 sprite area. This matches
+     * what pipeline_geometry saves for an "O" — morphological closing leaves
+     * the whole bounding box as the "sprite area" because the outer contour
+     * encloses the center hole. */
+    uint8_t *inside_mask = (uint8_t *)malloc((size_t)sw * sh);
+    TEST_ASSERT_NOT_NULL(inside_mask);
+    memset(inside_mask, 1, (size_t)sw * sh);
+
+    nt_atlas_test_extrude_dilate(page, scratch, frontier_a, frontier_b, W, H, px, py, sw, sh, inside_mask, extrude);
+
+    /* Central hole pixels (page (4,4), (5,4), (4,5), (5,5)) must stay
+     * transparent — mask=1 → dilation skips them. */
+    for (uint32_t cy = 4; cy <= 5; cy++) {
+        for (uint32_t cx = 4; cx <= 5; cx++) {
+            const uint8_t *p = &page[((size_t)cy * W + cx) * 4];
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, p[0], "interior hole pixel should be transparent");
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, p[3], "interior hole pixel should be transparent");
+        }
+    }
+
+    /* External pixel (1, 4) — 1 pixel left of the ring's left edge, outside
+     * the mask. Should be filled with R (extrude band). */
+    const uint8_t *ext_pix = &page[((size_t)4 * W + 1) * 4];
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(R, ext_pix[0], "exterior extrude pixel should be filled");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(A, ext_pix[3], "exterior extrude pixel should have full alpha");
+
+    free(scratch);
+    free(inside_mask);
+    free(frontier_a);
+    free(frontier_b);
+    free(page);
+}
+
+/* --- End-to-end: real pipeline preserves hollow ring's hole ---
+ *
+ * Builds an atlas containing a single ring sprite (opaque border, transparent
+ * center) through the production add_raw → end_atlas → finish_pack path,
+ * then reads the resulting page texture from the .ntpack file and verifies
+ * the central hole pixel is still transparent.
+ *
+ * This is the regression test that catches the "post-inflate hull used as
+ * mask" bug: if pipeline_compose feeds the wrong polygon into extrude_dilate
+ * the central hole would be filled by dilation and this test would fail. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_real_pipeline_preserves_hole(void) {
+    (void)MKDIR(TMP_DIR);
+
+    /* 16x16 ring sprite: opaque pixels on the 6x6 border at offset (5,5),
+     * transparent everywhere else (and at the 4x4 hole inside the border). */
+    const uint32_t W = 16;
+    const uint32_t H = 16;
+    uint8_t *pixels = (uint8_t *)calloc((size_t)W * H * 4, 1);
+    TEST_ASSERT_NOT_NULL(pixels);
+
+    const uint8_t R = 200;
+    const uint8_t G = 80;
+    const uint8_t B = 40;
+    for (uint32_t y = 5; y <= 10; y++) {
+        for (uint32_t x = 5; x <= 10; x++) {
+            if (y == 5 || y == 10 || x == 5 || x == 10) {
+                size_t off = ((size_t)y * W + x) * 4;
+                pixels[off + 0] = R;
+                pixels[off + 1] = G;
+                pixels[off + 2] = B;
+                pixels[off + 3] = 255;
+            }
+        }
+    }
+
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_ring_e2e.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Default opts → polygon_mode=true, extrude=2, premultiplied=true */
+    nt_builder_begin_atlas(ctx, "ring", NULL);
+    nt_builder_atlas_add_raw(ctx, pixels, W, H, "ring.png");
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+    free(pixels);
+
+    /* Read pack, find the texture page entry. */
+    uint32_t pack_size = 0;
+    uint8_t *pack = read_file_bytes(TMP_DIR "/atlas_ring_e2e.ntpack", &pack_size);
+    TEST_ASSERT_NOT_NULL(pack);
+
+    const NtPackHeader *hdr = (const NtPackHeader *)pack;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(pack + sizeof(NtPackHeader));
+    const NtAssetEntry *tex_entry = NULL;
+    for (uint32_t i = 0; i < hdr->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_TEXTURE) {
+            tex_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(tex_entry);
+
+    const NtTextureAssetHeaderV2 *tex_hdr = (const NtTextureAssetHeaderV2 *)(pack + tex_entry->offset);
+    TEST_ASSERT_EQUAL_HEX32(NT_TEXTURE_MAGIC, tex_hdr->magic);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex_hdr->compression);
+    /* Atlas pages must be premultiplied (set by pipeline_register). */
+    TEST_ASSERT_TRUE_MESSAGE((tex_hdr->flags & NT_TEXTURE_FLAG_PREMULTIPLIED) != 0, "atlas page must have premultiplied flag");
+
+    const uint8_t *page_pixels = (const uint8_t *)tex_hdr + sizeof(NtTextureAssetHeaderV2);
+    uint32_t page_w = tex_hdr->width;
+    uint32_t page_h = tex_hdr->height;
+
+    /* Find a hole pixel: any transparent pixel with at least one opaque
+     * neighbor on EACH of its four 4-connected sides (above, below, left,
+     * right). For our ring sprite, the only such pixels are the 4x4 inner
+     * hole pixels. Scanning for "first opaque" would find an extruded
+     * pixel from the dilation band instead. */
+    int32_t hole_x = -1;
+    int32_t hole_y = -1;
+    for (uint32_t y = 1; y + 1 < page_h && hole_x < 0; y++) {
+        for (uint32_t x = 1; x + 1 < page_w; x++) {
+            const uint8_t *p = &page_pixels[((size_t)y * page_w + x) * 4];
+            if (p[3] != 0) {
+                continue;
+            }
+            /* Walk outward in each direction looking for an opaque pixel.
+             * If all four directions hit opaque before leaving the page,
+             * this transparent pixel is enclosed — i.e. inside a hole. */
+            bool blocked_n = false, blocked_s = false, blocked_w = false, blocked_e = false;
+            for (uint32_t k = 1; y >= k && !blocked_n; k++) {
+                if (page_pixels[((size_t)(y - k) * page_w + x) * 4 + 3] != 0) {
+                    blocked_n = true;
+                }
+            }
+            for (uint32_t k = 1; y + k < page_h && !blocked_s; k++) {
+                if (page_pixels[((size_t)(y + k) * page_w + x) * 4 + 3] != 0) {
+                    blocked_s = true;
+                }
+            }
+            for (uint32_t k = 1; x >= k && !blocked_w; k++) {
+                if (page_pixels[((size_t)y * page_w + (x - k)) * 4 + 3] != 0) {
+                    blocked_w = true;
+                }
+            }
+            for (uint32_t k = 1; x + k < page_w && !blocked_e; k++) {
+                if (page_pixels[((size_t)y * page_w + (x + k)) * 4 + 3] != 0) {
+                    blocked_e = true;
+                }
+            }
+            if (blocked_n && blocked_s && blocked_w && blocked_e) {
+                hole_x = (int32_t)x;
+                hole_y = (int32_t)y;
+                break;
+            }
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(hole_x >= 0, "no enclosed transparent pixel found — dilation may have filled the hole");
+
+    const uint8_t *hole_pix = &page_pixels[((size_t)(uint32_t)hole_y * page_w + (uint32_t)hole_x) * 4];
+
+    /* The hole MUST be transparent. */
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, hole_pix[3], "ring hole was filled by dilation — polygon mask not preserving interior");
+    /* In premultiplied alpha, RGB of an alpha=0 pixel must also be 0. */
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, hole_pix[0], "ring hole RGB should be zero in premultiplied");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, hole_pix[1], "ring hole RGB should be zero in premultiplied");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, hole_pix[2], "ring hole RGB should be zero in premultiplied");
+
+    free(pack);
 }
 
 void test_atlas_round_trip_basic(void) {
@@ -4481,6 +4703,8 @@ int main(void) {
 
     /* Iterative dilation extrude (Phase 48 Plan 1.2) */
     RUN_TEST(test_extrude_dilate_l_shape);
+    RUN_TEST(test_extrude_dilate_binary_mask_preserves_hole);
+    RUN_TEST(test_atlas_real_pipeline_preserves_hole);
 
     /* Atlas round-trip tests (Phase 47 Plan 03) */
     RUN_TEST(test_atlas_round_trip_basic);

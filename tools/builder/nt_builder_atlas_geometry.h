@@ -68,6 +68,11 @@ uint32_t rdp_simplify(const Point2D *poly, uint32_t n, double epsilon, Point2D *
 /* Ray-casting point-in-polygon test (even-odd rule). */
 bool point_in_polygon(const Point2D *poly, uint32_t n, Point2D p);
 
+/* Float-coord point-in-polygon — used to test pixel centers (px+0.5, py+0.5)
+ * against an integer polygon. Avoids the off-by-one of integer corner tests
+ * on polygon boundaries. */
+bool point_in_polygon_f(const Point2D *poly, uint32_t n, double px, double py);
+
 /* Max distance from any opaque pixel center outside the polygon to the
  * polygon boundary. Returns 0 if every opaque pixel center is inside. */
 double polygon_max_outside_pixel_distance(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th);
