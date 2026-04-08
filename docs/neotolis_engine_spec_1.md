@@ -1836,7 +1836,7 @@ typedef struct {
     uint32_t extrude;        /* AABB edge pixel duplication count (default 0 with polygon_mode=true; invalid if >0 in polygon mode) */
     uint8_t alpha_threshold; /* alpha >= threshold = opaque (default 1) */
     uint8_t max_vertices;    /* max polygon vertices per region (default 16, hard cap) */
-    bool allow_rotate;       /* try 8 D4 orientations (default true) */
+    bool allow_transform;    /* try 8 D4 orientations (4 rotations × 2 flips; default true) */
     bool power_of_two;       /* round atlas dims to POT (default true) */
     bool polygon_mode;       /* concave contour vs 4-vertex bbox (default true) */
     bool debug_png;          /* write debug atlas page PNGs (default false) */

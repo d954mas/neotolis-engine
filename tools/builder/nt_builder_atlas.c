@@ -379,7 +379,7 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     pos += (uint32_t)sizeof(opts->max_vertices);
     memcpy(opts_buf + pos, &opts->format, sizeof(opts->format));
     pos += (uint32_t)sizeof(opts->format);
-    uint8_t flags = (uint8_t)((opts->allow_rotate ? 1 : 0) | (opts->power_of_two ? 2 : 0) | (opts->polygon_mode ? 4 : 0) | (opts->debug_png ? 8 : 0) | (opts->premultiplied ? 16 : 0));
+    uint8_t flags = (uint8_t)((opts->allow_transform ? 1 : 0) | (opts->power_of_two ? 2 : 0) | (opts->polygon_mode ? 4 : 0) | (opts->debug_png ? 8 : 0) | (opts->premultiplied ? 16 : 0));
     opts_buf[pos++] = flags;
     opts_buf[pos++] = (uint8_t)ATLAS_CACHE_KEY_VERSION;
     uint8_t hc = has_compress ? 1 : 0;

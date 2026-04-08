@@ -211,7 +211,9 @@ typedef struct {
     uint32_t extrude;                       /* AABB edge pixel duplication count (default: 0 with polygon_mode=true; must stay 0 in polygon mode) */
     uint8_t alpha_threshold;                /* alpha >= this = opaque for trimming (default: 1 per D-11) */
     uint8_t max_vertices;                   /* max polygon vertices per region (default: 16; downstream stack arrays limit to 32) */
-    bool allow_rotate;                      /* try rotations for better packing (default: true per D-11) */
+    bool allow_transform;                   /* try all 8 D4 orientations (4 rotations × 2 flips) for better packing.
+                                             * false = identity only. Matches the transform field on AtlasPlacement /
+                                             * NtAtlasRegion (default: true per D-11) */
     bool power_of_two;                      /* round atlas dims to POT (default: true per D-11) */
     bool polygon_mode;                      /* true = concave contour polygon, false = rect (default: true) */
     bool debug_png;                         /* write debug atlas page PNGs (default: false per D-11) */
@@ -233,7 +235,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .extrude = 0,
         .alpha_threshold = 1,
         .max_vertices = 8,
-        .allow_rotate = true,
+        .allow_transform = true,
         .power_of_two = true,
         .polygon_mode = true,
         .debug_png = false,

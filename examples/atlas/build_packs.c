@@ -102,7 +102,7 @@ int main(int argc, char *argv[]) {
     opts.max_size = (argc >= 3) ? (uint32_t)atoi(argv[2]) : 2048;
     opts.polygon_mode = true;
     opts.max_vertices = 8;
-    opts.allow_rotate = true;
+    opts.allow_transform = true;
     opts.debug_png = true;
     const char *glob_pattern = (argc >= 4) ? argv[3] : "assets/sprites/spineboy/*.png";
     const char *atlas_name = (argc >= 5) ? argv[4] : "spineboy";

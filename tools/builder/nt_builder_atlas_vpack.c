@@ -15,8 +15,9 @@
  *    better packing density (classic bin-packing heuristic).
  *
  * 3. For each sprite (in sorted order):
- *    a. Transform the inflated polygon into up to 8 D4 orientations (identity,
- *       flipH/V, diagonal, and 90°/180°/270° rotations if allow_rotate).
+ *    a. If opts.allow_transform, generate up to 8 D4 orientations of the
+ *       inflated polygon (identity + flipH/V + diagonal + 90°/180°/270°).
+ *       If opts.allow_transform is false, only identity is tried.
  *    b. Deduplicate orientations that produce identical shapes.
  *    c. For each orientation, compute AABB and candidate-position bounds.
  *    d. Try every existing page (plus a fresh page as fallback), for each
@@ -1349,7 +1350,7 @@ typedef struct {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, AtlasPlacement *out_placement) {
     double sprite_start = nt_time_now();
-    uint32_t orient_count = ctx->opts->allow_rotate ? 8 : 1;
+    uint32_t orient_count = ctx->opts->allow_transform ? 8 : 1;
 
     /* Transform exact pack polygon for all orientations.
      * Orthogonal D4 transforms preserve the exact offset shape, so we can
@@ -1561,7 +1562,7 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
  *   hull_counts[i]       — vertex count for hull i.
  *   sprite_count         — total sprites to pack.
  *   opts                 — extrude, padding, margin, max_size, power_of_two,
- *                          allow_rotate. The packer inflates hulls further by
+ *                          allow_transform. The packer inflates hulls further by
  *                          (extrude + padding/2) so NFP non-overlap guarantees
  *                          the desired clearance between sprites.
  *   thread_count         — 1 = single-threaded; > 1 starts a thread pool for
