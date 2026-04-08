@@ -46,8 +46,12 @@ package-lock.json
 #codex branch diff
 branch_diff.patch
 diff.txt
+_diff.txt
 diff_*.txt
 *.patch
+
+# Accidental outputs when running CLIs with --help or similar as the positional arg
+--help/
 
 # Claude local settings
 .claude/settings.local.json
