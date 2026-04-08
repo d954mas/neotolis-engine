@@ -348,7 +348,7 @@ static int uint64_cmp(const void *a, const void *b) {
 /* --- Atlas cache key computation (D-13) --- */
 
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts, bool has_compress, const nt_tex_compress_opts_t *compress) {
-    enum { ATLAS_CACHE_KEY_VERSION = 4 };
+    enum { ATLAS_CACHE_KEY_VERSION = 5 };
 
     /* Collect decoded hashes */
     uint64_t *hashes = (uint64_t *)malloc(sprite_count * sizeof(uint64_t));
@@ -1255,10 +1255,10 @@ static void pipeline_compose(AtlasPipeline *p) {
         uint32_t inner_x = pl->x + extrude_val;
         uint32_t inner_y = pl->y + extrude_val;
 
-        blit_sprite(p->page_pixels[pl->page], p->page_w[pl->page], p->sprites[idx].rgba, p->sprites[idx].width, pl->trim_x, pl->trim_y, pl->trimmed_w, pl->trimmed_h, inner_x, inner_y, pl->rotation);
+        blit_sprite(p->page_pixels[pl->page], p->page_w[pl->page], p->sprites[idx].rgba, p->sprites[idx].width, pl->trim_x, pl->trim_y, pl->trimmed_w, pl->trimmed_h, inner_x, inner_y, pl->transform);
 
-        uint32_t blit_w = (pl->rotation & 4) ? pl->trimmed_h : pl->trimmed_w;
-        uint32_t blit_h = (pl->rotation & 4) ? pl->trimmed_w : pl->trimmed_h;
+        uint32_t blit_w = (pl->transform & 4) ? pl->trimmed_h : pl->trimmed_w;
+        uint32_t blit_h = (pl->transform & 4) ? pl->trimmed_w : pl->trimmed_h;
         extrude_edges(p->page_pixels[pl->page], p->page_w[pl->page], p->page_h[pl->page], inner_x, inner_y, blit_w, blit_h, extrude_val);
     }
 }
@@ -1287,10 +1287,10 @@ static void pipeline_debug_png(AtlasPipeline *p) {
             uint32_t si = p->placements[pi].sprite_index;
 
             if (p->opts->polygon_mode && p->hull_vertices[si] && p->vertex_counts[si] >= 3) {
-                debug_draw_hull_outline(debug_page, p->page_w[pg], p->page_h[pg], p->hull_vertices[si], p->vertex_counts[si], ix, iy, p->trim_w[si], p->trim_h[si], p->placements[pi].rotation);
+                debug_draw_hull_outline(debug_page, p->page_w[pg], p->page_h[pg], p->hull_vertices[si], p->vertex_counts[si], ix, iy, p->trim_w[si], p->trim_h[si], p->placements[pi].transform);
             } else {
-                uint32_t rw = (p->placements[pi].rotation & 4) ? p->placements[pi].trimmed_h : p->placements[pi].trimmed_w;
-                uint32_t rh = (p->placements[pi].rotation & 4) ? p->placements[pi].trimmed_w : p->placements[pi].trimmed_h;
+                uint32_t rw = (p->placements[pi].transform & 4) ? p->placements[pi].trimmed_h : p->placements[pi].trimmed_w;
+                uint32_t rh = (p->placements[pi].transform & 4) ? p->placements[pi].trimmed_w : p->placements[pi].trimmed_h;
                 debug_draw_rect_outline(debug_page, p->page_w[pg], p->page_h[pg], ix, iy, rw, rh);
             }
         }
@@ -1331,8 +1331,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
     /* Count total vertices and indices for UNIQUE sprites only.
      * Duplicates are sprites with identical pixel data — they share placement with
      * their original (occupying the same atlas position), so they share vertex_start
-     * and index_start in the blob. This both saves space and fits big atlases (4812+
-     * sprites) within uint16 vertex/index_start limits.
+     * and index_start in the blob. This saves space for very large atlases.
      * Pre-triangulated sprites (multi-component) have an exact triangle count;
      * single-component polygons use fan/ear-clip triangulation = (n - 2) triangles.
      * region->index_count is uint8_t (max 255) → cap triangles per region at 85. */
@@ -1434,8 +1433,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
         uint32_t tri_count = ear_clip_triangulate(p->hull_vertices[i], p->vertex_counts[i], local_indices);
         uint32_t idx_count = tri_count * 3;
         NT_BUILD_ASSERT(idx_count <= UINT8_MAX && "pipeline_serialize: region index_count exceeds uint8_t");
-        NT_BUILD_ASSERT(vertex_cursor <= UINT16_MAX && "pipeline_serialize: vertex_start exceeds uint16_t");
-        NT_BUILD_ASSERT(index_cursor <= UINT16_MAX && "pipeline_serialize: index_start exceeds uint16_t");
+        /* vertex_start/index_start are uint32_t in v3 — no practical bound until 4G entries. */
 
         sprite_vertex_start[i] = vertex_cursor;
         sprite_index_start[i] = index_cursor;
@@ -1459,7 +1457,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
 
             int32_t tx;
             int32_t ty;
-            transform_point(lx, ly, pl->rotation, (int32_t)p->trim_w[i], (int32_t)p->trim_h[i], &tx, &ty);
+            transform_point(lx, ly, pl->transform, (int32_t)p->trim_w[i], (int32_t)p->trim_h[i], &tx, &ty);
             float atlas_px = (float)inner_x + (float)tx;
             float atlas_py = (float)inner_y + (float)ty;
 
@@ -1510,11 +1508,11 @@ static void pipeline_serialize(AtlasPipeline *p) {
         reg->trim_offset_y = (int16_t)p->trim_y[i];
         reg->origin_x = p->sprites[i].origin_x;
         reg->origin_y = p->sprites[i].origin_y;
-        reg->vertex_start = (uint16_t)sprite_vertex_start[i];
+        reg->vertex_start = sprite_vertex_start[i];
+        reg->index_start = sprite_index_start[i];
         reg->vertex_count = (uint8_t)p->vertex_counts[i];
         reg->page_index = (uint8_t)pl->page;
-        reg->rotated = pl->rotation;
-        reg->index_start = (uint16_t)sprite_index_start[i];
+        reg->transform = pl->transform;
         reg->index_count = (uint8_t)sprite_idx_count[i];
     }
 

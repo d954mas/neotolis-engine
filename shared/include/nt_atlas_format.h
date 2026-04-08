@@ -5,10 +5,10 @@
 
 /* Magic: ASCII "ATLS" as uint32_t little-endian = 0x534C5441 */
 #define NT_ATLAS_MAGIC 0x534C5441
-#define NT_ATLAS_VERSION 2
+#define NT_ATLAS_VERSION 3
 
 /*
- * Atlas asset binary layout (v2):
+ * Atlas asset binary layout (v3):
  *
  *   Offset 0: NtAtlasHeader (28 bytes)
  *   Then: uint64_t texture_resource_ids[page_count]
@@ -22,6 +22,13 @@
  * Runtime offsets them by vertex_start when building GPU buffers.
  * Triangle list: every 3 consecutive indices form one triangle.
  * Convex regions use fan triangulation; concave use ear-clipping.
+ *
+ * v3 changes from v2:
+ *   - NtAtlasRegion.rotated → transform (field rename only; same 3-bit D4
+ *     flags, clearer intent: it's a transform mask, not a bool)
+ *   - NtAtlasRegion.vertex_start and .index_start widened from uint16_t to
+ *     uint32_t so a single atlas can hold more than 64K vertices/indices.
+ *     Region struct grew from 32 to 36 bytes.
  */
 
 #pragma pack(push, 1)
@@ -48,15 +55,18 @@ typedef struct {
     int16_t trim_offset_y; /* 14: pixels removed from top */
     float origin_x;        /* 16: origin X in source-image space (D-08: float, not fixed-point) */
     float origin_y;        /* 20: origin Y in source-image space */
-    uint16_t vertex_start; /* 24: index into vertex array */
-    uint8_t vertex_count;  /* 26: number of vertices for this region */
-    uint8_t page_index;    /* 27: which texture page this region belongs to */
-    uint8_t rotated;       /* 28: 3-bit transform: bit0=flipH, bit1=flipV, bit2=diagonal */
-    uint8_t index_count;   /* 29: number of triangle indices for this region */
-    uint16_t index_start;  /* 30: index into the index array */
-} NtAtlasRegion;           /* 32 bytes */
+    uint32_t vertex_start; /* 24: index into vertex array (uint32 in v3, was uint16 in v2) */
+    uint32_t index_start;  /* 28: index into the index array (uint32 in v3, was uint16 in v2) */
+    uint8_t vertex_count;  /* 32: number of vertices for this region (max 16 per builder limit) */
+    uint8_t page_index;    /* 33: which texture page this region belongs to */
+    uint8_t transform;     /* 34: D4 transform flags — bit0=flipH, bit1=flipV, bit2=diagonal.
+                            *     Apply order: diagonal → flipH → flipV. 0 = identity. */
+    uint8_t index_count;   /* 35: triangle indices for this region. uint8_t caps at 255 =
+                            *     85 triangles; with max_vertices=16 the ear-clip/fan output
+                            *     is at most (16-2)*3 = 42 indices, so 1 byte is sufficient. */
+} NtAtlasRegion;           /* 36 bytes */
 #pragma pack(pop)
-_Static_assert(sizeof(NtAtlasRegion) == 32, "NtAtlasRegion must be 32 bytes");
+_Static_assert(sizeof(NtAtlasRegion) == 36, "NtAtlasRegion must be 36 bytes");
 
 #pragma pack(push, 1)
 typedef struct {

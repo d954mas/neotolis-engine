@@ -1514,7 +1514,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
                     out_placements[ridx].page = 0;
                     out_placements[ridx].x = opts->margin;
                     out_placements[ridx].y = opts->margin;
-                    out_placements[ridx].rotation = 0;
+                    out_placements[ridx].transform = 0;
                 }
                 break;
             }
@@ -1561,7 +1561,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
             NT_BUILD_ASSERT(best_x >= (int32_t)extrude && best_y >= (int32_t)extrude && "vector_pack: placement too close to edge for extrude");
             out_placements[idx].x = (uint32_t)(best_x - (int32_t)extrude);
             out_placements[idx].y = (uint32_t)(best_y - (int32_t)extrude);
-            out_placements[idx].rotation = orient_orig[best_orient];
+            out_placements[idx].transform = orient_orig[best_orient];
 
             if (best_x + win_poly_max_x > (int32_t)pages[best_page].used_w) {
                 pages[best_page].used_w = (uint32_t)(best_x + win_poly_max_x);

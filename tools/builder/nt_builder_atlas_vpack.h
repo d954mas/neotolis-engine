@@ -25,14 +25,15 @@ extern "C" {
 #endif
 
 /* Sprite placement result after packing.
- * rotation is a 3-bit D4 transform mask (bit0=flipH, bit1=flipV, bit2=diagonal).
+ * transform is a 3-bit D4 mask: bit0=flipH, bit1=flipV, bit2=diagonal.
+ * Apply order: diagonal → flipH → flipV. 0 = identity.
  *
  * NOTE: this struct is serialized directly to the atlas cache file via fwrite.
- * Trailing padding after the uint8_t rotation field is written to disk. Allocate
- * placement arrays with calloc (or memset) so padding bytes are deterministic —
- * otherwise cache files contain uninitialized memory and diff noisily between
- * runs. The _Static_assert locks the expected size; adding fields forces a
- * fresh cache format review. */
+ * Trailing padding after the uint8_t transform field is written to disk.
+ * Allocate placement arrays with calloc (or memset) so padding bytes are
+ * deterministic — otherwise cache files contain uninitialized memory and diff
+ * noisily between runs. The _Static_assert locks the expected size; adding
+ * fields forces a fresh cache format review. */
 typedef struct {
     uint32_t sprite_index; /* index into original sprite array */
     uint32_t page;         /* which atlas page (0-based) */
@@ -41,7 +42,7 @@ typedef struct {
     uint32_t trimmed_h;    /* trimmed sprite height */
     uint32_t trim_x;       /* trim offset from source image left */
     uint32_t trim_y;       /* trim offset from source image top */
-    uint8_t rotation;      /* D4 transform flags */
+    uint8_t transform;     /* D4 transform flags */
 } AtlasPlacement;
 _Static_assert(sizeof(AtlasPlacement) == 36, "AtlasPlacement size is baked into the atlas cache file; any change must bump ATLAS_CACHE_KEY_VERSION");
 
