@@ -4430,7 +4430,12 @@ void test_atlas_codegen(void) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_codegen_large(void) {
-    enum { LARGE_ATLAS_REGION_COUNT = 4200 };
+    /* 500 regions is enough to exercise "many regions + codegen name mangling
+     * for high indices" — the SPR0499 name check below is the real invariant.
+     * allow_transform=false: every sprite is identical, so 8 D4 orientations
+     * would just multiply packer work by 8 for zero benefit. Together these
+     * keep the test under a few seconds in debug+ASAN instead of ~10 minutes. */
+    enum { LARGE_ATLAS_REGION_COUNT = 500 };
 
     (void)MKDIR(TMP_DIR);
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_codegen_large.ntpack");
@@ -4438,6 +4443,7 @@ void test_atlas_codegen_large(void) {
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.polygon_mode = false;
+    opts.allow_transform = false;
     nt_builder_begin_atlas(ctx, "sprites", &opts);
 
     for (uint32_t i = 0; i < LARGE_ATLAS_REGION_COUNT; i++) {
@@ -4482,8 +4488,8 @@ void test_atlas_codegen_large(void) {
     TEST_ASSERT_NOT_NULL(h_buf);
     TEST_ASSERT_TRUE(h_size > 0);
     TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "ASSET_ATLAS_SPRITES"));
-    TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "ASSET_ATLAS_REGION_SPRITES_SPR4199_PNG"));
-    TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "sprites/spr4199.png"));
+    TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "ASSET_ATLAS_REGION_SPRITES_SPR0499_PNG"));
+    TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "sprites/spr0499.png"));
     free(h_buf);
 }
 
