@@ -1647,9 +1647,9 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
     return sprite_count;
 }
 
-/* --- Test-access wrapper (vpack internals remain static) --- */
-
-#ifdef NT_BUILDER_ATLAS_TEST_ACCESS
+/* --- Test-access wrapper (vpack internals remain static) ---
+ * Thin pass-through for unit tests to exercise vpack_point_in_nfp without
+ * exposing internal types. Always compiled; builder is a developer tool. */
 bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, uint32_t ring_count, int32_t px, int32_t py) {
     NT_BUILD_ASSERT(ring_count <= VPACK_NFP_MAX_RINGS && "nt_atlas_test_vpack_point_in_nfp: too many rings");
     NT_BUILD_ASSERT(vert_count <= VPACK_NFP_MAX_VERTS && "nt_atlas_test_vpack_point_in_nfp: too many vertices");
@@ -1665,4 +1665,3 @@ bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_cou
     }
     return vpack_point_in_nfp(px, py, &nfp);
 }
-#endif
