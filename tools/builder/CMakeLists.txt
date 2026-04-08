@@ -49,29 +49,32 @@ set_target_properties(nt_basisu_encoder PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tools/builder/${NT_PRESET_NAME}"
 )
 
-# Clipper2 (polygon clipping, offset, Minkowski, CDT — C++ static lib with C API)
+# Clipper2 (polygon clipping, offset, Minkowski, CDT — upstream C++ sources,
+# no nt_ prefix since this is pure vendored code; matches tinycthread/miniz
+# convention for third-party libs wrapped without our own glue)
 set(CLIPPER2_DIR "${NT_ENGINE_ROOT}/deps/clipper2/CPP/Clipper2Lib")
-add_library(nt_clipper2 STATIC
+add_library(clipper2 STATIC
     "${CLIPPER2_DIR}/src/clipper.engine.cpp"
     "${CLIPPER2_DIR}/src/clipper.offset.cpp"
     "${CLIPPER2_DIR}/src/clipper.rectclip.cpp"
     "${CLIPPER2_DIR}/src/clipper.triangulation.cpp"
 )
-target_include_directories(nt_clipper2 PUBLIC "${CLIPPER2_DIR}/include")
-target_compile_definitions(nt_clipper2 PRIVATE _CRT_SECURE_NO_WARNINGS)
-target_compile_options(nt_clipper2 PRIVATE -w)
-target_compile_options(nt_clipper2 PRIVATE -U_DLL)
-set_target_properties(nt_clipper2 PROPERTIES
+target_include_directories(clipper2 PUBLIC "${CLIPPER2_DIR}/include")
+target_compile_definitions(clipper2 PRIVATE _CRT_SECURE_NO_WARNINGS)
+target_compile_options(clipper2 PRIVATE -w)
+target_compile_options(clipper2 PRIVATE -U_DLL)
+set_target_properties(clipper2 PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:>"
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tools/builder/${NT_PRESET_NAME}"
 )
 
-# Clipper2 C bridge (C++ → extern "C" wrapper for inflate, triangulate, Minkowski)
+# Clipper2 C bridge (our C++ → extern "C" wrapper; the nt_ prefix is legit
+# because nt_clipper2_bridge.cpp is our code, not vendored)
 add_library(nt_clipper2_bridge STATIC nt_clipper2_bridge.cpp)
 target_include_directories(nt_clipper2_bridge PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(nt_clipper2_bridge PUBLIC nt_clipper2)
+target_link_libraries(nt_clipper2_bridge PUBLIC clipper2)
 target_compile_definitions(nt_clipper2_bridge PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_compile_options(nt_clipper2_bridge PRIVATE -w -U_DLL)
 set_target_properties(nt_clipper2_bridge PROPERTIES
