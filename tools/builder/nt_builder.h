@@ -202,26 +202,44 @@ static inline nt_tex_compress_opts_t nt_tex_compress_uastc_highest(void) { retur
 
 /* --- Atlas options (begin_atlas configuration) --- */
 
+/* Per-sprite silhouette mode for the atlas packer.
+ *
+ * Ordered by packing density and geometry-stage cost (both grow with the value):
+ *
+ *   RECT             fastest, worst pack density
+ *   CONVEX_HULL      medium — convex hull builder only
+ *   CONCAVE_CONTOUR  densest, slowest — contour trace + RDP + multi-strategy
+ *
+ * AABB edge extrude (opts.extrude > 0) is only valid for RECT. Non-RECT modes
+ * must use padding instead, since the pack polygon reserves space for the
+ * silhouette envelope, not for the full trim rect extrude band. */
+typedef enum {
+    NT_ATLAS_SHAPE_RECT = 0,
+    NT_ATLAS_SHAPE_CONVEX_HULL = 1,
+    NT_ATLAS_SHAPE_CONCAVE_CONTOUR = 2,
+} nt_atlas_shape_t;
+
 typedef struct {
     const nt_tex_compress_opts_t *compress; /* NULL = raw RGBA (per D-01) */
     nt_texture_pixel_format_t format;       /* output pixel format (default: NT_TEXTURE_FORMAT_RGBA8) */
     uint32_t max_size;                      /* max atlas page dimension (default: 2048 per D-11) */
-    uint32_t padding;                       /* extra spacing between sprites after extrude (default: 0 per D-11) */
+    uint32_t padding;                       /* extra spacing between sprites after extrude (default: 2 per D-11) */
     uint32_t margin;                        /* atlas edge margin (default: 0 per D-11) */
-    uint32_t extrude;                       /* AABB edge pixel duplication count (default: 0 with polygon_mode=true; must stay 0 in polygon mode) */
-    uint8_t alpha_threshold;                /* alpha >= this = opaque for trimming (default: 1 per D-11) */
-    uint8_t max_vertices;                   /* max polygon vertices per region (default: 16; downstream stack arrays limit to 32) */
-    bool allow_transform;                   /* try all 8 D4 orientations (4 rotations × 2 flips) for better packing.
-                                             * false = identity only. Matches the transform field on AtlasPlacement /
-                                             * NtAtlasRegion (default: true per D-11) */
-    bool power_of_two;                      /* round atlas dims to POT (default: true per D-11) */
-    bool polygon_mode;                      /* true = concave contour polygon, false = rect (default: true) */
-    bool debug_png;                         /* write debug atlas page PNGs (default: false per D-11) */
-    bool premultiplied;                     /* true (default) = premultiply RGB by alpha during page encoding.
-                                             * Required for correct bilinear filtering at sprite gaps.
-                                             * Only meaningful for NT_TEXTURE_FORMAT_RGBA8.
-                                             * Setting false is supported but emits a warning — valid only for
-                                             * NEAREST-filtered or fully opaque atlases. */
+    uint32_t extrude; /* AABB edge pixel duplication count. Default 0. Must stay 0 unless shape == NT_ATLAS_SHAPE_RECT — the packer reserves space for the silhouette envelope, not for an extrude band
+                         outside it. */
+    uint8_t alpha_threshold; /* alpha >= this = opaque for trimming (default: 1 per D-11) */
+    uint8_t max_vertices;    /* max polygon vertices per region (default: 8; hard cap 16 — downstream stack arrays limit to 32) */
+    nt_atlas_shape_t shape;  /* silhouette mode (default: NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
+    bool allow_transform;    /* try all 8 D4 orientations (4 rotations × 2 flips) for better packing.
+                              * false = identity only. Matches the transform field on AtlasPlacement /
+                              * NtAtlasRegion (default: true per D-11) */
+    bool power_of_two;       /* round atlas dims to POT (default: true per D-11) */
+    bool debug_png;          /* write debug atlas page PNGs (default: false per D-11) */
+    bool premultiplied;      /* true (default) = premultiply RGB by alpha during page encoding.
+                              * Required for correct bilinear filtering at sprite gaps.
+                              * Only meaningful for NT_TEXTURE_FORMAT_RGBA8.
+                              * Setting false is supported but emits a warning — valid only for
+                              * NEAREST-filtered or fully opaque atlases. */
 } nt_atlas_opts_t;
 
 /* Default atlas options (all D-11 values) */
@@ -235,9 +253,9 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .extrude = 0,
         .alpha_threshold = 1,
         .max_vertices = 8,
+        .shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR,
         .allow_transform = true,
         .power_of_two = true,
-        .polygon_mode = true,
         .debug_png = false,
         .premultiplied = true,
     };

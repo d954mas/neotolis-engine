@@ -1794,7 +1794,7 @@ The atlas builder packs a set of sprite images into one or more atlas pages and 
 nt_atlas_opts_t opts = nt_atlas_opts_defaults();  /* sane defaults per below */
 opts.max_size = 2048;
 opts.max_vertices = 8;
-opts.polygon_mode = true;
+opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
 
 nt_builder_begin_atlas(ctx, "spineboy", &opts);
 nt_builder_atlas_add_glob(ctx, "assets/sprites/spineboy/*.png");
@@ -1834,22 +1834,35 @@ The packer is **NFP/Minkowski-based** (`nt_builder_atlas_vpack.c`). For each can
 ### 23.11.3 Atlas options
 
 ```c
+/* Silhouette mode for atlas packing. Ordered by cost and density. */
+typedef enum {
+    NT_ATLAS_SHAPE_RECT = 0,             /* AABB trim rect — fastest, worst pack density */
+    NT_ATLAS_SHAPE_CONVEX_HULL = 1,      /* convex hull of opaque pixels — no contour trace */
+    NT_ATLAS_SHAPE_CONCAVE_CONTOUR = 2,  /* concave contour + multi-strategy — densest, slowest */
+} nt_atlas_shape_t;
+
 typedef struct {
     const nt_tex_compress_opts_t *compress;  /* NULL = raw RGBA */
     nt_texture_pixel_format_t format;        /* RGBA8 default */
     uint32_t max_size;       /* max atlas page dimension (default 2048) */
     uint32_t padding;        /* extra spacing between sprites after extrude (default 2) */
     uint32_t margin;         /* atlas edge margin (default 0) */
-    uint32_t extrude;        /* AABB edge pixel duplication count (default 0; must be 0 when polygon_mode=true) */
+    uint32_t extrude;        /* AABB edge pixel duplication count (default 0; must be 0 unless shape == NT_ATLAS_SHAPE_RECT) */
     uint8_t alpha_threshold; /* alpha >= threshold = opaque (default 1) */
     uint8_t max_vertices;    /* max polygon vertices per region (default 8, hard cap 16) */
+    nt_atlas_shape_t shape;  /* silhouette mode (default NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
     bool allow_transform;    /* try 8 D4 orientations (4 rotations × 2 flips; default true) */
     bool power_of_two;       /* round atlas dims to POT (default true) */
-    bool polygon_mode;       /* concave contour vs 4-vertex bbox (default true) */
     bool debug_png;          /* write debug atlas page PNGs (default false) */
     bool premultiplied;      /* premultiply RGB by alpha during texture encode (default true) */
 } nt_atlas_opts_t;
 ```
+
+**Silhouette modes (`nt_atlas_shape_t`):**
+
+- `NT_ATLAS_SHAPE_RECT` — 4-vertex AABB of the trim rect. No contour tracing, no hull, no RDP. Fastest geometry stage; lowest pack density because the packer cannot slot concave notches between sprites. The only mode where `extrude > 0` is legal.
+- `NT_ATLAS_SHAPE_CONVEX_HULL` — convex hull of opaque pixels via `binary_build_convex_polygon`, simplified to `max_vertices`. Skips morphological closing, contour tracing, RDP, and the 4-strategy pipeline entirely. Good compromise when sprites are roughly convex: noticeably denser than `RECT` without paying the full concave cost.
+- `NT_ATLAS_SHAPE_CONCAVE_CONTOUR` (default) — traces the concave alpha boundary, runs RDP plus a multi-strategy simplification (RDP / perpendicular distance / bbox / convex hull), Clipper2-inflates the chosen polygon, and post-verifies pixel coverage. Internally falls back to `binary_build_convex_polygon` for degenerate inputs (disjoint components that morphological closing cannot merge, degenerate contours, Clipper2 inflate failure). Densest packing, highest cost.
 
 **Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline with `premultiplied = true`, which writes `RGB' = (RGB * A + 127) / 255` into the page before `strip_channels` (RAW path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. Setting `premultiplied = false` logs a warning and is only valid for NEAREST-filtered or fully-opaque atlases; combining it with a non-RGBA8 `format` is a hard assert.
 

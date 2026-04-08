@@ -348,7 +348,10 @@ static int uint64_cmp(const void *a, const void *b) {
 /* --- Atlas cache key computation (D-13) --- */
 
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts, bool has_compress, const nt_tex_compress_opts_t *compress) {
-    enum { ATLAS_CACHE_KEY_VERSION = 5 };
+    /* Bump on any change to the byte layout below, the flag-bit ordering, or
+     * the shape enum ordering — otherwise cached atlases would silently bind
+     * to a different pack behaviour. v6: polygon_mode bool → shape enum. */
+    enum { ATLAS_CACHE_KEY_VERSION = 6 };
 
     /* Collect decoded hashes */
     uint64_t *hashes = (uint64_t *)malloc(sprite_count * sizeof(uint64_t));
@@ -379,8 +382,12 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     pos += (uint32_t)sizeof(opts->max_vertices);
     memcpy(opts_buf + pos, &opts->format, sizeof(opts->format));
     pos += (uint32_t)sizeof(opts->format);
-    uint8_t flags = (uint8_t)((opts->allow_transform ? 1 : 0) | (opts->power_of_two ? 2 : 0) | (opts->polygon_mode ? 4 : 0) | (opts->debug_png ? 8 : 0) | (opts->premultiplied ? 16 : 0));
+    /* Bit 4 (value 4) was polygon_mode in v5; freed in v6 since shape is
+     * serialised as a dedicated byte below. Do not re-use it without bumping
+     * ATLAS_CACHE_KEY_VERSION. */
+    uint8_t flags = (uint8_t)((opts->allow_transform ? 1 : 0) | (opts->power_of_two ? 2 : 0) | (opts->debug_png ? 8 : 0) | (opts->premultiplied ? 16 : 0));
     opts_buf[pos++] = flags;
+    opts_buf[pos++] = (uint8_t)opts->shape;
     opts_buf[pos++] = (uint8_t)ATLAS_CACHE_KEY_VERSION;
     uint8_t hc = has_compress ? 1 : 0;
     opts_buf[pos++] = hc;
@@ -597,7 +604,8 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
      * reserved area and collide with neighbors. This is a config error:
      * polygon packing must use padding-only, or rect packing if AABB
      * extrude is needed. */
-    NT_BUILD_ASSERT((!state->opts.polygon_mode || state->opts.extrude == 0) && "begin_atlas: polygon_mode=true requires extrude=0 (AABB extrude is only valid for rect packing)");
+    NT_BUILD_ASSERT((state->opts.shape == NT_ATLAS_SHAPE_RECT || state->opts.extrude == 0) &&
+                    "begin_atlas: opts.extrude > 0 requires shape == NT_ATLAS_SHAPE_RECT — polygon modes reserve space for the silhouette envelope, not for an AABB extrude band");
 
     /* Initialize sprite array */
     state->sprite_capacity = 64;
@@ -1005,11 +1013,24 @@ static void pipeline_geometry(AtlasPipeline *p) {
         uint32_t tw = p->trim_w[idx];
         uint32_t th = p->trim_h[idx];
 
-        if (p->opts->polygon_mode) {
+        if (p->opts->shape == NT_ATLAS_SHAPE_RECT) {
+            /* Rect mode: 4-vertex trim bounding box. */
+            p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
+            NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
+            p->hull_vertices[idx][0] = (Point2D){0, 0};
+            p->hull_vertices[idx][1] = (Point2D){(int32_t)tw, 0};
+            p->hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
+            p->hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
+            p->vertex_counts[idx] = 4;
+            continue;
+        }
+
+        /* Polygon modes (CONVEX_HULL or CONCAVE_CONTOUR): extract a binary alpha
+         * mask for the trimmed region, then dispatch on shape. */
+        {
             const uint8_t *ap = p->alpha_planes[idx];
             uint32_t aw = p->sprites[idx].width;
 
-            /* Build binary mask for trimmed region */
             uint8_t *binary = (uint8_t *)calloc((size_t)tw * th, 1);
             NT_BUILD_ASSERT(binary && "pipeline_geometry: alloc failed");
             for (uint32_t y = 0; y < th; y++) {
@@ -1020,6 +1041,20 @@ static void pipeline_geometry(AtlasPipeline *p) {
                     }
                 }
             }
+
+            if (p->opts->shape == NT_ATLAS_SHAPE_CONVEX_HULL) {
+                /* Convex hull mode: skip morphological closing, contour trace, and
+                 * the 4-strategy concave pipeline. The convex hull of opaque pixels
+                 * trivially contains disjoint components and every opaque pixel, so
+                 * none of that machinery is needed. */
+                p->hull_vertices[idx] = binary_build_convex_polygon(binary, tw, th, p->opts->max_vertices, &p->vertex_counts[idx]);
+                free(binary);
+                continue;
+            }
+
+            /* NT_ATLAS_SHAPE_CONCAVE_CONTOUR: full concave pipeline with convex
+             * fallback when morphological closing or contour trace cannot produce
+             * a valid simple polygon. */
 
             // #region Morphological closing — merge disjoint components into one
             /* If sprite has multiple disjoint opaque regions, iteratively dilate the
@@ -1167,15 +1202,6 @@ static void pipeline_geometry(AtlasPipeline *p) {
             }
             free(binary_source);
             free(binary);
-        } else {
-            /* Rect mode: 4-vertex trim bounding box. */
-            p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
-            NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
-            p->hull_vertices[idx][0] = (Point2D){0, 0};
-            p->hull_vertices[idx][1] = (Point2D){(int32_t)tw, 0};
-            p->hull_vertices[idx][2] = (Point2D){(int32_t)tw, (int32_t)th};
-            p->hull_vertices[idx][3] = (Point2D){0, (int32_t)th};
-            p->vertex_counts[idx] = 4;
         }
     }
 
@@ -1286,7 +1312,7 @@ static void pipeline_debug_png(AtlasPipeline *p) {
             uint32_t iy = p->placements[pi].y + extrude_val;
             uint32_t si = p->placements[pi].sprite_index;
 
-            if (p->opts->polygon_mode && p->hull_vertices[si] && p->vertex_counts[si] >= 3) {
+            if (p->opts->shape != NT_ATLAS_SHAPE_RECT && p->hull_vertices[si] && p->vertex_counts[si] >= 3) {
                 debug_draw_hull_outline(debug_page, p->page_w[pg], p->page_h[pg], p->hull_vertices[si], p->vertex_counts[si], ix, iy, p->trim_w[si], p->trim_h[si], p->placements[pi].transform);
             } else {
                 uint32_t rw = (p->placements[pi].transform & 4) ? p->placements[pi].trimmed_h : p->placements[pi].trimmed_w;

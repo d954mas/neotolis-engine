@@ -96,21 +96,22 @@ int main(int argc, char *argv[]) {
     nt_builder_add_shader(ctx, "assets/shaders/mesh_inst.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/mesh_inst.frag", NT_BUILD_SHADER_FRAGMENT);
 
-    /* --- Atlas: pack sprites with polygon mode --- */
+    /* --- Atlas: pack sprites with concave polygon mode --- */
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.max_size = (argc >= 3) ? (uint32_t)atoi(argv[2]) : 2048;
-    opts.polygon_mode = true;
+    opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
     opts.max_vertices = 8;
     opts.allow_transform = true;
     opts.debug_png = true;
     const char *glob_pattern = (argc >= 4) ? argv[3] : "assets/sprites/spineboy/*.png";
     const char *atlas_name = (argc >= 5) ? argv[4] : "spineboy";
     if (argc >= 6 && argv[5][0] == 'r') {
-        opts.polygon_mode = false;
+        opts.shape = NT_ATLAS_SHAPE_RECT;
     }
     uint32_t max_sprites = (argc >= 7) ? (uint32_t)atoi(argv[6]) : 0;
-    (void)printf("atlas=%s max=%u poly=%s max_sprites=%u\n", atlas_name, opts.max_size, opts.polygon_mode ? "yes" : "no", max_sprites);
+    const char *shape_name = (opts.shape == NT_ATLAS_SHAPE_RECT) ? "rect" : (opts.shape == NT_ATLAS_SHAPE_CONVEX_HULL) ? "convex" : "concave";
+    (void)printf("atlas=%s max=%u shape=%s max_sprites=%u\n", atlas_name, opts.max_size, shape_name, max_sprites);
 
     nt_builder_begin_atlas(ctx, atlas_name, &opts);
     if (max_sprites > 0) {

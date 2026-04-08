@@ -3933,7 +3933,7 @@ void test_atlas_real_pipeline_preserves_hole(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_ring_e2e.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
 
-    /* Default opts → polygon_mode=true, extrude=0, premultiplied=true */
+    /* Default opts → shape=CONCAVE_CONTOUR, extrude=0, premultiplied=true */
     nt_builder_begin_atlas(ctx, "ring", NULL);
     nt_builder_atlas_add_raw(ctx, pixels, W, H, "ring.png");
     nt_builder_end_atlas(ctx);
@@ -4028,12 +4028,12 @@ void test_atlas_real_pipeline_preserves_hole(void) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_atlas_polygon_mode_rejects_extrude(void) {
+void test_atlas_shape_concave_rejects_extrude(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poly_extrude_assert.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
-    opts.polygon_mode = true;
+    opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
     opts.extrude = 2;
 
     EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "poly", &opts));
@@ -4235,7 +4235,7 @@ void test_atlas_round_trip_vertices(void) {
     free(buf);
 }
 
-void test_atlas_polygon_mode_uses_convex_fallback_on_disjoint_sprite(void) {
+void test_atlas_shape_concave_falls_back_to_convex_on_disjoint_sprite(void) {
     (void)MKDIR(TMP_DIR);
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_disjoint_convex.ntpack");
     TEST_ASSERT_NOT_NULL(ctx);
@@ -4274,6 +4274,70 @@ void test_atlas_polygon_mode_uses_convex_fallback_on_disjoint_sprite(void) {
     const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
     TEST_ASSERT_EQUAL_UINT32(1, ahdr->region_count);
     TEST_ASSERT_TRUE(regions[0].vertex_count > 4);
+
+    free(buf);
+}
+
+/* Verify NT_ATLAS_SHAPE_CONVEX_HULL produces a polygon (>4 verts) for a shape
+ * whose convex hull is strictly larger than the trim rect, proving that the
+ * mode actually runs the convex hull builder and not the rect fallback. An
+ * opaque triangle fills the top-left half of the bounding box, so its hull
+ * is a 3-vertex triangle within a 32x32 trim; the builder inflates that up
+ * to max_vertices but it must stay ≥ 4 and ≠ the trim rect. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_shape_convex_hull_produces_polygon(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_shape_convex.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    enum { W = 32, H = 32 };
+    uint8_t *s = make_test_sprite(W, H, 255, 255, 255, 0);
+    /* Upper-left triangle: pixels where x + y < W are opaque. Its convex hull
+     * is a 3-vertex triangle. */
+    for (uint32_t y = 0; y < H; y++) {
+        for (uint32_t x = 0; x < W; x++) {
+            if (x + y < W) {
+                s[(((y * W) + x) * 4) + 3] = 255;
+            }
+        }
+    }
+
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_CONVEX_HULL;
+    nt_builder_begin_atlas(ctx, "convex", &opts);
+    nt_builder_atlas_add_raw(ctx, s, W, H, "triangle.png");
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_shape_convex.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)ablob;
+    const uint8_t *ptr = ablob + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
+    TEST_ASSERT_EQUAL_UINT32(1, ahdr->region_count);
+    /* Convex hull of the half-square triangle has at least 3 verts. RECT mode
+     * would produce exactly 4, so anything other than 4 proves this is not
+     * the RECT path. In practice binary_build_convex_polygon returns 3. */
+    TEST_ASSERT_TRUE(regions[0].vertex_count >= 3);
+    TEST_ASSERT_NOT_EQUAL(4, regions[0].vertex_count);
 
     free(buf);
 }
@@ -4442,7 +4506,7 @@ void test_atlas_codegen_large(void) {
     TEST_ASSERT_NOT_NULL(ctx);
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
-    opts.polygon_mode = false;
+    opts.shape = NT_ATLAS_SHAPE_RECT;
     opts.allow_transform = false;
     nt_builder_begin_atlas(ctx, "sprites", &opts);
 
@@ -4503,7 +4567,7 @@ void test_atlas_opts_defaults(void) {
     TEST_ASSERT_EQUAL(8, opts.max_vertices);
     TEST_ASSERT_TRUE(opts.allow_transform);
     TEST_ASSERT_TRUE(opts.power_of_two);
-    TEST_ASSERT_TRUE(opts.polygon_mode);
+    TEST_ASSERT_EQUAL(NT_ATLAS_SHAPE_CONCAVE_CONTOUR, opts.shape);
     TEST_ASSERT_FALSE(opts.debug_png);
     TEST_ASSERT_NULL(opts.compress);
 }
@@ -4663,13 +4727,14 @@ int main(void) {
     RUN_TEST(test_extrude_edges_aabb_l_shape);
     RUN_TEST(test_extrude_edges_preserve_hole);
     RUN_TEST(test_atlas_real_pipeline_preserves_hole);
-    RUN_TEST(test_atlas_polygon_mode_rejects_extrude);
+    RUN_TEST(test_atlas_shape_concave_rejects_extrude);
 
     /* Atlas round-trip tests (Phase 47 Plan 03) */
     RUN_TEST(test_atlas_round_trip_basic);
     RUN_TEST(test_atlas_round_trip_regions);
     RUN_TEST(test_atlas_round_trip_vertices);
-    RUN_TEST(test_atlas_polygon_mode_uses_convex_fallback_on_disjoint_sprite);
+    RUN_TEST(test_atlas_shape_concave_falls_back_to_convex_on_disjoint_sprite);
+    RUN_TEST(test_atlas_shape_convex_hull_produces_polygon);
     RUN_TEST(test_atlas_duplicate_detection);
     RUN_TEST(test_atlas_multi_page);
     RUN_TEST(test_atlas_codegen);
