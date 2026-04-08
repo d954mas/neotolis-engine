@@ -291,17 +291,6 @@ uint32_t fan_triangulate(uint32_t vertex_count, uint16_t *indices) {
     }
     return tri_count;
 }
-/* --- Point-in-triangle test (for ear-clipping) --- */
-
-static bool point_in_triangle(Point2D a, Point2D b, Point2D c, Point2D p) {
-    int64_t d1 = cross2d(a, b, p);
-    int64_t d2 = cross2d(b, c, p);
-    int64_t d3 = cross2d(c, a, p);
-    bool has_neg = (d1 < 0) || (d2 < 0) || (d3 < 0);
-    bool has_pos = (d1 > 0) || (d2 > 0) || (d3 > 0);
-    return !(has_neg && has_pos);
-}
-
 /* --- Triangulation via Clipper2 Constrained Delaunay Triangulation --- */
 
 /* Triangulates a simple polygon (convex or concave). Uses Clipper2 CDT
