@@ -189,7 +189,7 @@ uint32_t hull_simplify(const Point2D *hull, uint32_t n, uint32_t max_vertices, P
             }
 
             /* Triangle area = 0.5 * |cross(prev->i, prev->next)| */
-            double area = fabs((double)(hull[i].x - hull[prev].x) * (double)(hull[next].y - hull[prev].y) - (double)(hull[i].y - hull[prev].y) * (double)(hull[next].x - hull[prev].x));
+            double area = fabs(((double)(hull[i].x - hull[prev].x) * (double)(hull[next].y - hull[prev].y)) - ((double)(hull[i].y - hull[prev].y) * (double)(hull[next].x - hull[prev].x)));
             if (area < min_area) {
                 min_area = area;
                 min_idx = i;
@@ -315,7 +315,7 @@ uint32_t ear_clip_triangulate(const Point2D *poly, uint32_t n, uint16_t *indices
     NT_BUILD_ASSERT(xy && "triangulate: alloc failed");
     for (uint32_t i = 0; i < n; i++) {
         xy[i * 2] = poly[i].x;
-        xy[i * 2 + 1] = poly[i].y;
+        xy[(i * 2) + 1] = poly[i].y;
     }
     uint16_t *cdt_indices = NULL;
     uint32_t tri_count = nt_clipper2_triangulate(xy, n, &cdt_indices);
@@ -337,7 +337,7 @@ uint32_t ear_clip_triangulate(const Point2D *poly, uint32_t n, uint16_t *indices
 bool point_in_polygon(const Point2D *poly, uint32_t n, Point2D p) {
     bool inside = false;
     for (uint32_t i = 0, j = n - 1; i < n; j = i++) {
-        if (((poly[i].y > p.y) != (poly[j].y > p.y)) && (p.x < (int32_t)(((int64_t)(poly[j].x - poly[i].x) * (int64_t)(p.y - poly[i].y)) / (int64_t)(poly[j].y - poly[i].y) + poly[i].x))) {
+        if (((poly[i].y > p.y) != (poly[j].y > p.y)) && (p.x < (int32_t)((((int64_t)(poly[j].x - poly[i].x) * (int64_t)(p.y - poly[i].y)) / (int64_t)(poly[j].y - poly[i].y)) + poly[i].x))) {
             inside = !inside;
         }
     }
@@ -611,10 +611,11 @@ uint32_t trace_contour(const uint8_t *binary, uint32_t tw, uint32_t th, Point2D 
     int l_ = (dir + 3) & 3;
     int b_ = (dir + 2) & 3;
     // clang-format off
-    if      (EDGE_EXISTS(cx, cy, r_)) dir = r_;
-    else if (EDGE_EXISTS(cx, cy, s_)) dir = s_;
-    else if (EDGE_EXISTS(cx, cy, l_)) dir = l_;
-    else                              dir = b_;
+    if      (EDGE_EXISTS(cx, cy, r_)) { dir = r_;
+    } else if (EDGE_EXISTS(cx, cy, s_)) { dir = s_;
+    } else if (EDGE_EXISTS(cx, cy, l_)) { dir = l_;
+    } else {                              dir = b_;
+}
     // clang-format on
     if (dir == 0) {
         cx++;
@@ -635,10 +636,11 @@ uint32_t trace_contour(const uint8_t *binary, uint32_t tw, uint32_t th, Point2D 
         l_ = (dir + 3) & 3;
         b_ = (dir + 2) & 3;
         // clang-format off
-        if      (EDGE_EXISTS(cx, cy, r_)) dir = r_;
-        else if (EDGE_EXISTS(cx, cy, s_)) dir = s_;
-        else if (EDGE_EXISTS(cx, cy, l_)) dir = l_;
-        else                              dir = b_;
+        if      (EDGE_EXISTS(cx, cy, r_)) { dir = r_;
+        } else if (EDGE_EXISTS(cx, cy, s_)) { dir = s_;
+        } else if (EDGE_EXISTS(cx, cy, l_)) { dir = l_;
+        } else {                              dir = b_;
+}
         // clang-format on
         if (dir == 0) {
             cx++;
@@ -839,7 +841,7 @@ uint32_t polygon_inflate(const Point2D *hull, uint32_t n, float amount, Point2D 
     NT_BUILD_ASSERT(xy && "polygon_inflate: alloc failed");
     for (uint32_t i = 0; i < n; i++) {
         xy[i * 2] = hull[i].x;
-        xy[i * 2 + 1] = hull[i].y;
+        xy[(i * 2) + 1] = hull[i].y;
     }
     int32_t *inflated_xy = NULL;
     uint32_t out_count = nt_clipper2_inflate(xy, n, (double)amount, &inflated_xy);
@@ -866,23 +868,29 @@ uint32_t polygon_inflate(const Point2D *hull, uint32_t n, float amount, Point2D 
     }
     /* Sanity check: inflated coordinates must be within reasonable bounds (~input range + amount).
      * If Clipper2 returned something weird, fall back to the input. */
-    int32_t in_min_x = hull[0].x, in_max_x = hull[0].x;
-    int32_t in_min_y = hull[0].y, in_max_y = hull[0].y;
+    int32_t in_min_x = hull[0].x;
+    int32_t in_max_x = hull[0].x;
+    int32_t in_min_y = hull[0].y;
+    int32_t in_max_y = hull[0].y;
     for (uint32_t i = 1; i < n; i++) {
-        if (hull[i].x < in_min_x)
+        if (hull[i].x < in_min_x) {
             in_min_x = hull[i].x;
-        if (hull[i].x > in_max_x)
+        }
+        if (hull[i].x > in_max_x) {
             in_max_x = hull[i].x;
-        if (hull[i].y < in_min_y)
+        }
+        if (hull[i].y < in_min_y) {
             in_min_y = hull[i].y;
-        if (hull[i].y > in_max_y)
+        }
+        if (hull[i].y > in_max_y) {
             in_max_y = hull[i].y;
+        }
     }
     int32_t margin = (int32_t)(amount * 4.0F) + 16;
     bool sane = true;
     for (uint32_t i = 0; i < out_count; i++) {
         int32_t x = (int32_t)inflated_xy[i * 2];
-        int32_t y = (int32_t)inflated_xy[i * 2 + 1];
+        int32_t y = (int32_t)inflated_xy[(i * 2) + 1];
         if (x < in_min_x - margin || x > in_max_x + margin || y < in_min_y - margin || y > in_max_y + margin) {
             sane = false;
             break;
@@ -896,7 +904,7 @@ uint32_t polygon_inflate(const Point2D *hull, uint32_t n, float amount, Point2D 
     }
     for (uint32_t i = 0; i < out_count; i++) {
         out[i].x = inflated_xy[i * 2];
-        out[i].y = inflated_xy[i * 2 + 1];
+        out[i].y = inflated_xy[(i * 2) + 1];
     }
     free(inflated_xy);
     return out_count;

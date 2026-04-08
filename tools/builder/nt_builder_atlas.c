@@ -142,7 +142,7 @@ static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rg
             uint32_t sx = 0;
             while (sx < trim_w) {
                 /* Skip transparent pixels */
-                while (sx < trim_w && src_row[sx * 4 + 3] == 0) {
+                while (sx < trim_w && src_row[(sx * 4) + 3] == 0) {
                     sx++;
                 }
                 if (sx >= trim_w) {
@@ -150,7 +150,7 @@ static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rg
                 }
                 /* Find end of opaque run */
                 uint32_t run_start = sx;
-                while (sx < trim_w && src_row[sx * 4 + 3] != 0) {
+                while (sx < trim_w && src_row[(sx * 4) + 3] != 0) {
                     sx++;
                 }
                 memcpy(&dst_row[run_start * 4], &src_row[run_start * 4], (size_t)(sx - run_start) * 4);
@@ -1074,7 +1074,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
             if (comp_count > 1) {
                 uint8_t *scratch = (uint8_t *)malloc((size_t)tw * th);
                 NT_BUILD_ASSERT(scratch && "pipeline_geometry: alloc failed");
-                uint32_t max_iter = (tw > th ? tw : th) / 2 + 1;
+                uint32_t max_iter = ((tw > th ? tw : th) / 2) + 1;
                 while (comp_count > 1 && closing_k < max_iter) {
                     binary_dilate_4conn(binary, scratch, tw, th);
                     memcpy(binary, scratch, (size_t)tw * th);
@@ -1093,7 +1093,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
             if (!convex_reason) {
                 /* Trace outer contour (CCW). Worst-case contour length is
                  * 2*(tw*th) for maximally jagged shapes (checkerboard). */
-                uint32_t max_contour = 2 * tw * th + 4;
+                uint32_t max_contour = (2 * tw * th) + 4;
                 Point2D *contour = (Point2D *)malloc(max_contour * sizeof(Point2D));
                 NT_BUILD_ASSERT(contour && "pipeline_geometry: alloc failed");
                 uint32_t contour_count = trace_contour(binary, tw, th, contour, max_contour);
@@ -1128,7 +1128,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                     NT_BUILD_ASSERT(simp_xy && "pipeline_geometry: alloc failed");
                     for (uint32_t v = 0; v < simp_count; v++) {
                         simp_xy[v * 2] = simplified[v].x;
-                        simp_xy[v * 2 + 1] = simplified[v].y;
+                        simp_xy[(v * 2) + 1] = simplified[v].y;
                     }
                     free(simplified);
 
@@ -1146,7 +1146,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                         NT_BUILD_ASSERT(result && "pipeline_geometry: alloc failed");
                         for (uint32_t v = 0; v < inf_count; v++) {
                             result[v].x = inflated_xy[v * 2];
-                            result[v].y = inflated_xy[v * 2 + 1];
+                            result[v].y = inflated_xy[(v * 2) + 1];
                         }
                         free(inflated_xy);
 
