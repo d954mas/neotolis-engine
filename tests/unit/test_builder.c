@@ -357,9 +357,100 @@ void test_texture_round_trip(void) {
     TEST_ASSERT_EQUAL_UINT32(2, tex.height);
     TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_FORMAT_RGBA8, tex.format);
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex.compression);
+    /* Default opts: premultiplied=false → flags=0 for plain texture */
+    TEST_ASSERT_EQUAL_UINT8(0, tex.flags);
     TEST_ASSERT_EQUAL_UINT32(2 * 2 * 4, tex.data_size);
 
     (void)fclose(f);
+}
+
+/* --- Premultiplied alpha: formula + flag propagation --- */
+
+/* Known input → known output through the real encoder, exercising
+ * premultiply_rgba_copy(), flag write in the header, and the full pack
+ * pipeline. Verifies the rounding formula (x*a + 127) / 255 matches the
+ * contract documented in nt_texture_format.h. */
+void test_texture_premultiplied_encoding(void) {
+    /* Four hand-picked pixels covering interesting alpha values:
+     *   alpha=255 → RGB unchanged (lossless)
+     *   alpha=128 → RGB ≈ half  (tests round-to-nearest)
+     *   alpha=1   → RGB collapses to near-zero
+     *   alpha=0   → RGB fully zeroed */
+    uint8_t raw_pixels[4 * 4] = {
+        /* (R, G, B, A) */
+        255, 128, 0,   255, /* fully opaque — lossless */
+        200, 100, 50,  128, /* half alpha — test rounding */
+        255, 255, 255, 1,   /* tiny alpha — RGB collapses */
+        255, 128, 0,   0,   /* transparent — RGB zeroed */
+    };
+
+    const char *pack_path = TMP_DIR "/premul_test.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_tex_opts_t opts = {
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+        .max_size = 0,
+        .compress = NULL,
+        .premultiplied = true,
+    };
+    nt_builder_add_texture_raw(ctx, raw_pixels, 4, 1, "tex/premul_test", &opts);
+
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+
+    NtPackHeader hdr;
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
+    NtAssetEntry entry;
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
+    TEST_ASSERT_EQUAL_UINT8(NT_ASSET_TEXTURE, entry.asset_type);
+
+    (void)fseek(f, (long)entry.offset, SEEK_SET);
+    NtTextureAssetHeaderV2 tex;
+    TEST_ASSERT_EQUAL(1, fread(&tex, sizeof(tex), 1, f));
+    TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, tex.magic);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex.compression);
+    /* Flag must be set — this is the whole point of premultiplied=true. */
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_FLAG_PREMULTIPLIED, tex.flags & NT_TEXTURE_FLAG_PREMULTIPLIED);
+    TEST_ASSERT_EQUAL_UINT32(4 * 1 * 4, tex.data_size);
+
+    uint8_t pix[16];
+    TEST_ASSERT_EQUAL(1, fread(pix, sizeof(pix), 1, f));
+    (void)fclose(f);
+
+    /* Expected values from formula (x * a + 127) / 255 */
+
+    /* Pixel 0: alpha=255 → lossless */
+    TEST_ASSERT_EQUAL_UINT8(255, pix[0]);
+    TEST_ASSERT_EQUAL_UINT8(128, pix[1]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix[2]);
+    TEST_ASSERT_EQUAL_UINT8(255, pix[3]);
+
+    /* Pixel 1: (200,100,50, 128)
+     * 200*128+127 = 25727; /255 = 100 (exact: 100.890...)
+     * 100*128+127 = 12927; /255 = 50  (exact: 50.694...)
+     * 50*128+127  = 6527;  /255 = 25  (exact: 25.596...) */
+    TEST_ASSERT_EQUAL_UINT8(100, pix[4]);
+    TEST_ASSERT_EQUAL_UINT8(50, pix[5]);
+    TEST_ASSERT_EQUAL_UINT8(25, pix[6]);
+    TEST_ASSERT_EQUAL_UINT8(128, pix[7]);
+
+    /* Pixel 2: (255, 255, 255, 1)
+     * 255*1+127 = 382; /255 = 1 */
+    TEST_ASSERT_EQUAL_UINT8(1, pix[8]);
+    TEST_ASSERT_EQUAL_UINT8(1, pix[9]);
+    TEST_ASSERT_EQUAL_UINT8(1, pix[10]);
+    TEST_ASSERT_EQUAL_UINT8(1, pix[11]);
+
+    /* Pixel 3: alpha=0 → all zero regardless of RGB */
+    TEST_ASSERT_EQUAL_UINT8(0, pix[12]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix[13]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix[14]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix[15]);
 }
 
 /* --- Mesh round-trip test --- */
@@ -4250,6 +4341,9 @@ int main(void) {
     RUN_TEST(test_fan_triangulate_quad);
     RUN_TEST(test_fan_triangulate_triangle);
     RUN_TEST(test_vpack_point_in_nfp_block_any_ring);
+
+    /* Premultiplied alpha (Phase 48 Plan 1.1) */
+    RUN_TEST(test_texture_premultiplied_encoding);
 
     /* Atlas round-trip tests (Phase 47 Plan 03) */
     RUN_TEST(test_atlas_round_trip_basic);

@@ -359,7 +359,7 @@ static int uint64_cmp(const void *a, const void *b) {
 /* --- Atlas cache key computation (D-13) --- */
 
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts, bool has_compress, const nt_tex_compress_opts_t *compress) {
-    enum { ATLAS_CACHE_KEY_VERSION = 3 };
+    enum { ATLAS_CACHE_KEY_VERSION = 4 };
 
     /* Collect decoded hashes */
     uint64_t *hashes = (uint64_t *)malloc(sprite_count * sizeof(uint64_t));
@@ -390,7 +390,7 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     pos += (uint32_t)sizeof(opts->max_vertices);
     memcpy(opts_buf + pos, &opts->format, sizeof(opts->format));
     pos += (uint32_t)sizeof(opts->format);
-    uint8_t flags = (uint8_t)((opts->allow_rotate ? 1 : 0) | (opts->power_of_two ? 2 : 0) | (opts->polygon_mode ? 4 : 0) | (opts->debug_png ? 8 : 0));
+    uint8_t flags = (uint8_t)((opts->allow_rotate ? 1 : 0) | (opts->power_of_two ? 2 : 0) | (opts->polygon_mode ? 4 : 0) | (opts->debug_png ? 8 : 0) | (opts->premultiplied ? 16 : 0));
     opts_buf[pos++] = flags;
     opts_buf[pos++] = (uint8_t)ATLAS_CACHE_KEY_VERSION;
     uint8_t hc = has_compress ? 1 : 0;
@@ -598,6 +598,9 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
     }
     state->opts.compress = NULL; /* zeroed -- use has_compress flag */
     NT_BUILD_ASSERT(state->opts.max_vertices <= 16 && "begin_atlas: max_vertices must be <= 16 (NFP buffer limit: nA+nB <= 32)");
+    /* premultiplied alpha only meaningful for RGBA8. Setting it true with RGB8/RG8/R8
+     * is a caller bug — there's no alpha channel to multiply by. */
+    NT_BUILD_ASSERT((!state->opts.premultiplied || state->opts.format == NT_TEXTURE_FORMAT_RGBA8) && "begin_atlas: premultiplied=true requires NT_TEXTURE_FORMAT_RGBA8");
 
     /* Initialize sprite array */
     state->sprite_capacity = 64;
@@ -1546,6 +1549,7 @@ static void pipeline_register(AtlasPipeline *p) {
         td->opts.format = p->opts->format;
         td->opts.max_size = 0;
         td->opts.compress = NULL;
+        td->opts.premultiplied = p->opts->premultiplied; /* propagate to texture encoder (validated in begin_atlas) */
         if (p->state->has_compress) {
             td->compress = p->state->compress;
             td->has_compress = true;
@@ -1630,6 +1634,14 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
 
     NtBuildAtlasState *state = ctx->active_atlas;
     NT_BUILD_ASSERT(state->sprite_count > 0 && "end_atlas: atlas has no sprites");
+
+    /* Warn on non-premultiplied atlases. Bilinear filtering at sprite gaps
+     * mixes opaque pixels with transparent (0,0,0,0) background, producing
+     * dark fringes. Valid use cases (NEAREST filter, fully opaque sprites)
+     * exist but are rare — keep the user aware. */
+    if (!state->opts.premultiplied) {
+        NT_LOG_WARN("atlas '%s': premultiplied=false — bilinear filter will cause dark fringes at sprite edges. Use only with NEAREST filter or fully opaque sprites.", state->name);
+    }
 
     AtlasPipeline p = {0};
     p.ctx = ctx;

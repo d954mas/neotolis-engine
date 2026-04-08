@@ -59,6 +59,33 @@ static uint8_t *strip_channels(const uint8_t *rgba, uint32_t pixel_count, uint32
     return out;
 }
 
+/* Premultiply RGB by alpha in a working copy of the input RGBA buffer.
+ * RGB' = round(RGB * A / 255). Alpha channel is left untouched.
+ *
+ * Applied BEFORE any downstream processing (channel strip for RAW, Basis
+ * encode for BASIS) so lossy block compression operates on the correct
+ * data — no wasted bits on "invisible" RGB in transparent pixels, and no
+ * dark fringes when the GPU bilinearly filters opaque ↔ transparent edges.
+ *
+ * Returns a heap-allocated buffer (caller frees). Only called when
+ * opts->premultiplied is true AND the source format is RGBA8. */
+static uint8_t *premultiply_rgba_copy(const uint8_t *rgba, uint32_t pixel_count) {
+    uint8_t *out = (uint8_t *)malloc((size_t)pixel_count * 4);
+    if (!out) {
+        return NULL;
+    }
+    for (uint32_t i = 0; i < pixel_count; i++) {
+        uint32_t a = rgba[(i * 4) + 3];
+        /* Round-to-nearest: (x * a + 127) / 255. For a=0 result is 0,
+         * for a=255 result equals x (lossless for fully opaque). */
+        out[(i * 4) + 0] = (uint8_t)(((uint32_t)rgba[(i * 4) + 0] * a + 127U) / 255U);
+        out[(i * 4) + 1] = (uint8_t)(((uint32_t)rgba[(i * 4) + 1] * a + 127U) / 255U);
+        out[(i * 4) + 2] = (uint8_t)(((uint32_t)rgba[(i * 4) + 2] * a + 127U) / 255U);
+        out[(i * 4) + 3] = (uint8_t)a;
+    }
+    return out;
+}
+
 /* --- Decode: image data -> RGBA pixels (eager, called from add_*) --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -136,21 +163,35 @@ nt_build_result_t nt_builder_decode_texture_raw(const uint8_t *rgba_pixels, uint
 
 /* --- Encode: RGBA pixels -> independent buffer (thread-safe, no shared state) --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, uint8_t **out_data, uint32_t *out_size,
                                                    nt_asset_type_t *out_type, uint16_t *out_version) {
     nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
     uint32_t pixel_count = width * height;
     uint32_t bpp = nt_texture_bpp(fmt);
 
+    /* Premultiply RGB * A before strip. Only RGBA8 has a meaningful alpha
+     * channel; for other formats premultiplied=true is a caller bug. */
+    bool premul = opts && opts->premultiplied;
+    NT_BUILD_ASSERT((!premul || fmt == NT_TEXTURE_FORMAT_RGBA8) && "texture encode: premultiplied=true requires NT_TEXTURE_FORMAT_RGBA8");
+
+    uint8_t *premul_buf = NULL;
+    const uint8_t *source = rgba_pixels;
+    if (premul) {
+        premul_buf = premultiply_rgba_copy(rgba_pixels, pixel_count);
+        NT_BUILD_ASSERT(premul_buf && "texture encode: premultiply alloc failed");
+        source = premul_buf;
+    }
+
     /* Strip channels if needed */
     uint8_t *stripped = NULL;
     const uint8_t *final_data;
     if (bpp < 4) {
-        stripped = strip_channels(rgba_pixels, pixel_count, bpp);
+        stripped = strip_channels(source, pixel_count, bpp);
         NT_BUILD_ASSERT(stripped && "texture encode: strip_channels alloc failed");
         final_data = stripped;
     } else {
-        final_data = rgba_pixels;
+        final_data = source;
     }
 
     /* Build v2 header (RAW compression -- uncompressed pixel data) */
@@ -164,7 +205,7 @@ nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, u
     tex_hdr.height = height;
     tex_hdr.mip_count = 1;
     tex_hdr.compression = (uint8_t)NT_TEXTURE_COMPRESSION_RAW;
-    tex_hdr._pad = 0;
+    tex_hdr.flags = premul ? (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED : 0;
     tex_hdr.data_size = data_size;
 
     uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeaderV2) + data_size;
@@ -175,6 +216,7 @@ nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, u
     memcpy(buf + sizeof(NtTextureAssetHeaderV2), final_data, data_size);
 
     free(stripped);
+    free(premul_buf);
 
     *out_data = buf;
     *out_size = total_asset_size;
@@ -183,6 +225,7 @@ nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, u
     return NT_BUILD_OK;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_tex_opts_t *opts, const nt_tex_compress_opts_t *compress_opts,
                                                               uint32_t encode_threads, uint8_t **out_data, uint32_t *out_size, nt_asset_type_t *out_type, uint16_t *out_version) {
     nt_texture_pixel_format_t fmt = (opts && opts->format) ? opts->format : NT_TEXTURE_FORMAT_RGBA8;
@@ -194,11 +237,28 @@ nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgb
     /* Determine alpha from format (D-06) */
     bool has_alpha = (fmt == NT_TEXTURE_FORMAT_RGBA8);
 
+    /* Premultiply before Basis encode: block compression is lossy and perceptually
+     * optimized, so feeding it the correct data (with RGB zeroed in transparent
+     * pixels) avoids wasting bits on "invisible" RGB and prevents dark fringes
+     * after decode. Only meaningful when format has an alpha channel. */
+    bool premul = opts && opts->premultiplied;
+    NT_BUILD_ASSERT((!premul || has_alpha) && "texture encode: premultiplied=true requires NT_TEXTURE_FORMAT_RGBA8");
+
+    uint8_t *premul_buf = NULL;
+    const uint8_t *source = rgba_pixels;
+    if (premul) {
+        premul_buf = premultiply_rgba_copy(rgba_pixels, width * height);
+        NT_BUILD_ASSERT(premul_buf && "texture encode: premultiply alloc failed");
+        source = premul_buf;
+    }
+
     /* Encode via Basis Universal -- adaptive pool size per worker */
     bool uastc = (compress_opts->mode == NT_TEX_COMPRESS_UASTC);
     uint32_t bt = (encode_threads > 0) ? encode_threads : 1;
     nt_basisu_encode_result_t enc =
-        nt_basisu_encode(bt, rgba_pixels, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->endpoint_rdo_quality, compress_opts->selector_rdo_quality, true);
+        nt_basisu_encode(bt, source, width, height, has_alpha, uastc, compress_opts->quality, compress_opts->endpoint_rdo_quality, compress_opts->selector_rdo_quality, true);
+
+    free(premul_buf);
 
     NT_BUILD_ASSERT(enc.data && "texture encode: Basis encode failed");
 
@@ -212,7 +272,7 @@ nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgb
     tex_hdr.height = height;
     tex_hdr.mip_count = (uint16_t)enc.mip_count;
     tex_hdr.compression = (uint8_t)NT_TEXTURE_COMPRESSION_BASIS;
-    tex_hdr._pad = 0;
+    tex_hdr.flags = premul ? (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED : 0;
     tex_hdr.data_size = enc.size;
 
     uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeaderV2) + enc.size;

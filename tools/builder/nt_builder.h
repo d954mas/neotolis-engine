@@ -150,6 +150,10 @@ typedef struct {
     nt_texture_pixel_format_t format;       /* output pixel format (default: NT_TEXTURE_FORMAT_RGBA8) */
     uint32_t max_size;                      /* 0 = no resize, otherwise max(w,h) clamped to this */
     const nt_tex_compress_opts_t *compress; /* NULL = raw/uncompressed, non-NULL = Basis compress */
+    bool premultiplied;                     /* true = RGB premultiplied by alpha before encoding.
+                                             * Default false for compatibility. Set true for UI/sprite
+                                             * textures rendered with bilinear filtering to avoid dark
+                                             * fringes at alpha edges. Only meaningful for RGBA8. */
 } nt_tex_opts_t;
 
 /* --- Texture compression options (Basis Universal encoding) --- */
@@ -211,6 +215,11 @@ typedef struct {
     bool power_of_two;                      /* round atlas dims to POT (default: true per D-11) */
     bool polygon_mode;                      /* true = concave contour polygon, false = rect (default: true) */
     bool debug_png;                         /* write debug atlas page PNGs (default: false per D-11) */
+    bool premultiplied;                     /* true (default) = premultiply RGB by alpha during page encoding.
+                                             * Required for correct bilinear filtering at sprite gaps.
+                                             * Only meaningful for NT_TEXTURE_FORMAT_RGBA8.
+                                             * Setting false is supported but emits a warning — valid only for
+                                             * NEAREST-filtered or fully opaque atlases. */
 } nt_atlas_opts_t;
 
 /* Default atlas options (all D-11 values) */
@@ -228,6 +237,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .power_of_two = true,
         .polygon_mode = true,
         .debug_png = false,
+        .premultiplied = true,
     };
 }
 

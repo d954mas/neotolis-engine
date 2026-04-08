@@ -70,6 +70,65 @@ Polygon mode makes the search harder: more candidate positions pass
 initial checks but fail on detailed collision, and the tile grid has
 a "swiss cheese" pattern at high fill levels.
 
+## Pixel Format & Premultiplied Alpha
+
+Atlas pages are encoded through the regular texture pipeline and default
+to **premultiplied alpha** (`nt_atlas_opts_t.premultiplied = true`). The
+`NtTextureAssetHeader.flags` byte carries `NT_TEXTURE_FLAG_PREMULTIPLIED`
+so the runtime (and material blend state) can identify the format.
+
+### Why premultiplied
+
+NFP packing places sprites with sub-pixel clearance — gaps between sprites
+are `(0, 0, 0, 0)` after `calloc`. When the GPU bilinearly filters a UV
+close to a sprite edge, it blends opaque color with the gap. In straight
+alpha this produces **dark fringes**: the RGB of the opaque pixel gets
+averaged with (0,0,0), making edges visibly darker. In premultiplied
+space, `(0,0,0,0)` is the identity element for `(ONE, ONE_MINUS_SRC_ALPHA)`
+blending — bilinear interpolation stays correct across the alpha boundary
+and there are no fringes.
+
+### Pipeline position
+
+Premultiplication happens **once**, inside the texture encoder
+(`nt_builder_texture.c`), immediately before `strip_channels` (RAW path)
+or `nt_basisu_encode` (BASIS path). Doing it before Basis is important:
+block compression is lossy and perceptually tuned, so feeding it straight
+alpha wastes bits encoding "invisible" RGB in transparent pixels and can
+introduce artifacts after decode.
+
+`blit_sprite` stays a plain copy — no math on the hot composition path.
+The atlas pipeline just sets `td->opts.premultiplied = true` in
+`pipeline_register` and the encoder does the rest.
+
+### Formula
+
+```
+RGB' = (RGB * A + 127) / 255
+A'   = A
+```
+
+Integer round-to-nearest. Lossless when `A == 255`, fully zeroes RGB when
+`A == 0`. See `premultiply_rgba_copy` in `nt_builder_texture.c`.
+
+### Rendering contract
+
+Atlas pages and any `nt_tex_opts_t` texture with `premultiplied = true`
+**must** be drawn with blend mode `(ONE, ONE_MINUS_SRC_ALPHA)`. Other blend
+modes will not match the stored pixel layout.
+
+### Overriding the default
+
+Setting `nt_atlas_opts_t.premultiplied = false` is supported but logs a
+warning from `end_atlas`. Valid only for:
+
+- NEAREST-filtered atlases (no bilinear → no fringes)
+- Fully opaque sprite sets where the alpha channel is unused
+
+Mixing `premultiplied = true` with a non-RGBA8 pixel format is a hard
+error — `begin_atlas` asserts. Alpha must exist for premultiplication to
+mean anything.
+
 ## Per-Sprite Tile Grid
 
 Each sprite gets its own tile grid from its inflated convex hull.

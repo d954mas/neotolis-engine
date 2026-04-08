@@ -37,13 +37,17 @@ typedef enum {
     NT_TEXTURE_COMPRESSION_BASIS = 1, /* Basis Universal encoded data */
 } nt_texture_compression_t;
 
+/* Texture header flags (single byte, room for future bits: sRGB, linear, ...) */
+#define NT_TEXTURE_FLAG_PREMULTIPLIED (1u << 0) /* RGB already multiplied by alpha */
+/* bits 1..7 reserved */
+
 /*
  * TextureAssetHeader -- 24 bytes.
  *
  * Layout:
  *   magic(4) + version(2) + format(2) +
  *   width(4) + height(4) + mip_count(2) +
- *   compression(1) + _pad(1) + data_size(4)
+ *   compression(1) + flags(1) + data_size(4)
  *
  * compression field:
  *   RAW(0): uncompressed pixel data follows, data_size = width*height*bpp
@@ -52,6 +56,12 @@ typedef enum {
  * format field serves double duty:
  *   RAW: pixel layout (RGBA8, RGB8, RG8, R8)
  *   BASIS: source channel config (RGBA8 = has alpha, RGB8 = no alpha)
+ *
+ * flags field (was _pad in earlier builds):
+ *   bit 0 = NT_TEXTURE_FLAG_PREMULTIPLIED — RGB values are already multiplied
+ *           by alpha. Renderer should use blend (ONE, ONE_MINUS_SRC_ALPHA).
+ *   Older packs wrote 0 to this byte, which maps to "no flags set" — existing
+ *   assets keep working without a version bump.
  *
  * No mip_sizes[] array: RAW mips are calculable from dimensions,
  * BASIS mip boundaries are parsed internally by the transcoder.
@@ -65,7 +75,7 @@ typedef struct {
     uint32_t height;     /* base level height in pixels */
     uint16_t mip_count;  /* number of mip levels in chain */
     uint8_t compression; /* nt_texture_compression_t: 0=RAW, 1=BASIS */
-    uint8_t _pad;        /* alignment padding */
+    uint8_t flags;       /* NT_TEXTURE_FLAG_* bits (was _pad) */
     uint32_t data_size;  /* total bytes of data after this header */
 } NtTextureAssetHeader;
 #pragma pack(pop)
