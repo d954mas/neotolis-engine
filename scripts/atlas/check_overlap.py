@@ -4,7 +4,7 @@
 Reads NtAtlas blob + a page PNG, rasterizes each unique polygon hull
 (deduped by vertex_start) into a grid, counts overlapping cells.
 
-Usage: check_atlas_overlap.py <blob.ntpack> <page0.png>
+Usage: python scripts/atlas/check_overlap.py <blob.ntpack> <page0.png>
 Returns exit 0 if no overlap, exit 1 if overlap detected.
 """
 import struct
@@ -35,26 +35,46 @@ def main(blob_path, page_path):
         vb = data[verts_off + v * 8 : verts_off + (v + 1) * 8]
         verts.append(struct.unpack("<hhHH", vb))
 
+    # NtAtlasRegion v3 layout (36 bytes, shared/include/nt_atlas_format.h):
+    #   name_hash     Q   @0
+    #   source_w      H   @8
+    #   source_h      H   @10
+    #   trim_offset_x h   @12
+    #   trim_offset_y h   @14
+    #   origin_x      f   @16
+    #   origin_y      f   @20
+    #   vertex_start  I   @24   (u32 in v3, was u16 in v2)
+    #   index_start   I   @28   (u32 in v3, was u16 in v2)
+    #   vertex_count  B   @32
+    #   page_index    B   @33
+    #   transform     B   @34
+    #   index_count   B   @35
+    REGION_FMT = "<QHHhhffIIBBBB"
+    REGION_SIZE = struct.calcsize(REGION_FMT)
+    assert REGION_SIZE == 36, f"NtAtlasRegion v3 must be 36 bytes, got {REGION_SIZE}"
+
     # Group regions by vertex_start (duplicates share storage).
     vstart_groups = defaultdict(list)
     for i in range(region_count):
-        r = data[regions_off + i * 32 : regions_off + (i + 1) * 32]
-        f = struct.unpack("<QHHhhffHBBBBH", r)
-        vstart_groups[f[7]].append(f)
+        r = data[regions_off + i * REGION_SIZE : regions_off + (i + 1) * REGION_SIZE]
+        f = struct.unpack(REGION_FMT, r)
+        vstart = f[7]
+        vstart_groups[vstart].append(f)
 
     # One representative polygon per unique vertex_start.
     unique_polys = []
     for vstart, items in vstart_groups.items():
         f = items[0]
-        if f[9] != 0:  # only page 0 supported for overlap test
+        vertex_count = f[9]
+        page_index = f[10]
+        if page_index != 0:  # only page 0 supported for overlap test
             continue
-        vc = f[8]
         poly = [
             (
                 verts[vstart + j][2] * page_w / 65535.0,
                 verts[vstart + j][3] * page_h / 65535.0,
             )
-            for j in range(vc)
+            for j in range(vertex_count)
         ]
         unique_polys.append((vstart, poly))
 

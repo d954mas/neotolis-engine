@@ -5,7 +5,7 @@
 # parses stage timings, validates packing quality via used_area.
 #
 # Usage:
-#   bash scripts/atlas-benchmark.sh [--sprites N] [--max-area N] [--max-pages N] [--no-build]
+#   bash scripts/atlas/benchmark.sh [--sprites N] [--max-area N] [--max-pages N] [--no-build]
 #
 # Output (last line):
 #   METRIC:<total_ms>

@@ -2,7 +2,7 @@
 # Verify atlas builder is deterministic — same inputs produce bit-identical
 # blob and texture PNG across rebuilds.
 #
-# Usage: bash scripts/check_atlas_deterministic.sh [sprite_count]
+# Usage: bash scripts/atlas/check_deterministic.sh [sprite_count]
 #   sprite_count: max sprites to pack (default 2000, full=0)
 #
 # Returns exit 0 if both runs produce identical output, exit 1 if not.
@@ -24,7 +24,8 @@ fi
 
 run_build() {
     rm -rf "$PACK_DIR/_cache" 2>/dev/null || true
-    "$BUILDER" "$PACK_DIR" 4096 2 "assets/sprites/bigatlas/*.png" bigatlas v "$SPRITE_COUNT" \
+    # build_atlas_packs args: <pack_dir> [max_size] [glob] [name] [r=rect] [max_sprites]
+    "$BUILDER" "$PACK_DIR" 4096 "assets/sprites/bigatlas/*.png" bigatlas v "$SPRITE_COUNT" \
         > /dev/null 2>&1
 }
 
