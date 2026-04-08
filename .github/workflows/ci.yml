@@ -303,7 +303,7 @@ jobs:
         run: cmake --preset native-release
 
       - name: Build pack builders (release, no ASAN — fast encoding)
-        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs build_text_packs
+        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs build_text_packs build_atlas_packs
 
       - name: Restore builder cache
         uses: actions/cache@v4
@@ -312,6 +312,7 @@ jobs:
             build/examples/sponza/_cache
             build/examples/textured_quad/_cache
             build/examples/text/_cache
+            build/examples/atlas/_cache
           key: builder-cache-${{ github.sha }}
           restore-keys: builder-cache-
 
@@ -320,6 +321,7 @@ jobs:
           ./build/examples/textured_quad/native-release/build_tq_packs build/examples/textured_quad
           ./build/examples/sponza/native-release/build_sponza_packs build/examples/sponza
           ./build/examples/text/native-release/build_text_packs build/examples/text
+          ./build/examples/atlas/native-release/build_atlas_packs build/examples/atlas
 
       - name: Build native release (all targets)
         run: cmake --build --preset native-release

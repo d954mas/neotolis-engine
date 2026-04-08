@@ -79,7 +79,7 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
     case NT_BUILD_ASSET_FONT:
     case NT_BUILD_ASSET_MESH:
     case NT_BUILD_ASSET_BLOB:
-    case NT_BUILD_ASSET_ATLAS:       /* atlas uses atlas-level caching in end_atlas, not per-entry */
+    case NT_BUILD_ASSET_ATLAS:        /* atlas uses atlas-level caching in end_atlas, not per-entry */
     case NT_BUILD_ASSET_ATLAS_REGION: /* codegen-only, no encode caching needed */
         /* No additional fields -- kind + version sufficient */
         break;
