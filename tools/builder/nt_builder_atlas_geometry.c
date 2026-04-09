@@ -756,8 +756,7 @@ uint32_t rdp_simplify(const Point2D *poly, uint32_t n, double epsilon, Point2D *
     /* Linearize closed polygon into two open chains: i0→i1 and i1→i0 (wrapping) */
     uint32_t chain_len = n + 1; /* worst case: entire polygon + wrap */
     Point2D *chain = (Point2D *)malloc(chain_len * sizeof(Point2D));
-    bool *keep = (bool *)calloc(chain_len, sizeof(bool));
-    NT_BUILD_ASSERT(chain && keep && "rdp_simplify: alloc failed");
+    NT_BUILD_ASSERT(chain && "rdp_simplify: alloc failed");
 
     /* Chain A: i0 → i1 */
     uint32_t a_len = 0;
@@ -824,7 +823,6 @@ uint32_t rdp_simplify(const Point2D *poly, uint32_t n, double epsilon, Point2D *
     free(b_map);
     free(keep_a);
     free(a_map);
-    free(keep);
     free(chain);
 
     return (count >= 3) ? count : n;

@@ -1124,9 +1124,28 @@ static void pipeline_geometry(AtlasPipeline *p) {
             // #endregion
 
             if (!convex_reason) {
-                /* Trace outer contour (CCW). Worst-case contour length is
-                 * 2*(tw*th) for maximally jagged shapes (checkerboard). */
-                uint32_t max_contour = (2 * tw * th) + 4;
+                /* Trace outer contour (CCW).
+                 *
+                 * Tight upper bound on contour length for a single-component
+                 * mask: P ≤ 2*N + 2, where N is the opaque-pixel count.
+                 * Derivation: total pixel edges = 4*N; let I be the count of
+                 * edges shared between two opaque pixels, then P = 4*N − 2*I.
+                 * A connected component has I ≥ N − 1 (minimum: spanning
+                 * tree), so P ≤ 4*N − 2*(N − 1) = 2*N + 2. Connectivity is
+                 * already guaranteed by the binary_count_components check
+                 * above, so this bound holds.
+                 *
+                 * The old bound 2*tw*th assumed N = tw*th (a solid fill),
+                 * but a solid shape is a rectangle with perimeter 2*(tw+th),
+                 * not 2*tw*th. The old formula overshoots by 1/(2*fill_ratio)
+                 * — 10-100× more memory than needed for real sprites. */
+                uint32_t opaque_count = 0;
+                for (size_t bi = 0; bi < (size_t)tw * th; bi++) {
+                    if (binary[bi]) {
+                        opaque_count++;
+                    }
+                }
+                uint32_t max_contour = (2 * opaque_count) + 2;
                 Point2D *contour = (Point2D *)malloc(max_contour * sizeof(Point2D));
                 NT_BUILD_ASSERT(contour && "pipeline_geometry: alloc failed");
                 uint32_t contour_count = trace_contour(binary, tw, th, contour, max_contour);

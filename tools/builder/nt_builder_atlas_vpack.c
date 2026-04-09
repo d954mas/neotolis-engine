@@ -1708,9 +1708,17 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
     // #endregion
 
     VPackPlaced *placed = (VPackPlaced *)malloc(sprite_count * sizeof(VPackPlaced));
-    /* With triangle decomposition: up to T_p * T_i NFPs per placed sprite.
-     * For 8-vertex polygons: 6 tris each - 36 NFPs per pair. Allocate generously. */
-    uint32_t max_nfps = (sprite_count * 36) + 64;
+    /* One VPackNFP per placed-sprite pair. The broad-phase pre-filter selects
+     * relevant_count ≤ page->count items per incoming sprite, and each page
+     * holds at most sprite_count placements, so sprite_count is the tight
+     * upper bound on the number of NFPs built inside one vpack_try_page call.
+     * Matches the exact sizing used for relevant_buf / nfp_valid_buf below.
+     *
+     * Historical note: an earlier revision used triangle decomposition and
+     * needed T_p * T_i ≈ 36x more entries for 8-vertex polygons. The current
+     * pipeline calls nt_clipper2_minkowski_nfp once per pair, producing one
+     * multi-ring NFP — no triangle decomposition, no per-triangle blowup. */
+    uint32_t max_nfps = sprite_count;
     VPackNFP *nfps = (VPackNFP *)malloc(max_nfps * sizeof(VPackNFP));
     uint32_t cand_cap = 1024;
     VPackCand *cands = (VPackCand *)malloc(cand_cap * sizeof(VPackCand));
