@@ -422,15 +422,29 @@ typedef struct {
 #define VPACK_NFP_CACHE_READ_RETRIES 4U
 /* Cache entry stores NFP coordinates as int16 instead of int32. Atlas coords live
  * in [-4100, +4100] at worst, well within int16 range. Halves memory traffic on
- * the hit path (3.5M hits × 256 bytes saved). */
+ * the hit path (3.5M hits × 256 bytes saved).
+ *
+ * Seqlock contract: readers observe a consistent snapshot by checking the
+ * `version` field on both sides of a read (even/odd = stable/writer-in-progress).
+ * All payload fields are marked _Atomic so the intermediate plain-field reads
+ * between the two version loads are well-defined under C11 (not a data race).
+ * Access them via SLOT_LOAD / SLOT_STORE below — both compile to a single
+ * aligned mov on x86/ARM64 under memory_order_relaxed (zero perf cost) while
+ * preventing compilers from reordering, caching in registers across calls, or
+ * removing the seqlock re-check. Also makes the code TSan-clean. */
 typedef struct {
-    atomic_uint version;                       /* even = stable snapshot, odd = writer in progress */
-    uint32_t key_a, key_b;                     /* shape hashes; both 0 = empty slot */
-    int16_t verts_xy[VPACK_NFP_MAX_VERTS * 2]; /* interleaved x,y pairs */
-    uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1];
-    uint8_t ring_count;
-    int16_t min_x, min_y, max_x, max_y;
+    atomic_uint version;                               /* even = stable snapshot, odd = writer in progress */
+    _Atomic uint32_t key_a, key_b;                     /* shape hashes; both 0 = empty slot */
+    _Atomic int16_t verts_xy[VPACK_NFP_MAX_VERTS * 2]; /* interleaved x,y pairs */
+    _Atomic uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1];
+    _Atomic uint8_t ring_count;
+    _Atomic int16_t min_x, min_y, max_x, max_y;
 } VPackNFPCacheEntry;
+
+/* Seqlock payload field accessors. Relaxed ordering is sufficient — the
+ * surrounding version loads use acquire/release to provide happens-before. */
+#define SLOT_LOAD(field) atomic_load_explicit(&(field), memory_order_relaxed)
+#define SLOT_STORE(field, val) atomic_store_explicit(&(field), (val), memory_order_relaxed)
 
 /* Copy Point2D (int32) source to VPackNFP output, applying offset. Used for the
  * terminal store in vpack_compute_nfp_one when a freshly computed NFP is written
@@ -452,44 +466,48 @@ static void vpack_copy_local_nfp_to_out(const Point2D *verts, const uint16_t *ri
     out_nfp->max_y = max_y + off_y;
 }
 
-/* Copy cache slot (int16) to VPackNFP output, applying offset. Hot hit path. */
+/* Copy cache slot (int16) to VPackNFP output, applying offset. Hot hit path.
+ * Reads are relaxed atomics — see seqlock contract above VPackNFPCacheEntry. */
 static void vpack_copy_cache_slot_to_out(const VPackNFPCacheEntry *slot, int32_t off_x, int32_t off_y, VPackNFP *out_nfp) {
-    uint8_t rc = slot->ring_count;
+    uint8_t rc = SLOT_LOAD(slot->ring_count);
     out_nfp->ring_count = rc;
-    uint32_t total = slot->ring_offsets[rc];
+    uint32_t total = SLOT_LOAD(slot->ring_offsets[rc]);
     for (uint8_t r = 0; r <= rc; r++) {
-        out_nfp->ring_offsets[r] = slot->ring_offsets[r];
+        out_nfp->ring_offsets[r] = SLOT_LOAD(slot->ring_offsets[r]);
     }
     for (size_t v = 0; v < total; v++) {
-        out_nfp->verts[v].x = (int32_t)slot->verts_xy[v * 2] + off_x;
-        out_nfp->verts[v].y = (int32_t)slot->verts_xy[(v * 2) + 1] + off_y;
+        out_nfp->verts[v].x = (int32_t)SLOT_LOAD(slot->verts_xy[v * 2]) + off_x;
+        out_nfp->verts[v].y = (int32_t)SLOT_LOAD(slot->verts_xy[(v * 2) + 1]) + off_y;
     }
-    out_nfp->min_x = (int32_t)slot->min_x + off_x;
-    out_nfp->min_y = (int32_t)slot->min_y + off_y;
-    out_nfp->max_x = (int32_t)slot->max_x + off_x;
-    out_nfp->max_y = (int32_t)slot->max_y + off_y;
+    out_nfp->min_x = (int32_t)SLOT_LOAD(slot->min_x) + off_x;
+    out_nfp->min_y = (int32_t)SLOT_LOAD(slot->min_y) + off_y;
+    out_nfp->max_x = (int32_t)SLOT_LOAD(slot->max_x) + off_x;
+    out_nfp->max_y = (int32_t)SLOT_LOAD(slot->max_y) + off_y;
 }
 
+/* Writer side of the seqlock. The caller has already CAS'd version to odd;
+ * all stores below use relaxed ordering and are published by the caller's
+ * subsequent release-store of version = odd+1. */
 static void vpack_store_local_nfp_in_cache(VPackNFPCacheEntry *slot, uint32_t key_a, uint32_t key_b, const Point2D *verts, const uint16_t *ring_offsets, uint8_t ring_count, int32_t min_x,
                                            int32_t min_y, int32_t max_x, int32_t max_y) {
-    slot->ring_count = ring_count;
+    SLOT_STORE(slot->ring_count, ring_count);
     for (uint8_t r = 0; r <= ring_count; r++) {
-        slot->ring_offsets[r] = ring_offsets[r];
+        SLOT_STORE(slot->ring_offsets[r], ring_offsets[r]);
     }
     uint32_t total = ring_offsets[ring_count];
     for (size_t v = 0; v < total; v++) {
         /* Range-check: all atlas coords fit in int16. */
         NT_BUILD_ASSERT(verts[v].x >= INT16_MIN && verts[v].x <= INT16_MAX && "vpack: cache store x out of int16 range");
         NT_BUILD_ASSERT(verts[v].y >= INT16_MIN && verts[v].y <= INT16_MAX && "vpack: cache store y out of int16 range");
-        slot->verts_xy[v * 2] = (int16_t)verts[v].x;
-        slot->verts_xy[(v * 2) + 1] = (int16_t)verts[v].y;
+        SLOT_STORE(slot->verts_xy[v * 2], (int16_t)verts[v].x);
+        SLOT_STORE(slot->verts_xy[(v * 2) + 1], (int16_t)verts[v].y);
     }
-    slot->min_x = (int16_t)min_x;
-    slot->min_y = (int16_t)min_y;
-    slot->max_x = (int16_t)max_x;
-    slot->max_y = (int16_t)max_y;
-    slot->key_a = key_a;
-    slot->key_b = key_b;
+    SLOT_STORE(slot->min_x, (int16_t)min_x);
+    SLOT_STORE(slot->min_y, (int16_t)min_y);
+    SLOT_STORE(slot->max_x, (int16_t)max_x);
+    SLOT_STORE(slot->max_y, (int16_t)max_y);
+    SLOT_STORE(slot->key_a, key_a);
+    SLOT_STORE(slot->key_b, key_b);
 }
 
 typedef enum {
@@ -506,8 +524,8 @@ static VPackCacheReadResult vpack_try_read_nfp_cache_slot(const VPackNFPCacheEnt
         if ((version0 & 1U) != 0) {
             continue;
         }
-        uint32_t slot_key_a = slot->key_a;
-        uint32_t slot_key_b = slot->key_b;
+        uint32_t slot_key_a = SLOT_LOAD(slot->key_a);
+        uint32_t slot_key_b = SLOT_LOAD(slot->key_b);
         bool occupied = slot_key_a != 0 || slot_key_b != 0;
         if (slot_key_a == key_a && slot_key_b == key_b) {
             vpack_copy_cache_slot_to_out(slot, off_x, off_y, out_nfp);
@@ -557,10 +575,12 @@ static VPackNFPCacheEntry *vpack_select_nfp_cache_slot_locked(VPackNFPCacheEntry
     uint32_t victim_version = atomic_load_explicit(&victim->version, memory_order_relaxed);
     for (uint32_t way = 0; way < VPACK_NFP_CACHE_WAYS; way++) {
         VPackNFPCacheEntry *slot = &set[way];
-        if (slot->key_a == key_a && slot->key_b == key_b) {
+        uint32_t slot_key_a = SLOT_LOAD(slot->key_a);
+        uint32_t slot_key_b = SLOT_LOAD(slot->key_b);
+        if (slot_key_a == key_a && slot_key_b == key_b) {
             return slot;
         }
-        if (!empty_slot && slot->key_a == 0 && slot->key_b == 0) {
+        if (!empty_slot && slot_key_a == 0 && slot_key_b == 0) {
             empty_slot = slot;
         }
         uint32_t version = atomic_load_explicit(&slot->version, memory_order_relaxed);
