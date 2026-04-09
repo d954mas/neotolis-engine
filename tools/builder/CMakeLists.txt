@@ -71,7 +71,9 @@ set_target_properties(clipper2 PROPERTIES
 )
 
 # Clipper2 C bridge (our C++ → extern "C" wrapper; the nt_ prefix is legit
-# because nt_clipper2_bridge.cpp is our code, not vendored)
+# because nt_clipper2_bridge.cpp is our code, not vendored).
+# Isolated from nt_builder target (nt_builder depends on us, not vice versa)
+# so we cannot include nt_builder.h without creating a link cycle on static libs.
 add_library(nt_clipper2_bridge STATIC nt_clipper2_bridge.cpp)
 target_include_directories(nt_clipper2_bridge PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(nt_clipper2_bridge PUBLIC clipper2)

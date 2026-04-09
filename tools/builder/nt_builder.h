@@ -261,6 +261,44 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
     };
 }
 
+/* --- Atlas sprite options (per-sprite, passed to atlas_add/add_raw/add_glob) --- */
+
+/* Per-sprite opts struct for atlas_add / atlas_add_raw / atlas_add_glob.
+ *
+ * Common pattern: construct via nt_atlas_sprite_opts_defaults() and override
+ * the fields you care about. Designated-initialiser compound literals
+ * ({ .origin_y = 1.0F }) ZERO-init unset fields — this gives origin_x=0, not
+ * the default 0.5. Always start from the defaults function for partial
+ * overrides, or set every field explicitly in the literal. */
+typedef struct {
+    /* Optional region name.
+     *   atlas_add:      NULL = derive from file path (basename with extension)
+     *   atlas_add_raw:  required (NT_BUILD_ASSERT — no path to derive from)
+     *   atlas_add_glob: MUST be NULL — each matched file derives its own name
+     *                   (asserts otherwise to prevent name collisions across the glob) */
+    const char *name;
+
+    /* Pivot point normalized over source image dimensions (pre-trim).
+     * (0.5, 0.5) = image centre (default), (0.5, 1.0) = bottom-centre (character feet),
+     * (0.0, 0.0) = top-left corner. Values outside [0, 1] are allowed — pivots may lie
+     * outside the frame for weapons, effects, or motion-stabilised sprites. Must be
+     * finite (no NaN/inf, asserted). Runtime: pivot_px = origin * source_wh.
+     *
+     * Source-space (not trim-space) is used so animated sprites with varying
+     * per-frame trim bounds have a stable pivot across frames. */
+    float origin_x;
+    float origin_y;
+} nt_atlas_sprite_opts_t;
+
+/* Default per-sprite opts — centre pivot, name derived from path. */
+static inline nt_atlas_sprite_opts_t nt_atlas_sprite_opts_defaults(void) {
+    return (nt_atlas_sprite_opts_t){
+        .name = NULL,
+        .origin_x = 0.5F,
+        .origin_y = 0.5F,
+    };
+}
+
 /* --- Core API ---
  * Lifecycle: start_pack → add_* → finish_pack → free_pack.
  * Caller must always call free_pack when done, whether finish succeeded or not.
@@ -300,11 +338,16 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene);
 /* --- Blob API (generic binary data asset) --- */
 void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id);
 
-/* --- Atlas API (begin/add/end pattern per D-02) --- */
+/* --- Atlas API (begin/add/end pattern per D-02) ---
+ *
+ * atlas_add / atlas_add_raw / atlas_add_glob accept an nt_atlas_sprite_opts_t*
+ * for per-sprite settings (name override, pivot point). Pass NULL to use
+ * defaults (centre pivot, name from path). See nt_atlas_sprite_opts_t above
+ * for field semantics and the zero-init footgun warning. */
 void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_atlas_opts_t *opts);
-void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const char *name_override);
-void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *name);
-void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern);
+void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atlas_sprite_opts_t *opts);
+void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_atlas_sprite_opts_t *opts);
+void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern, const nt_atlas_sprite_opts_t *opts);
 void nt_builder_end_atlas(NtBuilderContext *ctx);
 
 /* --- Glob utility (exposed for custom add loops) --- */

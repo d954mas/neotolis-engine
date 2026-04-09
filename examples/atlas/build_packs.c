@@ -46,7 +46,7 @@ static void limited_add_callback(const char *path, void *user) {
     if (d->limit > 0 && d->count >= d->limit) {
         return;
     }
-    nt_builder_atlas_add(d->ctx, path, NULL);
+    nt_builder_atlas_add(d->ctx, path, NULL); /* NULL opts = defaults (centre pivot, name from path) */
     d->count++;
 }
 
@@ -125,7 +125,7 @@ int main(int argc, char *argv[]) {
         (void)nt_builder_glob_iterate(glob_pattern, limited_add_callback, &data);
         (void)printf("Added %u sprites (limited to %u)\n", data.count, max_sprites);
     } else {
-        nt_builder_atlas_add_glob(ctx, glob_pattern);
+        nt_builder_atlas_add_glob(ctx, glob_pattern, NULL); /* NULL = default centre pivot for every matched file */
     }
     nt_builder_end_atlas(ctx);
 

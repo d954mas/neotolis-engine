@@ -3933,7 +3933,7 @@ void test_atlas_real_pipeline_preserves_hole(void) {
 
     /* Default opts → shape=CONCAVE_CONTOUR, extrude=0, premultiplied=true */
     nt_builder_begin_atlas(ctx, "ring", NULL);
-    nt_builder_atlas_add_raw(ctx, pixels, W, H, "ring.png");
+    nt_builder_atlas_add_raw(ctx, pixels, W, H, &(nt_atlas_sprite_opts_t){.name = "ring.png", .origin_x = 0.5F, .origin_y = 0.5F});
     nt_builder_end_atlas(ctx);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
@@ -4047,8 +4047,8 @@ void test_atlas_round_trip_basic(void) {
     uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
 
     nt_builder_begin_atlas(ctx, "sprites", NULL);
-    nt_builder_atlas_add_raw(ctx, s1, 16, 16, "hero.png");
-    nt_builder_atlas_add_raw(ctx, s2, 16, 16, "goblin.png");
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
     nt_builder_end_atlas(ctx);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
@@ -4100,8 +4100,8 @@ void test_atlas_round_trip_regions(void) {
     uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
 
     nt_builder_begin_atlas(ctx, "sprites", NULL);
-    nt_builder_atlas_add_raw(ctx, s1, 16, 16, "hero.png");
-    nt_builder_atlas_add_raw(ctx, s2, 16, 16, "goblin.png");
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
     nt_builder_end_atlas(ctx);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
@@ -4176,8 +4176,8 @@ void test_atlas_round_trip_vertices(void) {
     uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
 
     nt_builder_begin_atlas(ctx, "sprites", NULL);
-    nt_builder_atlas_add_raw(ctx, s1, 16, 16, "hero.png");
-    nt_builder_atlas_add_raw(ctx, s2, 16, 16, "goblin.png");
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
     nt_builder_end_atlas(ctx);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
@@ -4244,7 +4244,7 @@ void test_atlas_shape_concave_falls_back_to_convex_on_disjoint_sprite(void) {
     s[(((15 * 16) + 15) * 4) + 3] = 255;
 
     nt_builder_begin_atlas(ctx, "sprites", NULL);
-    nt_builder_atlas_add_raw(ctx, s, 16, 16, "split.png");
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "split.png", .origin_x = 0.5F, .origin_y = 0.5F});
     nt_builder_end_atlas(ctx);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
@@ -4304,7 +4304,7 @@ void test_atlas_shape_convex_hull_produces_polygon(void) {
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
     opts.shape = NT_ATLAS_SHAPE_CONVEX_HULL;
     nt_builder_begin_atlas(ctx, "convex", &opts);
-    nt_builder_atlas_add_raw(ctx, s, W, H, "triangle.png");
+    nt_builder_atlas_add_raw(ctx, s, W, H, &(nt_atlas_sprite_opts_t){.name = "triangle.png", .origin_x = 0.5F, .origin_y = 0.5F});
     nt_builder_end_atlas(ctx);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
@@ -4351,8 +4351,8 @@ void test_atlas_duplicate_detection(void) {
     uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
 
     nt_builder_begin_atlas(ctx, "sprites", NULL);
-    nt_builder_atlas_add_raw(ctx, s1, 16, 16, "a.png");
-    nt_builder_atlas_add_raw(ctx, s1, 16, 16, "b.png");
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "a.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "b.png", .origin_x = 0.5F, .origin_y = 0.5F});
     nt_builder_end_atlas(ctx);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
@@ -4418,7 +4418,7 @@ void test_atlas_multi_page(void) {
         char name[32];
         (void)snprintf(name, sizeof(name), "spr%u.png", i);
         uint8_t *s = make_test_sprite(32, 32, (uint8_t)(i * 30), (uint8_t)(255 - (i * 30)), 128, 255);
-        nt_builder_atlas_add_raw(ctx, s, 32, 32, name);
+        nt_builder_atlas_add_raw(ctx, s, 32, 32, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
         free(s);
     }
 
@@ -4467,8 +4467,8 @@ void test_atlas_codegen(void) {
     uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
 
     nt_builder_begin_atlas(ctx, "sprites", NULL);
-    nt_builder_atlas_add_raw(ctx, s1, 16, 16, "hero.png");
-    nt_builder_atlas_add_raw(ctx, s2, 16, 16, "goblin.png");
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
     nt_builder_end_atlas(ctx);
 
     nt_build_result_t result = nt_builder_finish_pack(ctx);
@@ -4515,7 +4515,7 @@ void test_atlas_codegen_large(void) {
         uint8_t g = (uint8_t)((i >> 8) & 0xFFU);
         uint8_t *s = make_test_sprite(1, 1, r, g, 0, 255);
         (void)snprintf(name, sizeof(name), "spr%04u.png", i);
-        nt_builder_atlas_add_raw(ctx, s, 1, 1, name);
+        nt_builder_atlas_add_raw(ctx, s, 1, 1, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
         free(s);
     }
 
@@ -4569,6 +4569,215 @@ void test_atlas_opts_defaults(void) {
     TEST_ASSERT_EQUAL(NT_ATLAS_SHAPE_CONCAVE_CONTOUR, opts.shape);
     TEST_ASSERT_FALSE(opts.debug_png);
     TEST_ASSERT_NULL(opts.compress);
+}
+
+/* --- Atlas sprite opts + origin tests --- */
+
+/* Helper: read the single atlas blob from a freshly-built pack file. Returns
+ * pointer to the buffer (caller frees) and sets *out_regions to the regions
+ * array inside it. */
+static uint8_t *read_atlas_blob(const char *pack_path, const NtAtlasRegion **out_regions, uint32_t *out_region_count) {
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(pack_path, &file_size);
+    if (!buf) {
+        return NULL;
+    }
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    if (!atlas_entry) {
+        free(buf);
+        return NULL;
+    }
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)ablob;
+    const uint8_t *ptr = ablob + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
+    *out_regions = (const NtAtlasRegion *)ptr;
+    *out_region_count = ahdr->region_count;
+    return buf;
+}
+
+/* Default sprite opts: NULL opts == centre pivot (0.5, 0.5). */
+void test_atlas_sprite_opts_default_origin_is_centre(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_origin_default.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 255, 128, 0, 255);
+
+    nt_builder_begin_atlas(ctx, "origin_default", NULL);
+    /* Pass an opts struct with only .name set — still expect centre pivot because
+     * the helper uses nt_atlas_sprite_opts_defaults() as the base. */
+    nt_atlas_sprite_opts_t sopts = nt_atlas_sprite_opts_defaults();
+    sopts.name = "centre.png";
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &sopts);
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *buf = read_atlas_blob(TMP_DIR "/atlas_origin_default.ntpack", &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_EQUAL(1, region_count);
+    TEST_ASSERT_TRUE(regions[0].origin_x > 0.49F && regions[0].origin_x < 0.51F);
+    TEST_ASSERT_TRUE(regions[0].origin_y > 0.49F && regions[0].origin_y < 0.51F);
+    free(buf);
+}
+
+/* Custom origin via opts propagates into the blob verbatim. */
+void test_atlas_sprite_opts_custom_origin(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_origin_custom.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 128, 255);
+
+    nt_builder_begin_atlas(ctx, "origin_custom", NULL);
+    /* Feet pivot. */
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "feet.png", .origin_x = 0.5F, .origin_y = 1.0F});
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *buf = read_atlas_blob(TMP_DIR "/atlas_origin_custom.ntpack", &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_EQUAL(1, region_count);
+    TEST_ASSERT_TRUE(regions[0].origin_x > 0.49F && regions[0].origin_x < 0.51F);
+    TEST_ASSERT_TRUE(regions[0].origin_y > 0.99F && regions[0].origin_y < 1.01F);
+    free(buf);
+}
+
+/* Out-of-range origin values are legitimate (off-frame pivots) — must NOT assert. */
+void test_atlas_sprite_opts_origin_out_of_range_allowed(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_origin_oor.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 128, 64, 255, 255);
+
+    nt_builder_begin_atlas(ctx, "origin_oor", NULL);
+    /* Negative and > 1.0 — pivot lies outside the frame. Legal. */
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "offframe.png", .origin_x = -0.2F, .origin_y = 1.5F});
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *buf = read_atlas_blob(TMP_DIR "/atlas_origin_oor.ntpack", &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_EQUAL(1, region_count);
+    TEST_ASSERT_TRUE(regions[0].origin_x < -0.19F && regions[0].origin_x > -0.21F);
+    TEST_ASSERT_TRUE(regions[0].origin_y > 1.49F && regions[0].origin_y < 1.51F);
+    free(buf);
+}
+
+/* NaN origin must trigger NT_BUILD_ASSERT (caller bug). */
+void test_atlas_sprite_opts_origin_nan_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_origin_nan.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 200, 100, 50, 255);
+    nt_builder_begin_atlas(ctx, "origin_nan", NULL);
+
+    /* NaN in origin — must fire NT_BUILD_ASSERT. Use a named local to avoid
+     * compound-literal + macro expansion interactions. */
+    nt_atlas_sprite_opts_t bad = nt_atlas_sprite_opts_defaults();
+    bad.name = "bad.png";
+    bad.origin_x = (float)(0.0 / 0.0); /* NaN */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_atlas_add_raw(ctx, s, 16, 16, &bad));
+
+    free(s);
+    /* ctx freed by EXPECT_BUILD_ASSERT */
+}
+
+/* Two pixel-identical sprites with DIFFERENT origins:
+ *   - dedup shares vertex/index data (same vertex_start, same index_start)
+ *   - each region keeps its own origin_x/y verbatim
+ * This is the walk-cycle reuse pattern. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_duplicate_pixels_different_origin(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_dup_origin.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 255, 200, 100, 255);
+
+    nt_builder_begin_atlas(ctx, "dup_origin", NULL);
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero_centre.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero_feet.png", .origin_x = 0.5F, .origin_y = 1.0F});
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *buf = read_atlas_blob(TMP_DIR "/atlas_dup_origin.ntpack", &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_EQUAL(2, region_count);
+
+    /* Locate each region by name hash (order may vary). */
+    uint64_t centre_hash = nt_hash64_str("hero_centre.png").value;
+    uint64_t feet_hash = nt_hash64_str("hero_feet.png").value;
+    const NtAtlasRegion *r_centre = NULL;
+    const NtAtlasRegion *r_feet = NULL;
+    for (uint32_t i = 0; i < region_count; i++) {
+        if (regions[i].name_hash == centre_hash) {
+            r_centre = &regions[i];
+        }
+        if (regions[i].name_hash == feet_hash) {
+            r_feet = &regions[i];
+        }
+    }
+    TEST_ASSERT_NOT_NULL(r_centre);
+    TEST_ASSERT_NOT_NULL(r_feet);
+
+    /* Different origin_y — each region carries its own pivot. */
+    TEST_ASSERT_TRUE(r_centre->origin_y > 0.49F && r_centre->origin_y < 0.51F);
+    TEST_ASSERT_TRUE(r_feet->origin_y > 0.99F && r_feet->origin_y < 1.01F);
+
+    /* Shared vertex_start / index_start via dedup — both regions point at the
+     * same geometry in the blob. */
+    TEST_ASSERT_EQUAL(r_centre->vertex_start, r_feet->vertex_start);
+    TEST_ASSERT_EQUAL(r_centre->index_start, r_feet->index_start);
+    TEST_ASSERT_EQUAL(r_centre->vertex_count, r_feet->vertex_count);
+    TEST_ASSERT_EQUAL(r_centre->index_count, r_feet->index_count);
+
+    /* Total vertex count in the blob should be just one set (dedup worked). */
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)(buf + atlas_entry->offset);
+    /* One unique sprite → vertex_count in the blob equals that of a single region. */
+    TEST_ASSERT_EQUAL(r_centre->vertex_count, ahdr->total_vertex_count);
+    TEST_ASSERT_EQUAL(r_centre->index_count, ahdr->total_index_count);
+
+    free(buf);
 }
 
 int main(void) {
@@ -4739,6 +4948,13 @@ int main(void) {
     RUN_TEST(test_atlas_codegen);
     RUN_TEST(test_atlas_codegen_large);
     RUN_TEST(test_atlas_opts_defaults);
+
+    /* Atlas sprite opts + origin (Point 2 follow-up) */
+    RUN_TEST(test_atlas_sprite_opts_default_origin_is_centre);
+    RUN_TEST(test_atlas_sprite_opts_custom_origin);
+    RUN_TEST(test_atlas_sprite_opts_origin_out_of_range_allowed);
+    RUN_TEST(test_atlas_sprite_opts_origin_nan_asserts);
+    RUN_TEST(test_atlas_duplicate_pixels_different_origin);
 
     return UNITY_END();
 }

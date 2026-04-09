@@ -1036,12 +1036,14 @@ texture_resource_ids[page_count]: u64
 
 NtAtlasRegion[region_count] (36 bytes each)
   name_hash:      u64   (xxh64 of region name)
-  source_w:       u16   (original image width pre-trim)
-  source_h:       u16
-  trim_offset_x:  i16   (pixels removed from left)
-  trim_offset_y:  i16
-  origin_x:       f32   (origin in source-image space)
-  origin_y:       f32
+  source_w:       u16   (original image width in pixels, pre-trim)
+  source_h:       u16   (original image height in pixels, pre-trim)
+  trim_offset_x:  i16   (pixels stripped from the left edge during alpha trim)
+  trim_offset_y:  i16   (pixels stripped from the top edge)
+  origin_x:       f32   (pivot X, normalized over source_w — 0.5 = centre, 1.0 = right edge.
+                         Values outside [0, 1] are allowed for off-frame pivots. Source-space
+                         NOT trim-space — stable across animation frames with varying trim bounds.)
+  origin_y:       f32   (pivot Y, normalized over source_h. Same semantics.)
   vertex_start:   u32   (index into vertex array — u32 in v3, was u16 in v2)
   index_start:    u32   (index into the index array — u32 in v3, was u16 in v2)
   vertex_count:   u8    (vertices for this region; ≤ max_vertices)
@@ -1050,8 +1052,10 @@ NtAtlasRegion[region_count] (36 bytes each)
   index_count:    u8    (triangle indices for this region; ≤ 255)
 
 NtAtlasVertex[total_vertex_count] (8 bytes each, at vertex_offset)
-  local_x:   i16  (pixels relative to source-image origin)
-  local_y:   i16
+  local_x:   i16  (pixel X in trim-rect local space, 0..trim_w-1.
+                   Source-image pos: local_x + trim_offset_x
+                   Pivot-relative:   (local_x + trim_offset_x) - origin_x * source_w)
+  local_y:   i16  (pixel Y in trim-rect local space. Same semantics.)
   atlas_u:   u16  (normalized 0..65535 over atlas page width)
   atlas_v:   u16  (normalized 0..65535 over atlas page height)
 
@@ -1692,11 +1696,12 @@ add_materials(const char* pattern);
 add_audios(const char* pattern);
 add_fonts(const char* pattern);
 
-/* Atlas: groups N source sprites into 1 metadata blob + M texture pages */
+/* Atlas: groups N source sprites into 1 metadata blob + M texture pages.
+ * Per-sprite opts carry the name override and the pivot point (NULL = defaults). */
 begin_atlas(const char* name, const nt_atlas_opts_t* opts);
-atlas_add(const char* path, const char* name_override);
-atlas_add_raw(const uint8_t* rgba, uint32_t w, uint32_t h, const char* name);
-atlas_add_glob(const char* pattern);
+atlas_add(const char* path, const nt_atlas_sprite_opts_t* opts);
+atlas_add_raw(const uint8_t* rgba, uint32_t w, uint32_t h, const nt_atlas_sprite_opts_t* opts);
+atlas_add_glob(const char* pattern, const nt_atlas_sprite_opts_t* opts);
 end_atlas(void);
 ```
 
@@ -1791,17 +1796,32 @@ The atlas builder packs a set of sprite images into one or more atlas pages and 
 **API shape (begin/add*/end):**
 
 ```c
-nt_atlas_opts_t opts = nt_atlas_opts_defaults();  /* sane defaults per below */
+nt_atlas_opts_t opts = nt_atlas_opts_defaults();  /* atlas-level: packer, format, etc. */
 opts.max_size = 2048;
 opts.max_vertices = 8;
 opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
 
-nt_builder_begin_atlas(ctx, "spineboy", &opts);
-nt_builder_atlas_add_glob(ctx, "assets/sprites/spineboy/*.png");
+nt_builder_begin_atlas(ctx, "hero", &opts);
+
+/* Idle frames use the default centre pivot (0.5, 0.5). */
+nt_builder_atlas_add_glob(ctx, "assets/sprites/hero/idle_*.png", NULL);
+
+/* Walk cycle: override the pivot to bottom-centre for every matched frame. */
+nt_atlas_sprite_opts_t walk = nt_atlas_sprite_opts_defaults();
+walk.origin_y = 1.0F;  /* feet at bottom edge */
+nt_builder_atlas_add_glob(ctx, "assets/sprites/hero/walk_*.png", &walk);
+
+/* Single sprite with a custom name override. */
+nt_builder_atlas_add(ctx, "assets/sprites/hero/portrait.png",
+                     &(nt_atlas_sprite_opts_t){
+                         .name = "hero_portrait",
+                         .origin_x = 0.5F, .origin_y = 0.5F,
+                     });
+
 nt_builder_end_atlas(ctx);
 ```
 
-`begin_atlas` opens an atlas state on the context. Subsequent `atlas_add*` calls feed sprites in. `end_atlas` runs the full pipeline and registers entries. Nested atlases are not allowed (asserts).
+`begin_atlas` opens an atlas state on the context. Subsequent `atlas_add*` calls feed sprites in — each takes an optional `nt_atlas_sprite_opts_t*` carrying the per-sprite name override and pivot point (pass `NULL` for the centred-pivot default). `end_atlas` runs the full pipeline and registers entries. Nested atlases are not allowed (asserts).
 
 ### 23.11.1 Pipeline
 
@@ -1871,7 +1891,30 @@ typedef struct {
 - Per-region `index_count` is `uint8_t` → ≤ 255 indices per region. With `max_vertices ≤ 16` an ear-clipped/fan triangulation produces at most `(16 - 2) * 3 = 42` indices, so one byte is sufficient.
 - Per-atlas `vertex_start` / `index_start` are `uint32_t` (v3). v2 used `uint16_t` and asserted at ~65K cumulative entries — v3 lifts that limit.
 
-### 23.11.4 Atlas cache
+### 23.11.4 Per-sprite options (`nt_atlas_sprite_opts_t`)
+
+Each `atlas_add` / `atlas_add_raw` / `atlas_add_glob` call accepts an optional `nt_atlas_sprite_opts_t*`. `NULL` picks the defaults (centre pivot, name derived from path).
+
+```c
+typedef struct {
+    const char *name;   /* NULL = derive from path (atlas_add/glob); required for atlas_add_raw */
+    float origin_x;     /* pivot X, normalized over source_w (default 0.5) */
+    float origin_y;     /* pivot Y, normalized over source_h (default 0.5) */
+} nt_atlas_sprite_opts_t;
+```
+
+**Pivot semantics:**
+- Normalized over the **source image** dimensions (not the trimmed rect). Default `(0.5, 0.5)` = image centre.
+- **Values outside `[0, 1]` are allowed** — pivots may lie outside the frame for weapons, effects, or motion-stabilised sprites. Must be finite (`isfinite()` asserted; NaN/inf is caller bug).
+- Source-space (not trim-space) is chosen so frame-by-frame animations with varying per-frame trim bounds have stable pivots across frames. A walk cycle with `origin_y = 0.9375` sits on the same source-image pixel row regardless of how much whitespace the alpha trim removed from each frame.
+
+**Glob rule:** `atlas_add_glob` asserts `opts->name == NULL` — a single name cannot apply to N matched files without hash collisions. Each matched file derives its own name from its path, and the `origin_x/y` fields propagate to all of them. For per-file name overrides within a glob, fall back to calling `nt_builder_glob_iterate` directly with a custom callback that calls `nt_builder_atlas_add` per match.
+
+**Dedup + different pivots:** adding the same pixel-identical sprite twice with different `origin_x/y` produces **two separate regions** that **share** `vertex_start` and `index_start` in the blob. The dedup pass matches on pixel hash + byte-level pixel compare (origin is not considered), so the geometry/pixel data is stored once; each logical region stores its own pivot. This is the cheap path for "same sprite, different anchor" (e.g. icon referenced with centre pivot in menu vs bottom-centre in HUD).
+
+**Zero-init footgun:** C99 designated-initialiser compound literals (`&(nt_atlas_sprite_opts_t){.origin_y = 1.0F}`) zero-init unset fields — so `origin_x` becomes `0.0`, not the default `0.5`. Always start from `nt_atlas_sprite_opts_defaults()` for partial overrides, or set every field explicitly in the literal.
+
+### 23.11.5 Atlas cache
 
 Separate from the per-asset builder cache (§23.10) because atlas placement is a global decision over the whole sprite set.
 

@@ -620,11 +620,23 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
     ctx->active_atlas = state;
 }
 
+/* Resolve effective per-sprite opts: fall back to defaults when caller
+ * passes NULL, then validate the origin values. Always returns a struct
+ * whose fields are safe to use downstream. Trivial function; clang-tidy
+ * counts the NT_BUILD_ASSERT macro expansion as high cognitive complexity. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const char *name_override) {
+static nt_atlas_sprite_opts_t atlas_resolve_sprite_opts(const nt_atlas_sprite_opts_t *opts) {
+    nt_atlas_sprite_opts_t resolved = opts ? *opts : nt_atlas_sprite_opts_defaults();
+    NT_BUILD_ASSERT(isfinite(resolved.origin_x) && isfinite(resolved.origin_y) && "atlas_add*: origin must be finite (no NaN/inf)");
+    return resolved;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && path && "atlas_add: invalid args");
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add: no active atlas (call begin_atlas first)");
 
+    nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
     NtBuildAtlasState *state = ctx->active_atlas;
 
     /* Resolve file path via asset roots */
@@ -645,8 +657,9 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const char *n
     free(file_data);
     NT_BUILD_ASSERT(pixels && "atlas_add: stbi_load_from_memory failed");
 
-    /* Determine region name (D-06, D-07) */
-    const char *region_name = name_override ? name_override : extract_filename(path);
+    /* Determine region name (D-06, D-07). opts->name takes precedence; NULL falls
+     * back to basename of the source path. */
+    const char *region_name = sopts.name ? sopts.name : extract_filename(path);
 
     /* Compute decoded hash */
     uint64_t decoded_hash = nt_hash64(pixels, (uint32_t)w * (uint32_t)h * 4).value;
@@ -663,16 +676,18 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const char *n
     sprite->height = (uint32_t)h;
     sprite->name = strdup(region_name);
     NT_BUILD_ASSERT(sprite->name && "atlas_add: strdup failed");
-    sprite->origin_x = 0.5F;
-    sprite->origin_y = 0.5F;
+    sprite->origin_x = sopts.origin_x;
+    sprite->origin_y = sopts.origin_y;
     sprite->decoded_hash = decoded_hash;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const char *name) {
+void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && rgba_pixels && "atlas_add_raw: invalid args");
-    NT_BUILD_ASSERT(name && "atlas_add_raw: name is required for raw pixels (D-07)");
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_raw: no active atlas (call begin_atlas first)");
+
+    nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
+    NT_BUILD_ASSERT(sopts.name && "atlas_add_raw: opts->name is required for raw pixels (no path to derive from)");
 
     NtBuildAtlasState *state = ctx->active_atlas;
 
@@ -695,10 +710,10 @@ void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels,
     sprite->rgba = pixels;
     sprite->width = width;
     sprite->height = height;
-    sprite->name = strdup(name);
+    sprite->name = strdup(sopts.name);
     NT_BUILD_ASSERT(sprite->name && "atlas_add_raw: strdup failed");
-    sprite->origin_x = 0.5F;
-    sprite->origin_y = 0.5F;
+    sprite->origin_x = sopts.origin_x;
+    sprite->origin_y = sopts.origin_y;
     sprite->decoded_hash = decoded_hash;
 }
 
@@ -706,21 +721,35 @@ void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels,
 
 typedef struct {
     NtBuilderContext *ctx;
+    const nt_atlas_sprite_opts_t *sprite_opts; /* propagated origin; name is always per-file */
     uint32_t match_count;
 } AtlasGlobData;
 
 static void atlas_glob_callback(const char *full_path, void *user) {
     AtlasGlobData *d = (AtlasGlobData *)user;
     d->match_count++;
-    nt_builder_atlas_add(d->ctx, full_path, NULL);
+    /* Per-file name is derived from the path — pass NULL so atlas_add extracts
+     * the basename. The origin fields propagate from the glob-level opts. */
+    nt_atlas_sprite_opts_t per_file = d->sprite_opts ? *d->sprite_opts : nt_atlas_sprite_opts_defaults();
+    per_file.name = NULL;
+    nt_builder_atlas_add(d->ctx, full_path, &per_file);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern) {
+void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && pattern && "atlas_add_glob: invalid args");
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_glob: no active atlas");
+    /* If opts is non-NULL, name MUST be NULL — a single name can't apply to
+     * N matched files without hash collisions. Each file derives its own name
+     * from its path. Per-file override requires calling glob_iterate + atlas_add
+     * manually (build_packs.c shows the pattern). */
+    NT_BUILD_ASSERT((!opts || opts->name == NULL) && "atlas_add_glob: opts->name must be NULL (each file derives its name from path)");
+    /* Validate finite origin values up front so failures point at the glob call site. */
+    if (opts) {
+        NT_BUILD_ASSERT(isfinite(opts->origin_x) && isfinite(opts->origin_y) && "atlas_add_glob: origin must be finite (no NaN/inf)");
+    }
 
-    AtlasGlobData data = {.ctx = ctx, .match_count = 0};
+    AtlasGlobData data = {.ctx = ctx, .sprite_opts = opts, .match_count = 0};
     NT_BUILD_ASSERT(nt_builder_glob_iterate(pattern, atlas_glob_callback, &data) && "atlas_add_glob: glob overflow");
     NT_BUILD_ASSERT(data.match_count > 0 && "atlas_add_glob: no files matched pattern");
 }

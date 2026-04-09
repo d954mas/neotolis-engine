@@ -49,12 +49,19 @@ _Static_assert(sizeof(NtAtlasHeader) == 28, "NtAtlasHeader must be 28 bytes");
 #pragma pack(push, 1)
 typedef struct {
     uint64_t name_hash;    /*  0: xxh64 of region name */
-    uint16_t source_w;     /*  8: original image width (pre-trim) */
-    uint16_t source_h;     /* 10: original image height (pre-trim) */
-    int16_t trim_offset_x; /* 12: pixels removed from left */
-    int16_t trim_offset_y; /* 14: pixels removed from top */
-    float origin_x;        /* 16: origin X in source-image space (D-08: float, not fixed-point) */
-    float origin_y;        /* 20: origin Y in source-image space */
+    uint16_t source_w;     /*  8: original image width in pixels (pre-trim) */
+    uint16_t source_h;     /* 10: original image height in pixels (pre-trim) */
+    int16_t trim_offset_x; /* 12: pixels stripped from the left edge during alpha trim
+                            *     (add to NtAtlasVertex.local_x to get source-image space X) */
+    int16_t trim_offset_y; /* 14: pixels stripped from the top edge during alpha trim */
+    float origin_x;        /* 16: pivot X, normalized over source_w (NOT trim_w).
+                            *     0.0 = left edge, 0.5 = centre (default), 1.0 = right edge.
+                            *     Values outside [0, 1] are allowed — the pivot may lie outside
+                            *     the frame (weapons, effects, motion-stabilised sprites).
+                            *     Runtime resolves: pivot_px_x = origin_x * source_w.
+                            *     Source-space (not trim-space) gives stable pivots across
+                            *     animation frames where trim bounds vary. */
+    float origin_y;        /* 20: pivot Y, normalized over source_h. Same semantics. */
     uint32_t vertex_start; /* 24: index into vertex array (uint32 in v3, was uint16 in v2) */
     uint32_t index_start;  /* 28: index into the index array (uint32 in v3, was uint16 in v2) */
     uint8_t vertex_count;  /* 32: number of vertices for this region (max 16 per builder limit) */
@@ -70,8 +77,13 @@ _Static_assert(sizeof(NtAtlasRegion) == 36, "NtAtlasRegion must be 36 bytes");
 
 #pragma pack(push, 1)
 typedef struct {
-    int16_t local_x;  /*  0: local position X (pixels relative to origin) */
-    int16_t local_y;  /*  2: local position Y */
+    int16_t local_x;  /*  0: pixel X in trim-rect local space (0..trim_w-1).
+                       *     Add NtAtlasRegion.trim_offset_x to get source-image space X.
+                       *     Subtract (origin_x * source_w) to get offset from the pivot:
+                       *       pivot_relative_x = (local_x + trim_offset_x) - (origin_x * source_w)
+                       *     The rendered world-space position of the vertex is then:
+                       *       world_x = entity_pos_x + pivot_relative_x * scale_x */
+    int16_t local_y;  /*  2: pixel Y in trim-rect local space (0..trim_h-1). Same semantics. */
     uint16_t atlas_u; /*  4: atlas UV X (normalized 0-65535 over atlas width) */
     uint16_t atlas_v; /*  6: atlas UV Y (normalized 0-65535 over atlas height) */
 } NtAtlasVertex;      /*  8 bytes */
