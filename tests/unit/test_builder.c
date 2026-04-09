@@ -2635,6 +2635,94 @@ static uint32_t count_bin_files(const char *dir) {
     return count;
 }
 
+/* Count files matching atlas_*.bin in the cache dir. Atlas cache files use
+ * this prefix (see atlas_cache_write in nt_builder_atlas.c). */
+static uint32_t count_atlas_cache_files(const char *dir) {
+    uint32_t count = 0;
+#ifdef _WIN32
+    char pattern[512];
+    (void)snprintf(pattern, sizeof(pattern), "%s\\atlas_*.bin", dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(pattern, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            count++;
+        } while (FindNextFileA(hFind, &fd));
+        (void)FindClose(hFind);
+    }
+#else
+    DIR *d = opendir(dir);
+    if (d) {
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL) { // NOLINT(concurrency-mt-unsafe)
+            size_t len = strlen(ent->d_name);
+            if (len > 10 && strncmp(ent->d_name, "atlas_", 6) == 0 && strcmp(ent->d_name + len - 4, ".bin") == 0) {
+                count++;
+            }
+        }
+        (void)closedir(d);
+    }
+#endif
+    return count;
+}
+
+/* Truncate the first atlas_*.bin file in the cache dir to `keep` bytes.
+ * Used by the corrupt-cache test to simulate a torn/partial write or a file
+ * from an older format. Returns true if a file was found and truncated. */
+static bool truncate_first_atlas_cache_file(const char *dir, size_t keep) {
+    char path[512];
+    bool found = false;
+#ifdef _WIN32
+    char pattern[512];
+    (void)snprintf(pattern, sizeof(pattern), "%s\\atlas_*.bin", dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(pattern, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        (void)snprintf(path, sizeof(path), "%s\\%s", dir, fd.cFileName);
+        (void)FindClose(hFind);
+        found = true;
+    }
+#else
+    DIR *d = opendir(dir);
+    if (d) {
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL) { // NOLINT(concurrency-mt-unsafe)
+            size_t len = strlen(ent->d_name);
+            if (len > 10 && strncmp(ent->d_name, "atlas_", 6) == 0 && strcmp(ent->d_name + len - 4, ".bin") == 0) {
+                (void)snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+                found = true;
+                break;
+            }
+        }
+        (void)closedir(d);
+    }
+#endif
+    if (!found) {
+        return false;
+    }
+    FILE *f = fopen(path, "rb+");
+    if (!f) {
+        return false;
+    }
+    /* Write `keep` zero bytes then truncate. Simplest: reopen "wb" and write `keep` bytes. */
+    (void)fclose(f);
+    f = fopen(path, "wb");
+    if (!f) {
+        return false;
+    }
+    if (keep > 0) {
+        uint8_t zeros[64] = {0};
+        size_t remaining = keep;
+        while (remaining > 0) {
+            size_t chunk = remaining > sizeof(zeros) ? sizeof(zeros) : remaining;
+            (void)fwrite(zeros, 1, chunk, f);
+            remaining -= chunk;
+        }
+    }
+    (void)fclose(f);
+    return true;
+}
+
 /* Check that no subdirectories exist in the cache dir (excluding . and ..) */
 static bool cache_has_no_subdirs(const char *dir) {
 #ifdef _WIN32
@@ -4712,6 +4800,140 @@ void test_atlas_sprite_opts_origin_nan_asserts(void) {
  *   - each region keeps its own origin_x/y verbatim
  * This is the walk-cycle reuse pattern. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* Regression: two end_atlas runs differing only in an atlas opt must produce
+ * DIFFERENT atlas cache keys. Locks in compute_atlas_cache_key correctness —
+ * if someone adds a new field to nt_atlas_opts_t without updating the hash
+ * input, two atlases would share a cache entry and silently bind to the wrong
+ * output. This test catches that by counting atlas_*.bin files in an isolated
+ * cache directory: two different keys → two files. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_cache_invalidates_on_opts_change(void) {
+    const char *pack1 = TMP_DIR "/atlas_cache_opts1.ntpack";
+    const char *pack2 = TMP_DIR "/atlas_cache_opts2.ntpack";
+    const char *cache = TMP_DIR "/atlas_cache_opts_dir";
+    (void)MKDIR(TMP_DIR);
+    (void)MKDIR(cache);
+    clean_cache_dir(cache);
+    TEST_ASSERT_EQUAL_UINT32(0, count_atlas_cache_files(cache));
+
+    /* Build 1: default max_vertices */
+    nt_atlas_opts_t opts1 = nt_atlas_opts_defaults();
+    opts1.max_vertices = 8;
+    uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
+    NtBuilderContext *ctx1 = nt_builder_start_pack(pack1);
+    nt_builder_set_cache_dir(ctx1, cache);
+    nt_builder_begin_atlas(ctx1, "sprites", &opts1);
+    nt_builder_atlas_add_raw(ctx1, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx1);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx1));
+    nt_builder_free_pack(ctx1);
+    free(s1);
+    TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
+
+    /* Build 2: identical sprite set but max_vertices=16 — different cache key. */
+    nt_atlas_opts_t opts2 = nt_atlas_opts_defaults();
+    opts2.max_vertices = 16;
+    uint8_t *s2 = make_test_sprite(16, 16, 255, 0, 0, 255);
+    NtBuilderContext *ctx2 = nt_builder_start_pack(pack2);
+    nt_builder_set_cache_dir(ctx2, cache);
+    nt_builder_begin_atlas(ctx2, "sprites", &opts2);
+    nt_builder_atlas_add_raw(ctx2, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx2);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx2));
+    nt_builder_free_pack(ctx2);
+    free(s2);
+
+    /* Two distinct atlas cache entries prove compute_atlas_cache_key honours the opt. */
+    TEST_ASSERT_EQUAL_UINT32(2, count_atlas_cache_files(cache));
+}
+
+/* Regression: a corrupt or truncated atlas cache file must NOT crash the
+ * builder. atlas_cache_read validates placement_count / page_count / page
+ * dimensions and returns false on failure, causing pipeline_cache_check to
+ * fall through to a fresh pack. Locks in that graceful behaviour. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_cache_corrupt_file_falls_back(void) {
+    const char *pack1 = TMP_DIR "/atlas_cache_corrupt1.ntpack";
+    const char *pack2 = TMP_DIR "/atlas_cache_corrupt2.ntpack";
+    const char *cache = TMP_DIR "/atlas_cache_corrupt_dir";
+    (void)MKDIR(TMP_DIR);
+    (void)MKDIR(cache);
+    clean_cache_dir(cache);
+
+    /* Build 1: populates the cache. */
+    uint8_t *s1 = make_test_sprite(16, 16, 100, 150, 200, 255);
+    NtBuilderContext *ctx1 = nt_builder_start_pack(pack1);
+    nt_builder_set_cache_dir(ctx1, cache);
+    nt_builder_begin_atlas(ctx1, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx1, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx1);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx1));
+    nt_builder_free_pack(ctx1);
+    free(s1);
+    TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
+
+    /* Truncate the atlas cache file to 4 bytes — not enough for even
+     * placement_count + page_count. atlas_cache_read's fread must fail and
+     * return false. */
+    TEST_ASSERT_TRUE(truncate_first_atlas_cache_file(cache, 4));
+
+    /* Build 2: should re-pack gracefully, not crash on the bad cache. */
+    uint8_t *s2 = make_test_sprite(16, 16, 100, 150, 200, 255);
+    NtBuilderContext *ctx2 = nt_builder_start_pack(pack2);
+    nt_builder_set_cache_dir(ctx2, cache);
+    nt_builder_begin_atlas(ctx2, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx2, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx2);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx2));
+    nt_builder_free_pack(ctx2);
+    free(s2);
+
+    /* The corrupt file should have been overwritten with a fresh valid cache
+     * via the temp+rename path in atlas_cache_write. One file, same name. */
+    TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
+}
+
+/* Regression for BUG-2: exhausting ATLAS_MAX_PAGES must fire a loud
+ * NT_BUILD_ASSERT, not a silent fallback. Generates enough oversized sprites
+ * that the packer cannot fit even one per page across all ATLAS_MAX_PAGES (64)
+ * pages, then verifies the assert fires via EXPECT_BUILD_ASSERT. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_max_pages_exhaustion_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_maxpages.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Tiny max_size + sprite that nearly fills each page → one sprite per page.
+     * Need > ATLAS_MAX_PAGES (64) sprites to trigger the overflow. Use RECT
+     * shape for simple AABB packing (no polygon mode). */
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.max_size = 64;
+    opts.margin = 2;
+    opts.padding = 2;
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+
+    nt_builder_begin_atlas(ctx, "too_many", &opts);
+
+    /* 70 distinct sprites of 60x60 — each uses (60+padding)^2 = 62x62 of a
+     * 64x64 page, no room for a second sprite. Distinct red channels keep
+     * decoded_hash unique so dedup cannot collapse them. */
+    enum { N_SPRITES = 70 };
+    uint8_t *sprites[N_SPRITES];
+    for (uint32_t i = 0; i < N_SPRITES; i++) {
+        sprites[i] = make_test_sprite(60, 60, (uint8_t)(i + 1), 50, 100, 255);
+        char name[32];
+        (void)snprintf(name, sizeof(name), "sp_%u.png", i);
+        nt_builder_atlas_add_raw(ctx, sprites[i], 60, 60, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
+    }
+
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_end_atlas(ctx));
+
+    for (uint32_t i = 0; i < N_SPRITES; i++) {
+        free(sprites[i]);
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_duplicate_pixels_different_origin(void) {
     (void)MKDIR(TMP_DIR);
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_dup_origin.ntpack");
@@ -4955,6 +5177,11 @@ int main(void) {
     RUN_TEST(test_atlas_sprite_opts_origin_out_of_range_allowed);
     RUN_TEST(test_atlas_sprite_opts_origin_nan_asserts);
     RUN_TEST(test_atlas_duplicate_pixels_different_origin);
+
+    /* Atlas cache hardening + BUG-2 regression */
+    RUN_TEST(test_atlas_cache_invalidates_on_opts_change);
+    RUN_TEST(test_atlas_cache_corrupt_file_falls_back);
+    RUN_TEST(test_atlas_max_pages_exhaustion_asserts);
 
     return UNITY_END();
 }
