@@ -343,6 +343,11 @@ typedef struct {
     uint32_t max_size;
 } VPackCandDedup;
 
+/* Precondition: x ≥ 0 && y ≥ 0. Enforced upstream by the non-negative
+ * orient_min_cand invariant (see vpack_place_one_sprite). Negative values
+ * would wrap to huge unsigned via the (uint32_t) casts below and trigger
+ * the bounds assert — that would mask a real bug upstream rather than
+ * fail at the source. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — bounds check + dirty-word tracking + test-and-set on the dedup bitset in one inline hot-path function
 static inline bool vpack_try_mark_cand_seen(int32_t x, int32_t y, VPackCandDedup *dedup) {
     if (!dedup || !dedup->seen_bits) {
@@ -758,6 +763,12 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
     return true;
 }
 
+/* Precondition: cx ≥ 0 && cy ≥ 0 && poly_max_x ≥ 0 && poly_max_y ≥ 0.
+ * Candidates are created through vpack_add_cand with non-negative bounds
+ * (see vpack_place_one_sprite assert), and poly_max_x/y come from AABB
+ * computations on inflated polygons that always yield non-negative maxima
+ * for shapes placed on the atlas. Negative inputs would wrap to huge
+ * unsigned values via the (uint32_t) casts below and produce garbage scores. */
 static uint64_t vpack_score_candidate(int32_t cx, int32_t cy, int32_t poly_max_x, int32_t poly_max_y, uint32_t cur_w, uint32_t cur_h, uint32_t margin, bool power_of_two) {
     uint32_t nw = (uint32_t)cx + (uint32_t)poly_max_x;
     uint32_t nh = (uint32_t)cy + (uint32_t)poly_max_y;
@@ -1497,6 +1508,13 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
         if (mcy < min_edge) {
             mcy = min_edge;
         }
+        /* Downstream invariant: vpack_try_mark_cand_seen and vpack_score_candidate
+         * cast int32_t candidate coords to uint32_t, so bounds must stay non-negative.
+         * mcx = max(min_edge, min_edge - aabb[0]) with min_edge = max(margin, extrude) ≥ 0,
+         * so mcx ≥ min_edge ≥ 0 holds by construction. The assert catches future
+         * regressions that would relax this invariant (e.g. allowing negative margin
+         * or reworking the clamp). */
+        NT_BUILD_ASSERT(mcx >= 0 && mcy >= 0 && "vpack: orient_min_cand must be non-negative (downstream uint32 cast)");
         orient_min_cand[ori][0] = mcx;
         orient_min_cand[ori][1] = mcy;
         orient_max_cand[ori][0] = (int32_t)ctx->max_size - (int32_t)ctx->margin - orient_aabb[ori][2] - 1;
