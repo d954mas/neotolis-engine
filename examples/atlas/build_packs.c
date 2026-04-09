@@ -74,6 +74,7 @@ int main(int argc, char *argv[]) {
     if (argc < 4) { /* codegen only for default spineboy test */
         nt_builder_set_header_dir(ctx, HEADER_DIR);
     }
+    // NOLINTNEXTLINE(concurrency-mt-unsafe) — build_packs is a single-threaded CLI tool, getenv is fine
     const char *threads_env = getenv("NT_BUILDER_THREADS");
     if (threads_env && threads_env[0] != '\0') {
         uint32_t threads = (uint32_t)strtoul(threads_env, NULL, 10);
@@ -99,7 +100,7 @@ int main(int argc, char *argv[]) {
     /* --- Atlas: pack sprites with concave polygon mode --- */
 
     nt_atlas_opts_t opts = nt_atlas_opts_defaults();
-    opts.max_size = (argc >= 3) ? (uint32_t)atoi(argv[2]) : 2048;
+    opts.max_size = (argc >= 3) ? (uint32_t)strtoul(argv[2], NULL, 10) : 2048U;
     opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
     opts.max_vertices = 8;
     opts.allow_transform = true;
@@ -109,8 +110,13 @@ int main(int argc, char *argv[]) {
     if (argc >= 6 && argv[5][0] == 'r') {
         opts.shape = NT_ATLAS_SHAPE_RECT;
     }
-    uint32_t max_sprites = (argc >= 7) ? (uint32_t)atoi(argv[6]) : 0;
-    const char *shape_name = (opts.shape == NT_ATLAS_SHAPE_RECT) ? "rect" : (opts.shape == NT_ATLAS_SHAPE_CONVEX_HULL) ? "convex" : "concave";
+    uint32_t max_sprites = (argc >= 7) ? (uint32_t)strtoul(argv[6], NULL, 10) : 0U;
+    const char *shape_name = "concave";
+    if (opts.shape == NT_ATLAS_SHAPE_RECT) {
+        shape_name = "rect";
+    } else if (opts.shape == NT_ATLAS_SHAPE_CONVEX_HULL) {
+        shape_name = "convex";
+    }
     (void)printf("atlas=%s max=%u shape=%s max_sprites=%u\n", atlas_name, opts.max_size, shape_name, max_sprites);
 
     nt_builder_begin_atlas(ctx, atlas_name, &opts);

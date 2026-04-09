@@ -156,7 +156,7 @@ static int area_sort_cmp(const void *a, const void *b) {
  * rotation, preserves winding (CCW stays CCW). */
 static uint32_t vpack_negate_pack_xy_hash(const Point2D *in, uint32_t count, Point2D *out_poly, int32_t *out_xy) {
     uint32_t h = 2166136261U; /* FNV-1a offset basis */
-    for (uint32_t i = 0; i < count; i++) {
+    for (size_t i = 0; i < count; i++) {
         int32_t x = -in[i].x;
         int32_t y = -in[i].y;
         out_poly[i].x = x;
@@ -174,7 +174,7 @@ static uint32_t vpack_negate_pack_xy_hash(const Point2D *in, uint32_t count, Poi
 /* Pack int32 xy pairs for Clipper2 and return the shape hash in one pass. */
 static uint32_t vpack_pack_xy_hash(const Point2D *in, uint32_t count, int32_t *out_xy) {
     uint32_t h = 2166136261U; /* FNV-1a offset basis */
-    for (uint32_t i = 0; i < count; i++) {
+    for (size_t i = 0; i < count; i++) {
         int32_t x = in[i].x;
         int32_t y = in[i].y;
         out_xy[i * 2] = x;
@@ -188,7 +188,7 @@ static uint32_t vpack_pack_xy_hash(const Point2D *in, uint32_t count, int32_t *o
 }
 
 static void vpack_unpack_xy(const int32_t *in_xy, uint32_t count, Point2D *out_poly) {
-    for (uint32_t i = 0; i < count; i++) {
+    for (size_t i = 0; i < count; i++) {
         out_poly[i].x = in_xy[i * 2];
         out_poly[i].y = in_xy[(i * 2) + 1];
     }
@@ -239,6 +239,7 @@ static uint32_t vpack_minkowski(const Point2D *A, uint32_t nA, const Point2D *B,
  * Returns true if edge (p1->p2) crosses the line x=M (is_x_axis) or y=M (!is_x_axis).
  * out_floor/out_ceil: integer bounds of
  * the other coordinate at the crossing. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — symmetric x-axis/y-axis branches with integer floor/ceil handling; splitting would duplicate math
 static bool vpack_intersect_axis_i(Point2D p1, Point2D p2, bool is_x_axis, int32_t M, int32_t *out_floor, int32_t *out_ceil) {
     if (is_x_axis) {
         int32_t dx = p2.x - p1.x;
@@ -342,6 +343,7 @@ typedef struct {
     uint32_t max_size;
 } VPackCandDedup;
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — bounds check + dirty-word tracking + test-and-set on the dedup bitset in one inline hot-path function
 static inline bool vpack_try_mark_cand_seen(int32_t x, int32_t y, VPackCandDedup *dedup) {
     if (!dedup || !dedup->seen_bits) {
         return true;
@@ -450,7 +452,7 @@ static void vpack_copy_cache_slot_to_out(const VPackNFPCacheEntry *slot, int32_t
     for (uint8_t r = 0; r <= rc; r++) {
         out_nfp->ring_offsets[r] = slot->ring_offsets[r];
     }
-    for (uint32_t v = 0; v < total; v++) {
+    for (size_t v = 0; v < total; v++) {
         out_nfp->verts[v].x = (int32_t)slot->verts_xy[v * 2] + off_x;
         out_nfp->verts[v].y = (int32_t)slot->verts_xy[(v * 2) + 1] + off_y;
     }
@@ -467,7 +469,7 @@ static void vpack_store_local_nfp_in_cache(VPackNFPCacheEntry *slot, uint32_t ke
         slot->ring_offsets[r] = ring_offsets[r];
     }
     uint32_t total = ring_offsets[ring_count];
-    for (uint32_t v = 0; v < total; v++) {
+    for (size_t v = 0; v < total; v++) {
         /* Range-check: all atlas coords fit in int16. */
         NT_BUILD_ASSERT(verts[v].x >= INT16_MIN && verts[v].x <= INT16_MAX && "vpack: cache store x out of int16 range");
         NT_BUILD_ASSERT(verts[v].y >= INT16_MIN && verts[v].y <= INT16_MAX && "vpack: cache store y out of int16 range");
@@ -668,7 +670,7 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
     cache_mix *= 0x85ebca6bU;
     cache_mix ^= cache_mix >> 13;
     uint32_t cache_set_idx = cache_mix & (VPACK_NFP_CACHE_SET_COUNT - 1);
-    VPackNFPCacheEntry *cache_set = &nfp_cache[cache_set_idx * VPACK_NFP_CACHE_WAYS];
+    VPackNFPCacheEntry *cache_set = &nfp_cache[(size_t)cache_set_idx * VPACK_NFP_CACHE_WAYS];
 
     /* Lock-free read via seqlock; on BUSY just fall through to compute. */
     VPackCacheReadResult cache_result = vpack_try_read_nfp_cache(cache_set, cache_a, cache_b, pl_i->x, pl_i->y, out_nfp);
@@ -699,7 +701,7 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
     if (nfp_ok) {
         local_ring_count = (uint8_t)nfp_ring_count;
         local_ring_offsets[0] = 0;
-        uint32_t v_cursor = 0;
+        size_t v_cursor = 0;
         for (uint32_t r = 0; r < nfp_ring_count; r++) {
             uint32_t rl = nfp_ring_lengths[r];
             for (uint32_t v = 0; v < rl; v++) {
@@ -709,7 +711,7 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
             }
             local_ring_offsets[r + 1] = (uint16_t)v_cursor;
         }
-        vpack_calc_aabb(local_verts, v_cursor, &local_min_x, &local_min_y, &local_max_x, &local_max_y);
+        vpack_calc_aabb(local_verts, (uint32_t)v_cursor, &local_min_x, &local_min_y, &local_max_x, &local_max_y);
     } else {
         /* Clipper2 NFP failed - fall back to convex hull pair (always valid). */
         Point2D placed_poly[VPACK_PLACED_MAX_VERTS];
@@ -731,7 +733,9 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
             local_verts[v] = convex_clean[v];
         }
         vpack_calc_aabb(local_verts, convex_count, &local_min_x, &local_min_y, &local_max_x, &local_max_y);
-        nfp_ok = true;
+        /* nfp_ok is set to true only to document the state at this branch exit
+         * (for future readers); no later reads — clang-tidy flags the dead store. */
+        (void)nfp_ok;
     }
     free(nfp_xy);
     free(nfp_ring_lengths);
@@ -869,6 +873,7 @@ static inline bool vpack_par_better(uint64_t score, uint32_t cand_index, uint64_
     return (score < best_score) || (score == best_score && cand_index < best_cand_index);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — hot-path candidate scanner: AABB prefilter, NFP point-in-poly loop, score compare, best-update reduction; inlined for performance
 static void vpack_scan_candidate_range(const VPackScanCtx *scan, uint32_t start, uint32_t end, VPackParResult *out_result) {
     uint64_t local_best = out_result->score;
     uint32_t local_best_cand = out_result->cand_index;
@@ -965,39 +970,42 @@ static int vpack_par_worker(void *arg) {
     VPackParCtx *ctx = wa->ctx;
     uint32_t tid = wa->tid;
     uint32_t seen_batch_seq = 0;
+    /* tinycthread mtx/cnd return values are ignored throughout this pool:
+     * on our platforms (Windows/POSIX) the only failure modes are OOM / EINVAL
+     * on a destroyed mutex, neither of which is recoverable mid-batch. */
     for (;;) {
-        mtx_lock(&ctx->mtx);
+        (void)mtx_lock(&ctx->mtx);
         while ((!ctx->batch_ready || ctx->batch_seq == seen_batch_seq) && !ctx->shutdown) {
-            cnd_wait(&ctx->cnd_work, &ctx->mtx);
+            (void)cnd_wait(&ctx->cnd_work, &ctx->mtx);
         }
         if (ctx->shutdown) {
-            mtx_unlock(&ctx->mtx);
+            (void)mtx_unlock(&ctx->mtx);
             break;
         }
         seen_batch_seq = ctx->batch_seq;
         VPackBatchKind kind = ctx->batch_kind;
-        mtx_unlock(&ctx->mtx);
+        (void)mtx_unlock(&ctx->mtx);
 
         if (kind == VPACK_BATCH_SCAN_CANDIDATES) {
             VPackParResult result = ctx->results[tid];
             vpack_par_process_chunks(ctx, tid, &result);
-            mtx_lock(&ctx->mtx);
+            (void)mtx_lock(&ctx->mtx);
             ctx->results[tid] = result;
             ctx->workers_done++;
             if (ctx->workers_done == ctx->num_workers) {
                 ctx->batch_ready = false;
-                cnd_signal(&ctx->cnd_done);
+                (void)cnd_signal(&ctx->cnd_done);
             }
-            mtx_unlock(&ctx->mtx);
+            (void)mtx_unlock(&ctx->mtx);
         } else { /* VPACK_BATCH_NFP_BUILD */
             vpack_par_process_nfp_chunks(ctx, tid);
-            mtx_lock(&ctx->mtx);
+            (void)mtx_lock(&ctx->mtx);
             ctx->workers_done++;
             if (ctx->workers_done == ctx->num_workers) {
                 ctx->batch_ready = false;
-                cnd_signal(&ctx->cnd_done);
+                (void)cnd_signal(&ctx->cnd_done);
             }
-            mtx_unlock(&ctx->mtx);
+            (void)mtx_unlock(&ctx->mtx);
         }
     }
     return 0;
@@ -1055,7 +1063,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
          * NFPs and generates candidates in ri order. */
         if (par && par->num_workers > 0 && relevant_count >= 4) {
             /* Parallel NFP build: dispatch to thread pool */
-            mtx_lock(&par->mtx);
+            (void)mtx_lock(&par->mtx);
             par->batch_kind = VPACK_BATCH_NFP_BUILD;
             par->nfp_build.placed_arr = page->placed;
             par->nfp_build.relevant_buf = relevant_buf;
@@ -1082,18 +1090,18 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             par->active_threads = nfp_active;
             par->batch_seq++;
             par->batch_ready = true;
-            cnd_broadcast(&par->cnd_work);
-            mtx_unlock(&par->mtx);
+            (void)cnd_broadcast(&par->cnd_work);
+            (void)mtx_unlock(&par->mtx);
 
             /* Main thread also processes its chunk (tid=0) */
             vpack_par_process_nfp_chunks(par, 0);
 
             /* Wait for all workers to finish this batch */
-            mtx_lock(&par->mtx);
+            (void)mtx_lock(&par->mtx);
             while (par->workers_done < par->num_workers) {
-                cnd_wait(&par->cnd_done, &par->mtx);
+                (void)cnd_wait(&par->cnd_done, &par->mtx);
             }
-            mtx_unlock(&par->mtx);
+            (void)mtx_unlock(&par->mtx);
 
             /* Aggregate per-thread stats into global stats */
             for (uint32_t t = 0; t <= par->num_workers; t++) {
@@ -1257,7 +1265,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         // #region Candidate testing (single-threaded or parallel)
         if (par && par->num_workers > 0 && cand_count >= VPACK_PAR_MIN_CANDIDATES) {
             /* Parallel: dispatch to thread pool */
-            mtx_lock(&par->mtx);
+            (void)mtx_lock(&par->mtx);
             par->batch_kind = VPACK_BATCH_SCAN_CANDIDATES;
             par->scan = scan;
             for (uint32_t t = 0; t <= par->num_workers; t++) {
@@ -1278,8 +1286,8 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             par->active_threads = scan_active;
             par->batch_seq++;
             par->batch_ready = true;
-            cnd_broadcast(&par->cnd_work);
-            mtx_unlock(&par->mtx);
+            (void)cnd_broadcast(&par->cnd_work);
+            (void)mtx_unlock(&par->mtx);
 
             /* Main thread also processes chunks (tid=0) */
             VPackParResult main_result = par->results[0];
@@ -1287,11 +1295,11 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             par->results[0] = main_result;
 
             /* Wait for all workers to finish this batch */
-            mtx_lock(&par->mtx);
+            (void)mtx_lock(&par->mtx);
             while (par->workers_done < par->num_workers) {
-                cnd_wait(&par->cnd_done, &par->mtx);
+                (void)cnd_wait(&par->cnd_done, &par->mtx);
             }
-            mtx_unlock(&par->mtx);
+            (void)mtx_unlock(&par->mtx);
 
             /* Reduce: find global best across all threads */
             uint64_t reduce_score = *io_best_score;
@@ -1480,6 +1488,7 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
     for (uint32_t ori = 0; ori < orient_count; ori++) {
         orient_neg_hashes[ori] = vpack_negate_pack_xy_hash(orient_polys[ori], orient_counts[ori], orient_neg[ori], orient_neg_xy[ori]);
         vpack_calc_aabb(orient_polys[ori], orient_counts[ori], &orient_aabb[ori][0], &orient_aabb[ori][1], &orient_aabb[ori][2], &orient_aabb[ori][3]);
+        // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult) — orient_aabb[ori] is written by vpack_calc_aabb above; analyzer can't trace through the out-parameter store
         int32_t mcx = min_edge - orient_aabb[ori][0];
         if (mcx < min_edge) {
             mcx = min_edge;
@@ -1594,9 +1603,11 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
         out_placement->y = (uint32_t)(best_y - (int32_t)ctx->extrude);
         out_placement->transform = orient_orig[best_orient];
 
+        // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult) — win_poly_max_x is written when best-score is updated above; analyzer misses the store through the orientation branch
         if (best_x + win_poly_max_x > (int32_t)ctx->pages[best_page].used_w) {
             ctx->pages[best_page].used_w = (uint32_t)(best_x + win_poly_max_x);
         }
+        // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult) — same reasoning as the previous line for win_poly_max_y
         if (best_y + win_poly_max_y > (int32_t)ctx->pages[best_page].used_h) {
             ctx->pages[best_page].used_h = (uint32_t)(best_y + win_poly_max_y);
         }
@@ -1753,10 +1764,10 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
         par_ctx.results = (VPackParResult *)calloc(num_workers + 1, sizeof(VPackParResult));
         par_ctx.nfp_build.thread_stats = (VPackNFPBuildLocalStats *)calloc(num_workers + 1, sizeof(VPackNFPBuildLocalStats));
         NT_BUILD_ASSERT(par_ctx.results && par_ctx.nfp_build.thread_stats && "vector_pack: par results alloc failed");
-        mtx_init(&par_ctx.mtx, mtx_plain);
-        mtx_init(&par_ctx.cache_mtx, mtx_plain);
-        cnd_init(&par_ctx.cnd_work);
-        cnd_init(&par_ctx.cnd_done);
+        (void)mtx_init(&par_ctx.mtx, mtx_plain);
+        (void)mtx_init(&par_ctx.cache_mtx, mtx_plain);
+        (void)cnd_init(&par_ctx.cnd_work);
+        (void)cnd_init(&par_ctx.cnd_done);
         par_threads = (thrd_t *)malloc(num_workers * sizeof(thrd_t));
         par_args = (VPackWorkerArg *)malloc(num_workers * sizeof(VPackWorkerArg));
         NT_BUILD_ASSERT(par_threads && par_args && "vector_pack: thread alloc failed");
@@ -1852,7 +1863,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
     for (uint32_t i = 0; i < sprite_count; i++) {
         free(inf_polys[i]);
     }
-    free(inf_polys);
+    free((void *)inf_polys);
     free(inf_counts);
     free(sorted);
     for (uint32_t i = 1; i < page_count; i++) {
@@ -1871,12 +1882,12 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
     free(cand_seen_bits);
     /* Shutdown thread pool */
     if (num_workers > 0) {
-        mtx_lock(&par_ctx.mtx);
+        (void)mtx_lock(&par_ctx.mtx);
         par_ctx.shutdown = true;
-        cnd_broadcast(&par_ctx.cnd_work);
-        mtx_unlock(&par_ctx.mtx);
+        (void)cnd_broadcast(&par_ctx.cnd_work);
+        (void)mtx_unlock(&par_ctx.mtx);
         for (uint32_t t = 0; t < num_workers; t++) {
-            thrd_join(par_threads[t], NULL);
+            (void)thrd_join(par_threads[t], NULL);
         }
         mtx_destroy(&par_ctx.mtx);
         mtx_destroy(&par_ctx.cache_mtx);
@@ -1884,7 +1895,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
         cnd_destroy(&par_ctx.cnd_done);
         free(par_ctx.results);
         free(par_ctx.nfp_build.thread_stats);
-        free(par_threads);
+        free((void *)par_threads);
         free(par_args);
     }
     // #endregion
@@ -1904,7 +1915,7 @@ bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_cou
     for (uint32_t r = 0; r <= ring_count; r++) {
         nfp.ring_offsets[r] = ring_offsets[r];
     }
-    for (uint32_t v = 0; v < vert_count; v++) {
+    for (size_t v = 0; v < vert_count; v++) {
         nfp.verts[v].x = verts_xy[v * 2];
         nfp.verts[v].y = verts_xy[(v * 2) + 1];
     }

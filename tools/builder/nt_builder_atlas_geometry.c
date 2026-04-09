@@ -219,6 +219,7 @@ uint32_t hull_simplify(const Point2D *hull, uint32_t n, uint32_t max_vertices, P
  * out_max_dev returns the largest perpendicular deviation seen during removals — but
  * callers that need the exact inflate amount should post-compute it from the final
  * polygon (this tracker is only a coarse upper bound). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — greedy perpendicular-distance simplification with per-step min search; O(n²) control flow is inherent
 uint32_t hull_simplify_perp(const Point2D *hull, uint32_t n, uint32_t max_vertices, Point2D *out, double *out_max_dev) {
     if (n <= max_vertices) {
         memcpy(out, hull, n * sizeof(Point2D));
@@ -311,9 +312,9 @@ uint32_t ear_clip_triangulate(const Point2D *poly, uint32_t n, uint16_t *indices
     }
     /* Convert to flat xy and call Clipper2 CDT via bridge */
     int32_t stack_xy[64];
-    int32_t *xy = (n <= 32) ? stack_xy : (int32_t *)malloc(n * 2 * sizeof(int32_t));
+    int32_t *xy = (n <= 32) ? stack_xy : (int32_t *)malloc((size_t)n * 2 * sizeof(int32_t));
     NT_BUILD_ASSERT(xy && "triangulate: alloc failed");
-    for (uint32_t i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
         xy[i * 2] = poly[i].x;
         xy[(i * 2) + 1] = poly[i].y;
     }
@@ -327,7 +328,7 @@ uint32_t ear_clip_triangulate(const Point2D *poly, uint32_t n, uint16_t *indices
         free(cdt_indices);
         return fan_triangulate(n, indices);
     }
-    memcpy(indices, cdt_indices, tri_count * 3 * sizeof(uint16_t));
+    memcpy(indices, cdt_indices, (size_t)tri_count * 3 * sizeof(uint16_t));
     free(cdt_indices);
     return tri_count;
 }
@@ -367,6 +368,7 @@ bool point_in_polygon_f(const Point2D *poly, uint32_t n, double px, double py) {
  * Used to determine the minimum Clipper2 inflate amount needed so the inflated
  * polygon fully encloses every opaque pixel center (stricter than the clean
  * contour vertices, which sit at integer pixel corners and miss +0.5 offsets). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — pixel-grid scan with per-edge projection for every opaque pixel; loop nesting is the natural shape
 double polygon_max_outside_pixel_distance(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th) {
     double max_d = 0.0;
     for (uint32_t y = 0; y < th; y++) {
@@ -505,6 +507,7 @@ static bool binary_is_boundary_pixel(const uint8_t *binary, uint32_t tw, uint32_
     return false;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — iterative convex hull + ensure-fully-enclosed refinement loop; refactoring into helpers would obscure the termination invariant
 Point2D *binary_build_convex_polygon(const uint8_t *binary, uint32_t tw, uint32_t th, uint32_t max_vertices, uint32_t *out_count) {
     uint32_t boundary_pixel_count = 0;
     for (uint32_t y = 0; y < th; y++) {
@@ -702,6 +705,7 @@ static double rdp_dist_sq(Point2D a, Point2D b, Point2D p) {
 }
 
 /* Recursive RDP on an open sub-range [start..end] of a polygon. */
+// NOLINTNEXTLINE(misc-no-recursion) — Ramer-Douglas-Peucker is a recursive divide-and-conquer algorithm by definition; iterative version would need an explicit stack and be less clear
 static void rdp_recurse(const Point2D *pts, bool *keep, uint32_t start, uint32_t end, double eps_sq) {
     if (end <= start + 1) {
         return;
@@ -724,6 +728,7 @@ static void rdp_recurse(const Point2D *pts, bool *keep, uint32_t start, uint32_t
 
 /* RDP simplification for a closed polygon. epsilon controls max deviation in pixels.
  * Output polygon has at least 3 vertices. Returns vertex count. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — closed-loop RDP with double-pivot splitting; step count reflects the algorithm, not tangled control flow
 uint32_t rdp_simplify(const Point2D *poly, uint32_t n, double epsilon, Point2D *out) {
     if (n <= 3) {
         memcpy(out, poly, n * sizeof(Point2D));
@@ -830,16 +835,17 @@ uint32_t rdp_simplify(const Point2D *poly, uint32_t n, double epsilon, Point2D *
 /* Inflates a polygon by 'amount' pixels. Output buffer 'out' must hold at least
  * max(n, 32) Point2D entries — Clipper2 may add vertices at concave splits,
  * but we cap the result to fit downstream stack arrays. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — Clipper2 bridge plumbing + result simplification; subroutines would just shuffle locals across functions
 uint32_t polygon_inflate(const Point2D *hull, uint32_t n, float amount, Point2D *out) {
     if (n < 3 || amount <= 0.0F) {
-        memcpy(out, hull, n * sizeof(Point2D));
+        memcpy(out, hull, (size_t)n * sizeof(Point2D));
         return n;
     }
     /* Convert Point2D → flat xy array for bridge */
     int32_t stack_xy[64];
-    int32_t *xy = (n <= 32) ? stack_xy : (int32_t *)malloc(n * 2 * sizeof(int32_t));
+    int32_t *xy = (n <= 32) ? stack_xy : (int32_t *)malloc((size_t)n * 2 * sizeof(int32_t));
     NT_BUILD_ASSERT(xy && "polygon_inflate: alloc failed");
-    for (uint32_t i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
         xy[i * 2] = hull[i].x;
         xy[(i * 2) + 1] = hull[i].y;
     }
@@ -888,9 +894,9 @@ uint32_t polygon_inflate(const Point2D *hull, uint32_t n, float amount, Point2D 
     }
     int32_t margin = (int32_t)(amount * 4.0F) + 16;
     bool sane = true;
-    for (uint32_t i = 0; i < out_count; i++) {
-        int32_t x = (int32_t)inflated_xy[i * 2];
-        int32_t y = (int32_t)inflated_xy[(i * 2) + 1];
+    for (size_t i = 0; i < out_count; i++) {
+        int32_t x = inflated_xy[i * 2];
+        int32_t y = inflated_xy[(i * 2) + 1];
         if (x < in_min_x - margin || x > in_max_x + margin || y < in_min_y - margin || y > in_max_y + margin) {
             sane = false;
             break;
@@ -899,10 +905,10 @@ uint32_t polygon_inflate(const Point2D *hull, uint32_t n, float amount, Point2D 
     if (!sane) {
         NT_LOG_WARN("polygon_inflate: Clipper2 returned out-of-bounds vertices, using input unchanged");
         free(inflated_xy);
-        memcpy(out, hull, n * sizeof(Point2D));
+        memcpy(out, hull, (size_t)n * sizeof(Point2D));
         return n;
     }
-    for (uint32_t i = 0; i < out_count; i++) {
+    for (size_t i = 0; i < out_count; i++) {
         out[i].x = inflated_xy[i * 2];
         out[i].y = inflated_xy[(i * 2) + 1];
     }

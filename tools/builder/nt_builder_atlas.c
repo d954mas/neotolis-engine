@@ -108,6 +108,7 @@ static void pack_stats_measure_payload(PackStats *stats, const uint32_t *trim_w,
     stats->poly_area = 0;
 
     for (uint32_t i = 0; i < sprite_count; i++) {
+        // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult) — caller populates trim_w/trim_h before entry; analyzer can't trace through pipeline_tile_pack init
         stats->trim_area += (uint64_t)trim_w[i] * (uint64_t)trim_h[i];
 
         if (!hull_verts[i] || hull_counts[i] == 0) {
@@ -129,6 +130,7 @@ static void pack_stats_measure_payload(PackStats *stats, const uint32_t *trim_w,
 // #region Composition — blit trimmed pixels, extrude edges
 /* --- Blit trimmed sprite pixels to atlas page --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — two-path blit (rotation 0 fast path + generic) is inherent to the hot-path design
 static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rgba, uint32_t sprite_w, uint32_t trim_x, uint32_t trim_y, uint32_t trim_w, uint32_t trim_h, uint32_t dest_x,
                         uint32_t dest_y, uint8_t rotation) {
     /* Blit only non-transparent pixels to avoid overwriting neighbors in polygon mode.
@@ -153,7 +155,7 @@ static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rg
                 while (sx < trim_w && src_row[(sx * 4) + 3] != 0) {
                     sx++;
                 }
-                memcpy(&dst_row[run_start * 4], &src_row[run_start * 4], (size_t)(sx - run_start) * 4);
+                memcpy(&dst_row[(size_t)run_start * 4], &src_row[(size_t)run_start * 4], (size_t)(sx - run_start) * 4);
             }
         }
         return;
@@ -187,6 +189,7 @@ static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rg
  * bleed logic simple and predictable. When no visual gap between neighboring
  * extrude bands is desired, increase `opts.padding`; `margin` only affects
  * the page border. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — four edge-copy loops (top/bot/left/right) fused into one function; splitting would obscure intent
 static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh, uint32_t extrude_count) {
     if (extrude_count == 0) {
         return;
@@ -485,6 +488,7 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, AtlasPla
         return false;
     }
 
+    // NOLINTNEXTLINE(clang-analyzer-unix.Malloc) — no allocation alive at this point; analyzer false positive on the short-circuit OR path
     if (fread(out_page_w, sizeof(uint32_t), page_count_val, f) != page_count_val || fread(out_page_h, sizeof(uint32_t), page_count_val, f) != page_count_val) {
         (void)fclose(f);
         return false;
@@ -1124,9 +1128,9 @@ static void pipeline_geometry(AtlasPipeline *p) {
                     double inflate_amt = best.inflate_amt;
 
                     free(clean);
-                    int32_t *simp_xy = (int32_t *)malloc(simp_count * 2 * sizeof(int32_t));
+                    int32_t *simp_xy = (int32_t *)malloc((size_t)simp_count * 2 * sizeof(int32_t));
                     NT_BUILD_ASSERT(simp_xy && "pipeline_geometry: alloc failed");
-                    for (uint32_t v = 0; v < simp_count; v++) {
+                    for (size_t v = 0; v < simp_count; v++) {
                         simp_xy[v * 2] = simplified[v].x;
                         simp_xy[(v * 2) + 1] = simplified[v].y;
                     }
@@ -1142,9 +1146,9 @@ static void pipeline_geometry(AtlasPipeline *p) {
                     if (sane_result) {
                         /* If Clipper2 produced too many vertices (edge splits at concave corners),
                          * apply RDP again to get under max_vertices. */
-                        Point2D *result = (Point2D *)malloc(inf_count * sizeof(Point2D));
+                        Point2D *result = (Point2D *)malloc((size_t)inf_count * sizeof(Point2D));
                         NT_BUILD_ASSERT(result && "pipeline_geometry: alloc failed");
-                        for (uint32_t v = 0; v < inf_count; v++) {
+                        for (size_t v = 0; v < inf_count; v++) {
                             result[v].x = inflated_xy[v * 2];
                             result[v].y = inflated_xy[(v * 2) + 1];
                         }
@@ -1375,10 +1379,13 @@ static void pipeline_serialize(AtlasPipeline *p) {
         total_index_count += tri * 3;
     }
 
-    /* Build placement lookup: original_sprite_index -> placement index */
-    uint32_t *placement_lookup = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
+    /* Build placement lookup: original_sprite_index -> placement index.
+     * begin_atlas rejects empty sprite sets, so sprite_count > 0 here, but
+     * guard explicitly so the analyzer can prove malloc is not called with 0. */
+    NT_BUILD_ASSERT(p->sprite_count > 0 && "pipeline_serialize: sprite_count == 0");
+    uint32_t *placement_lookup = (uint32_t *)malloc((size_t)p->sprite_count * sizeof(uint32_t));
     NT_BUILD_ASSERT(placement_lookup && "pipeline_serialize: alloc failed");
-    memset(placement_lookup, 0xFF, p->sprite_count * sizeof(uint32_t));
+    memset(placement_lookup, 0xFF, (size_t)p->sprite_count * sizeof(uint32_t));
 
     for (uint32_t pi = 0; pi < p->placement_count; pi++) {
         placement_lookup[p->placements[pi].sprite_index] = pi;
@@ -1555,6 +1562,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
 
 /* --- pipeline_register: add texture page entries + codegen info --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — registers N page textures and N region codegen entries in one pass; splitting would just shuffle locals
 static void pipeline_register(AtlasPipeline *p) {
     /* Register texture page entries */
     for (uint32_t pg = 0; pg < p->page_count; pg++) {
@@ -1651,6 +1659,7 @@ static void pipeline_cleanup(AtlasPipeline *p) {
 
 /* --- nt_builder_end_atlas: orchestrator — calls pipeline steps in order --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — linear sequence of pipeline_* stage calls with shared cleanup; "high" complexity reflects stage count, not control-flow depth
 void nt_builder_end_atlas(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx && "end_atlas: ctx is NULL");
     NT_BUILD_ASSERT(ctx->active_atlas && "end_atlas: no active atlas");

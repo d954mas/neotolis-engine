@@ -163,7 +163,7 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
         for (uint32_t i = 0; i < match_count; i++) {
             free(matches[i]);
         }
-        free(matches);
+        free((void *)matches);
         return false;
     }
 
@@ -172,7 +172,7 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
         callback(matches[i], user);
         free(matches[i]);
     }
-    free(matches);
+    free((void *)matches);
     return true;
 }
 

@@ -160,8 +160,11 @@ static void check_codegen_collisions(const CodegenEntry *entries, uint32_t count
         return;
     }
 
-    /* Build identifier array, sort, check adjacent pairs — O(N log N) */
-    CodegenCollisionEntry *sorted = (CodegenCollisionEntry *)malloc((size_t)count * sizeof(CodegenCollisionEntry));
+    /* Build identifier array, sort, check adjacent pairs — O(N log N).
+     * calloc so the static analyzer sees every field initialised before qsort
+     * rearranges entries (the per-index init loop below would otherwise let
+     * the analyzer mark post-qsort reads as reading garbage). */
+    CodegenCollisionEntry *sorted = (CodegenCollisionEntry *)calloc(count, sizeof(CodegenCollisionEntry));
     if (!sorted) {
         return;
     }
@@ -178,6 +181,7 @@ static void check_codegen_collisions(const CodegenEntry *entries, uint32_t count
         if (strcmp(sorted[i - 1].identifier, sorted[i].identifier) == 0) {
             uint32_t a = sorted[i - 1].index;
             uint32_t b = sorted[i].index;
+            // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage) — entries[b].path is valid: b < count and entries[] is fully populated by the caller; analyzer loses track across qsort
             NT_LOG_ERROR("Codegen: identifier collision '%s' between '%s' and '%s'", sorted[i].identifier, entries[a].path, entries[b].path);
             free(sorted);
             NT_BUILD_ASSERT(0 && "codegen identifier collision -- rename one of the conflicting assets");
@@ -189,6 +193,9 @@ static void check_codegen_collisions(const CodegenEntry *entries, uint32_t count
 /* --- Shared: write sorted entries to FILE --- */
 
 static void write_sorted_defines(FILE *f, const CodegenEntry *entries, uint32_t count) {
+    if (count == 0) {
+        return;
+    }
     /* Build sort index per type group */
     const char *type_order[] = {"MESH", "TEXTURE", "SHADER", "BLOB", "FONT", "ATLAS", "ATLAS_REGION"};
 
@@ -226,6 +233,12 @@ static void write_sorted_defines(FILE *f, const CodegenEntry *entries, uint32_t 
 }
 
 static void write_register_labels(FILE *f, const char *func_prefix, const CodegenEntry *entries, uint32_t count) {
+    if (count == 0) {
+        (void)fprintf(f, "#if NT_HASH_LABELS\n");
+        (void)fprintf(f, "static inline void %s_register_labels(void) {}\n", func_prefix);
+        (void)fprintf(f, "#endif\n\n");
+        return;
+    }
     /* Sort all entries by path for deterministic output */
     SortEntry *sorted = (SortEntry *)malloc((size_t)count * sizeof(SortEntry));
     NT_BUILD_ASSERT(sorted && "codegen: sorted alloc failed");
@@ -280,6 +293,7 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
     FILE *f = fopen(header_path, "w");
     if (!f) {
         NT_LOG_WARN("Could not write codegen header: %s", header_path);
+        free(ce);
         return NT_BUILD_ERR_IO;
     }
 

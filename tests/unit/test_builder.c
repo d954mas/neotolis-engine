@@ -3985,22 +3985,22 @@ void test_atlas_real_pipeline_preserves_hole(void) {
              * this transparent pixel is enclosed — i.e. inside a hole. */
             bool blocked_n = false, blocked_s = false, blocked_w = false, blocked_e = false;
             for (uint32_t k = 1; y >= k && !blocked_n; k++) {
-                if (page_pixels[((size_t)(y - k) * page_w + x) * 4 + 3] != 0) {
+                if (page_pixels[((((size_t)(y - k) * page_w) + x) * 4) + 3] != 0) {
                     blocked_n = true;
                 }
             }
             for (uint32_t k = 1; y + k < page_h && !blocked_s; k++) {
-                if (page_pixels[((size_t)(y + k) * page_w + x) * 4 + 3] != 0) {
+                if (page_pixels[((((size_t)(y + k) * page_w) + x) * 4) + 3] != 0) {
                     blocked_s = true;
                 }
             }
             for (uint32_t k = 1; x >= k && !blocked_w; k++) {
-                if (page_pixels[((size_t)y * page_w + (x - k)) * 4 + 3] != 0) {
+                if (page_pixels[((((size_t)y * page_w) + (x - k)) * 4) + 3] != 0) {
                     blocked_w = true;
                 }
             }
             for (uint32_t k = 1; x + k < page_w && !blocked_e; k++) {
-                if (page_pixels[((size_t)y * page_w + (x + k)) * 4 + 3] != 0) {
+                if (page_pixels[((((size_t)y * page_w) + (x + k)) * 4) + 3] != 0) {
                     blocked_e = true;
                 }
             }
@@ -4037,6 +4037,7 @@ void test_atlas_shape_concave_rejects_extrude(void) {
     EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "poly", &opts));
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_round_trip_basic(void) {
     (void)MKDIR(TMP_DIR);
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_basic.ntpack");
@@ -4220,8 +4221,8 @@ void test_atlas_round_trip_vertices(void) {
     const uint8_t *ptr = ablob + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
     const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
     for (uint32_t r = 0; r < ahdr->region_count; r++) {
-        uint32_t vertex_end = (uint32_t)regions[r].vertex_start + regions[r].vertex_count;
-        uint32_t index_end = (uint32_t)regions[r].index_start + regions[r].index_count;
+        uint32_t vertex_end = regions[r].vertex_start + regions[r].vertex_count;
+        uint32_t index_end = regions[r].index_start + regions[r].index_count;
         TEST_ASSERT_TRUE(vertex_end <= ahdr->total_vertex_count);
         TEST_ASSERT_TRUE(index_end <= ahdr->total_index_count);
         TEST_ASSERT_EQUAL_UINT32(0, (uint32_t)regions[r].index_count % 3U);

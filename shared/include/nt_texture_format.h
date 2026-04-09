@@ -38,7 +38,7 @@ typedef enum {
 } nt_texture_compression_t;
 
 /* Texture header flags (single byte, room for future bits: sRGB, linear, ...) */
-#define NT_TEXTURE_FLAG_PREMULTIPLIED (1u << 0) /* RGB already multiplied by alpha */
+#define NT_TEXTURE_FLAG_PREMULTIPLIED (1U << 0) /* RGB already multiplied by alpha */
 /* bits 1..7 reserved */
 
 /*

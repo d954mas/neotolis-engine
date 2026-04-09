@@ -387,9 +387,8 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);
 /* File I/O utilities */
 char *nt_builder_read_file(const char *path, uint32_t *out_size);
 
-/* Glob callback type + sorted directory iteration (nt_builder_glob.c) */
-typedef void (*nt_builder_glob_callback_fn)(const char *full_path, void *user);
-bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn callback, void *user);
+/* Glob callback type is public (nt_builder.h). The iteration function itself
+ * is also declared in nt_builder.h; do not re-declare here. */
 
 /* Include resolver (D-11, D-12, D-13) */
 char *nt_builder_resolve_includes(const char *source, uint32_t source_len, const char *source_path, const NtBuilderContext *ctx, uint32_t *out_len);
