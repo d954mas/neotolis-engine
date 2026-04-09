@@ -353,7 +353,11 @@ static int uint64_cmp(const void *a, const void *b) {
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts, bool has_compress, const nt_tex_compress_opts_t *compress) {
     /* Bump on any change to the byte layout below, the flag-bit ordering, or
      * the shape enum ordering — otherwise cached atlases would silently bind
-     * to a different pack behaviour. v6: polygon_mode bool → shape enum. */
+     * to a different pack behaviour. v6: polygon_mode bool → shape enum.
+     * Note: NT_BUILDER_VERSION is ALSO mixed into the key below, so content
+     * changes inside the atlas pipeline (blit/extrude/compose tweaks that
+     * don't touch the byte layout of this hash input) only need a
+     * NT_BUILDER_VERSION bump — same policy as nt_builder_cache.c. */
     enum { ATLAS_CACHE_KEY_VERSION = 6 };
 
     /* Collect decoded hashes */
@@ -371,6 +375,14 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     /* Serialize opts fields (excluding compress pointer) */
     uint8_t opts_buf[128];
     uint32_t pos = 0;
+    /* Builder version — mirrors nt_builder_cache.c:nt_builder_compute_opts_hash
+     * so any NT_BUILDER_VERSION bump automatically invalidates all atlas cache
+     * files. Covers content-level changes (e.g. blit/extrude/compose) that
+     * don't touch the opts struct layout and therefore wouldn't otherwise
+     * trigger a cache miss. */
+    uint32_t builder_version = NT_BUILDER_VERSION;
+    memcpy(opts_buf + pos, &builder_version, sizeof(builder_version));
+    pos += (uint32_t)sizeof(builder_version);
     memcpy(opts_buf + pos, &opts->max_size, sizeof(opts->max_size));
     pos += (uint32_t)sizeof(opts->max_size);
     memcpy(opts_buf + pos, &opts->padding, sizeof(opts->padding));
