@@ -1617,8 +1617,9 @@ static void pipeline_register(AtlasPipeline *p) {
         char tex_path[512];
         (void)snprintf(tex_path, sizeof(tex_path), "%s/tex%u", p->state->name, pg);
 
-        uint32_t pixel_bytes = p->page_w[pg] * p->page_h[pg] * 4;
-        uint64_t tex_hash = nt_hash64(p->page_pixels[pg], pixel_bytes).value;
+        size_t pixel_bytes = (size_t)p->page_w[pg] * p->page_h[pg] * 4;
+        NT_BUILD_ASSERT(pixel_bytes <= UINT32_MAX && "pipeline_register: page too large for nt_hash64 length");
+        uint64_t tex_hash = nt_hash64(p->page_pixels[pg], (uint32_t)pixel_bytes).value;
 
         NtBuildTextureData *td = (NtBuildTextureData *)calloc(1, sizeof(NtBuildTextureData));
         NT_BUILD_ASSERT(td && "pipeline_register: alloc failed");
@@ -1632,7 +1633,7 @@ static void pipeline_register(AtlasPipeline *p) {
             td->compress = p->state->compress;
             td->has_compress = true;
         }
-        nt_builder_add_entry(p->ctx, tex_path, NT_BUILD_ASSET_TEXTURE, td, p->page_pixels[pg], pixel_bytes, tex_hash);
+        nt_builder_add_entry(p->ctx, tex_path, NT_BUILD_ASSET_TEXTURE, td, p->page_pixels[pg], (uint32_t)pixel_bytes, tex_hash);
         p->page_pixels[pg] = NULL; /* ownership transferred */
     }
 

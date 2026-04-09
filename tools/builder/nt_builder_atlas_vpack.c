@@ -130,7 +130,8 @@ void pack_stats_reset(PackStats *stats) { memset(stats, 0, sizeof(*stats)); }
 
 typedef struct {
     uint32_t index; /* index into sprites[] */
-    uint32_t area;  /* trimmed_w * trimmed_h */
+    uint64_t area;  /* trimmed_w * trimmed_h — uint64 to stay correct if max_size
+                     * ever grows beyond 65535 (uint32 overflows at 65536^2). */
 } AreaSortEntry;
 
 static int area_sort_cmp(const void *a, const void *b) {
@@ -390,7 +391,9 @@ static inline void vpack_add_cand(VPackCand **cands, uint32_t *c_count, uint32_t
     }
     if (*c_count >= *c_cap) {
         *c_cap = (*c_cap == 0) ? 1024 : (*c_cap * 2);
-        *cands = (VPackCand *)realloc(*cands, *c_cap * sizeof(VPackCand));
+        VPackCand *tmp = (VPackCand *)realloc(*cands, *c_cap * sizeof(VPackCand));
+        NT_BUILD_ASSERT(tmp && "vpack_add_cand: realloc failed");
+        *cands = tmp;
     }
     (*cands)[*c_count].x = x;
     (*cands)[*c_count].y = y;
@@ -1720,7 +1723,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
     NT_BUILD_ASSERT(sorted && "vector_pack: alloc failed");
     for (uint32_t i = 0; i < sprite_count; i++) {
         sorted[i].index = i;
-        sorted[i].area = trim_w[i] * trim_h[i];
+        sorted[i].area = (uint64_t)trim_w[i] * (uint64_t)trim_h[i];
     }
     qsort(sorted, sprite_count, sizeof(AreaSortEntry), area_sort_cmp);
     // #endregion
@@ -1840,20 +1843,13 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
 
     for (uint32_t s = 0; s < sprite_count; s++) {
         uint32_t idx = sorted[s].index;
-        if (!vpack_place_one_sprite(&pctx, idx, s, &out_placements[idx])) {
-            /* ATLAS_MAX_PAGES exhausted — log and fall back to page 0 for
-             * remaining sprites so output arrays stay defined. */
-            NT_LOG_ERROR("NFP packing failed: Out of pages (>=%u) for sprite %u!", ATLAS_MAX_PAGES, s);
-            for (uint32_t r = s; r < sprite_count; r++) {
-                uint32_t ridx = sorted[r].index;
-                out_placements[ridx].sprite_index = ridx;
-                out_placements[ridx].page = 0;
-                out_placements[ridx].x = opts->margin;
-                out_placements[ridx].y = opts->margin;
-                out_placements[ridx].transform = 0;
-            }
-            break;
-        }
+        /* vpack_place_one_sprite returns false only when ATLAS_MAX_PAGES is
+         * exhausted. Fail loudly per AGENTS.md "fail early": continuing with a
+         * silent fallback would produce an atlas where unplaced sprites collide
+         * at (margin, margin), and the caller would ship broken data. The
+         * developer needs to raise ATLAS_MAX_PAGES, increase max_size, or
+         * shrink the sprite set — all of which require a loud crash to notice. */
+        NT_BUILD_ASSERT(vpack_place_one_sprite(&pctx, idx, s, &out_placements[idx]) && "vector_pack: ATLAS_MAX_PAGES exhausted — raise the limit, bump opts.max_size, or split the atlas");
     }
 
     // #region POT expansion
