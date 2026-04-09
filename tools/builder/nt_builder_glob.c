@@ -121,7 +121,7 @@ bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn ca
     {
         DIR *dir = opendir(directory);
         if (!dir) {
-            free(matches);
+            free((void *)matches);
             return true;
         }
 
