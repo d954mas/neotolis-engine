@@ -68,3 +68,7 @@ diff_*.txt
 .claude/agents/gsd-*.md
 .claude/commands/gsd/
 .claude/hooks/gsd-*autoresearch-results.tsv
+
+# Autoresearch perf-tuning experiment log (local dev artifact, regenerated
+# per run — never belongs in source control)
+autoresearch-results.tsv
