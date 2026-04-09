@@ -413,9 +413,11 @@ typedef struct {
     uint32_t shape_hash;
 } VPackPlaced;
 
-/* NFP cache: 4-way set-associative table keyed by (placed_shape_hash, incoming_shape_hash).
- * 16384 total entries @ ~570 B each ≈ 9.3 MB — fits L3. 4 ways gives better LRU
- * approximation than 2 ways at the same total footprint, reducing collisions. */
+/* NFP cache: 8-way set-associative table keyed by (placed_shape_hash, incoming_shape_hash).
+ * 65536 total entries @ 296 B each ≈ 19 MB — exceeds L3 on most desktop CPUs, but the cache
+ * still wins big because a hit skips a full Clipper2 MinkowskiSum + Union pass (~µs) in
+ * exchange for a cache read (~ns even on a miss to DRAM). Tuned via autoresearch on the
+ * bigatlas workload: 65536 entries and 8 ways produced the lowest collision rate. */
 #define VPACK_NFP_CACHE_SIZE 65536U /* total entries; must be power of 2 */
 #define VPACK_NFP_CACHE_WAYS 8U
 #define VPACK_NFP_CACHE_SET_COUNT (VPACK_NFP_CACHE_SIZE / VPACK_NFP_CACHE_WAYS)
@@ -1591,7 +1593,7 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
     /* Fallback: nothing fit, allocate a fresh page and retry. */
     if (!found_any) {
         if (*ctx->page_count >= ATLAS_MAX_PAGES) {
-            return false; /* caller emits ERROR and fallback-places remaining sprites */
+            return false; /* vector_pack caller asserts — see NT_BUILD_ASSERT in the sprite loop */
         }
 
         uint32_t new_page = (*ctx->page_count)++;
