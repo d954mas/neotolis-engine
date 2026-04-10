@@ -1137,6 +1137,14 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
 
     bool found_on_page = false;
     for (uint32_t ori = 0; ori < od->count; ori++) {
+        // #region Per-orient lower-bound pruning
+        if (*io_best_score != UINT64_MAX) {
+            uint64_t orient_lb = vpack_score_candidate(od->min_cand[ori][0], od->min_cand[ori][1], od->aabb[ori][2], od->aabb[ori][3], page->used_w, page->used_h, ctx->margin, ctx->opts->power_of_two);
+            if (orient_lb >= *io_best_score) {
+                continue;
+            }
+        }
+        // #endregion
         VPackParCtx *par = ctx->par;
         // #region Per-orient local bounds setup
         uint32_t cur_count = od->counts[ori];
