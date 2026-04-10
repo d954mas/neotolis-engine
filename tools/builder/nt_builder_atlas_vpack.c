@@ -317,7 +317,7 @@ static bool vpack_intersect_axis_i(Point2D p1, Point2D p2, bool is_x_axis, int32
  * Layout puts AABB first so the broad-phase bounds check in the candidate scan
  * touches cache line 0 instead of fetching the last cache line of the struct. */
 typedef struct {
-    int32_t min_x, min_y, max_x, max_y;                /* 16B — hot: broad-phase bounds check */
+    int16_t min_x, min_y, max_x, max_y;                /* 8B — hot: broad-phase bounds check */
     uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1];    /* 18B — warm */
     uint8_t ring_count;                                /* 1B */
     int16_t verts_xy[VPACK_NFP_MAX_VERTS * 2];         /* 256B — cold: int16 xy pairs, touched only after broad-phase */
@@ -528,10 +528,10 @@ static void vpack_copy_local_nfp_to_out(const Point2D *verts, const uint16_t *ri
         out_nfp->verts_xy[v * 2] = (int16_t)(verts[v].x + off_x);
         out_nfp->verts_xy[v * 2 + 1] = (int16_t)(verts[v].y + off_y);
     }
-    out_nfp->min_x = min_x + off_x;
-    out_nfp->min_y = min_y + off_y;
-    out_nfp->max_x = max_x + off_x;
-    out_nfp->max_y = max_y + off_y;
+    out_nfp->min_x = (int16_t)(min_x + off_x);
+    out_nfp->min_y = (int16_t)(min_y + off_y);
+    out_nfp->max_x = (int16_t)(max_x + off_x);
+    out_nfp->max_y = (int16_t)(max_y + off_y);
 }
 
 /* Copy cache slot (int16) to VPackNFP output, applying offset. Hot hit path.
@@ -547,10 +547,10 @@ static void vpack_copy_cache_slot_to_out(const VPackNFPCacheEntry *slot, int32_t
         out_nfp->verts_xy[v * 2] = (int16_t)((int32_t)SLOT_LOAD(slot->verts_xy[v * 2]) + off_x);
         out_nfp->verts_xy[v * 2 + 1] = (int16_t)((int32_t)SLOT_LOAD(slot->verts_xy[(v * 2) + 1]) + off_y);
     }
-    out_nfp->min_x = (int32_t)SLOT_LOAD(slot->min_x) + off_x;
-    out_nfp->min_y = (int32_t)SLOT_LOAD(slot->min_y) + off_y;
-    out_nfp->max_x = (int32_t)SLOT_LOAD(slot->max_x) + off_x;
-    out_nfp->max_y = (int32_t)SLOT_LOAD(slot->max_y) + off_y;
+    out_nfp->min_x = (int16_t)((int32_t)SLOT_LOAD(slot->min_x) + off_x);
+    out_nfp->min_y = (int16_t)((int32_t)SLOT_LOAD(slot->min_y) + off_y);
+    out_nfp->max_x = (int16_t)((int32_t)SLOT_LOAD(slot->max_x) + off_x);
+    out_nfp->max_y = (int16_t)((int32_t)SLOT_LOAD(slot->max_y) + off_y);
 }
 
 /* Writer side of the seqlock. The caller has already CAS'd version to odd;
