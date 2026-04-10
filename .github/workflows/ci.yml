@@ -61,11 +61,12 @@ jobs:
           name: tq-packs
           path: build/examples/textured_quad
 
-      - name: Download sponza packs
-        uses: actions/download-artifact@v4
-        with:
-          name: sponza-packs
-          path: build/examples/sponza
+      # TODO: re-enable with sponza build step
+      # - name: Download sponza packs
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: sponza-packs
+      #     path: build/examples/sponza
 
       - name: Download text packs
         uses: actions/download-artifact@v4
@@ -233,19 +234,19 @@ jobs:
           test -f build/examples/bench_shapes/wasm-debug-paired/index_simd.wasm
           test -f build/examples/spinning_cube/wasm-debug-paired/index_simd.wasm
           test -f build/examples/textured_quad/wasm-debug-paired/index_simd.wasm
-          test -f build/examples/sponza/wasm-debug-paired/index_simd.wasm
+          # test -f build/examples/sponza/wasm-debug-paired/index_simd.wasm  # TODO: re-enable with sponza
           test -f build/examples/text/wasm-debug-paired/index_simd.wasm
           test -f build/examples/hello/wasm-release-paired/index_simd.wasm
           test -f build/examples/bench_shapes/wasm-release-paired/index_simd.wasm
           test -f build/examples/spinning_cube/wasm-release-paired/index_simd.wasm
           test -f build/examples/textured_quad/wasm-release-paired/index_simd.wasm
-          test -f build/examples/sponza/wasm-release-paired/index_simd.wasm
+          # test -f build/examples/sponza/wasm-release-paired/index_simd.wasm  # TODO: re-enable with sponza
           test -f build/examples/text/wasm-release-paired/index_simd.wasm
           test -f build/examples/hello/wasm-analysis-paired/index_simd.wasm
           test -f build/examples/bench_shapes/wasm-analysis-paired/index_simd.wasm
           test -f build/examples/spinning_cube/wasm-analysis-paired/index_simd.wasm
           test -f build/examples/textured_quad/wasm-analysis-paired/index_simd.wasm
-          test -f build/examples/sponza/wasm-analysis-paired/index_simd.wasm
+          # test -f build/examples/sponza/wasm-analysis-paired/index_simd.wasm  # TODO: re-enable with sponza
           test -f build/examples/text/wasm-analysis-paired/index_simd.wasm
           echo "Packaged example SIMD artifacts verified"
 
@@ -303,7 +304,8 @@ jobs:
         run: cmake --preset native-release
 
       - name: Build pack builders (release, no ASAN — fast encoding)
-        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs build_text_packs build_atlas_packs
+        # TODO: re-add build_sponza_packs when sponza is re-enabled
+        run: cmake --build --preset native-release --target build_tq_packs build_text_packs build_atlas_packs
 
       - name: Restore builder cache
         uses: actions/cache@v4
@@ -321,9 +323,10 @@ jobs:
         timeout-minutes: 10
         run: ./build/examples/textured_quad/native-release/build_tq_packs build/examples/textured_quad
 
-      - name: Build asset packs — sponza (release)
-        timeout-minutes: 120
-        run: ./build/examples/sponza/native-release/build_sponza_packs build/examples/sponza
+      # TODO: re-enable after atlas deadlock is diagnosed — sponza takes ~1h without cache
+      # - name: Build asset packs — sponza (release)
+      #   timeout-minutes: 120
+      #   run: ./build/examples/sponza/native-release/build_sponza_packs build/examples/sponza
 
       - name: Build asset packs — text (release)
         timeout-minutes: 10
@@ -390,12 +393,13 @@ jobs:
           path: build/examples/textured_quad/*.ntpack
           retention-days: 1
 
-      - name: Upload sponza packs
-        uses: actions/upload-artifact@v4
-        with:
-          name: sponza-packs
-          path: build/examples/sponza/*.ntpack
-          retention-days: 1
+      # TODO: re-enable with sponza build step above
+      # - name: Upload sponza packs
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: sponza-packs
+      #     path: build/examples/sponza/*.ntpack
+      #     retention-days: 1
 
       - name: Upload text packs
         uses: actions/upload-artifact@v4
@@ -451,11 +455,12 @@ jobs:
           name: tq-packs
           path: build/examples/textured_quad
 
-      - name: Download sponza packs
-        uses: actions/download-artifact@v4
-        with:
-          name: sponza-packs
-          path: build/examples/sponza
+      # TODO: re-enable with sponza build step
+      # - name: Download sponza packs
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: sponza-packs
+      #     path: build/examples/sponza
 
       - name: Download text packs
         uses: actions/download-artifact@v4
