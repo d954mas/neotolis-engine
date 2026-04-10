@@ -356,13 +356,8 @@ static bool vpack_point_in_ring(int32_t px, int32_t py, const int16_t *ring_xy, 
     return inside;
 }
 
-/* Returns true iff (px, py) is blocked by this NFP — point lies inside any ring.
- * Fast path for single-ring NFPs (the common case, ~95% of calls). */
+/* Returns true iff (px, py) is blocked by this NFP - point lies inside any ring. */
 static bool vpack_point_in_nfp(int32_t px, int32_t py, const VPackNFP *nfp) {
-    if (nfp->ring_count == 1) {
-        uint32_t n = nfp->ring_offsets[1];
-        return (n >= 3) && vpack_point_in_ring(px, py, nfp->verts_xy, n);
-    }
     for (uint8_t r = 0; r < nfp->ring_count; r++) {
         uint32_t start = nfp->ring_offsets[r];
         uint32_t end = nfp->ring_offsets[r + 1];
