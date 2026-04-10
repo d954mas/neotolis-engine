@@ -51,6 +51,9 @@ static void limited_add_callback(const char *path, void *user) {
 }
 
 int main(int argc, char *argv[]) {
+    /* Disable stdout buffering so CI sees output before a timeout/crash kill. */
+    (void)setvbuf(stdout, NULL, _IONBF, 0);
+
     if (argc < 2) {
         (void)fprintf(stderr, "Usage: build_atlas_packs <pack_dir> [max_size] [glob] [name] [r=rect] [max_sprites]\n");
         return 1;
