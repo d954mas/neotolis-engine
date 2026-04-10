@@ -919,14 +919,6 @@ typedef struct {
     uint32_t batch_seq;
     bool batch_ready;
     bool shutdown;
-    /* Startup barrier: workers increment workers_ready before entering the
-     * batch wait loop, main waits until workers_ready == num_workers. Without
-     * this, cnd_broadcast can fire before slow-starting workers enter cnd_wait
-     * — the broadcast is lost and those workers never see the first batch
-     * (even though batch_ready stays true, the workers are between thread
-     * creation and their first mtx_lock when the batch is dispatched). */
-    uint32_t workers_ready;
-    cnd_t cnd_ready;
 } VPackParCtx;
 
 typedef struct {
@@ -1040,15 +1032,6 @@ static int vpack_par_worker(void *arg) {
     /* tinycthread mtx/cnd return values are ignored throughout this pool:
      * on our platforms (Windows/POSIX) the only failure modes are OOM / EINVAL
      * on a destroyed mutex, neither of which is recoverable mid-batch. */
-
-    /* Signal startup barrier — main thread waits for all workers to reach
-     * this point before dispatching the first batch. */
-    (void)mtx_lock(&ctx->mtx);
-    ctx->workers_ready++;
-    if (ctx->workers_ready == ctx->num_workers) {
-        (void)cnd_signal(&ctx->cnd_ready);
-    }
-    (void)mtx_unlock(&ctx->mtx);
 
     for (;;) {
         (void)mtx_lock(&ctx->mtx);
@@ -1879,7 +1862,6 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
         (void)mtx_init(&par_ctx.cache_mtx, mtx_plain);
         (void)cnd_init(&par_ctx.cnd_work);
         (void)cnd_init(&par_ctx.cnd_done);
-        (void)cnd_init(&par_ctx.cnd_ready);
         par_threads = (thrd_t *)malloc(num_workers * sizeof(thrd_t));
         par_args = (VPackWorkerArg *)malloc(num_workers * sizeof(VPackWorkerArg));
         NT_BUILD_ASSERT(par_threads && par_args && "vector_pack: thread alloc failed");
@@ -1889,14 +1871,6 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
             int rc = thrd_create(&par_threads[t], vpack_par_worker, &par_args[t]);
             NT_BUILD_ASSERT(rc == thrd_success && "vector_pack: worker thread create failed");
         }
-        /* Wait for all workers to reach their startup barrier before
-         * dispatching any batch. Without this, cnd_broadcast can fire before
-         * slow-starting workers enter cnd_wait. */
-        (void)mtx_lock(&par_ctx.mtx);
-        while (par_ctx.workers_ready < num_workers) {
-            (void)cnd_wait(&par_ctx.cnd_ready, &par_ctx.mtx);
-        }
-        (void)mtx_unlock(&par_ctx.mtx);
         NT_LOG_INFO("  vector_pack: %u candidate-test workers + main thread", num_workers);
     }
     VPackParCtx *par = (num_workers > 0) ? &par_ctx : NULL;
@@ -1934,7 +1908,6 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
 
     for (uint32_t s = 0; s < sprite_count; s++) {
         uint32_t idx = sorted[s].index;
-        NT_LOG_INFO("  placing sprite %u/%u (idx=%u, area=%llu, pages=%u)...", s, sprite_count, idx, (unsigned long long)sorted[s].area, page_count);
         /* vpack_place_one_sprite returns false only when ATLAS_MAX_PAGES is
          * exhausted. Fail loudly per AGENTS.md "fail early": continuing with a
          * silent fallback would produce an atlas where unplaced sprites collide
@@ -2007,7 +1980,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
         mtx_destroy(&par_ctx.cache_mtx);
         cnd_destroy(&par_ctx.cnd_work);
         cnd_destroy(&par_ctx.cnd_done);
-        cnd_destroy(&par_ctx.cnd_ready);
+
         free(par_ctx.results);
         free(par_ctx.nfp_build.thread_stats);
         free((void *)par_threads);
