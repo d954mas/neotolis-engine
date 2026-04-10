@@ -911,18 +911,21 @@ typedef enum {
     VPACK_BATCH_NFP_BUILD,       /* parallel NFP build (Clipper2 calls) */
 } VPackBatchKind;
 
-/* NFP build batch state. Workers compute one chunk of relevant items. */
+/* NFP build batch state. Workers compute one chunk of work items.
+ * When orient_count > 1, work items are (ori, ri) pairs; total_items = orient_count × relevant_count.
+ * NFP output: nfps_out[ori * relevant_count + ri]. */
 typedef struct {
     const VPackPlaced *placed_arr; /* page->placed */
     const uint32_t *relevant_buf;  /* indices into placed_arr */
-    uint32_t relevant_count;       /* number of items in batch */
+    uint32_t relevant_count;       /* number of placed items per orient */
     const Point2D (*orient_neg)[8][32];
     const int32_t (*orient_neg_xy)[8][VPACK_PLACED_MAX_VERTS * 2];
     const uint32_t *orient_counts;
     const uint32_t *orient_neg_hashes;
-    uint32_t ori;
-    VPackNFP *nfps_out;  /* indexed by ri (per-thread writes own ri) */
-    bool *nfp_valid_out; /* per-ri validity flag */
+    uint32_t orient_count;         /* number of orientations in this batch (1..8) */
+    uint32_t total_items;          /* orient_count * relevant_count */
+    VPackNFP *nfps_out;  /* indexed by [ori * relevant_count + ri] */
+    bool *nfp_valid_out; /* per-item validity flag */
     VPackNFPCacheEntry *nfp_cache;
     /* Per-thread local stats - main aggregates after batch completes */
     VPackNFPBuildLocalStats *thread_stats;
@@ -1026,28 +1029,30 @@ static void vpack_par_process_chunks(VPackParCtx *ctx, uint32_t tid, VPackParRes
     vpack_scan_candidate_range(&ctx->scan, start, end, out_result);
 }
 
-/* NFP build chunk processor - each thread handles its slice of relevant items.
- * Writes nfps_out[ri] for ri in [start, end). Per-thread stats accumulated locally. */
+/* NFP build chunk processor — each thread handles its slice of work items.
+ * Work items are (ori, ri) pairs linearized as item = ori * relevant_count + ri.
+ * Writes nfps_out[item]. Per-thread stats accumulated locally. */
 static void vpack_par_process_nfp_chunks(VPackParCtx *ctx, uint32_t tid) {
     VPackNFPBuildLocalStats *local = &ctx->nfp_build.thread_stats[tid];
     *local = (VPackNFPBuildLocalStats){0};
-    /* Dynamic worker pool: dispatching to 32 threads for 10 items means 22
-     * threads get nothing. Excess threads fast-path skip. */
     uint32_t active = ctx->active_threads;
     if (tid >= active) {
         return;
     }
-    uint32_t start = (uint32_t)(((uint64_t)ctx->nfp_build.relevant_count * tid) / active);
-    uint32_t end = (uint32_t)(((uint64_t)ctx->nfp_build.relevant_count * (tid + 1)) / active);
-    uint32_t ori = ctx->nfp_build.ori;
-    for (uint32_t ri = start; ri < end; ri++) {
+    uint32_t total = ctx->nfp_build.total_items;
+    uint32_t start = (uint32_t)(((uint64_t)total * tid) / active);
+    uint32_t end = (uint32_t)(((uint64_t)total * (tid + 1)) / active);
+    uint32_t rc = ctx->nfp_build.relevant_count;
+    for (uint32_t item = start; item < end; item++) {
+        uint32_t ori = item / rc;
+        uint32_t ri = item - ori * rc;
         uint32_t i = ctx->nfp_build.relevant_buf[ri];
         const VPackPlaced *pl_i = &ctx->nfp_build.placed_arr[i];
         const Point2D *neg_poly = (*ctx->nfp_build.orient_neg)[ori];
         const int32_t *neg_xy = (*ctx->nfp_build.orient_neg_xy)[ori];
         uint32_t neg_count = ctx->nfp_build.orient_counts[ori];
         uint32_t neg_hash = ctx->nfp_build.orient_neg_hashes[ori];
-        ctx->nfp_build.nfp_valid_out[ri] = vpack_compute_nfp_one(pl_i, neg_poly, neg_xy, neg_count, neg_hash, ctx->nfp_build.nfp_cache, &ctx->nfp_build.nfps_out[ri], local);
+        ctx->nfp_build.nfp_valid_out[item] = vpack_compute_nfp_one(pl_i, neg_poly, neg_xy, neg_count, neg_hash, ctx->nfp_build.nfp_cache, &ctx->nfp_build.nfps_out[item], local);
     }
 }
 
@@ -1158,6 +1163,76 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
     }
     // #endregion
 
+    // #region Batched NFP build for all orientations
+    VPackParCtx *par = ctx->par;
+    uint32_t total_nfp_items = od->count * relevant_count;
+    if (par && par->num_workers > 0 && total_nfp_items >= 4) {
+        /* Parallel NFP build: single dispatch for all orientations × relevant items */
+        (void)mtx_lock(&par->mtx);
+        par->batch_kind = VPACK_BATCH_NFP_BUILD;
+        par->nfp_build.placed_arr = page->placed;
+        par->nfp_build.relevant_buf = ctx->relevant_buf;
+        par->nfp_build.relevant_count = relevant_count;
+        par->nfp_build.orient_neg = (const Point2D(*)[8][32])od->neg;
+        par->nfp_build.orient_neg_xy = (const int32_t(*)[8][VPACK_PLACED_MAX_VERTS * 2])od->neg_xy;
+        par->nfp_build.orient_counts = od->counts;
+        par->nfp_build.orient_neg_hashes = od->neg_hashes;
+        par->nfp_build.orient_count = od->count;
+        par->nfp_build.total_items = total_nfp_items;
+        par->nfp_build.nfps_out = ctx->nfps;
+        par->nfp_build.nfp_valid_out = ctx->nfp_valid_buf;
+        par->nfp_build.nfp_cache = ctx->nfp_cache;
+        par->workers_done = 0;
+        uint32_t nfp_active = total_nfp_items / 2;
+        if (nfp_active < 1) {
+            nfp_active = 1;
+        }
+        if (nfp_active > par->num_workers + 1) {
+            nfp_active = par->num_workers + 1;
+        }
+        par->active_threads = nfp_active;
+        par->expected_workers_done = vpack_par_active_worker_count(par);
+        par->batch_seq++;
+        par->batch_ready = true;
+        if (par->expected_workers_done > 0U) {
+            (void)cnd_broadcast(&par->cnd_work);
+        }
+        (void)mtx_unlock(&par->mtx);
+
+        vpack_par_process_nfp_chunks(par, 0);
+
+        (void)mtx_lock(&par->mtx);
+        if (par->expected_workers_done == 0U) {
+            par->batch_ready = false;
+        } else {
+            while (par->workers_done < par->expected_workers_done) {
+                (void)cnd_wait(&par->cnd_done, &par->mtx);
+            }
+        }
+        (void)mtx_unlock(&par->mtx);
+
+        for (uint32_t t = 0; t <= par->num_workers; t++) {
+            ctx->stats->or_count += par->nfp_build.thread_stats[t].or_count;
+            ctx->stats->nfp_cache_hit_count += par->nfp_build.thread_stats[t].cache_hits;
+            ctx->stats->nfp_cache_miss_count += par->nfp_build.thread_stats[t].cache_misses;
+        }
+    } else {
+        /* Sequential NFP build for all orientations */
+        VPackNFPBuildLocalStats local = {0};
+        for (uint32_t ori = 0; ori < od->count; ori++) {
+            uint32_t base = ori * relevant_count;
+            for (uint32_t ri = 0; ri < relevant_count; ri++) {
+                uint32_t i = ctx->relevant_buf[ri];
+                const VPackPlaced *pl_i = &page->placed[i];
+                ctx->nfp_valid_buf[base + ri] = vpack_compute_nfp_one(pl_i, od->neg[ori], od->neg_xy[ori], od->counts[ori], od->neg_hashes[ori], ctx->nfp_cache, &ctx->nfps[base + ri], &local);
+            }
+        }
+        ctx->stats->or_count += local.or_count;
+        ctx->stats->nfp_cache_hit_count += local.cache_hits;
+        ctx->stats->nfp_cache_miss_count += local.cache_misses;
+    }
+    // #endregion
+
     bool found_on_page = false;
     for (uint32_t ori = 0; ori < od->count; ori++) {
         // #region Per-orient lower-bound pruning
@@ -1168,9 +1243,7 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
             }
         }
         // #endregion
-        VPackParCtx *par = ctx->par;
         // #region Per-orient local bounds setup
-        uint32_t cur_count = od->counts[ori];
         int32_t poly_min_x = od->aabb[ori][0];
         int32_t poly_min_y = od->aabb[ori][1];
         int32_t poly_max_x = od->aabb[ori][2];
@@ -1192,84 +1265,13 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
         vpack_add_cand(ctx->cands, &cand_count, ctx->cand_cap, min_cand_x, min_cand_y, &bounds, &cand_dedup);
         // #endregion
 
-        // #region NFP build phase - parallel or sequential
-        /* Build NFPs for all relevant items into nfps[ri] (indexed by ri, deterministic).
-         * Each item is independent - safe to parallelize.
-         * Phase 2 (sequential) compacts valid
-         * NFPs and generates candidates in ri order. */
-        if (par && par->num_workers > 0 && relevant_count >= 4) {
-            /* Parallel NFP build: dispatch to thread pool */
-            (void)mtx_lock(&par->mtx);
-            par->batch_kind = VPACK_BATCH_NFP_BUILD;
-            par->nfp_build.placed_arr = page->placed;
-            par->nfp_build.relevant_buf = ctx->relevant_buf;
-            par->nfp_build.relevant_count = relevant_count;
-            par->nfp_build.orient_neg = (const Point2D(*)[8][32])od->neg;
-            par->nfp_build.orient_neg_xy = (const int32_t(*)[8][VPACK_PLACED_MAX_VERTS * 2]) od->neg_xy;
-            par->nfp_build.orient_counts = od->counts;
-            par->nfp_build.orient_neg_hashes = od->neg_hashes;
-            par->nfp_build.ori = ori;
-            par->nfp_build.nfps_out = ctx->nfps;
-            par->nfp_build.nfp_valid_out = ctx->nfp_valid_buf;
-            par->nfp_build.nfp_cache = ctx->nfp_cache;
-            par->workers_done = 0;
-            /* Scale active threads with work: at least 1 item per thread,
-             * capped at num_workers+1. Each Clipper2 call is ~50µs so we want
-             * roughly >= 2 calls per thread to amortize dispatch/wake cost. */
-            uint32_t nfp_active = relevant_count / 2;
-            if (nfp_active < 1) {
-                nfp_active = 1;
-            }
-            if (nfp_active > par->num_workers + 1) {
-                nfp_active = par->num_workers + 1;
-            }
-            par->active_threads = nfp_active;
-            par->expected_workers_done = vpack_par_active_worker_count(par);
-            par->batch_seq++;
-            par->batch_ready = true;
-            if (par->expected_workers_done > 0U) {
-                (void)cnd_broadcast(&par->cnd_work);
-            }
-            (void)mtx_unlock(&par->mtx);
-
-            /* Main thread also processes its chunk (tid=0) */
-            vpack_par_process_nfp_chunks(par, 0);
-
-            /* Wait only for workers that actually got a chunk. */
-            (void)mtx_lock(&par->mtx);
-            if (par->expected_workers_done == 0U) {
-                par->batch_ready = false;
-            } else {
-                while (par->workers_done < par->expected_workers_done) {
-                    (void)cnd_wait(&par->cnd_done, &par->mtx);
-                }
-            }
-            (void)mtx_unlock(&par->mtx);
-
-            /* Aggregate per-thread stats into global stats */
-            for (uint32_t t = 0; t <= par->num_workers; t++) {
-                ctx->stats->or_count += par->nfp_build.thread_stats[t].or_count;
-                ctx->stats->nfp_cache_hit_count += par->nfp_build.thread_stats[t].cache_hits;
-                ctx->stats->nfp_cache_miss_count += par->nfp_build.thread_stats[t].cache_misses;
-            }
-        } else {
-            /* Sequential NFP build (small relevant_count or no thread pool) */
-            VPackNFPBuildLocalStats local = {0};
-            for (uint32_t ri = 0; ri < relevant_count; ri++) {
-                uint32_t i = ctx->relevant_buf[ri];
-                const VPackPlaced *pl_i = &page->placed[i];
-                ctx->nfp_valid_buf[ri] = vpack_compute_nfp_one(pl_i, od->neg[ori], od->neg_xy[ori], cur_count, od->neg_hashes[ori], ctx->nfp_cache, &ctx->nfps[ri], &local);
-            }
-            ctx->stats->or_count += local.or_count;
-            ctx->stats->nfp_cache_hit_count += local.cache_hits;
-            ctx->stats->nfp_cache_miss_count += local.cache_misses;
-        }
-
-        /* Phase 2 (sequential): compact valid NFPs and generate candidates in ri order.
-         * need_candidates is computed per-ri using io_best_score (constant during this orient). */
+        /* Phase 2 (sequential): compact valid NFPs from batched array and generate candidates.
+         * Batched NFPs for this orient are at nfps[ori * relevant_count + ri].
+         * Compacted NFPs go to nfps[0..nfp_count-1] for grid/scan consumption. */
         uint32_t nfp_count = 0;
+        uint32_t nfp_base = ori * relevant_count;
         for (uint32_t ri = 0; ri < relevant_count; ri++) {
-            if (!ctx->nfp_valid_buf[ri]) {
+            if (!ctx->nfp_valid_buf[nfp_base + ri]) {
                 continue;
             }
             uint32_t i = ctx->relevant_buf[ri];
@@ -1285,10 +1287,8 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
                 }
             }
 
-            /* Compact: move valid NFP from nfps[ri] down to nfps[nfp_count] if needed */
-            if (nfp_count != ri) {
-                ctx->nfps[nfp_count] = ctx->nfps[ri];
-            }
+            /* Compact: move valid NFP from batched slot to nfps[nfp_count] */
+            ctx->nfps[nfp_count] = ctx->nfps[nfp_base + ri];
             if (need_candidates) {
                 vpack_add_nfp_candidates(&ctx->nfps[nfp_count], min_cand_x, min_cand_y, ctx->cands, &cand_count, ctx->cand_cap, &bounds, &cand_dedup);
             }
@@ -1831,7 +1831,9 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
      * needed T_p * T_i ≈ 36x more entries for 8-vertex polygons. The current
      * pipeline calls nt_clipper2_minkowski_nfp once per pair, producing one
      * multi-ring NFP — no triangle decomposition, no per-triangle blowup. */
-    uint32_t max_nfps = sprite_count;
+    /* Batched NFP build: up to 8 orientations × relevant_count per sprite.
+     * Allocate 8× to hold all orientations' NFPs simultaneously. */
+    uint32_t max_nfps = sprite_count * 8;
     VPackNFP *nfps = (VPackNFP *)malloc(max_nfps * sizeof(VPackNFP));
     uint32_t cand_cap = 1024;
     VPackCand *cands = (VPackCand *)malloc(cand_cap * sizeof(VPackCand));
@@ -1855,7 +1857,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
     uint32_t page_count = 1;
 
     uint32_t *relevant_buf = (uint32_t *)malloc(sprite_count * sizeof(uint32_t));
-    bool *nfp_valid_buf = (bool *)malloc(sprite_count * sizeof(bool));
+    bool *nfp_valid_buf = (bool *)malloc((size_t)sprite_count * 8 * sizeof(bool));
     NT_BUILD_ASSERT(relevant_buf && nfp_valid_buf && "vector_pack: alloc failed");
 
     size_t grid_cell_count = (size_t)grid_dim * grid_dim;
