@@ -477,8 +477,8 @@ static bool atlas_cache_write(const char *cache_dir, uint64_t cache_key, const A
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, AtlasPlacement **out_placements, uint32_t *out_placement_count, uint32_t *out_page_w, uint32_t *out_page_h,
-                             uint32_t *out_page_count, uint8_t ***out_page_pixels) {
+static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t sprite_count, AtlasPlacement **out_placements, uint32_t *out_placement_count, uint32_t *out_page_w,
+                             uint32_t *out_page_h, uint32_t *out_page_count, uint8_t ***out_page_pixels) {
     char path[1024];
     (void)snprintf(path, sizeof(path), "%s/atlas_%016llx.bin", cache_dir, (unsigned long long)cache_key);
 
@@ -527,9 +527,11 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, AtlasPla
 
     /* Validate per-placement fields — a corrupted cache file with valid outer
      * counts but garbage placement records would cause OOB access downstream
-     * (placement_lookup, page_pixels indexing). Fail gracefully → rebuild. */
+     * (placement_lookup, page_pixels indexing). Fail gracefully → rebuild.
+     * Note: sprite_index is remapped to the full sprite array (not unique-only),
+     * so the bound is sprite_count, not placement_count. */
     for (uint32_t i = 0; i < placement_count; i++) {
-        if (placements[i].sprite_index >= placement_count || placements[i].page >= page_count_val) {
+        if (placements[i].sprite_index >= sprite_count || placements[i].page >= page_count_val) {
             free(placements);
             (void)fclose(f);
             return false;
@@ -838,7 +840,7 @@ static void pipeline_cache_check(AtlasPipeline *p) {
     p->state->cache_key = compute_atlas_cache_key(p->sprites, p->sprite_count, p->opts, p->state->has_compress, &p->state->compress);
 
     if (p->ctx->cache_dir) {
-        p->cache_hit = atlas_cache_read(p->ctx->cache_dir, p->state->cache_key, &p->placements, &p->placement_count, p->page_w, p->page_h, &p->page_count, &p->page_pixels);
+        p->cache_hit = atlas_cache_read(p->ctx->cache_dir, p->state->cache_key, p->sprite_count, &p->placements, &p->placement_count, p->page_w, p->page_h, &p->page_count, &p->page_pixels);
         if (p->cache_hit) {
             NT_LOG_INFO("Atlas cache hit: %s (key %016llx)", p->state->name, (unsigned long long)p->state->cache_key);
         }

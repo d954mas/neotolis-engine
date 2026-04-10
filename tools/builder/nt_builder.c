@@ -229,6 +229,17 @@ static void nt_builder_free_context(NtBuilderContext *ctx) {
         free(ctx->atlas_regions[i].path);
     }
     free(ctx->atlas_regions);
+    /* Free partial atlas state if begin_atlas was called but end_atlas never ran
+     * (e.g. NT_BUILD_ASSERT fired mid-pipeline, longjmp in tests). */
+    if (ctx->active_atlas) {
+        for (uint32_t i = 0; i < ctx->active_atlas->sprite_count; i++) {
+            free(ctx->active_atlas->sprites[i].rgba);
+            free(ctx->active_atlas->sprites[i].name);
+        }
+        free(ctx->active_atlas->sprites);
+        free(ctx->active_atlas->name);
+        free(ctx->active_atlas);
+    }
     free(ctx);
 }
 

@@ -17,7 +17,8 @@ const char *__lsan_default_suppressions(void);  // NOLINT(bugprone-reserved-iden
 const char *__lsan_default_suppressions(void) { // NOLINT(bugprone-reserved-identifier)
     return "leak:extensionSupportedGLX\n"
            "leak:nt_builder_decode_font\n" /* EXPECT_BUILD_ASSERT + longjmp leaks internal allocs */
-           "leak:nt_builder_add_font\n";
+           "leak:nt_builder_add_font\n"
+           "leak:nt_builder_finish_pack\n"; /* shader error tests: longjmp leaks finish_pack internals */
 }
 
 /* clang-format off */
