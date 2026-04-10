@@ -1060,14 +1060,12 @@ static int vpack_par_worker(void *arg) {
         VPackBatchKind kind = ctx->batch_kind;
         (void)mtx_unlock(&ctx->mtx);
 
-        NT_LOG_INFO("    [worker %u] woke for batch %u (kind=%d)", tid, seen_batch_seq, (int)kind);
         if (kind == VPACK_BATCH_SCAN_CANDIDATES) {
             VPackParResult result = ctx->results[tid];
             vpack_par_process_chunks(ctx, tid, &result);
             (void)mtx_lock(&ctx->mtx);
             ctx->results[tid] = result;
             ctx->workers_done++;
-            NT_LOG_INFO("    [worker %u] done batch %u, workers_done=%u/%u", tid, seen_batch_seq, ctx->workers_done, ctx->num_workers);
             if (ctx->workers_done == ctx->num_workers) {
                 ctx->batch_ready = false;
                 (void)cnd_signal(&ctx->cnd_done);
@@ -1077,7 +1075,6 @@ static int vpack_par_worker(void *arg) {
             vpack_par_process_nfp_chunks(ctx, tid);
             (void)mtx_lock(&ctx->mtx);
             ctx->workers_done++;
-            NT_LOG_INFO("    [worker %u] done batch %u, workers_done=%u/%u", tid, seen_batch_seq, ctx->workers_done, ctx->num_workers);
             if (ctx->workers_done == ctx->num_workers) {
                 ctx->batch_ready = false;
                 (void)cnd_signal(&ctx->cnd_done);
@@ -1207,9 +1204,7 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
             (void)mtx_unlock(&par->mtx);
 
             /* Main thread also processes its chunk (tid=0) */
-            NT_LOG_INFO("    [main] NFP build dispatched batch %u, relevant=%u, active=%u", par->batch_seq, relevant_count, par->active_threads);
             vpack_par_process_nfp_chunks(par, 0);
-            NT_LOG_INFO("    [main] NFP build tid=0 done, waiting for %u workers...", par->num_workers);
 
             /* Wait for all workers to finish this batch */
             (void)mtx_lock(&par->mtx);
@@ -1217,7 +1212,6 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
                 (void)cnd_wait(&par->cnd_done, &par->mtx);
             }
             (void)mtx_unlock(&par->mtx);
-            NT_LOG_INFO("    [main] NFP build batch done");
 
             /* Aggregate per-thread stats into global stats */
             for (uint32_t t = 0; t <= par->num_workers; t++) {
