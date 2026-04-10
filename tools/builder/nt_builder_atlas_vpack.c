@@ -122,18 +122,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* --- Branchless next-power-of-two (v must be > 0) --- */
-static inline uint32_t vpack_next_pot(uint32_t v) {
-    v--;
-    v |= v >> 1;
-    v |= v >> 2;
-    v |= v >> 4;
-    v |= v >> 8;
-    v |= v >> 16;
-    return v + 1;
-}
-
-/* --- Portable count-trailing-zeros for uint64_t --- */
+/* --- Portable intrinsics --- */
 #if defined(_MSC_VER) && !defined(__clang__)
 #include <intrin.h>
 static inline uint32_t vpack_ctzll(uint64_t x) {
@@ -141,8 +130,24 @@ static inline uint32_t vpack_ctzll(uint64_t x) {
     _BitScanForward64(&idx, x);
     return (uint32_t)idx;
 }
+/* Next power of two via BSR (v must be > 0) */
+static inline uint32_t vpack_next_pot(uint32_t v) {
+    if (v <= 1) {
+        return 1;
+    }
+    unsigned long idx;
+    _BitScanReverse(&idx, v - 1);
+    return 1U << (idx + 1);
+}
 #else
 static inline uint32_t vpack_ctzll(uint64_t x) { return (uint32_t)__builtin_ctzll(x); }
+/* Next power of two via CLZ (v must be > 0) */
+static inline uint32_t vpack_next_pot(uint32_t v) {
+    if (v <= 1) {
+        return 1;
+    }
+    return 1U << (32 - __builtin_clz(v - 1));
+}
 #endif
 
 /* --- Public helpers --- */
