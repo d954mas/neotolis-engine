@@ -1185,7 +1185,7 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
         par->nfp_build.nfp_valid_out = ctx->nfp_valid_buf;
         par->nfp_build.nfp_cache = ctx->nfp_cache;
         par->workers_done = 0;
-        uint32_t nfp_active = total_nfp_items / 2;
+        uint32_t nfp_active = total_nfp_items;
         if (nfp_active < 1) {
             nfp_active = 1;
         }
