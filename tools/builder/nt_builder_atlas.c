@@ -447,7 +447,7 @@ static bool atlas_cache_write(const char *cache_dir, uint64_t cache_key, const A
 
     if (!ok) {
         (void)remove(tmp_path);
-        NT_BUILD_ASSERT(false && "atlas_cache_write: fwrite failed (disk full?)");
+        NT_LOG_WARN("atlas_cache_write: fwrite failed (disk full?) — build continues without cache");
         return false;
     }
 
@@ -517,11 +517,22 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t
 
     /* Validate per-placement fields — a corrupted cache file with valid outer
      * counts but garbage placement records would cause OOB access downstream
-     * (placement_lookup, page_pixels indexing). Fail gracefully → rebuild.
+     * (placement_lookup, page_pixels indexing, blit_sprite bounds).
+     * Fail gracefully → rebuild. Catch corruption HERE with a clear "cache
+     * invalid" path, not later in serialize/compose where it looks like a
+     * packer bug.
      * Note: sprite_index is remapped to the full sprite array (not unique-only),
      * so the bound is sprite_count, not placement_count. */
     for (uint32_t i = 0; i < placement_count; i++) {
-        if (placements[i].sprite_index >= sprite_count || placements[i].page >= page_count_val) {
+        uint32_t pg = placements[i].page;
+        if (placements[i].sprite_index >= sprite_count || pg >= page_count_val) {
+            free(placements);
+            (void)fclose(f);
+            return false;
+        }
+        /* Bounds-check placement against its page dimensions */
+        if (placements[i].x >= out_page_w[pg] || placements[i].y >= out_page_h[pg] || placements[i].trimmed_w > out_page_w[pg] || placements[i].trimmed_h > out_page_h[pg] ||
+            placements[i].transform > 7) {
             free(placements);
             (void)fclose(f);
             return false;
@@ -1427,6 +1438,15 @@ static void pipeline_serialize(AtlasPipeline *p) {
     uint32_t extrude_val = p->opts->extrude;
     const uint32_t max_region_tri_count = (uint32_t)(UINT8_MAX / 3U);
 
+    /* Detect duplicate region names. Two sprites with the same name produce
+     * ambiguous name_hash lookups at runtime — the caller must rename one or
+     * the atlas is broken. O(n²) but n ≤ 65535 and this is an offline check. */
+    for (uint32_t i = 0; i < p->sprite_count; i++) {
+        for (uint32_t j = i + 1; j < p->sprite_count; j++) {
+            NT_BUILD_ASSERT(strcmp(p->sprites[i].name, p->sprites[j].name) != 0 && "pipeline_serialize: duplicate region name — each sprite in an atlas must have a unique name");
+        }
+    }
+
     /* Count total vertices and indices for UNIQUE sprites only.
      * Duplicates are sprites with identical pixel data — they share placement with
      * their original (occupying the same atlas position), so they share vertex_start
@@ -1554,6 +1574,8 @@ static void pipeline_serialize(AtlasPipeline *p) {
             NtAtlasVertex *vtx = &vertices[vertex_cursor++];
             int32_t lx = p->hull_vertices[i][v].x;
             int32_t ly = p->hull_vertices[i][v].y;
+            NT_BUILD_ASSERT(lx >= INT16_MIN && lx <= INT16_MAX && "pipeline_serialize: local_x overflows int16_t");
+            NT_BUILD_ASSERT(ly >= INT16_MIN && ly <= INT16_MAX && "pipeline_serialize: local_y overflows int16_t");
             vtx->local_x = (int16_t)lx;
             vtx->local_y = (int16_t)ly;
 
@@ -1604,8 +1626,12 @@ static void pipeline_serialize(AtlasPipeline *p) {
 
         NtAtlasRegion *reg = &regions[i];
         reg->name_hash = nt_hash64_str(p->sprites[i].name).value;
+        NT_BUILD_ASSERT(p->sprites[i].width <= UINT16_MAX && "pipeline_serialize: source_w overflows uint16_t");
+        NT_BUILD_ASSERT(p->sprites[i].height <= UINT16_MAX && "pipeline_serialize: source_h overflows uint16_t");
         reg->source_w = (uint16_t)p->sprites[i].width;
         reg->source_h = (uint16_t)p->sprites[i].height;
+        NT_BUILD_ASSERT(p->trim_x[i] <= INT16_MAX && "pipeline_serialize: trim_offset_x overflows int16_t");
+        NT_BUILD_ASSERT(p->trim_y[i] <= INT16_MAX && "pipeline_serialize: trim_offset_y overflows int16_t");
         reg->trim_offset_x = (int16_t)p->trim_x[i];
         reg->trim_offset_y = (int16_t)p->trim_y[i];
         reg->origin_x = p->sprites[i].origin_x;
