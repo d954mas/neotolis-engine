@@ -884,7 +884,7 @@ static uint64_t vpack_page_lower_bound(const VPackOrientData *od, uint32_t page_
 }
 
 // #region Parallel candidate test thread pool
-#define VPACK_PAR_MIN_CANDIDATES 1024
+#define VPACK_PAR_MIN_CANDIDATES 512
 
 typedef struct {
     uint64_t score;
