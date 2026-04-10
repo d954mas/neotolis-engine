@@ -323,12 +323,32 @@ typedef struct {
     Point2D verts[VPACK_NFP_MAX_VERTS];             /* 512B — cold: touched only after broad-phase passes */
 } VPackNFP;
 
-/* Even-odd ray cast point-in-polygon. Winding-independent. */
+/* Even-odd ray cast point-in-polygon. Winding-independent.
+ * Division-free: replaces int64 division (~35-90 cycles) with cross-multiply
+ * (~3-4 cycles) per edge crossing. The truncation-correction branches replicate
+ * C integer division's round-toward-zero behavior exactly so the even-odd
+ * toggle sequence — and therefore packing output — is bit-identical. */
 static bool vpack_point_in_ring(int32_t px, int32_t py, const Point2D *ring, uint32_t n) {
     bool inside = false;
     for (uint32_t i = 0, j = n - 1; i < n; j = i++) {
-        if (((ring[i].y > py) != (ring[j].y > py)) && (px < (int32_t)((((int64_t)(ring[j].x - ring[i].x) * (int64_t)(py - ring[i].y)) / (int64_t)(ring[j].y - ring[i].y)) + ring[i].x))) {
-            inside = !inside;
+        if ((ring[i].y > py) != (ring[j].y > py)) {
+            int64_t dx = (int64_t)(ring[j].x - ring[i].x);
+            int64_t dy = (int64_t)(ring[j].y - ring[i].y);
+            int64_t D = (int64_t)(px - ring[i].x);
+            int64_t N = dx * (int64_t)(py - ring[i].y);
+            /* Cross-multiply: D < trunc(N/dy). When the quotient is non-negative
+             * (trunc = floor), use (D+1)*dy on N's side; when negative (trunc = ceil
+             * toward zero), plain D*dy suffices. Inequality direction flips with dy sign. */
+            int64_t Ddy = D * dy;
+            bool cross;
+            if (dy > 0) {
+                cross = (N >= 0) ? (Ddy + dy <= N) : (Ddy < N);
+            } else {
+                cross = (N <= 0) ? (Ddy + dy >= N) : (Ddy > N);
+            }
+            if (cross) {
+                inside = !inside;
+            }
         }
     }
     return inside;
