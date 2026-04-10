@@ -1025,6 +1025,7 @@ static int vpack_par_worker(void *arg) {
     VPackWorkerArg *wa = (VPackWorkerArg *)arg;
     VPackParCtx *ctx = wa->ctx;
     uint32_t tid = wa->tid;
+    NT_LOG_INFO("    [worker %u] thread started", tid);
     uint32_t seen_batch_seq = 0;
     /* tinycthread mtx/cnd return values are ignored throughout this pool:
      * on our platforms (Windows/POSIX) the only failure modes are OOM / EINVAL
