@@ -448,6 +448,27 @@ typedef struct {
 #define SLOT_LOAD(field) atomic_load_explicit(&(field), memory_order_relaxed)
 #define SLOT_STORE(field, val) atomic_store_explicit(&(field), (val), memory_order_relaxed)
 
+/* Per-sprite orientation data. Populated by vpack_place_one_sprite, consumed
+ * by vpack_try_page and vpack_page_lower_bound. Groups the 12+ per-orientation
+ * arrays that previously bloated the vpack_try_page call signature to 35 args.
+ * Stack-allocated (~6 KB); no heap, no ownership. */
+typedef struct {
+    Point2D polys[8][VPACK_PLACED_MAX_VERTS];
+    uint32_t counts[8];
+    Point2D neg[8][VPACK_PLACED_MAX_VERTS];
+    int32_t neg_xy[8][VPACK_PLACED_MAX_VERTS * 2];
+    uint32_t neg_hashes[8];
+    int32_t aabb[8][4];     /* [ori]{min_x, min_y, max_x, max_y} */
+    int32_t min_cand[8][2]; /* [ori]{x, y} */
+    int32_t max_cand[8][2]; /* [ori]{x, y} */
+    uint8_t orig[8];        /* maps compacted index -> original D4 flag */
+    uint32_t count;
+    int32_t worst_poly_min_x, worst_poly_min_y;
+    int32_t worst_poly_max_x, worst_poly_max_y;
+    int32_t global_min_cand_x, global_min_cand_y;
+    int32_t global_max_cand_x, global_max_cand_y;
+} VPackOrientData;
+
 /* Copy Point2D (int32) source to VPackNFP output, applying offset. Used for the
  * terminal store in vpack_compute_nfp_one when a freshly computed NFP is written
  * to out_nfp (no cache involvement). */
@@ -820,11 +841,10 @@ static uint64_t vpack_score_candidate(int32_t cx, int32_t cy, int32_t poly_max_x
     return ((uint64_t)nw * nh << 16) | ((uint64_t)(cx + cy) & 0xFFFF);
 }
 
-static uint64_t vpack_page_lower_bound(const int32_t orient_aabb[8][4], const int32_t orient_min_cand[8][2], uint32_t orient_count, uint32_t page_used_w, uint32_t page_used_h, uint32_t margin,
-                                       bool power_of_two) {
+static uint64_t vpack_page_lower_bound(const VPackOrientData *od, uint32_t page_used_w, uint32_t page_used_h, uint32_t margin, bool power_of_two) {
     uint64_t best = UINT64_MAX;
-    for (uint32_t ori = 0; ori < orient_count; ori++) {
-        uint64_t score = vpack_score_candidate(orient_min_cand[ori][0], orient_min_cand[ori][1], orient_aabb[ori][2], orient_aabb[ori][3], page_used_w, page_used_h, margin, power_of_two);
+    for (uint32_t ori = 0; ori < od->count; ori++) {
+        uint64_t score = vpack_score_candidate(od->min_cand[ori][0], od->min_cand[ori][1], od->aabb[ori][2], od->aabb[ori][3], page_used_w, page_used_h, margin, power_of_two);
         if (score < best) {
             best = score;
         }
@@ -1048,49 +1068,85 @@ static int vpack_par_worker(void *arg) {
 }
 // #endregion
 
+/* Per-sprite placement context. Holds all the shared scratch/state the
+ * packer reuses across sprites so the per-sprite body doesn't need a 40-arg
+ * function signature. Populated once by vector_pack, then passed to
+ * vpack_place_one_sprite in the sprite loop. */
+typedef struct {
+    /* Inputs (const across the whole pack) */
+    const uint32_t *trim_w;
+    const uint32_t *trim_h;
+    Point2D *const *inf_polys;
+    const uint32_t *inf_counts;
+    const nt_atlas_opts_t *opts;
+    uint32_t extrude;
+    uint32_t margin;
+    uint32_t max_size;
+    uint32_t sprite_count;
+    /* Shared per-sprite scratch (reused each call, no per-sprite malloc) */
+    VPackNFP *nfps;
+    VPackCand **cands;
+    uint32_t *cand_cap;
+    uint64_t (*nfp_grid)[VPACK_GRID_WORDS];
+    uint32_t grid_dim;
+    VPackNFPCacheEntry *nfp_cache;
+    uint32_t *relevant_buf;
+    bool *nfp_valid_buf;
+    uint64_t *dirty_bits_buf;
+    uint32_t *dirty_cells_buf;
+    uint64_t *cand_seen_bits;
+    uint32_t *cand_dirty_words;
+    uint32_t cand_seen_word_count;
+    VPackParCtx *par;
+    /* Mutable state (shared across sprites, grows as pages are added) */
+    VPackPage *pages;
+    uint32_t *page_count;
+    /* Stats accumulator */
+    PackStats *stats;
+} VPackContext;
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32], const int32_t orient_neg_xy[8][VPACK_PLACED_MAX_VERTS * 2], const uint32_t orient_counts[8],
-                           const int32_t orient_aabb[8][4], const int32_t orient_min_cand[8][2], const int32_t orient_max_cand[8][2], uint32_t orient_count, int32_t worst_poly_min_x,
-                           int32_t worst_poly_min_y, int32_t worst_poly_max_x, int32_t worst_poly_max_y, int32_t global_min_cand_x, int32_t global_min_cand_y, int32_t global_max_cand_x,
-                           int32_t global_max_cand_y, uint32_t extrude, uint32_t margin, bool power_of_two, VPackNFP *nfps, uint64_t (*nfp_grid)[VPACK_GRID_WORDS], VPackCand **cands,
-                           uint32_t *cand_cap, uint32_t *relevant_buf, bool *nfp_valid_buf, VPackNFPCacheEntry *nfp_cache, const uint32_t orient_neg_hashes[8], PackStats *stats,
-                           uint64_t *io_best_score, uint32_t page_index, uint32_t grid_dim, uint32_t max_size, uint64_t *dirty_bits_buf, uint32_t *dirty_cells_buf, uint64_t *cand_seen_bits,
-                           uint32_t *cand_dirty_words, uint32_t cand_seen_word_count, VPackParCtx *par, uint32_t *out_best_page, int32_t *out_best_x, int32_t *out_best_y, uint8_t *out_best_orient,
-                           uint32_t *out_best_orient_idx) {
+static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPackOrientData *od, uint32_t page_index, uint64_t *io_best_score, uint32_t *out_best_page, int32_t *out_best_x,
+                           int32_t *out_best_y, uint8_t *out_best_orient, uint32_t *out_best_orient_idx) {
+    // #region Relevant placed-sprite pre-filter
     uint32_t relevant_count = 0;
     for (uint32_t i = 0; i < page->count; i++) {
-        int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - worst_poly_max_x;
-        int32_t est_max_x = page->placed[i].x + page->placed[i].aabb_max_x - worst_poly_min_x;
-        int32_t est_min_y = page->placed[i].y + page->placed[i].aabb_min_y - worst_poly_max_y;
-        int32_t est_max_y = page->placed[i].y + page->placed[i].aabb_max_y - worst_poly_min_y;
-        if (est_max_x < global_min_cand_x || est_min_x > global_max_cand_x || est_max_y < global_min_cand_y || est_min_y > global_max_cand_y) {
+        int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - od->worst_poly_max_x;
+        int32_t est_max_x = page->placed[i].x + page->placed[i].aabb_max_x - od->worst_poly_min_x;
+        int32_t est_min_y = page->placed[i].y + page->placed[i].aabb_min_y - od->worst_poly_max_y;
+        int32_t est_max_y = page->placed[i].y + page->placed[i].aabb_max_y - od->worst_poly_min_y;
+        if (est_max_x < od->global_min_cand_x || est_min_x > od->global_max_cand_x || est_max_y < od->global_min_cand_y || est_min_y > od->global_max_cand_y) {
             continue;
         }
-        relevant_buf[relevant_count++] = i;
+        ctx->relevant_buf[relevant_count++] = i;
     }
+    // #endregion
 
     bool found_on_page = false;
-    for (uint32_t ori = 0; ori < orient_count; ori++) {
-        uint32_t cur_count = orient_counts[ori];
-        int32_t poly_min_x = orient_aabb[ori][0];
-        int32_t poly_min_y = orient_aabb[ori][1];
-        int32_t poly_max_x = orient_aabb[ori][2];
-        int32_t poly_max_y = orient_aabb[ori][3];
-        int32_t min_cand_x = orient_min_cand[ori][0];
-        int32_t min_cand_y = orient_min_cand[ori][1];
-        int32_t max_cand_x = orient_max_cand[ori][0];
-        int32_t max_cand_y = orient_max_cand[ori][1];
+    for (uint32_t ori = 0; ori < od->count; ori++) {
+        VPackParCtx *par = ctx->par;
+        // #region Per-orient local bounds setup
+        uint32_t cur_count = od->counts[ori];
+        int32_t poly_min_x = od->aabb[ori][0];
+        int32_t poly_min_y = od->aabb[ori][1];
+        int32_t poly_max_x = od->aabb[ori][2];
+        int32_t poly_max_y = od->aabb[ori][3];
+        int32_t min_cand_x = od->min_cand[ori][0];
+        int32_t min_cand_y = od->min_cand[ori][1];
+        int32_t max_cand_x = od->max_cand[ori][0];
+        int32_t max_cand_y = od->max_cand[ori][1];
 
         uint32_t cand_count = 0;
         VPackBounds bounds = {min_cand_x, min_cand_y, max_cand_x, max_cand_y};
         VPackCandDedup cand_dedup = {
-            .seen_bits = cand_seen_bits,
-            .dirty_words = cand_dirty_words,
-            .dirty_word_cap = cand_seen_word_count,
+            .seen_bits = ctx->cand_seen_bits,
+            .dirty_words = ctx->cand_dirty_words,
+            .dirty_word_cap = ctx->cand_seen_word_count,
             .dirty_count = 0,
-            .max_size = max_size,
+            .max_size = ctx->max_size,
         };
-        vpack_add_cand(cands, &cand_count, cand_cap, min_cand_x, min_cand_y, &bounds, &cand_dedup);
+        vpack_add_cand(ctx->cands, &cand_count, ctx->cand_cap, min_cand_x, min_cand_y, &bounds, &cand_dedup);
+        // #endregion
 
         // #region NFP build phase - parallel or sequential
         /* Build NFPs for all relevant items into nfps[ri] (indexed by ri, deterministic).
@@ -1102,16 +1158,16 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             (void)mtx_lock(&par->mtx);
             par->batch_kind = VPACK_BATCH_NFP_BUILD;
             par->nfp_build.placed_arr = page->placed;
-            par->nfp_build.relevant_buf = relevant_buf;
+            par->nfp_build.relevant_buf = ctx->relevant_buf;
             par->nfp_build.relevant_count = relevant_count;
-            par->nfp_build.orient_neg = (const Point2D(*)[8][32])orient_neg;
-            par->nfp_build.orient_neg_xy = (const int32_t(*)[8][VPACK_PLACED_MAX_VERTS * 2]) orient_neg_xy;
-            par->nfp_build.orient_counts = orient_counts;
-            par->nfp_build.orient_neg_hashes = orient_neg_hashes;
+            par->nfp_build.orient_neg = (const Point2D(*)[8][32])od->neg;
+            par->nfp_build.orient_neg_xy = (const int32_t(*)[8][VPACK_PLACED_MAX_VERTS * 2]) od->neg_xy;
+            par->nfp_build.orient_counts = od->counts;
+            par->nfp_build.orient_neg_hashes = od->neg_hashes;
             par->nfp_build.ori = ori;
-            par->nfp_build.nfps_out = nfps;
-            par->nfp_build.nfp_valid_out = nfp_valid_buf;
-            par->nfp_build.nfp_cache = nfp_cache;
+            par->nfp_build.nfps_out = ctx->nfps;
+            par->nfp_build.nfp_valid_out = ctx->nfp_valid_buf;
+            par->nfp_build.nfp_cache = ctx->nfp_cache;
             par->workers_done = 0;
             /* Scale active threads with work: at least 1 item per thread,
              * capped at num_workers+1. Each Clipper2 call is ~50µs so we want
@@ -1141,37 +1197,38 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
 
             /* Aggregate per-thread stats into global stats */
             for (uint32_t t = 0; t <= par->num_workers; t++) {
-                stats->or_count += par->nfp_build.thread_stats[t].or_count;
-                stats->nfp_cache_hit_count += par->nfp_build.thread_stats[t].cache_hits;
-                stats->nfp_cache_miss_count += par->nfp_build.thread_stats[t].cache_misses;
+                ctx->stats->or_count += par->nfp_build.thread_stats[t].or_count;
+                ctx->stats->nfp_cache_hit_count += par->nfp_build.thread_stats[t].cache_hits;
+                ctx->stats->nfp_cache_miss_count += par->nfp_build.thread_stats[t].cache_misses;
             }
         } else {
             /* Sequential NFP build (small relevant_count or no thread pool) */
             VPackNFPBuildLocalStats local = {0};
             for (uint32_t ri = 0; ri < relevant_count; ri++) {
-                uint32_t i = relevant_buf[ri];
+                uint32_t i = ctx->relevant_buf[ri];
                 const VPackPlaced *pl_i = &page->placed[i];
-                nfp_valid_buf[ri] = vpack_compute_nfp_one(pl_i, orient_neg[ori], orient_neg_xy[ori], cur_count, orient_neg_hashes[ori], nfp_cache, NULL, &nfps[ri], &local);
+                ctx->nfp_valid_buf[ri] = vpack_compute_nfp_one(pl_i, od->neg[ori], od->neg_xy[ori], cur_count, od->neg_hashes[ori], ctx->nfp_cache, NULL, &ctx->nfps[ri], &local);
             }
-            stats->or_count += local.or_count;
-            stats->nfp_cache_hit_count += local.cache_hits;
-            stats->nfp_cache_miss_count += local.cache_misses;
+            ctx->stats->or_count += local.or_count;
+            ctx->stats->nfp_cache_hit_count += local.cache_hits;
+            ctx->stats->nfp_cache_miss_count += local.cache_misses;
         }
 
         /* Phase 2 (sequential): compact valid NFPs and generate candidates in ri order.
          * need_candidates is computed per-ri using io_best_score (constant during this orient). */
         uint32_t nfp_count = 0;
         for (uint32_t ri = 0; ri < relevant_count; ri++) {
-            if (!nfp_valid_buf[ri]) {
+            if (!ctx->nfp_valid_buf[ri]) {
                 continue;
             }
-            uint32_t i = relevant_buf[ri];
+            uint32_t i = ctx->relevant_buf[ri];
 
             bool need_candidates = true;
             if (*io_best_score != UINT64_MAX) {
                 int32_t est_min_x = page->placed[i].x + page->placed[i].aabb_min_x - poly_max_x;
                 int32_t est_min_y = page->placed[i].y + page->placed[i].aabb_min_y - poly_max_y;
-                uint64_t opt_score = vpack_score_candidate((est_min_x > 0) ? est_min_x : 0, (est_min_y > 0) ? est_min_y : 0, poly_max_x, poly_max_y, page->used_w, page->used_h, margin, power_of_two);
+                uint64_t opt_score =
+                    vpack_score_candidate((est_min_x > 0) ? est_min_x : 0, (est_min_y > 0) ? est_min_y : 0, poly_max_x, poly_max_y, page->used_w, page->used_h, ctx->margin, ctx->opts->power_of_two);
                 if (opt_score > *io_best_score) {
                     need_candidates = false;
                 }
@@ -1179,112 +1236,117 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
 
             /* Compact: move valid NFP from nfps[ri] down to nfps[nfp_count] if needed */
             if (nfp_count != ri) {
-                nfps[nfp_count] = nfps[ri];
+                ctx->nfps[nfp_count] = ctx->nfps[ri];
             }
             if (need_candidates) {
-                vpack_add_nfp_candidates(&nfps[nfp_count], min_cand_x, min_cand_y, cands, &cand_count, cand_cap, &bounds, &cand_dedup);
+                vpack_add_nfp_candidates(&ctx->nfps[nfp_count], min_cand_x, min_cand_y, ctx->cands, &cand_count, ctx->cand_cap, &bounds, &cand_dedup);
             }
             nfp_count++;
         }
         // #endregion
 
+        // #region NFP spatial grid rasterization
         uint32_t nfp_words = (nfp_count + 63) / 64;
-        size_t dirty_cell_cap = (size_t)grid_dim * grid_dim;
+        size_t dirty_cell_cap = (size_t)ctx->grid_dim * ctx->grid_dim;
         size_t dirty_count = 0;
         if (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS) {
-            size_t dirty_words = (((size_t)grid_dim * grid_dim) + 63) / 64;
-            memset(dirty_bits_buf, 0, dirty_words * sizeof(uint64_t));
+            size_t dirty_words = (((size_t)ctx->grid_dim * ctx->grid_dim) + 63) / 64;
+            memset(ctx->dirty_bits_buf, 0, dirty_words * sizeof(uint64_t));
             for (uint32_t n = 0; n < nfp_count; n++) {
-                int32_t gx0 = nfps[n].min_x / VPACK_GRID_CELL;
-                int32_t gy0 = nfps[n].min_y / VPACK_GRID_CELL;
-                int32_t gx1 = nfps[n].max_x / VPACK_GRID_CELL;
-                int32_t gy1 = nfps[n].max_y / VPACK_GRID_CELL;
+                int32_t gx0 = ctx->nfps[n].min_x / VPACK_GRID_CELL;
+                int32_t gy0 = ctx->nfps[n].min_y / VPACK_GRID_CELL;
+                int32_t gx1 = ctx->nfps[n].max_x / VPACK_GRID_CELL;
+                int32_t gy1 = ctx->nfps[n].max_y / VPACK_GRID_CELL;
                 if (gx0 < 0) {
                     gx0 = 0;
                 }
                 if (gy0 < 0) {
                     gy0 = 0;
                 }
-                if (gx1 >= (int32_t)grid_dim) {
-                    gx1 = (int32_t)grid_dim - 1;
+                if (gx1 >= (int32_t)ctx->grid_dim) {
+                    gx1 = (int32_t)ctx->grid_dim - 1;
                 }
-                if (gy1 >= (int32_t)grid_dim) {
-                    gy1 = (int32_t)grid_dim - 1;
+                if (gy1 >= (int32_t)ctx->grid_dim) {
+                    gy1 = (int32_t)ctx->grid_dim - 1;
                 }
                 uint32_t word = n / 64;
                 uint64_t bit = (uint64_t)1 << (n % 64);
                 for (int32_t gy = gy0; gy <= gy1; gy++) {
                     for (int32_t gx = gx0; gx <= gx1; gx++) {
-                        uint32_t ci = ((uint32_t)gy * grid_dim) + (uint32_t)gx;
+                        uint32_t ci = ((uint32_t)gy * ctx->grid_dim) + (uint32_t)gx;
                         uint32_t dw = ci / 64;
                         uint64_t db = (uint64_t)1 << (ci % 64);
-                        if (!(dirty_bits_buf[dw] & db)) {
-                            dirty_bits_buf[dw] |= db;
+                        if (!(ctx->dirty_bits_buf[dw] & db)) {
+                            ctx->dirty_bits_buf[dw] |= db;
                             NT_BUILD_ASSERT(dirty_count < dirty_cell_cap && "vector_pack: dirty cell overflow");
-                            dirty_cells_buf[dirty_count++] = ci;
+                            ctx->dirty_cells_buf[dirty_count++] = ci;
                         }
-                        nfp_grid[ci][word] |= bit;
+                        ctx->nfp_grid[ci][word] |= bit;
                     }
                 }
             }
         }
         bool use_grid = (nfp_count > 0 && nfp_words <= VPACK_GRID_WORDS);
+        // #endregion
 
+        // #region Score-based bounds tightening
         /* Pre-compute upper coordinate bounds from io_best_score for fast rejection */
         int32_t fast_max_x = max_cand_x;
         int32_t fast_max_y = max_cand_y;
-        if (*io_best_score != UINT64_MAX && power_of_two) {
+        if (*io_best_score != UINT64_MAX && ctx->opts->power_of_two) {
             uint32_t best_area = (uint32_t)(*io_best_score >> 16);
             /* Find max cx such that POT(cx+poly_max_x+margin) * POT(cur_h+margin) <= best_area */
-            uint32_t fixed_h = page->used_h + margin;
+            uint32_t fixed_h = page->used_h + ctx->margin;
             uint32_t pot_h = 1;
             while (pot_h < fixed_h) {
                 pot_h <<= 1;
             }
             if (pot_h > 0) {
                 uint32_t max_pot_w = best_area / pot_h;
-                int32_t xb = (int32_t)max_pot_w - poly_max_x - (int32_t)margin;
+                int32_t xb = (int32_t)max_pot_w - poly_max_x - (int32_t)ctx->margin;
                 if (xb < fast_max_x) {
                     fast_max_x = xb;
                 }
             }
-            uint32_t fixed_w = page->used_w + margin;
+            uint32_t fixed_w = page->used_w + ctx->margin;
             uint32_t pot_w = 1;
             while (pot_w < fixed_w) {
                 pot_w <<= 1;
             }
             if (pot_w > 0) {
                 uint32_t max_pot_h = best_area / pot_w;
-                int32_t yb = (int32_t)max_pot_h - poly_max_y - (int32_t)margin;
+                int32_t yb = (int32_t)max_pot_h - poly_max_y - (int32_t)ctx->margin;
                 if (yb < fast_max_y) {
                     fast_max_y = yb;
                 }
             }
         }
+        // #endregion
 
+        // #region Effective bounds + scan context setup
         /* Pre-compute effective min bounds from all lower-bound checks */
         int32_t eff_min_x = min_cand_x;
         if (-poly_min_x > eff_min_x) {
             eff_min_x = -poly_min_x;
         }
-        if ((int32_t)extrude > eff_min_x) {
-            eff_min_x = (int32_t)extrude;
+        if ((int32_t)ctx->extrude > eff_min_x) {
+            eff_min_x = (int32_t)ctx->extrude;
         }
         int32_t eff_min_y = min_cand_y;
         if (-poly_min_y > eff_min_y) {
             eff_min_y = -poly_min_y;
         }
-        if ((int32_t)extrude > eff_min_y) {
-            eff_min_y = (int32_t)extrude;
+        if ((int32_t)ctx->extrude > eff_min_y) {
+            eff_min_y = (int32_t)ctx->extrude;
         }
         VPackScanCtx scan = {
-            .cands = *cands,
+            .cands = *ctx->cands,
             .cand_count = cand_count,
-            .nfps = nfps,
+            .nfps = ctx->nfps,
             .nfp_count = nfp_count,
             .nfp_words = nfp_words,
-            .nfp_grid = (const uint64_t(*)[VPACK_GRID_WORDS])nfp_grid,
-            .grid_dim = grid_dim,
+            .nfp_grid = (const uint64_t(*)[VPACK_GRID_WORDS])ctx->nfp_grid,
+            .grid_dim = ctx->grid_dim,
             .use_grid = use_grid,
             .eff_min_x = eff_min_x,
             .eff_min_y = eff_min_y,
@@ -1294,9 +1356,10 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             .poly_max_y = poly_max_y,
             .used_w = page->used_w,
             .used_h = page->used_h,
-            .margin = margin,
-            .power_of_two = power_of_two,
+            .margin = ctx->margin,
+            .power_of_two = ctx->opts->power_of_two,
         };
+        // #endregion
 
         // #region Candidate testing (single-threaded or parallel)
         if (par && par->num_workers > 0 && cand_count >= VPACK_PAR_MIN_CANDIDATES) {
@@ -1341,7 +1404,7 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             uint64_t reduce_score = *io_best_score;
             uint32_t reduce_cand = UINT32_MAX;
             for (uint32_t t = 0; t <= par->num_workers; t++) {
-                stats->test_count += par->results[t].test_count;
+                ctx->stats->test_count += par->results[t].test_count;
                 if (par->results[t].cand_index == UINT32_MAX) {
                     continue;
                 }
@@ -1353,8 +1416,8 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
             if (reduce_cand != UINT32_MAX) {
                 *io_best_score = reduce_score;
                 *out_best_page = page_index;
-                *out_best_x = (*cands)[reduce_cand].x;
-                *out_best_y = (*cands)[reduce_cand].y;
+                *out_best_x = (*ctx->cands)[reduce_cand].x;
+                *out_best_y = (*ctx->cands)[reduce_cand].y;
                 *out_best_orient = (uint8_t)ori;
                 *out_best_orient_idx = ori;
                 found_on_page = true;
@@ -1362,12 +1425,12 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         } else {
             VPackParResult result = {.score = *io_best_score, .cand_index = UINT32_MAX, .test_count = 0};
             vpack_scan_candidate_range(&scan, 0, cand_count, &result);
-            stats->test_count += result.test_count;
+            ctx->stats->test_count += result.test_count;
             if (result.cand_index != UINT32_MAX) {
                 *io_best_score = result.score;
                 *out_best_page = page_index;
-                *out_best_x = (*cands)[result.cand_index].x;
-                *out_best_y = (*cands)[result.cand_index].y;
+                *out_best_x = (*ctx->cands)[result.cand_index].x;
+                *out_best_y = (*ctx->cands)[result.cand_index].y;
                 *out_best_orient = (uint8_t)ori;
                 *out_best_orient_idx = ori;
                 found_on_page = true;
@@ -1375,55 +1438,20 @@ static bool vpack_try_page(const VPackPage *page, const Point2D orient_neg[8][32
         }
         // #endregion
 
+        // #region Grid cleanup + early break
         for (size_t d = 0; d < dirty_count; d++) {
-            memset(nfp_grid[dirty_cells_buf[d]], 0, sizeof(uint64_t[VPACK_GRID_WORDS]));
+            memset(ctx->nfp_grid[ctx->dirty_cells_buf[d]], 0, sizeof(uint64_t[VPACK_GRID_WORDS]));
         }
         vpack_clear_seen_cands(&cand_dedup);
 
         if (found_on_page && *out_best_page == page_index && *out_best_x == min_cand_x && *out_best_y == min_cand_y) {
             break;
         }
+        // #endregion
     }
 
     return found_on_page;
 }
-
-/* Per-sprite placement context. Holds all the shared scratch/state the
- * packer reuses across sprites so the per-sprite body doesn't need a 40-arg
- * function signature. Populated once by vector_pack, then passed to
- * vpack_place_one_sprite in the sprite loop. */
-typedef struct {
-    /* Inputs (const across the whole pack) */
-    const uint32_t *trim_w;
-    const uint32_t *trim_h;
-    Point2D *const *inf_polys;
-    const uint32_t *inf_counts;
-    const nt_atlas_opts_t *opts;
-    uint32_t extrude;
-    uint32_t margin;
-    uint32_t max_size;
-    uint32_t sprite_count;
-    /* Shared per-sprite scratch (reused each call, no per-sprite malloc) */
-    VPackNFP *nfps;
-    VPackCand **cands;
-    uint32_t *cand_cap;
-    uint64_t (*nfp_grid)[VPACK_GRID_WORDS];
-    uint32_t grid_dim;
-    VPackNFPCacheEntry *nfp_cache;
-    uint32_t *relevant_buf;
-    bool *nfp_valid_buf;
-    uint64_t *dirty_bits_buf;
-    uint32_t *dirty_cells_buf;
-    uint64_t *cand_seen_bits;
-    uint32_t *cand_dirty_words;
-    uint32_t cand_seen_word_count;
-    VPackParCtx *par;
-    /* Mutable state (shared across sprites, grows as pages are added) */
-    VPackPage *pages;
-    uint32_t *page_count;
-    /* Stats accumulator */
-    PackStats *stats;
-} VPackContext;
 
 /* Place a single sprite. Called once per sorted sprite from vector_pack.
  * Transforms the sprite's inflated polygon into up to 8 D4 orientations,
@@ -1438,25 +1466,25 @@ typedef struct {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, AtlasPlacement *out_placement) {
     double sprite_start = nt_time_now();
+    VPackOrientData od;
     uint32_t orient_count = ctx->opts->allow_transform ? 8 : 1;
 
+    // #region Orient generate — transform inflated polygon for all D4 orientations
     /* Transform exact pack polygon for all orientations.
      * Orthogonal D4 transforms preserve the exact offset shape, so we can
      * reuse the once-built inflated polygon instead of inflating per
      * orientation. */
-    Point2D orient_polys[8][32];
-    uint32_t orient_counts[8];
-    orient_counts[0] = ctx->inf_counts[idx];
-    memcpy(orient_polys[0], ctx->inf_polys[idx], ctx->inf_counts[idx] * sizeof(Point2D));
+    od.counts[0] = ctx->inf_counts[idx];
+    memcpy(od.polys[0], ctx->inf_polys[idx], ctx->inf_counts[idx] * sizeof(Point2D));
     for (uint32_t r = 1; r < orient_count; r++) {
-        polygon_transform(ctx->inf_polys[idx], ctx->inf_counts[idx], (uint8_t)r, (int32_t)ctx->trim_w[idx], (int32_t)ctx->trim_h[idx], orient_polys[r]);
-        orient_counts[r] = ctx->inf_counts[idx];
+        polygon_transform(ctx->inf_polys[idx], ctx->inf_counts[idx], (uint8_t)r, (int32_t)ctx->trim_w[idx], (int32_t)ctx->trim_h[idx], od.polys[r]);
+        od.counts[r] = ctx->inf_counts[idx];
     }
+    // #endregion
 
     // #region Deduplicate orientations (skip transforms that produce identical polygons)
-    uint8_t orient_orig[8]; /* maps compacted index -> original 0-7 orientation flag */
     for (uint32_t r = 0; r < orient_count; r++) {
-        orient_orig[r] = (uint8_t)r;
+        od.orig[r] = (uint8_t)r;
     }
     {
         uint32_t source_orient_count = orient_count;
@@ -1464,16 +1492,16 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
         for (uint32_t r = 0; r < source_orient_count; r++) {
             bool dup = false;
             int32_t r_aabb[4];
-            vpack_calc_aabb(orient_polys[r], orient_counts[r], &r_aabb[0], &r_aabb[1], &r_aabb[2], &r_aabb[3]);
+            vpack_calc_aabb(od.polys[r], od.counts[r], &r_aabb[0], &r_aabb[1], &r_aabb[2], &r_aabb[3]);
             for (uint32_t p = 0; p < dedup_count && !dup; p++) {
-                if (orient_counts[p] != orient_counts[r]) {
+                if (od.counts[p] != od.counts[r]) {
                     continue;
                 }
                 int32_t p_aabb[4];
-                vpack_calc_aabb(orient_polys[p], orient_counts[p], &p_aabb[0], &p_aabb[1], &p_aabb[2], &p_aabb[3]);
+                vpack_calc_aabb(od.polys[p], od.counts[p], &p_aabb[0], &p_aabb[1], &p_aabb[2], &p_aabb[3]);
                 bool same = true;
-                for (uint32_t v = 0; v < orient_counts[r] && same; v++) {
-                    if ((orient_polys[r][v].x - r_aabb[0]) != (orient_polys[p][v].x - p_aabb[0]) || (orient_polys[r][v].y - r_aabb[1]) != (orient_polys[p][v].y - p_aabb[1])) {
+                for (uint32_t v = 0; v < od.counts[r] && same; v++) {
+                    if ((od.polys[r][v].x - r_aabb[0]) != (od.polys[p][v].x - p_aabb[0]) || (od.polys[r][v].y - r_aabb[1]) != (od.polys[p][v].y - p_aabb[1])) {
                         same = false;
                     }
                 }
@@ -1483,15 +1511,16 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
             }
             if (!dup) {
                 if (dedup_count != r) {
-                    memcpy(orient_polys[dedup_count], orient_polys[r], orient_counts[r] * sizeof(Point2D));
-                    orient_counts[dedup_count] = orient_counts[r];
+                    memcpy(od.polys[dedup_count], od.polys[r], od.counts[r] * sizeof(Point2D));
+                    od.counts[dedup_count] = od.counts[r];
                 }
-                orient_orig[dedup_count] = (uint8_t)r;
+                od.orig[dedup_count] = (uint8_t)r;
                 dedup_count++;
             }
         }
         orient_count = dedup_count;
     }
+    od.count = orient_count;
     // #endregion
 
     int32_t min_edge = (int32_t)ctx->margin > (int32_t)ctx->extrude ? (int32_t)ctx->margin : (int32_t)ctx->extrude;
@@ -1503,33 +1532,27 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
     int32_t best_y = 0;
     uint8_t best_orient = 0;
     uint64_t best_score = UINT64_MAX;
-    uint32_t best_orient_idx = 0; /* which orient_polys[] was used */
+    uint32_t best_orient_idx = 0; /* which od.polys[] was used */
 
-    /* Pre-compute per-orientation AABBs, bounds, negated polys */
-    Point2D orient_neg[8][32];
-    int32_t orient_neg_xy[8][VPACK_PLACED_MAX_VERTS * 2];
-    uint32_t orient_neg_hashes[8];
-    int32_t orient_aabb[8][4];     /* min_x, min_y, max_x, max_y */
-    int32_t orient_min_cand[8][2]; /* min_cand_x, min_cand_y */
-    int32_t orient_max_cand[8][2]; /* max_cand_x, max_cand_y */
+    // #region Orient pre-compute — AABBs, candidate bounds, negated polys
     /* Worst-case AABB across all orientations for shared placed-sprite pre-filter */
-    int32_t worst_poly_max_x = 0;
-    int32_t worst_poly_max_y = 0;
-    int32_t worst_poly_min_x = 0;
-    int32_t worst_poly_min_y = 0;
-    int32_t global_min_cand_x = INT32_MAX;
-    int32_t global_min_cand_y = INT32_MAX;
-    int32_t global_max_cand_x = 0;
-    int32_t global_max_cand_y = 0;
-    for (uint32_t ori = 0; ori < orient_count; ori++) {
-        orient_neg_hashes[ori] = vpack_negate_pack_xy_hash(orient_polys[ori], orient_counts[ori], orient_neg[ori], orient_neg_xy[ori]);
-        vpack_calc_aabb(orient_polys[ori], orient_counts[ori], &orient_aabb[ori][0], &orient_aabb[ori][1], &orient_aabb[ori][2], &orient_aabb[ori][3]);
-        // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult) — orient_aabb[ori] is written by vpack_calc_aabb above; analyzer can't trace through the out-parameter store
-        int32_t mcx = min_edge - orient_aabb[ori][0];
+    od.worst_poly_max_x = 0;
+    od.worst_poly_max_y = 0;
+    od.worst_poly_min_x = 0;
+    od.worst_poly_min_y = 0;
+    od.global_min_cand_x = INT32_MAX;
+    od.global_min_cand_y = INT32_MAX;
+    od.global_max_cand_x = 0;
+    od.global_max_cand_y = 0;
+    for (uint32_t ori = 0; ori < od.count; ori++) {
+        od.neg_hashes[ori] = vpack_negate_pack_xy_hash(od.polys[ori], od.counts[ori], od.neg[ori], od.neg_xy[ori]);
+        vpack_calc_aabb(od.polys[ori], od.counts[ori], &od.aabb[ori][0], &od.aabb[ori][1], &od.aabb[ori][2], &od.aabb[ori][3]);
+        // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult) — od.aabb[ori] is written by vpack_calc_aabb above; analyzer can't trace through the out-parameter store
+        int32_t mcx = min_edge - od.aabb[ori][0];
         if (mcx < min_edge) {
             mcx = min_edge;
         }
-        int32_t mcy = min_edge - orient_aabb[ori][1];
+        int32_t mcy = min_edge - od.aabb[ori][1];
         if (mcy < min_edge) {
             mcy = min_edge;
         }
@@ -1540,52 +1563,50 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
          * regressions that would relax this invariant (e.g. allowing negative margin
          * or reworking the clamp). */
         NT_BUILD_ASSERT(mcx >= 0 && mcy >= 0 && "vpack: orient_min_cand must be non-negative (downstream uint32 cast)");
-        orient_min_cand[ori][0] = mcx;
-        orient_min_cand[ori][1] = mcy;
-        orient_max_cand[ori][0] = (int32_t)ctx->max_size - (int32_t)ctx->margin - orient_aabb[ori][2] - 1;
-        orient_max_cand[ori][1] = (int32_t)ctx->max_size - (int32_t)ctx->margin - orient_aabb[ori][3] - 1;
-        if (orient_aabb[ori][2] > worst_poly_max_x) {
-            worst_poly_max_x = orient_aabb[ori][2];
+        od.min_cand[ori][0] = mcx;
+        od.min_cand[ori][1] = mcy;
+        od.max_cand[ori][0] = (int32_t)ctx->max_size - (int32_t)ctx->margin - od.aabb[ori][2] - 1;
+        od.max_cand[ori][1] = (int32_t)ctx->max_size - (int32_t)ctx->margin - od.aabb[ori][3] - 1;
+        if (od.aabb[ori][2] > od.worst_poly_max_x) {
+            od.worst_poly_max_x = od.aabb[ori][2];
         }
-        if (orient_aabb[ori][3] > worst_poly_max_y) {
-            worst_poly_max_y = orient_aabb[ori][3];
+        if (od.aabb[ori][3] > od.worst_poly_max_y) {
+            od.worst_poly_max_y = od.aabb[ori][3];
         }
-        if (orient_aabb[ori][0] < worst_poly_min_x) {
-            worst_poly_min_x = orient_aabb[ori][0];
+        if (od.aabb[ori][0] < od.worst_poly_min_x) {
+            od.worst_poly_min_x = od.aabb[ori][0];
         }
-        if (orient_aabb[ori][1] < worst_poly_min_y) {
-            worst_poly_min_y = orient_aabb[ori][1];
+        if (od.aabb[ori][1] < od.worst_poly_min_y) {
+            od.worst_poly_min_y = od.aabb[ori][1];
         }
-        if (mcx < global_min_cand_x) {
-            global_min_cand_x = mcx;
+        if (mcx < od.global_min_cand_x) {
+            od.global_min_cand_x = mcx;
         }
-        if (mcy < global_min_cand_y) {
-            global_min_cand_y = mcy;
+        if (mcy < od.global_min_cand_y) {
+            od.global_min_cand_y = mcy;
         }
-        if (orient_max_cand[ori][0] > global_max_cand_x) {
-            global_max_cand_x = orient_max_cand[ori][0];
+        if (od.max_cand[ori][0] > od.global_max_cand_x) {
+            od.global_max_cand_x = od.max_cand[ori][0];
         }
-        if (orient_max_cand[ori][1] > global_max_cand_y) {
-            global_max_cand_y = orient_max_cand[ori][1];
+        if (od.max_cand[ori][1] > od.global_max_cand_y) {
+            od.global_max_cand_y = od.max_cand[ori][1];
         }
     }
+    // #endregion
 
+    // #region Page scan — try existing pages, fall back to new page
     /* Scan existing pages for a placement, skipping pages whose lower-bound
      * score already exceeds the current best. */
     uint32_t page_count_before = *ctx->page_count;
     for (uint32_t pi = 0; pi < page_count_before; pi++) {
         if (best_score != UINT64_MAX) {
-            uint64_t page_lb = vpack_page_lower_bound(orient_aabb, orient_min_cand, orient_count, ctx->pages[pi].used_w, ctx->pages[pi].used_h, ctx->margin, ctx->opts->power_of_two);
+            uint64_t page_lb = vpack_page_lower_bound(&od, ctx->pages[pi].used_w, ctx->pages[pi].used_h, ctx->margin, ctx->opts->power_of_two);
             if (page_lb >= best_score) {
                 continue;
             }
         }
         ctx->stats->page_scan_count++;
-        if (vpack_try_page(&ctx->pages[pi], orient_neg, orient_neg_xy, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y, worst_poly_max_x,
-                           worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, ctx->extrude, ctx->margin, ctx->opts->power_of_two, ctx->nfps, ctx->nfp_grid,
-                           ctx->cands, ctx->cand_cap, ctx->relevant_buf, ctx->nfp_valid_buf, ctx->nfp_cache, orient_neg_hashes, ctx->stats, &best_score, pi, ctx->grid_dim, ctx->max_size,
-                           ctx->dirty_bits_buf, ctx->dirty_cells_buf, ctx->cand_seen_bits, ctx->cand_dirty_words, ctx->cand_seen_word_count, ctx->par, &best_page, &best_x, &best_y, &best_orient,
-                           &best_orient_idx)) {
+        if (vpack_try_page(ctx, &ctx->pages[pi], &od, pi, &best_score, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx)) {
             found_any = true;
         }
     }
@@ -1604,21 +1625,19 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
         ctx->pages[new_page].used_h = 0;
         ctx->stats->page_new_count++;
         ctx->stats->page_scan_count++;
-        found_any = vpack_try_page(&ctx->pages[new_page], orient_neg, orient_neg_xy, orient_counts, orient_aabb, orient_min_cand, orient_max_cand, orient_count, worst_poly_min_x, worst_poly_min_y,
-                                   worst_poly_max_x, worst_poly_max_y, global_min_cand_x, global_min_cand_y, global_max_cand_x, global_max_cand_y, ctx->extrude, ctx->margin, ctx->opts->power_of_two,
-                                   ctx->nfps, ctx->nfp_grid, ctx->cands, ctx->cand_cap, ctx->relevant_buf, ctx->nfp_valid_buf, ctx->nfp_cache, orient_neg_hashes, ctx->stats, &best_score, new_page,
-                                   ctx->grid_dim, ctx->max_size, ctx->dirty_bits_buf, ctx->dirty_cells_buf, ctx->cand_seen_bits, ctx->cand_dirty_words, ctx->cand_seen_word_count, ctx->par, &best_page,
-                                   &best_x, &best_y, &best_orient, &best_orient_idx);
+        found_any = vpack_try_page(ctx, &ctx->pages[new_page], &od, new_page, &best_score, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx);
         NT_BUILD_ASSERT(found_any && "vector_pack: empty page should accept placement");
     }
+    // #endregion
 
+    // #region Record placement — write to placed[] and out_placement
     /* Save the winning placement into the chosen page's placed[] list and
      * write the out_placement record (coords are top-left of the cell
      * INCLUDING extrude margin — compose will add extrude_val to reach the
      * actual opaque content position). */
     {
-        Point2D *win_poly = orient_polys[best_orient_idx];
-        uint32_t win_count = orient_counts[best_orient_idx];
+        Point2D *win_poly = od.polys[best_orient_idx];
+        uint32_t win_count = od.counts[best_orient_idx];
         int32_t win_poly_max_x;
         int32_t win_poly_max_y;
         int32_t win_trash;
@@ -1633,10 +1652,10 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
         pl->x = best_x;
         pl->y = best_y;
         pl->shape_hash = vpack_pack_xy_hash(win_poly, win_count, pl->poly_xy);
-        pl->aabb_min_x = orient_aabb[best_orient_idx][0];
-        pl->aabb_min_y = orient_aabb[best_orient_idx][1];
-        pl->aabb_max_x = orient_aabb[best_orient_idx][2];
-        pl->aabb_max_y = orient_aabb[best_orient_idx][3];
+        pl->aabb_min_x = od.aabb[best_orient_idx][0];
+        pl->aabb_min_y = od.aabb[best_orient_idx][1];
+        pl->aabb_max_x = od.aabb[best_orient_idx][2];
+        pl->aabb_max_y = od.aabb[best_orient_idx][3];
         ctx->pages[best_page].count++;
 
         out_placement->sprite_index = idx;
@@ -1644,7 +1663,7 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
         NT_BUILD_ASSERT(best_x >= (int32_t)ctx->extrude && best_y >= (int32_t)ctx->extrude && "vector_pack: placement too close to edge for extrude");
         out_placement->x = (uint32_t)(best_x - (int32_t)ctx->extrude);
         out_placement->y = (uint32_t)(best_y - (int32_t)ctx->extrude);
-        out_placement->transform = orient_orig[best_orient];
+        out_placement->transform = od.orig[best_orient];
 
         // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult) — win_poly_max_x is written when best-score is updated above; analyzer misses the store through the orientation branch
         if (best_x + win_poly_max_x > (int32_t)ctx->pages[best_page].used_w) {
@@ -1655,6 +1674,7 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
             ctx->pages[best_page].used_h = (uint32_t)(best_y + win_poly_max_y);
         }
     }
+    // #endregion
 
     /* Slow-sprite warning: formerly lived in the old tile_pack loop. */
     double sprite_elapsed = nt_time_now() - sprite_start;
