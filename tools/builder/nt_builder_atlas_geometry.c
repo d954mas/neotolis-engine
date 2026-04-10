@@ -368,52 +368,105 @@ bool point_in_polygon_f(const Point2D *poly, uint32_t n, double px, double py) {
  * Used to determine the minimum Clipper2 inflate amount needed so the inflated
  * polygon fully encloses every opaque pixel center (stricter than the clean
  * contour vertices, which sit at integer pixel corners and miss +0.5 offsets). */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity) — pixel-grid scan with per-edge projection for every opaque pixel; loop nesting is the natural shape
+/* Distance from point (cx,cy) to the nearest polygon edge. */
+static double polygon_point_edge_distance(const Point2D *poly, uint32_t poly_count, double cx, double cy) {
+    double min_d_sq = 1e30;
+    for (uint32_t i = 0; i < poly_count; i++) {
+        uint32_t j = (i + 1) % poly_count;
+        double ax = (double)poly[i].x;
+        double ay = (double)poly[i].y;
+        double bx = (double)poly[j].x;
+        double by = (double)poly[j].y;
+        double dx = bx - ax;
+        double dy = by - ay;
+        double len_sq = (dx * dx) + (dy * dy);
+        double t = (len_sq > 0.0) ? (((cx - ax) * dx) + ((cy - ay) * dy)) / len_sq : 0.0;
+        if (t < 0.0) {
+            t = 0.0;
+        } else if (t > 1.0) {
+            t = 1.0;
+        }
+        double qx = ax + (t * dx);
+        double qy = ay + (t * dy);
+        double pdx = cx - qx;
+        double pdy = cy - qy;
+        double d_sq = (pdx * pdx) + (pdy * pdy);
+        if (d_sq < min_d_sq) {
+            min_d_sq = d_sq;
+        }
+    }
+    return sqrt(min_d_sq);
+}
+
+/* Scanline inside/outside classification — computes per-row x-intersections
+ * using EXACTLY the same edge-crossing formula as point_in_polygon_f, then
+ * sweeps pixels left-to-right for amortized O(1) per pixel instead of O(V).
+ *
+ * Insertion sort on x_ints is fine: poly_count ≤ 16 → at most 16 crossings. */
+static void scanline_sort_crossings(double *x_ints, uint32_t n) {
+    for (uint32_t a = 1; a < n; a++) {
+        double key = x_ints[a];
+        uint32_t b = a;
+        while (b > 0 && x_ints[b - 1] > key) {
+            x_ints[b] = x_ints[b - 1];
+            b--;
+        }
+        x_ints[b] = key;
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — scanline intersection + sweep + distance for outside pixels
 double polygon_max_outside_pixel_distance(const Point2D *poly, uint32_t poly_count, const uint8_t *binary, uint32_t tw, uint32_t th) {
     double max_d = 0.0;
+    /* Pre-allocate crossing buffer — at most poly_count crossings per row. */
+    double *x_ints = (double *)malloc(poly_count * sizeof(double));
+    NT_BUILD_ASSERT(x_ints && "polygon_max_outside_pixel_distance: alloc failed");
+
     for (uint32_t y = 0; y < th; y++) {
+        double cy = (double)y + 0.5;
+        // #region Compute scanline x-intersections (same formula as point_in_polygon_f)
+        uint32_t n_ints = 0;
+        for (uint32_t i = 0, j = poly_count - 1; i < poly_count; j = i++) {
+            double yi = (double)poly[i].y;
+            double yj = (double)poly[j].y;
+            if ((yi > cy) != (yj > cy)) {
+                double xi = (double)poly[i].x;
+                double xj = (double)poly[j].x;
+                x_ints[n_ints++] = ((xj - xi) * (cy - yi) / (yj - yi)) + xi;
+            }
+        }
+        scanline_sort_crossings(x_ints, n_ints);
+        // #endregion
+
+        // #region Sweep row: classify pixels + distance for outside
+        /* Sweep left-to-right, counting crossings to the right of each pixel
+         * center (matching point_in_polygon_f's `px < cross_x` logic). With
+         * sorted crossings, the count-to-the-right for cx is n_ints - k, where
+         * k is the first index with x_ints[k] > cx. We track k incrementally. */
+        uint32_t k = 0;
         for (uint32_t x = 0; x < tw; x++) {
             if (binary[((size_t)y * tw) + x] == 0) {
                 continue;
             }
             double cx = (double)x + 0.5;
-            double cy = (double)y + 0.5;
-            if (point_in_polygon_f(poly, poly_count, cx, cy)) {
+            /* Advance k past crossings <= cx. */
+            while (k < n_ints && !(cx < x_ints[k])) {
+                k++;
+            }
+            /* Crossings to the right of cx = n_ints - k. Odd → inside. */
+            if ((n_ints - k) & 1) {
                 continue;
             }
-            /* Outside: compute distance to nearest polygon edge. */
-            double min_d_sq = 1e30;
-            for (uint32_t i = 0; i < poly_count; i++) {
-                uint32_t j = (i + 1) % poly_count;
-                /* Distance from (cx,cy) to segment (poly[i], poly[j]). */
-                double ax = (double)poly[i].x;
-                double ay = (double)poly[i].y;
-                double bx = (double)poly[j].x;
-                double by = (double)poly[j].y;
-                double dx = bx - ax;
-                double dy = by - ay;
-                double len_sq = (dx * dx) + (dy * dy);
-                double t = (len_sq > 0.0) ? (((cx - ax) * dx) + ((cy - ay) * dy)) / len_sq : 0.0;
-                if (t < 0.0) {
-                    t = 0.0;
-                } else if (t > 1.0) {
-                    t = 1.0;
-                }
-                double qx = ax + (t * dx);
-                double qy = ay + (t * dy);
-                double pdx = cx - qx;
-                double pdy = cy - qy;
-                double d_sq = (pdx * pdx) + (pdy * pdy);
-                if (d_sq < min_d_sq) {
-                    min_d_sq = d_sq;
-                }
-            }
-            double d = sqrt(min_d_sq);
+            double d = polygon_point_edge_distance(poly, poly_count, cx, cy);
             if (d > max_d) {
                 max_d = d;
             }
         }
+        /* Reset k for next row. */
+        // #endregion
     }
+
+    free(x_ints);
     return max_d;
 }
 
