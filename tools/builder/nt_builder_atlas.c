@@ -336,19 +336,18 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 // #region Atlas cache — disk caching for incremental builds
 /* --- Atlas cache key computation (D-13) --- */
 
-static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts, bool has_compress, const nt_tex_compress_opts_t *compress) {
+static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts) {
     /* Bump on any change to the byte layout below, the flag-bit ordering, or
      * the shape enum ordering — otherwise cached atlases would silently bind
-     * to a different pack behaviour. v7: order-sensitive — sprite hashes are
-     * no longer sorted, and per-sprite origin_x/origin_y are included. The
-     * cached payload stores AtlasPlacement.sprite_index in add-order, so the
-     * key must be sensitive to both order and per-sprite metadata that affect
-     * the output atlas blob.
+     * to a different pack behaviour. v8: remove format, premultiplied,
+     * debug_png, compress from key — those are post-pack and handled by the
+     * texture cache (nt_builder_compute_opts_hash). The atlas cache stores
+     * raw RGBA page pixels + placements; encoding options don't affect them.
      * Note: NT_BUILDER_VERSION is ALSO mixed into the key below, so content
      * changes inside the atlas pipeline (blit/extrude/compose tweaks that
      * don't touch the byte layout of this hash input) only need a
      * NT_BUILDER_VERSION bump — same policy as nt_builder_cache.c. */
-    enum { ATLAS_CACHE_KEY_VERSION = 7 };
+    enum { ATLAS_CACHE_KEY_VERSION = 8 };
 
     /* Per-sprite data: hash + origin (in add-order, NOT sorted — cached
      * placements store sprite_index in add-order, so the key must be
@@ -387,23 +386,14 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     pos += (uint32_t)sizeof(opts->alpha_threshold);
     memcpy(opts_buf + pos, &opts->max_vertices, sizeof(opts->max_vertices));
     pos += (uint32_t)sizeof(opts->max_vertices);
-    memcpy(opts_buf + pos, &opts->format, sizeof(opts->format));
-    pos += (uint32_t)sizeof(opts->format);
-    /* Bit 4 (value 4) was polygon_mode in v5; freed in v6 since shape is
-     * serialised as a dedicated byte below. Do not re-use it without bumping
-     * ATLAS_CACHE_KEY_VERSION. */
-    uint8_t flags = (uint8_t)((opts->allow_transform ? 1 : 0) | (opts->power_of_two ? 2 : 0) | (opts->debug_png ? 8 : 0) | (opts->premultiplied ? 16 : 0));
+    /* Only pack/compose-affecting opts go here. Post-pack fields (format,
+     * premultiplied, debug_png, compress) are handled by the texture cache
+     * and must NOT appear — otherwise changing e.g. premultiplied triggers
+     * a full re-pack when only re-encode is needed. */
+    uint8_t flags = (uint8_t)((opts->allow_transform ? 1 : 0) | (opts->power_of_two ? 2 : 0));
     opts_buf[pos++] = flags;
     opts_buf[pos++] = (uint8_t)opts->shape;
     opts_buf[pos++] = (uint8_t)ATLAS_CACHE_KEY_VERSION;
-    uint8_t hc = has_compress ? 1 : 0;
-    opts_buf[pos++] = hc;
-    if (has_compress) {
-        memcpy(opts_buf + pos, &compress->mode, sizeof(compress->mode));
-        pos += (uint32_t)sizeof(compress->mode);
-        memcpy(opts_buf + pos, &compress->quality, sizeof(compress->quality));
-        pos += (uint32_t)sizeof(compress->quality);
-    }
 
     /* Combine into single buffer and hash */
     size_t total = per_sprite_bytes + pos;
@@ -837,7 +827,7 @@ static void pipeline_alpha_trim(AtlasPipeline *p) {
 /* --- pipeline_cache_check: compute cache key and try loading cached result --- */
 
 static void pipeline_cache_check(AtlasPipeline *p) {
-    p->state->cache_key = compute_atlas_cache_key(p->sprites, p->sprite_count, p->opts, p->state->has_compress, &p->state->compress);
+    p->state->cache_key = compute_atlas_cache_key(p->sprites, p->sprite_count, p->opts);
 
     if (p->ctx->cache_dir) {
         p->cache_hit = atlas_cache_read(p->ctx->cache_dir, p->state->cache_key, p->sprite_count, &p->placements, &p->placement_count, p->page_w, p->page_h, &p->page_count, &p->page_pixels);

@@ -604,7 +604,7 @@ static VPackCacheReadResult vpack_try_read_nfp_cache(const VPackNFPCacheEntry *s
     return VPACK_CACHE_READ_BUSY;
 }
 
-static VPackNFPCacheEntry *vpack_select_nfp_cache_slot_locked(VPackNFPCacheEntry *set, uint32_t key_a, uint32_t key_b) {
+static VPackNFPCacheEntry *vpack_select_nfp_cache_victim(VPackNFPCacheEntry *set, uint32_t key_a, uint32_t key_b) {
     VPackNFPCacheEntry *empty_slot = NULL;
     VPackNFPCacheEntry *victim = &set[0];
     uint32_t victim_version = atomic_load_explicit(&victim->version, memory_order_relaxed);
@@ -801,7 +801,7 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
      * slot (odd version or CAS fails), just skip — the other writer publishes
      * the same data (function of keys only), so the cache stays consistent. */
     {
-        VPackNFPCacheEntry *slot = vpack_select_nfp_cache_slot_locked(cache_set, cache_a, cache_b);
+        VPackNFPCacheEntry *slot = vpack_select_nfp_cache_victim(cache_set, cache_a, cache_b);
         uint32_t version = atomic_load_explicit(&slot->version, memory_order_relaxed);
         if ((version & 1U) == 0) {
             if (atomic_compare_exchange_strong_explicit(&slot->version, &version, version + 1U, memory_order_acq_rel, memory_order_relaxed)) {
@@ -1120,7 +1120,7 @@ typedef struct {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPackOrientData *od, uint32_t page_index, uint64_t *io_best_score, uint32_t *out_best_page, int32_t *out_best_x,
-                           int32_t *out_best_y, uint8_t *out_best_orient, uint32_t *out_best_orient_idx) {
+                           int32_t *out_best_y, uint32_t *out_best_orient_idx) {
     // #region Relevant placed-sprite pre-filter
     uint32_t relevant_count = 0;
     for (uint32_t i = 0; i < page->count; i++) {
@@ -1445,7 +1445,6 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
                 *out_best_page = page_index;
                 *out_best_x = (*ctx->cands)[reduce_cand].x;
                 *out_best_y = (*ctx->cands)[reduce_cand].y;
-                *out_best_orient = (uint8_t)ori;
                 *out_best_orient_idx = ori;
                 found_on_page = true;
             }
@@ -1458,7 +1457,6 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
                 *out_best_page = page_index;
                 *out_best_x = (*ctx->cands)[result.cand_index].x;
                 *out_best_y = (*ctx->cands)[result.cand_index].y;
-                *out_best_orient = (uint8_t)ori;
                 *out_best_orient_idx = ori;
                 found_on_page = true;
             }
@@ -1557,9 +1555,8 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
     uint32_t best_page = 0;
     int32_t best_x = 0;
     int32_t best_y = 0;
-    uint8_t best_orient = 0;
     uint64_t best_score = UINT64_MAX;
-    uint32_t best_orient_idx = 0; /* which od.polys[] was used */
+    uint32_t best_orient_idx = 0;
 
     // #region Orient pre-compute — AABBs, candidate bounds, negated polys
     /* Worst-case AABB across all orientations for shared placed-sprite pre-filter */
@@ -1633,7 +1630,7 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
             }
         }
         ctx->stats->page_scan_count++;
-        if (vpack_try_page(ctx, &ctx->pages[pi], &od, pi, &best_score, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx)) {
+        if (vpack_try_page(ctx, &ctx->pages[pi], &od, pi, &best_score, &best_page, &best_x, &best_y, &best_orient_idx)) {
             found_any = true;
         }
     }
@@ -1652,7 +1649,7 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
         ctx->pages[new_page].used_h = 0;
         ctx->stats->page_new_count++;
         ctx->stats->page_scan_count++;
-        found_any = vpack_try_page(ctx, &ctx->pages[new_page], &od, new_page, &best_score, &best_page, &best_x, &best_y, &best_orient, &best_orient_idx);
+        found_any = vpack_try_page(ctx, &ctx->pages[new_page], &od, new_page, &best_score, &best_page, &best_x, &best_y, &best_orient_idx);
         NT_BUILD_ASSERT(found_any && "vector_pack: empty page should accept placement");
     }
     // #endregion
@@ -1691,7 +1688,7 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
         NT_BUILD_ASSERT(best_x >= (int32_t)ctx->extrude && best_y >= (int32_t)ctx->extrude && "vector_pack: placement too close to edge for extrude");
         out_placement->x = (uint32_t)(best_x - (int32_t)ctx->extrude);
         out_placement->y = (uint32_t)(best_y - (int32_t)ctx->extrude);
-        out_placement->transform = od.orig[best_orient];
+        out_placement->transform = od.orig[best_orient_idx];
 
         // NOLINTNEXTLINE(clang-analyzer-core.UndefinedBinaryOperatorResult) — win_poly_max_x is written when best-score is updated above; analyzer misses the store through the orientation branch
         if (best_x + win_poly_max_x > (int32_t)ctx->pages[best_page].used_w) {
