@@ -309,7 +309,7 @@ static bool vpack_intersect_axis_i(Point2D p1, Point2D p2, bool is_x_axis, int32
  * Limits sized to measured maxima (bigatlas: max_verts=41, max_rings=4) with
  * safety margin. Smaller entries → NFP cache fits L3 → large speedup on hot path. */
 #define VPACK_NFP_MAX_RINGS 8
-#define VPACK_NFP_MAX_VERTS 64
+#define VPACK_NFP_MAX_VERTS 48
 /* Multi-ring NFP: rings describe forbidden zones (one or more disjoint outer
  * boundaries for concave inputs). No hole-packing - sprite holes are not modeled
  * in pipeline_geometry, so NFPs never need pocket fitting.
