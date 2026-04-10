@@ -1,6 +1,7 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
 #include "hash/nt_hash.h"
+#include "nt_atlas_format.h"
 #include "nt_basisu_encoder.h"
 #include "nt_blob_format.h"
 #include "nt_crc32.h"
@@ -38,6 +39,7 @@ static void nt_builder_free_entry_data(NtBuildEntry *entry) {
         NtBuildFontData *fd = (NtBuildFontData *)entry->data;
         free(fd->charset);
     }
+    /* ATLAS entries use decoded_data for the serialized blob, no type-specific data struct */
     /* TEXTURE -> NtBuildTextureData*, SHADER -> NtBuildShaderData*, FONT -> NtBuildFontData*, others -> NULL */
     free(entry->data);
     entry->data = NULL;
@@ -222,6 +224,22 @@ static void nt_builder_free_context(NtBuilderContext *ctx) {
     }
     free(ctx->header_dir);
     free(ctx->cache_dir);
+    /* Free atlas region codegen entries */
+    for (uint32_t i = 0; i < ctx->atlas_region_count; i++) {
+        free(ctx->atlas_regions[i].path);
+    }
+    free(ctx->atlas_regions);
+    /* Free partial atlas state if begin_atlas was called but end_atlas never ran
+     * (e.g. NT_BUILD_ASSERT fired mid-pipeline, longjmp in tests). */
+    if (ctx->active_atlas) {
+        for (uint32_t i = 0; i < ctx->active_atlas->sprite_count; i++) {
+            free(ctx->active_atlas->sprites[i].rgba);
+            free(ctx->active_atlas->sprites[i].name);
+        }
+        free(ctx->active_atlas->sprites);
+        free(ctx->active_atlas->name);
+        free(ctx->active_atlas);
+    }
     free(ctx);
 }
 
@@ -287,6 +305,11 @@ static void increment_kind_counter(NtBuilderContext *ctx, nt_build_asset_kind_t 
     case NT_BUILD_ASSET_FONT:
         ctx->font_count++;
         break;
+    case NT_BUILD_ASSET_ATLAS:
+        ctx->atlas_count++;
+        break;
+    case NT_BUILD_ASSET_ATLAS_REGION:
+        break; /* codegen-only, no counter */
     }
 }
 
@@ -326,6 +349,8 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
     case NT_BUILD_ASSET_MESH:
     case NT_BUILD_ASSET_BLOB:
     case NT_BUILD_ASSET_FONT:
+    case NT_BUILD_ASSET_ATLAS:
+    case NT_BUILD_ASSET_ATLAS_REGION:
         return true; /* no encoding opts -- everything is in decoded_data */
     }
     return false;
@@ -354,6 +379,11 @@ static void derive_asset_type(nt_build_asset_kind_t kind, nt_asset_type_t *out_t
         *out_type = NT_ASSET_FONT;
         *out_version = NT_FONT_VERSION;
         break;
+    case NT_BUILD_ASSET_ATLAS:
+    case NT_BUILD_ASSET_ATLAS_REGION:
+        *out_type = NT_ASSET_ATLAS;
+        *out_version = NT_ATLAS_VERSION;
+        break;
     default:
         NT_BUILD_ASSERT(0 && "derive_asset_type: unknown asset kind");
         break;
@@ -367,7 +397,9 @@ static nt_build_result_t encode_one_asset(const NtBuildEntry *pe, NtEncodeResult
     switch (pe->kind) {
     case NT_BUILD_ASSET_MESH:
     case NT_BUILD_ASSET_BLOB:
-    case NT_BUILD_ASSET_FONT: {
+    case NT_BUILD_ASSET_FONT:
+    case NT_BUILD_ASSET_ATLAS:
+    case NT_BUILD_ASSET_ATLAS_REGION: {
         result->data = (uint8_t *)malloc(pe->decoded_size);
         NT_BUILD_ASSERT(result->data && "encode: alloc failed (OOM)");
         memcpy(result->data, pe->decoded_data, pe->decoded_size);
@@ -444,8 +476,7 @@ static int parallel_encode_worker(void *arg) {
 
 /* --- Finish: dedup decoded entries, encode non-duplicates, write pack --- */
 
-/* Guard: stack arrays in finish_pack sized to NT_BUILD_MAX_ASSETS. If the limit grows, revisit. */
-_Static_assert(sizeof(NtEncodeResult) * (size_t)NT_BUILD_MAX_ASSETS <= (size_t)64U * 1024U, "NtEncodeResult stack array exceeds 64 KB — move to heap");
+/* NtEncodeResult array is heap-allocated in finish_pack to support large asset counts. */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
@@ -453,8 +484,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     NT_BUILD_ASSERT(ctx->pending_count > 0 && "finish_pack called with no assets added");
 
     double t_encode_start = nt_time_now();
-    nt_cache_status_t cache_status[NT_BUILD_MAX_ASSETS];
-    memset(cache_status, 0, sizeof(cache_status));
+    nt_cache_status_t *cache_status = (nt_cache_status_t *)calloc(ctx->pending_count, sizeof(nt_cache_status_t));
+    NT_BUILD_ASSERT(cache_status && "finish_pack: alloc failed");
     double cache_restore_secs = 0.0;
 
     /* Phase 0: Early dedup on hash + size + opts */
@@ -522,11 +553,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
     }
 
-    /* Per-asset encode results (filled by cache/encode, consumed by assembly) */
-    NtEncodeResult results[NT_BUILD_MAX_ASSETS];
-    memset(results, 0, sizeof(results));
-    uint64_t opts_hashes[NT_BUILD_MAX_ASSETS];
-    memset(opts_hashes, 0, sizeof(opts_hashes));
+    /* Per-asset encode results (heap-allocated to support large asset counts) */
+    NtEncodeResult *results = (NtEncodeResult *)calloc(ctx->pending_count, sizeof(NtEncodeResult));
+    NT_BUILD_ASSERT(results && "finish_pack: alloc failed");
+    uint64_t *opts_hashes = (uint64_t *)calloc(ctx->pending_count, sizeof(uint64_t));
+    NT_BUILD_ASSERT(opts_hashes && "finish_pack: alloc failed");
 
     /* PAR-03: Initialize global state before any encode (thread-safe prerequisite).
      * Check if any pending non-deduped texture entry has compression. */
@@ -638,7 +669,8 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
     /* Phase 1b: Encode (parallel if thread_count > 0, else single-threaded) */
     /* Build work queue: indices of entries needing encode (not cached, not deduped, not shader) */
-    uint32_t work_indices[NT_BUILD_MAX_ASSETS];
+    uint32_t *work_indices = (uint32_t *)malloc((size_t)ctx->pending_count * sizeof(uint32_t));
+    NT_BUILD_ASSERT(work_indices && "finish_pack: alloc failed");
     uint32_t work_count = 0;
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         if (ctx->pending[i].dedup_original >= 0) {
@@ -794,6 +826,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         case NT_BUILD_ASSET_FONT:
             ctx->font_count++;
             break;
+        case NT_BUILD_ASSET_ATLAS:
+            ctx->atlas_count++;
+            break;
+        case NT_BUILD_ASSET_ATLAS_REGION:
+            break; /* codegen-only, no counter */
         }
     }
 
@@ -857,8 +894,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(NT_PACK_DATA_ALIGN - 1U);
 
     /* Compute gzip sizes BEFORE shifting offsets (entries still data_buf-relative) */
-    uint32_t gz_sizes[NT_BUILD_MAX_ASSETS];
-    memset(gz_sizes, 0, sizeof(gz_sizes));
+    uint32_t *gz_sizes = (uint32_t *)calloc(ctx->entry_count > 0 ? ctx->entry_count : 1, sizeof(uint32_t));
     uint32_t total_gz = 0;
     double gzip_secs = 0.0;
     if (ctx->gzip_estimate) {
@@ -1036,6 +1072,9 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     if (ctx->font_count > 0) {
         NT_LOG_INFO("  FONT:    %u asset%s", ctx->font_count, ctx->font_count > 1 ? "s" : "");
     }
+    if (ctx->atlas_count > 0) {
+        NT_LOG_INFO("  ATLAS:   %u asset%s", ctx->atlas_count, ctx->atlas_count > 1 ? "s" : "");
+    }
     if (total_gz > 0 && raw_total > 0) {
         char total_raw_str[16];
         char total_gz_str[16];
@@ -1077,6 +1116,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     }
     NT_LOG_INFO("  CRC32:  0x%08X", checksum);
 
+    free(results);
+    free(opts_hashes);
+    free(cache_status);
+    free(work_indices);
+    free(gz_sizes);
     return NT_BUILD_OK;
 }
 

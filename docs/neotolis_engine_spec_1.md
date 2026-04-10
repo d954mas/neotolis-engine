@@ -974,10 +974,11 @@ typedef enum {
     NT_ASSET_SHADER_CODE = 3,
     NT_ASSET_BLOB = 4,        /* generic binary data (game-defined) */
     NT_ASSET_FONT = 5,        /* font glyph data (Slug format) */
+    NT_ASSET_ATLAS = 6,       /* atlas region metadata (vertices + UVs + origin) */
 } nt_asset_type_t;
 ```
 
-Additional types (material, audio, sprite) will be added as needed.
+Additional types (material, audio) will be added as needed.
 
 ### NT_ASSET_FONT binary format
 
@@ -1010,6 +1011,61 @@ Per-glyph data (at data_offset):
 ```
 
 Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier curves (lines promoted to degenerate quadratics). At lookup time, contours are decoded into float control points, decomposed into horizontal bands, and uploaded to GPU textures for Slug-style vector rendering. Glyphs are cached with LRU eviction — not immutable once loaded.
+
+### NT_ASSET_ATLAS binary format
+
+Builder produces atlas assets from a set of sprite PNGs (or raw RGBA buffers). One atlas yields **two kinds of pack entries**: a single `NT_ASSET_ATLAS` blob with region metadata, plus N `NT_ASSET_TEXTURE` page entries (named `<atlas>/tex0`, `<atlas>/tex1`, …). Runtime keeps a 1:N relationship — one metadata blob references N textures.
+
+Binary layout (`shared/include/nt_atlas_format.h`, packed, **v3**):
+
+```
+NtAtlasHeader (28 bytes)
+  magic:               u32  (0x534C5441 "ATLS")
+  version:             u16  (3)
+  region_count:        u16  (one entry per source sprite)
+  page_count:          u16  (number of texture pages)
+  _pad:                u16
+  vertex_offset:       u32  (byte offset from header start)
+  total_vertex_count:  u32
+  index_offset:        u32  (byte offset from header start)
+  total_index_count:   u32
+
+texture_resource_ids[page_count]: u64
+  Each entry is nt_hash64_str("<atlas_name>/tex<N>") matching the
+  page texture's resource_id in the same pack.
+
+NtAtlasRegion[region_count] (36 bytes each)
+  name_hash:      u64   (xxh64 of region name)
+  source_w:       u16   (original image width in pixels, pre-trim)
+  source_h:       u16   (original image height in pixels, pre-trim)
+  trim_offset_x:  i16   (pixels stripped from the left edge during alpha trim)
+  trim_offset_y:  i16   (pixels stripped from the top edge)
+  origin_x:       f32   (pivot X, normalized over source_w — 0.5 = centre, 1.0 = right edge.
+                         Values outside [0, 1] are allowed for off-frame pivots. Source-space
+                         NOT trim-space — stable across animation frames with varying trim bounds.)
+  origin_y:       f32   (pivot Y, normalized over source_h. Same semantics.)
+  vertex_start:   u32   (index into vertex array — u32 in v3, was u16 in v2)
+  index_start:    u32   (index into the index array — u32 in v3, was u16 in v2)
+  vertex_count:   u8    (vertices for this region; ≤ max_vertices)
+  page_index:     u8    (which texture page)
+  transform:      u8    (3-bit D4 mask: bit0=flipH, bit1=flipV, bit2=diagonal)
+  index_count:    u8    (triangle indices for this region; ≤ 255)
+
+NtAtlasVertex[total_vertex_count] (8 bytes each, at vertex_offset)
+  local_x:   i16  (corner X in trim-rect local space, 0..trim_w.
+                   Polygon vertices use corner coordinates, not pixel centres.
+                   Source-image pos: local_x + trim_offset_x
+                   Pivot-relative:   (local_x + trim_offset_x) - origin_x * source_w)
+  local_y:   i16  (corner Y in trim-rect local space, 0..trim_h. Same semantics.)
+  atlas_u:   u16  (normalized 0..65535 over atlas page width)
+  atlas_v:   u16  (normalized 0..65535 over atlas page height)
+
+uint16[total_index_count] (at index_offset)
+  Triangle list, indices local per region (0 .. vertex_count-1).
+  Runtime offsets them by vertex_start when building GPU buffers.
+```
+
+Runtime is intentionally trivial: `mmap` the blob, read header, slice arrays. No parsing, no allocation. UVs are pre-normalized, triangles are pre-built (Clipper2 CDT for all polygons, fan triangulation as fallback on CDT failure). Duplicate sprites share `vertex_start`/`index_start`.
 
 ## 17.9 Placeholder policy
 
@@ -1625,15 +1681,25 @@ add_texture(const char* path);
 add_shader(const char* path);
 add_material(const char* path);
 add_audio(const char* path);
+add_font(const char* path);
 
 add_meshes(const char* pattern);
 add_textures(const char* pattern);
 add_shaders(const char* pattern);
 add_materials(const char* pattern);
 add_audios(const char* pattern);
+add_fonts(const char* pattern);
+
+/* Atlas: groups N source sprites into 1 metadata blob + M texture pages.
+ * Per-sprite opts carry the name override and the pivot point (NULL = defaults). */
+begin_atlas(const char* name, const nt_atlas_opts_t* opts);
+atlas_add(const char* path, const nt_atlas_sprite_opts_t* opts);
+atlas_add_raw(const uint8_t* rgba, uint32_t w, uint32_t h, const nt_atlas_sprite_opts_t* opts);
+atlas_add_glob(const char* pattern, const nt_atlas_sprite_opts_t* opts);
+end_atlas(void);
 ```
 
-Prefer typed wildcard functions over one untyped `add_files()`.
+Prefer typed wildcard functions over one untyped `add_files()`. Atlas uses a `begin/add*/end` pattern because one atlas requires its full sprite set before packing can start — this is the only place in the API where multi-call grouping is required.
 
 ## 23.5 Builder stages
 
@@ -1716,6 +1782,143 @@ Content-addressed encode cache. Opt-in via `nt_builder_set_cache_dir(ctx, path)`
 **Safety:** write-to-temp + atomic rename. Cache failures (read/write) fall through to normal encode — never break the build.
 
 **Build summary** reports per-asset cache status (cached / miss-new / miss-opts) and aggregate hit/miss counts.
+
+## 23.11 Atlas builder
+
+The atlas builder packs a set of sprite images into one or more atlas pages and emits compact runtime metadata (`NT_ASSET_ATLAS`, see §17.8). It is the only "grouping" producer in the builder — every other importer is single-asset.
+
+**API shape (begin/add*/end):**
+
+```c
+nt_atlas_opts_t opts = nt_atlas_opts_defaults();  /* atlas-level: packer, format, etc. */
+opts.max_size = 2048;
+opts.max_vertices = 8;
+opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
+
+nt_builder_begin_atlas(ctx, "hero", &opts);
+
+/* Idle frames use the default centre pivot (0.5, 0.5). */
+nt_builder_atlas_add_glob(ctx, "assets/sprites/hero/idle_*.png", NULL);
+
+/* Walk cycle: override the pivot to bottom-centre for every matched frame. */
+nt_atlas_sprite_opts_t walk = nt_atlas_sprite_opts_defaults();
+walk.origin_y = 1.0F;  /* feet at bottom edge */
+nt_builder_atlas_add_glob(ctx, "assets/sprites/hero/walk_*.png", &walk);
+
+/* Single sprite with a custom name override. */
+nt_builder_atlas_add(ctx, "assets/sprites/hero/portrait.png",
+                     &(nt_atlas_sprite_opts_t){
+                         .name = "hero_portrait",
+                         .origin_x = 0.5F, .origin_y = 0.5F,
+                     });
+
+nt_builder_end_atlas(ctx);
+```
+
+`begin_atlas` opens an atlas state on the context. Subsequent `atlas_add*` calls feed sprites in — each takes an optional `nt_atlas_sprite_opts_t*` carrying the per-sprite name override and pivot point (pass `NULL` for the centred-pivot default). `end_atlas` runs the full pipeline and registers entries. Nested atlases are not allowed (asserts).
+
+### 23.11.1 Pipeline
+
+`end_atlas` runs ten stages in order:
+
+1. **alpha_trim** — extract alpha plane, find tight bbox per sprite (rejects fully transparent inputs).
+2. **cache_check** — compute atlas-level cache key (per-sprite hashes + origins in add-order + pack-affecting opts + version), try loading cached placement+pages. Key is order-sensitive because cached placements reference sprites by add-order index. Post-pack fields (format, premultiplied, compress, debug_png) are excluded — they only affect the texture encode stage, which has its own cache.
+3. **dedup** — hash + byte-level compare to find identical sprites; duplicates share `vertex_start`/`index_start` in the final blob.
+4. **geometry** — for each unique sprite: build binary mask, optional morphological closing for disjoint components, contour trace, multi-strategy simplification (RDP / perpendicular distance / bbox / convex hull — pick lowest estimated final area), Clipper2 inflate by `extrude + padding/2`, post-verify pixel coverage with fallback to bbox.
+5. **tile_pack** — call `vector_pack` (NFP packer, see below) to assign each unique sprite to a page and (x, y) position.
+6. **compose** — blit trimmed pixels onto page buffers, run AABB edge-extrude only when packing uses rectangles; in polygon mode, require `extrude=0` and rely on `padding`.
+7. **debug_png** — optional outline visualization (when `opts.debug_png`).
+8. **cache_write** — persist placement+pages for next build.
+9. **serialize** — pack `NtAtlasHeader + texture_resource_ids + regions + vertices + indices` into one blob, register as `NT_ASSET_ATLAS`.
+10. **register** — add `NT_ASSET_TEXTURE` entries for each page texture, populate region codegen entries.
+
+Stages 5–8 are skipped on cache hit; serialize/register always run.
+
+### 23.11.2 Vector packer
+
+The packer is **NFP/Minkowski-based** (`nt_builder_atlas_vpack.c`). For each candidate position the incoming polygon is tested against the union of No-Fit Polygons of all already-placed sprites. Properties:
+
+- **Sub-pixel exact** — no quantization to a tile grid.
+- **Concave-aware** — Clipper2 `MinkowskiSum + Union(NonZero)` produces multi-ring NFPs for concave inputs; rings are forbidden zones.
+- **8 D4 orientations** — flipH, flipV, diagonal flip and combinations. Identity-equivalent orientations are deduplicated.
+- **NFP cache** — 8-way set-associative seqlock cache keyed by `(placed_shape_hash, incoming_shape_hash)`. Lock-free reads via version counter, CAS writes. Same shape pair across different sprites reuses the cached NFP.
+- **Parallel build** — when `nt_builder_set_threads(ctx, N)` is called, NFP construction and candidate scanning run on a thread pool. Per-thread stat accumulators merge into global stats deterministically.
+- **Page growth** — sprites that don't fit allocate a new page (up to `ATLAS_MAX_PAGES = 64`); new pages start with the same dimensions as the first.
+
+### 23.11.3 Atlas options
+
+```c
+/* Silhouette mode for atlas packing. Ordered by cost and density. */
+typedef enum {
+    NT_ATLAS_SHAPE_RECT = 0,             /* AABB trim rect — fastest, worst pack density */
+    NT_ATLAS_SHAPE_CONVEX_HULL = 1,      /* convex hull of opaque pixels — no contour trace */
+    NT_ATLAS_SHAPE_CONCAVE_CONTOUR = 2,  /* concave contour + multi-strategy — densest, slowest */
+} nt_atlas_shape_t;
+
+typedef struct {
+    const nt_tex_compress_opts_t *compress;  /* NULL = raw RGBA */
+    nt_texture_pixel_format_t format;        /* RGBA8 default */
+    uint32_t max_size;       /* max atlas page dimension (default 2048) */
+    uint32_t padding;        /* extra spacing between sprites after extrude (default 2) */
+    uint32_t margin;         /* atlas edge margin (default 0) */
+    uint32_t extrude;        /* AABB edge pixel duplication count (default 0; must be 0 unless shape == NT_ATLAS_SHAPE_RECT) */
+    uint8_t alpha_threshold; /* alpha >= threshold = opaque (default 1) */
+    uint8_t max_vertices;    /* max polygon vertices per region (default 8, hard cap 16) */
+    nt_atlas_shape_t shape;  /* silhouette mode (default NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
+    bool allow_transform;    /* try 8 D4 orientations (4 rotations × 2 flips; default true) */
+    bool power_of_two;       /* round atlas dims to POT (default true) */
+    bool debug_png;          /* write debug atlas page PNGs (default false) */
+    bool premultiplied;      /* premultiply RGB by alpha during texture encode (default true) */
+} nt_atlas_opts_t;
+```
+
+**Silhouette modes (`nt_atlas_shape_t`):**
+
+- `NT_ATLAS_SHAPE_RECT` — 4-vertex AABB of the trim rect. No contour tracing, no hull, no RDP. Fastest geometry stage; lowest pack density because the packer cannot slot concave notches between sprites. The only mode where `extrude > 0` is legal.
+- `NT_ATLAS_SHAPE_CONVEX_HULL` — convex hull of opaque pixels via `binary_build_convex_polygon`, simplified to `max_vertices`. Skips morphological closing, contour tracing, RDP, and the 4-strategy pipeline entirely. Good compromise when sprites are roughly convex: noticeably denser than `RECT` without paying the full concave cost.
+- `NT_ATLAS_SHAPE_CONCAVE_CONTOUR` (default) — traces the concave alpha boundary, runs RDP plus a multi-strategy simplification (RDP / perpendicular distance / bbox / convex hull), Clipper2-inflates the chosen polygon, and post-verifies pixel coverage. Internally falls back to `binary_build_convex_polygon` for degenerate inputs (disjoint components that morphological closing cannot merge, degenerate contours, Clipper2 inflate failure). Densest packing, highest cost.
+
+**Premultiplied alpha (default):** atlas pages are encoded through the regular texture pipeline with `premultiplied = true`, which writes `RGB' = (RGB * A + 127) / 255` into the page before `strip_channels` (RAW path) or `nt_basisu_encode` (BASIS path). The resulting texture sets `NT_TEXTURE_FLAG_PREMULTIPLIED` in `NtTextureAssetHeader.flags`, and the runtime must draw with `(ONE, ONE_MINUS_SRC_ALPHA)` blending. This is what keeps NFP-packed sprites free of dark fringes at sub-pixel clearance: `(0,0,0,0)` gap pixels are the identity for premultiplied blending, so bilinear filtering at sprite edges stays correct. Setting `premultiplied = false` logs a warning and is only valid for NEAREST-filtered or fully-opaque atlases; combining it with a non-RGBA8 `format` is a hard assert.
+
+**Hard limits:**
+- `max_vertices ≤ 16`. NFP buffers are stack-sized for `nA + nB ≤ 32`.
+- Per-region `index_count` is `uint8_t` → ≤ 255 indices per region. With `max_vertices ≤ 16` an ear-clipped/fan triangulation produces at most `(16 - 2) * 3 = 42` indices, so one byte is sufficient.
+- Per-atlas `vertex_start` / `index_start` are `uint32_t`.
+
+### 23.11.4 Per-sprite options (`nt_atlas_sprite_opts_t`)
+
+Each `atlas_add` / `atlas_add_raw` / `atlas_add_glob` call accepts an optional `nt_atlas_sprite_opts_t*`. `NULL` picks the defaults (centre pivot, name derived from path).
+
+```c
+typedef struct {
+    const char *name;   /* NULL = derive from path (atlas_add/glob); required for atlas_add_raw */
+    float origin_x;     /* pivot X, normalized over source_w (default 0.5) */
+    float origin_y;     /* pivot Y, normalized over source_h (default 0.5) */
+} nt_atlas_sprite_opts_t;
+```
+
+**Pivot semantics:**
+- Normalized over the **source image** dimensions (not the trimmed rect). Default `(0.5, 0.5)` = image centre.
+- **Values outside `[0, 1]` are allowed** — pivots may lie outside the frame for weapons, effects, or motion-stabilised sprites. Must be finite (`isfinite()` asserted; NaN/inf is caller bug).
+- Source-space (not trim-space) is chosen so frame-by-frame animations with varying per-frame trim bounds have stable pivots across frames. A walk cycle with `origin_y = 0.9375` sits on the same source-image pixel row regardless of how much whitespace the alpha trim removed from each frame.
+
+**Glob rule:** `atlas_add_glob` asserts `opts->name == NULL` — a single name cannot apply to N matched files without hash collisions. Each matched file derives its own name from its path, and the `origin_x/y` fields propagate to all of them. For per-file name overrides within a glob, fall back to calling `nt_builder_glob_iterate` directly with a custom callback that calls `nt_builder_atlas_add` per match.
+
+**Dedup + different pivots:** adding the same pixel-identical sprite twice with different `origin_x/y` produces **two separate regions** that **share** `vertex_start` and `index_start` in the blob. The dedup pass matches on pixel hash + byte-level pixel compare (origin is not considered), so the geometry/pixel data is stored once; each logical region stores its own pivot. This is the cheap path for "same sprite, different anchor" (e.g. icon referenced with centre pivot in menu vs bottom-centre in HUD).
+
+**Zero-init footgun:** C99 designated-initialiser compound literals (`&(nt_atlas_sprite_opts_t){.origin_y = 1.0F}`) zero-init unset fields — so `origin_x` becomes `0.0`, not the default `0.5`. Always start from `nt_atlas_sprite_opts_defaults()` for partial overrides, or set every field explicitly in the literal.
+
+### 23.11.5 Atlas cache
+
+Separate from the per-asset builder cache (§23.10) because atlas placement is a global decision over the whole sprite set.
+
+**Cache key:** `xxh64(per_sprite(decoded_hash + origin_x + origin_y) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. Per-sprite data is hashed in add-order (not sorted) because cached placements reference sprites by index. Only pack/compose-affecting opts are included (max_size, padding, margin, extrude, alpha_threshold, max_vertices, allow_transform, power_of_two, shape); post-pack fields (format, premultiplied, compress, debug_png) are excluded — those affect the texture encode stage which has its own cache.
+
+**Storage:** one `atlas_<key>.bin` file per cache hit, containing the placement table and the composed page pixels. On hit, the pipeline skips pack/compose/debug_png/cache_write entirely.
+
+**Invalidation:** any change to source pixels, opts, or `ATLAS_CACHE_KEY_VERSION` produces a fresh key. The version constant is bumped when the packer's behavior changes in a way that would silently produce different output.
+
+**Failure mode:** atomic temp+rename writes; read/write failures fall through to a fresh build, never break it.
 
 ---
 
@@ -1895,7 +2098,8 @@ These do not block implementation:
 - exact binary layout of each runtime format header
 - precise bit packing of sort keys
 - future WebGPU backend details
-- exact sprite asset format and animation system
+- ~~exact sprite asset format~~ → resolved: `NT_ASSET_ATLAS` (§17.8) builder-side. Runtime sprite renderer + `SpriteComponent` consumer is still pending — atlas blob is produced and validated end-to-end but not yet consumed by a runtime sprite module.
+- sprite animation system
 - ~~exact text rendering strategy and string pool design~~ → resolved: Slug-based GPU vector rendering (§17.8 NT_ASSET_FONT), font module API (§9.5)
 - camera component/structure definition
 - whether some renderer-specific caches are worth adding later

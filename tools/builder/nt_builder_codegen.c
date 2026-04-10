@@ -18,6 +18,10 @@ static const char *type_prefix_for_kind(nt_build_asset_kind_t kind) {
         return "BLOB";
     case NT_BUILD_ASSET_FONT:
         return "FONT";
+    case NT_BUILD_ASSET_ATLAS:
+        return "ATLAS";
+    case NT_BUILD_ASSET_ATLAS_REGION:
+        return "ATLAS_REGION";
     }
     return "UNKNOWN";
 }
@@ -142,45 +146,63 @@ typedef struct {
 
 /* --- Collision detection --- */
 
+/* Sort helper for collision detection: sort by identifier string */
+typedef struct {
+    uint32_t index;
+    char identifier[NT_CODEGEN_MAX_IDENTIFIER];
+} CodegenCollisionEntry;
+
+static int collision_entry_cmp(const void *a, const void *b) { return strcmp(((const CodegenCollisionEntry *)a)->identifier, ((const CodegenCollisionEntry *)b)->identifier); }
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void check_codegen_collisions(const CodegenEntry *entries, uint32_t count) {
-    if (count == 0) {
+    if (count <= 1) {
         return;
     }
 
-    /* Heap-allocate identifier table -- not hot path, avoids large stack frame */
-    char(*identifiers)[NT_CODEGEN_MAX_IDENTIFIER] = (char(*)[NT_CODEGEN_MAX_IDENTIFIER])malloc((size_t)count * NT_CODEGEN_MAX_IDENTIFIER);
-    if (!identifiers) {
+    /* Build identifier array, sort, check adjacent pairs — O(N log N).
+     * calloc so the static analyzer sees every field initialised before qsort
+     * rearranges entries (the per-index init loop below would otherwise let
+     * the analyzer mark post-qsort reads as reading garbage). */
+    CodegenCollisionEntry *sorted = (CodegenCollisionEntry *)calloc(count, sizeof(CodegenCollisionEntry));
+    if (!sorted) {
         return;
     }
 
     for (uint32_t i = 0; i < count; i++) {
+        sorted[i].index = i;
         const char *prefix = type_prefix_for_kind(entries[i].kind);
-        path_to_identifier(entries[i].path, prefix, identifiers[i], NT_CODEGEN_MAX_IDENTIFIER);
+        path_to_identifier(entries[i].path, prefix, sorted[i].identifier, NT_CODEGEN_MAX_IDENTIFIER);
     }
 
-    /* O(n^2) is fine for small asset counts */
-    for (uint32_t i = 0; i < count; i++) {
-        for (uint32_t j = i + 1; j < count; j++) {
-            if (strcmp(identifiers[i], identifiers[j]) == 0) {
-                NT_LOG_ERROR("Codegen: identifier collision '%s' between '%s' and '%s'", identifiers[i], entries[i].path, entries[j].path);
-                free(identifiers);
-                NT_BUILD_ASSERT(0 && "codegen identifier collision -- rename one of the conflicting assets");
-            }
+    qsort(sorted, count, sizeof(CodegenCollisionEntry), collision_entry_cmp);
+
+    for (uint32_t i = 1; i < count; i++) {
+        if (strcmp(sorted[i - 1].identifier, sorted[i].identifier) == 0) {
+            uint32_t a = sorted[i - 1].index;
+            uint32_t b = sorted[i].index;
+            // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage) — entries[b].path is valid: b < count and entries[] is fully populated by the caller; analyzer loses track across qsort
+            NT_LOG_ERROR("Codegen: identifier collision '%s' between '%s' and '%s'", sorted[i].identifier, entries[a].path, entries[b].path);
+            free(sorted);
+            NT_BUILD_ASSERT(0 && "codegen identifier collision -- rename one of the conflicting assets");
         }
     }
-    free(identifiers);
+    free(sorted);
 }
 
 /* --- Shared: write sorted entries to FILE --- */
 
 static void write_sorted_defines(FILE *f, const CodegenEntry *entries, uint32_t count) {
+    if (count == 0) {
+        return;
+    }
     /* Build sort index per type group */
-    const char *type_order[] = {"MESH", "TEXTURE", "SHADER", "BLOB", "FONT"};
+    const char *type_order[] = {"MESH", "TEXTURE", "SHADER", "BLOB", "FONT", "ATLAS", "ATLAS_REGION"};
 
-    SortEntry sorted[NT_BUILD_MAX_ASSETS];
+    SortEntry *sorted = (SortEntry *)malloc((size_t)count * sizeof(SortEntry));
+    NT_BUILD_ASSERT(sorted && "codegen: sorted alloc failed");
 
-    for (int t = 0; t < 5; t++) {
+    for (int t = 0; t < 7; t++) {
         uint32_t group_count = 0;
         for (uint32_t i = 0; i < count; i++) {
             const char *prefix = type_prefix_for_kind(entries[i].kind);
@@ -207,11 +229,19 @@ static void write_sorted_defines(FILE *f, const CodegenEntry *entries, uint32_t 
         }
         (void)fprintf(f, "\n");
     }
+    free(sorted);
 }
 
 static void write_register_labels(FILE *f, const char *func_prefix, const CodegenEntry *entries, uint32_t count) {
+    if (count == 0) {
+        (void)fprintf(f, "#if NT_HASH_LABELS\n");
+        (void)fprintf(f, "static inline void %s_register_labels(void) {}\n", func_prefix);
+        (void)fprintf(f, "#endif\n\n");
+        return;
+    }
     /* Sort all entries by path for deterministic output */
-    SortEntry sorted[NT_BUILD_MAX_ASSETS];
+    SortEntry *sorted = (SortEntry *)malloc((size_t)count * sizeof(SortEntry));
+    NT_BUILD_ASSERT(sorted && "codegen: sorted alloc failed");
     for (uint32_t i = 0; i < count; i++) {
         sorted[i].index = i;
         sorted[i].sort_key = entries[i].path;
@@ -225,6 +255,7 @@ static void write_register_labels(FILE *f, const char *func_prefix, const Codege
     }
     (void)fprintf(f, "}\n");
     (void)fprintf(f, "#endif\n\n");
+    free(sorted);
 }
 
 /* --- Per-pack codegen (called from finish_pack) --- */
@@ -240,21 +271,29 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
     char func_prefix[128];
     derive_func_prefix(header_path, func_prefix, sizeof(func_prefix));
 
-    /* Build CodegenEntry array from pending */
-    CodegenEntry ce[NT_BUILD_MAX_ASSETS];
+    /* Build CodegenEntry array from pending entries + atlas region codegen entries */
+    uint32_t total_ce = ctx->pending_count + ctx->atlas_region_count;
+    CodegenEntry *ce = (CodegenEntry *)malloc((size_t)total_ce * sizeof(CodegenEntry));
+    NT_BUILD_ASSERT(ce && "codegen: alloc failed");
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         const NtBuildEntry *pe = &ctx->pending[i];
         ce[i].path = pe->rename_key ? pe->rename_key : pe->path;
         ce[i].resource_id = pe->resource_id;
         ce[i].kind = pe->kind;
     }
+    for (uint32_t i = 0; i < ctx->atlas_region_count; i++) {
+        ce[ctx->pending_count + i].path = ctx->atlas_regions[i].path;
+        ce[ctx->pending_count + i].resource_id = ctx->atlas_regions[i].resource_id;
+        ce[ctx->pending_count + i].kind = NT_BUILD_ASSET_ATLAS_REGION;
+    }
 
-    /* Check for identifier collisions before writing */
-    check_codegen_collisions(ce, ctx->pending_count);
+    /* Check for identifier collisions before writing — O(N log N) */
+    check_codegen_collisions(ce, total_ce);
 
     FILE *f = fopen(header_path, "w");
     if (!f) {
         NT_LOG_WARN("Could not write codegen header: %s", header_path);
+        free(ce);
         return NT_BUILD_ERR_IO;
     }
 
@@ -265,13 +304,14 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx) {
     (void)fprintf(f, "#define %s\n\n", guard);
     (void)fprintf(f, "#include \"hash/nt_hash.h\"\n\n");
 
-    write_sorted_defines(f, ce, ctx->pending_count);
-    write_register_labels(f, func_prefix, ce, ctx->pending_count);
+    write_sorted_defines(f, ce, total_ce);
+    write_register_labels(f, func_prefix, ce, total_ce);
 
     (void)fprintf(f, "#endif /* %s */\n", guard);
     (void)fclose(f);
 
     NT_LOG_INFO("Generated header: %s (%u assets)", header_path, ctx->pending_count);
+    free(ce);
     return NT_BUILD_OK;
 }
 
@@ -300,6 +340,13 @@ static nt_build_asset_kind_t kind_from_identifier(const char *id) {
     }
     if (strstr(id, "ASSET_FONT_") == id) {
         return NT_BUILD_ASSET_FONT;
+    }
+    /* Check ATLAS_REGION before ATLAS (prefix overlap) */
+    if (strstr(id, "ASSET_ATLAS_REGION_") == id) {
+        return NT_BUILD_ASSET_ATLAS_REGION;
+    }
+    if (strstr(id, "ASSET_ATLAS_") == id) {
+        return NT_BUILD_ASSET_ATLAS;
     }
     return NT_BUILD_ASSET_BLOB; /* fallback */
 }

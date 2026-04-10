@@ -150,6 +150,10 @@ typedef struct {
     nt_texture_pixel_format_t format;       /* output pixel format (default: NT_TEXTURE_FORMAT_RGBA8) */
     uint32_t max_size;                      /* 0 = no resize, otherwise max(w,h) clamped to this */
     const nt_tex_compress_opts_t *compress; /* NULL = raw/uncompressed, non-NULL = Basis compress */
+    bool premultiplied;                     /* true = RGB premultiplied by alpha before encoding.
+                                             * Default false for compatibility. Set true for UI/sprite
+                                             * textures rendered with bilinear filtering to avoid dark
+                                             * fringes at alpha edges. Only meaningful for RGBA8. */
 } nt_tex_opts_t;
 
 /* --- Texture compression options (Basis Universal encoding) --- */
@@ -196,6 +200,105 @@ static inline nt_tex_compress_opts_t nt_tex_compress_uastc_default(void) { retur
 static inline nt_tex_compress_opts_t nt_tex_compress_uastc_high(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 3, .endpoint_rdo_quality = 0.5F}; }
 static inline nt_tex_compress_opts_t nt_tex_compress_uastc_highest(void) { return (nt_tex_compress_opts_t){.mode = NT_TEX_COMPRESS_UASTC, .quality = 4, .endpoint_rdo_quality = 0.0F}; }
 
+/* --- Atlas options (begin_atlas configuration) --- */
+
+/* Per-sprite silhouette mode for the atlas packer.
+ *
+ * Ordered by packing density and geometry-stage cost (both grow with the value):
+ *
+ *   RECT             fastest, worst pack density
+ *   CONVEX_HULL      medium — convex hull builder only
+ *   CONCAVE_CONTOUR  densest, slowest — contour trace + RDP + multi-strategy
+ *
+ * AABB edge extrude (opts.extrude > 0) is only valid for RECT. Non-RECT modes
+ * must use padding instead, since the pack polygon reserves space for the
+ * silhouette envelope, not for the full trim rect extrude band. */
+typedef enum {
+    NT_ATLAS_SHAPE_RECT = 0,
+    NT_ATLAS_SHAPE_CONVEX_HULL = 1,
+    NT_ATLAS_SHAPE_CONCAVE_CONTOUR = 2,
+} nt_atlas_shape_t;
+
+typedef struct {
+    const nt_tex_compress_opts_t *compress; /* NULL = raw RGBA (per D-01) */
+    nt_texture_pixel_format_t format;       /* output pixel format (default: NT_TEXTURE_FORMAT_RGBA8) */
+    uint32_t max_size;                      /* max atlas page dimension (default: 2048 per D-11) */
+    uint32_t padding;                       /* extra spacing between sprites after extrude (default: 2 per D-11) */
+    uint32_t margin;                        /* atlas edge margin (default: 0 per D-11) */
+    uint32_t extrude; /* AABB edge pixel duplication count. Default 0. Must stay 0 unless shape == NT_ATLAS_SHAPE_RECT — the packer reserves space for the silhouette envelope, not for an extrude band
+                         outside it. */
+    uint8_t alpha_threshold; /* alpha >= this = opaque for trimming (default: 1 per D-11) */
+    uint8_t max_vertices;    /* max polygon vertices per region (default: 8; hard cap 16 — downstream stack arrays limit to 32) */
+    nt_atlas_shape_t shape;  /* silhouette mode (default: NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
+    bool allow_transform;    /* try all 8 D4 orientations (4 rotations × 2 flips) for better packing.
+                              * false = identity only. Matches the transform field on AtlasPlacement /
+                              * NtAtlasRegion (default: true per D-11) */
+    bool power_of_two;       /* round atlas dims to POT (default: true per D-11) */
+    bool debug_png;          /* write debug atlas page PNGs (default: false per D-11) */
+    bool premultiplied;      /* true (default) = premultiply RGB by alpha during page encoding.
+                              * Required for correct bilinear filtering at sprite gaps.
+                              * Only meaningful for NT_TEXTURE_FORMAT_RGBA8.
+                              * Setting false is supported but emits a warning — valid only for
+                              * NEAREST-filtered or fully opaque atlases. */
+} nt_atlas_opts_t;
+
+/* Default atlas options (all D-11 values) */
+static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
+    return (nt_atlas_opts_t){
+        .compress = NULL,
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+        .max_size = 2048,
+        .padding = 2,
+        .margin = 0,
+        .extrude = 0,
+        .alpha_threshold = 1,
+        .max_vertices = 8,
+        .shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR,
+        .allow_transform = true,
+        .power_of_two = true,
+        .debug_png = false,
+        .premultiplied = true,
+    };
+}
+
+/* --- Atlas sprite options (per-sprite, passed to atlas_add/add_raw/add_glob) --- */
+
+/* Per-sprite opts struct for atlas_add / atlas_add_raw / atlas_add_glob.
+ *
+ * Common pattern: construct via nt_atlas_sprite_opts_defaults() and override
+ * the fields you care about. Designated-initialiser compound literals
+ * ({ .origin_y = 1.0F }) ZERO-init unset fields — this gives origin_x=0, not
+ * the default 0.5. Always start from the defaults function for partial
+ * overrides, or set every field explicitly in the literal. */
+typedef struct {
+    /* Optional region name.
+     *   atlas_add:      NULL = derive from file path (basename with extension)
+     *   atlas_add_raw:  required (NT_BUILD_ASSERT — no path to derive from)
+     *   atlas_add_glob: MUST be NULL — each matched file derives its own name
+     *                   (asserts otherwise to prevent name collisions across the glob) */
+    const char *name;
+
+    /* Pivot point normalized over source image dimensions (pre-trim).
+     * (0.5, 0.5) = image centre (default), (0.5, 1.0) = bottom-centre (character feet),
+     * (0.0, 0.0) = top-left corner. Values outside [0, 1] are allowed — pivots may lie
+     * outside the frame for weapons, effects, or motion-stabilised sprites. Must be
+     * finite (no NaN/inf, asserted). Runtime: pivot_px = origin * source_wh.
+     *
+     * Source-space (not trim-space) is used so animated sprites with varying
+     * per-frame trim bounds have a stable pivot across frames. */
+    float origin_x;
+    float origin_y;
+} nt_atlas_sprite_opts_t;
+
+/* Default per-sprite opts — centre pivot, name derived from path. */
+static inline nt_atlas_sprite_opts_t nt_atlas_sprite_opts_defaults(void) {
+    return (nt_atlas_sprite_opts_t){
+        .name = NULL,
+        .origin_x = 0.5F,
+        .origin_y = 0.5F,
+    };
+}
+
 /* --- Core API ---
  * Lifecycle: start_pack → add_* → finish_pack → free_pack.
  * Caller must always call free_pack when done, whether finish succeeded or not.
@@ -234,6 +337,22 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene);
 
 /* --- Blob API (generic binary data asset) --- */
 void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id);
+
+/* --- Atlas API (begin/add/end pattern per D-02) ---
+ *
+ * atlas_add / atlas_add_raw / atlas_add_glob accept an nt_atlas_sprite_opts_t*
+ * for per-sprite settings (name override, pivot point). Pass NULL to use
+ * defaults (centre pivot, name from path). See nt_atlas_sprite_opts_t above
+ * for field semantics and the zero-init footgun warning. */
+void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_atlas_opts_t *opts);
+void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atlas_sprite_opts_t *opts);
+void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_atlas_sprite_opts_t *opts);
+void nt_builder_atlas_add_glob(NtBuilderContext *ctx, const char *pattern, const nt_atlas_sprite_opts_t *opts);
+void nt_builder_end_atlas(NtBuilderContext *ctx);
+
+/* --- Glob utility (exposed for custom add loops) --- */
+typedef void (*nt_builder_glob_callback_fn)(const char *full_path, void *user);
+bool nt_builder_glob_iterate(const char *pattern, nt_builder_glob_callback_fn callback, void *user);
 
 /* --- Codegen options --- */
 void nt_builder_set_header_dir(NtBuilderContext *ctx, const char *dir);

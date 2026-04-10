@@ -17,12 +17,17 @@ const char *__lsan_default_suppressions(void);  // NOLINT(bugprone-reserved-iden
 const char *__lsan_default_suppressions(void) { // NOLINT(bugprone-reserved-identifier)
     return "leak:extensionSupportedGLX\n"
            "leak:nt_builder_decode_font\n" /* EXPECT_BUILD_ASSERT + longjmp leaks internal allocs */
-           "leak:nt_builder_add_font\n";
+           "leak:nt_builder_add_font\n"
+           "leak:nt_builder_finish_pack\n" /* shader error tests: longjmp leaks finish_pack internals */
+           "leak:vector_pack\n"            /* max-pages assert: longjmp skips vector_pack cleanup */
+           "leak:pipeline_tile_pack\n";    /* same test: longjmp skips pipeline_tile_pack cleanup */
 }
 
 /* clang-format off */
+#include "nt_atlas_format.h"
 #include "nt_blob_format.h"
 #include "nt_builder.h"
+#include "nt_builder_atlas_geometry.h"
 #include "nt_builder_internal.h"
 #include "nt_crc32.h"
 #include "nt_font_format.h"
@@ -355,9 +360,100 @@ void test_texture_round_trip(void) {
     TEST_ASSERT_EQUAL_UINT32(2, tex.height);
     TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_FORMAT_RGBA8, tex.format);
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex.compression);
+    /* Default opts: premultiplied=false → flags=0 for plain texture */
+    TEST_ASSERT_EQUAL_UINT8(0, tex.flags);
     TEST_ASSERT_EQUAL_UINT32(2 * 2 * 4, tex.data_size);
 
     (void)fclose(f);
+}
+
+/* --- Premultiplied alpha: formula + flag propagation --- */
+
+/* Known input → known output through the real encoder, exercising
+ * premultiply_rgba_copy(), flag write in the header, and the full pack
+ * pipeline. Verifies the rounding formula (x*a + 127) / 255 matches the
+ * contract documented in nt_texture_format.h. */
+void test_texture_premultiplied_encoding(void) {
+    /* Four hand-picked pixels covering interesting alpha values:
+     *   alpha=255 → RGB unchanged (lossless)
+     *   alpha=128 → RGB ≈ half  (tests round-to-nearest)
+     *   alpha=1   → RGB collapses to near-zero
+     *   alpha=0   → RGB fully zeroed */
+    uint8_t raw_pixels[4 * 4] = {
+        /* (R, G, B, A) */
+        255, 128, 0,   255, /* fully opaque — lossless */
+        200, 100, 50,  128, /* half alpha — test rounding */
+        255, 255, 255, 1,   /* tiny alpha — RGB collapses */
+        255, 128, 0,   0,   /* transparent — RGB zeroed */
+    };
+
+    const char *pack_path = TMP_DIR "/premul_test.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_tex_opts_t opts = {
+        .format = NT_TEXTURE_FORMAT_RGBA8,
+        .max_size = 0,
+        .compress = NULL,
+        .premultiplied = true,
+    };
+    nt_builder_add_texture_raw(ctx, raw_pixels, 4, 1, "tex/premul_test", &opts);
+
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+
+    FILE *f = fopen(pack_path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+
+    NtPackHeader hdr;
+    TEST_ASSERT_EQUAL(1, fread(&hdr, sizeof(hdr), 1, f));
+    NtAssetEntry entry;
+    TEST_ASSERT_EQUAL(1, fread(&entry, sizeof(entry), 1, f));
+    TEST_ASSERT_EQUAL_UINT8(NT_ASSET_TEXTURE, entry.asset_type);
+
+    (void)fseek(f, (long)entry.offset, SEEK_SET);
+    NtTextureAssetHeaderV2 tex;
+    TEST_ASSERT_EQUAL(1, fread(&tex, sizeof(tex), 1, f));
+    TEST_ASSERT_EQUAL_UINT32(NT_TEXTURE_MAGIC, tex.magic);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex.compression);
+    /* Flag must be set — this is the whole point of premultiplied=true. */
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_FLAG_PREMULTIPLIED, tex.flags & NT_TEXTURE_FLAG_PREMULTIPLIED);
+    TEST_ASSERT_EQUAL_UINT32(4 * 1 * 4, tex.data_size);
+
+    uint8_t pix[16];
+    TEST_ASSERT_EQUAL(1, fread(pix, sizeof(pix), 1, f));
+    (void)fclose(f);
+
+    /* Expected values from formula (x * a + 127) / 255 */
+
+    /* Pixel 0: alpha=255 → lossless */
+    TEST_ASSERT_EQUAL_UINT8(255, pix[0]);
+    TEST_ASSERT_EQUAL_UINT8(128, pix[1]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix[2]);
+    TEST_ASSERT_EQUAL_UINT8(255, pix[3]);
+
+    /* Pixel 1: (200,100,50, 128)
+     * 200*128+127 = 25727; /255 = 100 (exact: 100.890...)
+     * 100*128+127 = 12927; /255 = 50  (exact: 50.694...)
+     * 50*128+127  = 6527;  /255 = 25  (exact: 25.596...) */
+    TEST_ASSERT_EQUAL_UINT8(100, pix[4]);
+    TEST_ASSERT_EQUAL_UINT8(50, pix[5]);
+    TEST_ASSERT_EQUAL_UINT8(25, pix[6]);
+    TEST_ASSERT_EQUAL_UINT8(128, pix[7]);
+
+    /* Pixel 2: (255, 255, 255, 1)
+     * 255*1+127 = 382; /255 = 1 */
+    TEST_ASSERT_EQUAL_UINT8(1, pix[8]);
+    TEST_ASSERT_EQUAL_UINT8(1, pix[9]);
+    TEST_ASSERT_EQUAL_UINT8(1, pix[10]);
+    TEST_ASSERT_EQUAL_UINT8(1, pix[11]);
+
+    /* Pixel 3: alpha=0 → all zero regardless of RGB */
+    TEST_ASSERT_EQUAL_UINT8(0, pix[12]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix[13]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix[14]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix[15]);
 }
 
 /* --- Mesh round-trip test --- */
@@ -2542,6 +2638,94 @@ static uint32_t count_bin_files(const char *dir) {
     return count;
 }
 
+/* Count files matching atlas_*.bin in the cache dir. Atlas cache files use
+ * this prefix (see atlas_cache_write in nt_builder_atlas.c). */
+static uint32_t count_atlas_cache_files(const char *dir) {
+    uint32_t count = 0;
+#ifdef _WIN32
+    char pattern[512];
+    (void)snprintf(pattern, sizeof(pattern), "%s\\atlas_*.bin", dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(pattern, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            count++;
+        } while (FindNextFileA(hFind, &fd));
+        (void)FindClose(hFind);
+    }
+#else
+    DIR *d = opendir(dir);
+    if (d) {
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL) { // NOLINT(concurrency-mt-unsafe)
+            size_t len = strlen(ent->d_name);
+            if (len > 10 && strncmp(ent->d_name, "atlas_", 6) == 0 && strcmp(ent->d_name + len - 4, ".bin") == 0) {
+                count++;
+            }
+        }
+        (void)closedir(d);
+    }
+#endif
+    return count;
+}
+
+/* Truncate the first atlas_*.bin file in the cache dir to `keep` bytes.
+ * Used by the corrupt-cache test to simulate a torn/partial write or a file
+ * from an older format. Returns true if a file was found and truncated. */
+static bool truncate_first_atlas_cache_file(const char *dir, size_t keep) {
+    char path[512];
+    bool found = false;
+#ifdef _WIN32
+    char pattern[512];
+    (void)snprintf(pattern, sizeof(pattern), "%s\\atlas_*.bin", dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(pattern, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        (void)snprintf(path, sizeof(path), "%s\\%s", dir, fd.cFileName);
+        (void)FindClose(hFind);
+        found = true;
+    }
+#else
+    DIR *d = opendir(dir);
+    if (d) {
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL) { // NOLINT(concurrency-mt-unsafe)
+            size_t len = strlen(ent->d_name);
+            if (len > 10 && strncmp(ent->d_name, "atlas_", 6) == 0 && strcmp(ent->d_name + len - 4, ".bin") == 0) {
+                (void)snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+                found = true;
+                break;
+            }
+        }
+        (void)closedir(d);
+    }
+#endif
+    if (!found) {
+        return false;
+    }
+    FILE *f = fopen(path, "rb+");
+    if (!f) {
+        return false;
+    }
+    /* Write `keep` zero bytes then truncate. Simplest: reopen "wb" and write `keep` bytes. */
+    (void)fclose(f);
+    f = fopen(path, "wb");
+    if (!f) {
+        return false;
+    }
+    if (keep > 0) {
+        uint8_t zeros[64] = {0};
+        size_t remaining = keep;
+        while (remaining > 0) {
+            size_t chunk = remaining > sizeof(zeros) ? sizeof(zeros) : remaining;
+            (void)fwrite(zeros, 1, chunk, f);
+            remaining -= chunk;
+        }
+    }
+    (void)fclose(f);
+    return true;
+}
+
 /* Check that no subdirectories exist in the cache dir (excluding . and ..) */
 static bool cache_has_no_subdirs(const char *dir) {
 #ifdef _WIN32
@@ -3419,6 +3603,1408 @@ void test_font_kern_values(void) {
     free(pack_data);
 }
 
+/* --- Atlas geometry algorithm tests (Phase 47) --- */
+
+/* alpha_trim takes a dense alpha plane; tests start from RGBA so wrap the
+ * extract+trim+free sequence in one helper. */
+static bool atlas_trim_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint8_t threshold, uint32_t *ox, uint32_t *oy, uint32_t *ow, uint32_t *oh) {
+    uint8_t *ap = alpha_plane_extract(rgba, w, h);
+    bool result = alpha_trim(ap, w, h, threshold, ox, oy, ow, oh);
+    free(ap);
+    return result;
+}
+
+/* vpack internals stay static; tests reach in via this thin wrapper defined in nt_builder_atlas_vpack.c. */
+bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_count, const uint16_t *ring_offsets, uint32_t ring_count, int32_t px, int32_t py);
+
+/* edge-extrude helper stays static; test access via this wrapper defined in
+ * nt_builder_atlas.c. */
+void nt_atlas_test_extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint32_t px, uint32_t py, uint32_t sw, uint32_t sh, uint32_t extrude_count);
+
+/* alpha_trim: fully transparent 4x4 image returns false */
+void test_alpha_trim_fully_transparent(void) {
+    uint8_t rgba[4 * 4 * 4];
+    memset(rgba, 0, sizeof(rgba)); /* all pixels transparent (alpha=0) */
+    uint32_t ox = 0;
+    uint32_t oy = 0;
+    uint32_t ow = 0;
+    uint32_t oh = 0;
+    bool result = atlas_trim_rgba(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
+    TEST_ASSERT_FALSE(result);
+}
+
+/* alpha_trim: single opaque pixel at (2,1) */
+void test_alpha_trim_single_pixel(void) {
+    uint8_t rgba[4 * 4 * 4];
+    memset(rgba, 0, sizeof(rgba));
+    /* Set pixel at (2,1) to opaque: index = (1*4 + 2) * 4 = 24, alpha at offset 27 */
+    rgba[(((1 * 4) + 2) * 4) + 3] = 255; /* alpha channel */
+    uint32_t ox = 0;
+    uint32_t oy = 0;
+    uint32_t ow = 0;
+    uint32_t oh = 0;
+    bool result = atlas_trim_rgba(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
+    TEST_ASSERT_TRUE(result);
+    TEST_ASSERT_EQUAL_UINT32(2, ox);
+    TEST_ASSERT_EQUAL_UINT32(1, oy);
+    TEST_ASSERT_EQUAL_UINT32(1, ow);
+    TEST_ASSERT_EQUAL_UINT32(1, oh);
+}
+
+/* alpha_trim: L-shape opaque pixels */
+void test_alpha_trim_l_shape(void) {
+    uint8_t rgba[4 * 4 * 4];
+    memset(rgba, 0, sizeof(rgba));
+    /* L-shape: (0,0), (0,1), (0,2), (1,2) */
+    rgba[(((0 * 4) + 0) * 4) + 3] = 255;
+    rgba[(((1 * 4) + 0) * 4) + 3] = 255;
+    rgba[(((2 * 4) + 0) * 4) + 3] = 255;
+    rgba[(((2 * 4) + 1) * 4) + 3] = 255;
+    uint32_t ox = 0;
+    uint32_t oy = 0;
+    uint32_t ow = 0;
+    uint32_t oh = 0;
+    bool result = atlas_trim_rgba(rgba, 4, 4, 1, &ox, &oy, &ow, &oh);
+    TEST_ASSERT_TRUE(result);
+    TEST_ASSERT_EQUAL_UINT32(0, ox);
+    TEST_ASSERT_EQUAL_UINT32(0, oy);
+    TEST_ASSERT_EQUAL_UINT32(2, ow);
+    TEST_ASSERT_EQUAL_UINT32(3, oh);
+}
+
+/* alpha_trim: threshold=128 treats alpha=127 as transparent */
+void test_alpha_trim_threshold(void) {
+    uint8_t rgba[4 * 4 * 4];
+    memset(rgba, 0, sizeof(rgba));
+    /* Pixel at (1,1) with alpha=127 should be treated as transparent with threshold=128 */
+    rgba[(((1 * 4) + 1) * 4) + 3] = 127;
+    /* Pixel at (2,2) with alpha=128 should be treated as opaque */
+    rgba[(((2 * 4) + 2) * 4) + 3] = 128;
+    uint32_t ox = 0;
+    uint32_t oy = 0;
+    uint32_t ow = 0;
+    uint32_t oh = 0;
+    bool result = atlas_trim_rgba(rgba, 4, 4, 128, &ox, &oy, &ow, &oh);
+    TEST_ASSERT_TRUE(result);
+    TEST_ASSERT_EQUAL_UINT32(2, ox);
+    TEST_ASSERT_EQUAL_UINT32(2, oy);
+    TEST_ASSERT_EQUAL_UINT32(1, ow);
+    TEST_ASSERT_EQUAL_UINT32(1, oh);
+}
+
+/* convex_hull: 3 points forming triangle returns all 3 in CCW order */
+void test_convex_hull_triangle(void) {
+    Point2D pts[3] = {{0, 0}, {4, 0}, {2, 3}};
+    Point2D out[16];
+    uint32_t n = convex_hull(pts, 3, out);
+    TEST_ASSERT_EQUAL_UINT32(3, n);
+    /* Verify CCW ordering: cross product of consecutive edges should be positive */
+    int64_t cross = ((int64_t)(out[1].x - out[0].x) * (int64_t)(out[2].y - out[0].y)) - ((int64_t)(out[1].y - out[0].y) * (int64_t)(out[2].x - out[0].x));
+    TEST_ASSERT_TRUE(cross > 0); /* CCW */
+}
+
+/* convex_hull: 5 points with 1 interior point returns 4-vertex hull */
+void test_convex_hull_with_interior(void) {
+    /* Square (0,0)-(4,0)-(4,4)-(0,4) with interior point (2,2) */
+    Point2D pts[5] = {{0, 0}, {4, 0}, {4, 4}, {0, 4}, {2, 2}};
+    Point2D out[16];
+    uint32_t n = convex_hull(pts, 5, out);
+    TEST_ASSERT_EQUAL_UINT32(4, n); /* interior point excluded */
+}
+
+/* convex_hull: collinear points handled correctly */
+void test_convex_hull_collinear(void) {
+    Point2D pts[4] = {{0, 0}, {1, 0}, {2, 0}, {3, 0}};
+    Point2D out[16];
+    uint32_t n = convex_hull(pts, 4, out);
+    /* Collinear points should produce a degenerate hull (2 points: endpoints) */
+    TEST_ASSERT_EQUAL_UINT32(2, n);
+}
+
+/* rdp_simplify: 4-vertex square with max_vertices=4 returns unchanged */
+void test_rdp_simplify_no_reduction(void) {
+    Point2D hull[4] = {{0, 0}, {4, 0}, {4, 4}, {0, 4}};
+    Point2D out[16];
+    uint32_t n = hull_simplify(hull, 4, 4, out);
+    TEST_ASSERT_EQUAL_UINT32(4, n);
+    /* Verify same points */
+    for (uint32_t i = 0; i < 4; i++) {
+        TEST_ASSERT_EQUAL_INT32(hull[i].x, out[i].x);
+        TEST_ASSERT_EQUAL_INT32(hull[i].y, out[i].y);
+    }
+}
+
+/* rdp_simplify: 8-vertex shape reduced to max_vertices=4 */
+void test_rdp_simplify_reduction(void) {
+    /* Octagon-ish shape: 8 vertices approximating a circle */
+    Point2D hull[8] = {
+        {10, 0}, {20, 3}, {23, 10}, {20, 17}, {10, 20}, {3, 17}, {0, 10}, {3, 3},
+    };
+    Point2D out[16];
+    uint32_t n = hull_simplify(hull, 8, 4, out);
+    TEST_ASSERT_EQUAL_UINT32(4, n);
+}
+
+/* fan_triangulate: 4 vertices produces 2 triangles */
+void test_fan_triangulate_quad(void) {
+    uint16_t indices[32];
+    uint32_t tri_count = fan_triangulate(4, indices);
+    TEST_ASSERT_EQUAL_UINT32(2, tri_count);
+    /* Triangle 0: (0, 1, 2) */
+    TEST_ASSERT_EQUAL_UINT16(0, indices[0]);
+    TEST_ASSERT_EQUAL_UINT16(1, indices[1]);
+    TEST_ASSERT_EQUAL_UINT16(2, indices[2]);
+    /* Triangle 1: (0, 2, 3) */
+    TEST_ASSERT_EQUAL_UINT16(0, indices[3]);
+    TEST_ASSERT_EQUAL_UINT16(2, indices[4]);
+    TEST_ASSERT_EQUAL_UINT16(3, indices[5]);
+}
+
+/* fan_triangulate: 3 vertices produces 1 triangle */
+void test_fan_triangulate_triangle(void) {
+    uint16_t indices[32];
+    uint32_t tri_count = fan_triangulate(3, indices);
+    TEST_ASSERT_EQUAL_UINT32(1, tri_count);
+    TEST_ASSERT_EQUAL_UINT16(0, indices[0]);
+    TEST_ASSERT_EQUAL_UINT16(1, indices[1]);
+    TEST_ASSERT_EQUAL_UINT16(2, indices[2]);
+}
+
+void test_vpack_point_in_nfp_block_any_ring(void) {
+    /* Two disjoint outer rings — point inside any of them is blocked.
+     * Sprite holes are not modeled, so all NFP rings are forbidden zones. */
+    const int32_t verts_xy[] = {
+        0, 0, 10, 0, 10, 10, 0, 10, 20, 0, 30, 0, 30, 10, 20, 10,
+    };
+    const uint16_t ring_offsets[] = {0, 4, 8};
+
+    TEST_ASSERT_TRUE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 5, 5));    /* in first ring */
+    TEST_ASSERT_TRUE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 25, 5));   /* in second ring */
+    TEST_ASSERT_FALSE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 15, 5));  /* between rings */
+    TEST_ASSERT_FALSE(nt_atlas_test_vpack_point_in_nfp(verts_xy, 8, ring_offsets, 2, 50, 50)); /* outside both */
+}
+
+/* --- Atlas round-trip test helpers --- */
+
+/* Create a solid-color RGBA sprite for testing. Caller must free returned pointer. */
+static uint8_t *make_test_sprite(uint32_t w, uint32_t h, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    uint8_t *pixels = (uint8_t *)malloc((size_t)w * h * 4);
+    for (uint32_t i = 0; i < w * h; i++) {
+        pixels[(i * 4) + 0] = r;
+        pixels[(i * 4) + 1] = g;
+        pixels[(i * 4) + 2] = b;
+        pixels[(i * 4) + 3] = a;
+    }
+    return pixels;
+}
+
+/* Read a file into a malloc'd buffer. Caller must free. */
+static uint8_t *read_file_bytes(const char *path, uint32_t *out_size) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return NULL;
+    }
+    (void)fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    (void)fseek(f, 0, SEEK_SET);
+    if (len <= 0) {
+        (void)fclose(f);
+        return NULL;
+    }
+    uint8_t *buf = (uint8_t *)malloc((size_t)len + 1U);
+    if (!buf) {
+        (void)fclose(f);
+        return NULL;
+    }
+    (void)fread(buf, 1, (size_t)len, f);
+    (void)fclose(f);
+    buf[len] = 0;
+    *out_size = (uint32_t)len;
+    return buf;
+}
+
+/* --- Atlas round-trip tests --- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* --- AABB edge extrude: preserves trim-rect interior --- */
+
+/* L-shape (5x5) placed at (2,2) inside a 12x12 page. Verifies the classic
+ * AABB edge extrude contract:
+ *  - only rows/columns at the trim rect boundary are copied outward
+ *  - transparent pixels INSIDE the trim rect stay untouched
+ *  - transparent columns/rows on the trim boundary copy as transparent */
+void test_extrude_edges_aabb_l_shape(void) {
+    /* Page layout (. = empty, █ = red opaque):
+     *
+     *   . . . . . . . . . . . .
+     *   . . . . . . . . . . . .
+     *   . . █ . . . . . . . . .    ← rows 2..6: L shape
+     *   . . █ . . . . . . . . .
+     *   . . █ . . . . . . . . .
+     *   . . █ . . . . . . . . .
+     *   . . █ █ █ . . . . . . .    ← row 6: bottom of L
+     *   . . . . . . . . . . . .
+     *   . . . . . . . . . . . .
+     *   . . . . . . . . . . . .
+     *   . . . . . . . . . . . .
+     *   . . . . . . . . . . . .
+     *
+     * The trim AABB is rows 2..6, cols 2..4. The concave corner at (3,3)
+     * is transparent INSIDE the trim rect and must remain transparent.
+     */
+    const uint32_t W = 12;
+    const uint32_t H = 12;
+    uint8_t *page = (uint8_t *)calloc((size_t)W * H * 4, 1);
+    TEST_ASSERT_NOT_NULL(page);
+
+    /* Paint the L in red (255, 0, 0, 255) */
+    const uint8_t R = 255;
+    const uint8_t G = 0;
+    const uint8_t B = 0;
+    const uint8_t A = 255;
+    /* vertical bar: col 2, rows 2..6 */
+    for (uint32_t y = 2; y <= 6; y++) {
+        size_t off = ((size_t)y * W + 2) * 4;
+        page[off + 0] = R;
+        page[off + 1] = G;
+        page[off + 2] = B;
+        page[off + 3] = A;
+    }
+    /* horizontal foot: row 6, cols 3..4 */
+    for (uint32_t x = 3; x <= 4; x++) {
+        size_t off = ((size_t)6 * W + x) * 4;
+        page[off + 0] = R;
+        page[off + 1] = G;
+        page[off + 2] = B;
+        page[off + 3] = A;
+    }
+
+    const uint32_t px = 2;
+    const uint32_t py = 2;
+    const uint32_t sw = 3;
+    const uint32_t sh = 5;
+    const uint32_t extrude = 2;
+    nt_atlas_test_extrude_edges(page, W, H, px, py, sw, sh, extrude);
+
+    /* Assertions:
+     *
+     * 1. Concave corner (3,3) is INSIDE the trim rect and remains transparent.
+     */
+    const uint8_t *pix_3_3 = &page[((size_t)3 * W + 3) * 4];
+    TEST_ASSERT_EQUAL_UINT8(0, pix_3_3[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix_3_3[3]);
+
+    /* 2. Left band duplicates the left trim column outward. */
+    const uint8_t *pix_1_2 = &page[((size_t)2 * W + 1) * 4];
+    TEST_ASSERT_EQUAL_UINT8(R, pix_1_2[0]);
+    TEST_ASSERT_EQUAL_UINT8(A, pix_1_2[3]);
+
+    /* 3. Two-pixel extrude duplicates one more column outward. */
+    const uint8_t *pix_0_2 = &page[((size_t)2 * W + 0) * 4];
+    TEST_ASSERT_EQUAL_UINT8(R, pix_0_2[0]);
+    TEST_ASSERT_EQUAL_UINT8(A, pix_0_2[3]);
+
+    /* 4. Top band duplicates the top trim row. */
+    const uint8_t *pix_2_0 = &page[((size_t)0 * W + 2) * 4];
+    TEST_ASSERT_EQUAL_UINT8(R, pix_2_0[0]);
+    TEST_ASSERT_EQUAL_UINT8(A, pix_2_0[3]);
+
+    /* 5. Bottom-right corner band gets filled via row-copy then column-copy. */
+    const uint8_t *pix_6_8 = &page[((size_t)8 * W + 6) * 4];
+    TEST_ASSERT_EQUAL_UINT8(R, pix_6_8[0]);
+    TEST_ASSERT_EQUAL_UINT8(A, pix_6_8[3]);
+
+    /* 6. Transparent pixels on the trim boundary stay transparent when copied. */
+    const uint8_t *pix_6_2 = &page[((size_t)2 * W + 6) * 4];
+    TEST_ASSERT_EQUAL_UINT8(0, pix_6_2[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix_6_2[3]);
+
+    /* 7. Farther than the extrude band stays transparent. */
+    const uint8_t *pix_7_2 = &page[((size_t)2 * W + 7) * 4];
+    TEST_ASSERT_EQUAL_UINT8(0, pix_7_2[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, pix_7_2[3]);
+    free(page);
+}
+
+/* --- AABB edge extrude: preserves interior hole ---
+ *
+ * Letter "O" sprite — opaque ring around a transparent center. AABB extrude
+ * only duplicates rows/columns OUTSIDE the trim rect, so the transparent
+ * center stays untouched with no inside-mask logic.
+ */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_extrude_edges_preserve_hole(void) {
+    const uint32_t W = 10;
+    const uint32_t H = 10;
+    uint8_t *page = (uint8_t *)calloc((size_t)W * H * 4, 1);
+    TEST_ASSERT_NOT_NULL(page);
+
+    const uint8_t R = 255;
+    const uint8_t G = 100;
+    const uint8_t B = 50;
+    const uint8_t A = 255;
+
+    /* Paint the ring at page (2,2)..(7,7), with 4x4 hole at (3,3)..(6,6). */
+    const uint32_t px = 2;
+    const uint32_t py = 2;
+    const uint32_t sw = 6;
+    const uint32_t sh = 6;
+    for (uint32_t y = py; y < py + sh; y++) {
+        for (uint32_t x = px; x < px + sw; x++) {
+            bool on_border = (y == py) || (y == py + sh - 1) || (x == px) || (x == px + sw - 1);
+            if (on_border) {
+                size_t off = ((size_t)y * W + x) * 4;
+                page[off + 0] = R;
+                page[off + 1] = G;
+                page[off + 2] = B;
+                page[off + 3] = A;
+            }
+        }
+    }
+
+    const uint32_t extrude = 1;
+    nt_atlas_test_extrude_edges(page, W, H, px, py, sw, sh, extrude);
+
+    /* Central hole pixels stay transparent because AABB extrude never writes
+     * inside the trim rect. */
+    for (uint32_t cy = 4; cy <= 5; cy++) {
+        for (uint32_t cx = 4; cx <= 5; cx++) {
+            const uint8_t *p = &page[((size_t)cy * W + cx) * 4];
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, p[0], "interior hole pixel should be transparent");
+            TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, p[3], "interior hole pixel should be transparent");
+        }
+    }
+
+    /* External pixel (1,4) — 1 pixel left of the ring's left edge — should be
+     * filled with the left edge color. */
+    const uint8_t *ext_pix = &page[((size_t)4 * W + 1) * 4];
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(R, ext_pix[0], "exterior extrude pixel should be filled");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(A, ext_pix[3], "exterior extrude pixel should have full alpha");
+
+    free(page);
+}
+
+/* --- End-to-end: real pipeline preserves hollow ring's hole ---
+ *
+ * Builds an atlas containing a single ring sprite (opaque border, transparent
+ * center) through the production add_raw → end_atlas → finish_pack path,
+ * then reads the resulting page texture from the .ntpack file and verifies
+ * the central hole pixel is still transparent.
+ *
+ * Regression guard: the production blit + edge-extrude path must keep the
+ * ring center transparent after compose. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_real_pipeline_preserves_hole(void) {
+    (void)MKDIR(TMP_DIR);
+
+    /* 16x16 ring sprite: opaque pixels on the 6x6 border at offset (5,5),
+     * transparent everywhere else (and at the 4x4 hole inside the border). */
+    const uint32_t W = 16;
+    const uint32_t H = 16;
+    uint8_t *pixels = (uint8_t *)calloc((size_t)W * H * 4, 1);
+    TEST_ASSERT_NOT_NULL(pixels);
+
+    const uint8_t R = 200;
+    const uint8_t G = 80;
+    const uint8_t B = 40;
+    for (uint32_t y = 5; y <= 10; y++) {
+        for (uint32_t x = 5; x <= 10; x++) {
+            if (y == 5 || y == 10 || x == 5 || x == 10) {
+                size_t off = ((size_t)y * W + x) * 4;
+                pixels[off + 0] = R;
+                pixels[off + 1] = G;
+                pixels[off + 2] = B;
+                pixels[off + 3] = 255;
+            }
+        }
+    }
+
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_ring_e2e.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Default opts → shape=CONCAVE_CONTOUR, extrude=0, premultiplied=true */
+    nt_builder_begin_atlas(ctx, "ring", NULL);
+    nt_builder_atlas_add_raw(ctx, pixels, W, H, &(nt_atlas_sprite_opts_t){.name = "ring.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t r = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, r);
+    nt_builder_free_pack(ctx);
+    free(pixels);
+
+    /* Read pack, find the texture page entry. */
+    uint32_t pack_size = 0;
+    uint8_t *pack = read_file_bytes(TMP_DIR "/atlas_ring_e2e.ntpack", &pack_size);
+    TEST_ASSERT_NOT_NULL(pack);
+
+    const NtPackHeader *hdr = (const NtPackHeader *)pack;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(pack + sizeof(NtPackHeader));
+    const NtAssetEntry *tex_entry = NULL;
+    for (uint32_t i = 0; i < hdr->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_TEXTURE) {
+            tex_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(tex_entry);
+
+    const NtTextureAssetHeaderV2 *tex_hdr = (const NtTextureAssetHeaderV2 *)(pack + tex_entry->offset);
+    TEST_ASSERT_EQUAL_HEX32(NT_TEXTURE_MAGIC, tex_hdr->magic);
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex_hdr->compression);
+    /* Atlas pages must be premultiplied (set by pipeline_register). */
+    TEST_ASSERT_TRUE_MESSAGE((tex_hdr->flags & NT_TEXTURE_FLAG_PREMULTIPLIED) != 0, "atlas page must have premultiplied flag");
+
+    const uint8_t *page_pixels = (const uint8_t *)tex_hdr + sizeof(NtTextureAssetHeaderV2);
+    uint32_t page_w = tex_hdr->width;
+    uint32_t page_h = tex_hdr->height;
+
+    /* Find a hole pixel: any transparent pixel with at least one opaque
+     * neighbor on EACH of its four 4-connected sides (above, below, left,
+     * right). For our ring sprite, the only such pixels are the 4x4 inner
+     * hole pixels. Scanning for "first opaque" would find an extruded
+     * pixel from the AABB edge band instead. */
+    int32_t hole_x = -1;
+    int32_t hole_y = -1;
+    for (uint32_t y = 1; y + 1 < page_h && hole_x < 0; y++) {
+        for (uint32_t x = 1; x + 1 < page_w; x++) {
+            const uint8_t *p = &page_pixels[((size_t)y * page_w + x) * 4];
+            if (p[3] != 0) {
+                continue;
+            }
+            /* Walk outward in each direction looking for an opaque pixel.
+             * If all four directions hit opaque before leaving the page,
+             * this transparent pixel is enclosed — i.e. inside a hole. */
+            bool blocked_n = false, blocked_s = false, blocked_w = false, blocked_e = false;
+            for (uint32_t k = 1; y >= k && !blocked_n; k++) {
+                if (page_pixels[((((size_t)(y - k) * page_w) + x) * 4) + 3] != 0) {
+                    blocked_n = true;
+                }
+            }
+            for (uint32_t k = 1; y + k < page_h && !blocked_s; k++) {
+                if (page_pixels[((((size_t)(y + k) * page_w) + x) * 4) + 3] != 0) {
+                    blocked_s = true;
+                }
+            }
+            for (uint32_t k = 1; x >= k && !blocked_w; k++) {
+                if (page_pixels[((((size_t)y * page_w) + (x - k)) * 4) + 3] != 0) {
+                    blocked_w = true;
+                }
+            }
+            for (uint32_t k = 1; x + k < page_w && !blocked_e; k++) {
+                if (page_pixels[((((size_t)y * page_w) + (x + k)) * 4) + 3] != 0) {
+                    blocked_e = true;
+                }
+            }
+            if (blocked_n && blocked_s && blocked_w && blocked_e) {
+                hole_x = (int32_t)x;
+                hole_y = (int32_t)y;
+                break;
+            }
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(hole_x >= 0, "no enclosed transparent pixel found — edge extrude may have filled the hole");
+
+    const uint8_t *hole_pix = &page_pixels[((size_t)(uint32_t)hole_y * page_w + (uint32_t)hole_x) * 4];
+
+    /* The hole MUST be transparent. */
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, hole_pix[3], "ring hole was filled by edge extrude");
+    /* In premultiplied alpha, RGB of an alpha=0 pixel must also be 0. */
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, hole_pix[0], "ring hole RGB should be zero in premultiplied");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, hole_pix[1], "ring hole RGB should be zero in premultiplied");
+    TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, hole_pix[2], "ring hole RGB should be zero in premultiplied");
+
+    free(pack);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_shape_concave_rejects_extrude(void) {
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_poly_extrude_assert.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
+    opts.extrude = 2;
+
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_begin_atlas(ctx, "poly", &opts));
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_round_trip_basic(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_basic.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
+    uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
+
+    nt_builder_begin_atlas(ctx, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+
+    free(s1);
+    free(s2);
+
+    /* Read .ntpack back */
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_basic.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_TRUE(file_size >= sizeof(NtPackHeader));
+
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    TEST_ASSERT_EQUAL_HEX32(NT_PACK_MAGIC, pack->magic);
+    /* At least 2 assets: 1 atlas metadata + 1 texture page (+ 2 region codegen entries that are deduped out) */
+    TEST_ASSERT_TRUE(pack->asset_count >= 2);
+
+    /* Find atlas entry */
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    /* Verify atlas header */
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)(buf + atlas_entry->offset);
+    TEST_ASSERT_EQUAL_HEX32(NT_ATLAS_MAGIC, ahdr->magic);
+    TEST_ASSERT_EQUAL(NT_ATLAS_VERSION, ahdr->version);
+    TEST_ASSERT_EQUAL(2, ahdr->region_count);
+    TEST_ASSERT_TRUE(ahdr->page_count >= 1);
+
+    free(buf);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_round_trip_regions(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_regions.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
+    uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
+
+    nt_builder_begin_atlas(ctx, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+
+    free(s1);
+    free(s2);
+
+    /* Read .ntpack back */
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_regions.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    /* Find atlas entry */
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)ablob;
+    TEST_ASSERT_EQUAL(2, ahdr->region_count);
+
+    /* Skip texture_resource_ids to get to regions */
+    const uint8_t *ptr = ablob + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
+
+    uint64_t hero_hash = nt_hash64_str("hero.png").value;
+    uint64_t goblin_hash = nt_hash64_str("goblin.png").value;
+
+    /* Both regions should have source_w/source_h == 16 */
+    for (uint32_t r = 0; r < 2; r++) {
+        TEST_ASSERT_EQUAL(16, regions[r].source_w);
+        TEST_ASSERT_EQUAL(16, regions[r].source_h);
+        TEST_ASSERT_TRUE(regions[r].vertex_count >= 3); /* at least triangle in polygon mode */
+        /* Unity float disabled; origin_x/y are exactly 0.5f, compare as uint32_t bit pattern */
+        TEST_ASSERT_TRUE(regions[r].origin_x > 0.49F && regions[r].origin_x < 0.51F);
+        TEST_ASSERT_TRUE(regions[r].origin_y > 0.49F && regions[r].origin_y < 0.51F);
+    }
+
+    /* Verify name hashes (order may vary) */
+    bool found_hero = false;
+    bool found_goblin = false;
+    for (uint32_t r = 0; r < 2; r++) {
+        if (regions[r].name_hash == hero_hash) {
+            found_hero = true;
+        }
+        if (regions[r].name_hash == goblin_hash) {
+            found_goblin = true;
+        }
+    }
+    TEST_ASSERT_TRUE(found_hero);
+    TEST_ASSERT_TRUE(found_goblin);
+
+    free(buf);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_round_trip_vertices(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_verts.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
+    uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
+
+    nt_builder_begin_atlas(ctx, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+
+    free(s1);
+    free(s2);
+
+    /* Read .ntpack back */
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_verts.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    /* Find atlas entry */
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)ablob;
+
+    /* Read vertex/index arrays at their serialized offsets */
+    const NtAtlasVertex *verts = (const NtAtlasVertex *)(ablob + ahdr->vertex_offset);
+    const uint16_t *indices = (const uint16_t *)(ablob + ahdr->index_offset);
+
+    /* All vertices must have valid atlas UVs in [0, 65535] */
+    for (uint32_t v = 0; v < ahdr->total_vertex_count; v++) {
+        TEST_ASSERT_TRUE(verts[v].atlas_u <= 65535);
+        TEST_ASSERT_TRUE(verts[v].atlas_v <= 65535);
+    }
+
+    /* Verify regions reference valid vertex/index ranges */
+    const uint8_t *ptr = ablob + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
+    for (uint32_t r = 0; r < ahdr->region_count; r++) {
+        uint32_t vertex_end = regions[r].vertex_start + regions[r].vertex_count;
+        uint32_t index_end = regions[r].index_start + regions[r].index_count;
+        TEST_ASSERT_TRUE(vertex_end <= ahdr->total_vertex_count);
+        TEST_ASSERT_TRUE(index_end <= ahdr->total_index_count);
+        TEST_ASSERT_EQUAL_UINT32(0, (uint32_t)regions[r].index_count % 3U);
+        for (uint32_t i = 0; i < regions[r].index_count; i++) {
+            TEST_ASSERT_TRUE(indices[regions[r].index_start + i] < regions[r].vertex_count);
+        }
+    }
+
+    free(buf);
+}
+
+void test_atlas_shape_concave_falls_back_to_convex_on_disjoint_sprite(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_disjoint_convex.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 255, 255, 255, 0);
+    s[(((0 * 16) + 0) * 4) + 3] = 255;
+    s[(((15 * 16) + 15) * 4) + 3] = 255;
+
+    nt_builder_begin_atlas(ctx, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "split.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_disjoint_convex.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)ablob;
+    const uint8_t *ptr = ablob + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
+    TEST_ASSERT_EQUAL_UINT32(1, ahdr->region_count);
+    TEST_ASSERT_TRUE(regions[0].vertex_count > 4);
+
+    free(buf);
+}
+
+/* Verify NT_ATLAS_SHAPE_CONVEX_HULL produces a polygon (>4 verts) for a shape
+ * whose convex hull is strictly larger than the trim rect, proving that the
+ * mode actually runs the convex hull builder and not the rect fallback. An
+ * opaque triangle fills the top-left half of the bounding box, so its hull
+ * is a 3-vertex triangle within a 32x32 trim; the builder inflates that up
+ * to max_vertices but it must stay ≥ 4 and ≠ the trim rect. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_shape_convex_hull_produces_polygon(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_shape_convex.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    enum { W = 32, H = 32 };
+    uint8_t *s = make_test_sprite(W, H, 255, 255, 255, 0);
+    /* Upper-left triangle: pixels where x + y < W are opaque. Its convex hull
+     * is a 3-vertex triangle. */
+    for (uint32_t y = 0; y < H; y++) {
+        for (uint32_t x = 0; x < W; x++) {
+            if (x + y < W) {
+                s[(((y * W) + x) * 4) + 3] = 255;
+            }
+        }
+    }
+
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_CONVEX_HULL;
+    nt_builder_begin_atlas(ctx, "convex", &opts);
+    nt_builder_atlas_add_raw(ctx, s, W, H, &(nt_atlas_sprite_opts_t){.name = "triangle.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_shape_convex.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)ablob;
+    const uint8_t *ptr = ablob + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
+    TEST_ASSERT_EQUAL_UINT32(1, ahdr->region_count);
+    /* Convex hull of the half-square triangle has at least 3 verts. RECT mode
+     * would produce exactly 4, so anything other than 4 proves this is not
+     * the RECT path. In practice binary_build_convex_polygon returns 3. */
+    TEST_ASSERT_TRUE(regions[0].vertex_count >= 3);
+    TEST_ASSERT_NOT_EQUAL(4, regions[0].vertex_count);
+
+    free(buf);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_duplicate_detection(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_dedup.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Same pixel data, different names */
+    uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
+
+    nt_builder_begin_atlas(ctx, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "a.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "b.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+
+    free(s1);
+
+    /* Read back */
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_dedup.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    /* Find atlas entry */
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)ablob;
+
+    /* Both regions present (region_count == 2) */
+    TEST_ASSERT_EQUAL(2, ahdr->region_count);
+
+    /* Both regions should share same page_index (dedup places identical sprites at same position) */
+    const uint8_t *ptr = ablob + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
+    TEST_ASSERT_EQUAL(regions[0].page_index, regions[1].page_index);
+
+    /* Vertex data should be identical (same atlas position) */
+    const NtAtlasVertex *verts = (const NtAtlasVertex *)(ablob + ahdr->vertex_offset);
+    TEST_ASSERT_EQUAL(regions[0].vertex_count, regions[1].vertex_count);
+    for (uint32_t v = 0; v < regions[0].vertex_count; v++) {
+        TEST_ASSERT_EQUAL(verts[regions[0].vertex_start + v].atlas_u, verts[regions[1].vertex_start + v].atlas_u);
+        TEST_ASSERT_EQUAL(verts[regions[0].vertex_start + v].atlas_v, verts[regions[1].vertex_start + v].atlas_v);
+    }
+
+    free(buf);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_multi_page(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_multi.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Small max_size forces multi-page: 8 sprites of 32x32 won't fit in 64x64 */
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.max_size = 64;
+    opts.power_of_two = false;
+
+    nt_builder_begin_atlas(ctx, "sprites", &opts);
+
+    /* Each sprite has different color so dedup doesn't collapse them */
+    for (uint32_t i = 0; i < 8; i++) {
+        char name[32];
+        (void)snprintf(name, sizeof(name), "spr%u.png", i);
+        uint8_t *s = make_test_sprite(32, 32, (uint8_t)(i * 30), (uint8_t)(255 - (i * 30)), 128, 255);
+        nt_builder_atlas_add_raw(ctx, s, 32, 32, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
+        free(s);
+    }
+
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+
+    /* Read back */
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_multi.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    /* Find atlas entry */
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *pack_entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (pack_entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &pack_entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)(buf + atlas_entry->offset);
+    TEST_ASSERT_TRUE(ahdr->page_count > 1);
+
+    /* All regions should have valid page_index */
+    const uint8_t *ptr = (buf + atlas_entry->offset) + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
+    for (uint32_t r = 0; r < ahdr->region_count; r++) {
+        TEST_ASSERT_TRUE(regions[r].page_index < ahdr->page_count);
+    }
+
+    free(buf);
+}
+
+void test_atlas_codegen(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_codegen.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
+    uint8_t *s2 = make_test_sprite(16, 16, 0, 255, 0, 255);
+
+    nt_builder_begin_atlas(ctx, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "goblin.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+
+    free(s1);
+    free(s2);
+
+    /* Read generated .h file */
+    uint32_t h_size = 0;
+    uint8_t *h_buf = read_file_bytes(TMP_DIR "/atlas_rt_codegen.h", &h_size);
+    TEST_ASSERT_NOT_NULL(h_buf);
+    TEST_ASSERT_TRUE(h_size > 0);
+
+    /* Verify ASSET_ATLAS_ and ASSET_ATLAS_REGION_ defines exist */
+    TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "ASSET_ATLAS_SPRITES"));
+    TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "ASSET_ATLAS_REGION_SPRITES"));
+
+    free(h_buf);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_codegen_large(void) {
+    /* 500 regions is enough to exercise "many regions + codegen name mangling
+     * for high indices" — the SPR0499 name check below is the real invariant.
+     * allow_transform=false: every sprite is identical, so 8 D4 orientations
+     * would just multiply packer work by 8 for zero benefit. Together these
+     * keep the test under a few seconds in debug+ASAN instead of ~10 minutes. */
+    enum { LARGE_ATLAS_REGION_COUNT = 500 };
+
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_rt_codegen_large.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+    opts.allow_transform = false;
+    nt_builder_begin_atlas(ctx, "sprites", &opts);
+
+    for (uint32_t i = 0; i < LARGE_ATLAS_REGION_COUNT; i++) {
+        char name[32];
+        uint8_t r = (uint8_t)(i & 0xFFU);
+        uint8_t g = (uint8_t)((i >> 8) & 0xFFU);
+        uint8_t *s = make_test_sprite(1, 1, r, g, 0, 255);
+        (void)snprintf(name, sizeof(name), "spr%04u.png", i);
+        nt_builder_atlas_add_raw(ctx, s, 1, 1, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
+        free(s);
+    }
+
+    nt_builder_end_atlas(ctx);
+
+    nt_build_result_t result = nt_builder_finish_pack(ctx);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, result);
+    nt_builder_free_pack(ctx);
+
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(TMP_DIR "/atlas_rt_codegen_large.ntpack", &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)(buf + atlas_entry->offset);
+    TEST_ASSERT_EQUAL(LARGE_ATLAS_REGION_COUNT, ahdr->region_count);
+    TEST_ASSERT_TRUE(ahdr->total_vertex_count >= LARGE_ATLAS_REGION_COUNT * 4U);
+
+    free(buf);
+
+    uint32_t h_size = 0;
+    uint8_t *h_buf = read_file_bytes(TMP_DIR "/atlas_rt_codegen_large.h", &h_size);
+    TEST_ASSERT_NOT_NULL(h_buf);
+    TEST_ASSERT_TRUE(h_size > 0);
+    TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "ASSET_ATLAS_SPRITES"));
+    TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "ASSET_ATLAS_REGION_SPRITES_SPR0499_PNG"));
+    TEST_ASSERT_NOT_NULL(strstr((const char *)h_buf, "sprites/spr0499.png"));
+    free(h_buf);
+}
+
+void test_atlas_opts_defaults(void) {
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    TEST_ASSERT_EQUAL(2048, opts.max_size);
+    TEST_ASSERT_EQUAL(2, opts.padding);
+    TEST_ASSERT_EQUAL(0, opts.margin);
+    TEST_ASSERT_EQUAL(0, opts.extrude);
+    TEST_ASSERT_EQUAL(1, opts.alpha_threshold);
+    TEST_ASSERT_EQUAL(8, opts.max_vertices);
+    TEST_ASSERT_TRUE(opts.allow_transform);
+    TEST_ASSERT_TRUE(opts.power_of_two);
+    TEST_ASSERT_EQUAL(NT_ATLAS_SHAPE_CONCAVE_CONTOUR, opts.shape);
+    TEST_ASSERT_FALSE(opts.debug_png);
+    TEST_ASSERT_NULL(opts.compress);
+}
+
+/* --- Atlas sprite opts + origin tests --- */
+
+/* Helper: read the single atlas blob from a freshly-built pack file. Returns
+ * pointer to the buffer (caller frees) and sets *out_regions to the regions
+ * array inside it. */
+static uint8_t *read_atlas_blob(const char *pack_path, const NtAtlasRegion **out_regions, uint32_t *out_region_count) {
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(pack_path, &file_size);
+    if (!buf) {
+        return NULL;
+    }
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    if (!atlas_entry) {
+        free(buf);
+        return NULL;
+    }
+    const uint8_t *ablob = buf + atlas_entry->offset;
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)ablob;
+    const uint8_t *ptr = ablob + sizeof(NtAtlasHeader) + ((size_t)ahdr->page_count * sizeof(uint64_t));
+    *out_regions = (const NtAtlasRegion *)ptr;
+    *out_region_count = ahdr->region_count;
+    return buf;
+}
+
+/* Default sprite opts: NULL opts == centre pivot (0.5, 0.5). */
+void test_atlas_sprite_opts_default_origin_is_centre(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_origin_default.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 255, 128, 0, 255);
+
+    nt_builder_begin_atlas(ctx, "origin_default", NULL);
+    /* Pass an opts struct with only .name set — still expect centre pivot because
+     * the helper uses nt_atlas_sprite_opts_defaults() as the base. */
+    nt_atlas_sprite_opts_t sopts = nt_atlas_sprite_opts_defaults();
+    sopts.name = "centre.png";
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &sopts);
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *buf = read_atlas_blob(TMP_DIR "/atlas_origin_default.ntpack", &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_EQUAL(1, region_count);
+    TEST_ASSERT_TRUE(regions[0].origin_x > 0.49F && regions[0].origin_x < 0.51F);
+    TEST_ASSERT_TRUE(regions[0].origin_y > 0.49F && regions[0].origin_y < 0.51F);
+    free(buf);
+}
+
+/* Custom origin via opts propagates into the blob verbatim. */
+void test_atlas_sprite_opts_custom_origin(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_origin_custom.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 0, 255, 128, 255);
+
+    nt_builder_begin_atlas(ctx, "origin_custom", NULL);
+    /* Feet pivot. */
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "feet.png", .origin_x = 0.5F, .origin_y = 1.0F});
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *buf = read_atlas_blob(TMP_DIR "/atlas_origin_custom.ntpack", &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_EQUAL(1, region_count);
+    TEST_ASSERT_TRUE(regions[0].origin_x > 0.49F && regions[0].origin_x < 0.51F);
+    TEST_ASSERT_TRUE(regions[0].origin_y > 0.99F && regions[0].origin_y < 1.01F);
+    free(buf);
+}
+
+/* Out-of-range origin values are legitimate (off-frame pivots) — must NOT assert. */
+void test_atlas_sprite_opts_origin_out_of_range_allowed(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_origin_oor.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 128, 64, 255, 255);
+
+    nt_builder_begin_atlas(ctx, "origin_oor", NULL);
+    /* Negative and > 1.0 — pivot lies outside the frame. Legal. */
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "offframe.png", .origin_x = -0.2F, .origin_y = 1.5F});
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *buf = read_atlas_blob(TMP_DIR "/atlas_origin_oor.ntpack", &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_EQUAL(1, region_count);
+    TEST_ASSERT_TRUE(regions[0].origin_x < -0.19F && regions[0].origin_x > -0.21F);
+    TEST_ASSERT_TRUE(regions[0].origin_y > 1.49F && regions[0].origin_y < 1.51F);
+    free(buf);
+}
+
+/* NaN origin must trigger NT_BUILD_ASSERT (caller bug). */
+void test_atlas_sprite_opts_origin_nan_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_origin_nan.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 200, 100, 50, 255);
+    nt_builder_begin_atlas(ctx, "origin_nan", NULL);
+
+    /* NaN in origin — must fire NT_BUILD_ASSERT. Use a named local to avoid
+     * compound-literal + macro expansion interactions. */
+    nt_atlas_sprite_opts_t bad = nt_atlas_sprite_opts_defaults();
+    bad.name = "bad.png";
+    bad.origin_x = (float)(0.0 / 0.0); /* NaN */
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_atlas_add_raw(ctx, s, 16, 16, &bad));
+
+    free(s);
+    /* ctx freed by EXPECT_BUILD_ASSERT */
+}
+
+/* Two pixel-identical sprites with DIFFERENT origins:
+ *   - dedup shares vertex/index data (same vertex_start, same index_start)
+ *   - each region keeps its own origin_x/y verbatim
+ * This is the walk-cycle reuse pattern. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* Regression: two end_atlas runs differing only in an atlas opt must produce
+ * DIFFERENT atlas cache keys. Locks in compute_atlas_cache_key correctness —
+ * if someone adds a new field to nt_atlas_opts_t without updating the hash
+ * input, two atlases would share a cache entry and silently bind to the wrong
+ * output. This test catches that by counting atlas_*.bin files in an isolated
+ * cache directory: two different keys → two files. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_cache_invalidates_on_opts_change(void) {
+    const char *pack1 = TMP_DIR "/atlas_cache_opts1.ntpack";
+    const char *pack2 = TMP_DIR "/atlas_cache_opts2.ntpack";
+    const char *cache = TMP_DIR "/atlas_cache_opts_dir";
+    (void)MKDIR(TMP_DIR);
+    (void)MKDIR(cache);
+    clean_cache_dir(cache);
+    TEST_ASSERT_EQUAL_UINT32(0, count_atlas_cache_files(cache));
+
+    /* Build 1: default max_vertices */
+    nt_atlas_opts_t opts1 = nt_atlas_opts_defaults();
+    opts1.max_vertices = 8;
+    uint8_t *s1 = make_test_sprite(16, 16, 255, 0, 0, 255);
+    NtBuilderContext *ctx1 = nt_builder_start_pack(pack1);
+    nt_builder_set_cache_dir(ctx1, cache);
+    nt_builder_begin_atlas(ctx1, "sprites", &opts1);
+    nt_builder_atlas_add_raw(ctx1, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx1);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx1));
+    nt_builder_free_pack(ctx1);
+    free(s1);
+    TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
+
+    /* Build 2: identical sprite set but max_vertices=16 — different cache key. */
+    nt_atlas_opts_t opts2 = nt_atlas_opts_defaults();
+    opts2.max_vertices = 16;
+    uint8_t *s2 = make_test_sprite(16, 16, 255, 0, 0, 255);
+    NtBuilderContext *ctx2 = nt_builder_start_pack(pack2);
+    nt_builder_set_cache_dir(ctx2, cache);
+    nt_builder_begin_atlas(ctx2, "sprites", &opts2);
+    nt_builder_atlas_add_raw(ctx2, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx2);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx2));
+    nt_builder_free_pack(ctx2);
+    free(s2);
+
+    /* Two distinct atlas cache entries prove compute_atlas_cache_key honours the opt. */
+    TEST_ASSERT_EQUAL_UINT32(2, count_atlas_cache_files(cache));
+}
+
+/* Regression: a corrupt or truncated atlas cache file must NOT crash the
+ * builder. atlas_cache_read validates placement_count / page_count / page
+ * dimensions and returns false on failure, causing pipeline_cache_check to
+ * fall through to a fresh pack. Locks in that graceful behaviour. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_cache_corrupt_file_falls_back(void) {
+    const char *pack1 = TMP_DIR "/atlas_cache_corrupt1.ntpack";
+    const char *pack2 = TMP_DIR "/atlas_cache_corrupt2.ntpack";
+    const char *cache = TMP_DIR "/atlas_cache_corrupt_dir";
+    (void)MKDIR(TMP_DIR);
+    (void)MKDIR(cache);
+    clean_cache_dir(cache);
+
+    /* Build 1: populates the cache. */
+    uint8_t *s1 = make_test_sprite(16, 16, 100, 150, 200, 255);
+    NtBuilderContext *ctx1 = nt_builder_start_pack(pack1);
+    nt_builder_set_cache_dir(ctx1, cache);
+    nt_builder_begin_atlas(ctx1, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx1, s1, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx1);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx1));
+    nt_builder_free_pack(ctx1);
+    free(s1);
+    TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
+
+    /* Truncate the atlas cache file to 4 bytes — not enough for even
+     * placement_count + page_count. atlas_cache_read's fread must fail and
+     * return false. */
+    TEST_ASSERT_TRUE(truncate_first_atlas_cache_file(cache, 4));
+
+    /* Build 2: should re-pack gracefully, not crash on the bad cache. */
+    uint8_t *s2 = make_test_sprite(16, 16, 100, 150, 200, 255);
+    NtBuilderContext *ctx2 = nt_builder_start_pack(pack2);
+    nt_builder_set_cache_dir(ctx2, cache);
+    nt_builder_begin_atlas(ctx2, "sprites", NULL);
+    nt_builder_atlas_add_raw(ctx2, s2, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx2);
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx2));
+    nt_builder_free_pack(ctx2);
+    free(s2);
+
+    /* The corrupt file should have been overwritten with a fresh valid cache
+     * via the temp+rename path in atlas_cache_write. One file, same name. */
+    TEST_ASSERT_EQUAL_UINT32(1, count_atlas_cache_files(cache));
+}
+
+/* Regression for BUG-2: exhausting ATLAS_MAX_PAGES must fire a loud
+ * NT_BUILD_ASSERT, not a silent fallback. Generates enough oversized sprites
+ * that the packer cannot fit even one per page across all ATLAS_MAX_PAGES (64)
+ * pages, then verifies the assert fires via EXPECT_BUILD_ASSERT. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_max_pages_exhaustion_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_maxpages.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Tiny max_size + sprite that nearly fills each page → one sprite per page.
+     * Need > ATLAS_MAX_PAGES (64) sprites to trigger the overflow. Use RECT
+     * shape for simple AABB packing (no polygon mode). */
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.max_size = 64;
+    opts.margin = 2;
+    opts.padding = 2;
+    opts.shape = NT_ATLAS_SHAPE_RECT;
+
+    nt_builder_begin_atlas(ctx, "too_many", &opts);
+
+    /* 70 distinct sprites of 60x60 — each uses (60+padding)^2 = 62x62 of a
+     * 64x64 page, no room for a second sprite. Distinct red channels keep
+     * decoded_hash unique so dedup cannot collapse them. */
+    enum { N_SPRITES = 70 };
+    uint8_t *sprites[N_SPRITES];
+    for (uint32_t i = 0; i < N_SPRITES; i++) {
+        sprites[i] = make_test_sprite(60, 60, (uint8_t)(i + 1), 50, 100, 255);
+        char name[32];
+        (void)snprintf(name, sizeof(name), "sp_%u.png", i);
+        nt_builder_atlas_add_raw(ctx, sprites[i], 60, 60, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
+    }
+
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_end_atlas(ctx));
+
+    for (uint32_t i = 0; i < N_SPRITES; i++) {
+        free(sprites[i]);
+    }
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_duplicate_pixels_different_origin(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_dup_origin.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 255, 200, 100, 255);
+
+    nt_builder_begin_atlas(ctx, "dup_origin", NULL);
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero_centre.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "hero_feet.png", .origin_x = 0.5F, .origin_y = 1.0F});
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *buf = read_atlas_blob(TMP_DIR "/atlas_dup_origin.ntpack", &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_EQUAL(2, region_count);
+
+    /* Locate each region by name hash (order may vary). */
+    uint64_t centre_hash = nt_hash64_str("hero_centre.png").value;
+    uint64_t feet_hash = nt_hash64_str("hero_feet.png").value;
+    const NtAtlasRegion *r_centre = NULL;
+    const NtAtlasRegion *r_feet = NULL;
+    for (uint32_t i = 0; i < region_count; i++) {
+        if (regions[i].name_hash == centre_hash) {
+            r_centre = &regions[i];
+        }
+        if (regions[i].name_hash == feet_hash) {
+            r_feet = &regions[i];
+        }
+    }
+    TEST_ASSERT_NOT_NULL(r_centre);
+    TEST_ASSERT_NOT_NULL(r_feet);
+
+    /* Different origin_y — each region carries its own pivot. */
+    TEST_ASSERT_TRUE(r_centre->origin_y > 0.49F && r_centre->origin_y < 0.51F);
+    TEST_ASSERT_TRUE(r_feet->origin_y > 0.99F && r_feet->origin_y < 1.01F);
+
+    /* Shared vertex_start / index_start via dedup — both regions point at the
+     * same geometry in the blob. */
+    TEST_ASSERT_EQUAL(r_centre->vertex_start, r_feet->vertex_start);
+    TEST_ASSERT_EQUAL(r_centre->index_start, r_feet->index_start);
+    TEST_ASSERT_EQUAL(r_centre->vertex_count, r_feet->vertex_count);
+    TEST_ASSERT_EQUAL(r_centre->index_count, r_feet->index_count);
+
+    /* Total vertex count in the blob should be just one set (dedup worked). */
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)(buf + atlas_entry->offset);
+    /* One unique sprite → vertex_count in the blob equals that of a single region. */
+    TEST_ASSERT_EQUAL(r_centre->vertex_count, ahdr->total_vertex_count);
+    TEST_ASSERT_EQUAL(r_centre->index_count, ahdr->total_index_count);
+
+    free(buf);
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -3552,6 +5138,53 @@ int main(void) {
     RUN_TEST(test_font_dump_pack);
     RUN_TEST(test_font_charset_dedup);
     RUN_TEST(test_font_kern_values);
+
+    /* Atlas geometry algorithms (Phase 47) */
+    RUN_TEST(test_alpha_trim_fully_transparent);
+    RUN_TEST(test_alpha_trim_single_pixel);
+    RUN_TEST(test_alpha_trim_l_shape);
+    RUN_TEST(test_alpha_trim_threshold);
+    RUN_TEST(test_convex_hull_triangle);
+    RUN_TEST(test_convex_hull_with_interior);
+    RUN_TEST(test_convex_hull_collinear);
+    RUN_TEST(test_rdp_simplify_no_reduction);
+    RUN_TEST(test_rdp_simplify_reduction);
+    RUN_TEST(test_fan_triangulate_quad);
+    RUN_TEST(test_fan_triangulate_triangle);
+    RUN_TEST(test_vpack_point_in_nfp_block_any_ring);
+
+    /* Premultiplied alpha (Phase 48 Plan 1.1) */
+    RUN_TEST(test_texture_premultiplied_encoding);
+
+    /* AABB edge extrude */
+    RUN_TEST(test_extrude_edges_aabb_l_shape);
+    RUN_TEST(test_extrude_edges_preserve_hole);
+    RUN_TEST(test_atlas_real_pipeline_preserves_hole);
+    RUN_TEST(test_atlas_shape_concave_rejects_extrude);
+
+    /* Atlas round-trip tests (Phase 47 Plan 03) */
+    RUN_TEST(test_atlas_round_trip_basic);
+    RUN_TEST(test_atlas_round_trip_regions);
+    RUN_TEST(test_atlas_round_trip_vertices);
+    RUN_TEST(test_atlas_shape_concave_falls_back_to_convex_on_disjoint_sprite);
+    RUN_TEST(test_atlas_shape_convex_hull_produces_polygon);
+    RUN_TEST(test_atlas_duplicate_detection);
+    RUN_TEST(test_atlas_multi_page);
+    RUN_TEST(test_atlas_codegen);
+    RUN_TEST(test_atlas_codegen_large);
+    RUN_TEST(test_atlas_opts_defaults);
+
+    /* Atlas sprite opts + origin (Point 2 follow-up) */
+    RUN_TEST(test_atlas_sprite_opts_default_origin_is_centre);
+    RUN_TEST(test_atlas_sprite_opts_custom_origin);
+    RUN_TEST(test_atlas_sprite_opts_origin_out_of_range_allowed);
+    RUN_TEST(test_atlas_sprite_opts_origin_nan_asserts);
+    RUN_TEST(test_atlas_duplicate_pixels_different_origin);
+
+    /* Atlas cache hardening + BUG-2 regression */
+    RUN_TEST(test_atlas_cache_invalidates_on_opts_change);
+    RUN_TEST(test_atlas_cache_corrupt_file_falls_back);
+    RUN_TEST(test_atlas_max_pages_exhaustion_asserts);
 
     return UNITY_END();
 }

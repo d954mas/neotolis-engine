@@ -223,7 +223,7 @@ void test_texture_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(12, offsetof(NtTextureAssetHeaderV2, height));
     TEST_ASSERT_EQUAL_UINT(16, offsetof(NtTextureAssetHeaderV2, mip_count));
     TEST_ASSERT_EQUAL_UINT(18, offsetof(NtTextureAssetHeaderV2, compression));
-    TEST_ASSERT_EQUAL_UINT(19, offsetof(NtTextureAssetHeaderV2, _pad));
+    TEST_ASSERT_EQUAL_UINT(19, offsetof(NtTextureAssetHeaderV2, flags));
     TEST_ASSERT_EQUAL_UINT(20, offsetof(NtTextureAssetHeaderV2, data_size));
 }
 

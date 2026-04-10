@@ -15,13 +15,15 @@
 /* Initial data buffer capacity (1 MB, doubles on overflow) */
 #define NT_BUILD_INITIAL_CAPACITY (1024 * 1024)
 
-/* Asset type tag -- 5 unified kinds (source-agnostic) */
+/* Asset type tag -- unified kinds (source-agnostic) */
 typedef enum {
     NT_BUILD_ASSET_MESH = 0,
     NT_BUILD_ASSET_TEXTURE = 1,
     NT_BUILD_ASSET_SHADER = 2,
     NT_BUILD_ASSET_BLOB = 3,
     NT_BUILD_ASSET_FONT = 4,
+    NT_BUILD_ASSET_ATLAS = 5,
+    NT_BUILD_ASSET_ATLAS_REGION = 6, /* codegen-only: region entry (no pack data, dedup_original >= 0) */
 } nt_build_asset_kind_t;
 
 /* Type-specific data for shader entries */
@@ -45,6 +47,35 @@ typedef struct {
 typedef struct {
     char *charset; /* deep copy of opts.charset (owned) */
 } NtBuildFontData;
+
+/* Input sprite for atlas packing (populated during atlas_add_*) */
+typedef struct {
+    uint8_t *rgba;         /* decoded RGBA pixels (owned, heap) */
+    uint32_t width;        /* decoded image width */
+    uint32_t height;       /* decoded image height */
+    char *name;            /* region name for hash (owned, heap) */
+    float origin_x;        /* default 0.5 */
+    float origin_y;        /* default 0.5 */
+    uint64_t decoded_hash; /* xxh64 of decoded RGBA pixels */
+} NtAtlasSpriteInput;
+
+/* Atlas region entry for codegen (lightweight, no pack entry needed) */
+typedef struct {
+    char *path;           /* "atlas_name/region_name" (owned, heap) */
+    uint64_t resource_id; /* nt_hash64 of path */
+} NtAtlasRegionCodegen;
+
+/* Atlas build state (active between begin_atlas / end_atlas) */
+typedef struct {
+    char *name;                      /* atlas name for resource_id (owned) */
+    nt_atlas_opts_t opts;            /* copy of user opts (compress ptr zeroed, use has_compress) */
+    nt_tex_compress_opts_t compress; /* Basis compression settings */
+    bool has_compress;               /* true = use Basis path */
+    NtAtlasSpriteInput *sprites;     /* dynamic array (heap) */
+    uint32_t sprite_count;
+    uint32_t sprite_capacity;
+    uint64_t cache_key; /* computed atlas cache key for D-13 */
+} NtBuildAtlasState;
 
 /* Metadata accumulation limit (Phase 37) */
 #ifndef NT_BUILD_MAX_META_ENTRIES
@@ -136,6 +167,10 @@ struct NtBuilderContext {
     uint32_t shader_count;
     uint32_t blob_count;
     uint32_t font_count;
+    uint32_t atlas_count;
+
+    /* Atlas: active atlas state (non-NULL between begin_atlas/end_atlas) */
+    NtBuildAtlasState *active_atlas;
 
     /* Deduplication stats */
     uint32_t dedup_count;
@@ -171,6 +206,11 @@ struct NtBuilderContext {
 
     /* Parallel encoding: thread count (0 = single-threaded, per D-12) */
     uint32_t thread_count;
+
+    /* Atlas region codegen entries (heap, populated by end_atlas, consumed by codegen) */
+    NtAtlasRegionCodegen *atlas_regions;
+    uint32_t atlas_region_count;
+    uint32_t atlas_region_capacity;
 };
 
 /* Internal helpers -- data accumulation (used in finish_pack phase) */
@@ -347,6 +387,9 @@ nt_build_result_t nt_builder_generate_header(const NtBuilderContext *ctx);
 /* File I/O utilities */
 char *nt_builder_read_file(const char *path, uint32_t *out_size);
 
+/* Glob callback type is public (nt_builder.h). The iteration function itself
+ * is also declared in nt_builder.h; do not re-declare here. */
+
 /* Include resolver (D-11, D-12, D-13) */
 char *nt_builder_resolve_includes(const char *source, uint32_t source_len, const char *source_path, const NtBuilderContext *ctx, uint32_t *out_len);
 
@@ -359,5 +402,8 @@ void nt_builder_build_cache_path(const char *cache_dir, uint64_t decoded_hash, u
 nt_cache_status_t nt_builder_cache_lookup(const char *cache_dir, uint64_t decoded_hash, uint64_t opts_hash, uint8_t **out_data, uint32_t *out_size);
 bool nt_builder_cache_store(const char *cache_dir, uint64_t decoded_hash, uint64_t opts_hash, const uint8_t *data, uint32_t size);
 void nt_builder_ensure_cache_dir(const char *dir);
+
+/* Atlas geometry primitives now live in nt_builder_atlas_geometry.h and are
+ * called directly by tests. Vpack-internal test access is in nt_builder_atlas_vpack.c. */
 
 #endif /* NT_BUILDER_INTERNAL_H */

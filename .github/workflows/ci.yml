@@ -73,6 +73,12 @@ jobs:
           name: text-packs
           path: build/examples/text
 
+      - name: Download atlas packs
+        uses: actions/download-artifact@v4
+        with:
+          name: atlas-packs
+          path: build/examples/atlas
+
       - name: Build baseline WASM debug artifacts
         run: |
           emcmake cmake --preset wasm-debug
@@ -303,7 +309,7 @@ jobs:
         run: cmake --preset native-release
 
       - name: Build pack builders (release, no ASAN — fast encoding)
-        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs build_text_packs
+        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs build_text_packs build_atlas_packs
 
       - name: Restore builder cache
         uses: actions/cache@v4
@@ -312,14 +318,25 @@ jobs:
             build/examples/sponza/_cache
             build/examples/textured_quad/_cache
             build/examples/text/_cache
+            build/examples/atlas/_cache
           key: builder-cache-${{ github.sha }}
           restore-keys: builder-cache-
 
-      - name: Build asset packs (release)
-        run: |
-          ./build/examples/textured_quad/native-release/build_tq_packs build/examples/textured_quad
-          ./build/examples/sponza/native-release/build_sponza_packs build/examples/sponza
-          ./build/examples/text/native-release/build_text_packs build/examples/text
+      - name: Build asset packs — textured_quad (release)
+        timeout-minutes: 10
+        run: ./build/examples/textured_quad/native-release/build_tq_packs build/examples/textured_quad
+
+      - name: Build asset packs — sponza (release)
+        timeout-minutes: 120
+        run: ./build/examples/sponza/native-release/build_sponza_packs build/examples/sponza
+
+      - name: Build asset packs — text (release)
+        timeout-minutes: 10
+        run: ./build/examples/text/native-release/build_text_packs build/examples/text
+
+      - name: Build asset packs — atlas (release)
+        timeout-minutes: 10
+        run: ./build/examples/atlas/native-release/build_atlas_packs build/examples/atlas
 
       - name: Build native release (all targets)
         run: cmake --build --preset native-release
@@ -392,6 +409,13 @@ jobs:
           path: build/examples/text/*.ntpack
           retention-days: 1
 
+      - name: Upload atlas packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlas-packs
+          path: build/examples/atlas/*.ntpack
+          retention-days: 1
+
       - name: Submodule consumption test
         run: |
           cmake -S tests/submodule -B build/submodule-test \
@@ -450,6 +474,12 @@ jobs:
         with:
           name: text-packs
           path: build/examples/text
+
+      - name: Download atlas packs
+        uses: actions/download-artifact@v4
+        with:
+          name: atlas-packs
+          path: build/examples/atlas
 
       - uses: actions/setup-node@v4
         with:

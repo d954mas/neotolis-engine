@@ -2,6 +2,7 @@
 
 #include "hash/nt_hash.h"
 
+#include <stdio.h>
 #include <string.h>
 
 void setUp(void) {
@@ -127,6 +128,41 @@ void test_label_disabled_returns_null(void) {
 #endif
 }
 
+void test_label_table_fills(void) {
+#if NT_HASH_LABELS
+    enum { LABEL_COUNT = NT_HASH_MAX_LABELS + 1024 };
+    nt_hash32_t first32 = {0};
+    nt_hash32_t last32 = {0};
+    nt_hash64_t first64 = {0};
+    nt_hash64_t last64 = {0};
+    char last_label[32] = {0};
+
+    for (uint32_t i = 0; i < LABEL_COUNT; i++) {
+        char label[32];
+        (void)snprintf(label, sizeof(label), "grow_label_%u", i);
+
+        nt_hash32_t h32 = nt_hash32_str(label);
+        nt_hash64_t h64 = nt_hash64_str(label);
+        if (i == 0) {
+            first32 = h32;
+            first64 = h64;
+        }
+        if (i == LABEL_COUNT - 1U) {
+            last32 = h32;
+            last64 = h64;
+            (void)snprintf(last_label, sizeof(last_label), "%s", label);
+        }
+    }
+
+    TEST_ASSERT_EQUAL_STRING("grow_label_0", nt_hash32_label(first32));
+    TEST_ASSERT_EQUAL_STRING("grow_label_0", nt_hash64_label(first64));
+    TEST_ASSERT_EQUAL_STRING(last_label, nt_hash32_label(last32));
+    TEST_ASSERT_EQUAL_STRING(last_label, nt_hash64_label(last64));
+#else
+    TEST_IGNORE_MESSAGE("NT_HASH_LABELS not enabled");
+#endif
+}
+
 /* ---- Lifecycle test ---- */
 
 void test_init_shutdown(void) {
@@ -153,6 +189,7 @@ int main(void) {
     RUN_TEST(test_hash64_distribution);
     RUN_TEST(test_hash_binary_data);
     RUN_TEST(test_label_register_and_lookup);
+    RUN_TEST(test_label_table_fills);
     RUN_TEST(test_label_disabled_returns_null);
     RUN_TEST(test_init_shutdown);
     return UNITY_END();

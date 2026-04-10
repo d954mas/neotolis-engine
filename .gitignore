@@ -4,6 +4,9 @@ build/
 *.a
 *.so
 *.dylib
+.claude/commands/autoresearch.md
+.claude/commands/autoresearch
+.claude/skills/autoresearch
 
 # CMake
 CMakeFiles/
@@ -12,6 +15,9 @@ cmake_install.cmake
 CTestTestfile.cmake
 .cache/
 compile_commands.json
+
+# CTest output (created when ctest is run from repo root)
+Testing/
 
 # Emscripten local SDK
 emsdk/
@@ -43,8 +49,12 @@ package-lock.json
 #codex branch diff
 branch_diff.patch
 diff.txt
+_diff.txt
 diff_*.txt
 *.patch
+
+# Accidental outputs when running CLIs with --help or similar as the positional arg
+--help/
 
 # Claude local settings
 .claude/settings.local.json
@@ -57,4 +67,8 @@ diff_*.txt
 .claude/gsd-local-patches/
 .claude/agents/gsd-*.md
 .claude/commands/gsd/
-.claude/hooks/gsd-*
+.claude/hooks/gsd-*autoresearch-results.tsv
+
+# Autoresearch perf-tuning experiment log (local dev artifact, regenerated
+# per run — never belongs in source control)
+autoresearch-results.tsv

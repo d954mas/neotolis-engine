@@ -1,5 +1,6 @@
 /* clang-format off */
 #include "nt_builder_internal.h"
+#include "nt_atlas_format.h"
 #include "nt_crc32.h"
 #include "nt_font_format.h"
 #include "nt_texture_format.h"
@@ -169,6 +170,8 @@ static const char *nt_asset_type_name(uint8_t type) {
         return "BLOB";
     case NT_ASSET_FONT:
         return "FONT";
+    case NT_ASSET_ATLAS:
+        return "ATLAS"; /* also used for ATLAS_REGION (same asset_type) */
     default:
         return "UNKNOWN";
     }
@@ -248,6 +251,38 @@ static void print_font_details(const uint8_t *asset_data, uint32_t asset_size) {
     NT_LOG_INFO("    chars: %s", chars);
 }
 
+/* ---- Atlas-specific detail printer ---- */
+
+static void print_atlas_details(const uint8_t *asset_data, uint32_t asset_size) {
+    if (!asset_data || asset_size < sizeof(NtAtlasHeader)) {
+        return;
+    }
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)asset_data;
+    if (ahdr->magic != NT_ATLAS_MAGIC) {
+        return;
+    }
+
+    NT_LOG_INFO("    regions: %u  pages: %u  vertices: %u", ahdr->region_count, ahdr->page_count, ahdr->total_vertex_count);
+
+    /* Parse past texture resource IDs to reach regions */
+    const uint8_t *ptr = asset_data + sizeof(NtAtlasHeader);
+    ptr += (size_t)ahdr->page_count * sizeof(uint64_t);
+
+    /* Parse regions */
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)ptr;
+    uint32_t max_regions = (asset_size - (uint32_t)(ptr - asset_data)) / (uint32_t)sizeof(NtAtlasRegion);
+    uint32_t count = ahdr->region_count;
+    if (count > max_regions) {
+        count = max_regions;
+    }
+
+    for (uint32_t r = 0; r < count; r++) {
+        const NtAtlasRegion *reg = &regions[r];
+        NT_LOG_INFO("    [%u] page:%u %ux%u verts:%u origin:(%.2f,%.2f)%s", r, reg->page_index, reg->source_w, reg->source_h, reg->vertex_count, (double)reg->origin_x, (double)reg->origin_y,
+                    reg->transform ? " XFORM" : "");
+    }
+}
+
 /* ---- Per-type summary accumulators ---- */
 
 typedef struct {
@@ -264,6 +299,8 @@ typedef struct {
     uint32_t blob_raw;
     uint32_t font_count;
     uint32_t font_raw;
+    uint32_t atlas_count;
+    uint32_t atlas_raw;
     uint32_t total_raw;
     uint32_t total_gz;
     uint32_t dup_count;
@@ -322,6 +359,10 @@ static void accumulate_stats(DumpStats *st, const NtAssetEntry *e, const uint8_t
         st->font_count++;
         st->font_raw += asset_size;
         break;
+    case NT_ASSET_ATLAS:
+        st->atlas_count++;
+        st->atlas_raw += asset_size;
+        break;
     default:
         break;
     }
@@ -378,6 +419,9 @@ static void print_summary(const DumpStats *st) {
     }
     if (st->font_count > 0) {
         print_type_line("FONT:", st->font_count, st->font_raw);
+    }
+    if (st->atlas_count > 0) {
+        print_type_line("ATLAS:", st->atlas_count, st->atlas_raw);
     }
     if (st->dup_count > 0) {
         char sz[16];
@@ -570,6 +614,11 @@ nt_build_result_t nt_builder_dump_pack(const char *pack_path) {
         /* Font-specific detail line */
         if (e->asset_type == NT_ASSET_FONT && asset_data) {
             print_font_details(asset_data, asset_size);
+        }
+
+        /* Atlas-specific detail line */
+        if (e->asset_type == NT_ASSET_ATLAS && asset_data) {
+            print_atlas_details(asset_data, asset_size);
         }
 
         /* Accumulate per-type stats */

@@ -45,6 +45,11 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         memcpy(buf + pos, &format, sizeof(format));
         pos += (uint32_t)sizeof(format);
 
+        /* premultiplied alpha modifies pixel bytes + header flags */
+        uint8_t premul = td->opts.premultiplied ? 1 : 0;
+        memcpy(buf + pos, &premul, sizeof(premul));
+        pos += (uint32_t)sizeof(premul);
+
         /* compression path */
         uint8_t has_compress = td->has_compress ? 1 : 0;
         memcpy(buf + pos, &has_compress, sizeof(has_compress));
@@ -79,6 +84,8 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
     case NT_BUILD_ASSET_FONT:
     case NT_BUILD_ASSET_MESH:
     case NT_BUILD_ASSET_BLOB:
+    case NT_BUILD_ASSET_ATLAS:        /* atlas uses atlas-level caching in end_atlas, not per-entry */
+    case NT_BUILD_ASSET_ATLAS_REGION: /* codegen-only, no encode caching needed */
         /* No additional fields -- kind + version sufficient */
         break;
     }
