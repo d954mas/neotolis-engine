@@ -1696,12 +1696,16 @@ static void pipeline_register(AtlasPipeline *p) {
             p->ctx->atlas_region_capacity = new_cap;
         }
 
+        /* path includes atlas prefix for unique C identifiers in codegen
+         * (ASSET_ATLAS_REGION_SPINEBOY_HEAD_PNG), but resource_id hashes only
+         * the sprite name — runtime looks up regions within a specific atlas
+         * by name_hash, not by the full atlas/sprite path. */
         char region_path[512];
         (void)snprintf(region_path, sizeof(region_path), "%s/%s", p->state->name, p->sprites[i].name);
 
         NtAtlasRegionCodegen *reg = &p->ctx->atlas_regions[p->ctx->atlas_region_count++];
         reg->path = nt_builder_normalize_path(region_path);
-        reg->resource_id = nt_hash64_str(reg->path).value;
+        reg->resource_id = nt_hash64_str(p->sprites[i].name).value;
     }
 }
 

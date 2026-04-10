@@ -1065,14 +1065,7 @@ uint16[total_index_count] (at index_offset)
   Runtime offsets them by vertex_start when building GPU buffers.
 ```
 
-Runtime is intentionally trivial: `mmap` the blob, read header, slice arrays. No parsing, no allocation. UVs are pre-normalized, triangles are pre-built (Clipper2 CDT for all polygons, fan triangulation as fallback on CDT failure). Duplicate sprites share `vertex_start`/`index_start`; the u32 cursors let a single atlas carry more than 64K vertices/indices, which v2's u16 cursors could not.
-
-**v2 → v3 changes:**
-
-- `NtAtlasRegion.rotated` renamed to `transform` (same 3-bit D4 flags; name reflects its real meaning — it is a transform mask, not a bool).
-- `NtAtlasRegion.vertex_start` and `.index_start` widened from u16 to u32. Large atlases with many unique high-vertex sprites overflow 65535 cumulative vertices/indices, and the builder used to assert on that limit.
-- `NtAtlasRegion` grew from 32 bytes to 36 bytes (enforced by `_Static_assert` in `shared/include/nt_atlas_format.h`).
-- `NtAtlasHeader` layout is unchanged. Only `version` bumps 2 → 3.
+Runtime is intentionally trivial: `mmap` the blob, read header, slice arrays. No parsing, no allocation. UVs are pre-normalized, triangles are pre-built (Clipper2 CDT for all polygons, fan triangulation as fallback on CDT failure). Duplicate sprites share `vertex_start`/`index_start`.
 
 ## 17.9 Placeholder policy
 
@@ -1890,7 +1883,7 @@ typedef struct {
 **Hard limits:**
 - `max_vertices ≤ 16`. NFP buffers are stack-sized for `nA + nB ≤ 32`.
 - Per-region `index_count` is `uint8_t` → ≤ 255 indices per region. With `max_vertices ≤ 16` an ear-clipped/fan triangulation produces at most `(16 - 2) * 3 = 42` indices, so one byte is sufficient.
-- Per-atlas `vertex_start` / `index_start` are `uint32_t` (v3). v2 used `uint16_t` and asserted at ~65K cumulative entries — v3 lifts that limit.
+- Per-atlas `vertex_start` / `index_start` are `uint32_t`.
 
 ### 23.11.4 Per-sprite options (`nt_atlas_sprite_opts_t`)
 

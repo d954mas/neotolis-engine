@@ -8,7 +8,7 @@
 #define NT_ATLAS_VERSION 3
 
 /*
- * Atlas asset binary layout (v3):
+ * Atlas asset binary layout:
  *
  *   Offset 0: NtAtlasHeader (28 bytes)
  *   Then: uint64_t texture_resource_ids[page_count]
@@ -22,13 +22,6 @@
  * Runtime offsets them by vertex_start when building GPU buffers.
  * Triangle list: every 3 consecutive indices form one triangle.
  * Convex regions use fan triangulation; concave use ear-clipping.
- *
- * v3 changes from v2:
- *   - NtAtlasRegion.rotated → transform (field rename only; same 3-bit D4
- *     flags, clearer intent: it's a transform mask, not a bool)
- *   - NtAtlasRegion.vertex_start and .index_start widened from uint16_t to
- *     uint32_t so a single atlas can hold more than 64K vertices/indices.
- *     Region struct grew from 32 to 36 bytes.
  */
 
 #pragma pack(push, 1)
