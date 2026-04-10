@@ -322,10 +322,10 @@ static bool vpack_intersect_axis_i(Point2D p1, Point2D p2, bool is_x_axis, int32
  * Layout puts AABB first so the broad-phase bounds check in the candidate scan
  * touches cache line 0 instead of fetching the last cache line of the struct. */
 typedef struct {
-    int16_t min_x, min_y, max_x, max_y;                /* 8B — hot: broad-phase bounds check */
-    uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1];    /* 18B — warm */
-    uint8_t ring_count;                                /* 1B */
-    int16_t verts_xy[VPACK_NFP_MAX_VERTS * 2];         /* 256B — cold: int16 xy pairs, touched only after broad-phase */
+    int16_t min_x, min_y, max_x, max_y;             /* 8B — hot: broad-phase bounds check */
+    uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1]; /* 18B — warm */
+    uint8_t ring_count;                             /* 1B */
+    int16_t verts_xy[VPACK_NFP_MAX_VERTS * 2];      /* 256B — cold: int16 xy pairs, touched only after broad-phase */
 } VPackNFP;
 
 /* Even-odd ray cast point-in-polygon. Winding-independent.
@@ -336,12 +336,12 @@ typedef struct {
 static bool vpack_point_in_ring(int32_t px, int32_t py, const int16_t *ring_xy, uint32_t n) {
     bool inside = false;
     for (uint32_t i = 0, j = n - 1; i < n; j = i++) {
-        int32_t yi = (int32_t)ring_xy[i * 2 + 1];
-        int32_t yj = (int32_t)ring_xy[j * 2 + 1];
+        int32_t yi = (int32_t)ring_xy[(i * 2) + 1];
+        int32_t yj = (int32_t)ring_xy[(j * 2) + 1];
         if ((yi > py) != (yj > py)) {
-            int64_t dx = (int64_t)ring_xy[j * 2] - (int64_t)ring_xy[i * 2];
+            int64_t dx = (int64_t)ring_xy[(size_t)j * 2] - (int64_t)ring_xy[(size_t)i * 2];
             int64_t dy = (int64_t)(yj - yi);
-            int64_t D = (int64_t)(px - (int32_t)ring_xy[i * 2]);
+            int64_t D = (int64_t)(px - (int32_t)ring_xy[(size_t)i * 2]);
             int64_t N = dx * (int64_t)(py - yi);
             /* Cross-multiply: D < trunc(N/dy). When the quotient is non-negative
              * (trunc = floor), use (D+1)*dy on N's side; when negative (trunc = ceil
@@ -370,7 +370,7 @@ static bool vpack_point_in_nfp(int32_t px, int32_t py, const VPackNFP *nfp) {
         if (n < 3) {
             continue;
         }
-        if (vpack_point_in_ring(px, py, &nfp->verts_xy[start * 2], n)) {
+        if (vpack_point_in_ring(px, py, &nfp->verts_xy[(size_t)start * 2], n)) {
             return true;
         }
     }
@@ -530,8 +530,8 @@ static void vpack_copy_local_nfp_to_out(const Point2D *verts, const uint16_t *ri
         out_nfp->ring_offsets[r] = ring_offsets[r];
     }
     for (uint32_t v = 0; v < total; v++) {
-        out_nfp->verts_xy[v * 2] = (int16_t)(verts[v].x + off_x);
-        out_nfp->verts_xy[v * 2 + 1] = (int16_t)(verts[v].y + off_y);
+        out_nfp->verts_xy[(size_t)v * 2] = (int16_t)(verts[v].x + off_x);
+        out_nfp->verts_xy[(size_t)(v * 2) + 1] = (int16_t)(verts[v].y + off_y);
     }
     out_nfp->min_x = (int16_t)(min_x + off_x);
     out_nfp->min_y = (int16_t)(min_y + off_y);
@@ -550,7 +550,7 @@ static void vpack_copy_cache_slot_to_out(const VPackNFPCacheEntry *slot, int32_t
     }
     for (size_t v = 0; v < total; v++) {
         out_nfp->verts_xy[v * 2] = (int16_t)((int32_t)SLOT_LOAD(slot->verts_xy[v * 2]) + off_x);
-        out_nfp->verts_xy[v * 2 + 1] = (int16_t)((int32_t)SLOT_LOAD(slot->verts_xy[(v * 2) + 1]) + off_y);
+        out_nfp->verts_xy[(v * 2) + 1] = (int16_t)((int32_t)SLOT_LOAD(slot->verts_xy[(v * 2) + 1]) + off_y);
     }
     out_nfp->min_x = (int16_t)((int32_t)SLOT_LOAD(slot->min_x) + off_x);
     out_nfp->min_y = (int16_t)((int32_t)SLOT_LOAD(slot->min_y) + off_y);
@@ -706,7 +706,7 @@ static void vpack_calc_aabb(const Point2D *poly, uint32_t count, int32_t *min_x,
 static void vpack_add_nfp_candidates(const VPackNFP *nfp, int32_t min_cand_x, int32_t min_cand_y, VPackCand **cands, uint32_t *cand_count, uint32_t *cand_cap, const VPackBounds *bounds,
                                      VPackCandDedup *dedup) {
     for (uint32_t v = 0; v < nfp->ring_offsets[nfp->ring_count]; v++) {
-        vpack_add_cand(cands, cand_count, cand_cap, (int32_t)nfp->verts_xy[v * 2], (int32_t)nfp->verts_xy[v * 2 + 1], bounds, dedup);
+        vpack_add_cand(cands, cand_count, cand_cap, (int32_t)nfp->verts_xy[(size_t)v * 2], (int32_t)nfp->verts_xy[((size_t)v * 2) + 1], bounds, dedup);
     }
     for (uint32_t r = 0; r < nfp->ring_count; r++) {
         uint32_t rs = nfp->ring_offsets[r];
@@ -714,8 +714,8 @@ static void vpack_add_nfp_candidates(const VPackNFP *nfp, int32_t min_cand_x, in
         uint32_t rn = re - rs;
         for (uint32_t e = 0; e < rn; e++) {
             uint32_t en = (e + 1 == rn) ? 0 : e + 1;
-            Point2D pa = {(int32_t)nfp->verts_xy[(rs + e) * 2], (int32_t)nfp->verts_xy[(rs + e) * 2 + 1]};
-            Point2D pb = {(int32_t)nfp->verts_xy[(rs + en) * 2], (int32_t)nfp->verts_xy[(rs + en) * 2 + 1]};
+            Point2D pa = {(int32_t)nfp->verts_xy[(size_t)(rs + e) * 2], (int32_t)nfp->verts_xy[((size_t)(rs + e) * 2) + 1]};
+            Point2D pb = {(int32_t)nfp->verts_xy[(size_t)(rs + en) * 2], (int32_t)nfp->verts_xy[((size_t)(rs + en) * 2) + 1]};
             int32_t vf;
             int32_t vc;
             if (vpack_intersect_axis_i(pa, pb, true, min_cand_x, &vf, &vc)) {
@@ -929,10 +929,10 @@ typedef struct {
     const int32_t (*orient_neg_xy)[8][VPACK_PLACED_MAX_VERTS * 2];
     const uint32_t *orient_counts;
     const uint32_t *orient_neg_hashes;
-    uint32_t orient_count;         /* number of orientations in this batch (1..8) */
-    uint32_t total_items;          /* orient_count * relevant_count */
-    VPackNFP *nfps_out;  /* indexed by [ori * relevant_count + ri] */
-    bool *nfp_valid_out; /* per-item validity flag */
+    uint32_t orient_count; /* number of orientations in this batch (1..8) */
+    uint32_t total_items;  /* orient_count * relevant_count */
+    VPackNFP *nfps_out;    /* indexed by [ori * relevant_count + ri] */
+    bool *nfp_valid_out;   /* per-item validity flag */
     VPackNFPCacheEntry *nfp_cache;
     /* Per-thread local stats - main aggregates after batch completes */
     VPackNFPBuildLocalStats *thread_stats;
@@ -1053,7 +1053,7 @@ static void vpack_par_process_nfp_chunks(VPackParCtx *ctx, uint32_t tid) {
     uint32_t rc = ctx->nfp_build.relevant_count;
     for (uint32_t item = start; item < end; item++) {
         uint32_t ori = item / rc;
-        uint32_t ri = item - ori * rc;
+        uint32_t ri = item - (ori * rc);
         uint32_t i = ctx->nfp_build.relevant_buf[ri];
         const VPackPlaced *pl_i = &ctx->nfp_build.placed_arr[i];
         const Point2D *neg_poly = (*ctx->nfp_build.orient_neg)[ori];
@@ -1188,7 +1188,7 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
         par->nfp_build.relevant_buf = ctx->relevant_buf;
         par->nfp_build.relevant_count = relevant_count;
         par->nfp_build.orient_neg = (const Point2D(*)[8][32])od->neg;
-        par->nfp_build.orient_neg_xy = (const int32_t(*)[8][VPACK_PLACED_MAX_VERTS * 2])od->neg_xy;
+        par->nfp_build.orient_neg_xy = (const int32_t(*)[8][VPACK_PLACED_MAX_VERTS * 2]) od->neg_xy;
         par->nfp_build.orient_counts = od->counts;
         par->nfp_build.orient_neg_hashes = od->neg_hashes;
         par->nfp_build.orient_count = od->count;
@@ -1251,7 +1251,8 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
     for (uint32_t ori = 0; ori < od->count; ori++) {
         // #region Per-orient lower-bound pruning
         if (*io_best_score != UINT64_MAX) {
-            uint64_t orient_lb = vpack_score_candidate(od->min_cand[ori][0], od->min_cand[ori][1], od->aabb[ori][2], od->aabb[ori][3], page->used_w, page->used_h, ctx->margin, ctx->opts->power_of_two);
+            uint64_t orient_lb =
+                vpack_score_candidate(od->min_cand[ori][0], od->min_cand[ori][1], od->aabb[ori][2], od->aabb[ori][3], page->used_w, page->used_h, ctx->margin, ctx->opts->power_of_two);
             if (orient_lb >= *io_best_score) {
                 continue;
             }
