@@ -122,6 +122,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* --- Branchless next-power-of-two (v must be > 0) --- */
+static inline uint32_t vpack_next_pot(uint32_t v) {
+    v--;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    return v + 1;
+}
+
 /* --- Portable count-trailing-zeros for uint64_t --- */
 #if defined(_MSC_VER) && !defined(__clang__)
 #include <intrin.h>
@@ -833,16 +844,8 @@ static uint64_t vpack_score_candidate(int32_t cx, int32_t cy, int32_t poly_max_x
     nw += margin;
     nh += margin;
     if (power_of_two) {
-        uint32_t pw = 1;
-        while (pw < nw) {
-            pw <<= 1;
-        }
-        uint32_t ph = 1;
-        while (ph < nh) {
-            ph <<= 1;
-        }
-        nw = pw;
-        nh = ph;
+        nw = vpack_next_pot(nw);
+        nh = vpack_next_pot(nh);
     }
     return ((uint64_t)nw * nh << 16) | ((uint64_t)(cx + cy) & 0xFFFF);
 }
@@ -1137,6 +1140,14 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
 
     bool found_on_page = false;
     for (uint32_t ori = 0; ori < od->count; ori++) {
+        // #region Per-orient lower-bound pruning
+        if (*io_best_score != UINT64_MAX) {
+            uint64_t orient_lb = vpack_score_candidate(od->min_cand[ori][0], od->min_cand[ori][1], od->aabb[ori][2], od->aabb[ori][3], page->used_w, page->used_h, ctx->margin, ctx->opts->power_of_two);
+            if (orient_lb >= *io_best_score) {
+                continue;
+            }
+        }
+        // #endregion
         VPackParCtx *par = ctx->par;
         // #region Per-orient local bounds setup
         uint32_t cur_count = od->counts[ori];
@@ -1317,10 +1328,7 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
             uint32_t best_area = (uint32_t)(*io_best_score >> 16);
             /* Find max cx such that POT(cx+poly_max_x+margin) * POT(cur_h+margin) <= best_area */
             uint32_t fixed_h = page->used_h + ctx->margin;
-            uint32_t pot_h = 1;
-            while (pot_h < fixed_h) {
-                pot_h <<= 1;
-            }
+            uint32_t pot_h = (fixed_h > 0) ? vpack_next_pot(fixed_h) : 1;
             if (pot_h > 0) {
                 uint32_t max_pot_w = best_area / pot_h;
                 int32_t xb = (int32_t)max_pot_w - poly_max_x - (int32_t)ctx->margin;
@@ -1329,10 +1337,7 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
                 }
             }
             uint32_t fixed_w = page->used_w + ctx->margin;
-            uint32_t pot_w = 1;
-            while (pot_w < fixed_w) {
-                pot_w <<= 1;
-            }
+            uint32_t pot_w = (fixed_w > 0) ? vpack_next_pot(fixed_w) : 1;
             if (pot_w > 0) {
                 uint32_t max_pot_h = best_area / pot_w;
                 int32_t yb = (int32_t)max_pot_h - poly_max_y - (int32_t)ctx->margin;
@@ -1931,16 +1936,8 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
         }
         stats->frontier_area += (uint64_t)final_w * (uint64_t)final_h;
         if (opts->power_of_two) {
-            uint32_t pot_w = 1;
-            while (pot_w < final_w) {
-                pot_w <<= 1;
-            }
-            uint32_t pot_h = 1;
-            while (pot_h < final_h) {
-                pot_h <<= 1;
-            }
-            final_w = pot_w;
-            final_h = pot_h;
+            final_w = vpack_next_pot(final_w);
+            final_h = vpack_next_pot(final_h);
         }
         out_page_w[i] = final_w;
         out_page_h[i] = final_h;
