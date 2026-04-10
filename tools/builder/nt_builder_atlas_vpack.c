@@ -122,6 +122,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* --- Portable count-trailing-zeros for uint64_t --- */
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+static inline uint32_t vpack_ctzll(uint64_t x) {
+    unsigned long idx;
+    _BitScanForward64(&idx, x);
+    return (uint32_t)idx;
+}
+#else
+static inline uint32_t vpack_ctzll(uint64_t x) { return (uint32_t)__builtin_ctzll(x); }
+#endif
+
 /* --- Public helpers --- */
 
 void pack_stats_reset(PackStats *stats) { memset(stats, 0, sizeof(*stats)); }
@@ -695,22 +707,17 @@ typedef struct {
 
 /* Compute NFP for one (placed, orient_neg) pair. Writes to *out_nfp with placement
  * offset applied. Updates per-thread local stats. Cache accesses are protected by
- * cache_mtx (NULL = no locking,
- * sequential mode).
- *
  * Returns true on success (out_nfp populated), false on failure (caller skips item).
  *
  * This function is called both from sequential and parallel code paths. The result
- *
  * is bit-exact identical regardless of execution mode because:
  *  - cache hit checks and slot reads are serialized
  *  - cache writes publish a fully built local copy
- *  - Clipper2 NFP is a pure
- * function of inputs
+ *  - Clipper2 NFP is a pure function of inputs
  *  - per-thread stats are merged in deterministic order */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_poly, const int32_t *neg_xy, uint32_t neg_count, uint32_t neg_hash, VPackNFPCacheEntry *nfp_cache, mtx_t *cache_mtx,
-                                  VPackNFP *out_nfp, VPackNFPBuildLocalStats *local_stats) {
+static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_poly, const int32_t *neg_xy, uint32_t neg_count, uint32_t neg_hash, VPackNFPCacheEntry *nfp_cache, VPackNFP *out_nfp,
+                                  VPackNFPBuildLocalStats *local_stats) {
     uint32_t cache_a = pl_i->shape_hash;
     uint32_t cache_b = neg_hash;
     /* Hash combine: golden-ratio multipliers then xor-shift mix to smear high
@@ -730,7 +737,6 @@ static bool vpack_compute_nfp_one(const VPackPlaced *pl_i, const Point2D *neg_po
         return true;
     }
     local_stats->cache_misses++;
-    (void)cache_mtx;
 
     Point2D local_verts[VPACK_NFP_MAX_VERTS];
     uint16_t local_ring_offsets[VPACK_NFP_MAX_RINGS + 1];
@@ -910,8 +916,6 @@ typedef struct {
     mtx_t mtx;
     cnd_t cnd_work; /* main signals: work available */
     cnd_t cnd_done; /* workers signal: batch complete */
-    /* Cache write mutex - separate from batch sync to avoid contention */
-    mtx_t cache_mtx;
     uint32_t num_workers;
     uint32_t active_threads;        /* 1..num_workers+1; excess threads skip work */
     uint32_t expected_workers_done; /* active worker threads in current batch (excludes main) */
@@ -956,7 +960,7 @@ static void vpack_scan_candidate_range(const VPackScanCtx *scan, uint32_t start,
                 for (uint32_t w = 0; w < scan->nfp_words && safe; w++) {
                     uint64_t bits = cell[w];
                     while (bits) {
-                        uint32_t bit_idx = (uint32_t)__builtin_ctzll(bits);
+                        uint32_t bit_idx = vpack_ctzll(bits);
                         uint32_t i = (w * 64) + bit_idx;
                         if (cx >= scan->nfps[i].min_x && cx <= scan->nfps[i].max_x && cy >= scan->nfps[i].min_y && cy <= scan->nfps[i].max_y) {
                             local_tests++;
@@ -1020,7 +1024,7 @@ static void vpack_par_process_nfp_chunks(VPackParCtx *ctx, uint32_t tid) {
         const int32_t *neg_xy = (*ctx->nfp_build.orient_neg_xy)[ori];
         uint32_t neg_count = ctx->nfp_build.orient_counts[ori];
         uint32_t neg_hash = ctx->nfp_build.orient_neg_hashes[ori];
-        ctx->nfp_build.nfp_valid_out[ri] = vpack_compute_nfp_one(pl_i, neg_poly, neg_xy, neg_count, neg_hash, ctx->nfp_build.nfp_cache, &ctx->cache_mtx, &ctx->nfp_build.nfps_out[ri], local);
+        ctx->nfp_build.nfp_valid_out[ri] = vpack_compute_nfp_one(pl_i, neg_poly, neg_xy, neg_count, neg_hash, ctx->nfp_build.nfp_cache, &ctx->nfp_build.nfps_out[ri], local);
     }
 }
 
@@ -1223,7 +1227,7 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
             for (uint32_t ri = 0; ri < relevant_count; ri++) {
                 uint32_t i = ctx->relevant_buf[ri];
                 const VPackPlaced *pl_i = &page->placed[i];
-                ctx->nfp_valid_buf[ri] = vpack_compute_nfp_one(pl_i, od->neg[ori], od->neg_xy[ori], cur_count, od->neg_hashes[ori], ctx->nfp_cache, NULL, &ctx->nfps[ri], &local);
+                ctx->nfp_valid_buf[ri] = vpack_compute_nfp_one(pl_i, od->neg[ori], od->neg_xy[ori], cur_count, od->neg_hashes[ori], ctx->nfp_cache, &ctx->nfps[ri], &local);
             }
             ctx->stats->or_count += local.or_count;
             ctx->stats->nfp_cache_hit_count += local.cache_hits;
@@ -1661,10 +1665,11 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
     {
         Point2D *win_poly = od.polys[best_orient_idx];
         uint32_t win_count = od.counts[best_orient_idx];
+        int32_t win_poly_min_x;
+        int32_t win_poly_min_y;
         int32_t win_poly_max_x;
         int32_t win_poly_max_y;
-        int32_t win_trash;
-        vpack_calc_aabb(win_poly, win_count, &win_trash, &win_trash, &win_poly_max_x, &win_poly_max_y);
+        vpack_calc_aabb(win_poly, win_count, &win_poly_min_x, &win_poly_min_y, &win_poly_max_x, &win_poly_max_y);
 
         if (ctx->pages[best_page].count > 0) {
             ctx->stats->page_existing_hit_count++;
@@ -1859,7 +1864,6 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
         par_ctx.nfp_build.thread_stats = (VPackNFPBuildLocalStats *)calloc(num_workers + 1, sizeof(VPackNFPBuildLocalStats));
         NT_BUILD_ASSERT(par_ctx.results && par_ctx.nfp_build.thread_stats && "vector_pack: par results alloc failed");
         (void)mtx_init(&par_ctx.mtx, mtx_plain);
-        (void)mtx_init(&par_ctx.cache_mtx, mtx_plain);
         (void)cnd_init(&par_ctx.cnd_work);
         (void)cnd_init(&par_ctx.cnd_done);
         par_threads = (thrd_t *)malloc(num_workers * sizeof(thrd_t));
@@ -1977,7 +1981,6 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
             (void)thrd_join(par_threads[t], NULL);
         }
         mtx_destroy(&par_ctx.mtx);
-        mtx_destroy(&par_ctx.cache_mtx);
         cnd_destroy(&par_ctx.cnd_work);
         cnd_destroy(&par_ctx.cnd_done);
 

@@ -450,17 +450,24 @@ static bool atlas_cache_write(const char *cache_dir, uint64_t cache_key, const A
         return false;
     }
 
-    (void)fwrite(&placement_count, sizeof(uint32_t), 1, f);
-    (void)fwrite(&page_count, sizeof(uint32_t), 1, f);
-    (void)fwrite(page_w, sizeof(uint32_t), page_count, f);
-    (void)fwrite(page_h, sizeof(uint32_t), page_count, f);
-    (void)fwrite(placements, sizeof(AtlasPlacement), placement_count, f);
-    for (uint32_t p = 0; p < page_count; p++) {
+    bool ok = true;
+    ok = ok && fwrite(&placement_count, sizeof(uint32_t), 1, f) == 1;
+    ok = ok && fwrite(&page_count, sizeof(uint32_t), 1, f) == 1;
+    ok = ok && fwrite(page_w, sizeof(uint32_t), page_count, f) == page_count;
+    ok = ok && fwrite(page_h, sizeof(uint32_t), page_count, f) == page_count;
+    ok = ok && fwrite(placements, sizeof(AtlasPlacement), placement_count, f) == placement_count;
+    for (uint32_t p = 0; p < page_count && ok; p++) {
         size_t pixel_bytes = (size_t)page_w[p] * page_h[p] * 4;
-        (void)fwrite(page_pixels[p], 1, pixel_bytes, f);
+        ok = ok && fwrite(page_pixels[p], 1, pixel_bytes, f) == pixel_bytes;
     }
 
     (void)fclose(f);
+
+    if (!ok) {
+        (void)remove(tmp_path);
+        NT_BUILD_ASSERT(false && "atlas_cache_write: fwrite failed (disk full?)");
+        return false;
+    }
 
     /* Atomic rename */
 #ifdef _WIN32
