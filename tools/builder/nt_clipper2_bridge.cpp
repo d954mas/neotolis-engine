@@ -174,12 +174,14 @@ extern "C" uint32_t nt_clipper2_minkowski_nfp(const int32_t *pattern_xy, uint32_
 
     /* MinkowskiSum returns convolution loops for concave inputs. To get the actual
      * NFP boundary, union them with NonZero fill rule. May have multiple disjoint
-     * forbidden zones (rings) for concave inputs. */
+     * forbidden zones (rings) for concave inputs.
+     * Optimization: for convex inputs, MinkowskiSum produces exactly one convolution
+     * loop — skip the expensive Union step in that case. */
     Paths64 convolution = MinkowskiSum(pattern, path, true /* is_closed */);
     if (convolution.empty())
         return 0;
 
-    Paths64 nfp = Union(convolution, FillRule::NonZero);
+    const Paths64 &nfp = (convolution.size() == 1) ? convolution : Union(convolution, FillRule::NonZero);
     if (nfp.empty())
         return 0;
 
