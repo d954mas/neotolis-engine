@@ -1,5 +1,5 @@
 # Size Report: bench_shapes (wasm-analysis-paired)
-# Commit: bc770cb
+# Commit: f670916
 
 ## WASM Section Sizes
 
@@ -13,38 +13,39 @@ Memory                 7 B
 Global                 9 B
 Export                59 B
 Elem                  46 B
-Code               75584 B
+Code               61769 B
 Data                8523 B
 Custom              4543 B
 ---------------- ----------
-TOTAL              89486 B
+TOTAL              75671 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-22739 B   main
-11508 B   frame
- 3341 B   rebuild_shapes
+10950 B   frame
+10855 B   main
+ 3469 B   rebuild_shapes
  3103 B   fmt_fp
- 2896 B   emit_capsule_wire
+ 2803 B   emit_capsule_wire
  2630 B   printf_core
- 2494 B   nt_input_web_on_blur
  2041 B   __rem_pio2f
- 2020 B   emit_cylinder_wire
+ 1927 B   emit_cylinder_wire
  1343 B   nt_shape_renderer_flush
  1315 B   nt_shape_renderer_triangle
  1296 B   nt_gfx_make_pipeline
  1121 B   nt_hash32_str
+ 1026 B   nt_input_web_on_blur
   775 B   nt_gfx_bind_pipeline
-  741 B   nt_input_web_on_pointer_move
-  702 B   nt_input_web_on_pointer_down
+  731 B   nt_input_web_on_pointer_move
+  692 B   nt_input_web_on_pointer_down
   650 B   pop_arg_long_double
+  568 B   push_instance
   555 B   emmalloc_memalign
-  547 B   push_instance
   516 B   claim_more_memory
   512 B   __memcpy
   469 B   emit_wire_edge
+  458 B   nt_window_init
   415 B   attempt_allocate
   385 B   __dynamic_cast
   382 B   sinf
@@ -52,10 +53,9 @@ TOTAL              89486 B
   376 B   __stdio_write
   370 B   __memset
   362 B   cosf
-  361 B   nt_input_web_on_pointer_up
 
 Total functions: 97
-Total code size: 75424 B
+Total code size: 61610 B
 
 ## Per-Module Contributions
 
