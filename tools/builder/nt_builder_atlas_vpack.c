@@ -913,7 +913,8 @@ typedef struct {
     /* Cache write mutex - separate from batch sync to avoid contention */
     mtx_t cache_mtx;
     uint32_t num_workers;
-    uint32_t active_threads; /* 1..num_workers+1; excess threads skip work */
+    uint32_t active_threads;        /* 1..num_workers+1; excess threads skip work */
+    uint32_t expected_workers_done; /* active worker threads in current batch (excludes main) */
     uint32_t workers_done;
     uint32_t batch_seq;
     bool batch_ready;
@@ -936,6 +937,8 @@ typedef struct {
 static inline bool vpack_par_better(uint64_t score, uint32_t cand_index, uint64_t best_score, uint32_t best_cand_index) {
     return (score < best_score) || (score == best_score && cand_index < best_cand_index);
 }
+
+static inline uint32_t vpack_par_active_worker_count(const VPackParCtx *ctx) { return (ctx->active_threads > 0U) ? (ctx->active_threads - 1U) : 0U; }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity) — hot-path candidate scanner: AABB prefilter, NFP point-in-poly loop, score compare, best-update reduction; inlined for performance
 static void vpack_scan_candidate_range(const VPackScanCtx *scan, uint32_t start, uint32_t end, VPackParResult *out_result) {
@@ -1058,7 +1061,12 @@ static int vpack_par_worker(void *arg) {
         }
         seen_batch_seq = ctx->batch_seq;
         VPackBatchKind kind = ctx->batch_kind;
+        bool active = tid < ctx->active_threads;
         (void)mtx_unlock(&ctx->mtx);
+
+        if (!active) {
+            continue;
+        }
 
         if (kind == VPACK_BATCH_SCAN_CANDIDATES) {
             VPackParResult result = ctx->results[tid];
@@ -1066,7 +1074,7 @@ static int vpack_par_worker(void *arg) {
             (void)mtx_lock(&ctx->mtx);
             ctx->results[tid] = result;
             ctx->workers_done++;
-            if (ctx->workers_done == ctx->num_workers) {
+            if (ctx->workers_done == ctx->expected_workers_done) {
                 ctx->batch_ready = false;
                 (void)cnd_signal(&ctx->cnd_done);
             }
@@ -1075,7 +1083,7 @@ static int vpack_par_worker(void *arg) {
             vpack_par_process_nfp_chunks(ctx, tid);
             (void)mtx_lock(&ctx->mtx);
             ctx->workers_done++;
-            if (ctx->workers_done == ctx->num_workers) {
+            if (ctx->workers_done == ctx->expected_workers_done) {
                 ctx->batch_ready = false;
                 (void)cnd_signal(&ctx->cnd_done);
             }
@@ -1198,18 +1206,25 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
                 nfp_active = par->num_workers + 1;
             }
             par->active_threads = nfp_active;
+            par->expected_workers_done = vpack_par_active_worker_count(par);
             par->batch_seq++;
             par->batch_ready = true;
-            (void)cnd_broadcast(&par->cnd_work);
+            if (par->expected_workers_done > 0U) {
+                (void)cnd_broadcast(&par->cnd_work);
+            }
             (void)mtx_unlock(&par->mtx);
 
             /* Main thread also processes its chunk (tid=0) */
             vpack_par_process_nfp_chunks(par, 0);
 
-            /* Wait for all workers to finish this batch */
+            /* Wait only for workers that actually got a chunk. */
             (void)mtx_lock(&par->mtx);
-            while (par->workers_done < par->num_workers) {
-                (void)cnd_wait(&par->cnd_done, &par->mtx);
+            if (par->expected_workers_done == 0U) {
+                par->batch_ready = false;
+            } else {
+                while (par->workers_done < par->expected_workers_done) {
+                    (void)cnd_wait(&par->cnd_done, &par->mtx);
+                }
             }
             (void)mtx_unlock(&par->mtx);
 
@@ -1401,9 +1416,12 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
                 scan_active = par->num_workers + 1;
             }
             par->active_threads = scan_active;
+            par->expected_workers_done = vpack_par_active_worker_count(par);
             par->batch_seq++;
             par->batch_ready = true;
-            (void)cnd_broadcast(&par->cnd_work);
+            if (par->expected_workers_done > 0U) {
+                (void)cnd_broadcast(&par->cnd_work);
+            }
             (void)mtx_unlock(&par->mtx);
 
             /* Main thread also processes chunks (tid=0) */
@@ -1411,10 +1429,14 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
             vpack_par_process_chunks(par, 0, &main_result);
             par->results[0] = main_result;
 
-            /* Wait for all workers to finish this batch */
+            /* Wait only for workers that actually got a chunk. */
             (void)mtx_lock(&par->mtx);
-            while (par->workers_done < par->num_workers) {
-                (void)cnd_wait(&par->cnd_done, &par->mtx);
+            if (par->expected_workers_done == 0U) {
+                par->batch_ready = false;
+            } else {
+                while (par->workers_done < par->expected_workers_done) {
+                    (void)cnd_wait(&par->cnd_done, &par->mtx);
+                }
             }
             (void)mtx_unlock(&par->mtx);
 
