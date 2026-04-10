@@ -128,7 +128,7 @@ void test_label_disabled_returns_null(void) {
 #endif
 }
 
-void test_label_table_grows(void) {
+void test_label_table_fills(void) {
 #if NT_HASH_LABELS
     enum { LABEL_COUNT = NT_HASH_MAX_LABELS + 1024 };
     nt_hash32_t first32 = {0};
@@ -189,7 +189,7 @@ int main(void) {
     RUN_TEST(test_hash64_distribution);
     RUN_TEST(test_hash_binary_data);
     RUN_TEST(test_label_register_and_lookup);
-    RUN_TEST(test_label_table_grows);
+    RUN_TEST(test_label_table_fills);
     RUN_TEST(test_label_disabled_returns_null);
     RUN_TEST(test_init_shutdown);
     return UNITY_END();
