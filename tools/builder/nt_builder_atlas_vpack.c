@@ -954,6 +954,7 @@ typedef struct {
     uint32_t expected_workers_done; /* active worker threads in current batch (excludes main) */
     uint32_t workers_done;
     uint32_t batch_seq;
+    uint32_t workers_ready; /* startup barrier: each worker increments before entering wait loop */
     bool batch_ready;
     bool shutdown;
 } VPackParCtx;
@@ -1071,6 +1072,12 @@ static int vpack_par_worker(void *arg) {
     /* tinycthread mtx/cnd return values are ignored throughout this pool:
      * on our platforms (Windows/POSIX) the only failure modes are OOM / EINVAL
      * on a destroyed mutex, neither of which is recoverable mid-batch. */
+
+    /* Startup barrier: signal main thread that this worker is ready. */
+    (void)mtx_lock(&ctx->mtx);
+    ctx->workers_ready++;
+    (void)cnd_signal(&ctx->cnd_done);
+    (void)mtx_unlock(&ctx->mtx);
 
     for (;;) {
         (void)mtx_lock(&ctx->mtx);
@@ -1906,6 +1913,14 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
             int rc = thrd_create(&par_threads[t], vpack_par_worker, &par_args[t]);
             NT_BUILD_ASSERT(rc == thrd_success && "vector_pack: worker thread create failed");
         }
+        /* Startup barrier: wait until all workers are ready before dispatching
+         * any batch. Without this, a slow-to-start worker could miss the first
+         * cnd_broadcast and never increment workers_done, causing a deadlock. */
+        (void)mtx_lock(&par_ctx.mtx);
+        while (par_ctx.workers_ready < num_workers) {
+            (void)cnd_wait(&par_ctx.cnd_done, &par_ctx.mtx);
+        }
+        (void)mtx_unlock(&par_ctx.mtx);
         NT_LOG_INFO("  vector_pack: %u candidate-test workers + main thread", num_workers);
     }
     VPackParCtx *par = (num_workers > 0) ? &par_ctx : NULL;

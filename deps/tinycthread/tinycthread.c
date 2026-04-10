@@ -229,6 +229,9 @@ int cnd_broadcast(cnd_t *cond)
 
   return thrd_success;
 #else
+  /* FIX(neotolis): upstream tinycthread calls pthread_cond_signal here —
+   * must be pthread_cond_broadcast to wake ALL waiters, not just one.
+   * Without this fix the vpack thread pool deadlocks on Linux/macOS. */
   return pthread_cond_broadcast(cond) == 0 ? thrd_success : thrd_error;
 #endif
 }
