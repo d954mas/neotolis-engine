@@ -1065,7 +1065,7 @@ uint16[total_index_count] (at index_offset)
   Runtime offsets them by vertex_start when building GPU buffers.
 ```
 
-Runtime is intentionally trivial: `mmap` the blob, read header, slice arrays. No parsing, no allocation. UVs are pre-normalized, triangles are pre-built (fan triangulation for convex regions, Clipper2 CDT for concave). Duplicate sprites share `vertex_start`/`index_start`; the u32 cursors let a single atlas carry more than 64K vertices/indices, which v2's u16 cursors could not.
+Runtime is intentionally trivial: `mmap` the blob, read header, slice arrays. No parsing, no allocation. UVs are pre-normalized, triangles are pre-built (Clipper2 CDT for all polygons, fan triangulation as fallback on CDT failure). Duplicate sprites share `vertex_start`/`index_start`; the u32 cursors let a single atlas carry more than 64K vertices/indices, which v2's u16 cursors could not.
 
 **v2 → v3 changes:**
 
@@ -1829,7 +1829,7 @@ nt_builder_end_atlas(ctx);
 `end_atlas` runs ten stages in order:
 
 1. **alpha_trim** — extract alpha plane, find tight bbox per sprite (rejects fully transparent inputs).
-2. **cache_check** — compute atlas-level cache key (sorted sprite hashes + serialized opts + version), try loading cached placement+pages.
+2. **cache_check** — compute atlas-level cache key (per-sprite hashes + origins in add-order + pack-affecting opts + version), try loading cached placement+pages. Key is order-sensitive because cached placements reference sprites by add-order index. Post-pack fields (format, premultiplied, compress, debug_png) are excluded — they only affect the texture encode stage, which has its own cache.
 3. **dedup** — hash + byte-level compare to find identical sprites; duplicates share `vertex_start`/`index_start` in the final blob.
 4. **geometry** — for each unique sprite: build binary mask, optional morphological closing for disjoint components, contour trace, multi-strategy simplification (RDP / perpendicular distance / bbox / convex hull — pick lowest estimated final area), Clipper2 inflate by `extrude + padding/2`, post-verify pixel coverage with fallback to bbox.
 5. **tile_pack** — call `vector_pack` (NFP packer, see below) to assign each unique sprite to a page and (x, y) position.
@@ -1919,7 +1919,7 @@ typedef struct {
 
 Separate from the per-asset builder cache (§23.10) because atlas placement is a global decision over the whole sprite set.
 
-**Cache key:** `xxh64(sorted(decoded_hashes) + serialized_opts + ATLAS_CACHE_KEY_VERSION + compress_settings)`. Sorted sprite hashes make the key independent of `atlas_add` order.
+**Cache key:** `xxh64(per_sprite(decoded_hash + origin_x + origin_y) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. Per-sprite data is hashed in add-order (not sorted) because cached placements reference sprites by index. Only pack/compose-affecting opts are included (max_size, padding, margin, extrude, alpha_threshold, max_vertices, allow_transform, power_of_two, shape); post-pack fields (format, premultiplied, compress, debug_png) are excluded — those affect the texture encode stage which has its own cache.
 
 **Storage:** one `atlas_<key>.bin` file per cache hit, containing the placement table and the composed page pixels. On hit, the pipeline skips pack/compose/debug_png/cache_write entirely.
 

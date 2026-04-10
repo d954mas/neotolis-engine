@@ -612,6 +612,9 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
     }
     state->opts.compress = NULL; /* zeroed -- use has_compress flag */
     NT_BUILD_ASSERT(state->opts.max_vertices <= 16 && "begin_atlas: max_vertices must be <= 16 (NFP buffer limit: nA+nB <= 32)");
+    NT_BUILD_ASSERT(state->opts.max_size > 0 && state->opts.max_size <= 16384 && "begin_atlas: max_size must be 1..16384");
+    NT_BUILD_ASSERT(state->opts.padding <= state->opts.max_size && "begin_atlas: padding exceeds max_size");
+    NT_BUILD_ASSERT(state->opts.margin <= state->opts.max_size && "begin_atlas: margin exceeds max_size");
     /* premultiplied alpha only meaningful for RGBA8. Setting it true with RGB8/RG8/R8
      * is a caller bug — there's no alpha channel to multiply by. */
     NT_BUILD_ASSERT((!state->opts.premultiplied || state->opts.format == NT_TEXTURE_FORMAT_RGBA8) && "begin_atlas: premultiplied=true requires NT_TEXTURE_FORMAT_RGBA8");
@@ -670,6 +673,8 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     uint8_t *pixels = stbi_load_from_memory(file_data, (int)file_size, &w, &h, &channels, 4);
     free(file_data);
     NT_BUILD_ASSERT(pixels && "atlas_add: stbi_load_from_memory failed");
+    NT_BUILD_ASSERT(w > 0 && h > 0 && "atlas_add: decoded image has zero dimensions");
+    NT_BUILD_ASSERT((uint64_t)w * (uint64_t)h <= (UINT32_MAX / 4) && "atlas_add: decoded image too large (w*h*4 overflows uint32_t)");
 
     /* Determine region name (D-06, D-07). opts->name takes precedence; NULL falls
      * back to basename of the source path. */
@@ -699,6 +704,8 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
 void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels, uint32_t width, uint32_t height, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && rgba_pixels && "atlas_add_raw: invalid args");
     NT_BUILD_ASSERT(ctx->active_atlas && "atlas_add_raw: no active atlas (call begin_atlas first)");
+    NT_BUILD_ASSERT(width > 0 && height > 0 && "atlas_add_raw: width and height must be > 0");
+    NT_BUILD_ASSERT((uint64_t)width * height <= (UINT32_MAX / 4) && "atlas_add_raw: width * height * 4 overflows uint32_t");
 
     nt_atlas_sprite_opts_t sopts = atlas_resolve_sprite_opts(opts);
     NT_BUILD_ASSERT(sopts.name && "atlas_add_raw: opts->name is required for raw pixels (no path to derive from)");
