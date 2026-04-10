@@ -665,7 +665,7 @@ typedef struct {
     uint32_t used_h;
 } VPackPage;
 
-#define VPACK_GRID_CELL 128
+#define VPACK_GRID_CELL 64
 /* Each cell holds a bitmap of NFPs that overlap it. nfp_words grows with the
  * number of NFPs in the current orient. 64 * 64 = 4096 NFPs. Larger than
  * realistic workloads so grid path stays active. Measured: 32 is slightly
