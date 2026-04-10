@@ -607,6 +607,10 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
     NtBuildAtlasState *state = (NtBuildAtlasState *)calloc(1, sizeof(NtBuildAtlasState));
     NT_BUILD_ASSERT(state && "begin_atlas: alloc failed");
 
+    /* Assign early so nt_builder_free_pack can clean up if a validation
+     * assert below fires and the test harness longjmps out. */
+    ctx->active_atlas = state;
+
     state->name = strdup(name);
     NT_BUILD_ASSERT(state->name && "begin_atlas: strdup failed");
 
@@ -644,8 +648,6 @@ void nt_builder_begin_atlas(NtBuilderContext *ctx, const char *name, const nt_at
     state->sprites = (NtAtlasSpriteInput *)calloc(state->sprite_capacity, sizeof(NtAtlasSpriteInput));
     NT_BUILD_ASSERT(state->sprites && "begin_atlas: alloc failed");
     state->sprite_count = 0;
-
-    ctx->active_atlas = state;
 }
 
 /* Resolve effective per-sprite opts: fall back to defaults when caller

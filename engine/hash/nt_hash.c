@@ -46,17 +46,50 @@ nt_hash64_t nt_hash64_str(const char *s) {
 
 #if NT_HASH_LABELS
 
+/*
+ * ============================================================================
+ * Thread-safety & pointer-stability design
+ * ============================================================================
+ *
+ * Problem:
+ *   tests/CMakeLists.txt compiles nt_hash.c with NT_HASH_LABELS=1, so the
+ *   label functions are active for every consumer of nt_hash — including the
+ *   multi-threaded builder. nt_hash64_str() internally calls
+ *   nt_hash_register_label64(), which mutates global tables. Without
+ *   protection this is a data-race (concurrent reads/writes to s_labels*,
+ *   counts, capacity) and a use-after-free (another thread holds a pointer
+ *   returned by nt_hash*_label() while ensure_capacity frees the old table).
+ *
+ * Solution — two parts:
+ *
+ *   1. Spinlock (atomic_flag).
+ *      All label operations (register, lookup, shutdown) acquire s_label_lock.
+ *      Acceptable because labels are debug-only, contention is rare, and the
+ *      critical section is short (hash probe + strncpy, no I/O).
+ *
+ *   2. Retired-table list (no free until shutdown).
+ *      When the hash table grows, the old table is NOT freed — it is pushed
+ *      onto a singly-linked retired list. This guarantees that any pointer
+ *      previously returned by nt_hash*_label() remains valid until
+ *      nt_hash_shutdown(), even if another thread triggered a table resize
+ *      after the pointer was returned. Cost: a few KB of dead memory per
+ *      resize — negligible for a debug tool.
+ *
+ * Data structures:
+ *   - Open-addressing hash table with linear probing (one per bit-width).
+ *   - Load factor kept below 50% (capacity always >= 2 * count).
+ *   - Labels are write-once per hash (overwrite updates the same slot).
+ *   - No deletions — only insert or overwrite.
+ *
+ * Lifecycle:
+ *   nt_hash_init()     — marks initialized (tables start NULL, first
+ *                         register triggers lazy calloc).
+ *   nt_hash_shutdown() — frees current tables + all retired tables.
+ * ============================================================================
+ */
+
 #include <stdatomic.h>
 
-/* Spinlock for thread-safe label registration. Multiple builder worker threads
- * call nt_hash64_str → nt_hash_register_label64 concurrently. A spinlock is
- * acceptable: labels are debug-only, contention is rare, critical sections are
- * short (hash probe + strncpy).
- *
- * Tables grow dynamically. On resize the old table is NOT freed — it moves to
- * a retired list so that pointers previously returned by nt_hash*_label()
- * remain valid until nt_hash_shutdown(). This eliminates the use-after-free
- * that would occur if another thread held a pointer into a freed table. */
 static atomic_flag s_label_lock = ATOMIC_FLAG_INIT;
 
 static void label_lock(void) {
@@ -77,7 +110,8 @@ typedef struct {
     char label[96];
 } LabelEntry64;
 
-/* Retired table node — keeps old tables alive so outstanding pointers don't dangle. */
+/* Retired table node. Forms a singly-linked list of old tables that were
+ * replaced during capacity growth. Freed only in nt_hash_shutdown(). */
 typedef struct RetiredTable {
     void *table;
     struct RetiredTable *next;
@@ -92,6 +126,8 @@ static uint32_t s_labels64_count;
 static RetiredTable *s_retired;
 static bool s_initialized;
 
+/* Initial capacity: 2x the configured label budget (open-addressing needs
+ * headroom). Doubles on each subsequent growth. */
 static uint32_t label_initial_capacity(void) {
     uint32_t initial = (uint32_t)NT_HASH_MAX_LABELS;
     if (initial < 16U) {
@@ -100,6 +136,7 @@ static uint32_t label_initial_capacity(void) {
     return initial * 2U;
 }
 
+/* Find the smallest power-of-two-ish capacity that keeps load < 50%. */
 static uint32_t label_capacity_for_count(uint32_t count, uint32_t current_capacity) {
     uint32_t capacity = current_capacity > 0 ? current_capacity : label_initial_capacity();
     while (count > (capacity / 2U)) {
@@ -109,6 +146,9 @@ static uint32_t label_capacity_for_count(uint32_t count, uint32_t current_capaci
     return capacity;
 }
 
+/* Push old_table onto the retired list instead of freeing it.
+ * This is the key to pointer-stability: callers who already received
+ * a const char* from nt_hash*_label() can safely dereference it. */
 static void retire_table(void *old_table) {
     RetiredTable *node = (RetiredTable *)malloc(sizeof(RetiredTable));
     NT_ASSERT(node && "retire_table: alloc failed");
@@ -117,6 +157,7 @@ static void retire_table(void *old_table) {
     s_retired = node;
 }
 
+/* Linear-probe insert/overwrite into a given table. Empty slot = label[0]=='\0'. */
 static void label32_store(LabelEntry32 *table, uint32_t capacity, nt_hash32_t hash, const char *label) {
     uint32_t idx = hash.value % capacity;
     for (uint32_t i = 0; i < capacity; i++) {
@@ -145,6 +186,8 @@ static void label64_store(LabelEntry64 *table, uint32_t capacity, nt_hash64_t ha
     NT_ASSERT(0 && "hash label64 table unexpectedly full");
 }
 
+/* Grow the table if needed. Allocates a new table, rehashes all entries,
+ * then retires (not frees) the old table for pointer-stability. */
 static bool label32_ensure_capacity(uint32_t needed_count) {
     uint32_t new_capacity = label_capacity_for_count(needed_count, s_labels32_capacity);
     if (new_capacity == s_labels32_capacity && s_labels32 != NULL) {
@@ -160,7 +203,7 @@ static bool label32_ensure_capacity(uint32_t needed_count) {
                 label32_store(new_table, new_capacity, (nt_hash32_t){s_labels32[i].hash_value}, s_labels32[i].label);
             }
         }
-        retire_table(s_labels32);
+        retire_table(s_labels32); /* old table stays alive for outstanding pointers */
     }
     s_labels32 = new_table;
     s_labels32_capacity = new_capacity;
@@ -189,6 +232,10 @@ static bool label64_ensure_capacity(uint32_t needed_count) {
     return true;
 }
 
+/* Register a debug label for a 32-bit hash.
+ * Fast path: hash already exists → skip (label is immutable after first write,
+ *            so another thread can safely read it without the lock).
+ * Slow path: new hash → ensure capacity, then store. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_hash_register_label32(nt_hash32_t hash, const char *label) {
     NT_ASSERT(label != NULL);
@@ -198,15 +245,17 @@ void nt_hash_register_label32(nt_hash32_t hash, const char *label) {
         for (uint32_t i = 0; i < s_labels32_capacity; i++) {
             uint32_t probe = (idx + i) % s_labels32_capacity;
             if (s_labels32[probe].label[0] == '\0') {
-                break;
+                break; /* empty slot — hash not found, fall through to insert */
             }
             if (s_labels32[probe].hash_value == hash.value) {
-                label32_store(s_labels32, s_labels32_capacity, hash, label);
+                /* Already registered. Do NOT overwrite — another thread may be
+                 * reading these bytes right now via a pointer from _label(). */
                 label_unlock();
                 return;
             }
         }
     }
+    /* Slow path: new entry — may trigger table growth + retire. */
     NT_ASSERT(label32_ensure_capacity(s_labels32_count + 1U) && "hash label32 table grow failed");
     label32_store(s_labels32, s_labels32_capacity, hash, label);
     s_labels32_count++;
@@ -225,7 +274,6 @@ void nt_hash_register_label64(nt_hash64_t hash, const char *label) {
                 break;
             }
             if (s_labels64[probe].hash_value == hash.value) {
-                label64_store(s_labels64, s_labels64_capacity, hash, label);
                 label_unlock();
                 return;
             }
@@ -237,6 +285,9 @@ void nt_hash_register_label64(nt_hash64_t hash, const char *label) {
     label_unlock();
 }
 
+/* Lookup a debug label. Returns a pointer into the current table.
+ * The pointer remains valid even after table growth because old tables
+ * are retired, not freed. Only nt_hash_shutdown() invalidates them. */
 const char *nt_hash32_label(nt_hash32_t hash) {
     label_lock();
     if (!s_labels32 || s_labels32_capacity == 0) {
@@ -292,6 +343,9 @@ nt_result_t nt_hash_init(const nt_hash_desc_t *desc) {
     return NT_OK;
 }
 
+/* Free current tables + all retired tables. After this call, any pointer
+ * previously returned by nt_hash*_label() is dangling — callers must not
+ * hold label pointers across shutdown. */
 void nt_hash_shutdown(void) {
     label_lock();
     free(s_labels32);

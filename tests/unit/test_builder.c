@@ -18,7 +18,9 @@ const char *__lsan_default_suppressions(void) { // NOLINT(bugprone-reserved-iden
     return "leak:extensionSupportedGLX\n"
            "leak:nt_builder_decode_font\n" /* EXPECT_BUILD_ASSERT + longjmp leaks internal allocs */
            "leak:nt_builder_add_font\n"
-           "leak:nt_builder_finish_pack\n"; /* shader error tests: longjmp leaks finish_pack internals */
+           "leak:nt_builder_finish_pack\n" /* shader error tests: longjmp leaks finish_pack internals */
+           "leak:vector_pack\n"            /* max-pages assert: longjmp skips vector_pack cleanup */
+           "leak:pipeline_tile_pack\n";    /* same test: longjmp skips pipeline_tile_pack cleanup */
 }
 
 /* clang-format off */
