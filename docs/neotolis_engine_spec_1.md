@@ -1052,10 +1052,11 @@ NtAtlasRegion[region_count] (36 bytes each)
   index_count:    u8    (triangle indices for this region; ≤ 255)
 
 NtAtlasVertex[total_vertex_count] (8 bytes each, at vertex_offset)
-  local_x:   i16  (pixel X in trim-rect local space, 0..trim_w-1.
+  local_x:   i16  (corner X in trim-rect local space, 0..trim_w.
+                   Polygon vertices use corner coordinates, not pixel centres.
                    Source-image pos: local_x + trim_offset_x
                    Pivot-relative:   (local_x + trim_offset_x) - origin_x * source_w)
-  local_y:   i16  (pixel Y in trim-rect local space. Same semantics.)
+  local_y:   i16  (corner Y in trim-rect local space, 0..trim_h. Same semantics.)
   atlas_u:   u16  (normalized 0..65535 over atlas page width)
   atlas_v:   u16  (normalized 0..65535 over atlas page height)
 

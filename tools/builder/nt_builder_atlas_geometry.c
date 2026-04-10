@@ -938,6 +938,28 @@ void transform_point(int32_t sx, int32_t sy, uint8_t flags, int32_t tw, int32_t 
     int32_t w = (flags & 4) ? th : tw;
     int32_t h = (flags & 4) ? tw : th;
     if (flags & 1) {
+        x = w - x;
+    }
+    if (flags & 2) {
+        y = h - y;
+    }
+    *ox = x;
+    *oy = y;
+}
+
+/* Texel-space variant: maps pixel indices (0..w-1) to pixel indices (0..w-1).
+ * Used by blit_sprite where src/dst are pixel coordinates, not polygon corners. */
+void transform_point_texel(int32_t sx, int32_t sy, uint8_t flags, int32_t tw, int32_t th, int32_t *ox, int32_t *oy) {
+    int32_t x = sx;
+    int32_t y = sy;
+    if (flags & 4) {
+        int32_t t = x;
+        x = y;
+        y = t;
+    }
+    int32_t w = (flags & 4) ? th : tw;
+    int32_t h = (flags & 4) ? tw : th;
+    if (flags & 1) {
         x = w - 1 - x;
     }
     if (flags & 2) {

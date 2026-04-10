@@ -169,7 +169,7 @@ static void blit_sprite(uint8_t *page, uint32_t page_w, const uint8_t *sprite_rg
             }
             int32_t tx;
             int32_t ty;
-            transform_point((int32_t)sx, (int32_t)sy, rotation, (int32_t)trim_w, (int32_t)trim_h, &tx, &ty);
+            transform_point_texel((int32_t)sx, (int32_t)sy, rotation, (int32_t)trim_w, (int32_t)trim_h, &tx, &ty);
             uint32_t dx = dest_x + (uint32_t)tx;
             uint32_t dy = dest_y + (uint32_t)ty;
             memcpy(&page[((size_t)dy * page_w + dx) * 4], src, 4);
@@ -334,44 +334,36 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 // #endregion
 
 // #region Atlas cache — disk caching for incremental builds
-/* --- uint64_t sort comparator for atlas cache key (D-13) --- */
-
-static int uint64_cmp(const void *a, const void *b) {
-    uint64_t va = *(const uint64_t *)a;
-    uint64_t vb = *(const uint64_t *)b;
-    if (va < vb) {
-        return -1;
-    }
-    if (va > vb) {
-        return 1;
-    }
-    return 0;
-}
-
 /* --- Atlas cache key computation (D-13) --- */
 
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts, bool has_compress, const nt_tex_compress_opts_t *compress) {
     /* Bump on any change to the byte layout below, the flag-bit ordering, or
      * the shape enum ordering — otherwise cached atlases would silently bind
-     * to a different pack behaviour. v6: polygon_mode bool → shape enum.
+     * to a different pack behaviour. v7: order-sensitive — sprite hashes are
+     * no longer sorted, and per-sprite origin_x/origin_y are included. The
+     * cached payload stores AtlasPlacement.sprite_index in add-order, so the
+     * key must be sensitive to both order and per-sprite metadata that affect
+     * the output atlas blob.
      * Note: NT_BUILDER_VERSION is ALSO mixed into the key below, so content
      * changes inside the atlas pipeline (blit/extrude/compose tweaks that
      * don't touch the byte layout of this hash input) only need a
      * NT_BUILDER_VERSION bump — same policy as nt_builder_cache.c. */
-    enum { ATLAS_CACHE_KEY_VERSION = 6 };
+    enum { ATLAS_CACHE_KEY_VERSION = 7 };
 
-    /* Collect decoded hashes */
-    uint64_t *hashes = (uint64_t *)malloc(sprite_count * sizeof(uint64_t));
-    NT_BUILD_ASSERT(hashes && "compute_atlas_cache_key: alloc failed");
+    /* Per-sprite data: hash + origin (in add-order, NOT sorted — cached
+     * placements store sprite_index in add-order, so the key must be
+     * order-sensitive to avoid mismatching placements after reordering). */
+    size_t per_sprite_bytes = sprite_count * (sizeof(uint64_t) + 2 * sizeof(float));
+    uint8_t *sprite_buf = (uint8_t *)malloc(per_sprite_bytes);
+    NT_BUILD_ASSERT(sprite_buf && "compute_atlas_cache_key: alloc failed");
     for (uint32_t i = 0; i < sprite_count; i++) {
-        hashes[i] = sprites[i].decoded_hash;
+        size_t off = i * (sizeof(uint64_t) + 2 * sizeof(float));
+        memcpy(sprite_buf + off, &sprites[i].decoded_hash, sizeof(uint64_t));
+        memcpy(sprite_buf + off + sizeof(uint64_t), &sprites[i].origin_x, sizeof(float));
+        memcpy(sprite_buf + off + sizeof(uint64_t) + sizeof(float), &sprites[i].origin_y, sizeof(float));
     }
 
-    /* Sort for order-independence */
-    qsort(hashes, sprite_count, sizeof(uint64_t), uint64_cmp);
-
-    /* Build key buffer: sorted hashes + serialized opts */
-    size_t hash_bytes = sprite_count * sizeof(uint64_t);
+    /* Build key buffer: per-sprite data + serialized opts */
     /* Serialize opts fields (excluding compress pointer) */
     uint8_t opts_buf[128];
     uint32_t pos = 0;
@@ -414,12 +406,12 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     }
 
     /* Combine into single buffer and hash */
-    size_t total = hash_bytes + pos;
+    size_t total = per_sprite_bytes + pos;
     uint8_t *buf = (uint8_t *)malloc(total);
     NT_BUILD_ASSERT(buf && "compute_atlas_cache_key: alloc failed");
-    memcpy(buf, hashes, hash_bytes);
-    memcpy(buf + hash_bytes, opts_buf, pos);
-    free(hashes);
+    memcpy(buf, sprite_buf, per_sprite_bytes);
+    memcpy(buf + per_sprite_bytes, opts_buf, pos);
+    free(sprite_buf);
 
     nt_hash64_t key = nt_hash64(buf, (uint32_t)total);
     free(buf);
@@ -531,6 +523,17 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, AtlasPla
         free(placements);
         (void)fclose(f);
         return false;
+    }
+
+    /* Validate per-placement fields — a corrupted cache file with valid outer
+     * counts but garbage placement records would cause OOB access downstream
+     * (placement_lookup, page_pixels indexing). Fail gracefully → rebuild. */
+    for (uint32_t i = 0; i < placement_count; i++) {
+        if (placements[i].sprite_index >= placement_count || placements[i].page >= page_count_val) {
+            free(placements);
+            (void)fclose(f);
+            return false;
+        }
     }
 
     /* NOLINTNEXTLINE(clang-analyzer-optin.taint.TaintedAlloc) -- page_count_val bounded above */

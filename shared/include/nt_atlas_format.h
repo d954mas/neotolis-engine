@@ -77,13 +77,15 @@ _Static_assert(sizeof(NtAtlasRegion) == 36, "NtAtlasRegion must be 36 bytes");
 
 #pragma pack(push, 1)
 typedef struct {
-    int16_t local_x;  /*  0: pixel X in trim-rect local space (0..trim_w-1).
+    int16_t local_x;  /*  0: corner X in trim-rect local space (0..trim_w).
+                       *     Polygon vertices use corner coordinates, not pixel centres:
+                       *     vertex at trim_w means the right edge of the last pixel column.
                        *     Add NtAtlasRegion.trim_offset_x to get source-image space X.
                        *     Subtract (origin_x * source_w) to get offset from the pivot:
                        *       pivot_relative_x = (local_x + trim_offset_x) - (origin_x * source_w)
                        *     The rendered world-space position of the vertex is then:
                        *       world_x = entity_pos_x + pivot_relative_x * scale_x */
-    int16_t local_y;  /*  2: pixel Y in trim-rect local space (0..trim_h-1). Same semantics. */
+    int16_t local_y;  /*  2: corner Y in trim-rect local space (0..trim_h). Same semantics. */
     uint16_t atlas_u; /*  4: atlas UV X (normalized 0-65535 over atlas width) */
     uint16_t atlas_v; /*  6: atlas UV Y (normalized 0-65535 over atlas height) */
 } NtAtlasVertex;      /*  8 bytes */

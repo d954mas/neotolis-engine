@@ -97,6 +97,10 @@ uint32_t polygon_inflate(const Point2D *hull, uint32_t n, float amount, Point2D 
  * If (flags & 4) then output dims are (th, tw), else (tw, th). */
 void transform_point(int32_t sx, int32_t sy, uint8_t flags, int32_t tw, int32_t th, int32_t *ox, int32_t *oy);
 
+/* Texel-space variant: maps pixel indices (0..w-1) to pixel indices (0..w-1).
+ * Same diagonal + flip logic but uses (w-1-x) instead of (w-x). */
+void transform_point_texel(int32_t sx, int32_t sy, uint8_t flags, int32_t tw, int32_t th, int32_t *ox, int32_t *oy);
+
 /* Transform polygon vertices. Restores CCW winding if the transform has
  * odd parity (odd number of reflections). */
 void polygon_transform(const Point2D *src, uint32_t n, uint8_t flags, int32_t tw, int32_t th, Point2D *out);
