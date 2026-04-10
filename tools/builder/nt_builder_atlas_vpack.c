@@ -1885,6 +1885,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
 
     for (uint32_t s = 0; s < sprite_count; s++) {
         uint32_t idx = sorted[s].index;
+        NT_LOG_INFO("  placing sprite %u/%u (idx=%u, area=%llu, pages=%u)...", s, sprite_count, idx, (unsigned long long)sorted[s].area, page_count);
         /* vpack_place_one_sprite returns false only when ATLAS_MAX_PAGES is
          * exhausted. Fail loudly per AGENTS.md "fail early": continuing with a
          * silent fallback would produce an atlas where unplaced sprites collide
