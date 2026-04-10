@@ -321,7 +321,6 @@ jobs:
             build/examples/atlas/_cache
           key: builder-cache-${{ github.sha }}
           restore-keys: builder-cache-
-          save-always: true
 
       - name: Build asset packs — textured_quad (release)
         timeout-minutes: 10
