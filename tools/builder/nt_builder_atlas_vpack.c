@@ -317,10 +317,10 @@ static bool vpack_intersect_axis_i(Point2D p1, Point2D p2, bool is_x_axis, int32
  * Layout puts AABB first so the broad-phase bounds check in the candidate scan
  * touches cache line 0 instead of fetching the last cache line of the struct. */
 typedef struct {
-    int32_t min_x, min_y, max_x, max_y;             /* 16B — hot: broad-phase bounds check */
-    uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1]; /* 18B — warm */
-    uint8_t ring_count;                             /* 1B */
-    Point2D verts[VPACK_NFP_MAX_VERTS];             /* 512B — cold: touched only after broad-phase passes */
+    int32_t min_x, min_y, max_x, max_y;                /* 16B — hot: broad-phase bounds check */
+    uint16_t ring_offsets[VPACK_NFP_MAX_RINGS + 1];    /* 18B — warm */
+    uint8_t ring_count;                                /* 1B */
+    int16_t verts_xy[VPACK_NFP_MAX_VERTS * 2];         /* 256B — cold: int16 xy pairs, touched only after broad-phase */
 } VPackNFP;
 
 /* Even-odd ray cast point-in-polygon. Winding-independent.
@@ -328,14 +328,16 @@ typedef struct {
  * (~3-4 cycles) per edge crossing. The truncation-correction branches replicate
  * C integer division's round-toward-zero behavior exactly so the even-odd
  * toggle sequence — and therefore packing output — is bit-identical. */
-static bool vpack_point_in_ring(int32_t px, int32_t py, const Point2D *ring, uint32_t n) {
+static bool vpack_point_in_ring(int32_t px, int32_t py, const int16_t *ring_xy, uint32_t n) {
     bool inside = false;
     for (uint32_t i = 0, j = n - 1; i < n; j = i++) {
-        if ((ring[i].y > py) != (ring[j].y > py)) {
-            int64_t dx = (int64_t)(ring[j].x - ring[i].x);
-            int64_t dy = (int64_t)(ring[j].y - ring[i].y);
-            int64_t D = (int64_t)(px - ring[i].x);
-            int64_t N = dx * (int64_t)(py - ring[i].y);
+        int32_t yi = (int32_t)ring_xy[i * 2 + 1];
+        int32_t yj = (int32_t)ring_xy[j * 2 + 1];
+        if ((yi > py) != (yj > py)) {
+            int64_t dx = (int64_t)ring_xy[j * 2] - (int64_t)ring_xy[i * 2];
+            int64_t dy = (int64_t)(yj - yi);
+            int64_t D = (int64_t)(px - (int32_t)ring_xy[i * 2]);
+            int64_t N = dx * (int64_t)(py - yi);
             /* Cross-multiply: D < trunc(N/dy). When the quotient is non-negative
              * (trunc = floor), use (D+1)*dy on N's side; when negative (trunc = ceil
              * toward zero), plain D*dy suffices. Inequality direction flips with dy sign. */
@@ -363,7 +365,7 @@ static bool vpack_point_in_nfp(int32_t px, int32_t py, const VPackNFP *nfp) {
         if (n < 3) {
             continue;
         }
-        if (vpack_point_in_ring(px, py, &nfp->verts[start], n)) {
+        if (vpack_point_in_ring(px, py, &nfp->verts_xy[start * 2], n)) {
             return true;
         }
     }
@@ -523,8 +525,8 @@ static void vpack_copy_local_nfp_to_out(const Point2D *verts, const uint16_t *ri
         out_nfp->ring_offsets[r] = ring_offsets[r];
     }
     for (uint32_t v = 0; v < total; v++) {
-        out_nfp->verts[v].x = verts[v].x + off_x;
-        out_nfp->verts[v].y = verts[v].y + off_y;
+        out_nfp->verts_xy[v * 2] = (int16_t)(verts[v].x + off_x);
+        out_nfp->verts_xy[v * 2 + 1] = (int16_t)(verts[v].y + off_y);
     }
     out_nfp->min_x = min_x + off_x;
     out_nfp->min_y = min_y + off_y;
@@ -542,8 +544,8 @@ static void vpack_copy_cache_slot_to_out(const VPackNFPCacheEntry *slot, int32_t
         out_nfp->ring_offsets[r] = SLOT_LOAD(slot->ring_offsets[r]);
     }
     for (size_t v = 0; v < total; v++) {
-        out_nfp->verts[v].x = (int32_t)SLOT_LOAD(slot->verts_xy[v * 2]) + off_x;
-        out_nfp->verts[v].y = (int32_t)SLOT_LOAD(slot->verts_xy[(v * 2) + 1]) + off_y;
+        out_nfp->verts_xy[v * 2] = (int16_t)((int32_t)SLOT_LOAD(slot->verts_xy[v * 2]) + off_x);
+        out_nfp->verts_xy[v * 2 + 1] = (int16_t)((int32_t)SLOT_LOAD(slot->verts_xy[(v * 2) + 1]) + off_y);
     }
     out_nfp->min_x = (int32_t)SLOT_LOAD(slot->min_x) + off_x;
     out_nfp->min_y = (int32_t)SLOT_LOAD(slot->min_y) + off_y;
@@ -699,7 +701,7 @@ static void vpack_calc_aabb(const Point2D *poly, uint32_t count, int32_t *min_x,
 static void vpack_add_nfp_candidates(const VPackNFP *nfp, int32_t min_cand_x, int32_t min_cand_y, VPackCand **cands, uint32_t *cand_count, uint32_t *cand_cap, const VPackBounds *bounds,
                                      VPackCandDedup *dedup) {
     for (uint32_t v = 0; v < nfp->ring_offsets[nfp->ring_count]; v++) {
-        vpack_add_cand(cands, cand_count, cand_cap, nfp->verts[v].x, nfp->verts[v].y, bounds, dedup);
+        vpack_add_cand(cands, cand_count, cand_cap, (int32_t)nfp->verts_xy[v * 2], (int32_t)nfp->verts_xy[v * 2 + 1], bounds, dedup);
     }
     for (uint32_t r = 0; r < nfp->ring_count; r++) {
         uint32_t rs = nfp->ring_offsets[r];
@@ -707,8 +709,8 @@ static void vpack_add_nfp_candidates(const VPackNFP *nfp, int32_t min_cand_x, in
         uint32_t rn = re - rs;
         for (uint32_t e = 0; e < rn; e++) {
             uint32_t en = (e + 1 == rn) ? 0 : e + 1;
-            Point2D pa = nfp->verts[rs + e];
-            Point2D pb = nfp->verts[rs + en];
+            Point2D pa = {(int32_t)nfp->verts_xy[(rs + e) * 2], (int32_t)nfp->verts_xy[(rs + e) * 2 + 1]};
+            Point2D pb = {(int32_t)nfp->verts_xy[(rs + en) * 2], (int32_t)nfp->verts_xy[(rs + en) * 2 + 1]};
             int32_t vf;
             int32_t vc;
             if (vpack_intersect_axis_i(pa, pb, true, min_cand_x, &vf, &vc)) {
@@ -2023,8 +2025,8 @@ bool nt_atlas_test_vpack_point_in_nfp(const int32_t *verts_xy, uint32_t vert_cou
         nfp.ring_offsets[r] = ring_offsets[r];
     }
     for (size_t v = 0; v < vert_count; v++) {
-        nfp.verts[v].x = verts_xy[v * 2];
-        nfp.verts[v].y = verts_xy[(v * 2) + 1];
+        nfp.verts_xy[v * 2] = (int16_t)verts_xy[v * 2];
+        nfp.verts_xy[(v * 2) + 1] = (int16_t)verts_xy[(v * 2) + 1];
     }
     return vpack_point_in_nfp(px, py, &nfp);
 }
