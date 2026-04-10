@@ -1816,12 +1816,14 @@ void nt_builder_end_atlas(NtBuilderContext *ctx) {
         pipeline_compose(&p);
         bench_compose = nt_time_now() - t0;
 
-        t0 = nt_time_now();
-        pipeline_debug_png(&p);
-        bench_debug_png = nt_time_now() - t0;
-
         pipeline_cache_write(&p);
     }
+
+    /* debug_png runs regardless of cache — page_pixels are available from
+     * either compose (miss) or cache read (hit). Not part of cache key. */
+    t0 = nt_time_now();
+    pipeline_debug_png(&p);
+    bench_debug_png = nt_time_now() - t0;
 
     t0 = nt_time_now();
     pipeline_serialize(&p);

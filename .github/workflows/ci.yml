@@ -73,6 +73,12 @@ jobs:
           name: text-packs
           path: build/examples/text
 
+      - name: Download atlas packs
+        uses: actions/download-artifact@v4
+        with:
+          name: atlas-packs
+          path: build/examples/atlas
+
       - name: Build baseline WASM debug artifacts
         run: |
           emcmake cmake --preset wasm-debug
@@ -404,6 +410,13 @@ jobs:
           path: build/examples/text/*.ntpack
           retention-days: 1
 
+      - name: Upload atlas packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlas-packs
+          path: build/examples/atlas/*.ntpack
+          retention-days: 1
+
       - name: Submodule consumption test
         run: |
           cmake -S tests/submodule -B build/submodule-test \
@@ -462,6 +475,12 @@ jobs:
         with:
           name: text-packs
           path: build/examples/text
+
+      - name: Download atlas packs
+        uses: actions/download-artifact@v4
+        with:
+          name: atlas-packs
+          path: build/examples/atlas
 
       - uses: actions/setup-node@v4
         with:
