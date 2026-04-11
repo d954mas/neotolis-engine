@@ -249,11 +249,16 @@ static void translate_region(nt_texture_region_t *dst, const NtAtlasRegion *src)
 // #region replace_pages
 /* Replace the page id array wholesale from a new blob (D-05).
  * Clears all cached nt_resource_t handles — the new blob may reference
- * entirely different textures even at the same page_index. */
-static void replace_pages(nt_atlas_data_t *ad, const uint64_t *new_page_ids, uint8_t new_page_count) {
+ * entirely different textures even at the same page_index.
+ *
+ * Source is a raw byte pointer because blob page-id storage may be only
+ * 4-byte aligned (pack asset alignment). We memcpy bytes into the
+ * 8-byte-aligned ad->page_resource_ids destination. */
+static void replace_pages(nt_atlas_data_t *ad, const uint8_t *new_page_ids_bytes, uint32_t page_bytes, uint8_t new_page_count) {
     NT_ASSERT(new_page_count <= NT_ATLAS_MAX_PAGES);
+    NT_ASSERT(page_bytes == (uint32_t)new_page_count * (uint32_t)sizeof(uint64_t));
     if (new_page_count > 0) {
-        memcpy(ad->page_resource_ids, new_page_ids, new_page_count * sizeof(uint64_t));
+        memcpy(ad->page_resource_ids, new_page_ids_bytes, page_bytes);
     }
     /* Clear tail (including the un-used portion up to NT_ATLAS_MAX_PAGES) */
     if (new_page_count < NT_ATLAS_MAX_PAGES) {
@@ -279,13 +284,23 @@ static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
 /* D-11: deactivate must NOT touch user_data — on_cleanup owns that lifecycle. */
 static void atlas_deactivate(uint32_t runtime_handle) { (void)runtime_handle; }
 
-/* Blob views carved out of raw bytes once the header has been validated. */
+/* Blob views carved out of raw bytes once the header has been validated.
+ *
+ * Pack asset alignment (NT_PACK_ASSET_ALIGN, 4) does NOT guarantee 8-byte or
+ * 16-byte alignment of the inner atlas payload, so types with stricter
+ * alignment than pack-1 (uint64_t page_ids, uint16_t indices) are kept as
+ * raw byte pointers. Consumers read them via memcpy into an aligned
+ * destination — this avoids UBSan -fsanitize=alignment trips on the
+ * data pointer that Phase D hands to the resolve callback. The packed
+ * NtAtlasRegion / NtAtlasVertex structs have alignof==1 thanks to
+ * pragma pack(1), so pointer casts over those are legal. */
 typedef struct {
     const NtAtlasHeader *hdr;
-    const uint64_t *page_ids;
+    const uint8_t *page_ids_bytes;
     const NtAtlasRegion *regions;
     const NtAtlasVertex *verts;
-    const uint16_t *indices;
+    const uint8_t *indices_bytes;
+    uint32_t page_bytes;
     uint32_t vertex_bytes;
     uint32_t index_bytes;
 } nt_atlas_blob_view_t;
@@ -307,10 +322,11 @@ static void validate_and_carve_blob(const uint8_t *data, uint32_t size, nt_atlas
     NT_ASSERT(hdr->total_index_count == 0 || hdr->index_offset + index_bytes <= size);
 
     out->hdr = hdr;
-    out->page_ids = (const uint64_t *)(data + sizeof(NtAtlasHeader));
-    out->regions = (const NtAtlasRegion *)((const uint8_t *)out->page_ids + page_bytes);
+    out->page_ids_bytes = data + sizeof(NtAtlasHeader);
+    out->regions = (const NtAtlasRegion *)(out->page_ids_bytes + page_bytes);
     out->verts = (hdr->total_vertex_count > 0) ? (const NtAtlasVertex *)(data + hdr->vertex_offset) : NULL;
-    out->indices = (hdr->total_index_count > 0) ? (const uint16_t *)(data + hdr->index_offset) : NULL;
+    out->indices_bytes = (hdr->total_index_count > 0) ? data + hdr->index_offset : NULL;
+    out->page_bytes = page_bytes;
     out->vertex_bytes = vertex_bytes;
     out->index_bytes = index_bytes;
 }
@@ -346,12 +362,14 @@ static nt_atlas_data_t *first_parse_allocate(const NtAtlasHeader *hdr) {
 static void first_parse_fill(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
     /* Bulk-copy all vertices and indices. After this, every region's
      * original vertex_start/index_start is still correct because the
-     * owned buffers are a verbatim snapshot of the blob arrays. */
+     * owned buffers are a verbatim snapshot of the blob arrays.
+     * Indices are copied as raw bytes because the source alignment
+     * can be as weak as 1 byte (see nt_atlas_blob_view_t doc). */
     if (v->vertex_bytes > 0) {
         memcpy(ad->vertices, v->verts, v->vertex_bytes);
     }
     if (v->index_bytes > 0) {
-        memcpy(ad->indices, v->indices, v->index_bytes);
+        memcpy(ad->indices, v->indices_bytes, v->index_bytes);
     }
     ad->vertex_count = v->hdr->total_vertex_count;
     ad->index_count = v->hdr->total_index_count;
@@ -362,7 +380,7 @@ static void first_parse_fill(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v)
     }
     ad->region_count = v->hdr->region_count;
 
-    replace_pages(ad, v->page_ids, (uint8_t)v->hdr->page_count);
+    replace_pages(ad, v->page_ids_bytes, v->page_bytes, (uint8_t)v->hdr->page_count);
 }
 
 static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
@@ -494,6 +512,15 @@ uint64_t nt_atlas_test_page_resource_id(const struct nt_atlas_data *ad, uint8_t 
     NT_ASSERT(page_index < ad->page_count);
     return ad->page_resource_ids[page_index];
 }
+
+void nt_atlas_test_drive_resolve(const uint8_t *data, uint32_t size, void **user_data) {
+    NT_ASSERT(user_data != NULL);
+    /* runtime_handle is ignored by atlas_on_resolve (we cast it to void),
+     * so any non-zero value is fine. Tests pass 1 to mirror the real flow. */
+    atlas_on_resolve(data, size, 1, user_data);
+}
+
+void nt_atlas_test_drive_cleanup(void *user_data) { atlas_on_cleanup(user_data); }
 
 #endif /* NT_ATLAS_TEST_ACCESS */
 // #endregion

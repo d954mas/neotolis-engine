@@ -9,8 +9,8 @@
 
 /* ---- Public constants ---- */
 
-#define NT_ATLAS_INVALID_REGION ((uint32_t)0xFFFFFFFFu)
-#define NT_ATLAS_TOMBSTONE_HASH ((uint64_t)0xFFFFFFFFFFFFFFFFull)
+#define NT_ATLAS_INVALID_REGION ((uint32_t)0xFFFFFFFFU)
+#define NT_ATLAS_TOMBSTONE_HASH ((uint64_t)0xFFFFFFFFFFFFFFFFULL)
 
 #ifndef NT_ATLAS_MAX_PAGES
 #define NT_ATLAS_MAX_PAGES 64
@@ -106,6 +106,12 @@ uint32_t nt_atlas_test_vertex_count(const struct nt_atlas_data *ad);
 uint32_t nt_atlas_test_index_count(const struct nt_atlas_data *ad);
 uint8_t nt_atlas_test_page_count(const struct nt_atlas_data *ad);
 uint64_t nt_atlas_test_page_resource_id(const struct nt_atlas_data *ad, uint8_t page_index);
+
+/* Direct wrappers around the static atlas_on_resolve / atlas_on_cleanup
+ * callbacks so tests can drive first-parse and cleanup without standing up a
+ * full resource system. data/size/user_data forward 1:1 to the callback. */
+void nt_atlas_test_drive_resolve(const uint8_t *data, uint32_t size, void **user_data);
+void nt_atlas_test_drive_cleanup(void *user_data);
 
 #endif /* NT_ATLAS_TEST_ACCESS */
 

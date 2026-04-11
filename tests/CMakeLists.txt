@@ -276,6 +276,19 @@ if(NOT EMSCRIPTEN)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
 
+    # --- Atlas module tests ---
+    add_executable(test_atlas unit/test_atlas.c)
+    target_link_libraries(test_atlas PRIVATE nt_atlas nt_resource nt_hash unity)
+    target_compile_definitions(test_atlas PRIVATE NT_ATLAS_TEST_ACCESS _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    target_compile_options(test_atlas PRIVATE -U_DLL)
+    target_compile_definitions(nt_atlas PRIVATE NT_ATLAS_TEST_ACCESS)
+    nt_set_warning_flags(test_atlas)
+    nt_set_sanitizer_flags(test_atlas)
+    set_target_properties(test_atlas PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_atlas COMMAND test_atlas)
+
     # --- HTTP module tests ---
     add_executable(test_http unit/test_http.c)
     target_link_libraries(test_http PRIVATE nt_http_stub unity)
