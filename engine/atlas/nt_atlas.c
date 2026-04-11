@@ -383,6 +383,116 @@ static void first_parse_fill(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v)
     replace_pages(ad, v->page_ids_bytes, v->page_bytes, (uint8_t)v->hdr->page_count);
 }
 
+/* Append a region's vertex/index slices from the source blob into the owned
+ * buffers at the current append cursors, and rewrite r->vertex_start /
+ * r->index_start to the new positions. Shared by both the COMMON-update and
+ * NEW-append merge paths. Caller must have already grown the buffers. */
+static void merge_append_region_payload(nt_atlas_data_t *ad, nt_texture_region_t *r, const NtAtlasRegion *nr, const NtAtlasVertex *new_verts, const uint8_t *new_index_bytes) {
+    /* Vertices */
+    r->vertex_start = ad->vertex_count;
+    if (nr->vertex_count > 0) {
+        NT_ASSERT(new_verts != NULL && "merge: vertex_count > 0 but source vertex buffer is NULL");
+        memcpy(&ad->vertices[ad->vertex_count], &new_verts[nr->vertex_start], (size_t)nr->vertex_count * sizeof(nt_atlas_vertex_t));
+        ad->vertex_count += nr->vertex_count;
+    }
+    r->vertex_count = nr->vertex_count;
+
+    /* Indices — read as raw bytes because source alignment can be as weak
+     * as 1 byte (see nt_atlas_blob_view_t doc). */
+    r->index_start = ad->index_count;
+    if (nr->index_count > 0) {
+        NT_ASSERT(new_index_bytes != NULL && "merge: index_count > 0 but source index buffer is NULL");
+        memcpy(&ad->indices[ad->index_count], new_index_bytes + ((size_t)nr->index_start * sizeof(uint16_t)), (size_t)nr->index_count * sizeof(uint16_t));
+        ad->index_count += nr->index_count;
+    }
+    r->index_count = nr->index_count;
+}
+
+/* Two-pass merge: Pass 1 walks new_regions and updates common or appends new;
+ * Pass 2 walks existing regions and tombstones any that are missing from the
+ * new blob. After both passes, page ids are replaced wholesale (D-05). */
+static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
+    const NtAtlasHeader *hdr = v->hdr;
+    const NtAtlasRegion *new_regions = v->regions;
+    const NtAtlasVertex *new_verts = v->verts;
+    const uint8_t *new_index_bytes = v->indices_bytes;
+
+    // #region pass 1: common+new
+    for (uint32_t i = 0; i < hdr->region_count; i++) {
+        const NtAtlasRegion *nr = &new_regions[i];
+        const uint64_t h = nr->name_hash;
+        const uint32_t existing_idx = hash_find(ad, h);
+
+        if (existing_idx != NT_ATLAS_INVALID_REGION) {
+            // #region common: fragment accepted
+            /* COMMON: update metadata in place. Append new verts/indices
+             * to the end of owned buffers — the old vertex_start range is
+             * abandoned (dead space; reclamation deferred per D-03). */
+            grow_vertices_if_needed(ad, nr->vertex_count);
+            grow_indices_if_needed(ad, nr->index_count);
+
+            nt_texture_region_t *r = &ad->regions[existing_idx];
+            r->source_w = nr->source_w;
+            r->source_h = nr->source_h;
+            r->trim_offset_x = nr->trim_offset_x;
+            r->trim_offset_y = nr->trim_offset_y;
+            r->origin_x = nr->origin_x;
+            r->origin_y = nr->origin_y;
+            r->page_index = nr->page_index;
+            r->transform = nr->transform;
+
+            merge_append_region_payload(ad, r, nr, new_verts, new_index_bytes);
+            /* name_hash unchanged; hash-table entry unchanged; stable index. */
+            // #endregion
+        } else {
+            /* NEW: grow storage, append region, insert into hash table. */
+            grow_regions_if_needed(ad, 1);
+            grow_vertices_if_needed(ad, nr->vertex_count);
+            grow_indices_if_needed(ad, nr->index_count);
+
+            const uint32_t new_idx = ad->region_count++;
+            nt_texture_region_t *r = &ad->regions[new_idx];
+            translate_region(r, nr);
+            merge_append_region_payload(ad, r, nr, new_verts, new_index_bytes);
+
+            hash_insert(ad, h, new_idx); /* may rehash if load factor > 0.5 */
+        }
+    }
+    // #endregion
+
+    // #region pass 2: tombstones
+    /* Iterate existing regions[] (not the hash table, to avoid DELETED
+     * entries). For each surviving region, linear-scan the new blob for
+     * name_hash presence. O(N*M) is fine for Phase 48 (§Pass-2 optimization
+     * in 48-RESEARCH.md — revisit only if stress tests complain). */
+    for (uint32_t i = 0; i < ad->region_count; i++) {
+        nt_texture_region_t *r = &ad->regions[i];
+        if (r->name_hash == NT_ATLAS_TOMBSTONE_HASH) {
+            continue; /* already dead */
+        }
+        bool still_present = false;
+        for (uint32_t j = 0; j < hdr->region_count; j++) {
+            if (new_regions[j].name_hash == r->name_hash) {
+                still_present = true;
+                break;
+            }
+        }
+        if (!still_present) {
+            hash_delete(ad, r->name_hash); /* DELETED marker; not compacted */
+            r->name_hash = NT_ATLAS_TOMBSTONE_HASH;
+            r->vertex_count = 0;
+            r->index_count = 0;
+            /* vertex_start/index_start left as dead weight — never referenced
+             * once vertex_count==0. Region index is NEVER reused. */
+        }
+    }
+    // #endregion
+
+    /* Replace page resource ids wholesale per D-05 + R1 — lazy handle cache
+     * page_resources[] is reset to NT_RESOURCE_INVALID inside replace_pages. */
+    replace_pages(ad, v->page_ids_bytes, v->page_bytes, (uint8_t)hdr->page_count);
+}
+
 static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
     (void)runtime_handle; /* always 1 — our no-op activator's fake handle */
 
@@ -403,15 +513,16 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
         return;
     }
 
-    /* Merge branch — Plan 02. The grow_* and hash_delete helpers below are
-     * kept defined so Plan 02 only splices in the diff body. Touch them here
-     * via a never-executed reference to satisfy -Wunused-function without
-     * producing any runtime side effects. */
-    (void)grow_regions_if_needed;
-    (void)grow_vertices_if_needed;
-    (void)grow_indices_if_needed;
-    (void)hash_delete;
-    NT_ASSERT(0 && "atlas on_resolve merge branch not implemented — Plan 02");
+    /* ---- Merge path (Plan 02) — diff new blob against existing regions
+     * by name_hash. Implements D-03 stable-index semantics:
+     *   - common: update metadata in place, rewrite verts/indices at new
+     *             append positions (old slots become dead — fragmentation
+     *             accepted, D-03).
+     *   - new:    append region with fresh index, hash-insert.
+     *   - removed: tombstone region (name_hash = TOMBSTONE_HASH,
+     *              vertex_count = 0), delete hash entry (DELETED marker).
+     * Region indices for surviving regions NEVER shift. */
+    merge_existing(ad, &view);
 }
 
 static void atlas_on_cleanup(void *user_data) {
