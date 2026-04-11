@@ -55,6 +55,11 @@ endforeach()
 add_custom_target(text_packs DEPENDS ${TEXT_PACK_OUTPUTS})
 add_dependencies(text_demo text_packs)
 
+# Optional CDN base URL
+if(NT_CDN_URL)
+    target_compile_definitions(text_demo PRIVATE NT_CDN_URL="${NT_CDN_URL}")
+endif()
+
 # WASM-specific settings
 if(EMSCRIPTEN)
     set_target_properties(text_demo PROPERTIES SUFFIX ".html" OUTPUT_NAME "index")

@@ -231,7 +231,11 @@ static void frame(void) {
 #ifdef NT_PLATFORM_WEB
         nt_platform_web_loading_complete();
 #endif
+#ifdef NT_CDN_URL
+        nt_resource_load_auto(s_cjk_pack_id, NT_CDN_URL "/text/text_cjk.ntpack");
+#else
         nt_resource_load_auto(s_cjk_pack_id, "assets/text_cjk.ntpack");
+#endif
     }
 
     /* Trackball camera update — skip during resize to avoid drag input
@@ -445,7 +449,11 @@ int main(void) {
     /* 11. Mount packs and start base pack loading */
     s_base_pack_id = nt_hash32_str("text_base");
     nt_resource_mount(s_base_pack_id, 10);
+#ifdef NT_CDN_URL
+    nt_resource_load_auto(s_base_pack_id, NT_CDN_URL "/text/text_base.ntpack");
+#else
     nt_resource_load_auto(s_base_pack_id, "assets/text_base.ntpack");
+#endif
 
     s_cjk_pack_id = nt_hash32_str("text_cjk");
     nt_resource_mount(s_cjk_pack_id, 20);
