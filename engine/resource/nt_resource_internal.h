@@ -131,7 +131,7 @@ typedef struct {
 
 /* Transient per-slot state — only valid during resource_resolve_pass().
  * Reset at the start of each pass, consumed by the end.
- * Lives in a separate static array to keep NtResourceSlot small for
+ * Heap-allocated per pass to keep NtResourceSlot small for
  * the common case (resolve runs only when needs_resolve is true). */
 typedef struct {
     uint32_t target_runtime_handle;    /* best READY asset handle, even if blob is evicted */
