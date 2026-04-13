@@ -684,6 +684,44 @@ void test_register_update_handle(void) {
     TEST_ASSERT_EQUAL_UINT32(99, nt_resource_get(h));
 }
 
+void test_publication_epoch_stable_when_no_slot_publication_changes(void) {
+    nt_hash32_t pid = nt_hash32_str("epoch_stable_pack");
+    nt_hash64_t rid = nt_hash64_str("epoch_stable_res");
+
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_publication_epoch());
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, 42));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_TEXTURE);
+    TEST_ASSERT_TRUE(h.id != 0);
+
+    nt_resource_step();
+    uint32_t epoch_after_publish = nt_resource_publication_epoch();
+    TEST_ASSERT_TRUE(epoch_after_publish > 0);
+
+    nt_resource_step();
+    TEST_ASSERT_EQUAL_UINT32(epoch_after_publish, nt_resource_publication_epoch());
+}
+
+void test_publication_epoch_increments_on_winner_change(void) {
+    nt_hash32_t pid = nt_hash32_str("epoch_change_pack");
+    nt_hash64_t rid = nt_hash64_str("epoch_change_res");
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, 42));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_TEXTURE);
+    nt_resource_step();
+    uint32_t epoch_after_first_publish = nt_resource_publication_epoch();
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, rid, NT_ASSET_TEXTURE, 99));
+    nt_resource_step();
+
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+    TEST_ASSERT_EQUAL_UINT32(99, nt_resource_get(h));
+    TEST_ASSERT_TRUE(nt_resource_publication_epoch() > epoch_after_first_publish);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_virtual_overrides_file(void) {
     nt_hash32_t pid_file = nt_hash32_str("vof_file_pack");
@@ -2346,6 +2384,8 @@ int main(void) {
     RUN_TEST(test_register_file_pack_rejected);
     RUN_TEST(test_register_immediate_ready);
     RUN_TEST(test_register_update_handle);
+    RUN_TEST(test_publication_epoch_stable_when_no_slot_publication_changes);
+    RUN_TEST(test_publication_epoch_increments_on_winner_change);
     RUN_TEST(test_virtual_overrides_file);
     RUN_TEST(test_file_overrides_virtual);
     RUN_TEST(test_unregister_fallback);

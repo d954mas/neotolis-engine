@@ -34,6 +34,7 @@ static struct {
     uint16_t queue_top;
     uint16_t next_mount_seq;       /* monotonic counter for mount order tiebreak */
     uint32_t asset_hwm;            /* high-water mark in assets[] */
+    uint32_t publication_epoch;    /* bumps when published slot view changes */
     uint64_t placeholder_texture;  /* resource_id for fallback texture, 0 = none */
     float activate_time_budget_ms; /* per-step time limit, 0 = unlimited */
     /* Retry policy (global) */
@@ -102,6 +103,8 @@ static uint32_t asset_alloc(void) {
 static uint32_t resource_get_time_ms(void) { return (uint32_t)(nt_time_now() * 1000.0); }
 
 static inline nt_resource_t resource_make(uint16_t index, uint16_t gen) { return (nt_resource_t){.id = ((uint32_t)gen << 16) | index}; }
+
+static void resource_bump_publication_epoch(void) { s_resource.publication_epoch++; }
 
 static bool slot_user_data_synced_for(const NtResourceSlot *slot, uint16_t asset_idx) { return slot->user_data != NULL && slot->user_data_asset_idx == asset_idx; }
 
@@ -309,16 +312,23 @@ static void resource_resolve_pass(void) {
             slot->user_data_asset_idx = UINT16_MAX;
         }
 
+        uint8_t next_state = tmp->scan_state;
+        if (next_has_real_winner) {
+            next_state = NT_ASSET_STATE_READY;
+        } else if (target_missing_aux && next_handle == 0) {
+            next_state = NT_ASSET_STATE_LOADING;
+        }
+
+        const bool publication_changed = next_asset_idx != slot->resolve_asset_idx || next_handle != slot->runtime_handle || next_state != slot->state || needs_aux_sync;
+
         slot->resolve_asset_idx = next_has_real_winner ? next_asset_idx : UINT16_MAX;
         slot->runtime_handle = next_handle;
         slot->resolve_prio = (int16_t)(next_has_real_winner ? tmp->candidate_prio : INT16_MIN);
         slot->resolve_seq = next_has_real_winner ? tmp->candidate_seq : 0;
-        if (next_has_real_winner) {
-            slot->state = NT_ASSET_STATE_READY;
-        } else if (target_missing_aux && next_handle == 0) {
-            slot->state = NT_ASSET_STATE_LOADING;
-        } else {
-            slot->state = tmp->scan_state;
+        slot->state = next_state;
+
+        if (publication_changed) {
+            resource_bump_publication_epoch();
         }
     }
     // #endregion
@@ -1034,6 +1044,8 @@ uint8_t nt_resource_get_state(nt_resource_t handle) {
 
     return s_resource.slots[index].state;
 }
+
+uint32_t nt_resource_publication_epoch(void) { return s_resource.publication_epoch; }
 
 const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size) {
     if (out_size) {

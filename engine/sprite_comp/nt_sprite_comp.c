@@ -10,6 +10,8 @@
 /* ---- Static state ---- */
 
 static nt_comp_storage_t s_storage;
+static uint32_t s_last_publication_epoch;
+static bool s_sync_dirty;
 
 /* ---- SoA data arrays ---- */
 
@@ -132,6 +134,9 @@ nt_result_t nt_sprite_comp_init(const nt_sprite_comp_desc_t *desc) {
         .on_destroy = sprite_on_destroy,
     });
 
+    s_last_publication_epoch = 0;
+    s_sync_dirty = false;
+
     return NT_OK;
 }
 
@@ -148,14 +153,29 @@ void nt_sprite_comp_shutdown(void) {
     s_atlas_revision = NULL;
     s_origin = NULL;
     s_flags = NULL;
+    s_last_publication_epoch = 0;
+    s_sync_dirty = false;
     nt_comp_storage_shutdown(&s_storage);
 }
 
 void nt_sprite_comp_sync_resources(void) {
     uint16_t count = nt_comp_storage_count(&s_storage);
+    uint32_t publication_epoch = nt_resource_publication_epoch();
+    if (count == 0) {
+        s_last_publication_epoch = publication_epoch;
+        s_sync_dirty = false;
+        return;
+    }
+
+    if (!s_sync_dirty && s_last_publication_epoch == publication_epoch) {
+        return;
+    }
+
     for (uint16_t i = 0; i < count; i++) {
         sprite_resolve_dense(i);
     }
+    s_last_publication_epoch = publication_epoch;
+    s_sync_dirty = false;
 }
 
 /* ---- Per-entity operations ---- */
@@ -222,6 +242,7 @@ void nt_sprite_comp_bind_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64
     s_atlas[idx] = atlas;
     s_region_hash[idx] = name_hash;
     sprite_clear_resolved(idx);
+    s_sync_dirty = true;
     if ((s_flags[idx] & NT_SPRITE_FLAG_ORIGIN_OV) == 0) {
         s_origin[idx][0] = 0.0F;
         s_origin[idx][1] = 0.0F;
