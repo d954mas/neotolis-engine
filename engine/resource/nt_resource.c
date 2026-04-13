@@ -44,9 +44,6 @@ static struct {
     bool initialized;
 } s_resource;
 
-/* Transient resolve scratch — only valid inside resource_resolve_pass(). */
-static NtResolveTemp s_resolve_temp[NT_RESOURCE_MAX_SLOTS + 1];
-
 /* ---- Pack lookup ---- */
 
 static int16_t find_pack(uint32_t pack_id) {
@@ -152,6 +149,9 @@ static void schedule_pack_redownload_if_needed(NtPackMeta *pack) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void resource_resolve_pass(void) {
+    NtResolveTemp *resolve_temp = (NtResolveTemp *)calloc(NT_RESOURCE_MAX_SLOTS + 1, sizeof(NtResolveTemp));
+    NT_ASSERT(resolve_temp);
+
     /* D.1: Prepare per-pass transient candidates */
     for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
         NtResourceSlot *slot = &s_resource.slots[si];
@@ -161,7 +161,7 @@ static void resource_resolve_pass(void) {
         slot->prev_resolve_asset_idx = slot->resolve_asset_idx;
         slot->prev_runtime_handle = slot->runtime_handle;
 
-        NtResolveTemp *tmp = &s_resolve_temp[si];
+        NtResolveTemp *tmp = &resolve_temp[si];
         tmp->target_runtime_handle = 0;
         tmp->candidate_runtime_handle = 0;
         tmp->target_prio = INT16_MIN;
@@ -191,7 +191,7 @@ static void resource_resolve_pass(void) {
         }
 
         NtResourceSlot *slot = &s_resource.slots[si];
-        NtResolveTemp *tmp = &s_resolve_temp[si];
+        NtResolveTemp *tmp = &resolve_temp[si];
 
         /* Skip type mismatch (malformed pack or hash collision) */
         if (meta->asset_type != slot->asset_type) {
@@ -236,7 +236,7 @@ static void resource_resolve_pass(void) {
         uint16_t ph_si = slot_map_find(s_resource.placeholder_texture);
         uint32_t ph_handle = 0;
         if (ph_si != 0) {
-            const NtResolveTemp *ph_tmp = &s_resolve_temp[ph_si];
+            const NtResolveTemp *ph_tmp = &resolve_temp[ph_si];
             const NtResourceSlot *ph_slot = &s_resource.slots[ph_si];
             ph_handle = (ph_tmp->candidate_asset_idx < s_resource.asset_hwm || ph_tmp->candidate_runtime_handle != 0) ? ph_tmp->candidate_runtime_handle : ph_slot->runtime_handle;
         }
@@ -244,7 +244,7 @@ static void resource_resolve_pass(void) {
         if (ph_handle != 0) {
             for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
                 NtResourceSlot *slot = &s_resource.slots[si];
-                NtResolveTemp *tmp = &s_resolve_temp[si];
+                NtResolveTemp *tmp = &resolve_temp[si];
                 if (slot->resource_id == 0) {
                     continue;
                 }
@@ -264,7 +264,7 @@ static void resource_resolve_pass(void) {
         if (slot->resource_id == 0) {
             continue;
         }
-        NtResolveTemp *tmp = &s_resolve_temp[si];
+        NtResolveTemp *tmp = &resolve_temp[si];
 
         uint8_t atype = slot->asset_type;
         NtActivatorEntry *entry = &s_resource.activators[atype];
@@ -329,7 +329,7 @@ static void resource_resolve_pass(void) {
     // #region D.5: Fire on_post_resolve callbacks after the resolve iteration
     for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
         NtResourceSlot *slot = &s_resource.slots[si];
-        const NtResolveTemp *tmp = &s_resolve_temp[si];
+        const NtResolveTemp *tmp = &resolve_temp[si];
         if (slot->resource_id == 0 || !tmp->post_resolve_pending || slot->resolve_asset_idx >= s_resource.asset_hwm) {
             continue;
         }
@@ -345,6 +345,8 @@ static void resource_resolve_pass(void) {
         s_resource.activators[atype].on_post_resolve(data, size, resource_make(si, slot->generation), slot->runtime_handle, slot->user_data);
     }
     // #endregion
+
+    free(resolve_temp);
 }
 
 /* ---- I/O issue helper (shared by load + retry) ---- */

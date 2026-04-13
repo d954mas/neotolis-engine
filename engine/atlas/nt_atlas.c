@@ -308,6 +308,9 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
     const NtAtlasRegion *regions = (const NtAtlasRegion *)(page_ids_bytes + page_bytes);
     for (uint32_t i = 0; i < hdr->region_count; i++) {
         const NtAtlasRegion *region = &regions[i];
+        if (region->name_hash == NT_ATLAS_TOMBSTONE_HASH) {
+            return false;
+        }
         if (hdr->page_count > 0 && region->page_index >= hdr->page_count) {
             return false;
         }

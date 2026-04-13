@@ -929,33 +929,42 @@ typedef struct {
 
 ## 17.6 NtResourceSlot
 
+Persistent per-slot state — survives across frames:
+
 ```c
 typedef struct {
-    uint64_t resource_id;              /* nt_hash64 value */
-    uint32_t runtime_handle;           /* published winner handle */
-    uint32_t target_runtime_handle;    /* highest-priority READY handle */
-    uint32_t candidate_runtime_handle; /* best publishable handle found in current pass */
-    uint16_t generation;               /* stale detection */
-    int16_t  resolve_prio;             /* priority of published winner */
-    int16_t  target_prio;              /* priority of target winner */
-    int16_t  candidate_prio;           /* priority of publishable candidate */
-    uint8_t  asset_type;               /* nt_asset_type_t */
-    uint8_t  state;                    /* state visible to game code */
-    uint8_t  scan_state;               /* best raw asset state seen this pass */
-    uint16_t resolve_seq;              /* mount_seq of published winner (tiebreak) */
-    uint16_t target_seq;               /* mount_seq of target winner */
-    uint16_t candidate_seq;            /* mount_seq of publishable candidate */
-    uint16_t resolve_asset_idx;        /* index into assets[] of published winner */
-    uint16_t target_asset_idx;         /* index into assets[] of target winner */
-    uint16_t candidate_asset_idx;      /* index into assets[] of publishable candidate */
-    uint16_t prev_resolve_asset_idx;   /* previous published winner identity */
-    uint16_t user_data_asset_idx;      /* asset idx last used to build user_data */
-    uint32_t prev_runtime_handle;      /* previous published handle */
-    void    *user_data;                /* per-slot auxiliary data */
+    uint64_t resource_id;            /* nt_hash64 value */
+    uint32_t runtime_handle;         /* published winner's runtime handle (what game sees) */
+    uint16_t generation;             /* stale-handle detection; incremented on slot reuse */
+    int16_t  resolve_prio;           /* priority of currently published winner */
+    uint16_t resolve_seq;            /* mount_seq of published winner (tiebreak) */
+    uint16_t resolve_asset_idx;      /* index into assets[] of published winner */
+    uint16_t prev_resolve_asset_idx; /* previous published winner (change detection) */
+    uint16_t user_data_asset_idx;    /* asset idx last used to build user_data (aux sync check) */
+    uint32_t prev_runtime_handle;    /* previous published handle (detect re-activation) */
+    uint8_t  asset_type;             /* nt_asset_type_t */
+    uint8_t  state;                  /* nt_asset_state_t visible to game code */
+    void    *user_data;              /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 ```
 
-Implementation also keeps transient per-pass flags (for example post-resolve scheduling) that are omitted here for brevity.
+Transient per-pass state — allocated at the start of each resolve pass, freed at the end. Lives in a separate array to keep NtResourceSlot small for the common case (resolve runs only when `needs_resolve` is true):
+
+```c
+typedef struct {
+    uint32_t target_runtime_handle;    /* best READY asset handle, even if blob is evicted */
+    uint32_t candidate_runtime_handle; /* best READY asset handle that is publishable now */
+    int16_t  target_prio;              /* priority of target winner */
+    int16_t  candidate_prio;           /* priority of publishable candidate */
+    uint16_t target_seq;               /* mount_seq of target winner */
+    uint16_t candidate_seq;            /* mount_seq of publishable candidate */
+    uint16_t target_asset_idx;         /* assets[] index of target winner */
+    uint16_t candidate_asset_idx;      /* assets[] index of publishable candidate */
+    uint8_t  scan_state;               /* best nt_asset_state_t seen among all matching assets */
+    uint8_t  resolve_pending;          /* on_resolve fired for the published winner */
+    uint8_t  post_resolve_pending;     /* on_post_resolve should fire after the pass */
+} NtResolveTemp;
+```
 
 The resolve pass computes both the target winner and the published winner for each slot:
 - the target winner is purely priority/sequence-based over READY assets
