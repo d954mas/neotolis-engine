@@ -215,8 +215,7 @@ static void replace_pages(nt_atlas_data_t *ad, const uint8_t *new_page_ids_bytes
 
 // #region activator callbacks
 /* D-10: trivial no-op activator. The real work happens in on_resolve;
- * activate exists only so the resource state machine transitions
- * REGISTERED -> READY so nt_resource_is_ready() reports true. */
+ * activate only materializes a stable runtime winner handle for stacking. */
 static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
     (void)data;
     (void)size;
@@ -524,6 +523,7 @@ nt_result_t nt_atlas_init(void) {
     nt_resource_set_activator(NT_ASSET_ATLAS, atlas_activate, atlas_deactivate);
     nt_resource_set_resolve_callbacks(NT_ASSET_ATLAS, atlas_on_resolve, atlas_on_cleanup);
     nt_resource_set_post_resolve_callback(NT_ASSET_ATLAS, atlas_on_post_resolve);
+    nt_resource_set_behavior_flags(NT_ASSET_ATLAS, NT_RESOURCE_BEHAVIOR_PUBLISH_REQUIRES_AUX | NT_RESOURCE_BEHAVIOR_AUTO_RELOAD_ON_AUX_MISS);
     s_atlas.initialized = true;
     return NT_OK;
 }

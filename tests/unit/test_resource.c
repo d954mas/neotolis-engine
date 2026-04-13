@@ -1933,6 +1933,135 @@ void test_on_resolve_merge_on_reactivation(void) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_aux_publish_falls_back_to_best_usable_winner(void) {
+    reset_resolve_state();
+    s_activate_call_count = 0;
+    s_next_handle = 0xBEEF;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate_seq, fake_deactivate);
+    nt_resource_set_resolve_callbacks(NT_ASSET_MESH, mock_on_resolve, mock_on_cleanup);
+    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_PUBLISH_REQUIRES_AUX | NT_RESOURCE_BEHAVIOR_AUTO_RELOAD_ON_AUX_MISS);
+
+    nt_hash64_t rid = nt_hash64_str("aux_publish_fallback_res");
+
+    nt_hash32_t pid_b = nt_hash32_str("aux_publish_pack_b");
+    write_test_pack_file("build/test_aux_publish_b.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid_b, "build/test_aux_publish_b.ntpack"));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step();
+    uint32_t handle_b = nt_resource_get(h);
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+    TEST_ASSERT_TRUE(handle_b != 0);
+
+    nt_hash32_t pid_a = nt_hash32_str("aux_publish_pack_a");
+    write_test_pack_file("build/test_aux_publish_a.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 10));
+    nt_resource_set_blob_policy(pid_a, NT_BLOB_AUTO, 1);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid_a, "build/test_aux_publish_a.ntpack"));
+    nt_resource_step();
+    uint32_t handle_a = nt_resource_get(h);
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+    TEST_ASSERT_NOT_EQUAL(handle_b, handle_a);
+
+    nt_hash32_t pid_c = nt_hash32_str("aux_publish_pack_c");
+    write_test_pack_file("build/test_aux_publish_c.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_c, 20));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid_c, "build/test_aux_publish_c.ntpack"));
+    nt_resource_step();
+    uint32_t handle_c = nt_resource_get(h);
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+    TEST_ASSERT_NOT_EQUAL(handle_a, handle_c);
+
+    nt_time_sleep(0.005);
+    nt_resource_step(); /* evict pack A while pack C is still published */
+
+    nt_resource_unmount(pid_c);
+    nt_resource_step(); /* target A missing -> published should fall back to resident B */
+
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+    TEST_ASSERT_EQUAL_UINT32(handle_b, nt_resource_get(h));
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_NONE, nt_resource_pack_state(pid_a));
+    TEST_ASSERT_EQUAL_UINT32(4, s_resolve_call_count);
+    TEST_ASSERT_EQUAL_UINT32(45, *(uint32_t *)s_last_resolve_user_data);
+
+    nt_resource_step(); /* re-download A and republish it */
+    if (nt_resource_pack_state(pid_a) == NT_PACK_STATE_REQUESTED) {
+        nt_resource_step();
+    }
+
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid_a));
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+    TEST_ASSERT_EQUAL_UINT32(handle_a, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT32(5, s_resolve_call_count);
+    TEST_ASSERT_EQUAL_UINT32(46, *(uint32_t *)s_last_resolve_user_data);
+
+    (void)remove("build/test_aux_publish_b.ntpack");
+    (void)remove("build/test_aux_publish_a.ntpack");
+    (void)remove("build/test_aux_publish_c.ntpack");
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_aux_publish_waits_for_reload_when_no_usable_fallback_exists(void) {
+    reset_resolve_state();
+    s_activate_call_count = 0;
+    s_next_handle = 0xBEEF;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate_seq, fake_deactivate);
+    nt_resource_set_resolve_callbacks(NT_ASSET_MESH, mock_on_resolve, mock_on_cleanup);
+    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_PUBLISH_REQUIRES_AUX | NT_RESOURCE_BEHAVIOR_AUTO_RELOAD_ON_AUX_MISS);
+
+    nt_hash64_t rid = nt_hash64_str("aux_publish_reload_res");
+
+    nt_hash32_t pid_b = nt_hash32_str("aux_reload_pack_b");
+    write_test_pack_file("build/test_aux_reload_b.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_b, 0));
+    nt_resource_set_blob_policy(pid_b, NT_BLOB_AUTO, 1);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid_b, "build/test_aux_reload_b.ntpack"));
+
+    nt_resource_t h = nt_resource_request(rid, NT_ASSET_MESH);
+    nt_resource_step();
+    uint32_t handle_b = nt_resource_get(h);
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+    TEST_ASSERT_TRUE(handle_b != 0);
+
+    nt_hash32_t pid_a = nt_hash32_str("aux_reload_pack_a");
+    write_test_pack_file("build/test_aux_reload_a.ntpack", rid.value, NT_ASSET_MESH);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_a, 10));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_load_file(pid_a, "build/test_aux_reload_a.ntpack"));
+    nt_resource_step();
+    uint32_t handle_a = nt_resource_get(h);
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+    TEST_ASSERT_NOT_EQUAL(handle_b, handle_a);
+
+    nt_time_sleep(0.005);
+    nt_resource_step(); /* evict fallback B while A is published */
+
+    nt_resource_unmount(pid_a);
+    nt_resource_step(); /* target B missing and no other usable winner */
+
+    TEST_ASSERT_FALSE(nt_resource_is_ready(h));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT8(NT_ASSET_STATE_LOADING, nt_resource_get_state(h));
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_NONE, nt_resource_pack_state(pid_b));
+    TEST_ASSERT_EQUAL_UINT32(1, s_cleanup_call_count);
+    TEST_ASSERT_NULL(nt_resource_get_user_data(h));
+
+    nt_resource_step(); /* re-download B and publish it again */
+    if (nt_resource_pack_state(pid_b) == NT_PACK_STATE_REQUESTED) {
+        nt_resource_step();
+    }
+
+    TEST_ASSERT_EQUAL(NT_PACK_STATE_READY, nt_resource_pack_state(pid_b));
+    TEST_ASSERT_TRUE(nt_resource_is_ready(h));
+    TEST_ASSERT_EQUAL_UINT32(handle_b, nt_resource_get(h));
+    TEST_ASSERT_EQUAL_UINT32(3, s_resolve_call_count);
+    TEST_ASSERT_NOT_NULL(nt_resource_get_user_data(h));
+
+    (void)remove("build/test_aux_reload_b.ntpack");
+    (void)remove("build/test_aux_reload_a.ntpack");
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_on_cleanup_fires_on_unmount(void) {
     reset_resolve_state();
     s_activate_call_count = 0;
@@ -2282,6 +2411,8 @@ int main(void) {
     RUN_TEST(test_on_resolve_fires_on_winner_change);
     RUN_TEST(test_on_post_resolve_can_request_dependency_and_resolve_same_step);
     RUN_TEST(test_on_resolve_merge_on_reactivation);
+    RUN_TEST(test_aux_publish_falls_back_to_best_usable_winner);
+    RUN_TEST(test_aux_publish_waits_for_reload_when_no_usable_fallback_exists);
     RUN_TEST(test_on_cleanup_fires_on_unmount);
     RUN_TEST(test_on_cleanup_fires_on_shutdown);
     RUN_TEST(test_get_user_data_valid_handle);

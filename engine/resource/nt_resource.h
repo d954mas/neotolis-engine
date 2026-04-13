@@ -67,6 +67,21 @@ typedef void (*nt_resolve_fn)(const uint8_t *data, uint32_t size, uint32_t runti
 typedef void (*nt_cleanup_fn)(void *user_data);
 typedef void (*nt_post_resolve_fn)(const uint8_t *data, uint32_t size, nt_resource_t handle, uint32_t runtime_handle, void *user_data);
 
+/* ---- Resolve behavior flags ----
+ *
+ * Asset types that derive persistent auxiliary state from pack bytes (atlas,
+ * future similar assets) can opt into deferred publish:
+ *   - the highest-priority READY asset remains the target winner
+ *   - the published winner stays on the best currently usable asset
+ *   - when the target needs aux data but its blob is missing, the slot is not
+ *     published as READY until aux state is synchronized
+ */
+typedef enum {
+    NT_RESOURCE_BEHAVIOR_NONE = 0,
+    NT_RESOURCE_BEHAVIOR_PUBLISH_REQUIRES_AUX = 1 << 0,
+    NT_RESOURCE_BEHAVIOR_AUTO_RELOAD_ON_AUX_MISS = 1 << 1,
+} nt_resource_behavior_t;
+
 /* ---- Descriptor ---- */
 
 typedef struct {
@@ -99,6 +114,10 @@ nt_resource_t nt_resource_request(nt_hash64_t resource_id, uint8_t asset_type);
 nt_resource_t nt_resource_find(nt_hash64_t resource_id);
 
 uint32_t nt_resource_get(nt_resource_t handle);
+/* READY means the currently published winner is fully usable.
+ * For simple runtime-handle assets this matches the old behavior.
+ * For aux-backed assets (atlas, future similar types) READY additionally
+ * requires user_data to be synchronized with the published winner. */
 bool nt_resource_is_ready(nt_resource_t handle);
 uint8_t nt_resource_get_state(nt_resource_t handle);
 
@@ -136,6 +155,7 @@ void nt_resource_pack_progress(nt_hash32_t pack_id, uint32_t *received, uint32_t
 void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_deactivate_fn deactivate);
 void nt_resource_set_resolve_callbacks(uint8_t asset_type, nt_resolve_fn on_resolve, nt_cleanup_fn on_cleanup);
 void nt_resource_set_post_resolve_callback(uint8_t asset_type, nt_post_resolve_fn on_post_resolve);
+void nt_resource_set_behavior_flags(uint8_t asset_type, uint8_t behavior_flags);
 void *nt_resource_get_user_data(nt_resource_t handle);
 
 /* ---- Activation time budget ---- */
