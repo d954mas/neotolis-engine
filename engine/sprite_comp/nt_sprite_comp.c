@@ -6,6 +6,7 @@
 #include "atlas/nt_atlas.h"
 #include "comp_storage/nt_comp_storage.h"
 #include "core/nt_assert.h"
+#include "resource/nt_resource.h"
 
 /* ---- Static state ---- */
 
@@ -59,16 +60,7 @@ static void sprite_resolve_dense(uint16_t idx) {
 
     uint32_t resolved = nt_atlas_find_region(atlas, s_region_hash[idx]);
     NT_ASSERT(resolved != NT_ATLAS_INVALID_REGION);
-    if (resolved == NT_ATLAS_INVALID_REGION) {
-        sprite_clear_resolved(idx);
-        return;
-    }
-
     NT_ASSERT(resolved <= UINT16_MAX);
-    if (resolved > UINT16_MAX) {
-        sprite_clear_resolved(idx);
-        return;
-    }
 
     s_region_index[idx] = (uint16_t)resolved;
     s_atlas_revision[idx] = revision;
@@ -106,9 +98,8 @@ static void sprite_on_destroy(nt_entity_t entity) {
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_sprite_comp_init(const nt_sprite_comp_desc_t *desc) {
-    if (!desc || desc->capacity == 0) {
-        return NT_ERR_INVALID_ARG;
-    }
+    NT_ASSERT(desc != NULL);
+    NT_ASSERT(desc->capacity > 0);
 
     nt_result_t res = nt_comp_storage_init(&s_storage, desc->capacity, sprite_default, sprite_swap);
     if (res != NT_OK) {

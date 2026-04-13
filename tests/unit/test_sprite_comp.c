@@ -459,7 +459,28 @@ void test_sprite_sync_preserves_override_on_atlas_republish(void) {
     TEST_ASSERT_TRUE(origin[1] == 0.9F); /* NOLINT */
 }
 
-/* ---- Test 12: entity destroy auto-removes sprite ---- */
+/* ---- Test 12: set_flip sets bits correctly and isolates from other flags ---- */
+
+void test_sprite_set_flip_bit_isolation(void) {
+    nt_entity_t e = nt_entity_create();
+    nt_sprite_comp_add(e);
+
+    nt_sprite_comp_set_flip(e, true, false);
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X, NT_SPRITE_FLAG_FLIP_X, *nt_sprite_comp_flags(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_Y, 0, *nt_sprite_comp_flags(e));
+
+    nt_sprite_comp_set_flip(e, false, true);
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X, 0, *nt_sprite_comp_flags(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_Y, NT_SPRITE_FLAG_FLIP_Y, *nt_sprite_comp_flags(e));
+
+    nt_sprite_comp_set_flip(e, true, true);
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y, NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y, *nt_sprite_comp_flags(e));
+
+    nt_sprite_comp_set_flip(e, false, false);
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y, 0, *nt_sprite_comp_flags(e));
+}
+
+/* ---- Test 13: entity destroy auto-removes sprite ---- */
 
 void test_entity_destroy_removes_sprite(void) {
     nt_entity_t e = nt_entity_create();
@@ -484,6 +505,7 @@ int main(void) {
     RUN_TEST(test_sprite_swap_and_pop_preserves_state);
     RUN_TEST(test_sprite_sync_refreshes_authored_origin_on_atlas_republish);
     RUN_TEST(test_sprite_sync_preserves_override_on_atlas_republish);
+    RUN_TEST(test_sprite_set_flip_bit_isolation);
     RUN_TEST(test_entity_destroy_removes_sprite);
     return UNITY_END();
 }
