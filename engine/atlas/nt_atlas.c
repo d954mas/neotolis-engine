@@ -24,18 +24,19 @@ static struct {
  *
  * Sentinels for nt_atlas_hash_entry_t.region_index:
  *   EMPTY    = 0               probe stops here
- *   DELETED  = UINT32_MAX      probe continues past (tombstone)
  *   OCCUPIED = 1 .. N          stored as actual region index + 1
  *
  * Storing (index + 1) means the first registered region (index 0) is
  * distinguishable from an EMPTY slot. The 1-based form is collapsed back
- * to the 0-based index on lookup. */
+ * to the 0-based index on lookup.
+ *
+ * The table is rebuilt from scratch after each parse/merge — no DELETED
+ * sentinel, no incremental growth, no load-factor tracking. */
 #define NT_ATLAS_HT_EMPTY ((uint32_t)0)
-#define NT_ATLAS_HT_DELETED ((uint32_t)0xFFFFFFFFU)
 
 typedef struct {
     uint64_t name_hash;    /* ignored when region_index == EMPTY */
-    uint32_t region_index; /* EMPTY / DELETED / (index + 1) */
+    uint32_t region_index; /* EMPTY / (index + 1) */
 } nt_atlas_hash_entry_t;
 
 typedef struct nt_atlas_data {
@@ -54,10 +55,10 @@ typedef struct nt_atlas_data {
     uint32_t index_count; /* append cursor */
     uint32_t index_capacity;
 
-    /* Open-addressing hash table — power-of-two, linear probing */
+    /* Open-addressing hash table — power-of-two, linear probing.
+     * Rebuilt from scratch on each parse/merge — no incremental growth. */
     nt_atlas_hash_entry_t *hash_table;
-    uint32_t hash_capacity; /* pow2, >= next_pow2(region_count * 2) */
-    uint32_t hash_used;     /* OCCUPIED + DELETED count; triggers rehash > cap/2 */
+    uint32_t hash_capacity; /* pow2, >= next_pow2(live_region_count * 2) */
 
     /* Page texture ids + lazily resolved handles (see R1 in 48-RESEARCH.md:
      * nt_resource_request is illegal inside on_resolve, so we cache the ids
@@ -84,7 +85,7 @@ static uint32_t next_pow2(uint32_t v) {
 }
 
 /* Return the OCCUPIED region_index (0-based, or NT_ATLAS_INVALID_REGION).
- * Skips DELETED slots, stops at EMPTY. */
+ * Stops at EMPTY. */
 static uint32_t hash_find(const nt_atlas_data_t *ad, uint64_t name_hash) {
     if (ad->hash_capacity == 0) {
         return NT_ATLAS_INVALID_REGION;
@@ -96,7 +97,7 @@ static uint32_t hash_find(const nt_atlas_data_t *ad, uint64_t name_hash) {
         if (e->region_index == NT_ATLAS_HT_EMPTY) {
             return NT_ATLAS_INVALID_REGION;
         }
-        if (e->region_index != NT_ATLAS_HT_DELETED && e->name_hash == name_hash) {
+        if (e->name_hash == name_hash) {
             return e->region_index - 1U; /* collapse 1-based to 0-based */
         }
         pos = (pos + 1U) & mask;
@@ -104,15 +105,14 @@ static uint32_t hash_find(const nt_atlas_data_t *ad, uint64_t name_hash) {
     return NT_ATLAS_INVALID_REGION;
 }
 
-/* Raw insert — caller must have ensured capacity/rehash policy.
- * Overwrites the first EMPTY or DELETED slot found along the probe chain. */
+/* Raw insert into a pre-sized table. Caller guarantees enough EMPTY slots. */
 static void hash_insert_raw(nt_atlas_hash_entry_t *table, uint32_t capacity, uint64_t name_hash, uint32_t region_index) {
     NT_ASSERT(capacity > 0);
     const uint32_t mask = capacity - 1;
     uint32_t pos = (uint32_t)(name_hash & mask);
     for (uint32_t steps = 0; steps < capacity; steps++) {
         nt_atlas_hash_entry_t *e = &table[pos];
-        if (e->region_index == NT_ATLAS_HT_EMPTY || e->region_index == NT_ATLAS_HT_DELETED) {
+        if (e->region_index == NT_ATLAS_HT_EMPTY) {
             e->name_hash = name_hash;
             e->region_index = region_index + 1U; /* 1-based */
             return;
@@ -122,59 +122,31 @@ static void hash_insert_raw(nt_atlas_hash_entry_t *table, uint32_t capacity, uin
     NT_ASSERT(0 && "hash table full — capacity invariant violated");
 }
 
-/* Rebuild the hash table from the live (non-tombstone) regions, dropping any
- * DELETED markers. Used by hash_insert when the load factor (OCCUPIED+DELETED)
- * exceeds half of hash_capacity. */
-static void hash_rehash(nt_atlas_data_t *ad, uint32_t new_capacity) {
-    NT_ASSERT((new_capacity & (new_capacity - 1)) == 0); /* pow2 */
-    nt_atlas_hash_entry_t *new_table = (nt_atlas_hash_entry_t *)calloc(new_capacity, sizeof(nt_atlas_hash_entry_t));
-    NT_ASSERT(new_table);
+/* Free the old hash table and rebuild from live (non-tombstone) regions.
+ * Called once after first parse and once after each merge. */
+static void hash_rebuild(nt_atlas_data_t *ad) {
+    free(ad->hash_table);
 
     uint32_t live = 0;
     for (uint32_t i = 0; i < ad->region_count; i++) {
-        const nt_texture_region_t *r = &ad->regions[i];
-        if (r->name_hash == NT_ATLAS_TOMBSTONE_HASH) {
-            continue;
+        if (ad->regions[i].name_hash != NT_ATLAS_TOMBSTONE_HASH) {
+            live++;
         }
-        hash_insert_raw(new_table, new_capacity, r->name_hash, i);
-        live++;
     }
 
-    free(ad->hash_table);
-    ad->hash_table = new_table;
-    ad->hash_capacity = new_capacity;
-    ad->hash_used = live;
-}
-
-static void hash_insert(nt_atlas_data_t *ad, uint64_t name_hash, uint32_t region_index) {
-    /* Grow / rehash if load factor > 0.5. hash_used includes DELETED so this
-     * also compacts out tombstones once they dominate. */
-    if (ad->hash_capacity == 0 || (ad->hash_used + 1U) * 2U > ad->hash_capacity) {
-        uint32_t new_cap = ad->hash_capacity == 0 ? 16U : ad->hash_capacity * 2U;
-        hash_rehash(ad, new_cap);
+    uint32_t cap = next_pow2(live * 2U);
+    if (cap < 16U) {
+        cap = 16U;
     }
-    hash_insert_raw(ad->hash_table, ad->hash_capacity, name_hash, region_index);
-    ad->hash_used++;
-}
 
-/* Mark a slot as DELETED. Probes continue past it; a future rehash drops it. */
-static void hash_delete(nt_atlas_data_t *ad, uint64_t name_hash) {
-    if (ad->hash_capacity == 0) {
-        return;
-    }
-    const uint32_t mask = ad->hash_capacity - 1;
-    uint32_t pos = (uint32_t)(name_hash & mask);
-    for (uint32_t steps = 0; steps < ad->hash_capacity; steps++) {
-        nt_atlas_hash_entry_t *e = &ad->hash_table[pos];
-        if (e->region_index == NT_ATLAS_HT_EMPTY) {
-            return;
+    ad->hash_table = (nt_atlas_hash_entry_t *)calloc(cap, sizeof(nt_atlas_hash_entry_t));
+    NT_ASSERT(ad->hash_table);
+    ad->hash_capacity = cap;
+
+    for (uint32_t i = 0; i < ad->region_count; i++) {
+        if (ad->regions[i].name_hash != NT_ATLAS_TOMBSTONE_HASH) {
+            hash_insert_raw(ad->hash_table, cap, ad->regions[i].name_hash, i);
         }
-        if (e->region_index != NT_ATLAS_HT_DELETED && e->name_hash == name_hash) {
-            e->region_index = NT_ATLAS_HT_DELETED;
-            /* hash_used stays — DELETED still occupies the slot budget */
-            return;
-        }
-        pos = (pos + 1U) & mask;
     }
 }
 // #endregion
@@ -227,6 +199,7 @@ static void translate_region(nt_texture_region_t *dst, const NtAtlasRegion *src)
  * Source is a raw byte pointer because blob page-id storage may be only
  * 4-byte aligned (pack asset alignment). We memcpy bytes into the
  * 8-byte-aligned ad->page_resource_ids destination. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void replace_pages(nt_atlas_data_t *ad, const uint8_t *new_page_ids_bytes, uint32_t page_bytes, uint8_t new_page_count) {
     NT_ASSERT(new_page_count <= NT_ATLAS_MAX_PAGES);
     NT_ASSERT(page_bytes == (uint32_t)new_page_count * (uint32_t)sizeof(uint64_t));
@@ -243,6 +216,7 @@ static void replace_pages(nt_atlas_data_t *ad, const uint8_t *new_page_ids_bytes
     for (uint8_t i = 0; i < new_page_count; i++) {
         nt_hash64_t rid = (nt_hash64_t){ad->page_resource_ids[i]};
         ad->page_resources[i] = nt_resource_find(rid);
+        NT_ASSERT(ad->page_resources[i].id != 0 && "page texture not registered");
     }
     for (uint32_t i = new_page_count; i < NT_ATLAS_MAX_PAGES; i++) {
         ad->page_resources[i] = NT_RESOURCE_INVALID;
@@ -295,6 +269,8 @@ static void validate_and_carve_blob(const uint8_t *data, uint32_t size, nt_atlas
 
     const uint32_t page_bytes = (uint32_t)hdr->page_count * (uint32_t)sizeof(uint64_t);
     const uint32_t region_bytes = (uint32_t)hdr->region_count * (uint32_t)sizeof(NtAtlasRegion);
+    NT_ASSERT(hdr->total_vertex_count <= UINT32_MAX / sizeof(NtAtlasVertex));
+    NT_ASSERT(hdr->total_index_count <= UINT32_MAX / sizeof(uint16_t));
     const uint32_t vertex_bytes = hdr->total_vertex_count * (uint32_t)sizeof(NtAtlasVertex);
     const uint32_t index_bytes = hdr->total_index_count * (uint32_t)sizeof(uint16_t);
     NT_ASSERT(size >= (uint32_t)sizeof(NtAtlasHeader) + page_bytes + region_bytes);
@@ -328,14 +304,8 @@ static nt_atlas_data_t *first_parse_allocate(const NtAtlasHeader *hdr) {
     ad->indices = (uint16_t *)malloc(ad->index_capacity * sizeof(uint16_t));
     NT_ASSERT(ad->indices);
 
-    uint32_t hcap = next_pow2(ad->region_capacity * 2U);
-    if (hcap < 16U) {
-        hcap = 16U;
-    }
-    ad->hash_capacity = hcap;
-    ad->hash_table = (nt_atlas_hash_entry_t *)calloc(ad->hash_capacity, sizeof(nt_atlas_hash_entry_t));
-    NT_ASSERT(ad->hash_table);
-    ad->hash_used = 0;
+    ad->hash_table = NULL;
+    ad->hash_capacity = 0;
     return ad;
 }
 
@@ -356,9 +326,10 @@ static void first_parse_fill(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v)
 
     for (uint32_t i = 0; i < v->hdr->region_count; i++) {
         translate_region(&ad->regions[i], &v->regions[i]);
-        hash_insert(ad, v->regions[i].name_hash, i);
     }
     ad->region_count = v->hdr->region_count;
+
+    hash_rebuild(ad);
 
     replace_pages(ad, v->page_ids_bytes, v->page_bytes, (uint8_t)v->hdr->page_count);
 }
@@ -422,19 +393,14 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
 
     merge_reset_buffers(ad, hdr);
 
-    /* Pre-scan: count how many new-blob regions are genuinely new (not in
-     * existing hash table) so we can pre-size the hash table exactly once. */
+    /* Pre-scan: count genuinely new regions to pre-grow region storage. */
     uint32_t new_only_count = 0;
     for (uint32_t i = 0; i < hdr->region_count; i++) {
         if (hash_find(ad, new_regions[i].name_hash) == NT_ATLAS_INVALID_REGION) {
             new_only_count++;
         }
     }
-    const uint32_t final_count = ad->region_count + new_only_count;
-    const uint32_t needed_cap = next_pow2(final_count * 2U);
-    if (needed_cap > ad->hash_capacity) {
-        hash_rehash(ad, needed_cap);
-    }
+    grow_regions_if_needed(ad, new_only_count);
 
     /* Seen-bitset: track which existing regions appear in the new blob.
      * Filled during pass 1 (common hits), consumed in pass 2 (unseen → tombstone). */
@@ -465,15 +431,11 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
             merge_append_region_payload(ad, r, nr, new_verts, new_index_bytes);
             // #endregion
         } else {
-            /* NEW: grow region storage, append region, insert into hash table. */
-            grow_regions_if_needed(ad, 1);
-
+            /* NEW: append region. Hash table rebuilt after both passes. */
             const uint32_t new_idx = ad->region_count++;
             nt_texture_region_t *r = &ad->regions[new_idx];
             translate_region(r, nr);
             merge_append_region_payload(ad, r, nr, new_verts, new_index_bytes);
-
-            hash_insert(ad, h, new_idx);
         }
     }
     // #endregion
@@ -487,7 +449,6 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
         const bool still_present = (seen[i / 8U] >> (i % 8U)) & 1U;
         if (!still_present) {
             NT_LOG_WARN("atlas merge: region 0x%016llx removed (not in new blob)", (unsigned long long)r->name_hash);
-            hash_delete(ad, r->name_hash);
             r->name_hash = NT_ATLAS_TOMBSTONE_HASH;
             r->vertex_count = 0;
             r->index_count = 0;
@@ -497,8 +458,10 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
 
     free(seen);
 
-    /* Replace page resource ids wholesale per D-05 + R1 — lazy handle cache
-     * page_resources[] is reset to NT_RESOURCE_INVALID inside replace_pages. */
+    /* Rebuild hash table from scratch — exact size for live regions. */
+    hash_rebuild(ad);
+
+    /* Replace page resource ids wholesale per D-05. */
     replace_pages(ad, v->page_ids_bytes, v->page_bytes, (uint8_t)hdr->page_count);
 }
 

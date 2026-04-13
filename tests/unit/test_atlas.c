@@ -162,8 +162,6 @@ static void build_fixture_blob(uint8_t *buf, uint32_t cap, uint32_t *out_size) {
     regions[2].page_index = 0;
     regions[2].transform = 4;
 
-    static const uint64_t page_ids[2] = {FIXTURE_PAGE0_ID, FIXTURE_PAGE1_ID};
-
     mock_atlas_spec_t spec = {
         .regions = regions,
         .region_count = 3,
@@ -171,8 +169,8 @@ static void build_fixture_blob(uint8_t *buf, uint32_t cap, uint32_t *out_size) {
         .total_vertex_count = 12,
         .indices = indices,
         .total_index_count = 18,
-        .page_ids = page_ids,
-        .page_count = 2,
+        .page_ids = NULL,
+        .page_count = 0,
     };
 
     *out_size = build_mock_atlas_blob(buf, cap, &spec);
@@ -194,9 +192,7 @@ void test_atlas_parse_valid_blob(void) {
     TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_region_count(ad));
     TEST_ASSERT_EQUAL_UINT32(12, nt_atlas_test_vertex_count(ad));
     TEST_ASSERT_EQUAL_UINT32(18, nt_atlas_test_index_count(ad));
-    TEST_ASSERT_EQUAL_UINT8(2, nt_atlas_test_page_count(ad));
-    TEST_ASSERT_EQUAL_UINT64(FIXTURE_PAGE0_ID, nt_atlas_test_page_resource_id(ad, 0));
-    TEST_ASSERT_EQUAL_UINT64(FIXTURE_PAGE1_ID, nt_atlas_test_page_resource_id(ad, 1));
+    TEST_ASSERT_EQUAL_UINT8(0, nt_atlas_test_page_count(ad));
 }
 
 /* Test 2: find_region by name hash
@@ -264,8 +260,6 @@ void test_atlas_get_region_returns_field_passthrough(void) {
     region.page_index = 1;
     region.transform = 0x05; /* bit0=flipH, bit2=diagonal */
 
-    static const uint64_t page_ids[2] = {0xDEAD, 0xBEEF};
-
     mock_atlas_spec_t spec = {
         .regions = &region,
         .region_count = 1,
@@ -273,8 +267,8 @@ void test_atlas_get_region_returns_field_passthrough(void) {
         .total_vertex_count = 4,
         .indices = indices,
         .total_index_count = 6,
-        .page_ids = page_ids,
-        .page_count = 2,
+        .page_ids = NULL,
+        .page_count = 0,
     };
 
     uint8_t buf[256];
@@ -416,14 +410,14 @@ static uint32_t build_merge_blob(uint8_t *out, uint32_t cap, const merge_region_
 
 /* ---- Test 6: merge common region updates metadata in place ---- */
 void test_atlas_merge_common_region_updates_in_place(void) {
-    static const uint64_t page_ids[1] = {0xAA01ULL};
+    /* Pages omitted — page tests use full resource system (test 15/16). */
 
     /* blob1: single region hash=0x111, 4 verts / 6 indices, payload seed 10 */
     merge_region_spec_t blob1_specs[1] = {
         {.name_hash = 0x111ULL, .vertex_count = 4, .index_count = 6, .source_w = 100, .page_index = 0, .transform = 0, .payload_seed = 10},
     };
     uint8_t buf1[512];
-    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 1, page_ids, 1);
+    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 1, NULL, 0);
 
     /* blob2: same hash=0x111 but source_w=200, DIFFERENT payload (seed=500).
      * Same vertex/index counts so we can assert exact cursor positions. */
@@ -431,7 +425,7 @@ void test_atlas_merge_common_region_updates_in_place(void) {
         {.name_hash = 0x111ULL, .vertex_count = 4, .index_count = 6, .source_w = 200, .page_index = 0, .transform = 0, .payload_seed = 500},
     };
     uint8_t buf2[512];
-    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 1, page_ids, 1);
+    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 1, NULL, 0);
 
     /* First parse */
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
@@ -462,14 +456,14 @@ void test_atlas_merge_common_region_updates_in_place(void) {
 
 /* ---- Test 7: merge appends new region with fresh index ---- */
 void test_atlas_merge_new_region_appends_with_fresh_index(void) {
-    static const uint64_t page_ids[1] = {0xAA02ULL};
+    /* Pages omitted. */
 
     merge_region_spec_t blob1_specs[2] = {
         {.name_hash = 0xAAAULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 10},
         {.name_hash = 0xBBBULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 20},
     };
     uint8_t buf1[512];
-    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 2, page_ids, 1);
+    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 2, NULL, 0);
 
     merge_region_spec_t blob2_specs[3] = {
         {.name_hash = 0xAAAULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 10},
@@ -477,7 +471,7 @@ void test_atlas_merge_new_region_appends_with_fresh_index(void) {
         {.name_hash = 0xCCCULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 30},
     };
     uint8_t buf2[512];
-    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 3, page_ids, 1);
+    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 3, NULL, 0);
 
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
@@ -493,7 +487,7 @@ void test_atlas_merge_new_region_appends_with_fresh_index(void) {
 
 /* ---- Test 8: removed region becomes a tombstone (stable indices) ---- */
 void test_atlas_merge_removed_region_becomes_tombstone(void) {
-    static const uint64_t page_ids[1] = {0xAA03ULL};
+    /* Pages omitted. */
 
     merge_region_spec_t blob1_specs[3] = {
         {.name_hash = 0xAAAULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 10},
@@ -501,7 +495,7 @@ void test_atlas_merge_removed_region_becomes_tombstone(void) {
         {.name_hash = 0xCCCULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 30},
     };
     uint8_t buf1[512];
-    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 3, page_ids, 1);
+    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 3, NULL, 0);
 
     /* blob2 drops B. */
     merge_region_spec_t blob2_specs[2] = {
@@ -509,7 +503,7 @@ void test_atlas_merge_removed_region_becomes_tombstone(void) {
         {.name_hash = 0xCCCULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 30},
     };
     uint8_t buf2[512];
-    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 2, page_ids, 1);
+    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 2, NULL, 0);
 
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
@@ -537,7 +531,7 @@ void test_atlas_merge_removed_region_becomes_tombstone(void) {
  * multiple merges; re-adding a previously-tombstoned hash creates a NEW
  * region at a fresh monotonic index — the old tombstone stays dead. ---- */
 void test_atlas_find_region_returns_invalid_for_tombstone(void) {
-    static const uint64_t page_ids[1] = {0xAA04ULL};
+    /* Pages omitted. */
 
     merge_region_spec_t only_a[1] = {
         {.name_hash = 0xAAAULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 10},
@@ -549,8 +543,8 @@ void test_atlas_find_region_returns_invalid_for_tombstone(void) {
 
     uint8_t buf_a[512];
     uint8_t buf_ab[512];
-    uint32_t size_a = build_merge_blob(buf_a, sizeof(buf_a), only_a, 1, page_ids, 1);
-    uint32_t size_ab = build_merge_blob(buf_ab, sizeof(buf_ab), a_and_b, 2, page_ids, 1);
+    uint32_t size_a = build_merge_blob(buf_a, sizeof(buf_a), only_a, 1, NULL, 0);
+    uint32_t size_ab = build_merge_blob(buf_ab, sizeof(buf_ab), a_and_b, 2, NULL, 0);
 
     /* Merge 1: parse {A, B} (first parse) */
     nt_atlas_test_drive_resolve(buf_ab, size_ab, &s_user_data);
@@ -586,7 +580,7 @@ void test_atlas_find_region_returns_invalid_for_tombstone(void) {
  * pointer with vertex_count==0 && index_count==0 (D-08 zero-draw
  * without NULL-branch in the hot path). ---- */
 void test_atlas_get_region_returns_vertex_count_zero_for_tombstone(void) {
-    static const uint64_t page_ids[1] = {0xAA05ULL};
+    /* Pages omitted. */
 
     merge_region_spec_t blob1_specs[3] = {
         {.name_hash = 0xAAAULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 10},
@@ -600,8 +594,8 @@ void test_atlas_get_region_returns_vertex_count_zero_for_tombstone(void) {
 
     uint8_t buf1[512];
     uint8_t buf2[512];
-    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 3, page_ids, 1);
-    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 2, page_ids, 1);
+    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 3, NULL, 0);
+    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 2, NULL, 0);
 
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
     nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
@@ -676,7 +670,6 @@ void test_atlas_hash_collisions_probe_correctly(void) {
     regions[2].index_count = 3;
     regions[2].page_index = 0;
 
-    const uint64_t page_ids[1] = {0xF001ULL};
     mock_atlas_spec_t spec = {
         .regions = regions,
         .region_count = 3,
@@ -684,8 +677,8 @@ void test_atlas_hash_collisions_probe_correctly(void) {
         .total_vertex_count = 9,
         .indices = indices,
         .total_index_count = 9,
-        .page_ids = page_ids,
-        .page_count = 1,
+        .page_ids = NULL,
+        .page_count = 0,
     };
 
     uint8_t buf[512];
@@ -732,8 +725,8 @@ void test_atlas_hash_table_growth_under_1000_regions(void) {
     const uint32_t total_indices_1 = n1 * indices_per_region;
 
     /* Estimate blob size:
-     * header(28) + page_ids(8) + regions(1000*36) + verts(3000*8) + indices(3000*2)
-     * = 28 + 8 + 36000 + 24000 + 6000 = 66036 bytes */
+     * header(28) + regions(1000*36) + verts(3000*8) + indices(3000*2)
+     * = 28 + 36000 + 24000 + 6000 = 66028 bytes */
     const uint32_t blob_cap = 70000;
     uint8_t *buf1 = (uint8_t *)malloc(blob_cap);
     TEST_ASSERT_NOT_NULL_MESSAGE(buf1, "malloc for 1000-region blob");
@@ -770,7 +763,6 @@ void test_atlas_hash_table_growth_under_1000_regions(void) {
         }
     }
 
-    const uint64_t page_ids[1] = {0xF002ULL};
     mock_atlas_spec_t spec1 = {
         .regions = regs1,
         .region_count = (uint16_t)n1,
@@ -778,8 +770,8 @@ void test_atlas_hash_table_growth_under_1000_regions(void) {
         .total_vertex_count = total_verts_1,
         .indices = inds1,
         .total_index_count = total_indices_1,
-        .page_ids = page_ids,
-        .page_count = 1,
+        .page_ids = NULL,
+        .page_count = 0,
     };
     uint32_t size1 = build_mock_atlas_blob(buf1, blob_cap, &spec1);
 
@@ -841,8 +833,8 @@ void test_atlas_hash_table_growth_under_1000_regions(void) {
         .total_vertex_count = total_verts_2,
         .indices = inds2,
         .total_index_count = total_indices_2,
-        .page_ids = page_ids,
-        .page_count = 1,
+        .page_ids = NULL,
+        .page_count = 0,
     };
     uint32_t size2 = build_mock_atlas_blob(buf2, blob_cap, &spec2);
 
@@ -887,22 +879,19 @@ void test_atlas_hash_table_growth_under_1000_regions(void) {
  * Parse, merge, then call cleanup directly. ASan reports zero leaks
  * at test-binary exit if every malloc has a matching free. */
 void test_atlas_on_cleanup_releases_all_buffers(void) {
-    static const uint64_t page_ids1[2] = {0xF003ULL, 0xF004ULL};
-
     merge_region_spec_t blob1_specs[3] = {
         {.name_hash = 0xA01ULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 10},
-        {.name_hash = 0xA02ULL, .vertex_count = 3, .index_count = 3, .source_w = 32, .page_index = 1, .transform = 1, .payload_seed = 20},
+        {.name_hash = 0xA02ULL, .vertex_count = 3, .index_count = 3, .source_w = 32, .page_index = 0, .transform = 1, .payload_seed = 20},
         {.name_hash = 0xA03ULL, .vertex_count = 4, .index_count = 6, .source_w = 48, .page_index = 0, .transform = 0, .payload_seed = 30},
     };
     uint8_t buf1[512];
-    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 3, page_ids1, 2);
+    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 3, NULL, 0);
 
     /* First parse */
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
     TEST_ASSERT_NOT_NULL(s_user_data);
 
     /* Merge with different set to exercise realloc paths */
-    static const uint64_t page_ids2[1] = {0xF005ULL};
     merge_region_spec_t blob2_specs[4] = {
         {.name_hash = 0xA01ULL, .vertex_count = 4, .index_count = 6, .source_w = 64, .page_index = 0, .transform = 0, .payload_seed = 100},
         {.name_hash = 0xA03ULL, .vertex_count = 4, .index_count = 6, .source_w = 64, .page_index = 0, .transform = 0, .payload_seed = 110},
@@ -910,7 +899,7 @@ void test_atlas_on_cleanup_releases_all_buffers(void) {
         {.name_hash = 0xA05ULL, .vertex_count = 4, .index_count = 6, .source_w = 64, .page_index = 0, .transform = 0, .payload_seed = 130},
     };
     uint8_t buf2[512];
-    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 4, page_ids2, 1);
+    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 4, NULL, 0);
 
     nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
 
@@ -959,26 +948,58 @@ void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
 }
 
 /* ---- Test 15: Page ids stored at parse, handles resolved via nt_resource_find ----
- * Direct-drive tests run without the resource system, so nt_resource_find
- * returns INVALID (handle.id == 0). Verifies page_resource_ids[] are stored
- * correctly at parse and replaced on merge. */
+ * Uses the resource system so nt_resource_find resolves page handles.
+ * Verifies page_resource_ids[] are stored correctly at parse and replaced
+ * on merge, and that handles are non-zero (resolved). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_page_resources_stored_at_parse(void) {
-    /* Parse blob with 2 pages (ids 0xAAA, 0xBBB) — reuse fixture. */
+    /* Set up resource system so nt_resource_find resolves page handles. */
+    nt_resource_init(NULL);
+    nt_atlas_init();
+
+    /* Register all page texture IDs used in this test. */
+    nt_resource_request((nt_hash64_t){FIXTURE_PAGE0_ID}, NT_ASSET_TEXTURE);
+    nt_resource_request((nt_hash64_t){FIXTURE_PAGE1_ID}, NT_ASSET_TEXTURE);
+    nt_resource_request((nt_hash64_t){0xCCCULL}, NT_ASSET_TEXTURE);
+    nt_resource_request((nt_hash64_t){0xDDDULL}, NT_ASSET_TEXTURE);
+
+    /* Build blob with 1 region, 2 pages. */
+    static NtAtlasVertex verts[3] = {{10, 20, 1000, 2000}, {30, 40, 3000, 4000}, {50, 60, 5000, 6000}};
+    static uint16_t indices[3] = {0, 1, 2};
+    static NtAtlasRegion region;
+    memset(&region, 0, sizeof(region));
+    region.name_hash = FIXTURE_R0_HASH;
+    region.source_w = 64;
+    region.source_h = 64;
+    region.origin_x = 0.5F;
+    region.origin_y = 0.5F;
+    region.vertex_count = 3;
+    region.index_count = 3;
+
+    static const uint64_t page_ids[2] = {FIXTURE_PAGE0_ID, FIXTURE_PAGE1_ID};
+    mock_atlas_spec_t spec = {
+        .regions = &region,
+        .region_count = 1,
+        .vertices = verts,
+        .total_vertex_count = 3,
+        .indices = indices,
+        .total_index_count = 3,
+        .page_ids = page_ids,
+        .page_count = 2,
+    };
     uint8_t buf[512];
-    uint32_t size = 0;
-    build_fixture_blob(buf, sizeof(buf), &size);
+    uint32_t size = build_mock_atlas_blob(buf, sizeof(buf), &spec);
 
     nt_atlas_test_drive_resolve(buf, size, &s_user_data);
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
 
-    /* Page ids stored immediately */
+    /* Page ids stored */
     TEST_ASSERT_EQUAL_UINT64(FIXTURE_PAGE0_ID, nt_atlas_test_page_resource_id(ad, 0));
     TEST_ASSERT_EQUAL_UINT64(FIXTURE_PAGE1_ID, nt_atlas_test_page_resource_id(ad, 1));
 
-    /* Without resource system, nt_resource_find returns INVALID */
-    TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 0));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 1));
+    /* Handles resolved (non-zero — resource system is running) */
+    TEST_ASSERT_TRUE(nt_atlas_test_page_resource_handle(ad, 0) != 0);
+    TEST_ASSERT_TRUE(nt_atlas_test_page_resource_handle(ad, 1) != 0);
 
     /* Merge with different page ids (0xCCC, 0xDDD) */
     static NtAtlasVertex merge_verts[3];
@@ -996,11 +1017,8 @@ void test_atlas_page_resources_stored_at_parse(void) {
     merge_region.source_h = 64;
     merge_region.origin_x = 0.5F;
     merge_region.origin_y = 0.5F;
-    merge_region.vertex_start = 0;
-    merge_region.index_start = 0;
     merge_region.vertex_count = 3;
     merge_region.index_count = 3;
-    merge_region.page_index = 0;
 
     static const uint64_t merge_page_ids[2] = {0xCCCULL, 0xDDDULL};
     mock_atlas_spec_t merge_spec = {
@@ -1018,9 +1036,17 @@ void test_atlas_page_resources_stored_at_parse(void) {
 
     nt_atlas_test_drive_resolve(merge_buf, merge_size, &s_user_data);
 
-    /* After merge: page ids replaced */
+    /* After merge: page ids replaced, handles re-resolved */
     TEST_ASSERT_EQUAL_UINT64(0xCCCULL, nt_atlas_test_page_resource_id(ad, 0));
     TEST_ASSERT_EQUAL_UINT64(0xDDDULL, nt_atlas_test_page_resource_id(ad, 1));
+    TEST_ASSERT_TRUE(nt_atlas_test_page_resource_handle(ad, 0) != 0);
+    TEST_ASSERT_TRUE(nt_atlas_test_page_resource_handle(ad, 1) != 0);
+
+    /* Cleanup: free atlas data, then shut down resource system. */
+    nt_atlas_test_drive_cleanup(s_user_data);
+    s_user_data = NULL;
+    nt_resource_shutdown();
+    nt_atlas_test_reset();
 }
 
 /* ---- Test 16: Full resource pipeline integration ----
