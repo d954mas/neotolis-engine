@@ -32,8 +32,7 @@ static void sprite_default(uint16_t idx) {
 static void sprite_swap(uint16_t dst, uint16_t src) {
     s_atlas[dst] = s_atlas[src];
     s_region_index[dst] = s_region_index[src];
-    s_origin[dst][0] = s_origin[src][0];
-    s_origin[dst][1] = s_origin[src][1];
+    memcpy(s_origin[dst], s_origin[src], sizeof(float) * 2);
     s_flags[dst] = s_flags[src];
 }
 
@@ -101,6 +100,7 @@ void nt_sprite_comp_set_region(nt_entity_t entity, nt_resource_t atlas, uint16_t
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     NT_ASSERT(nt_resource_get_user_data(atlas) != NULL);
+    NT_ASSERT(region_index < nt_atlas_region_count(atlas));
     s_atlas[idx] = atlas;
     s_region_index[idx] = region_index;
     s_flags[idx] = 0;

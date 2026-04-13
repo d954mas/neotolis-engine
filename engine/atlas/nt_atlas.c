@@ -512,6 +512,12 @@ nt_result_t nt_atlas_init(void) {
     return NT_OK;
 }
 
+uint32_t nt_atlas_region_count(nt_resource_t atlas) {
+    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    NT_ASSERT(ad != NULL && "nt_atlas_region_count on unresolved atlas");
+    return ad->region_count;
+}
+
 uint32_t nt_atlas_find_region(nt_resource_t atlas, uint64_t name_hash) {
     nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_find_region on unresolved atlas");
