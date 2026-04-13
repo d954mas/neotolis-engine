@@ -246,32 +246,88 @@ typedef struct {
     uint32_t index_bytes;
 } nt_atlas_blob_view_t;
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void validate_and_carve_blob(const uint8_t *data, uint32_t size, nt_atlas_blob_view_t *out) {
-    NT_ASSERT(size >= sizeof(NtAtlasHeader));
-    const NtAtlasHeader *hdr = (const NtAtlasHeader *)data;
-    NT_ASSERT(hdr->magic == NT_ATLAS_MAGIC);
-    NT_ASSERT(hdr->version == NT_ATLAS_VERSION);
-    NT_ASSERT(hdr->page_count <= NT_ATLAS_MAX_PAGES);
+static bool mul_u32_checked(uint32_t lhs, uint32_t rhs, uint32_t *out) {
+    NT_ASSERT(out != NULL);
+    if (rhs == 0) {
+        *out = 0;
+        return true;
+    }
+    if (lhs > UINT32_MAX / rhs) {
+        return false;
+    }
+    *out = lhs * rhs;
+    return true;
+}
 
-    const uint32_t page_bytes = (uint32_t)hdr->page_count * (uint32_t)sizeof(uint64_t);
-    const uint32_t region_bytes = (uint32_t)hdr->region_count * (uint32_t)sizeof(NtAtlasRegion);
-    NT_ASSERT(hdr->total_vertex_count <= UINT32_MAX / sizeof(NtAtlasVertex));
-    NT_ASSERT(hdr->total_index_count <= UINT32_MAX / sizeof(uint16_t));
-    const uint32_t vertex_bytes = hdr->total_vertex_count * (uint32_t)sizeof(NtAtlasVertex);
-    const uint32_t index_bytes = hdr->total_index_count * (uint32_t)sizeof(uint16_t);
-    NT_ASSERT(size >= (uint32_t)sizeof(NtAtlasHeader) + page_bytes + region_bytes);
-    NT_ASSERT(hdr->total_vertex_count == 0 || hdr->vertex_offset + vertex_bytes <= size);
-    NT_ASSERT(hdr->total_index_count == 0 || hdr->index_offset + index_bytes <= size);
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size, nt_atlas_blob_view_t *out) {
+    if (data == NULL || out == NULL || size < sizeof(NtAtlasHeader)) {
+        return false;
+    }
+
+    const NtAtlasHeader *hdr = (const NtAtlasHeader *)data;
+    if (hdr->magic != NT_ATLAS_MAGIC || hdr->version != NT_ATLAS_VERSION || hdr->page_count > NT_ATLAS_MAX_PAGES) {
+        return false;
+    }
+
+    uint32_t page_bytes = 0;
+    uint32_t region_bytes = 0;
+    uint32_t vertex_bytes = 0;
+    uint32_t index_bytes = 0;
+    if (!mul_u32_checked((uint32_t)hdr->page_count, (uint32_t)sizeof(uint64_t), &page_bytes) || !mul_u32_checked((uint32_t)hdr->region_count, (uint32_t)sizeof(NtAtlasRegion), &region_bytes) ||
+        !mul_u32_checked(hdr->total_vertex_count, (uint32_t)sizeof(NtAtlasVertex), &vertex_bytes) || !mul_u32_checked(hdr->total_index_count, (uint32_t)sizeof(uint16_t), &index_bytes)) {
+        return false;
+    }
+
+    uint32_t meta_end = (uint32_t)sizeof(NtAtlasHeader);
+    if (page_bytes > size - meta_end) {
+        return false;
+    }
+    meta_end += page_bytes;
+    if (region_bytes > size - meta_end) {
+        return false;
+    }
+    meta_end += region_bytes;
+
+    if (hdr->vertex_offset != meta_end) {
+        return false;
+    }
+    if (vertex_bytes > size - hdr->vertex_offset) {
+        return false;
+    }
+
+    const uint32_t expected_index_offset = hdr->vertex_offset + vertex_bytes;
+    if (hdr->index_offset != expected_index_offset) {
+        return false;
+    }
+    if (index_bytes > size - hdr->index_offset) {
+        return false;
+    }
+
+    const uint8_t *page_ids_bytes = data + sizeof(NtAtlasHeader);
+    const NtAtlasRegion *regions = (const NtAtlasRegion *)(page_ids_bytes + page_bytes);
+    for (uint32_t i = 0; i < hdr->region_count; i++) {
+        const NtAtlasRegion *region = &regions[i];
+        if (hdr->page_count > 0 && region->page_index >= hdr->page_count) {
+            return false;
+        }
+        if (region->vertex_start > hdr->total_vertex_count || region->vertex_count > hdr->total_vertex_count - region->vertex_start) {
+            return false;
+        }
+        if (region->index_start > hdr->total_index_count || region->index_count > hdr->total_index_count - region->index_start) {
+            return false;
+        }
+    }
 
     out->hdr = hdr;
-    out->page_ids_bytes = data + sizeof(NtAtlasHeader);
-    out->regions = (const NtAtlasRegion *)(out->page_ids_bytes + page_bytes);
+    out->page_ids_bytes = page_ids_bytes;
+    out->regions = regions;
     out->verts = (hdr->total_vertex_count > 0) ? (const NtAtlasVertex *)(data + hdr->vertex_offset) : NULL;
     out->indices_bytes = (hdr->total_index_count > 0) ? data + hdr->index_offset : NULL;
     out->page_bytes = page_bytes;
     out->vertex_bytes = vertex_bytes;
     out->index_bytes = index_bytes;
+    return true;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -421,7 +477,7 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
     }
 
     nt_atlas_blob_view_t view;
-    validate_and_carve_blob(data, size, &view);
+    NT_ASSERT(atlas_try_validate_and_carve_blob(data, size, &view));
 
     nt_atlas_data_t *ad = (nt_atlas_data_t *)*user_data;
     if (ad == NULL) {
@@ -574,33 +630,8 @@ uint32_t nt_atlas_test_page_resource_handle(const struct nt_atlas_data *ad, uint
 void nt_atlas_test_reset(void) { s_atlas.initialized = false; }
 
 bool nt_atlas_test_validate_header(const uint8_t *data, uint32_t size) {
-    if (size < sizeof(NtAtlasHeader)) {
-        return false;
-    }
-    const NtAtlasHeader *hdr = (const NtAtlasHeader *)data;
-    if (hdr->magic != NT_ATLAS_MAGIC) {
-        return false;
-    }
-    if (hdr->version != NT_ATLAS_VERSION) {
-        return false;
-    }
-    if (hdr->page_count > NT_ATLAS_MAX_PAGES) {
-        return false;
-    }
-    const uint32_t page_bytes = (uint32_t)hdr->page_count * (uint32_t)sizeof(uint64_t);
-    const uint32_t region_bytes = (uint32_t)hdr->region_count * (uint32_t)sizeof(NtAtlasRegion);
-    if (size < (uint32_t)sizeof(NtAtlasHeader) + page_bytes + region_bytes) {
-        return false;
-    }
-    const uint32_t vertex_bytes = hdr->total_vertex_count * (uint32_t)sizeof(NtAtlasVertex);
-    const uint32_t index_bytes = hdr->total_index_count * (uint32_t)sizeof(uint16_t);
-    if (hdr->total_vertex_count > 0 && hdr->vertex_offset + vertex_bytes > size) {
-        return false;
-    }
-    if (hdr->total_index_count > 0 && hdr->index_offset + index_bytes > size) {
-        return false;
-    }
-    return true;
+    nt_atlas_blob_view_t ignored;
+    return atlas_try_validate_and_carve_blob(data, size, &ignored);
 }
 
 #endif /* NT_ATLAS_TEST_ACCESS */

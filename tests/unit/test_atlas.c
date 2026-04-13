@@ -491,7 +491,7 @@ static uint32_t build_merge_blob(uint8_t *out, uint32_t cap, const merge_region_
 
 /* ---- Test 6: merge common region updates metadata in place ---- */
 void test_atlas_merge_common_region_updates_in_place(void) {
-    /* Pages omitted — page tests use full resource system (test 15/16). */
+    /* Pages omitted — page tests use full resource system (test 16/17). */
 
     /* blob1: single region hash=0x111, 4 verts / 6 indices, payload seed 10 */
     merge_region_spec_t blob1_specs[1] = {
@@ -1107,11 +1107,11 @@ void test_atlas_on_cleanup_releases_all_buffers(void) {
      * report a leak-check failure at exit. */
 }
 
-/* ---- Test 14: Header validation rejects corruption ----
- * Uses the test-only nt_atlas_test_validate_header helper that mirrors
- * the NT_ASSERT logic in validate_and_carve_blob but returns false on
- * failure instead of trapping. Automated coverage for magic, version,
- * and size-bounds checks. */
+/* ---- Test 14: Header/layout validation rejects corruption ----
+ * Uses the test-only nt_atlas_test_validate_header helper that shares the
+ * same validation logic as validate_and_carve_blob() but returns false on
+ * failure instead of trapping. Covers magic/version, canonical section
+ * layout, and overflow-safe size-bounds checks. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
     /* Build a valid blob first */
@@ -1141,14 +1141,71 @@ void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
 
     /* Truncated blob: header valid but size too small for pages + regions */
     TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(buf, sizeof(NtAtlasHeader)), "undersized blob should fail");
+
+    /* Non-canonical vertex offset: sections must be tightly packed per spec. */
+    uint8_t corrupt_vertex_offset[512];
+    memcpy(corrupt_vertex_offset, buf, valid_size);
+    NtAtlasHeader *hdr = (NtAtlasHeader *)corrupt_vertex_offset;
+    hdr->vertex_offset += 4;
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_vertex_offset, valid_size), "vertex_offset gap should fail");
+
+    /* Non-canonical index offset: index section must start right after vertices. */
+    uint8_t corrupt_index_offset[512];
+    memcpy(corrupt_index_offset, buf, valid_size);
+    hdr = (NtAtlasHeader *)corrupt_index_offset;
+    hdr->index_offset += 2;
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_index_offset, valid_size), "index_offset gap should fail");
+
+    /* Overflow / wraparound candidate in vertex_offset must fail. */
+    uint8_t corrupt_vertex_wrap[512];
+    memcpy(corrupt_vertex_wrap, buf, valid_size);
+    hdr = (NtAtlasHeader *)corrupt_vertex_wrap;
+    hdr->vertex_offset = UINT32_MAX - 3U;
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_vertex_wrap, valid_size), "vertex_offset wrap should fail");
 }
 
-/* ---- Test 15: Direct-drive on_resolve stores page ids and invalidates handles ----
+/* ---- Test 15: Region slice validation rejects corrupt page / payload refs ---- */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_region_slice_validation_rejects_corruption(void) {
+    uint8_t buf[512];
+    uint32_t size = 0;
+    build_fixture_blob(buf, sizeof(buf), &size);
+
+    uint8_t corrupt_vertex_slice[512];
+    memcpy(corrupt_vertex_slice, buf, size);
+    NtAtlasHeader *hdr = (NtAtlasHeader *)corrupt_vertex_slice;
+    NtAtlasRegion *regions = (NtAtlasRegion *)(corrupt_vertex_slice + sizeof(NtAtlasHeader));
+    regions[0].vertex_start = hdr->total_vertex_count - 1U;
+    regions[0].vertex_count = 4;
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_vertex_slice, size), "vertex slice OOB should fail");
+
+    uint8_t corrupt_index_slice[512];
+    memcpy(corrupt_index_slice, buf, size);
+    hdr = (NtAtlasHeader *)corrupt_index_slice;
+    regions = (NtAtlasRegion *)(corrupt_index_slice + sizeof(NtAtlasHeader));
+    regions[1].index_start = hdr->total_index_count - 1U;
+    regions[1].index_count = 3;
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_index_slice, size), "index slice OOB should fail");
+
+    uint8_t buf_with_pages[512];
+    uint32_t size_with_pages = 0;
+    build_fixture_blob_with_pages(buf_with_pages, sizeof(buf_with_pages), &size_with_pages);
+
+    uint8_t corrupt_page_index[512];
+    memcpy(corrupt_page_index, buf_with_pages, size_with_pages);
+    hdr = (NtAtlasHeader *)corrupt_page_index;
+    const uint32_t page_bytes = (uint32_t)hdr->page_count * (uint32_t)sizeof(uint64_t);
+    regions = (NtAtlasRegion *)(corrupt_page_index + sizeof(NtAtlasHeader) + page_bytes);
+    regions[0].page_index = (uint8_t)hdr->page_count;
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_page_index, size_with_pages), "page_index OOB should fail");
+}
+
+/* ---- Test 16: Direct-drive on_resolve stores page ids and invalidates handles ----
  * Direct-drive tests bypass resource_step(), so atlas_on_post_resolve does not
  * run here. This test verifies
  * the parse/merge side only: page_resource_ids[]
  * are copied correctly and page_resources[] remain invalid until the post-
- * resolve phase materializes the slots (covered by test 16). */
+ * resolve phase materializes the slots (covered by test 17). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_page_resources_stored_at_parse(void) {
     /* Build blob with 1 region, 2 pages. */
@@ -1231,7 +1288,7 @@ void test_atlas_page_resources_stored_at_parse(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 1));
 }
 
-/* ---- Test 16: Full resource pipeline integration ----
+/* ---- Test 17: Full resource pipeline integration ----
  * Atlas + page textures live in one pack. Request only the atlas resource.
  * on_post_resolve must request page slots and the same nt_resource_step()
  * must resolve them, so nt_atlas_get_page_resource stays O(1). */
@@ -1379,6 +1436,7 @@ int main(void) {
     RUN_TEST(test_atlas_hash_table_growth_under_1000_regions);
     RUN_TEST(test_atlas_on_cleanup_releases_all_buffers);
     RUN_TEST(test_atlas_on_resolve_header_validation_rejects_corruption);
+    RUN_TEST(test_atlas_region_slice_validation_rejects_corruption);
     RUN_TEST(test_atlas_page_resources_stored_at_parse);
     RUN_TEST(test_atlas_full_resource_pipeline_integration);
     return UNITY_END();
