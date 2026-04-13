@@ -72,11 +72,9 @@ uint32_t nt_atlas_find_region(nt_resource_t atlas, uint64_t name_hash);
  * Out-of-range indices trip NT_ASSERT (caller bug). */
 const nt_texture_region_t *nt_atlas_get_region(nt_resource_t atlas, uint32_t index);
 
-/* Resolve a page index to its texture resource handle.
- * First call per (atlas, page) performs a single nt_resource_request() for the
- * page's resource id (this is safe: get_page_resource runs OUTSIDE the resolve
- * callback, unlike parse-time which cannot call the resource API). Subsequent
- * calls return the cached handle. */
+/* Return the texture resource handle for a page index.
+ * Page handles are resolved at parse/merge time via nt_resource_find
+ * (pure lookup, no allocation). Out-of-range trips NT_ASSERT. */
 nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index);
 
 /* ---- Test access (compiled only when NT_ATLAS_TEST_ACCESS is defined) ---- */

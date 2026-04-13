@@ -816,6 +816,17 @@ nt_resource_t nt_resource_request(nt_hash64_t resource_id, uint8_t asset_type) {
     return handle;
 }
 
+nt_resource_t nt_resource_find(nt_hash64_t resource_id) {
+    if (!s_resource.initialized) {
+        return NT_RESOURCE_INVALID;
+    }
+    uint16_t existing = slot_map_find(resource_id.value);
+    if (existing != 0) {
+        return resource_make(existing, s_resource.slots[existing].generation);
+    }
+    return NT_RESOURCE_INVALID;
+}
+
 uint32_t nt_resource_get(nt_resource_t handle) {
     if (handle.id == 0) {
         return 0;

@@ -86,6 +86,12 @@ nt_result_t nt_resource_parse_pack(nt_hash32_t pack_id, const uint8_t *blob, uin
 /* ---- Resource access ---- */
 
 nt_resource_t nt_resource_request(nt_hash64_t resource_id, uint8_t asset_type);
+
+/* Pure lookup — returns the handle for an already-registered resource, or
+ * NT_RESOURCE_INVALID if no slot exists. Never allocates a new slot.
+ * Safe to call inside on_resolve / on_cleanup callbacks. */
+nt_resource_t nt_resource_find(nt_hash64_t resource_id);
+
 uint32_t nt_resource_get(nt_resource_t handle);
 bool nt_resource_is_ready(nt_resource_t handle);
 uint8_t nt_resource_get_state(nt_resource_t handle);

@@ -219,9 +219,10 @@ static void translate_region(nt_texture_region_t *dst, const NtAtlasRegion *src)
 // #endregion
 
 // #region replace_pages
-/* Replace the page id array wholesale from a new blob (D-05).
- * Clears all cached nt_resource_t handles — the new blob may reference
- * entirely different textures even at the same page_index.
+/* Replace the page id array wholesale from a new blob (D-05) and resolve
+ * page texture handles immediately via nt_resource_find (pure lookup, safe
+ * inside on_resolve). Assert if a page texture is not registered — the
+ * builder packs atlas metadata and page textures into the same pack.
  *
  * Source is a raw byte pointer because blob page-id storage may be only
  * 4-byte aligned (pack asset alignment). We memcpy bytes into the
@@ -236,7 +237,14 @@ static void replace_pages(nt_atlas_data_t *ad, const uint8_t *new_page_ids_bytes
     if (new_page_count < NT_ATLAS_MAX_PAGES) {
         memset(&ad->page_resource_ids[new_page_count], 0, (NT_ATLAS_MAX_PAGES - new_page_count) * sizeof(uint64_t));
     }
-    for (uint32_t i = 0; i < NT_ATLAS_MAX_PAGES; i++) {
+    /* Resolve page handles immediately — nt_resource_find is a pure lookup,
+     * safe inside on_resolve. Pages must already be registered from the same pack.
+     * Returns INVALID when driven outside the resource system (unit tests). */
+    for (uint8_t i = 0; i < new_page_count; i++) {
+        nt_hash64_t rid = (nt_hash64_t){ad->page_resource_ids[i]};
+        ad->page_resources[i] = nt_resource_find(rid);
+    }
+    for (uint32_t i = new_page_count; i < NT_ATLAS_MAX_PAGES; i++) {
         ad->page_resources[i] = NT_RESOURCE_INVALID;
     }
     ad->page_count = new_page_count;
@@ -568,14 +576,6 @@ nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index
     nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_page_resource on unresolved atlas");
     NT_ASSERT(page_index < ad->page_count && "page_index out of range");
-
-    /* Lazy resolve: first call per (atlas, page) requests the texture
-     * resource handle and caches it. This runs OUTSIDE any callback context,
-     * so nt_resource_request is legal here (see R1 in 48-RESEARCH.md). */
-    if (ad->page_resources[page_index].id == 0) {
-        nt_hash64_t rid = (nt_hash64_t){ad->page_resource_ids[page_index]};
-        ad->page_resources[page_index] = nt_resource_request(rid, NT_ASSET_TEXTURE);
-    }
     return ad->page_resources[page_index];
 }
 // #endregion

@@ -958,13 +958,12 @@ void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
     TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(buf, sizeof(NtAtlasHeader)), "undersized blob should fail");
 }
 
-/* ---- Test 15: Page resources resolved lazily (R1 amendment) ----
- * Verifies that page_resource_ids[] are stored immediately at parse,
- * but page_resources[] remain NT_RESOURCE_INVALID until first
- * nt_atlas_get_page_resource() call. Also verifies merge resets the
- * lazy cache. */
+/* ---- Test 15: Page ids stored at parse, handles resolved via nt_resource_find ----
+ * Direct-drive tests run without the resource system, so nt_resource_find
+ * returns INVALID (handle.id == 0). Verifies page_resource_ids[] are stored
+ * correctly at parse and replaced on merge. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void test_atlas_page_resources_resolved_lazily(void) {
+void test_atlas_page_resources_stored_at_parse(void) {
     /* Parse blob with 2 pages (ids 0xAAA, 0xBBB) — reuse fixture. */
     uint8_t buf[512];
     uint32_t size = 0;
@@ -977,7 +976,7 @@ void test_atlas_page_resources_resolved_lazily(void) {
     TEST_ASSERT_EQUAL_UINT64(FIXTURE_PAGE0_ID, nt_atlas_test_page_resource_id(ad, 0));
     TEST_ASSERT_EQUAL_UINT64(FIXTURE_PAGE1_ID, nt_atlas_test_page_resource_id(ad, 1));
 
-    /* Slot handles are ZERO (NT_RESOURCE_INVALID) — not yet lazily resolved */
+    /* Without resource system, nt_resource_find returns INVALID */
     TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 0));
     TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 1));
 
@@ -1019,11 +1018,9 @@ void test_atlas_page_resources_resolved_lazily(void) {
 
     nt_atlas_test_drive_resolve(merge_buf, merge_size, &s_user_data);
 
-    /* After merge: page ids replaced, lazy handles reset to 0 */
+    /* After merge: page ids replaced */
     TEST_ASSERT_EQUAL_UINT64(0xCCCULL, nt_atlas_test_page_resource_id(ad, 0));
     TEST_ASSERT_EQUAL_UINT64(0xDDDULL, nt_atlas_test_page_resource_id(ad, 1));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 0));
-    TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 1));
 }
 
 /* ---- Test 16: Full resource pipeline integration ----
@@ -1132,7 +1129,7 @@ int main(void) {
     RUN_TEST(test_atlas_hash_table_growth_under_1000_regions);
     RUN_TEST(test_atlas_on_cleanup_releases_all_buffers);
     RUN_TEST(test_atlas_on_resolve_header_validation_rejects_corruption);
-    RUN_TEST(test_atlas_page_resources_resolved_lazily);
+    RUN_TEST(test_atlas_page_resources_stored_at_parse);
     RUN_TEST(test_atlas_full_resource_pipeline_integration);
     return UNITY_END();
 }
