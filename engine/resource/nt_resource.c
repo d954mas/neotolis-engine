@@ -20,6 +20,7 @@
 /* ---- Slot map: resource_id -> slot index, open-addressing hash table ---- */
 
 #define NT_SLOT_MAP_SIZE (NT_RESOURCE_MAX_SLOTS * 2)
+#define NT_RESOURCE_MAX_RESOLVE_PASSES 4U
 
 /* ---- Module state ---- */
 
@@ -99,6 +100,251 @@ static uint32_t asset_alloc(void) {
 /* ---- Time helper ---- */
 
 static uint32_t resource_get_time_ms(void) { return (uint32_t)(nt_time_now() * 1000.0); }
+
+static inline nt_resource_t resource_make(uint16_t index, uint16_t gen) { return (nt_resource_t){.id = ((uint32_t)gen << 16) | index}; }
+
+static bool slot_user_data_synced_for(const NtResourceSlot *slot, uint16_t asset_idx) { return slot->user_data != NULL && slot->user_data_asset_idx == asset_idx; }
+
+static bool asset_blob_resident(const NtAssetMeta *meta) {
+    NT_ASSERT(meta->pack_index < NT_RESOURCE_MAX_PACKS);
+    const NtPackMeta *pack = &s_resource.packs[meta->pack_index];
+    return pack->pack_type == NT_PACK_VIRTUAL || pack->blob != NULL;
+}
+
+static uint32_t asset_effective_runtime_handle(uint32_t asset_index, const NtAssetMeta *meta) { return (meta->asset_type == NT_ASSET_BLOB) ? asset_index : meta->runtime_handle; }
+
+static bool asset_is_publishable(const NtResourceSlot *slot, const NtAssetMeta *meta, uint16_t asset_index, uint8_t behavior_flags) {
+    if ((behavior_flags & NT_RESOURCE_BEHAVIOR_AUX_BACKED) == 0) {
+        return true;
+    }
+    return slot_user_data_synced_for(slot, asset_index) || asset_blob_resident(meta);
+}
+
+static const uint8_t *asset_data_ptr(const NtAssetMeta *meta, uint32_t *out_size) {
+    const NtPackMeta *pack = &s_resource.packs[meta->pack_index];
+    if (pack->blob == NULL) {
+        if (out_size != NULL) {
+            *out_size = 0;
+        }
+        return NULL;
+    }
+    if (out_size != NULL) {
+        *out_size = meta->size;
+    }
+    return pack->blob + meta->offset;
+}
+
+static void schedule_pack_redownload_if_needed(NtPackMeta *pack) {
+    if (!pack->mounted || pack->pack_type == NT_PACK_VIRTUAL || pack->io_type == NT_IO_NONE) {
+        return;
+    }
+    if (pack->blob != NULL || pack->pack_state != NT_PACK_STATE_READY) {
+        return;
+    }
+    pack->pack_state = NT_PACK_STATE_NONE;
+    pack->retry_delay_ms = 0;
+    pack->retry_time_ms = 1; /* non-zero: retry logic re-issues I/O on next step */
+    pack->attempt_count = 0;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void resource_resolve_pass(void) {
+    NtResolveTemp *resolve_temp = (NtResolveTemp *)calloc(NT_RESOURCE_MAX_SLOTS + 1, sizeof(NtResolveTemp));
+    NT_ASSERT(resolve_temp);
+
+    /* D.1: Prepare per-pass transient candidates */
+    for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
+        NtResourceSlot *slot = &s_resource.slots[si];
+        if (slot->resource_id == 0) {
+            continue;
+        }
+        slot->prev_resolve_asset_idx = slot->resolve_asset_idx;
+        slot->prev_runtime_handle = slot->runtime_handle;
+
+        NtResolveTemp *tmp = &resolve_temp[si];
+        tmp->target_runtime_handle = 0;
+        tmp->candidate_runtime_handle = 0;
+        tmp->target_prio = INT16_MIN;
+        tmp->candidate_prio = INT16_MIN;
+        tmp->target_seq = 0;
+        tmp->candidate_seq = 0;
+        tmp->target_asset_idx = UINT16_MAX;
+        tmp->candidate_asset_idx = UINT16_MAX;
+        tmp->scan_state = NT_ASSET_STATE_REGISTERED;
+        tmp->resolve_pending = 0;
+        tmp->post_resolve_pending = 0;
+    }
+
+    /* D.2: Single pass over assets -- O(A) via slot_map lookup */
+    for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
+        NtAssetMeta *meta = &s_resource.assets[ai];
+        if (meta->resource_id == 0) {
+            continue;
+        }
+        if (meta->pack_index >= NT_RESOURCE_MAX_PACKS || s_resource.packs[meta->pack_index].mounted == 0) {
+            continue;
+        }
+
+        uint16_t si = slot_map_find(meta->resource_id);
+        if (si == 0) {
+            continue;
+        }
+
+        NtResourceSlot *slot = &s_resource.slots[si];
+        NtResolveTemp *tmp = &resolve_temp[si];
+
+        /* Skip type mismatch (malformed pack or hash collision) */
+        if (meta->asset_type != slot->asset_type) {
+            continue;
+        }
+
+        /* Track best available state from any matching entry */
+        if (meta->state > tmp->scan_state && tmp->scan_state != NT_ASSET_STATE_READY) {
+            tmp->scan_state = meta->state;
+        }
+
+        if (meta->state != NT_ASSET_STATE_READY) {
+            continue;
+        }
+
+        int16_t prio = s_resource.packs[meta->pack_index].priority;
+        uint16_t seq = s_resource.packs[meta->pack_index].mount_seq;
+        uint32_t runtime_handle = asset_effective_runtime_handle(ai, meta);
+        uint8_t behavior_flags = s_resource.activators[slot->asset_type].behavior_flags;
+
+        /* Target winner: highest-priority READY asset, even if it is not yet publishable. */
+        if (prio > tmp->target_prio || (prio == tmp->target_prio && seq >= tmp->target_seq)) {
+            tmp->target_runtime_handle = runtime_handle;
+            tmp->target_prio = prio;
+            tmp->target_seq = seq;
+            NT_ASSERT(ai <= UINT16_MAX && "asset index exceeds uint16 -- raise resolve_asset_idx to uint32");
+            tmp->target_asset_idx = (uint16_t)ai;
+        }
+
+        /* Published winner: highest-priority READY asset that is usable now. */
+        if (asset_is_publishable(slot, meta, (uint16_t)ai, behavior_flags) && (prio > tmp->candidate_prio || (prio == tmp->candidate_prio && seq >= tmp->candidate_seq))) {
+            tmp->candidate_runtime_handle = runtime_handle;
+            tmp->candidate_prio = prio;
+            tmp->candidate_seq = seq;
+            NT_ASSERT(ai <= UINT16_MAX && "asset index exceeds uint16 -- raise resolve_asset_idx to uint32");
+            tmp->candidate_asset_idx = (uint16_t)ai;
+        }
+    }
+
+    /* D.3: Texture placeholder fallback -- publish placeholder only if no READY asset exists */
+    if (s_resource.placeholder_texture != 0) {
+        uint16_t ph_si = slot_map_find(s_resource.placeholder_texture);
+        uint32_t ph_handle = 0;
+        if (ph_si != 0) {
+            ph_handle = resolve_temp[ph_si].candidate_runtime_handle;
+        }
+
+        if (ph_handle != 0) {
+            for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
+                NtResourceSlot *slot = &s_resource.slots[si];
+                NtResolveTemp *tmp = &resolve_temp[si];
+                if (slot->resource_id == 0) {
+                    continue;
+                }
+                if (tmp->scan_state == NT_ASSET_STATE_READY) {
+                    continue;
+                }
+                if (slot->asset_type == NT_ASSET_TEXTURE) {
+                    tmp->candidate_runtime_handle = ph_handle;
+                }
+            }
+        }
+    }
+
+    // #region D.4: Publish the best usable winner and run resolve/cleanup hooks
+    for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
+        NtResourceSlot *slot = &s_resource.slots[si];
+        if (slot->resource_id == 0) {
+            continue;
+        }
+        NtResolveTemp *tmp = &resolve_temp[si];
+
+        uint8_t atype = slot->asset_type;
+        NtActivatorEntry *entry = &s_resource.activators[atype];
+        uint8_t behavior_flags = entry->behavior_flags;
+        const bool aux_backed = (behavior_flags & NT_RESOURCE_BEHAVIOR_AUX_BACKED) != 0;
+
+        NT_ASSERT(!aux_backed || (entry->on_resolve != NULL && entry->on_cleanup != NULL));
+
+        const bool next_has_real_winner = tmp->candidate_asset_idx < s_resource.asset_hwm;
+        const uint16_t next_asset_idx = tmp->candidate_asset_idx;
+        const uint32_t next_handle = tmp->candidate_runtime_handle;
+        const bool next_changed = next_has_real_winner && (next_asset_idx != slot->prev_resolve_asset_idx || next_handle != slot->prev_runtime_handle);
+        const bool needs_aux_sync = next_has_real_winner && aux_backed && !slot_user_data_synced_for(slot, next_asset_idx);
+
+        bool target_missing_aux = false;
+        if (aux_backed && tmp->target_asset_idx < s_resource.asset_hwm) {
+            const NtAssetMeta *target = &s_resource.assets[tmp->target_asset_idx];
+            target_missing_aux = !slot_user_data_synced_for(slot, tmp->target_asset_idx) && !asset_blob_resident(target);
+            if (target_missing_aux) {
+                schedule_pack_redownload_if_needed(&s_resource.packs[target->pack_index]);
+            }
+        }
+
+        if (next_has_real_winner && entry->on_resolve != NULL && (next_changed || needs_aux_sync)) {
+            const NtAssetMeta *winner = &s_resource.assets[next_asset_idx];
+            uint32_t size = 0;
+            const uint8_t *data = asset_data_ptr(winner, &size);
+            entry->on_resolve(data, size, next_handle, &slot->user_data);
+            tmp->resolve_pending = 1;
+            tmp->post_resolve_pending = 1;
+            if (aux_backed) {
+                NT_ASSERT(slot->user_data != NULL && "aux-backed asset must populate user_data before publication");
+                slot->user_data_asset_idx = next_asset_idx;
+            }
+        } else if (next_has_real_winner && (next_changed || needs_aux_sync)) {
+            tmp->post_resolve_pending = 1;
+        }
+
+        if (!next_has_real_winner && slot->user_data != NULL) {
+            if (entry->on_cleanup != NULL) {
+                entry->on_cleanup(slot->user_data);
+            }
+            slot->user_data = NULL;
+            slot->user_data_asset_idx = UINT16_MAX;
+        }
+
+        slot->resolve_asset_idx = next_has_real_winner ? next_asset_idx : UINT16_MAX;
+        slot->runtime_handle = next_handle;
+        slot->resolve_prio = (int16_t)(next_has_real_winner ? tmp->candidate_prio : INT16_MIN);
+        slot->resolve_seq = next_has_real_winner ? tmp->candidate_seq : 0;
+        if (next_has_real_winner) {
+            slot->state = NT_ASSET_STATE_READY;
+        } else if (target_missing_aux && next_handle == 0) {
+            slot->state = NT_ASSET_STATE_LOADING;
+        } else {
+            slot->state = tmp->scan_state;
+        }
+    }
+    // #endregion
+
+    // #region D.5: Fire on_post_resolve callbacks after the resolve iteration
+    for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
+        NtResourceSlot *slot = &s_resource.slots[si];
+        const NtResolveTemp *tmp = &resolve_temp[si];
+        if (slot->resource_id == 0 || !tmp->post_resolve_pending || slot->resolve_asset_idx >= s_resource.asset_hwm) {
+            continue;
+        }
+
+        uint8_t atype = slot->asset_type;
+        if (atype >= NT_RESOURCE_MAX_ASSET_TYPES || s_resource.activators[atype].on_post_resolve == NULL) {
+            continue;
+        }
+
+        NtAssetMeta *winner = &s_resource.assets[slot->resolve_asset_idx];
+        uint32_t size = 0;
+        const uint8_t *data = asset_data_ptr(winner, &size);
+        s_resource.activators[atype].on_post_resolve(data, size, resource_make(si, slot->generation), slot->runtime_handle, slot->user_data);
+    }
+    // #endregion
+
+    free(resolve_temp);
+}
 
 /* ---- I/O issue helper (shared by load + retry) ---- */
 
@@ -410,126 +656,18 @@ void nt_resource_step(void) {
         return; /* O(1) fast path when nothing changed */
     }
 
-    /* D.1: Reset all active slots */
-    for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
-        NtResourceSlot *slot = &s_resource.slots[si];
-        if (slot->resource_id == 0) {
-            continue;
+    for (uint32_t pass = 0; pass < NT_RESOURCE_MAX_RESOLVE_PASSES; pass++) {
+        if (!s_resource.needs_resolve) {
+            break;
         }
-        slot->prev_resolve_asset_idx = slot->resolve_asset_idx;
-        slot->prev_runtime_handle = slot->runtime_handle;
-        slot->runtime_handle = 0;
-        slot->state = NT_ASSET_STATE_REGISTERED;
-        slot->resolve_prio = INT16_MIN;
-        slot->resolve_seq = 0;
-        slot->resolve_asset_idx = UINT16_MAX;
+        s_resource.needs_resolve = false;
+        resource_resolve_pass();
     }
 
-    /* D.2: Single pass over assets -- O(A) via slot_map lookup */
-    for (uint32_t ai = 0; ai < s_resource.asset_hwm; ai++) {
-        NtAssetMeta *meta = &s_resource.assets[ai];
-        if (meta->resource_id == 0) {
-            continue;
-        }
-        if (meta->pack_index >= NT_RESOURCE_MAX_PACKS || s_resource.packs[meta->pack_index].mounted == 0) {
-            continue;
-        }
-
-        uint16_t si = slot_map_find(meta->resource_id);
-        if (si == 0) {
-            continue;
-        }
-
-        NtResourceSlot *slot = &s_resource.slots[si];
-
-        /* Skip type mismatch (malformed pack or hash collision) */
-        if (meta->asset_type != slot->asset_type) {
-            continue;
-        }
-
-        /* Track best available state from any matching entry */
-        if (meta->state > slot->state && slot->state != NT_ASSET_STATE_READY) {
-            slot->state = meta->state;
-        }
-
-        if (meta->state != NT_ASSET_STATE_READY) {
-            continue;
-        }
-
-        int16_t prio = s_resource.packs[meta->pack_index].priority;
-        uint16_t seq = s_resource.packs[meta->pack_index].mount_seq;
-
-        /* Higher priority wins. Equal priority: higher mount_seq wins (last mounted) */
-        if (prio > slot->resolve_prio || (prio == slot->resolve_prio && seq >= slot->resolve_seq)) {
-            /* For blobs: store asset index (no GPU handle). For others: store runtime_handle. */
-            slot->runtime_handle = (meta->asset_type == NT_ASSET_BLOB) ? ai : meta->runtime_handle;
-            slot->state = NT_ASSET_STATE_READY;
-            slot->resolve_prio = prio;
-            slot->resolve_seq = seq;
-            NT_ASSERT(ai <= UINT16_MAX && "asset index exceeds uint16 -- raise resolve_asset_idx to uint32");
-            slot->resolve_asset_idx = (uint16_t)ai;
-        }
-    }
-
-    /* D.3: Texture placeholder fallback -- resolve via slot_map */
-    if (s_resource.placeholder_texture != 0) {
-        uint16_t ph_si = slot_map_find(s_resource.placeholder_texture);
-        uint32_t ph_handle = (ph_si != 0) ? s_resource.slots[ph_si].runtime_handle : 0;
-
-        if (ph_handle != 0) {
-            for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
-                NtResourceSlot *slot = &s_resource.slots[si];
-                if (slot->resource_id == 0) {
-                    continue;
-                }
-                if (slot->state == NT_ASSET_STATE_READY) {
-                    continue;
-                }
-                if (slot->asset_type == NT_ASSET_TEXTURE) {
-                    slot->runtime_handle = ph_handle;
-                }
-            }
-        }
-    }
-
-    // #region D.4: Fire on_resolve / on_cleanup callbacks on winner change
-    for (uint16_t si = 1; si <= NT_RESOURCE_MAX_SLOTS; si++) {
-        NtResourceSlot *slot = &s_resource.slots[si];
-        if (slot->resource_id == 0) {
-            continue;
-        }
-        uint16_t prev_idx = slot->prev_resolve_asset_idx;
-        uint16_t curr_idx = slot->resolve_asset_idx;
-        /* idx < asset_hwm = valid asset (real winner), idx >= asset_hwm = no real winner (UINT16_MAX sentinel) */
-        if (curr_idx < s_resource.asset_hwm && (curr_idx != prev_idx || slot->runtime_handle != slot->prev_runtime_handle)) {
-            /* Real winner appeared, changed, or re-activated with new handle -- fire on_resolve */
-            uint8_t atype = slot->asset_type;
-            if (atype < NT_RESOURCE_MAX_ASSET_TYPES && s_resource.activators[atype].on_resolve) {
-                NtAssetMeta *winner = &s_resource.assets[curr_idx];
-                NtPackMeta *pack = &s_resource.packs[winner->pack_index];
-                /* data/size are NULL/0 when pack blob is not resident (evicted). */
-                const uint8_t *data = (pack->blob != NULL) ? pack->blob + winner->offset : NULL;
-                uint32_t size = (pack->blob != NULL) ? winner->size : 0;
-                s_resource.activators[atype].on_resolve(data, size, slot->runtime_handle, &slot->user_data);
-            }
-        }
-        if (prev_idx < s_resource.asset_hwm && curr_idx >= s_resource.asset_hwm && slot->user_data != NULL) {
-            /* Real winner lost -- fire on_cleanup */
-            uint8_t atype = slot->asset_type;
-            if (atype < NT_RESOURCE_MAX_ASSET_TYPES && s_resource.activators[atype].on_cleanup) {
-                s_resource.activators[atype].on_cleanup(slot->user_data);
-            }
-            slot->user_data = NULL;
-        }
-    }
-    // #endregion
-
-    s_resource.needs_resolve = false;
+    NT_ASSERT(!s_resource.needs_resolve && "resource resolve pass limit exceeded");
 }
 
 /* ---- Slot allocation helpers ---- */
-
-static inline nt_resource_t resource_make(uint16_t index, uint16_t gen) { return (nt_resource_t){.id = ((uint32_t)gen << 16) | index}; }
 
 static nt_resource_t slot_alloc(uint64_t resource_id, uint8_t asset_type) {
     NT_ASSERT(s_resource.queue_top > 0); /* slot pool full -- raise MAX_SLOTS */
@@ -551,6 +689,7 @@ static nt_resource_t slot_alloc(uint64_t resource_id, uint8_t asset_type) {
     slot->resolve_seq = 0;
     slot->resolve_asset_idx = UINT16_MAX;
     slot->prev_resolve_asset_idx = UINT16_MAX;
+    slot->user_data_asset_idx = UINT16_MAX;
     slot->prev_runtime_handle = 0;
     slot->asset_type = asset_type;
     slot->state = NT_ASSET_STATE_REGISTERED;
@@ -814,6 +953,17 @@ nt_resource_t nt_resource_request(nt_hash64_t resource_id, uint8_t asset_type) {
         s_resource.needs_resolve = true;
     }
     return handle;
+}
+
+nt_resource_t nt_resource_find(nt_hash64_t resource_id) {
+    if (!s_resource.initialized) {
+        return NT_RESOURCE_INVALID;
+    }
+    uint16_t existing = slot_map_find(resource_id.value);
+    if (existing != 0) {
+        return resource_make(existing, s_resource.slots[existing].generation);
+    }
+    return NT_RESOURCE_INVALID;
 }
 
 uint32_t nt_resource_get(nt_resource_t handle) {
@@ -1171,6 +1321,17 @@ void nt_resource_set_resolve_callbacks(uint8_t asset_type, nt_resolve_fn on_reso
     NT_ASSERT((on_resolve == NULL || on_cleanup != NULL) && "on_resolve requires on_cleanup to avoid user_data leak");
     s_resource.activators[asset_type].on_resolve = on_resolve;
     s_resource.activators[asset_type].on_cleanup = on_cleanup;
+}
+
+void nt_resource_set_post_resolve_callback(uint8_t asset_type, nt_post_resolve_fn on_post_resolve) {
+    NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
+    NT_ASSERT((s_resource.activators[asset_type].on_post_resolve == NULL || s_resource.activators[asset_type].on_post_resolve == on_post_resolve) && "post-resolve callback already registered");
+    s_resource.activators[asset_type].on_post_resolve = on_post_resolve;
+}
+
+void nt_resource_set_behavior_flags(uint8_t asset_type, uint8_t behavior_flags) {
+    NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
+    s_resource.activators[asset_type].behavior_flags = behavior_flags;
 }
 
 /* ---- Activation time budget ---- */

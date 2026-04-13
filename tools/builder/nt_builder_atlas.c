@@ -1628,6 +1628,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
 
         NtAtlasRegion *reg = &regions[i];
         reg->name_hash = nt_hash64_str(p->sprites[i].name).value;
+        NT_BUILD_ASSERT(reg->name_hash != 0xFFFFFFFFFFFFFFFFULL && "pipeline_serialize: region name_hash collides with runtime tombstone sentinel");
         NT_BUILD_ASSERT(p->sprites[i].width <= UINT16_MAX && "pipeline_serialize: source_w overflows uint16_t");
         NT_BUILD_ASSERT(p->sprites[i].height <= UINT16_MAX && "pipeline_serialize: source_h overflows uint16_t");
         reg->source_w = (uint16_t)p->sprites[i].width;

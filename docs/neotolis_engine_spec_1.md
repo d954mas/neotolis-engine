@@ -883,7 +883,13 @@ Sort order is **not** a material property. Sorting is game-controlled: game code
 
 Two-level system:
 - **Assets** (MAX_ASSETS): metadata from all packs. Same resource_id can appear in multiple packs.
-- **Slots** (MAX_SLOTS): unique resources requested by game. One slot per resource_id, holds the best resolved handle.
+- **Slots** (MAX_SLOTS): unique resources requested by game. One slot per resource_id, holds the published handle plus any per-slot auxiliary state.
+
+Each slot tracks two winner notions:
+- **target winner**: highest-priority READY asset for this resource_id
+- **published winner**: highest-priority asset that is usable right now
+
+For simple runtime-handle asset types (texture, mesh, blob), target and published winners usually match. Asset types that derive persistent auxiliary state from pack bytes (atlas, future similar types) may defer publication until `user_data` has been synchronized to the target winner.
 
 ## 17.2 ResourceId
 
@@ -891,13 +897,17 @@ Two-level system:
 
 ## 17.3 Generational handles
 
-Game code receives `nt_resource_t` — a 32-bit handle encoding slot index (lower 16 bits) and generation (upper 16 bits). Generation detects stale handles within a single init/shutdown lifecycle. After shutdown, all handles are invalid — game code must re-request resources after reinit. Access functions (`nt_resource_get`, `nt_resource_is_ready`) validate generation before returning data.
+Game code receives `nt_resource_t` — a 32-bit handle encoding slot index (lower 16 bits) and generation (upper 16 bits). Generation detects stale handles within a single init/shutdown lifecycle. After shutdown, all handles are invalid — game code must re-request resources after reinit. Access functions (`nt_resource_get`, `nt_resource_is_ready`) validate generation before returning data. `nt_resource_get()` returns the currently published winner handle. `nt_resource_is_ready()` means "published winner is fully usable", not merely "some runtime handle exists somewhere in the stack."
 
 Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game code or future phases.
 
 ## 17.4 AssetMeta stability
 
 **Unmount** removes asset entries (resource_id = 0) — slots are recycled for new packs. **Unload** (Phase 25) clears runtime handle/state but preserves metadata — enables fast reload without re-parsing.
+
+`NT_BLOB_AUTO` eviction clears only the pack blob bytes. Already-activated assets keep `state == READY` and their `runtime_handle`. Whether a slot can stay published after eviction depends on asset type:
+- simple assets stay usable from the runtime handle alone
+- aux-backed assets stay published only if their existing `user_data` already belongs to the published winner
 
 ## 17.5 NtAssetMeta
 
@@ -919,41 +929,85 @@ typedef struct {
 
 ## 17.6 NtResourceSlot
 
+Persistent per-slot state — survives across frames:
+
 ```c
 typedef struct {
     uint64_t resource_id;            /* nt_hash64 value */
-    uint32_t runtime_handle;         /* current best resolved handle */
-    uint16_t generation;             /* stale detection */
-    int16_t  resolve_prio;           /* priority of current winner */
+    uint32_t runtime_handle;         /* published winner's runtime handle (what game sees) */
+    uint16_t generation;             /* stale-handle detection; incremented on slot reuse */
+    int16_t  resolve_prio;           /* priority of currently published winner */
+    uint16_t resolve_seq;            /* mount_seq of published winner (tiebreak) */
+    uint16_t resolve_asset_idx;      /* index into assets[] of published winner */
+    uint16_t prev_resolve_asset_idx; /* previous published winner (change detection) */
+    uint16_t user_data_asset_idx;    /* asset idx last used to build user_data (aux sync check) */
+    uint32_t prev_runtime_handle;    /* previous published handle (detect re-activation) */
     uint8_t  asset_type;             /* nt_asset_type_t */
-    uint8_t  state;                  /* nt_asset_state_t of resolved entry */
-    uint16_t resolve_seq;            /* mount_seq of current winner (tiebreak) */
-    uint16_t resolve_asset_idx;      /* index into assets[] of resolved winner */
-    uint16_t prev_resolve_asset_idx; /* previous winner identity (change detection) */
-    uint32_t prev_runtime_handle;    /* previous handle (detect re-activation) */
+    uint8_t  state;                  /* nt_asset_state_t visible to game code */
     void    *user_data;              /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 ```
 
-### 17.6.1 Resolve callbacks (on_resolve / on_cleanup)
+Transient per-pass state — allocated at the start of each resolve pass, freed at the end. Lives in a separate array to keep NtResourceSlot small for the common case (resolve runs only when `needs_resolve` is true):
+
+```c
+typedef struct {
+    uint32_t target_runtime_handle;    /* best READY asset handle, even if blob is evicted */
+    uint32_t candidate_runtime_handle; /* best READY asset handle that is publishable now */
+    int16_t  target_prio;              /* priority of target winner */
+    int16_t  candidate_prio;           /* priority of publishable candidate */
+    uint16_t target_seq;               /* mount_seq of target winner */
+    uint16_t candidate_seq;            /* mount_seq of publishable candidate */
+    uint16_t target_asset_idx;         /* assets[] index of target winner */
+    uint16_t candidate_asset_idx;      /* assets[] index of publishable candidate */
+    uint8_t  scan_state;               /* best nt_asset_state_t seen among all matching assets */
+    uint8_t  resolve_pending;          /* on_resolve fired for the published winner */
+    uint8_t  post_resolve_pending;     /* on_post_resolve should fire after the pass */
+} NtResolveTemp;
+```
+
+The resolve pass computes both the target winner and the published winner for each slot:
+- the target winner is purely priority/sequence-based over READY assets
+- the published winner is the best asset that is usable now
+
+For aux-backed asset types, "usable now" means one of two things:
+- `user_data` was already built from this exact asset (`user_data_asset_idx == asset_idx`)
+- or the winner's blob is currently resident, so `on_resolve` can rebuild `user_data` immediately
+
+If a higher-priority target winner is not yet publishable, the slot keeps the best lower-priority usable fallback published. If no usable fallback exists, the slot reports `LOADING` until publication can complete. `nt_resource_get_state()` and `nt_resource_is_ready()` always report the published state, not the raw target winner state.
+
+### 17.6.1 Resolve callbacks (on_resolve / on_cleanup / on_post_resolve)
 
 Per-asset-type callbacks for auxiliary data that persists across pack stacking. Registered separately from activate/deactivate — asset types that don't use them pay nothing.
 
 ```c
 typedef void (*nt_resolve_fn)(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data);
 typedef void (*nt_cleanup_fn)(void *user_data);
+typedef void (*nt_post_resolve_fn)(const uint8_t *data, uint32_t size, nt_resource_t handle, uint32_t runtime_handle, void *user_data);
 
 nt_resource_set_resolve_callbacks(asset_type, on_resolve, on_cleanup);
+nt_resource_set_post_resolve_callback(asset_type, on_post_resolve);
+nt_resource_set_behavior_flags(asset_type, flags);
 void *nt_resource_get_user_data(handle);
 ```
 
-**on_resolve** fires in Phase D when the winner changes for a slot (different asset identity or same identity with a new runtime_handle after re-activation). Receives blob data, runtime_handle, and in/out `user_data` pointer. `data` may be NULL when the winner's pack blob is not resident (placeholder, virtual pack, or evicted blob). The data pointer is valid only for the duration of the call — callbacks must copy if needed.
+Behavior flags:
+- `NT_RESOURCE_BEHAVIOR_AUX_BACKED`: published winner is deferred until `user_data` is synchronized to the winning asset. If the target winner requires aux data but its file-pack blob is currently missing, `resource_step()` schedules that pack for immediate re-download.
 
-**on_cleanup** fires when a slot loses its real winner (all packs unmounted) and during shutdown for remaining non-NULL user_data. `on_resolve` requires `on_cleanup` — registering resolve without cleanup is an assert.
+**on_resolve** fires in Phase D for the published winner when:
+- published asset identity changes
+- published `runtime_handle` changes (re-activation / invalidate / context loss)
+- or an aux-backed asset is being published but its `user_data` has not yet been synchronized to that asset
 
-Winner change detection uses two factors: `resolve_asset_idx` (winner identity) and `runtime_handle` (detect re-activation from context loss / invalidate). Placeholder substitution does not trigger on_resolve — placeholders are visual fallbacks, not real winners.
+`on_resolve` only runs when the published winner is usable now. For aux-backed assets this means the callback either already owns matching `user_data`, or the winner's blob is resident and can be parsed immediately. For simple runtime-handle asset types, `data` may still be NULL (virtual pack, placeholder-style handle substitution, or evicted blob) because publication can proceed from the runtime handle alone. The data pointer is valid only for the duration of the call — callbacks must copy if needed.
 
-Callbacks must not call resource API (mount/unmount/request/step) — they fire during resolve iteration.
+**on_cleanup** fires when a slot loses its published real winner (no publishable real candidate remains) and during shutdown for remaining non-NULL user_data. `on_resolve` requires `on_cleanup` — registering resolve without cleanup is an assert.
+
+**on_post_resolve** fires after the resolve iteration finishes. It may call `request` / `find` / `get` style resource accessors, but must not recurse into `mount` / `unmount` / `step` / `load` / `parse`. Typical use: materialize dependent resource slots from ids that were copied in `on_resolve`.
+
+Publication change detection uses three pieces of state: published asset identity (`resolve_asset_idx`), published `runtime_handle`, and aux synchronization (`user_data_asset_idx`). Placeholder substitution does not trigger `on_resolve` — placeholders are visual fallbacks, not real winners.
+
+`resource_step()` may run more than one resolve pass in the same frame when `on_post_resolve` work creates new slots that need resolution. The pass count is bounded.
 
 ## 17.7 Virtual packs
 
@@ -1065,18 +1119,28 @@ uint16[total_index_count] (at index_offset)
   Runtime offsets them by vertex_start when building GPU buffers.
 ```
 
-Runtime is intentionally trivial: `mmap` the blob, read header, slice arrays. No parsing, no allocation. UVs are pre-normalized, triangles are pre-built (Clipper2 CDT for all polygons, fan triangulation as fallback on CDT failure). Duplicate sprites share `vertex_start`/`index_start`.
+Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, vertex data, index data, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. UVs are pre-normalized and triangles are pre-built by the builder (Clipper2 CDT for all polygons, fan triangulation as fallback on CDT failure).
+
+Subsequent publications merge by `name_hash` to preserve stable region indices across pack stacking:
+- common regions update metadata in place and rewrite their copied vertex/index payload
+- new regions append to the end
+- removed regions become tombstones (`vertex_count = index_count = 0`, `name_hash = NT_ATLAS_TOMBSTONE_HASH`)
+- the hash table is rebuilt from live regions after each merge
+
+Page texture resource ids are copied during `on_resolve`. The actual `nt_resource_t` page handles are materialized in `on_post_resolve` and cached in the atlas snapshot, so `nt_atlas_get_page_resource()` remains O(1).
+
+Atlas registers `NT_RESOURCE_BEHAVIOR_AUX_BACKED`. A higher-priority atlas whose blob is currently missing becomes the target winner, but it is not published until its metadata snapshot has been rebuilt. If a lower-priority usable atlas is already published, it stays active until the target blob is reloaded and resolved.
 
 ## 17.9 Placeholder policy
 
-Texture-only placeholder: if a texture resource is not READY, `nt_resource_step()` resolves the placeholder resource_id and substitutes its handle. Non-texture resources return handle 0 when not ready — game code checks `nt_resource_is_ready()`.
+Texture-only placeholder: if a texture slot has no publishable READY asset, `nt_resource_step()` may publish the placeholder resource's handle for rendering. Non-texture resources never publish placeholder handles and return handle 0 when not ready.
 
 ```c
 // Placeholder is a regular resource (e.g. from a virtual pack or base pack)
 nt_resource_set_placeholder_texture(nt_hash64_str("textures/placeholder.png"));
 ```
 
-The function automatically requests a slot for the placeholder resource_id if one does not exist. Placeholder participates in the same resolve system — if the placeholder resource itself is not READY, no substitution occurs.
+The function automatically requests a slot for the placeholder resource_id if one does not exist. Placeholder participates in the same resolve system — if the placeholder resource itself has no publishable READY winner, no substitution occurs. Publishing a placeholder handle does not make the slot READY: `nt_resource_is_ready()` remains false and `nt_resource_get_state()` continues to report the non-ready state.
 
 ## 17.10 nt_hash -- Identity Hashing
 
@@ -1121,15 +1185,14 @@ The same async contract applies to all platforms for consistency — desktop imp
 ## 18.2 Pack state machine
 
 ```c
-typedef enum PackState
-{
-    PACK_STATE_NONE,         // never loaded
-    PACK_STATE_REQUESTED,    // fetch started
-    PACK_STATE_DOWNLOADING,  // data incoming (optional, for progress)
-    PACK_STATE_LOADED,       // blob received, manifest not parsed
-    PACK_STATE_READY,        // manifest parsed, assets registered
-    PACK_STATE_FAILED        // error
-} PackState;
+typedef enum {
+    NT_PACK_STATE_NONE = 0,    /* not loaded */
+    NT_PACK_STATE_REQUESTED,   /* I/O request issued */
+    NT_PACK_STATE_DOWNLOADING, /* receiving data (progress available) */
+    NT_PACK_STATE_LOADED,      /* data received, not yet parsed */
+    NT_PACK_STATE_READY,       /* parsed, assets registered */
+    NT_PACK_STATE_FAILED,      /* load failed (may retry) */
+} nt_pack_state_t;
 ```
 
 ## 18.3 Asset state machine
@@ -1137,9 +1200,9 @@ typedef enum PackState
 ```c
 typedef enum {
     NT_ASSET_STATE_REGISTERED = 0, /* meta exists, data not loaded */
-    NT_ASSET_STATE_LOADING,        /* being activated (GPU upload etc.) */
-    NT_ASSET_STATE_READY,          /* runtime handle valid, usable */
     NT_ASSET_STATE_FAILED,         /* error, permanent, no retry */
+    NT_ASSET_STATE_LOADING,        /* being activated; slot state may also wait for publication */
+    NT_ASSET_STATE_READY,          /* runtime handle valid; for slots this means published winner fully usable */
 } nt_asset_state_t;
 ```
 
@@ -1154,7 +1217,7 @@ game code: pack_request_load("world.pak")
 
 JS callback → WASM: platform_on_fetch_complete(request_id, blob_ptr, blob_size, success)
   → PackMeta.state = LOADED
-  → PackMeta.blob_data = blob_ptr
+  → PackMeta.blob = blob_ptr
 
 Next resource_step():
   → sees LOADED pack
@@ -1168,24 +1231,46 @@ Asset activation (eager with rate-limit):
   → parses runtime format
   → creates GPU resources / decodes audio
   → AssetState = READY
+
+Resolve/publication:
+  → dirty slots run a resolve pass after activation / mount / unmount / priority change / invalidation
+  → simple asset types publish immediately once the target winner is READY
+  → aux-backed asset types run on_resolve to build per-slot user_data before publication
+  → if the highest-priority target winner needs aux data but its blob is missing, the slot keeps the best usable fallback published or reports LOADING and schedules a reload
 ```
 
 ## 18.5 Loading progress
 
-Current NtPackMeta (Phase 24 — registry only):
+Current `NtPackMeta`:
 
 ```c
 typedef struct {
-    uint32_t pack_id;     /* nt_hash32 value of pack name/path */
-    int16_t  priority;    /* higher = wins on conflict */
-    uint8_t  pack_type;   /* NT_PACK_FILE or NT_PACK_VIRTUAL */
-    uint8_t  mounted;     /* 1 if mounted, 0 if slot available */
-    const uint8_t *blob;  /* loaded pack data */
-    uint32_t blob_size;   /* size of loaded blob */
+    uint32_t pack_id;       /* nt_hash32 value */
+    int16_t  priority;      /* higher = wins on conflict */
+    uint8_t  pack_type;     /* NT_PACK_FILE or NT_PACK_VIRTUAL */
+    uint8_t  mounted;       /* 1 if slot occupied */
+    uint16_t mount_seq;     /* monotonic mount order tiebreak */
+    uint8_t  pack_state;    /* nt_pack_state_t */
+    uint8_t  blob_policy;   /* NT_BLOB_KEEP or NT_BLOB_AUTO */
+    const uint8_t *blob;    /* loaded pack bytes, may be NULL after eviction */
+    uint32_t blob_size;     /* original blob size */
+    uint8_t *meta_data;     /* resident metadata copy (survives blob eviction) */
+    uint32_t meta_size;
+    uint32_t meta_count;
+    uint32_t bytes_received; /* async progress */
+    uint32_t bytes_total;
+    uint32_t io_request_id;
+    uint8_t  io_type;       /* NT_IO_NONE / NT_IO_FS / NT_IO_HTTP */
+    uint16_t attempt_count; /* retry state */
+    uint32_t retry_delay_ms;
+    uint32_t retry_time_ms;
+    uint32_t blob_last_access_ms;
+    uint32_t blob_ttl_ms;
+    char     load_path[256];
 } NtPackMeta;
 ```
 
-Phase 25 will extend with PackState (NONE → REQUESTED → LOADED → READY → FAILED), progress tracking (bytes_received/bytes_total), and url for async web loading.
+`meta_data` is copied out of the pack blob at parse time so metadata queries survive blob eviction. `retry_*`, `io_type`, and `load_path` drive both normal retry/backoff and immediate aux-miss reloads. `blob_last_access_ms` + `blob_ttl_ms` implement `NT_BLOB_AUTO` eviction.
 
 ## 18.6 JS bridge — fetch contract
 
@@ -1210,13 +1295,17 @@ void platform_on_fetch_complete(uint32_t request_id,
 
 ## 18.7 Asset activation strategy
 
-**Eager with rate-limit** (recommended for v0.1): when a pack becomes READY, `resource_step()` processes up to N assets per frame from the ready queue. This prevents frame spikes while ensuring assets become available quickly.
+**Eager with rate-limit**: when a pack becomes READY, `resource_step()` processes up to N assets per frame from the ready queue. This prevents frame spikes while ensuring assets become available quickly.
 
-Each NtResourceSlot stores `resolve_prio` and `resolve_pack` of the current winner. When an individual asset becomes READY, the loader can compare priority directly against the slot — O(1) activation without full rebuild. Full rebuild (`needs_resolve`) is only needed for mount/unmount/set_priority.
+Any change that can affect publication (`mount`, `unmount`, `set_priority`, asset activation, virtual register/unregister, invalidation, placeholder change, or aux-miss reload scheduling) marks the registry dirty. Dirty frames run a resolve scan over assets to compute each slot's target winner and published winner. Clean frames stay on the O(1) fast path.
+
+If `on_post_resolve` work creates new dependent slots (for example atlas page textures), `resource_step()` may execute additional resolve passes in the same frame. The total pass count is bounded to avoid infinite loops.
 
 ## 18.8 Retry policy
 
-1-2 retries with exponential backoff. After retries fail: PackState = FAILED, log error, game code decides response (show error, retry later).
+Normal load failures use 1-2 retries with exponential backoff. After retries fail: PackState = FAILED, log error, game code decides response (show error, retry later).
+
+Aux-miss reloads (target winner requires aux data but its blob was evicted) reuse the same I/O path, but schedule an immediate retry on the next `resource_step()` instead of waiting for backoff.
 
 ## 18.9 Memory note
 
