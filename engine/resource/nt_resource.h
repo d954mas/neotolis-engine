@@ -35,18 +35,6 @@ typedef enum {
     NT_PACK_STATE_FAILED,      /* load failed (may retry) */
 } nt_pack_state_t;
 
-/* ---- Activator callback types ----
- * WARNING: callbacks must not call resource API (mount/unmount/request/step).
- * They fire during resolve iteration — modifying resource state is UB. */
-
-typedef uint32_t (*nt_activate_fn)(const uint8_t *data, uint32_t size);
-typedef void (*nt_deactivate_fn)(uint32_t runtime_handle);
-/* data may be NULL when the winner's pack blob is not resident
- * (placeholder, virtual pack, or evicted file-pack blob).
- * data pointer is only valid for the duration of this call — copy if needed. */
-typedef void (*nt_resolve_fn)(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data);
-typedef void (*nt_cleanup_fn)(void *user_data);
-
 /* ---- Resource handle ---- */
 
 typedef struct {
@@ -60,6 +48,24 @@ typedef struct {
 static inline uint16_t nt_resource_slot_index(nt_resource_t r) { return (uint16_t)(r.id & 0xFFFF); }
 
 static inline uint16_t nt_resource_generation(nt_resource_t r) { return (uint16_t)(r.id >> 16); }
+
+/* ---- Activator callback types ----
+ * on_resolve/on_cleanup fire during resolve iteration — they must not call
+ * resource API (mount/unmount/request/step/load/parse), because modifying
+ * resource state there is UB.
+ *
+ * on_post_resolve fires after the resolve iteration finishes. It may call
+ * request/find/get-style resource accessors, but must not recurse into
+ * mount/unmount/step/load/parse. */
+
+typedef uint32_t (*nt_activate_fn)(const uint8_t *data, uint32_t size);
+typedef void (*nt_deactivate_fn)(uint32_t runtime_handle);
+/* data may be NULL when the winner's pack blob is not resident
+ * (placeholder, virtual pack, or evicted file-pack blob).
+ * data pointer is only valid for the duration of this call — copy if needed. */
+typedef void (*nt_resolve_fn)(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data);
+typedef void (*nt_cleanup_fn)(void *user_data);
+typedef void (*nt_post_resolve_fn)(const uint8_t *data, uint32_t size, nt_resource_t handle, uint32_t runtime_handle, void *user_data);
 
 /* ---- Descriptor ---- */
 
@@ -129,6 +135,7 @@ void nt_resource_pack_progress(nt_hash32_t pack_id, uint32_t *received, uint32_t
 
 void nt_resource_set_activator(uint8_t asset_type, nt_activate_fn activate, nt_deactivate_fn deactivate);
 void nt_resource_set_resolve_callbacks(uint8_t asset_type, nt_resolve_fn on_resolve, nt_cleanup_fn on_cleanup);
+void nt_resource_set_post_resolve_callback(uint8_t asset_type, nt_post_resolve_fn on_post_resolve);
 void *nt_resource_get_user_data(nt_resource_t handle);
 
 /* ---- Activation time budget ---- */

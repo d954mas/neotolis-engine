@@ -967,16 +967,22 @@ static uint32_t fake_activate_seq(const uint8_t *data, uint32_t size) {
 
 static uint32_t s_resolve_call_count;
 static uint32_t s_cleanup_call_count;
+static uint32_t s_post_resolve_call_count;
 static void *s_last_resolve_user_data;
 static uint32_t s_last_resolve_handle;
 static uint32_t s_last_resolve_size;
+static nt_resource_t s_last_post_resolve_requested;
+static uint64_t s_post_resolve_dependency_rid;
 
 static void reset_resolve_state(void) {
     s_resolve_call_count = 0;
     s_cleanup_call_count = 0;
+    s_post_resolve_call_count = 0;
     s_last_resolve_user_data = NULL;
     s_last_resolve_handle = 0;
     s_last_resolve_size = 0;
+    s_last_post_resolve_requested = NT_RESOURCE_INVALID;
+    s_post_resolve_dependency_rid = 0;
 }
 
 static void mock_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
@@ -998,6 +1004,18 @@ static void mock_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime
 static void mock_on_cleanup(void *user_data) {
     s_cleanup_call_count++;
     free(user_data);
+}
+
+static void mock_on_post_resolve(const uint8_t *data, uint32_t size, nt_resource_t handle, uint32_t runtime_handle, void *user_data) {
+    (void)data;
+    (void)size;
+    (void)handle;
+    (void)runtime_handle;
+    (void)user_data;
+    s_post_resolve_call_count++;
+    if (s_post_resolve_dependency_rid != 0) {
+        s_last_post_resolve_requested = nt_resource_request((nt_hash64_t){s_post_resolve_dependency_rid}, NT_ASSET_TEXTURE);
+    }
 }
 
 /* ---- Test pack file writer ---- */
@@ -1835,6 +1853,44 @@ void test_on_resolve_fires_on_winner_change(void) {
     (void)remove("build/test_resolve.ntpack");
 }
 
+void test_on_post_resolve_can_request_dependency_and_resolve_same_step(void) {
+    reset_resolve_state();
+    s_activate_call_count = 0;
+    s_next_handle = 0xBEEF;
+    nt_resource_set_activator(NT_ASSET_MESH, fake_activate_seq, fake_deactivate);
+    nt_resource_set_activator(NT_ASSET_TEXTURE, fake_activate_seq, fake_deactivate);
+    nt_resource_set_resolve_callbacks(NT_ASSET_MESH, mock_on_resolve, mock_on_cleanup);
+    nt_resource_set_post_resolve_callback(NT_ASSET_MESH, mock_on_post_resolve);
+
+    nt_hash32_t pid = nt_hash32_str("post_resolve_dep_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_pack(2, &blob_size);
+    TEST_ASSERT_NOT_NULL(blob);
+
+    /* build_test_pack(2) emits:
+     *   asset0 -> rid "asset0", type NT_ASSET_MESH
+     *   asset1 -> rid "asset1", type NT_ASSET_TEXTURE */
+    nt_hash64_t mesh_rid = nt_hash64_str("asset0");
+    nt_hash64_t tex_rid = nt_hash64_str("asset1");
+    s_post_resolve_dependency_rid = tex_rid.value;
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
+
+    nt_resource_t mesh = nt_resource_request(mesh_rid, NT_ASSET_MESH);
+    TEST_ASSERT_TRUE(mesh.id != 0);
+
+    nt_resource_step();
+
+    TEST_ASSERT_EQUAL_UINT32(1, s_post_resolve_call_count);
+    TEST_ASSERT_TRUE(s_last_post_resolve_requested.id != 0);
+    TEST_ASSERT_TRUE(nt_resource_is_ready(s_last_post_resolve_requested));
+    TEST_ASSERT_TRUE(nt_resource_get(s_last_post_resolve_requested) != 0);
+
+    free(blob);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_on_resolve_merge_on_reactivation(void) {
     reset_resolve_state();
@@ -2224,6 +2280,7 @@ int main(void) {
 
     /* Resolve callbacks and user_data tests */
     RUN_TEST(test_on_resolve_fires_on_winner_change);
+    RUN_TEST(test_on_post_resolve_can_request_dependency_and_resolve_same_step);
     RUN_TEST(test_on_resolve_merge_on_reactivation);
     RUN_TEST(test_on_cleanup_fires_on_unmount);
     RUN_TEST(test_on_cleanup_fires_on_shutdown);

@@ -45,6 +45,7 @@ typedef struct {
     nt_deactivate_fn deactivate;
     nt_resolve_fn on_resolve;
     nt_cleanup_fn on_cleanup;
+    nt_post_resolve_fn on_post_resolve;
 } NtActivatorEntry;
 
 /* ---- Per-asset metadata (one per asset from all packs) ---- */

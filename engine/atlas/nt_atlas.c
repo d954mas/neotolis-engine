@@ -60,12 +60,12 @@ typedef struct nt_atlas_data {
     nt_atlas_hash_entry_t *hash_table;
     uint32_t hash_capacity; /* pow2, >= next_pow2(live_region_count * 2) */
 
-    /* Page texture ids + lazily resolved handles (see R1 in 48-RESEARCH.md:
-     * nt_resource_request is illegal inside on_resolve, so we cache the ids
-     * at parse time and resolve handles on first nt_atlas_get_page_resource
-     * call — which runs OUTSIDE any callback). */
+    /* Page texture ids + cached resource handles. on_resolve stores the raw ids;
+     * on_post_resolve materializes/request the slots outside the resolve pass,
+     * so nt_atlas_get_page_resource
+     * stays O(1) and lock-free on the hot path. */
     uint64_t page_resource_ids[NT_ATLAS_MAX_PAGES];
-    nt_resource_t page_resources[NT_ATLAS_MAX_PAGES]; /* NT_RESOURCE_INVALID until first get */
+    nt_resource_t page_resources[NT_ATLAS_MAX_PAGES]; /* NT_RESOURCE_INVALID until on_post_resolve */
     uint8_t page_count;
 } nt_atlas_data_t;
 // #endregion
@@ -191,14 +191,15 @@ static void translate_region(nt_texture_region_t *dst, const NtAtlasRegion *src)
 // #endregion
 
 // #region replace_pages
-/* Replace the page id array wholesale from a new blob (D-05) and resolve
- * page texture handles immediately via nt_resource_find (pure lookup, safe
- * inside on_resolve). Assert if a page texture is not registered — the
- * builder packs atlas metadata and page textures into the same pack.
+/* Replace the page id array wholesale from a new blob (D-05). Page handles are
+ * invalidated here and re-materialized in atlas_on_post_resolve(), which runs
+ * after the resolve iteration and may
+ * safely call nt_resource_request.
  *
  * Source is a raw byte pointer because blob page-id storage may be only
  * 4-byte aligned (pack asset alignment). We memcpy bytes into the
- * 8-byte-aligned ad->page_resource_ids destination. */
+ * 8-byte-aligned
+ * ad->page_resource_ids destination. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void replace_pages(nt_atlas_data_t *ad, const uint8_t *new_page_ids_bytes, uint32_t page_bytes, uint8_t new_page_count) {
     NT_ASSERT(new_page_count <= NT_ATLAS_MAX_PAGES);
@@ -210,15 +211,7 @@ static void replace_pages(nt_atlas_data_t *ad, const uint8_t *new_page_ids_bytes
     if (new_page_count < NT_ATLAS_MAX_PAGES) {
         memset(&ad->page_resource_ids[new_page_count], 0, (NT_ATLAS_MAX_PAGES - new_page_count) * sizeof(uint64_t));
     }
-    /* Resolve page handles immediately — nt_resource_find is a pure lookup,
-     * safe inside on_resolve. Pages must already be registered from the same pack.
-     * Returns INVALID when driven outside the resource system (unit tests). */
-    for (uint8_t i = 0; i < new_page_count; i++) {
-        nt_hash64_t rid = (nt_hash64_t){ad->page_resource_ids[i]};
-        ad->page_resources[i] = nt_resource_find(rid);
-        NT_ASSERT(ad->page_resources[i].id != 0 && "page texture not registered");
-    }
-    for (uint32_t i = new_page_count; i < NT_ATLAS_MAX_PAGES; i++) {
+    for (uint32_t i = 0; i < NT_ATLAS_MAX_PAGES; i++) {
         ad->page_resources[i] = NT_RESOURCE_INVALID;
     }
     ad->page_count = new_page_count;
@@ -508,6 +501,26 @@ static void atlas_on_cleanup(void *user_data) {
     free(ad->hash_table);
     free(ad);
 }
+
+static void atlas_on_post_resolve(const uint8_t *data, uint32_t size, nt_resource_t atlas, uint32_t runtime_handle, void *user_data) {
+    (void)runtime_handle;
+    (void)atlas;
+
+    /* If the winner changed to an atlas whose blob is currently unavailable,
+     * atlas_on_resolve kept the existing user_data untouched. Do not request
+     * pages from stale data — wait for a
+     * later resolve with resident bytes. */
+    if (data == NULL || size == 0 || user_data == NULL) {
+        return;
+    }
+
+    nt_atlas_data_t *ad = (nt_atlas_data_t *)user_data;
+    for (uint8_t i = 0; i < ad->page_count; i++) {
+        nt_hash64_t rid = (nt_hash64_t){ad->page_resource_ids[i]};
+        ad->page_resources[i] = nt_resource_request(rid, NT_ASSET_TEXTURE);
+        NT_ASSERT(ad->page_resources[i].id != 0 && "page texture slot request failed");
+    }
+}
 // #endregion
 
 // #region public api
@@ -515,6 +528,7 @@ nt_result_t nt_atlas_init(void) {
     NT_ASSERT(!s_atlas.initialized && "nt_atlas_init called twice");
     nt_resource_set_activator(NT_ASSET_ATLAS, atlas_activate, atlas_deactivate);
     nt_resource_set_resolve_callbacks(NT_ASSET_ATLAS, atlas_on_resolve, atlas_on_cleanup);
+    nt_resource_set_post_resolve_callback(NT_ASSET_ATLAS, atlas_on_post_resolve);
     s_atlas.initialized = true;
     return NT_OK;
 }

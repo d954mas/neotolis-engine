@@ -17,7 +17,6 @@
 /* clang-format on */
 
 /* ---- Mock blob builder ----
- *
  * Builds a byte-for-byte valid NT_ASSET_ATLAS v3 blob in a caller-owned buffer.
  * Layout follows shared/include/nt_atlas_format.h:
  *
@@ -85,12 +84,18 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
 
 /* ---- Shared test state ---- */
 
+static uint32_t s_fake_texture_next_handle = 0x7000U;
+
 /* The direct-drive tests each allocate their own user_data via
  * nt_atlas_test_drive_resolve and free it via nt_atlas_test_drive_cleanup.
- * This wrapper lets tearDown safely clean up on failure mid-test. */
+ * This wrapper lets tearDown safely clean up on failure
+ * mid-test. */
 static void *s_user_data;
 
-void setUp(void) { s_user_data = NULL; }
+void setUp(void) {
+    s_user_data = NULL;
+    s_fake_texture_next_handle = 0x7000U;
+}
 
 void tearDown(void) {
     if (s_user_data != NULL) {
@@ -98,6 +103,14 @@ void tearDown(void) {
         s_user_data = NULL;
     }
 }
+
+static uint32_t fake_texture_activate(const uint8_t *data, uint32_t size) {
+    (void)data;
+    (void)size;
+    return s_fake_texture_next_handle++;
+}
+
+static void fake_texture_deactivate(uint32_t runtime_handle) { (void)runtime_handle; }
 
 /* ---- Shared 3-region / 2-page fixture used by tests 1, 2, 3 ---- */
 
@@ -171,6 +184,74 @@ static void build_fixture_blob(uint8_t *buf, uint32_t cap, uint32_t *out_size) {
         .total_index_count = 18,
         .page_ids = NULL,
         .page_count = 0,
+    };
+
+    *out_size = build_mock_atlas_blob(buf, cap, &spec);
+}
+
+static void build_fixture_blob_with_pages(uint8_t *buf, uint32_t cap, uint32_t *out_size) {
+    /* Same region/geometry payload as build_fixture_blob(), but with two atlas
+     * pages so the full resource-pipeline test exercises on_post_resolve. */
+    static NtAtlasVertex verts[12];
+    static uint16_t indices[18];
+    for (uint16_t i = 0; i < 12; i++) {
+        verts[i].local_x = (int16_t)(i * 10);
+        verts[i].local_y = (int16_t)(i * 20);
+        verts[i].atlas_u = (uint16_t)(i * 1000);
+        verts[i].atlas_v = (uint16_t)(i * 2000);
+    }
+    for (uint16_t i = 0; i < 18; i++) {
+        indices[i] = (uint16_t)(i % 5);
+    }
+
+    static NtAtlasRegion regions[3];
+    memset(regions, 0, sizeof(regions));
+    regions[0].name_hash = FIXTURE_R0_HASH;
+    regions[0].source_w = 64;
+    regions[0].source_h = 64;
+    regions[0].origin_x = 0.5F;
+    regions[0].origin_y = 0.5F;
+    regions[0].vertex_start = 0;
+    regions[0].index_start = 0;
+    regions[0].vertex_count = 4;
+    regions[0].index_count = 6;
+    regions[0].page_index = 0;
+    regions[0].transform = 0;
+
+    regions[1].name_hash = FIXTURE_R1_HASH;
+    regions[1].source_w = 32;
+    regions[1].source_h = 48;
+    regions[1].origin_x = 0.25F;
+    regions[1].origin_y = 0.75F;
+    regions[1].vertex_start = 4;
+    regions[1].index_start = 6;
+    regions[1].vertex_count = 3;
+    regions[1].index_count = 3;
+    regions[1].page_index = 1;
+    regions[1].transform = 1;
+
+    regions[2].name_hash = FIXTURE_R2_HASH;
+    regions[2].source_w = 128;
+    regions[2].source_h = 96;
+    regions[2].origin_x = 0.0F;
+    regions[2].origin_y = 1.0F;
+    regions[2].vertex_start = 7;
+    regions[2].index_start = 9;
+    regions[2].vertex_count = 5;
+    regions[2].index_count = 9;
+    regions[2].page_index = 0;
+    regions[2].transform = 4;
+
+    static const uint64_t page_ids[2] = {FIXTURE_PAGE0_ID, FIXTURE_PAGE1_ID};
+    mock_atlas_spec_t spec = {
+        .regions = regions,
+        .region_count = 3,
+        .vertices = verts,
+        .total_vertex_count = 12,
+        .indices = indices,
+        .total_index_count = 18,
+        .page_ids = page_ids,
+        .page_count = 2,
     };
 
     *out_size = build_mock_atlas_blob(buf, cap, &spec);
@@ -947,22 +1028,14 @@ void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
     TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(buf, sizeof(NtAtlasHeader)), "undersized blob should fail");
 }
 
-/* ---- Test 15: Page ids stored at parse, handles resolved via nt_resource_find ----
- * Uses the resource system so nt_resource_find resolves page handles.
- * Verifies page_resource_ids[] are stored correctly at parse and replaced
- * on merge, and that handles are non-zero (resolved). */
+/* ---- Test 15: Direct-drive on_resolve stores page ids and invalidates handles ----
+ * Direct-drive tests bypass resource_step(), so atlas_on_post_resolve does not
+ * run here. This test verifies
+ * the parse/merge side only: page_resource_ids[]
+ * are copied correctly and page_resources[] remain invalid until the post-
+ * resolve phase materializes the slots (covered by test 16). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_page_resources_stored_at_parse(void) {
-    /* Set up resource system so nt_resource_find resolves page handles. */
-    nt_resource_init(NULL);
-    nt_atlas_init();
-
-    /* Register all page texture IDs used in this test. */
-    nt_resource_request((nt_hash64_t){FIXTURE_PAGE0_ID}, NT_ASSET_TEXTURE);
-    nt_resource_request((nt_hash64_t){FIXTURE_PAGE1_ID}, NT_ASSET_TEXTURE);
-    nt_resource_request((nt_hash64_t){0xCCCULL}, NT_ASSET_TEXTURE);
-    nt_resource_request((nt_hash64_t){0xDDDULL}, NT_ASSET_TEXTURE);
-
     /* Build blob with 1 region, 2 pages. */
     static NtAtlasVertex verts[3] = {{10, 20, 1000, 2000}, {30, 40, 3000, 4000}, {50, 60, 5000, 6000}};
     static uint16_t indices[3] = {0, 1, 2};
@@ -997,9 +1070,9 @@ void test_atlas_page_resources_stored_at_parse(void) {
     TEST_ASSERT_EQUAL_UINT64(FIXTURE_PAGE0_ID, nt_atlas_test_page_resource_id(ad, 0));
     TEST_ASSERT_EQUAL_UINT64(FIXTURE_PAGE1_ID, nt_atlas_test_page_resource_id(ad, 1));
 
-    /* Handles resolved (non-zero — resource system is running) */
-    TEST_ASSERT_TRUE(nt_atlas_test_page_resource_handle(ad, 0) != 0);
-    TEST_ASSERT_TRUE(nt_atlas_test_page_resource_handle(ad, 1) != 0);
+    /* Direct-drive resolve does not run atlas_on_post_resolve, so handles stay invalid. */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 1));
 
     /* Merge with different page ids (0xCCC, 0xDDD) */
     static NtAtlasVertex merge_verts[3];
@@ -1036,38 +1109,41 @@ void test_atlas_page_resources_stored_at_parse(void) {
 
     nt_atlas_test_drive_resolve(merge_buf, merge_size, &s_user_data);
 
-    /* After merge: page ids replaced, handles re-resolved */
+    /* After merge: page ids replaced, handles still invalid until post-resolve. */
     TEST_ASSERT_EQUAL_UINT64(0xCCCULL, nt_atlas_test_page_resource_id(ad, 0));
     TEST_ASSERT_EQUAL_UINT64(0xDDDULL, nt_atlas_test_page_resource_id(ad, 1));
-    TEST_ASSERT_TRUE(nt_atlas_test_page_resource_handle(ad, 0) != 0);
-    TEST_ASSERT_TRUE(nt_atlas_test_page_resource_handle(ad, 1) != 0);
-
-    /* Cleanup: free atlas data, then shut down resource system. */
-    nt_atlas_test_drive_cleanup(s_user_data);
-    s_user_data = NULL;
-    nt_resource_shutdown();
-    nt_atlas_test_reset();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 1));
 }
 
 /* ---- Test 16: Full resource pipeline integration ----
- * End-to-end: nt_resource_init + nt_atlas_init → mount + parse_pack →
- * nt_resource_request + nt_resource_step → on_resolve fires →
- * nt_atlas_find_region + nt_atlas_get_region via the public API →
- * nt_resource_shutdown (cleanup runs). Validates the full wiring. */
+ * Atlas + page textures live in one pack. Request only the atlas resource.
+ * on_post_resolve must request page slots and the same nt_resource_step()
+ * must resolve them, so nt_atlas_get_page_resource stays O(1). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_full_resource_pipeline_integration(void) {
-    /* Build an atlas blob (3 regions, 2 pages) */
+    /* Build an atlas blob (3 regions, 2 pages). */
     uint8_t atlas_blob[512];
     uint32_t atlas_blob_size = 0;
-    build_fixture_blob(atlas_blob, sizeof(atlas_blob), &atlas_blob_size);
+    build_fixture_blob_with_pages(atlas_blob, sizeof(atlas_blob), &atlas_blob_size);
 
-    /* Build a .ntpack containing the atlas blob as a single NT_ASSET_ATLAS asset.
-     * Layout: NtPackHeader(32) + NtAssetEntry(24) + alignment padding + atlas_blob */
+    /* Build a .ntpack containing:
+     *   [0] atlas metadata blob
+     *   [1] page texture tex0
+     *   [2] page texture tex1 */
     const uint64_t atlas_rid = 0x1234567890ABCDEFULL;
-    const uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
+    static const uint8_t tex0_blob[16] = {1};
+    static const uint8_t tex1_blob[16] = {2};
+
+    const uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (3U * sizeof(NtAssetEntry)));
     const uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_DATA_ALIGN - 1U);
     const uint32_t aligned_atlas = (atlas_blob_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1U);
-    const uint32_t total_size = header_size + aligned_atlas;
+    const uint32_t aligned_tex0 = ((uint32_t)sizeof(tex0_blob) + (NT_PACK_ASSET_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1U);
+    const uint32_t aligned_tex1 = ((uint32_t)sizeof(tex1_blob) + (NT_PACK_ASSET_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1U);
+    const uint32_t atlas_offset = header_size;
+    const uint32_t tex0_offset = atlas_offset + aligned_atlas;
+    const uint32_t tex1_offset = tex0_offset + aligned_tex0;
+    const uint32_t total_size = tex1_offset + aligned_tex1;
 
     uint8_t *pack_blob = (uint8_t *)calloc(1, total_size);
     TEST_ASSERT_NOT_NULL(pack_blob);
@@ -1075,27 +1151,46 @@ void test_atlas_full_resource_pipeline_integration(void) {
     NtPackHeader *ph = (NtPackHeader *)pack_blob;
     ph->magic = NT_PACK_MAGIC;
     ph->version = NT_PACK_VERSION;
-    ph->asset_count = 1;
+    ph->asset_count = 3;
     ph->header_size = header_size;
     ph->total_size = total_size;
     ph->meta_offset = 0;
     ph->meta_count = 0;
 
     NtAssetEntry *entry = (NtAssetEntry *)(pack_blob + sizeof(NtPackHeader));
-    entry->resource_id = atlas_rid;
-    entry->asset_type = NT_ASSET_ATLAS;
-    entry->format_version = NT_ATLAS_VERSION;
-    entry->offset = header_size;
-    entry->size = atlas_blob_size;
-    entry->meta_offset = 0;
-    entry->_pad = 0;
+    entry[0].resource_id = atlas_rid;
+    entry[0].asset_type = NT_ASSET_ATLAS;
+    entry[0].format_version = NT_ATLAS_VERSION;
+    entry[0].offset = atlas_offset;
+    entry[0].size = atlas_blob_size;
+    entry[0].meta_offset = 0;
+    entry[0]._pad = 0;
 
-    memcpy(pack_blob + header_size, atlas_blob, atlas_blob_size);
+    entry[1].resource_id = FIXTURE_PAGE0_ID;
+    entry[1].asset_type = NT_ASSET_TEXTURE;
+    entry[1].format_version = 1;
+    entry[1].offset = tex0_offset;
+    entry[1].size = (uint32_t)sizeof(tex0_blob);
+    entry[1].meta_offset = 0;
+    entry[1]._pad = 0;
+
+    entry[2].resource_id = FIXTURE_PAGE1_ID;
+    entry[2].asset_type = NT_ASSET_TEXTURE;
+    entry[2].format_version = 1;
+    entry[2].offset = tex1_offset;
+    entry[2].size = (uint32_t)sizeof(tex1_blob);
+    entry[2].meta_offset = 0;
+    entry[2]._pad = 0;
+
+    memcpy(pack_blob + atlas_offset, atlas_blob, atlas_blob_size);
+    memcpy(pack_blob + tex0_offset, tex0_blob, sizeof(tex0_blob));
+    memcpy(pack_blob + tex1_offset, tex1_blob, sizeof(tex1_blob));
     ph->checksum = nt_crc32(pack_blob + header_size, total_size - header_size);
 
     /* --- Resource system init --- */
     nt_resource_init(NULL);
     nt_atlas_init();
+    nt_resource_set_activator(NT_ASSET_TEXTURE, fake_texture_activate, fake_texture_deactivate);
 
     /* Mount pack, parse, request */
     nt_hash32_t pid = nt_hash32_str("atlas_integ_pack");
@@ -1106,8 +1201,10 @@ void test_atlas_full_resource_pipeline_integration(void) {
     nt_resource_t atlas_res = nt_resource_request(rid, NT_ASSET_ATLAS);
     TEST_ASSERT_TRUE(atlas_res.id != 0);
 
-    /* Step: Phase B activates (atlas_activate returns 1 → READY),
-     * Phase D resolves slot → on_resolve fires → nt_atlas_data_t created. */
+    /* Step: Phase B activates atlas + page textures, Phase D resolves atlas,
+     * atlas_on_post_resolve requests page slots, and the follow-up resolve pass
+     * resolves those slots in the same
+     * nt_resource_step(). */
     nt_resource_step();
 
     /* Assert resource is ready */
@@ -1123,6 +1220,17 @@ void test_atlas_full_resource_pipeline_integration(void) {
     TEST_ASSERT_EQUAL_UINT16(64, r->source_w);
     TEST_ASSERT_EQUAL_UINT8(4, r->vertex_count);
     TEST_ASSERT_EQUAL_UINT8(6, r->index_count);
+
+    /* Page handles are cached eagerly by on_post_resolve without any manual
+     * nt_resource_request for the page textures. */
+    nt_resource_t page0 = nt_atlas_get_page_resource(atlas_res, 0);
+    nt_resource_t page1 = nt_atlas_get_page_resource(atlas_res, 1);
+    TEST_ASSERT_TRUE(page0.id != 0);
+    TEST_ASSERT_TRUE(page1.id != 0);
+    TEST_ASSERT_TRUE(nt_resource_is_ready(page0));
+    TEST_ASSERT_TRUE(nt_resource_is_ready(page1));
+    TEST_ASSERT_TRUE(nt_resource_get(page0) != 0);
+    TEST_ASSERT_TRUE(nt_resource_get(page1) != 0);
 
     /* Verify all 3 regions are queryable */
     TEST_ASSERT_EQUAL_UINT32(1, nt_atlas_find_region(atlas_res, FIXTURE_R1_HASH));

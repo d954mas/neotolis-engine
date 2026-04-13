@@ -73,8 +73,9 @@ uint32_t nt_atlas_find_region(nt_resource_t atlas, uint64_t name_hash);
 const nt_texture_region_t *nt_atlas_get_region(nt_resource_t atlas, uint32_t index);
 
 /* Return the texture resource handle for a page index.
- * Page handles are resolved at parse/merge time via nt_resource_find
- * (pure lookup, no allocation). Out-of-range trips NT_ASSERT. */
+ * Page handles are requested and cached in the atlas post-resolve phase,
+ * outside the resolve loop, so this remains an O(1) array read.
+ * Out-of-range trips NT_ASSERT. */
 nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index);
 
 /* ---- Test access (compiled only when NT_ATLAS_TEST_ACCESS is defined) ---- */
@@ -113,7 +114,7 @@ void nt_atlas_test_drive_resolve(const uint8_t *data, uint32_t size, void **user
 void nt_atlas_test_drive_cleanup(void *user_data);
 
 /* Return the cached page_resources[page_index] slot handle's .id field.
- * 0 means NT_RESOURCE_INVALID (not yet lazily resolved). */
+ * 0 means NT_RESOURCE_INVALID (not yet post-resolve primed). */
 uint32_t nt_atlas_test_page_resource_handle(const struct nt_atlas_data *ad, uint8_t page_index);
 
 /* Reset module-level initialized flag so tests can re-init after
