@@ -305,13 +305,11 @@ static void resource_resolve_pass(void) {
 
         slot->resolve_asset_idx = next_has_real_winner ? next_asset_idx : UINT16_MAX;
         slot->runtime_handle = next_handle;
-        slot->resolve_prio = next_has_real_winner ? slot->candidate_prio : INT16_MIN;
+        slot->resolve_prio = (int16_t)(next_has_real_winner ? slot->candidate_prio : INT16_MIN);
         slot->resolve_seq = next_has_real_winner ? slot->candidate_seq : 0;
         if (next_has_real_winner) {
             slot->state = NT_ASSET_STATE_READY;
-        } else if (next_handle != 0) {
-            slot->state = slot->scan_state; /* placeholder handle, state remains non-READY */
-        } else if (target_missing_aux) {
+        } else if (target_missing_aux && next_handle == 0) {
             slot->state = NT_ASSET_STATE_LOADING;
         } else {
             slot->state = slot->scan_state;
