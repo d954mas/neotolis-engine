@@ -420,7 +420,7 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
     /* Seen-bitset: track which existing regions appear in the new blob.
      * Filled during pass 1 (common hits), consumed in pass 2 (unseen → tombstone). */
     const uint32_t pre_merge_count = ad->region_count;
-    uint8_t *seen = (uint8_t *)calloc(1, (pre_merge_count + 7U) / 8U);
+    uint8_t *seen = (uint8_t *)calloc(1, ((pre_merge_count + 7U) / 8U) + 1U);
     NT_ASSERT(seen);
 
     // #region pass 1: common+new
