@@ -4,10 +4,13 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
-#include "log/nt_log.h"
+#include "hash/nt_hash.h"
 #include "nt_atlas_format.h"
 #include "nt_pack_format.h"
 #include "resource/nt_resource.h"
+
+_Static_assert(sizeof(nt_atlas_vertex_t) == 8, "nt_atlas_vertex_t must match NtAtlasVertex (8 bytes)");
+_Static_assert(sizeof(nt_texture_region_t) == 40, "nt_texture_region_t layout changed — update translate_region()");
 
 // #region module state
 static struct {
@@ -176,11 +179,6 @@ static void hash_delete(nt_atlas_data_t *ad, uint64_t name_hash) {
 // #endregion
 
 // #region growth helpers
-/* The growth helpers are defined here so Plan 02 can splice in the real merge
- * path without touching this TU's top-level structure. Plan 01's first-parse
- * branch sizes buffers exactly from the header and never invokes these — they
- * are marked to silence "static function unused" warnings via explicit forward
- * use in the merge stub further down. */
 static void grow_regions_if_needed(nt_atlas_data_t *ad, uint32_t add) {
     if (ad->region_count + add <= ad->region_capacity) {
         return;
@@ -197,33 +195,6 @@ static void grow_regions_if_needed(nt_atlas_data_t *ad, uint32_t add) {
     ad->region_capacity = new_cap;
 }
 
-static void grow_vertices_if_needed(nt_atlas_data_t *ad, uint32_t add) {
-    if (ad->vertex_count + add <= ad->vertex_capacity) {
-        return;
-    }
-    uint32_t new_cap = ad->vertex_capacity == 0 ? 64U : ad->vertex_capacity * 2U;
-    while (new_cap < ad->vertex_count + add) {
-        new_cap *= 2U;
-    }
-    nt_atlas_vertex_t *new_buf = (nt_atlas_vertex_t *)realloc(ad->vertices, new_cap * sizeof(nt_atlas_vertex_t));
-    NT_ASSERT(new_buf);
-    ad->vertices = new_buf;
-    ad->vertex_capacity = new_cap;
-}
-
-static void grow_indices_if_needed(nt_atlas_data_t *ad, uint32_t add) {
-    if (ad->index_count + add <= ad->index_capacity) {
-        return;
-    }
-    uint32_t new_cap = ad->index_capacity == 0 ? 128U : ad->index_capacity * 2U;
-    while (new_cap < ad->index_count + add) {
-        new_cap *= 2U;
-    }
-    uint16_t *new_buf = (uint16_t *)realloc(ad->indices, new_cap * sizeof(uint16_t));
-    NT_ASSERT(new_buf);
-    ad->indices = new_buf;
-    ad->index_capacity = new_cap;
-}
 // #endregion
 
 // #region translate_region
@@ -410,12 +381,37 @@ static void merge_append_region_payload(nt_atlas_data_t *ad, nt_texture_region_t
 
 /* Two-pass merge: Pass 1 walks new_regions and updates common or appends new;
  * Pass 2 walks existing regions and tombstones any that are missing from the
- * new blob. After both passes, page ids are replaced wholesale (D-05). */
+ * new blob. After both passes, page ids are replaced wholesale (D-05).
+ *
+ * All live vertex/index data after a merge comes from the new blob — common
+ * regions are overwritten, removed regions become tombstones (vertex_count=0).
+ * So the final buffer size equals hdr->total_vertex/index_count exactly.
+ * We ensure capacity once up front and reset cursors to zero, eliminating
+ * fragmentation from prior merges. */
+static void merge_reset_buffers(nt_atlas_data_t *ad, const NtAtlasHeader *hdr) {
+    if (hdr->total_vertex_count > ad->vertex_capacity) {
+        nt_atlas_vertex_t *new_buf = (nt_atlas_vertex_t *)realloc(ad->vertices, (size_t)hdr->total_vertex_count * sizeof(nt_atlas_vertex_t));
+        NT_ASSERT(new_buf);
+        ad->vertices = new_buf;
+        ad->vertex_capacity = hdr->total_vertex_count;
+    }
+    if (hdr->total_index_count > ad->index_capacity) {
+        uint16_t *new_buf = (uint16_t *)realloc(ad->indices, (size_t)hdr->total_index_count * sizeof(uint16_t));
+        NT_ASSERT(new_buf);
+        ad->indices = new_buf;
+        ad->index_capacity = hdr->total_index_count;
+    }
+    ad->vertex_count = 0;
+    ad->index_count = 0;
+}
+
 static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
     const NtAtlasHeader *hdr = v->hdr;
     const NtAtlasRegion *new_regions = v->regions;
     const NtAtlasVertex *new_verts = v->verts;
     const uint8_t *new_index_bytes = v->indices_bytes;
+
+    merge_reset_buffers(ad, hdr);
 
     // #region pass 1: common+new
     for (uint32_t i = 0; i < hdr->region_count; i++) {
@@ -424,13 +420,7 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
         const uint32_t existing_idx = hash_find(ad, h);
 
         if (existing_idx != NT_ATLAS_INVALID_REGION) {
-            // #region common: fragment accepted
-            /* COMMON: update metadata in place. Append new verts/indices
-             * to the end of owned buffers — the old vertex_start range is
-             * abandoned (dead space; reclamation deferred per D-03). */
-            grow_vertices_if_needed(ad, nr->vertex_count);
-            grow_indices_if_needed(ad, nr->index_count);
-
+            // #region common: in-place metadata update
             nt_texture_region_t *r = &ad->regions[existing_idx];
             r->source_w = nr->source_w;
             r->source_h = nr->source_h;
@@ -442,20 +432,17 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
             r->transform = nr->transform;
 
             merge_append_region_payload(ad, r, nr, new_verts, new_index_bytes);
-            /* name_hash unchanged; hash-table entry unchanged; stable index. */
             // #endregion
         } else {
-            /* NEW: grow storage, append region, insert into hash table. */
+            /* NEW: grow region storage, append region, insert into hash table. */
             grow_regions_if_needed(ad, 1);
-            grow_vertices_if_needed(ad, nr->vertex_count);
-            grow_indices_if_needed(ad, nr->index_count);
 
             const uint32_t new_idx = ad->region_count++;
             nt_texture_region_t *r = &ad->regions[new_idx];
             translate_region(r, nr);
             merge_append_region_payload(ad, r, nr, new_verts, new_index_bytes);
 
-            hash_insert(ad, h, new_idx); /* may rehash if load factor > 0.5 */
+            hash_insert(ad, h, new_idx);
         }
     }
     // #endregion

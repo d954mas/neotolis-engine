@@ -453,16 +453,11 @@ void test_atlas_merge_common_region_updates_in_place(void) {
     TEST_ASSERT_EQUAL_UINT8(4, r->vertex_count);
     TEST_ASSERT_EQUAL_UINT8(6, r->index_count);
 
-    /* Append cursor advanced: old 0..3 slots dead, new at 4..7 */
-    TEST_ASSERT_EQUAL_UINT32(8, nt_atlas_test_vertex_count(ad));
-    TEST_ASSERT_EQUAL_UINT32(12, nt_atlas_test_index_count(ad));
-    TEST_ASSERT_EQUAL_UINT32(4, r->vertex_start);
-    TEST_ASSERT_EQUAL_UINT32(6, r->index_start);
-
-    /* Fragmentation NOTE: owned buffers are private so tests assert
-     * through the region's vertex_start cursor rather than the buffer
-     * pointer — the stable-index + append-cursor invariants are the
-     * observable contract. */
+    /* Cursors reset on merge — no fragmentation, exact fit */
+    TEST_ASSERT_EQUAL_UINT32(4, nt_atlas_test_vertex_count(ad));
+    TEST_ASSERT_EQUAL_UINT32(6, nt_atlas_test_index_count(ad));
+    TEST_ASSERT_EQUAL_UINT32(0, r->vertex_start);
+    TEST_ASSERT_EQUAL_UINT32(0, r->index_start);
 }
 
 /* ---- Test 7: merge appends new region with fresh index ---- */

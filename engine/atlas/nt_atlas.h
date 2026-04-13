@@ -4,7 +4,6 @@
 #include <stdint.h>
 
 #include "core/nt_types.h"
-#include "hash/nt_hash.h"
 #include "resource/nt_resource.h"
 
 /* ---- Public constants ---- */
@@ -18,9 +17,10 @@
 
 /* ---- Public types ---- */
 
-/* Mirrors NtAtlasVertex from shared/include/nt_atlas_format.h (8 bytes).
+/* Mirrors NtAtlasVertex from shared/include/nt_atlas_format.h (8 bytes, same field order).
  * Runtime stores it identically — no decode; the sprite renderer (Phase 50)
- * applies the int→float conversion and the D4 transform at batch time. */
+ * applies the int→float conversion and the D4 transform at batch time.
+ * Update both structs together when changing fields. */
 typedef struct {
     int16_t local_x;
     int16_t local_y;
@@ -28,12 +28,13 @@ typedef struct {
     uint16_t atlas_v;
 } nt_atlas_vertex_t;
 
-/* Runtime region struct.
+/* Runtime region struct — blob counterpart: NtAtlasRegion (nt_atlas_format.h).
  *
  * Field order differs from NtAtlasRegion to minimize padding and keep hot
  * fields (name_hash, vertex_start, index_start) first. All values are raw:
  * UVs are the packed 0..65535 uint16 atlas_u/v, origin is the normalized
  * float from the builder, and transform is the D4 byte untouched.
+ * Update both structs + translate_region() together when changing fields.
  *
  * Total: 40 bytes on 64-bit (36 used + 4 tail padding). */
 typedef struct {
