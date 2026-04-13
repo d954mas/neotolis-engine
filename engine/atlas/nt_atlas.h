@@ -60,6 +60,10 @@ typedef struct {
  * Call after nt_resource_init(). Must be called exactly once. */
 nt_result_t nt_atlas_init(void);
 
+/* Monotonic snapshot revision. Increments whenever the owned atlas snapshot
+ * is rebuilt from a newly published winner. */
+uint32_t nt_atlas_revision(nt_resource_t atlas);
+
 /* Return the number of regions (including tombstones from merge). */
 uint32_t nt_atlas_region_count(nt_resource_t atlas);
 

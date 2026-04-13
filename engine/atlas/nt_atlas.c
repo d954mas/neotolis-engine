@@ -44,6 +44,7 @@ typedef struct nt_atlas_data {
     nt_texture_region_t *regions;
     uint32_t region_count;    /* high-water including tombstones */
     uint32_t region_capacity; /* allocated size of regions[] */
+    uint32_t revision;        /* owned snapshot generation */
 
     /* Owned vertex buffer — fragmentation from shrinking regions accepted */
     nt_atlas_vertex_t *vertices;
@@ -67,6 +68,16 @@ typedef struct nt_atlas_data {
     nt_resource_t page_resources[NT_ATLAS_MAX_PAGES]; /* NT_RESOURCE_INVALID until on_post_resolve */
     uint8_t page_count;
 } nt_atlas_data_t;
+// #endregion
+
+// #region revision helpers
+static void atlas_bump_revision(nt_atlas_data_t *ad) {
+    NT_ASSERT(ad != NULL);
+    ad->revision++;
+    if (ad->revision == 0) {
+        ad->revision = 1;
+    }
+}
 // #endregion
 
 // #region hash table helpers
@@ -379,6 +390,7 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
             translate_region(&ad->regions[i], &view.regions[i]);
         }
         ad->region_count = hdr->region_count;
+        atlas_bump_revision(ad);
 
         hash_rebuild(ad);
         replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
@@ -463,6 +475,7 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
 
     free(seen);
 
+    atlas_bump_revision(ad);
     hash_rebuild(ad);
     replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
     // #endregion
@@ -510,6 +523,12 @@ nt_result_t nt_atlas_init(void) {
     nt_resource_set_behavior_flags(NT_ASSET_ATLAS, NT_RESOURCE_BEHAVIOR_AUX_BACKED);
     s_atlas.initialized = true;
     return NT_OK;
+}
+
+uint32_t nt_atlas_revision(nt_resource_t atlas) {
+    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    NT_ASSERT(ad != NULL && "nt_atlas_revision on unresolved atlas");
+    return ad->revision;
 }
 
 uint32_t nt_atlas_region_count(nt_resource_t atlas) {

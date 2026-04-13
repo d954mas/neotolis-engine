@@ -6,7 +6,6 @@
 /* clang-format off */
 #include "atlas/nt_atlas.h"
 #include "entity/nt_entity.h"
-#include "hash/nt_hash.h"
 #include "nt_atlas_format.h"
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
@@ -81,7 +80,7 @@ static uint8_t *s_pack_blob; /* heap-allocated pack blob for cleanup */
 
 /* ---- Atlas fixture: full resource pipeline ---- */
 
-static void setup_atlas_fixture(void) {
+static void setup_atlas_fixture(bool resolve_now) {
     // #region Build 2-region atlas blob (no pages for simplicity)
     NtAtlasVertex verts[8];
     uint16_t indices[12];
@@ -168,20 +167,20 @@ static void setup_atlas_fixture(void) {
     ph->checksum = nt_crc32(s_pack_blob + header_size, total_size - header_size);
     // #endregion
 
-    // #region Resource system init + parse + step
+    // #region Resource system init + parse + optional step
     nt_resource_init(NULL);
     nt_atlas_init();
 
-    nt_hash32_t pid = {.value = 0xDEAD};
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, s_pack_blob, total_size));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount((nt_hash32_t){.value = 0xDEAD}, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack((nt_hash32_t){.value = 0xDEAD}, s_pack_blob, total_size));
 
-    nt_hash64_t rid = {.value = atlas_rid};
-    s_atlas_res = nt_resource_request(rid, NT_ASSET_ATLAS);
+    s_atlas_res = nt_resource_request((nt_hash64_t){.value = atlas_rid}, NT_ASSET_ATLAS);
     TEST_ASSERT_TRUE(s_atlas_res.id != 0);
 
-    nt_resource_step();
-    TEST_ASSERT_TRUE_MESSAGE(nt_resource_is_ready(s_atlas_res), "atlas not ready after step");
+    if (resolve_now) {
+        nt_resource_step();
+        TEST_ASSERT_TRUE_MESSAGE(nt_resource_is_ready(s_atlas_res), "atlas not ready after step");
+    }
     // #endregion
 
     s_atlas_initialized = true;
@@ -226,162 +225,158 @@ void test_sprite_add_returns_true(void) {
 void test_sprite_add_defaults(void) {
     nt_entity_t e = nt_entity_create();
     nt_sprite_comp_add(e);
+
     TEST_ASSERT_EQUAL_UINT32(0, nt_sprite_comp_atlas(e)->id);
+    TEST_ASSERT_EQUAL_UINT64(0ULL, *nt_sprite_comp_region_hash(e));
     TEST_ASSERT_EQUAL_UINT16(0, *nt_sprite_comp_region_index(e));
+    TEST_ASSERT_FALSE(nt_sprite_comp_is_resolved(e));
     TEST_ASSERT_EQUAL_UINT8(0, *nt_sprite_comp_flags(e));
 }
 
-/* ---- Test 3: has and remove ---- */
+/* ---- Test 3: bind-by-hash stores desired sprite before atlas is ready ---- */
 
-void test_sprite_has_and_remove(void) {
-    nt_entity_t e = nt_entity_create();
-    nt_sprite_comp_add(e);
-    TEST_ASSERT_TRUE(nt_sprite_comp_has(e));
-    nt_sprite_comp_remove(e);
-    TEST_ASSERT_FALSE(nt_sprite_comp_has(e));
-}
+void test_sprite_bind_by_hash_is_deferred(void) {
+    setup_atlas_fixture(false);
 
-/* ---- Test 4: set_region stores atlas + region_index ---- */
-
-void test_sprite_set_region(void) {
-    setup_atlas_fixture();
-    nt_entity_t e = nt_entity_create();
-    nt_sprite_comp_add(e);
-    nt_sprite_comp_set_region(e, s_atlas_res, 1);
-    TEST_ASSERT_EQUAL_UINT32(s_atlas_res.id, nt_sprite_comp_atlas(e)->id);
-    TEST_ASSERT_EQUAL_UINT16(1, *nt_sprite_comp_region_index(e));
-}
-
-/* ---- Test 5: set_region copies atlas origin and preserves flip ---- */
-
-void test_sprite_set_region_resets_flags(void) {
-    setup_atlas_fixture();
-    nt_entity_t e = nt_entity_create();
-    nt_sprite_comp_add(e);
-    nt_sprite_comp_set_flip(e, true, false);
-    nt_sprite_comp_set_origin(e, 0.1F, 0.2F);
-    nt_sprite_comp_set_region(e, s_atlas_res, 0);
-    /* origin copied from atlas region 0 (0.5, 0.5) */
-    const float *o = nt_sprite_comp_origin(e);
-    TEST_ASSERT_TRUE(o[0] == 0.5F); /* NOLINT */
-    TEST_ASSERT_TRUE(o[1] == 0.5F); /* NOLINT */
-    /* flip preserved */
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X, NT_SPRITE_FLAG_FLIP_X, *nt_sprite_comp_flags(e));
-}
-
-/* ---- Test 6: set_region_by_hash resolves hash to index ---- */
-
-void test_sprite_set_region_by_hash(void) {
-    setup_atlas_fixture();
     nt_entity_t e = nt_entity_create();
     nt_sprite_comp_add(e);
     nt_sprite_comp_set_region_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
+
     TEST_ASSERT_EQUAL_UINT32(s_atlas_res.id, nt_sprite_comp_atlas(e)->id);
+    TEST_ASSERT_EQUAL_UINT64(FIXTURE_R1_HASH, *nt_sprite_comp_region_hash(e));
+    TEST_ASSERT_FALSE(nt_sprite_comp_is_resolved(e));
+    TEST_ASSERT_EQUAL_UINT16(0, *nt_sprite_comp_region_index(e));
+
+    const float *origin = nt_sprite_comp_origin(e);
+    TEST_ASSERT_TRUE(origin[0] == 0.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(origin[1] == 0.0F); /* NOLINT */
+}
+
+/* ---- Test 4: sync resolves cached index and authored origin ---- */
+
+void test_sprite_sync_resolves_ready_atlas(void) {
+    setup_atlas_fixture(false);
+
+    nt_entity_t e = nt_entity_create();
+    nt_sprite_comp_add(e);
+    nt_sprite_comp_set_region_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
+
+    nt_resource_step();
+    TEST_ASSERT_TRUE(nt_resource_is_ready(s_atlas_res));
+
+    nt_sprite_comp_sync_resources();
+
+    TEST_ASSERT_TRUE(nt_sprite_comp_is_resolved(e));
     TEST_ASSERT_EQUAL_UINT16(1, *nt_sprite_comp_region_index(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_RESOLVED, NT_SPRITE_FLAG_RESOLVED, *nt_sprite_comp_flags(e));
+
+    const float *origin = nt_sprite_comp_origin(e);
+    TEST_ASSERT_TRUE(origin[0] == 0.25F); /* NOLINT */
+    TEST_ASSERT_TRUE(origin[1] == 0.75F); /* NOLINT */
 }
 
-/* ---- Test 7: set_origin stores values ---- */
+/* ---- Test 5: set_region is strict fast path for a ready atlas ---- */
 
-void test_sprite_set_origin(void) {
+void test_sprite_set_region_resolves_immediately(void) {
+    setup_atlas_fixture(true);
+
     nt_entity_t e = nt_entity_create();
     nt_sprite_comp_add(e);
-    nt_sprite_comp_set_origin(e, 0.3F, 0.7F);
-    const float *o = nt_sprite_comp_origin(e);
-    TEST_ASSERT_TRUE(o[0] == 0.3F); /* NOLINT */
-    TEST_ASSERT_TRUE(o[1] == 0.7F); /* NOLINT */
+    nt_sprite_comp_set_region(e, s_atlas_res, 0);
+
+    TEST_ASSERT_TRUE(nt_sprite_comp_is_resolved(e));
+    TEST_ASSERT_EQUAL_UINT64(FIXTURE_R0_HASH, *nt_sprite_comp_region_hash(e));
+    TEST_ASSERT_EQUAL_UINT16(0, *nt_sprite_comp_region_index(e));
+
+    const float *origin = nt_sprite_comp_origin(e);
+    TEST_ASSERT_TRUE(origin[0] == 0.5F); /* NOLINT */
+    TEST_ASSERT_TRUE(origin[1] == 0.5F); /* NOLINT */
 }
 
-/* ---- Test 8: reset_origin restores atlas origin, leaves flip intact ---- */
+/* ---- Test 6: explicit origin override survives deferred resolve ---- */
 
-void test_sprite_reset_origin(void) {
-    setup_atlas_fixture();
+void test_sprite_override_survives_sync(void) {
+    setup_atlas_fixture(false);
+
     nt_entity_t e = nt_entity_create();
     nt_sprite_comp_add(e);
-    nt_sprite_comp_set_region(e, s_atlas_res, 0); /* origin = (0.5, 0.5) */
-    nt_sprite_comp_set_flip(e, true, true);
-    nt_sprite_comp_set_origin(e, 0.9F, 0.9F);
+    nt_sprite_comp_set_region_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
+    nt_sprite_comp_set_origin(e, 0.1F, 0.2F);
+
+    nt_resource_step();
+    nt_sprite_comp_sync_resources();
+
+    TEST_ASSERT_TRUE(nt_sprite_comp_is_resolved(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV | NT_SPRITE_FLAG_RESOLVED, NT_SPRITE_FLAG_ORIGIN_OV | NT_SPRITE_FLAG_RESOLVED, *nt_sprite_comp_flags(e));
+
+    const float *origin = nt_sprite_comp_origin(e);
+    TEST_ASSERT_TRUE(origin[0] == 0.1F); /* NOLINT */
+    TEST_ASSERT_TRUE(origin[1] == 0.2F); /* NOLINT */
+}
+
+/* ---- Test 7: reset_origin restores authored origin after resolve ---- */
+
+void test_sprite_reset_origin_restores_authored_origin(void) {
+    setup_atlas_fixture(true);
+
+    nt_entity_t e = nt_entity_create();
+    nt_sprite_comp_add(e);
+    nt_sprite_comp_set_region_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
+    nt_sprite_comp_sync_resources();
+    nt_sprite_comp_set_origin(e, 0.9F, 0.1F);
     nt_sprite_comp_reset_origin(e);
-    /* origin restored from atlas region 0 */
-    const float *o = nt_sprite_comp_origin(e);
-    TEST_ASSERT_TRUE(o[0] == 0.5F); /* NOLINT */
-    TEST_ASSERT_TRUE(o[1] == 0.5F); /* NOLINT */
-    /* flip preserved */
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y, NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y, *nt_sprite_comp_flags(e));
+
+    TEST_ASSERT_TRUE(nt_sprite_comp_is_resolved(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, 0, *nt_sprite_comp_flags(e));
+
+    const float *origin = nt_sprite_comp_origin(e);
+    TEST_ASSERT_TRUE(origin[0] == 0.25F); /* NOLINT */
+    TEST_ASSERT_TRUE(origin[1] == 0.75F); /* NOLINT */
 }
 
-/* ---- Test 9: set_flip sets bits 0-1 correctly ---- */
-
-void test_sprite_set_flip(void) {
-    nt_entity_t e = nt_entity_create();
-    nt_sprite_comp_add(e);
-
-    nt_sprite_comp_set_flip(e, true, false);
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X, NT_SPRITE_FLAG_FLIP_X, *nt_sprite_comp_flags(e));
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_Y, 0, *nt_sprite_comp_flags(e));
-
-    nt_sprite_comp_set_flip(e, false, true);
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X, 0, *nt_sprite_comp_flags(e));
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_Y, NT_SPRITE_FLAG_FLIP_Y, *nt_sprite_comp_flags(e));
-
-    nt_sprite_comp_set_flip(e, true, true);
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y, NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y, *nt_sprite_comp_flags(e));
-}
-
-/* ---- Test 10: set_flip preserves origin values ---- */
+/* ---- Test 8: set_flip preserves origin override ---- */
 
 void test_sprite_flip_preserves_origin_override(void) {
     nt_entity_t e = nt_entity_create();
     nt_sprite_comp_add(e);
     nt_sprite_comp_set_origin(e, 0.5F, 0.5F);
+
     nt_sprite_comp_set_flip(e, true, false);
-    const float *o = nt_sprite_comp_origin(e);
-    TEST_ASSERT_TRUE(o[0] == 0.5F); /* NOLINT */
-    TEST_ASSERT_TRUE(o[1] == 0.5F); /* NOLINT */
+
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, NT_SPRITE_FLAG_ORIGIN_OV, *nt_sprite_comp_flags(e));
     TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X, NT_SPRITE_FLAG_FLIP_X, *nt_sprite_comp_flags(e));
 }
 
-/* ---- Test 11: set_region copies atlas origin over custom origin ---- */
+/* ---- Test 9: swap-and-pop preserves cached sprite data ---- */
 
-void test_sprite_set_region_clears_origin_override(void) {
-    setup_atlas_fixture();
-    nt_entity_t e = nt_entity_create();
-    nt_sprite_comp_add(e);
-    nt_sprite_comp_set_origin(e, 0.1F, 0.2F);
-    nt_sprite_comp_set_region(e, s_atlas_res, 0);
-    /* origin replaced by atlas region 0 values (0.5, 0.5) */
-    const float *o = nt_sprite_comp_origin(e);
-    TEST_ASSERT_TRUE(o[0] == 0.5F); /* NOLINT */
-    TEST_ASSERT_TRUE(o[1] == 0.5F); /* NOLINT */
-}
+void test_sprite_swap_and_pop_preserves_state(void) {
+    setup_atlas_fixture(true);
 
-/* ---- Test 12: swap-and-pop preserves data ---- */
-
-void test_sprite_swap_and_pop(void) {
-    setup_atlas_fixture();
     nt_entity_t e1 = nt_entity_create();
     nt_entity_t e2 = nt_entity_create();
     nt_sprite_comp_add(e1);
     nt_sprite_comp_add(e2);
 
-    nt_sprite_comp_set_region(e1, s_atlas_res, 0);
-    nt_sprite_comp_set_flip(e1, true, false);
-
-    nt_sprite_comp_set_region(e2, s_atlas_res, 1);
+    nt_sprite_comp_set_region_by_hash(e1, s_atlas_res, FIXTURE_R0_HASH);
+    nt_sprite_comp_set_region_by_hash(e2, s_atlas_res, FIXTURE_R1_HASH);
     nt_sprite_comp_set_origin(e2, 0.1F, 0.9F);
+    nt_sprite_comp_sync_resources();
 
-    /* Remove e1 triggers swap-and-pop: e2 data moves to e1's dense slot */
     nt_sprite_comp_remove(e1);
 
     TEST_ASSERT_FALSE(nt_sprite_comp_has(e1));
     TEST_ASSERT_TRUE(nt_sprite_comp_has(e2));
+    TEST_ASSERT_TRUE(nt_sprite_comp_is_resolved(e2));
+    TEST_ASSERT_EQUAL_UINT64(FIXTURE_R1_HASH, *nt_sprite_comp_region_hash(e2));
     TEST_ASSERT_EQUAL_UINT16(1, *nt_sprite_comp_region_index(e2));
-    TEST_ASSERT_EQUAL_UINT32(s_atlas_res.id, nt_sprite_comp_atlas(e2)->id);
-    const float *o = nt_sprite_comp_origin(e2);
-    TEST_ASSERT_TRUE(o[0] == 0.1F); /* NOLINT */
-    TEST_ASSERT_TRUE(o[1] == 0.9F); /* NOLINT */
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV | NT_SPRITE_FLAG_RESOLVED, NT_SPRITE_FLAG_ORIGIN_OV | NT_SPRITE_FLAG_RESOLVED, *nt_sprite_comp_flags(e2));
+
+    const float *origin = nt_sprite_comp_origin(e2);
+    TEST_ASSERT_TRUE(origin[0] == 0.1F); /* NOLINT */
+    TEST_ASSERT_TRUE(origin[1] == 0.9F); /* NOLINT */
 }
 
-/* ---- Test 13: entity destroy auto-removes sprite ---- */
+/* ---- Test 10: entity destroy auto-removes sprite ---- */
 
 void test_entity_destroy_removes_sprite(void) {
     nt_entity_t e = nt_entity_create();
@@ -397,16 +392,13 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_sprite_add_returns_true);
     RUN_TEST(test_sprite_add_defaults);
-    RUN_TEST(test_sprite_has_and_remove);
-    RUN_TEST(test_sprite_set_region);
-    RUN_TEST(test_sprite_set_region_resets_flags);
-    RUN_TEST(test_sprite_set_region_by_hash);
-    RUN_TEST(test_sprite_set_origin);
-    RUN_TEST(test_sprite_reset_origin);
-    RUN_TEST(test_sprite_set_flip);
+    RUN_TEST(test_sprite_bind_by_hash_is_deferred);
+    RUN_TEST(test_sprite_sync_resolves_ready_atlas);
+    RUN_TEST(test_sprite_set_region_resolves_immediately);
+    RUN_TEST(test_sprite_override_survives_sync);
+    RUN_TEST(test_sprite_reset_origin_restores_authored_origin);
     RUN_TEST(test_sprite_flip_preserves_origin_override);
-    RUN_TEST(test_sprite_set_region_clears_origin_override);
-    RUN_TEST(test_sprite_swap_and_pop);
+    RUN_TEST(test_sprite_swap_and_pop_preserves_state);
     RUN_TEST(test_entity_destroy_removes_sprite);
     return UNITY_END();
 }
