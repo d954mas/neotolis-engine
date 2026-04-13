@@ -236,9 +236,7 @@ static void resource_resolve_pass(void) {
         uint16_t ph_si = slot_map_find(s_resource.placeholder_texture);
         uint32_t ph_handle = 0;
         if (ph_si != 0) {
-            const NtResolveTemp *ph_tmp = &resolve_temp[ph_si];
-            const NtResourceSlot *ph_slot = &s_resource.slots[ph_si];
-            ph_handle = (ph_tmp->candidate_asset_idx < s_resource.asset_hwm || ph_tmp->candidate_runtime_handle != 0) ? ph_tmp->candidate_runtime_handle : ph_slot->runtime_handle;
+            ph_handle = resolve_temp[ph_si].candidate_runtime_handle;
         }
 
         if (ph_handle != 0) {

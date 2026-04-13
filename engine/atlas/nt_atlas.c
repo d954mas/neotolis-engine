@@ -181,9 +181,7 @@ static void replace_pages(nt_atlas_data_t *ad, const uint8_t *new_page_ids_bytes
     if (new_page_count < NT_ATLAS_MAX_PAGES) {
         memset(&ad->page_resource_ids[new_page_count], 0, (NT_ATLAS_MAX_PAGES - new_page_count) * sizeof(uint64_t));
     }
-    for (uint32_t i = 0; i < NT_ATLAS_MAX_PAGES; i++) {
-        ad->page_resources[i] = NT_RESOURCE_INVALID;
-    }
+    memset(ad->page_resources, 0, sizeof(ad->page_resources));
     ad->page_count = new_page_count;
 }
 // #endregion
