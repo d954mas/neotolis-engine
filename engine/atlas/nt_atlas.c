@@ -60,10 +60,9 @@ typedef struct nt_atlas_data {
     nt_atlas_hash_entry_t *hash_table;
     uint32_t hash_capacity; /* pow2, >= next_pow2(live_region_count * 2) */
 
-    /* Page texture ids + cached resource handles. on_resolve stores the raw ids;
-     * on_post_resolve materializes/request the slots outside the resolve pass,
-     * so nt_atlas_get_page_resource
-     * stays O(1) and lock-free on the hot path. */
+    // Page texture ids + cached resource handles.
+    // on_resolve stores raw ids. on_post_resolve builds the slots after the
+    // resolve pass. nt_atlas_get_page_resource stays O(1).
     uint64_t page_resource_ids[NT_ATLAS_MAX_PAGES];
     nt_resource_t page_resources[NT_ATLAS_MAX_PAGES]; /* NT_RESOURCE_INVALID until on_post_resolve */
     uint8_t page_count;
@@ -191,15 +190,11 @@ static void translate_region(nt_texture_region_t *dst, const NtAtlasRegion *src)
 // #endregion
 
 // #region replace_pages
-/* Replace the page id array wholesale from a new blob (D-05). Page handles are
- * invalidated here and re-materialized in atlas_on_post_resolve(), which runs
- * after the resolve iteration and may
- * safely call nt_resource_request.
- *
- * Source is a raw byte pointer because blob page-id storage may be only
- * 4-byte aligned (pack asset alignment). We memcpy bytes into the
- * 8-byte-aligned
- * ad->page_resource_ids destination. */
+// Replace the page id array wholesale from a new blob (D-05).
+// Invalidate page handles here. atlas_on_post_resolve() rebuilds them after
+// the resolve pass, where nt_resource_request is legal.
+// Source is a raw byte pointer because page-id storage may be only 4-byte
+// aligned by the pack. memcpy copies the bytes into ad->page_resource_ids.
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void replace_pages(nt_atlas_data_t *ad, const uint8_t *new_page_ids_bytes, uint32_t page_bytes, uint8_t new_page_count) {
     NT_ASSERT(new_page_count <= NT_ATLAS_MAX_PAGES);
