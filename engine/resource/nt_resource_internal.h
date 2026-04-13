@@ -5,7 +5,11 @@
 
 #include <stdint.h>
 
-/* ---- Asset state machine ---- */
+/* ---- Asset state machine ----
+ * Numeric order matters: resolve uses (state > scan_state) to pick the
+ * best state across multiple assets for one slot.  READY > LOADING >
+ * FAILED > REGISTERED — so a LOADING asset beats FAILED, etc.
+ * Do not reorder without updating the comparison in resource_resolve_pass(). */
 
 typedef enum {
     NT_ASSET_STATE_REGISTERED = 0, /* meta exists, data not loaded */
@@ -13,6 +17,9 @@ typedef enum {
     NT_ASSET_STATE_LOADING,        /* being activated (GPU upload etc.) */
     NT_ASSET_STATE_READY,          /* runtime handle valid, usable */
 } nt_asset_state_t;
+
+_Static_assert(NT_ASSET_STATE_READY > NT_ASSET_STATE_LOADING && NT_ASSET_STATE_LOADING > NT_ASSET_STATE_FAILED && NT_ASSET_STATE_FAILED > NT_ASSET_STATE_REGISTERED,
+               "nt_asset_state_t ordering is load-bearing — resolve uses numeric comparison");
 
 /* ---- Pack type ---- */
 

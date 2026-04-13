@@ -452,6 +452,8 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
         if (!still_present) {
             NT_LOG_WARN("atlas merge: region 0x%016llx removed (not in new blob)", (unsigned long long)r->name_hash);
             r->name_hash = NT_ATLAS_TOMBSTONE_HASH;
+            r->vertex_start = 0;
+            r->index_start = 0;
             r->vertex_count = 0;
             r->index_count = 0;
         }

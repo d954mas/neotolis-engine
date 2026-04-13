@@ -125,8 +125,8 @@ static void build_fixture_blob(uint8_t *buf, uint32_t cap, uint32_t *out_size) {
      * Region 0: verts [0..4),  indices [0..6),  page 0, hash 0x100
      * Region 1: verts [4..7),  indices [6..9),  page 1, hash 0x200
      * Region 2: verts [7..12), indices [9..18), page 0, hash 0x300 */
-    static NtAtlasVertex verts[12];
-    static uint16_t indices[18];
+    NtAtlasVertex verts[12];
+    uint16_t indices[18];
     for (uint16_t i = 0; i < 12; i++) {
         verts[i].local_x = (int16_t)(i * 10);
         verts[i].local_y = (int16_t)(i * 20);
@@ -137,7 +137,7 @@ static void build_fixture_blob(uint8_t *buf, uint32_t cap, uint32_t *out_size) {
         indices[i] = (uint16_t)(i % 5); /* local-per-region, deliberately not 0..N */
     }
 
-    static NtAtlasRegion regions[3];
+    NtAtlasRegion regions[3];
     memset(regions, 0, sizeof(regions));
     regions[0].name_hash = FIXTURE_R0_HASH;
     regions[0].source_w = 64;
@@ -192,8 +192,8 @@ static void build_fixture_blob(uint8_t *buf, uint32_t cap, uint32_t *out_size) {
 static void build_fixture_blob_with_pages(uint8_t *buf, uint32_t cap, uint32_t *out_size) {
     /* Same region/geometry payload as build_fixture_blob(), but with two atlas
      * pages so the full resource-pipeline test exercises on_post_resolve. */
-    static NtAtlasVertex verts[12];
-    static uint16_t indices[18];
+    NtAtlasVertex verts[12];
+    uint16_t indices[18];
     for (uint16_t i = 0; i < 12; i++) {
         verts[i].local_x = (int16_t)(i * 10);
         verts[i].local_y = (int16_t)(i * 20);
@@ -204,7 +204,7 @@ static void build_fixture_blob_with_pages(uint8_t *buf, uint32_t cap, uint32_t *
         indices[i] = (uint16_t)(i % 5);
     }
 
-    static NtAtlasRegion regions[3];
+    NtAtlasRegion regions[3];
     memset(regions, 0, sizeof(regions));
     regions[0].name_hash = FIXTURE_R0_HASH;
     regions[0].source_w = 64;
@@ -317,15 +317,15 @@ void test_atlas_get_region_by_index_bounds_check(void) {
 /* Test 4: Every NtAtlasRegion field round-trips into nt_texture_region_t
  * Verifies REGION-08 field-passthrough guard (transform D4, all raw ints). */
 void test_atlas_get_region_returns_field_passthrough(void) {
-    static NtAtlasVertex verts[4] = {
+    NtAtlasVertex verts[4] = {
         {.local_x = 10, .local_y = 20, .atlas_u = 1000, .atlas_v = 2000},
         {.local_x = 30, .local_y = 40, .atlas_u = 3000, .atlas_v = 4000},
         {.local_x = 50, .local_y = 60, .atlas_u = 5000, .atlas_v = 6000},
         {.local_x = 70, .local_y = 80, .atlas_u = 7000, .atlas_v = 8000},
     };
-    static uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
+    uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
 
-    static NtAtlasRegion region;
+    NtAtlasRegion region;
     memset(&region, 0, sizeof(region));
     region.name_hash = 0xABCD1234ULL;
     region.source_w = 123;
@@ -439,9 +439,9 @@ typedef struct {
  * Generates synthetic vertices and indices tied to payload_seed so each
  * region's payload is visibly distinct. Returns bytes written. */
 static uint32_t build_merge_blob(uint8_t *out, uint32_t cap, const merge_region_spec_t *specs, uint16_t region_count, const uint64_t *page_ids, uint16_t page_count) {
-    static NtAtlasRegion regions_storage[8];
-    static NtAtlasVertex verts_storage[128];
-    static uint16_t indices_storage[256];
+    NtAtlasRegion regions_storage[8];
+    NtAtlasVertex verts_storage[128];
+    uint16_t indices_storage[256];
 
     TEST_ASSERT_MESSAGE(region_count <= 8, "merge helper region_count cap");
     uint32_t v_cursor = 0;
@@ -537,14 +537,14 @@ void test_atlas_merge_common_region_updates_in_place(void) {
 
 /* ---- Test 7: merge preserves shared payload slices from the blob ---- */
 void test_atlas_merge_preserves_shared_payload_slices(void) {
-    static NtAtlasVertex verts1[4] = {
+    NtAtlasVertex verts1[4] = {
         {.local_x = 10, .local_y = 20, .atlas_u = 100, .atlas_v = 200},
         {.local_x = 30, .local_y = 40, .atlas_u = 300, .atlas_v = 400},
         {.local_x = 50, .local_y = 60, .atlas_u = 500, .atlas_v = 600},
         {.local_x = 70, .local_y = 80, .atlas_u = 700, .atlas_v = 800},
     };
-    static uint16_t indices1[6] = {0, 1, 2, 0, 2, 3};
-    static NtAtlasRegion regions1[2];
+    uint16_t indices1[6] = {0, 1, 2, 0, 2, 3};
+    NtAtlasRegion regions1[2];
     memset(regions1, 0, sizeof(regions1));
     regions1[0].name_hash = 0xAAAULL;
     regions1[0].source_w = 32;
@@ -575,13 +575,13 @@ void test_atlas_merge_preserves_shared_payload_slices(void) {
         .page_count = 0,
     };
 
-    static NtAtlasVertex verts2[7] = {
+    NtAtlasVertex verts2[7] = {
         {.local_x = 11, .local_y = 21, .atlas_u = 101, .atlas_v = 201}, {.local_x = 31, .local_y = 41, .atlas_u = 301, .atlas_v = 401}, {.local_x = 51, .local_y = 61, .atlas_u = 501, .atlas_v = 601},
         {.local_x = 71, .local_y = 81, .atlas_u = 701, .atlas_v = 801}, {.local_x = 90, .local_y = 91, .atlas_u = 902, .atlas_v = 903}, {.local_x = 92, .local_y = 93, .atlas_u = 904, .atlas_v = 905},
         {.local_x = 94, .local_y = 95, .atlas_u = 906, .atlas_v = 907},
     };
-    static uint16_t indices2[9] = {0, 1, 2, 0, 2, 3, 0, 1, 2};
-    static NtAtlasRegion regions2[3];
+    uint16_t indices2[9] = {0, 1, 2, 0, 2, 3, 0, 1, 2};
+    NtAtlasRegion regions2[3];
     memset(regions2, 0, sizeof(regions2));
     regions2[0].name_hash = 0xAAAULL;
     regions2[0].source_w = 64;
@@ -1209,9 +1209,9 @@ void test_atlas_region_slice_validation_rejects_corruption(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_page_resources_stored_at_parse(void) {
     /* Build blob with 1 region, 2 pages. */
-    static NtAtlasVertex verts[3] = {{10, 20, 1000, 2000}, {30, 40, 3000, 4000}, {50, 60, 5000, 6000}};
-    static uint16_t indices[3] = {0, 1, 2};
-    static NtAtlasRegion region;
+    NtAtlasVertex verts[3] = {{10, 20, 1000, 2000}, {30, 40, 3000, 4000}, {50, 60, 5000, 6000}};
+    uint16_t indices[3] = {0, 1, 2};
+    NtAtlasRegion region;
     memset(&region, 0, sizeof(region));
     region.name_hash = FIXTURE_R0_HASH;
     region.source_w = 64;
@@ -1247,15 +1247,15 @@ void test_atlas_page_resources_stored_at_parse(void) {
     TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 1));
 
     /* Merge with different page ids (0xCCC, 0xDDD) */
-    static NtAtlasVertex merge_verts[3];
-    static uint16_t merge_indices[3] = {0, 1, 2};
+    NtAtlasVertex merge_verts[3];
+    uint16_t merge_indices[3] = {0, 1, 2};
     for (int i = 0; i < 3; i++) {
         merge_verts[i].local_x = (int16_t)(i * 5);
         merge_verts[i].local_y = (int16_t)(i * 10);
         merge_verts[i].atlas_u = (uint16_t)(i * 500);
         merge_verts[i].atlas_v = (uint16_t)(i * 1000);
     }
-    static NtAtlasRegion merge_region;
+    NtAtlasRegion merge_region;
     memset(&merge_region, 0, sizeof(merge_region));
     merge_region.name_hash = FIXTURE_R0_HASH;
     merge_region.source_w = 64;
