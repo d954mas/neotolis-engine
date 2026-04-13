@@ -5,6 +5,7 @@
 
 #include "core/nt_assert.h"
 #include "hash/nt_hash.h"
+#include "log/nt_log.h"
 #include "nt_atlas_format.h"
 #include "nt_pack_format.h"
 #include "resource/nt_resource.h"
@@ -413,6 +414,26 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
 
     merge_reset_buffers(ad, hdr);
 
+    /* Pre-scan: count how many new-blob regions are genuinely new (not in
+     * existing hash table) so we can pre-size the hash table exactly once. */
+    uint32_t new_only_count = 0;
+    for (uint32_t i = 0; i < hdr->region_count; i++) {
+        if (hash_find(ad, new_regions[i].name_hash) == NT_ATLAS_INVALID_REGION) {
+            new_only_count++;
+        }
+    }
+    const uint32_t final_count = ad->region_count + new_only_count;
+    const uint32_t needed_cap = next_pow2(final_count * 2U);
+    if (needed_cap > ad->hash_capacity) {
+        hash_rehash(ad, needed_cap);
+    }
+
+    /* Seen-bitset: track which existing regions appear in the new blob.
+     * Filled during pass 1 (common hits), consumed in pass 2 (unseen → tombstone). */
+    const uint32_t pre_merge_count = ad->region_count;
+    uint8_t *seen = (uint8_t *)calloc(1, (pre_merge_count + 7U) / 8U);
+    NT_ASSERT(seen);
+
     // #region pass 1: common+new
     for (uint32_t i = 0; i < hdr->region_count; i++) {
         const NtAtlasRegion *nr = &new_regions[i];
@@ -421,6 +442,8 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
 
         if (existing_idx != NT_ATLAS_INVALID_REGION) {
             // #region common: in-place metadata update
+            seen[existing_idx / 8U] |= (uint8_t)(1U << (existing_idx % 8U));
+
             nt_texture_region_t *r = &ad->regions[existing_idx];
             r->source_w = nr->source_w;
             r->source_h = nr->source_h;
@@ -448,32 +471,23 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
     // #endregion
 
     // #region pass 2: tombstones
-    /* Iterate existing regions[] (not the hash table, to avoid DELETED
-     * entries). For each surviving region, linear-scan the new blob for
-     * name_hash presence. O(N*M) is fine for Phase 48 (§Pass-2 optimization
-     * in 48-RESEARCH.md — revisit only if stress tests complain). */
-    for (uint32_t i = 0; i < ad->region_count; i++) {
+    for (uint32_t i = 0; i < pre_merge_count; i++) {
         nt_texture_region_t *r = &ad->regions[i];
         if (r->name_hash == NT_ATLAS_TOMBSTONE_HASH) {
-            continue; /* already dead */
+            continue; /* already dead from a previous merge */
         }
-        bool still_present = false;
-        for (uint32_t j = 0; j < hdr->region_count; j++) {
-            if (new_regions[j].name_hash == r->name_hash) {
-                still_present = true;
-                break;
-            }
-        }
+        const bool still_present = (seen[i / 8U] >> (i % 8U)) & 1U;
         if (!still_present) {
-            hash_delete(ad, r->name_hash); /* DELETED marker; not compacted */
+            NT_LOG_WARN("atlas merge: region 0x%016llx removed (not in new blob)", (unsigned long long)r->name_hash);
+            hash_delete(ad, r->name_hash);
             r->name_hash = NT_ATLAS_TOMBSTONE_HASH;
             r->vertex_count = 0;
             r->index_count = 0;
-            /* vertex_start/index_start left as dead weight — never referenced
-             * once vertex_count==0. Region index is NEVER reused. */
         }
     }
     // #endregion
+
+    free(seen);
 
     /* Replace page resource ids wholesale per D-05 + R1 — lazy handle cache
      * page_resources[] is reset to NT_RESOURCE_INVALID inside replace_pages. */
