@@ -114,7 +114,7 @@ static bool asset_blob_resident(const NtAssetMeta *meta) {
 static uint32_t asset_effective_runtime_handle(uint32_t asset_index, const NtAssetMeta *meta) { return (meta->asset_type == NT_ASSET_BLOB) ? asset_index : meta->runtime_handle; }
 
 static bool asset_is_publishable(const NtResourceSlot *slot, const NtAssetMeta *meta, uint16_t asset_index, uint8_t behavior_flags) {
-    if ((behavior_flags & NT_RESOURCE_BEHAVIOR_PUBLISH_REQUIRES_AUX) == 0) {
+    if ((behavior_flags & NT_RESOURCE_BEHAVIOR_AUX_BACKED) == 0) {
         return true;
     }
     return slot_user_data_synced_for(slot, asset_index) || asset_blob_resident(meta);
@@ -269,22 +269,21 @@ static void resource_resolve_pass(void) {
         uint8_t atype = slot->asset_type;
         NtActivatorEntry *entry = &s_resource.activators[atype];
         uint8_t behavior_flags = entry->behavior_flags;
-        const bool requires_aux = (behavior_flags & NT_RESOURCE_BEHAVIOR_PUBLISH_REQUIRES_AUX) != 0;
-        const bool auto_reload_on_aux_miss = (behavior_flags & NT_RESOURCE_BEHAVIOR_AUTO_RELOAD_ON_AUX_MISS) != 0;
+        const bool aux_backed = (behavior_flags & NT_RESOURCE_BEHAVIOR_AUX_BACKED) != 0;
 
-        NT_ASSERT(!requires_aux || (entry->on_resolve != NULL && entry->on_cleanup != NULL));
+        NT_ASSERT(!aux_backed || (entry->on_resolve != NULL && entry->on_cleanup != NULL));
 
         const bool next_has_real_winner = tmp->candidate_asset_idx < s_resource.asset_hwm;
         const uint16_t next_asset_idx = tmp->candidate_asset_idx;
         const uint32_t next_handle = tmp->candidate_runtime_handle;
         const bool next_changed = next_has_real_winner && (next_asset_idx != slot->prev_resolve_asset_idx || next_handle != slot->prev_runtime_handle);
-        const bool needs_aux_sync = next_has_real_winner && requires_aux && !slot_user_data_synced_for(slot, next_asset_idx);
+        const bool needs_aux_sync = next_has_real_winner && aux_backed && !slot_user_data_synced_for(slot, next_asset_idx);
 
         bool target_missing_aux = false;
-        if (requires_aux && tmp->target_asset_idx < s_resource.asset_hwm) {
+        if (aux_backed && tmp->target_asset_idx < s_resource.asset_hwm) {
             const NtAssetMeta *target = &s_resource.assets[tmp->target_asset_idx];
             target_missing_aux = !slot_user_data_synced_for(slot, tmp->target_asset_idx) && !asset_blob_resident(target);
-            if (target_missing_aux && auto_reload_on_aux_miss) {
+            if (target_missing_aux) {
                 schedule_pack_redownload_if_needed(&s_resource.packs[target->pack_index]);
             }
         }
@@ -296,7 +295,7 @@ static void resource_resolve_pass(void) {
             entry->on_resolve(data, size, next_handle, &slot->user_data);
             tmp->resolve_pending = 1;
             tmp->post_resolve_pending = 1;
-            if (requires_aux) {
+            if (aux_backed) {
                 NT_ASSERT(slot->user_data != NULL && "aux-backed asset must populate user_data before publication");
                 slot->user_data_asset_idx = next_asset_idx;
             }
@@ -1334,7 +1333,6 @@ void nt_resource_set_post_resolve_callback(uint8_t asset_type, nt_post_resolve_f
 
 void nt_resource_set_behavior_flags(uint8_t asset_type, uint8_t behavior_flags) {
     NT_ASSERT(asset_type < NT_RESOURCE_MAX_ASSET_TYPES);
-    NT_ASSERT((behavior_flags & NT_RESOURCE_BEHAVIOR_AUTO_RELOAD_ON_AUX_MISS) == 0 || (behavior_flags & NT_RESOURCE_BEHAVIOR_PUBLISH_REQUIRES_AUX) != 0);
     s_resource.activators[asset_type].behavior_flags = behavior_flags;
 }
 

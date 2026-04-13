@@ -104,23 +104,6 @@ static uint32_t hash_find(const nt_atlas_data_t *ad, uint64_t name_hash) {
     return NT_ATLAS_INVALID_REGION;
 }
 
-/* Raw insert into a pre-sized table. Caller guarantees enough EMPTY slots. */
-static void hash_insert_raw(nt_atlas_hash_entry_t *table, uint32_t capacity, uint64_t name_hash, uint32_t region_index) {
-    NT_ASSERT(capacity > 0);
-    const uint32_t mask = capacity - 1;
-    uint32_t pos = (uint32_t)(name_hash & mask);
-    for (uint32_t steps = 0; steps < capacity; steps++) {
-        nt_atlas_hash_entry_t *e = &table[pos];
-        if (e->region_index == NT_ATLAS_HT_EMPTY) {
-            e->name_hash = name_hash;
-            e->region_index = region_index + 1U; /* 1-based */
-            return;
-        }
-        pos = (pos + 1U) & mask;
-    }
-    NT_ASSERT(0 && "hash table full — capacity invariant violated");
-}
-
 /* Free the old hash table and rebuild from live (non-tombstone) regions.
  * Called once after first parse and once after each merge. */
 static void hash_rebuild(nt_atlas_data_t *ad) {
@@ -142,31 +125,23 @@ static void hash_rebuild(nt_atlas_data_t *ad) {
     NT_ASSERT(ad->hash_table);
     ad->hash_capacity = cap;
 
+    const uint32_t mask = cap - 1;
     for (uint32_t i = 0; i < ad->region_count; i++) {
-        if (ad->regions[i].name_hash != NT_ATLAS_TOMBSTONE_HASH) {
-            hash_insert_raw(ad->hash_table, cap, ad->regions[i].name_hash, i);
+        if (ad->regions[i].name_hash == NT_ATLAS_TOMBSTONE_HASH) {
+            continue;
+        }
+        uint32_t pos = (uint32_t)(ad->regions[i].name_hash & mask);
+        for (uint32_t steps = 0; steps < cap; steps++) {
+            nt_atlas_hash_entry_t *e = &ad->hash_table[pos];
+            if (e->region_index == NT_ATLAS_HT_EMPTY) {
+                e->name_hash = ad->regions[i].name_hash;
+                e->region_index = i + 1U; /* 1-based */
+                break;
+            }
+            pos = (pos + 1U) & mask;
         }
     }
 }
-// #endregion
-
-// #region growth helpers
-static void grow_regions_if_needed(nt_atlas_data_t *ad, uint32_t add) {
-    if (ad->region_count + add <= ad->region_capacity) {
-        return;
-    }
-    uint32_t new_cap = ad->region_capacity == 0 ? 16U : ad->region_capacity * 2U;
-    while (new_cap < ad->region_count + add) {
-        new_cap *= 2U;
-    }
-    nt_texture_region_t *new_buf = (nt_texture_region_t *)realloc(ad->regions, new_cap * sizeof(nt_texture_region_t));
-    NT_ASSERT(new_buf);
-    /* Zero the tail so newly-available slots start in a defined state */
-    memset(new_buf + ad->region_capacity, 0, (new_cap - ad->region_capacity) * sizeof(nt_texture_region_t));
-    ad->regions = new_buf;
-    ad->region_capacity = new_cap;
-}
-
 // #endregion
 
 // #region translate_region
@@ -333,28 +308,9 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
     return true;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static nt_atlas_data_t *first_parse_allocate(const NtAtlasHeader *hdr) {
-    nt_atlas_data_t *ad = (nt_atlas_data_t *)calloc(1, sizeof(*ad));
-    NT_ASSERT(ad);
-
-    ad->region_capacity = (hdr->region_count == 0) ? 16U : (uint32_t)hdr->region_count;
-    ad->regions = (nt_texture_region_t *)calloc(ad->region_capacity, sizeof(nt_texture_region_t));
-    NT_ASSERT(ad->regions);
-
-    ad->vertex_capacity = (hdr->total_vertex_count == 0) ? 64U : hdr->total_vertex_count;
-    ad->vertices = (nt_atlas_vertex_t *)malloc(ad->vertex_capacity * sizeof(nt_atlas_vertex_t));
-    NT_ASSERT(ad->vertices);
-
-    ad->index_capacity = (hdr->total_index_count == 0) ? 128U : hdr->total_index_count;
-    ad->indices = (uint16_t *)malloc(ad->index_capacity * sizeof(uint16_t));
-    NT_ASSERT(ad->indices);
-
-    ad->hash_table = NULL;
-    ad->hash_capacity = 0;
-    return ad;
-}
-
+/* Grow vertex/index buffers if the new blob is larger, then bulk-copy
+ * payload arrays verbatim. Keeps duplicate region sharing exactly as
+ * the builder serialized. Called by both first-parse and merge paths. */
 static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
     const NtAtlasHeader *hdr = v->hdr;
     if (hdr->total_vertex_count > ad->vertex_capacity) {
@@ -370,10 +326,6 @@ static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_vie
         ad->index_capacity = hdr->total_index_count;
     }
 
-    /* Bulk-copy the shared payload arrays verbatim from the blob. This keeps
-     * duplicate regions sharing the same vertex/index slices exactly as the
-     * builder serialized them. Indices are copied as raw bytes because the
-     * source alignment can be as weak as 1 byte. */
     if (v->vertex_bytes > 0) {
         memcpy(ad->vertices, v->verts, v->vertex_bytes);
     }
@@ -384,41 +336,92 @@ static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_vie
     ad->index_count = hdr->total_index_count;
 }
 
-static void first_parse_fill(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
-    replace_payload_buffers(ad, v);
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
+    (void)runtime_handle; /* always 1 — our no-op activator's fake handle */
 
-    for (uint32_t i = 0; i < v->hdr->region_count; i++) {
-        translate_region(&ad->regions[i], &v->regions[i]);
+    /* Blob eviction edge case (R2 / §Q2): if the winning blob is no longer
+     * resident, keep existing user_data as-is. */
+    if (data == NULL || size == 0) {
+        return;
     }
-    ad->region_count = v->hdr->region_count;
 
-    hash_rebuild(ad);
+    nt_atlas_blob_view_t view;
+    NT_ASSERT(atlas_try_validate_and_carve_blob(data, size, &view));
 
-    replace_pages(ad, v->page_ids_bytes, v->page_bytes, (uint8_t)v->hdr->page_count);
-}
+    nt_atlas_data_t *ad = (nt_atlas_data_t *)*user_data;
 
-/* Two-pass merge: Pass 1 walks new_regions and updates common or appends new;
- * Pass 2 walks existing regions and tombstones any that are missing from the
- * new blob. After both passes, page ids are replaced wholesale (D-05).
- *
- * The shared vertex/index payload arrays are copied wholesale from the new
- * blob before the metadata pass. That preserves duplicate region sharing
- * (`vertex_start/index_start`) exactly as serialized by the builder while
- * stable region indices are maintained in regions[]. */
+    // #region first parse
+    if (ad == NULL) {
+        const NtAtlasHeader *hdr = view.hdr;
 
-static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
-    const NtAtlasHeader *hdr = v->hdr;
-    const NtAtlasRegion *new_regions = v->regions;
-    replace_payload_buffers(ad, v);
+        // #region allocate
+        ad = (nt_atlas_data_t *)calloc(1, sizeof(*ad));
+        NT_ASSERT(ad);
 
-    /* Pre-scan: count genuinely new regions to pre-grow region storage. */
+        ad->region_capacity = (hdr->region_count == 0) ? 16U : (uint32_t)hdr->region_count;
+        ad->regions = (nt_texture_region_t *)calloc(ad->region_capacity, sizeof(nt_texture_region_t));
+        NT_ASSERT(ad->regions);
+
+        ad->vertex_capacity = (hdr->total_vertex_count == 0) ? 64U : hdr->total_vertex_count;
+        ad->vertices = (nt_atlas_vertex_t *)malloc(ad->vertex_capacity * sizeof(nt_atlas_vertex_t));
+        NT_ASSERT(ad->vertices);
+
+        ad->index_capacity = (hdr->total_index_count == 0) ? 128U : hdr->total_index_count;
+        ad->indices = (uint16_t *)malloc(ad->index_capacity * sizeof(uint16_t));
+        NT_ASSERT(ad->indices);
+
+        ad->hash_table = NULL;
+        ad->hash_capacity = 0;
+        // #endregion
+
+        replace_payload_buffers(ad, &view);
+
+        for (uint32_t i = 0; i < hdr->region_count; i++) {
+            translate_region(&ad->regions[i], &view.regions[i]);
+        }
+        ad->region_count = hdr->region_count;
+
+        hash_rebuild(ad);
+        replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
+
+        *user_data = ad;
+        return;
+    }
+    // #endregion
+
+    /* ---- Merge path — diff new blob against existing regions by name_hash.
+     * D-03 stable-index semantics:
+     *   - payload arrays replaced wholesale from new blob
+     *   - common: update metadata in place
+     *   - new:    append region with fresh index
+     *   - removed: tombstone (name_hash = TOMBSTONE_HASH, vertex_count = 0)
+     * Region indices for surviving regions NEVER shift. */
+
+    // #region merge
+    const NtAtlasHeader *hdr = view.hdr;
+    const NtAtlasRegion *new_regions = view.regions;
+    replace_payload_buffers(ad, &view);
+
+    // #region grow regions
     uint32_t new_only_count = 0;
     for (uint32_t i = 0; i < hdr->region_count; i++) {
         if (hash_find(ad, new_regions[i].name_hash) == NT_ATLAS_INVALID_REGION) {
             new_only_count++;
         }
     }
-    grow_regions_if_needed(ad, new_only_count);
+    if (ad->region_count + new_only_count > ad->region_capacity) {
+        uint32_t new_cap = ad->region_capacity == 0 ? 16U : ad->region_capacity * 2U;
+        while (new_cap < ad->region_count + new_only_count) {
+            new_cap *= 2U;
+        }
+        nt_texture_region_t *new_buf = (nt_texture_region_t *)realloc(ad->regions, new_cap * sizeof(nt_texture_region_t));
+        NT_ASSERT(new_buf);
+        memset(new_buf + ad->region_capacity, 0, (new_cap - ad->region_capacity) * sizeof(nt_texture_region_t));
+        ad->regions = new_buf;
+        ad->region_capacity = new_cap;
+    }
+    // #endregion
 
     /* Seen-bitset: track which existing regions appear in the new blob.
      * Filled during pass 1 (common hits), consumed in pass 2 (unseen → tombstone). */
@@ -433,12 +436,9 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
         const uint32_t existing_idx = hash_find(ad, h);
 
         if (existing_idx != NT_ATLAS_INVALID_REGION) {
-            // #region common: in-place metadata update
             seen[existing_idx / 8U] |= (uint8_t)(1U << (existing_idx % 8U));
             translate_region(&ad->regions[existing_idx], nr);
-            // #endregion
         } else {
-            /* NEW: append region. Hash table rebuilt after both passes. */
             const uint32_t new_idx = ad->region_count++;
             translate_region(&ad->regions[new_idx], nr);
         }
@@ -449,7 +449,7 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
     for (uint32_t i = 0; i < pre_merge_count; i++) {
         nt_texture_region_t *r = &ad->regions[i];
         if (r->name_hash == NT_ATLAS_TOMBSTONE_HASH) {
-            continue; /* already dead from a previous merge */
+            continue;
         }
         const bool still_present = (seen[i / 8U] >> (i % 8U)) & 1U;
         if (!still_present) {
@@ -465,43 +465,9 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
 
     free(seen);
 
-    /* Rebuild hash table from scratch — exact size for live regions. */
     hash_rebuild(ad);
-
-    /* Replace page resource ids wholesale per D-05. */
-    replace_pages(ad, v->page_ids_bytes, v->page_bytes, (uint8_t)hdr->page_count);
-}
-
-static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
-    (void)runtime_handle; /* always 1 — our no-op activator's fake handle */
-
-    /* Blob eviction edge case (R2 / §Q2): if the winning blob is no longer
-     * resident, keep existing user_data as-is. */
-    if (data == NULL || size == 0) {
-        return;
-    }
-
-    nt_atlas_blob_view_t view;
-    NT_ASSERT(atlas_try_validate_and_carve_blob(data, size, &view));
-
-    nt_atlas_data_t *ad = (nt_atlas_data_t *)*user_data;
-    if (ad == NULL) {
-        ad = first_parse_allocate(view.hdr);
-        first_parse_fill(ad, &view);
-        *user_data = ad;
-        return;
-    }
-
-    /* ---- Merge path (Plan 02) — diff new blob against existing regions
-     * by name_hash. Implements D-03 stable-index semantics:
-     *   - payload arrays are replaced wholesale from the new blob, preserving
-     *     any shared vertex/index slices serialized by the builder
-     *   - common: update metadata in place
-     *   - new:    append region with fresh index, hash-insert
-     *   - removed: tombstone region (name_hash = TOMBSTONE_HASH,
-     *              vertex_count = 0)
-     * Region indices for surviving regions NEVER shift. */
-    merge_existing(ad, &view);
+    replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
+    // #endregion
 }
 
 static void atlas_on_cleanup(void *user_data) {
@@ -543,7 +509,7 @@ nt_result_t nt_atlas_init(void) {
     nt_resource_set_activator(NT_ASSET_ATLAS, atlas_activate, atlas_deactivate);
     nt_resource_set_resolve_callbacks(NT_ASSET_ATLAS, atlas_on_resolve, atlas_on_cleanup);
     nt_resource_set_post_resolve_callback(NT_ASSET_ATLAS, atlas_on_post_resolve);
-    nt_resource_set_behavior_flags(NT_ASSET_ATLAS, NT_RESOURCE_BEHAVIOR_PUBLISH_REQUIRES_AUX | NT_RESOURCE_BEHAVIOR_AUTO_RELOAD_ON_AUX_MISS);
+    nt_resource_set_behavior_flags(NT_ASSET_ATLAS, NT_RESOURCE_BEHAVIOR_AUX_BACKED);
     s_atlas.initialized = true;
     return NT_OK;
 }

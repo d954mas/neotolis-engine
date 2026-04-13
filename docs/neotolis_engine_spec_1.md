@@ -992,8 +992,7 @@ void *nt_resource_get_user_data(handle);
 ```
 
 Behavior flags:
-- `NT_RESOURCE_BEHAVIOR_PUBLISH_REQUIRES_AUX`: published winner is deferred until `user_data` is synchronized to the winning asset
-- `NT_RESOURCE_BEHAVIOR_AUTO_RELOAD_ON_AUX_MISS`: if the target winner requires aux data but its file-pack blob is currently missing, `resource_step()` schedules that pack for immediate re-download
+- `NT_RESOURCE_BEHAVIOR_AUX_BACKED`: published winner is deferred until `user_data` is synchronized to the winning asset. If the target winner requires aux data but its file-pack blob is currently missing, `resource_step()` schedules that pack for immediate re-download.
 
 **on_resolve** fires in Phase D for the published winner when:
 - published asset identity changes
@@ -1130,7 +1129,7 @@ Subsequent publications merge by `name_hash` to preserve stable region indices a
 
 Page texture resource ids are copied during `on_resolve`. The actual `nt_resource_t` page handles are materialized in `on_post_resolve` and cached in the atlas snapshot, so `nt_atlas_get_page_resource()` remains O(1).
 
-Atlas registers `NT_RESOURCE_BEHAVIOR_PUBLISH_REQUIRES_AUX | NT_RESOURCE_BEHAVIOR_AUTO_RELOAD_ON_AUX_MISS`. A higher-priority atlas whose blob is currently missing becomes the target winner, but it is not published until its metadata snapshot has been rebuilt. If a lower-priority usable atlas is already published, it stays active until the target blob is reloaded and resolved.
+Atlas registers `NT_RESOURCE_BEHAVIOR_AUX_BACKED`. A higher-priority atlas whose blob is currently missing becomes the target winner, but it is not published until its metadata snapshot has been rebuilt. If a lower-priority usable atlas is already published, it stays active until the target blob is reloaded and resolved.
 
 ## 17.9 Placeholder policy
 

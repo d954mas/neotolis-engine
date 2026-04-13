@@ -12,7 +12,7 @@
 #define NT_ATLAS_TOMBSTONE_HASH ((uint64_t)0xFFFFFFFFFFFFFFFFULL)
 
 #ifndef NT_ATLAS_MAX_PAGES
-#define NT_ATLAS_MAX_PAGES 64
+#define NT_ATLAS_MAX_PAGES 8
 #endif
 
 /* ---- Public types ---- */

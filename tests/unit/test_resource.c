@@ -1939,7 +1939,7 @@ void test_aux_publish_falls_back_to_best_usable_winner(void) {
     s_next_handle = 0xBEEF;
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate_seq, fake_deactivate);
     nt_resource_set_resolve_callbacks(NT_ASSET_MESH, mock_on_resolve, mock_on_cleanup);
-    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_PUBLISH_REQUIRES_AUX | NT_RESOURCE_BEHAVIOR_AUTO_RELOAD_ON_AUX_MISS);
+    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_AUX_BACKED);
 
     nt_hash64_t rid = nt_hash64_str("aux_publish_fallback_res");
 
@@ -2008,7 +2008,7 @@ void test_aux_publish_waits_for_reload_when_no_usable_fallback_exists(void) {
     s_next_handle = 0xBEEF;
     nt_resource_set_activator(NT_ASSET_MESH, fake_activate_seq, fake_deactivate);
     nt_resource_set_resolve_callbacks(NT_ASSET_MESH, mock_on_resolve, mock_on_cleanup);
-    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_PUBLISH_REQUIRES_AUX | NT_RESOURCE_BEHAVIOR_AUTO_RELOAD_ON_AUX_MISS);
+    nt_resource_set_behavior_flags(NT_ASSET_MESH, NT_RESOURCE_BEHAVIOR_AUX_BACKED);
 
     nt_hash64_t rid = nt_hash64_str("aux_publish_reload_res");
 

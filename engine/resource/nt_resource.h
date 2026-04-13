@@ -74,12 +74,12 @@ typedef void (*nt_post_resolve_fn)(const uint8_t *data, uint32_t size, nt_resour
  *   - the highest-priority READY asset remains the target winner
  *   - the published winner stays on the best currently usable asset
  *   - when the target needs aux data but its blob is missing, the slot is not
- *     published as READY until aux state is synchronized
+ *     published as READY until aux state is synchronized, and the pack is
+ *     scheduled for immediate re-download
  */
 typedef enum {
     NT_RESOURCE_BEHAVIOR_NONE = 0,
-    NT_RESOURCE_BEHAVIOR_PUBLISH_REQUIRES_AUX = 1 << 0,
-    NT_RESOURCE_BEHAVIOR_AUTO_RELOAD_ON_AUX_MISS = 1 << 1,
+    NT_RESOURCE_BEHAVIOR_AUX_BACKED = 1 << 0,
 } nt_resource_behavior_t;
 
 /* ---- Descriptor ---- */
