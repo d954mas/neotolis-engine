@@ -45,9 +45,8 @@ static void sprite_on_destroy(nt_entity_t entity) {
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_sprite_comp_init(const nt_sprite_comp_desc_t *desc) {
-    if (!desc || desc->capacity == 0) {
-        return NT_ERR_INVALID_ARG;
-    }
+    NT_ASSERT(desc != NULL);
+    NT_ASSERT(desc->capacity > 0);
 
     nt_result_t res = nt_comp_storage_init(&s_storage, desc->capacity, sprite_default, sprite_swap);
     if (res != NT_OK) {
@@ -103,7 +102,9 @@ void nt_sprite_comp_set_region(nt_entity_t entity, nt_resource_t atlas, uint16_t
     NT_ASSERT(region_index < nt_atlas_region_count(atlas));
     s_atlas[idx] = atlas;
     s_region_index[idx] = region_index;
-    s_flags[idx] &= (uint8_t)~NT_SPRITE_FLAG_ORIGIN_OV;
+    const nt_texture_region_t *reg = nt_atlas_get_region(atlas, region_index);
+    s_origin[idx][0] = reg->origin_x;
+    s_origin[idx][1] = reg->origin_y;
 }
 
 void nt_sprite_comp_set_region_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64_t name_hash) {
@@ -120,13 +121,14 @@ void nt_sprite_comp_set_origin(nt_entity_t entity, float origin_x, float origin_
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     s_origin[idx][0] = origin_x;
     s_origin[idx][1] = origin_y;
-    s_flags[idx] |= (uint8_t)NT_SPRITE_FLAG_ORIGIN_OV;
 }
 
 void nt_sprite_comp_reset_origin(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
-    s_flags[idx] &= (uint8_t)~NT_SPRITE_FLAG_ORIGIN_OV;
+    const nt_texture_region_t *reg = nt_atlas_get_region(s_atlas[idx], s_region_index[idx]);
+    s_origin[idx][0] = reg->origin_x;
+    s_origin[idx][1] = reg->origin_y;
 }
 
 /* ---- Flip control ---- */

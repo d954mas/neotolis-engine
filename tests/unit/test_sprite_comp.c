@@ -252,7 +252,7 @@ void test_sprite_set_region(void) {
     TEST_ASSERT_EQUAL_UINT16(1, *nt_sprite_comp_region_index(e));
 }
 
-/* ---- Test 5: set_region clears origin override but preserves flip ---- */
+/* ---- Test 5: set_region copies atlas origin and preserves flip ---- */
 
 void test_sprite_set_region_resets_flags(void) {
     setup_atlas_fixture();
@@ -260,10 +260,12 @@ void test_sprite_set_region_resets_flags(void) {
     nt_sprite_comp_add(e);
     nt_sprite_comp_set_flip(e, true, false);
     nt_sprite_comp_set_origin(e, 0.1F, 0.2F);
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, NT_SPRITE_FLAG_ORIGIN_OV, *nt_sprite_comp_flags(e));
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X, NT_SPRITE_FLAG_FLIP_X, *nt_sprite_comp_flags(e));
     nt_sprite_comp_set_region(e, s_atlas_res, 0);
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, 0, *nt_sprite_comp_flags(e));
+    /* origin copied from atlas region 0 (0.5, 0.5) */
+    const float *o = nt_sprite_comp_origin(e);
+    TEST_ASSERT_TRUE(o[0] == 0.5F); /* NOLINT */
+    TEST_ASSERT_TRUE(o[1] == 0.5F); /* NOLINT */
+    /* flip preserved */
     TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X, NT_SPRITE_FLAG_FLIP_X, *nt_sprite_comp_flags(e));
 }
 
@@ -278,7 +280,7 @@ void test_sprite_set_region_by_hash(void) {
     TEST_ASSERT_EQUAL_UINT16(1, *nt_sprite_comp_region_index(e));
 }
 
-/* ---- Test 7: set_origin stores values and sets flag ---- */
+/* ---- Test 7: set_origin stores values ---- */
 
 void test_sprite_set_origin(void) {
     nt_entity_t e = nt_entity_create();
@@ -287,21 +289,23 @@ void test_sprite_set_origin(void) {
     const float *o = nt_sprite_comp_origin(e);
     TEST_ASSERT_TRUE(o[0] == 0.3F); /* NOLINT */
     TEST_ASSERT_TRUE(o[1] == 0.7F); /* NOLINT */
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, NT_SPRITE_FLAG_ORIGIN_OV, *nt_sprite_comp_flags(e));
 }
 
-/* ---- Test 8: reset_origin clears bit2, leaves bits 0-1 intact ---- */
+/* ---- Test 8: reset_origin restores atlas origin, leaves flip intact ---- */
 
 void test_sprite_reset_origin(void) {
+    setup_atlas_fixture();
     nt_entity_t e = nt_entity_create();
     nt_sprite_comp_add(e);
+    nt_sprite_comp_set_region(e, s_atlas_res, 0); /* origin = (0.5, 0.5) */
     nt_sprite_comp_set_flip(e, true, true);
-    nt_sprite_comp_set_origin(e, 0.5F, 0.5F);
-    /* all three bits should be set */
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y | NT_SPRITE_FLAG_ORIGIN_OV, NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y | NT_SPRITE_FLAG_ORIGIN_OV, *nt_sprite_comp_flags(e));
+    nt_sprite_comp_set_origin(e, 0.9F, 0.9F);
     nt_sprite_comp_reset_origin(e);
-    /* bit2 cleared, bits 0-1 remain */
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, 0, *nt_sprite_comp_flags(e));
+    /* origin restored from atlas region 0 */
+    const float *o = nt_sprite_comp_origin(e);
+    TEST_ASSERT_TRUE(o[0] == 0.5F); /* NOLINT */
+    TEST_ASSERT_TRUE(o[1] == 0.5F); /* NOLINT */
+    /* flip preserved */
     TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y, NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y, *nt_sprite_comp_flags(e));
 }
 
@@ -323,28 +327,31 @@ void test_sprite_set_flip(void) {
     TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y, NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y, *nt_sprite_comp_flags(e));
 }
 
-/* ---- Test 10: set_flip preserves origin override ---- */
+/* ---- Test 10: set_flip preserves origin values ---- */
 
 void test_sprite_flip_preserves_origin_override(void) {
     nt_entity_t e = nt_entity_create();
     nt_sprite_comp_add(e);
     nt_sprite_comp_set_origin(e, 0.5F, 0.5F);
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, NT_SPRITE_FLAG_ORIGIN_OV, *nt_sprite_comp_flags(e));
     nt_sprite_comp_set_flip(e, true, false);
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, NT_SPRITE_FLAG_ORIGIN_OV, *nt_sprite_comp_flags(e));
+    const float *o = nt_sprite_comp_origin(e);
+    TEST_ASSERT_TRUE(o[0] == 0.5F); /* NOLINT */
+    TEST_ASSERT_TRUE(o[1] == 0.5F); /* NOLINT */
     TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X, NT_SPRITE_FLAG_FLIP_X, *nt_sprite_comp_flags(e));
 }
 
-/* ---- Test 11: set_region clears origin override ---- */
+/* ---- Test 11: set_region copies atlas origin over custom origin ---- */
 
 void test_sprite_set_region_clears_origin_override(void) {
     setup_atlas_fixture();
     nt_entity_t e = nt_entity_create();
     nt_sprite_comp_add(e);
     nt_sprite_comp_set_origin(e, 0.1F, 0.2F);
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, NT_SPRITE_FLAG_ORIGIN_OV, *nt_sprite_comp_flags(e));
     nt_sprite_comp_set_region(e, s_atlas_res, 0);
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, 0, *nt_sprite_comp_flags(e));
+    /* origin replaced by atlas region 0 values (0.5, 0.5) */
+    const float *o = nt_sprite_comp_origin(e);
+    TEST_ASSERT_TRUE(o[0] == 0.5F); /* NOLINT */
+    TEST_ASSERT_TRUE(o[1] == 0.5F); /* NOLINT */
 }
 
 /* ---- Test 12: swap-and-pop preserves data ---- */
@@ -369,7 +376,6 @@ void test_sprite_swap_and_pop(void) {
     TEST_ASSERT_TRUE(nt_sprite_comp_has(e2));
     TEST_ASSERT_EQUAL_UINT16(1, *nt_sprite_comp_region_index(e2));
     TEST_ASSERT_EQUAL_UINT32(s_atlas_res.id, nt_sprite_comp_atlas(e2)->id);
-    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, NT_SPRITE_FLAG_ORIGIN_OV, *nt_sprite_comp_flags(e2));
     const float *o = nt_sprite_comp_origin(e2);
     TEST_ASSERT_TRUE(o[0] == 0.1F); /* NOLINT */
     TEST_ASSERT_TRUE(o[1] == 0.9F); /* NOLINT */

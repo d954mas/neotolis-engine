@@ -9,7 +9,6 @@
 
 #define NT_SPRITE_FLAG_FLIP_X (1U << 0)
 #define NT_SPRITE_FLAG_FLIP_Y (1U << 1)
-#define NT_SPRITE_FLAG_ORIGIN_OV (1U << 2)
 
 /* ---- Descriptor ---- */
 
