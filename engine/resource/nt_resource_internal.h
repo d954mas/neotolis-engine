@@ -126,7 +126,7 @@ typedef struct {
     uint8_t asset_type;              /* nt_asset_type_t */
     uint8_t state;                   /* nt_asset_state_t visible to game code */
     uint8_t _pad[2];
-    void *user_data;                 /* per-slot auxiliary data (on_resolve/on_cleanup) */
+    void *user_data; /* per-slot auxiliary data (on_resolve/on_cleanup) */
 } NtResourceSlot;
 
 /* Transient per-slot state — only valid during resource_resolve_pass().
