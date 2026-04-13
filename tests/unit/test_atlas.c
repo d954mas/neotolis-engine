@@ -535,7 +535,122 @@ void test_atlas_merge_common_region_updates_in_place(void) {
     TEST_ASSERT_EQUAL_UINT32(0, r->index_start);
 }
 
-/* ---- Test 7: merge appends new region with fresh index ---- */
+/* ---- Test 7: merge preserves shared payload slices from the blob ---- */
+void test_atlas_merge_preserves_shared_payload_slices(void) {
+    static NtAtlasVertex verts1[4] = {
+        {.local_x = 10, .local_y = 20, .atlas_u = 100, .atlas_v = 200},
+        {.local_x = 30, .local_y = 40, .atlas_u = 300, .atlas_v = 400},
+        {.local_x = 50, .local_y = 60, .atlas_u = 500, .atlas_v = 600},
+        {.local_x = 70, .local_y = 80, .atlas_u = 700, .atlas_v = 800},
+    };
+    static uint16_t indices1[6] = {0, 1, 2, 0, 2, 3};
+    static NtAtlasRegion regions1[2];
+    memset(regions1, 0, sizeof(regions1));
+    regions1[0].name_hash = 0xAAAULL;
+    regions1[0].source_w = 32;
+    regions1[0].source_h = 32;
+    regions1[0].origin_x = 0.5F;
+    regions1[0].origin_y = 0.5F;
+    regions1[0].vertex_start = 0;
+    regions1[0].index_start = 0;
+    regions1[0].vertex_count = 4;
+    regions1[0].index_count = 6;
+    regions1[1].name_hash = 0xBBBULL;
+    regions1[1].source_w = 48;
+    regions1[1].source_h = 48;
+    regions1[1].origin_x = 0.25F;
+    regions1[1].origin_y = 0.75F;
+    regions1[1].vertex_start = 0;
+    regions1[1].index_start = 0;
+    regions1[1].vertex_count = 4;
+    regions1[1].index_count = 6;
+    mock_atlas_spec_t spec1 = {
+        .regions = regions1,
+        .region_count = 2,
+        .vertices = verts1,
+        .total_vertex_count = 4,
+        .indices = indices1,
+        .total_index_count = 6,
+        .page_ids = NULL,
+        .page_count = 0,
+    };
+
+    static NtAtlasVertex verts2[7] = {
+        {.local_x = 11, .local_y = 21, .atlas_u = 101, .atlas_v = 201}, {.local_x = 31, .local_y = 41, .atlas_u = 301, .atlas_v = 401}, {.local_x = 51, .local_y = 61, .atlas_u = 501, .atlas_v = 601},
+        {.local_x = 71, .local_y = 81, .atlas_u = 701, .atlas_v = 801}, {.local_x = 90, .local_y = 91, .atlas_u = 902, .atlas_v = 903}, {.local_x = 92, .local_y = 93, .atlas_u = 904, .atlas_v = 905},
+        {.local_x = 94, .local_y = 95, .atlas_u = 906, .atlas_v = 907},
+    };
+    static uint16_t indices2[9] = {0, 1, 2, 0, 2, 3, 0, 1, 2};
+    static NtAtlasRegion regions2[3];
+    memset(regions2, 0, sizeof(regions2));
+    regions2[0].name_hash = 0xAAAULL;
+    regions2[0].source_w = 64;
+    regions2[0].source_h = 64;
+    regions2[0].origin_x = 0.5F;
+    regions2[0].origin_y = 0.5F;
+    regions2[0].vertex_start = 0;
+    regions2[0].index_start = 0;
+    regions2[0].vertex_count = 4;
+    regions2[0].index_count = 6;
+    regions2[1].name_hash = 0xBBBULL;
+    regions2[1].source_w = 96;
+    regions2[1].source_h = 96;
+    regions2[1].origin_x = 0.25F;
+    regions2[1].origin_y = 0.75F;
+    regions2[1].vertex_start = 0;
+    regions2[1].index_start = 0;
+    regions2[1].vertex_count = 4;
+    regions2[1].index_count = 6;
+    regions2[2].name_hash = 0xCCCULL;
+    regions2[2].source_w = 128;
+    regions2[2].source_h = 32;
+    regions2[2].origin_x = 0.0F;
+    regions2[2].origin_y = 1.0F;
+    regions2[2].vertex_start = 4;
+    regions2[2].index_start = 6;
+    regions2[2].vertex_count = 3;
+    regions2[2].index_count = 3;
+    mock_atlas_spec_t spec2 = {
+        .regions = regions2,
+        .region_count = 3,
+        .vertices = verts2,
+        .total_vertex_count = 7,
+        .indices = indices2,
+        .total_index_count = 9,
+        .page_ids = NULL,
+        .page_count = 0,
+    };
+
+    uint8_t buf1[512];
+    uint8_t buf2[512];
+    uint32_t size1 = build_mock_atlas_blob(buf1, sizeof(buf1), &spec1);
+    uint32_t size2 = build_mock_atlas_blob(buf2, sizeof(buf2), &spec2);
+
+    nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
+    const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+    TEST_ASSERT_EQUAL_UINT32(2, nt_atlas_test_region_count(ad));
+
+    nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
+
+    TEST_ASSERT_EQUAL_UINT32(3, nt_atlas_test_region_count(ad));
+    TEST_ASSERT_EQUAL_UINT32(7, nt_atlas_test_vertex_count(ad));
+    TEST_ASSERT_EQUAL_UINT32(9, nt_atlas_test_index_count(ad));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_find_region_raw(ad, 0xAAAULL));
+    TEST_ASSERT_EQUAL_UINT32(1, nt_atlas_test_find_region_raw(ad, 0xBBBULL));
+    TEST_ASSERT_EQUAL_UINT32(2, nt_atlas_test_find_region_raw(ad, 0xCCCULL));
+
+    const nt_texture_region_t *r0 = nt_atlas_test_get_region_raw(ad, 0);
+    const nt_texture_region_t *r1 = nt_atlas_test_get_region_raw(ad, 1);
+    const nt_texture_region_t *r2 = nt_atlas_test_get_region_raw(ad, 2);
+    TEST_ASSERT_EQUAL_UINT32(0, r0->vertex_start);
+    TEST_ASSERT_EQUAL_UINT32(0, r0->index_start);
+    TEST_ASSERT_EQUAL_UINT32(r0->vertex_start, r1->vertex_start);
+    TEST_ASSERT_EQUAL_UINT32(r0->index_start, r1->index_start);
+    TEST_ASSERT_EQUAL_UINT32(4, r2->vertex_start);
+    TEST_ASSERT_EQUAL_UINT32(6, r2->index_start);
+}
+
+/* ---- Test 8: merge appends new region with fresh index ---- */
 void test_atlas_merge_new_region_appends_with_fresh_index(void) {
     /* Pages omitted. */
 
@@ -566,7 +681,7 @@ void test_atlas_merge_new_region_appends_with_fresh_index(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_atlas_test_find_region_raw(ad, 0xCCCULL)); /* fresh index == previous region_count */
 }
 
-/* ---- Test 8: removed region becomes a tombstone (stable indices) ---- */
+/* ---- Test 9: removed region becomes a tombstone (stable indices) ---- */
 void test_atlas_merge_removed_region_becomes_tombstone(void) {
     /* Pages omitted. */
 
@@ -1255,6 +1370,7 @@ int main(void) {
     RUN_TEST(test_atlas_get_region_returns_field_passthrough);
     RUN_TEST(test_atlas_on_resolve_null_data_early_returns);
     RUN_TEST(test_atlas_merge_common_region_updates_in_place);
+    RUN_TEST(test_atlas_merge_preserves_shared_payload_slices);
     RUN_TEST(test_atlas_merge_new_region_appends_with_fresh_index);
     RUN_TEST(test_atlas_merge_removed_region_becomes_tombstone);
     RUN_TEST(test_atlas_find_region_returns_invalid_for_tombstone);

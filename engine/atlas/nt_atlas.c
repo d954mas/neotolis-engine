@@ -296,66 +296,8 @@ static nt_atlas_data_t *first_parse_allocate(const NtAtlasHeader *hdr) {
     return ad;
 }
 
-static void first_parse_fill(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
-    /* Bulk-copy all vertices and indices. After this, every region's
-     * original vertex_start/index_start is still correct because the
-     * owned buffers are a verbatim snapshot of the blob arrays.
-     * Indices are copied as raw bytes because the source alignment
-     * can be as weak as 1 byte (see nt_atlas_blob_view_t doc). */
-    if (v->vertex_bytes > 0) {
-        memcpy(ad->vertices, v->verts, v->vertex_bytes);
-    }
-    if (v->index_bytes > 0) {
-        memcpy(ad->indices, v->indices_bytes, v->index_bytes);
-    }
-    ad->vertex_count = v->hdr->total_vertex_count;
-    ad->index_count = v->hdr->total_index_count;
-
-    for (uint32_t i = 0; i < v->hdr->region_count; i++) {
-        translate_region(&ad->regions[i], &v->regions[i]);
-    }
-    ad->region_count = v->hdr->region_count;
-
-    hash_rebuild(ad);
-
-    replace_pages(ad, v->page_ids_bytes, v->page_bytes, (uint8_t)v->hdr->page_count);
-}
-
-/* Append a region's vertex/index slices from the source blob into the owned
- * buffers at the current append cursors, and rewrite r->vertex_start /
- * r->index_start to the new positions. Shared by both the COMMON-update and
- * NEW-append merge paths. Caller must have already grown the buffers. */
-static void merge_append_region_payload(nt_atlas_data_t *ad, nt_texture_region_t *r, const NtAtlasRegion *nr, const NtAtlasVertex *new_verts, const uint8_t *new_index_bytes) {
-    /* Vertices */
-    r->vertex_start = ad->vertex_count;
-    if (nr->vertex_count > 0) {
-        NT_ASSERT(new_verts != NULL && "merge: vertex_count > 0 but source vertex buffer is NULL");
-        memcpy(&ad->vertices[ad->vertex_count], &new_verts[nr->vertex_start], (size_t)nr->vertex_count * sizeof(nt_atlas_vertex_t));
-        ad->vertex_count += nr->vertex_count;
-    }
-    r->vertex_count = nr->vertex_count;
-
-    /* Indices — read as raw bytes because source alignment can be as weak
-     * as 1 byte (see nt_atlas_blob_view_t doc). */
-    r->index_start = ad->index_count;
-    if (nr->index_count > 0) {
-        NT_ASSERT(new_index_bytes != NULL && "merge: index_count > 0 but source index buffer is NULL");
-        memcpy(&ad->indices[ad->index_count], new_index_bytes + ((size_t)nr->index_start * sizeof(uint16_t)), (size_t)nr->index_count * sizeof(uint16_t));
-        ad->index_count += nr->index_count;
-    }
-    r->index_count = nr->index_count;
-}
-
-/* Two-pass merge: Pass 1 walks new_regions and updates common or appends new;
- * Pass 2 walks existing regions and tombstones any that are missing from the
- * new blob. After both passes, page ids are replaced wholesale (D-05).
- *
- * All live vertex/index data after a merge comes from the new blob — common
- * regions are overwritten, removed regions become tombstones (vertex_count=0).
- * So the final buffer size equals hdr->total_vertex/index_count exactly.
- * We ensure capacity once up front and reset cursors to zero, eliminating
- * fragmentation from prior merges. */
-static void merge_reset_buffers(nt_atlas_data_t *ad, const NtAtlasHeader *hdr) {
+static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
+    const NtAtlasHeader *hdr = v->hdr;
     if (hdr->total_vertex_count > ad->vertex_capacity) {
         nt_atlas_vertex_t *new_buf = (nt_atlas_vertex_t *)realloc(ad->vertices, (size_t)hdr->total_vertex_count * sizeof(nt_atlas_vertex_t));
         NT_ASSERT(new_buf);
@@ -368,17 +310,47 @@ static void merge_reset_buffers(nt_atlas_data_t *ad, const NtAtlasHeader *hdr) {
         ad->indices = new_buf;
         ad->index_capacity = hdr->total_index_count;
     }
-    ad->vertex_count = 0;
-    ad->index_count = 0;
+
+    /* Bulk-copy the shared payload arrays verbatim from the blob. This keeps
+     * duplicate regions sharing the same vertex/index slices exactly as the
+     * builder serialized them. Indices are copied as raw bytes because the
+     * source alignment can be as weak as 1 byte. */
+    if (v->vertex_bytes > 0) {
+        memcpy(ad->vertices, v->verts, v->vertex_bytes);
+    }
+    if (v->index_bytes > 0) {
+        memcpy(ad->indices, v->indices_bytes, v->index_bytes);
+    }
+    ad->vertex_count = hdr->total_vertex_count;
+    ad->index_count = hdr->total_index_count;
 }
+
+static void first_parse_fill(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
+    replace_payload_buffers(ad, v);
+
+    for (uint32_t i = 0; i < v->hdr->region_count; i++) {
+        translate_region(&ad->regions[i], &v->regions[i]);
+    }
+    ad->region_count = v->hdr->region_count;
+
+    hash_rebuild(ad);
+
+    replace_pages(ad, v->page_ids_bytes, v->page_bytes, (uint8_t)v->hdr->page_count);
+}
+
+/* Two-pass merge: Pass 1 walks new_regions and updates common or appends new;
+ * Pass 2 walks existing regions and tombstones any that are missing from the
+ * new blob. After both passes, page ids are replaced wholesale (D-05).
+ *
+ * The shared vertex/index payload arrays are copied wholesale from the new
+ * blob before the metadata pass. That preserves duplicate region sharing
+ * (`vertex_start/index_start`) exactly as serialized by the builder while
+ * stable region indices are maintained in regions[]. */
 
 static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
     const NtAtlasHeader *hdr = v->hdr;
     const NtAtlasRegion *new_regions = v->regions;
-    const NtAtlasVertex *new_verts = v->verts;
-    const uint8_t *new_index_bytes = v->indices_bytes;
-
-    merge_reset_buffers(ad, hdr);
+    replace_payload_buffers(ad, v);
 
     /* Pre-scan: count genuinely new regions to pre-grow region storage. */
     uint32_t new_only_count = 0;
@@ -404,25 +376,12 @@ static void merge_existing(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
         if (existing_idx != NT_ATLAS_INVALID_REGION) {
             // #region common: in-place metadata update
             seen[existing_idx / 8U] |= (uint8_t)(1U << (existing_idx % 8U));
-
-            nt_texture_region_t *r = &ad->regions[existing_idx];
-            r->source_w = nr->source_w;
-            r->source_h = nr->source_h;
-            r->trim_offset_x = nr->trim_offset_x;
-            r->trim_offset_y = nr->trim_offset_y;
-            r->origin_x = nr->origin_x;
-            r->origin_y = nr->origin_y;
-            r->page_index = nr->page_index;
-            r->transform = nr->transform;
-
-            merge_append_region_payload(ad, r, nr, new_verts, new_index_bytes);
+            translate_region(&ad->regions[existing_idx], nr);
             // #endregion
         } else {
             /* NEW: append region. Hash table rebuilt after both passes. */
             const uint32_t new_idx = ad->region_count++;
-            nt_texture_region_t *r = &ad->regions[new_idx];
-            translate_region(r, nr);
-            merge_append_region_payload(ad, r, nr, new_verts, new_index_bytes);
+            translate_region(&ad->regions[new_idx], nr);
         }
     }
     // #endregion
@@ -474,12 +433,12 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
 
     /* ---- Merge path (Plan 02) — diff new blob against existing regions
      * by name_hash. Implements D-03 stable-index semantics:
-     *   - common: update metadata in place, rewrite verts/indices at new
-     *             append positions (old slots become dead — fragmentation
-     *             accepted, D-03).
-     *   - new:    append region with fresh index, hash-insert.
+     *   - payload arrays are replaced wholesale from the new blob, preserving
+     *     any shared vertex/index slices serialized by the builder
+     *   - common: update metadata in place
+     *   - new:    append region with fresh index, hash-insert
      *   - removed: tombstone region (name_hash = TOMBSTONE_HASH,
-     *              vertex_count = 0), delete hash entry (DELETED marker).
+     *              vertex_count = 0)
      * Region indices for surviving regions NEVER shift. */
     merge_existing(ad, &view);
 }
