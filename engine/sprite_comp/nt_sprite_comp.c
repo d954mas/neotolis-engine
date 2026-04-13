@@ -204,10 +204,10 @@ void nt_sprite_comp_set_region(nt_entity_t entity, nt_resource_t atlas, uint16_t
     sprite_set_authored_origin(idx, region);
 }
 
-void nt_sprite_comp_set_region_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64_t name_hash) {
+void nt_sprite_comp_bind_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64_t name_hash) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
-    NT_ASSERT(atlas.id != 0 && "nt_sprite_comp_set_region_by_hash requires a valid atlas handle");
+    NT_ASSERT(atlas.id != 0 && "nt_sprite_comp_bind_by_hash requires a valid atlas handle");
     if (atlas.id == 0) {
         s_atlas[idx] = NT_RESOURCE_INVALID;
         s_region_hash[idx] = 0;

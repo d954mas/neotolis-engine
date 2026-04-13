@@ -215,6 +215,8 @@ input_begin_frame
     → if pointer pressed && audio suspended → audio_try_resume()
 input_event_apply
 resource_step         ← async loading processing
+game-defined resource sync helpers
+    → e.g. sprite_comp_sync_resources() after resource publication changes
 audio_update          ← voice state management
 fixed_update loop
 game_update
@@ -555,6 +557,27 @@ typedef struct SpriteComponent
     SpriteAssetRef sprite;
 } SpriteComponent;
 ```
+
+Baseline sprite asset ref is atlas-backed:
+
+```c
+typedef struct SpriteAssetRef
+{
+    nt_resource_t atlas;
+    uint64_t      region_hash;
+} SpriteAssetRef;
+```
+
+Runtime may cache resolved region index, snapshot revision, and effective origin
+next to the component for fast rendering, but those are implementation details —
+the stable identity is `atlas + region_hash`.
+
+Resolution is explicit, not renderer-driven magic:
+
+- game code requests / mounts resources
+- `resource_step()` publishes winners
+- game code calls `sprite_comp_sync_resources()` (or equivalent system)
+- sprite render-item build skips unresolved sprites
 
 Sprite is a separate render kind, not a special mode of mesh.
 

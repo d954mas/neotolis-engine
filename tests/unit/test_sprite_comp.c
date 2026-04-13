@@ -76,11 +76,12 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
 
 static bool s_atlas_initialized;
 static nt_resource_t s_atlas_res;
-static uint8_t *s_pack_blob; /* heap-allocated pack blob for cleanup */
+static uint8_t *s_pack_blobs[4]; /* heap-allocated pack blobs for cleanup */
+static uint8_t s_pack_blob_count;
 
 /* ---- Atlas fixture: full resource pipeline ---- */
 
-static void setup_atlas_fixture(bool resolve_now) {
+static uint32_t build_fixture_atlas_blob(uint8_t *atlas_blob, uint32_t cap, float r0_origin_x, float r0_origin_y, float r1_origin_x, float r1_origin_y) {
     // #region Build 2-region atlas blob (no pages for simplicity)
     NtAtlasVertex verts[8];
     uint16_t indices[12];
@@ -99,8 +100,8 @@ static void setup_atlas_fixture(bool resolve_now) {
     regions[0].name_hash = FIXTURE_R0_HASH;
     regions[0].source_w = 64;
     regions[0].source_h = 64;
-    regions[0].origin_x = 0.5F;
-    regions[0].origin_y = 0.5F;
+    regions[0].origin_x = r0_origin_x;
+    regions[0].origin_y = r0_origin_y;
     regions[0].vertex_start = 0;
     regions[0].index_start = 0;
     regions[0].vertex_count = 4;
@@ -111,8 +112,8 @@ static void setup_atlas_fixture(bool resolve_now) {
     regions[1].name_hash = FIXTURE_R1_HASH;
     regions[1].source_w = 32;
     regions[1].source_h = 48;
-    regions[1].origin_x = 0.25F;
-    regions[1].origin_y = 0.75F;
+    regions[1].origin_x = r1_origin_x;
+    regions[1].origin_y = r1_origin_y;
     regions[1].vertex_start = 4;
     regions[1].index_start = 6;
     regions[1].vertex_count = 4;
@@ -120,7 +121,6 @@ static void setup_atlas_fixture(bool resolve_now) {
     regions[1].page_index = 0;
     regions[1].transform = 0;
 
-    uint8_t atlas_blob[1024];
     mock_atlas_spec_t spec = {
         .regions = regions,
         .region_count = 2,
@@ -131,21 +131,24 @@ static void setup_atlas_fixture(bool resolve_now) {
         .page_ids = NULL,
         .page_count = 0,
     };
-    uint32_t atlas_blob_size = build_mock_atlas_blob(atlas_blob, sizeof(atlas_blob), &spec);
+    uint32_t atlas_blob_size = build_mock_atlas_blob(atlas_blob, cap, &spec);
     // #endregion
 
+    return atlas_blob_size;
+}
+
+static uint8_t *build_pack_blob_for_atlas(uint64_t atlas_rid, const uint8_t *atlas_blob, uint32_t atlas_blob_size) {
     // #region Build NEOPAK pack containing the atlas blob
-    const uint64_t atlas_rid = 0x1234567890ABCDEFULL;
     const uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
     const uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_DATA_ALIGN - 1U);
     const uint32_t atlas_offset = header_size;
     const uint32_t aligned_atlas = (atlas_blob_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1U);
     const uint32_t total_size = atlas_offset + aligned_atlas;
 
-    s_pack_blob = (uint8_t *)calloc(1, total_size);
-    TEST_ASSERT_NOT_NULL(s_pack_blob);
+    uint8_t *pack_blob = (uint8_t *)calloc(1, total_size);
+    TEST_ASSERT_NOT_NULL(pack_blob);
 
-    NtPackHeader *ph = (NtPackHeader *)s_pack_blob;
+    NtPackHeader *ph = (NtPackHeader *)pack_blob;
     ph->magic = NT_PACK_MAGIC;
     ph->version = NT_PACK_VERSION;
     ph->asset_count = 1;
@@ -154,7 +157,7 @@ static void setup_atlas_fixture(bool resolve_now) {
     ph->meta_offset = 0;
     ph->meta_count = 0;
 
-    NtAssetEntry *entry = (NtAssetEntry *)(s_pack_blob + sizeof(NtPackHeader));
+    NtAssetEntry *entry = (NtAssetEntry *)(pack_blob + sizeof(NtPackHeader));
     entry[0].resource_id = atlas_rid;
     entry[0].asset_type = NT_ASSET_ATLAS;
     entry[0].format_version = NT_ATLAS_VERSION;
@@ -163,16 +166,28 @@ static void setup_atlas_fixture(bool resolve_now) {
     entry[0].meta_offset = 0;
     entry[0]._pad = 0;
 
-    memcpy(s_pack_blob + atlas_offset, atlas_blob, atlas_blob_size);
-    ph->checksum = nt_crc32(s_pack_blob + header_size, total_size - header_size);
+    memcpy(pack_blob + atlas_offset, atlas_blob, atlas_blob_size);
+    ph->checksum = nt_crc32(pack_blob + header_size, total_size - header_size);
     // #endregion
+
+    TEST_ASSERT_TRUE_MESSAGE(s_pack_blob_count < 4, "pack blob test fixture overflow");
+    s_pack_blobs[s_pack_blob_count++] = pack_blob;
+    return pack_blob;
+}
+
+static void setup_atlas_fixture(bool resolve_now) {
+    uint8_t atlas_blob[1024];
+    uint32_t atlas_blob_size = build_fixture_atlas_blob(atlas_blob, sizeof(atlas_blob), 0.5F, 0.5F, 0.25F, 0.75F);
+
+    const uint64_t atlas_rid = 0x1234567890ABCDEFULL;
+    uint8_t *pack_blob = build_pack_blob_for_atlas(atlas_rid, atlas_blob, atlas_blob_size);
 
     // #region Resource system init + parse + optional step
     nt_resource_init(NULL);
     nt_atlas_init();
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount((nt_hash32_t){.value = 0xDEAD}, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack((nt_hash32_t){.value = 0xDEAD}, s_pack_blob, total_size));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack((nt_hash32_t){.value = 0xDEAD}, pack_blob, ((NtPackHeader *)pack_blob)->total_size));
 
     s_atlas_res = nt_resource_request((nt_hash64_t){.value = atlas_rid}, NT_ASSET_ATLAS);
     TEST_ASSERT_TRUE(s_atlas_res.id != 0);
@@ -192,8 +207,11 @@ static void teardown_atlas_fixture(void) {
         nt_resource_shutdown();
         s_atlas_initialized = false;
     }
-    free(s_pack_blob);
-    s_pack_blob = NULL;
+    for (uint8_t i = 0; i < s_pack_blob_count; i++) {
+        free(s_pack_blobs[i]);
+        s_pack_blobs[i] = NULL;
+    }
+    s_pack_blob_count = 0;
 }
 
 /* ---- setUp / tearDown ---- */
@@ -201,7 +219,8 @@ static void teardown_atlas_fixture(void) {
 void setUp(void) {
     s_atlas_initialized = false;
     s_atlas_res = NT_RESOURCE_INVALID;
-    s_pack_blob = NULL;
+    memset(s_pack_blobs, 0, sizeof(s_pack_blobs));
+    s_pack_blob_count = 0;
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 16});
     nt_sprite_comp_init(&(nt_sprite_comp_desc_t){.capacity = 16});
 }
@@ -240,7 +259,7 @@ void test_sprite_bind_by_hash_is_deferred(void) {
 
     nt_entity_t e = nt_entity_create();
     nt_sprite_comp_add(e);
-    nt_sprite_comp_set_region_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
+    nt_sprite_comp_bind_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
 
     TEST_ASSERT_EQUAL_UINT32(s_atlas_res.id, nt_sprite_comp_atlas(e)->id);
     TEST_ASSERT_EQUAL_UINT64(FIXTURE_R1_HASH, *nt_sprite_comp_region_hash(e));
@@ -259,7 +278,7 @@ void test_sprite_sync_resolves_ready_atlas(void) {
 
     nt_entity_t e = nt_entity_create();
     nt_sprite_comp_add(e);
-    nt_sprite_comp_set_region_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
+    nt_sprite_comp_bind_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
 
     nt_resource_step();
     TEST_ASSERT_TRUE(nt_resource_is_ready(s_atlas_res));
@@ -300,7 +319,7 @@ void test_sprite_override_survives_sync(void) {
 
     nt_entity_t e = nt_entity_create();
     nt_sprite_comp_add(e);
-    nt_sprite_comp_set_region_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
+    nt_sprite_comp_bind_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
     nt_sprite_comp_set_origin(e, 0.1F, 0.2F);
 
     nt_resource_step();
@@ -321,7 +340,7 @@ void test_sprite_reset_origin_restores_authored_origin(void) {
 
     nt_entity_t e = nt_entity_create();
     nt_sprite_comp_add(e);
-    nt_sprite_comp_set_region_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
+    nt_sprite_comp_bind_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
     nt_sprite_comp_sync_resources();
     nt_sprite_comp_set_origin(e, 0.9F, 0.1F);
     nt_sprite_comp_reset_origin(e);
@@ -357,8 +376,8 @@ void test_sprite_swap_and_pop_preserves_state(void) {
     nt_sprite_comp_add(e1);
     nt_sprite_comp_add(e2);
 
-    nt_sprite_comp_set_region_by_hash(e1, s_atlas_res, FIXTURE_R0_HASH);
-    nt_sprite_comp_set_region_by_hash(e2, s_atlas_res, FIXTURE_R1_HASH);
+    nt_sprite_comp_bind_by_hash(e1, s_atlas_res, FIXTURE_R0_HASH);
+    nt_sprite_comp_bind_by_hash(e2, s_atlas_res, FIXTURE_R1_HASH);
     nt_sprite_comp_set_origin(e2, 0.1F, 0.9F);
     nt_sprite_comp_sync_resources();
 
@@ -376,7 +395,71 @@ void test_sprite_swap_and_pop_preserves_state(void) {
     TEST_ASSERT_TRUE(origin[1] == 0.9F); /* NOLINT */
 }
 
-/* ---- Test 10: entity destroy auto-removes sprite ---- */
+/* ---- Test 10: republish bumps atlas revision and refreshes authored origin ---- */
+
+void test_sprite_sync_refreshes_authored_origin_on_atlas_republish(void) {
+    setup_atlas_fixture(true);
+
+    nt_entity_t e = nt_entity_create();
+    nt_sprite_comp_add(e);
+    nt_sprite_comp_bind_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
+    nt_sprite_comp_sync_resources();
+
+    const float *origin_before = nt_sprite_comp_origin(e);
+    TEST_ASSERT_TRUE(origin_before[0] == 0.25F); /* NOLINT */
+    TEST_ASSERT_TRUE(origin_before[1] == 0.75F); /* NOLINT */
+    uint32_t revision_before = nt_atlas_revision(s_atlas_res);
+
+    uint8_t atlas_blob[1024];
+    uint32_t atlas_blob_size = build_fixture_atlas_blob(atlas_blob, sizeof(atlas_blob), 0.5F, 0.5F, 0.6F, 0.2F);
+    uint8_t *pack_blob = build_pack_blob_for_atlas(0x1234567890ABCDEFULL, atlas_blob, atlas_blob_size);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount((nt_hash32_t){.value = 0xBEEF}, 10));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack((nt_hash32_t){.value = 0xBEEF}, pack_blob, ((NtPackHeader *)pack_blob)->total_size));
+
+    nt_resource_step();
+    nt_sprite_comp_sync_resources();
+
+    TEST_ASSERT_TRUE(nt_atlas_revision(s_atlas_res) != revision_before);
+    TEST_ASSERT_TRUE(nt_sprite_comp_is_resolved(e));
+
+    const float *origin_after = nt_sprite_comp_origin(e);
+    TEST_ASSERT_TRUE(origin_after[0] == 0.6F); /* NOLINT */
+    TEST_ASSERT_TRUE(origin_after[1] == 0.2F); /* NOLINT */
+}
+
+/* ---- Test 11: republish does not overwrite explicit origin override ---- */
+
+void test_sprite_sync_preserves_override_on_atlas_republish(void) {
+    setup_atlas_fixture(true);
+
+    nt_entity_t e = nt_entity_create();
+    nt_sprite_comp_add(e);
+    nt_sprite_comp_bind_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
+    nt_sprite_comp_sync_resources();
+    nt_sprite_comp_set_origin(e, 0.1F, 0.9F);
+    uint32_t revision_before = nt_atlas_revision(s_atlas_res);
+
+    uint8_t atlas_blob[1024];
+    uint32_t atlas_blob_size = build_fixture_atlas_blob(atlas_blob, sizeof(atlas_blob), 0.5F, 0.5F, 0.6F, 0.2F);
+    uint8_t *pack_blob = build_pack_blob_for_atlas(0x1234567890ABCDEFULL, atlas_blob, atlas_blob_size);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount((nt_hash32_t){.value = 0xBEEF}, 10));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack((nt_hash32_t){.value = 0xBEEF}, pack_blob, ((NtPackHeader *)pack_blob)->total_size));
+
+    nt_resource_step();
+    nt_sprite_comp_sync_resources();
+
+    TEST_ASSERT_TRUE(nt_atlas_revision(s_atlas_res) != revision_before);
+    TEST_ASSERT_TRUE(nt_sprite_comp_is_resolved(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, NT_SPRITE_FLAG_ORIGIN_OV, *nt_sprite_comp_flags(e));
+
+    const float *origin = nt_sprite_comp_origin(e);
+    TEST_ASSERT_TRUE(origin[0] == 0.1F); /* NOLINT */
+    TEST_ASSERT_TRUE(origin[1] == 0.9F); /* NOLINT */
+}
+
+/* ---- Test 12: entity destroy auto-removes sprite ---- */
 
 void test_entity_destroy_removes_sprite(void) {
     nt_entity_t e = nt_entity_create();
@@ -399,6 +482,8 @@ int main(void) {
     RUN_TEST(test_sprite_reset_origin_restores_authored_origin);
     RUN_TEST(test_sprite_flip_preserves_origin_override);
     RUN_TEST(test_sprite_swap_and_pop_preserves_state);
+    RUN_TEST(test_sprite_sync_refreshes_authored_origin_on_atlas_republish);
+    RUN_TEST(test_sprite_sync_preserves_override_on_atlas_republish);
     RUN_TEST(test_entity_destroy_removes_sprite);
     return UNITY_END();
 }

@@ -48,7 +48,7 @@ void nt_sprite_comp_set_region(nt_entity_t entity, nt_resource_t atlas, uint16_t
 
 /* Async-friendly path: stores atlas + region hash, then resolves explicitly in
  * nt_sprite_comp_sync_resources(). */
-void nt_sprite_comp_set_region_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64_t name_hash);
+void nt_sprite_comp_bind_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64_t name_hash);
 
 /* ---- Origin override ---- */
 
