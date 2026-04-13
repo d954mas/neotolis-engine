@@ -219,7 +219,7 @@ static void teardown_atlas_fixture(void) {
 void setUp(void) {
     s_atlas_initialized = false;
     s_atlas_res = NT_RESOURCE_INVALID;
-    memset(s_pack_blobs, 0, sizeof(s_pack_blobs));
+    memset((void *)s_pack_blobs, 0, sizeof(s_pack_blobs));
     s_pack_blob_count = 0;
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 16});
     nt_sprite_comp_init(&(nt_sprite_comp_desc_t){.capacity = 16});

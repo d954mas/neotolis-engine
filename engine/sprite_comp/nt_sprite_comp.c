@@ -59,8 +59,10 @@ static void sprite_resolve_dense(uint16_t idx) {
     }
 
     uint32_t resolved = nt_atlas_find_region(atlas, s_region_hash[idx]);
-    NT_ASSERT(resolved != NT_ATLAS_INVALID_REGION);
-    NT_ASSERT(resolved <= UINT16_MAX);
+    if (resolved == NT_ATLAS_INVALID_REGION || resolved > UINT16_MAX) {
+        sprite_clear_resolved(idx);
+        return;
+    }
 
     s_region_index[idx] = (uint16_t)resolved;
     s_atlas_revision[idx] = revision;
@@ -185,6 +187,7 @@ bool nt_sprite_comp_is_resolved(nt_entity_t entity) {
 
 /* ---- Region binding ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_comp_set_region(nt_entity_t entity, nt_resource_t atlas, uint16_t region_index) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
