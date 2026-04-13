@@ -189,23 +189,10 @@ void nt_sprite_comp_set_region(nt_entity_t entity, nt_resource_t atlas, uint16_t
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_comp_set_region requires a READY atlas");
-    if (!nt_resource_is_ready(atlas)) {
-        sprite_clear_resolved(idx);
-        return;
-    }
-
     NT_ASSERT(region_index < nt_atlas_region_count(atlas) && "sprite region index out of range");
-    if (region_index >= nt_atlas_region_count(atlas)) {
-        sprite_clear_resolved(idx);
-        return;
-    }
 
     const nt_texture_region_t *region = nt_atlas_get_region(atlas, region_index);
     NT_ASSERT(region->name_hash != NT_ATLAS_TOMBSTONE_HASH && "sprite region points at a tombstone");
-    if (region->name_hash == NT_ATLAS_TOMBSTONE_HASH) {
-        sprite_clear_resolved(idx);
-        return;
-    }
 
     s_atlas[idx] = atlas;
     s_region_hash[idx] = region->name_hash;
@@ -219,16 +206,6 @@ void nt_sprite_comp_bind_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     NT_ASSERT(atlas.id != 0 && "nt_sprite_comp_bind_by_hash requires a valid atlas handle");
-    if (atlas.id == 0) {
-        s_atlas[idx] = NT_RESOURCE_INVALID;
-        s_region_hash[idx] = 0;
-        sprite_clear_resolved(idx);
-        if ((s_flags[idx] & NT_SPRITE_FLAG_ORIGIN_OV) == 0) {
-            s_origin[idx][0] = 0.0F;
-            s_origin[idx][1] = 0.0F;
-        }
-        return;
-    }
 
     s_atlas[idx] = atlas;
     s_region_hash[idx] = name_hash;
