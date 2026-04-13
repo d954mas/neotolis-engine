@@ -618,6 +618,273 @@ void test_atlas_get_region_returns_vertex_count_zero_for_tombstone(void) {
     TEST_ASSERT_EQUAL_UINT64(NT_ATLAS_TOMBSTONE_HASH, r1->name_hash);
 }
 
+/* ---- Test 11: Hash collisions resolve correctly via linear probing ----
+ * Two name_hashes that differ only in high bits (both map to the same slot
+ * modulo any power-of-two capacity) plus one unrelated control hash.
+ * REGION-06 hash robustness. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_hash_collisions_probe_correctly(void) {
+    /* Hash A and Hash B differ only in bit 63 — both map to slot (0x10 & mask)
+     * for any power-of-two mask ≤ 63 bits. */
+    const uint64_t hash_a = 0x0000000000000010ULL;
+    const uint64_t hash_b = 0x8000000000000010ULL;
+    const uint64_t hash_ctrl = 0x00000000DEADBEEFULL; /* unrelated */
+
+    NtAtlasVertex verts[9];
+    uint16_t indices[9];
+    for (int i = 0; i < 9; i++) {
+        verts[i].local_x = (int16_t)(i * 10);
+        verts[i].local_y = (int16_t)(i * 20);
+        verts[i].atlas_u = (uint16_t)(i * 1000);
+        verts[i].atlas_v = (uint16_t)(i * 2000);
+        indices[i] = (uint16_t)(i % 3);
+    }
+
+    NtAtlasRegion regions[3];
+    memset(regions, 0, sizeof(regions));
+    /* Region 0: hash_a, 3 verts / 3 indices */
+    regions[0].name_hash = hash_a;
+    regions[0].source_w = 10;
+    regions[0].source_h = 10;
+    regions[0].origin_x = 0.5F;
+    regions[0].origin_y = 0.5F;
+    regions[0].vertex_start = 0;
+    regions[0].index_start = 0;
+    regions[0].vertex_count = 3;
+    regions[0].index_count = 3;
+    regions[0].page_index = 0;
+
+    /* Region 1: hash_b (collides with hash_a), 3 verts / 3 indices */
+    regions[1].name_hash = hash_b;
+    regions[1].source_w = 20;
+    regions[1].source_h = 20;
+    regions[1].origin_x = 0.5F;
+    regions[1].origin_y = 0.5F;
+    regions[1].vertex_start = 3;
+    regions[1].index_start = 3;
+    regions[1].vertex_count = 3;
+    regions[1].index_count = 3;
+    regions[1].page_index = 0;
+
+    /* Region 2: hash_ctrl (no collision), 3 verts / 3 indices */
+    regions[2].name_hash = hash_ctrl;
+    regions[2].source_w = 30;
+    regions[2].source_h = 30;
+    regions[2].origin_x = 0.5F;
+    regions[2].origin_y = 0.5F;
+    regions[2].vertex_start = 6;
+    regions[2].index_start = 6;
+    regions[2].vertex_count = 3;
+    regions[2].index_count = 3;
+    regions[2].page_index = 0;
+
+    const uint64_t page_ids[1] = {0xF001ULL};
+    mock_atlas_spec_t spec = {
+        .regions = regions,
+        .region_count = 3,
+        .vertices = verts,
+        .total_vertex_count = 9,
+        .indices = indices,
+        .total_index_count = 9,
+        .page_ids = page_ids,
+        .page_count = 1,
+    };
+
+    uint8_t buf[512];
+    uint32_t size = build_mock_atlas_blob(buf, sizeof(buf), &spec);
+
+    nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+    const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+
+    /* All three must map to distinct valid indices. */
+    uint32_t idx_a = nt_atlas_test_find_region_raw(ad, hash_a);
+    uint32_t idx_b = nt_atlas_test_find_region_raw(ad, hash_b);
+    uint32_t idx_ctrl = nt_atlas_test_find_region_raw(ad, hash_ctrl);
+
+    TEST_ASSERT_EQUAL_UINT32(0, idx_a);
+    TEST_ASSERT_EQUAL_UINT32(1, idx_b);
+    TEST_ASSERT_EQUAL_UINT32(2, idx_ctrl);
+
+    /* Cross-check: no collision caused wrong region to be returned. */
+    TEST_ASSERT_NOT_EQUAL(idx_a, idx_b);
+    TEST_ASSERT_NOT_EQUAL(idx_a, idx_ctrl);
+    TEST_ASSERT_NOT_EQUAL(idx_b, idx_ctrl);
+
+    /* Verify each region's source_w matches what we set (proves the right data landed). */
+    const nt_texture_region_t *r_a = nt_atlas_test_get_region_raw(ad, idx_a);
+    const nt_texture_region_t *r_b = nt_atlas_test_get_region_raw(ad, idx_b);
+    const nt_texture_region_t *r_ctrl = nt_atlas_test_get_region_raw(ad, idx_ctrl);
+    TEST_ASSERT_EQUAL_UINT16(10, r_a->source_w);
+    TEST_ASSERT_EQUAL_UINT16(20, r_b->source_w);
+    TEST_ASSERT_EQUAL_UINT16(30, r_ctrl->source_w);
+}
+
+/* ---- Test 12: Hash table growth under 1000 regions ----
+ * Exercises multiple rehashes and reallocs. Then merges with a shifted
+ * working set [500..1500) to verify tombstones, common, and new regions
+ * at scale. REGION-09 coverage. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_hash_table_growth_under_1000_regions(void) {
+    /* Build blob1 with 1000 regions, each with name_hash = i + 1,
+     * minimal 3 verts / 3 indices per region. */
+    const uint32_t n1 = 1000;
+    const uint32_t verts_per_region = 3;
+    const uint32_t indices_per_region = 3;
+    const uint32_t total_verts_1 = n1 * verts_per_region;
+    const uint32_t total_indices_1 = n1 * indices_per_region;
+
+    /* Estimate blob size:
+     * header(28) + page_ids(8) + regions(1000*36) + verts(3000*8) + indices(3000*2)
+     * = 28 + 8 + 36000 + 24000 + 6000 = 66036 bytes */
+    const uint32_t blob_cap = 70000;
+    uint8_t *buf1 = (uint8_t *)malloc(blob_cap);
+    TEST_ASSERT_NOT_NULL_MESSAGE(buf1, "malloc for 1000-region blob");
+
+    NtAtlasRegion *regs1 = (NtAtlasRegion *)malloc(n1 * sizeof(NtAtlasRegion));
+    NtAtlasVertex *verts1 = (NtAtlasVertex *)malloc(total_verts_1 * sizeof(NtAtlasVertex));
+    uint16_t *inds1 = (uint16_t *)malloc(total_indices_1 * sizeof(uint16_t));
+    TEST_ASSERT_NOT_NULL(regs1);
+    TEST_ASSERT_NOT_NULL(verts1);
+    TEST_ASSERT_NOT_NULL(inds1);
+
+    for (uint32_t i = 0; i < n1; i++) {
+        memset(&regs1[i], 0, sizeof(NtAtlasRegion));
+        regs1[i].name_hash = (uint64_t)i + 1U;
+        regs1[i].source_w = (uint16_t)(i & 0xFFFFU);
+        regs1[i].source_h = 16;
+        regs1[i].origin_x = 0.5F;
+        regs1[i].origin_y = 0.5F;
+        regs1[i].vertex_start = i * verts_per_region;
+        regs1[i].index_start = i * indices_per_region;
+        regs1[i].vertex_count = (uint8_t)verts_per_region;
+        regs1[i].index_count = (uint8_t)indices_per_region;
+        regs1[i].page_index = 0;
+
+        for (uint32_t vi = 0; vi < verts_per_region; vi++) {
+            uint32_t idx = (i * verts_per_region) + vi;
+            verts1[idx].local_x = (int16_t)(i & 0x7FFF);
+            verts1[idx].local_y = (int16_t)(vi);
+            verts1[idx].atlas_u = (uint16_t)(i & 0xFFFF);
+            verts1[idx].atlas_v = (uint16_t)(vi);
+        }
+        for (uint32_t ii = 0; ii < indices_per_region; ii++) {
+            inds1[(i * indices_per_region) + ii] = (uint16_t)ii;
+        }
+    }
+
+    const uint64_t page_ids[1] = {0xF002ULL};
+    mock_atlas_spec_t spec1 = {
+        .regions = regs1,
+        .region_count = (uint16_t)n1,
+        .vertices = verts1,
+        .total_vertex_count = total_verts_1,
+        .indices = inds1,
+        .total_index_count = total_indices_1,
+        .page_ids = page_ids,
+        .page_count = 1,
+    };
+    uint32_t size1 = build_mock_atlas_blob(buf1, blob_cap, &spec1);
+
+    /* First parse: 1000 regions */
+    nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
+    const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+    TEST_ASSERT_EQUAL_UINT32(n1, nt_atlas_test_region_count(ad));
+
+    /* Verify all 1000 are findable */
+    for (uint32_t i = 0; i < n1; i++) {
+        uint32_t idx = nt_atlas_test_find_region_raw(ad, (uint64_t)i + 1U);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(i, idx, "first parse: find_region mismatch");
+    }
+
+    /* Build blob2 with regions [500..1500) — hashes 501..1500 */
+    const uint32_t n2 = 1000;
+    const uint32_t total_verts_2 = n2 * verts_per_region;
+    const uint32_t total_indices_2 = n2 * indices_per_region;
+
+    uint8_t *buf2 = (uint8_t *)malloc(blob_cap);
+    NtAtlasRegion *regs2 = (NtAtlasRegion *)malloc(n2 * sizeof(NtAtlasRegion));
+    NtAtlasVertex *verts2 = (NtAtlasVertex *)malloc(total_verts_2 * sizeof(NtAtlasVertex));
+    uint16_t *inds2 = (uint16_t *)malloc(total_indices_2 * sizeof(uint16_t));
+    TEST_ASSERT_NOT_NULL(buf2);
+    TEST_ASSERT_NOT_NULL(regs2);
+    TEST_ASSERT_NOT_NULL(verts2);
+    TEST_ASSERT_NOT_NULL(inds2);
+
+    for (uint32_t i = 0; i < n2; i++) {
+        uint32_t region_id = 500 + i; /* range [500..1500) */
+        memset(&regs2[i], 0, sizeof(NtAtlasRegion));
+        regs2[i].name_hash = (uint64_t)region_id + 1U; /* hashes 501..1500 */
+        regs2[i].source_w = (uint16_t)((region_id + 1000) & 0xFFFFU);
+        regs2[i].source_h = 32;
+        regs2[i].origin_x = 0.5F;
+        regs2[i].origin_y = 0.5F;
+        regs2[i].vertex_start = i * verts_per_region;
+        regs2[i].index_start = i * indices_per_region;
+        regs2[i].vertex_count = (uint8_t)verts_per_region;
+        regs2[i].index_count = (uint8_t)indices_per_region;
+        regs2[i].page_index = 0;
+
+        for (uint32_t vi = 0; vi < verts_per_region; vi++) {
+            uint32_t idx = (i * verts_per_region) + vi;
+            verts2[idx].local_x = (int16_t)(region_id & 0x7FFF);
+            verts2[idx].local_y = (int16_t)(vi + 100);
+            verts2[idx].atlas_u = (uint16_t)((region_id + 1000) & 0xFFFF);
+            verts2[idx].atlas_v = (uint16_t)(vi + 100);
+        }
+        for (uint32_t ii = 0; ii < indices_per_region; ii++) {
+            inds2[(i * indices_per_region) + ii] = (uint16_t)ii;
+        }
+    }
+
+    mock_atlas_spec_t spec2 = {
+        .regions = regs2,
+        .region_count = (uint16_t)n2,
+        .vertices = verts2,
+        .total_vertex_count = total_verts_2,
+        .indices = inds2,
+        .total_index_count = total_indices_2,
+        .page_ids = page_ids,
+        .page_count = 1,
+    };
+    uint32_t size2 = build_mock_atlas_blob(buf2, blob_cap, &spec2);
+
+    /* Merge */
+    nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
+
+    /* region_count should be 1500: original 1000 + 500 new (1001..1500) */
+    TEST_ASSERT_EQUAL_UINT32(1500, nt_atlas_test_region_count(ad));
+
+    /* Regions [0..499] (hashes 1..500) should be tombstoned. */
+    for (uint32_t i = 0; i < 500; i++) {
+        uint32_t idx = nt_atlas_test_find_region_raw(ad, (uint64_t)i + 1U);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(NT_ATLAS_INVALID_REGION, idx, "tombstoned region still findable");
+        const nt_texture_region_t *r = nt_atlas_test_get_region_raw(ad, i);
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(0, r->vertex_count, "tombstoned region vertex_count != 0");
+    }
+
+    /* Regions [500..999] (hashes 501..1000) are common — indices unchanged. */
+    for (uint32_t i = 500; i < 1000; i++) {
+        uint32_t idx = nt_atlas_test_find_region_raw(ad, (uint64_t)i + 1U);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(i, idx, "common region index shifted");
+    }
+
+    /* Regions [1000..1499] (hashes 1001..1500) are new — appended. */
+    for (uint32_t i = 1000; i < 1500; i++) {
+        uint32_t idx = nt_atlas_test_find_region_raw(ad, (uint64_t)i + 1U);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(i, idx, "new region index mismatch");
+    }
+
+    /* Cleanup heap allocations */
+    free(buf1);
+    free(regs1);
+    free(verts1);
+    free(inds1);
+    free(buf2);
+    free(regs2);
+    free(verts2);
+    free(inds2);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_atlas_parse_valid_blob);
@@ -630,5 +897,7 @@ int main(void) {
     RUN_TEST(test_atlas_merge_removed_region_becomes_tombstone);
     RUN_TEST(test_atlas_find_region_returns_invalid_for_tombstone);
     RUN_TEST(test_atlas_get_region_returns_vertex_count_zero_for_tombstone);
+    RUN_TEST(test_atlas_hash_collisions_probe_correctly);
+    RUN_TEST(test_atlas_hash_table_growth_under_1000_regions);
     return UNITY_END();
 }
