@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: 7477c20
+# Commit: 3fa00e7
 
 ## WASM Section Sizes
 
@@ -76,6 +76,7 @@ TOTAL (linked)           1212592 B
 
 Not linked to spinning_cube:
 libnt_app_stub.a            1428 B
+libnt_atlas.a               4918 B
 libnt_basisu_transcoder.a 1329370 B
 libnt_comp_storage.a        1802 B
 libnt_entity.a              2996 B
@@ -95,7 +96,7 @@ libnt_mesh_comp.a           1914 B
 libnt_mesh_renderer.a       7900 B
 libnt_pool.a                1278 B
 libnt_render.a              5910 B
-libnt_resource.a          168170 B
+libnt_resource.a          186392 B
 libnt_sort.a                 366 B
 libnt_text_renderer.a    1170014 B
 libnt_time.a                 868 B
