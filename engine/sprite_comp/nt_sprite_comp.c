@@ -249,9 +249,7 @@ void nt_sprite_comp_reset_origin(nt_entity_t entity) {
 void nt_sprite_comp_set_flip(nt_entity_t entity, bool flip_x, bool flip_y) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
-    uint8_t mask = (uint8_t)~(NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y);
-    uint8_t bits = (uint8_t)((flip_x ? NT_SPRITE_FLAG_FLIP_X : 0U) | (flip_y ? NT_SPRITE_FLAG_FLIP_Y : 0U));
-    s_flags[idx] = (uint8_t)((s_flags[idx] & mask) | bits);
+    s_flags[idx] = (uint8_t)((s_flags[idx] & ~(NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y)) | (flip_x ? NT_SPRITE_FLAG_FLIP_X : 0U) | (flip_y ? NT_SPRITE_FLAG_FLIP_Y : 0U));
 }
 
 /* ---- Read accessors ---- */
