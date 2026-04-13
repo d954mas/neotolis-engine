@@ -113,6 +113,20 @@ uint64_t nt_atlas_test_page_resource_id(const struct nt_atlas_data *ad, uint8_t 
 void nt_atlas_test_drive_resolve(const uint8_t *data, uint32_t size, void **user_data);
 void nt_atlas_test_drive_cleanup(void *user_data);
 
+/* Return the cached page_resources[page_index] slot handle's .id field.
+ * 0 means NT_RESOURCE_INVALID (not yet lazily resolved). */
+uint32_t nt_atlas_test_page_resource_handle(const struct nt_atlas_data *ad, uint8_t page_index);
+
+/* Reset module-level initialized flag so tests can re-init after
+ * nt_resource_shutdown(). Production code has no nt_atlas_shutdown (D-16). */
+void nt_atlas_test_reset(void);
+
+/* Mirrors the header validation logic in atlas_on_resolve (magic, version,
+ * size bounds) but returns false on failure instead of asserting.
+ * Gives automated coverage of the validation path without needing a
+ * death-test harness. */
+bool nt_atlas_test_validate_header(const uint8_t *data, uint32_t size);
+
 #endif /* NT_ATLAS_TEST_ACCESS */
 
 #endif /* NT_ATLAS_H */

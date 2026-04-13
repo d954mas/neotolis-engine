@@ -633,5 +633,43 @@ void nt_atlas_test_drive_resolve(const uint8_t *data, uint32_t size, void **user
 
 void nt_atlas_test_drive_cleanup(void *user_data) { atlas_on_cleanup(user_data); }
 
+uint32_t nt_atlas_test_page_resource_handle(const struct nt_atlas_data *ad, uint8_t page_index) {
+    NT_ASSERT(ad != NULL);
+    NT_ASSERT(page_index < ad->page_count);
+    return ad->page_resources[page_index].id;
+}
+
+void nt_atlas_test_reset(void) { s_atlas.initialized = false; }
+
+bool nt_atlas_test_validate_header(const uint8_t *data, uint32_t size) {
+    if (size < sizeof(NtAtlasHeader)) {
+        return false;
+    }
+    const NtAtlasHeader *hdr = (const NtAtlasHeader *)data;
+    if (hdr->magic != NT_ATLAS_MAGIC) {
+        return false;
+    }
+    if (hdr->version != NT_ATLAS_VERSION) {
+        return false;
+    }
+    if (hdr->page_count > NT_ATLAS_MAX_PAGES) {
+        return false;
+    }
+    const uint32_t page_bytes = (uint32_t)hdr->page_count * (uint32_t)sizeof(uint64_t);
+    const uint32_t region_bytes = (uint32_t)hdr->region_count * (uint32_t)sizeof(NtAtlasRegion);
+    if (size < (uint32_t)sizeof(NtAtlasHeader) + page_bytes + region_bytes) {
+        return false;
+    }
+    const uint32_t vertex_bytes = hdr->total_vertex_count * (uint32_t)sizeof(NtAtlasVertex);
+    const uint32_t index_bytes = hdr->total_index_count * (uint32_t)sizeof(uint16_t);
+    if (hdr->total_vertex_count > 0 && hdr->vertex_offset + vertex_bytes > size) {
+        return false;
+    }
+    if (hdr->total_index_count > 0 && hdr->index_offset + index_bytes > size) {
+        return false;
+    }
+    return true;
+}
+
 #endif /* NT_ATLAS_TEST_ACCESS */
 // #endregion

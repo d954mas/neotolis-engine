@@ -8,8 +8,11 @@
 
 /* clang-format off */
 #include "atlas/nt_atlas.h"
+#include "hash/nt_hash.h"
 #include "nt_atlas_format.h"
+#include "nt_crc32.h"
 #include "nt_pack_format.h"
+#include "resource/nt_resource.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -885,6 +888,239 @@ void test_atlas_hash_table_growth_under_1000_regions(void) {
     free(inds2);
 }
 
+/* ---- Test 13: on_cleanup releases all buffers (ASan validates) ----
+ * Parse, merge, then call cleanup directly. ASan reports zero leaks
+ * at test-binary exit if every malloc has a matching free. */
+void test_atlas_on_cleanup_releases_all_buffers(void) {
+    static const uint64_t page_ids1[2] = {0xF003ULL, 0xF004ULL};
+
+    merge_region_spec_t blob1_specs[3] = {
+        {.name_hash = 0xA01ULL, .vertex_count = 4, .index_count = 6, .source_w = 16, .page_index = 0, .transform = 0, .payload_seed = 10},
+        {.name_hash = 0xA02ULL, .vertex_count = 3, .index_count = 3, .source_w = 32, .page_index = 1, .transform = 1, .payload_seed = 20},
+        {.name_hash = 0xA03ULL, .vertex_count = 4, .index_count = 6, .source_w = 48, .page_index = 0, .transform = 0, .payload_seed = 30},
+    };
+    uint8_t buf1[512];
+    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 3, page_ids1, 2);
+
+    /* First parse */
+    nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
+    TEST_ASSERT_NOT_NULL(s_user_data);
+
+    /* Merge with different set to exercise realloc paths */
+    static const uint64_t page_ids2[1] = {0xF005ULL};
+    merge_region_spec_t blob2_specs[4] = {
+        {.name_hash = 0xA01ULL, .vertex_count = 4, .index_count = 6, .source_w = 64, .page_index = 0, .transform = 0, .payload_seed = 100},
+        {.name_hash = 0xA03ULL, .vertex_count = 4, .index_count = 6, .source_w = 64, .page_index = 0, .transform = 0, .payload_seed = 110},
+        {.name_hash = 0xA04ULL, .vertex_count = 4, .index_count = 6, .source_w = 64, .page_index = 0, .transform = 0, .payload_seed = 120},
+        {.name_hash = 0xA05ULL, .vertex_count = 4, .index_count = 6, .source_w = 64, .page_index = 0, .transform = 0, .payload_seed = 130},
+    };
+    uint8_t buf2[512];
+    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 4, page_ids2, 1);
+
+    nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
+
+    /* Explicit cleanup — tearDown would also clean up, but calling it
+     * directly makes the test's intent clear. */
+    nt_atlas_test_drive_cleanup(s_user_data);
+    s_user_data = NULL;
+    /* If ASan is active and any buffer leaked, the test binary will
+     * report a leak-check failure at exit. */
+}
+
+/* ---- Test 14: Header validation rejects corruption ----
+ * Uses the test-only nt_atlas_test_validate_header helper that mirrors
+ * the NT_ASSERT logic in validate_and_carve_blob but returns false on
+ * failure instead of trapping. Automated coverage for magic, version,
+ * and size-bounds checks. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
+    /* Build a valid blob first */
+    uint8_t buf[512];
+    uint32_t valid_size = 0;
+    build_fixture_blob(buf, sizeof(buf), &valid_size);
+
+    /* Valid blob should pass */
+    TEST_ASSERT_TRUE(nt_atlas_test_validate_header(buf, valid_size));
+
+    /* Magic corruption: overwrite first 4 bytes */
+    uint8_t corrupt_magic[512];
+    memcpy(corrupt_magic, buf, valid_size);
+    uint32_t bad_magic = 0xDEADBEEFU;
+    memcpy(corrupt_magic, &bad_magic, sizeof(bad_magic));
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_magic, valid_size), "corrupted magic should fail");
+
+    /* Version corruption: overwrite bytes 4-5 */
+    uint8_t corrupt_version[512];
+    memcpy(corrupt_version, buf, valid_size);
+    uint16_t bad_version = 0xFFFFU;
+    memcpy(corrupt_version + 4, &bad_version, sizeof(bad_version));
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_version, valid_size), "bad version should fail");
+
+    /* Truncated blob: size < sizeof(NtAtlasHeader) */
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(buf, 10), "truncated blob should fail");
+
+    /* Truncated blob: header valid but size too small for pages + regions */
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(buf, sizeof(NtAtlasHeader)), "undersized blob should fail");
+}
+
+/* ---- Test 15: Page resources resolved lazily (R1 amendment) ----
+ * Verifies that page_resource_ids[] are stored immediately at parse,
+ * but page_resources[] remain NT_RESOURCE_INVALID until first
+ * nt_atlas_get_page_resource() call. Also verifies merge resets the
+ * lazy cache. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_page_resources_resolved_lazily(void) {
+    /* Parse blob with 2 pages (ids 0xAAA, 0xBBB) — reuse fixture. */
+    uint8_t buf[512];
+    uint32_t size = 0;
+    build_fixture_blob(buf, sizeof(buf), &size);
+
+    nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+    const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+
+    /* Page ids stored immediately */
+    TEST_ASSERT_EQUAL_UINT64(FIXTURE_PAGE0_ID, nt_atlas_test_page_resource_id(ad, 0));
+    TEST_ASSERT_EQUAL_UINT64(FIXTURE_PAGE1_ID, nt_atlas_test_page_resource_id(ad, 1));
+
+    /* Slot handles are ZERO (NT_RESOURCE_INVALID) — not yet lazily resolved */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 1));
+
+    /* Merge with different page ids (0xCCC, 0xDDD) */
+    static NtAtlasVertex merge_verts[3];
+    static uint16_t merge_indices[3] = {0, 1, 2};
+    for (int i = 0; i < 3; i++) {
+        merge_verts[i].local_x = (int16_t)(i * 5);
+        merge_verts[i].local_y = (int16_t)(i * 10);
+        merge_verts[i].atlas_u = (uint16_t)(i * 500);
+        merge_verts[i].atlas_v = (uint16_t)(i * 1000);
+    }
+    static NtAtlasRegion merge_region;
+    memset(&merge_region, 0, sizeof(merge_region));
+    merge_region.name_hash = FIXTURE_R0_HASH;
+    merge_region.source_w = 64;
+    merge_region.source_h = 64;
+    merge_region.origin_x = 0.5F;
+    merge_region.origin_y = 0.5F;
+    merge_region.vertex_start = 0;
+    merge_region.index_start = 0;
+    merge_region.vertex_count = 3;
+    merge_region.index_count = 3;
+    merge_region.page_index = 0;
+
+    static const uint64_t merge_page_ids[2] = {0xCCCULL, 0xDDDULL};
+    mock_atlas_spec_t merge_spec = {
+        .regions = &merge_region,
+        .region_count = 1,
+        .vertices = merge_verts,
+        .total_vertex_count = 3,
+        .indices = merge_indices,
+        .total_index_count = 3,
+        .page_ids = merge_page_ids,
+        .page_count = 2,
+    };
+    uint8_t merge_buf[512];
+    uint32_t merge_size = build_mock_atlas_blob(merge_buf, sizeof(merge_buf), &merge_spec);
+
+    nt_atlas_test_drive_resolve(merge_buf, merge_size, &s_user_data);
+
+    /* After merge: page ids replaced, lazy handles reset to 0 */
+    TEST_ASSERT_EQUAL_UINT64(0xCCCULL, nt_atlas_test_page_resource_id(ad, 0));
+    TEST_ASSERT_EQUAL_UINT64(0xDDDULL, nt_atlas_test_page_resource_id(ad, 1));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nt_atlas_test_page_resource_handle(ad, 1));
+}
+
+/* ---- Test 16: Full resource pipeline integration ----
+ * End-to-end: nt_resource_init + nt_atlas_init → mount + parse_pack →
+ * nt_resource_request + nt_resource_step → on_resolve fires →
+ * nt_atlas_find_region + nt_atlas_get_region via the public API →
+ * nt_resource_shutdown (cleanup runs). Validates the full wiring. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_full_resource_pipeline_integration(void) {
+    /* Build an atlas blob (3 regions, 2 pages) */
+    uint8_t atlas_blob[512];
+    uint32_t atlas_blob_size = 0;
+    build_fixture_blob(atlas_blob, sizeof(atlas_blob), &atlas_blob_size);
+
+    /* Build a .ntpack containing the atlas blob as a single NT_ASSET_ATLAS asset.
+     * Layout: NtPackHeader(32) + NtAssetEntry(24) + alignment padding + atlas_blob */
+    const uint64_t atlas_rid = 0x1234567890ABCDEFULL;
+    const uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
+    const uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_DATA_ALIGN - 1U);
+    const uint32_t aligned_atlas = (atlas_blob_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1U);
+    const uint32_t total_size = header_size + aligned_atlas;
+
+    uint8_t *pack_blob = (uint8_t *)calloc(1, total_size);
+    TEST_ASSERT_NOT_NULL(pack_blob);
+
+    NtPackHeader *ph = (NtPackHeader *)pack_blob;
+    ph->magic = NT_PACK_MAGIC;
+    ph->version = NT_PACK_VERSION;
+    ph->asset_count = 1;
+    ph->header_size = header_size;
+    ph->total_size = total_size;
+    ph->meta_offset = 0;
+    ph->meta_count = 0;
+
+    NtAssetEntry *entry = (NtAssetEntry *)(pack_blob + sizeof(NtPackHeader));
+    entry->resource_id = atlas_rid;
+    entry->asset_type = NT_ASSET_ATLAS;
+    entry->format_version = NT_ATLAS_VERSION;
+    entry->offset = header_size;
+    entry->size = atlas_blob_size;
+    entry->meta_offset = 0;
+    entry->_pad = 0;
+
+    memcpy(pack_blob + header_size, atlas_blob, atlas_blob_size);
+    ph->checksum = nt_crc32(pack_blob + header_size, total_size - header_size);
+
+    /* --- Resource system init --- */
+    nt_resource_init(NULL);
+    nt_atlas_init();
+
+    /* Mount pack, parse, request */
+    nt_hash32_t pid = nt_hash32_str("atlas_integ_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, pack_blob, total_size));
+
+    nt_hash64_t rid = {atlas_rid};
+    nt_resource_t atlas_res = nt_resource_request(rid, NT_ASSET_ATLAS);
+    TEST_ASSERT_TRUE(atlas_res.id != 0);
+
+    /* Step: Phase B activates (atlas_activate returns 1 → READY),
+     * Phase D resolves slot → on_resolve fires → nt_atlas_data_t created. */
+    nt_resource_step();
+
+    /* Assert resource is ready */
+    TEST_ASSERT_TRUE_MESSAGE(nt_resource_is_ready(atlas_res), "atlas resource not ready after step");
+
+    /* Query via public API */
+    uint32_t idx = nt_atlas_find_region(atlas_res, FIXTURE_R0_HASH);
+    TEST_ASSERT_EQUAL_UINT32(0, idx);
+
+    const nt_texture_region_t *r = nt_atlas_get_region(atlas_res, 0);
+    TEST_ASSERT_NOT_NULL(r);
+    TEST_ASSERT_EQUAL_UINT64(FIXTURE_R0_HASH, r->name_hash);
+    TEST_ASSERT_EQUAL_UINT16(64, r->source_w);
+    TEST_ASSERT_EQUAL_UINT8(4, r->vertex_count);
+    TEST_ASSERT_EQUAL_UINT8(6, r->index_count);
+
+    /* Verify all 3 regions are queryable */
+    TEST_ASSERT_EQUAL_UINT32(1, nt_atlas_find_region(atlas_res, FIXTURE_R1_HASH));
+    TEST_ASSERT_EQUAL_UINT32(2, nt_atlas_find_region(atlas_res, FIXTURE_R2_HASH));
+    TEST_ASSERT_EQUAL_UINT32(NT_ATLAS_INVALID_REGION, nt_atlas_find_region(atlas_res, 0xDEADULL));
+
+    /* Cleanup: shutdown frees user_data via on_cleanup, then we free the pack blob */
+    nt_resource_shutdown();
+    nt_atlas_test_reset();
+    free(pack_blob);
+
+    /* s_user_data is NOT involved in this test — set to NULL to prevent
+     * tearDown from double-freeing. */
+    s_user_data = NULL;
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_atlas_parse_valid_blob);
@@ -899,5 +1135,9 @@ int main(void) {
     RUN_TEST(test_atlas_get_region_returns_vertex_count_zero_for_tombstone);
     RUN_TEST(test_atlas_hash_collisions_probe_correctly);
     RUN_TEST(test_atlas_hash_table_growth_under_1000_regions);
+    RUN_TEST(test_atlas_on_cleanup_releases_all_buffers);
+    RUN_TEST(test_atlas_on_resolve_header_validation_rejects_corruption);
+    RUN_TEST(test_atlas_page_resources_resolved_lazily);
+    RUN_TEST(test_atlas_full_resource_pipeline_integration);
     return UNITY_END();
 }
