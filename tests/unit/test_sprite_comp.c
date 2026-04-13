@@ -252,16 +252,19 @@ void test_sprite_set_region(void) {
     TEST_ASSERT_EQUAL_UINT16(1, *nt_sprite_comp_region_index(e));
 }
 
-/* ---- Test 5: set_region resets flags ---- */
+/* ---- Test 5: set_region clears origin override but preserves flip ---- */
 
 void test_sprite_set_region_resets_flags(void) {
     setup_atlas_fixture();
     nt_entity_t e = nt_entity_create();
     nt_sprite_comp_add(e);
+    nt_sprite_comp_set_flip(e, true, false);
     nt_sprite_comp_set_origin(e, 0.1F, 0.2F);
-    TEST_ASSERT_NOT_EQUAL(0, *nt_sprite_comp_flags(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, NT_SPRITE_FLAG_ORIGIN_OV, *nt_sprite_comp_flags(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X, NT_SPRITE_FLAG_FLIP_X, *nt_sprite_comp_flags(e));
     nt_sprite_comp_set_region(e, s_atlas_res, 0);
-    TEST_ASSERT_EQUAL_UINT8(0, *nt_sprite_comp_flags(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, 0, *nt_sprite_comp_flags(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X, NT_SPRITE_FLAG_FLIP_X, *nt_sprite_comp_flags(e));
 }
 
 /* ---- Test 6: set_region_by_hash resolves hash to index ---- */
@@ -341,7 +344,7 @@ void test_sprite_set_region_clears_origin_override(void) {
     nt_sprite_comp_set_origin(e, 0.1F, 0.2F);
     TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, NT_SPRITE_FLAG_ORIGIN_OV, *nt_sprite_comp_flags(e));
     nt_sprite_comp_set_region(e, s_atlas_res, 0);
-    TEST_ASSERT_EQUAL_UINT8(0, *nt_sprite_comp_flags(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_ORIGIN_OV, 0, *nt_sprite_comp_flags(e));
 }
 
 /* ---- Test 12: swap-and-pop preserves data ---- */

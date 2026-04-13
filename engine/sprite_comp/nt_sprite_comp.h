@@ -11,12 +11,6 @@
 #define NT_SPRITE_FLAG_FLIP_Y (1U << 1)
 #define NT_SPRITE_FLAG_ORIGIN_OV (1U << 2)
 
-/* ---- Compile-time capacity ---- */
-
-#ifndef NT_SPRITE_COMP_MAX_SPRITES
-#define NT_SPRITE_COMP_MAX_SPRITES 256
-#endif
-
 /* ---- Descriptor ---- */
 
 typedef struct {
@@ -27,7 +21,7 @@ typedef struct {
 
 static inline nt_sprite_comp_desc_t nt_sprite_comp_desc_defaults(void) {
     return (nt_sprite_comp_desc_t){
-        .capacity = NT_SPRITE_COMP_MAX_SPRITES,
+        .capacity = 256,
     };
 }
 
