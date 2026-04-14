@@ -120,6 +120,20 @@ uint32_t nt_resource_get(nt_resource_t handle);
  * requires user_data to be synchronized with the published winner. */
 bool nt_resource_is_ready(nt_resource_t handle);
 uint8_t nt_resource_get_state(nt_resource_t handle);
+/* Monotonic counter that changes whenever the published view of any slot
+ * changes (winner, visible state, or aux-backed published payload refresh).
+ *
+ * Invariant: the epoch bumps from exactly one place — resource_resolve_pass().
+ * All public APIs that can affect slot publication (register, unregister,
+ * unmount, set_priority, parse_pack, placeholder change, unload) set a
+ * needs_resolve flag; nt_resource_step() drains it by running resolve_pass,
+ * which diffs per-slot and bumps the epoch when the published view differs.
+ *
+ * slot_alloc() is the only path that writes slot->* outside resolve_pass,
+ * but it only initializes a freshly created slot (state=REGISTERED, handle=0)
+ * that no observer has seen yet — the slot's first real publication still
+ * goes through resolve_pass and bumps the epoch normally. */
+uint32_t nt_resource_publication_epoch(void);
 
 /* Get raw blob data pointer (after NtBlobAssetHeader). Returns NULL if not ready or not a blob.
  * Returned pointer is a view into pack memory — valid until pack blob is evicted.

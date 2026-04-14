@@ -215,6 +215,8 @@ input_begin_frame
     → if pointer pressed && audio suspended → audio_try_resume()
 input_event_apply
 resource_step         ← async loading processing
+game-defined resource sync helpers
+    → e.g. sprite_comp_sync_resources() after resource publication changes
 audio_update          ← voice state management
 fixed_update loop
 game_update
@@ -556,6 +558,27 @@ typedef struct SpriteComponent
 } SpriteComponent;
 ```
 
+Baseline sprite asset ref is atlas-backed:
+
+```c
+typedef struct SpriteAssetRef
+{
+    nt_resource_t atlas;
+    uint64_t      region_hash;
+} SpriteAssetRef;
+```
+
+Runtime may cache resolved region index, snapshot revision, and effective origin
+next to the component for fast rendering, but those are implementation details —
+the stable identity is `atlas + region_hash`.
+
+Resolution is explicit, not renderer-driven magic:
+
+- game code requests / mounts resources
+- `resource_step()` publishes winners
+- game code calls `sprite_comp_sync_resources()` (or equivalent system)
+- sprite render-item build skips unresolved sprites
+
 Sprite is a separate render kind, not a special mode of mesh.
 
 ## 9.5 Text component
@@ -876,6 +899,8 @@ Sort order is **not** a material property. Sorting is game-controlled: game code
 
 ## 17.1 Core concepts
 
+- `publication_epoch`: monotonic counter that changes when the published view of any slot changes
+
 - `resource_id`: 64-bit xxHash of asset path (`nt_hash64_t`) — stable resource identity
 - `NtAssetMeta`: per-asset metadata entry (one per asset per pack)
 - `NtResourceSlot`: per unique resource requested by game code — holds resolved handle and optional user_data
@@ -900,6 +925,8 @@ For simple runtime-handle asset types (texture, mesh, blob), target and publishe
 Game code receives `nt_resource_t` — a 32-bit handle encoding slot index (lower 16 bits) and generation (upper 16 bits). Generation detects stale handles within a single init/shutdown lifecycle. After shutdown, all handles are invalid — game code must re-request resources after reinit. Access functions (`nt_resource_get`, `nt_resource_is_ready`) validate generation before returning data. `nt_resource_get()` returns the currently published winner handle. `nt_resource_is_ready()` means "published winner is fully usable", not merely "some runtime handle exists somewhere in the stack."
 
 Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game code or future phases.
+
+`nt_resource_publication_epoch()` exposes a monotonic change counter for systems that want to skip work when published slot data has not changed.
 
 ## 17.4 AssetMeta stability
 

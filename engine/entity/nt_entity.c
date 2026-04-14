@@ -147,8 +147,12 @@ bool nt_entity_is_enabled(nt_entity_t entity) {
 
 /* ---- Storage registration ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_entity_register_storage(const nt_comp_storage_reg_t *reg) {
     NT_ASSERT(reg && reg->name && reg->has && reg->on_destroy);
+    for (uint8_t i = 0; i < s_entity.reg_count; i++) {
+        NT_ASSERT(strcmp(s_entity.registrations[i].name, reg->name) != 0 && "storage with this name already registered");
+    }
     if (s_entity.reg_count >= NT_MAX_COMP_STORAGES) {
         NT_ASSERT(false);
         return;
