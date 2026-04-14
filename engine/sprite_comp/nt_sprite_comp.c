@@ -29,6 +29,10 @@ static void sprite_clear_resolved(uint16_t idx) {
     s_region_index[idx] = 0;
     s_atlas_revision[idx] = 0;
     s_flags[idx] &= (uint8_t)~NT_SPRITE_FLAG_RESOLVED;
+    if ((s_flags[idx] & NT_SPRITE_FLAG_ORIGIN_OV) == 0) {
+        s_origin[idx][0] = 0.0F;
+        s_origin[idx][1] = 0.0F;
+    }
 }
 
 static void sprite_set_authored_origin(uint16_t idx, const nt_texture_region_t *region) {
@@ -102,6 +106,7 @@ static void sprite_on_destroy(nt_entity_t entity) {
 nt_result_t nt_sprite_comp_init(const nt_sprite_comp_desc_t *desc) {
     NT_ASSERT(desc != NULL);
     NT_ASSERT(desc->capacity > 0);
+    NT_ASSERT(s_atlas == NULL && "sprite_comp already initialized");
 
     nt_result_t res = nt_comp_storage_init(&s_storage, desc->capacity, sprite_default, sprite_swap);
     if (res != NT_OK) {
@@ -214,10 +219,6 @@ void nt_sprite_comp_bind_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64
     s_region_hash[idx] = name_hash;
     sprite_clear_resolved(idx);
     s_sync_dirty = true;
-    if ((s_flags[idx] & NT_SPRITE_FLAG_ORIGIN_OV) == 0) {
-        s_origin[idx][0] = 0.0F;
-        s_origin[idx][1] = 0.0F;
-    }
 }
 
 /* ---- Origin override ---- */

@@ -63,7 +63,9 @@ void nt_sprite_comp_set_flip(nt_entity_t entity, bool flip_x, bool flip_y);
 
 const nt_resource_t *nt_sprite_comp_atlas(nt_entity_t entity);
 const uint64_t *nt_sprite_comp_region_hash(nt_entity_t entity);
-/* Cached region index, valid only when nt_sprite_comp_is_resolved() is true. */
+/* Cached region index. Undefined when nt_sprite_comp_is_resolved() is false —
+ * callers MUST gate reads on is_resolved(). The stored value is not a sentinel;
+ * 0 is a valid region index for a resolved sprite. */
 const uint16_t *nt_sprite_comp_region_index(nt_entity_t entity);
 const float *nt_sprite_comp_origin(nt_entity_t entity); /* float[2], effective origin */
 const uint8_t *nt_sprite_comp_flags(nt_entity_t entity);
