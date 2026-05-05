@@ -26,6 +26,7 @@ typedef struct {
     nt_pipeline_t pipeline;
     uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
     const char *tex_names[NT_MATERIAL_MAX_TEXTURES];
+    nt_sampler_t resolved_sampler[NT_MATERIAL_MAX_TEXTURES]; /* per-binding override, .id==0 keeps texture default */
     uint8_t tex_count;
     uint32_t first_index; /* offset into s_sprite.indices[] */
     uint32_t index_count;
@@ -223,6 +224,7 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi) {
     for (uint8_t i = 0; i < mi->tex_count; i++) {
         c->resolved_tex[i] = mi->resolved_tex[i];
         c->tex_names[i] = mi->tex_names[i];
+        c->resolved_sampler[i] = mi->resolved_sampler[i];
     }
     c->first_index = s_sprite.index_count;
     c->index_count = 0;
@@ -454,6 +456,13 @@ void nt_sprite_renderer_flush(void) {
                     nt_gfx_set_uniform_int(c->tex_names[t], (int)t);
                 }
                 bound_tex_ids[t] = c->resolved_tex[t];
+            }
+            /* Material sampler override: bind_texture already attached the
+             * texture's asset-baked default sampler. If the material declared
+             * its own sampler for this slot, bind it now to override. .id==0
+             * means "keep texture default" — no extra GL call. */
+            if (c->resolved_sampler[t].id != 0) {
+                nt_gfx_bind_sampler(c->resolved_sampler[t], t);
             }
         }
 
