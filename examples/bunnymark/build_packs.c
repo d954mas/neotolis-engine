@@ -123,6 +123,66 @@ int main(int argc, char *argv[]) {
     (void)printf("Generated: %s\n", combined);
     // #endregion
 
+#ifdef BUNNYMARK_HD_AVAILABLE
+    // #region pack 2: bunnymark_hd.ntpack (Open Q3 — guarded by CMake)
+    /* HD pack uses pixels_per_unit=2.0F so 2 source pixels == 1 world unit; with
+     * the runtime cached_pos bake (ipu = 1/ppu), HD sprites at the same
+     * Transform render at the same on-screen size as the SD pack. The HD art
+     * is user-supplied — the user drops 5 PNGs (matching SD names) into
+     * examples/bunnymark/raw/hd/ and reruns cmake configure. The atlas region
+     * NAMES match the SD names ("bunnies/bunny_red.png" etc.) — Phase 48 merge
+     * keeps the same region indices stable on stack (DEMO-08). */
+    (void)printf("\n=== Build Bunnymark HD Pack -> %s ===\n\n", out_dir);
+
+    NtBuilderContext *ctx_hd = nt_builder_start_pack(pack_path(out_dir, "bunnymark_hd.ntpack"));
+    if (!ctx_hd) {
+        (void)fprintf(stderr, "Failed to start bunnymark_hd.ntpack\n");
+        return 1;
+    }
+
+    nt_builder_set_header_dir(ctx_hd, HEADER_DIR);
+    nt_builder_set_cache_dir(ctx_hd, cache_dir);
+    if (threads_env && threads_env[0] != '\0') {
+        uint32_t threads_hd = (uint32_t)strtoul(threads_env, NULL, 10);
+        if (threads_hd > 0) {
+            nt_builder_set_threads(ctx_hd, threads_hd);
+        } else {
+            nt_builder_set_threads_auto(ctx_hd);
+        }
+    } else {
+        nt_builder_set_threads_auto(ctx_hd);
+    }
+
+    /* HD pack carries no shaders — they're already in SD pack and stack via
+     * the resource registry by id (highest-priority winner serves both). */
+
+    nt_atlas_opts_t hd_opts = nt_atlas_opts_defaults();
+    hd_opts.shape = NT_ATLAS_SHAPE_RECT;
+    hd_opts.allow_transform = true;
+    hd_opts.pixels_per_unit = 2.0F; /* HD: 2 source pixels per unit (D-30) */
+    hd_opts.padding = 2;
+    hd_opts.margin = 2;
+    hd_opts.extrude = 2;
+
+    nt_builder_begin_atlas(ctx_hd, "bunnies", &hd_opts);
+    /* atlas_add_glob picks up whatever 5 PNGs the user dropped in raw/hd/.
+     * The user is expected to use the same 5 names (bunny_red.png …) so the
+     * region name_hashes match SD — Phase 48 merge keeps the region indices
+     * stable on stack (DEMO-08). atlas_add_glob requires opts->name == NULL
+     * (each matched file derives its own name from basename). */
+    nt_builder_atlas_add_glob(ctx_hd, "examples/bunnymark/raw/hd/*.png", NULL);
+    nt_builder_end_atlas(ctx_hd);
+    (void)printf("  Atlas 'bunnies' added: HD pack (RECT, ppu=2.0)\n");
+
+    nt_build_result_t r_hd = nt_builder_finish_pack(ctx_hd);
+    nt_builder_free_pack(ctx_hd);
+    if (r_hd != NT_BUILD_OK) {
+        (void)fprintf(stderr, "bunnymark_hd.ntpack failed: %d\n", r_hd);
+        return 1;
+    }
+    // #endregion
+#endif
+
     /* Print pack size summary */
     (void)printf("\n=== Pack Size Summary ===\n");
     FILE *f = fopen(pack_path(out_dir, "bunnymark_sd.ntpack"), "rb");
@@ -132,6 +192,15 @@ int main(int argc, char *argv[]) {
         (void)fclose(f);
         (void)printf("  bunnymark_sd.ntpack    %8.1f KB\n", (double)sz / 1024.0);
     }
+#ifdef BUNNYMARK_HD_AVAILABLE
+    FILE *f_hd = fopen(pack_path(out_dir, "bunnymark_hd.ntpack"), "rb");
+    if (f_hd) {
+        (void)fseek(f_hd, 0, SEEK_END);
+        long sz_hd = ftell(f_hd);
+        (void)fclose(f_hd);
+        (void)printf("  bunnymark_hd.ntpack    %8.1f KB\n", (double)sz_hd / 1024.0);
+    }
+#endif
 
     (void)printf("\n=== Done ===\n");
     return 0;
