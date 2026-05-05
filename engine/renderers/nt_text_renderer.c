@@ -42,6 +42,13 @@ static struct {
     uint32_t pipeline_material_version; /* version when pipeline was last created */
 
     bool initialized;
+
+#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+    /* Pitfall 9 (Issue 2) — count every set_material / set_font entry
+     * regardless of early-out so nt_stats tests can prove explicit calls. */
+    uint32_t test_set_material_calls;
+    uint32_t test_set_font_calls;
+#endif
 } s_text;
 
 static uint16_t s_quad_indices[NT_TEXT_RENDERER_MAX_INDICES];
@@ -185,6 +192,9 @@ void nt_text_renderer_restore_gpu(void) {
 // #region State setters
 void nt_text_renderer_set_material(nt_material_t mat) {
     NT_ASSERT(s_text.initialized);
+#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+    s_text.test_set_material_calls++;
+#endif
     if (s_text.material.id == mat.id) {
         return;
     }
@@ -201,6 +211,9 @@ void nt_text_renderer_set_material(nt_material_t mat) {
 
 void nt_text_renderer_set_font(nt_font_t font) {
     NT_ASSERT(s_text.initialized);
+#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+    s_text.test_set_font_calls++;
+#endif
     if (s_text.font.id == font.id) {
         return;
     }
@@ -396,5 +409,11 @@ uint32_t nt_text_renderer_test_vertex_count(void) { return s_text.vertex_count; 
 uint32_t nt_text_renderer_test_glyph_count(void) { return s_text.glyph_count; }
 const void *nt_text_renderer_test_vertices(void) { return s_text.vertices; }
 bool nt_text_renderer_test_initialized(void) { return s_text.initialized; }
+uint32_t nt_text_renderer_test_set_material_calls(void) { return s_text.test_set_material_calls; }
+uint32_t nt_text_renderer_test_set_font_calls(void) { return s_text.test_set_font_calls; }
+void nt_text_renderer_test_reset_call_counters(void) {
+    s_text.test_set_material_calls = 0;
+    s_text.test_set_font_calls = 0;
+}
 #endif
 // #endregion

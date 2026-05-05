@@ -205,3 +205,21 @@ void nt_stats_draw(nt_material_t material, nt_font_t font, const float model[16]
     nt_text_renderer_draw(buf, model, size, color);
 }
 // #endregion
+
+// #region Test access
+#ifdef NT_STATS_TEST_ACCESS
+void nt_stats_test_inject_frame(float dt_seconds) {
+    NT_ASSERT(s_stats.initialized);
+    s_stats.last_cpu_ms = dt_seconds * 1000.0F;
+    s_stats.last_draw_calls = nt_gfx_get_frame_draw_calls();
+
+    s_stats.fps_ring[s_stats.fps_head] = dt_seconds;
+    s_stats.fps_head = (uint16_t)((s_stats.fps_head + 1) % s_stats.fps_window);
+    if (s_stats.fps_count < s_stats.fps_window) {
+        s_stats.fps_count++;
+    }
+
+    s_stats.frame_index++;
+}
+#endif
+// #endregion
