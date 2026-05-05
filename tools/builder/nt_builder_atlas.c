@@ -1700,6 +1700,12 @@ static void pipeline_register(AtlasPipeline *p) {
         td->opts.max_size = 0;
         td->opts.compress = NULL;
         td->opts.premultiplied = p->opts->premultiplied; /* propagate to texture encoder (validated in begin_atlas) */
+        /* Propagate atlas-level sampler defaults to the page texture header so
+         * the activator creates the right sampler for this atlas page. */
+        td->opts.filter_min = p->opts->filter_min;
+        td->opts.filter_mag = p->opts->filter_mag;
+        td->opts.wrap_u = p->opts->wrap_u;
+        td->opts.wrap_v = p->opts->wrap_v;
         if (p->state->has_compress) {
             td->compress = p->state->compress;
             td->has_compress = true;

@@ -206,13 +206,13 @@ nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, u
     tex_hdr.mip_count = 1;
     tex_hdr.compression = (uint8_t)NT_TEXTURE_COMPRESSION_RAW;
     tex_hdr.flags = premul ? (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED : 0;
-    /* Sampler defaults: trilinear + REPEAT (matches the activator's prior
-     * hardcoded values). Atlas/material can override at higher levels via
-     * nt_atlas_opts_t.filter_* (B3) or material sampler binding (B5). */
-    tex_hdr.default_min_filter = (uint8_t)NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;
-    tex_hdr.default_mag_filter = (uint8_t)NT_TEXTURE_DEFAULT_FILTER_LINEAR;
-    tex_hdr.default_wrap_u = (uint8_t)NT_TEXTURE_DEFAULT_WRAP_REPEAT;
-    tex_hdr.default_wrap_v = (uint8_t)NT_TEXTURE_DEFAULT_WRAP_REPEAT;
+    /* Sampler defaults from opts (caller controls per-texture / per-atlas).
+     * Activator reads these to create the bound sampler. Materials override
+     * at draw time via per-binding sampler config (B5). */
+    tex_hdr.default_min_filter = (uint8_t)(opts ? opts->filter_min : NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR);
+    tex_hdr.default_mag_filter = (uint8_t)(opts ? opts->filter_mag : NT_TEXTURE_DEFAULT_FILTER_LINEAR);
+    tex_hdr.default_wrap_u = (uint8_t)(opts ? opts->wrap_u : NT_TEXTURE_DEFAULT_WRAP_REPEAT);
+    tex_hdr.default_wrap_v = (uint8_t)(opts ? opts->wrap_v : NT_TEXTURE_DEFAULT_WRAP_REPEAT);
     tex_hdr.data_size = data_size;
 
     uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeaderV2) + data_size;
@@ -280,10 +280,11 @@ nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgb
     tex_hdr.mip_count = (uint16_t)enc.mip_count;
     tex_hdr.compression = (uint8_t)NT_TEXTURE_COMPRESSION_BASIS;
     tex_hdr.flags = premul ? (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED : 0;
-    tex_hdr.default_min_filter = (uint8_t)NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;
-    tex_hdr.default_mag_filter = (uint8_t)NT_TEXTURE_DEFAULT_FILTER_LINEAR;
-    tex_hdr.default_wrap_u = (uint8_t)NT_TEXTURE_DEFAULT_WRAP_REPEAT;
-    tex_hdr.default_wrap_v = (uint8_t)NT_TEXTURE_DEFAULT_WRAP_REPEAT;
+    /* Sampler defaults from opts (BASIS path mirrors RAW). */
+    tex_hdr.default_min_filter = (uint8_t)(opts ? opts->filter_min : NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR);
+    tex_hdr.default_mag_filter = (uint8_t)(opts ? opts->filter_mag : NT_TEXTURE_DEFAULT_FILTER_LINEAR);
+    tex_hdr.default_wrap_u = (uint8_t)(opts ? opts->wrap_u : NT_TEXTURE_DEFAULT_WRAP_REPEAT);
+    tex_hdr.default_wrap_v = (uint8_t)(opts ? opts->wrap_v : NT_TEXTURE_DEFAULT_WRAP_REPEAT);
     tex_hdr.data_size = enc.size;
 
     uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeaderV2) + enc.size;

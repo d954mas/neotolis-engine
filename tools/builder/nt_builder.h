@@ -154,6 +154,15 @@ typedef struct {
                                              * Default false for compatibility. Set true for UI/sprite
                                              * textures rendered with bilinear filtering to avoid dark
                                              * fringes at alpha edges. Only meaningful for RGBA8. */
+    /* Default sampler state baked into the V3 NtTextureAssetHeader so the
+     * activator creates the right sampler. Materials may override per
+     * binding. Default values match the historical hardcoded activator
+     * config (LINEAR_MIPMAP_LINEAR + REPEAT). Set NEAREST/no-mips for
+     * pixel-art atlases or LINEAR (no mips) for sharp 2D illustrations. */
+    nt_texture_default_filter_t filter_min; /* default: LINEAR_MIPMAP_LINEAR */
+    nt_texture_default_filter_t filter_mag; /* default: LINEAR (NEAREST or LINEAR only) */
+    nt_texture_default_wrap_t wrap_u;       /* default: REPEAT */
+    nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
 } nt_tex_opts_t;
 
 /* --- Texture compression options (Basis Universal encoding) --- */
@@ -247,6 +256,15 @@ typedef struct {
                               * sharing the same Transform. Stored as a 4-byte resource metadata blob
                               * (kind = hash64_str("pixels_per_unit")) — atlas binary format v3 is
                               * unchanged (D-34). Must be positive and finite. */
+    /* Default sampler state baked into the atlas page texture's V3 header
+     * (NtTextureAssetHeader.default_*). The activator creates a sampler from
+     * these and binds it alongside the texture; materials may override per
+     * texture binding. Use NEAREST/no-mips for crisp pixel art atlases,
+     * LINEAR_MIPMAP_LINEAR for downscaled illustration atlases. */
+    nt_texture_default_filter_t filter_min; /* default: LINEAR_MIPMAP_LINEAR */
+    nt_texture_default_filter_t filter_mag; /* default: LINEAR (NEAREST or LINEAR only) */
+    nt_texture_default_wrap_t wrap_u;       /* default: REPEAT */
+    nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
 } nt_atlas_opts_t;
 
 /* Default atlas options (all D-11 values) */
@@ -266,6 +284,10 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .debug_png = false,
         .premultiplied = true,
         .pixels_per_unit = 1.0F, /* Phase 50 D-32: 1 source pixel == 1 world unit by default */
+        .filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR,
+        .filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR,
+        .wrap_u = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
+        .wrap_v = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
     };
 }
 
