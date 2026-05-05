@@ -100,6 +100,9 @@ int main(int argc, char *argv[]) {
     atlas_opts.padding = 2;
     atlas_opts.margin = 2;
     atlas_opts.extrude = 2; /* OK with RECT (extrude valid only for rect shape) */
+    atlas_opts.premultiplied = true;
+    nt_tex_compress_opts_t sd_compress_opts = nt_tex_compress_uastc_default();
+    atlas_opts.compress = &sd_compress_opts;
 
     nt_builder_begin_atlas(ctx, "bunnies", &atlas_opts);
 
