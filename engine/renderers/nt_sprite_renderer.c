@@ -287,6 +287,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
      * nt_gfx_get_frame_draw_calls, which is reset by nt_gfx_begin_frame). */
     s_sprite.frame_draw_calls = 0;
 
+    bool first_group = true;
     uint32_t run_start = 0;
     while (run_start < count) {
         uint32_t run_end = run_start + 1;
@@ -305,11 +306,17 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
             continue;
         }
 
+        /* D-18: flush at every batch_key boundary (one nt_gfx_draw_indexed per
+         * batch group). This is the contract — even when consecutive groups
+         * resolve to the same cached pipeline, the game has signalled they
+         * are not state-compatible by giving them different batch_keys. */
+        if (!first_group && s_sprite.vertex_count > 0) {
+            nt_sprite_renderer_flush();
+        }
+        first_group = false;
+
         nt_pipeline_t pip = find_or_create_pipeline(mat_info);
         if (s_sprite.current_pipeline.id != pip.id) {
-            if (s_sprite.vertex_count > 0) {
-                nt_sprite_renderer_flush();
-            }
             nt_gfx_bind_pipeline(pip);
             s_sprite.current_pipeline = pip;
 
