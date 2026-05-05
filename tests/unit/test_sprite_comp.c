@@ -459,7 +459,74 @@ void test_sprite_sync_preserves_override_on_atlas_republish(void) {
     TEST_ASSERT_TRUE(origin[1] == 0.9F); /* NOLINT */
 }
 
-/* ---- Test 12: set_flip sets bits correctly and isolates from other flags ---- */
+/* Build a single-region atlas blob containing only R0 — used to test tombstone-on-merge. */
+static uint32_t build_fixture_atlas_blob_r0_only(uint8_t *atlas_blob, uint32_t cap) {
+    NtAtlasVertex verts[4];
+    uint16_t indices[6];
+    for (uint16_t i = 0; i < 4; i++) {
+        verts[i].local_x = (int16_t)(i * 10);
+        verts[i].local_y = (int16_t)(i * 20);
+        verts[i].atlas_u = (uint16_t)(i * 1000);
+        verts[i].atlas_v = (uint16_t)(i * 2000);
+    }
+    for (uint16_t i = 0; i < 6; i++) {
+        indices[i] = (uint16_t)(i % 4);
+    }
+
+    NtAtlasRegion regions[1];
+    memset(regions, 0, sizeof(regions));
+    regions[0].name_hash = FIXTURE_R0_HASH;
+    regions[0].source_w = 64;
+    regions[0].source_h = 64;
+    regions[0].origin_x = 0.5F;
+    regions[0].origin_y = 0.5F;
+    regions[0].vertex_count = 4;
+    regions[0].index_count = 6;
+
+    mock_atlas_spec_t spec = {
+        .regions = regions,
+        .region_count = 1,
+        .vertices = verts,
+        .total_vertex_count = 4,
+        .indices = indices,
+        .total_index_count = 6,
+        .page_ids = NULL,
+        .page_count = 0,
+    };
+    return build_mock_atlas_blob(atlas_blob, cap, &spec);
+}
+
+/* ---- Test 12: republish that tombstones a bound region clears RESOLVED and origin ---- */
+
+void test_sprite_sync_clears_resolved_when_region_tombstoned(void) {
+    setup_atlas_fixture(true);
+
+    nt_entity_t e = nt_entity_create();
+    nt_sprite_comp_add(e);
+    nt_sprite_comp_bind_by_hash(e, s_atlas_res, FIXTURE_R1_HASH);
+    nt_sprite_comp_sync_resources();
+    TEST_ASSERT_TRUE(nt_sprite_comp_is_resolved(e));
+
+    uint8_t atlas_blob[1024];
+    uint32_t atlas_blob_size = build_fixture_atlas_blob_r0_only(atlas_blob, sizeof(atlas_blob));
+    uint8_t *pack_blob = build_pack_blob_for_atlas(0x1234567890ABCDEFULL, atlas_blob, atlas_blob_size);
+
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount((nt_hash32_t){.value = 0xBEEF}, 10));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack((nt_hash32_t){.value = 0xBEEF}, pack_blob, ((NtPackHeader *)pack_blob)->total_size));
+
+    nt_resource_step();
+    nt_sprite_comp_sync_resources();
+
+    TEST_ASSERT_FALSE(nt_sprite_comp_is_resolved(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_RESOLVED, 0, *nt_sprite_comp_flags(e));
+    TEST_ASSERT_EQUAL_UINT64(FIXTURE_R1_HASH, *nt_sprite_comp_region_hash(e)); /* identity preserved */
+
+    const float *origin_after = nt_sprite_comp_origin(e);
+    TEST_ASSERT_TRUE(origin_after[0] == 0.0F); /* NOLINT */
+    TEST_ASSERT_TRUE(origin_after[1] == 0.0F); /* NOLINT */
+}
+
+/* ---- Test 13: set_flip sets bits correctly and isolates from other flags ---- */
 
 void test_sprite_set_flip_bit_isolation(void) {
     nt_entity_t e = nt_entity_create();
@@ -478,6 +545,46 @@ void test_sprite_set_flip_bit_isolation(void) {
 
     nt_sprite_comp_set_flip(e, false, false);
     TEST_ASSERT_BITS(NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y, 0, *nt_sprite_comp_flags(e));
+}
+
+/* ---- Test: bulk view exposes dense SoA arrays consistent with per-entity reads ---- */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_sprite_view_matches_per_entity_reads(void) {
+    setup_atlas_fixture(true);
+
+    nt_entity_t e0 = nt_entity_create();
+    nt_entity_t e1 = nt_entity_create();
+    nt_sprite_comp_add(e0);
+    nt_sprite_comp_add(e1);
+    nt_sprite_comp_bind_by_hash(e0, s_atlas_res, FIXTURE_R0_HASH);
+    nt_sprite_comp_bind_by_hash(e1, s_atlas_res, FIXTURE_R1_HASH);
+    nt_sprite_comp_set_flip(e1, true, false);
+    nt_sprite_comp_sync_resources();
+
+    nt_sprite_comp_view_t v = nt_sprite_comp_view();
+    TEST_ASSERT_EQUAL_UINT16(2, v.count);
+    TEST_ASSERT_NOT_NULL(v.atlas);
+    TEST_ASSERT_NOT_NULL(v.region_hash);
+    TEST_ASSERT_NOT_NULL(v.region_index);
+    TEST_ASSERT_NOT_NULL(v.origin);
+    TEST_ASSERT_NOT_NULL(v.flags);
+
+    /* Check that each per-entity accessor matches the corresponding view slot. */
+    for (uint16_t i = 0; i < v.count; i++) {
+        bool found_e0 = (v.region_hash[i] == FIXTURE_R0_HASH);
+        bool found_e1 = (v.region_hash[i] == FIXTURE_R1_HASH);
+        TEST_ASSERT_TRUE(found_e0 || found_e1);
+
+        nt_entity_t e = found_e0 ? e0 : e1;
+        TEST_ASSERT_EQUAL_UINT32(nt_sprite_comp_atlas(e)->id, v.atlas[i].id);
+        TEST_ASSERT_EQUAL_UINT16(*nt_sprite_comp_region_index(e), v.region_index[i]);
+        TEST_ASSERT_EQUAL_UINT8(*nt_sprite_comp_flags(e), v.flags[i]);
+
+        const float *o = nt_sprite_comp_origin(e);
+        TEST_ASSERT_TRUE(o[0] == v.origin[i][0]); /* NOLINT */
+        TEST_ASSERT_TRUE(o[1] == v.origin[i][1]); /* NOLINT */
+    }
 }
 
 /* ---- Test 13: entity destroy auto-removes sprite ---- */
@@ -505,7 +612,9 @@ int main(void) {
     RUN_TEST(test_sprite_swap_and_pop_preserves_state);
     RUN_TEST(test_sprite_sync_refreshes_authored_origin_on_atlas_republish);
     RUN_TEST(test_sprite_sync_preserves_override_on_atlas_republish);
+    RUN_TEST(test_sprite_sync_clears_resolved_when_region_tombstoned);
     RUN_TEST(test_sprite_set_flip_bit_isolation);
+    RUN_TEST(test_sprite_view_matches_per_entity_reads);
     RUN_TEST(test_entity_destroy_removes_sprite);
     return UNITY_END();
 }

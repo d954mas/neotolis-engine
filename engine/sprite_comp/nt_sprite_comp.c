@@ -126,6 +126,10 @@ nt_result_t nt_sprite_comp_init(const nt_sprite_comp_desc_t *desc) {
         return NT_ERR_INIT_FAILED;
     }
 
+    /* Register last. No nt_entity_unregister_storage exists, so if this ran before
+     * the SoA allocations and any of them failed, shutdown could not un-publish the
+     * callbacks — they would dangle with freed state. Keep register after the final
+     * allocation success check. */
     nt_entity_register_storage(&(nt_comp_storage_reg_t){
         .name = "sprite",
         .has = nt_sprite_comp_has,
@@ -283,4 +287,17 @@ const uint8_t *nt_sprite_comp_flags(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return &s_flags[idx];
+}
+
+/* ---- Bulk SoA view ---- */
+
+nt_sprite_comp_view_t nt_sprite_comp_view(void) {
+    return (nt_sprite_comp_view_t){
+        .count = nt_comp_storage_count(&s_storage),
+        .atlas = s_atlas,
+        .region_hash = s_region_hash,
+        .region_index = s_region_index,
+        .origin = (const float(*)[2])s_origin,
+        .flags = s_flags,
+    };
 }

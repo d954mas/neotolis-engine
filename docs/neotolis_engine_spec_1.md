@@ -321,27 +321,51 @@ Lifetime = single frame.
 
 Examples: render item arrays, temporary sort arrays, transient CPU batch buffers, build temp lists in render pass.
 
-## 5.3 Compile-time limits
+## 5.3 Capacity policy
+
+Capacities split into two tiers.
+
+**Compile-time hard caps.** Sized at build time. Used where a single global
+sparse table or fixed pool needs a known upper bound. Cannot be overridden
+without recompiling the engine.
 
 ```c
-#define MAX_ENTITIES            65536
-#define MAX_TRANSFORMS          8192
-#define MAX_RENDER_STATE        8192
-#define MAX_MESH_COMPONENTS     8192
-#define MAX_MATERIAL_COMPONENTS 8192
-#define MAX_SPRITE_COMPONENTS   8192
-#define MAX_TEXT_COMPONENTS     2048
-#define MAX_SHADOW_COMPONENTS   4096
-
-#define MAX_ASSETS              2048
-#define MAX_SLOTS               2048
-#define MAX_PACKS               16
-#define MAX_RENDER_ITEMS        16384
-#define MAX_POINTERS            8
-
-#define MAX_AUDIO_CLIPS         256
-#define MAX_AUDIO_VOICES        32
+#define NT_MAX_ENTITIES         65536  /* sparse side, generation tables */
+#define NT_MAX_PACKS            16
+#define NT_MAX_SLOTS            2048
+#define NT_MAX_ASSETS           2048
+#define NT_MAX_RENDER_ITEMS     16384
+#define NT_MAX_AUDIO_CLIPS      256
+#define NT_MAX_AUDIO_VOICES     32
+#define NT_MAX_POINTERS         8
 ```
+
+**Init-time component capacities.** Each component module exposes a
+descriptor and a defaults helper. The game picks the size at init based
+on its scene density. Allocation happens once in init (`calloc`), never
+grows after — the "preallocated, no heap in hot path" rule from §5.1
+still holds.
+
+```c
+nt_sprite_comp_init(&(nt_sprite_comp_desc_t){ .capacity = 4096 });
+/* or use defaults: */
+nt_sprite_comp_init(&nt_sprite_comp_desc_defaults());
+```
+
+Suggested baseline defaults (override per game):
+
+| Component       | Default | Notes                          |
+|-----------------|---------|--------------------------------|
+| transform_comp  | 256     | Adjust for scene density       |
+| drawable_comp   | 256     |                                |
+| mesh_comp       | 256     |                                |
+| material_comp   | 256     |                                |
+| sprite_comp     | 256     |                                |
+| text_comp       | 64      |                                |
+| shadow_comp     | 256     |                                |
+
+Component capacity must not exceed `NT_MAX_ENTITIES` — the sparse side is
+sized off the entity table, not the component capacity.
 
 ## 5.4 Runtime settings
 
@@ -569,8 +593,29 @@ typedef struct SpriteAssetRef
 ```
 
 Runtime may cache resolved region index, snapshot revision, and effective origin
-next to the component for fast rendering, but those are implementation details —
-the stable identity is `atlas + region_hash`.
+next to the component for fast rendering. Their *layout* is an implementation
+detail (SoA fields, internal flags, etc.) — the stable identity is
+`atlas + region_hash`.
+
+Two binding modes, picked by what the game knows:
+
+- **By hash (slow path, async-friendly).** Game knows `region_hash` only.
+  The atlas may not be ready yet. Sync resolves the hash to a region index
+  on the next `sprite_comp_sync_resources()` once the atlas is published.
+  Cost: one hash-table lookup per sprite per resolve.
+- **By index (fast path, requires ready atlas).** Game already knows the
+  numeric region index — typically because it cycled an animation frame,
+  or read it back from a previously resolved sprite. Skips the hash lookup
+  entirely. The atlas merge contract guarantees that surviving regions keep
+  the same index across republish, so cached indices are stable as long as
+  the underlying region is not tombstoned.
+
+Game code is free to read back the cached region index for animation logic
+(e.g. cycle to the next frame). It is stable across atlas republish for
+surviving regions; the only failure mode — tombstoning — is observable via
+`is_resolved()`. The game must not, however, depend on the *internal layout*
+of the cache: always go through the public accessor, never poke SoA arrays
+directly.
 
 Resolution is explicit, not renderer-driven magic:
 

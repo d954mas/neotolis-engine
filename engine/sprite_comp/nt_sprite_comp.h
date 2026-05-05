@@ -67,7 +67,33 @@ const uint64_t *nt_sprite_comp_region_hash(nt_entity_t entity);
  * callers MUST gate reads on is_resolved(). The stored value is not a sentinel;
  * 0 is a valid region index for a resolved sprite. */
 const uint16_t *nt_sprite_comp_region_index(nt_entity_t entity);
-const float *nt_sprite_comp_origin(nt_entity_t entity); /* float[2], effective origin */
+/* Effective origin (float[2]). Invariant: when ORIGIN_OV is set, returns the
+ * value stored by set_origin(). Otherwise origin reflects the resolved region's
+ * authored origin, or (0, 0) when not resolved. The renderer should only read
+ * origin for resolved sprites; non-resolved (0, 0) is a safety default, not a
+ * meaningful position. */
+const float *nt_sprite_comp_origin(nt_entity_t entity);
 const uint8_t *nt_sprite_comp_flags(nt_entity_t entity);
+
+/* ---- Bulk SoA view for systems iterating dense data (renderer, debug, etc.) ----
+ *
+ * Returns base pointers into the dense SoA arrays plus the live count. All
+ * arrays are indexed by the same dense_idx in [0, count). Pointers are stable
+ * for the lifetime of the module (allocated once at init), but values shift
+ * under add/remove (swap-and-pop) — do not cache the view across mutations.
+ *
+ * Reading region_index / origin requires checking flags[i] & RESOLVED, same
+ * contract as the per-entity accessors. */
+
+typedef struct {
+    uint16_t count;
+    const nt_resource_t *atlas;
+    const uint64_t *region_hash;
+    const uint16_t *region_index;
+    const float (*origin)[2];
+    const uint8_t *flags;
+} nt_sprite_comp_view_t;
+
+nt_sprite_comp_view_t nt_sprite_comp_view(void);
 
 #endif /* NT_SPRITE_COMP_H */
