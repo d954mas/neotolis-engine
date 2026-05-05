@@ -37,6 +37,13 @@ typedef struct {
     uint8_t mip_count; /* 1 = base only, >1 = has mip chain */
     bool compressed;   /* true for Basis/GPU-compressed textures */
     uint8_t _pad;
+    /* Default sampler from the texture asset header (V3+). bind_texture
+     * binds this sampler alongside the texture so the GPU samples with
+     * the asset's intended filter unless a material overrides via
+     * bind_sampler. id == 0 → no default, fall through to legacy texture
+     * state (only relevant for textures created via nt_gfx_make_texture
+     * directly, not via the activator). */
+    nt_sampler_t default_sampler;
 } nt_gfx_texture_meta_t;
 
 /* ---- Global state ---- */
@@ -583,6 +590,13 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
     }
     uint32_t idx = nt_pool_slot_index(tex.id);
     nt_gfx_backend_bind_texture(s_gfx.texture_backends[idx], slot);
+    /* Bind the texture's default sampler too. Materials override later by
+     * calling nt_gfx_bind_sampler with their own handle on the same slot
+     * (B5/B6); materials with no override re-bind this same default. */
+    nt_sampler_t s = s_gfx.texture_metas[idx].default_sampler;
+    if (s.id != 0) {
+        nt_gfx_bind_sampler(s, slot);
+    }
 }
 
 /* ---- Sampler (deduplicated cache) ---- */
@@ -886,6 +900,22 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 
 /* ---- Asset activators ---- */
 
+/* Build a default sampler from the V3 texture header's filter/wrap fields and
+ * record it in texture_metas[slot] so bind_texture can bind it alongside the
+ * texture. Materials may still override at draw time via bind_sampler. */
+static void texture_attach_default_sampler(uint32_t tex_id, const NtTextureAssetHeaderV2 *hdr) {
+    nt_sampler_desc_t sd = {
+        .min_filter = (nt_texture_filter_t)hdr->default_min_filter,
+        .mag_filter = (nt_texture_filter_t)hdr->default_mag_filter,
+        .wrap_u = (nt_texture_wrap_t)hdr->default_wrap_u,
+        .wrap_v = (nt_texture_wrap_t)hdr->default_wrap_v,
+        .label = NULL,
+    };
+    nt_sampler_t s = nt_gfx_make_sampler(&sd);
+    uint32_t slot = nt_pool_slot_index(tex_id);
+    s_gfx.texture_metas[slot].default_sampler = s;
+}
+
 /* Activate a v2 texture (RAW or Basis Universal compressed) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
@@ -936,12 +966,15 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
         }
         NT_ASSERT(hdr2->width <= UINT16_MAX && hdr2->height <= UINT16_MAX && "activate_texture: dimensions exceed uint16");
         const uint8_t *pixels = data + sizeof(NtTextureAssetHeaderV2);
+        /* Texture-side filter is now redundant with the default sampler we
+         * attach below; pick LINEAR_MIPMAP_LINEAR + REPEAT here as a safe
+         * fallback if no sampler ever gets bound (e.g. via legacy code path). */
         nt_texture_desc_t desc = {
             .width = (uint16_t)hdr2->width,
             .height = (uint16_t)hdr2->height,
             .data = pixels,
             .format = pixel_fmt,
-            .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
+            .min_filter = (hdr2->mip_count > 1) ? NT_FILTER_LINEAR_MIPMAP_LINEAR : NT_FILTER_LINEAR,
             .mag_filter = NT_FILTER_LINEAR,
             .wrap_u = NT_WRAP_REPEAT,
             .wrap_v = NT_WRAP_REPEAT,
@@ -949,6 +982,9 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
             .label = NULL,
         };
         nt_texture_t tex = nt_gfx_make_texture(&desc);
+        if (tex.id != 0) {
+            texture_attach_default_sampler(tex.id, hdr2);
+        }
         return tex.id;
     }
 
@@ -1018,6 +1054,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     s_gfx.texture_metas[slot].height = (uint16_t)hdr2->height;
     s_gfx.texture_metas[slot].mip_count = (uint8_t)(levels > 255 ? 255 : levels);
     s_gfx.texture_metas[slot].compressed = true;
+    texture_attach_default_sampler(id, hdr2);
     return id;
 #endif /* NT_HAS_BASISU */
 }
