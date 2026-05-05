@@ -1,5 +1,5 @@
 # Size Report: textured_quad (wasm-analysis-paired)
-# Commit: 3fa00e7
+# Commit: 59e8064
 
 ## WASM Section Sizes
 
@@ -7,17 +7,17 @@ Section                Size
 ---------------- ----------
 Type                 531 B
 Import               535 B
-Function             347 B
+Function             348 B
 Table                  5 B
 Memory                 7 B
 Global                 8 B
 Export                88 B
 Elem                 158 B
-Code              510225 B
+Code              510430 B
 Data              232764 B
-Custom             36155 B
+Custom             36164 B
 ---------------- ----------
-TOTAL             780823 B
+TOTAL             781038 B
 
 ## Top 30 Functions by Size
 
@@ -27,7 +27,7 @@ TOTAL             780823 B
 30775 B   nt_gfx_activate_texture
 28820 B   basist::basisu_lowlevel_uastc_ldr_4x4_transcoder::transcode_slice(void*, unsigned int, unsigned int, unsigned char const*, unsigned int, basist::block_format, unsigned int, bool, bool, unsigned int, unsigned int, unsigned int, basist::basisu_transcoder_state*, unsigned int, int, int, unsigned int)
 21621 B   basist::astc_ldr_t::xuastc_ldr_decompress_image(unsigned char const*, unsigned long, unsigned int&, unsigned int&, unsigned int&, unsigned int&, bool&, bool&, bool, bool (*)(unsigned int, unsigned int, unsigned int, unsigned int, bool, float, bool, void*), void*, bool (*)(unsigned int, unsigned int, astc_helpers::log_astc_block const&, void*), void*)
-21363 B   frame
+21480 B   frame
 18194 B   nt_basisu_transcode_level
 15319 B   basist::bc7f::pack_mode0_or_2_rgb(unsigned char*, basist::color_rgba const*, float, float, float, int, int, int, float, unsigned int, float*, unsigned int*)
 11625 B   basist::astc_hdr_transcode_to_bc6h(astc_helpers::log_astc_block const&, basist::bc6h_block&)
@@ -46,7 +46,7 @@ TOTAL             780823 B
  6729 B   basist::bc7f::fast_pack_bc7_rgba_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
  5989 B   basist::encode_bc1(void*, unsigned char const*, unsigned int)
  5618 B   basist::bc7f::fast_pack_bc7_rgb_partial_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
- 5454 B   main
+ 5490 B   main
  5137 B   basist::transcode_uastc_to_etc1(basist::unpacked_uastc_block&, basist::color32 (*) [4], void*)
  5064 B   basist::bc7f::fast_pack_bc7_rgb_analytical(unsigned char*, basist::color_rgba const*, unsigned int)
  4868 B   basist::unpack_uastc(basist::uastc_block const&, basist::unpacked_uastc_block&, bool, bool)
@@ -54,8 +54,8 @@ TOTAL             780823 B
  4198 B   basist::etc1f::pack_etc1_grayscale(unsigned char*, unsigned char const*, basist::etc1f::pack_etc1_state&)
  3977 B   astc_helpers::decode_block_xuastc_ldr(astc_helpers::log_astc_block const&, void*, unsigned int, unsigned int, astc_helpers::decode_mode, unsigned char const*, unsigned int, unsigned int, unsigned int, unsigned int)
 
-Total functions: 345
-Total code size: 509627 B
+Total functions: 346
+Total code size: 509830 B
 
 ## Per-Module Contributions
 
@@ -65,8 +65,8 @@ Module                         Size
 ------------------------ ----------
 libnt_app.a                 1430 B
 libnt_core.a                2178 B
-libnt_drawable_comp.a       2668 B
-libnt_entity.a              2996 B
+libnt_drawable_comp.a       2670 B
+libnt_entity.a              3076 B
 libnt_fs.a                  2620 B
 libnt_gfx.a                40492 B
 libnt_hash.a                4028 B
@@ -75,22 +75,22 @@ libnt_http_stub.a           3210 B
 libnt_input.a              16446 B
 libnt_log.a                 1424 B
 libnt_material.a            4312 B
-libnt_material_comp.a       1990 B
-libnt_mesh_comp.a           1914 B
+libnt_material_comp.a       1992 B
+libnt_mesh_comp.a           1916 B
 libnt_mesh_renderer.a       7900 B
 libnt_render.a              5910 B
-libnt_resource.a          186392 B
+libnt_resource.a          186766 B
 libnt_time.a                 868 B
-libnt_transform_comp.a      4536 B
+libnt_transform_comp.a      4538 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)            301964 B
+TOTAL (linked)            302426 B
 
 Not linked to textured_quad:
 libnt_app_stub.a            1428 B
-libnt_atlas.a               4918 B
+libnt_atlas.a               5230 B
 libnt_basisu_transcoder.a 1329370 B
-libnt_comp_storage.a        1802 B
+libnt_comp_storage.a        1868 B
 libnt_font.a              194546 B
 libnt_fs_stub.a             2620 B
 libnt_gfx_stub.a           22732 B
@@ -99,6 +99,7 @@ libnt_log_stub.a             484 B
 libnt_pool.a                1278 B
 libnt_shape_renderer.a   1140902 B
 libnt_sort.a                 366 B
+libnt_sprite_comp.a         6536 B
 libnt_text_renderer.a    1170014 B
 libnt_utf8.a                1000 B
 libnt_window_stub.a         1838 B
