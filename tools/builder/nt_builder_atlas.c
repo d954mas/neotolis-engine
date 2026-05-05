@@ -1655,6 +1655,27 @@ static void pipeline_serialize(AtlasPipeline *p) {
     uint64_t blob_hash = nt_hash64(blob, blob_size).value;
     nt_builder_add_entry(p->ctx, p->state->name, NT_BUILD_ASSET_ATLAS, NULL, blob, blob_size, blob_hash);
 
+    // #region pixels_per_unit metadata
+    /* Phase 50-02 (D-32): write pixels_per_unit as a 4-byte resource metadata
+     * blob keyed by hash64_str("pixels_per_unit"). Atlas binary format v3 is
+     * unchanged (D-34) — runtime reads this via nt_atlas_get_pixels_per_unit
+     * (Plan 01 Task 3) and bakes 1/ppu into cached_pos so HD packs render at
+     * the same on-screen size as SD packs sharing the same Transform.
+     *
+     * Written unconditionally (even when value == 1.0F) — uniform code path,
+     * 4 bytes are negligible, and keeps the round-trip tests symmetric. The
+     * resource_id must mirror nt_builder_add_entry's hashing exactly: the
+     * normalized atlas state name. */
+    NT_BUILD_ASSERT(p->opts->pixels_per_unit > 0.0F && isfinite(p->opts->pixels_per_unit));
+    char *atlas_norm_path = nt_builder_normalize_path(p->state->name);
+    NT_BUILD_ASSERT(atlas_norm_path);
+    const uint64_t atlas_resource_id = nt_hash64_str(atlas_norm_path).value;
+    free(atlas_norm_path);
+    const uint64_t kind_ppu = nt_hash64_str("pixels_per_unit").value;
+    const float ppu = p->opts->pixels_per_unit;
+    nt_builder_add_meta(p->ctx, atlas_resource_id, kind_ppu, &ppu, sizeof(float));
+    // #endregion
+
     free(placement_lookup);
 }
 

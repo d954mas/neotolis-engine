@@ -240,6 +240,13 @@ typedef struct {
                               * Only meaningful for NT_TEXTURE_FORMAT_RGBA8.
                               * Setting false is supported but emits a warning — valid only for
                               * NEAREST-filtered or fully opaque atlases. */
+    float pixels_per_unit;   /* Atlas-level scale: source pixels per world unit (Phase 50 D-32, D-33).
+                              * 1.0F = 1 source pixel per unit (default). Combined with the runtime
+                              * cached_pos bake (ipu = 1 / pixels_per_unit), an HD pack with 3× source
+                              * pixels renders at the same on-screen size as the matching SD pack
+                              * sharing the same Transform. Stored as a 4-byte resource metadata blob
+                              * (kind = hash64_str("pixels_per_unit")) — atlas binary format v3 is
+                              * unchanged (D-34). Must be positive and finite. */
 } nt_atlas_opts_t;
 
 /* Default atlas options (all D-11 values) */
@@ -258,6 +265,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .power_of_two = true,
         .debug_png = false,
         .premultiplied = true,
+        .pixels_per_unit = 1.0F, /* Phase 50 D-32: 1 source pixel == 1 world unit by default */
     };
 }
 
