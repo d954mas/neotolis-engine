@@ -246,17 +246,19 @@ static void emit_one(const nt_render_item_t *item) {
     nt_entity_t e = {.id = item->entity};
 
     /* Resolve atlas + region — sprite_comp guarantees atlas/region_index for
-     * resolved sprites. Tombstone (vertex_count==0) → zero-draw early-out. */
+     * resolved sprites. Single combined accessor: one user_data lookup +
+     * one bounds check, returns all four pointers. Tombstone
+     * (vertex_count==0) → zero-draw early-out. */
     nt_resource_t atlas = *nt_sprite_comp_atlas(e);
     uint16_t ridx = *nt_sprite_comp_region_index(e);
-    const nt_texture_region_t *r = nt_atlas_get_region(atlas, ridx);
-    if (r == NULL || r->vertex_count == 0) {
+    nt_atlas_region_view_t view = nt_atlas_get_region_view(atlas, ridx);
+    if (view.region == NULL || view.region->vertex_count == 0) {
         return;
     }
-
-    const float(*cpos)[2] = nt_atlas_get_region_cached_pos(atlas, ridx);
-    const float(*cuv)[2] = nt_atlas_get_region_cached_uv(atlas, ridx);
-    const uint16_t *idx = nt_atlas_get_region_indices(atlas, ridx);
+    const nt_texture_region_t *r = view.region;
+    const float(*cpos)[2] = view.cached_pos;
+    const float(*cuv)[2] = view.cached_uv;
+    const uint16_t *idx = view.indices;
     NT_ASSERT(cpos != NULL && cuv != NULL && idx != NULL);
 
     /* Capacity guard — if this sprite would overflow staging, snapshot the

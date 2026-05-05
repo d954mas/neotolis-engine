@@ -108,6 +108,24 @@ const float (*nt_atlas_get_region_cached_uv(nt_resource_t atlas, uint32_t region
  * Used by nt_sprite_renderer (Plan 04) for index emit. */
 const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region_index);
 
+/* Combined hot-path accessor: returns region metadata + cached vertex/UV
+ * arrays + index slice in one call. Equivalent to four separate get_region /
+ * cached_pos / cached_uv / indices calls but does the atlas user_data lookup
+ * once. Hot in nt_sprite_renderer where 60k+ sprites/frame each need all
+ * four pointers (~3-5 ms saved on 60k vs. four separate accessors).
+ *
+ * Out-of-range region_index trips NT_ASSERT. If the atlas isn't resolved,
+ * region is NULL and the array pointers are NULL too — caller should
+ * branch on .region or .region->vertex_count == 0 (tombstone). */
+typedef struct {
+    const nt_texture_region_t *region;
+    const float (*cached_pos)[2];
+    const float (*cached_uv)[2];
+    const uint16_t *indices;
+} nt_atlas_region_view_t;
+
+nt_atlas_region_view_t nt_atlas_get_region_view(nt_resource_t atlas, uint32_t region_index);
+
 /* ---- Test access (compiled only when NT_ATLAS_TEST_ACCESS is defined) ---- */
 
 #ifdef NT_ATLAS_TEST_ACCESS
