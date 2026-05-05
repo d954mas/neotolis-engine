@@ -4,7 +4,7 @@
  *
  * Constants under test (Defold britzl baseline, scaled to per-second):
  *   BUNNY_GRAVITY       30.0    (0.5 px/frame × 60Hz)
- *   BUNNY_VX_MAX       600.0
+ *   BUNNY_VX_MAX       300.0    (5 px/frame × 60Hz)
  *   BUNNY_VY_RANGE     300.0
  *   BUNNY_BOUNCE_BOT    -0.85   (dimensionless, bounce coefficient)
  *   BUNNY_BOUNCE_KICK  360.0    (instant velocity boost on bottom bounce)
@@ -28,13 +28,13 @@ static bool float_near(float a, float b, float epsilon) { return fabsf(a - b) <=
 void setUp(void) {}
 void tearDown(void) {}
 
-/* 1. nt_bunny_init produces vx in [0, 600) and vy in [-300, +300) over many trials. */
+/* 1. nt_bunny_init produces vx in [0, 300) and vy in [-300, +300) over many trials. */
 void test_bunny_init_velocity_ranges(void) {
     nt_bunny_rng_t rng = {.state = 12345ULL};
     for (int i = 0; i < 1000; i++) {
         nt_bunny_t b;
         nt_bunny_init(&b, 0.0F, 0.0F, &rng);
-        TEST_ASSERT_TRUE_MESSAGE(b.vx >= 0.0F && b.vx < BUNNY_VX_MAX, "vx out of [0, 600)");
+        TEST_ASSERT_TRUE_MESSAGE(b.vx >= 0.0F && b.vx < BUNNY_VX_MAX, "vx out of [0, 300)");
         TEST_ASSERT_TRUE_MESSAGE(b.vy >= -BUNNY_VY_RANGE && b.vy < BUNNY_VY_RANGE, "vy out of [-300, +300)");
         TEST_ASSERT_TRUE_MESSAGE(b.variant < 5U, "variant must be 0..4");
     }

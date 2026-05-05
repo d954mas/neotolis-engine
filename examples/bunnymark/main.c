@@ -472,6 +472,12 @@ int main(void) {
     nt_stats_desc_t stats_desc = nt_stats_desc_defaults();
     nt_stats_init(&stats_desc);
 
+    /* Frame rate cap: lock to 60 FPS to match britzl/defold-bunnymark visual
+     * pacing. Native engine loop is otherwise uncapped (target_dt=0). dt-scaled
+     * physics already produces the same trajectories at any FPS, but capping
+     * gives predictable benchmark numbers and a recognizable Defold feel. */
+    g_nt_app.target_dt = 1.0F / 60.0F;
+
     /* Frame UBO */
     s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_UNIFORM,

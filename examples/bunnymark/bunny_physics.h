@@ -7,9 +7,9 @@
  *
  *   britzl per-frame value × 60Hz → our per-second constant
  *   GRAVITY     0.5  px/frame  →   30.0 px/s²
- *   VX_MAX     10.0  px/frame  →  600.0 px/s
+ *   VX_MAX      5.0  px/frame  →  300.0 px/s   (britzl uses half PixiJS range)
  *   VY_RANGE    5.0  px/frame  →  300.0 px/s
- *   BOUNCE_KICK 6.0  px/frame  →  360.0 px/s (instant velocity boost on bounce)
+ *   BOUNCE_KICK 6.0  px/frame  →  360.0 px/s   (instant velocity boost on bounce)
  *
  * Coordinate convention is y-up, bottom-left origin (D-25): gravity DECREMENTS vy,
  * bottom edge is y < 0, top edge is y > h. */
@@ -17,7 +17,7 @@
 #include <stdint.h>
 
 #define BUNNY_GRAVITY 30.0F      /* px/s² downward (britzl 0.5 px/frame × 60Hz) */
-#define BUNNY_VX_MAX 600.0F      /* vx0 in [0, 600) px/s */
+#define BUNNY_VX_MAX 300.0F      /* vx0 in [0, 300) px/s (britzl 5 px/frame × 60Hz) */
 #define BUNNY_VY_RANGE 300.0F    /* vy0 in [-300, +300) px/s */
 #define BUNNY_BOUNCE_BOT -0.85F  /* dimensionless bottom bounce coefficient */
 #define BUNNY_BOUNCE_KICK 360.0F /* extra random upward kick on bottom hit (px/s, 50% chance) */
