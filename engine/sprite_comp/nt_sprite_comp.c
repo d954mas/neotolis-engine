@@ -1,7 +1,6 @@
 #include "sprite_comp/nt_sprite_comp.h"
 
 #include <stdlib.h>
-#include <string.h>
 
 #include "atlas/nt_atlas.h"
 #include "comp_storage/nt_comp_storage.h"
@@ -91,7 +90,8 @@ static void sprite_swap(uint16_t dst, uint16_t src) {
     s_region_hash[dst] = s_region_hash[src];
     s_region_index[dst] = s_region_index[src];
     s_atlas_revision[dst] = s_atlas_revision[src];
-    memcpy(s_origin[dst], s_origin[src], sizeof(float) * 2);
+    s_origin[dst][0] = s_origin[src][0];
+    s_origin[dst][1] = s_origin[src][1];
     s_flags[dst] = s_flags[src];
 }
 
