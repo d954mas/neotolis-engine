@@ -101,11 +101,13 @@ int main(int argc, char *argv[]) {
     atlas_opts.margin = 2;
     atlas_opts.extrude = 2; /* OK with RECT (extrude valid only for rect shape) */
     atlas_opts.premultiplied = true;
-    /* SD perf experiment: was UASTC compress; reverted to raw RGBA8 to
-     * compare like-for-like with the HD pack (which is also raw). If SD
-     * fps now matches HD on 60k bunnies, the cost was in compressed-format
-     * sampling; if SD is still 3x slower, the cause is elsewhere
-     * (mip generation, pixel-art texture cache locality, ...). */
+    /* UASTC compress matches the HD pack (both packs go through the same
+     * Basis transcode path on GPU). Without compress on SD, HD was sampling
+     * a smaller compressed BC7/ASTC texel block while SD was reading raw
+     * RGBA8 — different memory bandwidth profile, different fps. Equal
+     * configs make the SD/HD comparison meaningful. */
+    nt_tex_compress_opts_t sd_compress_opts = nt_tex_compress_uastc_default();
+    atlas_opts.compress = &sd_compress_opts;
 
     nt_builder_begin_atlas(ctx, "bunnies", &atlas_opts);
 
