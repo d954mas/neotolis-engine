@@ -23,9 +23,8 @@ static void mesh_on_destroy(nt_entity_t entity) {
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_mesh_comp_init(const nt_mesh_comp_desc_t *desc) {
-    if (!desc || desc->capacity == 0) {
-        return NT_ERR_INVALID_ARG;
-    }
+    NT_ASSERT(desc != NULL);
+    NT_ASSERT(desc->capacity > 0);
 
     nt_result_t res = nt_comp_storage_init(&s_storage, desc->capacity, mesh_default, mesh_swap);
     if (res != NT_OK) {

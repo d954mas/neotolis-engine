@@ -289,6 +289,20 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_atlas COMMAND test_atlas)
 
+    # --- Sprite component tests ---
+    add_executable(test_sprite_comp unit/test_sprite_comp.c)
+    target_link_libraries(test_sprite_comp PRIVATE
+        nt_sprite_comp nt_atlas nt_entity nt_resource nt_hash nt_pool nt_shared unity
+    )
+    target_compile_definitions(test_sprite_comp PRIVATE NT_ATLAS_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_sprite_comp PRIVATE -U_DLL)
+    nt_set_warning_flags(test_sprite_comp)
+    nt_set_sanitizer_flags(test_sprite_comp)
+    set_target_properties(test_sprite_comp PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_sprite_comp COMMAND test_sprite_comp)
+
     # --- HTTP module tests ---
     add_executable(test_http unit/test_http.c)
     target_link_libraries(test_http PRIVATE nt_http_stub unity)

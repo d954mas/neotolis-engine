@@ -215,6 +215,8 @@ input_begin_frame
     → if pointer pressed && audio suspended → audio_try_resume()
 input_event_apply
 resource_step         ← async loading processing
+game-defined resource sync helpers
+    → e.g. sprite_comp_sync_resources() after resource publication changes
 audio_update          ← voice state management
 fixed_update loop
 game_update
@@ -319,27 +321,51 @@ Lifetime = single frame.
 
 Examples: render item arrays, temporary sort arrays, transient CPU batch buffers, build temp lists in render pass.
 
-## 5.3 Compile-time limits
+## 5.3 Capacity policy
+
+Capacities split into two tiers.
+
+**Compile-time hard caps.** Sized at build time. Used where a single global
+sparse table or fixed pool needs a known upper bound. Cannot be overridden
+without recompiling the engine.
 
 ```c
-#define MAX_ENTITIES            65536
-#define MAX_TRANSFORMS          8192
-#define MAX_RENDER_STATE        8192
-#define MAX_MESH_COMPONENTS     8192
-#define MAX_MATERIAL_COMPONENTS 8192
-#define MAX_SPRITE_COMPONENTS   8192
-#define MAX_TEXT_COMPONENTS     2048
-#define MAX_SHADOW_COMPONENTS   4096
-
-#define MAX_ASSETS              2048
-#define MAX_SLOTS               2048
-#define MAX_PACKS               16
-#define MAX_RENDER_ITEMS        16384
-#define MAX_POINTERS            8
-
-#define MAX_AUDIO_CLIPS         256
-#define MAX_AUDIO_VOICES        32
+#define NT_MAX_ENTITIES         65536  /* sparse side, generation tables */
+#define NT_MAX_PACKS            16
+#define NT_MAX_SLOTS            2048
+#define NT_MAX_ASSETS           2048
+#define NT_MAX_RENDER_ITEMS     16384
+#define NT_MAX_AUDIO_CLIPS      256
+#define NT_MAX_AUDIO_VOICES     32
+#define NT_MAX_POINTERS         8
 ```
+
+**Init-time component capacities.** Each component module exposes a
+descriptor and a defaults helper. The game picks the size at init based
+on its scene density. Allocation happens once in init (`calloc`), never
+grows after — the "preallocated, no heap in hot path" rule from §5.1
+still holds.
+
+```c
+nt_sprite_comp_init(&(nt_sprite_comp_desc_t){ .capacity = 4096 });
+/* or use defaults: */
+nt_sprite_comp_init(&nt_sprite_comp_desc_defaults());
+```
+
+Suggested baseline defaults (override per game):
+
+| Component       | Default | Notes                          |
+|-----------------|---------|--------------------------------|
+| transform_comp  | 256     | Adjust for scene density       |
+| drawable_comp   | 256     |                                |
+| mesh_comp       | 256     |                                |
+| material_comp   | 256     |                                |
+| sprite_comp     | 256     |                                |
+| text_comp       | 64      |                                |
+| shadow_comp     | 256     |                                |
+
+Component capacity must not exceed `NT_MAX_ENTITIES` — the sparse side is
+sized off the entity table, not the component capacity.
 
 ## 5.4 Runtime settings
 
@@ -456,14 +482,32 @@ Default component indices = `uint16_t`. Only use `uint32_t` if truly needed late
 
 ## 7.4 Component API style
 
-Typed APIs, not one generic mega-API:
+Typed APIs, not one generic mega-API. Each component module exposes its own
+init descriptor, lifecycle (`init`, `shutdown`), per-entity ops (`add`, `has`,
+`remove`), and per-field accessors. Components do not return a monolithic
+struct — fields live in parallel SoA arrays and are read/written one at a time.
 
 ```c
-TransformComponent* transform_add(EntityHandle e);
-TransformComponent* transform_get(EntityHandle e);
-bool transform_has(EntityHandle e);
-void transform_remove(EntityHandle e);
+/* Lifecycle */
+nt_result_t  nt_transform_comp_init(const nt_transform_comp_desc_t *desc);
+void         nt_transform_comp_shutdown(void);
+
+/* Per-entity ops */
+bool nt_transform_comp_add(nt_entity_t e);
+bool nt_transform_comp_has(nt_entity_t e);
+void nt_transform_comp_remove(nt_entity_t e);
+
+/* Per-field accessors return pointers into the dense SoA — the caller
+ * mutates fields directly through the returned pointer where appropriate. */
+float *nt_transform_comp_position(nt_entity_t e); /* vec3 */
+float *nt_transform_comp_rotation(nt_entity_t e); /* vec4 quaternion */
+/* ... */
 ```
+
+Modules with cross-field invariants (e.g. sprite_comp, where `atlas` and
+`region_hash` drive a cached `region_index`) return `const` accessors and
+provide dedicated setters instead. See per-component sections in §8 and §9
+for the actual API surface.
 
 ---
 
@@ -471,18 +515,18 @@ void transform_remove(EntityHandle e);
 
 ## 8.1 Transform component data
 
-```c
-typedef struct TransformComponent
-{
-    vec3 local_position;
-    quat local_rotation;
-    vec3 local_scale;
+The transform component is SoA — there is no monolithic `TransformComponent`
+struct in the code. Each entity contributes one row across these dense fields:
 
-    mat4 world_matrix;
+| Field          | Type     | Notes                                |
+|----------------|----------|--------------------------------------|
+| local position | `vec3`   | mutable via `nt_transform_comp_position(e)`  |
+| local rotation | `vec4`   | quaternion, via `nt_transform_comp_rotation(e)`  |
+| local scale    | `vec3`   | via `nt_transform_comp_scale(e)`     |
+| world matrix   | `mat4`   | read-only via `nt_transform_comp_world_matrix(e)`; recomputed by `nt_transform_comp_update()` |
+| dirty          | `bool`   | mutable; set when locals change      |
 
-    bool dirty;
-} TransformComponent;
-```
+API surface lives in `engine/transform_comp/nt_transform_comp.h`.
 
 Optional future additions: previous_world_matrix, decomposed world data, bounds dirty flag.
 
@@ -512,60 +556,158 @@ The architecture supports different renderable kinds via separate components, no
 
 ## 9.1 Common render state
 
-```c
-typedef struct DrawableComponent
-{
-    nt_hash32_t tag;  // hash-based, game-defined via nt_hash32_str()
-    bool visible;
-    vec4 color;
-} DrawableComponent;
-```
+The drawable component is SoA. Fields:
 
-Defaults: `visible = true`, `color = (1,1,1,1)`, `tag = {0}`.
+| Field   | Type          | Default      | Notes                                |
+|---------|---------------|--------------|--------------------------------------|
+| tag     | `nt_hash32_t` | `{0}`        | pass/group filter; set via `nt_hash32_str("world")` etc. |
+| visible | `bool`        | `true`       | render visibility only               |
+| color   | `vec4`        | `(1,1,1,1)`  | object tint / alpha multiplier       |
 
-- `tag`: pass/group filter chosen by game, set via `nt_hash32_str("world")` etc.
-- `visible`: render visibility only
-- `color`: object tint / alpha multiplier
+Accessors return mutable pointers (`nt_drawable_comp_tag/visible/color`) — fields
+are independent so direct mutation is safe. API lives in
+`engine/drawable_comp/nt_drawable_comp.h`.
 
 Per-entity shader params (`params0`) deferred to ShaderParamsComponent — add when per-entity shader effects are needed (#98).
 
 ## 9.2 Mesh component
 
+Per-entity mesh handle. The component stores a single `nt_mesh_t` per entity
+(typed handle from the gfx module); accessor returns a mutable pointer:
+
 ```c
-typedef struct MeshComponent
-{
-    MeshAssetRef mesh;
-} MeshComponent;
+nt_mesh_t *nt_mesh_comp_handle(nt_entity_t e);
 ```
+
+API in `engine/mesh_comp/nt_mesh_comp.h`. There is no `MeshComponent` struct
+or `MeshAssetRef` wrapper — just one handle per entity.
 
 ## 9.3 Material component
 
+Per-entity material handle. The component stores a single `nt_material_t`
+per entity (handle from the `nt_material` module); accessor returns a
+mutable pointer:
+
 ```c
-typedef struct MaterialComponent
-{
-    nt_material_t material; /* typed handle from nt_material module */
-} MaterialComponent;
+nt_material_t *nt_material_comp_handle(nt_entity_t e);
 ```
+
+API in `engine/material_comp/nt_material_comp.h`. There is no
+`MaterialComponent` struct — just one handle per entity. The `nt_material`
+module behind the handle is described in §16.
 
 ## 9.4 Sprite component
 
+The sprite component is a SoA module — there is no monolithic `SpriteComponent`
+struct. Each sprite-bearing entity contributes one row across parallel dense
+arrays (atlas handle, region hash, cached region index, cached atlas revision,
+effective origin, flag bits). The module owns those arrays directly and
+exposes them via per-entity accessors and a bulk view (see header
+`engine/sprite_comp/nt_sprite_comp.h` for the full API).
+
+### Identity
+
+Sprite identity is the pair `(nt_resource_t atlas, uint64_t region_hash)`.
+That pair survives atlas republish, hot reload, and region renumbering.
+
+The runtime additionally caches:
+
+- **Resolved region index** — `uint16_t` index into the atlas region table.
+- **Atlas revision snapshot** — `uint32_t`, used to detect republish.
+- **Effective origin** — `float[2]`, either authored from the region or
+  overridden by the game.
+- **Flag byte** — `FLIP_X`, `FLIP_Y`, `ORIGIN_OV`, `RESOLVED`.
+
+These are implementation details. Game code reads them through the public
+accessors; layout (SoA, packed flags, sentinel choices) is not part of the
+contract.
+
+### Binding modes
+
+Two ways to bind a sprite to a region, picked by what the game knows:
+
+- **By hash (slow path, async-friendly).** Game knows `region_hash` only.
+  The atlas may not be ready yet. Sync resolves the hash to a region index
+  on the next `nt_sprite_comp_sync_resources()` once the atlas is published.
+  Cost: one hash-table lookup per sprite per resolve.
+- **By index (fast path, requires ready atlas).** Game already knows the
+  numeric region index — typically because it cycled an animation frame,
+  or read it back from a previously resolved sprite. Skips the hash lookup
+  on bind and on stable frames (the atlas-revision gate inside sync resolves
+  to a no-op when nothing changed). After atlas republish, sync re-resolves
+  via hash to confirm the cached index still points to the same region —
+  this is how tombstoning is detected. The atlas merge contract guarantees
+  that surviving regions keep the same index across republish, so the cached
+  index stays stable as long as the underlying region is not tombstoned.
+
+Game code is free to read back the cached region index for animation logic
+(e.g. cycle to the next frame). It is stable across atlas republish for
+surviving regions; the only failure mode — tombstoning — is observable via
+`is_resolved()`.
+
+### Origin override and flip
+
+Each sprite carries an effective origin (`float[2]`). By default it tracks
+the region's authored origin from the atlas. The game may override it with
+`set_origin(x, y)`, which sets the `ORIGIN_OV` flag and pins the value across
+subsequent atlas republishes. `reset_origin()` clears the override and
+restores the authored value on the next sync.
+
+Flip is a pair of flag bits (`FLIP_X`, `FLIP_Y`) toggled via `set_flip`.
+They are pure state — no resolve, no atlas interaction.
+
+### Lifecycle
+
 ```c
-typedef struct SpriteComponent
-{
-    SpriteAssetRef sprite;
-} SpriteComponent;
+nt_sprite_comp_init(&(nt_sprite_comp_desc_t){ .capacity = 4096 });
+/* per-frame: */
+nt_resource_step();
+nt_sprite_comp_sync_resources();   /* explicit, after publication */
+/* on shutdown: */
+nt_sprite_comp_shutdown();
 ```
+
+Capacity is set once at init (see §5.3). All SoA arrays are allocated up
+front and never grow.
+
+### Resolution flow
+
+Resolution is explicit, not renderer-driven magic:
+
+- game code requests / mounts resources
+- `resource_step()` publishes winners
+- game code calls `nt_sprite_comp_sync_resources()` (or equivalent system)
+- sync iterates dense sprite rows when the resource publication epoch
+  advanced or any sprite was bound by hash since the last call; per-row
+  early-out via cached atlas revision keeps stable frames cheap
+- sprite render-item build skips unresolved sprites
+
+### Bulk iteration
+
+`nt_sprite_comp_view()` returns base pointers into the dense SoA arrays plus
+the live count and an `entity_indices` array (dense → entity index) for
+joining sprites with other components. Pointers are stable for the lifetime
+of the module; values shift on add/remove (swap-and-pop) so views must not
+be cached across mutations.
+
+> **Status:** as of Phase 49, only the component data layer (sprite_comp,
+> atlas, resource `publication_epoch`) is implemented. The sprite render-item
+> builder and any associated dedicated renderer are deferred to a later phase.
+> "Render-item build skips unresolved sprites" describes the contract those
+> future systems must honour, not behaviour that exists today.
 
 Sprite is a separate render kind, not a special mode of mesh.
 
 ## 9.5 Text component
 
-```c
-typedef struct TextComponent
-{
-    nt_font_t font;    /* handle from nt_font_create / nt_font_add */
-    StringId text;
-} TextComponent;
+> **Status:** the text component module does not exist yet — only the
+> `nt_font` module backing it is implemented (`engine/font/nt_font.h`).
+> The shape below describes the planned component.
+
+```text
+text_comp fields (planned):
+  font   nt_font_t   /* handle from nt_font_create / nt_font_add */
+  text   StringId    /* intern-table reference, design TBD */
 ```
 
 `nt_font_t` is a pool-backed handle to a font instance. A font instance owns GPU textures (curve + band) and a glyph cache. Font data comes from one or more `nt_resource_t` assets attached via `nt_font_add()`, allowing fallback chains (base font + CJK extension pack, etc.). Glyphs are decoded and uploaded to GPU on first lookup, not on asset load.
@@ -574,13 +716,14 @@ StringId references a string in a string pool/intern table (detail deferred to i
 
 ## 9.6 Shadow component
 
-```c
-typedef struct ShadowComponent
-{
-    bool enabled;
-    MeshAssetRef mesh_override;
-    MaterialAssetRef material_override;
-} ShadowComponent;
+> **Status:** the shadow component module does not exist yet. The shape
+> below describes the planned component once a shadow pass lands.
+
+```text
+shadow_comp fields (planned):
+  enabled            bool
+  mesh_override      nt_mesh_t       /* optional override; INVALID = use primary mesh */
+  material_override  nt_material_t   /* optional override; INVALID = use primary material */
 ```
 
 If missing: object does not participate in shadow pass. If present and enabled: use override mesh/material if valid, otherwise use primary mesh/material or default shadow path.
@@ -810,8 +953,16 @@ Benefits: simple layout, simple alignment, easy future GPU block packing, no per
 
 ## 16.3 MaterialAsset binary layout
 
+> **Status:** materials today are created at runtime from
+> `nt_material_create_desc_t` (see `engine/material/nt_material.h`). There is
+> no `NT_ASSET_MATERIAL` activator and no pack-loadable material format yet.
+> The layout below describes the planned on-disk shape once material assets
+> become pack-loadable. `ShaderAssetRef` and `TextureAssetRef` are also
+> planned types; current shaders are loaded as `NT_ASSET_SHADER_CODE` blobs
+> referenced by `nt_resource_t` directly.
+
 ```c
-// In-memory header (NOT a C struct with FAM)
+// In-memory header (NOT a C struct with FAM) — PLANNED, not yet implemented
 typedef struct MaterialAssetHeader
 {
     ShaderAssetRef vertex_shader;
@@ -876,6 +1027,8 @@ Sort order is **not** a material property. Sorting is game-controlled: game code
 
 ## 17.1 Core concepts
 
+- `publication_epoch`: monotonic counter that changes when the published view of any slot changes
+
 - `resource_id`: 64-bit xxHash of asset path (`nt_hash64_t`) — stable resource identity
 - `NtAssetMeta`: per-asset metadata entry (one per asset per pack)
 - `NtResourceSlot`: per unique resource requested by game code — holds resolved handle and optional user_data
@@ -900,6 +1053,8 @@ For simple runtime-handle asset types (texture, mesh, blob), target and publishe
 Game code receives `nt_resource_t` — a 32-bit handle encoding slot index (lower 16 bits) and generation (upper 16 bits). Generation detects stale handles within a single init/shutdown lifecycle. After shutdown, all handles are invalid — game code must re-request resources after reinit. Access functions (`nt_resource_get`, `nt_resource_is_ready`) validate generation before returning data. `nt_resource_get()` returns the currently published winner handle. `nt_resource_is_ready()` means "published winner is fully usable", not merely "some runtime handle exists somewhere in the stack."
 
 Typed wrappers (MeshHandle, TextureHandle) live outside nt_resource — game code or future phases.
+
+`nt_resource_publication_epoch()` exposes a monotonic change counter for systems that want to skip work when published slot data has not changed.
 
 ## 17.4 AssetMeta stability
 

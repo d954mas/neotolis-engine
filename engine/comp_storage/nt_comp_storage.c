@@ -112,3 +112,5 @@ uint16_t nt_comp_storage_index(const nt_comp_storage_t *s, nt_entity_t entity) {
     uint16_t eidx = nt_entity_index(entity);
     return s->entity_to_index[eidx];
 }
+
+const uint16_t *nt_comp_storage_entities(const nt_comp_storage_t *s) { return s->index_to_entity; }
