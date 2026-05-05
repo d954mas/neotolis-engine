@@ -4664,6 +4664,88 @@ void test_atlas_opts_defaults(void) {
     TEST_ASSERT_TRUE(opts.pixels_per_unit > 0.999F && opts.pixels_per_unit < 1.001F);
 }
 
+/* Phase 50-02 (D-32): Builder writes pixels_per_unit as a 4-byte resource
+ * metadata blob keyed by hash64_str("pixels_per_unit") for every atlas.
+ * Round-trip: build pack with ppu=2.5, scan meta section, expect 4 B == 2.5F.
+ *
+ * Cross-plan note: Plan 01 Task 3 closes the runtime side via
+ * nt_atlas_get_pixels_per_unit; this test validates the builder side only. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_builder_atlas_pixels_per_unit_metadata(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *pack_path = TMP_DIR "/atlas_ppu_meta.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 200, 100, 50, 255);
+
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.pixels_per_unit = 2.5F;
+    nt_builder_begin_atlas(ctx, "ppu_atlas", &opts);
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "ppu_sprite.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    /* Read pack and find atlas asset entry */
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(pack_path, &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    TEST_ASSERT_TRUE(pack->meta_count >= 1U);
+    TEST_ASSERT_TRUE(pack->meta_offset > 0U);
+
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+    TEST_ASSERT_TRUE(atlas_entry->meta_offset > 0U);
+
+    /* Walk meta entries from atlas_entry->meta_offset until resource_id changes
+     * (entries are grouped by resource_id, sorted contiguous). Find the entry
+     * with kind == hash64_str("pixels_per_unit"). */
+    const uint64_t kind_ppu = nt_hash64_str("pixels_per_unit").value;
+    bool found = false;
+    float ppu_value = 0.0F;
+    uint32_t walk_offset = atlas_entry->meta_offset;
+    for (uint32_t i = 0; i < pack->meta_count; i++) {
+        TEST_ASSERT_TRUE(walk_offset + sizeof(NtMetaEntryHeader) <= file_size);
+        const NtMetaEntryHeader *mh = (const NtMetaEntryHeader *)(buf + walk_offset);
+        if (mh->resource_id != atlas_entry->resource_id) {
+            break; /* entered a different asset's meta group */
+        }
+        if (mh->kind == kind_ppu) {
+            TEST_ASSERT_EQUAL_UINT32(sizeof(float), mh->size);
+            const uint8_t *payload = buf + walk_offset + sizeof(NtMetaEntryHeader);
+            TEST_ASSERT_TRUE(payload + sizeof(float) <= buf + file_size);
+            memcpy(&ppu_value, payload, sizeof(float));
+            found = true;
+            break;
+        }
+        /* Advance to next meta entry: header + payload, padded to 4 bytes. */
+        uint32_t padded_size = (mh->size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+        walk_offset += (uint32_t)sizeof(NtMetaEntryHeader) + padded_size;
+    }
+    TEST_ASSERT_TRUE(found);
+    TEST_ASSERT_TRUE(ppu_value > 2.4999F && ppu_value < 2.5001F);
+
+    /* Smoke-check: pack_dump must not crash on a pack carrying
+     * pixels_per_unit metadata. The new dump line ("pixels_per_unit: 2.500")
+     * is asserted as code presence by the plan's grep verify step rather
+     * than by stdout capture (NT_LOG_INFO routes through the log module). */
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_dump_pack(pack_path));
+
+    free(buf);
+}
+
 /* --- Atlas sprite opts + origin tests --- */
 
 /* Helper: read the single atlas blob from a freshly-built pack file. Returns
@@ -5175,6 +5257,7 @@ int main(void) {
     RUN_TEST(test_atlas_codegen);
     RUN_TEST(test_atlas_codegen_large);
     RUN_TEST(test_atlas_opts_defaults);
+    RUN_TEST(test_builder_atlas_pixels_per_unit_metadata);
 
     /* Atlas sprite opts + origin (Point 2 follow-up) */
     RUN_TEST(test_atlas_sprite_opts_default_origin_is_centre);
