@@ -262,6 +262,28 @@ void test_measure_width_increases(void) {
     TEST_ASSERT_TRUE(sz_ab.width > sz_a.width);
 }
 
+/* ---- Test 11: Newlines reset x and advance y ---- */
+
+void test_draw_newline_advances_to_next_line(void) {
+    nt_text_renderer_draw("A\nB", s_identity, 32.0F, s_white);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_text_renderer_test_glyph_count());
+
+    const uint8_t *verts = (const uint8_t *)nt_text_renderer_test_vertices();
+    TEST_ASSERT_NOT_NULL(verts);
+
+    float first_x = 0.0F;
+    float first_y = 0.0F;
+    float second_x = 0.0F;
+    float second_y = 0.0F;
+    memcpy(&first_x, verts + 0, sizeof(float));
+    memcpy(&first_y, verts + 4, sizeof(float));
+    memcpy(&second_x, verts + (4U * 68U), sizeof(float));
+    memcpy(&second_y, verts + (4U * 68U) + 4U, sizeof(float));
+
+    TEST_ASSERT_TRUE(first_x == second_x);
+    TEST_ASSERT_TRUE(second_y < first_y);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -276,5 +298,6 @@ int main(void) {
     RUN_TEST(test_vertex_count_4_per_glyph);
     RUN_TEST(test_flush_resets_counts);
     RUN_TEST(test_measure_width_increases);
+    RUN_TEST(test_draw_newline_advances_to_next_line);
     return UNITY_END();
 }

@@ -378,8 +378,8 @@ static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_vie
 // #region precompute (Phase 50 D-10/D-11/D-32)
 /* Compute cached_pos and cached_uv for one region (D-10/D-11).
  * cached_pos has 1/pixels_per_unit baked in (D-32 + Pitfall 3) so the
- * sprite renderer is pixels_per_unit-oblivious. cached_uv has the D4
- * transform pre-applied (D-10): the renderer never sees transform.
+ * sprite renderer is pixels_per_unit-oblivious. atlas_u/v are already stored
+ * in atlas-page space by the builder, including any D4 placement transform.
  * Tombstones (NT_ATLAS_TOMBSTONE_HASH) and zero-vertex regions are
  * no-ops — their cached slices stay zero from calloc / zero-fill. */
 static void atlas_precompute_region(nt_atlas_data_t *ad, uint32_t region_idx) {
@@ -393,25 +393,8 @@ static void atlas_precompute_region(nt_atlas_data_t *ad, uint32_t region_idx) {
         const nt_atlas_vertex_t *raw = &ad->vertices[r->vertex_start + v];
         ad->cached_pos[r->vertex_start + v][0] = ((float)raw->local_x - origin_px_x) * ad->ipu;
         ad->cached_pos[r->vertex_start + v][1] = ((float)raw->local_y - origin_px_y) * ad->ipu;
-
-        float u = (float)raw->atlas_u * (1.0F / 65535.0F);
-        float w = (float)raw->atlas_v * (1.0F / 65535.0F);
-        /* D4 transform — diagonal first, then flips (Pitfall 2 verified by
-         * test_atlas_cached_uv_d4_transform). Bit layout (nt_atlas.h):
-         *   bit0 = flipH, bit1 = flipV, bit2 = diagonal */
-        if (r->transform & 4U) {
-            float t = u;
-            u = w;
-            w = t;
-        }
-        if (r->transform & 1U) {
-            u = 1.0F - u;
-        }
-        if (r->transform & 2U) {
-            w = 1.0F - w;
-        }
-        ad->cached_uv[r->vertex_start + v][0] = u;
-        ad->cached_uv[r->vertex_start + v][1] = w;
+        ad->cached_uv[r->vertex_start + v][0] = (float)raw->atlas_u * (1.0F / 65535.0F);
+        ad->cached_uv[r->vertex_start + v][1] = (float)raw->atlas_v * (1.0F / 65535.0F);
     }
 }
 
@@ -624,7 +607,7 @@ static void atlas_on_post_resolve(const uint8_t *data, uint32_t size, nt_resourc
     // #region pixels_per_unit metadata read (Phase 50 D-32)
     /* Read pixels_per_unit metadata once per atlas (atlas-level, not region-
      * level). On merge (DEMO-08), this re-reads the new pack's pixels_per_unit
-     * so HD packs (ppu=2.0) replace SD's (ppu=1.0), and the subsequent
+     * so higher-priority packs replace lower-priority scale metadata, and the subsequent
      * atlas_precompute_all re-bakes cached_pos at the new scale. region_index
      * stays stable per Phase 48 merge semantics — only the cached float
      * values change. */

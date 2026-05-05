@@ -237,16 +237,16 @@ static void transform_point(float out[3], const float model[16], float x, float 
     out[2] = model[2] * x + model[6] * y + model[14];
 }
 
-static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, const float color[4], uint8_t band_count) {
+static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, const float color[4], uint8_t band_count) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
     }
 
     /* Local quad corners (scaled from font units to target size) */
     float x0 = pen_x + ((float)g->bbox_x0 * scale);
-    float y0 = (float)g->bbox_y0 * scale;
+    float y0 = pen_y + ((float)g->bbox_y0 * scale);
     float x1 = pen_x + ((float)g->bbox_x1 * scale);
-    float y1 = (float)g->bbox_y1 * scale;
+    float y1 = pen_y + ((float)g->bbox_y1 * scale);
 
     /* Em-space coordinates (unscaled, for shader) */
     float em_x0 = (float)g->bbox_x0;
@@ -327,12 +327,25 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
     float pen_x = 0.0F;
+    float pen_y = 0.0F;
+    const float line_advance = (metrics.line_height != 0) ? ((float)metrics.line_height * scale) : size;
 
     for (const uint8_t *p = (const uint8_t *)utf8; *p; p++) {
         if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
             if (state == NT_UTF8_REJECT) {
                 state = NT_UTF8_ACCEPT; /* recover: skip bad byte, continue parsing */
             }
+            continue;
+        }
+
+        if (codepoint == '\r') {
+            prev_cp = 0;
+            continue;
+        }
+        if (codepoint == '\n') {
+            pen_x = 0.0F;
+            pen_y -= line_advance;
+            prev_cp = 0;
             continue;
         }
 
@@ -350,7 +363,7 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
 
         /* Emit quad if glyph has visible bbox */
         if (g->bbox_x1 > g->bbox_x0) {
-            emit_quad(g, model, scale, pen_x, color, band_count);
+            emit_quad(g, model, scale, pen_x, pen_y, color, band_count);
         }
 
         pen_x += (float)g->advance * scale;

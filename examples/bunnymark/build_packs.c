@@ -174,6 +174,8 @@ int main(int argc, char *argv[]) {
     hd_opts.padding = 2;
     hd_opts.margin = 2;
     hd_opts.extrude = 2;
+    nt_tex_compress_opts_t uastc_compress_opts = nt_tex_compress_uastc_default();
+    hd_opts.compress = &uastc_compress_opts;
 
     nt_builder_begin_atlas(ctx_hd, "bunnies", &hd_opts);
     /* atlas_add_glob picks up whatever 5 PNGs the user dropped in raw/hd/.

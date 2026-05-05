@@ -19,6 +19,7 @@ static struct {
     float fps_ring[NT_STATS_FPS_WINDOW_MAX]; /* seconds per frame */
 
     double frame_begin_t;
+    double last_frame_begin_t;
     float last_cpu_ms;
     float last_gpu_ms;
     uint32_t last_draw_calls;
@@ -60,7 +61,17 @@ void nt_stats_shutdown(void) { s_stats.initialized = false; }
 // #region Frame brackets
 void nt_stats_frame_begin(void) {
     NT_ASSERT(s_stats.initialized);
-    s_stats.frame_begin_t = nt_time_now();
+    double now = nt_time_now();
+    if (s_stats.last_frame_begin_t > 0.0) {
+        float frame_dt_s = (float)(now - s_stats.last_frame_begin_t);
+        s_stats.fps_ring[s_stats.fps_head] = frame_dt_s;
+        s_stats.fps_head = (uint16_t)((s_stats.fps_head + 1) % s_stats.fps_window);
+        if (s_stats.fps_count < s_stats.fps_window) {
+            s_stats.fps_count++;
+        }
+    }
+    s_stats.last_frame_begin_t = now;
+    s_stats.frame_begin_t = now;
 }
 
 void nt_stats_frame_end(void) {
@@ -71,16 +82,6 @@ void nt_stats_frame_end(void) {
     s_stats.last_cpu_ms = dt_s * 1000.0F;
     s_stats.last_draw_calls = nt_gfx_get_frame_draw_calls();
     /* GPU timer: Pitfall 5 — not yet wired through nt_gfx; remain -1.0F */
-    // #endregion
-
-    // #region DEMO-05 rolling FPS ring
-    /* Ring stores per-frame seconds. Rolling avg FPS = count / sum(ring[0..count]).
-     * This intentionally lags a discrete window — instantaneous FPS is NOT used. */
-    s_stats.fps_ring[s_stats.fps_head] = dt_s;
-    s_stats.fps_head = (uint16_t)((s_stats.fps_head + 1) % s_stats.fps_window);
-    if (s_stats.fps_count < s_stats.fps_window) {
-        s_stats.fps_count++;
-    }
     // #endregion
 
     // #region DEMO-06 throughput log

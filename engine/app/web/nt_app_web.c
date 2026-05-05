@@ -17,9 +17,12 @@ static double s_prev_time_ms;
 static EM_BOOL nt_app_web_frame(double time_ms, void *user_data) {
     (void)user_data;
 
-    /* Frame rate cap: skip RAF tick if target_dt not elapsed */
+    /* Frame rate cap: skip RAF tick if target_dt not elapsed.
+     * We allow a 2ms jitter margin so a 60Hz RAF (16.66ms) arriving
+     * slightly early (e.g. 15.5ms) isn't dropped, which would otherwise
+     * halve the frame rate to 30 FPS on that tick. */
     if (g_nt_app.target_dt > 0.0F) {
-        double target_ms = (double)g_nt_app.target_dt * 1000.0;
+        double target_ms = (double)g_nt_app.target_dt * 1000.0 - 2.0;
         if (time_ms - s_prev_time_ms < target_ms) {
             return EM_TRUE;
         }

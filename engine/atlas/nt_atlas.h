@@ -18,8 +18,7 @@
 /* ---- Public types ---- */
 
 /* Mirrors NtAtlasVertex from shared/include/nt_atlas_format.h (8 bytes, same field order).
- * Runtime stores it identically — no decode; the sprite renderer (Phase 50)
- * applies the int→float conversion and the D4 transform at batch time.
+ * Runtime stores it identically; nt_atlas precomputes float positions/UVs before sprite batching.
  * Update both structs together when changing fields. */
 typedef struct {
     int16_t local_x;
@@ -98,7 +97,7 @@ float nt_atlas_get_pixels_per_unit(nt_resource_t atlas);
  * Returns NULL only if atlas not resolved. */
 const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t region_index))[2];
 
-/* D-10: D4-transformed normalized atlas UVs. Returns base pointer at the start
+/* D-10: normalized atlas UVs. Returns base pointer at the start
  * of region's slice (length = region->vertex_count). Out-of-range region_index
  * trips NT_ASSERT. Returns NULL only if atlas not resolved. */
 const float (*nt_atlas_get_region_cached_uv(nt_resource_t atlas, uint32_t region_index))[2];

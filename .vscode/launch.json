@@ -264,6 +264,52 @@
             "cwd": "${workspaceFolder}/build/examples/text/native-release",
             "console": "integratedTerminal",
             "preLaunchTask": "Quick build native-release (no -Werror)"
+        },
+        {
+            "name": "Build Bunnymark Packs",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/bunnymark/native-release/build_bunnymark_packs.exe",
+            "args": ["build/examples/bunnymark"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build pack builders (release)"
+        },
+        {
+            "name": "Debug Desktop bunnymark",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/bunnymark/native-debug/bunnymark_demo.exe",
+            "cwd": "${workspaceFolder}/build/examples/bunnymark/native-debug",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-debug"
+        },
+        {
+            "name": "Run Desktop bunnymark (release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/bunnymark/native-release/bunnymark_demo.exe",
+            "cwd": "${workspaceFolder}/build/examples/bunnymark/native-release",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-release"
+        },
+        {
+            "name": "Debug WASM bunnymark",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8092/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/bunnymark/wasm-debug-paired",
+            "preLaunchTask": "Build & Serve bunnymark (debug)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Run WASM bunnymark (release)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8093/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/bunnymark/wasm-release-paired",
+            "preLaunchTask": "Build & Serve bunnymark (release)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
         }
     ]
 }

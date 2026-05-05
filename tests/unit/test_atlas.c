@@ -1476,16 +1476,9 @@ static uint32_t build_corner_uv_blob(uint8_t *out, uint32_t cap, uint8_t transfo
     return build_mock_atlas_blob(out, cap, &spec);
 }
 
-/* SPRITE-12 / Pitfall 2 — exhaustive D4 transform round-trip.
- * For each transform value 0..7, build a 1-region 4-vertex blob with
- * corner UVs (0,0)/(1,0)/(0,1)/(1,1) and assert cached_uv[i] matches
- * the expected D4-transformed corner within 1e-5 tolerance.
- *
- * D4 mapping (diagonal-first-then-flips):
- *   transform & 4: swap (u,v)
- *   transform & 1: u = 1 - u
- *   transform & 2: v = 1 - v
- */
+/* Atlas cached_uv stores serialized atlas_u/v as-is. The builder already
+ * applies any D4 placement transform while serializing vertices; runtime must
+ * not apply transform a second time. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_cached_uv_d4_transform(void) {
     /* Reference corners in (u, v) before transform, matching build_corner_uv_blob. */
@@ -1507,17 +1500,6 @@ void test_atlas_cached_uv_d4_transform(void) {
         for (uint32_t i = 0; i < 4U; i++) {
             float u = src_u[i];
             float v = src_v[i];
-            if (t & 4U) {
-                float tmp = u;
-                u = v;
-                v = tmp;
-            }
-            if (t & 1U) {
-                u = 1.0F - u;
-            }
-            if (t & 2U) {
-                v = 1.0F - v;
-            }
             char msg[64];
             (void)snprintf(msg, sizeof(msg), "transform=%u vertex=%u u", (unsigned)t, (unsigned)i);
             assert_float_close(u, uv[i][0], 1e-5F, msg);
