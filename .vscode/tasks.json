@@ -455,26 +455,42 @@
         {
             "label": "Ensure server bunnymark (debug :8092)",
             "type": "shell",
-            "command": "curl -s -o nul http://localhost:8092 >nul 2>&1 && (echo Server already running on :8092) || (start /b python -m http.server 8092 -d \"${workspaceFolder}/build/examples/bunnymark/wasm-debug-paired\" & timeout /t 1 >nul)",
+            "command": "python -m http.server 8092 -d \"${workspaceFolder}/build/examples/bunnymark/wasm-debug-paired\"",
+            "isBackground": true,
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
                     "args": ["/c"]
                 }
             },
-            "problemMatcher": []
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
         },
         {
             "label": "Ensure server bunnymark (release :8093)",
             "type": "shell",
-            "command": "curl -s -o nul http://localhost:8093 >nul 2>&1 && (echo Server already running on :8093) || (start /b python -m http.server 8093 -d \"${workspaceFolder}/build/examples/bunnymark/wasm-release-paired\" & timeout /t 1 >nul)",
+            "command": "python -m http.server 8093 -d \"${workspaceFolder}/build/examples/bunnymark/wasm-release-paired\"",
+            "isBackground": true,
             "options": {
                 "shell": {
                     "executable": "cmd.exe",
                     "args": ["/c"]
                 }
             },
-            "problemMatcher": []
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
         },
         {
             "label": "Build & Serve bunnymark (debug)",
