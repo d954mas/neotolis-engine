@@ -401,6 +401,21 @@ if(NOT EMSCRIPTEN)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_stats COMMAND test_stats)
+
+    # --- Bunnymark physics tests (DEMO-02 coverage; pure-C header, libm only) ---
+    add_executable(test_bunnymark_physics unit/test_bunnymark_physics.c)
+    target_link_libraries(test_bunnymark_physics PRIVATE unity)
+    target_include_directories(test_bunnymark_physics PRIVATE
+        "${CMAKE_SOURCE_DIR}/examples/bunnymark"
+    )
+    target_compile_definitions(test_bunnymark_physics PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_bunnymark_physics PRIVATE -U_DLL)
+    nt_set_warning_flags(test_bunnymark_physics)
+    nt_set_sanitizer_flags(test_bunnymark_physics)
+    set_target_properties(test_bunnymark_physics PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_bunnymark_physics COMMAND test_bunnymark_physics)
 endif()
 
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---
