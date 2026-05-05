@@ -329,41 +329,35 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
     return true;
 }
 
+/* Phase 50 D-10/Pitfall 1: grow one cached float[2] array to new_cap.
+ * On first parse the array is NULL (calloc'd in atlas_on_resolve); on merge
+ * it exists and needs realloc + zero-fill of the grown tail so common-region
+ * slices never see garbage before atlas_precompute_all overwrites them. */
+static void grow_cached_array(float (**arr)[2], uint32_t old_cap, uint32_t new_cap) {
+    if (*arr == NULL) {
+        return;
+    }
+    float(*new_arr)[2] = (float(*)[2])realloc(*arr, (size_t)new_cap * sizeof(float[2]));
+    NT_ASSERT(new_arr);
+    *arr = new_arr;
+    memset(&new_arr[old_cap], 0, (size_t)(new_cap - old_cap) * sizeof(float[2]));
+}
+
 /* Grow vertex/index buffers if the new blob is larger, then bulk-copy
  * payload arrays verbatim. Keeps duplicate region sharing exactly as
  * the builder serialized. Called by both first-parse and merge paths.
- *
- * Phase 50 D-10/Pitfall 1: cached_pos and cached_uv are kept parallel to
- * vertices[] (same vertex_capacity). When vertices grows, both cached
- * arrays grow with it; the grown TAIL is zero-filled so common-region
- * slices never see garbage before atlas_precompute_all overwrites them. */
+ * cached_pos/cached_uv are kept parallel to vertices[] via grow_cached_array. */
 static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
     const NtAtlasHeader *hdr = v->hdr;
-    // #region grow vertex buffer + cached arrays in lock-step
     const uint32_t old_cap = ad->vertex_capacity;
     if (hdr->total_vertex_count > ad->vertex_capacity) {
         nt_atlas_vertex_t *new_buf = (nt_atlas_vertex_t *)realloc(ad->vertices, (size_t)hdr->total_vertex_count * sizeof(nt_atlas_vertex_t));
         NT_ASSERT(new_buf);
         ad->vertices = new_buf;
         ad->vertex_capacity = hdr->total_vertex_count;
-
-        /* Phase 50 D-10: grow cached_pos and cached_uv to match vertex_capacity.
-         * On first parse these are NULL (calloc'd below in atlas_on_resolve);
-         * on merge they exist and need realloc + zero-fill of grown tail. */
-        if (ad->cached_pos != NULL) {
-            float(*new_pos)[2] = (float(*)[2])realloc(ad->cached_pos, (size_t)ad->vertex_capacity * sizeof(float[2]));
-            NT_ASSERT(new_pos);
-            ad->cached_pos = new_pos;
-            memset(&ad->cached_pos[old_cap], 0, (size_t)(ad->vertex_capacity - old_cap) * sizeof(float[2]));
-        }
-        if (ad->cached_uv != NULL) {
-            float(*new_uv)[2] = (float(*)[2])realloc(ad->cached_uv, (size_t)ad->vertex_capacity * sizeof(float[2]));
-            NT_ASSERT(new_uv);
-            ad->cached_uv = new_uv;
-            memset(&ad->cached_uv[old_cap], 0, (size_t)(ad->vertex_capacity - old_cap) * sizeof(float[2]));
-        }
+        grow_cached_array(&ad->cached_pos, old_cap, ad->vertex_capacity);
+        grow_cached_array(&ad->cached_uv, old_cap, ad->vertex_capacity);
     }
-    // #endregion
     if (hdr->total_index_count > ad->index_capacity) {
         uint16_t *new_buf = (uint16_t *)realloc(ad->indices, (size_t)hdr->total_index_count * sizeof(uint16_t));
         NT_ASSERT(new_buf);

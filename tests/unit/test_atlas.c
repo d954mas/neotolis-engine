@@ -1431,7 +1431,7 @@ static void assert_float_close(float expected, float actual, float tol, const ch
     float diff = fabsf(expected - actual);
     if (diff > tol) {
         char buf[256];
-        snprintf(buf, sizeof(buf), "%s (expected=%g actual=%g diff=%g tol=%g)", msg, (double)expected, (double)actual, (double)diff, (double)tol);
+        (void)snprintf(buf, sizeof(buf), "%s (expected=%g actual=%g diff=%g tol=%g)", msg, (double)expected, (double)actual, (double)diff, (double)tol);
         TEST_FAIL_MESSAGE(buf);
     }
 }
@@ -1519,9 +1519,9 @@ void test_atlas_cached_uv_d4_transform(void) {
                 v = 1.0F - v;
             }
             char msg[64];
-            snprintf(msg, sizeof(msg), "transform=%u vertex=%u u", (unsigned)t, (unsigned)i);
+            (void)snprintf(msg, sizeof(msg), "transform=%u vertex=%u u", (unsigned)t, (unsigned)i);
             assert_float_close(u, uv[i][0], 1e-5F, msg);
-            snprintf(msg, sizeof(msg), "transform=%u vertex=%u v", (unsigned)t, (unsigned)i);
+            (void)snprintf(msg, sizeof(msg), "transform=%u vertex=%u v", (unsigned)t, (unsigned)i);
             assert_float_close(v, uv[i][1], 1e-5F, msg);
         }
 
