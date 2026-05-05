@@ -4660,6 +4660,8 @@ void test_atlas_opts_defaults(void) {
     TEST_ASSERT_EQUAL(NT_ATLAS_SHAPE_CONCAVE_CONTOUR, opts.shape);
     TEST_ASSERT_FALSE(opts.debug_png);
     TEST_ASSERT_NULL(opts.compress);
+    /* Phase 50-02 (D-32): default pixels_per_unit is 1.0 */
+    TEST_ASSERT_TRUE(opts.pixels_per_unit > 0.999F && opts.pixels_per_unit < 1.001F);
 }
 
 /* --- Atlas sprite opts + origin tests --- */
