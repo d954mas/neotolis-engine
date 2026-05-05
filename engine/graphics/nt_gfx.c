@@ -855,11 +855,17 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
             .height = (uint16_t)hdr2->height,
             .data = pixels,
             .format = pixel_fmt,
-            .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
+            /* Diagnostic: was LINEAR_MIPMAP_LINEAR + gen_mipmaps. Reduced to
+             * plain LINEAR (no mipmaps) to match the Defold default sprite
+             * filter and isolate the SD/HD bunnymark perf gap (60k overlapping
+             * pixel-art bunnies were ~3x slower than HD with trilinear). The
+             * proper fix is per-asset filter config (a flag in the pack header
+             * or material sampler binding) — for now this is global. */
+            .min_filter = NT_FILTER_LINEAR,
             .mag_filter = NT_FILTER_LINEAR,
             .wrap_u = NT_WRAP_REPEAT,
             .wrap_v = NT_WRAP_REPEAT,
-            .gen_mipmaps = (hdr2->mip_count == 1),
+            .gen_mipmaps = false,
             .label = NULL,
         };
         nt_texture_t tex = nt_gfx_make_texture(&desc);
