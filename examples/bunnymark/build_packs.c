@@ -140,12 +140,22 @@ int main(int argc, char *argv[]) {
 
 #ifdef BUNNYMARK_HD_AVAILABLE
     // #region pack 2: bunnymark_hd.ntpack (Open Q3 — guarded by CMake)
-    /* HD pack uses pixels_per_unit=22.0F so HD source pixels match SD on-screen
-     * size. The shipped HD art is 543x724 px while SD is 25x32 (≈21.7x and
-     * 22.6x ratios) — ppu=22 puts the HD bunny at world ~25x33, visually
-     * identical to SD when both share the same Transform. Phase 48 merge keeps
-     * the region indices stable on stack so live SpriteComponent.region_index
-     * values stay valid across the toggle (DEMO-08). */
+    /* HD pack uses pixels_per_unit=17.0F so the on-screen size after the
+     * builder's alpha-trim matches the SD bunny.
+     *
+     * SD bunnies are pixel art with no transparent margin → trim is a no-op.
+     * HD illustrations have ~42% transparent margin around the character that
+     * the builder strips during alpha-trim, so the actual rendered region per
+     * HD bunny is ~227 750 px (avg of BENCH trim_area / 5), i.e. ≈477x477
+     * visible content. Dividing by ppu=17 → ~28x28 world units, close to
+     * SD's 25x32. With the earlier ppu=22 the trimmed HD bunnies rendered
+     * at ~22x22 — visibly smaller AND hitting fewer fragments per sprite,
+     * which masked the real per-fragment cost (HD looked artificially fast
+     * on 60k bunnies vs SD).
+     *
+     * Phase 48 atlas merge keeps region indices stable on stack so live
+     * SpriteComponent.region_index values stay valid across the toggle
+     * (DEMO-08). */
     (void)printf("\n=== Build Bunnymark HD Pack -> %s ===\n\n", out_dir);
 
     NtBuilderContext *ctx_hd = nt_builder_start_pack(pack_path(out_dir, "bunnymark_hd.ntpack"));
@@ -173,10 +183,11 @@ int main(int argc, char *argv[]) {
     nt_atlas_opts_t hd_opts = nt_atlas_opts_defaults();
     hd_opts.shape = NT_ATLAS_SHAPE_RECT;
     hd_opts.allow_transform = true;
-    hd_opts.pixels_per_unit = 22.0F; /* HD source 543x724 / SD 25x32 ≈ 22x — match on-screen size */
+    hd_opts.pixels_per_unit = 17.0F; /* HD trim_area / 5 ≈ 477x477 visible / 17 ≈ 28x28 world ≈ SD 25x32 */
     hd_opts.padding = 2;
     hd_opts.margin = 2;
     hd_opts.extrude = 2;
+    hd_opts.premultiplied = true;
     nt_tex_compress_opts_t uastc_compress_opts = nt_tex_compress_uastc_default();
     hd_opts.compress = &uastc_compress_opts;
 
@@ -188,7 +199,7 @@ int main(int argc, char *argv[]) {
      * (each matched file derives its own name from basename). */
     nt_builder_atlas_add_glob(ctx_hd, "examples/bunnymark/raw/hd/*.png", NULL);
     nt_builder_end_atlas(ctx_hd);
-    (void)printf("  Atlas 'bunnies' added: HD pack (RECT, ppu=22.0)\n");
+    (void)printf("  Atlas 'bunnies' added: HD pack (RECT, ppu=17.0)\n");
 
     nt_build_result_t r_hd = nt_builder_finish_pack(ctx_hd);
     nt_builder_free_pack(ctx_hd);
