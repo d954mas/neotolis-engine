@@ -4,21 +4,29 @@
 #include "core/nt_types.h"
 #include "render/nt_render_defs.h"
 
-/* ---- Compile-time limits (D-17) ---- */
+/* ---- Compile-time limits (D-17) ----
+ *
+ * Buffers are sized for the worst case (rect: 4 verts + 6 indices per sprite).
+ * Index buffer uses uint32 so the renderer can pack everything emitted in
+ * one frame into a single VBO/IBO upload (Defold-style: collect → upload
+ * once → multi-draw with offsets). Auto-flush on overflow keeps per-cmd
+ * state and re-opens after the upload. */
 
 #ifndef NT_SPRITE_RENDERER_MAX_SPRITES
-#define NT_SPRITE_RENDERER_MAX_SPRITES 4096
+#define NT_SPRITE_RENDERER_MAX_SPRITES 65535
 #endif
 
-/* Worst-case rect (4 verts, 6 indices). Polygon sprites with vertex_count=N
- * reduce capacity proportionally; flush triggers prevent overflow at runtime. */
 #define NT_SPRITE_RENDERER_MAX_VERTICES (NT_SPRITE_RENDERER_MAX_SPRITES * 4)
 #define NT_SPRITE_RENDERER_MAX_INDICES (NT_SPRITE_RENDERER_MAX_SPRITES * 6)
 
-_Static_assert(NT_SPRITE_RENDERER_MAX_VERTICES <= 65535, "NT_SPRITE_RENDERER_MAX_VERTICES > 65535 overflows uint16 index buffer");
-
 /* Hard cap on pipeline cache size (kept in static array to avoid heap). */
 #define NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP 64
+
+/* Recorded draw commands per flush — one per state change (pipeline/material
+ * /textures). Bunnymark uses 1; richer scenes typically stay well under 64. */
+#ifndef NT_SPRITE_RENDERER_MAX_DRAW_CMDS
+#define NT_SPRITE_RENDERER_MAX_DRAW_CMDS 256
+#endif
 
 /* ---- Vertex format (D-16, SPRITE-05) — 24 bytes ---- */
 

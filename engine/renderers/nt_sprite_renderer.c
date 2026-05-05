@@ -19,6 +19,18 @@ typedef struct {
     nt_pipeline_t pipeline;
 } nt_sprite_pipeline_entry_t;
 
+/* Per-state-change draw command. emit_one writes vertices/indices into shared
+ * staging buffers; draw_list opens/closes commands at batch_key boundaries.
+ * flush() uploads VBO+IBO once, then replays each cmd with bind+draw. */
+typedef struct {
+    nt_pipeline_t pipeline;
+    uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
+    const char *tex_names[NT_MATERIAL_MAX_TEXTURES];
+    uint8_t tex_count;
+    uint32_t first_index; /* offset into s_sprite.indices[] */
+    uint32_t index_count;
+} nt_sprite_draw_cmd_t;
+
 static struct {
     bool initialized;
     uint16_t max_pipelines;
@@ -26,14 +38,18 @@ static struct {
     uint16_t count;
 
     nt_buffer_t vbo; /* dynamic, sized for NT_SPRITE_RENDERER_MAX_VERTICES * 24 */
-    nt_buffer_t ibo; /* dynamic, sized for NT_SPRITE_RENDERER_MAX_INDICES * 2 */
+    nt_buffer_t ibo; /* dynamic, sized for NT_SPRITE_RENDERER_MAX_INDICES * 4 (uint32 indices) */
     nt_sprite_vertex_t vertices[NT_SPRITE_RENDERER_MAX_VERTICES];
-    uint16_t indices[NT_SPRITE_RENDERER_MAX_INDICES];
+    uint32_t indices[NT_SPRITE_RENDERER_MAX_INDICES];
     uint32_t vertex_count;
     uint32_t index_count;
 
-    /* Per-batch state (set inside draw_list, consumed by flush) */
-    nt_pipeline_t current_pipeline;
+    /* Recorded per-state draw commands. Last entry is the "currently open"
+     * cmd that emit_one writes into; closed by close_current_cmd() before a
+     * new state is pushed or before flush(). */
+    nt_sprite_draw_cmd_t cmds[NT_SPRITE_RENDERER_MAX_DRAW_CMDS];
+    uint32_t cmd_count;
+
     uint32_t frame_draw_calls; /* test counter; SEPARATE from nt_gfx_get_frame_draw_calls per CONTEXT D-39 */
 #ifdef NT_SPRITE_RENDERER_TEST_ACCESS
     /* Test-only: last emit_one() vertex/index counts captured BEFORE flush
@@ -79,8 +95,8 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
     s_sprite.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_INDEX,
         .usage = NT_USAGE_DYNAMIC,
-        .size = NT_SPRITE_RENDERER_MAX_INDICES * (uint32_t)sizeof(uint16_t),
-        .index_type = NT_INDEX_UINT16,
+        .size = NT_SPRITE_RENDERER_MAX_INDICES * (uint32_t)sizeof(uint32_t),
+        .index_type = NT_INDEX_UINT32,
         .label = "sprite_ibo",
     });
     NT_ASSERT(s_sprite.ibo.id != 0);
@@ -181,6 +197,49 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
 }
 // #endregion
 
+// #region cmd queue helpers
+/* Close the currently-open draw cmd by computing its index_count from the
+ * accumulated staging position. Empty cmds (no indices written) are popped
+ * so they never reach the GPU as zero-draw glDrawElements calls. */
+static void close_current_cmd(void) {
+    if (s_sprite.cmd_count == 0) {
+        return;
+    }
+    nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count - 1];
+    c->index_count = s_sprite.index_count - c->first_index;
+    if (c->index_count == 0) {
+        s_sprite.cmd_count--;
+    }
+}
+
+/* Open a new cmd with state captured from a resolved material_info, anchored
+ * at the current staging index_count. Caller must close the previous cmd via
+ * close_current_cmd() before opening a new one. */
+static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi) {
+    NT_ASSERT(s_sprite.cmd_count < NT_SPRITE_RENDERER_MAX_DRAW_CMDS && "sprite draw-cmd queue full; raise NT_SPRITE_RENDERER_MAX_DRAW_CMDS");
+    nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count++];
+    c->pipeline = pip;
+    c->tex_count = mi->tex_count;
+    for (uint8_t i = 0; i < mi->tex_count; i++) {
+        c->resolved_tex[i] = mi->resolved_tex[i];
+        c->tex_names[i] = mi->tex_names[i];
+    }
+    c->first_index = s_sprite.index_count;
+    c->index_count = 0;
+}
+
+/* Re-open a cmd with state copied from another cmd. Used by emit_one's
+ * overflow recovery path: snapshot the current cmd's state before flush()
+ * resets cmd_count, then re-open with first_index=0 in the fresh staging. */
+static void open_cmd_from_snapshot(const nt_sprite_draw_cmd_t *snap) {
+    NT_ASSERT(s_sprite.cmd_count < NT_SPRITE_RENDERER_MAX_DRAW_CMDS);
+    nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count++];
+    *c = *snap;
+    c->first_index = s_sprite.index_count;
+    c->index_count = 0;
+}
+// #endregion
+
 // #region emit_one (per-sprite vertex/index emit)
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_one(const nt_render_item_t *item) {
@@ -200,10 +259,15 @@ static void emit_one(const nt_render_item_t *item) {
     const uint16_t *idx = nt_atlas_get_region_indices(atlas, ridx);
     NT_ASSERT(cpos != NULL && cuv != NULL && idx != NULL);
 
-    /* Capacity guard — flush if this emit would overflow staging (auto-flush
-     * mid-run is fine; the same pipeline is rebound on the next emit). */
+    /* Capacity guard — if this sprite would overflow staging, snapshot the
+     * open cmd's state, flush() (uploads + replays cmds + resets), then
+     * re-open a fresh cmd with the same state at first_index=0. The caller
+     * sees no state change; the GPU just gets two flushes instead of one. */
     if (s_sprite.vertex_count + r->vertex_count > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + r->index_count > NT_SPRITE_RENDERER_MAX_INDICES) {
+        NT_ASSERT(s_sprite.cmd_count > 0 && "emit_one called with no open cmd");
+        nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
         nt_sprite_renderer_flush();
+        open_cmd_from_snapshot(&snapshot);
     }
 
     /* Model matrix + origin override (D-07). Override path is cold for the
@@ -259,9 +323,10 @@ static void emit_one(const nt_render_item_t *item) {
     }
     s_sprite.vertex_count += r->vertex_count;
 
-    /* Emit indices (rebase to staging base) */
+    /* Emit indices (rebase to staging base; uint32 leaves headroom for big
+     * VBOs without per-cmd splits). */
     for (uint8_t i = 0; i < r->index_count; i++) {
-        s_sprite.indices[s_sprite.index_count + i] = (uint16_t)(base + idx[i]);
+        s_sprite.indices[s_sprite.index_count + i] = base + (uint32_t)idx[i];
     }
     s_sprite.index_count += r->index_count;
 
@@ -276,7 +341,23 @@ static void emit_one(const nt_render_item_t *item) {
 // #endregion
 
 // #region draw_list
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/* Defold-style two-phase pipeline (D-18 semantics preserved):
+ *
+ *   Phase 1 (this function): walk run boundaries, open a draw cmd per
+ *   batch_key with its pipeline + texture state, append per-sprite vertices
+ *   into shared staging via emit_one.
+ *
+ *   Phase 2 (nt_sprite_renderer_flush, called once at the end): single VBO
+ *   + IBO upload, then iterate cmds binding state once per cmd and issuing
+ *   one nt_gfx_draw_indexed with byte offsets. emit_one auto-flushes
+ *   mid-list when staging overflows and re-opens the same cmd state, so
+ *   the contract still gives N flushes for N batch_keys in the common case
+ *   (= 1 for bunnymark with 60k uniformly-keyed sprites).
+ *
+ *   Why N draws and not 1: between cmds the GPU may need a new pipeline
+ *   binding (different shader/blend/depth) or a new texture binding, which
+ *   must happen between draw calls in WebGL2/GL. Cmds inside flush() bind
+ *   only what changed (pipeline & texture id tracked since previous cmd). */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     NT_ASSERT(s_sprite.initialized);
     if (count == 0) {
@@ -287,7 +368,6 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
      * nt_gfx_get_frame_draw_calls, which is reset by nt_gfx_begin_frame). */
     s_sprite.frame_draw_calls = 0;
 
-    bool first_group = true;
     uint32_t run_start = 0;
     while (run_start < count) {
         uint32_t run_end = run_start + 1;
@@ -306,31 +386,13 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
             continue;
         }
 
-        /* D-18: flush at every batch_key boundary (one nt_gfx_draw_indexed per
-         * batch group). This is the contract — even when consecutive groups
-         * resolve to the same cached pipeline, the game has signalled they
-         * are not state-compatible by giving them different batch_keys. */
-        if (!first_group && s_sprite.vertex_count > 0) {
-            nt_sprite_renderer_flush();
-        }
-        first_group = false;
-
+        /* D-18: every batch_key boundary opens a fresh cmd. Even when the
+         * resolved pipeline matches the previous cmd, the game has signalled
+         * the runs are not state-compatible — keep them as separate draws
+         * so flush() can re-bind whatever the game needs. */
         nt_pipeline_t pip = find_or_create_pipeline(mat_info);
-        if (s_sprite.current_pipeline.id != pip.id) {
-            nt_gfx_bind_pipeline(pip);
-            s_sprite.current_pipeline = pip;
-
-            /* Bind first material texture (atlas page) — sprite shader uses
-             * a single sampler. Mirrors nt_mesh_renderer texture binding. */
-            for (uint8_t t = 0; t < mat_info->tex_count; t++) {
-                if (mat_info->resolved_tex[t] != 0) {
-                    nt_gfx_bind_texture((nt_texture_t){.id = mat_info->resolved_tex[t]}, t);
-                    if (mat_info->tex_names[t] != NULL) {
-                        nt_gfx_set_uniform_int(mat_info->tex_names[t], (int)t);
-                    }
-                }
-            }
-        }
+        close_current_cmd();
+        open_cmd(pip, mat_info);
 
         for (uint32_t i = run_start; i < run_end; i++) {
             emit_one(&items[i]);
@@ -338,23 +400,70 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         run_start = run_end;
     }
     nt_sprite_renderer_flush();
-    s_sprite.current_pipeline = (nt_pipeline_t){0};
 }
 // #endregion
 
 // #region flush
+/* Phase 2 of the Defold-style pipeline: single VBO + IBO upload, then replay
+ * recorded draw cmds with state binding only when it changes between cmds.
+ * Resets all staging counters at the end so the next draw_list / external
+ * caller starts clean. Idempotent when nothing was emitted. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_flush(void) {
-    if (s_sprite.vertex_count == 0) {
+    /* Closing the open cmd is safe here (no-op if cmd_count==0). */
+    close_current_cmd();
+    if (s_sprite.cmd_count == 0 || s_sprite.vertex_count == 0) {
+        s_sprite.vertex_count = 0;
+        s_sprite.index_count = 0;
+        s_sprite.cmd_count = 0;
         return;
     }
+
+    /* Single upload for the whole frame's worth of geometry — vs the previous
+     * implementation that did one update_buffer per 4096-sprite flush
+     * (16 uploads on 60k bunnies), each potentially stalling the WebGL
+     * driver's dynamic VBO. */
     nt_gfx_update_buffer(s_sprite.vbo, s_sprite.vertices, s_sprite.vertex_count * (uint32_t)sizeof(nt_sprite_vertex_t));
-    nt_gfx_update_buffer(s_sprite.ibo, s_sprite.indices, s_sprite.index_count * (uint32_t)sizeof(uint16_t));
-    nt_gfx_bind_vertex_buffer(s_sprite.vbo);
+    nt_gfx_update_buffer(s_sprite.ibo, s_sprite.indices, s_sprite.index_count * (uint32_t)sizeof(uint32_t));
+
+    /* VBO/IBO binds happen once before the cmd loop; the layout is fixed
+     * (D-16) so no re-bind is needed between cmds even when the pipeline
+     * changes — same attribute formats. */
     nt_gfx_bind_index_buffer(s_sprite.ibo);
-    nt_gfx_draw_indexed(0, s_sprite.index_count, s_sprite.vertex_count);
+
+    uint32_t bound_pipeline_id = 0;
+    uint32_t bound_tex_ids[NT_MATERIAL_MAX_TEXTURES] = {0};
+
+    for (uint32_t ci = 0; ci < s_sprite.cmd_count; ci++) {
+        const nt_sprite_draw_cmd_t *c = &s_sprite.cmds[ci];
+
+        if (c->pipeline.id != bound_pipeline_id) {
+            nt_gfx_bind_pipeline(c->pipeline);
+            /* GL backend's bind_vertex_buffer re-applies glVertexAttribPointer
+             * for the currently bound pipeline. Re-bind on every pipeline
+             * switch so pointers reference the (single) sprite VBO under the
+             * new pipeline's attribute locations. */
+            nt_gfx_bind_vertex_buffer(s_sprite.vbo);
+            bound_pipeline_id = c->pipeline.id;
+        }
+
+        for (uint8_t t = 0; t < c->tex_count; t++) {
+            if (c->resolved_tex[t] != 0 && c->resolved_tex[t] != bound_tex_ids[t]) {
+                nt_gfx_bind_texture((nt_texture_t){.id = c->resolved_tex[t]}, t);
+                if (c->tex_names[t] != NULL) {
+                    nt_gfx_set_uniform_int(c->tex_names[t], (int)t);
+                }
+                bound_tex_ids[t] = c->resolved_tex[t];
+            }
+        }
+
+        nt_gfx_draw_indexed(c->first_index, c->index_count, s_sprite.vertex_count);
+        s_sprite.frame_draw_calls++;
+    }
+
     s_sprite.vertex_count = 0;
     s_sprite.index_count = 0;
-    s_sprite.frame_draw_calls++;
+    s_sprite.cmd_count = 0;
 }
 // #endregion
 
