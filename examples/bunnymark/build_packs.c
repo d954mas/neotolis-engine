@@ -77,7 +77,19 @@ int main(int argc, char *argv[]) {
     // #region shaders (game-shipped per D-21, satisfies SPRITE-09 via Phase 35 GLSL validate)
     nt_builder_add_shader(ctx, "assets/shaders/sprite.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/sprite.frag", NT_BUILD_SHADER_FRAGMENT);
-    (void)printf("  Shaders added: 2 (sprite.vert + sprite.frag)\n");
+    /* Slug shaders for the on-screen stats overlay (FPS / draws / bunnies). */
+    nt_builder_add_shader(ctx, "assets/shaders/slug_text.vert", NT_BUILD_SHADER_VERTEX);
+    nt_builder_add_shader(ctx, "assets/shaders/slug_text.frag", NT_BUILD_SHADER_FRAGMENT);
+    (void)printf("  Shaders added: 4 (sprite + slug_text)\n");
+    // #endregion
+
+    // #region font for stats overlay (Latin only — overlay is ASCII)
+    nt_builder_add_font(ctx, "assets/fonts/LilitaOne-RussianChineseKo.ttf",
+                        &(nt_font_opts_t){
+                            .charset = NT_CHARSET_ASCII,
+                            .resource_name = "bunnymark/font_overlay",
+                        });
+    (void)printf("  Font (ASCII) added: bunnymark/font_overlay\n");
     // #endregion
 
     // #region atlas: 5 SD bunny variants
@@ -125,13 +137,12 @@ int main(int argc, char *argv[]) {
 
 #ifdef BUNNYMARK_HD_AVAILABLE
     // #region pack 2: bunnymark_hd.ntpack (Open Q3 — guarded by CMake)
-    /* HD pack uses pixels_per_unit=2.0F so 2 source pixels == 1 world unit; with
-     * the runtime cached_pos bake (ipu = 1/ppu), HD sprites at the same
-     * Transform render at the same on-screen size as the SD pack. The HD art
-     * is user-supplied — the user drops 5 PNGs (matching SD names) into
-     * examples/bunnymark/raw/hd/ and reruns cmake configure. The atlas region
-     * NAMES match the SD names ("bunnies/bunny_red.png" etc.) — Phase 48 merge
-     * keeps the same region indices stable on stack (DEMO-08). */
+    /* HD pack uses pixels_per_unit=22.0F so HD source pixels match SD on-screen
+     * size. The shipped HD art is 543x724 px while SD is 25x32 (≈21.7x and
+     * 22.6x ratios) — ppu=22 puts the HD bunny at world ~25x33, visually
+     * identical to SD when both share the same Transform. Phase 48 merge keeps
+     * the region indices stable on stack so live SpriteComponent.region_index
+     * values stay valid across the toggle (DEMO-08). */
     (void)printf("\n=== Build Bunnymark HD Pack -> %s ===\n\n", out_dir);
 
     NtBuilderContext *ctx_hd = nt_builder_start_pack(pack_path(out_dir, "bunnymark_hd.ntpack"));
@@ -159,7 +170,7 @@ int main(int argc, char *argv[]) {
     nt_atlas_opts_t hd_opts = nt_atlas_opts_defaults();
     hd_opts.shape = NT_ATLAS_SHAPE_RECT;
     hd_opts.allow_transform = true;
-    hd_opts.pixels_per_unit = 2.0F; /* HD: 2 source pixels per unit (D-30) */
+    hd_opts.pixels_per_unit = 22.0F; /* HD source 543x724 / SD 25x32 ≈ 22x — match on-screen size */
     hd_opts.padding = 2;
     hd_opts.margin = 2;
     hd_opts.extrude = 2;
@@ -172,7 +183,7 @@ int main(int argc, char *argv[]) {
      * (each matched file derives its own name from basename). */
     nt_builder_atlas_add_glob(ctx_hd, "examples/bunnymark/raw/hd/*.png", NULL);
     nt_builder_end_atlas(ctx_hd);
-    (void)printf("  Atlas 'bunnies' added: HD pack (RECT, ppu=2.0)\n");
+    (void)printf("  Atlas 'bunnies' added: HD pack (RECT, ppu=22.0)\n");
 
     nt_build_result_t r_hd = nt_builder_finish_pack(ctx_hd);
     nt_builder_free_pack(ctx_hd);

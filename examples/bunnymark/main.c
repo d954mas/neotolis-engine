@@ -21,6 +21,7 @@
 #include "core/nt_platform.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
+#include "font/nt_font.h"
 #include "fs/nt_fs.h"
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
@@ -31,6 +32,7 @@
 #include "material_comp/nt_material_comp.h"
 #include "render/nt_render_defs.h"
 #include "renderers/nt_sprite_renderer.h"
+#include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
 #include "sprite_comp/nt_sprite_comp.h"
 #include "stats/nt_stats.h"
@@ -93,6 +95,10 @@ static bool s_hd_active = false;
 static bool s_hd_load_started = false;
 
 static nt_material_t s_sprite_material;
+
+/* Stats overlay (DEMO-04..06) — separate material/font from sprites. */
+static nt_material_t s_text_material;
+static nt_font_t s_overlay_font;
 
 static nt_bunny_t s_bunnies[BUNNY_MAX];
 static nt_entity_t s_entities[BUNNY_MAX];
@@ -269,6 +275,7 @@ static void frame(void) {
 
     nt_resource_step();
     nt_material_step();
+    nt_font_step();
     nt_sprite_comp_sync_resources();
 
     /* Dump pack contents once, when ready. */
@@ -410,6 +417,21 @@ static void frame(void) {
         // #endregion
     }
 
+    // #region stats overlay (DEMO-04..06 on-screen HUD)
+    /* Top-left corner anchor in world coords (y-up, bottom-left origin).
+     * Text renders below the model translation point by line; size is the
+     * em-height in world units, which == pixels here since ortho is 1:1. */
+    {
+        const float overlay_size = 14.0F;
+        mat4 overlay_model;
+        glm_mat4_identity(overlay_model);
+        glm_translate(overlay_model, (vec3){10.0F, h - overlay_size - 4.0F, 0.0F});
+        const float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+        nt_stats_draw(s_text_material, s_overlay_font, (const float *)overlay_model, overlay_size, white);
+        nt_text_renderer_flush();
+    }
+    // #endregion
+
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
@@ -462,9 +484,11 @@ int main(void) {
     nt_sprite_comp_init(&(nt_sprite_comp_desc_t){.capacity = BUNNY_MAX + 8});
 
     nt_material_init(&(nt_material_desc_t){.max_materials = 4});
+    nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
 
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
     nt_sprite_renderer_init(&sr_desc);
+    nt_text_renderer_init();
 
     /* DEMO-04..06: console throughput log every 60 frames (FPS, CPU/GPU ms,
      * draws, bunnies, atlas quality). On-screen overlay deferred until a font
@@ -520,6 +544,27 @@ int main(void) {
         .label = "sprite",
     });
 
+    /* Stats overlay material (Slug shader) + Latin font for FPS / draws / bunnies HUD. */
+    nt_resource_t slug_vs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_VERT, NT_ASSET_SHADER_CODE);
+    nt_resource_t slug_fs = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SLUG_TEXT_FRAG, NT_ASSET_SHADER_CODE);
+    s_text_material = nt_material_create(&(nt_material_create_desc_t){
+        .vs = slug_vs,
+        .fs = slug_fs,
+        .blend_mode = NT_BLEND_MODE_ALPHA,
+        .depth_test = false,
+        .depth_write = false,
+        .cull_mode = NT_CULL_NONE,
+        .label = "stats_overlay",
+    });
+    s_overlay_font = nt_font_create(&(nt_font_create_desc_t){
+        .curve_texture_width = 1024,
+        .curve_texture_height = 512,
+        .band_texture_height = 256,
+        .band_count = 8,
+    });
+    nt_resource_t overlay_font_res = nt_resource_request(ASSET_FONT_BUNNYMARK_FONT_OVERLAY, NT_ASSET_FONT);
+    nt_font_add(s_overlay_font, overlay_font_res);
+
     nt_resource_set_activate_time_budget(0);
 
 #ifdef NT_PLATFORM_WEB
@@ -540,6 +585,9 @@ int main(void) {
 
 #ifndef NT_PLATFORM_WEB
     nt_stats_shutdown();
+    nt_text_renderer_shutdown();
+    nt_font_destroy(s_overlay_font);
+    nt_font_shutdown();
     nt_sprite_renderer_shutdown();
     nt_sprite_comp_shutdown();
     nt_drawable_comp_shutdown();
@@ -547,6 +595,7 @@ int main(void) {
     nt_transform_comp_shutdown();
     nt_entity_shutdown();
     nt_material_destroy(s_sprite_material);
+    nt_material_destroy(s_text_material);
     nt_material_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();
