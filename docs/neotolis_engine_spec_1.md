@@ -482,14 +482,32 @@ Default component indices = `uint16_t`. Only use `uint32_t` if truly needed late
 
 ## 7.4 Component API style
 
-Typed APIs, not one generic mega-API:
+Typed APIs, not one generic mega-API. Each component module exposes its own
+init descriptor, lifecycle (`init`, `shutdown`), per-entity ops (`add`, `has`,
+`remove`), and per-field accessors. Components do not return a monolithic
+struct — fields live in parallel SoA arrays and are read/written one at a time.
 
 ```c
-TransformComponent* transform_add(EntityHandle e);
-TransformComponent* transform_get(EntityHandle e);
-bool transform_has(EntityHandle e);
-void transform_remove(EntityHandle e);
+/* Lifecycle */
+nt_result_t  nt_transform_comp_init(const nt_transform_comp_desc_t *desc);
+void         nt_transform_comp_shutdown(void);
+
+/* Per-entity ops */
+bool nt_transform_comp_add(nt_entity_t e);
+bool nt_transform_comp_has(nt_entity_t e);
+void nt_transform_comp_remove(nt_entity_t e);
+
+/* Per-field accessors return pointers into the dense SoA — the caller
+ * mutates fields directly through the returned pointer where appropriate. */
+float *nt_transform_comp_position(nt_entity_t e); /* vec3 */
+float *nt_transform_comp_rotation(nt_entity_t e); /* vec4 quaternion */
+/* ... */
 ```
+
+Modules with cross-field invariants (e.g. sprite_comp, where `atlas` and
+`region_hash` drive a cached `region_index`) return `const` accessors and
+provide dedicated setters instead. See per-component sections in §8 and §9
+for the actual API surface.
 
 ---
 
@@ -497,18 +515,18 @@ void transform_remove(EntityHandle e);
 
 ## 8.1 Transform component data
 
-```c
-typedef struct TransformComponent
-{
-    vec3 local_position;
-    quat local_rotation;
-    vec3 local_scale;
+The transform component is SoA — there is no monolithic `TransformComponent`
+struct in the code. Each entity contributes one row across these dense fields:
 
-    mat4 world_matrix;
+| Field          | Type     | Notes                                |
+|----------------|----------|--------------------------------------|
+| local position | `vec3`   | mutable via `nt_transform_comp_position(e)`  |
+| local rotation | `vec4`   | quaternion, via `nt_transform_comp_rotation(e)`  |
+| local scale    | `vec3`   | via `nt_transform_comp_scale(e)`     |
+| world matrix   | `mat4`   | read-only via `nt_transform_comp_world_matrix(e)`; recomputed by `nt_transform_comp_update()` |
+| dirty          | `bool`   | mutable; set when locals change      |
 
-    bool dirty;
-} TransformComponent;
-```
+API surface lives in `engine/transform_comp/nt_transform_comp.h`.
 
 Optional future additions: previous_world_matrix, decomposed world data, bounds dirty flag.
 
@@ -538,70 +556,79 @@ The architecture supports different renderable kinds via separate components, no
 
 ## 9.1 Common render state
 
-```c
-typedef struct DrawableComponent
-{
-    nt_hash32_t tag;  // hash-based, game-defined via nt_hash32_str()
-    bool visible;
-    vec4 color;
-} DrawableComponent;
-```
+The drawable component is SoA. Fields:
 
-Defaults: `visible = true`, `color = (1,1,1,1)`, `tag = {0}`.
+| Field   | Type          | Default      | Notes                                |
+|---------|---------------|--------------|--------------------------------------|
+| tag     | `nt_hash32_t` | `{0}`        | pass/group filter; set via `nt_hash32_str("world")` etc. |
+| visible | `bool`        | `true`       | render visibility only               |
+| color   | `vec4`        | `(1,1,1,1)`  | object tint / alpha multiplier       |
 
-- `tag`: pass/group filter chosen by game, set via `nt_hash32_str("world")` etc.
-- `visible`: render visibility only
-- `color`: object tint / alpha multiplier
+Accessors return mutable pointers (`nt_drawable_comp_tag/visible/color`) — fields
+are independent so direct mutation is safe. API lives in
+`engine/drawable_comp/nt_drawable_comp.h`.
 
 Per-entity shader params (`params0`) deferred to ShaderParamsComponent — add when per-entity shader effects are needed (#98).
 
 ## 9.2 Mesh component
 
+Per-entity mesh handle. The component stores a single `nt_mesh_t` per entity
+(typed handle from the gfx module); accessor returns a mutable pointer:
+
 ```c
-typedef struct MeshComponent
-{
-    MeshAssetRef mesh;
-} MeshComponent;
+nt_mesh_t *nt_mesh_comp_handle(nt_entity_t e);
 ```
+
+API in `engine/mesh_comp/nt_mesh_comp.h`. There is no `MeshComponent` struct
+or `MeshAssetRef` wrapper — just one handle per entity.
 
 ## 9.3 Material component
 
+Per-entity material handle. The component stores a single `nt_material_t`
+per entity (handle from the `nt_material` module); accessor returns a
+mutable pointer:
+
 ```c
-typedef struct MaterialComponent
-{
-    nt_material_t material; /* typed handle from nt_material module */
-} MaterialComponent;
+nt_material_t *nt_material_comp_handle(nt_entity_t e);
 ```
+
+API in `engine/material_comp/nt_material_comp.h`. There is no
+`MaterialComponent` struct — just one handle per entity. The `nt_material`
+module behind the handle is described in §16.
 
 ## 9.4 Sprite component
 
-```c
-typedef struct SpriteComponent
-{
-    SpriteAssetRef sprite;
-} SpriteComponent;
-```
+The sprite component is a SoA module — there is no monolithic `SpriteComponent`
+struct. Each sprite-bearing entity contributes one row across parallel dense
+arrays (atlas handle, region hash, cached region index, cached atlas revision,
+effective origin, flag bits). The module owns those arrays directly and
+exposes them via per-entity accessors and a bulk view (see header
+`engine/sprite_comp/nt_sprite_comp.h` for the full API).
 
-Baseline sprite asset ref is atlas-backed:
+### Identity
 
-```c
-typedef struct SpriteAssetRef
-{
-    nt_resource_t atlas;
-    uint64_t      region_hash;
-} SpriteAssetRef;
-```
+Sprite identity is the pair `(nt_resource_t atlas, uint64_t region_hash)`.
+That pair survives atlas republish, hot reload, and region renumbering.
 
-Runtime may cache resolved region index, snapshot revision, and effective origin
-next to the component for fast rendering. Their *layout* is an implementation
-detail (SoA fields, internal flags, etc.) — the stable identity is
-`atlas + region_hash`.
+The runtime additionally caches:
 
-Two binding modes, picked by what the game knows:
+- **Resolved region index** — `uint16_t` index into the atlas region table.
+- **Atlas revision snapshot** — `uint32_t`, used to detect republish.
+- **Effective origin** — `float[2]`, either authored from the region or
+  overridden by the game.
+- **Flag byte** — `FLIP_X`, `FLIP_Y`, `ORIGIN_OV`, `RESOLVED`.
+
+These are implementation details. Game code reads them through the public
+accessors; layout (SoA, packed flags, sentinel choices) is not part of the
+contract.
+
+### Binding modes
+
+Two ways to bind a sprite to a region, picked by what the game knows:
 
 - **By hash (slow path, async-friendly).** Game knows `region_hash` only.
   The atlas may not be ready yet. Sync resolves the hash to a region index
-  on the next `sprite_comp_sync_resources()` once the atlas is published.
+  on the next `nt_sprite_comp_sync_resources()` once the atlas is published.
   Cost: one hash-table lookup per sprite per resolve.
 - **By index (fast path, requires ready atlas).** Game already knows the
   numeric region index — typically because it cycled an animation frame,
@@ -616,19 +643,55 @@ Two binding modes, picked by what the game knows:
 Game code is free to read back the cached region index for animation logic
 (e.g. cycle to the next frame). It is stable across atlas republish for
 surviving regions; the only failure mode — tombstoning — is observable via
-`is_resolved()`. The game must not, however, depend on the *internal layout*
-of the cache: always go through the public accessor, never poke SoA arrays
-directly.
+`is_resolved()`.
+
+### Origin override and flip
+
+Each sprite carries an effective origin (`float[2]`). By default it tracks
+the region's authored origin from the atlas. The game may override it with
+`set_origin(x, y)`, which sets the `ORIGIN_OV` flag and pins the value across
+subsequent atlas republishes. `reset_origin()` clears the override and
+restores the authored value on the next sync.
+
+Flip is a pair of flag bits (`FLIP_X`, `FLIP_Y`) toggled via `set_flip`.
+They are pure state — no resolve, no atlas interaction.
+
+### Lifecycle
+
+```c
+nt_sprite_comp_init(&(nt_sprite_comp_desc_t){ .capacity = 4096 });
+/* per-frame: */
+nt_resource_step();
+nt_sprite_comp_sync_resources();   /* explicit, after publication */
+/* on shutdown: */
+nt_sprite_comp_shutdown();
+```
+
+Capacity is set once at init (see §5.3). All SoA arrays are allocated up
+front and never grow.
+
+### Resolution flow
 
 Resolution is explicit, not renderer-driven magic:
 
 - game code requests / mounts resources
 - `resource_step()` publishes winners
-- game code calls `sprite_comp_sync_resources()` (or equivalent system)
+- game code calls `nt_sprite_comp_sync_resources()` (or equivalent system)
+- sync iterates dense sprite rows when the resource publication epoch
+  advanced or any sprite was bound by hash since the last call; per-row
+  early-out via cached atlas revision keeps stable frames cheap
 - sprite render-item build skips unresolved sprites
 
+### Bulk iteration
+
+`nt_sprite_comp_view()` returns base pointers into the dense SoA arrays plus
+the live count and an `entity_indices` array (dense → entity index) for
+joining sprites with other components. Pointers are stable for the lifetime
+of the module; values shift on add/remove (swap-and-pop) so views must not
+be cached across mutations.
+
 > **Status:** as of Phase 49, only the component data layer (sprite_comp,
-> atlas, resource publication_epoch) is implemented. The sprite render-item
+> atlas, resource `publication_epoch`) is implemented. The sprite render-item
 > builder and any associated dedicated renderer are deferred to a later phase.
 > "Render-item build skips unresolved sprites" describes the contract those
 > future systems must honour, not behaviour that exists today.
@@ -637,12 +700,14 @@ Sprite is a separate render kind, not a special mode of mesh.
 
 ## 9.5 Text component
 
-```c
-typedef struct TextComponent
-{
-    nt_font_t font;    /* handle from nt_font_create / nt_font_add */
-    StringId text;
-} TextComponent;
+> **Status:** the text component module does not exist yet — only the
+> `nt_font` module backing it is implemented (`engine/font/nt_font.h`).
+> The shape below describes the planned component.
+
+```text
+text_comp fields (planned):
+  font   nt_font_t   /* handle from nt_font_create / nt_font_add */
+  text   StringId    /* intern-table reference, design TBD */
 ```
 
 `nt_font_t` is a pool-backed handle to a font instance. A font instance owns GPU textures (curve + band) and a glyph cache. Font data comes from one or more `nt_resource_t` assets attached via `nt_font_add()`, allowing fallback chains (base font + CJK extension pack, etc.). Glyphs are decoded and uploaded to GPU on first lookup, not on asset load.
@@ -651,13 +716,14 @@ StringId references a string in a string pool/intern table (detail deferred to i
 
 ## 9.6 Shadow component
 
-```c
-typedef struct ShadowComponent
-{
-    bool enabled;
-    MeshAssetRef mesh_override;
-    MaterialAssetRef material_override;
-} ShadowComponent;
+> **Status:** the shadow component module does not exist yet. The shape
+> below describes the planned component once a shadow pass lands.
+
+```text
+shadow_comp fields (planned):
+  enabled            bool
+  mesh_override      nt_mesh_t       /* optional override; INVALID = use primary mesh */
+  material_override  nt_material_t   /* optional override; INVALID = use primary material */
 ```
 
 If missing: object does not participate in shadow pass. If present and enabled: use override mesh/material if valid, otherwise use primary mesh/material or default shadow path.
@@ -887,8 +953,16 @@ Benefits: simple layout, simple alignment, easy future GPU block packing, no per
 
 ## 16.3 MaterialAsset binary layout
 
+> **Status:** materials today are created at runtime from
+> `nt_material_create_desc_t` (see `engine/material/nt_material.h`). There is
+> no `NT_ASSET_MATERIAL` activator and no pack-loadable material format yet.
+> The layout below describes the planned on-disk shape once material assets
+> become pack-loadable. `ShaderAssetRef` and `TextureAssetRef` are also
+> planned types; current shaders are loaded as `NT_ASSET_SHADER_CODE` blobs
+> referenced by `nt_resource_t` directly.
+
 ```c
-// In-memory header (NOT a C struct with FAM)
+// In-memory header (NOT a C struct with FAM) — PLANNED, not yet implemented
 typedef struct MaterialAssetHeader
 {
     ShaderAssetRef vertex_shader;
