@@ -43,7 +43,10 @@ bool nt_sprite_comp_is_resolved(nt_entity_t entity);
 
 /* ---- Region binding ---- */
 
-/* Strict fast path: atlas must already be READY. */
+/* Strict fast path: atlas must already be READY. Resolves immediately and sets
+ * RESOLVED. Does NOT raise s_sync_dirty — there is nothing to sync. If the
+ * atlas later republishes, the next sync_resources() catches it via the cached
+ * atlas_revision gate inside resolve_dense, so callers do not need to re-bind. */
 void nt_sprite_comp_set_region(nt_entity_t entity, nt_resource_t atlas, uint16_t region_index);
 
 /* Async-friendly path: stores atlas + region hash, then resolves explicitly in
@@ -59,7 +62,14 @@ void nt_sprite_comp_reset_origin(nt_entity_t entity);
 
 void nt_sprite_comp_set_flip(nt_entity_t entity, bool flip_x, bool flip_y);
 
-/* ---- Read accessors (return const pointer into dense SoA array) ---- */
+/* ---- Read accessors (return const pointer into dense SoA array) ----
+ *
+ * Note on const: unlike drawable_comp / material_comp which return mutable
+ * pointers, sprite_comp accessors are strictly read-only. Sprite fields are
+ * coupled through resolve (atlas/region_hash drive the cached region_index,
+ * authored origin, and RESOLVED flag) — direct mutation would silently break
+ * those invariants. Use the dedicated set_region / bind_by_hash / set_origin /
+ * set_flip entry points to mutate state. */
 
 const nt_resource_t *nt_sprite_comp_atlas(nt_entity_t entity);
 const uint64_t *nt_sprite_comp_region_hash(nt_entity_t entity);

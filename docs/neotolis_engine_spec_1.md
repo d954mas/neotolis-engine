@@ -624,6 +624,12 @@ Resolution is explicit, not renderer-driven magic:
 - game code calls `sprite_comp_sync_resources()` (or equivalent system)
 - sprite render-item build skips unresolved sprites
 
+> **Status:** as of Phase 49, only the component data layer (sprite_comp,
+> atlas, resource publication_epoch) is implemented. The sprite render-item
+> builder and any associated dedicated renderer are deferred to a later phase.
+> "Render-item build skips unresolved sprites" describes the contract those
+> future systems must honour, not behaviour that exists today.
+
 Sprite is a separate render kind, not a special mode of mesh.
 
 ## 9.5 Text component

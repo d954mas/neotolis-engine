@@ -104,7 +104,12 @@ static uint32_t resource_get_time_ms(void) { return (uint32_t)(nt_time_now() * 1
 
 static inline nt_resource_t resource_make(uint16_t index, uint16_t gen) { return (nt_resource_t){.id = ((uint32_t)gen << 16) | index}; }
 
-static void resource_bump_publication_epoch(void) { s_resource.publication_epoch++; }
+static void resource_bump_publication_epoch(void) {
+    s_resource.publication_epoch++;
+    if (s_resource.publication_epoch == 0) {
+        s_resource.publication_epoch = 1; /* skip 0: subscribers init last_seen=0 and "0 == 0" must mean "never observed" */
+    }
+}
 
 static bool slot_user_data_synced_for(const NtResourceSlot *slot, uint16_t asset_idx) { return slot->user_data != NULL && slot->user_data_asset_idx == asset_idx; }
 

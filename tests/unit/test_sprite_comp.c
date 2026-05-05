@@ -76,7 +76,8 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
 
 static bool s_atlas_initialized;
 static nt_resource_t s_atlas_res;
-static uint8_t *s_pack_blobs[4]; /* heap-allocated pack blobs for cleanup */
+#define NT_TEST_MAX_PACK_BLOBS 8
+static uint8_t *s_pack_blobs[NT_TEST_MAX_PACK_BLOBS]; /* heap-allocated pack blobs for cleanup */
 static uint8_t s_pack_blob_count;
 
 /* ---- Atlas fixture: full resource pipeline ---- */
@@ -170,7 +171,7 @@ static uint8_t *build_pack_blob_for_atlas(uint64_t atlas_rid, const uint8_t *atl
     ph->checksum = nt_crc32(pack_blob + header_size, total_size - header_size);
     // #endregion
 
-    TEST_ASSERT_TRUE_MESSAGE(s_pack_blob_count < 4, "pack blob test fixture overflow");
+    TEST_ASSERT_TRUE_MESSAGE(s_pack_blob_count < NT_TEST_MAX_PACK_BLOBS, "pack blob test fixture overflow");
     s_pack_blobs[s_pack_blob_count++] = pack_blob;
     return pack_blob;
 }
