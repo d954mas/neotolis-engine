@@ -380,6 +380,11 @@ static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_vie
  * cached_pos has 1/pixels_per_unit baked in (D-32 + Pitfall 3) so the
  * sprite renderer is pixels_per_unit-oblivious. atlas_u/v are already stored
  * in atlas-page space by the builder, including any D4 placement transform.
+ * Y axis is flipped here: source PNG local_y is top-down (row 0 at the top
+ * of the image) while the engine world is y-up (D-25, glm_ortho with
+ * bottom=0). Inverting `local_y - origin_px_y` to `origin_px_y - local_y`
+ * lands the PNG's top edge at world top so sprites render upright in a
+ * y-up ortho without per-game scale_y=-1 hacks.
  * Tombstones (NT_ATLAS_TOMBSTONE_HASH) and zero-vertex regions are
  * no-ops — their cached slices stay zero from calloc / zero-fill. */
 static void atlas_precompute_region(nt_atlas_data_t *ad, uint32_t region_idx) {
@@ -392,7 +397,7 @@ static void atlas_precompute_region(nt_atlas_data_t *ad, uint32_t region_idx) {
     for (uint32_t v = 0; v < r->vertex_count; v++) {
         const nt_atlas_vertex_t *raw = &ad->vertices[r->vertex_start + v];
         ad->cached_pos[r->vertex_start + v][0] = ((float)raw->local_x - origin_px_x) * ad->ipu;
-        ad->cached_pos[r->vertex_start + v][1] = ((float)raw->local_y - origin_px_y) * ad->ipu;
+        ad->cached_pos[r->vertex_start + v][1] = (origin_px_y - (float)raw->local_y) * ad->ipu;
         ad->cached_uv[r->vertex_start + v][0] = (float)raw->atlas_u * (1.0F / 65535.0F);
         ad->cached_uv[r->vertex_start + v][1] = (float)raw->atlas_v * (1.0F / 65535.0F);
     }

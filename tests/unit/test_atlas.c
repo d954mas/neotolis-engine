@@ -1560,15 +1560,17 @@ void test_atlas_cached_pos_origin_subtract(void) {
     const float(*pos)[2] = nt_atlas_test_cached_pos(ad);
     TEST_ASSERT_NOT_NULL(pos);
 
-    /* Pivot at center (origin 0.5,0.5 of 10x10 = pixel 5,5). */
+    /* Pivot at center (origin 0.5,0.5 of 10x10 = pixel 5,5).
+     * Y is flipped (PNG y-down → world y-up), so PNG-top vertices land at
+     * positive world y and PNG-bottom vertices at negative world y. */
     assert_float_close(-5.0F, pos[0][0], 1e-5F, "v0.x");
-    assert_float_close(-5.0F, pos[0][1], 1e-5F, "v0.y");
+    assert_float_close(5.0F, pos[0][1], 1e-5F, "v0.y (PNG top → world top)");
     assert_float_close(5.0F, pos[1][0], 1e-5F, "v1.x");
-    assert_float_close(-5.0F, pos[1][1], 1e-5F, "v1.y");
+    assert_float_close(5.0F, pos[1][1], 1e-5F, "v1.y (PNG top → world top)");
     assert_float_close(-5.0F, pos[2][0], 1e-5F, "v2.x");
-    assert_float_close(5.0F, pos[2][1], 1e-5F, "v2.y");
+    assert_float_close(-5.0F, pos[2][1], 1e-5F, "v2.y (PNG bottom → world bottom)");
     assert_float_close(5.0F, pos[3][0], 1e-5F, "v3.x");
-    assert_float_close(5.0F, pos[3][1], 1e-5F, "v3.y");
+    assert_float_close(-5.0F, pos[3][1], 1e-5F, "v3.y (PNG bottom → world bottom)");
 
     /* Default ipu when no metadata read: 1.0F. */
     assert_float_close(1.0F, nt_atlas_test_ipu(ad), 1e-7F, "default ipu");
@@ -1687,15 +1689,16 @@ void test_atlas_pixels_per_unit_metadata_roundtrip(void) {
     TEST_ASSERT_EQUAL_UINT32(0, region_idx);
     const float(*pos)[2] = nt_atlas_get_region_cached_pos(atlas_res, region_idx);
     TEST_ASSERT_NOT_NULL(pos);
-    /* origin (0,0) → cached_pos = (local * 0.5). */
+    /* origin (0,0), ipu=0.5: cached_pos.x = local_x*0.5; cached_pos.y is
+     * Y-flipped (PNG y-down → world y-up) → -local_y*0.5. */
     assert_float_close(0.0F, pos[0][0], 1e-5F, "ppu=2 v0.x");
-    assert_float_close(0.0F, pos[0][1], 1e-5F, "ppu=2 v0.y");
+    assert_float_close(0.0F, pos[0][1], 1e-5F, "ppu=2 v0.y (PNG top → world top)");
     assert_float_close(5.0F, pos[1][0], 1e-5F, "ppu=2 v1.x");
-    assert_float_close(0.0F, pos[1][1], 1e-5F, "ppu=2 v1.y");
+    assert_float_close(0.0F, pos[1][1], 1e-5F, "ppu=2 v1.y (PNG top → world top)");
     assert_float_close(0.0F, pos[2][0], 1e-5F, "ppu=2 v2.x");
-    assert_float_close(5.0F, pos[2][1], 1e-5F, "ppu=2 v2.y");
+    assert_float_close(-5.0F, pos[2][1], 1e-5F, "ppu=2 v2.y (PNG bottom → world bottom)");
     assert_float_close(5.0F, pos[3][0], 1e-5F, "ppu=2 v3.x");
-    assert_float_close(5.0F, pos[3][1], 1e-5F, "ppu=2 v3.y");
+    assert_float_close(-5.0F, pos[3][1], 1e-5F, "ppu=2 v3.y (PNG bottom → world bottom)");
 
     /* Indices getter sanity-check (Issue 4 — moved here from Plan 04). */
     const uint16_t *idx = nt_atlas_get_region_indices(atlas_res, region_idx);
@@ -1796,9 +1799,10 @@ void test_atlas_cached_recompute_on_merge(void) {
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
     const float(*pos_pre)[2] = nt_atlas_test_cached_pos(ad);
-    /* Origin (0.5, 0.5) of 10x10 → pixel (5,5). v0 = (0,0) - (5,5) = (-5,-5). */
+    /* Origin (0.5, 0.5) of 10x10 → pixel (5,5). v0 = (0,0) → x = -5,
+     * y is Y-flipped (PNG y-down → world y-up) → +5. */
     assert_float_close(-5.0F, pos_pre[0][0], 1e-5F, "pre-merge v0.x");
-    assert_float_close(-5.0F, pos_pre[0][1], 1e-5F, "pre-merge v0.y");
+    assert_float_close(5.0F, pos_pre[0][1], 1e-5F, "pre-merge v0.y (PNG top → world top)");
 
     /* Merge: same hash, new origin. */
     nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
