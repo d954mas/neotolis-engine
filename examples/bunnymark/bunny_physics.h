@@ -2,18 +2,25 @@
 #define BUNNY_PHYSICS_H
 
 /* Pure-C bunnymark physics — testable in isolation (libm + stdint only,
- * no engine deps). Constants follow PixiJS canonical (verified — corrects
- * CONTEXT D-45 baseline per Pitfall 2). Coordinate convention is y-up,
- * bottom-left origin (D-25): gravity DECREMENTS vy, bottom edge is y < 0,
- * top edge is y > h. */
+ * no engine deps). dt-scaled (frame-rate independent) physics calibrated
+ * against britzl/defold-bunnymark @60Hz baseline:
+ *
+ *   britzl per-frame value × 60Hz → our per-second constant
+ *   GRAVITY     0.5  px/frame  →   30.0 px/s²
+ *   VX_MAX     10.0  px/frame  →  600.0 px/s
+ *   VY_RANGE    5.0  px/frame  →  300.0 px/s
+ *   BOUNCE_KICK 6.0  px/frame  →  360.0 px/s (instant velocity boost on bounce)
+ *
+ * Coordinate convention is y-up, bottom-left origin (D-25): gravity DECREMENTS vy,
+ * bottom edge is y < 0, top edge is y > h. */
 
 #include <stdint.h>
 
-#define BUNNY_GRAVITY 0.75F     /* per-frame, downward (PixiJS pixijs/bunny-mark Bunny.js) */
-#define BUNNY_VX_MAX 10.0F      /* vx0 in [0, 10) */
-#define BUNNY_VY_RANGE 5.0F     /* vy0 in [-5, +5) */
-#define BUNNY_BOUNCE_BOT -0.85F /* bottom bounce coefficient */
-#define BUNNY_BOUNCE_KICK 6.0F  /* extra random downward (50% chance) */
+#define BUNNY_GRAVITY 30.0F      /* px/s² downward (britzl 0.5 px/frame × 60Hz) */
+#define BUNNY_VX_MAX 600.0F      /* vx0 in [0, 600) px/s */
+#define BUNNY_VY_RANGE 300.0F    /* vy0 in [-300, +300) px/s */
+#define BUNNY_BOUNCE_BOT -0.85F  /* dimensionless bottom bounce coefficient */
+#define BUNNY_BOUNCE_KICK 360.0F /* extra random upward kick on bottom hit (px/s, 50% chance) */
 
 typedef struct {
     float x;
@@ -49,13 +56,15 @@ static inline void nt_bunny_init(nt_bunny_t *b, float spawn_x, float spawn_y, nt
     b->variant = (uint8_t)(nt_bunny_rng_next(rng) % 5U);
 }
 
-/* Single-frame integrator. Side bounce inverts vx and clamps to edge.
- * Bottom bounce inverts vy with -0.85 coefficient and adds a 50%-chance
- * random kick of [0, BUNNY_BOUNCE_KICK). Top edge: clamp vy to 0 (no bounce). */
-static inline void nt_bunny_step(nt_bunny_t *b, float w, float h, nt_bunny_rng_t *rng) {
-    b->x += b->vx;
-    b->y += b->vy;
-    b->vy -= BUNNY_GRAVITY;
+/* dt-scaled integrator. Position and gravity scale by dt; bounce coefficient
+ * is dimensionless (energy ratio); bounce kick is an instantaneous velocity
+ * boost (px/s) — independent of dt. Side bounce inverts vx and clamps to edge.
+ * Bottom bounce inverts vy with -0.85 coefficient and adds a 50%-chance random
+ * kick of [0, BUNNY_BOUNCE_KICK) px/s. Top edge: clamp vy to 0 (no bounce). */
+static inline void nt_bunny_step(nt_bunny_t *b, float w, float h, float dt, nt_bunny_rng_t *rng) {
+    b->x += b->vx * dt;
+    b->y += b->vy * dt;
+    b->vy -= BUNNY_GRAVITY * dt;
 
     /* sides — invert + clamp to edge */
     if (b->x > w) {

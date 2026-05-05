@@ -33,6 +33,7 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "resource/nt_resource.h"
 #include "sprite_comp/nt_sprite_comp.h"
+#include "stats/nt_stats.h"
 #include "time/nt_time.h"
 #include "transform_comp/nt_transform_comp.h"
 #include "window/nt_window.h"
@@ -256,6 +257,7 @@ static void spawn_n_random(uint32_t n) {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
+    nt_stats_frame_begin();
     nt_window_poll();
     nt_input_poll();
 
@@ -333,8 +335,9 @@ static void frame(void) {
     // #endregion
 
     // #region physics step
+    const float dt = g_nt_app.dt;
     for (uint32_t i = 0; i < s_bunny_count; i++) {
-        nt_bunny_step(&s_bunnies[i], w, h, &s_rng);
+        nt_bunny_step(&s_bunnies[i], w, h, dt, &s_rng);
         float *pos = nt_transform_comp_position(s_entities[i]);
         pos[0] = s_bunnies[i].x;
         pos[1] = s_bunnies[i].y;
@@ -410,6 +413,10 @@ static void frame(void) {
     nt_gfx_end_pass();
     nt_gfx_end_frame();
 
+    nt_stats_count("bunnies", (uint64_t)s_bunny_count);
+    nt_stats_count("atlas_quality", s_hd_active ? 1ULL : 0ULL);
+    nt_stats_frame_end();
+
     nt_window_swap_buffers();
 }
 
@@ -458,6 +465,12 @@ int main(void) {
 
     nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
     nt_sprite_renderer_init(&sr_desc);
+
+    /* DEMO-04..06: console throughput log every 60 frames (FPS, CPU/GPU ms,
+     * draws, bunnies, atlas quality). On-screen overlay deferred until a font
+     * pack is added to bunnymark — for now stats live in stdout/dev console. */
+    nt_stats_desc_t stats_desc = nt_stats_desc_defaults();
+    nt_stats_init(&stats_desc);
 
     /* Frame UBO */
     s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
@@ -520,6 +533,7 @@ int main(void) {
     nt_app_run(frame);
 
 #ifndef NT_PLATFORM_WEB
+    nt_stats_shutdown();
     nt_sprite_renderer_shutdown();
     nt_sprite_comp_shutdown();
     nt_drawable_comp_shutdown();
