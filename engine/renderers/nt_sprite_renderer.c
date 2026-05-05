@@ -32,21 +32,6 @@ typedef struct {
     uint32_t index_count;
 } nt_sprite_draw_cmd_t;
 
-/* Per-sprite render packet — densely packed AoS view of the SoA component
- * data needed by emit_one. draw_list runs a one-shot pre-pass that gathers
- * sprite_comp / transform_comp / drawable_comp fields (5 scattered SoA
- * reads) into one contiguous packet per sprite. The hot loop then reads
- * one cache line per sprite (vs ~5 spread across components), amortizing
- * the SoA->AoS layout cost over the run. */
-typedef struct {
-    uint32_t atlas_id;       /* nt_resource_t.id for the atlas */
-    uint16_t region_index;   /* sprite_comp.region_index */
-    uint8_t flags;           /* sprite_comp.flags (NT_SPRITE_FLAG_*) */
-    uint8_t _pad;            /*  pad to 4-byte boundary */
-    uint32_t color_packed;   /* drawable_comp.color packed as RGBA8 */
-    float matrix[16];        /* transform_comp.world_matrix copy (64B) */
-} nt_sprite_render_packet_t; /* 76 bytes per sprite */
-
 static struct {
     bool initialized;
     uint16_t max_pipelines;
@@ -65,10 +50,6 @@ static struct {
      * new state is pushed or before flush(). */
     nt_sprite_draw_cmd_t cmds[NT_SPRITE_RENDERER_MAX_DRAW_CMDS];
     uint32_t cmd_count;
-
-    /* Packed AoS render packets gathered once per draw_list call. Sized to
-     * the same cap as the sprite buffer so the pre-pass never spills. */
-    nt_sprite_render_packet_t packets[NT_SPRITE_RENDERER_MAX_SPRITES];
 
     uint32_t frame_draw_calls; /* test counter; SEPARATE from nt_gfx_get_frame_draw_calls per CONTEXT D-39 */
 #ifdef NT_SPRITE_RENDERER_TEST_ACCESS
@@ -261,36 +242,17 @@ static void open_cmd_from_snapshot(const nt_sprite_draw_cmd_t *snap) {
 }
 // #endregion
 
-// #region pre-pass: SoA → AoS render packet
-/* Gather one packet by reading from the relevant SoA component arrays. Cold
- * for tombstone / not-resolved sprites — those are filtered by emit_one
- * via the atlas region's vertex_count==0 check. */
-static inline void gather_packet(nt_sprite_render_packet_t *p, const nt_render_item_t *item) {
-    nt_entity_t e = {.id = item->entity};
-    p->atlas_id = nt_sprite_comp_atlas(e)->id;
-    p->region_index = *nt_sprite_comp_region_index(e);
-    p->flags = *nt_sprite_comp_flags(e);
-    p->_pad = 0;
-    const float *cf = nt_drawable_comp_color(e);
-    uint32_t r8 = pack_u8(cf[0]);
-    uint32_t g8 = pack_u8(cf[1]);
-    uint32_t b8 = pack_u8(cf[2]);
-    uint32_t a8 = pack_u8(cf[3]);
-    /* Little-endian RGBA matches the per-vertex .color[4] write order. */
-    p->color_packed = r8 | (g8 << 8) | (b8 << 16) | (a8 << 24);
-    memcpy(p->matrix, nt_transform_comp_world_matrix(e), 64);
-}
-// #endregion
-
 // #region emit_one (per-sprite vertex/index emit)
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_one(const nt_sprite_render_packet_t *p, nt_entity_t e) {
-    /* Atlas region — atlas_id was gathered into the packet; rebuild the
-     * resource handle. The single combined accessor returns all four
-     * pointers in one user_data lookup + one bounds check. Tombstone
+static void emit_one(const nt_render_item_t *item) {
+    nt_entity_t e = {.id = item->entity};
+
+    /* Resolve atlas + region — sprite_comp guarantees atlas/region_index for
+     * resolved sprites. Single combined accessor: one user_data lookup +
+     * one bounds check, returns all four pointers. Tombstone
      * (vertex_count==0) → zero-draw early-out. */
-    nt_resource_t atlas = {.id = p->atlas_id};
-    uint16_t ridx = p->region_index;
+    nt_resource_t atlas = *nt_sprite_comp_atlas(e);
+    uint16_t ridx = *nt_sprite_comp_region_index(e);
     nt_atlas_region_view_t view = nt_atlas_get_region_view(atlas, ridx);
     if (view.region == NULL || view.region->vertex_count == 0) {
         return;
@@ -313,30 +275,29 @@ static void emit_one(const nt_sprite_render_packet_t *p, nt_entity_t e) {
     }
 
     /* Model matrix + origin override (D-07). Override path is cold for the
-     * Bunnymark default — branch is predictable per-batch. The origin is
-     * still read from sprite_comp on demand (rare branch — keeping it out
-     * of the hot packet keeps the packet small). */
-    const float *m = p->matrix;
+     * Bunnymark default — branch is predictable per-batch. */
+    const float *m = nt_transform_comp_world_matrix(e);
     float local_model[16];
-    uint8_t flags = p->flags;
+    uint8_t flags = *nt_sprite_comp_flags(e);
     if (flags & NT_SPRITE_FLAG_ORIGIN_OV) {
         const float *o = nt_sprite_comp_origin(e);
         float ppu = nt_atlas_get_pixels_per_unit(atlas);
         float ipu = (ppu > 0.0F) ? 1.0F / ppu : 1.0F;
         float dx = (o[0] - r->origin_x) * (float)r->source_w * ipu;
         float dy = (o[1] - r->origin_y) * (float)r->source_h * ipu;
-        memcpy(local_model, p->matrix, 64);
+        memcpy(local_model, m, 64);
         local_model[12] -= (local_model[0] * dx) + (local_model[4] * dy);
         local_model[13] -= (local_model[1] * dx) + (local_model[5] * dy);
         local_model[14] -= (local_model[2] * dx) + (local_model[6] * dy);
         m = local_model;
     }
 
-    /* Color already packed in the gather pass. */
-    uint8_t cr = (uint8_t)(p->color_packed & 0xFFU);
-    uint8_t cg = (uint8_t)((p->color_packed >> 8) & 0xFFU);
-    uint8_t cb = (uint8_t)((p->color_packed >> 16) & 0xFFU);
-    uint8_t ca = (uint8_t)((p->color_packed >> 24) & 0xFFU);
+    /* Color (DrawableComponent) → packed RGBA8 */
+    const float *cf = nt_drawable_comp_color(e);
+    uint8_t cr = pack_u8(cf[0]);
+    uint8_t cg = pack_u8(cf[1]);
+    uint8_t cb = pack_u8(cf[2]);
+    uint8_t ca = pack_u8(cf[3]);
 
     /* Flip flags (D-09) — per-vertex negate of cached_pos */
     bool fx = (flags & NT_SPRITE_FLAG_FLIP_X) != 0;
@@ -411,16 +372,6 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
      * nt_gfx_get_frame_draw_calls, which is reset by nt_gfx_begin_frame). */
     s_sprite.frame_draw_calls = 0;
 
-    /* Pre-pass: gather AoS render packets from SoA components once, before
-     * the per-batch emit loop. The hot loop reads one cache line per sprite
-     * (76-byte packet) instead of probing 5 disjoint SoA arrays per item.
-     * Loop over the whole list — emit_one decides per-batch whether to skip
-     * via tombstone / not-ready material checks. */
-    NT_ASSERT(count <= NT_SPRITE_RENDERER_MAX_SPRITES && "draw_list count > NT_SPRITE_RENDERER_MAX_SPRITES; raise the cap or split the call");
-    for (uint32_t i = 0; i < count; i++) {
-        gather_packet(&s_sprite.packets[i], &items[i]);
-    }
-
     uint32_t run_start = 0;
     while (run_start < count) {
         uint32_t run_end = run_start + 1;
@@ -448,8 +399,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         open_cmd(pip, mat_info);
 
         for (uint32_t i = run_start; i < run_end; i++) {
-            nt_entity_t e = {.id = items[i].entity};
-            emit_one(&s_sprite.packets[i], e);
+            emit_one(&items[i]);
         }
         run_start = run_end;
     }
