@@ -120,6 +120,10 @@ uint32_t nt_resource_get(nt_resource_t handle);
  * requires user_data to be synchronized with the published winner. */
 bool nt_resource_is_ready(nt_resource_t handle);
 uint8_t nt_resource_get_state(nt_resource_t handle);
+/* Returns the asset type (NT_ASSET_*) the slot was created for. Returns 0
+ * for invalid or stale handles. Useful for runtime type checks at API
+ * boundaries (e.g. nt_atlas_*() asserting it received an atlas resource). */
+uint8_t nt_resource_get_asset_type(nt_resource_t handle);
 /* Monotonic counter that changes whenever the published view of any slot
  * changes (winner, visible state, or aux-backed published payload refresh).
  *

@@ -1052,6 +1052,22 @@ uint8_t nt_resource_get_state(nt_resource_t handle) {
 
 uint32_t nt_resource_publication_epoch(void) { return s_resource.publication_epoch; }
 
+/* Returns 0 for invalid/stale handles; real asset types start at NT_ASSET_MESH = 1. */
+uint8_t nt_resource_get_asset_type(nt_resource_t handle) {
+    if (handle.id == 0) {
+        return 0;
+    }
+    uint16_t index = nt_resource_slot_index(handle);
+    uint16_t gen = nt_resource_generation(handle);
+    if (index == 0 || index > NT_RESOURCE_MAX_SLOTS) {
+        return 0;
+    }
+    if (s_resource.slots[index].generation != gen) {
+        return 0;
+    }
+    return s_resource.slots[index].asset_type;
+}
+
 const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size) {
     if (out_size) {
         *out_size = 0;

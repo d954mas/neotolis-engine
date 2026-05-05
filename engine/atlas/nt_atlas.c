@@ -526,18 +526,21 @@ nt_result_t nt_atlas_init(void) {
 }
 
 uint32_t nt_atlas_revision(nt_resource_t atlas) {
+    NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_revision: handle is not an atlas resource");
     nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_revision on unresolved atlas");
     return ad->revision;
 }
 
 uint32_t nt_atlas_region_count(nt_resource_t atlas) {
+    NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_region_count: handle is not an atlas resource");
     nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_region_count on unresolved atlas");
     return ad->region_count;
 }
 
 uint32_t nt_atlas_find_region(nt_resource_t atlas, uint64_t name_hash) {
+    NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_find_region: handle is not an atlas resource");
     nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_find_region on unresolved atlas");
     if (ad->region_count == 0) {
@@ -547,6 +550,7 @@ uint32_t nt_atlas_find_region(nt_resource_t atlas, uint64_t name_hash) {
 }
 
 const nt_texture_region_t *nt_atlas_get_region(nt_resource_t atlas, uint32_t index) {
+    NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_get_region: handle is not an atlas resource");
     nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_region on unresolved atlas");
     NT_ASSERT(index < ad->region_count && "nt_atlas_get_region index out of range");
@@ -554,6 +558,7 @@ const nt_texture_region_t *nt_atlas_get_region(nt_resource_t atlas, uint32_t ind
 }
 
 nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index) {
+    NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_get_page_resource: handle is not an atlas resource");
     nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_page_resource on unresolved atlas");
     NT_ASSERT(page_index < ad->page_count && "page_index out of range");
