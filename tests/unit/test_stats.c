@@ -275,7 +275,7 @@ static void test_stats_draw_pitfall9_explicit_set_calls(void) {
 int main(void) {
     /* Force unbuffered stdout so diagnostics survive a SIGILL from a stray
      * NT_ASSERT in any test; matches the pattern used in test_text_renderer. */
-    setvbuf(stdout, NULL, _IONBF, 0);
+    (void)setvbuf(stdout, NULL, _IONBF, 0);
     UNITY_BEGIN();
     RUN_TEST(test_stats_init_shutdown);
     RUN_TEST(test_stats_fps_rolling_avg);
