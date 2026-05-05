@@ -309,7 +309,7 @@ static void frame(void) {
             uint32_t page_tex_id = nt_resource_get(page_res);
             s_items[i].sort_key = 0; /* unsorted in Bunnymark; renderer ignores */
             s_items[i].entity = s_entities[i].id;
-            s_items[i].batch_key = (page_tex_id << 16) | (uint32_t)s_sprite_material.id;
+            s_items[i].batch_key = (page_tex_id << 16) | s_sprite_material.id;
         }
         nt_sprite_renderer_draw_list(s_items, s_bunny_count);
         // #endregion
