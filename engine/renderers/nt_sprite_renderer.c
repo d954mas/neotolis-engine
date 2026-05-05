@@ -422,9 +422,11 @@ void nt_sprite_renderer_flush(void) {
     /* Single upload for the whole frame's worth of geometry — vs the previous
      * implementation that did one update_buffer per 4096-sprite flush
      * (16 uploads on 60k bunnies), each potentially stalling the WebGL
-     * driver's dynamic VBO. */
-    nt_gfx_update_buffer(s_sprite.vbo, s_sprite.vertices, s_sprite.vertex_count * (uint32_t)sizeof(nt_sprite_vertex_t));
-    nt_gfx_update_buffer(s_sprite.ibo, s_sprite.indices, s_sprite.index_count * (uint32_t)sizeof(uint32_t));
+     * driver's dynamic VBO. orphan_buffer hints the driver to allocate fresh
+     * storage on every rewrite so the GPU can keep consuming the previous
+     * frame while we're staging the next one. */
+    nt_gfx_orphan_buffer(s_sprite.vbo, s_sprite.vertices, s_sprite.vertex_count * (uint32_t)sizeof(nt_sprite_vertex_t));
+    nt_gfx_orphan_buffer(s_sprite.ibo, s_sprite.indices, s_sprite.index_count * (uint32_t)sizeof(uint32_t));
 
     uint32_t bound_pipeline_id = 0;
     uint32_t bound_tex_ids[NT_MATERIAL_MAX_TEXTURES] = {0};

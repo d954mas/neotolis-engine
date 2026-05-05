@@ -339,9 +339,22 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
 void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_t slot);
 
-/* ---- Buffer update ---- */
+/* ---- Buffer update ----
+ *
+ * update_buffer  — partial / in-place rewrite (glBufferSubData). Use when the
+ *                  buffer is reused without a full per-frame replacement
+ *                  (e.g. UBO frame uniforms, sub-region patches).
+ *
+ * orphan_buffer  — full rewrite with driver orphan hint (glBufferData with
+ *                  GL_DYNAMIC_DRAW). Use for streaming geometry where the
+ *                  whole buffer is replaced every frame (sprite VBO/IBO,
+ *                  text VBO/IBO). Avoids GPU pipeline stalls when the GPU
+ *                  is still consuming the previous frame's data — the
+ *                  driver allocates fresh storage and reclaims the old one
+ *                  asynchronously. Buffer must be NT_USAGE_DYNAMIC. */
 
 void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size);
+void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
 /* ---- Texture update (non-mipmapped textures only, level 0) ---- */
 

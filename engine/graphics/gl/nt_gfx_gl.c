@@ -766,6 +766,21 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uin
     glBufferSubData(target, 0, (GLsizeiptr)size, data);
 }
 
+void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
+        return;
+    }
+    GLuint buf = s_buffer_gl[backend_handle];
+    GLenum target = s_buffer_targets[backend_handle];
+    glBindBuffer(target, buf);
+    /* glBufferData with non-NULL data both orphans the existing storage and
+     * uploads in one call. The driver may allocate fresh memory for the new
+     * contents and reclaim the old block once the GPU finishes consuming it,
+     * avoiding the pipeline stall that glBufferSubData can introduce when
+     * rewriting a buffer that's still in flight. */
+    glBufferData(target, (GLsizeiptr)size, data, GL_DYNAMIC_DRAW);
+}
+
 void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) {
     if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
         return;

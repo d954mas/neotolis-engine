@@ -773,6 +773,20 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
     nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], data, size);
 }
 
+void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
+        NT_LOG_ERROR("orphan_buffer: invalid handle");
+        return;
+    }
+    uint32_t slot = nt_pool_slot_index(buf.id);
+    NT_ASSERT(s_gfx.buffer_metas[slot].usage == NT_USAGE_DYNAMIC && "orphan_buffer: requires NT_USAGE_DYNAMIC");
+    NT_ASSERT(size <= s_gfx.buffer_metas[slot].size && "orphan_buffer: size exceeds buffer capacity");
+    nt_gfx_backend_orphan_buffer(s_gfx.buffer_backends[slot], data, size);
+}
+
 /* ---- Texture update ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
