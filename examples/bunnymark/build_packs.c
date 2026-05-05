@@ -108,6 +108,13 @@ int main(int argc, char *argv[]) {
      * configs make the SD/HD comparison meaningful. */
     nt_tex_compress_opts_t sd_compress_opts = nt_tex_compress_uastc_default();
     atlas_opts.compress = &sd_compress_opts;
+    /* Pixel-art SD: NEAREST-style filter without mipmaps. Trilinear would
+     * blur sharp pixel edges on any downscale and add cache pressure under
+     * heavy overdraw without buying anything visible at 1:1 render scale. */
+    atlas_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    atlas_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    atlas_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+    atlas_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
 
     nt_builder_begin_atlas(ctx, "bunnies", &atlas_opts);
 
@@ -195,6 +202,13 @@ int main(int argc, char *argv[]) {
     hd_opts.premultiplied = true;
     nt_tex_compress_opts_t uastc_compress_opts = nt_tex_compress_uastc_default();
     hd_opts.compress = &uastc_compress_opts;
+    /* HD anti-aliased illustration rendered at ~17:1 downscale benefits from
+     * mipmap chain selection — keep trilinear default. CLAMP_TO_EDGE so the
+     * filter never bleeds across atlas region boundaries during minification. */
+    hd_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;
+    hd_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    hd_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+    hd_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
 
     nt_builder_begin_atlas(ctx_hd, "bunnies", &hd_opts);
     /* atlas_add_glob picks up whatever 5 PNGs the user dropped in raw/hd/.
