@@ -426,11 +426,6 @@ void nt_sprite_renderer_flush(void) {
     nt_gfx_update_buffer(s_sprite.vbo, s_sprite.vertices, s_sprite.vertex_count * (uint32_t)sizeof(nt_sprite_vertex_t));
     nt_gfx_update_buffer(s_sprite.ibo, s_sprite.indices, s_sprite.index_count * (uint32_t)sizeof(uint32_t));
 
-    /* VBO/IBO binds happen once before the cmd loop; the layout is fixed
-     * (D-16) so no re-bind is needed between cmds even when the pipeline
-     * changes — same attribute formats. */
-    nt_gfx_bind_index_buffer(s_sprite.ibo);
-
     uint32_t bound_pipeline_id = 0;
     uint32_t bound_tex_ids[NT_MATERIAL_MAX_TEXTURES] = {0};
 
@@ -438,12 +433,13 @@ void nt_sprite_renderer_flush(void) {
         const nt_sprite_draw_cmd_t *c = &s_sprite.cmds[ci];
 
         if (c->pipeline.id != bound_pipeline_id) {
+            /* GL ordering: each pipeline owns a VAO, and GL_ELEMENT_ARRAY_BUFFER
+             * is part of VAO state. So pipeline → VBO (re-applies attribs into
+             * the new VAO) → IBO (binds the EBO into the new VAO). Reordering
+             * any of these breaks the next draw silently. */
             nt_gfx_bind_pipeline(c->pipeline);
-            /* GL backend's bind_vertex_buffer re-applies glVertexAttribPointer
-             * for the currently bound pipeline. Re-bind on every pipeline
-             * switch so pointers reference the (single) sprite VBO under the
-             * new pipeline's attribute locations. */
             nt_gfx_bind_vertex_buffer(s_sprite.vbo);
+            nt_gfx_bind_index_buffer(s_sprite.ibo);
             bound_pipeline_id = c->pipeline.id;
         }
 
