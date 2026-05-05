@@ -68,10 +68,28 @@
 static nt_buffer_t s_frame_ubo;
 
 static nt_hash32_t s_pack_id;
+static nt_hash32_t s_hd_pack_id;
 
 static nt_resource_t s_atlas_handle;
 static nt_resource_t s_vs_handle;
 static nt_resource_t s_fs_handle;
+
+/* HD/SD toggle state (D-29, D-31, D-44 — demo starts in SD).
+ *
+ * BUNNYMARK_HD_AVAILABLE is set by examples/bunnymark/CMakeLists.txt when the
+ * raw/hd/ directory exists. When absent, s_hd_available stays false and the
+ * H key + tap-zone toggle log a warning instead of crashing.
+ *
+ * The toggle works by mounting/unmounting the HD pack at higher priority than
+ * the SD pack. Phase 48 atlas merge re-maps regions in place so all live
+ * SpriteComponent.region_index values stay valid across the toggle (DEMO-08). */
+#ifdef BUNNYMARK_HD_AVAILABLE
+static bool s_hd_available = true;
+#else
+static bool s_hd_available = false;
+#endif
+static bool s_hd_active = false;
+static bool s_hd_load_started = false;
 
 static nt_material_t s_sprite_material;
 
@@ -93,6 +111,65 @@ static bool s_atlas_resolved;
 
 static uint32_t s_canvas_w(void) { return g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800; }
 static uint32_t s_canvas_h(void) { return g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600; }
+
+// #region HD/SD toggle (D-31, D-47, Pitfall 7)
+/* Tap-zone geometry per CONTEXT D-47 / Plan 07 interfaces: ~120x40 px in the
+ * top-right corner. Coordinates are in canvas (window) pixels with y top-down
+ * (raw pointer space). The tap_zone_hit test runs against the unflipped
+ * pointer, BEFORE the y-flip that converts to world space — and BEFORE the
+ * world-space spawn block (Pitfall 7). */
+#define TAP_ZONE_W 120.0F
+#define TAP_ZONE_H 40.0F
+
+static bool tap_zone_hit(float px, float py, float w, float h) {
+    /* Top-right rect in window-pixel coordinates (y top-down). */
+    (void)h;
+    return (px >= w - TAP_ZONE_W) && (px <= w) && (py >= 0.0F) && (py <= TAP_ZONE_H);
+}
+
+/* Mount or unmount the HD pack at higher priority than SD. Phase 48 atlas
+ * merge re-maps regions in place — region_index values stay stable across the
+ * toggle, so live bunnies don't need set_region re-binding (DEMO-08). */
+static void toggle_atlas_quality(void) {
+    if (!s_hd_available) {
+        nt_log_warn("Bunnymark: HD pack not available — toggle is a no-op (drop 5 PNGs in examples/bunnymark/raw/hd/ and re-run cmake configure to enable)");
+        return;
+    }
+    if (s_hd_active) {
+        nt_resource_unmount(s_hd_pack_id);
+        s_hd_active = false;
+        nt_log_info("Bunnymark: atlas toggled SD (HD pack unmounted)");
+    } else {
+        if (!s_hd_load_started) {
+            /* First activation: mount the HD pack at a higher priority than SD
+             * (SD priority is 100; HD = 200) and kick off the auto-load. The
+             * atlas activator's merge path stacks HD on top while keeping SD
+             * regions valid as a fallback. */
+            nt_result_t mount_r = nt_resource_mount(s_hd_pack_id, 200);
+            if (mount_r != NT_OK) {
+                nt_log_warn("Bunnymark: HD pack mount failed (result=%d) — toggle is a no-op", (int)mount_r);
+                s_hd_available = false;
+                return;
+            }
+#ifdef NT_CDN_URL
+            nt_resource_load_auto(s_hd_pack_id, NT_CDN_URL "/bunnymark/bunnymark_hd.ntpack");
+#else
+            nt_resource_load_auto(s_hd_pack_id, "assets/bunnymark_hd.ntpack");
+#endif
+            s_hd_load_started = true;
+        } else {
+            /* Already loaded once — just re-mount at higher priority. */
+            nt_result_t mount_r = nt_resource_mount(s_hd_pack_id, 200);
+            if (mount_r != NT_OK) {
+                nt_log_warn("Bunnymark: HD pack re-mount failed (result=%d)", (int)mount_r);
+                return;
+            }
+        }
+        s_hd_active = true;
+        nt_log_info("Bunnymark: atlas toggled HD (HD pack mounted at priority 200)");
+    }
+}
+// #endregion
 
 static void resolve_atlas_regions(void) {
     if (s_atlas_resolved || !nt_resource_is_ready(s_atlas_handle)) {
@@ -205,23 +282,38 @@ static void frame(void) {
         create_entity_pool_once();
     }
 
-    // #region input — spawn-only path (Plan 07 inserts tap-zone hit-test BEFORE this)
+    // #region input dispatch (Pitfall 6 + Pitfall 7)
     /* Pitfall 6: g_nt_input.pointers[0] unifies mouse + touch — using the
      * pointer's button state (not nt_input_mouse_*) avoids double-spawn on
      * iOS where touch + mouse events coexist. */
     const nt_pointer_t *p = &g_nt_input.pointers[0];
     float w = (float)s_canvas_w();
     float h = (float)s_canvas_h();
+    bool consumed = false;
+    /* Pitfall 7: tap-zone hit-test runs FIRST against the raw pointer (window
+     * pixels, y top-down) — before the y-flip and the world-space spawn — so
+     * a click in the top-right "Quality" rect toggles HD/SD without also
+     * spawning a bunny at that location. */
+    if (p->buttons[NT_BUTTON_LEFT].is_pressed && tap_zone_hit(p->x, p->y, w, h)) {
+        toggle_atlas_quality();
+        consumed = true;
+    }
+    /* H key always toggles regardless of pointer state. */
+    if (nt_input_key_is_pressed(NT_KEY_H)) {
+        toggle_atlas_quality();
+    }
     /* Window pointer y is top-down (framebuffer pixels); world y is bottom-up
      * (D-25). Flip on the way in. */
     float px = p->x;
     float py = h - p->y;
-    if (p->buttons[NT_BUTTON_LEFT].is_pressed) {
-        spawn_one_at(px, py);
-    }
-    if (p->buttons[NT_BUTTON_LEFT].is_down) {
-        for (int i = 0; i < BUNNY_HOLD_SPAWN_RATE; i++) {
+    if (!consumed) {
+        if (p->buttons[NT_BUTTON_LEFT].is_pressed) {
             spawn_one_at(px, py);
+        }
+        if (p->buttons[NT_BUTTON_LEFT].is_down) {
+            for (int i = 0; i < BUNNY_HOLD_SPAWN_RATE; i++) {
+                spawn_one_at(px, py);
+            }
         }
     }
     /* Bulk add/remove via arrow keys (CONTEXT D-43 specifies +/-, but the
@@ -375,7 +467,9 @@ int main(void) {
         .label = "frame_uniforms",
     });
 
-    /* Mount + load the SD pack. */
+    /* Mount + load the SD pack. SD is the base layer (priority 100); HD will
+     * stack on top at priority 200 when the user toggles it on (D-44 — demo
+     * starts in SD with HD lazy-mounted on first toggle). */
     s_pack_id = nt_hash32_str("bunnymark_sd");
     nt_resource_mount(s_pack_id, 100);
 #ifdef NT_CDN_URL
@@ -383,6 +477,10 @@ int main(void) {
 #else
     nt_resource_load_auto(s_pack_id, "assets/bunnymark_sd.ntpack");
 #endif
+
+    /* HD pack id is reserved up front; the actual mount/load happens lazily on
+     * first toggle (D-44). */
+    s_hd_pack_id = nt_hash32_str("bunnymark_hd");
 
     /* Resource handles */
     s_vs_handle = nt_resource_request(ASSET_SHADER_ASSETS_SHADERS_SPRITE_VERT, NT_ASSET_SHADER_CODE);
@@ -409,7 +507,15 @@ int main(void) {
     nt_platform_web_loading_complete();
 #endif
 
-    nt_log_info("Bunnymark conditions: viewport=%ux%u sprite=~26x37px (SD) blend=premult atlas=SD pages=1 max=%u", (unsigned)s_canvas_w(), (unsigned)s_canvas_h(), (unsigned)BUNNY_MAX);
+    /* DEMO-07: log test conditions at startup. Schema:
+     *   "Bunnymark conditions: viewport=WxH sprite_size=~26x37 px (SD) blend=premultiplied atlas=SD|HD pages=N hold_rate=R bunny_max=M hd_available=0|1 gpu=..."
+     * GPU detection is browser/driver-side and the engine doesn't yet expose a
+     * caps query — gpu=unknown until that ships (documented in README). */
+    const char *atlas_q = s_hd_active ? "HD" : "SD";
+    const char *blend_str = "premultiplied";
+    const char *gpu_str = "unknown";
+    nt_log_info("Bunnymark conditions: viewport=%ux%u sprite_size=~26x37 px (SD) blend=%s atlas=%s pages=1 hold_rate=%d bunny_max=%u hd_available=%d gpu=%s", (unsigned)s_canvas_w(),
+                (unsigned)s_canvas_h(), blend_str, atlas_q, BUNNY_HOLD_SPAWN_RATE, (unsigned)BUNNY_MAX, s_hd_available ? 1 : 0, gpu_str);
 
     nt_app_run(frame);
 
