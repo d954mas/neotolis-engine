@@ -108,10 +108,15 @@ int main(int argc, char *argv[]) {
      * configs make the SD/HD comparison meaningful. */
     nt_tex_compress_opts_t sd_compress_opts = nt_tex_compress_uastc_default();
     atlas_opts.compress = &sd_compress_opts;
-    /* Pixel-art SD: NEAREST-style filter without mipmaps. Trilinear would
-     * blur sharp pixel edges on any downscale and add cache pressure under
-     * heavy overdraw without buying anything visible at 1:1 render scale. */
-    atlas_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    /* Empirical perf — on the test machine WebGL2 driver had a noticeably
+     * faster path for trilinear sampling on compressed BC7/ASTC textures
+     * vs plain LINEAR no-mips. Defold's default is LINEAR no-mips (better
+     * for pixel-perfect 1:1 scaling without blur), but with 60k+ overlapping
+     * sprites the GPU bandwidth pattern of accessing the smaller mip levels
+     * dominated, and trilinear nearly doubled fps. Keep trilinear here and
+     * note that for 1:1-scaled UI / pixel-art games without overdraw,
+     * NEAREST or LINEAR no-mips would be the right pick. */
+    atlas_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;
     atlas_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     atlas_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
     atlas_opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
