@@ -381,6 +381,59 @@ static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_vie
     ad->index_count = hdr->total_index_count;
 }
 
+// #region precompute (Phase 50 D-10/D-11/D-32)
+/* Compute cached_pos and cached_uv for one region (D-10/D-11).
+ * cached_pos has 1/pixels_per_unit baked in (D-32 + Pitfall 3) so the
+ * sprite renderer is pixels_per_unit-oblivious. cached_uv has the D4
+ * transform pre-applied (D-10): the renderer never sees transform.
+ * Tombstones (NT_ATLAS_TOMBSTONE_HASH) and zero-vertex regions are
+ * no-ops — their cached slices stay zero from calloc / zero-fill. */
+static void atlas_precompute_region(nt_atlas_data_t *ad, uint32_t region_idx) {
+    const nt_texture_region_t *r = &ad->regions[region_idx];
+    if (r->name_hash == NT_ATLAS_TOMBSTONE_HASH || r->vertex_count == 0) {
+        return;
+    }
+    const float origin_px_x = r->origin_x * (float)r->source_w;
+    const float origin_px_y = r->origin_y * (float)r->source_h;
+    for (uint32_t v = 0; v < r->vertex_count; v++) {
+        const nt_atlas_vertex_t *raw = &ad->vertices[r->vertex_start + v];
+        ad->cached_pos[r->vertex_start + v][0] = ((float)raw->local_x - origin_px_x) * ad->ipu;
+        ad->cached_pos[r->vertex_start + v][1] = ((float)raw->local_y - origin_px_y) * ad->ipu;
+
+        float u = (float)raw->atlas_u * (1.0F / 65535.0F);
+        float w = (float)raw->atlas_v * (1.0F / 65535.0F);
+        /* D4 transform — diagonal first, then flips (Pitfall 2 verified by
+         * test_atlas_cached_uv_d4_transform). Bit layout (nt_atlas.h):
+         *   bit0 = flipH, bit1 = flipV, bit2 = diagonal */
+        if (r->transform & 4U) {
+            float t = u;
+            u = w;
+            w = t;
+        }
+        if (r->transform & 1U) {
+            u = 1.0F - u;
+        }
+        if (r->transform & 2U) {
+            w = 1.0F - w;
+        }
+        ad->cached_uv[r->vertex_start + v][0] = u;
+        ad->cached_uv[r->vertex_start + v][1] = w;
+    }
+}
+
+/* Recompute cached slices for every region, including tombstones (no-op).
+ * Called after first-parse and after every merge. On merge this is required
+ * regardless of which regions changed metadata: replace_payload_buffers
+ * may have realloc'd cached_pos/cached_uv to a new vertex_capacity, so all
+ * live slices must be re-baked from the (possibly relocated) raw vertices.
+ * Pitfall 1 mitigation. */
+static void atlas_precompute_all(nt_atlas_data_t *ad) {
+    for (uint32_t i = 0; i < ad->region_count; i++) {
+        atlas_precompute_region(ad, i);
+    }
+}
+// #endregion
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
     (void)runtime_handle; /* always 1 — our no-op activator's fake handle */
@@ -441,6 +494,12 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
 
         hash_rebuild(ad);
         replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
+
+        /* Phase 50 D-10/D-11: bake cached_pos/cached_uv with default ipu=1.0F.
+         * atlas_on_post_resolve re-reads pixels_per_unit metadata and re-runs
+         * precompute when ipu changes — this first call is intentional so the
+         * arrays are valid even if a caller queries them before post_resolve. */
+        atlas_precompute_all(ad);
 
         *user_data = ad;
         return;
@@ -525,6 +584,13 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
     atlas_bump_revision(ad);
     hash_rebuild(ad);
     replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
+
+    /* Phase 50 D-10/D-11/Pitfall 1: re-bake every live region's cached slice.
+     * replace_payload_buffers may have realloc'd cached_pos/cached_uv, and
+     * even unchanged common regions may now sit at different vertex_start
+     * offsets in the new blob. atlas_on_post_resolve re-runs this once more
+     * after re-reading the (possibly updated) pixels_per_unit metadata. */
+    atlas_precompute_all(ad);
     // #endregion
 }
 
@@ -545,7 +611,6 @@ static void atlas_on_cleanup(void *user_data) {
 
 static void atlas_on_post_resolve(const uint8_t *data, uint32_t size, nt_resource_t atlas, uint32_t runtime_handle, void *user_data) {
     (void)runtime_handle;
-    (void)atlas;
 
     /* If the winner changed to an atlas whose blob is currently unavailable,
      * atlas_on_resolve kept the existing user_data untouched. Do not request
@@ -561,6 +626,30 @@ static void atlas_on_post_resolve(const uint8_t *data, uint32_t size, nt_resourc
         ad->page_resources[i] = nt_resource_request(rid, NT_ASSET_TEXTURE);
         NT_ASSERT(ad->page_resources[i].id != 0 && "page texture slot request failed");
     }
+
+    // #region pixels_per_unit metadata read (Phase 50 D-32)
+    /* Read pixels_per_unit metadata once per atlas (atlas-level, not region-
+     * level). On merge (DEMO-08), this re-reads the new pack's pixels_per_unit
+     * so HD packs (ppu=2.0) replace SD's (ppu=1.0), and the subsequent
+     * atlas_precompute_all re-bakes cached_pos at the new scale. region_index
+     * stays stable per Phase 48 merge semantics — only the cached float
+     * values change. */
+    uint32_t meta_size = 0;
+    const uint64_t kind = nt_hash64_str("pixels_per_unit").value;
+    const void *meta = nt_resource_get_meta(atlas, kind, &meta_size);
+    if (meta != NULL && meta_size == sizeof(float)) {
+        float ppu = 0.0F;
+        memcpy(&ppu, meta, sizeof(ppu));
+        NT_ASSERT(ppu > 0.0F); /* divide-by-zero from corrupt metadata is an asset bug */
+        ad->ipu = 1.0F / ppu;
+    } else {
+        ad->ipu = 1.0F;
+    }
+    /* Re-bake cached_pos with the correct ipu (Pitfall 3, DEMO-08).
+     * cached_uv is unaffected by ipu but the loop is shared — cheap on
+     * small atlases and runs at resolve time, not in the hot path. */
+    atlas_precompute_all(ad);
+    // #endregion
 }
 // #endregion
 
@@ -614,6 +703,43 @@ nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index
     NT_ASSERT(page_index < ad->page_count && "page_index out of range");
     return ad->page_resources[page_index];
 }
+
+// #region Phase 50 D-10/D-32 public accessors
+float nt_atlas_get_pixels_per_unit(nt_resource_t atlas) {
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    if (ad == NULL || ad->ipu == 0.0F) {
+        return 1.0F;
+    }
+    return 1.0F / ad->ipu;
+}
+
+const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t region_index))[2] {
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    if (ad == NULL) {
+        return NULL;
+    }
+    NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_cached_pos: region_index out of range");
+    return (const float(*)[2]) & ad->cached_pos[ad->regions[region_index].vertex_start];
+}
+
+const float (*nt_atlas_get_region_cached_uv(nt_resource_t atlas, uint32_t region_index))[2] {
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    if (ad == NULL) {
+        return NULL;
+    }
+    NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_cached_uv: region_index out of range");
+    return (const float(*)[2]) & ad->cached_uv[ad->regions[region_index].vertex_start];
+}
+
+const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region_index) {
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    if (ad == NULL) {
+        return NULL;
+    }
+    NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_indices: region_index out of range");
+    return &ad->indices[ad->regions[region_index].index_start];
+}
+// #endregion
 // #endregion
 
 // #region test access

@@ -85,6 +85,30 @@ const nt_texture_region_t *nt_atlas_get_region(nt_resource_t atlas, uint32_t ind
  * Out-of-range trips NT_ASSERT. */
 nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index);
 
+/* ---- Phase 50 D-10/D-32: precomputed projections + pixels_per_unit ---- */
+
+/* D-32: atlas-level pixels_per_unit. Returns 1.0F if atlas not resolved yet
+ * or metadata absent. Game-side world math may want this. The renderer does
+ * NOT need it — cached_pos already has 1/pixels_per_unit baked in. */
+float nt_atlas_get_pixels_per_unit(nt_resource_t atlas);
+
+/* D-10: pivot-relative pre-converted vertex positions (with 1/pixels_per_unit
+ * baked in). Returns base pointer at the start of region's slice
+ * (length = region->vertex_count). Out-of-range region_index trips NT_ASSERT.
+ * Returns NULL only if atlas not resolved. */
+const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t region_index))[2];
+
+/* D-10: D4-transformed normalized atlas UVs. Returns base pointer at the start
+ * of region's slice (length = region->vertex_count). Out-of-range region_index
+ * trips NT_ASSERT. Returns NULL only if atlas not resolved. */
+const float (*nt_atlas_get_region_cached_uv(nt_resource_t atlas, uint32_t region_index))[2];
+
+/* Per-region triangle index slice (length = region->index_count). Returns base
+ * pointer at the start of region's index slice in the atlas index buffer.
+ * Returns NULL if atlas not resolved. Out-of-range trips NT_ASSERT.
+ * Used by nt_sprite_renderer (Plan 04) for index emit. */
+const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region_index);
+
 /* ---- Test access (compiled only when NT_ATLAS_TEST_ACCESS is defined) ---- */
 
 #ifdef NT_ATLAS_TEST_ACCESS
