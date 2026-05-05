@@ -43,6 +43,12 @@ typedef struct {
 
 nt_gfx_t g_nt_gfx;
 
+/* D-39: per-frame draw call counter, separate from g_nt_gfx.frame_stats.draw_calls.
+ * Reset in nt_gfx_begin_frame; incremented in all four nt_gfx_draw* entry points;
+ * read via nt_gfx_get_frame_draw_calls. nt_stats consumes this for DEMO-04/DEMO-06
+ * without coupling to the public frame_stats struct (Pitfall 4). */
+static uint32_t s_gfx_frame_draw_calls;
+
 /* ---- Global UBO block registry ---- */
 
 static nt_global_block_t s_global_blocks[NT_GFX_MAX_GLOBAL_BLOCKS];
@@ -214,6 +220,7 @@ void nt_gfx_begin_frame(void) {
     }
     s_gfx.render_state = NT_GFX_STATE_FRAME;
     memset(&g_nt_gfx.frame_stats, 0, sizeof(g_nt_gfx.frame_stats));
+    s_gfx_frame_draw_calls = 0; /* D-39 */
     nt_gfx_backend_begin_frame();
 }
 
@@ -232,6 +239,8 @@ void nt_gfx_end_frame(void) {
     nt_gfx_backend_end_frame();
     g_nt_gfx.context_restored = false;
 }
+
+uint32_t nt_gfx_get_frame_draw_calls(void) { return s_gfx_frame_draw_calls; }
 
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
     if (g_nt_gfx.context_lost) {
@@ -607,6 +616,7 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     }
 
     g_nt_gfx.frame_stats.draw_calls++;
+    s_gfx_frame_draw_calls++; /* D-39 */
     g_nt_gfx.frame_stats.vertices += num_vertices;
     nt_gfx_backend_draw(first_vertex, num_vertices);
 }
@@ -628,6 +638,7 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
     }
 
     g_nt_gfx.frame_stats.draw_calls++;
+    s_gfx_frame_draw_calls++; /* D-39 */
     g_nt_gfx.frame_stats.draw_calls_instanced++;
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
@@ -651,6 +662,7 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     }
 
     g_nt_gfx.frame_stats.draw_calls++;
+    s_gfx_frame_draw_calls++; /* D-39 */
     g_nt_gfx.frame_stats.vertices += num_vertices;
     g_nt_gfx.frame_stats.indices += num_indices;
     nt_gfx_backend_draw_indexed(first_index, num_indices, s_gfx.bound_index_type);
@@ -673,6 +685,7 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     }
 
     g_nt_gfx.frame_stats.draw_calls++;
+    s_gfx_frame_draw_calls++; /* D-39 */
     g_nt_gfx.frame_stats.draw_calls_instanced++;
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.indices += num_indices * instance_count;
