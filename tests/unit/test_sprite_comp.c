@@ -565,19 +565,22 @@ void test_sprite_view_matches_per_entity_reads(void) {
 
     nt_sprite_comp_view_t v = nt_sprite_comp_view();
     TEST_ASSERT_EQUAL_UINT16(2, v.count);
+    TEST_ASSERT_NOT_NULL(v.entity_indices);
     TEST_ASSERT_NOT_NULL(v.atlas);
     TEST_ASSERT_NOT_NULL(v.region_hash);
     TEST_ASSERT_NOT_NULL(v.region_index);
     TEST_ASSERT_NOT_NULL(v.origin);
     TEST_ASSERT_NOT_NULL(v.flags);
 
-    /* Check that each per-entity accessor matches the corresponding view slot. */
+    /* Check that each per-entity accessor matches the corresponding view slot,
+     * and that entity_indices[i] correctly identifies the owning entity. */
     for (uint16_t i = 0; i < v.count; i++) {
         bool found_e0 = (v.region_hash[i] == FIXTURE_R0_HASH);
         bool found_e1 = (v.region_hash[i] == FIXTURE_R1_HASH);
         TEST_ASSERT_TRUE(found_e0 || found_e1);
 
         nt_entity_t e = found_e0 ? e0 : e1;
+        TEST_ASSERT_EQUAL_UINT16(nt_entity_index(e), v.entity_indices[i]);
         TEST_ASSERT_EQUAL_UINT32(nt_sprite_comp_atlas(e)->id, v.atlas[i].id);
         TEST_ASSERT_EQUAL_UINT16(*nt_sprite_comp_region_index(e), v.region_index[i]);
         TEST_ASSERT_EQUAL_UINT8(*nt_sprite_comp_flags(e), v.flags[i]);

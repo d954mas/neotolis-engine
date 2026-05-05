@@ -606,9 +606,12 @@ Two binding modes, picked by what the game knows:
 - **By index (fast path, requires ready atlas).** Game already knows the
   numeric region index — typically because it cycled an animation frame,
   or read it back from a previously resolved sprite. Skips the hash lookup
-  entirely. The atlas merge contract guarantees that surviving regions keep
-  the same index across republish, so cached indices are stable as long as
-  the underlying region is not tombstoned.
+  on bind and on stable frames (the atlas-revision gate inside sync resolves
+  to a no-op when nothing changed). After atlas republish, sync re-resolves
+  via hash to confirm the cached index still points to the same region —
+  this is how tombstoning is detected. The atlas merge contract guarantees
+  that surviving regions keep the same index across republish, so the cached
+  index stays stable as long as the underlying region is not tombstoned.
 
 Game code is free to read back the cached region index for animation logic
 (e.g. cycle to the next frame). It is stable across atlas republish for

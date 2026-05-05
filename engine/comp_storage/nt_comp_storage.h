@@ -41,4 +41,9 @@ void nt_comp_storage_remove(nt_comp_storage_t *s, nt_entity_t entity);
 uint16_t nt_comp_storage_count(const nt_comp_storage_t *s);
 uint16_t nt_comp_storage_index(const nt_comp_storage_t *s, nt_entity_t entity);
 
+/* Reverse table: dense_idx -> entity_index. Used by bulk views to let downstream
+ * systems join with other components by entity. Length is `count`; values
+ * beyond count are stale leftovers from past swap-and-pops. */
+const uint16_t *nt_comp_storage_entities(const nt_comp_storage_t *s);
+
 #endif /* NT_COMP_STORAGE_H */

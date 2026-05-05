@@ -294,6 +294,7 @@ const uint8_t *nt_sprite_comp_flags(nt_entity_t entity) {
 nt_sprite_comp_view_t nt_sprite_comp_view(void) {
     return (nt_sprite_comp_view_t){
         .count = nt_comp_storage_count(&s_storage),
+        .entity_indices = nt_comp_storage_entities(&s_storage),
         .atlas = s_atlas,
         .region_hash = s_region_hash,
         .region_index = s_region_index,

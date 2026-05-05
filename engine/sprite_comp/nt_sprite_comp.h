@@ -97,6 +97,7 @@ const uint8_t *nt_sprite_comp_flags(nt_entity_t entity);
 
 typedef struct {
     uint16_t count;
+    const uint16_t *entity_indices; /* dense_idx -> entity_index, for joining with other comps */
     const nt_resource_t *atlas;
     const uint64_t *region_hash;
     const uint16_t *region_index;
