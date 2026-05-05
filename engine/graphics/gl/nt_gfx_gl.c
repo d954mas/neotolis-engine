@@ -1147,6 +1147,36 @@ void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
     s_gl_cache.bound_textures[slot] = tex;
 }
 
+/* Sampler objects (WebGL2 / GL 3.3+). The backend "handle" is the raw
+ * GLuint sampler id — nt_gfx caches them on its side, so the backend
+ * does not maintain its own array. */
+
+uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
+    GLuint s = 0;
+    glGenSamplers(1, &s);
+    if (s == 0) {
+        return 0;
+    }
+    glSamplerParameteri(s, GL_TEXTURE_MIN_FILTER, (GLint)map_texture_filter(desc->min_filter));
+    glSamplerParameteri(s, GL_TEXTURE_MAG_FILTER, (GLint)map_texture_filter(desc->mag_filter));
+    glSamplerParameteri(s, GL_TEXTURE_WRAP_S, (GLint)map_texture_wrap(desc->wrap_u));
+    glSamplerParameteri(s, GL_TEXTURE_WRAP_T, (GLint)map_texture_wrap(desc->wrap_v));
+    return (uint32_t)s;
+}
+
+void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) {
+    if (backend_handle == 0) {
+        return;
+    }
+    GLuint s = (GLuint)backend_handle;
+    glDeleteSamplers(1, &s);
+}
+
+void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
+    /* backend_handle == 0 unbinds (revert to texture's own filter state) */
+    glBindSampler(slot, (GLuint)backend_handle);
+}
+
 void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {
     glDrawArraysInstanced(GL_TRIANGLES, (GLint)first_vertex, (GLsizei)num_vertices, (GLsizei)instance_count);
 }

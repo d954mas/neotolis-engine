@@ -34,9 +34,24 @@ typedef struct {
 
 #define NT_MESH_INVALID ((nt_mesh_t){0})
 
+/* Sampler object — texture-side filter/wrap state decoupled from the texture
+ * itself. One texture can be sampled with different filters in different
+ * materials by binding different samplers to the same texture unit. */
+typedef struct {
+    uint32_t id;
+} nt_sampler_t;
+
+#define NT_SAMPLER_INVALID ((nt_sampler_t){0})
+
 /* ---- Global UBO block registry (compile-time limit) ---- */
 
 #define NT_GFX_MAX_GLOBAL_BLOCKS 8
+
+/* Sampler cache size — samplers are deduplicated by their (filter/wrap)
+ * descriptor so repeated nt_gfx_make_sampler calls with the same desc
+ * return the same handle. Most apps use 3-10 unique configs; 32 leaves
+ * comfortable headroom. */
+#define NT_GFX_MAX_SAMPLERS 32
 
 typedef struct {
     const char *name; /* string literal, not owned */
@@ -218,6 +233,14 @@ typedef struct {
 } nt_texture_desc_t;
 
 typedef struct {
+    nt_texture_filter_t min_filter; /* default: NT_FILTER_LINEAR */
+    nt_texture_filter_t mag_filter; /* default: NT_FILTER_LINEAR (NEAREST or LINEAR only) */
+    nt_texture_wrap_t wrap_u;       /* default: NT_WRAP_CLAMP_TO_EDGE */
+    nt_texture_wrap_t wrap_v;       /* default: NT_WRAP_CLAMP_TO_EDGE */
+    const char *label;              /* debug name; static storage */
+} nt_sampler_desc_t;
+
+typedef struct {
     float clear_color[4];
     float clear_depth; /* typically 1.0f; zero-init gives 0.0 which fails all depth tests */
 } nt_pass_desc_t;
@@ -293,6 +316,7 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
+nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
 
 /* ---- Resource destruction ---- */
 
@@ -300,6 +324,10 @@ void nt_gfx_destroy_shader(nt_shader_t shd);
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
 void nt_gfx_destroy_texture(nt_texture_t tex);
+/* Samplers have no destroy: nt_gfx_make_sampler dedupes against an internal
+ * cache (NT_GFX_MAX_SAMPLERS), and all cached samplers are released by
+ * nt_gfx_shutdown. The shared lifetime is intentional — multiple materials
+ * and textures reference the same sampler handle. */
 
 /* ---- Draw state ---- */
 
@@ -307,6 +335,9 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 void nt_gfx_bind_vertex_buffer(nt_buffer_t buf);
 void nt_gfx_bind_index_buffer(nt_buffer_t buf);
 void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
+/* Bind sampler to texture unit `slot`. Pass NT_SAMPLER_INVALID to fall back
+ * to the texture's own filter/wrap state (set via glTexParameteri). */
+void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
 
 /* ---- Uniforms ---- */
 

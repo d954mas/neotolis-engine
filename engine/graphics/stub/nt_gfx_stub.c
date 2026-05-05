@@ -82,6 +82,18 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
     (void)size;
 }
 
+uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
+    (void)desc;
+    return 0;
+}
+
+void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) { (void)backend_handle; }
+
+void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
+    (void)backend_handle;
+    (void)slot;
+}
+
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data) {
     (void)backend_handle;
     (void)x;

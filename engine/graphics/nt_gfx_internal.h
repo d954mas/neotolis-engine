@@ -39,6 +39,12 @@ uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc);
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle);
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot);
 
+uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc);
+void nt_gfx_backend_destroy_sampler(uint32_t backend_handle);
+/* slot is the texture unit (0..MAX). backend_handle == 0 unbinds the sampler
+ * and reverts to the texture's own filter state. */
+void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot);
+
 void nt_gfx_backend_bind_pipeline(uint32_t backend_handle);
 void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle);
 void nt_gfx_backend_bind_index_buffer(uint32_t backend_handle);

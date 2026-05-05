@@ -56,6 +56,12 @@ static uint32_t s_global_block_count;
 
 /* ---- File-scope internal state ---- */
 
+/* Sampler cache entry — packed key + backend handle. Lifetime = engine. */
+typedef struct {
+    uint32_t key;     /* hash of (min, mag, wrap_u, wrap_v); 0 = empty slot */
+    uint32_t backend; /* GL sampler object handle */
+} nt_gfx_sampler_entry_t;
+
 static struct {
     nt_pool_t shader_pool;
     nt_pool_t pipeline_pool;
@@ -69,6 +75,11 @@ static struct {
 
     nt_gfx_buffer_meta_t *buffer_metas;   /* minimal buffer metadata for runtime validation */
     nt_gfx_texture_meta_t *texture_metas; /* format + dimensions for update_texture validation */
+
+    /* Sampler cache (dedup by descriptor; samplers are immutable after create
+     * and shared across materials/textures). nt_sampler_t.id is 1+slot. */
+    nt_gfx_sampler_entry_t sampler_cache[NT_GFX_MAX_SAMPLERS];
+    uint32_t sampler_count;
 
     nt_pool_t mesh_pool;
     nt_gfx_mesh_info_t *mesh_table; /* [capacity+1], index 0 reserved */
@@ -150,6 +161,13 @@ void nt_gfx_shutdown(void) {
             if (s_gfx.mesh_table[i].ibo.id != 0) {
                 nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[nt_pool_slot_index(s_gfx.mesh_table[i].ibo.id)]);
             }
+        }
+    }
+
+    /* Release any cached sampler backends before pool shutdown */
+    for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
+        if (s_gfx.sampler_cache[i].backend != 0) {
+            nt_gfx_backend_destroy_sampler(s_gfx.sampler_cache[i].backend);
         }
     }
 
@@ -565,6 +583,60 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
     }
     uint32_t idx = nt_pool_slot_index(tex.id);
     nt_gfx_backend_bind_texture(s_gfx.texture_backends[idx], slot);
+}
+
+/* ---- Sampler (deduplicated cache) ---- */
+
+/* Pack desc into 32-bit key. 6 filter values (3 bits) + 2 mag (1 bit) +
+ * 3 wrap_u (2 bits) + 3 wrap_v (2 bits) = 8 bits used; rest is reserved. */
+static inline uint32_t sampler_pack_key(const nt_sampler_desc_t *desc) {
+    return (uint32_t)((desc->min_filter & 0x7U) | ((desc->mag_filter & 0x1U) << 3) | ((desc->wrap_u & 0x3U) << 4) | ((desc->wrap_v & 0x3U) << 6));
+}
+
+nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
+    NT_ASSERT(desc != NULL);
+    NT_ASSERT(desc->mag_filter <= NT_FILTER_LINEAR && "sampler mag_filter must be NEAREST or LINEAR");
+
+    /* Key 0 reserved as "empty slot" sentinel — pack_key always sets at least
+     * one bit thanks to wrap defaults != 0 if min_filter==0 and mag==0 too,
+     * so the all-zeros desc would collide. Bias the key to be nonzero by
+     * setting bit 31. */
+    uint32_t key = sampler_pack_key(desc) | 0x80000000U;
+
+    /* Linear scan over cache — small N (NT_GFX_MAX_SAMPLERS = 32). */
+    for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
+        if (s_gfx.sampler_cache[i].key == key) {
+            return (nt_sampler_t){.id = i + 1};
+        }
+    }
+
+    NT_ASSERT(s_gfx.sampler_count < NT_GFX_MAX_SAMPLERS && "sampler cache full; raise NT_GFX_MAX_SAMPLERS");
+    uint32_t backend = nt_gfx_backend_create_sampler(desc);
+    if (backend == 0) {
+        NT_LOG_ERROR("make_sampler: backend failed");
+        return NT_SAMPLER_INVALID;
+    }
+    uint32_t slot = s_gfx.sampler_count++;
+    s_gfx.sampler_cache[slot].key = key;
+    s_gfx.sampler_cache[slot].backend = backend;
+    return (nt_sampler_t){.id = slot + 1};
+}
+
+void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    if (slot >= NT_GFX_MAX_TEXTURE_SLOTS) {
+        NT_LOG_ERROR("bind_sampler: slot exceeds max");
+        return;
+    }
+    if (s.id == 0) {
+        /* Unbind: revert texture unit to texture's own filter/wrap. */
+        nt_gfx_backend_bind_sampler(0, slot);
+        return;
+    }
+    NT_ASSERT(s.id <= s_gfx.sampler_count && "bind_sampler: invalid handle");
+    nt_gfx_backend_bind_sampler(s_gfx.sampler_cache[s.id - 1].backend, slot);
 }
 
 /* ---- Uniforms ---- */
