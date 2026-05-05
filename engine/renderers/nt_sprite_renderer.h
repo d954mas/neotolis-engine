@@ -6,18 +6,24 @@
 
 /* ---- Compile-time limits (D-17) ----
  *
- * Buffers are sized for the worst case (rect: 4 verts + 6 indices per sprite).
+ * Buffers are sized for the polygon worst case: 8 verts + 18 indices per
+ * sprite (atlas builder default max_vertices=8 with triangle-fan, e.g.
+ * NT_ATLAS_SHAPE_CONCAVE_CONTOUR). RECT-shape sprites consume only 4 verts +
+ * 6 indices each, so a frame of pure-rect sprites can fit 2x MAX_SPRITES
+ * before triggering auto-flush, while a frame of pure-polygon sprites fits
+ * exactly MAX_SPRITES.
+ *
  * Index buffer uses uint32 so the renderer can pack everything emitted in
  * one frame into a single VBO/IBO upload (Defold-style: collect → upload
  * once → multi-draw with offsets). Auto-flush on overflow keeps per-cmd
  * state and re-opens after the upload. */
 
 #ifndef NT_SPRITE_RENDERER_MAX_SPRITES
-#define NT_SPRITE_RENDERER_MAX_SPRITES 65535
+#define NT_SPRITE_RENDERER_MAX_SPRITES 32768
 #endif
 
-#define NT_SPRITE_RENDERER_MAX_VERTICES (NT_SPRITE_RENDERER_MAX_SPRITES * 4)
-#define NT_SPRITE_RENDERER_MAX_INDICES (NT_SPRITE_RENDERER_MAX_SPRITES * 6)
+#define NT_SPRITE_RENDERER_MAX_VERTICES (NT_SPRITE_RENDERER_MAX_SPRITES * 8)
+#define NT_SPRITE_RENDERER_MAX_INDICES (NT_SPRITE_RENDERER_MAX_SPRITES * 18)
 
 /* Hard cap on pipeline cache size (kept in static array to avoid heap). */
 #define NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP 64
