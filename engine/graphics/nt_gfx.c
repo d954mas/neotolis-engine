@@ -468,6 +468,22 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         }
         s_gfx.texture_metas[slot].mip_count = levels;
     }
+
+    /* Build a default sampler from the desc so bind_texture binds the right
+     * filter/wrap automatically. Without this, font / mesh code that creates
+     * textures via make_texture (not via the activator) would inherit
+     * whatever sampler a previous draw left bound to the slot — caught when
+     * sprite_renderer's HD-pack atlas left a trilinear sampler on slot 0
+     * and the Slug font shader sampled curve textures with mipmap LOD
+     * selection on a non-mipmapped texture, returning black. */
+    nt_sampler_desc_t sd = {
+        .min_filter = local_desc.min_filter,
+        .mag_filter = local_desc.mag_filter,
+        .wrap_u = local_desc.wrap_u,
+        .wrap_v = local_desc.wrap_v,
+        .label = NULL,
+    };
+    s_gfx.texture_metas[slot].default_sampler = nt_gfx_make_sampler(&sd);
     // #endregion
 
     result.id = id;
