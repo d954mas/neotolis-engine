@@ -809,5 +809,27 @@ bool nt_atlas_test_validate_header(const uint8_t *data, uint32_t size) {
     return atlas_try_validate_and_carve_blob(data, size, &ignored);
 }
 
+const float (*nt_atlas_test_cached_pos(const struct nt_atlas_data *ad))[2] {
+    NT_ASSERT(ad != NULL);
+    return (const float(*)[2])ad->cached_pos;
+}
+
+const float (*nt_atlas_test_cached_uv(const struct nt_atlas_data *ad))[2] {
+    NT_ASSERT(ad != NULL);
+    return (const float(*)[2])ad->cached_uv;
+}
+
+float nt_atlas_test_ipu(const struct nt_atlas_data *ad) {
+    NT_ASSERT(ad != NULL);
+    return ad->ipu;
+}
+
+void nt_atlas_test_set_ipu_and_recompute(struct nt_atlas_data *ad, float ipu) {
+    NT_ASSERT(ad != NULL);
+    NT_ASSERT(ipu > 0.0F);
+    ad->ipu = ipu;
+    atlas_precompute_all(ad);
+}
+
 #endif /* NT_ATLAS_TEST_ACCESS */
 // #endregion

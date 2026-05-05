@@ -158,6 +158,16 @@ void nt_atlas_test_reset(void);
  * death-test harness. */
 bool nt_atlas_test_validate_header(const uint8_t *data, uint32_t size);
 
+/* Phase 50 D-10/D-32 test-only accessors for cached arrays + ipu.
+ * Tests using nt_atlas_test_drive_resolve (no resource system) need
+ * direct access since the public getters require an nt_resource_t. */
+const float (*nt_atlas_test_cached_pos(const struct nt_atlas_data *ad))[2];
+const float (*nt_atlas_test_cached_uv(const struct nt_atlas_data *ad))[2];
+float nt_atlas_test_ipu(const struct nt_atlas_data *ad);
+/* Test-only setter for ipu — used by direct-drive tests to simulate the
+ * post_resolve metadata read path without standing up a resource system. */
+void nt_atlas_test_set_ipu_and_recompute(struct nt_atlas_data *ad, float ipu);
+
 #endif /* NT_ATLAS_TEST_ACCESS */
 
 #endif /* NT_ATLAS_H */
