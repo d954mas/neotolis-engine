@@ -66,18 +66,6 @@ static struct {
 } s_sprite;
 // #endregion
 
-// #region pack helper
-static inline uint8_t pack_u8(float c) {
-    if (c <= 0.0F) {
-        return 0;
-    }
-    if (c >= 1.0F) {
-        return 255;
-    }
-    return (uint8_t)((c * 255.0F) + 0.5F);
-}
-// #endregion
-
 // #region lifecycle
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
@@ -289,9 +277,18 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     }
 
     /* Model matrix + origin override (D-07). Override path is cold for the
-     * Bunnymark default — branch is predictable per-batch. */
+     * Bunnymark default — branch is predictable per-batch.
+     *
+     * The origin shift is mathematically just a pre-translation in local
+     * space: m * (p - delta) = m*p - m*delta. We bake -m*delta into local
+     * tx/ty/tz scalars and feed those to the vertex transform instead of
+     * m[12]/m[13]/m[14]. No memcpy of the matrix, no mutation of caller
+     * data — the rotation/scale rows of m are read directly from the
+     * transform component. */
     const float *m = tv->world_matrices[t_idx];
-    float local_model[16];
+    float tx = m[12];
+    float ty = m[13];
+    float tz = m[14];
     uint8_t flags = sv->flags[s_idx];
     if (flags & NT_SPRITE_FLAG_ORIGIN_OV) {
         const float *o = sv->origin[s_idx];
@@ -299,19 +296,20 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         float ipu = (ppu > 0.0F) ? 1.0F / ppu : 1.0F;
         float dx = (o[0] - r->origin_x) * (float)r->source_w * ipu;
         float dy = (o[1] - r->origin_y) * (float)r->source_h * ipu;
-        memcpy(local_model, m, 64);
-        local_model[12] -= (local_model[0] * dx) + (local_model[4] * dy);
-        local_model[13] -= (local_model[1] * dx) + (local_model[5] * dy);
-        local_model[14] -= (local_model[2] * dx) + (local_model[6] * dy);
-        m = local_model;
+        tx -= (m[0] * dx) + (m[4] * dy);
+        ty -= (m[1] * dx) + (m[5] * dy);
+        tz -= (m[2] * dx) + (m[6] * dy);
     }
 
-    /* Color (DrawableComponent) → packed RGBA8 */
-    const float *cf = dv->color[d_idx];
-    uint8_t cr = pack_u8(cf[0]);
-    uint8_t cg = pack_u8(cf[1]);
-    uint8_t cb = pack_u8(cf[2]);
-    uint8_t ca = pack_u8(cf[3]);
+    /* Color (DrawableComponent) → already packed RGBA8 in the component.
+     * drawable_comp.set_color() / .repack_color() keep the packed mirror
+     * in sync with the float color — saves 4 × pack_u8 conversions per
+     * sprite (~4 mul + 4 branches × 4 channels = ~32 ops, dropped). */
+    uint32_t color32 = dv->colors_packed[d_idx];
+    uint8_t cr = (uint8_t)(color32 & 0xFFU);
+    uint8_t cg = (uint8_t)((color32 >> 8) & 0xFFU);
+    uint8_t cb = (uint8_t)((color32 >> 16) & 0xFFU);
+    uint8_t ca = (uint8_t)((color32 >> 24) & 0xFFU);
 
     /* Flip flags (D-09) — per-vertex negate of cached_pos */
     bool fx = (flags & NT_SPRITE_FLAG_FLIP_X) != 0;
@@ -348,12 +346,15 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         v128_t m4 = wasm_f32x4_splat(m[4]);
         v128_t m5 = wasm_f32x4_splat(m[5]);
         v128_t m6 = wasm_f32x4_splat(m[6]);
-        v128_t m12 = wasm_f32x4_splat(m[12]);
-        v128_t m13 = wasm_f32x4_splat(m[13]);
-        v128_t m14 = wasm_f32x4_splat(m[14]);
-        v128_t xs = wasm_f32x4_add(wasm_f32x4_add(wasm_f32x4_mul(m0, pxs), wasm_f32x4_mul(m4, pys)), m12);
-        v128_t ys = wasm_f32x4_add(wasm_f32x4_add(wasm_f32x4_mul(m1, pxs), wasm_f32x4_mul(m5, pys)), m13);
-        v128_t zs = wasm_f32x4_add(wasm_f32x4_add(wasm_f32x4_mul(m2, pxs), wasm_f32x4_mul(m6, pys)), m14);
+        /* Translation rows pre-baked with origin offset (tx/ty/tz computed
+         * once above) — saves a memcpy(64) and lets the SIMD path splat
+         * directly from locals. */
+        v128_t mtx = wasm_f32x4_splat(tx);
+        v128_t mty = wasm_f32x4_splat(ty);
+        v128_t mtz = wasm_f32x4_splat(tz);
+        v128_t xs = wasm_f32x4_add(wasm_f32x4_add(wasm_f32x4_mul(m0, pxs), wasm_f32x4_mul(m4, pys)), mtx);
+        v128_t ys = wasm_f32x4_add(wasm_f32x4_add(wasm_f32x4_mul(m1, pxs), wasm_f32x4_mul(m5, pys)), mty);
+        v128_t zs = wasm_f32x4_add(wasm_f32x4_add(wasm_f32x4_mul(m2, pxs), wasm_f32x4_mul(m6, pys)), mtz);
         float xs_arr[4];
         float ys_arr[4];
         float zs_arr[4];
@@ -385,9 +386,9 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
                 py = -py;
             }
             nt_sprite_vertex_t *v = &s_sprite.vertices[base + i];
-            v->position[0] = (m[0] * px) + (m[4] * py) + m[12];
-            v->position[1] = (m[1] * px) + (m[5] * py) + m[13];
-            v->position[2] = (m[2] * px) + (m[6] * py) + m[14];
+            v->position[0] = (m[0] * px) + (m[4] * py) + tx;
+            v->position[1] = (m[1] * px) + (m[5] * py) + ty;
+            v->position[2] = (m[2] * px) + (m[6] * py) + tz;
             v->texcoord[0] = cuv[i][0];
             v->texcoord[1] = cuv[i][1];
             v->color[0] = cr;
