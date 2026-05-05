@@ -2,6 +2,7 @@
 #define NT_MATERIAL_H
 
 #include "core/nt_types.h"
+#include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "render/nt_render_defs.h"
 #include "resource/nt_resource.h"
@@ -41,6 +42,13 @@ typedef enum {
 typedef struct {
     const char *name;
     nt_resource_t resource;
+    /* Optional sampler override. If sampler.id == 0 the texture is sampled
+     * with its asset-baked defaults (V3 NtTextureAssetHeader → activator
+     * builds a sampler at activation time). To override, call
+     * nt_gfx_make_sampler in your material setup and pass the handle here.
+     * Multiple materials sharing the same sampler config get the same
+     * handle (nt_gfx dedupes), so this is cheap. */
+    nt_sampler_t sampler;
 } nt_material_texture_desc_t;
 
 typedef struct {
@@ -99,7 +107,8 @@ typedef struct {
     uint32_t resolved_fs;
     uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
     uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
-    const char *tex_names[NT_MATERIAL_MAX_TEXTURES]; /* sampler uniform names (static storage) */
+    const char *tex_names[NT_MATERIAL_MAX_TEXTURES];         /* sampler uniform names (static storage) */
+    nt_sampler_t resolved_sampler[NT_MATERIAL_MAX_TEXTURES]; /* per-binding sampler override; .id==0 means use texture's default */
     uint8_t tex_count;
     float params[NT_MATERIAL_MAX_PARAMS][4];
     uint32_t param_name_hashes[NT_MATERIAL_MAX_PARAMS];

@@ -130,6 +130,7 @@ nt_material_t nt_material_create(const nt_material_create_desc_t *desc) {
         slot->tex_resources[i] = desc->textures[i].resource;
         slot->info.tex_name_hashes[i] = desc->textures[i].name ? nt_hash32_str(desc->textures[i].name).value : 0;
         slot->info.tex_names[i] = desc->textures[i].name; /* must be static storage */
+        slot->info.resolved_sampler[i] = desc->textures[i].sampler;
     }
 
     /* Params */
