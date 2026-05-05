@@ -2,6 +2,10 @@
 
 #include <string.h>
 
+#ifdef __wasm_simd128__
+#include <wasm_simd128.h>
+#endif
+
 #include "atlas/nt_atlas.h"
 #include "core/nt_assert.h"
 #include "drawable_comp/nt_drawable_comp.h"
@@ -303,27 +307,84 @@ static void emit_one(const nt_render_item_t *item) {
     bool fx = (flags & NT_SPRITE_FLAG_FLIP_X) != 0;
     bool fy = (flags & NT_SPRITE_FLAG_FLIP_Y) != 0;
 
-    /* Emit vertices (uniform rect/polygon path, D-08) */
+    /* Emit vertices (uniform rect/polygon path, D-08).
+     *
+     * Per-vertex transform is the dominant CPU cost at 60k+ sprites/frame:
+     * 6 mul + 6 add per vertex × 4 verts × 60k ≈ 2.9M FLOPs just for
+     * positions. WASM clang can auto-vectorize the scalar loop with
+     * -msimd128, but the layout (3 floats per vertex inside a 24-byte
+     * struct) makes auto-vec brittle — it usually only kicks in on flat
+     * arrays. Hand-rolled SIMD path computes 4 verts of XYZ in 9 SIMD
+     * mul/add ops total, then scatters into the interleaved vertex array.
+     * Native and non-SIMD WASM keep the scalar path. */
     uint32_t base = s_sprite.vertex_count;
-    for (uint8_t i = 0; i < r->vertex_count; i++) {
-        float px = cpos[i][0];
+#ifdef __wasm_simd128__
+    if (r->vertex_count == 4) {
+        /* cpos is float[4][2] — 8 contiguous floats x0,y0,x1,y1,x2,y2,x3,y3.
+         * Load and de-interleave into pxs={x0,x1,x2,x3} pys={y0,y1,y2,y3}. */
+        v128_t lo = wasm_v128_load(&cpos[0][0]);
+        v128_t hi = wasm_v128_load(&cpos[2][0]);
+        v128_t pxs = wasm_i32x4_shuffle(lo, hi, 0, 2, 4, 6);
+        v128_t pys = wasm_i32x4_shuffle(lo, hi, 1, 3, 5, 7);
         if (fx) {
-            px = -px;
+            pxs = wasm_f32x4_neg(pxs);
         }
-        float py = cpos[i][1];
         if (fy) {
-            py = -py;
+            pys = wasm_f32x4_neg(pys);
         }
-        nt_sprite_vertex_t *v = &s_sprite.vertices[base + i];
-        v->position[0] = (m[0] * px) + (m[4] * py) + m[12];
-        v->position[1] = (m[1] * px) + (m[5] * py) + m[13];
-        v->position[2] = (m[2] * px) + (m[6] * py) + m[14];
-        v->texcoord[0] = cuv[i][0];
-        v->texcoord[1] = cuv[i][1];
-        v->color[0] = cr;
-        v->color[1] = cg;
-        v->color[2] = cb;
-        v->color[3] = ca;
+        v128_t m0 = wasm_f32x4_splat(m[0]);
+        v128_t m1 = wasm_f32x4_splat(m[1]);
+        v128_t m2 = wasm_f32x4_splat(m[2]);
+        v128_t m4 = wasm_f32x4_splat(m[4]);
+        v128_t m5 = wasm_f32x4_splat(m[5]);
+        v128_t m6 = wasm_f32x4_splat(m[6]);
+        v128_t m12 = wasm_f32x4_splat(m[12]);
+        v128_t m13 = wasm_f32x4_splat(m[13]);
+        v128_t m14 = wasm_f32x4_splat(m[14]);
+        v128_t xs = wasm_f32x4_add(wasm_f32x4_add(wasm_f32x4_mul(m0, pxs), wasm_f32x4_mul(m4, pys)), m12);
+        v128_t ys = wasm_f32x4_add(wasm_f32x4_add(wasm_f32x4_mul(m1, pxs), wasm_f32x4_mul(m5, pys)), m13);
+        v128_t zs = wasm_f32x4_add(wasm_f32x4_add(wasm_f32x4_mul(m2, pxs), wasm_f32x4_mul(m6, pys)), m14);
+        float xs_arr[4];
+        float ys_arr[4];
+        float zs_arr[4];
+        wasm_v128_store(xs_arr, xs);
+        wasm_v128_store(ys_arr, ys);
+        wasm_v128_store(zs_arr, zs);
+        for (uint8_t i = 0; i < 4; i++) {
+            nt_sprite_vertex_t *v = &s_sprite.vertices[base + i];
+            v->position[0] = xs_arr[i];
+            v->position[1] = ys_arr[i];
+            v->position[2] = zs_arr[i];
+            v->texcoord[0] = cuv[i][0];
+            v->texcoord[1] = cuv[i][1];
+            v->color[0] = cr;
+            v->color[1] = cg;
+            v->color[2] = cb;
+            v->color[3] = ca;
+        }
+    } else
+#endif /* __wasm_simd128__ */
+    {
+        for (uint8_t i = 0; i < r->vertex_count; i++) {
+            float px = cpos[i][0];
+            if (fx) {
+                px = -px;
+            }
+            float py = cpos[i][1];
+            if (fy) {
+                py = -py;
+            }
+            nt_sprite_vertex_t *v = &s_sprite.vertices[base + i];
+            v->position[0] = (m[0] * px) + (m[4] * py) + m[12];
+            v->position[1] = (m[1] * px) + (m[5] * py) + m[13];
+            v->position[2] = (m[2] * px) + (m[6] * py) + m[14];
+            v->texcoord[0] = cuv[i][0];
+            v->texcoord[1] = cuv[i][1];
+            v->color[0] = cr;
+            v->color[1] = cg;
+            v->color[2] = cb;
+            v->color[3] = ca;
+        }
     }
     s_sprite.vertex_count += r->vertex_count;
 
