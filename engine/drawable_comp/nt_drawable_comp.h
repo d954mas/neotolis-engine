@@ -28,4 +28,17 @@ nt_hash32_t *nt_drawable_comp_tag(nt_entity_t entity);
 bool *nt_drawable_comp_visible(nt_entity_t entity);
 float *nt_drawable_comp_color(nt_entity_t entity); /* float[4] rgba */
 
+/* ---- Bulk SoA view (read-only) ----
+ *
+ * Lets renderers join with sprite/transform data without per-entity accessor
+ * overhead. Pointers stable for module lifetime; values shift on add/remove. */
+typedef struct {
+    uint16_t count;
+    const uint16_t *sparse_indices; /* entity_index -> dense_idx; NT_INVALID_COMP_INDEX if absent */
+    const float (*color)[4];        /* dense_idx -> rgba float4 */
+    const bool *visible;
+} nt_drawable_comp_view_t;
+
+nt_drawable_comp_view_t nt_drawable_comp_view(void);
+
 #endif /* NT_DRAWABLE_COMP_H */

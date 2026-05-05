@@ -247,24 +247,34 @@ static void open_cmd_from_snapshot(const nt_sprite_draw_cmd_t *snap) {
 // #endregion
 
 // #region emit_one (per-sprite vertex/index emit)
+/* Per-sprite emit uses pre-fetched bulk SoA views to skip the cross-TU
+ * accessor function-call + entity-liveness assert overhead — at 60k+
+ * sprites/frame those add up to 5-6 ms of pure overhead. The renderer
+ * trusts the game-supplied items[] to reference live entities with the
+ * required components; sparse_indices[entity_index] gives the dense slot
+ * directly. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_one(const nt_render_item_t *item) {
+static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv) {
     nt_entity_t e = {.id = item->entity};
+    uint16_t eidx = nt_entity_index(e);
 
-    /* Resolve atlas + region — sprite_comp guarantees atlas/region_index for
-     * resolved sprites. Single combined accessor: one user_data lookup +
-     * one bounds check, returns all four pointers. Tombstone
-     * (vertex_count==0) → zero-draw early-out. */
-    nt_resource_t atlas = *nt_sprite_comp_atlas(e);
-    uint16_t ridx = *nt_sprite_comp_region_index(e);
-    nt_atlas_region_view_t view = nt_atlas_get_region_view(atlas, ridx);
-    if (view.region == NULL || view.region->vertex_count == 0) {
+    /* Inline sparse->dense lookups — three array reads vs three function
+     * calls each doing a liveness assert + the same lookup. */
+    uint16_t s_idx = sv->sparse_indices[eidx];
+    uint16_t t_idx = tv->sparse_indices[eidx];
+    uint16_t d_idx = dv->sparse_indices[eidx];
+
+    /* Resolve atlas + region. Tombstone → zero-draw early-out. */
+    nt_resource_t atlas = sv->atlas[s_idx];
+    uint16_t ridx = sv->region_index[s_idx];
+    nt_atlas_region_view_t aview = nt_atlas_get_region_view(atlas, ridx);
+    if (aview.region == NULL || aview.region->vertex_count == 0) {
         return;
     }
-    const nt_texture_region_t *r = view.region;
-    const float(*cpos)[2] = view.cached_pos;
-    const float(*cuv)[2] = view.cached_uv;
-    const uint16_t *idx = view.indices;
+    const nt_texture_region_t *r = aview.region;
+    const float(*cpos)[2] = aview.cached_pos;
+    const float(*cuv)[2] = aview.cached_uv;
+    const uint16_t *idx = aview.indices;
     NT_ASSERT(cpos != NULL && cuv != NULL && idx != NULL);
 
     /* Capacity guard — if this sprite would overflow staging, snapshot the
@@ -280,11 +290,11 @@ static void emit_one(const nt_render_item_t *item) {
 
     /* Model matrix + origin override (D-07). Override path is cold for the
      * Bunnymark default — branch is predictable per-batch. */
-    const float *m = nt_transform_comp_world_matrix(e);
+    const float *m = tv->world_matrices[t_idx];
     float local_model[16];
-    uint8_t flags = *nt_sprite_comp_flags(e);
+    uint8_t flags = sv->flags[s_idx];
     if (flags & NT_SPRITE_FLAG_ORIGIN_OV) {
-        const float *o = nt_sprite_comp_origin(e);
+        const float *o = sv->origin[s_idx];
         float ppu = nt_atlas_get_pixels_per_unit(atlas);
         float ipu = (ppu > 0.0F) ? 1.0F / ppu : 1.0F;
         float dx = (o[0] - r->origin_x) * (float)r->source_w * ipu;
@@ -297,7 +307,7 @@ static void emit_one(const nt_render_item_t *item) {
     }
 
     /* Color (DrawableComponent) → packed RGBA8 */
-    const float *cf = nt_drawable_comp_color(e);
+    const float *cf = dv->color[d_idx];
     uint8_t cr = pack_u8(cf[0]);
     uint8_t cg = pack_u8(cf[1]);
     uint8_t cb = pack_u8(cf[2]);
@@ -433,6 +443,13 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
      * nt_gfx_get_frame_draw_calls, which is reset by nt_gfx_begin_frame). */
     s_sprite.frame_draw_calls = 0;
 
+    /* Fetch bulk SoA views once. Every per-sprite read inside emit_one then
+     * indexes the dense arrays directly via sparse_indices, skipping the
+     * per-entity accessor's function-call + liveness assert. */
+    nt_sprite_comp_view_t sv = nt_sprite_comp_view();
+    nt_transform_comp_view_t tv = nt_transform_comp_view();
+    nt_drawable_comp_view_t dv = nt_drawable_comp_view();
+
     uint32_t run_start = 0;
     while (run_start < count) {
         uint32_t run_end = run_start + 1;
@@ -460,7 +477,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         open_cmd(pip, mat_info);
 
         for (uint32_t i = run_start; i < run_end; i++) {
-            emit_one(&items[i]);
+            emit_one(&items[i], &sv, &tv, &dv);
         }
         run_start = run_end;
     }

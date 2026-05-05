@@ -114,3 +114,5 @@ uint16_t nt_comp_storage_index(const nt_comp_storage_t *s, nt_entity_t entity) {
 }
 
 const uint16_t *nt_comp_storage_entities(const nt_comp_storage_t *s) { return s->index_to_entity; }
+
+const uint16_t *nt_comp_storage_sparse(const nt_comp_storage_t *s) { return s->entity_to_index; }

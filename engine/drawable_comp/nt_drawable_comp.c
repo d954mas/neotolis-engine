@@ -103,3 +103,14 @@ float *nt_drawable_comp_color(nt_entity_t entity) {
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return s_colors[idx];
 }
+
+/* ---- Bulk SoA view ---- */
+
+nt_drawable_comp_view_t nt_drawable_comp_view(void) {
+    return (nt_drawable_comp_view_t){
+        .count = nt_comp_storage_count(&s_storage),
+        .sparse_indices = nt_comp_storage_sparse(&s_storage),
+        .color = (const float(*)[4])s_colors,
+        .visible = s_visible,
+    };
+}

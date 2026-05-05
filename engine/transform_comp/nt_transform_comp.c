@@ -145,3 +145,13 @@ void nt_transform_comp_update(void) {
         s_dirty[i] = false;
     }
 }
+
+/* ---- Bulk SoA view ---- */
+
+nt_transform_comp_view_t nt_transform_comp_view(void) {
+    return (nt_transform_comp_view_t){
+        .count = nt_comp_storage_count(&s_storage),
+        .sparse_indices = nt_comp_storage_sparse(&s_storage),
+        .world_matrices = (const float(*)[16])s_world_matrices,
+    };
+}
