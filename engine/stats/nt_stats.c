@@ -154,21 +154,54 @@ void nt_stats_count(const char *name, uint64_t value) {
 }
 // #endregion
 
-// #region Format & draw (filled in Task 2)
+// #region Format & draw
 uint32_t nt_stats_format_lines(char *buf, uint32_t size) {
     NT_ASSERT(buf && size > 0);
-    if (size > 0) {
-        buf[0] = '\0';
+
+    /* GPU slot is "N/A" until Pitfall 5 GPU timer wiring lands */
+    char gpu_buf[32];
+    if (s_stats.last_gpu_ms < 0.0F) {
+        (void)snprintf(gpu_buf, sizeof(gpu_buf), "N/A");
+    } else {
+        (void)snprintf(gpu_buf, sizeof(gpu_buf), "%.2f ms", (double)s_stats.last_gpu_ms);
     }
-    return 0;
+
+    int n = snprintf(buf, size, "FPS: %.1f\nCPU: %.2f ms\nGPU: %s\nDraws: %u\n", (double)nt_stats_get_fps(), (double)s_stats.last_cpu_ms, gpu_buf, s_stats.last_draw_calls);
+    if (n < 0) {
+        buf[0] = '\0';
+        return 0;
+    }
+    uint32_t written = (uint32_t)n;
+    if (written >= size) {
+        /* Truncated — buf is already NUL-terminated by snprintf */
+        return size - 1;
+    }
+
+    /* User counters in insertion order, one line each: "name: value" */
+    for (uint16_t i = 0; i < s_stats.user_count; i++) {
+        int m = snprintf(buf + written, size - written, "%s: %llu\n", s_stats.user_names[i], (unsigned long long)s_stats.user_values[i]);
+        if (m < 0) {
+            break;
+        }
+        if ((uint32_t)m >= size - written) {
+            /* Truncated — return available */
+            return size - 1;
+        }
+        written += (uint32_t)m;
+    }
+
+    return written;
 }
 
 void nt_stats_draw(nt_material_t material, nt_font_t font, const float model[16], float size, const float color[4]) {
-    /* Filled in Task 2 */
-    (void)material;
-    (void)font;
-    (void)model;
-    (void)size;
-    (void)color;
+    NT_ASSERT(s_stats.initialized);
+    char buf[512];
+    (void)nt_stats_format_lines(buf, sizeof(buf));
+    /* Pitfall 9 (Issue 2 fix): explicit set_material AND set_font defeat
+     * nt_text_renderer's change-detection early-out so the overlay always
+     * binds correctly regardless of prior frame state. */
+    nt_text_renderer_set_material(material);
+    nt_text_renderer_set_font(font);
+    nt_text_renderer_draw(buf, model, size, color);
 }
 // #endregion
