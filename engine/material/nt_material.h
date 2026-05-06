@@ -42,13 +42,7 @@ typedef enum {
 typedef struct {
     const char *name;
     nt_resource_t resource;
-    /* Optional sampler override. If sampler.id == 0 the texture is sampled
-     * with its asset-baked defaults (V3 NtTextureAssetHeader → activator
-     * builds a sampler at activation time). To override, call
-     * nt_gfx_make_sampler in your material setup and pass the handle here.
-     * Multiple materials sharing the same sampler config get the same
-     * handle (nt_gfx dedupes), so this is cheap. */
-    nt_sampler_t sampler;
+    nt_sampler_t sampler; /* override; .id==0 = use texture's asset-baked default */
 } nt_material_texture_desc_t;
 
 typedef struct {

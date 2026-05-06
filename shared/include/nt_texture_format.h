@@ -41,12 +41,7 @@ typedef enum {
 #define NT_TEXTURE_FLAG_PREMULTIPLIED (1U << 0) /* RGB already multiplied by alpha */
 /* bits 1..7 reserved */
 
-/* Filter / wrap enum values for default_min_filter / default_mag_filter /
- * default_wrap_u / default_wrap_v in NtTextureAssetHeader.
- *
- * Numeric values MUST match nt_texture_filter_t / nt_texture_wrap_t in
- * engine/graphics/nt_gfx.h. Defined here so the builder can write them
- * without a dependency on the engine graphics layer. */
+/* Values must match nt_texture_filter_t / nt_texture_wrap_t in nt_gfx.h. */
 typedef enum {
     NT_TEXTURE_DEFAULT_FILTER_NEAREST = 0,
     NT_TEXTURE_DEFAULT_FILTER_LINEAR = 1,

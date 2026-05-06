@@ -184,9 +184,6 @@ static void translate_region(nt_texture_region_t *dst, const NtAtlasRegion *src)
     dst->index_count = src->index_count;
     dst->page_index = src->page_index;
     dst->transform = src->transform;
-    /* Mask off bits the runtime doesn't recognize yet (forward-compat
-     * filter, not a validity check — builder asserts QUAD_* coherence
-     * with vertex/index counts at flag-set time). */
     dst->flags = (uint8_t)(src->flags & NT_ATLAS_REGION_FLAG_QUAD_MASK);
     memset(dst->reserved, 0, sizeof(dst->reserved));
 }

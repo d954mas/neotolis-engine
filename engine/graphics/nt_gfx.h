@@ -338,11 +338,7 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
  * to the texture's own filter/wrap state (set via glTexParameteri). */
 void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
 
-/* Texture's asset-baked default sampler (built from V3 header at activation
- * or from desc fields in nt_gfx_make_texture). Returns NT_SAMPLER_INVALID
- * if the texture has no default — caller in that case typically wants legacy
- * texture state. Renderers use this to resolve "no material override" into
- * an explicit sampler handle so they can detect leaks across draw commands. */
+/* Returns NT_SAMPLER_INVALID if texture has no asset-baked default. */
 nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex);
 
 /* ---- Uniforms ---- */

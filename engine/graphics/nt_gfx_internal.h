@@ -89,9 +89,6 @@ uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot);
 uint32_t nt_gfx_stub_test_bind_sampler_count(void);
 void nt_gfx_stub_test_reset(void);
 
-/* Resolve a public sampler handle to its backend id (the value the stub
- * records on bind). Lets tests compare "what was last bound" with a
- * specific public handle without exposing s_gfx internals. */
 uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s);
 #endif
 

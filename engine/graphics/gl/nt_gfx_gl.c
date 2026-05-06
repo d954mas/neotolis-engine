@@ -52,10 +52,7 @@
 #endif
 
 #ifdef NT_PLATFORM_WEB
-/* WebGL2 ships these as core GLES3 entry points (glBeginQuery / glEndQuery
- * etc.), but only target=GL_TIME_ELAPSED is gated behind the EXT extension.
- * After nt_gfx_gl_ctx_enable_timer_query() activates the extension, the
- * existing function pointers accept the new target. */
+/* EXT_disjoint_timer_query_webgl2 — only the 64-bit getter needs the EXT suffix. */
 extern void glGetQueryObjectui64vEXT(GLuint id, GLenum pname, GLuint64 *params);
 #define nt_gl_get_query_u64(id, pname, out) glGetQueryObjectui64vEXT((id), (pname), (out))
 #else
@@ -106,13 +103,7 @@ static GLuint s_instance_gl_buf;          /* GL name of last bound instance buff
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
 
-/* ---- GPU timer query (EXT_disjoint_timer_query_webgl2 / ARB_timer_query) ----
- *
- * Ring of N query objects so a frame's TIME_ELAPSED can be read 1-2 frames
- * later without stalling the GPU. begin_frame starts a query into the
- * head slot; end_frame closes it and advances head; poll_gpu_time reads the
- * oldest in-flight query if its result is ready. A disjoint event clears
- * all in-flight results (clock skip — values would be unreliable). */
+/* GPU TIME_ELAPSED ring (EXT_disjoint_timer_query_webgl2 / ARB_timer_query). */
 #define NT_GFX_TIMER_RING 4
 
 static bool s_timer_enabled;             /* extension/core entry points present */
@@ -431,10 +422,8 @@ void nt_gfx_backend_begin_frame(void) {
     s_bound_pipeline_slot = 0;
 
     if (s_timer_enabled && s_timer_user_enabled) {
-        /* Ring full means the game enabled timing but never polled. Drop the
-         * stale results once so begin_frame can proceed — warn once so the
-         * misuse is visible without spamming. */
         if (s_timer_in_flight[s_timer_head]) {
+            /* Ring full = game never polled. Drop stale slots, warn once. */
             if (!s_timer_warned) {
                 NT_LOG_WARN("gpu_timing: ring full — call nt_gfx_poll_gpu_time_ns to consume results");
                 s_timer_warned = true;
@@ -449,9 +438,6 @@ void nt_gfx_backend_begin_frame(void) {
 }
 
 void nt_gfx_backend_end_frame(void) {
-    /* Close the active TIME_ELAPSED query and mark the slot in-flight so
-     * poll_gpu_time can pick it up once the GPU finishes (1-2 frames
-     * later in WebGL2). */
     if (s_timer_active) {
         glEndQuery(GL_TIME_ELAPSED);
         s_timer_in_flight[s_timer_head] = true;
@@ -475,9 +461,7 @@ bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) {
         return false;
     }
 
-    /* Disjoint event = clock skip; all in-flight results are unreliable.
-     * Drop them and reset the ring. The flag auto-clears on read so reading
-     * it here also acks the event. */
+    /* Disjoint = clock skip → drop all in-flight (read also acks the flag). */
     GLint disjoint = 0;
     glGetIntegerv(GL_GPU_DISJOINT_EXT, &disjoint);
     if (disjoint) {
@@ -492,8 +476,6 @@ bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) {
 
     GLuint q = s_timer_queries[s_timer_tail];
     GLuint available = 0;
-    /* glGetQueryObjectuiv is portable: GLES3/WebGL2 + desktop GL ≥ 3.0.
-     * glGetQueryObjectiv is desktop-only and breaks WebGL builds. */
     glGetQueryObjectuiv(q, GL_QUERY_RESULT_AVAILABLE, &available);
     if (!available) {
         return false;
@@ -508,12 +490,8 @@ bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) {
 }
 
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
-    /* Drain on disable so re-enabling later starts from a clean ring —
-     * otherwise stale in-flight slots would silently block begin_frame.
-     * Mid-frame toggle: close the open query first, otherwise the next
-     * begin_frame would call glBeginQuery on an already-active target
-     * (INVALID_OPERATION on WebGL2 and desktop GL alike). */
     if (!enabled && s_timer_enabled) {
+        /* Close any in-flight query and drain ring so re-enable starts clean. */
         if (s_timer_active) {
             glEndQuery(GL_TIME_ELAPSED);
             s_timer_active = false;
@@ -522,8 +500,6 @@ void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
         s_timer_head = 0;
         s_timer_tail = 0;
     }
-    /* Reset one-shot ring-full warning so a re-enable cycle can re-flag
-     * misuse if the bug repeats. */
     if (enabled && !s_timer_user_enabled) {
         s_timer_warned = false;
     }

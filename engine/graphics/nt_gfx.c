@@ -599,12 +599,7 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
     }
     uint32_t idx = nt_pool_slot_index(tex.id);
     nt_gfx_backend_bind_texture(s_gfx.texture_backends[idx], slot);
-    /* Bind the texture's default sampler unconditionally — including .id == 0,
-     * which delegates to backend_bind_sampler(0, slot) and clears any sampler
-     * object left on the unit by a previous binding. Without that clear, a
-     * texture with no asset-baked default would still inherit the previous
-     * texture's sampler object and ignore its own legacy GL_TEXTURE_*_FILTER
-     * state. Materials may override after this via nt_gfx_bind_sampler. */
+    /* Always re-attach default (incl. .id==0 → unbinds any prior sampler). */
     nt_gfx_bind_sampler(s_gfx.texture_metas[idx].default_sampler, slot);
 }
 
@@ -936,10 +931,7 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 
 /* ---- Asset activators ---- */
 
-/* Build a default sampler from the V3 texture header's filter/wrap fields and
- * record it in texture_metas[slot] so bind_texture can bind it alongside the
- * texture. Used by the BASIS asset path; the RAW path bakes filter/wrap into
- * desc and lets nt_gfx_make_texture build the sampler directly. */
+/* BASIS-only: RAW path bakes filter into desc and uses make_texture instead. */
 #ifdef NT_HAS_BASISU
 static void texture_attach_default_sampler(uint32_t tex_id, const NtTextureAssetHeaderV2 *hdr) {
     nt_sampler_desc_t sd = {

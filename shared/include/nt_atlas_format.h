@@ -5,17 +5,10 @@
 
 /* Magic: ASCII "ATLS" as uint32_t little-endian = 0x534C5441 */
 #define NT_ATLAS_MAGIC 0x534C5441
-/* Bumped 4 → 5 when builder moved Y-flip out of runtime into pack-time:
- * vertex local_y, region origin_y, region trim_offset_y are now stored in
- * y-up source space. Old v4 packs would silently render upside-down — the
- * version bump makes the activator assert mismatch immediately. */
+/* V5: Y-flip moved to build-time (vertex local_y / origin_y / trim_offset_y in y-up). */
 #define NT_ATLAS_VERSION 5
 
-/* Reserved for the planned GPU-instanced rect renderer (Issue #176). The
- * builder still emits these flags so when the instanced path lands it can
- * filter rect runs in O(1). The current sprite renderer ignores them. The
- * three patterns describe the three valid CW (post Y-flip / winding-swap)
- * orderings of a 4-vertex quad's 6 indices. */
+/* Reserved for GPU-instanced rect renderer (Issue #176); runtime ignores. */
 #define NT_ATLAS_REGION_FLAG_QUAD_012023 ((uint8_t)(1U << 0))
 #define NT_ATLAS_REGION_FLAG_QUAD_012130 ((uint8_t)(1U << 1))
 #define NT_ATLAS_REGION_FLAG_QUAD_012132 ((uint8_t)(1U << 2))
@@ -60,9 +53,7 @@ typedef struct {
     uint16_t source_h;     /* 10: original image height in pixels (pre-trim) */
     int16_t trim_offset_x; /* 12: pixels stripped from the left edge during alpha trim
                             *     (add to NtAtlasVertex.local_x to get source-image space X) */
-    int16_t trim_offset_y; /* 14: pixels stripped from the BOTTOM edge in y-up source space
-                            *     (v5 semantics — was top edge in v4 and earlier). Builder
-                            *     converts at write time: trim_offset_y = source_h - trim_y_png - trim_h. */
+    int16_t trim_offset_y; /* 14: pixels stripped from the BOTTOM edge in y-up source space (v5+) */
     float origin_x;        /* 16: pivot X, normalized over source_w (NOT trim_w).
                             *     0.0 = left edge, 0.5 = centre (default), 1.0 = right edge.
                             *     Values outside [0, 1] are allowed — the pivot may lie outside
@@ -70,9 +61,7 @@ typedef struct {
                             *     Runtime resolves: pivot_px_x = origin_x * source_w.
                             *     Source-space (not trim-space) gives stable pivots across
                             *     animation frames where trim bounds vary. */
-    float origin_y;        /* 20: pivot Y, normalized over source_h, in y-up source space
-                            *     (v5 — was y-down in v4). 0.0 = bottom, 1.0 = top.
-                            *     Builder converts at write time: origin_y = 1 - origin_y_png. */
+    float origin_y;        /* 20: pivot Y, normalized over source_h, y-up (v5+) — 0=bottom, 1=top */
     uint32_t vertex_start; /* 24: index into vertex array (uint32 in v3, was uint16 in v2) */
     uint32_t index_start;  /* 28: index into the index array (uint32 in v3, was uint16 in v2) */
     uint8_t vertex_count;  /* 32: number of vertices for this region (max 16 per builder limit) */

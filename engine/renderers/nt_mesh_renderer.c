@@ -462,11 +462,6 @@ void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
                         if (mat_info->tex_names[t] != NULL) {
                             nt_gfx_set_uniform_int(mat_info->tex_names[t], (int)t);
                         }
-                        /* Per-binding sampler override (B5/B6) wins over the
-                         * texture default that bind_texture just attached.
-                         * Override stickiness across material switches is
-                         * handled by bind_texture re-attaching the next
-                         * texture's default sampler each time. */
                         if (mat_info->resolved_sampler[t].id != 0) {
                             nt_gfx_bind_sampler(mat_info->resolved_sampler[t], t);
                         }

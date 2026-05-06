@@ -215,12 +215,7 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi) {
     }
     NT_ASSERT(s_sprite.cmd_count < NT_SPRITE_RENDERER_MAX_DRAW_CMDS && "sprite draw-cmd queue full; raise NT_SPRITE_RENDERER_MAX_DRAW_CMDS");
     nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count++];
-    /* Zero-init: cmd slots are reused across frames. Without this, fields not
-     * touched by a low-tex_count material (e.g. tex_count == 0) inherit stale
-     * resolved_tex/_sampler from a previous frame's draw, and the lazy slot-0
-     * injection in ensure_current_cmd_page_texture would compare against
-     * garbage. */
-    memset(c, 0, sizeof(*c));
+    memset(c, 0, sizeof(*c)); /* slots reuse across frames; clear stale fields */
     c->pipeline = pip;
     c->tex_count = mi->tex_count;
     for (uint8_t i = 0; i < mi->tex_count; i++) {
@@ -247,10 +242,7 @@ static void open_cmd_from_snapshot(const nt_sprite_draw_cmd_t *snap) {
     c->first_vertex = s_sprite.vertex_count;
 }
 
-/* Sprite atlas pages are the renderer's texture source of truth. The game may
- * still use batch_key to keep compatible sprites adjacent, but correctness does
- * not depend on it encoding the page texture: when a run crosses atlas pages,
- * split the current draw cmd and keep emitting in-order. */
+/* Atlas page is the texture source of truth — split cmd if a run crosses pages. */
 static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
     NT_ASSERT(s_sprite.cmd_count > 0 && "sprite emit called with no open cmd");
     if (page_tex == 0) {
@@ -258,10 +250,7 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
     }
 
     nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count - 1];
-    /* Sprite contract (see nt_sprite_renderer.h draw_list comment): atlas
-     * page texture always binds to slot 0. If the material declared no
-     * slot-0 binding, install the page-texture slot here without uniform
-     * name (shader's sampler2D defaults to unit 0). */
+    /* Lazy slot 0 inject — see draw_list contract in nt_sprite_renderer.h. */
     if (c->tex_count == 0) {
         c->tex_count = 1;
         c->tex_names[0] = NULL;
@@ -287,12 +276,7 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
 // #endregion
 
 // #region emit_one (per-sprite vertex/index emit)
-/* Per-sprite emit uses pre-fetched bulk SoA views to skip the cross-TU
- * accessor function-call + entity-liveness assert overhead — at 60k+
- * sprites/frame those add up to 5-6 ms of pure overhead. The renderer
- * trusts the game-supplied items[] to reference live entities with the
- * required components; sparse_indices[entity_index] gives the dense slot
- * directly. */
+/* Caller passes pre-fetched SoA views; sparse_indices[entity_index] → dense slot. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv) {
     nt_entity_t e = {.id = item->entity};
@@ -333,15 +317,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         open_cmd_from_snapshot(&snapshot);
     }
 
-    /* Model matrix + origin override (D-07). Override path is cold for the
-     * Bunnymark default — branch is predictable per-batch.
-     *
-     * The origin shift is mathematically just a pre-translation in local
-     * space: m * (p - delta) = m*p - m*delta. We bake -m*delta into local
-     * tx/ty/tz scalars and feed those to the vertex transform instead of
-     * m[12]/m[13]/m[14]. No memcpy of the matrix, no mutation of caller
-     * data — the rotation/scale rows of m are read directly from the
-     * transform component. */
+    /* D-07 origin override: bake -m*delta into tx/ty/tz, no matrix copy. */
     const float *m = tv->world_matrices[t_idx];
     float tx = m[12];
     float ty = m[13];
@@ -368,13 +344,10 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     bool fx = (flags & NT_SPRITE_FLAG_FLIP_X) != 0;
     bool fy = (flags & NT_SPRITE_FLAG_FLIP_Y) != 0;
 
-    /* Per-vertex transform is the hottest CPU cost at 60k+ sprites. The
-     * SIMD128 path packs the 4-vert quad case; everything else uses scalar. */
     uint32_t base = s_sprite.vertex_count;
 #ifdef __wasm_simd128__
     if (r->vertex_count == 4) {
-        /* cpos is float[4][2] — 8 contiguous floats x0,y0,x1,y1,x2,y2,x3,y3.
-         * Load and de-interleave into pxs={x0,x1,x2,x3} pys={y0,y1,y2,y3}. */
+        /* De-interleave cpos[4][2] → pxs/pys lanes. */
         v128_t lo = wasm_v128_load(&cpos[0][0]);
         v128_t hi = wasm_v128_load(&cpos[2][0]);
         v128_t pxs = wasm_i32x4_shuffle(lo, hi, 0, 2, 4, 6);
@@ -391,9 +364,6 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         v128_t m4 = wasm_f32x4_splat(m[4]);
         v128_t m5 = wasm_f32x4_splat(m[5]);
         v128_t m6 = wasm_f32x4_splat(m[6]);
-        /* Translation rows pre-baked with origin offset (tx/ty/tz computed
-         * once above) — saves a memcpy(64) and lets the SIMD path splat
-         * directly from locals. */
         v128_t mtx = wasm_f32x4_splat(tx);
         v128_t mty = wasm_f32x4_splat(ty);
         v128_t mtz = wasm_f32x4_splat(tz);
@@ -465,35 +435,15 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
 // #endregion
 
 // #region draw_list
-/* Defold-style two-phase pipeline (D-18 semantics preserved):
- *
- *   Phase 1 (this function): walk run boundaries, open a draw cmd per
- *   batch_key with its pipeline + texture state, append per-sprite vertices
- *   into shared staging via emit_one.
- *
- *   Phase 2 (nt_sprite_renderer_flush, called once at the end): single VBO
- *   + IBO upload, then iterate cmds binding state once per cmd and issuing
- *   one nt_gfx_draw_indexed with byte offsets. emit_one auto-flushes
- *   mid-list when staging overflows and re-opens the same cmd state, so
- *   the contract still gives N flushes for N batch_keys in the common case
- *   (= 1 for bunnymark with 60k uniformly-keyed sprites).
- *
- *   Why N draws and not 1: between cmds the GPU may need a new pipeline
- *   binding (different shader/blend/depth) or a new texture binding, which
- *   must happen between draw calls in WebGL2/GL. Cmds inside flush() bind
- *   only what changed (pipeline & texture id tracked since previous cmd). */
+/* Phase 1 of the two-phase pipeline (D-18): open a cmd per batch_key,
+ * stream verts into staging via emit_one. Phase 2 = nt_sprite_renderer_flush. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     NT_ASSERT(s_sprite.initialized);
     if (count == 0) {
         return;
     }
 
-    /* Reset per-frame counter (per-renderer test counter — distinct from
-     * nt_gfx_get_frame_draw_calls, which is reset by nt_gfx_begin_frame). */
     s_sprite.frame_draw_calls = 0;
-    /* Fetch bulk SoA views once. Every per-sprite read inside emit_one then
-     * indexes the dense arrays directly via sparse_indices, skipping the
-     * per-entity accessor's function-call + liveness assert. */
     nt_sprite_comp_view_t sv = nt_sprite_comp_view();
     nt_transform_comp_view_t tv = nt_transform_comp_view();
     nt_drawable_comp_view_t dv = nt_drawable_comp_view();
@@ -516,10 +466,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
             continue;
         }
 
-        /* D-18: every batch_key boundary opens a fresh cmd. Even when the
-         * resolved pipeline matches the previous cmd, the game has signalled
-         * the runs are not state-compatible — keep them as separate draws
-         * so flush() can re-bind whatever the game needs. */
+        /* D-18: each batch_key boundary opens a fresh cmd. */
         nt_pipeline_t pip = find_or_create_pipeline(mat_info);
         close_current_cmd();
         open_cmd(pip, mat_info);
@@ -534,13 +481,9 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
 // #endregion
 
 // #region flush
-/* Phase 2 of the Defold-style pipeline: single VBO + IBO upload, then replay
- * recorded draw cmds with state binding only when it changes between cmds.
- * Resets all staging counters at the end so the next draw_list / external
- * caller starts clean. Idempotent when nothing was emitted. */
+/* Phase 2: upload staging, replay cmds, rebind state only on delta. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_flush(void) {
-    /* Closing the open cmd is safe here (no-op if cmd_count==0). */
     close_current_cmd();
     if (s_sprite.cmd_count == 0 || s_sprite.vertex_count == 0) {
         s_sprite.vertex_count = 0;
@@ -563,10 +506,7 @@ void nt_sprite_renderer_flush(void) {
     uint32_t bound_pipeline_id = 0;
     uint32_t bound_ibo_id = 0;
     uint32_t bound_tex_ids[NT_MATERIAL_MAX_TEXTURES] = {0};
-    /* Track effective sampler per unit. Without this a cmd with material
-     * override X followed by another cmd on the same texture without override
-     * would silently keep X bound (tex skip → sampler skip) and sample with
-     * the wrong filter. Resolve effective per cmd, bind only on delta. */
+    /* Tracked separately so override→no-override cmd transitions reset to default. */
     uint32_t bound_sampler_ids[NT_MATERIAL_MAX_TEXTURES] = {0};
 
     for (uint32_t ci = 0; ci < s_sprite.cmd_count; ci++) {
@@ -613,10 +553,7 @@ void nt_sprite_renderer_flush(void) {
             }
         }
 
-        /* Per-cmd vertex range = next cmd's first_vertex (or total at end of
-         * staging for the last cmd) minus this cmd's first_vertex. Without
-         * this delta, every cmd reports the whole flush chunk and frame_stats
-         * inflate by N when state changes split into N cmds. */
+        /* Per-cmd vertex delta — avoids stats inflation across state splits. */
         uint32_t cmd_vertex_end = (ci + 1U < s_sprite.cmd_count) ? s_sprite.cmds[ci + 1U].first_vertex : s_sprite.vertex_count;
         uint32_t cmd_vertex_count = cmd_vertex_end - c->first_vertex;
         nt_gfx_draw_indexed(c->first_index, c->index_count, cmd_vertex_count);
