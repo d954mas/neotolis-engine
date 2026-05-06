@@ -2875,6 +2875,52 @@ void test_cache_version_in_opts_hash(void) {
     TEST_ASSERT_TRUE(hash3 != hash1);
 }
 
+/* CACHE-02b: Sampler defaults (filter/wrap) participate in the texture
+ * opts hash. Regression for the bug where SD/HD packs with different
+ * filter_min produced identical cache entries because compute_opts_hash
+ * skipped the filter/wrap fields — the second build of a texture with a
+ * new filter would hit a stale cache blob. */
+void test_cache_filter_wrap_in_opts_hash(void) {
+    /* Build a fully-populated texture entry. Hash sensitivity is on the opts
+     * fields (format / filter / wrap / compress); pixel content is irrelevant
+     * because cache keys also include decoded_hash separately. */
+    NtBuildTextureData td;
+    memset(&td, 0, sizeof(td));
+    td.opts.format = NT_TEXTURE_FORMAT_RGBA8;
+    td.opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    td.opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    td.opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+    td.opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+
+    NtBuildEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.kind = NT_BUILD_ASSET_TEXTURE;
+    entry.data = &td;
+
+    uint64_t base = nt_builder_compute_opts_hash(&entry);
+    TEST_ASSERT_TRUE(base != 0);
+
+    /* Vary each sampler field one at a time — every change must shift the hash. */
+    td.opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;
+    TEST_ASSERT_TRUE(nt_builder_compute_opts_hash(&entry) != base);
+    td.opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+
+    td.opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
+    TEST_ASSERT_TRUE(nt_builder_compute_opts_hash(&entry) != base);
+    td.opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+
+    td.opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_REPEAT;
+    TEST_ASSERT_TRUE(nt_builder_compute_opts_hash(&entry) != base);
+    td.opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+
+    td.opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_REPEAT;
+    TEST_ASSERT_TRUE(nt_builder_compute_opts_hash(&entry) != base);
+    td.opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+
+    /* Restoring all four fields → hash returns to base (deterministic). */
+    TEST_ASSERT_EQUAL_UINT64(base, nt_builder_compute_opts_hash(&entry));
+}
+
 /* CACHE-03: Custom cache dir receives .bin files */
 void test_cache_dir_configurable(void) {
     const char *pack = TMP_DIR "/cache_custom.ntpack";
@@ -5204,6 +5250,7 @@ int main(void) {
     RUN_TEST(test_cache_hit_skips_encode);
     RUN_TEST(test_cache_invalidation_opts);
     RUN_TEST(test_cache_version_in_opts_hash);
+    RUN_TEST(test_cache_filter_wrap_in_opts_hash);
     RUN_TEST(test_cache_dir_configurable);
     RUN_TEST(test_cache_clear_forces_rebuild);
     RUN_TEST(test_cache_flat_files);

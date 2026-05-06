@@ -3,6 +3,28 @@
 /* No-op backend for headless builds and testing.
    Create functions return 1 (nonzero) so make_shader/pipeline/buffer succeed. */
 
+#ifdef NT_GFX_STUB_TEST_ACCESS
+#define NT_GFX_STUB_MAX_SLOTS 16
+static uint32_t s_stub_last_sampler[NT_GFX_STUB_MAX_SLOTS];
+static uint32_t s_stub_bind_sampler_count;
+
+uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot) {
+    if (slot >= NT_GFX_STUB_MAX_SLOTS) {
+        return 0;
+    }
+    return s_stub_last_sampler[slot];
+}
+
+uint32_t nt_gfx_stub_test_bind_sampler_count(void) { return s_stub_bind_sampler_count; }
+
+void nt_gfx_stub_test_reset(void) {
+    for (uint32_t i = 0; i < NT_GFX_STUB_MAX_SLOTS; i++) {
+        s_stub_last_sampler[i] = 0;
+    }
+    s_stub_bind_sampler_count = 0;
+}
+#endif
+
 bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     (void)desc;
     return true;
@@ -94,14 +116,24 @@ bool nt_gfx_backend_is_gpu_timing_supported(void) { return false; }
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     (void)desc;
-    return 1;
+    /* Unique non-zero id per call lets tests differentiate samplers without
+     * needing GL — production backend uses glGenSamplers which is also unique. */
+    static uint32_t s_counter;
+    return ++s_counter;
 }
 
 void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) { (void)backend_handle; }
 
 void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
+#ifdef NT_GFX_STUB_TEST_ACCESS
+    if (slot < NT_GFX_STUB_MAX_SLOTS) {
+        s_stub_last_sampler[slot] = backend_handle;
+    }
+    s_stub_bind_sampler_count++;
+#else
     (void)backend_handle;
     (void)slot;
+#endif
 }
 
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data) {

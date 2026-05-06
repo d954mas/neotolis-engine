@@ -83,4 +83,16 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
 /* GPU caps detection (implemented per-platform in gl/nt_gfx_gl_ctx_*.c and stub) */
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void);
 
+#ifdef NT_GFX_STUB_TEST_ACCESS
+/* Stub-only test hooks: inspect and reset bind_sampler observations. */
+uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot);
+uint32_t nt_gfx_stub_test_bind_sampler_count(void);
+void nt_gfx_stub_test_reset(void);
+
+/* Resolve a public sampler handle to its backend id (the value the stub
+ * records on bind). Lets tests compare "what was last bound" with a
+ * specific public handle without exposing s_gfx internals. */
+uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s);
+#endif
+
 #endif /* NT_GFX_INTERNAL_H */

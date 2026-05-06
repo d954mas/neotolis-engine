@@ -615,6 +615,15 @@ nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex) {
     return s_gfx.texture_metas[nt_pool_slot_index(tex.id)].default_sampler;
 }
 
+#ifdef NT_GFX_STUB_TEST_ACCESS
+uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s) {
+    if (s.id == 0 || s.id > s_gfx.sampler_count) {
+        return 0;
+    }
+    return s_gfx.sampler_cache[s.id - 1].backend;
+}
+#endif
+
 /* ---- Sampler (deduplicated cache) ---- */
 
 static inline uint32_t sampler_pack_key(const nt_sampler_desc_t *desc) {
@@ -926,7 +935,9 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 
 /* Build a default sampler from the V3 texture header's filter/wrap fields and
  * record it in texture_metas[slot] so bind_texture can bind it alongside the
- * texture. Materials may still override at draw time via bind_sampler. */
+ * texture. Used by the BASIS asset path; the RAW path bakes filter/wrap into
+ * desc and lets nt_gfx_make_texture build the sampler directly. */
+#ifdef NT_HAS_BASISU
 static void texture_attach_default_sampler(uint32_t tex_id, const NtTextureAssetHeaderV2 *hdr) {
     nt_sampler_desc_t sd = {
         .min_filter = (nt_texture_filter_t)hdr->default_min_filter,
@@ -939,6 +950,7 @@ static void texture_attach_default_sampler(uint32_t tex_id, const NtTextureAsset
     uint32_t slot = nt_pool_slot_index(tex_id);
     s_gfx.texture_metas[slot].default_sampler = s;
 }
+#endif
 
 /* Activate a v2 texture (RAW or Basis Universal compressed) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

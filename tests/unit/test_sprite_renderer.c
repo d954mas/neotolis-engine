@@ -10,6 +10,7 @@
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
 #include "graphics/nt_gfx.h"
+#include "graphics/nt_gfx_internal.h"
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
 #include "material_comp/nt_material_comp.h"
@@ -603,6 +604,98 @@ void test_sprite_renderer_pipeline_cache_capacity(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
 }
 
+/* ---- Test: material sampler override does not stick across cmds ----
+ *
+ * Regression for the "sticky sampler" bug. Two materials, both rendering
+ * the same atlas region (so the same page texture). Material A has a
+ * sampler override (LINEAR). Material B has none — should fall back to
+ * the texture's default sampler (NEAREST, set when page0 was created).
+ * Order: [A_override, B_no_override]. After flush, the unit must hold
+ * the texture default, not A's override. Without the bound_sampler_ids
+ * delta-tracking in flush, B's cmd would skip bind_sampler entirely
+ * (texture-bind cache hit), leaving A's override on the unit. */
+static nt_material_t create_test_material_with_sampler(nt_sampler_t override) {
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "smp_vs"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "smp_fs"});
+
+    char names[3][64];
+    (void)snprintf(names[0], sizeof(names[0]), "smp_vs_%u", s_vpack_counter);
+    (void)snprintf(names[1], sizeof(names[1]), "smp_fs_%u", s_vpack_counter);
+    (void)snprintf(names[2], sizeof(names[2]), "smp_pack_%u", s_vpack_counter++);
+
+    nt_hash32_t pid = nt_hash32_str(names[2]);
+    nt_resource_create_pack(pid, 0);
+    nt_resource_register(pid, nt_hash64_str(names[0]), NT_ASSET_SHADER_CODE, vs.id);
+    nt_resource_register(pid, nt_hash64_str(names[1]), NT_ASSET_SHADER_CODE, fs.id);
+    nt_resource_t vs_res = nt_resource_request(nt_hash64_str(names[0]), NT_ASSET_SHADER_CODE);
+    nt_resource_t fs_res = nt_resource_request(nt_hash64_str(names[1]), NT_ASSET_SHADER_CODE);
+    nt_resource_step();
+
+    nt_material_create_desc_t desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.vs = vs_res;
+    desc.fs = fs_res;
+    desc.cull_mode = NT_CULL_NONE;
+    desc.texture_count = 1;
+    desc.textures[0].name = "u_tex";
+    desc.textures[0].resource = NT_RESOURCE_INVALID;
+    desc.textures[0].sampler = override;
+    desc.label = "test_mat_override";
+    nt_material_t mat = nt_material_create(&desc);
+    nt_material_step();
+    return mat;
+}
+
+void test_sprite_renderer_sampler_override_does_not_stick(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xA9ULL);
+
+    /* Override sampler differs from page0's default (NEAREST/CLAMP from zero-init
+     * desc in setUp). LINEAR + REPEAT guarantees a fresh dedup slot. */
+    nt_sampler_t override = nt_gfx_make_sampler(&(nt_sampler_desc_t){
+        .min_filter = NT_FILTER_LINEAR,
+        .mag_filter = NT_FILTER_LINEAR,
+        .wrap_u = NT_WRAP_REPEAT,
+        .wrap_v = NT_WRAP_REPEAT,
+    });
+    TEST_ASSERT_TRUE(override.id != 0);
+
+    nt_material_t mat_override = create_test_material_with_sampler(override);
+    nt_material_t mat_plain = create_test_material();
+
+    nt_entity_t e_a = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat_override);
+    nt_entity_t e_b = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat_plain);
+
+    nt_render_item_t items[2];
+    items[0].sort_key = 0;
+    items[0].entity = e_a.id;
+    items[0].batch_key = nt_batch_key(mat_override.id, (uint32_t)FIXTURE_R0_HASH);
+    items[1].sort_key = 1;
+    items[1].entity = e_b.id;
+    items[1].batch_key = nt_batch_key(mat_plain.id, (uint32_t)FIXTURE_R0_HASH);
+
+    nt_gfx_stub_test_reset();
+    nt_sprite_renderer_draw_list(items, 2);
+
+    /* Resolve the page texture's default sampler (what the second cmd should
+     * leave bound). page0.id was registered under FIXTURE_PAGE0_RID; FIXTURE_R0
+     * lives on page 0. */
+    nt_resource_t page0_res = nt_atlas_get_page_resource(s_atlas_res, 0);
+    nt_texture_t page0_tex = (nt_texture_t){.id = nt_resource_get(page0_res)};
+    nt_sampler_t page0_default = nt_gfx_get_texture_default_sampler(page0_tex);
+
+    /* The last sampler bound on slot 0 must equal page0's default — not the
+     * override left over from cmd 0. Pre-fix this assertion fails because cmd 1
+     * (no override, same texture) would skip bind_sampler entirely. */
+    uint32_t last = nt_gfx_stub_test_last_sampler(0);
+    uint32_t default_backend = nt_gfx_test_sampler_backend_id(page0_default);
+    uint32_t override_backend = nt_gfx_test_sampler_backend_id(override);
+    TEST_ASSERT_TRUE(default_backend != 0 && override_backend != 0 && default_backend != override_backend);
+    TEST_ASSERT_EQUAL_UINT32(default_backend, last);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -616,5 +709,6 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_polygon_emit);
     RUN_TEST(test_sprite_renderer_restore_gpu_cycle);
     RUN_TEST(test_sprite_renderer_pipeline_cache_capacity);
+    RUN_TEST(test_sprite_renderer_sampler_override_does_not_stick);
     return UNITY_END();
 }
