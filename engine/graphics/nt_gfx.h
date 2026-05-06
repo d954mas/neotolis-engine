@@ -2,6 +2,7 @@
 #define NT_GFX_H
 
 #include "core/nt_types.h"
+#include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
 
 /* ---- Index buffer type constants ---- */
@@ -377,9 +378,15 @@ void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_
 void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
-/* Pop the oldest completed TIME_ELAPSED result. Returns false when the
- * platform lacks support, the oldest result isn't ready, or a disjoint
- * event invalidated results. Result lands 1-2 frames after begin_frame. */
+/* Named GPU TIME_ELAPSED segments. Pairs must be sequential (no nesting —
+ * GL can only have one TIME_ELAPSED query active at a time). begin_frame /
+ * end_frame open an implicit "frame" segment for legacy frame-total polling. */
+void nt_gfx_begin_segment(nt_hash32_t name_hash);
+void nt_gfx_end_segment(void);
+bool nt_gfx_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns);
+
+/* Pop the oldest completed frame total. Wraps the implicit "frame" segment.
+ * Returns false on unsupported platform / not-ready / disjoint event. */
 bool nt_gfx_poll_gpu_time_ns(uint64_t *out_ns);
 
 /* Toggle GPU time-elapsed queries. Default = enabled. Disable for

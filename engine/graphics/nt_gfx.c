@@ -879,6 +879,27 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
     nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], data, size);
 }
 
+void nt_gfx_begin_segment(nt_hash32_t name_hash) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    nt_gfx_backend_begin_segment(name_hash);
+}
+
+void nt_gfx_end_segment(void) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    nt_gfx_backend_end_segment();
+}
+
+bool nt_gfx_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns) {
+    if (g_nt_gfx.context_lost || out_ns == NULL) {
+        return false;
+    }
+    return nt_gfx_backend_poll_segment_time_ns(name_hash, out_ns);
+}
+
 bool nt_gfx_poll_gpu_time_ns(uint64_t *out_ns) {
     if (g_nt_gfx.context_lost || out_ns == NULL) {
         return false;

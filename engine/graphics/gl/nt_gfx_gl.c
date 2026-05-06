@@ -103,17 +103,25 @@ static GLuint s_instance_gl_buf;          /* GL name of last bound instance buff
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
 
-/* GPU TIME_ELAPSED ring (EXT_disjoint_timer_query_webgl2 / ARB_timer_query). */
+/* GPU TIME_ELAPSED named segments (EXT_disjoint_timer_query_webgl2 / ARB_timer_query). */
 #define NT_GFX_TIMER_RING 4
+#define NT_GFX_TIMER_MAX_SEGMENTS 16
+
+typedef struct {
+    nt_hash32_t name_hash;
+    GLuint queries[NT_GFX_TIMER_RING];
+    bool in_flight[NT_GFX_TIMER_RING];
+    uint8_t head;
+    uint8_t tail;
+    uint64_t last_result_ns; /* most recent successful poll value */
+} nt_gfx_segment_state_t;
 
 static bool s_timer_enabled;             /* extension/core entry points present */
 static bool s_timer_user_enabled = true; /* runtime toggle from nt_gfx_set_gpu_timing_enabled */
-static GLuint s_timer_queries[NT_GFX_TIMER_RING];
-static bool s_timer_in_flight[NT_GFX_TIMER_RING];
-static uint8_t s_timer_head; /* next slot to write into */
-static uint8_t s_timer_tail; /* oldest unread slot */
-static bool s_timer_active;  /* true between begin and end of current frame */
-static bool s_timer_warned;  /* one-shot ring-full warning; reset on re-enable */
+static nt_gfx_segment_state_t s_segments[NT_GFX_TIMER_MAX_SEGMENTS];
+static uint8_t s_segment_count;
+static int8_t s_active_segment = -1; /* index in s_segments while a query is open, -1 otherwise */
+static bool s_timer_warned;          /* one-shot ring-full warning; reset on re-enable */
 
 /* ---- Transcode buffer (reused across textures, freed after idle) ---- */
 
@@ -368,22 +376,20 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_bound_pipeline_slot = 0;
     nt_gfx_gl_cache_reset();
 
-    /* Probe + allocate GPU timer-query ring. Enable failure leaves
-     * s_timer_enabled = false and poll_gpu_time always returns false. */
+    /* Probe timer-query support. Segments allocate query objects lazily
+     * on first begin_segment for that name. Disable on probe failure. */
     s_timer_enabled = nt_gfx_gl_ctx_enable_timer_query();
-    if (s_timer_enabled) {
-        glGenQueries(NT_GFX_TIMER_RING, s_timer_queries);
-        memset(s_timer_in_flight, 0, sizeof(s_timer_in_flight));
-        s_timer_head = 0;
-        s_timer_tail = 0;
-        s_timer_active = false;
-    }
+    s_segment_count = 0;
+    s_active_segment = -1;
     return true;
 }
 
 void nt_gfx_backend_shutdown(void) {
     if (s_timer_enabled) {
-        glDeleteQueries(NT_GFX_TIMER_RING, s_timer_queries);
+        for (uint8_t i = 0; i < s_segment_count; i++) {
+            glDeleteQueries(NT_GFX_TIMER_RING, s_segments[i].queries);
+        }
+        s_segment_count = 0;
         s_timer_enabled = false;
     }
 
@@ -410,42 +416,90 @@ bool nt_gfx_backend_is_context_lost(void) { return nt_gfx_gl_ctx_is_lost(); }
 
 /* ---- Frame / Pass ---- */
 
+/* Find existing segment by name hash, or allocate a new slot with its own
+ * ring of GL_TIME_ELAPSED queries. Linear scan is fine for small N (<= 16). */
+static int8_t segment_find_or_alloc(nt_hash32_t name_hash) {
+    for (uint8_t i = 0; i < s_segment_count; i++) {
+        if (s_segments[i].name_hash.value == name_hash.value) {
+            return (int8_t)i;
+        }
+    }
+    NT_ASSERT(s_segment_count < NT_GFX_TIMER_MAX_SEGMENTS && "raise NT_GFX_TIMER_MAX_SEGMENTS");
+    nt_gfx_segment_state_t *seg = &s_segments[s_segment_count];
+    seg->name_hash = name_hash;
+    glGenQueries(NT_GFX_TIMER_RING, seg->queries);
+    memset(seg->in_flight, 0, sizeof(seg->in_flight));
+    seg->head = 0;
+    seg->tail = 0;
+    seg->last_result_ns = 0;
+    return (int8_t)(s_segment_count++);
+}
+
+static int8_t segment_find(nt_hash32_t name_hash) {
+    for (uint8_t i = 0; i < s_segment_count; i++) {
+        if (s_segments[i].name_hash.value == name_hash.value) {
+            return (int8_t)i;
+        }
+    }
+    return -1;
+}
+
+/* Implicit "frame" segment opened by begin_frame to keep the legacy single-
+ * timer API behaviour (poll_gpu_time_ns returns frame total). */
+static nt_hash32_t s_frame_seg_cached;
+static nt_hash32_t frame_segment_hash(void) {
+    if (s_frame_seg_cached.value == 0) {
+        s_frame_seg_cached = nt_hash32_str("frame");
+    }
+    return s_frame_seg_cached;
+}
+
+void nt_gfx_backend_begin_segment(nt_hash32_t name_hash) {
+    if (!s_timer_enabled || !s_timer_user_enabled) {
+        return;
+    }
+    NT_ASSERT(s_active_segment < 0 && "GL_TIME_ELAPSED cannot nest — close current segment first");
+    int8_t idx = segment_find_or_alloc(name_hash);
+    nt_gfx_segment_state_t *seg = &s_segments[idx];
+    if (seg->in_flight[seg->head]) {
+        if (!s_timer_warned) {
+            NT_LOG_WARN("gpu_timing: segment ring full — call nt_gfx_poll_segment_time_ns to consume");
+            s_timer_warned = true;
+        }
+        memset(seg->in_flight, 0, sizeof(seg->in_flight));
+        seg->head = 0;
+        seg->tail = 0;
+    }
+    glBeginQuery(GL_TIME_ELAPSED, seg->queries[seg->head]);
+    s_active_segment = idx;
+}
+
+void nt_gfx_backend_end_segment(void) {
+    if (s_active_segment < 0) {
+        return;
+    }
+    nt_gfx_segment_state_t *seg = &s_segments[s_active_segment];
+    glEndQuery(GL_TIME_ELAPSED);
+    seg->in_flight[seg->head] = true;
+    seg->head = (uint8_t)((seg->head + 1U) % NT_GFX_TIMER_RING);
+    s_active_segment = -1;
+}
+
 void nt_gfx_backend_begin_frame(void) {
     /* Reset GL state cache so all pipeline binds re-issue GL calls.
      * Required because window resize (Windows modal loop) or driver
      * may change GL state without going through nt_gfx API, leaving
-     * the cache stale. Without this, a pipeline bound on the previous
-     * frame (e.g. text with depth_write=false) poisons state for this
-     * frame's pipelines that skip re-binding due to cache hits. */
+     * the cache stale. */
     nt_gfx_gl_cache_reset();
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
 
-    if (s_timer_enabled && s_timer_user_enabled) {
-        if (s_timer_in_flight[s_timer_head]) {
-            /* Ring full = game never polled. Drop stale slots, warn once. */
-            if (!s_timer_warned) {
-                NT_LOG_WARN("gpu_timing: ring full — call nt_gfx_poll_gpu_time_ns to consume results");
-                s_timer_warned = true;
-            }
-            memset(s_timer_in_flight, 0, sizeof(s_timer_in_flight));
-            s_timer_head = 0;
-            s_timer_tail = 0;
-        }
-        glBeginQuery(GL_TIME_ELAPSED, s_timer_queries[s_timer_head]);
-        s_timer_active = true;
-    }
+    nt_gfx_backend_begin_segment(frame_segment_hash());
 }
 
 void nt_gfx_backend_end_frame(void) {
-    if (s_timer_active) {
-        glEndQuery(GL_TIME_ELAPSED);
-        s_timer_in_flight[s_timer_head] = true;
-        s_timer_head = (uint8_t)((s_timer_head + 1U) % NT_GFX_TIMER_RING);
-        s_timer_active = false;
-    }
+    nt_gfx_backend_end_segment();
 
-    /* Free transcode buffer after idle period */
     if (s_transcode_buf != NULL) {
         s_transcode_buf_idle++;
         if (s_transcode_buf_idle > NT_TRANSCODE_BUF_IDLE_FRAMES) {
@@ -456,25 +510,32 @@ void nt_gfx_backend_end_frame(void) {
     }
 }
 
-bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) {
+bool nt_gfx_backend_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns) {
     if (!s_timer_enabled) {
         return false;
     }
 
-    /* Disjoint = clock skip → drop all in-flight (read also acks the flag). */
+    /* Disjoint = clock skip → drop in-flight across all segments. */
     GLint disjoint = 0;
     glGetIntegerv(GL_GPU_DISJOINT_EXT, &disjoint);
     if (disjoint) {
-        memset(s_timer_in_flight, 0, sizeof(s_timer_in_flight));
-        s_timer_tail = s_timer_head;
+        for (uint8_t i = 0; i < s_segment_count; i++) {
+            memset(s_segments[i].in_flight, 0, sizeof(s_segments[i].in_flight));
+            s_segments[i].tail = s_segments[i].head;
+        }
         return false;
     }
 
-    if (!s_timer_in_flight[s_timer_tail]) {
+    int8_t idx = segment_find(name_hash);
+    if (idx < 0) {
+        return false;
+    }
+    nt_gfx_segment_state_t *seg = &s_segments[idx];
+    if (!seg->in_flight[seg->tail]) {
         return false;
     }
 
-    GLuint q = s_timer_queries[s_timer_tail];
+    GLuint q = seg->queries[seg->tail];
     GLuint available = 0;
     glGetQueryObjectuiv(q, GL_QUERY_RESULT_AVAILABLE, &available);
     if (!available) {
@@ -484,21 +545,26 @@ bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) {
     GLuint64 result = 0;
     nt_gl_get_query_u64(q, GL_QUERY_RESULT, &result);
     *out_ns = (uint64_t)result;
-    s_timer_in_flight[s_timer_tail] = false;
-    s_timer_tail = (uint8_t)((s_timer_tail + 1U) % NT_GFX_TIMER_RING);
+    seg->last_result_ns = (uint64_t)result;
+    seg->in_flight[seg->tail] = false;
+    seg->tail = (uint8_t)((seg->tail + 1U) % NT_GFX_TIMER_RING);
     return true;
 }
 
+bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) { return nt_gfx_backend_poll_segment_time_ns(frame_segment_hash(), out_ns); }
+
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
     if (!enabled && s_timer_enabled) {
-        /* Close any in-flight query and drain ring so re-enable starts clean. */
-        if (s_timer_active) {
+        /* Close any in-flight query, drain all segment rings so re-enable starts clean. */
+        if (s_active_segment >= 0) {
             glEndQuery(GL_TIME_ELAPSED);
-            s_timer_active = false;
+            s_active_segment = -1;
         }
-        memset(s_timer_in_flight, 0, sizeof(s_timer_in_flight));
-        s_timer_head = 0;
-        s_timer_tail = 0;
+        for (uint8_t i = 0; i < s_segment_count; i++) {
+            memset(s_segments[i].in_flight, 0, sizeof(s_segments[i].in_flight));
+            s_segments[i].head = 0;
+            s_segments[i].tail = 0;
+        }
     }
     if (enabled && !s_timer_user_enabled) {
         s_timer_warned = false;
