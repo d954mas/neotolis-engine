@@ -68,6 +68,9 @@ uint32_t nt_atlas_revision(nt_resource_t atlas);
 /* Return the number of regions (including tombstones from merge). */
 uint32_t nt_atlas_region_count(nt_resource_t atlas);
 
+/* Return atlas texture page count. Returns 0 while unresolved. */
+uint8_t nt_atlas_page_count(nt_resource_t atlas);
+
 /* O(1) amortized lookup of a region by its name hash.
  * Returns NT_ATLAS_INVALID_REGION if the hash is not present (including
  * tombstoned regions that have been removed by a later merge). */

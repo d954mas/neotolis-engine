@@ -867,7 +867,14 @@ Depth is computed on CPU only when needed. Transparent/depth-sensitive passes co
 
 ### SpriteRenderer
 
-CPU batch: max 256 sprites per batch, flush when incompatible state or full batch.
+CPU batch: SpriteRenderer consumes consecutive `batch_key` runs, emits dynamic
+sprite vertices into a shared staging VBO, records draw commands on state/page
+changes, and flushes when staging capacity, uint16 index range, or command
+capacity requires it. Rect and polygon sprites share the public stream; rect
+regions that the builder marks as standard quads may use an internal static
+quad-index path for large contiguous quad runs. This path preserves draw order
+and falls back to the generic dynamic-index path for polygon sprites, small rect
+islands, non-standard quad winding, or mixed geometry.
 
 ### MeshRenderer
 
@@ -881,7 +888,17 @@ WebGL 2 provides native `drawArraysInstanced` / `drawElementsInstanced` — no e
 
 ## 14.3 Sprite batching strategy
 
-Initial sprite renderer: gather sorted sprite render items, pack up to N sprites into one dynamic vertex buffer, flush on state change/full batch. Logic lives inside SpriteRenderer and can later be replaced with instancing without changing external pass architecture.
+Sprite renderer: gather sorted sprite render items, resolve component SoA views
+once, pack sprite vertices into one dynamic vertex buffer per flush chunk, and
+draw recorded commands. The renderer owns atlas page correctness: `batch_key`
+is a compatibility hint from the game, while SpriteRenderer verifies actual
+atlas page textures and splits commands when a run crosses pages.
+
+For large contiguous standard-quad runs, SpriteRenderer may flush the current
+dynamic chunk and draw a fresh VBO chunk with a static immutable quad IBO
+(`0,1,2,0,2,3`, repeated). WebGL2 has no `baseVertex`, so this path is only
+valid when the quad run starts at vertex 0 of that flush chunk. Polygon sprites
+and mixed/small runs use the generic dynamic IBO path.
 
 ---
 

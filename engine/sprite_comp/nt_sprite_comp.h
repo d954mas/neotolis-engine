@@ -1,6 +1,7 @@
 #ifndef NT_SPRITE_COMP_H
 #define NT_SPRITE_COMP_H
 
+#include "atlas/nt_atlas.h"
 #include "core/nt_types.h"
 #include "entity/nt_entity.h"
 #include "resource/nt_resource.h"
@@ -85,6 +86,14 @@ const uint16_t *nt_sprite_comp_region_index(nt_entity_t entity);
 const float *nt_sprite_comp_origin(nt_entity_t entity);
 const uint8_t *nt_sprite_comp_flags(nt_entity_t entity);
 
+typedef struct {
+    const nt_texture_region_t *region;
+    const float (*cached_pos)[2];
+    const float (*cached_uv)[2];
+    const uint16_t *indices;
+    nt_resource_t page_resource;
+} nt_sprite_resolved_region_t;
+
 /* ---- Bulk SoA view for systems iterating dense data (renderer, debug, etc.) ----
  *
  * Returns base pointers into the dense SoA arrays plus the live count. All
@@ -92,8 +101,11 @@ const uint8_t *nt_sprite_comp_flags(nt_entity_t entity);
  * for the lifetime of the module (allocated once at init), but values shift
  * under add/remove (swap-and-pop) — do not cache the view across mutations.
  *
- * Reading region_index / origin requires checking flags[i] & RESOLVED, same
- * contract as the per-entity accessors. */
+ * Reading region_index / origin / resolved requires checking
+ * flags[i] & RESOLVED, same contract as the per-entity accessors. `resolved`
+ * is refreshed by nt_sprite_comp_sync_resources() when atlas publication
+ * revisions change, so renderers do not repeat atlas metadata lookups in the
+ * per-sprite hot path. */
 
 typedef struct {
     uint16_t count;
@@ -102,6 +114,7 @@ typedef struct {
     const nt_resource_t *atlas;
     const uint64_t *region_hash;
     const uint16_t *region_index;
+    const nt_sprite_resolved_region_t *resolved;
     const float (*origin)[2];
     const uint8_t *flags;
 } nt_sprite_comp_view_t;

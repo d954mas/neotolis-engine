@@ -19,7 +19,8 @@ static nt_resource_t *s_atlas;
 static uint64_t *s_region_hash;
 static uint16_t *s_region_index;   /* cached resolved index */
 static uint32_t *s_atlas_revision; /* cached atlas snapshot revision */
-static float (*s_origin)[2];       /* effective origin */
+static nt_sprite_resolved_region_t *s_resolved;
+static float (*s_origin)[2]; /* effective origin */
 static uint8_t *s_flags;
 
 /* ---- Helpers ---- */
@@ -27,11 +28,28 @@ static uint8_t *s_flags;
 static void sprite_clear_resolved(uint16_t idx) {
     s_region_index[idx] = 0;
     s_atlas_revision[idx] = 0;
+    s_resolved[idx] = (nt_sprite_resolved_region_t){0};
     s_flags[idx] &= (uint8_t)~NT_SPRITE_FLAG_RESOLVED;
     if ((s_flags[idx] & NT_SPRITE_FLAG_ORIGIN_OV) == 0) {
         s_origin[idx][0] = 0.0F;
         s_origin[idx][1] = 0.0F;
     }
+}
+
+static void sprite_cache_region(uint16_t idx, nt_resource_t atlas, uint32_t region_index) {
+    nt_atlas_region_view_t view = nt_atlas_get_region_view(atlas, region_index);
+    NT_ASSERT(view.region != NULL);
+    nt_resource_t page_resource = NT_RESOURCE_INVALID;
+    if (view.region->vertex_count > 0 && nt_atlas_page_count(atlas) > 0) {
+        page_resource = nt_atlas_get_page_resource(atlas, view.region->page_index);
+    }
+    s_resolved[idx] = (nt_sprite_resolved_region_t){
+        .region = view.region,
+        .cached_pos = view.cached_pos,
+        .cached_uv = view.cached_uv,
+        .indices = view.indices,
+        .page_resource = page_resource,
+    };
 }
 
 static void sprite_set_authored_origin(uint16_t idx, const nt_texture_region_t *region) {
@@ -69,8 +87,9 @@ static void sprite_resolve_dense(uint16_t idx) {
 
     s_region_index[idx] = (uint16_t)resolved;
     s_atlas_revision[idx] = revision;
+    sprite_cache_region(idx, atlas, resolved);
     s_flags[idx] |= (uint8_t)NT_SPRITE_FLAG_RESOLVED;
-    sprite_set_authored_origin(idx, nt_atlas_get_region(atlas, resolved));
+    sprite_set_authored_origin(idx, s_resolved[idx].region);
 }
 
 /* ---- Callbacks ---- */
@@ -80,6 +99,7 @@ static void sprite_default(uint16_t idx) {
     s_region_hash[idx] = 0;
     s_region_index[idx] = 0;
     s_atlas_revision[idx] = 0;
+    s_resolved[idx] = (nt_sprite_resolved_region_t){0};
     s_origin[idx][0] = 0.0F;
     s_origin[idx][1] = 0.0F;
     s_flags[idx] = 0;
@@ -90,6 +110,7 @@ static void sprite_swap(uint16_t dst, uint16_t src) {
     s_region_hash[dst] = s_region_hash[src];
     s_region_index[dst] = s_region_index[src];
     s_atlas_revision[dst] = s_atlas_revision[src];
+    s_resolved[dst] = s_resolved[src];
     s_origin[dst][0] = s_origin[src][0];
     s_origin[dst][1] = s_origin[src][1];
     s_flags[dst] = s_flags[src];
@@ -118,10 +139,11 @@ nt_result_t nt_sprite_comp_init(const nt_sprite_comp_desc_t *desc) {
     s_region_hash = (uint64_t *)calloc(cap, sizeof(uint64_t));
     s_region_index = (uint16_t *)calloc(cap, sizeof(uint16_t));
     s_atlas_revision = (uint32_t *)calloc(cap, sizeof(uint32_t));
+    s_resolved = (nt_sprite_resolved_region_t *)calloc(cap, sizeof(nt_sprite_resolved_region_t));
     s_origin = calloc(cap, sizeof(*s_origin));
     s_flags = (uint8_t *)calloc(cap, sizeof(uint8_t));
 
-    if (!s_atlas || !s_region_hash || !s_region_index || !s_atlas_revision || !s_origin || !s_flags) {
+    if (!s_atlas || !s_region_hash || !s_region_index || !s_atlas_revision || !s_resolved || !s_origin || !s_flags) {
         nt_sprite_comp_shutdown();
         return NT_ERR_INIT_FAILED;
     }
@@ -147,12 +169,14 @@ void nt_sprite_comp_shutdown(void) {
     free(s_region_hash);
     free(s_region_index);
     free(s_atlas_revision);
+    free(s_resolved);
     free(s_origin);
     free(s_flags);
     s_atlas = NULL;
     s_region_hash = NULL;
     s_region_index = NULL;
     s_atlas_revision = NULL;
+    s_resolved = NULL;
     s_origin = NULL;
     s_flags = NULL;
     s_last_publication_epoch = 0;
@@ -210,8 +234,9 @@ void nt_sprite_comp_set_region(nt_entity_t entity, nt_resource_t atlas, uint16_t
     s_region_hash[idx] = region->name_hash;
     s_region_index[idx] = region_index;
     s_atlas_revision[idx] = nt_atlas_revision(atlas);
+    sprite_cache_region(idx, atlas, region_index);
     s_flags[idx] |= (uint8_t)NT_SPRITE_FLAG_RESOLVED;
-    sprite_set_authored_origin(idx, region);
+    sprite_set_authored_origin(idx, s_resolved[idx].region);
 }
 
 void nt_sprite_comp_bind_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64_t name_hash) {
@@ -299,6 +324,7 @@ nt_sprite_comp_view_t nt_sprite_comp_view(void) {
         .atlas = s_atlas,
         .region_hash = s_region_hash,
         .region_index = s_region_index,
+        .resolved = s_resolved,
         .origin = (const float(*)[2])s_origin,
         .flags = s_flags,
     };
