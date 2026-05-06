@@ -983,26 +983,19 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
         }
         NT_ASSERT(hdr2->width <= UINT16_MAX && hdr2->height <= UINT16_MAX && "activate_texture: dimensions exceed uint16");
         const uint8_t *pixels = data + sizeof(NtTextureAssetHeaderV2);
-        /* Texture-side filter is now redundant with the default sampler we
-         * attach below; pick LINEAR_MIPMAP_LINEAR + REPEAT here as a safe
-         * fallback if no sampler ever gets bound (e.g. via legacy code path). */
         nt_texture_desc_t desc = {
             .width = (uint16_t)hdr2->width,
             .height = (uint16_t)hdr2->height,
             .data = pixels,
             .format = pixel_fmt,
-            .min_filter = (hdr2->mip_count > 1) ? NT_FILTER_LINEAR_MIPMAP_LINEAR : NT_FILTER_LINEAR,
-            .mag_filter = NT_FILTER_LINEAR,
-            .wrap_u = NT_WRAP_REPEAT,
-            .wrap_v = NT_WRAP_REPEAT,
+            .min_filter = (nt_texture_filter_t)hdr2->default_min_filter,
+            .mag_filter = (nt_texture_filter_t)hdr2->default_mag_filter,
+            .wrap_u = (nt_texture_wrap_t)hdr2->default_wrap_u,
+            .wrap_v = (nt_texture_wrap_t)hdr2->default_wrap_v,
             .gen_mipmaps = (hdr2->mip_count == 1),
             .label = NULL,
         };
-        nt_texture_t tex = nt_gfx_make_texture(&desc);
-        if (tex.id != 0) {
-            texture_attach_default_sampler(tex.id, hdr2);
-        }
-        return tex.id;
+        return nt_gfx_make_texture(&desc).id;
     }
 
     /* BASIS compression: transcode to best available GPU format */
