@@ -617,8 +617,6 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
 
 /* ---- Sampler (deduplicated cache) ---- */
 
-/* Pack desc into 32-bit key. 6 filter values (3 bits) + 2 mag (1 bit) +
- * 3 wrap_u (2 bits) + 3 wrap_v (2 bits) = 8 bits used; rest is reserved. */
 static inline uint32_t sampler_pack_key(const nt_sampler_desc_t *desc) {
     return (uint32_t)((desc->min_filter & 0x7U) | ((desc->mag_filter & 0x1U) << 3) | ((desc->wrap_u & 0x3U) << 4) | ((desc->wrap_v & 0x3U) << 6));
 }
@@ -627,13 +625,8 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     NT_ASSERT(desc != NULL);
     NT_ASSERT(desc->mag_filter <= NT_FILTER_LINEAR && "sampler mag_filter must be NEAREST or LINEAR");
 
-    /* Key 0 reserved as "empty slot" sentinel — pack_key always sets at least
-     * one bit thanks to wrap defaults != 0 if min_filter==0 and mag==0 too,
-     * so the all-zeros desc would collide. Bias the key to be nonzero by
-     * setting bit 31. */
-    uint32_t key = sampler_pack_key(desc) | 0x80000000U;
+    uint32_t key = sampler_pack_key(desc);
 
-    /* Linear scan over cache — small N (NT_GFX_MAX_SAMPLERS = 32). */
     for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
         if (s_gfx.sampler_cache[i].key == key) {
             return (nt_sampler_t){.id = i + 1};

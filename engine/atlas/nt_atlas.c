@@ -701,7 +701,8 @@ nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index
 // #region Phase 50 D-10/D-32 public accessors
 float nt_atlas_get_pixels_per_unit(nt_resource_t atlas) {
     const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
-    if (ad == NULL || ad->ipu == 0.0F) {
+    NT_ASSERT(ad != NULL && "nt_atlas_get_pixels_per_unit on unresolved atlas");
+    if (ad->ipu == 0.0F) {
         return 1.0F;
     }
     return 1.0F / ad->ipu;
@@ -709,27 +710,21 @@ float nt_atlas_get_pixels_per_unit(nt_resource_t atlas) {
 
 const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t region_index))[2] {
     const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
-    if (ad == NULL) {
-        return NULL;
-    }
+    NT_ASSERT(ad != NULL && "nt_atlas_get_region_cached_pos on unresolved atlas");
     NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_cached_pos: region_index out of range");
     return (const float(*)[2]) & ad->cached_pos[ad->regions[region_index].vertex_start];
 }
 
 const float (*nt_atlas_get_region_cached_uv(nt_resource_t atlas, uint32_t region_index))[2] {
     const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
-    if (ad == NULL) {
-        return NULL;
-    }
+    NT_ASSERT(ad != NULL && "nt_atlas_get_region_cached_uv on unresolved atlas");
     NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_cached_uv: region_index out of range");
     return (const float(*)[2]) & ad->cached_uv[ad->regions[region_index].vertex_start];
 }
 
 const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region_index) {
     const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
-    if (ad == NULL) {
-        return NULL;
-    }
+    NT_ASSERT(ad != NULL && "nt_atlas_get_region_indices on unresolved atlas");
     NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_indices: region_index out of range");
     return &ad->indices[ad->regions[region_index].index_start];
 }
@@ -737,17 +732,15 @@ const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region
 nt_atlas_region_view_t nt_atlas_get_region_view(nt_resource_t atlas, uint32_t region_index) {
     NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_get_region_view: handle is not an atlas resource");
     const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
-    nt_atlas_region_view_t v = {0};
-    if (ad == NULL) {
-        return v;
-    }
+    NT_ASSERT(ad != NULL && "nt_atlas_get_region_view on unresolved atlas");
     NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_view: region_index out of range");
     const nt_texture_region_t *r = &ad->regions[region_index];
-    v.region = r;
-    v.cached_pos = (const float(*)[2]) & ad->cached_pos[r->vertex_start];
-    v.cached_uv = (const float(*)[2]) & ad->cached_uv[r->vertex_start];
-    v.indices = &ad->indices[r->index_start];
-    return v;
+    return (nt_atlas_region_view_t){
+        .region = r,
+        .cached_pos = (const float(*)[2]) & ad->cached_pos[r->vertex_start],
+        .cached_uv = (const float(*)[2]) & ad->cached_uv[r->vertex_start],
+        .indices = &ad->indices[r->index_start],
+    };
 }
 // #endregion
 // #endregion

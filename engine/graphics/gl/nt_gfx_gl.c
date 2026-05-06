@@ -429,10 +429,20 @@ void nt_gfx_backend_begin_frame(void) {
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
 
-    /* Start a TIME_ELAPSED query into the head ring slot. Skip if the slot
-     * is still in flight (poll never advanced) — happens when the game
-     * never reads results. Skipping prevents glBeginQuery on a busy id. */
-    if (s_timer_enabled && s_timer_user_enabled && !s_timer_in_flight[s_timer_head]) {
+    if (s_timer_enabled && s_timer_user_enabled) {
+        /* Ring full means the game enabled timing but never polled. Drop the
+         * stale results once so begin_frame can proceed — warn once so the
+         * misuse is visible without spamming. */
+        if (s_timer_in_flight[s_timer_head]) {
+            static bool s_warned;
+            if (!s_warned) {
+                NT_LOG_WARN("gpu_timing: ring full — call nt_gfx_poll_gpu_time_ns to consume results");
+                s_warned = true;
+            }
+            memset(s_timer_in_flight, 0, sizeof(s_timer_in_flight));
+            s_timer_head = 0;
+            s_timer_tail = 0;
+        }
         glBeginQuery(GL_TIME_ELAPSED, s_timer_queries[s_timer_head]);
         s_timer_active = true;
     }
@@ -498,9 +508,14 @@ bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) {
 }
 
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
-    /* Runtime toggle. begin_frame stops issuing new TIME_ELAPSED queries
-     * when disabled; existing in-flight ones drain naturally through poll.
-     * No GL state cleanup needed — query objects stay allocated for reuse. */
+    /* Drain on disable so re-enabling later starts from a clean ring —
+     * otherwise stale in-flight slots would silently block begin_frame. */
+    if (!enabled && s_timer_enabled) {
+        memset(s_timer_in_flight, 0, sizeof(s_timer_in_flight));
+        s_timer_head = 0;
+        s_timer_tail = 0;
+        s_timer_active = false;
+    }
     s_timer_user_enabled = enabled;
 }
 
