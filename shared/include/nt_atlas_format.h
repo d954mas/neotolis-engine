@@ -66,7 +66,7 @@ typedef struct {
     uint32_t index_start;  /* 28: index into the index array (uint32 in v3, was uint16 in v2) */
     uint8_t vertex_count;  /* 32: number of vertices for this region (max 16 per builder limit) */
     uint8_t page_index;    /* 33: which texture page this region belongs to */
-    uint8_t transform;     /* 34: D4 transform flags — bit0=flipH, bit1=flipV, bit2=diagonal.
+    uint8_t transform;     /* 34: orientation flags — bit0=flipH, bit1=flipV, bit2=diagonal.
                             *     Apply order: diagonal → flipH → flipV. 0 = identity. */
     uint8_t index_count;   /* 35: triangle indices for this region. uint8_t caps at 255 =
                             *     85 triangles; with max_vertices=16 the ear-clip/fan output

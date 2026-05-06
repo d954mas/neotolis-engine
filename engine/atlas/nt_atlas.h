@@ -33,7 +33,7 @@ typedef struct {
  * Field order differs from NtAtlasRegion to minimize padding and keep hot
  * fields (name_hash, vertex_start, index_start) first. All values are raw:
  * UVs are the packed 0..65535 uint16 atlas_u/v, origin is the normalized
- * float from the builder, and transform is the D4 byte untouched.
+ * float from the builder, and transform is the orientation byte untouched.
  * Update both structs + translate_region() together when changing fields.
  *
  * Total: 40 bytes on 64-bit. */
@@ -50,7 +50,7 @@ typedef struct {
     uint8_t vertex_count;  /* 32: 0 = tombstone (and also degenerate) */
     uint8_t index_count;   /* 33 */
     uint8_t page_index;    /* 34 */
-    uint8_t transform;     /* 35: D4 flags — bit0=flipH, bit1=flipV, bit2=diagonal */
+    uint8_t transform;     /* 35: orientation — bit0=flipH, bit1=flipV, bit2=diagonal */
     uint8_t flags;         /* 36: builder-authored render hints */
     uint8_t reserved[3];   /* 37 */
 } nt_texture_region_t;

@@ -68,10 +68,12 @@ typedef struct nt_atlas_data {
     nt_resource_t page_resources[NT_ATLAS_MAX_PAGES]; /* NT_RESOURCE_INVALID until on_post_resolve */
     uint8_t page_count;
 
-    /* Precomputed per-vertex projections, parallel to vertices[]. */
-    float (*cached_pos)[2]; /* pivot-relative pixels with ipu baked in */
-    float (*cached_uv)[2];  /* normalized atlas UV with D4 transform applied */
-    float ipu;              /* 1/pixels_per_unit, read from resource metadata */
+    /* Per-vertex values the sprite renderer reads directly each frame.
+     * Parallel to vertices[]; baked once at parse/merge so the hot loop
+     * does not redo this math for every sprite × every frame. */
+    float (*cached_pos)[2]; /* vertex pos in world units, relative to the region pivot */
+    float (*cached_uv)[2];  /* atlas UV in [0,1], rotation/flip already applied */
+    float ipu;              /* 1 / pixels_per_unit; baked into cached_pos */
 } nt_atlas_data_t;
 // #endregion
 
