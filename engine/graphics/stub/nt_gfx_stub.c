@@ -88,6 +88,10 @@ bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) {
     return false;
 }
 
+void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) { (void)enabled; }
+
+bool nt_gfx_backend_is_gpu_timing_supported(void) { return false; }
+
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     (void)desc;
     return 0;

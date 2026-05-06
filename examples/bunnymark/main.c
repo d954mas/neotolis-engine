@@ -302,6 +302,13 @@ static void frame(void) {
     if (nt_input_key_is_pressed(NT_KEY_H)) {
         toggle_atlas_quality();
     }
+    /* T toggles GPU timer queries. Shows current support state in the log. */
+    if (nt_input_key_is_pressed(NT_KEY_T)) {
+        static bool s_gpu_timing_on = true;
+        s_gpu_timing_on = !s_gpu_timing_on;
+        nt_gfx_set_gpu_timing_enabled(s_gpu_timing_on);
+        nt_log_info("Bunnymark: GPU timing %s (supported=%d)", s_gpu_timing_on ? "ON" : "OFF", (int)nt_gfx_is_gpu_timing_supported());
+    }
     if (!consumed) {
         if (p->buttons[NT_BUTTON_LEFT].is_pressed) {
             spawn_n_defold(BUNNY_CLICK_SPAWN_COUNT);

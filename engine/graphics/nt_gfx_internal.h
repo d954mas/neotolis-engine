@@ -38,6 +38,10 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
  * Returns true on success. False when timer queries aren't supported, the
  * oldest query isn't ready yet, or a disjoint event invalidated results. */
 bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns);
+/* Runtime toggle for GPU time-elapsed queries. When disabled the backend
+ * stops issuing new glBeginQuery calls; in-flight ones drain on poll. */
+void nt_gfx_backend_set_gpu_timing_enabled(bool enabled);
+bool nt_gfx_backend_is_gpu_timing_supported(void);
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data);
 
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc);

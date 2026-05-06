@@ -115,7 +115,8 @@ static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used every
  * all in-flight results (clock skip — values would be unreliable). */
 #define NT_GFX_TIMER_RING 4
 
-static bool s_timer_enabled;
+static bool s_timer_enabled;             /* extension/core entry points present */
+static bool s_timer_user_enabled = true; /* runtime toggle from nt_gfx_set_gpu_timing_enabled */
 static GLuint s_timer_queries[NT_GFX_TIMER_RING];
 static bool s_timer_in_flight[NT_GFX_TIMER_RING];
 static uint8_t s_timer_head; /* next slot to write into */
@@ -431,7 +432,7 @@ void nt_gfx_backend_begin_frame(void) {
     /* Start a TIME_ELAPSED query into the head ring slot. Skip if the slot
      * is still in flight (poll never advanced) — happens when the game
      * never reads results. Skipping prevents glBeginQuery on a busy id. */
-    if (s_timer_enabled && !s_timer_in_flight[s_timer_head]) {
+    if (s_timer_enabled && s_timer_user_enabled && !s_timer_in_flight[s_timer_head]) {
         glBeginQuery(GL_TIME_ELAPSED, s_timer_queries[s_timer_head]);
         s_timer_active = true;
     }
@@ -480,8 +481,10 @@ bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) {
     }
 
     GLuint q = s_timer_queries[s_timer_tail];
-    GLint available = 0;
-    glGetQueryObjectiv(q, GL_QUERY_RESULT_AVAILABLE, &available);
+    GLuint available = 0;
+    /* glGetQueryObjectuiv is portable: GLES3/WebGL2 + desktop GL ≥ 3.0.
+     * glGetQueryObjectiv is desktop-only and breaks WebGL builds. */
+    glGetQueryObjectuiv(q, GL_QUERY_RESULT_AVAILABLE, &available);
     if (!available) {
         return false;
     }
@@ -493,6 +496,15 @@ bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) {
     s_timer_tail = (uint8_t)((s_timer_tail + 1U) % NT_GFX_TIMER_RING);
     return true;
 }
+
+void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
+    /* Runtime toggle. begin_frame stops issuing new TIME_ELAPSED queries
+     * when disabled; existing in-flight ones drain naturally through poll.
+     * No GL state cleanup needed — query objects stay allocated for reuse. */
+    s_timer_user_enabled = enabled;
+}
+
+bool nt_gfx_backend_is_gpu_timing_supported(void) { return s_timer_enabled; }
 
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) {
     glViewport(0, 0, (GLsizei)g_nt_window.fb_width, (GLsizei)g_nt_window.fb_height);

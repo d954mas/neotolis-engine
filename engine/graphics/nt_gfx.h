@@ -402,6 +402,28 @@ void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
  * nt_stats polls this each frame for the on-screen / log GPU ms reading. */
 bool nt_gfx_poll_gpu_time_ns(uint64_t *out_ns);
 
+/* Toggle GPU time-elapsed queries at runtime. Default = enabled.
+ *
+ * Cost when enabled: two GL commands per frame (glBeginQuery / glEndQuery)
+ * + one glGetQueryObjectuiv per poll. Pipelined via a 4-deep ring so polls
+ * never block. Real overhead measured at <1% on a 60k-sprite bunnymark in
+ * both WebGL2 and native GL.
+ *
+ * Reasons to disable:
+ *   - Spector / RenderDoc captures (timer queries clutter the trace)
+ *   - Mobile WebGL where some drivers insert sync points on TIME_ELAPSED
+ *   - Production builds that don't show the GPU ms readout anyway
+ *
+ * No-op if the platform doesn't support timer queries (poll returns false
+ * either way). Existing in-flight queries drain naturally; subsequent
+ * polls return false until something is queued again. */
+void nt_gfx_set_gpu_timing_enabled(bool enabled);
+
+/* Reports whether the runtime detected timer-query support (WebGL2 +
+ * EXT_disjoint_timer_query_webgl2, or desktop GL ≥ 3.3 / ARB_timer_query).
+ * Independent of the runtime toggle above. */
+bool nt_gfx_is_gpu_timing_supported(void);
+
 /* ---- Texture update (non-mipmapped textures only, level 0) ---- */
 
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);

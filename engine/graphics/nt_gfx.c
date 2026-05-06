@@ -882,6 +882,10 @@ bool nt_gfx_poll_gpu_time_ns(uint64_t *out_ns) {
     return nt_gfx_backend_poll_gpu_time_ns(out_ns);
 }
 
+void nt_gfx_set_gpu_timing_enabled(bool enabled) { nt_gfx_backend_set_gpu_timing_enabled(enabled); }
+
+bool nt_gfx_is_gpu_timing_supported(void) { return nt_gfx_backend_is_gpu_timing_supported(); }
+
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
     if (g_nt_gfx.context_lost) {
         return;
