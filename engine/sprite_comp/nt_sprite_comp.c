@@ -37,17 +37,17 @@ static void sprite_clear_resolved(uint16_t idx) {
 }
 
 static void sprite_cache_region(uint16_t idx, nt_resource_t atlas, uint32_t region_index) {
-    nt_atlas_region_view_t view = nt_atlas_get_region_view(atlas, region_index);
-    NT_ASSERT(view.region != NULL);
+    const nt_texture_region_t *region = nt_atlas_get_region(atlas, region_index);
+    NT_ASSERT(region != NULL);
     nt_resource_t page_resource = NT_RESOURCE_INVALID;
-    if (view.region->vertex_count > 0 && nt_atlas_page_count(atlas) > 0) {
-        page_resource = nt_atlas_get_page_resource(atlas, view.region->page_index);
+    if (region->vertex_count > 0 && nt_atlas_page_count(atlas) > 0) {
+        page_resource = nt_atlas_get_page_resource(atlas, region->page_index);
     }
     s_resolved[idx] = (nt_sprite_resolved_region_t){
-        .region = view.region,
-        .cached_pos = view.cached_pos,
-        .cached_uv = view.cached_uv,
-        .indices = view.indices,
+        .region = region,
+        .cached_pos = nt_atlas_get_region_cached_pos(atlas, region_index),
+        .cached_uv = nt_atlas_get_region_cached_uv(atlas, region_index),
+        .indices = nt_atlas_get_region_indices(atlas, region_index),
         .page_resource = page_resource,
     };
 }

@@ -99,16 +99,6 @@ const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t regio
 const float (*nt_atlas_get_region_cached_uv(nt_resource_t atlas, uint32_t region_index))[2];
 const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region_index);
 
-/* Combined accessor — single user_data lookup vs. four separate calls. */
-typedef struct {
-    const nt_texture_region_t *region;
-    const float (*cached_pos)[2];
-    const float (*cached_uv)[2];
-    const uint16_t *indices;
-} nt_atlas_region_view_t;
-
-nt_atlas_region_view_t nt_atlas_get_region_view(nt_resource_t atlas, uint32_t region_index);
-
 /* ---- Test access (compiled only when NT_ATLAS_TEST_ACCESS is defined) ---- */
 
 #ifdef NT_ATLAS_TEST_ACCESS

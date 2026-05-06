@@ -702,20 +702,6 @@ const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region
     NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_indices: region_index out of range");
     return &ad->indices[ad->regions[region_index].index_start];
 }
-
-nt_atlas_region_view_t nt_atlas_get_region_view(nt_resource_t atlas, uint32_t region_index) {
-    NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_get_region_view: handle is not an atlas resource");
-    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
-    NT_ASSERT(ad != NULL && "nt_atlas_get_region_view on unresolved atlas");
-    NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_view: region_index out of range");
-    const nt_texture_region_t *r = &ad->regions[region_index];
-    return (nt_atlas_region_view_t){
-        .region = r,
-        .cached_pos = (const float(*)[2]) & ad->cached_pos[r->vertex_start],
-        .cached_uv = (const float(*)[2]) & ad->cached_uv[r->vertex_start],
-        .indices = &ad->indices[r->index_start],
-    };
-}
 // #endregion
 // #endregion
 
