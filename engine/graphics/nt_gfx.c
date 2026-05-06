@@ -150,9 +150,10 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 }
 
 void nt_gfx_shutdown(void) {
-    nt_gfx_backend_shutdown();
+    /* GL deletes MUST run before backend_shutdown — that destroys the
+     * GL context, after which any glDelete* call hits a dead context. */
 
-    /* Destroy active mesh table entries */
+    /* Destroy active mesh-table buffers */
     for (uint32_t i = 1; i <= s_gfx.mesh_pool.capacity; i++) {
         if (nt_pool_slot_alive(&s_gfx.mesh_pool, i) && s_gfx.mesh_table[i].vbo.id != 0) {
             nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[nt_pool_slot_index(s_gfx.mesh_table[i].vbo.id)]);
@@ -162,12 +163,14 @@ void nt_gfx_shutdown(void) {
         }
     }
 
-    /* Release any cached sampler backends before pool shutdown */
+    /* Release cached sampler backends */
     for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
         if (s_gfx.sampler_cache[i].backend != 0) {
             nt_gfx_backend_destroy_sampler(s_gfx.sampler_cache[i].backend);
         }
     }
+
+    nt_gfx_backend_shutdown();
 
     nt_pool_shutdown(&s_gfx.shader_pool);
     nt_pool_shutdown(&s_gfx.pipeline_pool);
