@@ -921,9 +921,9 @@ void test_atlas_hash_table_growth_under_1000_regions(void) {
     const uint32_t total_indices_1 = n1 * indices_per_region;
 
     /* Estimate blob size:
-     * header(28) + regions(1000*36) + verts(3000*8) + indices(3000*2)
-     * = 28 + 36000 + 24000 + 6000 = 66028 bytes */
-    const uint32_t blob_cap = 70000;
+     * header(28) + regions(1000*40) + verts(3000*8) + indices(3000*2)
+     * = 28 + 40000 + 24000 + 6000 = 70028 bytes */
+    const uint32_t blob_cap = 80000;
     uint8_t *buf1 = (uint8_t *)malloc(blob_cap);
     TEST_ASSERT_NOT_NULL_MESSAGE(buf1, "malloc for 1000-region blob");
 

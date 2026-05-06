@@ -1665,6 +1665,12 @@ static void pipeline_serialize(AtlasPipeline *p) {
         reg->transform = pl->transform;
         reg->index_count = (uint8_t)sprite_idx_count[i];
         reg->flags = sprite_flags[i];
+        /* Builder-side invariant: any QUAD_* flag implies vertex_count==4 +
+         * index_count==6. atlas_region_flags_from_indices already returns 0
+         * unless those hold, but assert here so future flag additions can't
+         * silently break the runtime contract (which trusts the bit). */
+        NT_BUILD_ASSERT(((reg->flags & NT_ATLAS_REGION_FLAG_QUAD_MASK) == 0 || (reg->vertex_count == 4 && reg->index_count == 6)) &&
+                        "atlas region: QUAD_* flag set but vertex_count/index_count don't match — builder bug");
     }
 
     free(sprite_vertex_start);
