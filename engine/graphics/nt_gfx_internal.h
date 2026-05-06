@@ -80,7 +80,7 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
                                                   nt_texture_filter_t mag_filter, nt_texture_wrap_t wrap_u, nt_texture_wrap_t wrap_v,
                                                   uint32_t transcode_target /* nt_basisu_format_t cast to uint32_t */);
 
-/* GPU caps detection (implemented per-platform in gl/nt_gfx_gl_ctx_*.c and stub) */
+/* GPU caps detection — implemented per-backend (gl/nt_gfx_gl_ctx_*.c, stub). */
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void);
 
 #ifdef NT_GFX_STUB_TEST_ACCESS

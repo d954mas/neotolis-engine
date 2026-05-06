@@ -214,6 +214,12 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi) {
     }
     NT_ASSERT(s_sprite.cmd_count < NT_SPRITE_RENDERER_MAX_DRAW_CMDS && "sprite draw-cmd queue full; raise NT_SPRITE_RENDERER_MAX_DRAW_CMDS");
     nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count++];
+    /* Zero-init: cmd slots are reused across frames. Without this, fields not
+     * touched by a low-tex_count material (e.g. tex_count == 0) inherit stale
+     * resolved_tex/_sampler from a previous frame's draw, and the lazy slot-0
+     * injection in ensure_current_cmd_page_texture would compare against
+     * garbage. */
+    memset(c, 0, sizeof(*c));
     c->pipeline = pip;
     c->tex_count = mi->tex_count;
     for (uint8_t i = 0; i < mi->tex_count; i++) {
@@ -222,7 +228,6 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi) {
         c->resolved_sampler[i] = mi->resolved_sampler[i];
     }
     c->first_index = s_sprite.index_count;
-    c->index_count = 0;
 }
 
 /* Re-open a cmd with state copied from another cmd. Used by emit_one's

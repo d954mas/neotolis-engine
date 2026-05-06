@@ -91,9 +91,10 @@ nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index
 
 /* ---- Phase 50 D-10/D-32: precomputed projections + pixels_per_unit ---- */
 
-/* D-32: atlas-level pixels_per_unit. Returns 1.0F if atlas not resolved yet
- * or metadata absent. Game-side world math may want this. The renderer does
- * NOT need it — cached_pos already has 1/pixels_per_unit baked in. */
+/* D-32: atlas-level pixels_per_unit. Asserts the atlas is resolved.
+ * Returns 1.0F when metadata is absent (ipu == 0). Game-side world math
+ * may want this; the renderer does not — cached_pos already has
+ * 1/pixels_per_unit baked in. */
 float nt_atlas_get_pixels_per_unit(nt_resource_t atlas);
 
 /* D-10: pivot-relative pre-converted vertex positions (with 1/pixels_per_unit

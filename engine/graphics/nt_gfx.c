@@ -631,7 +631,10 @@ static inline uint32_t sampler_pack_key(const nt_sampler_desc_t *desc) {
      * If asserts get compiled out (NT_ASSERT OFF mode for production), a
      * bad input would otherwise silently collide with another sampler. */
     uint32_t mag = (desc->mag_filter == NT_FILTER_LINEAR) ? 1U : 0U;
-    return (uint32_t)((desc->min_filter & 0x7U) | (mag << 3) | ((desc->wrap_u & 0x3U) << 4) | ((desc->wrap_v & 0x3U) << 6));
+    uint32_t mn = ((uint32_t)desc->min_filter) & 0x7U;
+    uint32_t wu = ((uint32_t)desc->wrap_u) & 0x3U;
+    uint32_t wv = ((uint32_t)desc->wrap_v) & 0x3U;
+    return mn | (mag << 3) | (wu << 4) | (wv << 6);
 }
 
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
