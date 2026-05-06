@@ -33,6 +33,7 @@ Bunnymark conditions: viewport=WxH sprite_size=~26x37 px blend=premultiplied atl
 | +100 / -100 bunnies (random pos)    | Arrow Up / Arrow Down                              |
 | +1000 / -1000 bunnies               | Shift + Arrow Up / Shift + Arrow Down              |
 | Toggle SD <-> HD                    | `H` key OR top-right "Quality" tap zone (~120x40)  |
+| Toggle GPU timing queries           | `T` key                                            |
 | Quit                                | `Esc` (native only — web ignores)                  |
 
 **Note on bulk add/remove keys:** the canonical Bunnymark uses `+` / `-`, but

@@ -603,26 +603,6 @@ void test_sprite_renderer_pipeline_cache_capacity(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
 }
 
-void test_sprite_renderer_large_quad_run_uses_static_ibo(void) {
-    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
-    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
-
-    s_atlas_res = register_test_atlas(0xA8ULL);
-    nt_material_t mat = create_test_material();
-    nt_render_item_t items[64];
-    uint32_t key = nt_batch_key(mat.id, (uint32_t)FIXTURE_R0_HASH);
-    for (uint32_t i = 0; i < 64; i++) {
-        nt_entity_t e = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
-        items[i].sort_key = i;
-        items[i].entity = e.id;
-        items[i].batch_key = key;
-    }
-
-    nt_sprite_renderer_draw_list(items, 64);
-    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_draw_call_count());
-    TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_static_quad_draw_call_count());
-}
-
 /* ---- main ---- */
 
 int main(void) {
@@ -636,6 +616,5 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_polygon_emit);
     RUN_TEST(test_sprite_renderer_restore_gpu_cycle);
     RUN_TEST(test_sprite_renderer_pipeline_cache_capacity);
-    RUN_TEST(test_sprite_renderer_large_quad_run_uses_static_ibo);
     return UNITY_END();
 }

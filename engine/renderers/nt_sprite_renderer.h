@@ -16,10 +16,8 @@
  * Index buffer uses uint16 and the renderer auto-flushes before a batch would
  * exceed the 0..65535 vertex index range. This may split very large rect runs
  * into a few draw calls, but halves index upload bandwidth and keeps WebGL on
- * the faster UNSIGNED_SHORT path. Large contiguous standard-quad runs may use
- * an immutable static quad IBO in a fresh VBO chunk; mixed/polygon runs keep
- * the generic dynamic IBO path. Auto-flush on overflow keeps per-cmd state and
- * re-opens after the upload. */
+ * the faster UNSIGNED_SHORT path. Auto-flush on overflow keeps per-cmd state
+ * and re-opens after the upload. */
 
 #ifndef NT_SPRITE_RENDERER_MAX_SPRITES
 #define NT_SPRITE_RENDERER_MAX_SPRITES 8192
@@ -52,7 +50,11 @@ typedef struct {
     uint16_t max_pipelines; /* default 16 */
 } nt_sprite_renderer_desc_t;
 
-static inline nt_sprite_renderer_desc_t nt_sprite_renderer_desc_defaults(void) { return (nt_sprite_renderer_desc_t){.max_pipelines = 16}; }
+static inline nt_sprite_renderer_desc_t nt_sprite_renderer_desc_defaults(void) {
+    return (nt_sprite_renderer_desc_t){
+        .max_pipelines = 16,
+    };
+}
 
 /* ---- Lifecycle ---- */
 
@@ -71,7 +73,6 @@ void nt_sprite_renderer_flush(void);
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
 /* Per-renderer test counter (separate from nt_gfx_get_frame_draw_calls per CONTEXT D-39). */
 uint32_t nt_sprite_renderer_test_draw_call_count(void);
-uint32_t nt_sprite_renderer_test_static_quad_draw_call_count(void);
 /* Current staging vertex_count (resets on flush). */
 uint32_t nt_sprite_renderer_test_vertex_count(void);
 /* Captured at end of emit_one — survives flush; lets tests assert per-emit

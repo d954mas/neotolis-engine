@@ -19,12 +19,6 @@
 #include "transform_comp/nt_transform_comp.h"
 
 #define NT_SPRITE_RENDERER_UINT16_VERTEX_LIMIT 65536U
-#define NT_SPRITE_RENDERER_STATIC_QUAD_MAX_QUADS (NT_SPRITE_RENDERER_UINT16_VERTEX_LIMIT / 4U)
-#define NT_SPRITE_RENDERER_STATIC_QUAD_INDEX_COUNT (NT_SPRITE_RENDERER_STATIC_QUAD_MAX_QUADS * 6U)
-
-#ifndef NT_SPRITE_RENDERER_STATIC_QUAD_MIN_RUN
-#define NT_SPRITE_RENDERER_STATIC_QUAD_MIN_RUN 64U
-#endif
 
 // #region module state
 typedef struct {
@@ -40,7 +34,6 @@ typedef struct {
     uint8_t tex_count;
     uint32_t first_index; /* offset into s_sprite.indices[] */
     uint32_t index_count;
-    bool use_static_quad_ibo;
 } nt_sprite_draw_cmd_t;
 
 static struct {
@@ -51,7 +44,6 @@ static struct {
 
     nt_buffer_t vbo; /* dynamic, sized for NT_SPRITE_RENDERER_MAX_VERTICES * 24 */
     nt_buffer_t ibo; /* dynamic, sized for NT_SPRITE_RENDERER_MAX_INDICES * 2 (uint16 indices) */
-    nt_buffer_t static_quad_ibo;
     nt_sprite_vertex_t vertices[NT_SPRITE_RENDERER_MAX_VERTICES];
     uint16_t indices[NT_SPRITE_RENDERER_MAX_INDICES];
     uint32_t vertex_count;
@@ -65,7 +57,6 @@ static struct {
 
     uint32_t frame_draw_calls; /* test counter; SEPARATE from nt_gfx_get_frame_draw_calls per CONTEXT D-39 */
 #ifdef NT_SPRITE_RENDERER_TEST_ACCESS
-    uint32_t frame_static_quad_draw_calls;
     /* Test-only: last emit_one() vertex/index counts captured BEFORE flush
      * resets s_sprite.vertex_count. Read by polygon-emit test to verify
      * region.vertex_count==N polygons emit N vertices (Issue 7 fix). */
@@ -73,8 +64,6 @@ static struct {
     uint32_t last_emit_index_count;
 #endif
 } s_sprite;
-
-static uint16_t s_static_quad_indices[NT_SPRITE_RENDERER_STATIC_QUAD_INDEX_COUNT];
 // #endregion
 
 // #region lifecycle
@@ -105,26 +94,6 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
     });
     NT_ASSERT(s_sprite.ibo.id != 0);
 
-    for (uint32_t q = 0; q < NT_SPRITE_RENDERER_STATIC_QUAD_MAX_QUADS; q++) {
-        uint16_t base = (uint16_t)(q * 4U);
-        uint32_t out = q * 6U;
-        s_static_quad_indices[out + 0U] = (uint16_t)(base + 0U);
-        s_static_quad_indices[out + 1U] = (uint16_t)(base + 1U);
-        s_static_quad_indices[out + 2U] = (uint16_t)(base + 2U);
-        s_static_quad_indices[out + 3U] = (uint16_t)(base + 0U);
-        s_static_quad_indices[out + 4U] = (uint16_t)(base + 2U);
-        s_static_quad_indices[out + 5U] = (uint16_t)(base + 3U);
-    }
-    s_sprite.static_quad_ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
-        .type = NT_BUFFER_INDEX,
-        .usage = NT_USAGE_IMMUTABLE,
-        .data = s_static_quad_indices,
-        .size = NT_SPRITE_RENDERER_STATIC_QUAD_INDEX_COUNT * (uint32_t)sizeof(uint16_t),
-        .index_type = NT_INDEX_UINT16,
-        .label = "sprite_static_quad_ibo",
-    });
-    NT_ASSERT(s_sprite.static_quad_ibo.id != 0);
-
     s_sprite.initialized = true;
     return NT_OK;
 }
@@ -141,7 +110,6 @@ void nt_sprite_renderer_shutdown(void) {
     s_sprite.count = 0;
     nt_gfx_destroy_buffer(s_sprite.vbo);
     nt_gfx_destroy_buffer(s_sprite.ibo);
-    nt_gfx_destroy_buffer(s_sprite.static_quad_ibo);
     memset(&s_sprite, 0, sizeof(s_sprite));
 }
 
@@ -231,9 +199,7 @@ static void close_current_cmd(void) {
         return;
     }
     nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count - 1];
-    if (!c->use_static_quad_ibo) {
-        c->index_count = s_sprite.index_count - c->first_index;
-    }
+    c->index_count = s_sprite.index_count - c->first_index;
     if (c->index_count == 0) {
         s_sprite.cmd_count--;
     }
@@ -257,7 +223,6 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi) {
     }
     c->first_index = s_sprite.index_count;
     c->index_count = 0;
-    c->use_static_quad_ibo = false;
 }
 
 /* Re-open a cmd with state copied from another cmd. Used by emit_one's
@@ -272,21 +237,6 @@ static void open_cmd_from_snapshot(const nt_sprite_draw_cmd_t *snap) {
     *c = *snap;
     c->first_index = s_sprite.index_count;
     c->index_count = 0;
-}
-
-static void open_static_quad_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, uint32_t page_tex) {
-    NT_ASSERT(s_sprite.vertex_count == 0 && s_sprite.index_count == 0 && s_sprite.cmd_count == 0 && "static quad cmd requires a fresh VBO chunk");
-    open_cmd(pip, mi);
-    nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count - 1];
-    c->use_static_quad_ibo = true;
-    c->first_index = 0;
-    c->index_count = 0;
-    if (c->tex_count == 0) {
-        c->tex_count = 1;
-        c->tex_names[0] = NULL;
-        c->resolved_sampler[0] = NT_SAMPLER_INVALID;
-    }
-    c->resolved_tex[0] = page_tex;
 }
 
 /* Sprite atlas pages are the renderer's texture source of truth. The game may
@@ -310,7 +260,7 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
         return true;
     }
 
-    const bool current_cmd_empty = c->use_static_quad_ibo ? (c->index_count == 0) : (s_sprite.index_count == c->first_index);
+    const bool current_cmd_empty = s_sprite.index_count == c->first_index;
     if (current_cmd_empty) {
         c->resolved_tex[0] = page_tex;
         return true;
@@ -332,7 +282,7 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
  * required components; sparse_indices[entity_index] gives the dense slot
  * directly. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv, bool write_indices) {
+static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv) {
     nt_entity_t e = {.id = item->entity};
     uint16_t eidx = nt_entity_index(e);
 
@@ -364,7 +314,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
      * same state at first_index=0. The caller sees no state change; the GPU
      * just gets another chunk draw instead of UNSIGNED_INT indices. */
     if (s_sprite.vertex_count + r->vertex_count > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.vertex_count + r->vertex_count > NT_SPRITE_RENDERER_UINT16_VERTEX_LIMIT ||
-        (write_indices && s_sprite.index_count + r->index_count > NT_SPRITE_RENDERER_MAX_INDICES)) {
+        s_sprite.index_count + r->index_count > NT_SPRITE_RENDERER_MAX_INDICES) {
         NT_ASSERT(s_sprite.cmd_count > 0 && "emit_one called with no open cmd");
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
         nt_sprite_renderer_flush();
@@ -482,40 +432,15 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     }
     s_sprite.vertex_count += r->vertex_count;
 
-    if (write_indices) {
-        /* Emit indices (rebase to staging base). Builder-authored quad flags let
-         * rect regions skip atlas index reads; polygon regions keep the generic
-         * path. Each flush chunk is capped to 65536 vertices. */
-        uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count];
-        uint8_t quad_flags = (uint8_t)(r->flags & NT_ATLAS_REGION_FLAG_QUAD_MASK);
-        if (quad_flags != 0) {
-            NT_ASSERT(r->vertex_count == 4 && r->index_count == 6 && base + 3U <= UINT16_MAX);
-            out_idx[0] = (uint16_t)(base + 0U);
-            out_idx[1] = (uint16_t)(base + 1U);
-            out_idx[2] = (uint16_t)(base + 2U);
-            if (quad_flags & NT_ATLAS_REGION_FLAG_QUAD_012023) {
-                out_idx[3] = (uint16_t)(base + 0U);
-                out_idx[4] = (uint16_t)(base + 2U);
-                out_idx[5] = (uint16_t)(base + 3U);
-            } else if (quad_flags & NT_ATLAS_REGION_FLAG_QUAD_012130) {
-                out_idx[3] = (uint16_t)(base + 1U);
-                out_idx[4] = (uint16_t)(base + 3U);
-                out_idx[5] = (uint16_t)(base + 0U);
-            } else {
-                NT_ASSERT((quad_flags & NT_ATLAS_REGION_FLAG_QUAD_012132) != 0);
-                out_idx[3] = (uint16_t)(base + 1U);
-                out_idx[4] = (uint16_t)(base + 3U);
-                out_idx[5] = (uint16_t)(base + 2U);
-            }
-        } else {
-            for (uint8_t i = 0; i < r->index_count; i++) {
-                uint32_t rebased = base + (uint32_t)idx[i];
-                NT_ASSERT(rebased <= UINT16_MAX && "sprite uint16 index chunk overflow");
-                out_idx[i] = (uint16_t)rebased;
-            }
-        }
-        s_sprite.index_count += r->index_count;
+    /* Emit indices (rebase to staging base). Each flush chunk is capped to
+     * 65536 vertices, so uint16 indices stay valid. */
+    uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count];
+    for (uint8_t i = 0; i < r->index_count; i++) {
+        uint32_t rebased = base + (uint32_t)idx[i];
+        NT_ASSERT(rebased <= UINT16_MAX && "sprite uint16 index chunk overflow");
+        out_idx[i] = (uint16_t)rebased;
     }
+    s_sprite.index_count += r->index_count;
 
 #ifdef NT_SPRITE_RENDERER_TEST_ACCESS
     /* Capture per-emit counts so polygon test can read them after draw_list
@@ -524,56 +449,6 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     s_sprite.last_emit_vertex_count = r->vertex_count;
     s_sprite.last_emit_index_count = r->index_count;
 #endif
-}
-
-static bool static_quad_item_info(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, uint32_t *out_page_tex) {
-    nt_entity_t e = {.id = item->entity};
-    uint16_t eidx = nt_entity_index(e);
-    uint16_t s_idx = sv->sparse_indices[eidx];
-    const nt_sprite_resolved_region_t *resolved = &sv->resolved[s_idx];
-    if ((sv->flags[s_idx] & NT_SPRITE_FLAG_RESOLVED) == 0 || resolved->region == NULL) {
-        return false;
-    }
-
-    const nt_texture_region_t *r = resolved->region;
-    if (r->vertex_count != 4 || r->index_count != 6 || (r->flags & NT_ATLAS_REGION_FLAG_QUAD_012023) == 0) {
-        return false;
-    }
-
-    uint32_t page_tex = nt_resource_get(resolved->page_resource);
-    if (page_tex == 0) {
-        return false;
-    }
-    *out_page_tex = page_tex;
-    return true;
-}
-
-static uint32_t count_static_quad_run(const nt_render_item_t *items, uint32_t start, uint32_t end, const nt_sprite_comp_view_t *sv, uint32_t *out_page_tex) {
-    uint32_t page_tex = 0;
-    if (!static_quad_item_info(&items[start], sv, &page_tex)) {
-        return 0;
-    }
-
-    uint32_t count = 1;
-    for (uint32_t i = start + 1U; i < end; i++) {
-        uint32_t next_page_tex = 0;
-        if (!static_quad_item_info(&items[i], sv, &next_page_tex) || next_page_tex != page_tex) {
-            break;
-        }
-        count++;
-    }
-    *out_page_tex = page_tex;
-    return count;
-}
-
-static void emit_static_quad_run(const nt_render_item_t *items, uint32_t start, uint32_t end, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv) {
-    for (uint32_t i = start; i < end; i++) {
-        NT_ASSERT((s_sprite.vertex_count % 4U) == 0 && "static quad IBO requires quad vertices packed from base 0");
-        emit_one(&items[i], sv, tv, dv, false);
-        nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count - 1];
-        NT_ASSERT(c->use_static_quad_ibo);
-        c->index_count += 6U;
-    }
 }
 // #endregion
 
@@ -604,10 +479,6 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
     /* Reset per-frame counter (per-renderer test counter — distinct from
      * nt_gfx_get_frame_draw_calls, which is reset by nt_gfx_begin_frame). */
     s_sprite.frame_draw_calls = 0;
-#ifdef NT_SPRITE_RENDERER_TEST_ACCESS
-    s_sprite.frame_static_quad_draw_calls = 0;
-#endif
-
     /* Fetch bulk SoA views once. Every per-sprite read inside emit_one then
      * indexes the dense arrays directly via sparse_indices, skipping the
      * per-entity accessor's function-call + liveness assert. */
@@ -641,23 +512,8 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         close_current_cmd();
         open_cmd(pip, mat_info);
 
-        uint32_t i = run_start;
-        while (i < run_end) {
-            uint32_t page_tex = 0;
-            uint32_t quad_run_count = count_static_quad_run(items, i, run_end, &sv, &page_tex);
-            if (quad_run_count >= NT_SPRITE_RENDERER_STATIC_QUAD_MIN_RUN) {
-                close_current_cmd();
-                nt_sprite_renderer_flush();
-                open_static_quad_cmd(pip, mat_info, page_tex);
-                emit_static_quad_run(items, i, i + quad_run_count, &sv, &tv, &dv);
-                nt_sprite_renderer_flush();
-                open_cmd(pip, mat_info);
-                i += quad_run_count;
-                continue;
-            }
-
-            emit_one(&items[i], &sv, &tv, &dv, true);
-            i++;
+        for (uint32_t i = run_start; i < run_end; i++) {
+            emit_one(&items[i], &sv, &tv, &dv);
         }
         run_start = run_end;
     }
@@ -710,10 +566,9 @@ void nt_sprite_renderer_flush(void) {
             bound_ibo_id = 0;
         }
 
-        nt_buffer_t ibo = c->use_static_quad_ibo ? s_sprite.static_quad_ibo : s_sprite.ibo;
-        if (ibo.id != bound_ibo_id) {
-            nt_gfx_bind_index_buffer(ibo);
-            bound_ibo_id = ibo.id;
+        if (s_sprite.ibo.id != bound_ibo_id) {
+            nt_gfx_bind_index_buffer(s_sprite.ibo);
+            bound_ibo_id = s_sprite.ibo.id;
         }
 
         for (uint8_t t = 0; t < c->tex_count; t++) {
@@ -732,11 +587,6 @@ void nt_sprite_renderer_flush(void) {
 
         nt_gfx_draw_indexed(c->first_index, c->index_count, s_sprite.vertex_count);
         s_sprite.frame_draw_calls++;
-#ifdef NT_SPRITE_RENDERER_TEST_ACCESS
-        if (c->use_static_quad_ibo) {
-            s_sprite.frame_static_quad_draw_calls++;
-        }
-#endif
     }
 
     s_sprite.vertex_count = 0;
@@ -749,7 +599,6 @@ void nt_sprite_renderer_flush(void) {
 #ifdef NT_SPRITE_RENDERER_TEST_ACCESS
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void) { return s_sprite.count; }
 uint32_t nt_sprite_renderer_test_draw_call_count(void) { return s_sprite.frame_draw_calls; }
-uint32_t nt_sprite_renderer_test_static_quad_draw_call_count(void) { return s_sprite.frame_static_quad_draw_calls; }
 uint32_t nt_sprite_renderer_test_vertex_count(void) { return s_sprite.vertex_count; }
 uint32_t nt_sprite_renderer_test_last_emit_vertex_count(void) { return s_sprite.last_emit_vertex_count; }
 uint32_t nt_sprite_renderer_test_last_emit_index_count(void) { return s_sprite.last_emit_index_count; }

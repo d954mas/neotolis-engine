@@ -564,9 +564,10 @@ The drawable component is SoA. Fields:
 | visible | `bool`        | `true`       | render visibility only               |
 | color   | `vec4`        | `(1,1,1,1)`  | object tint / alpha multiplier       |
 
-Accessors return mutable pointers (`nt_drawable_comp_tag/visible/color`) — fields
-are independent so direct mutation is safe. API lives in
-`engine/drawable_comp/nt_drawable_comp.h`.
+Accessors for `tag` and `visible` return mutable pointers. Color is mutated
+through `nt_drawable_comp_set_color()` / `nt_drawable_comp_set_alpha()` so the
+module can keep its float SoA and packed RGBA8 mirror in sync for renderers.
+API lives in `engine/drawable_comp/nt_drawable_comp.h`.
 
 Per-entity shader params (`params0`) deferred to ShaderParamsComponent — add when per-entity shader effects are needed (#98).
 
@@ -690,11 +691,10 @@ joining sprites with other components. Pointers are stable for the lifetime
 of the module; values shift on add/remove (swap-and-pop) so views must not
 be cached across mutations.
 
-> **Status:** as of Phase 49, only the component data layer (sprite_comp,
-> atlas, resource `publication_epoch`) is implemented. The sprite render-item
-> builder and any associated dedicated renderer are deferred to a later phase.
-> "Render-item build skips unresolved sprites" describes the contract those
-> future systems must honour, not behaviour that exists today.
+> **Status:** sprite_comp, atlas runtime data, explicit resource sync, and the
+> dedicated SpriteRenderer are implemented. Sprite render-item construction is
+> still game-side code: the engine consumes caller-provided render-item arrays
+> and does not introduce a hidden sprite scheduler.
 
 Sprite is a separate render kind, not a special mode of mesh.
 
@@ -894,11 +894,10 @@ draw recorded commands. The renderer owns atlas page correctness: `batch_key`
 is a compatibility hint from the game, while SpriteRenderer verifies actual
 atlas page textures and splits commands when a run crosses pages.
 
-For large contiguous standard-quad runs, SpriteRenderer may flush the current
-dynamic chunk and draw a fresh VBO chunk with a static immutable quad IBO
-(`0,1,2,0,2,3`, repeated). WebGL2 has no `baseVertex`, so this path is only
-valid when the quad run starts at vertex 0 of that flush chunk. Polygon sprites
-and mixed/small runs use the generic dynamic IBO path.
+Rect and polygon sprites use the same generic dynamic IBO path. The renderer
+does not keep a separate static-quad fast path unless measurements show a clear
+win on the target workload; this keeps the sprite batching code small and makes
+draw splitting depend only on capacity and state changes.
 
 ---
 
@@ -2373,7 +2372,7 @@ These do not block implementation:
 - exact binary layout of each runtime format header
 - precise bit packing of sort keys
 - future WebGPU backend details
-- ~~exact sprite asset format~~ → resolved: `NT_ASSET_ATLAS` (§17.8) builder-side. Runtime sprite renderer + `SpriteComponent` consumer is still pending — atlas blob is produced and validated end-to-end but not yet consumed by a runtime sprite module.
+- ~~exact sprite asset format~~ → resolved: `NT_ASSET_ATLAS` (§17.8) builder-side, runtime atlas consumer, `SpriteComponent`, and SpriteRenderer.
 - sprite animation system
 - ~~exact text rendering strategy and string pool design~~ → resolved: Slug-based GPU vector rendering (§17.8 NT_ASSET_FONT), font module API (§9.5)
 - camera component/structure definition
