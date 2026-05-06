@@ -509,12 +509,18 @@ bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) {
 
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
     /* Drain on disable so re-enabling later starts from a clean ring —
-     * otherwise stale in-flight slots would silently block begin_frame. */
+     * otherwise stale in-flight slots would silently block begin_frame.
+     * Mid-frame toggle: close the open query first, otherwise the next
+     * begin_frame would call glBeginQuery on an already-active target
+     * (INVALID_OPERATION on WebGL2 and desktop GL alike). */
     if (!enabled && s_timer_enabled) {
+        if (s_timer_active) {
+            glEndQuery(GL_TIME_ELAPSED);
+            s_timer_active = false;
+        }
         memset(s_timer_in_flight, 0, sizeof(s_timer_in_flight));
         s_timer_head = 0;
         s_timer_tail = 0;
-        s_timer_active = false;
     }
     /* Reset one-shot ring-full warning so a re-enable cycle can re-flag
      * misuse if the bug repeats. */

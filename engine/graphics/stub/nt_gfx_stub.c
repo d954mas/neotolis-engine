@@ -94,7 +94,7 @@ bool nt_gfx_backend_is_gpu_timing_supported(void) { return false; }
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     (void)desc;
-    return 0;
+    return 1;
 }
 
 void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) { (void)backend_handle; }

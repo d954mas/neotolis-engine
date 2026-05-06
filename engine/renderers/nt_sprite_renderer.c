@@ -341,8 +341,8 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     uint8_t flags = sv->flags[s_idx];
     if (flags & NT_SPRITE_FLAG_ORIGIN_OV) {
         const float *o = sv->origin[s_idx];
-        float ppu = nt_atlas_get_pixels_per_unit(atlas);
-        float ipu = (ppu > 0.0F) ? 1.0F / ppu : 1.0F;
+        /* get_pixels_per_unit asserts ppu > 0, so direct invert is safe. */
+        float ipu = 1.0F / nt_atlas_get_pixels_per_unit(atlas);
         float dx = (o[0] - r->origin_x) * (float)r->source_w * ipu;
         float dy = (o[1] - r->origin_y) * (float)r->source_h * ipu;
         tx -= (m[0] * dx) + (m[4] * dy);
@@ -555,6 +555,11 @@ void nt_sprite_renderer_flush(void) {
     uint32_t bound_pipeline_id = 0;
     uint32_t bound_ibo_id = 0;
     uint32_t bound_tex_ids[NT_MATERIAL_MAX_TEXTURES] = {0};
+    /* Track effective sampler per unit. Without this a cmd with material
+     * override X followed by another cmd on the same texture without override
+     * would silently keep X bound (tex skip → sampler skip) and sample with
+     * the wrong filter. Resolve effective per cmd, bind only on delta. */
+    uint32_t bound_sampler_ids[NT_MATERIAL_MAX_TEXTURES] = {0};
 
     for (uint32_t ci = 0; ci < s_sprite.cmd_count; ci++) {
         const nt_sprite_draw_cmd_t *c = &s_sprite.cmds[ci];
@@ -582,10 +587,21 @@ void nt_sprite_renderer_flush(void) {
                     nt_gfx_set_uniform_int(c->tex_names[t], (int)t);
                 }
                 bound_tex_ids[t] = c->resolved_tex[t];
+                /* bind_texture also bound the texture's default sampler. */
+                bound_sampler_ids[t] = nt_gfx_get_texture_default_sampler((nt_texture_t){.id = c->resolved_tex[t]}).id;
             }
-            /* Material sampler override (.id==0 = keep texture default). */
+            /* Effective sampler = override if set, else texture's asset default. */
+            uint32_t want_sampler;
             if (c->resolved_sampler[t].id != 0) {
-                nt_gfx_bind_sampler(c->resolved_sampler[t], t);
+                want_sampler = c->resolved_sampler[t].id;
+            } else if (c->resolved_tex[t] != 0) {
+                want_sampler = nt_gfx_get_texture_default_sampler((nt_texture_t){.id = c->resolved_tex[t]}).id;
+            } else {
+                want_sampler = 0;
+            }
+            if (want_sampler != bound_sampler_ids[t]) {
+                nt_gfx_bind_sampler((nt_sampler_t){.id = want_sampler}, t);
+                bound_sampler_ids[t] = want_sampler;
             }
         }
 

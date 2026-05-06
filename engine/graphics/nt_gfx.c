@@ -599,13 +599,20 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
     }
     uint32_t idx = nt_pool_slot_index(tex.id);
     nt_gfx_backend_bind_texture(s_gfx.texture_backends[idx], slot);
-    /* Bind the texture's default sampler too. Materials override later by
-     * calling nt_gfx_bind_sampler with their own handle on the same slot
-     * (B5/B6); materials with no override re-bind this same default. */
-    nt_sampler_t s = s_gfx.texture_metas[idx].default_sampler;
-    if (s.id != 0) {
-        nt_gfx_bind_sampler(s, slot);
+    /* Bind the texture's default sampler unconditionally — including .id == 0,
+     * which delegates to backend_bind_sampler(0, slot) and clears any sampler
+     * object left on the unit by a previous binding. Without that clear, a
+     * texture with no asset-baked default would still inherit the previous
+     * texture's sampler object and ignore its own legacy GL_TEXTURE_*_FILTER
+     * state. Materials may override after this via nt_gfx_bind_sampler. */
+    nt_gfx_bind_sampler(s_gfx.texture_metas[idx].default_sampler, slot);
+}
+
+nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex) {
+    if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
+        return NT_SAMPLER_INVALID;
     }
+    return s_gfx.texture_metas[nt_pool_slot_index(tex.id)].default_sampler;
 }
 
 /* ---- Sampler (deduplicated cache) ---- */
