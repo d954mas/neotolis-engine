@@ -4808,7 +4808,8 @@ void test_atlas_sprite_opts_default_origin_is_centre(void) {
     free(buf);
 }
 
-/* Custom origin via opts propagates into the blob verbatim. */
+/* Custom origin via opts propagates into the blob with builder y-up flip:
+ * origin_y_blob = 1 - origin_y_png. origin_x is unchanged. */
 void test_atlas_sprite_opts_custom_origin(void) {
     (void)MKDIR(TMP_DIR);
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_origin_custom.ntpack");
@@ -4817,7 +4818,7 @@ void test_atlas_sprite_opts_custom_origin(void) {
     uint8_t *s = make_test_sprite(16, 16, 0, 255, 128, 255);
 
     nt_builder_begin_atlas(ctx, "origin_custom", NULL);
-    /* Feet pivot. */
+    /* Feet pivot — PNG y-down 1.0 (bottom edge) flips to y-up 0.0 in the blob. */
     nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "feet.png", .origin_x = 0.5F, .origin_y = 1.0F});
     nt_builder_end_atlas(ctx);
 
@@ -4831,7 +4832,7 @@ void test_atlas_sprite_opts_custom_origin(void) {
     TEST_ASSERT_NOT_NULL(buf);
     TEST_ASSERT_EQUAL(1, region_count);
     TEST_ASSERT_TRUE(regions[0].origin_x > 0.49F && regions[0].origin_x < 0.51F);
-    TEST_ASSERT_TRUE(regions[0].origin_y > 0.99F && regions[0].origin_y < 1.01F);
+    TEST_ASSERT_TRUE(regions[0].origin_y > -0.01F && regions[0].origin_y < 0.01F);
     free(buf);
 }
 
@@ -4844,7 +4845,8 @@ void test_atlas_sprite_opts_origin_out_of_range_allowed(void) {
     uint8_t *s = make_test_sprite(16, 16, 128, 64, 255, 255);
 
     nt_builder_begin_atlas(ctx, "origin_oor", NULL);
-    /* Negative and > 1.0 — pivot lies outside the frame. Legal. */
+    /* Negative and > 1.0 — pivot lies outside the frame. Legal. PNG y-down 1.5
+     * flips symmetrically to y-up -0.5 in the blob (1 - 1.5 = -0.5). */
     nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "offframe.png", .origin_x = -0.2F, .origin_y = 1.5F});
     nt_builder_end_atlas(ctx);
 
@@ -4858,7 +4860,7 @@ void test_atlas_sprite_opts_origin_out_of_range_allowed(void) {
     TEST_ASSERT_NOT_NULL(buf);
     TEST_ASSERT_EQUAL(1, region_count);
     TEST_ASSERT_TRUE(regions[0].origin_x < -0.19F && regions[0].origin_x > -0.21F);
-    TEST_ASSERT_TRUE(regions[0].origin_y > 1.49F && regions[0].origin_y < 1.51F);
+    TEST_ASSERT_TRUE(regions[0].origin_y > -0.51F && regions[0].origin_y < -0.49F);
     free(buf);
 }
 
@@ -5059,9 +5061,10 @@ void test_atlas_duplicate_pixels_different_origin(void) {
     TEST_ASSERT_NOT_NULL(r_centre);
     TEST_ASSERT_NOT_NULL(r_feet);
 
-    /* Different origin_y — each region carries its own pivot. */
+    /* Different origin_y — each region carries its own pivot. Builder y-up flip
+     * applies (1 - origin_y_png): centre 0.5 stays 0.5, feet 1.0 → 0.0. */
     TEST_ASSERT_TRUE(r_centre->origin_y > 0.49F && r_centre->origin_y < 0.51F);
-    TEST_ASSERT_TRUE(r_feet->origin_y > 0.99F && r_feet->origin_y < 1.01F);
+    TEST_ASSERT_TRUE(r_feet->origin_y > -0.01F && r_feet->origin_y < 0.01F);
 
     /* Shared vertex_start / index_start via dedup — both regions point at the
      * same geometry in the blob. */

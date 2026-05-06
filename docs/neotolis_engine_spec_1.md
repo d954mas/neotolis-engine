@@ -1242,12 +1242,12 @@ Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier cu
 
 Builder produces atlas assets from a set of sprite PNGs (or raw RGBA buffers). One atlas yields **two kinds of pack entries**: a single `NT_ASSET_ATLAS` blob with region metadata, plus N `NT_ASSET_TEXTURE` page entries (named `<atlas>/tex0`, `<atlas>/tex1`, …). Runtime keeps a 1:N relationship — one metadata blob references N textures.
 
-Binary layout (`shared/include/nt_atlas_format.h`, packed, **v4**):
+Binary layout (`shared/include/nt_atlas_format.h`, packed, **v5**):
 
 ```
 NtAtlasHeader (28 bytes)
   magic:               u32  (0x534C5441 "ATLS")
-  version:             u16  (4)
+  version:             u16  (5)
   region_count:        u16  (one entry per source sprite)
   page_count:          u16  (number of texture pages)
   _pad:                u16
@@ -1265,11 +1265,15 @@ NtAtlasRegion[region_count] (40 bytes each)
   source_w:       u16   (original image width in pixels, pre-trim)
   source_h:       u16   (original image height in pixels, pre-trim)
   trim_offset_x:  i16   (pixels stripped from the left edge during alpha trim)
-  trim_offset_y:  i16   (pixels stripped from the top edge)
+  trim_offset_y:  i16   (pixels stripped from the BOTTOM edge in y-up source space.
+                         v5 — was top edge in v4. Builder converts at write time:
+                         trim_offset_y = source_h - trim_y_png - trim_h.)
   origin_x:       f32   (pivot X, normalized over source_w — 0.5 = centre, 1.0 = right edge.
                          Values outside [0, 1] are allowed for off-frame pivots. Source-space
                          NOT trim-space — stable across animation frames with varying trim bounds.)
-  origin_y:       f32   (pivot Y, normalized over source_h. Same semantics.)
+  origin_y:       f32   (pivot Y, normalized over source_h, in y-up source space.
+                         v5 — 0.0 = bottom edge, 1.0 = top edge. Builder converts at write
+                         time: origin_y = 1 - origin_y_png.)
   vertex_start:   u32   (index into vertex array — u32 in v3, was u16 in v2)
   index_start:    u32   (index into the index array — u32 in v3, was u16 in v2)
   vertex_count:   u8    (vertices for this region; ≤ max_vertices)
@@ -1284,13 +1288,21 @@ NtAtlasVertex[total_vertex_count] (8 bytes each, at vertex_offset)
                    Polygon vertices use corner coordinates, not pixel centres.
                    Source-image pos: local_x + trim_offset_x
                    Pivot-relative:   (local_x + trim_offset_x) - origin_x * source_w)
-  local_y:   i16  (corner Y in trim-rect local space, 0..trim_h. Same semantics.)
+  local_y:   i16  (corner Y in trim-rect local space, y-up — 0 = bottom of trim,
+                   trim_h = top. v5 — was y-down in v4. Symmetric to local_x:
+                   pivot_relative_y = (local_y + trim_offset_y) - origin_y * source_h.
+                   Runtime cached_pos applies this directly with no Y-flip.)
   atlas_u:   u16  (normalized 0..65535 over atlas page width)
-  atlas_v:   u16  (normalized 0..65535 over atlas page height)
+  atlas_v:   u16  (normalized 0..65535 over atlas page height. UV.v stays y-down because
+                   atlas page texture pixel data is uploaded top-row-first; UV.v=0 maps to
+                   PNG top, which is what the y-up sprite sees at its high-y vertex.)
 
 uint16[total_index_count] (at index_offset)
   Triangle list, indices local per region (0 .. vertex_count-1).
-  Runtime offsets them by vertex_start when building GPU buffers.
+  Builder pre-swaps each triangle's last two indices at pack time (a,b,c)→(a,c,b)
+  so the in-blob winding is world-CCW after y-up vertices are read directly. This
+  lets sprite materials use cull_mode = BACK without per-game opt-outs.
+  Runtime offsets indices by vertex_start when building GPU buffers.
 ```
 
 Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, vertex data, index data, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. UVs are pre-normalized and triangles are pre-built by the builder (Clipper2 CDT for all polygons, fan triangulation as fallback on CDT failure).

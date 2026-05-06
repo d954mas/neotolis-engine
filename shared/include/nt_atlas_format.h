@@ -5,7 +5,11 @@
 
 /* Magic: ASCII "ATLS" as uint32_t little-endian = 0x534C5441 */
 #define NT_ATLAS_MAGIC 0x534C5441
-#define NT_ATLAS_VERSION 4
+/* Bumped 4 → 5 when builder moved Y-flip out of runtime into pack-time:
+ * vertex local_y, region origin_y, region trim_offset_y are now stored in
+ * y-up source space. Old v4 packs would silently render upside-down — the
+ * version bump makes the activator assert mismatch immediately. */
+#define NT_ATLAS_VERSION 5
 
 #define NT_ATLAS_REGION_FLAG_QUAD_012023 ((uint8_t)(1U << 0))
 #define NT_ATLAS_REGION_FLAG_QUAD_012130 ((uint8_t)(1U << 1))
@@ -51,7 +55,9 @@ typedef struct {
     uint16_t source_h;     /* 10: original image height in pixels (pre-trim) */
     int16_t trim_offset_x; /* 12: pixels stripped from the left edge during alpha trim
                             *     (add to NtAtlasVertex.local_x to get source-image space X) */
-    int16_t trim_offset_y; /* 14: pixels stripped from the top edge during alpha trim */
+    int16_t trim_offset_y; /* 14: pixels stripped from the BOTTOM edge in y-up source space
+                            *     (v5 semantics — was top edge in v4 and earlier). Builder
+                            *     converts at write time: trim_offset_y = source_h - trim_y_png - trim_h. */
     float origin_x;        /* 16: pivot X, normalized over source_w (NOT trim_w).
                             *     0.0 = left edge, 0.5 = centre (default), 1.0 = right edge.
                             *     Values outside [0, 1] are allowed — the pivot may lie outside
@@ -59,7 +65,9 @@ typedef struct {
                             *     Runtime resolves: pivot_px_x = origin_x * source_w.
                             *     Source-space (not trim-space) gives stable pivots across
                             *     animation frames where trim bounds vary. */
-    float origin_y;        /* 20: pivot Y, normalized over source_h. Same semantics. */
+    float origin_y;        /* 20: pivot Y, normalized over source_h, in y-up source space
+                            *     (v5 — was y-down in v4). 0.0 = bottom, 1.0 = top.
+                            *     Builder converts at write time: origin_y = 1 - origin_y_png. */
     uint32_t vertex_start; /* 24: index into vertex array (uint32 in v3, was uint16 in v2) */
     uint32_t index_start;  /* 28: index into the index array (uint32 in v3, was uint16 in v2) */
     uint8_t vertex_count;  /* 32: number of vertices for this region (max 16 per builder limit) */
@@ -71,7 +79,7 @@ typedef struct {
                             *     is at most (16-2)*3 = 42 indices, so 1 byte is sufficient. */
     uint8_t flags;         /* 36: builder-authored render hints, see NT_ATLAS_REGION_FLAG_* */
     uint8_t _reserved[3];  /* 37: must be zero */
-} NtAtlasRegion;           /* 36 bytes — runtime mirror: nt_texture_region_t (nt_atlas.h, different field order) */
+} NtAtlasRegion;           /* 40 bytes — runtime mirror: nt_texture_region_t (nt_atlas.h, different field order) */
 #pragma pack(pop)
 _Static_assert(sizeof(NtAtlasRegion) == 40, "NtAtlasRegion must be 40 bytes");
 
@@ -85,7 +93,11 @@ typedef struct {
                        *       pivot_relative_x = (local_x + trim_offset_x) - (origin_x * source_w)
                        *     The rendered world-space position of the vertex is then:
                        *       world_x = entity_pos_x + pivot_relative_x * scale_x */
-    int16_t local_y;  /*  2: corner Y in trim-rect local space (0..trim_h). Same semantics. */
+    int16_t local_y;  /*  2: corner Y in trim-rect local space, y-up (0 = bottom of trim,
+                       *     trim_h = top). v5: builder flips this from PNG y-down at pack
+                       *     time so runtime can read positions directly without inverting.
+                       *     Symmetric to local_x: pivot_relative_y = (local_y + trim_offset_y)
+                       *     - (origin_y * source_h), with trim_offset_y / origin_y also y-up. */
     uint16_t atlas_u; /*  4: atlas UV X (normalized 0-65535 over atlas width) */
     uint16_t atlas_v; /*  6: atlas UV Y (normalized 0-65535 over atlas height) */
 } NtAtlasVertex;      /*  8 bytes — runtime mirror: nt_atlas_vertex_t (nt_atlas.h, same field order) */

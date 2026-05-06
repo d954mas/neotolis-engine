@@ -1433,6 +1433,11 @@ static void pipeline_cache_write(AtlasPipeline *p) {
     }
 }
 
+/* QUAD_* flag names describe the ear-clip / fan output BEFORE winding swap —
+ * detection runs on PNG-space CCW patterns. The blob stores the swapped form
+ * (see swap_triangle_winding below); runtime emit_one's hardcoded pattern is
+ * the swapped one too. Renaming the flags would churn pack format v4 for no
+ * gain, so the names stay as-is and this comment carries the contract. */
 static uint8_t atlas_region_flags_from_indices(uint32_t vertex_count, uint32_t index_count, const uint16_t *indices) {
     if (vertex_count != 4 || index_count != 6 || indices == NULL) {
         return 0;
@@ -1447,6 +1452,24 @@ static uint8_t atlas_region_flags_from_indices(uint32_t vertex_count, uint32_t i
         return NT_ATLAS_REGION_FLAG_QUAD_012132;
     }
     return 0;
+}
+
+/* Swap winding of every triangle in a triangle-list index buffer.
+ *
+ * Builder ear-clip / fan output is PNG-space CCW. Runtime atlas_precompute_region
+ * Y-flips cached_pos so PNG-top maps to world-top in a y-up ortho — that flip
+ * inverts the cross-product sign, turning CCW into CW under GL's winding test.
+ * Pre-swapping each triangle (a,b,c)→(a,c,b) here cancels out: blob indices
+ * trace CW in PNG-space and CCW in world-space, so cull_mode = BACK works
+ * correctly without per-game opt-outs. Y-flip stays in runtime (texture sampling
+ * still wants spritely-up); only the winding moves into the builder. */
+static void swap_triangle_winding(uint16_t *indices, uint32_t index_count) {
+    NT_BUILD_ASSERT(index_count % 3U == 0 && "swap_triangle_winding: index_count must be a multiple of 3 (triangle list)");
+    for (uint32_t i = 0; i + 2U < index_count; i += 3U) {
+        uint16_t tmp = indices[i + 1U];
+        indices[i + 1U] = indices[i + 2U];
+        indices[i + 2U] = tmp;
+    }
 }
 
 /* --- pipeline_serialize: compute atlas UVs, write binary blob --- */
@@ -1579,9 +1602,12 @@ static void pipeline_serialize(AtlasPipeline *p) {
         sprite_vertex_start[i] = vertex_cursor;
         sprite_index_start[i] = index_cursor;
         sprite_idx_count[i] = idx_count;
+        /* Flag detection runs on PNG-CCW pattern — must precede the winding
+         * swap below or every QUAD_* match would miss. */
         sprite_flags[i] = atlas_region_flags_from_indices(p->vertex_counts[i], idx_count, local_indices);
+        swap_triangle_winding(local_indices, idx_count);
 
-        /* Write triangle indices (local: 0..vertex_count-1) */
+        /* Write triangle indices (local: 0..vertex_count-1, world-CCW after Y-flip) */
         memcpy(&indices[index_cursor], local_indices, idx_count * sizeof(uint16_t));
         index_cursor += idx_count;
 
@@ -1594,10 +1620,18 @@ static void pipeline_serialize(AtlasPipeline *p) {
             NtAtlasVertex *vtx = &vertices[vertex_cursor++];
             int32_t lx = p->hull_vertices[i][v].x;
             int32_t ly = p->hull_vertices[i][v].y;
+            /* Y-flip vertex into y-up local space at the blob boundary (v5).
+             * Builder's hull/triangulator/UV math all operate in PNG y-down;
+             * only the on-disk vertex flips so runtime can read it as-is in
+             * the engine's y-up world. UV.v stays y-down on purpose — it
+             * indexes raw pixel rows, which the GL upload still receives
+             * top-row-first. transform_point gets the original PNG-space ly
+             * because it computes atlas_v, not local_y. */
+            int32_t ly_up = (int32_t)p->trim_h[i] - ly;
             NT_BUILD_ASSERT(lx >= INT16_MIN && lx <= INT16_MAX && "pipeline_serialize: local_x overflows int16_t");
-            NT_BUILD_ASSERT(ly >= INT16_MIN && ly <= INT16_MAX && "pipeline_serialize: local_y overflows int16_t");
+            NT_BUILD_ASSERT(ly_up >= INT16_MIN && ly_up <= INT16_MAX && "pipeline_serialize: local_y overflows int16_t after y-up flip");
             vtx->local_x = (int16_t)lx;
-            vtx->local_y = (int16_t)ly;
+            vtx->local_y = (int16_t)ly_up;
 
             int32_t tx;
             int32_t ty;
@@ -1653,11 +1687,18 @@ static void pipeline_serialize(AtlasPipeline *p) {
         reg->source_w = (uint16_t)p->sprites[i].width;
         reg->source_h = (uint16_t)p->sprites[i].height;
         NT_BUILD_ASSERT(p->trim_x[i] <= INT16_MAX && "pipeline_serialize: trim_offset_x overflows int16_t");
-        NT_BUILD_ASSERT(p->trim_y[i] <= INT16_MAX && "pipeline_serialize: trim_offset_y overflows int16_t");
+        /* trim_offset_y_up = pixels stripped from the BOTTOM edge in y-up
+         * source space. Builder's alpha-trim records trim_y as pixels stripped
+         * from the PNG-top, so the y-up conversion is source_h - trim_y - trim_h. */
+        int32_t trim_offset_y_up = (int32_t)p->sprites[i].height - (int32_t)p->trim_y[i] - (int32_t)p->trim_h[i];
+        NT_BUILD_ASSERT(trim_offset_y_up >= INT16_MIN && trim_offset_y_up <= INT16_MAX && "pipeline_serialize: trim_offset_y overflows int16_t after y-up flip");
         reg->trim_offset_x = (int16_t)p->trim_x[i];
-        reg->trim_offset_y = (int16_t)p->trim_y[i];
+        reg->trim_offset_y = (int16_t)trim_offset_y_up;
         reg->origin_x = p->sprites[i].origin_x;
-        reg->origin_y = p->sprites[i].origin_y;
+        /* origin_y in y-up: 0 = bottom edge, 1 = top edge. PNG convention is
+         * 0 = top, so flip at write time. Values outside [0,1] (off-frame
+         * pivots) flip symmetrically. */
+        reg->origin_y = 1.0F - p->sprites[i].origin_y;
         reg->vertex_start = sprite_vertex_start[i];
         reg->index_start = sprite_index_start[i];
         reg->vertex_count = (uint8_t)p->vertex_counts[i];
