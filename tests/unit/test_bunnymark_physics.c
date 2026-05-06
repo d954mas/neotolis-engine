@@ -13,6 +13,7 @@ static bool float_near(float a, float b, float epsilon) { return fabsf(a - b) <=
 void setUp(void) {}
 void tearDown(void) {}
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — 1000-iter sweep over many invariants is the test's purpose
 void test_bunny_init_defold_ranges(void) {
     nt_bunny_rng_t rng = {.state = 12345ULL};
     for (int i = 0; i < 1000; i++) {

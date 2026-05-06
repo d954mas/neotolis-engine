@@ -277,8 +277,8 @@ void test_draw_newline_advances_to_next_line(void) {
     float second_y = 0.0F;
     memcpy(&first_x, verts + 0, sizeof(float));
     memcpy(&first_y, verts + 4, sizeof(float));
-    memcpy(&second_x, verts + (4U * 68U), sizeof(float));
-    memcpy(&second_y, verts + (4U * 68U) + 4U, sizeof(float));
+    memcpy(&second_x, verts + ((size_t)4U * 68U), sizeof(float));
+    memcpy(&second_y, verts + ((size_t)4U * 68U) + 4U, sizeof(float));
 
     TEST_ASSERT_TRUE(first_x == second_x);
     TEST_ASSERT_TRUE(second_y < first_y);
