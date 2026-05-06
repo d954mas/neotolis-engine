@@ -229,33 +229,33 @@ typedef enum {
 } nt_atlas_shape_t;
 
 typedef struct {
-    const nt_tex_compress_opts_t *compress; /* NULL = raw RGBA (per D-01) */
+    const nt_tex_compress_opts_t *compress; /* NULL = raw RGBA */
     nt_texture_pixel_format_t format;       /* output pixel format (default: NT_TEXTURE_FORMAT_RGBA8) */
-    uint32_t max_size;                      /* max atlas page dimension (default: 2048 per D-11) */
-    uint32_t padding;                       /* extra spacing between sprites after extrude (default: 2 per D-11) */
-    uint32_t margin;                        /* atlas edge margin (default: 0 per D-11) */
+    uint32_t max_size;                      /* max atlas page dimension (default: 2048) */
+    uint32_t padding;                       /* extra spacing between sprites after extrude (default: 2) */
+    uint32_t margin;                        /* atlas edge margin (default: 0) */
     uint32_t extrude; /* AABB edge pixel duplication count. Default 0. Must stay 0 unless shape == NT_ATLAS_SHAPE_RECT — the packer reserves space for the silhouette envelope, not for an extrude band
                          outside it. */
-    uint8_t alpha_threshold; /* alpha >= this = opaque for trimming (default: 1 per D-11) */
+    uint8_t alpha_threshold; /* alpha >= this = opaque for trimming (default: 1) */
     uint8_t max_vertices;    /* max polygon vertices per region (default: 8; hard cap 16 — downstream stack arrays limit to 32) */
     nt_atlas_shape_t shape;  /* silhouette mode (default: NT_ATLAS_SHAPE_CONCAVE_CONTOUR) */
     bool allow_transform;    /* try all 8 D4 orientations (4 rotations × 2 flips) for better packing.
                               * false = identity only. Matches the transform field on AtlasPlacement /
-                              * NtAtlasRegion (default: true per D-11) */
-    bool power_of_two;       /* round atlas dims to POT (default: true per D-11) */
-    bool debug_png;          /* write debug atlas page PNGs (default: false per D-11) */
+                              * NtAtlasRegion (default: true) */
+    bool power_of_two;       /* round atlas dims to POT (default: true) */
+    bool debug_png;          /* write debug atlas page PNGs (default: false) */
     bool premultiplied;      /* true (default) = premultiply RGB by alpha during page encoding.
                               * Required for correct bilinear filtering at sprite gaps.
                               * Only meaningful for NT_TEXTURE_FORMAT_RGBA8.
                               * Setting false is supported but emits a warning — valid only for
                               * NEAREST-filtered or fully opaque atlases. */
-    float pixels_per_unit;   /* Atlas-level scale: source pixels per world unit (Phase 50 D-32, D-33).
+    float pixels_per_unit;   /* Atlas-level scale: source pixels per world unit.
                               * 1.0F = 1 source pixel per unit (default). Combined with the runtime
                               * cached_pos bake (ipu = 1 / pixels_per_unit), an HD pack with 3× source
                               * pixels renders at the same on-screen size as the matching SD pack
                               * sharing the same Transform. Stored as a 4-byte resource metadata blob
                               * (kind = hash64_str("pixels_per_unit")) — atlas binary format v3 is
-                              * unchanged (D-34). Must be positive and finite. */
+                              * unchanged. Must be positive and finite. */
     /* Default sampler state baked into the atlas page texture's V3 header
      * (NtTextureAssetHeader.default_*). The activator creates a sampler from
      * these and binds it alongside the texture; materials may override per
@@ -267,7 +267,7 @@ typedef struct {
     nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
 } nt_atlas_opts_t;
 
-/* Default atlas options (all D-11 values) */
+/* Default atlas options */
 static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
     return (nt_atlas_opts_t){
         .compress = NULL,
@@ -283,7 +283,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .power_of_two = true,
         .debug_png = false,
         .premultiplied = true,
-        .pixels_per_unit = 1.0F, /* Phase 50 D-32: 1 source pixel == 1 world unit by default */
+        .pixels_per_unit = 1.0F, /* 1 source pixel == 1 world unit by default */
         .filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR,
         .filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR,
         .wrap_u = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
@@ -368,7 +368,7 @@ void nt_builder_free_glb_scene(nt_glb_scene_t *scene);
 /* --- Blob API (generic binary data asset) --- */
 void nt_builder_add_blob(NtBuilderContext *ctx, const void *data, uint32_t size, const char *resource_id);
 
-/* --- Atlas API (begin/add/end pattern per D-02) ---
+/* --- Atlas API (begin/add/end pattern) ---
  *
  * atlas_add / atlas_add_raw / atlas_add_glob accept an nt_atlas_sprite_opts_t*
  * for per-sprite settings (name override, pivot point). Pass NULL to use
@@ -395,8 +395,8 @@ void nt_builder_set_gzip_estimate(NtBuilderContext *ctx, bool enabled);
 void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir);
 
 /* --- Parallel encoding (multi-threaded asset encode in finish_pack) --- */
-/* thread_count: number of worker threads. 0 or no call = single-threaded (backward compatible per D-12).
- * When > 0, finish_pack spawns workers for encode phase. Assembly remains sequential per D-17. */
+/* thread_count: number of worker threads. 0 or no call = single-threaded (backward compatible).
+ * When > 0, finish_pack spawns workers for encode phase. Assembly remains sequential. */
 void nt_builder_set_threads(NtBuilderContext *ctx, uint32_t thread_count);
 
 /* Auto-detect thread count: hardware_concurrency() cores.

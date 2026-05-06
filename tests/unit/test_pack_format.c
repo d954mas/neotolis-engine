@@ -362,7 +362,7 @@ void test_font_curve_size(void) { TEST_PASS(); }
 void test_font_curve_field_offsets(void) { TEST_PASS(); }
 
 void test_font_glyph_array_offset(void) {
-    /* Glyph entries start immediately after header (D-11) */
+    /* Glyph entries start immediately after header */
     TEST_ASSERT_EQUAL_UINT(16, sizeof(NtFontAssetHeader));
     /* 16 is 4-byte aligned, safe for NtFontGlyphEntry array access */
     TEST_ASSERT_EQUAL_UINT(0, sizeof(NtFontAssetHeader) % 4);
@@ -371,7 +371,7 @@ void test_font_glyph_array_offset(void) {
 int main(void) {
     UNITY_BEGIN();
 
-    /* Pack format tests (Plan 01) */
+    /* Pack format tests */
     RUN_TEST(test_pack_header_size);
     RUN_TEST(test_asset_entry_size);
     RUN_TEST(test_pack_magic_value);
@@ -399,7 +399,7 @@ int main(void) {
     RUN_TEST(test_mesh_magic_value);
     RUN_TEST(test_mesh_header_field_offsets);
 
-    /* Texture header tests (Plan 02) */
+    /* Texture header tests */
     RUN_TEST(test_texture_header_size);
     RUN_TEST(test_texture_magic_value);
     RUN_TEST(test_texture_header_field_offsets);

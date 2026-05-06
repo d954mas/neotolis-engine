@@ -56,11 +56,11 @@ static struct {
     nt_sprite_draw_cmd_t cmds[NT_SPRITE_RENDERER_MAX_DRAW_CMDS];
     uint32_t cmd_count;
 
-    uint32_t frame_draw_calls; /* test counter; SEPARATE from nt_gfx_get_frame_draw_calls per CONTEXT D-39 */
+    uint32_t frame_draw_calls; /* test counter; SEPARATE from nt_gfx_get_frame_draw_calls */
 #ifdef NT_SPRITE_RENDERER_TEST_ACCESS
     /* Test-only: last emit_one() vertex/index counts captured BEFORE flush
      * resets s_sprite.vertex_count. Read by polygon-emit test to verify
-     * region.vertex_count==N polygons emit N vertices (Issue 7 fix). */
+     * region.vertex_count==N polygons emit N vertices. */
     uint32_t last_emit_vertex_count;
     uint32_t last_emit_index_count;
 #endif
@@ -126,7 +126,7 @@ void nt_sprite_renderer_restore_gpu(void) {
 // #endregion
 
 // #region pipeline cache
-/* Build the fixed sprite vertex layout once — D-16 locks 24-byte stride.
+/* Build the fixed sprite vertex layout once — 24-byte stride is locked.
  * Uses NT_ATTR_POSITION/COLOR/TEXCOORD0 location enum so the sprite vertex
  * shader can declare matching layout(location=N) bindings. */
 static nt_vertex_layout_t s_sprite_layout = {
@@ -143,7 +143,7 @@ static nt_vertex_layout_t s_sprite_layout = {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
     /* Pipeline signature: vs/fs handles + render-state bits.
-     * Layout omitted from key — sprite vertex layout is fixed by D-16. */
+     * Layout omitted from key — sprite vertex layout is fixed. */
     uint32_t state_bits = ((uint32_t)mat_info->blend_mode) | ((uint32_t)mat_info->depth_test << 4) | ((uint32_t)mat_info->depth_write << 5) | ((uint32_t)mat_info->cull_mode << 6) |
                           ((uint32_t)mat_info->color_mode << 8);
     uint64_t key = 0;
@@ -159,7 +159,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     }
 
     /* Miss — create. Cache full is a configuration bug, not a runtime
-     * recovery case (D-19). */
+     * recovery case. */
     NT_ASSERT(s_sprite.count < s_sprite.max_pipelines && "sprite pipeline cache exhausted; raise NT_SPRITE_RENDERER_MAX_PIPELINES or desc.max_pipelines");
 
     nt_pipeline_desc_t desc;
@@ -172,7 +172,7 @@ static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info)
     desc.depth_func = NT_DEPTH_LESS;
     desc.blend = (mat_info->blend_mode == NT_BLEND_MODE_ALPHA);
     if (desc.blend) {
-        /* Premultiplied-alpha blend (D-24): material with NT_BLEND_MODE_ALPHA
+        /* Premultiplied-alpha blend: material with NT_BLEND_MODE_ALPHA
          * pairs with builder-side premultiplication. nt_text_renderer uses the
          * same (ONE, ONE_MINUS_SRC_ALPHA) recipe. */
         desc.blend_src = NT_BLEND_ONE;
@@ -317,7 +317,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         open_cmd_from_snapshot(&snapshot);
     }
 
-    /* D-07 origin override: bake -m*delta into tx/ty/tz, no matrix copy. */
+    /* Origin override: bake -m*delta into tx/ty/tz, no matrix copy. */
     const float *m = tv->world_matrices[t_idx];
     float tx = m[12];
     float ty = m[13];
@@ -340,7 +340,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     uint8_t cb = (uint8_t)((color32 >> 16) & 0xFFU);
     uint8_t ca = (uint8_t)((color32 >> 24) & 0xFFU);
 
-    /* Flip flags (D-09) — per-vertex negate of cached_pos */
+    /* Flip flags — per-vertex negate of cached_pos */
     bool fx = (flags & NT_SPRITE_FLAG_FLIP_X) != 0;
     bool fy = (flags & NT_SPRITE_FLAG_FLIP_Y) != 0;
 
@@ -435,7 +435,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
 // #endregion
 
 // #region draw_list
-/* Phase 1 of the two-phase pipeline (D-18): open a cmd per batch_key,
+/* Phase 1 of the two-phase pipeline: open a cmd per batch_key,
  * stream verts into staging via emit_one. Phase 2 = nt_sprite_renderer_flush. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     NT_ASSERT(s_sprite.initialized);
@@ -466,7 +466,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
             continue;
         }
 
-        /* D-18: each batch_key boundary opens a fresh cmd. */
+        /* Each batch_key boundary opens a fresh cmd. */
         nt_pipeline_t pip = find_or_create_pipeline(mat_info);
         close_current_cmd();
         open_cmd(pip, mat_info);

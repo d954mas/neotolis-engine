@@ -29,12 +29,12 @@ static struct {
     nt_buffer_t vbo; /* dynamic vertex buffer */
     nt_buffer_t ibo; /* immutable index buffer (pre-generated quad pattern) */
 
-    /* CPU staging buffer (compile-time arrays per D-14) */
+    /* CPU staging buffer (compile-time arrays) */
     nt_text_vertex_t vertices[NT_TEXT_RENDERER_MAX_VERTICES];
     uint32_t vertex_count;
     uint32_t glyph_count;
 
-    /* Current state (per D-04, D-05) */
+    /* Current state */
     nt_material_t material;
     nt_font_t font;
 
@@ -44,8 +44,8 @@ static struct {
     bool initialized;
 
 #ifdef NT_TEXT_RENDERER_TEST_ACCESS
-    /* Pitfall 9 (Issue 2) — count every set_material / set_font entry
-     * regardless of early-out so nt_stats tests can prove explicit calls. */
+    /* Count every set_material / set_font entry regardless of early-out so
+     * nt_stats tests can prove explicit calls. */
     uint32_t test_set_material_calls;
     uint32_t test_set_font_calls;
 #endif
@@ -199,7 +199,7 @@ void nt_text_renderer_set_material(nt_material_t mat) {
         return;
     }
 
-    /* Auto-flush on material change (D-19) */
+    /* Auto-flush on material change */
     if (s_text.glyph_count > 0) {
         nt_text_renderer_flush();
     }
@@ -218,7 +218,7 @@ void nt_text_renderer_set_font(nt_font_t font) {
         return;
     }
 
-    /* Auto-flush on font change (D-18) */
+    /* Auto-flush on font change */
     if (s_text.glyph_count > 0) {
         nt_text_renderer_flush();
     }
@@ -228,7 +228,7 @@ void nt_text_renderer_set_font(nt_font_t font) {
 // #endregion
 
 // #region Vertex generation helpers
-static void pack_uint_as_float(float *out, uint32_t val) { memcpy(out, &val, 4); /* bit-preserving uint-to-float, never cast (Pitfall 1) */ }
+static void pack_uint_as_float(float *out, uint32_t val) { memcpy(out, &val, 4); /* bit-preserving uint-to-float, never cast */ }
 
 static void transform_point(float out[3], const float model[16], float x, float y) {
     /* mat4 * vec4(x, y, 0, 1) -- full 3D transform */

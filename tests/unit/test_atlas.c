@@ -417,7 +417,7 @@ void test_atlas_on_resolve_null_data_early_returns(void) {
     TEST_ASSERT_EQUAL_PTR(before, s_user_data);
 }
 
-/* ---- Merge test helpers (Plan 02) ---- */
+/* ---- Merge test helpers ---- */
 
 /* Compact per-region spec for the merge tests. Lets a test describe a
  * multi-region blob with one line per region and a shared vertex/index
@@ -773,8 +773,8 @@ void test_atlas_find_region_returns_invalid_for_tombstone(void) {
 }
 
 /* ---- Test 10: get_region on a tombstoned slot returns a non-NULL
- * pointer with vertex_count==0 && index_count==0 (D-08 zero-draw
- * without NULL-branch in the hot path). ---- */
+ * pointer with vertex_count==0 && index_count==0 (zero-draw without
+ * NULL-branch in the hot path). ---- */
 void test_atlas_get_region_returns_vertex_count_zero_for_tombstone(void) {
     /* Pages omitted. */
 
@@ -1420,7 +1420,7 @@ void test_atlas_full_resource_pipeline_integration(void) {
 }
 
 /* ============================================================
- * Phase 50 Plan 01 — cached arrays + pixels_per_unit tests
+ * Cached arrays + pixels_per_unit tests
  * ============================================================ */
 
 /* Unity is built with UNITY_EXCLUDE_FLOAT (engine-wide policy in
@@ -1513,7 +1513,7 @@ void test_atlas_cached_uv_d4_transform(void) {
     }
 }
 
-/* SPRITE-12 / D-10 — origin subtraction in cached_pos.
+/* Origin subtraction in cached_pos.
  * Build a 1-region blob with vertices in y-up local space (v5 builder
  * output): (0,0)=bottom-left, (10,0)=bottom-right, (0,10)=top-left,
  * (10,10)=top-right. Origin (0.5, 0.5) is centre in y-up too. With ipu=1.0,
@@ -1577,8 +1577,8 @@ void test_atlas_cached_pos_origin_subtract(void) {
     assert_float_close(1.0F, nt_atlas_test_ipu(ad), 1e-7F, "default ipu");
 }
 
-/* DEMO-08 / D-32 — pixels_per_unit metadata round-trip via full resource
- * pipeline. Build a .ntpack with a metadata entry kind=hash64_str("pixels_per_unit")
+/* Pixels_per_unit metadata round-trip via full resource pipeline.
+ * Build a .ntpack with a metadata entry kind=hash64_str("pixels_per_unit")
  * payload = float(2.0F). Mount, resolve, assert nt_atlas_get_pixels_per_unit
  * returns 2.0F and cached_pos values are halved versus the same blob without
  * metadata (which keeps ipu=1.0F default). */
@@ -1701,7 +1701,7 @@ void test_atlas_pixels_per_unit_metadata_roundtrip(void) {
     assert_float_close(5.0F, pos[3][0], 1e-5F, "ppu=2 v3.x");
     assert_float_close(5.0F, pos[3][1], 1e-5F, "ppu=2 v3.y");
 
-    /* Indices getter sanity-check (Issue 4 — moved here from Plan 04). */
+    /* Indices getter sanity-check. */
     const uint16_t *idx = nt_atlas_get_region_indices(atlas_res, region_idx);
     TEST_ASSERT_NOT_NULL(idx);
     TEST_ASSERT_EQUAL_UINT16(0, idx[0]);
@@ -1756,7 +1756,7 @@ void test_atlas_pixels_per_unit_metadata_roundtrip(void) {
     s_user_data = NULL; /* not used in this test */
 }
 
-/* SPRITE-12 / Pitfall 1 — merge re-bakes cached arrays.
+/* Merge re-bakes cached arrays.
  * First-parse a 1-region blob with origin (0.5, 0.5), snapshot cached_pos.
  * Merge with the same hash but origin (0.0, 0.0); cached_pos must reflect
  * the new origin. */
@@ -1814,7 +1814,7 @@ void test_atlas_cached_recompute_on_merge(void) {
     assert_float_close(10.0F, pos_post[1][0], 1e-5F, "post-merge v1.x");
 }
 
-/* D-11 / D-08 — tombstone regions keep cached entries zeroed.
+/* Tombstone regions keep cached entries zeroed.
  * First-parse 2 regions, merge with only region 1 → region 0 becomes tombstone.
  * Region 0 is reachable through nt_atlas_test_get_region_raw with vertex_count==0.
  * Its cached entries (at the original vertex_start..vertex_count slice in the
@@ -1855,16 +1855,16 @@ void test_atlas_tombstone_cached_zero(void) {
     TEST_ASSERT_NOT_NULL(pos); /* buffer still allocated, slice length is 0 */
 }
 
-/* DEMO-08 closure (Issue 1) — synthetic SD↔HD merge stability.
+/* Synthetic SD↔HD merge stability.
  * Build TWO in-memory packs with identical region name_hashes but different
  * pixels_per_unit metadata (1.0 vs 2.0). Mount SD, resolve, snapshot region
- * indices and cached_pos[0]. Mount HD on top (Phase 48 merge); assert:
- *   (a) region_index stays the same for each name (DEMO-08 region-index stability)
+ * indices and cached_pos[0]. Mount HD on top (atlas merge); assert:
+ *   (a) region_index stays the same for each name (region-index stability)
  *   (b) nt_atlas_get_pixels_per_unit returns 2.0 post-merge (metadata re-read on merge)
  *   (c) cached_pos[red.vertex_start][0] is HALVED (ipu update propagated through precompute)
  *
  * This test does NOT require user-supplied raw/hd/ art — it's the deterministic,
- * autonomous DEMO-08 closure path. */
+ * autonomous closure path. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_sd_hd_merge_stable_region_indices(void) {
     /* Two regions, same hashes, same vertex layout. Vertices at (0,0)..(10,10),
@@ -1998,8 +1998,8 @@ void test_atlas_sd_hd_merge_stable_region_indices(void) {
     /* Assertion (a): region_index stable through merge. */
     uint32_t red_idx_hd = nt_atlas_find_region(atlas_res, red_hash);
     uint32_t green_idx_hd = nt_atlas_find_region(atlas_res, green_hash);
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(red_idx_sd, red_idx_hd, "DEMO-08: red region_index changed after HD merge");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(green_idx_sd, green_idx_hd, "DEMO-08: green region_index changed after HD merge");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(red_idx_sd, red_idx_hd, "red region_index changed after HD merge");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(green_idx_sd, green_idx_hd, "green region_index changed after HD merge");
 
     /* Assertion (b): pixels_per_unit reflects HD pack post-merge. */
     assert_float_close(2.0F, nt_atlas_get_pixels_per_unit(atlas_res), 1e-5F, "HD ppu after merge");
@@ -2038,7 +2038,7 @@ int main(void) {
     RUN_TEST(test_atlas_page_resources_stored_at_parse);
     RUN_TEST(test_atlas_full_resource_pipeline_integration);
 
-    /* Phase 50 Plan 01 — cached arrays + pixels_per_unit + DEMO-08 closure */
+    /* Cached arrays + pixels_per_unit + SD/HD merge */
     RUN_TEST(test_atlas_cached_uv_d4_transform);
     RUN_TEST(test_atlas_cached_pos_origin_subtract);
     RUN_TEST(test_atlas_pixels_per_unit_metadata_roundtrip);

@@ -27,7 +27,7 @@ static struct {
     uint16_t throughput_period;
     bool log_enabled;
 
-    /* User counters — flat parallel arrays (Open Q5) */
+    /* User counters — flat parallel arrays */
     uint16_t user_capacity;
     uint16_t user_count;
     uint64_t user_name_hashes[NT_STATS_MAX_USER_COUNTERS];
@@ -48,7 +48,7 @@ nt_result_t nt_stats_init(const nt_stats_desc_t *desc) {
     s_stats.throughput_period = d.throughput_log_period;
     s_stats.log_enabled = d.enable_throughput_log;
     s_stats.user_capacity = d.user_counter_capacity;
-    s_stats.last_gpu_ms = -1.0F; /* GPU timer not yet wired (Pitfall 5) */
+    s_stats.last_gpu_ms = -1.0F; /* GPU timer not yet wired */
     s_stats.initialized = true;
 
     NT_LOG_INFO("nt_stats: GPU timer not yet exposed via nt_gfx; gpu_ms = -1.0 always");
@@ -97,7 +97,7 @@ void nt_stats_frame_end(void) {
     }
     // #endregion
 
-    // #region DEMO-06 throughput log
+    // #region throughput log
     s_stats.frame_index++;
     if (s_stats.log_enabled && s_stats.throughput_period > 0 && (s_stats.frame_index % s_stats.throughput_period) == 0) {
         /* Find well-known user counters by hashed name */
@@ -172,7 +172,7 @@ void nt_stats_count(const char *name, uint64_t value) {
 uint32_t nt_stats_format_lines(char *buf, uint32_t size) {
     NT_ASSERT(buf && size > 0);
 
-    /* GPU slot is "N/A" until Pitfall 5 GPU timer wiring lands */
+    /* GPU slot is "N/A" until GPU timer wiring lands */
     char gpu_buf[32];
     if (s_stats.last_gpu_ms < 0.0F) {
         (void)snprintf(gpu_buf, sizeof(gpu_buf), "N/A");
@@ -211,9 +211,9 @@ void nt_stats_draw(nt_material_t material, nt_font_t font, const float model[16]
     NT_ASSERT(s_stats.initialized);
     char buf[512];
     (void)nt_stats_format_lines(buf, sizeof(buf));
-    /* Pitfall 9 (Issue 2 fix): explicit set_material AND set_font defeat
-     * nt_text_renderer's change-detection early-out so the overlay always
-     * binds correctly regardless of prior frame state. */
+    /* Explicit set_material AND set_font defeat nt_text_renderer's
+     * change-detection early-out so the overlay always binds correctly
+     * regardless of prior frame state. */
     nt_text_renderer_set_material(material);
     nt_text_renderer_set_font(font);
     nt_text_renderer_draw(buf, model, size, color);

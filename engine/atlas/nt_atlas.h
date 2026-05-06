@@ -89,12 +89,12 @@ const nt_texture_region_t *nt_atlas_get_region(nt_resource_t atlas, uint32_t ind
  * Out-of-range trips NT_ASSERT. */
 nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index);
 
-/* ---- Phase 50 D-10/D-32: precomputed projections + pixels_per_unit ---- */
+/* ---- Precomputed projections + pixels_per_unit ---- */
 
 /* Asserts atlas resolved; returns 1.0F if metadata absent (ipu == 0). */
 float nt_atlas_get_pixels_per_unit(nt_resource_t atlas);
 
-/* D-10 cached projections: 1/pixels_per_unit baked into pos, normalized UVs. */
+/* Cached projections: 1/pixels_per_unit baked into pos, normalized UVs. */
 const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t region_index))[2];
 const float (*nt_atlas_get_region_cached_uv(nt_resource_t atlas, uint32_t region_index))[2];
 const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region_index);
@@ -149,7 +149,7 @@ void nt_atlas_test_drive_cleanup(void *user_data);
 uint32_t nt_atlas_test_page_resource_handle(const struct nt_atlas_data *ad, uint8_t page_index);
 
 /* Reset module-level initialized flag so tests can re-init after
- * nt_resource_shutdown(). Production code has no nt_atlas_shutdown (D-16). */
+ * nt_resource_shutdown(). Production code has no nt_atlas_shutdown. */
 void nt_atlas_test_reset(void);
 
 /* Mirrors the header validation logic in atlas_on_resolve (magic, version,
@@ -158,7 +158,7 @@ void nt_atlas_test_reset(void);
  * death-test harness. */
 bool nt_atlas_test_validate_header(const uint8_t *data, uint32_t size);
 
-/* Phase 50 D-10/D-32 test-only accessors for cached arrays + ipu.
+/* Test-only accessors for cached arrays + ipu.
  * Tests using nt_atlas_test_drive_resolve (no resource system) need
  * direct access since the public getters require an nt_resource_t. */
 const float (*nt_atlas_test_cached_pos(const struct nt_atlas_data *ad))[2];

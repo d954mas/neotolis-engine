@@ -183,7 +183,7 @@ static void translate_region(nt_texture_region_t *dst, const NtAtlasRegion *src)
 // #endregion
 
 // #region replace_pages
-// Replace the page id array wholesale from a new blob (D-05).
+// Replace the page id array wholesale from a new blob.
 // Invalidate page handles here. atlas_on_post_resolve() rebuilds them after
 // the resolve pass, where nt_resource_request is legal.
 // Source is a raw byte pointer because page-id storage may be only 4-byte
@@ -205,7 +205,7 @@ static void replace_pages(nt_atlas_data_t *ad, const uint8_t *new_page_ids_bytes
 // #endregion
 
 // #region activator callbacks
-/* D-10: trivial no-op activator. The real work happens in on_resolve;
+/* Trivial no-op activator. The real work happens in on_resolve;
  * activate only materializes a stable runtime winner handle for stacking. */
 static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
     (void)data;
@@ -213,7 +213,7 @@ static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
     return 1; /* non-zero fake handle marks slot READY */
 }
 
-/* D-11: deactivate must NOT touch user_data — on_cleanup owns that lifecycle. */
+/* deactivate must NOT touch user_data — on_cleanup owns that lifecycle. */
 static void atlas_deactivate(uint32_t runtime_handle) { (void)runtime_handle; }
 
 /* Blob views carved out of raw bytes once the header has been validated.
@@ -324,7 +324,7 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
     return true;
 }
 
-/* Phase 50 D-10/Pitfall 1: grow one cached float[2] array to new_cap.
+/* Grow one cached float[2] array to new_cap.
  * On first parse the array is NULL (calloc'd in atlas_on_resolve); on merge
  * it exists and needs realloc + zero-fill of the grown tail so common-region
  * slices never see garbage before atlas_precompute_all overwrites them. */
@@ -370,7 +370,7 @@ static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_vie
     ad->index_count = hdr->total_index_count;
 }
 
-// #region precompute (Phase 50 D-10/D-11/D-32)
+// #region precompute
 /* Bake ipu into cached_pos; UV stays y-down to match PNG row order in upload. */
 static void atlas_precompute_region(nt_atlas_data_t *ad, uint32_t region_idx) {
     const nt_texture_region_t *r = &ad->regions[region_idx];
@@ -434,7 +434,7 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
         ad->hash_table = NULL;
         ad->hash_capacity = 0;
 
-        // #region cached arrays (Phase 50 D-10/D-11/D-32)
+        // #region cached arrays
         /* Allocated parallel to vertices[]. calloc zeros the buffer so any
          * tombstoned (vertex_count==0) region's slice naturally reads zero
          * — atlas_precompute_region is a no-op on tombstones. */
@@ -457,7 +457,7 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
         hash_rebuild(ad);
         replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
 
-        /* Phase 50 D-10/D-11: bake cached_pos/cached_uv with default ipu=1.0F.
+        /* Bake cached_pos/cached_uv with default ipu=1.0F.
          * atlas_on_post_resolve re-reads pixels_per_unit metadata and re-runs
          * precompute when ipu changes — this first call is intentional so the
          * arrays are valid even if a caller queries them before post_resolve. */
@@ -469,7 +469,7 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
     // #endregion
 
     /* ---- Merge path — diff new blob against existing regions by name_hash.
-     * D-03 stable-index semantics:
+     * Stable-index semantics:
      *   - payload arrays replaced wholesale from new blob
      *   - common: update metadata in place
      *   - new:    append region with fresh index
@@ -547,7 +547,7 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
     hash_rebuild(ad);
     replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
 
-    /* Phase 50 D-10/D-11/Pitfall 1: re-bake every live region's cached slice.
+    /* Re-bake every live region's cached slice.
      * replace_payload_buffers may have realloc'd cached_pos/cached_uv, and
      * even unchanged common regions may now sit at different vertex_start
      * offsets in the new blob. atlas_on_post_resolve re-runs this once more
@@ -565,7 +565,7 @@ static void atlas_on_cleanup(void *user_data) {
     free(ad->vertices);
     free(ad->indices);
     free(ad->hash_table);
-    /* Phase 50 D-10/D-11: cached arrays are owned alongside vertices[]. */
+    /* Cached arrays are owned alongside vertices[]. */
     free(ad->cached_pos);
     free(ad->cached_uv);
     free(ad);
@@ -589,12 +589,12 @@ static void atlas_on_post_resolve(const uint8_t *data, uint32_t size, nt_resourc
         NT_ASSERT(ad->page_resources[i].id != 0 && "page texture slot request failed");
     }
 
-    // #region pixels_per_unit metadata read (Phase 50 D-32)
+    // #region pixels_per_unit metadata read
     /* Read pixels_per_unit metadata once per atlas (atlas-level, not region-
-     * level). On merge (DEMO-08), this re-reads the new pack's pixels_per_unit
+     * level). On merge, this re-reads the new pack's pixels_per_unit
      * so higher-priority packs replace lower-priority scale metadata, and the subsequent
      * atlas_precompute_all re-bakes cached_pos at the new scale. region_index
-     * stays stable per Phase 48 merge semantics — only the cached float
+     * stays stable per merge semantics — only the cached float
      * values change. */
     uint32_t meta_size = 0;
     const uint64_t kind = nt_hash64_str("pixels_per_unit").value;
@@ -607,7 +607,7 @@ static void atlas_on_post_resolve(const uint8_t *data, uint32_t size, nt_resourc
     } else {
         ad->ipu = 1.0F;
     }
-    /* Re-bake cached_pos with the correct ipu (Pitfall 3, DEMO-08).
+    /* Re-bake cached_pos with the correct ipu.
      * cached_uv is unaffected by ipu but the loop is shared — cheap on
      * small atlases and runs at resolve time, not in the hot path. */
     atlas_precompute_all(ad);
@@ -673,7 +673,7 @@ nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index
     return ad->page_resources[page_index];
 }
 
-// #region Phase 50 D-10/D-32 public accessors
+// #region cached projection accessors
 float nt_atlas_get_pixels_per_unit(nt_resource_t atlas) {
     const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_pixels_per_unit on unresolved atlas");

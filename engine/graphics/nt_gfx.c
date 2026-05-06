@@ -50,10 +50,10 @@ typedef struct {
 
 nt_gfx_t g_nt_gfx;
 
-/* D-39: per-frame draw call counter, separate from g_nt_gfx.frame_stats.draw_calls.
+/* Per-frame draw call counter, separate from g_nt_gfx.frame_stats.draw_calls.
  * Reset in nt_gfx_begin_frame; incremented in all four nt_gfx_draw* entry points;
- * read via nt_gfx_get_frame_draw_calls. nt_stats consumes this for DEMO-04/DEMO-06
- * without coupling to the public frame_stats struct (Pitfall 4). */
+ * read via nt_gfx_get_frame_draw_calls. nt_stats consumes this for the on-screen
+ * HUD without coupling to the public frame_stats struct. */
 static uint32_t s_gfx_frame_draw_calls;
 
 /* ---- Global UBO block registry ---- */
@@ -245,7 +245,7 @@ void nt_gfx_begin_frame(void) {
     }
     s_gfx.render_state = NT_GFX_STATE_FRAME;
     memset(&g_nt_gfx.frame_stats, 0, sizeof(g_nt_gfx.frame_stats));
-    s_gfx_frame_draw_calls = 0; /* D-39 */
+    s_gfx_frame_draw_calls = 0;
     nt_gfx_backend_begin_frame();
 }
 
@@ -423,7 +423,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     /* Mipmaps require initial data — GL cannot generate from empty storage */
     NT_ASSERT((!local_desc.gen_mipmaps || local_desc.data) && "make_texture: gen_mipmaps requires data");
 
-    /* Integer textures: NEAREST only, no mipmaps (D-02) */
+    /* Integer textures: NEAREST only, no mipmaps */
     if (local_desc.format == NT_PIXEL_RG16UI) {
         NT_ASSERT(local_desc.min_filter == NT_FILTER_NEAREST && "integer texture requires NEAREST min_filter");
         NT_ASSERT(local_desc.mag_filter == NT_FILTER_NEAREST && "integer texture requires NEAREST mag_filter");
@@ -722,7 +722,7 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     }
 
     g_nt_gfx.frame_stats.draw_calls++;
-    s_gfx_frame_draw_calls++; /* D-39 */
+    s_gfx_frame_draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
     nt_gfx_backend_draw(first_vertex, num_vertices);
 }
@@ -744,7 +744,7 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
     }
 
     g_nt_gfx.frame_stats.draw_calls++;
-    s_gfx_frame_draw_calls++; /* D-39 */
+    s_gfx_frame_draw_calls++;
     g_nt_gfx.frame_stats.draw_calls_instanced++;
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
@@ -768,7 +768,7 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     }
 
     g_nt_gfx.frame_stats.draw_calls++;
-    s_gfx_frame_draw_calls++; /* D-39 */
+    s_gfx_frame_draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
     g_nt_gfx.frame_stats.indices += num_indices;
     nt_gfx_backend_draw_indexed(first_index, num_indices, s_gfx.bound_index_type);
@@ -791,7 +791,7 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     }
 
     g_nt_gfx.frame_stats.draw_calls++;
-    s_gfx_frame_draw_calls++; /* D-39 */
+    s_gfx_frame_draw_calls++;
     g_nt_gfx.frame_stats.draw_calls_instanced++;
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.indices += num_indices * instance_count;
@@ -1036,7 +1036,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
         return 0;
     }
 
-    /* Select transcode target: BC7 > ASTC > ETC2 > RGBA8 (D-14 cascade) */
+    /* Select transcode target: BC7 > ASTC > ETC2 > RGBA8 */
     bool has_alpha = (hdr2->format == NT_TEXTURE_FORMAT_RGBA8);
     const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
     nt_basisu_format_t target;

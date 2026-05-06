@@ -79,7 +79,7 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
     return total;
 }
 
-/* ---- Atlas fixture: 2 rect regions + 1 6-vertex polygon (for SPRITE-06) ---- */
+/* ---- Atlas fixture: 2 rect regions + 1 6-vertex polygon ---- */
 
 #define FIXTURE_R0_HASH 0x100ULL    /* rect, 4 verts, 6 indices */
 #define FIXTURE_R1_HASH 0x200ULL    /* rect, 4 verts, 6 indices */
@@ -378,7 +378,7 @@ void tearDown(void) {
     s_pack_blob_count = 0;
 }
 
-/* ---- Test: init/shutdown lifecycle (SPRITE-11 partial) ---- */
+/* ---- Test: init/shutdown lifecycle ---- */
 
 void test_sprite_renderer_init_shutdown(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
@@ -392,14 +392,14 @@ void test_sprite_renderer_init_shutdown(void) {
     TEST_ASSERT_TRUE(nt_sprite_renderer_test_initialized());
 }
 
-/* ---- Test: vertex size assert (SPRITE-05) ---- */
+/* ---- Test: vertex size assert ---- */
 
 /* The actual contract is enforced by the _Static_assert in nt_sprite_renderer.h.
  * This runtime test mirrors the assertion in case the static check is ever
  * accidentally relaxed (it would still catch the breakage in CI). */
 void test_sprite_renderer_vertex_size_assert(void) { TEST_ASSERT_EQUAL_size_t(24, sizeof(nt_sprite_vertex_t)); }
 
-/* ---- Test: pipeline cache reuse + miss-creates-new (SPRITE-10) ---- */
+/* ---- Test: pipeline cache reuse + miss-creates-new ---- */
 
 void test_sprite_renderer_pipeline_cache(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
@@ -427,7 +427,7 @@ void test_sprite_renderer_pipeline_cache(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_pipeline_cache_count());
 }
 
-/* ---- Test: batch grouping by batch_key (SPRITE-04, SPRITE-08) ----
+/* ---- Test: batch grouping by batch_key ----
  *
  * 3 items with batch_keys [A, A, B] should produce 2 nt_gfx_draw_indexed
  * calls (per-renderer test counter). */
@@ -460,7 +460,7 @@ void test_sprite_renderer_batch_grouping(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_draw_call_count());
 }
 
-/* ---- Test: batch_key-driven boundaries (SPRITE-07, SPRITE-08) ----
+/* ---- Test: batch_key-driven boundaries ----
  *
  * When the batch_key changes between consecutive items, a flush is triggered
  * even if the underlying material id matches — the renderer trusts batch_key
@@ -517,10 +517,10 @@ void test_sprite_renderer_splits_run_on_actual_page_change(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_draw_call_count());
 }
 
-/* ---- Test: polygon emit (SPRITE-06) ----
+/* ---- Test: polygon emit ----
  *
  * A region with vertex_count=6 / index_count=12 produces 6 vertices in
- * staging (uniform rect/polygon path, D-08). The last_emit_* counters
+ * staging (uniform rect/polygon path). The last_emit_* counters
  * are captured after the per-emit copy and survive flush. */
 void test_sprite_renderer_polygon_emit(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
@@ -542,7 +542,7 @@ void test_sprite_renderer_polygon_emit(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_draw_call_count());
 }
 
-/* ---- Test: restore_gpu re-cycle clears pipeline cache (SPRITE-11) ---- */
+/* ---- Test: restore_gpu re-cycle clears pipeline cache ---- */
 
 void test_sprite_renderer_restore_gpu_cycle(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
@@ -570,18 +570,13 @@ void test_sprite_renderer_restore_gpu_cycle(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_draw_call_count());
 }
 
-/* ---- Test: pipeline cache full → NT_ASSERT (SPRITE-10) ----
+/* ---- Test: pipeline cache full → NT_ASSERT ----
  *
- * The plan calls for a death-test on cache overflow. The codebase has no
- * death-test harness; instead we assert the cache assertion message exists
- * in the source via a build-time grep (CI verification step), and at runtime
- * verify that we can fill the cache up to capacity exactly. The actual
- * NT_ASSERT trigger is not exercised at runtime to keep the test binary
- * non-aborting — see the verify block in 50-04-PLAN.md.
- *
- * Concretely: with desc.max_pipelines=2, two distinct materials populate
+ * Death-test on cache overflow is not exercised at runtime to keep the test
+ * binary non-aborting; instead we verify that we can fill the cache up to
+ * capacity exactly. With desc.max_pipelines=2, two distinct materials populate
  * the cache to its declared capacity without firing the assert. A third
- * distinct material WOULD fire the assert (configuration bug per D-19). */
+ * distinct material WOULD fire the assert (configuration bug). */
 void test_sprite_renderer_pipeline_cache_capacity(void) {
     nt_sprite_renderer_desc_t desc = {.max_pipelines = 2};
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));

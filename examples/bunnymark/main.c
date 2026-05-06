@@ -1,5 +1,5 @@
 /*
- * Bunnymark Demo -- Neotolis Engine (Phase 50)
+ * Bunnymark Demo -- Neotolis Engine
  *
  * Interactive sprite stress test mirroring britzl/defold-bunnymark
  * update_native_position_velocity. Click/tap spawns 500 bunnies; hold spawns
@@ -7,11 +7,11 @@
  *
  * Physics constants live in bunny_physics.h (pure C, stdint-only). The renderer
  * pipeline is: nt_atlas + nt_sprite_comp + nt_sprite_renderer with a
- * game-shipped sprite.vert / sprite.frag (D-21).
+ * game-shipped sprite.vert / sprite.frag.
  *
  * Build packs first:  build_bunnymark_packs build/examples/bunnymark
  *
- * Coordinate convention (D-25): bottom-left = (0, 0), Y up. Ortho VP matches.
+ * Coordinate convention: bottom-left = (0, 0), Y up. Ortho VP matches.
  */
 
 #include "app/nt_app.h"
@@ -62,7 +62,7 @@
 
 #define BUNNY_INITIAL_COUNT 500
 #define BUNNY_CLICK_SPAWN_COUNT 500
-#define BUNNY_HOLD_SPAWN_RATE 50 /* per-frame on hold (CONTEXT D-43) */
+#define BUNNY_HOLD_SPAWN_RATE 50 /* per-frame on hold */
 #define BUNNY_BULK_ADD 100       /* arrow up/down */
 #define BUNNY_BULK_ADD_BIG 1000  /* shift + arrow up/down */
 
@@ -77,15 +77,15 @@ static nt_resource_t s_atlas_handle;
 static nt_resource_t s_vs_handle;
 static nt_resource_t s_fs_handle;
 
-/* HD/SD toggle state (D-29, D-31, D-44 — demo starts in SD).
+/* HD/SD toggle state — demo starts in SD.
  *
  * BUNNYMARK_HD_AVAILABLE is set by examples/bunnymark/CMakeLists.txt when the
  * raw/hd/ directory exists. When absent, s_hd_available stays false and the
  * H key + tap-zone toggle log a warning instead of crashing.
  *
  * The toggle works by mounting/unmounting the HD pack at higher priority than
- * the SD pack. Phase 48 atlas merge re-maps regions in place so all live
- * SpriteComponent.region_index values stay valid across the toggle (DEMO-08). */
+ * the SD pack. Atlas merge re-maps regions in place so all live
+ * SpriteComponent.region_index values stay valid across the toggle. */
 #ifdef BUNNYMARK_HD_AVAILABLE
 static bool s_hd_available = true;
 #else
@@ -96,7 +96,7 @@ static bool s_hd_load_started = false;
 
 static nt_material_t s_sprite_material;
 
-/* Stats overlay (DEMO-04..06) — separate material/font from sprites. */
+/* Stats overlay — separate material/font from sprites. */
 static nt_material_t s_text_material;
 static nt_font_t s_overlay_font;
 
@@ -107,7 +107,7 @@ static nt_entity_t s_entities[BUNNY_MAX];
 static uint32_t s_bunny_count;
 static bool s_initial_spawned;
 
-static uint16_t s_variant_region_idx[5]; /* resolved at startup once (DEMO-03) */
+static uint16_t s_variant_region_idx[5]; /* resolved at startup once */
 
 static nt_render_item_t s_items[BUNNY_MAX];
 
@@ -121,12 +121,11 @@ static bool s_atlas_resolved;
 static uint32_t s_canvas_w(void) { return g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800; }
 static uint32_t s_canvas_h(void) { return g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600; }
 
-// #region HD/SD toggle (D-31, D-47, Pitfall 7)
-/* Tap-zone geometry per CONTEXT D-47 / Plan 07 interfaces: ~120x40 px in the
- * top-right corner. Coordinates are in canvas (window) pixels with y top-down
- * (raw pointer space). The tap_zone_hit test runs against the unflipped
- * pointer, BEFORE the y-flip that converts to world space — and BEFORE the
- * world-space spawn block (Pitfall 7). */
+// #region HD/SD toggle
+/* Tap-zone geometry: ~120x40 px in the top-right corner. Coordinates are in
+ * canvas (window) pixels with y top-down (raw pointer space). The tap_zone_hit
+ * test runs against the unflipped pointer, BEFORE the y-flip that converts to
+ * world space — and BEFORE the world-space spawn block. */
 #define TAP_ZONE_W 120.0F
 #define TAP_ZONE_H 40.0F
 
@@ -136,9 +135,9 @@ static bool tap_zone_hit(float px, float py, float w, float h) {
     return (px >= w - TAP_ZONE_W) && (px <= w) && (py >= 0.0F) && (py <= TAP_ZONE_H);
 }
 
-/* Mount or unmount the HD pack at higher priority than SD. Phase 48 atlas
- * merge re-maps regions in place — region_index values stay stable across the
- * toggle, so live bunnies don't need set_region re-binding (DEMO-08). */
+/* Mount or unmount the HD pack at higher priority than SD. Atlas merge re-maps
+ * regions in place — region_index values stay stable across the toggle, so
+ * live bunnies don't need set_region re-binding. */
 static void toggle_atlas_quality(void) {
     if (!s_hd_available) {
         nt_log_warn("Bunnymark: HD pack not available — toggle is a no-op (drop 5 PNGs in examples/bunnymark/raw/hd/ and re-run cmake configure to enable)");
@@ -230,7 +229,7 @@ static void spawn_one_defold(void) {
     uint32_t i = s_bunny_count++;
     init_bunny_entity(i);
     nt_bunny_init_defold(&s_bunnies[i], (float)s_canvas_w(), &s_rng);
-    /* DEMO-03: region picked per spawn from the cached 5. */
+    /* Region picked per spawn from the cached 5. */
     nt_sprite_comp_set_region(s_entities[i], s_atlas_handle, s_variant_region_idx[s_bunnies[i].variant]);
     *nt_transform_comp_dirty(s_entities[i]) = true;
 }
@@ -271,25 +270,25 @@ static void frame(void) {
         s_pack_dumped = true;
     }
 
-    /* Atlas region indices resolve once (DEMO-03 — picks variant per spawn). */
+    /* Atlas region indices resolve once — picks variant per spawn. */
     resolve_atlas_regions();
     if (s_atlas_resolved && !s_initial_spawned) {
         spawn_n_defold(BUNNY_INITIAL_COUNT);
         s_initial_spawned = true;
     }
 
-    // #region input dispatch (Pitfall 6 + Pitfall 7)
-    /* Pitfall 6: g_nt_input.pointers[0] unifies mouse + touch — using the
-     * pointer's button state (not nt_input_mouse_*) avoids double-spawn on
-     * iOS where touch + mouse events coexist. */
+    // #region input dispatch
+    /* g_nt_input.pointers[0] unifies mouse + touch — using the pointer's button
+     * state (not nt_input_mouse_*) avoids double-spawn on iOS where touch +
+     * mouse events coexist. */
     const nt_pointer_t *p = &g_nt_input.pointers[0];
     float w = (float)s_canvas_w();
     float h = (float)s_canvas_h();
     bool consumed = false;
-    /* Pitfall 7: tap-zone hit-test runs FIRST against the raw pointer (window
-     * pixels, y top-down) — before the y-flip and the world-space spawn — so
-     * a click in the top-right "Quality" rect toggles HD/SD without also
-     * spawning a bunny at that location. */
+    /* Tap-zone hit-test runs FIRST against the raw pointer (window pixels,
+     * y top-down) — before the y-flip and the world-space spawn — so a click
+     * in the top-right "Quality" rect toggles HD/SD without also spawning a
+     * bunny at that location. */
     if (p->buttons[NT_BUTTON_LEFT].is_pressed && tap_zone_hit(p->x, p->y, w, h)) {
         toggle_atlas_quality();
         consumed = true;
@@ -315,9 +314,9 @@ static void frame(void) {
             }
         }
     }
-    /* Bulk add/remove via arrow keys (CONTEXT D-43 specifies +/-, but the
-     * input enum has no NT_KEY_PLUS / NT_KEY_MINUS — auto-fixed (Rule 3) to
-     * arrow up/down. Plan 07 README documents the substitution. */
+    /* Bulk add/remove via arrow keys — the input enum has no
+     * NT_KEY_PLUS / NT_KEY_MINUS, so we use arrow up/down. README documents
+     * the substitution. */
     bool shift = nt_input_key_is_down(NT_KEY_LSHIFT) || nt_input_key_is_down(NT_KEY_RSHIFT);
     if (nt_input_key_is_pressed(NT_KEY_ARROW_UP)) {
         spawn_n_defold(shift ? BUNNY_BULK_ADD_BIG : BUNNY_BULK_ADD);
@@ -348,7 +347,7 @@ static void frame(void) {
     nt_transform_comp_update();
     // #endregion
 
-    // #region frame uniforms (ortho VP via cglm — D-26)
+    // #region frame uniforms (ortho VP via cglm)
     mat4 view_m;
     mat4 proj_m;
     mat4 vp;
@@ -408,7 +407,7 @@ static void frame(void) {
         // #endregion
     }
 
-    // #region stats overlay (DEMO-04..06 on-screen HUD)
+    // #region stats overlay (on-screen HUD)
     /* Top-left corner anchor in world coords (y-up, bottom-left origin).
      * Text renders below the model translation point by line; size is the
      * em-height in world units, which == pixels here since ortho is 1:1. */
@@ -501,8 +500,8 @@ int main(void) {
     nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
 
-    /* DEMO-04..06: console throughput log every 60 frames (FPS, CPU/GPU ms,
-     * draws, bunnies, atlas quality) plus on-screen stats/controls overlay. */
+    /* Console throughput log every 60 frames (FPS, CPU/GPU ms, draws, bunnies,
+     * atlas quality) plus on-screen stats/controls overlay. */
     nt_stats_desc_t stats_desc = nt_stats_desc_defaults();
     nt_stats_init(&stats_desc);
 
@@ -519,8 +518,8 @@ int main(void) {
     });
 
     /* Mount + load the SD pack. SD is the base layer (priority 100); HD will
-     * stack on top at priority 200 when the user toggles it on (D-44 — demo
-     * starts in SD with HD lazy-mounted on first toggle). */
+     * stack on top at priority 200 when the user toggles it on — demo starts
+     * in SD with HD lazy-mounted on first toggle. */
     s_pack_id = nt_hash32_str("bunnymark_sd");
     nt_resource_mount(s_pack_id, 100);
 #ifdef NT_CDN_URL
@@ -530,7 +529,7 @@ int main(void) {
 #endif
 
     /* HD pack id is reserved up front; the actual mount/load happens lazily on
-     * first toggle (D-44). */
+     * first toggle. */
     s_hd_pack_id = nt_hash32_str("bunnymark_hd");
 
     /* Resource handles */
@@ -539,7 +538,7 @@ int main(void) {
     s_atlas_handle = nt_resource_request(ASSET_ATLAS_BUNNIES, NT_ASSET_ATLAS);
     nt_resource_t atlas_tex_handle = nt_resource_request(ASSET_TEXTURE_BUNNIES_TEX0, NT_ASSET_TEXTURE);
 
-    /* Material — premultiplied-alpha blend, depth off (D-24). */
+    /* Material — premultiplied-alpha blend, depth off. */
     s_sprite_material = nt_material_create(&(nt_material_create_desc_t){
         .vs = s_vs_handle,
         .fs = s_fs_handle,
@@ -579,7 +578,7 @@ int main(void) {
     nt_platform_web_loading_complete();
 #endif
 
-    /* DEMO-07: log test conditions at startup. Schema:
+    /* Log test conditions at startup. Schema:
      *   "Bunnymark conditions: viewport=WxH sprite_size=~26x37 px blend=premultiplied atlas=SD|HD pages=N initial=I click=C hold_rate=R bunny_max=M hd_available=0|1 gpu=..."
      * GPU detection is browser/driver-side and the engine doesn't yet expose a
      * caps query — gpu=unknown until that ships (documented in README). */

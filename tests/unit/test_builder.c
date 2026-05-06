@@ -1512,7 +1512,7 @@ void test_gl_validation_invalid_shader(void) {
     nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
-    /* GL validation may be skipped if no display (D-08) -- both outcomes are valid */
+    /* GL validation may be skipped if no display -- both outcomes are valid */
     TEST_ASSERT_TRUE(r == NT_BUILD_OK || r == NT_BUILD_ERR_VALIDATION);
     nt_builder_free_pack(ctx);
 }
@@ -1554,7 +1554,7 @@ void test_gl_validation_type_error(void) {
     nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
-    /* GL validation may be skipped if no display (D-08) -- both outcomes are valid */
+    /* GL validation may be skipped if no display -- both outcomes are valid */
     TEST_ASSERT_TRUE(r == NT_BUILD_OK || r == NT_BUILD_ERR_VALIDATION);
     nt_builder_free_pack(ctx);
 }
@@ -2136,7 +2136,7 @@ void test_builder_mesh_has_aabb(void) {
     free(blob);
 }
 
-/* --- Early dedup tests (Phase 38) --- */
+/* --- Early dedup tests --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_early_dedup_identical_textures(void) {
@@ -3090,7 +3090,7 @@ void test_cache_with_dedup(void) {
     free(data2);
 }
 
-/* --- Parallel encode tests (Phase 40) --- */
+/* --- Parallel encode tests --- */
 
 void test_parallel_deterministic(void) {
     /* Build same pack twice: once with 1 thread, once with 4 threads.
@@ -3182,7 +3182,7 @@ void test_parallel_basic(void) {
 }
 
 void test_set_threads_zero_is_singlethreaded(void) {
-    /* No call to set_threads = single-threaded, same as set_threads(0) (D-12). */
+    /* No call to set_threads = single-threaded, same as set_threads(0). */
     const char *pack1 = TMP_DIR "/thr_default.ntpack";
     const char *pack2 = TMP_DIR "/thr_zero.ntpack";
     const char *png_path = TMP_DIR "/thr_tex.png";
@@ -3329,7 +3329,7 @@ static const char *find_test_ttf(void) {
     return NULL;
 }
 
-/* --- Font processing tests (Phase 43) --- */
+/* --- Font processing tests --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_font_add_basic_ascii(void) {
@@ -3649,7 +3649,7 @@ void test_font_kern_values(void) {
     free(pack_data);
 }
 
-/* --- Atlas geometry algorithm tests (Phase 47) --- */
+/* --- Atlas geometry algorithm tests --- */
 
 /* alpha_trim takes a dense alpha plane; tests start from RGBA so wrap the
  * extract+trim+free sequence in one helper. */
@@ -4706,16 +4706,15 @@ void test_atlas_opts_defaults(void) {
     TEST_ASSERT_EQUAL(NT_ATLAS_SHAPE_CONCAVE_CONTOUR, opts.shape);
     TEST_ASSERT_FALSE(opts.debug_png);
     TEST_ASSERT_NULL(opts.compress);
-    /* Phase 50-02 (D-32): default pixels_per_unit is 1.0 */
+    /* Default pixels_per_unit is 1.0 */
     TEST_ASSERT_TRUE(opts.pixels_per_unit > 0.999F && opts.pixels_per_unit < 1.001F);
 }
 
-/* Phase 50-02 (D-32): Builder writes pixels_per_unit as a 4-byte resource
- * metadata blob keyed by hash64_str("pixels_per_unit") for every atlas.
- * Round-trip: build pack with ppu=2.5, scan meta section, expect 4 B == 2.5F.
- *
- * Cross-plan note: Plan 01 Task 3 closes the runtime side via
- * nt_atlas_get_pixels_per_unit; this test validates the builder side only. */
+/* Builder writes pixels_per_unit as a 4-byte resource metadata blob keyed by
+ * hash64_str("pixels_per_unit") for every atlas. Round-trip: build pack with
+ * ppu=2.5, scan meta section, expect 4 B == 2.5F. This test validates the
+ * builder side only — runtime side is covered by nt_atlas_get_pixels_per_unit
+ * tests. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_builder_atlas_pixels_per_unit_metadata(void) {
     (void)MKDIR(TMP_DIR);
@@ -5263,7 +5262,7 @@ int main(void) {
     RUN_TEST(test_parallel_with_cache);
     RUN_TEST(test_parallel_with_dedup);
 
-    /* Font processing tests (Phase 43) */
+    /* Font processing tests */
     RUN_TEST(test_font_add_basic_ascii);
     RUN_TEST(test_font_add_full_ascii_charset);
     RUN_TEST(test_font_kern_pairs);
@@ -5273,7 +5272,7 @@ int main(void) {
     RUN_TEST(test_font_charset_dedup);
     RUN_TEST(test_font_kern_values);
 
-    /* Atlas geometry algorithms (Phase 47) */
+    /* Atlas geometry algorithms */
     RUN_TEST(test_alpha_trim_fully_transparent);
     RUN_TEST(test_alpha_trim_single_pixel);
     RUN_TEST(test_alpha_trim_l_shape);
@@ -5287,7 +5286,7 @@ int main(void) {
     RUN_TEST(test_fan_triangulate_triangle);
     RUN_TEST(test_vpack_point_in_nfp_block_any_ring);
 
-    /* Premultiplied alpha (Phase 48 Plan 1.1) */
+    /* Premultiplied alpha */
     RUN_TEST(test_texture_premultiplied_encoding);
 
     /* AABB edge extrude */
@@ -5296,7 +5295,7 @@ int main(void) {
     RUN_TEST(test_atlas_real_pipeline_preserves_hole);
     RUN_TEST(test_atlas_shape_concave_rejects_extrude);
 
-    /* Atlas round-trip tests (Phase 47 Plan 03) */
+    /* Atlas round-trip tests */
     RUN_TEST(test_atlas_round_trip_basic);
     RUN_TEST(test_atlas_round_trip_regions);
     RUN_TEST(test_atlas_round_trip_vertices);

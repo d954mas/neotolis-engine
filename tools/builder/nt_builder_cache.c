@@ -21,7 +21,7 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
     uint8_t buf[128];
     uint32_t pos = 0;
 
-    /* Builder version -- invalidates all cache on encoder changes (D-03) */
+    /* Builder version -- invalidates all cache on encoder changes */
     uint32_t version = NT_BUILDER_VERSION;
     memcpy(buf + pos, &version, sizeof(version));
     pos += (uint32_t)sizeof(version);
@@ -181,7 +181,7 @@ nt_cache_status_t nt_builder_cache_lookup(const char *cache_dir, uint64_t decode
         return NT_CACHE_HIT;
     }
 
-    /* No exact match -- scan for prefix to distinguish miss(new) vs miss(opts) (D-04) */
+    /* No exact match -- scan for prefix to distinguish miss(new) vs miss(opts) */
     char prefix[32];
     (void)snprintf(prefix, sizeof(prefix), "%016llx_", (unsigned long long)decoded_hash);
 
@@ -254,7 +254,7 @@ bool nt_builder_cache_store(const char *cache_dir, uint64_t decoded_hash, uint64
 /* --- Public API --- */
 
 void nt_builder_set_cache_dir(NtBuilderContext *ctx, const char *dir) {
-    NT_BUILD_ASSERT(ctx && dir && "set_cache_dir: both ctx and dir required (D-08)");
+    NT_BUILD_ASSERT(ctx && dir && "set_cache_dir: both ctx and dir required");
     NT_BUILD_ASSERT(strlen(dir) < 900 && "cache_dir too long (max ~900, leaves room for hash filename)");
     free(ctx->cache_dir);
     ctx->cache_dir = strdup(dir);

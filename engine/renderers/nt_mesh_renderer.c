@@ -38,7 +38,7 @@ static struct {
     bool initialized;
 } s_mesh_renderer;
 
-/* ---- Instance layout per color mode (per D-15: locations 4-6 for mat4x3, 7 for color) ---- */
+/* ---- Instance layout per color mode (locations 4-6 for mat4x3, 7 for color) ---- */
 
 /* clang-format off */
 static const nt_vertex_layout_t s_instance_layouts[3] = {

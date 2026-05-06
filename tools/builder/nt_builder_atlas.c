@@ -242,7 +242,7 @@ static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint3
 // #endregion
 
 // #region Debug PNG — optional outline visualization
-/* --- Debug PNG: draw 2px outline around region (D-09, D-10) --- */
+/* --- Debug PNG: draw 2px outline around region --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void debug_draw_rect_outline(uint8_t *page, uint32_t page_w, uint32_t page_h, uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh) {
@@ -334,7 +334,7 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 // #endregion
 
 // #region Atlas cache — disk caching for incremental builds
-/* --- Atlas cache key computation (D-13) --- */
+/* --- Atlas cache key computation --- */
 
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts) {
     /* Bump on any change to the byte layout below, the flag-bit ordering, or
@@ -408,7 +408,7 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     return key.value;
 }
 
-/* --- Atlas cache file I/O (D-13) --- */
+/* --- Atlas cache file I/O --- */
 
 /* Cache file layout:
  *   uint32_t placement_count
@@ -584,7 +584,7 @@ static void atlas_grow_sprites(NtBuildAtlasState *state) {
     state->sprite_capacity = new_cap;
 }
 
-/* --- Extract filename with extension from path (D-06) --- */
+/* --- Extract filename with extension from path --- */
 
 static const char *extract_filename(const char *path) {
     const char *last = path;
@@ -689,8 +689,8 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     NT_BUILD_ASSERT(w > 0 && h > 0 && "atlas_add: decoded image has zero dimensions");
     NT_BUILD_ASSERT((uint64_t)w * (uint64_t)h <= (UINT32_MAX / 4) && "atlas_add: decoded image too large (w*h*4 overflows uint32_t)");
 
-    /* Determine region name (D-06, D-07). opts->name takes precedence; NULL falls
-     * back to basename of the source path. */
+    /* Determine region name. opts->name takes precedence; NULL falls back to
+     * basename of the source path. */
     const char *region_name = sopts.name ? sopts.name : extract_filename(path);
 
     /* Compute decoded hash */
@@ -1549,7 +1549,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
     hdr->index_offset = index_offset;
     hdr->total_index_count = total_index_count;
 
-    /* Texture resource IDs (D-05) */
+    /* Texture resource IDs */
     uint8_t *tex_ids_ptr = blob + sizeof(NtAtlasHeader);
     for (uint32_t pg = 0; pg < p->page_count; pg++) {
         char tex_path[512];
@@ -1719,16 +1719,16 @@ static void pipeline_serialize(AtlasPipeline *p) {
     free(sprite_idx_count);
     free(sprite_flags);
 
-    /* Register atlas metadata entry (D-04) */
+    /* Register atlas metadata entry */
     uint64_t blob_hash = nt_hash64(blob, blob_size).value;
     nt_builder_add_entry(p->ctx, p->state->name, NT_BUILD_ASSET_ATLAS, NULL, blob, blob_size, blob_hash);
 
     // #region pixels_per_unit metadata
-    /* Phase 50-02 (D-32): write pixels_per_unit as a 4-byte resource metadata
-     * blob keyed by hash64_str("pixels_per_unit"). Atlas binary format v3 is
-     * unchanged (D-34) — runtime reads this via nt_atlas_get_pixels_per_unit
-     * (Plan 01 Task 3) and bakes 1/ppu into cached_pos so HD packs render at
-     * the same on-screen size as SD packs sharing the same Transform.
+    /* Write pixels_per_unit as a 4-byte resource metadata blob keyed by
+     * hash64_str("pixels_per_unit"). Atlas binary format v3 is unchanged —
+     * runtime reads this via nt_atlas_get_pixels_per_unit and bakes 1/ppu
+     * into cached_pos so HD packs render at the same on-screen size as SD
+     * packs sharing the same Transform.
      *
      * Written unconditionally (even when value == 1.0F) — uniform code path,
      * 4 bytes are negligible, and keeps the round-trip tests symmetric. The

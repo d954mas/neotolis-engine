@@ -2,9 +2,8 @@
  * Build bunnymark demo packs:
  *   bunnymark_sd.ntpack -- sprite.vert + sprite.frag + atlas with 5 SD bunnies
  *
- * SD-only in Plan 06; HD pack lands in Plan 07. The atlas uses RECT shape
- * (rect bunnies — fastest pack) with allow_transform for D4 orientations,
- * pixels_per_unit=1.0 (D-32 default; combined with HD pack at ppu=3 in Plan 07
+ * The atlas uses RECT shape (rect bunnies — fastest pack) with allow_transform
+ * for D4 orientations, pixels_per_unit=1.0 (default; combined with the HD pack
  * the on-screen size matches when both packs share the same Transform).
  *
  * Usage: build_bunnymark_packs <pack_dir>
@@ -74,7 +73,7 @@ int main(int argc, char *argv[]) {
     }
     // #endregion
 
-    // #region shaders (game-shipped per D-21, satisfies SPRITE-09 via Phase 35 GLSL validate)
+    // #region shaders (game-shipped, validated by GLSL validator)
     nt_builder_add_shader(ctx, "assets/shaders/sprite.vert", NT_BUILD_SHADER_VERTEX);
     nt_builder_add_shader(ctx, "assets/shaders/sprite.frag", NT_BUILD_SHADER_FRAGMENT);
     /* Slug shaders for the on-screen stats overlay (FPS / draws / bunnies). */
@@ -96,7 +95,7 @@ int main(int argc, char *argv[]) {
     nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
     atlas_opts.shape = NT_ATLAS_SHAPE_RECT; /* rectangular bunnies — fastest pack */
     atlas_opts.allow_transform = true;
-    atlas_opts.pixels_per_unit = 1.0F; /* D-32 default: 1 source pixel = 1 world unit */
+    atlas_opts.pixels_per_unit = 1.0F; /* default: 1 source pixel = 1 world unit */
     atlas_opts.padding = 2;
     atlas_opts.margin = 2;
     atlas_opts.extrude = 2; /* OK with RECT (extrude valid only for rect shape) */
@@ -113,7 +112,7 @@ int main(int argc, char *argv[]) {
 
     nt_builder_begin_atlas(ctx, "bunnies", &atlas_opts);
 
-    /* Centre pivot for all sprites (D-13 default origin reset on set_region). */
+    /* Centre pivot for all sprites (default origin reset on set_region). */
     nt_atlas_sprite_opts_t sprite_opts = nt_atlas_sprite_opts_defaults();
     /* sprite_opts is centre pivot by default — origin_x=origin_y=0.5 */
 
@@ -146,7 +145,7 @@ int main(int argc, char *argv[]) {
     // #endregion
 
 #ifdef BUNNYMARK_HD_AVAILABLE
-    // #region pack 2: bunnymark_hd.ntpack (Open Q3 — guarded by CMake)
+    // #region pack 2: bunnymark_hd.ntpack (guarded by CMake)
     /* ppu=17 matches HD on-screen size to SD after alpha-trim of HD margins. */
     (void)printf("\n=== Build Bunnymark HD Pack -> %s ===\n\n", out_dir);
 
@@ -193,8 +192,8 @@ int main(int argc, char *argv[]) {
     nt_builder_begin_atlas(ctx_hd, "bunnies", &hd_opts);
     /* atlas_add_glob picks up whatever 5 PNGs the user dropped in raw/hd/.
      * The user is expected to use the same 5 names (bunny_red.png …) so the
-     * region name_hashes match SD — Phase 48 merge keeps the region indices
-     * stable on stack (DEMO-08). atlas_add_glob requires opts->name == NULL
+     * region name_hashes match SD — atlas merge keeps the region indices
+     * stable on stack. atlas_add_glob requires opts->name == NULL
      * (each matched file derives its own name from basename). */
     nt_builder_atlas_add_glob(ctx_hd, "examples/bunnymark/raw/hd/*.png", NULL);
     nt_builder_end_atlas(ctx_hd);
