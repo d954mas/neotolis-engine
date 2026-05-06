@@ -372,27 +372,24 @@ static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_vie
 }
 
 // #region precompute
-/* Bake ipu into cached_pos; UV stays y-down to match PNG row order in upload. */
-static void atlas_precompute_region(nt_atlas_data_t *ad, uint32_t region_idx) {
-    const nt_texture_region_t *r = &ad->regions[region_idx];
-    if (r->name_hash == NT_ATLAS_TOMBSTONE_HASH || r->vertex_count == 0) {
-        return;
-    }
-    const float origin_px_x = r->origin_x * (float)r->source_w;
-    const float origin_px_y = r->origin_y * (float)r->source_h;
-    for (uint32_t v = 0; v < r->vertex_count; v++) {
-        const nt_atlas_vertex_t *raw = &ad->vertices[r->vertex_start + v];
-        ad->cached_pos[r->vertex_start + v][0] = ((float)raw->local_x - origin_px_x) * ad->ipu;
-        ad->cached_pos[r->vertex_start + v][1] = ((float)raw->local_y - origin_px_y) * ad->ipu;
-        ad->cached_uv[r->vertex_start + v][0] = (float)raw->atlas_u * (1.0F / 65535.0F);
-        ad->cached_uv[r->vertex_start + v][1] = (float)raw->atlas_v * (1.0F / 65535.0F);
-    }
-}
-
-/* Re-bake all slices after parse/merge — replace_payload_buffers may have realloc'd. */
+/* Re-bake cached_pos/cached_uv for all live regions after parse/merge.
+ * UV stays y-down to match PNG row order in the texture upload. */
 static void atlas_precompute_all(nt_atlas_data_t *ad) {
+    const float ipu = ad->ipu;
     for (uint32_t i = 0; i < ad->region_count; i++) {
-        atlas_precompute_region(ad, i);
+        const nt_texture_region_t *r = &ad->regions[i];
+        if (r->name_hash == NT_ATLAS_TOMBSTONE_HASH || r->vertex_count == 0) {
+            continue;
+        }
+        const float origin_px_x = r->origin_x * (float)r->source_w;
+        const float origin_px_y = r->origin_y * (float)r->source_h;
+        for (uint32_t v = 0; v < r->vertex_count; v++) {
+            const nt_atlas_vertex_t *raw = &ad->vertices[r->vertex_start + v];
+            ad->cached_pos[r->vertex_start + v][0] = ((float)raw->local_x - origin_px_x) * ipu;
+            ad->cached_pos[r->vertex_start + v][1] = ((float)raw->local_y - origin_px_y) * ipu;
+            ad->cached_uv[r->vertex_start + v][0] = (float)raw->atlas_u * (1.0F / 65535.0F);
+            ad->cached_uv[r->vertex_start + v][1] = (float)raw->atlas_v * (1.0F / 65535.0F);
+        }
     }
 }
 // #endregion
@@ -436,9 +433,8 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
         ad->hash_capacity = 0;
 
         // #region cached arrays
-        /* Allocated parallel to vertices[]. calloc zeros the buffer so any
-         * tombstoned (vertex_count==0) region's slice naturally reads zero
-         * — atlas_precompute_region is a no-op on tombstones. */
+        /* Allocated parallel to vertices[]. calloc zeros the buffer so
+         * tombstoned (vertex_count==0) regions' slices naturally read zero. */
         ad->cached_pos = (float(*)[2])calloc(ad->vertex_capacity, sizeof(float[2]));
         NT_ASSERT(ad->cached_pos);
         ad->cached_uv = (float(*)[2])calloc(ad->vertex_capacity, sizeof(float[2]));

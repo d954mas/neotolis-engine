@@ -1845,7 +1845,7 @@ void test_atlas_tombstone_cached_zero(void) {
     TEST_ASSERT_EQUAL_UINT8(0, r0->vertex_count);
     TEST_ASSERT_EQUAL_UINT32(0, r0->vertex_start);
 
-    /* atlas_precompute_region is a no-op on tombstones; the cached_pos slice
+    /* atlas_precompute_all skips tombstones; the cached_pos slice
      * at [vertex_start..vertex_count) is empty (vertex_count=0). For
      * defensive coverage check that bytes at index 0 of the buffer are not
      * NaN/garbage — they're either zeroed (calloc) or the live BBB region's
