@@ -593,13 +593,17 @@ static void atlas_on_post_resolve(const uint8_t *data, uint32_t size, nt_resourc
      * atlas_precompute_all re-bakes cached_pos at the new scale. region_index
      * stays stable per merge semantics — only the cached float
      * values change. */
+    static nt_hash64_t s_ppu_kind;
+    if (s_ppu_kind.value == 0) {
+        s_ppu_kind = nt_hash64_str("pixels_per_unit");
+    }
     uint32_t meta_size = 0;
-    const uint64_t kind = nt_hash64_str("pixels_per_unit").value;
-    const void *meta = nt_resource_get_meta(atlas, kind, &meta_size);
-    if (meta != NULL && meta_size == sizeof(float)) {
+    const void *meta = nt_resource_get_meta(atlas, s_ppu_kind, &meta_size);
+    if (meta != NULL) {
+        NT_ASSERT(meta_size == sizeof(float) && "pixels_per_unit meta size mismatch — builder bug");
         float ppu = 0.0F;
         memcpy(&ppu, meta, sizeof(ppu));
-        NT_ASSERT(ppu > 0.0F); /* divide-by-zero from corrupt metadata is an asset bug */
+        NT_ASSERT(ppu > 0.0F);
         ad->ipu = 1.0F / ppu;
     } else {
         ad->ipu = 1.0F;

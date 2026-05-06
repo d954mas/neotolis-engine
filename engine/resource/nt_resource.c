@@ -1120,7 +1120,7 @@ const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size) {
 
 /* ---- Metadata query ---- */
 
-const void *nt_resource_get_meta(nt_resource_t handle, uint64_t kind, uint32_t *out_size) {
+const void *nt_resource_get_meta(nt_resource_t handle, nt_hash64_t kind, uint32_t *out_size) {
     if (out_size) {
         *out_size = 0;
     }
@@ -1184,7 +1184,7 @@ const void *nt_resource_get_meta(nt_resource_t handle, uint64_t kind, uint32_t *
             return NULL; /* corrupt */
         }
 
-        if (mh.kind == kind) {
+        if (mh.kind == kind.value) {
             if (out_size) {
                 *out_size = mh.size;
             }

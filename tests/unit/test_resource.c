@@ -1771,10 +1771,10 @@ void test_resource_get_meta_aabb(void) {
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
 
-    uint64_t test_kind = nt_hash64_str("test_meta").value;
+    nt_hash64_t test_kind = nt_hash64_str("test_meta");
     TestMetaPayload test_payload = {{-1.0F, -2.0F, -3.0F, 1.0F, 2.0F, 3.0F}};
     uint32_t blob_size = 0;
-    uint8_t *blob = build_meta_pack(rid.value, test_kind, &test_payload, (uint32_t)sizeof(test_payload), &blob_size);
+    uint8_t *blob = build_meta_pack(rid.value, test_kind.value, &test_payload, (uint32_t)sizeof(test_payload), &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
@@ -1814,7 +1814,7 @@ void test_resource_get_meta_absent(void) {
     nt_resource_step();
 
     uint32_t meta_size = 99;
-    const void *meta_ptr = nt_resource_get_meta(h, nt_hash64_str("nonexistent").value, &meta_size);
+    const void *meta_ptr = nt_resource_get_meta(h, nt_hash64_str("nonexistent"), &meta_size);
     TEST_ASSERT_NULL(meta_ptr);
     TEST_ASSERT_EQUAL_UINT32(0, meta_size);
 
@@ -1824,7 +1824,7 @@ void test_resource_get_meta_absent(void) {
 void test_resource_get_meta_invalid_handle(void) {
     nt_resource_t invalid = NT_RESOURCE_INVALID;
     uint32_t sz = 99;
-    const void *p = nt_resource_get_meta(invalid, 0, &sz);
+    const void *p = nt_resource_get_meta(invalid, (nt_hash64_t){0}, &sz);
     TEST_ASSERT_NULL(p);
     TEST_ASSERT_EQUAL_UINT32(0, sz);
 }
@@ -1835,10 +1835,10 @@ void test_resource_get_meta_wrong_kind(void) {
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
 
-    uint64_t stored_kind = nt_hash64_str("stored_kind").value;
+    nt_hash64_t stored_kind = nt_hash64_str("stored_kind");
     TestMetaPayload payload = {{0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F}};
     uint32_t blob_size = 0;
-    uint8_t *blob = build_meta_pack(rid.value, stored_kind, &payload, (uint32_t)sizeof(payload), &blob_size);
+    uint8_t *blob = build_meta_pack(rid.value, stored_kind.value, &payload, (uint32_t)sizeof(payload), &blob_size);
     TEST_ASSERT_NOT_NULL(blob);
 
     TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, blob, blob_size));
@@ -1849,7 +1849,7 @@ void test_resource_get_meta_wrong_kind(void) {
 
     /* Query with a different kind -- should return NULL */
     uint32_t meta_size = 99;
-    const void *meta_ptr = nt_resource_get_meta(h, nt_hash64_str("nonexistent").value, &meta_size);
+    const void *meta_ptr = nt_resource_get_meta(h, nt_hash64_str("nonexistent"), &meta_size);
     TEST_ASSERT_NULL(meta_ptr);
     TEST_ASSERT_EQUAL_UINT32(0, meta_size);
 
