@@ -103,8 +103,11 @@ static GLuint s_instance_gl_buf;          /* GL name of last bound instance buff
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
 
-/* GPU TIME_ELAPSED named segments (EXT_disjoint_timer_query_webgl2 / ARB_timer_query). */
-#define NT_GFX_TIMER_RING 4
+/* GPU TIME_ELAPSED named segments (EXT_disjoint_timer_query_webgl2 / ARB_timer_query).
+ * Ring depth 8 covers WebGL2 driver query latency (typically 1-4 frames, but spikes happen
+ * on tab refocus / GPU power state transitions). 4 was insufficient — observed ring-full in
+ * bunnymark on Chrome. */
+#define NT_GFX_TIMER_RING 8
 #define NT_GFX_TIMER_MAX_SEGMENTS 16
 
 typedef struct {
@@ -452,13 +455,27 @@ void nt_gfx_backend_begin_segment(nt_hash32_t name_hash) {
     int8_t idx = segment_find_or_alloc(name_hash);
     nt_gfx_segment_state_t *seg = &s_segments[idx];
     if (seg->in_flight[seg->head]) {
-        if (!s_timer_warned) {
-            NT_LOG_WARN("gpu_timing: segment ring full — call nt_gfx_poll_segment_time_ns to consume");
-            s_timer_warned = true;
+        /* Ring full — try to drain oldest first; it's likely ready by now. Only reset
+         * (data loss) if even the oldest isn't available, which means GPU pipeline is
+         * genuinely stuck (driver issue or background-tab freeze). */
+        GLuint q_old = seg->queries[seg->tail];
+        GLuint avail = 0;
+        glGetQueryObjectuiv(q_old, GL_QUERY_RESULT_AVAILABLE, &avail);
+        if (avail) {
+            GLuint64 result = 0;
+            nt_gl_get_query_u64(q_old, GL_QUERY_RESULT, &result);
+            seg->last_result_ns = (uint64_t)result;
+            seg->in_flight[seg->tail] = false;
+            seg->tail = (uint8_t)((seg->tail + 1U) % NT_GFX_TIMER_RING);
+        } else {
+            if (!s_timer_warned) {
+                NT_LOG_WARN("gpu_timing: segment ring full and oldest query not ready — dropping pipeline");
+                s_timer_warned = true;
+            }
+            memset(seg->in_flight, 0, sizeof(seg->in_flight));
+            seg->head = 0;
+            seg->tail = 0;
         }
-        memset(seg->in_flight, 0, sizeof(seg->in_flight));
-        seg->head = 0;
-        seg->tail = 0;
     }
     glBeginQuery(GL_TIME_ELAPSED, seg->queries[seg->head]);
     s_active_segment = idx;
@@ -534,6 +551,9 @@ bool nt_gfx_backend_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns
     seg->last_result_ns = (uint64_t)result;
     seg->in_flight[seg->tail] = false;
     seg->tail = (uint8_t)((seg->tail + 1U) % NT_GFX_TIMER_RING);
+    /* Re-arm ring-full warning: a successful drain means the system recovered.
+     * If it breaks again later, we want to see the warn again. */
+    s_timer_warned = false;
     return true;
 }
 
