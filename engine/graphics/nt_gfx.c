@@ -37,12 +37,9 @@ typedef struct {
     uint8_t mip_count; /* 1 = base only, >1 = has mip chain */
     bool compressed;   /* true for Basis/GPU-compressed textures */
     uint8_t _pad;
-    /* Default sampler from the texture asset header (V3+). bind_texture
-     * binds this sampler alongside the texture so the GPU samples with
-     * the asset's intended filter unless a material overrides via
-     * bind_sampler. id == 0 → no default, fall through to legacy texture
-     * state (only relevant for textures created via nt_gfx_make_texture
-     * directly, not via the activator). */
+    /* Sampler bound automatically by bind_texture. Always non-zero in
+     * normal runtime (make_texture / activator assert this). Reset to
+     * NT_SAMPLER_INVALID transiently during context-loss recovery. */
     nt_sampler_t default_sampler;
 } nt_gfx_texture_meta_t;
 
@@ -482,7 +479,9 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         .wrap_v = local_desc.wrap_v,
         .label = NULL,
     };
-    s_gfx.texture_metas[slot].default_sampler = nt_gfx_make_sampler(&sd);
+    nt_sampler_t default_sampler = nt_gfx_make_sampler(&sd);
+    NT_ASSERT(default_sampler.id != 0 && "nt_gfx_make_texture: default sampler creation failed");
+    s_gfx.texture_metas[slot].default_sampler = default_sampler;
     // #endregion
 
     result.id = id;
@@ -605,7 +604,6 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
     }
     uint32_t idx = nt_pool_slot_index(tex.id);
     nt_gfx_backend_bind_texture(s_gfx.texture_backends[idx], slot);
-    /* Always re-attach default (incl. .id==0 → unbinds any prior sampler). */
     nt_gfx_bind_sampler(s_gfx.texture_metas[idx].default_sampler, slot);
 }
 
@@ -958,6 +956,7 @@ static void texture_attach_default_sampler(uint32_t tex_id, const NtTextureAsset
         .label = NULL,
     };
     nt_sampler_t s = nt_gfx_make_sampler(&sd);
+    NT_ASSERT(s.id != 0 && "texture_attach_default_sampler: sampler creation failed");
     uint32_t slot = nt_pool_slot_index(tex_id);
     s_gfx.texture_metas[slot].default_sampler = s;
 }
