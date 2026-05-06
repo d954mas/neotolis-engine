@@ -1577,6 +1577,74 @@ void test_atlas_cached_pos_origin_subtract(void) {
     assert_float_close(1.0F, nt_atlas_test_ipu(ad), 1e-7F, "default ipu");
 }
 
+/* Trim offset folded into cached_pos.
+ * 20x20 source, content trimmed to a 10x10 region offset by (5,7) — i.e.
+ * trim stripped 5 px from the left edge and 7 from the bottom (y-up).
+ * Vertices are in trim-space (local 0..10); origin is in source-space
+ * (0.5*20 = pixel 10 on each axis). Expected: cached_pos = local +
+ * trim_offset - pivot_px. Without the trim_offset term every vertex
+ * would shift by (-5,-7) and the sprite pivot would land on the wrong
+ * source pixel — that was the P1 review finding. */
+void test_atlas_cached_pos_includes_trim_offset(void) {
+    NtAtlasVertex verts[4] = {
+        {.local_x = 0, .local_y = 0, .atlas_u = 0, .atlas_v = 0},
+        {.local_x = 10, .local_y = 0, .atlas_u = 65535, .atlas_v = 0},
+        {.local_x = 0, .local_y = 10, .atlas_u = 0, .atlas_v = 65535},
+        {.local_x = 10, .local_y = 10, .atlas_u = 65535, .atlas_v = 65535},
+    };
+    uint16_t indices[6] = {0, 1, 2, 1, 3, 2};
+
+    NtAtlasRegion region;
+    memset(&region, 0, sizeof(region));
+    region.name_hash = 0xDEADBEEFULL;
+    region.source_w = 20;
+    region.source_h = 20;
+    region.trim_offset_x = 5;
+    region.trim_offset_y = 7;
+    region.origin_x = 0.5F;
+    region.origin_y = 0.5F;
+    region.vertex_start = 0;
+    region.index_start = 0;
+    region.vertex_count = 4;
+    region.index_count = 6;
+    region.page_index = 0;
+    region.transform = 0;
+
+    mock_atlas_spec_t spec = {
+        .regions = &region,
+        .region_count = 1,
+        .vertices = verts,
+        .total_vertex_count = 4,
+        .indices = indices,
+        .total_index_count = 6,
+        .page_ids = NULL,
+        .page_count = 0,
+    };
+
+    uint8_t buf[512];
+    uint32_t size = build_mock_atlas_blob(buf, sizeof(buf), &spec);
+
+    nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+    const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+
+    const float(*pos)[2] = nt_atlas_test_cached_pos(ad);
+    TEST_ASSERT_NOT_NULL(pos);
+
+    /* pivot_px = (10, 10). Vertex source = local + trim_offset.
+     * v0 source (5,7)   → pivot-relative (-5, -3)
+     * v1 source (15,7)  → pivot-relative ( 5, -3)
+     * v2 source (5,17)  → pivot-relative (-5,  7)
+     * v3 source (15,17) → pivot-relative ( 5,  7) */
+    assert_float_close(-5.0F, pos[0][0], 1e-5F, "v0.x with trim_offset");
+    assert_float_close(-3.0F, pos[0][1], 1e-5F, "v0.y with trim_offset");
+    assert_float_close(5.0F, pos[1][0], 1e-5F, "v1.x with trim_offset");
+    assert_float_close(-3.0F, pos[1][1], 1e-5F, "v1.y with trim_offset");
+    assert_float_close(-5.0F, pos[2][0], 1e-5F, "v2.x with trim_offset");
+    assert_float_close(7.0F, pos[2][1], 1e-5F, "v2.y with trim_offset");
+    assert_float_close(5.0F, pos[3][0], 1e-5F, "v3.x with trim_offset");
+    assert_float_close(7.0F, pos[3][1], 1e-5F, "v3.y with trim_offset");
+}
+
 /* Pixels_per_unit metadata round-trip via full resource pipeline.
  * Build a .ntpack with a metadata entry kind=hash64_str("pixels_per_unit")
  * payload = float(2.0F). Mount, resolve, assert nt_atlas_get_pixels_per_unit
@@ -2041,6 +2109,7 @@ int main(void) {
     /* Cached arrays + pixels_per_unit + SD/HD merge */
     RUN_TEST(test_atlas_cached_uv_d4_transform);
     RUN_TEST(test_atlas_cached_pos_origin_subtract);
+    RUN_TEST(test_atlas_cached_pos_includes_trim_offset);
     RUN_TEST(test_atlas_pixels_per_unit_metadata_roundtrip);
     RUN_TEST(test_atlas_cached_recompute_on_merge);
     RUN_TEST(test_atlas_tombstone_cached_zero);
