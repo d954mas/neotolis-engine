@@ -14,13 +14,9 @@ static nt_comp_storage_t s_storage;
 static nt_hash32_t *s_tags;
 static bool *s_visible;
 static float (*s_colors)[4]; /* float[N][4] */
-/* Pre-packed RGBA8 mirror of s_colors so the renderer hot loop can read
- * the color as a single uint32_t without per-channel float→u8 conversion.
- * Kept in sync with s_colors via the setters and the swap callback.
- * Renderer prefers this; consumers that bypass set_color and write through
- * the writable nt_drawable_comp_color() pointer are responsible for calling
- * nt_drawable_comp_repack_color afterwards. */
-static uint32_t *s_colors_packed; /* uint32_t per entity, RGBA little-endian */
+/* Pre-packed RGBA8 mirror of s_colors. Renderer reads packed as one
+ * uint32_t; setters keep both in sync. */
+static uint32_t *s_colors_packed;
 
 /* ---- Callbacks ---- */
 
@@ -124,7 +120,7 @@ bool *nt_drawable_comp_visible(nt_entity_t entity) {
     return &s_visible[idx];
 }
 
-float *nt_drawable_comp_color(nt_entity_t entity) {
+const float *nt_drawable_comp_color(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return s_colors[idx];
@@ -140,11 +136,12 @@ void nt_drawable_comp_set_color(nt_entity_t entity, float r, float g, float b, f
     s_colors_packed[idx] = pack_color_rgba(r, g, b, a);
 }
 
-void nt_drawable_comp_repack_color(nt_entity_t entity) {
+void nt_drawable_comp_set_alpha(nt_entity_t entity, float a) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
-    const float *c = s_colors[idx];
-    s_colors_packed[idx] = pack_color_rgba(c[0], c[1], c[2], c[3]);
+    s_colors[idx][3] = a;
+    float *c = s_colors[idx];
+    s_colors_packed[idx] = pack_color_rgba(c[0], c[1], c[2], a);
 }
 
 /* ---- Bulk SoA view ---- */

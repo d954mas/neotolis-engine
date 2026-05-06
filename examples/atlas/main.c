@@ -264,11 +264,7 @@ int main(void) {
     *nt_material_comp_handle(s_cube) = s_material;
 
     /* White tint */
-    float *color = nt_drawable_comp_color(s_cube);
-    color[0] = 1.0F;
-    color[1] = 1.0F;
-    color[2] = 1.0F;
-    color[3] = 1.0F;
+    nt_drawable_comp_set_color(s_cube, 1.0F, 1.0F, 1.0F, 1.0F);
 
     /* Frame uniforms UBO */
     s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){

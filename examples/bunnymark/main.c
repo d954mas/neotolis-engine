@@ -212,11 +212,7 @@ static void init_bunny_entity(uint32_t i) {
     nt_sprite_comp_add(s_entities[i]);
 
     *nt_material_comp_handle(s_entities[i]) = s_sprite_material;
-    float *col = nt_drawable_comp_color(s_entities[i]);
-    col[0] = 1.0F;
-    col[1] = 1.0F;
-    col[2] = 1.0F;
-    col[3] = 1.0F;
+    nt_drawable_comp_set_color(s_entities[i], 1.0F, 1.0F, 1.0F, 1.0F);
 
     float *scale = nt_transform_comp_scale(s_entities[i]);
     scale[0] = 1.0F;

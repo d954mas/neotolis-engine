@@ -311,11 +311,7 @@ static nt_entity_t create_sprite_entity(nt_resource_t atlas, uint64_t region_has
     nt_transform_comp_update();
 
     /* White color */
-    float *c = nt_drawable_comp_color(e);
-    c[0] = 1.0F;
-    c[1] = 1.0F;
-    c[2] = 1.0F;
-    c[3] = 1.0F;
+    nt_drawable_comp_set_color(e, 1.0F, 1.0F, 1.0F, 1.0F);
 
     nt_sprite_comp_bind_by_hash(e, atlas, region_hash);
     nt_sprite_comp_sync_resources();
