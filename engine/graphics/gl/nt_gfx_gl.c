@@ -444,16 +444,6 @@ static int8_t segment_find(nt_hash32_t name_hash) {
     return -1;
 }
 
-/* Implicit "frame" segment opened by begin_frame to keep the legacy single-
- * timer API behaviour (poll_gpu_time_ns returns frame total). */
-static nt_hash32_t s_frame_seg_cached;
-static nt_hash32_t frame_segment_hash(void) {
-    if (s_frame_seg_cached.value == 0) {
-        s_frame_seg_cached = nt_hash32_str("frame");
-    }
-    return s_frame_seg_cached;
-}
-
 void nt_gfx_backend_begin_segment(nt_hash32_t name_hash) {
     if (!s_timer_enabled || !s_timer_user_enabled) {
         return;
@@ -493,13 +483,9 @@ void nt_gfx_backend_begin_frame(void) {
     nt_gfx_gl_cache_reset();
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
-
-    nt_gfx_backend_begin_segment(frame_segment_hash());
 }
 
 void nt_gfx_backend_end_frame(void) {
-    nt_gfx_backend_end_segment();
-
     if (s_transcode_buf != NULL) {
         s_transcode_buf_idle++;
         if (s_transcode_buf_idle > NT_TRANSCODE_BUF_IDLE_FRAMES) {
@@ -550,8 +536,6 @@ bool nt_gfx_backend_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns
     seg->tail = (uint8_t)((seg->tail + 1U) % NT_GFX_TIMER_RING);
     return true;
 }
-
-bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) { return nt_gfx_backend_poll_segment_time_ns(frame_segment_hash(), out_ns); }
 
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
     if (!enabled && s_timer_enabled) {

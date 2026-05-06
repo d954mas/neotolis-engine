@@ -374,6 +374,12 @@ static void frame(void) {
     bool can_render = s_atlas_resolved && mat_info && mat_info->ready && s_bunny_count > 0;
 
     nt_gfx_begin_frame();
+    /* nt_stats reads frame total via segment named "frame" by convention. */
+    static nt_hash32_t s_frame_seg;
+    if (s_frame_seg.value == 0) {
+        s_frame_seg = nt_hash32_str("frame");
+    }
+    nt_gfx_begin_segment(s_frame_seg);
 
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
@@ -443,6 +449,7 @@ static void frame(void) {
     // #endregion
 
     nt_gfx_end_pass();
+    nt_gfx_end_segment();
     nt_gfx_end_frame();
 
     nt_stats_count("bunnies", (uint64_t)s_bunny_count);

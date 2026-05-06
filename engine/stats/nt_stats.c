@@ -82,14 +82,17 @@ void nt_stats_frame_end(void) {
     s_stats.last_cpu_ms = dt_s * 1000.0F;
     s_stats.last_draw_calls = nt_gfx_get_frame_draw_calls();
 
-    /* Drain any GPU timer-query results that are ready (1-2 frames old).
-     * Pop the most recent of the available results — older ones are stale,
-     * closer ones reflect current load. nt_gfx_poll_gpu_time_ns returns
-     * false on unsupported drivers / disjoint events; in that case we
-     * keep last_gpu_ms = -1.0F so format_lines / log prints "N/A". */
+    /* GPU frame total via the conventional "frame" segment. Drain ready
+     * results (1-2 frames old) and keep the freshest. If no segment was
+     * opened or the driver doesn't support timer queries, last_gpu_ms
+     * stays at -1.0F and format_lines prints "N/A". */
+    static nt_hash32_t s_frame_seg;
+    if (s_frame_seg.value == 0) {
+        s_frame_seg = nt_hash32_str("frame");
+    }
     uint64_t gpu_ns = 0;
     bool gpu_ready = false;
-    while (nt_gfx_poll_gpu_time_ns(&gpu_ns)) {
+    while (nt_gfx_poll_segment_time_ns(s_frame_seg, &gpu_ns)) {
         gpu_ready = true;
     }
     if (gpu_ready) {

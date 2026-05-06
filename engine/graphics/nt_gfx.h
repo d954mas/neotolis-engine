@@ -379,15 +379,11 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
 /* Named GPU TIME_ELAPSED segments. Pairs must be sequential (no nesting —
- * GL can only have one TIME_ELAPSED query active at a time). begin_frame /
- * end_frame open an implicit "frame" segment for legacy frame-total polling. */
+ * GL can only have one TIME_ELAPSED query active at a time). Game opens
+ * the segments it wants to time; nt_stats polls "frame" by convention. */
 void nt_gfx_begin_segment(nt_hash32_t name_hash);
 void nt_gfx_end_segment(void);
 bool nt_gfx_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns);
-
-/* Pop the oldest completed frame total. Wraps the implicit "frame" segment.
- * Returns false on unsupported platform / not-ready / disjoint event. */
-bool nt_gfx_poll_gpu_time_ns(uint64_t *out_ns);
 
 /* Toggle GPU time-elapsed queries. Default = enabled. Disable for
  * RenderDoc / Spector captures or mobile drivers that stall on it. */

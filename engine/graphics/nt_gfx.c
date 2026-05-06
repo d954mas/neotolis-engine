@@ -900,13 +900,6 @@ bool nt_gfx_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns) {
     return nt_gfx_backend_poll_segment_time_ns(name_hash, out_ns);
 }
 
-bool nt_gfx_poll_gpu_time_ns(uint64_t *out_ns) {
-    if (g_nt_gfx.context_lost || out_ns == NULL) {
-        return false;
-    }
-    return nt_gfx_backend_poll_gpu_time_ns(out_ns);
-}
-
 void nt_gfx_set_gpu_timing_enabled(bool enabled) { nt_gfx_backend_set_gpu_timing_enabled(enabled); }
 
 bool nt_gfx_is_gpu_timing_supported(void) { return nt_gfx_backend_is_gpu_timing_supported(); }

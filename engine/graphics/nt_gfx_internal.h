@@ -35,13 +35,11 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle);
 void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uint32_t size);
 void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size);
 
-/* Named GPU TIME_ELAPSED segments. begin_segment / end_segment must pair
- * sequentially — TIME_ELAPSED cannot nest. begin_frame / end_frame open an
- * implicit "frame" segment for legacy poll_gpu_time_ns callers. */
+/* Named GPU TIME_ELAPSED segments. begin/end pairs must be sequential —
+ * TIME_ELAPSED cannot nest (one query active at a time). */
 void nt_gfx_backend_begin_segment(nt_hash32_t name_hash);
 void nt_gfx_backend_end_segment(void);
 bool nt_gfx_backend_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns);
-bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns); /* = poll_segment_time_ns(hash("frame")) */
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled);
 bool nt_gfx_backend_is_gpu_timing_supported(void);
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data);

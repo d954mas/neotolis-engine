@@ -114,12 +114,6 @@ bool nt_gfx_backend_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns
     return false;
 }
 
-// NOLINTNEXTLINE(readability-non-const-parameter) — out param signature must match real backend
-bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) {
-    (void)out_ns;
-    return false;
-}
-
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) { (void)enabled; }
 
 bool nt_gfx_backend_is_gpu_timing_supported(void) { return false; }
