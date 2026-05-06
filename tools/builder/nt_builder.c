@@ -329,6 +329,17 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
         if (ta->opts.format != tb->opts.format) {
             return false;
         }
+        /* Sampler defaults are baked into the V3 header — two textures
+         * with same pixels but different filter/wrap must not share an
+         * encoded entry, otherwise one of them gets the wrong sampler. */
+        if (ta->opts.filter_min != tb->opts.filter_min || ta->opts.filter_mag != tb->opts.filter_mag || ta->opts.wrap_u != tb->opts.wrap_u || ta->opts.wrap_v != tb->opts.wrap_v) {
+            return false;
+        }
+        /* premultiplied also affects encoded pixel bytes + header flags;
+         * mirror the opts_hash policy. */
+        if (ta->opts.premultiplied != tb->opts.premultiplied) {
+            return false;
+        }
         /* Compare compression path */
         if (ta->has_compress != tb->has_compress) {
             return false;
