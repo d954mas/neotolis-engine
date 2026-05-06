@@ -58,9 +58,9 @@ static uint32_t s_global_block_count;
  * Lifetime = engine. desc is preserved across context loss so backend can be
  * lazily recreated without invalidating material-side sampler.id handles. */
 typedef struct {
-    uint32_t key;            /* hash of (min, mag, wrap_u, wrap_v); 0 = empty slot */
-    uint32_t backend;        /* GL sampler object handle; 0 after context loss */
-    nt_sampler_desc_t desc;  /* recorded for context-loss recreate */
+    uint32_t key;           /* hash of (min, mag, wrap_u, wrap_v); 0 = empty slot */
+    uint32_t backend;       /* GL sampler object handle; 0 after context loss */
+    nt_sampler_desc_t desc; /* recorded for context-loss recreate */
 } nt_gfx_sampler_entry_t;
 
 static struct {
@@ -222,12 +222,13 @@ void nt_gfx_begin_frame(void) {
              * call deactivate_mesh() which returns slots to mesh pool.
              * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
             s_gfx.bound_pipeline = 0;
-            /* Sampler cache holds GL ids that are now invalid. Wipe so the
-             * next nt_gfx_make_sampler creates fresh objects. Texture metas
-             * carrying stale default_sampler handles get re-attached when
-             * the activator re-creates textures. */
-            memset(s_gfx.sampler_cache, 0, sizeof(s_gfx.sampler_cache));
-            s_gfx.sampler_count = 0;
+            /* Sampler cache: zero only the GL backend ids — keys, descs
+             * and sampler_count stay so material-stored sampler.id values
+             * remain valid slot references. Backend is lazy-recreated on
+             * the next nt_gfx_make_sampler hit or on bind_sampler. */
+            for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
+                s_gfx.sampler_cache[i].backend = 0;
+            }
             for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
                 s_gfx.texture_metas[i].default_sampler = NT_SAMPLER_INVALID;
             }
@@ -642,6 +643,7 @@ static inline uint32_t sampler_pack_key(const nt_sampler_desc_t *desc) {
     return mn | (mag << 3) | (wu << 4) | (wv << 6);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — cache hit / miss / lazy-recreate paths
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     NT_ASSERT(desc != NULL);
     NT_ASSERT(desc->mag_filter <= NT_FILTER_LINEAR && "sampler mag_filter must be NEAREST or LINEAR");
@@ -650,6 +652,10 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
 
     for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
         if (s_gfx.sampler_cache[i].key == key) {
+            /* Hit; lazy-recreate backend if context loss zeroed it. */
+            if (s_gfx.sampler_cache[i].backend == 0 && !g_nt_gfx.context_lost) {
+                s_gfx.sampler_cache[i].backend = nt_gfx_backend_create_sampler(&s_gfx.sampler_cache[i].desc);
+            }
             return (nt_sampler_t){.id = i + 1};
         }
     }
@@ -663,6 +669,7 @@ nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
     uint32_t slot = s_gfx.sampler_count++;
     s_gfx.sampler_cache[slot].key = key;
     s_gfx.sampler_cache[slot].backend = backend;
+    s_gfx.sampler_cache[slot].desc = *desc;
     return (nt_sampler_t){.id = slot + 1};
 }
 
@@ -680,7 +687,12 @@ void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot) {
         return;
     }
     NT_ASSERT(s.id <= s_gfx.sampler_count && "bind_sampler: invalid handle");
-    nt_gfx_backend_bind_sampler(s_gfx.sampler_cache[s.id - 1].backend, slot);
+    nt_gfx_sampler_entry_t *e = &s_gfx.sampler_cache[s.id - 1];
+    if (e->backend == 0) {
+        /* Lazy recreate after context-loss recovery — desc was preserved. */
+        e->backend = nt_gfx_backend_create_sampler(&e->desc);
+    }
+    nt_gfx_backend_bind_sampler(e->backend, slot);
 }
 
 /* ---- Uniforms ---- */
