@@ -33,6 +33,35 @@
 #define nt_gl_clear_depth(d) glClearDepth((double)(d))
 #endif
 
+/* EXT_disjoint_timer_query_webgl2 / ARB_timer_query constants. Spec-fixed
+ * values — define them inline so the file compiles on both GLES3 (where
+ * these are extension-only) and core GL 3.3+ (where glad already exposes
+ * them under the same names). The native build's glad pulls in the core
+ * symbols, so the #ifndef guard is a no-op there. */
+#ifndef GL_TIME_ELAPSED
+#define GL_TIME_ELAPSED 0x88BF
+#endif
+#ifndef GL_QUERY_RESULT
+#define GL_QUERY_RESULT 0x8866
+#endif
+#ifndef GL_QUERY_RESULT_AVAILABLE
+#define GL_QUERY_RESULT_AVAILABLE 0x8867
+#endif
+#ifndef GL_GPU_DISJOINT_EXT
+#define GL_GPU_DISJOINT_EXT 0x8FBB
+#endif
+
+#ifdef NT_PLATFORM_WEB
+/* WebGL2 ships these as core GLES3 entry points (glBeginQuery / glEndQuery
+ * etc.), but only target=GL_TIME_ELAPSED is gated behind the EXT extension.
+ * After nt_gfx_gl_ctx_enable_timer_query() activates the extension, the
+ * existing function pointers accept the new target. */
+extern void glGetQueryObjectui64vEXT(GLuint id, GLenum pname, GLuint64 *params);
+#define nt_gl_get_query_u64(id, pname, out) glGetQueryObjectui64vEXT((id), (pname), (out))
+#else
+#define nt_gl_get_query_u64(id, pname, out) glGetQueryObjectui64v((id), (pname), (out))
+#endif
+
 /* ---- Pipeline backend data ---- */
 
 /* Per-pipeline uniform location cache (populated at link time) */
@@ -76,6 +105,22 @@ static GLuint *s_texture_gl;              /* GL texture names, indexed by slot *
 static GLuint s_instance_gl_buf;          /* GL name of last bound instance buffer */
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
+
+/* ---- GPU timer query (EXT_disjoint_timer_query_webgl2 / ARB_timer_query) ----
+ *
+ * Ring of N query objects so a frame's TIME_ELAPSED can be read 1-2 frames
+ * later without stalling the GPU. begin_frame starts a query into the
+ * head slot; end_frame closes it and advances head; poll_gpu_time reads the
+ * oldest in-flight query if its result is ready. A disjoint event clears
+ * all in-flight results (clock skip — values would be unreliable). */
+#define NT_GFX_TIMER_RING 4
+
+static bool s_timer_enabled;
+static GLuint s_timer_queries[NT_GFX_TIMER_RING];
+static bool s_timer_in_flight[NT_GFX_TIMER_RING];
+static uint8_t s_timer_head; /* next slot to write into */
+static uint8_t s_timer_tail; /* oldest unread slot */
+static bool s_timer_active;  /* true between begin and end of current frame */
 
 /* ---- Transcode buffer (reused across textures, freed after idle) ---- */
 
@@ -329,10 +374,26 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
     nt_gfx_gl_cache_reset();
+
+    /* Probe + allocate GPU timer-query ring. Enable failure leaves
+     * s_timer_enabled = false and poll_gpu_time always returns false. */
+    s_timer_enabled = nt_gfx_gl_ctx_enable_timer_query();
+    if (s_timer_enabled) {
+        glGenQueries(NT_GFX_TIMER_RING, s_timer_queries);
+        memset(s_timer_in_flight, 0, sizeof(s_timer_in_flight));
+        s_timer_head = 0;
+        s_timer_tail = 0;
+        s_timer_active = false;
+    }
     return true;
 }
 
 void nt_gfx_backend_shutdown(void) {
+    if (s_timer_enabled) {
+        glDeleteQueries(NT_GFX_TIMER_RING, s_timer_queries);
+        s_timer_enabled = false;
+    }
+
     free(s_pipelines);
     free(s_buffer_gl);
     free(s_buffer_targets);
@@ -366,9 +427,27 @@ void nt_gfx_backend_begin_frame(void) {
     nt_gfx_gl_cache_reset();
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
+
+    /* Start a TIME_ELAPSED query into the head ring slot. Skip if the slot
+     * is still in flight (poll never advanced) — happens when the game
+     * never reads results. Skipping prevents glBeginQuery on a busy id. */
+    if (s_timer_enabled && !s_timer_in_flight[s_timer_head]) {
+        glBeginQuery(GL_TIME_ELAPSED, s_timer_queries[s_timer_head]);
+        s_timer_active = true;
+    }
 }
 
 void nt_gfx_backend_end_frame(void) {
+    /* Close the active TIME_ELAPSED query and mark the slot in-flight so
+     * poll_gpu_time can pick it up once the GPU finishes (1-2 frames
+     * later in WebGL2). */
+    if (s_timer_active) {
+        glEndQuery(GL_TIME_ELAPSED);
+        s_timer_in_flight[s_timer_head] = true;
+        s_timer_head = (uint8_t)((s_timer_head + 1U) % NT_GFX_TIMER_RING);
+        s_timer_active = false;
+    }
+
     /* Free transcode buffer after idle period */
     if (s_transcode_buf != NULL) {
         s_transcode_buf_idle++;
@@ -378,6 +457,41 @@ void nt_gfx_backend_end_frame(void) {
             s_transcode_buf_size = 0;
         }
     }
+}
+
+bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) {
+    if (!s_timer_enabled) {
+        return false;
+    }
+
+    /* Disjoint event = clock skip; all in-flight results are unreliable.
+     * Drop them and reset the ring. The flag auto-clears on read so reading
+     * it here also acks the event. */
+    GLint disjoint = 0;
+    glGetIntegerv(GL_GPU_DISJOINT_EXT, &disjoint);
+    if (disjoint) {
+        memset(s_timer_in_flight, 0, sizeof(s_timer_in_flight));
+        s_timer_tail = s_timer_head;
+        return false;
+    }
+
+    if (!s_timer_in_flight[s_timer_tail]) {
+        return false;
+    }
+
+    GLuint q = s_timer_queries[s_timer_tail];
+    GLint available = 0;
+    glGetQueryObjectiv(q, GL_QUERY_RESULT_AVAILABLE, &available);
+    if (!available) {
+        return false;
+    }
+
+    GLuint64 result = 0;
+    nt_gl_get_query_u64(q, GL_QUERY_RESULT, &result);
+    *out_ns = (uint64_t)result;
+    s_timer_in_flight[s_timer_tail] = false;
+    s_timer_tail = (uint8_t)((s_timer_tail + 1U) % NT_GFX_TIMER_RING);
+    return true;
 }
 
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) {

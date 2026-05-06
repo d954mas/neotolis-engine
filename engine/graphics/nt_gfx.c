@@ -875,6 +875,13 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
     nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], data, size);
 }
 
+bool nt_gfx_poll_gpu_time_ns(uint64_t *out_ns) {
+    if (g_nt_gfx.context_lost || out_ns == NULL) {
+        return false;
+    }
+    return nt_gfx_backend_poll_gpu_time_ns(out_ns);
+}
+
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
     if (g_nt_gfx.context_lost) {
         return;

@@ -33,6 +33,11 @@ uint32_t nt_gfx_backend_create_buffer(const nt_buffer_desc_t *desc);
 void nt_gfx_backend_destroy_buffer(uint32_t backend_handle);
 void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uint32_t size);
 void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size);
+
+/* Pop the oldest completed GPU time-elapsed query result into *out_ns.
+ * Returns true on success. False when timer queries aren't supported, the
+ * oldest query isn't ready yet, or a disjoint event invalidated results. */
+bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns);
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data);
 
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc);

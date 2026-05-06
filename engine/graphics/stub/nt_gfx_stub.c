@@ -82,6 +82,12 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
     (void)size;
 }
 
+// NOLINTNEXTLINE(readability-non-const-parameter) — out param signature must match real backend
+bool nt_gfx_backend_poll_gpu_time_ns(uint64_t *out_ns) {
+    (void)out_ns;
+    return false;
+}
+
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     (void)desc;
     return 0;

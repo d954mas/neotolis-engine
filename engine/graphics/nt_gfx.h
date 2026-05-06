@@ -387,6 +387,21 @@ void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_
 void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
+/* ---- GPU timing ----
+ *
+ * Pop the oldest completed GPU-side TIME_ELAPSED query into *out_ns.
+ * Backend-driven ring buffer captures one query per nt_gfx_begin/end_frame
+ * pair. Results land 1-2 frames after the frame that started the query.
+ *
+ * Returns true on success (out_ns filled with nanoseconds). Returns false
+ * when:
+ *   - the platform / driver doesn't expose timer queries
+ *   - the oldest query isn't ready yet (call again next frame)
+ *   - a disjoint event invalidated results (clock skipped)
+ *
+ * nt_stats polls this each frame for the on-screen / log GPU ms reading. */
+bool nt_gfx_poll_gpu_time_ns(uint64_t *out_ns);
+
 /* ---- Texture update (non-mipmapped textures only, level 0) ---- */
 
 void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w, uint16_t h, const void *data);

@@ -81,7 +81,20 @@ void nt_stats_frame_end(void) {
     float dt_s = (float)(now - s_stats.frame_begin_t);
     s_stats.last_cpu_ms = dt_s * 1000.0F;
     s_stats.last_draw_calls = nt_gfx_get_frame_draw_calls();
-    /* GPU timer: Pitfall 5 — not yet wired through nt_gfx; remain -1.0F */
+
+    /* Drain any GPU timer-query results that are ready (1-2 frames old).
+     * Pop the most recent of the available results — older ones are stale,
+     * closer ones reflect current load. nt_gfx_poll_gpu_time_ns returns
+     * false on unsupported drivers / disjoint events; in that case we
+     * keep last_gpu_ms = -1.0F so format_lines / log prints "N/A". */
+    uint64_t gpu_ns = 0;
+    bool gpu_ready = false;
+    while (nt_gfx_poll_gpu_time_ns(&gpu_ns)) {
+        gpu_ready = true;
+    }
+    if (gpu_ready) {
+        s_stats.last_gpu_ms = (float)((double)gpu_ns / 1.0e6);
+    }
     // #endregion
 
     // #region DEMO-06 throughput log
