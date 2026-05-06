@@ -4,21 +4,8 @@
 #include "core/nt_types.h"
 #include "render/nt_render_defs.h"
 
-/* ---- Compile-time limits (D-17) ----
- *
- * Buffers are sized for the polygon worst case: 8 verts + 18 indices per
- * sprite (atlas builder default max_vertices=8 with triangle-fan, e.g.
- * NT_ATLAS_SHAPE_CONCAVE_CONTOUR). RECT-shape sprites consume only 4 verts +
- * 6 indices each, so a frame of pure-rect sprites can fit 2x MAX_SPRITES
- * before triggering auto-flush, while a frame of pure-polygon sprites fits
- * exactly MAX_SPRITES.
- *
- * Index buffer uses uint16 and the renderer auto-flushes before a batch would
- * exceed the 0..65535 vertex index range. This may split very large rect runs
- * into a few draw calls, but halves index upload bandwidth and keeps WebGL on
- * the faster UNSIGNED_SHORT path. Auto-flush on overflow keeps per-cmd state
- * and re-opens after the upload. */
-
+/* D-17: sized for polygon worst case 8v/18i per sprite. uint16 indices —
+ * auto-flushes before crossing the 65535 vertex range. */
 #ifndef NT_SPRITE_RENDERER_MAX_SPRITES
 #define NT_SPRITE_RENDERER_MAX_SPRITES 8192
 #endif
@@ -26,11 +13,8 @@
 #define NT_SPRITE_RENDERER_MAX_VERTICES (NT_SPRITE_RENDERER_MAX_SPRITES * 8)
 #define NT_SPRITE_RENDERER_MAX_INDICES (NT_SPRITE_RENDERER_MAX_SPRITES * 18)
 
-/* Hard cap on pipeline cache size (kept in static array to avoid heap). */
 #define NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP 64
 
-/* Recorded draw commands per flush — one per state change (pipeline/material
- * /textures). Bunnymark uses 1; richer scenes typically stay well under 64. */
 #ifndef NT_SPRITE_RENDERER_MAX_DRAW_CMDS
 #define NT_SPRITE_RENDERER_MAX_DRAW_CMDS 256
 #endif
@@ -62,15 +46,8 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc);
 void nt_sprite_renderer_shutdown(void);
 void nt_sprite_renderer_restore_gpu(void);
 
-/* ---- Draw API (list-based, D-01) ----
- *
- * Texture binding contract: the renderer always binds the sprite's atlas
- * page texture to texture unit 0. A sprite material may declare a slot-0
- * texture binding to receive the uniform name (set_uniform_int) and an
- * optional sampler override; if it doesn't, the renderer still binds the
- * page texture — fragment shaders that sample sampler2D u_texture without
- * an explicit binding pick up unit 0 by GL default. */
-
+/* Contract: atlas page texture always binds to slot 0. Material may declare
+ * a slot-0 binding to override sampler / set uniform name. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 void nt_sprite_renderer_flush(void);
 

@@ -68,17 +68,10 @@ typedef struct nt_atlas_data {
     nt_resource_t page_resources[NT_ATLAS_MAX_PAGES]; /* NT_RESOURCE_INVALID until on_post_resolve */
     uint8_t page_count;
 
-    /* Phase 50 D-10/D-11/D-32: precomputed per-vertex projections.
-     * Parallel to vertices[]; capacity matches vertex_capacity.
-     * cached_pos: pivot-relative source-pixel coords with 1/pixels_per_unit baked in.
-     * cached_uv:  normalized 0..1 atlas UV with D4 transform pre-applied.
-     * Tombstones leave entries zeroed (vertex_count==0 yields zero draws). */
-    float (*cached_pos)[2];
-    float (*cached_uv)[2];
-    /* Phase 50 D-32: 1/pixels_per_unit, read once from resource metadata at first
-     * parse (and re-read on every merge, DEMO-08). Default 1.0F when metadata
-     * absent. Baked into cached_pos so renderer is pixels_per_unit-oblivious. */
-    float ipu;
+    /* Precomputed per-vertex projections, parallel to vertices[]. */
+    float (*cached_pos)[2]; /* pivot-relative pixels with ipu baked in */
+    float (*cached_uv)[2];  /* normalized atlas UV with D4 transform applied */
+    float ipu;              /* 1/pixels_per_unit, read from resource metadata */
 } nt_atlas_data_t;
 // #endregion
 
@@ -378,15 +371,7 @@ static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_vie
 }
 
 // #region precompute (Phase 50 D-10/D-11/D-32)
-/* Compute cached_pos and cached_uv for one region (D-10/D-11).
- * cached_pos has 1/pixels_per_unit baked in (D-32 + Pitfall 3) so the
- * sprite renderer is pixels_per_unit-oblivious. atlas_u/v are already stored
- * in atlas-page space by the builder, including any D4 placement transform.
- * v5 contract: vertex local_y, origin_y and trim_offset_y are stored y-up by
- * the builder, so the X and Y formulas are symmetric here — no runtime
- * Y-flip. UV.v stays y-down to match raw PNG row order in the texture upload.
- * Tombstones (NT_ATLAS_TOMBSTONE_HASH) and zero-vertex regions are
- * no-ops — their cached slices stay zero from calloc / zero-fill. */
+/* Bake ipu into cached_pos; UV stays y-down to match PNG row order in upload. */
 static void atlas_precompute_region(nt_atlas_data_t *ad, uint32_t region_idx) {
     const nt_texture_region_t *r = &ad->regions[region_idx];
     if (r->name_hash == NT_ATLAS_TOMBSTONE_HASH || r->vertex_count == 0) {
@@ -403,12 +388,7 @@ static void atlas_precompute_region(nt_atlas_data_t *ad, uint32_t region_idx) {
     }
 }
 
-/* Recompute cached slices for every region, including tombstones (no-op).
- * Called after first-parse and after every merge. On merge this is required
- * regardless of which regions changed metadata: replace_payload_buffers
- * may have realloc'd cached_pos/cached_uv to a new vertex_capacity, so all
- * live slices must be re-baked from the (possibly relocated) raw vertices.
- * Pitfall 1 mitigation. */
+/* Re-bake all slices after parse/merge — replace_payload_buffers may have realloc'd. */
 static void atlas_precompute_all(nt_atlas_data_t *ad) {
     for (uint32_t i = 0; i < ad->region_count; i++) {
         atlas_precompute_region(ad, i);

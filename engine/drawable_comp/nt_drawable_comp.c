@@ -13,10 +13,8 @@ static nt_comp_storage_t s_storage;
 
 static nt_hash32_t *s_tags;
 static bool *s_visible;
-static float (*s_colors)[4]; /* float[N][4] */
-/* Pre-packed RGBA8 mirror of s_colors. Renderer reads packed as one
- * uint32_t; setters keep both in sync. */
-static uint32_t *s_colors_packed;
+static float (*s_colors)[4];
+static uint32_t *s_colors_packed; /* RGBA8 mirror; setters keep in sync with s_colors */
 
 /* ---- Callbacks ---- */
 

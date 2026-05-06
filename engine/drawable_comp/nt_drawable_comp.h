@@ -31,10 +31,7 @@ void nt_drawable_comp_set_color(nt_entity_t entity, float r, float g, float b, f
 /* Single-channel alpha shortcut — one sparse lookup, packs once. */
 void nt_drawable_comp_set_alpha(nt_entity_t entity, float a);
 
-/* ---- Bulk SoA view (read-only) ----
- *
- * Lets renderers join with sprite/transform data without per-entity accessor
- * overhead. Pointers stable for module lifetime; values shift on add/remove. */
+/* Bulk SoA view — pointers stable for module lifetime, values shift on add/remove. */
 typedef struct {
     uint16_t count;
     const uint16_t *sparse_indices; /* entity_index -> dense_idx; NT_INVALID_COMP_INDEX if absent */

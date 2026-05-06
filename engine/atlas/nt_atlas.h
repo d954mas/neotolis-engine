@@ -91,38 +91,15 @@ nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index
 
 /* ---- Phase 50 D-10/D-32: precomputed projections + pixels_per_unit ---- */
 
-/* D-32: atlas-level pixels_per_unit. Asserts the atlas is resolved.
- * Returns 1.0F when metadata is absent (ipu == 0). Game-side world math
- * may want this; the renderer does not — cached_pos already has
- * 1/pixels_per_unit baked in. */
+/* Asserts atlas resolved; returns 1.0F if metadata absent (ipu == 0). */
 float nt_atlas_get_pixels_per_unit(nt_resource_t atlas);
 
-/* D-10: pivot-relative pre-converted vertex positions (with 1/pixels_per_unit
- * baked in). Returns base pointer at the start of region's slice
- * (length = region->vertex_count). Out-of-range region_index trips NT_ASSERT.
- * Returns NULL only if atlas not resolved. */
+/* D-10 cached projections: 1/pixels_per_unit baked into pos, normalized UVs. */
 const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t region_index))[2];
-
-/* D-10: normalized atlas UVs. Returns base pointer at the start
- * of region's slice (length = region->vertex_count). Out-of-range region_index
- * trips NT_ASSERT. Returns NULL only if atlas not resolved. */
 const float (*nt_atlas_get_region_cached_uv(nt_resource_t atlas, uint32_t region_index))[2];
-
-/* Per-region triangle index slice (length = region->index_count). Returns base
- * pointer at the start of region's index slice in the atlas index buffer.
- * Returns NULL if atlas not resolved. Out-of-range trips NT_ASSERT.
- * Used by nt_sprite_renderer (Plan 04) for index emit. */
 const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region_index);
 
-/* Combined hot-path accessor: returns region metadata + cached vertex/UV
- * arrays + index slice in one call. Equivalent to four separate get_region /
- * cached_pos / cached_uv / indices calls but does the atlas user_data lookup
- * once. Hot in nt_sprite_renderer where 60k+ sprites/frame each need all
- * four pointers (~3-5 ms saved on 60k vs. four separate accessors).
- *
- * Out-of-range region_index trips NT_ASSERT. If the atlas isn't resolved,
- * region is NULL and the array pointers are NULL too — caller should
- * branch on .region or .region->vertex_count == 0 (tombstone). */
+/* Combined accessor — single user_data lookup vs. four separate calls. */
 typedef struct {
     const nt_texture_region_t *region;
     const float (*cached_pos)[2];

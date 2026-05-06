@@ -42,12 +42,7 @@ const float *nt_transform_comp_world_matrix(nt_entity_t entity); /* mat4, read-o
 
 void nt_transform_comp_update(void);
 
-/* ---- Bulk SoA view (read-only) ----
- *
- * For renderers / systems that iterate many entities per frame and want to
- * skip the per-entity accessor overhead. Returns sparse_indices (entity_idx
- * -> dense_idx) plus dense world_matrix array. Pointers are stable for the
- * module lifetime; values shift on add/remove (swap-and-pop). */
+/* Bulk SoA view — pointers stable for module lifetime, values shift on add/remove. */
 
 typedef struct {
     uint16_t count;

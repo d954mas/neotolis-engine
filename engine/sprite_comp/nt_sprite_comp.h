@@ -94,18 +94,8 @@ typedef struct {
     nt_resource_t page_resource;
 } nt_sprite_resolved_region_t;
 
-/* ---- Bulk SoA view for systems iterating dense data (renderer, debug, etc.) ----
- *
- * Returns base pointers into the dense SoA arrays plus the live count. All
- * arrays are indexed by the same dense_idx in [0, count). Pointers are stable
- * for the lifetime of the module (allocated once at init), but values shift
- * under add/remove (swap-and-pop) — do not cache the view across mutations.
- *
- * Reading region_index / origin / resolved requires checking
- * flags[i] & RESOLVED, same contract as the per-entity accessors. `resolved`
- * is refreshed by nt_sprite_comp_sync_resources() when atlas publication
- * revisions change, so renderers do not repeat atlas metadata lookups in the
- * per-sprite hot path. */
+/* Bulk SoA view — pointers stable for module lifetime; values shift on add/remove.
+ * Reads of region_index/origin/resolved require flags[i] & RESOLVED. */
 
 typedef struct {
     uint16_t count;

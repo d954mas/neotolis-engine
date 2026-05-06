@@ -116,10 +116,8 @@ bool nt_gfx_backend_is_gpu_timing_supported(void) { return false; }
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
     (void)desc;
-    /* Unique non-zero id per call lets tests differentiate samplers without
-     * needing GL — production backend uses glGenSamplers which is also unique. */
     static uint32_t s_counter;
-    return ++s_counter;
+    return ++s_counter; /* unique id so tests can differentiate samplers */
 }
 
 void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) { (void)backend_handle; }
