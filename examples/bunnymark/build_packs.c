@@ -197,19 +197,11 @@ int main(int argc, char *argv[]) {
     atlas_opts.margin = 2;
     atlas_opts.extrude = 2; /* OK with RECT (extrude valid only for rect shape) */
     atlas_opts.premultiplied = true;
-    /* UASTC compress matches the HD pack (both packs go through the same
-     * Basis transcode path on GPU). Without compress on SD, HD was sampling
-     * a smaller compressed BC7/ASTC texel block while SD was reading raw
-     * RGBA8 — different memory bandwidth profile, different fps. Equal
-     * configs make the SD/HD comparison meaningful. */
+    /* UASTC matches HD so both packs share the GPU transcode path. */
     nt_tex_compress_opts_t sd_compress_opts = nt_tex_compress_uastc_default();
     atlas_opts.compress = &sd_compress_opts;
-    /* Bunnymark is a stress test — we WANT to see the real per-fragment cost
-     * under heavy overdraw, not mask it with the driver's fast-path mipmap
-     * sampling on compressed textures. LINEAR no-mips matches Defold's
-     * sprite default and gives a clean baseline for the renderer's CPU and
-     * GPU work. (For real games with shipping content, trilinear+mipmaps
-     * usually wins on this driver — pick filter per-asset to taste.) */
+    /* LINEAR no-mips: bunnymark stress test wants honest per-fragment cost,
+     * not driver mipmap fast-path. Defold's sprite default. */
     atlas_opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     atlas_opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
     atlas_opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
@@ -251,22 +243,7 @@ int main(int argc, char *argv[]) {
 
 #ifdef BUNNYMARK_HD_AVAILABLE
     // #region pack 2: bunnymark_hd.ntpack (Open Q3 — guarded by CMake)
-    /* HD pack uses pixels_per_unit=17.0F so the on-screen size after the
-     * builder's alpha-trim matches the SD bunny.
-     *
-     * SD bunnies are pixel art with no transparent margin → trim is a no-op.
-     * HD illustrations have ~42% transparent margin around the character that
-     * the builder strips during alpha-trim, so the actual rendered region per
-     * HD bunny is ~227 750 px (avg of BENCH trim_area / 5), i.e. ≈477x477
-     * visible content. Dividing by ppu=17 → ~28x28 world units, close to
-     * SD's 25x32. With the earlier ppu=22 the trimmed HD bunnies rendered
-     * at ~22x22 — visibly smaller AND hitting fewer fragments per sprite,
-     * which masked the real per-fragment cost (HD looked artificially fast
-     * on 60k bunnies vs SD).
-     *
-     * Phase 48 atlas merge keeps region indices stable on stack so live
-     * SpriteComponent.region_index values stay valid across the toggle
-     * (DEMO-08). */
+    /* ppu=17 matches HD on-screen size to SD after alpha-trim of HD margins. */
     (void)printf("\n=== Build Bunnymark HD Pack -> %s ===\n\n", out_dir);
 
     NtBuilderContext *ctx_hd = nt_builder_start_pack(pack_path(out_dir, "bunnymark_hd.ntpack"));

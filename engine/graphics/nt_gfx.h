@@ -51,7 +51,7 @@ typedef struct {
  * descriptor so repeated nt_gfx_make_sampler calls with the same desc
  * return the same handle. Most apps use 3-10 unique configs; 32 leaves
  * comfortable headroom. */
-#define NT_GFX_MAX_SAMPLERS 32
+#define NT_GFX_MAX_SAMPLERS 64
 
 typedef struct {
     const char *name; /* string literal, not owned */
@@ -370,58 +370,19 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
 void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_t slot);
 
-/* ---- Buffer update ----
- *
- * update_buffer  — partial / in-place rewrite (glBufferSubData). Use when the
- *                  buffer is reused without a full per-frame replacement
- *                  (e.g. UBO frame uniforms, sub-region patches).
- *
- * orphan_buffer  — full rewrite with driver orphan hint (glBufferData with
- *                  GL_DYNAMIC_DRAW). Use for streaming geometry where the
- *                  whole buffer is replaced every frame (sprite VBO/IBO,
- *                  text VBO/IBO). Avoids GPU pipeline stalls when the GPU
- *                  is still consuming the previous frame's data — the
- *                  driver allocates fresh storage and reclaims the old one
- *                  asynchronously. Buffer must be NT_USAGE_DYNAMIC. */
-
+/* update_buffer = glBufferSubData (partial). orphan_buffer = glBufferData
+ * with DYNAMIC_DRAW hint, for streaming geometry replaced every frame. */
 void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
 
-/* ---- GPU timing ----
- *
- * Pop the oldest completed GPU-side TIME_ELAPSED query into *out_ns.
- * Backend-driven ring buffer captures one query per nt_gfx_begin/end_frame
- * pair. Results land 1-2 frames after the frame that started the query.
- *
- * Returns true on success (out_ns filled with nanoseconds). Returns false
- * when:
- *   - the platform / driver doesn't expose timer queries
- *   - the oldest query isn't ready yet (call again next frame)
- *   - a disjoint event invalidated results (clock skipped)
- *
- * nt_stats polls this each frame for the on-screen / log GPU ms reading. */
+/* Pop the oldest completed TIME_ELAPSED result. Returns false when the
+ * platform lacks support, the oldest result isn't ready, or a disjoint
+ * event invalidated results. Result lands 1-2 frames after begin_frame. */
 bool nt_gfx_poll_gpu_time_ns(uint64_t *out_ns);
 
-/* Toggle GPU time-elapsed queries at runtime. Default = enabled.
- *
- * Cost when enabled: two GL commands per frame (glBeginQuery / glEndQuery)
- * + one glGetQueryObjectuiv per poll. Pipelined via a 4-deep ring so polls
- * never block. Real overhead measured at <1% on a 60k-sprite bunnymark in
- * both WebGL2 and native GL.
- *
- * Reasons to disable:
- *   - Spector / RenderDoc captures (timer queries clutter the trace)
- *   - Mobile WebGL where some drivers insert sync points on TIME_ELAPSED
- *   - Production builds that don't show the GPU ms readout anyway
- *
- * No-op if the platform doesn't support timer queries (poll returns false
- * either way). Existing in-flight queries drain naturally; subsequent
- * polls return false until something is queued again. */
+/* Toggle GPU time-elapsed queries. Default = enabled. Disable for
+ * RenderDoc / Spector captures or mobile drivers that stall on it. */
 void nt_gfx_set_gpu_timing_enabled(bool enabled);
-
-/* Reports whether the runtime detected timer-query support (WebGL2 +
- * EXT_disjoint_timer_query_webgl2, or desktop GL ≥ 3.3 / ARB_timer_query).
- * Independent of the runtime toggle above. */
 bool nt_gfx_is_gpu_timing_supported(void);
 
 /* ---- Texture update (non-mipmapped textures only, level 0) ---- */

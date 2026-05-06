@@ -32,9 +32,6 @@ typedef struct {
     nt_pipeline_t pipeline;
 } nt_sprite_pipeline_entry_t;
 
-/* Per-state-change draw command. emit_one writes vertices/indices into shared
- * staging buffers; draw_list opens/closes commands at batch_key boundaries.
- * flush() uploads VBO+IBO once, then replays each cmd with bind+draw. */
 typedef struct {
     nt_pipeline_t pipeline;
     uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
@@ -399,10 +396,6 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         tz -= (m[2] * dx) + (m[6] * dy);
     }
 
-    /* Color (DrawableComponent) → already packed RGBA8 in the component.
-     * drawable_comp.set_color() / .repack_color() keep the packed mirror
-     * in sync with the float color — saves 4 × pack_u8 conversions per
-     * sprite (~4 mul + 4 branches × 4 channels = ~32 ops, dropped). */
     uint32_t color32 = dv->colors_packed[d_idx];
     uint8_t cr = (uint8_t)(color32 & 0xFFU);
     uint8_t cg = (uint8_t)((color32 >> 8) & 0xFFU);
@@ -413,16 +406,8 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     bool fx = (flags & NT_SPRITE_FLAG_FLIP_X) != 0;
     bool fy = (flags & NT_SPRITE_FLAG_FLIP_Y) != 0;
 
-    /* Emit vertices (uniform rect/polygon path, D-08).
-     *
-     * Per-vertex transform is the dominant CPU cost at 60k+ sprites/frame:
-     * 6 mul + 6 add per vertex × 4 verts × 60k ≈ 2.9M FLOPs just for
-     * positions. WASM clang can auto-vectorize the scalar loop with
-     * -msimd128, but the layout (3 floats per vertex inside a 24-byte
-     * struct) makes auto-vec brittle — it usually only kicks in on flat
-     * arrays. Hand-rolled SIMD path computes 4 verts of XYZ in 9 SIMD
-     * mul/add ops total, then scatters into the interleaved vertex array.
-     * Native and non-SIMD WASM keep the scalar path. */
+    /* Per-vertex transform is the hottest CPU cost at 60k+ sprites. The
+     * SIMD128 path packs the 4-vert quad case; everything else uses scalar. */
     uint32_t base = s_sprite.vertex_count;
 #ifdef __wasm_simd128__
     if (r->vertex_count == 4) {
@@ -739,10 +724,7 @@ void nt_sprite_renderer_flush(void) {
                 }
                 bound_tex_ids[t] = c->resolved_tex[t];
             }
-            /* Material sampler override: bind_texture already attached the
-             * texture's asset-baked default sampler. If the material declared
-             * its own sampler for this slot, bind it now to override. .id==0
-             * means "keep texture default" — no extra GL call. */
+            /* Material sampler override (.id==0 = keep texture default). */
             if (c->resolved_sampler[t].id != 0) {
                 nt_gfx_bind_sampler(c->resolved_sampler[t], t);
             }
