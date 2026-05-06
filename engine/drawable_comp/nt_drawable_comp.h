@@ -35,7 +35,6 @@ void nt_drawable_comp_set_alpha(nt_entity_t entity, float a);
 typedef struct {
     uint16_t count;
     const uint16_t *sparse_indices; /* entity_index -> dense_idx; NT_INVALID_COMP_INDEX if absent */
-    const float (*color)[4];        /* dense_idx -> rgba float4 */
     const uint32_t *colors_packed;  /* dense_idx -> RGBA8 packed (little-endian) */
     const bool *visible;
 } nt_drawable_comp_view_t;

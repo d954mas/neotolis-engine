@@ -148,7 +148,6 @@ nt_drawable_comp_view_t nt_drawable_comp_view(void) {
     return (nt_drawable_comp_view_t){
         .count = nt_comp_storage_count(&s_storage),
         .sparse_indices = nt_comp_storage_sparse(&s_storage),
-        .color = (const float(*)[4])s_colors,
         .colors_packed = s_colors_packed,
         .visible = s_visible,
     };
