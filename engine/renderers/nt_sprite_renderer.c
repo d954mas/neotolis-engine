@@ -545,6 +545,14 @@ void nt_sprite_renderer_flush(void) {
             } else if (c->resolved_tex[t] != 0) {
                 want_sampler = nt_gfx_get_texture_default_sampler((nt_texture_t){.id = c->resolved_tex[t]}).id;
             } else {
+                /* Slot declared by material (tex_count > t) but no texture
+                 * resolved. Cmd will render with stale unit state. Warn once
+                 * — usually a material/resource resolve race. */
+                static bool s_warned_unbound;
+                if (!s_warned_unbound) {
+                    NT_LOG_WARN("sprite_renderer: cmd slot %u has no resolved texture — material binding race?", (unsigned)t);
+                    s_warned_unbound = true;
+                }
                 want_sampler = 0;
             }
             if (want_sampler != bound_sampler_ids[t]) {
