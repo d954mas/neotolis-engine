@@ -4,14 +4,19 @@
 #include "core/nt_types.h"
 #include "render/nt_render_defs.h"
 
-/* Sized for polygon worst case 8v/18i per sprite. uint16 indices —
- * auto-flushes before crossing the 65535 vertex range. */
-#ifndef NT_SPRITE_RENDERER_MAX_SPRITES
-#define NT_SPRITE_RENDERER_MAX_SPRITES 8192
+/* Staging buffers for one flush. uint16 indices cap MAX_VERTICES at 65536.
+ * Default index ratio (9/4) sized for 8-vertex polygon worst case (18 idx /
+ * 8 verts). Pure-rect content needs only 6/4 = 1.5×; polygon-heavy 16-v
+ * needs 42/16 ≈ 2.6×. Override either to match the game's content profile. */
+#ifndef NT_SPRITE_RENDERER_MAX_VERTICES
+#define NT_SPRITE_RENDERER_MAX_VERTICES 16384
 #endif
 
-#define NT_SPRITE_RENDERER_MAX_VERTICES (NT_SPRITE_RENDERER_MAX_SPRITES * 8)
-#define NT_SPRITE_RENDERER_MAX_INDICES (NT_SPRITE_RENDERER_MAX_SPRITES * 18)
+#ifndef NT_SPRITE_RENDERER_MAX_INDICES
+#define NT_SPRITE_RENDERER_MAX_INDICES (NT_SPRITE_RENDERER_MAX_VERTICES * 9 / 4)
+#endif
+
+_Static_assert(NT_SPRITE_RENDERER_MAX_VERTICES <= 65536, "MAX_VERTICES must fit uint16 index range");
 
 #define NT_SPRITE_RENDERER_MAX_PIPELINES_HARDCAP 64
 

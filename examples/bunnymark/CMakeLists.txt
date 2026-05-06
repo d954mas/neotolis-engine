@@ -20,6 +20,10 @@ else()
     target_link_libraries(bunnymark_demo PRIVATE nt_gfx nt_http_stub nt_fs)
 endif()
 
+# Bunnymark stress-tests 60k+ sprites; raise sprite-renderer staging to the
+# uint16 cap so we hit ~4 flushes/frame instead of ~15 with the engine default.
+target_compile_definitions(nt_sprite_renderer PRIVATE NT_SPRITE_RENDERER_MAX_VERTICES=65536)
+
 nt_set_warning_flags(bunnymark_demo)
 nt_set_sanitizer_flags(bunnymark_demo)
 

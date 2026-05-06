@@ -18,8 +18,6 @@
 #include "sprite_comp/nt_sprite_comp.h"
 #include "transform_comp/nt_transform_comp.h"
 
-#define NT_SPRITE_RENDERER_UINT16_VERTEX_LIMIT 65536U
-
 // #region module state
 typedef struct {
     uint64_t key;
@@ -309,8 +307,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
      * (uploads + replays cmds + resets), then re-open a fresh cmd with the
      * same state at first_index=0. The caller sees no state change; the GPU
      * just gets another chunk draw instead of UNSIGNED_INT indices. */
-    if (s_sprite.vertex_count + r->vertex_count > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.vertex_count + r->vertex_count > NT_SPRITE_RENDERER_UINT16_VERTEX_LIMIT ||
-        s_sprite.index_count + r->index_count > NT_SPRITE_RENDERER_MAX_INDICES) {
+    if (s_sprite.vertex_count + r->vertex_count > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + r->index_count > NT_SPRITE_RENDERER_MAX_INDICES) {
         NT_ASSERT(s_sprite.cmd_count > 0 && "emit_one called with no open cmd");
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
         nt_sprite_renderer_flush();
