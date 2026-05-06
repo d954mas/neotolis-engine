@@ -58,18 +58,40 @@ else()
     message(STATUS "Bunnymark: HD art not present at examples/bunnymark/raw/hd/ — SD-only build")
 endif()
 
+# Per-preset asset sync: copy the source ntpacks (produced by the
+# build_bunnymark_packs CLI) into the running preset's assets/ dir whenever
+# they're newer than the destination. By design the packer is invoked
+# manually via the VS Code task / CLI — CMake does not produce the source
+# packs itself. If the user runs `cmake --build ... --target bunnymark_demo`
+# without first generating ntpacks, skip the copy chain and emit a clear
+# warning instead of failing with an opaque "missing dependency" from ninja.
+set(BUNNYMARK_PACKS_PRESENT TRUE)
 foreach(PACK ${BUNNYMARK_PACK_NAMES})
-    add_custom_command(
-        OUTPUT "${BUNNYMARK_ASSETS_DIR}/${PACK}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${BUNNYMARK_ASSETS_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${BUNNYMARK_PACK_DIR}/${PACK}" "${BUNNYMARK_ASSETS_DIR}/${PACK}"
-        DEPENDS "${BUNNYMARK_PACK_DIR}/${PACK}"
-        COMMENT "Copying ${PACK} -> ${NT_PRESET_NAME}/assets/"
-    )
-    list(APPEND BUNNYMARK_PACK_OUTPUTS "${BUNNYMARK_ASSETS_DIR}/${PACK}")
+    if(NOT EXISTS "${BUNNYMARK_PACK_DIR}/${PACK}")
+        set(BUNNYMARK_PACKS_PRESENT FALSE)
+    endif()
 endforeach()
-add_custom_target(bunnymark_demo_packs DEPENDS ${BUNNYMARK_PACK_OUTPUTS})
-add_dependencies(bunnymark_demo bunnymark_demo_packs)
+
+if(BUNNYMARK_PACKS_PRESENT)
+    foreach(PACK ${BUNNYMARK_PACK_NAMES})
+        add_custom_command(
+            OUTPUT "${BUNNYMARK_ASSETS_DIR}/${PACK}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${BUNNYMARK_ASSETS_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${BUNNYMARK_PACK_DIR}/${PACK}" "${BUNNYMARK_ASSETS_DIR}/${PACK}"
+            DEPENDS "${BUNNYMARK_PACK_DIR}/${PACK}"
+            COMMENT "Copying ${PACK} -> ${NT_PRESET_NAME}/assets/"
+        )
+        list(APPEND BUNNYMARK_PACK_OUTPUTS "${BUNNYMARK_ASSETS_DIR}/${PACK}")
+    endforeach()
+    add_custom_target(bunnymark_demo_packs DEPENDS ${BUNNYMARK_PACK_OUTPUTS})
+    add_dependencies(bunnymark_demo bunnymark_demo_packs)
+else()
+    message(WARNING
+        "Bunnymark: source packs not found at ${BUNNYMARK_PACK_DIR}. "
+        "Run the 'Build & run bunnymark packs' VS Code task (or "
+        "build_bunnymark_packs.exe) before building bunnymark_demo, "
+        "then re-run cmake configure to wire the per-preset copy step.")
+endif()
 
 # Optional CDN base URL
 if(NT_CDN_URL)
