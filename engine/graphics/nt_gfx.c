@@ -54,10 +54,13 @@ static uint32_t s_global_block_count;
 
 /* ---- File-scope internal state ---- */
 
-/* Sampler cache entry — packed key + backend handle. Lifetime = engine. */
+/* Sampler cache entry — packed key, original desc, and current backend handle.
+ * Lifetime = engine. desc is preserved across context loss so backend can be
+ * lazily recreated without invalidating material-side sampler.id handles. */
 typedef struct {
-    uint32_t key;     /* hash of (min, mag, wrap_u, wrap_v); 0 = empty slot */
-    uint32_t backend; /* GL sampler object handle */
+    uint32_t key;            /* hash of (min, mag, wrap_u, wrap_v); 0 = empty slot */
+    uint32_t backend;        /* GL sampler object handle; 0 after context loss */
+    nt_sampler_desc_t desc;  /* recorded for context-loss recreate */
 } nt_gfx_sampler_entry_t;
 
 static struct {
