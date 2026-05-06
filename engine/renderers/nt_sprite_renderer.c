@@ -34,6 +34,7 @@ typedef struct {
     uint8_t tex_count;
     uint32_t first_index; /* offset into s_sprite.indices[] */
     uint32_t index_count;
+    uint32_t first_vertex; /* offset into s_sprite.vertices[] — for per-cmd vertex stats */
 } nt_sprite_draw_cmd_t;
 
 static struct {
@@ -228,6 +229,7 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi) {
         c->resolved_sampler[i] = mi->resolved_sampler[i];
     }
     c->first_index = s_sprite.index_count;
+    c->first_vertex = s_sprite.vertex_count;
 }
 
 /* Re-open a cmd with state copied from another cmd. Used by emit_one's
@@ -242,6 +244,7 @@ static void open_cmd_from_snapshot(const nt_sprite_draw_cmd_t *snap) {
     *c = *snap;
     c->first_index = s_sprite.index_count;
     c->index_count = 0;
+    c->first_vertex = s_sprite.vertex_count;
 }
 
 /* Sprite atlas pages are the renderer's texture source of truth. The game may
@@ -610,7 +613,13 @@ void nt_sprite_renderer_flush(void) {
             }
         }
 
-        nt_gfx_draw_indexed(c->first_index, c->index_count, s_sprite.vertex_count);
+        /* Per-cmd vertex range = next cmd's first_vertex (or total at end of
+         * staging for the last cmd) minus this cmd's first_vertex. Without
+         * this delta, every cmd reports the whole flush chunk and frame_stats
+         * inflate by N when state changes split into N cmds. */
+        uint32_t cmd_vertex_end = (ci + 1U < s_sprite.cmd_count) ? s_sprite.cmds[ci + 1U].first_vertex : s_sprite.vertex_count;
+        uint32_t cmd_vertex_count = cmd_vertex_end - c->first_vertex;
+        nt_gfx_draw_indexed(c->first_index, c->index_count, cmd_vertex_count);
         s_sprite.frame_draw_calls++;
     }
 
