@@ -48,10 +48,8 @@ nt_result_t nt_stats_init(const nt_stats_desc_t *desc) {
     s_stats.throughput_period = d.throughput_log_period;
     s_stats.log_enabled = d.enable_throughput_log;
     s_stats.user_capacity = d.user_counter_capacity;
-    s_stats.last_gpu_ms = -1.0F; /* GPU timer not yet wired */
+    s_stats.last_gpu_ms = -1.0F; /* until first poll succeeds */
     s_stats.initialized = true;
-
-    NT_LOG_INFO("nt_stats: GPU timer not yet exposed via nt_gfx; gpu_ms = -1.0 always");
     return NT_OK;
 }
 
@@ -175,7 +173,7 @@ void nt_stats_count(const char *name, uint64_t value) {
 uint32_t nt_stats_format_lines(char *buf, uint32_t size) {
     NT_ASSERT(buf && size > 0);
 
-    /* GPU slot is "N/A" until GPU timer wiring lands */
+    /* GPU slot is "N/A" if timer queries unsupported or no segment polled yet */
     char gpu_buf[32];
     if (s_stats.last_gpu_ms < 0.0F) {
         (void)snprintf(gpu_buf, sizeof(gpu_buf), "N/A");
