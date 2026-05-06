@@ -1021,7 +1021,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
             .mag_filter = (nt_texture_filter_t)hdr2->default_mag_filter,
             .wrap_u = (nt_texture_wrap_t)hdr2->default_wrap_u,
             .wrap_v = (nt_texture_wrap_t)hdr2->default_wrap_v,
-            .gen_mipmaps = (hdr2->mip_count == 1),
+            .gen_mipmaps = (hdr2->flags & NT_TEXTURE_FLAG_GEN_MIPMAPS) != 0,
             .label = NULL,
         };
         return nt_gfx_make_texture(&desc).id;

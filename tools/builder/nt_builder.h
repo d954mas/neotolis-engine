@@ -163,6 +163,12 @@ typedef struct {
     nt_texture_default_filter_t filter_mag; /* default: LINEAR (NEAREST or LINEAR only) */
     nt_texture_default_wrap_t wrap_u;       /* default: REPEAT */
     nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
+    /* Runtime mip generation for RAW textures. Default true so material
+     * sampler overrides can opt into mipmap filtering without surprises.
+     * Opt out for pixel-art atlases / UI textures that will never be
+     * sampled with mipmap filters — saves ~33% memory. No effect on
+     * BASIS textures (their mip count is baked at encode time). */
+    bool gen_mipmaps;
 } nt_tex_opts_t;
 
 /* --- Texture compression options (Basis Universal encoding) --- */
@@ -265,6 +271,7 @@ typedef struct {
     nt_texture_default_filter_t filter_mag; /* default: LINEAR (NEAREST or LINEAR only) */
     nt_texture_default_wrap_t wrap_u;       /* default: REPEAT */
     nt_texture_default_wrap_t wrap_v;       /* default: REPEAT */
+    bool gen_mipmaps;                       /* RAW only; default true. See nt_tex_opts_t.gen_mipmaps. */
 } nt_atlas_opts_t;
 
 /* Default atlas options */
@@ -288,6 +295,7 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
         .filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR,
         .wrap_u = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
         .wrap_v = NT_TEXTURE_DEFAULT_WRAP_REPEAT,
+        .gen_mipmaps = true,
     };
 }
 

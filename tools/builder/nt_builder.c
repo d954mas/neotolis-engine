@@ -335,6 +335,9 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
         if (ta->opts.filter_min != tb->opts.filter_min || ta->opts.filter_mag != tb->opts.filter_mag || ta->opts.wrap_u != tb->opts.wrap_u || ta->opts.wrap_v != tb->opts.wrap_v) {
             return false;
         }
+        if (ta->opts.gen_mipmaps != tb->opts.gen_mipmaps) {
+            return false;
+        }
         /* premultiplied also affects encoded pixel bytes + header flags;
          * mirror the opts_hash policy. */
         if (ta->opts.premultiplied != tb->opts.premultiplied) {

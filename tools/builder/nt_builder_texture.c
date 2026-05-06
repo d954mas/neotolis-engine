@@ -205,10 +205,15 @@ nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, u
     tex_hdr.height = height;
     tex_hdr.mip_count = 1;
     tex_hdr.compression = (uint8_t)NT_TEXTURE_COMPRESSION_RAW;
-    tex_hdr.flags = premul ? (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED : 0;
-    /* Sampler defaults from opts (caller controls per-texture / per-atlas).
-     * Activator reads these to create the bound sampler. Materials override
-     * at draw time via per-binding sampler config. */
+    uint8_t hdr_flags = 0;
+    if (premul) {
+        hdr_flags |= (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED;
+    }
+    if (opts && opts->gen_mipmaps) {
+        hdr_flags |= (uint8_t)NT_TEXTURE_FLAG_GEN_MIPMAPS;
+    }
+    tex_hdr.flags = hdr_flags;
+    /* Sampler defaults from opts (caller controls per-texture / per-atlas). */
     tex_hdr.default_min_filter = (uint8_t)(opts ? opts->filter_min : NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR);
     tex_hdr.default_mag_filter = (uint8_t)(opts ? opts->filter_mag : NT_TEXTURE_DEFAULT_FILTER_LINEAR);
     tex_hdr.default_wrap_u = (uint8_t)(opts ? opts->wrap_u : NT_TEXTURE_DEFAULT_WRAP_REPEAT);

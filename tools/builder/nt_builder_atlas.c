@@ -1774,6 +1774,7 @@ static void pipeline_register(AtlasPipeline *p) {
         td->opts.filter_mag = p->opts->filter_mag;
         td->opts.wrap_u = p->opts->wrap_u;
         td->opts.wrap_v = p->opts->wrap_v;
+        td->opts.gen_mipmaps = p->opts->gen_mipmaps;
         if (p->state->has_compress) {
             td->compress = p->state->compress;
             td->has_compress = true;

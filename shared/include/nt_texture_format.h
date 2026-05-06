@@ -39,7 +39,8 @@ typedef enum {
 
 /* Texture header flags (single byte, room for future bits: sRGB, linear, ...) */
 #define NT_TEXTURE_FLAG_PREMULTIPLIED (1U << 0) /* RGB already multiplied by alpha */
-/* bits 1..7 reserved */
+#define NT_TEXTURE_FLAG_GEN_MIPMAPS (1U << 1)   /* runtime should glGenerateMipmap on RAW upload (no effect on BASIS) */
+/* bits 2..7 reserved */
 
 /* Values must match nt_texture_filter_t / nt_texture_wrap_t in nt_gfx.h. */
 typedef enum {
@@ -79,6 +80,9 @@ typedef enum {
  * flags field:
  *   bit 0 = NT_TEXTURE_FLAG_PREMULTIPLIED — RGB values are already multiplied
  *           by alpha. Renderer should use blend (ONE, ONE_MINUS_SRC_ALPHA).
+ *   bit 1 = NT_TEXTURE_FLAG_GEN_MIPMAPS — runtime should generate mips on
+ *           upload for RAW textures so material sampler overrides can opt
+ *           into mipmap filtering. No effect on BASIS (mips are baked).
  *
  * default_min/mag_filter, default_wrap_u/v:
  *   Builder-baked defaults (nt_texture_filter_t / nt_texture_wrap_t enum

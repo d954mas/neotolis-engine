@@ -61,10 +61,12 @@ uint64_t nt_builder_compute_opts_hash(const NtBuildEntry *pe) {
         uint8_t fmag = (uint8_t)td->opts.filter_mag;
         uint8_t wu = (uint8_t)td->opts.wrap_u;
         uint8_t wv = (uint8_t)td->opts.wrap_v;
+        uint8_t gen_mips = td->opts.gen_mipmaps ? 1 : 0;
         buf[pos++] = fmin;
         buf[pos++] = fmag;
         buf[pos++] = wu;
         buf[pos++] = wv;
+        buf[pos++] = gen_mips;
 
         /* compression path */
         uint8_t has_compress = td->has_compress ? 1 : 0;
