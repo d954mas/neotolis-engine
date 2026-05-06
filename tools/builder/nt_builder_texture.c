@@ -269,6 +269,15 @@ nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgb
 
     NT_BUILD_ASSERT(enc.data && "texture encode: Basis encode failed");
 
+    /* Mipmap filters need a mipmap chain. BASIS textures upload exactly the
+     * mips the encoder produced — runtime cannot fix this up like RAW does
+     * via glGenerateMipmap. Asserting at builder time prevents shipping
+     * broken sampling (incomplete mip chain → undefined / black). */
+    nt_texture_default_filter_t fmin = opts ? opts->filter_min : NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;
+    bool wants_mips = (fmin == NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST || fmin == NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_NEAREST || fmin == NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_LINEAR ||
+                       fmin == NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR);
+    NT_BUILD_ASSERT((!wants_mips || enc.mip_count > 1) && "texture encode: filter_min selects a mipmap variant but Basis produced a single-level chain");
+
     /* Build V3 header */
     NtTextureAssetHeaderV2 tex_hdr;
     memset(&tex_hdr, 0, sizeof(tex_hdr));
