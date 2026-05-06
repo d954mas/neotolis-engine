@@ -62,7 +62,14 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc);
 void nt_sprite_renderer_shutdown(void);
 void nt_sprite_renderer_restore_gpu(void);
 
-/* ---- Draw API (list-based, D-01) ---- */
+/* ---- Draw API (list-based, D-01) ----
+ *
+ * Texture binding contract: the renderer always binds the sprite's atlas
+ * page texture to texture unit 0. A sprite material may declare a slot-0
+ * texture binding to receive the uniform name (set_uniform_int) and an
+ * optional sampler override; if it doesn't, the renderer still binds the
+ * page texture — fragment shaders that sample sampler2D u_texture without
+ * an explicit binding pick up unit 0 by GL default. */
 
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 void nt_sprite_renderer_flush(void);

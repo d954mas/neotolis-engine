@@ -11,6 +11,11 @@
  * version bump makes the activator assert mismatch immediately. */
 #define NT_ATLAS_VERSION 5
 
+/* Reserved for the planned GPU-instanced rect renderer (Issue #176). The
+ * builder still emits these flags so when the instanced path lands it can
+ * filter rect runs in O(1). The current sprite renderer ignores them. The
+ * three patterns describe the three valid CW (post Y-flip / winding-swap)
+ * orderings of a 4-vertex quad's 6 indices. */
 #define NT_ATLAS_REGION_FLAG_QUAD_012023 ((uint8_t)(1U << 0))
 #define NT_ATLAS_REGION_FLAG_QUAD_012130 ((uint8_t)(1U << 1))
 #define NT_ATLAS_REGION_FLAG_QUAD_012132 ((uint8_t)(1U << 2))

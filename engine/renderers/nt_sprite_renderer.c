@@ -250,6 +250,10 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
     }
 
     nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count - 1];
+    /* Sprite contract (see nt_sprite_renderer.h draw_list comment): atlas
+     * page texture always binds to slot 0. If the material declared no
+     * slot-0 binding, install the page-texture slot here without uniform
+     * name (shader's sampler2D defaults to unit 0). */
     if (c->tex_count == 0) {
         c->tex_count = 1;
         c->tex_names[0] = NULL;

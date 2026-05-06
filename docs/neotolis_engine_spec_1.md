@@ -870,11 +870,10 @@ Depth is computed on CPU only when needed. Transparent/depth-sensitive passes co
 CPU batch: SpriteRenderer consumes consecutive `batch_key` runs, emits dynamic
 sprite vertices into a shared staging VBO, records draw commands on state/page
 changes, and flushes when staging capacity, uint16 index range, or command
-capacity requires it. Rect and polygon sprites share the public stream; rect
-regions that the builder marks as standard quads may use an internal static
-quad-index path for large contiguous quad runs. This path preserves draw order
-and falls back to the generic dynamic-index path for polygon sprites, small rect
-islands, non-standard quad winding, or mixed geometry.
+capacity requires it. Rect and polygon sprites share the same generic dynamic
+IBO path — see §14.3. Atlas regions still carry `NT_ATLAS_REGION_FLAG_QUAD_*`
+metadata for a future GPU-instanced rect renderer (Issue #176); the current
+SpriteRenderer ignores those flags.
 
 ### MeshRenderer
 
