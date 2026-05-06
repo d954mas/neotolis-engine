@@ -19,8 +19,10 @@
 
 #ifdef _WIN32
 #include <direct.h>
+#include <windows.h>
 #define MKDIR(p) _mkdir(p)
 #else
+#include <dirent.h>
 #include <sys/stat.h>
 #define MKDIR(p) mkdir(p, 0755)
 #endif
@@ -32,6 +34,100 @@ static char s_path_buf[512];
 static const char *pack_path(const char *dir, const char *name) {
     (void)snprintf(s_path_buf, sizeof(s_path_buf), "%s/%s", dir, name);
     return s_path_buf;
+}
+
+/* Copy ntpack files into every "<out_dir>/<preset>/assets" directory found
+ * at scan time. Keeps per-preset assets in sync with the freshly built
+ * source packs without dragging the build system into the dependency graph. */
+static int fanout_packs(const char *out_dir, const char *const *pack_names, int n_packs) {
+    char pattern[512];
+    (void)snprintf(pattern, sizeof(pattern), "%s/*", out_dir);
+    int copied = 0;
+
+#ifdef _WIN32
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            continue;
+        }
+        if (fd.cFileName[0] == '.') {
+            continue;
+        }
+        if (strcmp(fd.cFileName, "_cache") == 0) {
+            continue;
+        }
+
+        char assets_dir[512];
+        (void)snprintf(assets_dir, sizeof(assets_dir), "%s/%s/assets", out_dir, fd.cFileName);
+        DWORD attrs = GetFileAttributesA(assets_dir);
+        if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+            continue;
+        }
+
+        for (int i = 0; i < n_packs; i++) {
+            char src[512];
+            char dst[512];
+            (void)snprintf(src, sizeof(src), "%s/%s", out_dir, pack_names[i]);
+            (void)snprintf(dst, sizeof(dst), "%s/%s", assets_dir, pack_names[i]);
+            if (CopyFileA(src, dst, FALSE)) {
+                copied++;
+                (void)printf("  %s -> %s/assets/\n", pack_names[i], fd.cFileName);
+            }
+        }
+    } while (FindNextFileA(h, &fd));
+    (void)FindClose(h);
+#else
+    DIR *d = opendir(out_dir);
+    if (!d) {
+        return 0;
+    }
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+        if (ent->d_name[0] == '.') {
+            continue;
+        }
+        if (strcmp(ent->d_name, "_cache") == 0) {
+            continue;
+        }
+        char assets_dir[512];
+        (void)snprintf(assets_dir, sizeof(assets_dir), "%s/%s/assets", out_dir, ent->d_name);
+        struct stat st;
+        if (stat(assets_dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
+            continue;
+        }
+
+        for (int i = 0; i < n_packs; i++) {
+            char src[512];
+            char dst[512];
+            (void)snprintf(src, sizeof(src), "%s/%s", out_dir, pack_names[i]);
+            (void)snprintf(dst, sizeof(dst), "%s/%s", assets_dir, pack_names[i]);
+            FILE *fs = fopen(src, "rb");
+            if (!fs) {
+                continue;
+            }
+            FILE *fdst = fopen(dst, "wb");
+            if (!fdst) {
+                (void)fclose(fs);
+                continue;
+            }
+            char buf[8192];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), fs)) > 0) {
+                (void)fwrite(buf, 1, n, fdst);
+            }
+            (void)fclose(fs);
+            (void)fclose(fdst);
+            copied++;
+            (void)printf("  %s -> %s/assets/\n", pack_names[i], ent->d_name);
+        }
+    }
+    (void)closedir(d);
+#endif
+    return copied;
 }
 
 int main(int argc, char *argv[]) {
@@ -250,6 +346,19 @@ int main(int argc, char *argv[]) {
         (void)printf("  bunnymark_hd.ntpack    %8.1f KB\n", (double)sz_hd / 1024.0);
     }
 #endif
+
+    /* Fan out freshly built packs to every <out_dir>/<preset>/assets/ dir.
+     * Lets the demo see new packs without rebuilding bunnymark_demo. */
+    (void)printf("\n=== Sync to preset assets/ dirs ===\n");
+#ifdef BUNNYMARK_HD_AVAILABLE
+    static const char *const pack_names[] = {"bunnymark_sd.ntpack", "bunnymark_hd.ntpack"};
+    int n_packs = 2;
+#else
+    static const char *const pack_names[] = {"bunnymark_sd.ntpack"};
+    int n_packs = 1;
+#endif
+    int copied = fanout_packs(out_dir, pack_names, n_packs);
+    (void)printf("  Total: %d copies\n", copied);
 
     (void)printf("\n=== Done ===\n");
     return 0;
