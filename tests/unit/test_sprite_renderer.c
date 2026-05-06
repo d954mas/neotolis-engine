@@ -83,6 +83,8 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
 #define FIXTURE_R0_HASH 0x100ULL    /* rect, 4 verts, 6 indices */
 #define FIXTURE_R1_HASH 0x200ULL    /* rect, 4 verts, 6 indices */
 #define FIXTURE_RPOLY_HASH 0x300ULL /* polygon, 6 verts, 12 indices (4 triangles fan) */
+#define FIXTURE_PAGE0_RID 0x7000ULL
+#define FIXTURE_PAGE1_RID 0x7001ULL
 
 static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
     /* Layout: [r0 verts: 4] [r1 verts: 4] [poly verts: 6] = 14 verts
@@ -137,6 +139,7 @@ static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
     regions[0].index_count = 6;
     regions[0].page_index = 0;
     regions[0].transform = 0;
+    regions[0].flags = NT_ATLAS_REGION_FLAG_QUAD_012023;
 
     regions[1].name_hash = FIXTURE_R1_HASH;
     regions[1].source_w = 32;
@@ -147,8 +150,9 @@ static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
     regions[1].index_start = 6;
     regions[1].vertex_count = 4;
     regions[1].index_count = 6;
-    regions[1].page_index = 0;
+    regions[1].page_index = 1;
     regions[1].transform = 0;
+    regions[1].flags = NT_ATLAS_REGION_FLAG_QUAD_012023;
 
     regions[2].name_hash = FIXTURE_RPOLY_HASH;
     regions[2].source_w = 100;
@@ -162,6 +166,7 @@ static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
     regions[2].page_index = 0;
     regions[2].transform = 0;
 
+    uint64_t page_ids[2] = {FIXTURE_PAGE0_RID, FIXTURE_PAGE1_RID};
     mock_atlas_spec_t spec = {
         .regions = regions,
         .region_count = 3,
@@ -169,8 +174,8 @@ static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
         .total_vertex_count = 14,
         .indices = indices,
         .total_index_count = 24,
-        .page_ids = NULL,
-        .page_count = 0,
+        .page_ids = page_ids,
+        .page_count = 2,
     };
     return build_mock_atlas_blob(atlas_blob, cap, &spec);
 }
@@ -217,6 +222,7 @@ static uint8_t *s_pack_blobs[MAX_PACK_BLOBS];
 static uint8_t s_pack_blob_count;
 static nt_resource_t s_atlas_res;
 static uint32_t s_vpack_counter;
+static const uint8_t s_white_pixel[4] = {255, 255, 255, 255};
 
 /* ---- Helper: register an atlas resource via the full pipeline ---- */
 
@@ -238,6 +244,9 @@ static nt_resource_t register_test_atlas(uint64_t atlas_rid) {
 
     nt_resource_t atlas = nt_resource_request((nt_hash64_t){.value = atlas_rid}, NT_ASSET_ATLAS);
     TEST_ASSERT_TRUE(atlas.id != 0);
+    nt_resource_step();
+    /* atlas_on_post_resolve requests page texture slots; a second step
+     * publishes those newly requested slots before renderer tests draw. */
     nt_resource_step();
     TEST_ASSERT_TRUE(nt_resource_is_ready(atlas));
     return atlas;
@@ -325,6 +334,15 @@ void setUp(void) {
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_atlas_init();
+
+    nt_hash32_t page_pid = nt_hash32_str("sprite_renderer_pages");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(page_pid, 100));
+    nt_texture_t page0 = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .label = "page0"});
+    nt_texture_t page1 = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .label = "page1"});
+    TEST_ASSERT_TRUE(page0.id != 0);
+    TEST_ASSERT_TRUE(page1.id != 0);
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(page_pid, (nt_hash64_t){FIXTURE_PAGE0_RID}, NT_ASSET_TEXTURE, page0.id));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(page_pid, (nt_hash64_t){FIXTURE_PAGE1_RID}, NT_ASSET_TEXTURE, page1.id));
 
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 64});
     nt_transform_comp_init(&(nt_transform_comp_desc_t){.capacity = 64});
@@ -474,6 +492,34 @@ void test_sprite_renderer_batch_key_atlas_change(void) {
     TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_draw_call_count());
 }
 
+/* ---- Test: actual atlas page splits a coarse batch_key run ----
+ *
+ * The game-level batch_key is a compatibility hint, not the texture source of
+ * truth. If two adjacent sprites share a key but resolve to different atlas
+ * pages, the renderer must split the command stream before drawing the second
+ * sprite. */
+void test_sprite_renderer_splits_run_on_actual_page_change(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xA7ULL);
+    nt_material_t mat = create_test_material();
+    nt_entity_t e0 = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
+    nt_entity_t e1 = create_sprite_entity(s_atlas_res, FIXTURE_R1_HASH, mat);
+
+    uint32_t coarse_key = nt_batch_key(mat.id, 0xCAFEU);
+    nt_render_item_t items[2];
+    items[0].sort_key = 0;
+    items[0].entity = e0.id;
+    items[0].batch_key = coarse_key;
+    items[1].sort_key = 1;
+    items[1].entity = e1.id;
+    items[1].batch_key = coarse_key;
+
+    nt_sprite_renderer_draw_list(items, 2);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_sprite_renderer_test_draw_call_count());
+}
+
 /* ---- Test: polygon emit (SPRITE-06) ----
  *
  * A region with vertex_count=6 / index_count=12 produces 6 vertices in
@@ -570,6 +616,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_pipeline_cache);
     RUN_TEST(test_sprite_renderer_batch_grouping);
     RUN_TEST(test_sprite_renderer_batch_key_atlas_change);
+    RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);
     RUN_TEST(test_sprite_renderer_polygon_emit);
     RUN_TEST(test_sprite_renderer_restore_gpu_cycle);
     RUN_TEST(test_sprite_renderer_pipeline_cache_capacity);

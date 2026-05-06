@@ -13,10 +13,11 @@
  * before triggering auto-flush, while a frame of pure-polygon sprites fits
  * exactly MAX_SPRITES.
  *
- * Index buffer uses uint32 so the renderer can pack everything emitted in
- * one frame into a single VBO/IBO upload (Defold-style: collect → upload
- * once → multi-draw with offsets). Auto-flush on overflow keeps per-cmd
- * state and re-opens after the upload. */
+ * Index buffer uses uint16 and the renderer auto-flushes before a batch would
+ * exceed the 0..65535 vertex index range. This may split very large rect runs
+ * into a few draw calls, but halves index upload bandwidth and keeps WebGL on
+ * the faster UNSIGNED_SHORT path. Auto-flush on overflow keeps per-cmd state
+ * and re-opens after the upload. */
 
 #ifndef NT_SPRITE_RENDERER_MAX_SPRITES
 #define NT_SPRITE_RENDERER_MAX_SPRITES 8192

@@ -5,7 +5,12 @@
 
 /* Magic: ASCII "ATLS" as uint32_t little-endian = 0x534C5441 */
 #define NT_ATLAS_MAGIC 0x534C5441
-#define NT_ATLAS_VERSION 3
+#define NT_ATLAS_VERSION 4
+
+#define NT_ATLAS_REGION_FLAG_QUAD_012023 ((uint8_t)(1U << 0))
+#define NT_ATLAS_REGION_FLAG_QUAD_012130 ((uint8_t)(1U << 1))
+#define NT_ATLAS_REGION_FLAG_QUAD_012132 ((uint8_t)(1U << 2))
+#define NT_ATLAS_REGION_FLAG_QUAD_MASK ((uint8_t)(NT_ATLAS_REGION_FLAG_QUAD_012023 | NT_ATLAS_REGION_FLAG_QUAD_012130 | NT_ATLAS_REGION_FLAG_QUAD_012132))
 
 /*
  * Atlas asset binary layout:
@@ -64,9 +69,11 @@ typedef struct {
     uint8_t index_count;   /* 35: triangle indices for this region. uint8_t caps at 255 =
                             *     85 triangles; with max_vertices=16 the ear-clip/fan output
                             *     is at most (16-2)*3 = 42 indices, so 1 byte is sufficient. */
+    uint8_t flags;         /* 36: builder-authored render hints, see NT_ATLAS_REGION_FLAG_* */
+    uint8_t _reserved[3];  /* 37: must be zero */
 } NtAtlasRegion;           /* 36 bytes — runtime mirror: nt_texture_region_t (nt_atlas.h, different field order) */
 #pragma pack(pop)
-_Static_assert(sizeof(NtAtlasRegion) == 36, "NtAtlasRegion must be 36 bytes");
+_Static_assert(sizeof(NtAtlasRegion) == 40, "NtAtlasRegion must be 40 bytes");
 
 #pragma pack(push, 1)
 typedef struct {

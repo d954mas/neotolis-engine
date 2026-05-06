@@ -392,17 +392,14 @@ static void frame(void) {
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
         // #region build draw list
-        /* Pitfall 8: rebuild batch_key from current page tex id every frame —
-         * atlas merge republishes page resources after pack stacking, so the
-         * page texture id can shift between frames. */
         for (uint32_t i = 0; i < s_bunny_count; i++) {
-            uint16_t ridx = s_variant_region_idx[s_bunnies[i].variant];
-            const nt_texture_region_t *r = nt_atlas_get_region(s_atlas_handle, ridx);
-            nt_resource_t page_res = nt_atlas_get_page_resource(s_atlas_handle, r->page_index);
-            uint32_t page_tex_id = nt_resource_get(page_res);
             s_items[i].sort_key = 0; /* unsorted in Bunnymark; renderer ignores */
             s_items[i].entity = s_entities[i].id;
-            s_items[i].batch_key = (page_tex_id << 16) | s_sprite_material.id;
+            /* Coarse compatibility hint. The sprite renderer validates the
+             * actual atlas page while emitting and splits draw commands when a
+             * run crosses page textures, so the game no longer does per-bunny
+             * atlas/resource lookups just to build this key. */
+            s_items[i].batch_key = s_sprite_material.id;
         }
         nt_sprite_renderer_draw_list(s_items, s_bunny_count);
         // #endregion

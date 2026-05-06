@@ -1433,6 +1433,22 @@ static void pipeline_cache_write(AtlasPipeline *p) {
     }
 }
 
+static uint8_t atlas_region_flags_from_indices(uint32_t vertex_count, uint32_t index_count, const uint16_t *indices) {
+    if (vertex_count != 4 || index_count != 6 || indices == NULL) {
+        return 0;
+    }
+    if (indices[0] == 0 && indices[1] == 1 && indices[2] == 2 && indices[3] == 0 && indices[4] == 2 && indices[5] == 3) {
+        return NT_ATLAS_REGION_FLAG_QUAD_012023;
+    }
+    if (indices[0] == 0 && indices[1] == 1 && indices[2] == 2 && indices[3] == 1 && indices[4] == 3 && indices[5] == 0) {
+        return NT_ATLAS_REGION_FLAG_QUAD_012130;
+    }
+    if (indices[0] == 0 && indices[1] == 1 && indices[2] == 2 && indices[3] == 1 && indices[4] == 3 && indices[5] == 2) {
+        return NT_ATLAS_REGION_FLAG_QUAD_012132;
+    }
+    return 0;
+}
+
 /* --- pipeline_serialize: compute atlas UVs, write binary blob --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1538,7 +1554,8 @@ static void pipeline_serialize(AtlasPipeline *p) {
     uint32_t *sprite_vertex_start = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
     uint32_t *sprite_index_start = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
     uint32_t *sprite_idx_count = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
-    NT_BUILD_ASSERT(sprite_vertex_start && sprite_index_start && sprite_idx_count && "pipeline_serialize: alloc failed");
+    uint8_t *sprite_flags = (uint8_t *)calloc(p->sprite_count, sizeof(uint8_t));
+    NT_BUILD_ASSERT(sprite_vertex_start && sprite_index_start && sprite_idx_count && sprite_flags && "pipeline_serialize: alloc failed");
 
     /* Pass 1: write vertex/index data only for unique sprites */
     for (uint32_t i = 0; i < p->sprite_count; i++) {
@@ -1562,6 +1579,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
         sprite_vertex_start[i] = vertex_cursor;
         sprite_index_start[i] = index_cursor;
         sprite_idx_count[i] = idx_count;
+        sprite_flags[i] = atlas_region_flags_from_indices(p->vertex_counts[i], idx_count, local_indices);
 
         /* Write triangle indices (local: 0..vertex_count-1) */
         memcpy(&indices[index_cursor], local_indices, idx_count * sizeof(uint16_t));
@@ -1616,6 +1634,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
             sprite_vertex_start[i] = sprite_vertex_start[orig];
             sprite_index_start[i] = sprite_index_start[orig];
             sprite_idx_count[i] = sprite_idx_count[orig];
+            sprite_flags[i] = sprite_flags[orig];
         }
     }
 
@@ -1645,11 +1664,13 @@ static void pipeline_serialize(AtlasPipeline *p) {
         reg->page_index = (uint8_t)pl->page;
         reg->transform = pl->transform;
         reg->index_count = (uint8_t)sprite_idx_count[i];
+        reg->flags = sprite_flags[i];
     }
 
     free(sprite_vertex_start);
     free(sprite_index_start);
     free(sprite_idx_count);
+    free(sprite_flags);
 
     /* Register atlas metadata entry (D-04) */
     uint64_t blob_hash = nt_hash64(blob, blob_size).value;

@@ -184,6 +184,11 @@ static void translate_region(nt_texture_region_t *dst, const NtAtlasRegion *src)
     dst->index_count = src->index_count;
     dst->page_index = src->page_index;
     dst->transform = src->transform;
+    dst->flags = (uint8_t)(src->flags & NT_ATLAS_REGION_FLAG_QUAD_MASK);
+    if ((dst->flags & NT_ATLAS_REGION_FLAG_QUAD_MASK) != 0 && (dst->vertex_count != 4 || dst->index_count != 6)) {
+        dst->flags = 0;
+    }
+    memset(dst->reserved, 0, sizeof(dst->reserved));
 }
 // #endregion
 

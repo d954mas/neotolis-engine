@@ -316,8 +316,8 @@ static void print_atlas_details(const uint8_t *asset_data, uint32_t asset_size, 
 
     for (uint32_t r = 0; r < count; r++) {
         const NtAtlasRegion *reg = &regions[r];
-        NT_LOG_INFO("    [%u] page:%u %ux%u verts:%u origin:(%.2f,%.2f)%s", r, reg->page_index, reg->source_w, reg->source_h, reg->vertex_count, (double)reg->origin_x, (double)reg->origin_y,
-                    reg->transform ? " XFORM" : "");
+        NT_LOG_INFO("    [%u] page:%u %ux%u verts:%u flags:0x%02x origin:(%.2f,%.2f)%s", r, reg->page_index, reg->source_w, reg->source_h, reg->vertex_count, reg->flags, (double)reg->origin_x,
+                    (double)reg->origin_y, reg->transform ? " XFORM" : "");
     }
 }
 

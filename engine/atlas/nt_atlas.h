@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "core/nt_types.h"
+#include "nt_atlas_format.h"
 #include "resource/nt_resource.h"
 
 /* ---- Public constants ---- */
@@ -35,7 +36,7 @@ typedef struct {
  * float from the builder, and transform is the D4 byte untouched.
  * Update both structs + translate_region() together when changing fields.
  *
- * Total: 40 bytes on 64-bit (36 used + 4 tail padding). */
+ * Total: 40 bytes on 64-bit. */
 typedef struct {
     uint64_t name_hash;    /*  0: xxh64 of region name (or NT_ATLAS_TOMBSTONE_HASH) */
     uint32_t vertex_start; /*  8: index into nt_atlas_data_t.vertices[] */
@@ -50,7 +51,8 @@ typedef struct {
     uint8_t index_count;   /* 33 */
     uint8_t page_index;    /* 34 */
     uint8_t transform;     /* 35: D4 flags — bit0=flipH, bit1=flipV, bit2=diagonal */
-    /* 4 bytes tail padding */
+    uint8_t flags;         /* 36: builder-authored render hints */
+    uint8_t reserved[3];   /* 37 */
 } nt_texture_region_t;
 
 /* ---- Public API ---- */

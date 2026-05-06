@@ -1225,12 +1225,12 @@ Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier cu
 
 Builder produces atlas assets from a set of sprite PNGs (or raw RGBA buffers). One atlas yields **two kinds of pack entries**: a single `NT_ASSET_ATLAS` blob with region metadata, plus N `NT_ASSET_TEXTURE` page entries (named `<atlas>/tex0`, `<atlas>/tex1`, …). Runtime keeps a 1:N relationship — one metadata blob references N textures.
 
-Binary layout (`shared/include/nt_atlas_format.h`, packed, **v3**):
+Binary layout (`shared/include/nt_atlas_format.h`, packed, **v4**):
 
 ```
 NtAtlasHeader (28 bytes)
   magic:               u32  (0x534C5441 "ATLS")
-  version:             u16  (3)
+  version:             u16  (4)
   region_count:        u16  (one entry per source sprite)
   page_count:          u16  (number of texture pages)
   _pad:                u16
@@ -1243,7 +1243,7 @@ texture_resource_ids[page_count]: u64
   Each entry is nt_hash64_str("<atlas_name>/tex<N>") matching the
   page texture's resource_id in the same pack.
 
-NtAtlasRegion[region_count] (36 bytes each)
+NtAtlasRegion[region_count] (40 bytes each)
   name_hash:      u64   (xxh64 of region name)
   source_w:       u16   (original image width in pixels, pre-trim)
   source_h:       u16   (original image height in pixels, pre-trim)
@@ -1259,6 +1259,8 @@ NtAtlasRegion[region_count] (36 bytes each)
   page_index:     u8    (which texture page)
   transform:      u8    (3-bit D4 mask: bit0=flipH, bit1=flipV, bit2=diagonal)
   index_count:    u8    (triangle indices for this region; ≤ 255)
+  flags:          u8    (builder-authored render hints, e.g. standard quad index pattern)
+  reserved[3]:    u8    (must be zero)
 
 NtAtlasVertex[total_vertex_count] (8 bytes each, at vertex_offset)
   local_x:   i16  (corner X in trim-rect local space, 0..trim_w.

@@ -1,5 +1,6 @@
 #include "renderers/nt_sprite_renderer.h"
 
+#include <stdint.h>
 #include <string.h>
 
 #ifdef __wasm_simd128__
@@ -16,6 +17,8 @@
 #include "render/nt_render_defs.h"
 #include "sprite_comp/nt_sprite_comp.h"
 #include "transform_comp/nt_transform_comp.h"
+
+#define NT_SPRITE_RENDERER_UINT16_VERTEX_LIMIT 65536U
 
 // #region module state
 typedef struct {
@@ -43,9 +46,9 @@ static struct {
     uint16_t count;
 
     nt_buffer_t vbo; /* dynamic, sized for NT_SPRITE_RENDERER_MAX_VERTICES * 24 */
-    nt_buffer_t ibo; /* dynamic, sized for NT_SPRITE_RENDERER_MAX_INDICES * 4 (uint32 indices) */
+    nt_buffer_t ibo; /* dynamic, sized for NT_SPRITE_RENDERER_MAX_INDICES * 2 (uint16 indices) */
     nt_sprite_vertex_t vertices[NT_SPRITE_RENDERER_MAX_VERTICES];
-    uint32_t indices[NT_SPRITE_RENDERER_MAX_INDICES];
+    uint16_t indices[NT_SPRITE_RENDERER_MAX_INDICES];
     uint32_t vertex_count;
     uint32_t index_count;
 
@@ -88,8 +91,8 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc) {
     s_sprite.ibo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
         .type = NT_BUFFER_INDEX,
         .usage = NT_USAGE_DYNAMIC,
-        .size = NT_SPRITE_RENDERER_MAX_INDICES * (uint32_t)sizeof(uint32_t),
-        .index_type = NT_INDEX_UINT32,
+        .size = NT_SPRITE_RENDERER_MAX_INDICES * (uint32_t)sizeof(uint16_t),
+        .index_type = NT_INDEX_UINT16,
         .label = "sprite_ibo",
     });
     NT_ASSERT(s_sprite.ibo.id != 0);
@@ -232,6 +235,44 @@ static void open_cmd_from_snapshot(const nt_sprite_draw_cmd_t *snap) {
     c->first_index = s_sprite.index_count;
     c->index_count = 0;
 }
+
+/* Sprite atlas pages are the renderer's texture source of truth. The game may
+ * still use batch_key to keep compatible sprites adjacent, but correctness does
+ * not depend on it encoding the page texture: when a run crosses atlas pages,
+ * split the current draw cmd and keep emitting in-order. */
+static bool ensure_current_cmd_page_texture(nt_resource_t atlas, const nt_texture_region_t *region) {
+    NT_ASSERT(region != NULL);
+    NT_ASSERT(s_sprite.cmd_count > 0 && "sprite emit called with no open cmd");
+
+    nt_resource_t page_res = nt_atlas_get_page_resource(atlas, region->page_index);
+    uint32_t page_tex = nt_resource_get(page_res);
+    if (page_tex == 0) {
+        return false;
+    }
+
+    nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count - 1];
+    if (c->tex_count == 0) {
+        c->tex_count = 1;
+        c->tex_names[0] = NULL;
+        c->resolved_sampler[0] = NT_SAMPLER_INVALID;
+    }
+
+    if (c->resolved_tex[0] == page_tex) {
+        return true;
+    }
+
+    const bool current_cmd_empty = (s_sprite.index_count == c->first_index);
+    if (current_cmd_empty) {
+        c->resolved_tex[0] = page_tex;
+        return true;
+    }
+
+    nt_sprite_draw_cmd_t snapshot = *c;
+    snapshot.resolved_tex[0] = page_tex;
+    close_current_cmd();
+    open_cmd_from_snapshot(&snapshot);
+    return true;
+}
 // #endregion
 
 // #region emit_one (per-sprite vertex/index emit)
@@ -264,12 +305,17 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     const float(*cuv)[2] = aview.cached_uv;
     const uint16_t *idx = aview.indices;
     NT_ASSERT(cpos != NULL && cuv != NULL && idx != NULL);
+    if (!ensure_current_cmd_page_texture(atlas, r)) {
+        return;
+    }
 
-    /* Capacity guard — if this sprite would overflow staging, snapshot the
-     * open cmd's state, flush() (uploads + replays cmds + resets), then
-     * re-open a fresh cmd with the same state at first_index=0. The caller
-     * sees no state change; the GPU just gets two flushes instead of one. */
-    if (s_sprite.vertex_count + r->vertex_count > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + r->index_count > NT_SPRITE_RENDERER_MAX_INDICES) {
+    /* Capacity guard: if this sprite would overflow staging, or exceed the
+     * uint16 indexable vertex range, snapshot the open cmd's state, flush()
+     * (uploads + replays cmds + resets), then re-open a fresh cmd with the
+     * same state at first_index=0. The caller sees no state change; the GPU
+     * just gets another chunk draw instead of UNSIGNED_INT indices. */
+    if (s_sprite.vertex_count + r->vertex_count > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.vertex_count + r->vertex_count > NT_SPRITE_RENDERER_UINT16_VERTEX_LIMIT ||
+        s_sprite.index_count + r->index_count > NT_SPRITE_RENDERER_MAX_INDICES) {
         NT_ASSERT(s_sprite.cmd_count > 0 && "emit_one called with no open cmd");
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
         nt_sprite_renderer_flush();
@@ -399,10 +445,36 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     }
     s_sprite.vertex_count += r->vertex_count;
 
-    /* Emit indices (rebase to staging base; uint32 leaves headroom for big
-     * VBOs without per-cmd splits). */
-    for (uint8_t i = 0; i < r->index_count; i++) {
-        s_sprite.indices[s_sprite.index_count + i] = base + (uint32_t)idx[i];
+    /* Emit indices (rebase to staging base). Builder-authored quad flags let
+     * rect regions skip atlas index reads; polygon regions keep the generic
+     * path. Each flush chunk is capped to 65536 vertices. */
+    uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count];
+    uint8_t quad_flags = (uint8_t)(r->flags & NT_ATLAS_REGION_FLAG_QUAD_MASK);
+    if (quad_flags != 0) {
+        NT_ASSERT(r->vertex_count == 4 && r->index_count == 6 && base + 3U <= UINT16_MAX);
+        out_idx[0] = (uint16_t)(base + 0U);
+        out_idx[1] = (uint16_t)(base + 1U);
+        out_idx[2] = (uint16_t)(base + 2U);
+        if (quad_flags & NT_ATLAS_REGION_FLAG_QUAD_012023) {
+            out_idx[3] = (uint16_t)(base + 0U);
+            out_idx[4] = (uint16_t)(base + 2U);
+            out_idx[5] = (uint16_t)(base + 3U);
+        } else if (quad_flags & NT_ATLAS_REGION_FLAG_QUAD_012130) {
+            out_idx[3] = (uint16_t)(base + 1U);
+            out_idx[4] = (uint16_t)(base + 3U);
+            out_idx[5] = (uint16_t)(base + 0U);
+        } else {
+            NT_ASSERT((quad_flags & NT_ATLAS_REGION_FLAG_QUAD_012132) != 0);
+            out_idx[3] = (uint16_t)(base + 1U);
+            out_idx[4] = (uint16_t)(base + 3U);
+            out_idx[5] = (uint16_t)(base + 2U);
+        }
+    } else {
+        for (uint8_t i = 0; i < r->index_count; i++) {
+            uint32_t rebased = base + (uint32_t)idx[i];
+            NT_ASSERT(rebased <= UINT16_MAX && "sprite uint16 index chunk overflow");
+            out_idx[i] = (uint16_t)rebased;
+        }
     }
     s_sprite.index_count += r->index_count;
 
@@ -509,7 +581,7 @@ void nt_sprite_renderer_flush(void) {
      * storage on every rewrite so the GPU can keep consuming the previous
      * frame while we're staging the next one. */
     nt_gfx_orphan_buffer(s_sprite.vbo, s_sprite.vertices, s_sprite.vertex_count * (uint32_t)sizeof(nt_sprite_vertex_t));
-    nt_gfx_orphan_buffer(s_sprite.ibo, s_sprite.indices, s_sprite.index_count * (uint32_t)sizeof(uint32_t));
+    nt_gfx_orphan_buffer(s_sprite.ibo, s_sprite.indices, s_sprite.index_count * (uint32_t)sizeof(uint16_t));
 
     uint32_t bound_pipeline_id = 0;
     uint32_t bound_tex_ids[NT_MATERIAL_MAX_TEXTURES] = {0};
