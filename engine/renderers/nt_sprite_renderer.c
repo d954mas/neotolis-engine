@@ -142,12 +142,10 @@ static nt_vertex_layout_t s_sprite_layout = {
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info) {
     /* Pipeline signature: vs/fs handles + render-state bits.
      * Layout omitted from key — sprite vertex layout is fixed. */
-    uint32_t state_bits = ((uint32_t)mat_info->blend_mode) | ((uint32_t)mat_info->depth_test << 4) | ((uint32_t)mat_info->depth_write << 5) | ((uint32_t)mat_info->cull_mode << 6) |
-                          ((uint32_t)mat_info->color_mode << 8);
     uint64_t key = 0;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_vs;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_fs;
-    key = key * 0x9E3779B97F4A7C15ULL + state_bits;
+    key = key * 0x9E3779B97F4A7C15ULL + nt_material_state_bits(mat_info);
 
     /* Linear scan for cached entry */
     for (uint16_t i = 0; i < s_sprite.count; i++) {

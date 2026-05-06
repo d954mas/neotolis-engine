@@ -123,6 +123,12 @@ typedef struct {
     const char *label; /* debug name (string literal, static storage) */
 } nt_material_info_t;
 
+/* Pack render-state fields into a single u32 for pipeline-cache key building.
+ * Used by sprite/mesh renderers — same layout, single source of truth. */
+static inline uint32_t nt_material_state_bits(const nt_material_info_t *info) {
+    return ((uint32_t)info->blend_mode) | ((uint32_t)info->depth_test << 4) | ((uint32_t)info->depth_write << 5) | ((uint32_t)info->cull_mode << 6) | ((uint32_t)info->color_mode << 8);
+}
+
 /* ---- Lifecycle ---- */
 
 nt_result_t nt_material_init(const nt_material_desc_t *desc);

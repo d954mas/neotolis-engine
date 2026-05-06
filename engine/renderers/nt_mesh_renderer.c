@@ -169,14 +169,11 @@ static uint16_t stream_byte_size(const NtStreamDesc *s) { return (uint16_t)(nt_s
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_pipeline_t find_or_create_pipeline(const nt_material_info_t *mat_info, const nt_gfx_mesh_info_t *mesh_info) {
 
-    /* Full pipeline signature: layout + shaders + render state.
-     * Multiplicative hash combining to avoid collisions. */
-    uint32_t state_bits = ((uint32_t)mat_info->blend_mode) | ((uint32_t)mat_info->depth_test << 4) | ((uint32_t)mat_info->depth_write << 5) | ((uint32_t)mat_info->cull_mode << 6) |
-                          ((uint32_t)mat_info->color_mode << 8);
+    /* Full pipeline signature: layout + shaders + render state. */
     uint64_t key = mesh_info->layout_hash;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_vs;
     key = key * 0x9E3779B97F4A7C15ULL + mat_info->resolved_fs;
-    key = key * 0x9E3779B97F4A7C15ULL + state_bits;
+    key = key * 0x9E3779B97F4A7C15ULL + nt_material_state_bits(mat_info);
 
     /* Linear scan for cached entry */
     for (uint16_t i = 0; i < s_mesh_renderer.count; i++) {
