@@ -537,6 +537,13 @@ bool nt_gfx_backend_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns
     return true;
 }
 
+void nt_gfx_backend_drop_timer_segments(void) {
+    /* Context is gone — forget queries without glDeleteQueries (would error). */
+    s_segment_count = 0;
+    s_active_segment = -1;
+    s_timer_warned = false;
+}
+
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
     if (!enabled && s_timer_enabled) {
         /* Close any in-flight query, drain all segment rings so re-enable starts clean. */

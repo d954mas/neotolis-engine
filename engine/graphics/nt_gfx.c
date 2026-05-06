@@ -50,12 +50,6 @@ typedef struct {
 
 nt_gfx_t g_nt_gfx;
 
-/* Per-frame draw call counter, separate from g_nt_gfx.frame_stats.draw_calls.
- * Reset in nt_gfx_begin_frame; incremented in all four nt_gfx_draw* entry points;
- * read via nt_gfx_get_frame_draw_calls. nt_stats consumes this for the on-screen
- * HUD without coupling to the public frame_stats struct. */
-static uint32_t s_gfx_frame_draw_calls;
-
 /* ---- Global UBO block registry ---- */
 
 static nt_global_block_t s_global_blocks[NT_GFX_MAX_GLOBAL_BLOCKS];
@@ -204,6 +198,7 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void) { return &g_nt_gfx.gpu_caps; }
 
 /* ---- Frame / Pass ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — context-loss recovery branches push it just over 25
 void nt_gfx_begin_frame(void) {
     if (nt_gfx_backend_is_context_lost()) {
         if (!g_nt_gfx.context_lost) {
@@ -224,6 +219,18 @@ void nt_gfx_begin_frame(void) {
              * call deactivate_mesh() which returns slots to mesh pool.
              * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
             s_gfx.bound_pipeline = 0;
+            /* Sampler cache holds GL ids that are now invalid. Wipe so the
+             * next nt_gfx_make_sampler creates fresh objects. Texture metas
+             * carrying stale default_sampler handles get re-attached when
+             * the activator re-creates textures. */
+            memset(s_gfx.sampler_cache, 0, sizeof(s_gfx.sampler_cache));
+            s_gfx.sampler_count = 0;
+            for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
+                s_gfx.texture_metas[i].default_sampler = NT_SAMPLER_INVALID;
+            }
+            /* Timer-segment GL queries are dead too — let backend re-allocate
+             * on next begin_segment via the lazy-find-or-alloc path. */
+            nt_gfx_backend_drop_timer_segments();
             g_nt_gfx.context_lost = true;
             NT_LOG_ERROR("WebGL context lost");
         }
@@ -245,7 +252,6 @@ void nt_gfx_begin_frame(void) {
     }
     s_gfx.render_state = NT_GFX_STATE_FRAME;
     memset(&g_nt_gfx.frame_stats, 0, sizeof(g_nt_gfx.frame_stats));
-    s_gfx_frame_draw_calls = 0;
     nt_gfx_backend_begin_frame();
 }
 
@@ -265,7 +271,7 @@ void nt_gfx_end_frame(void) {
     g_nt_gfx.context_restored = false;
 }
 
-uint32_t nt_gfx_get_frame_draw_calls(void) { return s_gfx_frame_draw_calls; }
+uint32_t nt_gfx_get_frame_draw_calls(void) { return g_nt_gfx.frame_stats.draw_calls; }
 
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
     if (g_nt_gfx.context_lost) {
@@ -722,7 +728,6 @@ void nt_gfx_draw(uint32_t first_vertex, uint32_t num_vertices) {
     }
 
     g_nt_gfx.frame_stats.draw_calls++;
-    s_gfx_frame_draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
     nt_gfx_backend_draw(first_vertex, num_vertices);
 }
@@ -744,7 +749,6 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
     }
 
     g_nt_gfx.frame_stats.draw_calls++;
-    s_gfx_frame_draw_calls++;
     g_nt_gfx.frame_stats.draw_calls_instanced++;
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.instances += instance_count;
@@ -768,7 +772,6 @@ void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t nu
     }
 
     g_nt_gfx.frame_stats.draw_calls++;
-    s_gfx_frame_draw_calls++;
     g_nt_gfx.frame_stats.vertices += num_vertices;
     g_nt_gfx.frame_stats.indices += num_indices;
     nt_gfx_backend_draw_indexed(first_index, num_indices, s_gfx.bound_index_type);
@@ -791,7 +794,6 @@ void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, u
     }
 
     g_nt_gfx.frame_stats.draw_calls++;
-    s_gfx_frame_draw_calls++;
     g_nt_gfx.frame_stats.draw_calls_instanced++;
     g_nt_gfx.frame_stats.vertices += num_vertices * instance_count;
     g_nt_gfx.frame_stats.indices += num_indices * instance_count;

@@ -42,6 +42,9 @@ void nt_gfx_backend_end_segment(void);
 bool nt_gfx_backend_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns);
 void nt_gfx_backend_set_gpu_timing_enabled(bool enabled);
 bool nt_gfx_backend_is_gpu_timing_supported(void);
+/* Called on context loss: forget all segment GL query ids without trying to
+ * delete them (context is gone). Next begin_segment lazy-allocates fresh. */
+void nt_gfx_backend_drop_timer_segments(void);
 void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data);
 
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc);

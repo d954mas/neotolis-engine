@@ -106,6 +106,7 @@ void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uin
 
 void nt_gfx_backend_begin_segment(nt_hash32_t name_hash) { (void)name_hash; }
 void nt_gfx_backend_end_segment(void) {}
+void nt_gfx_backend_drop_timer_segments(void) {}
 
 // NOLINTNEXTLINE(readability-non-const-parameter) — out param signature must match real backend
 bool nt_gfx_backend_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns) {
