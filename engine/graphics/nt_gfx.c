@@ -611,7 +611,11 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
 /* ---- Sampler (deduplicated cache) ---- */
 
 static inline uint32_t sampler_pack_key(const nt_sampler_desc_t *desc) {
-    return (uint32_t)((desc->min_filter & 0x7U) | ((desc->mag_filter & 0x1U) << 3) | ((desc->wrap_u & 0x3U) << 4) | ((desc->wrap_v & 0x3U) << 6));
+    /* Explicit clamp on mag_filter — only NEAREST/LINEAR are legal there.
+     * If asserts get compiled out (NT_ASSERT OFF mode for production), a
+     * bad input would otherwise silently collide with another sampler. */
+    uint32_t mag = (desc->mag_filter == NT_FILTER_LINEAR) ? 1U : 0U;
+    return (uint32_t)((desc->min_filter & 0x7U) | (mag << 3) | ((desc->wrap_u & 0x3U) << 4) | ((desc->wrap_v & 0x3U) << 6));
 }
 
 nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {

@@ -1456,13 +1456,13 @@ static uint8_t atlas_region_flags_from_indices(uint32_t vertex_count, uint32_t i
 
 /* Swap winding of every triangle in a triangle-list index buffer.
  *
- * Builder ear-clip / fan output is PNG-space CCW. Runtime atlas_precompute_region
- * Y-flips cached_pos so PNG-top maps to world-top in a y-up ortho — that flip
- * inverts the cross-product sign, turning CCW into CW under GL's winding test.
- * Pre-swapping each triangle (a,b,c)→(a,c,b) here cancels out: blob indices
- * trace CW in PNG-space and CCW in world-space, so cull_mode = BACK works
- * correctly without per-game opt-outs. Y-flip stays in runtime (texture sampling
- * still wants spritely-up); only the winding moves into the builder. */
+ * Builder ear-clip / fan output is PNG-space CCW. The blob writer Y-flips
+ * each vertex's local_y to y-up before serialising (see local_y assignment
+ * in pipeline_serialize) — that reflection inverts the cross-product sign,
+ * turning the original CCW into CW in world-space. Pre-swapping each
+ * triangle (a,b,c)→(a,c,b) here compensates: blob indices read CW in
+ * PNG-space and CCW in world-space, so GL cull_mode = BACK works without
+ * per-game opt-outs. UVs are not flipped — they index raw pixel rows. */
 static void swap_triangle_winding(uint16_t *indices, uint32_t index_count) {
     NT_BUILD_ASSERT(index_count % 3U == 0 && "swap_triangle_winding: index_count must be a multiple of 3 (triangle list)");
     for (uint32_t i = 0; i + 2U < index_count; i += 3U) {

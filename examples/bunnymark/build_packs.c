@@ -13,6 +13,7 @@
 
 #include "nt_builder.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -76,6 +77,8 @@ static int fanout_packs(const char *out_dir, const char *const *pack_names, int 
             if (CopyFileA(src, dst, FALSE)) {
                 copied++;
                 (void)printf("  %s -> %s/assets/\n", pack_names[i], fd.cFileName);
+            } else {
+                (void)fprintf(stderr, "fanout: failed to copy %s -> %s (GetLastError=%lu)\n", src, dst, GetLastError());
             }
         }
     } while (FindNextFileA(h, &fd));
@@ -107,10 +110,12 @@ static int fanout_packs(const char *out_dir, const char *const *pack_names, int 
             (void)snprintf(dst, sizeof(dst), "%s/%s", assets_dir, pack_names[i]);
             FILE *fs = fopen(src, "rb");
             if (!fs) {
+                (void)fprintf(stderr, "fanout: failed to open %s for read: %s\n", src, strerror(errno));
                 continue;
             }
             FILE *fdst = fopen(dst, "wb");
             if (!fdst) {
+                (void)fprintf(stderr, "fanout: failed to open %s for write: %s\n", dst, strerror(errno));
                 (void)fclose(fs);
                 continue;
             }

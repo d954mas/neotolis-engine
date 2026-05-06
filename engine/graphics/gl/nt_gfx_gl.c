@@ -122,6 +122,7 @@ static bool s_timer_in_flight[NT_GFX_TIMER_RING];
 static uint8_t s_timer_head; /* next slot to write into */
 static uint8_t s_timer_tail; /* oldest unread slot */
 static bool s_timer_active;  /* true between begin and end of current frame */
+static bool s_timer_warned;  /* one-shot ring-full warning; reset on re-enable */
 
 /* ---- Transcode buffer (reused across textures, freed after idle) ---- */
 
@@ -434,10 +435,9 @@ void nt_gfx_backend_begin_frame(void) {
          * stale results once so begin_frame can proceed — warn once so the
          * misuse is visible without spamming. */
         if (s_timer_in_flight[s_timer_head]) {
-            static bool s_warned;
-            if (!s_warned) {
+            if (!s_timer_warned) {
                 NT_LOG_WARN("gpu_timing: ring full — call nt_gfx_poll_gpu_time_ns to consume results");
-                s_warned = true;
+                s_timer_warned = true;
             }
             memset(s_timer_in_flight, 0, sizeof(s_timer_in_flight));
             s_timer_head = 0;
@@ -515,6 +515,11 @@ void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
         s_timer_head = 0;
         s_timer_tail = 0;
         s_timer_active = false;
+    }
+    /* Reset one-shot ring-full warning so a re-enable cycle can re-flag
+     * misuse if the bug repeats. */
+    if (enabled && !s_timer_user_enabled) {
+        s_timer_warned = false;
     }
     s_timer_user_enabled = enabled;
 }

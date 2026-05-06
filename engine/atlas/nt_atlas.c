@@ -700,9 +700,7 @@ nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index
 float nt_atlas_get_pixels_per_unit(nt_resource_t atlas) {
     const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_pixels_per_unit on unresolved atlas");
-    if (ad->ipu == 0.0F) {
-        return 1.0F;
-    }
+    NT_ASSERT(ad->ipu > 0.0F && "atlas ipu must be set by atlas_on_post_resolve");
     return 1.0F / ad->ipu;
 }
 
