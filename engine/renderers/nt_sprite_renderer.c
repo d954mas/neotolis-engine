@@ -55,7 +55,10 @@ static struct {
     nt_sprite_draw_cmd_t cmds[NT_SPRITE_RENDERER_MAX_DRAW_CMDS];
     uint32_t cmd_count;
 
-    uint32_t frame_draw_calls; /* test counter; SEPARATE from nt_gfx_get_frame_draw_calls */
+    /* Test counter — reset at the start of each nt_sprite_renderer_draw_list
+     * call, holds the GPU draw count from that call only. SEPARATE from
+     * nt_gfx_get_frame_draw_calls (which is engine-wide and frame-scoped). */
+    uint32_t last_draw_list_calls;
 #ifdef NT_SPRITE_RENDERER_TEST_ACCESS
     /* Test-only: last emit_one() vertex/index counts captured BEFORE flush
      * resets s_sprite.vertex_count. Read by polygon-emit test to verify
@@ -448,7 +451,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         return;
     }
 
-    s_sprite.frame_draw_calls = 0;
+    s_sprite.last_draw_list_calls = 0;
     nt_sprite_comp_view_t sv = nt_sprite_comp_view();
     nt_transform_comp_view_t tv = nt_transform_comp_view();
     nt_drawable_comp_view_t dv = nt_drawable_comp_view();
@@ -574,7 +577,7 @@ void nt_sprite_renderer_flush(void) {
         uint32_t cmd_vertex_end = (ci + 1U < s_sprite.cmd_count) ? s_sprite.cmds[ci + 1U].first_vertex : s_sprite.vertex_count;
         uint32_t cmd_vertex_count = cmd_vertex_end - c->first_vertex;
         nt_gfx_draw_indexed(c->first_index, c->index_count, cmd_vertex_count);
-        s_sprite.frame_draw_calls++;
+        s_sprite.last_draw_list_calls++;
     }
 
     s_sprite.vertex_count = 0;
@@ -586,7 +589,7 @@ void nt_sprite_renderer_flush(void) {
 // #region test accessors
 #ifdef NT_SPRITE_RENDERER_TEST_ACCESS
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void) { return s_sprite.count; }
-uint32_t nt_sprite_renderer_test_draw_call_count(void) { return s_sprite.frame_draw_calls; }
+uint32_t nt_sprite_renderer_test_draw_call_count(void) { return s_sprite.last_draw_list_calls; }
 uint32_t nt_sprite_renderer_test_vertex_count(void) { return s_sprite.vertex_count; }
 uint32_t nt_sprite_renderer_test_last_emit_vertex_count(void) { return s_sprite.last_emit_vertex_count; }
 uint32_t nt_sprite_renderer_test_last_emit_index_count(void) { return s_sprite.last_emit_index_count; }
