@@ -35,21 +35,10 @@ void nt_gfx_backend_destroy_buffer(uint32_t backend_handle);
 void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uint32_t size);
 void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size);
 
-/* Named GPU TIME_ELAPSED segments. begin/end pairs must be sequential —
- * TIME_ELAPSED cannot nest (one query active at a time). */
-void nt_gfx_backend_begin_segment(nt_hash32_t name_hash);
-void nt_gfx_backend_end_segment(void);
-bool nt_gfx_backend_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns);
-void nt_gfx_backend_set_gpu_timing_enabled(bool enabled);
-bool nt_gfx_backend_is_gpu_timing_supported(void);
-/* Called on context loss: forget all segment GL query ids without trying to
- * delete them (context is gone). Next begin_segment lazy-allocates fresh. */
-void nt_gfx_backend_drop_timer_segments(void);
-void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data);
-
 uint32_t nt_gfx_backend_create_texture(const nt_texture_desc_t *desc);
 void nt_gfx_backend_destroy_texture(uint32_t backend_handle);
 void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot);
+void nt_gfx_backend_update_texture(uint32_t backend_handle, uint16_t x, uint16_t y, uint16_t w, uint16_t h, nt_pixel_format_t format, const void *data);
 
 uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc);
 void nt_gfx_backend_destroy_sampler(uint32_t backend_handle);
@@ -85,6 +74,21 @@ uint32_t nt_gfx_backend_create_texture_compressed(const uint8_t *basis_data, uin
 
 /* GPU caps detection — implemented per-backend (gl/nt_gfx_gl_ctx_*.c, stub). */
 nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void);
+
+// #region GPU timer segments
+/* Named GPU TIME_ELAPSED segments. begin/end pairs must be sequential —
+ * TIME_ELAPSED cannot nest (one query active at a time). Backend hashes
+ * the name internally for slot lookup AND emits glPushDebugGroup so the
+ * name shows in RenderDoc / Apitrace (KHR_debug; no-op on WebGL2). */
+void nt_gfx_backend_begin_segment(const char *name);
+void nt_gfx_backend_end_segment(void);
+bool nt_gfx_backend_poll_segment_time_ns(const char *name, uint64_t *out_ns);
+void nt_gfx_backend_set_gpu_timing_enabled(bool enabled);
+bool nt_gfx_backend_is_gpu_timing_supported(void);
+/* Called on context loss: forget all segment GL query ids without trying to
+ * delete them (context is gone). Next begin_segment lazy-allocates fresh. */
+void nt_gfx_backend_drop_timer_segments(void);
+// #endregion
 
 #ifdef NT_GFX_STUB_TEST_ACCESS
 /* Stub-only test hooks: inspect and reset bind_sampler observations. */

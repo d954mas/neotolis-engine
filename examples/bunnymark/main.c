@@ -256,7 +256,6 @@ static void frame(void) {
 
     nt_resource_step();
     nt_material_step();
-    nt_font_step();
     nt_sprite_comp_sync_resources();
 
     /* Dump pack contents once, when ready. */
@@ -371,11 +370,7 @@ static void frame(void) {
 
     nt_gfx_begin_frame();
     /* nt_stats reads frame total via segment named "frame" by convention. */
-    static nt_hash32_t s_frame_seg;
-    if (s_frame_seg.value == 0) {
-        s_frame_seg = nt_hash32_str("frame");
-    }
-    nt_gfx_begin_segment(s_frame_seg);
+    nt_gfx_begin_segment("frame");
 
     if (g_nt_gfx.context_restored) {
         /* WebGL context loss recovery. mat_info / s_overlay_font handles
@@ -400,6 +395,10 @@ static void frame(void) {
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.1F, 0.1F, 0.15F, 1.0F}, .clear_depth = 1.0F});
+
+    /* Must run after nt_gfx_begin_frame(): context_restored is detected there,
+     * and nt_font_step() recreates font GPU textures on that flag. */
+    nt_font_step();
 
     if (can_render) {
         nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));

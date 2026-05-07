@@ -53,3 +53,11 @@ bool nt_gfx_gl_ctx_enable_timer_query(void) {
      * glad and need no extension activation. */
     return GLAD_GL_VERSION_3_3 != 0 || GLAD_GL_ARB_timer_query != 0;
 }
+
+bool nt_gfx_gl_ctx_enable_debug_groups(void) {
+    /* glPushDebugGroup / glPopDebugGroup ship via the KHR_debug extension
+     * (core in GL 4.3+, but our glad config only generates up to 3.3+ext).
+     * KHR_debug is widely supported by modern desktop drivers; if absent
+     * we no-op the labeling (segments still work, just unlabeled). */
+    return GLAD_GL_KHR_debug != 0;
+}

@@ -84,13 +84,9 @@ void nt_stats_frame_end(void) {
      * results (1-2 frames old) and keep the freshest. If no segment was
      * opened or the driver doesn't support timer queries, last_gpu_ms
      * stays at -1.0F and format_lines prints "N/A". */
-    static nt_hash32_t s_frame_seg;
-    if (s_frame_seg.value == 0) {
-        s_frame_seg = nt_hash32_str("frame");
-    }
     uint64_t gpu_ns = 0;
     bool gpu_ready = false;
-    while (nt_gfx_poll_segment_time_ns(s_frame_seg, &gpu_ns)) {
+    while (nt_gfx_poll_segment_time_ns("frame", &gpu_ns)) {
         gpu_ready = true;
     }
     if (gpu_ready) {

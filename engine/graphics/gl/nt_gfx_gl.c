@@ -51,6 +51,13 @@
 #define GL_GPU_DISJOINT_EXT 0x8FBB
 #endif
 
+/* KHR_debug constant — needed for glPushDebugGroup. Only used on native
+ * (s_debug_groups_enabled is always false on WebGL2 since KHR_debug isn't
+ * in the WebGL spec), but the symbol must compile. */
+#ifndef GL_DEBUG_SOURCE_APPLICATION
+#define GL_DEBUG_SOURCE_APPLICATION 0x824A
+#endif
+
 #ifdef NT_PLATFORM_WEB
 /* EXT_disjoint_timer_query_webgl2 — only the 64-bit getter needs the EXT suffix. */
 extern void glGetQueryObjectui64vEXT(GLuint id, GLenum pname, GLuint64 *params);
@@ -131,6 +138,7 @@ typedef struct {
 
 static bool s_timer_enabled;             /* extension/core entry points present */
 static bool s_timer_user_enabled = true; /* runtime toggle from nt_gfx_set_gpu_timing_enabled */
+static bool s_debug_groups_enabled;      /* KHR_debug present — push/pop debug groups around segments */
 static nt_gfx_segment_state_t s_segments[NT_GFX_TIMER_MAX_SEGMENTS];
 static uint8_t s_segment_count;
 static int8_t s_active_segment = -1; /* index in s_segments while a query is open, -1 otherwise */
@@ -393,6 +401,9 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     /* Probe timer-query support. Segments allocate query objects lazily
      * on first begin_segment for that name. Disable on probe failure. */
     s_timer_enabled = nt_gfx_gl_ctx_enable_timer_query();
+    /* Probe KHR_debug for segment labeling. If absent, push/pop become
+     * no-ops; segment timing still works. */
+    s_debug_groups_enabled = nt_gfx_gl_ctx_enable_debug_groups();
     s_segment_count = 0;
     s_active_segment = -1;
     return true;
@@ -459,10 +470,11 @@ static int8_t segment_find(nt_hash32_t name_hash) {
     return -1;
 }
 
-void nt_gfx_backend_begin_segment(nt_hash32_t name_hash) {
-    if (!s_timer_enabled || !s_timer_user_enabled) {
+void nt_gfx_backend_begin_segment(const char *name) {
+    if (!s_timer_enabled || !s_timer_user_enabled || name == NULL) {
         return;
     }
+    nt_hash32_t name_hash = nt_hash32_str(name);
     NT_ASSERT(s_active_segment < 0 && "GL_TIME_ELAPSED cannot nest — close current segment first");
     int8_t idx = segment_find_or_alloc(name_hash);
     nt_gfx_segment_state_t *seg = &s_segments[idx];
@@ -489,6 +501,16 @@ void nt_gfx_backend_begin_segment(nt_hash32_t name_hash) {
             seg->tail = 0;
         }
     }
+    /* Push debug group BEFORE glBeginQuery so RenderDoc / Apitrace shows the
+     * named group around both the query and the wrapped draw calls.
+     * Compiled out on WebGL — KHR_debug isn't in the WebGL2 spec, the
+     * runtime probe always returns false there, and the symbols don't
+     * exist in <GLES3/gl3.h>. */
+#ifndef NT_PLATFORM_WEB
+    if (s_debug_groups_enabled) {
+        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, name_hash.value, -1, name);
+    }
+#endif
     glBeginQuery(GL_TIME_ELAPSED, seg->queries[seg->head]);
     s_active_segment = idx;
 }
@@ -499,6 +521,11 @@ void nt_gfx_backend_end_segment(void) {
     }
     nt_gfx_segment_state_t *seg = &s_segments[s_active_segment];
     glEndQuery(GL_TIME_ELAPSED);
+#ifndef NT_PLATFORM_WEB
+    if (s_debug_groups_enabled) {
+        glPopDebugGroup();
+    }
+#endif
     seg->in_flight[seg->head] = true;
     seg->head = (uint8_t)((seg->head + 1U) % NT_GFX_TIMER_RING);
     s_active_segment = -1;
@@ -543,10 +570,11 @@ void nt_gfx_backend_end_frame(void) {
 }
 
 // #region GPU timer segments — poll/lifecycle
-bool nt_gfx_backend_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns) {
-    if (!s_timer_enabled) {
+bool nt_gfx_backend_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
+    if (!s_timer_enabled || name == NULL || out_ns == NULL) {
         return false;
     }
+    nt_hash32_t name_hash = nt_hash32_str(name);
 
     /* Disjoint check moved to nt_gfx_backend_begin_frame — runs once per frame
      * instead of once per poll, avoiding GLE roundtrip in the drain loop. */

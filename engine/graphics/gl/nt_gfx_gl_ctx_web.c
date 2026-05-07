@@ -89,3 +89,8 @@ EM_JS(int, nt_gfx_js_enable_timer_query, (void), {
 // clang-format on
 
 bool nt_gfx_gl_ctx_enable_timer_query(void) { return nt_gfx_js_enable_timer_query() != 0; }
+
+/* WebGL2 has no KHR_debug equivalent in the spec; Spector.js intercepts at
+ * the JS call level and wouldn't see glPushDebugGroup anyway. Return false
+ * — segment labeling becomes a no-op on web. */
+bool nt_gfx_gl_ctx_enable_debug_groups(void) { return false; }
