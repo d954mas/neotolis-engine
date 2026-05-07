@@ -463,6 +463,21 @@ static void frame(void) {
     nt_stats_count("atlas_quality", s_hd_active ? 1ULL : 0ULL);
     nt_stats_frame_end();
 
+    /* Throughput log — bunnymark owns its own format. nt_stats provides
+     * generic accessors; demo-specific fields (bunny count, atlas quality)
+     * come from local state. */
+    static uint32_t s_log_frame_counter;
+    if ((++s_log_frame_counter % 60U) == 0U) {
+        const float gpu_ms = nt_stats_get_gpu_ms();
+        const char *atlas_str = s_hd_active ? "HD" : "SD";
+        if (gpu_ms < 0.0F) {
+            nt_log_info("fps=%.1f cpu=%.2fms gpu=N/A draws=%u bunnies=%u atlas=%s", (double)nt_stats_get_fps(), (double)nt_stats_get_cpu_ms(), nt_stats_get_draw_calls(), s_bunny_count, atlas_str);
+        } else {
+            nt_log_info("fps=%.1f cpu=%.2fms gpu=%.2fms draws=%u bunnies=%u atlas=%s", (double)nt_stats_get_fps(), (double)nt_stats_get_cpu_ms(), (double)gpu_ms, nt_stats_get_draw_calls(),
+                        s_bunny_count, atlas_str);
+        }
+    }
+
     nt_window_swap_buffers();
 }
 

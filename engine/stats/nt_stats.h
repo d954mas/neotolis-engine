@@ -19,16 +19,12 @@
 
 typedef struct {
     uint16_t fps_window;            /* default 60 (D-37) */
-    uint16_t throughput_log_period; /* default 60 frames; 0 = no log */
-    bool enable_throughput_log;     /* default true */
     uint16_t user_counter_capacity; /* default 16 (D-37) */
 } nt_stats_desc_t;
 
 static inline nt_stats_desc_t nt_stats_desc_defaults(void) {
     return (nt_stats_desc_t){
         .fps_window = 60,
-        .throughput_log_period = 60,
-        .enable_throughput_log = true,
         .user_counter_capacity = 16,
     };
 }

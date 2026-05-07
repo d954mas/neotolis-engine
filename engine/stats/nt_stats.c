@@ -3,7 +3,6 @@
 #include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
-#include "log/nt_log.h"
 #include "renderers/nt_text_renderer.h"
 #include "time/nt_time.h"
 
@@ -24,8 +23,6 @@ static struct {
     float last_gpu_ms;
     uint32_t last_draw_calls;
     uint64_t frame_index;
-    uint16_t throughput_period;
-    bool log_enabled;
 
     /* User counters — flat parallel arrays */
     uint16_t user_capacity;
@@ -45,8 +42,6 @@ nt_result_t nt_stats_init(const nt_stats_desc_t *desc) {
 
     memset(&s_stats, 0, sizeof(s_stats));
     s_stats.fps_window = d.fps_window;
-    s_stats.throughput_period = d.throughput_log_period;
-    s_stats.log_enabled = d.enable_throughput_log;
     s_stats.user_capacity = d.user_counter_capacity;
     s_stats.last_gpu_ms = -1.0F; /* until first poll succeeds */
     s_stats.initialized = true;
@@ -94,32 +89,7 @@ void nt_stats_frame_end(void) {
     }
     // #endregion
 
-    // #region throughput log
     s_stats.frame_index++;
-    if (s_stats.log_enabled && s_stats.throughput_period > 0 && (s_stats.frame_index % s_stats.throughput_period) == 0) {
-        /* Find well-known user counters by hashed name */
-        const uint64_t k_bunnies = nt_hash64_str("bunnies").value;
-        const uint64_t k_quality = nt_hash64_str("atlas_quality").value;
-        uint64_t bunnies = 0;
-        uint64_t quality = 0;
-        for (uint16_t i = 0; i < s_stats.user_count; i++) {
-            if (s_stats.user_name_hashes[i] == k_bunnies) {
-                bunnies = s_stats.user_values[i];
-            }
-            if (s_stats.user_name_hashes[i] == k_quality) {
-                quality = s_stats.user_values[i];
-            }
-        }
-        const char *atlas_str = (quality == 0) ? "SD" : "HD";
-        if (s_stats.last_gpu_ms < 0.0F) {
-            NT_LOG_INFO("frame=%llu fps=%.1f cpu=%.2f ms gpu=N/A draws=%u bunnies=%llu atlas=%s", (unsigned long long)s_stats.frame_index, (double)nt_stats_get_fps(), (double)s_stats.last_cpu_ms,
-                        s_stats.last_draw_calls, (unsigned long long)bunnies, atlas_str);
-        } else {
-            NT_LOG_INFO("frame=%llu fps=%.1f cpu=%.2f ms gpu=%.2f ms draws=%u bunnies=%llu atlas=%s", (unsigned long long)s_stats.frame_index, (double)nt_stats_get_fps(), (double)s_stats.last_cpu_ms,
-                        (double)s_stats.last_gpu_ms, s_stats.last_draw_calls, (unsigned long long)bunnies, atlas_str);
-        }
-    }
-    // #endregion
 }
 // #endregion
 

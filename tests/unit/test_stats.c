@@ -83,7 +83,6 @@ static void assert_float_within(float tolerance, float expected, float actual, c
 static void test_stats_fps_rolling_avg(void) {
     nt_stats_desc_t desc = nt_stats_desc_defaults();
     desc.fps_window = 60;
-    desc.enable_throughput_log = false; /* keep test output quiet */
     nt_stats_init(&desc);
 
     /* Drive 60 frames at 16.67 ms (= 60 fps) via test injection */
@@ -171,33 +170,10 @@ static void test_stats_format_lines_schema(void) {
  * test merely exercises the code path to make sure it doesn't crash.
  */
 
-static void test_stats_throughput_log_period(void) {
-    nt_stats_desc_t desc = nt_stats_desc_defaults();
-    desc.throughput_log_period = 10;
-    desc.enable_throughput_log = true;
-    nt_stats_init(&desc);
-
-    nt_stats_count("bunnies", 42);
-    nt_stats_count("atlas_quality", 0);
-
-    /* Drive 25 frames; logs at frame 10 and 20 emit via NT_LOG_INFO.
-     * No assertion — just smoke-test the path without crashing. */
-    for (int i = 0; i < 25; i++) {
-        nt_stats_test_inject_frame(1.0F / 60.0F);
-        /* nt_stats_test_inject_frame doesn't emit the log (only frame_end does);
-         * we exercise frame_begin/frame_end pair instead for log emission. */
-        nt_stats_frame_begin();
-        nt_stats_frame_end();
-    }
-
-    nt_stats_shutdown();
-}
-
 /* ---- Test 7: draw call count from nt_gfx (DEMO-04) ---- */
 
 static void test_stats_draw_calls_from_gfx(void) {
     nt_stats_desc_t desc = nt_stats_desc_defaults();
-    desc.enable_throughput_log = false;
     nt_stats_init(&desc);
 
     /* Mirror test_gfx_frame_draw_calls setup: minimal pipeline so the four
@@ -282,7 +258,6 @@ int main(void) {
     RUN_TEST(test_stats_user_counters);
     RUN_TEST(test_stats_user_counter_overflow_assert);
     RUN_TEST(test_stats_format_lines_schema);
-    RUN_TEST(test_stats_throughput_log_period);
     RUN_TEST(test_stats_draw_calls_from_gfx);
     RUN_TEST(test_stats_draw_pitfall9_explicit_set_calls);
     return UNITY_END();
