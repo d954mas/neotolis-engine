@@ -67,6 +67,13 @@ typedef struct nt_atlas_data {
     uint64_t page_resource_ids[NT_ATLAS_MAX_PAGES];
     nt_resource_t page_resources[NT_ATLAS_MAX_PAGES]; /* NT_RESOURCE_INVALID until on_post_resolve */
     uint8_t page_count;
+
+    /* Per-vertex pos baked once at parse/merge so the hot loop doesn't redo
+     * the math per sprite × per frame. UVs aren't cached separately — atlas
+     * stores them as u16 in the blob and sprite vertex format uses USHORT2N,
+     * so the renderer reads them straight from vertices[]. */
+    float (*cached_pos)[2]; /* (local + trim_offset) * ipu, parallel to vertices[] */
+    float ipu;              /* 1 / pixels_per_unit; baked into cached_pos */
 } nt_atlas_data_t;
 // #endregion
 
@@ -172,11 +179,12 @@ static void translate_region(nt_texture_region_t *dst, const NtAtlasRegion *src)
     dst->index_count = src->index_count;
     dst->page_index = src->page_index;
     dst->transform = src->transform;
+    dst->flags = src->flags;
 }
 // #endregion
 
 // #region replace_pages
-// Replace the page id array wholesale from a new blob (D-05).
+// Replace the page id array wholesale from a new blob.
 // Invalidate page handles here. atlas_on_post_resolve() rebuilds them after
 // the resolve pass, where nt_resource_request is legal.
 // Source is a raw byte pointer because page-id storage may be only 4-byte
@@ -198,7 +206,7 @@ static void replace_pages(nt_atlas_data_t *ad, const uint8_t *new_page_ids_bytes
 // #endregion
 
 // #region activator callbacks
-/* D-10: trivial no-op activator. The real work happens in on_resolve;
+/* Trivial no-op activator. The real work happens in on_resolve;
  * activate only materializes a stable runtime winner handle for stacking. */
 static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
     (void)data;
@@ -206,7 +214,7 @@ static uint32_t atlas_activate(const uint8_t *data, uint32_t size) {
     return 1; /* non-zero fake handle marks slot READY */
 }
 
-/* D-11: deactivate must NOT touch user_data — on_cleanup owns that lifecycle. */
+/* deactivate must NOT touch user_data — on_cleanup owns that lifecycle. */
 static void atlas_deactivate(uint32_t runtime_handle) { (void)runtime_handle; }
 
 /* Blob views carved out of raw bytes once the header has been validated.
@@ -317,16 +325,33 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
     return true;
 }
 
+/* Grow one cached float[2] array to new_cap.
+ * On first parse the array is NULL (calloc'd in atlas_on_resolve); on merge
+ * it exists and needs realloc + zero-fill of the grown tail so common-region
+ * slices never see garbage before atlas_precompute_all overwrites them. */
+static void grow_cached_array(float (**arr)[2], uint32_t old_cap, uint32_t new_cap) {
+    if (*arr == NULL) {
+        return;
+    }
+    float(*new_arr)[2] = (float(*)[2])realloc(*arr, (size_t)new_cap * sizeof(float[2]));
+    NT_ASSERT(new_arr);
+    *arr = new_arr;
+    memset(&new_arr[old_cap], 0, (size_t)(new_cap - old_cap) * sizeof(float[2]));
+}
+
 /* Grow vertex/index buffers if the new blob is larger, then bulk-copy
  * payload arrays verbatim. Keeps duplicate region sharing exactly as
- * the builder serialized. Called by both first-parse and merge paths. */
+ * the builder serialized. Called by both first-parse and merge paths.
+ * cached_pos is kept parallel to vertices[] via grow_cached_array. */
 static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
     const NtAtlasHeader *hdr = v->hdr;
+    const uint32_t old_cap = ad->vertex_capacity;
     if (hdr->total_vertex_count > ad->vertex_capacity) {
         nt_atlas_vertex_t *new_buf = (nt_atlas_vertex_t *)realloc(ad->vertices, (size_t)hdr->total_vertex_count * sizeof(nt_atlas_vertex_t));
         NT_ASSERT(new_buf);
         ad->vertices = new_buf;
         ad->vertex_capacity = hdr->total_vertex_count;
+        grow_cached_array(&ad->cached_pos, old_cap, ad->vertex_capacity);
     }
     if (hdr->total_index_count > ad->index_capacity) {
         uint16_t *new_buf = (uint16_t *)realloc(ad->indices, (size_t)hdr->total_index_count * sizeof(uint16_t));
@@ -344,6 +369,32 @@ static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_vie
     ad->vertex_count = hdr->total_vertex_count;
     ad->index_count = hdr->total_index_count;
 }
+
+// #region precompute
+/* Re-bake cached_pos for all live regions after parse/merge. */
+static void atlas_precompute_all(nt_atlas_data_t *ad) {
+    const float ipu = ad->ipu;
+    for (uint32_t i = 0; i < ad->region_count; i++) {
+        const nt_texture_region_t *r = &ad->regions[i];
+        if (r->name_hash == NT_ATLAS_TOMBSTONE_HASH || r->vertex_count == 0) {
+            continue;
+        }
+        const float trim_off_x = (float)r->trim_offset_x;
+        const float trim_off_y = (float)r->trim_offset_y;
+        for (uint32_t v = 0; v < r->vertex_count; v++) {
+            const nt_atlas_vertex_t *raw = &ad->vertices[r->vertex_start + v];
+            /* Source-space position (NO origin baked). Builder dedups regions
+             * by pixel hash — duplicates share vertex_start/index_start with
+             * possibly different origin_x/y. Baking origin into cached_pos
+             * would let the last-baked region overwrite earlier ones, so the
+             * sprite renderer applies origin per-emit via the translation
+             * vector instead. */
+            ad->cached_pos[r->vertex_start + v][0] = ((float)raw->local_x + trim_off_x) * ipu;
+            ad->cached_pos[r->vertex_start + v][1] = ((float)raw->local_y + trim_off_y) * ipu;
+        }
+    }
+}
+// #endregion
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtime_handle, void **user_data) {
@@ -382,6 +433,14 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
 
         ad->hash_table = NULL;
         ad->hash_capacity = 0;
+
+        // #region cached arrays
+        /* Allocated parallel to vertices[]. calloc zeros the buffer so
+         * tombstoned (vertex_count==0) regions' slices naturally read zero. */
+        ad->cached_pos = (float(*)[2])calloc(ad->vertex_capacity, sizeof(float[2]));
+        NT_ASSERT(ad->cached_pos);
+        ad->ipu = 1.0F; /* default; overwritten in atlas_on_post_resolve if metadata present */
+        // #endregion
         // #endregion
 
         replace_payload_buffers(ad, &view);
@@ -395,13 +454,18 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
         hash_rebuild(ad);
         replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
 
+        /* cached_pos/cached_uv bake is deferred to atlas_on_post_resolve where
+         * ipu is finalized from pixels_per_unit metadata. The resource module
+         * fires resolve and post_resolve in pairs within a single nt_resource_step,
+         * so no caller can observe the unbaked state. */
+
         *user_data = ad;
         return;
     }
     // #endregion
 
     /* ---- Merge path — diff new blob against existing regions by name_hash.
-     * D-03 stable-index semantics:
+     * Stable-index semantics:
      *   - payload arrays replaced wholesale from new blob
      *   - common: update metadata in place
      *   - new:    append region with fresh index
@@ -478,6 +542,12 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
     atlas_bump_revision(ad);
     hash_rebuild(ad);
     replace_pages(ad, view.page_ids_bytes, view.page_bytes, (uint8_t)hdr->page_count);
+
+    /* cached_pos/cached_uv bake deferred to atlas_on_post_resolve once ipu
+     * is finalized from the (possibly updated) pixels_per_unit metadata.
+     * replace_payload_buffers may have realloc'd cached_pos/cached_uv and
+     * even unchanged common regions may now sit at different vertex_start
+     * offsets — post_resolve handles all of that in one pass. */
     // #endregion
 }
 
@@ -490,12 +560,14 @@ static void atlas_on_cleanup(void *user_data) {
     free(ad->vertices);
     free(ad->indices);
     free(ad->hash_table);
+    /* Cached pos owned alongside vertices[]. */
+    free(ad->cached_pos);
     free(ad);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void atlas_on_post_resolve(const uint8_t *data, uint32_t size, nt_resource_t atlas, uint32_t runtime_handle, void *user_data) {
     (void)runtime_handle;
-    (void)atlas;
 
     /* If the winner changed to an atlas whose blob is currently unavailable,
      * atlas_on_resolve kept the existing user_data untouched. Do not request
@@ -511,6 +583,34 @@ static void atlas_on_post_resolve(const uint8_t *data, uint32_t size, nt_resourc
         ad->page_resources[i] = nt_resource_request(rid, NT_ASSET_TEXTURE);
         NT_ASSERT(ad->page_resources[i].id != 0 && "page texture slot request failed");
     }
+
+    // #region pixels_per_unit metadata read
+    /* Read pixels_per_unit metadata once per atlas (atlas-level, not region-
+     * level). On merge, this re-reads the new pack's pixels_per_unit
+     * so higher-priority packs replace lower-priority scale metadata, and the subsequent
+     * atlas_precompute_all re-bakes cached_pos at the new scale. region_index
+     * stays stable per merge semantics — only the cached float
+     * values change. */
+    static nt_hash64_t s_ppu_kind;
+    if (s_ppu_kind.value == 0) {
+        s_ppu_kind = nt_hash64_str("pixels_per_unit");
+    }
+    uint32_t meta_size = 0;
+    const void *meta = nt_resource_get_meta(atlas, s_ppu_kind, &meta_size);
+    if (meta != NULL) {
+        NT_ASSERT(meta_size == sizeof(float) && "pixels_per_unit meta size mismatch — builder bug");
+        float ppu = 0.0F;
+        memcpy(&ppu, meta, sizeof(ppu));
+        NT_ASSERT(ppu > 0.0F);
+        ad->ipu = 1.0F / ppu;
+    } else {
+        ad->ipu = 1.0F;
+    }
+    /* Re-bake cached_pos with the correct ipu.
+     * cached_uv is unaffected by ipu but the loop is shared — cheap on
+     * small atlases and runs at resolve time, not in the hot path. */
+    atlas_precompute_all(ad);
+    // #endregion
 }
 // #endregion
 
@@ -539,6 +639,13 @@ uint32_t nt_atlas_region_count(nt_resource_t atlas) {
     return ad->region_count;
 }
 
+uint8_t nt_atlas_page_count(nt_resource_t atlas) {
+    NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_page_count: handle is not an atlas resource");
+    nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    NT_ASSERT(ad != NULL && "nt_atlas_page_count on unresolved atlas");
+    return ad->page_count;
+}
+
 uint32_t nt_atlas_find_region(nt_resource_t atlas, uint64_t name_hash) {
     NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_find_region: handle is not an atlas resource");
     nt_atlas_data_t *ad = (nt_atlas_data_t *)nt_resource_get_user_data(atlas);
@@ -564,6 +671,43 @@ nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index
     NT_ASSERT(page_index < ad->page_count && "page_index out of range");
     return ad->page_resources[page_index];
 }
+
+// #region cached projection accessors
+float nt_atlas_get_pixels_per_unit(nt_resource_t atlas) {
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    NT_ASSERT(ad != NULL && "nt_atlas_get_pixels_per_unit on unresolved atlas");
+    NT_ASSERT(ad->ipu > 0.0F && "atlas ipu must be set by atlas_on_post_resolve");
+    return 1.0F / ad->ipu;
+}
+
+float nt_atlas_get_inverse_pixels_per_unit(nt_resource_t atlas) {
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    NT_ASSERT(ad != NULL && "nt_atlas_get_inverse_pixels_per_unit on unresolved atlas");
+    NT_ASSERT(ad->ipu > 0.0F && "atlas ipu must be set by atlas_on_post_resolve");
+    return ad->ipu;
+}
+
+const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t region_index))[2] {
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    NT_ASSERT(ad != NULL && "nt_atlas_get_region_cached_pos on unresolved atlas");
+    NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_cached_pos: region_index out of range");
+    return (const float(*)[2]) & ad->cached_pos[ad->regions[region_index].vertex_start];
+}
+
+const nt_atlas_vertex_t *nt_atlas_get_region_raw_vertices(nt_resource_t atlas, uint32_t region_index) {
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    NT_ASSERT(ad != NULL && "nt_atlas_get_region_raw_vertices on unresolved atlas");
+    NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_raw_vertices: region_index out of range");
+    return &ad->vertices[ad->regions[region_index].vertex_start];
+}
+
+const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region_index) {
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    NT_ASSERT(ad != NULL && "nt_atlas_get_region_indices on unresolved atlas");
+    NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_indices: region_index out of range");
+    return &ad->indices[ad->regions[region_index].index_start];
+}
+// #endregion
 // #endregion
 
 // #region test access
@@ -616,6 +760,15 @@ void nt_atlas_test_drive_resolve(const uint8_t *data, uint32_t size, void **user
     /* runtime_handle is ignored by atlas_on_resolve (we cast it to void),
      * so any non-zero value is fine. Tests pass 1 to mirror the real flow. */
     atlas_on_resolve(data, size, 1, user_data);
+    /* Production fires on_post_resolve immediately after on_resolve in the
+     * same nt_resource_step. Mimic it here so cached_pos/cached_uv are
+     * baked before tests query them. We can't call atlas_on_post_resolve
+     * directly (it requires resource module + a real nt_resource_t to
+     * fetch page textures and metadata) — but the only state it touches
+     * besides those is the cached array bake. */
+    if (*user_data != NULL) {
+        atlas_precompute_all((nt_atlas_data_t *)*user_data);
+    }
 }
 
 void nt_atlas_test_drive_cleanup(void *user_data) { atlas_on_cleanup(user_data); }
@@ -631,6 +784,28 @@ void nt_atlas_test_reset(void) { s_atlas.initialized = false; }
 bool nt_atlas_test_validate_header(const uint8_t *data, uint32_t size) {
     nt_atlas_blob_view_t ignored;
     return atlas_try_validate_and_carve_blob(data, size, &ignored);
+}
+
+const float (*nt_atlas_test_cached_pos(const struct nt_atlas_data *ad))[2] {
+    NT_ASSERT(ad != NULL);
+    return (const float(*)[2])ad->cached_pos;
+}
+
+const nt_atlas_vertex_t *nt_atlas_test_raw_vertices(const struct nt_atlas_data *ad) {
+    NT_ASSERT(ad != NULL);
+    return ad->vertices;
+}
+
+float nt_atlas_test_ipu(const struct nt_atlas_data *ad) {
+    NT_ASSERT(ad != NULL);
+    return ad->ipu;
+}
+
+void nt_atlas_test_set_ipu_and_recompute(struct nt_atlas_data *ad, float ipu) {
+    NT_ASSERT(ad != NULL);
+    NT_ASSERT(ipu > 0.0F);
+    ad->ipu = ipu;
+    atlas_precompute_all(ad);
 }
 
 #endif /* NT_ATLAS_TEST_ACCESS */

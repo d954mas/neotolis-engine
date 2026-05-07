@@ -446,11 +446,7 @@ int main(void) {
         *nt_material_comp_handle(s_cubes[i]) = s_cube_material;
 
         /* Set tint color */
-        float *color = nt_drawable_comp_color(s_cubes[i]);
-        color[0] = s_cube_colors[i][0];
-        color[1] = s_cube_colors[i][1];
-        color[2] = s_cube_colors[i][2];
-        color[3] = s_cube_colors[i][3];
+        nt_drawable_comp_set_color(s_cubes[i], s_cube_colors[i][0], s_cube_colors[i][1], s_cube_colors[i][2], s_cube_colors[i][3]);
     }
 
     /* Create frame uniforms UBO (updated each frame) */

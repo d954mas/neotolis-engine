@@ -12,7 +12,6 @@
  * Usage: build_sponza_packs <output_dir>
  */
 
-#include "nt_basisu_encoder.h"
 #include "nt_builder.h"
 
 #include "cgltf.h"
@@ -132,7 +131,8 @@ static void add_textures(NtBuilderContext *ctx, const nt_glb_scene_t *scene, uin
             continue;
         }
 
-        nt_tex_opts_t opts = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = max_size};
+        nt_tex_opts_t opts = nt_tex_opts_defaults();
+        opts.max_size = max_size;
         const nt_tex_compress_opts_t *tex_compress = color_compress;
         switch (roles[i]) {
         case TEX_ROLE_DIFFUSE:
@@ -190,7 +190,8 @@ static void add_placeholder_textures(NtBuilderContext *ctx, const nt_glb_scene_t
     uint32_t added = 0;
     for (uint32_t i = 0; i < scene->texture_count; i++) {
         const uint8_t *pixels = NULL;
-        nt_tex_opts_t opts = {.format = NT_TEXTURE_FORMAT_RGB8, .max_size = 0};
+        nt_tex_opts_t opts = nt_tex_opts_defaults();
+        opts.format = NT_TEXTURE_FORMAT_RGB8;
 
         switch (roles[i]) {
         case TEX_ROLE_NORMAL:
@@ -213,7 +214,7 @@ static void add_placeholder_textures(NtBuilderContext *ctx, const nt_glb_scene_t
 /* --- Add fallback checkerboard texture (used as runtime placeholder for all unloaded textures) --- */
 
 static void add_fallback_checker(NtBuilderContext *ctx) {
-    nt_tex_opts_t opts = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = 0};
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
     nt_builder_add_texture_raw(ctx, s_checker, CHECKER_SIZE, CHECKER_SIZE, "sponza/fallback_checker", &opts);
     (void)printf("  Fallback checkerboard added\n");
 }

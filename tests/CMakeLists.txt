@@ -358,6 +358,56 @@ if(NOT EMSCRIPTEN)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
     )
     add_test(NAME test_mesh_renderer COMMAND test_mesh_renderer)
+
+    # --- Sprite renderer tests ---
+    add_executable(test_sprite_renderer unit/test_sprite_renderer.c)
+    target_link_libraries(test_sprite_renderer PRIVATE
+        nt_sprite_renderer nt_atlas nt_sprite_comp nt_transform_comp
+        nt_drawable_comp nt_material_comp nt_material nt_render
+        nt_resource nt_hash nt_pool nt_entity nt_shared nt_gfx_stub unity
+    )
+    target_compile_definitions(test_sprite_renderer PRIVATE
+        NT_SPRITE_RENDERER_TEST_ACCESS
+        NT_ATLAS_TEST_ACCESS
+        NT_GFX_STUB_TEST_ACCESS
+        NT_GFX_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS
+        _CRT_NONSTDC_NO_DEPRECATE
+    )
+    target_compile_definitions(nt_sprite_renderer PRIVATE NT_SPRITE_RENDERER_TEST_ACCESS)
+    # nt_gfx_stub also compiles nt_gfx.c — needs NT_GFX_TEST_ACCESS for the
+    # real-backend test hook (sampler cache inspection) the test uses.
+    target_compile_definitions(nt_gfx_stub PRIVATE NT_GFX_STUB_TEST_ACCESS NT_GFX_TEST_ACCESS)
+    target_compile_definitions(nt_gfx PRIVATE NT_GFX_TEST_ACCESS)
+    target_compile_options(test_sprite_renderer PRIVATE -U_DLL)
+    nt_set_warning_flags(test_sprite_renderer)
+    nt_set_sanitizer_flags(test_sprite_renderer)
+    set_target_properties(test_sprite_renderer PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_sprite_renderer COMMAND test_sprite_renderer)
+
+    # --- Stats module tests (DEMO-04..06 + Pitfall 9 / Issue 2 coverage) ---
+    add_executable(test_stats unit/test_stats.c)
+    target_link_libraries(test_stats PRIVATE
+        nt_stats nt_text_renderer nt_font nt_material nt_resource
+        nt_gfx_stub nt_hash nt_pool unity
+    )
+    target_compile_definitions(test_stats PRIVATE
+        NT_STATS_TEST_ACCESS
+        NT_TEXT_RENDERER_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS
+    )
+    target_compile_definitions(nt_stats PRIVATE NT_STATS_TEST_ACCESS)
+    target_compile_definitions(nt_text_renderer PRIVATE NT_TEXT_RENDERER_TEST_ACCESS)
+    target_compile_options(test_stats PRIVATE -U_DLL)
+    nt_set_warning_flags(test_stats)
+    nt_set_sanitizer_flags(test_stats)
+    set_target_properties(test_stats PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_stats COMMAND test_stats)
+
 endif()
 
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---

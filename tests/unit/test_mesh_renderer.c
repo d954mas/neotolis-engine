@@ -153,11 +153,7 @@ static nt_entity_t create_test_entity(nt_mesh_t mesh, nt_material_t mat) {
     nt_transform_comp_update();
 
     /* Set white color */
-    float *color = nt_drawable_comp_color(e);
-    color[0] = 1.0F;
-    color[1] = 1.0F;
-    color[2] = 1.0F;
-    color[3] = 1.0F;
+    nt_drawable_comp_set_color(e, 1.0F, 1.0F, 1.0F, 1.0F);
 
     return e;
 }

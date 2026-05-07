@@ -2,6 +2,7 @@
 #define NT_GFX_H
 
 #include "core/nt_types.h"
+#include "hash/nt_hash.h"
 #include "nt_mesh_format.h"
 
 /* ---- Index buffer type constants ---- */
@@ -34,9 +35,28 @@ typedef struct {
 
 #define NT_MESH_INVALID ((nt_mesh_t){0})
 
+/* Sampler object — texture-side filter/wrap state decoupled from the texture
+ * itself. One texture can be sampled with different filters in different
+ * materials by binding different samplers to the same texture unit. */
+typedef struct {
+    uint32_t id;
+} nt_sampler_t;
+
+#define NT_SAMPLER_INVALID ((nt_sampler_t){0})
+
 /* ---- Global UBO block registry (compile-time limit) ---- */
 
 #define NT_GFX_MAX_GLOBAL_BLOCKS 8
+
+/* Sampler cache size — samplers are deduplicated by their (filter/wrap)
+ * descriptor so repeated nt_gfx_make_sampler calls with the same desc
+ * return the same handle. Most apps use 3-10 unique configs. */
+/* 128 covers all theoretically possible combinations of (min×mag×wrap_u×wrap_v)
+ * = 6×2×3×3 = 108, with a small safety margin. Cost: ~3.5 KB BSS (not binary
+ * — zero-init in WASM linear memory / native .bss). Linear scan in
+ * nt_gfx_make_sampler iterates sampler_count, not capacity, so size is free
+ * for the hot path. */
+#define NT_GFX_MAX_SAMPLERS 128
 
 typedef struct {
     const char *name; /* string literal, not owned */
@@ -82,17 +102,18 @@ typedef enum {
     NT_FORMAT_FLOAT2,
     NT_FORMAT_FLOAT3,
     NT_FORMAT_FLOAT4,
-    NT_FORMAT_HALF,    /* GL_HALF_FLOAT × 1 */
-    NT_FORMAT_HALF2,   /* GL_HALF_FLOAT × 2 */
-    NT_FORMAT_HALF3,   /* GL_HALF_FLOAT × 3 */
-    NT_FORMAT_HALF4,   /* GL_HALF_FLOAT × 4 */
-    NT_FORMAT_SHORT2,  /* GL_SHORT × 2 */
-    NT_FORMAT_SHORT2N, /* GL_SHORT × 2, normalized */
-    NT_FORMAT_SHORT4,  /* GL_SHORT × 4 */
-    NT_FORMAT_SHORT4N, /* GL_SHORT × 4, normalized */
-    NT_FORMAT_UBYTE4,  /* GL_UNSIGNED_BYTE × 4 */
-    NT_FORMAT_UBYTE4N, /* GL_UNSIGNED_BYTE × 4, normalized */
-    NT_FORMAT_BYTE4N,  /* GL_BYTE × 4, normalized */
+    NT_FORMAT_HALF,     /* GL_HALF_FLOAT × 1 */
+    NT_FORMAT_HALF2,    /* GL_HALF_FLOAT × 2 */
+    NT_FORMAT_HALF3,    /* GL_HALF_FLOAT × 3 */
+    NT_FORMAT_HALF4,    /* GL_HALF_FLOAT × 4 */
+    NT_FORMAT_SHORT2,   /* GL_SHORT × 2 */
+    NT_FORMAT_SHORT2N,  /* GL_SHORT × 2, normalized to [-1, 1] */
+    NT_FORMAT_USHORT2N, /* GL_UNSIGNED_SHORT × 2, normalized to [0, 1] */
+    NT_FORMAT_SHORT4,   /* GL_SHORT × 4 */
+    NT_FORMAT_SHORT4N,  /* GL_SHORT × 4, normalized */
+    NT_FORMAT_UBYTE4,   /* GL_UNSIGNED_BYTE × 4 */
+    NT_FORMAT_UBYTE4N,  /* GL_UNSIGNED_BYTE × 4, normalized */
+    NT_FORMAT_BYTE4N,   /* GL_BYTE × 4, normalized */
 } nt_vertex_format_t;
 
 typedef enum {
@@ -218,6 +239,14 @@ typedef struct {
 } nt_texture_desc_t;
 
 typedef struct {
+    nt_texture_filter_t min_filter; /* default: NT_FILTER_LINEAR */
+    nt_texture_filter_t mag_filter; /* default: NT_FILTER_LINEAR (NEAREST or LINEAR only) */
+    nt_texture_wrap_t wrap_u;       /* default: NT_WRAP_CLAMP_TO_EDGE */
+    nt_texture_wrap_t wrap_v;       /* default: NT_WRAP_CLAMP_TO_EDGE */
+    const char *label;              /* debug name; static storage */
+} nt_sampler_desc_t;
+
+typedef struct {
     float clear_color[4];
     float clear_depth; /* typically 1.0f; zero-init gives 0.0 which fails all depth tests */
 } nt_pass_desc_t;
@@ -293,6 +322,7 @@ nt_shader_t nt_gfx_make_shader(const nt_shader_desc_t *desc);
 nt_pipeline_t nt_gfx_make_pipeline(const nt_pipeline_desc_t *desc);
 nt_buffer_t nt_gfx_make_buffer(const nt_buffer_desc_t *desc);
 nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc);
+nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc);
 
 /* ---- Resource destruction ---- */
 
@@ -300,6 +330,10 @@ void nt_gfx_destroy_shader(nt_shader_t shd);
 void nt_gfx_destroy_pipeline(nt_pipeline_t pip);
 void nt_gfx_destroy_buffer(nt_buffer_t buf);
 void nt_gfx_destroy_texture(nt_texture_t tex);
+/* Samplers have no destroy: nt_gfx_make_sampler dedupes against an internal
+ * cache (NT_GFX_MAX_SAMPLERS), and all cached samplers are released by
+ * nt_gfx_shutdown. The shared lifetime is intentional — multiple materials
+ * and textures reference the same sampler handle. */
 
 /* ---- Draw state ---- */
 
@@ -307,6 +341,12 @@ void nt_gfx_bind_pipeline(nt_pipeline_t pip);
 void nt_gfx_bind_vertex_buffer(nt_buffer_t buf);
 void nt_gfx_bind_index_buffer(nt_buffer_t buf);
 void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
+/* Bind sampler to texture unit `slot`. Pass NT_SAMPLER_INVALID to fall back
+ * to the texture's own filter/wrap state (set via glTexParameteri). */
+void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
+
+/* Returns NT_SAMPLER_INVALID if texture has no asset-baked default. */
+nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex);
 
 /* ---- Uniforms ---- */
 
@@ -322,6 +362,11 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices);
 void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count);
 
+/* Convenience getter for g_nt_gfx.frame_stats.draw_calls. Reset by
+ * nt_gfx_begin_frame, incremented by every public draw function. Read
+ * by nt_stats; equivalent to reading frame_stats.draw_calls directly. */
+uint32_t nt_gfx_get_frame_draw_calls(void);
+
 /* ---- Instance buffer ---- */
 
 void nt_gfx_bind_instance_buffer(nt_buffer_t buf);
@@ -333,9 +378,27 @@ void nt_gfx_set_vertex_attrib_default(uint8_t location, float x, float y, float 
 void nt_gfx_bind_uniform_buffer(nt_buffer_t buf, uint32_t slot);
 void nt_gfx_set_uniform_block(nt_pipeline_t pip, const char *block_name, uint32_t slot);
 
-/* ---- Buffer update ---- */
-
+/* update_buffer = glBufferSubData (partial). orphan_buffer = glBufferData
+ * with DYNAMIC_DRAW hint, for streaming geometry replaced every frame. */
 void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size);
+void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size);
+
+/* Named GPU TIME_ELAPSED segments. Pairs must be sequential (no nesting —
+ * GL can only have one TIME_ELAPSED query active at a time). Game opens
+ * the segments it wants to time; nt_stats polls "frame" by convention.
+ *
+ * Pass a stable string literal — the backend hashes for internal slot
+ * lookup AND emits glPushDebugGroup so the name shows up in RenderDoc /
+ * gDEBugger / Apitrace as a debug group around the timing query
+ * (KHR_debug; no-op on WebGL2 where the extension is absent). */
+void nt_gfx_begin_segment(const char *name);
+void nt_gfx_end_segment(void);
+bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns);
+
+/* Toggle GPU time-elapsed queries. Default = enabled. Disable for
+ * RenderDoc / Spector captures or mobile drivers that stall on it. */
+void nt_gfx_set_gpu_timing_enabled(bool enabled);
+bool nt_gfx_is_gpu_timing_supported(void);
 
 /* ---- Texture update (non-mipmapped textures only, level 0) ---- */
 

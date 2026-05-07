@@ -2,6 +2,7 @@
 #define NT_MATERIAL_H
 
 #include "core/nt_types.h"
+#include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "render/nt_render_defs.h"
 #include "resource/nt_resource.h"
@@ -41,6 +42,7 @@ typedef enum {
 typedef struct {
     const char *name;
     nt_resource_t resource;
+    nt_sampler_t sampler; /* override; .id==0 = use texture's asset-baked default */
 } nt_material_texture_desc_t;
 
 typedef struct {
@@ -99,7 +101,8 @@ typedef struct {
     uint32_t resolved_fs;
     uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
     uint32_t tex_name_hashes[NT_MATERIAL_MAX_TEXTURES];
-    const char *tex_names[NT_MATERIAL_MAX_TEXTURES]; /* sampler uniform names (static storage) */
+    const char *tex_names[NT_MATERIAL_MAX_TEXTURES];         /* sampler uniform names (static storage) */
+    nt_sampler_t resolved_sampler[NT_MATERIAL_MAX_TEXTURES]; /* per-binding sampler override; .id==0 means use texture's default */
     uint8_t tex_count;
     float params[NT_MATERIAL_MAX_PARAMS][4];
     uint32_t param_name_hashes[NT_MATERIAL_MAX_PARAMS];
@@ -119,6 +122,12 @@ typedef struct {
     bool ready;
     const char *label; /* debug name (string literal, static storage) */
 } nt_material_info_t;
+
+/* Pack render-state fields into a single u32 for pipeline-cache key building.
+ * Used by sprite/mesh renderers — same layout, single source of truth. */
+static inline uint32_t nt_material_state_bits(const nt_material_info_t *info) {
+    return ((uint32_t)info->blend_mode) | ((uint32_t)info->depth_test << 4) | ((uint32_t)info->depth_write << 5) | ((uint32_t)info->cull_mode << 6) | ((uint32_t)info->color_mode << 8);
+}
 
 /* ---- Lifecycle ---- */
 

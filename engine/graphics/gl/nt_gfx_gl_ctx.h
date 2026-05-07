@@ -13,4 +13,18 @@ bool nt_gfx_gl_ctx_create(const nt_gfx_desc_t *desc);
 void nt_gfx_gl_ctx_destroy(void);
 bool nt_gfx_gl_ctx_is_lost(void);
 
+/* nt_gfx_gl_ctx_detect_gpu_caps is declared in graphics/nt_gfx_internal.h —
+ * the stub backend also implements it, so the declaration lives at the
+ * shared internal layer, not the GL-only header. */
+
+/* Enable EXT_disjoint_timer_query_webgl2 (web) or check ARB_timer_query
+ * support (native). Returns true if GL_TIME_ELAPSED queries are usable. */
+bool nt_gfx_gl_ctx_enable_timer_query(void);
+
+/* KHR_debug check (native: GL 4.3+ or KHR_debug extension; web: usually
+ * absent). Returns true if glPushDebugGroup / glPopDebugGroup are safe to
+ * call. The GL backend uses these to label GPU timer segments so RenderDoc
+ * / Apitrace / gDEBugger show segment names as debug groups. */
+bool nt_gfx_gl_ctx_enable_debug_groups(void);
+
 #endif /* NT_GFX_GL_CTX_H */

@@ -16,6 +16,11 @@ nt_result_t nt_mesh_renderer_init(const nt_mesh_renderer_desc_t *desc);
 void nt_mesh_renderer_shutdown(void);
 void nt_mesh_renderer_restore_gpu(void);
 
+/* Contract: caller must pre-filter `items` by visibility — the renderer draws
+ * every entry unconditionally and does not consult drawable_comp's visible
+ * flag, color alpha, or entity-enabled state. Use nt_render_is_visible()
+ * (engine/render/nt_render_util.h) as the canonical filter when building
+ * the items array. */
 void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 #ifdef NT_MESH_RENDERER_TEST_ACCESS

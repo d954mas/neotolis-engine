@@ -29,12 +29,12 @@ static struct {
     nt_buffer_t vbo; /* dynamic vertex buffer */
     nt_buffer_t ibo; /* immutable index buffer (pre-generated quad pattern) */
 
-    /* CPU staging buffer (compile-time arrays per D-14) */
+    /* CPU staging buffer (compile-time arrays) */
     nt_text_vertex_t vertices[NT_TEXT_RENDERER_MAX_VERTICES];
     uint32_t vertex_count;
     uint32_t glyph_count;
 
-    /* Current state (per D-04, D-05) */
+    /* Current state */
     nt_material_t material;
     nt_font_t font;
 
@@ -42,6 +42,13 @@ static struct {
     uint32_t pipeline_material_version; /* version when pipeline was last created */
 
     bool initialized;
+
+#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+    /* Count every set_material / set_font entry regardless of early-out so
+     * nt_stats tests can prove explicit calls. */
+    uint32_t test_set_material_calls;
+    uint32_t test_set_font_calls;
+#endif
 } s_text;
 
 static uint16_t s_quad_indices[NT_TEXT_RENDERER_MAX_INDICES];
@@ -185,11 +192,14 @@ void nt_text_renderer_restore_gpu(void) {
 // #region State setters
 void nt_text_renderer_set_material(nt_material_t mat) {
     NT_ASSERT(s_text.initialized);
+#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+    s_text.test_set_material_calls++;
+#endif
     if (s_text.material.id == mat.id) {
         return;
     }
 
-    /* Auto-flush on material change (D-19) */
+    /* Auto-flush on material change */
     if (s_text.glyph_count > 0) {
         nt_text_renderer_flush();
     }
@@ -201,11 +211,14 @@ void nt_text_renderer_set_material(nt_material_t mat) {
 
 void nt_text_renderer_set_font(nt_font_t font) {
     NT_ASSERT(s_text.initialized);
+#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+    s_text.test_set_font_calls++;
+#endif
     if (s_text.font.id == font.id) {
         return;
     }
 
-    /* Auto-flush on font change (D-18) */
+    /* Auto-flush on font change */
     if (s_text.glyph_count > 0) {
         nt_text_renderer_flush();
     }
@@ -215,7 +228,7 @@ void nt_text_renderer_set_font(nt_font_t font) {
 // #endregion
 
 // #region Vertex generation helpers
-static void pack_uint_as_float(float *out, uint32_t val) { memcpy(out, &val, 4); /* bit-preserving uint-to-float, never cast (Pitfall 1) */ }
+static void pack_uint_as_float(float *out, uint32_t val) { memcpy(out, &val, 4); /* bit-preserving uint-to-float, never cast */ }
 
 static void transform_point(float out[3], const float model[16], float x, float y) {
     /* mat4 * vec4(x, y, 0, 1) -- full 3D transform */
@@ -224,16 +237,16 @@ static void transform_point(float out[3], const float model[16], float x, float 
     out[2] = model[2] * x + model[6] * y + model[14];
 }
 
-static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, const float color[4], uint8_t band_count) {
+static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], float scale, float pen_x, float pen_y, const float color[4], uint8_t band_count) {
     if (s_text.glyph_count >= NT_TEXT_RENDERER_MAX_GLYPHS) {
         nt_text_renderer_flush();
     }
 
     /* Local quad corners (scaled from font units to target size) */
     float x0 = pen_x + ((float)g->bbox_x0 * scale);
-    float y0 = (float)g->bbox_y0 * scale;
+    float y0 = pen_y + ((float)g->bbox_y0 * scale);
     float x1 = pen_x + ((float)g->bbox_x1 * scale);
-    float y1 = (float)g->bbox_y1 * scale;
+    float y1 = pen_y + ((float)g->bbox_y1 * scale);
 
     /* Em-space coordinates (unscaled, for shader) */
     float em_x0 = (float)g->bbox_x0;
@@ -314,12 +327,25 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
     float pen_x = 0.0F;
+    float pen_y = 0.0F;
+    const float line_advance = (metrics.line_height != 0) ? ((float)metrics.line_height * scale) : size;
 
     for (const uint8_t *p = (const uint8_t *)utf8; *p; p++) {
         if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
             if (state == NT_UTF8_REJECT) {
                 state = NT_UTF8_ACCEPT; /* recover: skip bad byte, continue parsing */
             }
+            continue;
+        }
+
+        if (codepoint == '\r') {
+            prev_cp = 0;
+            continue;
+        }
+        if (codepoint == '\n') {
+            pen_x = 0.0F;
+            pen_y -= line_advance;
+            prev_cp = 0;
             continue;
         }
 
@@ -337,7 +363,7 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
 
         /* Emit quad if glyph has visible bbox */
         if (g->bbox_x1 > g->bbox_x0) {
-            emit_quad(g, model, scale, pen_x, color, band_count);
+            emit_quad(g, model, scale, pen_x, pen_y, color, band_count);
         }
 
         pen_x += (float)g->advance * scale;
@@ -365,8 +391,10 @@ void nt_text_renderer_flush(void) {
         return;
     }
 
-    /* Upload staging buffer to GPU */
-    nt_gfx_update_buffer(s_text.vbo, s_text.vertices, s_text.vertex_count * (uint32_t)sizeof(nt_text_vertex_t));
+    /* Upload staging buffer to GPU. Orphan-style upload (glBufferData with
+     * GL_DYNAMIC_DRAW) so the driver allocates fresh storage and avoids
+     * stalling on the previous frame's draw of the same VBO. */
+    nt_gfx_orphan_buffer(s_text.vbo, s_text.vertices, s_text.vertex_count * (uint32_t)sizeof(nt_text_vertex_t));
 
     nt_gfx_bind_pipeline(s_text.pipeline);
     nt_gfx_bind_vertex_buffer(s_text.vbo);
@@ -396,5 +424,11 @@ uint32_t nt_text_renderer_test_vertex_count(void) { return s_text.vertex_count; 
 uint32_t nt_text_renderer_test_glyph_count(void) { return s_text.glyph_count; }
 const void *nt_text_renderer_test_vertices(void) { return s_text.vertices; }
 bool nt_text_renderer_test_initialized(void) { return s_text.initialized; }
+uint32_t nt_text_renderer_test_set_material_calls(void) { return s_text.test_set_material_calls; }
+uint32_t nt_text_renderer_test_set_font_calls(void) { return s_text.test_set_font_calls; }
+void nt_text_renderer_test_reset_call_counters(void) {
+    s_text.test_set_material_calls = 0;
+    s_text.test_set_font_calls = 0;
+}
 #endif
 // #endregion

@@ -79,6 +79,12 @@ jobs:
           name: atlas-packs
           path: build/examples/atlas
 
+      - name: Download bunnymark packs
+        uses: actions/download-artifact@v4
+        with:
+          name: bunnymark-packs
+          path: build/examples/bunnymark
+
       - name: Build baseline WASM debug artifacts
         run: |
           emcmake cmake --preset wasm-debug
@@ -241,18 +247,21 @@ jobs:
           test -f build/examples/textured_quad/wasm-debug-paired/index_simd.wasm
           test -f build/examples/sponza/wasm-debug-paired/index_simd.wasm
           test -f build/examples/text/wasm-debug-paired/index_simd.wasm
+          test -f build/examples/bunnymark/wasm-debug-paired/index_simd.wasm
           test -f build/examples/hello/wasm-release-paired/index_simd.wasm
           test -f build/examples/bench_shapes/wasm-release-paired/index_simd.wasm
           test -f build/examples/spinning_cube/wasm-release-paired/index_simd.wasm
           test -f build/examples/textured_quad/wasm-release-paired/index_simd.wasm
           test -f build/examples/sponza/wasm-release-paired/index_simd.wasm
           test -f build/examples/text/wasm-release-paired/index_simd.wasm
+          test -f build/examples/bunnymark/wasm-release-paired/index_simd.wasm
           test -f build/examples/hello/wasm-analysis-paired/index_simd.wasm
           test -f build/examples/bench_shapes/wasm-analysis-paired/index_simd.wasm
           test -f build/examples/spinning_cube/wasm-analysis-paired/index_simd.wasm
           test -f build/examples/textured_quad/wasm-analysis-paired/index_simd.wasm
           test -f build/examples/sponza/wasm-analysis-paired/index_simd.wasm
           test -f build/examples/text/wasm-analysis-paired/index_simd.wasm
+          test -f build/examples/bunnymark/wasm-analysis-paired/index_simd.wasm
           echo "Packaged example SIMD artifacts verified"
 
       - name: Install wabt
@@ -309,7 +318,7 @@ jobs:
         run: cmake --preset native-release
 
       - name: Build pack builders (release, no ASAN — fast encoding)
-        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs build_text_packs build_atlas_packs
+        run: cmake --build --preset native-release --target build_tq_packs build_sponza_packs build_text_packs build_atlas_packs build_bunnymark_packs
 
       - name: Restore builder cache
         uses: actions/cache@v4
@@ -337,6 +346,16 @@ jobs:
       - name: Build asset packs — atlas (release)
         timeout-minutes: 10
         run: ./build/examples/atlas/native-release/build_atlas_packs build/examples/atlas
+
+      - name: Build asset packs — bunnymark (release)
+        timeout-minutes: 10
+        run: ./build/examples/bunnymark/native-release/build_bunnymark_packs build/examples/bunnymark
+
+      # Bunnymark CMakeLists wires the per-preset asset copy at configure time
+      # only if .ntpack files exist (graceful local DX). The packs were just
+      # generated above, so reconfigure to wire the copy step before build-all.
+      - name: Reconfigure native release (wire bunnymark pack copy)
+        run: cmake --preset native-release
 
       - name: Build native release (all targets)
         run: cmake --build --preset native-release
@@ -416,6 +435,13 @@ jobs:
           path: build/examples/atlas/*.ntpack
           retention-days: 1
 
+      - name: Upload bunnymark packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: bunnymark-packs
+          path: build/examples/bunnymark/*.ntpack
+          retention-days: 1
+
       - name: Submodule consumption test
         run: |
           cmake -S tests/submodule -B build/submodule-test \
@@ -480,6 +506,12 @@ jobs:
         with:
           name: atlas-packs
           path: build/examples/atlas
+
+      - name: Download bunnymark packs
+        uses: actions/download-artifact@v4
+        with:
+          name: bunnymark-packs
+          path: build/examples/bunnymark
 
       - uses: actions/setup-node@v4
         with:

@@ -358,11 +358,7 @@ static void load_scene_from_manifest(void) {
         *nt_material_comp_handle(s_entities[i]) = s_materials[i];
 
         /* Set drawable color from manifest base_color */
-        float *color = nt_drawable_comp_color(s_entities[i]);
-        color[0] = mn->base_color[0];
-        color[1] = mn->base_color[1];
-        color[2] = mn->base_color[2];
-        color[3] = mn->base_color[3];
+        nt_drawable_comp_set_color(s_entities[i], mn->base_color[0], mn->base_color[1], mn->base_color[2], mn->base_color[3]);
     }
 
     s_entity_count = node_count;

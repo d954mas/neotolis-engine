@@ -72,3 +72,25 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
     caps.max_texture_size = (uint32_t)nt_gfx_js_max_texture_size();
     return caps;
 }
+
+/* Enable EXT_disjoint_timer_query_webgl2. Calling getExtension both checks
+ * support AND activates the extension's entry points + constants for the
+ * current GL context. Returns 1 if available, 0 otherwise. */
+// clang-format off
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wextra-semi"
+EM_JS(int, nt_gfx_js_enable_timer_query, (void), {
+    var gl = GL.currentContext ? GL.currentContext.GLctx : null;
+    if (!gl) return 0;
+    var ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+    return ext ? 1 : 0;
+});
+#pragma clang diagnostic pop
+// clang-format on
+
+bool nt_gfx_gl_ctx_enable_timer_query(void) { return nt_gfx_js_enable_timer_query() != 0; }
+
+/* WebGL2 has no KHR_debug equivalent in the spec; Spector.js intercepts at
+ * the JS call level and wouldn't see glPushDebugGroup anyway. Return false
+ * — segment labeling becomes a no-op on web. */
+bool nt_gfx_gl_ctx_enable_debug_groups(void) { return false; }

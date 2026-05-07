@@ -199,7 +199,7 @@ nt_build_result_t nt_builder_register_asset(NtBuilderContext *ctx, uint64_t reso
 /* --- Metadata accumulation --- */
 
 void nt_builder_add_meta(NtBuilderContext *ctx, uint64_t resource_id, uint64_t kind, const void *data, uint32_t size) {
-    NT_BUILD_ASSERT(size <= 256 && "metadata entry exceeds 256 byte limit (D-12)");
+    NT_BUILD_ASSERT(size <= 256 && "metadata entry exceeds 256 byte limit");
     NT_BUILD_ASSERT(ctx->meta_count < NT_BUILD_MAX_META_ENTRIES && "metadata entry limit exceeded");
     NtBuildMetaEntry *m = &ctx->meta_pending[ctx->meta_count++];
     m->resource_id = resource_id;
@@ -327,6 +327,20 @@ static bool opts_equal(const NtBuildEntry *a, const NtBuildEntry *b) {
          * so different max_size → different decoded pixels → different hash.
          * Only encode-affecting options need comparison. */
         if (ta->opts.format != tb->opts.format) {
+            return false;
+        }
+        /* Sampler defaults are baked into the V3 header — two textures
+         * with same pixels but different filter/wrap must not share an
+         * encoded entry, otherwise one of them gets the wrong sampler. */
+        if (ta->opts.filter_min != tb->opts.filter_min || ta->opts.filter_mag != tb->opts.filter_mag || ta->opts.wrap_u != tb->opts.wrap_u || ta->opts.wrap_v != tb->opts.wrap_v) {
+            return false;
+        }
+        if (ta->opts.gen_mipmaps != tb->opts.gen_mipmaps) {
+            return false;
+        }
+        /* premultiplied also affects encoded pixel bytes + header flags;
+         * mirror the opts_hash policy. */
+        if (ta->opts.premultiplied != tb->opts.premultiplied) {
             return false;
         }
         /* Compare compression path */
@@ -581,7 +595,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     /* Phase 1: Encode non-deduped entries (cache_check -> encode -> assembly) */
     NT_LOG_INFO("Encoding %u assets (%u early-deduped)...", ctx->pending_count, ctx->early_dedup_count);
 
-    /* Pre-encode shaders (GL context is thread-bound, cannot parallelize per D-05).
+    /* Pre-encode shaders (GL context is thread-bound, cannot parallelize).
      * Cache check happens here too — shaders are skipped by the main cache loop. */
     uint32_t shader_done = 0;
     uint32_t shader_total = 0;
@@ -683,7 +697,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     }
 
     if (work_count > 0 && ctx->thread_count > 0) {
-        /* --- PARALLEL ENCODE (per D-05/D-08) --- */
+        /* --- PARALLEL ENCODE --- */
         NtParallelContext pctx;
         pctx.work_indices = work_indices;
         pctx.work_count = work_count;
@@ -739,11 +753,11 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         double parallel_secs = nt_time_now() - t_parallel_start;
         NT_LOG_INFO("Parallel encode complete: %.2fs (%u items, %u threads)", parallel_secs, work_count, num_threads);
 
-        /* Per D-13: Check for errors after join */
+        /* Check for errors after join */
         NT_BUILD_ASSERT(!atomic_load(&pctx.error_flag) && "parallel encode: one or more assets failed -- see errors above");
 
     } else if (work_count > 0) {
-        /* --- SINGLE-THREADED ENCODE (backward compatible, per D-12) --- */
+        /* --- SINGLE-THREADED ENCODE (backward compatible) --- */
         for (uint32_t wi = 0; wi < work_count; wi++) {
             uint32_t i = work_indices[wi];
             NtBuildEntry *pe = &ctx->pending[i];
@@ -759,7 +773,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
     }
 
-    /* Phase 1c: Sequential assembly (per D-06/D-17) -- append in declaration order */
+    /* Phase 1c: Sequential assembly -- append in declaration order */
     for (uint32_t i = 0; i < ctx->pending_count; i++) {
         NtBuildEntry *pe = &ctx->pending[i];
         if (pe->dedup_original >= 0) {
@@ -775,7 +789,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
 
         increment_kind_counter(ctx, pe->kind);
 
-        /* Cache store: save encoded bytes for future builds (per D-13: raw bytes only) */
+        /* Cache store: save encoded bytes for future builds (raw bytes only) */
         if (ctx->cache_dir && !results[i].from_cache) {
             if (!nt_builder_cache_store(ctx->cache_dir, pe->decoded_hash, opts_hashes[i], results[i].data, results[i].size)) {
                 NT_LOG_WARN("cache store failed for %s", pe->path);
@@ -840,7 +854,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
     double encode_secs = nt_time_now() - t_encode_start;
 
     /* Phase 1b: Write meta section to data_buf (appended after asset data).
-     * Meta entries grouped by resource_id (D-05), covered by CRC32. */
+     * Meta entries grouped by resource_id, covered by CRC32. */
     uint32_t meta_section_start_databuf = 0; /* data_buf-relative, before header shift */
     if (ctx->meta_count > 0) {
         /* Sort meta_pending by resource_id (insertion sort -- count is small) */
@@ -1021,7 +1035,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
         }
 
         if (ctx->cache_dir) {
-            /* Note column: cache status per D-15 */
+            /* Note column: cache status */
             const char *note;
             if (pe->dedup_original >= 0) {
                 note = "dedup";
@@ -1041,7 +1055,7 @@ nt_build_result_t nt_builder_finish_pack(NtBuilderContext *ctx) {
                     break;
                 }
             }
-            /* Cached assets show "--" in Time column per D-15 */
+            /* Cached assets show "--" in Time column */
             if (cache_status[i] == NT_CACHE_HIT) {
                 NT_LOG_INFO("  %-4u %-40s %-10s %-24s %-8s %s", i, display, type_name, size_str, "--", note);
             } else {
@@ -1171,6 +1185,11 @@ static NtBuildTextureData *make_texture_data(uint32_t w, uint32_t h, const nt_te
     NT_BUILD_ASSERT(td && "texture data alloc failed");
     td->width = w;
     td->height = h;
+    /* Always start from documented defaults so the NULL-opts path bakes the
+     * same sampler header as the explicit-defaults path. encode_one_asset
+     * passes &td->opts (never NULL) downstream, so leaving sampler fields at
+     * zero would write NEAREST/CLAMP/no-mips into the V3 texture header. */
+    td->opts = nt_tex_opts_defaults();
     if (opts) {
         td->opts = *opts;
         td->opts.compress = NULL; /* don't store dangling pointer */
@@ -1178,8 +1197,6 @@ static NtBuildTextureData *make_texture_data(uint32_t w, uint32_t h, const nt_te
             td->has_compress = true;
             td->compress = *opts->compress;
         }
-    } else {
-        td->opts.format = NT_TEXTURE_FORMAT_RGBA8;
     }
     return td;
 }

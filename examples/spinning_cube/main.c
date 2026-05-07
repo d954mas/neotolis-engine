@@ -246,11 +246,8 @@ static void set_shape_scale(void) {
 /* ---- set_shape_color: update render state from shape table ---- */
 
 static void set_shape_color(void) {
-    float *col = nt_drawable_comp_color(s_shape_entity);
-    col[0] = s_shape_colors[s_current_shape][0];
-    col[1] = s_shape_colors[s_current_shape][1];
-    col[2] = s_shape_colors[s_current_shape][2];
-    col[3] = s_shape_colors[s_current_shape][3];
+    const float *src = s_shape_colors[s_current_shape];
+    nt_drawable_comp_set_color(s_shape_entity, src[0], src[1], src[2], src[3]);
 }
 
 /* ---- frame callback ---- */

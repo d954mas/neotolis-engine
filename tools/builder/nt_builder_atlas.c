@@ -242,7 +242,7 @@ static void extrude_edges(uint8_t *page, uint32_t page_w, uint32_t page_h, uint3
 // #endregion
 
 // #region Debug PNG — optional outline visualization
-/* --- Debug PNG: draw 2px outline around region (D-09, D-10) --- */
+/* --- Debug PNG: draw 2px outline around region --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void debug_draw_rect_outline(uint8_t *page, uint32_t page_w, uint32_t page_h, uint32_t rx, uint32_t ry, uint32_t rw, uint32_t rh) {
@@ -334,7 +334,7 @@ static void debug_draw_hull_outline(uint8_t *page, uint32_t pw, uint32_t ph, con
 // #endregion
 
 // #region Atlas cache — disk caching for incremental builds
-/* --- Atlas cache key computation (D-13) --- */
+/* --- Atlas cache key computation --- */
 
 static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint32_t sprite_count, const nt_atlas_opts_t *opts) {
     /* Bump on any change to the byte layout below, the flag-bit ordering, or
@@ -408,7 +408,7 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     return key.value;
 }
 
-/* --- Atlas cache file I/O (D-13) --- */
+/* --- Atlas cache file I/O --- */
 
 /* Cache file layout:
  *   uint32_t placement_count
@@ -584,7 +584,7 @@ static void atlas_grow_sprites(NtBuildAtlasState *state) {
     state->sprite_capacity = new_cap;
 }
 
-/* --- Extract filename with extension from path (D-06) --- */
+/* --- Extract filename with extension from path --- */
 
 static const char *extract_filename(const char *path) {
     const char *last = path;
@@ -689,8 +689,8 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     NT_BUILD_ASSERT(w > 0 && h > 0 && "atlas_add: decoded image has zero dimensions");
     NT_BUILD_ASSERT((uint64_t)w * (uint64_t)h <= (UINT32_MAX / 4) && "atlas_add: decoded image too large (w*h*4 overflows uint32_t)");
 
-    /* Determine region name (D-06, D-07). opts->name takes precedence; NULL falls
-     * back to basename of the source path. */
+    /* Determine region name. opts->name takes precedence; NULL falls back to
+     * basename of the source path. */
     const char *region_name = sopts.name ? sopts.name : extract_filename(path);
 
     /* Compute decoded hash */
@@ -1433,6 +1433,45 @@ static void pipeline_cache_write(AtlasPipeline *p) {
     }
 }
 
+/* QUAD_* flag names describe the ear-clip / fan output BEFORE winding swap —
+ * detection runs on PNG-space CCW patterns. The blob stores the swapped form
+ * (see swap_triangle_winding below); runtime emit_one's hardcoded pattern is
+ * the swapped one too. Renaming the flags would churn pack format v4 for no
+ * gain, so the names stay as-is and this comment carries the contract. */
+static uint8_t atlas_region_flags_from_indices(uint32_t vertex_count, uint32_t index_count, const uint16_t *indices) {
+    if (vertex_count != 4 || index_count != 6 || indices == NULL) {
+        return 0;
+    }
+    if (indices[0] == 0 && indices[1] == 1 && indices[2] == 2 && indices[3] == 0 && indices[4] == 2 && indices[5] == 3) {
+        return NT_ATLAS_REGION_FLAG_QUAD_012023;
+    }
+    if (indices[0] == 0 && indices[1] == 1 && indices[2] == 2 && indices[3] == 1 && indices[4] == 3 && indices[5] == 0) {
+        return NT_ATLAS_REGION_FLAG_QUAD_012130;
+    }
+    if (indices[0] == 0 && indices[1] == 1 && indices[2] == 2 && indices[3] == 1 && indices[4] == 3 && indices[5] == 2) {
+        return NT_ATLAS_REGION_FLAG_QUAD_012132;
+    }
+    return 0;
+}
+
+/* Swap winding of every triangle in a triangle-list index buffer.
+ *
+ * Builder ear-clip / fan output is PNG-space CCW. The blob writer Y-flips
+ * each vertex's local_y to y-up before serialising (see local_y assignment
+ * in pipeline_serialize) — that reflection inverts the cross-product sign,
+ * turning the original CCW into CW in world-space. Pre-swapping each
+ * triangle (a,b,c)→(a,c,b) here compensates: blob indices read CW in
+ * PNG-space and CCW in world-space, so GL cull_mode = BACK works without
+ * per-game opt-outs. UVs are not flipped — they index raw pixel rows. */
+static void swap_triangle_winding(uint16_t *indices, uint32_t index_count) {
+    NT_BUILD_ASSERT(index_count % 3U == 0 && "swap_triangle_winding: index_count must be a multiple of 3 (triangle list)");
+    for (uint32_t i = 0; i + 2U < index_count; i += 3U) {
+        uint16_t tmp = indices[i + 1U];
+        indices[i + 1U] = indices[i + 2U];
+        indices[i + 2U] = tmp;
+    }
+}
+
 /* --- pipeline_serialize: compute atlas UVs, write binary blob --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1510,7 +1549,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
     hdr->index_offset = index_offset;
     hdr->total_index_count = total_index_count;
 
-    /* Texture resource IDs (D-05) */
+    /* Texture resource IDs */
     uint8_t *tex_ids_ptr = blob + sizeof(NtAtlasHeader);
     for (uint32_t pg = 0; pg < p->page_count; pg++) {
         char tex_path[512];
@@ -1538,7 +1577,8 @@ static void pipeline_serialize(AtlasPipeline *p) {
     uint32_t *sprite_vertex_start = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
     uint32_t *sprite_index_start = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
     uint32_t *sprite_idx_count = (uint32_t *)malloc(p->sprite_count * sizeof(uint32_t));
-    NT_BUILD_ASSERT(sprite_vertex_start && sprite_index_start && sprite_idx_count && "pipeline_serialize: alloc failed");
+    uint8_t *sprite_flags = (uint8_t *)calloc(p->sprite_count, sizeof(uint8_t));
+    NT_BUILD_ASSERT(sprite_vertex_start && sprite_index_start && sprite_idx_count && sprite_flags && "pipeline_serialize: alloc failed");
 
     /* Pass 1: write vertex/index data only for unique sprites */
     for (uint32_t i = 0; i < p->sprite_count; i++) {
@@ -1562,8 +1602,12 @@ static void pipeline_serialize(AtlasPipeline *p) {
         sprite_vertex_start[i] = vertex_cursor;
         sprite_index_start[i] = index_cursor;
         sprite_idx_count[i] = idx_count;
+        /* Flag detection runs on PNG-CCW pattern — must precede the winding
+         * swap below or every QUAD_* match would miss. */
+        sprite_flags[i] = atlas_region_flags_from_indices(p->vertex_counts[i], idx_count, local_indices);
+        swap_triangle_winding(local_indices, idx_count);
 
-        /* Write triangle indices (local: 0..vertex_count-1) */
+        /* Write triangle indices (local: 0..vertex_count-1, world-CCW after Y-flip) */
         memcpy(&indices[index_cursor], local_indices, idx_count * sizeof(uint16_t));
         index_cursor += idx_count;
 
@@ -1576,10 +1620,18 @@ static void pipeline_serialize(AtlasPipeline *p) {
             NtAtlasVertex *vtx = &vertices[vertex_cursor++];
             int32_t lx = p->hull_vertices[i][v].x;
             int32_t ly = p->hull_vertices[i][v].y;
+            /* Y-flip vertex into y-up local space at the blob boundary (v5).
+             * Builder's hull/triangulator/UV math all operate in PNG y-down;
+             * only the on-disk vertex flips so runtime can read it as-is in
+             * the engine's y-up world. UV.v stays y-down on purpose — it
+             * indexes raw pixel rows, which the GL upload still receives
+             * top-row-first. transform_point gets the original PNG-space ly
+             * because it computes atlas_v, not local_y. */
+            int32_t ly_up = (int32_t)p->trim_h[i] - ly;
             NT_BUILD_ASSERT(lx >= INT16_MIN && lx <= INT16_MAX && "pipeline_serialize: local_x overflows int16_t");
-            NT_BUILD_ASSERT(ly >= INT16_MIN && ly <= INT16_MAX && "pipeline_serialize: local_y overflows int16_t");
+            NT_BUILD_ASSERT(ly_up >= INT16_MIN && ly_up <= INT16_MAX && "pipeline_serialize: local_y overflows int16_t after y-up flip");
             vtx->local_x = (int16_t)lx;
-            vtx->local_y = (int16_t)ly;
+            vtx->local_y = (int16_t)ly_up;
 
             int32_t tx;
             int32_t ty;
@@ -1616,6 +1668,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
             sprite_vertex_start[i] = sprite_vertex_start[orig];
             sprite_index_start[i] = sprite_index_start[orig];
             sprite_idx_count[i] = sprite_idx_count[orig];
+            sprite_flags[i] = sprite_flags[orig];
         }
     }
 
@@ -1634,26 +1687,62 @@ static void pipeline_serialize(AtlasPipeline *p) {
         reg->source_w = (uint16_t)p->sprites[i].width;
         reg->source_h = (uint16_t)p->sprites[i].height;
         NT_BUILD_ASSERT(p->trim_x[i] <= INT16_MAX && "pipeline_serialize: trim_offset_x overflows int16_t");
-        NT_BUILD_ASSERT(p->trim_y[i] <= INT16_MAX && "pipeline_serialize: trim_offset_y overflows int16_t");
+        /* trim_offset_y_up = pixels stripped from the BOTTOM edge in y-up
+         * source space. Builder's alpha-trim records trim_y as pixels stripped
+         * from the PNG-top, so the y-up conversion is source_h - trim_y - trim_h. */
+        int32_t trim_offset_y_up = (int32_t)p->sprites[i].height - (int32_t)p->trim_y[i] - (int32_t)p->trim_h[i];
+        NT_BUILD_ASSERT(trim_offset_y_up >= INT16_MIN && trim_offset_y_up <= INT16_MAX && "pipeline_serialize: trim_offset_y overflows int16_t after y-up flip");
         reg->trim_offset_x = (int16_t)p->trim_x[i];
-        reg->trim_offset_y = (int16_t)p->trim_y[i];
+        reg->trim_offset_y = (int16_t)trim_offset_y_up;
         reg->origin_x = p->sprites[i].origin_x;
-        reg->origin_y = p->sprites[i].origin_y;
+        /* origin_y in y-up: 0 = bottom edge, 1 = top edge. PNG convention is
+         * 0 = top, so flip at write time. Values outside [0,1] (off-frame
+         * pivots) flip symmetrically. */
+        reg->origin_y = 1.0F - p->sprites[i].origin_y;
         reg->vertex_start = sprite_vertex_start[i];
         reg->index_start = sprite_index_start[i];
         reg->vertex_count = (uint8_t)p->vertex_counts[i];
         reg->page_index = (uint8_t)pl->page;
         reg->transform = pl->transform;
         reg->index_count = (uint8_t)sprite_idx_count[i];
+        reg->flags = sprite_flags[i];
+        /* Builder-side invariant: any QUAD_* flag implies vertex_count==4 +
+         * index_count==6. atlas_region_flags_from_indices already returns 0
+         * unless those hold, but assert here so future flag additions can't
+         * silently break the runtime contract (which trusts the bit). */
+        NT_BUILD_ASSERT(((reg->flags & NT_ATLAS_REGION_FLAG_QUAD_MASK) == 0 || (reg->vertex_count == 4 && reg->index_count == 6)) &&
+                        "atlas region: QUAD_* flag set but vertex_count/index_count don't match — builder bug");
     }
 
     free(sprite_vertex_start);
     free(sprite_index_start);
     free(sprite_idx_count);
+    free(sprite_flags);
 
-    /* Register atlas metadata entry (D-04) */
+    /* Register atlas metadata entry */
     uint64_t blob_hash = nt_hash64(blob, blob_size).value;
     nt_builder_add_entry(p->ctx, p->state->name, NT_BUILD_ASSET_ATLAS, NULL, blob, blob_size, blob_hash);
+
+    // #region pixels_per_unit metadata
+    /* Write pixels_per_unit as a 4-byte resource metadata blob keyed by
+     * hash64_str("pixels_per_unit"). Atlas binary format (v5) is unchanged —
+     * runtime reads this via nt_atlas_get_pixels_per_unit and bakes 1/ppu
+     * into cached_pos so HD packs render at the same on-screen size as SD
+     * packs sharing the same Transform.
+     *
+     * Written unconditionally (even when value == 1.0F) — uniform code path,
+     * 4 bytes are negligible, and keeps the round-trip tests symmetric. The
+     * resource_id must mirror nt_builder_add_entry's hashing exactly: the
+     * normalized atlas state name. */
+    NT_BUILD_ASSERT(p->opts->pixels_per_unit > 0.0F && isfinite(p->opts->pixels_per_unit));
+    char *atlas_norm_path = nt_builder_normalize_path(p->state->name);
+    NT_BUILD_ASSERT(atlas_norm_path);
+    const uint64_t atlas_resource_id = nt_hash64_str(atlas_norm_path).value;
+    free(atlas_norm_path);
+    const uint64_t kind_ppu = nt_hash64_str("pixels_per_unit").value;
+    const float ppu = p->opts->pixels_per_unit;
+    nt_builder_add_meta(p->ctx, atlas_resource_id, kind_ppu, &ppu, sizeof(float));
+    // #endregion
 
     free(placement_lookup);
 }
@@ -1679,6 +1768,13 @@ static void pipeline_register(AtlasPipeline *p) {
         td->opts.max_size = 0;
         td->opts.compress = NULL;
         td->opts.premultiplied = p->opts->premultiplied; /* propagate to texture encoder (validated in begin_atlas) */
+        /* Propagate atlas-level sampler defaults to the page texture header so
+         * the activator creates the right sampler for this atlas page. */
+        td->opts.filter_min = p->opts->filter_min;
+        td->opts.filter_mag = p->opts->filter_mag;
+        td->opts.wrap_u = p->opts->wrap_u;
+        td->opts.wrap_v = p->opts->wrap_v;
+        td->opts.gen_mipmaps = p->opts->gen_mipmaps;
         if (p->state->has_compress) {
             td->compress = p->state->compress;
             td->has_compress = true;

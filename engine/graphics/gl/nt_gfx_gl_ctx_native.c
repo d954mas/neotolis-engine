@@ -46,3 +46,18 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void) {
 
     return caps;
 }
+
+bool nt_gfx_gl_ctx_enable_timer_query(void) {
+    /* GL_TIME_ELAPSED + glBeginQuery were promoted to core in GL 3.3, so on
+     * desktop with a 3.3+ context the entry points are already loaded by
+     * glad and need no extension activation. */
+    return GLAD_GL_VERSION_3_3 != 0 || GLAD_GL_ARB_timer_query != 0;
+}
+
+bool nt_gfx_gl_ctx_enable_debug_groups(void) {
+    /* glPushDebugGroup / glPopDebugGroup ship via the KHR_debug extension
+     * (core in GL 4.3+, but our glad config only generates up to 3.3+ext).
+     * KHR_debug is widely supported by modern desktop drivers; if absent
+     * we no-op the labeling (segments still work, just unlabeled). */
+    return GLAD_GL_KHR_debug != 0;
+}

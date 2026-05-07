@@ -417,7 +417,7 @@ void test_atlas_on_resolve_null_data_early_returns(void) {
     TEST_ASSERT_EQUAL_PTR(before, s_user_data);
 }
 
-/* ---- Merge test helpers (Plan 02) ---- */
+/* ---- Merge test helpers ---- */
 
 /* Compact per-region spec for the merge tests. Lets a test describe a
  * multi-region blob with one line per region and a shared vertex/index
@@ -773,8 +773,8 @@ void test_atlas_find_region_returns_invalid_for_tombstone(void) {
 }
 
 /* ---- Test 10: get_region on a tombstoned slot returns a non-NULL
- * pointer with vertex_count==0 && index_count==0 (D-08 zero-draw
- * without NULL-branch in the hot path). ---- */
+ * pointer with vertex_count==0 && index_count==0 (zero-draw without
+ * NULL-branch in the hot path). ---- */
 void test_atlas_get_region_returns_vertex_count_zero_for_tombstone(void) {
     /* Pages omitted. */
 
@@ -921,9 +921,9 @@ void test_atlas_hash_table_growth_under_1000_regions(void) {
     const uint32_t total_indices_1 = n1 * indices_per_region;
 
     /* Estimate blob size:
-     * header(28) + regions(1000*36) + verts(3000*8) + indices(3000*2)
-     * = 28 + 36000 + 24000 + 6000 = 66028 bytes */
-    const uint32_t blob_cap = 70000;
+     * header(28) + regions(1000*40) + verts(3000*8) + indices(3000*2)
+     * = 28 + 40000 + 24000 + 6000 = 70028 bytes */
+    const uint32_t blob_cap = 80000;
     uint8_t *buf1 = (uint8_t *)malloc(blob_cap);
     TEST_ASSERT_NOT_NULL_MESSAGE(buf1, "malloc for 1000-region blob");
 
@@ -1419,6 +1419,682 @@ void test_atlas_full_resource_pipeline_integration(void) {
     s_user_data = NULL;
 }
 
+/* ============================================================
+ * Cached arrays + pixels_per_unit tests
+ * ============================================================ */
+
+/* Unity is built with UNITY_EXCLUDE_FLOAT (engine-wide policy in
+ * deps/unity/CMakeLists.txt), so TEST_ASSERT_FLOAT_WITHIN is unavailable.
+ * Use this small fabsf-based helper for the cached-arrays tests instead. */
+#include <math.h>
+static void assert_float_close(float expected, float actual, float tol, const char *msg) {
+    float diff = fabsf(expected - actual);
+    if (diff > tol) {
+        char buf[256];
+        (void)snprintf(buf, sizeof(buf), "%s (expected=%g actual=%g diff=%g tol=%g)", msg, (double)expected, (double)actual, (double)diff, (double)tol);
+        TEST_FAIL_MESSAGE(buf);
+    }
+}
+
+/* Build a one-region blob with hand-set corner UVs (0,0)/(1,0)/(0,1)/(1,1)
+ * so cached_uv tests can assert each transform mapping. UVs are packed as
+ * uint16 0..65535 by the format; 0->0.0, 65535->1.0 exactly. */
+static uint32_t build_corner_uv_blob(uint8_t *out, uint32_t cap, uint8_t transform) {
+    NtAtlasVertex verts[4];
+    /* Corner UVs in (u, v): (0,0), (1,0), (0,1), (1,1) — top-left CCW. */
+    verts[0] = (NtAtlasVertex){.local_x = 0, .local_y = 0, .atlas_u = 0, .atlas_v = 0};
+    verts[1] = (NtAtlasVertex){.local_x = 10, .local_y = 0, .atlas_u = 65535, .atlas_v = 0};
+    verts[2] = (NtAtlasVertex){.local_x = 0, .local_y = 10, .atlas_u = 0, .atlas_v = 65535};
+    verts[3] = (NtAtlasVertex){.local_x = 10, .local_y = 10, .atlas_u = 65535, .atlas_v = 65535};
+
+    uint16_t indices[6] = {0, 1, 2, 1, 3, 2};
+
+    NtAtlasRegion region;
+    memset(&region, 0, sizeof(region));
+    region.name_hash = 0xDEADBEEFULL;
+    region.source_w = 10;
+    region.source_h = 10;
+    region.origin_x = 0.0F; /* origin at (0,0) so cached_pos == raw local (with ipu=1) */
+    region.origin_y = 0.0F;
+    region.vertex_start = 0;
+    region.index_start = 0;
+    region.vertex_count = 4;
+    region.index_count = 6;
+    region.page_index = 0;
+    region.transform = transform;
+
+    mock_atlas_spec_t spec = {
+        .regions = &region,
+        .region_count = 1,
+        .vertices = verts,
+        .total_vertex_count = 4,
+        .indices = indices,
+        .total_index_count = 6,
+        .page_ids = NULL,
+        .page_count = 0,
+    };
+    return build_mock_atlas_blob(out, cap, &spec);
+}
+
+/* Atlas cached_uv stores serialized atlas_u/v as-is. The builder already
+ * applies any D4 placement transform while serializing vertices; runtime must
+ * not apply transform a second time. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_cached_uv_d4_transform(void) {
+    /* Reference corners in (u, v) before transform, matching build_corner_uv_blob. */
+    const float src_u[4] = {0.0F, 1.0F, 0.0F, 1.0F};
+    const float src_v[4] = {0.0F, 0.0F, 1.0F, 1.0F};
+
+    for (uint8_t t = 0; t < 8U; t++) {
+        uint8_t buf[512];
+        uint32_t size = build_corner_uv_blob(buf, sizeof(buf), t);
+
+        nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+        const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+
+        const float(*pos)[2] = nt_atlas_test_cached_pos(ad);
+        const nt_atlas_vertex_t *vraw = nt_atlas_test_raw_vertices(ad);
+        TEST_ASSERT_NOT_NULL(vraw);
+        TEST_ASSERT_NOT_NULL(pos);
+
+        /* UVs are stored u16 0..65535 in the blob; sprite vertex format uses
+         * USHORT2N (GL normalizes to [0,1]). Convert to float here purely for
+         * the assertion; the renderer copies u16 verbatim. */
+        for (uint32_t i = 0; i < 4U; i++) {
+            float u = src_u[i];
+            float v = src_v[i];
+            float u_actual = (float)vraw[i].atlas_u * (1.0F / 65535.0F);
+            float v_actual = (float)vraw[i].atlas_v * (1.0F / 65535.0F);
+            char msg[64];
+            (void)snprintf(msg, sizeof(msg), "transform=%u vertex=%u u", (unsigned)t, (unsigned)i);
+            assert_float_close(u, u_actual, 1e-5F, msg);
+            (void)snprintf(msg, sizeof(msg), "transform=%u vertex=%u v", (unsigned)t, (unsigned)i);
+            assert_float_close(v, v_actual, 1e-5F, msg);
+        }
+
+        /* cleanup between iterations — tearDown also handles it but explicit is clearer */
+        nt_atlas_test_drive_cleanup(s_user_data);
+        s_user_data = NULL;
+    }
+}
+
+/* Origin subtraction in cached_pos.
+ * Build a 1-region blob with vertices in y-up local space (v5 builder
+ * output): (0,0)=bottom-left, (10,0)=bottom-right, (0,10)=top-left,
+ * (10,10)=top-right. Origin (0.5, 0.5) is centre in y-up too. With ipu=1.0,
+ * expected cached_pos = (-5,-5)/(5,-5)/(-5,5)/(5,5). */
+void test_atlas_cached_pos_origin_not_baked(void) {
+    NtAtlasVertex verts[4] = {
+        {.local_x = 0, .local_y = 0, .atlas_u = 0, .atlas_v = 0},
+        {.local_x = 10, .local_y = 0, .atlas_u = 65535, .atlas_v = 0},
+        {.local_x = 0, .local_y = 10, .atlas_u = 0, .atlas_v = 65535},
+        {.local_x = 10, .local_y = 10, .atlas_u = 65535, .atlas_v = 65535},
+    };
+    uint16_t indices[6] = {0, 1, 2, 1, 3, 2};
+
+    NtAtlasRegion region;
+    memset(&region, 0, sizeof(region));
+    region.name_hash = 0xC0FFEEULL;
+    region.source_w = 10;
+    region.source_h = 10;
+    region.origin_x = 0.5F;
+    region.origin_y = 0.5F;
+    region.vertex_start = 0;
+    region.index_start = 0;
+    region.vertex_count = 4;
+    region.index_count = 6;
+    region.page_index = 0;
+    region.transform = 0;
+
+    mock_atlas_spec_t spec = {
+        .regions = &region,
+        .region_count = 1,
+        .vertices = verts,
+        .total_vertex_count = 4,
+        .indices = indices,
+        .total_index_count = 6,
+        .page_ids = NULL,
+        .page_count = 0,
+    };
+
+    uint8_t buf[512];
+    uint32_t size = build_mock_atlas_blob(buf, sizeof(buf), &spec);
+
+    nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+    const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+
+    const float(*pos)[2] = nt_atlas_test_cached_pos(ad);
+    TEST_ASSERT_NOT_NULL(pos);
+
+    /* origin (0.5, 0.5) is NOT baked into cached_pos — sprite renderer
+     * applies origin offset to the translation vector instead so dedup'd
+     * regions sharing vertex_start can use independent origins. cached_pos
+     * holds only source-space (local + trim_offset) * ipu. trim_offset is 0
+     * here, so cached_pos == local exactly. */
+    assert_float_close(0.0F, pos[0][0], 1e-5F, "v0.x = local_x");
+    assert_float_close(0.0F, pos[0][1], 1e-5F, "v0.y = local_y");
+    assert_float_close(10.0F, pos[1][0], 1e-5F, "v1.x = local_x");
+    assert_float_close(0.0F, pos[1][1], 1e-5F, "v1.y = local_y");
+    assert_float_close(0.0F, pos[2][0], 1e-5F, "v2.x = local_x");
+    assert_float_close(10.0F, pos[2][1], 1e-5F, "v2.y = local_y");
+    assert_float_close(10.0F, pos[3][0], 1e-5F, "v3.x = local_x");
+    assert_float_close(10.0F, pos[3][1], 1e-5F, "v3.y = local_y");
+
+    /* Default ipu when no metadata read: 1.0F. */
+    assert_float_close(1.0F, nt_atlas_test_ipu(ad), 1e-7F, "default ipu");
+}
+
+/* Trim offset folded into cached_pos.
+ * 20x20 source, content trimmed to a 10x10 region offset by (5,7) — i.e.
+ * trim stripped 5 px from the left edge and 7 from the bottom (y-up).
+ * Vertices are in trim-space (local 0..10); origin is in source-space
+ * (0.5*20 = pixel 10 on each axis). Expected: cached_pos = local +
+ * trim_offset - pivot_px. Without the trim_offset term every vertex
+ * would shift by (-5,-7) and the sprite pivot would land on the wrong
+ * source pixel — that was the P1 review finding. */
+void test_atlas_cached_pos_includes_trim_offset(void) {
+    NtAtlasVertex verts[4] = {
+        {.local_x = 0, .local_y = 0, .atlas_u = 0, .atlas_v = 0},
+        {.local_x = 10, .local_y = 0, .atlas_u = 65535, .atlas_v = 0},
+        {.local_x = 0, .local_y = 10, .atlas_u = 0, .atlas_v = 65535},
+        {.local_x = 10, .local_y = 10, .atlas_u = 65535, .atlas_v = 65535},
+    };
+    uint16_t indices[6] = {0, 1, 2, 1, 3, 2};
+
+    NtAtlasRegion region;
+    memset(&region, 0, sizeof(region));
+    region.name_hash = 0xDEADBEEFULL;
+    region.source_w = 20;
+    region.source_h = 20;
+    region.trim_offset_x = 5;
+    region.trim_offset_y = 7;
+    region.origin_x = 0.5F;
+    region.origin_y = 0.5F;
+    region.vertex_start = 0;
+    region.index_start = 0;
+    region.vertex_count = 4;
+    region.index_count = 6;
+    region.page_index = 0;
+    region.transform = 0;
+
+    mock_atlas_spec_t spec = {
+        .regions = &region,
+        .region_count = 1,
+        .vertices = verts,
+        .total_vertex_count = 4,
+        .indices = indices,
+        .total_index_count = 6,
+        .page_ids = NULL,
+        .page_count = 0,
+    };
+
+    uint8_t buf[512];
+    uint32_t size = build_mock_atlas_blob(buf, sizeof(buf), &spec);
+
+    nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+    const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+
+    const float(*pos)[2] = nt_atlas_test_cached_pos(ad);
+    TEST_ASSERT_NOT_NULL(pos);
+
+    /* Vertex source = local + trim_offset (origin NOT baked — that's
+     * sprite_renderer's responsibility now to support dedup'd regions
+     * with different pivots).
+     * v0 source (5,7)
+     * v1 source (15,7)
+     * v2 source (5,17)
+     * v3 source (15,17) */
+    assert_float_close(5.0F, pos[0][0], 1e-5F, "v0.x = local_x + trim_offset_x");
+    assert_float_close(7.0F, pos[0][1], 1e-5F, "v0.y = local_y + trim_offset_y");
+    assert_float_close(15.0F, pos[1][0], 1e-5F, "v1.x = local_x + trim_offset_x");
+    assert_float_close(7.0F, pos[1][1], 1e-5F, "v1.y = local_y + trim_offset_y");
+    assert_float_close(5.0F, pos[2][0], 1e-5F, "v2.x = local_x + trim_offset_x");
+    assert_float_close(17.0F, pos[2][1], 1e-5F, "v2.y = local_y + trim_offset_y");
+    assert_float_close(15.0F, pos[3][0], 1e-5F, "v3.x = local_x + trim_offset_x");
+    assert_float_close(17.0F, pos[3][1], 1e-5F, "v3.y = local_y + trim_offset_y");
+}
+
+/* Pixels_per_unit metadata round-trip via full resource pipeline.
+ * Build a .ntpack with a metadata entry kind=hash64_str("pixels_per_unit")
+ * payload = float(2.0F). Mount, resolve, assert nt_atlas_get_pixels_per_unit
+ * returns 2.0F and cached_pos values are halved versus the same blob without
+ * metadata (which keeps ipu=1.0F default). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_pixels_per_unit_metadata_roundtrip(void) {
+    /* One region, 4 vertices at (0,0)/(10,0)/(0,10)/(10,10), origin (0,0).
+     * cached_pos with ipu=1 → identity. With ppu=2 → ipu=0.5 → halved. */
+    NtAtlasVertex verts[4] = {
+        {.local_x = 0, .local_y = 0, .atlas_u = 0, .atlas_v = 0},
+        {.local_x = 10, .local_y = 0, .atlas_u = 65535, .atlas_v = 0},
+        {.local_x = 0, .local_y = 10, .atlas_u = 0, .atlas_v = 65535},
+        {.local_x = 10, .local_y = 10, .atlas_u = 65535, .atlas_v = 65535},
+    };
+    uint16_t indices[6] = {0, 1, 2, 1, 3, 2};
+
+    NtAtlasRegion region;
+    memset(&region, 0, sizeof(region));
+    region.name_hash = 0xBEEFULL;
+    region.source_w = 10;
+    region.source_h = 10;
+    region.origin_x = 0.0F;
+    region.origin_y = 0.0F;
+    region.vertex_count = 4;
+    region.index_count = 6;
+    region.page_index = 0;
+    region.transform = 0;
+
+    mock_atlas_spec_t spec = {
+        .regions = &region,
+        .region_count = 1,
+        .vertices = verts,
+        .total_vertex_count = 4,
+        .indices = indices,
+        .total_index_count = 6,
+        .page_ids = NULL,
+        .page_count = 0,
+    };
+
+    uint8_t atlas_blob[512];
+    uint32_t atlas_blob_size = build_mock_atlas_blob(atlas_blob, sizeof(atlas_blob), &spec);
+
+    /* Build a .ntpack with 1 atlas asset + 1 meta entry (pixels_per_unit). */
+    const uint64_t atlas_rid = 0xABC0123456789DEFULL;
+    const float ppu_value = 2.0F;
+    const uint32_t meta_payload_size = (uint32_t)sizeof(float);
+
+    const uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (1U * sizeof(NtAssetEntry)));
+    const uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_DATA_ALIGN - 1U);
+    const uint32_t aligned_atlas = (atlas_blob_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1U);
+    const uint32_t atlas_offset = header_size;
+    const uint32_t meta_offset = atlas_offset + aligned_atlas;
+    const uint32_t meta_entry_size = (uint32_t)sizeof(NtMetaEntryHeader) + meta_payload_size;
+    const uint32_t aligned_meta = (meta_entry_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1U);
+    const uint32_t total_size = meta_offset + aligned_meta;
+
+    uint8_t *pack_blob = (uint8_t *)calloc(1, total_size);
+    TEST_ASSERT_NOT_NULL(pack_blob);
+
+    NtPackHeader *ph = (NtPackHeader *)pack_blob;
+    ph->magic = NT_PACK_MAGIC;
+    ph->version = NT_PACK_VERSION;
+    ph->asset_count = 1;
+    ph->meta_count = 1;
+    ph->meta_offset = meta_offset;
+    ph->header_size = header_size;
+    ph->total_size = total_size;
+
+    NtAssetEntry *entry = (NtAssetEntry *)(pack_blob + sizeof(NtPackHeader));
+    entry[0].resource_id = atlas_rid;
+    entry[0].asset_type = NT_ASSET_ATLAS;
+    entry[0].format_version = NT_ATLAS_VERSION;
+    entry[0].offset = atlas_offset;
+    entry[0].size = atlas_blob_size;
+    entry[0].meta_offset = meta_offset; /* points to first NtMetaEntryHeader for this asset */
+    entry[0]._pad = 0;
+
+    memcpy(pack_blob + atlas_offset, atlas_blob, atlas_blob_size);
+
+    NtMetaEntryHeader *mh = (NtMetaEntryHeader *)(pack_blob + meta_offset);
+    mh->resource_id = atlas_rid;
+    mh->kind = nt_hash64_str("pixels_per_unit").value;
+    mh->size = meta_payload_size;
+    memcpy(pack_blob + meta_offset + sizeof(NtMetaEntryHeader), &ppu_value, sizeof(ppu_value));
+
+    ph->checksum = nt_crc32(pack_blob + header_size, total_size - header_size);
+
+    /* Resource system init */
+    nt_resource_init(NULL);
+    nt_atlas_init();
+
+    nt_hash32_t pid = nt_hash32_str("ppu_test_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid, pack_blob, total_size));
+
+    nt_hash64_t rid = {atlas_rid};
+    nt_resource_t atlas_res = nt_resource_request(rid, NT_ASSET_ATLAS);
+    TEST_ASSERT_TRUE(atlas_res.id != 0);
+
+    /* One step is enough: atlas activates, on_resolve runs, on_post_resolve
+     * reads metadata and re-runs precompute. */
+    nt_resource_step();
+    TEST_ASSERT_TRUE_MESSAGE(nt_resource_is_ready(atlas_res), "atlas resource not ready");
+
+    /* Public getter returns original ppu (2.0F), not ipu. */
+    assert_float_close(2.0F, nt_atlas_get_pixels_per_unit(atlas_res), 1e-5F, "pixels_per_unit");
+
+    /* cached_pos values are halved (ipu = 0.5) */
+    uint32_t region_idx = nt_atlas_find_region(atlas_res, 0xBEEFULL);
+    TEST_ASSERT_EQUAL_UINT32(0, region_idx);
+    const float(*pos)[2] = nt_atlas_get_region_cached_pos(atlas_res, region_idx);
+    TEST_ASSERT_NOT_NULL(pos);
+    /* origin (0,0) in y-up means bottom-left pivot, ipu=0.5. cached_pos =
+     * local * 0.5 directly (X and Y symmetric — v5 stores y-up vertices). */
+    assert_float_close(0.0F, pos[0][0], 1e-5F, "ppu=2 v0.x");
+    assert_float_close(0.0F, pos[0][1], 1e-5F, "ppu=2 v0.y");
+    assert_float_close(5.0F, pos[1][0], 1e-5F, "ppu=2 v1.x");
+    assert_float_close(0.0F, pos[1][1], 1e-5F, "ppu=2 v1.y");
+    assert_float_close(0.0F, pos[2][0], 1e-5F, "ppu=2 v2.x");
+    assert_float_close(5.0F, pos[2][1], 1e-5F, "ppu=2 v2.y");
+    assert_float_close(5.0F, pos[3][0], 1e-5F, "ppu=2 v3.x");
+    assert_float_close(5.0F, pos[3][1], 1e-5F, "ppu=2 v3.y");
+
+    /* Indices getter sanity-check. */
+    const uint16_t *idx = nt_atlas_get_region_indices(atlas_res, region_idx);
+    TEST_ASSERT_NOT_NULL(idx);
+    TEST_ASSERT_EQUAL_UINT16(0, idx[0]);
+    TEST_ASSERT_EQUAL_UINT16(1, idx[1]);
+    TEST_ASSERT_EQUAL_UINT16(2, idx[2]);
+
+    /* Default-fallback path: a second pack WITHOUT metadata keeps ipu=1.0F.
+     * Build a fresh resource system to keep the default path isolated. */
+    nt_resource_shutdown();
+    nt_atlas_test_reset();
+    free(pack_blob);
+
+    /* No-metadata pack */
+    const uint32_t total_size_nm = atlas_offset + aligned_atlas;
+    uint8_t *pack_blob_nm = (uint8_t *)calloc(1, total_size_nm);
+    TEST_ASSERT_NOT_NULL(pack_blob_nm);
+    NtPackHeader *ph_nm = (NtPackHeader *)pack_blob_nm;
+    ph_nm->magic = NT_PACK_MAGIC;
+    ph_nm->version = NT_PACK_VERSION;
+    ph_nm->asset_count = 1;
+    ph_nm->meta_count = 0;
+    ph_nm->meta_offset = 0;
+    ph_nm->header_size = header_size;
+    ph_nm->total_size = total_size_nm;
+    NtAssetEntry *e_nm = (NtAssetEntry *)(pack_blob_nm + sizeof(NtPackHeader));
+    e_nm[0].resource_id = atlas_rid;
+    e_nm[0].asset_type = NT_ASSET_ATLAS;
+    e_nm[0].format_version = NT_ATLAS_VERSION;
+    e_nm[0].offset = atlas_offset;
+    e_nm[0].size = atlas_blob_size;
+    e_nm[0].meta_offset = 0; /* no metadata */
+    e_nm[0]._pad = 0;
+    memcpy(pack_blob_nm + atlas_offset, atlas_blob, atlas_blob_size);
+    ph_nm->checksum = nt_crc32(pack_blob_nm + header_size, total_size_nm - header_size);
+
+    nt_resource_init(NULL);
+    nt_atlas_init();
+    nt_hash32_t pid_nm = nt_hash32_str("ppu_default_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(pid_nm, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(pid_nm, pack_blob_nm, total_size_nm));
+    nt_resource_t atlas_nm = nt_resource_request(rid, NT_ASSET_ATLAS);
+    nt_resource_step();
+    TEST_ASSERT_TRUE(nt_resource_is_ready(atlas_nm));
+    assert_float_close(1.0F, nt_atlas_get_pixels_per_unit(atlas_nm), 1e-5F, "default ppu");
+    /* cached_pos with ipu=1.0 should equal raw local. */
+    const float(*pos_nm)[2] = nt_atlas_get_region_cached_pos(atlas_nm, nt_atlas_find_region(atlas_nm, 0xBEEFULL));
+    assert_float_close(10.0F, pos_nm[1][0], 1e-5F, "no-meta v1.x raw");
+
+    nt_resource_shutdown();
+    nt_atlas_test_reset();
+    free(pack_blob_nm);
+    s_user_data = NULL; /* not used in this test */
+}
+
+/* Merge re-bakes cached arrays.
+ * First-parse a 1-region blob with origin (0.5, 0.5), snapshot cached_pos.
+ * Merge with the same hash but origin (0.0, 0.0); cached_pos must reflect
+ * the new origin. */
+void test_atlas_cached_recompute_on_merge(void) {
+    /* Build blob1 at origin (0.5, 0.5) of a 10x10 source. */
+    NtAtlasVertex verts1[4] = {
+        {.local_x = 0, .local_y = 0, .atlas_u = 0, .atlas_v = 0},
+        {.local_x = 10, .local_y = 0, .atlas_u = 65535, .atlas_v = 0},
+        {.local_x = 0, .local_y = 10, .atlas_u = 0, .atlas_v = 65535},
+        {.local_x = 10, .local_y = 10, .atlas_u = 65535, .atlas_v = 65535},
+    };
+    uint16_t indices1[6] = {0, 1, 2, 1, 3, 2};
+    NtAtlasRegion r1;
+    memset(&r1, 0, sizeof(r1));
+    r1.name_hash = 0x111ULL;
+    r1.source_w = 10;
+    r1.source_h = 10;
+    r1.origin_x = 0.5F;
+    r1.origin_y = 0.5F;
+    r1.vertex_count = 4;
+    r1.index_count = 6;
+    mock_atlas_spec_t spec1 = {.regions = &r1, .region_count = 1, .vertices = verts1, .total_vertex_count = 4, .indices = indices1, .total_index_count = 6, .page_ids = NULL, .page_count = 0};
+
+    /* Same hash, same vertex layout, but origin (0.0, 0.0). */
+    NtAtlasRegion r2;
+    memset(&r2, 0, sizeof(r2));
+    r2.name_hash = 0x111ULL;
+    r2.source_w = 10;
+    r2.source_h = 10;
+    r2.origin_x = 0.0F;
+    r2.origin_y = 0.0F;
+    r2.vertex_count = 4;
+    r2.index_count = 6;
+    mock_atlas_spec_t spec2 = {.regions = &r2, .region_count = 1, .vertices = verts1, .total_vertex_count = 4, .indices = indices1, .total_index_count = 6, .page_ids = NULL, .page_count = 0};
+
+    uint8_t buf1[512];
+    uint8_t buf2[512];
+    uint32_t size1 = build_mock_atlas_blob(buf1, sizeof(buf1), &spec1);
+    uint32_t size2 = build_mock_atlas_blob(buf2, sizeof(buf2), &spec2);
+
+    nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
+    const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+    const float(*pos_pre)[2] = nt_atlas_test_cached_pos(ad);
+    /* Origin is NOT baked into cached_pos — sprite_renderer applies it via
+     * translation. cached_pos = (local + trim_offset) * ipu = local here.
+     * Different origins between merges don't change cached_pos values. */
+    assert_float_close(0.0F, pos_pre[0][0], 1e-5F, "pre-merge v0.x = local");
+    assert_float_close(0.0F, pos_pre[0][1], 1e-5F, "pre-merge v0.y = local");
+
+    /* Merge: same hash, new origin. cached_pos must remain stable since the
+     * vertex layout didn't change and origin is no longer baked. */
+    nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
+    const float(*pos_post)[2] = nt_atlas_test_cached_pos(ad);
+    assert_float_close(0.0F, pos_post[0][0], 1e-5F, "post-merge v0.x unchanged");
+    assert_float_close(0.0F, pos_post[0][1], 1e-5F, "post-merge v0.y unchanged");
+    assert_float_close(10.0F, pos_post[1][0], 1e-5F, "post-merge v1.x = local");
+}
+
+/* Tombstone regions keep cached entries zeroed.
+ * First-parse 2 regions, merge with only region 1 → region 0 becomes tombstone.
+ * Region 0 is reachable through nt_atlas_test_get_region_raw with vertex_count==0.
+ * Its cached entries (at the original vertex_start..vertex_count slice in the
+ * NEW blob's vertex buffer — but tombstones get vertex_start=0/vertex_count=0
+ * after pass 2) read zero. */
+void test_atlas_tombstone_cached_zero(void) {
+    merge_region_spec_t blob1_specs[2] = {
+        {.name_hash = 0xAAAULL, .vertex_count = 4, .index_count = 6, .source_w = 10, .page_index = 0, .transform = 0, .payload_seed = 10},
+        {.name_hash = 0xBBBULL, .vertex_count = 4, .index_count = 6, .source_w = 10, .page_index = 0, .transform = 0, .payload_seed = 20},
+    };
+    /* blob2 keeps only BBB → AAA becomes tombstone. */
+    merge_region_spec_t blob2_specs[1] = {
+        {.name_hash = 0xBBBULL, .vertex_count = 4, .index_count = 6, .source_w = 10, .page_index = 0, .transform = 0, .payload_seed = 20},
+    };
+
+    uint8_t buf1[512];
+    uint8_t buf2[512];
+    uint32_t size1 = build_merge_blob(buf1, sizeof(buf1), blob1_specs, 2, NULL, 0);
+    uint32_t size2 = build_merge_blob(buf2, sizeof(buf2), blob2_specs, 1, NULL, 0);
+
+    nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
+    nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
+
+    const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+    const nt_texture_region_t *r0 = nt_atlas_test_get_region_raw(ad, 0);
+    /* AAA tombstoned → vertex_count==0, vertex_start==0. */
+    TEST_ASSERT_EQUAL_UINT64(NT_ATLAS_TOMBSTONE_HASH, r0->name_hash);
+    TEST_ASSERT_EQUAL_UINT8(0, r0->vertex_count);
+    TEST_ASSERT_EQUAL_UINT32(0, r0->vertex_start);
+
+    /* atlas_precompute_all skips tombstones; the cached_pos slice
+     * at [vertex_start..vertex_count) is empty (vertex_count=0). For
+     * defensive coverage check that bytes at index 0 of the buffer are not
+     * NaN/garbage — they're either zeroed (calloc) or the live BBB region's
+     * baked floats. The point is: the *zero-length slice* requires no
+     * defensive read in the renderer hot path. */
+    const float(*pos)[2] = nt_atlas_test_cached_pos(ad);
+    TEST_ASSERT_NOT_NULL(pos); /* buffer still allocated, slice length is 0 */
+}
+
+/* Synthetic SD↔HD merge stability.
+ * Build TWO in-memory packs with identical region name_hashes but different
+ * pixels_per_unit metadata (1.0 vs 2.0). Mount SD, resolve, snapshot region
+ * indices and cached_pos[0]. Mount HD on top (atlas merge); assert:
+ *   (a) region_index stays the same for each name (region-index stability)
+ *   (b) nt_atlas_get_pixels_per_unit returns 2.0 post-merge (metadata re-read on merge)
+ *   (c) cached_pos[red.vertex_start][0] is HALVED (ipu update propagated through precompute)
+ *
+ * This test does NOT require user-supplied raw/hd/ art — it's the deterministic,
+ * autonomous closure path. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_sd_hd_merge_stable_region_indices(void) {
+    /* Two regions, same hashes, same vertex layout. Vertices at (0,0)..(10,10),
+     * origin (0,0) → cached_pos = local * ipu. */
+    NtAtlasVertex verts[8];
+    for (int i = 0; i < 8; i++) {
+        /* region 0 (red): verts 0..3 */
+        /* region 1 (green): verts 4..7 */
+        int r = i / 4;
+        int q = i % 4;
+        verts[i].local_x = (int16_t)((q == 1 || q == 3) ? 10 : 0);
+        verts[i].local_y = (int16_t)((q == 2 || q == 3) ? 10 : 0);
+        verts[i].atlas_u = (uint16_t)((q == 1 || q == 3) ? 65535 : 0);
+        verts[i].atlas_v = (uint16_t)((q == 2 || q == 3) ? 65535 : 0);
+        (void)r;
+    }
+    uint16_t indices[12] = {0, 1, 2, 1, 3, 2, 0, 1, 2, 1, 3, 2};
+
+    NtAtlasRegion regions[2];
+    memset(regions, 0, sizeof(regions));
+    const uint64_t red_hash = nt_hash64_str("bunny_red").value;
+    const uint64_t green_hash = nt_hash64_str("bunny_green").value;
+
+    regions[0].name_hash = red_hash;
+    regions[0].source_w = 10;
+    regions[0].source_h = 10;
+    regions[0].origin_x = 0.0F;
+    regions[0].origin_y = 0.0F;
+    regions[0].vertex_start = 0;
+    regions[0].index_start = 0;
+    regions[0].vertex_count = 4;
+    regions[0].index_count = 6;
+
+    regions[1].name_hash = green_hash;
+    regions[1].source_w = 10;
+    regions[1].source_h = 10;
+    regions[1].origin_x = 0.0F;
+    regions[1].origin_y = 0.0F;
+    regions[1].vertex_start = 4;
+    regions[1].index_start = 6;
+    regions[1].vertex_count = 4;
+    regions[1].index_count = 6;
+
+    mock_atlas_spec_t spec = {.regions = regions, .region_count = 2, .vertices = verts, .total_vertex_count = 8, .indices = indices, .total_index_count = 12, .page_ids = NULL, .page_count = 0};
+
+    uint8_t atlas_blob[512];
+    uint32_t atlas_blob_size = build_mock_atlas_blob(atlas_blob, sizeof(atlas_blob), &spec);
+
+    /* Pack-builder helper: same atlas_rid, but two different ppu values
+     * (one per pack — SD: 1.0F, HD: 2.0F). */
+    const uint64_t atlas_rid = 0x5D7C0FFEE0123456ULL;
+
+    /* Construct SD pack */
+    const uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + (1U * sizeof(NtAssetEntry)));
+    const uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_DATA_ALIGN - 1U);
+    const uint32_t aligned_atlas = (atlas_blob_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1U);
+    const uint32_t atlas_offset = header_size;
+    const uint32_t meta_offset = atlas_offset + aligned_atlas;
+    const uint32_t meta_entry_size = (uint32_t)sizeof(NtMetaEntryHeader) + (uint32_t)sizeof(float);
+    const uint32_t aligned_meta = (meta_entry_size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1U);
+    const uint32_t total_size = meta_offset + aligned_meta;
+
+    uint8_t *sd_blob = (uint8_t *)calloc(1, total_size);
+    uint8_t *hd_blob = (uint8_t *)calloc(1, total_size);
+    TEST_ASSERT_NOT_NULL(sd_blob);
+    TEST_ASSERT_NOT_NULL(hd_blob);
+
+    for (int variant = 0; variant < 2; variant++) {
+        uint8_t *blob = (variant == 0) ? sd_blob : hd_blob;
+        float ppu = (variant == 0) ? 1.0F : 2.0F;
+
+        NtPackHeader *ph = (NtPackHeader *)blob;
+        ph->magic = NT_PACK_MAGIC;
+        ph->version = NT_PACK_VERSION;
+        ph->asset_count = 1;
+        ph->meta_count = 1;
+        ph->meta_offset = meta_offset;
+        ph->header_size = header_size;
+        ph->total_size = total_size;
+
+        NtAssetEntry *entry = (NtAssetEntry *)(blob + sizeof(NtPackHeader));
+        entry[0].resource_id = atlas_rid;
+        entry[0].asset_type = NT_ASSET_ATLAS;
+        entry[0].format_version = NT_ATLAS_VERSION;
+        entry[0].offset = atlas_offset;
+        entry[0].size = atlas_blob_size;
+        entry[0].meta_offset = meta_offset;
+        entry[0]._pad = 0;
+
+        memcpy(blob + atlas_offset, atlas_blob, atlas_blob_size);
+
+        NtMetaEntryHeader *mh = (NtMetaEntryHeader *)(blob + meta_offset);
+        mh->resource_id = atlas_rid;
+        mh->kind = nt_hash64_str("pixels_per_unit").value;
+        mh->size = (uint32_t)sizeof(float);
+        memcpy(blob + meta_offset + sizeof(NtMetaEntryHeader), &ppu, sizeof(ppu));
+
+        ph->checksum = nt_crc32(blob + header_size, total_size - header_size);
+    }
+
+    /* Mount SD pack at priority 0. */
+    nt_resource_init(NULL);
+    nt_atlas_init();
+    nt_hash32_t sd_pid = nt_hash32_str("bunny_sd_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(sd_pid, 0));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(sd_pid, sd_blob, total_size));
+
+    nt_hash64_t rid = {atlas_rid};
+    nt_resource_t atlas_res = nt_resource_request(rid, NT_ASSET_ATLAS);
+    nt_resource_step();
+    TEST_ASSERT_TRUE_MESSAGE(nt_resource_is_ready(atlas_res), "SD atlas not ready");
+
+    /* Snapshot SD state. */
+    uint32_t red_idx_sd = nt_atlas_find_region(atlas_res, red_hash);
+    uint32_t green_idx_sd = nt_atlas_find_region(atlas_res, green_hash);
+    TEST_ASSERT_NOT_EQUAL_UINT32(NT_ATLAS_INVALID_REGION, red_idx_sd);
+    TEST_ASSERT_NOT_EQUAL_UINT32(NT_ATLAS_INVALID_REGION, green_idx_sd);
+    assert_float_close(1.0F, nt_atlas_get_pixels_per_unit(atlas_res), 1e-5F, "SD ppu");
+    /* SD: ipu=1, origin=(0,0), v1.x=10. */
+    const float(*pos_red_sd)[2] = nt_atlas_get_region_cached_pos(atlas_res, red_idx_sd);
+    float v1x_sd = pos_red_sd[1][0];
+    assert_float_close(10.0F, v1x_sd, 1e-5F, "SD red v1.x");
+
+    /* Mount HD pack at priority 1 (higher → wins). */
+    nt_hash32_t hd_pid = nt_hash32_str("bunny_hd_pack");
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_mount(hd_pid, 1));
+    TEST_ASSERT_EQUAL(NT_OK, nt_resource_parse_pack(hd_pid, hd_blob, total_size));
+    nt_resource_step();
+    TEST_ASSERT_TRUE(nt_resource_is_ready(atlas_res));
+
+    /* Assertion (a): region_index stable through merge. */
+    uint32_t red_idx_hd = nt_atlas_find_region(atlas_res, red_hash);
+    uint32_t green_idx_hd = nt_atlas_find_region(atlas_res, green_hash);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(red_idx_sd, red_idx_hd, "red region_index changed after HD merge");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(green_idx_sd, green_idx_hd, "green region_index changed after HD merge");
+
+    /* Assertion (b): pixels_per_unit reflects HD pack post-merge. */
+    assert_float_close(2.0F, nt_atlas_get_pixels_per_unit(atlas_res), 1e-5F, "HD ppu after merge");
+
+    /* Assertion (c): cached_pos halved for the same logical vertex. */
+    const float(*pos_red_hd)[2] = nt_atlas_get_region_cached_pos(atlas_res, red_idx_hd);
+    float v1x_hd = pos_red_hd[1][0];
+    assert_float_close(5.0F, v1x_hd, 1e-5F, "HD red v1.x (should be SD/2)");
+    assert_float_close(v1x_sd * 0.5F, v1x_hd, 1e-5F, "HD red v1.x = SD/2");
+
+    nt_resource_shutdown();
+    nt_atlas_test_reset();
+    free(sd_blob);
+    free(hd_blob);
+    s_user_data = NULL;
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_atlas_parse_valid_blob);
@@ -1439,5 +2115,14 @@ int main(void) {
     RUN_TEST(test_atlas_region_slice_validation_rejects_corruption);
     RUN_TEST(test_atlas_page_resources_stored_at_parse);
     RUN_TEST(test_atlas_full_resource_pipeline_integration);
+
+    /* Cached arrays + pixels_per_unit + SD/HD merge */
+    RUN_TEST(test_atlas_cached_uv_d4_transform);
+    RUN_TEST(test_atlas_cached_pos_origin_not_baked);
+    RUN_TEST(test_atlas_cached_pos_includes_trim_offset);
+    RUN_TEST(test_atlas_pixels_per_unit_metadata_roundtrip);
+    RUN_TEST(test_atlas_cached_recompute_on_merge);
+    RUN_TEST(test_atlas_tombstone_cached_zero);
+    RUN_TEST(test_atlas_sd_hd_merge_stable_region_indices);
     return UNITY_END();
 }

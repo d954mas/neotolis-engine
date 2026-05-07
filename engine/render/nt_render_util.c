@@ -17,7 +17,7 @@ bool nt_render_is_visible(nt_entity_t entity) {
     if (!*nt_drawable_comp_visible(entity)) {
         return false;
     }
-    float *color = nt_drawable_comp_color(entity);
+    const float *color = nt_drawable_comp_color(entity);
     if (color[3] <= 0.0F) {
         return false;
     }

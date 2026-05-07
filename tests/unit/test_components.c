@@ -101,7 +101,7 @@ void test_drawable_add_defaults_visible(void) {
 void test_drawable_add_defaults_color(void) {
     nt_entity_t e = nt_entity_create();
     nt_drawable_comp_add(e);
-    float *col = nt_drawable_comp_color(e);
+    const float *col = nt_drawable_comp_color(e);
     TEST_ASSERT_TRUE(col[0] == 1.0F); /* NOLINT */
     TEST_ASSERT_TRUE(col[1] == 1.0F); /* NOLINT */
     TEST_ASSERT_TRUE(col[2] == 1.0F); /* NOLINT */

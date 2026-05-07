@@ -360,8 +360,8 @@ void test_texture_round_trip(void) {
     TEST_ASSERT_EQUAL_UINT32(2, tex.height);
     TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_FORMAT_RGBA8, tex.format);
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex.compression);
-    /* Default opts: premultiplied=false → flags=0 for plain texture */
-    TEST_ASSERT_EQUAL_UINT8(0, tex.flags);
+    /* NULL opts → nt_tex_opts_defaults(): premultiplied=false, gen_mipmaps=true */
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_FLAG_GEN_MIPMAPS, tex.flags);
     TEST_ASSERT_EQUAL_UINT32(2 * 2 * 4, tex.data_size);
 
     (void)fclose(f);
@@ -391,12 +391,8 @@ void test_texture_premultiplied_encoding(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_tex_opts_t opts = {
-        .format = NT_TEXTURE_FORMAT_RGBA8,
-        .max_size = 0,
-        .compress = NULL,
-        .premultiplied = true,
-    };
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.premultiplied = true;
     nt_builder_add_texture_raw(ctx, raw_pixels, 4, 1, "tex/premul_test", &opts);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
@@ -1512,7 +1508,7 @@ void test_gl_validation_invalid_shader(void) {
     nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
-    /* GL validation may be skipped if no display (D-08) -- both outcomes are valid */
+    /* GL validation may be skipped if no display -- both outcomes are valid */
     TEST_ASSERT_TRUE(r == NT_BUILD_OK || r == NT_BUILD_ERR_VALIDATION);
     nt_builder_free_pack(ctx);
 }
@@ -1554,7 +1550,7 @@ void test_gl_validation_type_error(void) {
     nt_builder_add_shader(ctx, vert_path, NT_BUILD_SHADER_VERTEX);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
-    /* GL validation may be skipped if no display (D-08) -- both outcomes are valid */
+    /* GL validation may be skipped if no display -- both outcomes are valid */
     TEST_ASSERT_TRUE(r == NT_BUILD_OK || r == NT_BUILD_ERR_VALIDATION);
     nt_builder_free_pack(ctx);
 }
@@ -2136,7 +2132,7 @@ void test_builder_mesh_has_aabb(void) {
     free(blob);
 }
 
-/* --- Early dedup tests (Phase 38) --- */
+/* --- Early dedup tests --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_early_dedup_identical_textures(void) {
@@ -2235,8 +2231,9 @@ void test_early_dedup_different_opts_not_deduped(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_tex_opts_t opts_a = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = 0};
-    nt_tex_opts_t opts_b = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = 256};
+    nt_tex_opts_t opts_a = nt_tex_opts_defaults();
+    nt_tex_opts_t opts_b = nt_tex_opts_defaults();
+    opts_b.max_size = 256;
     nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "textures/no_resize.png", &opts_a);
     nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "textures/resized.png", &opts_b);
 
@@ -2537,7 +2534,7 @@ void test_dedup_cross_source_texture_memory_vs_raw(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_tex_opts_t opts = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = 0};
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
     nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)len, "tex/from_png", &opts);
     nt_builder_add_texture_raw(ctx, raw_pixels, 2, 2, "tex/from_raw", &opts);
     free(png_data);
@@ -2824,7 +2821,7 @@ void test_cache_invalidation_opts(void) {
     write_test_png(TMP_DIR "/cache_opts_tex.png");
 
     /* Build 1: RGBA8 (default) */
-    nt_tex_opts_t opts1 = {.format = NT_TEXTURE_FORMAT_RGBA8};
+    nt_tex_opts_t opts1 = nt_tex_opts_defaults();
     NtBuilderContext *ctx1 = nt_builder_start_pack(pack1);
     nt_builder_set_cache_dir(ctx1, cache);
     nt_builder_add_texture(ctx1, TMP_DIR "/cache_opts_tex.png", &opts1);
@@ -2832,7 +2829,8 @@ void test_cache_invalidation_opts(void) {
     nt_builder_free_pack(ctx1);
 
     /* Build 2: RGB8 (different) -- should be a cache miss */
-    nt_tex_opts_t opts2 = {.format = NT_TEXTURE_FORMAT_RGB8};
+    nt_tex_opts_t opts2 = nt_tex_opts_defaults();
+    opts2.format = NT_TEXTURE_FORMAT_RGB8;
     NtBuilderContext *ctx2 = nt_builder_start_pack(pack2);
     nt_builder_set_cache_dir(ctx2, cache);
     nt_builder_add_texture(ctx2, TMP_DIR "/cache_opts_tex.png", &opts2);
@@ -2873,6 +2871,52 @@ void test_cache_version_in_opts_hash(void) {
     entry2.data = NULL;
     uint64_t hash3 = nt_builder_compute_opts_hash(&entry2);
     TEST_ASSERT_TRUE(hash3 != hash1);
+}
+
+/* CACHE-02b: Sampler defaults (filter/wrap) participate in the texture
+ * opts hash. Regression for the bug where SD/HD packs with different
+ * filter_min produced identical cache entries because compute_opts_hash
+ * skipped the filter/wrap fields — the second build of a texture with a
+ * new filter would hit a stale cache blob. */
+void test_cache_filter_wrap_in_opts_hash(void) {
+    /* Build a fully-populated texture entry. Hash sensitivity is on the opts
+     * fields (format / filter / wrap / compress); pixel content is irrelevant
+     * because cache keys also include decoded_hash separately. */
+    NtBuildTextureData td;
+    memset(&td, 0, sizeof(td));
+    td.opts.format = NT_TEXTURE_FORMAT_RGBA8;
+    td.opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    td.opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+    td.opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+    td.opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+
+    NtBuildEntry entry;
+    memset(&entry, 0, sizeof(entry));
+    entry.kind = NT_BUILD_ASSET_TEXTURE;
+    entry.data = &td;
+
+    uint64_t base = nt_builder_compute_opts_hash(&entry);
+    TEST_ASSERT_TRUE(base != 0);
+
+    /* Vary each sampler field one at a time — every change must shift the hash. */
+    td.opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;
+    TEST_ASSERT_TRUE(nt_builder_compute_opts_hash(&entry) != base);
+    td.opts.filter_min = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+
+    td.opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_NEAREST;
+    TEST_ASSERT_TRUE(nt_builder_compute_opts_hash(&entry) != base);
+    td.opts.filter_mag = NT_TEXTURE_DEFAULT_FILTER_LINEAR;
+
+    td.opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_REPEAT;
+    TEST_ASSERT_TRUE(nt_builder_compute_opts_hash(&entry) != base);
+    td.opts.wrap_u = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+
+    td.opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_REPEAT;
+    TEST_ASSERT_TRUE(nt_builder_compute_opts_hash(&entry) != base);
+    td.opts.wrap_v = NT_TEXTURE_DEFAULT_WRAP_CLAMP_TO_EDGE;
+
+    /* Restoring all four fields → hash returns to base (deterministic). */
+    TEST_ASSERT_EQUAL_UINT64(base, nt_builder_compute_opts_hash(&entry));
 }
 
 /* CACHE-03: Custom cache dir receives .bin files */
@@ -3044,7 +3088,7 @@ void test_cache_with_dedup(void) {
     free(data2);
 }
 
-/* --- Parallel encode tests (Phase 40) --- */
+/* --- Parallel encode tests --- */
 
 void test_parallel_deterministic(void) {
     /* Build same pack twice: once with 1 thread, once with 4 threads.
@@ -3136,7 +3180,7 @@ void test_parallel_basic(void) {
 }
 
 void test_set_threads_zero_is_singlethreaded(void) {
-    /* No call to set_threads = single-threaded, same as set_threads(0) (D-12). */
+    /* No call to set_threads = single-threaded, same as set_threads(0). */
     const char *pack1 = TMP_DIR "/thr_default.ntpack";
     const char *pack2 = TMP_DIR "/thr_zero.ntpack";
     const char *png_path = TMP_DIR "/thr_tex.png";
@@ -3283,7 +3327,7 @@ static const char *find_test_ttf(void) {
     return NULL;
 }
 
-/* --- Font processing tests (Phase 43) --- */
+/* --- Font processing tests --- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_font_add_basic_ascii(void) {
@@ -3603,7 +3647,7 @@ void test_font_kern_values(void) {
     free(pack_data);
 }
 
-/* --- Atlas geometry algorithm tests (Phase 47) --- */
+/* --- Atlas geometry algorithm tests --- */
 
 /* alpha_trim takes a dense alpha plane; tests start from RGBA so wrap the
  * extract+trim+free sequence in one helper. */
@@ -4660,6 +4704,89 @@ void test_atlas_opts_defaults(void) {
     TEST_ASSERT_EQUAL(NT_ATLAS_SHAPE_CONCAVE_CONTOUR, opts.shape);
     TEST_ASSERT_FALSE(opts.debug_png);
     TEST_ASSERT_NULL(opts.compress);
+    /* Default pixels_per_unit is 1.0 */
+    TEST_ASSERT_TRUE(opts.pixels_per_unit > 0.999F && opts.pixels_per_unit < 1.001F);
+}
+
+/* Builder writes pixels_per_unit as a 4-byte resource metadata blob keyed by
+ * hash64_str("pixels_per_unit") for every atlas. Round-trip: build pack with
+ * ppu=2.5, scan meta section, expect 4 B == 2.5F. This test validates the
+ * builder side only — runtime side is covered by nt_atlas_get_pixels_per_unit
+ * tests. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_builder_atlas_pixels_per_unit_metadata(void) {
+    (void)MKDIR(TMP_DIR);
+    const char *pack_path = TMP_DIR "/atlas_ppu_meta.ntpack";
+    NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s = make_test_sprite(16, 16, 200, 100, 50, 255);
+
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.pixels_per_unit = 2.5F;
+    nt_builder_begin_atlas(ctx, "ppu_atlas", &opts);
+    nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "ppu_sprite.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    /* Read pack and find atlas asset entry */
+    uint32_t file_size = 0;
+    uint8_t *buf = read_file_bytes(pack_path, &file_size);
+    TEST_ASSERT_NOT_NULL(buf);
+
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    TEST_ASSERT_TRUE(pack->meta_count >= 1U);
+    TEST_ASSERT_TRUE(pack->meta_offset > 0U);
+
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+    TEST_ASSERT_TRUE(atlas_entry->meta_offset > 0U);
+
+    /* Walk meta entries from atlas_entry->meta_offset until resource_id changes
+     * (entries are grouped by resource_id, sorted contiguous). Find the entry
+     * with kind == hash64_str("pixels_per_unit"). */
+    const uint64_t kind_ppu = nt_hash64_str("pixels_per_unit").value;
+    bool found = false;
+    float ppu_value = 0.0F;
+    uint32_t walk_offset = atlas_entry->meta_offset;
+    for (uint32_t i = 0; i < pack->meta_count; i++) {
+        TEST_ASSERT_TRUE(walk_offset + sizeof(NtMetaEntryHeader) <= file_size);
+        const NtMetaEntryHeader *mh = (const NtMetaEntryHeader *)(buf + walk_offset);
+        if (mh->resource_id != atlas_entry->resource_id) {
+            break; /* entered a different asset's meta group */
+        }
+        if (mh->kind == kind_ppu) {
+            TEST_ASSERT_EQUAL_UINT32(sizeof(float), mh->size);
+            const uint8_t *payload = buf + walk_offset + sizeof(NtMetaEntryHeader);
+            TEST_ASSERT_TRUE(payload + sizeof(float) <= buf + file_size);
+            memcpy(&ppu_value, payload, sizeof(float));
+            found = true;
+            break;
+        }
+        /* Advance to next meta entry: header + payload, padded to 4 bytes. */
+        uint32_t padded_size = (mh->size + (NT_PACK_ASSET_ALIGN - 1U)) & ~(NT_PACK_ASSET_ALIGN - 1U);
+        walk_offset += (uint32_t)sizeof(NtMetaEntryHeader) + padded_size;
+    }
+    TEST_ASSERT_TRUE(found);
+    TEST_ASSERT_TRUE(ppu_value > 2.4999F && ppu_value < 2.5001F);
+
+    /* Smoke-check: pack_dump must not crash on a pack carrying
+     * pixels_per_unit metadata. The new dump line ("pixels_per_unit: 2.500")
+     * is asserted as code presence by the plan's grep verify step rather
+     * than by stdout capture (NT_LOG_INFO routes through the log module). */
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_dump_pack(pack_path));
+
+    free(buf);
 }
 
 /* --- Atlas sprite opts + origin tests --- */
@@ -4724,7 +4851,8 @@ void test_atlas_sprite_opts_default_origin_is_centre(void) {
     free(buf);
 }
 
-/* Custom origin via opts propagates into the blob verbatim. */
+/* Custom origin via opts propagates into the blob with builder y-up flip:
+ * origin_y_blob = 1 - origin_y_png. origin_x is unchanged. */
 void test_atlas_sprite_opts_custom_origin(void) {
     (void)MKDIR(TMP_DIR);
     NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_origin_custom.ntpack");
@@ -4733,7 +4861,7 @@ void test_atlas_sprite_opts_custom_origin(void) {
     uint8_t *s = make_test_sprite(16, 16, 0, 255, 128, 255);
 
     nt_builder_begin_atlas(ctx, "origin_custom", NULL);
-    /* Feet pivot. */
+    /* Feet pivot — PNG y-down 1.0 (bottom edge) flips to y-up 0.0 in the blob. */
     nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "feet.png", .origin_x = 0.5F, .origin_y = 1.0F});
     nt_builder_end_atlas(ctx);
 
@@ -4747,7 +4875,7 @@ void test_atlas_sprite_opts_custom_origin(void) {
     TEST_ASSERT_NOT_NULL(buf);
     TEST_ASSERT_EQUAL(1, region_count);
     TEST_ASSERT_TRUE(regions[0].origin_x > 0.49F && regions[0].origin_x < 0.51F);
-    TEST_ASSERT_TRUE(regions[0].origin_y > 0.99F && regions[0].origin_y < 1.01F);
+    TEST_ASSERT_TRUE(regions[0].origin_y > -0.01F && regions[0].origin_y < 0.01F);
     free(buf);
 }
 
@@ -4760,7 +4888,8 @@ void test_atlas_sprite_opts_origin_out_of_range_allowed(void) {
     uint8_t *s = make_test_sprite(16, 16, 128, 64, 255, 255);
 
     nt_builder_begin_atlas(ctx, "origin_oor", NULL);
-    /* Negative and > 1.0 — pivot lies outside the frame. Legal. */
+    /* Negative and > 1.0 — pivot lies outside the frame. Legal. PNG y-down 1.5
+     * flips symmetrically to y-up -0.5 in the blob (1 - 1.5 = -0.5). */
     nt_builder_atlas_add_raw(ctx, s, 16, 16, &(nt_atlas_sprite_opts_t){.name = "offframe.png", .origin_x = -0.2F, .origin_y = 1.5F});
     nt_builder_end_atlas(ctx);
 
@@ -4774,7 +4903,7 @@ void test_atlas_sprite_opts_origin_out_of_range_allowed(void) {
     TEST_ASSERT_NOT_NULL(buf);
     TEST_ASSERT_EQUAL(1, region_count);
     TEST_ASSERT_TRUE(regions[0].origin_x < -0.19F && regions[0].origin_x > -0.21F);
-    TEST_ASSERT_TRUE(regions[0].origin_y > 1.49F && regions[0].origin_y < 1.51F);
+    TEST_ASSERT_TRUE(regions[0].origin_y > -0.51F && regions[0].origin_y < -0.49F);
     free(buf);
 }
 
@@ -4975,9 +5104,10 @@ void test_atlas_duplicate_pixels_different_origin(void) {
     TEST_ASSERT_NOT_NULL(r_centre);
     TEST_ASSERT_NOT_NULL(r_feet);
 
-    /* Different origin_y — each region carries its own pivot. */
+    /* Different origin_y — each region carries its own pivot. Builder y-up flip
+     * applies (1 - origin_y_png): centre 0.5 stays 0.5, feet 1.0 → 0.0. */
     TEST_ASSERT_TRUE(r_centre->origin_y > 0.49F && r_centre->origin_y < 0.51F);
-    TEST_ASSERT_TRUE(r_feet->origin_y > 0.99F && r_feet->origin_y < 1.01F);
+    TEST_ASSERT_TRUE(r_feet->origin_y > -0.01F && r_feet->origin_y < 0.01F);
 
     /* Shared vertex_start / index_start via dedup — both regions point at the
      * same geometry in the blob. */
@@ -5117,6 +5247,7 @@ int main(void) {
     RUN_TEST(test_cache_hit_skips_encode);
     RUN_TEST(test_cache_invalidation_opts);
     RUN_TEST(test_cache_version_in_opts_hash);
+    RUN_TEST(test_cache_filter_wrap_in_opts_hash);
     RUN_TEST(test_cache_dir_configurable);
     RUN_TEST(test_cache_clear_forces_rebuild);
     RUN_TEST(test_cache_flat_files);
@@ -5129,7 +5260,7 @@ int main(void) {
     RUN_TEST(test_parallel_with_cache);
     RUN_TEST(test_parallel_with_dedup);
 
-    /* Font processing tests (Phase 43) */
+    /* Font processing tests */
     RUN_TEST(test_font_add_basic_ascii);
     RUN_TEST(test_font_add_full_ascii_charset);
     RUN_TEST(test_font_kern_pairs);
@@ -5139,7 +5270,7 @@ int main(void) {
     RUN_TEST(test_font_charset_dedup);
     RUN_TEST(test_font_kern_values);
 
-    /* Atlas geometry algorithms (Phase 47) */
+    /* Atlas geometry algorithms */
     RUN_TEST(test_alpha_trim_fully_transparent);
     RUN_TEST(test_alpha_trim_single_pixel);
     RUN_TEST(test_alpha_trim_l_shape);
@@ -5153,7 +5284,7 @@ int main(void) {
     RUN_TEST(test_fan_triangulate_triangle);
     RUN_TEST(test_vpack_point_in_nfp_block_any_ring);
 
-    /* Premultiplied alpha (Phase 48 Plan 1.1) */
+    /* Premultiplied alpha */
     RUN_TEST(test_texture_premultiplied_encoding);
 
     /* AABB edge extrude */
@@ -5162,7 +5293,7 @@ int main(void) {
     RUN_TEST(test_atlas_real_pipeline_preserves_hole);
     RUN_TEST(test_atlas_shape_concave_rejects_extrude);
 
-    /* Atlas round-trip tests (Phase 47 Plan 03) */
+    /* Atlas round-trip tests */
     RUN_TEST(test_atlas_round_trip_basic);
     RUN_TEST(test_atlas_round_trip_regions);
     RUN_TEST(test_atlas_round_trip_vertices);
@@ -5173,6 +5304,7 @@ int main(void) {
     RUN_TEST(test_atlas_codegen);
     RUN_TEST(test_atlas_codegen_large);
     RUN_TEST(test_atlas_opts_defaults);
+    RUN_TEST(test_builder_atlas_pixels_per_unit_metadata);
 
     /* Atlas sprite opts + origin (Point 2 follow-up) */
     RUN_TEST(test_atlas_sprite_opts_default_origin_is_centre);

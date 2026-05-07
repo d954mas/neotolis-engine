@@ -160,8 +160,7 @@ void test_is_visible_not_visible(void) {
 void test_is_visible_zero_alpha(void) {
     nt_entity_t e = nt_entity_create();
     nt_drawable_comp_add(e);
-    float *color = nt_drawable_comp_color(e);
-    color[3] = 0.0F;
+    nt_drawable_comp_set_alpha(e, 0.0F);
     TEST_ASSERT_FALSE(nt_render_is_visible(e));
 }
 

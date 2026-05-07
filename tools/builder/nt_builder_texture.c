@@ -194,7 +194,7 @@ nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, u
         final_data = source;
     }
 
-    /* Build v2 header (RAW compression -- uncompressed pixel data) */
+    /* Build V3 header (RAW compression -- uncompressed pixel data) */
     uint32_t data_size = pixel_count * bpp;
     NtTextureAssetHeaderV2 tex_hdr;
     memset(&tex_hdr, 0, sizeof(tex_hdr));
@@ -205,7 +205,19 @@ nt_build_result_t nt_builder_encode_texture_to_buf(const uint8_t *rgba_pixels, u
     tex_hdr.height = height;
     tex_hdr.mip_count = 1;
     tex_hdr.compression = (uint8_t)NT_TEXTURE_COMPRESSION_RAW;
-    tex_hdr.flags = premul ? (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED : 0;
+    uint8_t hdr_flags = 0;
+    if (premul) {
+        hdr_flags |= (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED;
+    }
+    if (opts && opts->gen_mipmaps) {
+        hdr_flags |= (uint8_t)NT_TEXTURE_FLAG_GEN_MIPMAPS;
+    }
+    tex_hdr.flags = hdr_flags;
+    /* Sampler defaults from opts (caller controls per-texture / per-atlas). */
+    tex_hdr.default_min_filter = (uint8_t)(opts ? opts->filter_min : NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR);
+    tex_hdr.default_mag_filter = (uint8_t)(opts ? opts->filter_mag : NT_TEXTURE_DEFAULT_FILTER_LINEAR);
+    tex_hdr.default_wrap_u = (uint8_t)(opts ? opts->wrap_u : NT_TEXTURE_DEFAULT_WRAP_REPEAT);
+    tex_hdr.default_wrap_v = (uint8_t)(opts ? opts->wrap_v : NT_TEXTURE_DEFAULT_WRAP_REPEAT);
     tex_hdr.data_size = data_size;
 
     uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeaderV2) + data_size;
@@ -234,7 +246,7 @@ nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgb
      * Use RGB8 for 2/1-channel textures (normals, specular) with Basis compression. */
     NT_BUILD_ASSERT((fmt == NT_TEXTURE_FORMAT_RGBA8 || fmt == NT_TEXTURE_FORMAT_RGB8) && "Basis compression requires RGBA8 or RGB8 format (RG8/R8 have no Basis equivalent)");
 
-    /* Determine alpha from format (D-06) */
+    /* Determine alpha from format */
     bool has_alpha = (fmt == NT_TEXTURE_FORMAT_RGBA8);
 
     /* Premultiply before Basis encode: block compression is lossy and perceptually
@@ -262,7 +274,16 @@ nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgb
 
     NT_BUILD_ASSERT(enc.data && "texture encode: Basis encode failed");
 
-    /* Build v2 header */
+    /* Mipmap filters need a mipmap chain. BASIS textures upload exactly the
+     * mips the encoder produced — runtime cannot fix this up like RAW does
+     * via glGenerateMipmap. Asserting at builder time prevents shipping
+     * broken sampling (incomplete mip chain → undefined / black). */
+    nt_texture_default_filter_t fmin = opts ? opts->filter_min : NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR;
+    bool wants_mips = (fmin == NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_NEAREST || fmin == NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_NEAREST || fmin == NT_TEXTURE_DEFAULT_FILTER_NEAREST_MIPMAP_LINEAR ||
+                       fmin == NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR);
+    NT_BUILD_ASSERT((!wants_mips || enc.mip_count > 1) && "texture encode: filter_min selects a mipmap variant but Basis produced a single-level chain");
+
+    /* Build V3 header */
     NtTextureAssetHeaderV2 tex_hdr;
     memset(&tex_hdr, 0, sizeof(tex_hdr));
     tex_hdr.magic = NT_TEXTURE_MAGIC;
@@ -273,6 +294,11 @@ nt_build_result_t nt_builder_encode_texture_compressed_to_buf(const uint8_t *rgb
     tex_hdr.mip_count = (uint16_t)enc.mip_count;
     tex_hdr.compression = (uint8_t)NT_TEXTURE_COMPRESSION_BASIS;
     tex_hdr.flags = premul ? (uint8_t)NT_TEXTURE_FLAG_PREMULTIPLIED : 0;
+    /* Sampler defaults from opts (BASIS path mirrors RAW). */
+    tex_hdr.default_min_filter = (uint8_t)(opts ? opts->filter_min : NT_TEXTURE_DEFAULT_FILTER_LINEAR_MIPMAP_LINEAR);
+    tex_hdr.default_mag_filter = (uint8_t)(opts ? opts->filter_mag : NT_TEXTURE_DEFAULT_FILTER_LINEAR);
+    tex_hdr.default_wrap_u = (uint8_t)(opts ? opts->wrap_u : NT_TEXTURE_DEFAULT_WRAP_REPEAT);
+    tex_hdr.default_wrap_v = (uint8_t)(opts ? opts->wrap_v : NT_TEXTURE_DEFAULT_WRAP_REPEAT);
     tex_hdr.data_size = enc.size;
 
     uint32_t total_asset_size = (uint32_t)sizeof(NtTextureAssetHeaderV2) + enc.size;

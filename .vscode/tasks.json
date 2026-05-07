@@ -424,6 +424,85 @@
             "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
             "group": "build",
             "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build & run bunnymark packs (debug)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target build_bunnymark_packs && build\\examples\\bunnymark\\native-debug\\build_bunnymark_packs.exe build/examples/bunnymark",
+            "dependsOn": ["Configure native-debug"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build & run bunnymark packs (release)",
+            "dependsOn": [
+                "Configure native-release",
+                "Build & run bunnymark packs (release command)"
+            ],
+            "dependsOrder": "sequence",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & run bunnymark packs (release command)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-release --target build_bunnymark_packs && build\\examples\\bunnymark\\native-release\\build_bunnymark_packs.exe build/examples/bunnymark",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Ensure server bunnymark (debug :8092)",
+            "type": "shell",
+            "command": "python -m http.server 8092 -d \"${workspaceFolder}/build/examples/bunnymark/wasm-debug-paired\"",
+            "isBackground": true,
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
+        },
+        {
+            "label": "Ensure server bunnymark (release :8093)",
+            "type": "shell",
+            "command": "python -m http.server 8093 -d \"${workspaceFolder}/build/examples/bunnymark/wasm-release-paired\"",
+            "isBackground": true,
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
+        },
+        {
+            "label": "Build & Serve bunnymark (debug)",
+            "dependsOn": ["Build wasm-debug-paired", "Ensure server bunnymark (debug :8092)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve bunnymark (release)",
+            "dependsOn": ["Build wasm-release-paired", "Ensure server bunnymark (release :8093)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
         }
     ]
 }

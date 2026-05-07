@@ -564,9 +564,10 @@ The drawable component is SoA. Fields:
 | visible | `bool`        | `true`       | render visibility only               |
 | color   | `vec4`        | `(1,1,1,1)`  | object tint / alpha multiplier       |
 
-Accessors return mutable pointers (`nt_drawable_comp_tag/visible/color`) — fields
-are independent so direct mutation is safe. API lives in
-`engine/drawable_comp/nt_drawable_comp.h`.
+Accessors for `tag` and `visible` return mutable pointers. Color is mutated
+through `nt_drawable_comp_set_color()` / `nt_drawable_comp_set_alpha()` so the
+module can keep its float SoA and packed RGBA8 mirror in sync for renderers.
+API lives in `engine/drawable_comp/nt_drawable_comp.h`.
 
 Per-entity shader params (`params0`) deferred to ShaderParamsComponent — add when per-entity shader effects are needed (#98).
 
@@ -690,11 +691,10 @@ joining sprites with other components. Pointers are stable for the lifetime
 of the module; values shift on add/remove (swap-and-pop) so views must not
 be cached across mutations.
 
-> **Status:** as of Phase 49, only the component data layer (sprite_comp,
-> atlas, resource `publication_epoch`) is implemented. The sprite render-item
-> builder and any associated dedicated renderer are deferred to a later phase.
-> "Render-item build skips unresolved sprites" describes the contract those
-> future systems must honour, not behaviour that exists today.
+> **Status:** sprite_comp, atlas runtime data, explicit resource sync, and the
+> dedicated SpriteRenderer are implemented. Sprite render-item construction is
+> still game-side code: the engine consumes caller-provided render-item arrays
+> and does not introduce a hidden sprite scheduler.
 
 Sprite is a separate render kind, not a special mode of mesh.
 
@@ -792,6 +792,24 @@ renderer_draw_mesh(...);
 renderer_draw_sprite(...);
 ```
 
+## 11.3 Renderer complexity classes
+
+Not all renderers carry the same weight. The engine ships three classes; copying patterns across classes is a common mistake.
+
+**Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`, `nt_mesh_renderer`). Single pipeline, fixed pattern, one draw call per item. Use for 3D meshes, custom geometry, anything where the game owns batching strategy. Stay minimal.
+
+**Batched dynamic** — high-throughput accumulation renderers (`nt_sprite_renderer`; future particles). Cmd queue, state-delta tracking, overflow recovery via snapshot/replay, multi-page atlas resolution, SIMD path. Optimized for many small draws per frame (1k–60k items). Complex by necessity — the 580 LOC of `nt_sprite_renderer.c` are paid for by measured throughput on bunnymark. Don't simplify away the cmd queue or snapshot recovery without a measured replacement plan.
+
+**Specialized** — domain-specific layout (`nt_text_renderer` glyph atlas + line layout; future debug-line/IM-GUI). Sit between the two — more state than primitives, less throughput pressure than batched dynamic.
+
+When adding a new renderer, classify first:
+
+- One pipeline, fixed pattern → **building block** (model after `nt_mesh_renderer`)
+- 1k+ items/frame with dynamic state → **batched dynamic** (study `nt_sprite_renderer`, but only copy what your throughput demands)
+- Domain-specific layout/data → **specialized**
+
+`nt_sprite_renderer.c` is not a renderer template. Its complexity earns its keep at 60k items/frame; a 100-item UI overlay doesn't need any of it.
+
 ---
 
 # 12. Render Items, Sort Keys, Batch Keys
@@ -867,7 +885,13 @@ Depth is computed on CPU only when needed. Transparent/depth-sensitive passes co
 
 ### SpriteRenderer
 
-CPU batch: max 256 sprites per batch, flush when incompatible state or full batch.
+CPU batch: SpriteRenderer consumes consecutive `batch_key` runs, emits dynamic
+sprite vertices into a shared staging VBO, records draw commands on state/page
+changes, and flushes when staging capacity, uint16 index range, or command
+capacity requires it. Rect and polygon sprites share the same generic dynamic
+IBO path — see §14.3. Atlas regions still carry `NT_ATLAS_REGION_FLAG_QUAD_*`
+metadata for a future GPU-instanced rect renderer (Issue #176); the current
+SpriteRenderer ignores those flags.
 
 ### MeshRenderer
 
@@ -881,7 +905,16 @@ WebGL 2 provides native `drawArraysInstanced` / `drawElementsInstanced` — no e
 
 ## 14.3 Sprite batching strategy
 
-Initial sprite renderer: gather sorted sprite render items, pack up to N sprites into one dynamic vertex buffer, flush on state change/full batch. Logic lives inside SpriteRenderer and can later be replaced with instancing without changing external pass architecture.
+Sprite renderer: gather sorted sprite render items, resolve component SoA views
+once, pack sprite vertices into one dynamic vertex buffer per flush chunk, and
+draw recorded commands. The renderer owns atlas page correctness: `batch_key`
+is a compatibility hint from the game, while SpriteRenderer verifies actual
+atlas page textures and splits commands when a run crosses pages.
+
+Rect and polygon sprites use the same generic dynamic IBO path. The renderer
+does not keep a separate static-quad fast path unless measurements show a clear
+win on the target workload; this keeps the sprite batching code small and makes
+draw splitting depend only on capacity and state changes.
 
 ---
 
@@ -1225,12 +1258,12 @@ Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier cu
 
 Builder produces atlas assets from a set of sprite PNGs (or raw RGBA buffers). One atlas yields **two kinds of pack entries**: a single `NT_ASSET_ATLAS` blob with region metadata, plus N `NT_ASSET_TEXTURE` page entries (named `<atlas>/tex0`, `<atlas>/tex1`, …). Runtime keeps a 1:N relationship — one metadata blob references N textures.
 
-Binary layout (`shared/include/nt_atlas_format.h`, packed, **v3**):
+Binary layout (`shared/include/nt_atlas_format.h`, packed, **v5**):
 
 ```
 NtAtlasHeader (28 bytes)
   magic:               u32  (0x534C5441 "ATLS")
-  version:             u16  (3)
+  version:             u16  (5)
   region_count:        u16  (one entry per source sprite)
   page_count:          u16  (number of texture pages)
   _pad:                u16
@@ -1243,35 +1276,49 @@ texture_resource_ids[page_count]: u64
   Each entry is nt_hash64_str("<atlas_name>/tex<N>") matching the
   page texture's resource_id in the same pack.
 
-NtAtlasRegion[region_count] (36 bytes each)
+NtAtlasRegion[region_count] (40 bytes each)
   name_hash:      u64   (xxh64 of region name)
   source_w:       u16   (original image width in pixels, pre-trim)
   source_h:       u16   (original image height in pixels, pre-trim)
   trim_offset_x:  i16   (pixels stripped from the left edge during alpha trim)
-  trim_offset_y:  i16   (pixels stripped from the top edge)
+  trim_offset_y:  i16   (pixels stripped from the BOTTOM edge in y-up source space.
+                         v5 — was top edge in v4. Builder converts at write time:
+                         trim_offset_y = source_h - trim_y_png - trim_h.)
   origin_x:       f32   (pivot X, normalized over source_w — 0.5 = centre, 1.0 = right edge.
                          Values outside [0, 1] are allowed for off-frame pivots. Source-space
                          NOT trim-space — stable across animation frames with varying trim bounds.)
-  origin_y:       f32   (pivot Y, normalized over source_h. Same semantics.)
+  origin_y:       f32   (pivot Y, normalized over source_h, in y-up source space.
+                         v5 — 0.0 = bottom edge, 1.0 = top edge. Builder converts at write
+                         time: origin_y = 1 - origin_y_png.)
   vertex_start:   u32   (index into vertex array — u32 in v3, was u16 in v2)
   index_start:    u32   (index into the index array — u32 in v3, was u16 in v2)
   vertex_count:   u8    (vertices for this region; ≤ max_vertices)
   page_index:     u8    (which texture page)
   transform:      u8    (3-bit D4 mask: bit0=flipH, bit1=flipV, bit2=diagonal)
   index_count:    u8    (triangle indices for this region; ≤ 255)
+  flags:          u8    (builder-authored render hints, e.g. standard quad index pattern)
+  reserved[3]:    u8    (must be zero)
 
 NtAtlasVertex[total_vertex_count] (8 bytes each, at vertex_offset)
   local_x:   i16  (corner X in trim-rect local space, 0..trim_w.
                    Polygon vertices use corner coordinates, not pixel centres.
                    Source-image pos: local_x + trim_offset_x
                    Pivot-relative:   (local_x + trim_offset_x) - origin_x * source_w)
-  local_y:   i16  (corner Y in trim-rect local space, 0..trim_h. Same semantics.)
+  local_y:   i16  (corner Y in trim-rect local space, y-up — 0 = bottom of trim,
+                   trim_h = top. v5 — was y-down in v4. Symmetric to local_x:
+                   pivot_relative_y = (local_y + trim_offset_y) - origin_y * source_h.
+                   Runtime cached_pos applies this directly with no Y-flip.)
   atlas_u:   u16  (normalized 0..65535 over atlas page width)
-  atlas_v:   u16  (normalized 0..65535 over atlas page height)
+  atlas_v:   u16  (normalized 0..65535 over atlas page height. UV.v stays y-down because
+                   atlas page texture pixel data is uploaded top-row-first; UV.v=0 maps to
+                   PNG top, which is what the y-up sprite sees at its high-y vertex.)
 
 uint16[total_index_count] (at index_offset)
   Triangle list, indices local per region (0 .. vertex_count-1).
-  Runtime offsets them by vertex_start when building GPU buffers.
+  Builder pre-swaps each triangle's last two indices at pack time (a,b,c)→(a,c,b)
+  so the in-blob winding is world-CCW after y-up vertices are read directly. This
+  lets sprite materials use cull_mode = BACK without per-game opt-outs.
+  Runtime offsets indices by vertex_start when building GPU buffers.
 ```
 
 Runtime keeps an owned atlas snapshot in slot `user_data`, not a raw mmap view. On first publication the atlas module validates the blob, copies region metadata, vertex data, index data, and page resource ids into owned buffers, then builds an open-addressing hash table for O(1) region lookup. UVs are pre-normalized and triangles are pre-built by the builder (Clipper2 CDT for all polygons, fan triangulation as fallback on CDT failure).
@@ -2342,7 +2389,7 @@ These do not block implementation:
 - exact binary layout of each runtime format header
 - precise bit packing of sort keys
 - future WebGPU backend details
-- ~~exact sprite asset format~~ → resolved: `NT_ASSET_ATLAS` (§17.8) builder-side. Runtime sprite renderer + `SpriteComponent` consumer is still pending — atlas blob is produced and validated end-to-end but not yet consumed by a runtime sprite module.
+- ~~exact sprite asset format~~ → resolved: `NT_ASSET_ATLAS` (§17.8) builder-side, runtime atlas consumer, `SpriteComponent`, and SpriteRenderer.
 - sprite animation system
 - ~~exact text rendering strategy and string pool design~~ → resolved: Slug-based GPU vector rendering (§17.8 NT_ASSET_FONT), font module API (§9.5)
 - camera component/structure definition

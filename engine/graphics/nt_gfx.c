@@ -37,6 +37,10 @@ typedef struct {
     uint8_t mip_count; /* 1 = base only, >1 = has mip chain */
     bool compressed;   /* true for Basis/GPU-compressed textures */
     uint8_t _pad;
+    /* Sampler bound automatically by bind_texture. Always non-zero in
+     * normal runtime (make_texture / activator assert this). Reset to
+     * NT_SAMPLER_INVALID transiently during context-loss recovery. */
+    nt_sampler_t default_sampler;
 } nt_gfx_texture_meta_t;
 
 /* ---- Global state ---- */
@@ -49,6 +53,15 @@ static nt_global_block_t s_global_blocks[NT_GFX_MAX_GLOBAL_BLOCKS];
 static uint32_t s_global_block_count;
 
 /* ---- File-scope internal state ---- */
+
+/* Sampler cache entry — packed key, original desc, and current backend handle.
+ * Lifetime = engine. desc is preserved across context loss so backend can be
+ * lazily recreated without invalidating material-side sampler.id handles. */
+typedef struct {
+    uint32_t key;           /* hash of (min, mag, wrap_u, wrap_v); 0 = empty slot */
+    uint32_t backend;       /* GL sampler object handle; 0 after context loss */
+    nt_sampler_desc_t desc; /* recorded for context-loss recreate */
+} nt_gfx_sampler_entry_t;
 
 static struct {
     nt_pool_t shader_pool;
@@ -63,6 +76,11 @@ static struct {
 
     nt_gfx_buffer_meta_t *buffer_metas;   /* minimal buffer metadata for runtime validation */
     nt_gfx_texture_meta_t *texture_metas; /* format + dimensions for update_texture validation */
+
+    /* Sampler cache (dedup by descriptor; samplers are immutable after create
+     * and shared across materials/textures). nt_sampler_t.id is 1+slot. */
+    nt_gfx_sampler_entry_t sampler_cache[NT_GFX_MAX_SAMPLERS];
+    uint32_t sampler_count;
 
     nt_pool_t mesh_pool;
     nt_gfx_mesh_info_t *mesh_table; /* [capacity+1], index 0 reserved */
@@ -135,9 +153,10 @@ void nt_gfx_init(const nt_gfx_desc_t *desc) {
 }
 
 void nt_gfx_shutdown(void) {
-    nt_gfx_backend_shutdown();
+    /* GL deletes MUST run before backend_shutdown — that destroys the
+     * GL context, after which any glDelete* call hits a dead context. */
 
-    /* Destroy active mesh table entries */
+    /* Destroy active mesh-table buffers */
     for (uint32_t i = 1; i <= s_gfx.mesh_pool.capacity; i++) {
         if (nt_pool_slot_alive(&s_gfx.mesh_pool, i) && s_gfx.mesh_table[i].vbo.id != 0) {
             nt_gfx_backend_destroy_buffer(s_gfx.buffer_backends[nt_pool_slot_index(s_gfx.mesh_table[i].vbo.id)]);
@@ -146,6 +165,15 @@ void nt_gfx_shutdown(void) {
             }
         }
     }
+
+    /* Release cached sampler backends */
+    for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
+        if (s_gfx.sampler_cache[i].backend != 0) {
+            nt_gfx_backend_destroy_sampler(s_gfx.sampler_cache[i].backend);
+        }
+    }
+
+    nt_gfx_backend_shutdown();
 
     nt_pool_shutdown(&s_gfx.shader_pool);
     nt_pool_shutdown(&s_gfx.pipeline_pool);
@@ -173,6 +201,7 @@ const nt_gfx_gpu_caps_t *nt_gfx_gpu_caps(void) { return &g_nt_gfx.gpu_caps; }
 
 /* ---- Frame / Pass ---- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — context-loss recovery branches push it just over 25
 void nt_gfx_begin_frame(void) {
     if (nt_gfx_backend_is_context_lost()) {
         if (!g_nt_gfx.context_lost) {
@@ -193,6 +222,19 @@ void nt_gfx_begin_frame(void) {
              * call deactivate_mesh() which returns slots to mesh pool.
              * destroy_buffer on zeroed backend handles is safe (glDeleteBuffers(0) = no-op). */
             s_gfx.bound_pipeline = 0;
+            /* Sampler cache: zero only the GL backend ids — keys, descs
+             * and sampler_count stay so material-stored sampler.id values
+             * remain valid slot references. Backend is lazy-recreated on
+             * the next nt_gfx_make_sampler hit or on bind_sampler. */
+            for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
+                s_gfx.sampler_cache[i].backend = 0;
+            }
+            for (uint32_t i = 1; i <= s_gfx.texture_pool.capacity; i++) {
+                s_gfx.texture_metas[i].default_sampler = NT_SAMPLER_INVALID;
+            }
+            /* Timer-segment GL queries are dead too — let backend re-allocate
+             * on next begin_segment via the lazy-find-or-alloc path. */
+            nt_gfx_backend_drop_timer_segments();
             g_nt_gfx.context_lost = true;
             NT_LOG_ERROR("WebGL context lost");
         }
@@ -232,6 +274,8 @@ void nt_gfx_end_frame(void) {
     nt_gfx_backend_end_frame();
     g_nt_gfx.context_restored = false;
 }
+
+uint32_t nt_gfx_get_frame_draw_calls(void) { return g_nt_gfx.frame_stats.draw_calls; }
 
 void nt_gfx_begin_pass(const nt_pass_desc_t *desc) {
     if (g_nt_gfx.context_lost) {
@@ -389,7 +433,7 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
     /* Mipmaps require initial data — GL cannot generate from empty storage */
     NT_ASSERT((!local_desc.gen_mipmaps || local_desc.data) && "make_texture: gen_mipmaps requires data");
 
-    /* Integer textures: NEAREST only, no mipmaps (D-02) */
+    /* Integer textures: NEAREST only, no mipmaps */
     if (local_desc.format == NT_PIXEL_RG16UI) {
         NT_ASSERT(local_desc.min_filter == NT_FILTER_NEAREST && "integer texture requires NEAREST min_filter");
         NT_ASSERT(local_desc.mag_filter == NT_FILTER_NEAREST && "integer texture requires NEAREST mag_filter");
@@ -434,6 +478,17 @@ nt_texture_t nt_gfx_make_texture(const nt_texture_desc_t *desc) {
         }
         s_gfx.texture_metas[slot].mip_count = levels;
     }
+
+    nt_sampler_desc_t sd = {
+        .min_filter = local_desc.min_filter,
+        .mag_filter = local_desc.mag_filter,
+        .wrap_u = local_desc.wrap_u,
+        .wrap_v = local_desc.wrap_v,
+        .label = NULL,
+    };
+    nt_sampler_t default_sampler = nt_gfx_make_sampler(&sd);
+    NT_ASSERT(default_sampler.id != 0 && "nt_gfx_make_texture: default sampler creation failed");
+    s_gfx.texture_metas[slot].default_sampler = default_sampler;
     // #endregion
 
     result.id = id;
@@ -556,6 +611,88 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot) {
     }
     uint32_t idx = nt_pool_slot_index(tex.id);
     nt_gfx_backend_bind_texture(s_gfx.texture_backends[idx], slot);
+    nt_gfx_bind_sampler(s_gfx.texture_metas[idx].default_sampler, slot);
+}
+
+nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex) {
+    if (!nt_pool_valid(&s_gfx.texture_pool, tex.id)) {
+        return NT_SAMPLER_INVALID;
+    }
+    return s_gfx.texture_metas[nt_pool_slot_index(tex.id)].default_sampler;
+}
+
+#ifdef NT_GFX_TEST_ACCESS
+uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s) {
+    if (s.id == 0 || s.id > s_gfx.sampler_count) {
+        return 0;
+    }
+    return s_gfx.sampler_cache[s.id - 1].backend;
+}
+#endif
+
+/* ---- Sampler (deduplicated cache) ---- */
+
+static inline uint32_t sampler_pack_key(const nt_sampler_desc_t *desc) {
+    /* Explicit clamp on mag_filter — only NEAREST/LINEAR are legal there.
+     * If asserts get compiled out (NT_ASSERT OFF mode for production), a
+     * bad input would otherwise silently collide with another sampler. */
+    uint32_t mag = (desc->mag_filter == NT_FILTER_LINEAR) ? 1U : 0U;
+    uint32_t mn = ((uint32_t)desc->min_filter) & 0x7U;
+    uint32_t wu = ((uint32_t)desc->wrap_u) & 0x3U;
+    uint32_t wv = ((uint32_t)desc->wrap_v) & 0x3U;
+    return mn | (mag << 3) | (wu << 4) | (wv << 6);
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity) — cache hit / miss / lazy-recreate paths
+nt_sampler_t nt_gfx_make_sampler(const nt_sampler_desc_t *desc) {
+    NT_ASSERT(desc != NULL);
+    NT_ASSERT(desc->mag_filter <= NT_FILTER_LINEAR && "sampler mag_filter must be NEAREST or LINEAR");
+
+    uint32_t key = sampler_pack_key(desc);
+
+    for (uint32_t i = 0; i < s_gfx.sampler_count; i++) {
+        if (s_gfx.sampler_cache[i].key == key) {
+            /* Hit; lazy-recreate backend if context loss zeroed it. */
+            if (s_gfx.sampler_cache[i].backend == 0 && !g_nt_gfx.context_lost) {
+                s_gfx.sampler_cache[i].backend = nt_gfx_backend_create_sampler(&s_gfx.sampler_cache[i].desc);
+            }
+            return (nt_sampler_t){.id = i + 1};
+        }
+    }
+
+    NT_ASSERT(s_gfx.sampler_count < NT_GFX_MAX_SAMPLERS && "sampler cache full; raise NT_GFX_MAX_SAMPLERS");
+    uint32_t backend = nt_gfx_backend_create_sampler(desc);
+    if (backend == 0) {
+        NT_LOG_ERROR("make_sampler: backend failed");
+        return NT_SAMPLER_INVALID;
+    }
+    uint32_t slot = s_gfx.sampler_count++;
+    s_gfx.sampler_cache[slot].key = key;
+    s_gfx.sampler_cache[slot].backend = backend;
+    s_gfx.sampler_cache[slot].desc = *desc;
+    return (nt_sampler_t){.id = slot + 1};
+}
+
+void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    if (slot >= NT_GFX_MAX_TEXTURE_SLOTS) {
+        NT_LOG_ERROR("bind_sampler: slot exceeds max");
+        return;
+    }
+    if (s.id == 0) {
+        /* Unbind: revert texture unit to texture's own filter/wrap. */
+        nt_gfx_backend_bind_sampler(0, slot);
+        return;
+    }
+    NT_ASSERT(s.id <= s_gfx.sampler_count && "bind_sampler: invalid handle");
+    nt_gfx_sampler_entry_t *e = &s_gfx.sampler_cache[s.id - 1];
+    if (e->backend == 0) {
+        /* Lazy recreate after context-loss recovery — desc was preserved. */
+        e->backend = nt_gfx_backend_create_sampler(&e->desc);
+    }
+    nt_gfx_backend_bind_sampler(e->backend, slot);
 }
 
 /* ---- Uniforms ---- */
@@ -760,6 +897,45 @@ void nt_gfx_update_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
     nt_gfx_backend_update_buffer(s_gfx.buffer_backends[slot], data, size);
 }
 
+void nt_gfx_begin_segment(const char *name) {
+    if (g_nt_gfx.context_lost || name == NULL) {
+        return;
+    }
+    nt_gfx_backend_begin_segment(name);
+}
+
+void nt_gfx_end_segment(void) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    nt_gfx_backend_end_segment();
+}
+
+bool nt_gfx_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
+    if (g_nt_gfx.context_lost || name == NULL || out_ns == NULL) {
+        return false;
+    }
+    return nt_gfx_backend_poll_segment_time_ns(name, out_ns);
+}
+
+void nt_gfx_set_gpu_timing_enabled(bool enabled) { nt_gfx_backend_set_gpu_timing_enabled(enabled); }
+
+bool nt_gfx_is_gpu_timing_supported(void) { return nt_gfx_backend_is_gpu_timing_supported(); }
+
+void nt_gfx_orphan_buffer(nt_buffer_t buf, const void *data, uint32_t size) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    if (!nt_pool_valid(&s_gfx.buffer_pool, buf.id)) {
+        NT_LOG_ERROR("orphan_buffer: invalid handle");
+        return;
+    }
+    uint32_t slot = nt_pool_slot_index(buf.id);
+    NT_ASSERT(s_gfx.buffer_metas[slot].usage == NT_USAGE_DYNAMIC && "orphan_buffer: requires NT_USAGE_DYNAMIC");
+    NT_ASSERT(size <= s_gfx.buffer_metas[slot].size && "orphan_buffer: size exceeds buffer capacity");
+    nt_gfx_backend_orphan_buffer(s_gfx.buffer_backends[slot], data, size);
+}
+
 /* ---- Texture update ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -786,6 +962,23 @@ void nt_gfx_update_texture(nt_texture_t tex, uint16_t x, uint16_t y, uint16_t w,
 /* mesh_table_alloc and mesh_handle_make replaced by nt_pool_alloc(&s_gfx.mesh_pool) */
 
 /* ---- Asset activators ---- */
+
+/* BASIS-only: RAW path bakes filter into desc and uses make_texture instead. */
+#ifdef NT_HAS_BASISU
+static void texture_attach_default_sampler(uint32_t tex_id, const NtTextureAssetHeaderV2 *hdr) {
+    nt_sampler_desc_t sd = {
+        .min_filter = (nt_texture_filter_t)hdr->default_min_filter,
+        .mag_filter = (nt_texture_filter_t)hdr->default_mag_filter,
+        .wrap_u = (nt_texture_wrap_t)hdr->default_wrap_u,
+        .wrap_v = (nt_texture_wrap_t)hdr->default_wrap_v,
+        .label = NULL,
+    };
+    nt_sampler_t s = nt_gfx_make_sampler(&sd);
+    NT_ASSERT(s.id != 0 && "texture_attach_default_sampler: sampler creation failed");
+    uint32_t slot = nt_pool_slot_index(tex_id);
+    s_gfx.texture_metas[slot].default_sampler = s;
+}
+#endif
 
 /* Activate a v2 texture (RAW or Basis Universal compressed) */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -842,15 +1035,14 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
             .height = (uint16_t)hdr2->height,
             .data = pixels,
             .format = pixel_fmt,
-            .min_filter = NT_FILTER_LINEAR_MIPMAP_LINEAR,
-            .mag_filter = NT_FILTER_LINEAR,
-            .wrap_u = NT_WRAP_REPEAT,
-            .wrap_v = NT_WRAP_REPEAT,
-            .gen_mipmaps = (hdr2->mip_count == 1),
+            .min_filter = (nt_texture_filter_t)hdr2->default_min_filter,
+            .mag_filter = (nt_texture_filter_t)hdr2->default_mag_filter,
+            .wrap_u = (nt_texture_wrap_t)hdr2->default_wrap_u,
+            .wrap_v = (nt_texture_wrap_t)hdr2->default_wrap_v,
+            .gen_mipmaps = (hdr2->flags & NT_TEXTURE_FLAG_GEN_MIPMAPS) != 0,
             .label = NULL,
         };
-        nt_texture_t tex = nt_gfx_make_texture(&desc);
-        return tex.id;
+        return nt_gfx_make_texture(&desc).id;
     }
 
     /* BASIS compression: transcode to best available GPU format */
@@ -877,7 +1069,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
         return 0;
     }
 
-    /* Select transcode target: BC7 > ASTC > ETC2 > RGBA8 (D-14 cascade) */
+    /* Select transcode target: BC7 > ASTC > ETC2 > RGBA8 */
     bool has_alpha = (hdr2->format == NT_TEXTURE_FORMAT_RGBA8);
     const nt_gfx_gpu_caps_t *caps = nt_gfx_gpu_caps();
     nt_basisu_format_t target;
@@ -904,9 +1096,16 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
         return 0;
     }
 
-    /* Call backend for per-mip transcode + compressed upload */
-    uint32_t backend = nt_gfx_backend_create_texture_compressed(basis_data, basis_size, hdr2->width, hdr2->height, levels, NT_FILTER_LINEAR_MIPMAP_LINEAR, NT_FILTER_LINEAR, NT_WRAP_REPEAT,
-                                                                NT_WRAP_REPEAT, (uint32_t)target);
+    /* Call backend for per-mip transcode + compressed upload. Pass V3 header
+     * sampler defaults through to texture-object state (glTexParameteri) — the
+     * RAW path already does this; BASIS was hardcoded LINEAR_MIPMAP_LINEAR/REPEAT
+     * pre-V3 and got missed in the header bump. The bound sampler-object
+     * normally overrides texture-object state, but if a caller ever issues
+     * glBindSampler(0, slot) the unit falls back to this state — so it must
+     * match the asset's intended defaults. */
+    uint32_t backend =
+        nt_gfx_backend_create_texture_compressed(basis_data, basis_size, hdr2->width, hdr2->height, levels, (nt_texture_filter_t)hdr2->default_min_filter,
+                                                 (nt_texture_filter_t)hdr2->default_mag_filter, (nt_texture_wrap_t)hdr2->default_wrap_u, (nt_texture_wrap_t)hdr2->default_wrap_v, (uint32_t)target);
     if (backend == 0) {
         NT_LOG_ERROR("activate_texture: transcode failed");
         nt_pool_free(&s_gfx.texture_pool, id);
@@ -919,6 +1118,7 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
     s_gfx.texture_metas[slot].height = (uint16_t)hdr2->height;
     s_gfx.texture_metas[slot].mip_count = (uint8_t)(levels > 255 ? 255 : levels);
     s_gfx.texture_metas[slot].compressed = true;
+    texture_attach_default_sampler(id, hdr2);
     return id;
 #endif /* NT_HAS_BASISU */
 }

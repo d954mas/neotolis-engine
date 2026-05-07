@@ -201,7 +201,7 @@ void test_mesh_header_field_offsets(void) {
 
 /* --- Texture header tests --- */
 
-void test_texture_header_size(void) { TEST_ASSERT_EQUAL_UINT(24, sizeof(NtTextureAssetHeaderV2)); }
+void test_texture_header_size(void) { TEST_ASSERT_EQUAL_UINT(28, sizeof(NtTextureAssetHeaderV2)); }
 
 void test_texture_magic_value(void) {
     TEST_ASSERT_EQUAL_HEX32(0x58455454, NT_TEXTURE_MAGIC);
@@ -224,7 +224,12 @@ void test_texture_header_field_offsets(void) {
     TEST_ASSERT_EQUAL_UINT(16, offsetof(NtTextureAssetHeaderV2, mip_count));
     TEST_ASSERT_EQUAL_UINT(18, offsetof(NtTextureAssetHeaderV2, compression));
     TEST_ASSERT_EQUAL_UINT(19, offsetof(NtTextureAssetHeaderV2, flags));
-    TEST_ASSERT_EQUAL_UINT(20, offsetof(NtTextureAssetHeaderV2, data_size));
+    /* V3: filter/wrap defaults inserted between flags and data_size */
+    TEST_ASSERT_EQUAL_UINT(20, offsetof(NtTextureAssetHeaderV2, default_min_filter));
+    TEST_ASSERT_EQUAL_UINT(21, offsetof(NtTextureAssetHeaderV2, default_mag_filter));
+    TEST_ASSERT_EQUAL_UINT(22, offsetof(NtTextureAssetHeaderV2, default_wrap_u));
+    TEST_ASSERT_EQUAL_UINT(23, offsetof(NtTextureAssetHeaderV2, default_wrap_v));
+    TEST_ASSERT_EQUAL_UINT(24, offsetof(NtTextureAssetHeaderV2, data_size));
 }
 
 void test_texture_format_enum(void) { TEST_ASSERT_EQUAL_UINT(1, NT_TEXTURE_FORMAT_RGBA8); }
@@ -357,7 +362,7 @@ void test_font_curve_size(void) { TEST_PASS(); }
 void test_font_curve_field_offsets(void) { TEST_PASS(); }
 
 void test_font_glyph_array_offset(void) {
-    /* Glyph entries start immediately after header (D-11) */
+    /* Glyph entries start immediately after header */
     TEST_ASSERT_EQUAL_UINT(16, sizeof(NtFontAssetHeader));
     /* 16 is 4-byte aligned, safe for NtFontGlyphEntry array access */
     TEST_ASSERT_EQUAL_UINT(0, sizeof(NtFontAssetHeader) % 4);
@@ -366,7 +371,7 @@ void test_font_glyph_array_offset(void) {
 int main(void) {
     UNITY_BEGIN();
 
-    /* Pack format tests (Plan 01) */
+    /* Pack format tests */
     RUN_TEST(test_pack_header_size);
     RUN_TEST(test_asset_entry_size);
     RUN_TEST(test_pack_magic_value);
@@ -394,7 +399,7 @@ int main(void) {
     RUN_TEST(test_mesh_magic_value);
     RUN_TEST(test_mesh_header_field_offsets);
 
-    /* Texture header tests (Plan 02) */
+    /* Texture header tests */
     RUN_TEST(test_texture_header_size);
     RUN_TEST(test_texture_magic_value);
     RUN_TEST(test_texture_header_field_offsets);

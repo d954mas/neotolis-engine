@@ -46,4 +46,12 @@ uint16_t nt_comp_storage_index(const nt_comp_storage_t *s, nt_entity_t entity);
  * beyond count are stale leftovers from past swap-and-pops. */
 const uint16_t *nt_comp_storage_entities(const nt_comp_storage_t *s);
 
+/* Sparse table: entity_index -> dense_idx. Bulk-view consumers (e.g. the sprite
+ * renderer hot loop) read directly from this to skip the per-entity accessor
+ * function-call + liveness assert and do an inline sparse->dense lookup.
+ * Returned pointer is valid until the storage is mutated (add/remove) or
+ * shut down. NT_INVALID_COMP_INDEX (0xFFFF) marks "no component for this
+ * entity_index". Length is max_entities+1. */
+const uint16_t *nt_comp_storage_sparse(const nt_comp_storage_t *s);
+
 #endif /* NT_COMP_STORAGE_H */

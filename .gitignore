@@ -53,6 +53,12 @@ _diff.txt
 diff_*.txt
 *.patch
 
+# Agent-generated artifacts that occasionally end up in the working tree
+*.diff
+build_error.txt
+build_*.log
+compile_*.log
+
 # Accidental outputs when running CLIs with --help or similar as the positional arg
 --help/
 
@@ -60,6 +66,7 @@ diff_*.txt
 .claude/settings.local.json
 .claude/settings.json
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 
 # GSD tooling (Claude Code workflow engine)
 .claude/get-shit-done/

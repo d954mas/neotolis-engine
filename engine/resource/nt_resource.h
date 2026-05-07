@@ -146,9 +146,9 @@ const uint8_t *nt_resource_get_blob(nt_resource_t handle, uint32_t *out_size);
 
 /* Get metadata for a resource by kind hash. Returns pointer to metadata bytes
  * in resident pack memory, NULL if absent. Pointer valid until pack unmount.
- * kind = nt_hash64_str("tag").value for example.
+ * kind = nt_hash64_str("tag") for example.
  * Returns NULL + size 0 for absent metadata. */
-const void *nt_resource_get_meta(nt_resource_t handle, uint64_t kind, uint32_t *out_size);
+const void *nt_resource_get_meta(nt_resource_t handle, nt_hash64_t kind, uint32_t *out_size);
 
 /* ---- Virtual packs ---- */
 

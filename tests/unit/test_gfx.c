@@ -823,6 +823,58 @@ void test_gfx_update_texture_invalid_handle(void) {
     nt_gfx_update_texture(tex, 0, 0, 1, 1, data); /* should log error, not crash */
 }
 
+/* ---- D-39: per-frame draw call counter ---- */
+
+void test_gfx_frame_draw_calls(void) {
+    /* D-39: separate draw-call counter for nt_stats consumption (Pitfall 4).
+     * Verifies counter starts at 0, increments by 1 per draw API, resets on begin_frame. */
+
+    /* Minimal pipeline so draws have something bound (stub backend accepts any handle). */
+    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "v"});
+    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "f"});
+    nt_pipeline_t pip = nt_gfx_make_pipeline(&(nt_pipeline_desc_t){
+        .vertex_shader = vs,
+        .fragment_shader = fs,
+        .layout = {.attr_count = 1, .stride = 12, .attrs = {{.location = 0, .format = NT_FORMAT_FLOAT3}}},
+    });
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, pip.id);
+
+    /* Counter starts at 0 (setUp called nt_gfx_init which zero-inits g_nt_gfx;
+     * the static counter sits in BSS and is also 0 on the first test call). */
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+
+    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
+    nt_gfx_bind_pipeline(pip);
+
+    /* Fire each of the 4 entry points exactly once. */
+    nt_gfx_draw(0, 0);
+    TEST_ASSERT_EQUAL_UINT32(1, nt_gfx_get_frame_draw_calls());
+    nt_gfx_draw_indexed(0, 0, 0);
+    TEST_ASSERT_EQUAL_UINT32(2, nt_gfx_get_frame_draw_calls());
+    nt_gfx_draw_instanced(0, 0, 0);
+    TEST_ASSERT_EQUAL_UINT32(3, nt_gfx_get_frame_draw_calls());
+    nt_gfx_draw_indexed_instanced(0, 0, 0, 0);
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_get_frame_draw_calls());
+
+    nt_gfx_end_pass();
+    nt_gfx_end_frame();
+
+    /* Counter persists across end_frame (frame_stats does too; reset is begin_frame's job). */
+    TEST_ASSERT_EQUAL_UINT32(4, nt_gfx_get_frame_draw_calls());
+
+    /* Next begin_frame must reset to 0. */
+    nt_gfx_begin_frame();
+    TEST_ASSERT_EQUAL_UINT32(0, nt_gfx_get_frame_draw_calls());
+    nt_gfx_end_frame();
+
+    nt_gfx_destroy_pipeline(pip);
+    nt_gfx_destroy_shader(vs);
+    nt_gfx_destroy_shader(fs);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_gfx_pool_alloc_returns_nonzero);
@@ -888,5 +940,7 @@ int main(void) {
     RUN_TEST(test_gfx_update_texture_valid);
     RUN_TEST(test_gfx_update_texture_full);
     RUN_TEST(test_gfx_update_texture_invalid_handle);
+    /* D-39: draw call counter */
+    RUN_TEST(test_gfx_frame_draw_calls);
     return UNITY_END();
 }

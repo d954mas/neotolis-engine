@@ -42,4 +42,14 @@ const float *nt_transform_comp_world_matrix(nt_entity_t entity); /* mat4, read-o
 
 void nt_transform_comp_update(void);
 
+/* Bulk SoA view — pointers stable for module lifetime, values shift on add/remove. */
+
+typedef struct {
+    uint16_t count;
+    const uint16_t *sparse_indices;    /* entity_index -> dense_idx; NT_INVALID_COMP_INDEX if absent */
+    const float (*world_matrices)[16]; /* dense_idx -> mat4 (16 floats) */
+} nt_transform_comp_view_t;
+
+nt_transform_comp_view_t nt_transform_comp_view(void);
+
 #endif /* NT_TRANSFORM_COMP_H */

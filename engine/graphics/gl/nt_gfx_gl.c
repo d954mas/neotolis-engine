@@ -33,6 +33,39 @@
 #define nt_gl_clear_depth(d) glClearDepth((double)(d))
 #endif
 
+/* EXT_disjoint_timer_query_webgl2 / ARB_timer_query constants. Spec-fixed
+ * values — define them inline so the file compiles on both GLES3 (where
+ * these are extension-only) and core GL 3.3+ (where glad already exposes
+ * them under the same names). The native build's glad pulls in the core
+ * symbols, so the #ifndef guard is a no-op there. */
+#ifndef GL_TIME_ELAPSED
+#define GL_TIME_ELAPSED 0x88BF
+#endif
+#ifndef GL_QUERY_RESULT
+#define GL_QUERY_RESULT 0x8866
+#endif
+#ifndef GL_QUERY_RESULT_AVAILABLE
+#define GL_QUERY_RESULT_AVAILABLE 0x8867
+#endif
+#ifndef GL_GPU_DISJOINT_EXT
+#define GL_GPU_DISJOINT_EXT 0x8FBB
+#endif
+
+/* KHR_debug constant — needed for glPushDebugGroup. Only used on native
+ * (s_debug_groups_enabled is always false on WebGL2 since KHR_debug isn't
+ * in the WebGL spec), but the symbol must compile. */
+#ifndef GL_DEBUG_SOURCE_APPLICATION
+#define GL_DEBUG_SOURCE_APPLICATION 0x824A
+#endif
+
+#ifdef NT_PLATFORM_WEB
+/* EXT_disjoint_timer_query_webgl2 — only the 64-bit getter needs the EXT suffix. */
+extern void glGetQueryObjectui64vEXT(GLuint id, GLenum pname, GLuint64 *params);
+#define nt_gl_get_query_u64(id, pname, out) glGetQueryObjectui64vEXT((id), (pname), (out))
+#else
+#define nt_gl_get_query_u64(id, pname, out) glGetQueryObjectui64v((id), (pname), (out))
+#endif
+
 /* ---- Pipeline backend data ---- */
 
 /* Per-pipeline uniform location cache (populated at link time) */
@@ -76,6 +109,41 @@ static GLuint *s_texture_gl;              /* GL texture names, indexed by slot *
 static GLuint s_instance_gl_buf;          /* GL name of last bound instance buffer */
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
+
+// #region GPU timer segments — types & state
+/* GPU TIME_ELAPSED named segments (EXT_disjoint_timer_query_webgl2 / ARB_timer_query).
+ *
+ * Self-contained sub-system inside this GL backend. Lives in three clusters:
+ *   1. types & state (this region)
+ *   2. impl: helpers + begin/end (region "GPU timer segments — begin/end")
+ *   3. impl: poll/drop/enable (region "GPU timer segments — poll/lifecycle")
+ * Plus a one-line disjoint check inside nt_gfx_backend_begin_frame (cross-cut
+ * with frame lifecycle, intentional — disjoint clears on read so it must
+ * happen exactly once per frame).
+ *
+ * Ring depth 8 covers WebGL2 driver query latency (typically 1-4 frames, but
+ * spikes happen on tab refocus / GPU power state transitions). 4 was
+ * insufficient — observed ring-full in bunnymark on Chrome. */
+#define NT_GFX_TIMER_RING 8
+#define NT_GFX_TIMER_MAX_SEGMENTS 16
+
+typedef struct {
+    nt_hash32_t name_hash;
+    GLuint queries[NT_GFX_TIMER_RING];
+    bool in_flight[NT_GFX_TIMER_RING];
+    uint8_t head;
+    uint8_t tail;
+    uint64_t last_result_ns; /* most recent successful poll value */
+} nt_gfx_segment_state_t;
+
+static bool s_timer_enabled;             /* extension/core entry points present */
+static bool s_timer_user_enabled = true; /* runtime toggle from nt_gfx_set_gpu_timing_enabled */
+static bool s_debug_groups_enabled;      /* KHR_debug present — push/pop debug groups around segments */
+static nt_gfx_segment_state_t s_segments[NT_GFX_TIMER_MAX_SEGMENTS];
+static uint8_t s_segment_count;
+static int8_t s_active_segment = -1; /* index in s_segments while a query is open, -1 otherwise */
+static bool s_timer_warned;          /* one-shot ring-full warning; reset on re-enable */
+// #endregion
 
 /* ---- Transcode buffer (reused across textures, freed after idle) ---- */
 
@@ -232,6 +300,11 @@ static void get_format_params(nt_vertex_format_t fmt, GLint *size, GLenum *type,
         *type = GL_SHORT;
         *normalized = GL_TRUE;
         break;
+    case NT_FORMAT_USHORT2N:
+        *size = 2;
+        *type = GL_UNSIGNED_SHORT;
+        *normalized = GL_TRUE;
+        break;
     case NT_FORMAT_SHORT4:
         *size = 4;
         *type = GL_SHORT;
@@ -329,10 +402,27 @@ bool nt_gfx_backend_init(const nt_gfx_desc_t *desc) {
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
     nt_gfx_gl_cache_reset();
+
+    /* Probe timer-query support. Segments allocate query objects lazily
+     * on first begin_segment for that name. Disable on probe failure. */
+    s_timer_enabled = nt_gfx_gl_ctx_enable_timer_query();
+    /* Probe KHR_debug for segment labeling. If absent, push/pop become
+     * no-ops; segment timing still works. */
+    s_debug_groups_enabled = nt_gfx_gl_ctx_enable_debug_groups();
+    s_segment_count = 0;
+    s_active_segment = -1;
     return true;
 }
 
 void nt_gfx_backend_shutdown(void) {
+    if (s_timer_enabled) {
+        for (uint8_t i = 0; i < s_segment_count; i++) {
+            glDeleteQueries(NT_GFX_TIMER_RING, s_segments[i].queries);
+        }
+        s_segment_count = 0;
+        s_timer_enabled = false;
+    }
+
     free(s_pipelines);
     free(s_buffer_gl);
     free(s_buffer_targets);
@@ -356,20 +446,130 @@ bool nt_gfx_backend_is_context_lost(void) { return nt_gfx_gl_ctx_is_lost(); }
 
 /* ---- Frame / Pass ---- */
 
+// #region GPU timer segments — begin/end
+/* Find existing segment by name hash, or allocate a new slot with its own
+ * ring of GL_TIME_ELAPSED queries. Linear scan is fine for small N (<= 16). */
+static int8_t segment_find_or_alloc(nt_hash32_t name_hash) {
+    for (uint8_t i = 0; i < s_segment_count; i++) {
+        if (s_segments[i].name_hash.value == name_hash.value) {
+            return (int8_t)i;
+        }
+    }
+    NT_ASSERT(s_segment_count < NT_GFX_TIMER_MAX_SEGMENTS && "raise NT_GFX_TIMER_MAX_SEGMENTS");
+    nt_gfx_segment_state_t *seg = &s_segments[s_segment_count];
+    seg->name_hash = name_hash;
+    glGenQueries(NT_GFX_TIMER_RING, seg->queries);
+    memset(seg->in_flight, 0, sizeof(seg->in_flight));
+    seg->head = 0;
+    seg->tail = 0;
+    seg->last_result_ns = 0;
+    return (int8_t)(s_segment_count++);
+}
+
+static int8_t segment_find(nt_hash32_t name_hash) {
+    for (uint8_t i = 0; i < s_segment_count; i++) {
+        if (s_segments[i].name_hash.value == name_hash.value) {
+            return (int8_t)i;
+        }
+    }
+    return -1;
+}
+
+void nt_gfx_backend_begin_segment(const char *name) {
+    if (!s_timer_enabled || !s_timer_user_enabled || name == NULL) {
+        return;
+    }
+    nt_hash32_t name_hash = nt_hash32_str(name);
+    NT_ASSERT(s_active_segment < 0 && "GL_TIME_ELAPSED cannot nest — close current segment first");
+    int8_t idx = segment_find_or_alloc(name_hash);
+    nt_gfx_segment_state_t *seg = &s_segments[idx];
+    if (seg->in_flight[seg->head]) {
+        /* Ring full — try to drain oldest first; it's likely ready by now. Only reset
+         * (data loss) if even the oldest isn't available, which means GPU pipeline is
+         * genuinely stuck (driver issue or background-tab freeze). */
+        GLuint q_old = seg->queries[seg->tail];
+        GLuint avail = 0;
+        glGetQueryObjectuiv(q_old, GL_QUERY_RESULT_AVAILABLE, &avail);
+        if (avail) {
+            GLuint64 result = 0;
+            nt_gl_get_query_u64(q_old, GL_QUERY_RESULT, &result);
+            seg->last_result_ns = (uint64_t)result;
+            seg->in_flight[seg->tail] = false;
+            seg->tail = (uint8_t)((seg->tail + 1U) % NT_GFX_TIMER_RING);
+        } else {
+            if (!s_timer_warned) {
+                NT_LOG_WARN("gpu_timing: segment ring full and oldest query not ready — dropping pipeline");
+                s_timer_warned = true;
+            }
+            memset(seg->in_flight, 0, sizeof(seg->in_flight));
+            seg->head = 0;
+            seg->tail = 0;
+        }
+    }
+    /* Push debug group BEFORE glBeginQuery so RenderDoc / Apitrace shows the
+     * named group around both the query and the wrapped draw calls.
+     * Compiled out on WebGL — KHR_debug isn't in the WebGL2 spec, the
+     * runtime probe always returns false there, and the symbols don't
+     * exist in <GLES3/gl3.h>. */
+#ifndef NT_PLATFORM_WEB
+    if (s_debug_groups_enabled) {
+        glPushDebugGroup(GL_DEBUG_SOURCE_APPLICATION, name_hash.value, -1, name);
+    }
+#endif
+    glBeginQuery(GL_TIME_ELAPSED, seg->queries[seg->head]);
+    s_active_segment = idx;
+}
+
+void nt_gfx_backend_end_segment(void) {
+    if (s_active_segment < 0) {
+        return;
+    }
+    nt_gfx_segment_state_t *seg = &s_segments[s_active_segment];
+    glEndQuery(GL_TIME_ELAPSED);
+#ifndef NT_PLATFORM_WEB
+    if (s_debug_groups_enabled) {
+        glPopDebugGroup();
+    }
+#endif
+    seg->in_flight[seg->head] = true;
+    seg->head = (uint8_t)((seg->head + 1U) % NT_GFX_TIMER_RING);
+    s_active_segment = -1;
+}
+// #endregion
+
 void nt_gfx_backend_begin_frame(void) {
     /* Reset GL state cache so all pipeline binds re-issue GL calls.
      * Required because window resize (Windows modal loop) or driver
      * may change GL state without going through nt_gfx API, leaving
-     * the cache stale. Without this, a pipeline bound on the previous
-     * frame (e.g. text with depth_write=false) poisons state for this
-     * frame's pipelines that skip re-binding due to cache hits. */
+     * the cache stale. */
     nt_gfx_gl_cache_reset();
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
+
+    /* GL_GPU_DISJOINT_EXT exists only in EXT_disjoint_timer_query_webgl2 (and
+     * GLES variants). Native ARB_timer_query has no disjoint concept — GPU
+     * clock is reliable by spec there. Reading 0x8FBB on the desktop driver
+     * triggers GL_INVALID_ENUM and pollutes glGetError() / KHR_debug callback
+     * output every frame. Web-only.
+     *
+     * Cleared on read, so we check once per frame here rather than on every
+     * poll: on disjoint hit, drop all in-flight timer queries across every
+     * segment (results are unreliable). */
+#ifdef NT_PLATFORM_WEB
+    if (s_timer_enabled) {
+        GLint disjoint = 0;
+        glGetIntegerv(GL_GPU_DISJOINT_EXT, &disjoint);
+        if (disjoint) {
+            for (uint8_t i = 0; i < s_segment_count; i++) {
+                memset(s_segments[i].in_flight, 0, sizeof(s_segments[i].in_flight));
+                s_segments[i].tail = s_segments[i].head;
+            }
+        }
+    }
+#endif
 }
 
 void nt_gfx_backend_end_frame(void) {
-    /* Free transcode buffer after idle period */
     if (s_transcode_buf != NULL) {
         s_transcode_buf_idle++;
         if (s_transcode_buf_idle > NT_TRANSCODE_BUF_IDLE_FRAMES) {
@@ -379,6 +579,73 @@ void nt_gfx_backend_end_frame(void) {
         }
     }
 }
+
+// #region GPU timer segments — poll/lifecycle
+bool nt_gfx_backend_poll_segment_time_ns(const char *name, uint64_t *out_ns) {
+    if (!s_timer_enabled || name == NULL || out_ns == NULL) {
+        return false;
+    }
+    nt_hash32_t name_hash = nt_hash32_str(name);
+
+    /* Disjoint check moved to nt_gfx_backend_begin_frame — runs once per frame
+     * instead of once per poll, avoiding GLE roundtrip in the drain loop. */
+
+    int8_t idx = segment_find(name_hash);
+    if (idx < 0) {
+        return false;
+    }
+    nt_gfx_segment_state_t *seg = &s_segments[idx];
+    if (!seg->in_flight[seg->tail]) {
+        return false;
+    }
+
+    GLuint q = seg->queries[seg->tail];
+    GLuint available = 0;
+    glGetQueryObjectuiv(q, GL_QUERY_RESULT_AVAILABLE, &available);
+    if (!available) {
+        return false;
+    }
+
+    GLuint64 result = 0;
+    nt_gl_get_query_u64(q, GL_QUERY_RESULT, &result);
+    *out_ns = (uint64_t)result;
+    seg->last_result_ns = (uint64_t)result;
+    seg->in_flight[seg->tail] = false;
+    seg->tail = (uint8_t)((seg->tail + 1U) % NT_GFX_TIMER_RING);
+    /* Re-arm ring-full warning: a successful drain means the system recovered.
+     * If it breaks again later, we want to see the warn again. */
+    s_timer_warned = false;
+    return true;
+}
+
+void nt_gfx_backend_drop_timer_segments(void) {
+    /* Context is gone — forget queries without glDeleteQueries (would error). */
+    s_segment_count = 0;
+    s_active_segment = -1;
+    s_timer_warned = false;
+}
+
+void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
+    if (!enabled && s_timer_enabled) {
+        /* Close any in-flight query, drain all segment rings so re-enable starts clean. */
+        if (s_active_segment >= 0) {
+            glEndQuery(GL_TIME_ELAPSED);
+            s_active_segment = -1;
+        }
+        for (uint8_t i = 0; i < s_segment_count; i++) {
+            memset(s_segments[i].in_flight, 0, sizeof(s_segments[i].in_flight));
+            s_segments[i].head = 0;
+            s_segments[i].tail = 0;
+        }
+    }
+    if (enabled && !s_timer_user_enabled) {
+        s_timer_warned = false;
+    }
+    s_timer_user_enabled = enabled;
+}
+
+bool nt_gfx_backend_is_gpu_timing_supported(void) { return s_timer_enabled; }
+// #endregion
 
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) {
     glViewport(0, 0, (GLsizei)g_nt_window.fb_width, (GLsizei)g_nt_window.fb_height);
@@ -766,6 +1033,21 @@ void nt_gfx_backend_update_buffer(uint32_t backend_handle, const void *data, uin
     glBufferSubData(target, 0, (GLsizeiptr)size, data);
 }
 
+void nt_gfx_backend_orphan_buffer(uint32_t backend_handle, const void *data, uint32_t size) {
+    if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
+        return;
+    }
+    GLuint buf = s_buffer_gl[backend_handle];
+    GLenum target = s_buffer_targets[backend_handle];
+    glBindBuffer(target, buf);
+    /* glBufferData with non-NULL data both orphans the existing storage and
+     * uploads in one call. The driver may allocate fresh memory for the new
+     * contents and reclaim the old block once the GPU finishes consuming it,
+     * avoiding the pipeline stall that glBufferSubData can introduce when
+     * rewriting a buffer that's still in flight. */
+    glBufferData(target, (GLsizeiptr)size, data, GL_DYNAMIC_DRAW);
+}
+
 void nt_gfx_backend_bind_vertex_buffer(uint32_t backend_handle) {
     if (backend_handle == 0 || backend_handle > s_init_desc.max_buffers) {
         return;
@@ -1130,6 +1412,36 @@ void nt_gfx_backend_bind_texture(uint32_t backend_handle, uint32_t slot) {
     }
     glBindTexture(GL_TEXTURE_2D, tex);
     s_gl_cache.bound_textures[slot] = tex;
+}
+
+/* Sampler objects (WebGL2 / GL 3.3+). The backend "handle" is the raw
+ * GLuint sampler id — nt_gfx caches them on its side, so the backend
+ * does not maintain its own array. */
+
+uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
+    GLuint s = 0;
+    glGenSamplers(1, &s);
+    if (s == 0) {
+        return 0;
+    }
+    glSamplerParameteri(s, GL_TEXTURE_MIN_FILTER, (GLint)map_texture_filter(desc->min_filter));
+    glSamplerParameteri(s, GL_TEXTURE_MAG_FILTER, (GLint)map_texture_filter(desc->mag_filter));
+    glSamplerParameteri(s, GL_TEXTURE_WRAP_S, (GLint)map_texture_wrap(desc->wrap_u));
+    glSamplerParameteri(s, GL_TEXTURE_WRAP_T, (GLint)map_texture_wrap(desc->wrap_v));
+    return (uint32_t)s;
+}
+
+void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) {
+    if (backend_handle == 0) {
+        return;
+    }
+    GLuint s = (GLuint)backend_handle;
+    glDeleteSamplers(1, &s);
+}
+
+void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
+    /* backend_handle == 0 unbinds (revert to texture's own filter state) */
+    glBindSampler(slot, (GLuint)backend_handle);
 }
 
 void nt_gfx_backend_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_t instance_count) {

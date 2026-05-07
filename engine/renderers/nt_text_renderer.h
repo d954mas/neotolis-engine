@@ -43,6 +43,13 @@ uint32_t nt_text_renderer_test_vertex_count(void);
 uint32_t nt_text_renderer_test_glyph_count(void);
 const void *nt_text_renderer_test_vertices(void);
 bool nt_text_renderer_test_initialized(void);
+/* Counts every entry into set_material / set_font (NOT only state changes).
+ * Used by nt_stats Pitfall 9 (Issue 2) test to verify nt_stats_draw always
+ * calls both setters explicitly even when the state matches the previous
+ * frame, defeating the early-out. */
+uint32_t nt_text_renderer_test_set_material_calls(void);
+uint32_t nt_text_renderer_test_set_font_calls(void);
+void nt_text_renderer_test_reset_call_counters(void);
 #endif
 
 #endif /* NT_TEXT_RENDERER_H */
