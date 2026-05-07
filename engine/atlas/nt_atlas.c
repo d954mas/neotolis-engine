@@ -572,6 +572,7 @@ static void atlas_on_cleanup(void *user_data) {
     free(ad);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void atlas_on_post_resolve(const uint8_t *data, uint32_t size, nt_resource_t atlas, uint32_t runtime_handle, void *user_data) {
     (void)runtime_handle;
 
