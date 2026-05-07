@@ -329,8 +329,9 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     uint8_t flags = sv->flags[s_idx];
     if (flags & NT_SPRITE_FLAG_ORIGIN_OV) {
         const float *o = sv->origin[s_idx];
-        /* get_pixels_per_unit asserts ppu > 0, so direct invert is safe. */
-        float ipu = 1.0F / nt_atlas_get_pixels_per_unit(atlas);
+        /* Atlas stores ipu directly; previous 1/get_pixels_per_unit() did 1/(1/ipu)
+         * for the same number. Asserts ipu > 0, so this is safe. */
+        float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
         float dx = (o[0] - r->origin_x) * (float)r->source_w * ipu;
         float dy = (o[1] - r->origin_y) * (float)r->source_h * ipu;
         tx -= (m[0] * dx) + (m[4] * dy);

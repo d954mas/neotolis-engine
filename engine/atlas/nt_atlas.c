@@ -687,6 +687,13 @@ float nt_atlas_get_pixels_per_unit(nt_resource_t atlas) {
     return 1.0F / ad->ipu;
 }
 
+float nt_atlas_get_inverse_pixels_per_unit(nt_resource_t atlas) {
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    NT_ASSERT(ad != NULL && "nt_atlas_get_inverse_pixels_per_unit on unresolved atlas");
+    NT_ASSERT(ad->ipu > 0.0F && "atlas ipu must be set by atlas_on_post_resolve");
+    return ad->ipu;
+}
+
 const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t region_index))[2] {
     const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
     NT_ASSERT(ad != NULL && "nt_atlas_get_region_cached_pos on unresolved atlas");

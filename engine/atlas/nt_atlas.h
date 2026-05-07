@@ -94,6 +94,11 @@ nt_resource_t nt_atlas_get_page_resource(nt_resource_t atlas, uint8_t page_index
 /* Asserts atlas resolved; returns 1.0F if metadata absent (ipu == 0). */
 float nt_atlas_get_pixels_per_unit(nt_resource_t atlas);
 
+/* Returns 1/pixels_per_unit directly (the value the atlas stores internally
+ * for cached_pos baking). Sprite renderer wants ipu and would otherwise do
+ * 1/get_pixels_per_unit() = 1/(1/ipu) — two divisions for the same number. */
+float nt_atlas_get_inverse_pixels_per_unit(nt_resource_t atlas);
+
 /* Cached projections: 1/pixels_per_unit baked into pos, normalized UVs. */
 const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t region_index))[2];
 const float (*nt_atlas_get_region_cached_uv(nt_resource_t atlas, uint32_t region_index))[2];
