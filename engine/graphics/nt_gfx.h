@@ -102,18 +102,18 @@ typedef enum {
     NT_FORMAT_FLOAT2,
     NT_FORMAT_FLOAT3,
     NT_FORMAT_FLOAT4,
-    NT_FORMAT_HALF,    /* GL_HALF_FLOAT × 1 */
-    NT_FORMAT_HALF2,   /* GL_HALF_FLOAT × 2 */
-    NT_FORMAT_HALF3,   /* GL_HALF_FLOAT × 3 */
-    NT_FORMAT_HALF4,   /* GL_HALF_FLOAT × 4 */
+    NT_FORMAT_HALF,     /* GL_HALF_FLOAT × 1 */
+    NT_FORMAT_HALF2,    /* GL_HALF_FLOAT × 2 */
+    NT_FORMAT_HALF3,    /* GL_HALF_FLOAT × 3 */
+    NT_FORMAT_HALF4,    /* GL_HALF_FLOAT × 4 */
     NT_FORMAT_SHORT2,   /* GL_SHORT × 2 */
     NT_FORMAT_SHORT2N,  /* GL_SHORT × 2, normalized to [-1, 1] */
     NT_FORMAT_USHORT2N, /* GL_UNSIGNED_SHORT × 2, normalized to [0, 1] */
     NT_FORMAT_SHORT4,   /* GL_SHORT × 4 */
     NT_FORMAT_SHORT4N,  /* GL_SHORT × 4, normalized */
-    NT_FORMAT_UBYTE4,  /* GL_UNSIGNED_BYTE × 4 */
-    NT_FORMAT_UBYTE4N, /* GL_UNSIGNED_BYTE × 4, normalized */
-    NT_FORMAT_BYTE4N,  /* GL_BYTE × 4, normalized */
+    NT_FORMAT_UBYTE4,   /* GL_UNSIGNED_BYTE × 4 */
+    NT_FORMAT_UBYTE4N,  /* GL_UNSIGNED_BYTE × 4, normalized */
+    NT_FORMAT_BYTE4N,   /* GL_BYTE × 4, normalized */
 } nt_vertex_format_t;
 
 typedef enum {
