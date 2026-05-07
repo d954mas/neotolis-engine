@@ -180,19 +180,15 @@ static void resolve_atlas_regions(void) {
     if (s_atlas_resolved || !nt_resource_is_ready(s_atlas_handle)) {
         return;
     }
-    /* Region names match builder output: "bunny_red.png", etc. (codegen header
-     * shows ASSET_ATLAS_REGION_BUNNIES_BUNNY_RED_PNG = hash of "bunnies/bunny_red.png").
-     * The atlas indexes regions by region-name hash within the atlas — that's
-     * the basename of the source file (with extension). */
-    static const uint64_t names[5] = {
-        0x83DBC7E6A787C8D3ULL, /* nt_hash64_str("bunnies/bunny_red.png") */
-        0xED252533A158CD02ULL, /* "bunnies/bunny_green.png" */
-        0xED791D4914243C90ULL, /* "bunnies/bunny_blue.png" */
-        0xCCC0131AD05DE339ULL, /* "bunnies/bunny_yellow.png" */
-        0x3CB0925D85DCF606ULL, /* "bunnies/bunny_purple.png" */
+    /* Region hashes are codegen'd by the builder into bunnymark_assets.h —
+     * single source of truth. If the builder's hash function or region
+     * naming changes, this rebuilds against the new constants automatically. */
+    static const nt_hash64_t names[5] = {
+        ASSET_ATLAS_REGION_BUNNIES_BUNNY_RED_PNG,    ASSET_ATLAS_REGION_BUNNIES_BUNNY_GREEN_PNG,  ASSET_ATLAS_REGION_BUNNIES_BUNNY_BLUE_PNG,
+        ASSET_ATLAS_REGION_BUNNIES_BUNNY_YELLOW_PNG, ASSET_ATLAS_REGION_BUNNIES_BUNNY_PURPLE_PNG,
     };
     for (int i = 0; i < 5; i++) {
-        uint32_t ridx = nt_atlas_find_region(s_atlas_handle, names[i]);
+        uint32_t ridx = nt_atlas_find_region(s_atlas_handle, names[i].value);
         NT_ASSERT(ridx != NT_ATLAS_INVALID_REGION && "bunny region not found in atlas");
         s_variant_region_idx[i] = (uint16_t)ridx;
     }
