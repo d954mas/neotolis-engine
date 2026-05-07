@@ -14,7 +14,7 @@ specifically `bunnymark/update_native_position_velocity`.
 | Depth test     | Off (D-24)                                                       |
 | Atlas pages    | 1                                                                |
 | Vertex format  | float3 pos + float2 uv + uint8[4] color = 24 B (SPRITE-05)       |
-| Pixels per unit | 1.0 (SD) / 22.0 (HD) — runtime ipu = 1/ppu bake (D-32)           |
+| Pixels per unit | 1.0 (SD) / 17.0 (HD) — runtime ipu = 1/ppu bake (D-32)           |
 | Browser / GPU  | Logged at startup (`gpu=unknown` until engine exposes caps)      |
 | Bunny pool cap | 60000 (uint16_t entity/component storage bound)                  |
 
@@ -56,8 +56,7 @@ The primary reference is `bunnymark/update_native_position_velocity` from
 | Horizontal motion   | none in this reference path |
 
 Coordinate convention: y-up, bottom-left origin (D-25), matching the engine
-ortho setup. The pure-C `bunny_physics.h` header is stdint-only and is covered
-by `tests/unit/test_bunnymark_physics.c` with a fixed-seed xorshift64* PRNG.
+ortho setup. The pure-C `bunny_physics.h` header is stdint-only.
 
 ## Spawn Rate Tuning
 
@@ -81,8 +80,8 @@ To enable HD:
    - `bunny_blue.png`
    - `bunny_yellow.png`
    - `bunny_purple.png`
-   The current HD art is about 22x the SD originals (the HD pack uses
-   `pixels_per_unit = 22.0`, so HD sprites render at the same on-screen size
+   The current HD art is about 17x the SD originals (the HD pack uses
+   `pixels_per_unit = 17.0`, so HD sprites render at the same on-screen size
    as SD).
 2. Re-run cmake configure: `cmake --preset native-debug`. The configure step
    detects the `raw/hd/` directory and adds `bunnymark_hd.ntpack` to the
@@ -102,24 +101,20 @@ a warning ("HD pack not available — toggle is a no-op") instead of crashing.
 [PixiJS bunny-mark sample](https://github.com/pixijs/bunny-mark). Both
 upstream sources are MIT-licensed.
 
-The 5 SD PNGs are fetched on demand by `tools/fetch_bunnymark_art.{ps1,sh}`
-(idempotent — re-runs are a no-op when the files already exist).
+The 5 SD PNGs ship with the repo at `examples/bunnymark/raw/sd/`. HD art is
+optional — see "Adding HD Art" above to drop in higher-resolution variants.
 
-## Throughput Log Schema (DEMO-06)
+## Throughput Log Schema
 
-`nt_stats` (engine module — `engine/stats/nt_stats.h`) emits a per-period
-console log line:
+Bunnymark emits its own per-60-frame console log line (game owns the format,
+engine `nt_stats` only provides accessors):
 
 ```
-frame=N fps=F.f cpu=C.c ms gpu=G.g ms draws=D bunnies=B atlas=SD|HD
+fps=F.f cpu=C.c ms gpu=G.g ms draws=D bunnies=B atlas=SD|HD
 ```
 
-The default period is 60 frames (`nt_stats_desc_t.throughput_log_period`).
-GPU time is `-1.0` (logged as `N/A`) when `EXT_disjoint_timer_query_webgl2`
-is unavailable or the timer query is disjoint (Pitfall 5: no estimation, no
-fallback heuristic). The wider Phase 50 milestone delivers `nt_stats` as a
-reusable engine module — wiring it into the demo's frame loop and overlay is
-a separate workstream (see Plan 07 SUMMARY for the deferred-overlay note).
+GPU time is `N/A` when `EXT_disjoint_timer_query_webgl2` is unavailable or
+the WebGL timer query is disjoint (no estimation, no fallback heuristic).
 
 ## Comparison Targets
 
