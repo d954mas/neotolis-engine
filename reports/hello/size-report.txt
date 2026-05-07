@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis-paired)
-# Commit: 59e8064
+# Commit: b5ef890
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                41 B
 Elem                  14 B
-Code               15379 B
+Code               15389 B
 Data                 831 B
 Custom              1148 B
 ---------------- ----------
-TOTAL              17687 B
+TOTAL              17697 B
 
 ## Top 30 Functions by Size
 
@@ -40,7 +40,7 @@ TOTAL              17687 B
   313 B   nt_input_web_on_pointer_up
   281 B   wctomb
   216 B   nt_input_web_on_wheel
-  195 B   nt_app_web_frame
+  205 B   nt_app_web_frame
   193 B   __fwritex
   191 B   nt_log_write
   166 B   sn_write
@@ -55,7 +55,7 @@ TOTAL              17687 B
    41 B   __small_printf
 
 Total functions: 36
-Total code size: 15318 B
+Total code size: 15328 B
 
 ## Per-Module Contributions
 
@@ -63,44 +63,46 @@ Total code size: 15318 B
 
 Module                         Size
 ------------------------ ----------
-libnt_app.a                 1430 B
+libnt_app.a                 1442 B
 libnt_core.a                2178 B
 libnt_input.a              16446 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)             23994 B
+TOTAL (linked)             24006 B
 
 Not linked to hello:
 libnt_app_stub.a            1428 B
-libnt_atlas.a               5230 B
+libnt_atlas.a               6766 B
 libnt_basisu_transcoder.a 1329370 B
-libnt_comp_storage.a        1868 B
-libnt_drawable_comp.a       2670 B
+libnt_comp_storage.a        1930 B
+libnt_drawable_comp.a       4200 B
 libnt_entity.a              3076 B
 libnt_font.a              194546 B
 libnt_fs.a                  2620 B
 libnt_fs_stub.a             2620 B
-libnt_gfx.a                40492 B
-libnt_gfx_stub.a           22732 B
+libnt_gfx.a                53600 B
+libnt_gfx_stub.a           30400 B
 libnt_hash.a                4028 B
 libnt_http.a                6710 B
 libnt_http_stub.a           3210 B
 libnt_input_stub.a         11148 B
 libnt_log.a                 1424 B
 libnt_log_stub.a             484 B
-libnt_material.a            4312 B
+libnt_material.a            4338 B
 libnt_material_comp.a       1992 B
 libnt_mesh_comp.a           1916 B
-libnt_mesh_renderer.a       7900 B
+libnt_mesh_renderer.a       7960 B
 libnt_pool.a                1278 B
 libnt_render.a              5910 B
 libnt_resource.a          186766 B
 libnt_shape_renderer.a   1140902 B
 libnt_sort.a                 366 B
-libnt_sprite_comp.a         6536 B
-libnt_text_renderer.a    1170014 B
+libnt_sprite_comp.a         7526 B
+libnt_sprite_renderer.a   428932 B
+libnt_stats.a               5622 B
+libnt_text_renderer.a    1170108 B
 libnt_time.a                 868 B
-libnt_transform_comp.a      4538 B
+libnt_transform_comp.a      4696 B
 libnt_utf8.a                1000 B
 libnt_window_stub.a         1838 B
 

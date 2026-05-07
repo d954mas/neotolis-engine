@@ -1,0 +1,15 @@
+[{
+  "commit": "b5ef890",
+  "date": "2026-05-07T12:33:35Z",
+  "files": {
+    "index.html": { "raw": 2556, "gzip": 1282 },
+    "index_simd.wasm": { "raw": 829342, "gzip": 333496 },
+    "index.wasm": { "raw": 739332, "gzip": 317060 },
+    "index_simd.js": { "raw": 25831, "gzip": 10468 },
+    "index.js": { "raw": 25831, "gzip": 10463 },
+    "assets/atlas_demo.ntpack": { "raw": 8396696, "gzip": 1198737 }
+  },
+  "engine": { "raw": 857729, "gzip": 345246 },
+  "resources": { "raw": 8396696, "gzip": 1198737 },
+  "total": { "raw": 9254425, "gzip": 1543983 }
+}]
