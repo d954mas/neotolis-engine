@@ -1725,7 +1725,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
 
     // #region pixels_per_unit metadata
     /* Write pixels_per_unit as a 4-byte resource metadata blob keyed by
-     * hash64_str("pixels_per_unit"). Atlas binary format v3 is unchanged —
+     * hash64_str("pixels_per_unit"). Atlas binary format (v5) is unchanged —
      * runtime reads this via nt_atlas_get_pixels_per_unit and bakes 1/ppu
      * into cached_pos so HD packs render at the same on-screen size as SD
      * packs sharing the same Transform.
