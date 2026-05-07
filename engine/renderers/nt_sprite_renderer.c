@@ -8,6 +8,7 @@
 #endif
 
 #include "atlas/nt_atlas.h"
+#include "comp_storage/nt_comp_storage.h"
 #include "core/nt_assert.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "graphics/nt_gfx.h"
@@ -283,6 +284,14 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     uint16_t s_idx = sv->sparse_indices[eidx];
     uint16_t t_idx = tv->sparse_indices[eidx];
     uint16_t d_idx = dv->sparse_indices[eidx];
+
+    /* AGENTS.md "fail early, prefer asserts": dense indices must be valid.
+     * NT_INVALID_COMP_INDEX (0xFFFF) would index SoA arrays out of bounds.
+     * Catches stale render items, items for entities missing a component,
+     * items built after entity destruction. Compiles out in release. */
+    NT_ASSERT(s_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no sprite component");
+    NT_ASSERT(t_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no transform component");
+    NT_ASSERT(d_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no drawable component");
 
     /* Resolve atlas + region. Tombstone → zero-draw early-out. */
     nt_resource_t atlas = sv->atlas[s_idx];
