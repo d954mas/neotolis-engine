@@ -67,6 +67,12 @@ static struct {
     uint32_t last_emit_index_count;
 #endif
 } s_sprite;
+
+/* Throttled warn for the "cmd slot has no resolved texture" race. Re-armed
+ * at the start of every flush() — semantics: at most one warn per flush
+ * (typically per frame) regardless of how many slots / cmds hit the path,
+ * so a systemic resolve race is loud enough to notice but not spammy. */
+static bool s_warned_unbound;
 // #endregion
 
 // #region lifecycle
@@ -493,6 +499,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_flush(void) {
     close_current_cmd();
+    s_warned_unbound = false; /* re-arm: at most one unresolved-tex warn per flush */
     if (s_sprite.cmd_count == 0 || s_sprite.vertex_count == 0) {
         s_sprite.vertex_count = 0;
         s_sprite.index_count = 0;
@@ -547,20 +554,18 @@ void nt_sprite_renderer_flush(void) {
                 bound_sampler_ids[t] = nt_gfx_get_texture_default_sampler((nt_texture_t){.id = c->resolved_tex[t]}).id;
             }
             /* Effective sampler = override if set, else texture's asset default.
-             * s_warned_unbound is process-scoped but re-armed on every successful
-             * resolve below — symmetric with s_timer_warned in nt_gfx_gl.c. */
-            static bool s_warned_unbound;
+             * s_warned_unbound is file-scoped, reset once at flush() entry —
+             * one warn per flush max, regardless of which/how many slots hit
+             * the unresolved path. */
             uint32_t want_sampler;
             if (c->resolved_sampler[t].id != 0) {
                 want_sampler = c->resolved_sampler[t].id;
-                s_warned_unbound = false;
             } else if (c->resolved_tex[t] != 0) {
                 want_sampler = nt_gfx_get_texture_default_sampler((nt_texture_t){.id = c->resolved_tex[t]}).id;
-                s_warned_unbound = false;
             } else {
                 /* Slot declared by material (tex_count > t) but no texture
                  * resolved. Cmd will render with stale unit state. Usually a
-                 * material/resource resolve race; warn once until next success. */
+                 * material/resource resolve race; warn once per flush. */
                 if (!s_warned_unbound) {
                     NT_LOG_WARN("sprite_renderer: cmd slot %u has no resolved texture — material binding race?", (unsigned)t);
                     s_warned_unbound = true;
