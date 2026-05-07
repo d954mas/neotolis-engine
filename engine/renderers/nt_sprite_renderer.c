@@ -335,23 +335,24 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         open_cmd_from_snapshot(&snapshot);
     }
 
-    /* Origin override: bake -m*delta into tx/ty/tz, no matrix copy. */
+    /* Apply origin offset to translation. cached_pos stores source-space
+     * positions (no origin baked) so dedup'd regions with different origins
+     * share vertex data; the per-region pivot lives entirely in tx/ty/tz.
+     * Same formula whether origin is the region default or a runtime override
+     * — only the source differs. */
     const float *m = tv->world_matrices[t_idx];
     float tx = m[12];
     float ty = m[13];
     float tz = m[14];
     uint8_t flags = sv->flags[s_idx];
-    if (flags & NT_SPRITE_FLAG_ORIGIN_OV) {
-        const float *o = sv->origin[s_idx];
-        /* Atlas stores ipu directly; previous 1/get_pixels_per_unit() did 1/(1/ipu)
-         * for the same number. Asserts ipu > 0, so this is safe. */
-        float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
-        float dx = (o[0] - r->origin_x) * (float)r->source_w * ipu;
-        float dy = (o[1] - r->origin_y) * (float)r->source_h * ipu;
-        tx -= (m[0] * dx) + (m[4] * dy);
-        ty -= (m[1] * dx) + (m[5] * dy);
-        tz -= (m[2] * dx) + (m[6] * dy);
-    }
+    const float origin_x = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][0] : r->origin_x;
+    const float origin_y = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][1] : r->origin_y;
+    const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
+    const float dx = origin_x * (float)r->source_w * ipu;
+    const float dy = origin_y * (float)r->source_h * ipu;
+    tx -= (m[0] * dx) + (m[4] * dy);
+    ty -= (m[1] * dx) + (m[5] * dy);
+    tz -= (m[2] * dx) + (m[6] * dy);
 
     uint32_t color32 = dv->colors_packed[d_idx];
     uint8_t cr = (uint8_t)(color32 & 0xFFU);

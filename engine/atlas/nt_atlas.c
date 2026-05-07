@@ -381,16 +381,18 @@ static void atlas_precompute_all(nt_atlas_data_t *ad) {
         if (r->name_hash == NT_ATLAS_TOMBSTONE_HASH || r->vertex_count == 0) {
             continue;
         }
-        const float origin_px_x = r->origin_x * (float)r->source_w;
-        const float origin_px_y = r->origin_y * (float)r->source_h;
         const float trim_off_x = (float)r->trim_offset_x;
         const float trim_off_y = (float)r->trim_offset_y;
         for (uint32_t v = 0; v < r->vertex_count; v++) {
             const nt_atlas_vertex_t *raw = &ad->vertices[r->vertex_start + v];
-            /* local_{x,y} is in trim-space; add trim_offset → source-space,
-             * then subtract origin (also in source-space) → pivot-relative. */
-            ad->cached_pos[r->vertex_start + v][0] = ((float)raw->local_x + trim_off_x - origin_px_x) * ipu;
-            ad->cached_pos[r->vertex_start + v][1] = ((float)raw->local_y + trim_off_y - origin_px_y) * ipu;
+            /* Source-space position (NO origin baked). Builder dedups regions
+             * by pixel hash — duplicates share vertex_start/index_start with
+             * possibly different origin_x/y. Baking origin into cached_pos
+             * would let the last-baked region overwrite earlier ones, so the
+             * sprite renderer applies origin per-emit via the translation
+             * vector instead. */
+            ad->cached_pos[r->vertex_start + v][0] = ((float)raw->local_x + trim_off_x) * ipu;
+            ad->cached_pos[r->vertex_start + v][1] = ((float)raw->local_y + trim_off_y) * ipu;
             ad->cached_uv[r->vertex_start + v][0] = (float)raw->atlas_u * (1.0F / 65535.0F);
             ad->cached_uv[r->vertex_start + v][1] = (float)raw->atlas_v * (1.0F / 65535.0F);
         }

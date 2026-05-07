@@ -1518,7 +1518,7 @@ void test_atlas_cached_uv_d4_transform(void) {
  * output): (0,0)=bottom-left, (10,0)=bottom-right, (0,10)=top-left,
  * (10,10)=top-right. Origin (0.5, 0.5) is centre in y-up too. With ipu=1.0,
  * expected cached_pos = (-5,-5)/(5,-5)/(-5,5)/(5,5). */
-void test_atlas_cached_pos_origin_subtract(void) {
+void test_atlas_cached_pos_origin_not_baked(void) {
     NtAtlasVertex verts[4] = {
         {.local_x = 0, .local_y = 0, .atlas_u = 0, .atlas_v = 0},
         {.local_x = 10, .local_y = 0, .atlas_u = 65535, .atlas_v = 0},
@@ -1561,17 +1561,19 @@ void test_atlas_cached_pos_origin_subtract(void) {
     const float(*pos)[2] = nt_atlas_test_cached_pos(ad);
     TEST_ASSERT_NOT_NULL(pos);
 
-    /* Pivot at center (origin 0.5,0.5 of 10x10 = pixel 5,5).
-     * Vertices in blob are y-up (v5), so X and Y formulas are symmetric:
-     * cached_pos = (local - pivot_px) * ipu, no flips. */
-    assert_float_close(-5.0F, pos[0][0], 1e-5F, "v0.x");
-    assert_float_close(-5.0F, pos[0][1], 1e-5F, "v0.y (y-up bottom → negative)");
-    assert_float_close(5.0F, pos[1][0], 1e-5F, "v1.x");
-    assert_float_close(-5.0F, pos[1][1], 1e-5F, "v1.y (y-up bottom → negative)");
-    assert_float_close(-5.0F, pos[2][0], 1e-5F, "v2.x");
-    assert_float_close(5.0F, pos[2][1], 1e-5F, "v2.y (y-up top → positive)");
-    assert_float_close(5.0F, pos[3][0], 1e-5F, "v3.x");
-    assert_float_close(5.0F, pos[3][1], 1e-5F, "v3.y (y-up top → positive)");
+    /* origin (0.5, 0.5) is NOT baked into cached_pos — sprite renderer
+     * applies origin offset to the translation vector instead so dedup'd
+     * regions sharing vertex_start can use independent origins. cached_pos
+     * holds only source-space (local + trim_offset) * ipu. trim_offset is 0
+     * here, so cached_pos == local exactly. */
+    assert_float_close(0.0F, pos[0][0], 1e-5F, "v0.x = local_x");
+    assert_float_close(0.0F, pos[0][1], 1e-5F, "v0.y = local_y");
+    assert_float_close(10.0F, pos[1][0], 1e-5F, "v1.x = local_x");
+    assert_float_close(0.0F, pos[1][1], 1e-5F, "v1.y = local_y");
+    assert_float_close(0.0F, pos[2][0], 1e-5F, "v2.x = local_x");
+    assert_float_close(10.0F, pos[2][1], 1e-5F, "v2.y = local_y");
+    assert_float_close(10.0F, pos[3][0], 1e-5F, "v3.x = local_x");
+    assert_float_close(10.0F, pos[3][1], 1e-5F, "v3.y = local_y");
 
     /* Default ipu when no metadata read: 1.0F. */
     assert_float_close(1.0F, nt_atlas_test_ipu(ad), 1e-7F, "default ipu");
@@ -1630,19 +1632,21 @@ void test_atlas_cached_pos_includes_trim_offset(void) {
     const float(*pos)[2] = nt_atlas_test_cached_pos(ad);
     TEST_ASSERT_NOT_NULL(pos);
 
-    /* pivot_px = (10, 10). Vertex source = local + trim_offset.
-     * v0 source (5,7)   → pivot-relative (-5, -3)
-     * v1 source (15,7)  → pivot-relative ( 5, -3)
-     * v2 source (5,17)  → pivot-relative (-5,  7)
-     * v3 source (15,17) → pivot-relative ( 5,  7) */
-    assert_float_close(-5.0F, pos[0][0], 1e-5F, "v0.x with trim_offset");
-    assert_float_close(-3.0F, pos[0][1], 1e-5F, "v0.y with trim_offset");
-    assert_float_close(5.0F, pos[1][0], 1e-5F, "v1.x with trim_offset");
-    assert_float_close(-3.0F, pos[1][1], 1e-5F, "v1.y with trim_offset");
-    assert_float_close(-5.0F, pos[2][0], 1e-5F, "v2.x with trim_offset");
-    assert_float_close(7.0F, pos[2][1], 1e-5F, "v2.y with trim_offset");
-    assert_float_close(5.0F, pos[3][0], 1e-5F, "v3.x with trim_offset");
-    assert_float_close(7.0F, pos[3][1], 1e-5F, "v3.y with trim_offset");
+    /* Vertex source = local + trim_offset (origin NOT baked — that's
+     * sprite_renderer's responsibility now to support dedup'd regions
+     * with different pivots).
+     * v0 source (5,7)
+     * v1 source (15,7)
+     * v2 source (5,17)
+     * v3 source (15,17) */
+    assert_float_close(5.0F, pos[0][0], 1e-5F, "v0.x = local_x + trim_offset_x");
+    assert_float_close(7.0F, pos[0][1], 1e-5F, "v0.y = local_y + trim_offset_y");
+    assert_float_close(15.0F, pos[1][0], 1e-5F, "v1.x = local_x + trim_offset_x");
+    assert_float_close(7.0F, pos[1][1], 1e-5F, "v1.y = local_y + trim_offset_y");
+    assert_float_close(5.0F, pos[2][0], 1e-5F, "v2.x = local_x + trim_offset_x");
+    assert_float_close(17.0F, pos[2][1], 1e-5F, "v2.y = local_y + trim_offset_y");
+    assert_float_close(15.0F, pos[3][0], 1e-5F, "v3.x = local_x + trim_offset_x");
+    assert_float_close(17.0F, pos[3][1], 1e-5F, "v3.y = local_y + trim_offset_y");
 }
 
 /* Pixels_per_unit metadata round-trip via full resource pipeline.
@@ -1868,18 +1872,19 @@ void test_atlas_cached_recompute_on_merge(void) {
     nt_atlas_test_drive_resolve(buf1, size1, &s_user_data);
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
     const float(*pos_pre)[2] = nt_atlas_test_cached_pos(ad);
-    /* Origin (0.5, 0.5) of 10x10 → pivot at (5,5). v0 vertex (0,0) is bottom-left
-     * in y-up local space (v5), so cached_pos = (0-5, 0-5) = (-5, -5). */
-    assert_float_close(-5.0F, pos_pre[0][0], 1e-5F, "pre-merge v0.x");
-    assert_float_close(-5.0F, pos_pre[0][1], 1e-5F, "pre-merge v0.y (y-up bottom)");
+    /* Origin is NOT baked into cached_pos — sprite_renderer applies it via
+     * translation. cached_pos = (local + trim_offset) * ipu = local here.
+     * Different origins between merges don't change cached_pos values. */
+    assert_float_close(0.0F, pos_pre[0][0], 1e-5F, "pre-merge v0.x = local");
+    assert_float_close(0.0F, pos_pre[0][1], 1e-5F, "pre-merge v0.y = local");
 
-    /* Merge: same hash, new origin. */
+    /* Merge: same hash, new origin. cached_pos must remain stable since the
+     * vertex layout didn't change and origin is no longer baked. */
     nt_atlas_test_drive_resolve(buf2, size2, &s_user_data);
     const float(*pos_post)[2] = nt_atlas_test_cached_pos(ad);
-    /* Origin (0,0) → cached_pos = raw local. v0 = (0,0). */
-    assert_float_close(0.0F, pos_post[0][0], 1e-5F, "post-merge v0.x");
-    assert_float_close(0.0F, pos_post[0][1], 1e-5F, "post-merge v0.y");
-    assert_float_close(10.0F, pos_post[1][0], 1e-5F, "post-merge v1.x");
+    assert_float_close(0.0F, pos_post[0][0], 1e-5F, "post-merge v0.x unchanged");
+    assert_float_close(0.0F, pos_post[0][1], 1e-5F, "post-merge v0.y unchanged");
+    assert_float_close(10.0F, pos_post[1][0], 1e-5F, "post-merge v1.x = local");
 }
 
 /* Tombstone regions keep cached entries zeroed.
@@ -2108,7 +2113,7 @@ int main(void) {
 
     /* Cached arrays + pixels_per_unit + SD/HD merge */
     RUN_TEST(test_atlas_cached_uv_d4_transform);
-    RUN_TEST(test_atlas_cached_pos_origin_subtract);
+    RUN_TEST(test_atlas_cached_pos_origin_not_baked);
     RUN_TEST(test_atlas_cached_pos_includes_trim_offset);
     RUN_TEST(test_atlas_pixels_per_unit_metadata_roundtrip);
     RUN_TEST(test_atlas_cached_recompute_on_merge);
