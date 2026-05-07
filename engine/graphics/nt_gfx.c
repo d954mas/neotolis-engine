@@ -1096,9 +1096,16 @@ static uint32_t activate_texture_impl(const uint8_t *data, uint32_t size) {
         return 0;
     }
 
-    /* Call backend for per-mip transcode + compressed upload */
-    uint32_t backend = nt_gfx_backend_create_texture_compressed(basis_data, basis_size, hdr2->width, hdr2->height, levels, NT_FILTER_LINEAR_MIPMAP_LINEAR, NT_FILTER_LINEAR, NT_WRAP_REPEAT,
-                                                                NT_WRAP_REPEAT, (uint32_t)target);
+    /* Call backend for per-mip transcode + compressed upload. Pass V3 header
+     * sampler defaults through to texture-object state (glTexParameteri) — the
+     * RAW path already does this; BASIS was hardcoded LINEAR_MIPMAP_LINEAR/REPEAT
+     * pre-V3 and got missed in the header bump. The bound sampler-object
+     * normally overrides texture-object state, but if a caller ever issues
+     * glBindSampler(0, slot) the unit falls back to this state — so it must
+     * match the asset's intended defaults. */
+    uint32_t backend =
+        nt_gfx_backend_create_texture_compressed(basis_data, basis_size, hdr2->width, hdr2->height, levels, (nt_texture_filter_t)hdr2->default_min_filter,
+                                                 (nt_texture_filter_t)hdr2->default_mag_filter, (nt_texture_wrap_t)hdr2->default_wrap_u, (nt_texture_wrap_t)hdr2->default_wrap_v, (uint32_t)target);
     if (backend == 0) {
         NT_LOG_ERROR("activate_texture: transcode failed");
         nt_pool_free(&s_gfx.texture_pool, id);
