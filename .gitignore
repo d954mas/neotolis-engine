@@ -66,6 +66,7 @@ compile_*.log
 .claude/settings.local.json
 .claude/settings.json
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 
 # GSD tooling (Claude Code workflow engine)
 .claude/get-shit-done/
