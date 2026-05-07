@@ -54,6 +54,14 @@ void nt_sprite_renderer_restore_gpu(void);
 /* Contract: atlas page texture always binds to slot 0. Material may declare
  * a slot-0 binding to override sampler / set uniform name. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
+
+/* INVARIANT for mid-frame callers: flush resets cmd_count to 0 and clears
+ * staging. If you intend to keep emitting sprites with the same cmd state
+ * (material, textures, samplers) after the flush, snapshot the currently
+ * open cmd FIRST and restore via open_cmd_from_snapshot AFTER. See the
+ * capacity-overflow path in emit_one for the canonical pattern. Calling
+ * flush() without preservation either trips the "no open cmd" assert on
+ * the next emit or silently drops the state binding. */
 void nt_sprite_renderer_flush(void);
 
 /* ---- Test access (compiled only when NT_SPRITE_RENDERER_TEST_ACCESS is defined) ---- */
