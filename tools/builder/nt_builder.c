@@ -1185,6 +1185,11 @@ static NtBuildTextureData *make_texture_data(uint32_t w, uint32_t h, const nt_te
     NT_BUILD_ASSERT(td && "texture data alloc failed");
     td->width = w;
     td->height = h;
+    /* Always start from documented defaults so the NULL-opts path bakes the
+     * same sampler header as the explicit-defaults path. encode_one_asset
+     * passes &td->opts (never NULL) downstream, so leaving sampler fields at
+     * zero would write NEAREST/CLAMP/no-mips into the V3 texture header. */
+    td->opts = nt_tex_opts_defaults();
     if (opts) {
         td->opts = *opts;
         td->opts.compress = NULL; /* don't store dangling pointer */
@@ -1192,8 +1197,6 @@ static NtBuildTextureData *make_texture_data(uint32_t w, uint32_t h, const nt_te
             td->has_compress = true;
             td->compress = *opts->compress;
         }
-    } else {
-        td->opts.format = NT_TEXTURE_FORMAT_RGBA8;
     }
     return td;
 }

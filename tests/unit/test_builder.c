@@ -360,8 +360,8 @@ void test_texture_round_trip(void) {
     TEST_ASSERT_EQUAL_UINT32(2, tex.height);
     TEST_ASSERT_EQUAL_UINT16(NT_TEXTURE_FORMAT_RGBA8, tex.format);
     TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_COMPRESSION_RAW, tex.compression);
-    /* Default opts: premultiplied=false → flags=0 for plain texture */
-    TEST_ASSERT_EQUAL_UINT8(0, tex.flags);
+    /* NULL opts → nt_tex_opts_defaults(): premultiplied=false, gen_mipmaps=true */
+    TEST_ASSERT_EQUAL_UINT8(NT_TEXTURE_FLAG_GEN_MIPMAPS, tex.flags);
     TEST_ASSERT_EQUAL_UINT32(2 * 2 * 4, tex.data_size);
 
     (void)fclose(f);
