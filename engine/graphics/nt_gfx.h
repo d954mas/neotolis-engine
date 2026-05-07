@@ -361,10 +361,9 @@ void nt_gfx_draw_instanced(uint32_t first_vertex, uint32_t num_vertices, uint32_
 void nt_gfx_draw_indexed(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices);
 void nt_gfx_draw_indexed_instanced(uint32_t first_index, uint32_t num_indices, uint32_t num_vertices, uint32_t instance_count);
 
-/* Total nt_gfx_draw* calls in the current frame.
- * Reset to 0 by nt_gfx_begin_frame, incremented by every public draw function.
- * Read by nt_stats. Distinct from nt_gfx_frame_stats_t.draw_calls (which is
- * part of the kitchen-sink struct). */
+/* Convenience getter for g_nt_gfx.frame_stats.draw_calls. Reset by
+ * nt_gfx_begin_frame, incremented by every public draw function. Read
+ * by nt_stats; equivalent to reading frame_stats.draw_calls directly. */
 uint32_t nt_gfx_get_frame_draw_calls(void);
 
 /* ---- Instance buffer ---- */
