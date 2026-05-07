@@ -621,7 +621,7 @@ nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex) {
     return s_gfx.texture_metas[nt_pool_slot_index(tex.id)].default_sampler;
 }
 
-#ifdef NT_GFX_STUB_TEST_ACCESS
+#ifdef NT_GFX_TEST_ACCESS
 uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s) {
     if (s.id == 0 || s.id > s_gfx.sampler_count) {
         return 0;

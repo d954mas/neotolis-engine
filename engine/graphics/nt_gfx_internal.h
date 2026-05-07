@@ -91,7 +91,13 @@ nt_gfx_gpu_caps_t nt_gfx_gl_ctx_detect_gpu_caps(void);
 uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot);
 uint32_t nt_gfx_stub_test_bind_sampler_count(void);
 void nt_gfx_stub_test_reset(void);
+#endif
 
+#ifdef NT_GFX_TEST_ACCESS
+/* Real-backend test hook: inspect a sampler's GPU backend handle from the
+ * dedup cache. Distinct from STUB_TEST_ACCESS — works against the real GL
+ * (or any non-stub) backend, so a test running with the real backend can
+ * still reach this without enabling stub-only state. */
 uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s);
 #endif
 

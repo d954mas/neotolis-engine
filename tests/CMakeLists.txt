@@ -370,12 +370,15 @@ if(NOT EMSCRIPTEN)
         NT_SPRITE_RENDERER_TEST_ACCESS
         NT_ATLAS_TEST_ACCESS
         NT_GFX_STUB_TEST_ACCESS
+        NT_GFX_TEST_ACCESS
         _CRT_SECURE_NO_WARNINGS
         _CRT_NONSTDC_NO_DEPRECATE
     )
     target_compile_definitions(nt_sprite_renderer PRIVATE NT_SPRITE_RENDERER_TEST_ACCESS)
-    target_compile_definitions(nt_gfx_stub PRIVATE NT_GFX_STUB_TEST_ACCESS)
-    target_compile_definitions(nt_gfx PRIVATE NT_GFX_STUB_TEST_ACCESS)
+    # nt_gfx_stub also compiles nt_gfx.c — needs NT_GFX_TEST_ACCESS for the
+    # real-backend test hook (sampler cache inspection) the test uses.
+    target_compile_definitions(nt_gfx_stub PRIVATE NT_GFX_STUB_TEST_ACCESS NT_GFX_TEST_ACCESS)
+    target_compile_definitions(nt_gfx PRIVATE NT_GFX_TEST_ACCESS)
     target_compile_options(test_sprite_renderer PRIVATE -U_DLL)
     nt_set_warning_flags(test_sprite_renderer)
     nt_set_sanitizer_flags(test_sprite_renderer)
