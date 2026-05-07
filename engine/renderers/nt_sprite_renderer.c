@@ -27,6 +27,10 @@ typedef struct {
 
 typedef struct {
     nt_pipeline_t pipeline;
+    nt_material_t material; /* handle for material-param lookup at flush; param values
+                               are NOT snapshotted — material info is stable within a
+                               frame (nt_material_step ran before render) so we
+                               re-fetch via nt_material_get_info at flush time */
     uint32_t resolved_tex[NT_MATERIAL_MAX_TEXTURES];
     const char *tex_names[NT_MATERIAL_MAX_TEXTURES];
     nt_sampler_t resolved_sampler[NT_MATERIAL_MAX_TEXTURES]; /* per-binding override, .id==0 keeps texture default */
@@ -215,7 +219,7 @@ static void close_current_cmd(void) {
 /* Open a new cmd with state captured from a resolved material_info, anchored
  * at the current staging index_count. Caller must close the previous cmd via
  * close_current_cmd() before opening a new one. */
-static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi) {
+static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_material_t mat) {
     if (s_sprite.cmd_count >= NT_SPRITE_RENDERER_MAX_DRAW_CMDS) {
         nt_sprite_renderer_flush();
     }
@@ -223,6 +227,7 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi) {
     nt_sprite_draw_cmd_t *c = &s_sprite.cmds[s_sprite.cmd_count++];
     memset(c, 0, sizeof(*c)); /* slots reuse across frames; clear stale fields */
     c->pipeline = pip;
+    c->material = mat;
     c->tex_count = mi->tex_count;
     for (uint8_t i = 0; i < mi->tex_count; i++) {
         c->resolved_tex[i] = mi->resolved_tex[i];
@@ -483,7 +488,7 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
         /* Each batch_key boundary opens a fresh cmd. */
         nt_pipeline_t pip = find_or_create_pipeline(mat_info);
         close_current_cmd();
-        open_cmd(pip, mat_info);
+        open_cmd(pip, mat_info, *mat);
 
         for (uint32_t i = run_start; i < run_end; i++) {
             emit_one(&items[i], &sv, &tv, &dv);
@@ -523,6 +528,7 @@ void nt_sprite_renderer_flush(void) {
     uint32_t bound_tex_ids[NT_MATERIAL_MAX_TEXTURES] = {0};
     /* Tracked separately so override→no-override cmd transitions reset to default. */
     uint32_t bound_sampler_ids[NT_MATERIAL_MAX_TEXTURES] = {0};
+    uint32_t bound_mat_id = 0;
 
     for (uint32_t ci = 0; ci < s_sprite.cmd_count; ci++) {
         const nt_sprite_draw_cmd_t *c = &s_sprite.cmds[ci];
@@ -541,6 +547,21 @@ void nt_sprite_renderer_flush(void) {
         if (s_sprite.ibo.id != bound_ibo_id) {
             nt_gfx_bind_index_buffer(s_sprite.ibo);
             bound_ibo_id = s_sprite.ibo.id;
+        }
+
+        /* Apply material params on material change. Most cmds in a flush share
+         * the same material (atlas page split / sampler split don't change it),
+         * so the lookup + uniform set runs only at run boundaries. */
+        if (c->material.id != bound_mat_id) {
+            const nt_material_info_t *mi = nt_material_get_info(c->material);
+            if (mi != NULL) {
+                for (uint8_t p = 0; p < mi->param_count; p++) {
+                    if (mi->param_names[p] != NULL) {
+                        nt_gfx_set_uniform_vec4(mi->param_names[p], mi->params[p]);
+                    }
+                }
+            }
+            bound_mat_id = c->material.id;
         }
 
         for (uint8_t t = 0; t < c->tex_count; t++) {
