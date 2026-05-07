@@ -382,8 +382,16 @@ static void frame(void) {
     nt_gfx_begin_segment(s_frame_seg);
 
     if (g_nt_gfx.context_restored) {
+        /* WebGL context loss recovery. mat_info / s_overlay_font handles
+         * captured above are stale (nt_material_step / nt_font_step ran
+         * before begin_frame detected the restore). Invalidate resources
+         * so the next frame's *_step calls re-resolve, recreate game-owned
+         * GPU buffers, and restore both renderers. Skip rendering this
+         * frame — it's safer than driving pipelines with stale handles. */
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
+        nt_resource_invalidate(NT_ASSET_FONT);
+        nt_gfx_destroy_buffer(s_frame_ubo); /* free pool slot before reuse */
         s_frame_ubo = nt_gfx_make_buffer(&(nt_buffer_desc_t){
             .type = NT_BUFFER_UNIFORM,
             .usage = NT_USAGE_DYNAMIC,
@@ -391,6 +399,8 @@ static void frame(void) {
             .label = "frame_uniforms",
         });
         nt_sprite_renderer_restore_gpu();
+        nt_text_renderer_restore_gpu();
+        can_render = false;
     }
 
     nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_color = {0.1F, 0.1F, 0.15F, 1.0F}, .clear_depth = 1.0F});
@@ -416,8 +426,10 @@ static void frame(void) {
     // #region stats overlay (on-screen HUD)
     /* Top-left corner anchor in world coords (y-up, bottom-left origin).
      * Text renders below the model translation point by line; size is the
-     * em-height in world units, which == pixels here since ortho is 1:1. */
-    {
+     * em-height in world units, which == pixels here since ortho is 1:1.
+     * Skipped on context_restored frames — text material's resolved shader
+     * handles are stale until next frame's nt_material_step / nt_font_step. */
+    if (!g_nt_gfx.context_restored) {
         const float overlay_size = 22.0F;
         mat4 overlay_model;
         glm_mat4_identity(overlay_model);
