@@ -51,7 +51,12 @@ typedef struct {
 /* Sampler cache size — samplers are deduplicated by their (filter/wrap)
  * descriptor so repeated nt_gfx_make_sampler calls with the same desc
  * return the same handle. Most apps use 3-10 unique configs. */
-#define NT_GFX_MAX_SAMPLERS 64
+/* 128 covers all theoretically possible combinations of (min×mag×wrap_u×wrap_v)
+ * = 6×2×3×3 = 108, with a small safety margin. Cost: ~3.5 KB BSS (not binary
+ * — zero-init in WASM linear memory / native .bss). Linear scan in
+ * nt_gfx_make_sampler iterates sampler_count, not capacity, so size is free
+ * for the hot path. */
+#define NT_GFX_MAX_SAMPLERS 128
 
 typedef struct {
     const char *name; /* string literal, not owned */
