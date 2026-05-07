@@ -500,6 +500,22 @@ void nt_gfx_backend_begin_frame(void) {
     nt_gfx_gl_cache_reset();
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
+
+    /* GL_GPU_DISJOINT_EXT clears on read, so check once per frame here rather
+     * than on every poll. The flag indicates the GPU clock was disturbed since
+     * last read; on hit, drop all in-flight timer queries across every segment
+     * — their results are unreliable. Keeps the GLE roundtrip out of the poll
+     * hot path and aligns with one-disjoint-event-per-frame semantics. */
+    if (s_timer_enabled) {
+        GLint disjoint = 0;
+        glGetIntegerv(GL_GPU_DISJOINT_EXT, &disjoint);
+        if (disjoint) {
+            for (uint8_t i = 0; i < s_segment_count; i++) {
+                memset(s_segments[i].in_flight, 0, sizeof(s_segments[i].in_flight));
+                s_segments[i].tail = s_segments[i].head;
+            }
+        }
+    }
 }
 
 void nt_gfx_backend_end_frame(void) {
@@ -518,16 +534,8 @@ bool nt_gfx_backend_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns
         return false;
     }
 
-    /* Disjoint = clock skip → drop in-flight across all segments. */
-    GLint disjoint = 0;
-    glGetIntegerv(GL_GPU_DISJOINT_EXT, &disjoint);
-    if (disjoint) {
-        for (uint8_t i = 0; i < s_segment_count; i++) {
-            memset(s_segments[i].in_flight, 0, sizeof(s_segments[i].in_flight));
-            s_segments[i].tail = s_segments[i].head;
-        }
-        return false;
-    }
+    /* Disjoint check moved to nt_gfx_backend_begin_frame — runs once per frame
+     * instead of once per poll, avoiding GLE roundtrip in the drain loop. */
 
     int8_t idx = segment_find(name_hash);
     if (idx < 0) {
