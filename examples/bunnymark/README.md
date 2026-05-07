@@ -13,7 +13,7 @@ specifically `bunnymark/update_native_position_velocity`.
 | Blend mode     | Premultiplied alpha                                              |
 | Depth test     | Off                                                              |
 | Atlas pages    | 1                                                                |
-| Vertex format  | float3 pos + float2 uv + uint8[4] color = 24 B                   |
+| Vertex format  | float3 pos + ushort2 uv (normalized) + uint8[4] color = 20 B     |
 | Pixels per unit | 1.0 (SD) / 17.0 (HD) — runtime ipu = 1/ppu bake                  |
 | Browser / GPU  | Logged at startup (`gpu=unknown` until engine exposes caps)      |
 | Bunny pool cap | 60000 (uint16_t entity/component storage bound)                  |
