@@ -552,7 +552,10 @@ void nt_sprite_renderer_flush(void) {
 
         /* Apply material params on material change. Most cmds in a flush share
          * the same material (atlas page split / sampler split don't change it),
-         * so the lookup + uniform set runs only at run boundaries. */
+         * so the lookup + uniform set runs only at run boundaries. If the
+         * material was destroyed between draw_list capture and flush replay,
+         * leave bound_mat_id unchanged so a later cmd with the same material
+         * can re-attempt the lookup once it's resolvable again. */
         if (c->material.id != bound_mat_id) {
             const nt_material_info_t *mi = nt_material_get_info(c->material);
             if (mi != NULL) {
@@ -561,8 +564,8 @@ void nt_sprite_renderer_flush(void) {
                         nt_gfx_set_uniform_vec4(mi->param_names[p], mi->params[p]);
                     }
                 }
+                bound_mat_id = c->material.id;
             }
-            bound_mat_id = c->material.id;
         }
 
         bool cmd_has_unresolved_slot = false;
@@ -607,6 +610,11 @@ void nt_sprite_renderer_flush(void) {
         }
 
         if (cmd_has_unresolved_slot) {
+            /* Reset tracked GL slot state — the slot loop above may have done
+             * partial binds before hitting the unresolved slot. Subsequent
+             * cmds must not assume those binds are still valid. */
+            memset(bound_tex_ids, 0, sizeof(bound_tex_ids));
+            memset(bound_sampler_ids, 0, sizeof(bound_sampler_ids));
             continue;
         }
 
