@@ -792,6 +792,24 @@ renderer_draw_mesh(...);
 renderer_draw_sprite(...);
 ```
 
+## 11.3 Renderer complexity classes
+
+Not all renderers carry the same weight. The engine ships three classes; copying patterns across classes is a common mistake.
+
+**Building blocks** — direct GPU primitives (`nt_gfx_draw_indexed`, `nt_mesh_renderer`). Single pipeline, fixed pattern, one draw call per item. Use for 3D meshes, custom geometry, anything where the game owns batching strategy. Stay minimal.
+
+**Batched dynamic** — high-throughput accumulation renderers (`nt_sprite_renderer`; future particles). Cmd queue, state-delta tracking, overflow recovery via snapshot/replay, multi-page atlas resolution, SIMD path. Optimized for many small draws per frame (1k–60k items). Complex by necessity — the 580 LOC of `nt_sprite_renderer.c` are paid for by measured throughput on bunnymark. Don't simplify away the cmd queue or snapshot recovery without a measured replacement plan.
+
+**Specialized** — domain-specific layout (`nt_text_renderer` glyph atlas + line layout; future debug-line/IM-GUI). Sit between the two — more state than primitives, less throughput pressure than batched dynamic.
+
+When adding a new renderer, classify first:
+
+- One pipeline, fixed pattern → **building block** (model after `nt_mesh_renderer`)
+- 1k+ items/frame with dynamic state → **batched dynamic** (study `nt_sprite_renderer`, but only copy what your throughput demands)
+- Domain-specific layout/data → **specialized**
+
+`nt_sprite_renderer.c` is not a renderer template. Its complexity earns its keep at 60k items/frame; a 100-item UI overlay doesn't need any of it.
+
 ---
 
 # 12. Render Items, Sort Keys, Batch Keys
