@@ -4,17 +4,17 @@ CPU sprite-batching stress test for Neotolis Engine. The primary reference is
 [britzl/defold-bunnymark](https://github.com/britzl/defold-bunnymark),
 specifically `bunnymark/update_native_position_velocity`.
 
-## Test Conditions (DEMO-07)
+## Test Conditions
 
 | Parameter      | Value                                                            |
 | -------------- | ---------------------------------------------------------------- |
 | Viewport       | 800 x 600 (default; resizable)                                   |
 | Sprite size    | ~26 x 37 px on screen (SD or HD)                                 |
-| Blend mode     | Premultiplied alpha (D-24)                                       |
-| Depth test     | Off (D-24)                                                       |
+| Blend mode     | Premultiplied alpha                                              |
+| Depth test     | Off                                                              |
 | Atlas pages    | 1                                                                |
-| Vertex format  | float3 pos + float2 uv + uint8[4] color = 24 B (SPRITE-05)       |
-| Pixels per unit | 1.0 (SD) / 17.0 (HD) — runtime ipu = 1/ppu bake (D-32)           |
+| Vertex format  | float3 pos + float2 uv + uint8[4] color = 24 B                   |
+| Pixels per unit | 1.0 (SD) / 17.0 (HD) — runtime ipu = 1/ppu bake                  |
 | Browser / GPU  | Logged at startup (`gpu=unknown` until engine exposes caps)      |
 | Bunny pool cap | 60000 (uint16_t entity/component storage bound)                  |
 
@@ -38,8 +38,8 @@ Bunnymark conditions: viewport=WxH sprite_size=~26x37 px blend=premultiplied atl
 
 **Note on bulk add/remove keys:** the canonical Bunnymark uses `+` / `-`, but
 the engine input enum currently does not expose `NT_KEY_PLUS` / `NT_KEY_MINUS`.
-Arrow Up / Arrow Down were substituted in Phase 50 Plan 06 (Rule 3 deviation).
-A future input-enum extension will restore the canonical keys.
+Arrow Up / Arrow Down are substituted; a future input-enum extension will
+restore the canonical keys.
 
 ## Physics
 
@@ -55,8 +55,8 @@ The primary reference is `bunnymark/update_native_position_velocity` from
 | Floor bounce        | if `y < 50`: `y = 50`, `vy = -vy` |
 | Horizontal motion   | none in this reference path |
 
-Coordinate convention: y-up, bottom-left origin (D-25), matching the engine
-ortho setup. The pure-C `bunny_physics.h` header is stdint-only.
+Coordinate convention: y-up, bottom-left origin, matching the engine ortho
+setup. The pure-C `bunny_physics.h` header is stdint-only.
 
 ## Spawn Rate Tuning
 
@@ -67,9 +67,8 @@ spawn count while the left mouse / tap is held.
 ## Adding HD Art (enabling the H toggle)
 
 The `H` key + top-right "Quality" tap zone toggle SD <-> HD packs at runtime.
-Phase 48 atlas merge re-maps regions in place so live SpriteComponent
-`region_index` values stay valid across the toggle — no `set_region`
-re-binding is needed (DEMO-08).
+Atlas merge re-maps regions in place so live SpriteComponent `region_index`
+values stay valid across the toggle — no `set_region` re-binding is needed.
 
 To enable HD:
 
@@ -88,7 +87,7 @@ To enable HD:
    build (sets `BUNNYMARK_HD_AVAILABLE = 1`).
 3. Rebuild: `cmake --build build/_cmake/native-debug --target bunnymark_demo`.
 4. The H key + tap-zone toggle will then mount/unmount the HD pack at
-   runtime via the Phase 48 atlas merge.
+   runtime via atlas merge.
 
 When `raw/hd/` is absent, the demo still builds (SD-only) and the toggle logs
 a warning ("HD pack not available — toggle is a no-op") instead of crashing.
