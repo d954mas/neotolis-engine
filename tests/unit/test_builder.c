@@ -391,12 +391,8 @@ void test_texture_premultiplied_encoding(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_tex_opts_t opts = {
-        .format = NT_TEXTURE_FORMAT_RGBA8,
-        .max_size = 0,
-        .compress = NULL,
-        .premultiplied = true,
-    };
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
+    opts.premultiplied = true;
     nt_builder_add_texture_raw(ctx, raw_pixels, 4, 1, "tex/premul_test", &opts);
 
     nt_build_result_t r = nt_builder_finish_pack(ctx);
@@ -2235,8 +2231,9 @@ void test_early_dedup_different_opts_not_deduped(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_tex_opts_t opts_a = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = 0};
-    nt_tex_opts_t opts_b = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = 256};
+    nt_tex_opts_t opts_a = nt_tex_opts_defaults();
+    nt_tex_opts_t opts_b = nt_tex_opts_defaults();
+    opts_b.max_size = 256;
     nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "textures/no_resize.png", &opts_a);
     nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)png_len, "textures/resized.png", &opts_b);
 
@@ -2537,7 +2534,7 @@ void test_dedup_cross_source_texture_memory_vs_raw(void) {
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    nt_tex_opts_t opts = {.format = NT_TEXTURE_FORMAT_RGBA8, .max_size = 0};
+    nt_tex_opts_t opts = nt_tex_opts_defaults();
     nt_builder_add_texture_from_memory(ctx, png_data, (uint32_t)len, "tex/from_png", &opts);
     nt_builder_add_texture_raw(ctx, raw_pixels, 2, 2, "tex/from_raw", &opts);
     free(png_data);
@@ -2824,7 +2821,7 @@ void test_cache_invalidation_opts(void) {
     write_test_png(TMP_DIR "/cache_opts_tex.png");
 
     /* Build 1: RGBA8 (default) */
-    nt_tex_opts_t opts1 = {.format = NT_TEXTURE_FORMAT_RGBA8};
+    nt_tex_opts_t opts1 = nt_tex_opts_defaults();
     NtBuilderContext *ctx1 = nt_builder_start_pack(pack1);
     nt_builder_set_cache_dir(ctx1, cache);
     nt_builder_add_texture(ctx1, TMP_DIR "/cache_opts_tex.png", &opts1);
@@ -2832,7 +2829,8 @@ void test_cache_invalidation_opts(void) {
     nt_builder_free_pack(ctx1);
 
     /* Build 2: RGB8 (different) -- should be a cache miss */
-    nt_tex_opts_t opts2 = {.format = NT_TEXTURE_FORMAT_RGB8};
+    nt_tex_opts_t opts2 = nt_tex_opts_defaults();
+    opts2.format = NT_TEXTURE_FORMAT_RGB8;
     NtBuilderContext *ctx2 = nt_builder_start_pack(pack2);
     nt_builder_set_cache_dir(ctx2, cache);
     nt_builder_add_texture(ctx2, TMP_DIR "/cache_opts_tex.png", &opts2);

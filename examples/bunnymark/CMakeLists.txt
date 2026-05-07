@@ -3,11 +3,33 @@ set(BUNNYMARK_ASSETS_DIR "${BUNNYMARK_OUTPUT_DIR}/assets")
 # Shared pack location -- builder writes here once, all presets copy from here
 set(BUNNYMARK_PACK_DIR "${CMAKE_SOURCE_DIR}/build/examples/bunnymark")
 
+# Bunnymark stress-tests 60k+ sprites and benefits from larger renderer
+# staging arrays (~4 flushes/frame vs ~15 with the engine default). The
+# arrays are static, so we can't mutate the shared nt_sprite_renderer
+# target — that would inflate every other consumer too. Compile a private
+# copy of the sprite-renderer translation unit with the override instead.
+add_library(nt_sprite_renderer_xl STATIC
+    "${CMAKE_SOURCE_DIR}/engine/renderers/nt_sprite_renderer.c"
+)
+target_include_directories(nt_sprite_renderer_xl PUBLIC
+    "${CMAKE_SOURCE_DIR}/engine"
+)
+target_compile_definitions(nt_sprite_renderer_xl PRIVATE
+    NT_LOG_DOMAIN_DEFAULT="sprite_renderer"
+    NT_SPRITE_RENDERER_MAX_VERTICES=65536
+)
+target_link_libraries(nt_sprite_renderer_xl PUBLIC
+    nt_core nt_render nt_atlas nt_sprite_comp nt_drawable_comp nt_material_comp
+    nt_transform_comp nt_material nt_entity
+)
+nt_set_warning_flags(nt_sprite_renderer_xl)
+nt_set_sanitizer_flags(nt_sprite_renderer_xl)
+
 add_executable(bunnymark_demo main.c)
 target_link_libraries(bunnymark_demo PRIVATE
     nt_core nt_app nt_input nt_window nt_math nt_log nt_time nt_resource
     nt_material nt_shared nt_entity nt_transform_comp nt_material_comp
-    nt_drawable_comp nt_sprite_comp nt_atlas nt_sprite_renderer
+    nt_drawable_comp nt_sprite_comp nt_atlas nt_sprite_renderer_xl
     nt_stats nt_text_renderer nt_font
     nt_render nt_hash
 )
@@ -19,10 +41,6 @@ if(EMSCRIPTEN)
 else()
     target_link_libraries(bunnymark_demo PRIVATE nt_gfx nt_http_stub nt_fs)
 endif()
-
-# Bunnymark stress-tests 60k+ sprites; raise sprite-renderer staging to the
-# uint16 cap so we hit ~4 flushes/frame instead of ~15 with the engine default.
-target_compile_definitions(nt_sprite_renderer PRIVATE NT_SPRITE_RENDERER_MAX_VERTICES=65536)
 
 nt_set_warning_flags(bunnymark_demo)
 nt_set_sanitizer_flags(bunnymark_demo)
