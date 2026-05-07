@@ -1,6 +1,12 @@
 precision highp float;
 precision highp int;
 
+// UBO contract: this shader uses "Globals" (defined in common/globals.glsl)
+// for view_proj. Game must register the block via
+//   nt_gfx_register_global_block("Globals", 0)
+// at startup, and update + bind the frame UBO to slot 0 every frame before
+// nt_sprite_renderer_draw_list. nt_sprite_renderer doesn't bind UBOs itself —
+// that's the game's responsibility per the shader contract.
 #include "common/globals.glsl"
 
 // Locations match nt_attr_location_t in engine/graphics/nt_gfx.h.

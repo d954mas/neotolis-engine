@@ -58,7 +58,13 @@ void nt_sprite_renderer_restore_gpu(void);
  *      every entry unconditionally and does not consult drawable_comp's
  *      visible flag, color alpha, or entity-enabled state. Use
  *      nt_render_is_visible() (engine/render/nt_render_util.h) as the
- *      canonical filter when building the items array. */
+ *      canonical filter when building the items array.
+ *   3. Frame uniforms (e.g. view_proj) are shader-specific — the renderer
+ *      doesn't bind any UBOs. Caller must:
+ *        - register the shader's UBO blocks via nt_gfx_register_global_block,
+ *        - update + bind the matching nt_buffer_t to the registered slot
+ *      before draw_list. The game-shipped sprite shader uses the conventional
+ *      "Globals" block at slot 0; check your shader for its actual bindings. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 /* INVARIANT for mid-frame callers: flush resets cmd_count to 0 and clears
