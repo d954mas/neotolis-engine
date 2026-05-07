@@ -90,6 +90,10 @@ uint32_t nt_sprite_renderer_test_vertex_count(void);
  * counts after draw_list completes. */
 uint32_t nt_sprite_renderer_test_last_emit_vertex_count(void);
 uint32_t nt_sprite_renderer_test_last_emit_index_count(void);
+/* Read back the position of the i-th vertex of the last emitted sprite.
+ * Flush only resets vertex_count, not the staging array data, so positions
+ * are still readable post-draw_list via the captured first_vertex offset. */
+void nt_sprite_renderer_test_last_emit_position(uint32_t v_idx, float out[3]);
 bool nt_sprite_renderer_test_initialized(void);
 #endif
 

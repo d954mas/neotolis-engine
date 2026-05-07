@@ -1,4 +1,5 @@
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -542,6 +543,72 @@ void test_sprite_renderer_polygon_emit(void) {
     TEST_ASSERT_EQUAL_UINT32(1, nt_sprite_renderer_test_draw_call_count());
 }
 
+/* ---- Test: FLIP_X / FLIP_Y mirror around the region pivot ---- */
+
+static void assert_pos_close(float ex, float ey, const float pos[3], const char *msg) {
+    if (fabsf(pos[0] - ex) > 1e-4F || fabsf(pos[1] - ey) > 1e-4F) {
+        char buf[160];
+        (void)snprintf(buf, sizeof(buf), "%s (expected=(%g,%g) actual=(%g,%g))", msg, (double)ex, (double)ey, (double)pos[0], (double)pos[1]);
+        TEST_FAIL_MESSAGE(buf);
+    }
+}
+
+void test_sprite_renderer_flip_mirrors_around_pivot(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xF1ULL);
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_sprite_entity(s_atlas_res, FIXTURE_R0_HASH, mat);
+
+    nt_render_item_t items[1];
+    items[0].sort_key = 0;
+    items[0].entity = e.id;
+    items[0].batch_key = nt_batch_key(mat.id, (uint32_t)FIXTURE_R0_HASH);
+
+    /* Region r0: 64x64 source, origin (0.5, 0.5) → pivot at source (32, 32).
+     * 4 verts at source-space (i*10, i*20) for i=0..3 = (0,0),(10,20),(20,40),(30,60).
+     * ipu = 1.0 (no pixels_per_unit metadata in fixture).
+     * Identity transform at entity world (0,0).
+     * Expected world position (no flip) = source_xy - pivot.
+     * FLIP_X negates pivot-relative x → world x = -(source_x - 32) = 32 - source_x.
+     * FLIP_Y negates pivot-relative y. */
+
+    float p[3];
+
+    /* No flip baseline */
+    nt_sprite_comp_set_flip(e, false, false);
+    nt_sprite_renderer_draw_list(items, 1);
+    nt_sprite_renderer_test_last_emit_position(0, p);
+    assert_pos_close(-32.0F, -32.0F, p, "no-flip v0");
+    nt_sprite_renderer_test_last_emit_position(3, p);
+    assert_pos_close(-2.0F, 28.0F, p, "no-flip v3");
+
+    /* FLIP_X — x mirrored around pivot, y unchanged */
+    nt_sprite_comp_set_flip(e, true, false);
+    nt_sprite_renderer_draw_list(items, 1);
+    nt_sprite_renderer_test_last_emit_position(0, p);
+    assert_pos_close(32.0F, -32.0F, p, "flip-x v0");
+    nt_sprite_renderer_test_last_emit_position(3, p);
+    assert_pos_close(2.0F, 28.0F, p, "flip-x v3");
+
+    /* FLIP_Y — y mirrored around pivot, x unchanged */
+    nt_sprite_comp_set_flip(e, false, true);
+    nt_sprite_renderer_draw_list(items, 1);
+    nt_sprite_renderer_test_last_emit_position(0, p);
+    assert_pos_close(-32.0F, 32.0F, p, "flip-y v0");
+    nt_sprite_renderer_test_last_emit_position(3, p);
+    assert_pos_close(-2.0F, -28.0F, p, "flip-y v3");
+
+    /* Both flips — position negated relative to no-flip */
+    nt_sprite_comp_set_flip(e, true, true);
+    nt_sprite_renderer_draw_list(items, 1);
+    nt_sprite_renderer_test_last_emit_position(0, p);
+    assert_pos_close(32.0F, 32.0F, p, "flip-both v0");
+    nt_sprite_renderer_test_last_emit_position(3, p);
+    assert_pos_close(2.0F, -28.0F, p, "flip-both v3");
+}
+
 /* ---- Test: restore_gpu re-cycle clears pipeline cache ---- */
 
 void test_sprite_renderer_restore_gpu_cycle(void) {
@@ -702,6 +769,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_batch_key_atlas_change);
     RUN_TEST(test_sprite_renderer_splits_run_on_actual_page_change);
     RUN_TEST(test_sprite_renderer_polygon_emit);
+    RUN_TEST(test_sprite_renderer_flip_mirrors_around_pivot);
     RUN_TEST(test_sprite_renderer_restore_gpu_cycle);
     RUN_TEST(test_sprite_renderer_pipeline_cache_capacity);
     RUN_TEST(test_sprite_renderer_sampler_override_does_not_stick);

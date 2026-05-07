@@ -65,9 +65,14 @@ static struct {
 #ifdef NT_SPRITE_RENDERER_TEST_ACCESS
     /* Test-only: last emit_one() vertex/index counts captured BEFORE flush
      * resets s_sprite.vertex_count. Read by polygon-emit test to verify
-     * region.vertex_count==N polygons emit N vertices. */
+     * region.vertex_count==N polygons emit N vertices.
+     *
+     * last_emit_first_vertex is the staging offset where the last emit
+     * wrote its vertices — flush only resets vertex_count, not the array
+     * data, so tests can still read positions back via this offset. */
     uint32_t last_emit_vertex_count;
     uint32_t last_emit_index_count;
+    uint32_t last_emit_first_vertex;
 #endif
 } s_sprite;
 // #endregion
@@ -344,8 +349,23 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     const float origin_x = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][0] : r->origin_x;
     const float origin_y = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][1] : r->origin_y;
     const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
-    const float dx = origin_x * (float)r->source_w * ipu;
-    const float dy = origin_y * (float)r->source_h * ipu;
+
+    /* Flip flags — per-vertex negate of cached_pos */
+    bool fx = (flags & NT_SPRITE_FLAG_FLIP_X) != 0;
+    bool fy = (flags & NT_SPRITE_FLAG_FLIP_Y) != 0;
+
+    /* Origin offset baked into translation. cached_pos is source-space, so
+     * the vertex loop's per-vertex flip negates source-space x — to mirror
+     * around the pivot rather than around source x=0, sign-flip dx/dy here
+     * before they get folded into tx/ty/tz. */
+    float dx = origin_x * (float)r->source_w * ipu;
+    float dy = origin_y * (float)r->source_h * ipu;
+    if (fx) {
+        dx = -dx;
+    }
+    if (fy) {
+        dy = -dy;
+    }
     tx -= (m[0] * dx) + (m[4] * dy);
     ty -= (m[1] * dx) + (m[5] * dy);
     tz -= (m[2] * dx) + (m[6] * dy);
@@ -355,10 +375,6 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     uint8_t cg = (uint8_t)((color32 >> 8) & 0xFFU);
     uint8_t cb = (uint8_t)((color32 >> 16) & 0xFFU);
     uint8_t ca = (uint8_t)((color32 >> 24) & 0xFFU);
-
-    /* Flip flags — per-vertex negate of cached_pos */
-    bool fx = (flags & NT_SPRITE_FLAG_FLIP_X) != 0;
-    bool fy = (flags & NT_SPRITE_FLAG_FLIP_Y) != 0;
 
     uint32_t base = s_sprite.vertex_count;
 #ifdef __wasm_simd128__
@@ -441,11 +457,12 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     s_sprite.index_count += r->index_count;
 
 #ifdef NT_SPRITE_RENDERER_TEST_ACCESS
-    /* Capture per-emit counts so polygon test can read them after draw_list
-     * completes (flush resets vertex_count). Fields under same guard in
-     * s_sprite struct (Task 1). */
+    /* Capture per-emit counts + first-vertex offset so tests can read
+     * back emitted positions after draw_list completes (flush resets
+     * vertex_count but leaves the array data intact). */
     s_sprite.last_emit_vertex_count = r->vertex_count;
     s_sprite.last_emit_index_count = r->index_count;
+    s_sprite.last_emit_first_vertex = base;
 #endif
 }
 // #endregion
@@ -617,6 +634,14 @@ uint32_t nt_sprite_renderer_test_draw_call_count(void) { return s_sprite.last_dr
 uint32_t nt_sprite_renderer_test_vertex_count(void) { return s_sprite.vertex_count; }
 uint32_t nt_sprite_renderer_test_last_emit_vertex_count(void) { return s_sprite.last_emit_vertex_count; }
 uint32_t nt_sprite_renderer_test_last_emit_index_count(void) { return s_sprite.last_emit_index_count; }
+
+void nt_sprite_renderer_test_last_emit_position(uint32_t v_idx, float out[3]) {
+    NT_ASSERT(v_idx < s_sprite.last_emit_vertex_count && "last_emit_position: index out of range");
+    const nt_sprite_vertex_t *v = &s_sprite.vertices[s_sprite.last_emit_first_vertex + v_idx];
+    out[0] = v->position[0];
+    out[1] = v->position[1];
+    out[2] = v->position[2];
+}
 bool nt_sprite_renderer_test_initialized(void) { return s_sprite.initialized; }
 #endif
 // #endregion
