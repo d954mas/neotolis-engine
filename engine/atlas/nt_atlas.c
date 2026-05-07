@@ -68,11 +68,11 @@ typedef struct nt_atlas_data {
     nt_resource_t page_resources[NT_ATLAS_MAX_PAGES]; /* NT_RESOURCE_INVALID until on_post_resolve */
     uint8_t page_count;
 
-    /* Per-vertex values the sprite renderer reads directly each frame.
-     * Parallel to vertices[]; baked once at parse/merge so the hot loop
-     * does not redo this math for every sprite × every frame. */
-    float (*cached_pos)[2]; /* vertex pos in world units, relative to the region pivot */
-    float (*cached_uv)[2];  /* atlas UV in [0,1], rotation/flip already applied */
+    /* Per-vertex pos baked once at parse/merge so the hot loop doesn't redo
+     * the math per sprite × per frame. UVs aren't cached separately — atlas
+     * stores them as u16 in the blob and sprite vertex format uses USHORT2N,
+     * so the renderer reads them straight from vertices[]. */
+    float (*cached_pos)[2]; /* (local + trim_offset) * ipu, parallel to vertices[] */
     float ipu;              /* 1 / pixels_per_unit; baked into cached_pos */
 } nt_atlas_data_t;
 // #endregion
@@ -342,7 +342,7 @@ static void grow_cached_array(float (**arr)[2], uint32_t old_cap, uint32_t new_c
 /* Grow vertex/index buffers if the new blob is larger, then bulk-copy
  * payload arrays verbatim. Keeps duplicate region sharing exactly as
  * the builder serialized. Called by both first-parse and merge paths.
- * cached_pos/cached_uv are kept parallel to vertices[] via grow_cached_array. */
+ * cached_pos is kept parallel to vertices[] via grow_cached_array. */
 static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_view_t *v) {
     const NtAtlasHeader *hdr = v->hdr;
     const uint32_t old_cap = ad->vertex_capacity;
@@ -352,7 +352,6 @@ static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_vie
         ad->vertices = new_buf;
         ad->vertex_capacity = hdr->total_vertex_count;
         grow_cached_array(&ad->cached_pos, old_cap, ad->vertex_capacity);
-        grow_cached_array(&ad->cached_uv, old_cap, ad->vertex_capacity);
     }
     if (hdr->total_index_count > ad->index_capacity) {
         uint16_t *new_buf = (uint16_t *)realloc(ad->indices, (size_t)hdr->total_index_count * sizeof(uint16_t));
@@ -372,8 +371,7 @@ static void replace_payload_buffers(nt_atlas_data_t *ad, const nt_atlas_blob_vie
 }
 
 // #region precompute
-/* Re-bake cached_pos/cached_uv for all live regions after parse/merge.
- * UV stays y-down to match PNG row order in the texture upload. */
+/* Re-bake cached_pos for all live regions after parse/merge. */
 static void atlas_precompute_all(nt_atlas_data_t *ad) {
     const float ipu = ad->ipu;
     for (uint32_t i = 0; i < ad->region_count; i++) {
@@ -393,8 +391,6 @@ static void atlas_precompute_all(nt_atlas_data_t *ad) {
              * vector instead. */
             ad->cached_pos[r->vertex_start + v][0] = ((float)raw->local_x + trim_off_x) * ipu;
             ad->cached_pos[r->vertex_start + v][1] = ((float)raw->local_y + trim_off_y) * ipu;
-            ad->cached_uv[r->vertex_start + v][0] = (float)raw->atlas_u * (1.0F / 65535.0F);
-            ad->cached_uv[r->vertex_start + v][1] = (float)raw->atlas_v * (1.0F / 65535.0F);
         }
     }
 }
@@ -443,8 +439,6 @@ static void atlas_on_resolve(const uint8_t *data, uint32_t size, uint32_t runtim
          * tombstoned (vertex_count==0) regions' slices naturally read zero. */
         ad->cached_pos = (float(*)[2])calloc(ad->vertex_capacity, sizeof(float[2]));
         NT_ASSERT(ad->cached_pos);
-        ad->cached_uv = (float(*)[2])calloc(ad->vertex_capacity, sizeof(float[2]));
-        NT_ASSERT(ad->cached_uv);
         ad->ipu = 1.0F; /* default; overwritten in atlas_on_post_resolve if metadata present */
         // #endregion
         // #endregion
@@ -566,9 +560,8 @@ static void atlas_on_cleanup(void *user_data) {
     free(ad->vertices);
     free(ad->indices);
     free(ad->hash_table);
-    /* Cached arrays are owned alongside vertices[]. */
+    /* Cached pos owned alongside vertices[]. */
     free(ad->cached_pos);
-    free(ad->cached_uv);
     free(ad);
 }
 
@@ -701,11 +694,11 @@ const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t regio
     return (const float(*)[2]) & ad->cached_pos[ad->regions[region_index].vertex_start];
 }
 
-const float (*nt_atlas_get_region_cached_uv(nt_resource_t atlas, uint32_t region_index))[2] {
+const nt_atlas_vertex_t *nt_atlas_get_region_raw_vertices(nt_resource_t atlas, uint32_t region_index) {
     const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
-    NT_ASSERT(ad != NULL && "nt_atlas_get_region_cached_uv on unresolved atlas");
-    NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_cached_uv: region_index out of range");
-    return (const float(*)[2]) & ad->cached_uv[ad->regions[region_index].vertex_start];
+    NT_ASSERT(ad != NULL && "nt_atlas_get_region_raw_vertices on unresolved atlas");
+    NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_raw_vertices: region_index out of range");
+    return &ad->vertices[ad->regions[region_index].vertex_start];
 }
 
 const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region_index) {
@@ -798,9 +791,9 @@ const float (*nt_atlas_test_cached_pos(const struct nt_atlas_data *ad))[2] {
     return (const float(*)[2])ad->cached_pos;
 }
 
-const float (*nt_atlas_test_cached_uv(const struct nt_atlas_data *ad))[2] {
+const nt_atlas_vertex_t *nt_atlas_test_raw_vertices(const struct nt_atlas_data *ad) {
     NT_ASSERT(ad != NULL);
-    return (const float(*)[2])ad->cached_uv;
+    return ad->vertices;
 }
 
 float nt_atlas_test_ipu(const struct nt_atlas_data *ad) {

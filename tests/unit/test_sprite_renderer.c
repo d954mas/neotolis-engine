@@ -397,7 +397,7 @@ void test_sprite_renderer_init_shutdown(void) {
 /* The actual contract is enforced by the _Static_assert in nt_sprite_renderer.h.
  * This runtime test mirrors the assertion in case the static check is ever
  * accidentally relaxed (it would still catch the breakage in CI). */
-void test_sprite_renderer_vertex_size_assert(void) { TEST_ASSERT_EQUAL_size_t(24, sizeof(nt_sprite_vertex_t)); }
+void test_sprite_renderer_vertex_size_assert(void) { TEST_ASSERT_EQUAL_size_t(20, sizeof(nt_sprite_vertex_t)); }
 
 /* ---- Test: pipeline cache reuse + miss-creates-new ---- */
 

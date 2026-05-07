@@ -300,6 +300,11 @@ static void get_format_params(nt_vertex_format_t fmt, GLint *size, GLenum *type,
         *type = GL_SHORT;
         *normalized = GL_TRUE;
         break;
+    case NT_FORMAT_USHORT2N:
+        *size = 2;
+        *type = GL_UNSIGNED_SHORT;
+        *normalized = GL_TRUE;
+        break;
     case NT_FORMAT_SHORT4:
         *size = 4;
         *type = GL_SHORT;

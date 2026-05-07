@@ -89,7 +89,7 @@ const uint8_t *nt_sprite_comp_flags(nt_entity_t entity);
 typedef struct {
     const nt_texture_region_t *region;
     const float (*cached_pos)[2];
-    const float (*cached_uv)[2];
+    const nt_atlas_vertex_t *raw_vertices;
     const uint16_t *indices;
     nt_resource_t page_resource;
 } nt_sprite_resolved_region_t;

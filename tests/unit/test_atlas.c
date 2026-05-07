@@ -1493,18 +1493,23 @@ void test_atlas_cached_uv_d4_transform(void) {
         const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
 
         const float(*pos)[2] = nt_atlas_test_cached_pos(ad);
-        const float(*uv)[2] = nt_atlas_test_cached_uv(ad);
-        TEST_ASSERT_NOT_NULL(uv);
+        const nt_atlas_vertex_t *vraw = nt_atlas_test_raw_vertices(ad);
+        TEST_ASSERT_NOT_NULL(vraw);
         TEST_ASSERT_NOT_NULL(pos);
 
+        /* UVs are stored u16 0..65535 in the blob; sprite vertex format uses
+         * USHORT2N (GL normalizes to [0,1]). Convert to float here purely for
+         * the assertion; the renderer copies u16 verbatim. */
         for (uint32_t i = 0; i < 4U; i++) {
             float u = src_u[i];
             float v = src_v[i];
+            float u_actual = (float)vraw[i].atlas_u * (1.0F / 65535.0F);
+            float v_actual = (float)vraw[i].atlas_v * (1.0F / 65535.0F);
             char msg[64];
             (void)snprintf(msg, sizeof(msg), "transform=%u vertex=%u u", (unsigned)t, (unsigned)i);
-            assert_float_close(u, uv[i][0], 1e-5F, msg);
+            assert_float_close(u, u_actual, 1e-5F, msg);
             (void)snprintf(msg, sizeof(msg), "transform=%u vertex=%u v", (unsigned)t, (unsigned)i);
-            assert_float_close(v, uv[i][1], 1e-5F, msg);
+            assert_float_close(v, v_actual, 1e-5F, msg);
         }
 
         /* cleanup between iterations — tearDown also handles it but explicit is clearer */

@@ -138,17 +138,20 @@ void nt_sprite_renderer_restore_gpu(void) {
 // #endregion
 
 // #region pipeline cache
-/* Build the fixed sprite vertex layout once — 24-byte stride is locked.
+/* Build the fixed sprite vertex layout once — 20-byte stride is locked.
  * Uses NT_ATTR_POSITION/COLOR/TEXCOORD0 location enum so the sprite vertex
- * shader can declare matching layout(location=N) bindings. */
+ * shader can declare matching layout(location=N) bindings.
+ * texcoord uses USHORT2N: GL normalizes 0..65535 → 0..1 in the shader at no
+ * cost, and atlas UVs are already u16 in the blob — emit copies them
+ * verbatim without a float roundtrip. */
 static nt_vertex_layout_t s_sprite_layout = {
-    .stride = 24,
+    .stride = 20,
     .attr_count = 3,
     .attrs =
         {
             {.location = NT_ATTR_POSITION, .format = NT_FORMAT_FLOAT3, .offset = 0},
-            {.location = NT_ATTR_TEXCOORD0, .format = NT_FORMAT_FLOAT2, .offset = 12},
-            {.location = NT_ATTR_COLOR, .format = NT_FORMAT_UBYTE4N, .offset = 20},
+            {.location = NT_ATTR_TEXCOORD0, .format = NT_FORMAT_USHORT2N, .offset = 12},
+            {.location = NT_ATTR_COLOR, .format = NT_FORMAT_UBYTE4N, .offset = 16},
         },
 };
 
@@ -315,9 +318,9 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     }
     const nt_texture_region_t *r = resolved->region;
     const float(*cpos)[2] = resolved->cached_pos;
-    const float(*cuv)[2] = resolved->cached_uv;
+    const nt_atlas_vertex_t *vraw = resolved->raw_vertices;
     const uint16_t *idx = resolved->indices;
-    NT_ASSERT(cpos != NULL && cuv != NULL && idx != NULL);
+    NT_ASSERT(cpos != NULL && vraw != NULL && idx != NULL);
     uint32_t page_tex = nt_resource_get(resolved->page_resource);
     if (!ensure_current_cmd_page_texture(page_tex)) {
         return;
@@ -401,8 +404,8 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
             v->position[0] = xs_arr[i];
             v->position[1] = ys_arr[i];
             v->position[2] = zs_arr[i];
-            v->texcoord[0] = cuv[i][0];
-            v->texcoord[1] = cuv[i][1];
+            v->texcoord[0] = vraw[i].atlas_u;
+            v->texcoord[1] = vraw[i].atlas_v;
             v->color[0] = cr;
             v->color[1] = cg;
             v->color[2] = cb;
@@ -424,8 +427,8 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
             v->position[0] = (m[0] * px) + (m[4] * py) + tx;
             v->position[1] = (m[1] * px) + (m[5] * py) + ty;
             v->position[2] = (m[2] * px) + (m[6] * py) + tz;
-            v->texcoord[0] = cuv[i][0];
-            v->texcoord[1] = cuv[i][1];
+            v->texcoord[0] = vraw[i].atlas_u;
+            v->texcoord[1] = vraw[i].atlas_v;
             v->color[0] = cr;
             v->color[1] = cg;
             v->color[2] = cb;

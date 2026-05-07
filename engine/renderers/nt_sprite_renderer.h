@@ -24,14 +24,16 @@ _Static_assert(NT_SPRITE_RENDERER_MAX_VERTICES <= 65536, "MAX_VERTICES must fit 
 #define NT_SPRITE_RENDERER_MAX_DRAW_CMDS 256
 #endif
 
-/* ---- Vertex format — 24 bytes ---- */
+/* ---- Vertex format — 20 bytes ---- */
 
 typedef struct {
-    float position[3]; /* 12 B */
-    float texcoord[2]; /*  8 B */
-    uint8_t color[4];  /*  4 B */
+    float position[3];    /* 12 B */
+    uint16_t texcoord[2]; /*  4 B — normalized to [0,1] in shader (atlas UVs are
+                           * stored as u16 0..65535 in the blob; emit copies them
+                           * directly without float intermediate) */
+    uint8_t color[4];     /*  4 B */
 } nt_sprite_vertex_t;
-_Static_assert(sizeof(nt_sprite_vertex_t) == 24, "sprite vertex must be 24 bytes");
+_Static_assert(sizeof(nt_sprite_vertex_t) == 20, "sprite vertex must be 20 bytes");
 
 /* ---- Init descriptor ---- */
 

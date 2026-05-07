@@ -46,7 +46,7 @@ static void sprite_cache_region(uint16_t idx, nt_resource_t atlas, uint32_t regi
     s_resolved[idx] = (nt_sprite_resolved_region_t){
         .region = region,
         .cached_pos = nt_atlas_get_region_cached_pos(atlas, region_index),
-        .cached_uv = nt_atlas_get_region_cached_uv(atlas, region_index),
+        .raw_vertices = nt_atlas_get_region_raw_vertices(atlas, region_index),
         .indices = nt_atlas_get_region_indices(atlas, region_index),
         .page_resource = page_resource,
     };

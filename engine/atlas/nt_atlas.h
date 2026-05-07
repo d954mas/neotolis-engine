@@ -99,9 +99,12 @@ float nt_atlas_get_pixels_per_unit(nt_resource_t atlas);
  * 1/get_pixels_per_unit() = 1/(1/ipu) — two divisions for the same number. */
 float nt_atlas_get_inverse_pixels_per_unit(nt_resource_t atlas);
 
-/* Cached projections: 1/pixels_per_unit baked into pos, normalized UVs. */
+/* Cached projections: 1/pixels_per_unit baked into pos. UVs are NOT cached
+ * separately — atlas stores them as u16 0..65535 in the blob, sprite
+ * vertex format uses USHORT2N (normalizes to [0,1] in shader at no cost),
+ * so the renderer reads them straight from the raw vertex slice. */
 const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t region_index))[2];
-const float (*nt_atlas_get_region_cached_uv(nt_resource_t atlas, uint32_t region_index))[2];
+const nt_atlas_vertex_t *nt_atlas_get_region_raw_vertices(nt_resource_t atlas, uint32_t region_index);
 const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region_index);
 
 /* ---- Test access (compiled only when NT_ATLAS_TEST_ACCESS is defined) ---- */
@@ -153,11 +156,11 @@ void nt_atlas_test_reset(void);
  * death-test harness. */
 bool nt_atlas_test_validate_header(const uint8_t *data, uint32_t size);
 
-/* Test-only accessors for cached arrays + ipu.
+/* Test-only accessors for cached arrays + raw vertex blob + ipu.
  * Tests using nt_atlas_test_drive_resolve (no resource system) need
  * direct access since the public getters require an nt_resource_t. */
 const float (*nt_atlas_test_cached_pos(const struct nt_atlas_data *ad))[2];
-const float (*nt_atlas_test_cached_uv(const struct nt_atlas_data *ad))[2];
+const nt_atlas_vertex_t *nt_atlas_test_raw_vertices(const struct nt_atlas_data *ad);
 float nt_atlas_test_ipu(const struct nt_atlas_data *ad);
 /* Test-only setter for ipu — used by direct-drive tests to simulate the
  * post_resolve metadata read path without standing up a resource system. */
