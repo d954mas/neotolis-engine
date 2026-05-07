@@ -12,7 +12,6 @@
  * Usage: build_sponza_packs <output_dir>
  */
 
-#include "nt_basisu_encoder.h"
 #include "nt_builder.h"
 
 #include "cgltf.h"
