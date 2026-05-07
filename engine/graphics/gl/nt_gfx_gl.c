@@ -541,11 +541,16 @@ void nt_gfx_backend_begin_frame(void) {
     s_bound_program = 0;
     s_bound_pipeline_slot = 0;
 
-    /* GL_GPU_DISJOINT_EXT clears on read, so check once per frame here rather
-     * than on every poll. The flag indicates the GPU clock was disturbed since
-     * last read; on hit, drop all in-flight timer queries across every segment
-     * — their results are unreliable. Keeps the GLE roundtrip out of the poll
-     * hot path and aligns with one-disjoint-event-per-frame semantics. */
+    /* GL_GPU_DISJOINT_EXT exists only in EXT_disjoint_timer_query_webgl2 (and
+     * GLES variants). Native ARB_timer_query has no disjoint concept — GPU
+     * clock is reliable by spec there. Reading 0x8FBB on the desktop driver
+     * triggers GL_INVALID_ENUM and pollutes glGetError() / KHR_debug callback
+     * output every frame. Web-only.
+     *
+     * Cleared on read, so we check once per frame here rather than on every
+     * poll: on disjoint hit, drop all in-flight timer queries across every
+     * segment (results are unreliable). */
+#ifdef NT_PLATFORM_WEB
     if (s_timer_enabled) {
         GLint disjoint = 0;
         glGetIntegerv(GL_GPU_DISJOINT_EXT, &disjoint);
@@ -556,6 +561,7 @@ void nt_gfx_backend_begin_frame(void) {
             }
         }
     }
+#endif
 }
 
 void nt_gfx_backend_end_frame(void) {
