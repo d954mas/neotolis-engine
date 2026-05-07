@@ -565,6 +565,7 @@ void nt_sprite_renderer_flush(void) {
             bound_mat_id = c->material.id;
         }
 
+        bool cmd_has_unresolved_slot = false;
         for (uint8_t t = 0; t < c->tex_count; t++) {
             if (c->resolved_tex[t] != 0 && c->resolved_tex[t] != bound_tex_ids[t]) {
                 nt_gfx_bind_texture((nt_texture_t){.id = c->resolved_tex[t]}, t);
@@ -586,18 +587,27 @@ void nt_sprite_renderer_flush(void) {
                 want_sampler = nt_gfx_get_texture_default_sampler((nt_texture_t){.id = c->resolved_tex[t]}).id;
             } else {
                 /* Slot declared by material (tex_count > t) but no texture
-                 * resolved. Cmd will render with stale unit state. Usually a
-                 * material/resource resolve race; warn once per flush. */
+                 * resolved. Skip the cmd — drawing would sample whatever
+                 * texture was left on this GL unit by a previous cmd. The
+                 * resource module already provides nt_resource_set_placeholder_texture
+                 * for normal "asset not yet ready" handling; reaching this
+                 * branch means the game didn't register a placeholder, so
+                 * silent skip + once-per-flush warn is the safest default. */
                 if (!s_warned_unbound) {
-                    NT_LOG_WARN("sprite_renderer: cmd slot %u has no resolved texture — material binding race?", (unsigned)t);
+                    NT_LOG_WARN("sprite_renderer: cmd slot %u has no resolved texture — register a placeholder via nt_resource_set_placeholder_texture", (unsigned)t);
                     s_warned_unbound = true;
                 }
+                cmd_has_unresolved_slot = true;
                 want_sampler = 0;
             }
             if (want_sampler != bound_sampler_ids[t]) {
                 nt_gfx_bind_sampler((nt_sampler_t){.id = want_sampler}, t);
                 bound_sampler_ids[t] = want_sampler;
             }
+        }
+
+        if (cmd_has_unresolved_slot) {
+            continue;
         }
 
         /* Per-cmd vertex delta — avoids stats inflation across state splits. */
