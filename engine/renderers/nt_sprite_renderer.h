@@ -51,8 +51,14 @@ nt_result_t nt_sprite_renderer_init(const nt_sprite_renderer_desc_t *desc);
 void nt_sprite_renderer_shutdown(void);
 void nt_sprite_renderer_restore_gpu(void);
 
-/* Contract: atlas page texture always binds to slot 0. Material may declare
- * a slot-0 binding to override sampler / set uniform name. */
+/* Contracts:
+ *   1. Atlas page texture always binds to slot 0. Material may declare a
+ *      slot-0 binding to override sampler / set uniform name.
+ *   2. Caller must pre-filter `items` by visibility — the renderer draws
+ *      every entry unconditionally and does not consult drawable_comp's
+ *      visible flag, color alpha, or entity-enabled state. Use
+ *      nt_render_is_visible() (engine/render/nt_render_util.h) as the
+ *      canonical filter when building the items array. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
 /* INVARIANT for mid-frame callers: flush resets cmd_count to 0 and clears
