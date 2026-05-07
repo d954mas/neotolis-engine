@@ -538,6 +538,12 @@ void nt_sprite_renderer_flush(void) {
             nt_gfx_bind_vertex_buffer(s_sprite.vbo);
             bound_pipeline_id = c->pipeline.id;
             bound_ibo_id = 0;
+            /* Sampler uniforms ("u_tex0" etc) are program-scoped — the new
+             * program has fresh uniform locations defaulting to 0. Reset the
+             * tex/sampler tracking so the inner loop forces rebind +
+             * set_uniform_int for every slot, even if the texture id matches. */
+            memset(bound_tex_ids, 0, sizeof(bound_tex_ids));
+            memset(bound_sampler_ids, 0, sizeof(bound_sampler_ids));
         }
 
         if (s_sprite.ibo.id != bound_ibo_id) {
