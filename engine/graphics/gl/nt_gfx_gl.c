@@ -103,10 +103,20 @@ static GLuint s_instance_gl_buf;          /* GL name of last bound instance buff
 
 static nt_gfx_desc_t s_init_desc; /* resolved desc: defaults applied, used everywhere */
 
+// #region GPU timer segments — types & state
 /* GPU TIME_ELAPSED named segments (EXT_disjoint_timer_query_webgl2 / ARB_timer_query).
- * Ring depth 8 covers WebGL2 driver query latency (typically 1-4 frames, but spikes happen
- * on tab refocus / GPU power state transitions). 4 was insufficient — observed ring-full in
- * bunnymark on Chrome. */
+ *
+ * Self-contained sub-system inside this GL backend. Lives in three clusters:
+ *   1. types & state (this region)
+ *   2. impl: helpers + begin/end (region "GPU timer segments — begin/end")
+ *   3. impl: poll/drop/enable (region "GPU timer segments — poll/lifecycle")
+ * Plus a one-line disjoint check inside nt_gfx_backend_begin_frame (cross-cut
+ * with frame lifecycle, intentional — disjoint clears on read so it must
+ * happen exactly once per frame).
+ *
+ * Ring depth 8 covers WebGL2 driver query latency (typically 1-4 frames, but
+ * spikes happen on tab refocus / GPU power state transitions). 4 was
+ * insufficient — observed ring-full in bunnymark on Chrome. */
 #define NT_GFX_TIMER_RING 8
 #define NT_GFX_TIMER_MAX_SEGMENTS 16
 
@@ -125,6 +135,7 @@ static nt_gfx_segment_state_t s_segments[NT_GFX_TIMER_MAX_SEGMENTS];
 static uint8_t s_segment_count;
 static int8_t s_active_segment = -1; /* index in s_segments while a query is open, -1 otherwise */
 static bool s_timer_warned;          /* one-shot ring-full warning; reset on re-enable */
+// #endregion
 
 /* ---- Transcode buffer (reused across textures, freed after idle) ---- */
 
@@ -419,6 +430,7 @@ bool nt_gfx_backend_is_context_lost(void) { return nt_gfx_gl_ctx_is_lost(); }
 
 /* ---- Frame / Pass ---- */
 
+// #region GPU timer segments — begin/end
 /* Find existing segment by name hash, or allocate a new slot with its own
  * ring of GL_TIME_ELAPSED queries. Linear scan is fine for small N (<= 16). */
 static int8_t segment_find_or_alloc(nt_hash32_t name_hash) {
@@ -491,6 +503,7 @@ void nt_gfx_backend_end_segment(void) {
     seg->head = (uint8_t)((seg->head + 1U) % NT_GFX_TIMER_RING);
     s_active_segment = -1;
 }
+// #endregion
 
 void nt_gfx_backend_begin_frame(void) {
     /* Reset GL state cache so all pipeline binds re-issue GL calls.
@@ -529,6 +542,7 @@ void nt_gfx_backend_end_frame(void) {
     }
 }
 
+// #region GPU timer segments — poll/lifecycle
 bool nt_gfx_backend_poll_segment_time_ns(nt_hash32_t name_hash, uint64_t *out_ns) {
     if (!s_timer_enabled) {
         return false;
@@ -592,6 +606,7 @@ void nt_gfx_backend_set_gpu_timing_enabled(bool enabled) {
 }
 
 bool nt_gfx_backend_is_gpu_timing_supported(void) { return s_timer_enabled; }
+// #endregion
 
 void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) {
     glViewport(0, 0, (GLsizei)g_nt_window.fb_width, (GLsizei)g_nt_window.fb_height);
