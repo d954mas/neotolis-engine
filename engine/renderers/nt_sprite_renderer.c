@@ -542,17 +542,21 @@ void nt_sprite_renderer_flush(void) {
                 /* bind_texture also bound the texture's default sampler. */
                 bound_sampler_ids[t] = nt_gfx_get_texture_default_sampler((nt_texture_t){.id = c->resolved_tex[t]}).id;
             }
-            /* Effective sampler = override if set, else texture's asset default. */
+            /* Effective sampler = override if set, else texture's asset default.
+             * s_warned_unbound is process-scoped but re-armed on every successful
+             * resolve below — symmetric with s_timer_warned in nt_gfx_gl.c. */
+            static bool s_warned_unbound;
             uint32_t want_sampler;
             if (c->resolved_sampler[t].id != 0) {
                 want_sampler = c->resolved_sampler[t].id;
+                s_warned_unbound = false;
             } else if (c->resolved_tex[t] != 0) {
                 want_sampler = nt_gfx_get_texture_default_sampler((nt_texture_t){.id = c->resolved_tex[t]}).id;
+                s_warned_unbound = false;
             } else {
                 /* Slot declared by material (tex_count > t) but no texture
-                 * resolved. Cmd will render with stale unit state. Warn once
-                 * — usually a material/resource resolve race. */
-                static bool s_warned_unbound;
+                 * resolved. Cmd will render with stale unit state. Usually a
+                 * material/resource resolve race; warn once until next success. */
                 if (!s_warned_unbound) {
                     NT_LOG_WARN("sprite_renderer: cmd slot %u has no resolved texture — material binding race?", (unsigned)t);
                     s_warned_unbound = true;
