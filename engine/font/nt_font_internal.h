@@ -76,9 +76,14 @@ typedef struct {
     uint8_t resource_index;       /* which resource this glyph came from */
 } nt_font_cache_slot_t;
 
-/* ---- Font slot (per-handle internal state) ---- */
+/* ---- Font slot (per-handle internal state) ----
+ *
+ * The struct tag `nt_font_slot_s` is forward-declared in nt_font.h so
+ * cross-module hot paths (nt_text_renderer draw loop) can hold an opaque
+ * pointer without pulling in this internal layout. The full layout below
+ * stays module-private. */
 
-typedef struct {
+struct nt_font_slot_s {
     nt_font_metrics_t metrics; /* populated on first nt_font_add */
     bool metrics_set;          /* true after first resource parsed */
 
@@ -163,7 +168,7 @@ typedef struct {
     uint32_t test_measure_cache_hits;
     uint32_t test_measure_cache_misses;
 #endif
-} nt_font_slot_t;
+};
 
 /* ---- Module state ---- */
 

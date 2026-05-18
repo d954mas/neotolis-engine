@@ -328,6 +328,14 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     float scale = size / (float)metrics.units_per_em;
     uint8_t band_count = nt_font_get_band_count(s_text.font);
 
+    /* Resolve the font slot once for the whole draw — the per-codepoint
+     * loop below uses nt_font_lookup_glyph_resolved / _get_kern_resolved
+     * to skip the per-call pool_valid + get_slot that the handle-based
+     * variants would re-do for every character (mirrors the optimization
+     * already applied to nt_font_measure_n). */
+    nt_font_slot_t *slot = nt_font_resolve(s_text.font);
+    NT_ASSERT(slot != NULL); /* set_font requires a valid handle */
+
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
     uint32_t prev_cp = 0;
@@ -359,11 +367,11 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 
         /* Apply kern pair */
         if (prev_cp != 0) {
-            int16_t kern = nt_font_get_kern(s_text.font, prev_cp, codepoint);
+            int16_t kern = nt_font_get_kern_resolved(slot, prev_cp, codepoint);
             pen_x += (float)kern * scale;
         }
 
-        const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph(s_text.font, codepoint);
+        const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph_resolved(slot, codepoint);
         if (!g) {
             prev_cp = codepoint;
             continue;

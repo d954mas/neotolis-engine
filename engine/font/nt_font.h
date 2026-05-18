@@ -195,6 +195,22 @@ nt_font_stats_t nt_font_get_stats(nt_font_t font);
  * eviction or flush. Copy needed data immediately — do not store the pointer. */
 const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t codepoint);
 
+/* ---- Resolved-slot hot-path API (Phase 51 / draw_n parity) ----
+ *
+ * `nt_font_slot_t` is forward-declared as an opaque type; internal layout
+ * lives in nt_font_internal.h and is not part of the public ABI. Callers
+ * with a tight per-codepoint loop (text renderers, layout walkers) call
+ * `nt_font_resolve` once to convert a `nt_font_t` handle to a slot pointer,
+ * then pass the pointer to the `_resolved` variants — bypassing the
+ * per-call `pool_valid + get_slot` overhead that the public-handle
+ * variants pay. Same observable behavior, including upload-on-miss for
+ * glyph lookup. Slot pointer is valid until the next call to
+ * `nt_font_destroy(font)` or `nt_font_shutdown`. */
+typedef struct nt_font_slot_s nt_font_slot_t;
+
+nt_font_slot_t *nt_font_resolve(nt_font_t font); /* NULL if handle is invalid or module uninit */
+const nt_glyph_cache_entry_t *nt_font_lookup_glyph_resolved(nt_font_slot_t *slot, uint32_t codepoint);
+
 /* ---- GPU texture access (for nt_text to bind before draw) ---- */
 
 nt_texture_t nt_font_get_curve_texture(nt_font_t font);
@@ -219,6 +235,10 @@ void nt_font_set_pre_flush_callback(nt_font_pre_flush_fn fn);
 /* ---- Kern pair lookup (for nt_text shaping in Phase 45) ---- */
 
 int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right_codepoint);
+
+/* Slot-resolved kern. Same semantics as nt_font_get_kern minus the per-call
+ * pool_valid + get_slot. Caller MUST hold a slot from nt_font_resolve(). */
+int16_t nt_font_get_kern_resolved(nt_font_slot_t *slot, uint32_t left_codepoint, uint32_t right_codepoint);
 
 /* ---- Test access (test-only) ---- */
 
