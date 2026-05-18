@@ -5,26 +5,27 @@
 #include "graphics/nt_gfx.h"
 #include "pool/nt_pool.h"
 
-/* ---- Measure cache (Phase 51 / D-51-08) ----
+/* ---- Measure cache (Phase 51 / D-51-08, evolved Phase 51.1) ----
  *
- * Per-font 256-entry direct-mapped table indexed by low 8 bits of
- * xxHash32(content, len). Each entry stores the full 32-bit hash + size_bits
- * (bit-cast of float size) for collision detection. Pure replace-on-collision
- * eviction within the 256 entries — NOT LRU; the cache is direct-mapped, a
- * collision in slot N overwrites the previous occupant unconditionally. The
- * name "LRU" in earlier wording was wrong; renamed throughout Phase 51.1.
+ * Per-font direct-mapped table; size is configured per font via
+ * nt_font_create_desc_t.measure_cache_size (POT, 0 = disabled). The index
+ * is `xxHash64(content, len) & (measure_cache_size - 1)`. Each entry
+ * stores the full 64-bit hash + size_bits (bit-cast of float size) for
+ * collision detection. Pure replace-on-collision eviction — a collision
+ * in slot N overwrites the previous occupant unconditionally (NOT LRU).
  *
- * Drift 3 Option B: key uses XXH32 via nt_hash32() — NOT FNV-1a.
+ * History:
+ *   - Drift 3 Option B (Phase 51): xxHash via nt_hash32() — not FNV-1a.
+ *   - Phase 51.1: upgraded to xxHash64 (eliminates theoretical 32-bit
+ *     false-positive cache hits over long sessions; also faster on big
+ *     strings due to wider lanes).
+ *   - Phase 51.1: layout changed from AoS to SoA (see nt_font_measure_cache_t).
+ *   - Phase 51.1: size made runtime-configurable.
  */
-#define NT_FONT_MEASURE_CACHE_SIZE 256U
+#define NT_FONT_MEASURE_CACHE_SIZE 256U /* legacy default; configurable in desc */
 
 /* Sentinel value for ascii_glyph_idx[] — codepoint is absent in all resources. */
 #define NT_FONT_ASCII_IDX_NONE ((uint16_t)0xFFFFU)
-
-/* Default measure cache size when desc->measure_cache_size == 0 and the
- * caller used nt_font_create_desc_defaults (versus a bare {0} that disables
- * the cache outright). Kept as a #define for migration paths that still
- * reference the v1.7 hardcoded constant. */
 
 /* Measure cache (SoA — Structure-of-Arrays).
  *
@@ -110,17 +111,21 @@ typedef struct {
     /* Cache generation (bumped on full flush, for Phase 45 batch invalidation) */
     uint32_t cache_generation;
 
-    /* Measure cache (Phase 51 / D-51-08 / FONT-02). Direct-mapped table,
-     * size = measure_cache_size (power-of-two, configured per font in
-     * nt_font_create_desc_t). Indexed by xxHash32(content,len) &
-     * (measure_cache_size - 1). Drift 3 Option B: xxHash32, not FNV-1a.
-     * Per-font isolation means font_id is redundant in the per-entry key —
-     * collision detection uses {key_hash, size_bits} only.
+    /* Measure cache (Phase 51 / D-51-08 / FONT-02; evolved 51.1). Direct-
+     * mapped table, size = measure_cache_size (power-of-two, configured per
+     * font in nt_font_create_desc_t). Indexed by xxHash64(content,len) &
+     * (measure_cache_size - 1). Per-font isolation means font_id is
+     * redundant in the per-entry key — collision detection uses
+     * {key_hash, size_bits} only.
      *
-     * Heap-allocated at create (NOT in hot path — AGENTS.md permits heap
-     * at lifecycle boundaries). NULL when measure_cache_size == 0 (cache
-     * disabled). The measure_cache_warm flag lets invalidate_cache skip
-     * slots that were never written. */
+     * Layout is SoA — see nt_font_measure_cache_t. Heap-allocated as one
+     * block at create (NOT in hot path — AGENTS.md permits heap at
+     * lifecycle boundaries). All four sub-pointers are NULL when
+     * measure_cache_size == 0 (cache disabled). The measure_cache_warm
+     * flag lets invalidate_cache skip slots that were never written.
+     *
+     * Auto-invalidated on any resource handle change inside nt_font_step
+     * (so async fallback chains don't return stale tofu metrics). */
     nt_font_measure_cache_t measure_cache; /* SoA; all pointers NULL when cache disabled */
     uint32_t measure_cache_size;           /* 0 = disabled; else POT */
     uint32_t measure_cache_mask;           /* measure_cache_size - 1 */

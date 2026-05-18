@@ -139,10 +139,12 @@ typedef struct {
  *                                         wrapper nt_font_measure(p, size) still
  *                                         stops at the first NUL via strlen.
  *
- * Internal per-font direct-mapped cache (256 entries, replace-on-collision —
- * NOT LRU) accelerates repeat calls. Cache is invalidated by
- * nt_font_measure_invalidate_cache() (Phase 53 theme swap) or
- * nt_font_measure_invalidate(font) (per-font reset).
+ * Internal per-font direct-mapped cache (configured via
+ * nt_font_create_desc_t.measure_cache_size; xxHash64-keyed,
+ * replace-on-collision — NOT LRU) accelerates repeat calls. Cache is
+ * invalidated by nt_font_measure_invalidate_cache() (Phase 53 theme swap),
+ * nt_font_measure_invalidate(font) (per-font reset), or automatically
+ * whenever a font resource handle changes inside nt_font_step.
  *
  * Phase 51 / FONT-01.
  */
@@ -154,8 +156,9 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size);
  *
  * Clear measure caches when fonts may have changed semantics. Phase 53
  * theme hot-swap calls nt_font_measure_invalidate_cache() to flush all
- * caches in one go (THEME-10). nt_font_destroy(font) clears its slot's
- * cache automatically via the existing slot memset — no separate call.
+ * caches in one go (THEME-10). nt_font_destroy(font) frees its slot's
+ * cache automatically. nt_font_step also auto-clears the slot's cache on
+ * any resource handle change (async fallback chains stay correct).
  *
  * Both variants are no-ops when the module is uninitialized or the font
  * handle is invalid. The per-font variant intentionally does NOT assert
