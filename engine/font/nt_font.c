@@ -958,7 +958,25 @@ void nt_font_step(void) {
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
             uint32_t ver = nt_resource_get(slot->resources[ri]);
             if (ver == 0) {
-                continue; /* resource not ready yet */
+                /* Resource is no longer available. If we previously had a
+                 * runtime handle here, drop it now so:
+                 *   (a) find_glyph_in_resources slow-path skips this slot
+                 *       via the existing resource_handles[i] == 0 check, and
+                 *   (b) the ASCII fast-path index entries for this resource
+                 *       are rebuilt (otherwise they would still point at the
+                 *       stale handle, and if activate_font later recycles
+                 *       that data-table slot for a different pack,
+                 *       get_font_data(stale) would silently return the new
+                 *       pack's bytes — out-of-range index + wrong-font glyph
+                 *       metrics). Also flush the GPU glyph cache: cached
+                 *       entries carry resource_index = ri and would otherwise
+                 *       outlive the resource. */
+                if (slot->resource_handles[ri] != 0) {
+                    flush_cache(slot);
+                    slot->resource_handles[ri] = 0;
+                    slot_indices_dirty = true;
+                }
+                continue;
             }
             if (ver == slot->resource_handles[ri]) {
                 continue; /* no change */

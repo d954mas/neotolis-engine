@@ -756,6 +756,64 @@ void test_measure_n_cache_custom_size(void) {
     free(blob);
 }
 
+/* ---- FONT-02g: pack unmount invalidates ASCII fast-path index + measure cache ----
+ *
+ * Regression for a stale-handle data corruption window: when a resource
+ * went from loaded (handle = N) to unloaded (nt_resource_get → 0), the
+ * old code path simply `continue`d, leaving slot->resource_handles[ri]
+ * at the stale N. If activate_font later recycled data-table slot N for
+ * a different font's pack, get_font_data(N) would silently return the
+ * new pack's bytes — and the ASCII fast-path index (pointing at the old
+ * pack's glyph indices) would read wrong-font glyph metrics. The fix in
+ * nt_font_step now flushes the glyph cache, clears resource_handles[ri],
+ * and triggers slot_indices_dirty so both the ASCII index and the
+ * measure cache get rebuilt/cleared. */
+void test_measure_n_invalidates_on_resource_unload(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
+
+    /* Register inline so we keep pack_id for unmount (the shared helper
+     * uses a counter-suffixed pack name and doesn't expose the id). */
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_font_blob(&blob_size);
+    uint32_t data_handle = nt_font_test_register_data(blob, blob_size);
+    char pack_name[64];
+    (void)snprintf(pack_name, sizeof(pack_name), "fp_unload_%u", s_vpack_counter++);
+    nt_hash32_t pid = nt_hash32_str(pack_name);
+    nt_hash64_t rid = nt_hash64_str("font_unload");
+    nt_resource_create_pack(pid, 0);
+    nt_resource_register(pid, rid, NT_ASSET_FONT, data_handle);
+    nt_resource_t res = nt_resource_request(rid, NT_ASSET_FONT);
+
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+
+    nt_font_test_reset_measure_counters();
+
+    /* Warm cache: measure twice → 1 miss + 1 hit. */
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
+
+    /* Unmount the only pack carrying this resource. After resolve, the
+     * asset slot has runtime_handle = 0, so nt_resource_get returns 0. */
+    nt_resource_unmount(pid);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Without the fix, measure cache still holds the warm entry → HIT.
+     * With the fix, slot_indices_dirty fires → measure cache cleared → MISS. */
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));   /* unchanged */
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_font_test_measure_cache_misses(font)); /* +1 */
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
 /* ---- Test 9: GPU texture handles (FONT-03) ---- */
 
 void test_font_gpu_textures(void) {
@@ -798,5 +856,6 @@ int main(void) {
     RUN_TEST(test_measure_n_cache_disabled);
     RUN_TEST(test_measure_n_cache_custom_size);
     RUN_TEST(test_measure_n_invalidates_on_resource_change);
+    RUN_TEST(test_measure_n_invalidates_on_resource_unload);
     return UNITY_END();
 }
