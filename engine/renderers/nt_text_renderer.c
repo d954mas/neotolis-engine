@@ -306,13 +306,13 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
 
 // #region Draw
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4]) {
+void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4]) {
     NT_ASSERT(s_text.initialized);
-    if (!utf8 || !*utf8) {
+    if (len == 0U || utf8 == NULL) {
         return;
     }
     if (s_text.font.id == 0) {
-        NT_LOG_WARN("nt_text_renderer_draw: no font set");
+        NT_LOG_WARN("nt_text_renderer_draw_n: no font set");
         return;
     }
 
@@ -330,7 +330,10 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
     float pen_y = 0.0F;
     const float line_advance = (metrics.line_height != 0) ? ((float)metrics.line_height * scale) : size;
 
-    for (const uint8_t *p = (const uint8_t *)utf8; *p; p++) {
+    const uint8_t *p = (const uint8_t *)utf8;
+    const uint8_t *end = p + len;
+
+    for (; p < end; p++) {
         if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
             if (state == NT_UTF8_REJECT) {
                 state = NT_UTF8_ACCEPT; /* recover: skip bad byte, continue parsing */
@@ -370,6 +373,8 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
         prev_cp = codepoint;
     }
 }
+
+void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4]) { nt_text_renderer_draw_n(utf8, utf8 ? strlen(utf8) : 0U, model, size, color); }
 // #endregion
 
 // #region Flush
