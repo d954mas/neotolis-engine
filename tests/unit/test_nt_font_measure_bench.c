@@ -256,7 +256,7 @@ static void bench_long_string_hit(void) {
     nt_font_measure_invalidate(font);
 
     /* ~2 KB ASCII paragraph (lorem-ipsum-style filler). Same content every
-     * call → cache hit. Measures: (xxHash32 over 2 KB) + entry compare cost. */
+     * call → cache hit. Measures: (xxHash64 over 2 KB) + entry compare cost. */
     static char paragraph[2048];
     for (size_t i = 0; i < sizeof(paragraph) - 1U; i++) {
         paragraph[i] = (char)('A' + (int)(i % 26));
@@ -294,7 +294,7 @@ static void bench_long_string_miss(void) {
     nt_font_measure_invalidate(font);
 
     /* 1000 unique ~2 KB strings (the leading 8 chars vary, rest is filler).
-     * Each call: full xxHash32 over 2 KB + full UTF-8 measure pass. The cache
+     * Each call: full xxHash64 over 2 KB + full UTF-8 measure pass. The cache
      * does write but is overwritten next call. Worst case for big-text. */
     const int n_calls = 1000;
     static char texts[1000][2048];

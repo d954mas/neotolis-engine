@@ -24,6 +24,14 @@
  */
 #define NT_FONT_MEASURE_CACHE_SIZE 256U /* legacy default; configurable in desc */
 
+/* Single source of truth for the SoA per-entry footprint. The SoA block
+ * is allocated as one calloc(cache_size, NT_FONT_MEASURE_CACHE_ENTRY_BYTES)
+ * in nt_font_create and zeroed in measure_cache_clear with the same
+ * multiplier — keeping both call sites in sync via this macro means a
+ * layout change in nt_font_measure_cache_t can't silently desync the
+ * alloc/zero sizes. */
+#define NT_FONT_MEASURE_CACHE_ENTRY_BYTES (sizeof(uint64_t) + sizeof(uint32_t) + sizeof(nt_text_size_t) + sizeof(uint8_t))
+
 /* Sentinel value for ascii_glyph_idx[] — codepoint is absent in all resources. */
 #define NT_FONT_ASCII_IDX_NONE ((uint16_t)0xFFFFU)
 

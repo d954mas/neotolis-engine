@@ -1125,7 +1125,7 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
         /* Upper bound matches nt_font.h "Sane range" docstring. Prevents typo
          * like 65536000 from silently asking for ~1.3 GB (21 B/entry). */
         NT_ASSERT(cache_size <= 65536U && "measure_cache_size > 65536 — see nt_font.h sane-range guidance");
-        const size_t per_entry_bytes = sizeof(uint64_t) + sizeof(uint32_t) + sizeof(nt_text_size_t) + sizeof(uint8_t);
+        const size_t per_entry_bytes = NT_FONT_MEASURE_CACHE_ENTRY_BYTES;
         uint8_t *block = (uint8_t *)calloc((size_t)cache_size, per_entry_bytes);
         if (!block) {
             NT_LOG_ERROR("font measure_cache allocation failed (size=%u, bytes=%zu)", (unsigned)cache_size, (size_t)cache_size * per_entry_bytes);
@@ -1707,10 +1707,7 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) { r
 /* Zero the entire SoA cache block (all 4 sub-arrays at once). The block is
  * laid out contiguously in nt_font_create — clearing it via the base
  * pointer (key_hashes) and total size is one memset, not four. */
-static void measure_cache_clear(nt_font_slot_t *slot) {
-    const size_t per_entry_bytes = sizeof(uint64_t) + sizeof(uint32_t) + sizeof(nt_text_size_t) + sizeof(uint8_t);
-    memset(slot->measure_cache.key_hashes, 0, (size_t)slot->measure_cache_size * per_entry_bytes);
-}
+static void measure_cache_clear(nt_font_slot_t *slot) { memset(slot->measure_cache.key_hashes, 0, (size_t)slot->measure_cache_size * NT_FONT_MEASURE_CACHE_ENTRY_BYTES); }
 
 void nt_font_measure_invalidate_cache(void) {
     if (!s_font.initialized) {
