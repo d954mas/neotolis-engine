@@ -18,6 +18,9 @@
  */
 #define NT_FONT_MEASURE_CACHE_SIZE 256U
 
+/* Sentinel value for ascii_glyph_idx[] — codepoint is absent in all resources. */
+#define NT_FONT_ASCII_IDX_NONE ((uint16_t)0xFFFFU)
+
 /* ---- Internal cache entry (extends public entry with LRU data) ---- */
 
 typedef struct {
@@ -89,6 +92,20 @@ typedef struct {
      * during nt_font_step when a resource handle changes; cleared by
      * destroy/flush_cache. */
     bool has_any_kern;
+
+    /* ASCII fast-path index (Phase 51 perf). For codepoints in [0, 128),
+     * stores the position of the matching glyph in its resource's glyph
+     * table, replacing the bsearch with a single array lookup.
+     *   ascii_glyph_idx[cp] == NT_FONT_ASCII_IDX_NONE → not present in any resource
+     *   else: glyph at index ascii_glyph_idx[cp] inside resource ascii_glyph_res[cp]
+     * Built once per resource change in nt_font_step. Walks the glyph table
+     * in order so the first resource that owns a codepoint wins (matches
+     * the lookup precedence of find_glyph_in_resources).
+     *
+     * Size: 128 × 2 + 128 = 384 B per slot; 16 fonts default → 6 KB.
+     * Non-ASCII codepoints still use the bsearch path. */
+    uint16_t ascii_glyph_idx[128];
+    uint8_t ascii_glyph_res[128];
 
 #ifdef NT_FONT_TEST_ACCESS
     uint32_t test_measure_cache_hits;

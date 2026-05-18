@@ -190,8 +190,31 @@ static const NtFontGlyphEntry *find_glyph_in_pack(const uint8_t *blob, uint32_t 
     return (const NtFontGlyphEntry *)bsearch(&codepoint, glyphs, hdr->glyph_count, sizeof(NtFontGlyphEntry), compare_glyph_codepoint);
 }
 
-/* Find glyph across all resources (first wins, per D-18) */
+/* Find glyph across all resources (first wins, per D-18).
+ *
+ * ASCII fast-path (Phase 51 perf): for codepoint < 128, consult the
+ * precomputed slot->ascii_glyph_idx table — one array lookup + one blob
+ * deref + pointer arithmetic, no bsearch. The table is built at
+ * resource-load time in nt_font_step. Non-ASCII / not-in-table fall
+ * through to the existing per-resource bsearch loop. */
 static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, uint8_t *out_resource_index, const NtFontGlyphEntry **out_glyph_entry) {
+    if (codepoint < 128U) {
+        const uint16_t gi = slot->ascii_glyph_idx[codepoint];
+        if (gi != NT_FONT_ASCII_IDX_NONE) {
+            const uint8_t ri = slot->ascii_glyph_res[codepoint];
+            uint32_t blob_size = 0;
+            const uint8_t *blob = get_font_data(slot->resource_handles[ri], &blob_size);
+            if (blob && blob_size >= sizeof(NtFontAssetHeader)) {
+                const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
+                *out_resource_index = ri;
+                *out_glyph_entry = glyphs + gi;
+                return true;
+            }
+        }
+        /* ASCII char not in any resource — fall through to slow path (rare,
+         * but possible for missing-glyph cases where tofu fallback is used). */
+    }
+
     for (uint8_t i = 0; i < slot->resource_count; i++) {
         if (slot->resource_handles[i] == 0) {
             continue; /* not loaded yet */
@@ -963,13 +986,23 @@ void nt_font_step(void) {
 
             slot->resource_handles[ri] = ver;
 
-            /* Recompute has_any_kern across ALL active resources whenever any
-             * handle changes (load or reload). Drives the fast-skip in
-             * nt_font_get_kern — most Latin fonts ship without kern tables,
-             * so this gate eliminates the entire per-codepoint kern lookup
-             * loop for them. One linear scan over each blob's glyph table
-             * at load time; cost amortized to zero per draw. */
+            /* Recompute has_any_kern + rebuild ASCII fast-path index across
+             * ALL active resources whenever any handle changes (load or
+             * reload). One pass per resource; we iterate the glyph table
+             * once and update both data structures in flight.
+             *
+             * has_any_kern drives the kern-skip in nt_font_get_kern (most
+             * Latin fonts ship without kern tables).
+             *
+             * ascii_glyph_idx[] replaces the per-codepoint bsearch with an
+             * O(1) array lookup for codepoints < 128 — the common case for
+             * Latin UIs. First resource that owns a codepoint wins (matches
+             * the precedence of find_glyph_in_resources). */
             slot->has_any_kern = false;
+            for (size_t a = 0; a < (sizeof(slot->ascii_glyph_idx) / sizeof(slot->ascii_glyph_idx[0])); a++) {
+                slot->ascii_glyph_idx[a] = NT_FONT_ASCII_IDX_NONE;
+                slot->ascii_glyph_res[a] = 0U;
+            }
             for (uint8_t k = 0; k < slot->resource_count; k++) {
                 if (slot->resource_handles[k] == 0) {
                     continue;
@@ -982,13 +1015,14 @@ void nt_font_step(void) {
                 const NtFontAssetHeader *scan_hdr = (const NtFontAssetHeader *)scan_blob;
                 const NtFontGlyphEntry *scan_glyphs = (const NtFontGlyphEntry *)(scan_blob + sizeof(NtFontAssetHeader));
                 for (uint32_t gi = 0; gi < scan_hdr->glyph_count; gi++) {
+                    const uint32_t cp = scan_glyphs[gi].codepoint;
                     if (scan_glyphs[gi].kern_count != 0U) {
                         slot->has_any_kern = true;
-                        break;
                     }
-                }
-                if (slot->has_any_kern) {
-                    break;
+                    if (cp < 128U && slot->ascii_glyph_idx[cp] == NT_FONT_ASCII_IDX_NONE && gi < NT_FONT_ASCII_IDX_NONE) {
+                        slot->ascii_glyph_idx[cp] = (uint16_t)gi;
+                        slot->ascii_glyph_res[cp] = k;
+                    }
                 }
             }
         }
@@ -1022,6 +1056,13 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     uint32_t slot_index = nt_pool_slot_index(id);
     nt_font_slot_t *slot = &s_font.slots[slot_index];
     memset(slot, 0, sizeof(*slot));
+
+    /* ASCII fast-path index — sentinel-fill before any resource loads.
+     * memset(slot, 0) zeros it, but 0 is a legitimate glyph index, so we
+     * need to explicitly set NT_FONT_ASCII_IDX_NONE on every entry. */
+    for (size_t i = 0; i < (sizeof(slot->ascii_glyph_idx) / sizeof(slot->ascii_glyph_idx[0])); i++) {
+        slot->ascii_glyph_idx[i] = NT_FONT_ASCII_IDX_NONE;
+    }
 
     // #region Store config
     slot->curve_tex_width = desc->curve_texture_width;
@@ -1370,6 +1411,24 @@ typedef struct {
 
 static nt_font_glyph_lookup_t lookup_glyph_entry_in_slot(const nt_font_slot_t *slot, uint32_t codepoint) {
     nt_font_glyph_lookup_t out = {0};
+
+    /* ASCII fast-path: O(1) array lookup instead of per-resource bsearch. */
+    if (codepoint < 128U) {
+        const uint16_t gi = slot->ascii_glyph_idx[codepoint];
+        if (gi != NT_FONT_ASCII_IDX_NONE) {
+            const uint8_t ri = slot->ascii_glyph_res[codepoint];
+            uint32_t blob_size = 0;
+            const uint8_t *blob = get_font_data(slot->resource_handles[ri], &blob_size);
+            if (blob && blob_size >= sizeof(NtFontAssetHeader)) {
+                const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
+                out.entry = glyphs + gi;
+                out.blob = blob;
+                out.blob_size = blob_size;
+                return out;
+            }
+        }
+    }
+
     for (uint8_t i = 0; i < slot->resource_count; i++) {
         if (slot->resource_handles[i] == 0) {
             continue;
