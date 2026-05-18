@@ -1392,7 +1392,7 @@ uint32_t nt_font_get_cache_generation(nt_font_t font) {
 
 /* ---- Kern pair lookup ---- */
 
-int16_t nt_font_get_kern_resolved(nt_font_slot_t *slot, uint32_t left_codepoint, uint32_t right_codepoint) {
+int16_t nt_font_get_kern_resolved(const nt_font_slot_t *slot, uint32_t left_codepoint, uint32_t right_codepoint) {
     NT_ASSERT(slot != NULL);
 
     /* Fast-skip: most Latin fonts have no kern table. has_any_kern is set

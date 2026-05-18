@@ -204,8 +204,18 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t code
  * then pass the pointer to the `_resolved` variants — bypassing the
  * per-call `pool_valid + get_slot` overhead that the public-handle
  * variants pay. Same observable behavior, including upload-on-miss for
- * glyph lookup. Slot pointer is valid until the next call to
- * `nt_font_destroy(font)` or `nt_font_shutdown`. */
+ * glyph lookup.
+ *
+ * Lifetime contract:
+ *   - Pointer ADDRESS is stable until `nt_font_destroy(font)` or
+ *     `nt_font_shutdown` — the slots array is allocated once at init
+ *     and slot indices don't move.
+ *   - Pointer CONTENTS may mutate on any `nt_font_step` call (resource
+ *     load/unload triggers `rebuild_slot_indices`, ASCII fast-path
+ *     refresh, measure_cache clear, glyph cache flush). Hold the
+ *     pointer only within a single draw scope — typically resolve at
+ *     the top of `_draw_n` / measure pass and discard at the end.
+ *     Do NOT cache slot pointers across frames. */
 typedef struct nt_font_slot_s nt_font_slot_t;
 
 nt_font_slot_t *nt_font_resolve(nt_font_t font); /* NULL if handle is invalid or module uninit */
@@ -237,8 +247,10 @@ void nt_font_set_pre_flush_callback(nt_font_pre_flush_fn fn);
 int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right_codepoint);
 
 /* Slot-resolved kern. Same semantics as nt_font_get_kern minus the per-call
- * pool_valid + get_slot. Caller MUST hold a slot from nt_font_resolve(). */
-int16_t nt_font_get_kern_resolved(nt_font_slot_t *slot, uint32_t left_codepoint, uint32_t right_codepoint);
+ * pool_valid + get_slot. Caller MUST hold a slot from nt_font_resolve().
+ * Pure read — the slot pointer is const because this lookup never mutates
+ * cache state (the kern table sits in the immutable blob). */
+int16_t nt_font_get_kern_resolved(const nt_font_slot_t *slot, uint32_t left_codepoint, uint32_t right_codepoint);
 
 /* ---- Test access (test-only) ---- */
 

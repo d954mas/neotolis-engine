@@ -332,9 +332,17 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
      * loop below uses nt_font_lookup_glyph_resolved / _get_kern_resolved
      * to skip the per-call pool_valid + get_slot that the handle-based
      * variants would re-do for every character (mirrors the optimization
-     * already applied to nt_font_measure_n). */
+     * already applied to nt_font_measure_n).
+     *
+     * Caller contract says set_font must hold a valid handle, so this is
+     * an assert in debug/trap-release. The graceful fallback below is for
+     * OFF-mode production builds where NT_ASSERT vanishes — without it,
+     * a destroyed-then-redrawn font would NPE inside the inner loop. */
     nt_font_slot_t *slot = nt_font_resolve(s_text.font);
-    NT_ASSERT(slot != NULL); /* set_font requires a valid handle */
+    NT_ASSERT(slot != NULL);
+    if (!slot) {
+        return;
+    }
 
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
