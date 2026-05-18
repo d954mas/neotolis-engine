@@ -1122,6 +1122,9 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     if (desc->measure_cache_size != 0U) {
         const uint32_t cache_size = desc->measure_cache_size;
         NT_ASSERT((cache_size & (cache_size - 1U)) == 0U && "measure_cache_size must be power-of-two");
+        /* Upper bound matches nt_font.h "Sane range" docstring. Prevents typo
+         * like 65536000 from silently asking for ~1.3 GB (21 B/entry). */
+        NT_ASSERT(cache_size <= 65536U && "measure_cache_size > 65536 — see nt_font.h sane-range guidance");
         const size_t per_entry_bytes = sizeof(uint64_t) + sizeof(uint32_t) + sizeof(nt_text_size_t) + sizeof(uint8_t);
         uint8_t *block = (uint8_t *)calloc((size_t)cache_size, per_entry_bytes);
         if (!block) {

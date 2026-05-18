@@ -267,10 +267,12 @@ void nt_gfx_begin_frame(void) {
     memset(&g_nt_gfx.frame_stats, 0, sizeof(g_nt_gfx.frame_stats));
     nt_gfx_backend_begin_frame();
     /* Defensive reset (Phase 51 / D-51-06): walker assumes clean scissor state.
-     * GPU state may not survive across frames (WebGL context loss, driver-level
-     * resets) — re-issue the disable every frame so the cached flag and GL
-     * state are guaranteed to agree at frame entry. */
-    nt_gfx_set_scissor_enabled(false);
+     * Only reissue when the cached flag says enabled — GL_SCISSOR_TEST defaults
+     * to disabled after any context reset, so a cached "disabled" already agrees
+     * with hardware state and the glDisable call would be redundant per frame. */
+    if (s_gfx.draw_state.scissor_enabled) {
+        nt_gfx_set_scissor_enabled(false);
+    }
 }
 
 void nt_gfx_end_frame(void) {
