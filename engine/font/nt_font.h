@@ -1,6 +1,8 @@
 #ifndef NT_FONT_H
 #define NT_FONT_H
 
+#include <stddef.h>
+
 #include "core/nt_types.h"
 #include "graphics/nt_gfx.h"
 #include "resource/nt_resource.h"
@@ -99,7 +101,33 @@ typedef struct {
     float height;
 } nt_text_size_t;
 
+/* Length-aware variant of nt_font_measure — accepts non-NUL-terminated
+ * buffers (Clay_StringSlice contract). Iterates exactly `len` bytes.
+ * Edge cases:
+ *   - len == 0           → returns {0, 0}
+ *   - utf8 == NULL       → returns {0, 0} (NULL with len > 0 is defensive guard)
+ *   - UTF-8 cut at boundary by `len` → trailing incomplete codepoint is dropped
+ *     via NT_UTF8_REJECT recovery; no over-read past utf8 + len.
+ *
+ * Internal per-font LRU cache (256 entries) accelerates repeat calls.
+ * Cache is invalidated by nt_font_measure_invalidate_cache() (Phase 53
+ * theme swap) or nt_font_measure_invalidate(font) (per-font reset).
+ *
+ * Phase 51 / FONT-01.
+ */
+nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size);
+
 nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size);
+
+/* ---- Measure cache invalidation (Phase 51 / FONT-02 / D-51-10) ----
+ *
+ * Clear LRU measure caches when fonts may have changed semantics. Phase 53
+ * theme hot-swap calls nt_font_measure_invalidate_cache() to flush all
+ * caches in one go (THEME-10). nt_font_destroy(font) clears its slot's
+ * cache automatically via the existing slot memset — no separate call.
+ */
+void nt_font_measure_invalidate_cache(void);     /* clears ALL fonts' caches */
+void nt_font_measure_invalidate(nt_font_t font); /* clears one font's cache */
 
 /* ---- Lifecycle ---- */
 
@@ -157,6 +185,12 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
 
 #ifdef NT_FONT_TEST_ACCESS
 uint32_t nt_font_test_register_data(const uint8_t *data, uint32_t size);
+
+/* Test-only measure-cache observation (D-51-11). Counters are incremented
+ * inside nt_font_measure_n cache lookup branches. */
+uint32_t nt_font_test_measure_cache_hits(nt_font_t font);
+uint32_t nt_font_test_measure_cache_misses(nt_font_t font);
+void nt_font_test_reset_measure_counters(void); /* iterates all slots, zeros both counters */
 #endif
 
 #endif /* NT_FONT_H */
