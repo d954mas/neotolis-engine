@@ -26,13 +26,38 @@
  * the cache outright). Kept as a #define for migration paths that still
  * reference the v1.7 hardcoded constant. */
 
-/* Measure cache entry — direct-mapped, 20 bytes per entry. */
+/* Measure cache (SoA — Structure-of-Arrays).
+ *
+ * On lookup we read key_hashes[i], size_bits[i], valid[i] to test for a hit.
+ * Only on a confirmed hit do we touch values[i]. With AoS, an entry would
+ * be 24 B and EVERY lookup loads the entire entry into L1 — including the
+ * 8 B value that the miss path never reads. SoA splits the per-entry data
+ * into 4 parallel arrays:
+ *
+ *   key_hashes  — 8 B/entry (xxHash64) — read on every lookup
+ *   size_bits   — 4 B/entry            — read on every lookup
+ *   valid       — 1 B/entry            — read on every lookup
+ *   values      — 8 B/entry            — read ONLY on a confirmed hit
+ *
+ * Total: 21 B per entry (no padding), 13 B in the hot bands. At 256 entries
+ * a single 64 B cache line covers 8 hash slots' (hash+size+valid) compactly.
+ *
+ * key_hash is 64-bit xxHash64(content, len). At 32-bit, false-positive cache
+ * hits become statistically possible in long sessions (~10⁻⁸ per call ×
+ * 10K calls/session = ~0.01% chance of one bogus result); 64-bit drops that
+ * to ~10⁻¹⁹ per call — effectively zero. size_bits stays as a separate
+ * field so two requests for the same string at different sizes don't alias.
+ */
 typedef struct {
-    uint32_t key_hash;  /* full 32-bit xxHash for collision detection */
-    uint32_t size_bits; /* bit_cast<uint32_t>(float size) — exact comparison, no quantization */
-    nt_text_size_t value;
-    bool valid;
-} nt_font_measure_cache_entry_t;
+    /* All four arrays live in one calloc'd block, [measure_cache_size] each,
+     * laid out: key_hashes | size_bits | values | valid. The pointers below
+     * point into that block. nt_font_destroy frees key_hashes (the base);
+     * the others are not freed independently. */
+    uint64_t *key_hashes;   /* [measure_cache_size] — xxHash64 of content */
+    uint32_t *size_bits;    /* [measure_cache_size] — bit_cast<u32>(size) */
+    nt_text_size_t *values; /* [measure_cache_size] — measured w/h */
+    uint8_t *valid;         /* [measure_cache_size] — 0/1 occupancy flag */
+} nt_font_measure_cache_t;
 
 /* ---- Internal cache entry (extends public entry with LRU data) ---- */
 
@@ -96,10 +121,10 @@ typedef struct {
      * at lifecycle boundaries). NULL when measure_cache_size == 0 (cache
      * disabled). The measure_cache_warm flag lets invalidate_cache skip
      * slots that were never written. */
-    nt_font_measure_cache_entry_t *measure_cache; /* [measure_cache_size] or NULL */
-    uint16_t measure_cache_size;                  /* 0 = disabled; else POT */
-    uint16_t measure_cache_mask;                  /* measure_cache_size - 1 */
-    bool measure_cache_warm;                      /* true after any write; lets invalidate_cache skip cold slots */
+    nt_font_measure_cache_t measure_cache; /* SoA; all pointers NULL when cache disabled */
+    uint32_t measure_cache_size;           /* 0 = disabled; else POT */
+    uint32_t measure_cache_mask;           /* measure_cache_size - 1 */
+    bool measure_cache_warm;               /* true after any write; lets invalidate_cache skip cold slots */
     /* True if ANY loaded resource has at least one glyph with kern_count > 0.
      * Cheap fast-path gate in measure_n / draw_n: most Latin fonts ship with
      * no kern table, so we skip the per-codepoint kern lookup entirely. Set
