@@ -727,12 +727,20 @@ void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot) {
     nt_gfx_backend_bind_sampler(e->backend, slot);
 }
 
-/* ---- Scissor and viewport (Phase 51) ---- */
+/* ---- Scissor and viewport (Phase 51) ----
+ *
+ * All three wrappers early-return on context loss to stay consistent with
+ * every other public nt_gfx_* setter — the backend is dead, and the cached
+ * draw_state must not diverge from "no state because no context". The
+ * walker re-issues scissor/viewport from a clean frame after restore. */
 
 void nt_gfx_set_scissor(int x, int y, int w, int h) {
     /* Negative width/height is undefined in GL — assert early per AGENTS.md "fail early". */
     NT_ASSERT(w >= 0);
     NT_ASSERT(h >= 0);
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
     s_gfx.draw_state.scissor_rect[0] = x;
     s_gfx.draw_state.scissor_rect[1] = y;
     s_gfx.draw_state.scissor_rect[2] = w;
@@ -741,6 +749,9 @@ void nt_gfx_set_scissor(int x, int y, int w, int h) {
 }
 
 void nt_gfx_set_scissor_enabled(bool enabled) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
     s_gfx.draw_state.scissor_enabled = enabled;
     nt_gfx_backend_set_scissor_enabled(enabled);
 }
@@ -748,6 +759,9 @@ void nt_gfx_set_scissor_enabled(bool enabled) {
 void nt_gfx_set_viewport(int x, int y, int w, int h) {
     NT_ASSERT(w >= 0);
     NT_ASSERT(h >= 0);
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
     s_gfx.draw_state.viewport_rect[0] = x;
     s_gfx.draw_state.viewport_rect[1] = y;
     s_gfx.draw_state.viewport_rect[2] = w;
