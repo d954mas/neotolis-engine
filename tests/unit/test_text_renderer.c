@@ -284,6 +284,63 @@ void test_draw_newline_advances_to_next_line(void) {
     TEST_ASSERT_TRUE(second_y < first_y);
 }
 
+/* ---- Test 12: TEXT-01 — _draw_n produces byte-identical vertex stream to _draw ---- */
+
+void test_draw_n_matches_draw(void) {
+    /* Capture vertex stream from existing _draw on NUL-terminated "AB" */
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white);
+    const uint32_t draw_vcount = nt_text_renderer_test_vertex_count();
+    const uint32_t draw_gcount = nt_text_renderer_test_glyph_count();
+    TEST_ASSERT_EQUAL_UINT32(8U, draw_vcount); /* 2 visible glyphs × 4 verts */
+    TEST_ASSERT_EQUAL_UINT32(2U, draw_gcount);
+
+    /* Snapshot vertex bytes — flush will zero the staging buffer counters next,
+     * so we copy out before reset. Stride is 68 bytes per nt_text_vertex_t. */
+    const size_t bytes_to_copy = (size_t)draw_vcount * 68U;
+    uint8_t buf_draw[8U * 68U];
+    memcpy(buf_draw, nt_text_renderer_test_vertices(), bytes_to_copy);
+
+    /* Reset staging counters (no pipeline → flush warns + zeros counters). */
+    nt_text_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_vertex_count());
+
+    /* Call length-aware variant with matching length */
+    nt_text_renderer_draw_n("AB", 2U, s_identity, 32.0F, s_white);
+    const uint32_t draw_n_vcount = nt_text_renderer_test_vertex_count();
+    const uint32_t draw_n_gcount = nt_text_renderer_test_glyph_count();
+
+    TEST_ASSERT_EQUAL_UINT32(draw_vcount, draw_n_vcount);
+    TEST_ASSERT_EQUAL_UINT32(draw_gcount, draw_n_gcount);
+    TEST_ASSERT_EQUAL_MEMORY(buf_draw, nt_text_renderer_test_vertices(), bytes_to_copy);
+}
+
+/* ---- Test 13: TEXT-01b — poisoned byte at utf8[len] does NOT contribute (no over-read) ---- */
+
+void test_draw_n_does_not_over_read(void) {
+    /* Reference: _draw on the clean "AB" string */
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white);
+    const uint32_t ref_vcount = nt_text_renderer_test_vertex_count();
+    TEST_ASSERT_EQUAL_UINT32(8U, ref_vcount);
+
+    const size_t bytes_to_copy = (size_t)ref_vcount * 68U;
+    uint8_t buf_ref[8U * 68U];
+    memcpy(buf_ref, nt_text_renderer_test_vertices(), bytes_to_copy);
+
+    nt_text_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_vertex_count());
+
+    /* Stack buffer with poisoned bytes at and past index 2. Stack-array literal
+     * expresses "intentionally not NUL-terminated" without tripping
+     * bugprone-not-null-terminated-result (matches test_font.c precedent). */
+    const char buf[8] = {'A', 'B', 'X', 'X', 'X', 'X', 'X', 'X'};
+
+    nt_text_renderer_draw_n(buf, 2U, s_identity, 32.0F, s_white);
+    const uint32_t bounded_vcount = nt_text_renderer_test_vertex_count();
+
+    TEST_ASSERT_EQUAL_UINT32(ref_vcount, bounded_vcount);
+    TEST_ASSERT_EQUAL_MEMORY(buf_ref, nt_text_renderer_test_vertices(), bytes_to_copy);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -299,5 +356,7 @@ int main(void) {
     RUN_TEST(test_flush_resets_counts);
     RUN_TEST(test_measure_width_increases);
     RUN_TEST(test_draw_newline_advances_to_next_line);
+    RUN_TEST(test_draw_n_matches_draw);
+    RUN_TEST(test_draw_n_does_not_over_read);
     return UNITY_END();
 }
