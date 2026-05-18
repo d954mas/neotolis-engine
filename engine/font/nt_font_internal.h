@@ -5,6 +5,17 @@
 #include "graphics/nt_gfx.h"
 #include "pool/nt_pool.h"
 
+/* ---- Measure cache (Phase 51 / D-51-08) ----
+ *
+ * Per-font 256-entry direct-mapped table indexed by low 8 bits of
+ * xxHash32(content, len). Each entry stores the full 32-bit hash + size_bits
+ * (bit-cast of float size) for collision detection. Pure replace-on-collision
+ * eviction within the 256 entries; lru_tick is bookkeeping for inspection.
+ *
+ * Drift 3 Option B: key uses XXH32 via nt_hash32() — NOT FNV-1a.
+ */
+#define NT_FONT_MEASURE_CACHE_SIZE 256U
+
 /* ---- Internal cache entry (extends public entry with LRU data) ---- */
 
 typedef struct {
@@ -55,6 +66,25 @@ typedef struct {
 
     /* Cache generation (bumped on full flush, for Phase 45 batch invalidation) */
     uint32_t cache_generation;
+
+    /* Measure cache (Phase 51 / D-51-08 / FONT-02). Direct-mapped 256 entries
+     * per font, ~6 KB per slot (24 B × 256). Indexed by xxHash32(content,len) & 255.
+     * Drift 3 Option B: xxHash32, not FNV-1a. Per-font isolation means
+     * font_id is redundant in the per-entry key — collision detection uses
+     * {key_hash, size_bits} only. */
+    struct {
+        uint32_t key_hash;  /* full 32-bit xxHash for collision detection */
+        uint32_t size_bits; /* bit_cast<uint32_t>(float size) — exact comparison, no quantization */
+        uint32_t lru_tick;  /* last touched tick (bookkeeping; compared with measure_cache_tick) */
+        nt_text_size_t value;
+        bool valid;
+    } measure_cache[NT_FONT_MEASURE_CACHE_SIZE];
+    uint32_t measure_cache_tick; /* monotonic tick; bumped on every measure_n call */
+
+#ifdef NT_FONT_TEST_ACCESS
+    uint32_t test_measure_cache_hits;
+    uint32_t test_measure_cache_misses;
+#endif
 } nt_font_slot_t;
 
 /* ---- Module state ---- */
