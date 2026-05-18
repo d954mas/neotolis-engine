@@ -103,15 +103,23 @@ typedef struct {
 
 /* Length-aware variant of nt_font_measure — accepts non-NUL-terminated
  * buffers (Clay_StringSlice contract). Iterates exactly `len` bytes.
- * Edge cases:
- *   - len == 0           → returns {0, 0}
- *   - utf8 == NULL       → returns {0, 0} (NULL with len > 0 is defensive guard)
- *   - UTF-8 cut at boundary by `len` → trailing incomplete codepoint is dropped
- *     via NT_UTF8_REJECT recovery; no over-read past utf8 + len.
  *
- * Internal per-font LRU cache (256 entries) accelerates repeat calls.
- * Cache is invalidated by nt_font_measure_invalidate_cache() (Phase 53
- * theme swap) or nt_font_measure_invalidate(font) (per-font reset).
+ * Edge cases (system-boundary tolerant — this function is called from
+ * Clay's measure callback with potentially malformed Clay_StringSlice):
+ *   - len == 0                          → returns {0, 0}
+ *   - utf8 == NULL                      → returns {0, 0} (regardless of len)
+ *   - UTF-8 cut at boundary by `len`    → trailing incomplete codepoint dropped
+ *                                         via NT_UTF8_REJECT recovery; no over-read
+ *                                         past utf8 + len.
+ *   - embedded NUL in [utf8, utf8+len)  → treated as a normal codepoint (tofu
+ *                                         glyph), NOT a string terminator. The
+ *                                         wrapper nt_font_measure(p, size) still
+ *                                         stops at the first NUL via strlen.
+ *
+ * Internal per-font direct-mapped cache (256 entries, replace-on-collision —
+ * NOT LRU) accelerates repeat calls. Cache is invalidated by
+ * nt_font_measure_invalidate_cache() (Phase 53 theme swap) or
+ * nt_font_measure_invalidate(font) (per-font reset).
  *
  * Phase 51 / FONT-01.
  */
@@ -121,10 +129,15 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size);
 
 /* ---- Measure cache invalidation (Phase 51 / FONT-02 / D-51-10) ----
  *
- * Clear LRU measure caches when fonts may have changed semantics. Phase 53
+ * Clear measure caches when fonts may have changed semantics. Phase 53
  * theme hot-swap calls nt_font_measure_invalidate_cache() to flush all
  * caches in one go (THEME-10). nt_font_destroy(font) clears its slot's
  * cache automatically via the existing slot memset — no separate call.
+ *
+ * Both variants are no-ops when the module is uninitialized or the font
+ * handle is invalid. The per-font variant intentionally does NOT assert
+ * on a bad handle — Phase 53 theme code may legitimately invalidate a
+ * font slot that was just destroyed during teardown.
  */
 void nt_font_measure_invalidate_cache(void);     /* clears ALL fonts' caches */
 void nt_font_measure_invalidate(nt_font_t font); /* clears one font's cache */

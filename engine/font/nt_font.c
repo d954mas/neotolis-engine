@@ -1317,7 +1317,11 @@ static inline uint32_t measure_size_bits(float size) {
 nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size) {
     nt_text_size_t result = {0.0F, 0.0F};
 
-    /* D-51-07 edge cases */
+    /* D-51-07 edge cases. NULL utf8 with len > 0 is treated as empty input
+     * defensively — this function sits at a Clay-callback boundary (system
+     * edge per AGENTS.md "validate at boundaries"), and silently returning
+     * {0,0} is safer than crashing the UI declaration phase on a malformed
+     * Clay_StringSlice. */
     if (len == 0U || utf8 == NULL) {
         return result;
     }
@@ -1335,12 +1339,8 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
     const uint32_t size_bits = measure_size_bits(size);
     const uint32_t slot_index = key_hash & (NT_FONT_MEASURE_CACHE_SIZE - 1U); /* & 255 */
 
-    /* Bump monotonic tick (every call advances it) */
-    slot->measure_cache_tick++;
-
-    /* Cache lookup */
+    /* Cache lookup — direct-mapped, replace-on-collision (NOT LRU). */
     if (slot->measure_cache[slot_index].valid && slot->measure_cache[slot_index].key_hash == key_hash && slot->measure_cache[slot_index].size_bits == size_bits) {
-        slot->measure_cache[slot_index].lru_tick = slot->measure_cache_tick;
 #ifdef NT_FONT_TEST_ACCESS
         slot->test_measure_cache_hits++;
 #endif
@@ -1398,9 +1398,9 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
      * eviction at 256-entry table). */
     slot->measure_cache[slot_index].key_hash = key_hash;
     slot->measure_cache[slot_index].size_bits = size_bits;
-    slot->measure_cache[slot_index].lru_tick = slot->measure_cache_tick;
     slot->measure_cache[slot_index].value = result;
     slot->measure_cache[slot_index].valid = true;
+    slot->measure_cache_warm = true;
 
     return result;
 }
@@ -1410,6 +1410,12 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) { r
 // #endregion
 
 // #region Measure cache invalidation (Phase 51 / FONT-02 / D-51-10)
+/* Both variants share the same contract: silently no-op if the module is
+ * uninitialized or the font handle is invalid. Phase 53 theme swap calls
+ * _cache between frames at every theme change — must not crash the game
+ * if a theme is swapped before the font module is up. The per-font variant
+ * is symmetric for the same reason. */
+
 void nt_font_measure_invalidate_cache(void) {
     if (!s_font.initialized) {
         return;
@@ -1419,20 +1425,24 @@ void nt_font_measure_invalidate_cache(void) {
             continue;
         }
         nt_font_slot_t *slot = &s_font.slots[i];
+        if (!slot->measure_cache_warm) {
+            continue; /* cold slot — never written, nothing to clear */
+        }
         memset(slot->measure_cache, 0, sizeof(slot->measure_cache));
-        slot->measure_cache_tick = 0U;
+        slot->measure_cache_warm = false;
     }
 }
 
 void nt_font_measure_invalidate(nt_font_t font) {
-    NT_ASSERT(s_font.initialized);
-    NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
     if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
         return;
     }
     nt_font_slot_t *slot = get_slot(font);
+    if (!slot->measure_cache_warm) {
+        return;
+    }
     memset(slot->measure_cache, 0, sizeof(slot->measure_cache));
-    slot->measure_cache_tick = 0U;
+    slot->measure_cache_warm = false;
 }
 // #endregion
 
