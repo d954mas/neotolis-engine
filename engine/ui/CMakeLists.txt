@@ -10,7 +10,11 @@
 # we use our own CLAY_PINNED_* defined here as the single source of truth.
 
 # --- Parse deps/clay/VERSION for major.minor ---
-set(_clay_version_file "${CMAKE_SOURCE_DIR}/deps/clay/VERSION")
+# NT_ENGINE_ROOT is set by the top-level CMakeLists.txt; this lets nt_ui be
+# consumed as a submodule (where CMAKE_SOURCE_DIR points at the host project,
+# not the engine root). See the comment near NT_ENGINE_ROOT in the top-level
+# CMakeLists.txt.
+set(_clay_version_file "${NT_ENGINE_ROOT}/deps/clay/VERSION")
 if(NOT EXISTS "${_clay_version_file}")
     message(FATAL_ERROR
         "nt_ui: deps/clay/VERSION not found at ${_clay_version_file}. "
@@ -38,8 +42,10 @@ nt_add_module(nt_ui LOG_DOMAIN "ui"
 # Clay vendored header -- PRIVATE include (only nt_ui.c sees clay.h).
 # SYSTEM suppresses -Werror on Clay-internal warnings (matches engine/math/cglm
 # precedent). Clay's source is excluded from clang-tidy via scripts/tidy.sh.
+# Use NT_ENGINE_ROOT so the include resolves correctly when nt_ui is
+# consumed from a parent CMake project (submodule scenario).
 target_include_directories(nt_ui SYSTEM PRIVATE
-    ${CMAKE_SOURCE_DIR}/deps/clay
+    ${NT_ENGINE_ROOT}/deps/clay
 )
 
 # Version pin propagated to the _Static_assert in nt_ui.c
