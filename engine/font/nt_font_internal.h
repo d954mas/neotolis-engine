@@ -83,6 +83,12 @@ typedef struct {
         bool valid;
     } measure_cache[NT_FONT_MEASURE_CACHE_SIZE];
     bool measure_cache_warm; /* true after any write; lets invalidate_cache skip cold slots */
+    /* True if ANY loaded resource has at least one glyph with kern_count > 0.
+     * Cheap fast-path gate in measure_n / draw_n: most Latin fonts ship with
+     * no kern table, so we skip the per-codepoint kern lookup entirely. Set
+     * during nt_font_step when a resource handle changes; cleared by
+     * destroy/flush_cache. */
+    bool has_any_kern;
 
 #ifdef NT_FONT_TEST_ACCESS
     uint32_t test_measure_cache_hits;

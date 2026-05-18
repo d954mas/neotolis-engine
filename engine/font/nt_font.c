@@ -962,6 +962,35 @@ void nt_font_step(void) {
             }
 
             slot->resource_handles[ri] = ver;
+
+            /* Recompute has_any_kern across ALL active resources whenever any
+             * handle changes (load or reload). Drives the fast-skip in
+             * nt_font_get_kern — most Latin fonts ship without kern tables,
+             * so this gate eliminates the entire per-codepoint kern lookup
+             * loop for them. One linear scan over each blob's glyph table
+             * at load time; cost amortized to zero per draw. */
+            slot->has_any_kern = false;
+            for (uint8_t k = 0; k < slot->resource_count; k++) {
+                if (slot->resource_handles[k] == 0) {
+                    continue;
+                }
+                uint32_t scan_bs = 0;
+                const uint8_t *scan_blob = get_font_data(slot->resource_handles[k], &scan_bs);
+                if (!scan_blob || scan_bs < sizeof(NtFontAssetHeader)) {
+                    continue;
+                }
+                const NtFontAssetHeader *scan_hdr = (const NtFontAssetHeader *)scan_blob;
+                const NtFontGlyphEntry *scan_glyphs = (const NtFontGlyphEntry *)(scan_blob + sizeof(NtFontAssetHeader));
+                for (uint32_t gi = 0; gi < scan_hdr->glyph_count; gi++) {
+                    if (scan_glyphs[gi].kern_count != 0U) {
+                        slot->has_any_kern = true;
+                        break;
+                    }
+                }
+                if (slot->has_any_kern) {
+                    break;
+                }
+            }
         }
         // #endregion
     }
@@ -1228,6 +1257,13 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
 
     nt_font_slot_t *slot = get_slot(font);
 
+    /* Fast-skip: most Latin fonts have no kern table. has_any_kern is set
+     * during nt_font_step when a resource loads, so this branch is a single
+     * predictable byte read — no resource loop, no bsearch. */
+    if (!slot->has_any_kern) {
+        return 0;
+    }
+
     /* Find left glyph in resources to access its kern entries */
     for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
         if (slot->resource_handles[ri] == 0) {
@@ -1313,6 +1349,66 @@ static inline uint32_t measure_size_bits(float size) {
     return bits;
 }
 
+/* ---- Internal hot-path helpers (skip public-API pool_valid + get_slot) ----
+ *
+ * The measure / draw inner loop runs once per codepoint. The public
+ * nt_font_lookup_metrics / nt_font_get_kern wrap pool_valid + get_slot per
+ * call — fine for occasional use, wasteful in tight loops. These internal
+ * variants take an already-resolved slot pointer (and an already-found
+ * left_entry + blob for kern) and skip the per-call validation.
+ *
+ * They also enable Opt C: the left_entry from the previous iteration
+ * (we just looked up its metrics) is reused for the kern bsearch — saving
+ * one of three bsearches per character pair.
+ */
+
+typedef struct {
+    const NtFontGlyphEntry *entry; /* NULL on tofu fallback */
+    const uint8_t *blob;
+    uint32_t blob_size;
+} nt_font_glyph_lookup_t;
+
+static nt_font_glyph_lookup_t lookup_glyph_entry_in_slot(const nt_font_slot_t *slot, uint32_t codepoint) {
+    nt_font_glyph_lookup_t out = {0};
+    for (uint8_t i = 0; i < slot->resource_count; i++) {
+        if (slot->resource_handles[i] == 0) {
+            continue;
+        }
+        uint32_t blob_size = 0;
+        const uint8_t *blob = get_font_data(slot->resource_handles[i], &blob_size);
+        if (!blob) {
+            continue;
+        }
+        const NtFontGlyphEntry *entry = find_glyph_in_pack(blob, blob_size, codepoint);
+        if (entry) {
+            out.entry = entry;
+            out.blob = blob;
+            out.blob_size = blob_size;
+            return out;
+        }
+    }
+    return out;
+}
+
+/* Kern lookup that REUSES the already-found left entry/blob from the
+ * previous iteration. Skips the leftmost bsearch — 1 of 3 inside the
+ * original get_kern. Caller MUST verify left->entry != NULL and
+ * left->entry->kern_count > 0 before calling. */
+static int16_t kern_with_left_in_slot(const nt_font_glyph_lookup_t *left, uint32_t right_codepoint) {
+    /* Right glyph index within the same resource as the left entry. */
+    int32_t right_idx = find_glyph_index(left->blob, left->blob_size, right_codepoint);
+    if (right_idx < 0) {
+        return 0;
+    }
+    const NtFontKernEntry *kerns = (const NtFontKernEntry *)(left->blob + left->entry->data_offset);
+    uint16_t right_glyph_index = (uint16_t)right_idx;
+    const NtFontKernEntry *found = (const NtFontKernEntry *)bsearch(&right_glyph_index, kerns, left->entry->kern_count, sizeof(NtFontKernEntry), compare_kern_right);
+    if (found) {
+        return found->value;
+    }
+    return 0;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size) {
     nt_text_size_t result = {0.0F, 0.0F};
@@ -1351,12 +1447,24 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
     slot->test_measure_cache_misses++;
 #endif
 
-    /* Cache miss — run full UTF-8 measurement, length-bounded. */
-    float scale = size / (float)slot->metrics.units_per_em;
+    /* Cache miss — run full UTF-8 measurement, length-bounded. Hot loop —
+     * Opt A: gate the kern lookup on slot->has_any_kern (font-wide) AND on
+     * the prev glyph's local kern_count. Opt B: skipped per-codepoint
+     * pool_valid + get_slot by working off the already-resolved slot. Opt C:
+     * reuse the previous iteration's left entry/blob — saves 1 of 3
+     * bsearches inside the original kern lookup. */
+    const float scale = size / (float)slot->metrics.units_per_em;
+    const bool font_has_kern = slot->has_any_kern;
+    /* Cache tofu metrics — slot-wide constants, recomputed per call but never per codepoint.
+     * Compute advance in float (units_per_em * 0.5) instead of integer divide-then-promote;
+     * matches nt_font_lookup_metrics for power-of-2 EMs (the common case). */
+    const float tofu_advance_px = (float)slot->metrics.units_per_em * 0.5F * scale;
+    const float tofu_min_y_px = (float)slot->metrics.descent * scale;
+    const float tofu_max_y_px = (float)slot->metrics.ascent * scale;
 
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
-    uint32_t prev_cp = 0;
+    nt_font_glyph_lookup_t prev_lookup = {0};
     float pen_x = 0.0F;
     float min_y = 0.0F;
     float max_y = 0.0F;
@@ -1372,20 +1480,38 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
             continue;
         }
 
-        if (prev_cp != 0) {
-            int16_t kern = nt_font_get_kern(font, prev_cp, codepoint);
+        /* Kern lookup — fully skipped on kerning-less fonts; for fonts that
+         * have kerning, also skipped per-pair if the prev glyph has no kern
+         * entries of its own. */
+        if (font_has_kern && prev_lookup.entry != NULL && prev_lookup.entry->kern_count != 0U) {
+            int16_t kern = kern_with_left_in_slot(&prev_lookup, codepoint);
             pen_x += (float)kern * scale;
         }
 
-        nt_glyph_metrics_t g = nt_font_lookup_metrics(font, codepoint);
-        if ((float)g.bbox_y0 * scale < min_y) {
-            min_y = (float)g.bbox_y0 * scale;
+        nt_font_glyph_lookup_t lookup = lookup_glyph_entry_in_slot(slot, codepoint);
+        if (lookup.entry != NULL) {
+            const NtFontGlyphEntry *g = lookup.entry;
+            const float gy0 = (float)g->bbox_y0 * scale;
+            const float gy1 = (float)g->bbox_y1 * scale;
+            if (gy0 < min_y) {
+                min_y = gy0;
+            }
+            if (gy1 > max_y) {
+                max_y = gy1;
+            }
+            pen_x += (float)g->advance * scale;
+        } else {
+            /* Tofu fallback — same dimensions as nt_font_lookup_metrics. */
+            if (tofu_min_y_px < min_y) {
+                min_y = tofu_min_y_px;
+            }
+            if (tofu_max_y_px > max_y) {
+                max_y = tofu_max_y_px;
+            }
+            pen_x += tofu_advance_px;
         }
-        if ((float)g.bbox_y1 * scale > max_y) {
-            max_y = (float)g.bbox_y1 * scale;
-        }
-        pen_x += (float)g.advance * scale;
-        prev_cp = codepoint;
+
+        prev_lookup = lookup;
     }
 
     result.width = pen_x;
