@@ -555,6 +555,34 @@ void test_measure_n_drops_partial_utf8(void) {
     free(blob);
 }
 
+/* ---- FONT-01d: embedded NUL inside [utf8, utf8+len) is NOT a terminator ----
+ *
+ * Documents and locks the semantic divergence between nt_font_measure_n
+ * (length-bounded, embedded NUL = tofu glyph) and nt_font_measure (NUL-
+ * terminated wrapper, stops at first NUL via strlen). Migrating callers
+ * to _n with sizeof(literal) MUST be aware of this. */
+void test_measure_n_embedded_nul_is_codepoint(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_resolved_test_font("font_nul", &blob);
+
+    /* "A\0B" — 3 bytes. _n should measure A + tofu(0) + B; _measure (wrapper)
+     * stops at the embedded NUL and measures only A. The two MUST differ. */
+    const char with_nul[3] = {'A', '\0', 'B'};
+    nt_text_size_t n_full = nt_font_measure_n(font, with_nul, 3U, 14.0F);
+    nt_text_size_t wrapper_truncated = nt_font_measure(font, with_nul, 14.0F);
+    nt_text_size_t reference_a = nt_font_measure(font, "A", 14.0F);
+
+    /* Wrapper stopped at the NUL: width matches a bare "A". */
+    assert_text_size_equal(reference_a, wrapper_truncated);
+
+    /* _n consumed all 3 bytes: width must be strictly greater than "A" alone
+     * (added at least the 'B' glyph's advance + the NUL's tofu advance). */
+    TEST_ASSERT_TRUE(n_full.width > reference_a.width);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
 /* ---- FONT-02: 200 identical calls produce 199 hits + 1 miss ---- */
 
 void test_measure_n_cache_hits_on_repeat(void) {
@@ -657,10 +685,11 @@ int main(void) {
     RUN_TEST(test_font_get_stats);
     RUN_TEST(test_font_lru_eviction);
     RUN_TEST(test_font_gpu_textures);
-    /* Phase 51 / Plan 04 — FONT-01 + FONT-02 (length-aware measure + LRU cache) */
+    /* Phase 51 / Plan 04 — FONT-01 + FONT-02 (length-aware measure + direct-mapped cache) */
     RUN_TEST(test_measure_n_matches_measure);
     RUN_TEST(test_measure_n_does_not_over_read);
     RUN_TEST(test_measure_n_drops_partial_utf8);
+    RUN_TEST(test_measure_n_embedded_nul_is_codepoint);
     RUN_TEST(test_measure_n_cache_hits_on_repeat);
     RUN_TEST(test_measure_n_invalidate_forces_miss);
     RUN_TEST(test_measure_n_destroy_clears_cache);
