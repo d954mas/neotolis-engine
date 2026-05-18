@@ -656,6 +656,25 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) {
 
 void nt_gfx_backend_end_pass(void) {}
 
+/* ---- Scissor and viewport (Phase 51) ----
+ *
+ * Raw GL bottom-left convention. The walker (Phase 52) y-flips before
+ * calling these. glScissor / glViewport accept integer pixel coordinates.
+ * glEnable(GL_SCISSOR_TEST) toggles the test — when disabled, fragments
+ * outside the scissor rect are still drawn. */
+
+void nt_gfx_backend_set_scissor(int x, int y, int w, int h) { glScissor(x, y, (GLsizei)w, (GLsizei)h); }
+
+void nt_gfx_backend_set_scissor_enabled(bool enabled) {
+    if (enabled) {
+        glEnable(GL_SCISSOR_TEST);
+    } else {
+        glDisable(GL_SCISSOR_TEST);
+    }
+}
+
+void nt_gfx_backend_set_viewport(int x, int y, int w, int h) { glViewport(x, y, (GLsizei)w, (GLsizei)h); }
+
 /* ---- Pipeline bind ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

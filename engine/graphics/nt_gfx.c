@@ -88,6 +88,15 @@ static struct {
     nt_gfx_render_state_t render_state;
     uint32_t bound_pipeline;  /* currently bound pipeline backend handle */
     uint8_t bound_index_type; /* index type of currently bound IBO (1=uint16, 2=uint32) */
+
+    /* Scissor / viewport cached state (Phase 51).
+     * Updated by nt_gfx_set_scissor* / _set_viewport public wrappers
+     * before forwarding to the backend. Read by NT_GFX_TEST_ACCESS probes. */
+    struct {
+        int scissor_rect[4];  /* x, y, w, h (GL bottom-left) */
+        int viewport_rect[4]; /* x, y, w, h (GL bottom-left) */
+        bool scissor_enabled; /* false at frame start (D-51-06) */
+    } draw_state;
 } s_gfx;
 
 /* ---- Global UBO block registration ---- */
@@ -257,6 +266,11 @@ void nt_gfx_begin_frame(void) {
     s_gfx.render_state = NT_GFX_STATE_FRAME;
     memset(&g_nt_gfx.frame_stats, 0, sizeof(g_nt_gfx.frame_stats));
     nt_gfx_backend_begin_frame();
+    /* Defensive reset (Phase 51 / D-51-06): walker assumes clean scissor state.
+     * GPU state may not survive across frames (WebGL context loss, driver-level
+     * resets) — re-issue the disable every frame so the cached flag and GL
+     * state are guaranteed to agree at frame entry. */
+    nt_gfx_set_scissor_enabled(false);
 }
 
 void nt_gfx_end_frame(void) {
@@ -628,6 +642,24 @@ uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s) {
     }
     return s_gfx.sampler_cache[s.id - 1].backend;
 }
+
+bool nt_gfx_test_scissor_enabled(void) { return s_gfx.draw_state.scissor_enabled; }
+
+void nt_gfx_test_scissor_rect(int out[4]) {
+    NT_ASSERT(out != NULL);
+    out[0] = s_gfx.draw_state.scissor_rect[0];
+    out[1] = s_gfx.draw_state.scissor_rect[1];
+    out[2] = s_gfx.draw_state.scissor_rect[2];
+    out[3] = s_gfx.draw_state.scissor_rect[3];
+}
+
+void nt_gfx_test_viewport_rect(int out[4]) {
+    NT_ASSERT(out != NULL);
+    out[0] = s_gfx.draw_state.viewport_rect[0];
+    out[1] = s_gfx.draw_state.viewport_rect[1];
+    out[2] = s_gfx.draw_state.viewport_rect[2];
+    out[3] = s_gfx.draw_state.viewport_rect[3];
+}
 #endif
 
 /* ---- Sampler (deduplicated cache) ---- */
@@ -693,6 +725,34 @@ void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot) {
         e->backend = nt_gfx_backend_create_sampler(&e->desc);
     }
     nt_gfx_backend_bind_sampler(e->backend, slot);
+}
+
+/* ---- Scissor and viewport (Phase 51) ---- */
+
+void nt_gfx_set_scissor(int x, int y, int w, int h) {
+    /* Negative width/height is undefined in GL — assert early per AGENTS.md "fail early". */
+    NT_ASSERT(w >= 0);
+    NT_ASSERT(h >= 0);
+    s_gfx.draw_state.scissor_rect[0] = x;
+    s_gfx.draw_state.scissor_rect[1] = y;
+    s_gfx.draw_state.scissor_rect[2] = w;
+    s_gfx.draw_state.scissor_rect[3] = h;
+    nt_gfx_backend_set_scissor(x, y, w, h);
+}
+
+void nt_gfx_set_scissor_enabled(bool enabled) {
+    s_gfx.draw_state.scissor_enabled = enabled;
+    nt_gfx_backend_set_scissor_enabled(enabled);
+}
+
+void nt_gfx_set_viewport(int x, int y, int w, int h) {
+    NT_ASSERT(w >= 0);
+    NT_ASSERT(h >= 0);
+    s_gfx.draw_state.viewport_rect[0] = x;
+    s_gfx.draw_state.viewport_rect[1] = y;
+    s_gfx.draw_state.viewport_rect[2] = w;
+    s_gfx.draw_state.viewport_rect[3] = h;
+    nt_gfx_backend_set_viewport(x, y, w, h);
 }
 
 /* ---- Uniforms ---- */
