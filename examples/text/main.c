@@ -480,6 +480,7 @@ int main(void) {
         .curve_texture_height = 512,
         .band_texture_height = 256,
         .band_count = 8,
+        .measure_cache_size = 256,
     });
 
     /* Request font resources (resolved when packs arrive) */

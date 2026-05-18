@@ -21,6 +21,19 @@
 /* Sentinel value for ascii_glyph_idx[] — codepoint is absent in all resources. */
 #define NT_FONT_ASCII_IDX_NONE ((uint16_t)0xFFFFU)
 
+/* Default measure cache size when desc->measure_cache_size == 0 and the
+ * caller used nt_font_create_desc_defaults (versus a bare {0} that disables
+ * the cache outright). Kept as a #define for migration paths that still
+ * reference the v1.7 hardcoded constant. */
+
+/* Measure cache entry — direct-mapped, 20 bytes per entry. */
+typedef struct {
+    uint32_t key_hash;  /* full 32-bit xxHash for collision detection */
+    uint32_t size_bits; /* bit_cast<uint32_t>(float size) — exact comparison, no quantization */
+    nt_text_size_t value;
+    bool valid;
+} nt_font_measure_cache_entry_t;
+
 /* ---- Internal cache entry (extends public entry with LRU data) ---- */
 
 typedef struct {
@@ -72,20 +85,21 @@ typedef struct {
     /* Cache generation (bumped on full flush, for Phase 45 batch invalidation) */
     uint32_t cache_generation;
 
-    /* Measure cache (Phase 51 / D-51-08 / FONT-02). Direct-mapped 256 entries
-     * per font, ~5 KB per slot (20 B × 256). Indexed by xxHash32(content,len) & 255.
-     * Drift 3 Option B: xxHash32, not FNV-1a. Per-font isolation means
-     * font_id is redundant in the per-entry key — collision detection uses
-     * {key_hash, size_bits} only. The slot is also a "written" sentinel: if
-     * any entry's `valid` is true, the cache has been touched since the last
-     * full clear (used by invalidate_cache to skip cold slots). */
-    struct {
-        uint32_t key_hash;  /* full 32-bit xxHash for collision detection */
-        uint32_t size_bits; /* bit_cast<uint32_t>(float size) — exact comparison, no quantization */
-        nt_text_size_t value;
-        bool valid;
-    } measure_cache[NT_FONT_MEASURE_CACHE_SIZE];
-    bool measure_cache_warm; /* true after any write; lets invalidate_cache skip cold slots */
+    /* Measure cache (Phase 51 / D-51-08 / FONT-02). Direct-mapped table,
+     * size = measure_cache_size (power-of-two, configured per font in
+     * nt_font_create_desc_t). Indexed by xxHash32(content,len) &
+     * (measure_cache_size - 1). Drift 3 Option B: xxHash32, not FNV-1a.
+     * Per-font isolation means font_id is redundant in the per-entry key —
+     * collision detection uses {key_hash, size_bits} only.
+     *
+     * Heap-allocated at create (NOT in hot path — AGENTS.md permits heap
+     * at lifecycle boundaries). NULL when measure_cache_size == 0 (cache
+     * disabled). The measure_cache_warm flag lets invalidate_cache skip
+     * slots that were never written. */
+    nt_font_measure_cache_entry_t *measure_cache; /* [measure_cache_size] or NULL */
+    uint16_t measure_cache_size;                  /* 0 = disabled; else POT */
+    uint16_t measure_cache_mask;                  /* measure_cache_size - 1 */
+    bool measure_cache_warm;                      /* true after any write; lets invalidate_cache skip cold slots */
     /* True if ANY loaded resource has at least one glyph with kern_count > 0.
      * Cheap fast-path gate in measure_n / draw_n: most Latin fonts ship with
      * no kern table, so we skip the per-codepoint kern lookup entirely. Set

@@ -136,10 +136,7 @@ static nt_resource_t register_font_resource(const char *name, const uint8_t *blo
 
 static nt_font_create_desc_t bench_font_desc(void) {
     return (nt_font_create_desc_t){
-        .curve_texture_width = 64,
-        .curve_texture_height = 64,
-        .band_texture_height = 16,
-        .band_count = 4,
+        .curve_texture_width = 64, .curve_texture_height = 64, .band_texture_height = 16, .band_count = 4, .measure_cache_size = 256, /* benchmark measures cache hit/miss — explicit opt-in */
     };
 }
 

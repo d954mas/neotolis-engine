@@ -39,7 +39,27 @@ typedef struct {
     uint16_t curve_texture_height; /* RGBA16F texture height */
     uint16_t band_texture_height;  /* RG16UI texture height = max_glyphs */
     uint8_t band_count;            /* bands per glyph (1-32, required) */
+    /* Measure cache size — direct-mapped, MUST be power-of-two if non-zero.
+     * 0 disables the cache entirely (every measure_n is a full compute path,
+     * useful for one-shot tools and tests that want to bypass caching).
+     * Sane range: 64–4096 entries (20 B per entry, so 1.2 KB–80 KB per font).
+     * Defaults to 256 when zero is passed via nt_font_create_desc_defaults
+     * (the bare {0}-initialized desc gets cache disabled — opt-in default). */
+    uint16_t measure_cache_size;
 } nt_font_create_desc_t;
+
+/* Sensible defaults for nt_font_create_desc_t. measure_cache_size=256 matches
+ * the v1.7 hardcoded size. Callers building desc from scratch with `{0}`
+ * MUST opt in explicitly via this helper or by setting the field. */
+static inline nt_font_create_desc_t nt_font_create_desc_defaults(void) {
+    return (nt_font_create_desc_t){
+        .curve_texture_width = 256,
+        .curve_texture_height = 256,
+        .band_texture_height = 64,
+        .band_count = 4,
+        .measure_cache_size = 256,
+    };
+}
 
 /* ---- Metrics (from font asset header) ---- */
 
