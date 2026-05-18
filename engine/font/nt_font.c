@@ -6,6 +6,7 @@
 
 #include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
+#include "hash/nt_hash.h"
 #include "log/nt_log.h"
 #include "math/nt_math.h"
 #include "nt_font_format.h"
@@ -1302,17 +1303,56 @@ nt_glyph_metrics_t nt_font_lookup_metrics(nt_font_t font, uint32_t codepoint) {
 // #endregion
 
 // #region Measurement (pure CPU, no GPU calls)
-nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) {
+
+/* Bit-cast a float size to uint32_t for exact cache-key comparison.
+ * float→uint32 round-trip is loss-free (same 4 bytes); memcpy avoids UB
+ * from a direct pointer cast (strict-aliasing rule). */
+static inline uint32_t measure_size_bits(float size) {
+    uint32_t bits;
+    memcpy(&bits, &size, sizeof(bits));
+    return bits;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size) {
     nt_text_size_t result = {0.0F, 0.0F};
-    if (!utf8 || !*utf8) {
+
+    /* D-51-07 edge cases */
+    if (len == 0U || utf8 == NULL) {
+        return result;
+    }
+    if (!nt_pool_valid(&s_font.pool, font.id)) {
         return result;
     }
 
-    nt_font_metrics_t metrics = nt_font_get_metrics(font);
-    if (metrics.units_per_em == 0) {
-        return result;
+    nt_font_slot_t *slot = get_slot(font);
+    if (!slot->metrics_set) {
+        return result; /* font not yet resolved */
     }
-    float scale = size / (float)metrics.units_per_em;
+
+    /* Cache key (Drift 3 Option B — xxHash32, NOT FNV-1a) */
+    const uint32_t key_hash = nt_hash32((const void *)utf8, (uint32_t)len).value;
+    const uint32_t size_bits = measure_size_bits(size);
+    const uint32_t slot_index = key_hash & (NT_FONT_MEASURE_CACHE_SIZE - 1U); /* & 255 */
+
+    /* Bump monotonic tick (every call advances it) */
+    slot->measure_cache_tick++;
+
+    /* Cache lookup */
+    if (slot->measure_cache[slot_index].valid && slot->measure_cache[slot_index].key_hash == key_hash && slot->measure_cache[slot_index].size_bits == size_bits) {
+        slot->measure_cache[slot_index].lru_tick = slot->measure_cache_tick;
+#ifdef NT_FONT_TEST_ACCESS
+        slot->test_measure_cache_hits++;
+#endif
+        return slot->measure_cache[slot_index].value;
+    }
+
+#ifdef NT_FONT_TEST_ACCESS
+    slot->test_measure_cache_misses++;
+#endif
+
+    /* Cache miss — run full UTF-8 measurement, length-bounded. */
+    float scale = size / (float)slot->metrics.units_per_em;
 
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
@@ -1321,7 +1361,10 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) {
     float min_y = 0.0F;
     float max_y = 0.0F;
 
-    for (const uint8_t *p = (const uint8_t *)utf8; *p; p++) {
+    const uint8_t *p = (const uint8_t *)utf8;
+    const uint8_t *end = p + len;
+
+    for (; p < end; p++) {
         if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
             if (state == NT_UTF8_REJECT) {
                 state = NT_UTF8_ACCEPT; /* recover: skip bad byte, continue parsing */
@@ -1350,7 +1393,46 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) {
     if (result.height < size) {
         result.height = size; /* Minimum height = requested size */
     }
+
+    /* Cache write — direct-mapped, replace on collision (D-51-09 simple
+     * eviction at 256-entry table). */
+    slot->measure_cache[slot_index].key_hash = key_hash;
+    slot->measure_cache[slot_index].size_bits = size_bits;
+    slot->measure_cache[slot_index].lru_tick = slot->measure_cache_tick;
+    slot->measure_cache[slot_index].value = result;
+    slot->measure_cache[slot_index].valid = true;
+
     return result;
+}
+
+/* Wrapper — NUL-terminated convenience (pre-Phase-51 signature). */
+nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) { return nt_font_measure_n(font, utf8, utf8 ? strlen(utf8) : 0U, size); }
+// #endregion
+
+// #region Measure cache invalidation (Phase 51 / FONT-02 / D-51-10)
+void nt_font_measure_invalidate_cache(void) {
+    if (!s_font.initialized) {
+        return;
+    }
+    for (uint32_t i = 1; i <= s_font.pool.capacity; i++) {
+        if (!nt_pool_slot_alive(&s_font.pool, i)) {
+            continue;
+        }
+        nt_font_slot_t *slot = &s_font.slots[i];
+        memset(slot->measure_cache, 0, sizeof(slot->measure_cache));
+        slot->measure_cache_tick = 0U;
+    }
+}
+
+void nt_font_measure_invalidate(nt_font_t font) {
+    NT_ASSERT(s_font.initialized);
+    NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
+    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
+        return;
+    }
+    nt_font_slot_t *slot = get_slot(font);
+    memset(slot->measure_cache, 0, sizeof(slot->measure_cache));
+    slot->measure_cache_tick = 0U;
 }
 // #endregion
 
@@ -1358,4 +1440,31 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) {
 
 #ifdef NT_FONT_TEST_ACCESS
 uint32_t nt_font_test_register_data(const uint8_t *data, uint32_t size) { return activate_font(data, size); }
+
+uint32_t nt_font_test_measure_cache_hits(nt_font_t font) {
+    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
+        return 0U;
+    }
+    return get_slot(font)->test_measure_cache_hits;
+}
+
+uint32_t nt_font_test_measure_cache_misses(nt_font_t font) {
+    if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
+        return 0U;
+    }
+    return get_slot(font)->test_measure_cache_misses;
+}
+
+void nt_font_test_reset_measure_counters(void) {
+    if (!s_font.initialized) {
+        return;
+    }
+    for (uint32_t i = 1; i <= s_font.pool.capacity; i++) {
+        if (!nt_pool_slot_alive(&s_font.pool, i)) {
+            continue;
+        }
+        s_font.slots[i].test_measure_cache_hits = 0U;
+        s_font.slots[i].test_measure_cache_misses = 0U;
+    }
+}
 #endif
