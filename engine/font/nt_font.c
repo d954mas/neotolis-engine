@@ -28,6 +28,7 @@ static nt_font_state_t s_font;
 
 /* Forward declarations for internal helpers used before their definitions. */
 static void rebuild_slot_indices(nt_font_slot_t *slot);
+static void measure_cache_clear(nt_font_slot_t *slot);
 
 /* ---- Font activator callbacks ---- */
 
@@ -888,6 +889,7 @@ void nt_font_shutdown(void) {
         free(slot->cache);
         free(slot->free_stack);
         free(slot->hash_table);
+        free(slot->measure_cache.key_hashes); /* SoA base — frees all 4 sub-arrays; NULL-safe */
         nt_gfx_destroy_texture(slot->curve_texture);
         nt_gfx_destroy_texture(slot->band_texture);
     }
@@ -1006,9 +1008,18 @@ void nt_font_step(void) {
          * resource handle changed in this slot. Previously this was inside
          * the per-resource loop, leading to O(R²×G) work when multiple
          * resources updated in one step. Now O(R×G) — single rebuild over
-         * all active resources after the loop. */
+         * all active resources after the loop.
+         *
+         * Cache invalidation is critical here: async resource fallback chains
+         * (e.g. measure a CJK glyph → tofu fallback → CJK resource arrives →
+         * remeasure) would otherwise keep returning the cached tofu width.
+         * Clear all entries unconditionally on any handle change. */
         if (slot_indices_dirty) {
             rebuild_slot_indices(slot);
+            if (slot->measure_cache.key_hashes != NULL && slot->measure_cache_warm) {
+                measure_cache_clear(slot);
+                slot->measure_cache_warm = false;
+            }
         }
     }
 }

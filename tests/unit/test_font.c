@@ -687,6 +687,46 @@ void test_measure_n_cache_disabled(void) {
     free(blob);
 }
 
+/* ---- FONT-02f: adding a font resource invalidates the measure cache ----
+ *
+ * Regression for the async fallback-chain bug: if a font handle measures a
+ * string before all resources are attached (so some glyphs hit the tofu
+ * fallback), the result gets cached. Once a real resource arrives, the
+ * cache MUST be cleared so the next measure picks up the real glyph metrics.
+ * Driven by slot_indices_dirty in nt_font_step. */
+void test_measure_n_invalidates_on_resource_change(void) {
+    uint8_t *blob_a = NULL;
+    nt_font_t font = make_resolved_test_font("font_async_a", &blob_a);
+
+    nt_font_test_reset_measure_counters();
+
+    /* Warm the cache for the same string twice — first miss, then hit. */
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
+
+    /* Attach a second resource (independent blob). nt_font_step will see a
+     * new resource handle and mark slot_indices_dirty — which must also
+     * clear the measure cache. */
+    uint32_t blob_size_b = 0;
+    uint8_t *blob_b = build_test_font_blob(&blob_size_b);
+    nt_resource_t res_b = register_font_resource("font_async_b", blob_b, blob_size_b);
+    nt_font_add(font, res_b);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Re-measure the same string — without the cache invalidation fix this
+     * is a HIT (counter unchanged). With the fix it's a MISS (counter +1). */
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));   /* unchanged */
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_font_test_measure_cache_misses(font)); /* +1 */
+
+    nt_font_destroy(font);
+    free(blob_a);
+    free(blob_b);
+}
+
 /* ---- FONT-02e: custom measure_cache_size (64 entries) ---- */
 
 void test_measure_n_cache_custom_size(void) {
@@ -757,5 +797,6 @@ int main(void) {
     RUN_TEST(test_measure_n_destroy_clears_cache);
     RUN_TEST(test_measure_n_cache_disabled);
     RUN_TEST(test_measure_n_cache_custom_size);
+    RUN_TEST(test_measure_n_invalidates_on_resource_change);
     return UNITY_END();
 }
