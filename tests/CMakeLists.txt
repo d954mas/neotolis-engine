@@ -141,10 +141,17 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_gfx COMMAND test_gfx)
 
     # --- Graphics scissor/viewport tests (Phase 51) ---
+    # Plan 03 added restore_gpu cases that call into nt_sprite_renderer +
+    # nt_text_renderer; the renderer libs (and their transitive deps for
+    # font/resource/hash/pool/material) are required at link time.
     add_executable(test_nt_gfx_scissor unit/test_nt_gfx_scissor.c)
-    target_link_libraries(test_nt_gfx_scissor PRIVATE nt_gfx_stub unity)
-    target_compile_definitions(test_nt_gfx_scissor PRIVATE NT_GFX_TEST_ACCESS)
+    target_link_libraries(test_nt_gfx_scissor PRIVATE
+        nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_gfx_stub unity
+    )
+    target_compile_definitions(test_nt_gfx_scissor PRIVATE NT_GFX_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
     target_compile_definitions(nt_gfx_stub PRIVATE NT_GFX_TEST_ACCESS)
+    target_compile_options(test_nt_gfx_scissor PRIVATE -U_DLL)
     nt_set_warning_flags(test_nt_gfx_scissor)
     nt_set_sanitizer_flags(test_nt_gfx_scissor)
     set_target_properties(test_nt_gfx_scissor PROPERTIES
