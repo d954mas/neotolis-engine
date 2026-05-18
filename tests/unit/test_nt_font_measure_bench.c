@@ -1,11 +1,15 @@
-/* Phase 51 / D-51-15 — nt_font_measure_n LRU cache benchmark.
+/* Phase 51 / D-51-15 — nt_font_measure_n direct-mapped cache benchmark.
  *
- * Workload: 1000 measure calls over 5-15-char ASCII labels.
- *   - Hit path: 1000 identical calls (after a single warm-up miss).
- *   - Miss path: 1000 calls each with a UNIQUE short string (forces cache
- *     replacement on every call; approximates the no-cache cost).
+ * Workloads (printed as [BENCH] lines to stdout):
+ *   - short_hit:   1000× "Hello, world" (12 chars, cache warm) → hash + return
+ *   - short_miss:  1000× unique "Item N" strings (forces cache miss every call)
+ *   - long_hit:    1000× same ~2 KB ASCII paragraph (large hash, cache hit)
+ *   - long_miss:   1000× unique ~2 KB strings (large hash + full measure)
+ *   - mixed_ui:    typical UI frame — 80 hot short labels × 12 frames + 20 fresh
+ *                  unique labels, simulating buttons + status text
  *
- * Outputs ns/call to stdout via printf. Capture in PR description.
+ * Captures both cache and raw measure cost. Re-run after optimization passes
+ * to compare ns/call.
  *
  * Threshold (D-51-15): if speedup < 5x OR miss < 500 ns/call,
  * plan a follow-up commit to revert the cache (D-51-08..11) and amend
@@ -245,11 +249,142 @@ static void bench_cache_miss_unique(void) {
     free(blob);
 }
 
+/* ---- Bench 3: long-string cache HIT (large hash, repeated content) ---- */
+
+static void bench_long_string_hit(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_bench_font("bench_lhit", &blob);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
+
+    nt_font_measure_invalidate(font);
+
+    /* ~2 KB ASCII paragraph (lorem-ipsum-style filler). Same content every
+     * call → cache hit. Measures: (xxHash32 over 2 KB) + entry compare cost. */
+    static char paragraph[2048];
+    for (size_t i = 0; i < sizeof(paragraph) - 1U; i++) {
+        paragraph[i] = (char)('A' + (int)(i % 26));
+    }
+    paragraph[sizeof(paragraph) - 1U] = '\0';
+    const size_t plen = sizeof(paragraph) - 1U;
+
+    /* Warm-up populates the slot. */
+    (void)nt_font_measure_n(font, paragraph, plen, 14.0F);
+
+    const int n_calls = 1000;
+    const uint64_t t0 = nt_time_nanos();
+    nt_text_size_t sink = {0.0F, 0.0F};
+    for (int i = 0; i < n_calls; i++) {
+        sink = nt_font_measure_n(font, paragraph, plen, 14.0F);
+    }
+    const uint64_t t1 = nt_time_nanos();
+    (void)sink;
+
+    const double per_call_ns = (double)(t1 - t0) / (double)n_calls;
+    (void)printf("[BENCH] long_string_hit (%zu B): %.2f ns/call\n", plen, per_call_ns);
+    (void)fflush(stdout);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* ---- Bench 4: long-string cache MISS (large hash + full measure) ---- */
+
+static void bench_long_string_miss(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_bench_font("bench_lmiss", &blob);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
+
+    nt_font_measure_invalidate(font);
+
+    /* 1000 unique ~2 KB strings (the leading 8 chars vary, rest is filler).
+     * Each call: full xxHash32 over 2 KB + full UTF-8 measure pass. The cache
+     * does write but is overwritten next call. Worst case for big-text. */
+    const int n_calls = 1000;
+    static char texts[1000][2048];
+    for (int i = 0; i < n_calls; i++) {
+        (void)snprintf(texts[i], 32U, "uniq_%04d_", i); /* unique prefix */
+        for (size_t j = 10U; j < sizeof(texts[i]) - 1U; j++) {
+            texts[i][j] = (char)('A' + (int)((j + (size_t)i) % 26));
+        }
+        texts[i][sizeof(texts[i]) - 1U] = '\0';
+    }
+
+    const uint64_t t0 = nt_time_nanos();
+    nt_text_size_t sink = {0.0F, 0.0F};
+    for (int i = 0; i < n_calls; i++) {
+        sink = nt_font_measure_n(font, texts[i], sizeof(texts[i]) - 1U, 14.0F);
+    }
+    const uint64_t t1 = nt_time_nanos();
+    (void)sink;
+
+    const double per_call_ns = (double)(t1 - t0) / (double)n_calls;
+    (void)printf("[BENCH] long_string_miss (~2 KB): %.2f ns/call\n", per_call_ns);
+    (void)fflush(stdout);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* ---- Bench 5: mixed UI workload — 80 hot labels + 20 fresh per "frame" ---- */
+
+static void bench_mixed_ui(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_bench_font("bench_mix", &blob);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
+
+    nt_font_measure_invalidate(font);
+
+    /* 80 short hot labels (typical button text), reused every "frame" */
+    const int hot_count = 80;
+    static char hot[80][32];
+    for (int i = 0; i < hot_count; i++) {
+        (void)snprintf(hot[i], sizeof(hot[i]), "Button_%02d", i);
+    }
+    /* Pre-warm the cache for hot labels (simulates frame N>1 of stable UI) */
+    for (int i = 0; i < hot_count; i++) {
+        (void)nt_font_measure_n(font, hot[i], strlen(hot[i]), 14.0F);
+    }
+
+    /* 240 fresh status labels (12 frames × 20 unique per frame) */
+    const int fresh_per_frame = 20;
+    const int frames = 12;
+    static char fresh[240][32];
+    for (int i = 0; i < fresh_per_frame * frames; i++) {
+        (void)snprintf(fresh[i], sizeof(fresh[i]), "Status %d ms", i);
+    }
+
+    const uint64_t t0 = nt_time_nanos();
+    nt_text_size_t sink = {0.0F, 0.0F};
+    int fresh_idx = 0;
+    for (int frame = 0; frame < frames; frame++) {
+        for (int i = 0; i < hot_count; i++) {
+            sink = nt_font_measure_n(font, hot[i], strlen(hot[i]), 14.0F);
+        }
+        for (int i = 0; i < fresh_per_frame; i++) {
+            const char *s = fresh[fresh_idx++];
+            sink = nt_font_measure_n(font, s, strlen(s), 14.0F);
+        }
+    }
+    const uint64_t t1 = nt_time_nanos();
+    (void)sink;
+
+    const int total_calls = frames * (hot_count + fresh_per_frame);
+    const double per_call_ns = (double)(t1 - t0) / (double)total_calls;
+    (void)printf("[BENCH] mixed_ui (80 hot × 12 frames + 240 fresh): %.2f ns/call (%d calls)\n", per_call_ns, total_calls);
+    (void)fflush(stdout);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
 /* ---- Main ---- */
 
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(bench_cache_hit_steady_state);
     RUN_TEST(bench_cache_miss_unique);
+    RUN_TEST(bench_long_string_hit);
+    RUN_TEST(bench_long_string_miss);
+    RUN_TEST(bench_mixed_ui);
     return UNITY_END();
 }
