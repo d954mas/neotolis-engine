@@ -651,6 +651,71 @@ void test_measure_n_destroy_clears_cache(void) {
     free(blob_b);
 }
 
+/* ---- FONT-02d: measure_cache_size = 0 disables cache entirely ---- */
+
+void test_measure_n_cache_disabled(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    desc.measure_cache_size = 0; /* explicit: cache disabled */
+    nt_font_t font = nt_font_create(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_font_blob(&blob_size);
+    nt_resource_t res = register_font_resource("font_cache_off", blob, blob_size);
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+
+    nt_font_test_reset_measure_counters();
+
+    /* 100 identical calls. With cache disabled, every call is a full measure
+     * AND neither hit nor miss counter is incremented (counters track cache
+     * activity, not raw measure calls). Result must still be correct. */
+    nt_text_size_t first = nt_font_measure_n(font, "ABC", 3U, 14.0F);
+    for (int i = 0; i < 99; i++) {
+        nt_text_size_t r = nt_font_measure_n(font, "ABC", 3U, 14.0F);
+        assert_text_size_equal(first, r);
+    }
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_font_test_measure_cache_hits(font));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_font_test_measure_cache_misses(font));
+
+    /* Invalidate is a no-op when disabled — must not crash. */
+    nt_font_measure_invalidate(font);
+    nt_font_measure_invalidate_cache();
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* ---- FONT-02e: custom measure_cache_size (64 entries) ---- */
+
+void test_measure_n_cache_custom_size(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    desc.measure_cache_size = 64; /* non-default, still POT */
+    nt_font_t font = nt_font_create(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_font_blob(&blob_size);
+    nt_resource_t res = register_font_resource("font_cache_64", blob, blob_size);
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+
+    nt_font_test_reset_measure_counters();
+
+    /* 200 identical calls → 1 miss + 199 hits, just like the default-size test.
+     * Verifies that a non-default POT size still produces correct counters. */
+    for (int i = 0; i < 200; i++) {
+        (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    }
+    TEST_ASSERT_EQUAL_UINT32(199U, nt_font_test_measure_cache_hits(font));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
 /* ---- Test 9: GPU texture handles (FONT-03) ---- */
 
 void test_font_gpu_textures(void) {
@@ -690,5 +755,7 @@ int main(void) {
     RUN_TEST(test_measure_n_cache_hits_on_repeat);
     RUN_TEST(test_measure_n_invalidate_forces_miss);
     RUN_TEST(test_measure_n_destroy_clears_cache);
+    RUN_TEST(test_measure_n_cache_disabled);
+    RUN_TEST(test_measure_n_cache_custom_size);
     return UNITY_END();
 }

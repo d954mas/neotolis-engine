@@ -260,7 +260,7 @@ if(NOT EMSCRIPTEN)
 
     # --- Text renderer module tests ---
     add_executable(test_text_renderer unit/test_text_renderer.c)
-    target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_material unity)
+    target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_material nt_time unity)
     target_compile_definitions(test_text_renderer PRIVATE NT_TEXT_RENDERER_TEST_ACCESS NT_FONT_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
     target_compile_definitions(nt_text_renderer PRIVATE NT_TEXT_RENDERER_TEST_ACCESS)
     target_compile_options(test_text_renderer PRIVATE -U_DLL)

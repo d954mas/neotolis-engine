@@ -14,6 +14,7 @@
 #include "nt_pack_format.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
+#include "time/nt_time.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -341,6 +342,58 @@ void test_draw_n_does_not_over_read(void) {
     TEST_ASSERT_EQUAL_MEMORY(buf_ref, nt_text_renderer_test_vertices(), bytes_to_copy);
 }
 
+/* ---- Benchmark cases (printed as [BENCH] lines; cover draw hot-loop perf) ---- */
+
+static void bench_draw_short_warm(void) {
+    /* GPU-side glyph cache and font ASCII fast-path warm via setup. We flush
+     * once before timing so the renderer buffer starts empty, and flush per
+     * loop iteration to keep glyph_count from saturating across 1000 draws. */
+    nt_text_renderer_flush();
+
+    const int n_calls = 1000;
+    const uint64_t t0 = nt_time_nanos();
+    for (int i = 0; i < n_calls; i++) {
+        nt_text_renderer_draw_n("ABC", 3U, s_identity, 32.0F, s_white);
+        nt_text_renderer_flush(); /* exclude buffer-overflow path from timing */
+    }
+    const uint64_t t1 = nt_time_nanos();
+
+    const double per_call_ns = (double)(t1 - t0) / (double)n_calls;
+    (void)printf("[BENCH] draw_short_warm (3 chars + flush): %.2f ns/call\n", per_call_ns);
+    (void)fflush(stdout);
+}
+
+static void bench_draw_mixed_ui(void) {
+    /* 6 hot labels each redrawn over 200 "frames" with a flush between frames.
+     * Approximates a stable UI re-render path where the GPU glyph cache and
+     * the ASCII fast-path are both warm. */
+    const char *const labels[] = {"OK", "AB", "BC", "CA", "ABC", "BCA"};
+    const size_t lens[] = {2U, 2U, 2U, 2U, 3U, 3U};
+    const int label_count = (int)(sizeof(labels) / sizeof(labels[0]));
+
+    /* Warm up the glyph cache once. */
+    for (int i = 0; i < label_count; i++) {
+        nt_text_renderer_draw_n(labels[i], lens[i], s_identity, 32.0F, s_white);
+    }
+    nt_text_renderer_flush();
+
+    const int frames = 200;
+    int total_calls = 0;
+    const uint64_t t0 = nt_time_nanos();
+    for (int f = 0; f < frames; f++) {
+        for (int i = 0; i < label_count; i++) {
+            nt_text_renderer_draw_n(labels[i], lens[i], s_identity, 32.0F, s_white);
+            total_calls++;
+        }
+        nt_text_renderer_flush();
+    }
+    const uint64_t t1 = nt_time_nanos();
+
+    const double per_call_ns = (double)(t1 - t0) / (double)total_calls;
+    (void)printf("[BENCH] draw_mixed_ui (6 labels × 200 frames): %.2f ns/call (%d calls)\n", per_call_ns, total_calls);
+    (void)fflush(stdout);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -358,5 +411,7 @@ int main(void) {
     RUN_TEST(test_draw_newline_advances_to_next_line);
     RUN_TEST(test_draw_n_matches_draw);
     RUN_TEST(test_draw_n_does_not_over_read);
+    RUN_TEST(bench_draw_short_warm);
+    RUN_TEST(bench_draw_mixed_ui);
     return UNITY_END();
 }
