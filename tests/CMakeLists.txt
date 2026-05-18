@@ -244,6 +244,20 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_font COMMAND test_font)
 
+    # --- Font measure benchmark (Phase 51 / D-51-15) ---
+    # Measures hit vs miss ns/call for the nt_font_measure_n LRU cache.
+    # Uses nt_time_nanos() for the ns clock (same module used by test_time).
+    add_executable(test_nt_font_measure_bench unit/test_nt_font_measure_bench.c)
+    target_link_libraries(test_nt_font_measure_bench PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_time unity)
+    target_compile_definitions(test_nt_font_measure_bench PRIVATE NT_FONT_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_nt_font_measure_bench PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_font_measure_bench)
+    nt_set_sanitizer_flags(test_nt_font_measure_bench)
+    set_target_properties(test_nt_font_measure_bench PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_nt_font_measure_bench COMMAND test_nt_font_measure_bench)
+
     # --- Text renderer module tests ---
     add_executable(test_text_renderer unit/test_text_renderer.c)
     target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_material unity)
