@@ -345,6 +345,20 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
  * to the texture's own filter/wrap state (set via glTexParameteri). */
 void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
 
+/* ---- Scissor and viewport (Phase 51) ----
+ *
+ * Pixel-space integer coordinates.
+ * GL convention: y measured from bottom-left of the current framebuffer.
+ * Callers that think in top-left (UI walker) MUST y-flip using their known
+ * framebuffer height before calling this wrapper. The wrapper does NOT y-flip.
+ *
+ * Scissor enabled flag is false after every nt_gfx_begin_frame (D-51-06).
+ * Set both rect and enabled explicitly when starting a clipped region.
+ */
+void nt_gfx_set_scissor(int x, int y, int w, int h);
+void nt_gfx_set_scissor_enabled(bool enabled);
+void nt_gfx_set_viewport(int x, int y, int w, int h);
+
 /* Returns NT_SAMPLER_INVALID if texture has no asset-baked default. */
 nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex);
 
@@ -416,5 +430,19 @@ void nt_gfx_deactivate_shader(uint32_t handle);
 /* ---- Mesh info query ---- */
 
 const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh);
+
+/* ---- Test access (test-only) ---- */
+
+#ifdef NT_GFX_TEST_ACCESS
+/* Read back the cached scissor enabled flag (last call to
+ * nt_gfx_set_scissor_enabled). Default false at frame start. */
+bool nt_gfx_test_scissor_enabled(void);
+/* Read back the cached scissor rect [x, y, w, h] from the last
+ * nt_gfx_set_scissor call. Out-param must be a 4-element int array. */
+void nt_gfx_test_scissor_rect(int out[4]);
+/* Read back the cached viewport rect [x, y, w, h] from the last
+ * nt_gfx_set_viewport call. Out-param must be a 4-element int array. */
+void nt_gfx_test_viewport_rect(int out[4]);
+#endif
 
 #endif /* NT_GFX_H */
