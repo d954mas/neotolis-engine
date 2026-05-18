@@ -26,6 +26,9 @@ typedef struct {
 
 static nt_font_state_t s_font;
 
+/* Forward declarations for internal helpers used before their definitions. */
+static void rebuild_slot_indices(nt_font_slot_t *slot);
+
 /* ---- Font activator callbacks ---- */
 
 static nt_font_data_entry_t *font_data_entries(void) { return (nt_font_data_entry_t *)s_font.data_entries; }
@@ -197,6 +200,7 @@ static const NtFontGlyphEntry *find_glyph_in_pack(const uint8_t *blob, uint32_t 
  * deref + pointer arithmetic, no bsearch. The table is built at
  * resource-load time in nt_font_step. Non-ASCII / not-in-table fall
  * through to the existing per-resource bsearch loop. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, uint8_t *out_resource_index, const NtFontGlyphEntry **out_glyph_entry) {
     if (codepoint < 128U) {
         const uint16_t gi = slot->ascii_glyph_idx[codepoint];
@@ -205,10 +209,18 @@ static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, ui
             uint32_t blob_size = 0;
             const uint8_t *blob = get_font_data(slot->resource_handles[ri], &blob_size);
             if (blob && blob_size >= sizeof(NtFontAssetHeader)) {
-                const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
-                *out_resource_index = ri;
-                *out_glyph_entry = glyphs + gi;
-                return true;
+                const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
+                /* Defensive: index was written by rebuild_slot_indices which
+                 * iterates the same glyph table, so gi < glyph_count by
+                 * construction. Assert catches blob corruption between
+                 * load and access (NDEBUG: TRAP, release: silent fallthrough). */
+                NT_ASSERT(gi < hdr->glyph_count);
+                if (gi < hdr->glyph_count) {
+                    const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
+                    *out_resource_index = ri;
+                    *out_glyph_entry = glyphs + gi;
+                    return true;
+                }
             }
         }
         /* ASCII char not in any resource — fall through to slow path (rare,
@@ -938,6 +950,7 @@ void nt_font_step(void) {
         }
 
         nt_font_slot_t *slot = &s_font.slots[i];
+        bool slot_indices_dirty = false;
 
         // #region Resolve resources
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
@@ -985,48 +998,52 @@ void nt_font_step(void) {
             }
 
             slot->resource_handles[ri] = ver;
-
-            /* Recompute has_any_kern + rebuild ASCII fast-path index across
-             * ALL active resources whenever any handle changes (load or
-             * reload). One pass per resource; we iterate the glyph table
-             * once and update both data structures in flight.
-             *
-             * has_any_kern drives the kern-skip in nt_font_get_kern (most
-             * Latin fonts ship without kern tables).
-             *
-             * ascii_glyph_idx[] replaces the per-codepoint bsearch with an
-             * O(1) array lookup for codepoints < 128 — the common case for
-             * Latin UIs. First resource that owns a codepoint wins (matches
-             * the precedence of find_glyph_in_resources). */
-            slot->has_any_kern = false;
-            for (size_t a = 0; a < (sizeof(slot->ascii_glyph_idx) / sizeof(slot->ascii_glyph_idx[0])); a++) {
-                slot->ascii_glyph_idx[a] = NT_FONT_ASCII_IDX_NONE;
-                slot->ascii_glyph_res[a] = 0U;
-            }
-            for (uint8_t k = 0; k < slot->resource_count; k++) {
-                if (slot->resource_handles[k] == 0) {
-                    continue;
-                }
-                uint32_t scan_bs = 0;
-                const uint8_t *scan_blob = get_font_data(slot->resource_handles[k], &scan_bs);
-                if (!scan_blob || scan_bs < sizeof(NtFontAssetHeader)) {
-                    continue;
-                }
-                const NtFontAssetHeader *scan_hdr = (const NtFontAssetHeader *)scan_blob;
-                const NtFontGlyphEntry *scan_glyphs = (const NtFontGlyphEntry *)(scan_blob + sizeof(NtFontAssetHeader));
-                for (uint32_t gi = 0; gi < scan_hdr->glyph_count; gi++) {
-                    const uint32_t cp = scan_glyphs[gi].codepoint;
-                    if (scan_glyphs[gi].kern_count != 0U) {
-                        slot->has_any_kern = true;
-                    }
-                    if (cp < 128U && slot->ascii_glyph_idx[cp] == NT_FONT_ASCII_IDX_NONE && gi < NT_FONT_ASCII_IDX_NONE) {
-                        slot->ascii_glyph_idx[cp] = (uint16_t)gi;
-                        slot->ascii_glyph_res[cp] = k;
-                    }
-                }
-            }
+            slot_indices_dirty = true; /* defer ASCII + kern rebuild to once per step */
         }
         // #endregion
+
+        /* Rebuild ASCII fast-path index + has_any_kern ONCE per step if any
+         * resource handle changed in this slot. Previously this was inside
+         * the per-resource loop, leading to O(R²×G) work when multiple
+         * resources updated in one step. Now O(R×G) — single rebuild over
+         * all active resources after the loop. */
+        if (slot_indices_dirty) {
+            rebuild_slot_indices(slot);
+        }
+    }
+}
+
+/* Rebuild slot->has_any_kern and slot->ascii_glyph_idx[] / ascii_glyph_res[]
+ * from scratch by scanning all currently active resources. Called by
+ * nt_font_step after one or more resource handles change. First resource
+ * that owns a codepoint wins (matches find_glyph_in_resources precedence). */
+static void rebuild_slot_indices(nt_font_slot_t *slot) {
+    slot->has_any_kern = false;
+    for (size_t a = 0; a < (sizeof(slot->ascii_glyph_idx) / sizeof(slot->ascii_glyph_idx[0])); a++) {
+        slot->ascii_glyph_idx[a] = NT_FONT_ASCII_IDX_NONE;
+        slot->ascii_glyph_res[a] = 0U;
+    }
+    for (uint8_t k = 0; k < slot->resource_count; k++) {
+        if (slot->resource_handles[k] == 0) {
+            continue;
+        }
+        uint32_t scan_bs = 0;
+        const uint8_t *scan_blob = get_font_data(slot->resource_handles[k], &scan_bs);
+        if (!scan_blob || scan_bs < sizeof(NtFontAssetHeader)) {
+            continue;
+        }
+        const NtFontAssetHeader *scan_hdr = (const NtFontAssetHeader *)scan_blob;
+        const NtFontGlyphEntry *scan_glyphs = (const NtFontGlyphEntry *)(scan_blob + sizeof(NtFontAssetHeader));
+        for (uint32_t gi = 0; gi < scan_hdr->glyph_count; gi++) {
+            const uint32_t cp = scan_glyphs[gi].codepoint;
+            if (scan_glyphs[gi].kern_count != 0U) {
+                slot->has_any_kern = true;
+            }
+            if (cp < 128U && slot->ascii_glyph_idx[cp] == NT_FONT_ASCII_IDX_NONE && gi < NT_FONT_ASCII_IDX_NONE) {
+                slot->ascii_glyph_idx[cp] = (uint16_t)gi;
+                slot->ascii_glyph_res[cp] = k;
+            }
+        }
     }
 }
 
@@ -1064,20 +1081,39 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
         slot->ascii_glyph_idx[i] = NT_FONT_ASCII_IDX_NONE;
     }
 
-    /* Measure cache — heap-allocated per-font, sized via desc->measure_cache_size.
-     * 0 disables the cache entirely (measure_n always runs the full compute path).
-     * Non-zero must be power-of-two for the `key_hash & mask` indexing to work. */
+    /* Measure cache — heap-allocated per-font as a single SoA block sized via
+     * desc->measure_cache_size. 0 disables the cache entirely (measure_n
+     * always runs the full compute path). Non-zero must be power-of-two for
+     * the `key_hash & mask` indexing.
+     *
+     * Layout in one calloc'd block (ordered by descending alignment so each
+     * sub-array starts properly aligned given calloc's max-align return):
+     *   [ key_hashes : N × 8 B ][ size_bits : N × 4 B ][ values : N × 8 B ][ valid : N × 1 B ]
+     * Total 21 N bytes; free via key_hashes (the base pointer). */
     if (desc->measure_cache_size != 0U) {
-        const uint16_t cache_size = desc->measure_cache_size;
+        const uint32_t cache_size = desc->measure_cache_size;
         NT_ASSERT((cache_size & (cache_size - 1U)) == 0U && "measure_cache_size must be power-of-two");
-        slot->measure_cache = (nt_font_measure_cache_entry_t *)calloc(cache_size, sizeof(nt_font_measure_cache_entry_t));
-        if (!slot->measure_cache) {
-            NT_LOG_ERROR("font measure_cache allocation failed (size=%u)", (unsigned)cache_size);
+        const size_t per_entry_bytes = sizeof(uint64_t) + sizeof(uint32_t) + sizeof(nt_text_size_t) + sizeof(uint8_t);
+        uint8_t *block = (uint8_t *)calloc((size_t)cache_size, per_entry_bytes);
+        if (!block) {
+            NT_LOG_ERROR("font measure_cache allocation failed (size=%u, bytes=%zu)", (unsigned)cache_size, (size_t)cache_size * per_entry_bytes);
             nt_pool_free(&s_font.pool, id);
             return NT_FONT_INVALID;
         }
+        /* Partition the byte block into 4 type-cast sub-arrays. Calloc returns
+         * memory aligned for any object type (8 B on x64), so the first array
+         * (uint64_t) is correctly aligned; the others follow the size of the
+         * preceding sub-array (8N, then 8N+4N, then 8N+4N+8N) and stay aligned
+         * because each multiplier is a multiple of the next type's alignment. */
+        /* NOLINTNEXTLINE(bugprone-casting-through-void) */
+        slot->measure_cache.key_hashes = (uint64_t *)(void *)block;
+        /* NOLINTNEXTLINE(bugprone-casting-through-void) */
+        slot->measure_cache.size_bits = (uint32_t *)(void *)(block + ((size_t)cache_size * sizeof(uint64_t)));
+        /* NOLINTNEXTLINE(bugprone-casting-through-void) */
+        slot->measure_cache.values = (nt_text_size_t *)(void *)(block + ((size_t)cache_size * (sizeof(uint64_t) + sizeof(uint32_t))));
+        slot->measure_cache.valid = block + ((size_t)cache_size * (sizeof(uint64_t) + sizeof(uint32_t) + sizeof(nt_text_size_t)));
         slot->measure_cache_size = cache_size;
-        slot->measure_cache_mask = (uint16_t)(cache_size - 1U);
+        slot->measure_cache_mask = cache_size - 1U;
     }
 
     // #region Store config
@@ -1141,7 +1177,7 @@ void nt_font_destroy(nt_font_t font) {
     free(slot->cache);
     free(slot->free_stack);
     free(slot->hash_table);
-    free(slot->measure_cache); /* Phase 51 — heap-allocated; NULL-safe by stdlib contract */
+    free(slot->measure_cache.key_hashes); /* SoA base pointer — frees all 4 arrays in one block. NULL-safe. */
     nt_gfx_destroy_texture(slot->curve_texture);
     nt_gfx_destroy_texture(slot->band_texture);
     memset(slot, 0, sizeof(*slot));
@@ -1426,6 +1462,7 @@ typedef struct {
     uint32_t blob_size;
 } nt_font_glyph_lookup_t;
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static nt_font_glyph_lookup_t lookup_glyph_entry_in_slot(const nt_font_slot_t *slot, uint32_t codepoint) {
     nt_font_glyph_lookup_t out = {0};
 
@@ -1437,11 +1474,15 @@ static nt_font_glyph_lookup_t lookup_glyph_entry_in_slot(const nt_font_slot_t *s
             uint32_t blob_size = 0;
             const uint8_t *blob = get_font_data(slot->resource_handles[ri], &blob_size);
             if (blob && blob_size >= sizeof(NtFontAssetHeader)) {
-                const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
-                out.entry = glyphs + gi;
-                out.blob = blob;
-                out.blob_size = blob_size;
-                return out;
+                const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
+                NT_ASSERT(gi < hdr->glyph_count); /* see find_glyph_in_resources rationale */
+                if (gi < hdr->glyph_count) {
+                    const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
+                    out.entry = glyphs + gi;
+                    out.blob = blob;
+                    out.blob_size = blob_size;
+                    return out;
+                }
             }
         }
     }
@@ -1506,24 +1547,29 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
         return result; /* font not yet resolved */
     }
 
-    /* Cache key (Drift 3 Option B — xxHash32, NOT FNV-1a). When the cache
-     * is disabled (measure_cache == NULL, configured via
-     * nt_font_create_desc_t.measure_cache_size == 0), skip the key compute
-     * and go straight to the full measure path. */
-    const uint32_t key_hash = (slot->measure_cache != NULL) ? nt_hash32((const void *)utf8, (uint32_t)len).value : 0U;
+    /* Cache key — xxHash64 (upgraded from xxHash32 to eliminate false-positive
+     * cache hits over long sessions; see nt_font_measure_cache_t doc).
+     * When the cache is disabled (key_hashes == NULL — measure_cache_size
+     * was 0 at create), skip the key compute and go straight to the full
+     * measure path. */
+    const bool cache_enabled = (slot->measure_cache.key_hashes != NULL);
+    const uint64_t key_hash = cache_enabled ? nt_hash64((const void *)utf8, (uint32_t)len).value : 0U;
     const uint32_t size_bits = measure_size_bits(size);
-    const uint32_t slot_index = key_hash & (uint32_t)slot->measure_cache_mask;
+    const uint32_t slot_index = (uint32_t)key_hash & slot->measure_cache_mask;
 
-    /* Cache lookup — direct-mapped, replace-on-collision (NOT LRU). */
-    if (slot->measure_cache != NULL && slot->measure_cache[slot_index].valid && slot->measure_cache[slot_index].key_hash == key_hash && slot->measure_cache[slot_index].size_bits == size_bits) {
+    /* Cache lookup — direct-mapped, replace-on-collision (NOT LRU). SoA:
+     * the three hot bands (key_hashes, size_bits, valid) sit in tight bands
+     * across all entries, so 8 adjacent slots' header data fits in one
+     * cache line. values[] is only touched on a confirmed hit. */
+    if (cache_enabled && slot->measure_cache.valid[slot_index] && slot->measure_cache.key_hashes[slot_index] == key_hash && slot->measure_cache.size_bits[slot_index] == size_bits) {
 #ifdef NT_FONT_TEST_ACCESS
         slot->test_measure_cache_hits++;
 #endif
-        return slot->measure_cache[slot_index].value;
+        return slot->measure_cache.values[slot_index];
     }
 
 #ifdef NT_FONT_TEST_ACCESS
-    if (slot->measure_cache != NULL) {
+    if (cache_enabled) {
         slot->test_measure_cache_misses++;
     }
 #endif
@@ -1602,12 +1648,13 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
     }
 
     /* Cache write — direct-mapped, replace on collision (D-51-09 simple
-     * eviction at 256-entry table). Skipped when cache is disabled. */
-    if (slot->measure_cache != NULL) {
-        slot->measure_cache[slot_index].key_hash = key_hash;
-        slot->measure_cache[slot_index].size_bits = size_bits;
-        slot->measure_cache[slot_index].value = result;
-        slot->measure_cache[slot_index].valid = true;
+     * eviction at 256-entry table). Skipped when cache is disabled. SoA:
+     * each field writes into its own parallel array. */
+    if (cache_enabled) {
+        slot->measure_cache.key_hashes[slot_index] = key_hash;
+        slot->measure_cache.size_bits[slot_index] = size_bits;
+        slot->measure_cache.values[slot_index] = result;
+        slot->measure_cache.valid[slot_index] = 1U;
         slot->measure_cache_warm = true;
     }
 
@@ -1625,6 +1672,14 @@ nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) { r
  * if a theme is swapped before the font module is up. The per-font variant
  * is symmetric for the same reason. */
 
+/* Zero the entire SoA cache block (all 4 sub-arrays at once). The block is
+ * laid out contiguously in nt_font_create — clearing it via the base
+ * pointer (key_hashes) and total size is one memset, not four. */
+static void measure_cache_clear(nt_font_slot_t *slot) {
+    const size_t per_entry_bytes = sizeof(uint64_t) + sizeof(uint32_t) + sizeof(nt_text_size_t) + sizeof(uint8_t);
+    memset(slot->measure_cache.key_hashes, 0, (size_t)slot->measure_cache_size * per_entry_bytes);
+}
+
 void nt_font_measure_invalidate_cache(void) {
     if (!s_font.initialized) {
         return;
@@ -1634,10 +1689,10 @@ void nt_font_measure_invalidate_cache(void) {
             continue;
         }
         nt_font_slot_t *slot = &s_font.slots[i];
-        if (!slot->measure_cache_warm || slot->measure_cache == NULL) {
+        if (!slot->measure_cache_warm || slot->measure_cache.key_hashes == NULL) {
             continue; /* cold slot or cache disabled — nothing to clear */
         }
-        memset(slot->measure_cache, 0, (size_t)slot->measure_cache_size * sizeof(nt_font_measure_cache_entry_t));
+        measure_cache_clear(slot);
         slot->measure_cache_warm = false;
     }
 }
@@ -1647,10 +1702,10 @@ void nt_font_measure_invalidate(nt_font_t font) {
         return;
     }
     nt_font_slot_t *slot = get_slot(font);
-    if (!slot->measure_cache_warm || slot->measure_cache == NULL) {
+    if (!slot->measure_cache_warm || slot->measure_cache.key_hashes == NULL) {
         return;
     }
-    memset(slot->measure_cache, 0, (size_t)slot->measure_cache_size * sizeof(nt_font_measure_cache_entry_t));
+    measure_cache_clear(slot);
     slot->measure_cache_warm = false;
 }
 // #endregion
