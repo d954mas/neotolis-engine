@@ -467,6 +467,165 @@ void test_font_lru_eviction(void) {
     free(blob2);
 }
 
+/* ---- Helpers for FONT-01 / FONT-02 tests ----
+ *
+ * Unity's TEST_ASSERT_EQUAL_FLOAT is compiled out via UNITY_EXCLUDE_FLOAT
+ * (matches test_stats.c pattern). Identity-comparing nt_text_size_t is safe
+ * because:
+ *   - cache hits return the EXACT bytes stored on miss → bit-identical
+ *   - miss-path on identical input is deterministic (same float math, same order)
+ * We use bit-exact memcmp on the struct. */
+static void assert_text_size_equal(nt_text_size_t expected, nt_text_size_t actual) { TEST_ASSERT_EQUAL_MEMORY(&expected, &actual, sizeof(expected)); }
+
+/* Build a fully-resolved test font (cache + metrics ready). Caller frees blob. */
+static nt_font_t make_resolved_test_font(const char *name, uint8_t **out_blob) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_font_blob(&blob_size);
+    nt_resource_t res = register_font_resource(name, blob, blob_size);
+
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+
+    *out_blob = blob;
+    return font;
+}
+
+/* ---- FONT-01: nt_font_measure_n matches nt_font_measure on NUL-equivalent input ---- */
+
+void test_measure_n_matches_measure(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_resolved_test_font("font_eq", &blob);
+
+    nt_text_size_t a = nt_font_measure(font, "ABC", 14.0F);
+    nt_text_size_t b = nt_font_measure_n(font, "ABC", 3U, 14.0F);
+    assert_text_size_equal(a, b);
+
+    /* Empty input contract */
+    nt_text_size_t zero = {0.0F, 0.0F};
+    nt_text_size_t e = nt_font_measure_n(font, "ABC", 0U, 14.0F);
+    assert_text_size_equal(zero, e);
+
+    /* NULL guard */
+    nt_text_size_t n = nt_font_measure_n(font, NULL, 4U, 14.0F);
+    assert_text_size_equal(zero, n);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* ---- FONT-01b: nt_font_measure_n bounded by len even with poisoned byte at utf8[len] ---- */
+
+void test_measure_n_does_not_over_read(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_resolved_test_font("font_bound", &blob);
+
+    /* "ABC" + poison 'B' + filler; bounded measure must ignore the poison */
+    char buf[8];
+    memcpy(buf, "ABCBXXXX", 8);
+    nt_text_size_t bounded = nt_font_measure_n(font, buf, 3U, 14.0F);
+    nt_text_size_t reference = nt_font_measure(font, "ABC", 14.0F);
+
+    /* If _n over-read into the poison 'B', bounded.width would exceed reference.width. */
+    assert_text_size_equal(reference, bounded);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* ---- FONT-01c: UTF-8 multibyte sequence cut by len → dropped via NT_UTF8_REJECT ---- */
+
+void test_measure_n_drops_partial_utf8(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_resolved_test_font("font_utf8", &blob);
+
+    /* "A" + 0xC3 (first byte of a 2-byte UTF-8 sequence) — len = 2 stops
+     * mid-multibyte. The UTF-8 state machine recovers via NT_UTF8_REJECT
+     * and the loop exits with only 'A' measured. */
+    const char partial[] = {'A', (char)0xC3, 0};
+    nt_text_size_t bounded = nt_font_measure_n(font, partial, 2U, 14.0F);
+    nt_text_size_t reference = nt_font_measure(font, "A", 14.0F);
+
+    assert_text_size_equal(reference, bounded);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* ---- FONT-02: 200 identical calls produce 199 hits + 1 miss ---- */
+
+void test_measure_n_cache_hits_on_repeat(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_resolved_test_font("font_hits", &blob);
+
+    nt_font_measure_invalidate(font);
+    nt_font_test_reset_measure_counters();
+
+    for (int i = 0; i < 200; i++) {
+        (void)nt_font_measure_n(font, "ABC", 3U, 14.0F);
+    }
+
+    TEST_ASSERT_EQUAL_UINT32(199U, nt_font_test_measure_cache_hits(font));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* ---- FONT-02b: invalidate_cache resets — next call is a miss ---- */
+
+void test_measure_n_invalidate_forces_miss(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_resolved_test_font("font_inv", &blob);
+
+    nt_font_measure_invalidate(font);
+    nt_font_test_reset_measure_counters();
+
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F); /* miss */
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F); /* hit */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
+
+    nt_font_measure_invalidate_cache();
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);                        /* miss again after invalidate */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));   /* unchanged */
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_font_test_measure_cache_misses(font)); /* +1 */
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* ---- FONT-02c: nt_font_destroy(font) clears cache (slot recycled = empty cache) ---- */
+
+void test_measure_n_destroy_clears_cache(void) {
+    uint8_t *blob_a = NULL;
+    nt_font_t font_a = make_resolved_test_font("font_d_a", &blob_a);
+
+    nt_font_test_reset_measure_counters();
+    (void)nt_font_measure_n(font_a, "ABC", 3U, 14.0F); /* warm slot */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font_a));
+
+    /* Destroy releases pool slot via memset(slot, 0, sizeof(*slot)); next
+     * create may reuse the same physical slot index. */
+    nt_font_destroy(font_a);
+    free(blob_a);
+
+    uint8_t *blob_b = NULL;
+    nt_font_t font_b = make_resolved_test_font("font_d_b", &blob_b);
+
+    nt_font_test_reset_measure_counters();
+    (void)nt_font_measure_n(font_b, "ABC", 3U, 14.0F);
+    /* Must be a miss — slot's cache was cleared on destroy. */
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_font_test_measure_cache_hits(font_b));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font_b));
+
+    nt_font_destroy(font_b);
+    free(blob_b);
+}
+
 /* ---- Test 9: GPU texture handles (FONT-03) ---- */
 
 void test_font_gpu_textures(void) {
@@ -498,5 +657,12 @@ int main(void) {
     RUN_TEST(test_font_get_stats);
     RUN_TEST(test_font_lru_eviction);
     RUN_TEST(test_font_gpu_textures);
+    /* Phase 51 / Plan 04 — FONT-01 + FONT-02 (length-aware measure + LRU cache) */
+    RUN_TEST(test_measure_n_matches_measure);
+    RUN_TEST(test_measure_n_does_not_over_read);
+    RUN_TEST(test_measure_n_drops_partial_utf8);
+    RUN_TEST(test_measure_n_cache_hits_on_repeat);
+    RUN_TEST(test_measure_n_invalidate_forces_miss);
+    RUN_TEST(test_measure_n_destroy_clears_cache);
     return UNITY_END();
 }
