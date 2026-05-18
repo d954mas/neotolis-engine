@@ -140,6 +140,18 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_gfx COMMAND test_gfx)
 
+    # --- Graphics scissor/viewport tests (Phase 51) ---
+    add_executable(test_nt_gfx_scissor unit/test_nt_gfx_scissor.c)
+    target_link_libraries(test_nt_gfx_scissor PRIVATE nt_gfx_stub unity)
+    target_compile_definitions(test_nt_gfx_scissor PRIVATE NT_GFX_TEST_ACCESS)
+    target_compile_definitions(nt_gfx_stub PRIVATE NT_GFX_TEST_ACCESS)
+    nt_set_warning_flags(test_nt_gfx_scissor)
+    nt_set_sanitizer_flags(test_nt_gfx_scissor)
+    set_target_properties(test_nt_gfx_scissor PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_nt_gfx_scissor COMMAND test_nt_gfx_scissor)
+
     # --- Shape module tests ---
     add_executable(test_shape unit/test_shape.c)
     target_link_libraries(test_shape PRIVATE nt_shape_renderer nt_gfx_stub unity)
