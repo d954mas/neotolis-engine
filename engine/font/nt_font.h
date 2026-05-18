@@ -42,21 +42,24 @@ typedef struct {
     /* Measure cache size — direct-mapped, MUST be power-of-two if non-zero.
      * 0 disables the cache entirely (every measure_n is a full compute path,
      * useful for one-shot tools and tests that want to bypass caching).
-     * Sane range: 64–4096 entries (20 B per entry, so 1.2 KB–80 KB per font).
+     * Sane range: 64–65536 entries (24 B per entry → 1.5 KB–1.5 MB per font).
      * Defaults to 256 when zero is passed via nt_font_create_desc_defaults
      * (the bare {0}-initialized desc gets cache disabled — opt-in default). */
-    uint16_t measure_cache_size;
+    uint32_t measure_cache_size;
 } nt_font_create_desc_t;
 
-/* Sensible defaults for nt_font_create_desc_t. measure_cache_size=256 matches
- * the v1.7 hardcoded size. Callers building desc from scratch with `{0}`
- * MUST opt in explicitly via this helper or by setting the field. */
+/* Sensible defaults for nt_font_create_desc_t. Mirrors the values used by
+ * examples/bunnymark and examples/text — sized for a typical Latin UI font
+ * (ASCII + punctuation + extended Latin = ~200 glyphs without flushing).
+ * band_count=8 gives good per-glyph SDF detail; measure_cache_size=256
+ * matches the v1.7 hardcoded size. Callers building desc from scratch
+ * with `{0}` MUST opt in explicitly via this helper or by setting fields. */
 static inline nt_font_create_desc_t nt_font_create_desc_defaults(void) {
     return (nt_font_create_desc_t){
-        .curve_texture_width = 256,
-        .curve_texture_height = 256,
-        .band_texture_height = 64,
-        .band_count = 4,
+        .curve_texture_width = 1024,
+        .curve_texture_height = 512,
+        .band_texture_height = 256, /* = max_glyphs, fits Latin + extended */
+        .band_count = 8,
         .measure_cache_size = 256,
     };
 }
