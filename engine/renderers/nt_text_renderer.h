@@ -30,6 +30,20 @@ void nt_text_renderer_set_font(nt_font_t font);
 
 /* ---- Draw (adds text to CPU staging buffer, per-draw mat4 pre-transform) ---- */
 
+/* Length-aware variant of nt_text_renderer_draw — accepts non-NUL-terminated
+ * buffers (Clay_StringSlice contract). Iterates exactly `len` bytes. No
+ * per-call scratch allocation — input string is iterated in place.
+ *
+ * Edge cases:
+ *   - len == 0 or utf8 == NULL → no-op
+ *   - UTF-8 multibyte cut by `len` → incomplete trailing codepoint dropped
+ *     via NT_UTF8_REJECT recovery; no over-read past utf8 + len.
+ *
+ * Phase 51 / TEXT-01. The existing nt_text_renderer_draw becomes a
+ * thin wrapper that calls _draw_n with strlen(utf8) (or 0 on NULL).
+ */
+void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4]);
+
 void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4]);
 
 /* ---- Flush (upload staging buffer + single draw call per flush) ---- */
