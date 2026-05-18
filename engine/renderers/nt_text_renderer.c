@@ -186,6 +186,11 @@ void nt_text_renderer_restore_gpu(void) {
     s_text.material = saved_material;
     s_text.font = saved_font;
     s_text.pipeline_material_version = 0; /* force pipeline recreation on next flush */
+
+    /* Defensive scissor reset (Phase 51 GFX-04 / D-51-05): symmetric with
+     * nt_sprite_renderer_restore_gpu — after context-loss + restore, GL
+     * defaults to scissor-disabled; force cached flag to match. */
+    nt_gfx_set_scissor_enabled(false);
 }
 // #endregion
 
