@@ -523,9 +523,9 @@ void test_measure_n_does_not_over_read(void) {
     uint8_t *blob = NULL;
     nt_font_t font = make_resolved_test_font("font_bound", &blob);
 
-    /* "ABC" + poison 'B' + filler; bounded measure must ignore the poison */
-    char buf[8];
-    memcpy(buf, "ABCBXXXX", 8);
+    /* "ABC" + poison 'B' + filler; bounded measure must ignore the poison.
+       Intentionally NOT NUL-terminated — tests that _n stops at len, not at NUL. */
+    const char buf[8] = {'A', 'B', 'C', 'B', 'X', 'X', 'X', 'X'};
     nt_text_size_t bounded = nt_font_measure_n(font, buf, 3U, 14.0F);
     nt_text_size_t reference = nt_font_measure(font, "ABC", 14.0F);
 
