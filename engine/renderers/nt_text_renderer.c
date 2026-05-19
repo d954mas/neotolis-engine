@@ -332,7 +332,6 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     float scale = size / (float)metrics.units_per_em;
     uint8_t band_count = nt_font_get_band_count(s_text.font);
 
-    /* Slot resolved once outside the per-codepoint loop. */
     nt_font_slot_t *slot = nt_font_get_slot(s_text.font);
     NT_ASSERT(slot != NULL);
     if (!slot) {

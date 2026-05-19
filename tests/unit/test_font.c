@@ -31,9 +31,6 @@ static uint32_t s_vpack_counter;
  *   NtFontGlyphEntry[3] (24 bytes each = 72 bytes)
  *   Per-glyph contour data blocks (variable)
  */
-/* Variant with custom metrics — used by hot-swap regression test
- * (FONT-02i) to construct a second font asset whose ascent/descent/UPEM
- * differ from the default blob. */
 static uint8_t *build_test_font_blob_with_metrics(uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_gap, uint32_t *out_size);
 
 static uint8_t *build_test_font_blob(uint32_t *out_size) { return build_test_font_blob_with_metrics(1000, 800, -200, 0, out_size); }
@@ -763,28 +760,12 @@ void test_measure_n_cache_custom_size(void) {
     free(blob);
 }
 
-/* ---- FONT-02g: full pack unmount resets state cleanly ----
+/* ---- FONT-02g: full pack unmount clears stale handle + metrics ----
  *
- * Covers two coupled fixes triggered by nt_resource_get → 0 transition:
- *
- *  (1) Stale-handle data corruption window: when a resource went from
- *      loaded (handle = N) to unloaded, the old code path simply
- *      `continue`d, leaving slot->resource_handles[ri] at stale N. If
- *      activate_font later recycled data-table slot N for a different
- *      font's pack, get_font_data(N) would silently return the new
- *      pack's bytes — wrong-font glyph metrics via the ASCII fast-path
- *      index. nt_font_step now clears resource_handles[ri] and triggers
- *      slot_indices_dirty so the ASCII index + measure cache rebuild.
- *
- *  (2) metrics_set sticky after full unmount: with all resources gone,
- *      slot->metrics_set stayed true with stale ascent/descent/UPEM.
- *      Renderers' `units_per_em != 0` guard would pass and emit tofu
- *      using wrong-font scale. nt_font_step now resets metrics + flag
- *      when no resource handle remains.
- *
- * Combined effect: nt_font_measure_n short-circuits at `!metrics_set`
- * and returns {0,0}. The cache-check path is never reached, so counters
- * stay frozen — that's the signal that the short-circuit fired. */
+ * After unmount, measure_n short-circuits at !metrics_set and returns
+ * {0,0}. The cache lookup is never reached, so counters stay frozen —
+ * that's the signature of both the resource_handles cleanup and the
+ * metrics reset firing. */
 void test_measure_n_invalidates_on_resource_unload(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
@@ -814,33 +795,28 @@ void test_measure_n_invalidates_on_resource_unload(void) {
     (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
-    TEST_ASSERT_TRUE(live.width > 0.0F); /* sanity — non-empty measurement before unmount */
+    TEST_ASSERT_TRUE(live.width > 0.0F);
 
-    /* Metrics should be live before unmount. */
     nt_font_metrics_t pre = nt_font_get_metrics(font);
     TEST_ASSERT_NOT_EQUAL_UINT16(0U, pre.units_per_em);
 
-    /* Unmount the only pack carrying this resource. After resolve, the
-     * asset slot has runtime_handle = 0, so nt_resource_get returns 0. */
     nt_resource_unmount(pid);
     nt_resource_step();
     nt_font_step();
 
-    /* Metrics must reset to {0} on full unmount (fix #2). */
     nt_font_metrics_t post = nt_font_get_metrics(font);
     TEST_ASSERT_EQUAL_UINT16(0U, post.units_per_em);
     TEST_ASSERT_EQUAL_INT16(0, post.ascent);
     TEST_ASSERT_EQUAL_INT16(0, post.descent);
 
-    /* measure_n short-circuits at !metrics_set → returns {0,0}. The cache
-     * lookup is never reached, so counters stay frozen — that's the
-     * combined signature of both fixes. (UNITY_EXCLUDE_FLOAT in this build,
-     * so use TEST_ASSERT_TRUE for the zero check.) */
+    /* Counters frozen — measure_n hit the !metrics_set short-circuit
+     * before the cache lookup. (UNITY_EXCLUDE_FLOAT, so TEST_ASSERT_TRUE
+     * for the zero check.) */
     nt_text_size_t after = nt_font_measure_n(font, "AB", 2U, 14.0F);
     TEST_ASSERT_TRUE(after.width == 0.0F);
     TEST_ASSERT_TRUE(after.height == 0.0F);
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));   /* unchanged */
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font)); /* unchanged */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
 
     nt_font_destroy(font);
     free(blob);
@@ -848,12 +824,9 @@ void test_measure_n_invalidates_on_resource_unload(void) {
 
 /* ---- FONT-02h: remount after full unmount recovers a working font ----
  *
- * Sister to FONT-02g. After full unmount nt_font_step clears
- * resource_handles[] + metrics_set, so a later mount of the SAME pack
- * id + resource id must take the existing `slot->resources[ri]`
- * handle (kept across unmount) and re-resolve. Without this path,
- * games that hot-swap themes or asset packs would see permanently
- * dead fonts after the first unmount. */
+ * Guards the invariant that nt_font_add stores resources[ri] permanently
+ * (it survives unmount), so a later remount under the same pid+rid
+ * re-resolves through the same slot without re-adding. */
 void test_font_recovers_after_remount(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
@@ -867,7 +840,6 @@ void test_font_recovers_after_remount(void) {
     nt_hash32_t pid = nt_hash32_str(pack_name);
     nt_hash64_t rid = nt_hash64_str("font_remount");
 
-    /* First mount cycle */
     nt_resource_create_pack(pid, 0);
     nt_resource_register(pid, rid, NT_ASSET_FONT, data_handle);
     nt_resource_t res = nt_resource_request(rid, NT_ASSET_FONT);
@@ -876,22 +848,19 @@ void test_font_recovers_after_remount(void) {
     nt_font_step();
     TEST_ASSERT_NOT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
 
-    /* Unmount → metrics reset (covered by FONT-02g) */
     nt_resource_unmount(pid);
     nt_resource_step();
     nt_font_step();
     TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
 
-    /* Remount the SAME pack + resource. nt_font already holds the
-     * resource handle from the original nt_font_add — we don't add it
-     * again; the step loop must pick up the new runtime handle. */
+    /* Remount without re-adding to the font — step must pick up the
+     * new runtime handle through the existing slot->resources[ri]. */
     uint32_t data_handle2 = nt_font_test_register_data(blob, blob_size);
     nt_resource_create_pack(pid, 0);
     nt_resource_register(pid, rid, NT_ASSET_FONT, data_handle2);
     nt_resource_step();
     nt_font_step();
 
-    /* Font is alive again: metrics populated, measurement is non-zero. */
     nt_font_metrics_t recovered = nt_font_get_metrics(font);
     TEST_ASSERT_NOT_EQUAL_UINT16(0U, recovered.units_per_em);
     nt_text_size_t m = nt_font_measure_n(font, "AB", 2U, 14.0F);
@@ -903,30 +872,15 @@ void test_font_recovers_after_remount(void) {
 
 /* ---- FONT-02i: single-step hot-swap with different metrics ----
  *
- * Tighter sister of FONT-02h. The recovery test there runs nt_font_step
- * BETWEEN unmount and remount, so the unmount path clears metrics_set
- * cleanly. This test compresses the cycle into a SINGLE nt_font_step:
- * the game unmounts the old pack, registers a different font asset
- * under the same pack id + resource id, and steps once.
- *
- * From step's point of view this looks like a plain reload — old
- * runtime handle → new runtime handle, slot->resource_handles[ri]
- * was never observed at 0. Before the hot-swap fix, the metrics
- * validation else-branch (nt_font.c) would assert that the new
- * header's ascent/UPEM matches the stale slot->metrics — false for
- * a different font, so the assert fires and crashes the frame.
- *
- * Fix: on metrics mismatch, if this resource is the ONLY active
- * metric provider in the slot, accept the new metrics (and wipe the
- * glyph cache built against the old ones). If there are other active
- * resources, the multi-resource invariant still holds and the assert
- * remains the right tool. */
+ * Unmount + register-different + step, with no intervening font_step.
+ * From step's view this is a plain reload (handle transition, not
+ * 0→N); single-provider mismatch must accept the new metrics rather
+ * than trip the shared-metrics assert. */
 void test_font_hotswap_replaces_metrics_in_one_step(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
 
-    /* First mount: standard metrics (UPEM=1000, ascent=800). */
     uint32_t size_a = 0;
     uint8_t *blob_a = build_test_font_blob(&size_a);
     uint32_t handle_a = nt_font_test_register_data(blob_a, size_a);
@@ -945,12 +899,9 @@ void test_font_hotswap_replaces_metrics_in_one_step(void) {
     TEST_ASSERT_EQUAL_UINT16(1000U, m_a.units_per_em);
     TEST_ASSERT_EQUAL_INT16(800, m_a.ascent);
 
-    /* Cache built against UPEM=1000 must be wiped on hot-swap; generation
-     * bump is the contract batch consumers (nt_text_renderer) rely on. */
     uint32_t gen_before = nt_font_get_cache_generation(font);
 
-    /* Hot-swap WITHOUT an intervening nt_font_step. Different UPEM and
-     * ascent so the stale-metrics path is exercised. */
+    /* No intervening font_step between unmount and remount. */
     uint32_t size_b = 0;
     uint8_t *blob_b = build_test_font_blob_with_metrics(2048, 1600, -400, 0, &size_b);
     uint32_t handle_b = nt_font_test_register_data(blob_b, size_b);
@@ -958,14 +909,12 @@ void test_font_hotswap_replaces_metrics_in_one_step(void) {
     nt_resource_create_pack(pid, 0);
     nt_resource_register(pid, rid, NT_ASSET_FONT, handle_b);
     nt_resource_step();
-    nt_font_step(); /* single step sees old_handle != 0 → new_handle (reload path) */
+    nt_font_step();
 
-    /* New metrics installed, not asserted against. */
     nt_font_metrics_t m_b = nt_font_get_metrics(font);
     TEST_ASSERT_EQUAL_UINT16(2048U, m_b.units_per_em);
     TEST_ASSERT_EQUAL_INT16(1600, m_b.ascent);
     TEST_ASSERT_EQUAL_INT16(-400, m_b.descent);
-
     TEST_ASSERT_TRUE(nt_font_get_cache_generation(font) > gen_before);
 
     nt_font_destroy(font);
@@ -973,14 +922,11 @@ void test_font_hotswap_replaces_metrics_in_one_step(void) {
     free(blob_b);
 }
 
-/* ---- FONT-02k: FILE-pack unmount without remount cleans state ----
+/* ---- FONT-02k: FILE-pack unmount without remount cleans state inline ----
  *
- * Regression for the deactivate-zeroes-handles fix. Once deactivate_font
- * cleared resource_handles[ri], the unload branch in nt_font_step
- * (`if (slot->resource_handles[ri] != 0)`) stopped firing — so glyph
- * cache, measure cache, ASCII index, and metrics_set survived a plain
- * file-pack unload. deactivate_font now performs the full cleanup
- * itself rather than waiting on step. */
+ * deactivate_font must finish all slot cleanup before returning — without
+ * waiting for the next nt_font_step. Asserts metrics/cache state are
+ * already reset after just unmount + deactivate, no extra tick. */
 void test_font_file_pack_unmount_cleans_state(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
@@ -999,24 +945,19 @@ void test_font_file_pack_unmount_cleans_state(void) {
     nt_resource_step();
     nt_font_step();
 
-    /* Warm caches. */
     nt_font_test_reset_measure_counters();
     (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
     (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
     uint32_t gen_before = nt_font_get_cache_generation(font);
 
-    /* FILE-pack unmount path: resource_unmount + activator deactivator,
-     * no further nt_font_step. */
+    /* No nt_font_step between unmount and the assertions. */
     nt_resource_unmount(pid);
     nt_font_test_deactivate(data_handle);
 
-    /* All downstream state must already be reset — without waiting on step. */
     TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
     TEST_ASSERT_TRUE(nt_font_get_cache_generation(font) > gen_before);
 
-    /* measure_n short-circuits at !metrics_set → returns {0,0}, counters
-     * stay frozen (cache check never runs). */
     nt_text_size_t after = nt_font_measure_n(font, "AB", 2U, 14.0F);
     TEST_ASSERT_TRUE(after.width == 0.0F);
     TEST_ASSERT_TRUE(after.height == 0.0F);
@@ -1027,17 +968,12 @@ void test_font_file_pack_unmount_cleans_state(void) {
     free(blob);
 }
 
-/* ---- FONT-02j: FILE-pack handle reuse hot-swap ----
+/* ---- FONT-02j: FILE-pack hot-swap with handle reuse ----
  *
- * Sister of FONT-02i. Virtual-pack unmount skips the activator
- * deactivator, so handles never collide. FILE packs do invoke it —
- * the data slot is freed and the next activate reuses the same
- * numeric handle for a different asset. The early-out
- * `ver == slot->resource_handles[ri]` would skip the reload unless
- * deactivate_font invalidates the slot reference first.
- *
- * Driven via nt_font_test_deactivate to imitate the file-pack path
- * without real I/O. */
+ * Tighter than FONT-02i: activate_font reuses the freed data slot, so
+ * handle_b == handle_a numerically. Step's `ver == resource_handles[ri]`
+ * early-out would skip the reload unless deactivate_font already
+ * invalidated the slot reference. */
 void test_font_hotswap_handle_reuse_after_deactivate(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
@@ -1059,8 +995,7 @@ void test_font_hotswap_handle_reuse_after_deactivate(void) {
 
     uint32_t gen_before = nt_font_get_cache_generation(font);
 
-    /* nt_resource_unmount on a virtual pack does not run the activator
-     * deactivator — drive it manually to match the file-pack path. */
+    /* Virtual-pack unmount skips the deactivator; invoke it manually. */
     nt_resource_unmount(pid);
     nt_font_test_deactivate(handle_a);
 

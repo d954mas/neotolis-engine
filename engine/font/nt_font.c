@@ -57,10 +57,6 @@ static uint32_t activate_font(const uint8_t *data, uint32_t size) {
     return idx + 1; /* 1-based handle (0 = failure in resource system) */
 }
 
-/* Drop one slot's reference to a deactivated runtime handle and rebuild
- * derived state (glyph cache, ASCII index, measure cache, metrics). Same
- * cleanup nt_font_step's unload branch runs — extracted so deactivate_font
- * can apply it immediately, without waiting for the next step. */
 static void slot_drop_handle(nt_font_slot_t *slot, uint32_t runtime_handle) {
     bool touched = false;
     for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
@@ -96,13 +92,10 @@ static void deactivate_font(uint32_t runtime_handle) {
         return;
     }
 
-    /* Two reasons to clean up here instead of deferring to nt_font_step:
-     * (1) handle reuse — activate_font hands out the first NULL data slot,
-     *     so the next mount can produce the same numeric handle for a
-     *     different asset and step's `ver == resource_handles[ri]` early-
-     *     out would skip the reload.
-     * (2) deactivate may run between steps; caches and metrics must be
-     *     consistent immediately, not on next tick. */
+    /* Cleanup runs inline (not deferred to nt_font_step) — activate_font
+     * reuses freed handles, so step's `ver == resource_handles[ri]` early-
+     * out would skip the reload and leave the slot bound to bytes that now
+     * belong to a different asset. */
     if (s_font.initialized) {
         for (uint32_t s = 1; s <= s_font.pool.capacity; s++) {
             if (!nt_pool_slot_alive(&s_font.pool, s)) {
@@ -400,8 +393,7 @@ static void clear_glyph_cache(nt_font_slot_t *slot) {
     slot->cache_generation++;
 }
 
-/* Sized-out-of-room flush. Lifecycle resets (reload/unload/restore) call
- * clear_glyph_cache directly to avoid the misleading "texture full" log. */
+/* Same reset as clear_glyph_cache, plus the "texture full" warning. */
 static void flush_cache_for_overflow(nt_font_slot_t *slot) {
     NT_LOG_WARN("font cache flush: curve texture full (%ux%u), consider larger curve_texture_width/height", slot->curve_tex_width, slot->curve_tex_height);
     clear_glyph_cache(slot);
@@ -1011,16 +1003,15 @@ void nt_font_step(void) {
 
         nt_font_slot_t *slot = &s_font.slots[i];
         bool slot_indices_dirty = false;
-        bool need_flush = false; /* batched — one clear_glyph_cache after the loop covers any combo of unload/reload */
+        bool need_flush = false;
 
         // #region Resolve resources
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
             uint32_t ver = nt_resource_get(slot->resources[ri]);
             if (ver == 0) {
-                /* Resource gone (virtual-pack unmount path; file-pack unmount
-                 * runs the deactivator which clears everything inline). Drop
-                 * the stale handle so a recycled data-slot can't masquerade
-                 * as the same asset. */
+                /* Virtual-pack unmount path. File-pack unmount runs the
+                 * deactivator which clears state inline; this branch only
+                 * fires for the virtual case where no deactivator runs. */
                 if (slot->resource_handles[ri] != 0) {
                     slot->resource_handles[ri] = 0;
                     slot_indices_dirty = true;
@@ -1048,11 +1039,10 @@ void nt_font_step(void) {
             const bool metrics_match = slot->metrics_set && slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent &&
                                        slot->metrics.line_gap == hdr->line_gap;
             if (!slot->metrics_set || !metrics_match) {
-                /* Mismatch with another active resource breaks the shared-metrics
-                 * invariant — normalize fonts in the builder. Single-provider
-                 * mismatch is the hot-swap case (theme/pack swap rebinding the
-                 * resource id to a different asset): accept and wipe the glyph
-                 * cache built against the old metrics. */
+                /* Mismatch with another active resource violates the shared-
+                 * metrics invariant (assert below). Single-provider mismatch
+                 * is the legitimate hot-swap case — accept and wipe the cache
+                 * built against the old metrics. */
                 if (slot->metrics_set && !metrics_match) {
                     bool only_provider = true;
                     for (uint8_t j = 0; j < slot->resource_count; j++) {
@@ -1073,13 +1063,12 @@ void nt_font_step(void) {
             }
             // #endregion
 
-            /* If version changed (reload), batch the flush — one call after the loop */
             if (slot->resource_handles[ri] != 0) {
-                need_flush = true;
+                need_flush = true; /* reload — wipe cache once after the loop */
             }
 
             slot->resource_handles[ri] = ver;
-            slot_indices_dirty = true; /* defer ASCII + kern rebuild to once per step */
+            slot_indices_dirty = true;
         }
         // #endregion
 
@@ -1103,13 +1092,9 @@ void nt_font_step(void) {
                 slot->measure_cache_warm = false;
             }
 
-            /* If every resource is now inactive (full unmount), reset metrics so
-             * nt_font_get_metrics returns {0} again. Without this, metrics_set
-             * stays true with stale ascent/descent/units_per_em from the last
-             * loaded resource — draw paths would proceed past their
-             * `units_per_em != 0` guard and emit tofu using wrong-font metrics.
-             * Named `j` (not `ri`) to avoid shadowing the outer per-resource
-             * loop variable that just went out of scope. */
+            /* Full unmount — reset metrics so get_metrics returns {0} and
+             * draw paths' units_per_em == 0 guard fires. Otherwise metrics_set
+             * sticks at true with stale values from the last loaded resource. */
             bool any_active = false;
             for (uint8_t j = 0; j < slot->resource_count; j++) {
                 if (slot->resource_handles[j] != 0) {
