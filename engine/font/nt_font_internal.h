@@ -26,8 +26,8 @@ typedef struct {
     uint8_t resource_index;
 } nt_font_cache_slot_t;
 
-/* Opaque forward-decl in nt_font_hot.h. Typedef duplicated here so nt_font.c
- * sees the name without pulling in the hot header (C17 allows). */
+/* Opaque forward-decl in nt_font_hot.h; the typedef is duplicated there.
+ * C17 permits identical typedefs across TUs. */
 typedef struct nt_font_slot_s nt_font_slot_t;
 
 struct nt_font_slot_s {

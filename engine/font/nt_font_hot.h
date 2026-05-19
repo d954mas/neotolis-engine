@@ -6,8 +6,6 @@
 
 #include "font/nt_font.h"
 
-#include <stdint.h>
-
 typedef struct nt_font_slot_s nt_font_slot_t;
 
 nt_font_slot_t *nt_font_get_slot(nt_font_t font); /* NULL if invalid */

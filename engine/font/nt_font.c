@@ -57,18 +57,15 @@ static uint32_t activate_font(const uint8_t *data, uint32_t size) {
     return idx + 1; /* 1-based handle (0 = failure in resource system) */
 }
 
-static void slot_drop_handle(nt_font_slot_t *slot, uint32_t runtime_handle) {
-    bool touched = false;
-    for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
-        if (slot->resource_handles[ri] == runtime_handle) {
-            slot->resource_handles[ri] = 0;
-            touched = true;
-        }
+/* Single source of truth for the cleanup that must follow any change in
+ * slot->resource_handles[]. Both deactivate_font (FILE-pack inline path)
+ * and nt_font_step (virtual-pack path) call this with their own conditional
+ * for `flush_glyphs` — keeping it in one place prevents the two paths from
+ * silently diverging. */
+static void slot_refresh_after_resource_change(nt_font_slot_t *slot, bool flush_glyphs) {
+    if (flush_glyphs) {
+        clear_glyph_cache(slot);
     }
-    if (!touched) {
-        return;
-    }
-    clear_glyph_cache(slot);
     rebuild_ascii_index(slot);
     if (slot->measure_cache.key_hashes != NULL) {
         measure_cache_clear(slot);
@@ -83,6 +80,19 @@ static void slot_drop_handle(nt_font_slot_t *slot, uint32_t runtime_handle) {
     if (!any_active && slot->metrics_set) {
         slot->metrics = (nt_font_metrics_t){0};
         slot->metrics_set = false;
+    }
+}
+
+static void slot_drop_handle(nt_font_slot_t *slot, uint32_t runtime_handle) {
+    bool touched = false;
+    for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
+        if (slot->resource_handles[ri] == runtime_handle) {
+            slot->resource_handles[ri] = 0;
+            touched = true;
+        }
+    }
+    if (touched) {
+        slot_refresh_after_resource_change(slot, true);
     }
 }
 
@@ -110,17 +120,17 @@ static void deactivate_font(uint32_t runtime_handle) {
     entries[idx].size = 0;
 }
 
-/* Get font data from activation handle. All callers guard against handle=0
- * (resource_handles[ri] zero-check or upstream ver!=0 check), so an invalid
- * handle here is a bug. NULL return remains valid when the slot was
- * deactivated but the caller still holds the handle (race between
- * deactivate and slot cleanup paths). */
+/* deactivate_font now clears slot handles before zeroing entries[idx].data,
+ * so reaching get_font_data with a valid handle implies a live data entry —
+ * NULL would mean a caller still references a deactivated handle, which is
+ * itself a bug (slot_drop_handle would have zeroed the reference). */
 static const uint8_t *get_font_data(uint32_t runtime_handle, uint32_t *out_size) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(runtime_handle != 0);
     NT_ASSERT(runtime_handle <= s_font.data_count);
     nt_font_data_entry_t *entries = font_data_entries();
     uint32_t idx = runtime_handle - 1;
+    NT_ASSERT(entries[idx].data != NULL);
     if (out_size) {
         *out_size = entries[idx].size;
     }
@@ -253,10 +263,8 @@ static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, ui
             const uint8_t *blob = get_font_data(slot->resource_handles[ri], &blob_size);
             if (blob && blob_size >= sizeof(NtFontAssetHeader)) {
                 const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
-                /* Defensive: index was written by rebuild_ascii_index which
-                 * iterates the same glyph table, so gi < glyph_count by
-                 * construction. Assert catches blob corruption between
-                 * load and access (NDEBUG: TRAP, release: silent fallthrough). */
+                /* gi is bounded by construction in rebuild_ascii_index;
+                 * the bounds check guards blob corruption between load and access. */
                 NT_ASSERT(gi < hdr->glyph_count);
                 if (gi < hdr->glyph_count) {
                     const NtFontGlyphEntry *glyphs = (const NtFontGlyphEntry *)(blob + sizeof(NtFontAssetHeader));
@@ -266,8 +274,7 @@ static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, ui
                 }
             }
         }
-        /* ASCII char not in any resource — fall through to slow path (rare,
-         * but possible for missing-glyph cases where tofu fallback is used). */
+        /* ASCII char not in any resource — fall through (tofu fallback). */
     }
 
     for (uint8_t i = 0; i < slot->resource_count; i++) {
@@ -1067,27 +1074,7 @@ void nt_font_step(void) {
         // #endregion
 
         if (ascii_index_dirty) {
-            if (need_flush) {
-                clear_glyph_cache(slot);
-            }
-            rebuild_ascii_index(slot);
-            if (slot->measure_cache.key_hashes != NULL) {
-                measure_cache_clear(slot);
-            }
-
-            /* Full unmount: reset metrics so draw paths' units_per_em == 0
-             * guard fires instead of using stale values. */
-            bool any_active = false;
-            for (uint8_t j = 0; j < slot->resource_count; j++) {
-                if (slot->resource_handles[j] != 0) {
-                    any_active = true;
-                    break;
-                }
-            }
-            if (!any_active && slot->metrics_set) {
-                slot->metrics = (nt_font_metrics_t){0};
-                slot->metrics_set = false;
-            }
+            slot_refresh_after_resource_change(slot, need_flush);
         }
     }
 }
