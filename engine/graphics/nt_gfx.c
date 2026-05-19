@@ -269,7 +269,13 @@ void nt_gfx_begin_frame(void) {
     /* Defensive reset (Phase 51 / D-51-06): walker assumes clean scissor state.
      * Only reissue when the cached flag says enabled — GL_SCISSOR_TEST defaults
      * to disabled after any context reset, so a cached "disabled" already agrees
-     * with hardware state and the glDisable call would be redundant per frame. */
+     * with hardware state and the glDisable call would be redundant per frame.
+     *
+     * Safe across WebGL context loss: nt_gfx_set_scissor_enabled returns early
+     * when context_lost is true, leaving the cached flag at whatever it was.
+     * On restore, GL state resets to default (disabled). If the cache then
+     * still reads "enabled", this gate fires once to bring them back in sync;
+     * if it reads "disabled", they already agree. Either way no desync. */
     if (s_gfx.draw_state.scissor_enabled) {
         nt_gfx_set_scissor_enabled(false);
     }
