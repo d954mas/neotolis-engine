@@ -5,8 +5,6 @@
 #include "graphics/nt_gfx.h"
 #include "pool/nt_pool.h"
 
-#define NT_FONT_MEASURE_CACHE_SIZE 256U
-
 /* Used by both calloc (in create) and memset (in clear) — macro keeps them in sync. */
 #define NT_FONT_MEASURE_CACHE_ENTRY_BYTES (sizeof(uint64_t) + sizeof(uint32_t) + sizeof(nt_text_size_t) + sizeof(uint8_t))
 
