@@ -34,6 +34,7 @@ set(_clay_minor "${CMAKE_MATCH_2}")
 nt_add_module(nt_ui LOG_DOMAIN "ui"
     nt_ui.c
     nt_ui.h
+    nt_ui_internal.h
 )
 
 # Clay vendored header -- PRIVATE include (only nt_ui.c sees clay.h).
@@ -41,14 +42,33 @@ nt_add_module(nt_ui LOG_DOMAIN "ui"
 # precedent). Clay's source is excluded from clang-tidy via scripts/tidy.sh.
 # Use NT_ENGINE_ROOT so the include resolves correctly when nt_ui is
 # consumed from a parent CMake project (submodule scenario).
+#
+# Phase 52 Task 2.2: nt_ui_internal.h includes "clay.h", and test TUs
+# compiled with NT_UI_TEST_ACCESS pull that internal header in. The
+# include directory therefore needs to be visible to consumers of nt_ui
+# that opt into test access.
 target_include_directories(nt_ui SYSTEM PRIVATE
     ${NT_ENGINE_ROOT}/deps/clay
+)
+target_include_directories(nt_ui SYSTEM INTERFACE
+    $<BUILD_INTERFACE:${NT_ENGINE_ROOT}/deps/clay>
 )
 
 # Version pin propagated to the _Static_assert in nt_ui.c
 target_compile_definitions(nt_ui PRIVATE
     CLAY_PINNED_MAJOR=${_clay_major}
     CLAY_PINNED_MINOR=${_clay_minor}
+)
+
+# Phase 52 Task 2.2: nt_ui needs nt_core (asserts/logging/types), nt_resource
+# (handle types referenced in public headers), nt_font (font handle),
+# nt_material (material handle), nt_input (pointer state struct).
+target_link_libraries(nt_ui PUBLIC
+    nt_core
+    nt_resource
+    nt_font
+    nt_material
+    nt_input
 )
 
 # nt_log is PRIVATE-linked by nt_add_module via the LOG_DOMAIN injection.
