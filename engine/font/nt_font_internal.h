@@ -136,15 +136,13 @@ struct nt_font_slot_s {
      * Layout is SoA — see nt_font_measure_cache_t. Heap-allocated as one
      * block at create (NOT in hot path — AGENTS.md permits heap at
      * lifecycle boundaries). All four sub-pointers are NULL when
-     * measure_cache_size == 0 (cache disabled). The measure_cache_warm
-     * flag lets invalidate_cache skip slots that were never written.
+     * measure_cache_size == 0 (cache disabled).
      *
      * Auto-invalidated on any resource handle change inside nt_font_step
      * (so async fallback chains don't return stale tofu metrics). */
     nt_font_measure_cache_t measure_cache; /* SoA; all pointers NULL when cache disabled */
     uint32_t measure_cache_size;           /* 0 = disabled; else POT, ≤ 32768 */
     uint32_t measure_cache_mask;           /* measure_cache_size - 1 */
-    bool measure_cache_warm;               /* true after any write; lets invalidate_cache skip cold slots */
     /* True if ANY loaded resource has at least one glyph with kern_count > 0.
      * Cheap fast-path gate in measure_n / draw_n: most Latin fonts ship with
      * no kern table, so we skip the per-codepoint kern lookup entirely. Set

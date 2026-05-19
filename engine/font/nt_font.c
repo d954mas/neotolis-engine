@@ -70,9 +70,8 @@ static void slot_drop_handle(nt_font_slot_t *slot, uint32_t runtime_handle) {
     }
     clear_glyph_cache(slot);
     rebuild_ascii_index(slot);
-    if (slot->measure_cache.key_hashes != NULL && slot->measure_cache_warm) {
+    if (slot->measure_cache.key_hashes != NULL) {
         measure_cache_clear(slot);
-        slot->measure_cache_warm = false;
     }
     bool any_active = false;
     for (uint8_t j = 0; j < slot->resource_count; j++) {
@@ -1088,9 +1087,8 @@ void nt_font_step(void) {
                 clear_glyph_cache(slot);
             }
             rebuild_ascii_index(slot);
-            if (slot->measure_cache.key_hashes != NULL && slot->measure_cache_warm) {
+            if (slot->measure_cache.key_hashes != NULL) {
                 measure_cache_clear(slot);
-                slot->measure_cache_warm = false;
             }
 
             /* Full unmount — reset metrics so get_metrics returns {0} and
@@ -1773,7 +1771,6 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
         slot->measure_cache.size_bits[slot_index] = size_bits;
         slot->measure_cache.values[slot_index] = result;
         slot->measure_cache.valid[slot_index] = 1U;
-        slot->measure_cache_warm = true;
     }
 
     return result;
@@ -1804,11 +1801,10 @@ void nt_font_measure_invalidate_cache(void) {
             continue;
         }
         nt_font_slot_t *slot = &s_font.slots[i];
-        if (!slot->measure_cache_warm || slot->measure_cache.key_hashes == NULL) {
-            continue; /* cold slot or cache disabled — nothing to clear */
+        if (slot->measure_cache.key_hashes == NULL) {
+            continue; /* cache disabled for this font */
         }
         measure_cache_clear(slot);
-        slot->measure_cache_warm = false;
     }
 }
 
@@ -1817,11 +1813,10 @@ void nt_font_measure_invalidate(nt_font_t font) {
         return;
     }
     nt_font_slot_t *slot = get_slot(font);
-    if (!slot->measure_cache_warm || slot->measure_cache.key_hashes == NULL) {
+    if (slot->measure_cache.key_hashes == NULL) {
         return;
     }
     measure_cache_clear(slot);
-    slot->measure_cache_warm = false;
 }
 // #endregion
 
