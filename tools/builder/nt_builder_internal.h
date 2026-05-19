@@ -77,7 +77,7 @@ typedef struct {
     uint64_t cache_key; /* computed atlas cache key */
 } NtBuildAtlasState;
 
-/* Metadata accumulation limit (Phase 37) */
+/* Metadata accumulation limit */
 #ifndef NT_BUILD_MAX_META_ENTRIES
 #define NT_BUILD_MAX_META_ENTRIES (NT_BUILD_MAX_ASSETS * 2)
 #endif
@@ -184,7 +184,7 @@ struct NtBuilderContext {
     uint32_t dedup_warn_b[NT_BUILD_MAX_ASSETS];
     uint32_t dedup_warn_count;
 
-    /* Metadata accumulation (Phase 37) */
+    /* Metadata accumulation */
     NtBuildMetaEntry meta_pending[NT_BUILD_MAX_META_ENTRIES];
     uint32_t meta_count;
 

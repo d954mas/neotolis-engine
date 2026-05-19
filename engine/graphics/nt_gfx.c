@@ -89,9 +89,8 @@ static struct {
     uint32_t bound_pipeline;  /* currently bound pipeline backend handle */
     uint8_t bound_index_type; /* index type of currently bound IBO (1=uint16, 2=uint32) */
 
-    /* Scissor / viewport cached state (Phase 51).
-     * Updated by nt_gfx_set_scissor* / _set_viewport public wrappers
-     * before forwarding to the backend. Read by NT_GFX_TEST_ACCESS probes. */
+    /* Scissor / viewport cached state — set by public wrappers, read by
+     * NT_GFX_TEST_ACCESS probes. */
     struct {
         int scissor_rect[4];  /* x, y, w, h (GL bottom-left) */
         int viewport_rect[4]; /* x, y, w, h (GL bottom-left) */
@@ -725,7 +724,7 @@ void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot) {
     nt_gfx_backend_bind_sampler(e->backend, slot);
 }
 
-/* ---- Scissor and viewport (Phase 51) ----
+/* ---- Scissor and viewport ----
  *
  * All three wrappers early-return on context loss to stay consistent with
  * every other public nt_gfx_* setter — the backend is dead, and the cached

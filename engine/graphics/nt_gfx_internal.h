@@ -53,7 +53,7 @@ void nt_gfx_backend_bind_instance_buffer(uint32_t backend_handle);
 void nt_gfx_backend_set_instance_offset(uint32_t byte_offset);
 void nt_gfx_backend_set_vertex_attrib_default(uint8_t location, float x, float y, float z, float w);
 
-/* Scissor and viewport (Phase 51 — see nt_gfx.h header comment for convention).
+/* Scissor and viewport (see nt_gfx.h for convention).
  * Backend implementations:
  *   - gl/nt_gfx_gl.c: glScissor + glEnable/glDisable(GL_SCISSOR_TEST) + glViewport
  *   - stub/nt_gfx_stub.c: no-op (state cached in shared nt_gfx.c for test probes)

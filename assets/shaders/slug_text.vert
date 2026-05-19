@@ -3,7 +3,7 @@ precision highp int;
 
 #include "common/globals.glsl"
 
-// CPU-SIDE PACKING FORMAT (Phase 45 nt_text vertex buffer contract):
+// CPU-SIDE PACKING FORMAT (nt_text vertex buffer contract):
 // Stride: 68 bytes per vertex, 4 vertices per glyph quad (2 triangles = 6 indices)
 // location 0: vec3  a_position     - world-space quad corner (float32 x3, full 3D)
 // location 1: vec2  a_texcoord     - em-space coordinate (float32 x2)

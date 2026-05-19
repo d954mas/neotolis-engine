@@ -140,7 +140,7 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_gfx COMMAND test_gfx)
 
-    # --- Graphics scissor/viewport tests (Phase 51) ---
+    # --- Graphics scissor/viewport tests ---
     # Plan 03 added restore_gpu cases that call into nt_sprite_renderer +
     # nt_text_renderer; the renderer libs (and their transitive deps for
     # font/resource/hash/pool/material) are required at link time.

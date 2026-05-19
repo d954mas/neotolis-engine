@@ -42,9 +42,8 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) { (void)desc; }
 
 void nt_gfx_backend_end_pass(void) {}
 
-/* Scissor and viewport (Phase 51) — stub no-ops.
- * State is cached in shared nt_gfx.c (s_gfx.draw_state) so the
- * NT_GFX_TEST_ACCESS probes can read it back without GL. */
+/* Scissor and viewport stub no-ops. State is cached in shared nt_gfx.c
+ * so NT_GFX_TEST_ACCESS probes can read it back without GL. */
 void nt_gfx_backend_set_scissor(int x, int y, int w, int h) {
     (void)x;
     (void)y;

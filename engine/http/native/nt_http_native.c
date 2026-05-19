@@ -1,6 +1,6 @@
 #include "http/nt_http_internal.h"
 
-/* Native HTTP not in Phase 25 scope — immediately fail */
+/* Native HTTP not implemented — immediately fail */
 void nt_http_backend_request(uint16_t slot_index, const char *url) {
     (void)url;
     NtHttpSlot *slot = nt_http_get_slot(slot_index);

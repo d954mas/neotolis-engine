@@ -187,9 +187,6 @@ void nt_text_renderer_restore_gpu(void) {
     s_text.material = saved_material;
     s_text.font = saved_font;
     s_text.pipeline_material_version = 0; /* force pipeline recreation on next flush */
-
-    /* GL scissor defaults to disabled after restore; sync cached flag. */
-    nt_gfx_set_scissor_enabled(false);
 }
 // #endregion
 

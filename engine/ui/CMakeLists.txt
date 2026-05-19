@@ -1,13 +1,10 @@
-# nt_ui -- UI module (Phase 51 skeleton; Phase 52 fills public API)
+# nt_ui -- UI module wrapping Clay v0.14.
 #
-# Vendors Clay v0.14 (deps/clay/clay.h, zlib license). The version is pinned
-# via deps/clay/VERSION; CMake parses major/minor and feeds them to
-# CLAY_PINNED_MAJOR/CLAY_PINNED_MINOR target_compile_definitions, which the
-# _Static_assert in nt_ui.c checks against the expected pin (0.14).
-#
-# Per Drift 1 Option D (see .planning/phases/051-.../051-RESEARCH.md): the
-# macros CLAY_VERSION_MAJOR/CLAY_VERSION_MINOR do NOT exist in Clay v0.14;
-# we use our own CLAY_PINNED_* defined here as the single source of truth.
+# Version pinned via deps/clay/VERSION; CMake parses major/minor and feeds
+# them to CLAY_PINNED_MAJOR/CLAY_PINNED_MINOR target_compile_definitions,
+# which the _Static_assert in nt_ui.c checks against the expected pin.
+# Clay v0.14 has no CLAY_VERSION_* macros of its own, hence CLAY_PINNED_*
+# defined here as the single source of truth.
 
 # --- Parse deps/clay/VERSION for major.minor ---
 # NT_ENGINE_ROOT is set by the top-level CMakeLists.txt; this lets nt_ui be
@@ -18,7 +15,7 @@ set(_clay_version_file "${NT_ENGINE_ROOT}/deps/clay/VERSION")
 if(NOT EXISTS "${_clay_version_file}")
     message(FATAL_ERROR
         "nt_ui: deps/clay/VERSION not found at ${_clay_version_file}. "
-        "Vendor Clay v0.14 before building (see Phase 51 Plan 01)."
+        "Vendor Clay v0.14 before building."
     )
 endif()
 file(STRINGS "${_clay_version_file}" _clay_version_lines LIMIT_COUNT 1)
@@ -33,7 +30,7 @@ endif()
 set(_clay_major "${CMAKE_MATCH_1}")
 set(_clay_minor "${CMAKE_MATCH_2}")
 
-# --- Module declaration (skeleton; Phase 52 fills sources) ---
+# --- Module declaration ---
 nt_add_module(nt_ui LOG_DOMAIN "ui"
     nt_ui.c
     nt_ui.h
@@ -54,6 +51,4 @@ target_compile_definitions(nt_ui PRIVATE
     CLAY_PINNED_MINOR=${_clay_minor}
 )
 
-# Phase 51 link surface is minimal; Phase 52 adds nt::gfx, nt::font,
-# nt::text_renderer, nt::sprite_renderer, nt::input as PUBLIC.
 # nt_log is PRIVATE-linked by nt_add_module via the LOG_DOMAIN injection.

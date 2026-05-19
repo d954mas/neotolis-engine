@@ -345,7 +345,7 @@ void nt_gfx_bind_texture(nt_texture_t tex, uint32_t slot);
  * to the texture's own filter/wrap state (set via glTexParameteri). */
 void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
 
-/* ---- Scissor and viewport (Phase 51) ----
+/* ---- Scissor and viewport ----
  *
  * Pixel-space integer coordinates.
  * GL convention: y measured from bottom-left of the current framebuffer.

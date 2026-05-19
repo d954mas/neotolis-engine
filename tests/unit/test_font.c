@@ -1051,7 +1051,7 @@ int main(void) {
     RUN_TEST(test_font_get_stats);
     RUN_TEST(test_font_lru_eviction);
     RUN_TEST(test_font_gpu_textures);
-    /* Phase 51 / Plan 04 — FONT-01 + FONT-02 (length-aware measure + direct-mapped cache) */
+    /* FONT-01 + FONT-02: length-aware measure + direct-mapped cache */
     RUN_TEST(test_measure_n_matches_measure);
     RUN_TEST(test_measure_n_does_not_over_read);
     RUN_TEST(test_measure_n_drops_partial_utf8);

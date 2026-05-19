@@ -73,7 +73,7 @@ typedef struct {
     uint32_t band_texels_total;
 } nt_font_stats_t;
 
-/* ---- Glyph cache entry (public for nt_text in Phase 45) ---- */
+/* ---- Glyph cache entry (public for nt_text) ---- */
 
 typedef struct {
     uint32_t codepoint;
