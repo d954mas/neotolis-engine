@@ -62,6 +62,14 @@ static struct {
      * call, holds the GPU draw count from that call only. SEPARATE from
      * nt_gfx_get_frame_draw_calls (which is engine-wide and frame-scoped). */
     uint32_t last_draw_list_calls;
+
+    /* Currently-bound material for the non-ECS public emit path
+     * (nt_sprite_renderer_set_material + nt_sprite_renderer_emit_region).
+     * Mirrors nt_text_renderer's s_text.material — auto-flushes on .id
+     * change. NT_MATERIAL_INVALID until first set_material call.
+     * NOTE: ECS path (draw_list -> emit_one) does NOT touch this field —
+     * it opens/closes cmds per batch_key directly. */
+    nt_material_t current_mat;
 #ifdef NT_SPRITE_RENDERER_TEST_ACCESS
     /* Test-only: last emit_one() vertex/index counts captured BEFORE flush
      * resets s_sprite.vertex_count. Read by polygon-emit test to verify
@@ -287,39 +295,74 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
 }
 // #endregion
 
-// #region emit_one (per-sprite vertex/index emit)
-/* Caller passes pre-fetched SoA views; sparse_indices[entity_index] → dense slot. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv) {
-    nt_entity_t e = {.id = item->entity};
-    uint16_t eidx = nt_entity_index(e);
+// #region set_material (non-ECS public state setter — Drift 4 resolution)
+/* Bind a material for subsequent nt_sprite_renderer_emit_region() calls.
+ * Mirrors nt_text_renderer_set_material: same-handle reentry is a no-op;
+ * .id-change closes the current cmd (auto-flushes pending emits) and opens
+ * a fresh cmd with the new pipeline + material info.
+ *
+ * Same-handle short-circuit reads s_sprite.current_mat.id WITHOUT closing
+ * the open cmd — this preserves batching when the game calls set_material
+ * defensively each walker frame. The ECS path (draw_list -> emit_one) opens
+ * cmds directly per batch_key and does not touch current_mat, so the two
+ * call paths cannot interfere. */
+void nt_sprite_renderer_set_material(nt_material_t mat) {
+    NT_ASSERT(s_sprite.initialized);
+    NT_ASSERT(mat.id != 0 && "nt_sprite_renderer_set_material: invalid material handle");
 
-    /* Inline sparse->dense lookups — three array reads vs three function
-     * calls each doing a liveness assert + the same lookup. */
-    uint16_t s_idx = sv->sparse_indices[eidx];
-    uint16_t t_idx = tv->sparse_indices[eidx];
-    uint16_t d_idx = dv->sparse_indices[eidx];
-
-    /* AGENTS.md "fail early, prefer asserts": dense indices must be valid.
-     * NT_INVALID_COMP_INDEX (0xFFFF) would index SoA arrays out of bounds.
-     * Catches stale render items, items for entities missing a component,
-     * items built after entity destruction. Compiles out in release. */
-    NT_ASSERT(s_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no sprite component");
-    NT_ASSERT(t_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no transform component");
-    NT_ASSERT(d_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no drawable component");
-
-    /* Resolve atlas + region. Tombstone → zero-draw early-out. */
-    nt_resource_t atlas = sv->atlas[s_idx];
-    const nt_sprite_resolved_region_t *resolved = &sv->resolved[s_idx];
-    if ((sv->flags[s_idx] & NT_SPRITE_FLAG_RESOLVED) == 0 || resolved->region == NULL || resolved->region->vertex_count == 0) {
+    /* Same-handle reentry is a no-op ONLY when the cmd we'd reopen is still
+     * live. After an explicit flush() (or restore_gpu) cmd_count drops to 0
+     * and we MUST reopen even for the same handle, otherwise the next emit
+     * trips the "no open cmd" assert. */
+    if (mat.id == s_sprite.current_mat.id && s_sprite.cmd_count > 0) {
         return;
     }
-    const nt_texture_region_t *r = resolved->region;
-    const float(*cpos)[2] = resolved->cached_pos;
-    const nt_atlas_vertex_t *vraw = resolved->raw_vertices;
-    const uint16_t *idx = resolved->indices;
-    NT_ASSERT(cpos != NULL && vraw != NULL && idx != NULL);
-    uint32_t page_tex = nt_resource_get(resolved->page_resource);
+
+    const nt_material_info_t *mat_info = nt_material_get_info(mat);
+    NT_ASSERT(mat_info != NULL && mat_info->ready && mat_info->resolved_vs != 0 && mat_info->resolved_fs != 0 && "nt_sprite_renderer_set_material: material not ready");
+
+    /* Auto-flush staging on material change. close_current_cmd() pops empty
+     * cmds (no indices written) so re-binding a material before any emit is
+     * cheap — flush() short-circuits when cmd_count == 0. */
+    if (s_sprite.cmd_count > 0) {
+        nt_sprite_renderer_flush();
+    }
+
+    nt_pipeline_t pip = find_or_create_pipeline(mat_info);
+    open_cmd(pip, mat_info, mat);
+    s_sprite.current_mat = mat;
+}
+// #endregion
+
+// #region emit_region_resolved (canonical staging-write body — shared ECS + non-ECS)
+/* Single canonical staging-write body for one atlas region at one mat4.
+ *
+ * Caller supplies pre-resolved region pointers and the atlas's inverse pixels-
+ * per-unit (ipu) directly — this is the no-extra-lookup hot path. The ECS
+ * emit_one() reads these straight from the resolved-region SoA slot; the
+ * non-ECS public nt_sprite_renderer_emit_region() does one nt_atlas_*() lookup
+ * per call and forwards.
+ *
+ * Marked `static inline` + ALWAYS_INLINE so the bunnymark ECS hot path keeps
+ * the same single-frame inlined shape it had before the refactor (D-52-02
+ * ≤2% regression gate). Compilers without an always_inline attribute simply
+ * see a `static inline` request — same behaviour as before. */
+#if defined(__GNUC__) || defined(__clang__)
+#define NT_SPRITE_EMIT_INLINE static inline __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#define NT_SPRITE_EMIT_INLINE static inline __forceinline
+#else
+#define NT_SPRITE_EMIT_INLINE static inline
+#endif
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, const float (*cpos)[2], const nt_atlas_vertex_t *vraw, const uint16_t *idx, uint32_t page_tex, float ipu, const float *m,
+                                                float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits) {
+    NT_ASSERT(r != NULL && cpos != NULL && vraw != NULL && idx != NULL);
+    NT_ASSERT(m != NULL);
+    if (r->vertex_count == 0u) {
+        return; /* tombstone — silent no-op (matches old emit_one behaviour) */
+    }
     if (!ensure_current_cmd_page_texture(page_tex)) {
         return;
     }
@@ -330,7 +373,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
      * same state at first_index=0. The caller sees no state change; the GPU
      * just gets another chunk draw instead of UNSIGNED_INT indices. */
     if (s_sprite.vertex_count + r->vertex_count > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + r->index_count > NT_SPRITE_RENDERER_MAX_INDICES) {
-        NT_ASSERT(s_sprite.cmd_count > 0 && "emit_one called with no open cmd");
+        NT_ASSERT(s_sprite.cmd_count > 0 && "emit_region_resolved called with no open cmd");
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
         nt_sprite_renderer_flush();
         open_cmd_from_snapshot(&snapshot);
@@ -341,18 +384,13 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
      * share vertex data; the per-region pivot lives entirely in tx/ty/tz.
      * Same formula whether origin is the region default or a runtime override
      * — only the source differs. */
-    const float *m = tv->world_matrices[t_idx];
     float tx = m[12];
     float ty = m[13];
     float tz = m[14];
-    uint8_t flags = sv->flags[s_idx];
-    const float origin_x = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][0] : r->origin_x;
-    const float origin_y = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][1] : r->origin_y;
-    const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
 
     /* Flip flags — per-vertex negate of cached_pos */
-    bool fx = (flags & NT_SPRITE_FLAG_FLIP_X) != 0;
-    bool fy = (flags & NT_SPRITE_FLAG_FLIP_Y) != 0;
+    bool fx = (flip_bits & NT_SPRITE_FLAG_FLIP_X) != 0;
+    bool fy = (flip_bits & NT_SPRITE_FLAG_FLIP_Y) != 0;
 
     /* Origin offset baked into translation. cached_pos is source-space, so
      * the vertex loop's per-vertex flip negates source-space x — to mirror
@@ -370,11 +408,10 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     ty -= (m[1] * dx) + (m[5] * dy);
     tz -= (m[2] * dx) + (m[6] * dy);
 
-    uint32_t color32 = dv->colors_packed[d_idx];
-    uint8_t cr = (uint8_t)(color32 & 0xFFU);
-    uint8_t cg = (uint8_t)((color32 >> 8) & 0xFFU);
-    uint8_t cb = (uint8_t)((color32 >> 16) & 0xFFU);
-    uint8_t ca = (uint8_t)((color32 >> 24) & 0xFFU);
+    uint8_t cr = (uint8_t)(color_packed & 0xFFU);
+    uint8_t cg = (uint8_t)((color_packed >> 8) & 0xFFU);
+    uint8_t cb = (uint8_t)((color_packed >> 16) & 0xFFU);
+    uint8_t ca = (uint8_t)((color_packed >> 24) & 0xFFU);
 
     uint32_t base = s_sprite.vertex_count;
 #ifdef __wasm_simd128__
@@ -464,6 +501,83 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     s_sprite.last_emit_index_count = r->index_count;
     s_sprite.last_emit_first_vertex = base;
 #endif
+}
+// #endregion
+
+// #region emit_one (ECS extractor — delegates to emit_region_resolved)
+/* Caller passes pre-fetched SoA views; sparse_indices[entity_index] → dense slot.
+ *
+ * D-52-02: emit_one is now a thin extractor that resolves origin/flip/color
+ * from the ECS components and forwards to emit_region_resolved. The staging-
+ * write body lives in one canonical place. No extra atlas lookup vs the old
+ * monolithic emit_one — resolved-region pointers come straight from
+ * sv->resolved[s_idx]. */
+static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv) {
+    nt_entity_t e = {.id = item->entity};
+    uint16_t eidx = nt_entity_index(e);
+
+    /* Inline sparse->dense lookups — three array reads vs three function
+     * calls each doing a liveness assert + the same lookup. */
+    uint16_t s_idx = sv->sparse_indices[eidx];
+    uint16_t t_idx = tv->sparse_indices[eidx];
+    uint16_t d_idx = dv->sparse_indices[eidx];
+
+    /* AGENTS.md "fail early, prefer asserts": dense indices must be valid.
+     * NT_INVALID_COMP_INDEX (0xFFFF) would index SoA arrays out of bounds.
+     * Catches stale render items, items for entities missing a component,
+     * items built after entity destruction. Compiles out in release. */
+    NT_ASSERT(s_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no sprite component");
+    NT_ASSERT(t_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no transform component");
+    NT_ASSERT(d_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no drawable component");
+
+    /* Resolve atlas + region. Tombstone → zero-draw early-out. */
+    nt_resource_t atlas = sv->atlas[s_idx];
+    const nt_sprite_resolved_region_t *resolved = &sv->resolved[s_idx];
+    if ((sv->flags[s_idx] & NT_SPRITE_FLAG_RESOLVED) == 0 || resolved->region == NULL || resolved->region->vertex_count == 0) {
+        return;
+    }
+    const nt_texture_region_t *r = resolved->region;
+    NT_ASSERT(resolved->cached_pos != NULL && resolved->raw_vertices != NULL && resolved->indices != NULL);
+    uint32_t page_tex = nt_resource_get(resolved->page_resource);
+
+    uint8_t flags = sv->flags[s_idx];
+    const float origin_x = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][0] : r->origin_x;
+    const float origin_y = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][1] : r->origin_y;
+    const uint8_t flip_bits = flags & (NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y);
+    const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
+
+    emit_region_resolved(r, resolved->cached_pos, resolved->raw_vertices, resolved->indices, page_tex, ipu, tv->world_matrices[t_idx], origin_x, origin_y, dv->colors_packed[d_idx], flip_bits);
+}
+// #endregion
+
+// #region emit_region (non-ECS public emit — D-52-01)
+/* Public single-region emit. Resolves the region + page texture + ipu via the
+ * atlas handle, then forwards to the canonical emit_region_resolved body. One
+ * extra atlas lookup per call vs the ECS path — acceptable for the walker /
+ * debug-draw / gizmo use cases where there is no SoA cache.
+ *
+ * Asserts the renderer + atlas are in a usable state. Caller must have an
+ * open cmd (set via nt_sprite_renderer_set_material). Tombstoned regions
+ * silently no-op (vertex_count == 0 short-circuits emit_region_resolved). */
+void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits) {
+    NT_ASSERT(s_sprite.initialized);
+    NT_ASSERT(world_matrix != NULL);
+    NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_region: invalid atlas handle");
+    NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_region: atlas must be READY");
+    NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_emit_region: call nt_sprite_renderer_set_material first");
+
+    const nt_texture_region_t *r = nt_atlas_get_region(atlas, region_index);
+    if (r == NULL || r->vertex_count == 0u) {
+        return; /* tombstone or out-of-range — silent no-op */
+    }
+    const float(*cpos)[2] = nt_atlas_get_region_cached_pos(atlas, region_index);
+    const nt_atlas_vertex_t *vraw = nt_atlas_get_region_raw_vertices(atlas, region_index);
+    const uint16_t *idx = nt_atlas_get_region_indices(atlas, region_index);
+    nt_resource_t page_res = nt_atlas_get_page_resource(atlas, r->page_index);
+    uint32_t page_tex = nt_resource_get(page_res);
+    const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
+
+    emit_region_resolved(r, cpos, vraw, idx, page_tex, ipu, world_matrix, origin_x, origin_y, color_packed, flip_bits);
 }
 // #endregion
 
