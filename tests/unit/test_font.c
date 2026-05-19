@@ -945,6 +945,10 @@ void test_font_hotswap_replaces_metrics_in_one_step(void) {
     TEST_ASSERT_EQUAL_UINT16(1000U, m_a.units_per_em);
     TEST_ASSERT_EQUAL_INT16(800, m_a.ascent);
 
+    /* Cache built against UPEM=1000 must be wiped on hot-swap; generation
+     * bump is the contract batch consumers (nt_text_renderer) rely on. */
+    uint32_t gen_before = nt_font_get_cache_generation(font);
+
     /* Hot-swap WITHOUT an intervening nt_font_step. Different UPEM and
      * ascent so the stale-metrics path is exercised. */
     uint32_t size_b = 0;
@@ -962,8 +966,66 @@ void test_font_hotswap_replaces_metrics_in_one_step(void) {
     TEST_ASSERT_EQUAL_INT16(1600, m_b.ascent);
     TEST_ASSERT_EQUAL_INT16(-400, m_b.descent);
 
-    /* Glyph cache must have been wiped — cache_generation bumps so
-     * batch consumers (e.g. nt_text_renderer) invalidate their staging. */
+    TEST_ASSERT_TRUE(nt_font_get_cache_generation(font) > gen_before);
+
+    nt_font_destroy(font);
+    free(blob_a);
+    free(blob_b);
+}
+
+/* ---- FONT-02j: FILE-pack handle reuse hot-swap ----
+ *
+ * Sister of FONT-02i. Virtual-pack unmount skips the activator
+ * deactivator, so handles never collide. FILE packs do invoke it —
+ * the data slot is freed and the next activate reuses the same
+ * numeric handle for a different asset. The early-out
+ * `ver == slot->resource_handles[ri]` would skip the reload unless
+ * deactivate_font invalidates the slot reference first.
+ *
+ * Driven via nt_font_test_deactivate to imitate the file-pack path
+ * without real I/O. */
+void test_font_hotswap_handle_reuse_after_deactivate(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+
+    uint32_t size_a = 0;
+    uint8_t *blob_a = build_test_font_blob(&size_a);
+    uint32_t handle_a = nt_font_test_register_data(blob_a, size_a);
+    char pack_name[64];
+    (void)snprintf(pack_name, sizeof(pack_name), "fp_reuse_%u", s_vpack_counter++);
+    nt_hash32_t pid = nt_hash32_str(pack_name);
+    nt_hash64_t rid = nt_hash64_str("font_reuse");
+    nt_resource_create_pack(pid, 0);
+    nt_resource_register(pid, rid, NT_ASSET_FONT, handle_a);
+    nt_resource_t res = nt_resource_request(rid, NT_ASSET_FONT);
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+    TEST_ASSERT_EQUAL_UINT16(1000U, nt_font_get_metrics(font).units_per_em);
+
+    uint32_t gen_before = nt_font_get_cache_generation(font);
+
+    /* nt_resource_unmount on a virtual pack does not run the activator
+     * deactivator — drive it manually to match the file-pack path. */
+    nt_resource_unmount(pid);
+    nt_font_test_deactivate(handle_a);
+
+    uint32_t size_b = 0;
+    uint8_t *blob_b = build_test_font_blob_with_metrics(2048, 1600, -400, 0, &size_b);
+    uint32_t handle_b = nt_font_test_register_data(blob_b, size_b);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(handle_a, handle_b, "test setup: activate_font must reuse the freed data slot to exercise the bug");
+
+    nt_resource_create_pack(pid, 0);
+    nt_resource_register(pid, rid, NT_ASSET_FONT, handle_b);
+    nt_resource_step();
+    nt_font_step();
+
+    nt_font_metrics_t m_b = nt_font_get_metrics(font);
+    TEST_ASSERT_EQUAL_UINT16(2048U, m_b.units_per_em);
+    TEST_ASSERT_EQUAL_INT16(1600, m_b.ascent);
+    TEST_ASSERT_EQUAL_INT16(-400, m_b.descent);
+    TEST_ASSERT_TRUE(nt_font_get_cache_generation(font) > gen_before);
+
     nt_font_destroy(font);
     free(blob_a);
     free(blob_b);
@@ -1014,5 +1076,6 @@ int main(void) {
     RUN_TEST(test_measure_n_invalidates_on_resource_unload);
     RUN_TEST(test_font_recovers_after_remount);
     RUN_TEST(test_font_hotswap_replaces_metrics_in_one_step);
+    RUN_TEST(test_font_hotswap_handle_reuse_after_deactivate);
     return UNITY_END();
 }

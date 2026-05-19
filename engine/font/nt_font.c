@@ -60,6 +60,28 @@ static void deactivate_font(uint32_t runtime_handle) {
     if (runtime_handle == 0 || runtime_handle > s_font.data_count) {
         return;
     }
+
+    /* activate_font reuses the first NULL data slot, so the next activate
+     * after this free can return the SAME numeric handle for a different
+     * font asset. Without invalidating slot references here, nt_font_step
+     * would hit `ver == slot->resource_handles[ri]` and skip the reload —
+     * silently keeping stale metrics, ASCII index, and glyph cache.
+     * Clearing forces the next step to take the reload path; metrics
+     * reset and cache wipe happen there. */
+    if (s_font.initialized) {
+        for (uint32_t s = 1; s <= s_font.pool.capacity; s++) {
+            if (!nt_pool_slot_alive(&s_font.pool, s)) {
+                continue;
+            }
+            nt_font_slot_t *slot = &s_font.slots[s];
+            for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
+                if (slot->resource_handles[ri] == runtime_handle) {
+                    slot->resource_handles[ri] = 0;
+                }
+            }
+        }
+    }
+
     nt_font_data_entry_t *entries = font_data_entries();
     uint32_t idx = runtime_handle - 1;
     entries[idx].data = NULL;
@@ -1812,6 +1834,8 @@ void nt_font_measure_invalidate(nt_font_t font) {
 
 #ifdef NT_FONT_TEST_ACCESS
 uint32_t nt_font_test_register_data(const uint8_t *data, uint32_t size) { return activate_font(data, size); }
+
+void nt_font_test_deactivate(uint32_t runtime_handle) { deactivate_font(runtime_handle); }
 
 uint32_t nt_font_test_measure_cache_hits(nt_font_t font) {
     if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {

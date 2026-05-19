@@ -231,6 +231,13 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
 #ifdef NT_FONT_TEST_ACCESS
 uint32_t nt_font_test_register_data(const uint8_t *data, uint32_t size);
 
+/* Test-only: invoke the font activator's deactivator path that
+ * nt_resource_unmount runs for FILE packs but skips for VIRTUAL packs.
+ * Lets virtual-pack tests exercise handle reuse semantics — after this
+ * call, the next register with a fresh blob will reuse the freed data
+ * slot and return the same numeric handle. */
+void nt_font_test_deactivate(uint32_t runtime_handle);
+
 /* Test-only measure-cache observation (D-51-11). Counters are incremented
  * inside nt_font_measure_n cache lookup branches. */
 uint32_t nt_font_test_measure_cache_hits(nt_font_t font);
