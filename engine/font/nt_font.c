@@ -1005,21 +1005,39 @@ void nt_font_step(void) {
             NT_ASSERT(hdr->magic == NT_FONT_MAGIC);
             NT_ASSERT(hdr->version == NT_FONT_VERSION);
 
-            // #region Metrics validation (D-19)
-            if (!slot->metrics_set) {
+            // #region Metrics validation (D-19) + hot-swap path (FONT-02i)
+            const bool metrics_match = slot->metrics_set && slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent &&
+                                       slot->metrics.line_gap == hdr->line_gap;
+            if (!slot->metrics_set || !metrics_match) {
+                /* Mismatch is only safe if THIS resource is the only active
+                 * metric provider — multi-resource fonts (e.g. Latin+CJK on
+                 * one nt_font_t) rely on the invariant that all source files
+                 * share the same metrics, and silently accepting a new set
+                 * would break glyph positioning for the others. The assert
+                 * still fires for the multi-resource violation; for a single
+                 * active resource we treat the mismatch as a hot-swap
+                 * (resource id rebound to a different font asset between
+                 * frames, common with theme/pack swaps) and re-populate. */
+                if (slot->metrics_set && !metrics_match) {
+                    bool only_provider = true;
+                    for (uint8_t j = 0; j < slot->resource_count; j++) {
+                        if (j != ri && slot->resource_handles[j] != 0) {
+                            only_provider = false;
+                            break;
+                        }
+                    }
+                    NT_ASSERT(only_provider && "font slot has multiple active resources with mismatched metrics — normalize in the builder");
+                    /* In OFF-mode production, accept the new metrics anyway —
+                     * a wrong-glyphs frame is preferable to UB. The above
+                     * assert documents the bug for debug builds. */
+                    need_flush = true; /* glyph cache built against old metrics */
+                }
                 slot->metrics.ascent = hdr->ascent;
                 slot->metrics.descent = hdr->descent;
                 slot->metrics.line_gap = hdr->line_gap;
                 slot->metrics.units_per_em = hdr->units_per_em;
                 slot->metrics.line_height = (int16_t)(hdr->ascent - hdr->descent + hdr->line_gap);
                 slot->metrics_set = true;
-            } else {
-                /* All resources on one nt_font_t must share identical metrics.
-                 * If combining Latin + CJK, normalize in the builder. */
-                NT_ASSERT(slot->metrics.units_per_em == hdr->units_per_em);
-                NT_ASSERT(slot->metrics.ascent == hdr->ascent);
-                NT_ASSERT(slot->metrics.descent == hdr->descent);
-                NT_ASSERT(slot->metrics.line_gap == hdr->line_gap);
             }
             // #endregion
 

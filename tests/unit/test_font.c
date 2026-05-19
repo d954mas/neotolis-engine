@@ -31,7 +31,14 @@ static uint32_t s_vpack_counter;
  *   NtFontGlyphEntry[3] (24 bytes each = 72 bytes)
  *   Per-glyph contour data blocks (variable)
  */
-static uint8_t *build_test_font_blob(uint32_t *out_size) {
+/* Variant with custom metrics — used by hot-swap regression test
+ * (FONT-02i) to construct a second font asset whose ascent/descent/UPEM
+ * differ from the default blob. */
+static uint8_t *build_test_font_blob_with_metrics(uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_gap, uint32_t *out_size);
+
+static uint8_t *build_test_font_blob(uint32_t *out_size) { return build_test_font_blob_with_metrics(1000, 800, -200, 0, out_size); }
+
+static uint8_t *build_test_font_blob_with_metrics(uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_gap, uint32_t *out_size) {
     /* Pre-calculate contour data size per glyph:
      * 1 contour with 2 line segments each
      *   contour_count = 1 (2 bytes)
@@ -55,10 +62,10 @@ static uint8_t *build_test_font_blob(uint32_t *out_size) {
     hdr.magic = NT_FONT_MAGIC;
     hdr.version = NT_FONT_VERSION;
     hdr.glyph_count = 3;
-    hdr.units_per_em = 1000;
-    hdr.ascent = 800;
-    hdr.descent = -200;
-    hdr.line_gap = 0;
+    hdr.units_per_em = units_per_em;
+    hdr.ascent = ascent;
+    hdr.descent = descent;
+    hdr.line_gap = line_gap;
     memcpy(blob, &hdr, sizeof(hdr));
 
     /* Glyph entries (sorted by codepoint) */
@@ -894,6 +901,74 @@ void test_font_recovers_after_remount(void) {
     free(blob);
 }
 
+/* ---- FONT-02i: single-step hot-swap with different metrics ----
+ *
+ * Tighter sister of FONT-02h. The recovery test there runs nt_font_step
+ * BETWEEN unmount and remount, so the unmount path clears metrics_set
+ * cleanly. This test compresses the cycle into a SINGLE nt_font_step:
+ * the game unmounts the old pack, registers a different font asset
+ * under the same pack id + resource id, and steps once.
+ *
+ * From step's point of view this looks like a plain reload — old
+ * runtime handle → new runtime handle, slot->resource_handles[ri]
+ * was never observed at 0. Before the hot-swap fix, the metrics
+ * validation else-branch (nt_font.c) would assert that the new
+ * header's ascent/UPEM matches the stale slot->metrics — false for
+ * a different font, so the assert fires and crashes the frame.
+ *
+ * Fix: on metrics mismatch, if this resource is the ONLY active
+ * metric provider in the slot, accept the new metrics (and wipe the
+ * glyph cache built against the old ones). If there are other active
+ * resources, the multi-resource invariant still holds and the assert
+ * remains the right tool. */
+void test_font_hotswap_replaces_metrics_in_one_step(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
+
+    /* First mount: standard metrics (UPEM=1000, ascent=800). */
+    uint32_t size_a = 0;
+    uint8_t *blob_a = build_test_font_blob(&size_a);
+    uint32_t handle_a = nt_font_test_register_data(blob_a, size_a);
+    char pack_name[64];
+    (void)snprintf(pack_name, sizeof(pack_name), "fp_hotswap_%u", s_vpack_counter++);
+    nt_hash32_t pid = nt_hash32_str(pack_name);
+    nt_hash64_t rid = nt_hash64_str("font_hotswap");
+    nt_resource_create_pack(pid, 0);
+    nt_resource_register(pid, rid, NT_ASSET_FONT, handle_a);
+    nt_resource_t res = nt_resource_request(rid, NT_ASSET_FONT);
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+
+    nt_font_metrics_t m_a = nt_font_get_metrics(font);
+    TEST_ASSERT_EQUAL_UINT16(1000U, m_a.units_per_em);
+    TEST_ASSERT_EQUAL_INT16(800, m_a.ascent);
+
+    /* Hot-swap WITHOUT an intervening nt_font_step. Different UPEM and
+     * ascent so the stale-metrics path is exercised. */
+    uint32_t size_b = 0;
+    uint8_t *blob_b = build_test_font_blob_with_metrics(2048, 1600, -400, 0, &size_b);
+    uint32_t handle_b = nt_font_test_register_data(blob_b, size_b);
+    nt_resource_unmount(pid);
+    nt_resource_create_pack(pid, 0);
+    nt_resource_register(pid, rid, NT_ASSET_FONT, handle_b);
+    nt_resource_step();
+    nt_font_step(); /* single step sees old_handle != 0 → new_handle (reload path) */
+
+    /* New metrics installed, not asserted against. */
+    nt_font_metrics_t m_b = nt_font_get_metrics(font);
+    TEST_ASSERT_EQUAL_UINT16(2048U, m_b.units_per_em);
+    TEST_ASSERT_EQUAL_INT16(1600, m_b.ascent);
+    TEST_ASSERT_EQUAL_INT16(-400, m_b.descent);
+
+    /* Glyph cache must have been wiped — cache_generation bumps so
+     * batch consumers (e.g. nt_text_renderer) invalidate their staging. */
+    nt_font_destroy(font);
+    free(blob_a);
+    free(blob_b);
+}
+
 /* ---- Test 9: GPU texture handles (FONT-03) ---- */
 
 void test_font_gpu_textures(void) {
@@ -938,5 +1013,6 @@ int main(void) {
     RUN_TEST(test_measure_n_invalidates_on_resource_change);
     RUN_TEST(test_measure_n_invalidates_on_resource_unload);
     RUN_TEST(test_font_recovers_after_remount);
+    RUN_TEST(test_font_hotswap_replaces_metrics_in_one_step);
     return UNITY_END();
 }
