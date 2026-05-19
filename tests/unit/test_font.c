@@ -697,7 +697,7 @@ void test_measure_n_cache_disabled(void) {
  * string before all resources are attached (so some glyphs hit the tofu
  * fallback), the result gets cached. Once a real resource arrives, the
  * cache MUST be cleared so the next measure picks up the real glyph metrics.
- * Driven by slot_indices_dirty in nt_font_step. */
+ * Driven by ascii_index_dirty in nt_font_step. */
 void test_measure_n_invalidates_on_resource_change(void) {
     uint8_t *blob_a = NULL;
     nt_font_t font = make_resolved_test_font("font_async_a", &blob_a);
@@ -711,7 +711,7 @@ void test_measure_n_invalidates_on_resource_change(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
 
     /* Attach a second resource (independent blob). nt_font_step will see a
-     * new resource handle and mark slot_indices_dirty — which must also
+     * new resource handle and mark ascii_index_dirty — which must also
      * clear the measure cache. */
     uint32_t blob_size_b = 0;
     uint8_t *blob_b = build_test_font_blob(&blob_size_b);

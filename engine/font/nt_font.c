@@ -28,7 +28,7 @@ typedef struct {
 static nt_font_state_t s_font;
 
 /* Forward declarations for internal helpers used before their definitions. */
-static void rebuild_slot_indices(nt_font_slot_t *slot);
+static void rebuild_ascii_index(nt_font_slot_t *slot);
 static void measure_cache_clear(nt_font_slot_t *slot);
 static void clear_glyph_cache(nt_font_slot_t *slot);
 
@@ -69,7 +69,7 @@ static void slot_drop_handle(nt_font_slot_t *slot, uint32_t runtime_handle) {
         return;
     }
     clear_glyph_cache(slot);
-    rebuild_slot_indices(slot);
+    rebuild_ascii_index(slot);
     if (slot->measure_cache.key_hashes != NULL && slot->measure_cache_warm) {
         measure_cache_clear(slot);
         slot->measure_cache_warm = false;
@@ -258,7 +258,7 @@ static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, ui
             const uint8_t *blob = get_font_data(slot->resource_handles[ri], &blob_size);
             if (blob && blob_size >= sizeof(NtFontAssetHeader)) {
                 const NtFontAssetHeader *hdr = (const NtFontAssetHeader *)blob;
-                /* Defensive: index was written by rebuild_slot_indices which
+                /* Defensive: index was written by rebuild_ascii_index which
                  * iterates the same glyph table, so gi < glyph_count by
                  * construction. Assert catches blob corruption between
                  * load and access (NDEBUG: TRAP, release: silent fallthrough). */
@@ -1003,7 +1003,7 @@ void nt_font_step(void) {
         }
 
         nt_font_slot_t *slot = &s_font.slots[i];
-        bool slot_indices_dirty = false;
+        bool ascii_index_dirty = false;
         bool need_flush = false;
 
         // #region Resolve resources
@@ -1015,7 +1015,7 @@ void nt_font_step(void) {
                  * fires for the virtual case where no deactivator runs. */
                 if (slot->resource_handles[ri] != 0) {
                     slot->resource_handles[ri] = 0;
-                    slot_indices_dirty = true;
+                    ascii_index_dirty = true;
                     need_flush = true;
                 }
                 continue;
@@ -1069,7 +1069,7 @@ void nt_font_step(void) {
             }
 
             slot->resource_handles[ri] = ver;
-            slot_indices_dirty = true;
+            ascii_index_dirty = true;
         }
         // #endregion
 
@@ -1083,11 +1083,11 @@ void nt_font_step(void) {
          * (e.g. measure a CJK glyph → tofu fallback → CJK resource arrives →
          * remeasure) would otherwise keep returning the cached tofu width.
          * Clear all entries unconditionally on any handle change. */
-        if (slot_indices_dirty) {
+        if (ascii_index_dirty) {
             if (need_flush) {
                 clear_glyph_cache(slot);
             }
-            rebuild_slot_indices(slot);
+            rebuild_ascii_index(slot);
             if (slot->measure_cache.key_hashes != NULL && slot->measure_cache_warm) {
                 measure_cache_clear(slot);
                 slot->measure_cache_warm = false;
@@ -1111,11 +1111,12 @@ void nt_font_step(void) {
     }
 }
 
-/* Rebuild slot->has_any_kern and slot->ascii_glyph_idx[] / ascii_glyph_res[]
- * from scratch by scanning all currently active resources. Called by
- * nt_font_step after one or more resource handles change. First resource
- * that owns a codepoint wins (matches find_glyph_in_resources precedence). */
-static void rebuild_slot_indices(nt_font_slot_t *slot) {
+/* Repopulate ascii_glyph_idx[] / ascii_glyph_res[] (per-slot fast-path
+ * lookup for codepoints < 128) by scanning every active resource's glyph
+ * table. First resource that owns a codepoint wins, matching
+ * find_glyph_in_resources precedence. Also recomputes has_any_kern as a
+ * by-product of the same scan. */
+static void rebuild_ascii_index(nt_font_slot_t *slot) {
     slot->has_any_kern = false;
     for (size_t a = 0; a < (sizeof(slot->ascii_glyph_idx) / sizeof(slot->ascii_glyph_idx[0])); a++) {
         slot->ascii_glyph_idx[a] = NT_FONT_ASCII_IDX_NONE;
