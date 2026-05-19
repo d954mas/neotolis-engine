@@ -39,17 +39,6 @@ static void test_set_scissor_enabled_round_trips(void) {
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
 }
 
-/* ---- GFX-02 (default-disabled): begin_frame leaves scissor disabled ---- */
-static void test_begin_frame_disables_scissor(void) {
-    nt_gfx_set_scissor_enabled(true);
-    TEST_ASSERT_TRUE(nt_gfx_test_scissor_enabled());
-    nt_gfx_begin_frame();
-    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
-    /* Close the frame so the gfx state machine returns to IDLE before tearDown
-     * shuts down — symmetric pairing matches the existing test_gfx precedent. */
-    nt_gfx_end_frame();
-}
-
 /* ---- GFX-03: nt_gfx_set_viewport round-trips ---- */
 static void test_set_viewport_round_trips(void) {
     nt_gfx_set_viewport(0, 0, 1280, 720);
@@ -76,7 +65,6 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_set_scissor_round_trips);
     RUN_TEST(test_set_scissor_enabled_round_trips);
-    RUN_TEST(test_begin_frame_disables_scissor);
     RUN_TEST(test_set_viewport_round_trips);
     RUN_TEST(test_viewport_survives_scissor_toggle);
     return UNITY_END();

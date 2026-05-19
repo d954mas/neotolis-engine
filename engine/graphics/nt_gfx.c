@@ -263,9 +263,6 @@ void nt_gfx_begin_frame(void) {
     s_gfx.render_state = NT_GFX_STATE_FRAME;
     memset(&g_nt_gfx.frame_stats, 0, sizeof(g_nt_gfx.frame_stats));
     nt_gfx_backend_begin_frame();
-    if (s_gfx.scissor_enabled) {
-        nt_gfx_set_scissor_enabled(false);
-    }
 }
 
 void nt_gfx_end_frame(void) {
