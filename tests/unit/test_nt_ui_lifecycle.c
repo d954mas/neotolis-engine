@@ -1,29 +1,86 @@
-/* tests/unit/test_nt_ui_lifecycle.c — Plan 52-00 stub
+/* tests/unit/test_nt_ui_lifecycle.c -- Plan 52-02
  *
- * Covers UI-01 (create_context + min_arena_size + misalign assert) and UI-02
- * (destroy preserves arena bytes). Wave 0 ships TEST_IGNORE bodies; Plan 52-02
- * fills with real assertions.
+ * Covers UI-01 (create_context + min_arena_size + misalign assert) and
+ * UI-02 (destroy preserves arena bytes -- caller owns memory).
+ *
+ * Revision Issue 3: death-tests use NT_TEST_EXPECT_ASSERT; no Unity-
+ * ignore fallback (the assert-trap macro replaces all prior stubs).
  */
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
+#include "test_helpers/nt_assert_trap.h"
+#include "ui/nt_ui.h"
 #include "unity.h"
 
-void setUp(void) {}
+/* 8-byte aligned static arena via uint64_t backing array.
+ * NT_UI_DEFAULT_ARENA_SIZE is 8 MiB -- divide by 8 to size in uint64_t.
+ * Re-used across tests; setUp memsets to 0xAB so the "destroy preserves
+ * bytes" case can verify caller-owned memory is untouched. */
+static uint64_t s_arena_u64[NT_UI_DEFAULT_ARENA_SIZE / 8u];
+
+void setUp(void) { nt_test_assert_install(); }
 void tearDown(void) {}
 
-/* UI-01: create_context returns non-NULL given valid arena */
-static void test_create_destroy(void) { TEST_IGNORE_MESSAGE("Wave 0 stub — filled by plan 52-02"); }
+/* UI-01: create returns non-NULL, destroy does not blow up. */
+static void test_create_destroy(void) {
+    void *arena = (void *)s_arena_u64;
+    nt_ui_context_t *ctx = nt_ui_create_context(arena, sizeof s_arena_u64);
+    TEST_ASSERT_NOT_NULL(ctx);
+    /* ctx is placed in the first ~256 bytes of the arena (D-52-10). */
+    TEST_ASSERT_EQUAL_PTR(arena, (void *)ctx);
+    nt_ui_destroy_context(ctx);
+}
 
-/* UI-01: min_arena_size matches Clay_MinMemorySize + sizeof(ctx) + padding */
-static void test_min_arena_size(void) { TEST_IGNORE_MESSAGE("Wave 0 stub — filled by plan 52-02"); }
+/* UI-01: min_arena_size > 0 and includes Clay_MinMemorySize headroom. */
+static void test_min_arena_size(void) {
+    size_t min = nt_ui_min_arena_size();
+    /* Clay's minimum + ctx struct + alignment slack must clearly exceed
+     * a trivial threshold. 4 KiB is well below the real value (Clay v0.14
+     * minimum is typically ~tens of KiB). */
+    TEST_ASSERT_GREATER_THAN_size_t(0u, min);
+    TEST_ASSERT_GREATER_OR_EQUAL_size_t(4096u, min);
+    /* And smaller than the default arena (8 MiB) -- create must succeed
+     * with the default. */
+    TEST_ASSERT_LESS_OR_EQUAL_size_t((size_t)NT_UI_DEFAULT_ARENA_SIZE, min);
+}
 
-/* UI-01: misaligned arena asserts (death-test — uses NT_TEST_EXPECT_ASSERT in Plan 02) */
-static void test_misaligned_assert(void) { TEST_IGNORE_MESSAGE("Wave 0 stub — filled by plan 52-02"); }
+/* UI-01 death-test: misaligned arena pointer asserts.
+ * Construct a deliberately mis-aligned pointer by offsetting by 1 byte. */
+static void test_misaligned_assert(void) {
+    uint8_t *base = (uint8_t *)s_arena_u64;
+    /* base is 8-aligned; base+1 is guaranteed misaligned. The arena is
+     * still oversized -- the misalign should trip before any size check. */
+    void *misaligned = (void *)(base + 1);
+    NT_TEST_EXPECT_ASSERT(nt_ui_create_context(misaligned, sizeof s_arena_u64 - 1u));
+}
 
-/* UI-02: destroy preserves arena bytes (caller owns memory) */
-static void test_destroy_preserves_arena(void) { TEST_IGNORE_MESSAGE("Wave 0 stub — filled by plan 52-02"); }
+/* UI-02: destroy preserves arena bytes beyond the ctx struct (caller
+ * owns the memory). Fill the tail with a sentinel before create, then
+ * verify it survives create + destroy. */
+static void test_destroy_preserves_arena(void) {
+    uint8_t *bytes = (uint8_t *)s_arena_u64;
+    /* Bytes [4096..8192) are well past the ctx struct (~256 B) and the
+     * Clay arena will USE some range starting right after the ctx. We
+     * pick a region that overlaps Clay memory only conceptually: the
+     * point of UI-02 is that destroy_context does NOT memset / free the
+     * caller's bytes. After destroy, the sentinel should still be there
+     * because destroy only touches sizeof(nt_ui_context_t) at the head. */
+    const size_t tail_start = (size_t)NT_UI_DEFAULT_ARENA_SIZE - 4096u;
+    memset(bytes + tail_start, 0xAB, 4096u);
+
+    nt_ui_context_t *ctx = nt_ui_create_context((void *)s_arena_u64, sizeof s_arena_u64);
+    TEST_ASSERT_NOT_NULL(ctx);
+    nt_ui_destroy_context(ctx);
+
+    /* Tail bytes survive destroy. */
+    for (size_t i = 0; i < 4096u; i += 64u) {
+        TEST_ASSERT_EQUAL_UINT8(0xABu, bytes[tail_start + i]);
+    }
+}
 
 int main(void) {
     UNITY_BEGIN();

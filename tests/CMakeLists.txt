@@ -465,6 +465,11 @@ if(NOT EMSCRIPTEN)
     # ui_atlas helper can link.
     target_compile_definitions(nt_atlas PRIVATE NT_ATLAS_TEST_ACCESS)
 
+    # Force nt_ui to expose NT_UI_TEST_ACCESS symbols
+    # (nt_ui_test_inframe_ctx + walk-counter probes) so test binaries
+    # that opt into NT_UI_TEST_ACCESS can link.
+    target_compile_definitions(nt_ui PRIVATE NT_UI_TEST_ACCESS)
+
     # --- test_nt_sprite_renderer_emit_region -- D-52-01/02 + Drift 4 ---
     add_executable(test_nt_sprite_renderer_emit_region
         unit/test_nt_sprite_renderer_emit_region.c

@@ -1,22 +1,106 @@
-/* tests/unit/test_nt_ui_multictx.c — Plan 52-00 stub
+/* tests/unit/test_nt_ui_multictx.c -- Plan 52-02
  *
- * Covers UI-03 (3-context interleave + Clay_SetCurrentContext invariant). Wave
- * 0 ships TEST_IGNORE bodies; Plan 52-02 fills with real assertions.
+ * Covers UI-03 (multiple contexts coexist; per-ctx Clay context
+ * isolation) and the multi-context invariant D-52-12.
  */
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
+#include "clay.h"
+#include "input/nt_input.h"
+#include "test_helpers/nt_assert_trap.h"
+#include "ui/nt_ui.h"
+#include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-void setUp(void) {}
+/* Three independently sized arenas (8 MiB each, 8-aligned via uint64_t). */
+static uint64_t s_arena_a[NT_UI_DEFAULT_ARENA_SIZE / 8u];
+static uint64_t s_arena_b[NT_UI_DEFAULT_ARENA_SIZE / 8u];
+static uint64_t s_arena_c[NT_UI_DEFAULT_ARENA_SIZE / 8u];
+
+void setUp(void) { nt_test_assert_install(); }
 void tearDown(void) {}
 
-/* UI-03: 3-ctx sequential interleave — Clay_GetCurrentContext switches per begin/end */
-static void test_three_ctx_interleave(void) { TEST_IGNORE_MESSAGE("Wave 0 stub — filled by plan 52-02"); }
+/* UI-03 + D-52-14: three contexts coexist; nt_ui_begin makes
+ * Clay_GetCurrentContext match ctx->clay; after end the in-frame
+ * tracker is cleared. */
+static void test_three_ctx_interleave(void) {
+    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a);
+    nt_ui_context_t *b = nt_ui_create_context(s_arena_b, sizeof s_arena_b);
+    nt_ui_context_t *c = nt_ui_create_context(s_arena_c, sizeof s_arena_c);
+    TEST_ASSERT_NOT_NULL(a);
+    TEST_ASSERT_NOT_NULL(b);
+    TEST_ASSERT_NOT_NULL(c);
+    /* Each ctx has its own Clay context pointer. */
+    TEST_ASSERT_NOT_EQUAL(a->clay, b->clay);
+    TEST_ASSERT_NOT_EQUAL(b->clay, c->clay);
+    TEST_ASSERT_NOT_EQUAL(a->clay, c->clay);
 
-/* UI-03: per-ctx in_frame flag isolated (begin c1 / end c1 / begin c2 / end c2) */
-static void test_per_ctx_in_frame_isolation(void) { TEST_IGNORE_MESSAGE("Wave 0 stub — filled by plan 52-02"); }
+    nt_pointer_t mouse;
+    memset(&mouse, 0, sizeof mouse);
+
+    /* a: begin sets Clay current to a->clay; in-frame ctx is a. */
+    nt_ui_begin(a, 100.0f, 100.0f, &mouse);
+    TEST_ASSERT_EQUAL_PTR(a->clay, Clay_GetCurrentContext());
+    TEST_ASSERT_EQUAL_PTR(a, nt_ui_test_inframe_ctx());
+    nt_ui_end(a);
+    TEST_ASSERT_NULL(nt_ui_test_inframe_ctx());
+
+    /* b: same shape, different ctx. */
+    nt_ui_begin(b, 200.0f, 200.0f, &mouse);
+    TEST_ASSERT_EQUAL_PTR(b->clay, Clay_GetCurrentContext());
+    TEST_ASSERT_EQUAL_PTR(b, nt_ui_test_inframe_ctx());
+    nt_ui_end(b);
+    TEST_ASSERT_NULL(nt_ui_test_inframe_ctx());
+
+    /* c: same shape, different ctx. */
+    nt_ui_begin(c, 300.0f, 300.0f, &mouse);
+    TEST_ASSERT_EQUAL_PTR(c->clay, Clay_GetCurrentContext());
+    TEST_ASSERT_EQUAL_PTR(c, nt_ui_test_inframe_ctx());
+    nt_ui_end(c);
+    TEST_ASSERT_NULL(nt_ui_test_inframe_ctx());
+
+    nt_ui_destroy_context(a);
+    nt_ui_destroy_context(b);
+    nt_ui_destroy_context(c);
+}
+
+/* UI-03: per-ctx in_frame isolation across sequential begin/end. */
+static void test_per_ctx_in_frame_isolation(void) {
+    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a);
+    nt_ui_context_t *b = nt_ui_create_context(s_arena_b, sizeof s_arena_b);
+    TEST_ASSERT_NOT_NULL(a);
+    TEST_ASSERT_NOT_NULL(b);
+
+    nt_pointer_t mouse;
+    memset(&mouse, 0, sizeof mouse);
+
+    /* Before any begin: no in-frame ctx, neither ctx is in_frame. */
+    TEST_ASSERT_NULL(nt_ui_test_inframe_ctx());
+    TEST_ASSERT_FALSE(a->in_frame);
+    TEST_ASSERT_FALSE(b->in_frame);
+
+    nt_ui_begin(a, 100.0f, 100.0f, &mouse);
+    TEST_ASSERT_TRUE(a->in_frame);
+    TEST_ASSERT_FALSE(b->in_frame); /* B is NOT marked in-frame */
+    TEST_ASSERT_EQUAL_PTR(a, nt_ui_test_inframe_ctx());
+    nt_ui_end(a);
+    TEST_ASSERT_FALSE(a->in_frame);
+
+    nt_ui_begin(b, 100.0f, 100.0f, &mouse);
+    TEST_ASSERT_FALSE(a->in_frame);
+    TEST_ASSERT_TRUE(b->in_frame);
+    TEST_ASSERT_EQUAL_PTR(b, nt_ui_test_inframe_ctx());
+    nt_ui_end(b);
+
+    TEST_ASSERT_NULL(nt_ui_test_inframe_ctx());
+
+    nt_ui_destroy_context(a);
+    nt_ui_destroy_context(b);
+}
 
 int main(void) {
     UNITY_BEGIN();
