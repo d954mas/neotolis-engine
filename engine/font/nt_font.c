@@ -88,21 +88,21 @@ static void slot_drop_handle(nt_font_slot_t *slot, uint32_t runtime_handle) {
 }
 
 static void deactivate_font(uint32_t runtime_handle) {
-    if (runtime_handle == 0 || runtime_handle > s_font.data_count) {
-        return;
+    if (!s_font.initialized) {
+        return; /* shutdown ordering: resource module may unmount packs after font shutdown */
     }
+    NT_ASSERT(runtime_handle != 0);
+    NT_ASSERT(runtime_handle <= s_font.data_count);
 
     /* Cleanup runs inline (not deferred to nt_font_step) — activate_font
      * reuses freed handles, so step's `ver == resource_handles[ri]` early-
      * out would skip the reload and leave the slot bound to bytes that now
      * belong to a different asset. */
-    if (s_font.initialized) {
-        for (uint32_t s = 1; s <= s_font.pool.capacity; s++) {
-            if (!nt_pool_slot_alive(&s_font.pool, s)) {
-                continue;
-            }
-            slot_drop_handle(&s_font.slots[s], runtime_handle);
+    for (uint32_t s = 1; s <= s_font.pool.capacity; s++) {
+        if (!nt_pool_slot_alive(&s_font.pool, s)) {
+            continue;
         }
+        slot_drop_handle(&s_font.slots[s], runtime_handle);
     }
 
     nt_font_data_entry_t *entries = font_data_entries();
@@ -111,14 +111,15 @@ static void deactivate_font(uint32_t runtime_handle) {
     entries[idx].size = 0;
 }
 
-/* Get font data from activation handle */
+/* Get font data from activation handle. All callers guard against handle=0
+ * (resource_handles[ri] zero-check or upstream ver!=0 check), so an invalid
+ * handle here is a bug. NULL return remains valid when the slot was
+ * deactivated but the caller still holds the handle (race between
+ * deactivate and slot cleanup paths). */
 static const uint8_t *get_font_data(uint32_t runtime_handle, uint32_t *out_size) {
-    if (runtime_handle == 0 || runtime_handle > s_font.data_count) {
-        if (out_size) {
-            *out_size = 0;
-        }
-        return NULL;
-    }
+    NT_ASSERT(s_font.initialized);
+    NT_ASSERT(runtime_handle != 0);
+    NT_ASSERT(runtime_handle <= s_font.data_count);
     nt_font_data_entry_t *entries = font_data_entries();
     uint32_t idx = runtime_handle - 1;
     if (out_size) {
