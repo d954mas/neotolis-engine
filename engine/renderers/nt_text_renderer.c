@@ -188,9 +188,7 @@ void nt_text_renderer_restore_gpu(void) {
     s_text.font = saved_font;
     s_text.pipeline_material_version = 0; /* force pipeline recreation on next flush */
 
-    /* Defensive scissor reset: symmetric with nt_sprite_renderer_restore_gpu —
-     * after context-loss + restore, GL defaults to scissor-disabled; force
-     * cached flag to match. */
+    /* GL scissor defaults to disabled after restore; sync cached flag. */
     nt_gfx_set_scissor_enabled(false);
 }
 // #endregion
@@ -318,9 +316,8 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
         return;
     }
     if (s_text.font.id == 0) {
-        /* Zeroed handle is a legitimate "no font configured" state (e.g.
-         * nt_stats_draw before set_font); the slot == NULL branch below
-         * is for handles that should have resolved (destroyed font, etc.). */
+        /* Legitimate "no font configured" state; slot == NULL below is the
+         * bug case (destroyed handle, etc.). */
         NT_LOG_WARN("nt_text_renderer_draw_n: no font set");
         return;
     }

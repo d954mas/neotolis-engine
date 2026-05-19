@@ -266,10 +266,6 @@ void nt_gfx_begin_frame(void) {
     s_gfx.render_state = NT_GFX_STATE_FRAME;
     memset(&g_nt_gfx.frame_stats, 0, sizeof(g_nt_gfx.frame_stats));
     nt_gfx_backend_begin_frame();
-    /* Walker assumes clean scissor state at frame entry. Skip the glDisable
-     * when the cached flag already says disabled — GL_SCISSOR_TEST defaults
-     * to disabled after a context reset, and nt_gfx_set_scissor_enabled is
-     * a no-op while context_lost is true, so cache and hardware can't drift. */
     if (s_gfx.draw_state.scissor_enabled) {
         nt_gfx_set_scissor_enabled(false);
     }
