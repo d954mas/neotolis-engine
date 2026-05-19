@@ -42,7 +42,9 @@ typedef struct {
     /* Measure cache size — direct-mapped, MUST be power-of-two if non-zero.
      * 0 disables the cache entirely (every measure_n is a full compute path,
      * useful for one-shot tools and tests that want to bypass caching).
-     * Sane range: 64–65536 entries (24 B per entry → 1.5 KB–1.5 MB per font).
+     * Sane range: 64–65536 entries (21 B per entry → ~1.3 KB–1.3 MB per font;
+     * see NT_FONT_MEASURE_CACHE_ENTRY_BYTES in nt_font_internal.h for the
+     * exact SoA layout).
      * Defaults to 256 when zero is passed via nt_font_create_desc_defaults
      * (the bare {0}-initialized desc gets cache disabled — opt-in default). */
     uint32_t measure_cache_size;
