@@ -40,10 +40,22 @@
 static uint8_t s_blob[UI_ATLAS_TOTAL_SIZE];
 static int s_blob_built = 0;
 
-/* Cached parsed data (from nt_atlas_test_drive_resolve). Plan 02 Task 2.3
- * finalizes resource-handle wiring so nt_resource_is_ready returns true.
- * Wave 0 ships the blob constructor + committed test-access call; the public
- * API shape is locked. */
+/* Cached parsed data (from nt_atlas_test_drive_resolve).
+ *
+ * Plan 02 Task 2.3 status (Revision Issue 4 committed path):
+ *   - Helper uses NT_ATLAS_TEST_ACCESS nt_atlas_test_drive_resolve which
+ *     parses the synthetic blob into an nt_atlas_data_t* directly. This
+ *     is sufficient for Plan 02 unit tests (lifecycle, multictx,
+ *     begin_end) -- none of which call nt_ui_walk, so none assert on
+ *     nt_resource_is_ready(handle).
+ *   - Plan 04 walker tests will be the first consumers that need
+ *     nt_resource_is_ready == true. At that time Plan 04 chooses path
+ *     (a) drive nt_resource_create_pack + register virtual pack with the
+ *     ad as runtime user_data, OR path (b) add a small
+ *     nt_atlas_test_register_synthetic_atlas helper under
+ *     NT_ATLAS_TEST_ACCESS that wraps the slot allocation. The current
+ *     helper API surface (handle field in minimal_ui_atlas_t) is
+ *     unchanged regardless of which path Plan 04 picks. */
 static void *s_atlas_user_data = NULL;
 
 static void ui_atlas_build_blob(void) {
