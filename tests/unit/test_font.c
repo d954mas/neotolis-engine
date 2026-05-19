@@ -839,6 +839,61 @@ void test_measure_n_invalidates_on_resource_unload(void) {
     free(blob);
 }
 
+/* ---- FONT-02h: remount after full unmount recovers a working font ----
+ *
+ * Sister to FONT-02g. After full unmount nt_font_step clears
+ * resource_handles[] + metrics_set, so a later mount of the SAME pack
+ * id + resource id must take the existing `slot->resources[ri]`
+ * handle (kept across unmount) and re-resolve. Without this path,
+ * games that hot-swap themes or asset packs would see permanently
+ * dead fonts after the first unmount. */
+void test_font_recovers_after_remount(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, font.id);
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_font_blob(&blob_size);
+    uint32_t data_handle = nt_font_test_register_data(blob, blob_size);
+    char pack_name[64];
+    (void)snprintf(pack_name, sizeof(pack_name), "fp_remount_%u", s_vpack_counter++);
+    nt_hash32_t pid = nt_hash32_str(pack_name);
+    nt_hash64_t rid = nt_hash64_str("font_remount");
+
+    /* First mount cycle */
+    nt_resource_create_pack(pid, 0);
+    nt_resource_register(pid, rid, NT_ASSET_FONT, data_handle);
+    nt_resource_t res = nt_resource_request(rid, NT_ASSET_FONT);
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+    TEST_ASSERT_NOT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
+
+    /* Unmount → metrics reset (covered by FONT-02g) */
+    nt_resource_unmount(pid);
+    nt_resource_step();
+    nt_font_step();
+    TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
+
+    /* Remount the SAME pack + resource. nt_font already holds the
+     * resource handle from the original nt_font_add — we don't add it
+     * again; the step loop must pick up the new runtime handle. */
+    uint32_t data_handle2 = nt_font_test_register_data(blob, blob_size);
+    nt_resource_create_pack(pid, 0);
+    nt_resource_register(pid, rid, NT_ASSET_FONT, data_handle2);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Font is alive again: metrics populated, measurement is non-zero. */
+    nt_font_metrics_t recovered = nt_font_get_metrics(font);
+    TEST_ASSERT_NOT_EQUAL_UINT16(0U, recovered.units_per_em);
+    nt_text_size_t m = nt_font_measure_n(font, "AB", 2U, 14.0F);
+    TEST_ASSERT_TRUE(m.width > 0.0F);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
 /* ---- Test 9: GPU texture handles (FONT-03) ---- */
 
 void test_font_gpu_textures(void) {
@@ -882,5 +937,6 @@ int main(void) {
     RUN_TEST(test_measure_n_cache_custom_size);
     RUN_TEST(test_measure_n_invalidates_on_resource_change);
     RUN_TEST(test_measure_n_invalidates_on_resource_unload);
+    RUN_TEST(test_font_recovers_after_remount);
     return UNITY_END();
 }

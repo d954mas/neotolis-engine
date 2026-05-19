@@ -1048,10 +1048,12 @@ void nt_font_step(void) {
              * nt_font_get_metrics returns {0} again. Without this, metrics_set
              * stays true with stale ascent/descent/units_per_em from the last
              * loaded resource — draw paths would proceed past their
-             * `units_per_em != 0` guard and emit tofu using wrong-font metrics. */
+             * `units_per_em != 0` guard and emit tofu using wrong-font metrics.
+             * Named `j` (not `ri`) to avoid shadowing the outer per-resource
+             * loop variable that just went out of scope. */
             bool any_active = false;
-            for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
-                if (slot->resource_handles[ri] != 0) {
+            for (uint8_t j = 0; j < slot->resource_count; j++) {
+                if (slot->resource_handles[j] != 0) {
                     any_active = true;
                     break;
                 }
