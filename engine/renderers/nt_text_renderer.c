@@ -2,6 +2,7 @@
 
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
+#include "font/nt_font_hot.h"
 #include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
@@ -306,22 +307,30 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
 
 // #region Draw
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4]) {
+void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4]) {
     NT_ASSERT(s_text.initialized);
-    if (!utf8 || !*utf8) {
+    if (len == 0U || utf8 == NULL) {
         return;
     }
     if (s_text.font.id == 0) {
-        NT_LOG_WARN("nt_text_renderer_draw: no font set");
+        /* Legitimate "no font configured" state; slot == NULL below is the
+         * bug case (destroyed handle, etc.). */
+        NT_LOG_WARN("nt_text_renderer_draw_n: no font set");
         return;
     }
 
     nt_font_metrics_t metrics = nt_font_get_metrics(s_text.font);
     if (metrics.units_per_em == 0) {
-        return;
+        return; /* no resource loaded yet (or all unmounted) */
     }
     float scale = size / (float)metrics.units_per_em;
     uint8_t band_count = nt_font_get_band_count(s_text.font);
+
+    nt_font_slot_t *slot = nt_font_get_slot(s_text.font);
+    NT_ASSERT(slot != NULL);
+    if (!slot) {
+        return;
+    }
 
     uint32_t state = NT_UTF8_ACCEPT;
     uint32_t codepoint = 0;
@@ -330,7 +339,10 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
     float pen_y = 0.0F;
     const float line_advance = (metrics.line_height != 0) ? ((float)metrics.line_height * scale) : size;
 
-    for (const uint8_t *p = (const uint8_t *)utf8; *p; p++) {
+    const uint8_t *p = (const uint8_t *)utf8;
+    const uint8_t *end = p + len;
+
+    for (; p < end; p++) {
         if (nt_utf8_decode(&state, &codepoint, *p) != NT_UTF8_ACCEPT) {
             if (state == NT_UTF8_REJECT) {
                 state = NT_UTF8_ACCEPT; /* recover: skip bad byte, continue parsing */
@@ -351,11 +363,11 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
 
         /* Apply kern pair */
         if (prev_cp != 0) {
-            int16_t kern = nt_font_get_kern(s_text.font, prev_cp, codepoint);
+            int16_t kern = nt_font_get_kern_in_slot(slot, prev_cp, codepoint);
             pen_x += (float)kern * scale;
         }
 
-        const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph(s_text.font, codepoint);
+        const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph_in_slot(slot, codepoint);
         if (!g) {
             prev_cp = codepoint;
             continue;
@@ -370,6 +382,8 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
         prev_cp = codepoint;
     }
 }
+
+void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4]) { nt_text_renderer_draw_n(utf8, utf8 ? strlen(utf8) : 0U, model, size, color); }
 // #endregion
 
 // #region Flush

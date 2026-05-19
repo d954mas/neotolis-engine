@@ -553,7 +553,7 @@ int main(int argc, char *argv[]) {
 
     nt_builder_free_glb_scene(&scene);
 
-    /* Print pack size summary (D-22) */
+    /* Print pack size summary */
     (void)printf("\n=== Pack Size Summary ===\n");
     static const char *pack_names[] = {"sponza_core.ntpack", "sponza_geo.ntpack", "sponza_tex.ntpack", "sponza_full.ntpack"};
     for (int i = 0; i < 4; i++) {

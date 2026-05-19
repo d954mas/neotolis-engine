@@ -16,7 +16,7 @@ target_compile_options(nt_basisu_transcoder PRIVATE -fno-strict-aliasing)
 # Suppress warnings in vendored C++ code
 target_compile_options(nt_basisu_transcoder PRIVATE -w)
 
-# Disable unused transcode targets to minimize WASM size (TEX-09, D-16, D-17)
+# Disable unused transcode targets to minimize WASM size
 target_compile_definitions(nt_basisu_transcoder PRIVATE
     BASISD_SUPPORT_DXT1=0
     BASISD_SUPPORT_DXT5A=0

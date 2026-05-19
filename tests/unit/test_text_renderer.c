@@ -14,6 +14,7 @@
 #include "nt_pack_format.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
+#include "time/nt_time.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -284,6 +285,115 @@ void test_draw_newline_advances_to_next_line(void) {
     TEST_ASSERT_TRUE(second_y < first_y);
 }
 
+/* ---- Test 12: TEXT-01 — _draw_n produces byte-identical vertex stream to _draw ---- */
+
+void test_draw_n_matches_draw(void) {
+    /* Capture vertex stream from existing _draw on NUL-terminated "AB" */
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white);
+    const uint32_t draw_vcount = nt_text_renderer_test_vertex_count();
+    const uint32_t draw_gcount = nt_text_renderer_test_glyph_count();
+    TEST_ASSERT_EQUAL_UINT32(8U, draw_vcount); /* 2 visible glyphs × 4 verts */
+    TEST_ASSERT_EQUAL_UINT32(2U, draw_gcount);
+
+    /* Snapshot vertex bytes — flush will zero the staging buffer counters next,
+     * so we copy out before reset. Stride is 68 bytes per nt_text_vertex_t. */
+    const size_t bytes_to_copy = (size_t)draw_vcount * 68U;
+    uint8_t buf_draw[8U * 68U];
+    memcpy(buf_draw, nt_text_renderer_test_vertices(), bytes_to_copy);
+
+    /* Reset staging counters (no pipeline → flush warns + zeros counters). */
+    nt_text_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_vertex_count());
+
+    /* Call length-aware variant with matching length */
+    nt_text_renderer_draw_n("AB", 2U, s_identity, 32.0F, s_white);
+    const uint32_t draw_n_vcount = nt_text_renderer_test_vertex_count();
+    const uint32_t draw_n_gcount = nt_text_renderer_test_glyph_count();
+
+    TEST_ASSERT_EQUAL_UINT32(draw_vcount, draw_n_vcount);
+    TEST_ASSERT_EQUAL_UINT32(draw_gcount, draw_n_gcount);
+    TEST_ASSERT_EQUAL_MEMORY(buf_draw, nt_text_renderer_test_vertices(), bytes_to_copy);
+}
+
+/* ---- Test 13: TEXT-01b — poisoned byte at utf8[len] does NOT contribute (no over-read) ---- */
+
+void test_draw_n_does_not_over_read(void) {
+    /* Reference: _draw on the clean "AB" string */
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white);
+    const uint32_t ref_vcount = nt_text_renderer_test_vertex_count();
+    TEST_ASSERT_EQUAL_UINT32(8U, ref_vcount);
+
+    const size_t bytes_to_copy = (size_t)ref_vcount * 68U;
+    uint8_t buf_ref[8U * 68U];
+    memcpy(buf_ref, nt_text_renderer_test_vertices(), bytes_to_copy);
+
+    nt_text_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_vertex_count());
+
+    /* Stack buffer with poisoned bytes at and past index 2. Stack-array literal
+     * expresses "intentionally not NUL-terminated" without tripping
+     * bugprone-not-null-terminated-result (matches test_font.c precedent). */
+    const char buf[8] = {'A', 'B', 'X', 'X', 'X', 'X', 'X', 'X'};
+
+    nt_text_renderer_draw_n(buf, 2U, s_identity, 32.0F, s_white);
+    const uint32_t bounded_vcount = nt_text_renderer_test_vertex_count();
+
+    TEST_ASSERT_EQUAL_UINT32(ref_vcount, bounded_vcount);
+    TEST_ASSERT_EQUAL_MEMORY(buf_ref, nt_text_renderer_test_vertices(), bytes_to_copy);
+}
+
+/* ---- Benchmark cases (printed as [BENCH] lines; cover draw hot-loop perf) ---- */
+
+static void bench_draw_short_warm(void) {
+    /* GPU-side glyph cache and font ASCII fast-path warm via setup. We flush
+     * once before timing so the renderer buffer starts empty, and flush per
+     * loop iteration to keep glyph_count from saturating across 1000 draws. */
+    nt_text_renderer_flush();
+
+    const int n_calls = 1000;
+    const uint64_t t0 = nt_time_nanos();
+    for (int i = 0; i < n_calls; i++) {
+        nt_text_renderer_draw_n("ABC", 3U, s_identity, 32.0F, s_white);
+        nt_text_renderer_flush(); /* exclude buffer-overflow path from timing */
+    }
+    const uint64_t t1 = nt_time_nanos();
+
+    const double per_call_ns = (double)(t1 - t0) / (double)n_calls;
+    (void)printf("[BENCH] draw_short_warm (3 chars + flush): %.2f ns/call\n", per_call_ns);
+    (void)fflush(stdout);
+}
+
+static void bench_draw_mixed_ui(void) {
+    /* 6 hot labels each redrawn over 200 "frames" with a flush between frames.
+     * Approximates a stable UI re-render path where the GPU glyph cache and
+     * the ASCII fast-path are both warm. */
+    const char *const labels[] = {"OK", "AB", "BC", "CA", "ABC", "BCA"};
+    const size_t lens[] = {2U, 2U, 2U, 2U, 3U, 3U};
+    const int label_count = (int)(sizeof(labels) / sizeof(labels[0]));
+
+    /* Warm up the glyph cache once. */
+    for (int i = 0; i < label_count; i++) {
+        nt_text_renderer_draw_n(labels[i], lens[i], s_identity, 32.0F, s_white);
+    }
+    nt_text_renderer_flush();
+
+    const int frames = 200;
+    int total_calls = 0;
+    const uint64_t t0 = nt_time_nanos();
+    for (int f = 0; f < frames; f++) {
+        for (int i = 0; i < label_count; i++) {
+            nt_text_renderer_draw_n(labels[i], lens[i], s_identity, 32.0F, s_white);
+            total_calls++;
+        }
+        nt_text_renderer_flush();
+    }
+    const uint64_t t1 = nt_time_nanos();
+
+    const double per_call_ns = (double)(t1 - t0) / (double)total_calls;
+    (void)printf("[BENCH] draw_mixed_ui (6 labels × 200 frames): %.2f ns/call (%d calls)\n", per_call_ns, total_calls);
+    (void)fflush(stdout);
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -299,5 +409,9 @@ int main(void) {
     RUN_TEST(test_flush_resets_counts);
     RUN_TEST(test_measure_width_increases);
     RUN_TEST(test_draw_newline_advances_to_next_line);
+    RUN_TEST(test_draw_n_matches_draw);
+    RUN_TEST(test_draw_n_does_not_over_read);
+    RUN_TEST(bench_draw_short_warm);
+    RUN_TEST(bench_draw_mixed_ui);
     return UNITY_END();
 }

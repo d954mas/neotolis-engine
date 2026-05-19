@@ -12,7 +12,7 @@
  *   y += velocity * dt
  *   if y < 50: y = 50; velocity = -velocity
  *
- * Coordinate convention is y-up, bottom-left origin (D-25). */
+ * Coordinate convention is y-up, bottom-left origin. */
 
 #include <stdint.h>
 

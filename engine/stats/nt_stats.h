@@ -18,8 +18,8 @@
 #endif
 
 typedef struct {
-    uint16_t fps_window;            /* default 60 (D-37) */
-    uint16_t user_counter_capacity; /* default 16 (D-37) */
+    uint16_t fps_window;            /* default 60 */
+    uint16_t user_counter_capacity; /* default 16 */
 } nt_stats_desc_t;
 
 static inline nt_stats_desc_t nt_stats_desc_defaults(void) {

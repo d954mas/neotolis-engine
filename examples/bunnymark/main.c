@@ -597,6 +597,7 @@ int main(void) {
         .curve_texture_height = 512,
         .band_texture_height = 256,
         .band_count = 8,
+        .measure_cache_size = 0, /* bunnymark never calls nt_font_measure*; disable to skip the alloc. */
     });
     nt_resource_t overlay_font_res = nt_resource_request(ASSET_FONT_BUNNYMARK_FONT_OVERLAY, NT_ASSET_FONT);
     nt_font_add(s_overlay_font, overlay_font_res);

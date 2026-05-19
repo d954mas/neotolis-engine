@@ -140,6 +140,25 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_gfx COMMAND test_gfx)
 
+    # --- Graphics scissor/viewport tests ---
+    # Plan 03 added restore_gpu cases that call into nt_sprite_renderer +
+    # nt_text_renderer; the renderer libs (and their transitive deps for
+    # font/resource/hash/pool/material) are required at link time.
+    add_executable(test_nt_gfx_scissor unit/test_nt_gfx_scissor.c)
+    target_link_libraries(test_nt_gfx_scissor PRIVATE
+        nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_gfx_stub unity
+    )
+    target_compile_definitions(test_nt_gfx_scissor PRIVATE NT_GFX_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
+    target_compile_definitions(nt_gfx_stub PRIVATE NT_GFX_TEST_ACCESS)
+    target_compile_options(test_nt_gfx_scissor PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_gfx_scissor)
+    nt_set_sanitizer_flags(test_nt_gfx_scissor)
+    set_target_properties(test_nt_gfx_scissor PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_nt_gfx_scissor COMMAND test_nt_gfx_scissor)
+
     # --- Shape module tests ---
     add_executable(test_shape unit/test_shape.c)
     target_link_libraries(test_shape PRIVATE nt_shape_renderer nt_gfx_stub unity)
@@ -225,9 +244,23 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_font COMMAND test_font)
 
+    # --- Font measure benchmark ---
+    # Measures hit vs miss ns/call for the nt_font_measure_n LRU cache.
+    # Uses nt_time_nanos() for the ns clock (same module used by test_time).
+    add_executable(test_nt_font_measure_bench unit/test_nt_font_measure_bench.c)
+    target_link_libraries(test_nt_font_measure_bench PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_time unity)
+    target_compile_definitions(test_nt_font_measure_bench PRIVATE NT_FONT_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_nt_font_measure_bench PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_font_measure_bench)
+    nt_set_sanitizer_flags(test_nt_font_measure_bench)
+    set_target_properties(test_nt_font_measure_bench PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    )
+    add_test(NAME test_nt_font_measure_bench COMMAND test_nt_font_measure_bench)
+
     # --- Text renderer module tests ---
     add_executable(test_text_renderer unit/test_text_renderer.c)
-    target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_material unity)
+    target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_material nt_time unity)
     target_compile_definitions(test_text_renderer PRIVATE NT_TEXT_RENDERER_TEST_ACCESS NT_FONT_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
     target_compile_definitions(nt_text_renderer PRIVATE NT_TEXT_RENDERER_TEST_ACCESS)
     target_compile_options(test_text_renderer PRIVATE -U_DLL)

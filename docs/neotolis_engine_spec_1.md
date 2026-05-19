@@ -105,7 +105,13 @@ If a decision can be deferred without loss of base architecture — it is deferr
 - plugin architecture
 - WebGPU backend implementation
 - scene editor / authoring editor
-- full UI framework
+- full UI framework (NOTE: Phase 51 introduces `nt_ui` — a minimal
+  immediate-mode layout + render bridge module that wraps Clay v0.14 as a
+  private layout backend. It is **not** a full UI framework — no widget
+  authoring tools, no styling pipeline beyond inline calls, no asset
+  hot-reload of UI definitions, no scene-graph integration. Game owns the
+  loop and render order; `nt_ui` provides building blocks per the engine's
+  "set of modules" principle. Clay does not leak into public headers.)
 - hot reload of compiled native/WASM code
 - generic reflection-heavy system architecture
 - WebGL 1 support

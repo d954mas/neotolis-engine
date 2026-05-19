@@ -2,7 +2,7 @@
 #include "nt_builder_internal.h"
 /* clang-format on */
 
-/* --- Include resolver (D-11, D-12, D-13, D-14) --- */
+/* --- Include resolver --- */
 
 #define NT_INCLUDE_MAX_DEPTH 32
 #define NT_INCLUDE_MAX_FILES 64
@@ -106,7 +106,7 @@ static bool file_exists(const char *path) {
     return false;
 }
 
-/* --- File lookup via asset roots (D-10b, D-13) --- */
+/* --- File lookup via asset roots --- */
 
 char *nt_builder_find_file(const char *filename, const char *relative_to_dir, const NtBuilderContext *ctx) {
     if (!filename) {

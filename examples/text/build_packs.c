@@ -24,7 +24,7 @@
 
 /* ---- Font path ---- */
 
-/* LilitaOne-RussianChineseKo.ttf (SIL OFL license, D-21)
+/* LilitaOne-RussianChineseKo.ttf (SIL OFL license).
  * Fallback to system Arial for development if custom font not present. */
 #ifndef FONT_PATH
 #define FONT_PATH "assets/fonts/LilitaOne-RussianChineseKo.ttf"

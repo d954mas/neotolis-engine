@@ -42,6 +42,24 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) { (void)desc; }
 
 void nt_gfx_backend_end_pass(void) {}
 
+/* Scissor and viewport stub no-ops. State is cached in shared nt_gfx.c
+ * so NT_GFX_TEST_ACCESS probes can read it back without GL. */
+void nt_gfx_backend_set_scissor(int x, int y, int w, int h) {
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+}
+
+void nt_gfx_backend_set_scissor_enabled(bool enabled) { (void)enabled; }
+
+void nt_gfx_backend_set_viewport(int x, int y, int w, int h) {
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+}
+
 uint32_t nt_gfx_backend_create_shader(const nt_shader_desc_t *desc) {
     (void)desc;
     return 1;

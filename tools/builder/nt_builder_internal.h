@@ -74,15 +74,15 @@ typedef struct {
     NtAtlasSpriteInput *sprites;     /* dynamic array (heap) */
     uint32_t sprite_count;
     uint32_t sprite_capacity;
-    uint64_t cache_key; /* computed atlas cache key for D-13 */
+    uint64_t cache_key; /* computed atlas cache key */
 } NtBuildAtlasState;
 
-/* Metadata accumulation limit (Phase 37) */
+/* Metadata accumulation limit */
 #ifndef NT_BUILD_MAX_META_ENTRIES
 #define NT_BUILD_MAX_META_ENTRIES (NT_BUILD_MAX_ASSETS * 2)
 #endif
 
-/* Builder-side meta entry for accumulation (max 256 bytes payload per D-12) */
+/* Builder-side meta entry for accumulation (max 256 bytes payload) */
 typedef struct {
     uint64_t resource_id;
     uint64_t kind;
@@ -117,13 +117,13 @@ typedef struct {
     double encode_secs;      /* wall time for this asset's encode (set by worker or single-threaded loop) */
 } NtEncodeResult;
 
-/* Shared state between main thread and encode workers (per D-08) */
+/* Shared state between main thread and encode workers */
 typedef struct {
     /* Work items: indices into pending[] that need encoding (cache misses, non-deduped, non-shader) */
     uint32_t *work_indices;
     uint32_t work_count;
     _Atomic uint32_t next_work;  /* atomic: next index to claim */
-    _Atomic uint32_t error_flag; /* 0 = ok, 1 = error occurred (per D-13) */
+    _Atomic uint32_t error_flag; /* 0 = ok, 1 = error occurred */
 
     /* Per-asset results (indexed by pending[] index, sized to pending_count) */
     NtEncodeResult *results;
@@ -184,11 +184,11 @@ struct NtBuilderContext {
     uint32_t dedup_warn_b[NT_BUILD_MAX_ASSETS];
     uint32_t dedup_warn_count;
 
-    /* Metadata accumulation (Phase 37) */
+    /* Metadata accumulation */
     NtBuildMetaEntry meta_pending[NT_BUILD_MAX_META_ENTRIES];
     uint32_t meta_count;
 
-    /* Asset root search paths (D-09) */
+    /* Asset root search paths */
     char *asset_roots[NT_BUILD_MAX_ASSET_ROOTS];
     uint32_t asset_root_count;
 
@@ -198,13 +198,13 @@ struct NtBuilderContext {
     /* Gzip estimation in summary (default: off) */
     bool gzip_estimate;
 
-    /* Cache: content-addressed encode cache (D-08) */
+    /* Cache: content-addressed encode cache */
     char *cache_dir;           /* NULL = caching disabled, set by nt_builder_set_cache_dir */
     uint32_t cache_hit_count;  /* per-build hit stats */
     uint32_t cache_miss_count; /* per-build miss stats */
     double cache_restore_secs; /* total time reading cache files */
 
-    /* Parallel encoding: thread count (0 = single-threaded, per D-12) */
+    /* Parallel encoding: thread count (0 = single-threaded) */
     uint32_t thread_count;
 
     /* Atlas region codegen entries (heap, populated by end_atlas, consumed by codegen) */
@@ -390,7 +390,7 @@ char *nt_builder_read_file(const char *path, uint32_t *out_size);
 /* Glob callback type is public (nt_builder.h). The iteration function itself
  * is also declared in nt_builder.h; do not re-declare here. */
 
-/* Include resolver (D-11, D-12, D-13) */
+/* Include resolver */
 char *nt_builder_resolve_includes(const char *source, uint32_t source_len, const char *source_path, const NtBuilderContext *ctx, uint32_t *out_len);
 
 /* File lookup via asset roots */

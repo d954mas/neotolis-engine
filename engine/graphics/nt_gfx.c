@@ -88,6 +88,12 @@ static struct {
     nt_gfx_render_state_t render_state;
     uint32_t bound_pipeline;  /* currently bound pipeline backend handle */
     uint8_t bound_index_type; /* index type of currently bound IBO (1=uint16, 2=uint32) */
+    bool scissor_enabled;     /* mirrors GL_SCISSOR_TEST; read in begin_frame */
+
+    /* Mirrors of last set_scissor / set_viewport — only NT_GFX_TEST_ACCESS
+     * probes read them; production never does. */
+    int scissor_rect[4];  /* GL bottom-left x,y,w,h */
+    int viewport_rect[4]; /* GL bottom-left x,y,w,h */
 } s_gfx;
 
 /* ---- Global UBO block registration ---- */
@@ -628,6 +634,24 @@ uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s) {
     }
     return s_gfx.sampler_cache[s.id - 1].backend;
 }
+
+bool nt_gfx_test_scissor_enabled(void) { return s_gfx.scissor_enabled; }
+
+void nt_gfx_test_scissor_rect(int out[4]) {
+    NT_ASSERT(out != NULL);
+    out[0] = s_gfx.scissor_rect[0];
+    out[1] = s_gfx.scissor_rect[1];
+    out[2] = s_gfx.scissor_rect[2];
+    out[3] = s_gfx.scissor_rect[3];
+}
+
+void nt_gfx_test_viewport_rect(int out[4]) {
+    NT_ASSERT(out != NULL);
+    out[0] = s_gfx.viewport_rect[0];
+    out[1] = s_gfx.viewport_rect[1];
+    out[2] = s_gfx.viewport_rect[2];
+    out[3] = s_gfx.viewport_rect[3];
+}
 #endif
 
 /* ---- Sampler (deduplicated cache) ---- */
@@ -693,6 +717,46 @@ void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot) {
         e->backend = nt_gfx_backend_create_sampler(&e->desc);
     }
     nt_gfx_backend_bind_sampler(e->backend, slot);
+}
+
+/* ---- Scissor and viewport ----
+ *
+ * All three wrappers early-return on context loss — backend is dead, cached
+ * state must not drift. Callers re-issue from a clean frame after restore. */
+
+void nt_gfx_set_scissor(int x, int y, int w, int h) {
+    /* Negative width/height is undefined in GL — assert early per AGENTS.md "fail early". */
+    NT_ASSERT(w >= 0);
+    NT_ASSERT(h >= 0);
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    s_gfx.scissor_rect[0] = x;
+    s_gfx.scissor_rect[1] = y;
+    s_gfx.scissor_rect[2] = w;
+    s_gfx.scissor_rect[3] = h;
+    nt_gfx_backend_set_scissor(x, y, w, h);
+}
+
+void nt_gfx_set_scissor_enabled(bool enabled) {
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    s_gfx.scissor_enabled = enabled;
+    nt_gfx_backend_set_scissor_enabled(enabled);
+}
+
+void nt_gfx_set_viewport(int x, int y, int w, int h) {
+    NT_ASSERT(w >= 0);
+    NT_ASSERT(h >= 0);
+    if (g_nt_gfx.context_lost) {
+        return;
+    }
+    s_gfx.viewport_rect[0] = x;
+    s_gfx.viewport_rect[1] = y;
+    s_gfx.viewport_rect[2] = w;
+    s_gfx.viewport_rect[3] = h;
+    nt_gfx_backend_set_viewport(x, y, w, h);
 }
 
 /* ---- Uniforms ---- */

@@ -823,10 +823,10 @@ void test_gfx_update_texture_invalid_handle(void) {
     nt_gfx_update_texture(tex, 0, 0, 1, 1, data); /* should log error, not crash */
 }
 
-/* ---- D-39: per-frame draw call counter ---- */
+/* ---- Per-frame draw call counter ---- */
 
 void test_gfx_frame_draw_calls(void) {
-    /* D-39: separate draw-call counter for nt_stats consumption (Pitfall 4).
+    /* Separate draw-call counter for nt_stats consumption.
      * Verifies counter starts at 0, increments by 1 per draw API, resets on begin_frame. */
 
     /* Minimal pipeline so draws have something bound (stub backend accepts any handle). */
@@ -940,7 +940,6 @@ int main(void) {
     RUN_TEST(test_gfx_update_texture_valid);
     RUN_TEST(test_gfx_update_texture_full);
     RUN_TEST(test_gfx_update_texture_invalid_handle);
-    /* D-39: draw call counter */
     RUN_TEST(test_gfx_frame_draw_calls);
     return UNITY_END();
 }
