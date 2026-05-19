@@ -756,18 +756,28 @@ void test_measure_n_cache_custom_size(void) {
     free(blob);
 }
 
-/* ---- FONT-02g: pack unmount invalidates ASCII fast-path index + measure cache ----
+/* ---- FONT-02g: full pack unmount resets state cleanly ----
  *
- * Regression for a stale-handle data corruption window: when a resource
- * went from loaded (handle = N) to unloaded (nt_resource_get → 0), the
- * old code path simply `continue`d, leaving slot->resource_handles[ri]
- * at the stale N. If activate_font later recycled data-table slot N for
- * a different font's pack, get_font_data(N) would silently return the
- * new pack's bytes — and the ASCII fast-path index (pointing at the old
- * pack's glyph indices) would read wrong-font glyph metrics. The fix in
- * nt_font_step now flushes the glyph cache, clears resource_handles[ri],
- * and triggers slot_indices_dirty so both the ASCII index and the
- * measure cache get rebuilt/cleared. */
+ * Covers two coupled fixes triggered by nt_resource_get → 0 transition:
+ *
+ *  (1) Stale-handle data corruption window: when a resource went from
+ *      loaded (handle = N) to unloaded, the old code path simply
+ *      `continue`d, leaving slot->resource_handles[ri] at stale N. If
+ *      activate_font later recycled data-table slot N for a different
+ *      font's pack, get_font_data(N) would silently return the new
+ *      pack's bytes — wrong-font glyph metrics via the ASCII fast-path
+ *      index. nt_font_step now clears resource_handles[ri] and triggers
+ *      slot_indices_dirty so the ASCII index + measure cache rebuild.
+ *
+ *  (2) metrics_set sticky after full unmount: with all resources gone,
+ *      slot->metrics_set stayed true with stale ascent/descent/UPEM.
+ *      Renderers' `units_per_em != 0` guard would pass and emit tofu
+ *      using wrong-font scale. nt_font_step now resets metrics + flag
+ *      when no resource handle remains.
+ *
+ * Combined effect: nt_font_measure_n short-circuits at `!metrics_set`
+ * and returns {0,0}. The cache-check path is never reached, so counters
+ * stay frozen — that's the signal that the short-circuit fired. */
 void test_measure_n_invalidates_on_resource_unload(void) {
     nt_font_create_desc_t desc = test_font_desc();
     nt_font_t font = nt_font_create(&desc);
@@ -793,10 +803,15 @@ void test_measure_n_invalidates_on_resource_unload(void) {
     nt_font_test_reset_measure_counters();
 
     /* Warm cache: measure twice → 1 miss + 1 hit. */
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    nt_text_size_t live = nt_font_measure_n(font, "AB", 2U, 14.0F);
     (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
+    TEST_ASSERT_TRUE(live.width > 0.0F); /* sanity — non-empty measurement before unmount */
+
+    /* Metrics should be live before unmount. */
+    nt_font_metrics_t pre = nt_font_get_metrics(font);
+    TEST_ASSERT_NOT_EQUAL_UINT16(0U, pre.units_per_em);
 
     /* Unmount the only pack carrying this resource. After resolve, the
      * asset slot has runtime_handle = 0, so nt_resource_get returns 0. */
@@ -804,11 +819,21 @@ void test_measure_n_invalidates_on_resource_unload(void) {
     nt_resource_step();
     nt_font_step();
 
-    /* Without the fix, measure cache still holds the warm entry → HIT.
-     * With the fix, slot_indices_dirty fires → measure cache cleared → MISS. */
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    /* Metrics must reset to {0} on full unmount (fix #2). */
+    nt_font_metrics_t post = nt_font_get_metrics(font);
+    TEST_ASSERT_EQUAL_UINT16(0U, post.units_per_em);
+    TEST_ASSERT_EQUAL_INT16(0, post.ascent);
+    TEST_ASSERT_EQUAL_INT16(0, post.descent);
+
+    /* measure_n short-circuits at !metrics_set → returns {0,0}. The cache
+     * lookup is never reached, so counters stay frozen — that's the
+     * combined signature of both fixes. (UNITY_EXCLUDE_FLOAT in this build,
+     * so use TEST_ASSERT_TRUE for the zero check.) */
+    nt_text_size_t after = nt_font_measure_n(font, "AB", 2U, 14.0F);
+    TEST_ASSERT_TRUE(after.width == 0.0F);
+    TEST_ASSERT_TRUE(after.height == 0.0F);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));   /* unchanged */
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_font_test_measure_cache_misses(font)); /* +1 */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font)); /* unchanged */
 
     nt_font_destroy(font);
     free(blob);

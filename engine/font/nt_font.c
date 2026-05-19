@@ -953,6 +953,7 @@ void nt_font_step(void) {
 
         nt_font_slot_t *slot = &s_font.slots[i];
         bool slot_indices_dirty = false;
+        bool need_flush = false; /* batched — one flush_cache after the loop covers any combo of unload/reload */
 
         // #region Resolve resources
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
@@ -972,9 +973,9 @@ void nt_font_step(void) {
                  *       entries carry resource_index = ri and would otherwise
                  *       outlive the resource. */
                 if (slot->resource_handles[ri] != 0) {
-                    flush_cache(slot);
                     slot->resource_handles[ri] = 0;
                     slot_indices_dirty = true;
+                    need_flush = true;
                 }
                 continue;
             }
@@ -1012,9 +1013,9 @@ void nt_font_step(void) {
             }
             // #endregion
 
-            /* If version changed (reload), invalidate cache + hash table */
+            /* If version changed (reload), batch the flush — one call after the loop */
             if (slot->resource_handles[ri] != 0) {
-                flush_cache(slot);
+                need_flush = true;
             }
 
             slot->resource_handles[ri] = ver;
@@ -1033,10 +1034,30 @@ void nt_font_step(void) {
          * remeasure) would otherwise keep returning the cached tofu width.
          * Clear all entries unconditionally on any handle change. */
         if (slot_indices_dirty) {
+            if (need_flush) {
+                flush_cache(slot);
+            }
             rebuild_slot_indices(slot);
             if (slot->measure_cache.key_hashes != NULL && slot->measure_cache_warm) {
                 measure_cache_clear(slot);
                 slot->measure_cache_warm = false;
+            }
+
+            /* If every resource is now inactive (full unmount), reset metrics so
+             * nt_font_get_metrics returns {0} again. Without this, metrics_set
+             * stays true with stale ascent/descent/units_per_em from the last
+             * loaded resource — draw paths would proceed past their
+             * `units_per_em != 0` guard and emit tofu using wrong-font metrics. */
+            bool any_active = false;
+            for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
+                if (slot->resource_handles[ri] != 0) {
+                    any_active = true;
+                    break;
+                }
+            }
+            if (!any_active && slot->metrics_set) {
+                slot->metrics = (nt_font_metrics_t){0};
+                slot->metrics_set = false;
             }
         }
     }
