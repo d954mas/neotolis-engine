@@ -240,13 +240,9 @@ static const NtFontGlyphEntry *find_glyph_in_pack(const uint8_t *blob, uint32_t 
     return (const NtFontGlyphEntry *)bsearch(&codepoint, glyphs, hdr->glyph_count, sizeof(NtFontGlyphEntry), compare_glyph_codepoint);
 }
 
-/* Find glyph across all resources (first wins).
- *
- * ASCII fast-path (Phase 51 perf): for codepoint < 128, consult the
- * precomputed slot->ascii_glyph_idx table — one array lookup + one blob
- * deref + pointer arithmetic, no bsearch. The table is built at
- * resource-load time in nt_font_step. Non-ASCII / not-in-table fall
- * through to the existing per-resource bsearch loop. */
+/* Find glyph across all resources (first wins). ASCII codepoints take the
+ * precomputed ascii_glyph_idx table (one array lookup); non-ASCII falls
+ * through to the per-resource bsearch loop. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static bool find_glyph_in_resources(nt_font_slot_t *slot, uint32_t codepoint, uint8_t *out_resource_index, const NtFontGlyphEntry **out_glyph_entry) {
     if (codepoint < 128U) {
@@ -1070,16 +1066,6 @@ void nt_font_step(void) {
         }
         // #endregion
 
-        /* Rebuild ASCII fast-path index + has_any_kern ONCE per step if any
-         * resource handle changed in this slot. Previously this was inside
-         * the per-resource loop, leading to O(R²×G) work when multiple
-         * resources updated in one step. Now O(R×G) — single rebuild over
-         * all active resources after the loop.
-         *
-         * Cache invalidation is critical here: async resource fallback chains
-         * (e.g. measure a CJK glyph → tofu fallback → CJK resource arrives →
-         * remeasure) would otherwise keep returning the cached tofu width.
-         * Clear all entries unconditionally on any handle change. */
         if (ascii_index_dirty) {
             if (need_flush) {
                 clear_glyph_cache(slot);
@@ -1089,9 +1075,8 @@ void nt_font_step(void) {
                 measure_cache_clear(slot);
             }
 
-            /* Full unmount — reset metrics so get_metrics returns {0} and
-             * draw paths' units_per_em == 0 guard fires. Otherwise metrics_set
-             * sticks at true with stale values from the last loaded resource. */
+            /* Full unmount: reset metrics so draw paths' units_per_em == 0
+             * guard fires instead of using stale values. */
             bool any_active = false;
             for (uint8_t j = 0; j < slot->resource_count; j++) {
                 if (slot->resource_handles[j] != 0) {
@@ -1773,20 +1758,15 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
     return result;
 }
 
-/* Wrapper — NUL-terminated convenience (pre-Phase-51 signature). */
+/* Wrapper — NUL-terminated convenience. */
 nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) { return nt_font_measure_n(font, utf8, utf8 ? strlen(utf8) : 0U, size); }
 // #endregion
 
 // #region Measure cache invalidation
-/* Both variants share the same contract: silently no-op if the module is
- * uninitialized or the font handle is invalid. Phase 53 theme swap calls
- * _cache between frames at every theme change — must not crash the game
- * if a theme is swapped before the font module is up. The per-font variant
- * is symmetric for the same reason. */
+/* Both variants no-op when the module is uninit or the handle is invalid —
+ * callers may invoke between frames or after partial teardown. */
 
-/* Zero the entire SoA cache block (all 4 sub-arrays at once). The block is
- * laid out contiguously in nt_font_create — clearing it via the base
- * pointer (key_hashes) and total size is one memset, not four. */
+/* One memset over the contiguous SoA block (base = key_hashes). */
 static void measure_cache_clear(nt_font_slot_t *slot) { memset(slot->measure_cache.key_hashes, 0, (size_t)slot->measure_cache_size * NT_FONT_MEASURE_CACHE_ENTRY_BYTES); }
 
 void nt_font_measure_invalidate_cache(void) {
