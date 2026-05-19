@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: b5ef890
+# Commit: f33f5a4
 
 ## WASM Section Sizes
 
@@ -7,44 +7,42 @@ Section                Size
 ---------------- ----------
 Type                 177 B
 Import               430 B
-Function             105 B
+Function             104 B
 Table                  5 B
 Memory                 7 B
 Global                 9 B
 Export                59 B
 Elem                  55 B
-Code               59495 B
+Code               75238 B
 Data                8551 B
-Custom              4658 B
+Custom              4641 B
 ---------------- ----------
-TOTAL              73551 B
+TOTAL              89276 B
 
 ## Top 30 Functions by Size
 
     Size  Name
 --------  ----
-15833 B   frame
-12079 B   main
+23933 B   main
+18970 B   frame
  3103 B   fmt_fp
  2624 B   printf_core
+ 2327 B   nt_input_web_on_blur
  2041 B   __rem_pio2f
- 1298 B   nt_gfx_make_pipeline
+ 1296 B   nt_gfx_make_pipeline
  1264 B   nt_shape_renderer_flush
  1239 B   nt_hash32_str
-  931 B   nt_input_web_on_blur
   775 B   nt_gfx_bind_pipeline
-  706 B   nt_input_web_on_pointer_move
-  667 B   nt_input_web_on_pointer_down
+  716 B   nt_input_web_on_pointer_move
+  677 B   nt_input_web_on_pointer_down
   650 B   pop_arg_long_double
-  559 B   push_instance
   555 B   emmalloc_memalign
+  540 B   push_instance
   516 B   claim_more_memory
   512 B   __memcpy
   464 B   emit_wire_edge
   464 B   vsnprintf
-  458 B   nt_window_init
   415 B   attempt_allocate
-  393 B   apply_rotation
   385 B   __dynamic_cast
   382 B   sinf
   381 B   nt_gfx_make_buffer
@@ -53,9 +51,11 @@ TOTAL              73551 B
   340 B   emmalloc_free
   337 B   nt_input_web_on_pointer_up
   329 B   nt_drawable_comp_set_color
+  329 B   nt_window_init
+  322 B   nt_gfx_bind_instance_buffer
 
-Total functions: 104
-Total code size: 59329 B
+Total functions: 103
+Total code size: 75073 B
 
 ## Per-Module Contributions
 
@@ -66,13 +66,13 @@ Module                         Size
 libnt_app.a                 1442 B
 libnt_core.a                2178 B
 libnt_drawable_comp.a       4200 B
-libnt_gfx.a                53600 B
+libnt_gfx.a                54530 B
 libnt_input.a              16446 B
 libnt_shape_renderer.a   1140902 B
 libnt_transform_comp.a      4696 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)           1227404 B
+TOTAL (linked)           1228334 B
 
 Not linked to spinning_cube:
 libnt_app_stub.a            1428 B
@@ -80,10 +80,10 @@ libnt_atlas.a               6766 B
 libnt_basisu_transcoder.a 1329370 B
 libnt_comp_storage.a        1930 B
 libnt_entity.a              3076 B
-libnt_font.a              194546 B
+libnt_font.a              197396 B
 libnt_fs.a                  2620 B
 libnt_fs_stub.a             2620 B
-libnt_gfx_stub.a           30400 B
+libnt_gfx_stub.a           31230 B
 libnt_hash.a                4028 B
 libnt_http.a                6710 B
 libnt_http_stub.a           3210 B
@@ -101,8 +101,9 @@ libnt_sort.a                 366 B
 libnt_sprite_comp.a         7526 B
 libnt_sprite_renderer.a   428932 B
 libnt_stats.a               5622 B
-libnt_text_renderer.a    1170108 B
+libnt_text_renderer.a    1170290 B
 libnt_time.a                 868 B
+libnt_ui.a                277502 B
 libnt_utf8.a                1000 B
 libnt_window_stub.a         1838 B
 

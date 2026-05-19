@@ -1,5 +1,5 @@
 # Size Report: hello (wasm-analysis-paired)
-# Commit: b5ef890
+# Commit: f33f5a4
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 8 B
 Export                41 B
 Elem                  14 B
-Code               15389 B
+Code               16671 B
 Data                 831 B
 Custom              1148 B
 ---------------- ----------
-TOTAL              17697 B
+TOTAL              18979 B
 
 ## Top 30 Functions by Size
 
@@ -25,17 +25,17 @@ TOTAL              17697 B
 --------  ----
  3101 B   fmt_fp
  2625 B   printf_core
- 1301 B   frame
-  836 B   nt_input_web_on_blur
-  680 B   nt_input_web_on_pointer_move
+ 2160 B   nt_input_web_on_blur
+ 1373 B   frame
+  690 B   nt_input_web_on_pointer_move
+  651 B   nt_input_web_on_pointer_down
   650 B   pop_arg_long_double
-  641 B   nt_input_web_on_pointer_down
   508 B   __memcpy
-  463 B   main
-  445 B   nt_window_init
+  454 B   main
   374 B   __stdio_write
   370 B   __memset
   323 B   __vfprintf_internal
+  320 B   nt_window_init
   316 B   pop_arg
   313 B   nt_input_web_on_pointer_up
   281 B   wctomb
@@ -55,7 +55,7 @@ TOTAL              17697 B
    41 B   __small_printf
 
 Total functions: 36
-Total code size: 15328 B
+Total code size: 16610 B
 
 ## Per-Module Contributions
 
@@ -77,11 +77,11 @@ libnt_basisu_transcoder.a 1329370 B
 libnt_comp_storage.a        1930 B
 libnt_drawable_comp.a       4200 B
 libnt_entity.a              3076 B
-libnt_font.a              194546 B
+libnt_font.a              197396 B
 libnt_fs.a                  2620 B
 libnt_fs_stub.a             2620 B
-libnt_gfx.a                53600 B
-libnt_gfx_stub.a           30400 B
+libnt_gfx.a                54530 B
+libnt_gfx_stub.a           31230 B
 libnt_hash.a                4028 B
 libnt_http.a                6710 B
 libnt_http_stub.a           3210 B
@@ -100,9 +100,10 @@ libnt_sort.a                 366 B
 libnt_sprite_comp.a         7526 B
 libnt_sprite_renderer.a   428932 B
 libnt_stats.a               5622 B
-libnt_text_renderer.a    1170108 B
+libnt_text_renderer.a    1170290 B
 libnt_time.a                 868 B
 libnt_transform_comp.a      4696 B
+libnt_ui.a                277502 B
 libnt_utf8.a                1000 B
 libnt_window_stub.a         1838 B
 

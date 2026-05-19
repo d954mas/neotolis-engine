@@ -1,16 +1,94 @@
-[{
-  "commit": "b5ef890",
-  "date": "2026-05-07T12:33:35Z",
-  "files": {
-    "index.html": { "raw": 2560, "gzip": 1285 },
-    "index_simd.wasm": { "raw": 863176, "gzip": 345142 },
-    "index.wasm": { "raw": 769655, "gzip": 327586 },
-    "index_simd.js": { "raw": 26347, "gzip": 10592 },
-    "index.js": { "raw": 26347, "gzip": 10587 },
-    "assets/bunnymark_hd.ntpack": { "raw": 2797184, "gzip": 835001 },
-    "assets/bunnymark_sd.ntpack": { "raw": 38224, "gzip": 14927 }
+[
+  {
+    "commit": "b5ef890",
+    "date": "2026-05-07T12:33:35Z",
+    "files": {
+      "index.html": {
+        "raw": 2560,
+        "gzip": 1285
+      },
+      "index_simd.wasm": {
+        "raw": 863176,
+        "gzip": 345142
+      },
+      "index.wasm": {
+        "raw": 769655,
+        "gzip": 327586
+      },
+      "index_simd.js": {
+        "raw": 26347,
+        "gzip": 10592
+      },
+      "index.js": {
+        "raw": 26347,
+        "gzip": 10587
+      },
+      "assets/bunnymark_hd.ntpack": {
+        "raw": 2797184,
+        "gzip": 835001
+      },
+      "assets/bunnymark_sd.ntpack": {
+        "raw": 38224,
+        "gzip": 14927
+      }
+    },
+    "engine": {
+      "raw": 892083,
+      "gzip": 357019
+    },
+    "resources": {
+      "raw": 2835408,
+      "gzip": 849928
+    },
+    "total": {
+      "raw": 3727491,
+      "gzip": 1206947
+    }
   },
-  "engine": { "raw": 892083, "gzip": 357019 },
-  "resources": { "raw": 2835408, "gzip": 849928 },
-  "total": { "raw": 3727491, "gzip": 1206947 }
-}]
+  {
+    "commit": "f33f5a4",
+    "date": "2026-05-19T15:37:58Z",
+    "files": {
+      "index.html": {
+        "raw": 2560,
+        "gzip": 1285
+      },
+      "index_simd.wasm": {
+        "raw": 864212,
+        "gzip": 345685
+      },
+      "index.wasm": {
+        "raw": 770691,
+        "gzip": 328144
+      },
+      "index_simd.js": {
+        "raw": 26347,
+        "gzip": 10591
+      },
+      "index.js": {
+        "raw": 26347,
+        "gzip": 10586
+      },
+      "assets/bunnymark_hd.ntpack": {
+        "raw": 2797184,
+        "gzip": 835001
+      },
+      "assets/bunnymark_sd.ntpack": {
+        "raw": 38224,
+        "gzip": 14927
+      }
+    },
+    "engine": {
+      "raw": 893119,
+      "gzip": 357561
+    },
+    "resources": {
+      "raw": 2835408,
+      "gzip": 849928
+    },
+    "total": {
+      "raw": 3728527,
+      "gzip": 1207489
+    }
+  }
+]
