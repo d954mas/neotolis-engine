@@ -30,6 +30,7 @@ static nt_font_state_t s_font;
 /* Forward declarations for internal helpers used before their definitions. */
 static void rebuild_slot_indices(nt_font_slot_t *slot);
 static void measure_cache_clear(nt_font_slot_t *slot);
+static void clear_glyph_cache(nt_font_slot_t *slot);
 
 /* ---- Font activator callbacks ---- */
 
@@ -56,29 +57,58 @@ static uint32_t activate_font(const uint8_t *data, uint32_t size) {
     return idx + 1; /* 1-based handle (0 = failure in resource system) */
 }
 
+/* Drop one slot's reference to a deactivated runtime handle and rebuild
+ * derived state (glyph cache, ASCII index, measure cache, metrics). Same
+ * cleanup nt_font_step's unload branch runs — extracted so deactivate_font
+ * can apply it immediately, without waiting for the next step. */
+static void slot_drop_handle(nt_font_slot_t *slot, uint32_t runtime_handle) {
+    bool touched = false;
+    for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
+        if (slot->resource_handles[ri] == runtime_handle) {
+            slot->resource_handles[ri] = 0;
+            touched = true;
+        }
+    }
+    if (!touched) {
+        return;
+    }
+    clear_glyph_cache(slot);
+    rebuild_slot_indices(slot);
+    if (slot->measure_cache.key_hashes != NULL && slot->measure_cache_warm) {
+        measure_cache_clear(slot);
+        slot->measure_cache_warm = false;
+    }
+    bool any_active = false;
+    for (uint8_t j = 0; j < slot->resource_count; j++) {
+        if (slot->resource_handles[j] != 0) {
+            any_active = true;
+            break;
+        }
+    }
+    if (!any_active && slot->metrics_set) {
+        slot->metrics = (nt_font_metrics_t){0};
+        slot->metrics_set = false;
+    }
+}
+
 static void deactivate_font(uint32_t runtime_handle) {
     if (runtime_handle == 0 || runtime_handle > s_font.data_count) {
         return;
     }
 
-    /* activate_font reuses the first NULL data slot, so the next activate
-     * after this free can return the SAME numeric handle for a different
-     * font asset. Without invalidating slot references here, nt_font_step
-     * would hit `ver == slot->resource_handles[ri]` and skip the reload —
-     * silently keeping stale metrics, ASCII index, and glyph cache.
-     * Clearing forces the next step to take the reload path; metrics
-     * reset and cache wipe happen there. */
+    /* Two reasons to clean up here instead of deferring to nt_font_step:
+     * (1) handle reuse — activate_font hands out the first NULL data slot,
+     *     so the next mount can produce the same numeric handle for a
+     *     different asset and step's `ver == resource_handles[ri]` early-
+     *     out would skip the reload.
+     * (2) deactivate may run between steps; caches and metrics must be
+     *     consistent immediately, not on next tick. */
     if (s_font.initialized) {
         for (uint32_t s = 1; s <= s_font.pool.capacity; s++) {
             if (!nt_pool_slot_alive(&s_font.pool, s)) {
                 continue;
             }
-            nt_font_slot_t *slot = &s_font.slots[s];
-            for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
-                if (slot->resource_handles[ri] == runtime_handle) {
-                    slot->resource_handles[ri] = 0;
-                }
-            }
+            slot_drop_handle(&s_font.slots[s], runtime_handle);
         }
     }
 

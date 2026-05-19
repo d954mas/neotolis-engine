@@ -973,6 +973,60 @@ void test_font_hotswap_replaces_metrics_in_one_step(void) {
     free(blob_b);
 }
 
+/* ---- FONT-02k: FILE-pack unmount without remount cleans state ----
+ *
+ * Regression for the deactivate-zeroes-handles fix. Once deactivate_font
+ * cleared resource_handles[ri], the unload branch in nt_font_step
+ * (`if (slot->resource_handles[ri] != 0)`) stopped firing — so glyph
+ * cache, measure cache, ASCII index, and metrics_set survived a plain
+ * file-pack unload. deactivate_font now performs the full cleanup
+ * itself rather than waiting on step. */
+void test_font_file_pack_unmount_cleans_state(void) {
+    nt_font_create_desc_t desc = test_font_desc();
+    nt_font_t font = nt_font_create(&desc);
+
+    uint32_t blob_size = 0;
+    uint8_t *blob = build_test_font_blob(&blob_size);
+    uint32_t data_handle = nt_font_test_register_data(blob, blob_size);
+    char pack_name[64];
+    (void)snprintf(pack_name, sizeof(pack_name), "fp_unmount_%u", s_vpack_counter++);
+    nt_hash32_t pid = nt_hash32_str(pack_name);
+    nt_hash64_t rid = nt_hash64_str("font_unmount_clean");
+    nt_resource_create_pack(pid, 0);
+    nt_resource_register(pid, rid, NT_ASSET_FONT, data_handle);
+    nt_resource_t res = nt_resource_request(rid, NT_ASSET_FONT);
+    nt_font_add(font, res);
+    nt_resource_step();
+    nt_font_step();
+
+    /* Warm caches. */
+    nt_font_test_reset_measure_counters();
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
+    uint32_t gen_before = nt_font_get_cache_generation(font);
+
+    /* FILE-pack unmount path: resource_unmount + activator deactivator,
+     * no further nt_font_step. */
+    nt_resource_unmount(pid);
+    nt_font_test_deactivate(data_handle);
+
+    /* All downstream state must already be reset — without waiting on step. */
+    TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
+    TEST_ASSERT_TRUE(nt_font_get_cache_generation(font) > gen_before);
+
+    /* measure_n short-circuits at !metrics_set → returns {0,0}, counters
+     * stay frozen (cache check never runs). */
+    nt_text_size_t after = nt_font_measure_n(font, "AB", 2U, 14.0F);
+    TEST_ASSERT_TRUE(after.width == 0.0F);
+    TEST_ASSERT_TRUE(after.height == 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));   /* unchanged */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font)); /* unchanged */
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
 /* ---- FONT-02j: FILE-pack handle reuse hot-swap ----
  *
  * Sister of FONT-02i. Virtual-pack unmount skips the activator
@@ -1076,6 +1130,7 @@ int main(void) {
     RUN_TEST(test_measure_n_invalidates_on_resource_unload);
     RUN_TEST(test_font_recovers_after_remount);
     RUN_TEST(test_font_hotswap_replaces_metrics_in_one_step);
+    RUN_TEST(test_font_file_pack_unmount_cleans_state);
     RUN_TEST(test_font_hotswap_handle_reuse_after_deactivate);
     return UNITY_END();
 }
