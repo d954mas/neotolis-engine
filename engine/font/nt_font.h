@@ -192,34 +192,12 @@ nt_font_stats_t nt_font_get_stats(nt_font_t font);
 /* ---- Glyph lookup (exposed for nt_text in Phase 45) ---- */
 
 /* Returns pointer into internal cache. Valid until next lookup that triggers
- * eviction or flush. Copy needed data immediately — do not store the pointer. */
+ * eviction or flush. Copy needed data immediately — do not store the pointer.
+ *
+ * Tightly-coupled consumers with a per-codepoint inner loop (e.g.
+ * nt_text_renderer) can use the slot-based variant in nt_font_hot.h to
+ * skip the per-call pool_valid + slot resolve. */
 const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t codepoint);
-
-/* ---- Resolved-slot hot-path API (Phase 51 / draw_n parity) ----
- *
- * `nt_font_slot_t` is forward-declared as an opaque type; internal layout
- * lives in nt_font_internal.h and is not part of the public ABI. Callers
- * with a tight per-codepoint loop (text renderers, layout walkers) call
- * `nt_font_resolve` once to convert a `nt_font_t` handle to a slot pointer,
- * then pass the pointer to the `_resolved` variants — bypassing the
- * per-call `pool_valid + get_slot` overhead that the public-handle
- * variants pay. Same observable behavior, including upload-on-miss for
- * glyph lookup.
- *
- * Lifetime contract:
- *   - Pointer ADDRESS is stable until `nt_font_destroy(font)` or
- *     `nt_font_shutdown` — the slots array is allocated once at init
- *     and slot indices don't move.
- *   - Pointer CONTENTS may mutate on any `nt_font_step` call (resource
- *     load/unload triggers `rebuild_slot_indices`, ASCII fast-path
- *     refresh, measure_cache clear, glyph cache flush). Hold the
- *     pointer only within a single draw scope — typically resolve at
- *     the top of `_draw_n` / measure pass and discard at the end.
- *     Do NOT cache slot pointers across frames. */
-typedef struct nt_font_slot_s nt_font_slot_t;
-
-nt_font_slot_t *nt_font_resolve(nt_font_t font); /* NULL if handle is invalid or module uninit */
-const nt_glyph_cache_entry_t *nt_font_lookup_glyph_resolved(nt_font_slot_t *slot, uint32_t codepoint);
 
 /* ---- GPU texture access (for nt_text to bind before draw) ---- */
 
@@ -245,12 +223,6 @@ void nt_font_set_pre_flush_callback(nt_font_pre_flush_fn fn);
 /* ---- Kern pair lookup (for nt_text shaping in Phase 45) ---- */
 
 int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right_codepoint);
-
-/* Slot-resolved kern. Same semantics as nt_font_get_kern minus the per-call
- * pool_valid + get_slot. Caller MUST hold a slot from nt_font_resolve().
- * Pure read — the slot pointer is const because this lookup never mutates
- * cache state (the kern table sits in the immutable blob). */
-int16_t nt_font_get_kern_resolved(const nt_font_slot_t *slot, uint32_t left_codepoint, uint32_t right_codepoint);
 
 /* ---- Test access (test-only) ---- */
 

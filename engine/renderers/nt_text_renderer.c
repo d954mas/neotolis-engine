@@ -2,6 +2,7 @@
 
 #include "core/nt_assert.h"
 #include "font/nt_font.h"
+#include "font/nt_font_hot.h"
 #include "graphics/nt_gfx.h"
 #include "log/nt_log.h"
 #include "material/nt_material.h"
@@ -329,7 +330,7 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     uint8_t band_count = nt_font_get_band_count(s_text.font);
 
     /* Resolve the font slot once for the whole draw — the per-codepoint
-     * loop below uses nt_font_lookup_glyph_resolved / _get_kern_resolved
+     * loop below uses nt_font_lookup_glyph_in_slot / _get_kern_in_slot
      * to skip the per-call pool_valid + get_slot that the handle-based
      * variants would re-do for every character (mirrors the optimization
      * already applied to nt_font_measure_n).
@@ -338,7 +339,7 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
      * an assert in debug/trap-release. The graceful fallback below is for
      * OFF-mode production builds where NT_ASSERT vanishes — without it,
      * a destroyed-then-redrawn font would NPE inside the inner loop. */
-    nt_font_slot_t *slot = nt_font_resolve(s_text.font);
+    nt_font_slot_t *slot = nt_font_get_slot(s_text.font);
     NT_ASSERT(slot != NULL);
     if (!slot) {
         return;
@@ -375,11 +376,11 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 
         /* Apply kern pair */
         if (prev_cp != 0) {
-            int16_t kern = nt_font_get_kern_resolved(slot, prev_cp, codepoint);
+            int16_t kern = nt_font_get_kern_in_slot(slot, prev_cp, codepoint);
             pen_x += (float)kern * scale;
         }
 
-        const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph_resolved(slot, codepoint);
+        const nt_glyph_cache_entry_t *g = nt_font_lookup_glyph_in_slot(slot, codepoint);
         if (!g) {
             prev_cp = codepoint;
             continue;

@@ -1,4 +1,5 @@
 #include "font/nt_font.h"
+#include "font/nt_font_hot.h"
 #include "font/nt_font_internal.h"
 
 #include <stdlib.h>
@@ -1296,12 +1297,12 @@ nt_font_stats_t nt_font_get_stats(nt_font_t font) {
 
 /* ---- Glyph lookup (D-05, D-13, D-14, D-15) ----
  *
- * The implementation lives in nt_font_lookup_glyph_resolved (slot-based);
+ * The implementation lives in nt_font_lookup_glyph_in_slot (slot-based);
  * the public handle-based variant resolves the slot once and delegates.
  * Hot-path callers (text renderers) hold the slot for the whole draw to
  * skip the per-codepoint pool_valid + get_slot. */
 
-nt_font_slot_t *nt_font_resolve(nt_font_t font) {
+nt_font_slot_t *nt_font_get_slot(nt_font_t font) {
     if (!s_font.initialized || !nt_pool_valid(&s_font.pool, font.id)) {
         return NULL;
     }
@@ -1309,7 +1310,7 @@ nt_font_slot_t *nt_font_resolve(nt_font_t font) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-const nt_glyph_cache_entry_t *nt_font_lookup_glyph_resolved(nt_font_slot_t *slot, uint32_t codepoint) {
+const nt_glyph_cache_entry_t *nt_font_lookup_glyph_in_slot(nt_font_slot_t *slot, uint32_t codepoint) {
     NT_ASSERT(slot != NULL);
 
     // #region Cache hit check (hash table)
@@ -1359,7 +1360,7 @@ const nt_glyph_cache_entry_t *nt_font_lookup_glyph_resolved(nt_font_slot_t *slot
 const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t codepoint) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
-    return nt_font_lookup_glyph_resolved(get_slot(font), codepoint);
+    return nt_font_lookup_glyph_in_slot(get_slot(font), codepoint);
 }
 
 /* ---- GPU texture access ---- */
@@ -1413,7 +1414,7 @@ uint32_t nt_font_get_cache_generation(nt_font_t font) {
 
 /* ---- Kern pair lookup ---- */
 
-int16_t nt_font_get_kern_resolved(const nt_font_slot_t *slot, uint32_t left_codepoint, uint32_t right_codepoint) {
+int16_t nt_font_get_kern_in_slot(const nt_font_slot_t *slot, uint32_t left_codepoint, uint32_t right_codepoint) {
     NT_ASSERT(slot != NULL);
 
     /* Fast-skip: most Latin fonts have no kern table. has_any_kern is set
@@ -1460,7 +1461,7 @@ int16_t nt_font_get_kern_resolved(const nt_font_slot_t *slot, uint32_t left_code
 int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right_codepoint) {
     NT_ASSERT(s_font.initialized);
     NT_ASSERT(nt_pool_valid(&s_font.pool, font.id));
-    return nt_font_get_kern_resolved(get_slot(font), left_codepoint, right_codepoint);
+    return nt_font_get_kern_in_slot(get_slot(font), left_codepoint, right_codepoint);
 }
 
 /* ---- Pre-flush callback ---- */

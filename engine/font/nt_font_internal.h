@@ -78,10 +78,14 @@ typedef struct {
 
 /* ---- Font slot (per-handle internal state) ----
  *
- * The struct tag `nt_font_slot_s` is forward-declared in nt_font.h so
+ * The struct tag `nt_font_slot_s` is forward-declared in nt_font_hot.h so
  * cross-module hot paths (nt_text_renderer draw loop) can hold an opaque
- * pointer without pulling in this internal layout. The full layout below
- * stays module-private. */
+ * pointer without pulling in this internal layout. The typedef below is
+ * a duplicate of the one in nt_font_hot.h — C17 permits identical
+ * typedefs across TUs, and putting one here lets nt_font.c see the name
+ * without including the hot header. The full layout stays module-private. */
+
+typedef struct nt_font_slot_s nt_font_slot_t;
 
 struct nt_font_slot_s {
     nt_font_metrics_t metrics; /* populated on first nt_font_add */
