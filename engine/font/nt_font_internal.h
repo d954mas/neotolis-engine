@@ -78,12 +78,10 @@ typedef struct {
 
 /* ---- Font slot (per-handle internal state) ----
  *
- * The struct tag `nt_font_slot_s` is forward-declared in nt_font_hot.h so
- * cross-module hot paths (nt_text_renderer draw loop) can hold an opaque
- * pointer without pulling in this internal layout. The typedef below is
- * a duplicate of the one in nt_font_hot.h — C17 permits identical
- * typedefs across TUs, and putting one here lets nt_font.c see the name
- * without including the hot header. The full layout stays module-private. */
+ * Layout stays module-private; an opaque forward-decl lives in
+ * nt_font_hot.h for cross-module hot paths. The typedef is duplicated
+ * here so nt_font.c sees the name without pulling in the hot header
+ * (C17 permits identical typedefs across TUs). */
 
 typedef struct nt_font_slot_s nt_font_slot_t;
 
@@ -144,7 +142,7 @@ struct nt_font_slot_s {
      * Auto-invalidated on any resource handle change inside nt_font_step
      * (so async fallback chains don't return stale tofu metrics). */
     nt_font_measure_cache_t measure_cache; /* SoA; all pointers NULL when cache disabled */
-    uint32_t measure_cache_size;           /* 0 = disabled; else POT */
+    uint32_t measure_cache_size;           /* 0 = disabled; else POT, ≤ 32768 */
     uint32_t measure_cache_mask;           /* measure_cache_size - 1 */
     bool measure_cache_warm;               /* true after any write; lets invalidate_cache skip cold slots */
     /* True if ANY loaded resource has at least one glyph with kern_count > 0.

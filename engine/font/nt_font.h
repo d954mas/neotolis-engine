@@ -39,23 +39,14 @@ typedef struct {
     uint16_t curve_texture_height; /* RGBA16F texture height */
     uint16_t band_texture_height;  /* RG16UI texture height = max_glyphs */
     uint8_t band_count;            /* bands per glyph (1-32, required) */
-    /* Measure cache size — direct-mapped, MUST be power-of-two if non-zero.
-     * 0 disables the cache entirely (every measure_n is a full compute path,
-     * useful for one-shot tools and tests that want to bypass caching).
-     * Sane range: 64–65536 entries (21 B per entry → ~1.3 KB–1.3 MB per font;
-     * see NT_FONT_MEASURE_CACHE_ENTRY_BYTES in nt_font_internal.h for the
-     * exact SoA layout).
-     * Defaults to 256 when zero is passed via nt_font_create_desc_defaults
-     * (the bare {0}-initialized desc gets cache disabled — opt-in default). */
-    uint32_t measure_cache_size;
+    /* Power-of-two if non-zero; 0 disables the cache. Sane range 64–32768
+     * (POT cap that fits uint16_t; entry size NT_FONT_MEASURE_CACHE_ENTRY_BYTES). */
+    uint16_t measure_cache_size;
 } nt_font_create_desc_t;
 
-/* Sensible defaults for nt_font_create_desc_t. Mirrors the values used by
- * examples/bunnymark and examples/text — sized for a typical Latin UI font
- * (ASCII + punctuation + extended Latin = ~200 glyphs without flushing).
- * band_count=8 gives good per-glyph SDF detail; measure_cache_size=256
- * matches the v1.7 hardcoded size. Callers building desc from scratch
- * with `{0}` MUST opt in explicitly via this helper or by setting fields. */
+/* Defaults sized for a typical Latin UI font (~200 glyphs without flushing).
+ * A bare {0}-initialized desc gets a disabled cache — opt in via this helper
+ * or set fields explicitly. */
 static inline nt_font_create_desc_t nt_font_create_desc_defaults(void) {
     return (nt_font_create_desc_t){
         .curve_texture_width = 1024,
@@ -194,11 +185,8 @@ nt_font_stats_t nt_font_get_stats(nt_font_t font);
 /* ---- Glyph lookup (exposed for nt_text in Phase 45) ---- */
 
 /* Returns pointer into internal cache. Valid until next lookup that triggers
- * eviction or flush. Copy needed data immediately — do not store the pointer.
- *
- * Tightly-coupled consumers with a per-codepoint inner loop (e.g.
- * nt_text_renderer) can use the slot-based variant in nt_font_hot.h to
- * skip the per-call pool_valid + slot resolve. */
+ * eviction or flush. Copy immediately — do not store. Per-codepoint inner
+ * loops should use the slot-based variant in nt_font_hot.h instead. */
 const nt_glyph_cache_entry_t *nt_font_lookup_glyph(nt_font_t font, uint32_t codepoint);
 
 /* ---- GPU texture access (for nt_text to bind before draw) ---- */
@@ -231,11 +219,9 @@ int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right
 #ifdef NT_FONT_TEST_ACCESS
 uint32_t nt_font_test_register_data(const uint8_t *data, uint32_t size);
 
-/* Test-only: invoke the font activator's deactivator path that
- * nt_resource_unmount runs for FILE packs but skips for VIRTUAL packs.
- * Lets virtual-pack tests exercise handle reuse semantics — after this
- * call, the next register with a fresh blob will reuse the freed data
- * slot and return the same numeric handle. */
+/* Test-only: imitate the deactivator path nt_resource_unmount runs for FILE
+ * packs (skipped for VIRTUAL). Frees the data slot — the next register with
+ * a fresh blob then reuses that slot and returns the same numeric handle. */
 void nt_font_test_deactivate(uint32_t runtime_handle);
 
 /* Test-only measure-cache observation (D-51-11). Counters are incremented

@@ -385,10 +385,8 @@ static uint16_t free_stack_pop(nt_font_slot_t *slot) {
     return slot->free_stack[--slot->free_top];
 }
 
-/* Reset the glyph cache to empty state (no diagnostics — this is a normal
- * lifecycle event used on resource reload, unmount, and context restore).
- * Pre-flush callback fires first so consumers (e.g. nt_text_renderer) can
- * draw their staging buffers while texture offsets are still valid. */
+/* Pre-flush callback fires first so consumers can drain staging buffers
+ * while texture offsets are still valid. */
 static void clear_glyph_cache(nt_font_slot_t *slot) {
     if (s_font.pre_flush_fn) {
         s_font.pre_flush_fn();
@@ -402,10 +400,8 @@ static void clear_glyph_cache(nt_font_slot_t *slot) {
     slot->cache_generation++;
 }
 
-/* Same reset as clear_glyph_cache, but logs a warning that the curve
- * texture is too small to hold all live glyphs. Only invoked from
- * ensure_curve_space — separated so reload/unload/context-restore paths
- * don't emit the misleading "curve texture full" diagnostic. */
+/* Sized-out-of-room flush. Lifecycle resets (reload/unload/restore) call
+ * clear_glyph_cache directly to avoid the misleading "texture full" log. */
 static void flush_cache_for_overflow(nt_font_slot_t *slot) {
     NT_LOG_WARN("font cache flush: curve texture full (%ux%u), consider larger curve_texture_width/height", slot->curve_tex_width, slot->curve_tex_height);
     clear_glyph_cache(slot);
@@ -1021,19 +1017,10 @@ void nt_font_step(void) {
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
             uint32_t ver = nt_resource_get(slot->resources[ri]);
             if (ver == 0) {
-                /* Resource is no longer available. If we previously had a
-                 * runtime handle here, drop it now so:
-                 *   (a) find_glyph_in_resources slow-path skips this slot
-                 *       via the existing resource_handles[i] == 0 check, and
-                 *   (b) the ASCII fast-path index entries for this resource
-                 *       are rebuilt (otherwise they would still point at the
-                 *       stale handle, and if activate_font later recycles
-                 *       that data-table slot for a different pack,
-                 *       get_font_data(stale) would silently return the new
-                 *       pack's bytes — out-of-range index + wrong-font glyph
-                 *       metrics). Also flush the GPU glyph cache: cached
-                 *       entries carry resource_index = ri and would otherwise
-                 *       outlive the resource. */
+                /* Resource gone (virtual-pack unmount path; file-pack unmount
+                 * runs the deactivator which clears everything inline). Drop
+                 * the stale handle so a recycled data-slot can't masquerade
+                 * as the same asset. */
                 if (slot->resource_handles[ri] != 0) {
                     slot->resource_handles[ri] = 0;
                     slot_indices_dirty = true;
@@ -1057,19 +1044,15 @@ void nt_font_step(void) {
             NT_ASSERT(hdr->magic == NT_FONT_MAGIC);
             NT_ASSERT(hdr->version == NT_FONT_VERSION);
 
-            // #region Metrics validation (D-19) + hot-swap path (FONT-02i)
+            // #region Metrics validation (D-19) + hot-swap
             const bool metrics_match = slot->metrics_set && slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent &&
                                        slot->metrics.line_gap == hdr->line_gap;
             if (!slot->metrics_set || !metrics_match) {
-                /* Mismatch is only safe if THIS resource is the only active
-                 * metric provider — multi-resource fonts (e.g. Latin+CJK on
-                 * one nt_font_t) rely on the invariant that all source files
-                 * share the same metrics, and silently accepting a new set
-                 * would break glyph positioning for the others. The assert
-                 * still fires for the multi-resource violation; for a single
-                 * active resource we treat the mismatch as a hot-swap
-                 * (resource id rebound to a different font asset between
-                 * frames, common with theme/pack swaps) and re-populate. */
+                /* Mismatch with another active resource breaks the shared-metrics
+                 * invariant — normalize fonts in the builder. Single-provider
+                 * mismatch is the hot-swap case (theme/pack swap rebinding the
+                 * resource id to a different asset): accept and wipe the glyph
+                 * cache built against the old metrics. */
                 if (slot->metrics_set && !metrics_match) {
                     bool only_provider = true;
                     for (uint8_t j = 0; j < slot->resource_count; j++) {
@@ -1079,10 +1062,7 @@ void nt_font_step(void) {
                         }
                     }
                     NT_ASSERT(only_provider && "font slot has multiple active resources with mismatched metrics — normalize in the builder");
-                    /* In OFF-mode production, accept the new metrics anyway —
-                     * a wrong-glyphs frame is preferable to UB. The above
-                     * assert documents the bug for debug builds. */
-                    need_flush = true; /* glyph cache built against old metrics */
+                    need_flush = true;
                 }
                 slot->metrics.ascent = hdr->ascent;
                 slot->metrics.descent = hdr->descent;
@@ -1225,9 +1205,7 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     if (desc->measure_cache_size != 0U) {
         const uint32_t cache_size = desc->measure_cache_size;
         NT_ASSERT((cache_size & (cache_size - 1U)) == 0U && "measure_cache_size must be power-of-two");
-        /* Upper bound matches nt_font.h "Sane range" docstring. Prevents typo
-         * like 65536000 from silently asking for ~1.3 GB (21 B/entry). */
-        NT_ASSERT(cache_size <= 65536U && "measure_cache_size > 65536 — see nt_font.h sane-range guidance");
+        NT_ASSERT(cache_size <= 32768U && "measure_cache_size exceeds the 32768 POT cap (uint16_t-sized field)");
         const size_t per_entry_bytes = NT_FONT_MEASURE_CACHE_ENTRY_BYTES;
         uint8_t *block = (uint8_t *)calloc((size_t)cache_size, per_entry_bytes);
         if (!block) {

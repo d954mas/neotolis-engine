@@ -318,33 +318,21 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
         return;
     }
     if (s_text.font.id == 0) {
-        /* Legitimate "no font set" state — e.g. nt_stats_draw passes a
-         * zeroed handle when no overlay font is configured. Separate from
-         * the slot == NULL check below, which is reserved for handles
-         * that should have been valid (destroyed font, uninit module). */
+        /* Zeroed handle is a legitimate "no font configured" state (e.g.
+         * nt_stats_draw before set_font); the slot == NULL branch below
+         * is for handles that should have resolved (destroyed font, etc.). */
         NT_LOG_WARN("nt_text_renderer_draw_n: no font set");
         return;
     }
 
     nt_font_metrics_t metrics = nt_font_get_metrics(s_text.font);
     if (metrics.units_per_em == 0) {
-        return; /* font module up but no resource loaded yet (or all unmounted) */
+        return; /* no resource loaded yet (or all unmounted) */
     }
     float scale = size / (float)metrics.units_per_em;
     uint8_t band_count = nt_font_get_band_count(s_text.font);
 
-    /* Resolve the font slot once for the whole draw — the per-codepoint
-     * loop below uses nt_font_lookup_glyph_in_slot / _get_kern_in_slot
-     * to skip the per-call pool_valid + get_slot that the handle-based
-     * variants would re-do for every character (mirrors the optimization
-     * already applied to nt_font_measure_n).
-     *
-     * Reaching here with NULL is a programming error (font.id != 0 yet
-     * the handle is invalid — destroyed font, or module uninit despite
-     * non-zero id). NT_ASSERT fires in debug/trap-release; the graceful
-     * return covers OFF-mode production builds where NT_ASSERT vanishes —
-     * without it a destroyed-then-redrawn font would NPE inside the
-     * inner loop. */
+    /* Slot resolved once outside the per-codepoint loop. */
     nt_font_slot_t *slot = nt_font_get_slot(s_text.font);
     NT_ASSERT(slot != NULL);
     if (!slot) {
