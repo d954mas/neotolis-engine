@@ -53,7 +53,7 @@ static inline nt_font_create_desc_t nt_font_create_desc_defaults(void) {
         .curve_texture_height = 512,
         .band_texture_height = 256, /* = max_glyphs, fits Latin + extended */
         .band_count = 8,
-        .measure_cache_size = 256,
+        .measure_cache_size = 1024,
     };
 }
 
