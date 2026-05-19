@@ -333,14 +333,14 @@ static uint16_t free_stack_pop(nt_font_slot_t *slot) {
     return slot->free_stack[--slot->free_top];
 }
 
-/* Flush entire cache when curve texture is full.
- * Pre-flush callback lets consumers (e.g. nt_text_renderer) draw their
- * staging buffers while texture offsets are still valid. */
-static void flush_cache(nt_font_slot_t *slot) {
+/* Reset the glyph cache to empty state (no diagnostics — this is a normal
+ * lifecycle event used on resource reload, unmount, and context restore).
+ * Pre-flush callback fires first so consumers (e.g. nt_text_renderer) can
+ * draw their staging buffers while texture offsets are still valid. */
+static void clear_glyph_cache(nt_font_slot_t *slot) {
     if (s_font.pre_flush_fn) {
         s_font.pre_flush_fn();
     }
-    NT_LOG_WARN("font cache flush: curve texture full (%ux%u), consider larger curve_texture_width/height", slot->curve_tex_width, slot->curve_tex_height);
     memset(slot->cache, 0, (size_t)slot->max_glyphs * sizeof(nt_font_cache_slot_t));
     memset(slot->hash_table, 0, (size_t)slot->hash_table_size * sizeof(uint16_t));
     free_stack_reset(slot);
@@ -350,8 +350,17 @@ static void flush_cache(nt_font_slot_t *slot) {
     slot->cache_generation++;
 }
 
+/* Same reset as clear_glyph_cache, but logs a warning that the curve
+ * texture is too small to hold all live glyphs. Only invoked from
+ * ensure_curve_space — separated so reload/unload/context-restore paths
+ * don't emit the misleading "curve texture full" diagnostic. */
+static void flush_cache_for_overflow(nt_font_slot_t *slot) {
+    NT_LOG_WARN("font cache flush: curve texture full (%ux%u), consider larger curve_texture_width/height", slot->curve_tex_width, slot->curve_tex_height);
+    clear_glyph_cache(slot);
+}
+
 /* Ensure enough texels, flushing if needed.
- * WARNING: flush_cache invalidates ALL cache entries, hash table, and bumps
+ * WARNING: flush invalidates ALL cache entries, hash table, and bumps
  * cache_generation. Callers (upload_glyph, generate_tofu) must handle the
  * case where the cache was reset mid-operation. Currently safe because
  * cache_idx is (re)allocated after this call returns. */
@@ -359,7 +368,7 @@ static void ensure_curve_space(nt_font_slot_t *slot, uint32_t needed_texels) {
     uint32_t total = (uint32_t)slot->curve_tex_width * slot->curve_tex_height;
     NT_ASSERT(needed_texels <= total); /* single glyph exceeds entire curve texture */
     if (slot->curve_write_head + needed_texels > total) {
-        flush_cache(slot);
+        flush_cache_for_overflow(slot);
     }
 }
 
@@ -940,7 +949,7 @@ void nt_font_step(void) {
                 .label = "font_band",
             });
 
-            flush_cache(slot);
+            clear_glyph_cache(slot); /* textures recreated — old cache entries point at stale GPU regions */
         }
     }
     // #endregion
@@ -954,7 +963,7 @@ void nt_font_step(void) {
 
         nt_font_slot_t *slot = &s_font.slots[i];
         bool slot_indices_dirty = false;
-        bool need_flush = false; /* batched — one flush_cache after the loop covers any combo of unload/reload */
+        bool need_flush = false; /* batched — one clear_glyph_cache after the loop covers any combo of unload/reload */
 
         // #region Resolve resources
         for (uint8_t ri = 0; ri < slot->resource_count; ri++) {
@@ -1036,7 +1045,7 @@ void nt_font_step(void) {
          * Clear all entries unconditionally on any handle change. */
         if (slot_indices_dirty) {
             if (need_flush) {
-                flush_cache(slot);
+                clear_glyph_cache(slot);
             }
             rebuild_slot_indices(slot);
             if (slot->measure_cache.key_hashes != NULL && slot->measure_cache_warm) {
