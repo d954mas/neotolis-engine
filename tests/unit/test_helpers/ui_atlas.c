@@ -4,7 +4,9 @@
 #include <stdint.h>
 #include <string.h>
 
-#define NT_ATLAS_TEST_ACCESS
+#ifndef NT_ATLAS_TEST_ACCESS
+#define NT_ATLAS_TEST_ACCESS 1
+#endif
 #include "atlas/nt_atlas.h"
 #include "nt_atlas_format.h"
 

@@ -441,6 +441,273 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_stats COMMAND test_stats)
 
+    # --- Phase 52: nt_ui module + walker MVP tests ---
+    # All tests use stub gfx backend + Phase 51 NT_GFX_TEST_ACCESS probes.
+    # nt_ui tests additionally use NT_UI_TEST_ACCESS for in-frame/walk probes.
+    # Death-tests use the shared NT_TEST_EXPECT_ASSERT macro (Revision Issue 3).
+
+    # Shared helper sources compiled into each binary.
+    # - ui_atlas: produces minimal_ui_atlas via NT_ATLAS_TEST_ACCESS (Revision Issue 4)
+    # - nt_assert_trap: NT_TEST_EXPECT_ASSERT death-test helper (Revision Issue 3)
+    set(_nt_ui_test_helper_sources
+        unit/test_helpers/ui_atlas.c
+        unit/test_helpers/nt_assert_trap.c
+    )
+
+    # Helpers need `tests/unit/` on the include path so
+    # `#include "test_helpers/ui_atlas.h"` resolves.
+    set(_nt_ui_test_helper_includes
+        "${CMAKE_CURRENT_SOURCE_DIR}/unit"
+    )
+
+    # Force nt_atlas to expose NT_ATLAS_TEST_ACCESS symbols
+    # (nt_atlas_test_drive_resolve, nt_atlas_test_drive_cleanup) so the
+    # ui_atlas helper can link.
+    target_compile_definitions(nt_atlas PRIVATE NT_ATLAS_TEST_ACCESS)
+
+    # --- test_nt_sprite_renderer_emit_region -- D-52-01/02 + Drift 4 ---
+    add_executable(test_nt_sprite_renderer_emit_region
+        unit/test_nt_sprite_renderer_emit_region.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_sprite_renderer_emit_region PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_sprite_renderer_emit_region PRIVATE
+        nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+    )
+    target_compile_definitions(test_nt_sprite_renderer_emit_region PRIVATE
+        NT_GFX_TEST_ACCESS NT_SPRITE_RENDERER_TEST_ACCESS NT_ATLAS_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS)
+    target_compile_definitions(nt_gfx_stub PRIVATE NT_GFX_TEST_ACCESS)
+    target_compile_options(test_nt_sprite_renderer_emit_region PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_sprite_renderer_emit_region)
+    nt_set_sanitizer_flags(test_nt_sprite_renderer_emit_region)
+    set_target_properties(test_nt_sprite_renderer_emit_region PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
+    add_test(NAME test_nt_sprite_renderer_emit_region COMMAND test_nt_sprite_renderer_emit_region)
+
+    # --- test_nt_ui_lifecycle -- UI-01, UI-02 ---
+    add_executable(test_nt_ui_lifecycle
+        unit/test_nt_ui_lifecycle.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_ui_lifecycle PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_ui_lifecycle PRIVATE
+        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+    )
+    target_compile_definitions(test_nt_ui_lifecycle PRIVATE
+        NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_nt_ui_lifecycle PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_ui_lifecycle)
+    nt_set_sanitizer_flags(test_nt_ui_lifecycle)
+    set_target_properties(test_nt_ui_lifecycle PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
+    add_test(NAME test_nt_ui_lifecycle COMMAND test_nt_ui_lifecycle)
+
+    # --- test_nt_ui_multictx -- UI-03 ---
+    add_executable(test_nt_ui_multictx
+        unit/test_nt_ui_multictx.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_ui_multictx PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_ui_multictx PRIVATE
+        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+    )
+    target_compile_definitions(test_nt_ui_multictx PRIVATE
+        NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_nt_ui_multictx PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_ui_multictx)
+    nt_set_sanitizer_flags(test_nt_ui_multictx)
+    set_target_properties(test_nt_ui_multictx PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
+    add_test(NAME test_nt_ui_multictx COMMAND test_nt_ui_multictx)
+
+    # --- test_nt_ui_begin_end -- UI-04, UI-05, UI-08 ---
+    add_executable(test_nt_ui_begin_end
+        unit/test_nt_ui_begin_end.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_ui_begin_end PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_ui_begin_end PRIVATE
+        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+    )
+    target_compile_definitions(test_nt_ui_begin_end PRIVATE
+        NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_nt_ui_begin_end PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_ui_begin_end)
+    nt_set_sanitizer_flags(test_nt_ui_begin_end)
+    set_target_properties(test_nt_ui_begin_end PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
+    add_test(NAME test_nt_ui_begin_end COMMAND test_nt_ui_begin_end)
+
+    # --- test_nt_ui_measure_cb -- CLAY-03 ---
+    add_executable(test_nt_ui_measure_cb
+        unit/test_nt_ui_measure_cb.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_ui_measure_cb PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_ui_measure_cb PRIVATE
+        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+    )
+    target_compile_definitions(test_nt_ui_measure_cb PRIVATE
+        NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS NT_FONT_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_nt_ui_measure_cb PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_ui_measure_cb)
+    nt_set_sanitizer_flags(test_nt_ui_measure_cb)
+    set_target_properties(test_nt_ui_measure_cb PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
+    add_test(NAME test_nt_ui_measure_cb COMMAND test_nt_ui_measure_cb)
+
+    # --- test_nt_ui_pointer_state -- CLAY-04 ---
+    add_executable(test_nt_ui_pointer_state
+        unit/test_nt_ui_pointer_state.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_ui_pointer_state PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_ui_pointer_state PRIVATE
+        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+    )
+    target_compile_definitions(test_nt_ui_pointer_state PRIVATE
+        NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_nt_ui_pointer_state PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_ui_pointer_state)
+    nt_set_sanitizer_flags(test_nt_ui_pointer_state)
+    set_target_properties(test_nt_ui_pointer_state PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
+    add_test(NAME test_nt_ui_pointer_state COMMAND test_nt_ui_pointer_state)
+
+    # --- test_nt_ui_walker_dispatch -- WALK-01, WALK-04 ---
+    add_executable(test_nt_ui_walker_dispatch
+        unit/test_nt_ui_walker_dispatch.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_ui_walker_dispatch PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_ui_walker_dispatch PRIVATE
+        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+    )
+    target_compile_definitions(test_nt_ui_walker_dispatch PRIVATE
+        NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
+        NT_SPRITE_RENDERER_TEST_ACCESS NT_TEXT_RENDERER_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_nt_ui_walker_dispatch PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_ui_walker_dispatch)
+    nt_set_sanitizer_flags(test_nt_ui_walker_dispatch)
+    set_target_properties(test_nt_ui_walker_dispatch PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
+    add_test(NAME test_nt_ui_walker_dispatch COMMAND test_nt_ui_walker_dispatch)
+
+    # --- test_nt_ui_walker_scissor -- WALK-02, WALK-03 ---
+    add_executable(test_nt_ui_walker_scissor
+        unit/test_nt_ui_walker_scissor.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_ui_walker_scissor PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_ui_walker_scissor PRIVATE
+        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+    )
+    target_compile_definitions(test_nt_ui_walker_scissor PRIVATE
+        NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_nt_ui_walker_scissor PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_ui_walker_scissor)
+    nt_set_sanitizer_flags(test_nt_ui_walker_scissor)
+    set_target_properties(test_nt_ui_walker_scissor PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
+    add_test(NAME test_nt_ui_walker_scissor COMMAND test_nt_ui_walker_scissor)
+
+    # --- test_nt_ui_walker_custom -- WALK-05 ---
+    add_executable(test_nt_ui_walker_custom
+        unit/test_nt_ui_walker_custom.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_ui_walker_custom PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_ui_walker_custom PRIVATE
+        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+    )
+    target_compile_definitions(test_nt_ui_walker_custom PRIVATE
+        NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_nt_ui_walker_custom PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_ui_walker_custom)
+    nt_set_sanitizer_flags(test_nt_ui_walker_custom)
+    set_target_properties(test_nt_ui_walker_custom PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
+    add_test(NAME test_nt_ui_walker_custom COMMAND test_nt_ui_walker_custom)
+
+    # --- test_nt_ui_walker_flush -- WALK-06 ---
+    add_executable(test_nt_ui_walker_flush
+        unit/test_nt_ui_walker_flush.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_ui_walker_flush PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_ui_walker_flush PRIVATE
+        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+    )
+    target_compile_definitions(test_nt_ui_walker_flush PRIVATE
+        NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
+        NT_SPRITE_RENDERER_TEST_ACCESS NT_TEXT_RENDERER_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_nt_ui_walker_flush PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_ui_walker_flush)
+    nt_set_sanitizer_flags(test_nt_ui_walker_flush)
+    set_target_properties(test_nt_ui_walker_flush PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
+    add_test(NAME test_nt_ui_walker_flush COMMAND test_nt_ui_walker_flush)
+
+    # --- test_nt_ui_walker_readonly -- UI-06, UI-07 + pre-walk assert death-tests ---
+    add_executable(test_nt_ui_walker_readonly
+        unit/test_nt_ui_walker_readonly.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_ui_walker_readonly PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_ui_walker_readonly PRIVATE
+        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+    )
+    target_compile_definitions(test_nt_ui_walker_readonly PRIVATE
+        NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_nt_ui_walker_readonly PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_ui_walker_readonly)
+    nt_set_sanitizer_flags(test_nt_ui_walker_readonly)
+    set_target_properties(test_nt_ui_walker_readonly PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
+    add_test(NAME test_nt_ui_walker_readonly COMMAND test_nt_ui_walker_readonly)
+
+    # --- test_nt_ui_stats -- WALK-09 ---
+    add_executable(test_nt_ui_stats
+        unit/test_nt_ui_stats.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_ui_stats PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_ui_stats PRIVATE
+        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_atlas nt_stats nt_gfx_stub nt_core unity
+    )
+    target_compile_definitions(test_nt_ui_stats PRIVATE
+        NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS NT_STATS_TEST_ACCESS
+        _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(test_nt_ui_stats PRIVATE -U_DLL)
+    nt_set_warning_flags(test_nt_ui_stats)
+    nt_set_sanitizer_flags(test_nt_ui_stats)
+    set_target_properties(test_nt_ui_stats PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
+    add_test(NAME test_nt_ui_stats COMMAND test_nt_ui_stats)
+
 endif()
 
 # --- WASM smoke test (Node.js loading via -sMODULARIZE) ---
