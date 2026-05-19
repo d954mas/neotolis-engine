@@ -5,7 +5,7 @@
 #include "font/nt_font.h"
 #include "material/nt_material.h"
 
-/* ---- Compile-time limits (per D-14) ---- */
+/* ---- Compile-time limits ---- */
 
 #ifndef NT_TEXT_RENDERER_MAX_GLYPHS
 #define NT_TEXT_RENDERER_MAX_GLYPHS 4096
@@ -23,7 +23,7 @@ void nt_text_renderer_init(void);
 void nt_text_renderer_shutdown(void);
 void nt_text_renderer_restore_gpu(void);
 
-/* ---- State setters (auto-flush on change per D-18, D-19, D-20) ---- */
+/* ---- State setters (auto-flush on change) ---- */
 
 void nt_text_renderer_set_material(nt_material_t mat);
 void nt_text_renderer_set_font(nt_font_t font);

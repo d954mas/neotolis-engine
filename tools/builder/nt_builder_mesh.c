@@ -88,7 +88,7 @@ static nt_build_result_t nt_parse_gltf_mesh(const char *path, const char *mesh_n
         }
         sel_mesh = mesh_index;
     } else {
-        /* Single-mesh mode (D-11): expect exactly 1 mesh, 1 primitive */
+        /* Single-mesh mode: expect exactly 1 mesh, 1 primitive */
         if ((*out_data)->meshes_count != 1) {
             NT_LOG_ERROR("%s: expected 1 mesh, found %zu", path, (*out_data)->meshes_count);
             cgltf_free(*out_data);

@@ -9,9 +9,6 @@
  * Phase 52 adds nt_ui_create_context / _begin / _end / _walk and the
  * widget surface follows in Phases 53-60.
  *
- * See:
- *   - .planning/REQUIREMENTS.md Clay Integration (CLAY-01, CLAY-02, CLAY-05)
- *   - .planning/research/SUMMARY.md Key Decisions D-01..D-12
  */
 
 #endif /* NT_UI_H */

@@ -145,7 +145,7 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
 
 nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size);
 
-/* ---- Measure cache invalidation (Phase 51 / FONT-02 / D-51-10) ----
+/* ---- Measure cache invalidation ----
  *
  * Clear measure caches when fonts may have changed semantics. Phase 53
  * theme hot-swap calls nt_font_measure_invalidate_cache() to flush all
@@ -224,8 +224,8 @@ uint32_t nt_font_test_register_data(const uint8_t *data, uint32_t size);
  * a fresh blob then reuses that slot and returns the same numeric handle. */
 void nt_font_test_deactivate(uint32_t runtime_handle);
 
-/* Test-only measure-cache observation (D-51-11). Counters are incremented
- * inside nt_font_measure_n cache lookup branches. */
+/* Test-only measure-cache observation. Counters are incremented inside
+ * nt_font_measure_n cache lookup branches. */
 uint32_t nt_font_test_measure_cache_hits(nt_font_t font);
 uint32_t nt_font_test_measure_cache_misses(nt_font_t font);
 void nt_font_test_reset_measure_counters(void); /* iterates all slots, zeros both counters */

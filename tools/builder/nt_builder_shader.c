@@ -7,7 +7,7 @@
 #include <GLFW/glfw3.h>
 #include <glad/gl.h>
 
-/* --- Headless GL context for shader validation (D-07) --- */
+/* --- Headless GL context for shader validation --- */
 
 static bool s_gl_init_attempted = false;
 static bool s_gl_available = false;
@@ -73,7 +73,7 @@ static void ensure_gl_context(void) {
     (void)atexit(shutdown_gl_context);
 }
 
-/* --- GL compile validation (D-01, D-06) --- */
+/* --- GL compile validation --- */
 
 static bool validate_shader_compile(const char *source, GLenum gl_type, const char *version_prefix, const char *path) {
     GLuint shader = glCreateShader(gl_type);
@@ -103,22 +103,22 @@ static bool validate_shader_compile(const char *source, GLenum gl_type, const ch
     return true;
 }
 
-/* --- Dual compile validation (D-02, D-03, D-04) --- */
+/* --- Dual compile validation --- */
 
 static nt_build_result_t validate_shader(const char *source, nt_build_shader_stage_t stage, const char *path) {
     if (!s_gl_available) {
         NT_LOG_WARN("  %s: GL compile validation skipped (no GL context)", path);
-        return NT_BUILD_OK; /* D-08: skip if no context */
+        return NT_BUILD_OK; /* skip if no context */
     }
 
     GLenum gl_type = (stage == NT_BUILD_SHADER_VERTEX) ? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER;
 
-    /* Pass 1: GL 3.30 core (always, per D-02) */
+    /* Pass 1: GL 3.30 core (always) */
     if (!validate_shader_compile(source, gl_type, "#version 330 core\n", path)) {
         return NT_BUILD_ERR_VALIDATION;
     }
 
-    /* Pass 2: GLSL ES 3.00 (if available -- stricter, per D-03) */
+    /* Pass 2: GLSL ES 3.00 (if available — stricter) */
     if (s_gl_es3_available) {
         if (!validate_shader_compile(source, gl_type, "#version 300 es\n", path)) {
             return NT_BUILD_ERR_VALIDATION;
@@ -255,7 +255,7 @@ nt_build_result_t nt_builder_encode_shader_to_buf(const uint8_t *resolved_text, 
         NT_BUILD_ASSERT(0 && "shader: missing void main()");
     }
 
-    /* GL compile validation (D-01: validate at encode time) */
+    /* GL compile validation at encode time */
     ensure_gl_context();
     nt_build_result_t val_result = validate_shader(stripped, stage, "shader");
     if (val_result != NT_BUILD_OK) {

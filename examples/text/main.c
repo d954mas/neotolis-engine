@@ -51,7 +51,7 @@
 #define INERTIA_DECAY 0.95F
 #define VEL_THRESHOLD 0.0001F
 
-/* ---- Text content (D-24) ---- */
+/* ---- Text content ---- */
 
 static const char *TEXT_EN = "Hello Slug!";
 static const char *TEXT_RU = "\xd0\x9f\xd1\x80\xd0\xb8\xd0\xb2\xd0\xb5\xd1\x82 Slug!";       /* Privet Slug! */

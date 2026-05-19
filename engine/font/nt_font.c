@@ -240,7 +240,7 @@ static const NtFontGlyphEntry *find_glyph_in_pack(const uint8_t *blob, uint32_t 
     return (const NtFontGlyphEntry *)bsearch(&codepoint, glyphs, hdr->glyph_count, sizeof(NtFontGlyphEntry), compare_glyph_codepoint);
 }
 
-/* Find glyph across all resources (first wins, per D-18).
+/* Find glyph across all resources (first wins).
  *
  * ASCII fast-path (Phase 51 perf): for codepoint < 128, consult the
  * precomputed slot->ascii_glyph_idx table — one array lookup + one blob
@@ -320,7 +320,7 @@ static int compare_kern_right(const void *key, const void *elem) {
     return 0;
 }
 
-/* ---- LRU eviction (D-15, D-23) ---- */
+/* ---- LRU eviction ---- */
 
 static uint16_t evict_lru(nt_font_slot_t *slot) {
     uint32_t max_age = 0;
@@ -332,7 +332,7 @@ static uint16_t evict_lru(nt_font_slot_t *slot) {
             continue; /* empty slot */
         }
         if (cs->entry.is_tofu) {
-            continue; /* never evict tofu (D-23) */
+            continue; /* never evict tofu */
         }
         uint32_t age = s_font.frame_counter - cs->lru_frame; /* unsigned wrap-safe */
         if (age >= max_age) {
@@ -412,7 +412,7 @@ static void ensure_curve_space(nt_font_slot_t *slot, uint32_t needed_texels) {
     }
 }
 
-/* ---- Tofu generation (D-22, D-23) ---- */
+/* ---- Tofu generation ---- */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void generate_tofu(nt_font_slot_t *slot) {
@@ -517,7 +517,7 @@ static void generate_tofu(nt_font_slot_t *slot) {
 
     /* Fill cache entry */
     nt_font_cache_slot_t *cs = &slot->cache[cache_idx];
-    cs->entry.codepoint = 0xFFFFFFFFU; /* sentinel (D-22) */
+    cs->entry.codepoint = 0xFFFFFFFFU; /* tofu sentinel */
     cs->entry.curve_offset = curve_offset;
     cs->entry.curve_offset_x = x_curve_offset;
     cs->entry.curve_count = 8;
@@ -1035,14 +1035,12 @@ void nt_font_step(void) {
             NT_ASSERT(hdr->magic == NT_FONT_MAGIC);
             NT_ASSERT(hdr->version == NT_FONT_VERSION);
 
-            // #region Metrics validation (D-19) + hot-swap
+            // #region Metrics validation
             const bool metrics_match = slot->metrics_set && slot->metrics.units_per_em == hdr->units_per_em && slot->metrics.ascent == hdr->ascent && slot->metrics.descent == hdr->descent &&
                                        slot->metrics.line_gap == hdr->line_gap;
             if (!slot->metrics_set || !metrics_match) {
-                /* Mismatch with another active resource violates the shared-
-                 * metrics invariant (assert below). Single-provider mismatch
-                 * is the legitimate hot-swap case — accept and wipe the cache
-                 * built against the old metrics. */
+                /* Single-provider mismatch = hot-swap (accept new metrics + wipe cache).
+                 * Multi-resource mismatch breaks the shared-metrics invariant — assert. */
                 if (slot->metrics_set && !metrics_match) {
                     bool only_provider = true;
                     for (uint8_t j = 0; j < slot->resource_count; j++) {
@@ -1219,10 +1217,10 @@ nt_font_t nt_font_create(const nt_font_create_desc_t *desc) {
     slot->curve_tex_height = desc->curve_texture_height;
     slot->band_tex_height = desc->band_texture_height;
     slot->band_count = band_count;
-    slot->max_glyphs = desc->band_texture_height; /* D-08 */
+    slot->max_glyphs = desc->band_texture_height;
     // #endregion
 
-    // #region Create GPU textures (D-11: once, never resized)
+    // #region Create GPU textures (once, never resized)
     slot->curve_texture = nt_gfx_make_texture(&(nt_texture_desc_t){
         .width = desc->curve_texture_width,
         .height = desc->curve_texture_height,
@@ -1339,7 +1337,7 @@ nt_font_stats_t nt_font_get_stats(nt_font_t font) {
     };
 }
 
-/* ---- Glyph lookup (D-05, D-13, D-14, D-15) ----
+/* ---- Glyph lookup ----
  *
  * The implementation lives in nt_font_lookup_glyph_in_slot (slot-based);
  * the public handle-based variant resolves the slot once and delegates.
@@ -1646,7 +1644,7 @@ static int16_t kern_with_left_in_slot(const nt_font_glyph_lookup_t *left, uint32
 nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size) {
     nt_text_size_t result = {0.0F, 0.0F};
 
-    /* D-51-07 edge cases. NULL utf8 with len > 0 is treated as empty input
+    /* Edge cases. NULL utf8 with len > 0 is treated as empty input
      * defensively — this function sits at a Clay-callback boundary (system
      * edge per AGENTS.md "validate at boundaries"), and silently returning
      * {0,0} is safer than crashing the UI declaration phase on a malformed
@@ -1763,9 +1761,8 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
         result.height = size; /* Minimum height = requested size */
     }
 
-    /* Cache write — direct-mapped, replace on collision (D-51-09 simple
-     * eviction at 256-entry table). Skipped when cache is disabled. SoA:
-     * each field writes into its own parallel array. */
+    /* Cache write — direct-mapped, replace on collision. Skipped when cache
+     * is disabled. SoA: each field writes into its own parallel array. */
     if (cache_enabled) {
         slot->measure_cache.key_hashes[slot_index] = key_hash;
         slot->measure_cache.size_bits[slot_index] = size_bits;
@@ -1780,7 +1777,7 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
 nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) { return nt_font_measure_n(font, utf8, utf8 ? strlen(utf8) : 0U, size); }
 // #endregion
 
-// #region Measure cache invalidation (Phase 51 / FONT-02 / D-51-10)
+// #region Measure cache invalidation
 /* Both variants share the same contract: silently no-op if the module is
  * uninitialized or the font handle is invalid. Phase 53 theme swap calls
  * _cache between frames at every theme change — must not crash the game

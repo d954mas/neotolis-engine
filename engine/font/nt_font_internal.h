@@ -5,7 +5,7 @@
 #include "graphics/nt_gfx.h"
 #include "pool/nt_pool.h"
 
-/* ---- Measure cache (Phase 51 / D-51-08, evolved Phase 51.1) ----
+/* ---- Measure cache ----
  *
  * Per-font direct-mapped table; size is configured per font via
  * nt_font_create_desc_t.measure_cache_size (POT, 0 = disabled). The index
@@ -89,30 +89,30 @@ struct nt_font_slot_s {
     nt_font_metrics_t metrics; /* populated on first nt_font_add */
     bool metrics_set;          /* true after first resource parsed */
 
-    /* Resources (D-17, D-18) */
+    /* Resources */
     nt_resource_t resources[NT_FONT_MAX_SOURCES_PER_FONT];
     uint32_t resource_handles[NT_FONT_MAX_SOURCES_PER_FONT];
     uint8_t resource_count;
 
-    /* GPU textures (D-06, D-11) */
+    /* GPU textures */
     nt_texture_t curve_texture; /* RGBA16F */
     nt_texture_t band_texture;  /* RG16UI */
     uint16_t curve_tex_width;
     uint16_t curve_tex_height;
-    uint16_t band_tex_height; /* = max_glyphs (D-08) */
+    uint16_t band_tex_height; /* = max_glyphs */
     uint8_t band_count;
 
-    /* Glyph cache (D-13, D-14, D-15) */
+    /* Glyph cache */
     nt_font_cache_slot_t *cache; /* [max_glyphs] array */
     uint16_t glyphs_cached;
 
-    /* Curve texture packing (D-07) */
+    /* Curve texture packing */
     uint32_t curve_write_head; /* next free texel offset (linear allocator) */
 
-    /* Tofu (D-22, D-23) */
+    /* Tofu */
     bool tofu_generated;
 
-    /* Max glyphs (= band_tex_height, D-08) */
+    /* Max glyphs (= band_tex_height) */
     uint16_t max_glyphs;
 
     /* Free slot stack (O(1) alloc/free) */
@@ -126,8 +126,8 @@ struct nt_font_slot_s {
     /* Cache generation (bumped on full flush, for Phase 45 batch invalidation) */
     uint32_t cache_generation;
 
-    /* Measure cache (Phase 51 / D-51-08 / FONT-02; evolved 51.1). Direct-
-     * mapped table, size = measure_cache_size (power-of-two, configured per
+    /* Measure cache. Direct-mapped table,
+     * size = measure_cache_size (power-of-two, configured per
      * font in nt_font_create_desc_t). Indexed by xxHash64(content,len) &
      * (measure_cache_size - 1). Per-font isolation means font_id is
      * redundant in the per-entry key — collision detection uses

@@ -165,7 +165,7 @@ void main() {
     if (coverage < 1.0 / 255.0)
         discard;
 
-    // Premultiplied alpha output (D-27, SHD-04)
+    // Premultiplied alpha output
     float alpha = coverage * v_color.a;
     frag_color = vec4(v_color.rgb * alpha, alpha);
 }

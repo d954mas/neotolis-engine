@@ -1,4 +1,4 @@
-/* Phase 51 / D-51-15 — nt_font_measure_n direct-mapped cache benchmark.
+/* nt_font_measure_n direct-mapped cache benchmark.
  *
  * Workloads (printed as [BENCH] lines to stdout):
  *   - short_hit:   1000× "Hello, world" (12 chars, cache warm) → hash + return
@@ -10,10 +10,6 @@
  *
  * Captures both cache and raw measure cost. Re-run after optimization passes
  * to compare ns/call.
- *
- * Threshold (D-51-15): if speedup < 5x OR miss < 500 ns/call,
- * plan a follow-up commit to revert the cache (D-51-08..11) and amend
- * 051-SUMMARY.md in the same PR.
  */
 
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */

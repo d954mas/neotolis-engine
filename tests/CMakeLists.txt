@@ -244,7 +244,7 @@ if(NOT EMSCRIPTEN)
     )
     add_test(NAME test_font COMMAND test_font)
 
-    # --- Font measure benchmark (Phase 51 / D-51-15) ---
+    # --- Font measure benchmark ---
     # Measures hit vs miss ns/call for the nt_font_measure_n LRU cache.
     # Uses nt_time_nanos() for the ns clock (same module used by test_time).
     add_executable(test_nt_font_measure_bench unit/test_nt_font_measure_bench.c)

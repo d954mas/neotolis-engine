@@ -352,7 +352,7 @@ void nt_gfx_bind_sampler(nt_sampler_t s, uint32_t slot);
  * Callers that think in top-left (UI walker) MUST y-flip using their known
  * framebuffer height before calling this wrapper. The wrapper does NOT y-flip.
  *
- * Scissor enabled flag is false after every nt_gfx_begin_frame (D-51-06).
+ * Scissor enabled flag is false after every nt_gfx_begin_frame.
  * Set both rect and enabled explicitly when starting a clipped region.
  */
 void nt_gfx_set_scissor(int x, int y, int w, int h);

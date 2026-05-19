@@ -132,10 +132,9 @@ void nt_sprite_renderer_restore_gpu(void) {
     nt_sprite_renderer_shutdown();
     nt_sprite_renderer_desc_t desc = {.max_pipelines = saved_pip};
     NT_ASSERT(nt_sprite_renderer_init(&desc) == NT_OK);
-    /* Defensive scissor reset (Phase 51 GFX-04 / D-51-05): after a WebGL
-     * context-loss + restore cycle, GL state defaults to scissor-disabled
-     * but our cached flag may say true. Force the cached flag back to
-     * match GL's actual default. */
+    /* Defensive scissor reset: after a WebGL context-loss + restore cycle,
+     * GL state defaults to scissor-disabled but our cached flag may say
+     * true. Force the cached flag back to match GL's actual default. */
     nt_gfx_set_scissor_enabled(false);
 }
 // #endregion

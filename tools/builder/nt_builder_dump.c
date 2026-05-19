@@ -256,9 +256,9 @@ static void print_font_details(const uint8_t *asset_data, uint32_t asset_size) {
 
 /* ---- Atlas-specific detail printer ----
  *
- * The atlas blob itself does not carry pixels_per_unit (Phase 50 D-32, D-34 —
- * binary atlas format v3 unchanged). The value lives in the Phase 37 pack-level
- * metadata channel as a 4-byte float keyed by hash64_str("pixels_per_unit"),
+ * The atlas blob itself does not carry pixels_per_unit — binary atlas format
+ * v3 unchanged. The value lives in the pack-level metadata channel as a
+ * 4-byte float keyed by hash64_str("pixels_per_unit"),
  * so the printer needs the full pack buffer + the asset entry's meta_offset
  * to resolve it. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)

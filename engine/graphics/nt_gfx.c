@@ -95,7 +95,7 @@ static struct {
     struct {
         int scissor_rect[4];  /* x, y, w, h (GL bottom-left) */
         int viewport_rect[4]; /* x, y, w, h (GL bottom-left) */
-        bool scissor_enabled; /* false at frame start (D-51-06) */
+        bool scissor_enabled; /* false at frame start */
     } draw_state;
 } s_gfx;
 

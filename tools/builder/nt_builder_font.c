@@ -709,7 +709,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
 
     for (uint32_t i = 0; i < glyph_count; i++) {
         ginfo[i].glyph_idx = stbtt_FindGlyphIndex(&font, (int)codepoints[i]);
-        NT_BUILD_ASSERT(ginfo[i].glyph_idx != 0 && "codepoint not in font (D-09)");
+        NT_BUILD_ASSERT(ginfo[i].glyph_idx != 0 && "codepoint not in font");
         charset_glyph_ids[i] = ginfo[i].glyph_idx;
     }
     // #endregion
@@ -859,7 +859,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
     NT_BUILD_ASSERT(data_offset == total_size && "buffer size mismatch after writing all glyphs");
     // #endregion
 
-    // #region Build log (BLD-07, D-13)
+    // #region Build log
     {
         char packed_str[16];
         char ttf_str[16];
@@ -895,7 +895,7 @@ nt_build_result_t nt_builder_decode_font(const char *path, const char *charset, 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_add_font(NtBuilderContext *ctx, const char *path, const nt_font_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && path && "invalid add_font args");
-    NT_BUILD_ASSERT(opts && opts->charset && "charset is required (D-05/D-09)");
+    NT_BUILD_ASSERT(opts && opts->charset && "charset is required");
 
     /* Build logical path for resource_id */
     char logical_path[1024];

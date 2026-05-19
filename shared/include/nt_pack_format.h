@@ -93,7 +93,7 @@ _Static_assert(sizeof(NtAssetEntry) == 24, "AssetEntry must be 24 bytes");
 typedef struct {
     uint64_t resource_id; /* 0:  which asset this metadata belongs to */
     uint64_t kind;        /* 8:  hash64 of metadata type name */
-    uint32_t size;        /* 16: payload size in bytes (max 256 per D-12) */
+    uint32_t size;        /* 16: payload size in bytes (max 256) */
     /* uint8_t data[size] follows immediately */
 } NtMetaEntryHeader;
 #pragma pack(pop)
