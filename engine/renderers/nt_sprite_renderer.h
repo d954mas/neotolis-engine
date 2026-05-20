@@ -80,31 +80,27 @@ void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count)
  * the next emit or silently drops the state binding. */
 void nt_sprite_renderer_flush(void);
 
-/* ---- Non-ECS public emit surface (Phase 52, Drift 4 resolution) ----
+/* ---- Non-ECS public emit surface ----
  *
- * Bind material for subsequent nt_sprite_renderer_emit_region() calls. Auto-
- * flushes staging on change to a material with a different .id (mirrors
- * nt_text_renderer_set_material). Call exactly once between draw_list runs or
- * non-ECS emit sequences. Asserts the renderer is initialized and the material
- * resolves via nt_material_get_info() with .ready == true. Same-handle reentry
- * is a no-op. */
+ * Bind material for subsequent emit_region calls. Auto-flushes staging
+ * on change to a different .id (mirrors nt_text_renderer_set_material).
+ * Same-handle reentry is a no-op. Asserts the material resolves with
+ * .ready == true. */
 void nt_sprite_renderer_set_material(nt_material_t mat);
 
-/* Non-ECS emit path: one atlas region at one mat4 transform.
+/* Emit one atlas region at one mat4 transform.
  *
  *   atlas         - must be a READY atlas resource (asserted).
- *   region_index  - index into the atlas; tombstoned regions silently no-op.
- *   world_matrix  - 16-float mat4 COLUMN-major (cglm engine convention).
- *                   emit_region reads only m[0/1/2/4/5/6/12/13/14] --
- *                   columns 0+1 carry the 2D rotation/scale, m[12/13/14]
- *                   carry translation.
- *   origin_x, _y  - pivot in normalized region-space (e.g. {0.5, 0.5} centers).
+ *   region_index  - tombstoned regions silently no-op.
+ *   world_matrix  - 16-float column-major mat4 (cglm convention). Only
+ *                   m[0/1/2/4/5/6/12/13/14] are read: columns 0+1 carry
+ *                   2D rotation/scale, m[12/13/14] carry translation.
+ *   origin_x, _y  - pivot in normalized region-space (e.g. {0.5, 0.5}).
  *   color_packed  - 0xAABBGGRR (premultiplied by caller if needed).
- *   flip_bits     - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y combination, 0 = none.
+ *   flip_bits     - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y, 0 = none.
  *
- * Caller must call nt_sprite_renderer_set_material(...) FIRST so the renderer
- * has an open cmd to write into. Capacity overflow is handled internally
- * (auto flush + reopen with cmd state preserved). */
+ * Caller MUST have called set_material first so a cmd is open. Capacity
+ * overflow is handled internally (auto flush + reopen, state preserved). */
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits);
 
 /* ---- Test access (compiled only when NT_SPRITE_RENDERER_TEST_ACCESS is defined) ---- */

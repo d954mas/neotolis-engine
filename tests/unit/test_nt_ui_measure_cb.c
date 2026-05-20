@@ -1,24 +1,12 @@
-/* tests/unit/test_nt_ui_measure_cb.c -- Plan 52-03
+/* Verifies the Clay measure callback wiring: declare a CLAY_TEXT inside
+ * begin/end and inspect the resulting TEXT render command's bounding box
+ * (Clay calls the measure callback during EndLayout's layout pass).
  *
- * Covers CLAY-03 / D-52-14: Clay_SetMeasureTextFunction is wired at
- * module init, and the callback forwards to nt_font_measure_n via the
- * per-context font registry. Edge contracts (invalid ctx, out-of-range
- * fontId, invalid font handle) return zero dimensions without crashing.
- *
- * Verification strategy: declare a CLAY_TEXT element inside nt_ui_begin /
- * nt_ui_end and inspect the resulting TEXT render command's bounding box
- * after Clay_EndLayout. Clay drives the measure callback during the
- * EndLayout layout pass; the box width/height reflect what the callback
- * returned.
- *
- * Unity's TEST_ASSERT_*_FLOAT macros are compiled out via UNITY_EXCLUDE_
- * FLOAT (matches the v1.7 test_stats / Phase 51 test_font precedent).
- * Float comparisons go through TEST_ASSERT_EQUAL_MEMORY on bit-stable
- * struct copies, or through integer truncation when only a "non-zero"
- * gate is needed.
- */
+ * Unity's TEST_ASSERT_*_FLOAT is compiled out via UNITY_EXCLUDE_FLOAT;
+ * floats compared via TEST_ASSERT_EQUAL_MEMORY on bit-stable struct
+ * copies or via integer truncation for "non-zero" gates. */
 
-/* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+/* System headers before Unity -- avoids __declspec(noreturn) clash on MSVC. */
 #include <setjmp.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -42,10 +30,9 @@
 #include "unity.h"
 /* clang-format on */
 
-/* 8-byte aligned static arena via uint64_t backing array. */
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_DEFAULT_ARENA_SIZE];
 
-/* Virtual pack id counter to keep registrations unique across tests. */
+/* Per-test counter so virtual-pack ids stay unique across the binary. */
 static uint32_t s_vpack_counter;
 
 /* ---- Test font blob builder (mirrors test_font.c with 3 glyphs A/B/C) ---- */
@@ -212,7 +199,7 @@ static Clay_BoundingBox declare_and_measure_text(nt_ui_context_t *ctx, const cha
 
 /* ---- Tests ---- */
 
-/* CLAY-03: Clay_SetMeasureTextFunction is wired during nt_ui_create_context.
+/* Clay_SetMeasureTextFunction is wired during nt_ui_create_context.
  * Covariance check: with no font registered the callback returns {0,0} via
  * the nt_font_valid branch. The fact that Clay_EndLayout completes without
  * firing CLAY_ERROR_TYPE_TEXT_MEASUREMENT_FUNCTION_NOT_PROVIDED is itself
@@ -231,7 +218,7 @@ static void test_measure_callback_wired(void) {
     nt_ui_destroy_context(ctx);
 }
 
-/* CLAY-03: callback forwards Clay_StringSlice -> nt_font_measure_n with
+/* callback forwards Clay_StringSlice -> nt_font_measure_n with
  * proper font_id resolution. Compares the TEXT command bounding box
  * against an independent direct nt_font_measure_n call. */
 static void test_measure_callback_forwards_to_font_measure_n(void) {
@@ -276,7 +263,7 @@ static void test_measure_callback_forwards_to_font_measure_n(void) {
     free(blob);
 }
 
-/* CLAY-03: with no font slot populated the callback returns {0,0} via the
+/* with no font slot populated the callback returns {0,0} via the
  * nt_font_valid early-return path -- proves the guard branch fires before
  * the (would-be-crashing) nt_font_measure_n call. */
 static void test_measure_callback_invalid_font_returns_zero(void) {

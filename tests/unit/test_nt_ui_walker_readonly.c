@@ -1,12 +1,3 @@
-/* tests/unit/test_nt_ui_walker_readonly.c -- Plan 52-04
- *
- * Covers UI-06 (two walks against same ctx+target produce identical state)
- * and UI-07 (walker entry applies target->viewport via nt_gfx_set_viewport).
- * Three death-tests for pre-walk asserts (D-52-06 atlas, D-52-19 sprite +
- * text material). All death-tests use NT_TEST_EXPECT_ASSERT (Revision
- * Issue 3) -- no TEST_IGNORE fallback.
- */
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -49,7 +40,7 @@ static void inject_frozen_cmds(int32_t count) {
     s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
 }
 
-/* UI-06: two walks against same ctx+target produce identical probe state. */
+/* two walks against same ctx+target produce identical probe state. */
 static void test_second_walk_identical(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
@@ -80,7 +71,7 @@ static void test_second_walk_identical(void) {
     TEST_ASSERT_EQUAL_UINT32(delta1, delta2);
 }
 
-/* UI-07: walker entry applies target->viewport via nt_gfx_set_viewport. */
+/* walker entry applies target->viewport via nt_gfx_set_viewport. */
 static void test_viewport_applied(void) {
     inject_frozen_cmds(0);
 
@@ -95,7 +86,7 @@ static void test_viewport_applied(void) {
     TEST_ASSERT_EQUAL_INT(480, vp[3]);
 }
 
-/* D-52-06 death-test: walk without atlas set asserts. */
+/* walk without atlas set asserts. */
 static void test_walk_without_atlas_asserts(void) {
     /* Mode flag was set before Unity invoked setUp -- the atlas setter
      * was skipped, so g_nt_ui_atlas.id == 0. */
@@ -104,14 +95,14 @@ static void test_walk_without_atlas_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
-/* D-52-19 / Revision Issue 1 death-test: walk without sprite material asserts. */
+/* death-test: walk without sprite material asserts. */
 static void test_walk_without_sprite_material_asserts(void) {
     inject_frozen_cmds(0);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
-/* D-52-19 death-test: walk without text material asserts at walker entry. */
+/* walk without text material asserts at walker entry. */
 static void test_walk_without_text_material_asserts(void) {
     inject_frozen_cmds(0);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};

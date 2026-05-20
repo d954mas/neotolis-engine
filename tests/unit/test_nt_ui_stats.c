@@ -1,17 +1,9 @@
-/* tests/unit/test_nt_ui_stats.c -- Plan 52-05 (refactored after nt_stats decouple)
- *
- * Covers WALK-09 / D-52-20: per-walk metrics are captured into the ctx and
- * exposed via nt_ui_get_last_walk_*. nt_ui itself no longer pushes to
- * nt_stats; this test verifies (a) the public getters return the expected
- * values after a walk and (b) the canonical bridge pattern works -- app
- * forwards getter output into nt_stats_count and the value surfaces in
- * nt_stats_format_lines.
- *
- * nt_stats lifecycle is managed locally (init/shutdown bracketing the
- * fixture), because the shared ui_walker_fixture deliberately does NOT
- * init nt_stats: walker tests don't need it, and only this test exercises
- * the metrics-bridge integration.
- */
+/* Verifies the metrics bridge: per-walk counters captured into ctx and
+ * exposed via nt_ui_get_last_walk_*, then forwarded by the test into
+ * nt_stats and read back via nt_stats_format_lines. nt_ui itself does
+ * NOT depend on nt_stats -- the shared walker fixture leaves nt_stats
+ * un-init'd; this test bookends fixture setUp/tearDown with its own
+ * nt_stats_init/shutdown. */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -60,7 +52,7 @@ static void publish_ui_metrics_to_stats(const nt_ui_context_t *ctx) {
     nt_stats_count("ui_element_count", (uint64_t)nt_ui_get_last_walk_element_count(ctx));
 }
 
-/* WALK-09 (getter): after a walk that emits a RECT, the public draw-call
+/*after a walk that emits a RECT, the public draw-call
  * getter reports >= 1 (the walker-exit flush issues at least one GL
  * draw call). */
 static void test_get_last_walk_draw_calls_after_rect(void) {
@@ -76,7 +68,7 @@ static void test_get_last_walk_draw_calls_after_rect(void) {
     TEST_ASSERT_GREATER_THAN_UINT32(0U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
 }
 
-/* WALK-09 (getter): element count equals frozen_cmds.length exactly
+/*element count equals frozen_cmds.length exactly
  * (synthetic injected array, no Clay wrapper elements). */
 static void test_get_last_walk_element_count_matches_frozen_cmds(void) {
     for (int i = 0; i < 3; ++i) {
@@ -93,7 +85,7 @@ static void test_get_last_walk_element_count_matches_frozen_cmds(void) {
     TEST_ASSERT_EQUAL_UINT32(3U, nt_ui_get_last_walk_element_count(s_fx.ctx));
 }
 
-/* WALK-09 (bridge): app forwards getter values into nt_stats; both
+/* Bridge pattern: app forwards getter values into nt_stats; both
  * counters appear in nt_stats_format_lines with the expected values. */
 static void test_metrics_bridge_publishes_to_nt_stats(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
@@ -118,7 +110,7 @@ static void test_metrics_bridge_publishes_to_nt_stats(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, "ui_element_count: 1"), "bridge: ui_element_count must equal frozen_cmds.length");
 }
 
-/* WALK-09: counters are SET per walk (not accumulated). Walk twice with
+/* counters are SET per walk (not accumulated). Walk twice with
  * different command counts -- second getter call reflects second walk. */
 static void test_getters_reflect_latest_walk_only(void) {
     /* First walk: 2 RECT commands. */

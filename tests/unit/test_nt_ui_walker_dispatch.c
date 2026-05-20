@@ -1,12 +1,3 @@
-/* tests/unit/test_nt_ui_walker_dispatch.c -- Plan 52-04
- *
- * Covers WALK-01 (all 8 Clay command types dispatch to the right backend)
- * and WALK-04 (BORDER with all 4 widths non-zero emits exactly 4 thin
- * rects). Synthetic Clay_RenderCommand arrays are injected directly into
- * ctx->frozen_cmds (visible via nt_ui_internal.h) -- this is the
- * walker-only path, bypassing Clay's declaration machinery.
- */
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -68,7 +59,7 @@ static void inject_frozen_cmds(int32_t count) {
 
 /* ---- Tests ---- */
 
-/* WALK-01: RECTANGLE -> sprite renderer emit_region (4 verts for white quad) */
+/* RECTANGLE -> sprite renderer emit_region (4 verts for white quad) */
 static void test_dispatch_rectangle(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
@@ -86,7 +77,7 @@ static void test_dispatch_rectangle(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_element_count(s_fx.ctx));
 }
 
-/* WALK-04: BORDER with all 4 widths non-zero -- exactly 4 last_emit calls
+/* BORDER with all 4 widths non-zero -- exactly 4 last_emit calls
  * happen (top, bottom, left, right), all into the white region. Verify the
  * LAST emit was still a white 4-vert quad. */
 static void test_dispatch_border_emits_4_rects(void) {
@@ -111,7 +102,7 @@ static void test_dispatch_border_emits_4_rects(void) {
     TEST_ASSERT_EQUAL_UINT32(calls_before + 1U, nt_sprite_renderer_test_draw_call_count());
 }
 
-/* WALK-01: TEXT -> flush sprite (no-op when empty) + text renderer setters
+/* TEXT -> flush sprite (no-op when empty) + text renderer setters
  * + draw_n. We verify the text renderer's set_material call counter ticks. */
 static void test_dispatch_text(void) {
     /* Note: This test doesn't register a font in s_fx.ctx -- emit_text's
@@ -145,7 +136,7 @@ static void test_dispatch_text(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_element_count(s_fx.ctx));
 }
 
-/* WALK-01: IMAGE -> reads nt_ui_image_payload_t and emits one region. */
+/* IMAGE -> reads nt_ui_image_payload_t and emits one region. */
 static void test_dispatch_image(void) {
     s_image_payload.atlas = s_fx.atlas.handle;
     s_image_payload.region_index = s_fx.atlas.polygon_region_idx; /* 6-vert hull */
@@ -167,7 +158,7 @@ static void test_dispatch_image(void) {
     TEST_ASSERT_EQUAL_UINT32(12U, nt_sprite_renderer_test_last_emit_index_count());
 }
 
-/* WALK-01 / WALK-02 / WALK-03: SCISSOR_START + SCISSOR_END are dispatched
+/* SCISSOR_START + SCISSOR_END are dispatched
  * and the walker exits with scissor disabled. */
 static void test_dispatch_scissor_start_end(void) {
     Clay_RenderCommand *cs = &s_test_cmds[0];
@@ -184,12 +175,12 @@ static void test_dispatch_scissor_start_end(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* Walker MUST disable scissor at exit (CP-04). */
+    /* Walker MUST disable scissor at exit. */
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
     TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_element_count(s_fx.ctx));
 }
 
-/* WALK-05: CUSTOM -> registered handler called with (cmd, userdata). */
+/* CUSTOM -> registered handler called with (cmd, userdata). */
 static void test_dispatch_custom(void) {
     int sentinel = 42;
     nt_ui_set_custom_handler(s_fx.ctx, test_custom_handler, &sentinel);
@@ -209,7 +200,7 @@ static void test_dispatch_custom(void) {
     TEST_ASSERT_EQUAL_PTR(&sentinel, s_custom_received_user);
 }
 
-/* WALK-01: NONE -> silent skip (no crash, no emit). */
+/* NONE -> silent skip (no crash, no emit). */
 static void test_dispatch_none_silent_skip(void) {
     /* Walk an empty command array -- frozen_cmds.length = 0. */
     inject_frozen_cmds(0);

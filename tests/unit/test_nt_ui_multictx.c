@@ -1,12 +1,9 @@
-/* tests/unit/test_nt_ui_multictx.c -- Plan 52-02
- *
- * Covers UI-03 (multiple contexts coexist; per-ctx Clay context
- * isolation) and the multi-context invariant D-52-12.
- */
-
+/* System headers before Unity -- avoids __declspec(noreturn) clash on MSVC. */
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "clay.h"
@@ -16,7 +13,6 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-/* Three independently sized arenas (8 MiB each, 8-aligned via uint64_t). */
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_a[NT_UI_DEFAULT_ARENA_SIZE];
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_b[NT_UI_DEFAULT_ARENA_SIZE];
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_c[NT_UI_DEFAULT_ARENA_SIZE];
@@ -24,9 +20,9 @@ alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_c[NT_UI_DEFAULT_ARENA_SIZE];
 void setUp(void) { nt_test_assert_install(); }
 void tearDown(void) {}
 
-/* UI-03 + D-52-14: three contexts coexist; nt_ui_begin makes
- * Clay_GetCurrentContext match ctx->clay; after end the in-frame
- * tracker is cleared. */
+/* Three contexts coexist; begin/end pairs interleave correctly with
+ * Clay_GetCurrentContext switching per ctx and the in-frame tracker
+ * clearing on each end. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_three_ctx_interleave(void) {
     nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a);
@@ -69,7 +65,7 @@ static void test_three_ctx_interleave(void) {
     nt_ui_destroy_context(c);
 }
 
-/* UI-03: per-ctx in_frame isolation across sequential begin/end. */
+/* Per-ctx in_frame isolation across sequential begin/end. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_per_ctx_in_frame_isolation(void) {
     nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a);

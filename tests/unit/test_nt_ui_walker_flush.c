@@ -1,10 +1,3 @@
-/* tests/unit/test_nt_ui_walker_flush.c -- Plan 52-04
- *
- * Covers WALK-06 / D-52-18: walker flushes both sprite + text renderers
- * at scissor / text boundaries and at walk exit. Probes the renderer's
- * test-access draw_call_count / vertex_count counters.
- */
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -40,7 +33,7 @@ static void inject_frozen_cmds(int32_t count) {
     s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
 }
 
-/* WALK-06: walker exit flushes both sprite and text renderers. After
+/* walker exit flushes both sprite and text renderers. After
  * emitting 1 RECT into the sprite renderer's staging, the staging vertex
  * count is non-zero. After nt_ui_walk returns, the walker's exit-flush
  * MUST drain that staging back to 0. */
@@ -59,7 +52,7 @@ static void test_walker_exit_flushes_sprite_and_text(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_vertex_count());
 }
 
-/* WALK-06: SCISSOR_START/END flushes both renderers before changing
+/* SCISSOR_START/END flushes both renderers before changing
  * scissor state. Sequence: RECT (accumulates) -> SCISSOR_START (must
  * flush sprite) -> RECT (accumulates again) -> SCISSOR_END (must flush
  * sprite) -> walk-exit flush. */
@@ -88,7 +81,7 @@ static void test_flush_on_scissor_transition(void) {
     TEST_ASSERT_EQUAL_UINT32(calls_before + 2U, nt_sprite_renderer_test_draw_call_count());
 }
 
-/* WALK-06: RECT -> TEXT transition flushes sprite renderer before text
+/* RECT -> TEXT transition flushes sprite renderer before text
  * emit begins. We verify by checking that one draw call happened mid-
  * walk (sprite flush at TEXT boundary), even though the test font is
  * NOT registered (so the actual text path early-returns). The sprite

@@ -1,18 +1,8 @@
-/* tests/unit/test_nt_sprite_renderer_emit_region.c
- *
- * Plan 52-01: D-52-01/02 emit_region API + capacity guard + polygon-hull
- * vertex_count preservation + Drift 4 (set_material auto-flush).
- *
- * Setup mirrors test_sprite_renderer.c — full resource system + real atlas
- * + real material via nt_material_create. The Wave 0 minimal_ui_atlas helper
- * defers nt_resource_t wiring to Plan 02 Task 2.3 (TODO comment in that
- * helper), so until 02 lands we cannot use it for emit_region tests because
- * emit_region asserts nt_resource_is_ready(atlas). This file stands up the
- * full pipeline locally — same pattern as the existing test_sprite_renderer
- * binary.
- */
+/* Mirrors test_sprite_renderer.c setup -- full resource system + real
+ * atlas + real material via nt_material_create -- because emit_region
+ * asserts nt_resource_is_ready(atlas). */
 
-/* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+/* System headers before Unity -- avoids __declspec(noreturn) clash on MSVC. */
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -324,7 +314,7 @@ void tearDown(void) {
     s_pack_blob_count = 0;
 }
 
-/* ---- Test 1: D-52-01 direct call writes vertex_count verts ---- */
+/* ---- Test 1: direct call writes vertex_count verts ---- */
 
 static void test_emit_region_direct_call(void) {
     nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
@@ -352,7 +342,7 @@ static void test_emit_region_direct_call(void) {
     nt_sprite_renderer_flush();
 }
 
-/* ---- Test 2: D-52-01 capacity guard auto-flush + reopen ---- */
+/* ---- Test 2: capacity guard auto-flush + reopen ---- */
 
 static void test_emit_region_capacity_guard(void) {
     nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
@@ -383,7 +373,7 @@ static void test_emit_region_capacity_guard(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_UINT32(2U, nt_sprite_renderer_test_draw_call_count());
 }
 
-/* ---- Test 3: D-52-04 polygon-hull vertex_count preserved ---- */
+/* ---- Test 3: polygon-hull vertex_count preserved ---- */
 
 static void test_emit_region_polygon_hull_vertex_count_preserved(void) {
     nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();
@@ -404,7 +394,7 @@ static void test_emit_region_polygon_hull_vertex_count_preserved(void) {
     nt_sprite_renderer_flush();
 }
 
-/* ---- Test 4: Drift 4 set_material auto-flush on change ---- */
+/* ---- Test 4: set_material auto-flush on change ---- */
 
 static void test_set_material_auto_flush_on_change(void) {
     nt_sprite_renderer_desc_t rd = nt_sprite_renderer_desc_defaults();

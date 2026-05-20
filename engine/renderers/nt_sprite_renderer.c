@@ -63,21 +63,13 @@ static struct {
      * nt_gfx_get_frame_draw_calls (which is engine-wide and frame-scoped). */
     uint32_t last_draw_list_calls;
 
-    /* Currently-bound material for the non-ECS public emit path
-     * (nt_sprite_renderer_set_material + nt_sprite_renderer_emit_region).
-     * Mirrors nt_text_renderer's s_text.material — auto-flushes on .id
-     * change. NT_MATERIAL_INVALID until first set_material call.
-     * NOTE: ECS path (draw_list -> emit_one) does NOT touch this field —
-     * it opens/closes cmds per batch_key directly. */
+    /* Material bound for the non-ECS public emit path. Auto-flushes on
+     * .id change. The ECS draw_list path does NOT touch this -- it
+     * opens/closes cmds per batch_key directly. */
     nt_material_t current_mat;
 #ifdef NT_SPRITE_RENDERER_TEST_ACCESS
-    /* Test-only: last emit_one() vertex/index counts captured BEFORE flush
-     * resets s_sprite.vertex_count. Read by polygon-emit test to verify
-     * region.vertex_count==N polygons emit N vertices.
-     *
-     * last_emit_first_vertex is the staging offset where the last emit
-     * wrote its vertices — flush only resets vertex_count, not the array
-     * data, so tests can still read positions back via this offset. */
+    /* Captured before flush resets vertex_count, so tests can read back
+     * what the last emit wrote (positions via last_emit_first_vertex). */
     uint32_t last_emit_vertex_count;
     uint32_t last_emit_index_count;
     uint32_t last_emit_first_vertex;
@@ -295,25 +287,19 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
 }
 // #endregion
 
-// #region set_material (non-ECS public state setter — Drift 4 resolution)
-/* Bind a material for subsequent nt_sprite_renderer_emit_region() calls.
- * Mirrors nt_text_renderer_set_material: same-handle reentry is a no-op;
- * .id-change closes the current cmd (auto-flushes pending emits) and opens
- * a fresh cmd with the new pipeline + material info.
+// #region set_material
+/* Mirrors nt_text_renderer_set_material: same-handle reentry is a no-op;
+ * .id change auto-flushes and opens a fresh cmd.
  *
- * Same-handle short-circuit reads s_sprite.current_mat.id WITHOUT closing
- * the open cmd — this preserves batching when the game calls set_material
- * defensively each walker frame. The ECS path (draw_list -> emit_one) opens
- * cmds directly per batch_key and does not touch current_mat, so the two
- * call paths cannot interfere. */
+ * The ECS draw_list path opens cmds per batch_key directly and does not
+ * touch current_mat, so the two call paths cannot interfere. */
 void nt_sprite_renderer_set_material(nt_material_t mat) {
     NT_ASSERT(s_sprite.initialized);
     NT_ASSERT(mat.id != 0 && "nt_sprite_renderer_set_material: invalid material handle");
 
-    /* Same-handle reentry is a no-op ONLY when the cmd we'd reopen is still
-     * live. After an explicit flush() (or restore_gpu) cmd_count drops to 0
-     * and we MUST reopen even for the same handle, otherwise the next emit
-     * trips the "no open cmd" assert. */
+    /* Same-handle is a no-op only when the cmd is still live. After an
+     * explicit flush (or restore_gpu) cmd_count drops to 0 and we MUST
+     * reopen, otherwise the next emit trips "no open cmd". */
     if (mat.id == s_sprite.current_mat.id && s_sprite.cmd_count > 0) {
         return;
     }
@@ -321,9 +307,6 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
     const nt_material_info_t *mat_info = nt_material_get_info(mat);
     NT_ASSERT(mat_info != NULL && mat_info->ready && mat_info->resolved_vs != 0 && mat_info->resolved_fs != 0 && "nt_sprite_renderer_set_material: material not ready");
 
-    /* Auto-flush staging on material change. close_current_cmd() pops empty
-     * cmds (no indices written) so re-binding a material before any emit is
-     * cheap — flush() short-circuits when cmd_count == 0. */
     if (s_sprite.cmd_count > 0) {
         nt_sprite_renderer_flush();
     }
@@ -334,19 +317,15 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
 }
 // #endregion
 
-// #region emit_region_resolved (canonical staging-write body — shared ECS + non-ECS)
-/* Single canonical staging-write body for one atlas region at one mat4.
- *
- * Caller supplies pre-resolved region pointers and the atlas's inverse pixels-
- * per-unit (ipu) directly — this is the no-extra-lookup hot path. The ECS
- * emit_one() reads these straight from the resolved-region SoA slot; the
- * non-ECS public nt_sprite_renderer_emit_region() does one nt_atlas_*() lookup
+// #region emit_region_resolved
+/* Canonical staging-write body shared by ECS emit_one and the non-ECS
+ * public emit_region. Caller supplies pre-resolved region pointers + ipu;
+ * the ECS hot path passes these straight from its SoA cache (no extra
+ * lookups), the non-ECS public emit_region does one nt_atlas_*() lookup
  * per call and forwards.
  *
- * Marked `static inline` + ALWAYS_INLINE so the bunnymark ECS hot path keeps
- * the same single-frame inlined shape it had before the refactor (D-52-02
- * ≤2% regression gate). Compilers without an always_inline attribute simply
- * see a `static inline` request — same behaviour as before. */
+ * always_inline so the ECS bunnymark path keeps the same inlined shape
+ * it had before the refactor -- no perf regression. */
 #if defined(__GNUC__) || defined(__clang__)
 #define NT_SPRITE_EMIT_INLINE static inline __attribute__((always_inline))
 #elif defined(_MSC_VER)
@@ -507,35 +486,32 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
 // #region emit_one (ECS extractor — delegates to emit_region_resolved)
 /* Caller passes pre-fetched SoA views; sparse_indices[entity_index] → dense slot.
  *
- * D-52-02: emit_one is now a thin extractor that resolves origin/flip/color
- * from the ECS components and forwards to emit_region_resolved. The staging-
- * write body lives in one canonical place. No extra atlas lookup vs the old
- * monolithic emit_one — resolved-region pointers come straight from
- * sv->resolved[s_idx]. */
+ * emit_one is a thin ECS extractor: resolves origin/flip/color from the
+ * components and forwards to emit_region_resolved. Resolved region
+ * pointers come straight from sv->resolved[s_idx] -- no extra atlas
+ * lookup. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv) {
     nt_entity_t e = {.id = item->entity};
     uint16_t eidx = nt_entity_index(e);
 
-    /* Inline sparse->dense lookups — three array reads vs three function
-     * calls each doing a liveness assert + the same lookup. */
+    /* Inlined sparse->dense lookups vs three function calls each doing a
+     * liveness assert + the same array read. */
     uint16_t s_idx = sv->sparse_indices[eidx];
     uint16_t t_idx = tv->sparse_indices[eidx];
     uint16_t d_idx = dv->sparse_indices[eidx];
 
-    /* AGENTS.md "fail early, prefer asserts": dense indices must be valid.
-     * NT_INVALID_COMP_INDEX (0xFFFF) would index SoA arrays out of bounds.
-     * Catches stale render items, items for entities missing a component,
-     * items built after entity destruction. Compiles out in release. */
+    /* NT_INVALID_COMP_INDEX (0xFFFF) would index SoA arrays out of bounds
+     * -- catches stale render items, items for entities missing a
+     * component, items built after entity destruction. */
     NT_ASSERT(s_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no sprite component");
     NT_ASSERT(t_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no transform component");
     NT_ASSERT(d_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no drawable component");
 
-    /* Resolve atlas + region. Tombstone → zero-draw early-out. */
     nt_resource_t atlas = sv->atlas[s_idx];
     const nt_sprite_resolved_region_t *resolved = &sv->resolved[s_idx];
     if ((sv->flags[s_idx] & NT_SPRITE_FLAG_RESOLVED) == 0 || resolved->region == NULL || resolved->region->vertex_count == 0) {
-        return;
+        return; /* tombstone */
     }
     const nt_texture_region_t *r = resolved->region;
     NT_ASSERT(resolved->cached_pos != NULL && resolved->raw_vertices != NULL && resolved->indices != NULL);
@@ -551,15 +527,9 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
 }
 // #endregion
 
-// #region emit_region (non-ECS public emit — D-52-01)
-/* Public single-region emit. Resolves the region + page texture + ipu via the
- * atlas handle, then forwards to the canonical emit_region_resolved body. One
- * extra atlas lookup per call vs the ECS path — acceptable for the walker /
- * debug-draw / gizmo use cases where there is no SoA cache.
- *
- * Asserts the renderer + atlas are in a usable state. Caller must have an
- * open cmd (set via nt_sprite_renderer_set_material). Tombstoned regions
- * silently no-op (vertex_count == 0 short-circuits emit_region_resolved). */
+// #region emit_region
+/* One extra atlas lookup per call vs the ECS path -- acceptable for the
+ * walker / debug-draw / gizmo use cases that have no SoA cache. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits) {
     NT_ASSERT(s_sprite.initialized);
@@ -570,7 +540,7 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
 
     const nt_texture_region_t *r = nt_atlas_get_region(atlas, region_index);
     if (r == NULL || r->vertex_count == 0U) {
-        return; /* tombstone or out-of-range — silent no-op */
+        return; /* tombstone or out-of-range */
     }
     const float(*cpos)[2] = nt_atlas_get_region_cached_pos(atlas, region_index);
     const nt_atlas_vertex_t *vraw = nt_atlas_get_region_raw_vertices(atlas, region_index);
@@ -584,8 +554,8 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
 // #endregion
 
 // #region draw_list
-/* Phase 1 of the two-phase pipeline: open a cmd per batch_key,
- * stream verts into staging via emit_one. Phase 2 = nt_sprite_renderer_flush. */
+/* Phase 1: open a cmd per batch_key, stream verts into staging via
+ * emit_one. Phase 2 = nt_sprite_renderer_flush. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     NT_ASSERT(s_sprite.initialized);
     if (count == 0) {

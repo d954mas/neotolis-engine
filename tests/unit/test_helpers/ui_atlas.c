@@ -18,33 +18,19 @@
 #include "nt_pack_format.h"
 #include "resource/nt_resource.h"
 
-/* ---- Synthetic atlas blob layout (matches engine/atlas/nt_atlas_format.h) ----
+/* Synthetic atlas blob layout (matches engine/atlas/nt_atlas_format.h):
  *
- *  NtAtlasHeader (28 bytes)
- *  uint64_t texture_resource_ids[1]    -> page 0 (uses NT_UI_ATLAS_PAGE_RID)
- *  NtAtlasRegion regions[2]            -> region 0: white 4-vert; region 1: hull 6-vert
- *  NtAtlasVertex vertices[10]          -> 4 (white) + 6 (polygon hull)
- *  uint16_t      indices[18]           -> 6 (white) + 12 (hull)
+ *   NtAtlasHeader     (28 bytes)
+ *   page resource id  (8 bytes)
+ *   NtAtlasRegion[2]  (region 0 = 4-vert white quad, region 1 = 6-vert hull)
+ *   NtAtlasVertex[10]
+ *   uint16[18]        (6 indices for white + 12 for hull)
  *
- * Plan 04 Task 2.3 finalization (Path (a) committed): the helper now stands
- * up a real virtual pack and parses the synthetic blob through
- * nt_resource_parse_pack + the atlas activator's full on_resolve /
- * on_post_resolve path. That gives us a real nt_resource_t handle that
- * nt_resource_is_ready() returns true for, and that nt_atlas_get_region()
- * resolves against via nt_resource_get_user_data.
- *
- * Page-0 texture is registered as a separate high-priority virtual pack
- * pointing at a 1x1 white nt_texture_t -- the sprite renderer's emit path
- * calls nt_resource_get(page_resource) to bind a texture id, which must
- * be non-zero.
- *
- * Prerequisites the test must run before minimal_ui_atlas_create():
- *   - nt_hash_init
- *   - nt_gfx_init (any backend; stub is fine)
- *   - nt_resource_init
- *   - nt_atlas_init                          (registers the NT_ASSET_ATLAS activator)
- * After create, two nt_resource_step() calls drive resolve -> post-resolve
- * (page texture request publishes on the second step). */
+ * Mounts the blob as a real virtual pack so nt_resource_is_ready returns
+ * true and nt_atlas_get_region resolves through the regular activator
+ * path. Page 0 is a separate high-priority virtual pack with a 1x1 white
+ * texture so the sprite renderer's nt_resource_get(page_resource) returns
+ * a non-zero texture id. */
 
 #define UI_ATLAS_REGION_COUNT 2u
 #define UI_ATLAS_PAGE_COUNT 1u
@@ -61,13 +47,11 @@
 #define UI_ATLAS_INDEX_OFFSET (UI_ATLAS_VERTEX_OFFSET + UI_ATLAS_VERTICES_SIZE)
 #define UI_ATLAS_BLOB_SIZE (UI_ATLAS_INDEX_OFFSET + UI_ATLAS_INDICES_SIZE)
 
-/* Stable resource ids (unique-per-test-binary; counter-suffixed so multiple
- * create/destroy cycles in one binary don't collide on resource-table slots
- * that were tombstoned by destroy). */
+/* Counter-suffixed pack names so multiple create/destroy cycles in one
+ * binary don't collide on tombstoned resource-table slots. */
 static uint32_t s_helper_counter;
 
-/* Pack blob lives in the helper's BSS / heap -- nt_resource_parse_pack
- * keeps a reference until the pack is unmounted. We free on destroy. */
+/* nt_resource_parse_pack keeps a reference to the blob until unmount. */
 static uint8_t *s_pack_blob;
 static uint32_t s_pack_total;
 static nt_hash32_t s_atlas_pack_id;

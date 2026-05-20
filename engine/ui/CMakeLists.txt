@@ -40,13 +40,10 @@ nt_add_module(nt_ui LOG_DOMAIN "ui"
 # Clay vendored header -- PRIVATE include (only nt_ui.c sees clay.h).
 # SYSTEM suppresses -Werror on Clay-internal warnings (matches engine/math/cglm
 # precedent). Clay's source is excluded from clang-tidy via scripts/tidy.sh.
-# Use NT_ENGINE_ROOT so the include resolves correctly when nt_ui is
-# consumed from a parent CMake project (submodule scenario).
-#
-# Phase 52 Task 2.2: nt_ui_internal.h includes "clay.h", and test TUs
-# compiled with NT_UI_TEST_ACCESS pull that internal header in. The
-# include directory therefore needs to be visible to consumers of nt_ui
-# that opt into test access.
+# Use NT_ENGINE_ROOT so the include resolves when nt_ui is consumed from a
+# parent CMake project. INTERFACE-include is needed because test TUs
+# compiled with NT_UI_TEST_ACCESS pull in nt_ui_internal.h which #includes
+# "clay.h".
 target_include_directories(nt_ui SYSTEM PRIVATE
     ${NT_ENGINE_ROOT}/deps/clay
 )
@@ -60,19 +57,14 @@ target_compile_definitions(nt_ui PRIVATE
     CLAY_PINNED_MINOR=${_clay_minor}
 )
 
-# Phase 52 Task 2.2: nt_ui needs nt_core (asserts/logging/types), nt_resource
-# (handle types referenced in public headers), nt_font (font handle),
-# nt_material (material handle), nt_input (pointer state struct).
+# PUBLIC: types referenced in nt_ui.h (handles + pointer state struct).
+# PRIVATE: walker implementation deps (renderer + gfx + atlas).
 #
-# Phase 52 Plan 04: walker private deps. The walker translates Clay render
-# commands into sprite/text renderer emits + gfx scissor/viewport state. These
-# stay PRIVATE because nothing in nt_ui's public surface references them.
-#
-# nt_ui has NO dependency on nt_stats. Per-walk metrics are exposed via
-# nt_ui_get_last_walk_* getters; the application chooses to publish them
-# into nt_stats (debug overlay) or consume privately. This keeps nt_ui's
-# direction-of-deps aligned with nt_gfx <-- nt_stats (observability pulls
-# from rendering modules, never the reverse).
+# nt_stats is intentionally NOT a dependency. Per-walk metrics are
+# exposed via nt_ui_get_last_walk_* getters; apps that want them in the
+# debug overlay forward into nt_stats themselves. Direction-of-deps
+# matches nt_gfx <- nt_stats: observability pulls from rendering, never
+# the reverse.
 target_link_libraries(nt_ui
     PUBLIC
         nt_core

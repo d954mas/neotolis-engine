@@ -1,10 +1,3 @@
-/* tests/unit/test_nt_ui_walker_scissor.c -- Plan 52-04
- *
- * Covers WALK-02 (walker-local scissor stack depth 8 + balanced exit
- * assert) and WALK-03 (Y-flip top-left -> GL bottom-left + intersection
- * at push). Death-tests use NT_TEST_EXPECT_ASSERT (Revision Issue 3).
- */
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,7 +31,7 @@ static void inject_frozen_cmds(int32_t count) {
     s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
 }
 
-/* WALK-02: 8 nested SCISSOR_START / 8 SCISSOR_END must succeed (depth 8
+/* 8 nested SCISSOR_START / 8 SCISSOR_END must succeed (depth 8
  * is at the limit but not over). */
 static void test_scissor_depth_8_ok(void) {
     for (int32_t i = 0; i < 8; ++i) {
@@ -58,8 +51,7 @@ static void test_scissor_depth_8_ok(void) {
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
 }
 
-/* WALK-02 death-test: 9 nested SCISSOR_START must assert (depth overflow).
- * Wrapped in NT_TEST_EXPECT_ASSERT (Revision Issue 3). */
+/* 9 nested SCISSOR_START must assert (depth overflow). */
 static void test_scissor_depth_9_asserts(void) {
     for (int32_t i = 0; i < 9; ++i) {
         s_test_cmds[i].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
@@ -73,7 +65,7 @@ static void test_scissor_depth_9_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
-/* WALK-02 death-test: 2 SCISSOR_START + 1 SCISSOR_END leaves depth > 0
+/* 2 SCISSOR_START + 1 SCISSOR_END leaves depth > 0
  * at walk exit -> the final NT_ASSERT(depth == 0) must fire. */
 static void test_scissor_unbalanced_asserts_at_exit(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
@@ -87,7 +79,7 @@ static void test_scissor_unbalanced_asserts_at_exit(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
-/* WALK-03: Clay scissor (x=100, y=100, w=200, h=200) inside an 800x600 viewport
+/* Clay scissor (x=100, y=100, w=200, h=200) inside an 800x600 viewport
  * must produce GL scissor at (100, 600 - 100 - 200 = 300, 200, 200). The
  * scissor is disabled at walk exit; we observe the LAST set_scissor rect via
  * the gfx test probe, which retains the most-recent values regardless of
@@ -112,7 +104,7 @@ static void test_scissor_y_flip_top_left_to_gl_bottom_left(void) {
     TEST_ASSERT_EQUAL_INT(200, rect[3]);
 }
 
-/* WALK-03 / D-52-17: nested SCISSOR_START intersects with stack top.
+/* nested SCISSOR_START intersects with stack top.
  * Outer (0..100, 0..100), inner (50..200, 50..200) -> intersection
  * (50..100, 50..100) i.e. (x=50, y=50, w=50, h=50) in Clay's top-left
  * space. After Y-flip in a 600-tall fb: y_gl = 600 - 50 - 50 = 500. */
@@ -160,7 +152,7 @@ static void test_scissor_intersection_nested(void) {
     TEST_ASSERT_EQUAL_INT(100, rect[3]);
 }
 
-/* WALK-03 / D-52-17: walker exit always disables scissor, even if scissor
+/* walker exit always disables scissor, even if scissor
  * was enabled mid-walk. */
 static void test_walker_exit_disables_scissor(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
@@ -174,7 +166,7 @@ static void test_walker_exit_disables_scissor(void) {
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
 }
 
-/* WALK-03 / D-52-17: Clay's bounding box is target-local. With a non-zero
+/* Clay's bounding box is target-local. With a non-zero
  * viewport offset (split-screen pane, sub-FBO render-target), the GL scissor
  * MUST add viewport.x to x and use a Y-flip relative to viewport.y, not the
  * raw framebuffer height. Without this, a split-screen pane's clip rectangle

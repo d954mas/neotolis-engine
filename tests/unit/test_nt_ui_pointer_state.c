@@ -1,20 +1,3 @@
-/* tests/unit/test_nt_ui_pointer_state.c -- Plan 52-03
- *
- * Covers CLAY-04 / D-52-16: nt_ui_begin forwards pointer position and
- * left-button state to Clay_SetPointerState. Right/middle buttons and
- * wheel are intentionally NOT consumed (D-52-16 left-button only).
- *
- * Verification strategy: NT_UI_TEST_ACCESS probes nt_ui_test_clay_pointer_
- * x/y/down read ctx->clay->pointerInfo from inside nt_ui.c (where Clay's
- * struct definition is in scope via CLAY_IMPLEMENTATION). Tests pump the
- * pointer through nt_ui_begin, then snapshot the Clay-side state to
- * compare against the input nt_pointer_t.
- *
- * UNITY_EXCLUDE_FLOAT is set globally for tests; float comparisons go
- * through bit-stable uint32 conversion when the inputs are integer-valued
- * floats (matches the test_font.c precedent).
- */
-
 #include <setjmp.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -51,7 +34,7 @@ static bool float_eq_bits(float a, float b) {
     return pa == pb;
 }
 
-/* CLAY-04: x/y are forwarded literally; is_down=true is reflected as a
+/* x/y are forwarded literally; is_down=true is reflected as a
  * pressed-family Clay pointer state. */
 static void test_pointer_state_set_from_nt_pointer(void) {
     nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena);
@@ -74,7 +57,7 @@ static void test_pointer_state_set_from_nt_pointer(void) {
     nt_ui_destroy_context(ctx);
 }
 
-/* CLAY-04: is_down=false yields released-family state, position still
+/* is_down=false yields released-family state, position still
  * forwarded literally. */
 static void test_pointer_state_button_released(void) {
     nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena);
@@ -96,7 +79,7 @@ static void test_pointer_state_button_released(void) {
     nt_ui_destroy_context(ctx);
 }
 
-/* CLAY-04 + D-52-16: right and middle button state are NOT forwarded.
+/* right and middle button state are NOT forwarded.
  * Setting right/middle is_down=true while left is_down=false should
  * still produce a released Clay state -- only the left button matters. */
 static void test_pointer_state_only_left_button_consumed(void) {

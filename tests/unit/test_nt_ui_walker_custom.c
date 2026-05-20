@@ -1,9 +1,3 @@
-/* tests/unit/test_nt_ui_walker_custom.c -- Plan 52-04
- *
- * Covers WALK-05 / D-52-09: CUSTOM command -> registered handler called
- * with (cmd, userdata); NULL handler is a silent skip.
- */
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -51,7 +45,7 @@ static void inject_frozen_cmds(int32_t count) {
     s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
 }
 
-/* WALK-05: registered handler is called with (clay_cmd, userdata). */
+/* registered handler is called with (clay_cmd, userdata). */
 static void test_custom_handler_invoked(void) {
     int sentinel = 42;
     nt_ui_set_custom_handler(s_fx.ctx, test_custom_handler, &sentinel);
@@ -67,13 +61,13 @@ static void test_custom_handler_invoked(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_EQUAL_INT(1, s_custom_calls);
-    /* D-52-09 Option A: handler receives clay_cmd as const void * (opaque),
-     * which is the same pointer that's in our cmds array slot 0. */
+    /* Handler receives clay_cmd as opaque const void * -- same pointer
+     * as our cmds[0] slot. */
     TEST_ASSERT_EQUAL_PTR(c, s_custom_received_cmd);
     TEST_ASSERT_EQUAL_PTR(&sentinel, s_custom_received_user);
 }
 
-/* WALK-05 / D-52-09: NULL handler = silent skip (no crash, no warning). */
+/* NULL handler = silent skip (no crash, no warning). */
 static void test_null_custom_handler_silent_skip(void) {
     nt_ui_set_custom_handler(s_fx.ctx, NULL, NULL);
 
