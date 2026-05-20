@@ -79,13 +79,13 @@ static void nt_ui_clay_error_cb(Clay_ErrorData err) {
 // #endregion
 
 // #region measure_cb
-/* Returns {0,0} on every defensive path: no ctx mid-frame, NULL config,
- * out-of-range fontId, invalid font handle. Clay tolerates zero dims. */
 static Clay_Dimensions nt_ui_measure_text_cb(Clay_StringSlice text, Clay_TextElementConfig *config, void *user_data) {
     (void)user_data;
+    NT_ASSERT(g_nt_ui_inframe_ctx != NULL && "measure_cb: Clay called outside begin/end");
+    NT_ASSERT(config != NULL && "measure_cb: Clay passed NULL config");
 
     nt_ui_context_t *ctx = g_nt_ui_inframe_ctx;
-    if (ctx == NULL || config == NULL || config->fontId >= NT_UI_MAX_FONTS) {
+    if (config->fontId >= NT_UI_MAX_FONTS) {
         return (Clay_Dimensions){0};
     }
     nt_font_t font = ctx->fonts[config->fontId];
@@ -277,8 +277,8 @@ static void emit_image(const Clay_RenderCommand *c) {
     const uint32_t col = default_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(tint);
 
     const nt_texture_region_t *r = nt_atlas_get_region(p->atlas, p->region_index);
-    if (r == NULL || r->vertex_count == 0U) {
-        return; /* tombstone or out-of-range */
+    if (r->vertex_count == 0U) {
+        return; /* tombstone */
     }
     const float ipu = nt_atlas_get_inverse_pixels_per_unit(p->atlas);
     const float src_w = (float)r->source_w * ipu;
