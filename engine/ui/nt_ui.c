@@ -420,9 +420,15 @@ static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c
 
     stack[(*depth)++] = (sscissor_rect_t){.x = x, .y = y, .w = wp, .h = hp};
 
-    /* Y-flip top-left -> GL bottom-left (PP-03 / D-51-04). */
-    const int fb_h = (int)target->viewport[3];
-    nt_gfx_set_scissor(x, fb_h - y - hp, wp, hp);
+    /* Y-flip top-left -> GL bottom-left, applied WITHIN the target viewport
+     * (PP-03 / D-51-04). Clay's bounding box is target-local, so the GL
+     * scissor must shift by viewport.{x,y} and Y-flip relative to viewport.h
+     * (not raw framebuffer height). Without the offset, split-screen panes
+     * and sub-FBO targets would clip the wrong pixels. */
+    const int vx = (int)target->viewport[0];
+    const int vy = (int)target->viewport[1];
+    const int vh = (int)target->viewport[3];
+    nt_gfx_set_scissor(vx + x, vy + vh - y - hp, wp, hp);
     nt_gfx_set_scissor_enabled(true);
 
     /* Re-open sprite cmd so the next RECT/BORDER/IMAGE can emit. */
@@ -438,8 +444,10 @@ static void scissor_pop(const nt_ui_context_t *ctx, sscissor_rect_t *stack, int 
         nt_gfx_set_scissor_enabled(false);
     } else {
         sscissor_rect_t r = stack[*depth - 1];
-        const int fb_h = (int)target->viewport[3];
-        nt_gfx_set_scissor(r.x, fb_h - r.y - r.h, r.w, r.h);
+        const int vx = (int)target->viewport[0];
+        const int vy = (int)target->viewport[1];
+        const int vh = (int)target->viewport[3];
+        nt_gfx_set_scissor(vx + r.x, vy + vh - r.y - r.h, r.w, r.h);
     }
     /* Re-open sprite cmd so the next RECT/BORDER/IMAGE can emit. */
     rebind_sprite_after_flush(ctx);

@@ -174,6 +174,40 @@ static void test_walker_exit_disables_scissor(void) {
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
 }
 
+/* WALK-03 / D-52-17: Clay's bounding box is target-local. With a non-zero
+ * viewport offset (split-screen pane, sub-FBO render-target), the GL scissor
+ * MUST add viewport.x to x and use a Y-flip relative to viewport.y, not the
+ * raw framebuffer height. Without this, a split-screen pane's clip rectangle
+ * lands on the wrong physical pixels (clipping the wrong pane). */
+static void test_scissor_respects_viewport_offset(void) {
+    /* Local scissor at (10, 10) within a 400x300 viewport that itself
+     * starts at framebuffer offset (100, 50). */
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 10.0f, .y = 10.0f, .width = 100.0f, .height = 100.0f};
+    s_test_cmds[0].renderData.clip.horizontal = true;
+    s_test_cmds[0].renderData.clip.vertical = true;
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+    inject_frozen_cmds(2);
+
+    nt_ui_target_t target = {.viewport = {100.0f, 50.0f, 400.0f, 300.0f}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    int rect[4];
+    nt_gfx_test_scissor_rect(rect);
+
+    /* Expected (GL coords, bottom-left origin):
+     *   x_gl = viewport.x + local_x          = 100 + 10           = 110
+     *   y_gl = viewport.y + viewport.h - local_y - local_h
+     *        = 50 + 300 - 10 - 100                                = 240
+     *   w    = local_w                                            = 100
+     *   h    = local_h                                            = 100
+     */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(110, rect[0], "scissor x must include viewport offset");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(240, rect[1], "scissor y must Y-flip within viewport, not framebuffer");
+    TEST_ASSERT_EQUAL_INT(100, rect[2]);
+    TEST_ASSERT_EQUAL_INT(100, rect[3]);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scissor_depth_8_ok);
@@ -182,5 +216,6 @@ int main(void) {
     RUN_TEST(test_scissor_y_flip_top_left_to_gl_bottom_left);
     RUN_TEST(test_scissor_intersection_nested);
     RUN_TEST(test_walker_exit_disables_scissor);
+    RUN_TEST(test_scissor_respects_viewport_offset);
     return UNITY_END();
 }
