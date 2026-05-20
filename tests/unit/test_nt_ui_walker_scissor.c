@@ -26,6 +26,7 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
+#include "stats/nt_stats.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_atlas.h"
 #include "ui/nt_ui.h"
@@ -100,6 +101,11 @@ void setUp(void) {
     nt_sprite_renderer_init(&(nt_sprite_renderer_desc_t){.max_pipelines = 4});
     nt_text_renderer_init();
 
+    /* nt_stats_init required: Plan 52-05 wired nt_stats_count("ui_draw_calls", ...)
+     * + nt_stats_count("ui_element_count", ...) at nt_ui_walk exit. Without init,
+     * nt_stats_count's NT_ASSERT(s_stats.initialized) trips on every walk. */
+    nt_stats_init(NULL);
+
     s_atlas = minimal_ui_atlas_create();
     s_sprite_material = make_test_material();
     s_text_material = make_test_material();
@@ -120,6 +126,7 @@ void tearDown(void) {
     }
     nt_ui_test_reset_walker_globals();
     minimal_ui_atlas_destroy(&s_atlas);
+    nt_stats_shutdown();
     nt_sprite_renderer_shutdown();
     nt_text_renderer_shutdown();
     nt_gfx_end_pass();

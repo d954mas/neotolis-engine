@@ -599,7 +599,7 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_nt_ui_walker_dispatch PRIVATE ${_nt_ui_test_helper_includes})
     target_link_libraries(test_nt_ui_walker_dispatch PRIVATE
         nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+        nt_resource nt_hash nt_pool nt_atlas nt_stats nt_gfx_stub nt_core unity
     )
     target_compile_definitions(test_nt_ui_walker_dispatch PRIVATE
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
@@ -620,7 +620,7 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_nt_ui_walker_scissor PRIVATE ${_nt_ui_test_helper_includes})
     target_link_libraries(test_nt_ui_walker_scissor PRIVATE
         nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+        nt_resource nt_hash nt_pool nt_atlas nt_stats nt_gfx_stub nt_core unity
     )
     target_compile_definitions(test_nt_ui_walker_scissor PRIVATE
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
@@ -640,7 +640,7 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_nt_ui_walker_custom PRIVATE ${_nt_ui_test_helper_includes})
     target_link_libraries(test_nt_ui_walker_custom PRIVATE
         nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+        nt_resource nt_hash nt_pool nt_atlas nt_stats nt_gfx_stub nt_core unity
     )
     target_compile_definitions(test_nt_ui_walker_custom PRIVATE
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
@@ -660,7 +660,7 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_nt_ui_walker_flush PRIVATE ${_nt_ui_test_helper_includes})
     target_link_libraries(test_nt_ui_walker_flush PRIVATE
         nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+        nt_resource nt_hash nt_pool nt_atlas nt_stats nt_gfx_stub nt_core unity
     )
     target_compile_definitions(test_nt_ui_walker_flush PRIVATE
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
@@ -681,7 +681,7 @@ if(NOT EMSCRIPTEN)
     target_include_directories(test_nt_ui_walker_readonly PRIVATE ${_nt_ui_test_helper_includes})
     target_link_libraries(test_nt_ui_walker_readonly PRIVATE
         nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
-        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+        nt_resource nt_hash nt_pool nt_atlas nt_stats nt_gfx_stub nt_core unity
     )
     target_compile_definitions(test_nt_ui_walker_readonly PRIVATE
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
