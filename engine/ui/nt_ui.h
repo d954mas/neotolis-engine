@@ -177,6 +177,16 @@ nt_ui_context_t *nt_ui_test_inframe_ctx(void);
 /* Plan 05 will populate these. Phase 52 returns 0u placeholders. */
 uint32_t nt_ui_test_last_walk_draw_call_delta(void);
 uint32_t nt_ui_test_last_walk_element_count(void);
+
+/* Plan 03: snapshot of the Clay-side pointer state for the given ctx,
+ * intended for CLAY-04 / D-52-16 verification. Returns the values that
+ * the most recent Clay_SetPointerState call (inside nt_ui_begin) wrote
+ * to ctx->clay->pointerInfo. The struct stays Clay-opaque in the public
+ * header -- the getters surface only the scalar fields tests need. */
+float nt_ui_test_clay_pointer_x(const nt_ui_context_t *ctx);
+float nt_ui_test_clay_pointer_y(const nt_ui_context_t *ctx);
+/* 0 = released-family, 1 = pressed-family. */
+int nt_ui_test_clay_pointer_down(const nt_ui_context_t *ctx);
 #endif /* NT_UI_TEST_ACCESS */
 
 #endif /* NT_UI_H */

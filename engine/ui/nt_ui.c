@@ -216,5 +216,22 @@ nt_ui_context_t *nt_ui_test_inframe_ctx(void) { return g_nt_ui_inframe_ctx; }
 /* Plan 05 fills the body. */
 uint32_t nt_ui_test_last_walk_draw_call_delta(void) { return 0u; }
 uint32_t nt_ui_test_last_walk_element_count(void) { return 0u; }
+
+/* CLAY-04 / D-52-16 verification probes. ctx->clay is a Clay_Context whose
+ * struct definition is only visible to this TU (CLAY_IMPLEMENTATION above);
+ * tests cannot read pointerInfo directly. These getters bridge that gap. */
+float nt_ui_test_clay_pointer_x(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_test_clay_pointer_x: ctx must be non-NULL");
+    return ctx->clay->pointerInfo.position.x;
+}
+float nt_ui_test_clay_pointer_y(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_test_clay_pointer_y: ctx must be non-NULL");
+    return ctx->clay->pointerInfo.position.y;
+}
+int nt_ui_test_clay_pointer_down(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_test_clay_pointer_down: ctx must be non-NULL");
+    const Clay_PointerDataInteractionState s = ctx->clay->pointerInfo.state;
+    return (s == CLAY_POINTER_DATA_PRESSED || s == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) ? 1 : 0;
+}
 #endif /* NT_UI_TEST_ACCESS */
 // #endregion
