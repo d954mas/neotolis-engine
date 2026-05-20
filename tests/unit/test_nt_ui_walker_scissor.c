@@ -5,143 +5,37 @@
  * at push). Death-tests use NT_TEST_EXPECT_ASSERT (Revision Issue 3).
  */
 
-#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
-/* clang-format off */
-#include "atlas/nt_atlas.h"
 #include "clay.h"
-#include "core/nt_assert.h"
-#include "font/nt_font.h"
 #include "graphics/nt_gfx.h"
-#include "hash/nt_hash.h"
-#include "input/nt_input.h"
-#include "material/nt_material.h"
-#include "nt_pack_format.h"
-#include "renderers/nt_sprite_renderer.h"
-#include "renderers/nt_text_renderer.h"
-#include "resource/nt_resource.h"
-#include "stats/nt_stats.h"
 #include "test_helpers/nt_assert_trap.h"
-#include "test_helpers/ui_atlas.h"
+#include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
-/* clang-format on */
 
 static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8u];
-static minimal_ui_atlas_t s_atlas;
-static nt_material_t s_sprite_material;
-static nt_material_t s_text_material;
-static nt_ui_context_t *s_ctx;
-static uint32_t s_vpack_counter;
+static ui_walker_fixture_t s_fx;
 
 #define MAX_TEST_CMDS 32
 static Clay_RenderCommand s_test_cmds[MAX_TEST_CMDS];
 
-static nt_material_t make_test_material(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "walker_vs"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "walker_fs"});
-
-    char pack_name[64];
-    char vs_name[64];
-    char fs_name[64];
-    (void)snprintf(pack_name, sizeof pack_name, "walker_mat_pack_%u", s_vpack_counter);
-    (void)snprintf(vs_name, sizeof vs_name, "walker_vs_%u", s_vpack_counter);
-    (void)snprintf(fs_name, sizeof fs_name, "walker_fs_%u", s_vpack_counter);
-    s_vpack_counter++;
-
-    nt_hash32_t pid = nt_hash32_str(pack_name);
-    nt_hash64_t vs_rid = nt_hash64_str(vs_name);
-    nt_hash64_t fs_rid = nt_hash64_str(fs_name);
-
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id));
-
-    nt_resource_t vs_res = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_t fs_res = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_step();
-
-    nt_material_create_desc_t desc;
-    memset(&desc, 0, sizeof desc);
-    desc.vs = vs_res;
-    desc.fs = fs_res;
-    desc.depth_test = false;
-    desc.depth_write = false;
-    desc.cull_mode = NT_CULL_NONE;
-    desc.color_mode = NT_COLOR_MODE_NONE;
-    desc.label = "walker_test_material";
-
-    nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
-    return mat;
-}
-
 void setUp(void) {
     nt_test_assert_install();
-    s_vpack_counter = 0;
     memset(s_test_cmds, 0, sizeof s_test_cmds);
-
-    nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16});
-    nt_resource_init(&(nt_resource_desc_t){0});
-    nt_atlas_init();
-    nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
-    nt_material_init(&(nt_material_desc_t){.max_materials = 32});
-
-    nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-
-    nt_sprite_renderer_init(&(nt_sprite_renderer_desc_t){.max_pipelines = 4});
-    nt_text_renderer_init();
-
-    /* nt_stats_init required: Plan 52-05 wired nt_stats_count("ui_draw_calls", ...)
-     * + nt_stats_count("ui_element_count", ...) at nt_ui_walk exit. Without init,
-     * nt_stats_count's NT_ASSERT(s_stats.initialized) trips on every walk. */
-    nt_stats_init(NULL);
-
-    s_atlas = minimal_ui_atlas_create();
-    s_sprite_material = make_test_material();
-    s_text_material = make_test_material();
-
-    s_ctx = nt_ui_create_context(s_arena, sizeof s_arena);
-    TEST_ASSERT_NOT_NULL(s_ctx);
-
-    nt_ui_set_atlas_white_region(s_ctx, s_atlas.handle, s_atlas.white_region_idx);
-    nt_ui_set_sprite_material(s_ctx, s_sprite_material);
-    nt_ui_set_text_material(s_ctx, s_text_material);
-    nt_ui_set_custom_handler(s_ctx, NULL, NULL);
+    ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }
 
-void tearDown(void) {
-    if (s_ctx != NULL) {
-        nt_ui_destroy_context(s_ctx);
-        s_ctx = NULL;
-    }
-    minimal_ui_atlas_destroy(&s_atlas);
-    nt_stats_shutdown();
-    nt_sprite_renderer_shutdown();
-    nt_text_renderer_shutdown();
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-    nt_material_shutdown();
-    nt_font_shutdown();
-    nt_atlas_test_reset();
-    nt_resource_shutdown();
-    nt_gfx_shutdown();
-    nt_hash_shutdown();
-}
+void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 static void inject_frozen_cmds(int32_t count) {
-    s_ctx->frozen_cmds.internalArray = s_test_cmds;
-    s_ctx->frozen_cmds.length = count;
-    s_ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
+    s_fx.ctx->frozen_cmds.internalArray = s_test_cmds;
+    s_fx.ctx->frozen_cmds.length = count;
+    s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
 }
 
 /* WALK-02: 8 nested SCISSOR_START / 8 SCISSOR_END must succeed (depth 8
@@ -159,7 +53,7 @@ static void test_scissor_depth_8_ok(void) {
     inject_frozen_cmds(16);
 
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
-    nt_ui_walk(s_ctx, &target);
+    nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
 }
@@ -176,7 +70,7 @@ static void test_scissor_depth_9_asserts(void) {
     inject_frozen_cmds(9);
 
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
-    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_ctx, &target));
+    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
 /* WALK-02 death-test: 2 SCISSOR_START + 1 SCISSOR_END leaves depth > 0
@@ -190,7 +84,7 @@ static void test_scissor_unbalanced_asserts_at_exit(void) {
     inject_frozen_cmds(3);
 
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
-    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_ctx, &target));
+    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
 /* WALK-03: Clay scissor (x=100, y=100, w=200, h=200) inside an 800x600 viewport
@@ -207,7 +101,7 @@ static void test_scissor_y_flip_top_left_to_gl_bottom_left(void) {
     inject_frozen_cmds(2);
 
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
-    nt_ui_walk(s_ctx, &target);
+    nt_ui_walk(s_fx.ctx, &target);
 
     int rect[4];
     nt_gfx_test_scissor_rect(rect);
@@ -249,7 +143,7 @@ static void test_scissor_intersection_nested(void) {
     inject_frozen_cmds(4);
 
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
-    nt_ui_walk(s_ctx, &target);
+    nt_ui_walk(s_fx.ctx, &target);
 
     /* After scissor_pop of inner, scissor_pop re-applies outer (0, 0, 100, 100).
      * That's the second-to-last set_scissor call. The actual LAST call is
@@ -275,7 +169,7 @@ static void test_walker_exit_disables_scissor(void) {
     inject_frozen_cmds(2);
 
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
-    nt_ui_walk(s_ctx, &target);
+    nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
 }

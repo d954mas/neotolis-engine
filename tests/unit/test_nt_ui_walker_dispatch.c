@@ -7,51 +7,29 @@
  * walker-only path, bypassing Clay's declaration machinery.
  */
 
-/* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
-#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
-/* clang-format off */
-#include "atlas/nt_atlas.h"
 #include "clay.h"
-#include "core/nt_assert.h"
-#include "font/nt_font.h"
 #include "graphics/nt_gfx.h"
-#include "hash/nt_hash.h"
-#include "input/nt_input.h"
-#include "material/nt_material.h"
-#include "nt_crc32.h"
-#include "nt_pack_format.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
-#include "resource/nt_resource.h"
-#include "stats/nt_stats.h"
 #include "test_helpers/nt_assert_trap.h"
-#include "test_helpers/ui_atlas.h"
+#include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
-/* clang-format on */
 
-/* ---- Shared test fixtures ---- */
+/* ---- Test-local state ---- */
 
 static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8u];
-static minimal_ui_atlas_t s_atlas;
-static nt_material_t s_sprite_material;
-static nt_material_t s_text_material;
-static nt_ui_context_t *s_ctx;
-static uint32_t s_vpack_counter;
+static ui_walker_fixture_t s_fx;
 
-/* Static command arrays for synthetic frozen_cmds injection. */
 #define MAX_TEST_CMDS 32
 static Clay_RenderCommand s_test_cmds[MAX_TEST_CMDS];
 
-/* Image payload backing storage. */
 static nt_ui_image_payload_t s_image_payload;
 
 /* Custom-handler flag + receiver. */
@@ -65,118 +43,27 @@ static void test_custom_handler(const void *clay_cmd, void *userdata) {
     s_custom_received_user = userdata;
 }
 
-/* ---- Build a minimal test material via virtual-pack-registered shaders ---- */
-
-static nt_material_t make_test_material(void) {
-    nt_shader_t vs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_VERTEX, .source = "void main(){}", .label = "walker_vs"});
-    nt_shader_t fs = nt_gfx_make_shader(&(nt_shader_desc_t){.type = NT_SHADER_FRAGMENT, .source = "void main(){}", .label = "walker_fs"});
-
-    char pack_name[64];
-    char vs_name[64];
-    char fs_name[64];
-    (void)snprintf(pack_name, sizeof pack_name, "walker_mat_pack_%u", s_vpack_counter);
-    (void)snprintf(vs_name, sizeof vs_name, "walker_vs_%u", s_vpack_counter);
-    (void)snprintf(fs_name, sizeof fs_name, "walker_fs_%u", s_vpack_counter);
-    s_vpack_counter++;
-
-    nt_hash32_t pid = nt_hash32_str(pack_name);
-    nt_hash64_t vs_rid = nt_hash64_str(vs_name);
-    nt_hash64_t fs_rid = nt_hash64_str(fs_name);
-
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_create_pack(pid, 0));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, vs_rid, NT_ASSET_SHADER_CODE, vs.id));
-    TEST_ASSERT_EQUAL(NT_OK, nt_resource_register(pid, fs_rid, NT_ASSET_SHADER_CODE, fs.id));
-
-    nt_resource_t vs_res = nt_resource_request(vs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_t fs_res = nt_resource_request(fs_rid, NT_ASSET_SHADER_CODE);
-    nt_resource_step();
-
-    nt_material_create_desc_t desc;
-    memset(&desc, 0, sizeof desc);
-    desc.vs = vs_res;
-    desc.fs = fs_res;
-    desc.depth_test = false;
-    desc.depth_write = false;
-    desc.cull_mode = NT_CULL_NONE;
-    desc.color_mode = NT_COLOR_MODE_NONE;
-    desc.label = "walker_test_material";
-
-    nt_material_t mat = nt_material_create(&desc);
-    nt_material_step();
-    return mat;
-}
-
 /* ---- Common setUp / tearDown ---- */
 
 void setUp(void) {
     nt_test_assert_install();
-    s_vpack_counter = 0;
     s_custom_called = false;
     s_custom_received_cmd = NULL;
     s_custom_received_user = NULL;
     memset(s_test_cmds, 0, sizeof s_test_cmds);
     memset(&s_image_payload, 0, sizeof s_image_payload);
 
-    nt_hash_init(&(nt_hash_desc_t){0});
-    nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16});
-    nt_resource_init(&(nt_resource_desc_t){0});
-    nt_atlas_init();
-    nt_font_init(&(nt_font_desc_t){.max_fonts = 4});
-    nt_material_init(&(nt_material_desc_t){.max_materials = 32});
-
-    /* Begin a frame/pass so flush's draw_indexed doesn't trip the stub backend
-     * "no active pass" guard (mirrors test_sprite_renderer setUp). */
-    nt_gfx_begin_frame();
-    nt_gfx_begin_pass(&(nt_pass_desc_t){.clear_depth = 1.0F});
-
-    nt_sprite_renderer_init(&(nt_sprite_renderer_desc_t){.max_pipelines = 4});
-    nt_text_renderer_init();
-
-    /* nt_stats_init required: Plan 52-05 wired nt_stats_count("ui_draw_calls", ...)
-     * + nt_stats_count("ui_element_count", ...) at nt_ui_walk exit. Without init,
-     * nt_stats_count's NT_ASSERT(s_stats.initialized) trips on every walk. */
-    nt_stats_init(NULL);
-
-    s_atlas = minimal_ui_atlas_create();
-    s_sprite_material = make_test_material();
-    s_text_material = make_test_material();
-
-    s_ctx = nt_ui_create_context(s_arena, sizeof s_arena);
-    TEST_ASSERT_NOT_NULL(s_ctx);
-
-    nt_ui_set_atlas_white_region(s_ctx, s_atlas.handle, s_atlas.white_region_idx);
-    nt_ui_set_sprite_material(s_ctx, s_sprite_material);
-    nt_ui_set_text_material(s_ctx, s_text_material);
-    nt_ui_set_custom_handler(s_ctx, NULL, NULL);
+    ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
 }
 
-void tearDown(void) {
-    if (s_ctx != NULL) {
-        nt_ui_destroy_context(s_ctx);
-        s_ctx = NULL;
-    }
-    minimal_ui_atlas_destroy(&s_atlas);
-
-    nt_stats_shutdown();
-    nt_sprite_renderer_shutdown();
-    nt_text_renderer_shutdown();
-    nt_gfx_end_pass();
-    nt_gfx_end_frame();
-
-    nt_material_shutdown();
-    nt_font_shutdown();
-    nt_atlas_test_reset();
-    nt_resource_shutdown();
-    nt_gfx_shutdown();
-    nt_hash_shutdown();
-}
+void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
 /* Inject a synthetic frozen_cmds array into the ctx so the walker iterates
  * a known-shape command list. Bypasses Clay declaration machinery. */
 static void inject_frozen_cmds(int32_t count) {
-    s_ctx->frozen_cmds.internalArray = s_test_cmds;
-    s_ctx->frozen_cmds.length = count;
-    s_ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
+    s_fx.ctx->frozen_cmds.internalArray = s_test_cmds;
+    s_fx.ctx->frozen_cmds.length = count;
+    s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
 }
 
 /* ---- Tests ---- */
@@ -190,13 +77,13 @@ static void test_dispatch_rectangle(void) {
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
-    nt_ui_walk(s_ctx, &target);
+    nt_ui_walk(s_fx.ctx, &target);
 
     /* White region is 4 verts/6 indices -- emit_region preserves it. */
     TEST_ASSERT_EQUAL_UINT32(4u, nt_sprite_renderer_test_last_emit_vertex_count());
     TEST_ASSERT_EQUAL_UINT32(6u, nt_sprite_renderer_test_last_emit_index_count());
     /* Walker element count delta matches frozen_cmds.length. */
-    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count(s_ctx));
+    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count(s_fx.ctx));
 }
 
 /* WALK-04: BORDER with all 4 widths non-zero -- exactly 4 last_emit calls
@@ -216,7 +103,7 @@ static void test_dispatch_border_emits_4_rects(void) {
     const uint32_t calls_before = nt_sprite_renderer_test_draw_call_count();
 
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
-    nt_ui_walk(s_ctx, &target);
+    nt_ui_walk(s_fx.ctx, &target);
 
     /* Last emit is still a 4-vert white quad. */
     TEST_ASSERT_EQUAL_UINT32(4u, nt_sprite_renderer_test_last_emit_vertex_count());
@@ -227,7 +114,7 @@ static void test_dispatch_border_emits_4_rects(void) {
 /* WALK-01: TEXT -> flush sprite (no-op when empty) + text renderer setters
  * + draw_n. We verify the text renderer's set_material call counter ticks. */
 static void test_dispatch_text(void) {
-    /* Note: This test doesn't register a font in s_ctx -- emit_text's
+    /* Note: This test doesn't register a font in s_fx.ctx -- emit_text's
      * nt_font_valid early-return fires, so no glyphs are drawn. But the
      * sprite-flush at the top of emit_text DOES happen, and the test
      * confirms the walk completes without crashing (TEXT branch reachable).
@@ -247,7 +134,7 @@ static void test_dispatch_text(void) {
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
-    nt_ui_walk(s_ctx, &target);
+    nt_ui_walk(s_fx.ctx, &target);
 
     /* font_id=0 has no font set in the per-ctx registry; emit_text exits
      * before calling set_font/set_material. The walker just needs to not
@@ -255,13 +142,13 @@ static void test_dispatch_text(void) {
     TEST_ASSERT_EQUAL_UINT32(0u, nt_text_renderer_test_set_material_calls());
     TEST_ASSERT_EQUAL_UINT32(0u, nt_text_renderer_test_set_font_calls());
     /* Walker element count still ticks. */
-    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count(s_ctx));
+    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count(s_fx.ctx));
 }
 
 /* WALK-01: IMAGE -> reads nt_ui_image_payload_t and emits one region. */
 static void test_dispatch_image(void) {
-    s_image_payload.atlas = s_atlas.handle;
-    s_image_payload.region_index = s_atlas.polygon_region_idx; /* 6-vert hull */
+    s_image_payload.atlas = s_fx.atlas.handle;
+    s_image_payload.region_index = s_fx.atlas.polygon_region_idx; /* 6-vert hull */
     s_image_payload.flip_bits = 0;
     memset(s_image_payload.slice9_lrtb, 0, sizeof s_image_payload.slice9_lrtb);
 
@@ -273,7 +160,7 @@ static void test_dispatch_image(void) {
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
-    nt_ui_walk(s_ctx, &target);
+    nt_ui_walk(s_fx.ctx, &target);
 
     /* Polygon hull preservation: emit_image must NOT collapse to 4-vert quad. */
     TEST_ASSERT_EQUAL_UINT32(6u, nt_sprite_renderer_test_last_emit_vertex_count());
@@ -295,17 +182,17 @@ static void test_dispatch_scissor_start_end(void) {
     inject_frozen_cmds(2);
 
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
-    nt_ui_walk(s_ctx, &target);
+    nt_ui_walk(s_fx.ctx, &target);
 
     /* Walker MUST disable scissor at exit (CP-04). */
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
-    TEST_ASSERT_EQUAL_UINT32(2u, nt_ui_test_last_walk_element_count(s_ctx));
+    TEST_ASSERT_EQUAL_UINT32(2u, nt_ui_test_last_walk_element_count(s_fx.ctx));
 }
 
 /* WALK-05: CUSTOM -> registered handler called with (cmd, userdata). */
 static void test_dispatch_custom(void) {
     int sentinel = 42;
-    nt_ui_set_custom_handler(s_ctx, test_custom_handler, &sentinel);
+    nt_ui_set_custom_handler(s_fx.ctx, test_custom_handler, &sentinel);
 
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_CUSTOM;
@@ -315,7 +202,7 @@ static void test_dispatch_custom(void) {
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
-    nt_ui_walk(s_ctx, &target);
+    nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_TRUE(s_custom_called);
     TEST_ASSERT_EQUAL_PTR(c, s_custom_received_cmd);
@@ -328,15 +215,15 @@ static void test_dispatch_none_silent_skip(void) {
     inject_frozen_cmds(0);
 
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
-    nt_ui_walk(s_ctx, &target);
+    nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(0u, nt_ui_test_last_walk_element_count(s_ctx));
+    TEST_ASSERT_EQUAL_UINT32(0u, nt_ui_test_last_walk_element_count(s_fx.ctx));
 
     /* Also test an explicit NONE command -- still no crash, still no emit. */
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_NONE;
     inject_frozen_cmds(1);
-    nt_ui_walk(s_ctx, &target);
-    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count(s_ctx));
+    nt_ui_walk(s_fx.ctx, &target);
+    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count(s_fx.ctx));
 }
 
 int main(void) {

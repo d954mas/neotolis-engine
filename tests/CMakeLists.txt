@@ -452,6 +452,7 @@ if(NOT EMSCRIPTEN)
     set(_nt_ui_test_helper_sources
         unit/test_helpers/ui_atlas.c
         unit/test_helpers/nt_assert_trap.c
+        unit/test_helpers/ui_walker_fixture.c
     )
 
     # Helpers need `tests/unit/` on the include path so
