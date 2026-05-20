@@ -31,6 +31,7 @@
 
 _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 required -- deps/clay/VERSION disagrees with the engine pin");
 
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -378,10 +379,15 @@ static void rebind_sprite_after_flush(void) { nt_sprite_renderer_set_material(g_
 static void scissor_push(const Clay_RenderCommand *c, sscissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
     NT_ASSERT(*depth < NT_UI_WALKER_MAX_SCISSOR_DEPTH && "scissor stack overflow");
 
-    int x = (int)c->boundingBox.x;
-    int y = (int)c->boundingBox.y;
-    int wp = (int)c->boundingBox.width;
-    int hp = (int)c->boundingBox.height;
+    /* Conservative integer rectangle: floor the min corner, ceil the max
+     * corner. (int)truncate would clip subpixel-aligned UI by 1px at the
+     * right/bottom edge. */
+    const float bx = c->boundingBox.x;
+    const float by = c->boundingBox.y;
+    int x = (int)floorf(bx);
+    int y = (int)floorf(by);
+    int wp = (int)ceilf(bx + c->boundingBox.width) - x;
+    int hp = (int)ceilf(by + c->boundingBox.height) - y;
 
     /* Nested scissor -> intersect with top (D-52-17). REPLACE would let an
      * inner widget paint outside its parent's clip, e.g. scroll-content
