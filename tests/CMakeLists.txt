@@ -151,13 +151,7 @@ if(NOT EMSCRIPTEN)
     )
     target_compile_definitions(test_nt_gfx_scissor PRIVATE NT_GFX_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
     target_compile_definitions(nt_gfx_stub PRIVATE NT_GFX_TEST_ACCESS)
-    target_compile_options(test_nt_gfx_scissor PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_gfx_scissor)
-    nt_set_sanitizer_flags(test_nt_gfx_scissor)
-    set_target_properties(test_nt_gfx_scissor PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_nt_gfx_scissor COMMAND test_nt_gfx_scissor)
+    nt_setup_test_target(test_nt_gfx_scissor)
 
     # --- Shape module tests ---
     add_executable(test_shape unit/test_shape.c)
@@ -234,15 +228,9 @@ if(NOT EMSCRIPTEN)
     add_executable(test_font unit/test_font.c)
     target_link_libraries(test_font PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool unity)
     target_compile_definitions(test_font PRIVATE NT_FONT_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_font PRIVATE -U_DLL)
     target_compile_definitions(nt_font PRIVATE NT_FONT_TEST_ACCESS)
     target_compile_options(nt_font PRIVATE -U_DLL)
-    nt_set_warning_flags(test_font)
-    nt_set_sanitizer_flags(test_font)
-    set_target_properties(test_font PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_font COMMAND test_font)
+    nt_setup_test_target(test_font)
 
     # --- Font measure benchmark ---
     # Measures hit vs miss ns/call for the nt_font_measure_n LRU cache.
@@ -250,26 +238,14 @@ if(NOT EMSCRIPTEN)
     add_executable(test_nt_font_measure_bench unit/test_nt_font_measure_bench.c)
     target_link_libraries(test_nt_font_measure_bench PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_time unity)
     target_compile_definitions(test_nt_font_measure_bench PRIVATE NT_FONT_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_nt_font_measure_bench PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_font_measure_bench)
-    nt_set_sanitizer_flags(test_nt_font_measure_bench)
-    set_target_properties(test_nt_font_measure_bench PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_nt_font_measure_bench COMMAND test_nt_font_measure_bench)
+    nt_setup_test_target(test_nt_font_measure_bench)
 
     # --- Text renderer module tests ---
     add_executable(test_text_renderer unit/test_text_renderer.c)
     target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_material nt_time unity)
     target_compile_definitions(test_text_renderer PRIVATE NT_TEXT_RENDERER_TEST_ACCESS NT_FONT_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
     target_compile_definitions(nt_text_renderer PRIVATE NT_TEXT_RENDERER_TEST_ACCESS)
-    target_compile_options(test_text_renderer PRIVATE -U_DLL)
-    nt_set_warning_flags(test_text_renderer)
-    nt_set_sanitizer_flags(test_text_renderer)
-    set_target_properties(test_text_renderer PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_text_renderer COMMAND test_text_renderer)
+    nt_setup_test_target(test_text_renderer)
 
     # --- Material module tests ---
     add_executable(test_material unit/test_material.c)
@@ -298,29 +274,15 @@ if(NOT EMSCRIPTEN)
     add_executable(test_resource unit/test_resource.c)
     target_link_libraries(test_resource PRIVATE nt_resource unity)
     target_compile_definitions(test_resource PRIVATE NT_RESOURCE_TEST_ACCESS _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
-    target_compile_options(test_resource PRIVATE -U_DLL)
     target_compile_definitions(nt_resource PRIVATE NT_RESOURCE_TEST_ACCESS)
-    nt_set_warning_flags(test_resource)
-    nt_set_sanitizer_flags(test_resource)
-    set_target_properties(test_resource PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_resource COMMAND test_resource
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    )
+    nt_setup_test_target(test_resource WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # --- Atlas module tests ---
     add_executable(test_atlas unit/test_atlas.c)
     target_link_libraries(test_atlas PRIVATE nt_atlas nt_resource nt_hash unity)
     target_compile_definitions(test_atlas PRIVATE NT_ATLAS_TEST_ACCESS _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
-    target_compile_options(test_atlas PRIVATE -U_DLL)
     target_compile_definitions(nt_atlas PRIVATE NT_ATLAS_TEST_ACCESS)
-    nt_set_warning_flags(test_atlas)
-    nt_set_sanitizer_flags(test_atlas)
-    set_target_properties(test_atlas PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_atlas COMMAND test_atlas)
+    nt_setup_test_target(test_atlas)
 
     # --- Sprite component tests ---
     add_executable(test_sprite_comp unit/test_sprite_comp.c)
@@ -328,13 +290,7 @@ if(NOT EMSCRIPTEN)
         nt_sprite_comp nt_atlas nt_entity nt_resource nt_hash nt_pool nt_shared unity
     )
     target_compile_definitions(test_sprite_comp PRIVATE NT_ATLAS_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_sprite_comp PRIVATE -U_DLL)
-    nt_set_warning_flags(test_sprite_comp)
-    nt_set_sanitizer_flags(test_sprite_comp)
-    set_target_properties(test_sprite_comp PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_sprite_comp COMMAND test_sprite_comp)
+    nt_setup_test_target(test_sprite_comp)
 
     # --- HTTP module tests ---
     add_executable(test_http unit/test_http.c)
@@ -350,29 +306,13 @@ if(NOT EMSCRIPTEN)
     add_executable(test_fs unit/test_fs.c)
     target_link_libraries(test_fs PRIVATE nt_fs unity)
     target_compile_definitions(test_fs PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
-    target_compile_options(test_fs PRIVATE -U_DLL)
-    nt_set_warning_flags(test_fs)
-    nt_set_sanitizer_flags(test_fs)
-    set_target_properties(test_fs PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_fs COMMAND test_fs
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    )
+    nt_setup_test_target(test_fs WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # --- Builder tests ---
     add_executable(test_builder unit/test_builder.c)
     target_link_libraries(test_builder PRIVATE nt_builder unity)
     target_compile_definitions(test_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
-    target_compile_options(test_builder PRIVATE -U_DLL)
-    nt_set_warning_flags(test_builder)
-    nt_set_sanitizer_flags(test_builder)
-    set_target_properties(test_builder PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_builder COMMAND test_builder
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    )
+    nt_setup_test_target(test_builder WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # --- Mesh renderer tests ---
     add_executable(test_mesh_renderer unit/test_mesh_renderer.c)
@@ -412,13 +352,7 @@ if(NOT EMSCRIPTEN)
     # real-backend test hook (sampler cache inspection) the test uses.
     target_compile_definitions(nt_gfx_stub PRIVATE NT_GFX_STUB_TEST_ACCESS NT_GFX_TEST_ACCESS)
     target_compile_definitions(nt_gfx PRIVATE NT_GFX_TEST_ACCESS)
-    target_compile_options(test_sprite_renderer PRIVATE -U_DLL)
-    nt_set_warning_flags(test_sprite_renderer)
-    nt_set_sanitizer_flags(test_sprite_renderer)
-    set_target_properties(test_sprite_renderer PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_sprite_renderer COMMAND test_sprite_renderer)
+    nt_setup_test_target(test_sprite_renderer)
 
     # --- Stats module tests (DEMO-04..06 + Pitfall 9 / Issue 2 coverage) ---
     add_executable(test_stats unit/test_stats.c)
@@ -433,13 +367,7 @@ if(NOT EMSCRIPTEN)
     )
     target_compile_definitions(nt_stats PRIVATE NT_STATS_TEST_ACCESS)
     target_compile_definitions(nt_text_renderer PRIVATE NT_TEXT_RENDERER_TEST_ACCESS)
-    target_compile_options(test_stats PRIVATE -U_DLL)
-    nt_set_warning_flags(test_stats)
-    nt_set_sanitizer_flags(test_stats)
-    set_target_properties(test_stats PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_stats COMMAND test_stats)
+    nt_setup_test_target(test_stats)
 
     # --- Phase 52: nt_ui module + walker MVP tests ---
     # All tests use stub gfx backend + Phase 51 NT_GFX_TEST_ACCESS probes.
@@ -485,12 +413,7 @@ if(NOT EMSCRIPTEN)
         NT_GFX_TEST_ACCESS NT_SPRITE_RENDERER_TEST_ACCESS NT_ATLAS_TEST_ACCESS
         _CRT_SECURE_NO_WARNINGS)
     target_compile_definitions(nt_gfx_stub PRIVATE NT_GFX_TEST_ACCESS)
-    target_compile_options(test_nt_sprite_renderer_emit_region PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_sprite_renderer_emit_region)
-    nt_set_sanitizer_flags(test_nt_sprite_renderer_emit_region)
-    set_target_properties(test_nt_sprite_renderer_emit_region PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
-    add_test(NAME test_nt_sprite_renderer_emit_region COMMAND test_nt_sprite_renderer_emit_region)
+    nt_setup_test_target(test_nt_sprite_renderer_emit_region)
 
     # --- test_nt_ui_lifecycle -- UI-01, UI-02 ---
     add_executable(test_nt_ui_lifecycle
@@ -505,12 +428,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_ui_lifecycle PRIVATE
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
         _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_nt_ui_lifecycle PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_ui_lifecycle)
-    nt_set_sanitizer_flags(test_nt_ui_lifecycle)
-    set_target_properties(test_nt_ui_lifecycle PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
-    add_test(NAME test_nt_ui_lifecycle COMMAND test_nt_ui_lifecycle)
+    nt_setup_test_target(test_nt_ui_lifecycle)
 
     # --- test_nt_ui_multictx -- UI-03 ---
     add_executable(test_nt_ui_multictx
@@ -525,12 +443,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_ui_multictx PRIVATE
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
         _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_nt_ui_multictx PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_ui_multictx)
-    nt_set_sanitizer_flags(test_nt_ui_multictx)
-    set_target_properties(test_nt_ui_multictx PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
-    add_test(NAME test_nt_ui_multictx COMMAND test_nt_ui_multictx)
+    nt_setup_test_target(test_nt_ui_multictx)
 
     # --- test_nt_ui_begin_end -- UI-04, UI-05, UI-08 ---
     add_executable(test_nt_ui_begin_end
@@ -545,12 +458,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_ui_begin_end PRIVATE
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
         _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_nt_ui_begin_end PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_ui_begin_end)
-    nt_set_sanitizer_flags(test_nt_ui_begin_end)
-    set_target_properties(test_nt_ui_begin_end PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
-    add_test(NAME test_nt_ui_begin_end COMMAND test_nt_ui_begin_end)
+    nt_setup_test_target(test_nt_ui_begin_end)
 
     # --- test_nt_ui_measure_cb -- CLAY-03 ---
     add_executable(test_nt_ui_measure_cb
@@ -565,12 +473,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_ui_measure_cb PRIVATE
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS NT_FONT_TEST_ACCESS
         _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_nt_ui_measure_cb PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_ui_measure_cb)
-    nt_set_sanitizer_flags(test_nt_ui_measure_cb)
-    set_target_properties(test_nt_ui_measure_cb PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
-    add_test(NAME test_nt_ui_measure_cb COMMAND test_nt_ui_measure_cb)
+    nt_setup_test_target(test_nt_ui_measure_cb)
 
     # --- test_nt_ui_pointer_state -- CLAY-04 ---
     add_executable(test_nt_ui_pointer_state
@@ -585,12 +488,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_ui_pointer_state PRIVATE
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
         _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_nt_ui_pointer_state PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_ui_pointer_state)
-    nt_set_sanitizer_flags(test_nt_ui_pointer_state)
-    set_target_properties(test_nt_ui_pointer_state PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
-    add_test(NAME test_nt_ui_pointer_state COMMAND test_nt_ui_pointer_state)
+    nt_setup_test_target(test_nt_ui_pointer_state)
 
     # --- test_nt_ui_walker_dispatch -- WALK-01, WALK-04 ---
     add_executable(test_nt_ui_walker_dispatch
@@ -606,12 +504,7 @@ if(NOT EMSCRIPTEN)
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
         NT_SPRITE_RENDERER_TEST_ACCESS NT_TEXT_RENDERER_TEST_ACCESS
         _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_nt_ui_walker_dispatch PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_ui_walker_dispatch)
-    nt_set_sanitizer_flags(test_nt_ui_walker_dispatch)
-    set_target_properties(test_nt_ui_walker_dispatch PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
-    add_test(NAME test_nt_ui_walker_dispatch COMMAND test_nt_ui_walker_dispatch)
+    nt_setup_test_target(test_nt_ui_walker_dispatch)
 
     # --- test_nt_ui_walker_scissor -- WALK-02, WALK-03 ---
     add_executable(test_nt_ui_walker_scissor
@@ -626,12 +519,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_ui_walker_scissor PRIVATE
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
         _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_nt_ui_walker_scissor PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_ui_walker_scissor)
-    nt_set_sanitizer_flags(test_nt_ui_walker_scissor)
-    set_target_properties(test_nt_ui_walker_scissor PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
-    add_test(NAME test_nt_ui_walker_scissor COMMAND test_nt_ui_walker_scissor)
+    nt_setup_test_target(test_nt_ui_walker_scissor)
 
     # --- test_nt_ui_walker_custom -- WALK-05 ---
     add_executable(test_nt_ui_walker_custom
@@ -646,12 +534,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_ui_walker_custom PRIVATE
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
         _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_nt_ui_walker_custom PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_ui_walker_custom)
-    nt_set_sanitizer_flags(test_nt_ui_walker_custom)
-    set_target_properties(test_nt_ui_walker_custom PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
-    add_test(NAME test_nt_ui_walker_custom COMMAND test_nt_ui_walker_custom)
+    nt_setup_test_target(test_nt_ui_walker_custom)
 
     # --- test_nt_ui_walker_flush -- WALK-06 ---
     add_executable(test_nt_ui_walker_flush
@@ -667,12 +550,7 @@ if(NOT EMSCRIPTEN)
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
         NT_SPRITE_RENDERER_TEST_ACCESS NT_TEXT_RENDERER_TEST_ACCESS
         _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_nt_ui_walker_flush PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_ui_walker_flush)
-    nt_set_sanitizer_flags(test_nt_ui_walker_flush)
-    set_target_properties(test_nt_ui_walker_flush PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
-    add_test(NAME test_nt_ui_walker_flush COMMAND test_nt_ui_walker_flush)
+    nt_setup_test_target(test_nt_ui_walker_flush)
 
     # --- test_nt_ui_walker_readonly -- UI-06, UI-07 + pre-walk assert death-tests ---
     add_executable(test_nt_ui_walker_readonly
@@ -687,12 +565,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_ui_walker_readonly PRIVATE
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS
         _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_nt_ui_walker_readonly PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_ui_walker_readonly)
-    nt_set_sanitizer_flags(test_nt_ui_walker_readonly)
-    set_target_properties(test_nt_ui_walker_readonly PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
-    add_test(NAME test_nt_ui_walker_readonly COMMAND test_nt_ui_walker_readonly)
+    nt_setup_test_target(test_nt_ui_walker_readonly)
 
     # --- test_nt_ui_stats -- WALK-09 ---
     add_executable(test_nt_ui_stats
@@ -707,12 +580,7 @@ if(NOT EMSCRIPTEN)
     target_compile_definitions(test_nt_ui_stats PRIVATE
         NT_GFX_TEST_ACCESS NT_UI_TEST_ACCESS NT_ATLAS_TEST_ACCESS NT_STATS_TEST_ACCESS
         _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_nt_ui_stats PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_ui_stats)
-    nt_set_sanitizer_flags(test_nt_ui_stats)
-    set_target_properties(test_nt_ui_stats PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}")
-    add_test(NAME test_nt_ui_stats COMMAND test_nt_ui_stats)
+    nt_setup_test_target(test_nt_ui_stats)
 
 endif()
 
