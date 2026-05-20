@@ -314,21 +314,13 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
 
     const Clay_TextRenderData *t = &c->renderData.text;
     if ((uint32_t)t->fontId >= NT_UI_MAX_FONTS) {
-        static bool warned = false;
-        if (!warned) {
-            NT_LOG_WARN("nt_ui TEXT: fontId %u >= NT_UI_MAX_FONTS=%u; skipping (further occurrences silenced)", (unsigned)t->fontId, (unsigned)NT_UI_MAX_FONTS);
-            warned = true;
-        }
+        NT_LOG_WARN_ONCE("nt_ui TEXT: fontId %u >= NT_UI_MAX_FONTS=%u; skipping (further occurrences silenced)", (unsigned)t->fontId, (unsigned)NT_UI_MAX_FONTS);
         rebind_sprite_after_flush(ctx);
         return;
     }
     nt_font_t font = ctx->fonts[t->fontId];
     if (!nt_font_valid(font)) {
-        static bool warned_invalid = false;
-        if (!warned_invalid) {
-            NT_LOG_WARN("nt_ui TEXT: fontId %u resolves to an invalid font handle; skipping (further occurrences silenced)", (unsigned)t->fontId);
-            warned_invalid = true;
-        }
+        NT_LOG_WARN_ONCE("nt_ui TEXT: fontId %u resolves to an invalid font handle; skipping (further occurrences silenced)", (unsigned)t->fontId);
         rebind_sprite_after_flush(ctx);
         return;
     }

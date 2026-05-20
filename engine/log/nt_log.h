@@ -1,6 +1,8 @@
 #ifndef NT_LOG_H
 #define NT_LOG_H
 
+#include <stdatomic.h>
+
 /* Log levels (ordered by severity) */
 typedef enum {
     NT_LOG_LEVEL_INFO = 0,
@@ -27,6 +29,21 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
 #define nt_log_warn(...) nt_log_write(NT_LOG_LEVEL_WARN, NULL, __VA_ARGS__)
 #define nt_log_error(...) nt_log_write(NT_LOG_LEVEL_ERROR, NULL, __VA_ARGS__)
 
+/* --- Once-per-callsite variants ---
+ * Per-callsite static atomic_flag; logs on first call only. Not resettable.
+ * Tests rely on per-process isolation (ctest runs each binary fresh). */
+#define NT_LOG_ONCE_(write_call)                                                  \
+    do {                                                                          \
+        static atomic_flag nt_log_once_flag_ = ATOMIC_FLAG_INIT;                  \
+        if (!atomic_flag_test_and_set_explicit(&nt_log_once_flag_, memory_order_relaxed)) { \
+            write_call;                                                           \
+        }                                                                         \
+    } while (0)
+
+#define nt_log_info_once(...) NT_LOG_ONCE_(nt_log_write(NT_LOG_LEVEL_INFO, NULL, __VA_ARGS__))
+#define nt_log_warn_once(...) NT_LOG_ONCE_(nt_log_write(NT_LOG_LEVEL_WARN, NULL, __VA_ARGS__))
+#define nt_log_error_once(...) NT_LOG_ONCE_(nt_log_write(NT_LOG_LEVEL_ERROR, NULL, __VA_ARGS__))
+
 /* --- Domain resolution --- */
 #ifndef NT_LOG_DOMAIN
 #ifdef NT_LOG_DOMAIN_DEFAULT
@@ -39,6 +56,9 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
 #define NT_LOG_INFO(...) nt_log_write(NT_LOG_LEVEL_INFO, NT_LOG_DOMAIN, __VA_ARGS__)
 #define NT_LOG_WARN(...) nt_log_write(NT_LOG_LEVEL_WARN, NT_LOG_DOMAIN, __VA_ARGS__)
 #define NT_LOG_ERROR(...) nt_log_write(NT_LOG_LEVEL_ERROR, NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_INFO_ONCE(...) NT_LOG_ONCE_(NT_LOG_INFO(__VA_ARGS__))
+#define NT_LOG_WARN_ONCE(...) NT_LOG_ONCE_(NT_LOG_WARN(__VA_ARGS__))
+#define NT_LOG_ERROR_ONCE(...) NT_LOG_ONCE_(NT_LOG_ERROR(__VA_ARGS__))
 #else
 /* Compile error when domain macros used without domain defined */
 #define NT_LOG_INFO(...)                                                                                                                                                                               \
