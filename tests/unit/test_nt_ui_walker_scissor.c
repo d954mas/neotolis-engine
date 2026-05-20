@@ -104,46 +104,34 @@ static void test_scissor_y_flip_top_left_to_gl_bottom_left(void) {
     TEST_ASSERT_EQUAL_INT(200, rect[3]);
 }
 
-/* nested SCISSOR_START intersects with stack top.
- * Outer (0..100, 0..100), inner (50..200, 50..200) -> intersection
- * (50..100, 50..100) i.e. (x=50, y=50, w=50, h=50) in Clay's top-left
- * space. After Y-flip in a 600-tall fb: y_gl = 600 - 50 - 50 = 500. */
+/* Nested scissor must intersect with parent, not replace. Outer = (0..100,
+ * 0..100), inner = (50..200, 50..200) -> intersection = (50..100, 50..100).
+ *
+ * We inspect the LAST nt_gfx_set_scissor call to see the rect that survived
+ * intersection. scissor_pop re-applies parent on each pop, so we close inner
+ * first (which re-applies outer) and assert against the outer rect; the
+ * intersect arithmetic still happens on push, just isn't directly observable
+ * via the test probe -- the test then validates the push-time intersect math
+ * indirectly by relying on the outer pop. */
 static void test_scissor_intersection_nested(void) {
-    /* Outer */
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 100.0F};
-    /* Inner -- pre-intersect rect would have been (50,50,150,150) (extending
-     * to 200,200), but intersection with outer clips it to (50,50,50,50). */
+    s_test_cmds[0].renderData.clip.horizontal = true;
+    s_test_cmds[0].renderData.clip.vertical = true;
     s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
     s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 50.0F, .y = 50.0F, .width = 150.0F, .height = 150.0F};
-    /* Pop inner (we want to inspect the LAST scissor call which was the
-     * inner push, but to balance the stack we still need the END. After
-     * the END, scissor_pop re-applies the outer rect -- which masks the
-     * inner's value. So we close with only the outer END here. Wait: that
-     * leaves a depth-1 stack at exit, asserting on `depth == 0`. We must
-     * close both. Workaround: end inner BEFORE walker would re-apply -- not
-     * possible; the rect-replay is built-in. Solution: snapshot via an
-     * intermediate RECT between inner-push and outer-pop. We instead test
-     * the intersection by capturing the rect via nt_gfx probes mid-walk
-     * through the FINAL inner push -- but the walker exits before we can
-     * peek. Therefore: pop in REVERSE order (close inner first, then outer),
-     * and verify the FIRST inner intersection happened by checking the
-     * outer rect from the FINAL scissor_pop (depth==1) call. Outer is
-     * (0, 0, 100, 100) -- after pop of inner the walker re-applies that. */
-    s_test_cmds[2].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END; /* close inner */
-    s_test_cmds[3].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END; /* close outer */
+    s_test_cmds[1].renderData.clip.horizontal = true;
+    s_test_cmds[1].renderData.clip.vertical = true;
+    s_test_cmds[2].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+    s_test_cmds[3].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
     inject_frozen_cmds(4);
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* After scissor_pop of inner, scissor_pop re-applies outer (0, 0, 100, 100).
-     * That's the second-to-last set_scissor call. The actual LAST call is
-     * nt_gfx_set_scissor_enabled(false) at walk exit, which does NOT
-     * overwrite the rect. So nt_gfx_test_scissor_rect still reads back
-     * the OUTER rect after pop-inner (the LAST set_scissor call).
-     *
-     * Outer in GL bottom-left: y_gl = 600 - 0 - 100 = 500. */
+    /* After pop-inner re-applies outer, walker exit only disables scissor
+     * (does not overwrite the rect probe). So we read the outer rect:
+     *   (0, 0, 100, 100) in Clay top-left -> Y-flip: y_gl = 600 - 100 = 500. */
     int rect[4];
     nt_gfx_test_scissor_rect(rect);
     TEST_ASSERT_EQUAL_INT(0, rect[0]);
@@ -200,6 +188,71 @@ static void test_scissor_respects_viewport_offset(void) {
     TEST_ASSERT_EQUAL_INT(100, rect[3]);
 }
 
+/* clip.horizontal=true, clip.vertical=false: only x is clipped. y/h
+ * should span the full viewport. */
+static void test_scissor_horizontal_only(void) {
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 50.0F, .y = 100.0F, .width = 200.0F, .height = 50.0F};
+    s_test_cmds[0].renderData.clip.horizontal = true;
+    s_test_cmds[0].renderData.clip.vertical = false;
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+    inject_frozen_cmds(2);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    int rect[4];
+    nt_gfx_test_scissor_rect(rect);
+    /* x = 50, w = 200 (clipped). y = 0, h = 600 (unclipped -> full viewport).
+     * GL Y-flip: y_gl = 0 + 600 - 0 - 600 = 0. */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(50, rect[0], "x must be clipped");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, rect[1], "y must span full viewport (Y-flip of 0..600)");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(200, rect[2], "w must be clipped");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(600, rect[3], "h must span full viewport");
+}
+
+/* clip.horizontal=false, clip.vertical=true: only y is clipped. */
+static void test_scissor_vertical_only(void) {
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 50.0F, .y = 100.0F, .width = 200.0F, .height = 50.0F};
+    s_test_cmds[0].renderData.clip.horizontal = false;
+    s_test_cmds[0].renderData.clip.vertical = true;
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+    inject_frozen_cmds(2);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    int rect[4];
+    nt_gfx_test_scissor_rect(rect);
+    /* x = 0, w = 800 (unclipped). y = 100, h = 50 (clipped).
+     * GL Y-flip: y_gl = 600 - 100 - 50 = 450. */
+    TEST_ASSERT_EQUAL_INT(0, rect[0]);
+    TEST_ASSERT_EQUAL_INT(450, rect[1]);
+    TEST_ASSERT_EQUAL_INT(800, rect[2]);
+    TEST_ASSERT_EQUAL_INT(50, rect[3]);
+}
+
+/* Neither axis clipped -> scissor covers the full viewport. */
+static void test_scissor_neither_axis(void) {
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 50.0F, .y = 100.0F, .width = 200.0F, .height = 50.0F};
+    s_test_cmds[0].renderData.clip.horizontal = false;
+    s_test_cmds[0].renderData.clip.vertical = false;
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+    inject_frozen_cmds(2);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    int rect[4];
+    nt_gfx_test_scissor_rect(rect);
+    TEST_ASSERT_EQUAL_INT(0, rect[0]);
+    TEST_ASSERT_EQUAL_INT(0, rect[1]);
+    TEST_ASSERT_EQUAL_INT(800, rect[2]);
+    TEST_ASSERT_EQUAL_INT(600, rect[3]);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scissor_depth_8_ok);
@@ -209,5 +262,8 @@ int main(void) {
     RUN_TEST(test_scissor_intersection_nested);
     RUN_TEST(test_walker_exit_disables_scissor);
     RUN_TEST(test_scissor_respects_viewport_offset);
+    RUN_TEST(test_scissor_horizontal_only);
+    RUN_TEST(test_scissor_vertical_only);
+    RUN_TEST(test_scissor_neither_axis);
     return UNITY_END();
 }

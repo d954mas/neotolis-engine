@@ -352,14 +352,38 @@ static void rebind_sprite_after_flush(const nt_ui_context_t *ctx) { nt_sprite_re
 static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, sscissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
     NT_ASSERT(*depth < NT_UI_WALKER_MAX_SCISSOR_DEPTH && "scissor stack overflow");
 
-    /* floor min / ceil max: a (int)truncate would clip subpixel-aligned
-     * UI by 1px at the right/bottom edge. */
-    const float bx = c->boundingBox.x;
-    const float by = c->boundingBox.y;
-    int x = (int)floorf(bx);
-    int y = (int)floorf(by);
-    int wp = (int)ceilf(bx + c->boundingBox.width) - x;
-    int hp = (int)ceilf(by + c->boundingBox.height) - y;
+    /* clip.horizontal / .vertical flag the axes that should be clipped.
+     * On an unclipped axis we use the target viewport extent so the GL
+     * scissor still has well-defined bounds; the nested-intersect step
+     * below will narrow it to the parent on that axis if there is one.
+     *
+     * floor min / ceil max on the clipped axis: a (int)truncate would
+     * clip subpixel-aligned UI by 1px at the right/bottom edge. */
+    const Clay_ClipRenderData *clip = &c->renderData.clip;
+    const int vx = (int)target->viewport[0];
+    const int vy = (int)target->viewport[1];
+    const int vw = (int)target->viewport[2];
+    const int vh = (int)target->viewport[3];
+    int x;
+    int y;
+    int wp;
+    int hp;
+    if (clip->horizontal) {
+        const float bx = c->boundingBox.x;
+        x = (int)floorf(bx);
+        wp = (int)ceilf(bx + c->boundingBox.width) - x;
+    } else {
+        x = 0;
+        wp = vw;
+    }
+    if (clip->vertical) {
+        const float by = c->boundingBox.y;
+        y = (int)floorf(by);
+        hp = (int)ceilf(by + c->boundingBox.height) - y;
+    } else {
+        y = 0;
+        hp = vh;
+    }
 
     /* Nested scissor intersects with stack top -- REPLACE semantics would
      * let an inner widget paint outside its parent's clip (e.g. scroll
@@ -387,9 +411,6 @@ static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c
     /* Clay's bbox is target-local; shift by viewport.{x,y} and Y-flip
      * against viewport.h, NOT raw framebuffer height. Without the offset,
      * split-screen panes and sub-FBO targets clip the wrong pixels. */
-    const int vx = (int)target->viewport[0];
-    const int vy = (int)target->viewport[1];
-    const int vh = (int)target->viewport[3];
     nt_gfx_set_scissor(vx + x, vy + vh - y - hp, wp, hp);
     nt_gfx_set_scissor_enabled(true);
 
