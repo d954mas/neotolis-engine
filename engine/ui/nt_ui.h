@@ -158,8 +158,14 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
  *     nt_stats_count("ui_draw_calls",    nt_ui_get_last_walk_draw_calls(ctx));
  *     nt_stats_count("ui_element_count", nt_ui_get_last_walk_element_count(ctx));
  *
- * draw_calls counts physical glDrawElements (one per renderer flush) --
- * the metric reflects batching efficiency, not Clay command count. */
+ * draw_calls is a WINDOW measurement: the GL draw-call counter delta
+ * between walk entry and exit. It counts every physical
+ * glDrawElements made during the walk, which includes any draws a
+ * CUSTOM-command handler emits (the handler's draws are part of the
+ * UI's cost, not separable from batching efficiency). Use this as
+ * "what did this walk cost the GPU?". If you need UI-only draws
+ * (excluding CUSTOM handler output), snapshot sprite/text renderer
+ * stats yourself around nt_ui_walk. */
 uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_element_count(const nt_ui_context_t *ctx);
 
