@@ -135,6 +135,7 @@ void nt_ui_destroy_context(nt_ui_context_t *ctx) {
 // #region font_registry
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_font: ctx must be non-NULL");
+    NT_ASSERT(!ctx->in_frame && "nt_ui_set_font: must be called outside begin/end (mid-frame mutation would split layout vs walker view)");
     NT_ASSERT(font_id < NT_UI_MAX_FONTS && "nt_ui_set_font: font_id out of range (raise NT_UI_MAX_FONTS)");
     ctx->fonts[font_id] = font;
 }
@@ -236,24 +237,24 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c)
      * left/right edge geometry below would emit a negative-height rect.
      * Fail early on that contract violation rather than feeding garbage to
      * the sprite renderer. */
-    const float _top = (float)b->width.top;
-    const float _bot = (float)b->width.bottom;
-    const float _lft = (float)b->width.left;
-    const float _rgt = (float)b->width.right;
-    NT_ASSERT(_top + _bot <= bb.height && "nt_ui BORDER: top+bottom widths exceed bbox.height");
-    NT_ASSERT(_lft + _rgt <= bb.width && "nt_ui BORDER: left+right widths exceed bbox.width");
+    const float top = (float)b->width.top;
+    const float bot = (float)b->width.bottom;
+    const float lft = (float)b->width.left;
+    const float rgt = (float)b->width.right;
+    NT_ASSERT(top + bot <= bb.height && "nt_ui BORDER: top+bottom widths exceed bbox.height");
+    NT_ASSERT(lft + rgt <= bb.width && "nt_ui BORDER: left+right widths exceed bbox.width");
 
     if (b->width.top) {
-        emit_screen_rect(atlas, wr, bb.x, bb.y, bb.width, _top, col);
+        emit_screen_rect(atlas, wr, bb.x, bb.y, bb.width, top, col);
     }
     if (b->width.bottom) {
-        emit_screen_rect(atlas, wr, bb.x, bb.y + bb.height - _bot, bb.width, _bot, col);
+        emit_screen_rect(atlas, wr, bb.x, bb.y + bb.height - bot, bb.width, bot, col);
     }
     if (b->width.left) {
-        emit_screen_rect(atlas, wr, bb.x, bb.y + _top, _lft, bb.height - _top - _bot, col);
+        emit_screen_rect(atlas, wr, bb.x, bb.y + top, lft, bb.height - top - bot, col);
     }
     if (b->width.right) {
-        emit_screen_rect(atlas, wr, bb.x + bb.width - _rgt, bb.y + _top, _rgt, bb.height - _top - _bot, col);
+        emit_screen_rect(atlas, wr, bb.x + bb.width - rgt, bb.y + top, rgt, bb.height - top - bot, col);
     }
 }
 // #endregion
@@ -524,11 +525,13 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
      * this guard, a create -> walk skipping begin/end would be a silent
      * no-op. */
     NT_ASSERT(ctx->frozen_cmds.internalArray != NULL && "nt_ui_walk: frozen_cmds not populated (call nt_ui_end before walk)");
-    /* Viewport must be finite and non-negative -- the cast to int below
-     * would otherwise turn NaN / +-inf into garbage GL state. isfinite()
-     * rejects both NaN and infinity; raw `>= 0.0F` lets +inf through. */
+    /* Viewport must be finite and strictly positive in width/height --
+     * GL accepts zero dimensions (no draws) but downstream scissor math
+     * `vh - y - hp` underflows to negative when vh == 0, which is GL
+     * undefined. Origin x/y may be zero. */
     NT_ASSERT(isfinite(target->viewport[0]) && isfinite(target->viewport[1]) && isfinite(target->viewport[2]) && isfinite(target->viewport[3]) && "nt_ui_walk: target->viewport must be finite");
-    NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport must be non-negative");
+    NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && "nt_ui_walk: target->viewport origin (x,y) must be non-negative");
+    NT_ASSERT(target->viewport[2] > 0.0F && target->viewport[3] > 0.0F && "nt_ui_walk: target->viewport (w,h) must be > 0 (zero-size walk is not a supported no-op)");
     NT_ASSERT(ctx->atlas.id != 0 && "nt_ui_set_atlas_white_region(ctx,...) required before nt_ui_walk");
     NT_ASSERT(nt_resource_is_ready(ctx->atlas) && "nt_ui_walk: ctx atlas must be READY");
     NT_ASSERT(ctx->sprite_material.id != 0 && "nt_ui_set_sprite_material(ctx,...) required before nt_ui_walk");
@@ -626,6 +629,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uint32_t white_region_idx) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_atlas_white_region: ctx must be non-NULL");
+    NT_ASSERT(!ctx->in_frame && "nt_ui_set_atlas_white_region: must be called outside begin/end");
     NT_ASSERT(atlas.id != 0 && "nt_ui_set_atlas_white_region: invalid atlas handle");
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_ui_set_atlas_white_region: atlas must be READY");
     const nt_texture_region_t *r = nt_atlas_get_region(atlas, white_region_idx);
@@ -640,18 +644,21 @@ void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uin
 
 void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_material) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_sprite_material: ctx must be non-NULL");
+    NT_ASSERT(!ctx->in_frame && "nt_ui_set_sprite_material: must be called outside begin/end");
     NT_ASSERT(sprite_material.id != 0 && "nt_ui_set_sprite_material: invalid material handle");
     ctx->sprite_material = sprite_material;
 }
 
 void nt_ui_set_text_material(nt_ui_context_t *ctx, nt_material_t text_material) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_text_material: ctx must be non-NULL");
+    NT_ASSERT(!ctx->in_frame && "nt_ui_set_text_material: must be called outside begin/end");
     NT_ASSERT(text_material.id != 0 && "nt_ui_set_text_material: invalid material handle");
     ctx->text_material = text_material;
 }
 
 void nt_ui_set_custom_handler(nt_ui_context_t *ctx, nt_ui_custom_handler_t fn, void *userdata) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_custom_handler: ctx must be non-NULL");
+    NT_ASSERT(!ctx->in_frame && "nt_ui_set_custom_handler: must be called outside begin/end");
     /* NULL fn is allowed -- legitimate "reserved space" pattern. */
     ctx->custom_fn = fn;
     ctx->custom_user = userdata;
