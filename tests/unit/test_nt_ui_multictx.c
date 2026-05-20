@@ -17,9 +17,9 @@
 #include "unity.h"
 
 /* Three independently sized arenas (8 MiB each, 8-aligned via uint64_t). */
-static uint64_t s_arena_a[NT_UI_DEFAULT_ARENA_SIZE / 8U];
-static uint64_t s_arena_b[NT_UI_DEFAULT_ARENA_SIZE / 8U];
-static uint64_t s_arena_c[NT_UI_DEFAULT_ARENA_SIZE / 8U];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_a[NT_UI_DEFAULT_ARENA_SIZE];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_b[NT_UI_DEFAULT_ARENA_SIZE];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_c[NT_UI_DEFAULT_ARENA_SIZE];
 
 void setUp(void) { nt_test_assert_install(); }
 void tearDown(void) {}

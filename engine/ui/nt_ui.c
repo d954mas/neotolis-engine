@@ -126,7 +126,7 @@ size_t nt_ui_min_arena_size(void) { return nt_ui_ctx_size_aligned() + (size_t)Cl
 
 nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size) {
     NT_ASSERT(arena != NULL && "nt_ui_create_context: arena must be non-NULL");
-    NT_ASSERT(((uintptr_t)arena & 7U) == 0U && "nt_ui_create_context: arena must be 8-byte aligned");
+    NT_ASSERT(((uintptr_t)arena & (NT_UI_ARENA_ALIGN - 1U)) == 0U && "nt_ui_create_context: arena must be NT_UI_ARENA_ALIGN-aligned (alignas(NT_UI_ARENA_ALIGN) static uint8_t arena[N])");
     NT_ASSERT(arena_size >= nt_ui_min_arena_size() && "nt_ui_create_context: arena_size < nt_ui_min_arena_size()");
 
     nt_ui_context_t *ctx = (nt_ui_context_t *)arena;

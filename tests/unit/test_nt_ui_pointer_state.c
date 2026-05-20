@@ -29,7 +29,7 @@
 #include "unity.h"
 /* clang-format on */
 
-static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8U];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_DEFAULT_ARENA_SIZE];
 
 void setUp(void) {
     /* gfx is required because the nt_ui transitive link surface pulls it

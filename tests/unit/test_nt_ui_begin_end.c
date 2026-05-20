@@ -20,8 +20,8 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-static uint64_t s_arena_a[NT_UI_DEFAULT_ARENA_SIZE / 8U];
-static uint64_t s_arena_b[NT_UI_DEFAULT_ARENA_SIZE / 8U];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_a[NT_UI_DEFAULT_ARENA_SIZE];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_b[NT_UI_DEFAULT_ARENA_SIZE];
 
 void setUp(void) { nt_test_assert_install(); }
 void tearDown(void) {

@@ -43,7 +43,7 @@
 /* clang-format on */
 
 /* 8-byte aligned static arena via uint64_t backing array. */
-static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8U];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_DEFAULT_ARENA_SIZE];
 
 /* Virtual pack id counter to keep registrations unique across tests. */
 static uint32_t s_vpack_counter;

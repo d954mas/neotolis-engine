@@ -52,6 +52,7 @@
  * Globals. See nt_ui_target_t for details.
  */
 
+#include <stdalign.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -72,8 +73,21 @@
 #define NT_UI_WALKER_MAX_SCISSOR_DEPTH 8
 #endif
 
+/* Required arena alignment. Clay places its Clay_Context struct at the
+ * head of the arena via raw pointer cast and that struct holds fields
+ * whose strictest alignment is max_align_t (16 bytes on x86_64). A raw
+ * `static uint8_t arena[N]` declaration has only 1-byte alignment in C,
+ * so callers MUST use the alignas decoration shown below. */
+#define NT_UI_ARENA_ALIGN _Alignof(max_align_t)
+
 /* Default arena size suitable for ~50k Clay elements + 8 fonts + scroll/
- * modal stacks. Caller pattern: static uint8_t g_ui_arena[NT_UI_DEFAULT_ARENA_SIZE]. */
+ * modal stacks. Recommended caller pattern:
+ *
+ *     alignas(NT_UI_ARENA_ALIGN) static uint8_t g_ui_arena[NT_UI_DEFAULT_ARENA_SIZE];
+ *
+ * `static uint64_t arena[N/8]` gives 8-byte alignment which is NOT enough.
+ * The cleanest stack-friendly alternative is a uint64_t array sized to fit
+ * plus a cast through a max-aligned union; tests use this pattern. */
 #define NT_UI_DEFAULT_ARENA_SIZE (8U * 1024U * 1024U)
 
 /* ---- Opaque context handle ---- */
