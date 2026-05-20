@@ -371,10 +371,14 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
     bool fx = (flip_bits & NT_SPRITE_FLAG_FLIP_X) != 0;
     bool fy = (flip_bits & NT_SPRITE_FLAG_FLIP_Y) != 0;
 
-    /* Origin offset baked into translation. cached_pos is source-space, so
-     * the vertex loop's per-vertex flip negates source-space x — to mirror
-     * around the pivot rather than around source x=0, sign-flip dx/dy here
-     * before they get folded into tx/ty/tz. */
+    /* Bake the origin pivot into translation: world = m * (local - pivot)
+     * + t expands to world = m * local + (t - m * pivot). Subtracting
+     * m*pivot from tx/ty/tz folds the pivot offset into translation so
+     * the per-vertex multiply doesn't have to subtract it.
+     *
+     * cached_pos is source-space; the per-vertex flip negates source-x.
+     * Sign-flipping dx/dy here mirrors around the pivot instead of around
+     * source x=0. */
     float dx = origin_x * (float)r->source_w * ipu;
     float dy = origin_y * (float)r->source_h * ipu;
     if (fx) {
@@ -611,12 +615,9 @@ void nt_sprite_renderer_flush(void) {
         return;
     }
 
-    /* Single upload for the whole frame's worth of geometry — vs the previous
-     * implementation that did one update_buffer per 4096-sprite flush
-     * (16 uploads on 60k bunnies), each potentially stalling the WebGL
-     * driver's dynamic VBO. orphan_buffer hints the driver to allocate fresh
-     * storage on every rewrite so the GPU can keep consuming the previous
-     * frame while we're staging the next one. */
+    /* orphan_buffer asks the driver to allocate fresh storage instead of
+     * mutating the bound VBO in place, so the GPU can keep consuming the
+     * previous frame's draws while we stage the next one. */
     nt_gfx_orphan_buffer(s_sprite.vbo, s_sprite.vertices, s_sprite.vertex_count * (uint32_t)sizeof(nt_sprite_vertex_t));
     if (s_sprite.index_count > 0) {
         nt_gfx_orphan_buffer(s_sprite.ibo, s_sprite.indices, s_sprite.index_count * (uint32_t)sizeof(uint16_t));

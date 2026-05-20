@@ -450,8 +450,6 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c)
 // #endregion
 
 // #region walk
-/* Extracted from nt_ui_walk so the loop body stays under clang-tidy's
- * cognitive-complexity threshold. */
 static void dispatch_command(nt_ui_context_t *ctx, const Clay_RenderCommand *c, sscissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target) {
     switch (c->commandType) {
     case CLAY_RENDER_COMMAND_TYPE_NONE:
