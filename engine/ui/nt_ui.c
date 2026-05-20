@@ -501,7 +501,8 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
      * does not consume it; if Phase 5x grows the walker to upload Globals
      * UBO from this field, callers writing into it expecting "old"
      * behaviour would silently get the wrong projection. */
-    NT_ASSERT(target->projection[0] == 0.0F && target->projection[5] == 0.0F && target->projection[10] == 0.0F && target->projection[15] == 0.0F && "nt_ui_walk: target->projection is reserved -- must be all-zero (caller owns Globals UBO)");
+    NT_ASSERT(target->projection[0] == 0.0F && target->projection[5] == 0.0F && target->projection[10] == 0.0F && target->projection[15] == 0.0F &&
+              "nt_ui_walk: target->projection is reserved -- must be all-zero (caller owns Globals UBO)");
     NT_ASSERT(ctx->atlas.id != 0 && "nt_ui_set_atlas_white_region(ctx,...) required before nt_ui_walk");
     NT_ASSERT(nt_resource_is_ready(ctx->atlas) && "nt_ui_walk: ctx atlas must be READY");
     NT_ASSERT(ctx->sprite_material.id != 0 && "nt_ui_set_sprite_material(ctx,...) required before nt_ui_walk");
