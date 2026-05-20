@@ -52,21 +52,26 @@ static nt_ui_context_t *g_nt_ui_inframe_ctx = NULL;
 // #endregion
 
 // #region clay_error_handler
-/* Returns true if a Clay error code is a recoverable caller-author bug
- * (Clay safely no-ops it). Everything else is treated as a fatal invariant
- * violation -- arena too small, missing measure callback, internal Clay
- * bug, or an unknown type from a future Clay version. Defaulting unknown
- * to fatal prevents a Clay upgrade from silently demoting new invariants. */
+/* Returns true if a Clay error code is a recoverable visual bug (Clay
+ * safely no-ops it; the UI still renders, just with the buggy element
+ * missing or mis-styled). Everything else -- including capacity overflows
+ * that SILENTLY TRUNCATE the UI -- is a fatal invariant violation.
+ * Defaulting unknown to fatal prevents a future Clay version from silently
+ * demoting new invariants. */
 static bool nt_ui_clay_error_is_recoverable(Clay_ErrorType type) {
     switch (type) {
-    case CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED:
-    case CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED:
     case CLAY_ERROR_TYPE_DUPLICATE_ID:
     case CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND:
     case CLAY_ERROR_TYPE_PERCENTAGE_OVER_1:
         return true;
     case CLAY_ERROR_TYPE_TEXT_MEASUREMENT_FUNCTION_NOT_PROVIDED:
     case CLAY_ERROR_TYPE_ARENA_CAPACITY_EXCEEDED:
+    /* Capacity exceeded silently truncates the UI -- caller declared
+     * more than Clay's internal arrays could hold. That's a sizing bug
+     * the developer must fix (raise Clay's limits or simplify the UI),
+     * not a runtime condition to tolerate. */
+    case CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED:
+    case CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED:
     case CLAY_ERROR_TYPE_INTERNAL_ERROR:
         return false;
     }
