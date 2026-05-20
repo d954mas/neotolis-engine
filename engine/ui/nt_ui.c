@@ -341,6 +341,11 @@ static void rebind_sprite_after_flush(const nt_ui_context_t *ctx);
  * material/pipeline boundary), then binds the text font + text material
  * and forwards to nt_text_renderer_draw_n (Phase 51 length-aware API). */
 static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
+    /* Lazy walker contract: text_material is asserted ONLY when an actual
+     * TEXT command appears -- a pure-RECT UI never enters this path so
+     * never needs the setter call. */
+    NT_ASSERT(ctx->text_material.id != 0 && "nt_ui_set_text_material(ctx,...) required before walking a UI that contains TEXT commands");
+
     /* State boundary: sprite material/pipeline must flush before text
      * binds its own pipeline. Auto-flush on font/material change happens
      * inside the text renderer, but the sprite renderer's own staging
@@ -527,9 +532,12 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(!ctx->in_frame && "nt_ui_walk: ctx is mid-frame (call nt_ui_end first)");
     NT_ASSERT(ctx->atlas.id != 0 && "nt_ui_set_atlas_white_region(ctx,...) required before nt_ui_walk");
     NT_ASSERT(nt_resource_is_ready(ctx->atlas) && "nt_ui_walk: ctx atlas must be READY");
-    /* Revision Issue 1: sprite + text materials are separate; assert BOTH. */
+    /* Revision Issue 1: sprite + text materials are separate. Sprite is
+     * asserted at entry because RECT/BORDER/IMAGE need it eagerly (the
+     * walker binds it before the dispatch loop). Text material is asserted
+     * lazily inside emit_text -- a pure-RECT UI doesn't need it. This lets
+     * games with no UI text skip set_text_material entirely. */
     NT_ASSERT(ctx->sprite_material.id != 0 && "nt_ui_set_sprite_material(ctx,...) required before nt_ui_walk");
-    NT_ASSERT(ctx->text_material.id != 0 && "nt_ui_set_text_material(ctx,...) required before nt_ui_walk");
 
     /* Walker-local scissor stack -- D-52-17 (on C stack, NOT in ctx, so
      * multiple walks against the same ctx don't share state). */

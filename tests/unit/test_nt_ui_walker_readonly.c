@@ -111,9 +111,19 @@ static void test_walk_without_sprite_material_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
-/* D-52-19 death-test: walk without text material asserts. */
+/* D-52-19 death-test: walk that EMITS A TEXT COMMAND without text_material
+ * set asserts inside emit_text. (text_material is asserted lazily so a
+ * pure-RECT UI doesn't require the setter.) */
 static void test_walk_without_text_material_asserts(void) {
-    inject_frozen_cmds(0);
+    static const char *kText = "X";
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_TEXT;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
+    s_test_cmds[0].renderData.text.stringContents = (Clay_StringSlice){.length = 1, .chars = kText, .baseChars = kText};
+    s_test_cmds[0].renderData.text.textColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
+    s_test_cmds[0].renderData.text.fontId = 0;
+    s_test_cmds[0].renderData.text.fontSize = 14;
+    inject_frozen_cmds(1);
+
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
