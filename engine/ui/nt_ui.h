@@ -174,7 +174,8 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 /* Module-level in-frame pointer (D-52-12). NULL when no context is mid-frame. */
 nt_ui_context_t *nt_ui_test_inframe_ctx(void);
 
-/* Plan 05 will populate these. Phase 52 returns 0u placeholders. */
+/* Plan 04 captures into static module state at walk exit; Plan 05 will
+ * additionally route these through nt_stats_count. */
 uint32_t nt_ui_test_last_walk_draw_call_delta(void);
 uint32_t nt_ui_test_last_walk_element_count(void);
 
@@ -187,6 +188,16 @@ float nt_ui_test_clay_pointer_x(const nt_ui_context_t *ctx);
 float nt_ui_test_clay_pointer_y(const nt_ui_context_t *ctx);
 /* 0 = released-family, 1 = pressed-family. */
 int nt_ui_test_clay_pointer_down(const nt_ui_context_t *ctx);
+
+/* Plan 04: walker-setter introspection + reset.
+ * Tests use these to verify what the setters wrote and to reset the
+ * module-level globals for death-tests that need a "no setter called"
+ * pre-state (e.g. walk_without_atlas_asserts). */
+nt_resource_t nt_ui_test_atlas(void);
+uint32_t nt_ui_test_white_region(void);
+nt_material_t nt_ui_test_sprite_material(void);
+nt_material_t nt_ui_test_text_material(void);
+void nt_ui_test_reset_walker_globals(void);
 #endif /* NT_UI_TEST_ACCESS */
 
 #endif /* NT_UI_H */

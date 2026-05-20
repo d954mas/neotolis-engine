@@ -1,5 +1,11 @@
 #include "ui/nt_ui.h"
 
+#include "atlas/nt_atlas.h"
+#include "graphics/nt_gfx.h"
+#include "material/nt_material.h"
+#include "renderers/nt_sprite_renderer.h"
+#include "renderers/nt_text_renderer.h"
+
 /*
  * Clay v0.14 implementation TU.
  *
@@ -41,6 +47,27 @@ static nt_ui_context_t *g_nt_ui_inframe_ctx = NULL;
 /* g_nt_ui_measure_wired -- Clay_SetMeasureTextFunction is a global hook.
  * We wire it lazily on first create_context. Plan 03 fills the body. */
 static bool g_nt_ui_measure_wired = false;
+
+/* Plan 04 / Revision Issue 1: walker globals set by nt_ui_set_* APIs.
+ *
+ * Sprite and text materials are SEPARATE globals -- they map to different
+ * nt_material_t handles (different shaders / pipelines), so a single shared
+ * slot would force a flush+rebind on every TEXT command. Walker asserts
+ * BOTH are valid at entry.
+ *
+ * g_nt_ui_atlas + g_nt_ui_white_region drive RECT/BORDER emit (and IMAGE's
+ * fallback when the payload has no atlas of its own -- D-52-06). */
+static nt_resource_t g_nt_ui_atlas;
+static uint32_t g_nt_ui_white_region;
+static nt_material_t g_nt_ui_sprite_material;
+static nt_material_t g_nt_ui_text_material;
+static nt_ui_custom_handler_t g_nt_ui_custom_fn;
+static void *g_nt_ui_custom_user;
+
+/* Walker stats (D-52-20 / WALK-09). Plan 05 wires them into nt_stats; Plan
+ * 04 captures the values into BSS so the test probes can read them. */
+static uint32_t s_last_walk_draw_call_delta;
+static uint32_t s_last_walk_element_count;
 // #endregion
 
 // #region clay_error_handler
@@ -190,22 +217,42 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 }
 // #endregion
 
-// #region setters_stub
-/* Setter bodies land in Plan 04 next to the walker code that consumes
- * them. Phase 52 declares them in the public header (Revision Issue 1
- * locks symmetric sprite + text material setters). */
+// #region setters
+/* Walker entry asserts these were set; setters validate at call time so the
+ * developer sees the bad input at the call site, not at first walk.
+ *
+ * Atlas setter: requires non-zero, READY (Drift 5 -- nt_resource_is_ready),
+ * AND the named region resolves with vertex_count > 0 (Q4 -- catches a
+ * mis-baked atlas one frame earlier than the walker would).
+ *
+ * Material setters: only check .id != 0 -- Phase 52 doesn't synchronously
+ * resolve material pipelines (nt_material_step happens elsewhere); the
+ * sprite/text renderers' own set_material asserts material.ready when
+ * actually consumed inside the walker. */
 void nt_ui_set_atlas_white_region(nt_resource_t atlas, uint32_t white_region_idx) {
-    (void)atlas;
-    (void)white_region_idx;
+    NT_ASSERT(atlas.id != 0 && "nt_ui_set_atlas_white_region: invalid atlas handle");
+    NT_ASSERT(nt_resource_is_ready(atlas) && "nt_ui_set_atlas_white_region: atlas must be READY");
+    const nt_texture_region_t *r = nt_atlas_get_region(atlas, white_region_idx);
+    NT_ASSERT(r != NULL && r->vertex_count > 0u && "nt_ui_set_atlas_white_region: white region missing / tombstoned (mis-baked atlas)");
+    g_nt_ui_atlas = atlas;
+    g_nt_ui_white_region = white_region_idx;
 }
 
-void nt_ui_set_sprite_material(nt_material_t sprite_material) { (void)sprite_material; }
+void nt_ui_set_sprite_material(nt_material_t sprite_material) {
+    NT_ASSERT(sprite_material.id != 0 && "nt_ui_set_sprite_material: invalid material handle");
+    g_nt_ui_sprite_material = sprite_material;
+}
 
-void nt_ui_set_text_material(nt_material_t text_material) { (void)text_material; }
+void nt_ui_set_text_material(nt_material_t text_material) {
+    NT_ASSERT(text_material.id != 0 && "nt_ui_set_text_material: invalid material handle");
+    g_nt_ui_text_material = text_material;
+}
 
 void nt_ui_set_custom_handler(nt_ui_custom_handler_t fn, void *userdata) {
-    (void)fn;
-    (void)userdata;
+    /* NULL fn is allowed -- D-52-09 says CUSTOM with no handler is a
+     * silent skip (legitimate "reserved space" pattern). */
+    g_nt_ui_custom_fn = fn;
+    g_nt_ui_custom_user = userdata;
 }
 // #endregion
 
@@ -213,9 +260,31 @@ void nt_ui_set_custom_handler(nt_ui_custom_handler_t fn, void *userdata) {
 #ifdef NT_UI_TEST_ACCESS
 nt_ui_context_t *nt_ui_test_inframe_ctx(void) { return g_nt_ui_inframe_ctx; }
 
-/* Plan 05 fills the body. */
-uint32_t nt_ui_test_last_walk_draw_call_delta(void) { return 0u; }
-uint32_t nt_ui_test_last_walk_element_count(void) { return 0u; }
+/* Plan 04 captures the per-walk deltas; Plan 05 will route them to nt_stats. */
+uint32_t nt_ui_test_last_walk_draw_call_delta(void) { return s_last_walk_draw_call_delta; }
+uint32_t nt_ui_test_last_walk_element_count(void) { return s_last_walk_element_count; }
+
+/* Plan 04 probes: walker setter state introspection. Tests need these to
+ * verify (a) reset semantics for walk_without_* death tests and (b) that
+ * setters actually wrote what was passed in. */
+nt_resource_t nt_ui_test_atlas(void) { return g_nt_ui_atlas; }
+uint32_t nt_ui_test_white_region(void) { return g_nt_ui_white_region; }
+nt_material_t nt_ui_test_sprite_material(void) { return g_nt_ui_sprite_material; }
+nt_material_t nt_ui_test_text_material(void) { return g_nt_ui_text_material; }
+
+/* Plan 04 probe: clear all walker globals so death-tests can re-setUp from
+ * scratch. Setter validation prevents writing back invalid values, so a
+ * reset has to go through this probe. */
+void nt_ui_test_reset_walker_globals(void) {
+    g_nt_ui_atlas = (nt_resource_t){0};
+    g_nt_ui_white_region = 0u;
+    g_nt_ui_sprite_material = (nt_material_t){0};
+    g_nt_ui_text_material = (nt_material_t){0};
+    g_nt_ui_custom_fn = NULL;
+    g_nt_ui_custom_user = NULL;
+    s_last_walk_draw_call_delta = 0u;
+    s_last_walk_element_count = 0u;
+}
 
 /* CLAY-04 / D-52-16 verification probes. ctx->clay is a Clay_Context whose
  * struct definition is only visible to this TU (CLAY_IMPLEMENTATION above);

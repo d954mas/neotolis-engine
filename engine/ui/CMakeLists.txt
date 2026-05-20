@@ -63,12 +63,22 @@ target_compile_definitions(nt_ui PRIVATE
 # Phase 52 Task 2.2: nt_ui needs nt_core (asserts/logging/types), nt_resource
 # (handle types referenced in public headers), nt_font (font handle),
 # nt_material (material handle), nt_input (pointer state struct).
-target_link_libraries(nt_ui PUBLIC
-    nt_core
-    nt_resource
-    nt_font
-    nt_material
-    nt_input
+#
+# Phase 52 Plan 04: walker private deps. The walker translates Clay render
+# commands into sprite/text renderer emits + gfx scissor/viewport state. These
+# stay PRIVATE because nothing in nt_ui's public surface references them.
+target_link_libraries(nt_ui
+    PUBLIC
+        nt_core
+        nt_resource
+        nt_font
+        nt_material
+        nt_input
+    PRIVATE
+        nt_gfx
+        nt_sprite_renderer
+        nt_text_renderer
+        nt_atlas
 )
 
 # nt_log is PRIVATE-linked by nt_add_module via the LOG_DOMAIN injection.
