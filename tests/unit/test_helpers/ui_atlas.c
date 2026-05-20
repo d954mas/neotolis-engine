@@ -2,24 +2,49 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifndef NT_ATLAS_TEST_ACCESS
 #define NT_ATLAS_TEST_ACCESS 1
 #endif
 #include "atlas/nt_atlas.h"
+#include "core/nt_assert.h"
+#include "graphics/nt_gfx.h"
+#include "hash/nt_hash.h"
 #include "nt_atlas_format.h"
+#include "nt_crc32.h"
+#include "nt_pack_format.h"
+#include "resource/nt_resource.h"
 
 /* ---- Synthetic atlas blob layout (matches engine/atlas/nt_atlas_format.h) ----
  *
  *  NtAtlasHeader (28 bytes)
- *  uint64_t texture_resource_ids[1]    -> page 0 (placeholder hash)
+ *  uint64_t texture_resource_ids[1]    -> page 0 (uses NT_UI_ATLAS_PAGE_RID)
  *  NtAtlasRegion regions[2]            -> region 0: white 4-vert; region 1: hull 6-vert
  *  NtAtlasVertex vertices[10]          -> 4 (white) + 6 (polygon hull)
- *  uint16_t      indices[18]           -> 6 (white: two triangles) + 12 (hull: 4 triangles)
+ *  uint16_t      indices[18]           -> 6 (white) + 12 (hull)
  *
- * Offsets are computed at build time so the blob is contiguous BSS data.
- */
+ * Plan 04 Task 2.3 finalization (Path (a) committed): the helper now stands
+ * up a real virtual pack and parses the synthetic blob through
+ * nt_resource_parse_pack + the atlas activator's full on_resolve /
+ * on_post_resolve path. That gives us a real nt_resource_t handle that
+ * nt_resource_is_ready() returns true for, and that nt_atlas_get_region()
+ * resolves against via nt_resource_get_user_data.
+ *
+ * Page-0 texture is registered as a separate high-priority virtual pack
+ * pointing at a 1x1 white nt_texture_t -- the sprite renderer's emit path
+ * calls nt_resource_get(page_resource) to bind a texture id, which must
+ * be non-zero.
+ *
+ * Prerequisites the test must run before minimal_ui_atlas_create():
+ *   - nt_hash_init
+ *   - nt_gfx_init (any backend; stub is fine)
+ *   - nt_resource_init
+ *   - nt_atlas_init                          (registers the NT_ASSET_ATLAS activator)
+ * After create, two nt_resource_step() calls drive resolve -> post-resolve
+ * (page texture request publishes on the second step). */
 
 #define UI_ATLAS_REGION_COUNT 2u
 #define UI_ATLAS_PAGE_COUNT 1u
@@ -34,35 +59,24 @@
 
 #define UI_ATLAS_VERTEX_OFFSET (UI_ATLAS_HEADER_SIZE + UI_ATLAS_PAGE_IDS_SIZE + UI_ATLAS_REGIONS_SIZE)
 #define UI_ATLAS_INDEX_OFFSET (UI_ATLAS_VERTEX_OFFSET + UI_ATLAS_VERTICES_SIZE)
-#define UI_ATLAS_TOTAL_SIZE (UI_ATLAS_INDEX_OFFSET + UI_ATLAS_INDICES_SIZE)
+#define UI_ATLAS_BLOB_SIZE (UI_ATLAS_INDEX_OFFSET + UI_ATLAS_INDICES_SIZE)
 
-/* Synthetic blob lives in BSS — built lazily on first create. */
-static uint8_t s_blob[UI_ATLAS_TOTAL_SIZE];
-static int s_blob_built = 0;
+/* Stable resource ids (unique-per-test-binary; counter-suffixed so multiple
+ * create/destroy cycles in one binary don't collide on resource-table slots
+ * that were tombstoned by destroy). */
+static uint32_t s_helper_counter;
 
-/* Cached parsed data (from nt_atlas_test_drive_resolve).
- *
- * Plan 02 Task 2.3 status (Revision Issue 4 committed path):
- *   - Helper uses NT_ATLAS_TEST_ACCESS nt_atlas_test_drive_resolve which
- *     parses the synthetic blob into an nt_atlas_data_t* directly. This
- *     is sufficient for Plan 02 unit tests (lifecycle, multictx,
- *     begin_end) -- none of which call nt_ui_walk, so none assert on
- *     nt_resource_is_ready(handle).
- *   - Plan 04 walker tests will be the first consumers that need
- *     nt_resource_is_ready == true. At that time Plan 04 chooses path
- *     (a) drive nt_resource_create_pack + register virtual pack with the
- *     ad as runtime user_data, OR path (b) add a small
- *     nt_atlas_test_register_synthetic_atlas helper under
- *     NT_ATLAS_TEST_ACCESS that wraps the slot allocation. The current
- *     helper API surface (handle field in minimal_ui_atlas_t) is
- *     unchanged regardless of which path Plan 04 picks. */
-static void *s_atlas_user_data = NULL;
+/* Pack blob lives in the helper's BSS / heap -- nt_resource_parse_pack
+ * keeps a reference until the pack is unmounted. We free on destroy. */
+static uint8_t *s_pack_blob;
+static uint32_t s_pack_total;
+static nt_hash32_t s_atlas_pack_id;
+static nt_hash32_t s_page_pack_id;
+static nt_texture_t s_page_tex;
+static const uint8_t s_white_pixel[4] = {255, 255, 255, 255};
 
-static void ui_atlas_build_blob(void) {
-    if (s_blob_built) {
-        return;
-    }
-    memset(s_blob, 0, sizeof s_blob);
+static void ui_atlas_build_inner_blob(uint8_t *out_blob) {
+    memset(out_blob, 0, UI_ATLAS_BLOB_SIZE);
 
     /* ---- Header ---- */
     NtAtlasHeader hdr = {
@@ -76,15 +90,17 @@ static void ui_atlas_build_blob(void) {
         .index_offset = UI_ATLAS_INDEX_OFFSET,
         .total_index_count = UI_ATLAS_INDEX_COUNT,
     };
-    memcpy(s_blob + 0, &hdr, sizeof hdr);
+    memcpy(out_blob + 0, &hdr, sizeof hdr);
 
-    /* ---- Page resource id (placeholder; runtime uses its own slot lookup) ---- */
-    uint64_t page_id = 0xC0FFEE00ULL;
-    memcpy(s_blob + UI_ATLAS_HEADER_SIZE, &page_id, sizeof page_id);
+    /* ---- Page resource id (must match the page-pack registration below) ---- */
+    char page_name[64];
+    (void)snprintf(page_name, sizeof page_name, "ui_atlas_page_%u", s_helper_counter);
+    uint64_t page_rid = nt_hash64_str(page_name).value;
+    memcpy(out_blob + UI_ATLAS_HEADER_SIZE, &page_rid, sizeof page_rid);
 
-    /* ---- Region 0: 1x1 white quad, 4 verts, 6 indices ---- */
+    /* ---- Region 0: 1x1 white quad ---- */
     NtAtlasRegion region0 = {
-        .name_hash = 0x57484954454E4555ULL, /* arbitrary hash for "white" */
+        .name_hash = 0x57484954454E4555ULL, /* "WHITEENU" */
         .source_w = 1,
         .source_h = 1,
         .trim_offset_x = 0,
@@ -97,14 +113,14 @@ static void ui_atlas_build_blob(void) {
         .page_index = 0,
         .transform = 0,
         .index_count = 6,
-        .flags = 0,
+        .flags = NT_ATLAS_REGION_FLAG_QUAD_012023,
         ._reserved = {0, 0, 0},
     };
-    memcpy(s_blob + UI_ATLAS_HEADER_SIZE + UI_ATLAS_PAGE_IDS_SIZE, &region0, sizeof region0);
+    memcpy(out_blob + UI_ATLAS_HEADER_SIZE + UI_ATLAS_PAGE_IDS_SIZE, &region0, sizeof region0);
 
     /* ---- Region 1: 6-vertex polygon hull (12 indices = 4 fan triangles) ---- */
     NtAtlasRegion region1 = {
-        .name_hash = 0x504F4C59474F4E32ULL, /* arbitrary hash for "polygon2" */
+        .name_hash = 0x504F4C59474F4E32ULL, /* "POLYGON2" */
         .source_w = 16,
         .source_h = 16,
         .trim_offset_x = 0,
@@ -120,26 +136,26 @@ static void ui_atlas_build_blob(void) {
         .flags = 0,
         ._reserved = {0, 0, 0},
     };
-    memcpy(s_blob + UI_ATLAS_HEADER_SIZE + UI_ATLAS_PAGE_IDS_SIZE + 40, &region1, sizeof region1);
+    memcpy(out_blob + UI_ATLAS_HEADER_SIZE + UI_ATLAS_PAGE_IDS_SIZE + 40, &region1, sizeof region1);
 
-    /* ---- Vertices: 4 white (corners of 1x1) + 6 polygon-hull ---- */
+    /* ---- Vertices: 4 white + 6 polygon-hull ---- */
     NtAtlasVertex verts[UI_ATLAS_VERTEX_COUNT] = {
-        /* white quad (trim-local space 0..1, atlas UV 0..0xFFFF) */
+        /* white quad (trim-local 0..1, atlas UV 0..0xFFFF) */
         {0, 0, 0, 0},
         {1, 0, 0xFFFF, 0},
         {1, 1, 0xFFFF, 0xFFFF},
         {0, 1, 0, 0xFFFF},
-        /* polygon hull (6 verts, hexagon-ish) */
+        /* polygon hull (hexagon-ish, 6 unique verts) */
         {0, 8, 0, 0x8000},
         {8, 0, 0x8000, 0},
         {16, 8, 0xFFFF, 0x8000},
-        {16, 8, 0xFFFF, 0x8000},
+        {16, 16, 0xFFFF, 0xFFFF},
         {8, 16, 0x8000, 0xFFFF},
         {0, 8, 0, 0x8000},
     };
-    memcpy(s_blob + UI_ATLAS_VERTEX_OFFSET, verts, sizeof verts);
+    memcpy(out_blob + UI_ATLAS_VERTEX_OFFSET, verts, sizeof verts);
 
-    /* ---- Indices: white (0..3 fan -> 2 tris) + polygon (fan over 4 tris) ---- */
+    /* ---- Indices ---- */
     uint16_t indices[UI_ATLAS_INDEX_COUNT] = {
         /* white: 0,1,2 + 0,2,3 */
         0,
@@ -148,7 +164,7 @@ static void ui_atlas_build_blob(void) {
         0,
         2,
         3,
-        /* polygon-hull fan (vertices local 0..5): 0,1,2 0,2,3 0,3,4 0,4,5 */
+        /* polygon-hull fan: 0,1,2 / 0,2,3 / 0,3,4 / 0,4,5 */
         0,
         1,
         2,
@@ -162,24 +178,88 @@ static void ui_atlas_build_blob(void) {
         4,
         5,
     };
-    memcpy(s_blob + UI_ATLAS_INDEX_OFFSET, indices, sizeof indices);
+    memcpy(out_blob + UI_ATLAS_INDEX_OFFSET, indices, sizeof indices);
+}
 
-    s_blob_built = 1;
+/* Wrap the inner atlas blob in a real NEOPAK envelope so nt_resource_parse_pack
+ * accepts it. The resulting pack contains exactly one NT_ASSET_ATLAS entry. */
+static uint8_t *ui_atlas_build_pack_blob(uint64_t atlas_rid, uint32_t *out_total) {
+    uint8_t inner[UI_ATLAS_BLOB_SIZE];
+    ui_atlas_build_inner_blob(inner);
+
+    const uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
+    const uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1u)) & ~(uint32_t)(NT_PACK_DATA_ALIGN - 1u);
+    const uint32_t atlas_offset = header_size;
+    const uint32_t aligned_atlas = (UI_ATLAS_BLOB_SIZE + (NT_PACK_ASSET_ALIGN - 1u)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1u);
+    const uint32_t total_size = atlas_offset + aligned_atlas;
+
+    uint8_t *pack_blob = (uint8_t *)calloc(1, total_size);
+    NT_ASSERT(pack_blob != NULL);
+
+    NtPackHeader *ph = (NtPackHeader *)pack_blob;
+    ph->magic = NT_PACK_MAGIC;
+    ph->version = NT_PACK_VERSION;
+    ph->asset_count = 1;
+    ph->header_size = header_size;
+    ph->total_size = total_size;
+    ph->meta_offset = 0;
+    ph->meta_count = 0;
+
+    NtAssetEntry *entry = (NtAssetEntry *)(pack_blob + sizeof(NtPackHeader));
+    entry->resource_id = atlas_rid;
+    entry->asset_type = NT_ASSET_ATLAS;
+    entry->format_version = NT_ATLAS_VERSION;
+    entry->offset = atlas_offset;
+    entry->size = UI_ATLAS_BLOB_SIZE;
+    entry->meta_offset = 0;
+    entry->_pad = 0;
+
+    memcpy(pack_blob + atlas_offset, inner, UI_ATLAS_BLOB_SIZE);
+    ph->checksum = nt_crc32(pack_blob + header_size, total_size - header_size);
+
+    *out_total = total_size;
+    return pack_blob;
 }
 
 minimal_ui_atlas_t minimal_ui_atlas_create(void) {
-    ui_atlas_build_blob();
+    s_helper_counter++;
 
-    /* Drive the atlas activator's on_resolve callback directly (Revision Issue 4
-     * committed path — nt_atlas_test_drive_resolve from NT_ATLAS_TEST_ACCESS).
-     * This parses the synthetic blob into an nt_atlas_data_t* without standing
-     * up the resource system. Plan 02 Task 2.3 finalizes the nt_resource_t
-     * wiring so nt_resource_is_ready(handle) returns true; until then the
-     * handle is INVALID and callers must use nt_atlas_test_* accessors. */
-    nt_atlas_test_drive_resolve(s_blob, (uint32_t)sizeof s_blob, &s_atlas_user_data);
+    /* Page texture pack (high priority so atlas_on_post_resolve's
+     * nt_resource_request for the page id succeeds). */
+    char page_pack[64];
+    char page_name[64];
+    (void)snprintf(page_pack, sizeof page_pack, "ui_atlas_page_pack_%u", s_helper_counter);
+    (void)snprintf(page_name, sizeof page_name, "ui_atlas_page_%u", s_helper_counter);
+    s_page_pack_id = nt_hash32_str(page_pack);
+    NT_ASSERT(nt_resource_create_pack(s_page_pack_id, 100) == NT_OK);
+    s_page_tex = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .label = "ui_atlas_white_page"});
+    NT_ASSERT(s_page_tex.id != 0);
+    NT_ASSERT(nt_resource_register(s_page_pack_id, nt_hash64_str(page_name), NT_ASSET_TEXTURE, s_page_tex.id) == NT_OK);
+
+    /* Atlas pack: mount, parse blob, request handle. */
+    char atlas_pack[64];
+    char atlas_name[64];
+    (void)snprintf(atlas_pack, sizeof atlas_pack, "ui_atlas_pack_%u", s_helper_counter);
+    (void)snprintf(atlas_name, sizeof atlas_name, "ui_atlas_%u", s_helper_counter);
+    s_atlas_pack_id = nt_hash32_str(atlas_pack);
+    nt_hash64_t atlas_rid = nt_hash64_str(atlas_name);
+
+    NT_ASSERT(nt_resource_mount(s_atlas_pack_id, 0) == NT_OK);
+    s_pack_blob = ui_atlas_build_pack_blob(atlas_rid.value, &s_pack_total);
+    NT_ASSERT(nt_resource_parse_pack(s_atlas_pack_id, s_pack_blob, s_pack_total) == NT_OK);
+
+    nt_resource_t atlas = nt_resource_request(atlas_rid, NT_ASSET_ATLAS);
+    NT_ASSERT(atlas.id != 0);
+    /* Two steps: first runs on_resolve+on_post_resolve (which queues a
+     * page-texture nt_resource_request); second publishes the page slot
+     * and lets nt_resource_is_ready(atlas) return true (AUX_BACKED
+     * behavior). */
+    nt_resource_step();
+    nt_resource_step();
+    NT_ASSERT(nt_resource_is_ready(atlas));
 
     minimal_ui_atlas_t result = {
-        .handle = NT_RESOURCE_INVALID, /* TODO Plan 02 Task 2.3 */
+        .handle = atlas,
         .white_region_idx = 0,
         .polygon_region_idx = 1,
     };
@@ -190,10 +270,23 @@ void minimal_ui_atlas_destroy(minimal_ui_atlas_t *atlas) {
     if (atlas == NULL) {
         return;
     }
-    if (s_atlas_user_data != NULL) {
-        nt_atlas_test_drive_cleanup(s_atlas_user_data);
-        s_atlas_user_data = NULL;
+    if (s_atlas_pack_id.value != 0) {
+        nt_resource_unmount(s_atlas_pack_id);
+        s_atlas_pack_id = (nt_hash32_t){0};
     }
+    if (s_page_pack_id.value != 0) {
+        /* Unregister the page resource before destroying the texture so the
+         * resource system doesn't dangle on the runtime handle. */
+        nt_resource_unmount(s_page_pack_id);
+        s_page_pack_id = (nt_hash32_t){0};
+    }
+    if (s_page_tex.id != 0) {
+        nt_gfx_destroy_texture(s_page_tex);
+        s_page_tex = (nt_texture_t){0};
+    }
+    free(s_pack_blob);
+    s_pack_blob = NULL;
+    s_pack_total = 0;
     atlas->handle = NT_RESOURCE_INVALID;
     atlas->white_region_idx = 0;
     atlas->polygon_region_idx = 0;

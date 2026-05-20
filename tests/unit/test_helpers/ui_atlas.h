@@ -9,12 +9,20 @@
 extern "C" {
 #endif
 
-/* Produces a fake "UI atlas" resource handle that nt_resource_is_ready returns
+/* Produces a real UI atlas resource handle that nt_resource_is_ready returns
  * true for and that has a 1x1 white region at index 0 (4 verts) and a
  * 6-vertex polygon region at index 1 (for polygon-hull preservation tests).
  *
- * Built via NT_ATLAS_TEST_ACCESS nt_atlas_test_drive_resolve — bypasses pack
- * loading. (Revision Issue 4 committed path.)
+ * Plan 04 Task 2.3 finalization (Path (a) committed): mounts a virtual pack
+ * containing a synthetic atlas blob and parses it through the full atlas
+ * activator (on_resolve + on_post_resolve). Also registers a 1x1 white
+ * texture as page 0 so emit_region can resolve a real page texture handle.
+ *
+ * Prerequisites (caller must call BEFORE minimal_ui_atlas_create):
+ *   - nt_hash_init
+ *   - nt_gfx_init (any backend; stub OK)
+ *   - nt_resource_init
+ *   - nt_atlas_init
  *
  * Lifetime: valid until minimal_ui_atlas_destroy is called. */
 typedef struct {
