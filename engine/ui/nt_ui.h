@@ -55,9 +55,20 @@
  * arena[N]` has 1-byte alignment in C, so callers MUST use alignas. */
 #define NT_UI_ARENA_ALIGN _Alignof(max_align_t)
 
-/* Recommended caller pattern:
- *     alignas(NT_UI_ARENA_ALIGN) static uint8_t g_ui_arena[NT_UI_DEFAULT_ARENA_SIZE]; */
 #define NT_UI_DEFAULT_ARENA_SIZE (8U * 1024U * 1024U)
+
+/* Declares a correctly-aligned arena. The bare alternative
+ *
+ *     static uint8_t arena[NT_UI_DEFAULT_ARENA_SIZE];
+ *
+ * has only 1-byte alignment per the C spec and trips the runtime
+ * assert in nt_ui_create_context. This macro produces a definition
+ * compatible with file-scope, function-static, and (compilers that
+ * accept _Alignas on auto) block-scope. Usage:
+ *
+ *     NT_UI_DECLARE_ARENA(g_ui_arena, NT_UI_DEFAULT_ARENA_SIZE);
+ *     ctx = nt_ui_create_context(g_ui_arena, sizeof g_ui_arena); */
+#define NT_UI_DECLARE_ARENA(name, size) alignas(NT_UI_ARENA_ALIGN) uint8_t name[(size)]
 
 typedef struct nt_ui_context nt_ui_context_t;
 

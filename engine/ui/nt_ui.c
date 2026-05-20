@@ -497,6 +497,11 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* Viewport must be non-negative -- the cast to int below would
      * otherwise turn NaN / -inf into garbage GL state. */
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport must be non-negative");
+    /* projection is reserved -- caller MUST keep it all-zero. The walker
+     * does not consume it; if Phase 5x grows the walker to upload Globals
+     * UBO from this field, callers writing into it expecting "old"
+     * behaviour would silently get the wrong projection. */
+    NT_ASSERT(target->projection[0] == 0.0F && target->projection[5] == 0.0F && target->projection[10] == 0.0F && target->projection[15] == 0.0F && "nt_ui_walk: target->projection is reserved -- must be all-zero (caller owns Globals UBO)");
     NT_ASSERT(ctx->atlas.id != 0 && "nt_ui_set_atlas_white_region(ctx,...) required before nt_ui_walk");
     NT_ASSERT(nt_resource_is_ready(ctx->atlas) && "nt_ui_walk: ctx atlas must be READY");
     NT_ASSERT(ctx->sprite_material.id != 0 && "nt_ui_set_sprite_material(ctx,...) required before nt_ui_walk");

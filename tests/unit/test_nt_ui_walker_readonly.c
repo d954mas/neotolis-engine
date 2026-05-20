@@ -89,7 +89,7 @@ static void test_viewport_applied(void) {
 /* walk without atlas set asserts. */
 static void test_walk_without_atlas_asserts(void) {
     /* Mode flag was set before Unity invoked setUp -- the atlas setter
-     * was skipped, so g_nt_ui_atlas.id == 0. */
+     * was skipped, so ctx->atlas.id == 0. */
     inject_frozen_cmds(0);
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));

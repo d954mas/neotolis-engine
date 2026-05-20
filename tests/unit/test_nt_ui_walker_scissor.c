@@ -70,8 +70,12 @@ static void test_scissor_depth_9_asserts(void) {
 static void test_scissor_unbalanced_asserts_at_exit(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 800, .height = 600};
+    s_test_cmds[0].renderData.clip.horizontal = true;
+    s_test_cmds[0].renderData.clip.vertical = true;
     s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
     s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 800, .height = 600};
+    s_test_cmds[1].renderData.clip.horizontal = true;
+    s_test_cmds[1].renderData.clip.vertical = true;
     s_test_cmds[2].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
     inject_frozen_cmds(3);
 
@@ -145,6 +149,8 @@ static void test_scissor_intersection_nested(void) {
 static void test_walker_exit_disables_scissor(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 10, .y = 10, .width = 100, .height = 100};
+    s_test_cmds[0].renderData.clip.horizontal = true;
+    s_test_cmds[0].renderData.clip.vertical = true;
     s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
     inject_frozen_cmds(2);
 
