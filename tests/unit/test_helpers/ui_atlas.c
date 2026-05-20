@@ -47,19 +47,14 @@
 #define UI_ATLAS_INDEX_OFFSET (UI_ATLAS_VERTEX_OFFSET + UI_ATLAS_VERTICES_SIZE)
 #define UI_ATLAS_BLOB_SIZE (UI_ATLAS_INDEX_OFFSET + UI_ATLAS_INDICES_SIZE)
 
-/* Counter-suffixed pack names so multiple create/destroy cycles in one
- * binary don't collide on tombstoned resource-table slots. */
+/* Pack name suffix counter so multiple coexisting instances (and
+ * sequential create/destroy cycles) don't collide on tombstoned
+ * resource-table slots. Monotonic across the whole test binary. */
 static uint32_t s_helper_counter;
 
-/* nt_resource_parse_pack keeps a reference to the blob until unmount. */
-static uint8_t *s_pack_blob;
-static uint32_t s_pack_total;
-static nt_hash32_t s_atlas_pack_id;
-static nt_hash32_t s_page_pack_id;
-static nt_texture_t s_page_tex;
 static const uint8_t s_white_pixel[4] = {255, 255, 255, 255};
 
-static void ui_atlas_build_inner_blob(uint8_t *out_blob) {
+static void ui_atlas_build_inner_blob(uint8_t *out_blob, uint32_t suffix) {
     memset(out_blob, 0, UI_ATLAS_BLOB_SIZE);
 
     /* ---- Header ---- */
@@ -78,7 +73,7 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob) {
 
     /* ---- Page resource id (must match the page-pack registration below) ---- */
     char page_name[64];
-    (void)snprintf(page_name, sizeof page_name, "ui_atlas_page_%u", s_helper_counter);
+    (void)snprintf(page_name, sizeof page_name, "ui_atlas_page_%u", suffix);
     uint64_t page_rid = nt_hash64_str(page_name).value;
     memcpy(out_blob + UI_ATLAS_HEADER_SIZE, &page_rid, sizeof page_rid);
 
@@ -167,9 +162,9 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob) {
 
 /* Wrap the inner atlas blob in a real NEOPAK envelope so nt_resource_parse_pack
  * accepts it. The resulting pack contains exactly one NT_ASSET_ATLAS entry. */
-static uint8_t *ui_atlas_build_pack_blob(uint64_t atlas_rid, uint32_t *out_total) {
+static uint8_t *ui_atlas_build_pack_blob(uint64_t atlas_rid, uint32_t suffix, uint32_t *out_total) {
     uint8_t inner[UI_ATLAS_BLOB_SIZE];
-    ui_atlas_build_inner_blob(inner);
+    ui_atlas_build_inner_blob(inner, suffix);
 
     const uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
     const uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_DATA_ALIGN - 1U);
@@ -207,72 +202,62 @@ static uint8_t *ui_atlas_build_pack_blob(uint64_t atlas_rid, uint32_t *out_total
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 minimal_ui_atlas_t minimal_ui_atlas_create(void) {
-    s_helper_counter++;
+    minimal_ui_atlas_t out = {0};
+    const uint32_t suffix = ++s_helper_counter;
 
-    /* Page texture pack (high priority so atlas_on_post_resolve's
-     * nt_resource_request for the page id succeeds). */
+    /* Page pack at high priority so the atlas activator's post-resolve
+     * nt_resource_request for the page id finds a registered slot. */
     char page_pack[64];
     char page_name[64];
-    (void)snprintf(page_pack, sizeof page_pack, "ui_atlas_page_pack_%u", s_helper_counter);
-    (void)snprintf(page_name, sizeof page_name, "ui_atlas_page_%u", s_helper_counter);
-    s_page_pack_id = nt_hash32_str(page_pack);
-    NT_ASSERT(nt_resource_create_pack(s_page_pack_id, 100) == NT_OK);
-    s_page_tex = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .label = "ui_atlas_white_page"});
-    NT_ASSERT(s_page_tex.id != 0);
-    NT_ASSERT(nt_resource_register(s_page_pack_id, nt_hash64_str(page_name), NT_ASSET_TEXTURE, s_page_tex.id) == NT_OK);
+    (void)snprintf(page_pack, sizeof page_pack, "ui_atlas_page_pack_%u", suffix);
+    (void)snprintf(page_name, sizeof page_name, "ui_atlas_page_%u", suffix);
+    out._page_pack_id = nt_hash32_str(page_pack);
+    NT_ASSERT(nt_resource_create_pack(out._page_pack_id, 100) == NT_OK);
+    out._page_tex = nt_gfx_make_texture(&(nt_texture_desc_t){.width = 1, .height = 1, .data = s_white_pixel, .label = "ui_atlas_white_page"});
+    NT_ASSERT(out._page_tex.id != 0);
+    NT_ASSERT(nt_resource_register(out._page_pack_id, nt_hash64_str(page_name), NT_ASSET_TEXTURE, out._page_tex.id) == NT_OK);
 
-    /* Atlas pack: mount, parse blob, request handle. */
     char atlas_pack[64];
     char atlas_name[64];
-    (void)snprintf(atlas_pack, sizeof atlas_pack, "ui_atlas_pack_%u", s_helper_counter);
-    (void)snprintf(atlas_name, sizeof atlas_name, "ui_atlas_%u", s_helper_counter);
-    s_atlas_pack_id = nt_hash32_str(atlas_pack);
+    (void)snprintf(atlas_pack, sizeof atlas_pack, "ui_atlas_pack_%u", suffix);
+    (void)snprintf(atlas_name, sizeof atlas_name, "ui_atlas_%u", suffix);
+    out._atlas_pack_id = nt_hash32_str(atlas_pack);
     nt_hash64_t atlas_rid = nt_hash64_str(atlas_name);
 
-    NT_ASSERT(nt_resource_mount(s_atlas_pack_id, 0) == NT_OK);
-    s_pack_blob = ui_atlas_build_pack_blob(atlas_rid.value, &s_pack_total);
-    NT_ASSERT(nt_resource_parse_pack(s_atlas_pack_id, s_pack_blob, s_pack_total) == NT_OK);
+    NT_ASSERT(nt_resource_mount(out._atlas_pack_id, 0) == NT_OK);
+    out._pack_blob = ui_atlas_build_pack_blob(atlas_rid.value, suffix, &out._pack_total);
+    NT_ASSERT(nt_resource_parse_pack(out._atlas_pack_id, out._pack_blob, out._pack_total) == NT_OK);
 
     nt_resource_t atlas = nt_resource_request(atlas_rid, NT_ASSET_ATLAS);
     NT_ASSERT(atlas.id != 0);
-    /* Two steps: first runs on_resolve+on_post_resolve (which queues a
-     * page-texture nt_resource_request); second publishes the page slot
-     * and lets nt_resource_is_ready(atlas) return true (AUX_BACKED
-     * behavior). */
+    /* Two steps: first runs on_resolve + on_post_resolve (which queues a
+     * page-texture request); second publishes the page slot so
+     * nt_resource_is_ready(atlas) returns true. */
     nt_resource_step();
     nt_resource_step();
     NT_ASSERT(nt_resource_is_ready(atlas));
 
-    minimal_ui_atlas_t result = {
-        .handle = atlas,
-        .white_region_idx = 0,
-        .polygon_region_idx = 1,
-    };
-    return result;
+    out.handle = atlas;
+    out.white_region_idx = 0;
+    out.polygon_region_idx = 1;
+    return out;
 }
 
 void minimal_ui_atlas_destroy(minimal_ui_atlas_t *atlas) {
     if (atlas == NULL) {
         return;
     }
-    if (s_atlas_pack_id.value != 0) {
-        nt_resource_unmount(s_atlas_pack_id);
-        s_atlas_pack_id = (nt_hash32_t){0};
+    if (atlas->_atlas_pack_id.value != 0) {
+        nt_resource_unmount(atlas->_atlas_pack_id);
     }
-    if (s_page_pack_id.value != 0) {
-        /* Unregister the page resource before destroying the texture so the
+    if (atlas->_page_pack_id.value != 0) {
+        /* Unmount the page pack BEFORE destroying the texture so the
          * resource system doesn't dangle on the runtime handle. */
-        nt_resource_unmount(s_page_pack_id);
-        s_page_pack_id = (nt_hash32_t){0};
+        nt_resource_unmount(atlas->_page_pack_id);
     }
-    if (s_page_tex.id != 0) {
-        nt_gfx_destroy_texture(s_page_tex);
-        s_page_tex = (nt_texture_t){0};
+    if (atlas->_page_tex.id != 0) {
+        nt_gfx_destroy_texture(atlas->_page_tex);
     }
-    free(s_pack_blob);
-    s_pack_blob = NULL;
-    s_pack_total = 0;
-    atlas->handle = NT_RESOURCE_INVALID;
-    atlas->white_region_idx = 0;
-    atlas->polygon_region_idx = 0;
+    free(atlas->_pack_blob);
+    *atlas = (minimal_ui_atlas_t){0};
 }
