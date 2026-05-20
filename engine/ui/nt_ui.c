@@ -69,16 +69,40 @@ static uint32_t s_last_walk_element_count;
 // #endregion
 
 // #region clay_error_handler
-/* Forward a Clay error to NT_LOG_WARN. errorText is a Clay_String with
- * .length + .chars (not necessarily NUL-terminated). */
+/* Returns true if a Clay error code is a recoverable caller-author bug
+ * (Clay safely no-ops it). Everything else is treated as a fatal invariant
+ * violation -- arena too small, missing measure callback, internal Clay
+ * bug, or an unknown type from a future Clay version. Defaulting unknown
+ * to fatal prevents a Clay upgrade from silently demoting new invariants. */
+static bool nt_ui_clay_error_is_recoverable(Clay_ErrorType type) {
+    switch (type) {
+    case CLAY_ERROR_TYPE_ELEMENTS_CAPACITY_EXCEEDED:
+    case CLAY_ERROR_TYPE_TEXT_MEASUREMENT_CAPACITY_EXCEEDED:
+    case CLAY_ERROR_TYPE_DUPLICATE_ID:
+    case CLAY_ERROR_TYPE_FLOATING_CONTAINER_PARENT_NOT_FOUND:
+    case CLAY_ERROR_TYPE_PERCENTAGE_OVER_1:
+        return true;
+    case CLAY_ERROR_TYPE_TEXT_MEASUREMENT_FUNCTION_NOT_PROVIDED:
+    case CLAY_ERROR_TYPE_ARENA_CAPACITY_EXCEEDED:
+    case CLAY_ERROR_TYPE_INTERNAL_ERROR:
+        return false;
+    }
+    return false; /* unknown -> fatal */
+}
+
+/* errorText is a Clay_String with .length + .chars -- not NUL-terminated. */
 static void nt_ui_clay_error_cb(Clay_ErrorData err) {
-    int len = err.errorText.length;
-    const char *chars = err.errorText.chars;
-    if (chars == NULL || len <= 0) {
-        NT_LOG_WARN("clay error type=%d (no text)", (int)err.errorType);
+    const int len = err.errorText.length;
+    const char *const chars = (err.errorText.chars != NULL && len > 0) ? err.errorText.chars : "(no text)";
+    const int safe_len = (err.errorText.chars != NULL && len > 0) ? len : 9;
+    const int type = (int)err.errorType;
+
+    if (nt_ui_clay_error_is_recoverable(err.errorType)) {
+        NT_LOG_WARN("clay error type=%d: %.*s", type, safe_len, chars);
         return;
     }
-    NT_LOG_WARN("clay error type=%d: %.*s", (int)err.errorType, len, chars);
+    NT_LOG_ERROR("clay fatal error type=%d: %.*s", type, safe_len, chars);
+    NT_ASSERT(false && "nt_ui: Clay reported a fatal invariant violation (see preceding log line)");
 }
 // #endregion
 
