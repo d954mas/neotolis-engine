@@ -20,7 +20,7 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8u];
+static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8U];
 static ui_walker_fixture_t s_fx;
 
 #define MAX_TEST_CMDS 8
@@ -55,8 +55,8 @@ static void test_walker_exit_flushes_sprite_and_text(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     /* After flush, staging vertex_count resets to 0. */
-    TEST_ASSERT_EQUAL_UINT32(0u, nt_sprite_renderer_test_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(0u, nt_text_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_sprite_renderer_test_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_vertex_count());
 }
 
 /* WALK-06: SCISSOR_START/END flushes both renderers before changing
@@ -85,7 +85,7 @@ static void test_flush_on_scissor_transition(void) {
     /* scissor_push flushes the first RECT (1 draw call), then scissor_pop
      * flushes the second RECT (1 more). The walker-exit flush adds 0 more
      * because pop already drained staging. So delta == 2. */
-    TEST_ASSERT_EQUAL_UINT32(calls_before + 2u, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(calls_before + 2U, nt_sprite_renderer_test_draw_call_count());
 }
 
 /* WALK-06: RECT -> TEXT transition flushes sprite renderer before text
@@ -115,7 +115,7 @@ static void test_flush_on_rect_to_text_transition(void) {
     /* emit_text always flushes sprite at the top. That flush drains the
      * RECT staging into one draw call. Walker-exit flush adds nothing
      * (already drained). So delta == 1. */
-    TEST_ASSERT_EQUAL_UINT32(sprite_calls_before + 1u, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(sprite_calls_before + 1U, nt_sprite_renderer_test_draw_call_count());
 }
 
 int main(void) {

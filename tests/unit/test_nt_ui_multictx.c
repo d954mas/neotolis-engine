@@ -17,9 +17,9 @@
 #include "unity.h"
 
 /* Three independently sized arenas (8 MiB each, 8-aligned via uint64_t). */
-static uint64_t s_arena_a[NT_UI_DEFAULT_ARENA_SIZE / 8u];
-static uint64_t s_arena_b[NT_UI_DEFAULT_ARENA_SIZE / 8u];
-static uint64_t s_arena_c[NT_UI_DEFAULT_ARENA_SIZE / 8u];
+static uint64_t s_arena_a[NT_UI_DEFAULT_ARENA_SIZE / 8U];
+static uint64_t s_arena_b[NT_UI_DEFAULT_ARENA_SIZE / 8U];
+static uint64_t s_arena_c[NT_UI_DEFAULT_ARENA_SIZE / 8U];
 
 void setUp(void) { nt_test_assert_install(); }
 void tearDown(void) {}
@@ -27,6 +27,7 @@ void tearDown(void) {}
 /* UI-03 + D-52-14: three contexts coexist; nt_ui_begin makes
  * Clay_GetCurrentContext match ctx->clay; after end the in-frame
  * tracker is cleared. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_three_ctx_interleave(void) {
     nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a);
     nt_ui_context_t *b = nt_ui_create_context(s_arena_b, sizeof s_arena_b);
@@ -43,21 +44,21 @@ static void test_three_ctx_interleave(void) {
     memset(&mouse, 0, sizeof mouse);
 
     /* a: begin sets Clay current to a->clay; in-frame ctx is a. */
-    nt_ui_begin(a, 100.0f, 100.0f, &mouse);
+    nt_ui_begin(a, 100.0F, 100.0F, &mouse);
     TEST_ASSERT_EQUAL_PTR(a->clay, Clay_GetCurrentContext());
     TEST_ASSERT_EQUAL_PTR(a, nt_ui_test_inframe_ctx());
     nt_ui_end(a);
     TEST_ASSERT_NULL(nt_ui_test_inframe_ctx());
 
     /* b: same shape, different ctx. */
-    nt_ui_begin(b, 200.0f, 200.0f, &mouse);
+    nt_ui_begin(b, 200.0F, 200.0F, &mouse);
     TEST_ASSERT_EQUAL_PTR(b->clay, Clay_GetCurrentContext());
     TEST_ASSERT_EQUAL_PTR(b, nt_ui_test_inframe_ctx());
     nt_ui_end(b);
     TEST_ASSERT_NULL(nt_ui_test_inframe_ctx());
 
     /* c: same shape, different ctx. */
-    nt_ui_begin(c, 300.0f, 300.0f, &mouse);
+    nt_ui_begin(c, 300.0F, 300.0F, &mouse);
     TEST_ASSERT_EQUAL_PTR(c->clay, Clay_GetCurrentContext());
     TEST_ASSERT_EQUAL_PTR(c, nt_ui_test_inframe_ctx());
     nt_ui_end(c);
@@ -69,6 +70,7 @@ static void test_three_ctx_interleave(void) {
 }
 
 /* UI-03: per-ctx in_frame isolation across sequential begin/end. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_per_ctx_in_frame_isolation(void) {
     nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a);
     nt_ui_context_t *b = nt_ui_create_context(s_arena_b, sizeof s_arena_b);
@@ -83,14 +85,14 @@ static void test_per_ctx_in_frame_isolation(void) {
     TEST_ASSERT_FALSE(a->in_frame);
     TEST_ASSERT_FALSE(b->in_frame);
 
-    nt_ui_begin(a, 100.0f, 100.0f, &mouse);
+    nt_ui_begin(a, 100.0F, 100.0F, &mouse);
     TEST_ASSERT_TRUE(a->in_frame);
     TEST_ASSERT_FALSE(b->in_frame); /* B is NOT marked in-frame */
     TEST_ASSERT_EQUAL_PTR(a, nt_ui_test_inframe_ctx());
     nt_ui_end(a);
     TEST_ASSERT_FALSE(a->in_frame);
 
-    nt_ui_begin(b, 100.0f, 100.0f, &mouse);
+    nt_ui_begin(b, 100.0F, 100.0F, &mouse);
     TEST_ASSERT_FALSE(a->in_frame);
     TEST_ASSERT_TRUE(b->in_frame);
     TEST_ASSERT_EQUAL_PTR(b, nt_ui_test_inframe_ctx());

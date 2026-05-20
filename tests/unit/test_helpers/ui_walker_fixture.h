@@ -38,14 +38,19 @@ extern "C" {
 
 /* Per-field bind mask. Controls which walker setters fixture_init calls
  * on the freshly-created context. A field whose bit is zero stays at the
- * zero-initialised default -- walker asserts will fire on its absence. */
-typedef enum {
-    UI_WALKER_FX_BIND_NONE = 0,
-    UI_WALKER_FX_BIND_ATLAS = 1u << 0,
-    UI_WALKER_FX_BIND_SPRITE_MATERIAL = 1u << 1,
-    UI_WALKER_FX_BIND_TEXT_MATERIAL = 1u << 2,
-    UI_WALKER_FX_BIND_ALL = UI_WALKER_FX_BIND_ATLAS | UI_WALKER_FX_BIND_SPRITE_MATERIAL | UI_WALKER_FX_BIND_TEXT_MATERIAL,
-} ui_walker_fx_bind_t;
+ * zero-initialised default -- walker asserts will fire on its absence.
+ *
+ * Underlying type is uint32_t (not an enum) because callers combine bits
+ * arbitrarily -- e.g. ALL & ~ATLAS produces a valid mask value (6) that
+ * isn't an enum member; an enum type would trip clang-analyzer's
+ * EnumCastOutOfRange check on every such expression. */
+typedef uint32_t ui_walker_fx_bind_t;
+
+#define UI_WALKER_FX_BIND_NONE ((ui_walker_fx_bind_t)0U)
+#define UI_WALKER_FX_BIND_ATLAS ((ui_walker_fx_bind_t)(1U << 0))
+#define UI_WALKER_FX_BIND_SPRITE_MATERIAL ((ui_walker_fx_bind_t)(1U << 1))
+#define UI_WALKER_FX_BIND_TEXT_MATERIAL ((ui_walker_fx_bind_t)(1U << 2))
+#define UI_WALKER_FX_BIND_ALL (UI_WALKER_FX_BIND_ATLAS | UI_WALKER_FX_BIND_SPRITE_MATERIAL | UI_WALKER_FX_BIND_TEXT_MATERIAL)
 
 typedef struct {
     nt_ui_context_t *ctx;

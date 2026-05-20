@@ -23,7 +23,7 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8u];
+static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8U];
 static ui_walker_fixture_t s_fx;
 
 #define MAX_TEST_CMDS 8
@@ -50,21 +50,21 @@ static void inject_frozen_cmds(int32_t count) {
 static void test_ui_draw_calls_counter_set(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
-    c->boundingBox = (Clay_BoundingBox){.x = 0.0f, .y = 0.0f, .width = 100.0f, .height = 100.0f};
-    c->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255.0f, .g = 0.0f, .b = 0.0f, .a = 255.0f};
+    c->boundingBox = (Clay_BoundingBox){.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 100.0F};
+    c->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255.0F, .g = 0.0F, .b = 0.0F, .a = 255.0F};
     inject_frozen_cmds(1);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     /* Per-walk delta probe: at least the walker-exit flush ticked one draw call. */
     const uint32_t delta = nt_ui_test_last_walk_draw_call_delta(s_fx.ctx);
-    TEST_ASSERT_GREATER_THAN_UINT32(0u, delta);
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, delta);
 
     /* nt_stats wiring: the counter must surface in format_lines. */
     char buf[512];
     uint32_t n = nt_stats_format_lines(buf, sizeof buf);
-    TEST_ASSERT_GREATER_THAN_UINT32(0u, n);
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, n);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, "ui_draw_calls:"), "nt_stats must contain ui_draw_calls counter after walk");
 
     /* The delta value must match what nt_stats holds -- verify via
@@ -81,17 +81,17 @@ static void test_ui_element_count_counter_set(void) {
     for (int i = 0; i < 3; ++i) {
         Clay_RenderCommand *c = &s_test_cmds[i];
         c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
-        c->boundingBox = (Clay_BoundingBox){.x = (float)(i * 20), .y = 0.0f, .width = 10.0f, .height = 10.0f};
-        c->renderData.rectangle.backgroundColor = (Clay_Color){.r = 0.0f, .g = 255.0f, .b = 0.0f, .a = 255.0f};
+        c->boundingBox = (Clay_BoundingBox){.x = (float)(i * 20), .y = 0.0F, .width = 10.0F, .height = 10.0F};
+        c->renderData.rectangle.backgroundColor = (Clay_Color){.r = 0.0F, .g = 255.0F, .b = 0.0F, .a = 255.0F};
     }
     inject_frozen_cmds(3);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     /* Element count probe matches frozen_cmds.length exactly (no Clay
      * wrapper elements -- frozen_cmds is the injected synthetic array). */
-    TEST_ASSERT_EQUAL_UINT32(3u, nt_ui_test_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(3U, nt_ui_test_last_walk_element_count(s_fx.ctx));
 
     /* nt_stats wiring. */
     char buf[512];
@@ -107,23 +107,23 @@ static void test_counters_reset_per_walk(void) {
     for (int i = 0; i < 2; ++i) {
         Clay_RenderCommand *c = &s_test_cmds[i];
         c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
-        c->boundingBox = (Clay_BoundingBox){.x = 0.0f, .y = 0.0f, .width = 10.0f, .height = 10.0f};
-        c->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255.0f, .g = 255.0f, .b = 255.0f, .a = 255.0f};
+        c->boundingBox = (Clay_BoundingBox){.x = 0.0F, .y = 0.0F, .width = 10.0F, .height = 10.0F};
+        c->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F};
     }
     inject_frozen_cmds(2);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     const uint32_t count1 = nt_ui_test_last_walk_element_count(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT32(2u, count1);
+    TEST_ASSERT_EQUAL_UINT32(2U, count1);
 
     /* Second walk: empty command array. */
     inject_frozen_cmds(0);
     nt_ui_walk(s_fx.ctx, &target);
 
     const uint32_t count2 = nt_ui_test_last_walk_element_count(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT32(0u, count2);
+    TEST_ASSERT_EQUAL_UINT32(0U, count2);
     TEST_ASSERT_NOT_EQUAL_MESSAGE(count1, count2, "second walk's element count must reflect the second declaration, not accumulate");
 
     /* nt_stats also reflects the second walk's value, not the first. */

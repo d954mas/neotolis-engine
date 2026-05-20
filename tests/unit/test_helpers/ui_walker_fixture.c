@@ -101,13 +101,13 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     fx->ctx = nt_ui_create_context(arena, arena_size);
     TEST_ASSERT_NOT_NULL(fx->ctx);
 
-    if ((bind & UI_WALKER_FX_BIND_ATLAS) != 0u) {
+    if ((bind & UI_WALKER_FX_BIND_ATLAS) != 0U) {
         nt_ui_set_atlas_white_region(fx->ctx, fx->atlas.handle, fx->atlas.white_region_idx);
     }
-    if ((bind & UI_WALKER_FX_BIND_SPRITE_MATERIAL) != 0u) {
+    if ((bind & UI_WALKER_FX_BIND_SPRITE_MATERIAL) != 0U) {
         nt_ui_set_sprite_material(fx->ctx, fx->sprite_material);
     }
-    if ((bind & UI_WALKER_FX_BIND_TEXT_MATERIAL) != 0u) {
+    if ((bind & UI_WALKER_FX_BIND_TEXT_MATERIAL) != 0U) {
         nt_ui_set_text_material(fx->ctx, fx->text_material);
     }
     nt_ui_set_custom_handler(fx->ctx, NULL, NULL);

@@ -105,8 +105,8 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob) {
         .source_h = 1,
         .trim_offset_x = 0,
         .trim_offset_y = 0,
-        .origin_x = 0.0f,
-        .origin_y = 0.0f,
+        .origin_x = 0.0F,
+        .origin_y = 0.0F,
         .vertex_start = 0,
         .index_start = 0,
         .vertex_count = 4,
@@ -116,7 +116,7 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob) {
         .flags = NT_ATLAS_REGION_FLAG_QUAD_012023,
         ._reserved = {0, 0, 0},
     };
-    memcpy(out_blob + UI_ATLAS_HEADER_SIZE + UI_ATLAS_PAGE_IDS_SIZE, &region0, sizeof region0);
+    memcpy(out_blob + (size_t)UI_ATLAS_HEADER_SIZE + (size_t)UI_ATLAS_PAGE_IDS_SIZE, &region0, sizeof region0);
 
     /* ---- Region 1: 6-vertex polygon hull (12 indices = 4 fan triangles) ---- */
     NtAtlasRegion region1 = {
@@ -125,8 +125,8 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob) {
         .source_h = 16,
         .trim_offset_x = 0,
         .trim_offset_y = 0,
-        .origin_x = 0.5f,
-        .origin_y = 0.5f,
+        .origin_x = 0.5F,
+        .origin_y = 0.5F,
         .vertex_start = 4,
         .index_start = 6,
         .vertex_count = 6,
@@ -136,7 +136,7 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob) {
         .flags = 0,
         ._reserved = {0, 0, 0},
     };
-    memcpy(out_blob + UI_ATLAS_HEADER_SIZE + UI_ATLAS_PAGE_IDS_SIZE + 40, &region1, sizeof region1);
+    memcpy(out_blob + (size_t)UI_ATLAS_HEADER_SIZE + (size_t)UI_ATLAS_PAGE_IDS_SIZE + 40U, &region1, sizeof region1);
 
     /* ---- Vertices: 4 white + 6 polygon-hull ---- */
     NtAtlasVertex verts[UI_ATLAS_VERTEX_COUNT] = {
@@ -188,9 +188,9 @@ static uint8_t *ui_atlas_build_pack_blob(uint64_t atlas_rid, uint32_t *out_total
     ui_atlas_build_inner_blob(inner);
 
     const uint32_t raw_header = (uint32_t)(sizeof(NtPackHeader) + sizeof(NtAssetEntry));
-    const uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1u)) & ~(uint32_t)(NT_PACK_DATA_ALIGN - 1u);
+    const uint32_t header_size = (raw_header + (NT_PACK_DATA_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_DATA_ALIGN - 1U);
     const uint32_t atlas_offset = header_size;
-    const uint32_t aligned_atlas = (UI_ATLAS_BLOB_SIZE + (NT_PACK_ASSET_ALIGN - 1u)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1u);
+    const uint32_t aligned_atlas = (UI_ATLAS_BLOB_SIZE + (NT_PACK_ASSET_ALIGN - 1U)) & ~(uint32_t)(NT_PACK_ASSET_ALIGN - 1U);
     const uint32_t total_size = atlas_offset + aligned_atlas;
 
     uint8_t *pack_blob = (uint8_t *)calloc(1, total_size);
@@ -221,6 +221,7 @@ static uint8_t *ui_atlas_build_pack_blob(uint64_t atlas_rid, uint32_t *out_total
     return pack_blob;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 minimal_ui_atlas_t minimal_ui_atlas_create(void) {
     s_helper_counter++;
 

@@ -343,7 +343,7 @@ static void test_emit_region_direct_call(void) {
     const float m[16] = {
         32.0F, 0.0F, 0.0F, 0.0F, 0.0F, 32.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 10.0F, 20.0F, 0.0F, 1.0F,
     };
-    nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, /*flip=*/0U);
+    nt_sprite_renderer_emit_region(s_atlas_res, FIXTURE_WHITE_REGION_IDX, m, 0.0F, 0.0F, 0xFFFFFFFFU, /*flip_bits=*/0U);
 
     /* Probe captured BEFORE flush resets vertex_count. */
     TEST_ASSERT_EQUAL_UINT32(4, nt_sprite_renderer_test_last_emit_vertex_count());

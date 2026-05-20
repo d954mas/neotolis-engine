@@ -74,7 +74,7 @@
 
 /* Default arena size suitable for ~50k Clay elements + 8 fonts + scroll/
  * modal stacks. Caller pattern: static uint8_t g_ui_arena[NT_UI_DEFAULT_ARENA_SIZE]. */
-#define NT_UI_DEFAULT_ARENA_SIZE (8u * 1024u * 1024u)
+#define NT_UI_DEFAULT_ARENA_SIZE (8U * 1024U * 1024U)
 
 /* ---- Opaque context handle ---- */
 

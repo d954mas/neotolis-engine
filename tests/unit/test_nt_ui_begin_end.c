@@ -20,8 +20,8 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-static uint64_t s_arena_a[NT_UI_DEFAULT_ARENA_SIZE / 8u];
-static uint64_t s_arena_b[NT_UI_DEFAULT_ARENA_SIZE / 8u];
+static uint64_t s_arena_a[NT_UI_DEFAULT_ARENA_SIZE / 8U];
+static uint64_t s_arena_b[NT_UI_DEFAULT_ARENA_SIZE / 8U];
 
 void setUp(void) { nt_test_assert_install(); }
 void tearDown(void) {
@@ -42,7 +42,7 @@ static void test_begin_sets_current_ctx(void) {
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
-    nt_ui_begin(a, 800.0f, 600.0f, &mouse);
+    nt_ui_begin(a, 800.0F, 600.0F, &mouse);
     TEST_ASSERT_EQUAL_PTR(a->clay, Clay_GetCurrentContext());
     nt_ui_end(a);
 
@@ -60,9 +60,9 @@ static void test_stray_nested_begin_asserts(void) {
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
-    nt_ui_begin(a, 800.0f, 600.0f, &mouse);
+    nt_ui_begin(a, 800.0F, 600.0F, &mouse);
     /* The second begin must fire NT_ASSERT(g_nt_ui_inframe_ctx == NULL). */
-    NT_TEST_EXPECT_ASSERT(nt_ui_begin(b, 800.0f, 600.0f, &mouse));
+    NT_TEST_EXPECT_ASSERT(nt_ui_begin(b, 800.0F, 600.0F, &mouse));
     /* Recover: a is still in-frame (assert fired before begin mutated
      * any state), so end it cleanly. */
     nt_ui_end(a);
@@ -79,7 +79,7 @@ static void test_end_clears_in_frame(void) {
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
-    nt_ui_begin(a, 800.0f, 600.0f, &mouse);
+    nt_ui_begin(a, 800.0F, 600.0F, &mouse);
     TEST_ASSERT_TRUE(a->in_frame);
     TEST_ASSERT_EQUAL_PTR(a, nt_ui_test_inframe_ctx());
 

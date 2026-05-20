@@ -20,7 +20,7 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8u];
+static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8U];
 static ui_walker_fixture_t s_fx;
 
 #define MAX_TEST_CMDS 8
@@ -84,7 +84,7 @@ static void test_second_walk_identical(void) {
 static void test_viewport_applied(void) {
     inject_frozen_cmds(0);
 
-    nt_ui_target_t target = {.viewport = {100.0f, 200.0f, 640.0f, 480.0f}};
+    nt_ui_target_t target = {.viewport = {100.0F, 200.0F, 640.0F, 480.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     int vp[4];

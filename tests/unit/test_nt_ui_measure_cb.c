@@ -43,7 +43,7 @@
 /* clang-format on */
 
 /* 8-byte aligned static arena via uint64_t backing array. */
-static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8u];
+static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8U];
 
 /* Virtual pack id counter to keep registrations unique across tests. */
 static uint32_t s_vpack_counter;
@@ -52,12 +52,12 @@ static uint32_t s_vpack_counter;
 
 static uint8_t *build_test_font_blob(uint32_t *out_size) {
     /* 1 contour with 2 line segments per glyph = 18 bytes per glyph. */
-    const uint32_t contour_size = 18u;
+    const uint32_t contour_size = 18U;
     const uint32_t header_size = (uint32_t)sizeof(NtFontAssetHeader);
-    const uint32_t glyphs_size = 3u * (uint32_t)sizeof(NtFontGlyphEntry);
-    const uint32_t total_size = header_size + glyphs_size + (3u * contour_size);
+    const uint32_t glyphs_size = 3U * (uint32_t)sizeof(NtFontGlyphEntry);
+    const uint32_t total_size = header_size + glyphs_size + (3U * contour_size);
 
-    uint8_t *blob = (uint8_t *)calloc(total_size, 1u);
+    uint8_t *blob = (uint8_t *)calloc(total_size, 1U);
     NT_ASSERT(blob);
 
     NtFontAssetHeader hdr;
@@ -90,12 +90,14 @@ static uint8_t *build_test_font_blob(uint32_t *out_size) {
 
     for (int g = 0; g < 3; ++g) {
         uint8_t *wp = blob + data_base + ((size_t)g * contour_size);
-        uint16_t cc = 1u, sc = 2u;
+        uint16_t cc = 1U;
+        uint16_t sc = 2U;
         memcpy(wp, &cc, 2);
         wp += 2;
         memcpy(wp, &sc, 2);
         wp += 2;
-        int16_t sx = 0, sy = 0;
+        int16_t sx = 0;
+        int16_t sy = 0;
         memcpy(wp, &sx, 2);
         wp += 2;
         memcpy(wp, &sy, 2);
@@ -103,12 +105,14 @@ static uint8_t *build_test_font_blob(uint32_t *out_size) {
         wp[0] = 0;
         wp[1] = 0;
         wp += 2;
-        int16_t d1x = 400, d1y = 0;
+        int16_t d1x = 400;
+        int16_t d1y = 0;
         memcpy(wp, &d1x, 2);
         wp += 2;
         memcpy(wp, &d1y, 2);
         wp += 2;
-        int16_t d2x = 0, d2y = 800;
+        int16_t d2x = 0;
+        int16_t d2y = 800;
         memcpy(wp, &d2x, 2);
         wp += 2;
         memcpy(wp, &d2y, 2);
@@ -178,7 +182,7 @@ void tearDown(void) {
 static bool float_is_zero_bits(float f) {
     uint32_t b;
     memcpy(&b, &f, sizeof b);
-    return (b == 0u) || (b == 0x80000000u);
+    return (b == 0U) || (b == 0x80000000U);
 }
 
 /* Drive Clay through a one-element CLAY_TEXT declaration and return the
@@ -188,7 +192,7 @@ static Clay_BoundingBox declare_and_measure_text(nt_ui_context_t *ctx, const cha
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
-    nt_ui_begin(ctx, 800.0f, 600.0f, &mouse);
+    nt_ui_begin(ctx, 800.0F, 600.0F, &mouse);
 
     /* Build a Clay_String wrapper from the literal. CLAY_TEXT's first arg
      * is a Clay_String value (not a pointer). */
@@ -220,7 +224,7 @@ static void test_measure_callback_wired(void) {
     /* No font set at slot 0 -> callback should hit the nt_font_valid early
      * return and produce a 0-width TEXT command bounding box (or no TEXT
      * command at all, depending on Clay's culling). */
-    Clay_BoundingBox bb = declare_and_measure_text(ctx, "ABC", 0u, 14u);
+    Clay_BoundingBox bb = declare_and_measure_text(ctx, "ABC", 0U, 14U);
     TEST_ASSERT_TRUE(float_is_zero_bits(bb.width));
     TEST_ASSERT_TRUE(float_is_zero_bits(bb.height));
 
@@ -237,18 +241,18 @@ static void test_measure_callback_forwards_to_font_measure_n(void) {
 
     nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena);
     TEST_ASSERT_NOT_NULL(ctx);
-    nt_ui_set_font(ctx, 0u, font);
+    nt_ui_set_font(ctx, 0U, font);
 
     /* Independent ground truth: invoke the exact same measure path the
      * callback takes (with the size cast to float matching uint16_t->float). */
-    nt_text_size_t expected = nt_font_measure_n(font, "ABC", 3u, 14.0f);
+    nt_text_size_t expected = nt_font_measure_n(font, "ABC", 3U, 14.0F);
     /* Sanity: the resolved test font must produce positive dimensions for
      * a 3-glyph "ABC" measurement. If this fails the test_font setup is
      * broken, not the callback. */
     TEST_ASSERT_FALSE(float_is_zero_bits(expected.width));
     TEST_ASSERT_FALSE(float_is_zero_bits(expected.height));
 
-    Clay_BoundingBox bb = declare_and_measure_text(ctx, "ABC", 0u, 14u);
+    Clay_BoundingBox bb = declare_and_measure_text(ctx, "ABC", 0U, 14U);
 
     /* Clay can round/quantize the bbox slightly during layout; compare
      * via integer truncation with a 1 px tolerance window. The truncation
@@ -280,7 +284,7 @@ static void test_measure_callback_invalid_font_returns_zero(void) {
     TEST_ASSERT_NOT_NULL(ctx);
     /* Deliberately leave ctx->fonts[0] = NT_FONT_INVALID (zeroed by create). */
 
-    Clay_BoundingBox bb = declare_and_measure_text(ctx, "ABC", 0u, 14u);
+    Clay_BoundingBox bb = declare_and_measure_text(ctx, "ABC", 0U, 14U);
     TEST_ASSERT_TRUE(float_is_zero_bits(bb.width));
     TEST_ASSERT_TRUE(float_is_zero_bits(bb.height));
 

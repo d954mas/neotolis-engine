@@ -18,7 +18,7 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8u];
+static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8U];
 static ui_walker_fixture_t s_fx;
 
 #define MAX_TEST_CMDS 32
@@ -52,7 +52,7 @@ static void test_scissor_depth_8_ok(void) {
     }
     inject_frozen_cmds(16);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
@@ -69,7 +69,7 @@ static void test_scissor_depth_9_asserts(void) {
     }
     inject_frozen_cmds(9);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
@@ -83,7 +83,7 @@ static void test_scissor_unbalanced_asserts_at_exit(void) {
     s_test_cmds[2].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
     inject_frozen_cmds(3);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
@@ -94,13 +94,13 @@ static void test_scissor_unbalanced_asserts_at_exit(void) {
  * the enabled flag. */
 static void test_scissor_y_flip_top_left_to_gl_bottom_left(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
-    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 100.0f, .y = 100.0f, .width = 200.0f, .height = 200.0f};
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 100.0F, .y = 100.0F, .width = 200.0F, .height = 200.0F};
     s_test_cmds[0].renderData.clip.horizontal = true;
     s_test_cmds[0].renderData.clip.vertical = true;
     s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
     inject_frozen_cmds(2);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     int rect[4];
@@ -119,11 +119,11 @@ static void test_scissor_y_flip_top_left_to_gl_bottom_left(void) {
 static void test_scissor_intersection_nested(void) {
     /* Outer */
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
-    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0.0f, .y = 0.0f, .width = 100.0f, .height = 100.0f};
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 100.0F};
     /* Inner -- pre-intersect rect would have been (50,50,150,150) (extending
      * to 200,200), but intersection with outer clips it to (50,50,50,50). */
     s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
-    s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 50.0f, .y = 50.0f, .width = 150.0f, .height = 150.0f};
+    s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 50.0F, .y = 50.0F, .width = 150.0F, .height = 150.0F};
     /* Pop inner (we want to inspect the LAST scissor call which was the
      * inner push, but to balance the stack we still need the END. After
      * the END, scissor_pop re-applies the outer rect -- which masks the
@@ -142,7 +142,7 @@ static void test_scissor_intersection_nested(void) {
     s_test_cmds[3].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END; /* close outer */
     inject_frozen_cmds(4);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     /* After scissor_pop of inner, scissor_pop re-applies outer (0, 0, 100, 100).
@@ -168,7 +168,7 @@ static void test_walker_exit_disables_scissor(void) {
     s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
     inject_frozen_cmds(2);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
@@ -183,13 +183,13 @@ static void test_scissor_respects_viewport_offset(void) {
     /* Local scissor at (10, 10) within a 400x300 viewport that itself
      * starts at framebuffer offset (100, 50). */
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
-    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 10.0f, .y = 10.0f, .width = 100.0f, .height = 100.0f};
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 10.0F, .y = 10.0F, .width = 100.0F, .height = 100.0F};
     s_test_cmds[0].renderData.clip.horizontal = true;
     s_test_cmds[0].renderData.clip.vertical = true;
     s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
     inject_frozen_cmds(2);
 
-    nt_ui_target_t target = {.viewport = {100.0f, 50.0f, 400.0f, 300.0f}};
+    nt_ui_target_t target = {.viewport = {100.0F, 50.0F, 400.0F, 300.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     int rect[4];

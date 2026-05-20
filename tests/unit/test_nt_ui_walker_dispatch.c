@@ -24,7 +24,7 @@
 
 /* ---- Test-local state ---- */
 
-static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8u];
+static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8U];
 static ui_walker_fixture_t s_fx;
 
 #define MAX_TEST_CMDS 32
@@ -72,18 +72,18 @@ static void inject_frozen_cmds(int32_t count) {
 static void test_dispatch_rectangle(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
-    c->boundingBox = (Clay_BoundingBox){.x = 10.0f, .y = 20.0f, .width = 100.0f, .height = 50.0f};
-    c->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255.0f, .g = 0.0f, .b = 0.0f, .a = 255.0f};
+    c->boundingBox = (Clay_BoundingBox){.x = 10.0F, .y = 20.0F, .width = 100.0F, .height = 50.0F};
+    c->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255.0F, .g = 0.0F, .b = 0.0F, .a = 255.0F};
     inject_frozen_cmds(1);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     /* White region is 4 verts/6 indices -- emit_region preserves it. */
-    TEST_ASSERT_EQUAL_UINT32(4u, nt_sprite_renderer_test_last_emit_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(6u, nt_sprite_renderer_test_last_emit_index_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(6U, nt_sprite_renderer_test_last_emit_index_count());
     /* Walker element count delta matches frozen_cmds.length. */
-    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_test_last_walk_element_count(s_fx.ctx));
 }
 
 /* WALK-04: BORDER with all 4 widths non-zero -- exactly 4 last_emit calls
@@ -92,8 +92,8 @@ static void test_dispatch_rectangle(void) {
 static void test_dispatch_border_emits_4_rects(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_BORDER;
-    c->boundingBox = (Clay_BoundingBox){.x = 0.0f, .y = 0.0f, .width = 200.0f, .height = 100.0f};
-    c->renderData.border.color = (Clay_Color){.r = 0.0f, .g = 255.0f, .b = 0.0f, .a = 255.0f};
+    c->boundingBox = (Clay_BoundingBox){.x = 0.0F, .y = 0.0F, .width = 200.0F, .height = 100.0F};
+    c->renderData.border.color = (Clay_Color){.r = 0.0F, .g = 255.0F, .b = 0.0F, .a = 255.0F};
     c->renderData.border.width = (Clay_BorderWidth){.left = 2, .right = 2, .top = 2, .bottom = 2, .betweenChildren = 0};
     inject_frozen_cmds(1);
 
@@ -102,13 +102,13 @@ static void test_dispatch_border_emits_4_rects(void) {
      * they all batch into one cmd that flushes at walk exit. */
     const uint32_t calls_before = nt_sprite_renderer_test_draw_call_count();
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     /* Last emit is still a 4-vert white quad. */
-    TEST_ASSERT_EQUAL_UINT32(4u, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
     /* All 4 sides batch into one cmd; walker exit flush adds exactly 1 draw call. */
-    TEST_ASSERT_EQUAL_UINT32(calls_before + 1u, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(calls_before + 1U, nt_sprite_renderer_test_draw_call_count());
 }
 
 /* WALK-01: TEXT -> flush sprite (no-op when empty) + text renderer setters
@@ -123,26 +123,26 @@ static void test_dispatch_text(void) {
 
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_TEXT;
-    c->boundingBox = (Clay_BoundingBox){.x = 50.0f, .y = 60.0f, .width = 100.0f, .height = 20.0f};
+    c->boundingBox = (Clay_BoundingBox){.x = 50.0F, .y = 60.0F, .width = 100.0F, .height = 20.0F};
     static const char *kText = "AB";
     c->renderData.text.stringContents = (Clay_StringSlice){.length = 2, .chars = kText, .baseChars = kText};
-    c->renderData.text.textColor = (Clay_Color){.r = 255.0f, .g = 255.0f, .b = 255.0f, .a = 255.0f};
+    c->renderData.text.textColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F};
     c->renderData.text.fontId = 0;
     c->renderData.text.fontSize = 14;
     c->renderData.text.letterSpacing = 0;
     c->renderData.text.lineHeight = 0;
     inject_frozen_cmds(1);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     /* font_id=0 has no font set in the per-ctx registry; emit_text exits
      * before calling set_font/set_material. The walker just needs to not
      * crash on the TEXT case. */
-    TEST_ASSERT_EQUAL_UINT32(0u, nt_text_renderer_test_set_material_calls());
-    TEST_ASSERT_EQUAL_UINT32(0u, nt_text_renderer_test_set_font_calls());
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_material_calls());
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_font_calls());
     /* Walker element count still ticks. */
-    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_test_last_walk_element_count(s_fx.ctx));
 }
 
 /* WALK-01: IMAGE -> reads nt_ui_image_payload_t and emits one region. */
@@ -154,17 +154,17 @@ static void test_dispatch_image(void) {
 
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
-    c->boundingBox = (Clay_BoundingBox){.x = 100.0f, .y = 100.0f, .width = 64.0f, .height = 64.0f};
+    c->boundingBox = (Clay_BoundingBox){.x = 100.0F, .y = 100.0F, .width = 64.0F, .height = 64.0F};
     c->renderData.image.backgroundColor = (Clay_Color){0}; /* untinted */
     c->renderData.image.imageData = &s_image_payload;
     inject_frozen_cmds(1);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     /* Polygon hull preservation: emit_image must NOT collapse to 4-vert quad. */
-    TEST_ASSERT_EQUAL_UINT32(6u, nt_sprite_renderer_test_last_emit_vertex_count());
-    TEST_ASSERT_EQUAL_UINT32(12u, nt_sprite_renderer_test_last_emit_index_count());
+    TEST_ASSERT_EQUAL_UINT32(6U, nt_sprite_renderer_test_last_emit_vertex_count());
+    TEST_ASSERT_EQUAL_UINT32(12U, nt_sprite_renderer_test_last_emit_index_count());
 }
 
 /* WALK-01 / WALK-02 / WALK-03: SCISSOR_START + SCISSOR_END are dispatched
@@ -172,7 +172,7 @@ static void test_dispatch_image(void) {
 static void test_dispatch_scissor_start_end(void) {
     Clay_RenderCommand *cs = &s_test_cmds[0];
     cs->commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
-    cs->boundingBox = (Clay_BoundingBox){.x = 50.0f, .y = 50.0f, .width = 200.0f, .height = 200.0f};
+    cs->boundingBox = (Clay_BoundingBox){.x = 50.0F, .y = 50.0F, .width = 200.0F, .height = 200.0F};
     cs->renderData.clip.horizontal = true;
     cs->renderData.clip.vertical = true;
 
@@ -181,12 +181,12 @@ static void test_dispatch_scissor_start_end(void) {
 
     inject_frozen_cmds(2);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     /* Walker MUST disable scissor at exit (CP-04). */
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
-    TEST_ASSERT_EQUAL_UINT32(2u, nt_ui_test_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_test_last_walk_element_count(s_fx.ctx));
 }
 
 /* WALK-05: CUSTOM -> registered handler called with (cmd, userdata). */
@@ -201,7 +201,7 @@ static void test_dispatch_custom(void) {
     c->renderData.custom.customData = NULL;
     inject_frozen_cmds(1);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_TRUE(s_custom_called);
@@ -214,16 +214,16 @@ static void test_dispatch_none_silent_skip(void) {
     /* Walk an empty command array -- frozen_cmds.length = 0. */
     inject_frozen_cmds(0);
 
-    nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(0u, nt_ui_test_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_last_walk_element_count(s_fx.ctx));
 
     /* Also test an explicit NONE command -- still no crash, still no emit. */
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_NONE;
     inject_frozen_cmds(1);
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_test_last_walk_element_count(s_fx.ctx));
 }
 
 int main(void) {

@@ -29,7 +29,7 @@
 #include "unity.h"
 /* clang-format on */
 
-static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8u];
+static uint64_t s_arena[NT_UI_DEFAULT_ARENA_SIZE / 8U];
 
 void setUp(void) {
     /* gfx is required because the nt_ui transitive link surface pulls it
@@ -44,7 +44,8 @@ void tearDown(void) { nt_gfx_shutdown(); }
  * inputs (100.0f, 200.0f, 50.0f, 75.0f) are exact float representations
  * so the round-trip through Clay's identity-store should be bit-stable. */
 static bool float_eq_bits(float a, float b) {
-    uint32_t pa, pb;
+    uint32_t pa;
+    uint32_t pb;
     memcpy(&pa, &a, sizeof pa);
     memcpy(&pb, &b, sizeof pb);
     return pa == pb;
@@ -58,15 +59,15 @@ static void test_pointer_state_set_from_nt_pointer(void) {
 
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
-    mouse.x = 100.0f;
-    mouse.y = 200.0f;
+    mouse.x = 100.0F;
+    mouse.y = 200.0F;
     mouse.buttons[NT_BUTTON_LEFT].is_down = true;
 
-    nt_ui_begin(ctx, 800.0f, 600.0f, &mouse);
+    nt_ui_begin(ctx, 800.0F, 600.0F, &mouse);
 
     /* Probe Clay's pointer state via NT_UI_TEST_ACCESS getters. */
-    TEST_ASSERT_TRUE(float_eq_bits(100.0f, nt_ui_test_clay_pointer_x(ctx)));
-    TEST_ASSERT_TRUE(float_eq_bits(200.0f, nt_ui_test_clay_pointer_y(ctx)));
+    TEST_ASSERT_TRUE(float_eq_bits(100.0F, nt_ui_test_clay_pointer_x(ctx)));
+    TEST_ASSERT_TRUE(float_eq_bits(200.0F, nt_ui_test_clay_pointer_y(ctx)));
     TEST_ASSERT_EQUAL_INT(1, nt_ui_test_clay_pointer_down(ctx));
 
     nt_ui_end(ctx);
@@ -81,14 +82,14 @@ static void test_pointer_state_button_released(void) {
 
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
-    mouse.x = 50.0f;
-    mouse.y = 75.0f;
+    mouse.x = 50.0F;
+    mouse.y = 75.0F;
     mouse.buttons[NT_BUTTON_LEFT].is_down = false;
 
-    nt_ui_begin(ctx, 800.0f, 600.0f, &mouse);
+    nt_ui_begin(ctx, 800.0F, 600.0F, &mouse);
 
-    TEST_ASSERT_TRUE(float_eq_bits(50.0f, nt_ui_test_clay_pointer_x(ctx)));
-    TEST_ASSERT_TRUE(float_eq_bits(75.0f, nt_ui_test_clay_pointer_y(ctx)));
+    TEST_ASSERT_TRUE(float_eq_bits(50.0F, nt_ui_test_clay_pointer_x(ctx)));
+    TEST_ASSERT_TRUE(float_eq_bits(75.0F, nt_ui_test_clay_pointer_y(ctx)));
     TEST_ASSERT_EQUAL_INT(0, nt_ui_test_clay_pointer_down(ctx));
 
     nt_ui_end(ctx);
@@ -104,13 +105,13 @@ static void test_pointer_state_only_left_button_consumed(void) {
 
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
-    mouse.x = 10.0f;
-    mouse.y = 20.0f;
+    mouse.x = 10.0F;
+    mouse.y = 20.0F;
     mouse.buttons[NT_BUTTON_LEFT].is_down = false;
     mouse.buttons[NT_BUTTON_RIGHT].is_down = true;
     mouse.buttons[NT_BUTTON_MIDDLE].is_down = true;
 
-    nt_ui_begin(ctx, 800.0f, 600.0f, &mouse);
+    nt_ui_begin(ctx, 800.0F, 600.0F, &mouse);
 
     TEST_ASSERT_EQUAL_INT(0, nt_ui_test_clay_pointer_down(ctx));
 

@@ -120,13 +120,13 @@ static Clay_Dimensions nt_ui_measure_text_cb(Clay_StringSlice text, Clay_TextEle
 // #region create_destroy
 /* Pattern 2 from 52-RESEARCH.md: caller-owned arena, ctx struct lives in
  * the first ~256 bytes (cache-line aligned), Clay arena takes the rest. */
-static size_t nt_ui_ctx_size_aligned(void) { return (sizeof(struct nt_ui_context) + 63u) & ~(size_t)63u; }
+static size_t nt_ui_ctx_size_aligned(void) { return (sizeof(struct nt_ui_context) + 63U) & ~(size_t)63U; }
 
 size_t nt_ui_min_arena_size(void) { return nt_ui_ctx_size_aligned() + (size_t)Clay_MinMemorySize(); }
 
 nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size) {
     NT_ASSERT(arena != NULL && "nt_ui_create_context: arena must be non-NULL");
-    NT_ASSERT(((uintptr_t)arena & 7u) == 0u && "nt_ui_create_context: arena must be 8-byte aligned");
+    NT_ASSERT(((uintptr_t)arena & 7U) == 0U && "nt_ui_create_context: arena must be 8-byte aligned");
     NT_ASSERT(arena_size >= nt_ui_min_arena_size() && "nt_ui_create_context: arena_size < nt_ui_min_arena_size()");
 
     nt_ui_context_t *ctx = (nt_ui_context_t *)arena;
@@ -140,7 +140,7 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size) {
     ctx->arena_size = arena_size;
     ctx->in_frame = false;
     ctx->clay_arena = Clay_CreateArenaWithCapacityAndMemory(clay_size, clay_mem);
-    ctx->clay = Clay_Initialize(ctx->clay_arena, (Clay_Dimensions){.width = 1.0f, .height = 1.0f}, (Clay_ErrorHandler){.errorHandlerFunction = nt_ui_clay_error_cb, .userData = ctx});
+    ctx->clay = Clay_Initialize(ctx->clay_arena, (Clay_Dimensions){.width = 1.0F, .height = 1.0F}, (Clay_ErrorHandler){.errorHandlerFunction = nt_ui_clay_error_cb, .userData = ctx});
 
     /* Clay_SetMeasureTextFunction is idempotent -- always wire (cheap pointer
      * assignment in Clay v0.14). Avoids any lazy-init state of our own. */
@@ -167,6 +167,7 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 // #endregion
 
 // #region begin_end
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_pointer_t *mouse) {
     NT_ASSERT(ctx != NULL && "nt_ui_begin: ctx must be non-NULL");
     NT_ASSERT(mouse != NULL && "nt_ui_begin: mouse must be non-NULL");
@@ -209,11 +210,11 @@ void nt_ui_end(nt_ui_context_t *ctx) {
  * Saturate at uint8 because Clay does not clamp -- a theme that wrote
  * 256.0f or -1.0f would otherwise wrap around. */
 static inline uint8_t clamp_u8(float v) {
-    if (v <= 0.0f) {
-        return 0u;
+    if (v <= 0.0F) {
+        return 0U;
     }
-    if (v >= 255.0f) {
-        return 255u;
+    if (v >= 255.0F) {
+        return 255U;
     }
     return (uint8_t)v;
 }
@@ -235,12 +236,12 @@ static inline uint32_t nt_color_pack_clay(Clay_Color c) {
 static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed) {
     /* Column-major layout: m[0..3]=col0, m[4..7]=col1, m[8..11]=col2, m[12..15]=col3. */
     const float m[16] = {
-        w,    0.0f, 0.0f, 0.0f, /* col0: scale x */
-        0.0f, h,    0.0f, 0.0f, /* col1: scale y */
-        0.0f, 0.0f, 1.0f, 0.0f, /* col2 */
-        x,    y,    0.0f, 1.0f  /* col3: translate */
+        w,    0.0F, 0.0F, 0.0F, /* col0: scale x */
+        0.0F, h,    0.0F, 0.0F, /* col1: scale y */
+        0.0F, 0.0F, 1.0F, 0.0F, /* col2 */
+        x,    y,    0.0F, 1.0F  /* col3: translate */
     };
-    nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0f, 0.0f, color_packed, 0u);
+    nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
 }
 // #endregion
 
@@ -298,12 +299,12 @@ static void emit_image(const Clay_RenderCommand *c) {
      * (clay.h:481 comment). Map that to 0xFFFFFFFF so the sprite shader's
      * per-vertex tint is a no-op. */
     Clay_Color tint = c->renderData.image.backgroundColor;
-    const uint32_t col = (tint.r == 0.0f && tint.g == 0.0f && tint.b == 0.0f && tint.a == 0.0f) ? 0xFFFFFFFFu : nt_color_pack_clay(tint);
+    const uint32_t col = (tint.r == 0.0F && tint.g == 0.0F && tint.b == 0.0F && tint.a == 0.0F) ? 0xFFFFFFFFU : nt_color_pack_clay(tint);
 
     /* Resolve region via the payload's atlas. Tombstones / out-of-range
      * silently no-op via the sprite renderer's emit_region_resolved. */
     const nt_texture_region_t *r = nt_atlas_get_region(p->atlas, p->region_index);
-    if (r == NULL || r->vertex_count == 0u) {
+    if (r == NULL || r->vertex_count == 0U) {
         return;
     }
     const float ipu = nt_atlas_get_inverse_pixels_per_unit(p->atlas);
@@ -311,13 +312,13 @@ static void emit_image(const Clay_RenderCommand *c) {
     const float src_h = (float)r->source_h * ipu;
     /* Guard against degenerate source dim (avoid div-by-zero on tombstoned
      * regions that slipped through the vertex_count gate). */
-    const float sx = (src_w > 0.0f) ? (bb.width / src_w) : bb.width;
-    const float sy = (src_h > 0.0f) ? (bb.height / src_h) : bb.height;
+    const float sx = (src_w > 0.0F) ? (bb.width / src_w) : bb.width;
+    const float sy = (src_h > 0.0F) ? (bb.height / src_h) : bb.height;
 
     const float m[16] = {
-        sx, 0.0f, 0.0f, 0.0f, 0.0f, sy, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, bb.x, bb.y, 0.0f, 1.0f,
+        sx, 0.0F, 0.0F, 0.0F, 0.0F, sy, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, bb.x, bb.y, 0.0F, 1.0F,
     };
-    nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0f, 0.0f, col, p->flip_bits);
+    nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
 }
 // #endregion
 
@@ -353,16 +354,16 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
     /* Translation-only model mat4 -- font size is the scale argument
      * to draw_n, not folded into the model. */
     const float m[16] = {
-        1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, c->boundingBox.x, c->boundingBox.y, 0.0f, 1.0f,
+        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, c->boundingBox.x, c->boundingBox.y, 0.0F, 1.0F,
     };
     /* Text renderer color contract: float[4] in 0..1 range (engine/renderers
      * /nt_text_renderer.c writes it straight into vertex color via memcpy at
      * line 281). Clay stores 0..255 floats -- divide. */
     const float color[4] = {
-        t->textColor.r / 255.0f,
-        t->textColor.g / 255.0f,
-        t->textColor.b / 255.0f,
-        t->textColor.a / 255.0f,
+        t->textColor.r / 255.0F,
+        t->textColor.g / 255.0F,
+        t->textColor.b / 255.0F,
+        t->textColor.a / 255.0F,
     };
     nt_text_renderer_draw_n(t->stringContents.chars, (size_t)t->stringContents.length, m, (float)t->fontSize, color);
     rebind_sprite_after_flush(ctx);
@@ -470,10 +471,45 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c)
 // #endregion
 
 // #region walk
+/* Per-command dispatch helper. Pulled out of nt_ui_walk so that function
+ * stays under clang-tidy's cognitive-complexity threshold -- the switch
+ * over commandType is itself a heavy branch tree. */
+static void dispatch_command(nt_ui_context_t *ctx, const Clay_RenderCommand *c, sscissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target) {
+    switch (c->commandType) {
+    case CLAY_RENDER_COMMAND_TYPE_NONE:
+        return; /* silent skip -- Clay sentinel */
+    case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
+        const Clay_RectangleRenderData *r = &c->renderData.rectangle;
+        const uint32_t col = nt_color_pack_clay(r->backgroundColor);
+        emit_screen_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, col);
+        return;
+    }
+    case CLAY_RENDER_COMMAND_TYPE_BORDER:
+        emit_border(ctx, c);
+        return;
+    case CLAY_RENDER_COMMAND_TYPE_TEXT:
+        emit_text(ctx, c);
+        return;
+    case CLAY_RENDER_COMMAND_TYPE_IMAGE:
+        emit_image(c);
+        return;
+    case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:
+        scissor_push(ctx, c, scissor_stack, depth, target);
+        return;
+    case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
+        scissor_pop(ctx, scissor_stack, depth, target);
+        return;
+    case CLAY_RENDER_COMMAND_TYPE_CUSTOM:
+        emit_custom(ctx, c);
+        return;
+    }
+}
+
 /* D-52-05 / Revision Issue 2: depth test/write are pipeline-baked.
  * UI materials must use pipelines with depth_test=false, depth_write=false.
  * Walker takes no per-frame depth action — nt_gfx has no such API
  * (verified against engine/graphics/nt_gfx.h at plan-write time). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(ctx != NULL && "nt_ui_walk: ctx must be non-NULL");
     NT_ASSERT(target != NULL && "nt_ui_walk: target must be non-NULL");
@@ -518,35 +554,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* Iterate Clay's frozen command array -- already zIndex-ascending sorted. */
     const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
     for (int32_t i = 0; i < arr->length; ++i) {
-        const Clay_RenderCommand *c = &arr->internalArray[i];
-        switch (c->commandType) {
-        case CLAY_RENDER_COMMAND_TYPE_NONE:
-            break; /* silent skip -- Clay sentinel */
-        case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
-            const Clay_RectangleRenderData *r = &c->renderData.rectangle;
-            const uint32_t col = nt_color_pack_clay(r->backgroundColor);
-            emit_screen_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, col);
-            break;
-        }
-        case CLAY_RENDER_COMMAND_TYPE_BORDER:
-            emit_border(ctx, c);
-            break;
-        case CLAY_RENDER_COMMAND_TYPE_TEXT:
-            emit_text(ctx, c);
-            break;
-        case CLAY_RENDER_COMMAND_TYPE_IMAGE:
-            emit_image(c);
-            break;
-        case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:
-            scissor_push(ctx, c, scissor_stack, &depth, target);
-            break;
-        case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
-            scissor_pop(ctx, scissor_stack, &depth, target);
-            break;
-        case CLAY_RENDER_COMMAND_TYPE_CUSTOM:
-            emit_custom(ctx, c);
-            break;
-        }
+        dispatch_command(ctx, &arr->internalArray[i], scissor_stack, &depth, target);
     }
 
     /* Final flushes + invariant check (WALK-06 + CP-04). */
@@ -583,12 +591,13 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
  * resolve material pipelines (nt_material_step happens elsewhere); the
  * sprite/text renderers' own set_material asserts material.ready when
  * actually consumed inside the walker. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uint32_t white_region_idx) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_atlas_white_region: ctx must be non-NULL");
     NT_ASSERT(atlas.id != 0 && "nt_ui_set_atlas_white_region: invalid atlas handle");
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_ui_set_atlas_white_region: atlas must be READY");
     const nt_texture_region_t *r = nt_atlas_get_region(atlas, white_region_idx);
-    NT_ASSERT(r != NULL && r->vertex_count > 0u && "nt_ui_set_atlas_white_region: white region missing / tombstoned (mis-baked atlas)");
+    NT_ASSERT(r != NULL && r->vertex_count > 0U && "nt_ui_set_atlas_white_region: white region missing / tombstoned (mis-baked atlas)");
     ctx->atlas = atlas;
     ctx->white_region = white_region_idx;
 }
