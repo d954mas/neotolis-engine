@@ -37,17 +37,14 @@ nt_add_module(nt_ui LOG_DOMAIN "ui"
     nt_ui_internal.h
 )
 
-# Clay vendored header -- PRIVATE include (only nt_ui.c sees clay.h).
-# SYSTEM suppresses -Werror on Clay-internal warnings (matches engine/math/cglm
-# precedent). Clay's source is excluded from clang-tidy via scripts/tidy.sh.
-# Use NT_ENGINE_ROOT so the include resolves when nt_ui is consumed from a
-# parent CMake project. INTERFACE-include is needed because test TUs
-# compiled with NT_UI_TEST_ACCESS pull in nt_ui_internal.h which #includes
-# "clay.h".
-target_include_directories(nt_ui SYSTEM PRIVATE
-    ${NT_ENGINE_ROOT}/deps/clay
-)
-target_include_directories(nt_ui SYSTEM INTERFACE
+# Clay vendored header -- PUBLIC include. Clay is part of the engine's
+# public surface: nt_ui wraps lifecycle (context, walker, themes) but
+# game code drives layout/widgets via CLAY_* macros directly. SYSTEM
+# suppresses -Werror on Clay-internal warnings (matches engine/math/cglm).
+# Clay's source is excluded from clang-tidy via scripts/tidy.sh. Use
+# NT_ENGINE_ROOT so the include resolves when nt_ui is consumed from a
+# parent CMake project.
+target_include_directories(nt_ui SYSTEM PUBLIC
     $<BUILD_INTERFACE:${NT_ENGINE_ROOT}/deps/clay>
 )
 
