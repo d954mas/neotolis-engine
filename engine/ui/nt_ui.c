@@ -101,7 +101,12 @@ static Clay_Dimensions nt_ui_measure_text_cb(Clay_StringSlice text, Clay_TextEle
 /* ctx struct rounded up to cache-line so Clay's arena starts aligned. */
 static size_t nt_ui_ctx_size_aligned(void) { return (sizeof(struct nt_ui_context) + 63U) & ~(size_t)63U; }
 
-size_t nt_ui_min_arena_size(void) { return nt_ui_ctx_size_aligned() + (size_t)Clay_MinMemorySize(); }
+size_t nt_ui_min_arena_size(void) {
+    /* Idempotent: ensures Clay_MinMemorySize() reflects our element-count
+     * default no matter whether caller queries before create_context. */
+    Clay_SetMaxElementCount(NT_UI_DEFAULT_MAX_ELEMENT_COUNT);
+    return nt_ui_ctx_size_aligned() + (size_t)Clay_MinMemorySize();
+}
 
 nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size) {
     NT_ASSERT(arena != NULL && "nt_ui_create_context: arena must be non-NULL");
@@ -116,6 +121,8 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size) {
     const size_t clay_size = arena_size - ctx_size;
 
     ctx->in_frame = false;
+    /* nt_ui_min_arena_size() already locked Clay's element-count default
+     * via Clay_SetMaxElementCount; Clay_Initialize picks it up below. */
     ctx->clay_arena = Clay_CreateArenaWithCapacityAndMemory(clay_size, clay_mem);
     ctx->clay = Clay_Initialize(ctx->clay_arena, (Clay_Dimensions){.width = 1.0F, .height = 1.0F}, (Clay_ErrorHandler){.errorHandlerFunction = nt_ui_clay_error_cb, .userData = ctx});
 

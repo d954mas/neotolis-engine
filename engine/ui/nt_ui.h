@@ -55,7 +55,14 @@
  * arena[N]` has 1-byte alignment in C, so callers MUST use alignas. */
 #define NT_UI_ARENA_ALIGN _Alignof(max_align_t)
 
-#define NT_UI_DEFAULT_ARENA_SIZE (8U * 1024U * 1024U)
+/* Clay sizes its internal arena by maxElementCount; default 8192 wants
+ * ~8 MiB. Most game UIs use 100-1000 elements -- 1024 default keeps min
+ * arena ~700 KiB. Override at compile time + raise arena if your layout
+ * has more elements. nt_ui_create_context asserts on under-size. */
+#ifndef NT_UI_DEFAULT_MAX_ELEMENT_COUNT
+#define NT_UI_DEFAULT_MAX_ELEMENT_COUNT 1024
+#endif
+#define NT_UI_DEFAULT_ARENA_SIZE (1U * 1024U * 1024U)
 
 /* Declares a correctly-aligned arena. The bare alternative
  *
