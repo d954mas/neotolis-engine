@@ -1,10 +1,4 @@
-/* Verifies the Clay measure callback wiring: declare a CLAY_TEXT inside
- * begin/end and inspect the resulting TEXT render command's bounding box
- * (Clay calls the measure callback during EndLayout's layout pass).
- *
- * Unity's TEST_ASSERT_*_FLOAT is compiled out via UNITY_EXCLUDE_FLOAT;
- * floats compared via TEST_ASSERT_EQUAL_MEMORY on bit-stable struct
- * copies or via integer truncation for "non-zero" gates. */
+/* Floats compared via memcmp/integer (UNITY_EXCLUDE_FLOAT). */
 
 /* System headers before Unity -- avoids __declspec(noreturn) clash on MSVC. */
 #include <setjmp.h>
@@ -161,20 +155,14 @@ void tearDown(void) {
 
 /* ---- Helpers ---- */
 
-/* Bit-exact "is this float zero?" test (handles +0/-0 identically with the
- * uint32 bit cast: -0.0f bit pattern is 0x80000000, +0.0f is 0x00000000.
- * We only emit non-negative widths/heights from the callback, so either
- * pattern would actually be diagnostic of "zero". For simplicity we accept
- * both. */
+/* Accept +0 / -0. */
 static bool float_is_zero_bits(float f) {
     uint32_t b;
     memcpy(&b, &f, sizeof b);
     return (b == 0U) || (b == 0x80000000U);
 }
 
-/* Drive Clay through a one-element CLAY_TEXT declaration and return the
- * resulting TEXT render command bounding box. Bounding box {0,0,0,0} if
- * no TEXT command was emitted (e.g. element culled or measure returned 0). */
+/* Returns the bbox of the emitted TEXT cmd; {0,0,0,0} if none emitted. */
 static Clay_BoundingBox declare_and_measure_text(nt_ui_context_t *ctx, const char *utf8, uint16_t font_id, uint16_t font_size) {
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);

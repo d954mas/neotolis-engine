@@ -108,15 +108,7 @@ static void test_scissor_y_flip_top_left_to_gl_bottom_left(void) {
     TEST_ASSERT_EQUAL_INT(200, rect[3]);
 }
 
-/* Nested scissor must intersect with parent, not replace. Outer = (0..100,
- * 0..100), inner = (50..200, 50..200) -> intersection = (50..100, 50..100).
- *
- * We inspect the LAST nt_gfx_set_scissor call to see the rect that survived
- * intersection. scissor_pop re-applies parent on each pop, so we close inner
- * first (which re-applies outer) and assert against the outer rect; the
- * intersect arithmetic still happens on push, just isn't directly observable
- * via the test probe -- the test then validates the push-time intersect math
- * indirectly by relying on the outer pop. */
+/* Nested scissor intersects, not replaces. */
 static void test_scissor_intersection_nested(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 100.0F};

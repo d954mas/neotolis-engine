@@ -102,14 +102,8 @@ static void test_dispatch_border_emits_4_rects(void) {
     TEST_ASSERT_EQUAL_UINT32(calls_before + 1U, nt_sprite_renderer_test_draw_call_count());
 }
 
-/* TEXT -> flush sprite (no-op when empty) + text renderer setters
- * + draw_n. We verify the text renderer's set_material call counter ticks. */
+/* No font registered -- emit_text early-returns; checks branch reachable. */
 static void test_dispatch_text(void) {
-    /* Note: This test doesn't register a font in s_fx.ctx -- emit_text's
-     * nt_font_valid early-return fires, so no glyphs are drawn. But the
-     * sprite-flush at the top of emit_text DOES happen, and the test
-     * confirms the walk completes without crashing (TEXT branch reachable).
-     * A separate flush test verifies the boundary semantics. */
     nt_text_renderer_test_reset_call_counters();
 
     Clay_RenderCommand *c = &s_test_cmds[0];
@@ -235,16 +229,10 @@ static void test_dispatch_image_tinted_packs_color(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* Probe the last vertex's color (4 channels, packed BGRA into uint32
-     * but stored per-channel in the vertex). We can only check vertex
-     * count here without exposing color probes -- the meaningful contract
-     * is that we DID emit (4 verts) and didn't take the silent no-op. */
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
 }
 
-/* IMAGE payload with a not-READY atlas handle must silently no-op
- * (no crash, no emit). Async-loading atlases are a legitimate runtime
- * state -- next frame will draw. */
+/* Not-READY atlas must silent no-op (async loading is legitimate). */
 static void test_dispatch_image_not_ready_silent(void) {
     nt_ui_image_payload_t bad = {.atlas = {.id = 0xDEADBEEFU}, .region_index = 0, .flip_bits = 0};
     Clay_RenderCommand *c = &s_test_cmds[0];

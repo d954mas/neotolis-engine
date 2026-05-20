@@ -15,9 +15,7 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_DEFAULT_ARENA_SIZE];
 
 void setUp(void) {
-    /* gfx is required because the nt_ui transitive link surface pulls it
-     * in via nt_font/nt_resource even though pointer-state tests don't
-     * touch GPU state directly. Stub backend is fine. */
+    /* gfx pulled in transitively via nt_font/nt_resource; stub is fine. */
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 4, .max_pipelines = 4, .max_buffers = 4, .max_textures = 4, .max_meshes = 4});
 }
 

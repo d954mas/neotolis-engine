@@ -20,8 +20,6 @@ static void test_create_destroy(void) {
     void *arena = (void *)s_arena_u64;
     nt_ui_context_t *ctx = nt_ui_create_context(arena, sizeof s_arena_u64);
     TEST_ASSERT_NOT_NULL(ctx);
-    /* ctx is placed at arena base; TEST_ASSERT_EQUAL_PTR casts through
-     * void* by Unity contract -- NOLINT silences the resulting tidy warn. */
     // NOLINTNEXTLINE(bugprone-casting-through-void)
     TEST_ASSERT_EQUAL_PTR(arena, (void *)ctx);
     nt_ui_destroy_context(ctx);

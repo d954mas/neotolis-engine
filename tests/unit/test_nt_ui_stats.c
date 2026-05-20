@@ -1,9 +1,4 @@
-/* Verifies the metrics bridge: per-walk counters captured into ctx and
- * exposed via nt_ui_get_last_walk_*, then forwarded by the test into
- * nt_stats and read back via nt_stats_format_lines. nt_ui itself does
- * NOT depend on nt_stats -- the shared walker fixture leaves nt_stats
- * un-init'd; this test bookends fixture setUp/tearDown with its own
- * nt_stats_init/shutdown. */
+/* Bridge test: nt_ui_get_last_walk_* -> nt_stats. nt_ui has no nt_stats dep. */
 
 #include <stdbool.h>
 #include <stddef.h>
