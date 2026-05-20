@@ -318,14 +318,7 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
 // #endregion
 
 // #region emit_region_resolved
-/* Canonical staging-write body shared by ECS emit_one and the non-ECS
- * public emit_region. Caller supplies pre-resolved region pointers + ipu;
- * the ECS hot path passes these straight from its SoA cache (no extra
- * lookups), the non-ECS public emit_region does one nt_atlas_*() lookup
- * per call and forwards.
- *
- * always_inline so the ECS bunnymark path keeps the same inlined shape
- * it had before the refactor -- no perf regression. */
+/* always_inline keeps the ECS hot path's inlined shape. */
 #if defined(__GNUC__) || defined(__clang__)
 #define NT_SPRITE_EMIT_INLINE static inline __attribute__((always_inline))
 #elif defined(_MSC_VER)
@@ -346,11 +339,8 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
         return;
     }
 
-    /* Capacity guard: if this sprite would overflow staging, or exceed the
-     * uint16 indexable vertex range, snapshot the open cmd's state, flush()
-     * (uploads + replays cmds + resets), then re-open a fresh cmd with the
-     * same state at first_index=0. The caller sees no state change; the GPU
-     * just gets another chunk draw instead of UNSIGNED_INT indices. */
+    /* Snapshot+flush+reopen on staging overflow keeps the caller's open
+     * cmd state across the chunk boundary. */
     if (s_sprite.vertex_count + r->vertex_count > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + r->index_count > NT_SPRITE_RENDERER_MAX_INDICES) {
         NT_ASSERT(s_sprite.cmd_count > 0 && "emit_region_resolved called with no open cmd");
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
@@ -358,27 +348,17 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
         open_cmd_from_snapshot(&snapshot);
     }
 
-    /* Apply origin offset to translation. cached_pos stores source-space
-     * positions (no origin baked) so dedup'd regions with different origins
-     * share vertex data; the per-region pivot lives entirely in tx/ty/tz.
-     * Same formula whether origin is the region default or a runtime override
-     * — only the source differs. */
+    /* cached_pos is source-space (no origin baked) -- regions with
+     * different origins can share vertex data. */
     float tx = m[12];
     float ty = m[13];
     float tz = m[14];
 
-    /* Flip flags — per-vertex negate of cached_pos */
     bool fx = (flip_bits & NT_SPRITE_FLAG_FLIP_X) != 0;
     bool fy = (flip_bits & NT_SPRITE_FLAG_FLIP_Y) != 0;
 
-    /* Bake the origin pivot into translation: world = m * (local - pivot)
-     * + t expands to world = m * local + (t - m * pivot). Subtracting
-     * m*pivot from tx/ty/tz folds the pivot offset into translation so
-     * the per-vertex multiply doesn't have to subtract it.
-     *
-     * cached_pos is source-space; the per-vertex flip negates source-x.
-     * Sign-flipping dx/dy here mirrors around the pivot instead of around
-     * source x=0. */
+    /* Bake pivot into translation: world = m*local + (t - m*pivot).
+     * Flip mirrors around the pivot by sign-flipping dx/dy. */
     float dx = origin_x * (float)r->source_w * ipu;
     float dy = origin_y * (float)r->source_h * ipu;
     if (fx) {

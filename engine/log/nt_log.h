@@ -29,9 +29,7 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
 #define nt_log_warn(...) nt_log_write(NT_LOG_LEVEL_WARN, NULL, __VA_ARGS__)
 #define nt_log_error(...) nt_log_write(NT_LOG_LEVEL_ERROR, NULL, __VA_ARGS__)
 
-/* --- Once-per-callsite variants ---
- * Per-callsite static atomic_flag; logs on first call only. Not resettable.
- * Tests rely on per-process isolation (ctest runs each binary fresh). */
+/* --- Once-per-callsite variants (not resettable) --- */
 #define NT_LOG_ONCE_(write_call)                                                                                                                                                                       \
     do {                                                                                                                                                                                               \
         static atomic_flag nt_log_once_flag_ = ATOMIC_FLAG_INIT;                                                                                                                                       \

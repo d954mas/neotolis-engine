@@ -50,31 +50,16 @@
 #define NT_UI_WALKER_MAX_SCISSOR_DEPTH 8
 #endif
 
-/* Clay places its Clay_Context at the head of the arena via raw cast;
- * the strictest field there needs max_align_t. A bare `static uint8_t
- * arena[N]` has 1-byte alignment in C, so callers MUST use alignas. */
+/* Clay places its Clay_Context at the arena head via raw cast. */
 #define NT_UI_ARENA_ALIGN _Alignof(max_align_t)
 
-/* Clay sizes its internal arena by maxElementCount; default 8192 wants
- * ~8 MiB. Most game UIs use 100-1000 elements -- 1024 default keeps min
- * arena ~700 KiB. Override at compile time + raise arena if your layout
- * has more elements. nt_ui_create_context asserts on under-size. */
+/* Override at compile time + raise arena if your layout has more elements. */
 #ifndef NT_UI_DEFAULT_MAX_ELEMENT_COUNT
 #define NT_UI_DEFAULT_MAX_ELEMENT_COUNT 1024
 #endif
 #define NT_UI_DEFAULT_ARENA_SIZE (1U * 1024U * 1024U)
 
-/* Declares a correctly-aligned arena. The bare alternative
- *
- *     static uint8_t arena[NT_UI_DEFAULT_ARENA_SIZE];
- *
- * has only 1-byte alignment per the C spec and trips the runtime
- * assert in nt_ui_create_context. This macro produces a definition
- * compatible with file-scope, function-static, and (compilers that
- * accept _Alignas on auto) block-scope. Usage:
- *
- *     NT_UI_DECLARE_ARENA(g_ui_arena, NT_UI_DEFAULT_ARENA_SIZE);
- *     ctx = nt_ui_create_context(g_ui_arena, sizeof g_ui_arena); */
+/* Bare uint8_t[N] has 1-byte alignment and trips the create_context assert. */
 #define NT_UI_DECLARE_ARENA(name, size) alignas(NT_UI_ARENA_ALIGN) uint8_t name[(size)]
 
 typedef struct nt_ui_context nt_ui_context_t;
@@ -143,16 +128,8 @@ void nt_ui_end(nt_ui_context_t *ctx);
  *  - SCISSOR_START/END and CUSTOM are hard barriers -- never reordered. */
 void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 
-/* Per-walk metrics captured into ctx at every nt_ui_walk exit. Apps that
- * want them in the debug overlay forward themselves:
- *
- *     nt_ui_walk(ctx, &target);
- *     nt_stats_count("ui_draw_calls",    nt_ui_get_last_walk_draw_calls(ctx));
- *     nt_stats_count("ui_element_count", nt_ui_get_last_walk_element_count(ctx));
- *
- * draw_calls is a WINDOW measurement: GL draw-call delta between walk
- * entry and exit. Includes any draws a CUSTOM handler emits. For
- * UI-only counts, snapshot sprite/text renderer stats around the walk. */
+/* draw_calls is a window delta over the walk -- includes CUSTOM-handler
+ * draws. Snapshot sprite/text renderer stats yourself for UI-only counts. */
 uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_element_count(const nt_ui_context_t *ctx);
 

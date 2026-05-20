@@ -102,8 +102,7 @@ static Clay_Dimensions nt_ui_measure_text_cb(Clay_StringSlice text, Clay_TextEle
 static size_t nt_ui_ctx_size_aligned(void) { return (sizeof(struct nt_ui_context) + 63U) & ~(size_t)63U; }
 
 size_t nt_ui_min_arena_size(void) {
-    /* Idempotent: ensures Clay_MinMemorySize() reflects our element-count
-     * default no matter whether caller queries before create_context. */
+    /* Lock element-count default before Clay_MinMemorySize reads it. */
     Clay_SetMaxElementCount(NT_UI_DEFAULT_MAX_ELEMENT_COUNT);
     return nt_ui_ctx_size_aligned() + (size_t)Clay_MinMemorySize();
 }
@@ -121,8 +120,6 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size) {
     const size_t clay_size = arena_size - ctx_size;
 
     ctx->in_frame = false;
-    /* nt_ui_min_arena_size() already locked Clay's element-count default
-     * via Clay_SetMaxElementCount; Clay_Initialize picks it up below. */
     ctx->clay_arena = Clay_CreateArenaWithCapacityAndMemory(clay_size, clay_mem);
     ctx->clay = Clay_Initialize(ctx->clay_arena, (Clay_Dimensions){.width = 1.0F, .height = 1.0F}, (Clay_ErrorHandler){.errorHandlerFunction = nt_ui_clay_error_cb, .userData = ctx});
 
@@ -504,18 +501,11 @@ static void dispatch_command(nt_ui_context_t *ctx, const Clay_RenderCommand *c, 
     }
 }
 
-/* Depth test/write must be baked into the UI material's pipeline
- * (depth_test=false, depth_write=false). nt_gfx has no per-frame depth
- * API, so the walker can't enforce this -- it's a caller contract. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(ctx != NULL && "nt_ui_walk: ctx must be non-NULL");
     NT_ASSERT(target != NULL && "nt_ui_walk: target must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_walk: ctx is mid-frame (call nt_ui_end first)");
-    /* frozen_cmds.internalArray is zero-init'd until nt_ui_end populates
-     * it (Clay returns a valid pointer even for an empty layout). Without
-     * this guard, a create -> walk skipping begin/end would be a silent
-     * no-op. */
     NT_ASSERT(ctx->frozen_cmds.internalArray != NULL && "nt_ui_walk: frozen_cmds not populated (call nt_ui_end before walk)");
     /* w/h > 0: scissor math `vh - y - hp` underflows negative when
      * vh==0 (GL undefined). Origin x/y may be zero. */
@@ -549,15 +539,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
      * lazily inside emit_text just before draw_n. */
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
-    /* Clay's frozen array is zIndex-ascending sorted. Walker contract:
-     * within a maximal run of same-zIndex, barrier-free commands
-     * (a "segment"), reorderable types (RECT/BORDER/IMAGE/TEXT) emit in
-     * two passes -- sprite-bound first, text second -- so interleaved
-     * RECT/TEXT in the same layer don't fragment renderer batches. Hard
-     * barriers (SCISSOR_START/END, CUSTOM) always emit in original order
-     * and never enter a segment. Game code that relies on strict painter
-     * order within same-z must put overlapping elements on different
-     * zIndex layers. */
+    /* Segment-aware dispatch -- see nt_ui_walk header doc for contract. */
     const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
     int32_t i = 0;
     while (i < arr->length) {
@@ -576,18 +558,12 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
             }
             ++seg_end;
         }
-        /* Pass 1: sprite-bound (RECT/BORDER/IMAGE). All share the same
-         * ctx->sprite_material; sprite_renderer auto-flushes on atlas
-         * page change (RECT/BORDER use ctx->atlas, IMAGE uses payload). */
         for (int32_t j = i; j < seg_end; ++j) {
             const Clay_RenderCommand *cc = &arr->internalArray[j];
             if (cc->commandType != CLAY_RENDER_COMMAND_TYPE_TEXT) {
                 dispatch_command(ctx, cc, scissor_stack, &depth, target);
             }
         }
-        /* Pass 2: TEXT. emit_text's prologue flushes sprite_renderer at
-         * the first text in the segment, so painter order across the
-         * sprite->text transition is preserved. */
         for (int32_t j = i; j < seg_end; ++j) {
             const Clay_RenderCommand *cc = &arr->internalArray[j];
             if (cc->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
@@ -612,10 +588,6 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 // #endregion
 
 // #region setters
-/* Atlas setter asserts the white region resolves with vertex_count > 0
- * so a mis-baked atlas surfaces here, not one frame later in the walker.
- * Material setters only check .id != 0 -- pipeline readiness is checked
- * later when the renderer's set_material actually consumes the handle. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uint32_t white_region_idx) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_atlas_white_region: ctx must be non-NULL");
@@ -624,9 +596,7 @@ void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uin
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_ui_set_atlas_white_region: atlas must be READY");
     const nt_texture_region_t *r = nt_atlas_get_region(atlas, white_region_idx);
     NT_ASSERT(r != NULL && r->vertex_count > 0U && "nt_ui_set_atlas_white_region: white region missing / tombstoned (mis-baked atlas)");
-    /* emit_screen_rect assumes a unit-square white region so that its
-     * mat4(scale=w,h; translate=x,y) maps cached_pos {0,1}x{0,1} directly
-     * onto the target rect. A non-unit region would mis-scale RECT/BORDER. */
+    /* emit_screen_rect scales by mat4(w,h) on cached_pos {0,1}x{0,1}. */
     NT_ASSERT(r->source_w == 1 && r->source_h == 1 && "nt_ui_set_atlas_white_region: white region must be 1x1 source");
     ctx->atlas = atlas;
     ctx->white_region = white_region_idx;
