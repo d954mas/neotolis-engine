@@ -109,6 +109,31 @@ static void test_walk_without_text_material_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
+/* walk on a freshly-created ctx (no begin/end) must assert -- frozen_cmds
+ * is zero-init'd; without the guard the walker is a silent no-op. */
+static void test_walk_without_end_asserts(void) {
+    /* Use a fresh arena+ctx outside the fixture so we don't inherit
+     * frozen_cmds from injection. */
+    alignas(NT_UI_ARENA_ALIGN) static uint8_t fresh_arena[NT_UI_DEFAULT_ARENA_SIZE];
+    nt_ui_context_t *fresh = nt_ui_create_context(fresh_arena, sizeof fresh_arena);
+    TEST_ASSERT_NOT_NULL(fresh);
+    nt_ui_set_atlas_white_region(fresh, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
+    nt_ui_set_sprite_material(fresh, s_fx.sprite_material);
+    nt_ui_set_text_material(fresh, s_fx.text_material);
+    nt_ui_set_custom_handler(fresh, NULL, NULL);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    NT_TEST_EXPECT_ASSERT(nt_ui_walk(fresh, &target));
+    nt_ui_destroy_context(fresh);
+}
+
+/* viewport components must be non-negative (otherwise (int) cast is UB). */
+static void test_walk_negative_viewport_asserts(void) {
+    inject_frozen_cmds(0);
+    nt_ui_target_t target = {.viewport = {-1.0F, 0, 800, 600}};
+    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
+}
+
 /* Macro to set s_setup_bind BEFORE RUN_TEST invokes setUp -- Unity runs
  * setUp first, then the test function, so the mode flag must be written
  * by the caller of RUN_TEST, not from inside the test body. */
@@ -120,6 +145,10 @@ static void test_walk_without_text_material_asserts(void) {
 
 int main(void) {
     UNITY_BEGIN();
+    s_setup_bind = UI_WALKER_FX_BIND_ALL;
+    RUN_TEST(test_walk_without_end_asserts);
+    s_setup_bind = UI_WALKER_FX_BIND_ALL;
+    RUN_TEST(test_walk_negative_viewport_asserts);
     s_setup_bind = UI_WALKER_FX_BIND_ALL;
     RUN_TEST(test_second_walk_identical);
     s_setup_bind = UI_WALKER_FX_BIND_ALL;

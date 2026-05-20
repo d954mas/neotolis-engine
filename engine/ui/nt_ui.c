@@ -491,9 +491,11 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(ctx != NULL && "nt_ui_walk: ctx must be non-NULL");
     NT_ASSERT(target != NULL && "nt_ui_walk: target must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_walk: ctx is mid-frame (call nt_ui_end first)");
-    /* Catch the create -> walk shortcut: frozen_cmds is zero-init'd until
-     * nt_ui_end populates it. Without this, the loop is a silent no-op. */
-    NT_ASSERT((ctx->frozen_cmds.internalArray != NULL || ctx->frozen_cmds.length == 0) && "nt_ui_walk: frozen_cmds not populated (call nt_ui_end before walk)");
+    /* frozen_cmds.internalArray is zero-init'd until nt_ui_end populates
+     * it (Clay returns a valid pointer even for an empty layout). Without
+     * this guard, a create -> walk skipping begin/end would be a silent
+     * no-op. */
+    NT_ASSERT(ctx->frozen_cmds.internalArray != NULL && "nt_ui_walk: frozen_cmds not populated (call nt_ui_end before walk)");
     /* Viewport must be non-negative -- the cast to int below would
      * otherwise turn NaN / -inf into garbage GL state. */
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport must be non-negative");

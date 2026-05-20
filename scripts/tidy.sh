@@ -29,21 +29,23 @@ SYSTEM_DEPS=(
     "$ROOT_DIR/deps/stb"
 )
 
-EXTRA_ARGS=""
+EXTRA_ARGS=()
 for dep in "${SYSTEM_DEPS[@]}"; do
-    EXTRA_ARGS+=" --extra-arg=-isystem$dep"
+    EXTRA_ARGS+=("--extra-arg=-isystem$dep")
 done
 
 # Always invoke clang-tidy directly. The LLVM run-clang-tidy Python wrapper
 # silently swallows diagnostics on Windows + LLVM 19, causing the script to
 # report PASS while real errors exist. Direct per-file invocation surfaces
 # errors reliably; parallelism via xargs -P keeps wall time comparable.
+# EXTRA_ARGS is an array (not a string) so dep paths with spaces stay intact
+# through xargs splitting.
 TIDY_OUTPUT=$(mktemp)
 TIDY_RC=0
 
 PARALLEL_JOBS="${TIDY_JOBS:-$(nproc 2>/dev/null || echo 4)}"
 
-echo "$SOURCES" | tr ' ' '\n' | xargs -n 1 -P "$PARALLEL_JOBS" clang-tidy -p "$BUILD_DIR" $EXTRA_ARGS > "$TIDY_OUTPUT" 2>&1 || TIDY_RC=$?
+echo "$SOURCES" | tr ' ' '\n' | xargs -n 1 -P "$PARALLEL_JOBS" -I {} clang-tidy -p "$BUILD_DIR" "${EXTRA_ARGS[@]}" {} > "$TIDY_OUTPUT" 2>&1 || TIDY_RC=$?
 
 # Filter: show only errors from project files, not vendored deps
 PROJECT_ERRORS=$(grep "error:" "$TIDY_OUTPUT" | grep -v "deps/" || true)

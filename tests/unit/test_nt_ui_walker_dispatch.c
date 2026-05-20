@@ -217,6 +217,27 @@ static void test_dispatch_none_silent_skip(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_element_count(s_fx.ctx));
 }
 
+/* IMAGE payload with a not-READY atlas handle must silently no-op
+ * (no crash, no emit). Async-loading atlases are a legitimate runtime
+ * state -- next frame will draw. */
+static void test_dispatch_image_not_ready_silent(void) {
+    nt_ui_image_payload_t bad = {.atlas = {.id = 0xDEADBEEFU}, .region_index = 0, .flip_bits = 0};
+    Clay_RenderCommand *c = &s_test_cmds[0];
+    c->commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
+    c->boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 64, .height = 64};
+    c->renderData.image.backgroundColor = (Clay_Color){0};
+    c->renderData.image.imageData = &bad;
+    inject_frozen_cmds(1);
+
+    const uint32_t calls_before = nt_sprite_renderer_test_draw_call_count();
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    /* The IMAGE emit was skipped; no draw call from this command. */
+    TEST_ASSERT_EQUAL_UINT32(calls_before, nt_sprite_renderer_test_draw_call_count());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_dispatch_rectangle);
@@ -226,5 +247,6 @@ int main(void) {
     RUN_TEST(test_dispatch_scissor_start_end);
     RUN_TEST(test_dispatch_custom);
     RUN_TEST(test_dispatch_none_silent_skip);
+    RUN_TEST(test_dispatch_image_not_ready_silent);
     return UNITY_END();
 }

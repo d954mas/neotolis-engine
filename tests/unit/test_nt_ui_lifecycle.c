@@ -58,11 +58,28 @@ static void test_destroy_preserves_arena(void) {
     TEST_ASSERT_EQUAL_MEMORY(kSentinel, sentinel_ptr, sizeof kSentinel);
 }
 
+/* destroy_context on a mid-frame ctx must assert. */
+static void test_destroy_in_frame_asserts(void) {
+    nt_ui_context_t *ctx = nt_ui_create_context(s_arena_u64, sizeof s_arena_u64);
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* begin requires a pointer struct + the arena to be backed by nt_input
+     * etc., but we only need ctx->in_frame=true for this assert path. Forge
+     * it directly via the internal header. */
+    ctx->in_frame = true;
+    NT_TEST_EXPECT_ASSERT(nt_ui_destroy_context(ctx));
+
+    /* Clean up: clear in_frame manually so the real destroy succeeds. */
+    ctx->in_frame = false;
+    nt_ui_destroy_context(ctx);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_create_destroy);
     RUN_TEST(test_min_arena_size);
     RUN_TEST(test_misaligned_assert);
     RUN_TEST(test_destroy_preserves_arena);
+    RUN_TEST(test_destroy_in_frame_asserts);
     return UNITY_END();
 }
