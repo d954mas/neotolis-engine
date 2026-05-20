@@ -321,6 +321,9 @@ static void emit_image(const Clay_RenderCommand *c) {
 }
 // #endregion
 
+/* Forward declaration -- defined alongside the scissor stack helpers. */
+static void rebind_sprite_after_flush(void);
+
 // #region helper_emit_text
 /* D-52-18: TEXT command emit. Flushes sprite renderer first (different
  * material/pipeline boundary), then binds the text font + text material
@@ -329,15 +332,18 @@ static void emit_text(nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
     /* State boundary: sprite material/pipeline must flush before text
      * binds its own pipeline. Auto-flush on font/material change happens
      * inside the text renderer, but the sprite renderer's own staging
-     * needs to drain here. */
+     * needs to drain here. The matching sprite-rebind happens at the
+     * tail so the next RECT/BORDER/IMAGE has a live cmd. */
     nt_sprite_renderer_flush();
 
     const Clay_TextRenderData *t = &c->renderData.text;
     if ((uint32_t)t->fontId >= NT_UI_MAX_FONTS) {
+        rebind_sprite_after_flush();
         return;
     }
     nt_font_t font = ctx->fonts[t->fontId];
     if (!nt_font_valid(font)) {
+        rebind_sprite_after_flush();
         return;
     }
 
@@ -359,6 +365,7 @@ static void emit_text(nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
         t->textColor.a / 255.0f,
     };
     nt_text_renderer_draw_n(t->stringContents.chars, (size_t)t->stringContents.length, m, (float)t->fontSize, color);
+    rebind_sprite_after_flush();
 }
 // #endregion
 
@@ -369,6 +376,13 @@ typedef struct {
     int w;
     int h;
 } sscissor_rect_t;
+
+/* Re-bind the sprite material after a flush. nt_sprite_renderer_flush closes
+ * the current cmd (cmd_count -> 0), so the next nt_sprite_renderer_emit_region
+ * would trip "call nt_sprite_renderer_set_material first" without this. The
+ * sprite renderer's set_material is cheap when cmd_count == 0 with same
+ * handle: it just re-opens the cmd from the cached pipeline + mat_info. */
+static void rebind_sprite_after_flush(void) { nt_sprite_renderer_set_material(g_nt_ui_sprite_material); }
 
 static void scissor_push(const Clay_RenderCommand *c, sscissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
     NT_ASSERT(*depth < NT_UI_WALKER_MAX_SCISSOR_DEPTH && "scissor stack overflow");
@@ -405,6 +419,9 @@ static void scissor_push(const Clay_RenderCommand *c, sscissor_rect_t *stack, in
     const int fb_h = (int)target->viewport[3];
     nt_gfx_set_scissor(x, fb_h - y - hp, wp, hp);
     nt_gfx_set_scissor_enabled(true);
+
+    /* Re-open sprite cmd so the next RECT/BORDER/IMAGE can emit. */
+    rebind_sprite_after_flush();
 }
 
 static void scissor_pop(sscissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
@@ -419,21 +436,23 @@ static void scissor_pop(sscissor_rect_t *stack, int *depth, const nt_ui_target_t
         const int fb_h = (int)target->viewport[3];
         nt_gfx_set_scissor(r.x, fb_h - r.y - r.h, r.w, r.h);
     }
+    /* Re-open sprite cmd so the next RECT/BORDER/IMAGE can emit. */
+    rebind_sprite_after_flush();
 }
 // #endregion
 
 // #region helper_emit_custom
 /* WALK-05 / D-52-09: CUSTOM -> flush both renderers then invoke the
- * registered handler (NULL handler == silent skip). The handler is
- * responsible for its own pipeline binds; the walker re-binds the sprite
- * material via the existing cmd-state preservation in set_material on the
- * next RECT/BORDER/IMAGE, so we don't need to re-set here. */
+ * registered handler (NULL handler == silent skip). The handler may bind
+ * its own pipeline; on return, we re-bind the sprite material so the next
+ * RECT/BORDER/IMAGE has a live cmd. */
 static void emit_custom(const Clay_RenderCommand *c) {
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
     if (g_nt_ui_custom_fn != NULL) {
         g_nt_ui_custom_fn((const void *)c, g_nt_ui_custom_user);
     }
+    rebind_sprite_after_flush();
 }
 // #endregion
 
