@@ -32,12 +32,12 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
 /* --- Once-per-callsite variants ---
  * Per-callsite static atomic_flag; logs on first call only. Not resettable.
  * Tests rely on per-process isolation (ctest runs each binary fresh). */
-#define NT_LOG_ONCE_(write_call)                                                  \
-    do {                                                                          \
-        static atomic_flag nt_log_once_flag_ = ATOMIC_FLAG_INIT;                  \
-        if (!atomic_flag_test_and_set_explicit(&nt_log_once_flag_, memory_order_relaxed)) { \
-            write_call;                                                           \
-        }                                                                         \
+#define NT_LOG_ONCE_(write_call)                                                                                                                                                                       \
+    do {                                                                                                                                                                                               \
+        static atomic_flag nt_log_once_flag_ = ATOMIC_FLAG_INIT;                                                                                                                                       \
+        if (!atomic_flag_test_and_set_explicit(&nt_log_once_flag_, memory_order_relaxed)) {                                                                                                            \
+            write_call;                                                                                                                                                                                \
+        }                                                                                                                                                                                              \
     } while (0)
 
 #define nt_log_info_once(...) NT_LOG_ONCE_(nt_log_write(NT_LOG_LEVEL_INFO, NULL, __VA_ARGS__))
