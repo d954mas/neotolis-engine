@@ -57,14 +57,31 @@ static void nt_ui_clay_error_cb(Clay_ErrorData err) {
 }
 // #endregion
 
-// #region measure_cb_stub
-/* Clay measure callback stub. Plan 03 fills the body (look up font by
- * config->fontId in g_nt_ui_inframe_ctx->fonts and call nt_font_measure_n). */
+// #region measure_cb
+/* Clay measure callback (CLAY-03 / D-52-14).
+ *
+ * Forwards to the Phase 51 length-aware measure path through the per-ctx
+ * font registry. Phase 51's 256-entry xxHash measure cache (37x hit speedup)
+ * is the MP-07 amplification mitigation.
+ *
+ * Returns {0,0} (no crash) when ctx is not mid-frame, config is NULL, the
+ * font slot is out of range, or the slot holds an invalid/destroyed handle.
+ *
+ * user_data is reserved (NULL in Phase 52); D-52-14 keeps it for future
+ * per-context font tables that bypass g_nt_ui_inframe_ctx. */
 static Clay_Dimensions nt_ui_measure_text_cb(Clay_StringSlice text, Clay_TextElementConfig *config, void *user_data) {
-    (void)text;
-    (void)config;
-    (void)user_data;
-    return (Clay_Dimensions){.width = 0.0f, .height = 0.0f};
+    (void)user_data; /* Phase 52 reserves user_data; Plan 03 ships NULL */
+
+    nt_ui_context_t *ctx = g_nt_ui_inframe_ctx;
+    if (ctx == NULL || config == NULL || config->fontId >= NT_UI_MAX_FONTS) {
+        return (Clay_Dimensions){0};
+    }
+    nt_font_t font = ctx->fonts[config->fontId];
+    if (!nt_font_valid(font)) {
+        return (Clay_Dimensions){0};
+    }
+    nt_text_size_t s = nt_font_measure_n(font, text.chars, (size_t)text.length, (float)config->fontSize);
+    return (Clay_Dimensions){.width = s.width, .height = s.height};
 }
 // #endregion
 
@@ -93,8 +110,8 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size) {
     ctx->clay_arena = Clay_CreateArenaWithCapacityAndMemory(clay_size, clay_mem);
     ctx->clay = Clay_Initialize(ctx->clay_arena, (Clay_Dimensions){.width = 1.0f, .height = 1.0f}, (Clay_ErrorHandler){.errorHandlerFunction = nt_ui_clay_error_cb, .userData = ctx});
 
-    /* Clay_SetMeasureTextFunction is a global hook -- wire it once. Plan 03
-     * fills the callback body with font-registry lookup + nt_font_measure_n. */
+    /* Clay_SetMeasureTextFunction is a global hook -- wire it once. The
+     * callback (nt_ui_measure_text_cb above) handles font lookup + measure. */
     if (!g_nt_ui_measure_wired) {
         Clay_SetMeasureTextFunction(nt_ui_measure_text_cb, NULL);
         g_nt_ui_measure_wired = true;
@@ -143,8 +160,11 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_
 
     Clay_SetLayoutDimensions((Clay_Dimensions){.width = screen_w, .height = screen_h});
 
-    /* Pointer-state wiring is Plan 03 territory (D-52-16). */
-    (void)mouse;
+    /* Pointer state (CLAY-04 / D-52-16). Left-button only is intentional in
+     * v1.8 — right/middle/wheel are not consumed by Clay v0.14. Multi-pointer
+     * is deferred: the game caller chooses which pointer to feed (typically
+     * pointers[0]; split-screen uses pointers[N]). */
+    Clay_SetPointerState((Clay_Vector2){.x = mouse->x, .y = mouse->y}, mouse->buttons[NT_BUTTON_LEFT].is_down);
 
     Clay_BeginLayout();
 }
