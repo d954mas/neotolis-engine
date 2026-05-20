@@ -263,26 +263,18 @@ static void emit_border(const Clay_RenderCommand *c) {
 
 // #region helper_emit_image
 /* D-52-07 + D-52-08: IMAGE -> read nt_ui_image_payload_t* from imageData,
- * emit one region at bbox. slice9 fields are reserved-but-inactive in
- * Phase 52 -- warn-once and fall through to a plain quad emit.
+ * emit one region at bbox.
  *
  * IMPORTANT: image uses the PAYLOAD's atlas, not g_nt_ui_atlas. Different
  * atlas pages auto-flush via the sprite renderer's
- * ensure_current_cmd_page_texture path. */
+ * ensure_current_cmd_page_texture path.
+ *
+ * slice9_lrtb is reserved in Phase 52 and silently ignored (plain quad emit)
+ * until Phase 54 adds the slice9 path. The header documents this contract. */
 static void emit_image(const Clay_RenderCommand *c) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
     if (p == NULL) {
-        return; /* tolerate missing payload — Clay does not enforce */
-    }
-
-    const bool slice9 = (p->slice9_lrtb[0] | p->slice9_lrtb[1] | p->slice9_lrtb[2] | p->slice9_lrtb[3]) != 0u;
-    if (slice9) {
-        static bool s_slice9_warned = false;
-        if (!s_slice9_warned) {
-            NT_LOG_WARN("nt_ui slice9 payload set in Phase 52 — Phase 54 required; emitting plain quad");
-            s_slice9_warned = true;
-        }
-        /* fall through -- emit as plain quad */
+        return; /* tolerate missing payload -- Clay does not enforce */
     }
 
     const Clay_BoundingBox bb = c->boundingBox;

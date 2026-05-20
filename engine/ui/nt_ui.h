@@ -90,15 +90,14 @@ typedef struct {
  * Caller fills + assigns pointer to Clay_ImageElementConfig.imageData.
  * Lifetime: must live until the matching nt_ui_walk call returns.
  *
- * D-52-08: slice9_lrtb bytes are reserved in Phase 52 but inactive --
- * the walker emits as plain quad when any field is non-zero (with a
- * once-per-region warning). Phase 54 fills the slice9 emit path.
+ * D-52-08: slice9_lrtb bytes are RESERVED in Phase 52 -- silently ignored
+ * by the walker (plain-quad emit). Phase 54 will fill the slice9 emit path.
  */
 typedef struct {
     nt_resource_t atlas;
     uint32_t region_index;
     uint8_t flip_bits;
-    uint8_t slice9_lrtb[4]; /* {left, right, top, bottom} -- Phase 54 */
+    uint8_t slice9_lrtb[4]; /* {left, right, top, bottom} -- reserved, Phase 54 */
 } nt_ui_image_payload_t;
 
 /* ---- CUSTOM-command handler (D-52-09, Option A) ----
