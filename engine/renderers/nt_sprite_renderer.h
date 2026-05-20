@@ -94,8 +94,10 @@ void nt_sprite_renderer_set_material(nt_material_t mat);
  *
  *   atlas         - must be a READY atlas resource (asserted).
  *   region_index  - index into the atlas; tombstoned regions silently no-op.
- *   world_matrix  - 16-float mat4 row-major (engine convention; emit_region
- *                   reads only m[0/1/2/4/5/6/12/13/14]).
+ *   world_matrix  - 16-float mat4 COLUMN-major (cglm engine convention).
+ *                   emit_region reads only m[0/1/2/4/5/6/12/13/14] --
+ *                   columns 0+1 carry the 2D rotation/scale, m[12/13/14]
+ *                   carry translation.
  *   origin_x, _y  - pivot in normalized region-space (e.g. {0.5, 0.5} centers).
  *   color_packed  - 0xAABBGGRR (premultiplied by caller if needed).
  *   flip_bits     - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y combination, 0 = none.

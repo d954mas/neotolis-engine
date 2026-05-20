@@ -113,7 +113,7 @@ typedef struct nt_ui_context nt_ui_context_t;
 typedef struct {
     uint32_t fbo;         /* 0 = default framebuffer; non-zero reserved */
     float viewport[4];    /* {x, y, width, height} */
-    float projection[16]; /* row-major; all-zero = caller owns Globals UBO */
+    float projection[16]; /* column-major (cglm); all-zero = caller owns Globals UBO */
 } nt_ui_target_t;
 
 /* ---- Image payload (D-52-07) ----
