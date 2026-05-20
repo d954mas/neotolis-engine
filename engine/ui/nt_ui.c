@@ -207,13 +207,314 @@ void nt_ui_end(nt_ui_context_t *ctx) {
 }
 // #endregion
 
-// #region walk_stub
-/* Walker body lives in Plan 04. Phase 52 ships entry-guard asserts only. */
+// #region helpers_color_pack
+/* Clay packs RGBA as 0..255 floats (clay.h:481). Walker emits as 0xAABBGGRR
+ * uint32 (sprite-renderer vertex format -- nt_sprite_vertex_t.color[4]).
+ *
+ * Saturate before casting because Clay does not clamp -- a theme that wrote
+ * 256.0f or -1.0f would otherwise wrap around in the uint8 cast. */
+static inline uint32_t nt_color_pack_clay(Clay_Color c) {
+    int ri = (int)c.r;
+    int gi = (int)c.g;
+    int bi = (int)c.b;
+    int ai = (int)c.a;
+    uint32_t r = (uint32_t)(ri > 255 ? 255 : (ri < 0 ? 0 : ri));
+    uint32_t g = (uint32_t)(gi > 255 ? 255 : (gi < 0 ? 0 : gi));
+    uint32_t b = (uint32_t)(bi > 255 ? 255 : (bi < 0 ? 0 : bi));
+    uint32_t a = (uint32_t)(ai > 255 ? 255 : (ai < 0 ? 0 : ai));
+    return r | (g << 8) | (b << 16) | (a << 24); /* 0xAABBGGRR */
+}
+// #endregion
+
+// #region helper_emit_screen_rect
+/* D-52-03: 2D-ortho mat4 (scale x,y by w,h; translate to x,y) onto the sprite
+ * renderer. Origin {0,0} and flip 0 -- the rect already covers (x,y..x+w,y+h)
+ * directly because cached_pos for a 1x1 white region is (0,0)..(1,1) in
+ * source space, and the scale m[0]=w / m[5]=h folds that into the target rect. */
+static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed) {
+    /* Column-major layout: m[0..3]=col0, m[4..7]=col1, m[8..11]=col2, m[12..15]=col3. */
+    const float m[16] = {
+        w,    0.0f, 0.0f, 0.0f, /* col0: scale x */
+        0.0f, h,    0.0f, 0.0f, /* col1: scale y */
+        0.0f, 0.0f, 1.0f, 0.0f, /* col2 */
+        x,    y,    0.0f, 1.0f  /* col3: translate */
+    };
+    nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0f, 0.0f, color_packed, 0u);
+}
+// #endregion
+
+// #region helper_emit_border
+/* WALK-04 / D-52-03: BORDER -> up to 4 thin RECT quads via emit_screen_rect.
+ * Top/bottom run the full width; left/right are inset by top/bottom heights
+ * to avoid double-blending corners (matches 52-RESEARCH.md §BORDER emit). */
+static void emit_border(const Clay_RenderCommand *c) {
+    const Clay_BorderRenderData *b = &c->renderData.border;
+    const Clay_BoundingBox bb = c->boundingBox;
+    const uint32_t col = nt_color_pack_clay(b->color);
+
+    if (b->width.top) {
+        emit_screen_rect(g_nt_ui_atlas, g_nt_ui_white_region, bb.x, bb.y, bb.width, (float)b->width.top, col);
+    }
+    if (b->width.bottom) {
+        emit_screen_rect(g_nt_ui_atlas, g_nt_ui_white_region, bb.x, bb.y + bb.height - (float)b->width.bottom, bb.width, (float)b->width.bottom, col);
+    }
+    if (b->width.left) {
+        emit_screen_rect(g_nt_ui_atlas, g_nt_ui_white_region, bb.x, bb.y + (float)b->width.top, (float)b->width.left, bb.height - (float)b->width.top - (float)b->width.bottom, col);
+    }
+    if (b->width.right) {
+        emit_screen_rect(g_nt_ui_atlas, g_nt_ui_white_region, bb.x + bb.width - (float)b->width.right, bb.y + (float)b->width.top, (float)b->width.right,
+                         bb.height - (float)b->width.top - (float)b->width.bottom, col);
+    }
+}
+// #endregion
+
+// #region helper_emit_image
+/* D-52-07 + D-52-08: IMAGE -> read nt_ui_image_payload_t* from imageData,
+ * emit one region at bbox. slice9 fields are reserved-but-inactive in
+ * Phase 52 -- warn-once and fall through to a plain quad emit.
+ *
+ * IMPORTANT: image uses the PAYLOAD's atlas, not g_nt_ui_atlas. Different
+ * atlas pages auto-flush via the sprite renderer's
+ * ensure_current_cmd_page_texture path. */
+static void emit_image(const Clay_RenderCommand *c) {
+    const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
+    if (p == NULL) {
+        return; /* tolerate missing payload — Clay does not enforce */
+    }
+
+    const bool slice9 = (p->slice9_lrtb[0] | p->slice9_lrtb[1] | p->slice9_lrtb[2] | p->slice9_lrtb[3]) != 0u;
+    if (slice9) {
+        static bool s_slice9_warned = false;
+        if (!s_slice9_warned) {
+            NT_LOG_WARN("nt_ui slice9 payload set in Phase 52 — Phase 54 required; emitting plain quad");
+            s_slice9_warned = true;
+        }
+        /* fall through -- emit as plain quad */
+    }
+
+    const Clay_BoundingBox bb = c->boundingBox;
+
+    /* Clay's default backgroundColor for IMAGE is {0,0,0,0} == untinted
+     * (clay.h:481 comment). Map that to 0xFFFFFFFF so the sprite shader's
+     * per-vertex tint is a no-op. */
+    Clay_Color tint = c->renderData.image.backgroundColor;
+    const uint32_t col = (tint.r == 0.0f && tint.g == 0.0f && tint.b == 0.0f && tint.a == 0.0f) ? 0xFFFFFFFFu : nt_color_pack_clay(tint);
+
+    /* Resolve region via the payload's atlas. Tombstones / out-of-range
+     * silently no-op via the sprite renderer's emit_region_resolved. */
+    const nt_texture_region_t *r = nt_atlas_get_region(p->atlas, p->region_index);
+    if (r == NULL || r->vertex_count == 0u) {
+        return;
+    }
+    const float ipu = nt_atlas_get_inverse_pixels_per_unit(p->atlas);
+    const float src_w = (float)r->source_w * ipu;
+    const float src_h = (float)r->source_h * ipu;
+    /* Guard against degenerate source dim (avoid div-by-zero on tombstoned
+     * regions that slipped through the vertex_count gate). */
+    const float sx = (src_w > 0.0f) ? (bb.width / src_w) : bb.width;
+    const float sy = (src_h > 0.0f) ? (bb.height / src_h) : bb.height;
+
+    const float m[16] = {
+        sx, 0.0f, 0.0f, 0.0f, 0.0f, sy, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, bb.x, bb.y, 0.0f, 1.0f,
+    };
+    nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0f, 0.0f, col, p->flip_bits);
+}
+// #endregion
+
+// #region helper_emit_text
+/* D-52-18: TEXT command emit. Flushes sprite renderer first (different
+ * material/pipeline boundary), then binds the text font + text material
+ * and forwards to nt_text_renderer_draw_n (Phase 51 length-aware API). */
+static void emit_text(nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
+    /* State boundary: sprite material/pipeline must flush before text
+     * binds its own pipeline. Auto-flush on font/material change happens
+     * inside the text renderer, but the sprite renderer's own staging
+     * needs to drain here. */
+    nt_sprite_renderer_flush();
+
+    const Clay_TextRenderData *t = &c->renderData.text;
+    if ((uint32_t)t->fontId >= NT_UI_MAX_FONTS) {
+        return;
+    }
+    nt_font_t font = ctx->fonts[t->fontId];
+    if (!nt_font_valid(font)) {
+        return;
+    }
+
+    nt_text_renderer_set_font(font);
+    nt_text_renderer_set_material(g_nt_ui_text_material);
+
+    /* Translation-only model mat4 -- font size is the scale argument
+     * to draw_n, not folded into the model. */
+    const float m[16] = {
+        1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, c->boundingBox.x, c->boundingBox.y, 0.0f, 1.0f,
+    };
+    /* Text renderer color contract: float[4] in 0..1 range (engine/renderers
+     * /nt_text_renderer.c writes it straight into vertex color via memcpy at
+     * line 281). Clay stores 0..255 floats -- divide. */
+    const float color[4] = {
+        t->textColor.r / 255.0f,
+        t->textColor.g / 255.0f,
+        t->textColor.b / 255.0f,
+        t->textColor.a / 255.0f,
+    };
+    nt_text_renderer_draw_n(t->stringContents.chars, (size_t)t->stringContents.length, m, (float)t->fontSize, color);
+}
+// #endregion
+
+// #region helper_scissor_stack
+typedef struct {
+    int x;
+    int y;
+    int w;
+    int h;
+} sscissor_rect_t;
+
+static void scissor_push(const Clay_RenderCommand *c, sscissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
+    NT_ASSERT(*depth < NT_UI_WALKER_MAX_SCISSOR_DEPTH && "scissor stack overflow");
+
+    int x = (int)c->boundingBox.x;
+    int y = (int)c->boundingBox.y;
+    int wp = (int)c->boundingBox.width;
+    int hp = (int)c->boundingBox.height;
+
+    /* Nested scissor -> intersect with top (D-52-17). REPLACE would let an
+     * inner widget paint outside its parent's clip, e.g. scroll-content
+     * leaking past a modal backdrop. */
+    if (*depth > 0) {
+        sscissor_rect_t t = stack[*depth - 1];
+        int x2 = (x > t.x) ? x : t.x;
+        int y2 = (y > t.y) ? y : t.y;
+        int r2 = ((x + wp) < (t.x + t.w)) ? (x + wp) : (t.x + t.w);
+        int b2 = ((y + hp) < (t.y + t.h)) ? (y + hp) : (t.y + t.h);
+        x = x2;
+        y = y2;
+        wp = (r2 > x2) ? (r2 - x2) : 0;
+        hp = (b2 > y2) ? (b2 - y2) : 0;
+    }
+
+    /* FLUSH both renderers BEFORE changing GL scissor state. Pending
+     * staging written under the prior scissor would otherwise be drawn
+     * under the new one. */
+    nt_sprite_renderer_flush();
+    nt_text_renderer_flush();
+
+    stack[(*depth)++] = (sscissor_rect_t){.x = x, .y = y, .w = wp, .h = hp};
+
+    /* Y-flip top-left -> GL bottom-left (PP-03 / D-51-04). */
+    const int fb_h = (int)target->viewport[3];
+    nt_gfx_set_scissor(x, fb_h - y - hp, wp, hp);
+    nt_gfx_set_scissor_enabled(true);
+}
+
+static void scissor_pop(sscissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
+    NT_ASSERT(*depth > 0 && "scissor underflow");
+    nt_sprite_renderer_flush();
+    nt_text_renderer_flush();
+    (*depth)--;
+    if (*depth == 0) {
+        nt_gfx_set_scissor_enabled(false);
+    } else {
+        sscissor_rect_t r = stack[*depth - 1];
+        const int fb_h = (int)target->viewport[3];
+        nt_gfx_set_scissor(r.x, fb_h - r.y - r.h, r.w, r.h);
+    }
+}
+// #endregion
+
+// #region helper_emit_custom
+/* WALK-05 / D-52-09: CUSTOM -> flush both renderers then invoke the
+ * registered handler (NULL handler == silent skip). The handler is
+ * responsible for its own pipeline binds; the walker re-binds the sprite
+ * material via the existing cmd-state preservation in set_material on the
+ * next RECT/BORDER/IMAGE, so we don't need to re-set here. */
+static void emit_custom(const Clay_RenderCommand *c) {
+    nt_sprite_renderer_flush();
+    nt_text_renderer_flush();
+    if (g_nt_ui_custom_fn != NULL) {
+        g_nt_ui_custom_fn((const void *)c, g_nt_ui_custom_user);
+    }
+}
+// #endregion
+
+// #region walk
+/* D-52-05 / Revision Issue 2: depth test/write are pipeline-baked.
+ * UI materials must use pipelines with depth_test=false, depth_write=false.
+ * Walker takes no per-frame depth action — nt_gfx has no such API
+ * (verified against engine/graphics/nt_gfx.h at plan-write time). */
 void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(ctx != NULL && "nt_ui_walk: ctx must be non-NULL");
     NT_ASSERT(target != NULL && "nt_ui_walk: target must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_walk: ctx is mid-frame (call nt_ui_end first)");
-    /* Plan 04 fills: viewport setup, frozen_cmds iteration, dispatch. */
+    NT_ASSERT(g_nt_ui_atlas.id != 0 && "nt_ui_set_atlas_white_region required before nt_ui_walk");
+    NT_ASSERT(nt_resource_is_ready(g_nt_ui_atlas) && "nt_ui_walk: UI atlas must be READY");
+    /* Revision Issue 1: sprite + text materials are separate; assert BOTH. */
+    NT_ASSERT(g_nt_ui_sprite_material.id != 0 && "nt_ui_set_sprite_material required before nt_ui_walk");
+    NT_ASSERT(g_nt_ui_text_material.id != 0 && "nt_ui_set_text_material required before nt_ui_walk");
+
+    /* Walker-local scissor stack -- D-52-17 (on C stack, NOT in ctx, so
+     * multiple walks against the same ctx don't share state). */
+    sscissor_rect_t scissor_stack[NT_UI_WALKER_MAX_SCISSOR_DEPTH];
+    int depth = 0;
+
+    /* Snapshot draw-call counter for the delta (Plan 05 will route to
+     * nt_stats_count; Plan 04 captures into static module state). */
+    const uint32_t calls_at_entry = nt_gfx_get_frame_draw_calls();
+
+    /* Apply viewport from target (UI-07). Bottom-left GL convention. */
+    nt_gfx_set_viewport((int)target->viewport[0], (int)target->viewport[1], (int)target->viewport[2], (int)target->viewport[3]);
+
+    /* Defensive scissor disable at entry (CP-04 prevention). */
+    nt_gfx_set_scissor_enabled(false);
+
+    /* Revision Issue 1: bind SPRITE material for RECT/BORDER/IMAGE emits.
+     * TEXT material binds lazily inside emit_text just before draw_n
+     * (auto-flush handles the boundary). */
+    nt_sprite_renderer_set_material(g_nt_ui_sprite_material);
+
+    /* Iterate Clay's frozen command array -- already zIndex-ascending sorted. */
+    const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
+    for (int32_t i = 0; i < arr->length; ++i) {
+        const Clay_RenderCommand *c = &arr->internalArray[i];
+        switch (c->commandType) {
+        case CLAY_RENDER_COMMAND_TYPE_NONE:
+            break; /* silent skip — Clay sentinel */
+        case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
+            const Clay_RectangleRenderData *r = &c->renderData.rectangle;
+            const uint32_t col = nt_color_pack_clay(r->backgroundColor);
+            emit_screen_rect(g_nt_ui_atlas, g_nt_ui_white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, col);
+            break;
+        }
+        case CLAY_RENDER_COMMAND_TYPE_BORDER:
+            emit_border(c);
+            break;
+        case CLAY_RENDER_COMMAND_TYPE_TEXT:
+            emit_text(ctx, c);
+            break;
+        case CLAY_RENDER_COMMAND_TYPE_IMAGE:
+            emit_image(c);
+            break;
+        case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:
+            scissor_push(c, scissor_stack, &depth, target);
+            break;
+        case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
+            scissor_pop(scissor_stack, &depth, target);
+            break;
+        case CLAY_RENDER_COMMAND_TYPE_CUSTOM:
+            emit_custom(c);
+            break;
+        }
+    }
+
+    /* Final flushes + invariant check (WALK-06 + CP-04). */
+    nt_sprite_renderer_flush();
+    nt_text_renderer_flush();
+    NT_ASSERT(depth == 0 && "unbalanced scissor stack at walk exit");
+    nt_gfx_set_scissor_enabled(false);
+
+    /* Stats (D-52-20 / WALK-09). Plan 05 routes these through nt_stats. */
+    s_last_walk_draw_call_delta = nt_gfx_get_frame_draw_calls() - calls_at_entry;
+    s_last_walk_element_count = (uint32_t)arr->length;
 }
 // #endregion
 
