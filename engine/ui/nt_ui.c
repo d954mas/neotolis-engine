@@ -45,10 +45,6 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
  * asserts this is NULL on entry and assigns ctx; nt_ui_end clears it. */
 static nt_ui_context_t *g_nt_ui_inframe_ctx = NULL;
 
-/* g_nt_ui_measure_wired -- Clay_SetMeasureTextFunction is a global hook.
- * We wire it lazily on first create_context. Plan 03 fills the body. */
-static bool g_nt_ui_measure_wired = false;
-
 /* Plan 04 / Revision Issue 1: walker globals set by nt_ui_set_* APIs.
  *
  * Sprite and text materials are SEPARATE globals -- they map to different
@@ -138,12 +134,9 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size) {
     ctx->clay_arena = Clay_CreateArenaWithCapacityAndMemory(clay_size, clay_mem);
     ctx->clay = Clay_Initialize(ctx->clay_arena, (Clay_Dimensions){.width = 1.0f, .height = 1.0f}, (Clay_ErrorHandler){.errorHandlerFunction = nt_ui_clay_error_cb, .userData = ctx});
 
-    /* Clay_SetMeasureTextFunction is a global hook -- wire it once. The
-     * callback (nt_ui_measure_text_cb above) handles font lookup + measure. */
-    if (!g_nt_ui_measure_wired) {
-        Clay_SetMeasureTextFunction(nt_ui_measure_text_cb, NULL);
-        g_nt_ui_measure_wired = true;
-    }
+    /* Clay_SetMeasureTextFunction is idempotent -- always wire (cheap pointer
+     * assignment in Clay v0.14). Avoids any lazy-init state of our own. */
+    Clay_SetMeasureTextFunction(nt_ui_measure_text_cb, NULL);
 
     return ctx;
 }
@@ -151,12 +144,6 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size) {
 void nt_ui_destroy_context(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_destroy_context: ctx must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_destroy_context: ctx is mid-frame (call nt_ui_end first)");
-
-    /* If this context is the in-frame ctx for any reason, clear the global
-     * (defensive -- assert above should prevent this). */
-    if (g_nt_ui_inframe_ctx == ctx) {
-        g_nt_ui_inframe_ctx = NULL;
-    }
 
     /* Caller owns the arena memory -- only zero the ctx struct portion. */
     memset(ctx, 0, sizeof(*ctx));
@@ -211,18 +198,23 @@ void nt_ui_end(nt_ui_context_t *ctx) {
 // #region helpers_color_pack
 /* Clay packs RGBA as 0..255 floats (clay.h:481). Walker emits as 0xAABBGGRR
  * uint32 (sprite-renderer vertex format -- nt_sprite_vertex_t.color[4]).
- *
- * Saturate before casting because Clay does not clamp -- a theme that wrote
- * 256.0f or -1.0f would otherwise wrap around in the uint8 cast. */
+ * Saturate at uint8 because Clay does not clamp -- a theme that wrote
+ * 256.0f or -1.0f would otherwise wrap around. */
+static inline uint8_t clamp_u8(float v) {
+    if (v <= 0.0f) {
+        return 0u;
+    }
+    if (v >= 255.0f) {
+        return 255u;
+    }
+    return (uint8_t)v;
+}
+
 static inline uint32_t nt_color_pack_clay(Clay_Color c) {
-    int ri = (int)c.r;
-    int gi = (int)c.g;
-    int bi = (int)c.b;
-    int ai = (int)c.a;
-    uint32_t r = (uint32_t)(ri > 255 ? 255 : (ri < 0 ? 0 : ri));
-    uint32_t g = (uint32_t)(gi > 255 ? 255 : (gi < 0 ? 0 : gi));
-    uint32_t b = (uint32_t)(bi > 255 ? 255 : (bi < 0 ? 0 : bi));
-    uint32_t a = (uint32_t)(ai > 255 ? 255 : (ai < 0 ? 0 : ai));
+    uint32_t r = clamp_u8(c.r);
+    uint32_t g = clamp_u8(c.g);
+    uint32_t b = clamp_u8(c.b);
+    uint32_t a = clamp_u8(c.a);
     return r | (g << 8) | (b << 16) | (a << 24); /* 0xAABBGGRR */
 }
 // #endregion
