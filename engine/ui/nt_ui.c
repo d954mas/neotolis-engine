@@ -277,6 +277,12 @@ static void emit_image(const Clay_RenderCommand *c) {
         return; /* tolerate missing payload -- Clay does not enforce */
     }
 
+    /* Payload's atlas is independent of the walker's white-region atlas.
+     * Validate it here so the failure points at the IMAGE call site, not
+     * deep inside nt_atlas_get_region or the sprite renderer's emit. */
+    NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle");
+    NT_ASSERT(nt_resource_is_ready(p->atlas) && "nt_ui IMAGE payload: atlas not READY");
+
     const Clay_BoundingBox bb = c->boundingBox;
 
     /* Clay's default backgroundColor for IMAGE is {0,0,0,0} == untinted
