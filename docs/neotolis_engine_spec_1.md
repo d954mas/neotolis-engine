@@ -106,12 +106,23 @@ If a decision can be deferred without loss of base architecture — it is deferr
 - WebGPU backend implementation
 - scene editor / authoring editor
 - full UI framework (NOTE: Phase 51 introduces `nt_ui` — a minimal
-  immediate-mode layout + render bridge module that wraps Clay v0.14 as a
-  private layout backend. It is **not** a full UI framework — no widget
-  authoring tools, no styling pipeline beyond inline calls, no asset
-  hot-reload of UI definitions, no scene-graph integration. Game owns the
-  loop and render order; `nt_ui` provides building blocks per the engine's
-  "set of modules" principle. Clay does not leak into public headers.)
+  immediate-mode layout + render bridge module. It is **not** a full UI
+  framework — no widget authoring tools, no styling pipeline beyond
+  inline calls, no asset hot-reload of UI definitions, no scene-graph
+  integration. Game owns the loop and render order; `nt_ui` provides
+  building blocks per the engine's "set of modules" principle.
+
+  Clay v0.14 is vendored as a **public** dependency of `nt_ui`: game
+  code declares layout and widgets via `CLAY_*` macros directly,
+  while `nt_ui` owns lifecycle (contexts, themes, the walker that
+  turns Clay's render commands into sprite/text renderer calls). This
+  is a deliberate compromise — wrapping Clay's full surface in an
+  engine-owned adapter API would be ~100+ shim functions for no
+  benefit beyond hiding the dependency. The cost we accept is that
+  Clay's pinned API (`CLAY_PINNED_MAJOR/MINOR` enforced via
+  `_Static_assert` in `nt_ui.c`) becomes part of the engine's
+  publicly-promised surface; bumping Clay can require coordinated
+  game-side changes.)
 - hot reload of compiled native/WASM code
 - generic reflection-heavy system architecture
 - WebGL 1 support
