@@ -288,10 +288,16 @@ static void emit_image(const Clay_RenderCommand *c) {
     }
 
     /* Payload's atlas is independent of the walker's white-region atlas.
-     * Validate it here so the failure points at the IMAGE call site, not
-     * deep inside nt_atlas_get_region or the sprite renderer's emit. */
-    NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle");
-    NT_ASSERT(nt_resource_is_ready(p->atlas) && "nt_ui IMAGE payload: atlas not READY");
+     *
+     * id == 0 is a caller bug -- never a legitimate runtime state -- so
+     * assert. nt_resource_is_ready == false IS a legitimate state when an
+     * image atlas is still loading asynchronously; the IMAGE element just
+     * draws nothing this frame and the UI continues. AGENTS.md "runtime
+     * is a safety net" applies. */
+    NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle (zero id)");
+    if (!nt_resource_is_ready(p->atlas)) {
+        return; /* atlas still loading -- silent no-op, render next frame */
+    }
 
     const Clay_BoundingBox bb = c->boundingBox;
 
