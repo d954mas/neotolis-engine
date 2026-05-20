@@ -127,28 +127,13 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_
 /* Freezes Clay's command array into ctx for subsequent walk(s). */
 void nt_ui_end(nt_ui_context_t *ctx);
 
-/* Read-only on ctx; safe to call N times against different targets in
- * the same frame.
- *
- * Render order contract:
- * -- Different zIndex layers are drawn in strict ascending z order
- *    (preserving Clay's sort).
- * -- Within a single zIndex layer, the walker partitions commands into
- *    two groups and emits sprite-bound first (RECTANGLE / BORDER /
- *    IMAGE), TEXT second. Inside each group, commands keep their
- *    original Clay index order -- so two overlapping sprites at the
- *    same z still paint in declaration order. Code that needs strict
- *    painter order between an overlapping sprite and a text MUST place
- *    them on different zIndex layers.
- * -- Within the sprite group, the walker does NOT yet bucket-sort by
- *    atlas, so interleaved IMAGEs that reference different atlas pages
- *    will still fragment the sprite batch on the page transitions.
- *    Within the TEXT group, the walker does NOT yet bucket by font.
- *    These additional sorts are valid extensions of the contract
- *    above (within-z reorderable) and may land in a later phase.
- * -- SCISSOR_START / SCISSOR_END / CUSTOM are hard barriers: commands
- *    on either side are never reordered across them. Clip scope and
- *    custom-callback state are preserved exactly. */
+/* Read-only on ctx; safe to call N times against different targets per
+ * frame. Render order:
+ *  - Different zIndex: strict ascending z.
+ *  - Same z: sprite-bound (RECT/BORDER/IMAGE) emitted before TEXT;
+ *    declaration order kept within each group. Overlapping sprite+text
+ *    needing strict painter order MUST use different z.
+ *  - SCISSOR_START/END and CUSTOM are hard barriers -- never reordered. */
 void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 
 /* Per-walk metrics captured into ctx at every nt_ui_walk exit. Apps that
@@ -158,14 +143,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
  *     nt_stats_count("ui_draw_calls",    nt_ui_get_last_walk_draw_calls(ctx));
  *     nt_stats_count("ui_element_count", nt_ui_get_last_walk_element_count(ctx));
  *
- * draw_calls is a WINDOW measurement: the GL draw-call counter delta
- * between walk entry and exit. It counts every physical
- * glDrawElements made during the walk, which includes any draws a
- * CUSTOM-command handler emits (the handler's draws are part of the
- * UI's cost, not separable from batching efficiency). Use this as
- * "what did this walk cost the GPU?". If you need UI-only draws
- * (excluding CUSTOM handler output), snapshot sprite/text renderer
- * stats yourself around nt_ui_walk. */
+ * draw_calls is a WINDOW measurement: GL draw-call delta between walk
+ * entry and exit. Includes any draws a CUSTOM handler emits. For
+ * UI-only counts, snapshot sprite/text renderer stats around the walk. */
 uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_element_count(const nt_ui_context_t *ctx);
 

@@ -708,6 +708,9 @@ void nt_sprite_renderer_flush(void) {
     s_sprite.vertex_count = 0;
     s_sprite.index_count = 0;
     s_sprite.cmd_count = 0;
+    /* draw_list opens cmds per batch_key, not via current_mat. Reset
+     * the fence so a following same-handle set_material() re-opens. */
+    s_sprite.current_mat = (nt_material_t){0};
 }
 // #endregion
 

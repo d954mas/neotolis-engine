@@ -146,11 +146,7 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_pointer_t *mouse) {
     NT_ASSERT(ctx != NULL && "nt_ui_begin: ctx must be non-NULL");
     NT_ASSERT(mouse != NULL && "nt_ui_begin: mouse must be non-NULL");
-    /* Layout dimensions go straight into Clay; NaN / +-inf / negative
-     * would silently corrupt layout calculations downstream. isfinite()
-     * rejects both NaN and infinity in one call -- the older `x == x`
-     * idiom only catches NaN. Match the boundary check nt_ui_walk
-     * applies to target->viewport. */
+    /* isfinite() rejects NaN + +-inf; raw `>= 0.0F` lets +inf through. */
     NT_ASSERT(isfinite(screen_w) && screen_w >= 0.0F && "nt_ui_begin: screen_w must be finite and non-negative");
     NT_ASSERT(isfinite(screen_h) && screen_h >= 0.0F && "nt_ui_begin: screen_h must be finite and non-negative");
     NT_ASSERT(g_nt_ui_inframe_ctx == NULL && "nt_ui_begin: another ctx is mid-frame");
@@ -232,11 +228,8 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c)
     const nt_resource_t atlas = ctx->atlas;
     const uint32_t wr = ctx->white_region;
 
-    /* Clay's BorderWidth fields are uint16_t and unvalidated -- caller could
-     * set top+bottom > bbox.height (or left+right > bbox.width) and the
-     * left/right edge geometry below would emit a negative-height rect.
-     * Fail early on that contract violation rather than feeding garbage to
-     * the sprite renderer. */
+    /* Clay borders are uint16_t -- top+bot > bb.height (or lft+rgt >
+     * bb.width) would emit a negative-size rect downstream. */
     const float top = (float)b->width.top;
     const float bot = (float)b->width.bottom;
     const float lft = (float)b->width.left;
@@ -525,10 +518,8 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
      * this guard, a create -> walk skipping begin/end would be a silent
      * no-op. */
     NT_ASSERT(ctx->frozen_cmds.internalArray != NULL && "nt_ui_walk: frozen_cmds not populated (call nt_ui_end before walk)");
-    /* Viewport must be finite and strictly positive in width/height --
-     * GL accepts zero dimensions (no draws) but downstream scissor math
-     * `vh - y - hp` underflows to negative when vh == 0, which is GL
-     * undefined. Origin x/y may be zero. */
+    /* w/h > 0: scissor math `vh - y - hp` underflows negative when
+     * vh==0 (GL undefined). Origin x/y may be zero. */
     NT_ASSERT(isfinite(target->viewport[0]) && isfinite(target->viewport[1]) && isfinite(target->viewport[2]) && isfinite(target->viewport[3]) && "nt_ui_walk: target->viewport must be finite");
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && "nt_ui_walk: target->viewport origin (x,y) must be non-negative");
     NT_ASSERT(target->viewport[2] > 0.0F && target->viewport[3] > 0.0F && "nt_ui_walk: target->viewport (w,h) must be > 0 (zero-size walk is not a supported no-op)");
