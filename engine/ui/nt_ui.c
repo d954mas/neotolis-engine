@@ -531,9 +531,13 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* Stats (D-52-20 / WALK-09). Plan 04 captures the per-walk deltas
      * into BSS for test probes; Plan 05 routes them through nt_stats so
      * the overlay surfaces walker overhead alongside FPS/CPU/GPU/Draws.
-     * Counter names are conventional strings; nt_stats default capacity
-     * (16 slots) is plenty for these two. */
-    const uint32_t delta = nt_gfx_get_frame_draw_calls() - calls_at_entry;
+     *
+     * Guard against a CUSTOM handler resetting frame stats mid-walk:
+     * unsigned wrap on (calls_after - calls_at_entry) would produce a
+     * spurious huge delta. */
+    const uint32_t calls_after = nt_gfx_get_frame_draw_calls();
+    NT_ASSERT(calls_after >= calls_at_entry && "nt_ui_walk: frame draw-call counter went backwards (CUSTOM handler reset stats?)");
+    const uint32_t delta = calls_after - calls_at_entry;
     s_last_walk_draw_call_delta = delta;
     s_last_walk_element_count = (uint32_t)arr->length;
     nt_stats_count("ui_draw_calls", (uint64_t)delta);
