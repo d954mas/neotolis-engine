@@ -267,10 +267,6 @@ static void emit_image(const Clay_RenderCommand *c) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
     NT_ASSERT(p != NULL && "nt_ui IMAGE: imageData must point to nt_ui_image_payload_t");
     NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle (zero id)");
-    /* Reserved field -- caller writing into it indicates a feature
-     * expectation we don't yet meet. Assert until slice9 emit lands. */
-    NT_ASSERT(p->slice9_lrtb[0] == 0 && p->slice9_lrtb[1] == 0 && p->slice9_lrtb[2] == 0 && p->slice9_lrtb[3] == 0 && "nt_ui IMAGE payload: slice9_lrtb is reserved");
-
     /* Async-loading atlas is a legitimate runtime state -- skip this
      * frame, next frame will draw. */
     if (!nt_resource_is_ready(p->atlas)) {
@@ -533,18 +529,6 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
      * rejects both NaN and infinity; raw `>= 0.0F` lets +inf through. */
     NT_ASSERT(isfinite(target->viewport[0]) && isfinite(target->viewport[1]) && isfinite(target->viewport[2]) && isfinite(target->viewport[3]) && "nt_ui_walk: target->viewport must be finite");
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport must be non-negative");
-    /* projection is reserved -- caller MUST keep ALL 16 floats zero. The
-     * walker does not consume the field; if a later phase grows the walker
-     * to upload Globals UBO from it, callers who wrote non-zero off-diagonal
-     * values expecting "old" behaviour would silently get the wrong matrix. */
-    bool _projection_all_zero = true;
-    for (int _pi = 0; _pi < 16; ++_pi) {
-        if (target->projection[_pi] != 0.0F) {
-            _projection_all_zero = false;
-            break;
-        }
-    }
-    NT_ASSERT(_projection_all_zero && "nt_ui_walk: target->projection is reserved -- must be all-zero (caller owns Globals UBO)");
     NT_ASSERT(ctx->atlas.id != 0 && "nt_ui_set_atlas_white_region(ctx,...) required before nt_ui_walk");
     NT_ASSERT(nt_resource_is_ready(ctx->atlas) && "nt_ui_walk: ctx atlas must be READY");
     NT_ASSERT(ctx->sprite_material.id != 0 && "nt_ui_set_sprite_material(ctx,...) required before nt_ui_walk");

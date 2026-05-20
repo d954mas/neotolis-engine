@@ -76,19 +76,16 @@ typedef struct nt_ui_context nt_ui_context_t;
  * the upload and uses whatever ortho the caller wrote before walk. fbo
  * and projection are reserved for future render-to-texture. */
 typedef struct {
-    uint32_t fbo;         /* 0 = default framebuffer; non-zero reserved */
-    float viewport[4];    /* {x, y, w, h} in framebuffer pixels */
-    float projection[16]; /* column-major (cglm); all-zero = caller owns Globals UBO */
+    uint32_t fbo;      /* 0 = default framebuffer; non-zero reserved */
+    float viewport[4]; /* {x, y, w, h} in framebuffer pixels */
 } nt_ui_target_t;
 
 /* Pointed to by Clay_ImageElementConfig.imageData. Lifetime must extend
- * through the matching nt_ui_walk. slice9_lrtb is reserved (currently
- * ignored, walker emits a plain quad). */
+ * through the matching nt_ui_walk. */
 typedef struct {
     nt_resource_t atlas;
     uint32_t region_index;
     uint8_t flip_bits;
-    uint8_t slice9_lrtb[4]; /* reserved */
 } nt_ui_image_payload_t;
 
 /* clay_cmd is an opaque const Clay_RenderCommand * (cast back if needed).

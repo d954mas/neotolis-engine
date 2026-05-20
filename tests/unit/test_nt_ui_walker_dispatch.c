@@ -141,7 +141,6 @@ static void test_dispatch_image(void) {
     s_image_payload.atlas = s_fx.atlas.handle;
     s_image_payload.region_index = s_fx.atlas.polygon_region_idx; /* 6-vert hull */
     s_image_payload.flip_bits = 0;
-    memset(s_image_payload.slice9_lrtb, 0, sizeof s_image_payload.slice9_lrtb);
 
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
@@ -223,7 +222,6 @@ static void test_dispatch_image_tinted_packs_color(void) {
     s_image_payload.atlas = s_fx.atlas.handle;
     s_image_payload.region_index = s_fx.atlas.white_region_idx;
     s_image_payload.flip_bits = 0;
-    memset(s_image_payload.slice9_lrtb, 0, sizeof s_image_payload.slice9_lrtb);
 
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
