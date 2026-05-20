@@ -360,7 +360,7 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
                                                 float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits) {
     NT_ASSERT(r != NULL && cpos != NULL && vraw != NULL && idx != NULL);
     NT_ASSERT(m != NULL);
-    if (r->vertex_count == 0u) {
+    if (r->vertex_count == 0U) {
         return; /* tombstone — silent no-op (matches old emit_one behaviour) */
     }
     if (!ensure_current_cmd_page_texture(page_tex)) {
@@ -512,6 +512,7 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
  * write body lives in one canonical place. No extra atlas lookup vs the old
  * monolithic emit_one — resolved-region pointers come straight from
  * sv->resolved[s_idx]. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv) {
     nt_entity_t e = {.id = item->entity};
     uint16_t eidx = nt_entity_index(e);
@@ -559,6 +560,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
  * Asserts the renderer + atlas are in a usable state. Caller must have an
  * open cmd (set via nt_sprite_renderer_set_material). Tombstoned regions
  * silently no-op (vertex_count == 0 short-circuits emit_region_resolved). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits) {
     NT_ASSERT(s_sprite.initialized);
     NT_ASSERT(world_matrix != NULL);
@@ -567,7 +569,7 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
     NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_emit_region: call nt_sprite_renderer_set_material first");
 
     const nt_texture_region_t *r = nt_atlas_get_region(atlas, region_index);
-    if (r == NULL || r->vertex_count == 0u) {
+    if (r == NULL || r->vertex_count == 0U) {
         return; /* tombstone or out-of-range — silent no-op */
     }
     const float(*cpos)[2] = nt_atlas_get_region_cached_pos(atlas, region_index);
