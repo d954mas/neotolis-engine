@@ -60,13 +60,23 @@ static void custom_cb(const void *cmd, void *user) {
     ++s_custom_calls;
 }
 
-/* Same-z interleaved RECT/TEXT collapses to one sprite + one text draw
- * call instead of one per transition. Sequence RTRTRT (3 of each) at
- * z=0 used to produce 3 sprite flushes (one per TEXT, draining the
- * preceding RECT alone) + 1 text flush at exit = 4 draw calls. With
- * segment batching: Pass 1 stages all 3 RECTs together; first TEXT in
- * Pass 2 triggers a single sprite flush (1 draw call), then all 3
- * TEXTs stage; walker-exit text flush emits 1 draw call. Total 2. */
+/* Sprite-side proof: same-z interleaved RECT/TEXT no longer splits the
+ * sprite batch on every RECT->TEXT transition.
+ *
+ * Sequence: RTRTRT (3 of each) at z=0. The fixture does not register
+ * a font, so emit_text early-returns after its prologue sprite flush;
+ * the text-renderer side contributes 0 draw calls. What we can prove
+ * via draw_call_count is that the SPRITE batch survived the
+ * interleaving:
+ *   -- Old walker: each TEXT drained the preceding RECT alone (1 dc
+ *      per TEXT * 3 = 3 sprite dc).
+ *   -- New walker (segment batching): Pass 1 stages all 3 RECTs
+ *      together; first TEXT in Pass 2 triggers one sprite flush (1
+ *      dc). All subsequent TEXTs flush an already-empty sprite stage.
+ *      Total sprite dc = 1.
+ * Proving the TEXT side batches symmetrically would require setting
+ * up a real font + registered resource (see test_nt_ui_measure_cb for
+ * the harness), out of scope for this batching unit. */
 static void test_same_z_rect_text_batches(void) {
     make_rect(0, 0, 0);
     make_text(1, 0, 20);
@@ -79,10 +89,6 @@ static void test_same_z_rect_text_batches(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* Note: test font isn't registered (UI_WALKER_FX_BIND_ALL doesn't
-     * include a font). emit_text early-returns after the prologue sprite
-     * flush -- so the text-renderer side contributes 0 draw calls.
-     * Sprite batch drains in one call. */
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
 }
 

@@ -136,13 +136,19 @@ void nt_ui_end(nt_ui_context_t *ctx);
  * Render order contract:
  * -- Different zIndex layers are drawn in strict ascending z order
  *    (preserving Clay's sort).
- * -- Within a single zIndex layer, the walker reorders compatible
- *    commands for renderer batching: all sprite-bound commands
- *    (RECT/BORDER/IMAGE) emit first, then all TEXT. Sprite emission
- *    order within the batch follows the original index, so two
- *    overlapping sprites on the same z still paint in declaration
- *    order. Code that needs strict painter order between overlapping
- *    elements MUST place them on different zIndex layers.
+ * -- Within a single zIndex layer, the walker partitions commands into
+ *    two groups and emits sprite-bound first (RECTANGLE / BORDER /
+ *    IMAGE), TEXT second. Inside each group, commands keep their
+ *    original Clay index order -- so two overlapping sprites at the
+ *    same z still paint in declaration order. Code that needs strict
+ *    painter order between an overlapping sprite and a text MUST place
+ *    them on different zIndex layers.
+ * -- Within the sprite group, the walker does NOT yet bucket-sort by
+ *    atlas, so interleaved IMAGEs that reference different atlas pages
+ *    will still fragment the sprite batch on the page transitions.
+ *    Within the TEXT group, the walker does NOT yet bucket by font.
+ *    These additional sorts are valid extensions of the contract
+ *    above (within-z reorderable) and may land in a later phase.
  * -- SCISSOR_START / SCISSOR_END / CUSTOM are hard barriers: commands
  *    on either side are never reordered across them. Clip scope and
  *    custom-callback state are preserved exactly. */

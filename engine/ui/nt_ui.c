@@ -145,11 +145,13 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_pointer_t *mouse) {
     NT_ASSERT(ctx != NULL && "nt_ui_begin: ctx must be non-NULL");
     NT_ASSERT(mouse != NULL && "nt_ui_begin: mouse must be non-NULL");
-    /* Layout dimensions go straight into Clay; NaN / -inf / negative would
-     * silently corrupt layout calculations downstream. Match the boundary
-     * check nt_ui_walk applies to target->viewport. */
-    NT_ASSERT(screen_w >= 0.0F && screen_w == screen_w && "nt_ui_begin: screen_w must be finite and non-negative");
-    NT_ASSERT(screen_h >= 0.0F && screen_h == screen_h && "nt_ui_begin: screen_h must be finite and non-negative");
+    /* Layout dimensions go straight into Clay; NaN / +-inf / negative
+     * would silently corrupt layout calculations downstream. isfinite()
+     * rejects both NaN and infinity in one call -- the older `x == x`
+     * idiom only catches NaN. Match the boundary check nt_ui_walk
+     * applies to target->viewport. */
+    NT_ASSERT(isfinite(screen_w) && screen_w >= 0.0F && "nt_ui_begin: screen_w must be finite and non-negative");
+    NT_ASSERT(isfinite(screen_h) && screen_h >= 0.0F && "nt_ui_begin: screen_h must be finite and non-negative");
     NT_ASSERT(g_nt_ui_inframe_ctx == NULL && "nt_ui_begin: another ctx is mid-frame");
     NT_ASSERT(!ctx->in_frame && "nt_ui_begin: ctx already in_frame");
 
@@ -526,8 +528,10 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
      * this guard, a create -> walk skipping begin/end would be a silent
      * no-op. */
     NT_ASSERT(ctx->frozen_cmds.internalArray != NULL && "nt_ui_walk: frozen_cmds not populated (call nt_ui_end before walk)");
-    /* Viewport must be non-negative -- the cast to int below would
-     * otherwise turn NaN / -inf into garbage GL state. */
+    /* Viewport must be finite and non-negative -- the cast to int below
+     * would otherwise turn NaN / +-inf into garbage GL state. isfinite()
+     * rejects both NaN and infinity; raw `>= 0.0F` lets +inf through. */
+    NT_ASSERT(isfinite(target->viewport[0]) && isfinite(target->viewport[1]) && isfinite(target->viewport[2]) && isfinite(target->viewport[3]) && "nt_ui_walk: target->viewport must be finite");
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport must be non-negative");
     /* projection is reserved -- caller MUST keep ALL 16 floats zero. The
      * walker does not consume the field; if a later phase grows the walker
