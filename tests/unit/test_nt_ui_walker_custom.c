@@ -123,13 +123,13 @@ void setUp(void) {
     s_sprite_material = make_test_material();
     s_text_material = make_test_material();
 
-    nt_ui_set_atlas_white_region(s_atlas.handle, s_atlas.white_region_idx);
-    nt_ui_set_sprite_material(s_sprite_material);
-    nt_ui_set_text_material(s_text_material);
-    nt_ui_set_custom_handler(NULL, NULL);
-
     s_ctx = nt_ui_create_context(s_arena, sizeof s_arena);
     TEST_ASSERT_NOT_NULL(s_ctx);
+
+    nt_ui_set_atlas_white_region(s_ctx, s_atlas.handle, s_atlas.white_region_idx);
+    nt_ui_set_sprite_material(s_ctx, s_sprite_material);
+    nt_ui_set_text_material(s_ctx, s_text_material);
+    nt_ui_set_custom_handler(s_ctx, NULL, NULL);
 }
 
 void tearDown(void) {
@@ -137,7 +137,6 @@ void tearDown(void) {
         nt_ui_destroy_context(s_ctx);
         s_ctx = NULL;
     }
-    nt_ui_test_reset_walker_globals();
     minimal_ui_atlas_destroy(&s_atlas);
     nt_stats_shutdown();
     nt_sprite_renderer_shutdown();
@@ -161,7 +160,7 @@ static void inject_frozen_cmds(int32_t count) {
 /* WALK-05: registered handler is called with (clay_cmd, userdata). */
 static void test_custom_handler_invoked(void) {
     int sentinel = 42;
-    nt_ui_set_custom_handler(test_custom_handler, &sentinel);
+    nt_ui_set_custom_handler(s_ctx, test_custom_handler, &sentinel);
 
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_CUSTOM;
@@ -182,7 +181,7 @@ static void test_custom_handler_invoked(void) {
 
 /* WALK-05 / D-52-09: NULL handler = silent skip (no crash, no warning). */
 static void test_null_custom_handler_silent_skip(void) {
-    nt_ui_set_custom_handler(NULL, NULL);
+    nt_ui_set_custom_handler(s_ctx, NULL, NULL);
 
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_CUSTOM;

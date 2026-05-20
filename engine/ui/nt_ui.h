@@ -6,12 +6,12 @@
  *
  * Frame lifecycle (Phase 52):
  *
- *   1) Once at boot:
+ *   1) Once at boot, per context:
  *        ctx = nt_ui_create_context(arena, sizeof arena);
  *        nt_ui_set_font(ctx, 0, font);
- *        nt_ui_set_atlas_white_region(atlas, white_region_idx);
- *        nt_ui_set_sprite_material(sprite_material);
- *        nt_ui_set_text_material(text_material);
+ *        nt_ui_set_atlas_white_region(ctx, atlas, white_region_idx);
+ *        nt_ui_set_sprite_material(ctx, sprite_material);
+ *        nt_ui_set_text_material(ctx, text_material);
  *
  *   2) Per frame, declaration phase (Phase 1):
  *        nt_pointer_t mouse = g_nt_input.pointers[0];
@@ -107,23 +107,30 @@ typedef struct {
  */
 typedef void (*nt_ui_custom_handler_t)(const void *clay_cmd, void *userdata);
 
-/* ---- Global setters (implementations in Plan 04) ---- */
+/* ---- Per-context setters (atlas / materials / custom handler) ----
+ *
+ * Walker state is owned by each context, NOT by globals. This makes the
+ * "one ctx, many walks against different targets" pattern (split-screen,
+ * screenshot FBO, minimap UI) trivially correct: separate contexts can
+ * carry separate atlases and themes without swapping state between walks.
+ *
+ * All four setters must be called for each context before its first walk;
+ * nt_ui_walk asserts every field is set at entry. */
 
-/* White-region & atlas setter -- one call between init and first walk.
- * Walker asserts atlas is valid + ready before each walk. */
-void nt_ui_set_atlas_white_region(nt_resource_t atlas, uint32_t white_region_idx);
+/* White-region & atlas binding. Walker emits RECT and BORDER through this
+ * atlas+region. IMAGE uses the payload's atlas independently. */
+void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uint32_t white_region_idx);
 
 /* Material setters -- symmetric pair (Revision Issue 1, D-52-19).
  * Sprite material drives RECT/BORDER/IMAGE; text material drives TEXT.
- * Both must be set before first nt_ui_walk (walker asserts at entry).
- * Phase 53 theme sets both atomically; Phase 52 setters are the bootstrap.
+ * Phase 53 theme will set both atomically; Phase 52 setters are the bootstrap.
  * Single-material reuse was rejected because sprite and text use different
  * nt_material_t (different shaders) and cannot share a pipeline slot. */
-void nt_ui_set_sprite_material(nt_material_t sprite_material);
-void nt_ui_set_text_material(nt_material_t text_material);
+void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_material);
+void nt_ui_set_text_material(nt_ui_context_t *ctx, nt_material_t text_material);
 
-/* CUSTOM handler -- global, NULL = silent skip. */
-void nt_ui_set_custom_handler(nt_ui_custom_handler_t fn, void *userdata);
+/* CUSTOM handler -- per-context, NULL fn = silent skip. */
+void nt_ui_set_custom_handler(nt_ui_context_t *ctx, nt_ui_custom_handler_t fn, void *userdata);
 
 /* ---- Lifecycle (D-52-10) ---- */
 
@@ -173,10 +180,10 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 /* Module-level in-frame pointer (D-52-12). NULL when no context is mid-frame. */
 nt_ui_context_t *nt_ui_test_inframe_ctx(void);
 
-/* Plan 04 captures into static module state at walk exit; Plan 05 will
- * additionally route these through nt_stats_count. */
-uint32_t nt_ui_test_last_walk_draw_call_delta(void);
-uint32_t nt_ui_test_last_walk_element_count(void);
+/* Walker captures per-walk deltas into the ctx itself; tests read them back
+ * via these probes. Plan 05 also routes them through nt_stats_count. */
+uint32_t nt_ui_test_last_walk_draw_call_delta(const nt_ui_context_t *ctx);
+uint32_t nt_ui_test_last_walk_element_count(const nt_ui_context_t *ctx);
 
 /* Plan 03: snapshot of the Clay-side pointer state for the given ctx,
  * intended for CLAY-04 / D-52-16 verification. Returns the values that
@@ -188,15 +195,14 @@ float nt_ui_test_clay_pointer_y(const nt_ui_context_t *ctx);
 /* 0 = released-family, 1 = pressed-family. */
 int nt_ui_test_clay_pointer_down(const nt_ui_context_t *ctx);
 
-/* Plan 04: walker-setter introspection + reset.
- * Tests use these to verify what the setters wrote and to reset the
- * module-level globals for death-tests that need a "no setter called"
- * pre-state (e.g. walk_without_atlas_asserts). */
-nt_resource_t nt_ui_test_atlas(void);
-uint32_t nt_ui_test_white_region(void);
-nt_material_t nt_ui_test_sprite_material(void);
-nt_material_t nt_ui_test_text_material(void);
-void nt_ui_test_reset_walker_globals(void);
+/* Walker-setter introspection. Tests use these to verify what the per-context
+ * setters wrote. Death-tests for "setter not called before walk" simply use
+ * a freshly-created context (all walker fields zero-initialised); no reset
+ * probe is needed. */
+nt_resource_t nt_ui_test_atlas(const nt_ui_context_t *ctx);
+uint32_t nt_ui_test_white_region(const nt_ui_context_t *ctx);
+nt_material_t nt_ui_test_sprite_material(const nt_ui_context_t *ctx);
+nt_material_t nt_ui_test_text_material(const nt_ui_context_t *ctx);
 #endif /* NT_UI_TEST_ACCESS */
 
 #endif /* NT_UI_H */

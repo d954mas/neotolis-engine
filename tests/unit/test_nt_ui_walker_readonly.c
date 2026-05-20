@@ -122,22 +122,22 @@ void setUp(void) {
     s_sprite_material = make_test_material();
     s_text_material = make_test_material();
 
-    /* Per-test walker setter selection. Clears first so death-tests start
-     * from a known-empty state. */
-    nt_ui_test_reset_walker_globals();
-    if (s_setup_mode != SETUP_NO_ATLAS) {
-        nt_ui_set_atlas_white_region(s_atlas.handle, s_atlas.white_region_idx);
-    }
-    if (s_setup_mode != SETUP_NO_SPRITE_MATERIAL) {
-        nt_ui_set_sprite_material(s_sprite_material);
-    }
-    if (s_setup_mode != SETUP_NO_TEXT_MATERIAL) {
-        nt_ui_set_text_material(s_text_material);
-    }
-    nt_ui_set_custom_handler(NULL, NULL);
-
     s_ctx = nt_ui_create_context(s_arena, sizeof s_arena);
     TEST_ASSERT_NOT_NULL(s_ctx);
+
+    /* Per-test walker setter selection. A fresh context has all walker fields
+     * zero-initialised, so death-tests just skip the setter for the field
+     * whose absence they expect the walker to assert on. */
+    if (s_setup_mode != SETUP_NO_ATLAS) {
+        nt_ui_set_atlas_white_region(s_ctx, s_atlas.handle, s_atlas.white_region_idx);
+    }
+    if (s_setup_mode != SETUP_NO_SPRITE_MATERIAL) {
+        nt_ui_set_sprite_material(s_ctx, s_sprite_material);
+    }
+    if (s_setup_mode != SETUP_NO_TEXT_MATERIAL) {
+        nt_ui_set_text_material(s_ctx, s_text_material);
+    }
+    nt_ui_set_custom_handler(s_ctx, NULL, NULL);
 
     /* Reset mode to FULL for the next test -- per-test setup applies a
      * sentinel BEFORE Unity runs setUp via the run_with_mode wrappers below. */
@@ -148,7 +148,6 @@ void tearDown(void) {
         nt_ui_destroy_context(s_ctx);
         s_ctx = NULL;
     }
-    nt_ui_test_reset_walker_globals();
     minimal_ui_atlas_destroy(&s_atlas);
     nt_stats_shutdown();
     nt_sprite_renderer_shutdown();
@@ -183,18 +182,18 @@ static void test_second_walk_identical(void) {
 
     int vp1[4];
     nt_gfx_test_viewport_rect(vp1);
-    const uint32_t elements1 = nt_ui_test_last_walk_element_count();
+    const uint32_t elements1 = nt_ui_test_last_walk_element_count(s_ctx);
     /* Read but don't compare draw-call delta -- walking once already
      * incurs draw calls; a second walk will too, so the EXACT delta-
      * to-delta count is what we compare. */
-    const uint32_t delta1 = nt_ui_test_last_walk_draw_call_delta();
+    const uint32_t delta1 = nt_ui_test_last_walk_draw_call_delta(s_ctx);
 
     nt_ui_walk(s_ctx, &target);
 
     int vp2[4];
     nt_gfx_test_viewport_rect(vp2);
-    const uint32_t elements2 = nt_ui_test_last_walk_element_count();
-    const uint32_t delta2 = nt_ui_test_last_walk_draw_call_delta();
+    const uint32_t elements2 = nt_ui_test_last_walk_element_count(s_ctx);
+    const uint32_t delta2 = nt_ui_test_last_walk_draw_call_delta(s_ctx);
 
     TEST_ASSERT_EQUAL_INT_ARRAY(vp1, vp2, 4);
     TEST_ASSERT_EQUAL_UINT32(elements1, elements2);

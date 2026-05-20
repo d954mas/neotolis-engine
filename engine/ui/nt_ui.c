@@ -43,29 +43,12 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 // #region module_state
 /* g_nt_ui_inframe_ctx -- module-level pointer enforcing the multi-context
  * invariant (D-52-12). Exactly one ctx may be in-frame at a time; nt_ui_begin
- * asserts this is NULL on entry and assigns ctx; nt_ui_end clears it. */
+ * asserts this is NULL on entry and assigns ctx; nt_ui_end clears it.
+ *
+ * This is the only module-level state. Walker bindings (atlas, materials,
+ * custom handler) and per-walk stats live in nt_ui_context_t -- the walker
+ * is fully per-context. */
 static nt_ui_context_t *g_nt_ui_inframe_ctx = NULL;
-
-/* Plan 04 / Revision Issue 1: walker globals set by nt_ui_set_* APIs.
- *
- * Sprite and text materials are SEPARATE globals -- they map to different
- * nt_material_t handles (different shaders / pipelines), so a single shared
- * slot would force a flush+rebind on every TEXT command. Walker asserts
- * BOTH are valid at entry.
- *
- * g_nt_ui_atlas + g_nt_ui_white_region drive RECT/BORDER emit (and IMAGE's
- * fallback when the payload has no atlas of its own -- D-52-06). */
-static nt_resource_t g_nt_ui_atlas;
-static uint32_t g_nt_ui_white_region;
-static nt_material_t g_nt_ui_sprite_material;
-static nt_material_t g_nt_ui_text_material;
-static nt_ui_custom_handler_t g_nt_ui_custom_fn;
-static void *g_nt_ui_custom_user;
-
-/* Walker stats (D-52-20 / WALK-09). Plan 05 wires them into nt_stats; Plan
- * 04 captures the values into BSS so the test probes can read them. */
-static uint32_t s_last_walk_draw_call_delta;
-static uint32_t s_last_walk_element_count;
 // #endregion
 
 // #region clay_error_handler
@@ -265,23 +248,24 @@ static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, 
 /* WALK-04 / D-52-03: BORDER -> up to 4 thin RECT quads via emit_screen_rect.
  * Top/bottom run the full width; left/right are inset by top/bottom heights
  * to avoid double-blending corners (matches 52-RESEARCH.md §BORDER emit). */
-static void emit_border(const Clay_RenderCommand *c) {
+static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
     const Clay_BorderRenderData *b = &c->renderData.border;
     const Clay_BoundingBox bb = c->boundingBox;
     const uint32_t col = nt_color_pack_clay(b->color);
+    const nt_resource_t atlas = ctx->atlas;
+    const uint32_t wr = ctx->white_region;
 
     if (b->width.top) {
-        emit_screen_rect(g_nt_ui_atlas, g_nt_ui_white_region, bb.x, bb.y, bb.width, (float)b->width.top, col);
+        emit_screen_rect(atlas, wr, bb.x, bb.y, bb.width, (float)b->width.top, col);
     }
     if (b->width.bottom) {
-        emit_screen_rect(g_nt_ui_atlas, g_nt_ui_white_region, bb.x, bb.y + bb.height - (float)b->width.bottom, bb.width, (float)b->width.bottom, col);
+        emit_screen_rect(atlas, wr, bb.x, bb.y + bb.height - (float)b->width.bottom, bb.width, (float)b->width.bottom, col);
     }
     if (b->width.left) {
-        emit_screen_rect(g_nt_ui_atlas, g_nt_ui_white_region, bb.x, bb.y + (float)b->width.top, (float)b->width.left, bb.height - (float)b->width.top - (float)b->width.bottom, col);
+        emit_screen_rect(atlas, wr, bb.x, bb.y + (float)b->width.top, (float)b->width.left, bb.height - (float)b->width.top - (float)b->width.bottom, col);
     }
     if (b->width.right) {
-        emit_screen_rect(g_nt_ui_atlas, g_nt_ui_white_region, bb.x + bb.width - (float)b->width.right, bb.y + (float)b->width.top, (float)b->width.right,
-                         bb.height - (float)b->width.top - (float)b->width.bottom, col);
+        emit_screen_rect(atlas, wr, bb.x + bb.width - (float)b->width.right, bb.y + (float)b->width.top, (float)b->width.right, bb.height - (float)b->width.top - (float)b->width.bottom, col);
     }
 }
 // #endregion
@@ -338,13 +322,13 @@ static void emit_image(const Clay_RenderCommand *c) {
 // #endregion
 
 /* Forward declaration -- defined alongside the scissor stack helpers. */
-static void rebind_sprite_after_flush(void);
+static void rebind_sprite_after_flush(const nt_ui_context_t *ctx);
 
 // #region helper_emit_text
 /* D-52-18: TEXT command emit. Flushes sprite renderer first (different
  * material/pipeline boundary), then binds the text font + text material
  * and forwards to nt_text_renderer_draw_n (Phase 51 length-aware API). */
-static void emit_text(nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
+static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
     /* State boundary: sprite material/pipeline must flush before text
      * binds its own pipeline. Auto-flush on font/material change happens
      * inside the text renderer, but the sprite renderer's own staging
@@ -354,17 +338,17 @@ static void emit_text(nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
 
     const Clay_TextRenderData *t = &c->renderData.text;
     if ((uint32_t)t->fontId >= NT_UI_MAX_FONTS) {
-        rebind_sprite_after_flush();
+        rebind_sprite_after_flush(ctx);
         return;
     }
     nt_font_t font = ctx->fonts[t->fontId];
     if (!nt_font_valid(font)) {
-        rebind_sprite_after_flush();
+        rebind_sprite_after_flush(ctx);
         return;
     }
 
     nt_text_renderer_set_font(font);
-    nt_text_renderer_set_material(g_nt_ui_text_material);
+    nt_text_renderer_set_material(ctx->text_material);
 
     /* Translation-only model mat4 -- font size is the scale argument
      * to draw_n, not folded into the model. */
@@ -381,7 +365,7 @@ static void emit_text(nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
         t->textColor.a / 255.0f,
     };
     nt_text_renderer_draw_n(t->stringContents.chars, (size_t)t->stringContents.length, m, (float)t->fontSize, color);
-    rebind_sprite_after_flush();
+    rebind_sprite_after_flush(ctx);
 }
 // #endregion
 
@@ -398,9 +382,9 @@ typedef struct {
  * would trip "call nt_sprite_renderer_set_material first" without this. The
  * sprite renderer's set_material is cheap when cmd_count == 0 with same
  * handle: it just re-opens the cmd from the cached pipeline + mat_info. */
-static void rebind_sprite_after_flush(void) { nt_sprite_renderer_set_material(g_nt_ui_sprite_material); }
+static void rebind_sprite_after_flush(const nt_ui_context_t *ctx) { nt_sprite_renderer_set_material(ctx->sprite_material); }
 
-static void scissor_push(const Clay_RenderCommand *c, sscissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
+static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, sscissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
     NT_ASSERT(*depth < NT_UI_WALKER_MAX_SCISSOR_DEPTH && "scissor stack overflow");
 
     /* Conservative integer rectangle: floor the min corner, ceil the max
@@ -442,10 +426,10 @@ static void scissor_push(const Clay_RenderCommand *c, sscissor_rect_t *stack, in
     nt_gfx_set_scissor_enabled(true);
 
     /* Re-open sprite cmd so the next RECT/BORDER/IMAGE can emit. */
-    rebind_sprite_after_flush();
+    rebind_sprite_after_flush(ctx);
 }
 
-static void scissor_pop(sscissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
+static void scissor_pop(const nt_ui_context_t *ctx, sscissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
     NT_ASSERT(*depth > 0 && "scissor underflow");
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
@@ -458,7 +442,7 @@ static void scissor_pop(sscissor_rect_t *stack, int *depth, const nt_ui_target_t
         nt_gfx_set_scissor(r.x, fb_h - r.y - r.h, r.w, r.h);
     }
     /* Re-open sprite cmd so the next RECT/BORDER/IMAGE can emit. */
-    rebind_sprite_after_flush();
+    rebind_sprite_after_flush(ctx);
 }
 // #endregion
 
@@ -467,13 +451,13 @@ static void scissor_pop(sscissor_rect_t *stack, int *depth, const nt_ui_target_t
  * registered handler (NULL handler == silent skip). The handler may bind
  * its own pipeline; on return, we re-bind the sprite material so the next
  * RECT/BORDER/IMAGE has a live cmd. */
-static void emit_custom(const Clay_RenderCommand *c) {
+static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
-    if (g_nt_ui_custom_fn != NULL) {
-        g_nt_ui_custom_fn((const void *)c, g_nt_ui_custom_user);
+    if (ctx->custom_fn != NULL) {
+        ctx->custom_fn((const void *)c, ctx->custom_user);
     }
-    rebind_sprite_after_flush();
+    rebind_sprite_after_flush(ctx);
 }
 // #endregion
 
@@ -486,19 +470,18 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(ctx != NULL && "nt_ui_walk: ctx must be non-NULL");
     NT_ASSERT(target != NULL && "nt_ui_walk: target must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_walk: ctx is mid-frame (call nt_ui_end first)");
-    NT_ASSERT(g_nt_ui_atlas.id != 0 && "nt_ui_set_atlas_white_region required before nt_ui_walk");
-    NT_ASSERT(nt_resource_is_ready(g_nt_ui_atlas) && "nt_ui_walk: UI atlas must be READY");
+    NT_ASSERT(ctx->atlas.id != 0 && "nt_ui_set_atlas_white_region(ctx,...) required before nt_ui_walk");
+    NT_ASSERT(nt_resource_is_ready(ctx->atlas) && "nt_ui_walk: ctx atlas must be READY");
     /* Revision Issue 1: sprite + text materials are separate; assert BOTH. */
-    NT_ASSERT(g_nt_ui_sprite_material.id != 0 && "nt_ui_set_sprite_material required before nt_ui_walk");
-    NT_ASSERT(g_nt_ui_text_material.id != 0 && "nt_ui_set_text_material required before nt_ui_walk");
+    NT_ASSERT(ctx->sprite_material.id != 0 && "nt_ui_set_sprite_material(ctx,...) required before nt_ui_walk");
+    NT_ASSERT(ctx->text_material.id != 0 && "nt_ui_set_text_material(ctx,...) required before nt_ui_walk");
 
     /* Walker-local scissor stack -- D-52-17 (on C stack, NOT in ctx, so
      * multiple walks against the same ctx don't share state). */
     sscissor_rect_t scissor_stack[NT_UI_WALKER_MAX_SCISSOR_DEPTH];
     int depth = 0;
 
-    /* Snapshot draw-call counter for the delta (Plan 05 will route to
-     * nt_stats_count; Plan 04 captures into static module state). */
+    /* Snapshot draw-call counter for the delta -- routed to nt_stats below. */
     const uint32_t calls_at_entry = nt_gfx_get_frame_draw_calls();
 
     /* Apply viewport from target (UI-07). Bottom-left GL convention. */
@@ -510,7 +493,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* Revision Issue 1: bind SPRITE material for RECT/BORDER/IMAGE emits.
      * TEXT material binds lazily inside emit_text just before draw_n
      * (auto-flush handles the boundary). */
-    nt_sprite_renderer_set_material(g_nt_ui_sprite_material);
+    nt_sprite_renderer_set_material(ctx->sprite_material);
 
     /* Iterate Clay's frozen command array -- already zIndex-ascending sorted. */
     const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
@@ -518,15 +501,15 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
         switch (c->commandType) {
         case CLAY_RENDER_COMMAND_TYPE_NONE:
-            break; /* silent skip — Clay sentinel */
+            break; /* silent skip -- Clay sentinel */
         case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
             const Clay_RectangleRenderData *r = &c->renderData.rectangle;
             const uint32_t col = nt_color_pack_clay(r->backgroundColor);
-            emit_screen_rect(g_nt_ui_atlas, g_nt_ui_white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, col);
+            emit_screen_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, col);
             break;
         }
         case CLAY_RENDER_COMMAND_TYPE_BORDER:
-            emit_border(c);
+            emit_border(ctx, c);
             break;
         case CLAY_RENDER_COMMAND_TYPE_TEXT:
             emit_text(ctx, c);
@@ -535,13 +518,13 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
             emit_image(c);
             break;
         case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:
-            scissor_push(c, scissor_stack, &depth, target);
+            scissor_push(ctx, c, scissor_stack, &depth, target);
             break;
         case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
-            scissor_pop(scissor_stack, &depth, target);
+            scissor_pop(ctx, scissor_stack, &depth, target);
             break;
         case CLAY_RENDER_COMMAND_TYPE_CUSTOM:
-            emit_custom(c);
+            emit_custom(ctx, c);
             break;
         }
     }
@@ -552,9 +535,8 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(depth == 0 && "unbalanced scissor stack at walk exit");
     nt_gfx_set_scissor_enabled(false);
 
-    /* Stats (D-52-20 / WALK-09). Plan 04 captures the per-walk deltas
-     * into BSS for test probes; Plan 05 routes them through nt_stats so
-     * the overlay surfaces walker overhead alongside FPS/CPU/GPU/Draws.
+    /* Stats (D-52-20 / WALK-09). Counters live in ctx for the test probes;
+     * nt_stats_count routes them to the overlay alongside FPS/CPU/GPU/Draws.
      *
      * Guard against a CUSTOM handler resetting frame stats mid-walk:
      * unsigned wrap on (calls_after - calls_at_entry) would produce a
@@ -562,8 +544,8 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     const uint32_t calls_after = nt_gfx_get_frame_draw_calls();
     NT_ASSERT(calls_after >= calls_at_entry && "nt_ui_walk: frame draw-call counter went backwards (CUSTOM handler reset stats?)");
     const uint32_t delta = calls_after - calls_at_entry;
-    s_last_walk_draw_call_delta = delta;
-    s_last_walk_element_count = (uint32_t)arr->length;
+    ctx->last_walk_draw_call_delta = delta;
+    ctx->last_walk_element_count = (uint32_t)arr->length;
     nt_stats_count("ui_draw_calls", (uint64_t)delta);
     nt_stats_count("ui_element_count", (uint64_t)arr->length);
 }
@@ -581,30 +563,34 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
  * resolve material pipelines (nt_material_step happens elsewhere); the
  * sprite/text renderers' own set_material asserts material.ready when
  * actually consumed inside the walker. */
-void nt_ui_set_atlas_white_region(nt_resource_t atlas, uint32_t white_region_idx) {
+void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uint32_t white_region_idx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_set_atlas_white_region: ctx must be non-NULL");
     NT_ASSERT(atlas.id != 0 && "nt_ui_set_atlas_white_region: invalid atlas handle");
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_ui_set_atlas_white_region: atlas must be READY");
     const nt_texture_region_t *r = nt_atlas_get_region(atlas, white_region_idx);
     NT_ASSERT(r != NULL && r->vertex_count > 0u && "nt_ui_set_atlas_white_region: white region missing / tombstoned (mis-baked atlas)");
-    g_nt_ui_atlas = atlas;
-    g_nt_ui_white_region = white_region_idx;
+    ctx->atlas = atlas;
+    ctx->white_region = white_region_idx;
 }
 
-void nt_ui_set_sprite_material(nt_material_t sprite_material) {
+void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_material) {
+    NT_ASSERT(ctx != NULL && "nt_ui_set_sprite_material: ctx must be non-NULL");
     NT_ASSERT(sprite_material.id != 0 && "nt_ui_set_sprite_material: invalid material handle");
-    g_nt_ui_sprite_material = sprite_material;
+    ctx->sprite_material = sprite_material;
 }
 
-void nt_ui_set_text_material(nt_material_t text_material) {
+void nt_ui_set_text_material(nt_ui_context_t *ctx, nt_material_t text_material) {
+    NT_ASSERT(ctx != NULL && "nt_ui_set_text_material: ctx must be non-NULL");
     NT_ASSERT(text_material.id != 0 && "nt_ui_set_text_material: invalid material handle");
-    g_nt_ui_text_material = text_material;
+    ctx->text_material = text_material;
 }
 
-void nt_ui_set_custom_handler(nt_ui_custom_handler_t fn, void *userdata) {
+void nt_ui_set_custom_handler(nt_ui_context_t *ctx, nt_ui_custom_handler_t fn, void *userdata) {
+    NT_ASSERT(ctx != NULL && "nt_ui_set_custom_handler: ctx must be non-NULL");
     /* NULL fn is allowed -- D-52-09 says CUSTOM with no handler is a
      * silent skip (legitimate "reserved space" pattern). */
-    g_nt_ui_custom_fn = fn;
-    g_nt_ui_custom_user = userdata;
+    ctx->custom_fn = fn;
+    ctx->custom_user = userdata;
 }
 // #endregion
 
@@ -612,30 +598,33 @@ void nt_ui_set_custom_handler(nt_ui_custom_handler_t fn, void *userdata) {
 #ifdef NT_UI_TEST_ACCESS
 nt_ui_context_t *nt_ui_test_inframe_ctx(void) { return g_nt_ui_inframe_ctx; }
 
-/* Plan 04 captures the per-walk deltas; Plan 05 will route them to nt_stats. */
-uint32_t nt_ui_test_last_walk_draw_call_delta(void) { return s_last_walk_draw_call_delta; }
-uint32_t nt_ui_test_last_walk_element_count(void) { return s_last_walk_element_count; }
+uint32_t nt_ui_test_last_walk_draw_call_delta(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL);
+    return ctx->last_walk_draw_call_delta;
+}
+uint32_t nt_ui_test_last_walk_element_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL);
+    return ctx->last_walk_element_count;
+}
 
-/* Plan 04 probes: walker setter state introspection. Tests need these to
- * verify (a) reset semantics for walk_without_* death tests and (b) that
- * setters actually wrote what was passed in. */
-nt_resource_t nt_ui_test_atlas(void) { return g_nt_ui_atlas; }
-uint32_t nt_ui_test_white_region(void) { return g_nt_ui_white_region; }
-nt_material_t nt_ui_test_sprite_material(void) { return g_nt_ui_sprite_material; }
-nt_material_t nt_ui_test_text_material(void) { return g_nt_ui_text_material; }
-
-/* Plan 04 probe: clear all walker globals so death-tests can re-setUp from
- * scratch. Setter validation prevents writing back invalid values, so a
- * reset has to go through this probe. */
-void nt_ui_test_reset_walker_globals(void) {
-    g_nt_ui_atlas = (nt_resource_t){0};
-    g_nt_ui_white_region = 0u;
-    g_nt_ui_sprite_material = (nt_material_t){0};
-    g_nt_ui_text_material = (nt_material_t){0};
-    g_nt_ui_custom_fn = NULL;
-    g_nt_ui_custom_user = NULL;
-    s_last_walk_draw_call_delta = 0u;
-    s_last_walk_element_count = 0u;
+/* Walker setter introspection: verifies the per-context setters wrote what
+ * was passed in. "Setter not called before walk" death-tests simply create
+ * a fresh context (all fields zero-initialised) and walk -- no reset probe. */
+nt_resource_t nt_ui_test_atlas(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL);
+    return ctx->atlas;
+}
+uint32_t nt_ui_test_white_region(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL);
+    return ctx->white_region;
+}
+nt_material_t nt_ui_test_sprite_material(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL);
+    return ctx->sprite_material;
+}
+nt_material_t nt_ui_test_text_material(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL);
+    return ctx->text_material;
 }
 
 /* CLAY-04 / D-52-16 verification probes. ctx->clay is a Clay_Context whose

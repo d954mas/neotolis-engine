@@ -141,13 +141,13 @@ void setUp(void) {
     s_sprite_material = make_test_material();
     s_text_material = make_test_material();
 
-    nt_ui_set_atlas_white_region(s_atlas.handle, s_atlas.white_region_idx);
-    nt_ui_set_sprite_material(s_sprite_material);
-    nt_ui_set_text_material(s_text_material);
-    nt_ui_set_custom_handler(NULL, NULL);
-
     s_ctx = nt_ui_create_context(s_arena, sizeof s_arena);
     TEST_ASSERT_NOT_NULL(s_ctx);
+
+    nt_ui_set_atlas_white_region(s_ctx, s_atlas.handle, s_atlas.white_region_idx);
+    nt_ui_set_sprite_material(s_ctx, s_sprite_material);
+    nt_ui_set_text_material(s_ctx, s_text_material);
+    nt_ui_set_custom_handler(s_ctx, NULL, NULL);
 }
 
 void tearDown(void) {
@@ -155,7 +155,6 @@ void tearDown(void) {
         nt_ui_destroy_context(s_ctx);
         s_ctx = NULL;
     }
-    nt_ui_test_reset_walker_globals();
     minimal_ui_atlas_destroy(&s_atlas);
 
     nt_stats_shutdown();
@@ -197,7 +196,7 @@ static void test_dispatch_rectangle(void) {
     TEST_ASSERT_EQUAL_UINT32(4u, nt_sprite_renderer_test_last_emit_vertex_count());
     TEST_ASSERT_EQUAL_UINT32(6u, nt_sprite_renderer_test_last_emit_index_count());
     /* Walker element count delta matches frozen_cmds.length. */
-    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count());
+    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count(s_ctx));
 }
 
 /* WALK-04: BORDER with all 4 widths non-zero -- exactly 4 last_emit calls
@@ -256,7 +255,7 @@ static void test_dispatch_text(void) {
     TEST_ASSERT_EQUAL_UINT32(0u, nt_text_renderer_test_set_material_calls());
     TEST_ASSERT_EQUAL_UINT32(0u, nt_text_renderer_test_set_font_calls());
     /* Walker element count still ticks. */
-    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count());
+    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count(s_ctx));
 }
 
 /* WALK-01: IMAGE -> reads nt_ui_image_payload_t and emits one region. */
@@ -300,13 +299,13 @@ static void test_dispatch_scissor_start_end(void) {
 
     /* Walker MUST disable scissor at exit (CP-04). */
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
-    TEST_ASSERT_EQUAL_UINT32(2u, nt_ui_test_last_walk_element_count());
+    TEST_ASSERT_EQUAL_UINT32(2u, nt_ui_test_last_walk_element_count(s_ctx));
 }
 
 /* WALK-05: CUSTOM -> registered handler called with (cmd, userdata). */
 static void test_dispatch_custom(void) {
     int sentinel = 42;
-    nt_ui_set_custom_handler(test_custom_handler, &sentinel);
+    nt_ui_set_custom_handler(s_ctx, test_custom_handler, &sentinel);
 
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_CUSTOM;
@@ -331,13 +330,13 @@ static void test_dispatch_none_silent_skip(void) {
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
     nt_ui_walk(s_ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(0u, nt_ui_test_last_walk_element_count());
+    TEST_ASSERT_EQUAL_UINT32(0u, nt_ui_test_last_walk_element_count(s_ctx));
 
     /* Also test an explicit NONE command -- still no crash, still no emit. */
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_NONE;
     inject_frozen_cmds(1);
     nt_ui_walk(s_ctx, &target);
-    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count());
+    TEST_ASSERT_EQUAL_UINT32(1u, nt_ui_test_last_walk_element_count(s_ctx));
 }
 
 int main(void) {

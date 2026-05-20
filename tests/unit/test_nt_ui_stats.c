@@ -119,13 +119,13 @@ void setUp(void) {
     s_sprite_material = make_test_material();
     s_text_material = make_test_material();
 
-    nt_ui_set_atlas_white_region(s_atlas.handle, s_atlas.white_region_idx);
-    nt_ui_set_sprite_material(s_sprite_material);
-    nt_ui_set_text_material(s_text_material);
-    nt_ui_set_custom_handler(NULL, NULL);
-
     s_ctx = nt_ui_create_context(s_arena, sizeof s_arena);
     TEST_ASSERT_NOT_NULL(s_ctx);
+
+    nt_ui_set_atlas_white_region(s_ctx, s_atlas.handle, s_atlas.white_region_idx);
+    nt_ui_set_sprite_material(s_ctx, s_sprite_material);
+    nt_ui_set_text_material(s_ctx, s_text_material);
+    nt_ui_set_custom_handler(s_ctx, NULL, NULL);
 }
 
 void tearDown(void) {
@@ -133,7 +133,6 @@ void tearDown(void) {
         nt_ui_destroy_context(s_ctx);
         s_ctx = NULL;
     }
-    nt_ui_test_reset_walker_globals();
     minimal_ui_atlas_destroy(&s_atlas);
 
     nt_stats_shutdown();
@@ -171,7 +170,7 @@ static void test_ui_draw_calls_counter_set(void) {
     nt_ui_walk(s_ctx, &target);
 
     /* Per-walk delta probe: at least the walker-exit flush ticked one draw call. */
-    const uint32_t delta = nt_ui_test_last_walk_draw_call_delta();
+    const uint32_t delta = nt_ui_test_last_walk_draw_call_delta(s_ctx);
     TEST_ASSERT_GREATER_THAN_UINT32(0u, delta);
 
     /* nt_stats wiring: the counter must surface in format_lines. */
@@ -204,7 +203,7 @@ static void test_ui_element_count_counter_set(void) {
 
     /* Element count probe matches frozen_cmds.length exactly (no Clay
      * wrapper elements -- frozen_cmds is the injected synthetic array). */
-    TEST_ASSERT_EQUAL_UINT32(3u, nt_ui_test_last_walk_element_count());
+    TEST_ASSERT_EQUAL_UINT32(3u, nt_ui_test_last_walk_element_count(s_ctx));
 
     /* nt_stats wiring. */
     char buf[512];
@@ -228,14 +227,14 @@ static void test_counters_reset_per_walk(void) {
     nt_ui_target_t target = {.viewport = {0.0f, 0.0f, 800.0f, 600.0f}};
     nt_ui_walk(s_ctx, &target);
 
-    const uint32_t count1 = nt_ui_test_last_walk_element_count();
+    const uint32_t count1 = nt_ui_test_last_walk_element_count(s_ctx);
     TEST_ASSERT_EQUAL_UINT32(2u, count1);
 
     /* Second walk: empty command array. */
     inject_frozen_cmds(0);
     nt_ui_walk(s_ctx, &target);
 
-    const uint32_t count2 = nt_ui_test_last_walk_element_count();
+    const uint32_t count2 = nt_ui_test_last_walk_element_count(s_ctx);
     TEST_ASSERT_EQUAL_UINT32(0u, count2);
     TEST_ASSERT_NOT_EQUAL_MESSAGE(count1, count2, "second walk's element count must reflect the second declaration, not accumulate");
 
