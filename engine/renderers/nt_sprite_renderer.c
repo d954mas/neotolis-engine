@@ -532,8 +532,11 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
 // #endregion
 
 // #region emit_region
-/* One extra atlas lookup per call vs the ECS path -- acceptable for the
- * walker / debug-draw / gizmo use cases that have no SoA cache. */
+/* One bundled atlas lookup (vs 6 separate get_region/cached_pos/raw_vertices/
+ * indices/page_resource/ipu calls). Resolves the atlas user_data once and
+ * fills the handle struct -- no SoA cache like the ECS path, but the
+ * single-resolve form keeps the hot path tight enough for walker /
+ * debug-draw / gizmo use. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits) {
     NT_ASSERT(s_sprite.initialized);
@@ -542,18 +545,12 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_region: atlas must be READY");
     NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_emit_region: call nt_sprite_renderer_set_material first");
 
-    const nt_texture_region_t *r = nt_atlas_get_region(atlas, region_index);
-    if (r == NULL || r->vertex_count == 0U) {
+    nt_atlas_region_handles_t h;
+    nt_atlas_get_region_handles(atlas, region_index, &h);
+    if (h.region->vertex_count == 0U) {
         return; /* tombstone or out-of-range */
     }
-    const float(*cpos)[2] = nt_atlas_get_region_cached_pos(atlas, region_index);
-    const nt_atlas_vertex_t *vraw = nt_atlas_get_region_raw_vertices(atlas, region_index);
-    const uint16_t *idx = nt_atlas_get_region_indices(atlas, region_index);
-    nt_resource_t page_res = nt_atlas_get_page_resource(atlas, r->page_index);
-    uint32_t page_tex = nt_resource_get(page_res);
-    const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
-
-    emit_region_resolved(r, cpos, vraw, idx, page_tex, ipu, world_matrix, origin_x, origin_y, color_packed, flip_bits);
+    emit_region_resolved(h.region, h.cached_pos, h.raw_vertices, h.indices, nt_resource_get(h.page_resource), h.ipu, world_matrix, origin_x, origin_y, color_packed, flip_bits);
 }
 // #endregion
 

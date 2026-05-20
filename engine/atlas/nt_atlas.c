@@ -707,6 +707,24 @@ const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region
     NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_indices: region_index out of range");
     return &ad->indices[ad->regions[region_index].index_start];
 }
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_atlas_region_handles_t *out) {
+    NT_ASSERT(out != NULL && "nt_atlas_get_region_handles: out must be non-NULL");
+    NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_get_region_handles: handle is not an atlas resource");
+    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
+    NT_ASSERT(ad != NULL && "nt_atlas_get_region_handles on unresolved atlas");
+    NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_handles: region_index out of range");
+    NT_ASSERT(ad->ipu > 0.0F && "atlas ipu must be set by atlas_on_post_resolve");
+
+    const nt_texture_region_t *r = &ad->regions[region_index];
+    out->region = r;
+    out->cached_pos = (const float(*)[2]) & ad->cached_pos[r->vertex_start];
+    out->raw_vertices = &ad->vertices[r->vertex_start];
+    out->indices = &ad->indices[r->index_start];
+    out->page_resource = ad->page_resources[r->page_index];
+    out->ipu = ad->ipu;
+}
 // #endregion
 // #endregion
 

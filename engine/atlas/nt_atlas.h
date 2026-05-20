@@ -107,6 +107,22 @@ const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t regio
 const nt_atlas_vertex_t *nt_atlas_get_region_raw_vertices(nt_resource_t atlas, uint32_t region_index);
 const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region_index);
 
+/* Bundle accessor: every pointer a sprite-emit caller needs in one struct,
+ * fetched by one resolve + one region lookup. Equivalent to calling
+ * get_region + get_region_cached_pos + get_region_raw_vertices +
+ * get_region_indices + get_page_resource + get_inverse_pixels_per_unit
+ * individually, but does the atlas-data resolve once instead of six times. */
+typedef struct {
+    const nt_texture_region_t *region;
+    const float (*cached_pos)[2];
+    const nt_atlas_vertex_t *raw_vertices;
+    const uint16_t *indices;
+    nt_resource_t page_resource;
+    float ipu;
+} nt_atlas_region_handles_t;
+
+void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_atlas_region_handles_t *out);
+
 /* ---- Test access (compiled only when NT_ATLAS_TEST_ACCESS is defined) ---- */
 
 #ifdef NT_ATLAS_TEST_ACCESS
