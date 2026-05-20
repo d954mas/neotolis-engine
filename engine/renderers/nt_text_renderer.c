@@ -44,7 +44,7 @@ static struct {
 
     bool initialized;
 
-#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
     /* Count every set_material / set_font entry regardless of early-out so
      * nt_stats tests can prove explicit calls. */
     uint32_t test_set_material_calls;
@@ -193,7 +193,7 @@ void nt_text_renderer_restore_gpu(void) {
 // #region State setters
 void nt_text_renderer_set_material(nt_material_t mat) {
     NT_ASSERT(s_text.initialized);
-#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
     s_text.test_set_material_calls++;
 #endif
     if (s_text.material.id == mat.id) {
@@ -212,7 +212,7 @@ void nt_text_renderer_set_material(nt_material_t mat) {
 
 void nt_text_renderer_set_font(nt_font_t font) {
     NT_ASSERT(s_text.initialized);
-#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
     s_text.test_set_font_calls++;
 #endif
     if (s_text.font.id == font.id) {
@@ -433,7 +433,7 @@ void nt_text_renderer_flush(void) {
 // #endregion
 
 // #region Test accessors
-#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 uint32_t nt_text_renderer_test_vertex_count(void) { return s_text.vertex_count; }
 uint32_t nt_text_renderer_test_glyph_count(void) { return s_text.glyph_count; }
 const void *nt_text_renderer_test_vertices(void) { return s_text.vertices; }

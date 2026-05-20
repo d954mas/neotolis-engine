@@ -100,14 +100,14 @@ bool nt_gfx_backend_is_gpu_timing_supported(void);
 void nt_gfx_backend_drop_timer_segments(void);
 // #endregion
 
-#ifdef NT_GFX_STUB_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 /* Stub-only test hooks: inspect and reset bind_sampler observations. */
 uint32_t nt_gfx_stub_test_last_sampler(uint32_t slot);
 uint32_t nt_gfx_stub_test_bind_sampler_count(void);
 void nt_gfx_stub_test_reset(void);
 #endif
 
-#ifdef NT_GFX_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 /* Real-backend test hook: inspect a sampler's GPU backend handle from the
  * dedup cache. Distinct from STUB_TEST_ACCESS — works against the real GL
  * (or any non-stub) backend, so a test running with the real backend can

@@ -1,4 +1,4 @@
-/* Scissor and viewport API round-trip via NT_GFX_TEST_ACCESS probes. */
+/* Scissor and viewport API round-trip via NT_TEST_ACCESS probes. */
 
 #include <stdbool.h>
 #include <stdint.h>

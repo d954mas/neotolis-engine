@@ -1,11 +1,11 @@
 #include "test_helpers/ui_walker_fixture.h"
 
 /* The fixture body is only compiled into test binaries that opt into
- * nt_ui (NT_UI_TEST_ACCESS). Other test binaries -- notably
+ * nt_ui (NT_TEST_ACCESS). Other test binaries -- notably
  * test_nt_sprite_renderer_emit_region, which lives in the same helper
  * sources list but does NOT link nt_ui -- get an empty TU and avoid
  * the unresolved nt_ui_create_context / nt_ui_set_* symbols. */
-#ifdef NT_UI_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 
 #include <stddef.h>
 #include <stdint.h>
@@ -134,4 +134,4 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
     nt_hash_shutdown();
 }
 
-#endif /* NT_UI_TEST_ACCESS */
+#endif /* NT_TEST_ACCESS */

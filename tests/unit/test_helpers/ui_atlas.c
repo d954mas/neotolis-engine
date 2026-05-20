@@ -6,8 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef NT_ATLAS_TEST_ACCESS
-#define NT_ATLAS_TEST_ACCESS 1
+#ifndef NT_TEST_ACCESS
+#define NT_TEST_ACCESS 1
 #endif
 #include "atlas/nt_atlas.h"
 #include "core/nt_assert.h"

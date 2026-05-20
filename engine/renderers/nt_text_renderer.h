@@ -32,7 +32,8 @@ void nt_text_renderer_draw(const char *utf8, const float model[16], float size, 
 
 void nt_text_renderer_flush(void);
 
-#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+// #region test_access
+#ifdef NT_TEST_ACCESS
 uint32_t nt_text_renderer_test_vertex_count(void);
 uint32_t nt_text_renderer_test_glyph_count(void);
 const void *nt_text_renderer_test_vertices(void);
@@ -43,5 +44,6 @@ uint32_t nt_text_renderer_test_set_material_calls(void);
 uint32_t nt_text_renderer_test_set_font_calls(void);
 void nt_text_renderer_test_reset_call_counters(void);
 #endif
+// #endregion
 
 #endif /* NT_TEXT_RENDERER_H */

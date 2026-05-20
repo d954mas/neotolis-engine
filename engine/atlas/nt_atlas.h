@@ -123,9 +123,8 @@ typedef struct {
 
 void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_atlas_region_handles_t *out);
 
-/* ---- Test access (compiled only when NT_ATLAS_TEST_ACCESS is defined) ---- */
-
-#ifdef NT_ATLAS_TEST_ACCESS
+// #region test_access
+#ifdef NT_TEST_ACCESS
 
 /* Opaque forward declaration — the real nt_atlas_data_t lives in nt_atlas.c.
  * Tests poke at it via the raw-access helpers below, without needing a full
@@ -182,6 +181,7 @@ float nt_atlas_test_ipu(const struct nt_atlas_data *ad);
  * post_resolve metadata read path without standing up a resource system. */
 void nt_atlas_test_set_ipu_and_recompute(struct nt_atlas_data *ad, float ipu);
 
-#endif /* NT_ATLAS_TEST_ACCESS */
+#endif
+// #endregion
 
 #endif /* NT_ATLAS_H */

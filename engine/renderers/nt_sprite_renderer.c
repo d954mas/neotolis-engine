@@ -67,7 +67,7 @@ static struct {
      * .id change. The ECS draw_list path does NOT touch this -- it
      * opens/closes cmds per batch_key directly. */
     nt_material_t current_mat;
-#ifdef NT_SPRITE_RENDERER_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
     /* Captured before flush resets vertex_count, so tests can read back
      * what the last emit wrote (positions via last_emit_first_vertex). */
     uint32_t last_emit_vertex_count;
@@ -476,7 +476,7 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
     }
     s_sprite.index_count += r->index_count;
 
-#ifdef NT_SPRITE_RENDERER_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
     /* Capture per-emit counts + first-vertex offset so tests can read
      * back emitted positions after draw_list completes (flush resets
      * vertex_count but leaves the array data intact). */
@@ -712,7 +712,7 @@ void nt_sprite_renderer_flush(void) {
 // #endregion
 
 // #region test accessors
-#ifdef NT_SPRITE_RENDERER_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void) { return s_sprite.count; }
 uint32_t nt_sprite_renderer_test_draw_call_count(void) { return s_sprite.last_draw_list_calls; }
 uint32_t nt_sprite_renderer_test_vertex_count(void) { return s_sprite.vertex_count; }

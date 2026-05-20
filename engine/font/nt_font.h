@@ -133,7 +133,8 @@ void nt_font_set_pre_flush_callback(nt_font_pre_flush_fn fn);
 
 int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right_codepoint);
 
-#ifdef NT_FONT_TEST_ACCESS
+// #region test_access
+#ifdef NT_TEST_ACCESS
 uint32_t nt_font_test_register_data(const uint8_t *data, uint32_t size);
 
 /* Imitate the FILE-pack deactivator path (skipped for VIRTUAL packs). */
@@ -143,5 +144,6 @@ uint32_t nt_font_test_measure_cache_hits(nt_font_t font);
 uint32_t nt_font_test_measure_cache_misses(nt_font_t font);
 void nt_font_test_reset_measure_counters(void);
 #endif
+// #endregion
 
 #endif /* NT_FONT_H */

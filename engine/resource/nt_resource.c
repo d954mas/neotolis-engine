@@ -1506,7 +1506,7 @@ void nt_resource_dump_pack(nt_hash32_t pack_id) {
 
 /* ---- Test access (test-only) ---- */
 
-#ifdef NT_RESOURCE_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 
 void nt_resource_test_set_asset_state(nt_hash64_t resource_id, uint16_t pack_index, uint8_t state, uint32_t runtime_handle) {
     for (uint32_t i = 0; i < s_resource.asset_hwm; i++) {
@@ -1519,4 +1519,4 @@ void nt_resource_test_set_asset_state(nt_hash64_t resource_id, uint16_t pack_ind
     }
 }
 
-#endif /* NT_RESOURCE_TEST_ACCESS */
+#endif /* NT_TEST_ACCESS */

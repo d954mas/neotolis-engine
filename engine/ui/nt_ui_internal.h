@@ -3,7 +3,7 @@
 
 /*
  * Concrete struct nt_ui_context layout. The public header forward-declares
- * the type as opaque; only nt_ui.c and NT_UI_TEST_ACCESS test TUs see this.
+ * the type as opaque; only nt_ui.c and NT_TEST_ACCESS test TUs see this.
  */
 
 #include <stdbool.h>

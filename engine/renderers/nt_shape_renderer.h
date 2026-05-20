@@ -104,9 +104,8 @@ void nt_shape_renderer_capsule_wire_rot(const float center[3], float radius, flo
 void nt_shape_renderer_mesh(const float *positions, uint32_t num_vertices, const nt_shape_index_t *indices, uint32_t num_indices, const float color[4]);
 void nt_shape_renderer_mesh_wire(const float *positions, uint32_t num_vertices, const nt_shape_index_t *indices, uint32_t num_indices, const float color[4]);
 
-/* ---- Test accessors (test builds only) ---- */
-
-#ifdef NT_SHAPE_RENDERER_TEST_ACCESS
+// #region test_access
+#ifdef NT_TEST_ACCESS
 
 /* Instanced shape types (for test_instance_count) */
 enum {
@@ -126,5 +125,6 @@ const float *nt_shape_renderer_test_cam_pos(void);
 float nt_shape_renderer_test_line_width(void);
 bool nt_shape_renderer_test_initialized(void);
 #endif
+// #endregion
 
 #endif /* NT_SHAPE_RENDERER_H */

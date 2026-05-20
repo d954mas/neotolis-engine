@@ -729,7 +729,7 @@ void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_
 // #endregion
 
 // #region test access
-#ifdef NT_ATLAS_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 
 const struct nt_atlas_data *nt_atlas_test_get_data(nt_resource_t atlas) { return (const nt_atlas_data_t *)nt_resource_get_user_data(atlas); }
 
@@ -826,5 +826,5 @@ void nt_atlas_test_set_ipu_and_recompute(struct nt_atlas_data *ad, float ipu) {
     atlas_precompute_all(ad);
 }
 
-#endif /* NT_ATLAS_TEST_ACCESS */
+#endif /* NT_TEST_ACCESS */
 // #endregion

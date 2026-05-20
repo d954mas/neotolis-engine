@@ -23,11 +23,13 @@ void nt_mesh_renderer_restore_gpu(void);
  * the items array. */
 void nt_mesh_renderer_draw_list(const nt_render_item_t *items, uint32_t count);
 
-#ifdef NT_MESH_RENDERER_TEST_ACCESS
+// #region test_access
+#ifdef NT_TEST_ACCESS
 uint32_t nt_mesh_renderer_test_pipeline_cache_count(void);
 uint32_t nt_mesh_renderer_test_draw_call_count(void);
 uint32_t nt_mesh_renderer_test_instance_total(void);
 #endif
+// #endregion
 
 /* Stream type → vertex format mapping (used by pipeline builder, testable) */
 nt_vertex_format_t nt_stream_to_vertex_format(uint8_t type, uint8_t count, uint8_t normalized);

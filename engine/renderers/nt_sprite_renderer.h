@@ -103,9 +103,8 @@ void nt_sprite_renderer_set_material(nt_material_t mat);
  * overflow is handled internally (auto flush + reopen, state preserved). */
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits);
 
-/* ---- Test access (compiled only when NT_SPRITE_RENDERER_TEST_ACCESS is defined) ---- */
-
-#ifdef NT_SPRITE_RENDERER_TEST_ACCESS
+// #region test_access
+#ifdef NT_TEST_ACCESS
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
 /* Per-renderer test counter (separate from nt_gfx_get_frame_draw_calls). */
 uint32_t nt_sprite_renderer_test_draw_call_count(void);
@@ -121,5 +120,6 @@ uint32_t nt_sprite_renderer_test_last_emit_index_count(void);
 void nt_sprite_renderer_test_last_emit_position(uint32_t v_idx, float out[3]);
 bool nt_sprite_renderer_test_initialized(void);
 #endif
+// #endregion
 
 #endif /* NT_SPRITE_RENDERER_H */

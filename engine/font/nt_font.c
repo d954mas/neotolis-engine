@@ -1648,13 +1648,13 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
      * across all entries, so 8 adjacent slots' header data fits in one
      * cache line. values[] is only touched on a confirmed hit. */
     if (cache_enabled && slot->measure_cache.valid[slot_index] && slot->measure_cache.key_hashes[slot_index] == key_hash && slot->measure_cache.size_bits[slot_index] == size_bits) {
-#ifdef NT_FONT_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
         slot->test_measure_cache_hits++;
 #endif
         return slot->measure_cache.values[slot_index];
     }
 
-#ifdef NT_FONT_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
     if (cache_enabled) {
         slot->test_measure_cache_misses++;
     }
@@ -1786,7 +1786,7 @@ void nt_font_measure_invalidate(nt_font_t font) {
 
 /* ---- Test-only: register font data for headless testing ---- */
 
-#ifdef NT_FONT_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 uint32_t nt_font_test_register_data(const uint8_t *data, uint32_t size) { return activate_font(data, size); }
 
 void nt_font_test_deactivate(uint32_t runtime_handle) { deactivate_font(runtime_handle); }

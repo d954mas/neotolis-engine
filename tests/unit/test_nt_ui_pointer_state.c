@@ -48,7 +48,7 @@ static void test_pointer_state_set_from_nt_pointer(void) {
 
     nt_ui_begin(ctx, 800.0F, 600.0F, &mouse);
 
-    /* Probe Clay's pointer state via NT_UI_TEST_ACCESS getters. */
+    /* Probe Clay's pointer state via NT_TEST_ACCESS getters. */
     TEST_ASSERT_TRUE(float_eq_bits(100.0F, nt_ui_test_clay_pointer_x(ctx)));
     TEST_ASSERT_TRUE(float_eq_bits(200.0F, nt_ui_test_clay_pointer_y(ctx)));
     TEST_ASSERT_EQUAL_INT(1, nt_ui_test_clay_pointer_down(ctx));

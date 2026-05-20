@@ -146,7 +146,8 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_element_count(const nt_ui_context_t *ctx);
 
-#ifdef NT_UI_TEST_ACCESS
+// #region test_access
+#ifdef NT_TEST_ACCESS
 nt_ui_context_t *nt_ui_test_inframe_ctx(void);
 
 /* Clay_Context isn't visible outside the nt_ui TU, so tests need these
@@ -160,5 +161,6 @@ uint32_t nt_ui_test_white_region(const nt_ui_context_t *ctx);
 nt_material_t nt_ui_test_sprite_material(const nt_ui_context_t *ctx);
 nt_material_t nt_ui_test_text_material(const nt_ui_context_t *ctx);
 #endif
+// #endregion
 
 #endif /* NT_UI_H */

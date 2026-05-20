@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* NT_ATLAS_TEST_ACCESS is provided by the CMake target. */
+/* NT_TEST_ACCESS is provided by the CMake target. */
 
 /* clang-format off */
 #include "atlas/nt_atlas.h"

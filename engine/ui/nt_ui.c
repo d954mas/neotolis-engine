@@ -603,7 +603,7 @@ uint32_t nt_ui_get_last_walk_element_count(const nt_ui_context_t *ctx) {
 // #endregion
 
 // #region test_access
-#ifdef NT_UI_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 nt_ui_context_t *nt_ui_test_inframe_ctx(void) { return g_nt_ui_inframe_ctx; }
 
 nt_resource_t nt_ui_test_atlas(const nt_ui_context_t *ctx) {

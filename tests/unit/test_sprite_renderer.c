@@ -6,7 +6,7 @@
 #include <string.h>
 
 /* clang-format off */
-/* NT_SPRITE_RENDERER_TEST_ACCESS / NT_ATLAS_TEST_ACCESS provided via CMake */
+/* NT_TEST_ACCESS / NT_TEST_ACCESS provided via CMake */
 #include "atlas/nt_atlas.h"
 #include "drawable_comp/nt_drawable_comp.h"
 #include "entity/nt_entity.h"
