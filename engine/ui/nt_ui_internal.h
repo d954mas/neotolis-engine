@@ -37,8 +37,6 @@ struct nt_ui_context {
     nt_font_t fonts[NT_UI_MAX_FONTS];
 
     Clay_Arena clay_arena;
-    void *arena_base;
-    size_t arena_size;
 };
 
 #endif /* NT_UI_INTERNAL_H */

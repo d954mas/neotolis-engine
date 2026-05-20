@@ -115,8 +115,6 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size) {
     void *clay_mem = (char *)arena + ctx_size;
     const size_t clay_size = arena_size - ctx_size;
 
-    ctx->arena_base = arena;
-    ctx->arena_size = arena_size;
     ctx->in_frame = false;
     ctx->clay_arena = Clay_CreateArenaWithCapacityAndMemory(clay_size, clay_mem);
     ctx->clay = Clay_Initialize(ctx->clay_arena, (Clay_Dimensions){.width = 1.0F, .height = 1.0F}, (Clay_ErrorHandler){.errorHandlerFunction = nt_ui_clay_error_cb, .userData = ctx});
@@ -245,25 +243,30 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c)
 /* IMAGE uses the PAYLOAD's atlas, not ctx->atlas (the latter is for
  * RECT/BORDER's white region). Different atlas pages auto-flush via the
  * sprite renderer's ensure_current_cmd_page_texture path. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_image(const Clay_RenderCommand *c) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
-    if (p == NULL) {
-        return; /* Clay does not enforce non-NULL imageData */
-    }
-
-    /* id == 0 is a caller bug. not-READY is a legitimate transient state
-     * (async load), so silently skip this frame -- next frame will draw. */
+    NT_ASSERT(p != NULL && "nt_ui IMAGE: imageData must point to nt_ui_image_payload_t");
     NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle (zero id)");
+    /* Reserved field -- caller writing into it indicates a feature
+     * expectation we don't yet meet. Assert until slice9 emit lands. */
+    NT_ASSERT(p->slice9_lrtb[0] == 0 && p->slice9_lrtb[1] == 0 && p->slice9_lrtb[2] == 0 && p->slice9_lrtb[3] == 0 && "nt_ui IMAGE payload: slice9_lrtb is reserved");
+
+    /* Async-loading atlas is a legitimate runtime state -- skip this
+     * frame, next frame will draw. */
     if (!nt_resource_is_ready(p->atlas)) {
         return;
     }
 
     const Clay_BoundingBox bb = c->boundingBox;
 
-    /* Clay default backgroundColor for IMAGE is {0,0,0,0} == untinted. Map
-     * to 0xFFFFFFFF so the per-vertex tint multiply is a no-op. */
+    /* Clay's IMAGE default backgroundColor is {0,0,0,0}. Caller intent is
+     * "untinted" (the default-constructed Clay struct), not "draw nothing".
+     * Distinguishing on alpha==0 alone keeps legitimate transparent tints
+     * (e.g. {0,0,0,128} half-alpha black) working as expected. */
     Clay_Color tint = c->renderData.image.backgroundColor;
-    const uint32_t col = (tint.r == 0.0F && tint.g == 0.0F && tint.b == 0.0F && tint.a == 0.0F) ? 0xFFFFFFFFU : nt_color_pack_clay(tint);
+    const bool default_untinted = (tint.r == 0.0F && tint.g == 0.0F && tint.b == 0.0F && tint.a == 0.0F);
+    const uint32_t col = default_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(tint);
 
     const nt_texture_region_t *r = nt_atlas_get_region(p->atlas, p->region_index);
     if (r == NULL || r->vertex_count == 0U) {
@@ -295,11 +298,21 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
 
     const Clay_TextRenderData *t = &c->renderData.text;
     if ((uint32_t)t->fontId >= NT_UI_MAX_FONTS) {
+        static bool warned = false;
+        if (!warned) {
+            NT_LOG_WARN("nt_ui TEXT: fontId %u >= NT_UI_MAX_FONTS=%u; skipping (further occurrences silenced)", (unsigned)t->fontId, (unsigned)NT_UI_MAX_FONTS);
+            warned = true;
+        }
         rebind_sprite_after_flush(ctx);
         return;
     }
     nt_font_t font = ctx->fonts[t->fontId];
     if (!nt_font_valid(font)) {
+        static bool warned_invalid = false;
+        if (!warned_invalid) {
+            NT_LOG_WARN("nt_ui TEXT: fontId %u resolves to an invalid font handle; skipping (further occurrences silenced)", (unsigned)t->fontId);
+            warned_invalid = true;
+        }
         rebind_sprite_after_flush(ctx);
         return;
     }
@@ -457,6 +470,12 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(ctx != NULL && "nt_ui_walk: ctx must be non-NULL");
     NT_ASSERT(target != NULL && "nt_ui_walk: target must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_walk: ctx is mid-frame (call nt_ui_end first)");
+    /* Catch the create -> walk shortcut: frozen_cmds is zero-init'd until
+     * nt_ui_end populates it. Without this, the loop is a silent no-op. */
+    NT_ASSERT((ctx->frozen_cmds.internalArray != NULL || ctx->frozen_cmds.length == 0) && "nt_ui_walk: frozen_cmds not populated (call nt_ui_end before walk)");
+    /* Viewport must be non-negative -- the cast to int below would
+     * otherwise turn NaN / -inf into garbage GL state. */
+    NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport must be non-negative");
     NT_ASSERT(ctx->atlas.id != 0 && "nt_ui_set_atlas_white_region(ctx,...) required before nt_ui_walk");
     NT_ASSERT(nt_resource_is_ready(ctx->atlas) && "nt_ui_walk: ctx atlas must be READY");
     NT_ASSERT(ctx->sprite_material.id != 0 && "nt_ui_set_sprite_material(ctx,...) required before nt_ui_walk");
@@ -516,6 +535,10 @@ void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uin
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_ui_set_atlas_white_region: atlas must be READY");
     const nt_texture_region_t *r = nt_atlas_get_region(atlas, white_region_idx);
     NT_ASSERT(r != NULL && r->vertex_count > 0U && "nt_ui_set_atlas_white_region: white region missing / tombstoned (mis-baked atlas)");
+    /* emit_screen_rect assumes a unit-square white region so that its
+     * mat4(scale=w,h; translate=x,y) maps cached_pos {0,1}x{0,1} directly
+     * onto the target rect. A non-unit region would mis-scale RECT/BORDER. */
+    NT_ASSERT(r->source_w == 1 && r->source_h == 1 && "nt_ui_set_atlas_white_region: white region must be 1x1 source");
     ctx->atlas = atlas;
     ctx->white_region = white_region_idx;
 }
