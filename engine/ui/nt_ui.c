@@ -145,6 +145,11 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_pointer_t *mouse) {
     NT_ASSERT(ctx != NULL && "nt_ui_begin: ctx must be non-NULL");
     NT_ASSERT(mouse != NULL && "nt_ui_begin: mouse must be non-NULL");
+    /* Layout dimensions go straight into Clay; NaN / -inf / negative would
+     * silently corrupt layout calculations downstream. Match the boundary
+     * check nt_ui_walk applies to target->viewport. */
+    NT_ASSERT(screen_w >= 0.0F && screen_w == screen_w && "nt_ui_begin: screen_w must be finite and non-negative");
+    NT_ASSERT(screen_h >= 0.0F && screen_h == screen_h && "nt_ui_begin: screen_h must be finite and non-negative");
     NT_ASSERT(g_nt_ui_inframe_ctx == NULL && "nt_ui_begin: another ctx is mid-frame");
     NT_ASSERT(!ctx->in_frame && "nt_ui_begin: ctx already in_frame");
 
@@ -224,17 +229,29 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c)
     const nt_resource_t atlas = ctx->atlas;
     const uint32_t wr = ctx->white_region;
 
+    /* Clay's BorderWidth fields are uint16_t and unvalidated -- caller could
+     * set top+bottom > bbox.height (or left+right > bbox.width) and the
+     * left/right edge geometry below would emit a negative-height rect.
+     * Fail early on that contract violation rather than feeding garbage to
+     * the sprite renderer. */
+    const float _top = (float)b->width.top;
+    const float _bot = (float)b->width.bottom;
+    const float _lft = (float)b->width.left;
+    const float _rgt = (float)b->width.right;
+    NT_ASSERT(_top + _bot <= bb.height && "nt_ui BORDER: top+bottom widths exceed bbox.height");
+    NT_ASSERT(_lft + _rgt <= bb.width && "nt_ui BORDER: left+right widths exceed bbox.width");
+
     if (b->width.top) {
-        emit_screen_rect(atlas, wr, bb.x, bb.y, bb.width, (float)b->width.top, col);
+        emit_screen_rect(atlas, wr, bb.x, bb.y, bb.width, _top, col);
     }
     if (b->width.bottom) {
-        emit_screen_rect(atlas, wr, bb.x, bb.y + bb.height - (float)b->width.bottom, bb.width, (float)b->width.bottom, col);
+        emit_screen_rect(atlas, wr, bb.x, bb.y + bb.height - _bot, bb.width, _bot, col);
     }
     if (b->width.left) {
-        emit_screen_rect(atlas, wr, bb.x, bb.y + (float)b->width.top, (float)b->width.left, bb.height - (float)b->width.top - (float)b->width.bottom, col);
+        emit_screen_rect(atlas, wr, bb.x, bb.y + _top, _lft, bb.height - _top - _bot, col);
     }
     if (b->width.right) {
-        emit_screen_rect(atlas, wr, bb.x + bb.width - (float)b->width.right, bb.y + (float)b->width.top, (float)b->width.right, bb.height - (float)b->width.top - (float)b->width.bottom, col);
+        emit_screen_rect(atlas, wr, bb.x + bb.width - _rgt, bb.y + _top, _rgt, bb.height - _top - _bot, col);
     }
 }
 // #endregion
@@ -497,12 +514,18 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* Viewport must be non-negative -- the cast to int below would
      * otherwise turn NaN / -inf into garbage GL state. */
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport must be non-negative");
-    /* projection is reserved -- caller MUST keep it all-zero. The walker
-     * does not consume it; if Phase 5x grows the walker to upload Globals
-     * UBO from this field, callers writing into it expecting "old"
-     * behaviour would silently get the wrong projection. */
-    NT_ASSERT(target->projection[0] == 0.0F && target->projection[5] == 0.0F && target->projection[10] == 0.0F && target->projection[15] == 0.0F &&
-              "nt_ui_walk: target->projection is reserved -- must be all-zero (caller owns Globals UBO)");
+    /* projection is reserved -- caller MUST keep ALL 16 floats zero. The
+     * walker does not consume the field; if a later phase grows the walker
+     * to upload Globals UBO from it, callers who wrote non-zero off-diagonal
+     * values expecting "old" behaviour would silently get the wrong matrix. */
+    bool _projection_all_zero = true;
+    for (int _pi = 0; _pi < 16; ++_pi) {
+        if (target->projection[_pi] != 0.0F) {
+            _projection_all_zero = false;
+            break;
+        }
+    }
+    NT_ASSERT(_projection_all_zero && "nt_ui_walk: target->projection is reserved -- must be all-zero (caller owns Globals UBO)");
     NT_ASSERT(ctx->atlas.id != 0 && "nt_ui_set_atlas_white_region(ctx,...) required before nt_ui_walk");
     NT_ASSERT(nt_resource_is_ready(ctx->atlas) && "nt_ui_walk: ctx atlas must be READY");
     NT_ASSERT(ctx->sprite_material.id != 0 && "nt_ui_set_sprite_material(ctx,...) required before nt_ui_walk");
