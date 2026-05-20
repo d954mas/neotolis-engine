@@ -30,21 +30,20 @@ SYSTEM_DEPS=(
 )
 
 EXTRA_ARGS=""
-RCT_ARGS=""
 for dep in "${SYSTEM_DEPS[@]}"; do
     EXTRA_ARGS+=" --extra-arg=-isystem$dep"
-    RCT_ARGS+=" -extra-arg=-isystem$dep"
 done
 
-# Capture output, filter deps noise, then check for project errors
+# Always invoke clang-tidy directly. The LLVM run-clang-tidy Python wrapper
+# silently swallows diagnostics on Windows + LLVM 19, causing the script to
+# report PASS while real errors exist. Direct per-file invocation surfaces
+# errors reliably; parallelism via xargs -P keeps wall time comparable.
 TIDY_OUTPUT=$(mktemp)
 TIDY_RC=0
 
-if command -v run-clang-tidy &>/dev/null && command -v python3 &>/dev/null; then
-    echo "$SOURCES" | xargs run-clang-tidy -p "$BUILD_DIR" $RCT_ARGS > "$TIDY_OUTPUT" 2>&1 || TIDY_RC=$?
-else
-    echo "$SOURCES" | xargs clang-tidy -p "$BUILD_DIR" $EXTRA_ARGS > "$TIDY_OUTPUT" 2>&1 || TIDY_RC=$?
-fi
+PARALLEL_JOBS="${TIDY_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+
+echo "$SOURCES" | tr ' ' '\n' | xargs -n 1 -P "$PARALLEL_JOBS" clang-tidy -p "$BUILD_DIR" $EXTRA_ARGS > "$TIDY_OUTPUT" 2>&1 || TIDY_RC=$?
 
 # Filter: show only errors from project files, not vendored deps
 PROJECT_ERRORS=$(grep "error:" "$TIDY_OUTPUT" | grep -v "deps/" || true)
