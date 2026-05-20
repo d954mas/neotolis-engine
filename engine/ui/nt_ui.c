@@ -489,7 +489,19 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     sscissor_rect_t scissor_stack[NT_UI_WALKER_MAX_SCISSOR_DEPTH];
     int depth = 0;
 
-    /* Snapshot draw-call counter for the delta -- routed to nt_stats below. */
+    /* Entry boundary: drain any caller-side pending geometry BEFORE we
+     * mutate viewport / scissor state. Otherwise pending sprite or text
+     * staging produced under the caller's prior viewport would be flushed
+     * later (inside the walker or at the next caller flush) under our UI
+     * viewport, drawing the wrong pixels at the wrong place. Cheap when
+     * the renderers are already drained -- both flushes early-out on
+     * empty staging. */
+    nt_sprite_renderer_flush();
+    nt_text_renderer_flush();
+
+    /* Snapshot draw-call counter for the delta -- routed to nt_stats below.
+     * Snapshot AFTER the entry flushes so the delta reflects only walk
+     * work, not the caller's drained pending geometry. */
     const uint32_t calls_at_entry = nt_gfx_get_frame_draw_calls();
 
     /* Apply viewport from target (UI-07). Bottom-left GL convention. */
