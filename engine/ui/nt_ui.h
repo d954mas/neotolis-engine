@@ -4,6 +4,23 @@
 /*
  * nt_ui -- Immediate-mode UI module built atop Clay v0.14.
  *
+ * Engine dependencies. nt_ui_walk transitively calls into nt_gfx (viewport
+ * + scissor), nt_sprite_renderer + nt_text_renderer (geometry emit), and
+ * nt_stats (per-walk ui_draw_calls / ui_element_count counters). All of
+ * these must be init'd by the application BEFORE any nt_ui_walk:
+ *
+ *     nt_gfx_init(...);
+ *     nt_resource_init(...);
+ *     nt_atlas_init();
+ *     nt_font_init(...);
+ *     nt_material_init(...);
+ *     nt_sprite_renderer_init(...);
+ *     nt_text_renderer_init();
+ *     nt_stats_init(NULL);       // walker pushes counters every walk
+ *
+ * The walker doesn't init these itself -- the application drives the
+ * full engine lifecycle and is responsible for the order.
+ *
  * Frame lifecycle (Phase 52):
  *
  *   1) Once at boot, per context:
@@ -171,7 +188,10 @@ void nt_ui_end(nt_ui_context_t *ctx);
 /* Render phase -- iterates frozen commands and dispatches to renderers.
  * Read-only on ctx; can be called multiple times per frame against
  * different targets (split-screen / screenshot FBO).
- * Phase 52: body lands in Plan 04. */
+ *
+ * Engine dependencies: requires nt_gfx, nt_sprite_renderer,
+ * nt_text_renderer, and nt_stats to be init'd. See the file-level
+ * comment for the full init sequence. */
 void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 
 /* ---- Test access (compiled only when NT_UI_TEST_ACCESS is defined) ---- */
