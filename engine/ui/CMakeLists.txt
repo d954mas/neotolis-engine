@@ -67,6 +67,10 @@ target_compile_definitions(nt_ui PRIVATE
 # Phase 52 Plan 04: walker private deps. The walker translates Clay render
 # commands into sprite/text renderer emits + gfx scissor/viewport state. These
 # stay PRIVATE because nothing in nt_ui's public surface references them.
+#
+# Phase 52 Plan 05: nt_stats added for per-walk ui_draw_calls + ui_element_count
+# user-counter wiring (WALK-09 / D-52-20). Stays PRIVATE because nt_ui's public
+# API does not reference any nt_stats type.
 target_link_libraries(nt_ui
     PUBLIC
         nt_core
@@ -79,6 +83,7 @@ target_link_libraries(nt_ui
         nt_sprite_renderer
         nt_text_renderer
         nt_atlas
+        nt_stats
 )
 
 # nt_log is PRIVATE-linked by nt_add_module via the LOG_DOMAIN injection.

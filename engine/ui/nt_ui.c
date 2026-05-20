@@ -5,6 +5,7 @@
 #include "material/nt_material.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
+#include "stats/nt_stats.h"
 
 /*
  * Clay v0.14 implementation TU.
@@ -531,9 +532,16 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(depth == 0 && "unbalanced scissor stack at walk exit");
     nt_gfx_set_scissor_enabled(false);
 
-    /* Stats (D-52-20 / WALK-09). Plan 05 routes these through nt_stats. */
-    s_last_walk_draw_call_delta = nt_gfx_get_frame_draw_calls() - calls_at_entry;
+    /* Stats (D-52-20 / WALK-09). Plan 04 captures the per-walk deltas
+     * into BSS for test probes; Plan 05 routes them through nt_stats so
+     * the overlay surfaces walker overhead alongside FPS/CPU/GPU/Draws.
+     * Counter names are conventional strings; nt_stats default capacity
+     * (16 slots) is plenty for these two. */
+    const uint32_t delta = nt_gfx_get_frame_draw_calls() - calls_at_entry;
+    s_last_walk_draw_call_delta = delta;
     s_last_walk_element_count = (uint32_t)arr->length;
+    nt_stats_count("ui_draw_calls", (uint64_t)delta);
+    nt_stats_count("ui_element_count", (uint64_t)arr->length);
 }
 // #endregion
 
