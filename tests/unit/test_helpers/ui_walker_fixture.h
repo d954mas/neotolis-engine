@@ -1,30 +1,7 @@
 #ifndef NT_TEST_HELPER_UI_WALKER_FIXTURE_H
 #define NT_TEST_HELPER_UI_WALKER_FIXTURE_H
 
-/* Shared test fixture for nt_ui walker tests.
- *
- * Replaces ~110 lines of duplicated setUp / tearDown + make_test_material
- * across the five test_nt_ui_walker_*.c binaries and test_nt_ui_stats.c.
- *
- * Typical usage:
- *
- *     alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_DEFAULT_ARENA_SIZE];
- *     static ui_walker_fixture_t s_fx;
- *
- *     void setUp(void) {
- *         ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
- *     }
- *     void tearDown(void) {
- *         ui_walker_fixture_shutdown(&s_fx);
- *     }
- *
- *     // ... tests reference s_fx.ctx, s_fx.atlas, s_fx.sprite_material, ...
- *
- * Death-tests for "setter not called before walk" pass a partial bind mask:
- *
- *     ui_walker_fixture_init(&s_fx, ..., UI_WALKER_FX_BIND_ALL & ~UI_WALKER_FX_BIND_ATLAS);
- *     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
- */
+/* Shared setUp/tearDown for nt_ui walker tests. */
 
 #include <stdint.h>
 
@@ -36,14 +13,8 @@
 extern "C" {
 #endif
 
-/* Per-field bind mask. Controls which walker setters fixture_init calls
- * on the freshly-created context. A field whose bit is zero stays at the
- * zero-initialised default -- walker asserts will fire on its absence.
- *
- * Underlying type is uint32_t (not an enum) because callers combine bits
- * arbitrarily -- e.g. ALL & ~ATLAS produces a valid mask value (6) that
- * isn't an enum member; an enum type would trip clang-analyzer's
- * EnumCastOutOfRange check on every such expression. */
+/* Bit-mask of walker setters fixture_init calls; uint32_t so `ALL & ~MASK`
+ * is well-defined (an enum type would trip EnumCastOutOfRange). */
 typedef uint32_t ui_walker_fx_bind_t;
 
 #define UI_WALKER_FX_BIND_NONE ((ui_walker_fx_bind_t)0U)
@@ -59,24 +30,9 @@ typedef struct {
     nt_material_t text_material;
 } ui_walker_fixture_t;
 
-/* Brings up nt_hash, nt_gfx (stub), nt_resource, nt_atlas, nt_font,
- * nt_material, nt_sprite_renderer, nt_text_renderer, nt_stats; opens a
- * gfx frame/pass; creates the ui_atlas helper and two test materials;
- * creates the nt_ui context in the caller's arena; then calls the
- * walker setters selected by `bind`. The custom handler is always
- * cleared to (NULL, NULL).
- *
- * Aborts via Unity TEST_ASSERT if any subsystem fails to initialise. */
 void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_size, ui_walker_fx_bind_t bind);
-
-/* Tears down everything ui_walker_fixture_init brought up, in reverse
- * order. Safe to call after a partial init failure (best-effort). */
 void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx);
-
-/* Allocates an additional test material backed by a fresh virtual pack
- * (unique vs / fs shader resource ids per call). Tests that need more
- * than the two materials fixture_init builds (e.g. flush-boundary tests)
- * use this. Asserts the renderer is initialised. */
+/* Extra material backed by a fresh virtual pack -- unique vs/fs per call. */
 nt_material_t ui_walker_fixture_make_material(void);
 
 #ifdef __cplusplus

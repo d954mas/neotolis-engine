@@ -257,26 +257,21 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c)
 // #endregion
 
 // #region helper_emit_image
-/* IMAGE uses the PAYLOAD's atlas, not ctx->atlas (the latter is for
- * RECT/BORDER's white region). Different atlas pages auto-flush via the
- * sprite renderer's ensure_current_cmd_page_texture path. */
+/* IMAGE uses payload atlas, not ctx->atlas. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_image(const Clay_RenderCommand *c) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
     NT_ASSERT(p != NULL && "nt_ui IMAGE: imageData must point to nt_ui_image_payload_t");
     NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle (zero id)");
-    /* Async-loading atlas is a legitimate runtime state -- skip this
-     * frame, next frame will draw. */
+    /* Async-loading atlas: skip this frame. */
     if (!nt_resource_is_ready(p->atlas)) {
         return;
     }
 
     const Clay_BoundingBox bb = c->boundingBox;
 
-    /* Clay's IMAGE default backgroundColor is {0,0,0,0}. Caller intent is
-     * "untinted" (the default-constructed Clay struct), not "draw nothing".
-     * Distinguishing on alpha==0 alone keeps legitimate transparent tints
-     * (e.g. {0,0,0,128} half-alpha black) working as expected. */
+    /* Clay defaults backgroundColor to {0,0,0,0} = "untinted", not "draw
+     * nothing". Alpha-only check would clobber legitimate transparent tints. */
     Clay_Color tint = c->renderData.image.backgroundColor;
     const bool default_untinted = (tint.r == 0.0F && tint.g == 0.0F && tint.b == 0.0F && tint.a == 0.0F);
     const uint32_t col = default_untinted ? 0xFFFFFFFFU : nt_color_pack_clay(tint);

@@ -1,10 +1,6 @@
 #include "test_helpers/ui_walker_fixture.h"
 
-/* The fixture body is only compiled into test binaries that opt into
- * nt_ui (NT_TEST_ACCESS). Other test binaries -- notably
- * test_nt_sprite_renderer_emit_region, which lives in the same helper
- * sources list but does NOT link nt_ui -- get an empty TU and avoid
- * the unresolved nt_ui_create_context / nt_ui_set_* symbols. */
+/* Empty TU when NT_TEST_ACCESS undefined (helper compiled into non-UI binaries). */
 #ifdef NT_TEST_ACCESS
 
 #include <stddef.h>

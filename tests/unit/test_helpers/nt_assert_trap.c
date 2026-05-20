@@ -16,7 +16,6 @@ static void nt_test_assert_handler(const char *expr, const char *file, int line)
     (void)line;
     if (nt_test_assert_armed) {
         if (expr) {
-            /* snprintf-bounded copy, safe even if expr longer than buffer */
             (void)snprintf(nt_test_assert_last_expr, sizeof(nt_test_assert_last_expr), "%s", expr);
         }
         longjmp(nt_test_assert_jmp, 1);

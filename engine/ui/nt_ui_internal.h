@@ -1,10 +1,7 @@
 #ifndef NT_UI_INTERNAL_H
 #define NT_UI_INTERNAL_H
 
-/*
- * Concrete struct nt_ui_context layout. The public header forward-declares
- * the type as opaque; only nt_ui.c and NT_TEST_ACCESS test TUs see this.
- */
+/* Concrete layout of opaque nt_ui_context_t. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -13,10 +10,7 @@
 #include "font/nt_font.h"
 #include "ui/nt_ui.h"
 
-/* Lives in the first ~256 bytes of the caller-owned arena (Clay owns the
- * rest). Hot fields first for cache locality. All walker state is per-ctx
- * -- no module globals -- so multi-context UIs are correct without state
- * swaps between walks. */
+/* Lives at arena head; hot fields first. Per-ctx -- no module globals. */
 struct nt_ui_context {
     Clay_Context *clay;
     Clay_RenderCommandArray frozen_cmds; /* set by end, read by walk */

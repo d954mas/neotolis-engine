@@ -58,18 +58,13 @@ static struct {
     nt_sprite_draw_cmd_t cmds[NT_SPRITE_RENDERER_MAX_DRAW_CMDS];
     uint32_t cmd_count;
 
-    /* Test counter — reset at the start of each nt_sprite_renderer_draw_list
-     * call, holds the GPU draw count from that call only. SEPARATE from
-     * nt_gfx_get_frame_draw_calls (which is engine-wide and frame-scoped). */
+    /* Reset per draw_list call; SEPARATE from nt_gfx_get_frame_draw_calls. */
     uint32_t last_draw_list_calls;
 
-    /* Material bound for the non-ECS public emit path. Auto-flushes on
-     * .id change. The ECS draw_list path does NOT touch this -- it
-     * opens/closes cmds per batch_key directly. */
+    /* Non-ECS path only; draw_list opens cmds per batch_key. */
     nt_material_t current_mat;
 #ifdef NT_TEST_ACCESS
-    /* Captured before flush resets vertex_count, so tests can read back
-     * what the last emit wrote (positions via last_emit_first_vertex). */
+    /* Captured pre-flush so tests can read back the last emit. */
     uint32_t last_emit_vertex_count;
     uint32_t last_emit_index_count;
     uint32_t last_emit_first_vertex;
@@ -288,18 +283,11 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
 // #endregion
 
 // #region set_material
-/* Mirrors nt_text_renderer_set_material: same-handle reentry is a no-op;
- * .id change auto-flushes and opens a fresh cmd.
- *
- * The ECS draw_list path opens cmds per batch_key directly and does not
- * touch current_mat, so the two call paths cannot interfere. */
 void nt_sprite_renderer_set_material(nt_material_t mat) {
     NT_ASSERT(s_sprite.initialized);
     NT_ASSERT(mat.id != 0 && "nt_sprite_renderer_set_material: invalid material handle");
 
-    /* Same-handle is a no-op only when the cmd is still live. After an
-     * explicit flush (or restore_gpu) cmd_count drops to 0 and we MUST
-     * reopen, otherwise the next emit trips "no open cmd". */
+    /* Same-handle no-op only when cmd is still live; flush resets cmd_count. */
     if (mat.id == s_sprite.current_mat.id && s_sprite.cmd_count > 0) {
         return;
     }
@@ -467,27 +455,18 @@ NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, co
 }
 // #endregion
 
-// #region emit_one (ECS extractor — delegates to emit_region_resolved)
-/* Caller passes pre-fetched SoA views; sparse_indices[entity_index] → dense slot.
- *
- * emit_one is a thin ECS extractor: resolves origin/flip/color from the
- * components and forwards to emit_region_resolved. Resolved region
- * pointers come straight from sv->resolved[s_idx] -- no extra atlas
- * lookup. */
+// #region emit_one
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv) {
     nt_entity_t e = {.id = item->entity};
     uint16_t eidx = nt_entity_index(e);
 
-    /* Inlined sparse->dense lookups vs three function calls each doing a
-     * liveness assert + the same array read. */
+    /* Inlined vs three calls each doing the same liveness assert + array read. */
     uint16_t s_idx = sv->sparse_indices[eidx];
     uint16_t t_idx = tv->sparse_indices[eidx];
     uint16_t d_idx = dv->sparse_indices[eidx];
 
-    /* NT_INVALID_COMP_INDEX (0xFFFF) would index SoA arrays out of bounds
-     * -- catches stale render items, items for entities missing a
-     * component, items built after entity destruction. */
+    /* NT_INVALID_COMP_INDEX would index SoA OOB -- catches stale items. */
     NT_ASSERT(s_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no sprite component");
     NT_ASSERT(t_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no transform component");
     NT_ASSERT(d_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no drawable component");
@@ -512,11 +491,6 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
 // #endregion
 
 // #region emit_region
-/* One bundled atlas lookup (vs 6 separate get_region/cached_pos/raw_vertices/
- * indices/page_resource/ipu calls). Resolves the atlas user_data once and
- * fills the handle struct -- no SoA cache like the ECS path, but the
- * single-resolve form keeps the hot path tight enough for walker /
- * debug-draw / gizmo use. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits) {
     NT_ASSERT(s_sprite.initialized);
