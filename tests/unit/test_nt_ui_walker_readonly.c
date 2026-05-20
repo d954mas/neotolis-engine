@@ -62,18 +62,18 @@ static void test_second_walk_identical(void) {
 
     int vp1[4];
     nt_gfx_test_viewport_rect(vp1);
-    const uint32_t elements1 = nt_ui_test_last_walk_element_count(s_fx.ctx);
+    const uint32_t elements1 = nt_ui_get_last_walk_element_count(s_fx.ctx);
     /* Read but don't compare draw-call delta -- walking once already
      * incurs draw calls; a second walk will too, so the EXACT delta-
      * to-delta count is what we compare. */
-    const uint32_t delta1 = nt_ui_test_last_walk_draw_call_delta(s_fx.ctx);
+    const uint32_t delta1 = nt_ui_get_last_walk_draw_calls(s_fx.ctx);
 
     nt_ui_walk(s_fx.ctx, &target);
 
     int vp2[4];
     nt_gfx_test_viewport_rect(vp2);
-    const uint32_t elements2 = nt_ui_test_last_walk_element_count(s_fx.ctx);
-    const uint32_t delta2 = nt_ui_test_last_walk_draw_call_delta(s_fx.ctx);
+    const uint32_t elements2 = nt_ui_get_last_walk_element_count(s_fx.ctx);
+    const uint32_t delta2 = nt_ui_get_last_walk_draw_calls(s_fx.ctx);
 
     TEST_ASSERT_EQUAL_INT_ARRAY(vp1, vp2, 4);
     TEST_ASSERT_EQUAL_UINT32(elements1, elements2);

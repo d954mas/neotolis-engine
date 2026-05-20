@@ -1,18 +1,22 @@
-/* tests/unit/test_nt_ui_stats.c -- Plan 52-05
+/* tests/unit/test_nt_ui_stats.c -- Plan 52-05 (refactored after nt_stats decouple)
  *
- * Covers WALK-09 / D-52-20: ui_draw_calls + ui_element_count user counters
- * are routed through nt_stats_count at nt_ui_walk exit.
+ * Covers WALK-09 / D-52-20: per-walk metrics are captured into the ctx and
+ * exposed via nt_ui_get_last_walk_*. nt_ui itself no longer pushes to
+ * nt_stats; this test verifies (a) the public getters return the expected
+ * values after a walk and (b) the canonical bridge pattern works -- app
+ * forwards getter output into nt_stats_count and the value surfaces in
+ * nt_stats_format_lines.
  *
- * nt_stats has no public read-back-by-name accessor for user counters --
- * verification goes through (a) nt_ui_test_last_walk_* probes (per-walk
- * statics that Plan 04 captures and Plan 05 routes to nt_stats_count) and
- * (b) nt_stats_format_lines substring match (covers the wiring through to
- * nt_stats' user-counter table).
+ * nt_stats lifecycle is managed locally (init/shutdown bracketing the
+ * fixture), because the shared ui_walker_fixture deliberately does NOT
+ * init nt_stats: walker tests don't need it, and only this test exercises
+ * the metrics-bridge integration.
  */
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "clay.h"
@@ -33,9 +37,15 @@ void setUp(void) {
     nt_test_assert_install();
     memset(s_test_cmds, 0, sizeof s_test_cmds);
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
+    /* nt_stats is not init'd by the fixture (UI doesn't depend on it).
+     * This test exercises the metrics-bridge pattern so we init it here. */
+    nt_stats_init(NULL);
 }
 
-void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
+void tearDown(void) {
+    nt_stats_shutdown();
+    ui_walker_fixture_shutdown(&s_fx);
+}
 
 static void inject_frozen_cmds(int32_t count) {
     s_fx.ctx->frozen_cmds.internalArray = s_test_cmds;
@@ -43,11 +53,17 @@ static void inject_frozen_cmds(int32_t count) {
     s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
 }
 
-/* WALK-09 / D-52-20: after a walk that emits a RECT, the walker's per-walk
- * draw-call delta probe is > 0 (at least the walker-exit flush ticked the
- * gfx draw-call counter) AND nt_stats_format_lines surfaces the
- * "ui_draw_calls" line (proving the value was routed into nt_stats). */
-static void test_ui_draw_calls_counter_set(void) {
+/* Canonical metrics-bridge pattern: walk -> read getter -> publish into
+ * nt_stats. After this, nt_stats_format_lines must show the value. */
+static void publish_ui_metrics_to_stats(const nt_ui_context_t *ctx) {
+    nt_stats_count("ui_draw_calls", (uint64_t)nt_ui_get_last_walk_draw_calls(ctx));
+    nt_stats_count("ui_element_count", (uint64_t)nt_ui_get_last_walk_element_count(ctx));
+}
+
+/* WALK-09 (getter): after a walk that emits a RECT, the public draw-call
+ * getter reports >= 1 (the walker-exit flush issues at least one GL
+ * draw call). */
+static void test_get_last_walk_draw_calls_after_rect(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     c->boundingBox = (Clay_BoundingBox){.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 100.0F};
@@ -57,27 +73,12 @@ static void test_ui_draw_calls_counter_set(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* Per-walk delta probe: at least the walker-exit flush ticked one draw call. */
-    const uint32_t delta = nt_ui_test_last_walk_draw_call_delta(s_fx.ctx);
-    TEST_ASSERT_GREATER_THAN_UINT32(0U, delta);
-
-    /* nt_stats wiring: the counter must surface in format_lines. */
-    char buf[512];
-    uint32_t n = nt_stats_format_lines(buf, sizeof buf);
-    TEST_ASSERT_GREATER_THAN_UINT32(0U, n);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, "ui_draw_calls:"), "nt_stats must contain ui_draw_calls counter after walk");
-
-    /* The delta value must match what nt_stats holds -- verify via
-     * substring of the formatted counter line. */
-    char expected[64];
-    (void)snprintf(expected, sizeof expected, "ui_draw_calls: %u", (unsigned)delta);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, expected), "ui_draw_calls value in nt_stats must match per-walk delta probe");
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
 }
 
-/* WALK-09 / D-52-20: ui_element_count equals frozen_cmds.length and is
- * routed into nt_stats. */
-static void test_ui_element_count_counter_set(void) {
-    /* 3 RECT commands -> walker iterates 3 elements. */
+/* WALK-09 (getter): element count equals frozen_cmds.length exactly
+ * (synthetic injected array, no Clay wrapper elements). */
+static void test_get_last_walk_element_count_matches_frozen_cmds(void) {
     for (int i = 0; i < 3; ++i) {
         Clay_RenderCommand *c = &s_test_cmds[i];
         c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
@@ -89,20 +90,37 @@ static void test_ui_element_count_counter_set(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* Element count probe matches frozen_cmds.length exactly (no Clay
-     * wrapper elements -- frozen_cmds is the injected synthetic array). */
-    TEST_ASSERT_EQUAL_UINT32(3U, nt_ui_test_last_walk_element_count(s_fx.ctx));
-
-    /* nt_stats wiring. */
-    char buf[512];
-    (void)nt_stats_format_lines(buf, sizeof buf);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, "ui_element_count: 3"), "nt_stats ui_element_count must equal frozen_cmds.length");
+    TEST_ASSERT_EQUAL_UINT32(3U, nt_ui_get_last_walk_element_count(s_fx.ctx));
 }
 
-/* WALK-09 / D-52-20: counters are SET per walk, not accumulated. Walk twice
- * with different command counts -- the second walk's counter must reflect
- * the second declaration. */
-static void test_counters_reset_per_walk(void) {
+/* WALK-09 (bridge): app forwards getter values into nt_stats; both
+ * counters appear in nt_stats_format_lines with the expected values. */
+static void test_metrics_bridge_publishes_to_nt_stats(void) {
+    Clay_RenderCommand *c = &s_test_cmds[0];
+    c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    c->boundingBox = (Clay_BoundingBox){.x = 0.0F, .y = 0.0F, .width = 50.0F, .height = 50.0F};
+    c->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F};
+    inject_frozen_cmds(1);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+    publish_ui_metrics_to_stats(s_fx.ctx);
+
+    const uint32_t draw_calls = nt_ui_get_last_walk_draw_calls(s_fx.ctx);
+
+    char buf[512];
+    const uint32_t n = nt_stats_format_lines(buf, sizeof buf);
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, n);
+
+    char expected_draw[64];
+    (void)snprintf(expected_draw, sizeof expected_draw, "ui_draw_calls: %u", (unsigned)draw_calls);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, expected_draw), "bridge: ui_draw_calls value in nt_stats must match getter output");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, "ui_element_count: 1"), "bridge: ui_element_count must equal frozen_cmds.length");
+}
+
+/* WALK-09: counters are SET per walk (not accumulated). Walk twice with
+ * different command counts -- second getter call reflects second walk. */
+static void test_getters_reflect_latest_walk_only(void) {
     /* First walk: 2 RECT commands. */
     for (int i = 0; i < 2; ++i) {
         Clay_RenderCommand *c = &s_test_cmds[i];
@@ -114,29 +132,20 @@ static void test_counters_reset_per_walk(void) {
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_element_count(s_fx.ctx));
 
-    const uint32_t count1 = nt_ui_test_last_walk_element_count(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT32(2U, count1);
-
-    /* Second walk: empty command array. */
+    /* Second walk: empty array. Getter must reflect THIS walk, not the
+     * accumulated total. */
     inject_frozen_cmds(0);
     nt_ui_walk(s_fx.ctx, &target);
-
-    const uint32_t count2 = nt_ui_test_last_walk_element_count(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT32(0U, count2);
-    TEST_ASSERT_NOT_EQUAL_MESSAGE(count1, count2, "second walk's element count must reflect the second declaration, not accumulate");
-
-    /* nt_stats also reflects the second walk's value, not the first. */
-    char buf[512];
-    (void)nt_stats_format_lines(buf, sizeof buf);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, "ui_element_count: 0"), "nt_stats ui_element_count must reflect second walk (=0), not first (=2)");
-    TEST_ASSERT_NULL_MESSAGE(strstr(buf, "ui_element_count: 2"), "old (first-walk) value must be overwritten in nt_stats");
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_element_count(s_fx.ctx));
 }
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_ui_draw_calls_counter_set);
-    RUN_TEST(test_ui_element_count_counter_set);
-    RUN_TEST(test_counters_reset_per_walk);
+    RUN_TEST(test_get_last_walk_draw_calls_after_rect);
+    RUN_TEST(test_get_last_walk_element_count_matches_frozen_cmds);
+    RUN_TEST(test_metrics_bridge_publishes_to_nt_stats);
+    RUN_TEST(test_getters_reflect_latest_walk_only);
     return UNITY_END();
 }

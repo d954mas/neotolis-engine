@@ -5,9 +5,8 @@
  * nt_ui -- Immediate-mode UI module built atop Clay v0.14.
  *
  * Engine dependencies. nt_ui_walk transitively calls into nt_gfx (viewport
- * + scissor), nt_sprite_renderer + nt_text_renderer (geometry emit), and
- * nt_stats (per-walk ui_draw_calls / ui_element_count counters). All of
- * these must be init'd by the application BEFORE any nt_ui_walk:
+ * + scissor) and nt_sprite_renderer + nt_text_renderer (geometry emit).
+ * All of these must be init'd by the application BEFORE any nt_ui_walk:
  *
  *     nt_gfx_init(...);
  *     nt_resource_init(...);
@@ -16,10 +15,14 @@
  *     nt_material_init(...);
  *     nt_sprite_renderer_init(...);
  *     nt_text_renderer_init();
- *     nt_stats_init(NULL);       // walker pushes counters every walk
  *
  * The walker doesn't init these itself -- the application drives the
  * full engine lifecycle and is responsible for the order.
+ *
+ * nt_stats is NOT a dependency. Walker exposes per-walk metrics via the
+ * getter functions below (nt_ui_get_last_walk_draw_calls etc.); the
+ * application chooses whether to publish them to nt_stats for the debug
+ * overlay or to consume them privately for telemetry.
  *
  * Frame lifecycle (Phase 52):
  *
@@ -203,21 +206,46 @@ void nt_ui_end(nt_ui_context_t *ctx);
  * Read-only on ctx; can be called multiple times per frame against
  * different targets (split-screen / screenshot FBO).
  *
- * Engine dependencies: requires nt_gfx, nt_sprite_renderer,
- * nt_text_renderer, and nt_stats to be init'd. See the file-level
- * comment for the full init sequence. */
+ * Engine dependencies: requires nt_gfx, nt_sprite_renderer, and
+ * nt_text_renderer to be init'd. See the file-level comment for the
+ * full init sequence. */
 void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
+
+/* ---- Per-walk metrics (D-52-20 / WALK-09) ----
+ *
+ * Walker captures these into the ctx at the end of every nt_ui_walk.
+ * They're per-context so split-screen / multi-walk setups can read each
+ * pane's cost independently. Read-only on ctx; valid until the next
+ * nt_ui_walk against the same ctx overwrites them.
+ *
+ * The walker DOES NOT push these to nt_stats automatically -- nt_ui
+ * doesn't depend on nt_stats (observability is opt-in). Apps that want
+ * the values in the debug overlay forward them themselves:
+ *
+ *     nt_ui_walk(ctx, &target);
+ *     nt_stats_count("ui_draw_calls",    nt_ui_get_last_walk_draw_calls(ctx));
+ *     nt_stats_count("ui_element_count", nt_ui_get_last_walk_element_count(ctx));
+ *
+ * Per-context names ("ui_draw_calls_hud" vs "ui_draw_calls_minimap") are
+ * the app's call.
+ */
+
+/* GPU draw calls issued by the most recent nt_ui_walk against `ctx`.
+ * Counts physical glDrawElements (one per renderer flush), not Clay
+ * command count -- so it reflects batching efficiency. Returns 0 if no
+ * walk has been performed against this ctx yet. */
+uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx);
+
+/* Number of Clay render commands the most recent nt_ui_walk dispatched
+ * against `ctx` (== frozen_cmds.length at walk time). Returns 0 if no
+ * walk has been performed against this ctx yet. */
+uint32_t nt_ui_get_last_walk_element_count(const nt_ui_context_t *ctx);
 
 /* ---- Test access (compiled only when NT_UI_TEST_ACCESS is defined) ---- */
 
 #ifdef NT_UI_TEST_ACCESS
 /* Module-level in-frame pointer (D-52-12). NULL when no context is mid-frame. */
 nt_ui_context_t *nt_ui_test_inframe_ctx(void);
-
-/* Walker captures per-walk deltas into the ctx itself; tests read them back
- * via these probes. Plan 05 also routes them through nt_stats_count. */
-uint32_t nt_ui_test_last_walk_draw_call_delta(const nt_ui_context_t *ctx);
-uint32_t nt_ui_test_last_walk_element_count(const nt_ui_context_t *ctx);
 
 /* Plan 03: snapshot of the Clay-side pointer state for the given ctx,
  * intended for CLAY-04 / D-52-16 verification. Returns the values that

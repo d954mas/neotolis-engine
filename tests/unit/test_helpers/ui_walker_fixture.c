@@ -22,7 +22,6 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
-#include "stats/nt_stats.h"
 #include "unity.h"
 
 /* Per-binary counter so multiple ui_walker_fixture_make_material() calls
@@ -90,9 +89,10 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     nt_sprite_renderer_init(&(nt_sprite_renderer_desc_t){.max_pipelines = 4});
     nt_text_renderer_init();
 
-    /* The walker calls nt_stats_count at exit; init the module here so the
-     * NT_ASSERT(s_stats.initialized) check inside nt_stats_count never fires. */
-    nt_stats_init(NULL);
+    /* nt_stats is NOT init'd here -- nt_ui_walk does not depend on it.
+     * Tests that need nt_stats (e.g. test_nt_ui_stats verifying the
+     * metrics-bridge pattern) init/shutdown it themselves around the
+     * fixture calls. */
 
     fx->atlas = minimal_ui_atlas_create();
     fx->sprite_material = ui_walker_fixture_make_material();
@@ -121,7 +121,6 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
     }
     minimal_ui_atlas_destroy(&fx->atlas);
 
-    nt_stats_shutdown();
     nt_sprite_renderer_shutdown();
     nt_text_renderer_shutdown();
     nt_gfx_end_pass();

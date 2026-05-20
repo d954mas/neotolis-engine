@@ -83,7 +83,7 @@ static void test_dispatch_rectangle(void) {
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
     TEST_ASSERT_EQUAL_UINT32(6U, nt_sprite_renderer_test_last_emit_index_count());
     /* Walker element count delta matches frozen_cmds.length. */
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_test_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_element_count(s_fx.ctx));
 }
 
 /* WALK-04: BORDER with all 4 widths non-zero -- exactly 4 last_emit calls
@@ -142,7 +142,7 @@ static void test_dispatch_text(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_material_calls());
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_set_font_calls());
     /* Walker element count still ticks. */
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_test_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_element_count(s_fx.ctx));
 }
 
 /* WALK-01: IMAGE -> reads nt_ui_image_payload_t and emits one region. */
@@ -186,7 +186,7 @@ static void test_dispatch_scissor_start_end(void) {
 
     /* Walker MUST disable scissor at exit (CP-04). */
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_test_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_element_count(s_fx.ctx));
 }
 
 /* WALK-05: CUSTOM -> registered handler called with (cmd, userdata). */
@@ -217,13 +217,13 @@ static void test_dispatch_none_silent_skip(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_element_count(s_fx.ctx));
 
     /* Also test an explicit NONE command -- still no crash, still no emit. */
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_NONE;
     inject_frozen_cmds(1);
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_test_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_element_count(s_fx.ctx));
 }
 
 int main(void) {
