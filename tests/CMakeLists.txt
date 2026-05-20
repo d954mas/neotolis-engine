@@ -413,6 +413,7 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_walker_custom
         test_nt_ui_walker_flush
         test_nt_ui_walker_readonly
+        test_nt_ui_walker_batching
     )
 
     foreach(_t IN LISTS _nt_ui_test_names)

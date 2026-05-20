@@ -467,6 +467,21 @@ static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c)
 // #endregion
 
 // #region walk
+/* True iff the command participates in same-zIndex batch reordering.
+ * SCISSOR_START/END, CUSTOM, and NONE are hard barriers / no-ops -- they
+ * always emit in original sequence and never go through the bucket pass. */
+static bool is_segmentable(Clay_RenderCommandType cmd_type) {
+    switch (cmd_type) {
+    case CLAY_RENDER_COMMAND_TYPE_RECTANGLE:
+    case CLAY_RENDER_COMMAND_TYPE_BORDER:
+    case CLAY_RENDER_COMMAND_TYPE_IMAGE:
+    case CLAY_RENDER_COMMAND_TYPE_TEXT:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static void dispatch_command(nt_ui_context_t *ctx, const Clay_RenderCommand *c, sscissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target) {
     switch (c->commandType) {
     case CLAY_RENDER_COMMAND_TYPE_NONE:
@@ -553,10 +568,52 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
      * lazily inside emit_text just before draw_n. */
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
-    /* Clay's frozen array is already zIndex-ascending sorted. */
+    /* Clay's frozen array is zIndex-ascending sorted. Walker contract:
+     * within a maximal run of same-zIndex, barrier-free commands
+     * (a "segment"), reorderable types (RECT/BORDER/IMAGE/TEXT) emit in
+     * two passes -- sprite-bound first, text second -- so interleaved
+     * RECT/TEXT in the same layer don't fragment renderer batches. Hard
+     * barriers (SCISSOR_START/END, CUSTOM) always emit in original order
+     * and never enter a segment. Game code that relies on strict painter
+     * order within same-z must put overlapping elements on different
+     * zIndex layers. */
     const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
-    for (int32_t i = 0; i < arr->length; ++i) {
-        dispatch_command(ctx, &arr->internalArray[i], scissor_stack, &depth, target);
+    int32_t i = 0;
+    while (i < arr->length) {
+        const Clay_RenderCommand *c = &arr->internalArray[i];
+        if (!is_segmentable(c->commandType)) {
+            dispatch_command(ctx, c, scissor_stack, &depth, target);
+            ++i;
+            continue;
+        }
+        const int16_t seg_z = c->zIndex;
+        int32_t seg_end = i + 1;
+        while (seg_end < arr->length) {
+            const Clay_RenderCommand *next = &arr->internalArray[seg_end];
+            if (next->zIndex != seg_z || !is_segmentable(next->commandType)) {
+                break;
+            }
+            ++seg_end;
+        }
+        /* Pass 1: sprite-bound (RECT/BORDER/IMAGE). All share the same
+         * ctx->sprite_material; sprite_renderer auto-flushes on atlas
+         * page change (RECT/BORDER use ctx->atlas, IMAGE uses payload). */
+        for (int32_t j = i; j < seg_end; ++j) {
+            const Clay_RenderCommand *cc = &arr->internalArray[j];
+            if (cc->commandType != CLAY_RENDER_COMMAND_TYPE_TEXT) {
+                dispatch_command(ctx, cc, scissor_stack, &depth, target);
+            }
+        }
+        /* Pass 2: TEXT. emit_text's prologue flushes sprite_renderer at
+         * the first text in the segment, so painter order across the
+         * sprite->text transition is preserved. */
+        for (int32_t j = i; j < seg_end; ++j) {
+            const Clay_RenderCommand *cc = &arr->internalArray[j];
+            if (cc->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
+                dispatch_command(ctx, cc, scissor_stack, &depth, target);
+            }
+        }
+        i = seg_end;
     }
 
     nt_sprite_renderer_flush();

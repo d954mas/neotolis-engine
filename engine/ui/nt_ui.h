@@ -131,7 +131,21 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_
 void nt_ui_end(nt_ui_context_t *ctx);
 
 /* Read-only on ctx; safe to call N times against different targets in
- * the same frame. */
+ * the same frame.
+ *
+ * Render order contract:
+ * -- Different zIndex layers are drawn in strict ascending z order
+ *    (preserving Clay's sort).
+ * -- Within a single zIndex layer, the walker reorders compatible
+ *    commands for renderer batching: all sprite-bound commands
+ *    (RECT/BORDER/IMAGE) emit first, then all TEXT. Sprite emission
+ *    order within the batch follows the original index, so two
+ *    overlapping sprites on the same z still paint in declaration
+ *    order. Code that needs strict painter order between overlapping
+ *    elements MUST place them on different zIndex layers.
+ * -- SCISSOR_START / SCISSOR_END / CUSTOM are hard barriers: commands
+ *    on either side are never reordered across them. Clip scope and
+ *    custom-callback state are preserved exactly. */
 void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 
 /* Per-walk metrics captured into ctx at every nt_ui_walk exit. Apps that
