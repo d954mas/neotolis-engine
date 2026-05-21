@@ -51,6 +51,41 @@ static void test_scissor_depth_8_ok(void) {
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
 }
 
+/* Custom max_scissor_depth via desc: walker stack VLA-sizes to ctx config.
+ * Build a separate ctx with depth=4; pushing 4 scissors must succeed but
+ * pushing a 5th must overflow the per-ctx limit even though the global
+ * #define default is 8. */
+static void test_scissor_depth_custom_via_desc(void) {
+    alignas(NT_UI_ARENA_ALIGN) static uint8_t s_custom_arena[NT_UI_DEFAULT_ARENA_SIZE];
+    const nt_ui_create_desc_t custom_desc = {
+        .max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT,
+        .max_scissor_depth = 4U,
+    };
+    nt_ui_context_t *custom_ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &custom_desc);
+    TEST_ASSERT_NOT_NULL(custom_ctx);
+    nt_ui_set_atlas_white_region(custom_ctx, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
+    nt_ui_set_sprite_material(custom_ctx, s_fx.sprite_material);
+    nt_ui_set_text_material(custom_ctx, s_fx.text_material);
+
+    /* Push 5 scissors -> overflow on the 5th. */
+    Clay_RenderCommand local_cmds[5];
+    memset(local_cmds, 0, sizeof local_cmds);
+    for (int32_t i = 0; i < 5; ++i) {
+        local_cmds[i].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+        local_cmds[i].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 800, .height = 600};
+        local_cmds[i].renderData.clip.horizontal = true;
+        local_cmds[i].renderData.clip.vertical = true;
+    }
+    custom_ctx->frozen_cmds.internalArray = local_cmds;
+    custom_ctx->frozen_cmds.length = 5;
+    custom_ctx->frozen_cmds.capacity = 5;
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    NT_TEST_EXPECT_ASSERT(nt_ui_walk(custom_ctx, &target));
+
+    nt_ui_destroy_context(custom_ctx);
+}
+
 /* 9 nested SCISSOR_START must assert (depth overflow). */
 static void test_scissor_depth_9_asserts(void) {
     for (int32_t i = 0; i < 9; ++i) {
@@ -255,6 +290,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scissor_depth_8_ok);
     RUN_TEST(test_scissor_depth_9_asserts);
+    RUN_TEST(test_scissor_depth_custom_via_desc);
     RUN_TEST(test_scissor_unbalanced_asserts_at_exit);
     RUN_TEST(test_scissor_y_flip_top_left_to_gl_bottom_left);
     RUN_TEST(test_scissor_intersection_nested);

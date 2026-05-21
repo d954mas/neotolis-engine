@@ -169,10 +169,12 @@ static size_t nt_ui_sorted_size_aligned(uint32_t max_elements) {
     return (bytes + (NT_UI_ARENA_ALIGN - 1U)) & ~(size_t)(NT_UI_ARENA_ALIGN - 1U);
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     NT_ASSERT(desc != NULL && "nt_ui_min_arena_size: desc must be non-NULL");
     NT_ASSERT(desc->max_elements > 0U && "nt_ui_min_arena_size: desc->max_elements must be > 0");
     NT_ASSERT(desc->max_elements <= UINT16_MAX && "nt_ui_min_arena_size: desc->max_elements exceeds uint16 sorted-index range");
+    NT_ASSERT(desc->max_scissor_depth > 0U && "nt_ui_min_arena_size: desc->max_scissor_depth must be > 0");
     /* Clay_SetMaxElementCount writes to GLOBAL Clay__defaultMaxElementCount
      * when no current context exists, or to current context otherwise. We
      * want to size against desc-> max_elements WITHOUT mutating any active
@@ -202,6 +204,7 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
      * to keep the next block's start at NT_UI_ARENA_ALIGN-aligned offset. */
     ctx->sorted = (uint16_t *)((char *)arena + ctx_size);
     ctx->max_elements = desc->max_elements;
+    ctx->max_scissor_depth = desc->max_scissor_depth;
     void *clay_mem = (char *)arena + ctx_size + sorted_size;
     const size_t clay_size = arena_size - ctx_size - sorted_size;
 
@@ -678,7 +681,7 @@ typedef struct {
 static void rebind_sprite_after_flush(const nt_ui_context_t *ctx) { nt_sprite_renderer_set_material(ctx->sprite_material); }
 
 static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, sscissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
-    NT_ASSERT(*depth < NT_UI_WALKER_MAX_SCISSOR_DEPTH && "scissor stack overflow");
+    NT_ASSERT((uint32_t)*depth < ctx->max_scissor_depth && "scissor stack overflow; raise desc->max_scissor_depth or restructure nested clip");
 
     /* clip.horizontal / .vertical flag the axes that should be clipped.
      * On an unclipped axis we use the target viewport extent so the GL
@@ -853,8 +856,8 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(ctx->text_material.id != 0 && "nt_ui_set_text_material(ctx,...) required before nt_ui_walk");
 
     /* On C stack, NOT in ctx, so multi-walk against the same ctx doesn't
-     * share state. */
-    sscissor_rect_t scissor_stack[NT_UI_WALKER_MAX_SCISSOR_DEPTH];
+     * share state. VLA sized per ctx (max_scissor_depth from create desc). */
+    sscissor_rect_t scissor_stack[ctx->max_scissor_depth];
     int depth = 0;
 
     /* Drain caller-side pending geometry BEFORE mutating GL state, so

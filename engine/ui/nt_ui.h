@@ -143,12 +143,14 @@ void nt_ui_module_shutdown(void);
  * starting point and adjust fields explicitly when the layout grows beyond
  * default limits. */
 typedef struct {
-    uint32_t max_elements; /* Max layout elements Clay can hold in this ctx. */
+    uint32_t max_elements;      /* Max layout elements Clay can hold in this ctx. */
+    uint32_t max_scissor_depth; /* Max nested SCISSOR_START/END depth during walk. */
 } nt_ui_create_desc_t;
 
 static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
     return (nt_ui_create_desc_t){
         .max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT,
+        .max_scissor_depth = NT_UI_WALKER_MAX_SCISSOR_DEPTH,
     };
 }
 
