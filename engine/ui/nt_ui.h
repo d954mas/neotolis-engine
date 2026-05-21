@@ -213,6 +213,12 @@ nt_material_t nt_ui_test_text_material(const nt_ui_context_t *ctx);
  * was NULL (i.e. fell back to layer 0 implicitly). Useful to detect
  * "forgot to set layer on critical element" during development. */
 uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx);
+
+/* Exposes Clay's global Clay__defaultMaxElementCount for save/restore
+ * regression tests. Clay symbol is internal to the implementation TU
+ * (CLAY_IMPLEMENTATION lives in nt_ui.c), so external tests can't read
+ * it directly. */
+int32_t nt_ui_test_clay_default_max_element_count(void);
 #endif
 // #endregion
 

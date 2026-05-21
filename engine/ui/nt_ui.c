@@ -170,13 +170,18 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     NT_ASSERT(desc->max_scissor_depth > 0U && "nt_ui_min_arena_size: desc->max_scissor_depth must be > 0");
     /* Clay_SetMaxElementCount writes to GLOBAL Clay__defaultMaxElementCount
      * when no current context exists, or to current context otherwise. We
-     * want to size against desc-> max_elements WITHOUT mutating any active
-     * ctx -- save current, null it, set, query, restore. */
-    Clay_Context *saved = Clay_GetCurrentContext();
+     * want to size against desc->max_elements WITHOUT mutating any active
+     * ctx AND without leaving Clay's global default at our temporary value
+     * (pure-query contract). Snapshot current ctx + global default, set,
+     * query, restore both. Direct read of Clay__defaultMaxElementCount is
+     * legal because CLAY_IMPLEMENTATION is in this TU. */
+    Clay_Context *saved_ctx = Clay_GetCurrentContext();
+    const int32_t saved_default = Clay__defaultMaxElementCount;
     Clay_SetCurrentContext(NULL);
     Clay_SetMaxElementCount((int32_t)desc->max_elements);
     const size_t clay_bytes = (size_t)Clay_MinMemorySize();
-    Clay_SetCurrentContext(saved);
+    Clay__defaultMaxElementCount = saved_default;
+    Clay_SetCurrentContext(saved_ctx);
     return nt_ui_ctx_size_aligned() + clay_bytes;
 }
 
@@ -200,9 +205,12 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     const size_t clay_size = arena_size - ctx_size;
 
     /* Stage desc->max_elements into Clay's global default so Clay_Initialize
-     * inherits it for this new context. Save/restore current ctx so this
-     * does not bleed into an active sibling. */
-    Clay_Context *saved = Clay_GetCurrentContext();
+     * inherits it for this new context. Snapshot BOTH current ctx and the
+     * Clay__defaultMaxElementCount global, then restore both -- otherwise
+     * the temporary mutation persists across create_context calls and
+     * leaks our internals into any Clay consumer outside nt_ui. */
+    Clay_Context *saved_ctx = Clay_GetCurrentContext();
+    const int32_t saved_default = Clay__defaultMaxElementCount;
     Clay_SetCurrentContext(NULL);
     Clay_SetMaxElementCount((int32_t)desc->max_elements);
 
@@ -210,11 +218,12 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->clay_arena = Clay_CreateArenaWithCapacityAndMemory(clay_size, clay_mem);
     ctx->clay = Clay_Initialize(ctx->clay_arena, (Clay_Dimensions){.width = 1.0F, .height = 1.0F}, (Clay_ErrorHandler){.errorHandlerFunction = nt_ui_clay_error_cb, .userData = ctx});
 
-    /* Restore the pre-create current ctx (may be NULL). Clay_Initialize
-     * sets current to the new ctx; without this restore the caller would
-     * inherit our new ctx as active without ever calling nt_ui_begin --
-     * breaks the contract that nt_ui_begin owns active-ctx selection. */
-    Clay_SetCurrentContext(saved);
+    /* Restore both pre-create state. Clay_Initialize sets current to the
+     * new ctx; without restore the caller would inherit our new ctx as
+     * active without ever calling nt_ui_begin -- breaks the contract that
+     * nt_ui_begin owns active-ctx selection. */
+    Clay__defaultMaxElementCount = saved_default;
+    Clay_SetCurrentContext(saved_ctx);
 
     return ctx;
 }
@@ -804,22 +813,31 @@ static bool is_segmentable(Clay_RenderCommandType cmd_type) {
 }
 
 static void dispatch_command(nt_ui_context_t *ctx, const Clay_RenderCommand *c, sscissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target) {
+    /* emit_text drains pending sprite at its top; mirror that here so a
+     * sprite-backed command after a TEXT sees an empty text staging. Without
+     * this, text staging persists until walker exit (flushes sprite then
+     * text in that order) and a sprite-after-text declared between two TEXTs
+     * would render UNDER the text, violating declaration-order semantics.
+     * Empty-staging text_flush is a cheap no-op (early-returns on glyph_count==0). */
     switch (c->commandType) {
     case CLAY_RENDER_COMMAND_TYPE_NONE:
         return;
     case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
+        nt_text_renderer_flush();
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         const uint32_t col = nt_color_pack_clay(r->backgroundColor);
         emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, r->cornerRadius, col);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER:
+        nt_text_renderer_flush();
         emit_border(ctx, c);
         return;
     case CLAY_RENDER_COMMAND_TYPE_TEXT:
         emit_text(ctx, c);
         return;
     case CLAY_RENDER_COMMAND_TYPE_IMAGE:
+        nt_text_renderer_flush();
         emit_image(c);
         return;
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:
@@ -845,6 +863,14 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(isfinite(target->viewport[0]) && isfinite(target->viewport[1]) && isfinite(target->viewport[2]) && isfinite(target->viewport[3]) && "nt_ui_walk: target->viewport must be finite");
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && "nt_ui_walk: target->viewport origin (x,y) must be non-negative");
     NT_ASSERT(target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport (w,h) must be non-negative");
+
+    /* Drain caller-side pending geometry unconditionally -- BEFORE the
+     * zero-viewport early-return so leaked staging from a prior scene
+     * can't survive a minimized frame and render later under unrelated
+     * GL state. Both flushes early-out on empty staging. */
+    nt_sprite_renderer_flush();
+    nt_text_renderer_flush();
+
     /* Zero-size viewport is a legitimate runtime state (minimized browser
      * tab, mobile orientation transition). Silent no-op rather than assert,
      * but reset per-walk stats so callers don't read stale values from the
@@ -866,12 +892,6 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
      * share state. VLA sized per ctx (max_scissor_depth from create desc). */
     sscissor_rect_t scissor_stack[ctx->max_scissor_depth];
     int depth = 0;
-
-    /* Drain caller-side pending geometry BEFORE mutating GL state, so
-     * leftover staging from a prior scene isn't rendered under our
-     * viewport. Both flushes early-out on empty staging. */
-    nt_sprite_renderer_flush();
-    nt_text_renderer_flush();
 
     /* Snapshot AFTER the entry flushes so the per-walk delta excludes the
      * caller's drained geometry. */
@@ -1041,6 +1061,8 @@ nt_material_t nt_ui_test_text_material(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL);
     return ctx->text_material;
 }
+
+int32_t nt_ui_test_clay_default_max_element_count(void) { return Clay__defaultMaxElementCount; }
 
 uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL);

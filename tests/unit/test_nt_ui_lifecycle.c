@@ -95,6 +95,31 @@ static void test_destroy_clears_dangling_clay_current(void) {
     TEST_ASSERT_NULL(Clay_GetCurrentContext());
 }
 
+/* nt_ui_min_arena_size must be a pure query: even though it has to set
+ * Clay's global default to compute Clay_MinMemorySize(), it must restore
+ * the prior value so external Clay consumers don't see our scratch state. */
+static void test_min_arena_size_restores_clay_default(void) {
+    const int32_t before = nt_ui_test_clay_default_max_element_count();
+    nt_ui_create_desc_t custom = nt_ui_create_desc_defaults();
+    custom.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT * 2U; /* != before */
+    (void)nt_ui_min_arena_size(&custom);
+    TEST_ASSERT_EQUAL_INT32(before, nt_ui_test_clay_default_max_element_count());
+}
+
+/* create_context likewise must restore Clay's global default after staging
+ * desc->max_elements into it for Clay_Initialize to inherit. */
+static void test_create_context_restores_clay_default(void) {
+    const int32_t before = nt_ui_test_clay_default_max_element_count();
+    nt_ui_create_desc_t custom = nt_ui_create_desc_defaults();
+    custom.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT * 2U; /* != before */
+    /* Need a bigger arena because larger max_elements grows Clay's arena. */
+    alignas(NT_UI_ARENA_ALIGN) static uint8_t big_arena[NT_UI_DEFAULT_ARENA_SIZE * 4U];
+    nt_ui_context_t *ctx = nt_ui_create_context(big_arena, sizeof big_arena, &custom);
+    TEST_ASSERT_NOT_NULL(ctx);
+    TEST_ASSERT_EQUAL_INT32(before, nt_ui_test_clay_default_max_element_count());
+    nt_ui_destroy_context(ctx);
+}
+
 /* create_context must not leak active-ctx selection: Clay_Initialize
  * unconditionally sets current=new, so create must save/restore. Caller's
  * pre-create current (NULL if none) must survive. */
@@ -122,5 +147,7 @@ int main(void) {
     RUN_TEST(test_destroy_in_frame_asserts);
     RUN_TEST(test_create_context_restores_clay_current);
     RUN_TEST(test_destroy_clears_dangling_clay_current);
+    RUN_TEST(test_min_arena_size_restores_clay_default);
+    RUN_TEST(test_create_context_restores_clay_default);
     return UNITY_END();
 }
