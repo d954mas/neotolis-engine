@@ -508,6 +508,96 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
 }
 // #endregion
 
+// #region emit_geometry
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index, const float (*positions)[2], uint32_t vertex_count, const uint16_t *indices, uint32_t index_count,
+                                      const float *world_matrix, uint32_t color_packed) {
+    NT_ASSERT(s_sprite.initialized);
+    NT_ASSERT(positions != NULL && indices != NULL && world_matrix != NULL);
+    NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_geometry: invalid atlas handle");
+    NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_geometry: atlas must be READY");
+    NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_emit_geometry: call nt_sprite_renderer_set_material first");
+    NT_ASSERT(vertex_count > 0U && index_count > 0U && "nt_sprite_renderer_emit_geometry: empty geometry");
+    NT_ASSERT(vertex_count <= NT_SPRITE_RENDERER_MAX_VERTICES && "nt_sprite_renderer_emit_geometry: vertex_count exceeds staging capacity");
+    NT_ASSERT(index_count <= NT_SPRITE_RENDERER_MAX_INDICES && "nt_sprite_renderer_emit_geometry: index_count exceeds staging capacity");
+
+    nt_atlas_region_handles_t h;
+    nt_atlas_get_region_handles(atlas, region_index, &h);
+    if (h.region->vertex_count == 0U) {
+        return; /* tombstone */
+    }
+    const uint32_t page_tex = nt_resource_get(h.page_resource);
+    if (!ensure_current_cmd_page_texture(page_tex)) {
+        return;
+    }
+
+    /* Overflow handling mirrors emit_region_resolved: snapshot the open
+     * cmd, flush, reopen with the same state. */
+    if (s_sprite.vertex_count + vertex_count > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + index_count > NT_SPRITE_RENDERER_MAX_INDICES) {
+        nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
+        nt_sprite_renderer_flush();
+        open_cmd_from_snapshot(&snapshot);
+    }
+
+    /* Sample at the region's UV centroid -- the corner of vertex 0 would
+     * land at the texel boundary and bleed into neighbours under linear
+     * filtering. Centroid is safely inside the region for any convex
+     * polygon, and exactly the pixel center for a 4-vert axis-aligned
+     * white region. uint16 atlas_u/v sums fit uint32 for the polygon
+     * worst case (8 verts * 65535 << 2^32). */
+    uint32_t sum_u = 0;
+    uint32_t sum_v = 0;
+    for (uint8_t i = 0; i < h.region->vertex_count; i++) {
+        sum_u += h.raw_vertices[i].atlas_u;
+        sum_v += h.raw_vertices[i].atlas_v;
+    }
+    const uint16_t shared_u = (uint16_t)(sum_u / h.region->vertex_count);
+    const uint16_t shared_v = (uint16_t)(sum_v / h.region->vertex_count);
+
+    const uint8_t cr = (uint8_t)(color_packed & 0xFFU);
+    const uint8_t cg = (uint8_t)((color_packed >> 8) & 0xFFU);
+    const uint8_t cb = (uint8_t)((color_packed >> 16) & 0xFFU);
+    const uint8_t ca = (uint8_t)((color_packed >> 24) & 0xFFU);
+
+    const float *m = world_matrix;
+    const float tx = m[12];
+    const float ty = m[13];
+    const float tz = m[14];
+
+    const uint32_t base = s_sprite.vertex_count;
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const float px = positions[i][0];
+        const float py = positions[i][1];
+        nt_sprite_vertex_t *v = &s_sprite.vertices[base + i];
+        v->position[0] = (m[0] * px) + (m[4] * py) + tx;
+        v->position[1] = (m[1] * px) + (m[5] * py) + ty;
+        v->position[2] = (m[2] * px) + (m[6] * py) + tz;
+        v->texcoord[0] = shared_u;
+        v->texcoord[1] = shared_v;
+        v->color[0] = cr;
+        v->color[1] = cg;
+        v->color[2] = cb;
+        v->color[3] = ca;
+    }
+    s_sprite.vertex_count += vertex_count;
+
+    uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count];
+    for (uint32_t i = 0; i < index_count; i++) {
+        const uint32_t rebased = base + (uint32_t)indices[i];
+        NT_ASSERT(rebased <= UINT16_MAX && "sprite uint16 index chunk overflow");
+        NT_ASSERT(indices[i] < vertex_count && "nt_sprite_renderer_emit_geometry: index out of range");
+        out_idx[i] = (uint16_t)rebased;
+    }
+    s_sprite.index_count += index_count;
+
+#ifdef NT_TEST_ACCESS
+    s_sprite.last_emit_vertex_count = vertex_count;
+    s_sprite.last_emit_index_count = index_count;
+    s_sprite.last_emit_first_vertex = base;
+#endif
+}
+// #endregion
+
 // #region draw_list
 /* Phase 1: open a cmd per batch_key, stream verts into staging via
  * emit_one. Phase 2 = nt_sprite_renderer_flush. */
@@ -682,6 +772,13 @@ void nt_sprite_renderer_test_last_emit_position(uint32_t v_idx, float out[3]) {
     out[0] = v->position[0];
     out[1] = v->position[1];
     out[2] = v->position[2];
+}
+
+void nt_sprite_renderer_test_last_emit_texcoord(uint32_t v_idx, uint16_t out[2]) {
+    NT_ASSERT(v_idx < s_sprite.last_emit_vertex_count && "last_emit_texcoord: index out of range");
+    const nt_sprite_vertex_t *v = &s_sprite.vertices[s_sprite.last_emit_first_vertex + v_idx];
+    out[0] = v->texcoord[0];
+    out[1] = v->texcoord[1];
 }
 bool nt_sprite_renderer_test_initialized(void) { return s_sprite.initialized; }
 #endif

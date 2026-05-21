@@ -84,6 +84,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
 
     nt_sprite_renderer_init(&(nt_sprite_renderer_desc_t){.max_pipelines = 4});
     nt_text_renderer_init();
+    nt_ui_module_init();
 
     /* nt_stats is NOT init'd here -- nt_ui_walk does not depend on it.
      * Tests that need nt_stats (e.g. test_nt_ui_stats verifying the
@@ -94,8 +95,21 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     fx->sprite_material = ui_walker_fixture_make_material();
     fx->text_material = ui_walker_fixture_make_material();
 
-    fx->ctx = nt_ui_create_context(arena, arena_size);
+    /* Stub font: valid pool slot, no resource attached. nt_font_valid() is
+     * true so walker's contract assert passes, but units_per_em stays 0 so
+     * nt_text_renderer_draw_n early-returns before any glyph work. */
+    fx->stub_font = nt_font_create(&(nt_font_create_desc_t){
+        .curve_texture_width = 64,
+        .curve_texture_height = 64,
+        .band_texture_height = 16,
+        .band_count = 4,
+        .measure_cache_size = 0,
+    });
+
+    const nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    fx->ctx = nt_ui_create_context(arena, arena_size, &desc);
     TEST_ASSERT_NOT_NULL(fx->ctx);
+    nt_ui_set_font(fx->ctx, 0U, fx->stub_font);
 
     if ((bind & UI_WALKER_FX_BIND_ATLAS) != 0U) {
         nt_ui_set_atlas_white_region(fx->ctx, fx->atlas.handle, fx->atlas.white_region_idx);
@@ -115,8 +129,12 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
         nt_ui_destroy_context(fx->ctx);
         fx->ctx = NULL;
     }
+    if (nt_font_valid(fx->stub_font)) {
+        nt_font_destroy(fx->stub_font);
+    }
     minimal_ui_atlas_destroy(&fx->atlas);
 
+    nt_ui_module_shutdown();
     nt_sprite_renderer_shutdown();
     nt_text_renderer_shutdown();
     nt_gfx_end_pass();

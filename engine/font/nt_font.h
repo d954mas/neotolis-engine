@@ -94,9 +94,11 @@ typedef struct {
 
 /* Length-aware (Clay_StringSlice contract). NULL/len=0 → {0,0}; UTF-8 cut at
  * `len` boundary → trailing partial codepoint dropped; embedded NUL is a
- * normal codepoint (the NUL-terminated wrapper below stops at it via strlen). */
-nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size);
-nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size);
+ * normal codepoint (the NUL-terminated wrapper below stops at it via strlen).
+ * letter_spacing adds N-1 extra pixels of horizontal gap for N visible
+ * codepoints. Non-zero letter_spacing bypasses the measure cache. */
+nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size, float letter_spacing);
+nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size, float letter_spacing);
 
 /* Both no-op on invalid/destroyed handles — safe to call from teardown. */
 void nt_font_measure_invalidate_cache(void);

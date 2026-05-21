@@ -5,6 +5,7 @@
 
 #include "clay.h"
 #include "graphics/nt_gfx.h"
+#include "renderers/nt_sprite_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"
@@ -115,7 +116,8 @@ static void test_walk_without_end_asserts(void) {
     /* Use a fresh arena+ctx outside the fixture so we don't inherit
      * frozen_cmds from injection. */
     alignas(NT_UI_ARENA_ALIGN) static uint8_t fresh_arena[NT_UI_DEFAULT_ARENA_SIZE];
-    nt_ui_context_t *fresh = nt_ui_create_context(fresh_arena, sizeof fresh_arena);
+    const nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
+    nt_ui_context_t *fresh = nt_ui_create_context(fresh_arena, sizeof fresh_arena, &desc);
     TEST_ASSERT_NOT_NULL(fresh);
     nt_ui_set_atlas_white_region(fresh, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
     nt_ui_set_sprite_material(fresh, s_fx.sprite_material);
@@ -134,6 +136,21 @@ static void test_walk_negative_viewport_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
+/* Zero-size viewport (minimized window / mobile orientation transition) is
+ * a legitimate runtime state -- walker must silent no-op, not assert. */
+static void test_walk_zero_viewport_silent_noop(void) {
+    inject_frozen_cmds(0);
+    const uint32_t calls_before = nt_sprite_renderer_test_draw_call_count();
+    nt_ui_target_t zero_w = {.viewport = {0.0F, 0.0F, 0.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &zero_w); /* Must not crash. */
+    nt_ui_target_t zero_h = {.viewport = {0.0F, 0.0F, 800.0F, 0.0F}};
+    nt_ui_walk(s_fx.ctx, &zero_h);
+    nt_ui_target_t zero_both = {.viewport = {0.0F, 0.0F, 0.0F, 0.0F}};
+    nt_ui_walk(s_fx.ctx, &zero_both);
+    /* No draw calls emitted from any of the three. */
+    TEST_ASSERT_EQUAL_UINT32(calls_before, nt_sprite_renderer_test_draw_call_count());
+}
+
 /* Macro to set s_setup_bind BEFORE RUN_TEST invokes setUp -- Unity runs
  * setUp first, then the test function, so the mode flag must be written
  * by the caller of RUN_TEST, not from inside the test body. */
@@ -149,6 +166,8 @@ int main(void) {
     RUN_TEST(test_walk_without_end_asserts);
     s_setup_bind = UI_WALKER_FX_BIND_ALL;
     RUN_TEST(test_walk_negative_viewport_asserts);
+    s_setup_bind = UI_WALKER_FX_BIND_ALL;
+    RUN_TEST(test_walk_zero_viewport_silent_noop);
     s_setup_bind = UI_WALKER_FX_BIND_ALL;
     RUN_TEST(test_second_walk_identical);
     s_setup_bind = UI_WALKER_FX_BIND_ALL;

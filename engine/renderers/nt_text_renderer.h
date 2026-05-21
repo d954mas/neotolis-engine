@@ -26,9 +26,11 @@ void nt_text_renderer_set_material(nt_material_t mat);
 void nt_text_renderer_set_font(nt_font_t font);
 
 /* NULL/len=0 → no-op. UTF-8 cut at `len` boundary → trailing partial
- * codepoint dropped (no over-read past utf8+len). */
-void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4]);
-void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4]);
+ * codepoint dropped (no over-read past utf8+len). letter_spacing adds
+ * N-1 extra pixels of pen advance for N visible glyphs (newlines reset
+ * pen_x and do not count as glyphs). */
+void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4], float letter_spacing);
+void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_spacing);
 
 void nt_text_renderer_flush(void);
 

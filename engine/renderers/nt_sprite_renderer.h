@@ -103,6 +103,29 @@ void nt_sprite_renderer_set_material(nt_material_t mat);
  * overflow is handled internally (auto flush + reopen, state preserved). */
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits);
 
+/* Emit an arbitrary triangle list sampling a single UV from the given
+ * atlas region. Intended for solid-color shapes drawn against a
+ * white-pixel region (rounded corners, ring sectors, custom fan/strip).
+ *
+ *   atlas, region_index - the region whose UV centroid is sampled by
+ *                         every emitted vertex. Centroid (mean of region
+ *                         vertex UVs) avoids texel-corner sampling that
+ *                         would bleed neighbours under linear filtering.
+ *                         Region must be READY and have vertex_count > 0;
+ *                         tombstones no-op.
+ *   positions           - vertex_count XY pairs in local space.
+ *   indices             - index_count uint16s, local to this emit (rebased
+ *                         to staging base internally). Must reference
+ *                         indices < vertex_count.
+ *   world_matrix        - 16-float column-major mat4 (cglm convention),
+ *                         same subset read as emit_region.
+ *   color_packed        - 0xAABBGGRR.
+ *
+ * Capacity overflow handled internally (snapshot + flush + reopen).
+ * Caller MUST have called set_material first. */
+void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index, const float (*positions)[2], uint32_t vertex_count, const uint16_t *indices, uint32_t index_count,
+                                      const float *world_matrix, uint32_t color_packed);
+
 // #region test_access
 #ifdef NT_TEST_ACCESS
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void);
@@ -118,6 +141,9 @@ uint32_t nt_sprite_renderer_test_last_emit_index_count(void);
  * Flush only resets vertex_count, not the staging array data, so positions
  * are still readable post-draw_list via the captured first_vertex offset. */
 void nt_sprite_renderer_test_last_emit_position(uint32_t v_idx, float out[3]);
+/* Atlas texcoord of the i-th vertex of the last emit, in raw uint16 0..65535
+ * units (the shader normalizes to [0,1] via USHORT2N). */
+void nt_sprite_renderer_test_last_emit_texcoord(uint32_t v_idx, uint16_t out[2]);
 bool nt_sprite_renderer_test_initialized(void);
 #endif
 // #endregion

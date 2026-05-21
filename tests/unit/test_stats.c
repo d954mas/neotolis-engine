@@ -233,13 +233,15 @@ static void test_stats_draw_pitfall9_explicit_set_calls(void) {
     const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     const float white[4] = {1, 1, 1, 1};
 
-    nt_stats_draw(mat, font, identity, 16.0F, white);
+    /* draw_n asserts on font.id==0 (contract: caller must set_font first).
+     * Setters fire BEFORE the assert, so counters survive the longjmp. */
+    EXPECT_ASSERT(nt_stats_draw(mat, font, identity, 16.0F, white));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_set_material_calls());
     TEST_ASSERT_EQUAL_UINT32(1U, nt_text_renderer_test_set_font_calls());
 
     /* Second call with SAME material/font: still increments because the
      * caller (nt_stats_draw) ALWAYS calls both setters explicitly. */
-    nt_stats_draw(mat, font, identity, 16.0F, white);
+    EXPECT_ASSERT(nt_stats_draw(mat, font, identity, 16.0F, white));
     TEST_ASSERT_EQUAL_UINT32(2U, nt_text_renderer_test_set_material_calls());
     TEST_ASSERT_EQUAL_UINT32(2U, nt_text_renderer_test_set_font_calls());
 

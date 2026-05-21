@@ -1,6 +1,7 @@
 #include "ui/nt_ui.h"
 
 #include "atlas/nt_atlas.h"
+#include "core/nt_builtins.h"
 #include "graphics/nt_gfx.h"
 #include "material/nt_material.h"
 #include "renderers/nt_sprite_renderer.h"
@@ -92,25 +93,57 @@ static Clay_Dimensions nt_ui_measure_text_cb(Clay_StringSlice text, Clay_TextEle
     if (!nt_font_valid(font)) {
         return (Clay_Dimensions){0};
     }
-    nt_text_size_t s = nt_font_measure_n(font, text.chars, (size_t)text.length, (float)config->fontSize);
+    const float ls = (float)config->letterSpacing;
+    nt_text_size_t s = nt_font_measure_n(font, text.chars, (size_t)text.length, (float)config->fontSize, ls);
+    /* Clay convention: callback returns word width WITH one trailing
+     * letterSpacing slot, then Clay subtracts a single trailing slot at
+     * end-of-line (clay.h Clay__MeasureTextCached line 1677). Our
+     * nt_font_measure_n returns the CSS-style (N-1) gap width, so add one
+     * trailing slot here when the measurement produced any width. Without
+     * this, Clay's bbox is short by exactly one letterSpacing relative to
+     * the rendered text. */
+    if (s.width > 0.0F && ls != 0.0F) {
+        s.width += ls;
+    }
     return (Clay_Dimensions){.width = s.width, .height = s.height};
 }
+// #endregion
+
+// #region module_init
+/* Wire measure callback into Clay's global function pointer. Bypasses
+ * Clay_SetMeasureTextFunction (which requires an active Clay context) by
+ * writing directly to the global -- legal because CLAY_IMPLEMENTATION
+ * places Clay's internals in this TU. */
+void nt_ui_module_init(void) { Clay__MeasureText = nt_ui_measure_text_cb; }
+void nt_ui_module_shutdown(void) { Clay__MeasureText = NULL; }
 // #endregion
 
 // #region create_destroy
 /* ctx struct rounded up to cache-line so Clay's arena starts aligned. */
 static size_t nt_ui_ctx_size_aligned(void) { return (sizeof(struct nt_ui_context) + 63U) & ~(size_t)63U; }
 
-size_t nt_ui_min_arena_size(void) {
-    /* Lock element-count default before Clay_MinMemorySize reads it. */
-    Clay_SetMaxElementCount(NT_UI_DEFAULT_MAX_ELEMENT_COUNT);
-    return nt_ui_ctx_size_aligned() + (size_t)Clay_MinMemorySize();
+size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
+    NT_ASSERT(desc != NULL && "nt_ui_min_arena_size: desc must be non-NULL");
+    NT_ASSERT(desc->max_elements > 0U && "nt_ui_min_arena_size: desc->max_elements must be > 0");
+    /* Clay_SetMaxElementCount writes to GLOBAL Clay__defaultMaxElementCount
+     * when no current context exists, or to current context otherwise. We
+     * want to size against desc-> max_elements WITHOUT mutating any active
+     * ctx -- save current, null it, set, query, restore. */
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(NULL);
+    Clay_SetMaxElementCount((int32_t)desc->max_elements);
+    const size_t clay_bytes = (size_t)Clay_MinMemorySize();
+    Clay_SetCurrentContext(saved);
+    return nt_ui_ctx_size_aligned() + clay_bytes;
 }
 
-nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_ui_create_desc_t *desc) {
     NT_ASSERT(arena != NULL && "nt_ui_create_context: arena must be non-NULL");
+    NT_ASSERT(desc != NULL && "nt_ui_create_context: desc must be non-NULL");
+    NT_ASSERT(Clay__MeasureText == nt_ui_measure_text_cb && "nt_ui_create_context: call nt_ui_module_init() once before any create_context");
     NT_ASSERT(((uintptr_t)arena & (NT_UI_ARENA_ALIGN - 1U)) == 0U && "nt_ui_create_context: arena must be NT_UI_ARENA_ALIGN-aligned (alignas(NT_UI_ARENA_ALIGN) static uint8_t arena[N])");
-    NT_ASSERT(arena_size >= nt_ui_min_arena_size() && "nt_ui_create_context: arena_size < nt_ui_min_arena_size()");
+    NT_ASSERT(arena_size >= nt_ui_min_arena_size(desc) && "nt_ui_create_context: arena_size < nt_ui_min_arena_size(desc)");
 
     nt_ui_context_t *ctx = (nt_ui_context_t *)arena;
     memset(ctx, 0, sizeof(*ctx));
@@ -119,12 +152,22 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size) {
     void *clay_mem = (char *)arena + ctx_size;
     const size_t clay_size = arena_size - ctx_size;
 
+    /* Stage desc->max_elements into Clay's global default so Clay_Initialize
+     * inherits it for this new context. Save/restore current ctx so this
+     * does not bleed into an active sibling. */
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(NULL);
+    Clay_SetMaxElementCount((int32_t)desc->max_elements);
+
     ctx->in_frame = false;
     ctx->clay_arena = Clay_CreateArenaWithCapacityAndMemory(clay_size, clay_mem);
     ctx->clay = Clay_Initialize(ctx->clay_arena, (Clay_Dimensions){.width = 1.0F, .height = 1.0F}, (Clay_ErrorHandler){.errorHandlerFunction = nt_ui_clay_error_cb, .userData = ctx});
 
-    /* Clay_SetMeasureTextFunction is idempotent; wire unconditionally. */
-    Clay_SetMeasureTextFunction(nt_ui_measure_text_cb, NULL);
+    /* Restore the previously-current context (if any). The caller picks
+     * which ctx is "current" via nt_ui_begin for each frame anyway. */
+    if (saved != NULL) {
+        Clay_SetCurrentContext(saved);
+    }
 
     return ctx;
 }
@@ -222,37 +265,285 @@ static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, 
 }
 // #endregion
 
+// #region helper_emit_rounded_rect
+/* Per-quarter-arc segment count. 6 keeps the triangle count low (28 tris
+ * for a fully rounded rect) while staying smooth at typical UI radii.
+ *
+ * Hot-path note: trig (cosf/sinf) dominates here -- ~28 calls per rounded
+ * rect, ~56 per rounded border. If profiling shows this in the top hot
+ * path, precompute a (SEG+1) x 4 sin/cos LUT at startup and table-lookup
+ * here instead of computing each frame. UV centroid in emit_geometry is
+ * orders of magnitude cheaper and not worth caching first. */
+#define NT_UI_CORNER_SEGMENTS 6
+_Static_assert(NT_UI_CORNER_SEGMENTS >= 2 && NT_UI_CORNER_SEGMENTS <= 32, "NT_UI_CORNER_SEGMENTS must be in [2, 32]: lower degenerate, higher wastes stack and staging");
+#define NT_UI_PI_F 3.14159265358979323846F
+
+/* Triangle fan from rect center to the boundary. Each corner contributes
+ * either 1 vertex (radius 0) or NT_UI_CORNER_SEGMENTS+1 arc vertices.
+ * Boundary order is screen-CW starting at TL arc entry on the left edge. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, Clay_CornerRadius cr, uint32_t color_packed) {
+    /* Clamp radii so opposite corners can't overlap. Negative input is
+     * treated as zero. */
+    const float half_w = w * 0.5F;
+    const float half_h = h * 0.5F;
+    const float clamp = (half_w < half_h) ? half_w : half_h;
+    float tl = (cr.topLeft > 0.0F) ? cr.topLeft : 0.0F;
+    float tr = (cr.topRight > 0.0F) ? cr.topRight : 0.0F;
+    float bl = (cr.bottomLeft > 0.0F) ? cr.bottomLeft : 0.0F;
+    float br = (cr.bottomRight > 0.0F) ? cr.bottomRight : 0.0F;
+    if (tl > clamp) {
+        tl = clamp;
+    }
+    if (tr > clamp) {
+        tr = clamp;
+    }
+    if (bl > clamp) {
+        bl = clamp;
+    }
+    if (br > clamp) {
+        br = clamp;
+    }
+
+    /* All-square fast path stays on emit_screen_rect (1 quad, 4 verts). */
+    if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {
+        emit_screen_rect(atlas, region_index, x, y, w, h, color_packed);
+        return;
+    }
+
+    /* Worst case: center + 4 * (segments+1) boundary verts. */
+    float positions[1 + (4 * (NT_UI_CORNER_SEGMENTS + 1))][2];
+    uint16_t indices[4 * (NT_UI_CORNER_SEGMENTS + 1) * 3];
+
+    positions[0][0] = x + half_w;
+    positions[0][1] = y + half_h;
+    uint32_t vi = 1;
+
+    /* TL arc: math angle π → 1.5π (sweeps from west to north of corner center). */
+    if (tl == 0.0F) {
+        positions[vi][0] = x;
+        positions[vi][1] = y;
+        vi++;
+    } else {
+        const float cx = x + tl;
+        const float cy = y + tl;
+        for (uint32_t s = 0; s <= NT_UI_CORNER_SEGMENTS; s++) {
+            const float t = (float)s / (float)NT_UI_CORNER_SEGMENTS;
+            const float a = NT_UI_PI_F * (1.0F + 0.5F * t);
+            positions[vi][0] = cx + tl * cosf(a);
+            positions[vi][1] = cy + tl * sinf(a);
+            vi++;
+        }
+    }
+    /* TR arc: 1.5π → 2π. */
+    if (tr == 0.0F) {
+        positions[vi][0] = x + w;
+        positions[vi][1] = y;
+        vi++;
+    } else {
+        const float cx = x + w - tr;
+        const float cy = y + tr;
+        for (uint32_t s = 0; s <= NT_UI_CORNER_SEGMENTS; s++) {
+            const float t = (float)s / (float)NT_UI_CORNER_SEGMENTS;
+            const float a = NT_UI_PI_F * (1.5F + 0.5F * t);
+            positions[vi][0] = cx + tr * cosf(a);
+            positions[vi][1] = cy + tr * sinf(a);
+            vi++;
+        }
+    }
+    /* BR arc: 0 → 0.5π. */
+    if (br == 0.0F) {
+        positions[vi][0] = x + w;
+        positions[vi][1] = y + h;
+        vi++;
+    } else {
+        const float cx = x + w - br;
+        const float cy = y + h - br;
+        for (uint32_t s = 0; s <= NT_UI_CORNER_SEGMENTS; s++) {
+            const float t = (float)s / (float)NT_UI_CORNER_SEGMENTS;
+            const float a = NT_UI_PI_F * (0.5F * t);
+            positions[vi][0] = cx + br * cosf(a);
+            positions[vi][1] = cy + br * sinf(a);
+            vi++;
+        }
+    }
+    /* BL arc: 0.5π → π. */
+    if (bl == 0.0F) {
+        positions[vi][0] = x;
+        positions[vi][1] = y + h;
+        vi++;
+    } else {
+        const float cx = x + bl;
+        const float cy = y + h - bl;
+        for (uint32_t s = 0; s <= NT_UI_CORNER_SEGMENTS; s++) {
+            const float t = (float)s / (float)NT_UI_CORNER_SEGMENTS;
+            const float a = NT_UI_PI_F * (0.5F + 0.5F * t);
+            positions[vi][0] = cx + bl * cosf(a);
+            positions[vi][1] = cy + bl * sinf(a);
+            vi++;
+        }
+    }
+
+    /* Triangle fan: (center=0, i, i+1) for i in [1..vi-1], wrap last to 1. */
+    uint32_t ii = 0;
+    for (uint32_t i = 1; i < vi; i++) {
+        const uint16_t next = (uint16_t)((i + 1 < vi) ? (i + 1) : 1);
+        indices[ii++] = 0U;
+        indices[ii++] = (uint16_t)i;
+        indices[ii++] = next;
+    }
+
+    const float identity[16] = {
+        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
+    };
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, identity, color_packed);
+}
+// #endregion
+
 // #region helper_emit_border
-/* Up to 4 thin RECT quads. Top/bottom run the full width; left/right are
- * inset by top/bottom heights so corners don't double-blend. */
+/* Square-corner fast path: up to 4 thin RECT quads. Top/bottom run the
+ * full width; left/right are inset by top/bottom so corners don't blend. */
+static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, uint32_t col) {
+    const float top = (float)widths.top;
+    const float bot = (float)widths.bottom;
+    const float lft = (float)widths.left;
+    const float rgt = (float)widths.right;
+    if (widths.top) {
+        emit_screen_rect(atlas, region_index, bb.x, bb.y, bb.width, top, col);
+    }
+    if (widths.bottom) {
+        emit_screen_rect(atlas, region_index, bb.x, bb.y + bb.height - bot, bb.width, bot, col);
+    }
+    if (widths.left) {
+        emit_screen_rect(atlas, region_index, bb.x, bb.y + top, lft, bb.height - top - bot, col);
+    }
+    if (widths.right) {
+        emit_screen_rect(atlas, region_index, bb.x + bb.width - rgt, bb.y + top, rgt, bb.height - top - bot, col);
+    }
+}
+
+/* Append one corner's (outer,inner) vertex pair(s) into the strip array.
+ * a_start_factor scales by π for the arc start (1.0=TL/π, 1.5=TR/3π/2,
+ * 0.0=BR/0, 0.5=BL/π/2). a_start_factor sweep is always +0.5π. radius==0
+ * collapses to a single sharp pair at (sharp_x, sharp_y) (outer) and
+ * (sharp_x + sx*wx, sharp_y + sy*wy) (inner). */
+static uint32_t emit_corner_strip_pairs(float (*pos)[2], uint32_t vi, float radius, float cx, float cy, float w_perp_x, float w_perp_y, float sharp_x, float sharp_y, float sign_x, float sign_y,
+                                        float a_start_factor) {
+    if (radius == 0.0F) {
+        pos[vi][0] = sharp_x;
+        pos[vi][1] = sharp_y;
+        vi++;
+        pos[vi][0] = sharp_x + (sign_x * w_perp_x);
+        pos[vi][1] = sharp_y + (sign_y * w_perp_y);
+        vi++;
+        return vi;
+    }
+    /* Clamp inner radii to 0 -- when border width exceeds the corner radius,
+     * the inner curve degenerates to a flat segment through the corner
+     * center on that axis. Matches CSS/Godot/Skia behaviour. */
+    const float irx = (radius > w_perp_x) ? (radius - w_perp_x) : 0.0F;
+    const float iry = (radius > w_perp_y) ? (radius - w_perp_y) : 0.0F;
+    const float a_start = NT_UI_PI_F * a_start_factor;
+    for (uint32_t s = 0; s <= NT_UI_CORNER_SEGMENTS; s++) {
+        const float t = (float)s / (float)NT_UI_CORNER_SEGMENTS;
+        const float a = a_start + (NT_UI_PI_F * 0.5F * t);
+        const float cc = cosf(a);
+        const float ss = sinf(a);
+        pos[vi][0] = cx + (radius * cc);
+        pos[vi][1] = cy + (radius * ss);
+        vi++;
+        pos[vi][0] = cx + (irx * cc);
+        pos[vi][1] = cy + (iry * ss);
+        vi++;
+    }
+    return vi;
+}
+
+/* Tessellated ring between the outer rounded-rect boundary and the inner
+ * boundary (inset by per-side widths). Inner radius on each axis clamps
+ * to max(0, radius - adjacent_width); a zero-width side produces a
+ * zero-area strip segment (visually skipped). Matches CSS/Godot/Skia.
+ * Top+bottom widths must still fit bbox height (and left+right the width). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, Clay_CornerRadius cr_in, uint32_t color_packed) {
+    const float x = bb.x;
+    const float y = bb.y;
+    const float w = bb.width;
+    const float h = bb.height;
+    const float top = (float)widths.top;
+    const float bot = (float)widths.bottom;
+    const float lft = (float)widths.left;
+    const float rgt = (float)widths.right;
+    NT_ASSERT(top + bot <= h && "nt_ui BORDER: top+bottom widths exceed bbox.height");
+    NT_ASSERT(lft + rgt <= w && "nt_ui BORDER: left+right widths exceed bbox.width");
+
+    const float half_w = w * 0.5F;
+    const float half_h = h * 0.5F;
+    const float clamp_r = (half_w < half_h) ? half_w : half_h;
+    float tl = (cr_in.topLeft > 0.0F) ? cr_in.topLeft : 0.0F;
+    float tr = (cr_in.topRight > 0.0F) ? cr_in.topRight : 0.0F;
+    float bl = (cr_in.bottomLeft > 0.0F) ? cr_in.bottomLeft : 0.0F;
+    float br = (cr_in.bottomRight > 0.0F) ? cr_in.bottomRight : 0.0F;
+    if (tl > clamp_r) {
+        tl = clamp_r;
+    }
+    if (tr > clamp_r) {
+        tr = clamp_r;
+    }
+    if (bl > clamp_r) {
+        bl = clamp_r;
+    }
+    if (br > clamp_r) {
+        br = clamp_r;
+    }
+
+    if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {
+        emit_square_border(atlas, region_index, bb, widths, color_packed);
+        return;
+    }
+
+    /* Rounded path supports partial borders: a zero side width collapses
+     * its strip to zero-area triangles (no visible stroke). A side width
+     * larger than the corner radius clamps the inner curve to 0 on that
+     * axis (corner becomes "filled" inside). CSS/Godot/Skia parity. */
+
+    /* Worst case: 4 * (SEG+1) pairs * 2 verts = 56 for SEG=6. */
+    float positions[4 * (NT_UI_CORNER_SEGMENTS + 1) * 2][2];
+    uint32_t vi = 0;
+
+    vi = emit_corner_strip_pairs(positions, vi, tl, x + tl, y + tl, lft, top, x, y, 1.0F, 1.0F, 1.0F);
+    vi = emit_corner_strip_pairs(positions, vi, tr, x + w - tr, y + tr, rgt, top, x + w, y, -1.0F, 1.0F, 1.5F);
+    vi = emit_corner_strip_pairs(positions, vi, br, x + w - br, y + h - br, rgt, bot, x + w, y + h, -1.0F, -1.0F, 0.0F);
+    vi = emit_corner_strip_pairs(positions, vi, bl, x + bl, y + h - bl, lft, bot, x, y + h, 1.0F, -1.0F, 0.5F);
+
+    /* Triangle strip with wrap. Each pair k: outer at 2k, inner at 2k+1. */
+    const uint32_t pair_count = vi / 2;
+    uint16_t indices[4 * (NT_UI_CORNER_SEGMENTS + 1) * 6];
+    uint32_t ii = 0;
+    for (uint32_t k = 0; k < pair_count; k++) {
+        const uint32_t k_next = (k + 1 < pair_count) ? (k + 1) : 0;
+        const uint16_t out_k = (uint16_t)(2 * k);
+        const uint16_t in_k = (uint16_t)((2 * k) + 1);
+        const uint16_t out_n = (uint16_t)(2 * k_next);
+        const uint16_t in_n = (uint16_t)((2 * k_next) + 1);
+        indices[ii++] = out_k;
+        indices[ii++] = in_k;
+        indices[ii++] = out_n;
+        indices[ii++] = in_k;
+        indices[ii++] = in_n;
+        indices[ii++] = out_n;
+    }
+
+    const float identity[16] = {
+        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
+    };
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, identity, color_packed);
+}
+
 static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
     const Clay_BorderRenderData *b = &c->renderData.border;
-    const Clay_BoundingBox bb = c->boundingBox;
     const uint32_t col = nt_color_pack_clay(b->color);
-    const nt_resource_t atlas = ctx->atlas;
-    const uint32_t wr = ctx->white_region;
-
-    /* Clay borders are uint16_t -- top+bot > bb.height (or lft+rgt >
-     * bb.width) would emit a negative-size rect downstream. */
-    const float top = (float)b->width.top;
-    const float bot = (float)b->width.bottom;
-    const float lft = (float)b->width.left;
-    const float rgt = (float)b->width.right;
-    NT_ASSERT(top + bot <= bb.height && "nt_ui BORDER: top+bottom widths exceed bbox.height");
-    NT_ASSERT(lft + rgt <= bb.width && "nt_ui BORDER: left+right widths exceed bbox.width");
-
-    if (b->width.top) {
-        emit_screen_rect(atlas, wr, bb.x, bb.y, bb.width, top, col);
-    }
-    if (b->width.bottom) {
-        emit_screen_rect(atlas, wr, bb.x, bb.y + bb.height - bot, bb.width, bot, col);
-    }
-    if (b->width.left) {
-        emit_screen_rect(atlas, wr, bb.x, bb.y + top, lft, bb.height - top - bot, col);
-    }
-    if (b->width.right) {
-        emit_screen_rect(atlas, wr, bb.x + bb.width - rgt, bb.y + top, rgt, bb.height - top - bot, col);
-    }
+    emit_rounded_border(ctx->atlas, ctx->white_region, c->boundingBox, b->width, b->cornerRadius, col);
 }
 // #endregion
 
@@ -263,6 +554,11 @@ static void emit_image(const Clay_RenderCommand *c) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
     NT_ASSERT(p != NULL && "nt_ui IMAGE: imageData must point to nt_ui_image_payload_t");
     NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle (zero id)");
+    /* IMAGE corner radius is not supported -- bake rounded edges into the
+     * atlas instead. Polygon atlas regions would already escape any
+     * bbox-aligned corner clip. */
+    const Clay_CornerRadius cr = c->renderData.image.cornerRadius;
+    NT_ASSERT(cr.topLeft == 0.0F && cr.topRight == 0.0F && cr.bottomLeft == 0.0F && cr.bottomRight == 0.0F && "nt_ui IMAGE: cornerRadius unsupported; pre-bake into atlas");
     /* Async-loading atlas: skip this frame. */
     if (!nt_resource_is_ready(p->atlas)) {
         return;
@@ -305,17 +601,9 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
     nt_sprite_renderer_flush();
 
     const Clay_TextRenderData *t = &c->renderData.text;
-    if ((uint32_t)t->fontId >= NT_UI_MAX_FONTS) {
-        NT_LOG_WARN_ONCE("nt_ui TEXT: fontId %u >= NT_UI_MAX_FONTS=%u; skipping (further occurrences silenced)", (unsigned)t->fontId, (unsigned)NT_UI_MAX_FONTS);
-        rebind_sprite_after_flush(ctx);
-        return;
-    }
+    NT_ASSERT((uint32_t)t->fontId < NT_UI_MAX_FONTS && "nt_ui TEXT: fontId out of range; check CLAY_TEXT_CONFIG vs NT_UI_MAX_FONTS");
     nt_font_t font = ctx->fonts[t->fontId];
-    if (!nt_font_valid(font)) {
-        NT_LOG_WARN_ONCE("nt_ui TEXT: fontId %u resolves to an invalid font handle; skipping (further occurrences silenced)", (unsigned)t->fontId);
-        rebind_sprite_after_flush(ctx);
-        return;
-    }
+    NT_ASSERT(nt_font_valid(font) && "nt_ui TEXT: font slot empty; call nt_ui_set_font(ctx, fontId, font) before declaring TEXT with this fontId");
 
     nt_text_renderer_set_font(font);
     nt_text_renderer_set_material(ctx->text_material);
@@ -331,7 +619,7 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
         t->textColor.b / 255.0F,
         t->textColor.a / 255.0F,
     };
-    nt_text_renderer_draw_n(t->stringContents.chars, (size_t)t->stringContents.length, m, (float)t->fontSize, color);
+    nt_text_renderer_draw_n(t->stringContents.chars, (size_t)t->stringContents.length, m, (float)t->fontSize, color, (float)t->letterSpacing);
     rebind_sprite_after_flush(ctx);
 }
 // #endregion
@@ -472,7 +760,7 @@ static void dispatch_command(nt_ui_context_t *ctx, const Clay_RenderCommand *c, 
     case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         const uint32_t col = nt_color_pack_clay(r->backgroundColor);
-        emit_screen_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, col);
+        emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, r->cornerRadius, col);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER:
@@ -506,7 +794,11 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
      * vh==0 (GL undefined). Origin x/y may be zero. */
     NT_ASSERT(isfinite(target->viewport[0]) && isfinite(target->viewport[1]) && isfinite(target->viewport[2]) && isfinite(target->viewport[3]) && "nt_ui_walk: target->viewport must be finite");
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && "nt_ui_walk: target->viewport origin (x,y) must be non-negative");
-    NT_ASSERT(target->viewport[2] > 0.0F && target->viewport[3] > 0.0F && "nt_ui_walk: target->viewport (w,h) must be > 0 (zero-size walk is not a supported no-op)");
+    /* Zero-size viewport is a legitimate runtime state (minimized browser
+     * tab, mobile orientation transition). Silent no-op rather than assert. */
+    if (target->viewport[2] <= 0.0F || target->viewport[3] <= 0.0F) {
+        return;
+    }
     NT_ASSERT(ctx->atlas.id != 0 && "nt_ui_set_atlas_white_region(ctx,...) required before nt_ui_walk");
     NT_ASSERT(nt_resource_is_ready(ctx->atlas) && "nt_ui_walk: ctx atlas must be READY");
     NT_ASSERT(ctx->sprite_material.id != 0 && "nt_ui_set_sprite_material(ctx,...) required before nt_ui_walk");
@@ -534,8 +826,17 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
      * lazily inside emit_text just before draw_n. */
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
-    /* Segment-aware dispatch -- see nt_ui_walk header doc for contract. */
+    /* Segment-aware dispatch -- see nt_ui_walk header doc for contract.
+     * Within a segment (same z, no SCISSOR/CUSTOM barrier crossed):
+     *   pass 1: scan for layer range [min..max] used in this segment.
+     *   pass 2: for each layer in that range, emit commands matching it
+     *           in declaration order. NULL userData -> layer 0.
+     * For the common single-layer case (all userData NULL), min==max so
+     * pass 2 runs once -- O(N) total. */
     const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
+#ifdef NT_TEST_ACCESS
+    uint32_t unlayered_count = 0U;
+#endif
     int32_t i = 0;
     while (i < arr->length) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
@@ -553,16 +854,30 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
             }
             ++seg_end;
         }
+        uint8_t min_layer = 255U;
+        uint8_t max_layer = 0U;
         for (int32_t j = i; j < seg_end; ++j) {
             const Clay_RenderCommand *cc = &arr->internalArray[j];
-            if (cc->commandType != CLAY_RENDER_COMMAND_TYPE_TEXT) {
-                dispatch_command(ctx, cc, scissor_stack, &depth, target);
+            const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
+#ifdef NT_TEST_ACCESS
+            if (cc->userData == NULL) {
+                ++unlayered_count;
+            }
+#endif
+            if (layer < min_layer) {
+                min_layer = layer;
+            }
+            if (layer > max_layer) {
+                max_layer = layer;
             }
         }
-        for (int32_t j = i; j < seg_end; ++j) {
-            const Clay_RenderCommand *cc = &arr->internalArray[j];
-            if (cc->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
-                dispatch_command(ctx, cc, scissor_stack, &depth, target);
+        for (uint32_t layer = (uint32_t)min_layer; layer <= (uint32_t)max_layer; ++layer) {
+            for (int32_t j = i; j < seg_end; ++j) {
+                const Clay_RenderCommand *cc = &arr->internalArray[j];
+                const uint8_t cmd_layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
+                if ((uint32_t)cmd_layer == layer) {
+                    dispatch_command(ctx, cc, scissor_stack, &depth, target);
+                }
             }
         }
         i = seg_end;
@@ -579,6 +894,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(calls_after >= calls_at_entry && "nt_ui_walk: frame draw-call counter went backwards (CUSTOM handler reset stats?)");
     ctx->last_walk_draw_call_delta = calls_after - calls_at_entry;
     ctx->last_walk_element_count = (uint32_t)arr->length;
+#ifdef NT_TEST_ACCESS
+    ctx->test_last_walk_unlayered_count = unlayered_count;
+#endif
 }
 // #endregion
 
@@ -651,6 +969,11 @@ nt_material_t nt_ui_test_sprite_material(const nt_ui_context_t *ctx) {
 nt_material_t nt_ui_test_text_material(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL);
     return ctx->text_material;
+}
+
+uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL);
+    return ctx->test_last_walk_unlayered_count;
 }
 
 /* Clay_Context is only defined inside this TU (CLAY_IMPLEMENTATION),

@@ -16,18 +16,22 @@
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_a[NT_UI_DEFAULT_ARENA_SIZE];
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_b[NT_UI_DEFAULT_ARENA_SIZE];
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_c[NT_UI_DEFAULT_ARENA_SIZE];
+static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT};
 
-void setUp(void) { nt_test_assert_install(); }
-void tearDown(void) {}
+void setUp(void) {
+    nt_test_assert_install();
+    nt_ui_module_init();
+}
+void tearDown(void) { nt_ui_module_shutdown(); }
 
 /* Three contexts coexist; begin/end pairs interleave correctly with
  * Clay_GetCurrentContext switching per ctx and the in-frame tracker
  * clearing on each end. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_three_ctx_interleave(void) {
-    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a);
-    nt_ui_context_t *b = nt_ui_create_context(s_arena_b, sizeof s_arena_b);
-    nt_ui_context_t *c = nt_ui_create_context(s_arena_c, sizeof s_arena_c);
+    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);
+    nt_ui_context_t *b = nt_ui_create_context(s_arena_b, sizeof s_arena_b, &s_ui_desc);
+    nt_ui_context_t *c = nt_ui_create_context(s_arena_c, sizeof s_arena_c, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(a);
     TEST_ASSERT_NOT_NULL(b);
     TEST_ASSERT_NOT_NULL(c);
@@ -68,8 +72,8 @@ static void test_three_ctx_interleave(void) {
 /* Per-ctx in_frame isolation across sequential begin/end. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_per_ctx_in_frame_isolation(void) {
-    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a);
-    nt_ui_context_t *b = nt_ui_create_context(s_arena_b, sizeof s_arena_b);
+    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);
+    nt_ui_context_t *b = nt_ui_create_context(s_arena_b, sizeof s_arena_b, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(a);
     TEST_ASSERT_NOT_NULL(b);
 

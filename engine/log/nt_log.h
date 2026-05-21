@@ -1,7 +1,7 @@
 #ifndef NT_LOG_H
 #define NT_LOG_H
 
-#include <stdatomic.h>
+#include <stdbool.h>
 
 /* Log levels (ordered by severity) */
 typedef enum {
@@ -29,11 +29,15 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
 #define nt_log_warn(...) nt_log_write(NT_LOG_LEVEL_WARN, NULL, __VA_ARGS__)
 #define nt_log_error(...) nt_log_write(NT_LOG_LEVEL_ERROR, NULL, __VA_ARGS__)
 
-/* --- Once-per-callsite variants (not resettable) --- */
+/* --- Once-per-callsite variants (not resettable) ---
+ * Single-threaded: WASM has one main thread, native debug/builder likewise.
+ * A race would produce at most a duplicate line, never UB. If multi-threaded
+ * logging is needed later, gate this on a build flag and switch to atomic_flag. */
 #define NT_LOG_ONCE_(write_call)                                                                                                                                                                       \
     do {                                                                                                                                                                                               \
-        static atomic_flag nt_log_once_flag_ = ATOMIC_FLAG_INIT;                                                                                                                                       \
-        if (!atomic_flag_test_and_set_explicit(&nt_log_once_flag_, memory_order_relaxed)) {                                                                                                            \
+        static bool nt_log_once_done_ = false;                                                                                                                                                         \
+        if (!nt_log_once_done_) {                                                                                                                                                                      \
+            nt_log_once_done_ = true;                                                                                                                                                                  \
             write_call;                                                                                                                                                                                \
         }                                                                                                                                                                                              \
     } while (0)

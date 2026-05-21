@@ -5,6 +5,7 @@
 
 #include <stdint.h>
 
+#include "font/nt_font.h"
 #include "material/nt_material.h"
 #include "test_helpers/ui_atlas.h"
 #include "ui/nt_ui.h"
@@ -28,6 +29,11 @@ typedef struct {
     minimal_ui_atlas_t atlas;
     nt_material_t sprite_material;
     nt_material_t text_material;
+    /* Empty font handle bound to ctx->fonts[0]. Passes nt_font_valid check
+     * (pool slot occupied) but has no resource data, so nt_text_renderer
+     * silently skips at the units_per_em==0 guard. Lets walker tests
+     * traverse TEXT commands without setting up real font blob/atlas. */
+    nt_font_t stub_font;
 } ui_walker_fixture_t;
 
 void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_size, ui_walker_fx_bind_t bind);

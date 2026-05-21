@@ -13,13 +13,18 @@
 /* clang-format on */
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_DEFAULT_ARENA_SIZE];
+static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT};
 
 void setUp(void) {
     /* gfx pulled in transitively via nt_font/nt_resource; stub is fine. */
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 4, .max_pipelines = 4, .max_buffers = 4, .max_textures = 4, .max_meshes = 4});
+    nt_ui_module_init();
 }
 
-void tearDown(void) { nt_gfx_shutdown(); }
+void tearDown(void) {
+    nt_ui_module_shutdown();
+    nt_gfx_shutdown();
+}
 
 /* Compare two known-finite floats with integer-equivalence: the test
  * inputs (100.0f, 200.0f, 50.0f, 75.0f) are exact float representations
@@ -35,7 +40,7 @@ static bool float_eq_bits(float a, float b) {
 /* x/y are forwarded literally; is_down=true is reflected as a
  * pressed-family Clay pointer state. */
 static void test_pointer_state_set_from_nt_pointer(void) {
-    nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena);
+    nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(ctx);
 
     nt_pointer_t mouse;
@@ -58,7 +63,7 @@ static void test_pointer_state_set_from_nt_pointer(void) {
 /* is_down=false yields released-family state, position still
  * forwarded literally. */
 static void test_pointer_state_button_released(void) {
-    nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena);
+    nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(ctx);
 
     nt_pointer_t mouse;
@@ -81,7 +86,7 @@ static void test_pointer_state_button_released(void) {
  * Setting right/middle is_down=true while left is_down=false should
  * still produce a released Clay state -- only the left button matters. */
 static void test_pointer_state_only_left_button_consumed(void) {
-    nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena);
+    nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(ctx);
 
     nt_pointer_t mouse;

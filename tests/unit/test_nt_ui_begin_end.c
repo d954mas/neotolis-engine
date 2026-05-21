@@ -15,12 +15,16 @@
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_a[NT_UI_DEFAULT_ARENA_SIZE];
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_b[NT_UI_DEFAULT_ARENA_SIZE];
+static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT};
 
-void setUp(void) { nt_test_assert_install(); }
-void tearDown(void) {}
+void setUp(void) {
+    nt_test_assert_install();
+    nt_ui_module_init();
+}
+void tearDown(void) { nt_ui_module_shutdown(); }
 
 static void test_begin_sets_current_ctx(void) {
-    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a);
+    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(a);
 
     nt_pointer_t mouse;
@@ -34,8 +38,8 @@ static void test_begin_sets_current_ctx(void) {
 }
 
 static void test_stray_nested_begin_asserts(void) {
-    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a);
-    nt_ui_context_t *b = nt_ui_create_context(s_arena_b, sizeof s_arena_b);
+    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);
+    nt_ui_context_t *b = nt_ui_create_context(s_arena_b, sizeof s_arena_b, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(a);
     TEST_ASSERT_NOT_NULL(b);
 
@@ -52,7 +56,7 @@ static void test_stray_nested_begin_asserts(void) {
 }
 
 static void test_end_clears_in_frame(void) {
-    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a);
+    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(a);
 
     nt_pointer_t mouse;
@@ -70,7 +74,7 @@ static void test_end_clears_in_frame(void) {
 }
 
 static void test_end_without_begin_asserts(void) {
-    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a);
+    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(a);
 
     NT_TEST_EXPECT_ASSERT(nt_ui_end(a));

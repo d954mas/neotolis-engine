@@ -174,7 +174,7 @@ void tearDown(void) {
 /* ---- Test 1: UTF-8 decode ASCII (TEXT-03) ---- */
 
 void test_utf8_decode_ascii(void) {
-    nt_text_renderer_draw("ABC", s_identity, 32.0F, s_white);
+    nt_text_renderer_draw("ABC", s_identity, 32.0F, s_white, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(3, nt_text_renderer_test_glyph_count());
 }
 
@@ -183,7 +183,7 @@ void test_utf8_decode_ascii(void) {
 void test_utf8_decode_cyrillic(void) {
     /* "При" in Russian = 3 codepoints, 6 bytes */
     /* These are non-ASCII, so they won't be in our test font -> tofu glyphs */
-    nt_text_renderer_draw("\xd0\x9f\xd1\x80\xd0\xb8", s_identity, 32.0F, s_white);
+    nt_text_renderer_draw("\xd0\x9f\xd1\x80\xd0\xb8", s_identity, 32.0F, s_white, 0.0F);
     /* Tofu glyphs still produce quads (has visible bbox) */
     TEST_ASSERT_EQUAL_UINT32(3, nt_text_renderer_test_glyph_count());
 }
@@ -192,7 +192,7 @@ void test_utf8_decode_cyrillic(void) {
 
 void test_utf8_decode_cjk(void) {
     /* "你好" = 2 codepoints, 6 bytes */
-    nt_text_renderer_draw("\xe4\xbd\xa0\xe5\xa5\xbd", s_identity, 32.0F, s_white);
+    nt_text_renderer_draw("\xe4\xbd\xa0\xe5\xa5\xbd", s_identity, 32.0F, s_white, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(2, nt_text_renderer_test_glyph_count());
 }
 
@@ -200,7 +200,7 @@ void test_utf8_decode_cjk(void) {
 
 void test_measure_returns_nonzero(void) {
     /* "ABC" -> all in test font with advance=500, units_per_em=1000 */
-    nt_text_size_t sz = nt_font_measure(s_font, "ABC", 32.0F);
+    nt_text_size_t sz = nt_font_measure(s_font, "ABC", 32.0F, 0.0F);
     TEST_ASSERT_TRUE(sz.width > 0.0F);
     TEST_ASSERT_TRUE(sz.height > 0.0F);
 }
@@ -208,7 +208,7 @@ void test_measure_returns_nonzero(void) {
 /* ---- Test 5: Measure empty string (TEXT-02 edge) ---- */
 
 void test_measure_empty_string(void) {
-    nt_text_size_t sz = nt_font_measure(s_font, "", 32.0F);
+    nt_text_size_t sz = nt_font_measure(s_font, "", 32.0F, 0.0F);
     TEST_ASSERT_TRUE(sz.width == 0.0F);
     TEST_ASSERT_TRUE(sz.height == 0.0F);
 }
@@ -216,7 +216,7 @@ void test_measure_empty_string(void) {
 /* ---- Test 6: Measure NULL string (TEXT-02 edge) ---- */
 
 void test_measure_null_string(void) {
-    nt_text_size_t sz = nt_font_measure(s_font, NULL, 32.0F);
+    nt_text_size_t sz = nt_font_measure(s_font, NULL, 32.0F, 0.0F);
     TEST_ASSERT_TRUE(sz.width == 0.0F);
     TEST_ASSERT_TRUE(sz.height == 0.0F);
 }
@@ -224,7 +224,7 @@ void test_measure_null_string(void) {
 /* ---- Test 7: Vertex stride is 68 bytes (TEXT-01) ---- */
 
 void test_vertex_stride_68(void) {
-    nt_text_renderer_draw("A", s_identity, 32.0F, s_white);
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(1, nt_text_renderer_test_glyph_count());
 
     /* 4 vertices for one glyph, at 68 bytes stride */
@@ -239,7 +239,7 @@ void test_vertex_stride_68(void) {
 /* ---- Test 8: 4 vertices per glyph (TEXT-01) ---- */
 
 void test_vertex_count_4_per_glyph(void) {
-    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white);
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F);
     /* 2 visible glyphs -> 8 vertices */
     TEST_ASSERT_EQUAL_UINT32(8, nt_text_renderer_test_vertex_count());
 }
@@ -247,7 +247,7 @@ void test_vertex_count_4_per_glyph(void) {
 /* ---- Test 9: Flush resets counts (TEXT-05) ---- */
 
 void test_flush_resets_counts(void) {
-    nt_text_renderer_draw("A", s_identity, 32.0F, s_white);
+    nt_text_renderer_draw("A", s_identity, 32.0F, s_white, 0.0F);
     TEST_ASSERT_GREATER_THAN(0U, nt_text_renderer_test_glyph_count());
 
     nt_text_renderer_flush();
@@ -258,15 +258,15 @@ void test_flush_resets_counts(void) {
 /* ---- Test 10: Measure width increases with more chars (TEXT-04) ---- */
 
 void test_measure_width_increases(void) {
-    nt_text_size_t sz_a = nt_font_measure(s_font, "A", 32.0F);
-    nt_text_size_t sz_ab = nt_font_measure(s_font, "AB", 32.0F);
+    nt_text_size_t sz_a = nt_font_measure(s_font, "A", 32.0F, 0.0F);
+    nt_text_size_t sz_ab = nt_font_measure(s_font, "AB", 32.0F, 0.0F);
     TEST_ASSERT_TRUE(sz_ab.width > sz_a.width);
 }
 
 /* ---- Test 11: Newlines reset x and advance y ---- */
 
 void test_draw_newline_advances_to_next_line(void) {
-    nt_text_renderer_draw("A\nB", s_identity, 32.0F, s_white);
+    nt_text_renderer_draw("A\nB", s_identity, 32.0F, s_white, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(2, nt_text_renderer_test_glyph_count());
 
     const uint8_t *verts = (const uint8_t *)nt_text_renderer_test_vertices();
@@ -289,7 +289,7 @@ void test_draw_newline_advances_to_next_line(void) {
 
 void test_draw_n_matches_draw(void) {
     /* Capture vertex stream from existing _draw on NUL-terminated "AB" */
-    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white);
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F);
     const uint32_t draw_vcount = nt_text_renderer_test_vertex_count();
     const uint32_t draw_gcount = nt_text_renderer_test_glyph_count();
     TEST_ASSERT_EQUAL_UINT32(8U, draw_vcount); /* 2 visible glyphs × 4 verts */
@@ -306,7 +306,7 @@ void test_draw_n_matches_draw(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_vertex_count());
 
     /* Call length-aware variant with matching length */
-    nt_text_renderer_draw_n("AB", 2U, s_identity, 32.0F, s_white);
+    nt_text_renderer_draw_n("AB", 2U, s_identity, 32.0F, s_white, 0.0F);
     const uint32_t draw_n_vcount = nt_text_renderer_test_vertex_count();
     const uint32_t draw_n_gcount = nt_text_renderer_test_glyph_count();
 
@@ -315,11 +315,34 @@ void test_draw_n_matches_draw(void) {
     TEST_ASSERT_EQUAL_MEMORY(buf_draw, nt_text_renderer_test_vertices(), bytes_to_copy);
 }
 
+/* ---- Test 13b: letter_spacing shifts subsequent glyphs by spacing pixels ---- */
+
+void test_draw_n_letter_spacing_advances_pen(void) {
+    /* Baseline: AB with zero spacing -- second glyph's first vertex x at advance(A). */
+    nt_text_renderer_draw_n("AB", 2U, s_identity, 32.0F, s_white, 0.0F);
+    TEST_ASSERT_EQUAL_UINT32(8U, nt_text_renderer_test_vertex_count());
+    const uint8_t *vraw = (const uint8_t *)nt_text_renderer_test_vertices();
+    float base_b_x = 0.0F;
+    memcpy(&base_b_x, vraw + ((size_t)4U * 68U), sizeof(float));
+
+    nt_text_renderer_flush();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_text_renderer_test_vertex_count());
+
+    /* Same call with spacing=7: B's first vertex shifts by exactly 7 px. */
+    nt_text_renderer_draw_n("AB", 2U, s_identity, 32.0F, s_white, 7.0F);
+    const uint8_t *vspaced = (const uint8_t *)nt_text_renderer_test_vertices();
+    float spaced_b_x = 0.0F;
+    memcpy(&spaced_b_x, vspaced + ((size_t)4U * 68U), sizeof(float));
+
+    /* UNITY_EXCLUDE_FLOAT in this build: int-truncate to compare. */
+    TEST_ASSERT_EQUAL_INT32((int32_t)(base_b_x + 7.0F), (int32_t)spaced_b_x);
+}
+
 /* ---- Test 13: TEXT-01b — poisoned byte at utf8[len] does NOT contribute (no over-read) ---- */
 
 void test_draw_n_does_not_over_read(void) {
     /* Reference: _draw on the clean "AB" string */
-    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white);
+    nt_text_renderer_draw("AB", s_identity, 32.0F, s_white, 0.0F);
     const uint32_t ref_vcount = nt_text_renderer_test_vertex_count();
     TEST_ASSERT_EQUAL_UINT32(8U, ref_vcount);
 
@@ -335,7 +358,7 @@ void test_draw_n_does_not_over_read(void) {
      * bugprone-not-null-terminated-result (matches test_font.c precedent). */
     const char buf[8] = {'A', 'B', 'X', 'X', 'X', 'X', 'X', 'X'};
 
-    nt_text_renderer_draw_n(buf, 2U, s_identity, 32.0F, s_white);
+    nt_text_renderer_draw_n(buf, 2U, s_identity, 32.0F, s_white, 0.0F);
     const uint32_t bounded_vcount = nt_text_renderer_test_vertex_count();
 
     TEST_ASSERT_EQUAL_UINT32(ref_vcount, bounded_vcount);
@@ -353,7 +376,7 @@ static void bench_draw_short_warm(void) {
     const int n_calls = 1000;
     const uint64_t t0 = nt_time_nanos();
     for (int i = 0; i < n_calls; i++) {
-        nt_text_renderer_draw_n("ABC", 3U, s_identity, 32.0F, s_white);
+        nt_text_renderer_draw_n("ABC", 3U, s_identity, 32.0F, s_white, 0.0F);
         nt_text_renderer_flush(); /* exclude buffer-overflow path from timing */
     }
     const uint64_t t1 = nt_time_nanos();
@@ -373,7 +396,7 @@ static void bench_draw_mixed_ui(void) {
 
     /* Warm up the glyph cache once. */
     for (int i = 0; i < label_count; i++) {
-        nt_text_renderer_draw_n(labels[i], lens[i], s_identity, 32.0F, s_white);
+        nt_text_renderer_draw_n(labels[i], lens[i], s_identity, 32.0F, s_white, 0.0F);
     }
     nt_text_renderer_flush();
 
@@ -382,7 +405,7 @@ static void bench_draw_mixed_ui(void) {
     const uint64_t t0 = nt_time_nanos();
     for (int f = 0; f < frames; f++) {
         for (int i = 0; i < label_count; i++) {
-            nt_text_renderer_draw_n(labels[i], lens[i], s_identity, 32.0F, s_white);
+            nt_text_renderer_draw_n(labels[i], lens[i], s_identity, 32.0F, s_white, 0.0F);
             total_calls++;
         }
         nt_text_renderer_flush();
@@ -410,6 +433,7 @@ int main(void) {
     RUN_TEST(test_measure_width_increases);
     RUN_TEST(test_draw_newline_advances_to_next_line);
     RUN_TEST(test_draw_n_matches_draw);
+    RUN_TEST(test_draw_n_letter_spacing_advances_pen);
     RUN_TEST(test_draw_n_does_not_over_read);
     RUN_TEST(bench_draw_short_warm);
     RUN_TEST(bench_draw_mixed_ui);

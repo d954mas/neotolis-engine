@@ -12,13 +12,17 @@
 #include "unity.h"
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_u64[NT_UI_DEFAULT_ARENA_SIZE];
+static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT};
 
-void setUp(void) { nt_test_assert_install(); }
-void tearDown(void) {}
+void setUp(void) {
+    nt_test_assert_install();
+    nt_ui_module_init();
+}
+void tearDown(void) { nt_ui_module_shutdown(); }
 
 static void test_create_destroy(void) {
     void *arena = (void *)s_arena_u64;
-    nt_ui_context_t *ctx = nt_ui_create_context(arena, sizeof s_arena_u64);
+    nt_ui_context_t *ctx = nt_ui_create_context(arena, sizeof s_arena_u64, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(ctx);
     // NOLINTNEXTLINE(bugprone-casting-through-void)
     TEST_ASSERT_EQUAL_PTR(arena, (void *)ctx);
@@ -26,7 +30,7 @@ static void test_create_destroy(void) {
 }
 
 static void test_min_arena_size(void) {
-    size_t min = nt_ui_min_arena_size();
+    size_t min = nt_ui_min_arena_size(&s_ui_desc);
     TEST_ASSERT_GREATER_THAN(0, min);
     /* min must cover ctx struct + Clay_MinMemorySize. */
     TEST_ASSERT_GREATER_OR_EQUAL(sizeof(struct nt_ui_context) /* approx */, min);
@@ -36,13 +40,13 @@ static void test_min_arena_size(void) {
 static void test_misaligned_assert(void) {
     /* Offset the aligned arena by 1 to make it 1-byte-aligned. */
     void *bad_arena = (void *)((char *)s_arena_u64 + 1);
-    NT_TEST_EXPECT_ASSERT(nt_ui_create_context(bad_arena, sizeof s_arena_u64 - 1));
+    NT_TEST_EXPECT_ASSERT(nt_ui_create_context(bad_arena, sizeof s_arena_u64 - 1, &s_ui_desc));
 }
 
 /* destroy zeros the ctx struct but does NOT touch the rest of the arena
  * (caller owns memory). Verify bytes past sizeof(ctx) are preserved. */
 static void test_destroy_preserves_arena(void) {
-    nt_ui_context_t *ctx = nt_ui_create_context(s_arena_u64, sizeof s_arena_u64);
+    nt_ui_context_t *ctx = nt_ui_create_context(s_arena_u64, sizeof s_arena_u64, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(ctx);
 
     /* Plant a sentinel at a high offset that ctx cannot reach. */
@@ -58,7 +62,7 @@ static void test_destroy_preserves_arena(void) {
 
 /* destroy_context on a mid-frame ctx must assert. */
 static void test_destroy_in_frame_asserts(void) {
-    nt_ui_context_t *ctx = nt_ui_create_context(s_arena_u64, sizeof s_arena_u64);
+    nt_ui_context_t *ctx = nt_ui_create_context(s_arena_u64, sizeof s_arena_u64, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(ctx);
 
     /* begin requires a pointer struct + the arena to be backed by nt_input
