@@ -336,27 +336,36 @@ static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, 
  * Boundary order is screen-CW starting at TL arc entry on the left edge. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, Clay_CornerRadius cr, uint32_t color_packed) {
-    /* Clamp radii so opposite corners can't overlap. Negative input is
-     * treated as zero. */
-    const float half_w = w * 0.5F;
-    const float half_h = h * 0.5F;
-    const float clamp = (half_w < half_h) ? half_w : half_h;
+    /* Negative input -> 0. */
     float tl = (cr.topLeft > 0.0F) ? cr.topLeft : 0.0F;
     float tr = (cr.topRight > 0.0F) ? cr.topRight : 0.0F;
     float bl = (cr.bottomLeft > 0.0F) ? cr.bottomLeft : 0.0F;
     float br = (cr.bottomRight > 0.0F) ? cr.bottomRight : 0.0F;
-    if (tl > clamp) {
-        tl = clamp;
+    /* CSS3 border-radius §5.5 proportional clamp: when the sum of two
+     * radii along a side exceeds the side length, scale ALL four radii
+     * by the smallest factor needed. Preserves the user's intended
+     * proportions and matches browser/Godot/Skia behaviour. */
+    float factor = 1.0F;
+    if (tl + tr > w) {
+        factor = fminf(factor, w / (tl + tr));
     }
-    if (tr > clamp) {
-        tr = clamp;
+    if (bl + br > w) {
+        factor = fminf(factor, w / (bl + br));
     }
-    if (bl > clamp) {
-        bl = clamp;
+    if (tl + bl > h) {
+        factor = fminf(factor, h / (tl + bl));
     }
-    if (br > clamp) {
-        br = clamp;
+    if (tr + br > h) {
+        factor = fminf(factor, h / (tr + br));
     }
+    if (factor < 1.0F) {
+        tl *= factor;
+        tr *= factor;
+        bl *= factor;
+        br *= factor;
+    }
+    const float half_w = w * 0.5F;
+    const float half_h = h * 0.5F;
 
     /* All-square fast path stays on emit_screen_rect (1 quad, 4 verts). */
     if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {
@@ -519,24 +528,29 @@ static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay
     NT_ASSERT(top + bot <= h && "nt_ui BORDER: top+bottom widths exceed bbox.height");
     NT_ASSERT(lft + rgt <= w && "nt_ui BORDER: left+right widths exceed bbox.width");
 
-    const float half_w = w * 0.5F;
-    const float half_h = h * 0.5F;
-    const float clamp_r = (half_w < half_h) ? half_w : half_h;
     float tl = (cr_in.topLeft > 0.0F) ? cr_in.topLeft : 0.0F;
     float tr = (cr_in.topRight > 0.0F) ? cr_in.topRight : 0.0F;
     float bl = (cr_in.bottomLeft > 0.0F) ? cr_in.bottomLeft : 0.0F;
     float br = (cr_in.bottomRight > 0.0F) ? cr_in.bottomRight : 0.0F;
-    if (tl > clamp_r) {
-        tl = clamp_r;
+    /* CSS3 border-radius §5.5 proportional clamp -- see emit_rounded_rect. */
+    float factor = 1.0F;
+    if (tl + tr > w) {
+        factor = fminf(factor, w / (tl + tr));
     }
-    if (tr > clamp_r) {
-        tr = clamp_r;
+    if (bl + br > w) {
+        factor = fminf(factor, w / (bl + br));
     }
-    if (bl > clamp_r) {
-        bl = clamp_r;
+    if (tl + bl > h) {
+        factor = fminf(factor, h / (tl + bl));
     }
-    if (br > clamp_r) {
-        br = clamp_r;
+    if (tr + br > h) {
+        factor = fminf(factor, h / (tr + br));
+    }
+    if (factor < 1.0F) {
+        tl *= factor;
+        tr *= factor;
+        bl *= factor;
+        br *= factor;
     }
 
     if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {

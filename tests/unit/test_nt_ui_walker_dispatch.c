@@ -312,6 +312,38 @@ static void test_dispatch_rounded_rect_uv_is_centroid_not_corner(void) {
     TEST_ASSERT_EQUAL_UINT16(0x7FFFU, uv0[1]);
 }
 
+/* CSS3 border-radius proportional scaling: asymmetric radii where the SUM
+ * along a side fits the dimension must NOT be over-clamped. Before the
+ * CSS3 fix this case was clamped by half_h to {30,30,10,10} -- after the
+ * fix it stays {40,40,10,10} (sums 80 across w=200 and 50 across h=60
+ * both fit, factor=1.0). Vertex count and bbox are observable. */
+static void test_dispatch_rect_asymmetric_radii_no_over_clamp(void) {
+    Clay_RenderCommand *c = &s_test_cmds[0];
+    c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    c->boundingBox = (Clay_BoundingBox){.x = 0.0F, .y = 0.0F, .width = 200.0F, .height = 60.0F};
+    c->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255.0F, .g = 0.0F, .b = 0.0F, .a = 255.0F};
+    c->renderData.rectangle.cornerRadius = (Clay_CornerRadius){.topLeft = 40.0F, .topRight = 40.0F, .bottomLeft = 10.0F, .bottomRight = 10.0F};
+    inject_frozen_cmds(1);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    /* All four corners non-zero -> full tessellation (1 center + 4 * 7 = 29 verts). */
+    TEST_ASSERT_EQUAL_UINT32(29U, nt_sprite_renderer_test_last_emit_vertex_count());
+
+    /* TL arc entry at (0, top_y + tl) where tl should be 40 (NOT 30):
+     * vertex index 1 in fan (first boundary vert after center) is TL arc
+     * west point at (x, y+tl) per emit_rounded_rect ordering. Float-imprecise
+     * cosf(π) gives ~-1.0 (not exact), so allow ±1 tolerance. */
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(1U, pos);
+    const int32_t px = (int32_t)pos[0];
+    const int32_t py = (int32_t)pos[1];
+    TEST_ASSERT_TRUE(px == 0 || px == -1);  /* near 0 within float epsilon */
+    TEST_ASSERT_GREATER_THAN_INT32(35, py); /* MUST be ~40, NOT 30 from old half-clamp */
+    TEST_ASSERT_LESS_OR_EQUAL_INT32(40, py);
+}
+
 /* BORDER with rounded corners and partial widths (e.g. only bottom border)
  * must not assert -- inner radius clamps to 0 on axes where width=0, giving
  * a degenerate strip segment for skipped sides. */
@@ -395,6 +427,7 @@ int main(void) {
     RUN_TEST(test_dispatch_border_rounded_emits_strip);
     RUN_TEST(test_dispatch_border_rounded_partial_widths);
     RUN_TEST(test_dispatch_border_width_exceeds_radius);
+    RUN_TEST(test_dispatch_rect_asymmetric_radii_no_over_clamp);
     RUN_TEST(test_dispatch_rounded_rect_uv_is_centroid_not_corner);
     RUN_TEST(test_dispatch_image_nonzero_radius_asserts);
     RUN_TEST(test_dispatch_text_unbound_font_asserts);
