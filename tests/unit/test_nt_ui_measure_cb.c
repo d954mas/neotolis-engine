@@ -192,29 +192,17 @@ static Clay_BoundingBox declare_and_measure_text(nt_ui_context_t *ctx, const cha
 
 /* ---- Tests ---- */
 
-/* Clay_SetMeasureTextFunction is wired during nt_ui_create_context.
- * Covariance check: with no font registered the callback returns {0,0} via
- * the nt_font_valid branch. The fact that Clay_EndLayout completes without
- * firing CLAY_ERROR_TYPE_TEXT_MEASUREMENT_FUNCTION_NOT_PROVIDED is itself
- * evidence that the measure callback is wired. */
-/* measure_cb runs DURING Clay layout (nt_ui_end). Unbound font slot is a
- * contract violation symmetric with emit_text -- asserts here (one frame
- * earlier than the walker would catch it).
- *
- * Death-test caveat: assert handler longjmps OUT of nt_ui_end, leaving
- * ctx->in_frame=true and g_nt_ui_inframe_ctx dangling. We skip destroy
- * (would trip its own in_frame guard with armed=false handler -> trap).
- * Static arena gets reused next test; module_init clears the globals. */
+/* measure_cb fires during nt_ui_end; unbound font asserts here, one frame
+ * earlier than emit_text. Destroy skipped: assert longjmps leave ctx->in_frame=1
+ * and trip destroy's own guard with disarmed handler -> trap. Static arena
+ * gets reused next test; module_init clears the globals. */
 static void test_measure_callback_unbound_font_asserts(void) {
     nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(ctx);
-    /* No font set at slot 0 -> measure_cb fires during nt_ui_end and asserts. */
     NT_TEST_EXPECT_ASSERT(declare_and_measure_text(ctx, "ABC", 0U, 14U));
 }
 
-/* callback forwards Clay_StringSlice -> nt_font_measure_n with
- * proper font_id resolution. Compares the TEXT command bounding box
- * against an independent direct nt_font_measure_n call. */
+/* Compare Clay bbox against a direct nt_font_measure_n on the same input. */
 static void test_measure_callback_forwards_to_font_measure_n(void) {
     uint8_t *blob = NULL;
     nt_font_t font = make_resolved_test_font("measure_cb_forward", &blob);
@@ -224,20 +212,14 @@ static void test_measure_callback_forwards_to_font_measure_n(void) {
     TEST_ASSERT_NOT_NULL(ctx);
     nt_ui_set_font(ctx, 0U, font);
 
-    /* Independent ground truth: invoke the exact same measure path the
-     * callback takes (with the size cast to float matching uint16_t->float). */
     nt_text_size_t expected = nt_font_measure_n(font, "ABC", 3U, 14.0F, 0.0F);
-    /* Sanity: the resolved test font must produce positive dimensions for
-     * a 3-glyph "ABC" measurement. If this fails the test_font setup is
-     * broken, not the callback. */
     TEST_ASSERT_FALSE(float_is_zero_bits(expected.width));
     TEST_ASSERT_FALSE(float_is_zero_bits(expected.height));
 
     Clay_BoundingBox bb = declare_and_measure_text(ctx, "ABC", 0U, 14U);
 
-    /* Clay can round/quantize the bbox slightly during layout; compare
-     * via integer truncation with a 1 px tolerance window. The truncation
-     * keeps the comparison free of UNITY_EXCLUDE_FLOAT macros. */
+    /* Clay quantizes layout to int; ±1px tolerance via integer truncation
+     * (UNITY_EXCLUDE_FLOAT is on). */
     const int32_t exp_w = (int32_t)expected.width;
     const int32_t exp_h = (int32_t)expected.height;
     const int32_t got_w = (int32_t)bb.width;
@@ -246,9 +228,6 @@ static void test_measure_callback_forwards_to_font_measure_n(void) {
     const int32_t diff_h = (got_h > exp_h) ? (got_h - exp_h) : (exp_h - got_h);
     TEST_ASSERT_LESS_OR_EQUAL_INT32(1, diff_w);
     TEST_ASSERT_LESS_OR_EQUAL_INT32(1, diff_h);
-    /* And that we did get a positive measurement back -- if Clay culled
-     * the element or the callback returned {0,0} unexpectedly, both
-     * dimensions would be zero. */
     TEST_ASSERT_GREATER_THAN_INT32(0, got_w);
     TEST_ASSERT_GREATER_THAN_INT32(0, got_h);
 
@@ -257,7 +236,7 @@ static void test_measure_callback_forwards_to_font_measure_n(void) {
     free(blob);
 }
 
-/* Variant with explicit letterSpacing on the text config. */
+/* declare_and_measure_text with explicit letterSpacing. */
 static Clay_BoundingBox declare_and_measure_text_ls(nt_ui_context_t *ctx, const char *utf8, uint16_t font_id, uint16_t font_size, uint16_t letter_spacing) {
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
@@ -277,11 +256,7 @@ static Clay_BoundingBox declare_and_measure_text_ls(nt_ui_context_t *ctx, const 
     return empty;
 }
 
-/* Clay's MeasureTextCached subtracts one letterSpacing slot from the
- * line width (clay.h line 1677). The bridge has to compensate by adding
- * one trailing slot so Clay's final bbox matches the renderer's CSS-style
- * (N-1)*ls width. Without the bridge fix the bbox is short by exactly
- * one letterSpacing. */
+/* Bridge adds a trailing letterSpacing to compensate Clay's -1 at line 1677. */
 static void test_measure_callback_letter_spacing_matches_render_width(void) {
     uint8_t *blob = NULL;
     nt_font_t font = make_resolved_test_font("measure_cb_ls", &blob);
@@ -291,14 +266,13 @@ static void test_measure_callback_letter_spacing_matches_render_width(void) {
     TEST_ASSERT_NOT_NULL(ctx);
     nt_ui_set_font(ctx, 0U, font);
 
-    /* CSS-style render width is exactly what nt_font_measure_n returns. */
     nt_text_size_t expected = nt_font_measure_n(font, "ABC", 3U, 14.0F, 5.0F);
     TEST_ASSERT_FALSE(float_is_zero_bits(expected.width));
 
     Clay_BoundingBox bb = declare_and_measure_text_ls(ctx, "ABC", 0U, 14U, 5U);
 
-    /* Clay quantizes layout to int pixels in some paths; allow 1 px tolerance.
-     * Without the bridge fix this would be off by exactly letterSpacing=5. */
+    /* ±1px tolerance for Clay's int quantization. Without the bridge fix the
+     * bbox would be short by exactly letterSpacing=5. */
     const int32_t exp_w = (int32_t)expected.width;
     const int32_t got_w = (int32_t)bb.width;
     const int32_t diff_w = (got_w > exp_w) ? (got_w - exp_w) : (exp_w - got_w);
@@ -310,12 +284,7 @@ static void test_measure_callback_letter_spacing_matches_render_width(void) {
     free(blob);
 }
 
-/* with no font slot populated the callback returns {0,0} via the
- * nt_font_valid early-return path -- proves the guard branch fires before
- * the (would-be-crashing) nt_font_measure_n call. */
-/* fontId >= NT_UI_MAX_FONTS is a contract violation in CLAY_TEXT_CONFIG --
- * measure_cb asserts symmetrically with emit_text. Destroy skipped for the
- * same reason as test_measure_callback_unbound_font_asserts above. */
+/* fontId >= NT_UI_MAX_FONTS in CLAY_TEXT_CONFIG asserts in measure_cb. */
 static void test_measure_callback_out_of_range_font_asserts(void) {
     nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(ctx);

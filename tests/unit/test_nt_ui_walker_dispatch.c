@@ -202,8 +202,7 @@ static void test_dispatch_none_silent_skip(void) {
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_element_count(s_fx.ctx));
 }
 
-/* IMAGE with non-default backgroundColor must pack the tint (not fall
- * through the all-zero "default untinted" shortcut). */
+/* Non-zero tint must NOT hit the "untinted" shortcut. */
 static void test_dispatch_image_tinted_packs_color(void) {
     s_image_payload.atlas = s_fx.atlas.handle;
     s_image_payload.region_index = s_fx.atlas.white_region_idx;
@@ -212,8 +211,7 @@ static void test_dispatch_image_tinted_packs_color(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
     c->boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 32, .height = 32};
-    /* Half-alpha black -- not (0,0,0,0), so must NOT take the untinted
-     * shortcut. Packed: r=0, g=0, b=0, a=128 -> 0x80000000 in 0xAABBGGRR. */
+    /* Half-alpha black: packs to 0x80000000 in 0xAABBGGRR. */
     c->renderData.image.backgroundColor = (Clay_Color){.r = 0.0F, .g = 0.0F, .b = 0.0F, .a = 128.0F};
     c->renderData.image.imageData = &s_image_payload;
     inject_frozen_cmds(1);
@@ -224,11 +222,7 @@ static void test_dispatch_image_tinted_packs_color(void) {
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
 }
 
-/* RECT with non-zero cornerRadius takes the tessellated-fan path: emits
- * 1 center vertex + 4 * (NT_UI_CORNER_SEGMENTS + 1) boundary verts when
- * all four corners are rounded. NT_UI_CORNER_SEGMENTS is private to
- * nt_ui.c, so this test compares against the flat-corner emit count
- * instead of hardcoding it. */
+/* Rounded RECT goes through the tessellated-fan path (>4 verts). */
 static void test_dispatch_rectangle_rounded_emits_fan(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
@@ -240,14 +234,11 @@ static void test_dispatch_rectangle_rounded_emits_fan(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* Tessellated fan must be strictly more verts than the 4-vert flat quad
-     * and strictly more indices than the 6-index flat quad. */
     TEST_ASSERT_GREATER_THAN_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
     TEST_ASSERT_GREATER_THAN_UINT32(6U, nt_sprite_renderer_test_last_emit_index_count());
 }
 
-/* RECT with all-zero cornerRadius stays on the 4-vert fast path -- locking
- * the existing emit_screen_rect optimization in place. */
+/* Zero cornerRadius keeps the 4-vert fast path. */
 static void test_dispatch_rectangle_zero_radius_keeps_fast_path(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
@@ -263,8 +254,7 @@ static void test_dispatch_rectangle_zero_radius_keeps_fast_path(void) {
     TEST_ASSERT_EQUAL_UINT32(6U, nt_sprite_renderer_test_last_emit_index_count());
 }
 
-/* BORDER with non-zero cornerRadius takes the ring-strip path:
- * 4*(SEG+1)*2 verts when all four corners are rounded. */
+/* Rounded BORDER goes through the ring-strip path (>4 verts). */
 static void test_dispatch_border_rounded_emits_strip(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_BORDER;
@@ -277,15 +267,12 @@ static void test_dispatch_border_rounded_emits_strip(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* Ring strip emits significantly more than the 4-vert flat border fast path. */
     TEST_ASSERT_GREATER_THAN_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
 }
 
-/* emit_geometry samples the region's UV centroid, NOT vertex[0]'s corner UV.
- * The fixture's white_region is a 4-vert quad with UV corners at
- * (0,0), (0xFFFF,0), (0xFFFF,0xFFFF), (0,0xFFFF) -- mean = (0x7FFF, 0x7FFF).
- * A texel-corner sample would bleed into adjacent atlas pixels under
- * linear filtering; centroid keeps the sample firmly inside the white pixel. */
+/* emit_geometry samples the centroid (mean of 4 corner UVs) -- NOT vertex[0]'s
+ * UV which would land at a texel boundary and bleed under linear filtering.
+ * Fixture white_region UVs: (0,0)(FFFF,0)(FFFF,FFFF)(0,FFFF), mean = 0x7FFF. */
 static void test_dispatch_rounded_rect_uv_is_centroid_not_corner(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
@@ -312,11 +299,8 @@ static void test_dispatch_rounded_rect_uv_is_centroid_not_corner(void) {
     TEST_ASSERT_EQUAL_UINT16(0x7FFFU, uv0[1]);
 }
 
-/* CSS3 border-radius proportional scaling: asymmetric radii where the SUM
- * along a side fits the dimension must NOT be over-clamped. Before the
- * CSS3 fix this case was clamped by half_h to {30,30,10,10} -- after the
- * fix it stays {40,40,10,10} (sums 80 across w=200 and 50 across h=60
- * both fit, factor=1.0). Vertex count and bbox are observable. */
+/* CSS3 §5.5 keeps asymmetric radii {40,40,10,10} on 200x60 -- adjacent sums
+ * fit, factor=1, no over-clamp to {30,30,10,10}. */
 static void test_dispatch_rect_asymmetric_radii_no_over_clamp(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
@@ -328,25 +312,21 @@ static void test_dispatch_rect_asymmetric_radii_no_over_clamp(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* All four corners non-zero -> full tessellation (1 center + 4 * 7 = 29 verts). */
+    /* 1 center + 4 * 7 arc points = 29 verts. */
     TEST_ASSERT_EQUAL_UINT32(29U, nt_sprite_renderer_test_last_emit_vertex_count());
 
-    /* TL arc entry at (0, top_y + tl) where tl should be 40 (NOT 30):
-     * vertex index 1 in fan (first boundary vert after center) is TL arc
-     * west point at (x, y+tl) per emit_rounded_rect ordering. Float-imprecise
-     * cosf(π) gives ~-1.0 (not exact), so allow ±1 tolerance. */
+    /* TL arc west point at (x, y+tl). cosf(π) ≈ -1 -> ±1 tolerance. */
     float pos[3];
     nt_sprite_renderer_test_last_emit_position(1U, pos);
     const int32_t px = (int32_t)pos[0];
     const int32_t py = (int32_t)pos[1];
-    TEST_ASSERT_TRUE(px == 0 || px == -1);  /* near 0 within float epsilon */
-    TEST_ASSERT_GREATER_THAN_INT32(35, py); /* MUST be ~40, NOT 30 from old half-clamp */
+    TEST_ASSERT_TRUE(px == 0 || px == -1);
+    TEST_ASSERT_GREATER_THAN_INT32(35, py); /* ~40, NOT 30 from old half-clamp */
     TEST_ASSERT_LESS_OR_EQUAL_INT32(40, py);
 }
 
-/* BORDER with rounded corners and partial widths (e.g. only bottom border)
- * must not assert -- inner radius clamps to 0 on axes where width=0, giving
- * a degenerate strip segment for skipped sides. */
+/* Partial widths with rounded corners: inner radius clamps to 0 on zero-width
+ * axes, producing degenerate strip segments for the skipped sides. */
 static void test_dispatch_border_rounded_partial_widths(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_BORDER;
@@ -358,30 +338,26 @@ static void test_dispatch_border_rounded_partial_widths(void) {
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
-    nt_ui_walk(s_fx.ctx, &target); /* Must not crash, must not assert. */
-    /* Emits something (ring strip with degenerate parts). */
+    nt_ui_walk(s_fx.ctx, &target);
     TEST_ASSERT_GREATER_THAN_UINT32(0U, nt_sprite_renderer_test_last_emit_vertex_count());
 }
 
-/* BORDER with width > radius clamps inner radius to 0 on the affected axis.
- * Should not crash; result is "filled" corner without rounding. */
+/* width > radius: inner radius clamps to 0 (corner "filled" inside). */
 static void test_dispatch_border_width_exceeds_radius(void) {
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_BORDER;
     c->boundingBox = (Clay_BoundingBox){.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 60.0F};
     c->renderData.border.color = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 0.0F, .a = 255.0F};
-    /* Width 8 with radius 4 -- inner clamps to 0. */
     c->renderData.border.width = (Clay_BorderWidth){.left = 8, .right = 8, .top = 8, .bottom = 8, .betweenChildren = 0};
     c->renderData.border.cornerRadius = (Clay_CornerRadius){.topLeft = 4.0F, .topRight = 4.0F, .bottomLeft = 4.0F, .bottomRight = 4.0F};
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
-    nt_ui_walk(s_fx.ctx, &target); /* Must not crash. */
+    nt_ui_walk(s_fx.ctx, &target);
     TEST_ASSERT_GREATER_THAN_UINT32(0U, nt_sprite_renderer_test_last_emit_vertex_count());
 }
 
-/* IMAGE with any non-zero corner radius must assert -- rounded images are
- * pre-baked into the atlas, not clipped at the walker. */
+/* Rounded IMAGE asserts -- rounded edges must be baked into the atlas. */
 static void test_dispatch_image_nonzero_radius_asserts(void) {
     s_image_payload.atlas = s_fx.atlas.handle;
     s_image_payload.region_index = s_fx.atlas.white_region_idx;
@@ -414,7 +390,6 @@ static void test_dispatch_image_not_ready_silent(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* The IMAGE emit was skipped; no draw call from this command. */
     TEST_ASSERT_EQUAL_UINT32(calls_before, nt_sprite_renderer_test_draw_call_count());
 }
 

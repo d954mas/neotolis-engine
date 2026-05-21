@@ -76,14 +76,12 @@ static void test_destroy_in_frame_asserts(void) {
     nt_ui_destroy_context(ctx);
 }
 
-/* destroy_context must null Clay's global current_ptr when it dangles at
- * the just-destroyed ctx -- nt_ui_begin parks Clay's current pointer inside
- * the arena, and memset zeroes the Clay_Context behind that pointer. */
+/* begin parks Clay's current_ptr into the arena; destroy must null it
+ * before memset or Clay holds a dangling pointer. */
 static void test_destroy_clears_dangling_clay_current(void) {
     nt_ui_context_t *ctx = nt_ui_create_context(s_arena_u64, sizeof s_arena_u64, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    /* Drive a begin/end pair so Clay's current_ptr points at ctx->clay. */
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
     nt_ui_begin(ctx, 800.0F, 600.0F, &mouse);
@@ -91,28 +89,24 @@ static void test_destroy_clears_dangling_clay_current(void) {
     TEST_ASSERT_NOT_NULL(Clay_GetCurrentContext());
 
     nt_ui_destroy_context(ctx);
-    /* Without the fix, Clay still holds a pointer into the now-zeroed arena. */
     TEST_ASSERT_NULL(Clay_GetCurrentContext());
 }
 
-/* nt_ui_min_arena_size must be a pure query: even though it has to set
- * Clay's global default to compute Clay_MinMemorySize(), it must restore
- * the prior value so external Clay consumers don't see our scratch state. */
+/* Pure-query contract: must restore Clay's global default. */
 static void test_min_arena_size_restores_clay_default(void) {
     const int32_t before = nt_ui_test_clay_default_max_element_count();
     nt_ui_create_desc_t custom = nt_ui_create_desc_defaults();
-    custom.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT * 2U; /* != before */
+    custom.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT * 2U;
     (void)nt_ui_min_arena_size(&custom);
     TEST_ASSERT_EQUAL_INT32(before, nt_ui_test_clay_default_max_element_count());
 }
 
-/* create_context likewise must restore Clay's global default after staging
- * desc->max_elements into it for Clay_Initialize to inherit. */
+/* create_context stages desc->max_elements into Clay's global, must restore. */
 static void test_create_context_restores_clay_default(void) {
     const int32_t before = nt_ui_test_clay_default_max_element_count();
     nt_ui_create_desc_t custom = nt_ui_create_desc_defaults();
-    custom.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT * 2U; /* != before */
-    /* Need a bigger arena because larger max_elements grows Clay's arena. */
+    custom.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT * 2U;
+    /* Larger max_elements needs proportionally larger arena. */
     alignas(NT_UI_ARENA_ALIGN) static uint8_t big_arena[NT_UI_DEFAULT_ARENA_SIZE * 4U];
     nt_ui_context_t *ctx = nt_ui_create_context(big_arena, sizeof big_arena, &custom);
     TEST_ASSERT_NOT_NULL(ctx);
@@ -120,19 +114,14 @@ static void test_create_context_restores_clay_default(void) {
     nt_ui_destroy_context(ctx);
 }
 
-/* create_context must not leak active-ctx selection: Clay_Initialize
- * unconditionally sets current=new, so create must save/restore. Caller's
- * pre-create current (NULL if none) must survive. */
+/* Clay_Initialize unconditionally sets current=new; create must save/restore
+ * so the caller doesn't inherit our new ctx without calling nt_ui_begin. */
 static void test_create_context_restores_clay_current(void) {
-    /* No active Clay context at this point (module_init from setUp doesn't
-     * create any). Clay_GetCurrentContext returns NULL. */
     TEST_ASSERT_NULL(Clay_GetCurrentContext());
 
     nt_ui_context_t *ctx = nt_ui_create_context(s_arena_u64, sizeof s_arena_u64, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(ctx);
 
-    /* After create, current must still be NULL -- user owns active-ctx
-     * selection via nt_ui_begin. */
     TEST_ASSERT_NULL(Clay_GetCurrentContext());
 
     nt_ui_destroy_context(ctx);

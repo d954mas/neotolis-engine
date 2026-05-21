@@ -30,8 +30,7 @@ static void inject_frozen_cmds(int32_t count) {
     s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
 }
 
-/* Static-lifetime layer descriptors (compound literal pointer must outlive
- * the walk; file-scope static is the safest for tests). */
+/* File-scope so layer data outlives walk (compound literal would scope out). */
 static const nt_ui_element_data_t k_layer_sprite = {.layer = 0U};
 static const nt_ui_element_data_t k_layer_text = {.layer = 1U};
 
@@ -60,16 +59,13 @@ static int s_custom_calls;
 static void custom_cb(const void *cmd, void *user) {
     (void)cmd;
     (void)user;
-    /* When the walker invokes a custom callback, sprite_renderer must be
-     * flushed first -- callback may bind its own pipeline. Verify staging
-     * is empty at the moment of entry. */
+    /* Callback may bind its own pipeline -- sprite staging must be empty. */
     TEST_ASSERT_EQUAL_UINT32(0U, nt_sprite_renderer_test_vertex_count());
     ++s_custom_calls;
 }
 
-/* Interleaved RTRTRT @ z=0 with RECTs on layer 0 + TEXTs on layer 1
- * collapses to 1 sprite dc -- layer sort emits all RECTs first (single
- * sprite batch), then TEXTs flush sprite once on first emit_text entry. */
+/* RECTs on layer 0 + TEXTs on layer 1: layer sort collapses interleaved
+ * RTRTRT to 1 sprite dc (sprites batch, single sprite flush on first TEXT). */
 static void test_same_z_rect_text_batches(void) {
     make_rect(0, 0, 0);
     make_text(1, 0, 20);
@@ -141,8 +137,7 @@ static void test_multi_z_preserves_painter_order(void) {
 /* NULL userData defaults to layer 0 -- unlayered count exposes how many
  * segmentable commands fell through to the default layer. */
 static void test_unlayered_count_tracks_null_userdata(void) {
-    /* 3 commands without userData (NULL) + 0 with explicit data.
-     * Use the bare commandType setup so userData stays NULL. */
+    /* Bare setup so userData stays NULL on the first two. */
     Clay_RenderCommand *c0 = &s_test_cmds[0];
     c0->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     c0->zIndex = 0;
@@ -166,17 +161,14 @@ static void test_unlayered_count_tracks_null_userdata(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* 2 of 3 commands were NULL-userData. */
     TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_test_last_walk_unlayered_count(s_fx.ctx));
 }
 
-/* Sparse layers (0 and 200) must work correctly. Old iterate-per-layer
- * implementation would scan 200 empty buckets; counting sort is O(N + 256)
- * regardless of layer spread. */
+/* Sparse layers (0 and 200): bitmask scan skips empty buckets. */
 static void test_layer_sort_sparse_layers(void) {
     static const nt_ui_element_data_t k_layer_low = {.layer = 0U};
     static const nt_ui_element_data_t k_layer_high = {.layer = 200U};
-    /* Layer 200 declared first, layer 0 second -- after sort layer 0 renders first. */
+    /* Declared in reverse order; layer 0 must still render first. */
     Clay_RenderCommand *c0 = &s_test_cmds[0];
     c0->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     c0->zIndex = 0;
@@ -195,37 +187,35 @@ static void test_layer_sort_sparse_layers(void) {
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* Last emit must be layer 200 (declared first but renders last) at x=0. */
+    /* Last emit must be layer 200's rect at x=0. */
     float pos[3];
     nt_sprite_renderer_test_last_emit_position(0U, pos);
     TEST_ASSERT_EQUAL_INT32(0, (int32_t)pos[0]);
 }
 
-/* Layer 1 cmd declared FIRST but renders AFTER layer 0 cmd declared SECOND. */
+/* Layer wins over declaration order: layer 0 declared second renders first. */
 static void test_layer_sort_overrides_declaration_order(void) {
     Clay_RenderCommand *c0 = &s_test_cmds[0];
     c0->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     c0->zIndex = 0;
     c0->boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
     c0->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
-    c0->userData = (void *)&k_layer_text; /* layer 1, declared first */
+    c0->userData = (void *)&k_layer_text;
 
     Clay_RenderCommand *c1 = &s_test_cmds[1];
     c1->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     c1->zIndex = 0;
     c1->boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 10, .height = 10};
     c1->renderData.rectangle.backgroundColor = (Clay_Color){.r = 0, .g = 255, .b = 0, .a = 255};
-    c1->userData = (void *)&k_layer_sprite; /* layer 0, declared second */
+    c1->userData = (void *)&k_layer_sprite;
     inject_frozen_cmds(2);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* Layer 0 emits FIRST (declared second), layer 1 emits SECOND (declared first).
-     * The last_emit captures the most recent emit -- which must be layer 1's rect (x=0). */
+    /* Layer 1 (declared first) renders LAST: last emit is its rect at x=0. */
     float pos[3];
     nt_sprite_renderer_test_last_emit_position(0U, pos);
-    /* emit_screen_rect's transform places vertex 0 at exactly the rect's (x, y). */
     TEST_ASSERT_EQUAL_INT32(0, (int32_t)pos[0]);
 }
 

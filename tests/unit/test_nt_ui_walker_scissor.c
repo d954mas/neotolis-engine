@@ -51,10 +51,7 @@ static void test_scissor_depth_8_ok(void) {
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
 }
 
-/* Custom max_scissor_depth via desc: walker stack VLA-sizes to ctx config.
- * Build a separate ctx with depth=4; pushing 4 scissors must succeed but
- * pushing a 5th must overflow the per-ctx limit even though the global
- * #define default is 8. */
+/* Per-ctx max_scissor_depth (VLA size) -- depth=4 here, push #5 overflows. */
 static void test_scissor_depth_custom_via_desc(void) {
     alignas(NT_UI_ARENA_ALIGN) static uint8_t s_custom_arena[NT_UI_DEFAULT_ARENA_SIZE];
     const nt_ui_create_desc_t custom_desc = {
@@ -67,7 +64,6 @@ static void test_scissor_depth_custom_via_desc(void) {
     nt_ui_set_sprite_material(custom_ctx, s_fx.sprite_material);
     nt_ui_set_text_material(custom_ctx, s_fx.text_material);
 
-    /* Push 5 scissors -> overflow on the 5th. */
     Clay_RenderCommand local_cmds[5];
     memset(local_cmds, 0, sizeof local_cmds);
     for (int32_t i = 0; i < 5; ++i) {
