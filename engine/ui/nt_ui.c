@@ -142,15 +142,16 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     NT_ASSERT(desc->max_elements > 0U && "nt_ui_min_arena_size: desc->max_elements must be > 0");
     NT_ASSERT(desc->max_elements <= UINT16_MAX && "nt_ui_min_arena_size: desc->max_elements exceeds uint16 sorted-index range");
     NT_ASSERT(desc->max_scissor_depth > 0U && "nt_ui_min_arena_size: desc->max_scissor_depth must be > 0");
-    /* Pure-query contract: stage max_elements through Clay's global default
-     * (Clay_SetMaxElementCount writes there with no current ctx), then
-     * restore both saved ctx and saved global. */
+    /* Pure-query contract: Clay_SetMaxElementCount(N) writes globals (no
+     * current ctx) AND sets defaultMaxMeasureTextWordCacheCount = N*2
+     * (clay.h:4332). Restore via the SAME public call so BOTH side-effect
+     * globals are brought back together. */
     Clay_Context *saved_ctx = Clay_GetCurrentContext();
     const int32_t saved_default = Clay__defaultMaxElementCount;
     Clay_SetCurrentContext(NULL);
     Clay_SetMaxElementCount((int32_t)desc->max_elements);
     const size_t clay_bytes = (size_t)Clay_MinMemorySize();
-    Clay__defaultMaxElementCount = saved_default;
+    Clay_SetMaxElementCount(saved_default);
     Clay_SetCurrentContext(saved_ctx);
     return nt_ui_ctx_size_aligned() + clay_bytes;
 }
@@ -174,11 +175,12 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     void *clay_mem = (char *)arena + ctx_size;
     const size_t clay_size = arena_size - ctx_size;
 
-    /* Stage desc->max_elements into Clay's global default so Clay_Initialize
-     * inherits it for this new context. Snapshot BOTH current ctx and the
-     * Clay__defaultMaxElementCount global, then restore both -- otherwise
-     * the temporary mutation persists across create_context calls and
-     * leaks our internals into any Clay consumer outside nt_ui. */
+    /* Stage desc->max_elements into Clay's globals so Clay_Initialize inherits
+     * it. Restore via Clay_SetMaxElementCount so the paired global
+     * defaultMaxMeasureTextWordCacheCount=N*2 comes back too (clay.h:4332).
+     * Clay_Initialize sets current=new_ctx, so re-null current before the
+     * restoring call -- Clay_SetMaxElementCount writes per-ctx when current
+     * is non-null and writes globals only when current is null. */
     Clay_Context *saved_ctx = Clay_GetCurrentContext();
     const int32_t saved_default = Clay__defaultMaxElementCount;
     Clay_SetCurrentContext(NULL);
@@ -188,9 +190,8 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->clay_arena = Clay_CreateArenaWithCapacityAndMemory(clay_size, clay_mem);
     ctx->clay = Clay_Initialize(ctx->clay_arena, (Clay_Dimensions){.width = 1.0F, .height = 1.0F}, (Clay_ErrorHandler){.errorHandlerFunction = nt_ui_clay_error_cb, .userData = ctx});
 
-    /* nt_ui_begin owns active-ctx selection -- restore both so create
-     * doesn't accidentally leave the new ctx current. */
-    Clay__defaultMaxElementCount = saved_default;
+    Clay_SetCurrentContext(NULL);
+    Clay_SetMaxElementCount(saved_default);
     Clay_SetCurrentContext(saved_ctx);
 
     return ctx;
@@ -948,6 +949,7 @@ nt_material_t nt_ui_test_text_material(const nt_ui_context_t *ctx) {
 }
 
 int32_t nt_ui_test_clay_default_max_element_count(void) { return Clay__defaultMaxElementCount; }
+int32_t nt_ui_test_clay_default_max_measure_text_word_cache_count(void) { return Clay__defaultMaxMeasureTextWordCacheCount; }
 
 uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL);

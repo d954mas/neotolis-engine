@@ -92,25 +92,29 @@ static void test_destroy_clears_dangling_clay_current(void) {
     TEST_ASSERT_NULL(Clay_GetCurrentContext());
 }
 
-/* Pure-query contract: must restore Clay's global default. */
+/* Pure-query contract: must restore BOTH Clay globals (element count and
+ * the paired text-cache count = N*2 that Clay_SetMaxElementCount also writes). */
 static void test_min_arena_size_restores_clay_default(void) {
-    const int32_t before = nt_ui_test_clay_default_max_element_count();
+    const int32_t elems_before = nt_ui_test_clay_default_max_element_count();
+    const int32_t cache_before = nt_ui_test_clay_default_max_measure_text_word_cache_count();
     nt_ui_create_desc_t custom = nt_ui_create_desc_defaults();
     custom.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT * 2U;
     (void)nt_ui_min_arena_size(&custom);
-    TEST_ASSERT_EQUAL_INT32(before, nt_ui_test_clay_default_max_element_count());
+    TEST_ASSERT_EQUAL_INT32(elems_before, nt_ui_test_clay_default_max_element_count());
+    TEST_ASSERT_EQUAL_INT32(cache_before, nt_ui_test_clay_default_max_measure_text_word_cache_count());
 }
 
-/* create_context stages desc->max_elements into Clay's global, must restore. */
+/* create_context stages desc->max_elements into Clay's globals; must restore both. */
 static void test_create_context_restores_clay_default(void) {
-    const int32_t before = nt_ui_test_clay_default_max_element_count();
+    const int32_t elems_before = nt_ui_test_clay_default_max_element_count();
+    const int32_t cache_before = nt_ui_test_clay_default_max_measure_text_word_cache_count();
     nt_ui_create_desc_t custom = nt_ui_create_desc_defaults();
     custom.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT * 2U;
-    /* Larger max_elements needs proportionally larger arena. */
     alignas(NT_UI_ARENA_ALIGN) static uint8_t big_arena[NT_UI_DEFAULT_ARENA_SIZE * 4U];
     nt_ui_context_t *ctx = nt_ui_create_context(big_arena, sizeof big_arena, &custom);
     TEST_ASSERT_NOT_NULL(ctx);
-    TEST_ASSERT_EQUAL_INT32(before, nt_ui_test_clay_default_max_element_count());
+    TEST_ASSERT_EQUAL_INT32(elems_before, nt_ui_test_clay_default_max_element_count());
+    TEST_ASSERT_EQUAL_INT32(cache_before, nt_ui_test_clay_default_max_measure_text_word_cache_count());
     nt_ui_destroy_context(ctx);
 }
 

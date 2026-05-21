@@ -152,8 +152,9 @@ nt_material_t nt_ui_test_text_material(const nt_ui_context_t *ctx);
 /* Count of segmentable cmds in last walk with NULL userData (layer 0 fallback). */
 uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx);
 
-/* Clay__defaultMaxElementCount is impl-internal; expose for regression tests. */
+/* Clay globals are impl-internal; expose for regression tests. */
 int32_t nt_ui_test_clay_default_max_element_count(void);
+int32_t nt_ui_test_clay_default_max_measure_text_word_cache_count(void);
 #endif
 // #endregion
 
