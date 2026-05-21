@@ -80,19 +80,16 @@ static void nt_ui_clay_error_cb(Clay_ErrorData err) {
 // #endregion
 
 // #region measure_cb
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static Clay_Dimensions nt_ui_measure_text_cb(Clay_StringSlice text, Clay_TextElementConfig *config, void *user_data) {
     (void)user_data;
     NT_ASSERT(g_nt_ui_inframe_ctx != NULL && "measure_cb: Clay called outside begin/end");
     NT_ASSERT(config != NULL && "measure_cb: Clay passed NULL config");
 
     nt_ui_context_t *ctx = g_nt_ui_inframe_ctx;
-    if (config->fontId >= NT_UI_MAX_FONTS) {
-        return (Clay_Dimensions){0};
-    }
+    NT_ASSERT((uint32_t)config->fontId < NT_UI_MAX_FONTS && "nt_ui measure_cb: fontId out of range; check CLAY_TEXT_CONFIG vs NT_UI_MAX_FONTS");
     nt_font_t font = ctx->fonts[config->fontId];
-    if (!nt_font_valid(font)) {
-        return (Clay_Dimensions){0};
-    }
+    NT_ASSERT(nt_font_valid(font) && "nt_ui measure_cb: font slot empty; call nt_ui_set_font before declaring TEXT with this fontId");
     const float ls = (float)config->letterSpacing;
     nt_text_size_t s = nt_font_measure_n(font, text.chars, (size_t)text.length, (float)config->fontSize, ls);
     /* Clay convention: callback returns word width WITH one trailing
@@ -110,21 +107,72 @@ static Clay_Dimensions nt_ui_measure_text_cb(Clay_StringSlice text, Clay_TextEle
 // #endregion
 
 // #region module_init
+/* Per-quarter-arc segment count (rounded RECT/BORDER). Defined here so the
+ * LUT below sizes correctly. Helpers below use the same #define. */
+#define NT_UI_CORNER_SEGMENTS 6
+_Static_assert(NT_UI_CORNER_SEGMENTS >= 2 && NT_UI_CORNER_SEGMENTS <= 32, "NT_UI_CORNER_SEGMENTS must be in [2, 32]: lower degenerate, higher wastes stack and staging");
+#define NT_UI_PI_F 3.14159265358979323846F
+
+/* Precomputed (cos, sin) per arc segment per corner quadrant.
+ * Quadrant index encodes the starting angle (a_start = q * π/2):
+ *   q=0 -> BR (angle 0 → π/2)
+ *   q=1 -> BL (π/2 → π)
+ *   q=2 -> TL (π → 3π/2)
+ *   q=3 -> TR (3π/2 → 2π)
+ * Populated once at module init; .rodata-sized 4 * (SEG+1) * 8 = 224 B for SEG=6.
+ * Replaces 28-56 cosf/sinf calls per rounded element on the walker hot path. */
+typedef struct {
+    float cos;
+    float sin;
+} nt_ui_trig_pair_t;
+static nt_ui_trig_pair_t s_arc_lut[4][NT_UI_CORNER_SEGMENTS + 1];
+
+static void nt_ui_init_arc_lut(void) {
+    for (uint32_t q = 0U; q < 4U; ++q) {
+        const float a_start = NT_UI_PI_F * 0.5F * (float)q;
+        for (uint32_t s = 0U; s <= NT_UI_CORNER_SEGMENTS; ++s) {
+            const float t = (float)s / (float)NT_UI_CORNER_SEGMENTS;
+            const float a = a_start + (NT_UI_PI_F * 0.5F * t);
+            s_arc_lut[q][s].cos = cosf(a);
+            s_arc_lut[q][s].sin = sinf(a);
+        }
+    }
+}
+
 /* Wire measure callback into Clay's global function pointer. Bypasses
  * Clay_SetMeasureTextFunction (which requires an active Clay context) by
  * writing directly to the global -- legal because CLAY_IMPLEMENTATION
- * places Clay's internals in this TU. */
-void nt_ui_module_init(void) { Clay__MeasureText = nt_ui_measure_text_cb; }
-void nt_ui_module_shutdown(void) { Clay__MeasureText = NULL; }
+ * places Clay's internals in this TU. Also clears the module-global
+ * in-frame ctx tracker (death-test longjmp through nt_ui_end leaves it
+ * stale; module init/shutdown is the natural reset point). */
+void nt_ui_module_init(void) {
+    Clay__MeasureText = nt_ui_measure_text_cb;
+    g_nt_ui_inframe_ctx = NULL;
+    Clay_SetCurrentContext(NULL);
+    nt_ui_init_arc_lut();
+}
+void nt_ui_module_shutdown(void) {
+    Clay__MeasureText = NULL;
+    g_nt_ui_inframe_ctx = NULL;
+    Clay_SetCurrentContext(NULL);
+}
 // #endregion
 
 // #region create_destroy
 /* ctx struct rounded up to cache-line so Clay's arena starts aligned. */
 static size_t nt_ui_ctx_size_aligned(void) { return (sizeof(struct nt_ui_context) + 63U) & ~(size_t)63U; }
 
+/* Counting-sort scratch buffer in the arena: uint16_t per cmd, aligned up
+ * to NT_UI_ARENA_ALIGN so the Clay arena that follows stays aligned. */
+static size_t nt_ui_sorted_size_aligned(uint32_t max_elements) {
+    const size_t bytes = (size_t)max_elements * sizeof(uint16_t);
+    return (bytes + (NT_UI_ARENA_ALIGN - 1U)) & ~(size_t)(NT_UI_ARENA_ALIGN - 1U);
+}
+
 size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     NT_ASSERT(desc != NULL && "nt_ui_min_arena_size: desc must be non-NULL");
     NT_ASSERT(desc->max_elements > 0U && "nt_ui_min_arena_size: desc->max_elements must be > 0");
+    NT_ASSERT(desc->max_elements <= UINT16_MAX && "nt_ui_min_arena_size: desc->max_elements exceeds uint16 sorted-index range");
     /* Clay_SetMaxElementCount writes to GLOBAL Clay__defaultMaxElementCount
      * when no current context exists, or to current context otherwise. We
      * want to size against desc-> max_elements WITHOUT mutating any active
@@ -134,7 +182,7 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     Clay_SetMaxElementCount((int32_t)desc->max_elements);
     const size_t clay_bytes = (size_t)Clay_MinMemorySize();
     Clay_SetCurrentContext(saved);
-    return nt_ui_ctx_size_aligned() + clay_bytes;
+    return nt_ui_ctx_size_aligned() + nt_ui_sorted_size_aligned(desc->max_elements) + clay_bytes;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -149,8 +197,13 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     memset(ctx, 0, sizeof(*ctx));
 
     const size_t ctx_size = nt_ui_ctx_size_aligned();
-    void *clay_mem = (char *)arena + ctx_size;
-    const size_t clay_size = arena_size - ctx_size;
+    const size_t sorted_size = nt_ui_sorted_size_aligned(desc->max_elements);
+    /* Layout: [ctx struct][sorted buffer][Clay arena]. Each block is sized
+     * to keep the next block's start at NT_UI_ARENA_ALIGN-aligned offset. */
+    ctx->sorted = (uint16_t *)((char *)arena + ctx_size);
+    ctx->max_elements = desc->max_elements;
+    void *clay_mem = (char *)arena + ctx_size + sorted_size;
+    const size_t clay_size = arena_size - ctx_size - sorted_size;
 
     /* Stage desc->max_elements into Clay's global default so Clay_Initialize
      * inherits it for this new context. Save/restore current ctx so this
@@ -163,11 +216,11 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->clay_arena = Clay_CreateArenaWithCapacityAndMemory(clay_size, clay_mem);
     ctx->clay = Clay_Initialize(ctx->clay_arena, (Clay_Dimensions){.width = 1.0F, .height = 1.0F}, (Clay_ErrorHandler){.errorHandlerFunction = nt_ui_clay_error_cb, .userData = ctx});
 
-    /* Restore the previously-current context (if any). The caller picks
-     * which ctx is "current" via nt_ui_begin for each frame anyway. */
-    if (saved != NULL) {
-        Clay_SetCurrentContext(saved);
-    }
+    /* Restore the pre-create current ctx (may be NULL). Clay_Initialize
+     * sets current to the new ctx; without this restore the caller would
+     * inherit our new ctx as active without ever calling nt_ui_begin --
+     * breaks the contract that nt_ui_begin owns active-ctx selection. */
+    Clay_SetCurrentContext(saved);
 
     return ctx;
 }
@@ -175,6 +228,13 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
 void nt_ui_destroy_context(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_destroy_context: ctx must be non-NULL");
     NT_ASSERT(!ctx->in_frame && "nt_ui_destroy_context: ctx is mid-frame (call nt_ui_end first)");
+    /* nt_ui_begin sets Clay's global current_ptr to ctx->clay; that pointer
+     * lives inside ctx's arena and becomes dangling after memset below.
+     * Null Clay's current if it points at us so subsequent Clay API calls
+     * either short-circuit (Clay_MinMemorySize) or assert cleanly. */
+    if (Clay_GetCurrentContext() == ctx->clay) {
+        Clay_SetCurrentContext(NULL);
+    }
     memset(ctx, 0, sizeof(*ctx));
 }
 // #endregion
@@ -266,17 +326,7 @@ static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, 
 // #endregion
 
 // #region helper_emit_rounded_rect
-/* Per-quarter-arc segment count. 6 keeps the triangle count low (28 tris
- * for a fully rounded rect) while staying smooth at typical UI radii.
- *
- * Hot-path note: trig (cosf/sinf) dominates here -- ~28 calls per rounded
- * rect, ~56 per rounded border. If profiling shows this in the top hot
- * path, precompute a (SEG+1) x 4 sin/cos LUT at startup and table-lookup
- * here instead of computing each frame. UV centroid in emit_geometry is
- * orders of magnitude cheaper and not worth caching first. */
-#define NT_UI_CORNER_SEGMENTS 6
-_Static_assert(NT_UI_CORNER_SEGMENTS >= 2 && NT_UI_CORNER_SEGMENTS <= 32, "NT_UI_CORNER_SEGMENTS must be in [2, 32]: lower degenerate, higher wastes stack and staging");
-#define NT_UI_PI_F 3.14159265358979323846F
+/* NT_UI_CORNER_SEGMENTS, NT_UI_PI_F and s_arc_lut declared above in module_init. */
 
 /* Triangle fan from rect center to the boundary. Each corner contributes
  * either 1 vertex (radius 0) or NT_UI_CORNER_SEGMENTS+1 arc vertices.
@@ -319,7 +369,7 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
     positions[0][1] = y + half_h;
     uint32_t vi = 1;
 
-    /* TL arc: math angle π → 1.5π (sweeps from west to north of corner center). */
+    /* TL arc: quadrant 2 (π → 1.5π) -- sweeps west to north of corner center. */
     if (tl == 0.0F) {
         positions[vi][0] = x;
         positions[vi][1] = y;
@@ -328,14 +378,12 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
         const float cx = x + tl;
         const float cy = y + tl;
         for (uint32_t s = 0; s <= NT_UI_CORNER_SEGMENTS; s++) {
-            const float t = (float)s / (float)NT_UI_CORNER_SEGMENTS;
-            const float a = NT_UI_PI_F * (1.0F + 0.5F * t);
-            positions[vi][0] = cx + tl * cosf(a);
-            positions[vi][1] = cy + tl * sinf(a);
+            positions[vi][0] = cx + (tl * s_arc_lut[2][s].cos);
+            positions[vi][1] = cy + (tl * s_arc_lut[2][s].sin);
             vi++;
         }
     }
-    /* TR arc: 1.5π → 2π. */
+    /* TR arc: quadrant 3 (1.5π → 2π). */
     if (tr == 0.0F) {
         positions[vi][0] = x + w;
         positions[vi][1] = y;
@@ -344,14 +392,12 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
         const float cx = x + w - tr;
         const float cy = y + tr;
         for (uint32_t s = 0; s <= NT_UI_CORNER_SEGMENTS; s++) {
-            const float t = (float)s / (float)NT_UI_CORNER_SEGMENTS;
-            const float a = NT_UI_PI_F * (1.5F + 0.5F * t);
-            positions[vi][0] = cx + tr * cosf(a);
-            positions[vi][1] = cy + tr * sinf(a);
+            positions[vi][0] = cx + (tr * s_arc_lut[3][s].cos);
+            positions[vi][1] = cy + (tr * s_arc_lut[3][s].sin);
             vi++;
         }
     }
-    /* BR arc: 0 → 0.5π. */
+    /* BR arc: quadrant 0 (0 → 0.5π). */
     if (br == 0.0F) {
         positions[vi][0] = x + w;
         positions[vi][1] = y + h;
@@ -360,14 +406,12 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
         const float cx = x + w - br;
         const float cy = y + h - br;
         for (uint32_t s = 0; s <= NT_UI_CORNER_SEGMENTS; s++) {
-            const float t = (float)s / (float)NT_UI_CORNER_SEGMENTS;
-            const float a = NT_UI_PI_F * (0.5F * t);
-            positions[vi][0] = cx + br * cosf(a);
-            positions[vi][1] = cy + br * sinf(a);
+            positions[vi][0] = cx + (br * s_arc_lut[0][s].cos);
+            positions[vi][1] = cy + (br * s_arc_lut[0][s].sin);
             vi++;
         }
     }
-    /* BL arc: 0.5π → π. */
+    /* BL arc: quadrant 1 (0.5π → π). */
     if (bl == 0.0F) {
         positions[vi][0] = x;
         positions[vi][1] = y + h;
@@ -376,10 +420,8 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
         const float cx = x + bl;
         const float cy = y + h - bl;
         for (uint32_t s = 0; s <= NT_UI_CORNER_SEGMENTS; s++) {
-            const float t = (float)s / (float)NT_UI_CORNER_SEGMENTS;
-            const float a = NT_UI_PI_F * (0.5F + 0.5F * t);
-            positions[vi][0] = cx + bl * cosf(a);
-            positions[vi][1] = cy + bl * sinf(a);
+            positions[vi][0] = cx + (bl * s_arc_lut[1][s].cos);
+            positions[vi][1] = cy + (bl * s_arc_lut[1][s].sin);
             vi++;
         }
     }
@@ -423,12 +465,12 @@ static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_
 }
 
 /* Append one corner's (outer,inner) vertex pair(s) into the strip array.
- * a_start_factor scales by π for the arc start (1.0=TL/π, 1.5=TR/3π/2,
- * 0.0=BR/0, 0.5=BL/π/2). a_start_factor sweep is always +0.5π. radius==0
- * collapses to a single sharp pair at (sharp_x, sharp_y) (outer) and
+ * quadrant picks the LUT row: 2=TL (π → 1.5π), 3=TR (1.5π → 2π),
+ * 0=BR (0 → 0.5π), 1=BL (0.5π → π). radius==0 collapses to a single
+ * sharp pair at (sharp_x, sharp_y) (outer) and
  * (sharp_x + sx*wx, sharp_y + sy*wy) (inner). */
 static uint32_t emit_corner_strip_pairs(float (*pos)[2], uint32_t vi, float radius, float cx, float cy, float w_perp_x, float w_perp_y, float sharp_x, float sharp_y, float sign_x, float sign_y,
-                                        float a_start_factor) {
+                                        uint32_t quadrant) {
     if (radius == 0.0F) {
         pos[vi][0] = sharp_x;
         pos[vi][1] = sharp_y;
@@ -443,12 +485,9 @@ static uint32_t emit_corner_strip_pairs(float (*pos)[2], uint32_t vi, float radi
      * center on that axis. Matches CSS/Godot/Skia behaviour. */
     const float irx = (radius > w_perp_x) ? (radius - w_perp_x) : 0.0F;
     const float iry = (radius > w_perp_y) ? (radius - w_perp_y) : 0.0F;
-    const float a_start = NT_UI_PI_F * a_start_factor;
     for (uint32_t s = 0; s <= NT_UI_CORNER_SEGMENTS; s++) {
-        const float t = (float)s / (float)NT_UI_CORNER_SEGMENTS;
-        const float a = a_start + (NT_UI_PI_F * 0.5F * t);
-        const float cc = cosf(a);
-        const float ss = sinf(a);
+        const float cc = s_arc_lut[quadrant][s].cos;
+        const float ss = s_arc_lut[quadrant][s].sin;
         pos[vi][0] = cx + (radius * cc);
         pos[vi][1] = cy + (radius * ss);
         vi++;
@@ -511,10 +550,11 @@ static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay
     float positions[4 * (NT_UI_CORNER_SEGMENTS + 1) * 2][2];
     uint32_t vi = 0;
 
-    vi = emit_corner_strip_pairs(positions, vi, tl, x + tl, y + tl, lft, top, x, y, 1.0F, 1.0F, 1.0F);
-    vi = emit_corner_strip_pairs(positions, vi, tr, x + w - tr, y + tr, rgt, top, x + w, y, -1.0F, 1.0F, 1.5F);
-    vi = emit_corner_strip_pairs(positions, vi, br, x + w - br, y + h - br, rgt, bot, x + w, y + h, -1.0F, -1.0F, 0.0F);
-    vi = emit_corner_strip_pairs(positions, vi, bl, x + bl, y + h - bl, lft, bot, x, y + h, 1.0F, -1.0F, 0.5F);
+    /* Quadrant: 2=TL (π → 1.5π), 3=TR (1.5π → 2π), 0=BR (0 → 0.5π), 1=BL (0.5π → π). */
+    vi = emit_corner_strip_pairs(positions, vi, tl, x + tl, y + tl, lft, top, x, y, 1.0F, 1.0F, 2U);
+    vi = emit_corner_strip_pairs(positions, vi, tr, x + w - tr, y + tr, rgt, top, x + w, y, -1.0F, 1.0F, 3U);
+    vi = emit_corner_strip_pairs(positions, vi, br, x + w - br, y + h - br, rgt, bot, x + w, y + h, -1.0F, -1.0F, 0U);
+    vi = emit_corner_strip_pairs(positions, vi, bl, x + bl, y + h - bl, lft, bot, x, y + h, 1.0F, -1.0F, 1U);
 
     /* Triangle strip with wrap. Each pair k: outer at 2k, inner at 2k+1. */
     const uint32_t pair_count = vi / 2;
@@ -794,9 +834,17 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
      * vh==0 (GL undefined). Origin x/y may be zero. */
     NT_ASSERT(isfinite(target->viewport[0]) && isfinite(target->viewport[1]) && isfinite(target->viewport[2]) && isfinite(target->viewport[3]) && "nt_ui_walk: target->viewport must be finite");
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && "nt_ui_walk: target->viewport origin (x,y) must be non-negative");
+    NT_ASSERT(target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport (w,h) must be non-negative");
     /* Zero-size viewport is a legitimate runtime state (minimized browser
-     * tab, mobile orientation transition). Silent no-op rather than assert. */
-    if (target->viewport[2] <= 0.0F || target->viewport[3] <= 0.0F) {
+     * tab, mobile orientation transition). Silent no-op rather than assert,
+     * but reset per-walk stats so callers don't read stale values from the
+     * previous non-empty walk. */
+    if (target->viewport[2] == 0.0F || target->viewport[3] == 0.0F) {
+        ctx->last_walk_draw_call_delta = 0;
+        ctx->last_walk_element_count = 0;
+#ifdef NT_TEST_ACCESS
+        ctx->test_last_walk_unlayered_count = 0;
+#endif
         return;
     }
     NT_ASSERT(ctx->atlas.id != 0 && "nt_ui_set_atlas_white_region(ctx,...) required before nt_ui_walk");
@@ -828,11 +876,14 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 
     /* Segment-aware dispatch -- see nt_ui_walk header doc for contract.
      * Within a segment (same z, no SCISSOR/CUSTOM barrier crossed):
-     *   pass 1: scan for layer range [min..max] used in this segment.
-     *   pass 2: for each layer in that range, emit commands matching it
-     *           in declaration order. NULL userData -> layer 0.
-     * For the common single-layer case (all userData NULL), min==max so
-     * pass 2 runs once -- O(N) total. */
+     *   counting sort by layer (stable). 4 passes over N segment commands:
+     *     1) count[layer]++ per cmd
+     *     2) prefix-sum count[] into offset[]
+     *     3) place cmd index into ctx->sorted[offset[layer]++]
+     *     4) iterate ctx->sorted[] in order, dispatch
+     * O(N + 256) total per segment, ~6N ops dominant. count[256] and
+     * offset[256] live on this stack (2 KB); ctx->sorted lives in the
+     * per-ctx arena sized for ctx->max_elements. */
     const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
 #ifdef NT_TEST_ACCESS
     uint32_t unlayered_count = 0U;
@@ -854,31 +905,33 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
             }
             ++seg_end;
         }
-        uint8_t min_layer = 255U;
-        uint8_t max_layer = 0U;
+        const int32_t seg_n = seg_end - i;
+        NT_ASSERT((uint32_t)seg_n <= ctx->max_elements && "nt_ui_walk: segment size exceeds ctx->max_elements; raise desc->max_elements or split via SCISSOR");
+
+        uint32_t count[256] = {0};
         for (int32_t j = i; j < seg_end; ++j) {
             const Clay_RenderCommand *cc = &arr->internalArray[j];
             const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
+            count[layer]++;
 #ifdef NT_TEST_ACCESS
             if (cc->userData == NULL) {
                 ++unlayered_count;
             }
 #endif
-            if (layer < min_layer) {
-                min_layer = layer;
-            }
-            if (layer > max_layer) {
-                max_layer = layer;
-            }
         }
-        for (uint32_t layer = (uint32_t)min_layer; layer <= (uint32_t)max_layer; ++layer) {
-            for (int32_t j = i; j < seg_end; ++j) {
-                const Clay_RenderCommand *cc = &arr->internalArray[j];
-                const uint8_t cmd_layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
-                if ((uint32_t)cmd_layer == layer) {
-                    dispatch_command(ctx, cc, scissor_stack, &depth, target);
-                }
-            }
+        uint32_t offset[256];
+        uint32_t total = 0U;
+        for (uint32_t l = 0U; l < 256U; ++l) {
+            offset[l] = total;
+            total += count[l];
+        }
+        for (int32_t j = i; j < seg_end; ++j) {
+            const Clay_RenderCommand *cc = &arr->internalArray[j];
+            const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
+            ctx->sorted[offset[layer]++] = (uint16_t)j;
+        }
+        for (uint32_t k = 0U; k < total; ++k) {
+            dispatch_command(ctx, &arr->internalArray[ctx->sorted[k]], scissor_stack, &depth, target);
         }
         i = seg_end;
     }

@@ -31,6 +31,12 @@ struct nt_ui_context {
     uint32_t test_last_walk_unlayered_count;
 #endif
 
+    /* Layer-sort scratch buffer (uint16 indices into frozen_cmds). Lives
+     * in the same caller-owned arena right after the ctx struct, sized to
+     * fit one whole segment worst case (== max_elements). */
+    uint16_t *sorted;
+    uint32_t max_elements;
+
     nt_font_t fonts[NT_UI_MAX_FONTS];
 
     Clay_Arena clay_arena;

@@ -170,6 +170,37 @@ static void test_unlayered_count_tracks_null_userdata(void) {
     TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_test_last_walk_unlayered_count(s_fx.ctx));
 }
 
+/* Sparse layers (0 and 200) must work correctly. Old iterate-per-layer
+ * implementation would scan 200 empty buckets; counting sort is O(N + 256)
+ * regardless of layer spread. */
+static void test_layer_sort_sparse_layers(void) {
+    static const nt_ui_element_data_t k_layer_low = {.layer = 0U};
+    static const nt_ui_element_data_t k_layer_high = {.layer = 200U};
+    /* Layer 200 declared first, layer 0 second -- after sort layer 0 renders first. */
+    Clay_RenderCommand *c0 = &s_test_cmds[0];
+    c0->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    c0->zIndex = 0;
+    c0->boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
+    c0->renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+    c0->userData = (void *)&k_layer_high;
+
+    Clay_RenderCommand *c1 = &s_test_cmds[1];
+    c1->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    c1->zIndex = 0;
+    c1->boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 10, .height = 10};
+    c1->renderData.rectangle.backgroundColor = (Clay_Color){.r = 0, .g = 255, .b = 0, .a = 255};
+    c1->userData = (void *)&k_layer_low;
+    inject_frozen_cmds(2);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    /* Last emit must be layer 200 (declared first but renders last) at x=0. */
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0U, pos);
+    TEST_ASSERT_EQUAL_INT32(0, (int32_t)pos[0]);
+}
+
 /* Layer 1 cmd declared FIRST but renders AFTER layer 0 cmd declared SECOND. */
 static void test_layer_sort_overrides_declaration_order(void) {
     Clay_RenderCommand *c0 = &s_test_cmds[0];
@@ -206,5 +237,6 @@ int main(void) {
     RUN_TEST(test_multi_z_preserves_painter_order);
     RUN_TEST(test_unlayered_count_tracks_null_userdata);
     RUN_TEST(test_layer_sort_overrides_declaration_order);
+    RUN_TEST(test_layer_sort_sparse_layers);
     return UNITY_END();
 }

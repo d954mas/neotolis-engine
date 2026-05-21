@@ -129,15 +129,28 @@ static void test_walk_without_end_asserts(void) {
     nt_ui_destroy_context(fresh);
 }
 
-/* viewport components must be non-negative (otherwise (int) cast is UB). */
-static void test_walk_negative_viewport_asserts(void) {
+/* viewport origin must be non-negative (otherwise (int) cast is UB). */
+static void test_walk_negative_viewport_origin_asserts(void) {
     inject_frozen_cmds(0);
     nt_ui_target_t target = {.viewport = {-1.0F, 0, 800, 600}};
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
+/* viewport w/h < 0 is a caller bug -- assert by fail-early policy.
+ * Symmetric with origin assert above; zero is the only legitimate
+ * "small" value (handled by separate silent no-op path). */
+static void test_walk_negative_viewport_size_asserts(void) {
+    inject_frozen_cmds(0);
+    nt_ui_target_t neg_w = {.viewport = {0, 0, -1.0F, 600}};
+    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &neg_w));
+    nt_ui_target_t neg_h = {.viewport = {0, 0, 800, -1.0F}};
+    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &neg_h));
+}
+
 /* Zero-size viewport (minimized window / mobile orientation transition) is
- * a legitimate runtime state -- walker must silent no-op, not assert. */
+ * a legitimate runtime state -- walker must silent no-op, not assert, AND
+ * must reset per-walk stats so caller doesn't read stale values from the
+ * previous non-empty walk. */
 static void test_walk_zero_viewport_silent_noop(void) {
     inject_frozen_cmds(0);
     const uint32_t calls_before = nt_sprite_renderer_test_draw_call_count();
@@ -149,6 +162,26 @@ static void test_walk_zero_viewport_silent_noop(void) {
     nt_ui_walk(s_fx.ctx, &zero_both);
     /* No draw calls emitted from any of the three. */
     TEST_ASSERT_EQUAL_UINT32(calls_before, nt_sprite_renderer_test_draw_call_count());
+}
+
+/* Zero-viewport walk after a non-empty walk must overwrite the stats with 0,
+ * not leave stale element_count from the previous frame. */
+static void test_walk_zero_viewport_resets_stats(void) {
+    /* First: a normal walk with some commands so stats become non-zero. */
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
+    s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+    inject_frozen_cmds(1);
+    nt_ui_target_t normal = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &normal);
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_element_count(s_fx.ctx));
+
+    /* Second: minimized window simulated by zero viewport. */
+    nt_ui_target_t zero = {.viewport = {0, 0, 0.0F, 0.0F}};
+    nt_ui_walk(s_fx.ctx, &zero);
+    /* Stats MUST be reset; caller-visible value must be 0, not the stale 1. */
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
 }
 
 /* Macro to set s_setup_bind BEFORE RUN_TEST invokes setUp -- Unity runs
@@ -165,9 +198,13 @@ int main(void) {
     s_setup_bind = UI_WALKER_FX_BIND_ALL;
     RUN_TEST(test_walk_without_end_asserts);
     s_setup_bind = UI_WALKER_FX_BIND_ALL;
-    RUN_TEST(test_walk_negative_viewport_asserts);
+    RUN_TEST(test_walk_negative_viewport_origin_asserts);
+    s_setup_bind = UI_WALKER_FX_BIND_ALL;
+    RUN_TEST(test_walk_negative_viewport_size_asserts);
     s_setup_bind = UI_WALKER_FX_BIND_ALL;
     RUN_TEST(test_walk_zero_viewport_silent_noop);
+    s_setup_bind = UI_WALKER_FX_BIND_ALL;
+    RUN_TEST(test_walk_zero_viewport_resets_stats);
     s_setup_bind = UI_WALKER_FX_BIND_ALL;
     RUN_TEST(test_second_walk_identical);
     s_setup_bind = UI_WALKER_FX_BIND_ALL;

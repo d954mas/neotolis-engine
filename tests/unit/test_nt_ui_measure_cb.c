@@ -19,6 +19,7 @@
 #include "nt_font_format.h"
 #include "nt_pack_format.h"
 #include "resource/nt_resource.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
@@ -140,6 +141,7 @@ static nt_font_t make_resolved_test_font(const char *name, uint8_t **out_blob) {
 /* ---- Unity setUp / tearDown ---- */
 
 void setUp(void) {
+    nt_test_assert_install();
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 8, .max_pipelines = 4, .max_buffers = 8, .max_textures = 32, .max_meshes = 8});
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
@@ -195,18 +197,19 @@ static Clay_BoundingBox declare_and_measure_text(nt_ui_context_t *ctx, const cha
  * the nt_font_valid branch. The fact that Clay_EndLayout completes without
  * firing CLAY_ERROR_TYPE_TEXT_MEASUREMENT_FUNCTION_NOT_PROVIDED is itself
  * evidence that the measure callback is wired. */
-static void test_measure_callback_wired(void) {
+/* measure_cb runs DURING Clay layout (nt_ui_end). Unbound font slot is a
+ * contract violation symmetric with emit_text -- asserts here (one frame
+ * earlier than the walker would catch it).
+ *
+ * Death-test caveat: assert handler longjmps OUT of nt_ui_end, leaving
+ * ctx->in_frame=true and g_nt_ui_inframe_ctx dangling. We skip destroy
+ * (would trip its own in_frame guard with armed=false handler -> trap).
+ * Static arena gets reused next test; module_init clears the globals. */
+static void test_measure_callback_unbound_font_asserts(void) {
     nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(ctx);
-
-    /* No font set at slot 0 -> callback should hit the nt_font_valid early
-     * return and produce a 0-width TEXT command bounding box (or no TEXT
-     * command at all, depending on Clay's culling). */
-    Clay_BoundingBox bb = declare_and_measure_text(ctx, "ABC", 0U, 14U);
-    TEST_ASSERT_TRUE(float_is_zero_bits(bb.width));
-    TEST_ASSERT_TRUE(float_is_zero_bits(bb.height));
-
-    nt_ui_destroy_context(ctx);
+    /* No font set at slot 0 -> measure_cb fires during nt_ui_end and asserts. */
+    NT_TEST_EXPECT_ASSERT(declare_and_measure_text(ctx, "ABC", 0U, 14U));
 }
 
 /* callback forwards Clay_StringSlice -> nt_font_measure_n with
@@ -310,23 +313,22 @@ static void test_measure_callback_letter_spacing_matches_render_width(void) {
 /* with no font slot populated the callback returns {0,0} via the
  * nt_font_valid early-return path -- proves the guard branch fires before
  * the (would-be-crashing) nt_font_measure_n call. */
-static void test_measure_callback_invalid_font_returns_zero(void) {
+/* fontId >= NT_UI_MAX_FONTS is a contract violation in CLAY_TEXT_CONFIG --
+ * measure_cb asserts symmetrically with emit_text. Destroy skipped for the
+ * same reason as test_measure_callback_unbound_font_asserts above. */
+static void test_measure_callback_out_of_range_font_asserts(void) {
     nt_ui_context_t *ctx = nt_ui_create_context(s_arena, sizeof s_arena, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(ctx);
-    /* Deliberately leave ctx->fonts[0] = NT_FONT_INVALID (zeroed by create). */
-
-    Clay_BoundingBox bb = declare_and_measure_text(ctx, "ABC", 0U, 14U);
-    TEST_ASSERT_TRUE(float_is_zero_bits(bb.width));
-    TEST_ASSERT_TRUE(float_is_zero_bits(bb.height));
-
-    nt_ui_destroy_context(ctx);
+    NT_TEST_EXPECT_ASSERT(declare_and_measure_text(ctx, "ABC", NT_UI_MAX_FONTS, 14U));
 }
 
 int main(void) {
+    (void)setvbuf(stdout, NULL, _IONBF, 0);
     UNITY_BEGIN();
-    RUN_TEST(test_measure_callback_wired);
+    /* Happy-path tests first so a crashing death-test doesn't hide them. */
     RUN_TEST(test_measure_callback_forwards_to_font_measure_n);
     RUN_TEST(test_measure_callback_letter_spacing_matches_render_width);
-    RUN_TEST(test_measure_callback_invalid_font_returns_zero);
+    RUN_TEST(test_measure_callback_unbound_font_asserts);
+    RUN_TEST(test_measure_callback_out_of_range_font_asserts);
     return UNITY_END();
 }
