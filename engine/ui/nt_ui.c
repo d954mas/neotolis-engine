@@ -162,13 +162,6 @@ void nt_ui_module_shutdown(void) {
 /* ctx struct rounded up to cache-line so Clay's arena starts aligned. */
 static size_t nt_ui_ctx_size_aligned(void) { return (sizeof(struct nt_ui_context) + 63U) & ~(size_t)63U; }
 
-/* Counting-sort scratch buffer in the arena: uint16_t per cmd, aligned up
- * to NT_UI_ARENA_ALIGN so the Clay arena that follows stays aligned. */
-static size_t nt_ui_sorted_size_aligned(uint32_t max_elements) {
-    const size_t bytes = (size_t)max_elements * sizeof(uint16_t);
-    return (bytes + (NT_UI_ARENA_ALIGN - 1U)) & ~(size_t)(NT_UI_ARENA_ALIGN - 1U);
-}
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     NT_ASSERT(desc != NULL && "nt_ui_min_arena_size: desc must be non-NULL");
@@ -184,7 +177,7 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     Clay_SetMaxElementCount((int32_t)desc->max_elements);
     const size_t clay_bytes = (size_t)Clay_MinMemorySize();
     Clay_SetCurrentContext(saved);
-    return nt_ui_ctx_size_aligned() + nt_ui_sorted_size_aligned(desc->max_elements) + clay_bytes;
+    return nt_ui_ctx_size_aligned() + clay_bytes;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -199,14 +192,12 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     memset(ctx, 0, sizeof(*ctx));
 
     const size_t ctx_size = nt_ui_ctx_size_aligned();
-    const size_t sorted_size = nt_ui_sorted_size_aligned(desc->max_elements);
-    /* Layout: [ctx struct][sorted buffer][Clay arena]. Each block is sized
+    /* Layout: [ctx struct][Clay arena]. Each block is sized
      * to keep the next block's start at NT_UI_ARENA_ALIGN-aligned offset. */
-    ctx->sorted = (uint16_t *)((char *)arena + ctx_size);
     ctx->max_elements = desc->max_elements;
     ctx->max_scissor_depth = desc->max_scissor_depth;
-    void *clay_mem = (char *)arena + ctx_size + sorted_size;
-    const size_t clay_size = arena_size - ctx_size - sorted_size;
+    void *clay_mem = (char *)arena + ctx_size;
+    const size_t clay_size = arena_size - ctx_size;
 
     /* Stage desc->max_elements into Clay's global default so Clay_Initialize
      * inherits it for this new context. Save/restore current ctx so this
@@ -300,7 +291,9 @@ static inline uint8_t clamp_u8(float v) {
     if (v >= 255.0F) {
         return 255U;
     }
-    return (uint8_t)v;
+    /* Round-to-nearest (not truncation) so slow fades don't step on
+     * integer boundaries. The clamp above ensures v + 0.5F < 256. */
+    return (uint8_t)(v + 0.5F);
 }
 
 static inline uint32_t nt_color_pack_clay(Clay_Color c) {
@@ -893,14 +886,11 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 
     /* Segment-aware dispatch -- see nt_ui_walk header doc for contract.
      * Within a segment (same z, no SCISSOR/CUSTOM barrier crossed):
-     *   counting sort by layer (stable). 4 passes over N segment commands:
-     *     1) count[layer]++ per cmd
-     *     2) prefix-sum count[] into offset[]
-     *     3) place cmd index into ctx->sorted[offset[layer]++]
-     *     4) iterate ctx->sorted[] in order, dispatch
-     * O(N + 256) total per segment, ~6N ops dominant. count[256] and
-     * offset[256] live on this stack (2 KB); ctx->sorted lives in the
-     * per-ctx arena sized for ctx->max_elements. */
+     *   Bitmask Multipass layer dispatch (stable, zero persistent memory).
+     *   1) Scan segment commands (N), record active layers in active_layers[8] bitmask.
+     *   2) For each set layer bit in the mask, scan the segment (N) sequentially
+     *      and dispatch matching commands.
+     *   O(N + 8 + L_active * N) total per segment. Memory: 32 bytes on stack, 0 in arena. */
     const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
 #ifdef NT_TEST_ACCESS
     uint32_t unlayered_count = 0U;
@@ -925,30 +915,35 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         const int32_t seg_n = seg_end - i;
         NT_ASSERT((uint32_t)seg_n <= ctx->max_elements && "nt_ui_walk: segment size exceeds ctx->max_elements; raise desc->max_elements or split via SCISSOR");
 
-        uint32_t count[256] = {0};
+        uint32_t active_layers[8] = {0U};
         for (int32_t j = i; j < seg_end; ++j) {
             const Clay_RenderCommand *cc = &arr->internalArray[j];
             const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
-            count[layer]++;
+            active_layers[layer >> 5U] |= (1U << (layer & 31U));
 #ifdef NT_TEST_ACCESS
             if (cc->userData == NULL) {
                 ++unlayered_count;
             }
 #endif
         }
-        uint32_t offset[256];
-        uint32_t total = 0U;
-        for (uint32_t l = 0U; l < 256U; ++l) {
-            offset[l] = total;
-            total += count[l];
-        }
-        for (int32_t j = i; j < seg_end; ++j) {
-            const Clay_RenderCommand *cc = &arr->internalArray[j];
-            const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
-            ctx->sorted[offset[layer]++] = (uint16_t)j;
-        }
-        for (uint32_t k = 0U; k < total; ++k) {
-            dispatch_command(ctx, &arr->internalArray[ctx->sorted[k]], scissor_stack, &depth, target);
+
+        for (uint32_t word_idx = 0U; word_idx < 8U; ++word_idx) {
+            const uint32_t mask = active_layers[word_idx];
+            if (mask == 0U) {
+                continue;
+            }
+            for (uint32_t bit_idx = 0U; bit_idx < 32U; ++bit_idx) {
+                if ((mask & (1U << bit_idx)) != 0U) {
+                    const uint8_t current_layer = (uint8_t)((word_idx << 5U) | bit_idx);
+                    for (int32_t j = i; j < seg_end; ++j) {
+                        const Clay_RenderCommand *cc = &arr->internalArray[j];
+                        const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
+                        if (layer == current_layer) {
+                            dispatch_command(ctx, cc, scissor_stack, &depth, target);
+                        }
+                    }
+                }
+            }
         }
         i = seg_end;
     }
@@ -981,6 +976,12 @@ void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uin
     NT_ASSERT(r != NULL && r->vertex_count > 0U && "nt_ui_set_atlas_white_region: white region missing / tombstoned (mis-baked atlas)");
     /* emit_screen_rect scales by mat4(w,h) on cached_pos {0,1}x{0,1}. */
     NT_ASSERT(r->source_w == 1 && r->source_h == 1 && "nt_ui_set_atlas_white_region: white region must be 1x1 source");
+    /* cached_pos for the white quad is local_pos * ipu; emit_screen_rect
+     * expects ipu==1 so its mat4(w,h) scale lands at exactly w x h world
+     * units. A non-1 PPU atlas (e.g. shared game-sprite atlas with PPU=100)
+     * would shrink every UI rect by that factor -- use a dedicated UI atlas
+     * with default PPU. */
+    NT_ASSERT(nt_atlas_get_inverse_pixels_per_unit(atlas) == 1.0F && "nt_ui_set_atlas_white_region: atlas must have PPU=1 (no PPU metadata); use a dedicated UI atlas");
     ctx->atlas = atlas;
     ctx->white_region = white_region_idx;
 }

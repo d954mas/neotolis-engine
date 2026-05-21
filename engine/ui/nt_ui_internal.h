@@ -31,10 +31,6 @@ struct nt_ui_context {
     uint32_t test_last_walk_unlayered_count;
 #endif
 
-    /* Layer-sort scratch buffer (uint16 indices into frozen_cmds). Lives
-     * in the same caller-owned arena right after the ctx struct, sized to
-     * fit one whole segment worst case (== max_elements). */
-    uint16_t *sorted;
     uint32_t max_elements;
     /* Walker allocates a VLA of this depth for its scissor stack. */
     uint32_t max_scissor_depth;
