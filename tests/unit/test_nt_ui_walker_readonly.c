@@ -12,7 +12,7 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_DEFAULT_ARENA_SIZE];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
 #define MAX_TEST_CMDS 8
@@ -113,7 +113,7 @@ static void test_walk_without_text_material_asserts(void) {
 /* walk before begin/end must assert (frozen_cmds is zero-init). */
 static void test_walk_without_end_asserts(void) {
     /* Fresh ctx so we don't inherit injected frozen_cmds. */
-    alignas(NT_UI_ARENA_ALIGN) static uint8_t fresh_arena[NT_UI_DEFAULT_ARENA_SIZE];
+    alignas(NT_UI_ARENA_ALIGN) static uint8_t fresh_arena[NT_UI_TEST_ARENA_SIZE];
     const nt_ui_create_desc_t desc = nt_ui_create_desc_defaults();
     nt_ui_context_t *fresh = nt_ui_create_context(fresh_arena, sizeof fresh_arena, &desc);
     TEST_ASSERT_NOT_NULL(fresh);

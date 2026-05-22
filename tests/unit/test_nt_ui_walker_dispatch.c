@@ -15,7 +15,7 @@
 
 /* ---- Test-local state ---- */
 
-alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_DEFAULT_ARENA_SIZE];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
 #define MAX_TEST_CMDS 32
@@ -357,6 +357,27 @@ static void test_dispatch_border_width_exceeds_radius(void) {
     TEST_ASSERT_GREATER_THAN_UINT32(0U, nt_sprite_renderer_test_last_emit_vertex_count());
 }
 
+/* Mixed corners (some sharp, some rounded) in one BORDER. Locks current
+ * vertex count: 2 sharp pairs (2 verts each) + 2 rounded pairs (2*(SEG+1)
+ * verts each) = 2*2 + 2*2*(SEG+1) = 4 + 28 = 32 verts at SEG=6.
+ * Catches structural regressions in emit_corner_strip_pairs / strip wrap. */
+static void test_dispatch_border_mixed_radii(void) {
+    Clay_RenderCommand *c = &s_test_cmds[0];
+    c->commandType = CLAY_RENDER_COMMAND_TYPE_BORDER;
+    c->boundingBox = (Clay_BoundingBox){.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 60.0F};
+    c->renderData.border.color = (Clay_Color){.r = 0.0F, .g = 255.0F, .b = 0.0F, .a = 255.0F};
+    c->renderData.border.width = (Clay_BorderWidth){.left = 2, .right = 2, .top = 2, .bottom = 2, .betweenChildren = 0};
+    c->renderData.border.cornerRadius = (Clay_CornerRadius){.topLeft = 10.0F, .topRight = 0.0F, .bottomLeft = 0.0F, .bottomRight = 10.0F};
+    inject_frozen_cmds(1);
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    /* SEG=6 (private to nt_ui.c): 2 sharp corners give 2 pairs = 4 verts.
+     * 2 rounded corners give 2*(6+1) = 14 pairs = 28 verts. Total 32. */
+    TEST_ASSERT_EQUAL_UINT32(32U, nt_sprite_renderer_test_last_emit_vertex_count());
+}
+
 /* Rounded IMAGE asserts -- rounded edges must be baked into the atlas. */
 static void test_dispatch_image_nonzero_radius_asserts(void) {
     s_image_payload.atlas = s_fx.atlas.handle;
@@ -402,6 +423,7 @@ int main(void) {
     RUN_TEST(test_dispatch_border_rounded_emits_strip);
     RUN_TEST(test_dispatch_border_rounded_partial_widths);
     RUN_TEST(test_dispatch_border_width_exceeds_radius);
+    RUN_TEST(test_dispatch_border_mixed_radii);
     RUN_TEST(test_dispatch_rect_asymmetric_radii_no_over_clamp);
     RUN_TEST(test_dispatch_rounded_rect_uv_is_centroid_not_corner);
     RUN_TEST(test_dispatch_image_nonzero_radius_asserts);

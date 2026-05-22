@@ -41,6 +41,9 @@ void *nt_mem_scratch_alloc(size_t size, size_t align);
 /* Checked-multiply variant: asserts elem_size*count doesn't overflow. */
 void *nt_mem_scratch_alloc_array(size_t elem_size, size_t count, size_t align);
 
+/* Peak `used` since init. Survives resets so callers can size scratch budget. */
+size_t nt_mem_scratch_high_water_mark(void);
+
 #define NT_MEM_SCRATCH_ALLOC(T) ((T *)nt_mem_scratch_alloc(sizeof(T), _Alignof(T)))
 
 #define NT_MEM_SCRATCH_ALLOC_ARRAY(T, count) ((T *)nt_mem_scratch_alloc_array(sizeof(T), (size_t)(count), _Alignof(T)))

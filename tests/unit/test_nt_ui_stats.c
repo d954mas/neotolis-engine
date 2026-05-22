@@ -14,7 +14,7 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_DEFAULT_ARENA_SIZE];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
 #define MAX_TEST_CMDS 8

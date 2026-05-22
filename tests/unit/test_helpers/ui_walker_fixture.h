@@ -8,6 +8,7 @@
 #include "font/nt_font.h"
 #include "material/nt_material.h"
 #include "test_helpers/ui_atlas.h"
+#include "test_helpers/ui_test_arena.h"
 #include "ui/nt_ui.h"
 
 #ifdef __cplusplus

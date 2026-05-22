@@ -10,6 +10,7 @@ static struct {
     uint8_t *base;
     size_t size;
     size_t used;
+    size_t high_water;
     bool initialized;
 } s_scratch;
 
@@ -20,6 +21,7 @@ void nt_mem_scratch_init(size_t size_bytes) {
     NT_ASSERT(s_scratch.base != NULL && "nt_mem_scratch_init: malloc failed");
     s_scratch.size = size_bytes;
     s_scratch.used = 0;
+    s_scratch.high_water = 0;
     s_scratch.initialized = true;
 }
 
@@ -29,6 +31,7 @@ void nt_mem_scratch_shutdown(void) {
     s_scratch.base = NULL;
     s_scratch.size = 0;
     s_scratch.used = 0;
+    s_scratch.high_water = 0;
     s_scratch.initialized = false;
 }
 
@@ -49,8 +52,13 @@ void *nt_mem_scratch_alloc(size_t size, size_t align) {
     NT_ASSERT(aligned <= s_scratch.size && size <= s_scratch.size - aligned && "nt_mem_scratch_alloc: out of space; raise nt_mem_scratch_init size");
     void *p = s_scratch.base + aligned;
     s_scratch.used = aligned + size;
+    if (s_scratch.used > s_scratch.high_water) {
+        s_scratch.high_water = s_scratch.used;
+    }
     return p;
 }
+
+size_t nt_mem_scratch_high_water_mark(void) { return s_scratch.high_water; }
 
 void *nt_mem_scratch_alloc_array(size_t elem_size, size_t count, size_t align) {
     NT_ASSERT(elem_size > 0 && "nt_mem_scratch_alloc_array: elem_size must be > 0");

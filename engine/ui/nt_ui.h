@@ -24,7 +24,7 @@
 #endif
 
 /* Fixed stack-array size (no VLA -- MSVC C compat). */
-#define NT_UI_WALKER_SCISSOR_DEPTH_CAP 256
+#define NT_UI_WALKER_SCISSOR_DEPTH_CAP 64
 
 /* Clay places its Clay_Context at the arena head via raw cast. */
 #define NT_UI_ARENA_ALIGN _Alignof(max_align_t)
@@ -32,7 +32,6 @@
 #ifndef NT_UI_DEFAULT_MAX_ELEMENT_COUNT
 #define NT_UI_DEFAULT_MAX_ELEMENT_COUNT 1024
 #endif
-#define NT_UI_DEFAULT_ARENA_SIZE (1U * 1024U * 1024U)
 
 /* Bare uint8_t[N] has 1-byte alignment -- create_context would assert. */
 #define NT_UI_DECLARE_ARENA(name, size) alignas(NT_UI_ARENA_ALIGN) uint8_t name[(size)]
@@ -121,6 +120,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 
 /* Window delta over the walk; includes CUSTOM-handler draws. */
 uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx);
+/* Total Clay commands incl. SCISSOR/CUSTOM/NONE (non-drawing barriers). */
 uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx);
 
 // #region test_access

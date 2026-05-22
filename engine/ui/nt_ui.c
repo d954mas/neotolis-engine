@@ -71,7 +71,7 @@ static Clay_Dimensions nt_ui_measure_text_cb(Clay_StringSlice text, Clay_TextEle
 
 // #region module_init
 #define NT_UI_CORNER_SEGMENTS 6
-_Static_assert(NT_UI_CORNER_SEGMENTS >= 2 && NT_UI_CORNER_SEGMENTS <= 32, "NT_UI_CORNER_SEGMENTS must be in [2, 32]");
+_Static_assert(NT_UI_CORNER_SEGMENTS >= 2 && NT_UI_CORNER_SEGMENTS <= 16, "NT_UI_CORNER_SEGMENTS must be in [2, 16]");
 #define NT_UI_PI_F 3.14159265358979323846F
 
 /* Quadrant index: 0=BR, 1=BL, 2=TL, 3=TR (a_start = q * π/2). */
@@ -542,13 +542,10 @@ static void emit_image(const Clay_RenderCommand *c) {
 }
 // #endregion
 
-static void rebind_sprite_after_flush(const nt_ui_context_t *ctx);
-
 // #region helper_emit_text
+/* Pure text emit: no sprite renderer knowledge. dispatch_command handles
+ * the sprite_flush before and the lazy sprite rebind after. */
 static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
-    /* Drain sprite staging first; text uses a different pipeline. */
-    nt_sprite_renderer_flush();
-
     const Clay_TextRenderData *t = &c->renderData.text;
     NT_ASSERT((uint32_t)t->fontId < NT_UI_MAX_FONTS && "nt_ui TEXT: fontId >= NT_UI_MAX_FONTS");
     nt_font_t font = ctx->fonts[t->fontId];
@@ -568,7 +565,6 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
         t->textColor.a / 255.0F,
     };
     nt_text_renderer_draw_n(t->stringContents.chars, (size_t)t->stringContents.length, m, (float)t->fontSize, color, (float)t->letterSpacing);
-    rebind_sprite_after_flush(ctx);
 }
 // #endregion
 
@@ -583,7 +579,8 @@ typedef struct {
 static void rebind_sprite_after_flush(const nt_ui_context_t *ctx) { nt_sprite_renderer_set_material(ctx->sprite_material); }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
+static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
+    (void)ctx;
     NT_ASSERT((uint32_t)*depth < ctx->max_scissor_depth && "scissor stack overflow; raise desc->max_scissor_depth or restructure nested clip");
 
     /* Unclipped axis falls back to viewport; floor/ceil avoid 1px right/bottom bite. */
@@ -630,20 +627,20 @@ static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c
     /* Flush BEFORE scissor switch so staging keeps prior clip. */
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
+    *sprite_pipeline_dirty = true;
 
     stack[(*depth)++] = (scissor_rect_t){.x = x, .y = y, .w = wp, .h = hp};
 
     /* Y-flip against viewport.h (NOT framebuffer h) for split-screen panes. */
     nt_gfx_set_scissor(vx + x, vy + vh - y - hp, wp, hp);
     nt_gfx_set_scissor_enabled(true);
-
-    rebind_sprite_after_flush(ctx);
 }
 
-static void scissor_pop(const nt_ui_context_t *ctx, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
+static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
     NT_ASSERT(*depth > 0 && "scissor underflow");
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
+    *sprite_pipeline_dirty = true;
     (*depth)--;
     if (*depth == 0) {
         nt_gfx_set_scissor_enabled(false);
@@ -654,19 +651,19 @@ static void scissor_pop(const nt_ui_context_t *ctx, scissor_rect_t *stack, int *
         const int vh = (int)target->viewport[3];
         nt_gfx_set_scissor(vx + r.x, vy + vh - r.y - r.h, r.w, r.h);
     }
-    rebind_sprite_after_flush(ctx);
 }
 // #endregion
 
 // #region helper_emit_custom
-/* Handler may bind its own pipeline; flush both, rebind sprite on return. */
-static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
+/* Handler may bind its own pipeline; flush both. Sprite rebind is lazy
+ * (deferred to first sprite-backed emit after). */
+static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, bool *sprite_pipeline_dirty) {
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
+    *sprite_pipeline_dirty = true;
     if (ctx->custom_fn != NULL) {
         ctx->custom_fn((const void *)c, ctx->custom_user);
     }
-    rebind_sprite_after_flush(ctx);
 }
 // #endregion
 
@@ -684,38 +681,49 @@ static bool is_segmentable(Clay_RenderCommandType cmd_type) {
     }
 }
 
-static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target) {
-    /* Sprite cmds drain pending text first -- preserves declaration order
-     * across text→sprite transitions. No-op on empty staging. */
+/* Sprite-backed dispatch: drain pending text, lazy-rebind sprite cmd if a
+ * prior text/scissor/custom closed it. */
+static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite_pipeline_dirty) {
+    nt_text_renderer_flush();
+    if (*sprite_pipeline_dirty) {
+        rebind_sprite_after_flush(ctx);
+        *sprite_pipeline_dirty = false;
+    }
+}
+
+static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
     switch (c->commandType) {
     case CLAY_RENDER_COMMAND_TYPE_NONE:
         return;
     case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
-        nt_text_renderer_flush();
+        prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         const uint32_t col = nt_color_pack_clay(r->backgroundColor);
         emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, r->cornerRadius, col);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER:
-        nt_text_renderer_flush();
+        prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         emit_border(ctx, c);
         return;
     case CLAY_RENDER_COMMAND_TYPE_TEXT:
+        /* Drain sprite before switching to text pipeline; mark for lazy rebind. */
+        nt_sprite_renderer_flush();
+        *sprite_pipeline_dirty = true;
         emit_text(ctx, c);
         return;
     case CLAY_RENDER_COMMAND_TYPE_IMAGE:
-        nt_text_renderer_flush();
+        prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         emit_image(c);
         return;
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:
-        scissor_push(ctx, c, scissor_stack, depth, target);
+        scissor_push(ctx, c, scissor_stack, depth, target, sprite_pipeline_dirty);
         return;
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
-        scissor_pop(ctx, scissor_stack, depth, target);
+        scissor_pop(scissor_stack, depth, target, sprite_pipeline_dirty);
         return;
     case CLAY_RENDER_COMMAND_TYPE_CUSTOM:
-        emit_custom(ctx, c);
+        emit_custom(ctx, c, sprite_pipeline_dirty);
         return;
     }
 }
@@ -761,9 +769,11 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* Sprite material up-front; text binds lazily inside emit_text. */
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
-    /* Bitmask layer dispatch: O(L_active × N). Counting sort was prototyped
-     * but shelved -- real UIs use ~5-6 layers, bitmask is 32 B stack vs
-     * ~2 KB. Revisit if a profile shows L_active > 16. */
+    /* Sprite cmd open after set_material above; clean → no rebind needed. */
+    bool sprite_pipeline_dirty = false;
+
+    /* Bitmask layer dispatch + ctz: O(L_active × N) per segment, only set
+     * bits visited (32 B stack vs ~2 KB for counting sort). */
     const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
 #ifdef NT_TEST_ACCESS
     uint32_t unlayered_count = 0U;
@@ -772,7 +782,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     while (i < arr->length) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
         if (!is_segmentable(c->commandType)) {
-            dispatch_command(ctx, c, scissor_stack, &depth, target);
+            dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty);
             ++i;
             continue;
         }
@@ -800,20 +810,18 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 #endif
         }
 
+        /* Iterate set bits via ctz instead of 256-bit linear scan. */
         for (uint32_t word_idx = 0U; word_idx < 8U; ++word_idx) {
-            const uint32_t mask = active_layers[word_idx];
-            if (mask == 0U) {
-                continue;
-            }
-            for (uint32_t bit_idx = 0U; bit_idx < 32U; ++bit_idx) {
-                if ((mask & (1U << bit_idx)) != 0U) {
-                    const uint8_t current_layer = (uint8_t)((word_idx << 5U) | bit_idx);
-                    for (int32_t j = i; j < seg_end; ++j) {
-                        const Clay_RenderCommand *cc = &arr->internalArray[j];
-                        const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
-                        if (layer == current_layer) {
-                            dispatch_command(ctx, cc, scissor_stack, &depth, target);
-                        }
+            uint32_t mask = active_layers[word_idx];
+            while (mask != 0U) {
+                const uint32_t bit_idx = (uint32_t)__builtin_ctz(mask);
+                mask &= mask - 1U;
+                const uint8_t current_layer = (uint8_t)((word_idx << 5U) | bit_idx);
+                for (int32_t j = i; j < seg_end; ++j) {
+                    const Clay_RenderCommand *cc = &arr->internalArray[j];
+                    const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
+                    if (layer == current_layer) {
+                        dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty);
                     }
                 }
             }
@@ -845,7 +853,7 @@ void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uin
     NT_ASSERT(atlas.id != 0 && "nt_ui_set_atlas_white_region: invalid atlas handle");
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_ui_set_atlas_white_region: atlas must be READY");
     const nt_texture_region_t *r = nt_atlas_get_region(atlas, white_region_idx);
-    NT_ASSERT(r != NULL && r->vertex_count > 0U && "nt_ui_set_atlas_white_region: white region missing / tombstoned");
+    NT_ASSERT(r->vertex_count > 0U && "nt_ui_set_atlas_white_region: white region tombstoned");
     /* mat4(w,h) needs cached_pos {0,1}x{0,1}: 1x1 source AND PPU=1. */
     NT_ASSERT(r->source_w == 1 && r->source_h == 1 && "nt_ui_set_atlas_white_region: white region must be 1x1 source");
     NT_ASSERT(nt_atlas_get_inverse_pixels_per_unit(atlas) == 1.0F && "nt_ui_set_atlas_white_region: atlas must have PPU=1");

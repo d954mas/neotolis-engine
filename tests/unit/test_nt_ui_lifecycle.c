@@ -7,11 +7,12 @@
 #include <string.h>
 
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_test_arena.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_u64[NT_UI_DEFAULT_ARENA_SIZE];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_u64[NT_UI_TEST_ARENA_SIZE];
 static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT, .max_scissor_depth = NT_UI_WALKER_MAX_SCISSOR_DEPTH};
 
 void setUp(void) {
@@ -112,7 +113,7 @@ static void test_create_context_restores_clay_default(void) {
     const int32_t cache_before = nt_ui_test_clay_default_max_measure_text_word_cache_count();
     nt_ui_create_desc_t custom = nt_ui_create_desc_defaults();
     custom.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT * 2U;
-    alignas(NT_UI_ARENA_ALIGN) static uint8_t big_arena[NT_UI_DEFAULT_ARENA_SIZE * 4U];
+    alignas(NT_UI_ARENA_ALIGN) static uint8_t big_arena[NT_UI_TEST_ARENA_SIZE * 4U];
     nt_ui_context_t *ctx = nt_ui_create_context(big_arena, sizeof big_arena, &custom);
     TEST_ASSERT_NOT_NULL(ctx);
     TEST_ASSERT_EQUAL_INT32(elems_before, nt_ui_test_clay_default_max_element_count());

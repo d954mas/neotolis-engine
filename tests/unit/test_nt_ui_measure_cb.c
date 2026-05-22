@@ -20,12 +20,13 @@
 #include "nt_pack_format.h"
 #include "resource/nt_resource.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_test_arena.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 /* clang-format on */
 
-alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_DEFAULT_ARENA_SIZE];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT, .max_scissor_depth = NT_UI_WALKER_MAX_SCISSOR_DEPTH};
 
 /* Per-test counter so virtual-pack ids stay unique across the binary. */

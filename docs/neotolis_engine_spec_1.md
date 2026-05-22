@@ -339,7 +339,7 @@ Examples: loaded pack blob, manifest read buffer, temporary decompression buffer
 
 ### Frame scratch memory
 
-Lifetime = single frame.
+Lifetime: from allocation until the next `nt_mem_scratch_reset()` (typically the start of the next frame, see §4.2).
 
 Examples: render item arrays, temporary sort arrays, transient CPU batch buffers, build temp lists in render pass, `nt_ui_element_data_t` attached to CLAY elements via `NT_UI_DATA_*` macros.
 

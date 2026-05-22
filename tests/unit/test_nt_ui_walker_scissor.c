@@ -11,7 +11,7 @@
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_DEFAULT_ARENA_SIZE];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
 static ui_walker_fixture_t s_fx;
 
 #define MAX_TEST_CMDS 32
@@ -53,7 +53,7 @@ static void test_scissor_depth_8_ok(void) {
 
 /* Per-ctx max_scissor_depth (VLA size) -- depth=4 here, push #5 overflows. */
 static void test_scissor_depth_custom_via_desc(void) {
-    alignas(NT_UI_ARENA_ALIGN) static uint8_t s_custom_arena[NT_UI_DEFAULT_ARENA_SIZE];
+    alignas(NT_UI_ARENA_ALIGN) static uint8_t s_custom_arena[NT_UI_TEST_ARENA_SIZE];
     const nt_ui_create_desc_t custom_desc = {
         .max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT,
         .max_scissor_depth = 4U,

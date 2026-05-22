@@ -9,13 +9,14 @@
 #include "clay.h"
 #include "input/nt_input.h"
 #include "test_helpers/nt_assert_trap.h"
+#include "test_helpers/ui_test_arena.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_internal.h"
 #include "unity.h"
 
-alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_a[NT_UI_DEFAULT_ARENA_SIZE];
-alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_b[NT_UI_DEFAULT_ARENA_SIZE];
-alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_c[NT_UI_DEFAULT_ARENA_SIZE];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_a[NT_UI_TEST_ARENA_SIZE];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_b[NT_UI_TEST_ARENA_SIZE];
+alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena_c[NT_UI_TEST_ARENA_SIZE];
 static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT, .max_scissor_depth = NT_UI_WALKER_MAX_SCISSOR_DEPTH};
 
 void setUp(void) {
