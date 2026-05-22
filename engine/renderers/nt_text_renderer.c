@@ -196,13 +196,15 @@ void nt_text_renderer_set_material(nt_material_t mat) {
 #ifdef NT_TEST_ACCESS
     s_text.test_set_material_calls++;
 #endif
-    if (s_text.material.id == mat.id) {
-        return;
-    }
-
+    /* Validate BEFORE same-handle early return: stale handle (destroyed material,
+     * bumped generation) must assert even if the id still matches what we cached. */
     const nt_material_info_t *info = nt_material_get_info(mat);
     NT_ASSERT(info != NULL && "nt_text_renderer_set_material: invalid material handle");
     NT_ASSERT(info->ready && "nt_text_renderer_set_material: material not ready");
+
+    if (s_text.material.id == mat.id) {
+        return;
+    }
 
     if (s_text.glyph_count > 0) {
         nt_text_renderer_flush();

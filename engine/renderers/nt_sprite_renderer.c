@@ -287,13 +287,15 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
     NT_ASSERT(s_sprite.initialized);
     NT_ASSERT(mat.id != 0 && "nt_sprite_renderer_set_material: invalid material handle");
 
+    /* Validate BEFORE same-handle early return: stale handle (destroyed material,
+     * bumped generation) must assert even if the id still matches the cached one. */
+    const nt_material_info_t *mat_info = nt_material_get_info(mat);
+    NT_ASSERT(mat_info != NULL && mat_info->ready && mat_info->resolved_vs != 0 && mat_info->resolved_fs != 0 && "nt_sprite_renderer_set_material: material not ready");
+
     /* Same-handle no-op only when cmd is still live; flush resets cmd_count. */
     if (mat.id == s_sprite.current_mat.id && s_sprite.cmd_count > 0) {
         return;
     }
-
-    const nt_material_info_t *mat_info = nt_material_get_info(mat);
-    NT_ASSERT(mat_info != NULL && mat_info->ready && mat_info->resolved_vs != 0 && mat_info->resolved_fs != 0 && "nt_sprite_renderer_set_material: material not ready");
 
     if (s_sprite.cmd_count > 0) {
         nt_sprite_renderer_flush();
