@@ -61,7 +61,7 @@ static struct {
     /* Reset per draw_list call; SEPARATE from nt_gfx_get_frame_draw_calls. */
     uint32_t last_draw_list_calls;
 
-    /* Non-ECS path only; draw_list opens cmds per batch_key. */
+    /* Material of the most recently opened cmd; reset on flush. */
     nt_material_t current_mat;
 #ifdef NT_TEST_ACCESS
     /* Captured pre-flush so tests can read back the last emit. */
@@ -224,6 +224,7 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_materia
     memset(c, 0, sizeof(*c)); /* slots reuse across frames; clear stale fields */
     c->pipeline = pip;
     c->material = mat;
+    s_sprite.current_mat = mat;
     c->tex_count = mi->tex_count;
     for (uint8_t i = 0; i < mi->tex_count; i++) {
         c->resolved_tex[i] = mi->resolved_tex[i];
@@ -303,7 +304,6 @@ void nt_sprite_renderer_set_material(nt_material_t mat) {
 
     nt_pipeline_t pip = find_or_create_pipeline(mat_info);
     open_cmd(pip, mat_info, mat);
-    s_sprite.current_mat = mat;
 }
 // #endregion
 
