@@ -7,7 +7,7 @@ add_library(nt_basisu_transcoder STATIC
     ${NT_ENGINE_ROOT}/deps/basisu/transcoder/basisu_transcoder.cpp
 )
 
-target_include_directories(nt_basisu_transcoder PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(nt_basisu_transcoder PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 target_include_directories(nt_basisu_transcoder PRIVATE ${NT_ENGINE_ROOT}/deps/basisu/transcoder)
 
 # -fno-strict-aliasing required by Basis transcoder (TEX-10)
