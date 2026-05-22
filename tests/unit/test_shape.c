@@ -1,4 +1,4 @@
-/* NT_SHAPE_RENDERER_TEST_ACCESS defined via CMake target_compile_definitions */
+/* NT_TEST_ACCESS defined via CMake target_compile_definitions */
 #include "graphics/nt_gfx.h"
 #include "renderers/nt_shape_renderer.h"
 #include "unity.h"

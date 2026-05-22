@@ -107,9 +107,20 @@ const float (*nt_atlas_get_region_cached_pos(nt_resource_t atlas, uint32_t regio
 const nt_atlas_vertex_t *nt_atlas_get_region_raw_vertices(nt_resource_t atlas, uint32_t region_index);
 const uint16_t *nt_atlas_get_region_indices(nt_resource_t atlas, uint32_t region_index);
 
-/* ---- Test access (compiled only when NT_ATLAS_TEST_ACCESS is defined) ---- */
+/* One resolve + one region lookup; replaces six separate getters. */
+typedef struct {
+    const nt_texture_region_t *region;
+    const float (*cached_pos)[2];
+    const nt_atlas_vertex_t *raw_vertices;
+    const uint16_t *indices;
+    nt_resource_t page_resource;
+    float ipu;
+} nt_atlas_region_handles_t;
 
-#ifdef NT_ATLAS_TEST_ACCESS
+void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_atlas_region_handles_t *out);
+
+// #region test_access
+#ifdef NT_TEST_ACCESS
 
 /* Opaque forward declaration — the real nt_atlas_data_t lives in nt_atlas.c.
  * Tests poke at it via the raw-access helpers below, without needing a full
@@ -166,6 +177,7 @@ float nt_atlas_test_ipu(const struct nt_atlas_data *ad);
  * post_resolve metadata read path without standing up a resource system. */
 void nt_atlas_test_set_ipu_and_recompute(struct nt_atlas_data *ad, float ipu);
 
-#endif /* NT_ATLAS_TEST_ACCESS */
+#endif
+// #endregion
 
 #endif /* NT_ATLAS_H */

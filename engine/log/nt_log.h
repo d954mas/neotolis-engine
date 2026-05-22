@@ -1,6 +1,8 @@
 #ifndef NT_LOG_H
 #define NT_LOG_H
 
+#include <stdbool.h>
+
 /* Log levels (ordered by severity) */
 typedef enum {
     NT_LOG_LEVEL_INFO = 0,
@@ -27,6 +29,23 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
 #define nt_log_warn(...) nt_log_write(NT_LOG_LEVEL_WARN, NULL, __VA_ARGS__)
 #define nt_log_error(...) nt_log_write(NT_LOG_LEVEL_ERROR, NULL, __VA_ARGS__)
 
+/* --- Once-per-callsite variants (not resettable) ---
+ * Single-threaded: WASM has one main thread, native debug/builder likewise.
+ * A race would produce at most a duplicate line, never UB. If multi-threaded
+ * logging is needed later, gate this on a build flag and switch to atomic_flag. */
+#define NT_LOG_ONCE_(write_call)                                                                                                                                                                       \
+    do {                                                                                                                                                                                               \
+        static bool nt_log_once_done_ = false;                                                                                                                                                         \
+        if (!nt_log_once_done_) {                                                                                                                                                                      \
+            nt_log_once_done_ = true;                                                                                                                                                                  \
+            write_call;                                                                                                                                                                                \
+        }                                                                                                                                                                                              \
+    } while (0)
+
+#define nt_log_info_once(...) NT_LOG_ONCE_(nt_log_write(NT_LOG_LEVEL_INFO, NULL, __VA_ARGS__))
+#define nt_log_warn_once(...) NT_LOG_ONCE_(nt_log_write(NT_LOG_LEVEL_WARN, NULL, __VA_ARGS__))
+#define nt_log_error_once(...) NT_LOG_ONCE_(nt_log_write(NT_LOG_LEVEL_ERROR, NULL, __VA_ARGS__))
+
 /* --- Domain resolution --- */
 #ifndef NT_LOG_DOMAIN
 #ifdef NT_LOG_DOMAIN_DEFAULT
@@ -39,6 +58,9 @@ void nt_log_write(nt_log_level_t level, const char *domain, const char *fmt, ...
 #define NT_LOG_INFO(...) nt_log_write(NT_LOG_LEVEL_INFO, NT_LOG_DOMAIN, __VA_ARGS__)
 #define NT_LOG_WARN(...) nt_log_write(NT_LOG_LEVEL_WARN, NT_LOG_DOMAIN, __VA_ARGS__)
 #define NT_LOG_ERROR(...) nt_log_write(NT_LOG_LEVEL_ERROR, NT_LOG_DOMAIN, __VA_ARGS__)
+#define NT_LOG_INFO_ONCE(...) NT_LOG_ONCE_(NT_LOG_INFO(__VA_ARGS__))
+#define NT_LOG_WARN_ONCE(...) NT_LOG_ONCE_(NT_LOG_WARN(__VA_ARGS__))
+#define NT_LOG_ERROR_ONCE(...) NT_LOG_ONCE_(NT_LOG_ERROR(__VA_ARGS__))
 #else
 /* Compile error when domain macros used without domain defined */
 #define NT_LOG_INFO(...)                                                                                                                                                                               \

@@ -26,13 +26,19 @@ void nt_text_renderer_set_material(nt_material_t mat);
 void nt_text_renderer_set_font(nt_font_t font);
 
 /* NULL/len=0 → no-op. UTF-8 cut at `len` boundary → trailing partial
- * codepoint dropped (no over-read past utf8+len). */
-void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4]);
-void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4]);
+ * codepoint dropped (no over-read past utf8+len).
+ *
+ * letter_tracking: EXTRA px between glyphs (additive, NOT absolute).
+ *   0 = font's natural advance. Positive = loose, negative = tight.
+ * line_leading:    EXTRA px between lines on \n (additive, NOT absolute).
+ *   0 = font's natural line advance. Positive = loose, negative = tight. */
+void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4], float letter_tracking, float line_leading);
+void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading);
 
 void nt_text_renderer_flush(void);
 
-#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+// #region test_access
+#ifdef NT_TEST_ACCESS
 uint32_t nt_text_renderer_test_vertex_count(void);
 uint32_t nt_text_renderer_test_glyph_count(void);
 const void *nt_text_renderer_test_vertices(void);
@@ -43,5 +49,6 @@ uint32_t nt_text_renderer_test_set_material_calls(void);
 uint32_t nt_text_renderer_test_set_font_calls(void);
 void nt_text_renderer_test_reset_call_counters(void);
 #endif
+// #endregion
 
 #endif /* NT_TEXT_RENDERER_H */

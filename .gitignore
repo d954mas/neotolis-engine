@@ -39,6 +39,9 @@ tools/research/*.exe
 .DS_Store
 Thumbs.db
 
+# Shell crash dumps (Cygwin/MSYS bash on Windows)
+*.stackdump
+
 # Node
 node_modules/
 package-lock.json

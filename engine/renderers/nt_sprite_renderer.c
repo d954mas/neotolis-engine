@@ -58,18 +58,13 @@ static struct {
     nt_sprite_draw_cmd_t cmds[NT_SPRITE_RENDERER_MAX_DRAW_CMDS];
     uint32_t cmd_count;
 
-    /* Test counter — reset at the start of each nt_sprite_renderer_draw_list
-     * call, holds the GPU draw count from that call only. SEPARATE from
-     * nt_gfx_get_frame_draw_calls (which is engine-wide and frame-scoped). */
+    /* Reset per draw_list call; SEPARATE from nt_gfx_get_frame_draw_calls. */
     uint32_t last_draw_list_calls;
-#ifdef NT_SPRITE_RENDERER_TEST_ACCESS
-    /* Test-only: last emit_one() vertex/index counts captured BEFORE flush
-     * resets s_sprite.vertex_count. Read by polygon-emit test to verify
-     * region.vertex_count==N polygons emit N vertices.
-     *
-     * last_emit_first_vertex is the staging offset where the last emit
-     * wrote its vertices — flush only resets vertex_count, not the array
-     * data, so tests can still read positions back via this offset. */
+
+    /* Material of the most recently opened cmd; reset on flush. */
+    nt_material_t current_mat;
+#ifdef NT_TEST_ACCESS
+    /* Captured pre-flush so tests can read back the last emit. */
     uint32_t last_emit_vertex_count;
     uint32_t last_emit_index_count;
     uint32_t last_emit_first_vertex;
@@ -229,6 +224,7 @@ static void open_cmd(nt_pipeline_t pip, const nt_material_info_t *mi, nt_materia
     memset(c, 0, sizeof(*c)); /* slots reuse across frames; clear stale fields */
     c->pipeline = pip;
     c->material = mat;
+    s_sprite.current_mat = mat;
     c->tex_count = mi->tex_count;
     for (uint8_t i = 0; i < mi->tex_count; i++) {
         c->resolved_tex[i] = mi->resolved_tex[i];
@@ -287,77 +283,72 @@ static bool ensure_current_cmd_page_texture(uint32_t page_tex) {
 }
 // #endregion
 
-// #region emit_one (per-sprite vertex/index emit)
-/* Caller passes pre-fetched SoA views; sparse_indices[entity_index] → dense slot. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv) {
-    nt_entity_t e = {.id = item->entity};
-    uint16_t eidx = nt_entity_index(e);
+// #region set_material
+void nt_sprite_renderer_set_material(nt_material_t mat) {
+    NT_ASSERT(s_sprite.initialized);
+    NT_ASSERT(mat.id != 0 && "nt_sprite_renderer_set_material: invalid material handle");
 
-    /* Inline sparse->dense lookups — three array reads vs three function
-     * calls each doing a liveness assert + the same lookup. */
-    uint16_t s_idx = sv->sparse_indices[eidx];
-    uint16_t t_idx = tv->sparse_indices[eidx];
-    uint16_t d_idx = dv->sparse_indices[eidx];
+    /* Validate BEFORE same-handle early return: stale handle (destroyed material,
+     * bumped generation) must assert even if the id still matches the cached one. */
+    const nt_material_info_t *mat_info = nt_material_get_info(mat);
+    NT_ASSERT(mat_info != NULL && mat_info->ready && mat_info->resolved_vs != 0 && mat_info->resolved_fs != 0 && "nt_sprite_renderer_set_material: material not ready");
 
-    /* AGENTS.md "fail early, prefer asserts": dense indices must be valid.
-     * NT_INVALID_COMP_INDEX (0xFFFF) would index SoA arrays out of bounds.
-     * Catches stale render items, items for entities missing a component,
-     * items built after entity destruction. Compiles out in release. */
-    NT_ASSERT(s_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no sprite component");
-    NT_ASSERT(t_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no transform component");
-    NT_ASSERT(d_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no drawable component");
-
-    /* Resolve atlas + region. Tombstone → zero-draw early-out. */
-    nt_resource_t atlas = sv->atlas[s_idx];
-    const nt_sprite_resolved_region_t *resolved = &sv->resolved[s_idx];
-    if ((sv->flags[s_idx] & NT_SPRITE_FLAG_RESOLVED) == 0 || resolved->region == NULL || resolved->region->vertex_count == 0) {
+    /* Same-handle no-op only when cmd is still live; flush resets cmd_count. */
+    if (mat.id == s_sprite.current_mat.id && s_sprite.cmd_count > 0) {
         return;
     }
-    const nt_texture_region_t *r = resolved->region;
-    const float(*cpos)[2] = resolved->cached_pos;
-    const nt_atlas_vertex_t *vraw = resolved->raw_vertices;
-    const uint16_t *idx = resolved->indices;
-    NT_ASSERT(cpos != NULL && vraw != NULL && idx != NULL);
-    uint32_t page_tex = nt_resource_get(resolved->page_resource);
+
+    if (s_sprite.cmd_count > 0) {
+        nt_sprite_renderer_flush();
+    }
+
+    nt_pipeline_t pip = find_or_create_pipeline(mat_info);
+    open_cmd(pip, mat_info, mat);
+}
+// #endregion
+
+// #region emit_region_resolved
+/* always_inline keeps the ECS hot path's inlined shape. */
+#if defined(__GNUC__) || defined(__clang__)
+#define NT_SPRITE_EMIT_INLINE static inline __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#define NT_SPRITE_EMIT_INLINE static inline __forceinline
+#else
+#define NT_SPRITE_EMIT_INLINE static inline
+#endif
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+NT_SPRITE_EMIT_INLINE void emit_region_resolved(const nt_texture_region_t *r, const float (*cpos)[2], const nt_atlas_vertex_t *vraw, const uint16_t *idx, uint32_t page_tex, float ipu, const float *m,
+                                                float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits) {
+    NT_ASSERT(r != NULL && cpos != NULL && vraw != NULL && idx != NULL);
+    NT_ASSERT(m != NULL);
+    if (r->vertex_count == 0U) {
+        return; /* tombstone — silent no-op (matches old emit_one behaviour) */
+    }
     if (!ensure_current_cmd_page_texture(page_tex)) {
         return;
     }
 
-    /* Capacity guard: if this sprite would overflow staging, or exceed the
-     * uint16 indexable vertex range, snapshot the open cmd's state, flush()
-     * (uploads + replays cmds + resets), then re-open a fresh cmd with the
-     * same state at first_index=0. The caller sees no state change; the GPU
-     * just gets another chunk draw instead of UNSIGNED_INT indices. */
+    /* Snapshot+flush+reopen on staging overflow keeps the caller's open
+     * cmd state across the chunk boundary. */
     if (s_sprite.vertex_count + r->vertex_count > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + r->index_count > NT_SPRITE_RENDERER_MAX_INDICES) {
-        NT_ASSERT(s_sprite.cmd_count > 0 && "emit_one called with no open cmd");
+        NT_ASSERT(s_sprite.cmd_count > 0 && "emit_region_resolved called with no open cmd");
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
         nt_sprite_renderer_flush();
         open_cmd_from_snapshot(&snapshot);
     }
 
-    /* Apply origin offset to translation. cached_pos stores source-space
-     * positions (no origin baked) so dedup'd regions with different origins
-     * share vertex data; the per-region pivot lives entirely in tx/ty/tz.
-     * Same formula whether origin is the region default or a runtime override
-     * — only the source differs. */
-    const float *m = tv->world_matrices[t_idx];
+    /* cached_pos is source-space (no origin baked) -- regions with
+     * different origins can share vertex data. */
     float tx = m[12];
     float ty = m[13];
     float tz = m[14];
-    uint8_t flags = sv->flags[s_idx];
-    const float origin_x = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][0] : r->origin_x;
-    const float origin_y = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][1] : r->origin_y;
-    const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
 
-    /* Flip flags — per-vertex negate of cached_pos */
-    bool fx = (flags & NT_SPRITE_FLAG_FLIP_X) != 0;
-    bool fy = (flags & NT_SPRITE_FLAG_FLIP_Y) != 0;
+    bool fx = (flip_bits & NT_SPRITE_FLAG_FLIP_X) != 0;
+    bool fy = (flip_bits & NT_SPRITE_FLAG_FLIP_Y) != 0;
 
-    /* Origin offset baked into translation. cached_pos is source-space, so
-     * the vertex loop's per-vertex flip negates source-space x — to mirror
-     * around the pivot rather than around source x=0, sign-flip dx/dy here
-     * before they get folded into tx/ty/tz. */
+    /* Bake pivot into translation: world = m*local + (t - m*pivot).
+     * Flip mirrors around the pivot by sign-flipping dx/dy. */
     float dx = origin_x * (float)r->source_w * ipu;
     float dy = origin_y * (float)r->source_h * ipu;
     if (fx) {
@@ -370,11 +361,10 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     ty -= (m[1] * dx) + (m[5] * dy);
     tz -= (m[2] * dx) + (m[6] * dy);
 
-    uint32_t color32 = dv->colors_packed[d_idx];
-    uint8_t cr = (uint8_t)(color32 & 0xFFU);
-    uint8_t cg = (uint8_t)((color32 >> 8) & 0xFFU);
-    uint8_t cb = (uint8_t)((color32 >> 16) & 0xFFU);
-    uint8_t ca = (uint8_t)((color32 >> 24) & 0xFFU);
+    uint8_t cr = (uint8_t)(color_packed & 0xFFU);
+    uint8_t cg = (uint8_t)((color_packed >> 8) & 0xFFU);
+    uint8_t cb = (uint8_t)((color_packed >> 16) & 0xFFU);
+    uint8_t ca = (uint8_t)((color_packed >> 24) & 0xFFU);
 
     uint32_t base = s_sprite.vertex_count;
 #ifdef __wasm_simd128__
@@ -456,7 +446,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     }
     s_sprite.index_count += r->index_count;
 
-#ifdef NT_SPRITE_RENDERER_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
     /* Capture per-emit counts + first-vertex offset so tests can read
      * back emitted positions after draw_list completes (flush resets
      * vertex_count but leaves the array data intact). */
@@ -467,9 +457,152 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
 }
 // #endregion
 
+// #region emit_one
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *sv, const nt_transform_comp_view_t *tv, const nt_drawable_comp_view_t *dv) {
+    nt_entity_t e = {.id = item->entity};
+    uint16_t eidx = nt_entity_index(e);
+
+    /* Inlined vs three calls each doing the same liveness assert + array read. */
+    uint16_t s_idx = sv->sparse_indices[eidx];
+    uint16_t t_idx = tv->sparse_indices[eidx];
+    uint16_t d_idx = dv->sparse_indices[eidx];
+
+    /* NT_INVALID_COMP_INDEX would index SoA OOB -- catches stale items. */
+    NT_ASSERT(s_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no sprite component");
+    NT_ASSERT(t_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no transform component");
+    NT_ASSERT(d_idx != NT_INVALID_COMP_INDEX && "sprite render item: entity has no drawable component");
+
+    nt_resource_t atlas = sv->atlas[s_idx];
+    const nt_sprite_resolved_region_t *resolved = &sv->resolved[s_idx];
+    if ((sv->flags[s_idx] & NT_SPRITE_FLAG_RESOLVED) == 0 || resolved->region == NULL || resolved->region->vertex_count == 0) {
+        return; /* tombstone */
+    }
+    const nt_texture_region_t *r = resolved->region;
+    NT_ASSERT(resolved->cached_pos != NULL && resolved->raw_vertices != NULL && resolved->indices != NULL);
+    uint32_t page_tex = nt_resource_get(resolved->page_resource);
+
+    uint8_t flags = sv->flags[s_idx];
+    const float origin_x = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][0] : r->origin_x;
+    const float origin_y = (flags & NT_SPRITE_FLAG_ORIGIN_OV) ? sv->origin[s_idx][1] : r->origin_y;
+    const uint8_t flip_bits = flags & (NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y);
+    const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
+
+    emit_region_resolved(r, resolved->cached_pos, resolved->raw_vertices, resolved->indices, page_tex, ipu, tv->world_matrices[t_idx], origin_x, origin_y, dv->colors_packed[d_idx], flip_bits);
+}
+// #endregion
+
+// #region emit_region
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits) {
+    NT_ASSERT(s_sprite.initialized);
+    NT_ASSERT(world_matrix != NULL);
+    NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_region: invalid atlas handle");
+    NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_region: atlas must be READY");
+    NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_emit_region: call nt_sprite_renderer_set_material first");
+
+    nt_atlas_region_handles_t h;
+    nt_atlas_get_region_handles(atlas, region_index, &h);
+    if (h.region->vertex_count == 0U) {
+        return; /* tombstone or out-of-range */
+    }
+    emit_region_resolved(h.region, h.cached_pos, h.raw_vertices, h.indices, nt_resource_get(h.page_resource), h.ipu, world_matrix, origin_x, origin_y, color_packed, flip_bits);
+}
+// #endregion
+
+// #region emit_geometry
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index, const float (*positions)[2], uint32_t vertex_count, const uint16_t *indices, uint32_t index_count,
+                                      const float *world_matrix, uint32_t color_packed) {
+    NT_ASSERT(s_sprite.initialized);
+    NT_ASSERT(positions != NULL && indices != NULL && world_matrix != NULL);
+    NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_geometry: invalid atlas handle");
+    NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_geometry: atlas must be READY");
+    NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_emit_geometry: call nt_sprite_renderer_set_material first");
+    NT_ASSERT(vertex_count > 0U && index_count > 0U && "nt_sprite_renderer_emit_geometry: empty geometry");
+    NT_ASSERT(vertex_count <= NT_SPRITE_RENDERER_MAX_VERTICES && "nt_sprite_renderer_emit_geometry: vertex_count exceeds staging capacity");
+    NT_ASSERT(index_count <= NT_SPRITE_RENDERER_MAX_INDICES && "nt_sprite_renderer_emit_geometry: index_count exceeds staging capacity");
+
+    nt_atlas_region_handles_t h;
+    nt_atlas_get_region_handles(atlas, region_index, &h);
+    if (h.region->vertex_count == 0U) {
+        return; /* tombstone */
+    }
+    const uint32_t page_tex = nt_resource_get(h.page_resource);
+    if (!ensure_current_cmd_page_texture(page_tex)) {
+        return;
+    }
+
+    /* Overflow handling mirrors emit_region_resolved: snapshot the open
+     * cmd, flush, reopen with the same state. */
+    if (s_sprite.vertex_count + vertex_count > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + index_count > NT_SPRITE_RENDERER_MAX_INDICES) {
+        nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
+        nt_sprite_renderer_flush();
+        open_cmd_from_snapshot(&snapshot);
+    }
+
+    /* Sample at the region's UV centroid -- the corner of vertex 0 would
+     * land at the texel boundary and bleed into neighbours under linear
+     * filtering. Centroid is safely inside the region for any convex
+     * polygon, and exactly the pixel center for a 4-vert axis-aligned
+     * white region. uint16 atlas_u/v sums fit uint32 for the polygon
+     * worst case (8 verts * 65535 << 2^32). */
+    uint32_t sum_u = 0;
+    uint32_t sum_v = 0;
+    for (uint8_t i = 0; i < h.region->vertex_count; i++) {
+        sum_u += h.raw_vertices[i].atlas_u;
+        sum_v += h.raw_vertices[i].atlas_v;
+    }
+    const uint16_t shared_u = (uint16_t)(sum_u / h.region->vertex_count);
+    const uint16_t shared_v = (uint16_t)(sum_v / h.region->vertex_count);
+
+    const uint8_t cr = (uint8_t)(color_packed & 0xFFU);
+    const uint8_t cg = (uint8_t)((color_packed >> 8) & 0xFFU);
+    const uint8_t cb = (uint8_t)((color_packed >> 16) & 0xFFU);
+    const uint8_t ca = (uint8_t)((color_packed >> 24) & 0xFFU);
+
+    const float *m = world_matrix;
+    const float tx = m[12];
+    const float ty = m[13];
+    const float tz = m[14];
+
+    const uint32_t base = s_sprite.vertex_count;
+    for (uint32_t i = 0; i < vertex_count; i++) {
+        const float px = positions[i][0];
+        const float py = positions[i][1];
+        nt_sprite_vertex_t *v = &s_sprite.vertices[base + i];
+        v->position[0] = (m[0] * px) + (m[4] * py) + tx;
+        v->position[1] = (m[1] * px) + (m[5] * py) + ty;
+        v->position[2] = (m[2] * px) + (m[6] * py) + tz;
+        v->texcoord[0] = shared_u;
+        v->texcoord[1] = shared_v;
+        v->color[0] = cr;
+        v->color[1] = cg;
+        v->color[2] = cb;
+        v->color[3] = ca;
+    }
+    s_sprite.vertex_count += vertex_count;
+
+    uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count];
+    for (uint32_t i = 0; i < index_count; i++) {
+        const uint32_t rebased = base + (uint32_t)indices[i];
+        NT_ASSERT(rebased <= UINT16_MAX && "sprite uint16 index chunk overflow");
+        NT_ASSERT(indices[i] < vertex_count && "nt_sprite_renderer_emit_geometry: index out of range");
+        out_idx[i] = (uint16_t)rebased;
+    }
+    s_sprite.index_count += index_count;
+
+#ifdef NT_TEST_ACCESS
+    s_sprite.last_emit_vertex_count = vertex_count;
+    s_sprite.last_emit_index_count = index_count;
+    s_sprite.last_emit_first_vertex = base;
+#endif
+}
+// #endregion
+
 // #region draw_list
-/* Phase 1 of the two-phase pipeline: open a cmd per batch_key,
- * stream verts into staging via emit_one. Phase 2 = nt_sprite_renderer_flush. */
+/* Phase 1: open a cmd per batch_key, stream verts into staging via
+ * emit_one. Phase 2 = nt_sprite_renderer_flush. */
 void nt_sprite_renderer_draw_list(const nt_render_item_t *items, uint32_t count) {
     NT_ASSERT(s_sprite.initialized);
     if (count == 0) {
@@ -525,12 +658,9 @@ void nt_sprite_renderer_flush(void) {
         return;
     }
 
-    /* Single upload for the whole frame's worth of geometry — vs the previous
-     * implementation that did one update_buffer per 4096-sprite flush
-     * (16 uploads on 60k bunnies), each potentially stalling the WebGL
-     * driver's dynamic VBO. orphan_buffer hints the driver to allocate fresh
-     * storage on every rewrite so the GPU can keep consuming the previous
-     * frame while we're staging the next one. */
+    /* orphan_buffer asks the driver to allocate fresh storage instead of
+     * mutating the bound VBO in place, so the GPU can keep consuming the
+     * previous frame's draws while we stage the next one. */
     nt_gfx_orphan_buffer(s_sprite.vbo, s_sprite.vertices, s_sprite.vertex_count * (uint32_t)sizeof(nt_sprite_vertex_t));
     if (s_sprite.index_count > 0) {
         nt_gfx_orphan_buffer(s_sprite.ibo, s_sprite.indices, s_sprite.index_count * (uint32_t)sizeof(uint16_t));
@@ -624,11 +754,14 @@ void nt_sprite_renderer_flush(void) {
     s_sprite.vertex_count = 0;
     s_sprite.index_count = 0;
     s_sprite.cmd_count = 0;
+    /* draw_list opens cmds per batch_key, not via current_mat. Reset
+     * the fence so a following same-handle set_material() re-opens. */
+    s_sprite.current_mat = (nt_material_t){0};
 }
 // #endregion
 
 // #region test accessors
-#ifdef NT_SPRITE_RENDERER_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 uint32_t nt_sprite_renderer_test_pipeline_cache_count(void) { return s_sprite.count; }
 uint32_t nt_sprite_renderer_test_draw_call_count(void) { return s_sprite.last_draw_list_calls; }
 uint32_t nt_sprite_renderer_test_vertex_count(void) { return s_sprite.vertex_count; }
@@ -641,6 +774,13 @@ void nt_sprite_renderer_test_last_emit_position(uint32_t v_idx, float out[3]) {
     out[0] = v->position[0];
     out[1] = v->position[1];
     out[2] = v->position[2];
+}
+
+void nt_sprite_renderer_test_last_emit_texcoord(uint32_t v_idx, uint16_t out[2]) {
+    NT_ASSERT(v_idx < s_sprite.last_emit_vertex_count && "last_emit_texcoord: index out of range");
+    const nt_sprite_vertex_t *v = &s_sprite.vertices[s_sprite.last_emit_first_vertex + v_idx];
+    out[0] = v->texcoord[0];
+    out[1] = v->texcoord[1];
 }
 bool nt_sprite_renderer_test_initialized(void) { return s_sprite.initialized; }
 #endif

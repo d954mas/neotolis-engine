@@ -186,13 +186,13 @@ static void bench_cache_hit_steady_state(void) {
     nt_font_measure_invalidate(font);
 
     /* Warm-up: one call to populate the slot. */
-    (void)nt_font_measure_n(font, "Hello, world", 12U, 14.0F);
+    (void)nt_font_measure_n(font, "Hello, world", 12U, 14.0F, 0.0F);
 
     const int n_calls = 1000;
     const uint64_t t0 = nt_time_nanos();
     nt_text_size_t sink = {0.0F, 0.0F};
     for (int i = 0; i < n_calls; i++) {
-        sink = nt_font_measure_n(font, "Hello, world", 12U, 14.0F);
+        sink = nt_font_measure_n(font, "Hello, world", 12U, 14.0F, 0.0F);
     }
     const uint64_t t1 = nt_time_nanos();
     (void)sink; /* prevent dead-code elimination */
@@ -228,7 +228,7 @@ static void bench_cache_miss_unique(void) {
     const uint64_t t0 = nt_time_nanos();
     nt_text_size_t sink = {0.0F, 0.0F};
     for (int i = 0; i < n_calls; i++) {
-        sink = nt_font_measure_n(font, labels[i], strlen(labels[i]), 14.0F);
+        sink = nt_font_measure_n(font, labels[i], strlen(labels[i]), 14.0F, 0.0F);
     }
     const uint64_t t1 = nt_time_nanos();
     (void)sink;
@@ -261,13 +261,13 @@ static void bench_long_string_hit(void) {
     const size_t plen = sizeof(paragraph) - 1U;
 
     /* Warm-up populates the slot. */
-    (void)nt_font_measure_n(font, paragraph, plen, 14.0F);
+    (void)nt_font_measure_n(font, paragraph, plen, 14.0F, 0.0F);
 
     const int n_calls = 1000;
     const uint64_t t0 = nt_time_nanos();
     nt_text_size_t sink = {0.0F, 0.0F};
     for (int i = 0; i < n_calls; i++) {
-        sink = nt_font_measure_n(font, paragraph, plen, 14.0F);
+        sink = nt_font_measure_n(font, paragraph, plen, 14.0F, 0.0F);
     }
     const uint64_t t1 = nt_time_nanos();
     (void)sink;
@@ -305,7 +305,7 @@ static void bench_long_string_miss(void) {
     const uint64_t t0 = nt_time_nanos();
     nt_text_size_t sink = {0.0F, 0.0F};
     for (int i = 0; i < n_calls; i++) {
-        sink = nt_font_measure_n(font, texts[i], sizeof(texts[i]) - 1U, 14.0F);
+        sink = nt_font_measure_n(font, texts[i], sizeof(texts[i]) - 1U, 14.0F, 0.0F);
     }
     const uint64_t t1 = nt_time_nanos();
     (void)sink;
@@ -335,7 +335,7 @@ static void bench_mixed_ui(void) {
     }
     /* Pre-warm the cache for hot labels (simulates frame N>1 of stable UI) */
     for (int i = 0; i < hot_count; i++) {
-        (void)nt_font_measure_n(font, hot[i], strlen(hot[i]), 14.0F);
+        (void)nt_font_measure_n(font, hot[i], strlen(hot[i]), 14.0F, 0.0F);
     }
 
     /* 240 fresh status labels (12 frames × 20 unique per frame) */
@@ -351,11 +351,11 @@ static void bench_mixed_ui(void) {
     int fresh_idx = 0;
     for (int frame = 0; frame < frames; frame++) {
         for (int i = 0; i < hot_count; i++) {
-            sink = nt_font_measure_n(font, hot[i], strlen(hot[i]), 14.0F);
+            sink = nt_font_measure_n(font, hot[i], strlen(hot[i]), 14.0F, 0.0F);
         }
         for (int i = 0; i < fresh_per_frame; i++) {
             const char *s = fresh[fresh_idx++];
-            sink = nt_font_measure_n(font, s, strlen(s), 14.0F);
+            sink = nt_font_measure_n(font, s, strlen(s), 14.0F, 0.0F);
         }
     }
     const uint64_t t1 = nt_time_nanos();

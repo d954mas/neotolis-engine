@@ -450,7 +450,7 @@ static void frame(void) {
         }
         nt_text_renderer_set_material(s_text_material);
         nt_text_renderer_set_font(s_overlay_font);
-        nt_text_renderer_draw(overlay, (const float *)overlay_model, overlay_size, white);
+        nt_text_renderer_draw(overlay, (const float *)overlay_model, overlay_size, white, 0.0F, 0.0F);
         nt_text_renderer_flush();
     }
     // #endregion

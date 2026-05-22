@@ -5,6 +5,7 @@
 
 #include "comp_storage/nt_comp_storage.h"
 #include "core/nt_assert.h"
+#include "core/nt_clamp.h"
 #include "hash/nt_hash.h"
 
 static nt_comp_storage_t s_storage;
@@ -18,18 +19,9 @@ static uint32_t *s_colors_packed; /* RGBA8 mirror; setters keep in sync with s_c
 
 /* ---- Callbacks ---- */
 
-static inline uint8_t pack_u8_clamp(float c) {
-    if (c <= 0.0F) {
-        return 0;
-    }
-    if (c >= 1.0F) {
-        return 255;
-    }
-    return (uint8_t)((c * 255.0F) + 0.5F);
-}
-
+/* Normalized 0..1 input; scale to 0..255 then use the shared clamp. */
 static inline uint32_t pack_color_rgba(float r, float g, float b, float a) {
-    return (uint32_t)pack_u8_clamp(r) | ((uint32_t)pack_u8_clamp(g) << 8) | ((uint32_t)pack_u8_clamp(b) << 16) | ((uint32_t)pack_u8_clamp(a) << 24);
+    return (uint32_t)nt_clamp_f_to_u8(r * 255.0F) | ((uint32_t)nt_clamp_f_to_u8(g * 255.0F) << 8) | ((uint32_t)nt_clamp_f_to_u8(b * 255.0F) << 16) | ((uint32_t)nt_clamp_f_to_u8(a * 255.0F) << 24);
 }
 
 static void drawable_default(uint16_t idx) {

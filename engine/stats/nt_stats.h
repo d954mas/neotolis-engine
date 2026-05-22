@@ -68,12 +68,13 @@ uint32_t nt_stats_format_lines(char *buf, uint32_t size);
  * state. */
 void nt_stats_draw(nt_material_t material, nt_font_t font, const float model[16], float size, const float color[4]);
 
-/* ---- Test access (test builds only) ----
- * Inject a synthetic per-frame seconds value directly into the FPS ring +
- * cpu/draw bookkeeping, bypassing the real wall clock. Used by unit tests to
- * assert the rolling-avg formula deterministically. */
-#ifdef NT_STATS_TEST_ACCESS
+// #region test_access
+/* Inject a synthetic per-frame seconds value directly into the FPS ring +
+ * cpu/draw bookkeeping, bypassing the real wall clock. Used by unit tests
+ * to assert the rolling-avg formula deterministically. */
+#ifdef NT_TEST_ACCESS
 void nt_stats_test_inject_frame(float dt_seconds);
 #endif
+// #endregion
 
 #endif /* NT_STATS_H */

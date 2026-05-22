@@ -71,7 +71,7 @@ struct nt_font_slot_s {
     uint16_t ascii_glyph_idx[128];
     uint8_t ascii_glyph_res[128];
 
-#ifdef NT_FONT_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
     uint32_t test_measure_cache_hits;
     uint32_t test_measure_cache_misses;
 #endif

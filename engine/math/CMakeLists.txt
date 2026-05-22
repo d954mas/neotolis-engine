@@ -13,7 +13,7 @@ target_compile_definitions(nt_math INTERFACE CGLM_ALL_UNALIGNED)
 # Mark cglm includes as SYSTEM so clang-tidy and -Werror skip them
 get_target_property(_cglm_inc cglm_headers INTERFACE_INCLUDE_DIRECTORIES)
 if(_cglm_inc)
-    target_include_directories(nt_math SYSTEM INTERFACE ${_cglm_inc})
+    target_include_directories(nt_math SYSTEM INTERFACE $<BUILD_INTERFACE:${_cglm_inc}>)
 endif()
 if(NOT WIN32)
     target_link_libraries(nt_math INTERFACE m)

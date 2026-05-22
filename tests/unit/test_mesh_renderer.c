@@ -3,7 +3,7 @@
 #include <string.h>
 
 /* clang-format off */
-/* NT_MESH_RENDERER_TEST_ACCESS defined via CMake target_compile_definitions */
+/* NT_TEST_ACCESS defined via CMake target_compile_definitions */
 #include "renderers/nt_mesh_renderer.h"
 #include "graphics/nt_gfx.h"
 #include "entity/nt_entity.h"

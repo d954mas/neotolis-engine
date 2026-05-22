@@ -94,9 +94,16 @@ typedef struct {
 
 /* Length-aware (Clay_StringSlice contract). NULL/len=0 → {0,0}; UTF-8 cut at
  * `len` boundary → trailing partial codepoint dropped; embedded NUL is a
- * normal codepoint (the NUL-terminated wrapper below stops at it via strlen). */
-nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size);
-nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size);
+ * normal codepoint (the NUL-terminated wrapper below stops at it via strlen).
+ * Single-line measurement (no \n handling -- Clay tokenizes per line).
+ *
+ * letter_tracking: EXTRA px added between glyphs (additive, NOT absolute).
+ *   0 = font's natural glyph advance. Positive = loose, negative = tight.
+ *   Adds (N-1) * tracking px for N visible codepoints.
+ *
+ * Non-zero tracking bypasses the measure cache. */
+nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size, float letter_tracking);
+nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size, float letter_tracking);
 
 /* Both no-op on invalid/destroyed handles — safe to call from teardown. */
 void nt_font_measure_invalidate_cache(void);
@@ -133,7 +140,8 @@ void nt_font_set_pre_flush_callback(nt_font_pre_flush_fn fn);
 
 int16_t nt_font_get_kern(nt_font_t font, uint32_t left_codepoint, uint32_t right_codepoint);
 
-#ifdef NT_FONT_TEST_ACCESS
+// #region test_access
+#ifdef NT_TEST_ACCESS
 uint32_t nt_font_test_register_data(const uint8_t *data, uint32_t size);
 
 /* Imitate the FILE-pack deactivator path (skipped for VIRTUAL packs). */
@@ -143,5 +151,6 @@ uint32_t nt_font_test_measure_cache_hits(nt_font_t font);
 uint32_t nt_font_test_measure_cache_misses(nt_font_t font);
 void nt_font_test_reset_measure_counters(void);
 #endif
+// #endregion
 
 #endif /* NT_FONT_H */

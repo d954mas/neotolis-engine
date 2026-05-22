@@ -501,17 +501,17 @@ void test_measure_n_matches_measure(void) {
     uint8_t *blob = NULL;
     nt_font_t font = make_resolved_test_font("font_eq", &blob);
 
-    nt_text_size_t a = nt_font_measure(font, "ABC", 14.0F);
-    nt_text_size_t b = nt_font_measure_n(font, "ABC", 3U, 14.0F);
+    nt_text_size_t a = nt_font_measure(font, "ABC", 14.0F, 0.0F);
+    nt_text_size_t b = nt_font_measure_n(font, "ABC", 3U, 14.0F, 0.0F);
     assert_text_size_equal(a, b);
 
     /* Empty input contract */
     nt_text_size_t zero = {0.0F, 0.0F};
-    nt_text_size_t e = nt_font_measure_n(font, "ABC", 0U, 14.0F);
+    nt_text_size_t e = nt_font_measure_n(font, "ABC", 0U, 14.0F, 0.0F);
     assert_text_size_equal(zero, e);
 
     /* NULL guard */
-    nt_text_size_t n = nt_font_measure_n(font, NULL, 4U, 14.0F);
+    nt_text_size_t n = nt_font_measure_n(font, NULL, 4U, 14.0F, 0.0F);
     assert_text_size_equal(zero, n);
 
     nt_font_destroy(font);
@@ -527,8 +527,8 @@ void test_measure_n_does_not_over_read(void) {
     /* "ABC" + poison 'B' + filler; bounded measure must ignore the poison.
        Intentionally NOT NUL-terminated — tests that _n stops at len, not at NUL. */
     const char buf[8] = {'A', 'B', 'C', 'B', 'X', 'X', 'X', 'X'};
-    nt_text_size_t bounded = nt_font_measure_n(font, buf, 3U, 14.0F);
-    nt_text_size_t reference = nt_font_measure(font, "ABC", 14.0F);
+    nt_text_size_t bounded = nt_font_measure_n(font, buf, 3U, 14.0F, 0.0F);
+    nt_text_size_t reference = nt_font_measure(font, "ABC", 14.0F, 0.0F);
 
     /* If _n over-read into the poison 'B', bounded.width would exceed reference.width. */
     assert_text_size_equal(reference, bounded);
@@ -547,8 +547,8 @@ void test_measure_n_drops_partial_utf8(void) {
      * mid-multibyte. The UTF-8 state machine recovers via NT_UTF8_REJECT
      * and the loop exits with only 'A' measured. */
     const char partial[] = {'A', (char)0xC3, 0};
-    nt_text_size_t bounded = nt_font_measure_n(font, partial, 2U, 14.0F);
-    nt_text_size_t reference = nt_font_measure(font, "A", 14.0F);
+    nt_text_size_t bounded = nt_font_measure_n(font, partial, 2U, 14.0F, 0.0F);
+    nt_text_size_t reference = nt_font_measure(font, "A", 14.0F, 0.0F);
 
     assert_text_size_equal(reference, bounded);
 
@@ -569,9 +569,9 @@ void test_measure_n_embedded_nul_is_codepoint(void) {
     /* "A\0B" — 3 bytes. _n should measure A + tofu(0) + B; _measure (wrapper)
      * stops at the embedded NUL and measures only A. The two MUST differ. */
     const char with_nul[3] = {'A', '\0', 'B'};
-    nt_text_size_t n_full = nt_font_measure_n(font, with_nul, 3U, 14.0F);
-    nt_text_size_t wrapper_truncated = nt_font_measure(font, with_nul, 14.0F);
-    nt_text_size_t reference_a = nt_font_measure(font, "A", 14.0F);
+    nt_text_size_t n_full = nt_font_measure_n(font, with_nul, 3U, 14.0F, 0.0F);
+    nt_text_size_t wrapper_truncated = nt_font_measure(font, with_nul, 14.0F, 0.0F);
+    nt_text_size_t reference_a = nt_font_measure(font, "A", 14.0F, 0.0F);
 
     /* Wrapper stopped at the NUL: width matches a bare "A". */
     assert_text_size_equal(reference_a, wrapper_truncated);
@@ -586,6 +586,48 @@ void test_measure_n_embedded_nul_is_codepoint(void) {
 
 /* ---- FONT-02: 200 identical calls produce 199 hits + 1 miss ---- */
 
+/* letter_spacing adds (N-1) * spacing pixels for N visible glyphs.
+ * 0 spacing must match the baseline; non-zero spacing widens the result by
+ * the expected amount; bypassing the measure cache when spacing != 0.
+ * Integer-truncated compare keeps the test free of UNITY float macros
+ * (UNITY_EXCLUDE_FLOAT is set repo-wide). */
+void test_measure_n_letter_spacing_grows_width(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_resolved_test_font("font_ls", &blob);
+
+    /* 3 glyphs ABC: 2 gaps between them -> +10px width with spacing=5. */
+    nt_text_size_t baseline = nt_font_measure_n(font, "ABC", 3U, 14.0F, 0.0F);
+    nt_text_size_t spaced = nt_font_measure_n(font, "ABC", 3U, 14.0F, 5.0F);
+    const int32_t base_w = (int32_t)baseline.width;
+    const int32_t sp_w = (int32_t)spaced.width;
+    TEST_ASSERT_EQUAL_INT32(base_w + 10, sp_w);
+    /* Height unaffected by horizontal spacing. */
+    TEST_ASSERT_EQUAL_INT32((int32_t)baseline.height, (int32_t)spaced.height);
+
+    /* Single-glyph: 0 gaps -- letter_spacing has no effect. */
+    nt_text_size_t one_base = nt_font_measure_n(font, "A", 1U, 14.0F, 0.0F);
+    nt_text_size_t one_spaced = nt_font_measure_n(font, "A", 1U, 14.0F, 5.0F);
+    TEST_ASSERT_EQUAL_INT32((int32_t)one_base.width, (int32_t)one_spaced.width);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
+/* \r must be skipped (matches nt_text_renderer_draw_n). CRLF text from
+ * Clay tokenization can leave \r in slices; measure must not add tofu width. */
+void test_measure_n_skips_carriage_return(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_resolved_test_font("font_cr", &blob);
+
+    nt_text_size_t plain = nt_font_measure_n(font, "ABC", 3U, 14.0F, 0.0F);
+    nt_text_size_t with_cr = nt_font_measure_n(font, "ABC\r", 4U, 14.0F, 0.0F);
+
+    TEST_ASSERT_EQUAL_INT32((int32_t)plain.width, (int32_t)with_cr.width);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
 void test_measure_n_cache_hits_on_repeat(void) {
     uint8_t *blob = NULL;
     nt_font_t font = make_resolved_test_font("font_hits", &blob);
@@ -594,7 +636,7 @@ void test_measure_n_cache_hits_on_repeat(void) {
     nt_font_test_reset_measure_counters();
 
     for (int i = 0; i < 200; i++) {
-        (void)nt_font_measure_n(font, "ABC", 3U, 14.0F);
+        (void)nt_font_measure_n(font, "ABC", 3U, 14.0F, 0.0F);
     }
 
     TEST_ASSERT_EQUAL_UINT32(199U, nt_font_test_measure_cache_hits(font));
@@ -613,13 +655,13 @@ void test_measure_n_invalidate_forces_miss(void) {
     nt_font_measure_invalidate(font);
     nt_font_test_reset_measure_counters();
 
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F); /* miss */
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F); /* hit */
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F); /* miss */
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F); /* hit */
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
 
     nt_font_measure_invalidate_cache();
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);                        /* miss again after invalidate */
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);                  /* miss again after invalidate */
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));   /* unchanged */
     TEST_ASSERT_EQUAL_UINT32(2U, nt_font_test_measure_cache_misses(font)); /* +1 */
 
@@ -634,7 +676,7 @@ void test_measure_n_destroy_clears_cache(void) {
     nt_font_t font_a = make_resolved_test_font("font_d_a", &blob_a);
 
     nt_font_test_reset_measure_counters();
-    (void)nt_font_measure_n(font_a, "ABC", 3U, 14.0F); /* warm slot */
+    (void)nt_font_measure_n(font_a, "ABC", 3U, 14.0F, 0.0F); /* warm slot */
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font_a));
 
     /* Destroy releases pool slot via memset(slot, 0, sizeof(*slot)); next
@@ -646,7 +688,7 @@ void test_measure_n_destroy_clears_cache(void) {
     nt_font_t font_b = make_resolved_test_font("font_d_b", &blob_b);
 
     nt_font_test_reset_measure_counters();
-    (void)nt_font_measure_n(font_b, "ABC", 3U, 14.0F);
+    (void)nt_font_measure_n(font_b, "ABC", 3U, 14.0F, 0.0F);
     /* Must be a miss — slot's cache was cleared on destroy. */
     TEST_ASSERT_EQUAL_UINT32(0U, nt_font_test_measure_cache_hits(font_b));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font_b));
@@ -675,9 +717,9 @@ void test_measure_n_cache_disabled(void) {
     /* 100 identical calls. With cache disabled, every call is a full measure
      * AND neither hit nor miss counter is incremented (counters track cache
      * activity, not raw measure calls). Result must still be correct. */
-    nt_text_size_t first = nt_font_measure_n(font, "ABC", 3U, 14.0F);
+    nt_text_size_t first = nt_font_measure_n(font, "ABC", 3U, 14.0F, 0.0F);
     for (int i = 0; i < 99; i++) {
-        nt_text_size_t r = nt_font_measure_n(font, "ABC", 3U, 14.0F);
+        nt_text_size_t r = nt_font_measure_n(font, "ABC", 3U, 14.0F, 0.0F);
         assert_text_size_equal(first, r);
     }
     TEST_ASSERT_EQUAL_UINT32(0U, nt_font_test_measure_cache_hits(font));
@@ -705,8 +747,8 @@ void test_measure_n_invalidates_on_resource_change(void) {
     nt_font_test_reset_measure_counters();
 
     /* Warm the cache for the same string twice — first miss, then hit. */
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
 
@@ -722,7 +764,7 @@ void test_measure_n_invalidates_on_resource_change(void) {
 
     /* Re-measure the same string — without the cache invalidation fix this
      * is a HIT (counter unchanged). With the fix it's a MISS (counter +1). */
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));   /* unchanged */
     TEST_ASSERT_EQUAL_UINT32(2U, nt_font_test_measure_cache_misses(font)); /* +1 */
 
@@ -751,7 +793,7 @@ void test_measure_n_cache_custom_size(void) {
     /* 200 identical calls → 1 miss + 199 hits, just like the default-size test.
      * Verifies that a non-default POT size still produces correct counters. */
     for (int i = 0; i < 200; i++) {
-        (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+        (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
     }
     TEST_ASSERT_EQUAL_UINT32(199U, nt_font_test_measure_cache_hits(font));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
@@ -791,8 +833,8 @@ void test_measure_n_invalidates_on_resource_unload(void) {
     nt_font_test_reset_measure_counters();
 
     /* Warm cache: measure twice → 1 miss + 1 hit. */
-    nt_text_size_t live = nt_font_measure_n(font, "AB", 2U, 14.0F);
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    nt_text_size_t live = nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_misses(font));
     TEST_ASSERT_TRUE(live.width > 0.0F);
@@ -812,7 +854,7 @@ void test_measure_n_invalidates_on_resource_unload(void) {
     /* Counters frozen — measure_n hit the !metrics_set short-circuit
      * before the cache lookup. (UNITY_EXCLUDE_FLOAT, so TEST_ASSERT_TRUE
      * for the zero check.) */
-    nt_text_size_t after = nt_font_measure_n(font, "AB", 2U, 14.0F);
+    nt_text_size_t after = nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
     TEST_ASSERT_TRUE(after.width == 0.0F);
     TEST_ASSERT_TRUE(after.height == 0.0F);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
@@ -863,7 +905,7 @@ void test_font_recovers_after_remount(void) {
 
     nt_font_metrics_t recovered = nt_font_get_metrics(font);
     TEST_ASSERT_NOT_EQUAL_UINT16(0U, recovered.units_per_em);
-    nt_text_size_t m = nt_font_measure_n(font, "AB", 2U, 14.0F);
+    nt_text_size_t m = nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
     TEST_ASSERT_TRUE(m.width > 0.0F);
 
     nt_font_destroy(font);
@@ -946,8 +988,8 @@ void test_font_file_pack_unmount_cleans_state(void) {
     nt_font_step();
 
     nt_font_test_reset_measure_counters();
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
-    (void)nt_font_measure_n(font, "AB", 2U, 14.0F);
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
+    (void)nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));
     uint32_t gen_before = nt_font_get_cache_generation(font);
 
@@ -958,7 +1000,7 @@ void test_font_file_pack_unmount_cleans_state(void) {
     TEST_ASSERT_EQUAL_UINT16(0U, nt_font_get_metrics(font).units_per_em);
     TEST_ASSERT_TRUE(nt_font_get_cache_generation(font) > gen_before);
 
-    nt_text_size_t after = nt_font_measure_n(font, "AB", 2U, 14.0F);
+    nt_text_size_t after = nt_font_measure_n(font, "AB", 2U, 14.0F, 0.0F);
     TEST_ASSERT_TRUE(after.width == 0.0F);
     TEST_ASSERT_TRUE(after.height == 0.0F);
     TEST_ASSERT_EQUAL_UINT32(1U, nt_font_test_measure_cache_hits(font));   /* unchanged */
@@ -1056,6 +1098,8 @@ int main(void) {
     RUN_TEST(test_measure_n_does_not_over_read);
     RUN_TEST(test_measure_n_drops_partial_utf8);
     RUN_TEST(test_measure_n_embedded_nul_is_codepoint);
+    RUN_TEST(test_measure_n_letter_spacing_grows_width);
+    RUN_TEST(test_measure_n_skips_carriage_return);
     RUN_TEST(test_measure_n_cache_hits_on_repeat);
     RUN_TEST(test_measure_n_invalidate_forces_miss);
     RUN_TEST(test_measure_n_destroy_clears_cache);

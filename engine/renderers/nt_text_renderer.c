@@ -44,7 +44,7 @@ static struct {
 
     bool initialized;
 
-#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
     /* Count every set_material / set_font entry regardless of early-out so
      * nt_stats tests can prove explicit calls. */
     uint32_t test_set_material_calls;
@@ -193,26 +193,31 @@ void nt_text_renderer_restore_gpu(void) {
 // #region State setters
 void nt_text_renderer_set_material(nt_material_t mat) {
     NT_ASSERT(s_text.initialized);
-#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
     s_text.test_set_material_calls++;
 #endif
+    /* Validate BEFORE same-handle early return: stale handle (destroyed material,
+     * bumped generation) must assert even if the id still matches what we cached. */
+    const nt_material_info_t *info = nt_material_get_info(mat);
+    NT_ASSERT(info != NULL && "nt_text_renderer_set_material: invalid material handle");
+    NT_ASSERT(info->ready && "nt_text_renderer_set_material: material not ready");
+
     if (s_text.material.id == mat.id) {
         return;
     }
 
-    /* Auto-flush on material change */
     if (s_text.glyph_count > 0) {
         nt_text_renderer_flush();
     }
 
     s_text.material = mat;
-    s_text.pipeline_material_version = 0; /* force pipeline recreation */
+    s_text.pipeline_material_version = 0;
     create_pipeline();
 }
 
 void nt_text_renderer_set_font(nt_font_t font) {
     NT_ASSERT(s_text.initialized);
-#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
     s_text.test_set_font_calls++;
 #endif
     if (s_text.font.id == font.id) {
@@ -307,17 +312,12 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
 
 // #region Draw
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4]) {
+void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
     NT_ASSERT(s_text.initialized);
     if (len == 0U || utf8 == NULL) {
         return;
     }
-    if (s_text.font.id == 0) {
-        /* Legitimate "no font configured" state; slot == NULL below is the
-         * bug case (destroyed handle, etc.). */
-        NT_LOG_WARN("nt_text_renderer_draw_n: no font set");
-        return;
-    }
+    NT_ASSERT(s_text.font.id != 0 && "nt_text_renderer_draw_n: call set_font before draw");
 
     nt_font_metrics_t metrics = nt_font_get_metrics(s_text.font);
     if (metrics.units_per_em == 0) {
@@ -337,7 +337,10 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     uint32_t prev_cp = 0;
     float pen_x = 0.0F;
     float pen_y = 0.0F;
-    const float line_advance = (metrics.line_height != 0) ? ((float)metrics.line_height * scale) : size;
+    /* Natural line advance from font metrics, plus user-supplied leading. */
+    const float natural_line_advance = (metrics.line_height != 0) ? ((float)metrics.line_height * scale) : size;
+    const float line_advance = natural_line_advance + line_leading;
+    bool had_glyph_on_line = false;
 
     const uint8_t *p = (const uint8_t *)utf8;
     const uint8_t *end = p + len;
@@ -358,7 +361,12 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
             pen_x = 0.0F;
             pen_y -= line_advance;
             prev_cp = 0;
+            had_glyph_on_line = false;
             continue;
+        }
+
+        if (had_glyph_on_line) {
+            pen_x += letter_tracking;
         }
 
         /* Apply kern pair */
@@ -380,10 +388,13 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
 
         pen_x += (float)g->advance * scale;
         prev_cp = codepoint;
+        had_glyph_on_line = true;
     }
 }
 
-void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4]) { nt_text_renderer_draw_n(utf8, utf8 ? strlen(utf8) : 0U, model, size, color); }
+void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
+    nt_text_renderer_draw_n(utf8, utf8 ? strlen(utf8) : 0U, model, size, color, letter_tracking, line_leading);
+}
 // #endregion
 
 // #region Flush
@@ -433,7 +444,7 @@ void nt_text_renderer_flush(void) {
 // #endregion
 
 // #region Test accessors
-#ifdef NT_TEXT_RENDERER_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 uint32_t nt_text_renderer_test_vertex_count(void) { return s_text.vertex_count; }
 uint32_t nt_text_renderer_test_glyph_count(void) { return s_text.glyph_count; }
 const void *nt_text_renderer_test_vertices(void) { return s_text.vertices; }

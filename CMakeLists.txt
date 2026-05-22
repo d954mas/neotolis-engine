@@ -7,6 +7,7 @@ set(NT_ENGINE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH "Engine source root"
 
 # Warning and sanitizer flag functions (applied per-target, not globally)
 include(cmake/warnings.cmake)
+include(cmake/test_target.cmake)
 include(cmake/nt_module.cmake)
 include(cmake/nt_shell.cmake)
 

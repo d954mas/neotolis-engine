@@ -3,7 +3,7 @@
 /* No-op backend for headless builds and testing.
    Create functions return 1 (nonzero) so make_shader/pipeline/buffer succeed. */
 
-#ifdef NT_GFX_STUB_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 #define NT_GFX_STUB_MAX_SLOTS 16
 static uint32_t s_stub_last_sampler[NT_GFX_STUB_MAX_SLOTS];
 static uint32_t s_stub_bind_sampler_count;
@@ -43,7 +43,7 @@ void nt_gfx_backend_begin_pass(const nt_pass_desc_t *desc) { (void)desc; }
 void nt_gfx_backend_end_pass(void) {}
 
 /* Scissor and viewport stub no-ops. State is cached in shared nt_gfx.c
- * so NT_GFX_TEST_ACCESS probes can read it back without GL. */
+ * so NT_TEST_ACCESS probes can read it back without GL. */
 void nt_gfx_backend_set_scissor(int x, int y, int w, int h) {
     (void)x;
     (void)y;
@@ -146,7 +146,7 @@ uint32_t nt_gfx_backend_create_sampler(const nt_sampler_desc_t *desc) {
 void nt_gfx_backend_destroy_sampler(uint32_t backend_handle) { (void)backend_handle; }
 
 void nt_gfx_backend_bind_sampler(uint32_t backend_handle, uint32_t slot) {
-#ifdef NT_GFX_STUB_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
     if (slot < NT_GFX_STUB_MAX_SLOTS) {
         s_stub_last_sampler[slot] = backend_handle;
     }

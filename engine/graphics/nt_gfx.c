@@ -90,7 +90,7 @@ static struct {
     uint8_t bound_index_type; /* index type of currently bound IBO (1=uint16, 2=uint32) */
     bool scissor_enabled;     /* mirrors GL_SCISSOR_TEST; read in begin_frame */
 
-    /* Mirrors of last set_scissor / set_viewport — only NT_GFX_TEST_ACCESS
+    /* Mirrors of last set_scissor / set_viewport — only NT_TEST_ACCESS
      * probes read them; production never does. */
     int scissor_rect[4];  /* GL bottom-left x,y,w,h */
     int viewport_rect[4]; /* GL bottom-left x,y,w,h */
@@ -627,7 +627,7 @@ nt_sampler_t nt_gfx_get_texture_default_sampler(nt_texture_t tex) {
     return s_gfx.texture_metas[nt_pool_slot_index(tex.id)].default_sampler;
 }
 
-#ifdef NT_GFX_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 uint32_t nt_gfx_test_sampler_backend_id(nt_sampler_t s) {
     if (s.id == 0 || s.id > s_gfx.sampler_count) {
         return 0;

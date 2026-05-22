@@ -106,12 +106,23 @@ If a decision can be deferred without loss of base architecture — it is deferr
 - WebGPU backend implementation
 - scene editor / authoring editor
 - full UI framework (NOTE: Phase 51 introduces `nt_ui` — a minimal
-  immediate-mode layout + render bridge module that wraps Clay v0.14 as a
-  private layout backend. It is **not** a full UI framework — no widget
-  authoring tools, no styling pipeline beyond inline calls, no asset
-  hot-reload of UI definitions, no scene-graph integration. Game owns the
-  loop and render order; `nt_ui` provides building blocks per the engine's
-  "set of modules" principle. Clay does not leak into public headers.)
+  immediate-mode layout + render bridge module. It is **not** a full UI
+  framework — no widget authoring tools, no styling pipeline beyond
+  inline calls, no asset hot-reload of UI definitions, no scene-graph
+  integration. Game owns the loop and render order; `nt_ui` provides
+  building blocks per the engine's "set of modules" principle.
+
+  Clay v0.14 is vendored as a **public** dependency of `nt_ui`: game
+  code declares layout and widgets via `CLAY_*` macros directly,
+  while `nt_ui` owns lifecycle (contexts, themes, the walker that
+  turns Clay's render commands into sprite/text renderer calls). This
+  is a deliberate compromise — wrapping Clay's full surface in an
+  engine-owned adapter API would be ~100+ shim functions for no
+  benefit beyond hiding the dependency. The cost we accept is that
+  Clay's pinned API (`CLAY_PINNED_MAJOR/MINOR` enforced via
+  `_Static_assert` in `nt_ui.c`) becomes part of the engine's
+  publicly-promised surface; bumping Clay can require coordinated
+  game-side changes.)
 - hot reload of compiled native/WASM code
 - generic reflection-heavy system architecture
 - WebGL 1 support
@@ -224,12 +235,17 @@ resource_step         ← async loading processing
 game-defined resource sync helpers
     → e.g. sprite_comp_sync_resources() after resource publication changes
 audio_update          ← voice state management
+nt_mem_scratch_reset  ← frame scratch arena cleared (see §5.2)
 fixed_update loop
-game_update
+game_update           ← CLAY layout, NT_UI_DATA_* allocations
 transform_update
-game_render
-frame_temp_reset
+game_render           ← nt_ui_walk reads scratch pointers
 ```
+
+`nt_mem_scratch_reset()` MUST run before any scratch allocation in the
+current frame — typically right after `audio_update`. Allocating then
+resetting in the same frame invalidates pointers already handed to
+systems (e.g. `nt_ui` retains them through `nt_ui_walk`).
 
 ## 4.3 Fixed update loop
 
@@ -323,9 +339,22 @@ Examples: loaded pack blob, manifest read buffer, temporary decompression buffer
 
 ### Frame scratch memory
 
-Lifetime = single frame.
+Lifetime: from allocation until the next `nt_mem_scratch_reset()` (typically the start of the next frame, see §4.2).
 
-Examples: render item arrays, temporary sort arrays, transient CPU batch buffers, build temp lists in render pass.
+Examples: render item arrays, temporary sort arrays, transient CPU batch buffers, build temp lists in render pass, `nt_ui_element_data_t` attached to CLAY elements via `NT_UI_DATA_*` macros.
+
+The engine provides a global bump arena in `engine/memory/nt_mem_scratch`:
+
+```c
+nt_mem_scratch_init(NT_MEM_SCRATCH_DEFAULT_SIZE_BYTES);  // boot, default 512 KB
+// per frame (see §4.2):
+nt_mem_scratch_reset();          // start of frame
+nt_mem_scratch_alloc(size, align);  // anywhere during the frame
+// pointers stay valid until the next nt_mem_scratch_reset()
+nt_mem_scratch_shutdown();       // exit
+```
+
+Type-safe macros: `NT_MEM_SCRATCH_ALLOC(T)`, `NT_MEM_SCRATCH_ALLOC_ARRAY(T, count)`.
 
 ## 5.3 Capacity policy
 

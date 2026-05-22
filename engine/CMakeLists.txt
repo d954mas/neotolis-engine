@@ -1,4 +1,5 @@
 add_subdirectory(core)
+add_subdirectory(memory)
 add_subdirectory(pool)
 add_subdirectory(log)
 add_subdirectory(time)

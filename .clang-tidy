@@ -33,5 +33,5 @@ Checks: >
   -cert-int09-c,
   -bugprone-macro-parentheses
 WarningsAsErrors: '*'
-HeaderFilterRegex: '(engine|shared|tools|examples|tests)[/\\\\]'
+HeaderFilterRegex: '[/\\\\](engine|shared|tools|examples|tests)[/\\\\]'
 FormatStyle: file

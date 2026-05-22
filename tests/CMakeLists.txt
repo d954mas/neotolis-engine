@@ -1,7 +1,27 @@
 # Native unit tests (Unity framework via CTest)
 # WASM tests run through CTest via Node.js when available
+#
+# NT_TEST_ACCESS: single shared define that gates every module's test
+# surface (the `// #region test_access` block at the bottom of each
+# header). Applied at directory level here so all binaries below pick
+# it up automatically; engine library targets that expose test surface
+# get it explicitly so their compilation matches.
 
 if(NOT EMSCRIPTEN)
+    # Tests-wide define + engine libs that have a test surface. New module
+    # with test surface? Add its target name to NT_TEST_ACCESS_LIBS below.
+    add_compile_definitions(NT_TEST_ACCESS)
+    set(NT_TEST_ACCESS_LIBS
+        nt_atlas nt_ui nt_gfx nt_gfx_stub nt_font nt_text_renderer
+        nt_resource nt_sprite_renderer nt_mesh_renderer nt_stats
+        nt_shape_renderer nt_mem_scratch
+    )
+    foreach(_lib IN LISTS NT_TEST_ACCESS_LIBS)
+        if(TARGET ${_lib})
+            target_compile_definitions(${_lib} PRIVATE NT_TEST_ACCESS)
+        endif()
+    endforeach()
+
     add_executable(test_core unit/test_core.c)
     target_link_libraries(test_core PRIVATE nt_core unity)
 
@@ -149,20 +169,12 @@ if(NOT EMSCRIPTEN)
         nt_sprite_renderer nt_text_renderer nt_font nt_material
         nt_resource nt_hash nt_pool nt_gfx_stub unity
     )
-    target_compile_definitions(test_nt_gfx_scissor PRIVATE NT_GFX_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
-    target_compile_definitions(nt_gfx_stub PRIVATE NT_GFX_TEST_ACCESS)
-    target_compile_options(test_nt_gfx_scissor PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_gfx_scissor)
-    nt_set_sanitizer_flags(test_nt_gfx_scissor)
-    set_target_properties(test_nt_gfx_scissor PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_nt_gfx_scissor COMMAND test_nt_gfx_scissor)
+    target_compile_definitions(test_nt_gfx_scissor PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_gfx_scissor)
 
     # --- Shape module tests ---
     add_executable(test_shape unit/test_shape.c)
     target_link_libraries(test_shape PRIVATE nt_shape_renderer nt_gfx_stub unity)
-    target_compile_definitions(test_shape PRIVATE NT_SHAPE_RENDERER_TEST_ACCESS)
     nt_set_warning_flags(test_shape)
     nt_set_sanitizer_flags(test_shape)
     set_target_properties(test_shape PROPERTIES
@@ -233,43 +245,23 @@ if(NOT EMSCRIPTEN)
     # --- Font module tests ---
     add_executable(test_font unit/test_font.c)
     target_link_libraries(test_font PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool unity)
-    target_compile_definitions(test_font PRIVATE NT_FONT_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_font PRIVATE -U_DLL)
-    target_compile_definitions(nt_font PRIVATE NT_FONT_TEST_ACCESS)
+    target_compile_definitions(test_font PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(nt_font PRIVATE -U_DLL)
-    nt_set_warning_flags(test_font)
-    nt_set_sanitizer_flags(test_font)
-    set_target_properties(test_font PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_font COMMAND test_font)
+    nt_setup_test_target(test_font)
 
     # --- Font measure benchmark ---
     # Measures hit vs miss ns/call for the nt_font_measure_n LRU cache.
     # Uses nt_time_nanos() for the ns clock (same module used by test_time).
     add_executable(test_nt_font_measure_bench unit/test_nt_font_measure_bench.c)
     target_link_libraries(test_nt_font_measure_bench PRIVATE nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_time unity)
-    target_compile_definitions(test_nt_font_measure_bench PRIVATE NT_FONT_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_nt_font_measure_bench PRIVATE -U_DLL)
-    nt_set_warning_flags(test_nt_font_measure_bench)
-    nt_set_sanitizer_flags(test_nt_font_measure_bench)
-    set_target_properties(test_nt_font_measure_bench PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_nt_font_measure_bench COMMAND test_nt_font_measure_bench)
+    target_compile_definitions(test_nt_font_measure_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_font_measure_bench)
 
     # --- Text renderer module tests ---
     add_executable(test_text_renderer unit/test_text_renderer.c)
     target_link_libraries(test_text_renderer PRIVATE nt_text_renderer nt_font nt_gfx_stub nt_resource nt_hash nt_pool nt_material nt_time unity)
-    target_compile_definitions(test_text_renderer PRIVATE NT_TEXT_RENDERER_TEST_ACCESS NT_FONT_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
-    target_compile_definitions(nt_text_renderer PRIVATE NT_TEXT_RENDERER_TEST_ACCESS)
-    target_compile_options(test_text_renderer PRIVATE -U_DLL)
-    nt_set_warning_flags(test_text_renderer)
-    nt_set_sanitizer_flags(test_text_renderer)
-    set_target_properties(test_text_renderer PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_text_renderer COMMAND test_text_renderer)
+    target_compile_definitions(test_text_renderer PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_text_renderer)
 
     # --- Material module tests ---
     add_executable(test_material unit/test_material.c)
@@ -297,44 +289,22 @@ if(NOT EMSCRIPTEN)
     # --- Resource module tests ---
     add_executable(test_resource unit/test_resource.c)
     target_link_libraries(test_resource PRIVATE nt_resource unity)
-    target_compile_definitions(test_resource PRIVATE NT_RESOURCE_TEST_ACCESS _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
-    target_compile_options(test_resource PRIVATE -U_DLL)
-    target_compile_definitions(nt_resource PRIVATE NT_RESOURCE_TEST_ACCESS)
-    nt_set_warning_flags(test_resource)
-    nt_set_sanitizer_flags(test_resource)
-    set_target_properties(test_resource PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_resource COMMAND test_resource
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    )
+    target_compile_definitions(test_resource PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    nt_setup_test_target(test_resource WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # --- Atlas module tests ---
     add_executable(test_atlas unit/test_atlas.c)
     target_link_libraries(test_atlas PRIVATE nt_atlas nt_resource nt_hash unity)
-    target_compile_definitions(test_atlas PRIVATE NT_ATLAS_TEST_ACCESS _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
-    target_compile_options(test_atlas PRIVATE -U_DLL)
-    target_compile_definitions(nt_atlas PRIVATE NT_ATLAS_TEST_ACCESS)
-    nt_set_warning_flags(test_atlas)
-    nt_set_sanitizer_flags(test_atlas)
-    set_target_properties(test_atlas PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_atlas COMMAND test_atlas)
+    target_compile_definitions(test_atlas PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    nt_setup_test_target(test_atlas)
 
     # --- Sprite component tests ---
     add_executable(test_sprite_comp unit/test_sprite_comp.c)
     target_link_libraries(test_sprite_comp PRIVATE
         nt_sprite_comp nt_atlas nt_entity nt_resource nt_hash nt_pool nt_shared unity
     )
-    target_compile_definitions(test_sprite_comp PRIVATE NT_ATLAS_TEST_ACCESS _CRT_SECURE_NO_WARNINGS)
-    target_compile_options(test_sprite_comp PRIVATE -U_DLL)
-    nt_set_warning_flags(test_sprite_comp)
-    nt_set_sanitizer_flags(test_sprite_comp)
-    set_target_properties(test_sprite_comp PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_sprite_comp COMMAND test_sprite_comp)
+    target_compile_definitions(test_sprite_comp PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_sprite_comp)
 
     # --- HTTP module tests ---
     add_executable(test_http unit/test_http.c)
@@ -350,29 +320,13 @@ if(NOT EMSCRIPTEN)
     add_executable(test_fs unit/test_fs.c)
     target_link_libraries(test_fs PRIVATE nt_fs unity)
     target_compile_definitions(test_fs PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
-    target_compile_options(test_fs PRIVATE -U_DLL)
-    nt_set_warning_flags(test_fs)
-    nt_set_sanitizer_flags(test_fs)
-    set_target_properties(test_fs PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_fs COMMAND test_fs
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    )
+    nt_setup_test_target(test_fs WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # --- Builder tests ---
     add_executable(test_builder unit/test_builder.c)
     target_link_libraries(test_builder PRIVATE nt_builder unity)
     target_compile_definitions(test_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
-    target_compile_options(test_builder PRIVATE -U_DLL)
-    nt_set_warning_flags(test_builder)
-    nt_set_sanitizer_flags(test_builder)
-    set_target_properties(test_builder PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
-    add_test(NAME test_builder COMMAND test_builder
-        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    )
+    nt_setup_test_target(test_builder WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # --- Mesh renderer tests ---
     add_executable(test_mesh_renderer unit/test_mesh_renderer.c)
@@ -381,10 +335,7 @@ if(NOT EMSCRIPTEN)
         nt_entity nt_transform_comp nt_mesh_comp nt_material_comp nt_drawable_comp
         nt_material nt_resource nt_hash unity
     )
-    target_compile_definitions(test_mesh_renderer PRIVATE
-        NT_MESH_RENDERER_TEST_ACCESS
-        _CRT_SECURE_NO_WARNINGS
-    )
+    target_compile_definitions(test_mesh_renderer PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_set_warning_flags(test_mesh_renderer)
     nt_set_sanitizer_flags(test_mesh_renderer)
     set_target_properties(test_mesh_renderer PROPERTIES
@@ -400,25 +351,27 @@ if(NOT EMSCRIPTEN)
         nt_resource nt_hash nt_pool nt_entity nt_shared nt_gfx_stub unity
     )
     target_compile_definitions(test_sprite_renderer PRIVATE
-        NT_SPRITE_RENDERER_TEST_ACCESS
-        NT_ATLAS_TEST_ACCESS
-        NT_GFX_STUB_TEST_ACCESS
-        NT_GFX_TEST_ACCESS
-        _CRT_SECURE_NO_WARNINGS
-        _CRT_NONSTDC_NO_DEPRECATE
+        _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE
     )
-    target_compile_definitions(nt_sprite_renderer PRIVATE NT_SPRITE_RENDERER_TEST_ACCESS)
-    # nt_gfx_stub also compiles nt_gfx.c — needs NT_GFX_TEST_ACCESS for the
-    # real-backend test hook (sampler cache inspection) the test uses.
-    target_compile_definitions(nt_gfx_stub PRIVATE NT_GFX_STUB_TEST_ACCESS NT_GFX_TEST_ACCESS)
-    target_compile_definitions(nt_gfx PRIVATE NT_GFX_TEST_ACCESS)
-    target_compile_options(test_sprite_renderer PRIVATE -U_DLL)
-    nt_set_warning_flags(test_sprite_renderer)
-    nt_set_sanitizer_flags(test_sprite_renderer)
-    set_target_properties(test_sprite_renderer PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+    nt_setup_test_target(test_sprite_renderer)
+
+    # --- nt_mem_scratch tests ---
+    add_executable(test_nt_mem_scratch unit/test_nt_mem_scratch.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_nt_mem_scratch PRIVATE
+        nt_mem_scratch nt_core unity
     )
-    add_test(NAME test_sprite_renderer COMMAND test_sprite_renderer)
+    target_include_directories(test_nt_mem_scratch PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    target_compile_definitions(test_nt_mem_scratch PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_mem_scratch)
+
+    # --- nt_ui element_data macro tests (exercises macros -> scratch path) ---
+    add_executable(test_nt_ui_element_data unit/test_nt_ui_element_data.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_nt_ui_element_data PRIVATE
+        nt_ui nt_mem_scratch nt_core unity
+    )
+    target_include_directories(test_nt_ui_element_data PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    target_compile_definitions(test_nt_ui_element_data PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_ui_element_data)
 
     # --- Stats module tests (DEMO-04..06 + Pitfall 9 / Issue 2 coverage) ---
     add_executable(test_stats unit/test_stats.c)
@@ -426,20 +379,80 @@ if(NOT EMSCRIPTEN)
         nt_stats nt_text_renderer nt_font nt_material nt_resource
         nt_gfx_stub nt_hash nt_pool unity
     )
-    target_compile_definitions(test_stats PRIVATE
-        NT_STATS_TEST_ACCESS
-        NT_TEXT_RENDERER_TEST_ACCESS
-        _CRT_SECURE_NO_WARNINGS
+    target_compile_definitions(test_stats PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_stats)
+
+    # --- nt_ui module + walker tests ---
+    # Stub gfx backend + Unity. Death-tests use the shared
+    # NT_TEST_EXPECT_ASSERT macro (test_helpers/nt_assert_trap).
+    set(_nt_ui_test_helper_sources
+        unit/test_helpers/ui_atlas.c
+        unit/test_helpers/nt_assert_trap.c
+        unit/test_helpers/ui_walker_fixture.c
     )
-    target_compile_definitions(nt_stats PRIVATE NT_STATS_TEST_ACCESS)
-    target_compile_definitions(nt_text_renderer PRIVATE NT_TEXT_RENDERER_TEST_ACCESS)
-    target_compile_options(test_stats PRIVATE -U_DLL)
-    nt_set_warning_flags(test_stats)
-    nt_set_sanitizer_flags(test_stats)
-    set_target_properties(test_stats PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+
+    # Helpers need `tests/unit/` on the include path so
+    # `#include "test_helpers/ui_atlas.h"` resolves.
+    set(_nt_ui_test_helper_includes
+        "${CMAKE_CURRENT_SOURCE_DIR}/unit"
     )
-    add_test(NAME test_stats COMMAND test_stats)
+
+    add_executable(test_nt_sprite_renderer_emit_region
+        unit/test_nt_sprite_renderer_emit_region.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_sprite_renderer_emit_region PRIVATE ${_nt_ui_test_helper_includes})
+    # nt_ui is linked because the shared ui_walker_fixture helper -- which
+    # every nt_ui-test binary depends on -- now compiles unconditionally
+    # under the unified NT_TEST_ACCESS define.
+    target_link_libraries(test_nt_sprite_renderer_emit_region PRIVATE
+        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_atlas nt_gfx_stub nt_core unity
+    )
+    target_compile_definitions(test_nt_sprite_renderer_emit_region PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_sprite_renderer_emit_region)
+
+    # Shared list of libs every nt_ui test binary links against. Stub gfx
+    # backend; nt_stats included for walker tests that record draw_calls /
+    # element_count via the public getter forwards.
+    set(_nt_ui_test_libs
+        nt_ui nt_sprite_renderer nt_text_renderer nt_font nt_material
+        nt_resource nt_hash nt_pool nt_atlas nt_stats nt_gfx_stub nt_core unity
+    )
+
+    set(_nt_ui_test_names
+        test_nt_ui_lifecycle
+        test_nt_ui_multictx
+        test_nt_ui_begin_end
+        test_nt_ui_measure_cb
+        test_nt_ui_pointer_state
+        test_nt_ui_walker_dispatch
+        test_nt_ui_walker_scissor
+        test_nt_ui_walker_custom
+        test_nt_ui_walker_flush
+        test_nt_ui_walker_readonly
+        test_nt_ui_walker_batching
+    )
+
+    foreach(_t IN LISTS _nt_ui_test_names)
+        add_executable(${_t}
+            unit/${_t}.c
+            ${_nt_ui_test_helper_sources}
+        )
+        target_include_directories(${_t} PRIVATE ${_nt_ui_test_helper_includes})
+        target_link_libraries(${_t} PRIVATE ${_nt_ui_test_libs})
+        target_compile_definitions(${_t} PRIVATE _CRT_SECURE_NO_WARNINGS)
+        nt_setup_test_target(${_t})
+    endforeach()
+
+    add_executable(test_nt_ui_stats
+        unit/test_nt_ui_stats.c
+        ${_nt_ui_test_helper_sources}
+    )
+    target_include_directories(test_nt_ui_stats PRIVATE ${_nt_ui_test_helper_includes})
+    target_link_libraries(test_nt_ui_stats PRIVATE ${_nt_ui_test_libs})
+    target_compile_definitions(test_nt_ui_stats PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_ui_stats)
 
 endif()
 

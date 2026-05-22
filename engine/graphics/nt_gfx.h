@@ -426,9 +426,8 @@ void nt_gfx_deactivate_shader(uint32_t handle);
 
 const nt_gfx_mesh_info_t *nt_gfx_get_mesh_info(nt_mesh_t mesh);
 
-/* ---- Test access (test-only) ---- */
-
-#ifdef NT_GFX_TEST_ACCESS
+// #region test_access
+#ifdef NT_TEST_ACCESS
 /* Read back the cached scissor enabled flag (last call to
  * nt_gfx_set_scissor_enabled). Default false at frame start. */
 bool nt_gfx_test_scissor_enabled(void);
@@ -439,5 +438,6 @@ void nt_gfx_test_scissor_rect(int out[4]);
  * nt_gfx_set_viewport call. Out-param must be a 4-element int array. */
 void nt_gfx_test_viewport_rect(int out[4]);
 #endif
+// #endregion
 
 #endif /* NT_GFX_H */

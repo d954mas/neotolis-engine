@@ -1613,7 +1613,7 @@ static int16_t kern_with_left_in_slot(const nt_font_glyph_lookup_t *left, uint32
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size) {
+nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size, float letter_tracking) {
     nt_text_size_t result = {0.0F, 0.0F};
 
     /* Edge cases. NULL utf8 with len > 0 is treated as empty input
@@ -1633,12 +1633,9 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
         return result; /* font not yet resolved */
     }
 
-    /* Cache key — xxHash64 (upgraded from xxHash32 to eliminate false-positive
-     * cache hits over long sessions; see nt_font_measure_cache_t doc).
-     * When the cache is disabled (key_hashes == NULL — measure_cache_size
-     * was 0 at create), skip the key compute and go straight to the full
-     * measure path. */
-    const bool cache_enabled = (slot->measure_cache.key_hashes != NULL);
+    /* Non-zero tracking changes geometry per call; cache key doesn't include
+     * it (would double the SoA), so we skip the cache. */
+    const bool cache_enabled = (slot->measure_cache.key_hashes != NULL) && (letter_tracking == 0.0F);
     const uint64_t key_hash = cache_enabled ? nt_hash64((const void *)utf8, (uint32_t)len).value : 0U;
     const uint32_t size_bits = measure_size_bits(size);
     const uint32_t slot_index = (uint32_t)key_hash & slot->measure_cache_mask;
@@ -1648,13 +1645,13 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
      * across all entries, so 8 adjacent slots' header data fits in one
      * cache line. values[] is only touched on a confirmed hit. */
     if (cache_enabled && slot->measure_cache.valid[slot_index] && slot->measure_cache.key_hashes[slot_index] == key_hash && slot->measure_cache.size_bits[slot_index] == size_bits) {
-#ifdef NT_FONT_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
         slot->test_measure_cache_hits++;
 #endif
         return slot->measure_cache.values[slot_index];
     }
 
-#ifdef NT_FONT_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
     if (cache_enabled) {
         slot->test_measure_cache_misses++;
     }
@@ -1681,6 +1678,7 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
     float pen_x = 0.0F;
     float min_y = 0.0F;
     float max_y = 0.0F;
+    bool had_glyph = false;
 
     const uint8_t *p = (const uint8_t *)utf8;
     const uint8_t *end = p + len;
@@ -1691,6 +1689,19 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
                 state = NT_UTF8_ACCEPT; /* recover: skip bad byte, continue parsing */
             }
             continue;
+        }
+
+        /* Match renderer: \r adds no width AND breaks the kerning chain
+         * (nt_text_renderer_draw_n resets prev_cp on \r). Keep had_glyph
+         * so letter_tracking still applies on the next glyph. Clay splits
+         * on \n so multi-line slices may carry \r from CRLF. */
+        if (codepoint == '\r') {
+            prev_lookup = (nt_font_glyph_lookup_t){0};
+            continue;
+        }
+
+        if (had_glyph) {
+            pen_x += letter_tracking;
         }
 
         /* Kern lookup — fully skipped on kerning-less fonts; for fonts that
@@ -1725,6 +1736,7 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
         }
 
         prev_lookup = lookup;
+        had_glyph = true;
     }
 
     result.width = pen_x;
@@ -1746,7 +1758,7 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
 }
 
 /* Wrapper — NUL-terminated convenience. */
-nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size) { return nt_font_measure_n(font, utf8, utf8 ? strlen(utf8) : 0U, size); }
+nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size, float letter_tracking) { return nt_font_measure_n(font, utf8, utf8 ? strlen(utf8) : 0U, size, letter_tracking); }
 // #endregion
 
 // #region Measure cache invalidation
@@ -1786,7 +1798,7 @@ void nt_font_measure_invalidate(nt_font_t font) {
 
 /* ---- Test-only: register font data for headless testing ---- */
 
-#ifdef NT_FONT_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 uint32_t nt_font_test_register_data(const uint8_t *data, uint32_t size) { return activate_font(data, size); }
 
 void nt_font_test_deactivate(uint32_t runtime_handle) { deactivate_font(runtime_handle); }

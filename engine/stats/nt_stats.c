@@ -183,12 +183,12 @@ void nt_stats_draw(nt_material_t material, nt_font_t font, const float model[16]
      * regardless of prior frame state. */
     nt_text_renderer_set_material(material);
     nt_text_renderer_set_font(font);
-    nt_text_renderer_draw(buf, model, size, color);
+    nt_text_renderer_draw(buf, model, size, color, 0.0F, 0.0F);
 }
 // #endregion
 
 // #region Test access
-#ifdef NT_STATS_TEST_ACCESS
+#ifdef NT_TEST_ACCESS
 void nt_stats_test_inject_frame(float dt_seconds) {
     NT_ASSERT(s_stats.initialized);
     s_stats.last_cpu_ms = dt_seconds * 1000.0F;
