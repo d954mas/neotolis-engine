@@ -87,13 +87,20 @@ static void test_viewport_applied(void) {
     TEST_ASSERT_EQUAL_INT(480, vp[3]);
 }
 
-/* walk without atlas set asserts. */
-static void test_walk_without_atlas_asserts(void) {
+/* walk without atlas bound is a silent no-op (async-loading policy --
+ * game can start the loop before atlas is ready). */
+static void test_walk_without_atlas_silent_noop(void) {
     /* Mode flag was set before Unity invoked setUp -- the atlas setter
      * was skipped, so ctx->atlas.id == 0. */
-    inject_frozen_cmds(0);
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
+    inject_frozen_cmds(1);
+    const uint32_t calls_before = nt_sprite_renderer_test_draw_call_count();
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
-    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
+    nt_ui_walk(s_fx.ctx, &target);
+    /* No draws, stats zeroed. */
+    TEST_ASSERT_EQUAL_UINT32(calls_before, nt_sprite_renderer_test_draw_call_count());
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_command_count(s_fx.ctx));
 }
 
 /* death-test: walk without sprite material asserts. */
@@ -215,7 +222,7 @@ int main(void) {
     /* Death-tests last so a partial bind doesn't leak into the happy-path
      * runs above. tearDown resets s_setup_bind to ALL each time, so each
      * death-test re-arms its own mode here. */
-    RUN_TEST_WITH_BIND(UI_WALKER_FX_BIND_ALL & ~UI_WALKER_FX_BIND_ATLAS, test_walk_without_atlas_asserts);
+    RUN_TEST_WITH_BIND(UI_WALKER_FX_BIND_ALL & ~UI_WALKER_FX_BIND_ATLAS, test_walk_without_atlas_silent_noop);
     RUN_TEST_WITH_BIND(UI_WALKER_FX_BIND_ALL & ~UI_WALKER_FX_BIND_SPRITE_MATERIAL, test_walk_without_sprite_material_asserts);
     RUN_TEST_WITH_BIND(UI_WALKER_FX_BIND_ALL & ~UI_WALKER_FX_BIND_TEXT_MATERIAL, test_walk_without_text_material_asserts);
     return UNITY_END();

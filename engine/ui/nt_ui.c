@@ -744,10 +744,22 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 #endif
         return;
     }
-    NT_ASSERT(ctx->atlas.id != 0 && "nt_ui_set_atlas_white_region(ctx,...) required before nt_ui_walk");
-    NT_ASSERT(nt_resource_is_ready(ctx->atlas) && "nt_ui_walk: ctx atlas must be READY");
     NT_ASSERT(ctx->sprite_material.id != 0 && "nt_ui_set_sprite_material(ctx,...) required before nt_ui_walk");
     NT_ASSERT(ctx->text_material.id != 0 && "nt_ui_set_text_material(ctx,...) required before nt_ui_walk");
+
+    /* Async-friendly: skip the walk silently if the ctx atlas is not
+     * yet bound or still loading. Same policy as IMAGE p->atlas. Game
+     * can start the main loop immediately; bind atlas once it reaches
+     * READY (set_atlas_white_region needs resolved region data), UI
+     * starts drawing on the next walk. */
+    if (ctx->atlas.id == 0 || !nt_resource_is_ready(ctx->atlas)) {
+        ctx->last_walk_draw_call_delta = 0;
+        ctx->last_walk_command_count = 0;
+#ifdef NT_TEST_ACCESS
+        ctx->test_last_walk_unlayered_count = 0;
+#endif
+        return;
+    }
 
     scissor_rect_t scissor_stack[NT_UI_WALKER_SCISSOR_DEPTH_CAP];
     int depth = 0;
