@@ -235,12 +235,17 @@ resource_step         ← async loading processing
 game-defined resource sync helpers
     → e.g. sprite_comp_sync_resources() after resource publication changes
 audio_update          ← voice state management
+nt_mem_scratch_reset  ← frame scratch arena cleared (see §5.2)
 fixed_update loop
-game_update
+game_update           ← CLAY layout, NT_UI_DATA_* allocations
 transform_update
-game_render
-frame_temp_reset
+game_render           ← nt_ui_walk reads scratch pointers
 ```
+
+`nt_mem_scratch_reset()` MUST run before any scratch allocation in the
+current frame — typically right after `audio_update`. Allocating then
+resetting in the same frame invalidates pointers already handed to
+systems (e.g. `nt_ui` retains them through `nt_ui_walk`).
 
 ## 4.3 Fixed update loop
 
@@ -336,7 +341,20 @@ Examples: loaded pack blob, manifest read buffer, temporary decompression buffer
 
 Lifetime = single frame.
 
-Examples: render item arrays, temporary sort arrays, transient CPU batch buffers, build temp lists in render pass.
+Examples: render item arrays, temporary sort arrays, transient CPU batch buffers, build temp lists in render pass, `nt_ui_element_data_t` attached to CLAY elements via `NT_UI_DATA_*` macros.
+
+The engine provides a global bump arena in `engine/memory/nt_mem_scratch`:
+
+```c
+nt_mem_scratch_init(NT_MEM_SCRATCH_DEFAULT_SIZE_BYTES);  // boot, default 512 KB
+// per frame (see §4.2):
+nt_mem_scratch_reset();          // start of frame
+nt_mem_scratch_alloc(size, align);  // anywhere during the frame
+// pointers stay valid until the next nt_mem_scratch_reset()
+nt_mem_scratch_shutdown();       // exit
+```
+
+Type-safe macros: `NT_MEM_SCRATCH_ALLOC(T)`, `NT_MEM_SCRATCH_ALLOC_ARRAY(T, count)`.
 
 ## 5.3 Capacity policy
 

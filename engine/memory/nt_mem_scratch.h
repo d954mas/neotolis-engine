@@ -10,9 +10,25 @@
 #define NT_MEM_SCRATCH_DEFAULT_SIZE_BYTES (512U * 1024U)
 #endif
 
-/* Bump arena reset every frame. Init once at boot; reset at frame start.
- * All allocations live until the next reset -- pointers from a prior frame
- * are stale. No per-alloc free; allocator is "single-shot per frame". */
+/* Bump arena reset every frame. All allocations live until the next reset --
+ * pointers from a prior frame are stale. No per-alloc free.
+ *
+ * Frame loop placement:
+ *
+ *   int main(void) {
+ *       nt_mem_scratch_init(NT_MEM_SCRATCH_DEFAULT_SIZE_BYTES);
+ *       while (running) {
+ *           nt_mem_scratch_reset();   // start of frame, BEFORE any alloc
+ *           game_update();            // CLAY({...}), NT_UI_DATA_*, etc.
+ *           nt_ui_walk(...);          // reads scratch pointers
+ *           // render done; scratch may sit unused until next reset
+ *       }
+ *       nt_mem_scratch_shutdown();
+ *   }
+ *
+ * Reset MUST happen BEFORE any allocation in the current frame -- never
+ * after. Calling alloc then reset in the same frame invalidates pointers
+ * already handed to systems (nt_ui) that retain them through walk. */
 void nt_mem_scratch_init(size_t size_bytes);
 void nt_mem_scratch_shutdown(void);
 
