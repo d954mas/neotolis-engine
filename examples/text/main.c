@@ -158,7 +158,7 @@ static void draw_text_scene(void) {
         float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-5.0F, 3.0F, 0.0F});
-        nt_text_renderer_draw(TEXT_EN, (const float *)model, 2.0F, white, 0.0F);
+        nt_text_renderer_draw(TEXT_EN, (const float *)model, 2.0F, white, 0.0F, 0.0F);
     }
 
     /* Medium Russian text at Y=1.0, light blue */
@@ -166,7 +166,7 @@ static void draw_text_scene(void) {
         float blue[4] = {0.6F, 0.8F, 1.0F, 1.0F};
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-5.0F, 1.0F, 0.0F});
-        nt_text_renderer_draw(TEXT_RU, (const float *)model, 1.5F, blue, 0.0F);
+        nt_text_renderer_draw(TEXT_RU, (const float *)model, 1.5F, blue, 0.0F, 0.0F);
     }
 
     /* Chinese text at Y=-1.0, light green */
@@ -174,7 +174,7 @@ static void draw_text_scene(void) {
         float green[4] = {0.6F, 1.0F, 0.6F, 1.0F};
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-3.0F, -1.0F, 0.0F});
-        nt_text_renderer_draw(TEXT_CN, (const float *)model, 1.5F, green, 0.0F);
+        nt_text_renderer_draw(TEXT_CN, (const float *)model, 1.5F, green, 0.0F, 0.0F);
     }
 
     /* Korean text at Y=-3.0, light yellow */
@@ -182,7 +182,7 @@ static void draw_text_scene(void) {
         float yellow[4] = {1.0F, 1.0F, 0.6F, 1.0F};
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-4.0F, -3.0F, 0.0F});
-        nt_text_renderer_draw(TEXT_KR, (const float *)model, 1.5F, yellow, 0.0F);
+        nt_text_renderer_draw(TEXT_KR, (const float *)model, 1.5F, yellow, 0.0F, 0.0F);
     }
 
     /* Small size reference at bottom */
@@ -191,19 +191,19 @@ static void draw_text_scene(void) {
 
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-8.0F, -5.5F, 0.0F});
-        nt_text_renderer_draw(TEXT_EN, (const float *)model, 0.5F, gray, 0.0F);
+        nt_text_renderer_draw(TEXT_EN, (const float *)model, 0.5F, gray, 0.0F, 0.0F);
 
         glm_mat4_identity(model);
         glm_translate(model, (vec3){-2.0F, -5.5F, 0.0F});
-        nt_text_renderer_draw(TEXT_RU, (const float *)model, 0.5F, gray, 0.0F);
+        nt_text_renderer_draw(TEXT_RU, (const float *)model, 0.5F, gray, 0.0F, 0.0F);
 
         glm_mat4_identity(model);
         glm_translate(model, (vec3){4.0F, -5.5F, 0.0F});
-        nt_text_renderer_draw(TEXT_CN, (const float *)model, 0.5F, gray, 0.0F);
+        nt_text_renderer_draw(TEXT_CN, (const float *)model, 0.5F, gray, 0.0F, 0.0F);
 
         glm_mat4_identity(model);
         glm_translate(model, (vec3){8.0F, -5.5F, 0.0F});
-        nt_text_renderer_draw(TEXT_KR, (const float *)model, 0.5F, gray, 0.0F);
+        nt_text_renderer_draw(TEXT_KR, (const float *)model, 0.5F, gray, 0.0F, 0.0F);
     }
 }
 

@@ -1613,7 +1613,7 @@ static int16_t kern_with_left_in_slot(const nt_font_glyph_lookup_t *left, uint32
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size, float letter_spacing) {
+nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size, float letter_tracking) {
     nt_text_size_t result = {0.0F, 0.0F};
 
     /* Edge cases. NULL utf8 with len > 0 is treated as empty input
@@ -1633,9 +1633,9 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
         return result; /* font not yet resolved */
     }
 
-    /* Non-zero letter_spacing changes the geometry per call; cache key
-     * doesn't include it (would double the SoA), so we skip the cache. */
-    const bool cache_enabled = (slot->measure_cache.key_hashes != NULL) && (letter_spacing == 0.0F);
+    /* Non-zero tracking changes geometry per call; cache key doesn't include
+     * it (would double the SoA), so we skip the cache. */
+    const bool cache_enabled = (slot->measure_cache.key_hashes != NULL) && (letter_tracking == 0.0F);
     const uint64_t key_hash = cache_enabled ? nt_hash64((const void *)utf8, (uint32_t)len).value : 0U;
     const uint32_t size_bits = measure_size_bits(size);
     const uint32_t slot_index = (uint32_t)key_hash & slot->measure_cache_mask;
@@ -1698,7 +1698,7 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
         }
 
         if (had_glyph) {
-            pen_x += letter_spacing;
+            pen_x += letter_tracking;
         }
 
         /* Kern lookup — fully skipped on kerning-less fonts; for fonts that
@@ -1755,7 +1755,7 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
 }
 
 /* Wrapper — NUL-terminated convenience. */
-nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size, float letter_spacing) { return nt_font_measure_n(font, utf8, utf8 ? strlen(utf8) : 0U, size, letter_spacing); }
+nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size, float letter_tracking) { return nt_font_measure_n(font, utf8, utf8 ? strlen(utf8) : 0U, size, letter_tracking); }
 // #endregion
 
 // #region Measure cache invalidation

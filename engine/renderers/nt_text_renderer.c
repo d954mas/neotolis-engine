@@ -312,7 +312,7 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
 
 // #region Draw
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4], float letter_spacing) {
+void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
     NT_ASSERT(s_text.initialized);
     if (len == 0U || utf8 == NULL) {
         return;
@@ -337,7 +337,9 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     uint32_t prev_cp = 0;
     float pen_x = 0.0F;
     float pen_y = 0.0F;
-    const float line_advance = (metrics.line_height != 0) ? ((float)metrics.line_height * scale) : size;
+    /* Natural line advance from font metrics, plus user-supplied leading. */
+    const float natural_line_advance = (metrics.line_height != 0) ? ((float)metrics.line_height * scale) : size;
+    const float line_advance = natural_line_advance + line_leading;
     bool had_glyph_on_line = false;
 
     const uint8_t *p = (const uint8_t *)utf8;
@@ -364,7 +366,7 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
         }
 
         if (had_glyph_on_line) {
-            pen_x += letter_spacing;
+            pen_x += letter_tracking;
         }
 
         /* Apply kern pair */
@@ -390,8 +392,8 @@ void nt_text_renderer_draw_n(const char *utf8, size_t len, const float model[16]
     }
 }
 
-void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_spacing) {
-    nt_text_renderer_draw_n(utf8, utf8 ? strlen(utf8) : 0U, model, size, color, letter_spacing);
+void nt_text_renderer_draw(const char *utf8, const float model[16], float size, const float color[4], float letter_tracking, float line_leading) {
+    nt_text_renderer_draw_n(utf8, utf8 ? strlen(utf8) : 0U, model, size, color, letter_tracking, line_leading);
 }
 // #endregion
 

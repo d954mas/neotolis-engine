@@ -95,10 +95,15 @@ typedef struct {
 /* Length-aware (Clay_StringSlice contract). NULL/len=0 → {0,0}; UTF-8 cut at
  * `len` boundary → trailing partial codepoint dropped; embedded NUL is a
  * normal codepoint (the NUL-terminated wrapper below stops at it via strlen).
- * letter_spacing adds N-1 extra pixels of horizontal gap for N visible
- * codepoints. Non-zero letter_spacing bypasses the measure cache. */
-nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size, float letter_spacing);
-nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size, float letter_spacing);
+ * Single-line measurement (no \n handling -- Clay tokenizes per line).
+ *
+ * letter_tracking: EXTRA px added between glyphs (additive, NOT absolute).
+ *   0 = font's natural glyph advance. Positive = loose, negative = tight.
+ *   Adds (N-1) * tracking px for N visible codepoints.
+ *
+ * Non-zero tracking bypasses the measure cache. */
+nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, float size, float letter_tracking);
+nt_text_size_t nt_font_measure(nt_font_t font, const char *utf8, float size, float letter_tracking);
 
 /* Both no-op on invalid/destroyed handles — safe to call from teardown. */
 void nt_font_measure_invalidate_cache(void);

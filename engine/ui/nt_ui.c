@@ -564,7 +564,9 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
         t->textColor.b / 255.0F,
         t->textColor.a / 255.0F,
     };
-    nt_text_renderer_draw_n(t->stringContents.chars, (size_t)t->stringContents.length, m, (float)t->fontSize, color, (float)t->letterSpacing);
+    /* Clay's letterSpacing/lineHeight are additive extras (per Clay docs);
+     * direct passthrough to our tracking/leading params. */
+    nt_text_renderer_draw_n(t->stringContents.chars, (size_t)t->stringContents.length, m, (float)t->fontSize, color, (float)t->letterSpacing, (float)t->lineHeight);
 }
 // #endregion
 
