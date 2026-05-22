@@ -34,6 +34,8 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 // #region module_state
 /* Only one ctx may be in-frame at a time; nt_ui_begin asserts NULL on entry. */
 static nt_ui_context_t *g_nt_ui_inframe_ctx = NULL;
+/* Set true between nt_ui_module_init / nt_ui_module_shutdown. */
+static bool s_nt_ui_module_initialized = false;
 // #endregion
 
 // #region clay_error_handler
@@ -95,19 +97,20 @@ static void nt_ui_init_arc_lut(void) {
     }
 }
 
-/* Clay__MeasureText doubles as the "module initialized" flag. */
 void nt_ui_module_init(void) {
-    NT_ASSERT(Clay__MeasureText == NULL && "nt_ui_module_init: already initialized; call nt_ui_module_shutdown first");
+    NT_ASSERT(!s_nt_ui_module_initialized && "nt_ui_module_init: already initialized; call nt_ui_module_shutdown first");
     Clay__MeasureText = nt_ui_measure_text_cb;
     g_nt_ui_inframe_ctx = NULL;
     Clay_SetCurrentContext(NULL);
     nt_ui_init_arc_lut();
+    s_nt_ui_module_initialized = true;
 }
 void nt_ui_module_shutdown(void) {
-    NT_ASSERT(Clay__MeasureText != NULL && "nt_ui_module_shutdown: not initialized");
+    NT_ASSERT(s_nt_ui_module_initialized && "nt_ui_module_shutdown: not initialized");
     Clay__MeasureText = NULL;
     g_nt_ui_inframe_ctx = NULL;
     Clay_SetCurrentContext(NULL);
+    s_nt_ui_module_initialized = false;
 }
 // #endregion
 
@@ -136,7 +139,7 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
 nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_ui_create_desc_t *desc) {
     NT_ASSERT(arena != NULL && "nt_ui_create_context: arena must be non-NULL");
     NT_ASSERT(desc != NULL && "nt_ui_create_context: desc must be non-NULL");
-    NT_ASSERT(Clay__MeasureText == nt_ui_measure_text_cb && "nt_ui_create_context: call nt_ui_module_init() once before any create_context");
+    NT_ASSERT(s_nt_ui_module_initialized && "nt_ui_create_context: call nt_ui_module_init() once before any create_context");
     NT_ASSERT(((uintptr_t)arena & (NT_UI_ARENA_ALIGN - 1U)) == 0U && "nt_ui_create_context: arena must be NT_UI_ARENA_ALIGN-aligned (alignas(NT_UI_ARENA_ALIGN) static uint8_t arena[N])");
     NT_ASSERT(arena_size >= nt_ui_min_arena_size(desc) && "nt_ui_create_context: arena_size < nt_ui_min_arena_size(desc)");
 
@@ -192,7 +195,7 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_pointer_t *mouse) {
     NT_ASSERT(ctx != NULL && "nt_ui_begin: ctx must be non-NULL");
-    NT_ASSERT(Clay__MeasureText == nt_ui_measure_text_cb && "nt_ui_begin: nt_ui_module_init() must be called before begin");
+    NT_ASSERT(s_nt_ui_module_initialized && "nt_ui_begin: nt_ui_module_init() must be called before begin");
     NT_ASSERT(mouse != NULL && "nt_ui_begin: mouse must be non-NULL");
     /* isfinite() rejects NaN + +-inf which `>= 0.0F` alone lets through. */
     NT_ASSERT(isfinite(screen_w) && screen_w >= 0.0F && "nt_ui_begin: screen_w must be finite and non-negative");
