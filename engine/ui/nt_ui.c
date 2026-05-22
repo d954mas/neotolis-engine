@@ -566,8 +566,6 @@ typedef struct {
     int h;
 } scissor_rect_t;
 
-static void rebind_sprite_after_flush(const nt_ui_context_t *ctx) { nt_sprite_renderer_set_material(ctx->sprite_material); }
-
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
@@ -675,7 +673,7 @@ static bool is_segmentable(Clay_RenderCommandType cmd_type) {
 static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite_pipeline_dirty) {
     nt_text_renderer_flush();
     if (*sprite_pipeline_dirty) {
-        rebind_sprite_after_flush(ctx);
+        nt_sprite_renderer_set_material(ctx->sprite_material);
         *sprite_pipeline_dirty = false;
     }
 }
