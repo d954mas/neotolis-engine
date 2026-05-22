@@ -142,6 +142,7 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     NT_ASSERT(desc->max_elements > 0U && "nt_ui_min_arena_size: desc->max_elements must be > 0");
     NT_ASSERT(desc->max_elements <= UINT16_MAX && "nt_ui_min_arena_size: desc->max_elements exceeds uint16 sorted-index range");
     NT_ASSERT(desc->max_scissor_depth > 0U && "nt_ui_min_arena_size: desc->max_scissor_depth must be > 0");
+    NT_ASSERT(desc->max_scissor_depth <= 256U && "nt_ui_min_arena_size: desc->max_scissor_depth > 256 (likely uninit garbage; walker stack VLA would be huge)");
     /* Pure-query contract: Clay_SetMaxElementCount(N) writes globals (no
      * current ctx) AND sets defaultMaxMeasureTextWordCacheCount = N*2
      * (clay.h:4332). Restore via the SAME public call so BOTH side-effect
@@ -251,6 +252,10 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     ctx->frozen_cmds = Clay_EndLayout();
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;
+    /* Symmetric with begin's Clay_SetCurrentContext(ctx->clay): a stray
+     * CLAY_* call between end and the next begin now NULL-derefs in Clay
+     * instead of silently corrupting the just-frozen layout. */
+    Clay_SetCurrentContext(NULL);
 }
 // #endregion
 
@@ -286,35 +291,45 @@ static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, 
 }
 // #endregion
 
+// #region helper_clamp_radii_css3
+/* CSS3 border-radius §5.5 proportional clamp: negative -> 0, then if any
+ * adjacent-pair sum exceeds the side, scale all four by the smallest factor. */
+static inline void clamp_radii_css3(float w, float h, float *tl, float *tr, float *bl, float *br) {
+    *tl = (*tl > 0.0F) ? *tl : 0.0F;
+    *tr = (*tr > 0.0F) ? *tr : 0.0F;
+    *bl = (*bl > 0.0F) ? *bl : 0.0F;
+    *br = (*br > 0.0F) ? *br : 0.0F;
+    float factor = 1.0F;
+    if (*tl + *tr > w) {
+        factor = fminf(factor, w / (*tl + *tr));
+    }
+    if (*bl + *br > w) {
+        factor = fminf(factor, w / (*bl + *br));
+    }
+    if (*tl + *bl > h) {
+        factor = fminf(factor, h / (*tl + *bl));
+    }
+    if (*tr + *br > h) {
+        factor = fminf(factor, h / (*tr + *br));
+    }
+    if (factor < 1.0F) {
+        *tl *= factor;
+        *tr *= factor;
+        *bl *= factor;
+        *br *= factor;
+    }
+}
+// #endregion
+
 // #region helper_emit_rounded_rect
 /* Triangle fan from rect center: 1 vert per zero corner, SEG+1 per rounded. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, Clay_CornerRadius cr, uint32_t color_packed) {
-    float tl = (cr.topLeft > 0.0F) ? cr.topLeft : 0.0F;
-    float tr = (cr.topRight > 0.0F) ? cr.topRight : 0.0F;
-    float bl = (cr.bottomLeft > 0.0F) ? cr.bottomLeft : 0.0F;
-    float br = (cr.bottomRight > 0.0F) ? cr.bottomRight : 0.0F;
-    /* CSS3 border-radius §5.5 proportional clamp -- when adjacent-pair sums
-     * exceed the side, scale ALL radii by the smallest needed factor. */
-    float factor = 1.0F;
-    if (tl + tr > w) {
-        factor = fminf(factor, w / (tl + tr));
-    }
-    if (bl + br > w) {
-        factor = fminf(factor, w / (bl + br));
-    }
-    if (tl + bl > h) {
-        factor = fminf(factor, h / (tl + bl));
-    }
-    if (tr + br > h) {
-        factor = fminf(factor, h / (tr + br));
-    }
-    if (factor < 1.0F) {
-        tl *= factor;
-        tr *= factor;
-        bl *= factor;
-        br *= factor;
-    }
+    float tl = cr.topLeft;
+    float tr = cr.topRight;
+    float bl = cr.bottomLeft;
+    float br = cr.bottomRight;
+    clamp_radii_css3(w, h, &tl, &tr, &bl, &br);
     const float half_w = w * 0.5F;
     const float half_h = h * 0.5F;
 
@@ -467,30 +482,11 @@ static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay
     NT_ASSERT(top + bot <= h && "nt_ui BORDER: top+bottom widths exceed bbox.height");
     NT_ASSERT(lft + rgt <= w && "nt_ui BORDER: left+right widths exceed bbox.width");
 
-    float tl = (cr_in.topLeft > 0.0F) ? cr_in.topLeft : 0.0F;
-    float tr = (cr_in.topRight > 0.0F) ? cr_in.topRight : 0.0F;
-    float bl = (cr_in.bottomLeft > 0.0F) ? cr_in.bottomLeft : 0.0F;
-    float br = (cr_in.bottomRight > 0.0F) ? cr_in.bottomRight : 0.0F;
-    /* Same CSS3 §5.5 proportional clamp as emit_rounded_rect. */
-    float factor = 1.0F;
-    if (tl + tr > w) {
-        factor = fminf(factor, w / (tl + tr));
-    }
-    if (bl + br > w) {
-        factor = fminf(factor, w / (bl + br));
-    }
-    if (tl + bl > h) {
-        factor = fminf(factor, h / (tl + bl));
-    }
-    if (tr + br > h) {
-        factor = fminf(factor, h / (tr + br));
-    }
-    if (factor < 1.0F) {
-        tl *= factor;
-        tr *= factor;
-        bl *= factor;
-        br *= factor;
-    }
+    float tl = cr_in.topLeft;
+    float tr = cr_in.topRight;
+    float bl = cr_in.bottomLeft;
+    float br = cr_in.bottomRight;
+    clamp_radii_css3(w, h, &tl, &tr, &bl, &br);
 
     if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {
         emit_square_border(atlas, region_index, bb, widths, color_packed);
@@ -618,12 +614,14 @@ typedef struct {
 /* sprite_flush closed the cmd; reopen for the next emit. */
 static void rebind_sprite_after_flush(const nt_ui_context_t *ctx) { nt_sprite_renderer_set_material(ctx->sprite_material); }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, sscissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
     NT_ASSERT((uint32_t)*depth < ctx->max_scissor_depth && "scissor stack overflow; raise desc->max_scissor_depth or restructure nested clip");
 
     /* Unclipped axis falls back to viewport extent; floor/ceil avoid a 1px
      * truncation bite at the right/bottom edge on subpixel-aligned UI. */
     const Clay_ClipRenderData *clip = &c->renderData.clip;
+    NT_ASSERT((clip->horizontal || clip->vertical) && "nt_ui SCISSOR_START with both axes unclipped is a no-op; check Clay clip config");
     const int vx = (int)target->viewport[0];
     const int vy = (int)target->viewport[1];
     const int vw = (int)target->viewport[2];
@@ -720,7 +718,7 @@ static bool is_segmentable(Clay_RenderCommandType cmd_type) {
     }
 }
 
-static void dispatch_command(nt_ui_context_t *ctx, const Clay_RenderCommand *c, sscissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target) {
+static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, sscissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target) {
     /* Sprite cmds drain pending text first (mirror of emit_text's sprite_flush)
      * so declaration order survives text→sprite transitions. No-op if empty. */
     switch (c->commandType) {
@@ -775,7 +773,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
      * reset per-walk stats so callers don't read stale values. */
     if (target->viewport[2] == 0.0F || target->viewport[3] == 0.0F) {
         ctx->last_walk_draw_call_delta = 0;
-        ctx->last_walk_element_count = 0;
+        ctx->last_walk_command_count = 0;
 #ifdef NT_TEST_ACCESS
         ctx->test_last_walk_unlayered_count = 0;
 #endif
@@ -801,7 +799,12 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
     /* Per segment: bitmask of active layers in 8 uint32s (256 bits), then
-     * one pass per set bit dispatching matching cmds in declaration order. */
+     * one pass per set bit dispatching matching cmds in declaration order.
+     * O(L_active × N) per segment. Counting sort (O(N)) was prototyped but
+     * shelved -- real UIs hold ~5-6 active layers per segment, the bitmask
+     * costs 32 B stack vs ~2 KB for counting, and sequential rescans cache
+     * better than scatter writes at small L_active. Revisit if a profile
+     * shows L_active > 16 in practice. */
     const Clay_RenderCommandArray *arr = &ctx->frozen_cmds;
 #ifdef NT_TEST_ACCESS
     uint32_t unlayered_count = 0U;
@@ -868,7 +871,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     const uint32_t calls_after = nt_gfx_get_frame_draw_calls();
     NT_ASSERT(calls_after >= calls_at_entry && "nt_ui_walk: frame draw-call counter went backwards");
     ctx->last_walk_draw_call_delta = calls_after - calls_at_entry;
-    ctx->last_walk_element_count = (uint32_t)arr->length;
+    ctx->last_walk_command_count = (uint32_t)arr->length;
 #ifdef NT_TEST_ACCESS
     ctx->test_last_walk_unlayered_count = unlayered_count;
 #endif
@@ -921,9 +924,9 @@ uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx) {
     return ctx->last_walk_draw_call_delta;
 }
 
-uint32_t nt_ui_get_last_walk_element_count(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_element_count: ctx must be non-NULL");
-    return ctx->last_walk_element_count;
+uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_command_count: ctx must be non-NULL");
+    return ctx->last_walk_command_count;
 }
 // #endregion
 

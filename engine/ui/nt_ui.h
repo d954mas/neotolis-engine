@@ -53,7 +53,9 @@ typedef struct {
     nt_resource_t atlas;
     uint32_t region_index;
     uint8_t flip_bits;
+    uint8_t _reserved[3];
 } nt_ui_image_payload_t;
+_Static_assert(sizeof(nt_ui_image_payload_t) == 12, "nt_ui_image_payload_t stable ABI");
 
 /* clay_cmd is opaque const Clay_RenderCommand * (cast back inside handler). */
 typedef void (*nt_ui_custom_handler_t)(const void *clay_cmd, void *userdata);
@@ -123,7 +125,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_
 /* Freezes Clay's command array into ctx for subsequent walk(s). */
 void nt_ui_end(nt_ui_context_t *ctx);
 
-/* Read-only on ctx; safe to call N times against different targets per frame.
+/* Does not mutate frozen_cmds or bindings; per-walk stats reflect the most
+ * recent call. Safe to call N times against different targets per frame.
  * Render order:
  *  - Different zIndex (Clay floating only): ascending z.
  *  - Same z, different layer: ascending layer.
@@ -133,7 +136,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 
 /* Window delta over the walk; includes CUSTOM-handler draws. */
 uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx);
-uint32_t nt_ui_get_last_walk_element_count(const nt_ui_context_t *ctx);
+uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

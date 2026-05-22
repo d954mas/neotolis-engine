@@ -44,7 +44,7 @@ static void inject_frozen_cmds(int32_t count) {
  * nt_stats. After this, nt_stats_format_lines must show the value. */
 static void publish_ui_metrics_to_stats(const nt_ui_context_t *ctx) {
     nt_stats_count("ui_draw_calls", (uint64_t)nt_ui_get_last_walk_draw_calls(ctx));
-    nt_stats_count("ui_element_count", (uint64_t)nt_ui_get_last_walk_element_count(ctx));
+    nt_stats_count("ui_command_count", (uint64_t)nt_ui_get_last_walk_command_count(ctx));
 }
 
 /*after a walk that emits a RECT, the public draw-call
@@ -65,7 +65,7 @@ static void test_get_last_walk_draw_calls_after_rect(void) {
 
 /*element count equals frozen_cmds.length exactly
  * (synthetic injected array, no Clay wrapper elements). */
-static void test_get_last_walk_element_count_matches_frozen_cmds(void) {
+static void test_get_last_walk_command_count_matches_frozen_cmds(void) {
     for (int i = 0; i < 3; ++i) {
         Clay_RenderCommand *c = &s_test_cmds[i];
         c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
@@ -77,7 +77,7 @@ static void test_get_last_walk_element_count_matches_frozen_cmds(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(3U, nt_ui_get_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(3U, nt_ui_get_last_walk_command_count(s_fx.ctx));
 }
 
 /* Bridge pattern: app forwards getter values into nt_stats; both
@@ -102,7 +102,7 @@ static void test_metrics_bridge_publishes_to_nt_stats(void) {
     char expected_draw[64];
     (void)snprintf(expected_draw, sizeof expected_draw, "ui_draw_calls: %u", (unsigned)draw_calls);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, expected_draw), "bridge: ui_draw_calls value in nt_stats must match getter output");
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, "ui_element_count: 1"), "bridge: ui_element_count must equal frozen_cmds.length");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(buf, "ui_command_count: 1"), "bridge: ui_command_count must equal frozen_cmds.length");
 }
 
 /* counters are SET per walk (not accumulated). Walk twice with
@@ -119,19 +119,19 @@ static void test_getters_reflect_latest_walk_only(void) {
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_command_count(s_fx.ctx));
 
     /* Second walk: empty array. Getter must reflect THIS walk, not the
      * accumulated total. */
     inject_frozen_cmds(0);
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_element_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_command_count(s_fx.ctx));
 }
 
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_get_last_walk_draw_calls_after_rect);
-    RUN_TEST(test_get_last_walk_element_count_matches_frozen_cmds);
+    RUN_TEST(test_get_last_walk_command_count_matches_frozen_cmds);
     RUN_TEST(test_metrics_bridge_publishes_to_nt_stats);
     RUN_TEST(test_getters_reflect_latest_walk_only);
     return UNITY_END();

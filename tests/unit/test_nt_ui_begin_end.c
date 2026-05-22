@@ -73,6 +73,23 @@ static void test_end_clears_in_frame(void) {
     nt_ui_destroy_context(a);
 }
 
+/* Symmetric with begin: end nulls Clay's current so stray CLAY_* between
+ * frames fails loudly instead of corrupting the just-frozen layout. */
+static void test_end_clears_clay_current(void) {
+    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);
+    TEST_ASSERT_NOT_NULL(a);
+
+    nt_pointer_t mouse;
+    memset(&mouse, 0, sizeof mouse);
+
+    nt_ui_begin(a, 800.0F, 600.0F, &mouse);
+    TEST_ASSERT_EQUAL_PTR(a->clay, Clay_GetCurrentContext());
+    nt_ui_end(a);
+    TEST_ASSERT_NULL(Clay_GetCurrentContext());
+
+    nt_ui_destroy_context(a);
+}
+
 static void test_end_without_begin_asserts(void) {
     nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(a);
@@ -87,6 +104,7 @@ int main(void) {
     RUN_TEST(test_begin_sets_current_ctx);
     RUN_TEST(test_stray_nested_begin_asserts);
     RUN_TEST(test_end_clears_in_frame);
+    RUN_TEST(test_end_clears_clay_current);
     RUN_TEST(test_end_without_begin_asserts);
     return UNITY_END();
 }

@@ -76,8 +76,9 @@ static void test_destroy_in_frame_asserts(void) {
     nt_ui_destroy_context(ctx);
 }
 
-/* begin parks Clay's current_ptr into the arena; destroy must null it
- * before memset or Clay holds a dangling pointer. */
+/* Defense-in-depth: even though nt_ui_end nulls Clay current, destroy must
+ * still null it if external code re-parked it at our ctx between end and
+ * destroy. Simulate the re-park manually to keep the destroy guard tested. */
 static void test_destroy_clears_dangling_clay_current(void) {
     nt_ui_context_t *ctx = nt_ui_create_context(s_arena_u64, sizeof s_arena_u64, &s_ui_desc);
     TEST_ASSERT_NOT_NULL(ctx);
@@ -86,6 +87,7 @@ static void test_destroy_clears_dangling_clay_current(void) {
     memset(&mouse, 0, sizeof mouse);
     nt_ui_begin(ctx, 800.0F, 600.0F, &mouse);
     nt_ui_end(ctx);
+    Clay_SetCurrentContext(ctx->clay); /* simulate stray restore */
     TEST_ASSERT_NOT_NULL(Clay_GetCurrentContext());
 
     nt_ui_destroy_context(ctx);

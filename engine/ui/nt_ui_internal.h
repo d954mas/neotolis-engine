@@ -26,7 +26,7 @@ struct nt_ui_context {
 
     /* Per-walk metrics. Walker writes; nt_ui_get_last_walk_* reads. */
     uint32_t last_walk_draw_call_delta;
-    uint32_t last_walk_element_count;
+    uint32_t last_walk_command_count;
 #ifdef NT_TEST_ACCESS
     uint32_t test_last_walk_unlayered_count;
 #endif

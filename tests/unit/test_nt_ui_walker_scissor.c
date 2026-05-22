@@ -262,8 +262,9 @@ static void test_scissor_vertical_only(void) {
     TEST_ASSERT_EQUAL_INT(50, rect[3]);
 }
 
-/* Neither axis clipped -> scissor covers the full viewport. */
-static void test_scissor_neither_axis(void) {
+/* Both axes unclipped is a contract violation (no-op scissor with wasted
+ * flushes); walker asserts so the misconfig surfaces in dev. */
+static void test_scissor_neither_axis_asserts(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 50.0F, .y = 100.0F, .width = 200.0F, .height = 50.0F};
     s_test_cmds[0].renderData.clip.horizontal = false;
@@ -272,14 +273,7 @@ static void test_scissor_neither_axis(void) {
     inject_frozen_cmds(2);
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
-    nt_ui_walk(s_fx.ctx, &target);
-
-    int rect[4];
-    nt_gfx_test_scissor_rect(rect);
-    TEST_ASSERT_EQUAL_INT(0, rect[0]);
-    TEST_ASSERT_EQUAL_INT(0, rect[1]);
-    TEST_ASSERT_EQUAL_INT(800, rect[2]);
-    TEST_ASSERT_EQUAL_INT(600, rect[3]);
+    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
 int main(void) {
@@ -294,6 +288,6 @@ int main(void) {
     RUN_TEST(test_scissor_respects_viewport_offset);
     RUN_TEST(test_scissor_horizontal_only);
     RUN_TEST(test_scissor_vertical_only);
-    RUN_TEST(test_scissor_neither_axis);
+    RUN_TEST(test_scissor_neither_axis_asserts);
     return UNITY_END();
 }
