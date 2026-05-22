@@ -519,9 +519,9 @@ static void emit_image(const Clay_RenderCommand *c) {
     const float ipu = nt_atlas_get_inverse_pixels_per_unit(p->atlas);
     const float src_w = (float)r->source_w * ipu;
     const float src_h = (float)r->source_h * ipu;
-    /* Div-by-zero guard for degenerate regions. */
-    const float sx = (src_w > 0.0F) ? (bb.width / src_w) : bb.width;
-    const float sy = (src_h > 0.0F) ? (bb.height / src_h) : bb.height;
+    NT_ASSERT(src_w > 0.0F && src_h > 0.0F && "nt_ui IMAGE: atlas region has zero source dimensions (broken atlas data)");
+    const float sx = bb.width / src_w;
+    const float sy = bb.height / src_h;
 
     const float m[16] = {
         sx, 0.0F, 0.0F, 0.0F, 0.0F, sy, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, bb.x, bb.y, 0.0F, 1.0F,
