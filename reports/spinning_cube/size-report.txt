@@ -1,5 +1,5 @@
 # Size Report: spinning_cube (wasm-analysis-paired)
-# Commit: f33f5a4
+# Commit: 3b67e96
 
 ## WASM Section Sizes
 
@@ -13,11 +13,11 @@ Memory                 7 B
 Global                 9 B
 Export                59 B
 Elem                  55 B
-Code               75238 B
+Code               75248 B
 Data                8551 B
 Custom              4641 B
 ---------------- ----------
-TOTAL              89276 B
+TOTAL              89286 B
 
 ## Top 30 Functions by Size
 
@@ -49,13 +49,13 @@ TOTAL              89276 B
   370 B   __memset
   362 B   cosf
   340 B   emmalloc_free
+  339 B   nt_drawable_comp_set_color
   337 B   nt_input_web_on_pointer_up
-  329 B   nt_drawable_comp_set_color
   329 B   nt_window_init
   322 B   nt_gfx_bind_instance_buffer
 
 Total functions: 103
-Total code size: 75073 B
+Total code size: 75083 B
 
 ## Per-Module Contributions
 
@@ -65,22 +65,22 @@ Module                         Size
 ------------------------ ----------
 libnt_app.a                 1442 B
 libnt_core.a                2178 B
-libnt_drawable_comp.a       4200 B
+libnt_drawable_comp.a       4214 B
 libnt_gfx.a                54530 B
 libnt_input.a              16446 B
 libnt_shape_renderer.a   1140902 B
 libnt_transform_comp.a      4696 B
 libnt_window.a              3940 B
 ------------------------ ----------
-TOTAL (linked)           1228334 B
+TOTAL (linked)           1228348 B
 
 Not linked to spinning_cube:
 libnt_app_stub.a            1428 B
-libnt_atlas.a               6766 B
+libnt_atlas.a               7016 B
 libnt_basisu_transcoder.a 1329370 B
 libnt_comp_storage.a        1930 B
 libnt_entity.a              3076 B
-libnt_font.a              197396 B
+libnt_font.a              197456 B
 libnt_fs.a                  2620 B
 libnt_fs_stub.a             2620 B
 libnt_gfx_stub.a           31230 B
@@ -92,6 +92,7 @@ libnt_log.a                 1424 B
 libnt_log_stub.a             484 B
 libnt_material.a            4338 B
 libnt_material_comp.a       1992 B
+libnt_mem_scratch.a         1854 B
 libnt_mesh_comp.a           1916 B
 libnt_mesh_renderer.a       7960 B
 libnt_pool.a                1278 B
@@ -99,11 +100,11 @@ libnt_render.a              5910 B
 libnt_resource.a          186766 B
 libnt_sort.a                 366 B
 libnt_sprite_comp.a         7526 B
-libnt_sprite_renderer.a   428932 B
-libnt_stats.a               5622 B
-libnt_text_renderer.a    1170290 B
+libnt_sprite_renderer.a   432782 B
+libnt_stats.a               5634 B
+libnt_text_renderer.a    1170246 B
 libnt_time.a                 868 B
-libnt_ui.a                277502 B
+libnt_ui.a                294390 B
 libnt_utf8.a                1000 B
 libnt_window_stub.a         1838 B
 
