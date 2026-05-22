@@ -613,6 +613,21 @@ void test_measure_n_letter_spacing_grows_width(void) {
     free(blob);
 }
 
+/* \r must be skipped (matches nt_text_renderer_draw_n). CRLF text from
+ * Clay tokenization can leave \r in slices; measure must not add tofu width. */
+void test_measure_n_skips_carriage_return(void) {
+    uint8_t *blob = NULL;
+    nt_font_t font = make_resolved_test_font("font_cr", &blob);
+
+    nt_text_size_t plain = nt_font_measure_n(font, "ABC", 3U, 14.0F, 0.0F);
+    nt_text_size_t with_cr = nt_font_measure_n(font, "ABC\r", 4U, 14.0F, 0.0F);
+
+    TEST_ASSERT_EQUAL_INT32((int32_t)plain.width, (int32_t)with_cr.width);
+
+    nt_font_destroy(font);
+    free(blob);
+}
+
 void test_measure_n_cache_hits_on_repeat(void) {
     uint8_t *blob = NULL;
     nt_font_t font = make_resolved_test_font("font_hits", &blob);
@@ -1084,6 +1099,7 @@ int main(void) {
     RUN_TEST(test_measure_n_drops_partial_utf8);
     RUN_TEST(test_measure_n_embedded_nul_is_codepoint);
     RUN_TEST(test_measure_n_letter_spacing_grows_width);
+    RUN_TEST(test_measure_n_skips_carriage_return);
     RUN_TEST(test_measure_n_cache_hits_on_repeat);
     RUN_TEST(test_measure_n_invalidate_forces_miss);
     RUN_TEST(test_measure_n_destroy_clears_cache);

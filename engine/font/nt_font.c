@@ -1691,6 +1691,12 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
             continue;
         }
 
+        /* Match renderer: \r adds no width (nt_text_renderer_draw_n skips it).
+         * Clay splits on \n so multi-line slices may carry \r from CRLF. */
+        if (codepoint == '\r') {
+            continue;
+        }
+
         if (had_glyph) {
             pen_x += letter_spacing;
         }
