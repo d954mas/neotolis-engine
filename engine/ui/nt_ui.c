@@ -111,8 +111,8 @@ void nt_ui_module_shutdown(void) {
 // #endregion
 
 // #region create_destroy
-/* Cache-line aligned so Clay's arena starts on a clean boundary. */
-static size_t nt_ui_ctx_size_aligned(void) { return NT_ALIGN_UP(sizeof(struct nt_ui_context), (size_t)64U); }
+/* ctx struct gets padded to cache line so Clay's arena starts on a clean boundary. */
+#define NT_UI_CACHE_LINE ((size_t)64U)
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
@@ -128,7 +128,7 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     const size_t clay_bytes = (size_t)Clay_MinMemorySize();
     Clay_SetMaxElementCount(saved_default);
     Clay_SetCurrentContext(saved_ctx);
-    return nt_ui_ctx_size_aligned() + clay_bytes;
+    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + clay_bytes;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -142,7 +142,7 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     nt_ui_context_t *ctx = (nt_ui_context_t *)arena;
     memset(ctx, 0, sizeof(*ctx));
 
-    const size_t ctx_size = nt_ui_ctx_size_aligned();
+    const size_t ctx_size = NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE);
     /* Layout: [ctx struct][Clay arena], both NT_UI_ARENA_ALIGN aligned. */
     ctx->max_elements = desc->max_elements;
     void *clay_mem = (char *)arena + ctx_size;
