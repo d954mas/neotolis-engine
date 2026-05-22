@@ -24,6 +24,7 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include <stdint.h>
 #include <string.h>
 
+#include "core/nt_align.h"
 #include "core/nt_assert.h"
 #include "log/nt_log.h"
 #include "memory/nt_mem_scratch.h"
@@ -111,7 +112,7 @@ void nt_ui_module_shutdown(void) {
 
 // #region create_destroy
 /* Cache-line aligned so Clay's arena starts on a clean boundary. */
-static size_t nt_ui_ctx_size_aligned(void) { return (sizeof(struct nt_ui_context) + 63U) & ~(size_t)63U; }
+static size_t nt_ui_ctx_size_aligned(void) { return NT_ALIGN_UP(sizeof(struct nt_ui_context), (size_t)64U); }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {

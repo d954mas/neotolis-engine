@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#include "core/nt_align.h"
 #include "core/nt_assert.h"
 
 static struct {
@@ -48,7 +49,7 @@ void *nt_mem_scratch_alloc(size_t size, size_t align) {
     NT_ASSERT(align <= _Alignof(max_align_t) && "nt_mem_scratch_alloc: align exceeds malloc guarantee");
     NT_ASSERT(size > 0 && "nt_mem_scratch_alloc: size must be > 0");
     NT_ASSERT(s_scratch.used <= SIZE_MAX - (align - 1U) && "nt_mem_scratch_alloc: align bump would overflow");
-    const size_t aligned = (s_scratch.used + (align - 1U)) & ~(align - 1U);
+    const size_t aligned = NT_ALIGN_UP(s_scratch.used, align);
     NT_ASSERT(aligned <= s_scratch.size && size <= s_scratch.size - aligned && "nt_mem_scratch_alloc: out of space; raise nt_mem_scratch_init size");
     void *p = s_scratch.base + aligned;
     s_scratch.used = aligned + size;
