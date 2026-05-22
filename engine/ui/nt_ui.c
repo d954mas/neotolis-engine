@@ -119,7 +119,7 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     NT_ASSERT(desc->max_elements > 0U && "nt_ui_min_arena_size: desc->max_elements must be > 0");
     NT_ASSERT(desc->max_elements <= UINT16_MAX && "nt_ui_min_arena_size: desc->max_elements exceeds uint16 sorted-index range");
     NT_ASSERT(desc->max_scissor_depth > 0U && "nt_ui_min_arena_size: desc->max_scissor_depth must be > 0");
-    NT_ASSERT(desc->max_scissor_depth <= 256U && "nt_ui_min_arena_size: desc->max_scissor_depth > 256 (likely uninit garbage; walker stack VLA would be huge)");
+    NT_ASSERT(desc->max_scissor_depth <= NT_UI_WALKER_SCISSOR_DEPTH_CAP && "nt_ui_min_arena_size: desc->max_scissor_depth > cap");
     /* Clay_SetMaxElementCount(N) also writes defaultMaxMeasureTextWordCacheCount
      * = N*2 (clay.h:4332); restore via the same call so both come back. */
     Clay_Context *saved_ctx = Clay_GetCurrentContext();
@@ -578,12 +578,12 @@ typedef struct {
     int y;
     int w;
     int h;
-} sscissor_rect_t;
+} scissor_rect_t;
 
 static void rebind_sprite_after_flush(const nt_ui_context_t *ctx) { nt_sprite_renderer_set_material(ctx->sprite_material); }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, sscissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
+static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
     NT_ASSERT((uint32_t)*depth < ctx->max_scissor_depth && "scissor stack overflow; raise desc->max_scissor_depth or restructure nested clip");
 
     /* Unclipped axis falls back to viewport; floor/ceil avoid 1px right/bottom bite. */
@@ -616,7 +616,7 @@ static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c
 
     /* Intersect with parent so inner widgets can't escape outer clip. */
     if (*depth > 0) {
-        sscissor_rect_t t = stack[*depth - 1];
+        scissor_rect_t t = stack[*depth - 1];
         int x2 = (x > t.x) ? x : t.x;
         int y2 = (y > t.y) ? y : t.y;
         int r2 = ((x + wp) < (t.x + t.w)) ? (x + wp) : (t.x + t.w);
@@ -631,7 +631,7 @@ static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
 
-    stack[(*depth)++] = (sscissor_rect_t){.x = x, .y = y, .w = wp, .h = hp};
+    stack[(*depth)++] = (scissor_rect_t){.x = x, .y = y, .w = wp, .h = hp};
 
     /* Y-flip against viewport.h (NOT framebuffer h) for split-screen panes. */
     nt_gfx_set_scissor(vx + x, vy + vh - y - hp, wp, hp);
@@ -640,7 +640,7 @@ static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c
     rebind_sprite_after_flush(ctx);
 }
 
-static void scissor_pop(const nt_ui_context_t *ctx, sscissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
+static void scissor_pop(const nt_ui_context_t *ctx, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target) {
     NT_ASSERT(*depth > 0 && "scissor underflow");
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
@@ -648,7 +648,7 @@ static void scissor_pop(const nt_ui_context_t *ctx, sscissor_rect_t *stack, int 
     if (*depth == 0) {
         nt_gfx_set_scissor_enabled(false);
     } else {
-        sscissor_rect_t r = stack[*depth - 1];
+        scissor_rect_t r = stack[*depth - 1];
         const int vx = (int)target->viewport[0];
         const int vy = (int)target->viewport[1];
         const int vh = (int)target->viewport[3];
@@ -684,7 +684,7 @@ static bool is_segmentable(Clay_RenderCommandType cmd_type) {
     }
 }
 
-static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, sscissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target) {
+static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target) {
     /* Sprite cmds drain pending text first -- preserves declaration order
      * across text→sprite transitions. No-op on empty staging. */
     switch (c->commandType) {
@@ -749,8 +749,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(ctx->sprite_material.id != 0 && "nt_ui_set_sprite_material(ctx,...) required before nt_ui_walk");
     NT_ASSERT(ctx->text_material.id != 0 && "nt_ui_set_text_material(ctx,...) required before nt_ui_walk");
 
-    /* Per-walk VLA so multi-walk on same ctx doesn't share scissor state. */
-    sscissor_rect_t scissor_stack[ctx->max_scissor_depth];
+    scissor_rect_t scissor_stack[NT_UI_WALKER_SCISSOR_DEPTH_CAP];
     int depth = 0;
 
     /* AFTER entry flush so per-walk delta excludes caller's drained geometry. */

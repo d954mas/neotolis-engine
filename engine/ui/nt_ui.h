@@ -23,6 +23,9 @@
 #define NT_UI_WALKER_MAX_SCISSOR_DEPTH 8
 #endif
 
+/* Fixed stack-array size (no VLA -- MSVC C compat). */
+#define NT_UI_WALKER_SCISSOR_DEPTH_CAP 256
+
 /* Clay places its Clay_Context at the arena head via raw cast. */
 #define NT_UI_ARENA_ALIGN _Alignof(max_align_t)
 
@@ -51,7 +54,10 @@ typedef struct {
 } nt_ui_image_payload_t;
 _Static_assert(sizeof(nt_ui_image_payload_t) == 12, "nt_ui_image_payload_t stable ABI");
 
-/* clay_cmd is opaque const Clay_RenderCommand * (cast back inside handler). */
+/* clay_cmd is opaque const Clay_RenderCommand * (cast back inside handler).
+ * Handler owns the GL state it touches: if you change viewport or scissor,
+ * restore them before returning. Walker only rebinds the sprite material
+ * (its own flush invariant) -- everything else is the handler's mess. */
 typedef void (*nt_ui_custom_handler_t)(const void *clay_cmd, void *userdata);
 
 /* Attached via Clay's userData slot. Engine owns the wire format -- ANY

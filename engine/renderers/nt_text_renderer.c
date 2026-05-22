@@ -200,13 +200,16 @@ void nt_text_renderer_set_material(nt_material_t mat) {
         return;
     }
 
-    /* Auto-flush on material change */
+    const nt_material_info_t *info = nt_material_get_info(mat);
+    NT_ASSERT(info != NULL && "nt_text_renderer_set_material: invalid material handle");
+    NT_ASSERT(info->ready && "nt_text_renderer_set_material: material not ready");
+
     if (s_text.glyph_count > 0) {
         nt_text_renderer_flush();
     }
 
     s_text.material = mat;
-    s_text.pipeline_material_version = 0; /* force pipeline recreation */
+    s_text.pipeline_material_version = 0;
     create_pipeline();
 }
 

@@ -1,6 +1,7 @@
 #include "memory/nt_mem_scratch.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdlib.h>
 
 #include "core/nt_assert.h"
@@ -40,12 +41,22 @@ void nt_mem_scratch_reset(void) {
 void *nt_mem_scratch_alloc(size_t size, size_t align) {
     NT_ASSERT(s_scratch.initialized && "nt_mem_scratch_alloc: call nt_mem_scratch_init first");
     NT_ASSERT(align > 0 && (align & (align - 1)) == 0 && "nt_mem_scratch_alloc: align must be power of 2");
+    /* malloc guarantees max_align_t alignment; higher would need over-allocate. */
+    NT_ASSERT(align <= _Alignof(max_align_t) && "nt_mem_scratch_alloc: align exceeds malloc guarantee");
     NT_ASSERT(size > 0 && "nt_mem_scratch_alloc: size must be > 0");
-    const size_t aligned = (s_scratch.used + (align - 1)) & ~(align - 1);
-    NT_ASSERT(aligned + size <= s_scratch.size && "nt_mem_scratch_alloc: out of space; raise nt_mem_scratch_init size");
+    NT_ASSERT(s_scratch.used <= SIZE_MAX - (align - 1U) && "nt_mem_scratch_alloc: align bump would overflow");
+    const size_t aligned = (s_scratch.used + (align - 1U)) & ~(align - 1U);
+    NT_ASSERT(aligned <= s_scratch.size && size <= s_scratch.size - aligned && "nt_mem_scratch_alloc: out of space; raise nt_mem_scratch_init size");
     void *p = s_scratch.base + aligned;
     s_scratch.used = aligned + size;
     return p;
+}
+
+void *nt_mem_scratch_alloc_array(size_t elem_size, size_t count, size_t align) {
+    NT_ASSERT(elem_size > 0 && "nt_mem_scratch_alloc_array: elem_size must be > 0");
+    NT_ASSERT(count > 0 && "nt_mem_scratch_alloc_array: count must be > 0");
+    NT_ASSERT(count <= SIZE_MAX / elem_size && "nt_mem_scratch_alloc_array: count * elem_size overflow");
+    return nt_mem_scratch_alloc(elem_size * count, align);
 }
 
 #ifdef NT_TEST_ACCESS

@@ -87,6 +87,20 @@ static void test_non_pow2_align_asserts(void) {
     teardown_if_init();
 }
 
+/* align beyond malloc's max_align_t guarantee asserts. */
+static void test_align_over_max_asserts(void) {
+    nt_mem_scratch_init(1024U);
+    NT_TEST_EXPECT_ASSERT(nt_mem_scratch_alloc(16U, 4096U));
+    teardown_if_init();
+}
+
+/* alloc_array overflow assert: count * elem_size beyond SIZE_MAX. */
+static void test_alloc_array_overflow_asserts(void) {
+    nt_mem_scratch_init(1024U);
+    NT_TEST_EXPECT_ASSERT(nt_mem_scratch_alloc_array(sizeof(uint64_t), (size_t)-1, 8U));
+    teardown_if_init();
+}
+
 /* Typed macro returns a properly aligned pointer. */
 static void test_alloc_typed_macro(void) {
     nt_mem_scratch_init(4096U);
@@ -123,6 +137,8 @@ int main(void) {
     RUN_TEST(test_alloc_without_init_asserts);
     RUN_TEST(test_reset_without_init_asserts);
     RUN_TEST(test_non_pow2_align_asserts);
+    RUN_TEST(test_align_over_max_asserts);
+    RUN_TEST(test_alloc_array_overflow_asserts);
     RUN_TEST(test_alloc_typed_macro);
     RUN_TEST(test_alloc_array_macro);
     return UNITY_END();
