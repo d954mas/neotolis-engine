@@ -172,6 +172,21 @@ static void test_walk_zero_viewport_resets_stats(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_draw_calls(s_fx.ctx));
 }
 
+/* Zero-viewport walk must disable scissor (clean GL state on entry/exit,
+ * symmetric with the non-zero path). */
+static void test_walk_zero_viewport_disables_scissor(void) {
+    /* Enable scissor before walking; walker must reset regardless of viewport. */
+    nt_gfx_set_scissor(10, 10, 50, 50);
+    nt_gfx_set_scissor_enabled(true);
+    TEST_ASSERT_TRUE(nt_gfx_test_scissor_enabled());
+
+    inject_frozen_cmds(0);
+    nt_ui_target_t zero = {.viewport = {0, 0, 0.0F, 0.0F}};
+    nt_ui_walk(s_fx.ctx, &zero);
+
+    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
+}
+
 /* Set s_setup_bind BEFORE RUN_TEST: setUp fires first, must see the flag. */
 #define RUN_TEST_WITH_BIND(bind, fn)                                                                                                                                                                   \
     do {                                                                                                                                                                                               \
@@ -191,6 +206,8 @@ int main(void) {
     RUN_TEST(test_walk_zero_viewport_silent_noop);
     s_setup_bind = UI_WALKER_FX_BIND_ALL;
     RUN_TEST(test_walk_zero_viewport_resets_stats);
+    s_setup_bind = UI_WALKER_FX_BIND_ALL;
+    RUN_TEST(test_walk_zero_viewport_disables_scissor);
     s_setup_bind = UI_WALKER_FX_BIND_ALL;
     RUN_TEST(test_second_walk_identical);
     s_setup_bind = UI_WALKER_FX_BIND_ALL;

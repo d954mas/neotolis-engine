@@ -736,10 +736,13 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(target->viewport[0] >= 0.0F && target->viewport[1] >= 0.0F && "nt_ui_walk: target->viewport origin must be non-negative");
     NT_ASSERT(target->viewport[2] >= 0.0F && target->viewport[3] >= 0.0F && "nt_ui_walk: target->viewport (w,h) must be non-negative");
 
-    /* Drain BEFORE zero-viewport early return so leaked staging doesn't
-     * survive a minimized frame. No-op on empty. */
+    /* Walker owns GL scissor state: disables on entry, manages via
+     * SCISSOR_START/END pushes, disables on exit. Caller's scissor is
+     * not preserved across nt_ui_walk(). Drains BEFORE zero-viewport
+     * early return so leaked staging doesn't survive a minimized frame. */
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
+    nt_gfx_set_scissor_enabled(false);
 
     /* Zero viewport (minimized tab, orientation change): silent no-op. */
     if (target->viewport[2] == 0.0F || target->viewport[3] == 0.0F) {
@@ -762,7 +765,6 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     const uint32_t calls_at_entry = nt_gfx_get_frame_draw_calls();
 
     nt_gfx_set_viewport((int)target->viewport[0], (int)target->viewport[1], (int)target->viewport[2], (int)target->viewport[3]);
-    nt_gfx_set_scissor_enabled(false);
 
     /* Sprite material up-front; text binds lazily inside emit_text. */
     nt_sprite_renderer_set_material(ctx->sprite_material);
