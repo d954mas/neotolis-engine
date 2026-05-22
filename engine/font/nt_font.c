@@ -1691,9 +1691,12 @@ nt_text_size_t nt_font_measure_n(nt_font_t font, const char *utf8, size_t len, f
             continue;
         }
 
-        /* Match renderer: \r adds no width (nt_text_renderer_draw_n skips it).
-         * Clay splits on \n so multi-line slices may carry \r from CRLF. */
+        /* Match renderer: \r adds no width AND breaks the kerning chain
+         * (nt_text_renderer_draw_n resets prev_cp on \r). Keep had_glyph
+         * so letter_tracking still applies on the next glyph. Clay splits
+         * on \n so multi-line slices may carry \r from CRLF. */
         if (codepoint == '\r') {
+            prev_lookup = (nt_font_glyph_lookup_t){0};
             continue;
         }
 

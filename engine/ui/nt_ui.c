@@ -192,6 +192,7 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_pointer_t *mouse) {
     NT_ASSERT(ctx != NULL && "nt_ui_begin: ctx must be non-NULL");
+    NT_ASSERT(Clay__MeasureText == nt_ui_measure_text_cb && "nt_ui_begin: nt_ui_module_init() must be called before begin");
     NT_ASSERT(mouse != NULL && "nt_ui_begin: mouse must be non-NULL");
     /* isfinite() rejects NaN + +-inf which `>= 0.0F` alone lets through. */
     NT_ASSERT(isfinite(screen_w) && screen_w >= 0.0F && "nt_ui_begin: screen_w must be finite and non-negative");
