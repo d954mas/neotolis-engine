@@ -14,7 +14,7 @@ if(NOT EMSCRIPTEN)
     set(NT_TEST_ACCESS_LIBS
         nt_atlas nt_ui nt_gfx nt_gfx_stub nt_font nt_text_renderer
         nt_resource nt_sprite_renderer nt_mesh_renderer nt_stats
-        nt_shape_renderer
+        nt_shape_renderer nt_mem_scratch
     )
     foreach(_lib IN LISTS NT_TEST_ACCESS_LIBS)
         if(TARGET ${_lib})
@@ -354,6 +354,24 @@ if(NOT EMSCRIPTEN)
         _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE
     )
     nt_setup_test_target(test_sprite_renderer)
+
+    # --- nt_mem_scratch tests ---
+    add_executable(test_nt_mem_scratch unit/test_nt_mem_scratch.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_nt_mem_scratch PRIVATE
+        nt_mem_scratch nt_core unity
+    )
+    target_include_directories(test_nt_mem_scratch PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    target_compile_definitions(test_nt_mem_scratch PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_mem_scratch)
+
+    # --- nt_ui element_data macro tests (exercises macros -> scratch path) ---
+    add_executable(test_nt_ui_element_data unit/test_nt_ui_element_data.c unit/test_helpers/nt_assert_trap.c)
+    target_link_libraries(test_nt_ui_element_data PRIVATE
+        nt_ui nt_mem_scratch nt_core unity
+    )
+    target_include_directories(test_nt_ui_element_data PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
+    target_compile_definitions(test_nt_ui_element_data PRIVATE _CRT_SECURE_NO_WARNINGS)
+    nt_setup_test_target(test_nt_ui_element_data)
 
     # --- Stats module tests (DEMO-04..06 + Pitfall 9 / Issue 2 coverage) ---
     add_executable(test_stats unit/test_stats.c)

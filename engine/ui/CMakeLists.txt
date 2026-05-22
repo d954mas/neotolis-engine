@@ -69,6 +69,7 @@ target_link_libraries(nt_ui
         nt_font
         nt_material
         nt_input
+        nt_mem_scratch
     PRIVATE
         nt_gfx
         nt_sprite_renderer

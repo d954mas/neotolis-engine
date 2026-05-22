@@ -69,8 +69,13 @@ typedef struct {
     uint8_t _reserved[3];
 } nt_ui_element_data_t;
 
-#define NT_UI_DATA_LAYER(layer_value) ((void *)&(const nt_ui_element_data_t){.layer = (layer_value)})
-#define NT_UI_DATA_FULL(layer_value, user_ptr) ((void *)&(const nt_ui_element_data_t){.layer = (layer_value), .user_data = (user_ptr)})
+/* Macros allocate from nt_mem_scratch (frame arena) so the pointer stays valid
+ * across helper-function returns until the next nt_mem_scratch_reset. Game
+ * MUST init scratch before any CLAY({...}) declaration. */
+void *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data);
+
+#define NT_UI_DATA_LAYER(layer_value) nt_ui_make_element_data((layer_value), NULL)
+#define NT_UI_DATA_FULL(layer_value, user_ptr) nt_ui_make_element_data((layer_value), (user_ptr))
 
 /* All four setters required per-context before first walk. */
 void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uint32_t white_region_idx);

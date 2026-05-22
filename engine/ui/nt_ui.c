@@ -26,6 +26,7 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 
 #include "core/nt_assert.h"
 #include "log/nt_log.h"
+#include "memory/nt_mem_scratch.h"
 #include "ui/nt_ui_internal.h"
 
 // #region module_state
@@ -245,6 +246,15 @@ static inline uint32_t nt_color_pack_clay(Clay_Color c) {
     uint32_t b = clamp_u8(c.b);
     uint32_t a = clamp_u8(c.a);
     return r | (g << 8) | (b << 16) | (a << 24);
+}
+// #endregion
+
+// #region element_data_alloc
+void *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data) {
+    nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
+    d->layer = layer;
+    d->user_data = user_data;
+    return d;
 }
 // #endregion
 
