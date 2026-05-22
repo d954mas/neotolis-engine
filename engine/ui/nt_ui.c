@@ -26,6 +26,7 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 
 #include "core/nt_align.h"
 #include "core/nt_assert.h"
+#include "core/nt_clamp.h"
 #include "log/nt_log.h"
 #include "memory/nt_mem_scratch.h"
 #include "ui/nt_ui_internal.h"
@@ -226,23 +227,12 @@ void nt_ui_end(nt_ui_context_t *ctx) {
 // #endregion
 
 // #region helpers_color_pack
-/* Clay's RGBA floats are unclamped; saturate then round-to-nearest so slow
- * fades don't step on integer boundaries. Upper clamp ensures v+0.5F < 256. */
-static inline uint8_t clamp_u8(float v) {
-    if (v <= 0.0F) {
-        return 0U;
-    }
-    if (v >= 255.0F) {
-        return 255U;
-    }
-    return (uint8_t)(v + 0.5F);
-}
-
+/* Clay's RGBA floats are 0..255 unclamped; saturate via nt_clamp_f_to_u8. */
 static inline uint32_t nt_color_pack_clay(Clay_Color c) {
-    uint32_t r = clamp_u8(c.r);
-    uint32_t g = clamp_u8(c.g);
-    uint32_t b = clamp_u8(c.b);
-    uint32_t a = clamp_u8(c.a);
+    uint32_t r = nt_clamp_f_to_u8(c.r);
+    uint32_t g = nt_clamp_f_to_u8(c.g);
+    uint32_t b = nt_clamp_f_to_u8(c.b);
+    uint32_t a = nt_clamp_f_to_u8(c.a);
     return r | (g << 8) | (b << 16) | (a << 24);
 }
 // #endregion
