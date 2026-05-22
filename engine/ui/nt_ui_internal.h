@@ -32,8 +32,6 @@ struct nt_ui_context {
 #endif
 
     uint32_t max_elements;
-    /* Walker allocates a VLA of this depth for its scissor stack. */
-    uint32_t max_scissor_depth;
 
     nt_font_t fonts[NT_UI_MAX_FONTS];
 

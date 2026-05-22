@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "clay.h"
@@ -51,49 +52,25 @@ static void test_scissor_depth_8_ok(void) {
     TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
 }
 
-/* Per-ctx max_scissor_depth (VLA size) -- depth=4 here, push #5 overflows. */
-static void test_scissor_depth_custom_via_desc(void) {
-    alignas(NT_UI_ARENA_ALIGN) static uint8_t s_custom_arena[NT_UI_TEST_ARENA_SIZE];
-    const nt_ui_create_desc_t custom_desc = {
-        .max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT,
-        .max_scissor_depth = 4U,
-    };
-    nt_ui_context_t *custom_ctx = nt_ui_create_context(s_custom_arena, sizeof s_custom_arena, &custom_desc);
-    TEST_ASSERT_NOT_NULL(custom_ctx);
-    nt_ui_set_atlas_white_region(custom_ctx, s_fx.atlas.handle, s_fx.atlas.white_region_idx);
-    nt_ui_set_sprite_material(custom_ctx, s_fx.sprite_material);
-    nt_ui_set_text_material(custom_ctx, s_fx.text_material);
-
-    Clay_RenderCommand local_cmds[5];
-    memset(local_cmds, 0, sizeof local_cmds);
-    for (int32_t i = 0; i < 5; ++i) {
-        local_cmds[i].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
-        local_cmds[i].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 800, .height = 600};
-        local_cmds[i].renderData.clip.horizontal = true;
-        local_cmds[i].renderData.clip.vertical = true;
+/* Hard cap NT_UI_WALKER_SCISSOR_DEPTH_CAP push asserts on overflow. */
+static void test_scissor_depth_cap_asserts(void) {
+    /* MAX_TEST_CMDS may be smaller than CAP+1; use a heap array sized to CAP+1. */
+    const int32_t over = NT_UI_WALKER_SCISSOR_DEPTH_CAP + 1;
+    Clay_RenderCommand *cmds = (Clay_RenderCommand *)calloc((size_t)over, sizeof(Clay_RenderCommand));
+    TEST_ASSERT_NOT_NULL(cmds);
+    for (int32_t i = 0; i < over; ++i) {
+        cmds[i].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+        cmds[i].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 800, .height = 600};
+        cmds[i].renderData.clip.horizontal = true;
+        cmds[i].renderData.clip.vertical = true;
     }
-    custom_ctx->frozen_cmds.internalArray = local_cmds;
-    custom_ctx->frozen_cmds.length = 5;
-    custom_ctx->frozen_cmds.capacity = 5;
-
-    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
-    NT_TEST_EXPECT_ASSERT(nt_ui_walk(custom_ctx, &target));
-
-    nt_ui_destroy_context(custom_ctx);
-}
-
-/* 9 nested SCISSOR_START must assert (depth overflow). */
-static void test_scissor_depth_9_asserts(void) {
-    for (int32_t i = 0; i < 9; ++i) {
-        s_test_cmds[i].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
-        s_test_cmds[i].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 800, .height = 600};
-        s_test_cmds[i].renderData.clip.horizontal = true;
-        s_test_cmds[i].renderData.clip.vertical = true;
-    }
-    inject_frozen_cmds(9);
+    s_fx.ctx->frozen_cmds.internalArray = cmds;
+    s_fx.ctx->frozen_cmds.length = over;
+    s_fx.ctx->frozen_cmds.capacity = over;
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
+    free(cmds);
 }
 
 /* 2 SCISSOR_START + 1 SCISSOR_END leaves depth > 0
@@ -279,8 +256,7 @@ static void test_scissor_neither_axis_asserts(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scissor_depth_8_ok);
-    RUN_TEST(test_scissor_depth_9_asserts);
-    RUN_TEST(test_scissor_depth_custom_via_desc);
+    RUN_TEST(test_scissor_depth_cap_asserts);
     RUN_TEST(test_scissor_unbalanced_asserts_at_exit);
     RUN_TEST(test_scissor_y_flip_top_left_to_gl_bottom_left);
     RUN_TEST(test_scissor_intersection_nested);

@@ -19,11 +19,8 @@
 #define NT_UI_MAX_FONTS 8
 #endif
 
-#ifndef NT_UI_WALKER_MAX_SCISSOR_DEPTH
-#define NT_UI_WALKER_MAX_SCISSOR_DEPTH 8
-#endif
-
-/* Fixed stack-array size (no VLA -- MSVC C compat). */
+/* Walker's scissor stack capacity. Asserts on overflow. Real UIs nest 1-4
+ * levels; cap is 16x that headroom. */
 #define NT_UI_WALKER_SCISSOR_DEPTH_CAP 64
 
 /* Clay places its Clay_Context at the arena head via raw cast. */
@@ -93,14 +90,12 @@ void nt_ui_module_init(void);
 void nt_ui_module_shutdown(void);
 
 typedef struct {
-    uint32_t max_elements;      /* Clay layout-element cap. */
-    uint32_t max_scissor_depth; /* Walker scissor-stack VLA size. */
+    uint32_t max_elements; /* Clay layout-element cap. */
 } nt_ui_create_desc_t;
 
 static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
     return (nt_ui_create_desc_t){
         .max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT,
-        .max_scissor_depth = NT_UI_WALKER_MAX_SCISSOR_DEPTH,
     };
 }
 
@@ -130,11 +125,6 @@ nt_ui_context_t *nt_ui_test_inframe_ctx(void);
 float nt_ui_test_clay_pointer_x(const nt_ui_context_t *ctx);
 float nt_ui_test_clay_pointer_y(const nt_ui_context_t *ctx);
 int nt_ui_test_clay_pointer_down(const nt_ui_context_t *ctx); /* 0 released, 1 pressed */
-
-nt_resource_t nt_ui_test_atlas(const nt_ui_context_t *ctx);
-uint32_t nt_ui_test_white_region(const nt_ui_context_t *ctx);
-nt_material_t nt_ui_test_sprite_material(const nt_ui_context_t *ctx);
-nt_material_t nt_ui_test_text_material(const nt_ui_context_t *ctx);
 
 /* Count of segmentable cmds with NULL userData (= implicit layer-0 fallback). */
 uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx);

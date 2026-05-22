@@ -14,7 +14,7 @@
 /* clang-format on */
 
 alignas(NT_UI_ARENA_ALIGN) static uint8_t s_arena[NT_UI_TEST_ARENA_SIZE];
-static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT, .max_scissor_depth = NT_UI_WALKER_MAX_SCISSOR_DEPTH};
+static const nt_ui_create_desc_t s_ui_desc = {.max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT};
 
 void setUp(void) {
     /* gfx pulled in transitively via nt_font/nt_resource; stub is fine. */

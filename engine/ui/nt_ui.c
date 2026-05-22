@@ -118,8 +118,6 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     NT_ASSERT(desc != NULL && "nt_ui_min_arena_size: desc must be non-NULL");
     NT_ASSERT(desc->max_elements > 0U && "nt_ui_min_arena_size: desc->max_elements must be > 0");
     NT_ASSERT(desc->max_elements <= UINT16_MAX && "nt_ui_min_arena_size: desc->max_elements exceeds uint16 sorted-index range");
-    NT_ASSERT(desc->max_scissor_depth > 0U && "nt_ui_min_arena_size: desc->max_scissor_depth must be > 0");
-    NT_ASSERT(desc->max_scissor_depth <= NT_UI_WALKER_SCISSOR_DEPTH_CAP && "nt_ui_min_arena_size: desc->max_scissor_depth > cap");
     /* Clay_SetMaxElementCount(N) also writes defaultMaxMeasureTextWordCacheCount
      * = N*2 (clay.h:4332); restore via the same call so both come back. */
     Clay_Context *saved_ctx = Clay_GetCurrentContext();
@@ -146,7 +144,6 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     const size_t ctx_size = nt_ui_ctx_size_aligned();
     /* Layout: [ctx struct][Clay arena], both NT_UI_ARENA_ALIGN aligned. */
     ctx->max_elements = desc->max_elements;
-    ctx->max_scissor_depth = desc->max_scissor_depth;
     void *clay_mem = (char *)arena + ctx_size;
     const size_t clay_size = arena_size - ctx_size;
 
@@ -581,9 +578,8 @@ typedef struct {
 static void rebind_sprite_after_flush(const nt_ui_context_t *ctx) { nt_sprite_renderer_set_material(ctx->sprite_material); }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void scissor_push(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
-    (void)ctx;
-    NT_ASSERT((uint32_t)*depth < ctx->max_scissor_depth && "scissor stack overflow; raise desc->max_scissor_depth or restructure nested clip");
+static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
+    NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
 
     /* Unclipped axis falls back to viewport; floor/ceil avoid 1px right/bottom bite. */
     const Clay_ClipRenderData *clip = &c->renderData.clip;
@@ -719,7 +715,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         emit_image(c);
         return;
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:
-        scissor_push(ctx, c, scissor_stack, depth, target, sprite_pipeline_dirty);
+        scissor_push(c, scissor_stack, depth, target, sprite_pipeline_dirty);
         return;
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
         scissor_pop(scissor_stack, depth, target, sprite_pipeline_dirty);
@@ -901,23 +897,6 @@ uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx) {
 // #region test_access
 #ifdef NT_TEST_ACCESS
 nt_ui_context_t *nt_ui_test_inframe_ctx(void) { return g_nt_ui_inframe_ctx; }
-
-nt_resource_t nt_ui_test_atlas(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL);
-    return ctx->atlas;
-}
-uint32_t nt_ui_test_white_region(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL);
-    return ctx->white_region;
-}
-nt_material_t nt_ui_test_sprite_material(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL);
-    return ctx->sprite_material;
-}
-nt_material_t nt_ui_test_text_material(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL);
-    return ctx->text_material;
-}
 
 int32_t nt_ui_test_clay_default_max_element_count(void) { return Clay__defaultMaxElementCount; }
 int32_t nt_ui_test_clay_default_max_measure_text_word_cache_count(void) { return Clay__defaultMaxMeasureTextWordCacheCount; }
