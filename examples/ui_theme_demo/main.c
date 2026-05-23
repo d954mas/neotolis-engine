@@ -42,7 +42,8 @@
 #include "window/nt_window.h"
 
 #include "math/nt_math.h"
-#include "mem_scratch/nt_mem_scratch.h"
+#include "memory/nt_mem_scratch.h"
+#include "nt_pack_format.h"
 
 #include "ui_theme_demo_assets.h"
 
@@ -171,11 +172,10 @@ static const ui_palette_t *g_current = &g_dark;
 // #endregion
 
 // #region engine state
-#define UI_ARENA_SIZE (2U * 1024U * 1024U) /* 2 MB -- plenty for 6 labels */
-#define SCRATCH_ARENA_SIZE (256U * 1024U)
+#define UI_ARENA_SIZE ((size_t)2U * 1024U * 1024U) /* 2 MB -- plenty for 6 labels */
+#define SCRATCH_ARENA_SIZE ((size_t)256U * 1024U)
 
 static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
-static alignas(16) uint8_t s_scratch_arena[SCRATCH_ARENA_SIZE];
 
 static nt_ui_context_t *s_ctx;
 static nt_buffer_t s_frame_ubo;
@@ -363,7 +363,7 @@ int main(int argc, char *argv[]) {
     nt_fs_init();
     nt_hash_init(&(nt_hash_desc_t){0});
     nt_resource_init(&(nt_resource_desc_t){0});
-    nt_mem_scratch_init(s_scratch_arena, sizeof s_scratch_arena);
+    nt_mem_scratch_init(SCRATCH_ARENA_SIZE);
 
     nt_resource_set_activator(NT_ASSET_TEXTURE, nt_gfx_activate_texture, nt_gfx_deactivate_texture);
     nt_resource_set_activator(NT_ASSET_SHADER_CODE, nt_gfx_activate_shader, nt_gfx_deactivate_shader);
@@ -372,7 +372,8 @@ int main(int argc, char *argv[]) {
     nt_material_init(&(nt_material_desc_t){.max_materials = 4});
     nt_font_init(&(nt_font_desc_t){.max_fonts = 2});
 
-    nt_sprite_renderer_init(&nt_sprite_renderer_desc_defaults());
+    nt_sprite_renderer_desc_t sr_desc = nt_sprite_renderer_desc_defaults();
+    nt_sprite_renderer_init(&sr_desc);
     nt_text_renderer_init();
 
     nt_ui_module_init();
@@ -457,6 +458,7 @@ int main(int argc, char *argv[]) {
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
     nt_material_shutdown();
+    nt_mem_scratch_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();
     nt_http_shutdown();
