@@ -134,7 +134,9 @@ int32_t nt_ui_test_clay_default_max_measure_text_word_cache_count(void);
 #endif
 // #endregion
 
-/* Widget umbrella re-exports. Phase 54+ extends with panel, button, etc. */
-#include "ui/nt_ui_label.h"
+/* Widget headers (nt_ui_label.h, etc.) are NOT re-exported here: clay.h
+ * must stay out of the public umbrella to keep Windows ucrt/stdlib.h sane
+ * in release builds (stdnoreturn.h poisons __declspec(noreturn)). Consumers
+ * of widgets include their header directly. */
 
 #endif /* NT_UI_H */
