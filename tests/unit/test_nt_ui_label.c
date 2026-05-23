@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "clay.h"
+#include "core/nt_assert.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -65,6 +66,17 @@ static void test_label_emits_text_with_style_color(void) {
     TEST_ASSERT_EQUAL_INT32(255, (int32_t)c->renderData.text.textColor.a);
 }
 
+/* ---- Death tests (NT_ASSERT_FULL only) ----
+ * NT_TEST_EXPECT_ASSERT relies on the nt_assert_handler hook (setjmp/longjmp
+ * via test_helpers/nt_assert_trap). The handler is only called in
+ * NT_ASSERT_FULL mode -- NT_ASSERT_TRAP (release default) traps directly via
+ * __builtin_trap() with no handler dispatch (engine/core/nt_assert.h:39-56).
+ * The 4 death tests below are gated to FULL mode so this binary also passes
+ * in native-release. Same gating is needed across all NT_TEST_EXPECT_ASSERT
+ * users (test_nt_ui_measure_cb, test_nt_ui_walker_dispatch, ...) -- a Phase
+ * 52 infrastructure cleanup outside the scope of Plan 53-04. */
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+
 /* ---- Test 2: death test -- NULL style asserts ----
  * Assert fires at function entry BEFORE any Clay state mutation, so the
  * longjmp returns to setjmp inside the CLAY for-loop body. The loop
@@ -117,6 +129,8 @@ static void test_label_zero_font_size_asserts(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+#endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
+
 /* ---- Test 6: zero-init wrap_mode + align ----
  * wrap_mode / align rely on zero-init giving CLAY_TEXT_WRAP_WORDS (0)
  * + CLAY_TEXT_ALIGN_LEFT (0). Clay_TextRenderData does NOT surface
@@ -146,19 +160,26 @@ static void test_label_zero_init_wraps_words_left(void) {
 
 /* ---- Test 7: full-field passthrough including full RGBA ----
  * line_height + letter_tracking pass through to Clay_TextRenderData;
- * full RGBA verified per channel (W-3). */
+ * full RGBA verified per channel (W-3). wrap_mode/align are NOT verified
+ * here because Clay_TextRenderData does not surface wrapMode/textAlignment
+ * (they're consumed during layout). Cast safety for those two fields is
+ * a compile-time check satisfied by Plan 03 (wired in nt_ui_label.c with
+ * explicit (Clay_TextElementConfigWrapMode) and (Clay_TextAlignment) casts
+ * under -Wconversion -Werror). Using CLAY_TEXT_WRAP_NONE here would also
+ * cause Clay to skip emitting the TEXT cmd when measure cb returns 0 width
+ * (stub_font has no resource data) -- defeating the passthrough check. */
 static void test_label_full_field_passthrough(void) {
     static const nt_ui_label_style_t s = {
-        .font_id = 0,
-        .font_size = 16,
-        .color = {128.0F, 64.0F, 32.0F, 200.0F},
-        .line_height = 24,
-        .letter_tracking = 4,
-        .wrap_mode = (uint8_t)CLAY_TEXT_WRAP_NONE,
-        .align = (uint8_t)CLAY_TEXT_ALIGN_RIGHT,
+        .font_id = 0, .font_size = 16, .color = {128.0F, 64.0F, 32.0F, 200.0F}, .line_height = 24, .letter_tracking = 4,
+        /* wrap_mode + align left zero-init (WORDS + LEFT) -- see comment above. */
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
+    /* Stub font's measure cb returns {0,0}; with non-zero letterSpacing
+     * Clay subtracts at clay.h:1677 producing preferredDimensions.width<0,
+     * and the resulting bbox is then offscreen-culled (clay.h:2473). Disable
+     * culling so the TEXT cmd survives for our passthrough check. */
+    Clay_SetCullingEnabled(false);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, "Hello", &s); }
     nt_ui_end(s_fx.ctx);
 
@@ -210,10 +231,12 @@ static void test_label_empty_text_accepted(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_label_emits_text_with_style_color);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_label_null_style_asserts);
     RUN_TEST(test_label_out_of_range_font_asserts);
     RUN_TEST(test_label_unbound_font_asserts);
     RUN_TEST(test_label_zero_font_size_asserts);
+#endif
     RUN_TEST(test_label_zero_init_wraps_words_left);
     RUN_TEST(test_label_full_field_passthrough);
     RUN_TEST(test_label_per_call_override);
