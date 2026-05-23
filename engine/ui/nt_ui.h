@@ -134,4 +134,7 @@ int32_t nt_ui_test_clay_default_max_measure_text_word_cache_count(void);
 #endif
 // #endregion
 
+/* Widget umbrella re-exports. Phase 54+ extends with panel, button, etc. */
+#include "ui/nt_ui_label.h"
+
 #endif /* NT_UI_H */
