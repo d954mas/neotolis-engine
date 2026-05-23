@@ -503,6 +503,85 @@
             "dependsOn": ["Build wasm-release-paired", "Ensure server bunnymark (release :8093)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
+        },
+        {
+            "label": "Build & run ui_theme_demo packs (debug)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target build_ui_theme_demo_packs && build\\examples\\ui_theme_demo\\native-debug\\build_ui_theme_demo_packs.exe build/examples/ui_theme_demo",
+            "dependsOn": ["Configure native-debug"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build & run ui_theme_demo packs (release)",
+            "dependsOn": [
+                "Configure native-release",
+                "Build & run ui_theme_demo packs (release command)"
+            ],
+            "dependsOrder": "sequence",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & run ui_theme_demo packs (release command)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-release --target build_ui_theme_demo_packs && build\\examples\\ui_theme_demo\\native-release\\build_ui_theme_demo_packs.exe build/examples/ui_theme_demo",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Ensure server ui_theme_demo (debug :8094)",
+            "type": "shell",
+            "command": "python -m http.server 8094 -d \"${workspaceFolder}/build/examples/ui_theme_demo/wasm-debug-paired\"",
+            "isBackground": true,
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
+        },
+        {
+            "label": "Ensure server ui_theme_demo (release :8095)",
+            "type": "shell",
+            "command": "python -m http.server 8095 -d \"${workspaceFolder}/build/examples/ui_theme_demo/wasm-release-paired\"",
+            "isBackground": true,
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
+        },
+        {
+            "label": "Build & Serve ui_theme_demo (debug)",
+            "dependsOn": ["Build wasm-debug-paired", "Ensure server ui_theme_demo (debug :8094)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve ui_theme_demo (release)",
+            "dependsOn": ["Build wasm-release-paired", "Ensure server ui_theme_demo (release :8095)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
         }
     ]
 }

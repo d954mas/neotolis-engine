@@ -310,6 +310,52 @@
             "webRoot": "${workspaceFolder}/build/examples/bunnymark/wasm-release-paired",
             "preLaunchTask": "Build & Serve bunnymark (release)",
             "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Build UI Theme Demo Packs",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/ui_theme_demo/native-release/build_ui_theme_demo_packs.exe",
+            "args": ["build/examples/ui_theme_demo"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build & run ui_theme_demo packs (release)"
+        },
+        {
+            "name": "Debug Desktop ui_theme_demo",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/ui_theme_demo/native-debug/ui_theme_demo.exe",
+            "cwd": "${workspaceFolder}/build/examples/ui_theme_demo/native-debug",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-debug"
+        },
+        {
+            "name": "Run Desktop ui_theme_demo (release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/ui_theme_demo/native-release/ui_theme_demo.exe",
+            "cwd": "${workspaceFolder}/build/examples/ui_theme_demo/native-release",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-release"
+        },
+        {
+            "name": "Debug WASM ui_theme_demo",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8094/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/ui_theme_demo/wasm-debug-paired",
+            "preLaunchTask": "Build & Serve ui_theme_demo (debug)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Run WASM ui_theme_demo (release)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8095/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/ui_theme_demo/wasm-release-paired",
+            "preLaunchTask": "Build & Serve ui_theme_demo (release)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
         }
     ]
 }
