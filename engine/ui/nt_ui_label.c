@@ -17,6 +17,15 @@ void nt_ui_label(nt_ui_context_t *ctx, const char *text, const nt_ui_label_style
     NT_ASSERT(nt_font_valid(ctx->fonts[style->font_id]) && "nt_ui_label: font slot empty; call nt_ui_set_font first");
     NT_ASSERT(style->font_size > 0 && "nt_ui_label: font_size must be > 0");
 
-    /* Plan 03 wires CLAY_TEXT here; placeholder unused param. */
-    (void)text;
+    /* Clay arena-copies config; text.chars is by-pointer — keep alive until nt_ui_end. */
+    Clay_String s = {.length = (int32_t)strlen(text), .chars = text};
+    CLAY_TEXT(s, CLAY_TEXT_CONFIG({
+                     .textColor = style->color,
+                     .fontId = style->font_id,
+                     .fontSize = style->font_size,
+                     .letterSpacing = style->letter_tracking,
+                     .lineHeight = style->line_height,
+                     .wrapMode = (Clay_TextElementConfigWrapMode)style->wrap_mode,
+                     .textAlignment = (Clay_TextAlignment)style->align,
+                 }));
 }
