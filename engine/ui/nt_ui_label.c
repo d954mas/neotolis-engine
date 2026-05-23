@@ -8,6 +8,7 @@
 #include "font/nt_font.h"
 #include "ui/nt_ui_internal.h"
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_label(nt_ui_context_t *ctx, const char *text, const nt_ui_label_style_t *style) {
     NT_ASSERT(ctx != NULL && "nt_ui_label: ctx must be non-NULL");
     NT_ASSERT(style != NULL && "nt_ui_label: style must be non-NULL");

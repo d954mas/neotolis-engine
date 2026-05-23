@@ -8,7 +8,11 @@
 #include <stdint.h>
 
 #include "clay.h"
-#include "ui/nt_ui.h"
+
+/* Forward decl avoids include cycle with ui/nt_ui.h umbrella re-export
+ * (C11+ permits identical typedef redeclaration; misc-header-include-cycle
+ * would fire if we included ui/nt_ui.h here). */
+typedef struct nt_ui_context nt_ui_context_t;
 
 typedef struct {
     uint16_t font_id;         /* index into ctx->fonts[]; asserted < NT_UI_MAX_FONTS */
