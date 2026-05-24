@@ -209,12 +209,22 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_
     ctx->in_frame = true;
     g_nt_ui_inframe_ctx = ctx;
 
+    /* Apply BEFORE BeginLayout: it reserves Clay__debugViewWidth in root. */
+    Clay_SetDebugModeEnabled(ctx->debug_overlay);
     Clay_SetLayoutDimensions((Clay_Dimensions){.width = screen_w, .height = screen_h});
 
     /* Left-button only; Clay v0.14 has no right/middle/wheel. */
     Clay_SetPointerState((Clay_Vector2){.x = mouse->x, .y = mouse->y}, mouse->buttons[NT_BUTTON_LEFT].is_down);
 
     Clay_BeginLayout();
+}
+
+/* Flag is applied to Clay inside nt_ui_begin, before BeginLayout, so
+ * Clay reserves the debug panel width up-front (clay.h:4166-4168). Toggling
+ * is safe at any time; takes effect on the next begin. */
+void nt_ui_set_debug_overlay(nt_ui_context_t *ctx, bool enabled) {
+    NT_ASSERT(ctx != NULL && "nt_ui_set_debug_overlay: ctx must be non-NULL");
+    ctx->debug_overlay = enabled;
 }
 
 void nt_ui_end(nt_ui_context_t *ctx) {
@@ -682,7 +692,17 @@ static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite
     }
 }
 
+/* Clay emits boundingBoxes in top-left Y-down; engine renders in GL bottom-left
+ * Y-up (see scissor_push y_gl = vh - y - h at nt_ui.c:626 and matching test
+ * test_scissor_y_flip_top_left_to_gl_bottom_left). Apply the same conversion
+ * to drawing emits via a local-copy bbox.y rewrite. Border widths and corner
+ * radii also swap top<->bottom since the visual "top" lands at world bottom. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
+    const float vy = target->viewport[1];
+    const float vh = target->viewport[3];
+    const float world_y = vy + vh - c->boundingBox.y - c->boundingBox.height;
+
     switch (c->commandType) {
     case CLAY_RENDER_COMMAND_TYPE_NONE:
         return;
@@ -690,23 +710,47 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         const uint32_t col = nt_color_pack_clay(r->backgroundColor);
-        emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, r->cornerRadius, col);
+        const Clay_CornerRadius cr = {
+            .topLeft = r->cornerRadius.bottomLeft,
+            .topRight = r->cornerRadius.bottomRight,
+            .bottomLeft = r->cornerRadius.topLeft,
+            .bottomRight = r->cornerRadius.topRight,
+        };
+        emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, world_y, c->boundingBox.width, c->boundingBox.height, cr, col);
         return;
     }
-    case CLAY_RENDER_COMMAND_TYPE_BORDER:
+    case CLAY_RENDER_COMMAND_TYPE_BORDER: {
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
-        emit_border(ctx, c);
+        Clay_RenderCommand local = *c;
+        local.boundingBox.y = world_y;
+        Clay_BorderRenderData *b = &local.renderData.border;
+        const Clay_BorderWidth wo = b->width;
+        b->width.top = wo.bottom;
+        b->width.bottom = wo.top;
+        const Clay_CornerRadius cro = b->cornerRadius;
+        b->cornerRadius.topLeft = cro.bottomLeft;
+        b->cornerRadius.topRight = cro.bottomRight;
+        b->cornerRadius.bottomLeft = cro.topLeft;
+        b->cornerRadius.bottomRight = cro.topRight;
+        emit_border(ctx, &local);
         return;
-    case CLAY_RENDER_COMMAND_TYPE_TEXT:
+    }
+    case CLAY_RENDER_COMMAND_TYPE_TEXT: {
         /* Drain sprite before switching to text pipeline; mark for lazy rebind. */
         nt_sprite_renderer_flush();
         *sprite_pipeline_dirty = true;
-        emit_text(ctx, c);
+        Clay_RenderCommand local = *c;
+        local.boundingBox.y = world_y;
+        emit_text(ctx, &local);
         return;
-    case CLAY_RENDER_COMMAND_TYPE_IMAGE:
+    }
+    case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
-        emit_image(c);
+        Clay_RenderCommand local = *c;
+        local.boundingBox.y = world_y;
+        emit_image(&local);
         return;
+    }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:
         scissor_push(c, scissor_stack, depth, target, sprite_pipeline_dirty);
         return;

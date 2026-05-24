@@ -108,6 +108,11 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_pointer_t *mouse);
 void nt_ui_end(nt_ui_context_t *ctx);
 
+/* Toggle Clay's built-in debug overlay (element tree panel + bbox outlines).
+ * Stored on the ctx; applied to Clay at the next nt_ui_begin. Safe to call
+ * any time. */
+void nt_ui_set_debug_overlay(nt_ui_context_t *ctx, bool enabled);
+
 /* Read-only on frozen_cmds + bindings; per-walk stats reflect the latest call.
  * Order: zIndex asc, then layer asc, then declaration. SCISSOR/CUSTOM are
  * hard barriers and never reordered. */
