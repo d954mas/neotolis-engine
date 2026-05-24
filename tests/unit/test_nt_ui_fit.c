@@ -127,6 +127,24 @@ static void test_fit_box_explicit_line_height(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_UINT16(s_tall, s_natural);
 }
 
+/* Regression: double whitespace must not hang the simulator (was infinite
+ * loop because word_end == word_start continued without advancing i). */
+static void test_fit_width_double_whitespace_terminates(void) {
+    uint16_t s = nt_ui_fit_width(s_fx.ctx, 0, "ab  cd", 100.0F, 14U, 44U, 0.0F);
+    TEST_ASSERT_TRUE(s >= 14U && s <= 44U);
+}
+
+static void test_fit_box_double_whitespace_terminates(void) {
+    uint16_t s = nt_ui_fit_box(s_fx.ctx, 0, "ab  cd\nef  gh", 100.0F, 100.0F, 14U, 44U, 0.0F, 0U);
+    TEST_ASSERT_TRUE(s >= 14U && s <= 44U);
+}
+
+/* Regression: leading/trailing/mixed whitespace edge cases must terminate. */
+static void test_fit_width_whitespace_only_terminates(void) {
+    uint16_t s = nt_ui_fit_width(s_fx.ctx, 0, "   \t  ", 100.0F, 14U, 44U, 0.0F);
+    TEST_ASSERT_EQUAL_UINT16(44U, s); /* nothing to measure -- fits at max */
+}
+
 int main(void) {
     UNITY_BEGIN();
     /* NOTE: stub_font in ui_walker_fixture has units_per_em=0 and
@@ -135,7 +153,9 @@ int main(void) {
      * on font measurements producing > 0 widths -- fast paths (empty text,
      * fits-at-max, min==max), monotonicity (smaller box -> smaller-or-equal
      * size), and explicit-line-height comparison. The real shrink behavior
-     * under live font metrics is exercised end-to-end by ui_theme_demo. */
+     * under live font metrics is exercised end-to-end by ui_theme_demo.
+     * Long-word width-check (P2 in code review) requires a measuring font
+     * stub; not covered here -- TODO when test_helpers gets one. */
     RUN_TEST(test_fit_width_empty_returns_max);
     RUN_TEST(test_fit_width_fits_at_max);
     RUN_TEST(test_fit_width_shrinks_to_fit);
@@ -147,5 +167,8 @@ int main(void) {
     RUN_TEST(test_fit_box_long_word);
     RUN_TEST(test_fit_box_min_eq_max);
     RUN_TEST(test_fit_box_explicit_line_height);
+    RUN_TEST(test_fit_width_double_whitespace_terminates);
+    RUN_TEST(test_fit_box_double_whitespace_terminates);
+    RUN_TEST(test_fit_width_whitespace_only_terminates);
     return UNITY_END();
 }

@@ -649,7 +649,8 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
      * bbox is invalid use and trips the assert below. */
     const Clay_ClipRenderData *clip = &c->renderData.clip;
     const bool both_false = !clip->horizontal && !clip->vertical;
-    NT_ASSERT((!both_false || (c->boundingBox.width > 0.0F && c->boundingBox.height > 0.0F)) && "nt_ui SCISSOR_START with both axes false requires non-empty bbox (reserved for Clay floating clipTo marker)");
+    NT_ASSERT((!both_false || (c->boundingBox.width > 0.0F && c->boundingBox.height > 0.0F)) &&
+              "nt_ui SCISSOR_START with both axes false requires non-empty bbox (reserved for Clay floating clipTo marker)");
     const int vw = (int)target->viewport[2];
     const int vh = (int)target->viewport[3];
     const bool clip_h = clip->horizontal || both_false;

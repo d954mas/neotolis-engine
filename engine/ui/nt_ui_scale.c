@@ -78,19 +78,18 @@ nt_pointer_t nt_ui_scale_apply_pointer(const nt_ui_scale_t *s, nt_pointer_t phys
     return physical;
 }
 
-/* Logical {0..logical_w, 0..logical_h} -> physical inside fb. LETTERBOX/CROP
- * offsets expand ortho range past logical so bars/crop are part of world. */
+/* Single invariant: glViewport = physical content rect (skips LETTERBOX bars,
+ * extends past fb in CROP), ortho = [0..logical] (no margins). Scissor and
+ * pointer mapping use the same {offset, scale} -- world space stays consistent. */
 nt_ui_scale_ortho_t nt_ui_scale_ortho(const nt_ui_scale_t *s) {
     NT_ASSERT(s != NULL && "nt_ui_scale_ortho: s must be non-NULL");
     NT_ASSERT(s->scale_x > 0.0F && s->scale_y > 0.0F && "nt_ui_scale_ortho: scale must be positive");
-    nt_ui_scale_ortho_t out;
-    const float ox_logical = s->offset_x / s->scale_x;
-    const float oy_logical = s->offset_y / s->scale_y;
-    out.left = -ox_logical;
-    out.right = s->logical_w + ox_logical;
-    out.bottom = -oy_logical;
-    out.top = s->logical_h + oy_logical;
-    return out;
+    return (nt_ui_scale_ortho_t){
+        .left = 0.0F,
+        .right = s->logical_w,
+        .bottom = 0.0F,
+        .top = s->logical_h,
+    };
 }
 
 nt_ui_target_t nt_ui_scale_make_target(const nt_ui_scale_t *s) {

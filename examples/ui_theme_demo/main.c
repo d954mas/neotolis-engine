@@ -25,7 +25,6 @@
 #include "stats/nt_stats.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_fit.h"
-#include "ui/nt_ui_internal.h" /* DEMO_DEBUG_LOG: inspect frozen_cmds */
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_scale.h"
 #include "window/nt_window.h"
@@ -186,14 +185,6 @@ static uint32_t s_white_region_idx;
 static nt_ui_scale_mode_t s_scale_mode = NT_UI_SCALE_EXPAND;
 static const char *const k_scale_mode_names[] = {"STRETCH", "LETTERBOX", "CROP", "EXPAND"};
 
-/* Set to 1 to log scale + bbox on every fb-size change (test_demo_sizes.ps1). */
-#define DEMO_DEBUG_LOG 0
-#if DEMO_DEBUG_LOG
-static uint32_t s_frame_counter = 0U;
-static int s_last_logged_fb_w = -1;
-static int s_last_logged_fb_h = -1;
-#endif
-
 /* Key 2 cycles short/medium/long; idx=2 forces fit_* helpers near size_min. */
 static const char *const k_titles[] = {
     "Hi",
@@ -279,22 +270,6 @@ static void frame(void) {
     nt_ui_scale_desc_t scale_desc = {.ref_w = UI_REF_W, .ref_h = UI_REF_H, .mode = s_scale_mode};
     nt_ui_scale_t scale = nt_ui_compute_scale(&scale_desc, fb_w, fb_h);
     nt_ui_scale_ortho_t ortho = nt_ui_scale_ortho(&scale);
-
-#if DEMO_DEBUG_LOG
-    s_frame_counter++;
-    const int fbw_i = (int)fb_w;
-    const int fbh_i = (int)fb_h;
-    const bool log_this_frame = (fbw_i != s_last_logged_fb_w || fbh_i != s_last_logged_fb_h);
-    if (log_this_frame) {
-        s_last_logged_fb_w = fbw_i;
-        s_last_logged_fb_h = fbh_i;
-        (void)fprintf(stderr, "[demo frame=%u] fb=%dx%d ref=%dx%d mode=%s\n", s_frame_counter, fbw_i, fbh_i, (int)UI_REF_W, (int)UI_REF_H, k_scale_mode_names[s_scale_mode]);
-        (void)fprintf(stderr, "  scale.logical=%dx%d scale_x=%.4f scale_y=%.4f offset=(%.1f, %.1f) fb_in_scale=%dx%d\n", (int)scale.logical_w, (int)scale.logical_h, (double)scale.scale_x,
-                      (double)scale.scale_y, (double)scale.offset_x, (double)scale.offset_y, (int)scale.fb_w, (int)scale.fb_h);
-        (void)fprintf(stderr, "  ortho L=%.1f R=%.1f B=%.1f T=%.1f\n", (double)ortho.left, (double)ortho.right, (double)ortho.bottom, (double)ortho.top);
-        (void)fflush(stderr);
-    }
-#endif
 
     mat4 view_m;
     mat4 proj_m;
@@ -439,44 +414,6 @@ static void frame(void) {
         // #endregion
 
         nt_ui_end(s_ctx);
-
-#if DEMO_DEBUG_LOG
-        if (log_this_frame) {
-            const Clay_RenderCommandArray *cmds = &s_ctx->frozen_cmds;
-            (void)fprintf(stderr, "  cmds=%d:\n", cmds->length);
-            int dumped = 0;
-            for (int32_t ci = 0; ci < cmds->length && dumped < 12; ++ci) {
-                const Clay_RenderCommand *c = &cmds->internalArray[ci];
-                const char *type = "?";
-                switch (c->commandType) {
-                case CLAY_RENDER_COMMAND_TYPE_RECTANGLE:
-                    type = "RECT";
-                    break;
-                case CLAY_RENDER_COMMAND_TYPE_TEXT:
-                    type = "TEXT";
-                    break;
-                case CLAY_RENDER_COMMAND_TYPE_BORDER:
-                    type = "BRDR";
-                    break;
-                case CLAY_RENDER_COMMAND_TYPE_IMAGE:
-                    type = "IMG";
-                    break;
-                case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:
-                    type = "SCRS";
-                    break;
-                case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
-                    type = "SCRE";
-                    break;
-                default:
-                    continue;
-                }
-                (void)fprintf(stderr, "    [%d] %s bb=(%.1f, %.1f, %.1fx%.1f)\n", ci, type, (double)c->boundingBox.x, (double)c->boundingBox.y, (double)c->boundingBox.width,
-                              (double)c->boundingBox.height);
-                dumped++;
-            }
-            (void)fflush(stderr);
-        }
-#endif
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);

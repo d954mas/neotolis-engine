@@ -8,19 +8,28 @@
 
 static bool is_ws(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
-/* Mirrors Clay CLAY_TEXT_WRAP_WORDS: greedy-pack to container_w, \n forces break,
- * leading whitespace on wrapped lines is stripped. */
+typedef struct {
+    uint32_t lines;
+    float max_line_w;
+} wrap_result_t;
+
+/* Mirrors Clay CLAY_TEXT_WRAP_WORDS: greedy-pack words to container_w, \n forces
+ * break, leading whitespace on wrapped lines is stripped. Returns line count AND
+ * max measured line width -- callers need both (long single word with no wrap
+ * point still has a width that may exceed container_w). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static uint32_t simulate_wrap_lines(nt_font_t font, const char *text, size_t len, float size, float letter_tracking, float container_w) {
+static wrap_result_t simulate_wrap(nt_font_t font, const char *text, size_t len, float size, float letter_tracking, float container_w) {
     if (len == 0U || container_w <= 0.0F) {
-        return 0U;
+        return (wrap_result_t){.lines = 0U, .max_line_w = 0.0F};
     }
     const float space_w = nt_font_measure_n(font, " ", 1U, size, letter_tracking).width;
 
     uint32_t lines = 1U;
     float line_w = 0.0F;
+    float max_line_w = 0.0F;
     size_t i = 0U;
     while (i < len) {
+        /* Skip leading whitespace at start of line; \n still breaks. */
         if (line_w == 0.0F) {
             while (i < len && is_ws(text[i]) && text[i] != '\n') {
                 i++;
@@ -31,8 +40,19 @@ static uint32_t simulate_wrap_lines(nt_font_t font, const char *text, size_t len
         }
 
         if (text[i] == '\n') {
+            if (line_w > max_line_w) {
+                max_line_w = line_w;
+            }
             lines++;
             line_w = 0.0F;
+            i++;
+            continue;
+        }
+
+        /* Mid-line whitespace (multiple spaces, tabs): skip one and continue.
+         * Without this, i wouldn't advance and we'd infinite-loop. We do NOT
+         * add another space_w to line_w -- consecutive whitespace collapses. */
+        if (is_ws(text[i])) {
             i++;
             continue;
         }
@@ -42,23 +62,24 @@ static uint32_t simulate_wrap_lines(nt_font_t font, const char *text, size_t len
             i++;
         }
         const size_t word_end = i;
-        if (word_end == word_start) {
-            continue;
-        }
         const float word_w = nt_font_measure_n(font, text + word_start, word_end - word_start, size, letter_tracking).width;
         const float prospective = (line_w == 0.0F) ? word_w : (line_w + space_w + word_w);
         if (prospective > container_w && line_w > 0.0F) {
+            if (line_w > max_line_w) {
+                max_line_w = line_w;
+            }
             lines++;
             line_w = word_w;
         } else {
             line_w = prospective;
         }
-
-        if (i < len && text[i] != '\n' && is_ws(text[i])) {
-            i++;
-        }
+        /* Trailing whitespace is consumed by the next loop iteration's
+         * mid-line whitespace branch (or skipped as leading on next line). */
     }
-    return lines;
+    if (line_w > max_line_w) {
+        max_line_w = line_w;
+    }
+    return (wrap_result_t){.lines = lines, .max_line_w = max_line_w};
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -75,18 +96,19 @@ uint16_t nt_ui_fit_width(nt_ui_context_t *ctx, uint16_t font_id, const char *tex
 
     const size_t len = strlen(text);
 
-    /* Per-word simulation (not measure_n on full string) -- Clay doesn't kern
-     * across whitespace, the discrepancy flips wrap decisions for borderline text. */
-    if (simulate_wrap_lines(font, text, len, (float)size_max, letter_tracking, container_w) <= 1U) {
+    /* Fits single line at size_max means: no wrap point fired AND the single
+     * line's measured width is within container_w (catches long words too). */
+    const wrap_result_t r_max = simulate_wrap(font, text, len, (float)size_max, letter_tracking, container_w);
+    if (r_max.lines <= 1U && r_max.max_line_w <= container_w) {
         return size_max;
     }
 
-    /* round-up mid so lo converges to the answer. */
     uint16_t lo = size_min;
     uint16_t hi = size_max;
     while (lo < hi) {
-        const uint16_t mid = (uint16_t)((lo + hi + 1U) / 2U);
-        if (simulate_wrap_lines(font, text, len, (float)mid, letter_tracking, container_w) <= 1U) {
+        const uint16_t mid = (uint16_t)((lo + hi + 1U) / 2U); /* round-up so lo converges */
+        const wrap_result_t r = simulate_wrap(font, text, len, (float)mid, letter_tracking, container_w);
+        if (r.lines <= 1U && r.max_line_w <= container_w) {
             lo = mid;
         } else {
             hi = (uint16_t)(mid - 1U);
@@ -114,10 +136,11 @@ uint16_t nt_ui_fit_box(nt_ui_context_t *ctx, uint16_t font_id, const char *text,
     }
     const size_t len = strlen(text);
 
-    /* line_height==0 -> font's natural ascent+descent+linegap. */
-    const uint32_t lines_at_max = simulate_wrap_lines(font, text, len, (float)size_max, letter_tracking, container_w);
+    /* Fits if: total height (lines * line_height) <= container_h AND every
+     * line is <= container_w (long unbreakable word can otherwise overflow). */
+    const wrap_result_t r_max = simulate_wrap(font, text, len, (float)size_max, letter_tracking, container_w);
     const float lh_at_max = (line_height > 0U) ? (float)line_height : ((float)fm.line_height * (float)size_max / (float)fm.units_per_em);
-    if ((float)lines_at_max * lh_at_max <= container_h) {
+    if ((float)r_max.lines * lh_at_max <= container_h && r_max.max_line_w <= container_w) {
         return size_max;
     }
 
@@ -125,9 +148,9 @@ uint16_t nt_ui_fit_box(nt_ui_context_t *ctx, uint16_t font_id, const char *text,
     uint16_t hi = size_max;
     while (lo < hi) {
         const uint16_t mid = (uint16_t)((lo + hi + 1U) / 2U);
-        const uint32_t lines = simulate_wrap_lines(font, text, len, (float)mid, letter_tracking, container_w);
+        const wrap_result_t r = simulate_wrap(font, text, len, (float)mid, letter_tracking, container_w);
         const float lh = (line_height > 0U) ? (float)line_height : ((float)fm.line_height * (float)mid / (float)fm.units_per_em);
-        if ((float)lines * lh <= container_h) {
+        if ((float)r.lines * lh <= container_h && r.max_line_w <= container_w) {
             lo = mid;
         } else {
             hi = (uint16_t)(mid - 1U);

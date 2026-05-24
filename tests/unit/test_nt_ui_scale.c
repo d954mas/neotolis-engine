@@ -186,28 +186,25 @@ static void test_ortho_expand(void) {
     assert_int_eq_scaled(600000, o.top, 1);
 }
 
-/* LETTERBOX wider window: x-bars become negative ortho.left + extended right. */
+/* LETTERBOX/CROP/STRETCH: ortho ALWAYS [0..logical] regardless of margins;
+ * walker viewport already accounts for fb_offset, so margins must not be
+ * applied twice. Bars stay clear-color (outside viewport). */
 static void test_ortho_letterbox(void) {
     nt_ui_scale_desc_t desc = {.ref_w = 800.0F, .ref_h = 600.0F, .mode = NT_UI_SCALE_LETTERBOX};
     nt_ui_scale_t s = nt_ui_compute_scale(&desc, 1600.0F, 600.0F);
-    /* scale=1, offset_x=400, logical_w=800 -> ortho.left = -400, right = 1200. */
     nt_ui_scale_ortho_t o = nt_ui_scale_ortho(&s);
-    int32_t left_x1000 = (int32_t)((o.left * 1000.0F) - 0.5F);
-    TEST_ASSERT_EQUAL_INT32(-400000, left_x1000);
-    assert_int_eq_scaled(1200000, o.right, 1);
+    assert_int_eq_scaled(0, o.left, 1);
+    assert_int_eq_scaled(800000, o.right, 1);
     assert_int_eq_scaled(0, o.bottom, 1);
     assert_int_eq_scaled(600000, o.top, 1);
 }
 
-/* CROP: negative offset shrinks ortho range past logical bounds (content cropped). */
 static void test_ortho_crop(void) {
     nt_ui_scale_desc_t desc = {.ref_w = 800.0F, .ref_h = 600.0F, .mode = NT_UI_SCALE_CROP};
     nt_ui_scale_t s = nt_ui_compute_scale(&desc, 600.0F, 1200.0F);
-    /* scale=max(0.75, 2)=2, offset_x=(600-1600)/2=-500, offset_y=0
-     * ortho.left = -(-500)/2 = 250; right = 800 + (-500)/2 = 550. */
     nt_ui_scale_ortho_t o = nt_ui_scale_ortho(&s);
-    assert_int_eq_scaled(250000, o.left, 1);
-    assert_int_eq_scaled(550000, o.right, 1);
+    assert_int_eq_scaled(0, o.left, 1);
+    assert_int_eq_scaled(800000, o.right, 1);
     assert_int_eq_scaled(0, o.bottom, 1);
     assert_int_eq_scaled(600000, o.top, 1);
 }
