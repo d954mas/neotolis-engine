@@ -45,6 +45,7 @@
 #include "resource/nt_resource.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_label.h"
+#include "ui/nt_ui_scale.h"
 #include "window/nt_window.h"
 
 #include "math/nt_math.h"
@@ -195,6 +196,14 @@ static bool s_atlas_bound;
 static bool s_font_bound;
 static bool s_debug_overlay;
 static uint32_t s_white_region_idx;
+
+/* Reference resolution -- everything in main.c speaks logical pixels.
+ * EXPAND keeps aspect ratio and grows logical past ref to fill any window;
+ * 1 key cycles all four modes so you can compare. */
+#define UI_REF_W 640.0F
+#define UI_REF_H 960.0F
+static nt_ui_scale_mode_t s_scale_mode = NT_UI_SCALE_EXPAND;
+static const char *const k_scale_mode_names[] = {"STRETCH", "LETTERBOX", "CROP", "EXPAND"};
 // #endregion
 
 // #region binding (run once resources are READY)
@@ -247,28 +256,40 @@ static void frame(void) {
         s_debug_overlay = !s_debug_overlay;
         (void)printf("ui_theme_demo: debug overlay %s\n", s_debug_overlay ? "ON" : "OFF");
     }
+    if (nt_input_key_is_pressed(NT_KEY_1)) {
+        s_scale_mode = (nt_ui_scale_mode_t)((s_scale_mode + 1) % 4);
+        (void)printf("ui_theme_demo: scale mode -> %s\n", k_scale_mode_names[s_scale_mode]);
+    }
 
     try_bind_resources();
 
-    const float w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
-    const float h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
+    const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
+    const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
 
-    /* Frame ortho VP -- screen-space, bottom-left origin. */
+    /* Logical-space layout: everything below speaks in logical px. Ortho
+     * projection maps the logical box to the (possibly letterboxed) physical
+     * region; mouse gets the inverse transform via nt_ui_scale_apply_pointer.
+     * Slug text stays sharp because it computes derivatives in screen space. */
+    nt_ui_scale_desc_t scale_desc = {.ref_w = UI_REF_W, .ref_h = UI_REF_H, .mode = s_scale_mode};
+    nt_ui_scale_t scale = nt_ui_compute_scale(&scale_desc, fb_w, fb_h);
+    nt_ui_scale_ortho_t ortho = nt_ui_scale_ortho(&scale);
+
+    /* Frame ortho VP -- logical-space, bottom-left origin. */
     mat4 view_m;
     mat4 proj_m;
     mat4 vp;
     glm_mat4_identity(view_m);
-    glm_ortho(0.0F, w, 0.0F, h, -1.0F, 1.0F, proj_m);
+    glm_ortho(ortho.left, ortho.right, ortho.bottom, ortho.top, -1.0F, 1.0F, proj_m);
     glm_mat4_mul(proj_m, view_m, vp);
 
     nt_frame_uniforms_t uniforms = {0};
     memcpy(uniforms.view_proj, vp, 64);
     memcpy(uniforms.view, view_m, 64);
     memcpy(uniforms.proj, proj_m, 64);
-    uniforms.resolution[0] = w;
-    uniforms.resolution[1] = h;
-    uniforms.resolution[2] = (w > 0.0F) ? (1.0F / w) : 0.0F;
-    uniforms.resolution[3] = (h > 0.0F) ? (1.0F / h) : 0.0F;
+    uniforms.resolution[0] = fb_w;
+    uniforms.resolution[1] = fb_h;
+    uniforms.resolution[2] = (fb_w > 0.0F) ? (1.0F / fb_w) : 0.0F;
+    uniforms.resolution[3] = (fb_h > 0.0F) ? (1.0F / fb_h) : 0.0F;
     uniforms.near_far[0] = -1.0F;
     uniforms.near_far[1] = 1.0F;
 
@@ -306,12 +327,14 @@ static void frame(void) {
         nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
-        const nt_pointer_t *mouse = &g_nt_input.pointers[0];
+        /* Physical mouse -> logical-space mouse for the UI's coord system. */
+        const nt_pointer_t mouse_logical = nt_ui_scale_apply_pointer(&scale, g_nt_input.pointers[0]);
         nt_ui_set_debug_overlay(s_ctx, s_debug_overlay);
-        nt_ui_begin(s_ctx, w, h, mouse);
+        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, &mouse_logical);
 
-        char status_text[160];
-        (void)snprintf(status_text, sizeof status_text, "palette: %s    overlay: %s    [T] swap palette    [D] toggle debug", g_current->name, s_debug_overlay ? "ON" : "OFF");
+        char status_text[200];
+        (void)snprintf(status_text, sizeof status_text, "palette: %s   overlay: %s   scale: %s %dx%d   [T] palette [D] debug [1] scale", g_current->name, s_debug_overlay ? "ON" : "OFF",
+                       k_scale_mode_names[s_scale_mode], (int)scale.logical_w, (int)scale.logical_h);
 
         // #region clay declaration
         CLAY({.id = CLAY_ID("root"),
@@ -373,7 +396,7 @@ static void frame(void) {
 
         nt_ui_end(s_ctx);
 
-        nt_ui_target_t target = {.viewport = {0.0F, 0.0F, w, h}};
+        nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
     }
 
