@@ -25,7 +25,7 @@ typedef struct {
     float logical_h;
     float scale_x; /* physical / logical (scale_x == scale_y unless STRETCH) */
     float scale_y;
-    float offset_x; /* letterbox margin in physical px; 0 for non-letterbox */
+    float offset_x; /* physical px margin; 0 for STRETCH/EXPAND; negative in CROP */
     float offset_y;
     float fb_w; /* physical framebuffer dims -- echoed back for target build */
     float fb_h;

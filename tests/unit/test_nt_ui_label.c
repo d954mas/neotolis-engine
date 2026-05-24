@@ -51,7 +51,7 @@ static const Clay_RenderCommand *find_first_text_cmd(const nt_ui_context_t *ctx)
 /* ---- Test 1: happy path ---- */
 static void test_label_emits_text_with_style_color(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "Hello", &s_style_body); }
     nt_ui_end(s_fx.ctx);
 
@@ -84,7 +84,7 @@ static void test_label_emits_text_with_style_color(void) {
  * nt_ui_end then closes the frame normally. */
 static void test_label_null_style_asserts(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, NULL, "X", NULL)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -97,7 +97,7 @@ static void test_label_out_of_range_font_asserts(void) {
         .color = {255.0F, 255.0F, 255.0F, 255.0F},
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, NULL, "X", &bad)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -111,7 +111,7 @@ static void test_label_unbound_font_asserts(void) {
         .color = {255.0F, 255.0F, 255.0F, 255.0F},
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, NULL, "X", &bad)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -124,7 +124,7 @@ static void test_label_zero_font_size_asserts(void) {
         .color = {255.0F, 255.0F, 255.0F, 255.0F},
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, NULL, "X", &bad)); }
     nt_ui_end(s_fx.ctx);
 }
@@ -144,7 +144,7 @@ static void test_label_zero_init_wraps_words_left(void) {
         .color = {255.0F, 255.0F, 255.0F, 255.0F},
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "ABC DEF", &s); }
     nt_ui_end(s_fx.ctx);
 
@@ -174,7 +174,7 @@ static void test_label_full_field_passthrough(void) {
         /* wrap_mode + align left zero-init (WORDS + LEFT) -- see comment above. */
     };
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     /* Stub font's measure cb returns {0,0}; with non-zero letterSpacing
      * Clay subtracts at clay.h:1677 producing preferredDimensions.width<0,
      * and the resulting bbox is then offscreen-culled (clay.h:2473). Disable
@@ -206,7 +206,7 @@ static void test_label_per_call_override(void) {
     s.color = (Clay_Color){32.0F, 200.0F, 64.0F, 255.0F};
 
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "Override", &s); }
     nt_ui_end(s_fx.ctx);
 
@@ -222,7 +222,7 @@ static void test_label_per_call_override(void) {
  * length=0 via the measure cb's len==0 early-return path. */
 static void test_label_empty_text_accepted(void) {
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "", &s_style_body); }
     nt_ui_end(s_fx.ctx);
     TEST_PASS();
@@ -234,7 +234,7 @@ static void test_label_empty_text_accepted(void) {
 static void test_label_element_data_passthrough(void) {
     int marker = 42;
     nt_pointer_t mouse = {0};
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NT_UI_DATA_FULL(7, &marker), "Hi", &s_style_body); }
     nt_ui_end(s_fx.ctx);
 

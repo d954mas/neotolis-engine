@@ -46,7 +46,7 @@ vec2 SolveHorizPoly(vec2 p0, vec2 p1, vec2 p2) {
     float d = sqrt(max(b.y * b.y - a.y * p0.y, 0.0));
     float q = b.y + (b.y >= 0.0 ? d : -d);
     float t_add = q / a.y;
-    float t_mul = (abs(q) > 1e-30) ? (p0.y / q) : t_add;
+    float t_mul = (abs(q) > 1e-6) ? (p0.y / q) : t_add;
     // Map back to reference t1=(b-d)/a, t2=(b+d)/a ordering by sign(b.y).
     float t1 = (b.y >= 0.0) ? t_mul : t_add;
     float t2 = (b.y >= 0.0) ? t_add : t_mul;
@@ -66,7 +66,7 @@ vec2 SolveVertPoly(vec2 p0, vec2 p1, vec2 p2) {
     float d = sqrt(max(b.x * b.x - a.x * p0.x, 0.0));
     float q = b.x + (b.x >= 0.0 ? d : -d);
     float t_add = q / a.x;
-    float t_mul = (abs(q) > 1e-30) ? (p0.x / q) : t_add;
+    float t_mul = (abs(q) > 1e-6) ? (p0.x / q) : t_add;
     float t1 = (b.x >= 0.0) ? t_mul : t_add;
     float t2 = (b.x >= 0.0) ? t_add : t_mul;
 

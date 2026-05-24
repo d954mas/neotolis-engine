@@ -36,12 +36,16 @@
 typedef struct nt_ui_context nt_ui_context_t;
 
 /* Caller owns framebuffer binding; walker writes only viewport + scissor.
- *   viewport[]  = LOGICAL Clay-space {x, y, w, h} (matches nt_ui_begin).
- *   fb_size[]   = PHYSICAL fb {w, h}; sentinel {0,0} = treat viewport as
- *                 physical (legacy 1:1 mode for existing tests/non-scaled demos).
- *   fb_offset[] = PHYSICAL letterbox margin {ox, oy}; 0 for EXPAND/STRETCH.
- * Build via nt_ui_scale_make_target() or zero-init fb_* for legacy 1:1. */
+ *   DIRECT: viewport[] = GL physical px {x, y, w, h}; fb_size/fb_offset ignored.
+ *   SCALED: viewport[] = LOGICAL Clay-space; fb_size = PHYSICAL fb;
+ *           fb_offset = PHYSICAL letterbox margin (may be negative in CROP). */
+typedef enum {
+    NT_UI_TARGET_DIRECT = 0,
+    NT_UI_TARGET_SCALED = 1,
+} nt_ui_target_mode_t;
+
 typedef struct {
+    nt_ui_target_mode_t mode;
     float viewport[4];
     float fb_size[2];
     float fb_offset[2];
@@ -113,7 +117,8 @@ void nt_ui_destroy_context(nt_ui_context_t *ctx);
 
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 
-void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_pointer_t *mouse);
+/* dt drives Clay scroll-container momentum; pass g_nt_app.dt or test value. */
+void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *mouse);
 void nt_ui_end(nt_ui_context_t *ctx);
 
 /* Toggle Clay's debug overlay (element tree + bbox). Applied at next begin.

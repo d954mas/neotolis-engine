@@ -17,7 +17,7 @@ typedef struct {
     uint16_t font_size;       /* px; asserted > 0 */
     Clay_Color color;         /* 4 floats, 0..255 (Clay convention) */
     uint16_t line_height;     /* px; 0 = auto from font metrics */
-    uint16_t letter_tracking; /* px; maps to Clay letterSpacing (uint16_t — D-53-07 Drift-1 corrected) */
+    uint16_t letter_tracking; /* px; maps to Clay letterSpacing */
     uint8_t wrap_mode;        /* Clay_TextElementConfigWrapMode value; 0 = CLAY_TEXT_WRAP_WORDS default */
     uint8_t align;            /* Clay_TextAlignment value; 0 = CLAY_TEXT_ALIGN_LEFT default */
 } nt_ui_label_style_t;

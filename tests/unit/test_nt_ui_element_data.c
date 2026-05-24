@@ -31,34 +31,51 @@ static void test_full_macro(void) {
     TEST_ASSERT_EQUAL_PTR(&payload, d->user_data);
 }
 
-/* Each macro call advances scratch usage (proves allocation actually happens). */
-static void test_macro_uses_scratch(void) {
+/* Layer-only path uses static table (no scratch); FULL with user_data scratches. */
+static void test_layer_only_no_scratch(void) {
     const size_t before = nt_mem_scratch_test_used();
     (void)NT_UI_DATA_LAYER(0);
-    const size_t after_first = nt_mem_scratch_test_used();
-    TEST_ASSERT_TRUE(after_first > before);
-    (void)NT_UI_DATA_FULL(1, NULL);
-    const size_t after_second = nt_mem_scratch_test_used();
-    TEST_ASSERT_TRUE(after_second > after_first);
-}
-
-/* Two macro calls return distinct pointers. */
-static void test_macro_distinct_allocations(void) {
-    nt_ui_element_data_t *a = NT_UI_DATA_LAYER(3);
-    nt_ui_element_data_t *b = NT_UI_DATA_LAYER(4);
-    TEST_ASSERT_TRUE(a != b);
-    TEST_ASSERT_EQUAL_UINT8(3U, a->layer);
-    TEST_ASSERT_EQUAL_UINT8(4U, b->layer);
-}
-
-/* scratch_reset invalidates prior pointers; next macro call starts from base. */
-static void test_reset_releases_macro_storage(void) {
     (void)NT_UI_DATA_LAYER(1);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)before, (uint64_t)nt_mem_scratch_test_used());
+}
+
+static void test_full_with_user_data_uses_scratch(void) {
+    int payload = 1;
+    const size_t before = nt_mem_scratch_test_used();
+    (void)NT_UI_DATA_FULL(2, &payload);
+    TEST_ASSERT_TRUE(nt_mem_scratch_test_used() > before);
+}
+
+/* Layer-only: same layer -> same pointer (static table); different layer -> distinct. */
+static void test_layer_only_same_layer_same_ptr(void) {
+    nt_ui_element_data_t *a = NT_UI_DATA_LAYER(3);
+    nt_ui_element_data_t *b = NT_UI_DATA_LAYER(3);
+    nt_ui_element_data_t *c = NT_UI_DATA_LAYER(4);
+    TEST_ASSERT_EQUAL_PTR(a, b);
+    TEST_ASSERT_TRUE(a != c);
+    TEST_ASSERT_EQUAL_UINT8(3U, a->layer);
+    TEST_ASSERT_EQUAL_UINT8(4U, c->layer);
+}
+
+/* FULL allocations are distinct (each gets its own scratch slot). */
+static void test_full_distinct_allocations(void) {
+    int p1 = 1;
+    int p2 = 2;
+    nt_ui_element_data_t *a = NT_UI_DATA_FULL(0, &p1);
+    nt_ui_element_data_t *b = NT_UI_DATA_FULL(0, &p2);
+    TEST_ASSERT_TRUE(a != b);
+    TEST_ASSERT_EQUAL_PTR(&p1, a->user_data);
+    TEST_ASSERT_EQUAL_PTR(&p2, b->user_data);
+}
+
+/* scratch_reset invalidates only FULL pointers; layer-only table survives. */
+static void test_reset_releases_macro_storage(void) {
+    int payload = 0;
+    (void)NT_UI_DATA_FULL(1, &payload);
     const size_t after_alloc = nt_mem_scratch_test_used();
     TEST_ASSERT_TRUE(after_alloc > 0U);
     nt_mem_scratch_reset();
     TEST_ASSERT_EQUAL_UINT64(0U, (uint64_t)nt_mem_scratch_test_used());
-    /* Macro still works after reset. */
     nt_ui_element_data_t *d = NT_UI_DATA_LAYER(2);
     TEST_ASSERT_EQUAL_UINT8(2U, d->layer);
 }
@@ -67,8 +84,10 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_layer_only_macro);
     RUN_TEST(test_full_macro);
-    RUN_TEST(test_macro_uses_scratch);
-    RUN_TEST(test_macro_distinct_allocations);
+    RUN_TEST(test_layer_only_no_scratch);
+    RUN_TEST(test_full_with_user_data_uses_scratch);
+    RUN_TEST(test_layer_only_same_layer_same_ptr);
+    RUN_TEST(test_full_distinct_allocations);
     RUN_TEST(test_reset_releases_macro_storage);
     return UNITY_END();
 }

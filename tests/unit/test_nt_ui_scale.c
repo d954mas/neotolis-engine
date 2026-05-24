@@ -230,6 +230,7 @@ static void test_target_expand(void) {
     nt_ui_scale_desc_t desc = {.ref_w = 800.0F, .ref_h = 600.0F, .mode = NT_UI_SCALE_EXPAND};
     nt_ui_scale_t s = nt_ui_compute_scale(&desc, 1600.0F, 600.0F);
     nt_ui_target_t t = nt_ui_scale_make_target(&s);
+    TEST_ASSERT_EQUAL_INT(NT_UI_TARGET_SCALED, t.mode);
     assert_int_eq_scaled(0, t.viewport[0], 1);
     assert_int_eq_scaled(0, t.viewport[1], 1);
     assert_int_eq_scaled(1600000, t.viewport[2], 1); /* logical_w grew */

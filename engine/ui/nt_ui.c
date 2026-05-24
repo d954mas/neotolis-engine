@@ -193,13 +193,14 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 
 // #region begin_end
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_pointer_t *mouse) {
+void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *mouse) {
     NT_ASSERT(ctx != NULL && "nt_ui_begin: ctx must be non-NULL");
     NT_ASSERT(s_nt_ui_module_initialized && "nt_ui_begin: nt_ui_module_init() must be called before begin");
     NT_ASSERT(mouse != NULL && "nt_ui_begin: mouse must be non-NULL");
     /* isfinite() rejects NaN + +-inf which `>= 0.0F` alone lets through. */
     NT_ASSERT(isfinite(screen_w) && screen_w >= 0.0F && "nt_ui_begin: screen_w must be finite and non-negative");
     NT_ASSERT(isfinite(screen_h) && screen_h >= 0.0F && "nt_ui_begin: screen_h must be finite and non-negative");
+    NT_ASSERT(isfinite(dt) && dt >= 0.0F && "nt_ui_begin: dt must be finite and non-negative");
     NT_ASSERT(g_nt_ui_inframe_ctx == NULL && "nt_ui_begin: another ctx is mid-frame");
     NT_ASSERT(!ctx->in_frame && "nt_ui_begin: ctx already in_frame");
 
@@ -218,7 +219,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_
 
     /* Forward wheel + enable touch/drag-scroll (mobile/web pointer drag inside
      * a Clay clip scrolls it). Y inverted: Clay scroll opposite of typical wheel_dy. */
-    Clay_UpdateScrollContainers(true, (Clay_Vector2){.x = mouse->wheel_dx, .y = -mouse->wheel_dy}, 1.0F / 60.0F);
+    Clay_UpdateScrollContainers(true, (Clay_Vector2){.x = mouse->wheel_dx, .y = -mouse->wheel_dy}, dt);
 
     Clay_BeginLayout();
 }
@@ -262,7 +263,27 @@ static inline uint32_t nt_color_pack_clay(Clay_Color c) {
 // #endregion
 
 // #region element_data_alloc
+/* Static table for layer-only data: most common case (per-widget batch tag)
+ * avoids the per-call scratch alloc. .rodata cost: 256 * 16 = 4 KB.
+ * Filled lazily on first use; the layer field equals the index. */
+static nt_ui_element_data_t s_layer_only_table[256];
+static bool s_layer_only_initialized;
+
+static void init_layer_only_table(void) {
+    for (uint32_t i = 0; i < 256U; i++) {
+        s_layer_only_table[i].layer = (nt_ui_layer_t)i;
+        s_layer_only_table[i].user_data = NULL;
+    }
+    s_layer_only_initialized = true;
+}
+
 nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data) {
+    if (user_data == NULL) {
+        if (!s_layer_only_initialized) {
+            init_layer_only_table();
+        }
+        return &s_layer_only_table[layer];
+    }
     nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
     d->layer = layer;
     d->user_data = user_data;
@@ -590,40 +611,29 @@ typedef struct {
     int h;
 } scissor_rect_t;
 
-/* Convert a Clay-space scissor rect to GL bottom-left physical pixels and
- * submit. Two interpretations of target->viewport based on fb_size sentinel:
- *
- * fb_size = {0, 0} -- LEGACY 1:1 mode (existing tests, non-scaled demos):
- *   viewport.x/y are GL physical coords (vy = pixels from fb BOTTOM, like
- *   a glViewport(x, y, w, h) call). Y-flip happens within the viewport
- *   rect, ignoring everything below it in the fb.
- *
- * fb_size > 0 -- SCALED mode (nt_ui_scale_make_target builds this):
- *   viewport is in Clay logical coords (top-down Y); fb_size is physical;
- *   fb_offset is letterbox margin from top-left of fb. Scissor scales +
- *   shifts into physical, then Y-flips against fb height for GL. */
+/* DIRECT: viewport is GL physical; Y-flip inside viewport rect.
+ * SCALED: viewport is logical (Y top-down); scale+shift to physical; Y-flip
+ * against fb height for GL. Floor/ceil avoid 1-px sliver clipping. */
 static void apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp) {
     const float vx = target->viewport[0];
     const float vy = target->viewport[1];
     const float vw = target->viewport[2];
     const float vh = target->viewport[3];
-    const float fbw = target->fb_size[0];
-    const float fbh = target->fb_size[1];
 
-    if (fbw <= 0.0F || fbh <= 0.0F) {
-        /* Legacy: viewport.y is already GL bottom-up. Y-flip inside viewport. */
+    if (target->mode == NT_UI_TARGET_DIRECT) {
         nt_gfx_set_scissor((int)vx + x, (int)(vy + vh) - y - hp, wp, hp);
         return;
     }
 
     const float ox = target->fb_offset[0];
     const float oy = target->fb_offset[1];
-    const float sx = (vw > 0.0F) ? ((fbw - (2.0F * ox)) / vw) : 1.0F;
+    const float fbh = target->fb_size[1];
+    const float sx = (vw > 0.0F) ? ((target->fb_size[0] - (2.0F * ox)) / vw) : 1.0F;
     const float sy = (vh > 0.0F) ? ((fbh - (2.0F * oy)) / vh) : 1.0F;
-    const int phys_x = (int)(ox + (sx * (vx + (float)x)));
-    const int phys_y_top = (int)(oy + (sy * (vy + (float)y)));
-    const int phys_w = (int)(sx * (float)wp);
-    const int phys_h = (int)(sy * (float)hp);
+    const int phys_x = (int)floorf(ox + (sx * (vx + (float)x)));
+    const int phys_y_top = (int)floorf(oy + (sy * (vy + (float)y)));
+    const int phys_w = (int)ceilf(sx * (float)wp);
+    const int phys_h = (int)ceilf(sy * (float)hp);
     const int phys_y_gl = (int)fbh - phys_y_top - phys_h;
     nt_gfx_set_scissor(phys_x, phys_y_gl, phys_w, phys_h);
 }
@@ -633,13 +643,17 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
 
     /* Unclipped axis falls back to viewport; floor/ceil avoid 1px right/bottom bite.
-     * Special case: both axes false + bbox set = Clay's floating clipTo=ATTACHED_PARENT
-     * marker (clay.h:2695-2701). Clip to bbox on both axes. */
+     * Both axes false is RESERVED for Clay's floating clipTo=ATTACHED_PARENT marker
+     * (clay.h:2695-2701) -- bbox is the parent's clip area, applied to both axes.
+     * User code must always set at least one axis true; both-false with degenerate
+     * bbox is invalid use and trips the assert below. */
     const Clay_ClipRenderData *clip = &c->renderData.clip;
+    const bool both_false = !clip->horizontal && !clip->vertical;
+    NT_ASSERT((!both_false || (c->boundingBox.width > 0.0F && c->boundingBox.height > 0.0F)) && "nt_ui SCISSOR_START with both axes false requires non-empty bbox (reserved for Clay floating clipTo marker)");
     const int vw = (int)target->viewport[2];
     const int vh = (int)target->viewport[3];
-    const bool clip_h = clip->horizontal || (!clip->horizontal && !clip->vertical);
-    const bool clip_v = clip->vertical || (!clip->horizontal && !clip->vertical);
+    const bool clip_h = clip->horizontal || both_false;
+    const bool clip_v = clip->vertical || both_false;
     int x;
     int y;
     int wp;
@@ -800,9 +814,13 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
         scissor_pop(scissor_stack, depth, target, sprite_pipeline_dirty);
         return;
-    case CLAY_RENDER_COMMAND_TYPE_CUSTOM:
-        emit_custom(ctx, c, sprite_pipeline_dirty);
+    case CLAY_RENDER_COMMAND_TYPE_CUSTOM: {
+        /* Match RECT/TEXT/IMAGE/BORDER: custom handler gets bbox in GL world space. */
+        Clay_RenderCommand local = *c;
+        local.boundingBox.y = world_y;
+        emit_custom(ctx, &local, sprite_pipeline_dirty);
         return;
+    }
     }
 }
 
@@ -856,9 +874,12 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* AFTER entry flush so per-walk delta excludes caller's drained geometry. */
     const uint32_t calls_at_entry = nt_gfx_get_frame_draw_calls();
 
-    /* glViewport needs PHYSICAL pixels. fb_size=0 sentinel = legacy 1:1 mode. */
-    if (target->fb_size[0] > 0.0F && target->fb_size[1] > 0.0F) {
-        nt_gfx_set_viewport((int)target->fb_offset[0], (int)target->fb_offset[1], (int)(target->fb_size[0] - (2.0F * target->fb_offset[0])), (int)(target->fb_size[1] - (2.0F * target->fb_offset[1])));
+    /* glViewport needs PHYSICAL pixels. SCALED mode reads fb_size + fb_offset;
+     * DIRECT mode viewport[] is already in physical px. */
+    if (target->mode == NT_UI_TARGET_SCALED) {
+        const float ox2 = 2.0F * target->fb_offset[0];
+        const float oy2 = 2.0F * target->fb_offset[1];
+        nt_gfx_set_viewport((int)target->fb_offset[0], (int)target->fb_offset[1], (int)(target->fb_size[0] - ox2), (int)(target->fb_size[1] - oy2));
     } else {
         nt_gfx_set_viewport((int)target->viewport[0], (int)target->viewport[1], (int)target->viewport[2], (int)target->viewport[3]);
     }

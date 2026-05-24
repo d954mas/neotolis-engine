@@ -18,19 +18,19 @@ static Clay_RenderCommand s_test_cmds[MAX_TEST_CMDS];
 
 /* Custom-handler observers. */
 static int s_custom_calls;
-static const void *s_custom_received_cmd;
+static Clay_BoundingBox s_custom_received_bbox;
 static void *s_custom_received_user;
 
 static void test_custom_handler(const void *clay_cmd, void *userdata) {
     s_custom_calls++;
-    s_custom_received_cmd = clay_cmd;
+    s_custom_received_bbox = ((const Clay_RenderCommand *)clay_cmd)->boundingBox;
     s_custom_received_user = userdata;
 }
 
 void setUp(void) {
     nt_test_assert_install();
     s_custom_calls = 0;
-    s_custom_received_cmd = NULL;
+    s_custom_received_bbox = (Clay_BoundingBox){0};
     s_custom_received_user = NULL;
     memset(s_test_cmds, 0, sizeof s_test_cmds);
 
@@ -61,9 +61,12 @@ static void test_custom_handler_invoked(void) {
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_EQUAL_INT(1, s_custom_calls);
-    /* Handler receives clay_cmd as opaque const void * -- same pointer
-     * as our cmds[0] slot. */
-    TEST_ASSERT_EQUAL_PTR(c, s_custom_received_cmd);
+    /* Handler receives a local copy with bbox.y Y-flipped to GL world space:
+     * world_y = vy + vh - bb.y - bb.h = 0 + 600 - 5 - 50 = 545. */
+    TEST_ASSERT_EQUAL_INT(5, (int)s_custom_received_bbox.x);
+    TEST_ASSERT_EQUAL_INT(545, (int)s_custom_received_bbox.y);
+    TEST_ASSERT_EQUAL_INT(50, (int)s_custom_received_bbox.width);
+    TEST_ASSERT_EQUAL_INT(50, (int)s_custom_received_bbox.height);
     TEST_ASSERT_EQUAL_PTR(&sentinel, s_custom_received_user);
 }
 

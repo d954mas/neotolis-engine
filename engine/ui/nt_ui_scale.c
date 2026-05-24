@@ -96,6 +96,7 @@ nt_ui_scale_ortho_t nt_ui_scale_ortho(const nt_ui_scale_t *s) {
 nt_ui_target_t nt_ui_scale_make_target(const nt_ui_scale_t *s) {
     NT_ASSERT(s != NULL && "nt_ui_scale_make_target: s must be non-NULL");
     nt_ui_target_t t;
+    t.mode = NT_UI_TARGET_SCALED;
     t.viewport[0] = 0.0F;
     t.viewport[1] = 0.0F;
     t.viewport[2] = s->logical_w;
