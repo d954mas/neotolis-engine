@@ -791,14 +791,36 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     uint16_t yband_offsets[NT_FONT_MAX_BANDS] = {0};
 
     uint32_t local_pos = 0;
+    /* Reference Slug shader (SlugPixelShader.hlsl:187-192) early-outs the
+     * Y-band loop when a curve's max-x falls left of the sample pixel: this
+     * is only valid when curves within a band are sorted DESCENDING by
+     * max-x. We sort to match the documented contract; also gives stable
+     * summation order across pixels (FP rounding). */
+    uint16_t band_sorted[NT_FONT_MAX_CURVES_PER_GLYPH];
     for (uint8_t b = 0; b < slot->band_count; b++) {
         yband_offsets[b] = (uint16_t)(local_pos / 2);
         float ybot = bbox_y0 + ((float)b * band_height) - y_margin;
         float ytop = ybot + band_height + (y_margin * 2.0F);
+        uint16_t band_n = 0;
         for (uint16_t ci = 0; ci < curve_count; ci++) {
             if (curve_y_max[ci] < ybot || curve_y_min[ci] > ytop) {
                 continue;
             }
+            band_sorted[band_n++] = ci;
+        }
+        /* Insertion sort descending by max-x. n typically 0-15, never near 256. */
+        for (uint16_t i = 1; i < band_n; i++) {
+            uint16_t key = band_sorted[i];
+            float key_max = curve_x_max[key];
+            int32_t j = (int32_t)i - 1;
+            while (j >= 0 && curve_x_max[band_sorted[j]] < key_max) {
+                band_sorted[j + 1] = band_sorted[j];
+                j--;
+            }
+            band_sorted[j + 1] = key;
+        }
+        for (uint16_t i = 0; i < band_n; i++) {
+            uint16_t ci = band_sorted[i];
             uint32_t t0 = local_pos * 4;
             uint32_t t1 = t0 + 4;
             s_curve_upload[t0 + 0] = nt_float32_to_float16(curves[ci].p0x);
@@ -824,10 +846,26 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
         if (band_width > 0.0F) {
             float xleft = bbox_x0 + ((float)b * band_width) - x_margin;
             float xright = xleft + band_width + (x_margin * 2.0F);
+            /* Same contract for X-bands: sort DESCENDING by max-y. */
+            uint16_t band_n = 0;
             for (uint16_t ci = 0; ci < curve_count; ci++) {
                 if (curve_x_max[ci] < xleft || curve_x_min[ci] > xright) {
                     continue;
                 }
+                band_sorted[band_n++] = ci;
+            }
+            for (uint16_t i = 1; i < band_n; i++) {
+                uint16_t key = band_sorted[i];
+                float key_max = curve_y_max[key];
+                int32_t j = (int32_t)i - 1;
+                while (j >= 0 && curve_y_max[band_sorted[j]] < key_max) {
+                    band_sorted[j + 1] = band_sorted[j];
+                    j--;
+                }
+                band_sorted[j + 1] = key;
+            }
+            for (uint16_t i = 0; i < band_n; i++) {
+                uint16_t ci = band_sorted[i];
                 uint32_t t0 = local_pos * 4;
                 uint32_t t1 = t0 + 4;
                 s_curve_upload[t0 + 0] = nt_float32_to_float16(curves[ci].p0x);

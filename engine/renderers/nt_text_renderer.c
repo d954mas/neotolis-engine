@@ -248,17 +248,27 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
         nt_text_renderer_flush();
     }
 
-    /* Local quad corners (scaled from font units to target size) */
-    float x0 = pen_x + ((float)g->bbox_x0 * scale);
-    float y0 = pen_y + ((float)g->bbox_y0 * scale);
-    float x1 = pen_x + ((float)g->bbox_x1 * scale);
-    float y1 = pen_y + ((float)g->bbox_y1 * scale);
+    /* Dynamic dilation ("Decade of Slug" main improvement): pad the quad by
+     * 0.5 px per side in screen space. Slightly oversized quad lets fragments
+     * sample em-coords just outside the glyph bbox -- coverage falls cleanly
+     * to 0 there, eliminating under-coverage at bbox edges and shifting
+     * sample positions off pixel-aligned curve endpoints. Assumes 1 world
+     * unit = 1 screen pixel (true for nt_ui's orthographic projection). */
+    const float dilate_px = 0.5F;
+    const float dilate_em = dilate_px / scale;
 
-    /* Em-space coordinates (unscaled, for shader) */
-    float em_x0 = (float)g->bbox_x0;
-    float em_y0 = (float)g->bbox_y0;
-    float em_x1 = (float)g->bbox_x1;
-    float em_y1 = (float)g->bbox_y1;
+    /* Local quad corners (scaled from font units to target size) + dilation */
+    float x0 = pen_x + ((float)g->bbox_x0 * scale) - dilate_px;
+    float y0 = pen_y + ((float)g->bbox_y0 * scale) - dilate_px;
+    float x1 = pen_x + ((float)g->bbox_x1 * scale) + dilate_px;
+    float y1 = pen_y + ((float)g->bbox_y1 * scale) + dilate_px;
+
+    /* Em-space texcoords -- dilated to match the oversized quad so each
+     * fragment's sampled em-coord lines up with its world position. */
+    float em_x0 = (float)g->bbox_x0 - dilate_em;
+    float em_y0 = (float)g->bbox_y0 - dilate_em;
+    float em_x1 = (float)g->bbox_x1 + dilate_em;
+    float em_y1 = (float)g->bbox_y1 + dilate_em;
 
     /* Pack glyph data as uint bit patterns */
     float gd0;
@@ -274,15 +284,16 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
     uint32_t vi = s_text.vertex_count;
     nt_text_vertex_t *v = &s_text.vertices[vi];
 
-    /* Shared fields — fill once in v[0], copy to v[1..3] */
+    /* Shared fields — fill once in v[0], copy to v[1..3]. glyph_bounds is the
+     * UNDILATED glyph bbox so the shader's band lookup stays correct. */
     v[0].glyph_data[0] = gd0;
     v[0].glyph_data[1] = gd1;
     v[0].glyph_data[2] = gd2;
     v[0].glyph_data[3] = gd3;
-    v[0].glyph_bounds[0] = em_x0;
-    v[0].glyph_bounds[1] = em_y0;
-    v[0].glyph_bounds[2] = em_x1;
-    v[0].glyph_bounds[3] = em_y1;
+    v[0].glyph_bounds[0] = (float)g->bbox_x0;
+    v[0].glyph_bounds[1] = (float)g->bbox_y0;
+    v[0].glyph_bounds[2] = (float)g->bbox_x1;
+    v[0].glyph_bounds[3] = (float)g->bbox_y1;
     memcpy(v[0].color, color, 16);
     v[1] = v[0];
     v[2] = v[0];

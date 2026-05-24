@@ -5,9 +5,9 @@ precision highp int;
 // Ported from HLSL reference (github.com/EricLengyel/Slug, MIT license)
 // Uses CalcRootCode, reference solvers, and CalcCoverage formula verbatim.
 
-uniform sampler2D u_curve_texture; // RGBA16F -- curve control points as float16
+uniform sampler2D u_curve_texture;       // RGBA16F -- curve control points as float16
 uniform highp usampler2D u_band_texture; // RG16UI -- (curve_start, curve_count) per band
-uniform int u_curve_tex_width;     // For linear-to-2D addressing
+uniform int u_curve_tex_width;           // For linear-to-2D addressing
 
 in vec2 v_texcoord;
 flat in uvec4 v_glyph;       // curve_offset_y, band_row, curve_offset_x, band_count
@@ -16,9 +16,7 @@ in vec4 v_color;
 
 out vec4 frag_color;
 
-ivec2 CurveTexCoord(uint offset) {
-    return ivec2(int(offset) % u_curve_tex_width, int(offset) / u_curve_tex_width);
-}
+ivec2 CurveTexCoord(uint offset) { return ivec2(int(offset) % u_curve_tex_width, int(offset) / u_curve_tex_width); }
 
 // Determine root eligibility from signs of control point coordinates.
 // Returns eligibility in bits 0 (root 1) and 8 (root 2).
@@ -46,12 +44,12 @@ vec2 SolveHorizPoly(vec2 p0, vec2 p1, vec2 p2) {
     float t2 = (b.y + d) * ra;
 
     // Linear fallback when quadratic coefficient is near zero
-    if (abs(a.y) < 1.0 / 65536.0) { t1 = p0.y * rb; t2 = t1; }
+    if (abs(a.y) < 1.0 / 65536.0) {
+        t1 = p0.y * rb;
+        t2 = t1;
+    }
 
-    return vec2(
-        (a.x * t1 - b.x * 2.0) * t1 + p0.x,
-        (a.x * t2 - b.x * 2.0) * t2 + p0.x
-    );
+    return vec2((a.x * t1 - b.x * 2.0) * t1 + p0.x, (a.x * t2 - b.x * 2.0) * t2 + p0.x);
 }
 
 // Solve for y-coordinates where curve crosses x=0.
@@ -66,33 +64,30 @@ vec2 SolveVertPoly(vec2 p0, vec2 p1, vec2 p2) {
     float t1 = (b.x - d) * ra;
     float t2 = (b.x + d) * ra;
 
-    if (abs(a.x) < 1.0 / 65536.0) { t1 = p0.x * rb; t2 = t1; }
+    if (abs(a.x) < 1.0 / 65536.0) {
+        t1 = p0.x * rb;
+        t2 = t1;
+    }
 
-    return vec2(
-        (a.y * t1 - b.y * 2.0) * t1 + p0.y,
-        (a.y * t2 - b.y * 2.0) * t2 + p0.y
-    );
+    return vec2((a.y * t1 - b.y * 2.0) * t1 + p0.y, (a.y * t2 - b.y * 2.0) * t2 + p0.y);
 }
 
 // Reference: SlugPixelShader.hlsl CalcCoverage()
 float CalcCoverage(float xcov, float ycov, float xwgt, float ywgt) {
-    float coverage = max(
-        abs(xcov * xwgt + ycov * ywgt) / max(xwgt + ywgt, 1.0 / 65536.0),
-        min(abs(xcov), abs(ycov))
-    );
+    float coverage = max(abs(xcov * xwgt + ycov * ywgt) / max(xwgt + ywgt, 1.0 / 65536.0), min(abs(xcov), abs(ycov)));
     return clamp(coverage, 0.0, 1.0);
 }
 
 // Main coverage: Y-band horizontal ray + X-band vertical ray
 float SlugRender(vec2 coord) {
     uint curve_offset_y = v_glyph.x;
-    uint band_row       = v_glyph.y;
+    uint band_row = v_glyph.y;
     uint curve_offset_x = v_glyph.z;
-    uint band_count     = v_glyph.w;
+    uint band_count = v_glyph.w;
 
     vec2 pixelsPerEm = 1.0 / max(fwidth(coord), vec2(1.0e-6));
     float bbox_height = v_glyph_bounds.w - v_glyph_bounds.y;
-    float bbox_width  = v_glyph_bounds.z - v_glyph_bounds.x;
+    float bbox_width = v_glyph_bounds.z - v_glyph_bounds.x;
 
     // ---- Y-band: horizontal ray (+X) ----
     float band_y = (coord.y - v_glyph_bounds.y) / bbox_height * float(band_count);
@@ -161,6 +156,12 @@ float SlugRender(vec2 coord) {
 
 void main() {
     float coverage = SlugRender(v_texcoord);
+
+    // SLUG_WEIGHT (SlugPixelShader.hlsl:128-134): sqrt is a concave remap that
+    // lifts interior coverage (0.25 -> 0.5, 0.5 -> 0.71) so partially-covered
+    // edge pixels look thicker. Restores perceptual weight that linear AA
+    // thins on thin diagonals (w/v/M legs).
+    coverage = sqrt(coverage);
 
     if (coverage < 1.0 / 255.0)
         discard;
