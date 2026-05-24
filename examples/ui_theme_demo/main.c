@@ -1,29 +1,8 @@
-/*
- * UI Theme Demo -- Neotolis Engine
- *
- * Model D theme hot-swap demo: game owns per-widget styles via two
- * static-const palettes (g_dark + g_light), each grouping six pointers to
- * nt_ui_label_style_t instances. A single g_current palette pointer is
- * flipped on T-key press; the next frame's labels render with the new
- * palette. Engine ships no nt_ui_set_theme -- the swap is a pure game-side
- * pointer write.
- *
- * Style fields exercised:
- *   h1            font_size + color (large, panel bg outlines text zone)
- *   body          font_size + color (used in 3-cell align row -- see below)
- *   caption       align (CENTER) for status line
- *   wrap          wrap_mode + line_height + align (CENTER multi-line)
- *   tracking      letter_tracking
- *
- * Position alignment is proven separately via Clay container childAlignment
- * (three side-by-side cells with the SAME label style -- only each cell's
- * .childAlignment.x differs). textAlignment (style.align) is proven by the
- * centered multi-line wrap paragraph.
- *
- * Keys:  T = swap palette (DARK <-> LIGHT) | D = toggle Clay debug overlay
- *
- * Build packs first:  build_ui_theme_demo_packs build/examples/ui_theme_demo
- */
+/* UI Theme Demo -- Model D hot-swap: game owns per-widget styles in two
+ * static-const palettes; T-key flips g_current pointer. Also exercises
+ * nt_ui_fit_* (auto-shrink) and nt_ui_scale (adaptive resolution).
+ * Keys: T palette | D debug | 1 scale mode | 2 text length
+ * Build packs: build_ui_theme_demo_packs build/examples/ui_theme_demo */
 
 // #region includes
 #include "app/nt_app.h"
@@ -43,6 +22,7 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
+#include "stats/nt_stats.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_fit.h"
 #include "ui/nt_ui_internal.h" /* DEMO_DEBUG_LOG: inspect frozen_cmds */
@@ -68,9 +48,7 @@
 // #endregion
 
 // #region palette declarations
-/* Per-widget styles -- one static-const per (role, palette) pair. Lives in
- * .rodata; any mutation crashes -- proves immutability for free. Color
- * channels are 0..255 floats per Clay's convention. */
+/* Per-widget styles: static-const per (role, palette). Color channels 0..255 per Clay. */
 
 static const nt_ui_label_style_t g_h1_dark = {
     .font_id = 0,
@@ -92,8 +70,7 @@ static const nt_ui_label_style_t g_wrap_dark = {
     .font_id = 0,
     .font_size = 20,
     .color = {200.0F, 200.0F, 255.0F, 255.0F},
-    /* line_height = 0 -> use font's natural metrics; avoids Clay container
-     * underestimating panel height when half-leading shifts text past bb. */
+    /* line_height = 0 -> font's natural metrics (avoids panel underestimating height) */
     .wrap_mode = CLAY_TEXT_WRAP_WORDS,
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
@@ -143,7 +120,7 @@ typedef struct {
     const nt_ui_label_style_t *wrap;
     const nt_ui_label_style_t *tracking;
     Clay_Color bg;
-    Clay_Color panel; /* slightly contrasted bg -- shown under labels so text zones are visible */
+    Clay_Color panel;
     const char *name;
 } ui_palette_t;
 
@@ -168,12 +145,12 @@ static const ui_palette_t g_light = {
     .name = "LIGHT",
 };
 
-/* The pointer write IS the hot-swap. No engine API involved. */
+/* Pointer write IS the hot-swap -- engine ships no nt_ui_set_theme. */
 static const ui_palette_t *g_current = &g_dark;
 // #endregion
 
 // #region engine state
-#define UI_ARENA_SIZE ((size_t)2U * 1024U * 1024U) /* 2 MB -- plenty for 6 labels */
+#define UI_ARENA_SIZE ((size_t)2U * 1024U * 1024U)
 #define SCRATCH_ARENA_SIZE ((size_t)256U * 1024U)
 
 static NT_UI_DECLARE_ARENA(s_ui_arena, UI_ARENA_SIZE);
@@ -196,19 +173,20 @@ static nt_font_t s_font;
 
 static bool s_atlas_bound;
 static bool s_font_bound;
-static bool s_debug_overlay;
 static uint32_t s_white_region_idx;
 
-/* Reference resolution -- everything in main.c speaks logical pixels.
- * 960x640 landscape (1.5:1) -- iterating on adaptive UI; verify behavior
- * at 960x640 (1:1 to ref), 1920x1080, 480x320, etc. */
+/* Render layers: walker batches RECTs first (1 sprite DC), then TEXTs (1 text DC)
+ * within each Clay zIndex -- removes per-element sprite<->text pipeline switches. */
+#define LAYER_BG 0
+#define LAYER_TEXT 1
+
+/* Reference resolution -- main.c speaks logical pixels; scale handles physical. */
 #define UI_REF_W 960.0F
 #define UI_REF_H 640.0F
 static nt_ui_scale_mode_t s_scale_mode = NT_UI_SCALE_EXPAND;
 static const char *const k_scale_mode_names[] = {"STRETCH", "LETTERBOX", "CROP", "EXPAND"};
 
-/* Frame-by-frame debug log. Off by default; flip to 1 to dump scale + Clay
- * bbox values on every framebuffer-size change. Used by scripts/test_demo_sizes.ps1. */
+/* Set to 1 to log scale + bbox on every fb-size change (test_demo_sizes.ps1). */
 #define DEMO_DEBUG_LOG 0
 #if DEMO_DEBUG_LOG
 static uint32_t s_frame_counter = 0U;
@@ -216,11 +194,7 @@ static int s_last_logged_fb_w = -1;
 static int s_last_logged_fb_h = -1;
 #endif
 
-/* Auto-fit demo: cycle through short / medium / long text via key 2 to see
- * nt_ui_fit_width (title) and nt_ui_fit_box (paragraph) shrink as content
- * grows. Same font_size_max in both; same containers; only text length varies.
- * Strings deliberately pushed to extremes so the shrink is visually obvious
- * -- idx=2 forces the helpers to walk well down toward size_min. */
+/* Key 2 cycles short/medium/long; idx=2 forces fit_* helpers near size_min. */
 static const char *const k_titles[] = {
     "Hi",
     "Theme Hot-Swap Demo",
@@ -229,9 +203,6 @@ static const char *const k_titles[] = {
 static const char *const k_paragraphs[] = {
     "Short.",
     "Medium paragraph that wraps onto two or three lines depending on container width.",
-    /* Long block: at 20pt natural ~24 px/line, container 112 px tall holds ~4
-     * lines max. Real text needs >4 lines at every size to force fit_box to
-     * drive font_size well below 20pt. */
     "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. "
     "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. "
     "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. "
@@ -267,6 +238,7 @@ static void try_bind_resources(void) {
 // #region frame
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
+    nt_stats_frame_begin();
     nt_window_poll();
     nt_input_poll();
     nt_mem_scratch_reset();
@@ -280,15 +252,15 @@ static void frame(void) {
     nt_resource_step();
     nt_material_step();
 
-    /* Drift-3 corrected: the verified API is nt_input_key_is_pressed; the legacy
-     * planning draft used the wrong name (no _is_ infix) which would link-fail. */
     if (nt_input_key_is_pressed(NT_KEY_T)) {
         g_current = (g_current == &g_dark) ? &g_light : &g_dark;
         (void)printf("ui_theme_demo: swapped to %s palette\n", g_current->name);
     }
     if (nt_input_key_is_pressed(NT_KEY_D)) {
-        s_debug_overlay = !s_debug_overlay;
-        (void)printf("ui_theme_demo: debug overlay %s\n", s_debug_overlay ? "ON" : "OFF");
+        /* Toggle relative to current ctx state -- "x" button may have turned it off. */
+        const bool now_on = !nt_ui_get_debug_overlay(s_ctx);
+        nt_ui_set_debug_overlay(s_ctx, now_on);
+        (void)printf("ui_theme_demo: debug overlay %s\n", now_on ? "ON" : "OFF");
     }
     if (nt_input_key_is_pressed(NT_KEY_1)) {
         s_scale_mode = (nt_ui_scale_mode_t)((s_scale_mode + 1) % 4);
@@ -304,10 +276,6 @@ static void frame(void) {
     const float fb_w = (float)(g_nt_window.fb_width > 0 ? g_nt_window.fb_width : 800);
     const float fb_h = (float)(g_nt_window.fb_height > 0 ? g_nt_window.fb_height : 600);
 
-    /* Logical-space layout: everything below speaks in logical px. Ortho
-     * projection maps the logical box to the (possibly letterboxed) physical
-     * region; mouse gets the inverse transform via nt_ui_scale_apply_pointer.
-     * Slug text stays sharp because it computes derivatives in screen space. */
     nt_ui_scale_desc_t scale_desc = {.ref_w = UI_REF_W, .ref_h = UI_REF_H, .mode = s_scale_mode};
     nt_ui_scale_t scale = nt_ui_compute_scale(&scale_desc, fb_w, fb_h);
     nt_ui_scale_ortho_t ortho = nt_ui_scale_ortho(&scale);
@@ -328,7 +296,6 @@ static void frame(void) {
     }
 #endif
 
-    /* Frame ortho VP -- logical-space, bottom-left origin. */
     mat4 view_m;
     mat4 proj_m;
     mat4 vp;
@@ -372,7 +339,6 @@ static void frame(void) {
 
     nt_font_step();
 
-    /* All bindings ready? Declare + walk the UI. */
     const nt_material_info_t *sprite_info = nt_material_get_info(s_sprite_material);
     const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
     const bool can_render = s_atlas_bound && s_font_bound && sprite_info && sprite_info->ready && text_info && text_info->ready;
@@ -381,23 +347,15 @@ static void frame(void) {
         nt_gfx_update_buffer(s_frame_ubo, &uniforms, sizeof(uniforms));
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
-        /* Physical mouse -> logical-space mouse for the UI's coord system. */
         const nt_pointer_t mouse_logical = nt_ui_scale_apply_pointer(&scale, g_nt_input.pointers[0]);
-        nt_ui_set_debug_overlay(s_ctx, s_debug_overlay);
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, &mouse_logical);
 
         char status_text[160];
         (void)snprintf(status_text, sizeof status_text, "%s  %s  %dx%d  [T]palette [D]debug [1]scale [2]text", k_scale_mode_names[s_scale_mode], g_current->name, (int)scale.logical_w,
                        (int)scale.logical_h);
 
-        /* Container width chosen as PERCENT-of-root so every panel scales
-         * uniformly with the window. Padding values picked to give visible
-         * panel bg around text without crowding.
-         *
-         * IMPORTANT: Clay's CLAY_SIZING_PERCENT is a percentage of the parent's
-         * INNER content area (parent_w - parent_padding), not parent_w. Game-side
-         * fit_* helpers need the actual inner panel width to match what Clay
-         * will allocate for the text. */
+        /* Clay's CLAY_SIZING_PERCENT is of parent's INNER area (parent_w - padding),
+         * not parent_w -- fit_* helpers must use that same inner width. */
         const float root_pad = 20.0F;
         const float panel_pct = 0.85F;
         const float panel_h_fixed = 140.0F;
@@ -407,8 +365,6 @@ static void frame(void) {
         const float inner_w = panel_w - (2.0F * panel_pad);
         const float inner_h_box = panel_h_fixed - (2.0F * panel_pad);
 
-        /* Pre-Clay auto-fit computations (helpers know nothing about Clay --
-         * just font + container dims). Pass results to nt_ui_label_sized. */
         const uint16_t title_fit = nt_ui_fit_width(s_ctx, g_current->h1->font_id, k_titles[s_demo_text_idx], inner_w, 14U, g_current->h1->font_size, (float)g_current->h1->letter_tracking);
         const uint16_t box_fit = nt_ui_fit_box(s_ctx, g_current->wrap->font_id, k_paragraphs[s_demo_text_idx], inner_w, inner_h_box, 10U, g_current->wrap->font_size,
                                                (float)g_current->wrap->letter_tracking, g_current->wrap->line_height);
@@ -417,6 +373,12 @@ static void frame(void) {
         char hint_box[80];
         (void)snprintf(hint_title, sizeof hint_title, "fit_width -> %u pt (max %u, idx %d)", title_fit, g_current->h1->font_size, s_demo_text_idx);
         (void)snprintf(hint_box, sizeof hint_box, "fit_box -> %u pt (max %u, idx %d)", box_fit, g_current->wrap->font_size, s_demo_text_idx);
+
+        /* Stats read prev-frame values: nt_stats_get_fps after stats_frame_end
+         * last iteration; UI counters populated by previous nt_ui_walk. */
+        char stats_text[160];
+        (void)snprintf(stats_text, sizeof stats_text, "FPS %3.0f  DC %u  |  UI DC %u  cmds %u", (double)nt_stats_get_fps(), nt_stats_get_draw_calls(), nt_ui_get_last_walk_draw_calls(s_ctx),
+                       nt_ui_get_last_walk_command_count(s_ctx));
 
         // #region clay declaration
         CLAY({.id = CLAY_ID("root"),
@@ -427,48 +389,51 @@ static void frame(void) {
                          .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
               .backgroundColor = g_current->bg}) {
 
-            /* Status caption (font 16, align CENTER). Short -- fits one line. */
-            nt_ui_label(s_ctx, status_text, g_current->caption);
+            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), status_text, g_current->caption);
+            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), stats_text, g_current->caption);
 
-            /* === fit_width demo === */
-            nt_ui_label(s_ctx, hint_title, g_current->caption);
+            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), hint_title, g_current->caption);
             CLAY({.id = CLAY_ID("title-box"),
+                  .userData = NT_UI_DATA_LAYER(LAYER_BG),
                   .layout = {.sizing = {CLAY_SIZING_PERCENT(panel_pct), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL((uint16_t)panel_pad)},
                   .backgroundColor = g_current->panel}) {
-                nt_ui_label_sized(s_ctx, k_titles[s_demo_text_idx], g_current->h1, title_fit);
+                nt_ui_label_sized(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), k_titles[s_demo_text_idx], g_current->h1, title_fit);
             }
 
-            /* === Position alignment row (childAlignment proof) === */
+            /* childAlignment proof: 3 cells, same body style, only .childAlignment.x differs. */
             CLAY({.id = CLAY_ID("align-row"), .layout = {.sizing = {CLAY_SIZING_PERCENT(panel_pct), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
-                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
+                CLAY({.userData = NT_UI_DATA_LAYER(LAYER_BG),
+                      .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
                       .backgroundColor = g_current->panel}) {
-                    nt_ui_label(s_ctx, "LEFT", g_current->body);
+                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "LEFT", g_current->body);
                 }
-                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                CLAY({.userData = NT_UI_DATA_LAYER(LAYER_BG),
+                      .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                       .backgroundColor = g_current->panel}) {
-                    nt_ui_label(s_ctx, "CENTER", g_current->body);
+                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "CENTER", g_current->body);
                 }
-                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_RIGHT, CLAY_ALIGN_Y_CENTER}},
+                CLAY({.userData = NT_UI_DATA_LAYER(LAYER_BG),
+                      .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_RIGHT, CLAY_ALIGN_Y_CENTER}},
                       .backgroundColor = g_current->panel}) {
-                    nt_ui_label(s_ctx, "RIGHT", g_current->body);
+                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "RIGHT", g_current->body);
                 }
             }
 
-            /* === fit_box demo === */
-            nt_ui_label(s_ctx, hint_box, g_current->caption);
+            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), hint_box, g_current->caption);
             CLAY({.id = CLAY_ID("fit-box"),
+                  .userData = NT_UI_DATA_LAYER(LAYER_BG),
                   .layout = {.sizing = {CLAY_SIZING_PERCENT(panel_pct), CLAY_SIZING_FIXED((uint16_t)panel_h_fixed)}, .padding = CLAY_PADDING_ALL((uint16_t)panel_pad)},
                   .backgroundColor = g_current->panel}) {
-                nt_ui_label_sized(s_ctx, k_paragraphs[s_demo_text_idx], g_current->wrap, box_fit);
+                nt_ui_label_sized(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), k_paragraphs[s_demo_text_idx], g_current->wrap, box_fit);
             }
 
-            /* === Letter-tracking demo === */
             CLAY({.id = CLAY_ID("tracking-box"),
+                  .userData = NT_UI_DATA_LAYER(LAYER_BG),
                   .layout = {.sizing = {CLAY_SIZING_PERCENT(panel_pct), CLAY_SIZING_FIT(0)},
                              .padding = CLAY_PADDING_ALL((uint16_t)panel_pad),
                              .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                   .backgroundColor = g_current->panel}) {
-                nt_ui_label(s_ctx, "T R A C K I N G", g_current->tracking);
+                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "T R A C K I N G", g_current->tracking);
             }
         }
         // #endregion
@@ -477,8 +442,6 @@ static void frame(void) {
 
 #if DEMO_DEBUG_LOG
         if (log_this_frame) {
-            /* dump first 6 commands' bbox (one frame after size change so layout
-             * has settled). */
             const Clay_RenderCommandArray *cmds = &s_ctx->frozen_cmds;
             (void)fprintf(stderr, "  cmds=%d:\n", cmds->length);
             int dumped = 0;
@@ -507,7 +470,8 @@ static void frame(void) {
                 default:
                     continue;
                 }
-                (void)fprintf(stderr, "    [%d] %s bb=(%.1f, %.1f, %.1fx%.1f)\n", ci, type, (double)c->boundingBox.x, (double)c->boundingBox.y, (double)c->boundingBox.width, (double)c->boundingBox.height);
+                (void)fprintf(stderr, "    [%d] %s bb=(%.1f, %.1f, %.1fx%.1f)\n", ci, type, (double)c->boundingBox.x, (double)c->boundingBox.y, (double)c->boundingBox.width,
+                              (double)c->boundingBox.height);
                 dumped++;
             }
             (void)fflush(stderr);
@@ -520,6 +484,7 @@ static void frame(void) {
 
     nt_gfx_end_pass();
     nt_gfx_end_frame();
+    nt_stats_frame_end();
 
     nt_window_swap_buffers();
 }
@@ -628,6 +593,9 @@ int main(int argc, char *argv[]) {
 
     nt_resource_set_activate_time_budget(0);
 
+    nt_stats_desc_t stats_desc = nt_stats_desc_defaults();
+    nt_stats_init(&stats_desc);
+
 #ifdef NT_PLATFORM_WEB
     nt_platform_web_loading_complete();
 #endif
@@ -646,6 +614,7 @@ int main(int argc, char *argv[]) {
     nt_material_destroy(s_sprite_material);
     nt_material_destroy(s_text_material);
     nt_material_shutdown();
+    nt_stats_shutdown();
     nt_mem_scratch_shutdown();
     nt_resource_shutdown();
     nt_fs_shutdown();
