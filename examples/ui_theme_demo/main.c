@@ -8,13 +8,19 @@
  * palette. Engine ships no nt_ui_set_theme -- the swap is a pure game-side
  * pointer write.
  *
- * Six labels per frame exercise every nt_ui_label_style_t field at least once:
- *   h1            font_size + color
- *   body          font_size + color
- *   caption       align (CENTER)
- *   wrap          wrap_mode + line_height
+ * Style fields exercised:
+ *   h1            font_size + color (large, panel bg outlines text zone)
+ *   body          font_size + color (used in 3-cell align row -- see below)
+ *   caption       align (CENTER) for status line
+ *   wrap          wrap_mode + line_height + align (CENTER multi-line)
  *   tracking      letter_tracking
- *   right         align (RIGHT)
+ *
+ * Position alignment is proven separately via Clay container childAlignment
+ * (three side-by-side cells with the SAME label style -- only each cell's
+ * .childAlignment.x differs). textAlignment (style.align) is proven by the
+ * centered multi-line wrap paragraph.
+ *
+ * Keys:  T = swap palette (DARK <-> LIGHT) | D = toggle Clay debug overlay
  *
  * Build packs first:  build_ui_theme_demo_packs build/examples/ui_theme_demo
  */
@@ -65,74 +71,66 @@
 
 static const nt_ui_label_style_t g_h1_dark = {
     .font_id = 0,
-    .font_size = 28,
+    .font_size = 44,
     .color = {255.0F, 255.0F, 255.0F, 255.0F},
 };
 static const nt_ui_label_style_t g_body_dark = {
     .font_id = 0,
-    .font_size = 14,
+    .font_size = 22,
     .color = {230.0F, 230.0F, 235.0F, 255.0F},
 };
 static const nt_ui_label_style_t g_caption_dark = {
     .font_id = 0,
-    .font_size = 11,
+    .font_size = 16,
     .color = {170.0F, 170.0F, 180.0F, 255.0F},
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 static const nt_ui_label_style_t g_wrap_dark = {
     .font_id = 0,
-    .font_size = 14,
+    .font_size = 20,
     .color = {200.0F, 200.0F, 255.0F, 255.0F},
-    .line_height = 22,
+    /* line_height = 0 -> use font's natural metrics; avoids Clay container
+     * underestimating panel height when half-leading shifts text past bb. */
     .wrap_mode = CLAY_TEXT_WRAP_WORDS,
+    .align = CLAY_TEXT_ALIGN_CENTER,
 };
 static const nt_ui_label_style_t g_tracking_dark = {
     .font_id = 0,
-    .font_size = 18,
+    .font_size = 28,
     .color = {255.0F, 220.0F, 150.0F, 255.0F},
-    .letter_tracking = 8,
-};
-static const nt_ui_label_style_t g_right_dark = {
-    .font_id = 0,
-    .font_size = 14,
-    .color = {230.0F, 230.0F, 235.0F, 255.0F},
-    .align = CLAY_TEXT_ALIGN_RIGHT,
+    .letter_tracking = 12,
+    .wrap_mode = CLAY_TEXT_WRAP_WORDS,
 };
 
 static const nt_ui_label_style_t g_h1_light = {
     .font_id = 0,
-    .font_size = 28,
+    .font_size = 44,
     .color = {0.0F, 0.0F, 0.0F, 255.0F},
 };
 static const nt_ui_label_style_t g_body_light = {
     .font_id = 0,
-    .font_size = 14,
+    .font_size = 22,
     .color = {20.0F, 20.0F, 28.0F, 255.0F},
 };
 static const nt_ui_label_style_t g_caption_light = {
     .font_id = 0,
-    .font_size = 11,
+    .font_size = 16,
     .color = {80.0F, 80.0F, 90.0F, 255.0F},
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 static const nt_ui_label_style_t g_wrap_light = {
     .font_id = 0,
-    .font_size = 14,
+    .font_size = 20,
     .color = {40.0F, 40.0F, 100.0F, 255.0F},
-    .line_height = 22,
     .wrap_mode = CLAY_TEXT_WRAP_WORDS,
+    .align = CLAY_TEXT_ALIGN_CENTER,
 };
 static const nt_ui_label_style_t g_tracking_light = {
     .font_id = 0,
-    .font_size = 18,
+    .font_size = 28,
     .color = {140.0F, 80.0F, 0.0F, 255.0F},
-    .letter_tracking = 8,
-};
-static const nt_ui_label_style_t g_right_light = {
-    .font_id = 0,
-    .font_size = 14,
-    .color = {20.0F, 20.0F, 28.0F, 255.0F},
-    .align = CLAY_TEXT_ALIGN_RIGHT,
+    .letter_tracking = 12,
+    .wrap_mode = CLAY_TEXT_WRAP_WORDS,
 };
 
 typedef struct {
@@ -141,8 +139,8 @@ typedef struct {
     const nt_ui_label_style_t *caption;
     const nt_ui_label_style_t *wrap;
     const nt_ui_label_style_t *tracking;
-    const nt_ui_label_style_t *right;
     Clay_Color bg;
+    Clay_Color panel; /* slightly contrasted bg -- shown under labels so text zones are visible */
     const char *name;
 } ui_palette_t;
 
@@ -152,8 +150,8 @@ static const ui_palette_t g_dark = {
     .caption = &g_caption_dark,
     .wrap = &g_wrap_dark,
     .tracking = &g_tracking_dark,
-    .right = &g_right_dark,
     .bg = {18.0F, 18.0F, 22.0F, 255.0F},
+    .panel = {40.0F, 40.0F, 52.0F, 255.0F},
     .name = "DARK",
 };
 static const ui_palette_t g_light = {
@@ -162,8 +160,8 @@ static const ui_palette_t g_light = {
     .caption = &g_caption_light,
     .wrap = &g_wrap_light,
     .tracking = &g_tracking_light,
-    .right = &g_right_light,
     .bg = {245.0F, 245.0F, 250.0F, 255.0F},
+    .panel = {225.0F, 225.0F, 235.0F, 255.0F},
     .name = "LIGHT",
 };
 
@@ -195,6 +193,7 @@ static nt_font_t s_font;
 
 static bool s_atlas_bound;
 static bool s_font_bound;
+static bool s_debug_overlay;
 static uint32_t s_white_region_idx;
 // #endregion
 
@@ -243,6 +242,10 @@ static void frame(void) {
     if (nt_input_key_is_pressed(NT_KEY_T)) {
         g_current = (g_current == &g_dark) ? &g_light : &g_dark;
         (void)printf("ui_theme_demo: swapped to %s palette\n", g_current->name);
+    }
+    if (nt_input_key_is_pressed(NT_KEY_D)) {
+        s_debug_overlay = !s_debug_overlay;
+        (void)printf("ui_theme_demo: debug overlay %s\n", s_debug_overlay ? "ON" : "OFF");
     }
 
     try_bind_resources();
@@ -304,23 +307,67 @@ static void frame(void) {
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
         const nt_pointer_t *mouse = &g_nt_input.pointers[0];
+        nt_ui_set_debug_overlay(s_ctx, s_debug_overlay);
         nt_ui_begin(s_ctx, w, h, mouse);
 
-        // #region clay declaration: 6 labels per frame
+        char status_text[160];
+        (void)snprintf(status_text, sizeof status_text, "palette: %s    overlay: %s    [T] swap palette    [D] toggle debug", g_current->name, s_debug_overlay ? "ON" : "OFF");
+
+        // #region clay declaration
         CLAY({.id = CLAY_ID("root"),
-              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(24), .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 12},
+              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
+                         .padding = CLAY_PADDING_ALL(24),
+                         .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                         .childGap = 18,
+                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
               .backgroundColor = g_current->bg}) {
-            nt_ui_label(s_ctx, "Theme Hot-Swap Demo (press T)", g_current->h1);
-            nt_ui_label(s_ctx, "Body text -- flips between dark and light palettes.", g_current->body);
-            nt_ui_label(s_ctx, "Caption (centered)", g_current->caption);
-            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(360), CLAY_SIZING_FIT(0)}}}) {
+
+            /* Title with panel bg so the h1 text zone is unambiguous. */
+            CLAY({.id = CLAY_ID("title-box"),
+                  .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .padding = {.left = 20, .right = 20, .top = 10, .bottom = 10}},
+                  .backgroundColor = g_current->panel}) {
+                nt_ui_label(s_ctx, "Theme Hot-Swap Demo", g_current->h1);
+            }
+
+            /* Status line + key hints (caption style is align=CENTER). */
+            nt_ui_label(s_ctx, status_text, g_current->caption);
+
+            /* === Position alignment row ===
+             * Three identical cells, SAME label style; only each parent's
+             * childAlignment.x differs (LEFT / CENTER / RIGHT). The label
+             * visibly moves inside its panel -- proves layout alignment. */
+            CLAY({.id = CLAY_ID("align-row"), .layout = {.sizing = {CLAY_SIZING_PERCENT(0.85F), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12}}) {
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
+                      .backgroundColor = g_current->panel}) {
+                    nt_ui_label(s_ctx, "LEFT", g_current->body);
+                }
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                      .backgroundColor = g_current->panel}) {
+                    nt_ui_label(s_ctx, "CENTER", g_current->body);
+                }
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_RIGHT, CLAY_ALIGN_Y_CENTER}},
+                      .backgroundColor = g_current->panel}) {
+                    nt_ui_label(s_ctx, "RIGHT", g_current->body);
+                }
+            }
+
+            /* Wrap demo: multi-line text with style.align = CENTER proves textAlignment.
+             * PERCENT-of-root width so wrap boundary follows the window. */
+            CLAY({.id = CLAY_ID("wrap-box"), .layout = {.sizing = {CLAY_SIZING_PERCENT(0.65F), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(12)}, .backgroundColor = g_current->panel}) {
                 nt_ui_label(s_ctx,
-                            "This is a multi-line paragraph wrapped to a 360px container width to "
-                            "demonstrate the wrap_mode field flowing through to Clay text layout.",
+                            "Multi-line paragraph wrapped to its container width. "
+                            "Lines are centered inside the text box "
+                            "(style.align = CENTER) -- resize the window to see "
+                            "the wrap boundary follow.",
                             g_current->wrap);
             }
-            nt_ui_label(s_ctx, "S T R E T C H E D   T R A C K I N G", g_current->tracking);
-            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}}}) { nt_ui_label(s_ctx, "Right-aligned text", g_current->right); }
+
+            /* Letter-tracking demo. PERCENT-width so it wraps with the window. */
+            CLAY({.id = CLAY_ID("tracking-box"),
+                  .layout = {.sizing = {CLAY_SIZING_PERCENT(0.85F), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(12), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                  .backgroundColor = g_current->panel}) {
+                nt_ui_label(s_ctx, "S T R E T C H E D   T R A C K I N G", g_current->tracking);
+            }
         }
         // #endregion
 
