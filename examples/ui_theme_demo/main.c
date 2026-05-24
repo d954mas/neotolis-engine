@@ -218,18 +218,24 @@ static int s_last_logged_fb_h = -1;
 
 /* Auto-fit demo: cycle through short / medium / long text via key 2 to see
  * nt_ui_fit_width (title) and nt_ui_fit_box (paragraph) shrink as content
- * grows. Same font_size_max in both; same containers; only text length varies. */
+ * grows. Same font_size_max in both; same containers; only text length varies.
+ * Strings deliberately pushed to extremes so the shrink is visually obvious
+ * -- idx=2 forces the helpers to walk well down toward size_min. */
 static const char *const k_titles[] = {
-    "Title",
+    "Hi",
     "Theme Hot-Swap Demo",
-    "Theme Hot-Swap Demo with a Long Localized Title",
+    "Lorem Ipsum Dolor Sit Amet Consectetur Adipiscing Elit Sed Do Eiusmod Tempor Incididunt Ut Labore Et Dolore",
 };
 static const char *const k_paragraphs[] = {
     "Short.",
-    "Medium paragraph that wraps onto two or three lines.",
-    "A much longer paragraph that needs many lines to fit. The fit_box helper "
-    "shrinks the font_size until the wrapped text fits inside the panel; cycle "
-    "with key 2 to see the font drop further as text gets longer.",
+    "Medium paragraph that wraps onto two or three lines depending on container width.",
+    /* Long block: at 20pt natural ~24 px/line, container 112 px tall holds ~4
+     * lines max. Real text needs >4 lines at every size to force fit_box to
+     * drive font_size well below 20pt. */
+    "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. "
+    "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. "
+    "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. "
+    "Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
 };
 static int s_demo_text_idx = 1;
 // #endregion
