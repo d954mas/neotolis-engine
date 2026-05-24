@@ -36,18 +36,11 @@
 typedef struct nt_ui_context nt_ui_context_t;
 
 /* Caller owns framebuffer binding; walker writes only viewport + scissor.
- *
- * LOGICAL vs PHYSICAL pixels:
- *   viewport[]   = LOGICAL Clay-space {x, y, w, h}; matches what nt_ui_begin
- *                  received. Walker uses this for dispatch Y-flip math.
- *   fb_size[]    = PHYSICAL framebuffer {w, h}. Walker uses this to convert
- *                  logical scissor rects to physical pixels for GL.
- *                  Sentinel: {0,0} = treat viewport as physical (1:1 mode,
- *                  backwards compat for existing tests + non-scaled demos).
- *   fb_offset[]  = PHYSICAL letterbox margin {ox, oy}; 0 for EXPAND/STRETCH.
- *
- * Build via nt_ui_scale_make_target() for adaptive UI, or zero-init the
- * fb_* fields for legacy 1:1 (the original 4-float form still compiles). */
+ *   viewport[]  = LOGICAL Clay-space {x, y, w, h} (matches nt_ui_begin).
+ *   fb_size[]   = PHYSICAL fb {w, h}; sentinel {0,0} = treat viewport as
+ *                 physical (legacy 1:1 mode for existing tests/non-scaled demos).
+ *   fb_offset[] = PHYSICAL letterbox margin {ox, oy}; 0 for EXPAND/STRETCH.
+ * Build via nt_ui_scale_make_target() or zero-init fb_* for legacy 1:1. */
 typedef struct {
     float viewport[4];
     float fb_size[2];
@@ -87,8 +80,9 @@ typedef struct {
 
 /* Macros allocate from nt_mem_scratch (frame arena) so the pointer stays valid
  * across helper-function returns until the next nt_mem_scratch_reset. Game
- * MUST init scratch before any CLAY({...}) declaration. */
-void *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data);
+ * MUST init scratch before any CLAY({...}) declaration.
+ * Typed return; auto-converts to void* for Clay's .userData slot. */
+nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data);
 
 #define NT_UI_DATA_LAYER(layer_value) nt_ui_make_element_data((layer_value), NULL)
 #define NT_UI_DATA_FULL(layer_value, user_ptr) nt_ui_make_element_data((layer_value), (user_ptr))
@@ -122,10 +116,10 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_pointer_t *mouse);
 void nt_ui_end(nt_ui_context_t *ctx);
 
-/* Toggle Clay's built-in debug overlay (element tree panel + bbox outlines).
- * Stored on the ctx; applied to Clay at the next nt_ui_begin. Safe to call
- * any time. */
+/* Toggle Clay's debug overlay (element tree + bbox). Applied at next begin.
+ * Getter reflects Clay state -- updated each end (close-button "x" turns off). */
 void nt_ui_set_debug_overlay(nt_ui_context_t *ctx, bool enabled);
+bool nt_ui_get_debug_overlay(const nt_ui_context_t *ctx);
 
 /* Read-only on frozen_cmds + bindings; per-walk stats reflect the latest call.
  * Order: zIndex asc, then layer asc, then declaration. SCISSOR/CUSTOM are
@@ -153,9 +147,7 @@ int32_t nt_ui_test_clay_default_max_measure_text_word_cache_count(void);
 #endif
 // #endregion
 
-/* Widget headers (nt_ui_label.h, etc.) are NOT re-exported here: clay.h
- * must stay out of the public umbrella to keep Windows ucrt/stdlib.h sane
- * in release builds (stdnoreturn.h poisons __declspec(noreturn)). Consumers
- * of widgets include their header directly. */
+/* Widget headers NOT re-exported: keep clay.h out of public umbrella to
+ * avoid breaking Windows ucrt stdlib.h __declspec(noreturn) in release. */
 
 #endif /* NT_UI_H */

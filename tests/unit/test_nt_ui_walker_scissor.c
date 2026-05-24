@@ -239,9 +239,9 @@ static void test_scissor_vertical_only(void) {
     TEST_ASSERT_EQUAL_INT(50, rect[3]);
 }
 
-/* Both axes unclipped is a contract violation (no-op scissor with wasted
- * flushes); walker asserts so the misconfig surfaces in dev. */
-static void test_scissor_neither_axis_asserts(void) {
+/* Both axes false + bbox set is Clay's floating clipTo=ATTACHED_PARENT marker
+ * (clay.h:2695-2701). Walker must clip to bbox on BOTH axes -- not full viewport. */
+static void test_scissor_neither_axis_clips_to_bbox(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 50.0F, .y = 100.0F, .width = 200.0F, .height = 50.0F};
     s_test_cmds[0].renderData.clip.horizontal = false;
@@ -250,7 +250,14 @@ static void test_scissor_neither_axis_asserts(void) {
     inject_frozen_cmds(2);
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
-    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
+    nt_ui_walk(s_fx.ctx, &target);
+    int rect[4];
+    nt_gfx_test_scissor_rect(rect);
+    /* bbox=(50,100,200x50); GL Y-flip: y_gl = 600 - 100 - 50 = 450. */
+    TEST_ASSERT_EQUAL_INT(50, rect[0]);
+    TEST_ASSERT_EQUAL_INT(450, rect[1]);
+    TEST_ASSERT_EQUAL_INT(200, rect[2]);
+    TEST_ASSERT_EQUAL_INT(50, rect[3]);
 }
 
 /* Scaled mode: viewport is LOGICAL (Y top-down). fb_size + fb_offset describe
@@ -328,7 +335,7 @@ int main(void) {
     RUN_TEST(test_scissor_respects_viewport_offset);
     RUN_TEST(test_scissor_horizontal_only);
     RUN_TEST(test_scissor_vertical_only);
-    RUN_TEST(test_scissor_neither_axis_asserts);
+    RUN_TEST(test_scissor_neither_axis_clips_to_bbox);
     RUN_TEST(test_scissor_scaled_letterbox);
     RUN_TEST(test_scissor_scaled_expand);
     return UNITY_END();

@@ -209,22 +209,29 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_
     ctx->in_frame = true;
     g_nt_ui_inframe_ctx = ctx;
 
-    /* Apply BEFORE BeginLayout: it reserves Clay__debugViewWidth in root. */
+    /* Must run before BeginLayout: Clay reserves debug panel width up-front. */
     Clay_SetDebugModeEnabled(ctx->debug_overlay);
     Clay_SetLayoutDimensions((Clay_Dimensions){.width = screen_w, .height = screen_h});
 
-    /* Left-button only; Clay v0.14 has no right/middle/wheel. */
+    /* Left-button only; Clay v0.14 has no right/middle/wheel buttons. */
     Clay_SetPointerState((Clay_Vector2){.x = mouse->x, .y = mouse->y}, mouse->buttons[NT_BUTTON_LEFT].is_down);
+
+    /* Forward wheel + enable touch/drag-scroll (mobile/web pointer drag inside
+     * a Clay clip scrolls it). Y inverted: Clay scroll opposite of typical wheel_dy. */
+    Clay_UpdateScrollContainers(true, (Clay_Vector2){.x = mouse->wheel_dx, .y = -mouse->wheel_dy}, 1.0F / 60.0F);
 
     Clay_BeginLayout();
 }
 
-/* Flag is applied to Clay inside nt_ui_begin, before BeginLayout, so
- * Clay reserves the debug panel width up-front (clay.h:4166-4168). Toggling
- * is safe at any time; takes effect on the next begin. */
+/* Takes effect on next nt_ui_begin (Clay needs the flag before BeginLayout). */
 void nt_ui_set_debug_overlay(nt_ui_context_t *ctx, bool enabled) {
     NT_ASSERT(ctx != NULL && "nt_ui_set_debug_overlay: ctx must be non-NULL");
     ctx->debug_overlay = enabled;
+}
+
+bool nt_ui_get_debug_overlay(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_debug_overlay: ctx must be non-NULL");
+    return ctx->debug_overlay;
 }
 
 void nt_ui_end(nt_ui_context_t *ctx) {
@@ -233,6 +240,9 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx == g_nt_ui_inframe_ctx && "nt_ui_end: ctx mismatch with module in-frame ctx");
 
     ctx->frozen_cmds = Clay_EndLayout();
+    /* Clay's debug overlay close button ("x") flips internal debugModeEnabled.
+     * Sync back so caller's flag stays in lock-step (next begin re-applies). */
+    ctx->debug_overlay = Clay_IsDebugModeEnabled();
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;
     /* Stray CLAY_* between end and next begin NULL-derefs instead of corrupting. */
@@ -252,7 +262,7 @@ static inline uint32_t nt_color_pack_clay(Clay_Color c) {
 // #endregion
 
 // #region element_data_alloc
-void *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data) {
+nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data) {
     nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
     d->layer = layer;
     d->user_data = user_data;
@@ -622,16 +632,19 @@ static void apply_scissor_logical_to_physical(const nt_ui_target_t *target, int 
 static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
 
-    /* Unclipped axis falls back to viewport; floor/ceil avoid 1px right/bottom bite. */
+    /* Unclipped axis falls back to viewport; floor/ceil avoid 1px right/bottom bite.
+     * Special case: both axes false + bbox set = Clay's floating clipTo=ATTACHED_PARENT
+     * marker (clay.h:2695-2701). Clip to bbox on both axes. */
     const Clay_ClipRenderData *clip = &c->renderData.clip;
-    NT_ASSERT((clip->horizontal || clip->vertical) && "nt_ui SCISSOR_START with both axes unclipped is a no-op");
     const int vw = (int)target->viewport[2];
     const int vh = (int)target->viewport[3];
+    const bool clip_h = clip->horizontal || (!clip->horizontal && !clip->vertical);
+    const bool clip_v = clip->vertical || (!clip->horizontal && !clip->vertical);
     int x;
     int y;
     int wp;
     int hp;
-    if (clip->horizontal) {
+    if (clip_h) {
         const float bx = c->boundingBox.x;
         x = (int)floorf(bx);
         wp = (int)ceilf(bx + c->boundingBox.width) - x;
@@ -639,7 +652,7 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
         x = 0;
         wp = vw;
     }
-    if (clip->vertical) {
+    if (clip_v) {
         const float by = c->boundingBox.y;
         y = (int)floorf(by);
         hp = (int)ceilf(by + c->boundingBox.height) - y;
@@ -724,11 +737,9 @@ static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite
     }
 }
 
-/* Clay emits boundingBoxes in top-left Y-down; engine renders in GL bottom-left
- * Y-up (see scissor_push y_gl = vh - y - h at nt_ui.c:626 and matching test
- * test_scissor_y_flip_top_left_to_gl_bottom_left). Apply the same conversion
- * to drawing emits via a local-copy bbox.y rewrite. Border widths and corner
- * radii also swap top<->bottom since the visual "top" lands at world bottom. */
+/* Clay bbox is top-left Y-down; engine renders GL bottom-left Y-up. Local-copy
+ * bbox.y rewrite + corner-radii/border-width top<->bottom swap mirrors the
+ * scissor_push flip. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
     const float vy = target->viewport[1];
@@ -845,9 +856,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* AFTER entry flush so per-walk delta excludes caller's drained geometry. */
     const uint32_t calls_at_entry = nt_gfx_get_frame_draw_calls();
 
-    /* glViewport needs PHYSICAL pixels. Sentinel target->fb_size = 0 means
-     * "viewport is already physical" (legacy 1:1); otherwise use fb_size +
-     * fb_offset for the GL viewport rect inside the framebuffer. */
+    /* glViewport needs PHYSICAL pixels. fb_size=0 sentinel = legacy 1:1 mode. */
     if (target->fb_size[0] > 0.0F && target->fb_size[1] > 0.0F) {
         nt_gfx_set_viewport((int)target->fb_offset[0], (int)target->fb_offset[1], (int)(target->fb_size[0] - (2.0F * target->fb_offset[0])), (int)(target->fb_size[1] - (2.0F * target->fb_offset[1])));
     } else {
