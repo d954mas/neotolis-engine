@@ -29,3 +29,10 @@ void nt_ui_label(nt_ui_context_t *ctx, const char *text, const nt_ui_label_style
                      .textAlignment = (Clay_TextAlignment)style->align,
                  }));
 }
+
+void nt_ui_label_sized(nt_ui_context_t *ctx, const char *text, const nt_ui_label_style_t *style, uint16_t font_size_override) {
+    NT_ASSERT(style != NULL && "nt_ui_label_sized: style must be non-NULL");
+    nt_ui_label_style_t local = *style;
+    local.font_size = font_size_override;
+    nt_ui_label(ctx, text, &local);
+}

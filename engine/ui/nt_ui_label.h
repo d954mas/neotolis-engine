@@ -30,4 +30,10 @@ _Static_assert(sizeof(nt_ui_label_style_t) <= 32, "nt_ui_label_style_t fits in 3
  * nt_font_valid(ctx->fonts[font_id]); font_size > 0. */
 void nt_ui_label(nt_ui_context_t *ctx, const char *text, const nt_ui_label_style_t *style);
 
+/* Auto-fit variant: same as nt_ui_label, but overrides style->font_size with
+ * font_size_override. Style stays static-const (Model D); the override is
+ * the runtime-computed result of nt_ui_fit_width / nt_ui_fit_box. All other
+ * style fields (color, align, wrap_mode, letter_tracking) carry through. */
+void nt_ui_label_sized(nt_ui_context_t *ctx, const char *text, const nt_ui_label_style_t *style, uint16_t font_size_override);
+
 #endif /* NT_UI_LABEL_H */
