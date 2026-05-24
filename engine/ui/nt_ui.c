@@ -845,7 +845,14 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* AFTER entry flush so per-walk delta excludes caller's drained geometry. */
     const uint32_t calls_at_entry = nt_gfx_get_frame_draw_calls();
 
-    nt_gfx_set_viewport((int)target->viewport[0], (int)target->viewport[1], (int)target->viewport[2], (int)target->viewport[3]);
+    /* glViewport needs PHYSICAL pixels. Sentinel target->fb_size = 0 means
+     * "viewport is already physical" (legacy 1:1); otherwise use fb_size +
+     * fb_offset for the GL viewport rect inside the framebuffer. */
+    if (target->fb_size[0] > 0.0F && target->fb_size[1] > 0.0F) {
+        nt_gfx_set_viewport((int)target->fb_offset[0], (int)target->fb_offset[1], (int)(target->fb_size[0] - (2.0F * target->fb_offset[0])), (int)(target->fb_size[1] - (2.0F * target->fb_offset[1])));
+    } else {
+        nt_gfx_set_viewport((int)target->viewport[0], (int)target->viewport[1], (int)target->viewport[2], (int)target->viewport[3]);
+    }
 
     /* Sprite material up-front; text binds lazily inside emit_text. */
     nt_sprite_renderer_set_material(ctx->sprite_material);
