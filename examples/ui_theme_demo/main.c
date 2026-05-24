@@ -44,6 +44,8 @@
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_fit.h"
+#include "ui/nt_ui_internal.h" /* DEMO_DEBUG_LOG: inspect frozen_cmds */
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_scale.h"
 #include "window/nt_window.h"
@@ -198,12 +200,38 @@ static bool s_debug_overlay;
 static uint32_t s_white_region_idx;
 
 /* Reference resolution -- everything in main.c speaks logical pixels.
- * EXPAND keeps aspect ratio and grows logical past ref to fill any window;
- * 1 key cycles all four modes so you can compare. */
-#define UI_REF_W 640.0F
-#define UI_REF_H 960.0F
+ * 960x640 landscape (1.5:1) -- iterating on adaptive UI; verify behavior
+ * at 960x640 (1:1 to ref), 1920x1080, 480x320, etc. */
+#define UI_REF_W 960.0F
+#define UI_REF_H 640.0F
 static nt_ui_scale_mode_t s_scale_mode = NT_UI_SCALE_EXPAND;
 static const char *const k_scale_mode_names[] = {"STRETCH", "LETTERBOX", "CROP", "EXPAND"};
+
+/* Frame-by-frame debug log. Off by default; flip to 1 to dump scale + Clay
+ * bbox values on every framebuffer-size change. Used by scripts/test_demo_sizes.ps1. */
+#define DEMO_DEBUG_LOG 0
+#if DEMO_DEBUG_LOG
+static uint32_t s_frame_counter = 0U;
+static int s_last_logged_fb_w = -1;
+static int s_last_logged_fb_h = -1;
+#endif
+
+/* Auto-fit demo: cycle through short / medium / long text via key 2 to see
+ * nt_ui_fit_width (title) and nt_ui_fit_box (paragraph) shrink as content
+ * grows. Same font_size_max in both; same containers; only text length varies. */
+static const char *const k_titles[] = {
+    "Title",
+    "Theme Hot-Swap Demo",
+    "Theme Hot-Swap Demo with a Long Localized Title",
+};
+static const char *const k_paragraphs[] = {
+    "Short.",
+    "Medium paragraph that wraps onto two or three lines.",
+    "A much longer paragraph that needs many lines to fit. The fit_box helper "
+    "shrinks the font_size until the wrapped text fits inside the panel; cycle "
+    "with key 2 to see the font drop further as text gets longer.",
+};
+static int s_demo_text_idx = 1;
 // #endregion
 
 // #region binding (run once resources are READY)
@@ -260,6 +288,10 @@ static void frame(void) {
         s_scale_mode = (nt_ui_scale_mode_t)((s_scale_mode + 1) % 4);
         (void)printf("ui_theme_demo: scale mode -> %s\n", k_scale_mode_names[s_scale_mode]);
     }
+    if (nt_input_key_is_pressed(NT_KEY_2)) {
+        s_demo_text_idx = (s_demo_text_idx + 1) % 3;
+        (void)printf("ui_theme_demo: demo text -> %d\n", s_demo_text_idx);
+    }
 
     try_bind_resources();
 
@@ -273,6 +305,22 @@ static void frame(void) {
     nt_ui_scale_desc_t scale_desc = {.ref_w = UI_REF_W, .ref_h = UI_REF_H, .mode = s_scale_mode};
     nt_ui_scale_t scale = nt_ui_compute_scale(&scale_desc, fb_w, fb_h);
     nt_ui_scale_ortho_t ortho = nt_ui_scale_ortho(&scale);
+
+#if DEMO_DEBUG_LOG
+    s_frame_counter++;
+    const int fbw_i = (int)fb_w;
+    const int fbh_i = (int)fb_h;
+    const bool log_this_frame = (fbw_i != s_last_logged_fb_w || fbh_i != s_last_logged_fb_h);
+    if (log_this_frame) {
+        s_last_logged_fb_w = fbw_i;
+        s_last_logged_fb_h = fbh_i;
+        (void)fprintf(stderr, "[demo frame=%u] fb=%dx%d ref=%dx%d mode=%s\n", s_frame_counter, fbw_i, fbh_i, (int)UI_REF_W, (int)UI_REF_H, k_scale_mode_names[s_scale_mode]);
+        (void)fprintf(stderr, "  scale.logical=%dx%d scale_x=%.4f scale_y=%.4f offset=(%.1f, %.1f) fb_in_scale=%dx%d\n", (int)scale.logical_w, (int)scale.logical_h, (double)scale.scale_x,
+                      (double)scale.scale_y, (double)scale.offset_x, (double)scale.offset_y, (int)scale.fb_w, (int)scale.fb_h);
+        (void)fprintf(stderr, "  ortho L=%.1f R=%.1f B=%.1f T=%.1f\n", (double)ortho.left, (double)ortho.right, (double)ortho.bottom, (double)ortho.top);
+        (void)fflush(stderr);
+    }
+#endif
 
     /* Frame ortho VP -- logical-space, bottom-left origin. */
     mat4 view_m;
@@ -332,69 +380,133 @@ static void frame(void) {
         nt_ui_set_debug_overlay(s_ctx, s_debug_overlay);
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, &mouse_logical);
 
-        char status_text[200];
-        (void)snprintf(status_text, sizeof status_text, "palette: %s   overlay: %s   scale: %s %dx%d   [T] palette [D] debug [1] scale", g_current->name, s_debug_overlay ? "ON" : "OFF",
-                       k_scale_mode_names[s_scale_mode], (int)scale.logical_w, (int)scale.logical_h);
+        char status_text[160];
+        (void)snprintf(status_text, sizeof status_text, "%s  %s  %dx%d  [T]palette [D]debug [1]scale [2]text", k_scale_mode_names[s_scale_mode], g_current->name, (int)scale.logical_w,
+                       (int)scale.logical_h);
+
+        /* Container width chosen as PERCENT-of-root so every panel scales
+         * uniformly with the window. Padding values picked to give visible
+         * panel bg around text without crowding.
+         *
+         * IMPORTANT: Clay's CLAY_SIZING_PERCENT is a percentage of the parent's
+         * INNER content area (parent_w - parent_padding), not parent_w. Game-side
+         * fit_* helpers need the actual inner panel width to match what Clay
+         * will allocate for the text. */
+        const float root_pad = 20.0F;
+        const float panel_pct = 0.85F;
+        const float panel_h_fixed = 140.0F;
+        const float panel_pad = 14.0F;
+        const float root_inner_w = scale.logical_w - (2.0F * root_pad);
+        const float panel_w = root_inner_w * panel_pct;
+        const float inner_w = panel_w - (2.0F * panel_pad);
+        const float inner_h_box = panel_h_fixed - (2.0F * panel_pad);
+
+        /* Pre-Clay auto-fit computations (helpers know nothing about Clay --
+         * just font + container dims). Pass results to nt_ui_label_sized. */
+        const uint16_t title_fit = nt_ui_fit_width(s_ctx, g_current->h1->font_id, k_titles[s_demo_text_idx], inner_w, 14U, g_current->h1->font_size, (float)g_current->h1->letter_tracking);
+        const uint16_t box_fit = nt_ui_fit_box(s_ctx, g_current->wrap->font_id, k_paragraphs[s_demo_text_idx], inner_w, inner_h_box, 10U, g_current->wrap->font_size,
+                                               (float)g_current->wrap->letter_tracking, g_current->wrap->line_height);
+
+        char hint_title[80];
+        char hint_box[80];
+        (void)snprintf(hint_title, sizeof hint_title, "fit_width -> %u pt (max %u, idx %d)", title_fit, g_current->h1->font_size, s_demo_text_idx);
+        (void)snprintf(hint_box, sizeof hint_box, "fit_box -> %u pt (max %u, idx %d)", box_fit, g_current->wrap->font_size, s_demo_text_idx);
 
         // #region clay declaration
         CLAY({.id = CLAY_ID("root"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
-                         .padding = CLAY_PADDING_ALL(24),
+                         .padding = CLAY_PADDING_ALL(20),
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
-                         .childGap = 18,
+                         .childGap = 12,
                          .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
               .backgroundColor = g_current->bg}) {
 
-            /* Title with panel bg so the h1 text zone is unambiguous. */
-            CLAY({.id = CLAY_ID("title-box"),
-                  .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .padding = {.left = 20, .right = 20, .top = 10, .bottom = 10}},
-                  .backgroundColor = g_current->panel}) {
-                nt_ui_label(s_ctx, "Theme Hot-Swap Demo", g_current->h1);
-            }
-
-            /* Status line + key hints (caption style is align=CENTER). */
+            /* Status caption (font 16, align CENTER). Short -- fits one line. */
             nt_ui_label(s_ctx, status_text, g_current->caption);
 
-            /* === Position alignment row ===
-             * Three identical cells, SAME label style; only each parent's
-             * childAlignment.x differs (LEFT / CENTER / RIGHT). The label
-             * visibly moves inside its panel -- proves layout alignment. */
-            CLAY({.id = CLAY_ID("align-row"), .layout = {.sizing = {CLAY_SIZING_PERCENT(0.85F), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12}}) {
-                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
+            /* === fit_width demo === */
+            nt_ui_label(s_ctx, hint_title, g_current->caption);
+            CLAY({.id = CLAY_ID("title-box"),
+                  .layout = {.sizing = {CLAY_SIZING_PERCENT(panel_pct), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL((uint16_t)panel_pad)},
+                  .backgroundColor = g_current->panel}) {
+                nt_ui_label_sized(s_ctx, k_titles[s_demo_text_idx], g_current->h1, title_fit);
+            }
+
+            /* === Position alignment row (childAlignment proof) === */
+            CLAY({.id = CLAY_ID("align-row"), .layout = {.sizing = {CLAY_SIZING_PERCENT(panel_pct), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
                       .backgroundColor = g_current->panel}) {
                     nt_ui_label(s_ctx, "LEFT", g_current->body);
                 }
-                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                       .backgroundColor = g_current->panel}) {
                     nt_ui_label(s_ctx, "CENTER", g_current->body);
                 }
-                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_RIGHT, CLAY_ALIGN_Y_CENTER}},
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_RIGHT, CLAY_ALIGN_Y_CENTER}},
                       .backgroundColor = g_current->panel}) {
                     nt_ui_label(s_ctx, "RIGHT", g_current->body);
                 }
             }
 
-            /* Wrap demo: multi-line text with style.align = CENTER proves textAlignment.
-             * PERCENT-of-root width so wrap boundary follows the window. */
-            CLAY({.id = CLAY_ID("wrap-box"), .layout = {.sizing = {CLAY_SIZING_PERCENT(0.65F), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(12)}, .backgroundColor = g_current->panel}) {
-                nt_ui_label(s_ctx,
-                            "Multi-line paragraph wrapped to its container width. "
-                            "Lines are centered inside the text box "
-                            "(style.align = CENTER) -- resize the window to see "
-                            "the wrap boundary follow.",
-                            g_current->wrap);
+            /* === fit_box demo === */
+            nt_ui_label(s_ctx, hint_box, g_current->caption);
+            CLAY({.id = CLAY_ID("fit-box"),
+                  .layout = {.sizing = {CLAY_SIZING_PERCENT(panel_pct), CLAY_SIZING_FIXED((uint16_t)panel_h_fixed)}, .padding = CLAY_PADDING_ALL((uint16_t)panel_pad)},
+                  .backgroundColor = g_current->panel}) {
+                nt_ui_label_sized(s_ctx, k_paragraphs[s_demo_text_idx], g_current->wrap, box_fit);
             }
 
-            /* Letter-tracking demo. PERCENT-width so it wraps with the window. */
+            /* === Letter-tracking demo === */
             CLAY({.id = CLAY_ID("tracking-box"),
-                  .layout = {.sizing = {CLAY_SIZING_PERCENT(0.85F), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL(12), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                  .layout = {.sizing = {CLAY_SIZING_PERCENT(panel_pct), CLAY_SIZING_FIT(0)},
+                             .padding = CLAY_PADDING_ALL((uint16_t)panel_pad),
+                             .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                   .backgroundColor = g_current->panel}) {
-                nt_ui_label(s_ctx, "S T R E T C H E D   T R A C K I N G", g_current->tracking);
+                nt_ui_label(s_ctx, "T R A C K I N G", g_current->tracking);
             }
         }
         // #endregion
 
         nt_ui_end(s_ctx);
+
+#if DEMO_DEBUG_LOG
+        if (log_this_frame) {
+            /* dump first 6 commands' bbox (one frame after size change so layout
+             * has settled). */
+            const Clay_RenderCommandArray *cmds = &s_ctx->frozen_cmds;
+            (void)fprintf(stderr, "  cmds=%d:\n", cmds->length);
+            int dumped = 0;
+            for (int32_t ci = 0; ci < cmds->length && dumped < 12; ++ci) {
+                const Clay_RenderCommand *c = &cmds->internalArray[ci];
+                const char *type = "?";
+                switch (c->commandType) {
+                case CLAY_RENDER_COMMAND_TYPE_RECTANGLE:
+                    type = "RECT";
+                    break;
+                case CLAY_RENDER_COMMAND_TYPE_TEXT:
+                    type = "TEXT";
+                    break;
+                case CLAY_RENDER_COMMAND_TYPE_BORDER:
+                    type = "BRDR";
+                    break;
+                case CLAY_RENDER_COMMAND_TYPE_IMAGE:
+                    type = "IMG";
+                    break;
+                case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:
+                    type = "SCRS";
+                    break;
+                case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
+                    type = "SCRE";
+                    break;
+                default:
+                    continue;
+                }
+                (void)fprintf(stderr, "    [%d] %s bb=(%.1f, %.1f, %.1fx%.1f)\n", ci, type, (double)c->boundingBox.x, (double)c->boundingBox.y, (double)c->boundingBox.width, (double)c->boundingBox.height);
+                dumped++;
+            }
+            (void)fflush(stderr);
+        }
+#endif
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
