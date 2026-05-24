@@ -52,7 +52,7 @@ static const Clay_RenderCommand *find_first_text_cmd(const nt_ui_context_t *ctx)
 static void test_label_emits_text_with_style_color(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, "Hello", &s_style_body); }
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "Hello", &s_style_body); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_text_cmd(s_fx.ctx);
@@ -85,7 +85,7 @@ static void test_label_emits_text_with_style_color(void) {
 static void test_label_null_style_asserts(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, "X", NULL)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, NULL, "X", NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -98,7 +98,7 @@ static void test_label_out_of_range_font_asserts(void) {
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, "X", &bad)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, NULL, "X", &bad)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -112,7 +112,7 @@ static void test_label_unbound_font_asserts(void) {
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, "X", &bad)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, NULL, "X", &bad)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -125,7 +125,7 @@ static void test_label_zero_font_size_asserts(void) {
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, "X", &bad)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_label(s_fx.ctx, NULL, "X", &bad)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -145,7 +145,7 @@ static void test_label_zero_init_wraps_words_left(void) {
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, "ABC DEF", &s); }
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "ABC DEF", &s); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_text_cmd(s_fx.ctx);
@@ -180,7 +180,7 @@ static void test_label_full_field_passthrough(void) {
      * and the resulting bbox is then offscreen-culled (clay.h:2473). Disable
      * culling so the TEXT cmd survives for our passthrough check. */
     Clay_SetCullingEnabled(false);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, "Hello", &s); }
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "Hello", &s); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_text_cmd(s_fx.ctx);
@@ -207,7 +207,7 @@ static void test_label_per_call_override(void) {
 
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, "Override", &s); }
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "Override", &s); }
     nt_ui_end(s_fx.ctx);
 
     const Clay_RenderCommand *c = find_first_text_cmd(s_fx.ctx);
@@ -223,9 +223,27 @@ static void test_label_per_call_override(void) {
 static void test_label_empty_text_accepted(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, "", &s_style_body); }
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "", &s_style_body); }
     nt_ui_end(s_fx.ctx);
     TEST_PASS();
+}
+
+/* ---- Test 10: element_data passthrough -- layer + user_data reach the TEXT cmd
+ * via textConfig.userData, so the walker can read .layer for batch sort and
+ * a game pointer for hit detection. */
+static void test_label_element_data_passthrough(void) {
+    int marker = 42;
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, &mouse);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NT_UI_DATA_FULL(7, &marker), "Hi", &s_style_body); }
+    nt_ui_end(s_fx.ctx);
+
+    const Clay_RenderCommand *c = find_first_text_cmd(s_fx.ctx);
+    TEST_ASSERT_NOT_NULL(c);
+    TEST_ASSERT_NOT_NULL(c->userData);
+    const nt_ui_element_data_t *d = (const nt_ui_element_data_t *)c->userData;
+    TEST_ASSERT_EQUAL_UINT8(7U, d->layer);
+    TEST_ASSERT_EQUAL_PTR(&marker, d->user_data);
 }
 
 int main(void) {
@@ -241,5 +259,6 @@ int main(void) {
     RUN_TEST(test_label_full_field_passthrough);
     RUN_TEST(test_label_per_call_override);
     RUN_TEST(test_label_empty_text_accepted);
+    RUN_TEST(test_label_element_data_passthrough);
     return UNITY_END();
 }

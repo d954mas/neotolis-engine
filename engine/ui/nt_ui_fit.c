@@ -8,23 +8,19 @@
 
 static bool is_ws(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
-/* Word-wrap simulation matching Clay's CLAY_TEXT_WRAP_WORDS behavior.
- * Returns line count when `text` is greedy-packed to container_w at given
- * font size. \n is an explicit line break. Leading whitespace on each new
- * line is skipped (Clay convention -- no leading-space gap after wrap). */
+/* Mirrors Clay CLAY_TEXT_WRAP_WORDS: greedy-pack to container_w, \n forces break,
+ * leading whitespace on wrapped lines is stripped. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static uint32_t simulate_wrap_lines(nt_font_t font, const char *text, size_t len, float size, float letter_tracking, float container_w) {
     if (len == 0U || container_w <= 0.0F) {
         return 0U;
     }
-    /* Space width: measured once per call, reused for inter-word gaps. */
     const float space_w = nt_font_measure_n(font, " ", 1U, size, letter_tracking).width;
 
     uint32_t lines = 1U;
     float line_w = 0.0F;
     size_t i = 0U;
     while (i < len) {
-        /* Skip leading whitespace on a fresh line. */
         if (line_w == 0.0F) {
             while (i < len && is_ws(text[i]) && text[i] != '\n') {
                 i++;
@@ -34,7 +30,6 @@ static uint32_t simulate_wrap_lines(nt_font_t font, const char *text, size_t len
             }
         }
 
-        /* Explicit newline starts a new line; don't count empty trailing line. */
         if (text[i] == '\n') {
             lines++;
             line_w = 0.0F;
@@ -42,7 +37,6 @@ static uint32_t simulate_wrap_lines(nt_font_t font, const char *text, size_t len
             continue;
         }
 
-        /* Locate next word (run of non-whitespace). */
         const size_t word_start = i;
         while (i < len && !is_ws(text[i])) {
             i++;
@@ -54,14 +48,12 @@ static uint32_t simulate_wrap_lines(nt_font_t font, const char *text, size_t len
         const float word_w = nt_font_measure_n(font, text + word_start, word_end - word_start, size, letter_tracking).width;
         const float prospective = (line_w == 0.0F) ? word_w : (line_w + space_w + word_w);
         if (prospective > container_w && line_w > 0.0F) {
-            /* Wrap: word goes to next line, alone. */
             lines++;
             line_w = word_w;
         } else {
             line_w = prospective;
         }
 
-        /* Consume the trailing whitespace (one space) but stop at newline. */
         if (i < len && text[i] != '\n' && is_ws(text[i])) {
             i++;
         }
@@ -83,17 +75,13 @@ uint16_t nt_ui_fit_width(nt_ui_context_t *ctx, uint16_t font_id, const char *tex
 
     const size_t len = strlen(text);
 
-    /* Use the same per-word wrap simulation as Clay's MeasureTextCached path
-     * so fit_width returns size_max only when Clay will actually keep text on
-     * one line. Plain measure_n on the full string applies kerning across
-     * whitespace which Clay does NOT do -- the small discrepancy is enough
-     * to flip wrap decisions for borderline-length text. */
+    /* Per-word simulation (not measure_n on full string) -- Clay doesn't kern
+     * across whitespace, the discrepancy flips wrap decisions for borderline text. */
     if (simulate_wrap_lines(font, text, len, (float)size_max, letter_tracking, container_w) <= 1U) {
         return size_max;
     }
 
-    /* Binary search: find largest size in [lo, hi] that keeps the text on
-     * one line. round-up mid so lo converges to the answer. */
+    /* round-up mid so lo converges to the answer. */
     uint16_t lo = size_min;
     uint16_t hi = size_max;
     while (lo < hi) {
@@ -126,8 +114,7 @@ uint16_t nt_ui_fit_box(nt_ui_context_t *ctx, uint16_t font_id, const char *text,
     }
     const size_t len = strlen(text);
 
-    /* Per-size: wrap line count -> total height. Compare to container_h. */
-    /* Inlined inside the binary search; line_height==0 means natural. */
+    /* line_height==0 -> font's natural ascent+descent+linegap. */
     const uint32_t lines_at_max = simulate_wrap_lines(font, text, len, (float)size_max, letter_tracking, container_w);
     const float lh_at_max = (line_height > 0U) ? (float)line_height : ((float)fm.line_height * (float)size_max / (float)fm.units_per_em);
     if ((float)lines_at_max * lh_at_max <= container_h) {

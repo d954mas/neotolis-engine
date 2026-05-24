@@ -1,10 +1,8 @@
 #ifndef NT_UI_SCALE_H
 #define NT_UI_SCALE_H
 
-/* nt_ui_scale: maps a designer's reference resolution to the current
- * framebuffer for adaptive UI. Pure math, no state on the engine -- caller
- * recomputes per frame and feeds the result to ortho + nt_ui_begin + walker
- * target + pointer translation. */
+/* nt_ui_scale: maps reference resolution to framebuffer for adaptive UI.
+ * Pure math; caller recomputes per frame and feeds ortho + begin + target. */
 
 #include "input/nt_input.h"
 #include "ui/nt_ui.h" /* nt_ui_target_t */
@@ -41,22 +39,14 @@ typedef struct {
     float top;
 } nt_ui_scale_ortho_t;
 
-/* fb_w/h are the current framebuffer pixels. ref_w/h in desc are the
- * designer-picked logical resolution. mode chooses fit policy. */
 nt_ui_scale_t nt_ui_compute_scale(const nt_ui_scale_desc_t *desc, float fb_w, float fb_h);
 
-/* Translate a framebuffer-space pointer (e.g. g_nt_input.pointers[i]) to
- * logical UI space. x/y get the scale + offset transform; dx/dy/wheel/
- * buttons pass through unchanged -- callers that need delta in logical
- * space divide externally. */
+/* Physical pointer -> logical. dx/dy/wheel/buttons pass through unchanged. */
 nt_pointer_t nt_ui_scale_apply_pointer(const nt_ui_scale_t *s, nt_pointer_t physical);
 
-/* Compute ortho projection bounds that map logical Clay-space onto the full
- * framebuffer including letterbox margins. Feed result to glm_ortho. */
+/* Ortho bounds mapping logical Clay-space onto the full fb (including margins). */
 nt_ui_scale_ortho_t nt_ui_scale_ortho(const nt_ui_scale_t *s);
 
-/* Build a walker target from this scale. Fills viewport with logical dims
- * and fb_size/fb_offset with physical info -- scissor will be physical px. */
 nt_ui_target_t nt_ui_scale_make_target(const nt_ui_scale_t *s);
 
 #endif /* NT_UI_SCALE_H */

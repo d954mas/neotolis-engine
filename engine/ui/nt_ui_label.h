@@ -8,10 +8,8 @@
 #include <stdint.h>
 
 #include "clay.h"
+#include "ui/nt_ui.h" /* nt_ui_element_data_t */
 
-/* Forward decl avoids include cycle with ui/nt_ui.h umbrella re-export
- * (C11+ permits identical typedef redeclaration; misc-header-include-cycle
- * would fire if we included ui/nt_ui.h here). */
 typedef struct nt_ui_context nt_ui_context_t;
 
 typedef struct {
@@ -27,13 +25,13 @@ typedef struct {
 _Static_assert(sizeof(nt_ui_label_style_t) <= 32, "nt_ui_label_style_t fits in 32 B");
 
 /* Asserts at entry: ctx, style, text non-NULL; font_id < NT_UI_MAX_FONTS;
- * nt_font_valid(ctx->fonts[font_id]); font_size > 0. */
-void nt_ui_label(nt_ui_context_t *ctx, const char *text, const nt_ui_label_style_t *style);
+ * nt_font_valid(ctx->fonts[font_id]); font_size > 0.
+ * data may be NULL (= no layer, no user_data); build with NT_UI_DATA_LAYER /
+ * NT_UI_DATA_FULL macros. data is passed through to TEXT render command's
+ * userData -- walker reads .layer for batch sort. */
+void nt_ui_label(nt_ui_context_t *ctx, nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style);
 
-/* Auto-fit variant: same as nt_ui_label, but overrides style->font_size with
- * font_size_override. Style stays static-const (Model D); the override is
- * the runtime-computed result of nt_ui_fit_width / nt_ui_fit_box. All other
- * style fields (color, align, wrap_mode, letter_tracking) carry through. */
-void nt_ui_label_sized(nt_ui_context_t *ctx, const char *text, const nt_ui_label_style_t *style, uint16_t font_size_override);
+/* nt_ui_label with font_size override (keeps style static-const; pair with nt_ui_fit_*). */
+void nt_ui_label_sized(nt_ui_context_t *ctx, nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style, uint16_t font_size_override);
 
 #endif /* NT_UI_LABEL_H */

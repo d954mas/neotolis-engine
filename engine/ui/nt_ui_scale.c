@@ -78,11 +78,8 @@ nt_pointer_t nt_ui_scale_apply_pointer(const nt_ui_scale_t *s, nt_pointer_t phys
     return physical;
 }
 
-/* Ortho bounds chosen so logical {0..logical_w, 0..logical_h} lands at
- * physical {fb_offset_x..fb_w-fb_offset_x, fb_offset_y..fb_h-fb_offset_y}
- * inside the framebuffer. For LETTERBOX/CROP, offsets > 0 expand the ortho
- * range past logical bounds so the bars (or cropped area) are part of
- * world space. */
+/* Logical {0..logical_w, 0..logical_h} -> physical inside fb. LETTERBOX/CROP
+ * offsets expand ortho range past logical so bars/crop are part of world. */
 nt_ui_scale_ortho_t nt_ui_scale_ortho(const nt_ui_scale_t *s) {
     NT_ASSERT(s != NULL && "nt_ui_scale_ortho: s must be non-NULL");
     NT_ASSERT(s->scale_x > 0.0F && s->scale_y > 0.0F && "nt_ui_scale_ortho: scale must be positive");
