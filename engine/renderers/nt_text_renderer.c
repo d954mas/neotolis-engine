@@ -248,23 +248,17 @@ static void emit_quad(const nt_glyph_cache_entry_t *g, const float model[16], fl
         nt_text_renderer_flush();
     }
 
-    /* Dynamic dilation ("Decade of Slug" main improvement): pad the quad by
-     * 0.5 px per side in screen space. Slightly oversized quad lets fragments
-     * sample em-coords just outside the glyph bbox -- coverage falls cleanly
-     * to 0 there, eliminating under-coverage at bbox edges and shifting
-     * sample positions off pixel-aligned curve endpoints. Assumes 1 world
-     * unit = 1 screen pixel (true for nt_ui's orthographic projection). */
+    /* 0.5 px screen-space dilation ("Decade of Slug" improvement): oversize
+     * the quad so fragments sample em-coords just past bbox where coverage
+     * falls cleanly to 0. Assumes 1 world unit = 1 screen pixel (nt_ui ortho). */
     const float dilate_px = 0.5F;
     const float dilate_em = dilate_px / scale;
 
-    /* Local quad corners (scaled from font units to target size) + dilation */
     float x0 = pen_x + ((float)g->bbox_x0 * scale) - dilate_px;
     float y0 = pen_y + ((float)g->bbox_y0 * scale) - dilate_px;
     float x1 = pen_x + ((float)g->bbox_x1 * scale) + dilate_px;
     float y1 = pen_y + ((float)g->bbox_y1 * scale) + dilate_px;
 
-    /* Em-space texcoords -- dilated to match the oversized quad so each
-     * fragment's sampled em-coord lines up with its world position. */
     float em_x0 = (float)g->bbox_x0 - dilate_em;
     float em_y0 = (float)g->bbox_y0 - dilate_em;
     float em_x1 = (float)g->bbox_x1 + dilate_em;

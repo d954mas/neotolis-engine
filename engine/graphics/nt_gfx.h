@@ -141,8 +141,9 @@ typedef enum {
     NT_PIXEL_RGB8 = 1,    /* 3 bpp, no alpha */
     NT_PIXEL_RG8 = 2,     /* 2 bpp, two channels */
     NT_PIXEL_R8 = 3,      /* 1 bpp, single channel */
-    NT_PIXEL_RGBA16F = 4, /* 8 bpp, half-float (Slug curve data) */
-    NT_PIXEL_RG16UI = 5,  /* 4 bpp, unsigned integer (Slug band data) */
+    NT_PIXEL_RGBA16F = 4, /* 8 bpp, half-float */
+    NT_PIXEL_RG16UI = 5,  /* 4 bpp, unsigned integer */
+    NT_PIXEL_RGBA32F = 6, /* 16 bpp, full float */
 } nt_pixel_format_t;
 
 typedef enum {

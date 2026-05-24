@@ -16,6 +16,12 @@ in vec4 v_color;
 
 out vec4 frag_color;
 
+// Linear fallback for truly degenerate (a.y == 0) curves; near-tangential
+// cases are handled by the Citardauq stable form in the solvers below.
+#ifndef SLUG_LINEAR_FALLBACK_EPSILON
+#define SLUG_LINEAR_FALLBACK_EPSILON (1.0 / 65536.0)
+#endif
+
 ivec2 CurveTexCoord(uint offset) { return ivec2(int(offset) % u_curve_tex_width, int(offset) / u_curve_tex_width); }
 
 // Determine root eligibility from signs of control point coordinates.
@@ -30,42 +36,42 @@ uint CalcRootCode(float y1, float y2, float y3) {
     return ((0x2E74u >> shift) & 0x0101u);
 }
 
-// Solve for x-coordinates where curve crosses y=0.
-// Always returns two values; caller uses CalcRootCode to decide which are valid.
-// Reference: SlugPixelShader.hlsl SolveHorizPoly()
+// Solve for x where curve crosses y=0. Reference SolveHorizPoly() with the
+// Citardauq stable form: q = b + sign(b)*sqrt(D) is cancellation-free;
+// the other root via Vieta (t1*t2 = p0/a). Avoids the precision loss of
+// `b - sqrt(D)` on near-tangential curves.
 vec2 SolveHorizPoly(vec2 p0, vec2 p1, vec2 p2) {
     vec2 a = p0 - p1 * 2.0 + p2;
     vec2 b = p0 - p1;
-    float ra = 1.0 / a.y;
-    float rb = 0.5 / b.y;
-
     float d = sqrt(max(b.y * b.y - a.y * p0.y, 0.0));
-    float t1 = (b.y - d) * ra;
-    float t2 = (b.y + d) * ra;
+    float q = b.y + (b.y >= 0.0 ? d : -d);
+    float t_add = q / a.y;
+    float t_mul = (abs(q) > 1e-30) ? (p0.y / q) : t_add;
+    // Map back to reference t1=(b-d)/a, t2=(b+d)/a ordering by sign(b.y).
+    float t1 = (b.y >= 0.0) ? t_mul : t_add;
+    float t2 = (b.y >= 0.0) ? t_add : t_mul;
 
-    // Linear fallback when quadratic coefficient is near zero
-    if (abs(a.y) < 1.0 / 65536.0) {
-        t1 = p0.y * rb;
+    if (abs(a.y) < SLUG_LINEAR_FALLBACK_EPSILON) {
+        t1 = p0.y * (0.5 / b.y);
         t2 = t1;
     }
 
     return vec2((a.x * t1 - b.x * 2.0) * t1 + p0.x, (a.x * t2 - b.x * 2.0) * t2 + p0.x);
 }
 
-// Solve for y-coordinates where curve crosses x=0.
-// Reference: SlugPixelShader.hlsl SolveVertPoly()
+// Solve for y where curve crosses x=0. Same Citardauq stabilization.
 vec2 SolveVertPoly(vec2 p0, vec2 p1, vec2 p2) {
     vec2 a = p0 - p1 * 2.0 + p2;
     vec2 b = p0 - p1;
-    float ra = 1.0 / a.x;
-    float rb = 0.5 / b.x;
-
     float d = sqrt(max(b.x * b.x - a.x * p0.x, 0.0));
-    float t1 = (b.x - d) * ra;
-    float t2 = (b.x + d) * ra;
+    float q = b.x + (b.x >= 0.0 ? d : -d);
+    float t_add = q / a.x;
+    float t_mul = (abs(q) > 1e-30) ? (p0.x / q) : t_add;
+    float t1 = (b.x >= 0.0) ? t_mul : t_add;
+    float t2 = (b.x >= 0.0) ? t_add : t_mul;
 
-    if (abs(a.x) < 1.0 / 65536.0) {
-        t1 = p0.x * rb;
+    if (abs(a.x) < SLUG_LINEAR_FALLBACK_EPSILON) {
+        t1 = p0.x * (0.5 / b.x);
         t2 = t1;
     }
 
@@ -156,12 +162,6 @@ float SlugRender(vec2 coord) {
 
 void main() {
     float coverage = SlugRender(v_texcoord);
-
-    // SLUG_WEIGHT (SlugPixelShader.hlsl:128-134): sqrt is a concave remap that
-    // lifts interior coverage (0.25 -> 0.5, 0.5 -> 0.71) so partially-covered
-    // edge pixels look thicker. Restores perceptual weight that linear AA
-    // thins on thin diagonals (w/v/M legs).
-    coverage = sqrt(coverage);
 
     if (coverage < 1.0 / 255.0)
         discard;

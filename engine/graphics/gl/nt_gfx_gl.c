@@ -1188,6 +1188,8 @@ static nt_gfx_gl_fmt_t nt_gfx_gl_pixel_format(nt_pixel_format_t fmt) {
         return (nt_gfx_gl_fmt_t){GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, true};
     case NT_PIXEL_RG16UI:
         return (nt_gfx_gl_fmt_t){GL_RG16UI, GL_RG_INTEGER, GL_UNSIGNED_SHORT, true};
+    case NT_PIXEL_RGBA32F:
+        return (nt_gfx_gl_fmt_t){GL_RGBA32F, GL_RGBA, GL_FLOAT, true};
     case NT_PIXEL_RGBA8:
     default:
         return (nt_gfx_gl_fmt_t){GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, true};
