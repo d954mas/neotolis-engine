@@ -253,6 +253,70 @@ static void test_scissor_neither_axis_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
+/* Scaled mode: viewport is LOGICAL (Y top-down). fb_size + fb_offset describe
+ * physical placement. Scissor coordinates scale logical->physical and Y-flip
+ * against fb height for GL bottom-left. */
+static void test_scissor_scaled_letterbox(void) {
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+    /* Logical bbox: (10,20) 30x40 in a 640x480 logical viewport. */
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 10.0F, .y = 20.0F, .width = 30.0F, .height = 40.0F};
+    s_test_cmds[0].renderData.clip.horizontal = true;
+    s_test_cmds[0].renderData.clip.vertical = true;
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+    inject_frozen_cmds(2);
+
+    /* Logical 640x480 inside fb 1600x600 with letterbox: 2x bars on x.
+     * scale_x = (1600 - 2*320) / 640 = 1.5; scale_y = 600 / 480 = 1.25. */
+    nt_ui_target_t target = {
+        .viewport = {0.0F, 0.0F, 640.0F, 480.0F},
+        .fb_size = {1600.0F, 600.0F},
+        .fb_offset = {320.0F, 0.0F},
+    };
+    nt_ui_walk(s_fx.ctx, &target);
+
+    int rect[4];
+    nt_gfx_test_scissor_rect(rect);
+    /* phys_x = 320 + 1.5 * (0 + 10)            = 335
+     * phys_w = 1.5 * 30                        = 45
+     * phys_h = 1.25 * 40                       = 50
+     * phys_y_top = 0 + 1.25 * (0 + 20)         = 25
+     * phys_y_gl = 600 - 25 - 50                = 525 */
+    TEST_ASSERT_EQUAL_INT(335, rect[0]);
+    TEST_ASSERT_EQUAL_INT(525, rect[1]);
+    TEST_ASSERT_EQUAL_INT(45, rect[2]);
+    TEST_ASSERT_EQUAL_INT(50, rect[3]);
+}
+
+/* EXPAND mode (no letterbox, scale_x == scale_y, no offset). */
+static void test_scissor_scaled_expand(void) {
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 100.0F, .y = 50.0F, .width = 200.0F, .height = 100.0F};
+    s_test_cmds[0].renderData.clip.horizontal = true;
+    s_test_cmds[0].renderData.clip.vertical = true;
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+    inject_frozen_cmds(2);
+
+    /* Logical 640x480, fb 1280x960 (uniform 2x), no offset. */
+    nt_ui_target_t target = {
+        .viewport = {0.0F, 0.0F, 640.0F, 480.0F},
+        .fb_size = {1280.0F, 960.0F},
+        .fb_offset = {0.0F, 0.0F},
+    };
+    nt_ui_walk(s_fx.ctx, &target);
+
+    int rect[4];
+    nt_gfx_test_scissor_rect(rect);
+    /* phys_x = 0 + 2 * (0 + 100)               = 200
+     * phys_w = 2 * 200                         = 400
+     * phys_h = 2 * 100                         = 200
+     * phys_y_top = 0 + 2 * (0 + 50)            = 100
+     * phys_y_gl = 960 - 100 - 200              = 660 */
+    TEST_ASSERT_EQUAL_INT(200, rect[0]);
+    TEST_ASSERT_EQUAL_INT(660, rect[1]);
+    TEST_ASSERT_EQUAL_INT(400, rect[2]);
+    TEST_ASSERT_EQUAL_INT(200, rect[3]);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scissor_depth_8_ok);
@@ -265,5 +329,7 @@ int main(void) {
     RUN_TEST(test_scissor_horizontal_only);
     RUN_TEST(test_scissor_vertical_only);
     RUN_TEST(test_scissor_neither_axis_asserts);
+    RUN_TEST(test_scissor_scaled_letterbox);
+    RUN_TEST(test_scissor_scaled_expand);
     return UNITY_END();
 }

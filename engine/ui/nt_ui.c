@@ -580,6 +580,44 @@ typedef struct {
     int h;
 } scissor_rect_t;
 
+/* Convert a Clay-space scissor rect to GL bottom-left physical pixels and
+ * submit. Two interpretations of target->viewport based on fb_size sentinel:
+ *
+ * fb_size = {0, 0} -- LEGACY 1:1 mode (existing tests, non-scaled demos):
+ *   viewport.x/y are GL physical coords (vy = pixels from fb BOTTOM, like
+ *   a glViewport(x, y, w, h) call). Y-flip happens within the viewport
+ *   rect, ignoring everything below it in the fb.
+ *
+ * fb_size > 0 -- SCALED mode (nt_ui_scale_make_target builds this):
+ *   viewport is in Clay logical coords (top-down Y); fb_size is physical;
+ *   fb_offset is letterbox margin from top-left of fb. Scissor scales +
+ *   shifts into physical, then Y-flips against fb height for GL. */
+static void apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp) {
+    const float vx = target->viewport[0];
+    const float vy = target->viewport[1];
+    const float vw = target->viewport[2];
+    const float vh = target->viewport[3];
+    const float fbw = target->fb_size[0];
+    const float fbh = target->fb_size[1];
+
+    if (fbw <= 0.0F || fbh <= 0.0F) {
+        /* Legacy: viewport.y is already GL bottom-up. Y-flip inside viewport. */
+        nt_gfx_set_scissor((int)vx + x, (int)(vy + vh) - y - hp, wp, hp);
+        return;
+    }
+
+    const float ox = target->fb_offset[0];
+    const float oy = target->fb_offset[1];
+    const float sx = (vw > 0.0F) ? ((fbw - (2.0F * ox)) / vw) : 1.0F;
+    const float sy = (vh > 0.0F) ? ((fbh - (2.0F * oy)) / vh) : 1.0F;
+    const int phys_x = (int)(ox + (sx * (vx + (float)x)));
+    const int phys_y_top = (int)(oy + (sy * (vy + (float)y)));
+    const int phys_w = (int)(sx * (float)wp);
+    const int phys_h = (int)(sy * (float)hp);
+    const int phys_y_gl = (int)fbh - phys_y_top - phys_h;
+    nt_gfx_set_scissor(phys_x, phys_y_gl, phys_w, phys_h);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
@@ -587,8 +625,6 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
     /* Unclipped axis falls back to viewport; floor/ceil avoid 1px right/bottom bite. */
     const Clay_ClipRenderData *clip = &c->renderData.clip;
     NT_ASSERT((clip->horizontal || clip->vertical) && "nt_ui SCISSOR_START with both axes unclipped is a no-op");
-    const int vx = (int)target->viewport[0];
-    const int vy = (int)target->viewport[1];
     const int vw = (int)target->viewport[2];
     const int vh = (int)target->viewport[3];
     int x;
@@ -632,8 +668,7 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
 
     stack[(*depth)++] = (scissor_rect_t){.x = x, .y = y, .w = wp, .h = hp};
 
-    /* Y-flip against viewport.h (NOT framebuffer h) for split-screen panes. */
-    nt_gfx_set_scissor(vx + x, vy + vh - y - hp, wp, hp);
+    apply_scissor_logical_to_physical(target, x, y, wp, hp);
     nt_gfx_set_scissor_enabled(true);
 }
 
@@ -647,10 +682,7 @@ static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t 
         nt_gfx_set_scissor_enabled(false);
     } else {
         scissor_rect_t r = stack[*depth - 1];
-        const int vx = (int)target->viewport[0];
-        const int vy = (int)target->viewport[1];
-        const int vh = (int)target->viewport[3];
-        nt_gfx_set_scissor(vx + r.x, vy + vh - r.y - r.h, r.w, r.h);
+        apply_scissor_logical_to_physical(target, r.x, r.y, r.w, r.h);
     }
 }
 // #endregion

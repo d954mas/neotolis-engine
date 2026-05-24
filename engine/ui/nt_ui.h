@@ -35,9 +35,23 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Caller owns framebuffer binding; walker writes only viewport + scissor. */
+/* Caller owns framebuffer binding; walker writes only viewport + scissor.
+ *
+ * LOGICAL vs PHYSICAL pixels:
+ *   viewport[]   = LOGICAL Clay-space {x, y, w, h}; matches what nt_ui_begin
+ *                  received. Walker uses this for dispatch Y-flip math.
+ *   fb_size[]    = PHYSICAL framebuffer {w, h}. Walker uses this to convert
+ *                  logical scissor rects to physical pixels for GL.
+ *                  Sentinel: {0,0} = treat viewport as physical (1:1 mode,
+ *                  backwards compat for existing tests + non-scaled demos).
+ *   fb_offset[]  = PHYSICAL letterbox margin {ox, oy}; 0 for EXPAND/STRETCH.
+ *
+ * Build via nt_ui_scale_make_target() for adaptive UI, or zero-init the
+ * fb_* fields for legacy 1:1 (the original 4-float form still compiles). */
 typedef struct {
-    float viewport[4]; /* {x, y, w, h} in framebuffer pixels */
+    float viewport[4];
+    float fb_size[2];
+    float fb_offset[2];
 } nt_ui_target_t;
 
 /* Pointed to by Clay_ImageElementConfig.imageData; lifetime must extend
