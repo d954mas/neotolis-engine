@@ -114,8 +114,10 @@ If a decision can be deferred without loss of base architecture — it is deferr
 
   Clay v0.14 is vendored as a **public** dependency of `nt_ui`: game
   code declares layout and widgets via `CLAY_*` macros directly,
-  while `nt_ui` owns lifecycle (contexts, themes, the walker that
-  turns Clay's render commands into sprite/text renderer calls). This
+  while `nt_ui` owns lifecycle (contexts, the walker that turns Clay's
+  render commands into sprite/text renderer calls). Styling is
+  game-owned: `nt_ui_label_style_t` is a plain data struct passed by
+  const-pointer; engine ships no theme manager or style registry. This
   is a deliberate compromise — wrapping Clay's full surface in an
   engine-owned adapter API would be ~100+ shim functions for no
   benefit beyond hiding the dependency. The cost we accept is that

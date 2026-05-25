@@ -37,8 +37,7 @@ static nt_ui_context_t *g_nt_ui_inframe_ctx = NULL;
 /* Set true between nt_ui_module_init / nt_ui_module_shutdown. */
 static bool s_nt_ui_module_initialized = false;
 
-/* Static table for layer-only data (layer-only = no user_data). Most common
- * case avoids per-call scratch alloc. Lazy-init, reset in module_shutdown. */
+/* Avoids per-call scratch alloc for layer-only (no user_data) case. */
 static nt_ui_element_data_t s_layer_only_table[256];
 static bool s_layer_only_initialized;
 // #endregion
