@@ -576,8 +576,17 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
     nt_text_renderer_set_font(font);
     nt_text_renderer_set_material(ctx->text_material);
 
+    /* Baseline placement: center text vertically in bbox. Text height =
+     * (ascent + |descent|) * scale. Baseline sits |descent|*scale above
+     * the text bottom edge. */
+    nt_font_metrics_t metrics = nt_font_get_metrics(font);
+    const float scale = (metrics.units_per_em > 0) ? ((float)t->fontSize / (float)metrics.units_per_em) : 0.0F;
+    const float text_h = (float)(metrics.ascent - metrics.descent) * scale;
+    const float center_offset = (c->boundingBox.height - text_h) * 0.5F;
+    const float baseline_y = c->boundingBox.y + center_offset + ((float)(-metrics.descent) * scale);
+
     const float m[16] = {
-        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, c->boundingBox.x, c->boundingBox.y, 0.0F, 1.0F,
+        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, c->boundingBox.x, baseline_y, 0.0F, 1.0F,
     };
     /* text_renderer wants 0..1; Clay stores 0..255. */
     const float color[4] = {
