@@ -371,7 +371,7 @@ static void frame(void) {
 
             nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), hint_title, g_current->caption);
             CLAY({.id = CLAY_ID("title-box"),
-                  .userData = NT_UI_DATA_LAYER(LAYER_BG),
+                  .userData = NT_UI_CLAY_DATA(LAYER_BG),
                   .layout = {.sizing = {CLAY_SIZING_PERCENT(panel_pct), CLAY_SIZING_FIT(0)}, .padding = CLAY_PADDING_ALL((uint16_t)panel_pad)},
                   .backgroundColor = g_current->panel}) {
                 nt_ui_label_sized(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), k_titles[s_demo_text_idx], g_current->h1, title_fit);
@@ -379,17 +379,17 @@ static void frame(void) {
 
             /* childAlignment proof: 3 cells, same body style, only .childAlignment.x differs. */
             CLAY({.id = CLAY_ID("align-row"), .layout = {.sizing = {CLAY_SIZING_PERCENT(panel_pct), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 8}}) {
-                CLAY({.userData = NT_UI_DATA_LAYER(LAYER_BG),
+                CLAY({.userData = NT_UI_CLAY_DATA(LAYER_BG),
                       .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_LEFT, CLAY_ALIGN_Y_CENTER}},
                       .backgroundColor = g_current->panel}) {
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "LEFT", g_current->body);
                 }
-                CLAY({.userData = NT_UI_DATA_LAYER(LAYER_BG),
+                CLAY({.userData = NT_UI_CLAY_DATA(LAYER_BG),
                       .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                       .backgroundColor = g_current->panel}) {
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "CENTER", g_current->body);
                 }
-                CLAY({.userData = NT_UI_DATA_LAYER(LAYER_BG),
+                CLAY({.userData = NT_UI_CLAY_DATA(LAYER_BG),
                       .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(48)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_RIGHT, CLAY_ALIGN_Y_CENTER}},
                       .backgroundColor = g_current->panel}) {
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "RIGHT", g_current->body);
@@ -398,14 +398,14 @@ static void frame(void) {
 
             nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), hint_box, g_current->caption);
             CLAY({.id = CLAY_ID("fit-box"),
-                  .userData = NT_UI_DATA_LAYER(LAYER_BG),
+                  .userData = NT_UI_CLAY_DATA(LAYER_BG),
                   .layout = {.sizing = {CLAY_SIZING_PERCENT(panel_pct), CLAY_SIZING_FIXED((uint16_t)panel_h_fixed)}, .padding = CLAY_PADDING_ALL((uint16_t)panel_pad)},
                   .backgroundColor = g_current->panel}) {
                 nt_ui_label_sized(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), k_paragraphs[s_demo_text_idx], g_current->wrap, box_fit);
             }
 
             CLAY({.id = CLAY_ID("tracking-box"),
-                  .userData = NT_UI_DATA_LAYER(LAYER_BG),
+                  .userData = NT_UI_CLAY_DATA(LAYER_BG),
                   .layout = {.sizing = {CLAY_SIZING_PERCENT(panel_pct), CLAY_SIZING_FIT(0)},
                              .padding = CLAY_PADDING_ALL((uint16_t)panel_pad),
                              .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},

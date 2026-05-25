@@ -9,7 +9,7 @@
 #include "ui/nt_ui_internal.h"
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_label(nt_ui_context_t *ctx, nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style) {
+void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style) {
     NT_ASSERT(ctx != NULL && "nt_ui_label: ctx must be non-NULL");
     NT_ASSERT(style != NULL && "nt_ui_label: style must be non-NULL");
     NT_ASSERT(text != NULL && "nt_ui_label: text must be non-NULL (use \"\" for empty)");
@@ -20,7 +20,7 @@ void nt_ui_label(nt_ui_context_t *ctx, nt_ui_element_data_t *data, const char *t
     /* Clay arena-copies config; text.chars is by-pointer — keep alive until nt_ui_end. */
     Clay_String s = {.length = (int32_t)strlen(text), .chars = text};
     CLAY_TEXT(s, CLAY_TEXT_CONFIG({
-                     .userData = data,
+                     .userData = (void *)data,
                      .textColor = style->color,
                      .fontId = style->font_id,
                      .fontSize = style->font_size,
@@ -31,7 +31,7 @@ void nt_ui_label(nt_ui_context_t *ctx, nt_ui_element_data_t *data, const char *t
                  }));
 }
 
-void nt_ui_label_sized(nt_ui_context_t *ctx, nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style, uint16_t font_size_override) {
+void nt_ui_label_sized(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style, uint16_t font_size_override) {
     NT_ASSERT(ctx != NULL && "nt_ui_label_sized: ctx must be non-NULL");
     NT_ASSERT(style != NULL && "nt_ui_label_sized: style must be non-NULL");
     NT_ASSERT(font_size_override > 0 && "nt_ui_label_sized: font_size_override must be > 0");

@@ -269,7 +269,7 @@ static inline uint32_t nt_color_pack_clay(Clay_Color c) {
 // #endregion
 
 // #region element_data_alloc
-nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data) {
+const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data) {
     if (user_data == NULL) {
         return &s_default_element_data[layer];
     }

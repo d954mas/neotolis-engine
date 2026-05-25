@@ -29,9 +29,9 @@ _Static_assert(sizeof(nt_ui_label_style_t) <= 32, "nt_ui_label_style_t fits in 3
  * data may be NULL (= no layer, no user_data); build with NT_UI_DATA_LAYER /
  * NT_UI_DATA_FULL macros. data is passed through to TEXT render command's
  * userData -- walker reads .layer for batch sort. */
-void nt_ui_label(nt_ui_context_t *ctx, nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style);
+void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style);
 
 /* nt_ui_label with font_size override (keeps style static-const; pair with nt_ui_fit_*). */
-void nt_ui_label_sized(nt_ui_context_t *ctx, nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style, uint16_t font_size_override);
+void nt_ui_label_sized(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style, uint16_t font_size_override);
 
 #endif /* NT_UI_LABEL_H */
