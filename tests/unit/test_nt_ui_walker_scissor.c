@@ -326,9 +326,35 @@ static void test_scissor_scaled_expand(void) {
     TEST_ASSERT_EQUAL_INT(200, rect[3]);
 }
 
+/* T6: depth exactly at CAP (64) must succeed. */
+static void test_scissor_depth_at_cap_ok(void) {
+    const int32_t cap = NT_UI_WALKER_SCISSOR_DEPTH_CAP;
+    const int32_t total = cap * 2; /* push + pop each */
+    Clay_RenderCommand *cmds = (Clay_RenderCommand *)calloc((size_t)total, sizeof(Clay_RenderCommand));
+    TEST_ASSERT_NOT_NULL(cmds);
+    for (int32_t i = 0; i < cap; ++i) {
+        cmds[i].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+        cmds[i].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 800, .height = 600};
+        cmds[i].renderData.clip.horizontal = true;
+        cmds[i].renderData.clip.vertical = true;
+    }
+    for (int32_t i = cap; i < total; ++i) {
+        cmds[i].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+    }
+    s_fx.ctx->frozen_cmds.internalArray = cmds;
+    s_fx.ctx->frozen_cmds.length = total;
+    s_fx.ctx->frozen_cmds.capacity = total;
+
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_walk(s_fx.ctx, &target);
+    TEST_ASSERT_FALSE(nt_gfx_test_scissor_enabled());
+    free(cmds);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_scissor_depth_8_ok);
+    RUN_TEST(test_scissor_depth_at_cap_ok);
     RUN_TEST(test_scissor_depth_cap_asserts);
     RUN_TEST(test_scissor_unbalanced_asserts_at_exit);
     RUN_TEST(test_scissor_y_flip_top_left_to_gl_bottom_left);

@@ -246,6 +246,19 @@ static void test_label_element_data_passthrough(void) {
     TEST_ASSERT_EQUAL_PTR(&marker, d->user_data);
 }
 
+/* T7: nt_ui_label_sized overrides font_size from style. */
+static void test_label_sized_overrides_font_size(void) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_label_sized(s_fx.ctx, NULL, "Sized", &s_style_body, 28U); }
+    nt_ui_end(s_fx.ctx);
+
+    const Clay_RenderCommand *c = find_first_text_cmd(s_fx.ctx);
+    TEST_ASSERT_NOT_NULL(c);
+    TEST_ASSERT_EQUAL_UINT16(28U, c->renderData.text.fontSize);
+    TEST_ASSERT_EQUAL_INT32(255, (int32_t)c->renderData.text.textColor.r);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_label_emits_text_with_style_color);
@@ -260,5 +273,6 @@ int main(void) {
     RUN_TEST(test_label_per_call_override);
     RUN_TEST(test_label_empty_text_accepted);
     RUN_TEST(test_label_element_data_passthrough);
+    RUN_TEST(test_label_sized_overrides_font_size);
     return UNITY_END();
 }

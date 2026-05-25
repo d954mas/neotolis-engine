@@ -36,6 +36,11 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 static nt_ui_context_t *g_nt_ui_inframe_ctx = NULL;
 /* Set true between nt_ui_module_init / nt_ui_module_shutdown. */
 static bool s_nt_ui_module_initialized = false;
+
+/* Static table for layer-only data (layer-only = no user_data). Most common
+ * case avoids per-call scratch alloc. Lazy-init, reset in module_shutdown. */
+static nt_ui_element_data_t s_layer_only_table[256];
+static bool s_layer_only_initialized;
 // #endregion
 
 // #region clay_error_handler
@@ -110,6 +115,7 @@ void nt_ui_module_shutdown(void) {
     Clay__MeasureText = NULL;
     g_nt_ui_inframe_ctx = NULL;
     Clay_SetCurrentContext(NULL);
+    s_layer_only_initialized = false;
     s_nt_ui_module_initialized = false;
 }
 // #endregion
@@ -263,12 +269,6 @@ static inline uint32_t nt_color_pack_clay(Clay_Color c) {
 // #endregion
 
 // #region element_data_alloc
-/* Static table for layer-only data: most common case (per-widget batch tag)
- * avoids the per-call scratch alloc. .rodata cost: 256 * 16 = 4 KB.
- * Filled lazily on first use; the layer field equals the index. */
-static nt_ui_element_data_t s_layer_only_table[256];
-static bool s_layer_only_initialized;
-
 static void init_layer_only_table(void) {
     for (uint32_t i = 0; i < 256U; i++) {
         s_layer_only_table[i].layer = (nt_ui_layer_t)i;
@@ -878,9 +878,10 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* glViewport needs PHYSICAL pixels. SCALED mode reads fb_size + fb_offset;
      * DIRECT mode viewport[] is already in physical px. */
     if (target->mode == NT_UI_TARGET_SCALED) {
-        const float ox2 = 2.0F * target->fb_offset[0];
-        const float oy2 = 2.0F * target->fb_offset[1];
-        nt_gfx_set_viewport((int)target->fb_offset[0], (int)target->fb_offset[1], (int)(target->fb_size[0] - ox2), (int)(target->fb_size[1] - oy2));
+        /* Derive width from int offset to avoid rounding asymmetry (1px bar). */
+        const int ox = (int)roundf(target->fb_offset[0]);
+        const int oy = (int)roundf(target->fb_offset[1]);
+        nt_gfx_set_viewport(ox, oy, (int)target->fb_size[0] - (2 * ox), (int)target->fb_size[1] - (2 * oy));
     } else {
         nt_gfx_set_viewport((int)target->viewport[0], (int)target->viewport[1], (int)target->viewport[2], (int)target->viewport[3]);
     }

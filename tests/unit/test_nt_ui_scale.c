@@ -250,6 +250,44 @@ static void test_target_letterbox(void) {
     assert_int_eq_scaled(0, t.fb_offset[1], 1);
 }
 
+/* T3: CROP target has negative fb_offset. */
+static void test_target_crop(void) {
+    nt_ui_scale_desc_t desc = {.ref_w = 800.0F, .ref_h = 600.0F, .mode = NT_UI_SCALE_CROP};
+    nt_ui_scale_t s = nt_ui_compute_scale(&desc, 600.0F, 1200.0F);
+    nt_ui_target_t t = nt_ui_scale_make_target(&s);
+    TEST_ASSERT_EQUAL_INT(NT_UI_TARGET_SCALED, t.mode);
+    assert_int_eq_scaled(800000, t.viewport[2], 1);
+    assert_int_eq_scaled(600000, t.viewport[3], 1);
+    assert_int_eq_scaled(600000, t.fb_size[0], 1);
+    assert_int_eq_scaled(1200000, t.fb_size[1], 1);
+    /* offset_x = (600 - (800*2))/2 = -500 */
+    int32_t ox_x1000 = (int32_t)((t.fb_offset[0] * 1000.0F) - 0.5F);
+    TEST_ASSERT_EQUAL_INT32(-500000, ox_x1000);
+}
+
+/* T3: STRETCH target has no offset, viewport = ref. */
+static void test_target_stretch(void) {
+    nt_ui_scale_desc_t desc = {.ref_w = 800.0F, .ref_h = 600.0F, .mode = NT_UI_SCALE_STRETCH};
+    nt_ui_scale_t s = nt_ui_compute_scale(&desc, 1600.0F, 1200.0F);
+    nt_ui_target_t t = nt_ui_scale_make_target(&s);
+    TEST_ASSERT_EQUAL_INT(NT_UI_TARGET_SCALED, t.mode);
+    assert_int_eq_scaled(800000, t.viewport[2], 1);
+    assert_int_eq_scaled(600000, t.viewport[3], 1);
+    assert_int_eq_scaled(0, t.fb_offset[0], 1);
+    assert_int_eq_scaled(0, t.fb_offset[1], 1);
+}
+
+/* T4: pointer in CROP mode -- negative offset → positive logical. */
+static void test_pointer_crop(void) {
+    nt_ui_scale_desc_t desc = {.ref_w = 800.0F, .ref_h = 600.0F, .mode = NT_UI_SCALE_CROP};
+    nt_ui_scale_t s = nt_ui_compute_scale(&desc, 600.0F, 1200.0F);
+    /* scale=2, offset_x=-500, offset_y=0. Physical (0,0) → logical (250, 0). */
+    nt_pointer_t p = {.x = 0.0F, .y = 0.0F};
+    nt_pointer_t logical = nt_ui_scale_apply_pointer(&s, p);
+    assert_int_eq_scaled(250000, logical.x, 1);
+    assert_int_eq_scaled(0, logical.y, 1);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_stretch_identity);
@@ -262,6 +300,7 @@ int main(void) {
     RUN_TEST(test_pointer_letterbox);
     RUN_TEST(test_pointer_letterbox_in_bar);
     RUN_TEST(test_pointer_preserves_state);
+    RUN_TEST(test_pointer_crop);
     RUN_TEST(test_zero_framebuffer_safe);
     RUN_TEST(test_ortho_expand);
     RUN_TEST(test_ortho_letterbox);
@@ -269,5 +308,7 @@ int main(void) {
     RUN_TEST(test_ortho_stretch);
     RUN_TEST(test_target_expand);
     RUN_TEST(test_target_letterbox);
+    RUN_TEST(test_target_crop);
+    RUN_TEST(test_target_stretch);
     return UNITY_END();
 }

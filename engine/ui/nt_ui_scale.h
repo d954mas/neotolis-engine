@@ -41,7 +41,7 @@ typedef struct {
 
 nt_ui_scale_t nt_ui_compute_scale(const nt_ui_scale_desc_t *desc, float fb_w, float fb_h);
 
-/* Physical pointer -> logical. dx/dy/wheel/buttons pass through unchanged. */
+/* Physical pointer -> logical. x/y/dx/dy scaled; wheel/buttons pass through. */
 nt_pointer_t nt_ui_scale_apply_pointer(const nt_ui_scale_t *s, nt_pointer_t physical);
 
 /* Ortho bounds mapping logical Clay-space onto the full fb (including margins). */

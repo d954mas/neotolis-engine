@@ -245,21 +245,21 @@ static void frame(void) {
 
     if (nt_input_key_is_pressed(NT_KEY_T)) {
         g_current = (g_current == &g_dark) ? &g_light : &g_dark;
-        (void)printf("ui_theme_demo: swapped to %s palette\n", g_current->name);
+        nt_log_info("ui_theme_demo: swapped to %s palette", g_current->name);
     }
     if (nt_input_key_is_pressed(NT_KEY_D)) {
         /* Toggle relative to current ctx state -- "x" button may have turned it off. */
         const bool now_on = !nt_ui_get_debug_overlay(s_ctx);
         nt_ui_set_debug_overlay(s_ctx, now_on);
-        (void)printf("ui_theme_demo: debug overlay %s\n", now_on ? "ON" : "OFF");
+        nt_log_info("ui_theme_demo: debug overlay %s", now_on ? "ON" : "OFF");
     }
     if (nt_input_key_is_pressed(NT_KEY_1)) {
         s_scale_mode = (nt_ui_scale_mode_t)((s_scale_mode + 1) % 4);
-        (void)printf("ui_theme_demo: scale mode -> %s\n", k_scale_mode_names[s_scale_mode]);
+        nt_log_info("ui_theme_demo: scale mode -> %s", k_scale_mode_names[s_scale_mode]);
     }
     if (nt_input_key_is_pressed(NT_KEY_2)) {
         s_demo_text_idx = (s_demo_text_idx + 1) % 3;
-        (void)printf("ui_theme_demo: demo text -> %d\n", s_demo_text_idx);
+        nt_log_info("ui_theme_demo: demo text -> %d", s_demo_text_idx);
     }
 
     try_bind_resources();

@@ -9,6 +9,7 @@
 
 #include "clay.h"
 #include "core/nt_assert.h"
+#include "font/nt_font.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -145,17 +146,40 @@ static void test_fit_width_whitespace_only_terminates(void) {
     TEST_ASSERT_EQUAL_UINT16(44U, s); /* nothing to measure -- fits at max */
 }
 
+/* === Measuring font tests (T1): nt_font_test_set_metrics makes stub_font
+ * return tofu widths = size/2 per char. With units_per_em=1000, size=20:
+ * each char is 10px wide. "abcde" (5 chars) = 50px. === */
+
+/* With measuring font: text wider than container must shrink. */
+static void test_fit_width_measuring_font_shrinks(void) {
+    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
+    /* size=40: advance = 20px/char. "abcdefghij" = 10 chars = 200px. container=100. */
+    uint16_t s = nt_ui_fit_width(s_fx.ctx, 0, "abcdefghij", 100.0F, 10U, 40U, 0.0F);
+    TEST_ASSERT_LESS_THAN_UINT16(40U, s);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT16(10U, s);
+}
+
+/* Long single word (no whitespace): fit_width must shrink even without wrap. */
+static void test_fit_width_long_word_no_wrap_shrinks(void) {
+    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
+    /* 20 chars, size=40: width = 20*20 = 400px. container=100. Must shrink. */
+    uint16_t s = nt_ui_fit_width(s_fx.ctx, 0, "abcdefghijklmnopqrst", 100.0F, 10U, 40U, 0.0F);
+    TEST_ASSERT_LESS_THAN_UINT16(40U, s);
+}
+
+/* fit_box with measuring font: lots of text in tight box must shrink. */
+static void test_fit_box_measuring_font_shrinks(void) {
+    nt_font_test_set_metrics(s_fx.stub_font, 1000, 800, -200, 1000);
+    /* At size=40: line_height = 1000*40/1000 = 40px. Container 100x80 = 2 lines max.
+     * 20 chars at 20px/char = 400px → wraps many times → shrinks. */
+    uint16_t s = nt_ui_fit_box(s_fx.ctx, 0, "abcdefghij klmnopqrst uvwxy", 100.0F, 80.0F, 10U, 40U, 0.0F, 0U);
+    TEST_ASSERT_LESS_THAN_UINT16(40U, s);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT16(10U, s);
+}
+
 int main(void) {
     UNITY_BEGIN();
-    /* NOTE: stub_font in ui_walker_fixture has units_per_em=0 and
-     * !metrics_set, so nt_font_measure_n early-returns {0,0} regardless
-     * of letter_tracking. Tests below verify code paths that DON'T depend
-     * on font measurements producing > 0 widths -- fast paths (empty text,
-     * fits-at-max, min==max), monotonicity (smaller box -> smaller-or-equal
-     * size), and explicit-line-height comparison. The real shrink behavior
-     * under live font metrics is exercised end-to-end by ui_theme_demo.
-     * Long-word width-check (P2 in code review) requires a measuring font
-     * stub; not covered here -- TODO when test_helpers gets one. */
+    /* === Stub-font tests (units_per_em=0, measure returns {0,0}) === */
     RUN_TEST(test_fit_width_empty_returns_max);
     RUN_TEST(test_fit_width_fits_at_max);
     RUN_TEST(test_fit_width_shrinks_to_fit);
@@ -170,5 +194,9 @@ int main(void) {
     RUN_TEST(test_fit_width_double_whitespace_terminates);
     RUN_TEST(test_fit_box_double_whitespace_terminates);
     RUN_TEST(test_fit_width_whitespace_only_terminates);
+    /* === Measuring-font tests (tofu advance = size/2 per char) === */
+    RUN_TEST(test_fit_width_measuring_font_shrinks);
+    RUN_TEST(test_fit_width_long_word_no_wrap_shrinks);
+    RUN_TEST(test_fit_box_measuring_font_shrinks);
     return UNITY_END();
 }

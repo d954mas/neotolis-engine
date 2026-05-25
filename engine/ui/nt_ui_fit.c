@@ -131,6 +131,7 @@ uint16_t nt_ui_fit_box(nt_ui_context_t *ctx, uint16_t font_id, const char *text,
     NT_ASSERT(nt_font_valid(font) && "nt_ui_fit_box: font slot empty; bind via nt_ui_set_font first");
 
     nt_font_metrics_t fm = nt_font_get_metrics(font);
+    /* units_per_em==0 = font handle allocated but resource not loaded yet. */
     if (fm.units_per_em == 0) {
         return size_max;
     }

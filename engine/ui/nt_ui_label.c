@@ -32,7 +32,9 @@ void nt_ui_label(nt_ui_context_t *ctx, nt_ui_element_data_t *data, const char *t
 }
 
 void nt_ui_label_sized(nt_ui_context_t *ctx, nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style, uint16_t font_size_override) {
+    NT_ASSERT(ctx != NULL && "nt_ui_label_sized: ctx must be non-NULL");
     NT_ASSERT(style != NULL && "nt_ui_label_sized: style must be non-NULL");
+    NT_ASSERT(font_size_override > 0 && "nt_ui_label_sized: font_size_override must be > 0");
     nt_ui_label_style_t local = *style;
     local.font_size = font_size_override;
     nt_ui_label(ctx, data, text, &local);

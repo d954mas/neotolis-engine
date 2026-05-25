@@ -75,6 +75,8 @@ nt_pointer_t nt_ui_scale_apply_pointer(const nt_ui_scale_t *s, nt_pointer_t phys
     NT_ASSERT(s->scale_x > 0.0F && s->scale_y > 0.0F && "nt_ui_scale_apply_pointer: scale must be positive");
     physical.x = (physical.x - s->offset_x) / s->scale_x;
     physical.y = (physical.y - s->offset_y) / s->scale_y;
+    physical.dx /= s->scale_x;
+    physical.dy /= s->scale_y;
     return physical;
 }
 
@@ -94,7 +96,7 @@ nt_ui_scale_ortho_t nt_ui_scale_ortho(const nt_ui_scale_t *s) {
 
 nt_ui_target_t nt_ui_scale_make_target(const nt_ui_scale_t *s) {
     NT_ASSERT(s != NULL && "nt_ui_scale_make_target: s must be non-NULL");
-    nt_ui_target_t t;
+    nt_ui_target_t t = {0};
     t.mode = NT_UI_TARGET_SCALED;
     t.viewport[0] = 0.0F;
     t.viewport[1] = 0.0F;

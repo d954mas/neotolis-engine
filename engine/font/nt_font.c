@@ -1861,4 +1861,14 @@ void nt_font_test_reset_measure_counters(void) {
         s_font.slots[i].test_measure_cache_misses = 0U;
     }
 }
+
+void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_height) {
+    NT_ASSERT(nt_pool_valid(&s_font.pool, font.id) && "nt_font_test_set_metrics: invalid font handle");
+    nt_font_slot_t *slot = get_slot(font);
+    slot->metrics.units_per_em = units_per_em;
+    slot->metrics.ascent = ascent;
+    slot->metrics.descent = descent;
+    slot->metrics.line_height = line_height;
+    slot->metrics_set = true;
+}
 #endif

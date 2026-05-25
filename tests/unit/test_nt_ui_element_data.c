@@ -80,6 +80,21 @@ static void test_reset_releases_macro_storage(void) {
     TEST_ASSERT_EQUAL_UINT8(2U, d->layer);
 }
 
+/* T9: layer=255 boundary value. */
+static void test_layer_boundary_255(void) {
+    nt_ui_element_data_t *d = NT_UI_DATA_LAYER(255);
+    TEST_ASSERT_NOT_NULL(d);
+    TEST_ASSERT_EQUAL_UINT8(255U, d->layer);
+    TEST_ASSERT_NULL(d->user_data);
+}
+
+/* T9: NT_UI_DATA_FULL(layer, NULL) goes through static table (same as LAYER). */
+static void test_full_with_null_user_data_uses_table(void) {
+    nt_ui_element_data_t *via_layer = NT_UI_DATA_LAYER(10);
+    nt_ui_element_data_t *via_full = NT_UI_DATA_FULL(10, NULL);
+    TEST_ASSERT_EQUAL_PTR(via_layer, via_full);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_layer_only_macro);
@@ -89,5 +104,7 @@ int main(void) {
     RUN_TEST(test_layer_only_same_layer_same_ptr);
     RUN_TEST(test_full_distinct_allocations);
     RUN_TEST(test_reset_releases_macro_storage);
+    RUN_TEST(test_layer_boundary_255);
+    RUN_TEST(test_full_with_null_user_data_uses_table);
     return UNITY_END();
 }

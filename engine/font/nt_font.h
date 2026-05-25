@@ -150,6 +150,10 @@ void nt_font_test_deactivate(uint32_t runtime_handle);
 uint32_t nt_font_test_measure_cache_hits(nt_font_t font);
 uint32_t nt_font_test_measure_cache_misses(nt_font_t font);
 void nt_font_test_reset_measure_counters(void);
+
+/* Set metrics on a stub font so measure_n returns predictable tofu widths
+ * (advance = units_per_em * 0.5 * size / units_per_em = size/2 per char). */
+void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_height);
 #endif
 // #endregion
 
