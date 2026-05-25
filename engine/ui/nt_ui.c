@@ -843,8 +843,10 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     nt_text_renderer_flush();
     nt_gfx_set_scissor_enabled(false);
 
-    /* Zero viewport (minimized tab, orientation change): silent no-op. */
-    if (target->viewport[2] == 0.0F || target->viewport[3] == 0.0F) {
+    /* Zero viewport or zero physical fb (minimized tab, orientation change): no-op. */
+    const bool zero_vp = (target->viewport[2] == 0.0F || target->viewport[3] == 0.0F);
+    const bool zero_fb = (target->mode == NT_UI_TARGET_SCALED && (target->fb_size[0] == 0.0F || target->fb_size[1] == 0.0F));
+    if (zero_vp || zero_fb) {
         ctx->last_walk_draw_call_delta = 0;
         ctx->last_walk_command_count = 0;
 #ifdef NT_TEST_ACCESS
