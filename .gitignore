@@ -82,4 +82,3 @@ compile_*.log
 # Autoresearch perf-tuning experiment log (local dev artifact, regenerated
 # per run — never belongs in source control)
 autoresearch-results.tsv
-scripts/_demo_test/
