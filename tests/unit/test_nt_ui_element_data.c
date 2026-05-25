@@ -10,9 +10,13 @@
 void setUp(void) {
     nt_test_assert_install();
     nt_mem_scratch_init(4096U);
+    nt_ui_module_init();
 }
 
-void tearDown(void) { nt_mem_scratch_shutdown(); }
+void tearDown(void) {
+    nt_ui_module_shutdown();
+    nt_mem_scratch_shutdown();
+}
 
 /* NT_UI_DATA_LAYER returns a valid ptr with layer set and user_data=NULL. */
 static void test_layer_only_macro(void) {

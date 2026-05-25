@@ -37,9 +37,8 @@ static nt_ui_context_t *g_nt_ui_inframe_ctx = NULL;
 /* Set true between nt_ui_module_init / nt_ui_module_shutdown. */
 static bool s_nt_ui_module_initialized = false;
 
-/* Avoids per-call scratch alloc for layer-only (no user_data) case. */
-static nt_ui_element_data_t s_layer_only_table[256];
-static bool s_layer_only_initialized;
+/* Pre-built element_data for each layer (user_data=NULL). Avoids scratch alloc. */
+static nt_ui_element_data_t s_default_element_data[256];
 // #endregion
 
 // #region clay_error_handler
@@ -107,6 +106,9 @@ void nt_ui_module_init(void) {
     g_nt_ui_inframe_ctx = NULL;
     Clay_SetCurrentContext(NULL);
     nt_ui_init_arc_lut();
+    for (uint32_t i = 0; i < 256U; i++) {
+        s_default_element_data[i].layer = (nt_ui_layer_t)i;
+    }
     s_nt_ui_module_initialized = true;
 }
 void nt_ui_module_shutdown(void) {
@@ -114,7 +116,6 @@ void nt_ui_module_shutdown(void) {
     Clay__MeasureText = NULL;
     g_nt_ui_inframe_ctx = NULL;
     Clay_SetCurrentContext(NULL);
-    s_layer_only_initialized = false;
     s_nt_ui_module_initialized = false;
 }
 // #endregion
@@ -268,20 +269,9 @@ static inline uint32_t nt_color_pack_clay(Clay_Color c) {
 // #endregion
 
 // #region element_data_alloc
-static void init_layer_only_table(void) {
-    for (uint32_t i = 0; i < 256U; i++) {
-        s_layer_only_table[i].layer = (nt_ui_layer_t)i;
-        s_layer_only_table[i].user_data = NULL;
-    }
-    s_layer_only_initialized = true;
-}
-
 nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data) {
     if (user_data == NULL) {
-        if (!s_layer_only_initialized) {
-            init_layer_only_table();
-        }
-        return &s_layer_only_table[layer];
+        return &s_default_element_data[layer];
     }
     nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
     d->layer = layer;
