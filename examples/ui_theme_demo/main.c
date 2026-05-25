@@ -211,7 +211,7 @@ static void try_bind_resources(void) {
     }
 
     if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
-        uint32_t ridx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_THEME_DEMO_ATLAS__WHITE_PNG.value);
+        uint32_t ridx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_THEME_DEMO_ATLAS_WHITE_PNG.value);
         NT_ASSERT(ridx != NT_ATLAS_INVALID_REGION && "ui_theme_demo: _white.png region missing in atlas");
         s_white_region_idx = ridx;
         nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, s_white_region_idx);

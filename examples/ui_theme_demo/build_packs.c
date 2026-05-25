@@ -1,22 +1,11 @@
-/*
- * Build UI theme demo packs:
- *   ui_theme_demo.ntpack -- single white-pixel atlas + Latin font for the
- *                           Model D palette hot-swap demo.
- *
- * W-4: The 1x1 white_region PNG is generated in-process via stbi_write_png
- * BEFORE the atlas packer reads it -- no Python dependency, no committed
- * binary artifact in raw/. stb_image_write is PUBLIC-linked into nt_builder
- * (see tools/builder/CMakeLists.txt line 121), so a plain #include resolves.
- *
+/* Build UI theme demo packs:
+ *   ui_theme_demo.ntpack -- white-pixel atlas + Latin font.
  * Usage: build_ui_theme_demo_packs <pack_dir>
- * Run from the project root directory.
- */
+ * Run from the project root directory. */
 
 /* clang-format off */
 #include "nt_builder.h"
 /* clang-format on */
-
-#include "stb_image_write.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,7 +20,7 @@
 #endif
 
 #define HEADER_DIR "examples/ui_theme_demo/generated"
-#define WHITE_PNG_PATH "examples/ui_theme_demo/raw/_white.png"
+#define WHITE_PNG_PATH "assets/textures/white.png"
 #define FONT_PATH "examples/ui_theme_demo/raw/font.ttf"
 
 static char s_path_buf[512];
@@ -39,18 +28,6 @@ static char s_path_buf[512];
 static const char *pack_path(const char *dir, const char *name) {
     (void)snprintf(s_path_buf, sizeof(s_path_buf), "%s/%s", dir, name);
     return s_path_buf;
-}
-
-/* W-4: Generate the 1x1 white RGBA PNG used as the atlas white_region. */
-static int generate_white_png(const char *path) {
-    /* 4 bytes RGBA, fully opaque white. */
-    const unsigned char white[4] = {255U, 255U, 255U, 255U};
-    if (!stbi_write_png(path, 1, 1, 4, white, 4)) {
-        (void)fprintf(stderr, "ui_theme_demo: stbi_write_png failed for %s\n", path);
-        return 1;
-    }
-    (void)printf("  Generated %s (1x1 RGBA white)\n", path);
-    return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -68,11 +45,6 @@ int main(int argc, char *argv[]) {
     char cache_dir[512];
     (void)snprintf(cache_dir, sizeof(cache_dir), "%s/_cache", out_dir);
     MKDIR(cache_dir);
-
-    /* W-4: Produce _white.png in raw/ BEFORE the atlas packer needs it. */
-    if (generate_white_png(WHITE_PNG_PATH) != 0) {
-        return 1;
-    }
 
     // #region pack: ui_theme_demo.ntpack
     NtBuilderContext *ctx = nt_builder_start_pack(pack_path(out_dir, "ui_theme_demo.ntpack"));
@@ -116,7 +88,7 @@ int main(int argc, char *argv[]) {
     nt_builder_atlas_add(ctx, WHITE_PNG_PATH, &sprite_opts);
 
     nt_builder_end_atlas(ctx);
-    (void)printf("  Atlas 'ui_theme_demo_atlas' added: 1 region (_white.png)\n");
+    (void)printf("  Atlas 'ui_theme_demo_atlas' added: 1 region (white.png)\n");
     // #endregion
 
     // #region font: ASCII Latin only
