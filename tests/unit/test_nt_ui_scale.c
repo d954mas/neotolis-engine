@@ -227,7 +227,7 @@ static void test_target_expand(void) {
     nt_ui_scale_desc_t desc = {.ref_w = 800.0F, .ref_h = 600.0F, .mode = NT_UI_SCALE_EXPAND};
     nt_ui_scale_t s = nt_ui_compute_scale(&desc, 1600.0F, 600.0F);
     nt_ui_target_t t = nt_ui_scale_make_target(&s);
-    TEST_ASSERT_EQUAL_INT(NT_UI_TARGET_SCALED, t.mode);
+    TEST_ASSERT_TRUE(t.fb_size[0] > 0.0F);
     assert_int_eq_scaled(0, t.viewport[0], 1);
     assert_int_eq_scaled(0, t.viewport[1], 1);
     assert_int_eq_scaled(1600000, t.viewport[2], 1); /* logical_w grew */
@@ -255,7 +255,7 @@ static void test_target_crop(void) {
     nt_ui_scale_desc_t desc = {.ref_w = 800.0F, .ref_h = 600.0F, .mode = NT_UI_SCALE_CROP};
     nt_ui_scale_t s = nt_ui_compute_scale(&desc, 600.0F, 1200.0F);
     nt_ui_target_t t = nt_ui_scale_make_target(&s);
-    TEST_ASSERT_EQUAL_INT(NT_UI_TARGET_SCALED, t.mode);
+    TEST_ASSERT_TRUE(t.fb_size[0] > 0.0F);
     assert_int_eq_scaled(800000, t.viewport[2], 1);
     assert_int_eq_scaled(600000, t.viewport[3], 1);
     assert_int_eq_scaled(600000, t.fb_size[0], 1);
@@ -270,7 +270,7 @@ static void test_target_stretch(void) {
     nt_ui_scale_desc_t desc = {.ref_w = 800.0F, .ref_h = 600.0F, .mode = NT_UI_SCALE_STRETCH};
     nt_ui_scale_t s = nt_ui_compute_scale(&desc, 1600.0F, 1200.0F);
     nt_ui_target_t t = nt_ui_scale_make_target(&s);
-    TEST_ASSERT_EQUAL_INT(NT_UI_TARGET_SCALED, t.mode);
+    TEST_ASSERT_TRUE(t.fb_size[0] > 0.0F);
     assert_int_eq_scaled(800000, t.viewport[2], 1);
     assert_int_eq_scaled(600000, t.viewport[3], 1);
     assert_int_eq_scaled(0, t.fb_offset[0], 1);

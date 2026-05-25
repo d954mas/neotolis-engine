@@ -275,7 +275,6 @@ static void test_scissor_scaled_letterbox(void) {
     /* Logical 640x480 inside fb 1600x600 with letterbox: 2x bars on x.
      * scale_x = (1600 - 2*320) / 640 = 1.5; scale_y = 600 / 480 = 1.25. */
     nt_ui_target_t target = {
-        .mode = NT_UI_TARGET_SCALED,
         .viewport = {0.0F, 0.0F, 640.0F, 480.0F},
         .fb_size = {1600.0F, 600.0F},
         .fb_offset = {320.0F, 0.0F},
@@ -306,7 +305,6 @@ static void test_scissor_scaled_expand(void) {
 
     /* Logical 640x480, fb 1280x960 (uniform 2x), no offset. */
     nt_ui_target_t target = {
-        .mode = NT_UI_TARGET_SCALED,
         .viewport = {0.0F, 0.0F, 640.0F, 480.0F},
         .fb_size = {1280.0F, 960.0F},
         .fb_offset = {0.0F, 0.0F},

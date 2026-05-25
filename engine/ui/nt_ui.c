@@ -609,7 +609,7 @@ static void apply_scissor_logical_to_physical(const nt_ui_target_t *target, int 
     const float vw = target->viewport[2];
     const float vh = target->viewport[3];
 
-    if (target->mode == NT_UI_TARGET_DIRECT) {
+    if (target->fb_size[0] <= 0.0F || target->fb_size[1] <= 0.0F) {
         nt_gfx_set_scissor((int)vx + x, (int)(vy + vh) - y - hp, wp, hp);
         return;
     }
@@ -832,10 +832,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     nt_text_renderer_flush();
     nt_gfx_set_scissor_enabled(false);
 
-    /* Zero viewport or zero physical fb (minimized tab, orientation change): no-op. */
-    const bool zero_vp = (target->viewport[2] == 0.0F || target->viewport[3] == 0.0F);
-    const bool zero_fb = (target->mode == NT_UI_TARGET_SCALED && (target->fb_size[0] == 0.0F || target->fb_size[1] == 0.0F));
-    if (zero_vp || zero_fb) {
+    /* Zero viewport or degenerate fb (minimized tab, orientation change): no-op. */
+    const bool scaled = target->fb_size[0] > 0.0F;
+    if (target->viewport[2] == 0.0F || target->viewport[3] == 0.0F || (scaled && target->fb_size[1] == 0.0F)) {
         ctx->last_walk_draw_call_delta = 0;
         ctx->last_walk_command_count = 0;
 #ifdef NT_TEST_ACCESS
@@ -868,7 +867,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 
     /* glViewport needs PHYSICAL pixels. SCALED mode reads fb_size + fb_offset;
      * DIRECT mode viewport[] is already in physical px. */
-    if (target->mode == NT_UI_TARGET_SCALED) {
+    if (scaled) {
         /* Derive width from int offset to avoid rounding asymmetry (1px bar). */
         const int ox = (int)roundf(target->fb_offset[0]);
         const int oy = (int)roundf(target->fb_offset[1]);

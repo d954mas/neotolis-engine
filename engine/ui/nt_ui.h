@@ -36,16 +36,11 @@
 typedef struct nt_ui_context nt_ui_context_t;
 
 /* Caller owns framebuffer binding; walker writes only viewport + scissor.
- *   DIRECT: viewport[] = GL physical px {x, y, w, h}; fb_size/fb_offset ignored.
- *   SCALED: viewport[] = LOGICAL Clay-space; fb_size = PHYSICAL fb;
- *           fb_offset = PHYSICAL letterbox margin (may be negative in CROP). */
-typedef enum {
-    NT_UI_TARGET_DIRECT = 0,
-    NT_UI_TARGET_SCALED = 1,
-} nt_ui_target_mode_t;
-
+ *   fb_size[0] == 0: viewport[] = GL physical px {x, y, w, h}. Direct mode.
+ *   fb_size[0] > 0:  viewport[] = LOGICAL Clay-space; fb_size = PHYSICAL fb;
+ *                     fb_offset = PHYSICAL letterbox margin (negative in CROP).
+ * Build via nt_ui_scale_make_target() or zero-init for direct mode. */
 typedef struct {
-    nt_ui_target_mode_t mode;
     float viewport[4];
     float fb_size[2];
     float fb_offset[2];
