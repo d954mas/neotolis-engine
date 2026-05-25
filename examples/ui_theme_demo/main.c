@@ -184,6 +184,7 @@ static uint32_t s_white_region_idx;
 #define UI_REF_H 640.0F
 static nt_ui_scale_mode_t s_scale_mode = NT_UI_SCALE_EXPAND;
 static const char *const k_scale_mode_names[] = {"STRETCH", "LETTERBOX", "CROP", "EXPAND"};
+#define SCALE_MODE_COUNT ((int)(sizeof k_scale_mode_names / sizeof k_scale_mode_names[0]))
 
 /* Key 2 cycles short/medium/long; idx=2 forces fit_* helpers near size_min. */
 static const char *const k_titles[] = {
@@ -199,6 +200,7 @@ static const char *const k_paragraphs[] = {
     "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. "
     "Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
 };
+#define DEMO_TEXT_COUNT ((int)(sizeof k_titles / sizeof k_titles[0]))
 static int s_demo_text_idx = 1;
 // #endregion
 
@@ -254,11 +256,11 @@ static void frame(void) {
         nt_log_info("ui_theme_demo: debug overlay %s", now_on ? "ON" : "OFF");
     }
     if (nt_input_key_is_pressed(NT_KEY_1)) {
-        s_scale_mode = (nt_ui_scale_mode_t)((s_scale_mode + 1) % 4);
+        s_scale_mode = (nt_ui_scale_mode_t)((s_scale_mode + 1) % SCALE_MODE_COUNT);
         nt_log_info("ui_theme_demo: scale mode -> %s", k_scale_mode_names[s_scale_mode]);
     }
     if (nt_input_key_is_pressed(NT_KEY_2)) {
-        s_demo_text_idx = (s_demo_text_idx + 1) % 3;
+        s_demo_text_idx = (s_demo_text_idx + 1) % DEMO_TEXT_COUNT;
         nt_log_info("ui_theme_demo: demo text -> %d", s_demo_text_idx);
     }
 
