@@ -327,6 +327,8 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_builder PRIVATE nt_builder unity)
     target_compile_definitions(test_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_builder WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
+    set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
     # --- Mesh renderer tests ---
     add_executable(test_mesh_renderer unit/test_mesh_renderer.c)

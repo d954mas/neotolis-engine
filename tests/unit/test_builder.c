@@ -5060,15 +5060,7 @@ void test_atlas_max_pages_exhaustion_asserts(void) {
 
     /* Pipeline allocates internally; longjmp from NT_BUILD_ASSERT can't free
      * them. Suppress leak detection for this intentional assert-path test. */
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-    extern void __lsan_disable(void); // NOLINT(bugprone-reserved-identifier)
-    extern void __lsan_enable(void);  // NOLINT(bugprone-reserved-identifier)
-    __lsan_disable();
-#endif
     EXPECT_BUILD_ASSERT(ctx, nt_builder_end_atlas(ctx));
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-    __lsan_enable();
-#endif
 
     for (uint32_t i = 0; i < N_SPRITES; i++) {
         free(sprites[i]);
