@@ -621,6 +621,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     /* Slice9 regions must be non-rotated (D-54-13). */
     NT_ASSERT(rh.region->transform == 0 && "slice9 region must have transform == 0 (no rotation)");
     NT_ASSERT(rh.region->source_w > 0 && rh.region->source_h > 0 && "slice9 region source dimensions must be non-zero");
+    NT_ASSERT(sl + sr < rh.region->source_w && st + sb < rh.region->source_h && "slice9 borders exceed source dimensions (per-entity override invalid?)");
 
     const uint32_t page_tex = nt_resource_get(rh.page_resource);
     if (!ensure_current_cmd_page_texture(page_tex)) {

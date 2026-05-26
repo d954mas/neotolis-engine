@@ -992,7 +992,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     const float vh = target->viewport[3];
 
     /* Apply accumulated 2D affine: pos' = pos * M + T.
-     * Position uses full affine; size uses accum_scale (uniform). */
+     * Position uses full affine; size uses accum_scale (uniform).
+     * Rotation negated for renderers: affine is Clay Y-down, GL is Y-up. */
     const float sc = ws->accum_scale;
     const float orig_cx = c->boundingBox.x + (c->boundingBox.width * 0.5F);
     const float orig_cy = c->boundingBox.y + (c->boundingBox.height * 0.5F);
