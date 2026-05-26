@@ -2095,6 +2095,141 @@ void test_atlas_sd_hd_merge_stable_region_indices(void) {
     s_user_data = NULL;
 }
 
+/* ---- Slice9 tests ---- */
+
+/* Test: slice9 round-trip through resolve.
+ * Construct a v6 blob with 1 region that has slice9_lrtb={4,4,6,6} and
+ * NT_ATLAS_REGION_FLAG_SLICE9 set. Drive resolve. Verify the test probe
+ * returns the correct values. */
+void test_atlas_slice9_roundtrip(void) {
+    NtAtlasVertex verts[4] = {
+        {.local_x = 0, .local_y = 0, .atlas_u = 0, .atlas_v = 0},
+        {.local_x = 64, .local_y = 0, .atlas_u = 65535, .atlas_v = 0},
+        {.local_x = 64, .local_y = 64, .atlas_u = 65535, .atlas_v = 65535},
+        {.local_x = 0, .local_y = 64, .atlas_u = 0, .atlas_v = 65535},
+    };
+    uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
+
+    NtAtlasRegion region;
+    memset(&region, 0, sizeof(region));
+    region.name_hash = 0x51CE9ULL;
+    region.source_w = 64;
+    region.source_h = 64;
+    region.origin_x = 0.5F;
+    region.origin_y = 0.5F;
+    region.vertex_start = 0;
+    region.index_start = 0;
+    region.vertex_count = 4;
+    region.index_count = 6;
+    region.page_index = 0;
+    region.transform = 0;
+    region.flags = NT_ATLAS_REGION_FLAG_SLICE9;
+    region.slice9_lrtb[0] = 4;
+    region.slice9_lrtb[1] = 4;
+    region.slice9_lrtb[2] = 6;
+    region.slice9_lrtb[3] = 6;
+
+    mock_atlas_spec_t spec = {
+        .regions = &region,
+        .region_count = 1,
+        .vertices = verts,
+        .total_vertex_count = 4,
+        .indices = indices,
+        .total_index_count = 6,
+        .page_ids = NULL,
+        .page_count = 0,
+    };
+
+    uint8_t buf[512];
+    uint32_t size = build_mock_atlas_blob(buf, sizeof(buf), &spec);
+
+    nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+    TEST_ASSERT_NOT_NULL(s_user_data);
+
+    const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+    nt_atlas_slice9_t s9 = nt_atlas_test_get_region_slice9_raw(ad, 0);
+    TEST_ASSERT_EQUAL_UINT8(4, s9.left);
+    TEST_ASSERT_EQUAL_UINT8(4, s9.right);
+    TEST_ASSERT_EQUAL_UINT8(6, s9.top);
+    TEST_ASSERT_EQUAL_UINT8(6, s9.bottom);
+    TEST_ASSERT_TRUE(s9.has_slice9);
+
+    /* Verify the raw region struct also has the data */
+    const nt_texture_region_t *r = nt_atlas_test_get_region_raw(ad, 0);
+    TEST_ASSERT_EQUAL_UINT8(4, r->slice9_lrtb[0]);
+    TEST_ASSERT_EQUAL_UINT8(4, r->slice9_lrtb[1]);
+    TEST_ASSERT_EQUAL_UINT8(6, r->slice9_lrtb[2]);
+    TEST_ASSERT_EQUAL_UINT8(6, r->slice9_lrtb[3]);
+    TEST_ASSERT_TRUE(r->flags & NT_ATLAS_REGION_FLAG_SLICE9);
+}
+
+/* Test: region with zero slice9 returns has_slice9==false.
+ * All-zero slice9_lrtb and no SLICE9 flag = no slice9. */
+void test_atlas_slice9_zero_has_no_slice9(void) {
+    NtAtlasVertex verts[4] = {
+        {.local_x = 0, .local_y = 0, .atlas_u = 0, .atlas_v = 0},
+        {.local_x = 32, .local_y = 0, .atlas_u = 32000, .atlas_v = 0},
+        {.local_x = 32, .local_y = 32, .atlas_u = 32000, .atlas_v = 32000},
+        {.local_x = 0, .local_y = 32, .atlas_u = 0, .atlas_v = 32000},
+    };
+    uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
+
+    NtAtlasRegion region;
+    memset(&region, 0, sizeof(region));
+    region.name_hash = 0xA051CEULL;
+    region.source_w = 32;
+    region.source_h = 32;
+    region.origin_x = 0.5F;
+    region.origin_y = 0.5F;
+    region.vertex_start = 0;
+    region.index_start = 0;
+    region.vertex_count = 4;
+    region.index_count = 6;
+    region.page_index = 0;
+    region.transform = 0;
+    region.flags = 0; /* no SLICE9 flag */
+    /* slice9_lrtb already zeroed by memset */
+
+    mock_atlas_spec_t spec = {
+        .regions = &region,
+        .region_count = 1,
+        .vertices = verts,
+        .total_vertex_count = 4,
+        .indices = indices,
+        .total_index_count = 6,
+        .page_ids = NULL,
+        .page_count = 0,
+    };
+
+    uint8_t buf[512];
+    uint32_t size = build_mock_atlas_blob(buf, sizeof(buf), &spec);
+
+    nt_atlas_test_drive_resolve(buf, size, &s_user_data);
+    TEST_ASSERT_NOT_NULL(s_user_data);
+
+    const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
+    nt_atlas_slice9_t s9 = nt_atlas_test_get_region_slice9_raw(ad, 0);
+    TEST_ASSERT_EQUAL_UINT8(0, s9.left);
+    TEST_ASSERT_EQUAL_UINT8(0, s9.right);
+    TEST_ASSERT_EQUAL_UINT8(0, s9.top);
+    TEST_ASSERT_EQUAL_UINT8(0, s9.bottom);
+    TEST_ASSERT_FALSE(s9.has_slice9);
+}
+
+/* Test: v5 header is rejected by validation.
+ * Constructs a blob with version=5 and verifies validation returns false. */
+void test_atlas_v5_header_rejected(void) {
+    uint8_t buf[512];
+    uint32_t size = 0;
+    build_fixture_blob(buf, sizeof(buf), &size);
+
+    /* Overwrite version field to 5 (v5 is no longer supported) */
+    uint16_t v5 = 5;
+    memcpy(buf + 4, &v5, sizeof(v5));
+
+    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(buf, size), "v5 header should be rejected");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_atlas_parse_valid_blob);
@@ -2124,5 +2259,10 @@ int main(void) {
     RUN_TEST(test_atlas_cached_recompute_on_merge);
     RUN_TEST(test_atlas_tombstone_cached_zero);
     RUN_TEST(test_atlas_sd_hd_merge_stable_region_indices);
+
+    /* Slice9 */
+    RUN_TEST(test_atlas_slice9_roundtrip);
+    RUN_TEST(test_atlas_slice9_zero_has_no_slice9);
+    RUN_TEST(test_atlas_v5_header_rejected);
     return UNITY_END();
 }
