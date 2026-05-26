@@ -39,7 +39,6 @@ struct nt_ui_context {
     nt_ui_marker_t *markers; /* allocated from arena at create_context */
     uint32_t marker_count;
     uint32_t max_markers;
-    uint32_t clay_decl_count; /* incremented by each widget before its CLAY call */
 
     /* Per-walk metrics. Walker writes; nt_ui_get_last_walk_* reads. */
     uint32_t last_walk_draw_call_delta;

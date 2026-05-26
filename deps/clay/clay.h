@@ -1,10 +1,11 @@
 // VERSION: 0.14
 //
 // NT PATCHES (reapply after Clay update):
-//   1. nt_open_element_hook callback in Clay_Context — called on every
-//      Clay__OpenElement() and Clay__OpenTextElement(). Used by nt_ui
-//      side-channel transform markers to track element declaration count.
-//      Search "nt_open_element_hook" for all patch sites.
+//   1. nt_layout_index in Clay_RenderCommand + nt_current_layout_index
+//      in Clay_Context. Stores source layout element index on every render
+//      command. Set in Clay__AddRenderCommand from context state, updated
+//      in DFS traversal. Used by nt_ui side-channel transform markers.
+//      Search "nt_" for all patch sites (4 total).
 
 /*
     NOTE: In order to use this library you must define
@@ -699,6 +700,7 @@ typedef struct Clay_RenderCommand {
     // Note: the render command array is already sorted in ascending order, and will produce correct results if drawn in naive order.
     // This field is intended for use in batching renderers for improved performance.
     int16_t zIndex;
+    int32_t nt_layout_index; // NT patch: source layout element index (-1 for synthetic)
     // Specifies how to handle rendering of this command.
     // CLAY_RENDER_COMMAND_TYPE_RECTANGLE - The renderer should draw a solid color rectangle.
     // CLAY_RENDER_COMMAND_TYPE_BORDER - The renderer should draw a colored border inset into the bounding box.
@@ -1230,8 +1232,7 @@ struct Clay_Context {
     int32_t maxMeasureTextCacheWordCount;
     bool warningsEnabled;
     Clay_ErrorHandler errorHandler;
-    void (*nt_open_element_hook)(void *); /* NT patch: called on each OpenElement/OpenTextElement */
-    void *nt_open_element_hook_ud;
+    int32_t nt_current_layout_index; // NT patch: set during DFS, read by Clay__AddRenderCommand
     Clay_BooleanWarnings booleanWarnings;
     Clay__WarningArray warnings;
 
@@ -1982,7 +1983,6 @@ void Clay__OpenElement(void) {
     } else {
         Clay__int32_tArray_Set(&context->layoutElementClipElementIds, context->layoutElements.length - 1, 0);
     }
-    if (context->nt_open_element_hook) context->nt_open_element_hook(context->nt_open_element_hook_ud);
 }
 
 void Clay__OpenTextElement(Clay_String text, Clay_TextElementConfig *textConfig) {
@@ -2017,7 +2017,6 @@ void Clay__OpenTextElement(Clay_String text, Clay_TextElementConfig *textConfig)
     };
     textElement->layoutConfig = &CLAY_LAYOUT_DEFAULT;
     parentElement->childrenOrTextContent.children.length++;
-    if (context->nt_open_element_hook) context->nt_open_element_hook(context->nt_open_element_hook_ud);
 }
 
 Clay_ElementId Clay__AttachId(Clay_ElementId elementId) {
@@ -2459,6 +2458,7 @@ Clay_String Clay__IntToString(int32_t integer) {
 
 void Clay__AddRenderCommand(Clay_RenderCommand renderCommand) {
     Clay_Context* context = Clay_GetCurrentContext();
+    renderCommand.nt_layout_index = context->nt_current_layout_index; // NT patch
     if (context->renderCommands.length < context->renderCommands.capacity - 1) {
         Clay_RenderCommandArray_Add(&context->renderCommands, renderCommand);
     } else {
@@ -2717,6 +2717,7 @@ void Clay__CalculateFinalLayout(void) {
         while (dfsBuffer.length > 0) {
             Clay__LayoutElementTreeNode *currentElementTreeNode = Clay__LayoutElementTreeNodeArray_Get(&dfsBuffer, (int)dfsBuffer.length - 1);
             Clay_LayoutElement *currentElement = currentElementTreeNode->layoutElement;
+            context->nt_current_layout_index = (int32_t)(currentElement - context->layoutElements.internalArray); // NT patch
             Clay_LayoutConfig *layoutConfig = currentElement->layoutConfig;
             Clay_Vector2 scrollOffset = CLAY__DEFAULT_STRUCT;
 
