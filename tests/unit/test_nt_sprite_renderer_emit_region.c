@@ -509,7 +509,7 @@ static void test_slice9_basic(void) {
     nt_material_t mat = create_test_material();
     nt_sprite_renderer_set_material(mat);
 
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, 4, 4, 4, 4, 0xFFFFFFFFU, 0U, 0.0F);
+    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, 4, 4, 4, 4, 0xFFFFFFFFU, 0U, 0.0F, 1.0F);
 
     TEST_ASSERT_EQUAL_UINT32(36, nt_sprite_renderer_test_last_slice9_vertex_count());
     TEST_ASSERT_EQUAL_UINT32(54, nt_sprite_renderer_test_last_slice9_index_count());
@@ -528,7 +528,7 @@ static void test_slice9_positions(void) {
     nt_sprite_renderer_set_material(mat);
 
     /* Target: (0,0,100,80), borders: (4,4,4,4) */
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, 4, 4, 4, 4, 0xFFFFFFFFU, 0U, 0.0F);
+    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, 4, 4, 4, 4, 0xFFFFFFFFU, 0U, 0.0F, 1.0F);
 
     /* Expected x splits: [0, 4, 96, 100] */
     /* Expected y splits: [0, 4, 76, 80]  */
@@ -577,7 +577,7 @@ static void test_slice9_flip_x(void) {
     nt_sprite_renderer_set_material(mat);
 
     /* Asymmetric borders: L=4, R=8 to detect swap */
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, 4, 8, 4, 4, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_X, 0.0F);
+    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, 4, 8, 4, 4, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_X, 0.0F, 1.0F);
 
     /* With FLIP_X: fl=8, fr=4, so position splits become [0, 8, 96, 100] */
     float pos[3];
@@ -614,7 +614,7 @@ static void test_slice9_flip_y(void) {
     nt_sprite_renderer_set_material(mat);
 
     /* Asymmetric: T=4, B=8 */
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, 4, 4, 4, 8, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_Y, 0.0F);
+    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 100.0F, 80.0F, 4, 4, 4, 8, 0xFFFFFFFFU, NT_SPRITE_FLAG_FLIP_Y, 0.0F, 1.0F);
 
     /* FLIP_Y: ft=8, fb=4 -> y splits = [0, 4, 72, 80] */
     float pos[3];
@@ -650,7 +650,7 @@ static void test_slice9_tombstone_noop(void) {
 
     /* Emit a normal slice9 — should work and advance vertex_count by 36. */
     nt_resource_t atlas = register_slice9_atlas(0xC6ULL);
-    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 50.0F, 50.0F, 2, 2, 2, 2, 0xFFFFFFFFU, 0U, 0.0F);
+    nt_sprite_renderer_emit_slice9(atlas, 0, 0.0F, 0.0F, 50.0F, 50.0F, 2, 2, 2, 2, 0xFFFFFFFFU, 0U, 0.0F, 1.0F);
     TEST_ASSERT_EQUAL_UINT32(vc_before + 36U, nt_sprite_renderer_test_vertex_count());
 
     nt_sprite_renderer_flush();

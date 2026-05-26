@@ -62,7 +62,7 @@ void nt_sprite_comp_reset_origin(nt_entity_t entity);
 
 /* ---- Slice9 override (mirrors origin override pattern) ---- */
 
-/* Per-entity slice9 override. Setting {0,0,0,0} is valid (clears to atlas default). */
+/* Per-entity slice9 override. Passing all zeros clears the override to atlas default. */
 void nt_sprite_comp_set_slice9(nt_entity_t entity, uint16_t l, uint16_t r, uint16_t t, uint16_t b);
 void nt_sprite_comp_reset_slice9(nt_entity_t entity);
 

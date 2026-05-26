@@ -74,8 +74,9 @@ typedef struct {
                               *     85 triangles; with max_vertices=16 the ear-clip/fan output
                               *     is at most (16-2)*3 = 42 indices, so 1 byte is sufficient. */
     uint8_t flags;           /* 36: builder-authored render hints, see NT_ATLAS_REGION_FLAG_* */
-    uint16_t slice9_lrtb[4]; /* 37: slice9 borders [left, right, top, bottom]; all zero = no slice9 */
-    uint8_t _reserved2[3];   /* 45: must be zero */
+    uint8_t _pad0;           /* 37: alignment padding for uint16 slice9_lrtb */
+    uint16_t slice9_lrtb[4]; /* 38: slice9 borders [left, right, top, bottom]; all zero = no slice9 */
+    uint8_t _reserved2[2];   /* 46: must be zero */
 } NtAtlasRegion;             /* 48 bytes (v6) — runtime mirror: nt_texture_region_t (nt_atlas.h, different field order) */
 #pragma pack(pop)
 _Static_assert(sizeof(NtAtlasRegion) == 48, "NtAtlasRegion must be 48 bytes");

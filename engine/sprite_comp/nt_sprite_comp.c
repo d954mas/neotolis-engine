@@ -284,6 +284,11 @@ void nt_sprite_comp_reset_origin(nt_entity_t entity) {
 /* ---- Slice9 override ---- */
 
 void nt_sprite_comp_set_slice9(nt_entity_t entity, uint16_t l, uint16_t r, uint16_t t, uint16_t b) {
+    /* All zeros clears override back to atlas default */
+    if (l == 0 && r == 0 && t == 0 && b == 0) {
+        nt_sprite_comp_reset_slice9(entity);
+        return;
+    }
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     s_slice9_lrtb[idx][0] = l;

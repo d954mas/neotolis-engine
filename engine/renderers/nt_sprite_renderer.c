@@ -526,7 +526,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         const float oy = origin_y * src_h;
         const float x = m[12] - (m[0] * ox) - (m[4] * oy);
         const float y = m[13] - (m[1] * ox) - (m[5] * oy);
-        nt_sprite_renderer_emit_slice9(atlas, sv->region_index[s_idx], x, y, w, h, sl, sr, st, sb, dv->colors_packed[d_idx], flip_bits, rot);
+        nt_sprite_renderer_emit_slice9(atlas, sv->region_index[s_idx], x, y, w, h, sl, sr, st, sb, dv->colors_packed[d_idx], flip_bits, rot, ipu);
         return;
     }
 
@@ -645,7 +645,7 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 // #region emit_slice9
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
-                                    uint8_t flip_bits, float rotation) {
+                                    uint8_t flip_bits, float rotation, float ipu) {
     NT_ASSERT(s_sprite.initialized);
     NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_slice9: invalid atlas handle");
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_slice9: atlas must be READY");
@@ -662,6 +662,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     NT_ASSERT(rh.region->trim_offset_x == 0 && rh.region->trim_offset_y == 0 && "slice9 region must be untrimmed (builder should force RECT shape)");
     NT_ASSERT(rh.region->source_w > 0 && rh.region->source_h > 0 && "slice9 region source dimensions must be non-zero");
     NT_ASSERT(sl + sr < rh.region->source_w && st + sb < rh.region->source_h && "slice9 borders exceed source dimensions (per-entity override invalid?)");
+    NT_ASSERT(ipu > 0.0F && "slice9 ipu must be positive");
 
     const uint32_t page_tex = nt_resource_get(rh.page_resource);
     if (!ensure_current_cmd_page_texture(page_tex)) {
@@ -704,9 +705,13 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         }
     }
 
-    /* Position splits (4 x-values, 4 y-values). */
-    float xs[4] = {x, x + (float)fl, x + w - (float)fr, x + w};
-    float ys[4] = {y, y + (float)fb, y + h - (float)ft, y + h};
+    /* Position splits: convert pixel borders to world units via ipu */
+    float fl_w = (float)fl * ipu;
+    float fr_w = (float)fr * ipu;
+    float ft_w = (float)ft * ipu;
+    float fb_w = (float)fb * ipu;
+    float xs[4] = {x, x + fl_w, x + w - fr_w, x + w};
+    float ys[4] = {y, y + fb_w, y + h - ft_w, y + h};
 
     /* UV splits (4 u-values, 4 v-values in u16). Integer math avoids precision loss. */
     uint16_t u_range = (uint16_t)(u_max - u_min);

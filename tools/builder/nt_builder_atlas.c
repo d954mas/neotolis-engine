@@ -675,6 +675,7 @@ static nt_atlas_sprite_opts_t atlas_resolve_sprite_opts(const nt_atlas_sprite_op
 
 /* Copy per-sprite overrides from resolved opts into NtAtlasSpriteInput.
  * Slice9 borders auto-force RECT shape + no rotation. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_atlas_sprite_opts_t *sopts) {
     sprite->slice9_left = sopts->slice9_left;
     sprite->slice9_right = sopts->slice9_right;
@@ -683,15 +684,15 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     sprite->shape_override = sopts->shape;
     sprite->rotate_override = sopts->allow_rotate;
     sprite->max_verts_override = sopts->max_vertices;
+    NT_BUILD_ASSERT(sprite->shape_override <= NT_ATLAS_SPRITE_SHAPE_CONCAVE && "invalid shape override value");
+    NT_BUILD_ASSERT(sprite->max_verts_override <= 16 && "max_vertices override must be <= 16");
     /* Slice9 auto-force: any nonzero border -> RECT + no rotation */
     bool has_slice9 = sopts->slice9_left || sopts->slice9_right || sopts->slice9_top || sopts->slice9_bottom;
     if (has_slice9) {
-        if (sprite->shape_override == 0) {
-            sprite->shape_override = NT_ATLAS_SPRITE_SHAPE_RECT;
-        }
-        if (sprite->rotate_override == 0) {
-            sprite->rotate_override = NT_ATLAS_SPRITE_ROTATE_NO;
-        }
+        NT_BUILD_ASSERT((sprite->shape_override == 0 || sprite->shape_override == NT_ATLAS_SPRITE_SHAPE_RECT) && "slice9 sprite must use RECT shape");
+        NT_BUILD_ASSERT((sprite->rotate_override == 0 || sprite->rotate_override == NT_ATLAS_SPRITE_ROTATE_NO) && "slice9 sprite must not allow rotation");
+        sprite->shape_override = NT_ATLAS_SPRITE_SHAPE_RECT;
+        sprite->rotate_override = NT_ATLAS_SPRITE_ROTATE_NO;
     }
 }
 
@@ -1833,6 +1834,7 @@ static void pipeline_serialize(AtlasPipeline *p) {
             NT_BUILD_ASSERT((uint32_t)st + (uint32_t)sb < p->sprites[i].height && "slice9: top + bottom >= source height");
             reg->flags |= NT_ATLAS_REGION_FLAG_SLICE9;
         }
+        reg->_pad0 = 0;
         reg->slice9_lrtb[0] = sl;
         reg->slice9_lrtb[1] = sr;
         reg->slice9_lrtb[2] = st;
