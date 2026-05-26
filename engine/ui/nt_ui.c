@@ -613,7 +613,7 @@ static void emit_image(const Clay_RenderCommand *c) {
 // #region helper_emit_text
 /* Pure text emit: no sprite renderer knowledge. dispatch_command handles
  * the sprite_flush before and the lazy sprite rebind after. */
-static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
+static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale) {
     const Clay_TextRenderData *t = &c->renderData.text;
     NT_ASSERT((uint32_t)t->fontId < NT_UI_MAX_FONTS && "nt_ui TEXT: fontId >= NT_UI_MAX_FONTS");
     nt_font_t font = ctx->fonts[t->fontId];
@@ -622,11 +622,9 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
     nt_text_renderer_set_font(font);
     nt_text_renderer_set_material(ctx->text_material);
 
-    /* Baseline placement: center text vertically in bbox. Text height =
-     * (ascent + |descent|) * scale. Baseline sits |descent|*scale above
-     * the text bottom edge. */
+    const float font_size = (float)t->fontSize * text_scale;
     nt_font_metrics_t metrics = nt_font_get_metrics(font);
-    const float scale = (metrics.units_per_em > 0) ? ((float)t->fontSize / (float)metrics.units_per_em) : 0.0F;
+    const float scale = (metrics.units_per_em > 0) ? (font_size / (float)metrics.units_per_em) : 0.0F;
     const float text_h = (float)(metrics.ascent - metrics.descent) * scale;
     const float center_offset = (c->boundingBox.height - text_h) * 0.5F;
     const float baseline_y = c->boundingBox.y + center_offset + ((float)(-metrics.descent) * scale);
@@ -634,16 +632,13 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
     const float m[16] = {
         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, c->boundingBox.x, baseline_y, 0.0F, 1.0F,
     };
-    /* text_renderer wants 0..1; Clay stores 0..255. */
     const float color[4] = {
         t->textColor.r / 255.0F,
         t->textColor.g / 255.0F,
         t->textColor.b / 255.0F,
         t->textColor.a / 255.0F,
     };
-    /* Clay's letterSpacing/lineHeight are additive extras (per Clay docs);
-     * direct passthrough to our tracking/leading params. */
-    nt_text_renderer_draw_n(t->stringContents.chars, (size_t)t->stringContents.length, m, (float)t->fontSize, color, (float)t->letterSpacing, (float)t->lineHeight);
+    nt_text_renderer_draw_n(t->stringContents.chars, (size_t)t->stringContents.length, m, font_size, color, (float)t->letterSpacing * text_scale, (float)t->lineHeight * text_scale);
 }
 // #endregion
 
@@ -983,7 +978,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         Clay_RenderCommand local = *c;
         local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
         local.renderData.text.textColor.a *= ws->accum_opacity;
-        emit_text(ctx, &local);
+        emit_text(ctx, &local, sc);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
