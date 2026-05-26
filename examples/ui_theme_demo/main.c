@@ -342,7 +342,8 @@ static void frame(void) {
         const float inner_w = panel_w - (2.0F * panel_pad);
         const float inner_h_box = panel_h_fixed - (2.0F * panel_pad);
 
-        const uint16_t title_fit = nt_ui_fit_width(s_ctx, g_current->h1->font_id, k_titles[s_demo_text_idx], inner_w, 14U, (uint16_t)(g_current->h1->font_size + 0.5F), (float)g_current->h1->letter_tracking);
+        const uint16_t title_fit =
+            nt_ui_fit_width(s_ctx, g_current->h1->font_id, k_titles[s_demo_text_idx], inner_w, 14U, (uint16_t)(g_current->h1->font_size + 0.5F), (float)g_current->h1->letter_tracking);
         const uint16_t box_fit = nt_ui_fit_box(s_ctx, g_current->wrap->font_id, k_paragraphs[s_demo_text_idx], inner_w, inner_h_box, 10U, (uint16_t)(g_current->wrap->font_size + 0.5F),
                                                (float)g_current->wrap->letter_tracking, g_current->wrap->line_height);
 
