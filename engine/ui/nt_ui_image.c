@@ -33,7 +33,6 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_reso
         tint.a = (float)((style->color_packed >> 24) & 0xFFU);
     }
 
-    ctx->clay_decl_count++;
     CLAY({
         .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
         .backgroundColor = tint,

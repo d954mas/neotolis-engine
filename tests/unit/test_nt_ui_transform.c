@@ -51,7 +51,8 @@ static void inject_frozen_cmds(int32_t count) {
     s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
 }
 
-/* Helper: inject a side-channel marker into ctx->markers[]. */
+/* Helper: inject a side-channel marker into ctx->markers[].
+ * Uses clay->layoutElements.length as before_clay_idx (same as production code). */
 static void inject_marker(uint8_t type, const nt_ui_transform_t *t, float opacity) {
     nt_ui_marker_t *m = &s_fx.ctx->markers[s_fx.ctx->marker_count++];
     m->type = type;
@@ -59,6 +60,10 @@ static void inject_marker(uint8_t type, const nt_ui_transform_t *t, float opacit
     m->opacity = opacity;
     m->before_clay_idx = s_fx.ctx->clay_decl_count;
 }
+
+/* Simulate Clay element being declared (increments the counter that
+ * production code reads from Clay internals). */
+static void track_clay_element(void) { s_fx.ctx->clay_decl_count++; }
 
 /* Marker type constants (match nt_ui.c internal enum). */
 #define MARKER_PUSH_TRANSFORM 1
@@ -83,7 +88,7 @@ static void test_push_pop_transform_balanced(void) {
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 10, .y = 10, .width = 50, .height = 50};
     s_test_cmds[0].renderData.image.backgroundColor = (Clay_Color){0};
     s_test_cmds[0].renderData.image.imageData = &s_image_payload;
-    s_fx.ctx->clay_decl_count++; /* track this element */
+    track_clay_element(); /* track this element */
 
     /* pop_transform marker after the element */
     inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
@@ -107,7 +112,7 @@ static void test_transform_stack_overflow(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
     s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
-    s_fx.ctx->clay_decl_count++;
+    track_clay_element();
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
@@ -125,7 +130,7 @@ static void test_opacity_inheritance(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 100, .height = 50};
     s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
-    s_fx.ctx->clay_decl_count++;
+    track_clay_element();
 
     inject_marker(MARKER_POP_OPACITY, NULL, 1.0F);
     inject_marker(MARKER_POP_OPACITY, NULL, 1.0F);
@@ -149,7 +154,7 @@ static void test_transform_offset_applied(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
     s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
-    s_fx.ctx->clay_decl_count++;
+    track_clay_element();
 
     inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
 
@@ -195,7 +200,7 @@ static void test_unbalanced_transform_asserts(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
     s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
-    s_fx.ctx->clay_decl_count++;
+    track_clay_element();
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
@@ -209,7 +214,7 @@ static void test_unbalanced_opacity_asserts(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
     s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
-    s_fx.ctx->clay_decl_count++;
+    track_clay_element();
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
@@ -226,7 +231,7 @@ static void test_scale_applied(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
     s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
-    s_fx.ctx->clay_decl_count++;
+    track_clay_element();
 
     inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
 
@@ -261,7 +266,7 @@ static void test_rotation_applied(void) {
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 10, .y = 10, .width = 50, .height = 50};
     s_test_cmds[0].renderData.image.backgroundColor = (Clay_Color){0};
     s_test_cmds[0].renderData.image.imageData = &s_image_payload;
-    s_fx.ctx->clay_decl_count++;
+    track_clay_element();
 
     inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
 
@@ -300,7 +305,7 @@ static void test_nested_offset_scale(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
     s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
-    s_fx.ctx->clay_decl_count++;
+    track_clay_element();
 
     inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
     inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
@@ -337,7 +342,7 @@ static void test_opacity_scale_combined(void) {
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
     s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
-    s_fx.ctx->clay_decl_count++;
+    track_clay_element();
 
     inject_marker(MARKER_POP_OPACITY, NULL, 1.0F);
     inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
@@ -366,6 +371,48 @@ static void test_opacity_scale_combined(void) {
     TEST_ASSERT_EQUAL_UINT8(127U, color[3]); /* A = 255 * 0.5 truncated */
 }
 
+/* Game CLAY elements between push and content. Push/pop markers must
+ * use Clay's own element counter (layoutElements.length) so index
+ * alignment is correct regardless of tracked vs untracked elements. */
+static void test_game_clay_elements_shift_index(void) {
+    nt_ui_transform_t t = {.offset_x = 10.0F, .offset_y = 0, .rotation = 0, .scale = 1.0F};
+    inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
+
+    /* Cmd 0: game RECT (Clay element, tracked via layoutElements.length). */
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 100, .height = 50};
+    s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 50, .g = 50, .b = 50, .a = 255};
+    track_clay_element();
+
+    /* Cmd 1: another game RECT. */
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 0, .y = 60, .width = 100, .height = 50};
+    s_test_cmds[1].renderData.rectangle.backgroundColor = (Clay_Color){.r = 50, .g = 50, .b = 50, .a = 255};
+    track_clay_element();
+
+    /* Cmd 2: widget IMAGE. */
+    s_image_payload.atlas = s_fx.atlas.handle;
+    s_image_payload.region_index = s_fx.atlas.white_region_idx;
+    s_test_cmds[2].commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
+    s_test_cmds[2].boundingBox = (Clay_BoundingBox){.x = 20, .y = 120, .width = 40, .height = 30};
+    s_test_cmds[2].renderData.image.imageData = &s_image_payload;
+    track_clay_element();
+
+    inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
+
+    inject_frozen_cmds(3);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    /* IMAGE at cmd 2 should have offset +10 applied.
+     * x = 20 + 10 = 30. world_y = 600 - (120+10) - 30 = ... wait,
+     * no offset on y. Just check x of last emitted vertex 0. */
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0U, pos);
+    TEST_ASSERT_TRUE(pos[0] == 30.0F);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_push_pop_transform_balanced);
@@ -379,5 +426,6 @@ int main(void) {
     RUN_TEST(test_rotation_applied);
     RUN_TEST(test_nested_offset_scale);
     RUN_TEST(test_opacity_scale_combined);
+    RUN_TEST(test_game_clay_elements_shift_index);
     return UNITY_END();
 }

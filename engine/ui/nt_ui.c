@@ -1306,7 +1306,7 @@ static void emit_marker(nt_ui_context_t *ctx, uint8_t marker_type, const nt_ui_t
     m->type = marker_type;
     m->transform = transform ? *transform : nt_ui_transform_defaults();
     m->opacity = opacity;
-    m->before_clay_idx = ctx->clay_decl_count;
+    m->before_clay_idx = (uint32_t)ctx->clay->layoutElements.length;
 }
 
 void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transform) {

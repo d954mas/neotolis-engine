@@ -40,7 +40,6 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
     }
 
     /* Open Clay IMAGE container -- children go between _begin and _end */
-    ctx->clay_decl_count++;
     Clay__OpenElement();
     Clay__ConfigureOpenElement((Clay_ElementDeclaration){
         .backgroundColor = tint,
@@ -64,7 +63,6 @@ void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, c
     nt_ui_push_opacity(ctx, opacity);
 
     /* Open plain Clay container (no IMAGE) */
-    ctx->clay_decl_count++;
     Clay__OpenElement();
     Clay__ConfigureOpenElement((Clay_ElementDeclaration){
         .userData = (void *)data,
