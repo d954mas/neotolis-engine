@@ -21,6 +21,9 @@
 #include <windows.h>
 #endif
 
+/* Extra transparent margin per side for slice9 regions (anti-bleed). */
+#define SLICE9_MARGIN 2
+
 /* ===================================================================
  * Atlas Builder — sprite atlas packing pipeline
  * ===================================================================
@@ -349,17 +352,26 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
      * NT_BUILDER_VERSION bump — same policy as nt_builder_cache.c. */
     enum { ATLAS_CACHE_KEY_VERSION = 8 };
 
-    /* Per-sprite data: hash + origin (in add-order, NOT sorted — cached
-     * placements store sprite_index in add-order, so the key must be
+    /* Per-sprite data: hash + origin + overrides (in add-order, NOT sorted —
+     * cached placements store sprite_index in add-order, so the key must be
      * order-sensitive to avoid mismatching placements after reordering). */
-    size_t per_sprite_bytes = sprite_count * (sizeof(uint64_t) + 2 * sizeof(float));
+    enum { PER_SPRITE_SIZE = sizeof(uint64_t) + 2 * sizeof(float) + 7 };
+    size_t per_sprite_bytes = sprite_count * PER_SPRITE_SIZE;
     uint8_t *sprite_buf = (uint8_t *)malloc(per_sprite_bytes);
     NT_BUILD_ASSERT(sprite_buf && "compute_atlas_cache_key: alloc failed");
     for (uint32_t i = 0; i < sprite_count; i++) {
-        size_t off = i * (sizeof(uint64_t) + 2 * sizeof(float));
+        size_t off = i * PER_SPRITE_SIZE;
         memcpy(sprite_buf + off, &sprites[i].decoded_hash, sizeof(uint64_t));
         memcpy(sprite_buf + off + sizeof(uint64_t), &sprites[i].origin_x, sizeof(float));
         memcpy(sprite_buf + off + sizeof(uint64_t) + sizeof(float), &sprites[i].origin_y, sizeof(float));
+        size_t ov_off = off + sizeof(uint64_t) + 2 * sizeof(float);
+        sprite_buf[ov_off + 0] = sprites[i].slice9_left;
+        sprite_buf[ov_off + 1] = sprites[i].slice9_right;
+        sprite_buf[ov_off + 2] = sprites[i].slice9_top;
+        sprite_buf[ov_off + 3] = sprites[i].slice9_bottom;
+        sprite_buf[ov_off + 4] = sprites[i].shape_override;
+        sprite_buf[ov_off + 5] = sprites[i].rotate_override;
+        sprite_buf[ov_off + 6] = sprites[i].max_verts_override;
     }
 
     /* Build key buffer: per-sprite data + serialized opts */
@@ -661,6 +673,28 @@ static nt_atlas_sprite_opts_t atlas_resolve_sprite_opts(const nt_atlas_sprite_op
     return resolved;
 }
 
+/* Copy per-sprite overrides from resolved opts into NtAtlasSpriteInput.
+ * Slice9 borders auto-force RECT shape + no rotation. */
+static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_atlas_sprite_opts_t *sopts) {
+    sprite->slice9_left = sopts->slice9_left;
+    sprite->slice9_right = sopts->slice9_right;
+    sprite->slice9_top = sopts->slice9_top;
+    sprite->slice9_bottom = sopts->slice9_bottom;
+    sprite->shape_override = sopts->shape;
+    sprite->rotate_override = sopts->allow_rotate;
+    sprite->max_verts_override = sopts->max_vertices;
+    /* Slice9 auto-force: any nonzero border -> RECT + no rotation */
+    bool has_slice9 = sopts->slice9_left || sopts->slice9_right || sopts->slice9_top || sopts->slice9_bottom;
+    if (has_slice9) {
+        if (sprite->shape_override == 0) {
+            sprite->shape_override = NT_ATLAS_SPRITE_SHAPE_RECT;
+        }
+        if (sprite->rotate_override == 0) {
+            sprite->rotate_override = NT_ATLAS_SPRITE_ROTATE_NO;
+        }
+    }
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atlas_sprite_opts_t *opts) {
     NT_BUILD_ASSERT(ctx && path && "atlas_add: invalid args");
@@ -711,6 +745,7 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     sprite->origin_x = sopts.origin_x;
     sprite->origin_y = sopts.origin_y;
     sprite->decoded_hash = decoded_hash;
+    atlas_apply_sprite_overrides(sprite, &sopts);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -749,6 +784,7 @@ void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels,
     sprite->origin_x = sopts.origin_x;
     sprite->origin_y = sopts.origin_y;
     sprite->decoded_hash = decoded_hash;
+    atlas_apply_sprite_overrides(sprite, &sopts);
 }
 
 /* --- Glob callback for atlas --- */
@@ -1080,7 +1116,24 @@ static void pipeline_geometry(AtlasPipeline *p) {
         uint32_t tw = p->trim_w[idx];
         uint32_t th = p->trim_h[idx];
 
-        if (p->opts->shape == NT_ATLAS_SHAPE_RECT) {
+        /* Resolve per-sprite shape override (0 = atlas default) */
+        nt_atlas_shape_t effective_shape = p->opts->shape;
+        uint8_t effective_max_verts = p->opts->max_vertices;
+        if (p->sprites[idx].shape_override != 0) {
+            /* Map NT_ATLAS_SPRITE_SHAPE_* to nt_atlas_shape_t */
+            if (p->sprites[idx].shape_override == NT_ATLAS_SPRITE_SHAPE_RECT) {
+                effective_shape = NT_ATLAS_SHAPE_RECT;
+            } else if (p->sprites[idx].shape_override == NT_ATLAS_SPRITE_SHAPE_CONVEX) {
+                effective_shape = NT_ATLAS_SHAPE_CONVEX_HULL;
+            } else if (p->sprites[idx].shape_override == NT_ATLAS_SPRITE_SHAPE_CONCAVE) {
+                effective_shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
+            }
+        }
+        if (p->sprites[idx].max_verts_override != 0) {
+            effective_max_verts = p->sprites[idx].max_verts_override;
+        }
+
+        if (effective_shape == NT_ATLAS_SHAPE_RECT) {
             /* Rect mode: 4-vertex trim bounding box. */
             p->hull_vertices[idx] = (Point2D *)malloc(4 * sizeof(Point2D));
             NT_BUILD_ASSERT(p->hull_vertices[idx] && "pipeline_geometry: alloc failed");
@@ -1109,12 +1162,12 @@ static void pipeline_geometry(AtlasPipeline *p) {
                 }
             }
 
-            if (p->opts->shape == NT_ATLAS_SHAPE_CONVEX_HULL) {
+            if (effective_shape == NT_ATLAS_SHAPE_CONVEX_HULL) {
                 /* Convex hull mode: skip morphological closing, contour trace, and
                  * the 4-strategy concave pipeline. The convex hull of opaque pixels
                  * trivially contains disjoint components and every opaque pixel, so
                  * none of that machinery is needed. */
-                p->hull_vertices[idx] = binary_build_convex_polygon(binary, tw, th, p->opts->max_vertices, &p->vertex_counts[idx]);
+                p->hull_vertices[idx] = binary_build_convex_polygon(binary, tw, th, effective_max_verts, &p->vertex_counts[idx]);
                 free(binary);
                 continue;
             }
@@ -1198,7 +1251,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                      * final inflated area. Each strategy returns a candidate
                      * polygon + required inflate amount; geometry_maybe_adopt
                      * handles ownership (frees the loser each step). */
-                    uint32_t target = p->opts->max_vertices;
+                    uint32_t target = effective_max_verts;
                     GeometryCandidate best = strategy_rdp(clean, clean_count, target);
                     geometry_maybe_adopt(&best, strategy_perp(clean, clean_count, target, binary_source, tw, th));
                     geometry_maybe_adopt(&best, strategy_rect(tw, th));
@@ -1236,7 +1289,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                         }
                         free(inflated_xy);
 
-                        uint32_t final_target = p->opts->max_vertices;
+                        uint32_t final_target = effective_max_verts;
                         if (inf_count > final_target) {
                             Point2D *reduced = (Point2D *)malloc(inf_count * sizeof(Point2D));
                             NT_BUILD_ASSERT(reduced && "pipeline_geometry: alloc failed");
@@ -1250,7 +1303,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
                             result = reduced;
                             inf_count = red_count;
                         }
-                        if (inf_count <= p->opts->max_vertices) {
+                        if (inf_count <= effective_max_verts) {
                             /* Post-verify: every opaque pixel center must lie inside the
                              * final polygon. Secondary RDP can cut vertices and shrink the
                              * polygon; if that leaves any opaque pixel outside, fall back
@@ -1284,7 +1337,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
             }
             if (convex_reason) {
                 NT_LOG_WARN("pipeline_geometry: sprite '%s' using convex fallback (%s)", p->sprites[idx].name, convex_reason);
-                p->hull_vertices[idx] = binary_build_convex_polygon(binary_source, tw, th, p->opts->max_vertices, &p->vertex_counts[idx]);
+                p->hull_vertices[idx] = binary_build_convex_polygon(binary_source, tw, th, effective_max_verts, &p->vertex_counts[idx]);
             }
             free(binary_source);
             free(binary);
@@ -1325,11 +1378,44 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         u_hull_counts[i] = p->vertex_counts[oi];
     }
 
+    /* Slice9 sprites: expand trim dims by 2px per side for anti-bleed margin.
+     * Also expand hull vertices to match the enlarged tile area. */
+    for (uint32_t i = 0; i < p->unique_count; i++) {
+        uint32_t oi = p->unique_indices[i];
+        bool has_s9 = p->sprites[oi].slice9_left || p->sprites[oi].slice9_right || p->sprites[oi].slice9_top || p->sprites[oi].slice9_bottom;
+        if (has_s9) {
+            u_trim_w[i] += SLICE9_MARGIN * 2;
+            u_trim_h[i] += SLICE9_MARGIN * 2;
+            /* Update RECT hull (4 verts) to match expanded dims */
+            u_hulls[i][0] = (Point2D){0, 0};
+            u_hulls[i][1] = (Point2D){(int32_t)u_trim_w[i], 0};
+            u_hulls[i][2] = (Point2D){(int32_t)u_trim_w[i], (int32_t)u_trim_h[i]};
+            u_hulls[i][3] = (Point2D){0, (int32_t)u_trim_h[i]};
+        }
+        /* Per-sprite rotation override: force no-transform for this sprite.
+         * We temporarily set allow_transform to false for the whole pack if ANY
+         * sprite disallows rotation. This is conservative but correct; a more
+         * fine-grained approach would require vpack-internal changes. */
+    }
+
+    /* Per-sprite rotation override for vector_pack. */
+    bool *u_no_rotate = (bool *)calloc(p->unique_count, sizeof(bool));
+    NT_BUILD_ASSERT(u_no_rotate && "pipeline_tile_pack: alloc failed");
+    for (uint32_t i = 0; i < p->unique_count; i++) {
+        uint32_t oi = p->unique_indices[i];
+        if (p->sprites[oi].rotate_override == NT_ATLAS_SPRITE_ROTATE_NO) {
+            u_no_rotate[i] = true;
+        }
+    }
+
     NT_LOG_INFO("  vector_pack: %u sprites (NFP mode)", p->unique_count);
-    p->placement_count = vector_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats, p->thread_count);
+    p->placement_count =
+        vector_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, u_no_rotate, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats, p->thread_count);
     pack_stats_measure_payload(&p->stats, u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts);
 
-    /* Fill trim offsets and remap sprite_index back to original */
+    /* Fill trim offsets and remap sprite_index back to original.
+     * For slice9 sprites: force identity transform (no rotation) and
+     * restore original trim dims (without margin expansion). */
     for (uint32_t i = 0; i < p->placement_count; i++) {
         uint32_t unique_idx = p->placements[i].sprite_index;
         uint32_t orig_idx = p->unique_indices[unique_idx];
@@ -1338,12 +1424,17 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         p->placements[i].trim_y = p->trim_y[orig_idx];
         p->placements[i].trimmed_w = p->trim_w[orig_idx];
         p->placements[i].trimmed_h = p->trim_h[orig_idx];
+        /* Per-sprite no-rotation enforcement */
+        if (p->sprites[orig_idx].rotate_override == NT_ATLAS_SPRITE_ROTATE_NO && p->placements[i].transform != 0) {
+            p->placements[i].transform = 0;
+        }
     }
 
     free(u_trim_w);
     free(u_trim_h);
     free((void *)u_hulls);
     free(u_hull_counts);
+    free(u_no_rotate);
 }
 
 /* --- pipeline_compose: blit trimmed pixels onto pages + extrude edges --- */
@@ -1360,12 +1451,15 @@ static void pipeline_compose(AtlasPipeline *p) {
         NT_BUILD_ASSERT(p->page_pixels[pg] && "pipeline_compose: page alloc failed");
     }
 
-    /* Blit each placed sprite, then duplicate the trim AABB edges outward. */
+    /* Blit each placed sprite, then duplicate the trim AABB edges outward.
+     * Slice9 sprites get an additional 2px transparent margin. */
     for (uint32_t pi = 0; pi < p->placement_count; pi++) {
         AtlasPlacement *pl = &p->placements[pi];
         uint32_t idx = pl->sprite_index;
-        uint32_t inner_x = pl->x + extrude_val;
-        uint32_t inner_y = pl->y + extrude_val;
+        bool has_s9 = p->sprites[idx].slice9_left || p->sprites[idx].slice9_right || p->sprites[idx].slice9_top || p->sprites[idx].slice9_bottom;
+        uint32_t s9_margin = has_s9 ? SLICE9_MARGIN : 0;
+        uint32_t inner_x = pl->x + extrude_val + s9_margin;
+        uint32_t inner_y = pl->y + extrude_val + s9_margin;
 
         blit_sprite(p->page_pixels[pl->page], p->page_w[pl->page], p->sprites[idx].rgba, p->sprites[idx].width, pl->trim_x, pl->trim_y, pl->trimmed_w, pl->trimmed_h, inner_x, inner_y, pl->transform);
 
@@ -1611,8 +1705,11 @@ static void pipeline_serialize(AtlasPipeline *p) {
         memcpy(&indices[index_cursor], local_indices, idx_count * sizeof(uint16_t));
         index_cursor += idx_count;
 
-        uint32_t inner_x = pl->x + extrude_val;
-        uint32_t inner_y = pl->y + extrude_val;
+        /* Slice9 margin offset for UV computation */
+        bool pass1_s9 = p->sprites[i].slice9_left || p->sprites[i].slice9_right || p->sprites[i].slice9_top || p->sprites[i].slice9_bottom;
+        uint32_t s9m = pass1_s9 ? SLICE9_MARGIN : 0;
+        uint32_t inner_x = pl->x + extrude_val + s9m;
+        uint32_t inner_y = pl->y + extrude_val + s9m;
         uint32_t atlas_w = p->page_w[pl->page];
         uint32_t atlas_h = p->page_h[pl->page];
 
@@ -1712,6 +1809,21 @@ static void pipeline_serialize(AtlasPipeline *p) {
          * silently break the runtime contract (which trusts the bit). */
         NT_BUILD_ASSERT(((reg->flags & NT_ATLAS_REGION_FLAG_QUAD_MASK) == 0 || (reg->vertex_count == 4 && reg->index_count == 6)) &&
                         "atlas region: QUAD_* flag set but vertex_count/index_count don't match — builder bug");
+        /* Slice9 borders */
+        uint8_t sl = p->sprites[i].slice9_left;
+        uint8_t sr = p->sprites[i].slice9_right;
+        uint8_t st = p->sprites[i].slice9_top;
+        uint8_t sb = p->sprites[i].slice9_bottom;
+        if (sl || sr || st || sb) {
+            NT_BUILD_ASSERT((uint32_t)sl + (uint32_t)sr < p->sprites[i].width && "slice9: left + right >= source width");
+            NT_BUILD_ASSERT((uint32_t)st + (uint32_t)sb < p->sprites[i].height && "slice9: top + bottom >= source height");
+            reg->flags |= NT_ATLAS_REGION_FLAG_SLICE9;
+        }
+        reg->slice9_lrtb[0] = sl;
+        reg->slice9_lrtb[1] = sr;
+        reg->slice9_lrtb[2] = st;
+        reg->slice9_lrtb[3] = sb;
+        memset(reg->_reserved2, 0, sizeof(reg->_reserved2));
     }
 
     free(sprite_vertex_start);
