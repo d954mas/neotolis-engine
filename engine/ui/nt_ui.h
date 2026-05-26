@@ -35,9 +35,15 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Caller owns framebuffer binding; walker writes only viewport + scissor. */
+/* Caller owns framebuffer binding; walker writes only viewport + scissor.
+ *   fb_size[0] == 0: viewport[] = GL physical px {x, y, w, h}. Direct mode.
+ *   fb_size[0] > 0:  viewport[] = LOGICAL Clay-space; fb_size = PHYSICAL fb;
+ *                     fb_offset = PHYSICAL letterbox margin (negative in CROP).
+ * Build via nt_ui_scale_make_target() or zero-init for direct mode. */
 typedef struct {
-    float viewport[4]; /* {x, y, w, h} in framebuffer pixels */
+    float viewport[4];
+    float fb_size[2];
+    float fb_offset[2];
 } nt_ui_target_t;
 
 /* Pointed to by Clay_ImageElementConfig.imageData; lifetime must extend
@@ -73,11 +79,15 @@ typedef struct {
 
 /* Macros allocate from nt_mem_scratch (frame arena) so the pointer stays valid
  * across helper-function returns until the next nt_mem_scratch_reset. Game
- * MUST init scratch before any CLAY({...}) declaration. */
-void *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data);
+ * MUST init scratch before any CLAY({...}) declaration.
+ * Typed return; auto-converts to void* for Clay's .userData slot. */
+const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data);
 
+/* Returns const — element_data is immutable after creation.
+ * For Clay's .userData (void*), use NT_UI_CLAY_DATA() wrapper. */
 #define NT_UI_DATA_LAYER(layer_value) nt_ui_make_element_data((layer_value), NULL)
 #define NT_UI_DATA_FULL(layer_value, user_ptr) nt_ui_make_element_data((layer_value), (user_ptr))
+#define NT_UI_CLAY_DATA(layer_value) ((void *)nt_ui_make_element_data((layer_value), NULL))
 
 /* All four setters required per-context before first walk. */
 void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uint32_t white_region_idx);
@@ -105,8 +115,14 @@ void nt_ui_destroy_context(nt_ui_context_t *ctx);
 
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 
-void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_pointer_t *mouse);
+/* dt drives Clay scroll-container momentum; pass g_nt_app.dt or test value. */
+void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *mouse);
 void nt_ui_end(nt_ui_context_t *ctx);
+
+/* Toggle Clay's debug overlay (element tree + bbox). Applied at next begin.
+ * Getter reflects Clay state -- updated each end (close-button "x" turns off). */
+void nt_ui_set_debug_overlay(nt_ui_context_t *ctx, bool enabled);
+bool nt_ui_get_debug_overlay(const nt_ui_context_t *ctx);
 
 /* Read-only on frozen_cmds + bindings; per-walk stats reflect the latest call.
  * Order: zIndex asc, then layer asc, then declaration. SCISSOR/CUSTOM are
@@ -133,5 +149,8 @@ int32_t nt_ui_test_clay_default_max_element_count(void);
 int32_t nt_ui_test_clay_default_max_measure_text_word_cache_count(void);
 #endif
 // #endregion
+
+/* Widget headers NOT re-exported: keep clay.h out of public umbrella to
+ * avoid breaking Windows ucrt stdlib.h __declspec(noreturn) in release. */
 
 #endif /* NT_UI_H */

@@ -5,9 +5,9 @@ precision highp int;
 // Ported from HLSL reference (github.com/EricLengyel/Slug, MIT license)
 // Uses CalcRootCode, reference solvers, and CalcCoverage formula verbatim.
 
-uniform sampler2D u_curve_texture; // RGBA16F -- curve control points as float16
+uniform sampler2D u_curve_texture;       // RGBA16F -- curve control points as float16
 uniform highp usampler2D u_band_texture; // RG16UI -- (curve_start, curve_count) per band
-uniform int u_curve_tex_width;     // For linear-to-2D addressing
+uniform int u_curve_tex_width;           // For linear-to-2D addressing
 
 in vec2 v_texcoord;
 flat in uvec4 v_glyph;       // curve_offset_y, band_row, curve_offset_x, band_count
@@ -16,9 +16,13 @@ in vec4 v_color;
 
 out vec4 frag_color;
 
-ivec2 CurveTexCoord(uint offset) {
-    return ivec2(int(offset) % u_curve_tex_width, int(offset) / u_curve_tex_width);
-}
+// Linear fallback for truly degenerate (a.y == 0) curves; near-tangential
+// cases are handled by the Citardauq stable form in the solvers below.
+#ifndef SLUG_LINEAR_FALLBACK_EPSILON
+#define SLUG_LINEAR_FALLBACK_EPSILON (1.0 / 65536.0)
+#endif
+
+ivec2 CurveTexCoord(uint offset) { return ivec2(int(offset) % u_curve_tex_width, int(offset) / u_curve_tex_width); }
 
 // Determine root eligibility from signs of control point coordinates.
 // Returns eligibility in bits 0 (root 1) and 8 (root 2).
@@ -32,67 +36,64 @@ uint CalcRootCode(float y1, float y2, float y3) {
     return ((0x2E74u >> shift) & 0x0101u);
 }
 
-// Solve for x-coordinates where curve crosses y=0.
-// Always returns two values; caller uses CalcRootCode to decide which are valid.
-// Reference: SlugPixelShader.hlsl SolveHorizPoly()
+// Solve for x where curve crosses y=0. Reference SolveHorizPoly() with the
+// Citardauq stable form: q = b + sign(b)*sqrt(D) is cancellation-free;
+// the other root via Vieta (t1*t2 = p0/a). Avoids the precision loss of
+// `b - sqrt(D)` on near-tangential curves.
 vec2 SolveHorizPoly(vec2 p0, vec2 p1, vec2 p2) {
     vec2 a = p0 - p1 * 2.0 + p2;
     vec2 b = p0 - p1;
-    float ra = 1.0 / a.y;
-    float rb = 0.5 / b.y;
-
     float d = sqrt(max(b.y * b.y - a.y * p0.y, 0.0));
-    float t1 = (b.y - d) * ra;
-    float t2 = (b.y + d) * ra;
+    float q = b.y + (b.y >= 0.0 ? d : -d);
+    float t_add = q / a.y;
+    float t_mul = (abs(q) > 1e-6) ? (p0.y / q) : t_add;
+    // Map back to reference t1=(b-d)/a, t2=(b+d)/a ordering by sign(b.y).
+    float t1 = (b.y >= 0.0) ? t_mul : t_add;
+    float t2 = (b.y >= 0.0) ? t_add : t_mul;
 
-    // Linear fallback when quadratic coefficient is near zero
-    if (abs(a.y) < 1.0 / 65536.0) { t1 = p0.y * rb; t2 = t1; }
+    if (abs(a.y) < SLUG_LINEAR_FALLBACK_EPSILON) {
+        t1 = p0.y * (0.5 / b.y);
+        t2 = t1;
+    }
 
-    return vec2(
-        (a.x * t1 - b.x * 2.0) * t1 + p0.x,
-        (a.x * t2 - b.x * 2.0) * t2 + p0.x
-    );
+    return vec2((a.x * t1 - b.x * 2.0) * t1 + p0.x, (a.x * t2 - b.x * 2.0) * t2 + p0.x);
 }
 
-// Solve for y-coordinates where curve crosses x=0.
-// Reference: SlugPixelShader.hlsl SolveVertPoly()
+// Solve for y where curve crosses x=0. Same Citardauq stabilization.
 vec2 SolveVertPoly(vec2 p0, vec2 p1, vec2 p2) {
     vec2 a = p0 - p1 * 2.0 + p2;
     vec2 b = p0 - p1;
-    float ra = 1.0 / a.x;
-    float rb = 0.5 / b.x;
-
     float d = sqrt(max(b.x * b.x - a.x * p0.x, 0.0));
-    float t1 = (b.x - d) * ra;
-    float t2 = (b.x + d) * ra;
+    float q = b.x + (b.x >= 0.0 ? d : -d);
+    float t_add = q / a.x;
+    float t_mul = (abs(q) > 1e-6) ? (p0.x / q) : t_add;
+    float t1 = (b.x >= 0.0) ? t_mul : t_add;
+    float t2 = (b.x >= 0.0) ? t_add : t_mul;
 
-    if (abs(a.x) < 1.0 / 65536.0) { t1 = p0.x * rb; t2 = t1; }
+    if (abs(a.x) < SLUG_LINEAR_FALLBACK_EPSILON) {
+        t1 = p0.x * (0.5 / b.x);
+        t2 = t1;
+    }
 
-    return vec2(
-        (a.y * t1 - b.y * 2.0) * t1 + p0.y,
-        (a.y * t2 - b.y * 2.0) * t2 + p0.y
-    );
+    return vec2((a.y * t1 - b.y * 2.0) * t1 + p0.y, (a.y * t2 - b.y * 2.0) * t2 + p0.y);
 }
 
 // Reference: SlugPixelShader.hlsl CalcCoverage()
 float CalcCoverage(float xcov, float ycov, float xwgt, float ywgt) {
-    float coverage = max(
-        abs(xcov * xwgt + ycov * ywgt) / max(xwgt + ywgt, 1.0 / 65536.0),
-        min(abs(xcov), abs(ycov))
-    );
+    float coverage = max(abs(xcov * xwgt + ycov * ywgt) / max(xwgt + ywgt, 1.0 / 65536.0), min(abs(xcov), abs(ycov)));
     return clamp(coverage, 0.0, 1.0);
 }
 
 // Main coverage: Y-band horizontal ray + X-band vertical ray
 float SlugRender(vec2 coord) {
     uint curve_offset_y = v_glyph.x;
-    uint band_row       = v_glyph.y;
+    uint band_row = v_glyph.y;
     uint curve_offset_x = v_glyph.z;
-    uint band_count     = v_glyph.w;
+    uint band_count = v_glyph.w;
 
     vec2 pixelsPerEm = 1.0 / max(fwidth(coord), vec2(1.0e-6));
     float bbox_height = v_glyph_bounds.w - v_glyph_bounds.y;
-    float bbox_width  = v_glyph_bounds.z - v_glyph_bounds.x;
+    float bbox_width = v_glyph_bounds.z - v_glyph_bounds.x;
 
     // ---- Y-band: horizontal ray (+X) ----
     float band_y = (coord.y - v_glyph_bounds.y) / bbox_height * float(band_count);

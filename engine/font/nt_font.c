@@ -364,8 +364,7 @@ static uint16_t evict_lru(nt_font_slot_t *slot) {
 
 /* Static temp buffer for GPU upload (no CPU mirror needed).
  * Max texels per glyph: NT_FONT_MAX_CURVES_PER_GLYPH * bands * 2 * 2 (Y+X bands).
- * 256 curves * 32 bands * 2 texels * 2 axes * 4 uint16 = 256KB worst case.
- * Realistic: 40 curves * 8 bands * 2 * 2 * 4 = 5KB. */
+ * RGBA16F: 4 uint16 per texel. Realistic: 40 curves * 8 bands * 2 * 2 * 4 = 5KB. */
 static uint16_t s_curve_upload[NT_FONT_MAX_CURVES_PER_GLYPH * NT_FONT_MAX_BANDS * 2 * 4 * 2];
 
 /* Reset free stack to all slots available (0..max_glyphs-1) */
@@ -791,14 +790,32 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
     uint16_t yband_offsets[NT_FONT_MAX_BANDS] = {0};
 
     uint32_t local_pos = 0;
+    /* Per-band curves sorted DESC by max-x (Y-bands) / max-y (X-bands) so the
+     * shader's early-out matches reference Slug (SlugPixelShader.hlsl:187-192). */
+    uint16_t band_sorted[NT_FONT_MAX_CURVES_PER_GLYPH];
     for (uint8_t b = 0; b < slot->band_count; b++) {
         yband_offsets[b] = (uint16_t)(local_pos / 2);
         float ybot = bbox_y0 + ((float)b * band_height) - y_margin;
         float ytop = ybot + band_height + (y_margin * 2.0F);
+        uint16_t band_n = 0;
         for (uint16_t ci = 0; ci < curve_count; ci++) {
             if (curve_y_max[ci] < ybot || curve_y_min[ci] > ytop) {
                 continue;
             }
+            band_sorted[band_n++] = ci;
+        }
+        for (uint16_t i = 1; i < band_n; i++) {
+            uint16_t key = band_sorted[i];
+            float key_max = curve_x_max[key];
+            int32_t j = (int32_t)i - 1;
+            while (j >= 0 && curve_x_max[band_sorted[j]] < key_max) {
+                band_sorted[j + 1] = band_sorted[j];
+                j--;
+            }
+            band_sorted[j + 1] = key;
+        }
+        for (uint16_t i = 0; i < band_n; i++) {
+            uint16_t ci = band_sorted[i];
             uint32_t t0 = local_pos * 4;
             uint32_t t1 = t0 + 4;
             s_curve_upload[t0 + 0] = nt_float32_to_float16(curves[ci].p0x);
@@ -824,10 +841,25 @@ static uint16_t upload_glyph(nt_font_slot_t *slot, const NtFontGlyphEntry *glyph
         if (band_width > 0.0F) {
             float xleft = bbox_x0 + ((float)b * band_width) - x_margin;
             float xright = xleft + band_width + (x_margin * 2.0F);
+            uint16_t band_n = 0;
             for (uint16_t ci = 0; ci < curve_count; ci++) {
                 if (curve_x_max[ci] < xleft || curve_x_min[ci] > xright) {
                     continue;
                 }
+                band_sorted[band_n++] = ci;
+            }
+            for (uint16_t i = 1; i < band_n; i++) {
+                uint16_t key = band_sorted[i];
+                float key_max = curve_y_max[key];
+                int32_t j = (int32_t)i - 1;
+                while (j >= 0 && curve_y_max[band_sorted[j]] < key_max) {
+                    band_sorted[j + 1] = band_sorted[j];
+                    j--;
+                }
+                band_sorted[j + 1] = key;
+            }
+            for (uint16_t i = 0; i < band_n; i++) {
+                uint16_t ci = band_sorted[i];
                 uint32_t t0 = local_pos * 4;
                 uint32_t t1 = t0 + 4;
                 s_curve_upload[t0 + 0] = nt_float32_to_float16(curves[ci].p0x);
@@ -1828,5 +1860,15 @@ void nt_font_test_reset_measure_counters(void) {
         s_font.slots[i].test_measure_cache_hits = 0U;
         s_font.slots[i].test_measure_cache_misses = 0U;
     }
+}
+
+void nt_font_test_set_metrics(nt_font_t font, uint16_t units_per_em, int16_t ascent, int16_t descent, int16_t line_height) {
+    NT_ASSERT(nt_pool_valid(&s_font.pool, font.id) && "nt_font_test_set_metrics: invalid font handle");
+    nt_font_slot_t *slot = get_slot(font);
+    slot->metrics.units_per_em = units_per_em;
+    slot->metrics.ascent = ascent;
+    slot->metrics.descent = descent;
+    slot->metrics.line_height = line_height;
+    slot->metrics_set = true;
 }
 #endif

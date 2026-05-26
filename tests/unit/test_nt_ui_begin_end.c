@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "clay.h"
+#include "core/nt_assert.h"
 #include "input/nt_input.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
@@ -31,7 +32,7 @@ static void test_begin_sets_current_ctx(void) {
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
-    nt_ui_begin(a, 800.0F, 600.0F, &mouse);
+    nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse);
     TEST_ASSERT_EQUAL_PTR(a->clay, Clay_GetCurrentContext());
     nt_ui_end(a);
 
@@ -47,8 +48,8 @@ static void test_stray_nested_begin_asserts(void) {
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
-    nt_ui_begin(a, 800.0F, 600.0F, &mouse);
-    NT_TEST_EXPECT_ASSERT(nt_ui_begin(b, 800.0F, 600.0F, &mouse));
+    nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse);
+    NT_TEST_EXPECT_ASSERT(nt_ui_begin(b, 800.0F, 600.0F, 0.0F, &mouse));
     /* Assert fires before begin mutates state, so a is still in-frame. */
     nt_ui_end(a);
 
@@ -63,7 +64,7 @@ static void test_end_clears_in_frame(void) {
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
-    nt_ui_begin(a, 800.0F, 600.0F, &mouse);
+    nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse);
     TEST_ASSERT_TRUE(a->in_frame);
     TEST_ASSERT_EQUAL_PTR(a, nt_ui_test_inframe_ctx());
 
@@ -83,7 +84,7 @@ static void test_end_clears_clay_current(void) {
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
-    nt_ui_begin(a, 800.0F, 600.0F, &mouse);
+    nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse);
     TEST_ASSERT_EQUAL_PTR(a->clay, Clay_GetCurrentContext());
     nt_ui_end(a);
     TEST_ASSERT_NULL(Clay_GetCurrentContext());

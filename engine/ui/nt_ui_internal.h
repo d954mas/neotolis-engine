@@ -15,6 +15,7 @@ struct nt_ui_context {
     Clay_Context *clay;
     Clay_RenderCommandArray frozen_cmds; /* set by end, read by walk */
     bool in_frame;
+    bool debug_overlay; /* applied to Clay before BeginLayout in nt_ui_begin */
 
     /* Walker bindings -- nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;

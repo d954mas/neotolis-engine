@@ -14,6 +14,7 @@
 #include "graphics/nt_gfx.h"
 #include "hash/nt_hash.h"
 #include "material/nt_material.h"
+#include "memory/nt_mem_scratch.h"
 #include "nt_pack_format.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
@@ -70,6 +71,7 @@ void ui_walker_fixture_init(ui_walker_fixture_t *fx, void *arena, size_t arena_s
     s_vpack_counter = 0;
 
     nt_hash_init(&(nt_hash_desc_t){0});
+    nt_mem_scratch_init((size_t)64U * 1024U); /* NT_UI_DATA_LAYER / NT_UI_DATA_FULL allocate here. */
     nt_gfx_init(&(nt_gfx_desc_t){.max_shaders = 32, .max_pipelines = 16, .max_buffers = 64, .max_textures = 32, .max_meshes = 16});
     nt_resource_init(&(nt_resource_desc_t){0});
     nt_atlas_init();
@@ -145,6 +147,7 @@ void ui_walker_fixture_shutdown(ui_walker_fixture_t *fx) {
     nt_atlas_test_reset();
     nt_resource_shutdown();
     nt_gfx_shutdown();
+    nt_mem_scratch_shutdown();
     nt_hash_shutdown();
 }
 

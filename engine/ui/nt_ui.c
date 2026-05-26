@@ -36,6 +36,9 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 static nt_ui_context_t *g_nt_ui_inframe_ctx = NULL;
 /* Set true between nt_ui_module_init / nt_ui_module_shutdown. */
 static bool s_nt_ui_module_initialized = false;
+
+/* Pre-built element_data for each layer (user_data=NULL). Avoids scratch alloc. */
+static nt_ui_element_data_t s_default_element_data[256];
 // #endregion
 
 // #region clay_error_handler
@@ -103,6 +106,9 @@ void nt_ui_module_init(void) {
     g_nt_ui_inframe_ctx = NULL;
     Clay_SetCurrentContext(NULL);
     nt_ui_init_arc_lut();
+    for (uint32_t i = 0; i < 256U; i++) {
+        s_default_element_data[i].layer = (nt_ui_layer_t)i;
+    }
     s_nt_ui_module_initialized = true;
 }
 void nt_ui_module_shutdown(void) {
@@ -193,13 +199,14 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 
 // #region begin_end
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_pointer_t *mouse) {
+void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *mouse) {
     NT_ASSERT(ctx != NULL && "nt_ui_begin: ctx must be non-NULL");
     NT_ASSERT(s_nt_ui_module_initialized && "nt_ui_begin: nt_ui_module_init() must be called before begin");
     NT_ASSERT(mouse != NULL && "nt_ui_begin: mouse must be non-NULL");
     /* isfinite() rejects NaN + +-inf which `>= 0.0F` alone lets through. */
     NT_ASSERT(isfinite(screen_w) && screen_w >= 0.0F && "nt_ui_begin: screen_w must be finite and non-negative");
     NT_ASSERT(isfinite(screen_h) && screen_h >= 0.0F && "nt_ui_begin: screen_h must be finite and non-negative");
+    NT_ASSERT(isfinite(dt) && dt >= 0.0F && "nt_ui_begin: dt must be finite and non-negative");
     NT_ASSERT(g_nt_ui_inframe_ctx == NULL && "nt_ui_begin: another ctx is mid-frame");
     NT_ASSERT(!ctx->in_frame && "nt_ui_begin: ctx already in_frame");
 
@@ -209,12 +216,29 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, const nt_
     ctx->in_frame = true;
     g_nt_ui_inframe_ctx = ctx;
 
+    /* Must run before BeginLayout: Clay reserves debug panel width up-front. */
+    Clay_SetDebugModeEnabled(ctx->debug_overlay);
     Clay_SetLayoutDimensions((Clay_Dimensions){.width = screen_w, .height = screen_h});
 
-    /* Left-button only; Clay v0.14 has no right/middle/wheel. */
+    /* Left-button only; Clay v0.14 has no right/middle/wheel buttons. */
     Clay_SetPointerState((Clay_Vector2){.x = mouse->x, .y = mouse->y}, mouse->buttons[NT_BUTTON_LEFT].is_down);
 
+    /* Forward wheel + enable touch/drag-scroll (mobile/web pointer drag inside
+     * a Clay clip scrolls it). Y inverted: Clay scroll opposite of typical wheel_dy. */
+    Clay_UpdateScrollContainers(true, (Clay_Vector2){.x = mouse->wheel_dx, .y = -mouse->wheel_dy}, dt);
+
     Clay_BeginLayout();
+}
+
+/* Takes effect on next nt_ui_begin (Clay needs the flag before BeginLayout). */
+void nt_ui_set_debug_overlay(nt_ui_context_t *ctx, bool enabled) {
+    NT_ASSERT(ctx != NULL && "nt_ui_set_debug_overlay: ctx must be non-NULL");
+    ctx->debug_overlay = enabled;
+}
+
+bool nt_ui_get_debug_overlay(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_debug_overlay: ctx must be non-NULL");
+    return ctx->debug_overlay;
 }
 
 void nt_ui_end(nt_ui_context_t *ctx) {
@@ -223,6 +247,9 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx == g_nt_ui_inframe_ctx && "nt_ui_end: ctx mismatch with module in-frame ctx");
 
     ctx->frozen_cmds = Clay_EndLayout();
+    /* Clay's debug overlay close button ("x") flips internal debugModeEnabled.
+     * Sync back so caller's flag stays in lock-step (next begin re-applies). */
+    ctx->debug_overlay = Clay_IsDebugModeEnabled();
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;
     /* Stray CLAY_* between end and next begin NULL-derefs instead of corrupting. */
@@ -242,7 +269,10 @@ static inline uint32_t nt_color_pack_clay(Clay_Color c) {
 // #endregion
 
 // #region element_data_alloc
-void *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data) {
+const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *user_data) {
+    if (user_data == NULL) {
+        return &s_default_element_data[layer];
+    }
     nt_ui_element_data_t *d = NT_MEM_SCRATCH_ALLOC(nt_ui_element_data_t);
     d->layer = layer;
     d->user_data = user_data;
@@ -546,8 +576,17 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
     nt_text_renderer_set_font(font);
     nt_text_renderer_set_material(ctx->text_material);
 
+    /* Baseline placement: center text vertically in bbox. Text height =
+     * (ascent + |descent|) * scale. Baseline sits |descent|*scale above
+     * the text bottom edge. */
+    nt_font_metrics_t metrics = nt_font_get_metrics(font);
+    const float scale = (metrics.units_per_em > 0) ? ((float)t->fontSize / (float)metrics.units_per_em) : 0.0F;
+    const float text_h = (float)(metrics.ascent - metrics.descent) * scale;
+    const float center_offset = (c->boundingBox.height - text_h) * 0.5F;
+    const float baseline_y = c->boundingBox.y + center_offset + ((float)(-metrics.descent) * scale);
+
     const float m[16] = {
-        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, c->boundingBox.x, c->boundingBox.y, 0.0F, 1.0F,
+        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, c->boundingBox.x, baseline_y, 0.0F, 1.0F,
     };
     /* text_renderer wants 0..1; Clay stores 0..255. */
     const float color[4] = {
@@ -570,22 +609,55 @@ typedef struct {
     int h;
 } scissor_rect_t;
 
+/* DIRECT: viewport is GL physical; Y-flip inside viewport rect.
+ * SCALED: viewport is logical (Y top-down); scale+shift to physical; Y-flip
+ * against fb height for GL. Floor/ceil avoid 1-px sliver clipping. */
+static void apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp) {
+    const float vx = target->viewport[0];
+    const float vy = target->viewport[1];
+    const float vw = target->viewport[2];
+    const float vh = target->viewport[3];
+
+    if (target->fb_size[0] <= 0.0F || target->fb_size[1] <= 0.0F) {
+        nt_gfx_set_scissor((int)vx + x, (int)(vy + vh) - y - hp, wp, hp);
+        return;
+    }
+
+    const float ox = target->fb_offset[0];
+    const float oy = target->fb_offset[1];
+    const float fbh = target->fb_size[1];
+    const float sx = (vw > 0.0F) ? ((target->fb_size[0] - (2.0F * ox)) / vw) : 1.0F;
+    const float sy = (vh > 0.0F) ? ((fbh - (2.0F * oy)) / vh) : 1.0F;
+    const int phys_x = (int)floorf(ox + (sx * (vx + (float)x)));
+    const int phys_y_top = (int)floorf(oy + (sy * (vy + (float)y)));
+    const int phys_w = (int)ceilf(sx * (float)wp);
+    const int phys_h = (int)ceilf(sy * (float)hp);
+    const int phys_y_gl = (int)fbh - phys_y_top - phys_h;
+    nt_gfx_set_scissor(phys_x, phys_y_gl, phys_w, phys_h);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
     NT_ASSERT((uint32_t)*depth < NT_UI_WALKER_SCISSOR_DEPTH_CAP && "scissor stack overflow; restructure nested clip");
 
-    /* Unclipped axis falls back to viewport; floor/ceil avoid 1px right/bottom bite. */
+    /* Unclipped axis falls back to viewport; floor/ceil avoid 1px right/bottom bite.
+     * Both axes false is RESERVED for Clay's floating clipTo=ATTACHED_PARENT marker
+     * (clay.h:2695-2701) -- bbox is the parent's clip area, applied to both axes.
+     * User code must always set at least one axis true; both-false with degenerate
+     * bbox is invalid use and trips the assert below. */
     const Clay_ClipRenderData *clip = &c->renderData.clip;
-    NT_ASSERT((clip->horizontal || clip->vertical) && "nt_ui SCISSOR_START with both axes unclipped is a no-op");
-    const int vx = (int)target->viewport[0];
-    const int vy = (int)target->viewport[1];
+    const bool both_false = !clip->horizontal && !clip->vertical;
+    NT_ASSERT((!both_false || (c->boundingBox.width > 0.0F && c->boundingBox.height > 0.0F)) &&
+              "nt_ui SCISSOR_START with both axes false requires non-empty bbox (reserved for Clay floating clipTo marker)");
     const int vw = (int)target->viewport[2];
     const int vh = (int)target->viewport[3];
+    const bool clip_h = clip->horizontal || both_false;
+    const bool clip_v = clip->vertical || both_false;
     int x;
     int y;
     int wp;
     int hp;
-    if (clip->horizontal) {
+    if (clip_h) {
         const float bx = c->boundingBox.x;
         x = (int)floorf(bx);
         wp = (int)ceilf(bx + c->boundingBox.width) - x;
@@ -593,7 +665,7 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
         x = 0;
         wp = vw;
     }
-    if (clip->vertical) {
+    if (clip_v) {
         const float by = c->boundingBox.y;
         y = (int)floorf(by);
         hp = (int)ceilf(by + c->boundingBox.height) - y;
@@ -622,8 +694,7 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
 
     stack[(*depth)++] = (scissor_rect_t){.x = x, .y = y, .w = wp, .h = hp};
 
-    /* Y-flip against viewport.h (NOT framebuffer h) for split-screen panes. */
-    nt_gfx_set_scissor(vx + x, vy + vh - y - hp, wp, hp);
+    apply_scissor_logical_to_physical(target, x, y, wp, hp);
     nt_gfx_set_scissor_enabled(true);
 }
 
@@ -637,10 +708,7 @@ static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t 
         nt_gfx_set_scissor_enabled(false);
     } else {
         scissor_rect_t r = stack[*depth - 1];
-        const int vx = (int)target->viewport[0];
-        const int vy = (int)target->viewport[1];
-        const int vh = (int)target->viewport[3];
-        nt_gfx_set_scissor(vx + r.x, vy + vh - r.y - r.h, r.w, r.h);
+        apply_scissor_logical_to_physical(target, r.x, r.y, r.w, r.h);
     }
 }
 // #endregion
@@ -682,7 +750,15 @@ static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite
     }
 }
 
+/* Clay bbox is top-left Y-down; engine renders GL bottom-left Y-up. Local-copy
+ * bbox.y rewrite + corner-radii/border-width top<->bottom swap mirrors the
+ * scissor_push flip. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
+    const float vy = target->viewport[1];
+    const float vh = target->viewport[3];
+    const float world_y = vy + vh - c->boundingBox.y - c->boundingBox.height;
+
     switch (c->commandType) {
     case CLAY_RENDER_COMMAND_TYPE_NONE:
         return;
@@ -690,32 +766,60 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         const uint32_t col = nt_color_pack_clay(r->backgroundColor);
-        emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, c->boundingBox.y, c->boundingBox.width, c->boundingBox.height, r->cornerRadius, col);
+        const Clay_CornerRadius cr = {
+            .topLeft = r->cornerRadius.bottomLeft,
+            .topRight = r->cornerRadius.bottomRight,
+            .bottomLeft = r->cornerRadius.topLeft,
+            .bottomRight = r->cornerRadius.topRight,
+        };
+        emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, world_y, c->boundingBox.width, c->boundingBox.height, cr, col);
         return;
     }
-    case CLAY_RENDER_COMMAND_TYPE_BORDER:
+    case CLAY_RENDER_COMMAND_TYPE_BORDER: {
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
-        emit_border(ctx, c);
+        Clay_RenderCommand local = *c;
+        local.boundingBox.y = world_y;
+        Clay_BorderRenderData *b = &local.renderData.border;
+        const Clay_BorderWidth wo = b->width;
+        b->width.top = wo.bottom;
+        b->width.bottom = wo.top;
+        const Clay_CornerRadius cro = b->cornerRadius;
+        b->cornerRadius.topLeft = cro.bottomLeft;
+        b->cornerRadius.topRight = cro.bottomRight;
+        b->cornerRadius.bottomLeft = cro.topLeft;
+        b->cornerRadius.bottomRight = cro.topRight;
+        emit_border(ctx, &local);
         return;
-    case CLAY_RENDER_COMMAND_TYPE_TEXT:
+    }
+    case CLAY_RENDER_COMMAND_TYPE_TEXT: {
         /* Drain sprite before switching to text pipeline; mark for lazy rebind. */
         nt_sprite_renderer_flush();
         *sprite_pipeline_dirty = true;
-        emit_text(ctx, c);
+        Clay_RenderCommand local = *c;
+        local.boundingBox.y = world_y;
+        emit_text(ctx, &local);
         return;
-    case CLAY_RENDER_COMMAND_TYPE_IMAGE:
+    }
+    case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
-        emit_image(c);
+        Clay_RenderCommand local = *c;
+        local.boundingBox.y = world_y;
+        emit_image(&local);
         return;
+    }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:
         scissor_push(c, scissor_stack, depth, target, sprite_pipeline_dirty);
         return;
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
         scissor_pop(scissor_stack, depth, target, sprite_pipeline_dirty);
         return;
-    case CLAY_RENDER_COMMAND_TYPE_CUSTOM:
-        emit_custom(ctx, c, sprite_pipeline_dirty);
+    case CLAY_RENDER_COMMAND_TYPE_CUSTOM: {
+        /* Match RECT/TEXT/IMAGE/BORDER: custom handler gets bbox in GL world space. */
+        Clay_RenderCommand local = *c;
+        local.boundingBox.y = world_y;
+        emit_custom(ctx, &local, sprite_pipeline_dirty);
         return;
+    }
     }
 }
 
@@ -737,8 +841,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     nt_text_renderer_flush();
     nt_gfx_set_scissor_enabled(false);
 
-    /* Zero viewport (minimized tab, orientation change): silent no-op. */
-    if (target->viewport[2] == 0.0F || target->viewport[3] == 0.0F) {
+    /* Zero viewport or degenerate fb (minimized tab, orientation change): no-op. */
+    const bool scaled = target->fb_size[0] > 0.0F;
+    if (target->viewport[2] == 0.0F || target->viewport[3] == 0.0F || (scaled && target->fb_size[1] == 0.0F)) {
         ctx->last_walk_draw_call_delta = 0;
         ctx->last_walk_command_count = 0;
 #ifdef NT_TEST_ACCESS
@@ -769,7 +874,16 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     /* AFTER entry flush so per-walk delta excludes caller's drained geometry. */
     const uint32_t calls_at_entry = nt_gfx_get_frame_draw_calls();
 
-    nt_gfx_set_viewport((int)target->viewport[0], (int)target->viewport[1], (int)target->viewport[2], (int)target->viewport[3]);
+    /* glViewport needs PHYSICAL pixels. SCALED mode reads fb_size + fb_offset;
+     * DIRECT mode viewport[] is already in physical px. */
+    if (scaled) {
+        /* Derive width from int offset to avoid rounding asymmetry (1px bar). */
+        const int ox = (int)roundf(target->fb_offset[0]);
+        const int oy = (int)roundf(target->fb_offset[1]);
+        nt_gfx_set_viewport(ox, oy, (int)target->fb_size[0] - (2 * ox), (int)target->fb_size[1] - (2 * oy));
+    } else {
+        nt_gfx_set_viewport((int)target->viewport[0], (int)target->viewport[1], (int)target->viewport[2], (int)target->viewport[3]);
+    }
 
     /* Sprite material up-front; text binds lazily inside emit_text. */
     nt_sprite_renderer_set_material(ctx->sprite_material);
