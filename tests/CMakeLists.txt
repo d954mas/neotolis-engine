@@ -433,6 +433,7 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_walker_readonly
         test_nt_ui_walker_batching
         test_nt_ui_label
+        test_nt_ui_image
         test_nt_ui_scale
         test_nt_ui_fit
         test_nt_ui_transform
