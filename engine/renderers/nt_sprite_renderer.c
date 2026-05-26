@@ -1,5 +1,6 @@
 #include "renderers/nt_sprite_renderer.h"
 
+#include <math.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -491,6 +492,43 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     const uint8_t flip_bits = flags & (NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y);
     const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
 
+    /* Slice9 branch: per-entity override or atlas-authored slice9 */
+    bool has_s9_ov = (flags & NT_SPRITE_FLAG_SLICE9_OV) != 0;
+    bool has_s9_region = (r->flags & NT_ATLAS_REGION_FLAG_SLICE9) != 0;
+    if (has_s9_ov || has_s9_region) {
+        uint16_t sl;
+        uint16_t sr;
+        uint16_t st;
+        uint16_t sb;
+        if (has_s9_ov) {
+            const uint16_t *lrtb = nt_sprite_comp_slice9_lrtb(e);
+            sl = lrtb[0];
+            sr = lrtb[1];
+            st = lrtb[2];
+            sb = lrtb[3];
+        } else {
+            sl = r->slice9_lrtb[0];
+            sr = r->slice9_lrtb[1];
+            st = r->slice9_lrtb[2];
+            sb = r->slice9_lrtb[3];
+        }
+        /* Extract position + scale from world matrix; skip rotation (pass 0). */
+        const float *m = tv->world_matrices[t_idx];
+        const float src_w = (float)r->source_w * ipu;
+        const float src_h = (float)r->source_h * ipu;
+        const float sx = sqrtf((m[0] * m[0]) + (m[1] * m[1]));
+        const float sy = sqrtf((m[4] * m[4]) + (m[5] * m[5]));
+        const float w = sx * src_w;
+        const float h = sy * src_h;
+        /* Pivot offset: same logic as emit_region_resolved */
+        const float ox = origin_x * src_w;
+        const float oy = origin_y * src_h;
+        const float x = m[12] - (sx * ox);
+        const float y = m[13] - (sy * oy);
+        nt_sprite_renderer_emit_slice9(atlas, sv->region_index[s_idx], x, y, w, h, sl, sr, st, sb, dv->colors_packed[d_idx], flip_bits, 0.0F);
+        return;
+    }
+
     emit_region_resolved(r, resolved->cached_pos, resolved->raw_vertices, resolved->indices, page_tex, ipu, tv->world_matrices[t_idx], origin_x, origin_y, dv->colors_packed[d_idx], flip_bits);
 }
 // #endregion
@@ -618,8 +656,9 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         return; /* tombstone */
     }
 
-    /* Slice9 regions must be non-rotated (D-54-13). */
+    /* Slice9 regions must be non-rotated, untrimmed (RECT shape forces no trim). */
     NT_ASSERT(rh.region->transform == 0 && "slice9 region must have transform == 0 (no rotation)");
+    NT_ASSERT(rh.region->trim_offset_x == 0 && rh.region->trim_offset_y == 0 && "slice9 region must be untrimmed (builder should force RECT shape)");
     NT_ASSERT(rh.region->source_w > 0 && rh.region->source_h > 0 && "slice9 region source dimensions must be non-zero");
     NT_ASSERT(sl + sr < rh.region->source_w && st + sb < rh.region->source_h && "slice9 borders exceed source dimensions (per-entity override invalid?)");
 

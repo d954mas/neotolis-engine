@@ -1359,10 +1359,14 @@ static void emit_marker(nt_ui_context_t *ctx, uint8_t marker_type, const nt_ui_t
     m->before_clay_idx = (uint32_t)ctx->clay->layoutElements.length;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transform) {
     NT_ASSERT(ctx != NULL && "nt_ui_push_transform: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_push_transform: must be called inside begin/end");
     NT_ASSERT(transform != NULL && "nt_ui_push_transform: transform must be non-NULL");
+    NT_ASSERT(isfinite(transform->scale_x) && isfinite(transform->scale_y) && "nt_ui_push_transform: scale must be finite");
+    NT_ASSERT(isfinite(transform->rotation) && "nt_ui_push_transform: rotation must be finite");
+    NT_ASSERT(isfinite(transform->offset_x) && isfinite(transform->offset_y) && "nt_ui_push_transform: offset must be finite");
     emit_marker(ctx, NT_UI_MARKER_PUSH_TRANSFORM, transform, 1.0F);
 }
 
@@ -1375,6 +1379,7 @@ void nt_ui_pop_transform(nt_ui_context_t *ctx) {
 void nt_ui_push_opacity(nt_ui_context_t *ctx, float opacity) {
     NT_ASSERT(ctx != NULL && "nt_ui_push_opacity: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_push_opacity: must be called inside begin/end");
+    NT_ASSERT(isfinite(opacity) && opacity >= 0.0F && opacity <= 1.0F && "nt_ui_push_opacity: must be finite in [0,1]");
     emit_marker(ctx, NT_UI_MARKER_PUSH_OPACITY, NULL, opacity);
 }
 
