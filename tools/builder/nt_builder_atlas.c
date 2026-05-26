@@ -355,16 +355,16 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     /* Per-sprite data: hash + origin + overrides (in add-order, NOT sorted —
      * cached placements store sprite_index in add-order, so the key must be
      * order-sensitive to avoid mismatching placements after reordering). */
-    enum { PER_SPRITE_SIZE = sizeof(uint64_t) + 2 * sizeof(float) + 7 };
-    size_t per_sprite_bytes = sprite_count * PER_SPRITE_SIZE;
+    enum { PER_SPRITE_SIZE = sizeof(uint64_t) + (2 * sizeof(float)) + 7 };
+    size_t per_sprite_bytes = (size_t)sprite_count * PER_SPRITE_SIZE;
     uint8_t *sprite_buf = (uint8_t *)malloc(per_sprite_bytes);
     NT_BUILD_ASSERT(sprite_buf && "compute_atlas_cache_key: alloc failed");
     for (uint32_t i = 0; i < sprite_count; i++) {
-        size_t off = i * PER_SPRITE_SIZE;
+        size_t off = (size_t)i * PER_SPRITE_SIZE;
         memcpy(sprite_buf + off, &sprites[i].decoded_hash, sizeof(uint64_t));
         memcpy(sprite_buf + off + sizeof(uint64_t), &sprites[i].origin_x, sizeof(float));
         memcpy(sprite_buf + off + sizeof(uint64_t) + sizeof(float), &sprites[i].origin_y, sizeof(float));
-        size_t ov_off = off + sizeof(uint64_t) + 2 * sizeof(float);
+        size_t ov_off = off + sizeof(uint64_t) + (2 * sizeof(float));
         sprite_buf[ov_off + 0] = sprites[i].slice9_left;
         sprite_buf[ov_off + 1] = sprites[i].slice9_right;
         sprite_buf[ov_off + 2] = sprites[i].slice9_top;
@@ -1356,6 +1356,7 @@ static void pipeline_geometry(AtlasPipeline *p) {
 
 /* --- pipeline_tile_pack: sort sprites by area, place on atlas pages via tile-grid collision --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void pipeline_tile_pack(AtlasPipeline *p) {
     /* calloc so trailing padding in AtlasPlacement is deterministic — the struct
      * is fwrite'd directly into the atlas cache file and uninitialized padding
