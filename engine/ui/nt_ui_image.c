@@ -34,6 +34,7 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_reso
     }
 
     CLAY({
+        .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
         .backgroundColor = tint,
         .image = {.imageData = p},
         .userData = (void *)data,

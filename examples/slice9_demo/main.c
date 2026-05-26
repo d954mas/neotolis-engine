@@ -119,11 +119,11 @@ static uint32_t s_button_green_idx;
 #define UI_REF_W 960.0F
 #define UI_REF_H 640.0F
 
-/* Animation toggles (D-54-21) */
-static bool s_anim_scale;
-static bool s_anim_opacity;
-static bool s_anim_position;
-static bool s_anim_rotation;
+/* Animation toggles (D-54-21) — start ON for visual verification */
+static bool s_anim_scale = true;
+static bool s_anim_opacity = true;
+static bool s_anim_position = true;
+static bool s_anim_rotation; /* rotation not yet wired to renderer */
 static float s_time;
 // #endregion
 
@@ -170,31 +170,24 @@ static void declare_static_panels(void) {
     CLAY({.id = CLAY_ID("static-row"),
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
 
-        /* Beige panel: 120x80 */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(80)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(60)}}}) {
             nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_beige_idx, &g_panel_style);
         }
-
-        /* Blue panel: 300x100 */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(100)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(70)}}}) {
             nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_blue_idx, &g_panel_style);
         }
-
-        /* Brown panel: 500x150 */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(500), CLAY_SIZING_FIXED(150)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(350), CLAY_SIZING_FIXED(80)}}}) {
             nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style);
         }
     }
 
-    /* Kenney buttons at 2 sizes */
+    /* Kenney buttons */
     CLAY({.id = CLAY_ID("btn-row"),
-          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(50)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(40)}}}) {
             nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_button_blue_idx, &g_panel_style);
         }
-
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(60)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(250), CLAY_SIZING_FIXED(40)}}}) {
             nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_button_green_idx, &g_panel_style);
         }
     }
@@ -222,13 +215,12 @@ static void declare_animated_panel(void) {
         t.rotation = sinf(s_time * 3.0F) * 0.15F;
     }
     if (s_anim_opacity) {
-        opacity = ((sinf(s_time * 1.5F) + 1.0F) * 0.5F * 0.7F) + 0.3F;
+        opacity = (sinf(s_time * 1.5F) + 1.0F) * 0.5F;
     }
 
     CLAY({.id = CLAY_ID("anim-container"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
 
-        /* Panel with transform + opacity: 350x180, children inherit */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(350), CLAY_SIZING_FIXED(180)},
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(100)},
                          .padding = CLAY_PADDING_ALL(16),
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
                          .childGap = 8,
@@ -245,27 +237,57 @@ static void declare_animated_panel(void) {
 }
 // #endregion
 
-// #region declare_group_animation
-/* Group animation: two images slide together via group_begin/end. */
-static void declare_group_animation(void) {
-    CLAY({.id = CLAY_ID("group-title"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Group animation (children move together)", &g_title_style);
+// #region declare_nested_panels
+/* Nested panels: outer(offset+scale) > middle(offset+opacity) > inner(scale).
+ * Verifies transforms accumulate hierarchically. */
+static void declare_nested_panels(void) {
+    CLAY({.id = CLAY_ID("nested-title"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Nested: outer(offset+scale) > mid(opacity) > inner", &g_status_style);
     }
 
-    nt_ui_transform_t group_t = nt_ui_transform_defaults();
+    /* Outer: sliding + scale pulse */
+    nt_ui_transform_t outer_t = nt_ui_transform_defaults();
     if (s_anim_position) {
-        group_t.offset_x = sinf(s_time * 1.5F) * 30.0F;
+        outer_t.offset_x = sinf(s_time * 1.0F) * 40.0F;
+    }
+    if (s_anim_scale) {
+        outer_t.scale = 0.9F + (0.1F * (sinf(s_time * 2.5F) + 1.0F));
     }
 
-    CLAY({.id = CLAY_ID("group-container"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+    /* Middle: fading */
+    float mid_opacity = 1.0F;
+    if (s_anim_opacity) {
+        mid_opacity = (sinf(s_time * 2.0F) + 1.0F) * 0.5F;
+    }
 
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12}}) {
-            nt_ui_group_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), &group_t, 1.0F);
+    /* Inner: counter-scale */
+    nt_ui_transform_t inner_t = nt_ui_transform_defaults();
+    if (s_anim_scale) {
+        inner_t.scale = 1.1F - (0.1F * (sinf(s_time * 2.5F) + 1.0F));
+    }
+
+    CLAY({.id = CLAY_ID("nested-wrap"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        /* Outer beige panel */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(500), CLAY_SIZING_FIXED(140)}, .padding = CLAY_PADDING_ALL(12), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_beige_idx, &g_panel_style, &outer_t, 1.0F);
             {
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(60)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_beige_idx, &g_panel_style); }
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(60)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_blue_idx, &g_panel_style); }
+                /* Middle blue panel */
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(10), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                    nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_blue_idx, &g_panel_style, NULL, mid_opacity);
+                    {
+                        /* Inner brown panel with text */
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(8), .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style, &inner_t, 1.0F);
+                            {
+                                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Nested child", &g_child_label_style);
+                            }
+                            nt_ui_panel_end(s_ctx);
+                        }
+                    }
+                    nt_ui_panel_end(s_ctx);
+                }
             }
-            nt_ui_group_end(s_ctx);
+            nt_ui_panel_end(s_ctx);
         }
     }
 }
@@ -402,7 +424,7 @@ static void frame(void) {
             nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), status_text, &g_status_style);
             declare_static_panels();
             declare_animated_panel();
-            declare_group_animation();
+            declare_nested_panels();
         }
         // #endregion
 

@@ -760,14 +760,17 @@ static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t 
 // #endregion
 
 // #region helper_emit_custom
-/* Walker-local transform/opacity state passed through dispatch_command. */
+/* Walker-local transform/opacity state passed through dispatch_command.
+ * Transform is a 2D affine: pos' = pos * aff_s + (aff_tx, aff_ty).
+ * Each push composes: scale around bbox center, then add offset. */
 typedef struct {
     nt_ui_transform_t transform_stack[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
+    float push_center_x[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
+    float push_center_y[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
     int transform_depth;
-    float accum_offset_x;
-    float accum_offset_y;
-    float accum_rotation;
-    float accum_scale;
+    float aff_s;
+    float aff_tx;
+    float aff_ty;
     float opacity_stack[NT_UI_OPACITY_STACK_DEPTH_CAP];
     int opacity_depth;
     float accum_opacity;
@@ -775,24 +778,26 @@ typedef struct {
 
 static void walker_state_init(nt_ui_walker_state_t *ws) {
     ws->transform_depth = 0;
-    ws->accum_offset_x = 0;
-    ws->accum_offset_y = 0;
-    ws->accum_rotation = 0;
-    ws->accum_scale = 1.0F;
+    ws->aff_s = 1.0F;
+    ws->aff_tx = 0;
+    ws->aff_ty = 0;
     ws->opacity_depth = 0;
     ws->accum_opacity = 1.0F;
 }
 
 static void walker_recompute_transform(nt_ui_walker_state_t *ws) {
-    ws->accum_offset_x = 0;
-    ws->accum_offset_y = 0;
-    ws->accum_rotation = 0;
-    ws->accum_scale = 1.0F;
+    ws->aff_s = 1.0F;
+    ws->aff_tx = 0;
+    ws->aff_ty = 0;
     for (int k = 0; k < ws->transform_depth; ++k) {
-        ws->accum_offset_x += ws->transform_stack[k].offset_x;
-        ws->accum_offset_y += ws->transform_stack[k].offset_y;
-        ws->accum_rotation += ws->transform_stack[k].rotation;
-        ws->accum_scale *= ws->transform_stack[k].scale;
+        const float s = ws->transform_stack[k].scale;
+        const float cx = ws->push_center_x[k];
+        const float cy = ws->push_center_y[k];
+        const float ox = ws->transform_stack[k].offset_x;
+        const float oy = ws->transform_stack[k].offset_y;
+        ws->aff_tx = (ws->aff_tx * s) + (cx * (1.0F - s)) + ox;
+        ws->aff_ty = (ws->aff_ty * s) + (cy * (1.0F - s)) + oy;
+        ws->aff_s *= s;
     }
 }
 
@@ -828,14 +833,21 @@ static bool try_handle_custom_marker(const Clay_RenderCommand *c, nt_ui_walker_s
         return false;
     }
     switch (marker->marker_type) {
-    case NT_UI_CUSTOM_PUSH_TRANSFORM:
+    case NT_UI_CUSTOM_PUSH_TRANSFORM: {
         NT_ASSERT(ws->transform_depth < NT_UI_TRANSFORM_STACK_DEPTH_CAP && "transform stack overflow");
-        ws->transform_stack[ws->transform_depth++] = marker->transform;
-        ws->accum_offset_x += marker->transform.offset_x;
-        ws->accum_offset_y += marker->transform.offset_y;
-        ws->accum_rotation += marker->transform.rotation;
-        ws->accum_scale *= marker->transform.scale;
+        const int d = ws->transform_depth;
+        ws->transform_stack[d] = marker->transform;
+        ws->push_center_x[d] = c->boundingBox.x + (c->boundingBox.width * 0.5F);
+        ws->push_center_y[d] = c->boundingBox.y + (c->boundingBox.height * 0.5F);
+        ws->transform_depth = d + 1;
+        const float s = marker->transform.scale;
+        const float cx = ws->push_center_x[d];
+        const float cy = ws->push_center_y[d];
+        ws->aff_tx = (ws->aff_tx * s) + (cx * (1.0F - s)) + marker->transform.offset_x;
+        ws->aff_ty = (ws->aff_ty * s) + (cy * (1.0F - s)) + marker->transform.offset_y;
+        ws->aff_s *= s;
         return true;
+    }
     case NT_UI_CUSTOM_POP_TRANSFORM:
         NT_ASSERT(ws->transform_depth > 0 && "transform stack underflow");
         --ws->transform_depth;
@@ -905,10 +917,14 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
                              nt_ui_walker_state_t *ws) {
     const float vy = target->viewport[1];
     const float vh = target->viewport[3];
-    /* Apply accumulated offset from transform stack to rendered position. */
-    const float ox = ws->accum_offset_x;
-    const float oy = ws->accum_offset_y;
-    const float world_y = vy + vh - (c->boundingBox.y + oy) - c->boundingBox.height;
+    /* Apply accumulated 2D affine: pos' = pos * scale + translate. */
+    const float sc = ws->aff_s;
+    Clay_BoundingBox sbb = c->boundingBox;
+    sbb.x = (sbb.x * sc) + ws->aff_tx;
+    sbb.y = (sbb.y * sc) + ws->aff_ty;
+    sbb.width *= sc;
+    sbb.height *= sc;
+    const float world_y = vy + vh - sbb.y - sbb.height;
 
     switch (c->commandType) {
     case CLAY_RENDER_COMMAND_TYPE_NONE:
@@ -924,14 +940,13 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
             .bottomLeft = r->cornerRadius.topLeft,
             .bottomRight = r->cornerRadius.topRight,
         };
-        emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x + ox, world_y, c->boundingBox.width, c->boundingBox.height, cr, col);
+        emit_rounded_rect(ctx->atlas, ctx->white_region, sbb.x, world_y, sbb.width, sbb.height, cr, col);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER: {
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         Clay_RenderCommand local = *c;
-        local.boundingBox.x += ox;
-        local.boundingBox.y = world_y;
+        local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
         Clay_BorderRenderData *b = &local.renderData.border;
         const Clay_BorderWidth wo = b->width;
         b->width.top = wo.bottom;
@@ -951,9 +966,11 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         nt_sprite_renderer_flush();
         *sprite_pipeline_dirty = true;
         Clay_RenderCommand local = *c;
-        local.boundingBox.x += ox;
-        local.boundingBox.y = world_y;
-        /* Apply opacity to text alpha */
+        local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
+        /* Apply scale to font size + opacity to alpha */
+        if (sc != 1.0F) {
+            local.renderData.text.fontSize = (uint16_t)(((float)local.renderData.text.fontSize * sc) + 0.5F);
+        }
         local.renderData.text.textColor.a *= ws->accum_opacity;
         emit_text(ctx, &local);
         return;
@@ -961,8 +978,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         Clay_RenderCommand local = *c;
-        local.boundingBox.x += ox;
-        local.boundingBox.y = world_y;
+        local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
         /* Modify backgroundColor alpha for opacity -- emit_image reads it. */
         if (ws->accum_opacity < 1.0F) {
             Clay_Color tint = local.renderData.image.backgroundColor;
@@ -984,9 +1000,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         scissor_pop(scissor_stack, depth, target, sprite_pipeline_dirty);
         return;
     case CLAY_RENDER_COMMAND_TYPE_CUSTOM: {
-        /* Match RECT/TEXT/IMAGE/BORDER: custom handler gets bbox in GL world space. */
         Clay_RenderCommand local = *c;
-        local.boundingBox.y = world_y;
+        local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
         emit_custom(ctx, &local, sprite_pipeline_dirty, ws);
         return;
     }
