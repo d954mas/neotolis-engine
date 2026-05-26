@@ -452,15 +452,12 @@ static void test_nested_group_scale(void) {
 }
 
 /* push_transform(scale=2.0) -> pop_transform with no renderable in between.
- * Center never resolved -> NT_ASSERT fires on pop. */
-static void test_empty_panel_scale_asserts(void) {
+ * Unresolved center uses (0,0) — no crash. Valid for scale=0 (hide). */
+static void test_empty_container_scale_no_crash(void) {
     nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 2.0F, .scale_y = 2.0F};
     inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
-
-    /* No renderable: just pop immediately. */
     inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
 
-    /* Need at least one render command for walker to process markers. */
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
     s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
     s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
@@ -468,7 +465,7 @@ static void test_empty_panel_scale_asserts(void) {
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
-    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
+    nt_ui_walk(s_fx.ctx, &target);
 }
 
 int main(void) {
@@ -486,6 +483,6 @@ int main(void) {
     RUN_TEST(test_opacity_scale_combined);
     RUN_TEST(test_game_clay_elements_shift_index);
     RUN_TEST(test_nested_group_scale);
-    RUN_TEST(test_empty_panel_scale_asserts);
+    RUN_TEST(test_empty_container_scale_no_crash);
     return UNITY_END();
 }

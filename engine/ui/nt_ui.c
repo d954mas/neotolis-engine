@@ -327,13 +327,14 @@ static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, 
         };
         nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
     } else {
-        /* M = T(center) * R(rot) * T(-center) * S_T where S_T = Scale(w,h)+Translate(x,y) */
         const float rcx = x + (w * 0.5F);
         const float rcy = y + (h * 0.5F);
+        const float hw = w * 0.5F;
+        const float hh = h * 0.5F;
         const float rc = cosf(rotation);
         const float rs = sinf(rotation);
         const float m[16] = {
-            w * rc, w * rs, 0, 0, h * (-rs), h * rc, 0, 0, 0, 0, 1, 0, rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
+            w * rc, w * rs, 0, 0, h * (-rs), h * rc, 0, 0, 0, 0, 1, 0, rcx - (rc * hw) + (rs * hh), rcy - (rs * hw) - (rc * hh), 0, 1,
         };
         nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
     }
@@ -771,10 +772,12 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
     } else {
         const float rcx = bb.x + (bb.width * 0.5F);
         const float rcy = bb.y + (bb.height * 0.5F);
+        const float hw = bb.width * 0.5F;
+        const float hh = bb.height * 0.5F;
         const float rc = cosf(rotation);
         const float rs = sinf(rotation);
         const float m[16] = {
-            sx_f * rc, sx_f * rs, 0, 0, sy_f * (-rs), sy_f * rc, 0, 0, 0, 0, 1, 0, rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
+            sx_f * rc, sx_f * rs, 0, 0, sy_f * (-rs), sy_f * rc, 0, 0, 0, 0, 1, 0, rcx - (rc * hw) + (rs * hh), rcy - (rs * hw) - (rc * hh), 0, 1,
         };
         nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
     }
@@ -1075,7 +1078,7 @@ static void process_marker(const nt_ui_marker_t *marker, nt_ui_walker_state_t *w
     case NT_UI_MARKER_POP_TRANSFORM:
         NT_ASSERT(ws->transform_depth > 0 && "transform stack underflow");
         --ws->transform_depth;
-        NT_ASSERT(ws->center_resolved[ws->transform_depth] && "transform with scale/rotation popped without renderable to resolve center");
+        /* Unresolved center uses (0,0) — acceptable for scale=0 (hide) or offset-only transforms. */
         /* Remove any pending entries for this depth. */
         while (ws->pending_center_count > 0 && ws->pending_center_stack[ws->pending_center_count - 1] >= ws->transform_depth) {
             --ws->pending_center_count;

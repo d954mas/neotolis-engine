@@ -521,11 +521,11 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         const float rot = atan2f(m[1], m[0]);
         const float w = sx * src_w;
         const float h = sy * src_h;
-        /* Pivot offset: same logic as emit_region_resolved */
+        /* Pivot offset: transform through matrix columns (rotation-aware). */
         const float ox = origin_x * src_w;
         const float oy = origin_y * src_h;
-        const float x = m[12] - (sx * ox);
-        const float y = m[13] - (sy * oy);
+        const float x = m[12] - (m[0] * ox) - (m[4] * oy);
+        const float y = m[13] - (m[1] * ox) - (m[5] * oy);
         nt_sprite_renderer_emit_slice9(atlas, sv->region_index[s_idx], x, y, w, h, sl, sr, st, sb, dv->colors_packed[d_idx], flip_bits, rot);
         return;
     }
