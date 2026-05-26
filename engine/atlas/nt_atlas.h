@@ -28,31 +28,33 @@ typedef struct {
     uint16_t atlas_v;
 } nt_atlas_vertex_t;
 
-/* Runtime region struct — blob counterpart: NtAtlasRegion (nt_atlas_format.h).
+/* Runtime region struct — blob counterpart: NtAtlasRegion (nt_atlas_format.h, v6).
  *
  * Field order differs from NtAtlasRegion to minimize padding and keep hot
  * fields (name_hash, vertex_start, index_start) first. All values are raw:
  * UVs are the packed 0..65535 uint16 atlas_u/v, origin is the normalized
  * float from the builder, and transform is the orientation byte untouched.
+ * translate_region() copies slice9_lrtb from NtAtlasRegion at resolve time.
  * Update both structs + translate_region() together when changing fields.
  *
- * Total: 40 bytes on 64-bit. */
+ * Total: 48 bytes on 64-bit (uint64_t alignment drives 8-byte boundary). */
 typedef struct {
-    uint64_t name_hash;    /*  0: xxh64 of region name (or NT_ATLAS_TOMBSTONE_HASH) */
-    uint32_t vertex_start; /*  8: index into nt_atlas_data_t.vertices[] */
-    uint32_t index_start;  /* 12: index into nt_atlas_data_t.indices[]  */
-    float origin_x;        /* 16: normalized pivot 0..1 (may lie outside) */
-    float origin_y;        /* 20 */
-    uint16_t source_w;     /* 24: pre-trim source image width */
-    uint16_t source_h;     /* 26 */
-    int16_t trim_offset_x; /* 28: pixels stripped from left edge */
-    int16_t trim_offset_y; /* 30 */
-    uint8_t vertex_count;  /* 32: 0 = tombstone (and also degenerate) */
-    uint8_t index_count;   /* 33 */
-    uint8_t page_index;    /* 34 */
-    uint8_t transform;     /* 35: orientation — bit0=flipH, bit1=flipV, bit2=diagonal */
-    uint8_t flags;         /* 36: builder-authored render hints */
-    uint8_t reserved[3];   /* 37 */
+    uint64_t name_hash;       /*  0: xxh64 of region name (or NT_ATLAS_TOMBSTONE_HASH) */
+    uint32_t vertex_start;    /*  8: index into nt_atlas_data_t.vertices[] */
+    uint32_t index_start;     /* 12: index into nt_atlas_data_t.indices[]  */
+    float origin_x;           /* 16: normalized pivot 0..1 (may lie outside) */
+    float origin_y;           /* 20 */
+    uint16_t source_w;        /* 24: pre-trim source image width */
+    uint16_t source_h;        /* 26 */
+    int16_t trim_offset_x;    /* 28: pixels stripped from left edge */
+    int16_t trim_offset_y;    /* 30 */
+    uint8_t vertex_count;     /* 32: 0 = tombstone (and also degenerate) */
+    uint8_t index_count;      /* 33 */
+    uint8_t page_index;       /* 34 */
+    uint8_t transform;        /* 35: orientation — bit0=flipH, bit1=flipV, bit2=diagonal */
+    uint8_t flags;            /* 36: builder-authored render hints */
+    uint8_t slice9_lrtb[4];   /* 37: slice9 borders [left, right, top, bottom]; all zero = no slice9 */
+    uint8_t _pad[3];          /* 41: alignment padding to 48 bytes */
 } nt_texture_region_t;
 
 /* ---- Public API ---- */
@@ -119,6 +121,20 @@ typedef struct {
 
 void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_atlas_region_handles_t *out);
 
+/* ---- Slice9 query ---- */
+
+/* Return slice9 LRTB borders for a region. All zeros = no slice9.
+ * Asserts index < region_count. */
+typedef struct {
+    uint8_t left;
+    uint8_t right;
+    uint8_t top;
+    uint8_t bottom;
+    bool has_slice9; /* true if NT_ATLAS_REGION_FLAG_SLICE9 set */
+} nt_atlas_slice9_t;
+
+nt_atlas_slice9_t nt_atlas_get_region_slice9(nt_resource_t atlas, uint32_t region_index);
+
 // #region test_access
 #ifdef NT_TEST_ACCESS
 
@@ -176,6 +192,9 @@ float nt_atlas_test_ipu(const struct nt_atlas_data *ad);
 /* Test-only setter for ipu — used by direct-drive tests to simulate the
  * post_resolve metadata read path without standing up a resource system. */
 void nt_atlas_test_set_ipu_and_recompute(struct nt_atlas_data *ad, float ipu);
+
+/* Slice9 test probe: reads slice9 data directly from an nt_atlas_data pointer. */
+nt_atlas_slice9_t nt_atlas_test_get_region_slice9_raw(const struct nt_atlas_data *ad, uint32_t index);
 
 #endif
 // #endregion

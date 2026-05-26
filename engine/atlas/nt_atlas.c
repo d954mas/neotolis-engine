@@ -11,7 +11,7 @@
 #include "resource/nt_resource.h"
 
 _Static_assert(sizeof(nt_atlas_vertex_t) == 8, "nt_atlas_vertex_t must match NtAtlasVertex (8 bytes)");
-_Static_assert(sizeof(nt_texture_region_t) == 40, "nt_texture_region_t layout changed — update translate_region()");
+_Static_assert(sizeof(nt_texture_region_t) == 48, "nt_texture_region_t layout changed — update translate_region()");
 
 // #region module state
 static struct {
