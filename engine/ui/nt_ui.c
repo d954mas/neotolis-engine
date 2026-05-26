@@ -762,7 +762,9 @@ static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t 
 // #region helper_emit_custom
 /* Walker-local transform/opacity state passed through dispatch_command.
  * Transform is a 2D affine: pos' = pos * aff_s + (aff_tx, aff_ty).
- * Each push composes: scale around bbox center, then add offset. */
+ * Scale center is deferred: CUSTOM push marker has a zero-size bbox
+ * (it's a sibling before the panel), so we capture the center from the
+ * first renderable element (IMAGE/RECT) after the push. */
 typedef struct {
     nt_ui_transform_t transform_stack[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
     float push_center_x[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
@@ -771,6 +773,7 @@ typedef struct {
     float aff_s;
     float aff_tx;
     float aff_ty;
+    int pending_center_depth;
     float opacity_stack[NT_UI_OPACITY_STACK_DEPTH_CAP];
     int opacity_depth;
     float accum_opacity;
@@ -781,6 +784,7 @@ static void walker_state_init(nt_ui_walker_state_t *ws) {
     ws->aff_s = 1.0F;
     ws->aff_tx = 0;
     ws->aff_ty = 0;
+    ws->pending_center_depth = -1;
     ws->opacity_depth = 0;
     ws->accum_opacity = 1.0F;
 }
@@ -837,15 +841,15 @@ static bool try_handle_custom_marker(const Clay_RenderCommand *c, nt_ui_walker_s
         NT_ASSERT(ws->transform_depth < NT_UI_TRANSFORM_STACK_DEPTH_CAP && "transform stack overflow");
         const int d = ws->transform_depth;
         ws->transform_stack[d] = marker->transform;
-        ws->push_center_x[d] = c->boundingBox.x + (c->boundingBox.width * 0.5F);
-        ws->push_center_y[d] = c->boundingBox.y + (c->boundingBox.height * 0.5F);
+        ws->push_center_x[d] = 0;
+        ws->push_center_y[d] = 0;
         ws->transform_depth = d + 1;
-        const float s = marker->transform.scale;
-        const float cx = ws->push_center_x[d];
-        const float cy = ws->push_center_y[d];
-        ws->aff_tx = (ws->aff_tx * s) + (cx * (1.0F - s)) + marker->transform.offset_x;
-        ws->aff_ty = (ws->aff_ty * s) + (cy * (1.0F - s)) + marker->transform.offset_y;
-        ws->aff_s *= s;
+        /* Offset applies immediately; scale center deferred to first renderable. */
+        ws->aff_tx += marker->transform.offset_x;
+        ws->aff_ty += marker->transform.offset_y;
+        if (marker->transform.scale != 1.0F) {
+            ws->pending_center_depth = d;
+        }
         return true;
     }
     case NT_UI_CUSTOM_POP_TRANSFORM:
@@ -917,6 +921,17 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
                              nt_ui_walker_state_t *ws) {
     const float vy = target->viewport[1];
     const float vh = target->viewport[3];
+
+    /* Deferred scale center: capture from first renderable after push. */
+    if (ws->pending_center_depth >= 0 && c->boundingBox.width > 0 && c->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM && c->commandType != CLAY_RENDER_COMMAND_TYPE_NONE &&
+        c->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_START && c->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
+        const int d = ws->pending_center_depth;
+        ws->push_center_x[d] = c->boundingBox.x + (c->boundingBox.width * 0.5F);
+        ws->push_center_y[d] = c->boundingBox.y + (c->boundingBox.height * 0.5F);
+        ws->pending_center_depth = -1;
+        walker_recompute_transform(ws);
+    }
+
     /* Apply accumulated 2D affine: pos' = pos * scale + translate. */
     const float sc = ws->aff_s;
     Clay_BoundingBox sbb = c->boundingBox;
@@ -967,10 +982,6 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         *sprite_pipeline_dirty = true;
         Clay_RenderCommand local = *c;
         local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
-        /* Apply scale to font size + opacity to alpha */
-        if (sc != 1.0F) {
-            local.renderData.text.fontSize = (uint16_t)(((float)local.renderData.text.fontSize * sc) + 0.5F);
-        }
         local.renderData.text.textColor.a *= ws->accum_opacity;
         emit_text(ctx, &local);
         return;
