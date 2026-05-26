@@ -1414,9 +1414,7 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         vector_pack(u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts, u_no_rotate, p->placements, &p->page_count, p->page_w, p->page_h, &p->stats, p->thread_count);
     pack_stats_measure_payload(&p->stats, u_trim_w, u_trim_h, u_hulls, u_hull_counts, p->unique_count, p->opts);
 
-    /* Fill trim offsets and remap sprite_index back to original.
-     * For slice9 sprites: force identity transform (no rotation) and
-     * restore original trim dims (without margin expansion). */
+    /* Fill trim offsets and remap sprite_index back to original. */
     for (uint32_t i = 0; i < p->placement_count; i++) {
         uint32_t unique_idx = p->placements[i].sprite_index;
         uint32_t orig_idx = p->unique_indices[unique_idx];
@@ -1425,10 +1423,6 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         p->placements[i].trim_y = p->trim_y[orig_idx];
         p->placements[i].trimmed_w = p->trim_w[orig_idx];
         p->placements[i].trimmed_h = p->trim_h[orig_idx];
-        /* Per-sprite no-rotation enforcement */
-        if (p->sprites[orig_idx].rotate_override == NT_ATLAS_SPRITE_ROTATE_NO && p->placements[i].transform != 0) {
-            p->placements[i].transform = 0;
-        }
     }
 
     free(u_trim_w);

@@ -416,6 +416,61 @@ static void test_game_clay_elements_shift_index(void) {
     TEST_ASSERT_TRUE(pos[0] == 30.0F);
 }
 
+/* Two consecutive push_transforms with scale!=1.0 before a single renderable.
+ * Both scales compose and center resolves from the renderable's bbox. */
+static void test_nested_group_scale(void) {
+    nt_ui_transform_t t1 = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 2.0F};
+    inject_marker(MARKER_PUSH_TRANSFORM, &t1, 1.0F);
+
+    nt_ui_transform_t t2 = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 3.0F};
+    inject_marker(MARKER_PUSH_TRANSFORM, &t2, 1.0F);
+
+    /* Single renderable: rect at (20,0,40,30). */
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
+    s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+    track_clay_element_cmd(0);
+
+    inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
+    inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
+
+    inject_frozen_cmds(1);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+
+    /* Composed scale = 2.0 * 3.0 = 6.0 around deferred center (40,15).
+     * Scaled size: w=240, h=180. Center stays at (40,15).
+     * sbb = {x=40-120=-80, y=15-90=-75, w=240, h=180}.
+     * world_y = 600+75-180 = 495. V0=(-80, 495). */
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0U, pos);
+    TEST_ASSERT_TRUE(pos[0] == -80.0F);
+    TEST_ASSERT_TRUE(pos[1] == 495.0F);
+}
+
+/* push_transform(scale=2.0) -> pop_transform with no renderable in between.
+ * Center never resolved -> NT_ASSERT fires on pop. */
+static void test_empty_panel_scale_asserts(void) {
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 2.0F};
+    inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
+
+    /* No renderable: just pop immediately. */
+    inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
+
+    /* Need at least one render command for walker to process markers. */
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
+    s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
+    track_clay_element_cmd(0);
+    inject_frozen_cmds(1);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_push_pop_transform_balanced);
@@ -430,5 +485,7 @@ int main(void) {
     RUN_TEST(test_nested_offset_scale);
     RUN_TEST(test_opacity_scale_combined);
     RUN_TEST(test_game_clay_elements_shift_index);
+    RUN_TEST(test_nested_group_scale);
+    RUN_TEST(test_empty_panel_scale_asserts);
     return UNITY_END();
 }

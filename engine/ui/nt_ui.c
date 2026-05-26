@@ -813,7 +813,9 @@ typedef struct {
     float aff_a, aff_b, aff_c, aff_d, aff_tx, aff_ty;
     float accum_scale;
     float accum_rotation;
-    int pending_center_depth;
+    int pending_center_stack[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
+    int pending_center_count;
+    bool center_resolved[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
     float opacity_stack[NT_UI_OPACITY_STACK_DEPTH_CAP];
     int opacity_depth;
     float accum_opacity;
@@ -829,7 +831,7 @@ static void walker_state_init(nt_ui_walker_state_t *ws) {
     ws->aff_ty = 0;
     ws->accum_scale = 1.0F;
     ws->accum_rotation = 0;
-    ws->pending_center_depth = -1;
+    ws->pending_center_count = 0;
     ws->opacity_depth = 0;
     ws->accum_opacity = 1.0F;
 }
@@ -907,18 +909,26 @@ static void process_marker(const nt_ui_marker_t *marker, nt_ui_walker_state_t *w
         ws->transform_stack[d] = marker->transform;
         ws->push_center_x[d] = 0;
         ws->push_center_y[d] = 0;
+        ws->center_resolved[d] = true;
         ws->transform_depth = d + 1;
         /* Offset applies immediately; scale/rotation center deferred. */
         ws->aff_tx += marker->transform.offset_x;
         ws->aff_ty += marker->transform.offset_y;
         if (marker->transform.scale != 1.0F || marker->transform.rotation != 0.0F) {
-            ws->pending_center_depth = d;
+            ws->center_resolved[d] = false;
+            NT_ASSERT(ws->pending_center_count < NT_UI_TRANSFORM_STACK_DEPTH_CAP && "pending center stack overflow");
+            ws->pending_center_stack[ws->pending_center_count++] = d;
         }
         return;
     }
     case NT_UI_MARKER_POP_TRANSFORM:
         NT_ASSERT(ws->transform_depth > 0 && "transform stack underflow");
         --ws->transform_depth;
+        NT_ASSERT(ws->center_resolved[ws->transform_depth] && "transform with scale/rotation popped without renderable to resolve center");
+        /* Remove any pending entries for this depth. */
+        while (ws->pending_center_count > 0 && ws->pending_center_stack[ws->pending_center_count - 1] >= ws->transform_depth) {
+            --ws->pending_center_count;
+        }
         walker_recompute_transform(ws);
         return;
     case NT_UI_MARKER_PUSH_OPACITY:
@@ -1194,13 +1204,18 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                 ++mcur;
             }
             ++cmd_idx;
-            /* Resolve deferred center from first renderable with width > 0. */
-            if (ws.pending_center_depth >= 0 && cc->boundingBox.width > 0 && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM && cc->commandType != CLAY_RENDER_COMMAND_TYPE_NONE &&
+            /* Resolve ALL pending centers from first renderable with width > 0. */
+            if (ws.pending_center_count > 0 && cc->boundingBox.width > 0 && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM && cc->commandType != CLAY_RENDER_COMMAND_TYPE_NONE &&
                 cc->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_START && cc->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
-                const int pd = ws.pending_center_depth;
-                ws.push_center_x[pd] = cc->boundingBox.x + (cc->boundingBox.width * 0.5F);
-                ws.push_center_y[pd] = cc->boundingBox.y + (cc->boundingBox.height * 0.5F);
-                ws.pending_center_depth = -1;
+                const float rcx = cc->boundingBox.x + (cc->boundingBox.width * 0.5F);
+                const float rcy = cc->boundingBox.y + (cc->boundingBox.height * 0.5F);
+                for (int pi = 0; pi < ws.pending_center_count; ++pi) {
+                    const int pd = ws.pending_center_stack[pi];
+                    ws.push_center_x[pd] = rcx;
+                    ws.push_center_y[pd] = rcy;
+                    ws.center_resolved[pd] = true;
+                }
+                ws.pending_center_count = 0;
                 walker_recompute_transform(&ws);
             }
             const int32_t bi = j - i;
