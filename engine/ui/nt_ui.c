@@ -1276,9 +1276,10 @@ static void emit_marker(uint8_t marker_type, const nt_ui_transform_t *transform,
         m->transform = nt_ui_transform_defaults();
     }
     m->opacity = opacity;
-    /* Floating zero-size element: does not participate in parent's flow layout
-     * (no childGap, no positioning effect on siblings). */
-    CLAY({.floating = {.attachTo = CLAY_ATTACH_TO_PARENT}, .custom = {.customData = m}});
+    /* Zero-size flow element. Stays in render command order (push before
+     * content, pop after). May add parent's childGap — acceptable tradeoff
+     * vs floating which reorders and breaks the push/pop sequence. */
+    CLAY({.layout = {.sizing = {.width = CLAY_SIZING_FIXED(0), .height = CLAY_SIZING_FIXED(0)}}, .custom = {.customData = m}});
 }
 
 void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transform) {
