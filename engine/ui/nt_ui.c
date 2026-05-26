@@ -980,16 +980,6 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     const float vy = target->viewport[1];
     const float vh = target->viewport[3];
 
-    /* Deferred scale center: capture from first renderable after push. */
-    if (ws->pending_center_depth >= 0 && c->boundingBox.width > 0 && c->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM && c->commandType != CLAY_RENDER_COMMAND_TYPE_NONE &&
-        c->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_START && c->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
-        const int d = ws->pending_center_depth;
-        ws->push_center_x[d] = c->boundingBox.x + (c->boundingBox.width * 0.5F);
-        ws->push_center_y[d] = c->boundingBox.y + (c->boundingBox.height * 0.5F);
-        ws->pending_center_depth = -1;
-        walker_recompute_transform(ws);
-    }
-
     /* Apply accumulated 2D affine: pos' = pos * M + T.
      * Position uses full affine; size uses accum_scale (uniform). */
     const float sc = ws->accum_scale;
@@ -1177,19 +1167,48 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         const int32_t seg_n = seg_end - i;
         NT_ASSERT((uint32_t)seg_n <= ctx->max_elements && "nt_ui_walk: segment size exceeds ctx->max_elements; raise desc->max_elements or split via SCISSOR");
 
+        /* Pre-pass: process CUSTOM commands to bake transform/opacity per index.
+         * Each command gets the walker state that was active at its position.
+         * Layer passes then read baked state without re-processing CUSTOM. */
+        typedef struct {
+            float a, b, c, d, tx, ty;
+            float scale, rotation, opacity;
+        } baked_xform_t;
+        baked_xform_t *baked = (baked_xform_t *)nt_mem_scratch_alloc(
+            sizeof(baked_xform_t) * (size_t)seg_n, _Alignof(baked_xform_t));
+
         uint32_t active_layers[8] = {0U};
         for (int32_t j = i; j < seg_end; ++j) {
             const Clay_RenderCommand *cc = &arr->internalArray[j];
+            if (cc->commandType == CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
+                dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws);
+            }
+            /* Resolve deferred center from first renderable with width > 0. */
+            if (ws.pending_center_depth >= 0 && cc->boundingBox.width > 0 && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM && cc->commandType != CLAY_RENDER_COMMAND_TYPE_NONE &&
+                cc->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_START && cc->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
+                const int pd = ws.pending_center_depth;
+                ws.push_center_x[pd] = cc->boundingBox.x + (cc->boundingBox.width * 0.5F);
+                ws.push_center_y[pd] = cc->boundingBox.y + (cc->boundingBox.height * 0.5F);
+                ws.pending_center_depth = -1;
+                walker_recompute_transform(&ws);
+            }
+            const int32_t bi = j - i;
+            baked[bi] = (baked_xform_t){
+                .a = ws.aff_a, .b = ws.aff_b, .c = ws.aff_c, .d = ws.aff_d,
+                .tx = ws.aff_tx, .ty = ws.aff_ty,
+                .scale = ws.accum_scale, .rotation = ws.accum_rotation,
+                .opacity = ws.accum_opacity,
+            };
             const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
             active_layers[layer >> 5U] |= (1U << (layer & 31U));
 #ifdef NT_TEST_ACCESS
-            if (cc->userData == NULL) {
+            if (cc->userData == NULL && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
                 ++unlayered_count;
             }
 #endif
         }
 
-        /* Iterate set bits via ctz instead of 256-bit linear scan. */
+        /* Layer passes: dispatch renderables with baked transform state. */
         for (uint32_t word_idx = 0U; word_idx < 8U; ++word_idx) {
             uint32_t mask = active_layers[word_idx];
             while (mask != 0U) {
@@ -1198,8 +1217,21 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                 const uint8_t current_layer = (uint8_t)((word_idx << 5U) | bit_idx);
                 for (int32_t j = i; j < seg_end; ++j) {
                     const Clay_RenderCommand *cc = &arr->internalArray[j];
+                    if (cc->commandType == CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
+                        continue;
+                    }
                     const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
                     if (layer == current_layer) {
+                        const int32_t bi = j - i;
+                        ws.aff_a = baked[bi].a;
+                        ws.aff_b = baked[bi].b;
+                        ws.aff_c = baked[bi].c;
+                        ws.aff_d = baked[bi].d;
+                        ws.aff_tx = baked[bi].tx;
+                        ws.aff_ty = baked[bi].ty;
+                        ws.accum_scale = baked[bi].scale;
+                        ws.accum_rotation = baked[bi].rotation;
+                        ws.accum_opacity = baked[bi].opacity;
                         dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws);
                     }
                 }
