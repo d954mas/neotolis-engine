@@ -170,26 +170,16 @@ static void declare_static_panels(void) {
     CLAY({.id = CLAY_ID("static-row"),
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
 
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(60)}}}) {
-            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_beige_idx, &g_panel_style);
-        }
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(70)}}}) {
-            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_blue_idx, &g_panel_style);
-        }
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(350), CLAY_SIZING_FIXED(80)}}}) {
-            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style);
-        }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(60)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_beige_idx, &g_panel_style); }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(70)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_blue_idx, &g_panel_style); }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(350), CLAY_SIZING_FIXED(80)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style); }
     }
 
     /* Kenney buttons */
     CLAY({.id = CLAY_ID("btn-row"),
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(40)}}}) {
-            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_button_blue_idx, &g_panel_style);
-        }
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(250), CLAY_SIZING_FIXED(40)}}}) {
-            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_button_green_idx, &g_panel_style);
-        }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(40)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_button_blue_idx, &g_panel_style); }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(250), CLAY_SIZING_FIXED(40)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_button_green_idx, &g_panel_style); }
     }
 }
 // #endregion
@@ -272,7 +262,8 @@ static void declare_nested_panels(void) {
                     nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_blue_idx, &g_panel_style, NULL, mid_opacity);
                     {
                         /* Inner brown panel with text */
-                        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(8), .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                        CLAY({.layout = {
+                                  .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(8), .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
                             nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style, NULL, 1.0F);
                             {
                                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Nested child", &g_child_label_style);

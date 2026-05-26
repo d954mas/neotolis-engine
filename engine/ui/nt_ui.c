@@ -258,6 +258,7 @@ bool nt_ui_get_debug_overlay(const nt_ui_context_t *ctx) {
     return ctx->debug_overlay;
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_end: ctx is not in_frame (begin was not called)");
@@ -631,10 +632,7 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
         const float rc = cosf(rotation);
         const float rs = sinf(rotation);
         const float m[16] = {
-            sx_f * rc, sx_f * rs, 0, 0,
-            sy_f * (-rs), sy_f * rc, 0, 0,
-            0, 0, 1, 0,
-            rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
+            sx_f * rc, sx_f * rs, 0, 0, sy_f * (-rs), sy_f * rc, 0, 0, 0, 0, 1, 0, rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
         };
         nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
     }
@@ -674,8 +672,7 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
         const float rc = cosf(text_rotation);
         const float rs = sinf(text_rotation);
         const float rot[16] = {
-            rc, rs, 0, 0, -rs, rc, 0, 0, 0, 0, 1, 0,
-            bcx + (rc * dx) - (rs * dy), bcy + (rs * dx) + (rc * dy), 0, 1,
+            rc, rs, 0, 0, -rs, rc, 0, 0, 0, 0, 1, 0, bcx + (rc * dx) - (rs * dy), bcy + (rs * dx) + (rc * dy), 0, 1,
         };
         memcpy(m, rot, sizeof m);
     }
@@ -1186,8 +1183,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
             float a, b, c, d, tx, ty;
             float scale, rotation, opacity;
         } baked_xform_t;
-        baked_xform_t *baked = (baked_xform_t *)nt_mem_scratch_alloc(
-            sizeof(baked_xform_t) * (size_t)seg_n, _Alignof(baked_xform_t));
+        baked_xform_t *baked = (baked_xform_t *)nt_mem_scratch_alloc(sizeof(baked_xform_t) * (size_t)seg_n, _Alignof(baked_xform_t));
 
         uint32_t active_layers[8] = {0U};
         for (int32_t j = i; j < seg_end; ++j) {
@@ -1209,9 +1205,14 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
             }
             const int32_t bi = j - i;
             baked[bi] = (baked_xform_t){
-                .a = ws.aff_a, .b = ws.aff_b, .c = ws.aff_c, .d = ws.aff_d,
-                .tx = ws.aff_tx, .ty = ws.aff_ty,
-                .scale = ws.accum_scale, .rotation = ws.accum_rotation,
+                .a = ws.aff_a,
+                .b = ws.aff_b,
+                .c = ws.aff_c,
+                .d = ws.aff_d,
+                .tx = ws.aff_tx,
+                .ty = ws.aff_ty,
+                .scale = ws.accum_scale,
+                .rotation = ws.accum_rotation,
                 .opacity = ws.accum_opacity,
             };
             const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;

@@ -115,8 +115,7 @@ int main(int argc, char *argv[]) {
     btn_opts.name = "button_green";
     nt_builder_atlas_add(ctx, "examples/slice9_demo/raw/button_green_depth.png", &btn_opts);
 
-    (void)printf("  Atlas: 3 panels (100x100 s9:%d) + 2 buttons (384x128 s9:%d)\n",
-                 PANEL_BORDER, BUTTON_BORDER);
+    (void)printf("  Atlas: 3 panels (100x100 s9:%d) + 2 buttons (384x128 s9:%d)\n", PANEL_BORDER, BUTTON_BORDER);
 
     /* White pixel for UI rects */
     static const uint8_t white_pixel[4] = {255, 255, 255, 255};
