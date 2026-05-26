@@ -135,6 +135,32 @@ uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx);
 /* Total Clay commands incl. SCISSOR/CUSTOM/NONE (non-drawing barriers). */
 uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx);
 
+// #region transform_opacity_api
+/* Render-time transform -- no layout effect (D-54-09). */
+typedef struct {
+    float offset_x; /* slide-in/out, additive */
+    float offset_y;
+    float rotation; /* radians, additive */
+    float scale;    /* 1.0 = default, multiplicative */
+} nt_ui_transform_t;
+
+/* Identity transform (MUST use this, not zero-init -- scale=0 makes invisible). */
+static inline nt_ui_transform_t nt_ui_transform_defaults(void) { return (nt_ui_transform_t){.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F}; }
+
+#define NT_UI_TRANSFORM_STACK_DEPTH_CAP 8
+#define NT_UI_OPACITY_STACK_DEPTH_CAP 8
+
+/* Push/pop during declaration phase (between begin/end). Walker applies
+ * accumulated transform to all render commands between push and pop.
+ * Stack depth <= 8. */
+void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transform);
+void nt_ui_pop_transform(nt_ui_context_t *ctx);
+
+/* Opacity inheritance: multiplied into alpha of all children. 1.0 = opaque. */
+void nt_ui_push_opacity(nt_ui_context_t *ctx, float opacity);
+void nt_ui_pop_opacity(nt_ui_context_t *ctx);
+// #endregion
+
 // #region test_access
 #ifdef NT_TEST_ACCESS
 nt_ui_context_t *nt_ui_test_inframe_ctx(void);

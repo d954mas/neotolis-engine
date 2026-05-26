@@ -435,6 +435,7 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_label
         test_nt_ui_scale
         test_nt_ui_fit
+        test_nt_ui_transform
     )
 
     foreach(_t IN LISTS _nt_ui_test_names)

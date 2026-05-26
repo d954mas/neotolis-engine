@@ -31,6 +31,27 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include "memory/nt_mem_scratch.h"
 #include "ui/nt_ui_internal.h"
 
+// #region custom_markers
+/* Magic value to identify engine-internal CUSTOM markers.
+ * Checked before reading marker_type -- game CUSTOM commands
+ * without this sentinel are forwarded to custom_fn as usual. */
+#define NT_UI_CUSTOM_MARKER_MAGIC 0xC1A4FEEDU
+
+enum {
+    NT_UI_CUSTOM_PUSH_TRANSFORM = 1,
+    NT_UI_CUSTOM_POP_TRANSFORM = 2,
+    NT_UI_CUSTOM_PUSH_OPACITY = 3,
+    NT_UI_CUSTOM_POP_OPACITY = 4,
+};
+
+typedef struct {
+    uint32_t magic;              /* MUST be NT_UI_CUSTOM_MARKER_MAGIC */
+    uint8_t marker_type;         /* NT_UI_CUSTOM_PUSH_TRANSFORM etc. */
+    nt_ui_transform_t transform; /* only for PUSH_TRANSFORM */
+    float opacity;               /* only for PUSH_OPACITY */
+} nt_ui_custom_marker_t;
+// #endregion
+
 // #region module_state
 /* Only one ctx may be in-frame at a time; nt_ui_begin asserts NULL on entry. */
 static nt_ui_context_t *g_nt_ui_inframe_ctx = NULL;
@@ -739,9 +760,110 @@ static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t 
 // #endregion
 
 // #region helper_emit_custom
+/* Walker-local transform/opacity state passed through dispatch_command. */
+typedef struct {
+    nt_ui_transform_t transform_stack[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
+    int transform_depth;
+    float accum_offset_x;
+    float accum_offset_y;
+    float accum_rotation;
+    float accum_scale;
+    float opacity_stack[NT_UI_OPACITY_STACK_DEPTH_CAP];
+    int opacity_depth;
+    float accum_opacity;
+} nt_ui_walker_state_t;
+
+static void walker_state_init(nt_ui_walker_state_t *ws) {
+    ws->transform_depth = 0;
+    ws->accum_offset_x = 0;
+    ws->accum_offset_y = 0;
+    ws->accum_rotation = 0;
+    ws->accum_scale = 1.0F;
+    ws->opacity_depth = 0;
+    ws->accum_opacity = 1.0F;
+}
+
+static void walker_recompute_transform(nt_ui_walker_state_t *ws) {
+    ws->accum_offset_x = 0;
+    ws->accum_offset_y = 0;
+    ws->accum_rotation = 0;
+    ws->accum_scale = 1.0F;
+    for (int k = 0; k < ws->transform_depth; ++k) {
+        ws->accum_offset_x += ws->transform_stack[k].offset_x;
+        ws->accum_offset_y += ws->transform_stack[k].offset_y;
+        ws->accum_rotation += ws->transform_stack[k].rotation;
+        ws->accum_scale *= ws->transform_stack[k].scale;
+    }
+}
+
+static void walker_recompute_opacity(nt_ui_walker_state_t *ws) {
+    ws->accum_opacity = 1.0F;
+    for (int k = 0; k < ws->opacity_depth; ++k) {
+        ws->accum_opacity *= ws->opacity_stack[k];
+    }
+}
+
+/* Apply accumulated opacity to a packed AABBGGRR color. */
+static inline uint32_t apply_opacity(uint32_t color_packed, float opacity) {
+    if (opacity >= 1.0F) {
+        return color_packed;
+    }
+    uint32_t a = (color_packed >> 24) & 0xFFU;
+    a = (uint32_t)((float)a * opacity);
+    if (a > 255U) {
+        a = 255U;
+    }
+    return (color_packed & 0x00FFFFFFU) | (a << 24);
+}
+
+/* Returns true if marker was handled (engine internal); false = forward to game. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static bool try_handle_custom_marker(const Clay_RenderCommand *c, nt_ui_walker_state_t *ws) {
+    const void *data = c->renderData.custom.customData;
+    if (data == NULL) {
+        return false;
+    }
+    const nt_ui_custom_marker_t *marker = (const nt_ui_custom_marker_t *)data;
+    if (marker->magic != NT_UI_CUSTOM_MARKER_MAGIC) {
+        return false;
+    }
+    switch (marker->marker_type) {
+    case NT_UI_CUSTOM_PUSH_TRANSFORM:
+        NT_ASSERT(ws->transform_depth < NT_UI_TRANSFORM_STACK_DEPTH_CAP && "transform stack overflow");
+        ws->transform_stack[ws->transform_depth++] = marker->transform;
+        ws->accum_offset_x += marker->transform.offset_x;
+        ws->accum_offset_y += marker->transform.offset_y;
+        ws->accum_rotation += marker->transform.rotation;
+        ws->accum_scale *= marker->transform.scale;
+        return true;
+    case NT_UI_CUSTOM_POP_TRANSFORM:
+        NT_ASSERT(ws->transform_depth > 0 && "transform stack underflow");
+        --ws->transform_depth;
+        walker_recompute_transform(ws);
+        return true;
+    case NT_UI_CUSTOM_PUSH_OPACITY:
+        NT_ASSERT(ws->opacity_depth < NT_UI_OPACITY_STACK_DEPTH_CAP && "opacity stack overflow");
+        ws->opacity_stack[ws->opacity_depth++] = marker->opacity;
+        ws->accum_opacity *= marker->opacity;
+        return true;
+    case NT_UI_CUSTOM_POP_OPACITY:
+        NT_ASSERT(ws->opacity_depth > 0 && "opacity stack underflow");
+        --ws->opacity_depth;
+        walker_recompute_opacity(ws);
+        return true;
+    default:
+        return false;
+    }
+}
+
 /* Handler may bind its own pipeline; flush both. Sprite rebind is lazy
  * (deferred to first sprite-backed emit after). */
-static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, bool *sprite_pipeline_dirty) {
+static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, bool *sprite_pipeline_dirty, nt_ui_walker_state_t *ws) {
+    /* Check magic BEFORE reading marker_type -- game data without the
+     * sentinel is forwarded to custom_fn as usual. */
+    if (try_handle_custom_marker(c, ws)) {
+        return; /* engine marker consumed */
+    }
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
     *sprite_pipeline_dirty = true;
@@ -779,10 +901,14 @@ static inline void prep_sprite_dispatch(const nt_ui_context_t *ctx, bool *sprite
  * bbox.y rewrite + corner-radii/border-width top<->bottom swap mirrors the
  * scissor_push flip. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty) {
+static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, scissor_rect_t *scissor_stack, int *depth, const nt_ui_target_t *target, bool *sprite_pipeline_dirty,
+                             nt_ui_walker_state_t *ws) {
     const float vy = target->viewport[1];
     const float vh = target->viewport[3];
-    const float world_y = vy + vh - c->boundingBox.y - c->boundingBox.height;
+    /* Apply accumulated offset from transform stack to rendered position. */
+    const float ox = ws->accum_offset_x;
+    const float oy = ws->accum_offset_y;
+    const float world_y = vy + vh - (c->boundingBox.y + oy) - c->boundingBox.height;
 
     switch (c->commandType) {
     case CLAY_RENDER_COMMAND_TYPE_NONE:
@@ -790,19 +916,21 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
-        const uint32_t col = nt_color_pack_clay(r->backgroundColor);
+        uint32_t col = nt_color_pack_clay(r->backgroundColor);
+        col = apply_opacity(col, ws->accum_opacity);
         const Clay_CornerRadius cr = {
             .topLeft = r->cornerRadius.bottomLeft,
             .topRight = r->cornerRadius.bottomRight,
             .bottomLeft = r->cornerRadius.topLeft,
             .bottomRight = r->cornerRadius.topRight,
         };
-        emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x, world_y, c->boundingBox.width, c->boundingBox.height, cr, col);
+        emit_rounded_rect(ctx->atlas, ctx->white_region, c->boundingBox.x + ox, world_y, c->boundingBox.width, c->boundingBox.height, cr, col);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER: {
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         Clay_RenderCommand local = *c;
+        local.boundingBox.x += ox;
         local.boundingBox.y = world_y;
         Clay_BorderRenderData *b = &local.renderData.border;
         const Clay_BorderWidth wo = b->width;
@@ -813,6 +941,8 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         b->cornerRadius.topRight = cro.bottomRight;
         b->cornerRadius.bottomLeft = cro.topLeft;
         b->cornerRadius.bottomRight = cro.topRight;
+        /* Apply opacity to border color */
+        b->color.a *= ws->accum_opacity;
         emit_border(ctx, &local);
         return;
     }
@@ -821,14 +951,29 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         nt_sprite_renderer_flush();
         *sprite_pipeline_dirty = true;
         Clay_RenderCommand local = *c;
+        local.boundingBox.x += ox;
         local.boundingBox.y = world_y;
+        /* Apply opacity to text alpha */
+        local.renderData.text.textColor.a *= ws->accum_opacity;
         emit_text(ctx, &local);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         Clay_RenderCommand local = *c;
+        local.boundingBox.x += ox;
         local.boundingBox.y = world_y;
+        /* Modify backgroundColor alpha for opacity -- emit_image reads it. */
+        if (ws->accum_opacity < 1.0F) {
+            Clay_Color tint = local.renderData.image.backgroundColor;
+            const bool untinted = (tint.r == 0.0F && tint.g == 0.0F && tint.b == 0.0F && tint.a == 0.0F);
+            if (untinted) {
+                /* Default "untinted" maps to 0xFFFFFFFF; apply opacity. */
+                local.renderData.image.backgroundColor = (Clay_Color){.r = 255.0F, .g = 255.0F, .b = 255.0F, .a = 255.0F * ws->accum_opacity};
+            } else {
+                local.renderData.image.backgroundColor.a *= ws->accum_opacity;
+            }
+        }
         emit_image(&local);
         return;
     }
@@ -842,7 +987,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         /* Match RECT/TEXT/IMAGE/BORDER: custom handler gets bbox in GL world space. */
         Clay_RenderCommand local = *c;
         local.boundingBox.y = world_y;
-        emit_custom(ctx, &local, sprite_pipeline_dirty);
+        emit_custom(ctx, &local, sprite_pipeline_dirty, ws);
         return;
     }
     }
@@ -896,6 +1041,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     scissor_rect_t scissor_stack[NT_UI_WALKER_SCISSOR_DEPTH_CAP];
     int depth = 0;
 
+    nt_ui_walker_state_t ws;
+    walker_state_init(&ws);
+
     /* AFTER entry flush so per-walk delta excludes caller's drained geometry. */
     const uint32_t calls_at_entry = nt_gfx_get_frame_draw_calls();
 
@@ -926,7 +1074,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     while (i < arr->length) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
         if (!is_segmentable(c->commandType)) {
-            dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty);
+            dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws);
             ++i;
             continue;
         }
@@ -965,7 +1113,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                     const Clay_RenderCommand *cc = &arr->internalArray[j];
                     const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
                     if (layer == current_layer) {
-                        dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty);
+                        dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws);
                     }
                 }
             }
@@ -976,6 +1124,8 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
     NT_ASSERT(depth == 0 && "unbalanced scissor stack at walk exit");
+    NT_ASSERT(ws.transform_depth == 0 && "unbalanced transform stack at walk exit");
+    NT_ASSERT(ws.opacity_depth == 0 && "unbalanced opacity stack at walk exit");
     nt_gfx_set_scissor_enabled(false);
 
     /* Guard against CUSTOM handler resetting gfx counter -> unsigned wrap. */
@@ -1025,6 +1175,47 @@ void nt_ui_set_custom_handler(nt_ui_context_t *ctx, nt_ui_custom_handler_t fn, v
     /* NULL fn legal: reserved-slot pattern. */
     ctx->custom_fn = fn;
     ctx->custom_user = userdata;
+}
+// #endregion
+
+// #region push_pop_transform_opacity
+static void emit_marker(uint8_t marker_type, const nt_ui_transform_t *transform, float opacity) {
+    nt_ui_custom_marker_t *m = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_marker_t);
+    m->magic = NT_UI_CUSTOM_MARKER_MAGIC;
+    m->marker_type = marker_type;
+    if (transform != NULL) {
+        m->transform = *transform;
+    } else {
+        m->transform = nt_ui_transform_defaults();
+    }
+    m->opacity = opacity;
+    /* Zero-size invisible element carrying the marker as customData. */
+    CLAY({.layout = {.sizing = {.width = CLAY_SIZING_FIXED(0), .height = CLAY_SIZING_FIXED(0)}}, .custom = {.customData = m}});
+}
+
+void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transform) {
+    NT_ASSERT(ctx != NULL && "nt_ui_push_transform: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && "nt_ui_push_transform: must be called inside begin/end");
+    NT_ASSERT(transform != NULL && "nt_ui_push_transform: transform must be non-NULL");
+    emit_marker(NT_UI_CUSTOM_PUSH_TRANSFORM, transform, 1.0F);
+}
+
+void nt_ui_pop_transform(nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_pop_transform: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && "nt_ui_pop_transform: must be called inside begin/end");
+    emit_marker(NT_UI_CUSTOM_POP_TRANSFORM, NULL, 1.0F);
+}
+
+void nt_ui_push_opacity(nt_ui_context_t *ctx, float opacity) {
+    NT_ASSERT(ctx != NULL && "nt_ui_push_opacity: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && "nt_ui_push_opacity: must be called inside begin/end");
+    emit_marker(NT_UI_CUSTOM_PUSH_OPACITY, NULL, opacity);
+}
+
+void nt_ui_pop_opacity(nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_pop_opacity: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && "nt_ui_pop_opacity: must be called inside begin/end");
+    emit_marker(NT_UI_CUSTOM_POP_OPACITY, NULL, 1.0F);
 }
 // #endregion
 
