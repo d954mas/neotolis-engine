@@ -606,7 +606,7 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 // #region emit_slice9
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint8_t sl, uint8_t sr, uint8_t st, uint8_t sb, uint32_t color_packed,
-                                    uint8_t flip_bits) {
+                                    uint8_t flip_bits, float rotation) {
     NT_ASSERT(s_sprite.initialized);
     NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_slice9: invalid atlas handle");
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_slice9: atlas must be READY");
@@ -783,6 +783,21 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
             out_idx[3] = (uint16_t)(qb16 + 2U);
             out_idx[4] = (uint16_t)(qb16 + 1U);
             out_idx[5] = (uint16_t)(qb16 + 3U);
+        }
+    }
+
+    /* Rotate all 36 vertices around rect center if rotation != 0. */
+    if (rotation != 0.0F) {
+        const float rcx = x + (w * 0.5F);
+        const float rcy = y + (h * 0.5F);
+        const float rc = cosf(rotation);
+        const float rs = sinf(rotation);
+        for (uint32_t i = 0; i < 36U; i++) {
+            nt_sprite_vertex_t *v = &s_sprite.vertices[base + i];
+            const float dx = v->position[0] - rcx;
+            const float dy = v->position[1] - rcy;
+            v->position[0] = (dx * rc) - (dy * rs) + rcx;
+            v->position[1] = (dx * rs) + (dy * rc) + rcy;
         }
     }
 

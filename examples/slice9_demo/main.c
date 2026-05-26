@@ -123,7 +123,7 @@ static uint32_t s_button_green_idx;
 static bool s_anim_scale = true;
 static bool s_anim_opacity = true;
 static bool s_anim_position = true;
-static bool s_anim_rotation; /* rotation not yet wired to renderer */
+static bool s_anim_rotation = true;
 static float s_time;
 // #endregion
 
@@ -260,11 +260,7 @@ static void declare_nested_panels(void) {
         mid_opacity = (sinf(s_time * 2.0F) + 1.0F) * 0.5F;
     }
 
-    /* Inner: counter-scale */
-    nt_ui_transform_t inner_t = nt_ui_transform_defaults();
-    if (s_anim_scale) {
-        inner_t.scale = 1.1F - (0.1F * (sinf(s_time * 2.5F) + 1.0F));
-    }
+    /* Inner: no transform — inherits outer scale + middle opacity */
 
     CLAY({.id = CLAY_ID("nested-wrap"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
         /* Outer beige panel */
@@ -277,7 +273,7 @@ static void declare_nested_panels(void) {
                     {
                         /* Inner brown panel with text */
                         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(8), .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style, &inner_t, 1.0F);
+                            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style, NULL, 1.0F);
                             {
                                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Nested child", &g_child_label_style);
                             }

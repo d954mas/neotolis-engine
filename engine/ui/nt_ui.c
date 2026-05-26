@@ -550,7 +550,7 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c)
 
 // #region helper_emit_image
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_image(const Clay_RenderCommand *c) {
+static void emit_image(const Clay_RenderCommand *c, float rotation) {
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
     NT_ASSERT(p != NULL && "nt_ui IMAGE: imageData must point to nt_ui_image_payload_t");
     NT_ASSERT(p->atlas.id != 0 && "nt_ui IMAGE payload: invalid atlas handle");
@@ -592,7 +592,7 @@ static void emit_image(const Clay_RenderCommand *c) {
             st = r->slice9_lrtb[2];
             sb = r->slice9_lrtb[3];
         }
-        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, sl, sr, st, sb, col, p->flip_bits);
+        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, sl, sr, st, sb, col, p->flip_bits, rotation);
         return;
     }
 
@@ -600,13 +600,27 @@ static void emit_image(const Clay_RenderCommand *c) {
     const float src_w = (float)r->source_w * ipu;
     const float src_h = (float)r->source_h * ipu;
     NT_ASSERT(src_w > 0.0F && src_h > 0.0F && "nt_ui IMAGE: atlas region has zero source dimensions (broken atlas data)");
-    const float sx = bb.width / src_w;
-    const float sy = bb.height / src_h;
+    const float sx_f = bb.width / src_w;
+    const float sy_f = bb.height / src_h;
 
-    const float m[16] = {
-        sx, 0.0F, 0.0F, 0.0F, 0.0F, sy, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, bb.x, bb.y, 0.0F, 1.0F,
-    };
-    nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
+    if (rotation == 0.0F) {
+        const float m[16] = {
+            sx_f, 0.0F, 0.0F, 0.0F, 0.0F, sy_f, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, bb.x, bb.y, 0.0F, 1.0F,
+        };
+        nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
+    } else {
+        const float rcx = bb.x + (bb.width * 0.5F);
+        const float rcy = bb.y + (bb.height * 0.5F);
+        const float rc = cosf(rotation);
+        const float rs = sinf(rotation);
+        const float m[16] = {
+            sx_f * rc, sx_f * rs, 0, 0,
+            sy_f * (-rs), sy_f * rc, 0, 0,
+            0, 0, 1, 0,
+            rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
+        };
+        nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
+    }
 }
 // #endregion
 
@@ -765,9 +779,10 @@ typedef struct {
     float push_center_x[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
     float push_center_y[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
     int transform_depth;
-    float aff_s;
-    float aff_tx;
-    float aff_ty;
+    /* 2D affine: x'=x*a+y*b+tx, y'=x*c+y*d+ty */
+    float aff_a, aff_b, aff_c, aff_d, aff_tx, aff_ty;
+    float accum_scale;
+    float accum_rotation;
     int pending_center_depth;
     float opacity_stack[NT_UI_OPACITY_STACK_DEPTH_CAP];
     int opacity_depth;
@@ -776,27 +791,59 @@ typedef struct {
 
 static void walker_state_init(nt_ui_walker_state_t *ws) {
     ws->transform_depth = 0;
-    ws->aff_s = 1.0F;
+    ws->aff_a = 1.0F;
+    ws->aff_b = 0;
+    ws->aff_c = 0;
+    ws->aff_d = 1.0F;
     ws->aff_tx = 0;
     ws->aff_ty = 0;
+    ws->accum_scale = 1.0F;
+    ws->accum_rotation = 0;
     ws->pending_center_depth = -1;
     ws->opacity_depth = 0;
     ws->accum_opacity = 1.0F;
 }
 
+/* Compose local transform (scale S, rotation θ, center C, offset O) onto
+ * accumulated affine. Local = T(O) * T(C) * R(θ)*S * T(-C). */
 static void walker_recompute_transform(nt_ui_walker_state_t *ws) {
-    ws->aff_s = 1.0F;
+    ws->aff_a = 1.0F;
+    ws->aff_b = 0;
+    ws->aff_c = 0;
+    ws->aff_d = 1.0F;
     ws->aff_tx = 0;
     ws->aff_ty = 0;
+    ws->accum_scale = 1.0F;
+    ws->accum_rotation = 0;
     for (int k = 0; k < ws->transform_depth; ++k) {
         const float s = ws->transform_stack[k].scale;
+        const float r = ws->transform_stack[k].rotation;
         const float cx = ws->push_center_x[k];
         const float cy = ws->push_center_y[k];
         const float ox = ws->transform_stack[k].offset_x;
         const float oy = ws->transform_stack[k].offset_y;
-        ws->aff_tx = (ws->aff_tx * s) + (cx * (1.0F - s)) + ox;
-        ws->aff_ty = (ws->aff_ty * s) + (cy * (1.0F - s)) + oy;
-        ws->aff_s *= s;
+        const float cs = cosf(r) * s;
+        const float sn = sinf(r) * s;
+        /* Local 2x2: la=cs, lb=-sn, lc=sn, ld=cs */
+        /* Local translate: ltx = cx - cs*cx + sn*cy + ox
+         *                  lty = cy - sn*cx - cs*cy + oy */
+        const float ltx = cx - (cs * cx) + (sn * cy) + ox;
+        const float lty = cy - (sn * cx) - (cs * cy) + oy;
+        /* Compose: new = local * accumulated */
+        const float na = (cs * ws->aff_a) + ((-sn) * ws->aff_c);
+        const float nb = (cs * ws->aff_b) + ((-sn) * ws->aff_d);
+        const float nc = (sn * ws->aff_a) + (cs * ws->aff_c);
+        const float nd = (sn * ws->aff_b) + (cs * ws->aff_d);
+        const float ntx = (cs * ws->aff_tx) + ((-sn) * ws->aff_ty) + ltx;
+        const float nty = (sn * ws->aff_tx) + (cs * ws->aff_ty) + lty;
+        ws->aff_a = na;
+        ws->aff_b = nb;
+        ws->aff_c = nc;
+        ws->aff_d = nd;
+        ws->aff_tx = ntx;
+        ws->aff_ty = nty;
+        ws->accum_scale *= s;
+        ws->accum_rotation += r;
     }
 }
 
@@ -839,10 +886,10 @@ static bool try_handle_custom_marker(const Clay_RenderCommand *c, nt_ui_walker_s
         ws->push_center_x[d] = 0;
         ws->push_center_y[d] = 0;
         ws->transform_depth = d + 1;
-        /* Offset applies immediately; scale center deferred to first renderable. */
+        /* Offset applies immediately; scale/rotation center deferred. */
         ws->aff_tx += marker->transform.offset_x;
         ws->aff_ty += marker->transform.offset_y;
-        if (marker->transform.scale != 1.0F) {
+        if (marker->transform.scale != 1.0F || marker->transform.rotation != 0.0F) {
             ws->pending_center_depth = d;
         }
         return true;
@@ -927,13 +974,16 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         walker_recompute_transform(ws);
     }
 
-    /* Apply accumulated 2D affine: pos' = pos * scale + translate. */
-    const float sc = ws->aff_s;
-    Clay_BoundingBox sbb = c->boundingBox;
-    sbb.x = (sbb.x * sc) + ws->aff_tx;
-    sbb.y = (sbb.y * sc) + ws->aff_ty;
-    sbb.width *= sc;
-    sbb.height *= sc;
+    /* Apply accumulated 2D affine: pos' = pos * M + T.
+     * Position uses full affine; size uses accum_scale (uniform). */
+    const float sc = ws->accum_scale;
+    const float orig_cx = c->boundingBox.x + (c->boundingBox.width * 0.5F);
+    const float orig_cy = c->boundingBox.y + (c->boundingBox.height * 0.5F);
+    const float tcx = (orig_cx * ws->aff_a) + (orig_cy * ws->aff_b) + ws->aff_tx;
+    const float tcy = (orig_cx * ws->aff_c) + (orig_cy * ws->aff_d) + ws->aff_ty;
+    const float sw = c->boundingBox.width * sc;
+    const float sh = c->boundingBox.height * sc;
+    Clay_BoundingBox sbb = {.x = tcx - (sw * 0.5F), .y = tcy - (sh * 0.5F), .width = sw, .height = sh};
     const float world_y = vy + vh - sbb.y - sbb.height;
 
     switch (c->commandType) {
@@ -996,7 +1046,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
                 local.renderData.image.backgroundColor.a *= ws->accum_opacity;
             }
         }
-        emit_image(&local);
+        emit_image(&local, ws->accum_rotation);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:
