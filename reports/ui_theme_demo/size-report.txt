@@ -1,0 +1,24 @@
+# Size Report: ui_theme_demo (wasm-analysis-paired)
+# Commit: 85f4544
+
+## WASM Section Sizes
+
+Section                Size
+---------------- ----------
+Type                 548 B
+Import               598 B
+Function             375 B
+Table                  5 B
+Memory                 7 B
+Global                 9 B
+Export                94 B
+Elem                 148 B
+Code              780282 B
+Data              237307 B
+---------------- ----------
+TOTAL            1019373 B
+
+## Top 30 Functions by Size
+
+    Size  Name
+--------  ----
