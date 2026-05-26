@@ -261,15 +261,13 @@ static void declare_nested_panels(void) {
                 CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(10), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
                     nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_blue_idx, &g_panel_style, NULL, mid_opacity);
                     {
-                        /* Inner brown panel with text */
-                        CLAY({.layout = {
-                                  .sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(8), .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                        // clang-format off
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(8), .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
                             nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style, NULL, 1.0F);
-                            {
-                                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Nested child", &g_child_label_style);
-                            }
+                            { nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Nested child", &g_child_label_style); }
                             nt_ui_panel_end(s_ctx);
                         }
+                        // clang-format on
                     }
                     nt_ui_panel_end(s_ctx);
                 }
