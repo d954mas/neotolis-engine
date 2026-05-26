@@ -106,7 +106,11 @@ static nt_font_t s_font;
 static bool s_atlas_bound;
 static bool s_font_bound;
 static uint32_t s_white_region_idx;
-static uint32_t s_panel_bg_idx;
+static uint32_t s_panel_beige_idx;
+static uint32_t s_panel_blue_idx;
+static uint32_t s_panel_brown_idx;
+static uint32_t s_button_blue_idx;
+static uint32_t s_button_green_idx;
 
 #define LAYER_BG 0
 #define LAYER_IMG 1
@@ -131,17 +135,20 @@ static void try_bind_resources(void) {
     }
 
     if (!s_atlas_bound && nt_resource_is_ready(s_atlas_handle)) {
-        uint32_t white_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS__WHITE.value);
-        NT_ASSERT(white_idx != NT_ATLAS_INVALID_REGION && "slice9_demo: _white region missing");
-        s_white_region_idx = white_idx;
+        s_white_region_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS__WHITE.value);
+        NT_ASSERT(s_white_region_idx != NT_ATLAS_INVALID_REGION);
 
-        uint32_t panel_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BG.value);
-        NT_ASSERT(panel_idx != NT_ATLAS_INVALID_REGION && "slice9_demo: panel_bg region missing");
-        s_panel_bg_idx = panel_idx;
+        s_panel_beige_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BEIGE.value);
+        s_panel_blue_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BLUE.value);
+        s_panel_brown_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BROWN.value);
+        s_button_blue_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_BUTTON_BLUE.value);
+        s_button_green_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_BUTTON_GREEN.value);
+        NT_ASSERT(s_panel_beige_idx != NT_ATLAS_INVALID_REGION);
+        NT_ASSERT(s_button_blue_idx != NT_ATLAS_INVALID_REGION);
 
         nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, s_white_region_idx);
         s_atlas_bound = true;
-        nt_log_info("slice9_demo: atlas bound, white=%u panel_bg=%u", s_white_region_idx, s_panel_bg_idx);
+        nt_log_info("slice9_demo: atlas bound (5 Kenney regions + white)");
     }
 
     if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
@@ -154,28 +161,41 @@ static void try_bind_resources(void) {
 // #endregion
 
 // #region declare_static_panels
-/* Three static slice9 panels at different sizes -- corners must not stretch. */
+/* Kenney panels at 3 sizes — corners must not stretch. */
 static void declare_static_panels(void) {
     CLAY({.id = CLAY_ID("static-title"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Static panels (same region, 3 sizes)", &g_title_style);
+        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Kenney panels at 3 sizes (corners stay rounded)", &g_title_style);
     }
 
     CLAY({.id = CLAY_ID("static-row"),
           .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
 
-        /* Small: 120x80 */
+        /* Beige panel: 120x80 */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(120), CLAY_SIZING_FIXED(80)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_bg_idx, &g_panel_style);
+            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_beige_idx, &g_panel_style);
         }
 
-        /* Medium: 300x100 */
+        /* Blue panel: 300x100 */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(300), CLAY_SIZING_FIXED(100)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_bg_idx, &g_panel_style);
+            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_blue_idx, &g_panel_style);
         }
 
-        /* Large: 500x150 */
+        /* Brown panel: 500x150 */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(500), CLAY_SIZING_FIXED(150)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_bg_idx, &g_panel_style);
+            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style);
+        }
+    }
+
+    /* Kenney buttons at 2 sizes */
+    CLAY({.id = CLAY_ID("btn-row"),
+          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(50)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_button_blue_idx, &g_panel_style);
+        }
+
+        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(400), CLAY_SIZING_FIXED(60)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_button_green_idx, &g_panel_style);
         }
     }
 }
@@ -213,7 +233,7 @@ static void declare_animated_panel(void) {
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
                          .childGap = 8,
                          .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_bg_idx, &g_panel_style, &t, opacity);
+            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style, &t, opacity);
             {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Animated Panel", &g_panel_label_style);
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hello World", &g_child_label_style);
@@ -242,8 +262,8 @@ static void declare_group_animation(void) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 12}}) {
             nt_ui_group_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), &group_t, 1.0F);
             {
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(60)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_bg_idx, &g_panel_style); }
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(60)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_bg_idx, &g_panel_style); }
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(60)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_beige_idx, &g_panel_style); }
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(100), CLAY_SIZING_FIXED(60)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_blue_idx, &g_panel_style); }
             }
             nt_ui_group_end(s_ctx);
         }

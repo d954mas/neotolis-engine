@@ -22,7 +22,11 @@
 
 /* --- ATLAS_REGION --- */
 #define ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS__WHITE ((nt_hash64_t){0x27424DEE40744BBBULL}) /* slice9_demo_atlas/_white */
-#define ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BG ((nt_hash64_t){0xC13BC7F6F1B354A0ULL}) /* slice9_demo_atlas/panel_bg */
+#define ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_BUTTON_BLUE ((nt_hash64_t){0x04DD51E0B9359D84ULL}) /* slice9_demo_atlas/button_blue */
+#define ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_BUTTON_GREEN ((nt_hash64_t){0x7ABDDB88258FF8EEULL}) /* slice9_demo_atlas/button_green */
+#define ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BEIGE ((nt_hash64_t){0x0AE1CE33078EC907ULL}) /* slice9_demo_atlas/panel_beige */
+#define ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BLUE ((nt_hash64_t){0xD19BE6D11F48A883ULL}) /* slice9_demo_atlas/panel_blue */
+#define ASSET_ATLAS_REGION_SLICE9_DEMO_ATLAS_PANEL_BROWN ((nt_hash64_t){0xAF4C0086E593897FULL}) /* slice9_demo_atlas/panel_brown */
 
 #if NT_HASH_LABELS
 static inline void slice9_demo_register_labels(void) {
@@ -33,7 +37,11 @@ static inline void slice9_demo_register_labels(void) {
     (void)nt_hash64_str("slice9_demo/font");
     (void)nt_hash64_str("slice9_demo_atlas");
     (void)nt_hash64_str("slice9_demo_atlas/_white");
-    (void)nt_hash64_str("slice9_demo_atlas/panel_bg");
+    (void)nt_hash64_str("slice9_demo_atlas/button_blue");
+    (void)nt_hash64_str("slice9_demo_atlas/button_green");
+    (void)nt_hash64_str("slice9_demo_atlas/panel_beige");
+    (void)nt_hash64_str("slice9_demo_atlas/panel_blue");
+    (void)nt_hash64_str("slice9_demo_atlas/panel_brown");
     (void)nt_hash64_str("slice9_demo_atlas/tex0");
 }
 #endif

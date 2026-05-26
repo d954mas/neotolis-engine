@@ -29,59 +29,9 @@ static const char *pack_path(const char *dir, const char *name) {
     return s_path_buf;
 }
 
-/* Generate a 64x64 RGBA panel image with distinct colors per zone.
- * Border = 8 px on each side. Colors:
- *   corners:  red-ish   (200, 60, 60, 255)
- *   h-edges:  green-ish (60, 180, 60, 255)
- *   v-edges:  blue-ish  (60, 60, 200, 255)
- *   center:   gray      (160, 160, 160, 255) */
-#define PANEL_W 64
-#define PANEL_H 64
-#define BORDER 8
-
-static uint8_t s_panel_rgba[PANEL_W * PANEL_H * 4];
-
-static void generate_panel_image(void) {
-    for (int y = 0; y < PANEL_H; y++) {
-        for (int x = 0; x < PANEL_W; x++) {
-            const bool in_left = x < BORDER;
-            const bool in_right = x >= (PANEL_W - BORDER);
-            const bool in_top = y < BORDER;
-            const bool in_bottom = y >= (PANEL_H - BORDER);
-
-            uint8_t r = 0;
-            uint8_t g = 0;
-            uint8_t b = 0;
-            if ((in_left || in_right) && (in_top || in_bottom)) {
-                /* corner */
-                r = 200;
-                g = 60;
-                b = 60;
-            } else if (in_top || in_bottom) {
-                /* horizontal edge */
-                r = 60;
-                g = 180;
-                b = 60;
-            } else if (in_left || in_right) {
-                /* vertical edge */
-                r = 60;
-                g = 60;
-                b = 200;
-            } else {
-                /* center */
-                r = 160;
-                g = 160;
-                b = 160;
-            }
-
-            uint8_t *px = &s_panel_rgba[(size_t)((y * PANEL_W) + x) * 4];
-            px[0] = r;
-            px[1] = g;
-            px[2] = b;
-            px[3] = 255;
-        }
-    }
-}
+/* Kenney UI assets (CC0). Panels: 100x100, corners ~10px. Button: 384x128, corners ~16px. */
+#define PANEL_BORDER 10
+#define BUTTON_BORDER 16
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
@@ -119,7 +69,7 @@ int main(int argc, char *argv[]) {
     (void)printf("  Shaders added: 4 (sprite + slug_text)\n");
     // #endregion
 
-    // #region atlas: slice9 panel + white pixel
+    // #region atlas: Kenney panels + button + white pixel
     nt_atlas_opts_t atlas_opts = nt_atlas_opts_defaults();
     atlas_opts.shape = NT_ATLAS_SHAPE_RECT;
     atlas_opts.allow_transform = false;
@@ -137,16 +87,36 @@ int main(int argc, char *argv[]) {
 
     nt_builder_begin_atlas(ctx, "slice9_demo_atlas", &atlas_opts);
 
-    /* Slice9 panel: 64x64 with 8px borders */
-    generate_panel_image();
+    /* Kenney panels (100x100, 10px corners) */
     nt_atlas_sprite_opts_t panel_opts = nt_atlas_sprite_opts_defaults();
-    panel_opts.name = "panel_bg";
-    panel_opts.slice9_left = BORDER;
-    panel_opts.slice9_right = BORDER;
-    panel_opts.slice9_top = BORDER;
-    panel_opts.slice9_bottom = BORDER;
-    nt_builder_atlas_add_raw(ctx, s_panel_rgba, PANEL_W, PANEL_H, &panel_opts);
-    (void)printf("  Atlas region 'panel_bg': %dx%d slice9(%d,%d,%d,%d)\n", PANEL_W, PANEL_H, BORDER, BORDER, BORDER, BORDER);
+    panel_opts.slice9_left = PANEL_BORDER;
+    panel_opts.slice9_right = PANEL_BORDER;
+    panel_opts.slice9_top = PANEL_BORDER;
+    panel_opts.slice9_bottom = PANEL_BORDER;
+
+    panel_opts.name = "panel_beige";
+    nt_builder_atlas_add(ctx, "examples/slice9_demo/raw/panel_beige.png", &panel_opts);
+
+    panel_opts.name = "panel_blue";
+    nt_builder_atlas_add(ctx, "examples/slice9_demo/raw/panel_blue.png", &panel_opts);
+
+    panel_opts.name = "panel_brown";
+    nt_builder_atlas_add(ctx, "examples/slice9_demo/raw/panel_brown.png", &panel_opts);
+
+    /* Kenney button (384x128, 16px corners) */
+    nt_atlas_sprite_opts_t btn_opts = nt_atlas_sprite_opts_defaults();
+    btn_opts.name = "button_blue";
+    btn_opts.slice9_left = BUTTON_BORDER;
+    btn_opts.slice9_right = BUTTON_BORDER;
+    btn_opts.slice9_top = BUTTON_BORDER;
+    btn_opts.slice9_bottom = BUTTON_BORDER;
+    nt_builder_atlas_add(ctx, "examples/slice9_demo/raw/button_blue_depth.png", &btn_opts);
+
+    btn_opts.name = "button_green";
+    nt_builder_atlas_add(ctx, "examples/slice9_demo/raw/button_green_depth.png", &btn_opts);
+
+    (void)printf("  Atlas: 3 panels (100x100 s9:%d) + 2 buttons (384x128 s9:%d)\n",
+                 PANEL_BORDER, BUTTON_BORDER);
 
     /* White pixel for UI rects */
     static const uint8_t white_pixel[4] = {255, 255, 255, 255};

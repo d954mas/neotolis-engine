@@ -356,6 +356,52 @@
             "webRoot": "${workspaceFolder}/build/examples/ui_theme_demo/wasm-release-paired",
             "preLaunchTask": "Build & Serve ui_theme_demo (release)",
             "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Build Slice9 Demo Packs",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/slice9_demo/native-release/slice9_demo_build_packs.exe",
+            "args": ["build/examples/slice9_demo"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build & run slice9_demo packs (release)"
+        },
+        {
+            "name": "Debug Desktop slice9_demo",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/slice9_demo/native-debug/slice9_demo.exe",
+            "cwd": "${workspaceFolder}/build/examples/slice9_demo/native-debug",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-debug"
+        },
+        {
+            "name": "Run Desktop slice9_demo (release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/slice9_demo/native-release/slice9_demo.exe",
+            "cwd": "${workspaceFolder}/build/examples/slice9_demo/native-release",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-release"
+        },
+        {
+            "name": "Debug WASM slice9_demo",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8096/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/slice9_demo/wasm-debug-paired",
+            "preLaunchTask": "Build & Serve slice9_demo (debug)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Run WASM slice9_demo (release)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8097/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/slice9_demo/wasm-release-paired",
+            "preLaunchTask": "Build & Serve slice9_demo (release)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
         }
     ]
 }
