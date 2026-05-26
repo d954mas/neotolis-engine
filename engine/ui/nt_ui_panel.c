@@ -32,7 +32,7 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
 
     /* Unpack tint */
     Clay_Color tint = {0};
-    if (style->color_packed != 0xFFFFFFFF && style->color_packed != 0) {
+    if (style->color_packed != 0xFFFFFFFF) {
         tint.r = (float)(style->color_packed & 0xFFU);
         tint.g = (float)((style->color_packed >> 8) & 0xFFU);
         tint.b = (float)((style->color_packed >> 16) & 0xFFU);

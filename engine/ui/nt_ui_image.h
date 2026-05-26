@@ -19,6 +19,9 @@ typedef struct {
 } nt_ui_image_style_t;
 _Static_assert(sizeof(nt_ui_image_style_t) <= 16, "nt_ui_image_style_t fits in 16 B");
 
+/* Zero-init safe default: untinted white. Use instead of bare {0}. */
+static inline nt_ui_image_style_t nt_ui_image_style_defaults(void) { return (nt_ui_image_style_t){.color_packed = 0xFFFFFFFF}; }
+
 /* Leaf image widget. Atlas+region are arguments (runtime handles).
  * Style contains visual properties only (static const safe).
  * data may be NULL (= no layer, no user_data). */

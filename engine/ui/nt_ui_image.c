@@ -26,7 +26,7 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_reso
 
     /* Unpack tint to Clay_Color. 0xFFFFFFFF = untinted (pass {0,0,0,0}). */
     Clay_Color tint = {0};
-    if (style->color_packed != 0xFFFFFFFF && style->color_packed != 0) {
+    if (style->color_packed != 0xFFFFFFFF) {
         tint.r = (float)(style->color_packed & 0xFFU);
         tint.g = (float)((style->color_packed >> 8) & 0xFFU);
         tint.b = (float)((style->color_packed >> 16) & 0xFFU);
