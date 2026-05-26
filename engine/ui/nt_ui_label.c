@@ -19,6 +19,7 @@ void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const c
 
     const uint16_t clay_font_size = (uint16_t)(style->font_size + 0.5F);
     Clay_String s = {.length = (int32_t)strlen(text), .chars = text};
+    ctx->clay_decl_count++;
     CLAY_TEXT(s, CLAY_TEXT_CONFIG({
                      .userData = (void *)data,
                      .textColor = style->color,

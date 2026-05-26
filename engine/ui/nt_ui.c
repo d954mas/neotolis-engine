@@ -31,25 +31,13 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include "memory/nt_mem_scratch.h"
 #include "ui/nt_ui_internal.h"
 
-// #region custom_markers
-/* Magic value to identify engine-internal CUSTOM markers.
- * Checked before reading marker_type -- game CUSTOM commands
- * without this sentinel are forwarded to custom_fn as usual. */
-#define NT_UI_CUSTOM_MARKER_MAGIC 0xC1A4FEEDU
-
+// #region marker_types
 enum {
-    NT_UI_CUSTOM_PUSH_TRANSFORM = 1,
-    NT_UI_CUSTOM_POP_TRANSFORM = 2,
-    NT_UI_CUSTOM_PUSH_OPACITY = 3,
-    NT_UI_CUSTOM_POP_OPACITY = 4,
+    NT_UI_MARKER_PUSH_TRANSFORM = 1,
+    NT_UI_MARKER_POP_TRANSFORM = 2,
+    NT_UI_MARKER_PUSH_OPACITY = 3,
+    NT_UI_MARKER_POP_OPACITY = 4,
 };
-
-typedef struct {
-    uint32_t magic;              /* MUST be NT_UI_CUSTOM_MARKER_MAGIC */
-    uint8_t marker_type;         /* NT_UI_CUSTOM_PUSH_TRANSFORM etc. */
-    nt_ui_transform_t transform; /* only for PUSH_TRANSFORM */
-    float opacity;               /* only for PUSH_OPACITY */
-} nt_ui_custom_marker_t;
 // #endregion
 
 // #region module_state
@@ -159,7 +147,9 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     const size_t clay_bytes = (size_t)Clay_MinMemorySize();
     Clay_SetMaxElementCount(saved_default);
     Clay_SetCurrentContext(saved_ctx);
-    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + clay_bytes;
+    const uint32_t max_m = (desc->max_markers > 0U) ? desc->max_markers : desc->max_elements * 2U;
+    const size_t marker_bytes = NT_ALIGN_UP(sizeof(nt_ui_marker_t) * max_m, NT_UI_CACHE_LINE);
+    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + marker_bytes + clay_bytes;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -174,10 +164,16 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     memset(ctx, 0, sizeof(*ctx));
 
     const size_t ctx_size = NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE);
-    /* Layout: [ctx struct][Clay arena], both NT_UI_ARENA_ALIGN aligned. */
+    /* Layout: [ctx struct][markers][Clay arena]. */
     ctx->max_elements = desc->max_elements;
-    void *clay_mem = (char *)arena + ctx_size;
-    const size_t clay_size = arena_size - ctx_size;
+    const uint32_t max_m = (desc->max_markers > 0U) ? desc->max_markers : desc->max_elements * 2U;
+    const size_t marker_bytes = NT_ALIGN_UP(sizeof(nt_ui_marker_t) * max_m, NT_UI_CACHE_LINE);
+    ctx->markers = (nt_ui_marker_t *)((char *)arena + ctx_size);
+    ctx->max_markers = max_m;
+    ctx->marker_count = 0;
+    ctx->clay_decl_count = 0;
+    void *clay_mem = (char *)arena + ctx_size + marker_bytes;
+    const size_t clay_size = arena_size - ctx_size - marker_bytes;
 
     /* Stage max_elements into Clay's globals so Clay_Initialize inherits it;
      * re-null current before restore -- Clay_SetMaxElementCount writes
@@ -236,6 +232,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
 
     ctx->in_frame = true;
     g_nt_ui_inframe_ctx = ctx;
+    ctx->marker_count = 0;
+    ctx->clay_decl_count = 0;
 
     /* Must run before BeginLayout: Clay reserves debug panel width up-front. */
     Clay_SetDebugModeEnabled(ctx->debug_overlay);
@@ -883,19 +881,11 @@ static inline uint32_t apply_opacity(uint32_t color_packed, float opacity) {
     return (color_packed & 0x00FFFFFFU) | (a << 24);
 }
 
-/* Returns true if marker was handled (engine internal); false = forward to game. */
+/* Process a single side-channel marker into walker state. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static bool try_handle_custom_marker(const Clay_RenderCommand *c, nt_ui_walker_state_t *ws) {
-    const void *data = c->renderData.custom.customData;
-    if (data == NULL) {
-        return false;
-    }
-    const nt_ui_custom_marker_t *marker = (const nt_ui_custom_marker_t *)data;
-    if (marker->magic != NT_UI_CUSTOM_MARKER_MAGIC) {
-        return false;
-    }
-    switch (marker->marker_type) {
-    case NT_UI_CUSTOM_PUSH_TRANSFORM: {
+static void process_marker(const nt_ui_marker_t *marker, nt_ui_walker_state_t *ws) {
+    switch (marker->type) {
+    case NT_UI_MARKER_PUSH_TRANSFORM: {
         NT_ASSERT(ws->transform_depth < NT_UI_TRANSFORM_STACK_DEPTH_CAP && "transform stack overflow");
         const int d = ws->transform_depth;
         ws->transform_stack[d] = marker->transform;
@@ -908,36 +898,31 @@ static bool try_handle_custom_marker(const Clay_RenderCommand *c, nt_ui_walker_s
         if (marker->transform.scale != 1.0F || marker->transform.rotation != 0.0F) {
             ws->pending_center_depth = d;
         }
-        return true;
+        return;
     }
-    case NT_UI_CUSTOM_POP_TRANSFORM:
+    case NT_UI_MARKER_POP_TRANSFORM:
         NT_ASSERT(ws->transform_depth > 0 && "transform stack underflow");
         --ws->transform_depth;
         walker_recompute_transform(ws);
-        return true;
-    case NT_UI_CUSTOM_PUSH_OPACITY:
+        return;
+    case NT_UI_MARKER_PUSH_OPACITY:
         NT_ASSERT(ws->opacity_depth < NT_UI_OPACITY_STACK_DEPTH_CAP && "opacity stack overflow");
         ws->opacity_stack[ws->opacity_depth++] = marker->opacity;
         ws->accum_opacity *= marker->opacity;
-        return true;
-    case NT_UI_CUSTOM_POP_OPACITY:
+        return;
+    case NT_UI_MARKER_POP_OPACITY:
         NT_ASSERT(ws->opacity_depth > 0 && "opacity stack underflow");
         --ws->opacity_depth;
         walker_recompute_opacity(ws);
-        return true;
+        return;
     default:
-        return false;
+        NT_ASSERT(false && "unknown marker type");
+        return;
     }
 }
 
-/* Handler may bind its own pipeline; flush both. Sprite rebind is lazy
- * (deferred to first sprite-backed emit after). */
-static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, bool *sprite_pipeline_dirty, nt_ui_walker_state_t *ws) {
-    /* Check magic BEFORE reading marker_type -- game data without the
-     * sentinel is forwarded to custom_fn as usual. */
-    if (try_handle_custom_marker(c, ws)) {
-        return; /* engine marker consumed */
-    }
+/* Game CUSTOM handler: flush both renderers so handler starts clean. */
+static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, bool *sprite_pipeline_dirty) {
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
     *sprite_pipeline_dirty = true;
@@ -1064,7 +1049,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_CUSTOM: {
         Clay_RenderCommand local = *c;
         local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
-        emit_custom(ctx, &local, sprite_pipeline_dirty, ws);
+        emit_custom(ctx, &local, sprite_pipeline_dirty);
         return;
     }
     }
@@ -1147,10 +1132,18 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 #ifdef NT_TEST_ACCESS
     uint32_t unlayered_count = 0U;
 #endif
+    uint32_t mcur = 0U;    /* side-channel marker cursor */
+    uint32_t cmd_idx = 0U; /* global render-command index for marker alignment */
     int32_t i = 0;
     while (i < arr->length) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
         if (!is_segmentable(c->commandType)) {
+            /* Drain markers for non-segmentable commands too. */
+            while (mcur < ctx->marker_count && ctx->markers[mcur].before_clay_idx <= cmd_idx) {
+                process_marker(&ctx->markers[mcur], &ws);
+                ++mcur;
+            }
+            ++cmd_idx;
             dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws);
             ++i;
             continue;
@@ -1167,9 +1160,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         const int32_t seg_n = seg_end - i;
         NT_ASSERT((uint32_t)seg_n <= ctx->max_elements && "nt_ui_walk: segment size exceeds ctx->max_elements; raise desc->max_elements or split via SCISSOR");
 
-        /* Pre-pass: process CUSTOM commands to bake transform/opacity per index.
-         * Each command gets the walker state that was active at its position.
-         * Layer passes then read baked state without re-processing CUSTOM. */
+        /* Pre-pass: interleave side-channel markers with Clay commands to
+         * bake transform/opacity per render-command index. Markers fire
+         * before the Clay command whose declaration index they precede. */
         typedef struct {
             float a, b, c, d, tx, ty;
             float scale, rotation, opacity;
@@ -1180,9 +1173,12 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         uint32_t active_layers[8] = {0U};
         for (int32_t j = i; j < seg_end; ++j) {
             const Clay_RenderCommand *cc = &arr->internalArray[j];
-            if (cc->commandType == CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
-                dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws);
+            /* Drain markers whose before_clay_idx <= this command's index. */
+            while (mcur < ctx->marker_count && ctx->markers[mcur].before_clay_idx <= cmd_idx) {
+                process_marker(&ctx->markers[mcur], &ws);
+                ++mcur;
             }
+            ++cmd_idx;
             /* Resolve deferred center from first renderable with width > 0. */
             if (ws.pending_center_depth >= 0 && cc->boundingBox.width > 0 && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM && cc->commandType != CLAY_RENDER_COMMAND_TYPE_NONE &&
                 cc->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_START && cc->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
@@ -1238,6 +1234,12 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
             }
         }
         i = seg_end;
+    }
+
+    /* Drain remaining markers (pops at end of frame). */
+    while (mcur < ctx->marker_count) {
+        process_marker(&ctx->markers[mcur], &ws);
+        ++mcur;
     }
 
     nt_sprite_renderer_flush();
@@ -1298,45 +1300,38 @@ void nt_ui_set_custom_handler(nt_ui_context_t *ctx, nt_ui_custom_handler_t fn, v
 // #endregion
 
 // #region push_pop_transform_opacity
-static void emit_marker(uint8_t marker_type, const nt_ui_transform_t *transform, float opacity) {
-    nt_ui_custom_marker_t *m = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_marker_t);
-    m->magic = NT_UI_CUSTOM_MARKER_MAGIC;
-    m->marker_type = marker_type;
-    if (transform != NULL) {
-        m->transform = *transform;
-    } else {
-        m->transform = nt_ui_transform_defaults();
-    }
+static void emit_marker(nt_ui_context_t *ctx, uint8_t marker_type, const nt_ui_transform_t *transform, float opacity) {
+    NT_ASSERT(ctx->marker_count < ctx->max_markers && "marker array full; raise max_markers in nt_ui_create_desc_t");
+    nt_ui_marker_t *m = &ctx->markers[ctx->marker_count++];
+    m->type = marker_type;
+    m->transform = transform ? *transform : nt_ui_transform_defaults();
     m->opacity = opacity;
-    /* Zero-size flow element. Stays in render command order (push before
-     * content, pop after). May add parent's childGap — acceptable tradeoff
-     * vs floating which reorders and breaks the push/pop sequence. */
-    CLAY({.layout = {.sizing = {.width = CLAY_SIZING_FIXED(0), .height = CLAY_SIZING_FIXED(0)}}, .custom = {.customData = m}});
+    m->before_clay_idx = ctx->clay_decl_count;
 }
 
 void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transform) {
     NT_ASSERT(ctx != NULL && "nt_ui_push_transform: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_push_transform: must be called inside begin/end");
     NT_ASSERT(transform != NULL && "nt_ui_push_transform: transform must be non-NULL");
-    emit_marker(NT_UI_CUSTOM_PUSH_TRANSFORM, transform, 1.0F);
+    emit_marker(ctx, NT_UI_MARKER_PUSH_TRANSFORM, transform, 1.0F);
 }
 
 void nt_ui_pop_transform(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_pop_transform: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_pop_transform: must be called inside begin/end");
-    emit_marker(NT_UI_CUSTOM_POP_TRANSFORM, NULL, 1.0F);
+    emit_marker(ctx, NT_UI_MARKER_POP_TRANSFORM, NULL, 1.0F);
 }
 
 void nt_ui_push_opacity(nt_ui_context_t *ctx, float opacity) {
     NT_ASSERT(ctx != NULL && "nt_ui_push_opacity: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_push_opacity: must be called inside begin/end");
-    emit_marker(NT_UI_CUSTOM_PUSH_OPACITY, NULL, opacity);
+    emit_marker(ctx, NT_UI_MARKER_PUSH_OPACITY, NULL, opacity);
 }
 
 void nt_ui_pop_opacity(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_pop_opacity: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_pop_opacity: must be called inside begin/end");
-    emit_marker(NT_UI_CUSTOM_POP_OPACITY, NULL, 1.0F);
+    emit_marker(ctx, NT_UI_MARKER_POP_OPACITY, NULL, 1.0F);
 }
 // #endregion
 

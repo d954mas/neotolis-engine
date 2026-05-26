@@ -102,11 +102,13 @@ void nt_ui_module_shutdown(void);
 
 typedef struct {
     uint32_t max_elements; /* Clay layout-element cap. */
+    uint32_t max_markers;  /* side-channel transform/opacity markers; 0 = max_elements*2 */
 } nt_ui_create_desc_t;
 
 static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
     return (nt_ui_create_desc_t){
         .max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT,
+        .max_markers = 0,
     };
 }
 

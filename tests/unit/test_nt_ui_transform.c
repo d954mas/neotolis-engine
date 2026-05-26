@@ -51,56 +51,44 @@ static void inject_frozen_cmds(int32_t count) {
     s_fx.ctx->frozen_cmds.capacity = MAX_TEST_CMDS;
 }
 
-/* Helper: build a CUSTOM command carrying an engine marker. */
-static void make_marker_cmd(Clay_RenderCommand *c, void *marker_data) {
-    c->commandType = CLAY_RENDER_COMMAND_TYPE_CUSTOM;
-    c->boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 0, .height = 0};
-    c->renderData.custom.backgroundColor = (Clay_Color){0};
-    c->renderData.custom.customData = marker_data;
+/* Helper: inject a side-channel marker into ctx->markers[]. */
+static void inject_marker(uint8_t type, const nt_ui_transform_t *t, float opacity) {
+    nt_ui_marker_t *m = &s_fx.ctx->markers[s_fx.ctx->marker_count++];
+    m->type = type;
+    m->transform = t ? *t : nt_ui_transform_defaults();
+    m->opacity = opacity;
+    m->before_clay_idx = s_fx.ctx->clay_decl_count;
 }
 
-/* ---- Marker struct layout matches nt_ui.c internal definition ---- */
-
-#define NT_UI_CUSTOM_MARKER_MAGIC_TEST 0xC1A4FEEDU
-
-typedef struct {
-    uint32_t magic;
-    uint8_t marker_type;
-    nt_ui_transform_t transform;
-    float opacity;
-} test_marker_t;
+/* Marker type constants (match nt_ui.c internal enum). */
+#define MARKER_PUSH_TRANSFORM 1
+#define MARKER_POP_TRANSFORM 2
+#define MARKER_PUSH_OPACITY 3
+#define MARKER_POP_OPACITY 4
 
 /* ---- Tests ---- */
 
 /* Push transform, emit image, pop transform. Walk succeeds (no assert). */
 static void test_push_pop_transform_balanced(void) {
-    /* push_transform marker */
-    test_marker_t push = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 1, /* PUSH_TRANSFORM */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
-    /* pop_transform marker */
-    test_marker_t pop = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 2, /* POP_TRANSFORM */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
+    /* push_transform marker before any Clay element */
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F};
+    inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
 
-    /* IMAGE command between push/pop */
+    /* IMAGE command */
     s_image_payload.atlas = s_fx.atlas.handle;
     s_image_payload.region_index = s_fx.atlas.white_region_idx;
     s_image_payload.flip_bits = 0;
 
-    make_marker_cmd(&s_test_cmds[0], &push);
-    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
-    s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 10, .y = 10, .width = 50, .height = 50};
-    s_test_cmds[1].renderData.image.backgroundColor = (Clay_Color){0};
-    s_test_cmds[1].renderData.image.imageData = &s_image_payload;
-    make_marker_cmd(&s_test_cmds[2], &pop);
-    inject_frozen_cmds(3);
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 10, .y = 10, .width = 50, .height = 50};
+    s_test_cmds[0].renderData.image.backgroundColor = (Clay_Color){0};
+    s_test_cmds[0].renderData.image.imageData = &s_image_payload;
+    s_fx.ctx->clay_decl_count++; /* track this element */
+
+    /* pop_transform marker after the element */
+    inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
+
+    inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
@@ -111,15 +99,16 @@ static void test_push_pop_transform_balanced(void) {
 
 /* Push 9 transforms (depth > 8). Expect NT_ASSERT overflow. */
 static void test_transform_stack_overflow(void) {
-    test_marker_t pushes[9];
     for (int k = 0; k < 9; ++k) {
-        pushes[k].magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST;
-        pushes[k].marker_type = 1; /* PUSH_TRANSFORM */
-        pushes[k].transform = (nt_ui_transform_t){.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F};
-        pushes[k].opacity = 1.0F;
-        make_marker_cmd(&s_test_cmds[k], &pushes[k]);
+        nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F};
+        inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
     }
-    inject_frozen_cmds(9);
+    /* Need at least one render command for walker to process markers. */
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
+    s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
+    s_fx.ctx->clay_decl_count++;
+    inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     /* 9th push exceeds depth cap 8. */
@@ -129,97 +118,59 @@ static void test_transform_stack_overflow(void) {
 /* Push opacity 0.5, push opacity 0.5. Accumulated = 0.25. Verify
  * the emitted rect's alpha is approximately 0.25 * 255 = ~64. */
 static void test_opacity_inheritance(void) {
-    test_marker_t push_op1 = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 3, /* PUSH_OPACITY */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 0.5F,
-    };
-    test_marker_t push_op2 = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 3, /* PUSH_OPACITY */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 0.5F,
-    };
-    test_marker_t pop_op1 = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 4, /* POP_OPACITY */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
-    test_marker_t pop_op2 = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 4, /* POP_OPACITY */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
+    inject_marker(MARKER_PUSH_OPACITY, NULL, 0.5F);
+    inject_marker(MARKER_PUSH_OPACITY, NULL, 0.5F);
 
-    /* RECT command at full white between two opacity pushes. */
-    make_marker_cmd(&s_test_cmds[0], &push_op1);
-    make_marker_cmd(&s_test_cmds[1], &push_op2);
+    /* RECT command at full white */
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 100, .height = 50};
+    s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
+    s_fx.ctx->clay_decl_count++;
 
-    s_test_cmds[2].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
-    s_test_cmds[2].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 100, .height = 50};
-    s_test_cmds[2].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
+    inject_marker(MARKER_POP_OPACITY, NULL, 1.0F);
+    inject_marker(MARKER_POP_OPACITY, NULL, 1.0F);
 
-    make_marker_cmd(&s_test_cmds[3], &pop_op2);
-    make_marker_cmd(&s_test_cmds[4], &pop_op1);
-    inject_frozen_cmds(5);
+    inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* Walk succeeded; we can read the last emitted vertex color. The color
-     * was white (0xFFFFFFFF) with opacity 0.25 applied to alpha.
-     * Alpha = 255 * 0.25 = 63..64 (integer truncation). */
+    /* Walk succeeded; alpha = 255 * 0.25 = 63..64. */
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
 }
 
 /* Push transform with offset_x=10. Emit rect. Verify the rect's x
- * position is shifted by 10 (via vertex position test probe). */
+ * position is shifted by 10. */
 static void test_transform_offset_applied(void) {
-    test_marker_t push = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 1, /* PUSH_TRANSFORM */
-        .transform = {.offset_x = 10.0F, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
-    test_marker_t pop = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 2, /* POP_TRANSFORM */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
-
-    make_marker_cmd(&s_test_cmds[0], &push);
+    nt_ui_transform_t t = {.offset_x = 10.0F, .offset_y = 0, .rotation = 0, .scale = 1.0F};
+    inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
 
     /* RECT at x=20, width=40, viewport 800x600. */
-    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
-    s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
-    s_test_cmds[1].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
+    s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+    s_fx.ctx->clay_decl_count++;
 
-    make_marker_cmd(&s_test_cmds[2], &pop);
-    inject_frozen_cmds(3);
+    inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
+
+    inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    /* Rect positioned at x = 20 + 10 (offset) = 30.
-     * emit_screen_rect builds mat4 with m[12]=x, so vertex 0 pos.x should be 30.
-     * (Vertex 0 is top-left corner at m[12]+0*m[0] = 30.) */
+    /* Rect positioned at x = 20 + 10 (offset) = 30. */
     float pos[3];
     nt_sprite_renderer_test_last_emit_position(0U, pos);
     TEST_ASSERT_TRUE(pos[0] == 30.0F);
 }
 
-/* Register a game custom handler. Emit a CUSTOM command with game data
- * (customData pointing to a struct whose first 4 bytes are NOT
- * 0xC1A4FEED). Verify game handler is called, not intercepted as marker. */
+/* Register a game custom handler. Emit a CUSTOM command with game data.
+ * Verify game handler is called, not intercepted as marker. */
 static void test_game_custom_not_confused(void) {
     int sentinel = 99;
     nt_ui_set_custom_handler(s_fx.ctx, game_custom_handler, &sentinel);
 
-    /* Game data: first 4 bytes are NOT the magic. */
+    /* Game data: arbitrary non-marker data. */
     uint32_t game_data[2] = {0xDEADBEEF, 42};
 
     Clay_RenderCommand *c = &s_test_cmds[0];
@@ -238,13 +189,13 @@ static void test_game_custom_not_confused(void) {
 
 /* Unbalanced transform: push without pop -> assert at walk exit. */
 static void test_unbalanced_transform_asserts(void) {
-    test_marker_t push = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 1, /* PUSH_TRANSFORM */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
-    make_marker_cmd(&s_test_cmds[0], &push);
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F};
+    inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
+
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
+    s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
+    s_fx.ctx->clay_decl_count++;
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
@@ -253,13 +204,12 @@ static void test_unbalanced_transform_asserts(void) {
 
 /* Unbalanced opacity: push without pop -> assert at walk exit. */
 static void test_unbalanced_opacity_asserts(void) {
-    test_marker_t push = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 3, /* PUSH_OPACITY */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 0.5F,
-    };
-    make_marker_cmd(&s_test_cmds[0], &push);
+    inject_marker(MARKER_PUSH_OPACITY, NULL, 0.5F);
+
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
+    s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
+    s_fx.ctx->clay_decl_count++;
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
@@ -268,29 +218,19 @@ static void test_unbalanced_opacity_asserts(void) {
 
 /* Push transform with scale=2.0, emit rect at (20,0,40,30). Deferred
  * center captures rect center (40,15). Scale expands width 40->80,
- * height 30->60 around that center, so top-left shifts. */
+ * height 30->60 around that center. */
 static void test_scale_applied(void) {
-    test_marker_t push = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 1, /* PUSH_TRANSFORM */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 2.0F},
-        .opacity = 1.0F,
-    };
-    test_marker_t pop = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 2, /* POP_TRANSFORM */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 2.0F};
+    inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
 
-    make_marker_cmd(&s_test_cmds[0], &push);
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
+    s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+    s_fx.ctx->clay_decl_count++;
 
-    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
-    s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
-    s_test_cmds[1].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+    inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
 
-    make_marker_cmd(&s_test_cmds[2], &pop);
-    inject_frozen_cmds(3);
+    inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
@@ -307,34 +247,25 @@ static void test_scale_applied(void) {
 }
 
 /* Push transform with rotation=PI/2, emit image. Verify vertices are
- * rotated: walker negates rotation for GL Y-up, emit_image receives
- * -accum_rotation and builds a rotated matrix. */
+ * rotated. */
 static void test_rotation_applied(void) {
     const float half_pi = 3.14159265358979323846F * 0.5F;
-    test_marker_t push = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 1, /* PUSH_TRANSFORM */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = half_pi, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
-    test_marker_t pop = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 2, /* POP_TRANSFORM */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = half_pi, .scale = 1.0F};
+    inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
 
     s_image_payload.atlas = s_fx.atlas.handle;
     s_image_payload.region_index = s_fx.atlas.white_region_idx;
     s_image_payload.flip_bits = 0;
 
-    make_marker_cmd(&s_test_cmds[0], &push);
-    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
-    s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 10, .y = 10, .width = 50, .height = 50};
-    s_test_cmds[1].renderData.image.backgroundColor = (Clay_Color){0};
-    s_test_cmds[1].renderData.image.imageData = &s_image_payload;
-    make_marker_cmd(&s_test_cmds[2], &pop);
-    inject_frozen_cmds(3);
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 10, .y = 10, .width = 50, .height = 50};
+    s_test_cmds[0].renderData.image.backgroundColor = (Clay_Color){0};
+    s_test_cmds[0].renderData.image.imageData = &s_image_payload;
+    s_fx.ctx->clay_decl_count++;
+
+    inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
+
+    inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
@@ -347,12 +278,9 @@ static void test_rotation_applied(void) {
     nt_sprite_renderer_test_last_emit_position(0U, pos);
     TEST_ASSERT_TRUE(pos[0] != 10.0F || pos[1] != 540.0F);
 
-    /* Additional check: V0 and V1 should have the same x (rotation swaps axes
-     * for PI/2). For -PI/2 rotation of unit verts (0,0) and (1,0) around center,
-     * both map to the same x value since cos(-PI/2)~=0 zeroes the sx component. */
+    /* V0 and V1 x coordinates should be nearly equal (cos(-PI/2) ~ 0). */
     float pos1[3];
     nt_sprite_renderer_test_last_emit_position(1U, pos1);
-    /* V0 and V1 x coordinates should be nearly equal (cos(-PI/2) ~ 0). */
     float dx = pos1[0] - pos[0];
     if (dx < 0) {
         dx = -dx;
@@ -363,48 +291,28 @@ static void test_rotation_applied(void) {
 /* Push transform offset_x=10, push another transform scale=2.0, emit rect.
  * Accumulated: position shifted by 10 AND scaled by 2.0. */
 static void test_nested_offset_scale(void) {
-    test_marker_t push_off = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 1, /* PUSH_TRANSFORM */
-        .transform = {.offset_x = 10.0F, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
-    test_marker_t push_scale = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 1, /* PUSH_TRANSFORM */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 2.0F},
-        .opacity = 1.0F,
-    };
-    test_marker_t pop1 = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 2, /* POP_TRANSFORM */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
-    test_marker_t pop2 = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 2, /* POP_TRANSFORM */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
+    nt_ui_transform_t t_off = {.offset_x = 10.0F, .offset_y = 0, .rotation = 0, .scale = 1.0F};
+    inject_marker(MARKER_PUSH_TRANSFORM, &t_off, 1.0F);
 
-    make_marker_cmd(&s_test_cmds[0], &push_off);
-    make_marker_cmd(&s_test_cmds[1], &push_scale);
+    nt_ui_transform_t t_scale = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 2.0F};
+    inject_marker(MARKER_PUSH_TRANSFORM, &t_scale, 1.0F);
 
-    s_test_cmds[2].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
-    s_test_cmds[2].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
-    s_test_cmds[2].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
+    s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+    s_fx.ctx->clay_decl_count++;
 
-    make_marker_cmd(&s_test_cmds[3], &pop1);
-    make_marker_cmd(&s_test_cmds[4], &pop2);
-    inject_frozen_cmds(5);
+    inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
+    inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
+
+    inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
 
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
 
-    /* Affine recompute: k=0 offset_x=10 → tx=10; k=1 scale=2.0 around
+    /* Affine recompute: k=0 offset_x=10 -> tx=10; k=1 scale=2.0 around
      * deferred center (40,15). Composed: a=2, d=2, tx=-20, ty=-15.
      * dispatch: tcx=60, tcy=15, sw=80, sh=60.
      * sbb={x=20, y=-15, w=80, h=60}, world_y=555. V0=(20, 555). */
@@ -422,41 +330,19 @@ static void test_nested_offset_scale(void) {
 /* Push transform scale=1.5, push opacity 0.5, emit rect with white.
  * Verify vertex alpha is ~127 (255*0.5) AND rect is scaled. */
 static void test_opacity_scale_combined(void) {
-    test_marker_t push_scale = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 1, /* PUSH_TRANSFORM */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.5F},
-        .opacity = 1.0F,
-    };
-    test_marker_t push_op = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 3, /* PUSH_OPACITY */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 0.5F,
-    };
-    test_marker_t pop_op = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 4, /* POP_OPACITY */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
-    test_marker_t pop_scale = {
-        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
-        .marker_type = 2, /* POP_TRANSFORM */
-        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
-        .opacity = 1.0F,
-    };
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.5F};
+    inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
+    inject_marker(MARKER_PUSH_OPACITY, NULL, 0.5F);
 
-    make_marker_cmd(&s_test_cmds[0], &push_scale);
-    make_marker_cmd(&s_test_cmds[1], &push_op);
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
+    s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
+    s_fx.ctx->clay_decl_count++;
 
-    s_test_cmds[2].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
-    s_test_cmds[2].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
-    s_test_cmds[2].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
+    inject_marker(MARKER_POP_OPACITY, NULL, 1.0F);
+    inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
 
-    make_marker_cmd(&s_test_cmds[3], &pop_op);
-    make_marker_cmd(&s_test_cmds[4], &pop_scale);
-    inject_frozen_cmds(5);
+    inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
     nt_ui_walk(s_fx.ctx, &target);
