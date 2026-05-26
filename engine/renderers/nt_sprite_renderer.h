@@ -103,6 +103,19 @@ void nt_sprite_renderer_set_material(nt_material_t mat);
  * overflow is handled internally (auto flush + reopen, state preserved). */
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits);
 
+/* Emit a 9-quad slice9 image. Same vertex format as emit_region (no new pipeline).
+ *
+ *   atlas, region_index - must be READY; tombstones no-op.
+ *   x, y, w, h          - target rect in world space (top-left origin).
+ *   sl, sr, st, sb       - slice9 borders in pixels (left, right, top, bottom).
+ *   color_packed          - 0xAABBGGRR.
+ *   flip_bits             - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y.
+ *
+ * Emits 36 vertices + 54 indices (9 quads). Handles staging overflow internally.
+ * Caller MUST have called set_material first. */
+void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint8_t sl, uint8_t sr, uint8_t st, uint8_t sb, uint32_t color_packed,
+                                    uint8_t flip_bits);
+
 /* Emit an arbitrary triangle list sampling a single UV from the given
  * atlas region. Intended for solid-color shapes drawn against a
  * white-pixel region (rounded corners, ring sectors, custom fan/strip).
@@ -145,6 +158,9 @@ void nt_sprite_renderer_test_last_emit_position(uint32_t v_idx, float out[3]);
  * units (the shader normalizes to [0,1] via USHORT2N). */
 void nt_sprite_renderer_test_last_emit_texcoord(uint32_t v_idx, uint16_t out[2]);
 bool nt_sprite_renderer_test_initialized(void);
+/* Captured vertex/index count from last slice9 emit. */
+uint32_t nt_sprite_renderer_test_last_slice9_vertex_count(void);
+uint32_t nt_sprite_renderer_test_last_slice9_index_count(void);
 #endif
 // #endregion
 

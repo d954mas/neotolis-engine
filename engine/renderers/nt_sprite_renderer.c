@@ -68,6 +68,9 @@ static struct {
     uint32_t last_emit_vertex_count;
     uint32_t last_emit_index_count;
     uint32_t last_emit_first_vertex;
+    /* Captured at end of emit_slice9. */
+    uint32_t last_slice9_vertex_count;
+    uint32_t last_slice9_index_count;
 #endif
 } s_sprite;
 // #endregion
@@ -600,6 +603,203 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 }
 // #endregion
 
+// #region emit_slice9
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint8_t sl, uint8_t sr, uint8_t st, uint8_t sb, uint32_t color_packed,
+                                    uint8_t flip_bits) {
+    NT_ASSERT(s_sprite.initialized);
+    NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_slice9: invalid atlas handle");
+    NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_slice9: atlas must be READY");
+    NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_emit_slice9: call nt_sprite_renderer_set_material first");
+
+    nt_atlas_region_handles_t rh;
+    nt_atlas_get_region_handles(atlas, region_index, &rh);
+    if (rh.region->vertex_count == 0U) {
+        return; /* tombstone */
+    }
+
+    /* Slice9 regions must be non-rotated (D-54-13). */
+    NT_ASSERT(rh.region->transform == 0 && "slice9 region must have transform == 0 (no rotation)");
+
+    const uint32_t page_tex = nt_resource_get(rh.page_resource);
+    if (!ensure_current_cmd_page_texture(page_tex)) {
+        return;
+    }
+
+    /* Flip border swap (D-54-19): swap borders before computing splits. */
+    uint8_t fl = sl;
+    uint8_t fr = sr;
+    uint8_t ft = st;
+    uint8_t fb = sb;
+    if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
+        fl = sr;
+        fr = sl;
+    }
+    if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
+        ft = sb;
+        fb = st;
+    }
+
+    /* Extract bbox UVs from region vertices (u16 space). */
+    uint16_t u_min = UINT16_MAX;
+    uint16_t u_max = 0;
+    uint16_t v_min = UINT16_MAX;
+    uint16_t v_max = 0;
+    for (uint8_t i = 0; i < rh.region->vertex_count; i++) {
+        uint16_t au = rh.raw_vertices[i].atlas_u;
+        uint16_t av = rh.raw_vertices[i].atlas_v;
+        if (au < u_min) {
+            u_min = au;
+        }
+        if (au > u_max) {
+            u_max = au;
+        }
+        if (av < v_min) {
+            v_min = av;
+        }
+        if (av > v_max) {
+            v_max = av;
+        }
+    }
+
+    /* Position splits (4 x-values, 4 y-values). */
+    float xs[4] = {x, x + (float)fl, x + w - (float)fr, x + w};
+    float ys[4] = {y, y + (float)fb, y + h - (float)ft, y + h};
+
+    /* UV splits (4 u-values, 4 v-values in u16). Integer math avoids precision loss. */
+    uint16_t u_range = (uint16_t)(u_max - u_min);
+    uint16_t v_range = (uint16_t)(v_max - v_min);
+    uint16_t us[4] = {
+        u_min,
+        (uint16_t)(u_min + (((uint32_t)fl * u_range) / rh.region->source_w)),
+        (uint16_t)(u_max - (((uint32_t)fr * u_range) / rh.region->source_w)),
+        u_max,
+    };
+    uint16_t vs[4] = {
+        v_min,
+        (uint16_t)(v_min + (((uint32_t)fb * v_range) / rh.region->source_h)),
+        (uint16_t)(v_max - (((uint32_t)ft * v_range) / rh.region->source_h)),
+        v_max,
+    };
+
+    /* UV flip after split computation (D-54-19). */
+    if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
+        uint16_t t0 = us[0];
+        us[0] = us[3];
+        us[3] = t0;
+        uint16_t t1 = us[1];
+        us[1] = us[2];
+        us[2] = t1;
+    }
+    if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
+        uint16_t t0 = vs[0];
+        vs[0] = vs[3];
+        vs[3] = t0;
+        uint16_t t1 = vs[1];
+        vs[1] = vs[2];
+        vs[2] = t1;
+    }
+
+    /* Capacity check: need 36 verts + 54 indices. */
+    if (s_sprite.vertex_count + 36U > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + 54U > NT_SPRITE_RENDERER_MAX_INDICES) {
+        NT_ASSERT(s_sprite.cmd_count > 0 && "emit_slice9 called with no open cmd");
+        nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
+        nt_sprite_renderer_flush();
+        open_cmd_from_snapshot(&snapshot);
+    }
+
+    /* Unpack color. */
+    uint8_t cr = (uint8_t)(color_packed & 0xFFU);
+    uint8_t cg = (uint8_t)((color_packed >> 8) & 0xFFU);
+    uint8_t cb = (uint8_t)((color_packed >> 16) & 0xFFU);
+    uint8_t ca = (uint8_t)((color_packed >> 24) & 0xFFU);
+
+    uint32_t base = s_sprite.vertex_count;
+
+    /* Emit 9 quads: row 0..2, col 0..2. */
+    for (uint8_t row = 0; row < 3; row++) {
+        for (uint8_t col = 0; col < 3; col++) {
+            uint32_t qbase = base + ((uint32_t)((row * 3) + col) * 4U);
+            /* 4 vertices: TL, TR, BL, BR */
+            float px0 = xs[col];
+            float px1 = xs[col + 1];
+            float py0 = ys[row];
+            float py1 = ys[row + 1];
+            uint16_t tu0 = us[col];
+            uint16_t tu1 = us[col + 1];
+            uint16_t tv0 = vs[row];
+            uint16_t tv1 = vs[row + 1];
+
+            nt_sprite_vertex_t *v0 = &s_sprite.vertices[qbase + 0];
+            v0->position[0] = px0;
+            v0->position[1] = py0;
+            v0->position[2] = 0.0F;
+            v0->texcoord[0] = tu0;
+            v0->texcoord[1] = tv0;
+            v0->color[0] = cr;
+            v0->color[1] = cg;
+            v0->color[2] = cb;
+            v0->color[3] = ca;
+
+            nt_sprite_vertex_t *v1 = &s_sprite.vertices[qbase + 1];
+            v1->position[0] = px1;
+            v1->position[1] = py0;
+            v1->position[2] = 0.0F;
+            v1->texcoord[0] = tu1;
+            v1->texcoord[1] = tv0;
+            v1->color[0] = cr;
+            v1->color[1] = cg;
+            v1->color[2] = cb;
+            v1->color[3] = ca;
+
+            nt_sprite_vertex_t *v2 = &s_sprite.vertices[qbase + 2];
+            v2->position[0] = px0;
+            v2->position[1] = py1;
+            v2->position[2] = 0.0F;
+            v2->texcoord[0] = tu0;
+            v2->texcoord[1] = tv1;
+            v2->color[0] = cr;
+            v2->color[1] = cg;
+            v2->color[2] = cb;
+            v2->color[3] = ca;
+
+            nt_sprite_vertex_t *v3 = &s_sprite.vertices[qbase + 3];
+            v3->position[0] = px1;
+            v3->position[1] = py1;
+            v3->position[2] = 0.0F;
+            v3->texcoord[0] = tu1;
+            v3->texcoord[1] = tv1;
+            v3->color[0] = cr;
+            v3->color[1] = cg;
+            v3->color[2] = cb;
+            v3->color[3] = ca;
+
+            /* 6 indices: two triangles (0,1,2 / 2,1,3). */
+            uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count + ((uint32_t)((row * 3) + col) * 6U)];
+            uint16_t qb16 = (uint16_t)qbase;
+            out_idx[0] = qb16;
+            out_idx[1] = (uint16_t)(qb16 + 1U);
+            out_idx[2] = (uint16_t)(qb16 + 2U);
+            out_idx[3] = (uint16_t)(qb16 + 2U);
+            out_idx[4] = (uint16_t)(qb16 + 1U);
+            out_idx[5] = (uint16_t)(qb16 + 3U);
+        }
+    }
+
+    s_sprite.vertex_count += 36U;
+    s_sprite.index_count += 54U;
+
+#ifdef NT_TEST_ACCESS
+    s_sprite.last_slice9_vertex_count = 36U;
+    s_sprite.last_slice9_index_count = 54U;
+    /* Also update the generic last_emit so test_last_emit_position/texcoord work. */
+    s_sprite.last_emit_vertex_count = 36U;
+    s_sprite.last_emit_index_count = 54U;
+    s_sprite.last_emit_first_vertex = base;
+#endif
+}
+// #endregion
+
 // #region draw_list
 /* Phase 1: open a cmd per batch_key, stream verts into staging via
  * emit_one. Phase 2 = nt_sprite_renderer_flush. */
@@ -783,5 +983,7 @@ void nt_sprite_renderer_test_last_emit_texcoord(uint32_t v_idx, uint16_t out[2])
     out[1] = v->texcoord[1];
 }
 bool nt_sprite_renderer_test_initialized(void) { return s_sprite.initialized; }
+uint32_t nt_sprite_renderer_test_last_slice9_vertex_count(void) { return s_sprite.last_slice9_vertex_count; }
+uint32_t nt_sprite_renderer_test_last_slice9_index_count(void) { return s_sprite.last_slice9_index_count; }
 #endif
 // #endregion
