@@ -62,9 +62,10 @@ void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, c
     nt_ui_push_transform(ctx, &t);
     nt_ui_push_opacity(ctx, opacity);
 
-    /* Open plain Clay container (no IMAGE) */
+    /* Transparent RECT so Clay emits a render command with bbox for deferred center. */
     Clay__OpenElement();
     Clay__ConfigureOpenElement((Clay_ElementDeclaration){
+        .backgroundColor = {0, 0, 0, 0},
         .userData = (void *)data,
     });
 }
