@@ -627,7 +627,7 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
 // #region helper_emit_text
 /* Pure text emit: no sprite renderer knowledge. dispatch_command handles
  * the sprite_flush before and the lazy sprite rebind after. */
-static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale) {
+static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float text_scale, float text_rotation) {
     const Clay_TextRenderData *t = &c->renderData.text;
     NT_ASSERT((uint32_t)t->fontId < NT_UI_MAX_FONTS && "nt_ui TEXT: fontId >= NT_UI_MAX_FONTS");
     nt_font_t font = ctx->fonts[t->fontId];
@@ -643,9 +643,25 @@ static void emit_text(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, f
     const float center_offset = (c->boundingBox.height - text_h) * 0.5F;
     const float baseline_y = c->boundingBox.y + center_offset + ((float)(-metrics.descent) * scale);
 
-    const float m[16] = {
-        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, c->boundingBox.x, baseline_y, 0.0F, 1.0F,
-    };
+    float m[16];
+    if (text_rotation == 0.0F) {
+        const float id[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, c->boundingBox.x, baseline_y, 0, 1};
+        memcpy(m, id, sizeof m);
+    } else {
+        /* M = T(center) * R(θ) * T(text_origin - center)
+         * text_origin = (bbox.x, baseline_y), center = bbox center */
+        const float bcx = c->boundingBox.x + (c->boundingBox.width * 0.5F);
+        const float bcy = c->boundingBox.y + (c->boundingBox.height * 0.5F);
+        const float dx = c->boundingBox.x - bcx;
+        const float dy = baseline_y - bcy;
+        const float rc = cosf(text_rotation);
+        const float rs = sinf(text_rotation);
+        const float rot[16] = {
+            rc, rs, 0, 0, -rs, rc, 0, 0, 0, 0, 1, 0,
+            bcx + (rc * dx) - (rs * dy), bcy + (rs * dx) + (rc * dy), 0, 1,
+        };
+        memcpy(m, rot, sizeof m);
+    }
     const float color[4] = {
         t->textColor.r / 255.0F,
         t->textColor.g / 255.0F,
@@ -1028,7 +1044,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         Clay_RenderCommand local = *c;
         local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
         local.renderData.text.textColor.a *= ws->accum_opacity;
-        emit_text(ctx, &local, sc);
+        emit_text(ctx, &local, sc, ws->accum_rotation);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
