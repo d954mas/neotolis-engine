@@ -1044,7 +1044,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         Clay_RenderCommand local = *c;
         local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
         local.renderData.text.textColor.a *= ws->accum_opacity;
-        emit_text(ctx, &local, sc, ws->accum_rotation);
+        emit_text(ctx, &local, sc, -ws->accum_rotation);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
@@ -1062,7 +1062,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
                 local.renderData.image.backgroundColor.a *= ws->accum_opacity;
             }
         }
-        emit_image(&local, ws->accum_rotation);
+        emit_image(&local, -ws->accum_rotation);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:
