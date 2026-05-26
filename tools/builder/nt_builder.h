@@ -352,10 +352,10 @@ typedef struct {
     float origin_y;
 
     /* Slice9 borders in pixels (0 = no slice9). */
-    uint8_t slice9_left;
-    uint8_t slice9_right;
-    uint8_t slice9_top;
-    uint8_t slice9_bottom;
+    uint16_t slice9_left;
+    uint16_t slice9_right;
+    uint16_t slice9_top;
+    uint16_t slice9_bottom;
 
     /* Per-sprite overrides (0 = use atlas default). */
     uint8_t shape;        /* 0 = atlas default, NT_ATLAS_SPRITE_SHAPE_RECT/CONVEX/CONCAVE */

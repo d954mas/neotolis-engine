@@ -78,10 +78,10 @@ static void test_image_slice9_override(void) {
     const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
     TEST_ASSERT_NOT_NULL(c);
     const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
-    TEST_ASSERT_EQUAL_UINT8(4, p->slice9_override[0]);
-    TEST_ASSERT_EQUAL_UINT8(4, p->slice9_override[1]);
-    TEST_ASSERT_EQUAL_UINT8(4, p->slice9_override[2]);
-    TEST_ASSERT_EQUAL_UINT8(4, p->slice9_override[3]);
+    TEST_ASSERT_EQUAL_UINT16(4, p->slice9_override[0]);
+    TEST_ASSERT_EQUAL_UINT16(4, p->slice9_override[1]);
+    TEST_ASSERT_EQUAL_UINT16(4, p->slice9_override[2]);
+    TEST_ASSERT_EQUAL_UINT16(4, p->slice9_override[3]);
 }
 
 /* ---- Test 3: tint color unpacked to Clay_Color ---- */

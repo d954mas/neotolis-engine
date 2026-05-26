@@ -13,11 +13,11 @@
 typedef struct nt_ui_context nt_ui_context_t;
 
 typedef struct {
-    uint32_t color_packed;  /* tint (0xAABBGGRR), 0xFFFFFFFF = no tint */
-    uint8_t flip_bits;      /* NT_SPRITE_FLAG_FLIP_X | _FLIP_Y */
-    uint8_t slice9_lrtb[4]; /* override atlas default, {0,0,0,0} = use atlas */
+    uint32_t color_packed;   /* tint (0xAABBGGRR), 0xFFFFFFFF = no tint */
+    uint16_t slice9_lrtb[4]; /* override atlas default, {0,0,0,0} = use atlas */
+    uint8_t flip_bits;       /* NT_SPRITE_FLAG_FLIP_X | _FLIP_Y */
 } nt_ui_image_style_t;
-_Static_assert(sizeof(nt_ui_image_style_t) <= 12, "nt_ui_image_style_t fits in 12 B");
+_Static_assert(sizeof(nt_ui_image_style_t) <= 16, "nt_ui_image_style_t fits in 16 B");
 
 /* Leaf image widget. Atlas+region are arguments (runtime handles).
  * Style contains visual properties only (static const safe).

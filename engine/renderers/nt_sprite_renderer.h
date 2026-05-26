@@ -113,7 +113,7 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
  *
  * Emits 36 vertices + 54 indices (9 quads). Handles staging overflow internally.
  * Caller MUST have called set_material first. */
-void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint8_t sl, uint8_t sr, uint8_t st, uint8_t sb, uint32_t color_packed,
+void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
                                     uint8_t flip_bits, float rotation);
 
 /* Emit an arbitrary triangle list sampling a single UV from the given

@@ -595,10 +595,10 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
     const bool region_slice9 = (r->flags & NT_ATLAS_REGION_FLAG_SLICE9) != 0;
 
     if (has_override || region_slice9) {
-        uint8_t sl;
-        uint8_t sr;
-        uint8_t st;
-        uint8_t sb;
+        uint16_t sl;
+        uint16_t sr;
+        uint16_t st;
+        uint16_t sb;
         if (has_override) {
             sl = p->slice9_override[0];
             sr = p->slice9_override[1];
@@ -811,7 +811,8 @@ typedef struct {
     int transform_depth;
     /* 2D affine: x'=x*a+y*b+tx, y'=x*c+y*d+ty */
     float aff_a, aff_b, aff_c, aff_d, aff_tx, aff_ty;
-    float accum_scale;
+    float accum_scale_x;
+    float accum_scale_y;
     float accum_rotation;
     int pending_center_stack[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
     int pending_center_count;
@@ -829,7 +830,8 @@ static void walker_state_init(nt_ui_walker_state_t *ws) {
     ws->aff_d = 1.0F;
     ws->aff_tx = 0;
     ws->aff_ty = 0;
-    ws->accum_scale = 1.0F;
+    ws->accum_scale_x = 1.0F;
+    ws->accum_scale_y = 1.0F;
     ws->accum_rotation = 0;
     ws->pending_center_count = 0;
     ws->opacity_depth = 0;
@@ -845,36 +847,43 @@ static void walker_recompute_transform(nt_ui_walker_state_t *ws) {
     ws->aff_d = 1.0F;
     ws->aff_tx = 0;
     ws->aff_ty = 0;
-    ws->accum_scale = 1.0F;
+    ws->accum_scale_x = 1.0F;
+    ws->accum_scale_y = 1.0F;
     ws->accum_rotation = 0;
     for (int k = 0; k < ws->transform_depth; ++k) {
-        const float s = ws->transform_stack[k].scale;
+        const float sx = ws->transform_stack[k].scale_x;
+        const float sy = ws->transform_stack[k].scale_y;
         const float r = ws->transform_stack[k].rotation;
         const float cx = ws->push_center_x[k];
         const float cy = ws->push_center_y[k];
         const float ox = ws->transform_stack[k].offset_x;
         const float oy = ws->transform_stack[k].offset_y;
-        const float cs = cosf(r) * s;
-        const float sn = sinf(r) * s;
-        /* Local 2x2: la=cs, lb=-sn, lc=sn, ld=cs */
-        /* Local translate: ltx = cx - cs*cx + sn*cy + ox
-         *                  lty = cy - sn*cx - cs*cy + oy */
-        const float ltx = cx - (cs * cx) + (sn * cy) + ox;
-        const float lty = cy - (sn * cx) - (cs * cy) + oy;
+        const float cr = cosf(r);
+        const float sr = sinf(r);
+        /* Local 2x2: la=cr*sx, lb=-sr*sy, lc=sr*sx, ld=cr*sy */
+        const float la = cr * sx;
+        const float lb = -(sr * sy);
+        const float lc = sr * sx;
+        const float ld = cr * sy;
+        /* Local translate: ltx = cx - la*cx - lb*cy + ox
+         *                  lty = cy - lc*cx - ld*cy + oy */
+        const float ltx = cx - (la * cx) - (lb * cy) + ox;
+        const float lty = cy - (lc * cx) - (ld * cy) + oy;
         /* Compose: new = local * accumulated */
-        const float na = (cs * ws->aff_a) + ((-sn) * ws->aff_c);
-        const float nb = (cs * ws->aff_b) + ((-sn) * ws->aff_d);
-        const float nc = (sn * ws->aff_a) + (cs * ws->aff_c);
-        const float nd = (sn * ws->aff_b) + (cs * ws->aff_d);
-        const float ntx = (cs * ws->aff_tx) + ((-sn) * ws->aff_ty) + ltx;
-        const float nty = (sn * ws->aff_tx) + (cs * ws->aff_ty) + lty;
+        const float na = (la * ws->aff_a) + (lb * ws->aff_c);
+        const float nb = (la * ws->aff_b) + (lb * ws->aff_d);
+        const float nc = (lc * ws->aff_a) + (ld * ws->aff_c);
+        const float nd = (lc * ws->aff_b) + (ld * ws->aff_d);
+        const float ntx = (la * ws->aff_tx) + (lb * ws->aff_ty) + ltx;
+        const float nty = (lc * ws->aff_tx) + (ld * ws->aff_ty) + lty;
         ws->aff_a = na;
         ws->aff_b = nb;
         ws->aff_c = nc;
         ws->aff_d = nd;
         ws->aff_tx = ntx;
         ws->aff_ty = nty;
-        ws->accum_scale *= s;
+        ws->accum_scale_x *= sx;
+        ws->accum_scale_y *= sy;
         ws->accum_rotation += r;
     }
 }
@@ -914,7 +923,7 @@ static void process_marker(const nt_ui_marker_t *marker, nt_ui_walker_state_t *w
         /* Offset applies immediately; scale/rotation center deferred. */
         ws->aff_tx += marker->transform.offset_x;
         ws->aff_ty += marker->transform.offset_y;
-        if (marker->transform.scale != 1.0F || marker->transform.rotation != 0.0F) {
+        if (marker->transform.scale_x != 1.0F || marker->transform.scale_y != 1.0F || marker->transform.rotation != 0.0F) {
             ws->center_resolved[d] = false;
             NT_ASSERT(ws->pending_center_count < NT_UI_TRANSFORM_STACK_DEPTH_CAP && "pending center stack overflow");
             ws->pending_center_stack[ws->pending_center_count++] = d;
@@ -994,13 +1003,14 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     /* Apply accumulated 2D affine: pos' = pos * M + T.
      * Position uses full affine; size uses accum_scale (uniform).
      * Rotation negated for renderers: affine is Clay Y-down, GL is Y-up. */
-    const float sc = ws->accum_scale;
+    const float scx = ws->accum_scale_x;
+    const float scy = ws->accum_scale_y;
     const float orig_cx = c->boundingBox.x + (c->boundingBox.width * 0.5F);
     const float orig_cy = c->boundingBox.y + (c->boundingBox.height * 0.5F);
     const float tcx = (orig_cx * ws->aff_a) + (orig_cy * ws->aff_b) + ws->aff_tx;
     const float tcy = (orig_cx * ws->aff_c) + (orig_cy * ws->aff_d) + ws->aff_ty;
-    const float sw = c->boundingBox.width * sc;
-    const float sh = c->boundingBox.height * sc;
+    const float sw = c->boundingBox.width * scx;
+    const float sh = c->boundingBox.height * scy;
     Clay_BoundingBox sbb = {.x = tcx - (sw * 0.5F), .y = tcy - (sh * 0.5F), .width = sw, .height = sh};
     const float world_y = vy + vh - sbb.y - sbb.height;
 
@@ -1046,7 +1056,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         Clay_RenderCommand local = *c;
         local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
         local.renderData.text.textColor.a *= ws->accum_opacity;
-        emit_text(ctx, &local, sc, -ws->accum_rotation);
+        emit_text(ctx, &local, fmaxf(scx, scy), -ws->accum_rotation);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
@@ -1192,7 +1202,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
          * before the Clay command whose declaration index they precede. */
         typedef struct {
             float a, b, c, d, tx, ty;
-            float scale, rotation, opacity;
+            float scale_x, scale_y, rotation, opacity;
         } baked_xform_t;
         baked_xform_t *baked = (baked_xform_t *)nt_mem_scratch_alloc(sizeof(baked_xform_t) * (size_t)seg_n, _Alignof(baked_xform_t));
 
@@ -1227,7 +1237,8 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                 .d = ws.aff_d,
                 .tx = ws.aff_tx,
                 .ty = ws.aff_ty,
-                .scale = ws.accum_scale,
+                .scale_x = ws.accum_scale_x,
+                .scale_y = ws.accum_scale_y,
                 .rotation = ws.accum_rotation,
                 .opacity = ws.accum_opacity,
             };
@@ -1261,7 +1272,8 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                         ws.aff_d = baked[bi].d;
                         ws.aff_tx = baked[bi].tx;
                         ws.aff_ty = baked[bi].ty;
-                        ws.accum_scale = baked[bi].scale;
+                        ws.accum_scale_x = baked[bi].scale_x;
+                        ws.accum_scale_y = baked[bi].scale_y;
                         ws.accum_rotation = baked[bi].rotation;
                         ws.accum_opacity = baked[bi].opacity;
                         dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws);

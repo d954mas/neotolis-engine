@@ -611,11 +611,11 @@ void test_set_slice9(void) {
     TEST_ASSERT_TRUE(nt_sprite_comp_has_slice9_override(e));
     TEST_ASSERT_BITS(NT_SPRITE_FLAG_SLICE9_OV, NT_SPRITE_FLAG_SLICE9_OV, *nt_sprite_comp_flags(e));
 
-    const uint8_t *s9 = nt_sprite_comp_slice9_lrtb(e);
-    TEST_ASSERT_EQUAL_UINT8(2, s9[0]);
-    TEST_ASSERT_EQUAL_UINT8(3, s9[1]);
-    TEST_ASSERT_EQUAL_UINT8(4, s9[2]);
-    TEST_ASSERT_EQUAL_UINT8(5, s9[3]);
+    const uint16_t *s9 = nt_sprite_comp_slice9_lrtb(e);
+    TEST_ASSERT_EQUAL_UINT16(2, s9[0]);
+    TEST_ASSERT_EQUAL_UINT16(3, s9[1]);
+    TEST_ASSERT_EQUAL_UINT16(4, s9[2]);
+    TEST_ASSERT_EQUAL_UINT16(5, s9[3]);
 }
 
 /* ---- Test: reset_slice9 clears override and flag ---- */
@@ -630,11 +630,11 @@ void test_reset_slice9(void) {
     TEST_ASSERT_FALSE(nt_sprite_comp_has_slice9_override(e));
     TEST_ASSERT_BITS(NT_SPRITE_FLAG_SLICE9_OV, 0, *nt_sprite_comp_flags(e));
 
-    const uint8_t *s9 = nt_sprite_comp_slice9_lrtb(e);
-    TEST_ASSERT_EQUAL_UINT8(0, s9[0]);
-    TEST_ASSERT_EQUAL_UINT8(0, s9[1]);
-    TEST_ASSERT_EQUAL_UINT8(0, s9[2]);
-    TEST_ASSERT_EQUAL_UINT8(0, s9[3]);
+    const uint16_t *s9 = nt_sprite_comp_slice9_lrtb(e);
+    TEST_ASSERT_EQUAL_UINT16(0, s9[0]);
+    TEST_ASSERT_EQUAL_UINT16(0, s9[1]);
+    TEST_ASSERT_EQUAL_UINT16(0, s9[2]);
+    TEST_ASSERT_EQUAL_UINT16(0, s9[3]);
 }
 
 /* ---- Main ---- */

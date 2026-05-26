@@ -605,7 +605,7 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 
 // #region emit_slice9
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint8_t sl, uint8_t sr, uint8_t st, uint8_t sb, uint32_t color_packed,
+void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
                                     uint8_t flip_bits, float rotation) {
     NT_ASSERT(s_sprite.initialized);
     NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_slice9: invalid atlas handle");
@@ -629,10 +629,10 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     }
 
     /* Flip border swap (D-54-19): swap borders before computing splits. */
-    uint8_t fl = sl;
-    uint8_t fr = sr;
-    uint8_t ft = st;
-    uint8_t fb = sb;
+    uint16_t fl = sl;
+    uint16_t fr = sr;
+    uint16_t ft = st;
+    uint16_t fb = sb;
     if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
         fl = sr;
         fr = sl;

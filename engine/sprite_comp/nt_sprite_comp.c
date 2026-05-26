@@ -21,8 +21,8 @@ static uint64_t *s_region_hash;
 static uint16_t *s_region_index;   /* cached resolved index */
 static uint32_t *s_atlas_revision; /* cached atlas snapshot revision */
 static nt_sprite_resolved_region_t *s_resolved;
-static float (*s_origin)[2];        /* effective origin */
-static uint8_t (*s_slice9_lrtb)[4]; /* per-entity slice9 override [l,r,t,b] */
+static float (*s_origin)[2];         /* effective origin */
+static uint16_t (*s_slice9_lrtb)[4]; /* per-entity slice9 override [l,r,t,b] */
 static uint8_t *s_flags;
 
 /* ---- Helpers ---- */
@@ -104,7 +104,7 @@ static void sprite_default(uint16_t idx) {
     s_resolved[idx] = (nt_sprite_resolved_region_t){0};
     s_origin[idx][0] = 0.0F;
     s_origin[idx][1] = 0.0F;
-    memset(s_slice9_lrtb[idx], 0, 4);
+    memset(s_slice9_lrtb[idx], 0, sizeof(s_slice9_lrtb[0]));
     s_flags[idx] = 0;
 }
 
@@ -116,7 +116,7 @@ static void sprite_swap(uint16_t dst, uint16_t src) {
     s_resolved[dst] = s_resolved[src];
     s_origin[dst][0] = s_origin[src][0];
     s_origin[dst][1] = s_origin[src][1];
-    memcpy(s_slice9_lrtb[dst], s_slice9_lrtb[src], 4);
+    memcpy(s_slice9_lrtb[dst], s_slice9_lrtb[src], sizeof(s_slice9_lrtb[0]));
     s_flags[dst] = s_flags[src];
 }
 
@@ -283,7 +283,7 @@ void nt_sprite_comp_reset_origin(nt_entity_t entity) {
 
 /* ---- Slice9 override ---- */
 
-void nt_sprite_comp_set_slice9(nt_entity_t entity, uint8_t l, uint8_t r, uint8_t t, uint8_t b) {
+void nt_sprite_comp_set_slice9(nt_entity_t entity, uint16_t l, uint16_t r, uint16_t t, uint16_t b) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     s_slice9_lrtb[idx][0] = l;
@@ -296,11 +296,11 @@ void nt_sprite_comp_set_slice9(nt_entity_t entity, uint8_t l, uint8_t r, uint8_t
 void nt_sprite_comp_reset_slice9(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
-    memset(s_slice9_lrtb[idx], 0, 4);
+    memset(s_slice9_lrtb[idx], 0, sizeof(s_slice9_lrtb[0]));
     s_flags[idx] &= (uint8_t)~NT_SPRITE_FLAG_SLICE9_OV;
 }
 
-const uint8_t *nt_sprite_comp_slice9_lrtb(nt_entity_t entity) {
+const uint16_t *nt_sprite_comp_slice9_lrtb(nt_entity_t entity) {
     uint16_t idx = nt_comp_storage_index(&s_storage, entity);
     NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
     return s_slice9_lrtb[idx];

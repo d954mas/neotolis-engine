@@ -5200,17 +5200,17 @@ void test_atlas_slice9_flag_and_lrtb_in_output(void) {
 
     /* Slice9 region has FLAG_SLICE9 + correct lrtb */
     TEST_ASSERT_TRUE((r_panel->flags & NT_ATLAS_REGION_FLAG_SLICE9) != 0);
-    TEST_ASSERT_EQUAL_UINT8(4, r_panel->slice9_lrtb[0]);
-    TEST_ASSERT_EQUAL_UINT8(4, r_panel->slice9_lrtb[1]);
-    TEST_ASSERT_EQUAL_UINT8(4, r_panel->slice9_lrtb[2]);
-    TEST_ASSERT_EQUAL_UINT8(4, r_panel->slice9_lrtb[3]);
+    TEST_ASSERT_EQUAL_UINT16(4, r_panel->slice9_lrtb[0]);
+    TEST_ASSERT_EQUAL_UINT16(4, r_panel->slice9_lrtb[1]);
+    TEST_ASSERT_EQUAL_UINT16(4, r_panel->slice9_lrtb[2]);
+    TEST_ASSERT_EQUAL_UINT16(4, r_panel->slice9_lrtb[3]);
 
     /* Normal region has NO slice9 */
     TEST_ASSERT_EQUAL(0, (r_normal->flags & NT_ATLAS_REGION_FLAG_SLICE9));
-    TEST_ASSERT_EQUAL_UINT8(0, r_normal->slice9_lrtb[0]);
-    TEST_ASSERT_EQUAL_UINT8(0, r_normal->slice9_lrtb[1]);
-    TEST_ASSERT_EQUAL_UINT8(0, r_normal->slice9_lrtb[2]);
-    TEST_ASSERT_EQUAL_UINT8(0, r_normal->slice9_lrtb[3]);
+    TEST_ASSERT_EQUAL_UINT16(0, r_normal->slice9_lrtb[0]);
+    TEST_ASSERT_EQUAL_UINT16(0, r_normal->slice9_lrtb[1]);
+    TEST_ASSERT_EQUAL_UINT16(0, r_normal->slice9_lrtb[2]);
+    TEST_ASSERT_EQUAL_UINT16(0, r_normal->slice9_lrtb[3]);
 
     free(buf);
 }

@@ -51,11 +51,11 @@ typedef struct {
 typedef struct {
     nt_resource_t atlas;
     uint32_t region_index;
+    uint16_t slice9_override[4]; /* {0,0,0,0} = use atlas default */
     uint8_t flip_bits;
-    uint8_t slice9_override[4]; /* {0,0,0,0} = use atlas default */
     uint8_t _reserved[3];
 } nt_ui_image_payload_t;
-_Static_assert(sizeof(nt_ui_image_payload_t) == 16, "nt_ui_image_payload_t stable ABI");
+_Static_assert(sizeof(nt_ui_image_payload_t) == 20, "nt_ui_image_payload_t stable ABI");
 
 /* clay_cmd is opaque const Clay_RenderCommand * (cast back inside handler).
  * Handler owns the GL state it touches: if you change viewport or scissor,
@@ -143,11 +143,12 @@ typedef struct {
     float offset_x; /* slide-in/out, additive */
     float offset_y;
     float rotation; /* radians, additive */
-    float scale;    /* 1.0 = default, multiplicative */
+    float scale_x;  /* 1.0 = default, multiplicative */
+    float scale_y;  /* 1.0 = default, multiplicative */
 } nt_ui_transform_t;
 
 /* Identity transform (MUST use this, not zero-init -- scale=0 makes invisible). */
-static inline nt_ui_transform_t nt_ui_transform_defaults(void) { return (nt_ui_transform_t){.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F}; }
+static inline nt_ui_transform_t nt_ui_transform_defaults(void) { return (nt_ui_transform_t){.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F}; }
 
 #define NT_UI_TRANSFORM_STACK_DEPTH_CAP 8
 #define NT_UI_OPACITY_STACK_DEPTH_CAP 8

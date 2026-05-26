@@ -63,12 +63,12 @@ void nt_sprite_comp_reset_origin(nt_entity_t entity);
 /* ---- Slice9 override (mirrors origin override pattern) ---- */
 
 /* Per-entity slice9 override. Setting {0,0,0,0} is valid (clears to atlas default). */
-void nt_sprite_comp_set_slice9(nt_entity_t entity, uint8_t l, uint8_t r, uint8_t t, uint8_t b);
+void nt_sprite_comp_set_slice9(nt_entity_t entity, uint16_t l, uint16_t r, uint16_t t, uint16_t b);
 void nt_sprite_comp_reset_slice9(nt_entity_t entity);
 
 /* Read back current effective slice9 (override if set, else zero).
- * Returns pointer to 4-byte [l,r,t,b] in SoA storage. */
-const uint8_t *nt_sprite_comp_slice9_lrtb(nt_entity_t entity);
+ * Returns pointer to 4-element uint16 [l,r,t,b] in SoA storage. */
+const uint16_t *nt_sprite_comp_slice9_lrtb(nt_entity_t entity);
 bool nt_sprite_comp_has_slice9_override(nt_entity_t entity);
 
 /* ---- Flip control ---- */

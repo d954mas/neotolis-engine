@@ -355,7 +355,7 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
     /* Per-sprite data: hash + origin + overrides (in add-order, NOT sorted —
      * cached placements store sprite_index in add-order, so the key must be
      * order-sensitive to avoid mismatching placements after reordering). */
-    enum { PER_SPRITE_SIZE = sizeof(uint64_t) + (2 * sizeof(float)) + 7 };
+    enum { PER_SPRITE_SIZE = sizeof(uint64_t) + (2 * sizeof(float)) + (4 * sizeof(uint16_t)) + 3 };
     size_t per_sprite_bytes = (size_t)sprite_count * PER_SPRITE_SIZE;
     uint8_t *sprite_buf = (uint8_t *)malloc(per_sprite_bytes);
     NT_BUILD_ASSERT(sprite_buf && "compute_atlas_cache_key: alloc failed");
@@ -365,13 +365,13 @@ static uint64_t compute_atlas_cache_key(const NtAtlasSpriteInput *sprites, uint3
         memcpy(sprite_buf + off + sizeof(uint64_t), &sprites[i].origin_x, sizeof(float));
         memcpy(sprite_buf + off + sizeof(uint64_t) + sizeof(float), &sprites[i].origin_y, sizeof(float));
         size_t ov_off = off + sizeof(uint64_t) + (2 * sizeof(float));
-        sprite_buf[ov_off + 0] = sprites[i].slice9_left;
-        sprite_buf[ov_off + 1] = sprites[i].slice9_right;
-        sprite_buf[ov_off + 2] = sprites[i].slice9_top;
-        sprite_buf[ov_off + 3] = sprites[i].slice9_bottom;
-        sprite_buf[ov_off + 4] = sprites[i].shape_override;
-        sprite_buf[ov_off + 5] = sprites[i].rotate_override;
-        sprite_buf[ov_off + 6] = sprites[i].max_verts_override;
+        memcpy(sprite_buf + ov_off, &sprites[i].slice9_left, sizeof(uint16_t));
+        memcpy(sprite_buf + ov_off + 2, &sprites[i].slice9_right, sizeof(uint16_t));
+        memcpy(sprite_buf + ov_off + 4, &sprites[i].slice9_top, sizeof(uint16_t));
+        memcpy(sprite_buf + ov_off + 6, &sprites[i].slice9_bottom, sizeof(uint16_t));
+        sprite_buf[ov_off + 8] = sprites[i].shape_override;
+        sprite_buf[ov_off + 9] = sprites[i].rotate_override;
+        sprite_buf[ov_off + 10] = sprites[i].max_verts_override;
     }
 
     /* Build key buffer: per-sprite data + serialized opts */
@@ -503,7 +503,7 @@ static bool atlas_cache_read(const char *cache_dir, uint64_t cache_key, uint32_t
 
     // NOLINTNEXTLINE(clang-analyzer-unix.Malloc) — no allocation alive at this point; analyzer false positive on the short-circuit OR path
     if (fread(out_page_w, sizeof(uint32_t), page_count_val, f) != page_count_val || fread(out_page_h, sizeof(uint32_t), page_count_val, f) != page_count_val) {
-        (void)fclose(f);
+        (void)fclose(f); // NOLINT(clang-analyzer-unix.Malloc)
         return false;
     }
 
@@ -1805,10 +1805,10 @@ static void pipeline_serialize(AtlasPipeline *p) {
         NT_BUILD_ASSERT(((reg->flags & NT_ATLAS_REGION_FLAG_QUAD_MASK) == 0 || (reg->vertex_count == 4 && reg->index_count == 6)) &&
                         "atlas region: QUAD_* flag set but vertex_count/index_count don't match — builder bug");
         /* Slice9 borders */
-        uint8_t sl = p->sprites[i].slice9_left;
-        uint8_t sr = p->sprites[i].slice9_right;
-        uint8_t st = p->sprites[i].slice9_top;
-        uint8_t sb = p->sprites[i].slice9_bottom;
+        uint16_t sl = p->sprites[i].slice9_left;
+        uint16_t sr = p->sprites[i].slice9_right;
+        uint16_t st = p->sprites[i].slice9_top;
+        uint16_t sb = p->sprites[i].slice9_bottom;
         if (sl || sr || st || sb) {
             NT_BUILD_ASSERT((uint32_t)sl + (uint32_t)sr < p->sprites[i].width && "slice9: left + right >= source width");
             NT_BUILD_ASSERT((uint32_t)st + (uint32_t)sb < p->sprites[i].height && "slice9: top + bottom >= source height");

@@ -196,7 +196,7 @@ static void declare_animated_panel(void) {
     float opacity = 1.0F;
 
     if (s_anim_scale) {
-        t.scale = 0.8F + (0.2F * (sinf(s_time * 2.0F) + 1.0F));
+        t.scale_x = t.scale_y = 0.8F + (0.2F * (sinf(s_time * 2.0F) + 1.0F));
     }
     if (s_anim_position) {
         t.offset_x = sinf(s_time * 1.0F) * 50.0F;
@@ -241,7 +241,7 @@ static void declare_nested_panels(void) {
         outer_t.offset_x = sinf(s_time * 1.0F) * 40.0F;
     }
     if (s_anim_scale) {
-        outer_t.scale = 0.9F + (0.1F * (sinf(s_time * 2.5F) + 1.0F));
+        outer_t.scale_x = outer_t.scale_y = 0.9F + (0.1F * (sinf(s_time * 2.5F) + 1.0F));
     }
 
     /* Middle: fading */

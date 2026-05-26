@@ -22,7 +22,7 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_reso
         .region_index = region_index,
         .flip_bits = style->flip_bits,
     };
-    memcpy(p->slice9_override, style->slice9_lrtb, 4);
+    memcpy(p->slice9_override, style->slice9_lrtb, sizeof(p->slice9_override));
 
     /* Unpack tint to Clay_Color. 0xFFFFFFFF = untinted (pass {0,0,0,0}). */
     Clay_Color tint = {0};

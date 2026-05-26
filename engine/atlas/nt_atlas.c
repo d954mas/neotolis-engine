@@ -180,7 +180,8 @@ static void translate_region(nt_texture_region_t *dst, const NtAtlasRegion *src)
     dst->page_index = src->page_index;
     dst->transform = src->transform;
     dst->flags = src->flags;
-    memcpy(dst->slice9_lrtb, src->slice9_lrtb, 4);
+    dst->_pad0 = 0;
+    memcpy(dst->slice9_lrtb, src->slice9_lrtb, sizeof(dst->slice9_lrtb));
     memset(dst->_pad, 0, sizeof(dst->_pad));
 }
 // #endregion

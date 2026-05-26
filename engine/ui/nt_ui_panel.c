@@ -28,7 +28,7 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
         .region_index = region_index,
         .flip_bits = style->flip_bits,
     };
-    memcpy(p->slice9_override, style->slice9_lrtb, 4);
+    memcpy(p->slice9_override, style->slice9_lrtb, sizeof(p->slice9_override));
 
     /* Unpack tint */
     Clay_Color tint = {0};

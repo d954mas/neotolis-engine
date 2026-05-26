@@ -79,7 +79,7 @@ static void track_clay_element_cmd(int cmd_idx) {
 /* Push transform, emit image, pop transform. Walk succeeds (no assert). */
 static void test_push_pop_transform_balanced(void) {
     /* push_transform marker before any Clay element */
-    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F};
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F};
     inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
 
     /* IMAGE command */
@@ -108,7 +108,7 @@ static void test_push_pop_transform_balanced(void) {
 /* Push 9 transforms (depth > 8). Expect NT_ASSERT overflow. */
 static void test_transform_stack_overflow(void) {
     for (int k = 0; k < 9; ++k) {
-        nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F};
+        nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F};
         inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
     }
     /* Need at least one render command for walker to process markers. */
@@ -150,7 +150,7 @@ static void test_opacity_inheritance(void) {
 /* Push transform with offset_x=10. Emit rect. Verify the rect's x
  * position is shifted by 10. */
 static void test_transform_offset_applied(void) {
-    nt_ui_transform_t t = {.offset_x = 10.0F, .offset_y = 0, .rotation = 0, .scale = 1.0F};
+    nt_ui_transform_t t = {.offset_x = 10.0F, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F};
     inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
 
     /* RECT at x=20, width=40, viewport 800x600. */
@@ -197,7 +197,7 @@ static void test_game_custom_not_confused(void) {
 
 /* Unbalanced transform: push without pop -> assert at walk exit. */
 static void test_unbalanced_transform_asserts(void) {
-    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F};
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F};
     inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
 
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
@@ -228,7 +228,7 @@ static void test_unbalanced_opacity_asserts(void) {
  * center captures rect center (40,15). Scale expands width 40->80,
  * height 30->60 around that center. */
 static void test_scale_applied(void) {
-    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 2.0F};
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 2.0F, .scale_y = 2.0F};
     inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
 
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
@@ -258,7 +258,7 @@ static void test_scale_applied(void) {
  * rotated. */
 static void test_rotation_applied(void) {
     const float half_pi = 3.14159265358979323846F * 0.5F;
-    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = half_pi, .scale = 1.0F};
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = half_pi, .scale_x = 1.0F, .scale_y = 1.0F};
     inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
 
     s_image_payload.atlas = s_fx.atlas.handle;
@@ -299,10 +299,10 @@ static void test_rotation_applied(void) {
 /* Push transform offset_x=10, push another transform scale=2.0, emit rect.
  * Accumulated: position shifted by 10 AND scaled by 2.0. */
 static void test_nested_offset_scale(void) {
-    nt_ui_transform_t t_off = {.offset_x = 10.0F, .offset_y = 0, .rotation = 0, .scale = 1.0F};
+    nt_ui_transform_t t_off = {.offset_x = 10.0F, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F};
     inject_marker(MARKER_PUSH_TRANSFORM, &t_off, 1.0F);
 
-    nt_ui_transform_t t_scale = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 2.0F};
+    nt_ui_transform_t t_scale = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 2.0F, .scale_y = 2.0F};
     inject_marker(MARKER_PUSH_TRANSFORM, &t_scale, 1.0F);
 
     s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
@@ -338,7 +338,7 @@ static void test_nested_offset_scale(void) {
 /* Push transform scale=1.5, push opacity 0.5, emit rect with white.
  * Verify vertex alpha is ~127 (255*0.5) AND rect is scaled. */
 static void test_opacity_scale_combined(void) {
-    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.5F};
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 1.5F, .scale_y = 1.5F};
     inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
     inject_marker(MARKER_PUSH_OPACITY, NULL, 0.5F);
 
@@ -378,7 +378,7 @@ static void test_opacity_scale_combined(void) {
  * use Clay's own element counter (layoutElements.length) so index
  * alignment is correct regardless of tracked vs untracked elements. */
 static void test_game_clay_elements_shift_index(void) {
-    nt_ui_transform_t t = {.offset_x = 10.0F, .offset_y = 0, .rotation = 0, .scale = 1.0F};
+    nt_ui_transform_t t = {.offset_x = 10.0F, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F};
     inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
 
     /* Cmd 0: game RECT (Clay element, tracked via layoutElements.length). */
@@ -419,10 +419,10 @@ static void test_game_clay_elements_shift_index(void) {
 /* Two consecutive push_transforms with scale!=1.0 before a single renderable.
  * Both scales compose and center resolves from the renderable's bbox. */
 static void test_nested_group_scale(void) {
-    nt_ui_transform_t t1 = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 2.0F};
+    nt_ui_transform_t t1 = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 2.0F, .scale_y = 2.0F};
     inject_marker(MARKER_PUSH_TRANSFORM, &t1, 1.0F);
 
-    nt_ui_transform_t t2 = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 3.0F};
+    nt_ui_transform_t t2 = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 3.0F, .scale_y = 3.0F};
     inject_marker(MARKER_PUSH_TRANSFORM, &t2, 1.0F);
 
     /* Single renderable: rect at (20,0,40,30). */
@@ -454,7 +454,7 @@ static void test_nested_group_scale(void) {
 /* push_transform(scale=2.0) -> pop_transform with no renderable in between.
  * Center never resolved -> NT_ASSERT fires on pop. */
 static void test_empty_panel_scale_asserts(void) {
-    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 2.0F};
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 2.0F, .scale_y = 2.0F};
     inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
 
     /* No renderable: just pop immediately. */

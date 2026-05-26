@@ -2148,18 +2148,18 @@ void test_atlas_slice9_roundtrip(void) {
 
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
     nt_atlas_slice9_t s9 = nt_atlas_test_get_region_slice9_raw(ad, 0);
-    TEST_ASSERT_EQUAL_UINT8(4, s9.left);
-    TEST_ASSERT_EQUAL_UINT8(4, s9.right);
-    TEST_ASSERT_EQUAL_UINT8(6, s9.top);
-    TEST_ASSERT_EQUAL_UINT8(6, s9.bottom);
+    TEST_ASSERT_EQUAL_UINT16(4, s9.left);
+    TEST_ASSERT_EQUAL_UINT16(4, s9.right);
+    TEST_ASSERT_EQUAL_UINT16(6, s9.top);
+    TEST_ASSERT_EQUAL_UINT16(6, s9.bottom);
     TEST_ASSERT_TRUE(s9.has_slice9);
 
     /* Verify the raw region struct also has the data */
     const nt_texture_region_t *r = nt_atlas_test_get_region_raw(ad, 0);
-    TEST_ASSERT_EQUAL_UINT8(4, r->slice9_lrtb[0]);
-    TEST_ASSERT_EQUAL_UINT8(4, r->slice9_lrtb[1]);
-    TEST_ASSERT_EQUAL_UINT8(6, r->slice9_lrtb[2]);
-    TEST_ASSERT_EQUAL_UINT8(6, r->slice9_lrtb[3]);
+    TEST_ASSERT_EQUAL_UINT16(4, r->slice9_lrtb[0]);
+    TEST_ASSERT_EQUAL_UINT16(4, r->slice9_lrtb[1]);
+    TEST_ASSERT_EQUAL_UINT16(6, r->slice9_lrtb[2]);
+    TEST_ASSERT_EQUAL_UINT16(6, r->slice9_lrtb[3]);
     TEST_ASSERT_TRUE(r->flags & NT_ATLAS_REGION_FLAG_SLICE9);
 }
 

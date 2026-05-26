@@ -89,7 +89,7 @@ static void test_panel_begin_end_balanced(void) {
 
 /* ---- Test 2: panel with explicit transform ---- */
 static void test_panel_with_transform(void) {
-    nt_ui_transform_t t = {.offset_x = 10.0F, .offset_y = 5.0F, .rotation = 0, .scale = 1.0F};
+    nt_ui_transform_t t = {.offset_x = 10.0F, .offset_y = 5.0F, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F};
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) {

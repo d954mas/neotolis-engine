@@ -39,22 +39,23 @@ typedef struct {
  *
  * Total: 48 bytes on 64-bit (uint64_t alignment drives 8-byte boundary). */
 typedef struct {
-    uint64_t name_hash;     /*  0: xxh64 of region name (or NT_ATLAS_TOMBSTONE_HASH) */
-    uint32_t vertex_start;  /*  8: index into nt_atlas_data_t.vertices[] */
-    uint32_t index_start;   /* 12: index into nt_atlas_data_t.indices[]  */
-    float origin_x;         /* 16: normalized pivot 0..1 (may lie outside) */
-    float origin_y;         /* 20 */
-    uint16_t source_w;      /* 24: pre-trim source image width */
-    uint16_t source_h;      /* 26 */
-    int16_t trim_offset_x;  /* 28: pixels stripped from left edge */
-    int16_t trim_offset_y;  /* 30 */
-    uint8_t vertex_count;   /* 32: 0 = tombstone (and also degenerate) */
-    uint8_t index_count;    /* 33 */
-    uint8_t page_index;     /* 34 */
-    uint8_t transform;      /* 35: orientation — bit0=flipH, bit1=flipV, bit2=diagonal */
-    uint8_t flags;          /* 36: builder-authored render hints */
-    uint8_t slice9_lrtb[4]; /* 37: slice9 borders [left, right, top, bottom]; all zero = no slice9 */
-    uint8_t _pad[3];        /* 41: alignment padding to 48 bytes */
+    uint64_t name_hash;      /*  0: xxh64 of region name (or NT_ATLAS_TOMBSTONE_HASH) */
+    uint32_t vertex_start;   /*  8: index into nt_atlas_data_t.vertices[] */
+    uint32_t index_start;    /* 12: index into nt_atlas_data_t.indices[]  */
+    float origin_x;          /* 16: normalized pivot 0..1 (may lie outside) */
+    float origin_y;          /* 20 */
+    uint16_t source_w;       /* 24: pre-trim source image width */
+    uint16_t source_h;       /* 26 */
+    int16_t trim_offset_x;   /* 28: pixels stripped from left edge */
+    int16_t trim_offset_y;   /* 30 */
+    uint8_t vertex_count;    /* 32: 0 = tombstone (and also degenerate) */
+    uint8_t index_count;     /* 33 */
+    uint8_t page_index;      /* 34 */
+    uint8_t transform;       /* 35: orientation — bit0=flipH, bit1=flipV, bit2=diagonal */
+    uint8_t flags;           /* 36: builder-authored render hints */
+    uint8_t _pad0;           /* 37: alignment padding for uint16 */
+    uint16_t slice9_lrtb[4]; /* 38: slice9 borders [left, right, top, bottom]; all zero = no slice9 */
+    uint8_t _pad[2];         /* 46: alignment padding to 48 bytes */
 } nt_texture_region_t;
 
 /* ---- Public API ---- */
@@ -126,10 +127,10 @@ void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_
 /* Return slice9 LRTB borders for a region. All zeros = no slice9.
  * Asserts index < region_count. */
 typedef struct {
-    uint8_t left;
-    uint8_t right;
-    uint8_t top;
-    uint8_t bottom;
+    uint16_t left;
+    uint16_t right;
+    uint16_t top;
+    uint16_t bottom;
     bool has_slice9; /* true if NT_ATLAS_REGION_FLAG_SLICE9 set */
 } nt_atlas_slice9_t;
 

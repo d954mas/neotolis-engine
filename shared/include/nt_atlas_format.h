@@ -50,33 +50,33 @@ _Static_assert(sizeof(NtAtlasHeader) == 28, "NtAtlasHeader must be 28 bytes");
 
 #pragma pack(push, 1)
 typedef struct {
-    uint64_t name_hash;     /*  0: xxh64 of region name */
-    uint16_t source_w;      /*  8: original image width in pixels (pre-trim) */
-    uint16_t source_h;      /* 10: original image height in pixels (pre-trim) */
-    int16_t trim_offset_x;  /* 12: pixels stripped from the left edge during alpha trim
-                             *     (add to NtAtlasVertex.local_x to get source-image space X) */
-    int16_t trim_offset_y;  /* 14: pixels stripped from the BOTTOM edge in y-up source space (v5+) */
-    float origin_x;         /* 16: pivot X, normalized over source_w (NOT trim_w).
-                             *     0.0 = left edge, 0.5 = centre (default), 1.0 = right edge.
-                             *     Values outside [0, 1] are allowed — the pivot may lie outside
-                             *     the frame (weapons, effects, motion-stabilised sprites).
-                             *     Runtime resolves: pivot_px_x = origin_x * source_w.
-                             *     Source-space (not trim-space) gives stable pivots across
-                             *     animation frames where trim bounds vary. */
-    float origin_y;         /* 20: pivot Y, normalized over source_h, y-up (v5+) — 0=bottom, 1=top */
-    uint32_t vertex_start;  /* 24: index into vertex array (uint32 in v3, was uint16 in v2) */
-    uint32_t index_start;   /* 28: index into the index array (uint32 in v3, was uint16 in v2) */
-    uint8_t vertex_count;   /* 32: number of vertices for this region (max 16 per builder limit) */
-    uint8_t page_index;     /* 33: which texture page this region belongs to */
-    uint8_t transform;      /* 34: orientation flags — bit0=flipH, bit1=flipV, bit2=diagonal.
-                             *     Apply order: diagonal → flipH → flipV. 0 = identity. */
-    uint8_t index_count;    /* 35: triangle indices for this region. uint8_t caps at 255 =
-                             *     85 triangles; with max_vertices=16 the ear-clip/fan output
-                             *     is at most (16-2)*3 = 42 indices, so 1 byte is sufficient. */
-    uint8_t flags;          /* 36: builder-authored render hints, see NT_ATLAS_REGION_FLAG_* */
-    uint8_t slice9_lrtb[4]; /* 37: slice9 borders [left, right, top, bottom]; all zero = no slice9 */
-    uint8_t _reserved2[7];  /* 41: must be zero */
-} NtAtlasRegion;            /* 48 bytes (v6) — runtime mirror: nt_texture_region_t (nt_atlas.h, different field order) */
+    uint64_t name_hash;      /*  0: xxh64 of region name */
+    uint16_t source_w;       /*  8: original image width in pixels (pre-trim) */
+    uint16_t source_h;       /* 10: original image height in pixels (pre-trim) */
+    int16_t trim_offset_x;   /* 12: pixels stripped from the left edge during alpha trim
+                              *     (add to NtAtlasVertex.local_x to get source-image space X) */
+    int16_t trim_offset_y;   /* 14: pixels stripped from the BOTTOM edge in y-up source space (v5+) */
+    float origin_x;          /* 16: pivot X, normalized over source_w (NOT trim_w).
+                              *     0.0 = left edge, 0.5 = centre (default), 1.0 = right edge.
+                              *     Values outside [0, 1] are allowed — the pivot may lie outside
+                              *     the frame (weapons, effects, motion-stabilised sprites).
+                              *     Runtime resolves: pivot_px_x = origin_x * source_w.
+                              *     Source-space (not trim-space) gives stable pivots across
+                              *     animation frames where trim bounds vary. */
+    float origin_y;          /* 20: pivot Y, normalized over source_h, y-up (v5+) — 0=bottom, 1=top */
+    uint32_t vertex_start;   /* 24: index into vertex array (uint32 in v3, was uint16 in v2) */
+    uint32_t index_start;    /* 28: index into the index array (uint32 in v3, was uint16 in v2) */
+    uint8_t vertex_count;    /* 32: number of vertices for this region (max 16 per builder limit) */
+    uint8_t page_index;      /* 33: which texture page this region belongs to */
+    uint8_t transform;       /* 34: orientation flags — bit0=flipH, bit1=flipV, bit2=diagonal.
+                              *     Apply order: diagonal → flipH → flipV. 0 = identity. */
+    uint8_t index_count;     /* 35: triangle indices for this region. uint8_t caps at 255 =
+                              *     85 triangles; with max_vertices=16 the ear-clip/fan output
+                              *     is at most (16-2)*3 = 42 indices, so 1 byte is sufficient. */
+    uint8_t flags;           /* 36: builder-authored render hints, see NT_ATLAS_REGION_FLAG_* */
+    uint16_t slice9_lrtb[4]; /* 37: slice9 borders [left, right, top, bottom]; all zero = no slice9 */
+    uint8_t _reserved2[3];   /* 45: must be zero */
+} NtAtlasRegion;             /* 48 bytes (v6) — runtime mirror: nt_texture_region_t (nt_atlas.h, different field order) */
 #pragma pack(pop)
 _Static_assert(sizeof(NtAtlasRegion) == 48, "NtAtlasRegion must be 48 bytes");
 
