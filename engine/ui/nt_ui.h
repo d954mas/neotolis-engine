@@ -153,9 +153,12 @@ static inline nt_ui_transform_t nt_ui_transform_defaults(void) { return (nt_ui_t
 #define NT_UI_TRANSFORM_STACK_DEPTH_CAP 8
 #define NT_UI_OPACITY_STACK_DEPTH_CAP 8
 
-/* Push/pop during declaration phase (between begin/end). Walker applies
- * accumulated transform to all render commands between push and pop.
- * Stack depth <= 8. */
+/* Push/pop during declaration phase (between begin/end). Stack depth <= 8.
+ * Offset: applies to all element types (position shift).
+ * Scale: applies to all element types (position + size).
+ * Rotation: IMAGE and TEXT only. RECT/BORDER render at transformed position
+ *   but stay axis-aligned. SCISSOR ignores transform entirely.
+ * Opacity (via push_opacity): applies to all element types. */
 void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transform);
 void nt_ui_pop_transform(nt_ui_context_t *ctx);
 

@@ -1,6 +1,6 @@
 #include "renderers/nt_sprite_renderer.h"
 
-#include <math.h>
+#include "core/nt_builtins.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -512,12 +512,13 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
             st = r->slice9_lrtb[2];
             sb = r->slice9_lrtb[3];
         }
-        /* Extract position + scale from world matrix; skip rotation (pass 0). */
+        /* Extract position, scale, and rotation from world matrix. */
         const float *m = tv->world_matrices[t_idx];
         const float src_w = (float)r->source_w * ipu;
         const float src_h = (float)r->source_h * ipu;
         const float sx = sqrtf((m[0] * m[0]) + (m[1] * m[1]));
         const float sy = sqrtf((m[4] * m[4]) + (m[5] * m[5]));
+        const float rot = atan2f(m[1], m[0]);
         const float w = sx * src_w;
         const float h = sy * src_h;
         /* Pivot offset: same logic as emit_region_resolved */
@@ -525,7 +526,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         const float oy = origin_y * src_h;
         const float x = m[12] - (sx * ox);
         const float y = m[13] - (sy * oy);
-        nt_sprite_renderer_emit_slice9(atlas, sv->region_index[s_idx], x, y, w, h, sl, sr, st, sb, dv->colors_packed[d_idx], flip_bits, 0.0F);
+        nt_sprite_renderer_emit_slice9(atlas, sv->region_index[s_idx], x, y, w, h, sl, sr, st, sb, dv->colors_packed[d_idx], flip_bits, rot);
         return;
     }
 

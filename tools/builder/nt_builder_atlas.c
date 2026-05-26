@@ -877,6 +877,14 @@ static void pipeline_alpha_trim(AtlasPipeline *p) {
         p->alpha_planes[i] = alpha_plane_extract(p->sprites[i].rgba, p->sprites[i].width, p->sprites[i].height);
         bool has_pixels = alpha_trim(p->alpha_planes[i], p->sprites[i].width, p->sprites[i].height, p->opts->alpha_threshold, &p->trim_x[i], &p->trim_y[i], &p->trim_w[i], &p->trim_h[i]);
         NT_BUILD_ASSERT(has_pixels && "pipeline_alpha_trim: sprite is fully transparent");
+        /* Slice9 requires untrimmed source rect — runtime asserts trim_offset == 0 */
+        bool has_s9 = p->sprites[i].slice9_left || p->sprites[i].slice9_right || p->sprites[i].slice9_top || p->sprites[i].slice9_bottom;
+        if (has_s9) {
+            p->trim_x[i] = 0;
+            p->trim_y[i] = 0;
+            p->trim_w[i] = p->sprites[i].width;
+            p->trim_h[i] = p->sprites[i].height;
+        }
     }
 }
 
@@ -926,7 +934,7 @@ static void pipeline_dedup(AtlasPipeline *p) {
             const NtAtlasSpriteInput *so = &p->sprites[orig];
             /* Different slice9/shape/rotate constraints require separate placement */
             bool meta_match = sc->slice9_left == so->slice9_left && sc->slice9_right == so->slice9_right && sc->slice9_top == so->slice9_top && sc->slice9_bottom == so->slice9_bottom &&
-                              sc->shape_override == so->shape_override && sc->rotate_override == so->rotate_override;
+                              sc->shape_override == so->shape_override && sc->rotate_override == so->rotate_override && sc->max_verts_override == so->max_verts_override;
             if (meta_match && p->trim_w[curr_idx] == p->trim_w[orig] && p->trim_h[curr_idx] == p->trim_h[orig]) {
                 bool pixels_match = true;
                 uint32_t tw = p->trim_w[curr_idx];
