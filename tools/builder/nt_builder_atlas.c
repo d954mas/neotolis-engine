@@ -921,16 +921,21 @@ static void pipeline_dedup(AtlasPipeline *p) {
             while (p->dedup_map[orig] >= 0) {
                 orig = (uint32_t)p->dedup_map[orig];
             }
-            /* Verify trimmed pixels match (dims + byte-level comparison) */
-            if (p->trim_w[curr_idx] == p->trim_w[orig] && p->trim_h[curr_idx] == p->trim_h[orig]) {
+            /* Verify trimmed pixels + pack-affecting metadata match */
+            const NtAtlasSpriteInput *sc = &p->sprites[curr_idx];
+            const NtAtlasSpriteInput *so = &p->sprites[orig];
+            /* Different slice9/shape/rotate constraints require separate placement */
+            bool meta_match = sc->slice9_left == so->slice9_left && sc->slice9_right == so->slice9_right && sc->slice9_top == so->slice9_top && sc->slice9_bottom == so->slice9_bottom &&
+                              sc->shape_override == so->shape_override && sc->rotate_override == so->rotate_override;
+            if (meta_match && p->trim_w[curr_idx] == p->trim_w[orig] && p->trim_h[curr_idx] == p->trim_h[orig]) {
                 bool pixels_match = true;
                 uint32_t tw = p->trim_w[curr_idx];
                 uint32_t th = p->trim_h[curr_idx];
                 for (uint32_t row = 0; row < th && pixels_match; row++) {
-                    size_t off_a = (((size_t)(p->trim_y[curr_idx] + row) * p->sprites[curr_idx].width) + p->trim_x[curr_idx]) * 4;
-                    size_t off_b = (((size_t)(p->trim_y[orig] + row) * p->sprites[orig].width) + p->trim_x[orig]) * 4;
-                    const uint8_t *row_a = p->sprites[curr_idx].rgba + off_a;
-                    const uint8_t *row_b = p->sprites[orig].rgba + off_b;
+                    size_t off_a = (((size_t)(p->trim_y[curr_idx] + row) * sc->width) + p->trim_x[curr_idx]) * 4;
+                    size_t off_b = (((size_t)(p->trim_y[orig] + row) * so->width) + p->trim_x[orig]) * 4;
+                    const uint8_t *row_a = sc->rgba + off_a;
+                    const uint8_t *row_b = so->rgba + off_b;
                     if (memcmp(row_a, row_b, ((size_t)tw) * 4) != 0) {
                         pixels_match = false;
                     }
@@ -1380,23 +1385,22 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
     }
 
     /* Slice9 sprites: expand trim dims by 2px per side for anti-bleed margin.
-     * Also expand hull vertices to match the enlarged tile area. */
+     * Use a scratch hull so the original hull_vertices stay untouched for serialization. */
     for (uint32_t i = 0; i < p->unique_count; i++) {
         uint32_t oi = p->unique_indices[i];
         bool has_s9 = p->sprites[oi].slice9_left || p->sprites[oi].slice9_right || p->sprites[oi].slice9_top || p->sprites[oi].slice9_bottom;
         if (has_s9) {
             u_trim_w[i] += SLICE9_MARGIN * 2;
             u_trim_h[i] += SLICE9_MARGIN * 2;
-            /* Update RECT hull (4 verts) to match expanded dims */
-            u_hulls[i][0] = (Point2D){0, 0};
-            u_hulls[i][1] = (Point2D){(int32_t)u_trim_w[i], 0};
-            u_hulls[i][2] = (Point2D){(int32_t)u_trim_w[i], (int32_t)u_trim_h[i]};
-            u_hulls[i][3] = (Point2D){0, (int32_t)u_trim_h[i]};
+            /* Allocate scratch hull — original hull_vertices must survive for serialize */
+            Point2D *scratch = (Point2D *)malloc(4 * sizeof(Point2D));
+            NT_BUILD_ASSERT(scratch && "pipeline_tile_pack: scratch hull alloc failed");
+            scratch[0] = (Point2D){0, 0};
+            scratch[1] = (Point2D){(int32_t)u_trim_w[i], 0};
+            scratch[2] = (Point2D){(int32_t)u_trim_w[i], (int32_t)u_trim_h[i]};
+            scratch[3] = (Point2D){0, (int32_t)u_trim_h[i]};
+            u_hulls[i] = scratch;
         }
-        /* Per-sprite rotation override: force no-transform for this sprite.
-         * We temporarily set allow_transform to false for the whole pack if ANY
-         * sprite disallows rotation. This is conservative but correct; a more
-         * fine-grained approach would require vpack-internal changes. */
     }
 
     /* Per-sprite rotation override for vector_pack. */
@@ -1425,6 +1429,13 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         p->placements[i].trimmed_h = p->trim_h[orig_idx];
     }
 
+    /* Free scratch hulls allocated for slice9 sprites */
+    for (uint32_t i = 0; i < p->unique_count; i++) {
+        uint32_t oi = p->unique_indices[i];
+        if (u_hulls[i] != p->hull_vertices[oi]) {
+            free(u_hulls[i]);
+        }
+    }
     free(u_trim_w);
     free(u_trim_h);
     free((void *)u_hulls);

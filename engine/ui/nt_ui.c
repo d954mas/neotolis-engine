@@ -1018,6 +1018,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_NONE:
         return;
     case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
+        /* Rotation not applied — rendered axis-aligned at transformed position */
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         uint32_t col = nt_color_pack_clay(r->backgroundColor);
@@ -1032,6 +1033,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER: {
+        /* Rotation not applied — rendered axis-aligned at transformed position */
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         Clay_RenderCommand local = *c;
         local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
