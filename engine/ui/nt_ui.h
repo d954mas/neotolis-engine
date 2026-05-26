@@ -156,8 +156,8 @@ static inline nt_ui_transform_t nt_ui_transform_defaults(void) { return (nt_ui_t
 /* Push/pop during declaration phase (between begin/end). Stack depth <= 8.
  * Offset: applies to all element types (position shift).
  * Scale: applies to all element types (position + size).
- * Rotation: IMAGE and TEXT only. RECT/BORDER render at transformed position
- *   but stay axis-aligned. SCISSOR ignores transform entirely.
+ * Rotation: applies to all element types. SCISSOR uses AABB approximation
+ *   of the rotated clip rect (conservative: slightly larger than exact).
  * Opacity (via push_opacity): applies to all element types. */
 void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transform);
 void nt_ui_pop_transform(nt_ui_context_t *ctx);

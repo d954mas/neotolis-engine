@@ -320,11 +320,23 @@ const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *u
 // #endregion
 
 // #region helper_emit_screen_rect
-static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed) {
-    const float m[16] = {
-        w, 0.0F, 0.0F, 0.0F, 0.0F, h, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, x, y, 0.0F, 1.0F,
-    };
-    nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
+static inline void emit_screen_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint32_t color_packed, float rotation) {
+    if (rotation == 0.0F) {
+        const float m[16] = {
+            w, 0.0F, 0.0F, 0.0F, 0.0F, h, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, x, y, 0.0F, 1.0F,
+        };
+        nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
+    } else {
+        /* M = T(center) * R(rot) * T(-center) * S_T where S_T = Scale(w,h)+Translate(x,y) */
+        const float rcx = x + (w * 0.5F);
+        const float rcy = y + (h * 0.5F);
+        const float rc = cosf(rotation);
+        const float rs = sinf(rotation);
+        const float m[16] = {
+            w * rc, w * rs, 0, 0, h * (-rs), h * rc, 0, 0, 0, 0, 1, 0, rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
+        };
+        nt_sprite_renderer_emit_region(atlas, region_index, m, 0.0F, 0.0F, color_packed, 0U);
+    }
 }
 // #endregion
 
@@ -359,7 +371,7 @@ static inline void clamp_radii_css3(float w, float h, float *tl, float *tr, floa
 
 // #region helper_emit_rounded_rect
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, Clay_CornerRadius cr, uint32_t color_packed) {
+static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, Clay_CornerRadius cr, uint32_t color_packed, float rotation) {
     float tl = cr.topLeft;
     float tr = cr.topRight;
     float bl = cr.bottomLeft;
@@ -369,7 +381,7 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
     const float half_h = h * 0.5F;
 
     if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {
-        emit_screen_rect(atlas, region_index, x, y, w, h, color_packed);
+        emit_screen_rect(atlas, region_index, x, y, w, h, color_packed, rotation);
         return;
     }
 
@@ -443,32 +455,149 @@ static void emit_rounded_rect(nt_resource_t atlas, uint32_t region_index, float 
         indices[ii++] = next;
     }
 
-    const float identity[16] = {
-        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
-    };
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, identity, color_packed);
+    if (rotation == 0.0F) {
+        const float identity[16] = {
+            1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
+        };
+        nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, identity, color_packed);
+    } else {
+        /* Rotate around rect center: T(cx,cy) * R(rot) * T(-cx,-cy) */
+        const float rcx = x + half_w;
+        const float rcy = y + half_h;
+        const float rc = cosf(rotation);
+        const float rs = sinf(rotation);
+        const float mat[16] = {
+            rc, rs, 0, 0, -rs, rc, 0, 0, 0, 0, 1, 0, rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
+        };
+        nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, color_packed);
+    }
 }
 // #endregion
 
 // #region helper_emit_border
-/* Top/bottom run full width; left/right inset to avoid corner overlap. */
-static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, uint32_t col) {
+/* Top/bottom run full width; left/right inset to avoid corner overlap.
+ * With rotation, emits all segments as one mesh rotated around border center. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void emit_square_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, uint32_t col, float rotation) {
     const float top = (float)widths.top;
     const float bot = (float)widths.bottom;
     const float lft = (float)widths.left;
     const float rgt = (float)widths.right;
+    if (rotation == 0.0F) {
+        if (widths.top) {
+            emit_screen_rect(atlas, region_index, bb.x, bb.y, bb.width, top, col, 0.0F);
+        }
+        if (widths.bottom) {
+            emit_screen_rect(atlas, region_index, bb.x, bb.y + bb.height - bot, bb.width, bot, col, 0.0F);
+        }
+        if (widths.left) {
+            emit_screen_rect(atlas, region_index, bb.x, bb.y + top, lft, bb.height - top - bot, col, 0.0F);
+        }
+        if (widths.right) {
+            emit_screen_rect(atlas, region_index, bb.x + bb.width - rgt, bb.y + top, rgt, bb.height - top - bot, col, 0.0F);
+        }
+        return;
+    }
+    /* Build quads as geometry; rotate around border center. Max 4 quads = 16 verts, 24 indices. */
+    float positions[16][2];
+    uint16_t indices[24];
+    uint32_t vi = 0;
+    uint32_t ii = 0;
     if (widths.top) {
-        emit_screen_rect(atlas, region_index, bb.x, bb.y, bb.width, top, col);
+        const uint16_t b0 = (uint16_t)vi;
+        positions[vi][0] = bb.x;
+        positions[vi][1] = bb.y;
+        vi++;
+        positions[vi][0] = bb.x + bb.width;
+        positions[vi][1] = bb.y;
+        vi++;
+        positions[vi][0] = bb.x + bb.width;
+        positions[vi][1] = bb.y + top;
+        vi++;
+        positions[vi][0] = bb.x;
+        positions[vi][1] = bb.y + top;
+        vi++;
+        indices[ii++] = b0;
+        indices[ii++] = (uint16_t)(b0 + 1);
+        indices[ii++] = (uint16_t)(b0 + 2);
+        indices[ii++] = b0;
+        indices[ii++] = (uint16_t)(b0 + 2);
+        indices[ii++] = (uint16_t)(b0 + 3);
     }
     if (widths.bottom) {
-        emit_screen_rect(atlas, region_index, bb.x, bb.y + bb.height - bot, bb.width, bot, col);
+        const uint16_t b0 = (uint16_t)vi;
+        positions[vi][0] = bb.x;
+        positions[vi][1] = bb.y + bb.height - bot;
+        vi++;
+        positions[vi][0] = bb.x + bb.width;
+        positions[vi][1] = bb.y + bb.height - bot;
+        vi++;
+        positions[vi][0] = bb.x + bb.width;
+        positions[vi][1] = bb.y + bb.height;
+        vi++;
+        positions[vi][0] = bb.x;
+        positions[vi][1] = bb.y + bb.height;
+        vi++;
+        indices[ii++] = b0;
+        indices[ii++] = (uint16_t)(b0 + 1);
+        indices[ii++] = (uint16_t)(b0 + 2);
+        indices[ii++] = b0;
+        indices[ii++] = (uint16_t)(b0 + 2);
+        indices[ii++] = (uint16_t)(b0 + 3);
     }
     if (widths.left) {
-        emit_screen_rect(atlas, region_index, bb.x, bb.y + top, lft, bb.height - top - bot, col);
+        const uint16_t b0 = (uint16_t)vi;
+        positions[vi][0] = bb.x;
+        positions[vi][1] = bb.y + top;
+        vi++;
+        positions[vi][0] = bb.x + lft;
+        positions[vi][1] = bb.y + top;
+        vi++;
+        positions[vi][0] = bb.x + lft;
+        positions[vi][1] = bb.y + bb.height - bot;
+        vi++;
+        positions[vi][0] = bb.x;
+        positions[vi][1] = bb.y + bb.height - bot;
+        vi++;
+        indices[ii++] = b0;
+        indices[ii++] = (uint16_t)(b0 + 1);
+        indices[ii++] = (uint16_t)(b0 + 2);
+        indices[ii++] = b0;
+        indices[ii++] = (uint16_t)(b0 + 2);
+        indices[ii++] = (uint16_t)(b0 + 3);
     }
     if (widths.right) {
-        emit_screen_rect(atlas, region_index, bb.x + bb.width - rgt, bb.y + top, rgt, bb.height - top - bot, col);
+        const uint16_t b0 = (uint16_t)vi;
+        positions[vi][0] = bb.x + bb.width - rgt;
+        positions[vi][1] = bb.y + top;
+        vi++;
+        positions[vi][0] = bb.x + bb.width;
+        positions[vi][1] = bb.y + top;
+        vi++;
+        positions[vi][0] = bb.x + bb.width;
+        positions[vi][1] = bb.y + bb.height - bot;
+        vi++;
+        positions[vi][0] = bb.x + bb.width - rgt;
+        positions[vi][1] = bb.y + bb.height - bot;
+        vi++;
+        indices[ii++] = b0;
+        indices[ii++] = (uint16_t)(b0 + 1);
+        indices[ii++] = (uint16_t)(b0 + 2);
+        indices[ii++] = b0;
+        indices[ii++] = (uint16_t)(b0 + 2);
+        indices[ii++] = (uint16_t)(b0 + 3);
     }
+    if (vi == 0) {
+        return;
+    }
+    const float rcx = bb.x + (bb.width * 0.5F);
+    const float rcy = bb.y + (bb.height * 0.5F);
+    const float rc = cosf(rotation);
+    const float rs = sinf(rotation);
+    const float mat[16] = {
+        rc, rs, 0, 0, -rs, rc, 0, 0, 0, 0, 1, 0, rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
+    };
+    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, col);
 }
 
 static uint32_t emit_corner_strip_pairs(float (*pos)[2], uint32_t vi, float radius, float cx, float cy, float w_perp_x, float w_perp_y, float sharp_x, float sharp_y, float sign_x, float sign_y,
@@ -500,7 +629,8 @@ static uint32_t emit_corner_strip_pairs(float (*pos)[2], uint32_t vi, float radi
 
 /* Caller (emit_border) clamps radii and guarantees at least one is non-zero. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, float tl, float tr, float bl, float br, uint32_t color_packed) {
+static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay_BoundingBox bb, Clay_BorderWidth widths, float tl, float tr, float bl, float br, uint32_t color_packed,
+                                float rotation) {
     const float x = bb.x;
     const float y = bb.y;
     const float w = bb.width;
@@ -535,13 +665,25 @@ static void emit_rounded_border(nt_resource_t atlas, uint32_t region_index, Clay
         indices[ii++] = out_n;
     }
 
-    const float identity[16] = {
-        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
-    };
-    nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, identity, color_packed);
+    if (rotation == 0.0F) {
+        const float identity[16] = {
+            1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
+        };
+        nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, identity, color_packed);
+    } else {
+        /* Rotate around border center: T(cx,cy) * R(rot) * T(-cx,-cy) */
+        const float rcx = bb.x + (bb.width * 0.5F);
+        const float rcy = bb.y + (bb.height * 0.5F);
+        const float rc = cosf(rotation);
+        const float rs = sinf(rotation);
+        const float mat[16] = {
+            rc, rs, 0, 0, -rs, rc, 0, 0, 0, 0, 1, 0, rcx - (rc * rcx) + (rs * rcy), rcy - (rs * rcx) - (rc * rcy), 0, 1,
+        };
+        nt_sprite_renderer_emit_geometry(atlas, region_index, positions, vi, indices, ii, mat, color_packed);
+    }
 }
 
-static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c) {
+static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, float rotation) {
     const Clay_BorderRenderData *b = &c->renderData.border;
     const Clay_BoundingBox bb = c->boundingBox;
     const float top = (float)b->width.top;
@@ -559,10 +701,10 @@ static void emit_border(const nt_ui_context_t *ctx, const Clay_RenderCommand *c)
     clamp_radii_css3(bb.width, bb.height, &tl, &tr, &bl, &br);
 
     if (tl == 0.0F && tr == 0.0F && bl == 0.0F && br == 0.0F) {
-        emit_square_border(ctx->atlas, ctx->white_region, bb, b->width, col);
+        emit_square_border(ctx->atlas, ctx->white_region, bb, b->width, col, rotation);
         return;
     }
-    emit_rounded_border(ctx->atlas, ctx->white_region, bb, b->width, tl, tr, bl, br, col);
+    emit_rounded_border(ctx->atlas, ctx->white_region, bb, b->width, tl, tr, bl, br, col, rotation);
 }
 // #endregion
 
@@ -1018,7 +1160,6 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_NONE:
         return;
     case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
-        /* Rotation not applied — rendered axis-aligned at transformed position */
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         uint32_t col = nt_color_pack_clay(r->backgroundColor);
@@ -1029,11 +1170,10 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
             .bottomLeft = r->cornerRadius.topLeft,
             .bottomRight = r->cornerRadius.topRight,
         };
-        emit_rounded_rect(ctx->atlas, ctx->white_region, sbb.x, world_y, sbb.width, sbb.height, cr, col);
+        emit_rounded_rect(ctx->atlas, ctx->white_region, sbb.x, world_y, sbb.width, sbb.height, cr, col, -ws->accum_rotation);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER: {
-        /* Rotation not applied — rendered axis-aligned at transformed position */
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         Clay_RenderCommand local = *c;
         local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
@@ -1048,7 +1188,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         b->cornerRadius.bottomRight = cro.topRight;
         /* Apply opacity to border color */
         b->color.a *= ws->accum_opacity;
-        emit_border(ctx, &local);
+        emit_border(ctx, &local, -ws->accum_rotation);
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_TEXT: {
@@ -1079,9 +1219,48 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         emit_image(&local, -ws->accum_rotation);
         return;
     }
-    case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START:
-        scissor_push(c, scissor_stack, depth, target, sprite_pipeline_dirty);
+    case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {
+        Clay_RenderCommand local = *c;
+        if (ws->accum_rotation != 0.0F) {
+            /* AABB of rotated scissor rect in Clay Y-down space */
+            const float cx = sbb.x + (sbb.width * 0.5F);
+            const float cy = sbb.y + (sbb.height * 0.5F);
+            const float hw = sbb.width * 0.5F;
+            const float hh = sbb.height * 0.5F;
+            const float rot = ws->accum_rotation;
+            const float rc = cosf(rot);
+            const float rs = sinf(rot);
+            const float corners[4][2] = {{cx - hw, cy - hh}, {cx + hw, cy - hh}, {cx + hw, cy + hh}, {cx - hw, cy + hh}};
+            float mn_x = corners[0][0];
+            float mn_y = corners[0][1];
+            float mx_x = corners[0][0];
+            float mx_y = corners[0][1];
+            for (int ci = 0; ci < 4; ci++) {
+                const float dx = corners[ci][0] - cx;
+                const float dy = corners[ci][1] - cy;
+                const float rx = (dx * rc) - (dy * rs) + cx;
+                const float ry = (dx * rs) + (dy * rc) + cy;
+                if (rx < mn_x) {
+                    mn_x = rx;
+                }
+                if (ry < mn_y) {
+                    mn_y = ry;
+                }
+                if (rx > mx_x) {
+                    mx_x = rx;
+                }
+                if (ry > mx_y) {
+                    mx_y = ry;
+                }
+            }
+            local.boundingBox = (Clay_BoundingBox){.x = mn_x, .y = mn_y, .width = mx_x - mn_x, .height = mx_y - mn_y};
+        } else if (scx != 1.0F || scy != 1.0F || ws->aff_tx != 0.0F || ws->aff_ty != 0.0F) {
+            /* No rotation but has offset/scale: use transformed sbb directly */
+            local.boundingBox = sbb;
+        }
+        scissor_push(&local, scissor_stack, depth, target, sprite_pipeline_dirty);
         return;
+    }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_END:
         scissor_pop(scissor_stack, depth, target, sprite_pipeline_dirty);
         return;
