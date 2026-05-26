@@ -90,6 +90,13 @@ const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *u
 #define NT_UI_DATA_FULL(layer_value, user_ptr) nt_ui_make_element_data((layer_value), (user_ptr))
 #define NT_UI_CLAY_DATA(layer_value) ((void *)nt_ui_make_element_data((layer_value), NULL))
 
+/* Call before every game-side CLAY({...}) or CLAY_TEXT() to keep the
+ * side-channel transform marker indices aligned with render commands.
+ * nt_ui_* widgets call this internally; game code must call it for
+ * bare CLAY elements declared inside panel/group scopes. */
+void nt_ui_track_element(nt_ui_context_t *ctx);
+#define NT_UI_TRACK(ctx) nt_ui_track_element(ctx)
+
 /* All four setters required per-context before first walk. */
 void nt_ui_set_atlas_white_region(nt_ui_context_t *ctx, nt_resource_t atlas, uint32_t white_region_idx);
 void nt_ui_set_sprite_material(nt_ui_context_t *ctx, nt_material_t sprite_material);

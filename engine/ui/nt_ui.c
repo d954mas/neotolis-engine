@@ -216,6 +216,8 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 
 // #region begin_end
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void nt_ui_clay_element_hook(void *ud);
+
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *mouse) {
     NT_ASSERT(ctx != NULL && "nt_ui_begin: ctx must be non-NULL");
     NT_ASSERT(s_nt_ui_module_initialized && "nt_ui_begin: nt_ui_module_init() must be called before begin");
@@ -234,6 +236,8 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     g_nt_ui_inframe_ctx = ctx;
     ctx->marker_count = 0;
     ctx->clay_decl_count = 0;
+    ctx->clay->nt_open_element_hook = nt_ui_clay_element_hook;
+    ctx->clay->nt_open_element_hook_ud = ctx;
 
     /* Must run before BeginLayout: Clay reserves debug panel width up-front. */
     Clay_SetDebugModeEnabled(ctx->debug_overlay);
@@ -266,8 +270,29 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx == g_nt_ui_inframe_ctx && "nt_ui_end: ctx mismatch with module in-frame ctx");
 
     ctx->frozen_cmds = Clay_EndLayout();
-    /* Clay's debug overlay close button ("x") flips internal debugModeEnabled.
-     * Sync back so caller's flag stays in lock-step (next begin re-applies). */
+
+    /* Remap marker before_clay_idx from layout-element-space to render-command-space.
+     * Layout elements > render commands (containers without visuals are merged). */
+    if (ctx->marker_count > 0) {
+        const Clay_RenderCommandArray *cmds = &ctx->frozen_cmds;
+        const int32_t le_count = ctx->clay->layoutElements.length;
+        for (uint32_t mi = 0; mi < ctx->marker_count; ++mi) {
+            const uint32_t target_le = ctx->markers[mi].before_clay_idx;
+            uint32_t mapped = (uint32_t)cmds->length;
+            for (int32_t ci = 0; ci < cmds->length; ++ci) {
+                const uint32_t cmd_id = cmds->internalArray[ci].id;
+                for (int32_t li = 0; li < le_count; ++li) {
+                    if (ctx->clay->layoutElements.internalArray[li].id == cmd_id && (uint32_t)li >= target_le) {
+                        mapped = (uint32_t)ci;
+                        goto found;
+                    }
+                }
+            }
+            found:
+            ctx->markers[mi].before_clay_idx = mapped;
+        }
+    }
+
     ctx->debug_overlay = Clay_IsDebugModeEnabled();
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;
@@ -1300,13 +1325,18 @@ void nt_ui_set_custom_handler(nt_ui_context_t *ctx, nt_ui_custom_handler_t fn, v
 // #endregion
 
 // #region push_pop_transform_opacity
+/* Clay hook: auto-increments clay_decl_count on every element declaration. */
+static void nt_ui_clay_element_hook(void *ud) { ((nt_ui_context_t *)ud)->clay_decl_count++; }
+
+void nt_ui_track_element(nt_ui_context_t *ctx) { ctx->clay_decl_count++; }
+
 static void emit_marker(nt_ui_context_t *ctx, uint8_t marker_type, const nt_ui_transform_t *transform, float opacity) {
     NT_ASSERT(ctx->marker_count < ctx->max_markers && "marker array full; raise max_markers in nt_ui_create_desc_t");
     nt_ui_marker_t *m = &ctx->markers[ctx->marker_count++];
     m->type = marker_type;
     m->transform = transform ? *transform : nt_ui_transform_defaults();
     m->opacity = opacity;
-    m->before_clay_idx = (uint32_t)ctx->clay->layoutElements.length;
+    m->before_clay_idx = ctx->clay_decl_count;
 }
 
 void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transform) {

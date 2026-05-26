@@ -1,4 +1,10 @@
 // VERSION: 0.14
+//
+// NT PATCHES (reapply after Clay update):
+//   1. nt_open_element_hook callback in Clay_Context — called on every
+//      Clay__OpenElement() and Clay__OpenTextElement(). Used by nt_ui
+//      side-channel transform markers to track element declaration count.
+//      Search "nt_open_element_hook" for all patch sites.
 
 /*
     NOTE: In order to use this library you must define
@@ -1224,6 +1230,8 @@ struct Clay_Context {
     int32_t maxMeasureTextCacheWordCount;
     bool warningsEnabled;
     Clay_ErrorHandler errorHandler;
+    void (*nt_open_element_hook)(void *); /* NT patch: called on each OpenElement/OpenTextElement */
+    void *nt_open_element_hook_ud;
     Clay_BooleanWarnings booleanWarnings;
     Clay__WarningArray warnings;
 
@@ -1974,6 +1982,7 @@ void Clay__OpenElement(void) {
     } else {
         Clay__int32_tArray_Set(&context->layoutElementClipElementIds, context->layoutElements.length - 1, 0);
     }
+    if (context->nt_open_element_hook) context->nt_open_element_hook(context->nt_open_element_hook_ud);
 }
 
 void Clay__OpenTextElement(Clay_String text, Clay_TextElementConfig *textConfig) {
@@ -2008,6 +2017,7 @@ void Clay__OpenTextElement(Clay_String text, Clay_TextElementConfig *textConfig)
     };
     textElement->layoutConfig = &CLAY_LAYOUT_DEFAULT;
     parentElement->childrenOrTextContent.children.length++;
+    if (context->nt_open_element_hook) context->nt_open_element_hook(context->nt_open_element_hook_ud);
 }
 
 Clay_ElementId Clay__AttachId(Clay_ElementId elementId) {
