@@ -550,6 +550,31 @@ static void emit_image(const Clay_RenderCommand *c) {
     if (r->vertex_count == 0U) {
         return; /* tombstone */
     }
+
+    /* Auto-slice9: per-widget override > atlas default > regular quad */
+    const bool has_override = (p->slice9_override[0] | p->slice9_override[1] | p->slice9_override[2] | p->slice9_override[3]) != 0;
+    const bool region_slice9 = (r->flags & NT_ATLAS_REGION_FLAG_SLICE9) != 0;
+
+    if (has_override || region_slice9) {
+        uint8_t sl;
+        uint8_t sr;
+        uint8_t st;
+        uint8_t sb;
+        if (has_override) {
+            sl = p->slice9_override[0];
+            sr = p->slice9_override[1];
+            st = p->slice9_override[2];
+            sb = p->slice9_override[3];
+        } else {
+            sl = r->slice9_lrtb[0];
+            sr = r->slice9_lrtb[1];
+            st = r->slice9_lrtb[2];
+            sb = r->slice9_lrtb[3];
+        }
+        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, sl, sr, st, sb, col, p->flip_bits);
+        return;
+    }
+
     const float ipu = nt_atlas_get_inverse_pixels_per_unit(p->atlas);
     const float src_w = (float)r->source_w * ipu;
     const float src_h = (float)r->source_h * ipu;
