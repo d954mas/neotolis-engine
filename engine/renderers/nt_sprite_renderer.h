@@ -157,6 +157,8 @@ void nt_sprite_renderer_test_last_emit_position(uint32_t v_idx, float out[3]);
 /* Atlas texcoord of the i-th vertex of the last emit, in raw uint16 0..65535
  * units (the shader normalizes to [0,1] via USHORT2N). */
 void nt_sprite_renderer_test_last_emit_texcoord(uint32_t v_idx, uint16_t out[2]);
+/* RGBA color of the i-th vertex of the last emit, as raw uint8 [R,G,B,A]. */
+void nt_sprite_renderer_test_last_emit_color(uint32_t v_idx, uint8_t out[4]);
 bool nt_sprite_renderer_test_initialized(void);
 /* Captured vertex/index count from last slice9 emit. */
 uint32_t nt_sprite_renderer_test_last_slice9_vertex_count(void);

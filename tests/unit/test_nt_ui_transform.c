@@ -266,6 +266,220 @@ static void test_unbalanced_opacity_asserts(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_walk(s_fx.ctx, &target));
 }
 
+/* Push transform with scale=2.0, emit rect at (20,0,40,30). Deferred
+ * center captures rect center (40,15). Scale expands width 40->80,
+ * height 30->60 around that center, so top-left shifts. */
+static void test_scale_applied(void) {
+    test_marker_t push = {
+        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
+        .marker_type = 1, /* PUSH_TRANSFORM */
+        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 2.0F},
+        .opacity = 1.0F,
+    };
+    test_marker_t pop = {
+        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
+        .marker_type = 2, /* POP_TRANSFORM */
+        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
+        .opacity = 1.0F,
+    };
+
+    make_marker_cmd(&s_test_cmds[0], &push);
+
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
+    s_test_cmds[1].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+
+    make_marker_cmd(&s_test_cmds[2], &pop);
+    inject_frozen_cmds(3);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+
+    /* Affine: scale=2.0 around deferred center (40,15).
+     * sbb = {x=0, y=-15, w=80, h=60}, world_y = 600+15-60 = 555.
+     * emit_screen_rect mat4: m[12]=0, m[13]=555 -> vertex 0 at (0, 555). */
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0U, pos);
+    TEST_ASSERT_TRUE(pos[0] == 0.0F);
+    TEST_ASSERT_TRUE(pos[1] == 555.0F);
+}
+
+/* Push transform with rotation=PI/2, emit image. Verify vertices are
+ * rotated: walker negates rotation for GL Y-up, emit_image receives
+ * -accum_rotation and builds a rotated matrix. */
+static void test_rotation_applied(void) {
+    const float half_pi = 3.14159265358979323846F * 0.5F;
+    test_marker_t push = {
+        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
+        .marker_type = 1, /* PUSH_TRANSFORM */
+        .transform = {.offset_x = 0, .offset_y = 0, .rotation = half_pi, .scale = 1.0F},
+        .opacity = 1.0F,
+    };
+    test_marker_t pop = {
+        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
+        .marker_type = 2, /* POP_TRANSFORM */
+        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
+        .opacity = 1.0F,
+    };
+
+    s_image_payload.atlas = s_fx.atlas.handle;
+    s_image_payload.region_index = s_fx.atlas.white_region_idx;
+    s_image_payload.flip_bits = 0;
+
+    make_marker_cmd(&s_test_cmds[0], &push);
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_IMAGE;
+    s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 10, .y = 10, .width = 50, .height = 50};
+    s_test_cmds[1].renderData.image.backgroundColor = (Clay_Color){0};
+    s_test_cmds[1].renderData.image.imageData = &s_image_payload;
+    make_marker_cmd(&s_test_cmds[2], &pop);
+    inject_frozen_cmds(3);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+
+    /* With rotation, vertex positions differ from the axis-aligned case.
+     * Non-rotated V0 would be at (10, 540). Rotated V0 must differ. */
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0U, pos);
+    TEST_ASSERT_TRUE(pos[0] != 10.0F || pos[1] != 540.0F);
+
+    /* Additional check: V0 and V1 should have the same x (rotation swaps axes
+     * for PI/2). For -PI/2 rotation of unit verts (0,0) and (1,0) around center,
+     * both map to the same x value since cos(-PI/2)~=0 zeroes the sx component. */
+    float pos1[3];
+    nt_sprite_renderer_test_last_emit_position(1U, pos1);
+    /* V0 and V1 x coordinates should be nearly equal (cos(-PI/2) ~ 0). */
+    float dx = pos1[0] - pos[0];
+    if (dx < 0) {
+        dx = -dx;
+    }
+    TEST_ASSERT_TRUE(dx < 1.0F);
+}
+
+/* Push transform offset_x=10, push another transform scale=2.0, emit rect.
+ * Accumulated: position shifted by 10 AND scaled by 2.0. */
+static void test_nested_offset_scale(void) {
+    test_marker_t push_off = {
+        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
+        .marker_type = 1, /* PUSH_TRANSFORM */
+        .transform = {.offset_x = 10.0F, .offset_y = 0, .rotation = 0, .scale = 1.0F},
+        .opacity = 1.0F,
+    };
+    test_marker_t push_scale = {
+        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
+        .marker_type = 1, /* PUSH_TRANSFORM */
+        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 2.0F},
+        .opacity = 1.0F,
+    };
+    test_marker_t pop1 = {
+        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
+        .marker_type = 2, /* POP_TRANSFORM */
+        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
+        .opacity = 1.0F,
+    };
+    test_marker_t pop2 = {
+        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
+        .marker_type = 2, /* POP_TRANSFORM */
+        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
+        .opacity = 1.0F,
+    };
+
+    make_marker_cmd(&s_test_cmds[0], &push_off);
+    make_marker_cmd(&s_test_cmds[1], &push_scale);
+
+    s_test_cmds[2].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[2].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
+    s_test_cmds[2].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+
+    make_marker_cmd(&s_test_cmds[3], &pop1);
+    make_marker_cmd(&s_test_cmds[4], &pop2);
+    inject_frozen_cmds(5);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+
+    /* Affine recompute: k=0 offset_x=10 → tx=10; k=1 scale=2.0 around
+     * deferred center (40,15). Composed: a=2, d=2, tx=-20, ty=-15.
+     * dispatch: tcx=60, tcy=15, sw=80, sh=60.
+     * sbb={x=20, y=-15, w=80, h=60}, world_y=555. V0=(20, 555). */
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0U, pos);
+    TEST_ASSERT_TRUE(pos[0] == 20.0F);
+    TEST_ASSERT_TRUE(pos[1] == 555.0F);
+
+    /* Without any transform the rect V0 would be at (20, 570).
+     * With only offset: (30, 570). The nested scale around the deferred
+     * center produces a different result from either alone. */
+    TEST_ASSERT_TRUE(pos[0] != 30.0F); /* not just offset */
+}
+
+/* Push transform scale=1.5, push opacity 0.5, emit rect with white.
+ * Verify vertex alpha is ~127 (255*0.5) AND rect is scaled. */
+static void test_opacity_scale_combined(void) {
+    test_marker_t push_scale = {
+        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
+        .marker_type = 1, /* PUSH_TRANSFORM */
+        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.5F},
+        .opacity = 1.0F,
+    };
+    test_marker_t push_op = {
+        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
+        .marker_type = 3, /* PUSH_OPACITY */
+        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
+        .opacity = 0.5F,
+    };
+    test_marker_t pop_op = {
+        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
+        .marker_type = 4, /* POP_OPACITY */
+        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
+        .opacity = 1.0F,
+    };
+    test_marker_t pop_scale = {
+        .magic = NT_UI_CUSTOM_MARKER_MAGIC_TEST,
+        .marker_type = 2, /* POP_TRANSFORM */
+        .transform = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale = 1.0F},
+        .opacity = 1.0F,
+    };
+
+    make_marker_cmd(&s_test_cmds[0], &push_scale);
+    make_marker_cmd(&s_test_cmds[1], &push_op);
+
+    s_test_cmds[2].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[2].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
+    s_test_cmds[2].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
+
+    make_marker_cmd(&s_test_cmds[3], &pop_op);
+    make_marker_cmd(&s_test_cmds[4], &pop_scale);
+    inject_frozen_cmds(5);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+
+    /* Scale 1.5 around deferred center (40,15): sbb={x=10,y=-7.5,w=60,h=45}.
+     * world_y = 600+7.5-45 = 562.5. V0=(10, 562.5). */
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0U, pos);
+    TEST_ASSERT_TRUE(pos[0] == 10.0F);
+    TEST_ASSERT_TRUE(pos[1] == 562.5F);
+
+    /* Opacity 0.5 applied to white (255,255,255,255):
+     * alpha = (uint32_t)(255.0 * 0.5) = 127. */
+    uint8_t color[4];
+    nt_sprite_renderer_test_last_emit_color(0U, color);
+    TEST_ASSERT_EQUAL_UINT8(255U, color[0]); /* R */
+    TEST_ASSERT_EQUAL_UINT8(255U, color[1]); /* G */
+    TEST_ASSERT_EQUAL_UINT8(255U, color[2]); /* B */
+    TEST_ASSERT_EQUAL_UINT8(127U, color[3]); /* A = 255 * 0.5 truncated */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_push_pop_transform_balanced);
@@ -275,5 +489,9 @@ int main(void) {
     RUN_TEST(test_game_custom_not_confused);
     RUN_TEST(test_unbalanced_transform_asserts);
     RUN_TEST(test_unbalanced_opacity_asserts);
+    RUN_TEST(test_scale_applied);
+    RUN_TEST(test_rotation_applied);
+    RUN_TEST(test_nested_offset_scale);
+    RUN_TEST(test_opacity_scale_combined);
     return UNITY_END();
 }

@@ -997,6 +997,16 @@ void nt_sprite_renderer_test_last_emit_texcoord(uint32_t v_idx, uint16_t out[2])
     out[0] = v->texcoord[0];
     out[1] = v->texcoord[1];
 }
+
+void nt_sprite_renderer_test_last_emit_color(uint32_t v_idx, uint8_t out[4]) {
+    NT_ASSERT(v_idx < s_sprite.last_emit_vertex_count && "last_emit_color: index out of range");
+    const nt_sprite_vertex_t *v = &s_sprite.vertices[s_sprite.last_emit_first_vertex + v_idx];
+    out[0] = v->color[0];
+    out[1] = v->color[1];
+    out[2] = v->color[2];
+    out[3] = v->color[3];
+}
+
 bool nt_sprite_renderer_test_initialized(void) { return s_sprite.initialized; }
 uint32_t nt_sprite_renderer_test_last_slice9_vertex_count(void) { return s_sprite.last_slice9_vertex_count; }
 uint32_t nt_sprite_renderer_test_last_slice9_index_count(void) { return s_sprite.last_slice9_index_count; }
