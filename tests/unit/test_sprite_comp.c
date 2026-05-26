@@ -601,6 +601,42 @@ void test_entity_destroy_removes_sprite(void) {
     TEST_ASSERT_FALSE(nt_sprite_comp_has(e));
 }
 
+/* ---- Test: set_slice9 stores override and sets flag ---- */
+
+void test_set_slice9(void) {
+    nt_entity_t e = nt_entity_create();
+    nt_sprite_comp_add(e);
+    nt_sprite_comp_set_slice9(e, 2, 3, 4, 5);
+
+    TEST_ASSERT_TRUE(nt_sprite_comp_has_slice9_override(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_SLICE9_OV, NT_SPRITE_FLAG_SLICE9_OV, *nt_sprite_comp_flags(e));
+
+    const uint8_t *s9 = nt_sprite_comp_slice9_lrtb(e);
+    TEST_ASSERT_EQUAL_UINT8(2, s9[0]);
+    TEST_ASSERT_EQUAL_UINT8(3, s9[1]);
+    TEST_ASSERT_EQUAL_UINT8(4, s9[2]);
+    TEST_ASSERT_EQUAL_UINT8(5, s9[3]);
+}
+
+/* ---- Test: reset_slice9 clears override and flag ---- */
+
+void test_reset_slice9(void) {
+    nt_entity_t e = nt_entity_create();
+    nt_sprite_comp_add(e);
+    nt_sprite_comp_set_slice9(e, 2, 3, 4, 5);
+    TEST_ASSERT_TRUE(nt_sprite_comp_has_slice9_override(e));
+
+    nt_sprite_comp_reset_slice9(e);
+    TEST_ASSERT_FALSE(nt_sprite_comp_has_slice9_override(e));
+    TEST_ASSERT_BITS(NT_SPRITE_FLAG_SLICE9_OV, 0, *nt_sprite_comp_flags(e));
+
+    const uint8_t *s9 = nt_sprite_comp_slice9_lrtb(e);
+    TEST_ASSERT_EQUAL_UINT8(0, s9[0]);
+    TEST_ASSERT_EQUAL_UINT8(0, s9[1]);
+    TEST_ASSERT_EQUAL_UINT8(0, s9[2]);
+    TEST_ASSERT_EQUAL_UINT8(0, s9[3]);
+}
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -620,5 +656,7 @@ int main(void) {
     RUN_TEST(test_sprite_set_flip_bit_isolation);
     RUN_TEST(test_sprite_view_matches_per_entity_reads);
     RUN_TEST(test_entity_destroy_removes_sprite);
+    RUN_TEST(test_set_slice9);
+    RUN_TEST(test_reset_slice9);
     return UNITY_END();
 }
