@@ -688,7 +688,8 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     NT_BUILD_ASSERT(sprite->shape_override <= NT_ATLAS_SPRITE_SHAPE_CONCAVE && "invalid shape override value");
     NT_BUILD_ASSERT((sprite->rotate_override == 0 || sprite->rotate_override == NT_ATLAS_SPRITE_ROTATE_NO) && "invalid rotate override value (only 0 or NO)");
     NT_BUILD_ASSERT(sprite->max_verts_override <= 16 && "max_vertices override must be <= 16");
-    /* Per-sprite extrude > 0 requires RECT shape (same constraint as atlas-level). */
+    /* Per-sprite extrude > 0 requires RECT shape (same constraint as atlas-level).
+     * Override must not exceed atlas extrude — tile pack reserves atlas-level space. */
     NT_BUILD_ASSERT((sprite->extrude_override == 0 || sprite->shape_override == NT_ATLAS_SPRITE_SHAPE_RECT || sprite->shape_override == 0) &&
                     "per-sprite extrude > 0 requires shape == RECT (or atlas default RECT)");
     /* Slice9 auto-force: any nonzero border -> RECT + no rotation */
