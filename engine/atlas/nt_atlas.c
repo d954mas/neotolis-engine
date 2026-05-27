@@ -732,22 +732,6 @@ void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_
 }
 // #endregion
 
-// #region slice9 query
-nt_atlas_slice9_t nt_atlas_get_region_slice9(nt_resource_t atlas, uint32_t region_index) {
-    NT_ASSERT(nt_resource_get_asset_type(atlas) == NT_ASSET_ATLAS && "nt_atlas_get_region_slice9: handle is not an atlas resource");
-    const nt_atlas_data_t *ad = (const nt_atlas_data_t *)nt_resource_get_user_data(atlas);
-    NT_ASSERT(ad != NULL && "nt_atlas_get_region_slice9 on unresolved atlas");
-    NT_ASSERT(region_index < ad->region_count && "nt_atlas_get_region_slice9: region_index out of range");
-    const nt_texture_region_t *r = &ad->regions[region_index];
-    return (nt_atlas_slice9_t){
-        .left = r->slice9_lrtb[0],
-        .right = r->slice9_lrtb[1],
-        .top = r->slice9_lrtb[2],
-        .bottom = r->slice9_lrtb[3],
-        .has_slice9 = (r->flags & NT_ATLAS_REGION_FLAG_SLICE9) != 0,
-    };
-}
-// #endregion
 // #endregion
 
 // #region test access
@@ -846,19 +830,6 @@ void nt_atlas_test_set_ipu_and_recompute(struct nt_atlas_data *ad, float ipu) {
     NT_ASSERT(ipu > 0.0F);
     ad->ipu = ipu;
     atlas_precompute_all(ad);
-}
-
-nt_atlas_slice9_t nt_atlas_test_get_region_slice9_raw(const struct nt_atlas_data *ad, uint32_t index) {
-    NT_ASSERT(ad != NULL);
-    NT_ASSERT(index < ad->region_count);
-    const nt_texture_region_t *r = &ad->regions[index];
-    return (nt_atlas_slice9_t){
-        .left = r->slice9_lrtb[0],
-        .right = r->slice9_lrtb[1],
-        .top = r->slice9_lrtb[2],
-        .bottom = r->slice9_lrtb[3],
-        .has_slice9 = (r->flags & NT_ATLAS_REGION_FLAG_SLICE9) != 0,
-    };
 }
 
 #endif /* NT_TEST_ACCESS */

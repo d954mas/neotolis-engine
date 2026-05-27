@@ -1833,7 +1833,6 @@ static void pipeline_serialize(AtlasPipeline *p) {
         if (sl || sr || st || sb) {
             NT_BUILD_ASSERT((uint32_t)sl + (uint32_t)sr < p->sprites[i].width && "slice9: left + right >= source width");
             NT_BUILD_ASSERT((uint32_t)st + (uint32_t)sb < p->sprites[i].height && "slice9: top + bottom >= source height");
-            reg->flags |= NT_ATLAS_REGION_FLAG_SLICE9;
         }
         reg->_pad0 = 0;
         reg->slice9_lrtb[0] = sl;

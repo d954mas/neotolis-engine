@@ -5139,9 +5139,9 @@ void test_atlas_duplicate_pixels_different_origin(void) {
 
 /* ---- Slice9 builder pipeline tests ---- */
 
-/* Test: slice9 flag + lrtb values in output pack.
+/* Test: slice9 lrtb values in output pack.
  * Build atlas with one normal sprite and one slice9 sprite (borders 4,4,4,4).
- * Verify v6 header, FLAG_SLICE9, and correct lrtb values. */
+ * Verify v6 header and correct lrtb values (non-zero = has slice9). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void test_atlas_slice9_flag_and_lrtb_in_output(void) {
     (void)MKDIR(TMP_DIR);
@@ -5198,15 +5198,14 @@ void test_atlas_slice9_flag_and_lrtb_in_output(void) {
     TEST_ASSERT_NOT_NULL(r_panel);
     TEST_ASSERT_NOT_NULL(r_normal);
 
-    /* Slice9 region has FLAG_SLICE9 + correct lrtb */
-    TEST_ASSERT_TRUE((r_panel->flags & NT_ATLAS_REGION_FLAG_SLICE9) != 0);
+    /* Slice9 region has correct lrtb (non-zero = has slice9) */
     TEST_ASSERT_EQUAL_UINT16(4, r_panel->slice9_lrtb[0]);
     TEST_ASSERT_EQUAL_UINT16(4, r_panel->slice9_lrtb[1]);
     TEST_ASSERT_EQUAL_UINT16(4, r_panel->slice9_lrtb[2]);
     TEST_ASSERT_EQUAL_UINT16(4, r_panel->slice9_lrtb[3]);
+    TEST_ASSERT_TRUE((r_panel->slice9_lrtb[0] | r_panel->slice9_lrtb[1] | r_panel->slice9_lrtb[2] | r_panel->slice9_lrtb[3]) != 0);
 
-    /* Normal region has NO slice9 */
-    TEST_ASSERT_EQUAL(0, (r_normal->flags & NT_ATLAS_REGION_FLAG_SLICE9));
+    /* Normal region has zero lrtb = no slice9 */
     TEST_ASSERT_EQUAL_UINT16(0, r_normal->slice9_lrtb[0]);
     TEST_ASSERT_EQUAL_UINT16(0, r_normal->slice9_lrtb[1]);
     TEST_ASSERT_EQUAL_UINT16(0, r_normal->slice9_lrtb[2]);
@@ -5262,7 +5261,7 @@ void test_atlas_slice9_forces_rect_packing(void) {
     /* Slice9 auto-forces RECT: exactly 4 vertices, 6 indices */
     TEST_ASSERT_EQUAL_UINT8(4, regions[0].vertex_count);
     TEST_ASSERT_EQUAL_UINT8(6, regions[0].index_count);
-    TEST_ASSERT_TRUE((regions[0].flags & NT_ATLAS_REGION_FLAG_SLICE9) != 0);
+    TEST_ASSERT_TRUE((regions[0].slice9_lrtb[0] | regions[0].slice9_lrtb[1] | regions[0].slice9_lrtb[2] | regions[0].slice9_lrtb[3]) != 0);
 
     free(buf);
 }
@@ -5297,8 +5296,8 @@ void test_atlas_per_sprite_shape_override_rect(void) {
     /* Per-sprite RECT override: exactly 4 vertices, 6 indices */
     TEST_ASSERT_EQUAL_UINT8(4, regions[0].vertex_count);
     TEST_ASSERT_EQUAL_UINT8(6, regions[0].index_count);
-    /* No slice9 flag — just shape override */
-    TEST_ASSERT_EQUAL(0, (regions[0].flags & NT_ATLAS_REGION_FLAG_SLICE9));
+    /* No slice9 — lrtb all zero (just shape override) */
+    TEST_ASSERT_EQUAL_UINT16(0, (regions[0].slice9_lrtb[0] | regions[0].slice9_lrtb[1] | regions[0].slice9_lrtb[2] | regions[0].slice9_lrtb[3]));
 
     free(buf);
 }

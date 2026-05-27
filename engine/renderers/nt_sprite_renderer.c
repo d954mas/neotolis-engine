@@ -495,7 +495,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
 
     /* Slice9 branch: per-entity override or atlas-authored slice9 */
     bool has_s9_ov = (flags & NT_SPRITE_FLAG_SLICE9_OV) != 0;
-    bool has_s9_region = (r->flags & NT_ATLAS_REGION_FLAG_SLICE9) != 0;
+    bool has_s9_region = (r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0;
     if (has_s9_ov || has_s9_region) {
         uint16_t sl;
         uint16_t sr;

@@ -2100,9 +2100,8 @@ void test_atlas_sd_hd_merge_stable_region_indices(void) {
 /* ---- Slice9 tests ---- */
 
 /* Test: slice9 round-trip through resolve.
- * Construct a v6 blob with 1 region that has slice9_lrtb={4,4,6,6} and
- * NT_ATLAS_REGION_FLAG_SLICE9 set. Drive resolve. Verify the test probe
- * returns the correct values. */
+ * Construct a v6 blob with 1 region that has slice9_lrtb={4,4,6,6}.
+ * Drive resolve. Verify the region's slice9_lrtb values round-trip. */
 void test_atlas_slice9_roundtrip(void) {
     NtAtlasVertex verts[4] = {
         {.local_x = 0, .local_y = 0, .atlas_u = 0, .atlas_v = 0},
@@ -2125,7 +2124,7 @@ void test_atlas_slice9_roundtrip(void) {
     region.index_count = 6;
     region.page_index = 0;
     region.transform = 0;
-    region.flags = NT_ATLAS_REGION_FLAG_SLICE9;
+    region.flags = 0;
     region.slice9_lrtb[0] = 4;
     region.slice9_lrtb[1] = 4;
     region.slice9_lrtb[2] = 6;
@@ -2148,25 +2147,19 @@ void test_atlas_slice9_roundtrip(void) {
     nt_atlas_test_drive_resolve(buf, size, &s_user_data);
     TEST_ASSERT_NOT_NULL(s_user_data);
 
+    /* Verify slice9 via region struct directly */
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
-    nt_atlas_slice9_t s9 = nt_atlas_test_get_region_slice9_raw(ad, 0);
-    TEST_ASSERT_EQUAL_UINT16(4, s9.left);
-    TEST_ASSERT_EQUAL_UINT16(4, s9.right);
-    TEST_ASSERT_EQUAL_UINT16(6, s9.top);
-    TEST_ASSERT_EQUAL_UINT16(6, s9.bottom);
-    TEST_ASSERT_TRUE(s9.has_slice9);
-
-    /* Verify the raw region struct also has the data */
     const nt_texture_region_t *r = nt_atlas_test_get_region_raw(ad, 0);
     TEST_ASSERT_EQUAL_UINT16(4, r->slice9_lrtb[0]);
     TEST_ASSERT_EQUAL_UINT16(4, r->slice9_lrtb[1]);
     TEST_ASSERT_EQUAL_UINT16(6, r->slice9_lrtb[2]);
     TEST_ASSERT_EQUAL_UINT16(6, r->slice9_lrtb[3]);
-    TEST_ASSERT_TRUE(r->flags & NT_ATLAS_REGION_FLAG_SLICE9);
+    /* has_slice9 = non-zero lrtb */
+    TEST_ASSERT_TRUE((r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0);
 }
 
-/* Test: region with zero slice9 returns has_slice9==false.
- * All-zero slice9_lrtb and no SLICE9 flag = no slice9. */
+/* Test: region with zero slice9 has no slice9.
+ * All-zero slice9_lrtb = no slice9. */
 void test_atlas_slice9_zero_has_no_slice9(void) {
     NtAtlasVertex verts[4] = {
         {.local_x = 0, .local_y = 0, .atlas_u = 0, .atlas_v = 0},
@@ -2189,7 +2182,7 @@ void test_atlas_slice9_zero_has_no_slice9(void) {
     region.index_count = 6;
     region.page_index = 0;
     region.transform = 0;
-    region.flags = 0; /* no SLICE9 flag */
+    region.flags = 0;
     /* slice9_lrtb already zeroed by memset */
 
     mock_atlas_spec_t spec = {
@@ -2210,12 +2203,12 @@ void test_atlas_slice9_zero_has_no_slice9(void) {
     TEST_ASSERT_NOT_NULL(s_user_data);
 
     const struct nt_atlas_data *ad = (const struct nt_atlas_data *)s_user_data;
-    nt_atlas_slice9_t s9 = nt_atlas_test_get_region_slice9_raw(ad, 0);
-    TEST_ASSERT_EQUAL_UINT8(0, s9.left);
-    TEST_ASSERT_EQUAL_UINT8(0, s9.right);
-    TEST_ASSERT_EQUAL_UINT8(0, s9.top);
-    TEST_ASSERT_EQUAL_UINT8(0, s9.bottom);
-    TEST_ASSERT_FALSE(s9.has_slice9);
+    const nt_texture_region_t *r = nt_atlas_test_get_region_raw(ad, 0);
+    TEST_ASSERT_EQUAL_UINT16(0, r->slice9_lrtb[0]);
+    TEST_ASSERT_EQUAL_UINT16(0, r->slice9_lrtb[1]);
+    TEST_ASSERT_EQUAL_UINT16(0, r->slice9_lrtb[2]);
+    TEST_ASSERT_EQUAL_UINT16(0, r->slice9_lrtb[3]);
+    TEST_ASSERT_FALSE((r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0);
 }
 
 /* Test: v5 header is rejected by validation.

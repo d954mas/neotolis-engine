@@ -735,7 +735,7 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
 
     /* Auto-slice9: per-widget override > atlas default > regular quad */
     const bool has_override = (p->slice9_override[0] | p->slice9_override[1] | p->slice9_override[2] | p->slice9_override[3]) != 0;
-    const bool region_slice9 = (r->flags & NT_ATLAS_REGION_FLAG_SLICE9) != 0;
+    const bool region_slice9 = (r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0;
 
     if (has_override || region_slice9) {
         uint16_t sl;

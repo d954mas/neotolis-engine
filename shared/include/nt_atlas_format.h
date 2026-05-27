@@ -13,8 +13,7 @@
 #define NT_ATLAS_REGION_FLAG_QUAD_012130 ((uint8_t)(1U << 1))
 #define NT_ATLAS_REGION_FLAG_QUAD_012132 ((uint8_t)(1U << 2))
 #define NT_ATLAS_REGION_FLAG_QUAD_MASK ((uint8_t)(NT_ATLAS_REGION_FLAG_QUAD_012023 | NT_ATLAS_REGION_FLAG_QUAD_012130 | NT_ATLAS_REGION_FLAG_QUAD_012132))
-/* Slice9 flag: region has 9-cell border data in slice9_lrtb[4]. */
-#define NT_ATLAS_REGION_FLAG_SLICE9 ((uint8_t)(1U << 3))
+/* Bit 3 reserved (was FLAG_SLICE9; slice9 now detected by non-zero slice9_lrtb). */
 
 /*
  * Atlas asset binary layout:

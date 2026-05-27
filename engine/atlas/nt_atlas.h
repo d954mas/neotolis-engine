@@ -122,20 +122,6 @@ typedef struct {
 
 void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_atlas_region_handles_t *out);
 
-/* ---- Slice9 query ---- */
-
-/* Return slice9 LRTB borders for a region. All zeros = no slice9.
- * Asserts index < region_count. */
-typedef struct {
-    uint16_t left;
-    uint16_t right;
-    uint16_t top;
-    uint16_t bottom;
-    bool has_slice9; /* true if NT_ATLAS_REGION_FLAG_SLICE9 set */
-} nt_atlas_slice9_t;
-
-nt_atlas_slice9_t nt_atlas_get_region_slice9(nt_resource_t atlas, uint32_t region_index);
-
 // #region test_access
 #ifdef NT_TEST_ACCESS
 
@@ -193,9 +179,6 @@ float nt_atlas_test_ipu(const struct nt_atlas_data *ad);
 /* Test-only setter for ipu — used by direct-drive tests to simulate the
  * post_resolve metadata read path without standing up a resource system. */
 void nt_atlas_test_set_ipu_and_recompute(struct nt_atlas_data *ad, float ipu);
-
-/* Slice9 test probe: reads slice9 data directly from an nt_atlas_data pointer. */
-nt_atlas_slice9_t nt_atlas_test_get_region_slice9_raw(const struct nt_atlas_data *ad, uint32_t index);
 
 #endif
 // #endregion
