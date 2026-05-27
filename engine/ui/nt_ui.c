@@ -1586,13 +1586,12 @@ void nt_ui_set_custom_handler(nt_ui_context_t *ctx, nt_ui_custom_handler_t fn, v
 // #endregion
 
 // #region push_pop_transform_opacity
-static void emit_marker(nt_ui_context_t *ctx, uint8_t marker_type, const nt_ui_transform_t *transform, float opacity) {
+static nt_ui_marker_t *emit_marker_base(nt_ui_context_t *ctx, uint8_t marker_type) {
     NT_ASSERT(ctx->marker_count < ctx->max_markers && "marker array full; raise max_markers in nt_ui_create_desc_t");
     nt_ui_marker_t *m = &ctx->markers[ctx->marker_count++];
     m->type = marker_type;
-    m->transform = transform ? *transform : nt_ui_transform_defaults();
-    m->opacity = opacity;
     m->before_clay_idx = (uint32_t)ctx->clay->layoutElements.length;
+    return m;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -1604,26 +1603,26 @@ void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transfo
     NT_ASSERT(isfinite(transform->scale_x) && isfinite(transform->scale_y) && "nt_ui_push_transform: scale must be finite");
     NT_ASSERT(isfinite(transform->rotation) && "nt_ui_push_transform: rotation must be finite");
     NT_ASSERT(isfinite(transform->offset_x) && isfinite(transform->offset_y) && "nt_ui_push_transform: offset must be finite");
-    emit_marker(ctx, NT_UI_MARKER_PUSH_TRANSFORM, transform, 1.0F);
+    emit_marker_base(ctx, NT_UI_MARKER_PUSH_TRANSFORM)->transform = *transform;
 }
 
 void nt_ui_pop_transform(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_pop_transform: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_pop_transform: must be called inside begin/end");
-    emit_marker(ctx, NT_UI_MARKER_POP_TRANSFORM, NULL, 1.0F);
+    emit_marker_base(ctx, NT_UI_MARKER_POP_TRANSFORM);
 }
 
 void nt_ui_push_opacity(nt_ui_context_t *ctx, float opacity) {
     NT_ASSERT(ctx != NULL && "nt_ui_push_opacity: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_push_opacity: must be called inside begin/end");
     NT_ASSERT(isfinite(opacity) && opacity >= 0.0F && opacity <= 1.0F && "nt_ui_push_opacity: must be finite in [0,1]");
-    emit_marker(ctx, NT_UI_MARKER_PUSH_OPACITY, NULL, opacity);
+    emit_marker_base(ctx, NT_UI_MARKER_PUSH_OPACITY)->opacity = opacity;
 }
 
 void nt_ui_pop_opacity(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_pop_opacity: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_pop_opacity: must be called inside begin/end");
-    emit_marker(ctx, NT_UI_MARKER_POP_OPACITY, NULL, 1.0F);
+    emit_marker_base(ctx, NT_UI_MARKER_POP_OPACITY);
 }
 // #endregion
 

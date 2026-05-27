@@ -13,9 +13,11 @@
 /* Side-channel transform/opacity marker (not a Clay element). */
 typedef struct {
     uint8_t type;
-    nt_ui_transform_t transform;
-    float opacity;
     uint32_t before_clay_idx;
+    union {
+        nt_ui_transform_t transform; /* PUSH_TRANSFORM only */
+        float opacity;               /* PUSH_OPACITY only */
+    };
 } nt_ui_marker_t;
 
 /* Lives at arena head; hot fields first. Per-ctx -- no module globals. */

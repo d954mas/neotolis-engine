@@ -56,9 +56,12 @@ static void inject_frozen_cmds(int32_t count) {
 static void inject_marker(uint8_t type, const nt_ui_transform_t *t, float opacity) {
     nt_ui_marker_t *m = &s_fx.ctx->markers[s_fx.ctx->marker_count++];
     m->type = type;
-    m->transform = t ? *t : nt_ui_transform_defaults();
-    m->opacity = opacity;
     m->before_clay_idx = s_test_le_count;
+    if (t) {
+        m->transform = *t;
+    } else {
+        m->opacity = opacity;
+    }
 }
 
 /* Simulate declaring a Clay element: set nt_layout_index on the
