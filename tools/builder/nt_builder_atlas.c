@@ -688,9 +688,11 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     NT_BUILD_ASSERT(sprite->shape_override <= NT_ATLAS_SPRITE_SHAPE_CONCAVE && "invalid shape override value");
     NT_BUILD_ASSERT((sprite->rotate_override == 0 || sprite->rotate_override == NT_ATLAS_SPRITE_ROTATE_NO) && "invalid rotate override value (only 0 or NO)");
     NT_BUILD_ASSERT(sprite->max_verts_override <= 16 && "max_vertices override must be <= 16");
-    /* Per-sprite extrude > 0 requires RECT shape (same constraint as atlas-level). */
-    NT_BUILD_ASSERT((sprite->extrude_override == 0 || sprite->shape_override == NT_ATLAS_SPRITE_SHAPE_RECT || sprite->shape_override == 0) &&
-                    "per-sprite extrude > 0 requires shape == RECT (or atlas default RECT)");
+    /* Per-sprite extrude > 0 requires effective shape == RECT. shape_override=0
+     * inherits atlas default, which may be CONCAVE — must check resolved value. */
+    if (sprite->extrude_override > 0) {
+        NT_BUILD_ASSERT((sprite->shape_override == NT_ATLAS_SPRITE_SHAPE_RECT) && "per-sprite extrude > 0 requires shape == RECT (set shape override explicitly)");
+    }
     /* Slice9 auto-force: any nonzero border -> RECT + no rotation */
     bool has_slice9 = sopts->slice9_left || sopts->slice9_right || sopts->slice9_top || sopts->slice9_bottom;
     if (has_slice9) {

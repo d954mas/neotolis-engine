@@ -106,7 +106,7 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
 /* Emit a 9-quad slice9 image. Same vertex format as emit_region (no new pipeline).
  *
  *   atlas, region_index - must be READY; tombstones no-op.
- *   x, y, w, h          - target rect in world space (top-left origin).
+ *   x, y, w, h          - target rect in caller's coordinate space (UI passes GL Y-up world coords).
  *   sl, sr, st, sb       - slice9 borders in source pixels (left, right, top, bottom).
  *   color_packed          - 0xAABBGGRR.
  *   flip_bits             - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y.
