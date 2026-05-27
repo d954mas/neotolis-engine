@@ -1485,9 +1485,8 @@ static void pipeline_compose(AtlasPipeline *p) {
         AtlasPlacement *pl = &p->placements[pi];
         uint32_t idx = pl->sprite_index;
         uint32_t sprite_extrude = p->sprites[idx].extrude_override ? p->sprites[idx].extrude_override : p->opts->extrude;
-        uint32_t sprite_margin = p->sprites[idx].margin_override ? p->sprites[idx].margin_override : p->opts->margin;
-        uint32_t inner_x = pl->x + sprite_extrude + sprite_margin;
-        uint32_t inner_y = pl->y + sprite_extrude + sprite_margin;
+        uint32_t inner_x = pl->x + sprite_extrude;
+        uint32_t inner_y = pl->y + sprite_extrude;
 
         blit_sprite(p->page_pixels[pl->page], p->page_w[pl->page], p->sprites[idx].rgba, p->sprites[idx].width, pl->trim_x, pl->trim_y, pl->trimmed_w, pl->trimmed_h, inner_x, inner_y, pl->transform);
 
@@ -1517,9 +1516,8 @@ static void pipeline_debug_png(AtlasPipeline *p) {
             }
             uint32_t si = p->placements[pi].sprite_index;
             uint32_t sprite_extrude = p->sprites[si].extrude_override ? p->sprites[si].extrude_override : p->opts->extrude;
-            uint32_t sprite_margin = p->sprites[si].margin_override ? p->sprites[si].margin_override : p->opts->margin;
-            uint32_t ix = p->placements[pi].x + sprite_extrude + sprite_margin;
-            uint32_t iy = p->placements[pi].y + sprite_extrude + sprite_margin;
+            uint32_t ix = p->placements[pi].x + sprite_extrude;
+            uint32_t iy = p->placements[pi].y + sprite_extrude;
 
             if (p->opts->shape != NT_ATLAS_SHAPE_RECT && p->hull_vertices[si] && p->vertex_counts[si] >= 3) {
                 debug_draw_hull_outline(debug_page, p->page_w[pg], p->page_h[pg], p->hull_vertices[si], p->vertex_counts[si], ix, iy, p->trim_w[si], p->trim_h[si], p->placements[pi].transform);
@@ -1733,11 +1731,9 @@ static void pipeline_serialize(AtlasPipeline *p) {
         memcpy(&indices[index_cursor], local_indices, idx_count * sizeof(uint16_t));
         index_cursor += idx_count;
 
-        /* Per-sprite extrude/margin for UV computation */
         uint32_t s_extrude = p->sprites[i].extrude_override ? p->sprites[i].extrude_override : p->opts->extrude;
-        uint32_t s_margin = p->sprites[i].margin_override ? p->sprites[i].margin_override : p->opts->margin;
-        uint32_t inner_x = pl->x + s_extrude + s_margin;
-        uint32_t inner_y = pl->y + s_extrude + s_margin;
+        uint32_t inner_x = pl->x + s_extrude;
+        uint32_t inner_y = pl->y + s_extrude;
         uint32_t atlas_w = p->page_w[pl->page];
         uint32_t atlas_h = p->page_h[pl->page];
 
