@@ -153,8 +153,12 @@ typedef struct {
 /* Identity transform (MUST use this, not zero-init -- scale must be positive; use opacity=0 to hide). */
 static inline nt_ui_transform_t nt_ui_transform_defaults(void) { return (nt_ui_transform_t){.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F}; }
 
-#define NT_UI_TRANSFORM_STACK_DEPTH_CAP 8
-#define NT_UI_OPACITY_STACK_DEPTH_CAP 8
+#ifndef NT_UI_TRANSFORM_STACK_DEPTH_CAP
+#define NT_UI_TRANSFORM_STACK_DEPTH_CAP 16
+#endif
+#ifndef NT_UI_OPACITY_STACK_DEPTH_CAP
+#define NT_UI_OPACITY_STACK_DEPTH_CAP 16
+#endif
 
 /* Push/pop during declaration phase (between begin/end). Stack depth <= 8.
  * Offset: applies to all element types (position shift).
