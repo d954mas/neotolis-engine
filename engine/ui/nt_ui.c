@@ -1029,8 +1029,9 @@ static void walker_recompute_transform(nt_ui_walker_state_t *ws) {
         ws->aff_ty = nty;
         ws->accum_scale_x *= sx;
         ws->accum_scale_y *= sy;
-        ws->accum_rotation += r;
     }
+    /* Extract actual rotation from composed affine matrix */
+    ws->accum_rotation = atan2f(ws->aff_c, ws->aff_a);
 }
 
 static void walker_recompute_opacity(nt_ui_walker_state_t *ws) {

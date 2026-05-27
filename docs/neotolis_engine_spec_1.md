@@ -1335,11 +1335,12 @@ NtAtlasRegion[region_count] (48 bytes each, v6)
   index_count:    u8    (triangle indices for this region; ≤ 255)
   flags:          u8    (builder-authored render hints, e.g. NT_ATLAS_REGION_FLAG_QUAD_*,
                          NT_ATLAS_REGION_FLAG_SLICE9)
+  _pad0:          u8    (alignment padding for uint16 slice9_lrtb)
   slice9_lrtb[4]: u16   (slice9 borders [left, right, top, bottom] in pixels;
                          all zero = no slice9. When NT_ATLAS_REGION_FLAG_SLICE9 is set,
                          runtime uses these borders for 9-cell stretching. Slice9 sprites
                          are never alpha-trimmed and always use RECT shape.)
-  _reserved2[3]:  u8    (must be zero)
+  _reserved2[2]:  u8    (must be zero)
 
 NtAtlasVertex[total_vertex_count] (8 bytes each, at vertex_offset)
   local_x:   i16  (corner X in trim-rect local space, 0..trim_w.

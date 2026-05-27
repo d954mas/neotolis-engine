@@ -516,6 +516,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         /* Inline slice9 emit using world_matrix directly (same transform
          * pipeline as regular sprites in emit_region_resolved). */
         NT_ASSERT(r->transform == 0 && "slice9 region must have transform == 0");
+        NT_ASSERT(r->trim_offset_x == 0 && r->trim_offset_y == 0 && "slice9 region must be untrimmed");
         NT_ASSERT(r->source_w > 0 && r->source_h > 0);
         NT_ASSERT(sl + sr < r->source_w && st + sb < r->source_h);
 
@@ -546,8 +547,23 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         /* Build 4x4 grid in local source space (ipu-scaled, origin at 0,0). */
         const float src_w = (float)r->source_w * ipu;
         const float src_h = (float)r->source_h * ipu;
-        float lxs[4] = {0.0F, (float)fl * ipu, src_w - ((float)fr * ipu), src_w};
-        float lys[4] = {0.0F, (float)fb * ipu, src_h - ((float)ft * ipu), src_h};
+        float fl_w = (float)fl * ipu;
+        float fr_w = (float)fr * ipu;
+        float ft_w = (float)ft * ipu;
+        float fb_w = (float)fb * ipu;
+        /* Proportionally shrink borders when source rect is smaller than total borders */
+        if (fl_w + fr_w > src_w) {
+            float ratio = src_w / (fl_w + fr_w);
+            fl_w *= ratio;
+            fr_w *= ratio;
+        }
+        if (ft_w + fb_w > src_h) {
+            float ratio = src_h / (ft_w + fb_w);
+            ft_w *= ratio;
+            fb_w *= ratio;
+        }
+        float lxs[4] = {0.0F, fl_w, src_w - fr_w, src_w};
+        float lys[4] = {0.0F, fb_w, src_h - ft_w, src_h};
 
         /* Pivot offset into translation (mirrors emit_region_resolved). */
         const float *m = tv->world_matrices[t_idx];
@@ -895,6 +911,17 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     float fr_w = (float)fr * ipu;
     float ft_w = (float)ft * ipu;
     float fb_w = (float)fb * ipu;
+    /* Proportionally shrink borders when target rect is smaller than total borders */
+    if (fl_w + fr_w > w) {
+        float ratio = w / (fl_w + fr_w);
+        fl_w *= ratio;
+        fr_w *= ratio;
+    }
+    if (ft_w + fb_w > h) {
+        float ratio = h / (ft_w + fb_w);
+        ft_w *= ratio;
+        fb_w *= ratio;
+    }
     float xs[4] = {x, x + fl_w, x + w - fr_w, x + w};
     float ys[4] = {y, y + fb_w, y + h - ft_w, y + h};
 
