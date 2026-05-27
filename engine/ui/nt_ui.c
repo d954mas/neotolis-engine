@@ -716,16 +716,9 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
         return; /* tombstone */
     }
 
-    /* Resolve origin: override flag = style value, otherwise atlas default. */
-    float ox;
-    float oy;
-    if (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
-        ox = p->origin_x;
-        oy = p->origin_y;
-    } else {
-        ox = r->origin_x;
-        oy = r->origin_y;
-    }
+    /* UI rotation center: default center (0.5), override from style flag. */
+    const float ox = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_x : 0.5F;
+    const float oy = (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) ? p->origin_y : 0.5F;
 
     /* Auto-slice9: flag OR non-zero lrtb = override; flag adds ability to
      * override with zeros (disable slice9). Backward compat: non-zero lrtb
@@ -760,22 +753,24 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
     const float sx_f = bb.width / src_w;
     const float sy_f = bb.height / src_h;
 
+    /* UI images fill Clay bbox from top-left — origin (0,0) for positioning.
+     * ox/oy from atlas/override only affects rotation center, not position. */
     if (rotation == 0.0F) {
         const float m[16] = {
             sx_f, 0.0F, 0.0F, 0.0F, 0.0F, sy_f, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, bb.x, bb.y, 0.0F, 1.0F,
         };
-        nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, ox, oy, col, p->flip_bits);
+        nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
     } else {
-        const float rcx = bb.x + (bb.width * 0.5F);
-        const float rcy = bb.y + (bb.height * 0.5F);
-        const float hw = bb.width * 0.5F;
-        const float hh = bb.height * 0.5F;
+        const float rcx = bb.x + (ox * bb.width);
+        const float rcy = bb.y + (oy * bb.height);
+        const float hw = ox * bb.width;
+        const float hh = oy * bb.height;
         const float rc = cosf(rotation);
         const float rs = sinf(rotation);
         const float m[16] = {
             sx_f * rc, sx_f * rs, 0, 0, sy_f * (-rs), sy_f * rc, 0, 0, 0, 0, 1, 0, rcx - (rc * hw) + (rs * hh), rcy - (rs * hw) - (rc * hh), 0, 1,
         };
-        nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, ox, oy, col, p->flip_bits);
+        nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
     }
 }
 // #endregion

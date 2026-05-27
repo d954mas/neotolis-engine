@@ -108,9 +108,9 @@ static void test_push_pop_transform_balanced(void) {
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
 }
 
-/* Push 9 transforms (depth > 8). Expect NT_ASSERT overflow. */
+/* Push 17 transforms (depth > 16). Expect NT_ASSERT overflow. */
 static void test_transform_stack_overflow(void) {
-    for (int k = 0; k < 9; ++k) {
+    for (int k = 0; k < 17; ++k) {
         nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F};
         inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
     }

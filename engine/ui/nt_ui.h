@@ -160,7 +160,7 @@ static inline nt_ui_transform_t nt_ui_transform_defaults(void) { return (nt_ui_t
 #define NT_UI_OPACITY_STACK_DEPTH_CAP 16
 #endif
 
-/* Push/pop during declaration phase (between begin/end). Stack depth <= 8.
+/* Push/pop during declaration phase (between begin/end). Stack depth <= NT_UI_TRANSFORM_STACK_DEPTH_CAP.
  * Offset: applies to all element types (position shift).
  * Scale: applies to all element types (position + size).
  * Rotation: applies to all element types. SCISSOR uses AABB approximation
