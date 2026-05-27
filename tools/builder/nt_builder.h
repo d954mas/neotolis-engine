@@ -361,7 +361,7 @@ typedef struct {
     uint8_t allow_rotate; /* 0 = atlas default, NT_ATLAS_SPRITE_ROTATE_NO = restrict */
     uint8_t max_vertices; /* 0 = atlas default */
     uint8_t margin;       /* 0 = atlas default, overrides opts.margin for this sprite */
-    uint8_t extrude;      /* 0 = atlas default, must be <= atlas opts.extrude (tile pack reserves atlas-level space) */
+    uint8_t extrude;      /* 0 = atlas default, overrides opts.extrude for this sprite (RECT only) */
 } nt_atlas_sprite_opts_t;
 
 /* Default per-sprite opts — centre pivot, name derived from path. */

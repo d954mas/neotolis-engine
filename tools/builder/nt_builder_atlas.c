@@ -688,8 +688,7 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     NT_BUILD_ASSERT(sprite->shape_override <= NT_ATLAS_SPRITE_SHAPE_CONCAVE && "invalid shape override value");
     NT_BUILD_ASSERT((sprite->rotate_override == 0 || sprite->rotate_override == NT_ATLAS_SPRITE_ROTATE_NO) && "invalid rotate override value (only 0 or NO)");
     NT_BUILD_ASSERT(sprite->max_verts_override <= 16 && "max_vertices override must be <= 16");
-    /* Per-sprite extrude > 0 requires RECT shape (same constraint as atlas-level).
-     * Override must not exceed atlas extrude — tile pack reserves atlas-level space. */
+    /* Per-sprite extrude > 0 requires RECT shape (same constraint as atlas-level). */
     NT_BUILD_ASSERT((sprite->extrude_override == 0 || sprite->shape_override == NT_ATLAS_SPRITE_SHAPE_RECT || sprite->shape_override == 0) &&
                     "per-sprite extrude > 0 requires shape == RECT (or atlas default RECT)");
     /* Slice9 auto-force: any nonzero border -> RECT + no rotation */
@@ -1403,15 +1402,20 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         u_hull_counts[i] = p->vertex_counts[oi];
     }
 
-    /* Per-sprite margin override: expand trim dims for sprites with a margin
-     * larger than the atlas-level value. Use a scratch hull so the original
-     * hull_vertices stay untouched for serialization. */
+    /* Per-sprite margin/extrude override: expand trim dims so the packing
+     * footprint covers the full content + extrude band + margin.  vector_pack
+     * inflates all hulls by atlas-level (extrude + padding/2), so any per-sprite
+     * extrude that exceeds the atlas default needs extra tile space here.
+     * Use a scratch hull so the original hull_vertices stay untouched for
+     * serialization. */
     for (uint32_t i = 0; i < p->unique_count; i++) {
         uint32_t oi = p->unique_indices[i];
         uint32_t sprite_margin = p->sprites[oi].margin_override ? p->sprites[oi].margin_override : p->opts->margin;
-        if (sprite_margin > 0) {
-            u_trim_w[i] += sprite_margin * 2;
-            u_trim_h[i] += sprite_margin * 2;
+        uint32_t sprite_extrude = p->sprites[oi].extrude_override ? p->sprites[oi].extrude_override : p->opts->extrude;
+        uint32_t extra_extrude = (sprite_extrude > p->opts->extrude) ? (sprite_extrude - p->opts->extrude) : 0;
+        if (sprite_margin > 0 || extra_extrude > 0) {
+            u_trim_w[i] += sprite_margin * 2 + extra_extrude * 2;
+            u_trim_h[i] += sprite_margin * 2 + extra_extrude * 2;
             /* Allocate scratch hull — original hull_vertices must survive for serialize */
             Point2D *scratch = (Point2D *)malloc(4 * sizeof(Point2D));
             NT_BUILD_ASSERT(scratch && "pipeline_tile_pack: scratch hull alloc failed");
