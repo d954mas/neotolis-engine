@@ -1012,7 +1012,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     s_sprite.last_slice9_vertex_count = 16U;
     s_sprite.last_slice9_index_count = 54U;
     /* Also update the generic last_emit so test_last_emit_position/texcoord work. */
-    s_sprite.last_emit_vertex_count = 36U;
+    s_sprite.last_emit_vertex_count = 16U;
     s_sprite.last_emit_index_count = 54U;
     s_sprite.last_emit_first_vertex = base;
 #endif
