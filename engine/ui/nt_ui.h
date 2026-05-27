@@ -60,6 +60,17 @@ typedef struct {
 } nt_ui_image_payload_t;
 _Static_assert(sizeof(nt_ui_image_payload_t) == 28, "nt_ui_image_payload_t stable ABI");
 
+/* Typed wrapper for Clay CUSTOM element data. Engine and game share the
+ * same customData slot; type tag distinguishes engine anchors from game
+ * handlers. Allocate from nt_mem_scratch (frame arena). */
+typedef struct {
+    uint8_t type;
+    void *data;
+} nt_ui_custom_data_t;
+
+#define NT_UI_CUSTOM_TYPE_NONE 0 /* engine anchor: skip, bbox only */
+#define NT_UI_CUSTOM_TYPE_GAME 1 /* game handler */
+
 /* clay_cmd is opaque const Clay_RenderCommand * (cast back inside handler).
  * Handler owns the GL state it touches: if you change viewport or scissor,
  * restore them before returning. Walker only rebinds the sprite material

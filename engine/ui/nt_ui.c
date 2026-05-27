@@ -1096,8 +1096,14 @@ static void process_marker(const nt_ui_marker_t *marker, nt_ui_walker_state_t *w
     }
 }
 
-/* Game CUSTOM handler: flush both renderers so handler starts clean. */
+/* Typed CUSTOM dispatch: engine anchors (type=NONE) skip silently;
+ * game handlers (type=GAME) flush and invoke the custom callback. */
 static void emit_custom(const nt_ui_context_t *ctx, const Clay_RenderCommand *c, bool *sprite_pipeline_dirty) {
+    const nt_ui_custom_data_t *cd = (const nt_ui_custom_data_t *)c->renderData.custom.customData;
+    NT_ASSERT(cd != NULL && "CUSTOM command must have nt_ui_custom_data_t");
+    if (cd->type == NT_UI_CUSTOM_TYPE_NONE) {
+        return;
+    }
     nt_sprite_renderer_flush();
     nt_text_renderer_flush();
     *sprite_pipeline_dirty = true;

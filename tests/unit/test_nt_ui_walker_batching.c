@@ -107,9 +107,11 @@ static void test_custom_is_hard_barrier(void) {
     s_custom_calls = 0;
     nt_ui_set_custom_handler(s_fx.ctx, custom_cb, NULL);
 
+    static nt_ui_custom_data_t cd = {.type = NT_UI_CUSTOM_TYPE_GAME, .data = NULL};
     make_rect(0, 0, 0);
     s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_CUSTOM;
     s_test_cmds[1].zIndex = 0;
+    s_test_cmds[1].renderData.custom.customData = &cd;
     make_rect(2, 0, 20);
     inject_frozen_cmds(3);
 

@@ -50,11 +50,12 @@ static void test_custom_handler_invoked(void) {
     int sentinel = 42;
     nt_ui_set_custom_handler(s_fx.ctx, test_custom_handler, &sentinel);
 
+    nt_ui_custom_data_t cd = {.type = NT_UI_CUSTOM_TYPE_GAME, .data = NULL};
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_CUSTOM;
     c->boundingBox = (Clay_BoundingBox){.x = 5, .y = 5, .width = 50, .height = 50};
     c->renderData.custom.backgroundColor = (Clay_Color){0};
-    c->renderData.custom.customData = NULL;
+    c->renderData.custom.customData = &cd;
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
@@ -74,9 +75,11 @@ static void test_custom_handler_invoked(void) {
 static void test_null_custom_handler_silent_skip(void) {
     nt_ui_set_custom_handler(s_fx.ctx, NULL, NULL);
 
+    nt_ui_custom_data_t cd = {.type = NT_UI_CUSTOM_TYPE_GAME, .data = NULL};
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_CUSTOM;
     c->boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
+    c->renderData.custom.customData = &cd;
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};

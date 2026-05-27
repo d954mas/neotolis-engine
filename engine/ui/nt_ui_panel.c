@@ -54,12 +54,16 @@ void nt_ui_panel_end(nt_ui_context_t *ctx) {
 void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data) {
     NT_ASSERT(ctx != NULL && "nt_ui_group_begin: ctx must be non-NULL");
 
-    /* Near-transparent RECT so Clay emits a RECTANGLE render command with bbox
-     * for deferred center. Clay skips emission when a==0; alpha=1 (1/255) is
-     * visually invisible but crosses Clay's `backgroundColor.a > 0` threshold. */
+    /* CUSTOM anchor: zero draw calls, zero darkening. type=NONE tells the
+     * walker to skip the handler call but still use the bbox for deferred
+     * center resolution. */
+    nt_ui_custom_data_t *anchor = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_data_t);
+    NT_ASSERT(anchor != NULL && "nt_ui_group_begin: scratch alloc failed");
+    *anchor = (nt_ui_custom_data_t){.type = NT_UI_CUSTOM_TYPE_NONE, .data = NULL};
+
     Clay__OpenElement();
     Clay__ConfigureOpenElement((Clay_ElementDeclaration){
-        .backgroundColor = {0, 0, 0, 1},
+        .custom = {.customData = anchor},
         .userData = (void *)data,
     });
 }

@@ -175,20 +175,21 @@ static void test_transform_offset_applied(void) {
     TEST_ASSERT_TRUE(pos[0] == 30.0F);
 }
 
-/* Register a game custom handler. Emit a CUSTOM command with game data.
- * Verify game handler is called, not intercepted as marker. */
+/* Register a game custom handler. Emit a CUSTOM command with game data
+ * wrapped in nt_ui_custom_data_t(type=GAME). Verify handler is called. */
 static void test_game_custom_not_confused(void) {
     int sentinel = 99;
     nt_ui_set_custom_handler(s_fx.ctx, game_custom_handler, &sentinel);
 
-    /* Game data: arbitrary non-marker data. */
+    /* Game data: arbitrary non-marker data, wrapped in typed envelope. */
     uint32_t game_data[2] = {0xDEADBEEF, 42};
+    nt_ui_custom_data_t cd = {.type = NT_UI_CUSTOM_TYPE_GAME, .data = &game_data};
 
     Clay_RenderCommand *c = &s_test_cmds[0];
     c->commandType = CLAY_RENDER_COMMAND_TYPE_CUSTOM;
     c->boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 10, .height = 10};
     c->renderData.custom.backgroundColor = (Clay_Color){0};
-    c->renderData.custom.customData = &game_data;
+    c->renderData.custom.customData = &cd;
     inject_frozen_cmds(1);
 
     nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
