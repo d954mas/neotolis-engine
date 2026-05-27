@@ -850,6 +850,8 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_slice9: invalid atlas handle");
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_slice9: atlas must be READY");
     NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_emit_slice9: call nt_sprite_renderer_set_material first");
+    NT_ASSERT(isfinite(x) && isfinite(y) && isfinite(w) && isfinite(h) && isfinite(rotation));
+    NT_ASSERT(w >= 0.0F && h >= 0.0F && "slice9 target dimensions must be non-negative");
 
     nt_atlas_region_handles_t rh;
     nt_atlas_get_region_handles(atlas, region_index, &rh);

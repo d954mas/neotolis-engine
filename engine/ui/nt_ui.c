@@ -267,24 +267,20 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     ctx->frozen_cmds = Clay_EndLayout();
 
     /* Remap marker before_clay_idx from layout-element-space to render-command-space.
-     * Each render command carries nt_layout_index (Clay patch). Binary search
-     * for first cmd whose nt_layout_index >= marker target. O(M × log R). */
+     * Linear scan: nt_layout_index may be non-monotonic after zIndex sort. */
     if (ctx->marker_count > 0) {
         const Clay_RenderCommandArray *cmds = &ctx->frozen_cmds;
         const int32_t R = cmds->length;
         for (uint32_t mi = 0; mi < ctx->marker_count; ++mi) {
             const int32_t target = (int32_t)ctx->markers[mi].before_clay_idx;
-            int32_t lo = 0;
-            int32_t hi = R;
-            while (lo < hi) {
-                const int32_t mid = lo + ((hi - lo) >> 1);
-                if (cmds->internalArray[mid].nt_layout_index < target) {
-                    lo = mid + 1;
-                } else {
-                    hi = mid;
+            int32_t found = R;
+            for (int32_t ci = 0; ci < R; ++ci) {
+                if (cmds->internalArray[ci].nt_layout_index >= target) {
+                    found = ci;
+                    break;
                 }
             }
-            ctx->markers[mi].before_clay_idx = (uint32_t)lo;
+            ctx->markers[mi].before_clay_idx = (uint32_t)found;
         }
     }
 

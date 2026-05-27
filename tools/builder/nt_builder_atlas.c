@@ -882,6 +882,8 @@ static void pipeline_alpha_trim(AtlasPipeline *p) {
         /* Slice9 requires untrimmed source rect — runtime asserts trim_offset == 0 */
         bool has_s9 = p->sprites[i].slice9_left || p->sprites[i].slice9_right || p->sprites[i].slice9_top || p->sprites[i].slice9_bottom;
         if (has_s9) {
+            NT_BUILD_ASSERT(p->sprites[i].slice9_left + p->sprites[i].slice9_right < p->sprites[i].width && "slice9 left+right borders >= source width");
+            NT_BUILD_ASSERT(p->sprites[i].slice9_top + p->sprites[i].slice9_bottom < p->sprites[i].height && "slice9 top+bottom borders >= source height");
             p->trim_x[i] = 0;
             p->trim_y[i] = 0;
             p->trim_w[i] = p->sprites[i].width;
