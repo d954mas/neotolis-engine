@@ -21,7 +21,7 @@
 #define ASSET_ATLAS_UI_THEME_DEMO_ATLAS ((nt_hash64_t){0x92642FA7690C0AF6ULL}) /* ui_theme_demo_atlas */
 
 /* --- ATLAS_REGION --- */
-#define ASSET_ATLAS_REGION_UI_THEME_DEMO_ATLAS__WHITE_PNG ((nt_hash64_t){0x891F307905D4C531ULL}) /* ui_theme_demo_atlas/_white.png */
+#define ASSET_ATLAS_REGION_UI_THEME_DEMO_ATLAS_WHITE_PNG ((nt_hash64_t){0x68BB7E608D93CC56ULL}) /* ui_theme_demo_atlas/white.png */
 
 #if NT_HASH_LABELS
 static inline void ui_theme_demo_register_labels(void) {
@@ -31,8 +31,8 @@ static inline void ui_theme_demo_register_labels(void) {
     (void)nt_hash64_str("assets/shaders/sprite.vert");
     (void)nt_hash64_str("ui_theme_demo/font");
     (void)nt_hash64_str("ui_theme_demo_atlas");
-    (void)nt_hash64_str("ui_theme_demo_atlas/_white.png");
     (void)nt_hash64_str("ui_theme_demo_atlas/tex0");
+    (void)nt_hash64_str("ui_theme_demo_atlas/white.png");
 }
 #endif
 
