@@ -293,8 +293,9 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_resource WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # --- Atlas module tests ---
-    add_executable(test_atlas unit/test_atlas.c)
+    add_executable(test_atlas unit/test_atlas.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_atlas PRIVATE nt_atlas nt_resource nt_hash unity)
+    target_include_directories(test_atlas PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_atlas PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_atlas)
 

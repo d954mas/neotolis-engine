@@ -1362,10 +1362,22 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     while (i < arr->length) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
         if (!is_segmentable(c->commandType)) {
-            /* Drain markers for non-segmentable commands too. */
             while (mcur < ctx->marker_count && ctx->markers[mcur].before_clay_idx <= cmd_idx) {
                 process_marker(&ctx->markers[mcur], &ws);
                 ++mcur;
+            }
+            /* Resolve pending centers from non-segmentable commands too (SCISSOR_START has valid bbox). */
+            if (ws.pending_center_count > 0 && c->boundingBox.width > 0 && c->commandType != CLAY_RENDER_COMMAND_TYPE_NONE && c->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
+                const float rcx = c->boundingBox.x + (c->boundingBox.width * 0.5F);
+                const float rcy = c->boundingBox.y + (c->boundingBox.height * 0.5F);
+                for (int pi = 0; pi < ws.pending_center_count; ++pi) {
+                    const int pd = ws.pending_center_stack[pi];
+                    ws.push_center_x[pd] = rcx;
+                    ws.push_center_y[pd] = rcy;
+                    ws.center_resolved[pd] = true;
+                }
+                ws.pending_center_count = 0;
+                walker_recompute_transform(&ws);
             }
             ++cmd_idx;
             dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws);

@@ -261,6 +261,8 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
     }
 
     const NtAtlasHeader *hdr = (const NtAtlasHeader *)data;
+    NT_ASSERT(hdr->magic == NT_ATLAS_MAGIC && "atlas blob: bad magic (not an atlas or corrupted)");
+    NT_ASSERT(hdr->version == NT_ATLAS_VERSION && "atlas blob: version mismatch (rebuild packs with current builder)");
     if (hdr->magic != NT_ATLAS_MAGIC || hdr->version != NT_ATLAS_VERSION || hdr->page_count > NT_ATLAS_MAX_PAGES) {
         return false;
     }

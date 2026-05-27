@@ -7,6 +7,7 @@
 /* NT_TEST_ACCESS is provided by the CMake target. */
 
 /* clang-format off */
+#include "test_helpers/nt_assert_trap.h"
 #include "atlas/nt_atlas.h"
 #include "hash/nt_hash.h"
 #include "nt_atlas_format.h"
@@ -93,6 +94,7 @@ static uint32_t s_fake_texture_next_handle = 0x7000U;
 static void *s_user_data;
 
 void setUp(void) {
+    nt_test_assert_install();
     s_user_data = NULL;
     s_fake_texture_next_handle = 0x7000U;
 }
@@ -1127,14 +1129,14 @@ void test_atlas_on_resolve_header_validation_rejects_corruption(void) {
     memcpy(corrupt_magic, buf, valid_size);
     uint32_t bad_magic = 0xDEADBEEFU;
     memcpy(corrupt_magic, &bad_magic, sizeof(bad_magic));
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_magic, valid_size), "corrupted magic should fail");
+    NT_TEST_EXPECT_ASSERT(nt_atlas_test_validate_header(corrupt_magic, valid_size));
 
     /* Version corruption: overwrite bytes 4-5 */
     uint8_t corrupt_version[512];
     memcpy(corrupt_version, buf, valid_size);
     uint16_t bad_version = 0xFFFFU;
     memcpy(corrupt_version + 4, &bad_version, sizeof(bad_version));
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(corrupt_version, valid_size), "bad version should fail");
+    NT_TEST_EXPECT_ASSERT(nt_atlas_test_validate_header(corrupt_version, valid_size));
 
     /* Truncated blob: size < sizeof(NtAtlasHeader) */
     TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(buf, 10), "truncated blob should fail");
@@ -2227,7 +2229,7 @@ void test_atlas_v5_header_rejected(void) {
     uint16_t v5 = 5;
     memcpy(buf + 4, &v5, sizeof(v5));
 
-    TEST_ASSERT_FALSE_MESSAGE(nt_atlas_test_validate_header(buf, size), "v5 header should be rejected");
+    NT_TEST_EXPECT_ASSERT(nt_atlas_test_validate_header(buf, size));
 }
 
 int main(void) {
