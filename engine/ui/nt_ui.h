@@ -147,7 +147,7 @@ typedef struct {
     float scale_y;  /* 1.0 = default, multiplicative */
 } nt_ui_transform_t;
 
-/* Identity transform (MUST use this, not zero-init -- scale=0 makes invisible). */
+/* Identity transform (MUST use this, not zero-init -- scale must be positive; use opacity=0 to hide). */
 static inline nt_ui_transform_t nt_ui_transform_defaults(void) { return (nt_ui_transform_t){.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F}; }
 
 #define NT_UI_TRANSFORM_STACK_DEPTH_CAP 8

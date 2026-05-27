@@ -1402,9 +1402,10 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                 ++mcur;
             }
             ++cmd_idx;
-            /* Resolve ALL pending centers from first renderable with width > 0. */
-            if (ws.pending_center_count > 0 && cc->boundingBox.width > 0 && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM && cc->commandType != CLAY_RENDER_COMMAND_TYPE_NONE &&
-                cc->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_START && cc->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
+            /* Resolve ALL pending centers from first command with valid bbox.
+             * SCISSOR_START has a bbox -- include it so transforms wrapping a
+             * clip-only subtree still resolve their center. */
+            if (ws.pending_center_count > 0 && cc->boundingBox.width > 0 && cc->commandType != CLAY_RENDER_COMMAND_TYPE_NONE && cc->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
                 const float rcx = cc->boundingBox.x + (cc->boundingBox.width * 0.5F);
                 const float rcy = cc->boundingBox.y + (cc->boundingBox.height * 0.5F);
                 for (int pi = 0; pi < ws.pending_center_count; ++pi) {
@@ -1549,6 +1550,7 @@ void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transfo
     NT_ASSERT(ctx != NULL && "nt_ui_push_transform: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_push_transform: must be called inside begin/end");
     NT_ASSERT(transform != NULL && "nt_ui_push_transform: transform must be non-NULL");
+    NT_ASSERT(transform->scale_x > 0.0F && transform->scale_y > 0.0F && "nt_ui_push_transform: scale must be positive; use opacity=0 to hide");
     NT_ASSERT(isfinite(transform->scale_x) && isfinite(transform->scale_y) && "nt_ui_push_transform: scale must be finite");
     NT_ASSERT(isfinite(transform->rotation) && "nt_ui_push_transform: rotation must be finite");
     NT_ASSERT(isfinite(transform->offset_x) && isfinite(transform->offset_y) && "nt_ui_push_transform: offset must be finite");

@@ -1,7 +1,7 @@
 /* Unit tests for nt_ui_panel/group widgets (Phase 54 Plan 05).
  *
- * Tests verify balanced push/pop of transform+opacity stacks,
- * Clay element tree integrity, and death tests for invalid input.
+ * Tests verify Clay element tree integrity and death tests for invalid input.
+ * Panel/group no longer push transform/opacity -- game uses explicit push/pop.
  * Pattern follows test_nt_ui_label.c and test_nt_ui_image.c. */
 
 #include <stdalign.h>
@@ -71,7 +71,7 @@ static void test_panel_begin_end_balanced(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style, NULL, 1.0F);
+        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style);
         {
             nt_ui_label(s_fx.ctx, NULL, "Inside panel", &s_label_style);
         }
@@ -87,17 +87,19 @@ static void test_panel_begin_end_balanced(void) {
     TEST_ASSERT_NOT_NULL(txt);
 }
 
-/* ---- Test 2: panel with explicit transform ---- */
+/* ---- Test 2: panel with explicit push_transform ---- */
 static void test_panel_with_transform(void) {
     nt_ui_transform_t t = {.offset_x = 10.0F, .offset_y = 5.0F, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F};
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style, &t, 1.0F);
+        nt_ui_push_transform(s_fx.ctx, &t);
+        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style);
         {
             nt_ui_label(s_fx.ctx, NULL, "Offset", &s_label_style);
         }
         nt_ui_panel_end(s_fx.ctx);
+        nt_ui_pop_transform(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
 
@@ -106,17 +108,17 @@ static void test_panel_with_transform(void) {
     TEST_ASSERT_NOT_NULL(img);
 }
 
-/* ---- Test 3: panel with NULL transform (identity) ---- */
-static void test_panel_null_transform(void) {
+/* ---- Test 3: panel without transform (simple container) ---- */
+static void test_panel_no_transform(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style, NULL, 1.0F);
+        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style);
         nt_ui_panel_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Walk succeeds (identity transform used, no assert). */
+    /* Walk succeeds with no transform at all. */
     TEST_PASS();
 }
 
@@ -125,7 +127,7 @@ static void test_group_begin_end_balanced(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_group_begin(s_fx.ctx, NULL, NULL, 1.0F);
+        nt_ui_group_begin(s_fx.ctx, NULL);
         {
             nt_ui_label(s_fx.ctx, NULL, "In group", &s_label_style);
         }
@@ -141,16 +143,18 @@ static void test_group_begin_end_balanced(void) {
     TEST_ASSERT_NULL(img);
 }
 
-/* ---- Test 5: group with opacity ---- */
+/* ---- Test 5: group with explicit push_opacity ---- */
 static void test_group_with_opacity(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_group_begin(s_fx.ctx, NULL, NULL, 0.5F);
+        nt_ui_push_opacity(s_fx.ctx, 0.5F);
+        nt_ui_group_begin(s_fx.ctx, NULL);
         {
             nt_ui_label(s_fx.ctx, NULL, "Half opacity", &s_label_style);
         }
         nt_ui_group_end(s_fx.ctx);
+        nt_ui_pop_opacity(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
 
@@ -163,7 +167,7 @@ static void test_panel_payload_carries_atlas(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style, NULL, 1.0F);
+        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style);
         nt_ui_panel_end(s_fx.ctx);
     }
     nt_ui_end(s_fx.ctx);
@@ -180,13 +184,15 @@ static void test_nested_panel_group(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
     CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style, NULL, 1.0F);
+        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_panel_style);
         {
-            nt_ui_group_begin(s_fx.ctx, NULL, NULL, 0.8F);
+            nt_ui_push_opacity(s_fx.ctx, 0.8F);
+            nt_ui_group_begin(s_fx.ctx, NULL);
             {
                 nt_ui_label(s_fx.ctx, NULL, "Nested", &s_label_style);
             }
             nt_ui_group_end(s_fx.ctx);
+            nt_ui_pop_opacity(s_fx.ctx);
         }
         nt_ui_panel_end(s_fx.ctx);
     }
@@ -206,7 +212,7 @@ static void test_nested_panel_group(void) {
 static void test_panel_null_style_asserts(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, 0, NULL, NULL, 1.0F)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, 0, NULL)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -215,7 +221,7 @@ static void test_panel_invalid_atlas_asserts(void) {
     nt_resource_t bad = {.id = 0};
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
-    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_panel_begin(s_fx.ctx, NULL, bad, 0, &s_panel_style, NULL, 1.0F)); }
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_panel_begin(s_fx.ctx, NULL, bad, 0, &s_panel_style)); }
     nt_ui_end(s_fx.ctx);
 }
 
@@ -225,7 +231,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_panel_begin_end_balanced);
     RUN_TEST(test_panel_with_transform);
-    RUN_TEST(test_panel_null_transform);
+    RUN_TEST(test_panel_no_transform);
     RUN_TEST(test_group_begin_end_balanced);
     RUN_TEST(test_group_with_opacity);
     RUN_TEST(test_panel_payload_carries_atlas);

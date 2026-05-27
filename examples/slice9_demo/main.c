@@ -215,13 +215,17 @@ static void declare_animated_panel(void) {
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
                          .childGap = 8,
                          .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style, &t, opacity);
+            nt_ui_push_transform(s_ctx, &t);
+            nt_ui_push_opacity(s_ctx, opacity);
+            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style);
             {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Animated Panel", &g_panel_label_style);
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hello World", &g_child_label_style);
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Children inherit transform", &g_child_label_style);
             }
             nt_ui_panel_end(s_ctx);
+            nt_ui_pop_opacity(s_ctx);
+            nt_ui_pop_transform(s_ctx);
         }
     }
 }
@@ -255,24 +259,28 @@ static void declare_nested_panels(void) {
     CLAY({.id = CLAY_ID("nested-wrap"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
         /* Outer beige panel */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(500), CLAY_SIZING_FIXED(140)}, .padding = CLAY_PADDING_ALL(12), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_beige_idx, &g_panel_style, &outer_t, 1.0F);
+            nt_ui_push_transform(s_ctx, &outer_t);
+            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_beige_idx, &g_panel_style);
             {
                 /* Middle blue panel */
                 CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(10), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                    nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_blue_idx, &g_panel_style, NULL, mid_opacity);
+                    nt_ui_push_opacity(s_ctx, mid_opacity);
+                    nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_blue_idx, &g_panel_style);
                     {
                         // clang-format off
                         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(8), .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style, NULL, 1.0F);
+                            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style);
                             { nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Nested child", &g_child_label_style); }
                             nt_ui_panel_end(s_ctx);
                         }
                         // clang-format on
                     }
                     nt_ui_panel_end(s_ctx);
+                    nt_ui_pop_opacity(s_ctx);
                 }
             }
             nt_ui_panel_end(s_ctx);
+            nt_ui_pop_transform(s_ctx);
         }
     }
 }

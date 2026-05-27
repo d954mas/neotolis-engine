@@ -1295,7 +1295,7 @@ Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier cu
 
 Builder produces atlas assets from a set of sprite PNGs (or raw RGBA buffers). One atlas yields **two kinds of pack entries**: a single `NT_ASSET_ATLAS` blob with region metadata, plus N `NT_ASSET_TEXTURE` page entries (named `<atlas>/tex0`, `<atlas>/tex1`, …). Runtime keeps a 1:N relationship — one metadata blob references N textures.
 
-Binary layout (`shared/include/nt_atlas_format.h`, packed, **v5**):
+Binary layout (`shared/include/nt_atlas_format.h`, packed, **v6**):
 
 ```
 NtAtlasHeader (28 bytes)

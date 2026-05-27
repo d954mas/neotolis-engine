@@ -9,16 +9,10 @@
 #include "ui/nt_ui_internal.h"
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style, const nt_ui_transform_t *transform,
-                       float opacity) {
+void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style) {
     NT_ASSERT(ctx != NULL && "nt_ui_panel_begin: ctx must be non-NULL");
     NT_ASSERT(style != NULL && "nt_ui_panel_begin: style must be non-NULL");
     NT_ASSERT(atlas.id != 0 && "nt_ui_panel_begin: invalid atlas handle");
-
-    /* Push render-time transform + opacity */
-    nt_ui_transform_t t = transform ? *transform : nt_ui_transform_defaults();
-    nt_ui_push_transform(ctx, &t);
-    nt_ui_push_opacity(ctx, opacity);
 
     /* Allocate payload for Clay IMAGE */
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
@@ -51,16 +45,11 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
 void nt_ui_panel_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_panel_end: ctx must be non-NULL");
     Clay__CloseElement();
-    nt_ui_pop_opacity(ctx);
-    nt_ui_pop_transform(ctx);
+    (void)ctx;
 }
 
-void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const nt_ui_transform_t *transform, float opacity) {
+void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data) {
     NT_ASSERT(ctx != NULL && "nt_ui_group_begin: ctx must be non-NULL");
-
-    nt_ui_transform_t t = transform ? *transform : nt_ui_transform_defaults();
-    nt_ui_push_transform(ctx, &t);
-    nt_ui_push_opacity(ctx, opacity);
 
     /* Transparent RECT so Clay emits a render command with bbox for deferred center. */
     Clay__OpenElement();
@@ -73,6 +62,5 @@ void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, c
 void nt_ui_group_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_group_end: ctx must be non-NULL");
     Clay__CloseElement();
-    nt_ui_pop_opacity(ctx);
-    nt_ui_pop_transform(ctx);
+    (void)ctx;
 }
