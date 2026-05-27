@@ -6,6 +6,7 @@
 #include "material/nt_material.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
+#include "time/nt_time.h"
 
 /* This is the single CLAY_IMPLEMENTATION TU. CMake parses deps/clay/VERSION
  * into CLAY_PINNED_*; the assert below catches version drift. */
@@ -1651,6 +1652,56 @@ uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx) {
 uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_command_count: ctx must be non-NULL");
     return ctx->last_walk_command_count;
+}
+
+float nt_ui_get_last_layout_ms(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_layout_ms: ctx must be non-NULL");
+    return ctx->last_layout_ms;
+}
+
+float nt_ui_get_last_walk_ms(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_ms: ctx must be non-NULL");
+    return ctx->last_walk_ms;
+}
+
+uint32_t nt_ui_get_last_walk_rect_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_rect_count: ctx must be non-NULL");
+    return ctx->last_walk_rect_count;
+}
+
+uint32_t nt_ui_get_last_walk_image_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_image_count: ctx must be non-NULL");
+    return ctx->last_walk_image_count;
+}
+
+uint32_t nt_ui_get_last_walk_text_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_text_count: ctx must be non-NULL");
+    return ctx->last_walk_text_count;
+}
+
+uint32_t nt_ui_get_last_walk_border_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_border_count: ctx must be non-NULL");
+    return ctx->last_walk_border_count;
+}
+
+uint32_t nt_ui_get_last_walk_scissor_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_scissor_count: ctx must be non-NULL");
+    return ctx->last_walk_scissor_count;
+}
+
+uint32_t nt_ui_get_last_walk_max_scissor_depth(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_max_scissor_depth: ctx must be non-NULL");
+    return ctx->last_walk_max_scissor_depth;
+}
+
+uint32_t nt_ui_get_last_walk_transform_pushes(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_transform_pushes: ctx must be non-NULL");
+    return ctx->last_walk_transform_pushes;
+}
+
+uint32_t nt_ui_get_last_walk_opacity_pushes(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_opacity_pushes: ctx must be non-NULL");
+    return ctx->last_walk_opacity_pushes;
 }
 // #endregion
 

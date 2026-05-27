@@ -150,6 +150,19 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx);
 /* Total Clay commands incl. SCISSOR/CUSTOM/NONE (non-drawing barriers). */
 uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx);
+/* Phase 55: CPU timing (ms). layout runs in nt_ui_end; walk in nt_ui_walk. */
+float nt_ui_get_last_layout_ms(const nt_ui_context_t *ctx);
+float nt_ui_get_last_walk_ms(const nt_ui_context_t *ctx);
+/* Phase 55: per-type element counters. Reset each walk. */
+uint32_t nt_ui_get_last_walk_rect_count(const nt_ui_context_t *ctx);
+uint32_t nt_ui_get_last_walk_image_count(const nt_ui_context_t *ctx);
+uint32_t nt_ui_get_last_walk_text_count(const nt_ui_context_t *ctx);
+uint32_t nt_ui_get_last_walk_border_count(const nt_ui_context_t *ctx);
+/* Phase 55: scissor/marker counters. Reset each walk. */
+uint32_t nt_ui_get_last_walk_scissor_count(const nt_ui_context_t *ctx);
+uint32_t nt_ui_get_last_walk_max_scissor_depth(const nt_ui_context_t *ctx);
+uint32_t nt_ui_get_last_walk_transform_pushes(const nt_ui_context_t *ctx);
+uint32_t nt_ui_get_last_walk_opacity_pushes(const nt_ui_context_t *ctx);
 
 // #region transform_opacity_api
 /* Render-time transform -- no layout effect (D-54-09). */
