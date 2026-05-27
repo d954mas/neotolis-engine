@@ -628,11 +628,12 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
             (uint16_t)(u_max - (((uint32_t)fr * u_range) / r->source_w)),
             u_max,
         };
+        /* V inverted: geometry Y-up, texture V is PNG Y-down. */
         uint16_t vs[4] = {
-            v_min,
-            (uint16_t)(v_min + (((uint32_t)fb * v_range) / r->source_h)),
-            (uint16_t)(v_max - (((uint32_t)ft * v_range) / r->source_h)),
             v_max,
+            (uint16_t)(v_max - (((uint32_t)fb * v_range) / r->source_h)),
+            (uint16_t)(v_min + (((uint32_t)ft * v_range) / r->source_h)),
+            v_min,
         };
         if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
             uint16_t t0 = us[0];
@@ -934,11 +935,13 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         (uint16_t)(u_max - (((uint32_t)fr * u_range) / rh.region->source_w)),
         u_max,
     };
+    /* V splits inverted: geometry Y-up but texture V is PNG Y-down.
+     * vs[0] (geometry bottom) → v_max (texture bottom). */
     uint16_t vs[4] = {
-        v_min,
-        (uint16_t)(v_min + (((uint32_t)fb * v_range) / rh.region->source_h)),
-        (uint16_t)(v_max - (((uint32_t)ft * v_range) / rh.region->source_h)),
         v_max,
+        (uint16_t)(v_max - (((uint32_t)fb * v_range) / rh.region->source_h)),
+        (uint16_t)(v_min + (((uint32_t)ft * v_range) / rh.region->source_h)),
+        v_min,
     };
 
     /* UV flip after split computation (D-54-19). */

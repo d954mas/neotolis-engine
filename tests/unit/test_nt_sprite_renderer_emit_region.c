@@ -626,10 +626,13 @@ static void test_slice9_flip_y(void) {
     nt_sprite_renderer_test_last_emit_position(24, pos);
     TEST_ASSERT_TRUE(pos[1] == 72.0F); /* NOLINT */
 
-    /* V UVs: vs reversed => vs[0] should be v_max. */
-    uint16_t uv[2];
-    nt_sprite_renderer_test_last_emit_texcoord(0, uv);
-    TEST_ASSERT_EQUAL_UINT16(6000, uv[1]); /* vs[0] flipped = v_max */
+    /* After V inversion + FLIP_Y: vs[0]<->vs[3] swap. Vertex 0 V < vertex at
+     * row=2 V (bottom row flipped = original top = smaller V in PNG space). */
+    uint16_t uv_bot[2];
+    uint16_t uv_top[2];
+    nt_sprite_renderer_test_last_emit_texcoord(0, uv_bot);
+    nt_sprite_renderer_test_last_emit_texcoord(24, uv_top);
+    TEST_ASSERT_TRUE(uv_bot[1] < uv_top[1]);
 
     nt_sprite_renderer_flush();
 }
