@@ -2226,9 +2226,18 @@ Each `atlas_add` / `atlas_add_raw` / `atlas_add_glob` call accepts an optional `
 
 ```c
 typedef struct {
-    const char *name;   /* NULL = derive from path (atlas_add/glob); required for atlas_add_raw */
-    float origin_x;     /* pivot X, normalized over source_w (default 0.5) */
-    float origin_y;     /* pivot Y, normalized over source_h (default 0.5) */
+    const char *name;        /* NULL = derive from path (atlas_add/glob); required for atlas_add_raw */
+    float origin_x;          /* pivot X, normalized over source_w (default 0.5) */
+    float origin_y;          /* pivot Y, normalized over source_h (default 0.5) */
+    uint16_t slice9_left;    /* slice9 borders in source pixels (0 = no slice9) */
+    uint16_t slice9_right;
+    uint16_t slice9_top;
+    uint16_t slice9_bottom;
+    uint8_t shape;           /* 0 = atlas default, 1 = RECT, 2 = CONVEX, 3 = CONCAVE */
+    uint8_t allow_rotate;    /* 0 = atlas default, 1 = NO */
+    uint8_t max_vertices;    /* 0 = atlas default, max 16 */
+    uint8_t margin;          /* 0 = atlas default, per-sprite packing margin */
+    uint8_t extrude;         /* 0 = atlas default, requires shape = RECT */
 } nt_atlas_sprite_opts_t;
 ```
 
@@ -2247,7 +2256,7 @@ typedef struct {
 
 Separate from the per-asset builder cache (§23.10) because atlas placement is a global decision over the whole sprite set.
 
-**Cache key:** `xxh64(per_sprite(decoded_hash + origin_x + origin_y) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. Per-sprite data is hashed in add-order (not sorted) because cached placements reference sprites by index. Only pack/compose-affecting opts are included (max_size, padding, margin, extrude, alpha_threshold, max_vertices, allow_transform, power_of_two, shape); post-pack fields (format, premultiplied, compress, debug_png) are excluded — those affect the texture encode stage which has its own cache.
+**Cache key:** `xxh64(per_sprite(decoded_hash + origin_x + origin_y + slice9_lrtb + shape + allow_rotate + max_vertices + margin + extrude) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. Per-sprite data is hashed in add-order (not sorted) because cached placements reference sprites by index. Per-sprite overrides (slice9 borders, shape, allow_rotate, max_vertices, margin, extrude) are included because they affect packing geometry and tile placement. Only pack/compose-affecting opts are included (max_size, padding, margin, extrude, alpha_threshold, max_vertices, allow_transform, power_of_two, shape); post-pack fields (format, premultiplied, compress, debug_png) are excluded — those affect the texture encode stage which has its own cache.
 
 **Storage:** one `atlas_<key>.bin` file per cache hit, containing the placement table and the composed page pixels. On hit, the pipeline skips pack/compose/debug_png/cache_write entirely.
 

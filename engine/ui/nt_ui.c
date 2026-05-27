@@ -1627,6 +1627,21 @@ void nt_ui_pop_opacity(nt_ui_context_t *ctx) {
 }
 // #endregion
 
+// #region nt_ui_custom
+void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, void *data) {
+    NT_ASSERT(ctx != NULL);
+    NT_ASSERT(ctx->in_frame);
+    nt_ui_custom_data_t *cd = NT_MEM_SCRATCH_ALLOC(nt_ui_custom_data_t);
+    NT_ASSERT(cd != NULL);
+    *cd = (nt_ui_custom_data_t){.type = NT_UI_CUSTOM_TYPE_GAME, .data = data};
+    CLAY({
+        .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
+        .custom = {.customData = cd},
+        .userData = (void *)elem_data,
+    });
+}
+// #endregion
+
 // #region public_metrics
 uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_draw_calls: ctx must be non-NULL");

@@ -185,6 +185,11 @@ void nt_ui_push_opacity(nt_ui_context_t *ctx, float opacity);
 void nt_ui_pop_opacity(nt_ui_context_t *ctx);
 // #endregion
 
+/* Emit a game CUSTOM element. data is passed through to the custom handler
+ * registered via nt_ui_set_custom_handler. Allocates nt_ui_custom_data_t
+ * wrapper from scratch arena. */
+void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, void *data);
+
 // #region test_access
 #ifdef NT_TEST_ACCESS
 nt_ui_context_t *nt_ui_test_inframe_ctx(void);
