@@ -506,6 +506,49 @@ static void test_scale_before_scissor_resolves_center(void) {
     TEST_ASSERT_TRUE(pos[0] != 130.0F);
 }
 
+/* Transform wraps two elements whose nt_layout_index order differs from
+ * array order (simulates Clay z-sort reordering within a segment).
+ * Push fires before layout_idx=2, pop after layout_idx=4.
+ * Array order: cmd[0]=layout_idx=3, cmd[1]=layout_idx=2.
+ * Without layout-order sort the cursor drains push+pop at cmd[0] (wrong)
+ * and cmd[1] gets identity. With the fix both see the transform. */
+static void test_zsorted_marker_drain_order(void) {
+    /* push_transform(offset_x=10) before layout element 2. */
+    nt_ui_transform_t t = {.offset_x = 10.0F, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F};
+    /* Advance layout counter to 2 before injecting push. */
+    s_test_le_count = 2;
+    inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
+
+    /* cmd[0]: RECT at layout_idx=3 (higher layout, but first in array).
+     * Simulates an element Clay placed earlier in the z-sorted output. */
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 50, .y = 0, .width = 40, .height = 30};
+    s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+    s_test_cmds[0].nt_layout_index = 3;
+
+    /* cmd[1]: RECT at layout_idx=2 (lower layout, but second in array).
+     * This is the element that should see the transform first. */
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 20, .y = 0, .width = 40, .height = 30};
+    s_test_cmds[1].renderData.rectangle.backgroundColor = (Clay_Color){.r = 0, .g = 255, .b = 0, .a = 255};
+    s_test_cmds[1].nt_layout_index = 2;
+
+    /* pop_transform after layout element 4 (both elements are inside). */
+    s_test_le_count = 4;
+    inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
+
+    inject_frozen_cmds(2);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    /* cmd[1] (layout=2) is the last dispatched in layer-0 pass (array order).
+     * offset_x=10 applied: V0.x = 20 + 10 = 30. */
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0U, pos);
+    TEST_ASSERT_TRUE(pos[0] == 30.0F);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_push_pop_transform_balanced);
@@ -523,5 +566,6 @@ int main(void) {
     RUN_TEST(test_nested_group_scale);
     RUN_TEST(test_empty_container_scale_no_crash);
     RUN_TEST(test_scale_before_scissor_resolves_center);
+    RUN_TEST(test_zsorted_marker_drain_order);
     return UNITY_END();
 }

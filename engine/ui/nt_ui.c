@@ -1390,9 +1390,28 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         uint32_t active_layers[8] = {0U};
         if (ctx->marker_count > 0) {
             baked = (baked_xform_t *)nt_mem_scratch_alloc(sizeof(baked_xform_t) * (size_t)seg_n, _Alignof(baked_xform_t));
-            for (int32_t j = i; j < seg_end; ++j) {
-                const Clay_RenderCommand *cc = &arr->internalArray[j];
-                /* Match markers by nt_layout_index — no remap needed. */
+            /* Sort indices by nt_layout_index so marker drain sees declaration
+             * order regardless of Clay's z-sort on the render command array. */
+            int32_t *sorted = (int32_t *)nt_mem_scratch_alloc(sizeof(int32_t) * (size_t)seg_n, _Alignof(int32_t));
+            for (int32_t k = 0; k < seg_n; ++k) {
+                sorted[k] = k;
+            }
+            // #region insertion sort by nt_layout_index
+            for (int32_t k = 1; k < seg_n; ++k) {
+                const int32_t key = sorted[k];
+                const int32_t key_li = arr->internalArray[i + key].nt_layout_index;
+                int32_t p = k - 1;
+                while (p >= 0 && arr->internalArray[i + sorted[p]].nt_layout_index > key_li) {
+                    sorted[p + 1] = sorted[p];
+                    --p;
+                }
+                sorted[p + 1] = key;
+            }
+            // #endregion
+            for (int32_t k = 0; k < seg_n; ++k) {
+                const int32_t orig_idx = sorted[k];
+                const Clay_RenderCommand *cc = &arr->internalArray[i + orig_idx];
+                /* Match markers by nt_layout_index — sorted order restores declaration sequence. */
                 while (mcur < ctx->marker_count && (int32_t)ctx->markers[mcur].before_clay_idx <= cc->nt_layout_index) {
                     process_marker(&ctx->markers[mcur], &ws);
                     ++mcur;
@@ -1412,8 +1431,8 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                     ws.pending_center_count = 0;
                     walker_recompute_transform(&ws);
                 }
-                const int32_t bi = j - i;
-                baked[bi] = (baked_xform_t){
+                /* baked[] indexed by original array position for layer dispatch. */
+                baked[orig_idx] = (baked_xform_t){
                     .a = ws.aff_a,
                     .b = ws.aff_b,
                     .c = ws.aff_c,
