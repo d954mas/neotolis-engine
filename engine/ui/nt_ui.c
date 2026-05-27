@@ -1030,7 +1030,9 @@ static void walker_recompute_transform(nt_ui_walker_state_t *ws) {
         ws->accum_scale_x *= sx;
         ws->accum_scale_y *= sy;
     }
-    /* Extract actual rotation from composed affine matrix */
+    /* Extract actual rotation from composed affine matrix.
+     * atan2(c,a) assumes positive scale; negative scale flips the angle. */
+    NT_ASSERT(ws->accum_scale_x > 0.0F && ws->accum_scale_y > 0.0F && "negative UI scale breaks atan2 rotation extraction");
     ws->accum_rotation = atan2f(ws->aff_c, ws->aff_a);
 }
 
