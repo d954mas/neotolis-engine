@@ -1,5 +1,5 @@
 # Size Report: atlas (wasm-analysis-paired)
-# Commit: 85f4544
+# Commit: 50f408a
 
 ## WASM Section Sizes
 
@@ -88,7 +88,7 @@ TOTAL (linked)            318296 B
 
 Not linked to atlas:
 libnt_app_stub.a            1428 B
-libnt_atlas.a               7016 B
+libnt_atlas.a               7118 B
 libnt_basisu_transcoder.a 1329370 B
 libnt_comp_storage.a        1930 B
 libnt_font.a              198350 B
@@ -100,11 +100,11 @@ libnt_mem_scratch.a         1854 B
 libnt_pool.a                1278 B
 libnt_shape_renderer.a   1140902 B
 libnt_sort.a                 366 B
-libnt_sprite_comp.a         7526 B
-libnt_sprite_renderer.a   432782 B
+libnt_sprite_comp.a         8184 B
+libnt_sprite_renderer.a   445098 B
 libnt_stats.a               5634 B
 libnt_text_renderer.a    1170300 B
-libnt_ui.a                302804 B
+libnt_ui.a                313268 B
 libnt_utf8.a                1000 B
 libnt_window_stub.a         1838 B
 
