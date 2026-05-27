@@ -675,7 +675,7 @@ static nt_atlas_sprite_opts_t atlas_resolve_sprite_opts(const nt_atlas_sprite_op
 /* Copy per-sprite overrides from resolved opts into NtAtlasSpriteInput.
  * Slice9 borders auto-force RECT shape + no rotation. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_atlas_sprite_opts_t *sopts) {
+static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_atlas_sprite_opts_t *sopts, const nt_atlas_opts_t *atlas_opts) {
     sprite->slice9_left = sopts->slice9_left;
     sprite->slice9_right = sopts->slice9_right;
     sprite->slice9_top = sopts->slice9_top;
@@ -696,9 +696,10 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
         sprite->shape_override = NT_ATLAS_SPRITE_SHAPE_RECT;
         sprite->rotate_override = NT_ATLAS_SPRITE_ROTATE_NO;
     }
-    /* Per-sprite extrude > 0 requires shape == RECT (now safe after slice9 auto-force). */
+    /* Per-sprite extrude > 0 requires effective shape == RECT. */
     if (sprite->extrude_override > 0) {
-        NT_BUILD_ASSERT((sprite->shape_override == NT_ATLAS_SPRITE_SHAPE_RECT) && "per-sprite extrude > 0 requires shape == RECT");
+        uint8_t effective_shape = sprite->shape_override ? sprite->shape_override : (uint8_t)atlas_opts->shape;
+        NT_BUILD_ASSERT((effective_shape == NT_ATLAS_SPRITE_SHAPE_RECT) && "per-sprite extrude > 0 requires effective shape == RECT");
     }
 }
 
@@ -752,7 +753,7 @@ void nt_builder_atlas_add(NtBuilderContext *ctx, const char *path, const nt_atla
     sprite->origin_x = sopts.origin_x;
     sprite->origin_y = sopts.origin_y;
     sprite->decoded_hash = decoded_hash;
-    atlas_apply_sprite_overrides(sprite, &sopts);
+    atlas_apply_sprite_overrides(sprite, &sopts, &state->opts);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -791,7 +792,7 @@ void nt_builder_atlas_add_raw(NtBuilderContext *ctx, const uint8_t *rgba_pixels,
     sprite->origin_x = sopts.origin_x;
     sprite->origin_y = sopts.origin_y;
     sprite->decoded_hash = decoded_hash;
-    atlas_apply_sprite_overrides(sprite, &sopts);
+    atlas_apply_sprite_overrides(sprite, &sopts, &state->opts);
 }
 
 /* --- Glob callback for atlas --- */
