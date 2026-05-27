@@ -1412,10 +1412,11 @@ static void pipeline_tile_pack(AtlasPipeline *p) {
         uint32_t oi = p->unique_indices[i];
         uint32_t sprite_margin = p->sprites[oi].margin_override ? p->sprites[oi].margin_override : p->opts->margin;
         uint32_t sprite_extrude = p->sprites[oi].extrude_override ? p->sprites[oi].extrude_override : p->opts->extrude;
+        uint32_t extra_margin = (sprite_margin > p->opts->margin) ? (sprite_margin - p->opts->margin) : 0;
         uint32_t extra_extrude = (sprite_extrude > p->opts->extrude) ? (sprite_extrude - p->opts->extrude) : 0;
-        if (sprite_margin > 0 || extra_extrude > 0) {
-            u_trim_w[i] += sprite_margin * 2 + extra_extrude * 2;
-            u_trim_h[i] += sprite_margin * 2 + extra_extrude * 2;
+        if (extra_margin > 0 || extra_extrude > 0) {
+            u_trim_w[i] += (extra_margin + extra_extrude) * 2;
+            u_trim_h[i] += (extra_margin + extra_extrude) * 2;
             /* Allocate scratch hull — original hull_vertices must survive for serialize */
             Point2D *scratch = (Point2D *)malloc(4 * sizeof(Point2D));
             NT_BUILD_ASSERT(scratch && "pipeline_tile_pack: scratch hull alloc failed");
