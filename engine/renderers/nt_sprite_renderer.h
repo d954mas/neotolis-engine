@@ -103,6 +103,20 @@ void nt_sprite_renderer_set_material(nt_material_t mat);
  * overflow is handled internally (auto flush + reopen, state preserved). */
 void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, const float *world_matrix, float origin_x, float origin_y, uint32_t color_packed, uint8_t flip_bits);
 
+/* Emit a 9-quad slice9 image. Same vertex format as emit_region (no new pipeline).
+ *
+ *   atlas, region_index - must be READY; tombstones no-op.
+ *   x, y, w, h          - target rect in caller's coordinate space (UI passes GL Y-up world coords).
+ *   sl, sr, st, sb       - slice9 borders in source pixels (left, right, top, bottom).
+ *   color_packed          - 0xAABBGGRR.
+ *   flip_bits             - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y.
+ *
+ * ipu (1/pixels_per_unit) is computed internally from the atlas handle.
+ * Emits 16 vertices + 54 indices (4x4 shared grid). Handles staging overflow internally.
+ * Caller MUST have called set_material first. */
+void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
+                                    uint8_t flip_bits, float rotation);
+
 /* Emit an arbitrary triangle list sampling a single UV from the given
  * atlas region. Intended for solid-color shapes drawn against a
  * white-pixel region (rounded corners, ring sectors, custom fan/strip).
@@ -144,7 +158,12 @@ void nt_sprite_renderer_test_last_emit_position(uint32_t v_idx, float out[3]);
 /* Atlas texcoord of the i-th vertex of the last emit, in raw uint16 0..65535
  * units (the shader normalizes to [0,1] via USHORT2N). */
 void nt_sprite_renderer_test_last_emit_texcoord(uint32_t v_idx, uint16_t out[2]);
+/* RGBA color of the i-th vertex of the last emit, as raw uint8 [R,G,B,A]. */
+void nt_sprite_renderer_test_last_emit_color(uint32_t v_idx, uint8_t out[4]);
 bool nt_sprite_renderer_test_initialized(void);
+/* Captured vertex/index count from last slice9 emit. */
+uint32_t nt_sprite_renderer_test_last_slice9_vertex_count(void);
+uint32_t nt_sprite_renderer_test_last_slice9_index_count(void);
 #endif
 // #endregion
 

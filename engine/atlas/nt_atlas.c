@@ -11,7 +11,7 @@
 #include "resource/nt_resource.h"
 
 _Static_assert(sizeof(nt_atlas_vertex_t) == 8, "nt_atlas_vertex_t must match NtAtlasVertex (8 bytes)");
-_Static_assert(sizeof(nt_texture_region_t) == 40, "nt_texture_region_t layout changed — update translate_region()");
+_Static_assert(sizeof(nt_texture_region_t) == 48, "nt_texture_region_t layout changed — update translate_region()");
 
 // #region module state
 static struct {
@@ -180,6 +180,9 @@ static void translate_region(nt_texture_region_t *dst, const NtAtlasRegion *src)
     dst->page_index = src->page_index;
     dst->transform = src->transform;
     dst->flags = src->flags;
+    dst->_pad0 = 0;
+    memcpy(dst->slice9_lrtb, src->slice9_lrtb, sizeof(dst->slice9_lrtb));
+    memset(dst->_pad, 0, sizeof(dst->_pad));
 }
 // #endregion
 
@@ -258,6 +261,8 @@ static bool atlas_try_validate_and_carve_blob(const uint8_t *data, uint32_t size
     }
 
     const NtAtlasHeader *hdr = (const NtAtlasHeader *)data;
+    NT_ASSERT(hdr->magic == NT_ATLAS_MAGIC && "atlas blob: bad magic (not an atlas or corrupted)");
+    NT_ASSERT(hdr->version == NT_ATLAS_VERSION && "atlas blob: version mismatch (rebuild packs with current builder)");
     if (hdr->magic != NT_ATLAS_MAGIC || hdr->version != NT_ATLAS_VERSION || hdr->page_count > NT_ATLAS_MAX_PAGES) {
         return false;
     }
@@ -726,6 +731,7 @@ void nt_atlas_get_region_handles(nt_resource_t atlas, uint32_t region_index, nt_
     out->ipu = ad->ipu;
 }
 // #endregion
+
 // #endregion
 
 // #region test access

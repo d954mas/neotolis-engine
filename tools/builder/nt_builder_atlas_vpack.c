@@ -1134,6 +1134,7 @@ typedef struct {
     Point2D *const *inf_polys;
     const uint32_t *inf_counts;
     const nt_atlas_opts_t *opts;
+    const bool *no_rotate; /* per-sprite no-rotation flag (NULL = all obey opts) */
     uint32_t extrude;
     uint32_t margin;
     uint32_t max_size;
@@ -1532,7 +1533,9 @@ static bool vpack_try_page(VPackContext *ctx, const VPackPage *page, const VPack
 static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, AtlasPlacement *out_placement) {
     double sprite_start = nt_time_now();
     VPackOrientData od;
-    uint32_t orient_count = ctx->opts->allow_transform ? 8 : 1;
+    /* Per-sprite no_rotate overrides atlas-level allow_transform */
+    bool sprite_no_rotate = ctx->no_rotate && ctx->no_rotate[idx];
+    uint32_t orient_count = (ctx->opts->allow_transform && !sprite_no_rotate) ? 8 : 1;
 
     // #region Orient generate — transform inflated polygon for all D4 orientations
     /* Transform exact pack polygon for all orientations.
@@ -1794,7 +1797,7 @@ static bool vpack_place_one_sprite(VPackContext *ctx, uint32_t idx, uint32_t s, 
  * parallel mode due to cache write races; see the file header for details.
  */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts,
+uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts, const bool *no_rotate,
                      AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats, uint32_t thread_count) {
     uint32_t extrude = opts->extrude;
     uint32_t padding = opts->padding;
@@ -1934,6 +1937,7 @@ uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **h
         .inf_polys = inf_polys,
         .inf_counts = inf_counts,
         .opts = opts,
+        .no_rotate = no_rotate,
         .extrude = extrude,
         .margin = margin,
         .max_size = max_size,

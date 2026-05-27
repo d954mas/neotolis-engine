@@ -1295,12 +1295,12 @@ Runtime does not parse TTF. Glyph contours are delta-encoded quadratic Bezier cu
 
 Builder produces atlas assets from a set of sprite PNGs (or raw RGBA buffers). One atlas yields **two kinds of pack entries**: a single `NT_ASSET_ATLAS` blob with region metadata, plus N `NT_ASSET_TEXTURE` page entries (named `<atlas>/tex0`, `<atlas>/tex1`, …). Runtime keeps a 1:N relationship — one metadata blob references N textures.
 
-Binary layout (`shared/include/nt_atlas_format.h`, packed, **v5**):
+Binary layout (`shared/include/nt_atlas_format.h`, packed, **v6**):
 
 ```
 NtAtlasHeader (28 bytes)
   magic:               u32  (0x534C5441 "ATLS")
-  version:             u16  (5)
+  version:             u16  (6)
   region_count:        u16  (one entry per source sprite)
   page_count:          u16  (number of texture pages)
   _pad:                u16
@@ -1313,7 +1313,7 @@ texture_resource_ids[page_count]: u64
   Each entry is nt_hash64_str("<atlas_name>/tex<N>") matching the
   page texture's resource_id in the same pack.
 
-NtAtlasRegion[region_count] (40 bytes each)
+NtAtlasRegion[region_count] (48 bytes each, v6)
   name_hash:      u64   (xxh64 of region name)
   source_w:       u16   (original image width in pixels, pre-trim)
   source_h:       u16   (original image height in pixels, pre-trim)
@@ -1333,8 +1333,15 @@ NtAtlasRegion[region_count] (40 bytes each)
   page_index:     u8    (which texture page)
   transform:      u8    (3-bit D4 mask: bit0=flipH, bit1=flipV, bit2=diagonal)
   index_count:    u8    (triangle indices for this region; ≤ 255)
-  flags:          u8    (builder-authored render hints, e.g. standard quad index pattern)
-  reserved[3]:    u8    (must be zero)
+  flags:          u8    (builder-authored render hints, e.g. NT_ATLAS_REGION_FLAG_QUAD_*;
+                         bit 3 reserved)
+  _pad0:          u8    (alignment padding for uint16 slice9_lrtb)
+  slice9_lrtb[4]: u16   (slice9 borders [left, right, top, bottom] in pixels;
+                         all zero = no slice9. Non-zero values signal 9-cell
+                         stretching at runtime — no separate flag bit needed.
+                         Slice9 sprites are never alpha-trimmed and always use
+                         RECT shape.)
+  _reserved2[2]:  u8    (must be zero)
 
 NtAtlasVertex[total_vertex_count] (8 bytes each, at vertex_offset)
   local_x:   i16  (corner X in trim-rect local space, 0..trim_w.
@@ -2219,9 +2226,18 @@ Each `atlas_add` / `atlas_add_raw` / `atlas_add_glob` call accepts an optional `
 
 ```c
 typedef struct {
-    const char *name;   /* NULL = derive from path (atlas_add/glob); required for atlas_add_raw */
-    float origin_x;     /* pivot X, normalized over source_w (default 0.5) */
-    float origin_y;     /* pivot Y, normalized over source_h (default 0.5) */
+    const char *name;        /* NULL = derive from path (atlas_add/glob); required for atlas_add_raw */
+    float origin_x;          /* pivot X, normalized over source_w (default 0.5) */
+    float origin_y;          /* pivot Y, normalized over source_h (default 0.5) */
+    uint16_t slice9_left;    /* slice9 borders in source pixels (0 = no slice9) */
+    uint16_t slice9_right;
+    uint16_t slice9_top;
+    uint16_t slice9_bottom;
+    uint8_t shape;           /* 0 = atlas default, 1 = RECT, 2 = CONVEX, 3 = CONCAVE */
+    uint8_t allow_rotate;    /* 0 = atlas default, 1 = NO */
+    uint8_t max_vertices;    /* 0 = atlas default, max 16 */
+    uint8_t margin;          /* 0 = atlas default, per-sprite packing margin */
+    uint8_t extrude;         /* 0 = atlas default, requires shape = RECT */
 } nt_atlas_sprite_opts_t;
 ```
 
@@ -2240,7 +2256,7 @@ typedef struct {
 
 Separate from the per-asset builder cache (§23.10) because atlas placement is a global decision over the whole sprite set.
 
-**Cache key:** `xxh64(per_sprite(decoded_hash + origin_x + origin_y) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. Per-sprite data is hashed in add-order (not sorted) because cached placements reference sprites by index. Only pack/compose-affecting opts are included (max_size, padding, margin, extrude, alpha_threshold, max_vertices, allow_transform, power_of_two, shape); post-pack fields (format, premultiplied, compress, debug_png) are excluded — those affect the texture encode stage which has its own cache.
+**Cache key:** `xxh64(per_sprite(decoded_hash + origin_x + origin_y + slice9_lrtb + shape + allow_rotate + max_vertices + margin + extrude) + pack_opts + ATLAS_CACHE_KEY_VERSION)`. Per-sprite data is hashed in add-order (not sorted) because cached placements reference sprites by index. Per-sprite overrides (slice9 borders, shape, allow_rotate, max_vertices, margin, extrude) are included because they affect packing geometry and tile placement. Only pack/compose-affecting opts are included (max_size, padding, margin, extrude, alpha_threshold, max_vertices, allow_transform, power_of_two, shape); post-pack fields (format, premultiplied, compress, debug_png) are excluded — those affect the texture encode stage which has its own cache.
 
 **Storage:** one `atlas_<key>.bin` file per cache hit, containing the placement table and the composed page pixels. On hit, the pipeline skips pack/compose/debug_png/cache_write entirely.
 

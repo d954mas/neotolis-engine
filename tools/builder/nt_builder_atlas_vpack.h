@@ -10,6 +10,7 @@
  * this header to receive results.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "nt_builder.h"                /* nt_atlas_opts_t */
@@ -64,8 +65,10 @@ typedef struct {
 /* Zero all PackStats counters in one place. */
 void pack_stats_reset(PackStats *stats);
 
-/* Pack sprites via NFP/Minkowski vector packing. */
-uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts,
+/* Pack sprites via NFP/Minkowski vector packing.
+ * no_rotate: per-sprite flag array (may be NULL = all sprites use opts->allow_transform).
+ *            no_rotate[i] == true: force identity transform for sprite i. */
+uint32_t vector_pack(const uint32_t *trim_w, const uint32_t *trim_h, Point2D **hull_verts, const uint32_t *hull_counts, uint32_t sprite_count, const nt_atlas_opts_t *opts, const bool *no_rotate,
                      AtlasPlacement *out_placements, uint32_t *out_page_count, uint32_t *out_page_w, uint32_t *out_page_h, PackStats *stats, uint32_t thread_count);
 
 #ifdef __cplusplus

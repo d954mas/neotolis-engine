@@ -18,6 +18,7 @@
 #define sqrtf(x) __builtin_sqrtf(x)
 #define fabsf(x) __builtin_fabsf(x)
 #define acosf(x) __builtin_acosf(x)
+#define atan2f(y, x) __builtin_atan2f(y, x)
 #define powf(x, y) __builtin_powf(x, y)
 #define fminf(x, y) __builtin_fminf(x, y)
 #define fmaxf(x, y) __builtin_fmaxf(x, y)

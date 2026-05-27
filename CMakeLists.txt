@@ -112,6 +112,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_subdirectory(examples/atlas)
     add_subdirectory(examples/bunnymark)
     add_subdirectory(examples/ui_theme_demo)
+    add_subdirectory(examples/slice9_demo)
     add_subdirectory(tests)
 
     if(NOT EMSCRIPTEN)

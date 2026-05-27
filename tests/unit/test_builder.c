@@ -5058,6 +5058,8 @@ void test_atlas_max_pages_exhaustion_asserts(void) {
         nt_builder_atlas_add_raw(ctx, sprites[i], 60, 60, &(nt_atlas_sprite_opts_t){.name = name, .origin_x = 0.5F, .origin_y = 0.5F});
     }
 
+    /* Pipeline allocates internally; longjmp from NT_BUILD_ASSERT can't free
+     * them. Suppress leak detection for this intentional assert-path test. */
     EXPECT_BUILD_ASSERT(ctx, nt_builder_end_atlas(ctx));
 
     for (uint32_t i = 0; i < N_SPRITES; i++) {
@@ -5131,6 +5133,171 @@ void test_atlas_duplicate_pixels_different_origin(void) {
     /* One unique sprite → vertex_count in the blob equals that of a single region. */
     TEST_ASSERT_EQUAL(r_centre->vertex_count, ahdr->total_vertex_count);
     TEST_ASSERT_EQUAL(r_centre->index_count, ahdr->total_index_count);
+
+    free(buf);
+}
+
+/* ---- Slice9 builder pipeline tests ---- */
+
+/* Test: slice9 lrtb values in output pack.
+ * Build atlas with one normal sprite and one slice9 sprite (borders 4,4,4,4).
+ * Verify v6 header and correct lrtb values (non-zero = has slice9). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_slice9_flag_and_lrtb_in_output(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_slice9_flag.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    uint8_t *s_normal = make_test_sprite(16, 16, 255, 0, 0, 255);
+    uint8_t *s_slice9 = make_test_sprite(32, 32, 0, 255, 0, 255);
+
+    nt_builder_begin_atlas(ctx, "s9test", NULL);
+    nt_builder_atlas_add_raw(ctx, s_normal, 16, 16, &(nt_atlas_sprite_opts_t){.name = "normal.png", .origin_x = 0.5F, .origin_y = 0.5F});
+    nt_builder_atlas_add_raw(ctx, s_slice9, 32, 32,
+                             &(nt_atlas_sprite_opts_t){.name = "panel.png", .origin_x = 0.5F, .origin_y = 0.5F, .slice9_left = 4, .slice9_right = 4, .slice9_top = 4, .slice9_bottom = 4});
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(s_normal);
+    free(s_slice9);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *buf = read_atlas_blob(TMP_DIR "/atlas_slice9_flag.ntpack", &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_EQUAL(2, region_count);
+
+    /* Verify v6 header */
+    const NtPackHeader *pack = (const NtPackHeader *)buf;
+    const NtAssetEntry *entries = (const NtAssetEntry *)(buf + sizeof(NtPackHeader));
+    const NtAssetEntry *atlas_entry = NULL;
+    for (uint32_t i = 0; i < pack->asset_count; i++) {
+        if (entries[i].asset_type == NT_ASSET_ATLAS) {
+            atlas_entry = &entries[i];
+            break;
+        }
+    }
+    TEST_ASSERT_NOT_NULL(atlas_entry);
+    const NtAtlasHeader *ahdr = (const NtAtlasHeader *)(buf + atlas_entry->offset);
+    TEST_ASSERT_EQUAL(NT_ATLAS_VERSION, ahdr->version);
+
+    /* Find slice9 region by name hash */
+    uint64_t panel_hash = nt_hash64_str("panel.png").value;
+    uint64_t normal_hash = nt_hash64_str("normal.png").value;
+    const NtAtlasRegion *r_panel = NULL;
+    const NtAtlasRegion *r_normal = NULL;
+    for (uint32_t i = 0; i < region_count; i++) {
+        if (regions[i].name_hash == panel_hash) {
+            r_panel = &regions[i];
+        }
+        if (regions[i].name_hash == normal_hash) {
+            r_normal = &regions[i];
+        }
+    }
+    TEST_ASSERT_NOT_NULL(r_panel);
+    TEST_ASSERT_NOT_NULL(r_normal);
+
+    /* Slice9 region has correct lrtb (non-zero = has slice9) */
+    TEST_ASSERT_EQUAL_UINT16(4, r_panel->slice9_lrtb[0]);
+    TEST_ASSERT_EQUAL_UINT16(4, r_panel->slice9_lrtb[1]);
+    TEST_ASSERT_EQUAL_UINT16(4, r_panel->slice9_lrtb[2]);
+    TEST_ASSERT_EQUAL_UINT16(4, r_panel->slice9_lrtb[3]);
+    TEST_ASSERT_TRUE((r_panel->slice9_lrtb[0] | r_panel->slice9_lrtb[1] | r_panel->slice9_lrtb[2] | r_panel->slice9_lrtb[3]) != 0);
+
+    /* Normal region has zero lrtb = no slice9 */
+    TEST_ASSERT_EQUAL_UINT16(0, r_normal->slice9_lrtb[0]);
+    TEST_ASSERT_EQUAL_UINT16(0, r_normal->slice9_lrtb[1]);
+    TEST_ASSERT_EQUAL_UINT16(0, r_normal->slice9_lrtb[2]);
+    TEST_ASSERT_EQUAL_UINT16(0, r_normal->slice9_lrtb[3]);
+
+    free(buf);
+}
+
+/* Test: invalid slice9 borders (l+r >= width) triggers NT_BUILD_ASSERT. */
+void test_atlas_slice9_invalid_borders_asserts(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_slice9_invalid.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* 60px wide sprite, borders 32+32 = 64 >= 60 -> should assert */
+    uint8_t *s = make_test_sprite(60, 60, 200, 100, 50, 255);
+    nt_builder_begin_atlas(ctx, "s9invalid", NULL);
+    nt_builder_atlas_add_raw(ctx, s, 60, 60,
+                             &(nt_atlas_sprite_opts_t){.name = "bad_s9.png", .origin_x = 0.5F, .origin_y = 0.5F, .slice9_left = 32, .slice9_right = 32, .slice9_top = 4, .slice9_bottom = 4});
+
+    EXPECT_BUILD_ASSERT(ctx, nt_builder_end_atlas(ctx));
+    free(s);
+}
+
+/* Test: slice9 region forces rect packing (vertex_count == 4). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_slice9_forces_rect_packing(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_slice9_rect.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Use concave shape atlas-level, but slice9 sprite should auto-force RECT */
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
+    opts.max_vertices = 8;
+
+    uint8_t *s = make_test_sprite(32, 32, 0, 128, 255, 255);
+    nt_builder_begin_atlas(ctx, "s9rect", &opts);
+    nt_builder_atlas_add_raw(ctx, s, 32, 32,
+                             &(nt_atlas_sprite_opts_t){.name = "panel.png", .origin_x = 0.5F, .origin_y = 0.5F, .slice9_left = 4, .slice9_right = 4, .slice9_top = 4, .slice9_bottom = 4});
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *buf = read_atlas_blob(TMP_DIR "/atlas_slice9_rect.ntpack", &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_EQUAL(1, region_count);
+
+    /* Slice9 auto-forces RECT: exactly 4 vertices, 6 indices */
+    TEST_ASSERT_EQUAL_UINT8(4, regions[0].vertex_count);
+    TEST_ASSERT_EQUAL_UINT8(6, regions[0].index_count);
+    TEST_ASSERT_TRUE((regions[0].slice9_lrtb[0] | regions[0].slice9_lrtb[1] | regions[0].slice9_lrtb[2] | regions[0].slice9_lrtb[3]) != 0);
+
+    free(buf);
+}
+
+/* Test: per-sprite shape override (RECT on a concave atlas). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void test_atlas_per_sprite_shape_override_rect(void) {
+    (void)MKDIR(TMP_DIR);
+    NtBuilderContext *ctx = nt_builder_start_pack(TMP_DIR "/atlas_shape_override.ntpack");
+    TEST_ASSERT_NOT_NULL(ctx);
+
+    /* Concave atlas, but one sprite forced to RECT via per-sprite override */
+    nt_atlas_opts_t opts = nt_atlas_opts_defaults();
+    opts.shape = NT_ATLAS_SHAPE_CONCAVE_CONTOUR;
+    opts.max_vertices = 8;
+
+    uint8_t *s = make_test_sprite(32, 32, 100, 200, 50, 255);
+    nt_builder_begin_atlas(ctx, "shape_ov", &opts);
+    nt_builder_atlas_add_raw(ctx, s, 32, 32, &(nt_atlas_sprite_opts_t){.name = "forced_rect.png", .origin_x = 0.5F, .origin_y = 0.5F, .shape = NT_ATLAS_SPRITE_SHAPE_RECT});
+    nt_builder_end_atlas(ctx);
+
+    TEST_ASSERT_EQUAL(NT_BUILD_OK, nt_builder_finish_pack(ctx));
+    nt_builder_free_pack(ctx);
+    free(s);
+
+    const NtAtlasRegion *regions = NULL;
+    uint32_t region_count = 0;
+    uint8_t *buf = read_atlas_blob(TMP_DIR "/atlas_shape_override.ntpack", &regions, &region_count);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_EQUAL(1, region_count);
+
+    /* Per-sprite RECT override: exactly 4 vertices, 6 indices */
+    TEST_ASSERT_EQUAL_UINT8(4, regions[0].vertex_count);
+    TEST_ASSERT_EQUAL_UINT8(6, regions[0].index_count);
+    /* No slice9 — lrtb all zero (just shape override) */
+    TEST_ASSERT_EQUAL_UINT16(0, (regions[0].slice9_lrtb[0] | regions[0].slice9_lrtb[1] | regions[0].slice9_lrtb[2] | regions[0].slice9_lrtb[3]));
 
     free(buf);
 }
@@ -5317,6 +5484,12 @@ int main(void) {
     RUN_TEST(test_atlas_cache_invalidates_on_opts_change);
     RUN_TEST(test_atlas_cache_corrupt_file_falls_back);
     RUN_TEST(test_atlas_max_pages_exhaustion_asserts);
+
+    /* Slice9 builder pipeline */
+    RUN_TEST(test_atlas_slice9_flag_and_lrtb_in_output);
+    RUN_TEST(test_atlas_slice9_invalid_borders_asserts);
+    RUN_TEST(test_atlas_slice9_forces_rect_packing);
+    RUN_TEST(test_atlas_per_sprite_shape_override_rect);
 
     return UNITY_END();
 }

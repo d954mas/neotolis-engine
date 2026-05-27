@@ -39,7 +39,7 @@
 
 #define UI_ATLAS_HEADER_SIZE 28u
 #define UI_ATLAS_PAGE_IDS_SIZE (UI_ATLAS_PAGE_COUNT * 8u)
-#define UI_ATLAS_REGIONS_SIZE (UI_ATLAS_REGION_COUNT * 40u)
+#define UI_ATLAS_REGIONS_SIZE (UI_ATLAS_REGION_COUNT * 48u)
 #define UI_ATLAS_VERTICES_SIZE (UI_ATLAS_VERTEX_COUNT * 8u)
 #define UI_ATLAS_INDICES_SIZE (UI_ATLAS_INDEX_COUNT * 2u)
 
@@ -93,7 +93,8 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob, uint32_t suffix) {
         .transform = 0,
         .index_count = 6,
         .flags = NT_ATLAS_REGION_FLAG_QUAD_012023,
-        ._reserved = {0, 0, 0},
+        .slice9_lrtb = {0, 0, 0, 0},
+        ._reserved2 = {0},
     };
     memcpy(out_blob + (size_t)UI_ATLAS_HEADER_SIZE + (size_t)UI_ATLAS_PAGE_IDS_SIZE, &region0, sizeof region0);
 
@@ -113,9 +114,10 @@ static void ui_atlas_build_inner_blob(uint8_t *out_blob, uint32_t suffix) {
         .transform = 0,
         .index_count = 12,
         .flags = 0,
-        ._reserved = {0, 0, 0},
+        .slice9_lrtb = {0, 0, 0, 0},
+        ._reserved2 = {0},
     };
-    memcpy(out_blob + (size_t)UI_ATLAS_HEADER_SIZE + (size_t)UI_ATLAS_PAGE_IDS_SIZE + 40U, &region1, sizeof region1);
+    memcpy(out_blob + (size_t)UI_ATLAS_HEADER_SIZE + (size_t)UI_ATLAS_PAGE_IDS_SIZE + 48U, &region1, sizeof region1);
 
     /* ---- Vertices: 4 white + 6 polygon-hull ---- */
     NtAtlasVertex verts[UI_ATLAS_VERTEX_COUNT] = {

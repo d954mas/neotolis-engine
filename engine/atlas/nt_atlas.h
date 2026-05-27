@@ -28,31 +28,34 @@ typedef struct {
     uint16_t atlas_v;
 } nt_atlas_vertex_t;
 
-/* Runtime region struct — blob counterpart: NtAtlasRegion (nt_atlas_format.h).
+/* Runtime region struct — blob counterpart: NtAtlasRegion (nt_atlas_format.h, v6).
  *
  * Field order differs from NtAtlasRegion to minimize padding and keep hot
  * fields (name_hash, vertex_start, index_start) first. All values are raw:
  * UVs are the packed 0..65535 uint16 atlas_u/v, origin is the normalized
  * float from the builder, and transform is the orientation byte untouched.
+ * translate_region() copies slice9_lrtb from NtAtlasRegion at resolve time.
  * Update both structs + translate_region() together when changing fields.
  *
- * Total: 40 bytes on 64-bit. */
+ * Total: 48 bytes on 64-bit (uint64_t alignment drives 8-byte boundary). */
 typedef struct {
-    uint64_t name_hash;    /*  0: xxh64 of region name (or NT_ATLAS_TOMBSTONE_HASH) */
-    uint32_t vertex_start; /*  8: index into nt_atlas_data_t.vertices[] */
-    uint32_t index_start;  /* 12: index into nt_atlas_data_t.indices[]  */
-    float origin_x;        /* 16: normalized pivot 0..1 (may lie outside) */
-    float origin_y;        /* 20 */
-    uint16_t source_w;     /* 24: pre-trim source image width */
-    uint16_t source_h;     /* 26 */
-    int16_t trim_offset_x; /* 28: pixels stripped from left edge */
-    int16_t trim_offset_y; /* 30 */
-    uint8_t vertex_count;  /* 32: 0 = tombstone (and also degenerate) */
-    uint8_t index_count;   /* 33 */
-    uint8_t page_index;    /* 34 */
-    uint8_t transform;     /* 35: orientation — bit0=flipH, bit1=flipV, bit2=diagonal */
-    uint8_t flags;         /* 36: builder-authored render hints */
-    uint8_t reserved[3];   /* 37 */
+    uint64_t name_hash;      /*  0: xxh64 of region name (or NT_ATLAS_TOMBSTONE_HASH) */
+    uint32_t vertex_start;   /*  8: index into nt_atlas_data_t.vertices[] */
+    uint32_t index_start;    /* 12: index into nt_atlas_data_t.indices[]  */
+    float origin_x;          /* 16: normalized pivot 0..1 (may lie outside) */
+    float origin_y;          /* 20 */
+    uint16_t source_w;       /* 24: pre-trim source image width */
+    uint16_t source_h;       /* 26 */
+    int16_t trim_offset_x;   /* 28: pixels stripped from left edge */
+    int16_t trim_offset_y;   /* 30 */
+    uint8_t vertex_count;    /* 32: 0 = tombstone (and also degenerate) */
+    uint8_t index_count;     /* 33 */
+    uint8_t page_index;      /* 34 */
+    uint8_t transform;       /* 35: orientation — bit0=flipH, bit1=flipV, bit2=diagonal */
+    uint8_t flags;           /* 36: builder-authored render hints */
+    uint8_t _pad0;           /* 37: alignment padding for uint16 */
+    uint16_t slice9_lrtb[4]; /* 38: slice9 borders [left, right, top, bottom]; all zero = no slice9 */
+    uint8_t _pad[2];         /* 46: alignment padding to 48 bytes */
 } nt_texture_region_t;
 
 /* ---- Public API ---- */

@@ -1,5 +1,7 @@
 #include "renderers/nt_sprite_renderer.h"
 
+#include "core/nt_builtins.h"
+#include <math.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -68,6 +70,9 @@ static struct {
     uint32_t last_emit_vertex_count;
     uint32_t last_emit_index_count;
     uint32_t last_emit_first_vertex;
+    /* Captured at end of emit_slice9. */
+    uint32_t last_slice9_vertex_count;
+    uint32_t last_slice9_index_count;
 #endif
 } s_sprite;
 // #endregion
@@ -488,6 +493,219 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     const uint8_t flip_bits = flags & (NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y);
     const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
 
+    // #region emit_one_slice9_branch
+    bool has_s9_ov = (flags & NT_SPRITE_FLAG_SLICE9_OV) != 0;
+    bool has_s9_region = (r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0;
+    if (has_s9_ov || has_s9_region) {
+        uint16_t sl;
+        uint16_t sr;
+        uint16_t st;
+        uint16_t sb;
+        if (has_s9_ov) {
+            sl = sv->slice9_lrtb[s_idx][0];
+            sr = sv->slice9_lrtb[s_idx][1];
+            st = sv->slice9_lrtb[s_idx][2];
+            sb = sv->slice9_lrtb[s_idx][3];
+        } else {
+            sl = r->slice9_lrtb[0];
+            sr = r->slice9_lrtb[1];
+            st = r->slice9_lrtb[2];
+            sb = r->slice9_lrtb[3];
+        }
+        /* Inline slice9 emit using world_matrix directly (same transform
+         * pipeline as regular sprites in emit_region_resolved). */
+        NT_ASSERT(r->transform == 0 && "slice9 region must have transform == 0");
+        NT_ASSERT(r->trim_offset_x == 0 && r->trim_offset_y == 0 && "slice9 region must be untrimmed");
+        NT_ASSERT(r->source_w > 0 && r->source_h > 0);
+        NT_ASSERT(sl + sr < r->source_w && st + sb < r->source_h);
+
+        if (!ensure_current_cmd_page_texture(page_tex)) {
+            return;
+        }
+        if (s_sprite.vertex_count + 16U > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + 54U > NT_SPRITE_RENDERER_MAX_INDICES) {
+            NT_ASSERT(s_sprite.cmd_count > 0);
+            nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
+            nt_sprite_renderer_flush();
+            open_cmd_from_snapshot(&snapshot);
+        }
+
+        /* Flip border swap */
+        uint16_t fl = sl;
+        uint16_t fr = sr;
+        uint16_t ft = st;
+        uint16_t fb = sb;
+        if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
+            fl = sr;
+            fr = sl;
+        }
+        if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
+            ft = sb;
+            fb = st;
+        }
+
+        /* Build 4x4 grid in local source space (ipu-scaled, origin at 0,0). */
+        const float src_w = (float)r->source_w * ipu;
+        const float src_h = (float)r->source_h * ipu;
+        float fl_w = (float)fl * ipu;
+        float fr_w = (float)fr * ipu;
+        float ft_w = (float)ft * ipu;
+        float fb_w = (float)fb * ipu;
+        /* Proportionally shrink borders when source rect is smaller than total borders */
+        if (fl_w + fr_w > src_w) {
+            float ratio = src_w / (fl_w + fr_w);
+            fl_w *= ratio;
+            fr_w *= ratio;
+        }
+        if (ft_w + fb_w > src_h) {
+            float ratio = src_h / (ft_w + fb_w);
+            ft_w *= ratio;
+            fb_w *= ratio;
+        }
+        float lxs[4] = {0.0F, fl_w, src_w - fr_w, src_w};
+        float lys[4] = {0.0F, fb_w, src_h - ft_w, src_h};
+
+        /* Pivot offset into translation (mirrors emit_region_resolved). */
+        const float *m = tv->world_matrices[t_idx];
+        float dx = origin_x * src_w;
+        float dy = origin_y * src_h;
+        if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
+            dx = -dx;
+        }
+        if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
+            dy = -dy;
+        }
+        const float tx = m[12] - (m[0] * dx) - (m[4] * dy);
+        const float ty = m[13] - (m[1] * dx) - (m[5] * dy);
+        const float tz = m[14] - (m[2] * dx) - (m[6] * dy);
+
+        /* Transform 4x4 grid points through world_matrix. */
+        float wxs[4][4]; /* wxs[row][col] */
+        float wys[4][4];
+        float wzs[4][4];
+        for (uint8_t row = 0; row < 4; row++) {
+            for (uint8_t col = 0; col < 4; col++) {
+                float px = lxs[col];
+                float py = lys[row];
+                if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
+                    px = -px;
+                }
+                if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
+                    py = -py;
+                }
+                wxs[row][col] = (m[0] * px) + (m[4] * py) + tx;
+                wys[row][col] = (m[1] * px) + (m[5] * py) + ty;
+                wzs[row][col] = (m[2] * px) + (m[6] * py) + tz;
+            }
+        }
+
+        /* UV splits from region vertices (same as emit_slice9). */
+        uint16_t u_min = UINT16_MAX;
+        uint16_t u_max = 0;
+        uint16_t v_min = UINT16_MAX;
+        uint16_t v_max = 0;
+        for (uint8_t i = 0; i < r->vertex_count; i++) {
+            uint16_t au = resolved->raw_vertices[i].atlas_u;
+            uint16_t av = resolved->raw_vertices[i].atlas_v;
+            if (au < u_min) {
+                u_min = au;
+            }
+            if (au > u_max) {
+                u_max = au;
+            }
+            if (av < v_min) {
+                v_min = av;
+            }
+            if (av > v_max) {
+                v_max = av;
+            }
+        }
+        uint16_t u_range = (uint16_t)(u_max - u_min);
+        uint16_t v_range = (uint16_t)(v_max - v_min);
+        uint16_t us[4] = {
+            u_min,
+            (uint16_t)(u_min + (((uint32_t)fl * u_range) / r->source_w)),
+            (uint16_t)(u_max - (((uint32_t)fr * u_range) / r->source_w)),
+            u_max,
+        };
+        /* V inverted: geometry Y-up, texture V is PNG Y-down. */
+        uint16_t vs[4] = {
+            v_max,
+            (uint16_t)(v_max - (((uint32_t)fb * v_range) / r->source_h)),
+            (uint16_t)(v_min + (((uint32_t)ft * v_range) / r->source_h)),
+            v_min,
+        };
+        if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
+            uint16_t t0 = us[0];
+            us[0] = us[3];
+            us[3] = t0;
+            uint16_t t1 = us[1];
+            us[1] = us[2];
+            us[2] = t1;
+        }
+        if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
+            uint16_t t0 = vs[0];
+            vs[0] = vs[3];
+            vs[3] = t0;
+            uint16_t t1 = vs[1];
+            vs[1] = vs[2];
+            vs[2] = t1;
+        }
+
+        /* Unpack color. */
+        const uint32_t s9_color = dv->colors_packed[d_idx];
+        const uint8_t cr = (uint8_t)(s9_color & 0xFFU);
+        const uint8_t cg = (uint8_t)((s9_color >> 8) & 0xFFU);
+        const uint8_t cb = (uint8_t)((s9_color >> 16) & 0xFFU);
+        const uint8_t ca = (uint8_t)((s9_color >> 24) & 0xFFU);
+
+        /* Emit 4x4 grid = 16 unique vertices (shared at cell boundaries). */
+        const uint32_t base = s_sprite.vertex_count;
+        for (uint8_t row = 0; row < 4; row++) {
+            for (uint8_t col = 0; col < 4; col++) {
+                nt_sprite_vertex_t *v = &s_sprite.vertices[base + (row * 4) + col];
+                v->position[0] = wxs[row][col];
+                v->position[1] = wys[row][col];
+                v->position[2] = wzs[row][col];
+                v->texcoord[0] = us[col];
+                v->texcoord[1] = vs[row];
+                v->color[0] = cr;
+                v->color[1] = cg;
+                v->color[2] = cb;
+                v->color[3] = ca;
+            }
+        }
+
+        /* 54 indices: 9 cells x 2 triangles x 3 indices. */
+        uint32_t ii = 0;
+        for (uint8_t row = 0; row < 3; row++) {
+            for (uint8_t col = 0; col < 3; col++) {
+                const uint16_t i_bl = (uint16_t)(base + (row * 4) + col);
+                const uint16_t i_br = (uint16_t)(i_bl + 1U);
+                const uint16_t i_tl = (uint16_t)(i_bl + 4U);
+                const uint16_t i_tr = (uint16_t)(i_tl + 1U);
+                uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count + ii];
+                out_idx[0] = i_tl;
+                out_idx[1] = i_tr;
+                out_idx[2] = i_bl;
+                out_idx[3] = i_bl;
+                out_idx[4] = i_tr;
+                out_idx[5] = i_br;
+                ii += 6;
+            }
+        }
+        s_sprite.vertex_count += 16U;
+        s_sprite.index_count += 54U;
+#ifdef NT_TEST_ACCESS
+        s_sprite.last_slice9_vertex_count = 16U;
+        s_sprite.last_slice9_index_count = 54U;
+        s_sprite.last_emit_vertex_count = 16U;
+        s_sprite.last_emit_index_count = 54U;
+        s_sprite.last_emit_first_vertex = base;
+#endif
+        return;
+    }
+
+    // #endregion
     emit_region_resolved(r, resolved->cached_pos, resolved->raw_vertices, resolved->indices, page_tex, ipu, tv->world_matrices[t_idx], origin_x, origin_y, dv->colors_packed[d_idx], flip_bits);
 }
 // #endregion
@@ -597,6 +815,210 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
     s_sprite.last_emit_index_count = index_count;
     s_sprite.last_emit_first_vertex = base;
 #endif
+}
+// #endregion
+
+// #region emit_slice9
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
+                                    uint8_t flip_bits, float rotation) {
+    NT_ASSERT(s_sprite.initialized);
+    NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_slice9: invalid atlas handle");
+    NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_slice9: atlas must be READY");
+    NT_ASSERT(s_sprite.cmd_count > 0 && "nt_sprite_renderer_emit_slice9: call nt_sprite_renderer_set_material first");
+    NT_ASSERT(isfinite(x) && isfinite(y) && isfinite(w) && isfinite(h) && isfinite(rotation));
+    NT_ASSERT(w >= 0.0F && h >= 0.0F && "slice9 target dimensions must be non-negative");
+
+    nt_atlas_region_handles_t rh;
+    nt_atlas_get_region_handles(atlas, region_index, &rh);
+    if (rh.region->vertex_count == 0U) {
+        return; /* tombstone */
+    }
+
+    const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
+
+    /* Slice9 regions must be non-rotated, untrimmed (RECT shape forces no trim). */
+    NT_ASSERT(rh.region->transform == 0 && "slice9 region must have transform == 0 (no rotation)");
+    NT_ASSERT(rh.region->trim_offset_x == 0 && rh.region->trim_offset_y == 0 && "slice9 region must be untrimmed (builder should force RECT shape)");
+    NT_ASSERT(rh.region->source_w > 0 && rh.region->source_h > 0 && "slice9 region source dimensions must be non-zero");
+    NT_ASSERT(sl + sr < rh.region->source_w && st + sb < rh.region->source_h && "slice9 borders exceed source dimensions (per-entity override invalid?)");
+    NT_ASSERT(ipu > 0.0F && "slice9 ipu must be positive");
+
+    const uint32_t page_tex = nt_resource_get(rh.page_resource);
+    if (!ensure_current_cmd_page_texture(page_tex)) {
+        return;
+    }
+
+    /* Flip border swap (D-54-19): swap borders before computing splits. */
+    uint16_t fl = sl;
+    uint16_t fr = sr;
+    uint16_t ft = st;
+    uint16_t fb = sb;
+    if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
+        fl = sr;
+        fr = sl;
+    }
+    if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
+        ft = sb;
+        fb = st;
+    }
+
+    /* Extract bbox UVs from region vertices (u16 space). */
+    uint16_t u_min = UINT16_MAX;
+    uint16_t u_max = 0;
+    uint16_t v_min = UINT16_MAX;
+    uint16_t v_max = 0;
+    for (uint8_t i = 0; i < rh.region->vertex_count; i++) {
+        uint16_t au = rh.raw_vertices[i].atlas_u;
+        uint16_t av = rh.raw_vertices[i].atlas_v;
+        if (au < u_min) {
+            u_min = au;
+        }
+        if (au > u_max) {
+            u_max = au;
+        }
+        if (av < v_min) {
+            v_min = av;
+        }
+        if (av > v_max) {
+            v_max = av;
+        }
+    }
+
+    // #region position_and_uv_splits
+    float fl_w = (float)fl * ipu;
+    float fr_w = (float)fr * ipu;
+    float ft_w = (float)ft * ipu;
+    float fb_w = (float)fb * ipu;
+    /* Proportionally shrink borders when target rect is smaller than total borders */
+    if (fl_w + fr_w > w) {
+        float ratio = w / (fl_w + fr_w);
+        fl_w *= ratio;
+        fr_w *= ratio;
+    }
+    if (ft_w + fb_w > h) {
+        float ratio = h / (ft_w + fb_w);
+        ft_w *= ratio;
+        fb_w *= ratio;
+    }
+    float xs[4] = {x, x + fl_w, x + w - fr_w, x + w};
+    float ys[4] = {y, y + fb_w, y + h - ft_w, y + h};
+
+    /* UV splits (4 u-values, 4 v-values in u16). Integer math avoids precision loss. */
+    uint16_t u_range = (uint16_t)(u_max - u_min);
+    uint16_t v_range = (uint16_t)(v_max - v_min);
+    uint16_t us[4] = {
+        u_min,
+        (uint16_t)(u_min + (((uint32_t)fl * u_range) / rh.region->source_w)),
+        (uint16_t)(u_max - (((uint32_t)fr * u_range) / rh.region->source_w)),
+        u_max,
+    };
+    /* V splits inverted: geometry Y-up but texture V is PNG Y-down.
+     * vs[0] (geometry bottom) → v_max (texture bottom). */
+    uint16_t vs[4] = {
+        v_max,
+        (uint16_t)(v_max - (((uint32_t)fb * v_range) / rh.region->source_h)),
+        (uint16_t)(v_min + (((uint32_t)ft * v_range) / rh.region->source_h)),
+        v_min,
+    };
+
+    /* UV flip after split computation (D-54-19). */
+    if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
+        uint16_t t0 = us[0];
+        us[0] = us[3];
+        us[3] = t0;
+        uint16_t t1 = us[1];
+        us[1] = us[2];
+        us[2] = t1;
+    }
+    if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
+        uint16_t t0 = vs[0];
+        vs[0] = vs[3];
+        vs[3] = t0;
+        uint16_t t1 = vs[1];
+        vs[1] = vs[2];
+        vs[2] = t1;
+    }
+
+    // #endregion
+
+    // #region emit_slice9_vertices
+    if (s_sprite.vertex_count + 16U > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + 54U > NT_SPRITE_RENDERER_MAX_INDICES) {
+        NT_ASSERT(s_sprite.cmd_count > 0 && "emit_slice9 called with no open cmd");
+        nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
+        nt_sprite_renderer_flush();
+        open_cmd_from_snapshot(&snapshot);
+    }
+
+    /* Unpack color. */
+    uint8_t cr = (uint8_t)(color_packed & 0xFFU);
+    uint8_t cg = (uint8_t)((color_packed >> 8) & 0xFFU);
+    uint8_t cb = (uint8_t)((color_packed >> 16) & 0xFFU);
+    uint8_t ca = (uint8_t)((color_packed >> 24) & 0xFFU);
+
+    uint32_t base = s_sprite.vertex_count;
+
+    /* Emit 4x4 grid = 16 unique vertices (shared at cell boundaries). */
+    for (uint8_t row = 0; row < 4; row++) {
+        for (uint8_t col = 0; col < 4; col++) {
+            nt_sprite_vertex_t *v = &s_sprite.vertices[base + (row * 4) + col];
+            v->position[0] = xs[col];
+            v->position[1] = ys[row];
+            v->position[2] = 0.0F;
+            v->texcoord[0] = us[col];
+            v->texcoord[1] = vs[row];
+            v->color[0] = cr;
+            v->color[1] = cg;
+            v->color[2] = cb;
+            v->color[3] = ca;
+        }
+    }
+
+    /* 54 indices: 9 cells x 2 triangles x 3 indices. */
+    uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count];
+    uint32_t ii = 0;
+    for (uint8_t row = 0; row < 3; row++) {
+        for (uint8_t col = 0; col < 3; col++) {
+            const uint16_t i_bl = (uint16_t)(base + (row * 4) + col);
+            const uint16_t i_br = (uint16_t)(i_bl + 1U);
+            const uint16_t i_tl = (uint16_t)(i_bl + 4U);
+            const uint16_t i_tr = (uint16_t)(i_tl + 1U);
+            out_idx[ii++] = i_tl;
+            out_idx[ii++] = i_tr;
+            out_idx[ii++] = i_bl;
+            out_idx[ii++] = i_bl;
+            out_idx[ii++] = i_tr;
+            out_idx[ii++] = i_br;
+        }
+    }
+
+    /* Rotate all 16 vertices around rect center if rotation != 0. */
+    if (rotation != 0.0F) {
+        const float rcx = x + (w * 0.5F);
+        const float rcy = y + (h * 0.5F);
+        const float rc = cosf(rotation);
+        const float rs = sinf(rotation);
+        for (uint32_t vi = 0; vi < 16U; vi++) {
+            nt_sprite_vertex_t *v = &s_sprite.vertices[base + vi];
+            const float dx = v->position[0] - rcx;
+            const float dy = v->position[1] - rcy;
+            v->position[0] = (dx * rc) - (dy * rs) + rcx;
+            v->position[1] = (dx * rs) + (dy * rc) + rcy;
+        }
+    }
+
+    s_sprite.vertex_count += 16U;
+    s_sprite.index_count += 54U;
+
+#ifdef NT_TEST_ACCESS
+    s_sprite.last_slice9_vertex_count = 16U;
+    s_sprite.last_slice9_index_count = 54U;
+    /* Also update the generic last_emit so test_last_emit_position/texcoord work. */
+    s_sprite.last_emit_vertex_count = 16U;
+    s_sprite.last_emit_index_count = 54U;
+    s_sprite.last_emit_first_vertex = base;
+#endif
+    // #endregion
 }
 // #endregion
 
@@ -782,6 +1204,18 @@ void nt_sprite_renderer_test_last_emit_texcoord(uint32_t v_idx, uint16_t out[2])
     out[0] = v->texcoord[0];
     out[1] = v->texcoord[1];
 }
+
+void nt_sprite_renderer_test_last_emit_color(uint32_t v_idx, uint8_t out[4]) {
+    NT_ASSERT(v_idx < s_sprite.last_emit_vertex_count && "last_emit_color: index out of range");
+    const nt_sprite_vertex_t *v = &s_sprite.vertices[s_sprite.last_emit_first_vertex + v_idx];
+    out[0] = v->color[0];
+    out[1] = v->color[1];
+    out[2] = v->color[2];
+    out[3] = v->color[3];
+}
+
 bool nt_sprite_renderer_test_initialized(void) { return s_sprite.initialized; }
+uint32_t nt_sprite_renderer_test_last_slice9_vertex_count(void) { return s_sprite.last_slice9_vertex_count; }
+uint32_t nt_sprite_renderer_test_last_slice9_index_count(void) { return s_sprite.last_slice9_index_count; }
 #endif
 // #endregion

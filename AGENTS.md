@@ -40,6 +40,14 @@ If specific build, check, or run commands appear in the repo, keep them up to da
 
 - Use `// #region name` / `// #endregion` to mark logical sections inside long functions (VS Code foldable regions). No blank line after `// #region` or before `// #endregion`. Do not remove existing short inline comments when adding regions — regions group, comments explain.
 
+## Before adding a new subsystem
+
+- Diagram coordinate/data transforms between all systems involved.
+- Check API consistency with parallel subsystems (if sprites have it, UI images need it too).
+- Verify types and ranges will scale (target: mobile WASM).
+- Prototype the riskiest integration point before building the rest.
+- Test with asymmetric data that breaks on axis swap or flip.
+
 ## Change rules
 
 - Do not introduce monolithic subsystems where the spec requires a composable module set.

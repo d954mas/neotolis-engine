@@ -1,6 +1,7 @@
 #include "sprite_comp/nt_sprite_comp.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "atlas/nt_atlas.h"
 #include "comp_storage/nt_comp_storage.h"
@@ -20,7 +21,8 @@ static uint64_t *s_region_hash;
 static uint16_t *s_region_index;   /* cached resolved index */
 static uint32_t *s_atlas_revision; /* cached atlas snapshot revision */
 static nt_sprite_resolved_region_t *s_resolved;
-static float (*s_origin)[2]; /* effective origin */
+static float (*s_origin)[2];         /* effective origin */
+static uint16_t (*s_slice9_lrtb)[4]; /* per-entity slice9 override [l,r,t,b] */
 static uint8_t *s_flags;
 
 /* ---- Helpers ---- */
@@ -102,6 +104,7 @@ static void sprite_default(uint16_t idx) {
     s_resolved[idx] = (nt_sprite_resolved_region_t){0};
     s_origin[idx][0] = 0.0F;
     s_origin[idx][1] = 0.0F;
+    memset(s_slice9_lrtb[idx], 0, sizeof(s_slice9_lrtb[0]));
     s_flags[idx] = 0;
 }
 
@@ -113,6 +116,7 @@ static void sprite_swap(uint16_t dst, uint16_t src) {
     s_resolved[dst] = s_resolved[src];
     s_origin[dst][0] = s_origin[src][0];
     s_origin[dst][1] = s_origin[src][1];
+    memcpy(s_slice9_lrtb[dst], s_slice9_lrtb[src], sizeof(s_slice9_lrtb[0]));
     s_flags[dst] = s_flags[src];
 }
 
@@ -141,9 +145,10 @@ nt_result_t nt_sprite_comp_init(const nt_sprite_comp_desc_t *desc) {
     s_atlas_revision = (uint32_t *)calloc(cap, sizeof(uint32_t));
     s_resolved = (nt_sprite_resolved_region_t *)calloc(cap, sizeof(nt_sprite_resolved_region_t));
     s_origin = calloc(cap, sizeof(*s_origin));
+    s_slice9_lrtb = calloc(cap, sizeof(*s_slice9_lrtb));
     s_flags = (uint8_t *)calloc(cap, sizeof(uint8_t));
 
-    if (!s_atlas || !s_region_hash || !s_region_index || !s_atlas_revision || !s_resolved || !s_origin || !s_flags) {
+    if (!s_atlas || !s_region_hash || !s_region_index || !s_atlas_revision || !s_resolved || !s_origin || !s_slice9_lrtb || !s_flags) {
         nt_sprite_comp_shutdown();
         return NT_ERR_INIT_FAILED;
     }
@@ -171,6 +176,7 @@ void nt_sprite_comp_shutdown(void) {
     free(s_atlas_revision);
     free(s_resolved);
     free(s_origin);
+    free(s_slice9_lrtb);
     free(s_flags);
     s_atlas = NULL;
     s_region_hash = NULL;
@@ -178,6 +184,7 @@ void nt_sprite_comp_shutdown(void) {
     s_atlas_revision = NULL;
     s_resolved = NULL;
     s_origin = NULL;
+    s_slice9_lrtb = NULL;
     s_flags = NULL;
     s_last_publication_epoch = 0;
     s_sync_dirty = false;
@@ -274,6 +281,42 @@ void nt_sprite_comp_reset_origin(nt_entity_t entity) {
     s_origin[idx][1] = 0.0F;
 }
 
+/* ---- Slice9 override ---- */
+
+void nt_sprite_comp_set_slice9(nt_entity_t entity, uint16_t l, uint16_t r, uint16_t t, uint16_t b) {
+    /* All zeros clears override back to atlas default */
+    if (l == 0 && r == 0 && t == 0 && b == 0) {
+        nt_sprite_comp_reset_slice9(entity);
+        return;
+    }
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    s_slice9_lrtb[idx][0] = l;
+    s_slice9_lrtb[idx][1] = r;
+    s_slice9_lrtb[idx][2] = t;
+    s_slice9_lrtb[idx][3] = b;
+    s_flags[idx] |= (uint8_t)NT_SPRITE_FLAG_SLICE9_OV;
+}
+
+void nt_sprite_comp_reset_slice9(nt_entity_t entity) {
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    memset(s_slice9_lrtb[idx], 0, sizeof(s_slice9_lrtb[0]));
+    s_flags[idx] &= (uint8_t)~NT_SPRITE_FLAG_SLICE9_OV;
+}
+
+const uint16_t *nt_sprite_comp_slice9_lrtb(nt_entity_t entity) {
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    return s_slice9_lrtb[idx];
+}
+
+bool nt_sprite_comp_has_slice9_override(nt_entity_t entity) {
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    return (s_flags[idx] & NT_SPRITE_FLAG_SLICE9_OV) != 0;
+}
+
 /* ---- Flip control ---- */
 
 void nt_sprite_comp_set_flip(nt_entity_t entity, bool flip_x, bool flip_y) {
@@ -326,6 +369,7 @@ nt_sprite_comp_view_t nt_sprite_comp_view(void) {
         .region_index = s_region_index,
         .resolved = s_resolved,
         .origin = (const float(*)[2])s_origin,
+        .slice9_lrtb = (const uint16_t(*)[4])s_slice9_lrtb,
         .flags = s_flags,
     };
 }

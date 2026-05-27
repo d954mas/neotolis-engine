@@ -342,14 +342,15 @@ static void frame(void) {
         const float inner_w = panel_w - (2.0F * panel_pad);
         const float inner_h_box = panel_h_fixed - (2.0F * panel_pad);
 
-        const uint16_t title_fit = nt_ui_fit_width(s_ctx, g_current->h1->font_id, k_titles[s_demo_text_idx], inner_w, 14U, g_current->h1->font_size, (float)g_current->h1->letter_tracking);
-        const uint16_t box_fit = nt_ui_fit_box(s_ctx, g_current->wrap->font_id, k_paragraphs[s_demo_text_idx], inner_w, inner_h_box, 10U, g_current->wrap->font_size,
+        const uint16_t title_fit =
+            nt_ui_fit_width(s_ctx, g_current->h1->font_id, k_titles[s_demo_text_idx], inner_w, 14U, (uint16_t)(g_current->h1->font_size + 0.5F), (float)g_current->h1->letter_tracking);
+        const uint16_t box_fit = nt_ui_fit_box(s_ctx, g_current->wrap->font_id, k_paragraphs[s_demo_text_idx], inner_w, inner_h_box, 10U, (uint16_t)(g_current->wrap->font_size + 0.5F),
                                                (float)g_current->wrap->letter_tracking, g_current->wrap->line_height);
 
         char hint_title[80];
         char hint_box[80];
-        (void)snprintf(hint_title, sizeof hint_title, "fit_width -> %u pt (max %u, idx %d)", title_fit, g_current->h1->font_size, s_demo_text_idx);
-        (void)snprintf(hint_box, sizeof hint_box, "fit_box -> %u pt (max %u, idx %d)", box_fit, g_current->wrap->font_size, s_demo_text_idx);
+        (void)snprintf(hint_title, sizeof hint_title, "fit_width -> %u pt (max %.0f, idx %d)", title_fit, (double)g_current->h1->font_size, s_demo_text_idx);
+        (void)snprintf(hint_box, sizeof hint_box, "fit_box -> %u pt (max %.0f, idx %d)", box_fit, (double)g_current->wrap->font_size, s_demo_text_idx);
 
         /* Stats read prev-frame values: nt_stats_get_fps after stats_frame_end
          * last iteration; UI counters populated by previous nt_ui_walk. */

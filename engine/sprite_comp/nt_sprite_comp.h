@@ -12,6 +12,7 @@
 #define NT_SPRITE_FLAG_FLIP_Y (1U << 1)
 #define NT_SPRITE_FLAG_ORIGIN_OV (1U << 2)
 #define NT_SPRITE_FLAG_RESOLVED (1U << 3)
+#define NT_SPRITE_FLAG_SLICE9_OV (1U << 4)
 
 /* ---- Descriptor ---- */
 
@@ -58,6 +59,17 @@ void nt_sprite_comp_bind_by_hash(nt_entity_t entity, nt_resource_t atlas, uint64
 
 void nt_sprite_comp_set_origin(nt_entity_t entity, float origin_x, float origin_y);
 void nt_sprite_comp_reset_origin(nt_entity_t entity);
+
+/* ---- Slice9 override (mirrors origin override pattern) ---- */
+
+/* Per-entity slice9 override. Passing all zeros clears the override to atlas default. */
+void nt_sprite_comp_set_slice9(nt_entity_t entity, uint16_t l, uint16_t r, uint16_t t, uint16_t b);
+void nt_sprite_comp_reset_slice9(nt_entity_t entity);
+
+/* Read back current effective slice9 (override if set, else zero).
+ * Returns pointer to 4-element uint16 [l,r,t,b] in SoA storage. */
+const uint16_t *nt_sprite_comp_slice9_lrtb(nt_entity_t entity);
+bool nt_sprite_comp_has_slice9_override(nt_entity_t entity);
 
 /* ---- Flip control ---- */
 
@@ -106,6 +118,7 @@ typedef struct {
     const uint16_t *region_index;
     const nt_sprite_resolved_region_t *resolved;
     const float (*origin)[2];
+    const uint16_t (*slice9_lrtb)[4];
     const uint8_t *flags;
 } nt_sprite_comp_view_t;
 

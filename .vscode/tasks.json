@@ -582,6 +582,85 @@
             "dependsOn": ["Build wasm-release-paired", "Ensure server ui_theme_demo (release :8095)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
+        },
+        {
+            "label": "Build & run slice9_demo packs (debug)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target slice9_demo_build_packs && build\\examples\\slice9_demo\\native-debug\\slice9_demo_build_packs.exe build/examples/slice9_demo",
+            "dependsOn": ["Configure native-debug"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build & run slice9_demo packs (release)",
+            "dependsOn": [
+                "Configure native-release",
+                "Build & run slice9_demo packs (release command)"
+            ],
+            "dependsOrder": "sequence",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & run slice9_demo packs (release command)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-release --target slice9_demo_build_packs && build\\examples\\slice9_demo\\native-release\\slice9_demo_build_packs.exe build/examples/slice9_demo",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Ensure server slice9_demo (debug :8096)",
+            "type": "shell",
+            "command": "python -m http.server 8096 -d \"${workspaceFolder}/build/examples/slice9_demo/wasm-debug-paired\"",
+            "isBackground": true,
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
+        },
+        {
+            "label": "Ensure server slice9_demo (release :8097)",
+            "type": "shell",
+            "command": "python -m http.server 8097 -d \"${workspaceFolder}/build/examples/slice9_demo/wasm-release-paired\"",
+            "isBackground": true,
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
+        },
+        {
+            "label": "Build & Serve slice9_demo (debug)",
+            "dependsOn": ["Build wasm-debug-paired", "Ensure server slice9_demo (debug :8096)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & Serve slice9_demo (release)",
+            "dependsOn": ["Build wasm-release-paired", "Ensure server slice9_demo (release :8097)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
         }
     ]
 }

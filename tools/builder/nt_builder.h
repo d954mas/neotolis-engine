@@ -315,13 +315,22 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
 
 /* --- Atlas sprite options (per-sprite, passed to atlas_add/add_raw/add_glob) --- */
 
+/* Per-sprite shape/rotation overrides (0 = use atlas default). */
+#define NT_ATLAS_SPRITE_SHAPE_RECT 1
+#define NT_ATLAS_SPRITE_SHAPE_CONVEX 2
+#define NT_ATLAS_SPRITE_SHAPE_CONCAVE 3
+#define NT_ATLAS_SPRITE_ROTATE_NO 1
+
 /* Per-sprite opts struct for atlas_add / atlas_add_raw / atlas_add_glob.
  *
  * Common pattern: construct via nt_atlas_sprite_opts_defaults() and override
  * the fields you care about. Designated-initialiser compound literals
  * ({ .origin_y = 1.0F }) ZERO-init unset fields — this gives origin_x=0, not
  * the default 0.5. Always start from the defaults function for partial
- * overrides, or set every field explicitly in the literal. */
+ * overrides, or set every field explicitly in the literal.
+ *
+ * Slice9: when any slice9 border is non-zero, the pipeline auto-forces
+ * shape=RECT and allow_rotate=NO at geometry/pack time. */
 typedef struct {
     /* Optional region name.
      *   atlas_add:      NULL = derive from file path (basename with extension)
@@ -340,6 +349,19 @@ typedef struct {
      * per-frame trim bounds have a stable pivot across frames. */
     float origin_x;
     float origin_y;
+
+    /* Slice9 borders in pixels (0 = no slice9). */
+    uint16_t slice9_left;
+    uint16_t slice9_right;
+    uint16_t slice9_top;
+    uint16_t slice9_bottom;
+
+    /* Per-sprite overrides (0 = use atlas default). */
+    uint8_t shape;        /* 0 = atlas default, NT_ATLAS_SPRITE_SHAPE_RECT/CONVEX/CONCAVE */
+    uint8_t allow_rotate; /* 0 = atlas default, NT_ATLAS_SPRITE_ROTATE_NO = restrict */
+    uint8_t max_vertices; /* 0 = atlas default */
+    uint8_t margin;       /* 0 = atlas default, overrides opts.margin for this sprite */
+    uint8_t extrude;      /* 0 = atlas default, overrides opts.extrude for this sprite (RECT only) */
 } nt_atlas_sprite_opts_t;
 
 /* Default per-sprite opts — centre pivot, name derived from path. */

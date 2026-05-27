@@ -424,7 +424,8 @@ static void frame(void) {
      * em-height in world units, which == pixels here since ortho is 1:1.
      * Skipped on context_restored frames — text material's resolved shader
      * handles are stale until next frame's nt_material_step / nt_font_step. */
-    if (!g_nt_gfx.context_restored) {
+    const nt_material_info_t *text_info = nt_material_get_info(s_text_material);
+    if (!g_nt_gfx.context_restored && text_info && text_info->ready) {
         const float overlay_size = 22.0F;
         mat4 overlay_model;
         glm_mat4_identity(overlay_model);

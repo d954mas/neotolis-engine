@@ -51,10 +51,25 @@ typedef struct {
 typedef struct {
     nt_resource_t atlas;
     uint32_t region_index;
+    uint16_t slice9_override[4]; /* {0,0,0,0} + no flag = use atlas default */
+    float origin_x;
+    float origin_y;
     uint8_t flip_bits;
-    uint8_t _reserved[3];
+    uint8_t flags; /* copied from style (NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE) */
+    uint8_t _reserved[2];
 } nt_ui_image_payload_t;
-_Static_assert(sizeof(nt_ui_image_payload_t) == 12, "nt_ui_image_payload_t stable ABI");
+_Static_assert(sizeof(nt_ui_image_payload_t) == 28, "nt_ui_image_payload_t stable ABI");
+
+/* Typed wrapper for Clay CUSTOM element data. Engine and game share the
+ * same customData slot; type tag distinguishes engine anchors from game
+ * handlers. Allocate from nt_mem_scratch (frame arena). */
+typedef struct {
+    uint8_t type;
+    void *data;
+} nt_ui_custom_data_t;
+
+#define NT_UI_CUSTOM_TYPE_NONE 0 /* engine anchor: skip, bbox only */
+#define NT_UI_CUSTOM_TYPE_GAME 1 /* game handler */
 
 /* clay_cmd is opaque const Clay_RenderCommand * (cast back inside handler).
  * Handler owns the GL state it touches: if you change viewport or scissor,
@@ -101,11 +116,13 @@ void nt_ui_module_shutdown(void);
 
 typedef struct {
     uint32_t max_elements; /* Clay layout-element cap. */
+    uint32_t max_markers;  /* side-channel transform/opacity markers; 0 = max_elements*2 */
 } nt_ui_create_desc_t;
 
 static inline nt_ui_create_desc_t nt_ui_create_desc_defaults(void) {
     return (nt_ui_create_desc_t){
         .max_elements = NT_UI_DEFAULT_MAX_ELEMENT_COUNT,
+        .max_markers = 0,
     };
 }
 
@@ -133,6 +150,45 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx);
 /* Total Clay commands incl. SCISSOR/CUSTOM/NONE (non-drawing barriers). */
 uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx);
+
+// #region transform_opacity_api
+/* Render-time transform -- no layout effect (D-54-09). */
+typedef struct {
+    float offset_x; /* slide-in/out, additive */
+    float offset_y;
+    float rotation; /* radians, additive */
+    float scale_x;  /* 1.0 = default, multiplicative */
+    float scale_y;  /* 1.0 = default, multiplicative */
+} nt_ui_transform_t;
+
+/* Identity transform (MUST use this, not zero-init -- scale must be positive; use opacity=0 to hide). */
+static inline nt_ui_transform_t nt_ui_transform_defaults(void) { return (nt_ui_transform_t){.offset_x = 0, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F}; }
+
+#ifndef NT_UI_TRANSFORM_STACK_DEPTH_CAP
+#define NT_UI_TRANSFORM_STACK_DEPTH_CAP 16
+#endif
+#ifndef NT_UI_OPACITY_STACK_DEPTH_CAP
+#define NT_UI_OPACITY_STACK_DEPTH_CAP 16
+#endif
+
+/* Push/pop during declaration phase (between begin/end). Stack depth <= NT_UI_TRANSFORM_STACK_DEPTH_CAP.
+ * Offset: applies to all element types (position shift).
+ * Scale: applies to all element types (position + size).
+ * Rotation: applies to all element types. SCISSOR uses AABB approximation
+ *   of the rotated clip rect (conservative: slightly larger than exact).
+ * Opacity (via push_opacity): applies to all element types. */
+void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transform);
+void nt_ui_pop_transform(nt_ui_context_t *ctx);
+
+/* Opacity inheritance: multiplied into alpha of all children. 1.0 = opaque. */
+void nt_ui_push_opacity(nt_ui_context_t *ctx, float opacity);
+void nt_ui_pop_opacity(nt_ui_context_t *ctx);
+// #endregion
+
+/* Emit a game CUSTOM element. data is passed through to the custom handler
+ * registered via nt_ui_set_custom_handler. Allocates nt_ui_custom_data_t
+ * wrapper from scratch arena. */
+void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, void *data);
 
 // #region test_access
 #ifdef NT_TEST_ACCESS

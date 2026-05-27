@@ -293,8 +293,9 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_resource WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
     # --- Atlas module tests ---
-    add_executable(test_atlas unit/test_atlas.c)
+    add_executable(test_atlas unit/test_atlas.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_atlas PRIVATE nt_atlas nt_resource nt_hash unity)
+    target_include_directories(test_atlas PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_atlas PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_atlas)
 
@@ -327,6 +328,8 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(test_builder PRIVATE nt_builder unity)
     target_compile_definitions(test_builder PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     nt_setup_test_target(test_builder WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    # Builder assert tests longjmp mid-pipeline; leaked allocations are expected.
+    set_tests_properties(test_builder PROPERTIES ENVIRONMENT "LSAN_OPTIONS=detect_leaks=0")
 
     # --- Mesh renderer tests ---
     add_executable(test_mesh_renderer unit/test_mesh_renderer.c)
@@ -433,8 +436,11 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_walker_readonly
         test_nt_ui_walker_batching
         test_nt_ui_label
+        test_nt_ui_image
+        test_nt_ui_panel
         test_nt_ui_scale
         test_nt_ui_fit
+        test_nt_ui_transform
     )
 
     foreach(_t IN LISTS _nt_ui_test_names)

@@ -10,6 +10,16 @@
 #include "font/nt_font.h"
 #include "ui/nt_ui.h"
 
+/* Side-channel transform/opacity marker (not a Clay element). */
+typedef struct {
+    uint8_t type;
+    uint32_t before_clay_idx;
+    union {
+        nt_ui_transform_t transform; /* PUSH_TRANSFORM only */
+        float opacity;               /* PUSH_OPACITY only */
+    };
+} nt_ui_marker_t;
+
 /* Lives at arena head; hot fields first. Per-ctx -- no module globals. */
 struct nt_ui_context {
     Clay_Context *clay;
@@ -24,6 +34,13 @@ struct nt_ui_context {
     nt_material_t text_material;
     nt_ui_custom_handler_t custom_fn;
     void *custom_user;
+
+    /* Side-channel markers: push/pop transform/opacity without Clay elements.
+     * Markers record before_clay_idx = number of Clay elements declared before
+     * this marker. Walker pre-pass interleaves markers with Clay commands. */
+    nt_ui_marker_t *markers; /* allocated from arena at create_context */
+    uint32_t marker_count;
+    uint32_t max_markers;
 
     /* Per-walk metrics. Walker writes; nt_ui_get_last_walk_* reads. */
     uint32_t last_walk_draw_call_delta;

@@ -57,6 +57,15 @@ typedef struct {
     float origin_x;        /* default 0.5 */
     float origin_y;        /* default 0.5 */
     uint64_t decoded_hash; /* xxh64 of decoded RGBA pixels */
+    uint16_t slice9_left;  /* slice9 border (0 = none) */
+    uint16_t slice9_right;
+    uint16_t slice9_top;
+    uint16_t slice9_bottom;
+    uint8_t shape_override;     /* 0 = atlas default */
+    uint8_t rotate_override;    /* 0 = atlas default */
+    uint8_t max_verts_override; /* 0 = atlas default */
+    uint8_t margin_override;    /* 0 = atlas default */
+    uint8_t extrude_override;   /* 0 = atlas default */
 } NtAtlasSpriteInput;
 
 /* Atlas region entry for codegen (lightweight, no pack entry needed) */

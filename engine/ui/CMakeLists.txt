@@ -41,6 +41,10 @@ nt_add_module(nt_ui LOG_DOMAIN "ui"
     nt_ui_scale.h
     nt_ui_fit.c
     nt_ui_fit.h
+    nt_ui_image.c
+    nt_ui_image.h
+    nt_ui_panel.c
+    nt_ui_panel.h
 )
 
 # Clay vendored header -- PUBLIC include. Clay is part of the engine's
