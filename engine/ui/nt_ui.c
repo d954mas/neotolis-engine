@@ -1447,6 +1447,10 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
             }
         }
 
+        /* Save walker state after pre-pass so layer passes (which overwrite
+         * ws fields with per-command baked state) don't leak into the next segment. */
+        nt_ui_walker_state_t ws_after_prepass = ws;
+
         /* Layer passes: dispatch renderables with baked transform state. */
         for (uint32_t word_idx = 0U; word_idx < 8U; ++word_idx) {
             uint32_t mask = active_layers[word_idx];
@@ -1479,6 +1483,8 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                 }
             }
         }
+        /* Restore chronological state so next segment sees correct ws. */
+        ws = ws_after_prepass;
         i = seg_end;
     }
 

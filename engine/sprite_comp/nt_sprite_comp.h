@@ -118,6 +118,7 @@ typedef struct {
     const uint16_t *region_index;
     const nt_sprite_resolved_region_t *resolved;
     const float (*origin)[2];
+    const uint16_t (*slice9_lrtb)[4];
     const uint8_t *flags;
 } nt_sprite_comp_view_t;
 

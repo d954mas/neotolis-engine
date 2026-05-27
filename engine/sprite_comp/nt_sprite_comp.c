@@ -369,6 +369,7 @@ nt_sprite_comp_view_t nt_sprite_comp_view(void) {
         .region_index = s_region_index,
         .resolved = s_resolved,
         .origin = (const float(*)[2])s_origin,
+        .slice9_lrtb = (const uint16_t(*)[4])s_slice9_lrtb,
         .flags = s_flags,
     };
 }

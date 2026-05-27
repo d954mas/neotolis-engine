@@ -502,11 +502,10 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         uint16_t st;
         uint16_t sb;
         if (has_s9_ov) {
-            const uint16_t *lrtb = nt_sprite_comp_slice9_lrtb(e);
-            sl = lrtb[0];
-            sr = lrtb[1];
-            st = lrtb[2];
-            sb = lrtb[3];
+            sl = sv->slice9_lrtb[s_idx][0];
+            sr = sv->slice9_lrtb[s_idx][1];
+            st = sv->slice9_lrtb[s_idx][2];
+            sb = sv->slice9_lrtb[s_idx][3];
         } else {
             sl = r->slice9_lrtb[0];
             sr = r->slice9_lrtb[1];
