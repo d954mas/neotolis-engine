@@ -1511,8 +1511,9 @@ static void pipeline_debug_png(AtlasPipeline *p) {
             }
             uint32_t si = p->placements[pi].sprite_index;
             uint32_t sprite_extrude = p->sprites[si].extrude_override ? p->sprites[si].extrude_override : p->opts->extrude;
-            uint32_t ix = p->placements[pi].x + sprite_extrude;
-            uint32_t iy = p->placements[pi].y + sprite_extrude;
+            uint32_t sprite_margin = p->sprites[si].margin_override ? p->sprites[si].margin_override : p->opts->margin;
+            uint32_t ix = p->placements[pi].x + sprite_extrude + sprite_margin;
+            uint32_t iy = p->placements[pi].y + sprite_extrude + sprite_margin;
 
             if (p->opts->shape != NT_ATLAS_SHAPE_RECT && p->hull_vertices[si] && p->vertex_counts[si] >= 3) {
                 debug_draw_hull_outline(debug_page, p->page_w[pg], p->page_h[pg], p->hull_vertices[si], p->vertex_counts[si], ix, iy, p->trim_w[si], p->trim_h[si], p->placements[pi].transform);

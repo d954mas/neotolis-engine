@@ -975,6 +975,7 @@ static void walker_state_init(nt_ui_walker_state_t *ws) {
     ws->accum_scale_y = 1.0F;
     ws->accum_rotation = 0;
     ws->pending_center_count = 0;
+    memset(ws->center_resolved, 0, sizeof(ws->center_resolved));
     ws->opacity_depth = 0;
     ws->accum_opacity = 1.0F;
 }
