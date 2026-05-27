@@ -139,10 +139,42 @@ static void test_image_flip_bits(void) {
     TEST_ASSERT_EQUAL_UINT8(3, p->flip_bits);
 }
 
+/* ---- Test 6: flags + origin copied to payload ---- */
+static void test_image_flags_origin(void) {
+    static const nt_ui_image_style_t s = {
+        .color_packed = 0xFFFFFFFF,
+        .origin_x = 0.25F,
+        .origin_y = 0.75F,
+        .flip_bits = 0,
+        .flags = NT_UI_IMAGE_ORIGIN_OVERRIDE | NT_UI_IMAGE_SLICE9_OVERRIDE,
+    };
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s); }
+    nt_ui_end(s_fx.ctx);
+
+    const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
+    TEST_ASSERT_NOT_NULL(c);
+    const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
+    TEST_ASSERT_EQUAL_UINT8(NT_UI_IMAGE_ORIGIN_OVERRIDE | NT_UI_IMAGE_SLICE9_OVERRIDE, p->flags);
+    TEST_ASSERT_TRUE(p->origin_x == 0.25F); /* NOLINT(cert-flp30-c) exact literal */
+    TEST_ASSERT_TRUE(p->origin_y == 0.75F); /* NOLINT(cert-flp30-c) exact literal */
+}
+
+/* ---- Test 7: defaults() sets origin to 0.5 and flags to 0 ---- */
+static void test_image_style_defaults(void) {
+    nt_ui_image_style_t d = nt_ui_image_style_defaults();
+    TEST_ASSERT_EQUAL_UINT32(0xFFFFFFFF, d.color_packed);
+    TEST_ASSERT_TRUE(d.origin_x == 0.5F); /* NOLINT(cert-flp30-c) exact literal */
+    TEST_ASSERT_TRUE(d.origin_y == 0.5F); /* NOLINT(cert-flp30-c) exact literal */
+    TEST_ASSERT_EQUAL_UINT8(0, d.flags);
+    TEST_ASSERT_EQUAL_UINT8(0, d.flip_bits);
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
-/* ---- Test 6: NULL style asserts ---- */
+/* ---- Test 8: NULL style asserts ---- */
 static void test_image_null_style_asserts(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
@@ -150,7 +182,7 @@ static void test_image_null_style_asserts(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 7: invalid atlas (id=0) asserts ---- */
+/* ---- Test 9: invalid atlas (id=0) asserts ---- */
 static void test_image_invalid_atlas_asserts(void) {
     nt_resource_t bad = {.id = 0};
     nt_pointer_t mouse = {0};
@@ -168,6 +200,8 @@ int main(void) {
     RUN_TEST(test_image_tint_color);
     RUN_TEST(test_image_element_data_passthrough);
     RUN_TEST(test_image_flip_bits);
+    RUN_TEST(test_image_flags_origin);
+    RUN_TEST(test_image_style_defaults);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_image_null_style_asserts);
     RUN_TEST(test_image_invalid_atlas_asserts);

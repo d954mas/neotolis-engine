@@ -20,7 +20,10 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_reso
     *p = (nt_ui_image_payload_t){
         .atlas = atlas,
         .region_index = region_index,
+        .origin_x = style->origin_x,
+        .origin_y = style->origin_y,
         .flip_bits = style->flip_bits,
+        .flags = style->flags,
     };
     memcpy(p->slice9_override, style->slice9_lrtb, sizeof(p->slice9_override));
 

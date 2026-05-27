@@ -29,6 +29,7 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include "core/nt_clamp.h"
 #include "log/nt_log.h"
 #include "memory/nt_mem_scratch.h"
+#include "ui/nt_ui_image.h" /* NT_UI_IMAGE_*_OVERRIDE flags */
 #include "ui/nt_ui_internal.h"
 
 // #region marker_types
@@ -715,16 +716,29 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
         return; /* tombstone */
     }
 
-    /* Auto-slice9: per-widget override > atlas default > regular quad */
-    const bool has_override = (p->slice9_override[0] | p->slice9_override[1] | p->slice9_override[2] | p->slice9_override[3]) != 0;
+    /* Resolve origin: override flag = style value, otherwise atlas default. */
+    float ox;
+    float oy;
+    if (p->flags & NT_UI_IMAGE_ORIGIN_OVERRIDE) {
+        ox = p->origin_x;
+        oy = p->origin_y;
+    } else {
+        ox = r->origin_x;
+        oy = r->origin_y;
+    }
+
+    /* Auto-slice9: flag OR non-zero lrtb = override; flag adds ability to
+     * override with zeros (disable slice9). Backward compat: non-zero lrtb
+     * works without flag. */
+    const bool has_s9_override = (p->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) || (p->slice9_override[0] | p->slice9_override[1] | p->slice9_override[2] | p->slice9_override[3]) != 0;
     const bool region_slice9 = (r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0;
 
-    if (has_override || region_slice9) {
+    if (has_s9_override || region_slice9) {
         uint16_t sl;
         uint16_t sr;
         uint16_t st;
         uint16_t sb;
-        if (has_override) {
+        if (has_s9_override) {
             sl = p->slice9_override[0];
             sr = p->slice9_override[1];
             st = p->slice9_override[2];
@@ -750,7 +764,7 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
         const float m[16] = {
             sx_f, 0.0F, 0.0F, 0.0F, 0.0F, sy_f, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, bb.x, bb.y, 0.0F, 1.0F,
         };
-        nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
+        nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, ox, oy, col, p->flip_bits);
     } else {
         const float rcx = bb.x + (bb.width * 0.5F);
         const float rcy = bb.y + (bb.height * 0.5F);
@@ -761,7 +775,7 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
         const float m[16] = {
             sx_f * rc, sx_f * rs, 0, 0, sy_f * (-rs), sy_f * rc, 0, 0, 0, 0, 1, 0, rcx - (rc * hw) + (rs * hh), rcy - (rs * hw) - (rc * hh), 0, 1,
         };
-        nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, 0.0F, 0.0F, col, p->flip_bits);
+        nt_sprite_renderer_emit_region(p->atlas, p->region_index, m, ox, oy, col, p->flip_bits);
     }
 }
 // #endregion

@@ -205,10 +205,34 @@ static void test_nested_panel_group(void) {
     TEST_ASSERT_NOT_NULL(txt);
 }
 
+/* ---- Test 8: panel payload carries flags + origin ---- */
+static void test_panel_payload_flags_origin(void) {
+    static const nt_ui_image_style_t s = {
+        .color_packed = 0xFFFFFFFF,
+        .origin_x = 0.1F,
+        .origin_y = 0.9F,
+        .flags = NT_UI_IMAGE_ORIGIN_OVERRIDE,
+    };
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s);
+        nt_ui_panel_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
+    TEST_ASSERT_NOT_NULL(c);
+    const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
+    TEST_ASSERT_EQUAL_UINT8(NT_UI_IMAGE_ORIGIN_OVERRIDE, p->flags);
+    TEST_ASSERT_TRUE(p->origin_x == 0.1F); /* NOLINT(cert-flp30-c) exact literal */
+    TEST_ASSERT_TRUE(p->origin_y == 0.9F); /* NOLINT(cert-flp30-c) exact literal */
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
 
-/* ---- Test 8: panel_begin with NULL style asserts ---- */
+/* ---- Test 9: panel_begin with NULL style asserts ---- */
 static void test_panel_null_style_asserts(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse);
@@ -216,7 +240,7 @@ static void test_panel_null_style_asserts(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 9: panel_begin with invalid atlas asserts ---- */
+/* ---- Test 10: panel_begin with invalid atlas asserts ---- */
 static void test_panel_invalid_atlas_asserts(void) {
     nt_resource_t bad = {.id = 0};
     nt_pointer_t mouse = {0};
@@ -236,6 +260,7 @@ int main(void) {
     RUN_TEST(test_group_with_opacity);
     RUN_TEST(test_panel_payload_carries_atlas);
     RUN_TEST(test_nested_panel_group);
+    RUN_TEST(test_panel_payload_flags_origin);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_panel_null_style_asserts);
     RUN_TEST(test_panel_invalid_atlas_asserts);

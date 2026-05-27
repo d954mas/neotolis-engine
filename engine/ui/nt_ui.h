@@ -51,11 +51,14 @@ typedef struct {
 typedef struct {
     nt_resource_t atlas;
     uint32_t region_index;
-    uint16_t slice9_override[4]; /* {0,0,0,0} = use atlas default */
+    uint16_t slice9_override[4]; /* {0,0,0,0} + no flag = use atlas default */
+    float origin_x;
+    float origin_y;
     uint8_t flip_bits;
-    uint8_t _reserved[3];
+    uint8_t flags; /* copied from style (NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE) */
+    uint8_t _reserved[2];
 } nt_ui_image_payload_t;
-_Static_assert(sizeof(nt_ui_image_payload_t) == 20, "nt_ui_image_payload_t stable ABI");
+_Static_assert(sizeof(nt_ui_image_payload_t) == 28, "nt_ui_image_payload_t stable ABI");
 
 /* clay_cmd is opaque const Clay_RenderCommand * (cast back inside handler).
  * Handler owns the GL state it touches: if you change viewport or scissor,
