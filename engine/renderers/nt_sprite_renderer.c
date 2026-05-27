@@ -493,7 +493,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
     const uint8_t flip_bits = flags & (NT_SPRITE_FLAG_FLIP_X | NT_SPRITE_FLAG_FLIP_Y);
     const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
 
-    /* Slice9 branch: per-entity override or atlas-authored slice9 */
+    // #region emit_one_slice9_branch
     bool has_s9_ov = (flags & NT_SPRITE_FLAG_SLICE9_OV) != 0;
     bool has_s9_region = (r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0;
     if (has_s9_ov || has_s9_region) {
@@ -705,6 +705,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         return;
     }
 
+    // #endregion
     emit_region_resolved(r, resolved->cached_pos, resolved->raw_vertices, resolved->indices, page_tex, ipu, tv->world_matrices[t_idx], origin_x, origin_y, dv->colors_packed[d_idx], flip_bits);
 }
 // #endregion
@@ -884,7 +885,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         }
     }
 
-    /* Position splits: convert pixel borders to world units via ipu */
+    // #region position_and_uv_splits
     float fl_w = (float)fl * ipu;
     float fr_w = (float)fr * ipu;
     float ft_w = (float)ft * ipu;
@@ -939,7 +940,9 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         vs[2] = t1;
     }
 
-    /* Capacity check: need 16 verts + 54 indices. */
+    // #endregion
+
+    // #region emit_slice9_vertices
     if (s_sprite.vertex_count + 16U > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + 54U > NT_SPRITE_RENDERER_MAX_INDICES) {
         NT_ASSERT(s_sprite.cmd_count > 0 && "emit_slice9 called with no open cmd");
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
@@ -1015,6 +1018,7 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     s_sprite.last_emit_index_count = 54U;
     s_sprite.last_emit_first_vertex = base;
 #endif
+    // #endregion
 }
 // #endregion
 
