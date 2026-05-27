@@ -468,6 +468,44 @@ static void test_empty_container_scale_no_crash(void) {
     nt_ui_walk(s_fx.ctx, &target);
 }
 
+/* Push scale before SCISSOR_START (non-segmentable). Center must resolve
+ * from the scissor's bbox, not stay at (0,0). */
+static void test_scale_before_scissor_resolves_center(void) {
+    nt_ui_transform_t t = {.offset_x = 10.0F, .offset_y = 0, .rotation = 0, .scale_x = 2.0F, .scale_y = 2.0F};
+    inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
+
+    /* Cmd 0: SCISSOR_START (non-segmentable) — should resolve deferred center. */
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_START;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 50, .y = 50, .width = 200, .height = 100};
+    track_clay_element_cmd(0);
+
+    /* Cmd 1: RECT inside scissor — should have transform applied. */
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 60, .y = 60, .width = 40, .height = 30};
+    s_test_cmds[1].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+    track_clay_element_cmd(1);
+
+    /* Cmd 2: SCISSOR_END */
+    s_test_cmds[2].commandType = CLAY_RENDER_COMMAND_TYPE_SCISSOR_END;
+    s_test_cmds[2].boundingBox = (Clay_BoundingBox){0};
+    track_clay_element_cmd(2);
+
+    inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
+    inject_frozen_cmds(3);
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    /* If center resolved from scissor bbox (center=150,100), the RECT at
+     * (60,60) with scale=2 would be scaled around (150,100), not (0,0).
+     * With (0,0) center: tcx = 60*2 + 10 = 130. With (150,100) center:
+     * tcx = 150 + (60-150)*2 + 10 = 150 - 180 + 10 = -20. Check that
+     * vertex x != 130 (wrong center) by verifying it differs. */
+    float pos[3];
+    nt_sprite_renderer_test_last_emit_position(0U, pos);
+    TEST_ASSERT_TRUE(pos[0] != 130.0F);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_push_pop_transform_balanced);
@@ -484,5 +522,6 @@ int main(void) {
     RUN_TEST(test_game_clay_elements_shift_index);
     RUN_TEST(test_nested_group_scale);
     RUN_TEST(test_empty_container_scale_no_crash);
+    RUN_TEST(test_scale_before_scissor_resolves_center);
     return UNITY_END();
 }
