@@ -424,7 +424,31 @@ static void frame(void) {
         nt_ui_end(s_ctx);
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
+        nt_gfx_begin_segment("frame");
         nt_ui_walk(s_ctx, &target);
+        nt_gfx_end_segment();
+
+        // #region metrics bridge
+        nt_stats_count("ui_draw_calls", (uint64_t)nt_ui_get_last_walk_draw_calls(s_ctx));
+        nt_stats_count("ui_commands", (uint64_t)nt_ui_get_last_walk_command_count(s_ctx));
+        nt_stats_count("ui_rects", (uint64_t)nt_ui_get_last_walk_rect_count(s_ctx));
+        nt_stats_count("ui_images", (uint64_t)nt_ui_get_last_walk_image_count(s_ctx));
+        nt_stats_count("ui_texts", (uint64_t)nt_ui_get_last_walk_text_count(s_ctx));
+        nt_stats_count("ui_borders", (uint64_t)nt_ui_get_last_walk_border_count(s_ctx));
+        nt_stats_count("ui_scissors", (uint64_t)nt_ui_get_last_walk_scissor_count(s_ctx));
+        nt_stats_count("ui_layout_us", (uint64_t)(nt_ui_get_last_layout_ms(s_ctx) * 1000.0F));
+        nt_stats_count("ui_walk_us", (uint64_t)(nt_ui_get_last_walk_ms(s_ctx) * 1000.0F));
+        // #endregion
+
+        // #region stats overlay
+        {
+            mat4 stats_model;
+            glm_mat4_identity(stats_model);
+            glm_translate(stats_model, (vec3){10.0F, scale.logical_h - 20.0F, 0.0F});
+            const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
+            nt_stats_draw(s_text_material, s_font, (const float *)stats_model, 14.0F, stats_color);
+        }
+        // #endregion
     }
 
     nt_gfx_end_pass();
