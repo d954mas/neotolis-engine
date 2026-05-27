@@ -523,7 +523,7 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         if (!ensure_current_cmd_page_texture(page_tex)) {
             return;
         }
-        if (s_sprite.vertex_count + 36U > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + 54U > NT_SPRITE_RENDERER_MAX_INDICES) {
+        if (s_sprite.vertex_count + 16U > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + 54U > NT_SPRITE_RENDERER_MAX_INDICES) {
             NT_ASSERT(s_sprite.cmd_count > 0);
             nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
             nt_sprite_renderer_flush();
@@ -659,71 +659,47 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
         const uint8_t cb = (uint8_t)((s9_color >> 16) & 0xFFU);
         const uint8_t ca = (uint8_t)((s9_color >> 24) & 0xFFU);
 
-        /* Emit 9 quads with transformed positions. */
+        /* Emit 4x4 grid = 16 unique vertices (shared at cell boundaries). */
         const uint32_t base = s_sprite.vertex_count;
-        for (uint8_t row = 0; row < 3; row++) {
-            for (uint8_t col = 0; col < 3; col++) {
-                const uint32_t qbase = base + ((uint32_t)((row * 3) + col) * 4U);
-                nt_sprite_vertex_t *v0 = &s_sprite.vertices[qbase + 0];
-                v0->position[0] = wxs[row][col];
-                v0->position[1] = wys[row][col];
-                v0->position[2] = wzs[row][col];
-                v0->texcoord[0] = us[col];
-                v0->texcoord[1] = vs[row];
-                v0->color[0] = cr;
-                v0->color[1] = cg;
-                v0->color[2] = cb;
-                v0->color[3] = ca;
-
-                nt_sprite_vertex_t *v1 = &s_sprite.vertices[qbase + 1];
-                v1->position[0] = wxs[row][col + 1];
-                v1->position[1] = wys[row][col + 1];
-                v1->position[2] = wzs[row][col + 1];
-                v1->texcoord[0] = us[col + 1];
-                v1->texcoord[1] = vs[row];
-                v1->color[0] = cr;
-                v1->color[1] = cg;
-                v1->color[2] = cb;
-                v1->color[3] = ca;
-
-                nt_sprite_vertex_t *v2 = &s_sprite.vertices[qbase + 2];
-                v2->position[0] = wxs[row + 1][col];
-                v2->position[1] = wys[row + 1][col];
-                v2->position[2] = wzs[row + 1][col];
-                v2->texcoord[0] = us[col];
-                v2->texcoord[1] = vs[row + 1];
-                v2->color[0] = cr;
-                v2->color[1] = cg;
-                v2->color[2] = cb;
-                v2->color[3] = ca;
-
-                nt_sprite_vertex_t *v3 = &s_sprite.vertices[qbase + 3];
-                v3->position[0] = wxs[row + 1][col + 1];
-                v3->position[1] = wys[row + 1][col + 1];
-                v3->position[2] = wzs[row + 1][col + 1];
-                v3->texcoord[0] = us[col + 1];
-                v3->texcoord[1] = vs[row + 1];
-                v3->color[0] = cr;
-                v3->color[1] = cg;
-                v3->color[2] = cb;
-                v3->color[3] = ca;
-
-                uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count + ((uint32_t)((row * 3) + col) * 6U)];
-                const uint16_t qb16 = (uint16_t)qbase;
-                out_idx[0] = qb16;
-                out_idx[1] = (uint16_t)(qb16 + 1U);
-                out_idx[2] = (uint16_t)(qb16 + 2U);
-                out_idx[3] = (uint16_t)(qb16 + 2U);
-                out_idx[4] = (uint16_t)(qb16 + 1U);
-                out_idx[5] = (uint16_t)(qb16 + 3U);
+        for (uint8_t row = 0; row < 4; row++) {
+            for (uint8_t col = 0; col < 4; col++) {
+                nt_sprite_vertex_t *v = &s_sprite.vertices[base + (row * 4) + col];
+                v->position[0] = wxs[row][col];
+                v->position[1] = wys[row][col];
+                v->position[2] = wzs[row][col];
+                v->texcoord[0] = us[col];
+                v->texcoord[1] = vs[row];
+                v->color[0] = cr;
+                v->color[1] = cg;
+                v->color[2] = cb;
+                v->color[3] = ca;
             }
         }
-        s_sprite.vertex_count += 36U;
+
+        /* 54 indices: 9 cells x 2 triangles x 3 indices. */
+        uint32_t ii = 0;
+        for (uint8_t row = 0; row < 3; row++) {
+            for (uint8_t col = 0; col < 3; col++) {
+                const uint16_t i_bl = (uint16_t)(base + (row * 4) + col);
+                const uint16_t i_br = (uint16_t)(i_bl + 1U);
+                const uint16_t i_tl = (uint16_t)(i_bl + 4U);
+                const uint16_t i_tr = (uint16_t)(i_tl + 1U);
+                uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count + ii];
+                out_idx[0] = i_tl;
+                out_idx[1] = i_tr;
+                out_idx[2] = i_bl;
+                out_idx[3] = i_bl;
+                out_idx[4] = i_tr;
+                out_idx[5] = i_br;
+                ii += 6;
+            }
+        }
+        s_sprite.vertex_count += 16U;
         s_sprite.index_count += 54U;
 #ifdef NT_TEST_ACCESS
-        s_sprite.last_slice9_vertex_count = 36U;
+        s_sprite.last_slice9_vertex_count = 16U;
         s_sprite.last_slice9_index_count = 54U;
-        s_sprite.last_emit_vertex_count = 36U;
+        s_sprite.last_emit_vertex_count = 16U;
         s_sprite.last_emit_index_count = 54U;
         s_sprite.last_emit_first_vertex = base;
 #endif
@@ -964,8 +940,8 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         vs[2] = t1;
     }
 
-    /* Capacity check: need 36 verts + 54 indices. */
-    if (s_sprite.vertex_count + 36U > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + 54U > NT_SPRITE_RENDERER_MAX_INDICES) {
+    /* Capacity check: need 16 verts + 54 indices. */
+    if (s_sprite.vertex_count + 16U > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + 54U > NT_SPRITE_RENDERER_MAX_INDICES) {
         NT_ASSERT(s_sprite.cmd_count > 0 && "emit_slice9 called with no open cmd");
         nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
         nt_sprite_renderer_flush();
@@ -980,84 +956,48 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
 
     uint32_t base = s_sprite.vertex_count;
 
-    /* Emit 9 quads: row 0..2, col 0..2. */
-    for (uint8_t row = 0; row < 3; row++) {
-        for (uint8_t col = 0; col < 3; col++) {
-            uint32_t qbase = base + ((uint32_t)((row * 3) + col) * 4U);
-            /* 4 vertices: TL, TR, BL, BR */
-            float px0 = xs[col];
-            float px1 = xs[col + 1];
-            float py0 = ys[row];
-            float py1 = ys[row + 1];
-            uint16_t tu0 = us[col];
-            uint16_t tu1 = us[col + 1];
-            uint16_t tv0 = vs[row];
-            uint16_t tv1 = vs[row + 1];
-
-            nt_sprite_vertex_t *v0 = &s_sprite.vertices[qbase + 0];
-            v0->position[0] = px0;
-            v0->position[1] = py0;
-            v0->position[2] = 0.0F;
-            v0->texcoord[0] = tu0;
-            v0->texcoord[1] = tv0;
-            v0->color[0] = cr;
-            v0->color[1] = cg;
-            v0->color[2] = cb;
-            v0->color[3] = ca;
-
-            nt_sprite_vertex_t *v1 = &s_sprite.vertices[qbase + 1];
-            v1->position[0] = px1;
-            v1->position[1] = py0;
-            v1->position[2] = 0.0F;
-            v1->texcoord[0] = tu1;
-            v1->texcoord[1] = tv0;
-            v1->color[0] = cr;
-            v1->color[1] = cg;
-            v1->color[2] = cb;
-            v1->color[3] = ca;
-
-            nt_sprite_vertex_t *v2 = &s_sprite.vertices[qbase + 2];
-            v2->position[0] = px0;
-            v2->position[1] = py1;
-            v2->position[2] = 0.0F;
-            v2->texcoord[0] = tu0;
-            v2->texcoord[1] = tv1;
-            v2->color[0] = cr;
-            v2->color[1] = cg;
-            v2->color[2] = cb;
-            v2->color[3] = ca;
-
-            nt_sprite_vertex_t *v3 = &s_sprite.vertices[qbase + 3];
-            v3->position[0] = px1;
-            v3->position[1] = py1;
-            v3->position[2] = 0.0F;
-            v3->texcoord[0] = tu1;
-            v3->texcoord[1] = tv1;
-            v3->color[0] = cr;
-            v3->color[1] = cg;
-            v3->color[2] = cb;
-            v3->color[3] = ca;
-
-            /* 6 indices: two triangles (0,1,2 / 2,1,3). */
-            uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count + ((uint32_t)((row * 3) + col) * 6U)];
-            uint16_t qb16 = (uint16_t)qbase;
-            out_idx[0] = qb16;
-            out_idx[1] = (uint16_t)(qb16 + 1U);
-            out_idx[2] = (uint16_t)(qb16 + 2U);
-            out_idx[3] = (uint16_t)(qb16 + 2U);
-            out_idx[4] = (uint16_t)(qb16 + 1U);
-            out_idx[5] = (uint16_t)(qb16 + 3U);
+    /* Emit 4x4 grid = 16 unique vertices (shared at cell boundaries). */
+    for (uint8_t row = 0; row < 4; row++) {
+        for (uint8_t col = 0; col < 4; col++) {
+            nt_sprite_vertex_t *v = &s_sprite.vertices[base + (row * 4) + col];
+            v->position[0] = xs[col];
+            v->position[1] = ys[row];
+            v->position[2] = 0.0F;
+            v->texcoord[0] = us[col];
+            v->texcoord[1] = vs[row];
+            v->color[0] = cr;
+            v->color[1] = cg;
+            v->color[2] = cb;
+            v->color[3] = ca;
         }
     }
 
-    /* Rotate all 36 vertices around rect center if rotation != 0. */
+    /* 54 indices: 9 cells x 2 triangles x 3 indices. */
+    uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count];
+    uint32_t ii = 0;
+    for (uint8_t row = 0; row < 3; row++) {
+        for (uint8_t col = 0; col < 3; col++) {
+            const uint16_t i_bl = (uint16_t)(base + (row * 4) + col);
+            const uint16_t i_br = (uint16_t)(i_bl + 1U);
+            const uint16_t i_tl = (uint16_t)(i_bl + 4U);
+            const uint16_t i_tr = (uint16_t)(i_tl + 1U);
+            out_idx[ii++] = i_tl;
+            out_idx[ii++] = i_tr;
+            out_idx[ii++] = i_bl;
+            out_idx[ii++] = i_bl;
+            out_idx[ii++] = i_tr;
+            out_idx[ii++] = i_br;
+        }
+    }
+
+    /* Rotate all 16 vertices around rect center if rotation != 0. */
     if (rotation != 0.0F) {
         const float rcx = x + (w * 0.5F);
         const float rcy = y + (h * 0.5F);
         const float rc = cosf(rotation);
         const float rs = sinf(rotation);
-        for (uint32_t i = 0; i < 36U; i++) {
-            nt_sprite_vertex_t *v = &s_sprite.vertices[base + i];
+        for (uint32_t vi = 0; vi < 16U; vi++) {
+            nt_sprite_vertex_t *v = &s_sprite.vertices[base + vi];
             const float dx = v->position[0] - rcx;
             const float dy = v->position[1] - rcy;
             v->position[0] = (dx * rc) - (dy * rs) + rcx;
@@ -1065,11 +1005,11 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
         }
     }
 
-    s_sprite.vertex_count += 36U;
+    s_sprite.vertex_count += 16U;
     s_sprite.index_count += 54U;
 
 #ifdef NT_TEST_ACCESS
-    s_sprite.last_slice9_vertex_count = 36U;
+    s_sprite.last_slice9_vertex_count = 16U;
     s_sprite.last_slice9_index_count = 54U;
     /* Also update the generic last_emit so test_last_emit_position/texcoord work. */
     s_sprite.last_emit_vertex_count = 36U;

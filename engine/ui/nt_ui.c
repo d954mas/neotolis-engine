@@ -266,23 +266,9 @@ void nt_ui_end(nt_ui_context_t *ctx) {
 
     ctx->frozen_cmds = Clay_EndLayout();
 
-    /* Remap marker before_clay_idx from layout-element-space to render-command-space.
-     * Linear scan: nt_layout_index may be non-monotonic after zIndex sort. */
-    if (ctx->marker_count > 0) {
-        const Clay_RenderCommandArray *cmds = &ctx->frozen_cmds;
-        const int32_t R = cmds->length;
-        for (uint32_t mi = 0; mi < ctx->marker_count; ++mi) {
-            const int32_t target = (int32_t)ctx->markers[mi].before_clay_idx;
-            int32_t found = R;
-            for (int32_t ci = 0; ci < R; ++ci) {
-                if (cmds->internalArray[ci].nt_layout_index >= target) {
-                    found = ci;
-                    break;
-                }
-            }
-            ctx->markers[mi].before_clay_idx = (uint32_t)found;
-        }
-    }
+    /* Markers keep layout-element indices (before_clay_idx). The walker
+     * matches directly via nt_layout_index on each render command — no
+     * O(M×R) remap needed. */
 
     ctx->debug_overlay = Clay_IsDebugModeEnabled();
     ctx->in_frame = false;
@@ -1352,13 +1338,13 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 #ifdef NT_TEST_ACCESS
     uint32_t unlayered_count = 0U;
 #endif
-    uint32_t mcur = 0U;    /* side-channel marker cursor */
-    uint32_t cmd_idx = 0U; /* global render-command index for marker alignment */
+    uint32_t mcur = 0U; /* side-channel marker cursor */
     int32_t i = 0;
     while (i < arr->length) {
         const Clay_RenderCommand *c = &arr->internalArray[i];
         if (!is_segmentable(c->commandType)) {
-            while (mcur < ctx->marker_count && ctx->markers[mcur].before_clay_idx <= cmd_idx) {
+            /* Match markers by nt_layout_index — no remap needed. */
+            while (mcur < ctx->marker_count && (int32_t)ctx->markers[mcur].before_clay_idx <= c->nt_layout_index) {
                 process_marker(&ctx->markers[mcur], &ws);
                 ++mcur;
             }
@@ -1375,7 +1361,6 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                 ws.pending_center_count = 0;
                 walker_recompute_transform(&ws);
             }
-            ++cmd_idx;
             dispatch_command(ctx, c, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws);
             ++i;
             continue;
@@ -1394,57 +1379,72 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
 
         /* Pre-pass: interleave side-channel markers with Clay commands to
          * bake transform/opacity per render-command index. Markers fire
-         * before the Clay command whose declaration index they precede. */
+         * before the Clay command whose declaration index they precede.
+         * Skipped entirely when marker_count == 0 (identity transform). */
         typedef struct {
             float a, b, c, d, tx, ty;
             float scale_x, scale_y, rotation, opacity;
         } baked_xform_t;
-        baked_xform_t *baked = (baked_xform_t *)nt_mem_scratch_alloc(sizeof(baked_xform_t) * (size_t)seg_n, _Alignof(baked_xform_t));
+        baked_xform_t *baked = NULL;
 
         uint32_t active_layers[8] = {0U};
-        for (int32_t j = i; j < seg_end; ++j) {
-            const Clay_RenderCommand *cc = &arr->internalArray[j];
-            /* Drain markers whose before_clay_idx <= this command's index. */
-            while (mcur < ctx->marker_count && ctx->markers[mcur].before_clay_idx <= cmd_idx) {
-                process_marker(&ctx->markers[mcur], &ws);
-                ++mcur;
-            }
-            ++cmd_idx;
-            /* Resolve ALL pending centers from first command with valid bbox.
-             * SCISSOR_START has a bbox -- include it so transforms wrapping a
-             * clip-only subtree still resolve their center. */
-            if (ws.pending_center_count > 0 && cc->boundingBox.width > 0 && cc->commandType != CLAY_RENDER_COMMAND_TYPE_NONE && cc->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
-                const float rcx = cc->boundingBox.x + (cc->boundingBox.width * 0.5F);
-                const float rcy = cc->boundingBox.y + (cc->boundingBox.height * 0.5F);
-                for (int pi = 0; pi < ws.pending_center_count; ++pi) {
-                    const int pd = ws.pending_center_stack[pi];
-                    ws.push_center_x[pd] = rcx;
-                    ws.push_center_y[pd] = rcy;
-                    ws.center_resolved[pd] = true;
+        if (ctx->marker_count > 0) {
+            baked = (baked_xform_t *)nt_mem_scratch_alloc(sizeof(baked_xform_t) * (size_t)seg_n, _Alignof(baked_xform_t));
+            for (int32_t j = i; j < seg_end; ++j) {
+                const Clay_RenderCommand *cc = &arr->internalArray[j];
+                /* Match markers by nt_layout_index — no remap needed. */
+                while (mcur < ctx->marker_count && (int32_t)ctx->markers[mcur].before_clay_idx <= cc->nt_layout_index) {
+                    process_marker(&ctx->markers[mcur], &ws);
+                    ++mcur;
                 }
-                ws.pending_center_count = 0;
-                walker_recompute_transform(&ws);
-            }
-            const int32_t bi = j - i;
-            baked[bi] = (baked_xform_t){
-                .a = ws.aff_a,
-                .b = ws.aff_b,
-                .c = ws.aff_c,
-                .d = ws.aff_d,
-                .tx = ws.aff_tx,
-                .ty = ws.aff_ty,
-                .scale_x = ws.accum_scale_x,
-                .scale_y = ws.accum_scale_y,
-                .rotation = ws.accum_rotation,
-                .opacity = ws.accum_opacity,
-            };
-            const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
-            active_layers[layer >> 5U] |= (1U << (layer & 31U));
+                /* Resolve ALL pending centers from first command with valid bbox.
+                 * SCISSOR_START has a bbox -- include it so transforms wrapping a
+                 * clip-only subtree still resolve their center. */
+                if (ws.pending_center_count > 0 && cc->boundingBox.width > 0 && cc->commandType != CLAY_RENDER_COMMAND_TYPE_NONE && cc->commandType != CLAY_RENDER_COMMAND_TYPE_SCISSOR_END) {
+                    const float rcx = cc->boundingBox.x + (cc->boundingBox.width * 0.5F);
+                    const float rcy = cc->boundingBox.y + (cc->boundingBox.height * 0.5F);
+                    for (int pi = 0; pi < ws.pending_center_count; ++pi) {
+                        const int pd = ws.pending_center_stack[pi];
+                        ws.push_center_x[pd] = rcx;
+                        ws.push_center_y[pd] = rcy;
+                        ws.center_resolved[pd] = true;
+                    }
+                    ws.pending_center_count = 0;
+                    walker_recompute_transform(&ws);
+                }
+                const int32_t bi = j - i;
+                baked[bi] = (baked_xform_t){
+                    .a = ws.aff_a,
+                    .b = ws.aff_b,
+                    .c = ws.aff_c,
+                    .d = ws.aff_d,
+                    .tx = ws.aff_tx,
+                    .ty = ws.aff_ty,
+                    .scale_x = ws.accum_scale_x,
+                    .scale_y = ws.accum_scale_y,
+                    .rotation = ws.accum_rotation,
+                    .opacity = ws.accum_opacity,
+                };
+                const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
+                active_layers[layer >> 5U] |= (1U << (layer & 31U));
 #ifdef NT_TEST_ACCESS
-            if (cc->userData == NULL && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
-                ++unlayered_count;
-            }
+                if (cc->userData == NULL && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
+                    ++unlayered_count;
+                }
 #endif
+            }
+        } else {
+            /* No markers: identity transform/opacity. Just collect layers. */
+            for (int32_t j = i; j < seg_end; ++j) {
+                const Clay_RenderCommand *cc = &arr->internalArray[j];
+                const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
+                active_layers[layer >> 5U] |= (1U << (layer & 31U));
+#ifdef NT_TEST_ACCESS
+                if (cc->userData == NULL && cc->commandType != CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
+                    ++unlayered_count;
+                }
+#endif
+            }
         }
 
         /* Layer passes: dispatch renderables with baked transform state. */
@@ -1461,17 +1461,19 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                     }
                     const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
                     if (layer == current_layer) {
-                        const int32_t bi = j - i;
-                        ws.aff_a = baked[bi].a;
-                        ws.aff_b = baked[bi].b;
-                        ws.aff_c = baked[bi].c;
-                        ws.aff_d = baked[bi].d;
-                        ws.aff_tx = baked[bi].tx;
-                        ws.aff_ty = baked[bi].ty;
-                        ws.accum_scale_x = baked[bi].scale_x;
-                        ws.accum_scale_y = baked[bi].scale_y;
-                        ws.accum_rotation = baked[bi].rotation;
-                        ws.accum_opacity = baked[bi].opacity;
+                        if (baked != NULL) {
+                            const int32_t bi = j - i;
+                            ws.aff_a = baked[bi].a;
+                            ws.aff_b = baked[bi].b;
+                            ws.aff_c = baked[bi].c;
+                            ws.aff_d = baked[bi].d;
+                            ws.aff_tx = baked[bi].tx;
+                            ws.aff_ty = baked[bi].ty;
+                            ws.accum_scale_x = baked[bi].scale_x;
+                            ws.accum_scale_y = baked[bi].scale_y;
+                            ws.accum_rotation = baked[bi].rotation;
+                            ws.accum_opacity = baked[bi].opacity;
+                        }
                         dispatch_command(ctx, cc, scissor_stack, &depth, target, &sprite_pipeline_dirty, &ws);
                     }
                 }
