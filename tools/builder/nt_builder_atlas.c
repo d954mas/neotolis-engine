@@ -685,6 +685,7 @@ static void atlas_apply_sprite_overrides(NtAtlasSpriteInput *sprite, const nt_at
     sprite->rotate_override = sopts->allow_rotate;
     sprite->max_verts_override = sopts->max_vertices;
     NT_BUILD_ASSERT(sprite->shape_override <= NT_ATLAS_SPRITE_SHAPE_CONCAVE && "invalid shape override value");
+    NT_BUILD_ASSERT((sprite->rotate_override == 0 || sprite->rotate_override == NT_ATLAS_SPRITE_ROTATE_NO) && "invalid rotate override value (only 0 or NO)");
     NT_BUILD_ASSERT(sprite->max_verts_override <= 16 && "max_vertices override must be <= 16");
     /* Slice9 auto-force: any nonzero border -> RECT + no rotation */
     bool has_slice9 = sopts->slice9_left || sopts->slice9_right || sopts->slice9_top || sopts->slice9_bottom;

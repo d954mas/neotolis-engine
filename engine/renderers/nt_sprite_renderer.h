@@ -110,13 +110,12 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
  *   sl, sr, st, sb       - slice9 borders in source pixels (left, right, top, bottom).
  *   color_packed          - 0xAABBGGRR.
  *   flip_bits             - NT_SPRITE_FLAG_FLIP_X | _FLIP_Y.
- *   ipu                   - inverse pixels per unit (1/pixels_per_unit); converts
- *                           pixel borders to world-space for position splits.
  *
+ * ipu (1/pixels_per_unit) is computed internally from the atlas handle.
  * Emits 36 vertices + 54 indices (9 quads). Handles staging overflow internally.
  * Caller MUST have called set_material first. */
 void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
-                                    uint8_t flip_bits, float rotation, float ipu);
+                                    uint8_t flip_bits, float rotation);
 
 /* Emit an arbitrary triangle list sampling a single UV from the given
  * atlas region. Intended for solid-color shapes drawn against a

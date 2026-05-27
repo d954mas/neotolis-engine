@@ -1,6 +1,7 @@
 #include "renderers/nt_sprite_renderer.h"
 
 #include "core/nt_builtins.h"
+#include <math.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -512,21 +513,203 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
             st = r->slice9_lrtb[2];
             sb = r->slice9_lrtb[3];
         }
-        /* Extract position, scale, and rotation from world matrix. */
-        const float *m = tv->world_matrices[t_idx];
+        /* Inline slice9 emit using world_matrix directly (same transform
+         * pipeline as regular sprites in emit_region_resolved). */
+        NT_ASSERT(r->transform == 0 && "slice9 region must have transform == 0");
+        NT_ASSERT(r->source_w > 0 && r->source_h > 0);
+        NT_ASSERT(sl + sr < r->source_w && st + sb < r->source_h);
+
+        if (!ensure_current_cmd_page_texture(page_tex)) {
+            return;
+        }
+        if (s_sprite.vertex_count + 36U > NT_SPRITE_RENDERER_MAX_VERTICES || s_sprite.index_count + 54U > NT_SPRITE_RENDERER_MAX_INDICES) {
+            NT_ASSERT(s_sprite.cmd_count > 0);
+            nt_sprite_draw_cmd_t snapshot = s_sprite.cmds[s_sprite.cmd_count - 1];
+            nt_sprite_renderer_flush();
+            open_cmd_from_snapshot(&snapshot);
+        }
+
+        /* Flip border swap */
+        uint16_t fl = sl;
+        uint16_t fr = sr;
+        uint16_t ft = st;
+        uint16_t fb = sb;
+        if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
+            fl = sr;
+            fr = sl;
+        }
+        if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
+            ft = sb;
+            fb = st;
+        }
+
+        /* Build 4x4 grid in local source space (ipu-scaled, origin at 0,0). */
         const float src_w = (float)r->source_w * ipu;
         const float src_h = (float)r->source_h * ipu;
-        const float sx = sqrtf((m[0] * m[0]) + (m[1] * m[1]));
-        const float sy = sqrtf((m[4] * m[4]) + (m[5] * m[5]));
-        const float rot = atan2f(m[1], m[0]);
-        const float w = sx * src_w;
-        const float h = sy * src_h;
-        /* Pivot offset: transform through matrix columns (rotation-aware). */
-        const float ox = origin_x * src_w;
-        const float oy = origin_y * src_h;
-        const float x = m[12] - (m[0] * ox) - (m[4] * oy);
-        const float y = m[13] - (m[1] * ox) - (m[5] * oy);
-        nt_sprite_renderer_emit_slice9(atlas, sv->region_index[s_idx], x, y, w, h, sl, sr, st, sb, dv->colors_packed[d_idx], flip_bits, rot, ipu);
+        float lxs[4] = {0.0F, (float)fl * ipu, src_w - ((float)fr * ipu), src_w};
+        float lys[4] = {0.0F, (float)fb * ipu, src_h - ((float)ft * ipu), src_h};
+
+        /* Pivot offset into translation (mirrors emit_region_resolved). */
+        const float *m = tv->world_matrices[t_idx];
+        float dx = origin_x * src_w;
+        float dy = origin_y * src_h;
+        if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
+            dx = -dx;
+        }
+        if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
+            dy = -dy;
+        }
+        const float tx = m[12] - (m[0] * dx) - (m[4] * dy);
+        const float ty = m[13] - (m[1] * dx) - (m[5] * dy);
+        const float tz = m[14] - (m[2] * dx) - (m[6] * dy);
+
+        /* Transform 4x4 grid points through world_matrix. */
+        float wxs[4][4]; /* wxs[row][col] */
+        float wys[4][4];
+        float wzs[4][4];
+        for (uint8_t row = 0; row < 4; row++) {
+            for (uint8_t col = 0; col < 4; col++) {
+                float px = lxs[col];
+                float py = lys[row];
+                if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
+                    px = -px;
+                }
+                if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
+                    py = -py;
+                }
+                wxs[row][col] = (m[0] * px) + (m[4] * py) + tx;
+                wys[row][col] = (m[1] * px) + (m[5] * py) + ty;
+                wzs[row][col] = (m[2] * px) + (m[6] * py) + tz;
+            }
+        }
+
+        /* UV splits from region vertices (same as emit_slice9). */
+        uint16_t u_min = UINT16_MAX;
+        uint16_t u_max = 0;
+        uint16_t v_min = UINT16_MAX;
+        uint16_t v_max = 0;
+        for (uint8_t i = 0; i < r->vertex_count; i++) {
+            uint16_t au = resolved->raw_vertices[i].atlas_u;
+            uint16_t av = resolved->raw_vertices[i].atlas_v;
+            if (au < u_min) {
+                u_min = au;
+            }
+            if (au > u_max) {
+                u_max = au;
+            }
+            if (av < v_min) {
+                v_min = av;
+            }
+            if (av > v_max) {
+                v_max = av;
+            }
+        }
+        uint16_t u_range = (uint16_t)(u_max - u_min);
+        uint16_t v_range = (uint16_t)(v_max - v_min);
+        uint16_t us[4] = {
+            u_min,
+            (uint16_t)(u_min + (((uint32_t)fl * u_range) / r->source_w)),
+            (uint16_t)(u_max - (((uint32_t)fr * u_range) / r->source_w)),
+            u_max,
+        };
+        uint16_t vs[4] = {
+            v_min,
+            (uint16_t)(v_min + (((uint32_t)fb * v_range) / r->source_h)),
+            (uint16_t)(v_max - (((uint32_t)ft * v_range) / r->source_h)),
+            v_max,
+        };
+        if (flip_bits & NT_SPRITE_FLAG_FLIP_X) {
+            uint16_t t0 = us[0];
+            us[0] = us[3];
+            us[3] = t0;
+            uint16_t t1 = us[1];
+            us[1] = us[2];
+            us[2] = t1;
+        }
+        if (flip_bits & NT_SPRITE_FLAG_FLIP_Y) {
+            uint16_t t0 = vs[0];
+            vs[0] = vs[3];
+            vs[3] = t0;
+            uint16_t t1 = vs[1];
+            vs[1] = vs[2];
+            vs[2] = t1;
+        }
+
+        /* Unpack color. */
+        const uint32_t s9_color = dv->colors_packed[d_idx];
+        const uint8_t cr = (uint8_t)(s9_color & 0xFFU);
+        const uint8_t cg = (uint8_t)((s9_color >> 8) & 0xFFU);
+        const uint8_t cb = (uint8_t)((s9_color >> 16) & 0xFFU);
+        const uint8_t ca = (uint8_t)((s9_color >> 24) & 0xFFU);
+
+        /* Emit 9 quads with transformed positions. */
+        const uint32_t base = s_sprite.vertex_count;
+        for (uint8_t row = 0; row < 3; row++) {
+            for (uint8_t col = 0; col < 3; col++) {
+                const uint32_t qbase = base + ((uint32_t)((row * 3) + col) * 4U);
+                nt_sprite_vertex_t *v0 = &s_sprite.vertices[qbase + 0];
+                v0->position[0] = wxs[row][col];
+                v0->position[1] = wys[row][col];
+                v0->position[2] = wzs[row][col];
+                v0->texcoord[0] = us[col];
+                v0->texcoord[1] = vs[row];
+                v0->color[0] = cr;
+                v0->color[1] = cg;
+                v0->color[2] = cb;
+                v0->color[3] = ca;
+
+                nt_sprite_vertex_t *v1 = &s_sprite.vertices[qbase + 1];
+                v1->position[0] = wxs[row][col + 1];
+                v1->position[1] = wys[row][col + 1];
+                v1->position[2] = wzs[row][col + 1];
+                v1->texcoord[0] = us[col + 1];
+                v1->texcoord[1] = vs[row];
+                v1->color[0] = cr;
+                v1->color[1] = cg;
+                v1->color[2] = cb;
+                v1->color[3] = ca;
+
+                nt_sprite_vertex_t *v2 = &s_sprite.vertices[qbase + 2];
+                v2->position[0] = wxs[row + 1][col];
+                v2->position[1] = wys[row + 1][col];
+                v2->position[2] = wzs[row + 1][col];
+                v2->texcoord[0] = us[col];
+                v2->texcoord[1] = vs[row + 1];
+                v2->color[0] = cr;
+                v2->color[1] = cg;
+                v2->color[2] = cb;
+                v2->color[3] = ca;
+
+                nt_sprite_vertex_t *v3 = &s_sprite.vertices[qbase + 3];
+                v3->position[0] = wxs[row + 1][col + 1];
+                v3->position[1] = wys[row + 1][col + 1];
+                v3->position[2] = wzs[row + 1][col + 1];
+                v3->texcoord[0] = us[col + 1];
+                v3->texcoord[1] = vs[row + 1];
+                v3->color[0] = cr;
+                v3->color[1] = cg;
+                v3->color[2] = cb;
+                v3->color[3] = ca;
+
+                uint16_t *out_idx = &s_sprite.indices[s_sprite.index_count + ((uint32_t)((row * 3) + col) * 6U)];
+                const uint16_t qb16 = (uint16_t)qbase;
+                out_idx[0] = qb16;
+                out_idx[1] = (uint16_t)(qb16 + 1U);
+                out_idx[2] = (uint16_t)(qb16 + 2U);
+                out_idx[3] = (uint16_t)(qb16 + 2U);
+                out_idx[4] = (uint16_t)(qb16 + 1U);
+                out_idx[5] = (uint16_t)(qb16 + 3U);
+            }
+        }
+        s_sprite.vertex_count += 36U;
+        s_sprite.index_count += 54U;
+#ifdef NT_TEST_ACCESS
+        s_sprite.last_slice9_vertex_count = 36U;
+        s_sprite.last_slice9_index_count = 54U;
+        s_sprite.last_emit_vertex_count = 36U;
+        s_sprite.last_emit_index_count = 54U;
+        s_sprite.last_emit_first_vertex = base;
+#endif
         return;
     }
 
@@ -645,7 +828,7 @@ void nt_sprite_renderer_emit_geometry(nt_resource_t atlas, uint32_t region_index
 // #region emit_slice9
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
-                                    uint8_t flip_bits, float rotation, float ipu) {
+                                    uint8_t flip_bits, float rotation) {
     NT_ASSERT(s_sprite.initialized);
     NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_slice9: invalid atlas handle");
     NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_slice9: atlas must be READY");
@@ -656,6 +839,8 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
     if (rh.region->vertex_count == 0U) {
         return; /* tombstone */
     }
+
+    const float ipu = nt_atlas_get_inverse_pixels_per_unit(atlas);
 
     /* Slice9 regions must be non-rotated, untrimmed (RECT shape forces no trim). */
     NT_ASSERT(rh.region->transform == 0 && "slice9 region must have transform == 0 (no rotation)");

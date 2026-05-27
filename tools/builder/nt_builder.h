@@ -320,7 +320,6 @@ static inline nt_atlas_opts_t nt_atlas_opts_defaults(void) {
 #define NT_ATLAS_SPRITE_SHAPE_CONVEX 2
 #define NT_ATLAS_SPRITE_SHAPE_CONCAVE 3
 #define NT_ATLAS_SPRITE_ROTATE_NO 1
-#define NT_ATLAS_SPRITE_ROTATE_YES 2
 
 /* Per-sprite opts struct for atlas_add / atlas_add_raw / atlas_add_glob.
  *
@@ -359,7 +358,7 @@ typedef struct {
 
     /* Per-sprite overrides (0 = use atlas default). */
     uint8_t shape;        /* 0 = atlas default, NT_ATLAS_SPRITE_SHAPE_RECT/CONVEX/CONCAVE */
-    uint8_t allow_rotate; /* 0 = atlas default, NT_ATLAS_SPRITE_ROTATE_NO/YES */
+    uint8_t allow_rotate; /* 0 = atlas default, NT_ATLAS_SPRITE_ROTATE_NO = restrict */
     uint8_t max_vertices; /* 0 = atlas default */
 } nt_atlas_sprite_opts_t;
 

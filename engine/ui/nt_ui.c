@@ -753,8 +753,7 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
             st = r->slice9_lrtb[2];
             sb = r->slice9_lrtb[3];
         }
-        const float s9_ipu = nt_atlas_get_inverse_pixels_per_unit(p->atlas);
-        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, sl, sr, st, sb, col, p->flip_bits, rotation, s9_ipu);
+        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, sl, sr, st, sb, col, p->flip_bits, rotation);
         return;
     }
 
