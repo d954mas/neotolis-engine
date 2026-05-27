@@ -867,6 +867,7 @@ typedef struct {
 
 /* --- pipeline_alpha_trim: extract alpha planes + find tight bounding box --- */
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void pipeline_alpha_trim(AtlasPipeline *p) {
     p->trim_x = (uint32_t *)calloc(p->sprite_count, sizeof(uint32_t));
     p->trim_y = (uint32_t *)calloc(p->sprite_count, sizeof(uint32_t));
