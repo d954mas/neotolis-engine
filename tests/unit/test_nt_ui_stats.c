@@ -263,6 +263,8 @@ static void test_walk_ms_set_then_reset_on_early_return(void) {
     }
     inject_frozen_cmds(3);
 
+    /* Sentinel: a removed walk-exit write leaves -1.0F and trips the assert. */
+    s_fx.ctx->last_walk_ms = -1.0F;
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
     TEST_ASSERT_TRUE(nt_ui_get_last_walk_ms(s_fx.ctx) >= 0.0F);

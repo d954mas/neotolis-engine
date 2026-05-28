@@ -112,6 +112,9 @@ static void test_end_sets_layout_ms(void) {
     nt_pointer_t mouse;
     memset(&mouse, 0, sizeof mouse);
 
+    /* Sentinel: a removed/forgotten write leaves -1.0F and trips the assert;
+     * a real write in nt_ui_end replaces it with a non-negative ms value. */
+    a->last_layout_ms = -1.0F;
     nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse);
     nt_ui_end(a);
     TEST_ASSERT_TRUE(nt_ui_get_last_layout_ms(a) >= 0.0F);

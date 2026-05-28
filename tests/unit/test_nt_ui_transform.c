@@ -106,6 +106,10 @@ static void test_push_pop_transform_balanced(void) {
 
     /* Walk completed without assert = balanced. */
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+
+    /* Phase 55 counters: one transform push marker, one IMAGE dispatched. */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_transform_pushes(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_image_count(s_fx.ctx));
 }
 
 /* Push 17 transforms (depth > 16). Expect NT_ASSERT overflow. */
@@ -148,6 +152,9 @@ static void test_opacity_inheritance(void) {
 
     /* Walk succeeded; alpha = 255 * 0.25 = 63..64. */
     TEST_ASSERT_EQUAL_UINT32(4U, nt_sprite_renderer_test_last_emit_vertex_count());
+
+    /* Phase 55 counter: two opacity push markers. */
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_opacity_pushes(s_fx.ctx));
 }
 
 /* Push transform with offset_x=10. Emit rect. Verify the rect's x
