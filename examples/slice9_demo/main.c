@@ -365,6 +365,8 @@ static void frame(void) {
     uniforms.near_far[1] = 1.0F;
 
     nt_gfx_begin_frame();
+    /* nt_stats reads frame total via segment named "frame" by convention. */
+    nt_gfx_begin_segment("frame");
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
@@ -424,9 +426,7 @@ static void frame(void) {
         nt_ui_end(s_ctx);
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
-        nt_gfx_begin_segment("frame");
         nt_ui_walk(s_ctx, &target);
-        nt_gfx_end_segment();
 
         // #region metrics bridge
         nt_stats_count("ui_draw_calls", (uint64_t)nt_ui_get_last_walk_draw_calls(s_ctx));
@@ -452,6 +452,7 @@ static void frame(void) {
     }
 
     nt_gfx_end_pass();
+    nt_gfx_end_segment();
     nt_gfx_end_frame();
     nt_stats_frame_end();
 
