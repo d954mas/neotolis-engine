@@ -365,6 +365,8 @@ static void frame(void) {
     uniforms.near_far[1] = 1.0F;
 
     nt_gfx_begin_frame();
+    /* nt_stats reads frame total via segment named "frame" by convention. */
+    nt_gfx_begin_segment("frame");
     if (g_nt_gfx.context_restored) {
         nt_resource_invalidate(NT_ASSET_SHADER_CODE);
         nt_resource_invalidate(NT_ASSET_TEXTURE);
@@ -425,9 +427,35 @@ static void frame(void) {
 
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
+
+        // #region metrics bridge
+        nt_stats_count("ui_draw_calls", (uint64_t)nt_ui_get_last_walk_draw_calls(s_ctx));
+        nt_stats_count("ui_commands", (uint64_t)nt_ui_get_last_walk_command_count(s_ctx));
+        nt_stats_count("ui_rect_cmds", (uint64_t)nt_ui_get_last_walk_rect_command_count(s_ctx));
+        nt_stats_count("ui_image_cmds", (uint64_t)nt_ui_get_last_walk_image_command_count(s_ctx));
+        nt_stats_count("ui_text_cmds", (uint64_t)nt_ui_get_last_walk_text_command_count(s_ctx));
+        nt_stats_count("ui_border_cmds", (uint64_t)nt_ui_get_last_walk_border_command_count(s_ctx));
+        nt_stats_count("ui_scissor_cmds", (uint64_t)nt_ui_get_last_walk_scissor_command_count(s_ctx));
+        nt_stats_count("ui_layout_us", (uint64_t)(nt_ui_get_last_layout_ms(s_ctx) * 1000.0F));
+        nt_stats_count("ui_walk_us", (uint64_t)(nt_ui_get_last_walk_ms(s_ctx) * 1000.0F));
+        // #endregion
+
+        // #region stats overlay
+        {
+            mat4 stats_model;
+            glm_mat4_identity(stats_model);
+            glm_translate(stats_model, (vec3){10.0F, scale.logical_h - 20.0F, 0.0F});
+            const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
+            nt_stats_draw(s_text_material, s_font, (const float *)stats_model, 14.0F, stats_color);
+            /* nt_stats_draw only stages text; flush before end_pass so the
+             * overlay lands in THIS frame, not the next walk's flush. */
+            nt_text_renderer_flush();
+        }
+        // #endregion
     }
 
     nt_gfx_end_pass();
+    nt_gfx_end_segment();
     nt_gfx_end_frame();
     nt_stats_frame_end();
 
