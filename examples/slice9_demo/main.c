@@ -447,6 +447,9 @@ static void frame(void) {
             glm_translate(stats_model, (vec3){10.0F, scale.logical_h - 20.0F, 0.0F});
             const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
             nt_stats_draw(s_text_material, s_font, (const float *)stats_model, 14.0F, stats_color);
+            /* nt_stats_draw only stages text; flush before end_pass so the
+             * overlay lands in THIS frame, not the next walk's flush. */
+            nt_text_renderer_flush();
         }
         // #endregion
     }
