@@ -109,7 +109,7 @@ static void test_push_pop_transform_balanced(void) {
 
     /* Phase 55 counters: one transform push marker, one IMAGE dispatched. */
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_transform_pushes(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_image_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_image_command_count(s_fx.ctx));
 }
 
 /* Push 17 transforms (depth > 16). Expect NT_ASSERT overflow. */

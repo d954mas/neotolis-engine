@@ -153,13 +153,14 @@ uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx);
 /* Phase 55: CPU timing (ms). layout runs in nt_ui_end; walk in nt_ui_walk. */
 float nt_ui_get_last_layout_ms(const nt_ui_context_t *ctx);
 float nt_ui_get_last_walk_ms(const nt_ui_context_t *ctx);
-/* Phase 55: per-type element counters. Reset each walk. */
-uint32_t nt_ui_get_last_walk_rect_count(const nt_ui_context_t *ctx);
-uint32_t nt_ui_get_last_walk_image_count(const nt_ui_context_t *ctx);
-uint32_t nt_ui_get_last_walk_text_count(const nt_ui_context_t *ctx);
-uint32_t nt_ui_get_last_walk_border_count(const nt_ui_context_t *ctx);
-/* Phase 55: scissor/marker counters. Reset each walk. */
-uint32_t nt_ui_get_last_walk_scissor_count(const nt_ui_context_t *ctx);
+/* Phase 55: per-type render-command counts, counted at dispatch (pre-emit, not
+ * pixels drawn -- use draw_calls for GPU cost). Reset each walk. */
+uint32_t nt_ui_get_last_walk_rect_command_count(const nt_ui_context_t *ctx);
+uint32_t nt_ui_get_last_walk_image_command_count(const nt_ui_context_t *ctx);
+uint32_t nt_ui_get_last_walk_text_command_count(const nt_ui_context_t *ctx);
+uint32_t nt_ui_get_last_walk_border_command_count(const nt_ui_context_t *ctx);
+/* Phase 55: scissor command count + marker push counts. Reset each walk. */
+uint32_t nt_ui_get_last_walk_scissor_command_count(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_max_scissor_depth(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_transform_pushes(const nt_ui_context_t *ctx);
 uint32_t nt_ui_get_last_walk_opacity_pushes(const nt_ui_context_t *ctx);

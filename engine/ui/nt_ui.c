@@ -1053,11 +1053,11 @@ static inline uint32_t apply_opacity(uint32_t color_packed, float opacity) {
 
 /* Phase 55: per-walk counters passed to dispatch helpers. */
 typedef struct {
-    uint32_t rect_count;
-    uint32_t image_count;
-    uint32_t text_count;
-    uint32_t border_count;
-    uint32_t scissor_count;
+    uint32_t rect_command_count;
+    uint32_t image_command_count;
+    uint32_t text_command_count;
+    uint32_t border_command_count;
+    uint32_t scissor_command_count;
     uint32_t max_scissor_depth;
     uint32_t transform_pushes;
     uint32_t opacity_pushes;
@@ -1181,7 +1181,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
     case CLAY_RENDER_COMMAND_TYPE_NONE:
         return;
     case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
-        counters->rect_count++;
+        counters->rect_command_count++;
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         const Clay_RectangleRenderData *r = &c->renderData.rectangle;
         uint32_t col = nt_color_pack_clay(r->backgroundColor);
@@ -1196,7 +1196,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_BORDER: {
-        counters->border_count++;
+        counters->border_command_count++;
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         Clay_RenderCommand local = *c;
         local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
@@ -1215,7 +1215,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_TEXT: {
-        counters->text_count++;
+        counters->text_command_count++;
         /* Drain sprite before switching to text pipeline; mark for lazy rebind. */
         nt_sprite_renderer_flush();
         *sprite_pipeline_dirty = true;
@@ -1226,7 +1226,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_IMAGE: {
-        counters->image_count++;
+        counters->image_command_count++;
         prep_sprite_dispatch(ctx, sprite_pipeline_dirty);
         Clay_RenderCommand local = *c;
         local.boundingBox = (Clay_BoundingBox){.x = sbb.x, .y = world_y, .width = sbb.width, .height = sbb.height};
@@ -1245,7 +1245,7 @@ static void dispatch_command(const nt_ui_context_t *ctx, const Clay_RenderComman
         return;
     }
     case CLAY_RENDER_COMMAND_TYPE_SCISSOR_START: {
-        counters->scissor_count++;
+        counters->scissor_command_count++;
         Clay_RenderCommand local = *c;
         if (ws->accum_rotation != 0.0F) {
             /* AABB of rotated scissor rect in Clay Y-down space */
@@ -1326,11 +1326,11 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         ctx->last_walk_draw_call_delta = 0;
         ctx->last_walk_command_count = 0;
         ctx->last_walk_ms = 0.0F;
-        ctx->last_walk_rect_count = 0;
-        ctx->last_walk_image_count = 0;
-        ctx->last_walk_text_count = 0;
-        ctx->last_walk_border_count = 0;
-        ctx->last_walk_scissor_count = 0;
+        ctx->last_walk_rect_command_count = 0;
+        ctx->last_walk_image_command_count = 0;
+        ctx->last_walk_text_command_count = 0;
+        ctx->last_walk_border_command_count = 0;
+        ctx->last_walk_scissor_command_count = 0;
         ctx->last_walk_max_scissor_depth = 0;
         ctx->last_walk_transform_pushes = 0;
         ctx->last_walk_opacity_pushes = 0;
@@ -1351,11 +1351,11 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         ctx->last_walk_draw_call_delta = 0;
         ctx->last_walk_command_count = 0;
         ctx->last_walk_ms = 0.0F;
-        ctx->last_walk_rect_count = 0;
-        ctx->last_walk_image_count = 0;
-        ctx->last_walk_text_count = 0;
-        ctx->last_walk_border_count = 0;
-        ctx->last_walk_scissor_count = 0;
+        ctx->last_walk_rect_command_count = 0;
+        ctx->last_walk_image_command_count = 0;
+        ctx->last_walk_text_command_count = 0;
+        ctx->last_walk_border_command_count = 0;
+        ctx->last_walk_scissor_command_count = 0;
         ctx->last_walk_max_scissor_depth = 0;
         ctx->last_walk_transform_pushes = 0;
         ctx->last_walk_opacity_pushes = 0;
@@ -1588,11 +1588,11 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
     NT_ASSERT(calls_after >= calls_at_entry && "nt_ui_walk: frame draw-call counter went backwards");
     ctx->last_walk_draw_call_delta = calls_after - calls_at_entry;
     ctx->last_walk_command_count = (uint32_t)arr->length;
-    ctx->last_walk_rect_count = counters.rect_count;
-    ctx->last_walk_image_count = counters.image_count;
-    ctx->last_walk_text_count = counters.text_count;
-    ctx->last_walk_border_count = counters.border_count;
-    ctx->last_walk_scissor_count = counters.scissor_count;
+    ctx->last_walk_rect_command_count = counters.rect_command_count;
+    ctx->last_walk_image_command_count = counters.image_command_count;
+    ctx->last_walk_text_command_count = counters.text_command_count;
+    ctx->last_walk_border_command_count = counters.border_command_count;
+    ctx->last_walk_scissor_command_count = counters.scissor_command_count;
     ctx->last_walk_max_scissor_depth = counters.max_scissor_depth;
     ctx->last_walk_transform_pushes = counters.transform_pushes;
     ctx->last_walk_opacity_pushes = counters.opacity_pushes;
@@ -1719,29 +1719,29 @@ float nt_ui_get_last_walk_ms(const nt_ui_context_t *ctx) {
     return ctx->last_walk_ms;
 }
 
-uint32_t nt_ui_get_last_walk_rect_count(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_rect_count: ctx must be non-NULL");
-    return ctx->last_walk_rect_count;
+uint32_t nt_ui_get_last_walk_rect_command_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_rect_command_count: ctx must be non-NULL");
+    return ctx->last_walk_rect_command_count;
 }
 
-uint32_t nt_ui_get_last_walk_image_count(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_image_count: ctx must be non-NULL");
-    return ctx->last_walk_image_count;
+uint32_t nt_ui_get_last_walk_image_command_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_image_command_count: ctx must be non-NULL");
+    return ctx->last_walk_image_command_count;
 }
 
-uint32_t nt_ui_get_last_walk_text_count(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_text_count: ctx must be non-NULL");
-    return ctx->last_walk_text_count;
+uint32_t nt_ui_get_last_walk_text_command_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_text_command_count: ctx must be non-NULL");
+    return ctx->last_walk_text_command_count;
 }
 
-uint32_t nt_ui_get_last_walk_border_count(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_border_count: ctx must be non-NULL");
-    return ctx->last_walk_border_count;
+uint32_t nt_ui_get_last_walk_border_command_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_border_command_count: ctx must be non-NULL");
+    return ctx->last_walk_border_command_count;
 }
 
-uint32_t nt_ui_get_last_walk_scissor_count(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_scissor_count: ctx must be non-NULL");
-    return ctx->last_walk_scissor_count;
+uint32_t nt_ui_get_last_walk_scissor_command_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_last_walk_scissor_command_count: ctx must be non-NULL");
+    return ctx->last_walk_scissor_command_count;
 }
 
 uint32_t nt_ui_get_last_walk_max_scissor_depth(const nt_ui_context_t *ctx) {

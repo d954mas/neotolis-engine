@@ -129,8 +129,8 @@ static void test_getters_reflect_latest_walk_only(void) {
 }
 
 // #region phase55_counter_tests
-/* 3 RECTANGLE commands -> rect_count == 3, others 0. */
-static void test_per_type_rect_count(void) {
+/* 3 RECTANGLE commands -> rect_command_count == 3, others 0. */
+static void test_per_type_rect_command_count(void) {
     for (int i = 0; i < 3; ++i) {
         Clay_RenderCommand *c = &s_test_cmds[i];
         c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
@@ -142,10 +142,10 @@ static void test_per_type_rect_count(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(3U, nt_ui_get_last_walk_rect_count(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_image_count(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_text_count(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_border_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(3U, nt_ui_get_last_walk_rect_command_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_image_command_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_text_command_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_border_command_count(s_fx.ctx));
 }
 
 /* 1 RECT + 1 TEXT + 1 BORDER + 1 RECT -> rect=2, text=1, border=1, image=0. */
@@ -187,14 +187,14 @@ static void test_per_type_mixed_commands(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_rect_count(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_image_count(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_text_count(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_border_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_rect_command_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_image_command_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_text_command_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_border_command_count(s_fx.ctx));
 }
 
-/* SCISSOR_START + RECT + SCISSOR_END -> scissor_count=1, max_depth=1. */
-static void test_scissor_count_and_depth(void) {
+/* SCISSOR_START + RECT + SCISSOR_END -> scissor_command_count=1, max_depth=1. */
+static void test_scissor_command_count_and_depth(void) {
     /* cmd 0: SCISSOR_START */
     {
         Clay_RenderCommand *c = &s_test_cmds[0];
@@ -220,9 +220,9 @@ static void test_scissor_count_and_depth(void) {
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
 
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_scissor_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_scissor_command_count(s_fx.ctx));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_max_scissor_depth(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_rect_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_rect_command_count(s_fx.ctx));
 }
 
 /* Walk with 2 RECTs, assert rect=2. Walk again with 0 cmds, assert all 0. */
@@ -237,15 +237,15 @@ static void test_counters_reset_each_walk(void) {
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_rect_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(2U, nt_ui_get_last_walk_rect_command_count(s_fx.ctx));
 
     /* Second walk: empty. All per-type counters must be zero. */
     inject_frozen_cmds(0);
     nt_ui_walk(s_fx.ctx, &target);
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_rect_count(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_image_count(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_text_count(s_fx.ctx));
-    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_border_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_rect_command_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_image_command_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_text_command_count(s_fx.ctx));
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_border_command_count(s_fx.ctx));
 }
 
 /* walk_ms is written every walk: non-negative after a real walk (monotonic
@@ -284,9 +284,9 @@ int main(void) {
     RUN_TEST(test_get_last_walk_command_count_matches_frozen_cmds);
     RUN_TEST(test_metrics_bridge_publishes_to_nt_stats);
     RUN_TEST(test_getters_reflect_latest_walk_only);
-    RUN_TEST(test_per_type_rect_count);
+    RUN_TEST(test_per_type_rect_command_count);
     RUN_TEST(test_per_type_mixed_commands);
-    RUN_TEST(test_scissor_count_and_depth);
+    RUN_TEST(test_scissor_command_count_and_depth);
     RUN_TEST(test_counters_reset_each_walk);
     RUN_TEST(test_walk_ms_set_then_reset_on_early_return);
     return UNITY_END();

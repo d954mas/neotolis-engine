@@ -431,11 +431,11 @@ static void frame(void) {
         // #region metrics bridge
         nt_stats_count("ui_draw_calls", (uint64_t)nt_ui_get_last_walk_draw_calls(s_ctx));
         nt_stats_count("ui_commands", (uint64_t)nt_ui_get_last_walk_command_count(s_ctx));
-        nt_stats_count("ui_rects", (uint64_t)nt_ui_get_last_walk_rect_count(s_ctx));
-        nt_stats_count("ui_images", (uint64_t)nt_ui_get_last_walk_image_count(s_ctx));
-        nt_stats_count("ui_texts", (uint64_t)nt_ui_get_last_walk_text_count(s_ctx));
-        nt_stats_count("ui_borders", (uint64_t)nt_ui_get_last_walk_border_count(s_ctx));
-        nt_stats_count("ui_scissors", (uint64_t)nt_ui_get_last_walk_scissor_count(s_ctx));
+        nt_stats_count("ui_rect_cmds", (uint64_t)nt_ui_get_last_walk_rect_command_count(s_ctx));
+        nt_stats_count("ui_image_cmds", (uint64_t)nt_ui_get_last_walk_image_command_count(s_ctx));
+        nt_stats_count("ui_text_cmds", (uint64_t)nt_ui_get_last_walk_text_command_count(s_ctx));
+        nt_stats_count("ui_border_cmds", (uint64_t)nt_ui_get_last_walk_border_command_count(s_ctx));
+        nt_stats_count("ui_scissor_cmds", (uint64_t)nt_ui_get_last_walk_scissor_command_count(s_ctx));
         nt_stats_count("ui_layout_us", (uint64_t)(nt_ui_get_last_layout_ms(s_ctx) * 1000.0F));
         nt_stats_count("ui_walk_us", (uint64_t)(nt_ui_get_last_walk_ms(s_ctx) * 1000.0F));
         // #endregion

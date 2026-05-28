@@ -48,13 +48,13 @@ struct nt_ui_context {
     /* Phase 55: CPU timing (D-55-01, D-55-02) */
     float last_layout_ms;
     float last_walk_ms;
-    /* Phase 55: per-type element counters (D-55-03) */
-    uint32_t last_walk_rect_count;
-    uint32_t last_walk_image_count;
-    uint32_t last_walk_text_count;
-    uint32_t last_walk_border_count;
-    /* Phase 55: scissor/marker counters (D-55-05, D-55-06) */
-    uint32_t last_walk_scissor_count;
+    /* Phase 55: per-type render-command counts, counted pre-emit (D-55-03). */
+    uint32_t last_walk_rect_command_count;
+    uint32_t last_walk_image_command_count;
+    uint32_t last_walk_text_command_count;
+    uint32_t last_walk_border_command_count;
+    /* Phase 55: scissor command count + marker push counts (D-55-05, D-55-06) */
+    uint32_t last_walk_scissor_command_count;
     uint32_t last_walk_max_scissor_depth;
     uint32_t last_walk_transform_pushes;
     uint32_t last_walk_opacity_pushes;
