@@ -101,6 +101,24 @@ static void test_end_without_begin_asserts(void) {
     nt_ui_destroy_context(a);
 }
 
+/* nt_ui_end times Clay_EndLayout into last_layout_ms. A real begin/end cycle
+ * must leave a non-negative value (monotonic clock) -- catches a sign error or
+ * uninitialized-field regression in the timing math that a fixture which never
+ * runs nt_ui_end cannot. */
+static void test_end_sets_layout_ms(void) {
+    nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);
+    TEST_ASSERT_NOT_NULL(a);
+
+    nt_pointer_t mouse;
+    memset(&mouse, 0, sizeof mouse);
+
+    nt_ui_begin(a, 800.0F, 600.0F, 0.0F, &mouse);
+    nt_ui_end(a);
+    TEST_ASSERT_TRUE(nt_ui_get_last_layout_ms(a) >= 0.0F);
+
+    nt_ui_destroy_context(a);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_begin_sets_current_ctx);
@@ -108,5 +126,6 @@ int main(void) {
     RUN_TEST(test_end_clears_in_frame);
     RUN_TEST(test_end_clears_clay_current);
     RUN_TEST(test_end_without_begin_asserts);
+    RUN_TEST(test_end_sets_layout_ms);
     return UNITY_END();
 }

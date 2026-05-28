@@ -248,15 +248,13 @@ static void test_counters_reset_each_walk(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_get_last_walk_border_count(s_fx.ctx));
 }
 
-/* layout_ms is written by nt_ui_end; verify ctx field is non-negative. */
-static void test_layout_ms_nonnegative(void) {
-    /* ctx was set up by fixture; last_layout_ms should be 0.0F (no end called
-     * in this test cycle) or >= 0 if fixture ran begin/end. Either way, >= 0. */
-    TEST_ASSERT_TRUE(nt_ui_get_last_layout_ms(s_fx.ctx) >= 0.0F);
-}
-
-/* walk_ms is non-negative after a walk with commands. */
-static void test_walk_ms_nonzero_with_commands(void) {
+/* walk_ms is written every walk: non-negative after a real walk (monotonic
+ * clock), and reset to 0.0F on the zero-viewport early-return path. The reset
+ * is the deterministic half -- it fails loudly if a future edit forgets to
+ * zero walk_ms in that early-return. (layout_ms is owned by nt_ui_end, which
+ * the walker fixture never calls, so its timing is covered in
+ * test_nt_ui_begin_end.c where a real begin/end cycle runs.) */
+static void test_walk_ms_set_then_reset_on_early_return(void) {
     for (int i = 0; i < 3; ++i) {
         Clay_RenderCommand *c = &s_test_cmds[i];
         c->commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
@@ -267,8 +265,14 @@ static void test_walk_ms_nonzero_with_commands(void) {
 
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_walk(s_fx.ctx, &target);
-
     TEST_ASSERT_TRUE(nt_ui_get_last_walk_ms(s_fx.ctx) >= 0.0F);
+
+    /* Zero-width viewport hits the early return, which must zero walk_ms.
+     * Value is non-negative, so "not positive" pins it to exactly 0 without a
+     * float-equality compare. */
+    nt_ui_target_t zero_target = {.viewport = {0.0F, 0.0F, 0.0F, 0.0F}};
+    nt_ui_walk(s_fx.ctx, &zero_target);
+    TEST_ASSERT_FALSE(nt_ui_get_last_walk_ms(s_fx.ctx) > 0.0F);
 }
 // #endregion
 
@@ -282,7 +286,6 @@ int main(void) {
     RUN_TEST(test_per_type_mixed_commands);
     RUN_TEST(test_scissor_count_and_depth);
     RUN_TEST(test_counters_reset_each_walk);
-    RUN_TEST(test_layout_ms_nonnegative);
-    RUN_TEST(test_walk_ms_nonzero_with_commands);
+    RUN_TEST(test_walk_ms_set_then_reset_on_early_return);
     return UNITY_END();
 }
