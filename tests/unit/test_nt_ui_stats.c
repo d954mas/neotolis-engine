@@ -251,9 +251,11 @@ static void test_counters_reset_each_walk(void) {
 /* walk_ms is written every walk: non-negative after a real walk (monotonic
  * clock), and reset to 0.0F on the zero-viewport early-return path. The reset
  * is the deterministic half -- it fails loudly if a future edit forgets to
- * zero walk_ms in that early-return. (layout_ms is owned by nt_ui_end, which
- * the walker fixture never calls, so its timing is covered in
- * test_nt_ui_begin_end.c where a real begin/end cycle runs.) */
+ * zero walk_ms in that early-return. Scope: walk_ms times dispatch only; the
+ * entry flush runs before the timer starts, so it is excluded (same scope as
+ * the draw-call delta). (layout_ms is owned by nt_ui_end, which the walker
+ * fixture never calls, so its timing is covered in test_nt_ui_begin_end.c
+ * where a real begin/end cycle runs.) */
 static void test_walk_ms_set_then_reset_on_early_return(void) {
     for (int i = 0; i < 3; ++i) {
         Clay_RenderCommand *c = &s_test_cmds[i];

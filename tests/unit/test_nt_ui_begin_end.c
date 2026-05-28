@@ -101,8 +101,9 @@ static void test_end_without_begin_asserts(void) {
     nt_ui_destroy_context(a);
 }
 
-/* nt_ui_end times Clay_EndLayout into last_layout_ms. A real begin/end cycle
- * must leave a non-negative value (monotonic clock) -- catches a sign error or
+/* nt_ui_end times Clay_EndLayout into last_layout_ms. Scope: the Clay layout
+ * solve only, not the whole begin->end span. A real begin/end cycle must leave
+ * a non-negative value (monotonic clock) -- catches a sign error or
  * uninitialized-field regression in the timing math that a fixture which never
  * runs nt_ui_end cannot. */
 static void test_end_sets_layout_ms(void) {

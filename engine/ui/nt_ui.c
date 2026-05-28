@@ -266,6 +266,7 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx->in_frame && "nt_ui_end: ctx is not in_frame (begin was not called)");
     NT_ASSERT(ctx == g_nt_ui_inframe_ctx && "nt_ui_end: ctx mismatch with module in-frame ctx");
 
+    /* layout_ms times the Clay layout solve (EndLayout), not the begin->end span. */
     const double layout_t0 = nt_time_now();
     ctx->frozen_cmds = Clay_EndLayout();
     ctx->last_layout_ms = (float)((nt_time_now() - layout_t0) * 1000.0);
@@ -1365,6 +1366,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         return;
     }
 
+    /* Timed from here -- after the entry flush -- so walk_ms covers the UI walk's
+     * own dispatch, not draining the caller's pending geometry (same scope as
+     * last_walk_draw_call_delta below). */
     const double walk_t0 = nt_time_now();
 
     scissor_rect_t scissor_stack[NT_UI_WALKER_SCISSOR_DEPTH_CAP];

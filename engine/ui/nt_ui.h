@@ -150,8 +150,11 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target);
 uint32_t nt_ui_get_last_walk_draw_calls(const nt_ui_context_t *ctx);
 /* Total Clay commands incl. SCISSOR/CUSTOM/NONE (non-drawing barriers). */
 uint32_t nt_ui_get_last_walk_command_count(const nt_ui_context_t *ctx);
-/* Phase 55: CPU timing (ms). layout runs in nt_ui_end; walk in nt_ui_walk. */
+/* Phase 55 CPU timing (ms); both reset to 0 on early-out walks. */
+/* layout_ms = the Clay_EndLayout solve only, not the whole begin->end span. */
 float nt_ui_get_last_layout_ms(const nt_ui_context_t *ctx);
+/* walk_ms = walk dispatch, timed from AFTER the entry flush -- excludes
+ * draining the caller's pending geometry (same scope as draw_calls). */
 float nt_ui_get_last_walk_ms(const nt_ui_context_t *ctx);
 /* Phase 55: per-type render-command counts, counted at dispatch (pre-emit, not
  * pixels drawn -- use draw_calls for GPU cost). Reset each walk. */
