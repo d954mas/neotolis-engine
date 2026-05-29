@@ -53,6 +53,13 @@ struct nt_ui_context {
     uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
     bool pointer_over_any;
 
+    /* Phase 56: carries the get_interaction result from nt_ui_button_begin (void)
+     * to nt_ui_button_end (bool). Single slot -- buttons do not nest (asserted). */
+    struct {
+        bool active;
+        bool clicked;
+    } pending_button;
+
     /* Walker bindings -- nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;
     uint32_t white_region;
