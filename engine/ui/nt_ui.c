@@ -1802,5 +1802,11 @@ int nt_ui_test_clay_pointer_down(const nt_ui_context_t *ctx) {
     const Clay_PointerDataInteractionState s = ctx->clay->pointerInfo.state;
     return (s == CLAY_POINTER_DATA_PRESSED || s == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) ? 1 : 0;
 }
+
+uint32_t nt_ui_test_capture_active_id(const nt_ui_context_t *ctx, uint32_t pointer_index) {
+    (void)ctx;
+    (void)pointer_index;
+    return 0U; /* Plan 03: return ctx->captures[pointer_index].active_id */
+}
 #endif
 // #endregion

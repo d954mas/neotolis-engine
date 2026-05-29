@@ -218,6 +218,10 @@ float nt_ui_test_clay_pointer_x(const nt_ui_context_t *ctx);
 float nt_ui_test_clay_pointer_y(const nt_ui_context_t *ctx);
 int nt_ui_test_clay_pointer_down(const nt_ui_context_t *ctx); /* 0 released, 1 pressed */
 
+/* Phase 56: read engine-owned capture state from the test TU (captures[]
+ * is private; Plan 03 fills the bodies). active_id 0 = no capture. */
+uint32_t nt_ui_test_capture_active_id(const nt_ui_context_t *ctx, uint32_t pointer_index);
+
 /* Count of segmentable cmds with NULL userData (= implicit layer-0 fallback). */
 uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx);
 
