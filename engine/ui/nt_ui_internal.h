@@ -10,6 +10,7 @@
 #include "font/nt_font.h"
 #include "input/nt_input.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_anim.h"
 
 /* Side-channel transform/opacity marker (not a Clay element). */
 typedef struct {
@@ -72,6 +73,8 @@ struct nt_ui_context {
     uint32_t max_elements;
 
     nt_font_t fonts[NT_UI_MAX_FONTS];
+
+    nt_ui_anim_interaction_t anim[NT_UI_ANIM_SLOTS]; /* Phase 56 direct-mapped state-anim cache (D-56-15) */
 
     Clay_Arena clay_arena;
 };
