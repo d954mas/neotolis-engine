@@ -236,6 +236,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     ctx->in_frame = true;
     g_nt_ui_inframe_ctx = ctx;
     ctx->marker_count = 0;
+    ctx->accum_depth = 0; /* Phase 56: reset declaration-time transform stack. */
 
     /* Snapshot the frame pointer list + dt for the engine-owned hit-test
      * (Plan 03 reads frame_pointers; anim cache reads frame_dt, D-56-15/19). */
@@ -990,6 +991,39 @@ static void walker_state_init(nt_ui_walker_state_t *ws) {
     ws->accum_opacity = 1.0F;
 }
 
+/* Compose ONE transform level (scale S, rotation θ, center C, offset O) into
+ * the accumulated affine (a,b,c,d,tx,ty). Local = T(O)*T(C)*R(θ)*S*T(-C),
+ * then new = local * accumulated. Pure Clay Y-down math: NO Y-flip, NO rotation
+ * negation -- those are render-only conversions applied in dispatch_command.
+ * Shared by the walker (render) and ui_hit_test (interaction) so both agree. */
+static void compose_transform_level(const nt_ui_transform_t *t, float cx, float cy, float *a, float *b, float *c, float *d, float *tx, float *ty) {
+    const float sx = t->scale_x;
+    const float sy = t->scale_y;
+    const float cr = cosf(t->rotation);
+    const float sr = sinf(t->rotation);
+    /* Local 2x2: la=cr*sx, lb=-sr*sy, lc=sr*sx, ld=cr*sy */
+    const float la = cr * sx;
+    const float lb = -(sr * sy);
+    const float lc = sr * sx;
+    const float ld = cr * sy;
+    /* Local translate about center C + offset O. */
+    const float ltx = cx - (la * cx) - (lb * cy) + t->offset_x;
+    const float lty = cy - (lc * cx) - (ld * cy) + t->offset_y;
+    /* Compose: new = local * accumulated. */
+    const float na = (la * *a) + (lb * *c);
+    const float nb = (la * *b) + (lb * *d);
+    const float nc = (lc * *a) + (ld * *c);
+    const float nd = (lc * *b) + (ld * *d);
+    const float ntx = (la * *tx) + (lb * *ty) + ltx;
+    const float nty = (lc * *tx) + (ld * *ty) + lty;
+    *a = na;
+    *b = nb;
+    *c = nc;
+    *d = nd;
+    *tx = ntx;
+    *ty = nty;
+}
+
 /* Compose local transform (scale S, rotation θ, center C, offset O) onto
  * accumulated affine. Local = T(O) * T(C) * R(θ)*S * T(-C). */
 static void walker_recompute_transform(nt_ui_walker_state_t *ws) {
@@ -1003,39 +1037,9 @@ static void walker_recompute_transform(nt_ui_walker_state_t *ws) {
     ws->accum_scale_y = 1.0F;
     ws->accum_rotation = 0;
     for (int k = 0; k < ws->transform_depth; ++k) {
-        const float sx = ws->transform_stack[k].scale_x;
-        const float sy = ws->transform_stack[k].scale_y;
-        const float r = ws->transform_stack[k].rotation;
-        const float cx = ws->push_center_x[k];
-        const float cy = ws->push_center_y[k];
-        const float ox = ws->transform_stack[k].offset_x;
-        const float oy = ws->transform_stack[k].offset_y;
-        const float cr = cosf(r);
-        const float sr = sinf(r);
-        /* Local 2x2: la=cr*sx, lb=-sr*sy, lc=sr*sx, ld=cr*sy */
-        const float la = cr * sx;
-        const float lb = -(sr * sy);
-        const float lc = sr * sx;
-        const float ld = cr * sy;
-        /* Local translate: ltx = cx - la*cx - lb*cy + ox
-         *                  lty = cy - lc*cx - ld*cy + oy */
-        const float ltx = cx - (la * cx) - (lb * cy) + ox;
-        const float lty = cy - (lc * cx) - (ld * cy) + oy;
-        /* Compose: new = local * accumulated */
-        const float na = (la * ws->aff_a) + (lb * ws->aff_c);
-        const float nb = (la * ws->aff_b) + (lb * ws->aff_d);
-        const float nc = (lc * ws->aff_a) + (ld * ws->aff_c);
-        const float nd = (lc * ws->aff_b) + (ld * ws->aff_d);
-        const float ntx = (la * ws->aff_tx) + (lb * ws->aff_ty) + ltx;
-        const float nty = (lc * ws->aff_tx) + (ld * ws->aff_ty) + lty;
-        ws->aff_a = na;
-        ws->aff_b = nb;
-        ws->aff_c = nc;
-        ws->aff_d = nd;
-        ws->aff_tx = ntx;
-        ws->aff_ty = nty;
-        ws->accum_scale_x *= sx;
-        ws->accum_scale_y *= sy;
+        compose_transform_level(&ws->transform_stack[k], ws->push_center_x[k], ws->push_center_y[k], &ws->aff_a, &ws->aff_b, &ws->aff_c, &ws->aff_d, &ws->aff_tx, &ws->aff_ty);
+        ws->accum_scale_x *= ws->transform_stack[k].scale_x;
+        ws->accum_scale_y *= ws->transform_stack[k].scale_y;
     }
     /* Extract actual rotation from composed affine matrix.
      * atan2(c,a) assumes positive scale; negative scale flips the angle. */
@@ -1676,12 +1680,18 @@ void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transfo
     NT_ASSERT(isfinite(transform->rotation) && "nt_ui_push_transform: rotation must be finite");
     NT_ASSERT(isfinite(transform->offset_x) && isfinite(transform->offset_y) && "nt_ui_push_transform: offset must be finite");
     emit_marker_base(ctx, NT_UI_MARKER_PUSH_TRANSFORM)->transform = *transform;
+    /* Phase 56: mirror onto the live accum stack for the hit-test (Option A). */
+    NT_ASSERT(ctx->accum_depth < NT_UI_TRANSFORM_STACK_DEPTH_CAP && "transform accum overflow");
+    ctx->accum_stack[ctx->accum_depth++] = *transform;
 }
 
 void nt_ui_pop_transform(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_pop_transform: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_pop_transform: must be called inside begin/end");
     emit_marker_base(ctx, NT_UI_MARKER_POP_TRANSFORM);
+    /* Phase 56: keep the live accum stack balanced with push. */
+    NT_ASSERT(ctx->accum_depth > 0 && "transform accum underflow");
+    ctx->accum_depth--;
 }
 
 void nt_ui_push_opacity(nt_ui_context_t *ctx, float opacity) {
@@ -1711,6 +1721,74 @@ void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, v
         .userData = (void *)elem_data,
     });
 }
+// #endregion
+
+// #region interaction_id_bbox_hittest
+uint32_t nt_ui_id(const char *s) {
+    NT_ASSERT(s != NULL && "nt_ui_id: string must be non-NULL");
+    /* Clay hashes the string with its own one-at-a-time hash and returns
+     * hash+1, so the result is never 0 (the no-widget sentinel, D-56-05). A
+     * different hash (nt_hash/FNV) would miss Clay's hashmap (Pitfall 4). */
+    return Clay_GetElementId((Clay_String){.length = (int32_t)strlen(s), .chars = s}).id;
+}
+
+uint32_t nt_ui_id_str(const char *s) { return nt_ui_id(s); }
+
+nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_bbox: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_get_bbox: id must be non-zero (0 = no widget)");
+    /* Thin wrapper: raw prev-frame LAYOUT bbox (Y-down). On miss Clay returns a
+     * zeroed box with found == false (D-56-09). */
+    const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
+    return (nt_ui_bbox_t){.x = d.boundingBox.x, .y = d.boundingBox.y, .width = d.boundingBox.width, .height = d.boundingBox.height, .found = d.found};
+}
+
+/* Transform-aware hit-test (D-56-07). Build the declaration-time accumulated
+ * affine from ctx->accum_stack using the widget's PREV-FRAME bbox center as the
+ * center for ALL levels (accepted approximation: the common case is the widget
+ * being the first renderable after its own push, so the deferred render center
+ * resolves to this same point -- consistent to within the accepted 1-frame
+ * transform lag). Then inverse-transform (px,py) and point-in-(layout)-bbox.
+ * Stays in Clay Y-DOWN, NON-negated rotation (Pitfall 2).
+ * Task-1 note: only the NT_TEST_ACCESS probe consumes this for now; Task 2's
+ * nt_ui_get_interaction calls it unconditionally and drops this guard. */
+#ifdef NT_TEST_ACCESS
+static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py) {
+    if (id == 0U) {
+        return false;
+    }
+    const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
+    if (!d.found) {
+        return false; /* first frame an id is seen -> not hovered (D-56-06). */
+    }
+    const Clay_BoundingBox box = d.boundingBox;
+    const float cx = box.x + (box.width * 0.5F);
+    const float cy = box.y + (box.height * 0.5F);
+
+    /* Accumulate the affine from the live declaration-time stack. */
+    float a = 1.0F;
+    float b = 0.0F;
+    float c = 0.0F;
+    float dd = 1.0F;
+    float tx = 0.0F;
+    float ty = 0.0F;
+    for (uint32_t k = 0; k < ctx->accum_depth; ++k) {
+        compose_transform_level(&ctx->accum_stack[k], cx, cy, &a, &b, &c, &dd, &tx, &ty);
+    }
+
+    /* Inverse 2x2 (det nonzero: push_transform asserts scale > 0). */
+    const float det = (a * dd) - (b * c);
+    const float inv_a = dd / det;
+    const float inv_b = -b / det;
+    const float inv_c = -c / det;
+    const float inv_d = a / det;
+    const float rx = px - tx;
+    const float ry = py - ty;
+    const float lx = (inv_a * rx) + (inv_b * ry); /* point in the untransformed layout frame */
+    const float ly = (inv_c * rx) + (inv_d * ry);
+    return (lx >= box.x) && (lx <= box.x + box.width) && (ly >= box.y) && (ly <= box.y + box.height);
+}
+#endif /* NT_TEST_ACCESS */
 // #endregion
 
 // #region public_metrics
@@ -1806,7 +1884,12 @@ int nt_ui_test_clay_pointer_down(const nt_ui_context_t *ctx) {
 uint32_t nt_ui_test_capture_active_id(const nt_ui_context_t *ctx, uint32_t pointer_index) {
     (void)ctx;
     (void)pointer_index;
-    return 0U; /* Plan 03: return ctx->captures[pointer_index].active_id */
+    return 0U; /* Plan 03 Task 2: return ctx->captures[pointer_index].active_id */
+}
+
+bool nt_ui_test_hit(nt_ui_context_t *ctx, uint32_t id, float px, float py) {
+    NT_ASSERT(ctx != NULL && "nt_ui_test_hit: ctx must be non-NULL");
+    return ui_hit_test(ctx, id, px, py);
 }
 #endif
 // #endregion

@@ -35,6 +35,15 @@ struct nt_ui_context {
     uint32_t frame_pointer_count;
     float frame_dt; /* dt passed to begin; anim cache lerp uses it (D-56-15) */
 
+    /* Phase 56: declaration-time transform stack for the hit-test (Option A,
+     * D-56-07). push/pop_transform maintain this live (mirrors the walk-local
+     * nt_ui_walker_state_t but ctx-resident) so get_interaction can inverse-
+     * transform the pointer at call time. The scale/rotation center is resolved
+     * per-query from the widget's prev-frame bbox center (Clay_GetElementData).
+     * Reset to depth 0 each nt_ui_begin. Kept separate from anim[] below. */
+    nt_ui_transform_t accum_stack[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
+    uint32_t accum_depth;
+
     /* Walker bindings -- nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;
     uint32_t white_region;

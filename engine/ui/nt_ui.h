@@ -210,6 +210,28 @@ void nt_ui_pop_opacity(nt_ui_context_t *ctx);
  * wrapper from scratch arena. */
 void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, void *data);
 
+// #region interaction_api
+/* Phase 56 engine-owned interaction service (D-56-21). The hit-test is
+ * transform-aware: the pointer is inverse-transformed by the declaration-time
+ * accumulated transform stack, then tested against Clay's stable prev-frame
+ * layout bbox. Clay is layout-only; this is NOT Clay_Hovered (D-56-03). */
+
+/* Precompute once per id (game caches): wraps Clay_GetElementId, returns the
+ * uint32 hash (never 0 -- Clay returns hash+1). Asserts s != NULL. */
+uint32_t nt_ui_id(const char *s);
+/* Per-frame string convenience (hashes each call; also names the Clay debug
+ * overlay). Identical result to nt_ui_id; kept distinct for intent. */
+uint32_t nt_ui_id_str(const char *s);
+
+/* Prev-frame LAYOUT bbox (thin Clay_GetElementData wrapper; raw layout space,
+ * Y-down). found == false on the first frame an id is seen (D-56-09). */
+typedef struct {
+    float x, y, width, height;
+    bool found;
+} nt_ui_bbox_t;
+nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id);
+// #endregion
+
 // #region test_access
 #ifdef NT_TEST_ACCESS
 nt_ui_context_t *nt_ui_test_inframe_ctx(void);
@@ -221,6 +243,11 @@ int nt_ui_test_clay_pointer_down(const nt_ui_context_t *ctx); /* 0 released, 1 p
 /* Phase 56: read engine-owned capture state from the test TU (captures[]
  * is private; Plan 03 fills the bodies). active_id 0 = no capture. */
 uint32_t nt_ui_test_capture_active_id(const nt_ui_context_t *ctx, uint32_t pointer_index);
+
+/* Phase 56: drive the transform-aware hit-test directly from the test TU
+ * (inverse-affine vs prev-frame layout bbox). Returns true iff (px,py) in
+ * Clay Y-down space lands inside the widget after inverse-transform. */
+bool nt_ui_test_hit(nt_ui_context_t *ctx, uint32_t id, float px, float py);
 
 /* Count of segmentable cmds with NULL userData (= implicit layer-0 fallback). */
 uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx);
