@@ -8,6 +8,7 @@
 
 #include "clay.h"
 #include "font/nt_font.h"
+#include "input/nt_input.h"
 #include "ui/nt_ui.h"
 
 /* Side-channel transform/opacity marker (not a Clay element). */
@@ -26,6 +27,12 @@ struct nt_ui_context {
     Clay_RenderCommandArray frozen_cmds; /* set by end, read by walk */
     bool in_frame;
     bool debug_overlay; /* applied to Clay before BeginLayout in nt_ui_begin */
+
+    /* Phase 56: frame pointer snapshot for engine-owned hit-test (D-56-04/19).
+     * Copied each begin so get_interaction (called later in declaration) reads it. */
+    nt_pointer_t frame_pointers[NT_INPUT_MAX_POINTERS];
+    uint32_t frame_pointer_count;
+    float frame_dt; /* dt passed to begin; anim cache lerp uses it (D-56-15) */
 
     /* Walker bindings -- nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;

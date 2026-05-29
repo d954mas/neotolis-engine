@@ -325,7 +325,7 @@ static void frame(void) {
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
         const nt_pointer_t mouse_logical = nt_ui_scale_apply_pointer(&scale, g_nt_input.pointers[0]);
-        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &mouse_logical);
+        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &mouse_logical, 1);
 
         char status_text[160];
         (void)snprintf(status_text, sizeof status_text, "%s  %s  %dx%d  [T]palette [D]debug [1]scale [2]text", k_scale_mode_names[s_scale_mode], g_current->name, (int)scale.logical_w,

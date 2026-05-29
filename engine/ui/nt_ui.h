@@ -132,8 +132,11 @@ void nt_ui_destroy_context(nt_ui_context_t *ctx);
 
 void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 
-/* dt drives Clay scroll-container momentum; pass g_nt_app.dt or test value. */
-void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *mouse);
+/* dt drives Clay scroll-container momentum; pass g_nt_app.dt or test value.
+ * pointers[0..count) is the full per-frame pointer list (multitouch-ready,
+ * D-56-19); v1.8 drives the primary pointer (pointers[0]); Clay is still fed
+ * only the primary pointer. */
+void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count);
 void nt_ui_end(nt_ui_context_t *ctx);
 
 /* Toggle Clay's debug overlay (element tree + bbox). Applied at next begin.

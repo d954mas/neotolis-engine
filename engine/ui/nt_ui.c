@@ -28,6 +28,7 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include "core/nt_align.h"
 #include "core/nt_assert.h"
 #include "core/nt_clamp.h"
+#include "input/nt_input.h" /* NT_INPUT_MAX_POINTERS, nt_pointer_t */
 #include "log/nt_log.h"
 #include "memory/nt_mem_scratch.h"
 #include "ui/nt_ui_image.h" /* NT_UI_IMAGE_*_OVERRIDE flags */
@@ -217,10 +218,11 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font) {
 
 // #region begin_end
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *mouse) {
+void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count) {
     NT_ASSERT(ctx != NULL && "nt_ui_begin: ctx must be non-NULL");
     NT_ASSERT(s_nt_ui_module_initialized && "nt_ui_begin: nt_ui_module_init() must be called before begin");
-    NT_ASSERT(mouse != NULL && "nt_ui_begin: mouse must be non-NULL");
+    NT_ASSERT(pointers != NULL && "nt_ui_begin: pointers must be non-NULL");
+    NT_ASSERT(count > 0U && count <= NT_INPUT_MAX_POINTERS && "nt_ui_begin: count must be 1..NT_INPUT_MAX_POINTERS");
     /* isfinite() rejects NaN + +-inf which `>= 0.0F` alone lets through. */
     NT_ASSERT(isfinite(screen_w) && screen_w >= 0.0F && "nt_ui_begin: screen_w must be finite and non-negative");
     NT_ASSERT(isfinite(screen_h) && screen_h >= 0.0F && "nt_ui_begin: screen_h must be finite and non-negative");
@@ -235,16 +237,25 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     g_nt_ui_inframe_ctx = ctx;
     ctx->marker_count = 0;
 
+    /* Snapshot the frame pointer list + dt for the engine-owned hit-test
+     * (Plan 03 reads frame_pointers; anim cache reads frame_dt, D-56-15/19). */
+    memcpy(ctx->frame_pointers, pointers, sizeof(nt_pointer_t) * count);
+    ctx->frame_pointer_count = count;
+    ctx->frame_dt = dt;
+
+    /* v1.8 drives the primary pointer; Clay is fed only this one. */
+    const nt_pointer_t *primary = &pointers[0];
+
     /* Must run before BeginLayout: Clay reserves debug panel width up-front. */
     Clay_SetDebugModeEnabled(ctx->debug_overlay);
     Clay_SetLayoutDimensions((Clay_Dimensions){.width = screen_w, .height = screen_h});
 
     /* Left-button only; Clay v0.14 has no right/middle/wheel buttons. */
-    Clay_SetPointerState((Clay_Vector2){.x = mouse->x, .y = mouse->y}, mouse->buttons[NT_BUTTON_LEFT].is_down);
+    Clay_SetPointerState((Clay_Vector2){.x = primary->x, .y = primary->y}, primary->buttons[NT_BUTTON_LEFT].is_down);
 
     /* Forward wheel + enable touch/drag-scroll (mobile/web pointer drag inside
      * a Clay clip scrolls it). Y inverted: Clay scroll opposite of typical wheel_dy. */
-    Clay_UpdateScrollContainers(true, (Clay_Vector2){.x = mouse->wheel_dx, .y = -mouse->wheel_dy}, dt);
+    Clay_UpdateScrollContainers(true, (Clay_Vector2){.x = primary->wheel_dx, .y = -primary->wheel_dy}, dt);
 
     Clay_BeginLayout();
 }
