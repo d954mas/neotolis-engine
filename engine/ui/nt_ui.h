@@ -230,6 +230,37 @@ typedef struct {
     bool found;
 } nt_ui_bbox_t;
 nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id);
+
+/* Per-pointer capture state (D-56-04). v1.8 iterates the primary pointer
+ * (index 0); the array in the ctx is multitouch-ready for v1.9. */
+typedef struct {
+    uint32_t active_id; /* widget this pointer captured; 0 = none */
+    float press_pos[2]; /* UI-space press origin */
+    float pos[2];       /* current UI-space pos; drag = pos - press_pos */
+} nt_ui_capture_t;
+
+/* Full per-widget interaction state (D-56-06). Returned by value, computed
+ * lazily: this-frame primary pointer vs PREVIOUS-frame bbox (1-frame IM lag). */
+typedef struct {
+    bool hovered;           /* pointer over bbox (transform-aware) */
+    bool pressed;           /* currently captured (held) */
+    bool pressed_now;       /* press began this frame */
+    bool released_now;      /* released this frame (even off-widget = cancel) */
+    bool clicked;           /* released OVER the widget -> one-shot */
+    float press_pos[2];     /* where press began (UI-space) */
+    float pos[2];           /* current pointer pos (UI-space) */
+    float drag_dx, drag_dy; /* = pos - press_pos (convenience) */
+    uint32_t pointer_id;    /* which pointer captured (multitouch) */
+} nt_ui_interaction_t;
+
+/* THE foundation (D-56-21). The button (Plan 04) and every custom widget query
+ * this. id from nt_ui_id("..."). Drives the per-pointer capture state machine
+ * off the precomputed nt_button_state_t edges + the transform-aware hit-test. */
+nt_ui_interaction_t nt_ui_get_interaction(nt_ui_context_t *ctx, uint32_t id);
+
+/* True when any capture is active OR a pointer is over a widget this frame
+ * (~ ImGui io.WantCaptureMouse). The game gates its own world input on this. */
+bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
 // #endregion
 
 // #region test_access

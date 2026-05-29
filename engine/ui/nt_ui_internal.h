@@ -44,6 +44,15 @@ struct nt_ui_context {
     nt_ui_transform_t accum_stack[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
     uint32_t accum_depth;
 
+    /* Phase 56: per-pointer capture state machine (D-56-04). v1.8 drives the
+     * primary pointer (index 0); the array is multitouch-ready for v1.9.
+     * capture_seen[] tracks which captures get_interaction touched this frame;
+     * nt_ui_begin clears orphaned captures (queried-then-abandoned) using it.
+     * pointer_over_any feeds nt_ui_wants_pointer (D-56-08). */
+    nt_ui_capture_t captures[NT_INPUT_MAX_POINTERS];
+    uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
+    bool pointer_over_any;
+
     /* Walker bindings -- nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;
     uint32_t white_region;

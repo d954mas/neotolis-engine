@@ -244,6 +244,17 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     ctx->frame_pointer_count = count;
     ctx->frame_dt = dt;
 
+    /* Phase 56 (D-56-06): orphaned-capture cleanup. A capture whose widget was
+     * NOT re-queried last frame (capture_seen == 0) is abandoned -> clear it,
+     * else it would hold the pointer forever. Then reset the per-frame flags. */
+    for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
+        if (ctx->captures[i].active_id != 0U && ctx->capture_seen[i] == 0U) {
+            ctx->captures[i].active_id = 0U;
+        }
+        ctx->capture_seen[i] = 0U;
+    }
+    ctx->pointer_over_any = false;
+
     /* v1.8 drives the primary pointer; Clay is fed only this one. */
     const nt_pointer_t *primary = &pointers[0];
 
@@ -1749,10 +1760,7 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
  * being the first renderable after its own push, so the deferred render center
  * resolves to this same point -- consistent to within the accepted 1-frame
  * transform lag). Then inverse-transform (px,py) and point-in-(layout)-bbox.
- * Stays in Clay Y-DOWN, NON-negated rotation (Pitfall 2).
- * Task-1 note: only the NT_TEST_ACCESS probe consumes this for now; Task 2's
- * nt_ui_get_interaction calls it unconditionally and drops this guard. */
-#ifdef NT_TEST_ACCESS
+ * Stays in Clay Y-DOWN, NON-negated rotation (Pitfall 2). */
 static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py) {
     if (id == 0U) {
         return false;
@@ -1788,7 +1796,89 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     const float ly = (inv_c * rx) + (inv_d * ry);
     return (lx >= box.x) && (lx <= box.x + box.width) && (ly >= box.y) && (ly <= box.y + box.height);
 }
-#endif /* NT_TEST_ACCESS */
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+nt_ui_interaction_t nt_ui_get_interaction(nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_interaction: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_get_interaction: id must be non-zero (0 = no widget)");
+    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_get_interaction: no frame pointer snapshot (call inside begin/end)");
+
+    nt_ui_interaction_t out = {0};
+
+    /* No prev-frame bbox yet (first frame an id is declared) -> not hovered,
+     * no capture can have started against it (D-56-06). */
+    const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
+    if (!d.found) {
+        return out;
+    }
+
+    /* v1.8 single-pointer: the primary pointer is index 0 (D-56-04). */
+    const uint32_t pidx = 0U;
+    const nt_pointer_t *p = &ctx->frame_pointers[pidx];
+    nt_ui_capture_t *cap = &ctx->captures[pidx];
+    const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT]; /* precomputed edges */
+
+    const bool over = ui_hit_test(ctx, id, p->x, p->y);
+    out.hovered = over;
+    if (over) {
+        ctx->pointer_over_any = true; /* feeds nt_ui_wants_pointer (D-56-08). */
+    }
+
+    /* Begin capture on press-over-widget. */
+    if (over && btn.is_pressed) {
+        cap->active_id = id;
+        cap->press_pos[0] = p->x;
+        cap->press_pos[1] = p->y;
+        cap->pos[0] = p->x;
+        cap->pos[1] = p->y;
+        out.pressed_now = true;
+    }
+
+    const bool mine = (cap->active_id == id);
+    if (mine) {
+        cap->pos[0] = p->x;
+        cap->pos[1] = p->y;
+        out.pressed = btn.is_down;
+        out.released_now = btn.is_released;
+        /* clicked = release OVER the widget; off-widget release cancels
+         * (released_now true, clicked false). */
+        out.clicked = btn.is_released && over;
+        out.pointer_id = p->id;
+        out.press_pos[0] = cap->press_pos[0];
+        out.press_pos[1] = cap->press_pos[1];
+        out.pos[0] = cap->pos[0];
+        out.pos[1] = cap->pos[1];
+        out.drag_dx = cap->pos[0] - cap->press_pos[0];
+        out.drag_dy = cap->pos[1] - cap->press_pos[1];
+        /* This capture was queried this frame -> not an orphan. */
+        ctx->capture_seen[pidx] = 1U;
+        /* Release ends the capture (whether over or not). */
+        if (btn.is_released) {
+            cap->active_id = 0U;
+        }
+    } else {
+        /* Not captured: pos reflects the current pointer; no drag. */
+        out.press_pos[0] = p->x;
+        out.press_pos[1] = p->y;
+        out.pos[0] = p->x;
+        out.pos[1] = p->y;
+        out.pointer_id = p->id;
+    }
+    return out;
+}
+
+bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_wants_pointer: ctx must be non-NULL");
+    if (ctx->pointer_over_any) {
+        return true;
+    }
+    for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
+        if (ctx->captures[i].active_id != 0U) {
+            return true;
+        }
+    }
+    return false;
+}
 // #endregion
 
 // #region public_metrics
@@ -1882,9 +1972,9 @@ int nt_ui_test_clay_pointer_down(const nt_ui_context_t *ctx) {
 }
 
 uint32_t nt_ui_test_capture_active_id(const nt_ui_context_t *ctx, uint32_t pointer_index) {
-    (void)ctx;
-    (void)pointer_index;
-    return 0U; /* Plan 03 Task 2: return ctx->captures[pointer_index].active_id */
+    NT_ASSERT(ctx != NULL && "nt_ui_test_capture_active_id: ctx must be non-NULL");
+    NT_ASSERT(pointer_index < NT_INPUT_MAX_POINTERS && "nt_ui_test_capture_active_id: pointer_index out of range");
+    return ctx->captures[pointer_index].active_id;
 }
 
 bool nt_ui_test_hit(nt_ui_context_t *ctx, uint32_t id, float px, float py) {
