@@ -144,6 +144,26 @@ void nt_ui_end(nt_ui_context_t *ctx);
 void nt_ui_set_debug_overlay(nt_ui_context_t *ctx, bool enabled);
 bool nt_ui_get_debug_overlay(const nt_ui_context_t *ctx);
 
+/* Phase 56 ext (CHUNK E): widget-type tagging for nt_ui_inspector. Every
+ * engine widget (button/image/label/panel/group) records its element id +
+ * widget tag in a per-frame direct-mapped registry inside ctx so the
+ * inspector can show "button" / "image" / "label" / etc next to each entry
+ * in the element tree. Plain Clay elements (no widget call) implicitly fall
+ * through with NT_UI_WIDGET_NONE (rendered as "(plain)"). Registry resets
+ * each nt_ui_begin. nt_ui_widget_register is called BY widget code -- game
+ * code does not call it directly. id 0 is silently dropped (sentinel). */
+typedef enum {
+    NT_UI_WIDGET_NONE = 0,
+    NT_UI_WIDGET_BUTTON = 1,
+    NT_UI_WIDGET_IMAGE = 2,
+    NT_UI_WIDGET_LABEL = 3,
+    NT_UI_WIDGET_PANEL = 4,
+    NT_UI_WIDGET_GROUP = 5,
+} nt_ui_widget_type_t;
+
+void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, nt_ui_widget_type_t type);
+nt_ui_widget_type_t nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32_t id);
+
 /* Read-only on frozen_cmds + bindings; per-walk stats reflect the latest call.
  * Order: zIndex asc, then layer asc, then declaration. SCISSOR/CUSTOM are
  * hard barriers and never reordered. */

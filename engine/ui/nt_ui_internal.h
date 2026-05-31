@@ -20,6 +20,23 @@
 #define NT_UI_DEBUG_ZONE_CAP 64
 #endif
 
+/* Phase 56 ext (CHUNK E): widget_registry capacity. Direct-mapped table
+ * keyed on (id mod cap). On collision, the most recent register wins
+ * (later widget overwrites the slot) -- the inspector is an observability
+ * aid, so missing a tag for one of two colliding ids is acceptable. Cap
+ * is a power-of-two for the cheap modulo. Counted separately from the
+ * anim cache because widgets and animated widgets are disjoint sets. */
+#ifndef NT_UI_WIDGET_REGISTRY_CAP
+#define NT_UI_WIDGET_REGISTRY_CAP 128
+#endif
+_Static_assert((NT_UI_WIDGET_REGISTRY_CAP & (NT_UI_WIDGET_REGISTRY_CAP - 1)) == 0, "NT_UI_WIDGET_REGISTRY_CAP must be a power of two");
+
+typedef struct {
+    uint32_t id;  /* 0 = slot empty */
+    uint8_t type; /* nt_ui_widget_type_t */
+    uint8_t _pad[3];
+} nt_ui_widget_slot_t;
+
 typedef struct {
     uint32_t id;
     /* Padded layout-space bbox (l/t/r/b), Clay Y-down. l<r, t<b. */
@@ -140,7 +157,36 @@ struct nt_ui_context {
     uint32_t debug_zone_count;
     bool debug_recording;
 
+    /* Phase 56 ext (CHUNK E): per-frame widget tag registry for nt_ui_inspector.
+     * Cleared each nt_ui_begin (id=0 in every slot). Widgets call
+     * nt_ui_widget_register from their begin/leaf paths. Direct-mapped table
+     * with replace-on-collision (inspector is observability, not correctness). */
+    nt_ui_widget_slot_t widget_registry[NT_UI_WIDGET_REGISTRY_CAP];
+
+    /* Phase 56 ext (CHUNK E): nt_ui_inspector toggle (HUD-style overlay drawn
+     * by the game AFTER nt_ui_walk). Default off (zero overhead -- no per-frame
+     * tree walk, no extra draw calls). Game flips via nt_ui_inspector_set_active. */
+    bool inspector_active;
+
     Clay_Arena clay_arena;
 };
+
+/* Phase 56 ext (CHUNK E): nt_ui_inspector reads Clay's layoutElements array
+ * via these thin internal accessors, kept in nt_ui.c where CLAY_IMPLEMENTATION
+ * makes the Clay_Context struct visible. The inspector TU only sees opaque
+ * pointers from these. Engine-internal only (not in nt_ui.h public surface). */
+typedef struct nt_ui_inspector_element_view {
+    uint32_t id; /* Clay-assigned id, 0 if invalid index */
+    float x, y;  /* layout bbox top-left (Clay Y-down) */
+    float w, h;
+} nt_ui_inspector_element_view_t;
+
+int32_t nt_ui_internal_get_layout_element_count(const nt_ui_context_t *ctx);
+nt_ui_inspector_element_view_t nt_ui_internal_get_layout_element_view(const nt_ui_context_t *ctx, int32_t index);
+
+/* Returns the id of the currently-open Clay element (top of openLayoutElementStack)
+ * for the in-frame ctx. Used by widget begin/leaf paths to register their tag
+ * in the per-frame widget_registry. Returns 0 if no ctx is in-frame. */
+uint32_t nt_ui_internal_current_open_element_id(void);
 
 #endif /* NT_UI_INTERNAL_H */

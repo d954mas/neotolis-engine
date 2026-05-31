@@ -446,6 +446,7 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_anim
         test_nt_ui_button
         test_nt_ui_debug
+        test_nt_ui_inspector
     )
 
     foreach(_t IN LISTS _nt_ui_test_names)

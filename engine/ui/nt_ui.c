@@ -261,6 +261,10 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
      * debug_recording flag persists (it's a user toggle). */
     ctx->debug_zone_count = 0U;
 
+    /* Phase 56 ext (CHUNK E): widget tag registry is per-frame; clear every
+     * slot (id=0 = empty). inspector_active is a user toggle (persists). */
+    memset(ctx->widget_registry, 0, sizeof(ctx->widget_registry));
+
     /* v1.8 drives the primary pointer; Clay is fed only this one. */
     const nt_pointer_t *primary = &pointers[0];
 
@@ -332,6 +336,93 @@ const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *u
     d->layer = layer;
     d->user_data = user_data;
     return d;
+}
+// #endregion
+
+// #region inspector_internal_accessors (CHUNK E)
+uint32_t nt_ui_internal_current_open_element_id(void) {
+    if (g_nt_ui_inframe_ctx == NULL || g_nt_ui_inframe_ctx->clay == NULL) {
+        return 0U;
+    }
+    /* Mirror Clay__GetOpenLayoutElement (clay.h:1325) without going through
+     * its private prototype: top of openLayoutElementStack indexes into
+     * layoutElements; ->id is the Clay-assigned id. */
+    Clay_Context *cc = g_nt_ui_inframe_ctx->clay;
+    if (cc->openLayoutElementStack.length <= 0) {
+        return 0U;
+    }
+    const int32_t idx = Clay__int32_tArray_GetValue(&cc->openLayoutElementStack, cc->openLayoutElementStack.length - 1);
+    Clay_LayoutElement *el = Clay_LayoutElementArray_Get(&cc->layoutElements, idx);
+    return el->id;
+}
+
+/* Inspector lives in a separate TU but needs to peek at the Clay
+ * layoutElements array. The full Clay_Context type is only visible inside
+ * this TU (CLAY_IMPLEMENTATION) -- expose two thin accessors so the
+ * inspector stays Clay-agnostic. */
+int32_t nt_ui_internal_get_layout_element_count(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_internal_get_layout_element_count: ctx must be non-NULL");
+    if (ctx->clay == NULL) {
+        return 0;
+    }
+    return ctx->clay->layoutElements.length;
+}
+
+nt_ui_inspector_element_view_t nt_ui_internal_get_layout_element_view(const nt_ui_context_t *ctx, int32_t index) {
+    NT_ASSERT(ctx != NULL && "nt_ui_internal_get_layout_element_view: ctx must be non-NULL");
+    nt_ui_inspector_element_view_t v = {0};
+    if (ctx->clay == NULL || index < 0 || index >= ctx->clay->layoutElements.length) {
+        return v;
+    }
+    Clay_LayoutElement *el = Clay_LayoutElementArray_Get(&ctx->clay->layoutElements, index);
+    v.id = el->id;
+    /* Position via Clay_GetElementData -- requires Clay's current context set
+     * (Clay__GetHashMapItem dereferences it). Inspector is called AFTER
+     * nt_ui_end (which clears current context), so set it for the lookup
+     * and restore afterward to keep the post-end invariant. */
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+    Clay_ElementData ed = Clay_GetElementData((Clay_ElementId){.id = el->id});
+    Clay_SetCurrentContext(saved);
+    if (ed.found) {
+        v.x = ed.boundingBox.x;
+        v.y = ed.boundingBox.y;
+        v.w = ed.boundingBox.width;
+        v.h = ed.boundingBox.height;
+    } else {
+        v.x = 0.0F;
+        v.y = 0.0F;
+        v.w = el->dimensions.width;
+        v.h = el->dimensions.height;
+    }
+    return v;
+}
+// #endregion
+
+// #region widget_registry (CHUNK E)
+/* Direct-mapped per-frame widget tag table. Replace-on-collision because the
+ * inspector is observability (not correctness): missing a single colliding
+ * tag is acceptable, complex chaining would cost runtime + memory for no
+ * real win at the inspector cap of ~128 widgets per frame. id 0 is the
+ * no-widget sentinel; silently dropped. */
+void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, nt_ui_widget_type_t type) {
+    NT_ASSERT(ctx != NULL && "nt_ui_widget_register: ctx must be non-NULL");
+    if (id == 0U) {
+        return; /* sentinel: never register the no-id slot */
+    }
+    const uint32_t bucket = id & (NT_UI_WIDGET_REGISTRY_CAP - 1U);
+    ctx->widget_registry[bucket].id = id;
+    ctx->widget_registry[bucket].type = (uint8_t)type;
+}
+
+nt_ui_widget_type_t nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && "nt_ui_widget_lookup: ctx must be non-NULL");
+    if (id == 0U) {
+        return NT_UI_WIDGET_NONE;
+    }
+    const uint32_t bucket = id & (NT_UI_WIDGET_REGISTRY_CAP - 1U);
+    const nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
+    return (s->id == id) ? (nt_ui_widget_type_t)s->type : NT_UI_WIDGET_NONE;
 }
 // #endregion
 
