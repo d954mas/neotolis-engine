@@ -29,8 +29,10 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(id != 0U && "nt_ui_button_begin: id 0 is the no-widget sentinel");
     NT_ASSERT(!ctx->pending_button.active && "nt_ui_button: nested buttons unsupported");
     // #region state-pick + ease
-    /* Disabled short-circuits the hit-test/capture entirely (D-56-12). */
-    nt_ui_interaction_t in = enabled ? nt_ui_get_interaction(ctx, id) : (nt_ui_interaction_t){0};
+    /* Disabled short-circuits the hit-test/capture entirely (D-56-12). The
+     * padded query forwards the style's touch-target inflation (zero = old
+     * behavior); disabled path still gets a zeroed interaction. */
+    nt_ui_interaction_t in = enabled ? nt_ui_get_interaction_padded(ctx, id, style->hit_padding_lrtb) : (nt_ui_interaction_t){0};
 
     /* D-56-14 priority: disabled ? : pressed ? : hover ? : idle. */
     const nt_ui_btn_state_t *st = &style->idle;

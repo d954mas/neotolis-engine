@@ -1760,8 +1760,12 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
  * being the first renderable after its own push, so the deferred render center
  * resolves to this same point -- consistent to within the accepted 1-frame
  * transform lag). Then inverse-transform (px,py) and point-in-(layout)-bbox.
- * Stays in Clay Y-DOWN, NON-negated rotation (Pitfall 2). */
-static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py) {
+ * Stays in Clay Y-DOWN, NON-negated rotation (Pitfall 2).
+ *
+ * Phase 56 ext: pad_lrtb (NULL allowed = {0,0,0,0}) inflates the layout-space
+ * bbox BEFORE the inverse-affine check, so the padded zone rotates with the
+ * widget. pad_lrtb[i] >= 0 is asserted by the public _padded entry point. */
+static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]) {
     if (id == 0U) {
         return false;
     }
@@ -1770,6 +1774,9 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
         return false; /* first frame an id is seen -> not hovered (D-56-06). */
     }
     const Clay_BoundingBox box = d.boundingBox;
+    /* Center is the GEOMETRIC center of the visual bbox (NOT the padded one) so
+     * the same rotation pivot the renderer uses applies — padding is a hit-zone
+     * inflation, not a position shift. */
     const float cx = box.x + (box.width * 0.5F);
     const float cy = box.y + (box.height * 0.5F);
 
@@ -1794,14 +1801,23 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     const float ry = py - ty;
     const float lx = (inv_a * rx) + (inv_b * ry); /* point in the untransformed layout frame */
     const float ly = (inv_c * rx) + (inv_d * ry);
-    return (lx >= box.x) && (lx <= box.x + box.width) && (ly >= box.y) && (ly <= box.y + box.height);
+
+    /* Inflate bbox in layout space (NULL pad = zero padding -> original bbox). */
+    const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
+    const float pr = (pad_lrtb != NULL) ? (float)pad_lrtb[1] : 0.0F;
+    const float pt = (pad_lrtb != NULL) ? (float)pad_lrtb[2] : 0.0F;
+    const float pb = (pad_lrtb != NULL) ? (float)pad_lrtb[3] : 0.0F;
+    return (lx >= box.x - pl) && (lx <= box.x + box.width + pr) && (ly >= box.y - pt) && (ly <= box.y + box.height + pb);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_ui_interaction_t nt_ui_get_interaction(nt_ui_context_t *ctx, uint32_t id) {
-    NT_ASSERT(ctx != NULL && "nt_ui_get_interaction: ctx must be non-NULL");
-    NT_ASSERT(id != 0U && "nt_ui_get_interaction: id must be non-zero (0 = no widget)");
-    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_get_interaction: no frame pointer snapshot (call inside begin/end)");
+nt_ui_interaction_t nt_ui_get_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_get_interaction_padded: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_get_interaction_padded: id must be non-zero (0 = no widget)");
+    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_get_interaction_padded: no frame pointer snapshot (call inside begin/end)");
+    /* Negative padding is a use error: the API shrinks-from-bbox use case is
+     * better served by sizing the widget smaller, NOT a negative inflation. */
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_get_interaction_padded: pad_lrtb components must be >= 0");
 
     nt_ui_interaction_t out = {0};
 
@@ -1818,7 +1834,7 @@ nt_ui_interaction_t nt_ui_get_interaction(nt_ui_context_t *ctx, uint32_t id) {
     nt_ui_capture_t *cap = &ctx->captures[pidx];
     const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT]; /* precomputed edges */
 
-    const bool over = ui_hit_test(ctx, id, p->x, p->y);
+    const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb);
     out.hovered = over;
     if (over) {
         ctx->pointer_over_any = true; /* feeds nt_ui_wants_pointer (D-56-08). */
@@ -1866,6 +1882,9 @@ nt_ui_interaction_t nt_ui_get_interaction(nt_ui_context_t *ctx, uint32_t id) {
     }
     return out;
 }
+
+/* Thin wrapper: zero-padding specialization of the padded variant. */
+nt_ui_interaction_t nt_ui_get_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_get_interaction_padded(ctx, id, NULL); }
 
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_wants_pointer: ctx must be non-NULL");
@@ -1979,7 +1998,12 @@ uint32_t nt_ui_test_capture_active_id(const nt_ui_context_t *ctx, uint32_t point
 
 bool nt_ui_test_hit(nt_ui_context_t *ctx, uint32_t id, float px, float py) {
     NT_ASSERT(ctx != NULL && "nt_ui_test_hit: ctx must be non-NULL");
-    return ui_hit_test(ctx, id, px, py);
+    return ui_hit_test(ctx, id, px, py, NULL);
+}
+
+bool nt_ui_test_hit_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_test_hit_padded: ctx must be non-NULL");
+    return ui_hit_test(ctx, id, px, py, pad_lrtb);
 }
 #endif
 // #endregion

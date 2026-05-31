@@ -166,6 +166,106 @@ static void test_hittest_rotated_asymmetric_probes(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* ---- Test 4: padded hit-test, asymmetric padding (touch-target inflation) ----
+ * Phase 56 ext: nt_ui_test_hit_padded inflates the LAYOUT-space bbox by
+ * pad_lrtb = {left, right, top, bottom} BEFORE the inverse-affine. With no
+ * transform pushed, a point that sits 12 px OUTSIDE the bbox to the right
+ * is OUTSIDE the unpadded hit zone but INSIDE the {0,16,0,0} padded one. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_hittest_padded_asymmetric(void) {
+    declare_bbox_frame();
+
+    /* Frame 2: no transform, asymmetric pad. */
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    assert_bbox_as_declared();
+    const uint32_t id = nt_ui_id("htbtn");
+
+    const float right_outside_x = BBOX_X + BBOX_W + 12.0F;
+    const float center_y = BBOX_Y + (BBOX_H * 0.5F);
+    /* Unpadded: 12 px past the right edge -> outside. */
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_test_hit(s_fx.ctx, id, right_outside_x, center_y), "12 px right of bbox must be outside the unpadded hit zone");
+    /* Padded right=16: 12 px past the right edge -> inside. */
+    const int16_t pad_right[4] = {0, 16, 0, 0};
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_test_hit_padded(s_fx.ctx, id, right_outside_x, center_y, pad_right), "12 px right of bbox must be inside with right padding 16");
+    /* Asymmetric: pad_left=0 -> 12 px LEFT of bbox stays outside even when right padding is large. */
+    const float left_outside_x = BBOX_X - 12.0F;
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_test_hit_padded(s_fx.ctx, id, left_outside_x, center_y, pad_right), "12 px left of bbox must stay outside (left padding is 0)");
+    /* {left=16}: now LEFT side becomes inside. Right side test recomputed below. */
+    const int16_t pad_left[4] = {16, 0, 0, 0};
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_test_hit_padded(s_fx.ctx, id, left_outside_x, center_y, pad_left), "12 px left of bbox must be inside with left padding 16");
+    /* {top=8, bottom=0}: 4 px ABOVE bbox -> inside; 4 px BELOW -> outside. */
+    const float center_x = BBOX_X + (BBOX_W * 0.5F);
+    const int16_t pad_top[4] = {0, 0, 8, 0};
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_test_hit_padded(s_fx.ctx, id, center_x, BBOX_Y - 4.0F, pad_top), "4 px above bbox must be inside with top padding 8");
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_test_hit_padded(s_fx.ctx, id, center_x, BBOX_Y + BBOX_H + 4.0F, pad_top), "4 px below bbox must stay outside (bottom padding 0)");
+    /* NULL pad_lrtb == unpadded. */
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_test_hit_padded(s_fx.ctx, id, right_outside_x, center_y, NULL), "NULL pad_lrtb must behave like unpadded (12 px right -> outside)");
+
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 5: padded hit-test + rotation 30 deg ---- */
+/* Padding rotates with the widget (it lives in LAYOUT space, before the
+ * inverse-affine). A point on the rotated-RIGHT normal that lands 12 px past
+ * the rotated right edge is OUTSIDE unpadded but INSIDE with {0,16,0,0}. */
+static void test_hittest_padded_with_rotation(void) {
+    declare_bbox_frame();
+
+    const float cx = BBOX_X + (BBOX_W * 0.5F);
+    const float cy = BBOX_Y + (BBOX_H * 0.5F);
+
+    nt_ui_transform_t t = {.offset_x = 0, .offset_y = 0, .rotation = ROT_RAD, .scale_x = 1.0F, .scale_y = 1.0F};
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    assert_bbox_as_declared();
+    nt_ui_push_transform(s_fx.ctx, &t);
+    const uint32_t id = nt_ui_id("htbtn");
+
+    /* Forward-transform a layout-space point 12 px past the RIGHT edge along
+     * the y=center axis. Unpadded: outside; padded right=16: inside. Use the
+     * file-local forward_xform helper but with the test's rotation only
+     * (scale=1, offset=0) to isolate the rotation case. */
+    const float layout_x = BBOX_X + BBOX_W + 12.0F;
+    const float layout_y = cy;
+    /* Forward through rotation-only level (offset=0, scale=1). About center C. */
+    const float cr = cosf(ROT_RAD);
+    const float sr = sinf(ROT_RAD);
+    const float dx = layout_x - cx;
+    const float dy = layout_y - cy;
+    const float world_x = cx + (cr * dx) - (sr * dy);
+    const float world_y = cy + (sr * dx) + (cr * dy);
+
+    /* Unpadded -> outside (point is past the rotated right edge). */
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_test_hit(s_fx.ctx, id, world_x, world_y), "rotated: 12 px past right must be outside unpadded");
+    /* Padded right=16 -> inside (padding rotates with the widget). */
+    const int16_t pad_right[4] = {0, 16, 0, 0};
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_test_hit_padded(s_fx.ctx, id, world_x, world_y, pad_right), "rotated: 12 px past right must be inside with right padding 16 (padding rotates with widget)");
+
+    nt_ui_pop_transform(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 6: zero-padding {0,0,0,0} is identical to unpadded ---- */
+static void test_hittest_padded_zero_equals_unpadded(void) {
+    declare_bbox_frame();
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    assert_bbox_as_declared();
+    const uint32_t id = nt_ui_id("htbtn");
+
+    /* Several probes: zero padding must match the unpadded API exactly. */
+    const float cx = BBOX_X + (BBOX_W * 0.5F);
+    const float cy = BBOX_Y + (BBOX_H * 0.5F);
+    const int16_t zero_pad[4] = {0, 0, 0, 0};
+    TEST_ASSERT_TRUE(nt_ui_test_hit_padded(s_fx.ctx, id, cx, cy, zero_pad) == nt_ui_test_hit(s_fx.ctx, id, cx, cy));
+    TEST_ASSERT_TRUE(nt_ui_test_hit_padded(s_fx.ctx, id, BBOX_X - 5.0F, BBOX_Y - 5.0F, zero_pad) == nt_ui_test_hit(s_fx.ctx, id, BBOX_X - 5.0F, BBOX_Y - 5.0F));
+    TEST_ASSERT_TRUE(nt_ui_test_hit_padded(s_fx.ctx, id, BBOX_X + 1.0F, BBOX_Y + 1.0F, zero_pad) == nt_ui_test_hit(s_fx.ctx, id, BBOX_X + 1.0F, BBOX_Y + 1.0F));
+
+    nt_ui_end(s_fx.ctx);
+}
+
 /* ---- Test 3: hit-test stays in Clay Y-down space (no walker Y-flip) ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_hittest_no_render_y_flip(void) {
@@ -198,5 +298,9 @@ int main(void) {
     RUN_TEST(test_hittest_axis_aligned_baseline);
     RUN_TEST(test_hittest_rotated_asymmetric_probes);
     RUN_TEST(test_hittest_no_render_y_flip);
+    /* Phase 56 ext: touch-target padding (nt_ui_get_interaction_padded). */
+    RUN_TEST(test_hittest_padded_asymmetric);
+    RUN_TEST(test_hittest_padded_with_rotation);
+    RUN_TEST(test_hittest_padded_zero_equals_unpadded);
     return UNITY_END();
 }

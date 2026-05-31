@@ -36,7 +36,17 @@ typedef struct {
 typedef struct {
     nt_ui_btn_state_t idle, hover, pressed, disabled;
     float transition_speed; /* 0 = instant; >0 = eased via the anim cache */
+    /* Phase 56 ext: touch-target hit-zone inflation in layout pixels
+     * {left, right, top, bottom}. {0,0,0,0} = no padding (visual = hit).
+     * Inflated in layout space BEFORE the inverse-affine, so the padded zone
+     * rotates with the widget. Each component >= 0 (asserted). Forwarded
+     * straight to nt_ui_get_interaction_padded on the enabled path. */
+    int16_t hit_padding_lrtb[4];
 } nt_ui_button_style_t;
+/* Catches accidental growth past the documented field set. 4 nt_ui_btn_state_t
+ * (24 B each = 96) + transition_speed (4) + hit_padding_lrtb (8) = 108 B.
+ * Concrete number rather than expression to flag any silent padding shift. */
+_Static_assert(sizeof(nt_ui_button_style_t) == 108, "nt_ui_button_style_t expected size 108 B (4*24 state + 4 speed + 8 padding); update on intentional field changes");
 
 /* Container: begin -> children -> bool end. id from nt_ui_id("...") (never 0).
  * enabled=false short-circuits hover + click (D-56-12) and forces the disabled

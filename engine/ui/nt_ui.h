@@ -258,6 +258,16 @@ typedef struct {
  * off the precomputed nt_button_state_t edges + the transform-aware hit-test. */
 nt_ui_interaction_t nt_ui_get_interaction(nt_ui_context_t *ctx, uint32_t id);
 
+/* Padded variant (Phase 56 ext, touch-target inflation). Inflates the
+ * widget's layout-space bbox by pad_lrtb = {left, right, top, bottom} in
+ * LAYOUT pixels BEFORE the inverse-affine transform check. Use for mobile
+ * touch-friendly hit areas without changing visual size. Asserts each
+ * component >= 0 (negative padding is a use error -- use a smaller widget).
+ * pad_lrtb may be NULL (treated as {0,0,0,0}; equivalent to the unpadded
+ * call). nt_ui_get_interaction(ctx, id) is implemented as the {0,0,0,0}
+ * specialization of this. */
+nt_ui_interaction_t nt_ui_get_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
+
 /* True when any capture is active OR a pointer is over a widget this frame
  * (~ ImGui io.WantCaptureMouse). The game gates its own world input on this. */
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx);
@@ -279,6 +289,12 @@ uint32_t nt_ui_test_capture_active_id(const nt_ui_context_t *ctx, uint32_t point
  * (inverse-affine vs prev-frame layout bbox). Returns true iff (px,py) in
  * Clay Y-down space lands inside the widget after inverse-transform. */
 bool nt_ui_test_hit(nt_ui_context_t *ctx, uint32_t id, float px, float py);
+
+/* Phase 56 ext: drive the padded hit-test (touch-target inflation) directly
+ * from the test TU. pad_lrtb is {left, right, top, bottom} layout pixels;
+ * NULL = unpadded. Inflated bbox is checked AFTER the inverse-affine, so the
+ * padding lives in layout space (rotates with the widget). */
+bool nt_ui_test_hit_padded(nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]);
 
 /* Count of segmentable cmds with NULL userData (= implicit layer-0 fallback). */
 uint32_t nt_ui_test_last_walk_unlayered_count(const nt_ui_context_t *ctx);
