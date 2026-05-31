@@ -8,6 +8,7 @@
 #include "memory/nt_mem_scratch.h"
 #include "resource/nt_resource.h"
 #include "ui/nt_ui_anim.h"
+#include "ui/nt_ui_debug.h" /* record-only debug zone for disabled buttons */
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_label.h"
 
@@ -31,8 +32,17 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     // #region state-pick + ease
     /* Disabled short-circuits the hit-test/capture entirely (D-56-12). The
      * padded query forwards the style's touch-target inflation (zero = old
-     * behavior); disabled path still gets a zeroed interaction. */
-    nt_ui_interaction_t in = enabled ? nt_ui_get_interaction_padded(ctx, id, style->hit_padding_lrtb) : (nt_ui_interaction_t){0};
+     * behavior); disabled path still gets a zeroed interaction. Phase 56 ext:
+     * the disabled path STILL records a debug zone (DISABLED flag) so the
+     * overlay surfaces "why didn't this respond?" -- recording is gated by
+     * ctx->debug_recording so production overhead stays zero. */
+    nt_ui_interaction_t in;
+    if (enabled) {
+        in = nt_ui_get_interaction_padded(ctx, id, style->hit_padding_lrtb);
+    } else {
+        in = (nt_ui_interaction_t){0};
+        nt_ui_debug_record_disabled_zone(ctx, id, style->hit_padding_lrtb);
+    }
 
     /* D-56-14 priority: disabled ? : pressed ? : hover ? : idle. */
     const nt_ui_btn_state_t *st = &style->idle;

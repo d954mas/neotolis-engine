@@ -31,6 +31,7 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include "input/nt_input.h" /* NT_INPUT_MAX_POINTERS, nt_pointer_t */
 #include "log/nt_log.h"
 #include "memory/nt_mem_scratch.h"
+#include "ui/nt_ui_debug.h" /* nt_ui_debug_record_disabled_zone prototype */
 #include "ui/nt_ui_image.h" /* NT_UI_IMAGE_*_OVERRIDE flags */
 #include "ui/nt_ui_internal.h"
 
@@ -1929,6 +1930,54 @@ nt_ui_interaction_t nt_ui_get_interaction_padded(nt_ui_context_t *ctx, uint32_t 
 
 /* Thin wrapper: zero-padding specialization of the padded variant. */
 nt_ui_interaction_t nt_ui_get_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_get_interaction_padded(ctx, id, NULL); }
+
+/* Phase 56 ext: record-only push for DISABLED widgets that skip hit-test
+ * entirely (e.g. nt_ui_button enabled=false). Mirrors the zone-fill block
+ * inside nt_ui_get_interaction_padded but does NO hit-test / capture work
+ * (the widget is non-interactive by contract). Recording is gated by
+ * ctx->debug_recording (OFF default = zero overhead); at-cap silently
+ * dropped. First-frame Clay_GetElementData miss -> no zone (NOT an assert).
+ * The zone carries NT_UI_DEBUG_FLAG_DISABLED so mode=ALL surfaces it while
+ * mode=HOVER/CAPTURED naturally hide it (those filters don't match it). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_debug_record_disabled_zone: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_debug_record_disabled_zone: id must be non-zero (0 = no widget)");
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_debug_record_disabled_zone: pad_lrtb components must be >= 0");
+
+    /* Zero-overhead fast path. */
+    if (!ctx->debug_recording || ctx->debug_zone_count >= NT_UI_DEBUG_ZONE_CAP) {
+        return;
+    }
+    /* First frame an id is declared has no prev-frame bbox -> no zone to record. */
+    const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
+    if (!d.found) {
+        return;
+    }
+
+    nt_ui_debug_zone_t *z = &ctx->debug_zones[ctx->debug_zone_count++];
+    const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
+    const float pr = (pad_lrtb != NULL) ? (float)pad_lrtb[1] : 0.0F;
+    const float pt = (pad_lrtb != NULL) ? (float)pad_lrtb[2] : 0.0F;
+    const float pb = (pad_lrtb != NULL) ? (float)pad_lrtb[3] : 0.0F;
+    z->id = id;
+    z->visual_l = d.boundingBox.x;
+    z->visual_t = d.boundingBox.y;
+    z->visual_r = d.boundingBox.x + d.boundingBox.width;
+    z->visual_b = d.boundingBox.y + d.boundingBox.height;
+    z->layout_l = z->visual_l - pl;
+    z->layout_t = z->visual_t - pt;
+    z->layout_r = z->visual_r + pr;
+    z->layout_b = z->visual_b + pb;
+    z->center_x = d.boundingBox.x + (d.boundingBox.width * 0.5F);
+    z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
+    const uint32_t depth = ctx->accum_depth;
+    z->accum_depth = depth;
+    for (uint32_t k = 0; k < depth; ++k) {
+        z->accum[k] = ctx->accum_stack[k];
+    }
+    z->state_flags = (uint16_t)NT_UI_DEBUG_FLAG_DISABLED;
+}
 
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_wants_pointer: ctx must be non-NULL");

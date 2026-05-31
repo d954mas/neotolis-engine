@@ -543,8 +543,11 @@ static void frame(void) {
         nt_ui_walk(s_ctx, &target);
 
         // #region debug hit-zone overlay (Phase 56 ext)
+        /* Pass the SAME target used for nt_ui_walk so the debug overlay applies
+         * the same Y-flip (Pitfall 2: walker's Y-flip is render-only -- recorded
+         * zones are Clay Y-down). */
         if (s_dbg_mode != NT_UI_DEBUG_HIT_OFF) {
-            nt_ui_debug_draw_hit_zones(s_ctx, s_dbg_mode, s_font, 14.0F);
+            nt_ui_debug_draw_hit_zones(s_ctx, &target, s_dbg_mode, s_font, 14.0F);
         }
         // #endregion
 

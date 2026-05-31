@@ -60,9 +60,11 @@ static uint32_t color_for_state(uint16_t flags) {
 
 // #region forward-transform a 2D point through one accum level (Clay Y-down)
 /* Mirrors compose_transform_level's per-level math from nt_ui.c
- * (NON-negated rotation, NO Y-flip -- render-only conversions live in the
- * walker). Used to project each corner of the recorded layout bbox through
- * the snapshot accum stack so the overlay quads match the visible widget. */
+ * (NON-negated rotation, NO Y-flip -- those Clay-Y-down conventions are what
+ * was RECORDED at query time). The walker's GL Y-flip is applied ONCE per
+ * emitted point in project_to_world below, AFTER all accum levels have been
+ * walked through. Order matters: doing the flip per-level would re-flip the
+ * rotation pivot. */
 static void apply_level(float *x, float *y, const nt_ui_transform_t *t, float cx, float cy) {
     const float sx = t->scale_x;
     const float sy = t->scale_y;
@@ -74,14 +76,19 @@ static void apply_level(float *x, float *y, const nt_ui_transform_t *t, float cx
     *y = cy + (sr * sx * dx) + (cr * sy * dy) + t->offset_y;
 }
 
-static void forward_through_accum(const nt_ui_debug_zone_t *z, float x, float y, float *out_x, float *out_y) {
+/* Project a Clay-space (layout-bbox) point through:
+ *   1) the recorded accum stack (Clay Y-down, NON-negated rotation), then
+ *   2) the walker's GL Y-flip: world_y = vy + vh - clay_y.
+ * Step (2) makes the overlay land at the EXACT same screen coordinates as
+ * the widgets dispatch_command renders (engine/ui/nt_ui.c). Pitfall 2 fix. */
+static void project_to_world(const nt_ui_debug_zone_t *z, float vy, float vh, float x, float y, float *out_x, float *out_y) {
     float wx = x;
     float wy = y;
     for (uint32_t k = 0; k < z->accum_depth; ++k) {
         apply_level(&wx, &wy, &z->accum[k], z->center_x, z->center_y);
     }
     *out_x = wx;
-    *out_y = wy;
+    *out_y = vy + vh - wy; /* Clay Y-down -> GL Y-up */
 }
 // #endregion
 
@@ -162,8 +169,12 @@ static bool zone_passes_mode(const nt_ui_debug_zone_t *z, nt_ui_debug_hit_mode_t
 // #endregion
 
 // #region label rendering
-/* Compose a short status label for one zone and draw it at the top-left
- * corner of the padded zone (post-transform). font_size <= 0 skips. */
+/* Compose a short status label for one zone and draw it at the GL-Y-up
+ * top-left corner of the padded zone (post-transform + Y-flip). The corner
+ * is the visible TOP of the box in GL coords (largest y of the 4 corners).
+ * Text grows UPWARD from baseline; baseline sits just below the top edge so
+ * the glyph body lands inside the box. font_size <= 0 skips. DISABLED zones
+ * get a "disabl" tag (state filter under mode=ALL). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void draw_zone_label(const nt_ui_debug_zone_t *z, const float corner[2], nt_material_t text_mat, nt_font_t font, float size) {
     if (size <= 0.0F) {
@@ -171,7 +182,9 @@ static void draw_zone_label(const nt_ui_debug_zone_t *z, const float corner[2], 
     }
     char buf[64];
     const char *state_str = "idle";
-    if (z->state_flags & NT_UI_DEBUG_FLAG_PRESSED) {
+    if (z->state_flags & NT_UI_DEBUG_FLAG_DISABLED) {
+        state_str = "disabl";
+    } else if (z->state_flags & NT_UI_DEBUG_FLAG_PRESSED) {
         state_str = "press";
     } else if (z->state_flags & NT_UI_DEBUG_FLAG_CAPTURED) {
         state_str = "capt";
@@ -182,8 +195,11 @@ static void draw_zone_label(const nt_ui_debug_zone_t *z, const float corner[2], 
     if (n <= 0) {
         return;
     }
+    /* GL Y-up: corner[1] is the TOP of the box; subtract size+2 so the
+     * baseline sits inside the box and text grows back up toward the top edge. */
+    const float baseline_y = corner[1] - size - 2.0F;
     const float model[16] = {
-        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, corner[0] + 2.0F, corner[1] + size + 2.0F, 0.0F, 1.0F,
+        1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, corner[0] + 2.0F, baseline_y, 0.0F, 1.0F,
     };
     const float color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
     nt_text_renderer_set_material(text_mat);
@@ -194,8 +210,9 @@ static void draw_zone_label(const nt_ui_debug_zone_t *z, const float corner[2], 
 
 // #region public draw
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, nt_ui_debug_hit_mode_t mode, nt_font_t font, float label_size) {
+void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_ui_debug_hit_mode_t mode, nt_font_t font, float label_size) {
     NT_ASSERT(ctx != NULL && "nt_ui_debug_draw_hit_zones: ctx must be non-NULL");
+    NT_ASSERT(target != NULL && "nt_ui_debug_draw_hit_zones: target must be non-NULL (same one passed to nt_ui_walk)");
     if (mode == NT_UI_DEBUG_HIT_OFF || ctx->debug_zone_count == 0U) {
         return;
     }
@@ -210,6 +227,12 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, nt_ui_debug_hit_mode_t mod
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
     const bool can_label = (ctx->text_material.id != 0U) && (font.id != 0U) && (label_size > 0.0F);
+    /* Walker's logical viewport y/h drives the Y-flip (engine/ui/nt_ui.c
+     * dispatch_command: world_y = vy + vh - sbb.y - sbb.height). The overlay
+     * emits POINTS (corner-by-corner) so the per-point flip is
+     * world_y = vy + vh - clay_y. */
+    const float vy = target->viewport[1];
+    const float vh = target->viewport[3];
 
     for (uint32_t i = 0; i < ctx->debug_zone_count; ++i) {
         const nt_ui_debug_zone_t *z = &ctx->debug_zones[i];
@@ -217,7 +240,7 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, nt_ui_debug_hit_mode_t mod
             continue;
         }
         /* Project four corners of the PADDED layout bbox through the snapshot
-         * accum stack (forward transform mirrors compose_transform_level). */
+         * accum stack + walker's Y-flip so the overlay matches the rendered widget. */
         float pad_corners[4][2] = {
             {z->layout_l, z->layout_t},
             {z->layout_r, z->layout_t},
@@ -225,7 +248,7 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, nt_ui_debug_hit_mode_t mod
             {z->layout_l, z->layout_b},
         };
         for (uint32_t k = 0; k < 4U; ++k) {
-            forward_through_accum(z, pad_corners[k][0], pad_corners[k][1], &pad_corners[k][0], &pad_corners[k][1]);
+            project_to_world(z, vy, vh, pad_corners[k][0], pad_corners[k][1], &pad_corners[k][0], &pad_corners[k][1]);
         }
         /* Filled fill for the padded zone. */
         const uint32_t fill = color_for_state(z->state_flags);
@@ -239,13 +262,26 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, nt_ui_debug_hit_mode_t mod
             {z->visual_l, z->visual_b},
         };
         for (uint32_t k = 0; k < 4U; ++k) {
-            forward_through_accum(z, vis_corners[k][0], vis_corners[k][1], &vis_corners[k][0], &vis_corners[k][1]);
+            project_to_world(z, vy, vh, vis_corners[k][0], vis_corners[k][1], &vis_corners[k][0], &vis_corners[k][1]);
         }
         emit_outline(ctx->atlas, ctx->white_region, vis_corners, 2.0F, DEBUG_OUTLINE_COLOR);
 
-        /* Label near the top-left corner of the padded zone. */
+        /* Label anchored at the GL-Y-up top-left corner of the padded zone.
+         * After Y-flip the SMALLEST layout-y becomes the LARGEST GL-y, so
+         * pick the corner with max y for the label baseline.
+         * Text grows UPWARD from baseline (font convention), so baseline = top_y - 2
+         * places the label just below the top edge of the box, growing up into it. */
         if (can_label) {
-            draw_zone_label(z, pad_corners[0], ctx->text_material, font, label_size);
+            float top_x = pad_corners[0][0];
+            float top_y = pad_corners[0][1];
+            for (uint32_t k = 1; k < 4U; ++k) {
+                if (pad_corners[k][1] > top_y) {
+                    top_y = pad_corners[k][1];
+                    top_x = pad_corners[k][0];
+                }
+            }
+            const float label_corner[2] = {top_x, top_y};
+            draw_zone_label(z, label_corner, ctx->text_material, font, label_size);
         }
     }
     /* Flush so the overlay lands in the current pass, not the next walk's. */

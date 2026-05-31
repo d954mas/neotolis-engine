@@ -22,6 +22,7 @@
 #include "clay.h"
 #include "core/nt_assert.h"
 #include "input/nt_input.h"
+#include "renderers/nt_sprite_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -159,7 +160,8 @@ static void test_debug_draw_zero_zones_safe(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
     nt_ui_end(s_fx.ctx);
     /* No begin in flight, no recorded zones. Drawing must not assert/crash. */
-    nt_ui_debug_draw_hit_zones(s_fx.ctx, NT_UI_DEBUG_HIT_ALL, NT_FONT_INVALID, 0.0F);
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_debug_draw_hit_zones(s_fx.ctx, &target, NT_UI_DEBUG_HIT_ALL, NT_FONT_INVALID, 0.0F);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_debug_get_zone_count(s_fx.ctx));
 }
 
@@ -178,7 +180,8 @@ static void test_debug_draw_off_mode_silent(void) {
     nt_ui_end(s_fx.ctx);
 
     /* OFF mode must not call into the renderers (we only verify no crash). */
-    nt_ui_debug_draw_hit_zones(s_fx.ctx, NT_UI_DEBUG_HIT_OFF, NT_FONT_INVALID, 0.0F);
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_debug_draw_hit_zones(s_fx.ctx, &target, NT_UI_DEBUG_HIT_OFF, NT_FONT_INVALID, 0.0F);
 }
 
 /* ---- Test 6: mode filter HOVER returns only zones with HOVERED flag ---- */
@@ -212,7 +215,137 @@ static void test_debug_mode_filter(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 7: at-cap pushes are silently saturated (no assert) ---- */
+/* ---- Test 7: coordinate-space convention -- recorded zone projects to walker space ----
+ *
+ * This pins the Y-flip convention so the original bug (overlay drawn at
+ * Clay Y-down while sprites went through the walker's GL Y-up) cannot
+ * silently return. Strategy: record a zone with NO accum transform; draw
+ * the overlay; read back the emit vertex positions via the sprite
+ * renderer's NT_TEST_ACCESS probe. Each emitted corner must equal
+ *   world_y = vy + vh - clay_y (Y-flip)
+ *   world_x = clay_x (unchanged)
+ * matching the walker's dispatch_command convention. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_debug_emit_matches_walker_coord_space(void) {
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false);
+    /* Frame 1: declare. Frame 2: record + draw. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
+    declare_btn("btnA", BTN_X, BTN_Y);
+    nt_ui_end(s_fx.ctx);
+
+    nt_ui_debug_set_recording(s_fx.ctx, true);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
+    declare_btn("btnA", BTN_X, BTN_Y);
+    (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    nt_ui_end(s_fx.ctx);
+
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_debug_get_zone_count(s_fx.ctx));
+    /* Sanity: recorded zone is in Clay Y-down (no flip yet). */
+    TEST_ASSERT_TRUE((float)((int)s_fx.ctx->debug_zones[0].visual_t * 2) == BTN_Y * 2.0F);
+
+    /* Draw with a known target. The overlay emits the OUTLINE last per zone
+     * (4 edge quads). The LAST emit is the 4th edge of the visual bbox; the
+     * walker_y per vertex must equal vy + vh - clay_y. */
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_debug_draw_hit_zones(s_fx.ctx, &target, NT_UI_DEBUG_HIT_ALL, NT_FONT_INVALID, 0.0F);
+
+    /* The padded fill quad is emitted FIRST per zone; its 4 verts are at
+     * (visual_l, visual_t), (visual_r, visual_t), (visual_r, visual_b),
+     * (visual_l, visual_b) -- all Y-flipped. After 4 outline edges (each a
+     * thin quad), the LAST emit is one outline edge. We instead use last_emit_*
+     * which captures the MOST RECENT emit -- one outline edge quad. Both fill
+     * and outline pass through project_to_world; check the LAST emit's vertex Y
+     * values fall in the Y-flipped range [vy+vh - visual_b, vy+vh - visual_t]. */
+    const uint32_t v_count = nt_sprite_renderer_test_last_emit_vertex_count();
+    TEST_ASSERT_EQUAL_UINT32(4U, v_count); /* outline edge = thin quad */
+
+    /* All 4 verts of the LAST emit (one outline edge) must have Y inside the
+     * Y-flipped band: GL_top_y = 600 - BTN_Y = 360; GL_bot_y = 600 - (BTN_Y+BTN_H) = 300.
+     * Pixel-shift of +-1 absorbed by the 2px outline thickness. */
+    const float gl_top = 600.0F - BTN_Y;           /* 360 */
+    const float gl_bot = 600.0F - (BTN_Y + BTN_H); /* 300 */
+    for (uint32_t v = 0; v < v_count; ++v) {
+        float pos[3];
+        nt_sprite_renderer_test_last_emit_position(v, pos);
+        const float y = pos[1];
+        TEST_ASSERT_TRUE_MESSAGE(y >= gl_bot - 3.0F && y <= gl_top + 3.0F, "overlay vertex Y out of Y-flipped band (Pitfall 2 regressed?)");
+        /* Y must NOT be in the un-flipped band [BTN_Y, BTN_Y+BTN_H] = [240, 300]
+         * EXCEPT for narrow overlap (300 is in both since 600-300=300). We
+         * specifically reject y around BTN_Y=240 -- that was the bug. */
+        TEST_ASSERT_TRUE_MESSAGE(y < BTN_Y || y > BTN_Y + BTN_H + 3.0F || y >= gl_bot - 3.0F, "overlay vertex landed in Clay Y-down position (Y-flip missing)");
+    }
+}
+
+/* ---- Test 8: disabled-record helper drops a DISABLED zone (overlay surfaces it) ----
+ *
+ * Phase 56 ext extension: nt_ui_button on enabled=false short-circuits the
+ * interaction hit-test. Previously this also short-circuited recording, so
+ * disabled buttons were invisible in the debug overlay. The fix adds an
+ * explicit nt_ui_debug_record_disabled_zone call on the disabled path.
+ * This test exercises the helper directly (same pattern test_nt_ui_debug
+ * uses for nt_ui_get_interaction_padded -- driving the foundation, not the
+ * widget): the helper MUST drop a zone with DISABLED set and must NOT
+ * touch the capture state. Button wiring is regression-protected by
+ * test_nt_ui_button + the disabled-button visual in ui_buttons_demo. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_debug_disabled_helper_records_zone(void) {
+    /* Frame 1: declare so Clay has a prev-frame bbox. */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
+    declare_btn("btn_disabled", BTN_X, BTN_Y);
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: recording ON, pointer ON the disabled button but NO interaction
+     * query (mirrors the button widget's enabled=false short-circuit). Just the
+     * helper call. */
+    nt_ui_debug_set_recording(s_fx.ctx, true);
+    nt_pointer_t f2 = make_pointer(BTN_CX, BTN_CY, true, true); /* over + pressed */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
+    declare_btn("btn_disabled", BTN_X, BTN_Y);
+    const int16_t pad[4] = {12, 12, 12, 12};
+    nt_ui_debug_record_disabled_zone(s_fx.ctx, nt_ui_id("btn_disabled"), pad);
+
+    /* Exactly one zone recorded. */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_debug_get_zone_count(s_fx.ctx));
+    const nt_ui_debug_zone_t *z = &s_fx.ctx->debug_zones[0];
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn_disabled"), z->id);
+
+    /* DISABLED flag set; hover/pressed/captured all CLEAR (the helper records
+     * intent, not state -- it never runs hit-test or capture). */
+    TEST_ASSERT_TRUE((z->state_flags & NT_UI_DEBUG_FLAG_DISABLED) != 0U);
+    TEST_ASSERT_FALSE((z->state_flags & NT_UI_DEBUG_FLAG_HOVERED) != 0U);
+    TEST_ASSERT_FALSE((z->state_flags & NT_UI_DEBUG_FLAG_PRESSED) != 0U);
+    TEST_ASSERT_FALSE((z->state_flags & NT_UI_DEBUG_FLAG_CAPTURED) != 0U);
+
+    /* Padded layout bbox correctly inflated by 12 on every side. */
+    TEST_ASSERT_TRUE(z->layout_l < z->visual_l);
+    TEST_ASSERT_TRUE(z->layout_r > z->visual_r);
+    TEST_ASSERT_TRUE(z->layout_t < z->visual_t);
+    TEST_ASSERT_TRUE(z->layout_b > z->visual_b);
+
+    /* Crucially: NO capture got started. The helper does not touch capture state. */
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->captures[0].active_id);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 9: disabled-record helper is zero-overhead when recording is OFF ---- */
+static void test_debug_disabled_helper_off_no_capture(void) {
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
+    declare_btn("btnA", BTN_X, BTN_Y);
+    nt_ui_end(s_fx.ctx);
+
+    /* Recording OFF (default). Push must be silently dropped. */
+    TEST_ASSERT_FALSE(nt_ui_debug_get_recording(s_fx.ctx));
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
+    declare_btn("btnA", BTN_X, BTN_Y);
+    const int16_t pad[4] = {8, 8, 8, 8};
+    nt_ui_debug_record_disabled_zone(s_fx.ctx, nt_ui_id("btnA"), pad);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_debug_get_zone_count(s_fx.ctx));
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 10: at-cap pushes are silently saturated (no assert) ---- */
 static void test_debug_cap_saturates_silently(void) {
     /* Declare one button, then call get_interaction NT_UI_DEBUG_ZONE_CAP+10 times
      * (re-querying the same id). count must clamp to the cap, no assert. */
@@ -240,6 +373,9 @@ int main(void) {
     RUN_TEST(test_debug_draw_zero_zones_safe);
     RUN_TEST(test_debug_draw_off_mode_silent);
     RUN_TEST(test_debug_mode_filter);
+    RUN_TEST(test_debug_emit_matches_walker_coord_space);
+    RUN_TEST(test_debug_disabled_helper_records_zone);
+    RUN_TEST(test_debug_disabled_helper_off_no_capture);
     RUN_TEST(test_debug_cap_saturates_silently);
     return UNITY_END();
 }
