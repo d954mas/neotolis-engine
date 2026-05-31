@@ -24,7 +24,6 @@
 #include "resource/nt_resource.h"
 #include "stats/nt_stats.h"
 #include "ui/nt_ui.h"
-#include "ui/nt_ui_button.h"
 #include "ui/nt_ui_image.h"
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_panel.h"
@@ -80,44 +79,6 @@ static const nt_ui_label_style_t g_child_label_style = {
     .color = {255.0F, 240.0F, 200.0F, 255.0F},
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
-
-/* Reference button label (centered white text inside the slice9 bg). */
-static const nt_ui_label_style_t g_btn_label_style = {
-    .font_id = 0,
-    .font_size = 18,
-    .color = {255.0F, 255.0F, 255.0F, 255.0F},
-    .align = CLAY_TEXT_ALIGN_CENTER,
-};
-
-/* Icon child = the _white region tinted gold (exercises nt_ui_image tint +
- * opacity inheritance from the button's per-state push_opacity -- WIDGET-05). */
-static const nt_ui_image_style_t g_btn_icon_style = {
-    .color_packed = 0xFF33CCFF, /* gold (0xAABBGGRR) */
-    .origin_x = 0.5F,
-    .origin_y = 0.5F,
-};
-
-/* Reference button styles (Model-D game-side variants, D-56-20). bg_region is
- * left 0 here and patched to the runtime button_blue index at bind time (atlas
- * region is a runtime arg, not baked into a static const -- D-54-02). idle full
- * bright; hover scales up + brightens; pressed scales down + drops 2px; disabled
- * dims via opacity (inherits to children, D-56-13). The EASED and INSTANT
- * variants are identical except transition_speed -- SC #3 side-by-side proof. */
-static const nt_ui_button_style_t g_btn_eased_style = {
-    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
-    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
-    .transition_speed = 12.0F, /* eased */
-};
-
-static const nt_ui_button_style_t g_btn_instant_style = {
-    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
-    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
-    .transition_speed = 0.0F, /* instant snap */
-};
 // #endregion
 
 // #region engine state
@@ -150,20 +111,6 @@ static uint32_t s_panel_blue_idx;
 static uint32_t s_panel_brown_idx;
 static uint32_t s_button_blue_idx;
 static uint32_t s_button_green_idx;
-
-/* Reference-button runtime state: const templates copied + bg_region patched to
- * the real button_blue index once the atlas binds (atlas/region is a runtime arg
- * per D-54-02). Button ids are precomputed once via nt_ui_id inside the first
- * Clay frame (Clay_GetElementId needs the Clay context active). */
-static nt_ui_button_style_t s_btn_eased;
-static nt_ui_button_style_t s_btn_instant;
-static uint32_t s_id_text;
-static uint32_t s_id_text_instant;
-static uint32_t s_id_icon;
-static uint32_t s_id_icontext;
-static uint32_t s_id_disabled;
-static bool s_btn_ids_ready;
-static uint32_t s_click_count;
 
 #define LAYER_BG 0
 #define LAYER_IMG 1
@@ -200,20 +147,6 @@ static void try_bind_resources(void) {
         NT_ASSERT(s_button_blue_idx != NT_ATLAS_INVALID_REGION);
 
         nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, s_white_region_idx);
-
-        /* Patch the reference-button bg_region from the const templates to the
-         * runtime button_blue index (every state -- D-54-02). */
-        s_btn_eased = g_btn_eased_style;
-        s_btn_instant = g_btn_instant_style;
-        s_btn_eased.idle.bg_region = s_button_blue_idx;
-        s_btn_eased.hover.bg_region = s_button_blue_idx;
-        s_btn_eased.pressed.bg_region = s_button_blue_idx;
-        s_btn_eased.disabled.bg_region = s_button_blue_idx;
-        s_btn_instant.idle.bg_region = s_button_blue_idx;
-        s_btn_instant.hover.bg_region = s_button_blue_idx;
-        s_btn_instant.pressed.bg_region = s_button_blue_idx;
-        s_btn_instant.disabled.bg_region = s_button_blue_idx;
-
         s_atlas_bound = true;
         nt_log_info("slice9_demo: atlas bound (5 Kenney regions + white)");
     }
@@ -353,82 +286,6 @@ static void declare_nested_panels(void) {
 }
 // #endregion
 
-// #region declare_reference_buttons
-/* Reference buttons (WIDGET-02/03/04 visual gate + WIDGET-05 verify via the icon
- * child). Layout/sizing/gap are Clay's job (D-56-11); the per-state visual comes
- * from s_btn_eased / s_btn_instant. ids precomputed once on the first Clay frame.
- * Row: text(eased) | text(instant) | icon-only(eased) | icon+text(eased) | disabled. */
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void declare_reference_buttons(void) {
-    if (!s_btn_ids_ready) {
-        s_id_text = nt_ui_id("btn_text");
-        s_id_text_instant = nt_ui_id("btn_text_instant");
-        s_id_icon = nt_ui_id("btn_icon");
-        s_id_icontext = nt_ui_id("btn_icontext");
-        s_id_disabled = nt_ui_id("btn_disabled");
-        s_btn_ids_ready = true;
-    }
-
-    CLAY({.id = CLAY_ID("ref-btn-title"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Reference buttons: hover / press; eased vs instant; disabled; icon+text", &g_status_style);
-    }
-
-    CLAY({.id = CLAY_ID("ref-btn-row"),
-          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 16, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-
-        /* TEXT-ONLY, EASED (leaf sugar). Click -> increment the counter. */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(140), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            if (nt_ui_button(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_text, s_atlas_handle, "Save", &g_btn_label_style, &s_btn_eased, true)) {
-                s_click_count++;
-            }
-        }
-
-        /* TEXT-ONLY, INSTANT (same look, transition_speed 0 -- snaps on hover/press). */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(140), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            if (nt_ui_button(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_text_instant, s_atlas_handle, "Snap", &g_btn_label_style, &s_btn_instant, true)) {
-                s_click_count++;
-            }
-        }
-
-        /* ICON-ONLY, EASED. The icon child IS the WIDGET-05 verification: nt_ui_image
-         * renders the tinted _white region; per-state opacity inherits to it (D-56-13). */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(72), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icon, s_atlas_handle, &s_btn_eased, true);
-            {
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(24), CLAY_SIZING_FIXED(24)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_white_region_idx, &g_btn_icon_style); }
-            }
-            if (nt_ui_button_end(s_ctx)) {
-                s_click_count++;
-            }
-        }
-
-        /* ICON+TEXT, EASED. Icon child then label child, ordered LEFT_TO_RIGHT with
-         * a gap (WIDGET-03 ordering + WIDGET-05 icon render). */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(160), CLAY_SIZING_FIXED(56)},
-                         .padding = CLAY_PADDING_ALL(8),
-                         .layoutDirection = CLAY_LEFT_TO_RIGHT,
-                         .childGap = 8,
-                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icontext, s_atlas_handle, &s_btn_eased, true);
-            {
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(20), CLAY_SIZING_FIXED(20)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_white_region_idx, &g_btn_icon_style); }
-                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", &g_btn_label_style);
-            }
-            if (nt_ui_button_end(s_ctx)) {
-                s_click_count++;
-            }
-        }
-
-        /* DISABLED (enabled=false): dimmed, ignores hover, never increments. */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(140), CLAY_SIZING_FIXED(56)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            if (nt_ui_button(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_disabled, s_atlas_handle, "Locked", &g_btn_label_style, &s_btn_eased, false)) {
-                s_click_count++; /* unreachable while disabled -- proves the gate */
-            }
-        }
-    }
-}
-// #endregion
-
 // #region frame
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void frame(void) {
@@ -546,9 +403,9 @@ static void frame(void) {
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &mouse_logical, 1);
 
         // #region status line
-        char status_text[160];
-        (void)snprintf(status_text, sizeof status_text, "S:%s  O:%s  P:%s  R:%s   [A]all [D]debug   clicks:%u  ui_pointer:%s", s_anim_scale ? "on" : "off", s_anim_opacity ? "on" : "off",
-                       s_anim_position ? "on" : "off", s_anim_rotation ? "on" : "off", s_click_count, nt_ui_wants_pointer(s_ctx) ? "yes" : "no");
+        char status_text[128];
+        (void)snprintf(status_text, sizeof status_text, "S:%s  O:%s  P:%s  R:%s   [A]toggle all  [D]debug", s_anim_scale ? "on" : "off", s_anim_opacity ? "on" : "off", s_anim_position ? "on" : "off",
+                       s_anim_rotation ? "on" : "off");
         // #endregion
 
         // #region clay declaration
@@ -561,7 +418,6 @@ static void frame(void) {
               .backgroundColor = {18.0F, 18.0F, 22.0F, 255.0F}}) {
             nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), status_text, &g_status_style);
             declare_static_panels();
-            declare_reference_buttons();
             declare_animated_panel();
             declare_nested_panels();
         }
