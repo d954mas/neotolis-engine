@@ -12,6 +12,38 @@
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_anim.h"
 
+/* Phase 56 ext: hit-zone debug overlay (engine/ui/nt_ui_debug.{h,c}).
+ * Fixed compile-time cap matches the anim cache budget shape; at-cap is
+ * silently saturated (no assertion -- the overlay is a verification aid,
+ * not a correctness path). */
+#ifndef NT_UI_DEBUG_ZONE_CAP
+#define NT_UI_DEBUG_ZONE_CAP 64
+#endif
+
+typedef struct {
+    uint32_t id;
+    /* Padded layout-space bbox (l/t/r/b), Clay Y-down. l<r, t<b. */
+    float layout_l, layout_t, layout_r, layout_b;
+    /* Exact visual bbox (unpadded), so the overlay can outline padding distinctly. */
+    float visual_l, visual_t, visual_r, visual_b;
+    /* Snapshot of the declaration-time transform stack at query time. */
+    nt_ui_transform_t accum[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
+    uint32_t accum_depth;
+    /* Center of the VISUAL bbox -- used by both rotation and inverse-affine.
+     * Captured here so drawing matches the hit-test math exactly. */
+    float center_x, center_y;
+    /* bit0 hovered, bit1 pressed (captured this frame by primary), bit2 captured,
+     * bit3 disabled (heuristic: zone recorded for an id that is currently captured
+     * but reports no hover/press -> a state filter; the runtime cannot infer
+     * disabled vs idle at the hit-test layer). */
+    uint16_t state_flags;
+} nt_ui_debug_zone_t;
+
+#define NT_UI_DEBUG_FLAG_HOVERED (1U << 0)
+#define NT_UI_DEBUG_FLAG_PRESSED (1U << 1)
+#define NT_UI_DEBUG_FLAG_CAPTURED (1U << 2)
+#define NT_UI_DEBUG_FLAG_DISABLED (1U << 3)
+
 /* Side-channel transform/opacity marker (not a Clay element). */
 typedef struct {
     uint8_t type;
@@ -100,6 +132,13 @@ struct nt_ui_context {
     nt_font_t fonts[NT_UI_MAX_FONTS];
 
     nt_ui_anim_interaction_t anim[NT_UI_ANIM_SLOTS]; /* Phase 56 direct-mapped state-anim cache (D-56-15) */
+
+    /* Phase 56 ext: hit-zone debug overlay. Recording is OFF by default --
+     * production overhead is zero. Game opts in via nt_ui_debug_set_recording.
+     * Zones cleared to 0 each nt_ui_begin. At-cap pushes are silently dropped. */
+    nt_ui_debug_zone_t debug_zones[NT_UI_DEBUG_ZONE_CAP];
+    uint32_t debug_zone_count;
+    bool debug_recording;
 
     Clay_Arena clay_arena;
 };

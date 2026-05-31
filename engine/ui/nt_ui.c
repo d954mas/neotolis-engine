@@ -255,6 +255,11 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     }
     ctx->pointer_over_any = false;
 
+    /* Phase 56 ext: hit-zone debug overlay recording is per-frame; clear the
+     * zone buffer each begin so stale zones never bleed across frames. The
+     * debug_recording flag persists (it's a user toggle). */
+    ctx->debug_zone_count = 0U;
+
     /* v1.8 drives the primary pointer; Clay is fed only this one. */
     const nt_pointer_t *primary = &pointers[0];
 
@@ -1880,6 +1885,45 @@ nt_ui_interaction_t nt_ui_get_interaction_padded(nt_ui_context_t *ctx, uint32_t 
         out.pos[1] = p->y;
         out.pointer_id = p->id;
     }
+
+    /* Phase 56 ext: hit-zone overlay recording. Gated by debug_recording so
+     * production overhead is zero. At-cap is silently dropped (overlay is a
+     * verification aid, not correctness). */
+    if (ctx->debug_recording && ctx->debug_zone_count < NT_UI_DEBUG_ZONE_CAP) {
+        nt_ui_debug_zone_t *z = &ctx->debug_zones[ctx->debug_zone_count++];
+        const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
+        const float pr = (pad_lrtb != NULL) ? (float)pad_lrtb[1] : 0.0F;
+        const float pt = (pad_lrtb != NULL) ? (float)pad_lrtb[2] : 0.0F;
+        const float pb = (pad_lrtb != NULL) ? (float)pad_lrtb[3] : 0.0F;
+        z->id = id;
+        z->visual_l = d.boundingBox.x;
+        z->visual_t = d.boundingBox.y;
+        z->visual_r = d.boundingBox.x + d.boundingBox.width;
+        z->visual_b = d.boundingBox.y + d.boundingBox.height;
+        z->layout_l = z->visual_l - pl;
+        z->layout_t = z->visual_t - pt;
+        z->layout_r = z->visual_r + pr;
+        z->layout_b = z->visual_b + pb;
+        z->center_x = d.boundingBox.x + (d.boundingBox.width * 0.5F);
+        z->center_y = d.boundingBox.y + (d.boundingBox.height * 0.5F);
+        const uint32_t depth = ctx->accum_depth;
+        z->accum_depth = depth;
+        for (uint32_t k = 0; k < depth; ++k) {
+            z->accum[k] = ctx->accum_stack[k];
+        }
+        uint16_t flags = 0U;
+        if (out.hovered) {
+            flags |= (uint16_t)NT_UI_DEBUG_FLAG_HOVERED;
+        }
+        if (out.pressed) {
+            flags |= (uint16_t)NT_UI_DEBUG_FLAG_PRESSED;
+        }
+        if (cap->active_id == id) {
+            flags |= (uint16_t)NT_UI_DEBUG_FLAG_CAPTURED;
+        }
+        z->state_flags = flags;
+    }
+
     return out;
 }
 

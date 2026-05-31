@@ -49,6 +49,8 @@ nt_add_module(nt_ui LOG_DOMAIN "ui"
     nt_ui_anim.h
     nt_ui_button.c
     nt_ui_button.h
+    nt_ui_debug.c
+    nt_ui_debug.h
 )
 
 # Clay vendored header -- PUBLIC include. Clay is part of the engine's
