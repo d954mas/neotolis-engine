@@ -10,7 +10,6 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
-#include "ui/nt_ui_debug.h"
 #include "ui/nt_ui_internal.h"
 
 /* Phase 56 ext (CHUNK E): nt_ui_inspector.
@@ -21,7 +20,12 @@
  * arrays directly (1 read-only loop) and render our own sidebar via the
  * sprite + text renderers, mirroring nt_ui_debug_draw_hit_zones's binding
  * contract. Sidebar layout, widget-type column, and hit-zone column are
- * 100% ours. Clay-internal dependency surface is one cursor iteration. */
+ * 100% ours. Clay-internal dependency surface is one cursor iteration.
+ *
+ * Scope: SIDEBAR ONLY. The inspector does NOT draw the hit-zone overlay --
+ * the game owns that call explicitly (nt_ui_debug_draw_hit_zones). This
+ * keeps the two debug aids composable + matches AGENTS.md "explicit over
+ * implicit": no hidden side-channel call from the inspector. */
 
 // #region toggle + getters
 void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on) {
@@ -129,11 +133,7 @@ void nt_ui_inspector_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt
         return;
     }
 
-    /* === Step 1: hit-zone overlay (REUSE existing helper, Y-flip lives there).
-     * Inspector implies overlay -- the F3 wiring auto-flips debug_recording. */
-    nt_ui_debug_draw_hit_zones(ctx, target, NT_UI_DEBUG_HIT_HOVER, font, label_size);
-
-    /* === Step 2: sidebar background pinned at the right edge in world space.
+    /* === Step 1: sidebar background pinned at the right edge in world space.
      * target->viewport[2/3] are the LOGICAL width/height; we draw in world
      * coords identical to dispatch_command's Y-flip (vy + vh - clay_y), so
      * the sidebar lives at x in [vw - SIDEBAR_W, vw] and y in [0, vh]. */
@@ -149,7 +149,7 @@ void nt_ui_inspector_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt
     /* Header strip */
     emit_rect(ctx->atlas, ctx->white_region, side_x, side_y_top, SIDEBAR_W, HEADER_H, HEADER_COLOR);
 
-    /* === Step 3: walk Clay's layout elements via the internal accessor
+    /* === Step 2: walk Clay's layout elements via the internal accessor
      * (Clay_Context internals live in nt_ui.c -- inspector stays Clay-agnostic). */
     const int32_t total = nt_ui_internal_get_layout_element_count(ctx);
 

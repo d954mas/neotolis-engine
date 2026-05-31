@@ -228,6 +228,53 @@ static void test_inspector_many_widgets_safe(void) {
     nt_ui_inspector_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F); /* must not crash */
 }
 
+/* ---- Test 12: inspector_draw is SIDEBAR-ONLY -- does not touch the
+ *      recorded hit-zone buffer (no double-draw / no consume). Pins the
+ *      decoupling between nt_ui_inspector and nt_ui_debug_draw_hit_zones
+ *      (review §1 fix: inspector must not call the overlay internally). */
+static void test_inspector_does_not_double_draw_zones(void) {
+    /* Arrange: record one hit-zone via a button under the mouse. */
+    nt_ui_debug_set_recording(s_fx.ctx, true);
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    /* Frame 1: declare so Clay stores the bbox in its persistent hashmap.
+     * Without a prior frame the bbox is unknown and the zone won't record. */
+    nt_pointer_t mouse = make_pointer(100.0F, 100.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("zbtn"), s_fx.atlas.handle, &s_btn_style, true);
+        nt_ui_label(s_fx.ctx, NULL, "Z", &s_label_style);
+        (void)nt_ui_button_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: the button bbox is known; the recording path inside
+     * nt_ui_get_interaction_padded pushes one zone. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("zbtn"), s_fx.atlas.handle, &s_btn_style, true);
+        nt_ui_label(s_fx.ctx, NULL, "Z", &s_label_style);
+        (void)nt_ui_button_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    const uint32_t zone_count_before = nt_ui_debug_get_zone_count(s_fx.ctx);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, zone_count_before);
+    /* Snapshot zone[0] -- inspector must not mutate the zone buffer. */
+    const nt_ui_debug_zone_t z_before = s_fx.ctx->debug_zones[0];
+
+    /* Act: draw the inspector. */
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_inspector_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
+
+    /* Assert: zone count is unchanged (inspector neither adds nor drops
+     * zones), and zone[0] content is byte-identical (inspector is a pure
+     * reader). This pins "inspector draws sidebar only". */
+    const uint32_t zone_count_after = nt_ui_debug_get_zone_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32(zone_count_before, zone_count_after);
+    TEST_ASSERT_EQUAL_MEMORY(&z_before, &s_fx.ctx->debug_zones[0], sizeof z_before);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_registry_register_lookup);
@@ -241,5 +288,6 @@ int main(void) {
     RUN_TEST(test_inspector_inactive_no_crash);
     RUN_TEST(test_inspector_zero_widgets_safe);
     RUN_TEST(test_inspector_many_widgets_safe);
+    RUN_TEST(test_inspector_does_not_double_draw_zones);
     return UNITY_END();
 }

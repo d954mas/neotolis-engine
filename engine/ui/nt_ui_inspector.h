@@ -17,11 +17,12 @@
  *   1) Widget-type column from nt_ui_widget_lookup (button/image/panel/group);
  *      labels render as "label(text)"; plain Clay elements as "(plain)".
  *   2) Hit-zone column: for elements whose id is in debug_zones (i.e. the
- *      game queried interaction on them), show padded bbox + the padding
- *      {l,r,t,b}; the existing nt_ui_debug_draw_hit_zones (with the f948916
- *      Y-flip fix) is called automatically -- inspector implies overlay.
- *   3) The Y-flip projection is REUSED from nt_ui_debug (same target arg
- *      contract -- pass the same target as nt_ui_walk).
+ *      game queried interaction on them), the row shows a "has hit-zone"
+ *      badge + the padded bbox dimensions. The inspector draws SIDEBAR
+ *      ONLY; the game calls nt_ui_debug_draw_hit_zones explicitly for the
+ *      overlay. The two debug aids are independent and composable.
+ *   3) The sidebar uses world-space (GL Y-up) emit -- same target contract
+ *      as nt_ui_walk.
  *
  * Public API:
  *   set_active / is_active: persistent toggle (zero overhead when off).
@@ -41,16 +42,17 @@
 typedef struct nt_ui_context nt_ui_context_t;
 
 /* Toggle the inspector. Default off (no per-frame tree walk, no draws).
- * When on, nt_ui_inspector_draw renders the sidebar + invokes the
- * hit-zone overlay; the game still owns calling _draw each frame. */
+ * When on, nt_ui_inspector_draw renders the SIDEBAR ONLY. The hit-zone
+ * overlay is independent -- the game calls nt_ui_debug_draw_hit_zones
+ * explicitly when it wants zones drawn. */
 void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on);
 bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx);
 
-/* Render the inspector overlay (call AFTER nt_ui_walk, BEFORE end_pass).
+/* Render the inspector sidebar (call AFTER nt_ui_walk, BEFORE end_pass).
  * `target` MUST be the same nt_ui_target_t passed to nt_ui_walk -- the
- * hit-zone overlay applies the walker's GL Y-flip to recorded zones (the
- * Pitfall 2 fix from commit f948916). font + label_size are for the sidebar
- * text + zone labels; size <= 0 skips text (rects only).
+ * sidebar emits in world space using the target's viewport for placement.
+ * font + label_size are for the sidebar text; size <= 0 skips text
+ * (rects only).
  *
  * Silent skip when inactive, or when ctx has no atlas/sprite_material bound.
  * Same per-call binding contract as nt_ui_debug_draw_hit_zones. */
