@@ -246,6 +246,109 @@ static void test_hittest_padded_with_rotation(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* ---- Test 6+: combinatorial worst case -- padded + offset + anisotropic
+ *      scale + rotation in ONE frame. Each variable is isolated in earlier
+ *      tests; this one pins their composition (the demo geometry hits all
+ *      four). A future change to compose_transform_level / project_to_world
+ *      that silently breaks one layer would be caught here. ----
+ *
+ * Setup (uses the existing asymmetric BBOX = 150,80,200,60 -> cx=250, cy=110):
+ *   - Transform: offset (OFFSET_X=10, OFFSET_Y=-25), scale (1.4, 0.7) anisotropic,
+ *     rotation 25 deg -- DIFFERENT from the file-wide ROT_RAD so a constant
+ *     bleed across tests is caught.
+ *   - Padding: {l=8, r=16, t=4, b=12} asymmetric (no axis symmetric).
+ *
+ * Probe points (layout space):
+ *   (A) (146, 78) -- inside padded box (142,76,366,152), OUTSIDE unpadded (150,80,350,140).
+ *                    Forward through the new transform -> HIT padded, MISS unpadded.
+ *   (B) (100, 30) -- outside both boxes (100<142 left, 30<76 top).
+ *                    Forward through the new transform -> MISS both. */
+#define COMBO_ROT_DEG 25.0F
+#define COMBO_ROT_RAD (COMBO_ROT_DEG * 3.14159265358979323846F / 180.0F)
+#define COMBO_SCALE_X 1.4F
+#define COMBO_SCALE_Y 0.7F
+#define COMBO_OFFSET_X 10.0F
+#define COMBO_OFFSET_Y (-25.0F)
+
+/* File-local forward_xform is parameterized on the file-wide constants. The
+ * combinatorial test needs its own parameter set, so duplicate the math with
+ * COMBO_* substitutions. Keep the math byte-identical to compose_transform_level. */
+static void forward_xform_combo(float x, float y, float cx, float cy, float *out_x, float *out_y) {
+    const float sx = COMBO_SCALE_X;
+    const float sy = COMBO_SCALE_Y;
+    const float cr = cosf(COMBO_ROT_RAD);
+    const float sr = sinf(COMBO_ROT_RAD);
+    const float la = cr * sx;
+    const float lb = -(sr * sy);
+    const float lc = sr * sx;
+    const float ld = cr * sy;
+    const float ltx = cx - (la * cx) - (lb * cy) + COMBO_OFFSET_X;
+    const float lty = cy - (lc * cx) - (ld * cy) + COMBO_OFFSET_Y;
+    *out_x = (x * la) + (y * lb) + ltx;
+    *out_y = (x * lc) + (y * ld) + lty;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_hittest_padded_combinatorial_worst_case(void) {
+    declare_bbox_frame();
+
+    const float cx = BBOX_X + (BBOX_W * 0.5F); /* 250 */
+    const float cy = BBOX_Y + (BBOX_H * 0.5F); /* 110 */
+
+    nt_ui_transform_t t = {.offset_x = COMBO_OFFSET_X, .offset_y = COMBO_OFFSET_Y, .rotation = COMBO_ROT_RAD, .scale_x = COMBO_SCALE_X, .scale_y = COMBO_SCALE_Y};
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    assert_bbox_as_declared();
+    nt_ui_push_transform(s_fx.ctx, &t);
+    const uint32_t id = nt_ui_id("htbtn");
+
+    /* Asymmetric padding -- no two components equal, so an axis swap would
+     * scramble the result deterministically. */
+    const int16_t pad_combo[4] = {8, 16, 4, 12};
+
+    /* (A) layout (146,78): outside unpadded (146 < x=150), inside padded
+     *     (142 <= 146 <= 366 AND 76 <= 78 <= 152). Forward-transform must
+     *     land in the rotated/scaled/translated padded quad but NOT the
+     *     unpadded one. Hand-checked against forward_xform_combo math. */
+    {
+        const float layout_x = 146.0F;
+        const float layout_y = 78.0F;
+        /* Sanity-check layout-space classification before the transform. */
+        const bool in_unpadded = (layout_x >= BBOX_X) && (layout_x <= BBOX_X + BBOX_W) && (layout_y >= BBOX_Y) && (layout_y <= BBOX_Y + BBOX_H);
+        const bool in_padded = (layout_x >= BBOX_X - 8.0F) && (layout_x <= BBOX_X + BBOX_W + 16.0F) && (layout_y >= BBOX_Y - 4.0F) && (layout_y <= BBOX_Y + BBOX_H + 12.0F);
+        TEST_ASSERT_FALSE_MESSAGE(in_unpadded, "(A) layout-space sanity: must be outside unpadded bbox");
+        TEST_ASSERT_TRUE_MESSAGE(in_padded, "(A) layout-space sanity: must be inside padded bbox");
+
+        float world_x = 0;
+        float world_y = 0;
+        forward_xform_combo(layout_x, layout_y, cx, cy, &world_x, &world_y);
+
+        TEST_ASSERT_FALSE_MESSAGE(nt_ui_test_hit(s_fx.ctx, id, world_x, world_y), "(A) combinatorial: inside padded only -> MUST be outside unpadded hit zone");
+        TEST_ASSERT_TRUE_MESSAGE(nt_ui_test_hit_padded(s_fx.ctx, id, world_x, world_y, pad_combo), "(A) combinatorial: inside padded only -> MUST be inside padded hit zone");
+    }
+
+    /* (B) layout (100,30): outside both (100 < 142 left edge of padded,
+     *     30 < 76 top edge of padded). Forward-transform must land outside
+     *     the rotated/scaled/translated padded quad too -- pins that the
+     *     hit-test does NOT erroneously include points far outside. */
+    {
+        const float layout_x = 100.0F;
+        const float layout_y = 30.0F;
+        const bool in_padded = (layout_x >= BBOX_X - 8.0F) && (layout_x <= BBOX_X + BBOX_W + 16.0F) && (layout_y >= BBOX_Y - 4.0F) && (layout_y <= BBOX_Y + BBOX_H + 12.0F);
+        TEST_ASSERT_FALSE_MESSAGE(in_padded, "(B) layout-space sanity: must be outside padded bbox");
+
+        float world_x = 0;
+        float world_y = 0;
+        forward_xform_combo(layout_x, layout_y, cx, cy, &world_x, &world_y);
+
+        TEST_ASSERT_FALSE_MESSAGE(nt_ui_test_hit(s_fx.ctx, id, world_x, world_y), "(B) combinatorial: outside both -> MUST be outside unpadded hit zone");
+        TEST_ASSERT_FALSE_MESSAGE(nt_ui_test_hit_padded(s_fx.ctx, id, world_x, world_y, pad_combo), "(B) combinatorial: outside both -> MUST be outside padded hit zone");
+    }
+
+    nt_ui_pop_transform(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+}
+
 /* ---- Test 6: zero-padding {0,0,0,0} is identical to unpadded ---- */
 static void test_hittest_padded_zero_equals_unpadded(void) {
     declare_bbox_frame();
@@ -301,6 +404,7 @@ int main(void) {
     /* Phase 56 ext: touch-target padding (nt_ui_get_interaction_padded). */
     RUN_TEST(test_hittest_padded_asymmetric);
     RUN_TEST(test_hittest_padded_with_rotation);
+    RUN_TEST(test_hittest_padded_combinatorial_worst_case);
     RUN_TEST(test_hittest_padded_zero_equals_unpadded);
     return UNITY_END();
 }
