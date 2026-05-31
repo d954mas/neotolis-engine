@@ -402,6 +402,15 @@
             "webRoot": "${workspaceFolder}/build/examples/slice9_demo/wasm-release-paired",
             "preLaunchTask": "Build & Serve slice9_demo (release)",
             "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Debug Desktop ui_buttons_demo",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/ui_buttons_demo/native-debug/ui_buttons_demo.exe",
+            "cwd": "${workspaceFolder}/build/examples/ui_buttons_demo/native-debug",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build ui_buttons_demo (debug)"
         }
     ]
 }
