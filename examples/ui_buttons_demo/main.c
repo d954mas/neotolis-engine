@@ -1,21 +1,31 @@
 /* UI Buttons Demo -- WIDGET-02/03/04 visual gate + WIDGET-05 verify +
  * Phase 56 ext: transform-aware hit-test proof (D-56-07) + touch-target
- * padding (hit_padding_lrtb) + nt_ui_debug hit-zone overlay.
+ * padding (hit_padding_lrtb) + nt_ui_debug hit-zone overlay + Clay built-in
+ * debug view (D) + nt_ui_inspector (F3).
  *
- * Renders a row of reference buttons (text/icon/icon+text/disabled, eased
- * vs instant) at 180x72 with childGap 24 so they are legible on HiDPI
- * Windows. Per-button click counters print to the status line. Buttons run
- * inside a runtime-controllable transform (arrow keys translate, PageUp/Down
- * scale, Q/E rotate, R reset) -- the row visibly moves while remaining
- * clickable, proving the inverse-affine hit-test (D-56-07).
+ * Renders a 2 x 3 GRID of LABELED button variants -- each cell has the
+ * button (320x120) + a description text label above it -- so the user can
+ * see at a glance what each variant demonstrates:
  *
- * Touch-target padding: the EASED button has hit_padding_lrtb = {16,16,16,16}
- * so its hit zone extends 16 px past the visual rect on every side. The
- * INSTANT button keeps padding 0. Toggle the debug overlay (F1) and the
- * filled padded zone vs the outlined visual bbox become visible side-by-side.
+ *   (a) STANDARD (eased)              -- baseline text button, transition_speed=12
+ *   (b) SCALE (exaggerated 0.80<->1.20) -- per-state scale dramatized
+ *   (c) VISUAL SWAP (blue<->green)    -- bg_region swaps per state (D-56-11)
+ *   (d) ICON ONLY                      -- nt_ui_image gold-tinted _white child
+ *   (e) ICON + TEXT                    -- image + label inside one button
+ *   (f) DISABLED (enabled=false)      -- short-circuit gate
+ *
+ * Per-button click counters print to the status line.
+ * Variants (a)(b)(c)(f) ship +16 px touch padding; (d)(e) have no padding
+ * (so the visual proof of the padded zone vs the visual bbox stays clear).
+ *
+ * Buttons run inside a runtime-controllable transform (arrow keys translate,
+ * PageUp/Down scale, Q/E rotate, R reset) -- the grid visibly moves while
+ * remaining clickable, proving the inverse-affine hit-test (D-56-07).
  *
  * Keys:
  *   Esc      quit (native)
+ *   D        toggle Clay's built-in debug overlay
+ *   F3       toggle nt_ui_inspector (engine widget tree + hit-zones)
  *   F1       toggle nt_ui_debug recording on/off
  *   F2       cycle debug mode: OFF -> HOVER -> CAPTURED -> ALL -> OFF
  *   arrows   translate transform (+- 8 px / frame)
@@ -48,6 +58,7 @@
 #include "ui/nt_ui_button.h"
 #include "ui/nt_ui_debug.h"
 #include "ui/nt_ui_image.h"
+#include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_scale.h"
 #include "window/nt_window.h"
@@ -72,30 +83,40 @@
 // #region styles
 static const nt_ui_label_style_t g_status_style = {
     .font_id = 0,
-    .font_size = 18,
+    .font_size = 24,
     .color = {200.0F, 200.0F, 210.0F, 255.0F},
 };
 
 static const nt_ui_label_style_t g_help_style = {
     .font_id = 0,
-    .font_size = 14,
+    .font_size = 18,
     .color = {160.0F, 170.0F, 180.0F, 255.0F},
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 
-static const nt_ui_label_style_t g_title_style = {
+/* Per-cell variant title (one line above each button). Bigger than help/status
+ * so the user can tell variants apart at a glance ("чтобы я понимал где какая"). */
+static const nt_ui_label_style_t g_cell_title_style = {
     .font_id = 0,
-    .font_size = 24,
+    .font_size = 26,
     .color = {255.0F, 255.0F, 255.0F, 255.0F},
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 
+/* Sub-line under the title for padding annotation. */
+static const nt_ui_label_style_t g_cell_sub_style = {
+    .font_id = 0,
+    .font_size = 16,
+    .color = {180.0F, 180.0F, 190.0F, 255.0F},
+    .align = CLAY_TEXT_ALIGN_CENTER,
+};
+
 /* Reference button label (centered white text inside the slice9 bg). Bumped
- * to 26 px so the labels are legible at the bigger 180x72 button size on
- * HiDPI Windows -- the original 18 px was unreadable. */
+ * to 34 px so the labels are legible at the bigger 320x120 button size on
+ * HiDPI Windows. */
 static const nt_ui_label_style_t g_btn_label_style = {
     .font_id = 0,
-    .font_size = 26,
+    .font_size = 34,
     .color = {255.0F, 255.0F, 255.0F, 255.0F},
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
@@ -107,29 +128,51 @@ static const nt_ui_image_style_t g_btn_icon_style = {
     .origin_x = 0.5F,
     .origin_y = 0.5F,
 };
+// #endregion
 
-/* Reference button styles (Model-D game-side variants, D-56-20). bg_region is
- * left 0 here and patched to the runtime button_blue index at bind time (atlas
- * region is a runtime arg, not baked into a static const -- D-54-02). idle full
- * bright; hover scales up; pressed scales down + drops 2px; disabled dims via
- * opacity (inherits to children, D-56-13). The EASED and INSTANT variants are
- * identical except transition_speed -- SC #3 side-by-side proof. */
-static const nt_ui_button_style_t g_btn_eased_style = {
+// #region button style templates
+/* Variant (a) STANDARD: eased baseline. Same shape as the old g_btn_eased_style
+ * from the previous round; transition_speed 12, +16 hit padding. */
+static const nt_ui_button_style_t g_btn_standard_style = {
     .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
     .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
     .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
     .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
-    .transition_speed = 12.0F,            /* eased */
-    .hit_padding_lrtb = {16, 16, 16, 16}, /* Phase 56 ext: touch-target inflation */
+    .transition_speed = 12.0F,
+    .hit_padding_lrtb = {16, 16, 16, 16},
 };
 
-static const nt_ui_button_style_t g_btn_instant_style = {
+/* Variant (b) SCALE: exaggerated scale per state -- pressed 0.80, hover 1.20. */
+static const nt_ui_button_style_t g_btn_scale_style = {
+    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.20F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.80F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
+    .transition_speed = 12.0F,
+    .hit_padding_lrtb = {16, 16, 16, 16},
+};
+
+/* Variant (c) VISUAL SWAP: bg_region swaps per state -- idle/disabled = blue,
+ * hover/pressed = green; pressed tints green darker (0xFFCCCCCC). Patched at
+ * runtime with real button_blue/green indices (bg_region 0 in const = sentinel). */
+static const nt_ui_button_style_t g_btn_swap_style = {
+    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .pressed = {.bg_region = 0, .bg_tint = 0xFFCCCCCC, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
+    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
+    .transition_speed = 12.0F,
+    .hit_padding_lrtb = {16, 16, 16, 16},
+};
+
+/* Variant (d)(e) ICON / ICON+TEXT: same shape as STANDARD but NO touch padding,
+ * so the difference visual=hit (no pad) vs visual<hit (pad) is plain. */
+static const nt_ui_button_style_t g_btn_nopad_style = {
     .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
     .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
     .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
     .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
-    .transition_speed = 0.0F,         /* instant snap */
-    .hit_padding_lrtb = {0, 0, 0, 0}, /* no padding (visual = hit) */
+    .transition_speed = 12.0F,
+    .hit_padding_lrtb = {0, 0, 0, 0},
 };
 // #endregion
 
@@ -159,48 +202,50 @@ static bool s_atlas_bound;
 static bool s_font_bound;
 static uint32_t s_white_region_idx;
 static uint32_t s_button_blue_idx;
+static uint32_t s_button_green_idx;
 
-/* Reference-button runtime state: const templates copied + bg_region patched to
- * the real button_blue index once the atlas binds (atlas/region is a runtime arg
- * per D-54-02). Button ids are precomputed once via nt_ui_id inside the first
- * Clay frame (Clay_GetElementId needs the Clay context active). */
-static nt_ui_button_style_t s_btn_eased;
-static nt_ui_button_style_t s_btn_instant;
-static uint32_t s_id_text;
-static uint32_t s_id_text_instant;
+/* Reference-button runtime styles: const templates copied + bg_region patched
+ * to the real atlas indices once the atlas binds (D-54-02). Button ids
+ * precomputed once via nt_ui_id inside the first Clay frame. */
+static nt_ui_button_style_t s_btn_standard;
+static nt_ui_button_style_t s_btn_scale;
+static nt_ui_button_style_t s_btn_swap;
+static nt_ui_button_style_t s_btn_nopad;
+static uint32_t s_id_std;
+static uint32_t s_id_scale;
+static uint32_t s_id_swap;
 static uint32_t s_id_icon;
 static uint32_t s_id_icontext;
 static uint32_t s_id_disabled;
 static bool s_btn_ids_ready;
-/* Per-button click counters (proves SC #2 click-once on individual buttons). */
-static uint32_t s_clicks_text;
-static uint32_t s_clicks_text_instant;
+/* Per-variant click counters. */
+static uint32_t s_clicks_std;
+static uint32_t s_clicks_scale;
+static uint32_t s_clicks_swap;
 static uint32_t s_clicks_icon;
 static uint32_t s_clicks_icontext;
 static uint32_t s_clicks_disabled; /* should always stay 0 */
 
-/* Phase 56 ext: runtime transform around the reference button row. Driven by
- * arrows/PageUp/Down/Q/E/R so the user can rotate the row 30 deg and still
- * click each button precisely -- visual proof of D-56-07. */
+/* Runtime transform around the reference button grid. */
 static float s_xform_tx;
 static float s_xform_ty;
 static float s_xform_scale = 1.0F;
 static float s_xform_deg;
 
-/* Phase 56 ext: debug hit-zone overlay state. F1 toggles recording; F2 cycles
- * through OFF -> HOVER -> CAPTURED -> ALL. Default mode HOVER per user spec. */
+/* Debug overlay state. F1 toggles recording; F2 cycles HOVER/CAPTURED/ALL/OFF. */
 static nt_ui_debug_hit_mode_t s_dbg_mode = NT_UI_DEBUG_HIT_HOVER;
 
 #define LAYER_IMG 1
 #define LAYER_TEXT 2
 
-/* Bumped from 960x640 to 1280x800 so the bigger buttons (180x72) + transform
- * play space + status/help bars fit comfortably on HiDPI Windows. */
-#define UI_REF_W 1280.0F
-#define UI_REF_H 800.0F
+/* Bumped to 1600x1000 logical so the 320x120 buttons + per-cell label + grid
+ * gaps fit comfortably with room for status/help bars on the bigger window. */
+#define UI_REF_W 1600.0F
+#define UI_REF_H 1000.0F
 // #endregion
 
 // #region binding
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void try_bind_resources(void) {
     if (s_atlas_bound && s_font_bound) {
         return;
@@ -213,23 +258,39 @@ static void try_bind_resources(void) {
         s_button_blue_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_BLUE.value);
         NT_ASSERT(s_button_blue_idx != NT_ATLAS_INVALID_REGION);
 
+        s_button_green_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_GREEN.value);
+        NT_ASSERT(s_button_green_idx != NT_ATLAS_INVALID_REGION);
+
         nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, s_white_region_idx);
 
-        /* Patch the reference-button bg_region from the const templates to the
-         * runtime button_blue index (every state -- D-54-02). */
-        s_btn_eased = g_btn_eased_style;
-        s_btn_instant = g_btn_instant_style;
-        s_btn_eased.idle.bg_region = s_button_blue_idx;
-        s_btn_eased.hover.bg_region = s_button_blue_idx;
-        s_btn_eased.pressed.bg_region = s_button_blue_idx;
-        s_btn_eased.disabled.bg_region = s_button_blue_idx;
-        s_btn_instant.idle.bg_region = s_button_blue_idx;
-        s_btn_instant.hover.bg_region = s_button_blue_idx;
-        s_btn_instant.pressed.bg_region = s_button_blue_idx;
-        s_btn_instant.disabled.bg_region = s_button_blue_idx;
+        /* Patch each variant's bg_region from the templates (D-54-02). */
+        s_btn_standard = g_btn_standard_style;
+        s_btn_standard.idle.bg_region = s_button_blue_idx;
+        s_btn_standard.hover.bg_region = s_button_blue_idx;
+        s_btn_standard.pressed.bg_region = s_button_blue_idx;
+        s_btn_standard.disabled.bg_region = s_button_blue_idx;
+
+        s_btn_scale = g_btn_scale_style;
+        s_btn_scale.idle.bg_region = s_button_blue_idx;
+        s_btn_scale.hover.bg_region = s_button_blue_idx;
+        s_btn_scale.pressed.bg_region = s_button_blue_idx;
+        s_btn_scale.disabled.bg_region = s_button_blue_idx;
+
+        /* VISUAL-SWAP: blue idle/disabled, green hover/pressed. */
+        s_btn_swap = g_btn_swap_style;
+        s_btn_swap.idle.bg_region = s_button_blue_idx;
+        s_btn_swap.hover.bg_region = s_button_green_idx;
+        s_btn_swap.pressed.bg_region = s_button_green_idx;
+        s_btn_swap.disabled.bg_region = s_button_blue_idx;
+
+        s_btn_nopad = g_btn_nopad_style;
+        s_btn_nopad.idle.bg_region = s_button_blue_idx;
+        s_btn_nopad.hover.bg_region = s_button_blue_idx;
+        s_btn_nopad.pressed.bg_region = s_button_blue_idx;
+        s_btn_nopad.disabled.bg_region = s_button_blue_idx;
 
         s_atlas_bound = true;
-        nt_log_info("ui_buttons_demo: atlas bound (button_blue + _white)");
+        nt_log_info("ui_buttons_demo: atlas bound (button_blue + button_green + _white)");
     }
 
     if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
@@ -241,79 +302,156 @@ static void try_bind_resources(void) {
 }
 // #endregion
 
-// #region declare_reference_buttons
-/* Reference buttons (WIDGET-02/03/04 visual gate + WIDGET-05 verify via the icon
- * child + Phase 56 ext touch-target padding visible under F1 overlay). Layout
- * sizes bumped to 180x72 + childGap 24 + label font 26 so the row is legible on
- * HiDPI Windows. ids precomputed once on the first Clay frame.
- * Row: text(eased+pad16) | text(instant,no-pad) | icon-only(eased+pad16)
- *      | icon+text(eased+pad16) | disabled. */
+// #region grid cell sizing
+/* Each cell = vertical stack: title text + sub text + button.
+ * Cell is 360 wide so the 320 button has 20 px breathing room. */
+#define CELL_W 360
+#define CELL_H 240
+#define BTN_W 320
+#define BTN_H 120
+
+/* Macro to declare the title + sub strip of a cell (callable inside a CLAY block).
+ * The cell itself + the button slot are declared inline in the caller. */
+#define CELL_LABELS(title_str, sub_str)                                                                                                                                                                \
+    do {                                                                                                                                                                                               \
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {                                                        \
+            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), (title_str), &g_cell_title_style);                                                                                                        \
+        }                                                                                                                                                                                              \
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {                                                        \
+            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), (sub_str), &g_cell_sub_style);                                                                                                            \
+        }                                                                                                                                                                                              \
+    } while (0)
+
+/* Common layout for the per-cell column. */
+#define CELL_LAYOUT                                                                                                                                                                                    \
+    {                                                                                                                                                                                                  \
+        .layout = {                                                                                                                                                                                    \
+            .sizing = {CLAY_SIZING_FIXED(CELL_W), CLAY_SIZING_FIXED(CELL_H)},                                                                                                                          \
+            .padding = CLAY_PADDING_ALL(8),                                                                                                                                                            \
+            .layoutDirection = CLAY_TOP_TO_BOTTOM,                                                                                                                                                     \
+            .childGap = 6,                                                                                                                                                                             \
+            .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}                                                                                                                                  \
+        }                                                                                                                                                                                              \
+    }
+
+/* Common layout for the button slot inside a cell (centers the button). */
+#define BTN_SLOT_LAYOUT                                                                                                                                                                                \
+    {                                                                                                                                                                                                  \
+        .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER} }                      \
+    }
+// #endregion
+
+// #region declare_reference_buttons (2 x 3 GRID)
+/* Builds the 6-variant grid (2 rows x 3 cols). Each cell shows its title
+ * above the button so the user can tell variants apart at a glance.
+ * ids precomputed once on the first Clay frame. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_reference_buttons(void) {
     if (!s_btn_ids_ready) {
-        s_id_text = nt_ui_id("btn_text");
-        s_id_text_instant = nt_ui_id("btn_text_instant");
+        s_id_std = nt_ui_id("btn_standard");
+        s_id_scale = nt_ui_id("btn_scale");
+        s_id_swap = nt_ui_id("btn_swap");
         s_id_icon = nt_ui_id("btn_icon");
         s_id_icontext = nt_ui_id("btn_icontext");
         s_id_disabled = nt_ui_id("btn_disabled");
         s_btn_ids_ready = true;
     }
 
-    CLAY({.id = CLAY_ID("ref-btn-title"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Reference buttons: EASED has +16 px hit padding; INSTANT has none", &g_title_style);
-    }
+    /* Outer container = grid: TOP_TO_BOTTOM, two rows each LEFT_TO_RIGHT. */
+    CLAY({.id = CLAY_ID("ref-btn-grid"),
+          .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM, .childGap = 30, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
 
-    CLAY({.id = CLAY_ID("ref-btn-row"),
-          .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+        /* ===== ROW 1: (a) STANDARD | (b) SCALE | (c) VISUAL SWAP ===== */
+        CLAY({.id = CLAY_ID("ref-btn-row1"),
+              .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
 
-        /* TEXT-ONLY, EASED + padded (leaf sugar). */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            if (nt_ui_button(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_text, s_atlas_handle, "Save", &g_btn_label_style, &s_btn_eased, true)) {
-                s_clicks_text++;
+            // #region (a) STANDARD
+            CLAY(CELL_LAYOUT) {
+                CELL_LABELS("STANDARD (eased)", "+16 px touch padding");
+                CLAY(BTN_SLOT_LAYOUT) {
+                    if (nt_ui_button(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_std, s_atlas_handle, "Save", &g_btn_label_style, &s_btn_standard, true)) {
+                        s_clicks_std++;
+                    }
+                }
             }
+            // #endregion
+
+            // #region (b) SCALE
+            CLAY(CELL_LAYOUT) {
+                CELL_LABELS("SCALE 0.80<->1.20", "+16 px touch padding");
+                CLAY(BTN_SLOT_LAYOUT) {
+                    if (nt_ui_button(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_scale, s_atlas_handle, "Boom", &g_btn_label_style, &s_btn_scale, true)) {
+                        s_clicks_scale++;
+                    }
+                }
+            }
+            // #endregion
+
+            // #region (c) VISUAL SWAP
+            CLAY(CELL_LAYOUT) {
+                CELL_LABELS("VISUAL SWAP blue<->green", "+16 px touch padding");
+                CLAY(BTN_SLOT_LAYOUT) {
+                    if (nt_ui_button(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_swap, s_atlas_handle, "Swap", &g_btn_label_style, &s_btn_swap, true)) {
+                        s_clicks_swap++;
+                    }
+                }
+            }
+            // #endregion
         }
 
-        /* TEXT-ONLY, INSTANT (no padding -- contrast with the EASED variant). */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            if (nt_ui_button(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_text_instant, s_atlas_handle, "Snap", &g_btn_label_style, &s_btn_instant, true)) {
-                s_clicks_text_instant++;
-            }
-        }
+        /* ===== ROW 2: (d) ICON ONLY | (e) ICON + TEXT | (f) DISABLED ===== */
+        CLAY({.id = CLAY_ID("ref-btn-row2"),
+              .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
 
-        /* ICON-ONLY, EASED. The icon child IS the WIDGET-05 verification: nt_ui_image
-         * renders the tinted _white region; per-state opacity inherits to it (D-56-13). */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icon, s_atlas_handle, &s_btn_eased, true);
-            {
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(32), CLAY_SIZING_FIXED(32)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_white_region_idx, &g_btn_icon_style); }
+            // #region (d) ICON ONLY
+            CLAY(CELL_LAYOUT) {
+                CELL_LABELS("ICON ONLY", "no padding");
+                CLAY(BTN_SLOT_LAYOUT) {
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icon, s_atlas_handle, &s_btn_nopad, true);
+                    {
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(56), CLAY_SIZING_FIXED(56)}}}) {
+                            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_white_region_idx, &g_btn_icon_style);
+                        }
+                    }
+                    if (nt_ui_button_end(s_ctx)) {
+                        s_clicks_icon++;
+                    }
+                }
             }
-            if (nt_ui_button_end(s_ctx)) {
-                s_clicks_icon++;
-            }
-        }
+            // #endregion
 
-        /* ICON+TEXT, EASED. Icon child then label child, ordered LEFT_TO_RIGHT with
-         * a gap (WIDGET-03 ordering + WIDGET-05 icon render). */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(200), CLAY_SIZING_FIXED(72)},
-                         .padding = CLAY_PADDING_ALL(8),
-                         .layoutDirection = CLAY_LEFT_TO_RIGHT,
-                         .childGap = 12,
-                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icontext, s_atlas_handle, &s_btn_eased, true);
-            {
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(28), CLAY_SIZING_FIXED(28)}}}) { nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_white_region_idx, &g_btn_icon_style); }
-                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", &g_btn_label_style);
+            // #region (e) ICON + TEXT
+            CLAY(CELL_LAYOUT) {
+                CELL_LABELS("ICON + TEXT", "no padding");
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)},
+                                 .padding = CLAY_PADDING_ALL(8),
+                                 .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                                 .childGap = 16,
+                                 .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icontext, s_atlas_handle, &s_btn_nopad, true);
+                    {
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(44), CLAY_SIZING_FIXED(44)}}}) {
+                            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_white_region_idx, &g_btn_icon_style);
+                        }
+                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", &g_btn_label_style);
+                    }
+                    if (nt_ui_button_end(s_ctx)) {
+                        s_clicks_icontext++;
+                    }
+                }
             }
-            if (nt_ui_button_end(s_ctx)) {
-                s_clicks_icontext++;
-            }
-        }
+            // #endregion
 
-        /* DISABLED (enabled=false): dimmed, ignores hover, never increments. */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(180), CLAY_SIZING_FIXED(72)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-            if (nt_ui_button(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_disabled, s_atlas_handle, "Locked", &g_btn_label_style, &s_btn_eased, false)) {
-                s_clicks_disabled++; /* unreachable while disabled -- proves the gate */
+            // #region (f) DISABLED
+            CLAY(CELL_LAYOUT) {
+                CELL_LABELS("DISABLED (enabled=false)", "+16 px (no hover)");
+                CLAY(BTN_SLOT_LAYOUT) {
+                    if (nt_ui_button(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_disabled, s_atlas_handle, "Locked", &g_btn_label_style, &s_btn_standard, false)) {
+                        s_clicks_disabled++; /* unreachable while disabled -- proves the gate */
+                    }
+                }
             }
+            // #endregion
         }
     }
 }
@@ -321,8 +459,8 @@ static void declare_reference_buttons(void) {
 
 // #region input_handling
 /* Per-frame: arrows translate, PageUp/Dn scale, Q/E rotate, R reset, F1 toggle
- * debug recording, F2 cycle debug mode. Press-edge for one-shot keys (F1/F2/R/Q/E)
- * + held for continuous (arrows/PgUp/Dn). */
+ * debug recording, F2 cycle debug mode, D toggle Clay debug, F3 toggle
+ * nt_ui_inspector. Press-edge for one-shots; held for continuous arrows. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void handle_transform_and_debug_input(void) {
 #ifndef NT_PLATFORM_WEB
@@ -391,6 +529,21 @@ static void handle_transform_and_debug_input(void) {
             break;
         }
     }
+    /* D: toggle Clay's built-in debug overlay (mirrors slice9_demo). */
+    if (nt_input_key_is_pressed(NT_KEY_D)) {
+        const bool now_on = !nt_ui_get_debug_overlay(s_ctx);
+        nt_ui_set_debug_overlay(s_ctx, now_on);
+        nt_log_info("ui_buttons_demo: Clay debug overlay %s", now_on ? "ON" : "OFF");
+    }
+    /* F3: toggle nt_ui_inspector. Implies recording=ON for hit-zone overlay. */
+    if (nt_input_key_is_pressed(NT_KEY_F3)) {
+        const bool now_on = !nt_ui_inspector_is_active(s_ctx);
+        nt_ui_inspector_set_active(s_ctx, now_on);
+        if (now_on) {
+            nt_ui_debug_set_recording(s_ctx, true);
+        }
+        nt_log_info("ui_buttons_demo: nt_ui_inspector %s", now_on ? "ON" : "OFF");
+    }
 #endif
 }
 
@@ -424,8 +577,6 @@ static void frame(void) {
     }
 #endif
 
-    /* Phase 56 ext: transform/debug input. Updates the runtime transform around
-     * the reference button row + debug overlay toggle/mode. */
     handle_transform_and_debug_input();
 
     nt_resource_step();
@@ -496,12 +647,14 @@ static void frame(void) {
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &mouse_logical, 1);
 
         // #region status + help text
-        char status_text[256];
-        const uint32_t total_clicks = s_clicks_text + s_clicks_text_instant + s_clicks_icon + s_clicks_icontext;
-        (void)snprintf(status_text, sizeof status_text, "clicks: Save=%u  Snap=%u  Icon=%u  Play=%u  Locked=%u  (total=%u)    tx=%.0f ty=%.0f s=%.2f deg=%.0f    ui_pointer=%s    debug=%s mode=%s",
-                       s_clicks_text, s_clicks_text_instant, s_clicks_icon, s_clicks_icontext, s_clicks_disabled, total_clicks, (double)s_xform_tx, (double)s_xform_ty, (double)s_xform_scale,
-                       (double)s_xform_deg, nt_ui_wants_pointer(s_ctx) ? "yes" : "no", nt_ui_debug_get_recording(s_ctx) ? "ON" : "off", debug_mode_str(s_dbg_mode));
-        const char *help_text = "F1 toggle debug overlay  |  F2 cycle mode (off/hover/captured/all)  |  arrows translate  |  PgUp/PgDn scale  |  Q/E rotate  |  R reset  |  Esc quit";
+        char status_text[320];
+        const uint32_t total_clicks = s_clicks_std + s_clicks_scale + s_clicks_swap + s_clicks_icon + s_clicks_icontext;
+        (void)snprintf(status_text, sizeof status_text,
+                       "clicks: Std=%u Scale=%u Swap=%u Icon=%u IconTxt=%u Disabled=%u (total=%u)   tx=%.0f ty=%.0f s=%.2f deg=%.0f   debug=%s mode=%s inspector=%s clay=%s", s_clicks_std,
+                       s_clicks_scale, s_clicks_swap, s_clicks_icon, s_clicks_icontext, s_clicks_disabled, total_clicks, (double)s_xform_tx, (double)s_xform_ty, (double)s_xform_scale,
+                       (double)s_xform_deg, nt_ui_debug_get_recording(s_ctx) ? "ON" : "off", debug_mode_str(s_dbg_mode), nt_ui_inspector_is_active(s_ctx) ? "ON" : "off",
+                       nt_ui_get_debug_overlay(s_ctx) ? "ON" : "off");
+        const char *help_text = "D = Clay debug  |  F3 = nt_ui_inspector  |  F1 = hit-zone overlay  |  F2 cycle mode  |  arrows/PgUp-Dn/Q-E/R transform  |  Esc quit";
         // #endregion
 
         // #region clay declaration
@@ -520,17 +673,18 @@ static void frame(void) {
                          .childGap = 18,
                          .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
               .backgroundColor = {18.0F, 18.0F, 22.0F, 255.0F}}) {
-            nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), status_text, &g_status_style);
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), status_text, &g_status_style);
+            }
 
-            /* Wrap the reference-button row in the runtime transform. The
-             * accumulated transform feeds the engine's inverse-affine hit-test
-             * (D-56-07) so the buttons stay clickable even rotated 30 deg. */
+            /* Wrap the grid in the runtime transform. The accumulated transform
+             * feeds the engine's inverse-affine hit-test (D-56-07) so every
+             * variant stays clickable even rotated 30 deg. */
             nt_ui_push_transform(s_ctx, &row_xform);
             declare_reference_buttons();
             nt_ui_pop_transform(s_ctx);
 
-            /* Help bar pinned at the bottom (just appended after the row -- Clay
-             * stacks TOP_TO_BOTTOM; the row is short enough to leave room). */
+            /* Help bar pinned at the bottom. */
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), help_text, &g_help_style);
             }
@@ -542,12 +696,18 @@ static void frame(void) {
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
 
-        // #region debug hit-zone overlay (Phase 56 ext)
+        // #region debug hit-zone overlay
         /* Pass the SAME target used for nt_ui_walk so the debug overlay applies
          * the same Y-flip (Pitfall 2: walker's Y-flip is render-only -- recorded
          * zones are Clay Y-down). */
         if (s_dbg_mode != NT_UI_DEBUG_HIT_OFF) {
-            nt_ui_debug_draw_hit_zones(s_ctx, &target, s_dbg_mode, s_font, 14.0F);
+            nt_ui_debug_draw_hit_zones(s_ctx, &target, s_dbg_mode, s_font, 18.0F);
+        }
+        // #endregion
+
+        // #region nt_ui_inspector overlay
+        if (nt_ui_inspector_is_active(s_ctx)) {
+            nt_ui_inspector_draw(s_ctx, &target, s_font, 16.0F);
         }
         // #endregion
 
@@ -557,9 +717,7 @@ static void frame(void) {
             glm_mat4_identity(stats_model);
             glm_translate(stats_model, (vec3){10.0F, scale.logical_h - 20.0F, 0.0F});
             const float stats_color[4] = {0.8F, 0.9F, 0.8F, 1.0F};
-            nt_stats_draw(s_text_material, s_font, (const float *)stats_model, 14.0F, stats_color);
-            /* nt_stats_draw only stages text; flush before end_pass so the
-             * overlay lands in THIS frame, not the next walk's flush. */
+            nt_stats_draw(s_text_material, s_font, (const float *)stats_model, 16.0F, stats_color);
             nt_text_renderer_flush();
         }
         // #endregion
@@ -587,10 +745,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Bigger logical window so the 180x72 buttons remain legible on HiDPI
-     * Windows even after the OS shrinks the framebuffer for ASan DPI quirks. */
-    g_nt_window.width = 1280;
-    g_nt_window.height = 800;
+    /* Bigger logical window: 1600x1000 so the 320x120 buttons + per-cell label
+     * fit comfortably with margins for status/help bars. */
+    g_nt_window.width = 1600;
+    g_nt_window.height = 1000;
     nt_window_init();
     nt_input_init();
 
@@ -686,7 +844,7 @@ int main(int argc, char *argv[]) {
     nt_platform_web_loading_complete();
 #endif
 
-    nt_log_info("ui_buttons_demo: starting (F1 debug overlay, F2 cycle mode, arrows/PgUp-Dn/Q-E/R transform)");
+    nt_log_info("ui_buttons_demo: starting (D=Clay debug, F3=inspector, F1/F2=hit-zone overlay, arrows/PgUp-Dn/Q-E/R transform)");
 
     nt_app_run(frame);
 

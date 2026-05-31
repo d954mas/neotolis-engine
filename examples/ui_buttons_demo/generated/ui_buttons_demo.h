@@ -23,6 +23,7 @@
 /* --- ATLAS_REGION --- */
 #define ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS__WHITE ((nt_hash64_t){0x27424DEE40744BBBULL}) /* ui_buttons_demo_atlas/_white */
 #define ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_BLUE ((nt_hash64_t){0x04DD51E0B9359D84ULL}) /* ui_buttons_demo_atlas/button_blue */
+#define ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_GREEN ((nt_hash64_t){0x7ABDDB88258FF8EEULL}) /* ui_buttons_demo_atlas/button_green */
 
 #if NT_HASH_LABELS
 static inline void ui_buttons_demo_register_labels(void) {
@@ -34,6 +35,7 @@ static inline void ui_buttons_demo_register_labels(void) {
     (void)nt_hash64_str("ui_buttons_demo_atlas");
     (void)nt_hash64_str("ui_buttons_demo_atlas/_white");
     (void)nt_hash64_str("ui_buttons_demo_atlas/button_blue");
+    (void)nt_hash64_str("ui_buttons_demo_atlas/button_green");
     (void)nt_hash64_str("ui_buttons_demo_atlas/tex0");
 }
 #endif
