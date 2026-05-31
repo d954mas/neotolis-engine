@@ -200,6 +200,29 @@ static void test_button_id_zero_asserts(void) {
 
 #endif /* NT_ASSERT_MODE == NT_ASSERT_FULL */
 
+/* ---- Test 8: nt_ui_begin clears pending_button.active (dev-mode recovery).
+ *      Simulates the dev-build scenario where a previous frame asserted
+ *      mid-button (leaving the field true). Without the reset every subsequent
+ *      button_begin would assert "nested buttons unsupported". Pins the
+ *      review §2 fix. ---- */
+static void test_button_recovers_after_simulated_mid_button_state(void) {
+    /* Wedge the field manually -- mimic the post-assert leftover state. */
+    s_fx.ctx->pending_button.active = true;
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    /* The reset must run unconditionally in nt_ui_begin. */
+    TEST_ASSERT_FALSE_MESSAGE(s_fx.ctx->pending_button.active, "nt_ui_begin must clear pending_button.active so a previously-wedged dev session recovers");
+
+    /* And a normal begin/end must not assert. */
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &s_btn_style, true);
+        nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
+        (void)nt_ui_button_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_button_text_only_children);
@@ -211,5 +234,6 @@ int main(void) {
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_button_id_zero_asserts);
 #endif
+    RUN_TEST(test_button_recovers_after_simulated_mid_button_state);
     return UNITY_END();
 }

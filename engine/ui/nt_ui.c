@@ -261,6 +261,12 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
      * debug_recording flag persists (it's a user toggle). */
     ctx->debug_zone_count = 0U;
 
+    /* Dev-mode footgun guard: a button begin/end that asserted mid-flight in
+     * NT_ASSERT_FULL would leave pending_button.active=true, wedging every
+     * subsequent frame with "nested buttons unsupported". Release/TRAP dies
+     * on the first assert so this only matters in dev. Reset is unconditional. */
+    ctx->pending_button.active = false;
+
     /* Phase 56 ext (CHUNK E): widget tag registry is per-frame; clear every
      * slot (id=0 = empty). inspector_active is a user toggle (persists). */
     memset(ctx->widget_registry, 0, sizeof(ctx->widget_registry));
