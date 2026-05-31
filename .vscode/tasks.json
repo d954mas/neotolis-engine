@@ -734,6 +734,32 @@
             "dependsOn": ["Build wasm-debug-paired", "Ensure server ui_buttons_demo (debug :8098)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
+        },
+        {
+            "label": "Ensure server ui_buttons_demo (release :8099)",
+            "type": "shell",
+            "command": "python -m http.server 8099 -d \"${workspaceFolder}/build/examples/ui_buttons_demo/wasm-release-paired\"",
+            "isBackground": true,
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
+        },
+        {
+            "label": "Build & Serve ui_buttons_demo (release)",
+            "dependsOn": ["Build wasm-release-paired", "Ensure server ui_buttons_demo (release :8099)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
         }
     ]
 }

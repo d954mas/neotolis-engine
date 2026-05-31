@@ -404,6 +404,16 @@
             "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
         },
         {
+            "name": "Build UI Buttons Demo Packs",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/ui_buttons_demo/native-release/build_ui_buttons_demo_packs.exe",
+            "args": ["build/examples/ui_buttons_demo"],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build & run ui_buttons_demo packs (release)"
+        },
+        {
             "name": "Debug Desktop ui_buttons_demo",
             "type": "cppvsdbg",
             "request": "launch",
@@ -411,6 +421,33 @@
             "cwd": "${workspaceFolder}/build/examples/ui_buttons_demo/native-debug",
             "console": "integratedTerminal",
             "preLaunchTask": "Build ui_buttons_demo (debug)"
+        },
+        {
+            "name": "Run Desktop ui_buttons_demo (release)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/examples/ui_buttons_demo/native-release/ui_buttons_demo.exe",
+            "cwd": "${workspaceFolder}/build/examples/ui_buttons_demo/native-release",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build native-release"
+        },
+        {
+            "name": "Debug WASM ui_buttons_demo",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8098/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/ui_buttons_demo/wasm-debug-paired",
+            "preLaunchTask": "Build & Serve ui_buttons_demo (debug)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
+        },
+        {
+            "name": "Run WASM ui_buttons_demo (release)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:8099/index.html",
+            "webRoot": "${workspaceFolder}/build/examples/ui_buttons_demo/wasm-release-paired",
+            "preLaunchTask": "Build & Serve ui_buttons_demo (release)",
+            "userDataDir": "${workspaceFolder}/.vscode/.chrome-profile"
         }
     ]
 }
