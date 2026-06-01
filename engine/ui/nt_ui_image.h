@@ -12,6 +12,17 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
+/* EXPERIMENTAL (Phase 56 ext): API surface may change in v1.9. Used by
+ * ui_buttons_demo and inspector internals. Game code adopting this should
+ * pin the engine version.
+ *
+ * Inspector descriptor: pill name "nt_image" + color shown in the element
+ * tree. Engine widget defs use the "nt_" prefix to disambiguate from Clay's
+ * own config-type pills (Clay emits its own verbatim "Image" pill on the
+ * same row). Game code may compare pointer identity against this symbol if
+ * it needs to filter by "is this an image" without parsing names. */
+extern const nt_ui_widget_def_t NT_UI_IMAGE_DEF;
+
 /* Style flag bits. */
 #define NT_UI_IMAGE_SLICE9_OVERRIDE (1U << 0) /* use slice9_lrtb even if {0,0,0,0} */
 #define NT_UI_IMAGE_ORIGIN_OVERRIDE (1U << 1) /* use origin_x/y instead of atlas default */

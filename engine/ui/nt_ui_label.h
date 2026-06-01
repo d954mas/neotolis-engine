@@ -12,6 +12,17 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
+/* EXPERIMENTAL (Phase 56 ext): API surface may change in v1.9. Used by
+ * ui_buttons_demo and inspector internals. Game code adopting this should
+ * pin the engine version.
+ *
+ * Inspector descriptor: pill name "nt_label" + color shown in the element
+ * tree. Engine widget defs use the "nt_" prefix to disambiguate from Clay's
+ * own config-type pills ("Text" appears on the same row from Clay's port).
+ * nt_ui_label auto-registers the descriptor against the just-emitted CLAY_TEXT
+ * leaf's id so a row tagged "nt_label" appears alongside the text content. */
+extern const nt_ui_widget_def_t NT_UI_LABEL_DEF;
+
 typedef struct {
     uint16_t font_id;         /* index into ctx->fonts[]; asserted < NT_UI_MAX_FONTS */
     float font_size;          /* px; asserted > 0. Passed to Clay as (uint16_t) for layout, float for rendering. */

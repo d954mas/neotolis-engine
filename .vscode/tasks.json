@@ -661,6 +661,105 @@
             "dependsOn": ["Build wasm-release-paired", "Ensure server slice9_demo (release :8097)"],
             "dependsOrder": "sequence",
             "problemMatcher": []
+        },
+        {
+            "label": "Build & run ui_buttons_demo packs (debug)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target build_ui_buttons_demo_packs && build\\examples\\ui_buttons_demo\\native-debug\\build_ui_buttons_demo_packs.exe build/examples/ui_buttons_demo",
+            "dependsOn": ["Configure native-debug"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build & run ui_buttons_demo packs (release)",
+            "dependsOn": [
+                "Configure native-release",
+                "Build & run ui_buttons_demo packs (release command)"
+            ],
+            "dependsOrder": "sequence",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build & run ui_buttons_demo packs (release command)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-release --target build_ui_buttons_demo_packs && build\\examples\\ui_buttons_demo\\native-release\\build_ui_buttons_demo_packs.exe build/examples/ui_buttons_demo",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Build ui_buttons_demo (debug)",
+            "type": "shell",
+            "command": "cmake --build build/_cmake/native-debug --target ui_buttons_demo",
+            "dependsOn": ["Build & run ui_buttons_demo packs (debug)"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "Run ui_buttons_demo (native-debug)",
+            "type": "shell",
+            "command": "build\\examples\\ui_buttons_demo\\native-debug\\ui_buttons_demo.exe",
+            "dependsOn": ["Build ui_buttons_demo (debug)"],
+            "dependsOrder": "sequence",
+            "options": { "shell": { "executable": "cmd.exe", "args": ["/c"] } },
+            "presentation": { "panel": "dedicated", "reveal": "always" },
+            "problemMatcher": []
+        },
+        {
+            "label": "Ensure server ui_buttons_demo (debug :8098)",
+            "type": "shell",
+            "command": "python -m http.server 8098 -d \"${workspaceFolder}/build/examples/ui_buttons_demo/wasm-debug-paired\"",
+            "isBackground": true,
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
+        },
+        {
+            "label": "Build & Serve ui_buttons_demo (debug)",
+            "dependsOn": ["Build wasm-debug-paired", "Ensure server ui_buttons_demo (debug :8098)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
+        },
+        {
+            "label": "Ensure server ui_buttons_demo (release :8099)",
+            "type": "shell",
+            "command": "python -m http.server 8099 -d \"${workspaceFolder}/build/examples/ui_buttons_demo/wasm-release-paired\"",
+            "isBackground": true,
+            "options": {
+                "shell": {
+                    "executable": "cmd.exe",
+                    "args": ["/c"]
+                }
+            },
+            "problemMatcher": {
+                "pattern": [{ "regexp": ".", "file": 1, "location": 2, "message": 3 }],
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Serving HTTP|Address already in use"
+                }
+            }
+        },
+        {
+            "label": "Build & Serve ui_buttons_demo (release)",
+            "dependsOn": ["Build wasm-release-paired", "Ensure server ui_buttons_demo (release :8099)"],
+            "dependsOrder": "sequence",
+            "problemMatcher": []
         }
     ]
 }

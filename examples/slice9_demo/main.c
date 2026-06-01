@@ -25,6 +25,7 @@
 #include "stats/nt_stats.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_image.h"
+#include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_panel.h"
 #include "ui/nt_ui_scale.h"
@@ -217,7 +218,7 @@ static void declare_animated_panel(void) {
                          .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
             nt_ui_push_transform(s_ctx, &t);
             nt_ui_push_opacity(s_ctx, opacity);
-            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style);
+            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style, NULL);
             {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Animated Panel", &g_panel_label_style);
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Hello World", &g_child_label_style);
@@ -260,16 +261,16 @@ static void declare_nested_panels(void) {
         /* Outer beige panel */
         CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(500), CLAY_SIZING_FIXED(140)}, .padding = CLAY_PADDING_ALL(12), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
             nt_ui_push_transform(s_ctx, &outer_t);
-            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_beige_idx, &g_panel_style);
+            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_beige_idx, &g_panel_style, NULL);
             {
                 /* Middle blue panel */
                 CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(10), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
                     nt_ui_push_opacity(s_ctx, mid_opacity);
-                    nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_blue_idx, &g_panel_style);
+                    nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_blue_idx, &g_panel_style, NULL);
                     {
                         // clang-format off
                         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(8), .childGap = 4, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style);
+                            nt_ui_panel_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_panel_brown_idx, &g_panel_style, NULL);
                             { nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Nested child", &g_child_label_style); }
                             nt_ui_panel_end(s_ctx);
                         }
@@ -329,9 +330,11 @@ static void frame(void) {
         nt_log_info("slice9_demo: all animations %s", !all_on ? "ON" : "OFF");
     }
     if (nt_input_key_is_pressed(NT_KEY_D)) {
-        const bool now_on = !nt_ui_get_debug_overlay(s_ctx);
-        nt_ui_set_debug_overlay(s_ctx, now_on);
-        nt_log_info("slice9_demo: debug overlay %s", now_on ? "ON" : "OFF");
+        /* Phase 56 ext: Clay built-in debug overlay was removed. The
+         * replacement is nt_ui_inspector (verbatim Clay debug view port). */
+        const bool now_on = !nt_ui_inspector_is_active(s_ctx);
+        nt_ui_inspector_set_active(s_ctx, now_on);
+        nt_log_info("slice9_demo: inspector %s", now_on ? "ON" : "OFF");
     }
     // #endregion
 
@@ -400,7 +403,7 @@ static void frame(void) {
         nt_gfx_bind_uniform_buffer(s_frame_ubo, 0);
 
         const nt_pointer_t mouse_logical = nt_ui_scale_apply_pointer(&scale, g_nt_input.pointers[0]);
-        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &mouse_logical);
+        nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &mouse_logical, 1);
 
         // #region status line
         char status_text[128];

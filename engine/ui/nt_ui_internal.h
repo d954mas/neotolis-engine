@@ -8,7 +8,96 @@
 
 #include "clay.h"
 #include "font/nt_font.h"
+#include "input/nt_input.h"
 #include "ui/nt_ui.h"
+#include "ui/nt_ui_anim.h"
+#include "ui/nt_ui_inspector.h"
+
+/* Phase 56 ext: hit-zone debug overlay (engine/ui/nt_ui_debug.{h,c}).
+ * Fixed compile-time cap matches the anim cache budget shape; at-cap is
+ * silently saturated (no assertion -- the overlay is a verification aid,
+ * not a correctness path). */
+#ifndef NT_UI_DEBUG_ZONE_CAP
+#define NT_UI_DEBUG_ZONE_CAP 64
+#endif
+
+/* Phase 56 ext (CHUNK E): widget_registry capacity. Direct-mapped table
+ * keyed on (id mod cap). On collision, the most recent register wins
+ * (later widget overwrites the slot) -- the inspector is an observability
+ * aid, so missing a tag for one of two colliding ids is acceptable. Cap
+ * is a power-of-two for the cheap modulo. Counted separately from the
+ * anim cache because widgets and animated widgets are disjoint sets. */
+#ifndef NT_UI_WIDGET_REGISTRY_CAP
+#define NT_UI_WIDGET_REGISTRY_CAP 128
+#endif
+_Static_assert((NT_UI_WIDGET_REGISTRY_CAP & (NT_UI_WIDGET_REGISTRY_CAP - 1)) == 0, "NT_UI_WIDGET_REGISTRY_CAP must be a power of two");
+
+/* Phase 56 ext: inspector collapsed-element set. Persistent across frames
+ * (toggled by clicking the dot icon on a row). Linear list scanned O(N) --
+ * N capped at 128, scan cost is negligible vs the layout solve. At-cap
+ * toggle is silently ignored (the user simply can't collapse more nodes
+ * until something is uncollapsed); the inspector is observability, not
+ * correctness. */
+#ifndef NT_UI_INSPECTOR_COLLAPSED_CAP
+#define NT_UI_INSPECTOR_COLLAPSED_CAP 128
+#endif
+
+/* Phase 56 ext (REVIEW-2 P3-1): inspector sidebar width / row height / font
+ * size / paddings live on ctx->inspector_metrics. The compile-time
+ * NT_UI_INSPECTOR_PANEL_WIDTH macro (and the CDV_* siblings in nt_ui.c) were
+ * removed in favor of nt_ui_inspector_metrics_t -- consume the values via
+ * ctx->inspector_metrics.{panel_width, row_height, font_size, outer_padding,
+ * indent_width} in nt_ui.c (Clay debug-view emit + input-consume gate) and
+ * nt_ui_inspector.c (post-walk overlay scissor). Defaults preserved 1:1 in
+ * NT_UI_INSPECTOR_METRICS_DEFAULT (nt_ui_inspector.c). */
+
+/* Phase 56 ext (REVIEW-2 followup): hit-test clip stack capacity. Real UIs
+ * nest 1-3 clip levels (modal panel + scrolling list + inner pane); cap at
+ * 16 gives 5x headroom. Mirrors NT_UI_TRANSFORM_STACK_DEPTH_CAP. */
+#ifndef NT_UI_CLIP_STACK_CAP
+#define NT_UI_CLIP_STACK_CAP 16
+#endif
+
+typedef struct {
+    /* Layout-space rect (Clay Y-down). */
+    float x, y, w, h;
+    /* Affine snapshot composed at push time (a,b / c,d / tx,ty). Mirrors the
+     * structure produced by compose_transform_level walking the accum_stack
+     * at the clip rect's center -- same math ui_hit_test uses for widgets. */
+    float accum_a, accum_b, accum_c, accum_d, accum_tx, accum_ty;
+} nt_ui_clip_entry_t;
+
+typedef struct {
+    uint32_t id;                   /* 0 = slot empty */
+    const nt_ui_widget_def_t *def; /* NULL = slot empty (kept in sync with id==0) */
+    uint8_t has_padding;           /* 0 = none recorded, 1 = hit_padding_lrtb is valid */
+    uint8_t _pad[3];
+    int16_t hit_padding_lrtb[4]; /* layout-space padding {l,r,t,b}; matches nt_ui_button_style_t */
+} nt_ui_widget_slot_t;
+
+typedef struct {
+    uint32_t id;
+    /* Padded layout-space bbox (l/t/r/b), Clay Y-down. l<r, t<b. */
+    float layout_l, layout_t, layout_r, layout_b;
+    /* Exact visual bbox (unpadded), so the overlay can outline padding distinctly. */
+    float visual_l, visual_t, visual_r, visual_b;
+    /* Snapshot of the declaration-time transform stack at query time. */
+    nt_ui_transform_t accum[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
+    uint32_t accum_depth;
+    /* Center of the VISUAL bbox -- used by both rotation and inverse-affine.
+     * Captured here so drawing matches the hit-test math exactly. */
+    float center_x, center_y;
+    /* bit0 hovered, bit1 pressed (captured this frame by primary), bit2 captured,
+     * bit3 disabled (heuristic: zone recorded for an id that is currently captured
+     * but reports no hover/press -> a state filter; the runtime cannot infer
+     * disabled vs idle at the hit-test layer). */
+    uint16_t state_flags;
+} nt_ui_debug_zone_t;
+
+#define NT_UI_DEBUG_FLAG_HOVERED (1U << 0)
+#define NT_UI_DEBUG_FLAG_PRESSED (1U << 1)
+#define NT_UI_DEBUG_FLAG_CAPTURED (1U << 2)
+#define NT_UI_DEBUG_FLAG_DISABLED (1U << 3)
 
 /* Side-channel transform/opacity marker (not a Clay element). */
 typedef struct {
@@ -25,7 +114,47 @@ struct nt_ui_context {
     Clay_Context *clay;
     Clay_RenderCommandArray frozen_cmds; /* set by end, read by walk */
     bool in_frame;
-    bool debug_overlay; /* applied to Clay before BeginLayout in nt_ui_begin */
+
+    /* Phase 56: frame pointer snapshot for engine-owned hit-test (D-56-04/19).
+     * Copied each begin so get_interaction (called later in declaration) reads it. */
+    nt_pointer_t frame_pointers[NT_INPUT_MAX_POINTERS];
+    uint32_t frame_pointer_count;
+    float frame_dt; /* dt passed to begin; anim cache lerp uses it (D-56-15) */
+
+    /* Phase 56: declaration-time transform stack for the hit-test (Option A,
+     * D-56-07). push/pop_transform maintain this live (mirrors the walk-local
+     * nt_ui_walker_state_t but ctx-resident) so get_interaction can inverse-
+     * transform the pointer at call time. The scale/rotation center is resolved
+     * per-query from the widget's prev-frame bbox center (Clay_GetElementData).
+     * Reset to depth 0 each nt_ui_begin. Kept separate from anim[] below. */
+    nt_ui_transform_t accum_stack[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
+    uint32_t accum_depth;
+
+    /* Phase 56 ext (REVIEW-2 followup): declaration-time clip stack for the
+     * hit-test. push_clip captures the current transform accum at the clip
+     * rect's center and stores it alongside the rect; ui_hit_test walks the
+     * stack BEFORE the widget inverse-affine and rejects any point outside
+     * an ancestor clip. Mirrors push_transform / pop_transform (explicit >
+     * implicit). Reset to depth 0 each nt_ui_begin; nt_ui_end asserts the
+     * stack is balanced (depth == 0). */
+    nt_ui_clip_entry_t clip_stack[NT_UI_CLIP_STACK_CAP];
+    uint32_t clip_depth;
+
+    /* Phase 56: per-pointer capture state machine (D-56-04). v1.8 drives the
+     * primary pointer (index 0); the array is multitouch-ready for v1.9.
+     * capture_seen[] tracks which captures get_interaction touched this frame;
+     * nt_ui_begin clears orphaned captures (queried-then-abandoned) using it.
+     * pointer_over_any feeds nt_ui_wants_pointer (D-56-08). */
+    nt_ui_capture_t captures[NT_INPUT_MAX_POINTERS];
+    uint8_t capture_seen[NT_INPUT_MAX_POINTERS];
+    bool pointer_over_any;
+
+    /* Phase 56: carries the get_interaction result from nt_ui_button_begin (void)
+     * to nt_ui_button_end (bool). Single slot -- buttons do not nest (asserted). */
+    struct {
+        bool active;
+        bool clicked;
+    } pending_button;
 
     /* Walker bindings -- nt_ui_walk asserts each is non-zero at entry. */
     nt_resource_t atlas;
@@ -66,7 +195,177 @@ struct nt_ui_context {
 
     nt_font_t fonts[NT_UI_MAX_FONTS];
 
+    nt_ui_anim_interaction_t anim[NT_UI_ANIM_SLOTS]; /* Phase 56 direct-mapped state-anim cache (D-56-15) */
+
+    /* Phase 56 ext: hit-zone debug overlay. Recording is OFF by default --
+     * production overhead is zero. Game opts in via nt_ui_debug_set_recording.
+     * Zones cleared to 0 each nt_ui_begin. At-cap pushes are silently dropped. */
+    nt_ui_debug_zone_t debug_zones[NT_UI_DEBUG_ZONE_CAP];
+    uint32_t debug_zone_count;
+    bool debug_recording;
+
+    /* Phase 56 ext (CHUNK E): per-frame widget tag registry for nt_ui_inspector.
+     * Cleared each nt_ui_begin (id=0 in every slot). Widgets call
+     * nt_ui_widget_register from their begin/leaf paths. Direct-mapped table
+     * with replace-on-collision (inspector is observability, not correctness). */
+    nt_ui_widget_slot_t widget_registry[NT_UI_WIDGET_REGISTRY_CAP];
+
+    /* Phase 56 ext rework (verbatim Clay debug view port): nt_ui_inspector
+     * toggle. When ON, nt_ui_end injects Clay debug-view CLAY({...}) elements
+     * into the layout pass BEFORE Clay_EndLayout. There is now ONE debug
+     * system -- the inspector REPLACES Clay's built-in debug entirely.
+     * inspector_highlight_id is the element the post-walk hit-zone overlay
+     * paints for: set when the user hovers/selects in the sidebar OR hovers
+     * the actual widget in the viewport. Cleared each nt_ui_begin and re-
+     * computed during emit_layout. */
+    bool inspector_active;
+    uint32_t inspector_highlight_id;
+    /* Selection persists across frames (sidebar click -> stays selected until
+     * another row is clicked or selection is explicitly cleared). Mirrors
+     * Clay's own debugSelectedElementId behavior. */
+    uint32_t inspector_selected_id;
+    /* Per-frame: true when the pointer is inside the inspector's sidebar
+     * footprint (computed in nt_ui_begin from primary->x vs the panel width).
+     * Gates nt_ui_get_interaction_padded to a zeroed return so user widgets
+     * behind the sidebar do NOT register hover/press/click while the sidebar
+     * visually consumes the click. Also makes nt_ui_wants_pointer report true
+     * so the game can suppress its own world-input. Reset each nt_ui_begin. */
+    bool inspector_pointer_consumed;
+
+    /* Phase 56 ext: persistent set of collapsed element ids. Toggling is
+     * driven by clicks on the per-row dot icon inside the inspector. DFS
+     * uses is_collapsed() to skip child enqueue when the parent id is in
+     * the set. Capacity NT_UI_INSPECTOR_COLLAPSED_CAP (default 128); at-cap
+     * adds are silently ignored. Cleared when the inspector is disabled
+     * (set_active(false)). */
+    uint32_t inspector_collapsed_ids[NT_UI_INSPECTOR_COLLAPSED_CAP];
+    uint32_t inspector_collapsed_count;
+
+    /* Phase 56 ext (REVIEW-2 P3-1): runtime inspector sizing. Read by both
+     * the verbatim Clay debug-view layout emit in nt_ui.c (panel_width /
+     * row_height / font_size / outer_padding / indent_width) and the post-
+     * walk overlay's GPU scissor in nt_ui_inspector.c (panel_width). Default-
+     * initialized in nt_ui_create_context to NT_UI_INSPECTOR_METRICS_DEFAULT;
+     * games override via nt_ui_inspector_set_metrics. */
+    nt_ui_inspector_metrics_t inspector_metrics;
+
     Clay_Arena clay_arena;
 };
+
+/* Phase 56 ext (CHUNK E): nt_ui_inspector reads Clay's layoutElements array
+ * via these thin internal accessors, kept in nt_ui.c where CLAY_IMPLEMENTATION
+ * makes the Clay_Context struct visible. The inspector TU only sees opaque
+ * pointers from these. Engine-internal only (not in nt_ui.h public surface). */
+typedef struct nt_ui_inspector_element_view {
+    uint32_t id; /* Clay-assigned id, 0 if invalid index */
+    float x, y;  /* layout bbox top-left (Clay Y-down) */
+    float w, h;
+} nt_ui_inspector_element_view_t;
+
+int32_t nt_ui_internal_get_layout_element_count(const nt_ui_context_t *ctx);
+nt_ui_inspector_element_view_t nt_ui_internal_get_layout_element_view(const nt_ui_context_t *ctx, int32_t index);
+
+/* Returns the id of the currently-open Clay element (top of openLayoutElementStack)
+ * for the in-frame ctx. Used by widget begin/leaf paths to register their tag
+ * in the per-frame widget_registry. Returns 0 if no ctx is in-frame. */
+uint32_t nt_ui_internal_current_open_element_id(void);
+
+/* Returns the id of the LAST layout element added to Clay's layoutElements
+ * array. Use only IMMEDIATELY after CLAY_TEXT (Clay__OpenTextElement adds
+ * the text leaf at the array tail but does NOT push it onto
+ * openLayoutElementStack, so current_open_element_id returns the PARENT's
+ * id). Returns 0 if no ctx is in-frame or layoutElements is empty. */
+uint32_t nt_ui_internal_last_emitted_element_id(void);
+
+/* Phase 56 ext rework (Clay debug view port): DFS pre-order entry for the
+ * inspector. Mirrors the rows emitted by Clay's Clay__RenderDebugLayoutElementsList
+ * (clay.h:3151) with depth, id-string, bbox, offscreen flag, and element-config
+ * type bitmask (1<<Clay__ElementConfigType bit per config attached). The inspector
+ * walks these in declaration order to render the element tree without seeing
+ * Clay_LayoutElement directly. id_string is borrowed from Clay's
+ * layoutElementIdStrings array -- lifetime extends through the next nt_ui_begin. */
+typedef struct nt_ui_inspector_tree_row {
+    const char *id_string;  /* NUL-not-guaranteed; see id_string_len. Borrowed from Clay's layoutElementIdStrings -- lifetime through next nt_ui_begin. */
+    const char *text_chars; /* NULL unless is_text -- borrowed from textElementData */
+    uint32_t id;
+    float bbox_x, bbox_y, bbox_w, bbox_h; /* Clay Y-down layout bbox */
+    uint16_t id_string_len;
+    uint16_t text_len;
+    uint8_t depth;
+    uint8_t config_mask; /* bit0=Shared bit1=Text bit2=Aspect bit3=Image bit4=Floating bit5=Clip bit6=Border bit7=Custom */
+    uint8_t offscreen;
+    uint8_t is_text; /* element has CLAY__ELEMENT_CONFIG_TYPE_TEXT */
+} nt_ui_inspector_tree_row_t;
+
+/* Fill out[] with up to out_cap pre-order rows; returns count written. ctx
+ * must have just completed nt_ui_end (Clay_EndLayout invoked -- otherwise no
+ * tree is solved). Sets Clay current context internally and restores on exit. */
+int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspector_tree_row_t *out, int32_t out_cap);
+
+/* Layout config of a single element (for the element-info pane). Looked up by
+ * the Clay-assigned id (e.g. from a tree row). found = false if unknown. */
+typedef struct nt_ui_inspector_element_info {
+    bool found;
+    /* Bounding box (Clay Y-down). */
+    float bbox_x, bbox_y, bbox_w, bbox_h;
+    /* Layout config bits. */
+    uint8_t layout_direction; /* 0=LTR 1=TTB (matches Clay_LayoutDirection enum) */
+    uint16_t padding_l, padding_r, padding_t, padding_b;
+    uint16_t child_gap;
+    uint8_t child_align_x; /* 0=L 1=C 2=R */
+    uint8_t child_align_y; /* 0=T 1=C 2=B */
+    /* Element-id string (borrowed). */
+    const char *id_string;
+    uint16_t id_string_len;
+    uint8_t config_mask;
+    /* For SHARED config: background RGBA + corner-radius. */
+    float bg_r, bg_g, bg_b, bg_a;
+    float corner_tl, corner_tr, corner_bl, corner_br;
+    /* For TEXT config: font_size, color, alignment label. */
+    uint16_t text_font_size;
+    uint16_t text_font_id;
+    float text_color_r, text_color_g, text_color_b, text_color_a;
+    uint8_t text_align; /* 0=LEFT 1=CENTER 2=RIGHT */
+} nt_ui_inspector_element_info_t;
+
+nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_context_t *ctx, uint32_t id);
+
+/* Phase 56 ext rework: external symbol that re-exposes the file-static
+ * emit_layout body from nt_ui.c. The body must live there because it touches
+ * Clay private types (Clay_Context fields, Clay__GetHashMapItem, layoutElements
+ * array, etc.) that only the CLAY_IMPLEMENTATION TU can see. nt_ui_inspector.c
+ * forwards the public emit_layout call to this. Asserts in-frame. */
+void nt_ui_internal_emit_inspector_layout_extern(nt_ui_context_t *ctx);
+
+/* Phase 56 ext fix (inspector overlay transform-aware): shared math + emit
+ * helpers used by BOTH nt_ui_debug_draw_hit_zones AND
+ * nt_ui_inspector_overlay_draw. The walker Y-flip + per-level accum apply
+ * convention from D-56-07 (commit f948916) lives here as the single source
+ * of truth so the two overlays can never drift.
+ *
+ * - find_debug_zone:    linear scan of ctx->debug_zones[] by id; NULL if missing.
+ * - project_layout_to_world: project a Clay-layout point through z's accum
+ *   stack (NON-negated rotation, NO per-level Y-flip -- matches what was
+ *   RECORDED at query time inside nt_ui_get_interaction_padded) then apply
+ *   the walker's single GL Y-flip world_y = vy + vh - clay_y.
+ * - emit_filled_quad / emit_outline: sprite-renderer emits used by the
+ *   transformed-overlay path. Vertices in WORLD space (already flipped). */
+const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *ctx, uint32_t id);
+
+void nt_ui_internal_project_layout_to_world(const nt_ui_debug_zone_t *z, float vy, float vh, float x, float y, float *out_x, float *out_y);
+
+void nt_ui_internal_emit_filled_quad(nt_resource_t atlas, uint32_t region, const float v[4][2], uint32_t color);
+
+void nt_ui_internal_emit_outline(nt_resource_t atlas, uint32_t region, const float c[4][2], float thickness, uint32_t color);
+
+/* Phase 56 ext fix (REVIEW-2 P2-1): inspector overlay needs the SAME logical-
+ * to-physical scissor math the walker uses (engine/ui/nt_ui.c::scissor_push)
+ * so the overlay's GPU scissor and the walker's GPU scissor agree on every
+ * target shape (DIRECT vs SCALED viewport, fb offset/scale, Y-flip). Single
+ * source of truth in nt_ui.c -- here we just expose it. (x, y, wp, hp) are
+ * logical-space layout pixels: x/y top-left, wp/hp width/height. The function
+ * computes the physical GL rect and calls nt_gfx_set_scissor; the caller must
+ * then nt_gfx_set_scissor_enabled(true) and re-disable when done. */
+void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp);
 
 #endif /* NT_UI_INTERNAL_H */

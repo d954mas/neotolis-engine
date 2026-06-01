@@ -441,6 +441,13 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_scale
         test_nt_ui_fit
         test_nt_ui_transform
+        test_nt_ui_interaction
+        test_nt_ui_hittest
+        test_nt_ui_clip_hittest
+        test_nt_ui_anim
+        test_nt_ui_button
+        test_nt_ui_debug
+        test_nt_ui_inspector
     )
 
     foreach(_t IN LISTS _nt_ui_test_names)

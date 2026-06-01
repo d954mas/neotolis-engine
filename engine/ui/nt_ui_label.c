@@ -8,6 +8,15 @@
 #include "font/nt_font.h"
 #include "ui/nt_ui_internal.h"
 
+/* Phase 56 ext (descriptor refactor): static descriptor consumed by the
+ * inspector. Blue pill (0xFFC88C5A -- R=90,G=140,B=200; preserved from the
+ * pre-refactor cdv_widget_color switch). */
+const nt_ui_widget_def_t NT_UI_LABEL_DEF = {
+    .name = "nt_label",
+    .pill_color = 0xFFC88C5AU,
+    ._reserved = 0U,
+};
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style) {
     NT_ASSERT(ctx != NULL && "nt_ui_label: ctx must be non-NULL");
@@ -29,6 +38,21 @@ void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const c
                      .wrapMode = (Clay_TextElementConfigWrapMode)style->wrap_mode,
                      .textAlignment = (Clay_TextAlignment)style->align,
                  }));
+
+    /* Phase 56 ext (CHUNK B fix): tag the just-emitted CLAY_TEXT leaf so
+     * nt_ui_inspector shows "nt_label" next to it in the element tree.
+     * current_open_element_id() returns the PARENT's id here -- Clay's
+     * Clay__OpenTextElement appends the text element but does NOT push it
+     * onto openLayoutElementStack (clay.h:1991-2023). Use
+     * last_emitted_element_id() to read layoutElements[length-1] = the leaf
+     * we just emitted. id 0 (Clay's maxElementsExceeded early-out) is
+     * silently dropped by widget_register.
+     *
+     * Layer recovery: CLAY_TEXT_CONFIG above already sets .userData = data, so
+     * cdv_element_layer reads the layer directly from the TEXT config's
+     * userData slot (Clay_TextElementConfig has its own userData at
+     * clay.h:386). No widget-registry duplication needed. */
+    nt_ui_widget_register(ctx, nt_ui_internal_last_emitted_element_id(), &NT_UI_LABEL_DEF, NULL);
 }
 
 void nt_ui_label_sized(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style, float font_size_override) {

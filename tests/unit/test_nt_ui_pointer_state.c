@@ -50,7 +50,7 @@ static void test_pointer_state_set_from_nt_pointer(void) {
     mouse.y = 200.0F;
     mouse.buttons[NT_BUTTON_LEFT].is_down = true;
 
-    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse);
+    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
 
     /* Probe Clay's pointer state via NT_TEST_ACCESS getters. */
     TEST_ASSERT_TRUE(float_eq_bits(100.0F, nt_ui_test_clay_pointer_x(ctx)));
@@ -73,7 +73,7 @@ static void test_pointer_state_button_released(void) {
     mouse.y = 75.0F;
     mouse.buttons[NT_BUTTON_LEFT].is_down = false;
 
-    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse);
+    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
 
     TEST_ASSERT_TRUE(float_eq_bits(50.0F, nt_ui_test_clay_pointer_x(ctx)));
     TEST_ASSERT_TRUE(float_eq_bits(75.0F, nt_ui_test_clay_pointer_y(ctx)));
@@ -98,7 +98,7 @@ static void test_pointer_state_only_left_button_consumed(void) {
     mouse.buttons[NT_BUTTON_RIGHT].is_down = true;
     mouse.buttons[NT_BUTTON_MIDDLE].is_down = true;
 
-    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse);
+    nt_ui_begin(ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
 
     TEST_ASSERT_EQUAL_INT(0, nt_ui_test_clay_pointer_down(ctx));
 

@@ -13,16 +13,35 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
+/* EXPERIMENTAL (Phase 56 ext): API surface may change in v1.9. Used by
+ * ui_buttons_demo and inspector internals. Game code adopting this should
+ * pin the engine version.
+ *
+ * Inspector descriptors: pill name "nt_panel" / "nt_group" + color shown in
+ * the element tree. Engine widget defs use the "nt_" prefix to disambiguate
+ * from Clay's own config-type pills on the same row. Game code may compare
+ * pointer identity against these symbols. */
+extern const nt_ui_widget_def_t NT_UI_PANEL_DEF;
+extern const nt_ui_widget_def_t NT_UI_GROUP_DEF;
+
 /* Panel: image background container.
  * Internally: Clay IMAGE container. No transform/opacity -- use explicit
- * push_transform/push_opacity around panel_begin/end when needed. */
-void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style);
+ * push_transform/push_opacity around panel_begin/end when needed.
+ *
+ * decl (Phase 56 ext, P3-2): optional Clay_ElementDeclaration. NULL = FIT default.
+ * Engine OWNS .image, .backgroundColor, .userData fields -- caller MUST leave
+ * them zero/NULL. .id, .layout, .scroll, .floating, .border, .clip flow through. */
+void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl);
 void nt_ui_panel_end(nt_ui_context_t *ctx);
 
 /* Group: invisible container WITHOUT image.
  * Internally: Clay container with transparent bg. No transform/opacity --
- * use explicit push_transform/push_opacity when needed. */
-void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data);
+ * use explicit push_transform/push_opacity when needed.
+ *
+ * decl (Phase 56 ext, P3-2): optional Clay_ElementDeclaration. NULL = FIT default.
+ * Engine OWNS .custom (anchor) and .userData fields -- caller MUST leave them
+ * NULL. .id, .layout, .scroll, .floating, .border, .clip flow through. */
+void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const Clay_ElementDeclaration *decl);
 void nt_ui_group_end(nt_ui_context_t *ctx);
 
 #endif /* NT_UI_PANEL_H */
