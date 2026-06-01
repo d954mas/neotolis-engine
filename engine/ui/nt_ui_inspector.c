@@ -37,9 +37,11 @@ void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_set_active: ctx must be non-NULL");
     ctx->inspector_active = on;
     if (!on) {
-        /* Clear focus + selection on disable so a re-enable starts clean. */
+        /* Clear focus + selection + collapsed-set on disable so a re-enable
+         * starts clean (the user expects the next open to show the full tree). */
         ctx->inspector_highlight_id = 0U;
         ctx->inspector_selected_id = 0U;
+        ctx->inspector_collapsed_count = 0U;
     }
 }
 

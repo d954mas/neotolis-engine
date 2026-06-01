@@ -31,6 +31,16 @@
 #endif
 _Static_assert((NT_UI_WIDGET_REGISTRY_CAP & (NT_UI_WIDGET_REGISTRY_CAP - 1)) == 0, "NT_UI_WIDGET_REGISTRY_CAP must be a power of two");
 
+/* Phase 56 ext: inspector collapsed-element set. Persistent across frames
+ * (toggled by clicking the dot icon on a row). Linear list scanned O(N) --
+ * N capped at 128, scan cost is negligible vs the layout solve. At-cap
+ * toggle is silently ignored (the user simply can't collapse more nodes
+ * until something is uncollapsed); the inspector is observability, not
+ * correctness. */
+#ifndef NT_UI_INSPECTOR_COLLAPSED_CAP
+#define NT_UI_INSPECTOR_COLLAPSED_CAP 128
+#endif
+
 typedef struct {
     uint32_t id;                   /* 0 = slot empty */
     const nt_ui_widget_def_t *def; /* NULL = slot empty (kept in sync with id==0) */
@@ -185,6 +195,15 @@ struct nt_ui_context {
      * visually consumes the click. Also makes nt_ui_wants_pointer report true
      * so the game can suppress its own world-input. Reset each nt_ui_begin. */
     bool inspector_pointer_consumed;
+
+    /* Phase 56 ext: persistent set of collapsed element ids. Toggling is
+     * driven by clicks on the per-row dot icon inside the inspector. DFS
+     * uses is_collapsed() to skip child enqueue when the parent id is in
+     * the set. Capacity NT_UI_INSPECTOR_COLLAPSED_CAP (default 128); at-cap
+     * adds are silently ignored. Cleared when the inspector is disabled
+     * (set_active(false)). */
+    uint32_t inspector_collapsed_ids[NT_UI_INSPECTOR_COLLAPSED_CAP];
+    uint32_t inspector_collapsed_count;
 
     Clay_Arena clay_arena;
 };

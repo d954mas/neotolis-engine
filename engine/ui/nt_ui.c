@@ -772,6 +772,36 @@ static Clay_String cdv_hex_id_to_string(uint32_t v) {
     return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
 }
 
+/* Phase 56 ext: persistent collapsed-id set helpers. Linear scan -- N <=
+ * NT_UI_INSPECTOR_COLLAPSED_CAP (128). At-cap adds are silently dropped so
+ * the user can still operate but loses no existing collapses. */
+static bool cdv_is_collapsed(const nt_ui_context_t *ctx, uint32_t id) {
+    for (uint32_t i = 0; i < ctx->inspector_collapsed_count; ++i) {
+        if (ctx->inspector_collapsed_ids[i] == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void cdv_toggle_collapsed(nt_ui_context_t *ctx, uint32_t id) {
+    if (id == 0U) {
+        return;
+    }
+    for (uint32_t i = 0; i < ctx->inspector_collapsed_count; ++i) {
+        if (ctx->inspector_collapsed_ids[i] == id) {
+            /* Remove via swap-with-last (order-independent set). */
+            ctx->inspector_collapsed_ids[i] = ctx->inspector_collapsed_ids[ctx->inspector_collapsed_count - 1U];
+            ctx->inspector_collapsed_count--;
+            return;
+        }
+    }
+    if (ctx->inspector_collapsed_count < NT_UI_INSPECTOR_COLLAPSED_CAP) {
+        ctx->inspector_collapsed_ids[ctx->inspector_collapsed_count++] = id;
+    }
+    /* At cap: silently drop (no assert; observability not correctness). */
+}
+
 /* Forward declaration -- mutual recursion with the tree walk. */
 typedef struct {
     int32_t row_count;
@@ -881,11 +911,31 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             }
             if (has_identity) {
                 CLAY({.id = CLAY_IDI("ntInsp_ElementOuter", currentElement->id), .layout = Clay__DebugView_ScrollViewItemLayoutConfig}) {
-                    /* Collapse icon / dot (verbatim shape but no debugData usage --
-                     * we don't track collapse state in the engine; show the dot
-                     * variant always so the layout cadence matches Clay's). */
+                    /* Collapse icon / dot. Click on the inner 8x8 toggles the
+                     * collapsed-set entry for currentElement->id; collapsed
+                     * rows paint the dot in the brighter CDV_COLOR_4 + sharp
+                     * (cornerRadius 0) so users can tell at a glance which
+                     * subtrees are folded. Verbatim shape from Clay's debug
+                     * view -- only the .id + color/radius variation are new. */
+                    const bool currently_collapsed = cdv_is_collapsed(ctx, currentElement->id);
+                    const Clay_ElementId dotId = Clay__HashString(CLAY_STRING("ntInsp_CollapseDot"), 0, currentElement->id);
                     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}, .backgroundColor = CDV_COLOR_3, .cornerRadius = CLAY_CORNER_RADIUS(2)}) {}
+                        CLAY({.id = dotId,
+                              .layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}},
+                              .backgroundColor = currently_collapsed ? CDV_COLOR_4 : CDV_COLOR_3,
+                              .cornerRadius = currently_collapsed ? CLAY_CORNER_RADIUS(0) : CLAY_CORNER_RADIUS(2)}) {}
+                    }
+                    /* Detect click on the dot: same pattern as the close-button
+                     * gate at the top of emit_inspector_layout. Pressed THIS
+                     * frame + pointer-over-dot id = toggle. */
+                    if (context->pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
+                        for (int32_t pi = 0; pi < context->pointerOverIds.length; ++pi) {
+                            const Clay_ElementId *over = Clay_ElementIdArray_Get(&context->pointerOverIds, pi);
+                            if (over->id == dotId.id) {
+                                cdv_toggle_collapsed(ctx, currentElement->id);
+                                break;
+                            }
+                        }
                     }
                     if (offscreen) {
                         CLAY({.layout = {.padding = {8, 8, 2, 2}}, .border = {.color = CDV_COLOR_3, .width = {1, 1, 1, 1, 0}}}) {
@@ -974,10 +1024,11 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                     }
                     CLAY_TEXT(CLAY_STRING("\""), rawTextConfig);
                 }
-            } else if (has_identity && currentElement->childrenOrTextContent.children.length > 0) {
-                /* Only open the 3 indent wrappers when a row was emitted --
-                 * filtered (no-identity) elements descend SILENTLY so anonymous
-                 * Clay containers don't add visible indent steps. */
+            } else if (has_identity && currentElement->childrenOrTextContent.children.length > 0 && !cdv_is_collapsed(ctx, currentElement->id)) {
+                /* Only open the 3 indent wrappers when a row was emitted AND
+                 * the subtree is not collapsed -- filtered (no-identity) and
+                 * collapsed elements descend SILENTLY so the indent steps
+                 * (vertical line + padding) do not appear for hidden subtrees. */
                 Clay__OpenElement();
                 Clay__ConfigureOpenElement((Clay_ElementDeclaration){.layout = {.padding = {.left = 8}}});
                 Clay__OpenElement();
@@ -993,7 +1044,10 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             if (has_identity) {
                 layoutData.row_count++;
             }
-            if (!Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT)) {
+            /* Children are skipped entirely when this id is collapsed --
+             * mirrors Clay's debug-view collapsed flag (clay.h:3281). The
+             * dot icon click toggles the collapsed-set entry for this id. */
+            if (!Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT) && !cdv_is_collapsed(ctx, currentElement->id)) {
                 const int32_t childLen = currentElement->childrenOrTextContent.children.length;
                 int32_t *childElems = currentElement->childrenOrTextContent.children.elements;
                 /* Clay's lifecycle: children.elements is assigned in Clay__CloseElement (clay.h:1828).
