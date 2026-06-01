@@ -3201,23 +3201,40 @@ nt_ui_interaction_t nt_ui_get_interaction_padded(nt_ui_context_t *ctx, uint32_t 
     nt_ui_capture_t *cap = &ctx->captures[pidx];
     const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT]; /* precomputed edges */
 
-    const bool over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb);
-    out.hovered = over;
-    if (over) {
-        ctx->pointer_over_any = true; /* feeds nt_ui_wants_pointer (D-56-08). */
+    /* Phase 56 ext fix (exclusive capture): when ANOTHER widget owns this
+     * pointer's capture (press-began on it, not yet released), THIS widget
+     * sees zero interaction -- no hover, no press, no clicked -- regardless
+     * of where the pointer geometrically sits. Standard UI semantics: drag
+     * inside button A and slide onto button B; B must NOT light up. Without
+     * this gate, B's hit-test still computed over=true while A held the
+     * capture, so a row of touch-padded buttons would all show hover when
+     * the pointer slid across them mid-drag.
+     *
+     * The zone is still RECORDED (the inspector overlay needs to see B's
+     * bbox), but with state_flags=0 (idle) so the visual matches reality:
+     * B is not interacting on this pointer. */
+    const bool exclusive_gated = (cap->active_id != 0U) && (cap->active_id != id);
+
+    bool over = false;
+    if (!exclusive_gated) {
+        over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb);
+        out.hovered = over;
+        if (over) {
+            ctx->pointer_over_any = true; /* feeds nt_ui_wants_pointer (D-56-08). */
+        }
+
+        /* Begin capture on press-over-widget. */
+        if (over && btn.is_pressed) {
+            cap->active_id = id;
+            cap->press_pos[0] = p->x;
+            cap->press_pos[1] = p->y;
+            cap->pos[0] = p->x;
+            cap->pos[1] = p->y;
+            out.pressed_now = true;
+        }
     }
 
-    /* Begin capture on press-over-widget. */
-    if (over && btn.is_pressed) {
-        cap->active_id = id;
-        cap->press_pos[0] = p->x;
-        cap->press_pos[1] = p->y;
-        cap->pos[0] = p->x;
-        cap->pos[1] = p->y;
-        out.pressed_now = true;
-    }
-
-    const bool mine = (cap->active_id == id);
+    const bool mine = !exclusive_gated && (cap->active_id == id);
     if (mine) {
         cap->pos[0] = p->x;
         cap->pos[1] = p->y;
