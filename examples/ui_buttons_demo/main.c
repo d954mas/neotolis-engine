@@ -232,6 +232,7 @@ static uint32_t s_id_swap;
 static uint32_t s_id_icon;
 static uint32_t s_id_icontext;
 static uint32_t s_id_disabled;
+static uint32_t s_id_baked;
 static bool s_btn_ids_ready;
 /* Per-variant click counters. */
 static uint32_t s_clicks_std;
@@ -240,6 +241,7 @@ static uint32_t s_clicks_swap;
 static uint32_t s_clicks_icon;
 static uint32_t s_clicks_icontext;
 static uint32_t s_clicks_disabled; /* should always stay 0 */
+static uint32_t s_clicks_baked;
 
 /* Runtime transform around the reference button grid. */
 static float s_xform_tx;
@@ -253,10 +255,10 @@ static float s_xform_deg;
 #define LAYER_IMG 1
 #define LAYER_TEXT 2
 
-/* Bumped to 1600x1000 logical so the 320x120 buttons + per-cell label + grid
- * gaps fit comfortably with room for status/help bars on the bigger window. */
+/* 1600x1200 logical: 6-cell grid (~720 px tall with status) + new BAKED
+ * TRANSFORM section (~400 px with padding) + help bar. The window matches. */
 #define UI_REF_W 1600.0F
-#define UI_REF_H 1000.0F
+#define UI_REF_H 1200.0F
 // #endregion
 
 // #region binding
@@ -387,6 +389,7 @@ static void declare_reference_buttons(void) {
         s_id_icon = nt_ui_id("btn_icon");
         s_id_icontext = nt_ui_id("btn_icontext");
         s_id_disabled = nt_ui_id("btn_disabled");
+        s_id_baked = nt_ui_id("btn_baked");
         s_btn_ids_ready = true;
     }
 
@@ -501,6 +504,53 @@ static void declare_reference_buttons(void) {
             }
             // #endregion
         }
+
+        // #region (g) BAKED TRANSFORM (7th button -- D-56-07 static proof)
+        /* User scope COMMIT 3: a 7th button wrapped in nt_ui_push_transform
+         * with non-trivial BAKED values so the user sees it offset+rotated+
+         * scaled at IDLE (before any hover), and clicking it at the
+         * transformed on-screen position proves the inverse-affine hit-test
+         * (D-56-07) works for statically-transformed widgets too. Baked values:
+         *   offset_x: +60   (clearly offset from layout slot)
+         *   offset_y: -20
+         *   rotation: 25 deg (CCW visually -- Clay Y-down -> screen flip)
+         *   scale_x:  1.15  (anisotropic)
+         *   scale_y:  0.85
+         * Outer slot has ~80 px extra padding so the rotated button does not
+         * overlap row 2 or the help bar. The button itself uses the eased
+         * STANDARD style; click counter s_clicks_baked. */
+        CLAY({.id = CLAY_ID("ref-btn-baked-section"),
+              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)},
+                         .padding = {.left = 0, .right = 0, .top = 80, .bottom = 80},
+                         .layoutDirection = CLAY_TOP_TO_BOTTOM,
+                         .childGap = 12,
+                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "BAKED TRANSFORM (idle has offset+rotation+scale; click should still work)", &g_cell_title_style);
+            }
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "offset=(+60,-20) rotation=25 deg scale=(1.15,0.85)", &g_cell_sub_style);
+            }
+            CLAY(BTN_SLOT_LAYOUT) {
+                const nt_ui_transform_t baked = {
+                    .offset_x = 60.0F,
+                    .offset_y = -20.0F,
+                    .rotation = 25.0F * 0.017453292F, /* 25 deg -> rad */
+                    .scale_x = 1.15F,
+                    .scale_y = 0.85F,
+                };
+                nt_ui_push_transform(s_ctx, &baked);
+                nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_baked, s_atlas_handle, &s_btn_standard, true);
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_CONTENT_W), CLAY_SIZING_FIXED(BTN_CONTENT_H)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Baked", &g_btn_label_style);
+                }
+                if (nt_ui_button_end(s_ctx)) {
+                    s_clicks_baked++;
+                }
+                nt_ui_pop_transform(s_ctx);
+            }
+        }
+        // #endregion
     }
 }
 // #endregion
@@ -697,11 +747,12 @@ static void frame(void) {
         nt_ui_begin(s_ctx, scale.logical_w, scale.logical_h, g_nt_app.dt, &mouse_logical, 1);
 
         // #region status + help text
-        char status_text[320];
-        const uint32_t total_clicks = s_clicks_std + s_clicks_scale + s_clicks_swap + s_clicks_icon + s_clicks_icontext;
+        char status_text[360];
+        const uint32_t total_clicks = s_clicks_std + s_clicks_scale + s_clicks_swap + s_clicks_icon + s_clicks_icontext + s_clicks_baked;
         const nt_ui_debug_hit_mode_t insp_mode = nt_ui_inspector_get_hit_mode(s_ctx);
-        (void)snprintf(status_text, sizeof status_text, "clicks: Std=%u Scale=%u Swap=%u Icon=%u IconTxt=%u Disabled=%u (total=%u)   tx=%.0f ty=%.0f s=%.2f deg=%.0f   inspector=%s mode=%s clay=%s",
-                       s_clicks_std, s_clicks_scale, s_clicks_swap, s_clicks_icon, s_clicks_icontext, s_clicks_disabled, total_clicks, (double)s_xform_tx, (double)s_xform_ty, (double)s_xform_scale,
+        (void)snprintf(status_text, sizeof status_text,
+                       "clicks: Std=%u Scale=%u Swap=%u Icon=%u IconTxt=%u Disabled=%u Baked=%u (total=%u)   tx=%.0f ty=%.0f s=%.2f deg=%.0f   inspector=%s mode=%s clay=%s", s_clicks_std,
+                       s_clicks_scale, s_clicks_swap, s_clicks_icon, s_clicks_icontext, s_clicks_disabled, s_clicks_baked, total_clicks, (double)s_xform_tx, (double)s_xform_ty, (double)s_xform_scale,
                        (double)s_xform_deg, nt_ui_inspector_is_active(s_ctx) ? "ON" : "off", debug_mode_str(insp_mode), nt_ui_get_debug_overlay(s_ctx) ? "ON" : "off");
         const char *help_text = "D = Clay debug  |  F3 = my debug (inspector + hit zones)  |  F2 cycle hit-zone mode  |  arrows/PgUp-Dn/Q-E/R transform  |  Esc quit";
         // #endregion
@@ -789,10 +840,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Bigger logical window: 1600x1000 so the 320x120 buttons + per-cell label
-     * fit comfortably with margins for status/help bars. */
+    /* Bigger logical window: 1600x1200 so the 2 x 3 grid + BAKED TRANSFORM
+     * section + status/help bars all fit without scaling. */
     g_nt_window.width = 1600;
-    g_nt_window.height = 1000;
+    g_nt_window.height = 1200;
     nt_window_init();
     nt_input_init();
 
