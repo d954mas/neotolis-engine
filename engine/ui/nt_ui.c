@@ -793,6 +793,22 @@ static Clay_String cdv_hex_id_to_string(uint32_t v) {
     return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
 }
 
+/* Same ring strategy for "#RRGGBBAA" color hex strings (SHARED bg-color
+ * inline display per Phase 56 ext UX feedback). Shares the hex ring's
+ * cursor space implicitly because each frame resets cdv_hex_buf_cursor to
+ * 0 and the ring is sized for the worst-case row count. 10 chars ("#"
+ * + 8 hex + NUL) fits in 16. */
+static Clay_String cdv_color_hex_to_string(Clay_Color c) {
+    char *buf = cdv_hex_bufs[cdv_hex_buf_cursor];
+    cdv_hex_buf_cursor = (cdv_hex_buf_cursor + 1U) & (NT_UI_INSPECTOR_INT_BUFS - 1U);
+    const uint8_t r = nt_clamp_f_to_u8(c.r);
+    const uint8_t g = nt_clamp_f_to_u8(c.g);
+    const uint8_t b = nt_clamp_f_to_u8(c.b);
+    const uint8_t a = nt_clamp_f_to_u8(c.a);
+    const int n = snprintf(buf, sizeof cdv_hex_bufs[0], "#%02X%02X%02X%02X", r, g, b, a);
+    return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
+}
+
 /* Phase 56 ext: persistent collapsed-id set helpers. Linear scan -- N <=
  * NT_UI_INSPECTOR_COLLAPSED_CAP (128). At-cap adds are silently dropped so
  * the user can still operate but loses no existing collapses. */
@@ -974,20 +990,46 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                     } else {
                         CLAY_TEXT(cdv_hex_id_to_string(currentElement->id), offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16}) : &Clay__DebugView_TextNameConfig);
                     }
+                    /* Phase 56 ext (CHUNK C, UX fix #5): inline SHARED bg-color
+                     * swatch + hex string in the row's identification area --
+                     * replaces the standalone "Color" pill that the user found
+                     * cryptic ("это мой цвет или нет?"). Surfaced right after
+                     * the id text so the color reads as PART of the row's
+                     * identity. Only emitted when a SHARED config with non-zero
+                     * alpha is attached (matches the pre-fix gate). The matching
+                     * pre-fix "Color" pill in the config-loop below is removed
+                     * (no equivalent left -- the inline form IS the surface). */
+                    for (int32_t cfgScan = 0; cfgScan < currentElement->elementConfigs.length; ++cfgScan) {
+                        Clay_ElementConfig *sc = Clay__ElementConfigArraySlice_Get(&currentElement->elementConfigs, cfgScan);
+                        if (sc->type != CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
+                            continue;
+                        }
+                        const Clay_Color bg = sc->config.sharedElementConfig->backgroundColor;
+                        if (bg.a <= 0) {
+                            break;
+                        }
+                        /* Swatch quad (16x16, corner-radius 4) + hex text. Sits
+                         * in a row container so it shares the vertical center
+                         * with the id text. Border color matches the row's
+                         * subtle frame style. fontSize 14 keeps the row's
+                         * vertical extent unchanged from the verbatim shape. */
+                        CLAY({.layout = {.sizing = {.height = CLAY_SIZING_FIXED(CDV_ROW_HEIGHT - 8)}, .childGap = 4, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
+                            CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}},
+                                  .backgroundColor = bg,
+                                  .cornerRadius = CLAY_CORNER_RADIUS(4),
+                                  .border = {.color = CDV_COLOR_4, .width = {1, 1, 1, 1, 0}}}) {}
+                            CLAY_TEXT(cdv_color_hex_to_string(bg), CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 14}));
+                        }
+                        break;
+                    }
                     for (int32_t elementConfigIndex = 0; elementConfigIndex < currentElement->elementConfigs.length; ++elementConfigIndex) {
                         Clay_ElementConfig *elementConfig = Clay__ElementConfigArraySlice_Get(&currentElement->elementConfigs, elementConfigIndex);
                         if (elementConfig->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
                             const Clay_Color labelColor = {243, 134, 48, 90};
-                            Clay_Color backgroundColor = elementConfig->config.sharedElementConfig->backgroundColor;
                             Clay_CornerRadius radius = elementConfig->config.sharedElementConfig->cornerRadius;
-                            if (backgroundColor.a > 0) {
-                                CLAY({.layout = {.padding = {8, 8, 2, 2}},
-                                      .backgroundColor = labelColor,
-                                      .cornerRadius = CLAY_CORNER_RADIUS(4),
-                                      .border = {.color = labelColor, .width = {1, 1, 1, 1, 0}}}) {
-                                    CLAY_TEXT(CLAY_STRING("Color"), CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 16}));
-                                }
-                            }
+                            /* "Color" pill replaced by the inline swatch + hex
+                             * above. Radius pill kept verbatim -- it's still a
+                             * useful marker for slice9 / rounded panels. */
                             if (radius.bottomLeft > 0) {
                                 CLAY({.layout = {.padding = {8, 8, 2, 2}},
                                       .backgroundColor = labelColor,
@@ -1101,11 +1143,17 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     if (highlightedElementId) {
         /* Mirror clay.h:3303 -- floating highlight rectangle attached to the
          * hovered element. This is the IN-VIEWPORT highlight as the user moves
-         * the pointer over the sidebar. */
+         * the pointer over the sidebar. Tagged with NT_UI_LAYER_DEBUG so the
+         * walker sorts it above any game UI element regardless of declaration
+         * order (the inspector is a debug overlay -- it must always win). */
         CLAY({.id = CLAY_ID("ntInsp_ElementHighlight"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
+              .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG),
               .floating = {.parentId = highlightedElementId, .zIndex = 32767, .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH, .attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID}}) {
-            CLAY({.id = CLAY_ID("ntInsp_ElementHighlightRectangle"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .backgroundColor = CDV_HIGHLIGHT_COLOR}) {}
+            CLAY({.id = CLAY_ID("ntInsp_ElementHighlightRectangle"),
+                  .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
+                  .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG),
+                  .backgroundColor = CDV_HIGHLIGHT_COLOR}) {}
         }
         /* Surface the hovered id to the post-walk overlay. */
         ctx->inspector_highlight_id = highlightedElementId;
@@ -1184,6 +1232,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
      * would land at [screen.w, screen.w + panel_w] -- entirely off-screen. */
     CLAY({.id = CLAY_ID("ntInsp_Root"),
           .layout = {.sizing = {CLAY_SIZING_FIXED((float)CDV_PANEL_WIDTH), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
+          .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG),
           .floating = {.zIndex = 32765,
                        .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_CENTER, .parent = CLAY_ATTACH_POINT_RIGHT_CENTER},
                        .attachTo = CLAY_ATTACH_TO_ROOT,
@@ -1335,22 +1384,17 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                         if (elementConfig->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
                             Clay_SharedElementConfig *sharedConfig = elementConfig->config.sharedElementConfig;
                             CLAY({.layout = {.padding = attributeConfigPadding, .childGap = 8, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+                                /* Phase 56 ext (CHUNK C, UX fix #5): info-pane
+                                 * bg color uses the same swatch + hex shape as
+                                 * the tree row's inline display -- the row and
+                                 * the pane read the same color at a glance. */
                                 CLAY_TEXT(CLAY_STRING("Background Color"), infoTitleConfig);
-                                CLAY({.layout = {.childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
-                                    CLAY_TEXT(CLAY_STRING("{ r: "), infoTextConfig);
-                                    CLAY_TEXT(cdv_int_to_string((int32_t)sharedConfig->backgroundColor.r), infoTextConfig);
-                                    CLAY_TEXT(CLAY_STRING(", g: "), infoTextConfig);
-                                    CLAY_TEXT(cdv_int_to_string((int32_t)sharedConfig->backgroundColor.g), infoTextConfig);
-                                    CLAY_TEXT(CLAY_STRING(", b: "), infoTextConfig);
-                                    CLAY_TEXT(cdv_int_to_string((int32_t)sharedConfig->backgroundColor.b), infoTextConfig);
-                                    CLAY_TEXT(CLAY_STRING(", a: "), infoTextConfig);
-                                    CLAY_TEXT(cdv_int_to_string((int32_t)sharedConfig->backgroundColor.a), infoTextConfig);
-                                    CLAY_TEXT(CLAY_STRING(" }"), infoTextConfig);
-                                    CLAY({.layout = {.sizing = {.width = CLAY_SIZING_FIXED(10)}}}) {}
+                                CLAY({.layout = {.childGap = 8, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
                                     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(CDV_ROW_HEIGHT - 8), CLAY_SIZING_FIXED(CDV_ROW_HEIGHT - 8)}},
                                           .backgroundColor = sharedConfig->backgroundColor,
                                           .cornerRadius = CLAY_CORNER_RADIUS(4),
                                           .border = {.color = CDV_COLOR_4, .width = {1, 1, 1, 1, 0}}}) {}
+                                    CLAY_TEXT(cdv_color_hex_to_string(sharedConfig->backgroundColor), infoTextConfig);
                                 }
                             }
                         } else if (elementConfig->type == CLAY__ELEMENT_CONFIG_TYPE_TEXT) {

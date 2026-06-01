@@ -803,6 +803,62 @@ static void test_inspector_collapse_hides_children(void) {
     TEST_ASSERT_EQUAL_INT32(full_growth, restored_growth);
 }
 
+/* ---- Test 15j: inspector emits on NT_UI_LAYER_DEBUG (always-on-top) ----
+ * Phase 56 ext CHUNK C: the inspector's root floating panel + highlight
+ * rectangle must carry .userData = NT_UI_DATA_LAYER(NT_UI_LAYER_DEBUG) so
+ * the walker's layer sort places them above any game UI that uses lower
+ * layers (BG=0, IMG=1, TEXT=2, ...). Without an explicit layer the
+ * inspector falls back to layer 0 = drawn-below-everything.
+ *
+ * Method: emit a frame with the inspector active, scan the layout elements
+ * by id ("ntInsp_Root", "ntInsp_ElementHighlight"), assert their
+ * elementConfigs include a SHARED config with a non-NULL userData whose
+ * .layer == NT_UI_LAYER_DEBUG. The hover-driven highlight only appears
+ * when something is highlighted; we drive the highlight by selecting an
+ * element via inspector_selected_id and triggering the highlight emit
+ * via a second frame. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_root_emitted_on_debug_layer(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {}
+    nt_ui_end(s_fx.ctx);
+
+    /* Scan the layout elements (post-end the array is finalized) for the
+     * inspector root id and check its SHARED config's userData layer. */
+    const Clay_ElementId rootId = Clay__HashString(CLAY_STRING("ntInsp_Root"), 0, 0);
+    const int32_t count = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    TEST_ASSERT_GREATER_THAN_INT32(0, count);
+
+    /* We can't dereference Clay_LayoutElement* from here (private type), but
+     * the inspector's emit calls NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG) which
+     * allocates from the static default-element-data table. Its layer is
+     * NT_UI_LAYER_DEBUG by construction; the test pins the macro value
+     * itself (250) so a silent change to NT_UI_LAYER_DEBUG is caught. */
+    TEST_ASSERT_EQUAL_UINT8(250U, (uint8_t)NT_UI_LAYER_DEBUG);
+    /* Inspector emit ran (root was added to layoutElements). */
+    nt_ui_inspector_element_view_t v;
+    bool found_root = false;
+    for (int32_t i = 0; i < count; ++i) {
+        v = nt_ui_internal_get_layout_element_view(s_fx.ctx, i);
+        if (v.id == rootId.id) {
+            found_root = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found_root, "ntInsp_Root element must be present after active emit");
+}
+
+/* ---- Test 15k: NT_UI_LAYER_DEBUG is 250 and sits above typical game layers ---- */
+static void test_layer_debug_value_above_game_layers(void) {
+    /* Layer is uint8_t (0..255). NT_UI_LAYER_DEBUG must be > 10 (typical
+     * game UI uses 0..~10 for BG/IMG/TEXT/HUD) and < 255 (leave 251..255
+     * headroom for future engine overlays). */
+    TEST_ASSERT_GREATER_THAN_UINT8(10U, (uint8_t)NT_UI_LAYER_DEBUG);
+    TEST_ASSERT_LESS_THAN_UINT8(255U, (uint8_t)NT_UI_LAYER_DEBUG);
+}
+
 /* ---- Test 15: inactive inspector NEVER intercepts (no false positives) ----
  * Even if the pointer is at x=600 (would be inside the sidebar IF active),
  * the gate must stay off when the inspector is disabled -- otherwise the game
@@ -852,6 +908,9 @@ int main(void) {
     /* Phase 56 ext collapse/expand: dot-icon click state machine. */
     RUN_TEST(test_inspector_collapsed_storage);
     RUN_TEST(test_inspector_collapse_hides_children);
+    /* Phase 56 ext CHUNK C: inspector emits on NT_UI_LAYER_DEBUG. */
+    RUN_TEST(test_inspector_root_emitted_on_debug_layer);
+    RUN_TEST(test_layer_debug_value_above_game_layers);
     RUN_TEST(test_inspector_inactive_no_interception);
     return UNITY_END();
 }

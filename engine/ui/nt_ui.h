@@ -92,6 +92,15 @@ typedef struct {
     uint8_t _reserved[3];
 } nt_ui_element_data_t;
 
+/* Phase 56 ext: well-known debug layer for nt_ui_inspector emit.
+ * Games typically use 0..~10 for normal UI (BG/IMG/TEXT/HUD); the inspector
+ * floats its sidebar + highlight overlay above ALL game UI by tagging its
+ * Clay elements with NT_UI_DATA_LAYER(NT_UI_LAYER_DEBUG). 250 leaves a small
+ * headroom (251..255) for future engine-level overlays without colliding
+ * with the inspector. Layer is uint8_t (0..255); the walker sort key is
+ * (zIndex asc, layer asc, declaration). */
+#define NT_UI_LAYER_DEBUG ((nt_ui_layer_t)250)
+
 /* Macros allocate from nt_mem_scratch (frame arena) so the pointer stays valid
  * across helper-function returns until the next nt_mem_scratch_reset. Game
  * MUST init scratch before any CLAY({...}) declaration.
