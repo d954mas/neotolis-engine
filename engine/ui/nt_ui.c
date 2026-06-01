@@ -938,6 +938,18 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             if (!Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT)) {
                 const int32_t childLen = currentElement->childrenOrTextContent.children.length;
                 int32_t *childElems = currentElement->childrenOrTextContent.children.elements;
+                /* Clay's lifecycle: children.elements is assigned in Clay__CloseElement (clay.h:1828).
+                 * Our verbatim port is invoked from nt_ui_end BEFORE Clay_EndLayout, so the
+                 * auto-emitted Clay__RootContainer (always element 0) is still OPEN -- its
+                 * children.elements is NULL even though children.length tracks how many user
+                 * top-level CLAY blocks closed under it. For that single case the live child
+                 * indices are at the BOTTOM of context->layoutElementChildrenBuffer (the buffer
+                 * Clay uses for in-flight children; clay.h:1906). Every other element on the
+                 * walk path either has children.elements already populated (closed normally)
+                 * or is genuinely a leaf. */
+                if (childLen > 0 && childElems == NULL && currentElementIndex == 0) {
+                    childElems = context->layoutElementChildrenBuffer.internalArray;
+                }
                 if (childLen > 0 && childElems != NULL) {
                     for (int32_t i = childLen - 1; i >= 0; --i) {
                         if (dfs_length >= CDV_DFS_CAP) {

@@ -377,6 +377,56 @@ static void test_inspector_pointer_outside_sidebar_normal(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* ---- Test 15b: walker enumerates the user's tree (NOT just the auto-root) ----
+ * Regression pin: cdv_render_layout_elements_list runs from nt_ui_end BEFORE
+ * Clay_EndLayout closes the auto-emitted Clay__RootContainer. At that point
+ * Clay__RootContainer.children.elements is NULL even though children.length is
+ * populated -- the walker has to fall back to context->layoutElementChildrenBuffer
+ * to find the user's first-level CLAY blocks. The pre-fix walker stopped at the
+ * auto-root and emitted only ONE ElementOuter row (regardless of how big the
+ * user tree was). The fix surfaces every reachable element.
+ *
+ * We pin the regression by inspector-emitted-element-count growth. Each row the
+ * walker visits emits a `CLAY({.id = CLAY_IDI("ntInsp_ElementOuter", ...)})`
+ * block (+ inner Clay calls). With ~6 user elements (root + 5 panels) the
+ * walker must emit substantially more inspector wrappers than the empty-root
+ * test above. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_walker_enumerates_user_tree(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+
+    /* Baseline: empty user root -> inspector wraps {RC + user_root} = 2 walker rows. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root_empty")}) {}
+    const int32_t before_empty = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    const int32_t empty_after = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    const int32_t empty_inspector_grew = empty_after - before_empty;
+
+    /* User tree with 5 children -> walker must visit RC + root + 5 children = 7 rows. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root_full")}) {
+        CLAY({.id = CLAY_ID("child1"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+        CLAY({.id = CLAY_ID("child2"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+        CLAY({.id = CLAY_ID("child3"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+        CLAY({.id = CLAY_ID("child4"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+        CLAY({.id = CLAY_ID("child5"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+    }
+    const int32_t before_full = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    const int32_t full_after = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    const int32_t full_inspector_grew = full_after - before_full;
+
+    /* The full-tree walk must emit strictly more inspector elements than the
+     * empty-root walk -- pre-fix, both produced the SAME count (walker stopped
+     * at Clay__RootContainer because children.elements was NULL). */
+    TEST_ASSERT_GREATER_THAN_INT32(empty_inspector_grew, full_inspector_grew);
+    /* Each extra user element adds at least one ElementOuter wrapper; 5 extra
+     * children must add at least 5 extra inspector elements. */
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(empty_inspector_grew + 5, full_inspector_grew);
+}
+
 /* ---- Test 15: inactive inspector NEVER intercepts (no false positives) ----
  * Even if the pointer is at x=600 (would be inside the sidebar IF active),
  * the gate must stay off when the inspector is disabled -- otherwise the game
@@ -411,6 +461,7 @@ int main(void) {
     /* Phase 56 ext fix: sidebar input interception regression pins. */
     RUN_TEST(test_inspector_intercepts_pointer_over_sidebar);
     RUN_TEST(test_inspector_pointer_outside_sidebar_normal);
+    RUN_TEST(test_inspector_walker_enumerates_user_tree);
     RUN_TEST(test_inspector_inactive_no_interception);
     return UNITY_END();
 }
