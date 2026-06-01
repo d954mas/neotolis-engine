@@ -77,7 +77,7 @@ static void test_registry_register_lookup(void) {
     /* Empty by default. */
     TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
     /* Register one. */
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("foo"), &NT_UI_BUTTON_DEF, NULL);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("foo"), &NT_UI_BUTTON_DEF, NULL, NULL);
     TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
     /* Different id, same bucket NOT guaranteed -- but distinct lookups return NULL. */
     TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("bar")));
@@ -88,7 +88,7 @@ static void test_registry_register_lookup(void) {
 static void test_registry_resets_each_begin(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("foo"), &NT_UI_BUTTON_DEF, NULL);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("foo"), &NT_UI_BUTTON_DEF, NULL, NULL);
     TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
     nt_ui_end(s_fx.ctx);
 
@@ -107,10 +107,10 @@ static void test_registry_replace_on_collision(void) {
      * id & (CAP-1) is identical for both. CAP is power-of-two by _Static_assert. */
     const uint32_t base_id = nt_ui_id("collide_a");
     const uint32_t collide_id = base_id + (uint32_t)NT_UI_WIDGET_REGISTRY_CAP;
-    nt_ui_widget_register(s_fx.ctx, base_id, &NT_UI_BUTTON_DEF, NULL);
+    nt_ui_widget_register(s_fx.ctx, base_id, &NT_UI_BUTTON_DEF, NULL, NULL);
     TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, base_id));
     /* Collide -- new write must overwrite the slot. */
-    nt_ui_widget_register(s_fx.ctx, collide_id, &NT_UI_IMAGE_DEF, NULL);
+    nt_ui_widget_register(s_fx.ctx, collide_id, &NT_UI_IMAGE_DEF, NULL, NULL);
     TEST_ASSERT_EQUAL_PTR(&NT_UI_IMAGE_DEF, nt_ui_widget_lookup(s_fx.ctx, collide_id));
     /* The original id now misses (replace-on-collision policy). */
     TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, base_id));
@@ -121,7 +121,7 @@ static void test_registry_replace_on_collision(void) {
 static void test_registry_id_zero_dropped(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    nt_ui_widget_register(s_fx.ctx, 0U, &NT_UI_BUTTON_DEF, NULL); /* must not assert */
+    nt_ui_widget_register(s_fx.ctx, 0U, &NT_UI_BUTTON_DEF, NULL, NULL); /* must not assert */
     TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, 0U));
     nt_ui_end(s_fx.ctx);
 }
@@ -138,8 +138,8 @@ static const nt_ui_widget_def_t TEST_GAME_INV_SLOT_DEF = {
 static void test_registry_engine_and_game_defs_coexist(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("a_btn"), &NT_UI_BUTTON_DEF, NULL);
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("a_slot"), &TEST_GAME_INV_SLOT_DEF, NULL);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("a_btn"), &NT_UI_BUTTON_DEF, NULL, NULL);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("a_slot"), &TEST_GAME_INV_SLOT_DEF, NULL, NULL);
 
     const nt_ui_widget_def_t *btn = nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("a_btn"));
     const nt_ui_widget_def_t *slot = nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("a_slot"));
@@ -532,7 +532,7 @@ static void test_widget_register_padded_roundtrip(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     const int16_t pad[4] = {12, 14, 16, 18};
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("btn_padded"), &NT_UI_BUTTON_DEF, pad);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("btn_padded"), &NT_UI_BUTTON_DEF, pad, NULL);
     /* Def still resolves through lookup. */
     TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("btn_padded")));
     /* Padding is recovered exactly. */
@@ -551,7 +551,7 @@ static void test_widget_register_padded_roundtrip(void) {
 static void test_widget_unpadded_no_hit_padding(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("img"), &NT_UI_IMAGE_DEF, NULL);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("img"), &NT_UI_IMAGE_DEF, NULL, NULL);
     int16_t out[4] = {99, 99, 99, 99};
     TEST_ASSERT_FALSE(nt_ui_widget_get_hit_padding(s_fx.ctx, nt_ui_id("img"), out));
     /* out untouched on miss (documented contract). */
@@ -1096,6 +1096,51 @@ static void test_overlay_skips_padded_zone_for_zero_padding(void) {
     nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
 }
 
+/* ---- Test 15o: layer is recovered from widget_registry when registered with data ----
+ * Phase 56 ext (layer-from-data fix). nt_ui_widget_register now captures the
+ * caller's nt_ui_element_data_t->layer alongside def + padding. The inspector
+ * info pane + tree layer column fall back to this slot when Clay's userData
+ * lookup misses (CLAY_TEXT leaves can't carry SHARED config -- nt_ui_label's
+ * layer is otherwise discarded). Pin the registry roundtrip directly. */
+static void test_widget_register_layer_roundtrip(void) {
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    /* Register with explicit element_data carrying layer 7. */
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("layered_btn"), &NT_UI_BUTTON_DEF, NULL, NT_UI_DATA_LAYER((nt_ui_layer_t)7));
+    uint8_t out = 0U;
+    TEST_ASSERT_TRUE(nt_ui_widget_get_layer(s_fx.ctx, nt_ui_id("layered_btn"), &out));
+    TEST_ASSERT_EQUAL_UINT8(7U, out);
+    /* NULL-data register reports no layer (out untouched). */
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("plain_btn"), &NT_UI_BUTTON_DEF, NULL, NULL);
+    out = 99U;
+    TEST_ASSERT_FALSE(nt_ui_widget_get_layer(s_fx.ctx, nt_ui_id("plain_btn"), &out));
+    TEST_ASSERT_EQUAL_UINT8(99U, out); /* untouched on miss */
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 15p: nt_ui_label propagates element_data->layer to widget_registry ----
+ * End-to-end pin for the bug ("nt_label без слоя? почему не написан"). The
+ * label widget is a CLAY_TEXT leaf with no SHARED config slot for userData;
+ * Clay-side lookup of layer used to return -1 ("(none)") in the inspector.
+ * After the fix, nt_ui_label forwards `data` to nt_ui_widget_register so the
+ * inspector recovers the layer from the registry. */
+static void test_label_widget_layer_recovered_from_registry(void) {
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    /* Declare a label with explicit layer 2 (LAYER_TEXT in the demo). */
+    uint32_t leaf_id = 0U;
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_label(s_fx.ctx, NT_UI_DATA_LAYER((nt_ui_layer_t)2), "Save", &s_label_style);
+        leaf_id = nt_ui_internal_last_emitted_element_id();
+    }
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, leaf_id);
+    /* Registry must have the layer recorded for the leaf id. */
+    uint8_t layer = 0U;
+    TEST_ASSERT_TRUE(nt_ui_widget_get_layer(s_fx.ctx, leaf_id, &layer));
+    TEST_ASSERT_EQUAL_UINT8(2U, layer);
+    nt_ui_end(s_fx.ctx);
+}
+
 /* ---- Test 15: inactive inspector NEVER intercepts (no false positives) ----
  * Even if the pointer is at x=600 (would be inside the sidebar IF active),
  * the gate must stay off when the inspector is disabled -- otherwise the game
@@ -1160,6 +1205,12 @@ int main(void) {
      * silently break the contract that surfaces the regression. */
     RUN_TEST(test_overlay_fallback_chain_with_padded_button);
     RUN_TEST(test_overlay_skips_padded_zone_for_zero_padding);
+    /* Phase 56 ext (layer-from-data fix): widget_registry captures the
+     * caller's nt_ui_element_data_t->layer alongside def + padding. The
+     * inspector layer column falls back to this for CLAY_TEXT leaves where
+     * Clay userData has no slot to live in. */
+    RUN_TEST(test_widget_register_layer_roundtrip);
+    RUN_TEST(test_label_widget_layer_recovered_from_registry);
     RUN_TEST(test_inspector_inactive_no_interception);
     return UNITY_END();
 }

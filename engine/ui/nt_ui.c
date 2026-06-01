@@ -738,8 +738,14 @@ static inline Clay_Color cdv_widget_color_from_packed(uint32_t packed) {
 }
 
 /* Engine extension column: layer number from nt_ui_element_data_t.layer (via
- * Clay's userData). Returns -1 if userData is NULL. */
-static int32_t cdv_element_layer(Clay_LayoutElement *el) {
+ * Clay's userData). Returns -1 if userData is NULL.
+ *
+ * Fallback path (Phase 56 ext, layer-from-data fix): CLAY_TEXT elements do
+ * not carry SHARED config, so .userData has no slot to live in. nt_ui_label
+ * receives nt_ui_element_data_t* from the caller and forwards the layer to
+ * widget_registry via nt_ui_widget_register(..., data) -- recoverable here
+ * via nt_ui_widget_get_layer when the Clay-side userData lookup misses. */
+static int32_t cdv_element_layer(const nt_ui_context_t *ctx, Clay_LayoutElement *el) {
     for (int32_t i = 0; i < el->elementConfigs.length; ++i) {
         Clay_ElementConfig *cfg = Clay__ElementConfigArraySlice_Get(&el->elementConfigs, i);
         if (cfg->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
@@ -749,6 +755,13 @@ static int32_t cdv_element_layer(Clay_LayoutElement *el) {
                 return (int32_t)d->layer;
             }
         }
+    }
+    /* Widget registry fallback: leaf-TEXT (nt_ui_label) lands here -- the
+     * label widget forwards its caller's nt_ui_element_data_t->layer to
+     * the per-frame registry slot. */
+    uint8_t reg_layer = 0;
+    if (nt_ui_widget_get_layer(ctx, el->id, &reg_layer)) {
+        return (int32_t)reg_layer;
     }
     return -1;
 }
@@ -908,7 +921,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             Clay_LayoutElementHashMapItem *currentElementData = Clay__GetHashMapItem(currentElement->id);
             bool offscreen = currentElementData != NULL && Clay__ElementIsOffscreen(&currentElementData->boundingBox);
             /* Phase 56 ext extension columns: widget descriptor pill + layer cell. */
-            const int32_t layer = cdv_element_layer(currentElement);
+            const int32_t layer = cdv_element_layer(ctx, currentElement);
             const nt_ui_widget_def_t *wdef = nt_ui_widget_lookup(ctx, currentElement->id);
             Clay_String idString = context->layoutElementIdStrings.internalArray[currentElementIndex];
             /* Phase 56 ext fix: filter out the 3 anonymous indent wrappers we
@@ -1334,7 +1347,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                         CLAY_TEXT(CLAY_STRING("Widget"), infoTitleConfig);
                         CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(sel_w_tag), .chars = sel_w_tag}), infoTextConfig);
                         CLAY_TEXT(CLAY_STRING("Layer"), infoTitleConfig);
-                        const int32_t selLayer = cdv_element_layer(selectedItem->layoutElement);
+                        const int32_t selLayer = cdv_element_layer(ctx, selectedItem->layoutElement);
                         if (selLayer >= 0) {
                             CLAY_TEXT(cdv_int_to_string(selLayer), infoTextConfig);
                         } else {
@@ -1452,7 +1465,7 @@ void nt_ui_internal_emit_inspector_layout_extern(nt_ui_context_t *ctx) { nt_ui_i
  * descriptor is acceptable, complex chaining would cost runtime + memory for
  * no real win at the inspector cap of ~128 widgets per frame. id 0 is the
  * no-widget sentinel; silently dropped. NULL def is silently dropped. */
-void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]) {
+void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4], const nt_ui_element_data_t *data) {
     NT_ASSERT(ctx != NULL && "nt_ui_widget_register: ctx must be non-NULL");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_widget_register: pad_lrtb components must be >= 0");
     if (id == 0U || def == NULL) {
@@ -1474,6 +1487,16 @@ void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget
         s->hit_padding_lrtb[1] = 0;
         s->hit_padding_lrtb[2] = 0;
         s->hit_padding_lrtb[3] = 0;
+    }
+    /* Layer fallback for LEAF widgets whose Clay userData slot can't carry
+     * SHARED config (CLAY_TEXT). When data is NULL the caller is explicitly
+     * saying "no element_data" -- inspector reports (none). */
+    if (data != NULL) {
+        s->has_layer = 1U;
+        s->layer = (uint8_t)data->layer;
+    } else {
+        s->has_layer = 0U;
+        s->layer = 0U;
     }
 }
 
@@ -1502,6 +1525,21 @@ bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16
     out_lrtb[1] = s->hit_padding_lrtb[1];
     out_lrtb[2] = s->hit_padding_lrtb[2];
     out_lrtb[3] = s->hit_padding_lrtb[3];
+    return true;
+}
+
+bool nt_ui_widget_get_layer(const nt_ui_context_t *ctx, uint32_t id, uint8_t *out_layer) {
+    NT_ASSERT(ctx != NULL && "nt_ui_widget_get_layer: ctx must be non-NULL");
+    NT_ASSERT(out_layer != NULL && "nt_ui_widget_get_layer: out_layer must be non-NULL");
+    if (id == 0U) {
+        return false;
+    }
+    const uint32_t bucket = id & (NT_UI_WIDGET_REGISTRY_CAP - 1U);
+    const nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
+    if (s->id != id || !s->has_layer) {
+        return false;
+    }
+    *out_layer = s->layer;
     return true;
 }
 // #endregion

@@ -45,7 +45,15 @@ typedef struct {
     uint32_t id;                   /* 0 = slot empty */
     const nt_ui_widget_def_t *def; /* NULL = slot empty (kept in sync with id==0) */
     uint8_t has_padding;           /* 0 = none recorded, 1 = hit_padding_lrtb is valid */
-    uint8_t _pad[3];
+    /* Phase 56 ext (layer-from-data): captured nt_ui_element_data_t->layer at register
+     * time. The inspector's per-row layer column + info pane fall back to this when
+     * Clay's userData slot is empty (CLAY_TEXT leaves can't carry SHARED config /
+     * userData, so nt_ui_label's layer would otherwise be lost). has_layer == 0 keeps
+     * the existing "(none)" / -1 sentinel path; has_layer == 1 surfaces the stored
+     * uint8_t. Matches nt_ui_layer_t = uint8_t exactly. */
+    uint8_t has_layer; /* 0 = no element_data on register, 1 = layer is valid */
+    uint8_t layer;     /* matches nt_ui_layer_t size */
+    uint8_t _pad;
     int16_t hit_padding_lrtb[4]; /* layout-space padding {l,r,t,b}; matches nt_ui_button_style_t */
 } nt_ui_widget_slot_t;
 

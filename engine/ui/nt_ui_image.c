@@ -55,6 +55,6 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_reso
          * shows "image" in the tree. Clay auto-assigns the id (no game-side
          * id needed); we read it via the internal accessor (the just-opened
          * element is the current top of openLayoutElementStack). */
-        nt_ui_widget_register(ctx, nt_ui_internal_current_open_element_id(), &NT_UI_IMAGE_DEF, NULL);
+        nt_ui_widget_register(ctx, nt_ui_internal_current_open_element_id(), &NT_UI_IMAGE_DEF, NULL, data);
     }
 }

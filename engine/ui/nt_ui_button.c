@@ -117,7 +117,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
      * at every nt_ui_begin. id is guaranteed non-zero by the assert above.
      * Pass style->hit_padding_lrtb so the inspector overlay can outline the
      * visual bbox AND the padded hit zone distinctly. */
-    nt_ui_widget_register(ctx, id, &NT_UI_BUTTON_DEF, style->hit_padding_lrtb);
+    nt_ui_widget_register(ctx, id, &NT_UI_BUTTON_DEF, style->hit_padding_lrtb, data);
 
     ctx->pending_button.active = true;
     ctx->pending_button.clicked = in.clicked;

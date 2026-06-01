@@ -190,7 +190,7 @@ void nt_ui_end(nt_ui_context_t *ctx);
  *   static const nt_ui_widget_def_t INV_SLOT_DEF = {
  *       .name = "inv_slot", .pill_color = 0xFFB060A0,
  *   };
- *   nt_ui_widget_register(ctx, id, &INV_SLOT_DEF, NULL);
+ *   nt_ui_widget_register(ctx, id, &INV_SLOT_DEF, NULL, NULL);
  */
 typedef struct nt_ui_widget_def_t {
     const char *name;    /* shown in inspector pill; e.g. "button" */
@@ -201,10 +201,15 @@ typedef struct nt_ui_widget_def_t {
 
 /* Register the widget at `id` with the descriptor `def`. Optional
  * `pad_lrtb` records the touch-target inflation so the inspector overlay can
- * outline the padded hit zone distinctly; pass NULL for none. def must
- * outlive the frame (static const is the canonical pattern). id 0 is
- * silently dropped (sentinel). def NULL is silently dropped. */
-void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]);
+ * outline the padded hit zone distinctly; pass NULL for none. Optional
+ * `data` captures the caller's nt_ui_element_data_t->layer so the inspector
+ * info pane + tree layer column can recover the layer for LEAF widgets where
+ * Clay's userData slot is unreachable (CLAY_TEXT elements have no SHARED
+ * config -- nt_ui_label's layer is otherwise discarded). Pass NULL to leave
+ * the slot's layer field unset (inspector falls back to "(none)" / -1).
+ * def must outlive the frame (static const is the canonical pattern). id 0
+ * is silently dropped (sentinel). def NULL is silently dropped. */
+void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4], const nt_ui_element_data_t *data);
 
 /* Return the descriptor registered for `id` this frame, or NULL when no
  * widget is registered at that id. The returned pointer is the same one
@@ -216,6 +221,14 @@ const nt_ui_widget_def_t *nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32
  * (out untouched) when the id is not registered OR was registered with a
  * NULL hit_padding_lrtb. */
 bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16_t out_lrtb[4]);
+
+/* Read back the registered layer for id. Returns true and writes the layer
+ * (0..255) into *out_layer when the id has a recorded layer; returns false
+ * (*out_layer untouched) when the id is not registered OR was registered
+ * with a NULL data pointer. Used by the inspector to recover the layer for
+ * CLAY_TEXT leaves (nt_ui_label) whose Clay userData slot cannot carry the
+ * SHARED-config-attached nt_ui_element_data_t. */
+bool nt_ui_widget_get_layer(const nt_ui_context_t *ctx, uint32_t id, uint8_t *out_layer);
 
 /* Read-only on frozen_cmds + bindings; per-walk stats reflect the latest call.
  * Order: zIndex asc, then layer asc, then declaration. SCISSOR/CUSTOM are

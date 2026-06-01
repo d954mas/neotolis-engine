@@ -47,7 +47,10 @@ void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const c
      * last_emitted_element_id() to read layoutElements[length-1] = the leaf
      * we just emitted. id 0 (Clay's maxElementsExceeded early-out) is
      * silently dropped by widget_register. */
-    nt_ui_widget_register(ctx, nt_ui_internal_last_emitted_element_id(), &NT_UI_LABEL_DEF, NULL);
+    /* Phase 56 ext (layer-from-data): forward `data` so the registry captures the
+     * caller's layer. CLAY_TEXT has no SHARED config -> .userData has no slot,
+     * so the layer would otherwise be discarded for label widgets. */
+    nt_ui_widget_register(ctx, nt_ui_internal_last_emitted_element_id(), &NT_UI_LABEL_DEF, NULL, data);
 }
 
 void nt_ui_label_sized(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style, float font_size_override) {
