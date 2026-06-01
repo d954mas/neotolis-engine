@@ -20,7 +20,6 @@
 #include <string.h>
 
 #include "clay.h"
-#include "core/nt_assert.h"
 #include "graphics/nt_gfx.h"
 #include "input/nt_input.h"
 #include "test_helpers/nt_assert_trap.h"

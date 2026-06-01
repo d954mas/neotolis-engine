@@ -26,7 +26,6 @@
 #include <string.h>
 
 #include "core/nt_assert.h"
-#include "core/nt_builtins.h"
 #include "graphics/nt_gfx.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
