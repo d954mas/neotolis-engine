@@ -1,70 +1,64 @@
 #ifndef NT_UI_INSPECTOR_H
 #define NT_UI_INSPECTOR_H
 
-/* Phase 56 ext rework: nt_ui_inspector -- a Clay-styled debug view + engine
- * extensions.
+/* Phase 56 ext rework (verbatim Clay debug view port).
  *
- * Design ported from Clay's built-in `Clay__RenderDebugView` (deps/clay/clay.h:
- * lines ~3392-3800 -- the floating right-pinned debug panel with element tree,
- * collapse indicators, config-type pills, and per-element info pane). Clay is
- * zlib-licensed; the visual structure (colors `CLAY__DEBUGVIEW_COLOR_1..4`,
- * row heights, layout proportions, info-pane attribute rows) is reproduced
- * here as faithfully as Clay's source supports for a post-walk overlay
- * (Clay's own debug view runs INSIDE the declaration phase via CLAY({...})
- * macros; ours runs AFTER nt_ui_walk and emits sprite + text commands
- * directly through our renderers, which keeps the inspector callable in the
- * same place as nt_stats_draw).
+ * Architecture: at nt_ui_end -- BEFORE Clay_EndLayout -- the engine injects
+ * nt_ui_inspector_emit_layout(ctx) which emits CLAY({...}) blocks that
+ * REPRODUCE Clay's `Clay__RenderDebugView` (deps/clay/clay.h:3392) 1:1 into
+ * the SAME layout pass. The user's UI and the inspector solve, render, and
+ * cull through the exact same pipeline. There is now ONE debug system --
+ * Clay's built-in `Clay_SetDebugModeEnabled` wiring has been removed and
+ * `nt_ui_set_debug_overlay` / `nt_ui_get_debug_overlay` are deleted from
+ * the public API.
  *
- * Extensions ON TOP of the Clay design:
- *   1) Widget-type pill per row -- pulled from ctx->widget_registry: button /
- *      image / label / panel / group (or "(plain Clay)" for raw CLAY).
- *   2) Hit-zone overlay -- the inspector calls nt_ui_debug_draw_hit_zones at
- *      the end of its draw when debug_recording is on. This RE-COUPLES the
- *      inspector and the overlay: F3 toggles both, F1 is redundant.
+ * The post-walk overlay (nt_ui_inspector_overlay_draw) paints the hit-zone
+ * + id label for EXACTLY ONE element: the one the user is currently focused
+ * on (hovered widget OR clicked sidebar row). Filter state lives in
+ * ctx->inspector_highlight_id, written during emit_layout by the verbatim
+ * port and consumed by overlay_draw. No mode cycling -- the focus is the
+ * filter.
  *
- * Public API:
- *   set_active / is_active  -- persistent toggle (zero overhead when off).
- *   draw                    -- call AFTER nt_ui_walk, BEFORE nt_gfx_end_pass.
+ * Public API (3 functions):
+ *   set_active / is_active   -- persistent toggle (zero overhead when off)
+ *   emit_layout              -- called by nt_ui_end (engine-internal use)
+ *   overlay_draw             -- call AFTER nt_ui_walk, BEFORE nt_gfx_end_pass
  *
- * The inspector reads Clay state (layoutElements + hashmap + idStrings) via
- * nt_ui_internal_collect_tree_rows / nt_ui_internal_get_element_info -- those
- * accessors live in nt_ui.c next to CLAY_IMPLEMENTATION, so the inspector TU
- * never sees Clay private types directly.
- *
- * Tests: tests/unit/test_nt_ui_inspector.c -- widget_registry (untouched) +
- * inspector toggle + no-crash on zero/many widgets. The visual look is
- * verified in ui_buttons_demo (F3 toggle). */
+ * Engine extensions on top of the verbatim port:
+ *   1) Widget-type column     -- nt_ui_widget_lookup pill per element row
+ *      (button / image / label / panel / group, or "-" for plain Clay).
+ *   2) Layer column           -- "L:N" or "-" read from
+ *      nt_ui_element_data_t.layer via Clay's userData slot. */
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "font/nt_font.h"
-#include "ui/nt_ui.h"       /* nt_ui_target_t */
-#include "ui/nt_ui_debug.h" /* nt_ui_debug_hit_mode_t */
+#include "ui/nt_ui.h" /* nt_ui_target_t */
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Toggle the inspector. Default off (no per-frame draws). When on,
- * nt_ui_inspector_draw renders the Clay-styled element tree + info pane AND,
- * if ctx->debug_recording is true, the hit-zone overlay on top of the
- * declared widgets. */
+/* Toggle the inspector. Default off (no debug elements injected, no per-frame
+ * tree walk, no extra draw calls). When on, nt_ui_end injects the Clay debug
+ * view BEFORE Clay_EndLayout so the inspector participates in the same layout
+ * solve as the user's UI. */
 void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on);
 bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx);
 
-/* Which hit-zone filter the inspector uses for its internal overlay call.
- * Default NT_UI_DEBUG_HIT_HOVER. The demo's F2 binding cycles this so the
- * user can switch between HOVER / CAPTURED / ALL while F3 stays the single
- * master toggle. Pass NT_UI_DEBUG_HIT_OFF to suppress the overlay entirely
- * (panel still draws). */
-void nt_ui_inspector_set_hit_mode(nt_ui_context_t *ctx, nt_ui_debug_hit_mode_t mode);
-nt_ui_debug_hit_mode_t nt_ui_inspector_get_hit_mode(const nt_ui_context_t *ctx);
+/* Engine-internal: called by nt_ui_end if the inspector is active. Emits the
+ * verbatim Clay debug view as CLAY({...}) blocks INSIDE the in-progress
+ * layout pass (between user UI and Clay_EndLayout). Asserts in-frame.
+ * Game code does NOT call this directly. */
+void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx);
 
-/* Render the inspector (call AFTER nt_ui_walk, BEFORE end_pass).
- * `target` MUST be the same nt_ui_target_t passed to nt_ui_walk -- the
- * inspector emits in world space using the same Y-flip and viewport.
- * font + label_size drive the panel text; size <= 0 skips text (panel
- * background still renders).
+/* Render the hit-zone + id label for the currently-focused element (sidebar
+ * hover/click OR viewport hover, as set inside emit_layout). Single-element
+ * overlay -- not all zones. Call AFTER nt_ui_walk, BEFORE nt_gfx_end_pass.
+ *   target: MUST be the same nt_ui_target_t passed to nt_ui_walk.
+ *   font / label_size: id label text (size <= 0 skips label, rect still drawn).
  *
- * Silent skip when inactive, or when ctx has no atlas/sprite_material bound. */
-void nt_ui_inspector_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_font_t font, float label_size);
+ * Silent skip when inactive, when ctx has no atlas/sprite_material bound, or
+ * when no element is focused (inspector_highlight_id == 0). */
+void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_font_t font, float label_size);
 
 #endif /* NT_UI_INSPECTOR_H */

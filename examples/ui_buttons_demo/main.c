@@ -1,7 +1,6 @@
 /* UI Buttons Demo -- WIDGET-02/03/04 visual gate + WIDGET-05 verify +
  * Phase 56 ext: transform-aware hit-test proof (D-56-07) + touch-target
- * padding (hit_padding_lrtb) + Clay built-in debug view (D) + nt_ui_inspector
- * (F3 -- panel + hit-zone overlay).
+ * padding (hit_padding_lrtb) + nt_ui_inspector (verbatim Clay debug view port).
  *
  * Renders a 2 x 3 GRID of LABELED button variants -- each cell has the
  * button (320x180) + a description text label above it -- so the user can
@@ -20,8 +19,7 @@
  *
  * Per-button click counters print to the status line.
  * Variants (a)(b)(c)(f) ship +16 px touch padding; (d)(e) and the baked
- * variant have no padding (so the visual proof of the padded zone vs the
- * visual bbox stays clear).
+ * variant have no padding.
  *
  * Buttons run inside a runtime-controllable transform (arrow keys translate,
  * PageUp/Down scale, Q/E rotate, R reset) -- the grid visibly moves while
@@ -29,9 +27,7 @@
  *
  * Keys:
  *   Esc      quit (native)
- *   D        toggle Clay's built-in debug overlay
- *   F3       toggle nt_ui_inspector (panel + hit-zone overlay together)
- *   F2       cycle inspector hit-zone mode: HOVER -> CAPTURED -> ALL -> OFF
+ *   D        toggle inspector (panel + hit-zone overlay -- ONE debug system)
  *   arrows   translate transform (+- 8 px / frame)
  *   PgUp/Dn  scale transform (+- 0.05, clamp 0.5..2.0)
  *   Q / E    rotate transform (+- 5 deg / press)
@@ -249,8 +245,8 @@ static float s_xform_ty;
 static float s_xform_scale = 1.0F;
 static float s_xform_deg;
 
-/* Debug overlay state. The inspector now owns the hit-zone overlay -- F2
- * cycles the inspector's stored mode; F1 is gone. */
+/* Debug overlay state. ONE master toggle (D) drives the inspector.
+ * The hit-zone overlay paints for the single focused element. */
 
 #define LAYER_IMG 1
 #define LAYER_TEXT 2
@@ -557,8 +553,7 @@ static void declare_reference_buttons(void) {
 
 // #region input_handling
 /* Per-frame: arrows translate, PageUp/Dn scale, Q/E rotate, R reset,
- * F2 cycle inspector hit-zone mode, D toggle Clay debug,
- * F3 toggle nt_ui_inspector (panel + hit-zone overlay together).
+ * D toggles the inspector (single master debug key).
  * Press-edge for one-shots; held for continuous arrows. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void handle_transform_and_debug_input(void) {
@@ -604,62 +599,16 @@ static void handle_transform_and_debug_input(void) {
         s_xform_scale = 1.0F;
         s_xform_deg = 0.0F;
     }
-    /* F2: cycle inspector hit-zone mode HOVER -> CAPTURED -> ALL -> OFF -> HOVER.
-     * The inspector internally calls nt_ui_debug_draw_hit_zones using its
-     * stored mode -- the demo does NOT call the overlay drawer itself anymore. */
-    if (nt_input_key_is_pressed(NT_KEY_F2)) {
-        const nt_ui_debug_hit_mode_t cur = nt_ui_inspector_get_hit_mode(s_ctx);
-        nt_ui_debug_hit_mode_t nxt;
-        switch (cur) {
-        case NT_UI_DEBUG_HIT_HOVER:
-            nxt = NT_UI_DEBUG_HIT_CAPTURED;
-            break;
-        case NT_UI_DEBUG_HIT_CAPTURED:
-            nxt = NT_UI_DEBUG_HIT_ALL;
-            break;
-        case NT_UI_DEBUG_HIT_ALL:
-            nxt = NT_UI_DEBUG_HIT_OFF;
-            break;
-        case NT_UI_DEBUG_HIT_OFF:
-        default:
-            nxt = NT_UI_DEBUG_HIT_HOVER;
-            break;
-        }
-        nt_ui_inspector_set_hit_mode(s_ctx, nxt);
-    }
-    /* D: toggle Clay's built-in debug overlay (mirrors slice9_demo). */
+    /* D: toggle nt_ui_inspector (single master debug key, Phase 56 ext rework).
+     * The inspector is the verbatim Clay debug view port + engine extensions
+     * (widget-type pill + layer column). Clay's built-in debug is gone --
+     * there is ONE debug system now. */
     if (nt_input_key_is_pressed(NT_KEY_D)) {
-        const bool now_on = !nt_ui_get_debug_overlay(s_ctx);
-        nt_ui_set_debug_overlay(s_ctx, now_on);
-        nt_log_info("ui_buttons_demo: Clay debug overlay %s", now_on ? "ON" : "OFF");
-    }
-    /* F3: master toggle. Drives BOTH the inspector panel AND the hit-zone
-     * overlay (the inspector owns the overlay call internally). debug_recording
-     * tracks the inspector so the recording side-effect cleans up when the
-     * inspector is off (zero-overhead production state).
-     * Highlight: scope rule 3 -- only F3 controls visibility; F1 removed. */
-    if (nt_input_key_is_pressed(NT_KEY_F3)) {
         const bool now_on = !nt_ui_inspector_is_active(s_ctx);
         nt_ui_inspector_set_active(s_ctx, now_on);
-        nt_ui_debug_set_recording(s_ctx, now_on);
-        nt_log_info("ui_buttons_demo: nt_ui_inspector %s (recording=%s)", now_on ? "ON" : "OFF", now_on ? "ON" : "off");
+        nt_log_info("ui_buttons_demo: inspector %s", now_on ? "ON" : "OFF");
     }
 #endif
-}
-
-static const char *debug_mode_str(nt_ui_debug_hit_mode_t m) {
-    switch (m) {
-    case NT_UI_DEBUG_HIT_OFF:
-        return "OFF";
-    case NT_UI_DEBUG_HIT_HOVER:
-        return "HOVER";
-    case NT_UI_DEBUG_HIT_CAPTURED:
-        return "CAPTURED";
-    case NT_UI_DEBUG_HIT_ALL:
-        return "ALL";
-    default:
-        return "?";
-    }
 }
 // #endregion
 
@@ -749,12 +698,10 @@ static void frame(void) {
         // #region status + help text
         char status_text[360];
         const uint32_t total_clicks = s_clicks_std + s_clicks_scale + s_clicks_swap + s_clicks_icon + s_clicks_icontext + s_clicks_baked;
-        const nt_ui_debug_hit_mode_t insp_mode = nt_ui_inspector_get_hit_mode(s_ctx);
-        (void)snprintf(status_text, sizeof status_text,
-                       "clicks: Std=%u Scale=%u Swap=%u Icon=%u IconTxt=%u Disabled=%u Baked=%u (total=%u)   tx=%.0f ty=%.0f s=%.2f deg=%.0f   inspector=%s mode=%s clay=%s", s_clicks_std,
-                       s_clicks_scale, s_clicks_swap, s_clicks_icon, s_clicks_icontext, s_clicks_disabled, s_clicks_baked, total_clicks, (double)s_xform_tx, (double)s_xform_ty, (double)s_xform_scale,
-                       (double)s_xform_deg, nt_ui_inspector_is_active(s_ctx) ? "ON" : "off", debug_mode_str(insp_mode), nt_ui_get_debug_overlay(s_ctx) ? "ON" : "off");
-        const char *help_text = "D = Clay debug  |  F3 = my debug (inspector + hit zones)  |  F2 cycle hit-zone mode  |  arrows/PgUp-Dn/Q-E/R transform  |  Esc quit";
+        (void)snprintf(status_text, sizeof status_text, "clicks: Std=%u Scale=%u Swap=%u Icon=%u IconTxt=%u Disabled=%u Baked=%u (total=%u)   tx=%.0f ty=%.0f s=%.2f deg=%.0f   inspector=%s",
+                       s_clicks_std, s_clicks_scale, s_clicks_swap, s_clicks_icon, s_clicks_icontext, s_clicks_disabled, s_clicks_baked, total_clicks, (double)s_xform_tx, (double)s_xform_ty,
+                       (double)s_xform_scale, (double)s_xform_deg, nt_ui_inspector_is_active(s_ctx) ? "ON" : "off");
+        const char *help_text = "D = debug  |  arrows/PgUp-Dn/Q-E/R transform  |  Esc quit";
         // #endregion
 
         // #region clay declaration
@@ -796,14 +743,13 @@ static void frame(void) {
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
 
-        // #region nt_ui_inspector (panel + hit-zone overlay together)
-        /* The inspector now owns the hit-zone overlay -- F1 is gone. F3
-         * toggles BOTH the panel AND the overlay (via debug_recording);
-         * F2 cycles which zones the overlay shows (HOVER / CAPTURED / ALL
-         * / OFF) via nt_ui_inspector_set_hit_mode. */
-        if (nt_ui_inspector_is_active(s_ctx)) {
-            nt_ui_inspector_draw(s_ctx, &target, s_font, 16.0F);
-        }
+        // #region nt_ui_inspector (single-element hit-zone overlay)
+        /* The inspector panel itself was already emitted into the layout pass
+         * inside nt_ui_end. The post-walk call here paints a hit-zone +
+         * id label for the ONE element the user is focused on (sidebar
+         * hover/click OR viewport hover via Clay's pointerOver). One key
+         * (D) toggles the whole system. */
+        nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
         // #endregion
 
         // #region stats overlay
@@ -939,7 +885,7 @@ int main(int argc, char *argv[]) {
     nt_platform_web_loading_complete();
 #endif
 
-    nt_log_info("ui_buttons_demo: starting (D=Clay debug, F3=inspector+hit-zones, F2=cycle hit-zone mode, arrows/PgUp-Dn/Q-E/R transform)");
+    nt_log_info("ui_buttons_demo: starting (D=inspector, arrows/PgUp-Dn/Q-E/R transform, Esc quit)");
 
     nt_app_run(frame);
 

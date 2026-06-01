@@ -25,6 +25,7 @@
 #include "stats/nt_stats.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_fit.h"
+#include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_scale.h"
 #include "window/nt_window.h"
@@ -250,10 +251,11 @@ static void frame(void) {
         nt_log_info("ui_theme_demo: swapped to %s palette", g_current->name);
     }
     if (nt_input_key_is_pressed(NT_KEY_D)) {
-        /* Toggle relative to current ctx state -- "x" button may have turned it off. */
-        const bool now_on = !nt_ui_get_debug_overlay(s_ctx);
-        nt_ui_set_debug_overlay(s_ctx, now_on);
-        nt_log_info("ui_theme_demo: debug overlay %s", now_on ? "ON" : "OFF");
+        /* Phase 56 ext: Clay built-in debug overlay was removed. The
+         * replacement is nt_ui_inspector (verbatim Clay debug view port). */
+        const bool now_on = !nt_ui_inspector_is_active(s_ctx);
+        nt_ui_inspector_set_active(s_ctx, now_on);
+        nt_log_info("ui_theme_demo: inspector %s", now_on ? "ON" : "OFF");
     }
     if (nt_input_key_is_pressed(NT_KEY_1)) {
         s_scale_mode = (nt_ui_scale_mode_t)((s_scale_mode + 1) % SCALE_MODE_COUNT);

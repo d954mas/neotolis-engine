@@ -139,10 +139,12 @@ void nt_ui_set_font(nt_ui_context_t *ctx, uint16_t font_id, nt_font_t font);
 void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt, const nt_pointer_t *pointers, uint32_t count);
 void nt_ui_end(nt_ui_context_t *ctx);
 
-/* Toggle Clay's debug overlay (element tree + bbox). Applied at next begin.
- * Getter reflects Clay state -- updated each end (close-button "x" turns off). */
-void nt_ui_set_debug_overlay(nt_ui_context_t *ctx, bool enabled);
-bool nt_ui_get_debug_overlay(const nt_ui_context_t *ctx);
+/* NOTE: nt_ui_set_debug_overlay / nt_ui_get_debug_overlay were REMOVED in the
+ * Phase 56 ext inspector rework. Clay's built-in debug view is no longer wired
+ * by the engine. The replacement is nt_ui_inspector_set_active /
+ * nt_ui_inspector_is_active (engine/ui/nt_ui_inspector.h) -- ONE debug system,
+ * verbatim port of Clay__RenderDebugView injected into the layout pass via
+ * nt_ui_end. */
 
 /* Phase 56 ext (CHUNK E): widget-type tagging for nt_ui_inspector. Every
  * engine widget (button/image/label/panel/group) records its element id +

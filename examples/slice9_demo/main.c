@@ -25,6 +25,7 @@
 #include "stats/nt_stats.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_image.h"
+#include "ui/nt_ui_inspector.h"
 #include "ui/nt_ui_label.h"
 #include "ui/nt_ui_panel.h"
 #include "ui/nt_ui_scale.h"
@@ -329,9 +330,11 @@ static void frame(void) {
         nt_log_info("slice9_demo: all animations %s", !all_on ? "ON" : "OFF");
     }
     if (nt_input_key_is_pressed(NT_KEY_D)) {
-        const bool now_on = !nt_ui_get_debug_overlay(s_ctx);
-        nt_ui_set_debug_overlay(s_ctx, now_on);
-        nt_log_info("slice9_demo: debug overlay %s", now_on ? "ON" : "OFF");
+        /* Phase 56 ext: Clay built-in debug overlay was removed. The
+         * replacement is nt_ui_inspector (verbatim Clay debug view port). */
+        const bool now_on = !nt_ui_inspector_is_active(s_ctx);
+        nt_ui_inspector_set_active(s_ctx, now_on);
+        nt_log_info("slice9_demo: inspector %s", now_on ? "ON" : "OFF");
     }
     // #endregion
 

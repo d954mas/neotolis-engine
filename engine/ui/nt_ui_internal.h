@@ -76,7 +76,6 @@ struct nt_ui_context {
     Clay_Context *clay;
     Clay_RenderCommandArray frozen_cmds; /* set by end, read by walk */
     bool in_frame;
-    bool debug_overlay; /* applied to Clay before BeginLayout in nt_ui_begin */
 
     /* Phase 56: frame pointer snapshot for engine-owned hit-test (D-56-04/19).
      * Copied each begin so get_interaction (called later in declaration) reads it. */
@@ -163,14 +162,20 @@ struct nt_ui_context {
      * with replace-on-collision (inspector is observability, not correctness). */
     nt_ui_widget_slot_t widget_registry[NT_UI_WIDGET_REGISTRY_CAP];
 
-    /* Phase 56 ext (CHUNK E): nt_ui_inspector toggle (HUD-style overlay drawn
-     * by the game AFTER nt_ui_walk). Default off (zero overhead -- no per-frame
-     * tree walk, no extra draw calls). Game flips via nt_ui_inspector_set_active.
-     * inspector_hit_mode controls which zones the inspector's internal overlay
-     * call draws (HOVER / CAPTURED / ALL / OFF); default HOVER. The game's F2
-     * binding cycles this so F3 stays the single master toggle. */
+    /* Phase 56 ext rework (verbatim Clay debug view port): nt_ui_inspector
+     * toggle. When ON, nt_ui_end injects Clay debug-view CLAY({...}) elements
+     * into the layout pass BEFORE Clay_EndLayout. There is now ONE debug
+     * system -- the inspector REPLACES Clay's built-in debug entirely.
+     * inspector_highlight_id is the element the post-walk hit-zone overlay
+     * paints for: set when the user hovers/selects in the sidebar OR hovers
+     * the actual widget in the viewport. Cleared each nt_ui_begin and re-
+     * computed during emit_layout. */
     bool inspector_active;
-    uint8_t inspector_hit_mode; /* nt_ui_debug_hit_mode_t; 0=OFF 1=HOVER 2=CAPTURED 3=ALL */
+    uint32_t inspector_highlight_id;
+    /* Selection persists across frames (sidebar click -> stays selected until
+     * another row is clicked or selection is explicitly cleared). Mirrors
+     * Clay's own debugSelectedElementId behavior. */
+    uint32_t inspector_selected_id;
 
     Clay_Arena clay_arena;
 };
@@ -245,5 +250,12 @@ typedef struct nt_ui_inspector_element_info {
 } nt_ui_inspector_element_info_t;
 
 nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_context_t *ctx, uint32_t id);
+
+/* Phase 56 ext rework: external symbol that re-exposes the file-static
+ * emit_layout body from nt_ui.c. The body must live there because it touches
+ * Clay private types (Clay_Context fields, Clay__GetHashMapItem, layoutElements
+ * array, etc.) that only the CLAY_IMPLEMENTATION TU can see. nt_ui_inspector.c
+ * forwards the public emit_layout call to this. Asserts in-frame. */
+void nt_ui_internal_emit_inspector_layout_extern(nt_ui_context_t *ctx);
 
 #endif /* NT_UI_INTERNAL_H */

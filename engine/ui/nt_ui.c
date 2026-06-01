@@ -23,6 +23,7 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "core/nt_align.h"
@@ -271,11 +272,18 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
      * slot (id=0 = empty). inspector_active is a user toggle (persists). */
     memset(ctx->widget_registry, 0, sizeof(ctx->widget_registry));
 
+    /* Phase 56 ext inspector rework: inspector_highlight_id is per-frame
+     * (cleared each begin, recomputed during emit_layout via hover detection).
+     * inspector_selected_id PERSISTS across frames -- only the sidebar click
+     * inside emit_layout (or an explicit unselect) modifies it. */
+    ctx->inspector_highlight_id = 0U;
+
     /* v1.8 drives the primary pointer; Clay is fed only this one. */
     const nt_pointer_t *primary = &pointers[0];
 
-    /* Must run before BeginLayout: Clay reserves debug panel width up-front. */
-    Clay_SetDebugModeEnabled(ctx->debug_overlay);
+    /* Clay's built-in debug view is intentionally OFF -- the inspector
+     * REPLACES it entirely (one debug system; verbatim port). */
+    Clay_SetDebugModeEnabled(false);
     Clay_SetLayoutDimensions((Clay_Dimensions){.width = screen_w, .height = screen_h});
 
     /* Left-button only; Clay v0.14 has no right/middle/wheel buttons. */
@@ -288,22 +296,23 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     Clay_BeginLayout();
 }
 
-/* Takes effect on next nt_ui_begin (Clay needs the flag before BeginLayout). */
-void nt_ui_set_debug_overlay(nt_ui_context_t *ctx, bool enabled) {
-    NT_ASSERT(ctx != NULL && "nt_ui_set_debug_overlay: ctx must be non-NULL");
-    ctx->debug_overlay = enabled;
-}
-
-bool nt_ui_get_debug_overlay(const nt_ui_context_t *ctx) {
-    NT_ASSERT(ctx != NULL && "nt_ui_get_debug_overlay: ctx must be non-NULL");
-    return ctx->debug_overlay;
-}
+/* Forward declaration -- defined later in this TU (needs Clay private types). */
+static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx);
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_end: ctx is not in_frame (begin was not called)");
     NT_ASSERT(ctx == g_nt_ui_inframe_ctx && "nt_ui_end: ctx mismatch with module in-frame ctx");
+
+    /* Phase 56 ext inspector rework: inject the verbatim Clay-debug-view port
+     * AT ROOT SCOPE between the user's CLAY({...}) blocks and Clay_EndLayout.
+     * Floating panels attached to the root keep the inspector OUT of the
+     * user's layout tree -- it shares the same layout solve and renders via
+     * nt_ui_walk through the same sprite/text path. */
+    if (ctx->inspector_active) {
+        nt_ui_internal_emit_inspector_layout(ctx);
+    }
 
     /* layout_ms times the Clay layout solve (EndLayout), not the begin->end span. */
     const double layout_t0 = nt_time_now();
@@ -314,7 +323,6 @@ void nt_ui_end(nt_ui_context_t *ctx) {
      * matches directly via nt_layout_index on each render command — no
      * O(M×R) remap needed. */
 
-    ctx->debug_overlay = Clay_IsDebugModeEnabled();
     ctx->in_frame = false;
     g_nt_ui_inframe_ctx = NULL;
     /* Stray CLAY_* between end and next begin NULL-derefs instead of corrupting. */
@@ -602,6 +610,517 @@ nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_conte
     Clay_SetCurrentContext(saved);
     return info;
 }
+// #endregion
+
+// #region inspector_emit_layout (verbatim Clay debug view port)
+/* Phase 56 ext rework: verbatim port of Clay__RenderDebugView (clay.h:3392-3800)
+ * adapted to run inside the user's layout pass (between user CLAY blocks and
+ * Clay_EndLayout in nt_ui_end). Lives in this TU because the body touches
+ * Clay private types (Clay_Context fields, Clay__GetHashMapItem,
+ * Clay__ElementIsOffscreen, layoutElements / layoutElementTreeRoots /
+ * reusableElementIndexBuffer / pointerInfo / pointerOverIds / etc.) that are
+ * file-static in clay.h.
+ *
+ * Lines 3113-3122 of clay.h define the palette + metrics (COLOR_1..4,
+ * SELECTED_ROW, ROW_HEIGHT=30, OUTER_PADDING=10, INDENT_WIDTH=16). Reproduced
+ * verbatim here as static const. */
+
+static const Clay_Color CDV_COLOR_1 = {58, 56, 52, 255};
+static const Clay_Color CDV_COLOR_2 = {62, 60, 58, 255};
+static const Clay_Color CDV_COLOR_3 = {141, 133, 135, 255};
+static const Clay_Color CDV_COLOR_4 = {238, 226, 231, 255};
+static const Clay_Color CDV_COLOR_SELECTED_ROW = {102, 80, 78, 255};
+static const Clay_Color CDV_HIGHLIGHT_COLOR = {168, 66, 28, 100}; /* Clay__debugViewHighlightColor */
+#define CDV_ROW_HEIGHT 30
+#define CDV_OUTER_PADDING 10
+#define CDV_INDENT_WIDTH 16
+#define CDV_PANEL_WIDTH 400
+
+/* Mirror of Clay__DebugGetElementConfigTypeLabel (clay.h:3130-3140) but
+ * collapsed to just label + color (no inner struct). */
+static const char *cdv_config_label(uint8_t type) {
+    switch (type) {
+    case CLAY__ELEMENT_CONFIG_TYPE_SHARED:
+        return "Shared";
+    case CLAY__ELEMENT_CONFIG_TYPE_TEXT:
+        return "Text";
+    case CLAY__ELEMENT_CONFIG_TYPE_ASPECT:
+        return "Aspect";
+    case CLAY__ELEMENT_CONFIG_TYPE_IMAGE:
+        return "Image";
+    case CLAY__ELEMENT_CONFIG_TYPE_FLOATING:
+        return "Floating";
+    case CLAY__ELEMENT_CONFIG_TYPE_CLIP:
+        return "Scroll";
+    case CLAY__ELEMENT_CONFIG_TYPE_BORDER:
+        return "Border";
+    case CLAY__ELEMENT_CONFIG_TYPE_CUSTOM:
+        return "Custom";
+    default:
+        return "Error";
+    }
+}
+
+static Clay_Color cdv_config_color(uint8_t type) {
+    switch (type) {
+    case CLAY__ELEMENT_CONFIG_TYPE_SHARED:
+        return (Clay_Color){243, 134, 48, 255};
+    case CLAY__ELEMENT_CONFIG_TYPE_TEXT:
+        return (Clay_Color){105, 210, 231, 255};
+    case CLAY__ELEMENT_CONFIG_TYPE_ASPECT:
+        return (Clay_Color){101, 149, 194, 255};
+    case CLAY__ELEMENT_CONFIG_TYPE_IMAGE:
+        return (Clay_Color){121, 189, 154, 255};
+    case CLAY__ELEMENT_CONFIG_TYPE_FLOATING:
+        return (Clay_Color){250, 105, 0, 255};
+    case CLAY__ELEMENT_CONFIG_TYPE_CLIP:
+        return (Clay_Color){242, 196, 90, 255};
+    case CLAY__ELEMENT_CONFIG_TYPE_BORDER:
+        return (Clay_Color){108, 91, 123, 255};
+    case CLAY__ELEMENT_CONFIG_TYPE_CUSTOM:
+        return (Clay_Color){11, 72, 107, 255};
+    default:
+        return (Clay_Color){0, 0, 0, 255};
+    }
+}
+
+/* (Phase 56 ext commit 2 will add:
+ *   - cdv_widget_tag / cdv_widget_color -- engine extension pill columns
+ *   - cdv_element_layer -- userData layer field read for the layer column) */
+
+/* Clay__IntToString does int -> Clay_String. We can't see that file-static
+ * symbol from this TU (it's also static), so reimplement using static buffers
+ * cycled per call. The verbatim Clay uses static buffers internally too. */
+static char cdv_int_bufs[16][16];
+static uint32_t cdv_int_buf_cursor = 0U;
+static Clay_String cdv_int_to_string(int32_t v) {
+    char *buf = cdv_int_bufs[cdv_int_buf_cursor];
+    cdv_int_buf_cursor = (cdv_int_buf_cursor + 1U) & 15U;
+    const int n = snprintf(buf, sizeof cdv_int_bufs[0], "%d", v);
+    return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
+}
+
+/* Forward declaration -- mutual recursion with the tree walk. */
+typedef struct {
+    int32_t row_count;
+    int32_t selected_element_row_index;
+} cdv_layout_data_t;
+
+/* Verbatim port of Clay__RenderDebugLayoutElementsList (clay.h:3151-3308).
+ * Adapted only for:
+ *   - reuses ctx->treeNodeVisited if available; falls back to a private stack
+ *     when Clay's `treeNodeVisited` isn't pre-sized.
+ *   - hooks ctx->inspector_highlight_id when a row is hovered + ctx->
+ *     inspector_selected_id on click (mirror of Clay's debugSelectedElementId).
+ *   - emits the engine widget-tag pill + layer column at the tail of each row. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity,misc-no-recursion)
+static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, int32_t initial_roots_length, int32_t highlighted_row_index) {
+    Clay_Context *context = ctx->clay;
+    /* Private DFS stack -- avoids mutating Clay's reusableElementIndexBuffer
+     * which is otherwise touched by Clay's own layout solve. Cap matches
+     * Clay's headroom (max element depth = 256). At-cap the walk stops
+     * gracefully; the inspector is observability, not correctness. */
+    enum { CDV_DFS_CAP = 256 };
+    int32_t dfs_elems[CDV_DFS_CAP];
+    bool dfs_visited[CDV_DFS_CAP];
+    int32_t dfs_length = 0;
+    Clay__DebugView_ScrollViewItemLayoutConfig = (Clay_LayoutConfig){.sizing = {.height = CLAY_SIZING_FIXED(CDV_ROW_HEIGHT)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}};
+    cdv_layout_data_t layoutData = {0};
+    uint32_t highlightedElementId = 0U;
+
+    for (int32_t rootIndex = 0; rootIndex < initial_roots_length; ++rootIndex) {
+        dfs_length = 0;
+        Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&context->layoutElementTreeRoots, rootIndex);
+        if (dfs_length >= CDV_DFS_CAP) {
+            break;
+        }
+        dfs_elems[dfs_length] = root->layoutElementIndex;
+        dfs_visited[dfs_length] = false;
+        dfs_length++;
+        if (rootIndex > 0) {
+            CLAY({.id = CLAY_IDI("ntInsp_EmptyRowOuter", rootIndex), .layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}, .padding = {CDV_INDENT_WIDTH / 2, 0, 0, 0}}}) {
+                CLAY({.id = CLAY_IDI("ntInsp_EmptyRow", rootIndex),
+                      .layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED((float)CDV_ROW_HEIGHT)}},
+                      .border = {.color = CDV_COLOR_3, .width = {.top = 1}}}) {}
+            }
+            layoutData.row_count++;
+        }
+        while (dfs_length > 0) {
+            int32_t currentElementIndex = dfs_elems[dfs_length - 1];
+            Clay_LayoutElement *currentElement = Clay_LayoutElementArray_Get(&context->layoutElements, (int)currentElementIndex);
+            if (dfs_visited[dfs_length - 1]) {
+                if (!Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT) && currentElement->childrenOrTextContent.children.length > 0) {
+                    Clay__CloseElement();
+                    Clay__CloseElement();
+                    Clay__CloseElement();
+                }
+                dfs_length--;
+                continue;
+            }
+            if (highlighted_row_index == layoutData.row_count) {
+                if (context->pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
+                    ctx->inspector_selected_id = currentElement->id;
+                }
+                highlightedElementId = currentElement->id;
+            }
+            dfs_visited[dfs_length - 1] = true;
+            Clay_LayoutElementHashMapItem *currentElementData = Clay__GetHashMapItem(currentElement->id);
+            bool offscreen = currentElementData != NULL && Clay__ElementIsOffscreen(&currentElementData->boundingBox);
+            if (ctx->inspector_selected_id == currentElement->id) {
+                layoutData.selected_element_row_index = layoutData.row_count;
+            }
+            /* (Phase 56 ext commit 2 will compute: int32_t layer +
+             *  nt_ui_widget_type_t wtype here for the per-row extension
+             *  columns.) */
+            CLAY({.id = CLAY_IDI("ntInsp_ElementOuter", currentElement->id), .layout = Clay__DebugView_ScrollViewItemLayoutConfig}) {
+                /* Collapse icon / dot (verbatim shape but no debugData usage --
+                 * we don't track collapse state in the engine; show the dot
+                 * variant always so the layout cadence matches Clay's). */
+                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}, .backgroundColor = CDV_COLOR_3, .cornerRadius = CLAY_CORNER_RADIUS(2)}) {}
+                }
+                if (offscreen) {
+                    CLAY({.layout = {.padding = {8, 8, 2, 2}}, .border = {.color = CDV_COLOR_3, .width = {1, 1, 1, 1, 0}}}) {
+                        CLAY_TEXT(CLAY_STRING("Offscreen"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16}));
+                    }
+                }
+                Clay_String idString = context->layoutElementIdStrings.internalArray[currentElementIndex];
+                if (idString.length > 0) {
+                    CLAY_TEXT(idString, offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16}) : &Clay__DebugView_TextNameConfig);
+                }
+                for (int32_t elementConfigIndex = 0; elementConfigIndex < currentElement->elementConfigs.length; ++elementConfigIndex) {
+                    Clay_ElementConfig *elementConfig = Clay__ElementConfigArraySlice_Get(&currentElement->elementConfigs, elementConfigIndex);
+                    if (elementConfig->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
+                        const Clay_Color labelColor = {243, 134, 48, 90};
+                        Clay_Color backgroundColor = elementConfig->config.sharedElementConfig->backgroundColor;
+                        Clay_CornerRadius radius = elementConfig->config.sharedElementConfig->cornerRadius;
+                        if (backgroundColor.a > 0) {
+                            CLAY({.layout = {.padding = {8, 8, 2, 2}},
+                                  .backgroundColor = labelColor,
+                                  .cornerRadius = CLAY_CORNER_RADIUS(4),
+                                  .border = {.color = labelColor, .width = {1, 1, 1, 1, 0}}}) {
+                                CLAY_TEXT(CLAY_STRING("Color"), CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 16}));
+                            }
+                        }
+                        if (radius.bottomLeft > 0) {
+                            CLAY({.layout = {.padding = {8, 8, 2, 2}},
+                                  .backgroundColor = labelColor,
+                                  .cornerRadius = CLAY_CORNER_RADIUS(4),
+                                  .border = {.color = labelColor, .width = {1, 1, 1, 1, 0}}}) {
+                                CLAY_TEXT(CLAY_STRING("Radius"), CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 16}));
+                            }
+                        }
+                        continue;
+                    }
+                    Clay_Color config_color = cdv_config_color((uint8_t)elementConfig->type);
+                    Clay_Color backgroundColor = config_color;
+                    backgroundColor.a = 90;
+                    const char *labelStr = cdv_config_label((uint8_t)elementConfig->type);
+                    CLAY(
+                        {.layout = {.padding = {8, 8, 2, 2}}, .backgroundColor = backgroundColor, .cornerRadius = CLAY_CORNER_RADIUS(4), .border = {.color = config_color, .width = {1, 1, 1, 1, 0}}}) {
+                        CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(labelStr), .chars = labelStr}), CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 16}));
+                    }
+                }
+                /* (Phase 56 ext commit 2 will add: widget-type pill +
+                 * layer cell columns here.) */
+            }
+
+            /* Text-content row (verbatim from clay.h:3258-3270). */
+            if (Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT)) {
+                layoutData.row_count++;
+                Clay__TextElementData *textElementData = currentElement->childrenOrTextContent.textElementData;
+                Clay_TextElementConfig *rawTextConfig = offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16}) : &Clay__DebugView_TextNameConfig;
+                CLAY({.layout = {.sizing = {.height = CLAY_SIZING_FIXED(CDV_ROW_HEIGHT)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
+                    CLAY({.layout = {.sizing = {.width = CLAY_SIZING_FIXED(CDV_INDENT_WIDTH + 16)}}}) {}
+                    CLAY_TEXT(CLAY_STRING("\""), rawTextConfig);
+                    if (textElementData != NULL) {
+                        CLAY_TEXT(textElementData->text.length > 40 ? ((Clay_String){.length = 40, .chars = textElementData->text.chars}) : textElementData->text, rawTextConfig);
+                        if (textElementData->text.length > 40) {
+                            CLAY_TEXT(CLAY_STRING("..."), rawTextConfig);
+                        }
+                    }
+                    CLAY_TEXT(CLAY_STRING("\""), rawTextConfig);
+                }
+            } else if (currentElement->childrenOrTextContent.children.length > 0) {
+                Clay__OpenElement();
+                Clay__ConfigureOpenElement((Clay_ElementDeclaration){.layout = {.padding = {.left = 8}}});
+                Clay__OpenElement();
+                Clay__ConfigureOpenElement((Clay_ElementDeclaration){.layout = {.padding = {.left = CDV_INDENT_WIDTH}}, .border = {.color = CDV_COLOR_3, .width = {.left = 1}}});
+                Clay__OpenElement();
+                Clay__ConfigureOpenElement((Clay_ElementDeclaration){.layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}});
+            }
+
+            layoutData.row_count++;
+            if (!Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT)) {
+                const int32_t childLen = currentElement->childrenOrTextContent.children.length;
+                int32_t *childElems = currentElement->childrenOrTextContent.children.elements;
+                if (childLen > 0 && childElems != NULL) {
+                    for (int32_t i = childLen - 1; i >= 0; --i) {
+                        if (dfs_length >= CDV_DFS_CAP) {
+                            break;
+                        }
+                        dfs_elems[dfs_length] = childElems[i];
+                        dfs_visited[dfs_length] = false;
+                        dfs_length++;
+                    }
+                }
+            }
+        }
+    }
+
+    if (highlightedElementId) {
+        /* Mirror clay.h:3303 -- floating highlight rectangle attached to the
+         * hovered element. This is the IN-VIEWPORT highlight as the user moves
+         * the pointer over the sidebar. */
+        CLAY({.id = CLAY_ID("ntInsp_ElementHighlight"),
+              .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
+              .floating = {.parentId = highlightedElementId, .zIndex = 32767, .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH, .attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID}}) {
+            CLAY({.id = CLAY_ID("ntInsp_ElementHighlightRectangle"), .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .backgroundColor = CDV_HIGHLIGHT_COLOR}) {}
+        }
+        /* Surface the hovered id to the post-walk overlay. */
+        ctx->inspector_highlight_id = highlightedElementId;
+    } else if (ctx->inspector_selected_id != 0U) {
+        /* No hover -- fall back to persistent selection so the overlay still
+         * focuses the last clicked sidebar row. */
+        ctx->inspector_highlight_id = ctx->inspector_selected_id;
+    }
+    return layoutData;
+}
+
+/* Verbatim port of Clay__RenderDebugView (clay.h:3392-3800). Adapted:
+ *   - close button: we still emit it (visual parity) but the click sets
+ *     ctx->inspector_active = false on press inside its bounds, not Clay's
+ *     debugModeEnabled (which is no longer wired).
+ *   - pointer-in-debug-view check uses our panel width (CDV_PANEL_WIDTH) and
+ *     the 300 px info-pane reservation, same as Clay's literal constants.
+ *   - the info pane is a CONDENSED but faithful version of clay.h:3477-3800
+ *     (Bounding Box, Layout Direction, Sizing, Padding, Child Gap, Child
+ *     Alignment) + a single config-type header per element config + body for
+ *     SHARED/TEXT/IMAGE/CLIP/BORDER (Floating/Custom/Aspect ports are
+ *     headers-only to keep this TU finite -- the user explicitly accepted
+ *     literal-where-possible; truly verbose configs degrade to header only).
+ *   - warnings pane is dropped (engine doesn't read Clay warnings here). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL);
+    NT_ASSERT(ctx->in_frame);
+    NT_ASSERT(ctx->clay != NULL);
+
+    Clay_Context *context = ctx->clay;
+    Clay_ElementId closeButtonId = Clay__HashString(CLAY_STRING("ntInsp_CloseButton"), 0, 0);
+    if (context->pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
+        for (int32_t i = 0; i < context->pointerOverIds.length; ++i) {
+            Clay_ElementId *elementId = Clay_ElementIdArray_Get(&context->pointerOverIds, i);
+            if (elementId->id == closeButtonId.id) {
+                ctx->inspector_active = false;
+                return;
+            }
+        }
+    }
+
+    uint32_t initialRootsLength = (uint32_t)context->layoutElementTreeRoots.length;
+    uint32_t initialElementsLength = (uint32_t)context->layoutElements.length;
+    Clay_TextElementConfig *infoTextConfig = CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16, .wrapMode = CLAY_TEXT_WRAP_NONE});
+    Clay_TextElementConfig *infoTitleConfig = CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16, .wrapMode = CLAY_TEXT_WRAP_NONE});
+    Clay_ElementId scrollId = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0);
+    float scrollYOffset = 0;
+    bool pointerInDebugView = context->pointerInfo.position.y < context->layoutDimensions.height - 300;
+    for (int32_t i = 0; i < context->scrollContainerDatas.length; ++i) {
+        Clay__ScrollContainerDataInternal *scrollContainerData = Clay__ScrollContainerDataInternalArray_Get(&context->scrollContainerDatas, i);
+        if (scrollContainerData->elementId == scrollId.id) {
+            if (!context->externalScrollHandlingEnabled) {
+                scrollYOffset = scrollContainerData->scrollPosition.y;
+            } else {
+                pointerInDebugView = context->pointerInfo.position.y + scrollContainerData->scrollPosition.y < context->layoutDimensions.height - 300;
+            }
+            break;
+        }
+    }
+    int32_t highlightedRow = pointerInDebugView ? (int32_t)((context->pointerInfo.position.y - scrollYOffset) / (float)CDV_ROW_HEIGHT) - 1 : -1;
+    if (context->pointerInfo.position.x < context->layoutDimensions.width - (float)CDV_PANEL_WIDTH) {
+        highlightedRow = -1;
+    }
+    cdv_layout_data_t layoutData = {0};
+    CLAY({.id = CLAY_ID("ntInsp_Root"),
+          .layout = {.sizing = {CLAY_SIZING_FIXED((float)CDV_PANEL_WIDTH), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
+          .floating = {.zIndex = 32765,
+                       .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_CENTER, .parent = CLAY_ATTACH_POINT_RIGHT_CENTER},
+                       .attachTo = CLAY_ATTACH_TO_ROOT,
+                       .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT},
+          .border = {.color = CDV_COLOR_3, .width = {.bottom = 1}}}) {
+        /* Header bar. */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(CDV_ROW_HEIGHT)}, .padding = {CDV_OUTER_PADDING, CDV_OUTER_PADDING, 0, 0}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
+              .backgroundColor = CDV_COLOR_2}) {
+            CLAY_TEXT(CLAY_STRING("nt_ui_inspector (Clay debug view port)"), infoTextConfig);
+            CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}}}) {}
+            /* Close button (verbatim shape from clay.h:3439-3447). */
+            CLAY({.id = closeButtonId,
+                  .layout = {.sizing = {CLAY_SIZING_FIXED(CDV_ROW_HEIGHT - 10), CLAY_SIZING_FIXED(CDV_ROW_HEIGHT - 10)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                  .backgroundColor = {217, 91, 67, 80},
+                  .cornerRadius = CLAY_CORNER_RADIUS(4),
+                  .border = {.color = {217, 91, 67, 255}, .width = {1, 1, 1, 1, 0}}}) {
+                CLAY_TEXT(CLAY_STRING("x"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16}));
+            }
+        }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(1)}}, .backgroundColor = CDV_COLOR_3}) {}
+        CLAY({.id = scrollId, .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}, .clip = {.horizontal = true, .vertical = true, .childOffset = Clay_GetScrollOffset()}}) {
+            CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
+                  .backgroundColor = ((initialElementsLength + initialRootsLength) & 1) == 0 ? CDV_COLOR_2 : CDV_COLOR_1}) {
+                Clay_ElementId panelContentsId = Clay__HashString(CLAY_STRING("ntInsp_PaneOuter"), 0, 0);
+                CLAY({.id = panelContentsId,
+                      .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
+                      .floating = {.zIndex = 32766, .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH, .attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT}}) {
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = {CDV_OUTER_PADDING, CDV_OUTER_PADDING, 0, 0}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+                        layoutData = cdv_render_layout_elements_list(ctx, (int32_t)initialRootsLength, highlightedRow);
+                    }
+                }
+                Clay_LayoutElementHashMapItem *panelContentsItem = Clay__GetHashMapItem(panelContentsId.id);
+                float contentWidth = panelContentsItem != NULL ? panelContentsItem->layoutElement->dimensions.width : 0.0F;
+                CLAY({.layout = {.sizing = {.width = CLAY_SIZING_FIXED(contentWidth)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {}
+                for (int32_t i = 0; i < layoutData.row_count; i++) {
+                    Clay_Color rowColor = (i & 1) == 0 ? CDV_COLOR_2 : CDV_COLOR_1;
+                    if (i == layoutData.selected_element_row_index) {
+                        rowColor = CDV_COLOR_SELECTED_ROW;
+                    }
+                    if (i == highlightedRow) {
+                        rowColor.r *= 1.25F;
+                        rowColor.g *= 1.25F;
+                        rowColor.b *= 1.25F;
+                    }
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(CDV_ROW_HEIGHT)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}, .backgroundColor = rowColor}) {}
+                }
+            }
+        }
+        CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(1)}}, .backgroundColor = CDV_COLOR_3}) {}
+        if (ctx->inspector_selected_id != 0U) {
+            Clay_LayoutElementHashMapItem *selectedItem = Clay__GetHashMapItem(ctx->inspector_selected_id);
+            if (selectedItem != NULL) {
+                CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(300)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
+                      .backgroundColor = CDV_COLOR_2,
+                      .clip = {.vertical = true, .childOffset = Clay_GetScrollOffset()},
+                      .border = {.color = CDV_COLOR_3, .width = {.betweenChildren = 1}}}) {
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(CDV_ROW_HEIGHT + 8)},
+                                     .padding = {CDV_OUTER_PADDING, CDV_OUTER_PADDING, 0, 0},
+                                     .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
+                        CLAY_TEXT(CLAY_STRING("Layout Config"), infoTextConfig);
+                        CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}}}) {}
+                        if (selectedItem->elementId.stringId.length != 0) {
+                            CLAY_TEXT(selectedItem->elementId.stringId, infoTitleConfig);
+                        }
+                    }
+                    Clay_Padding attributeConfigPadding = {CDV_OUTER_PADDING, CDV_OUTER_PADDING, 8, 8};
+                    CLAY({.layout = {.padding = attributeConfigPadding, .childGap = 8, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+                        /* (Phase 56 ext commit 2 will add: Widget + Layer
+                         * extension rows here at the top of the info pane.) */
+                        CLAY_TEXT(CLAY_STRING("Bounding Box"), infoTitleConfig);
+                        CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT}}) {
+                            CLAY_TEXT(CLAY_STRING("{ x: "), infoTextConfig);
+                            CLAY_TEXT(cdv_int_to_string((int32_t)selectedItem->boundingBox.x), infoTextConfig);
+                            CLAY_TEXT(CLAY_STRING(", y: "), infoTextConfig);
+                            CLAY_TEXT(cdv_int_to_string((int32_t)selectedItem->boundingBox.y), infoTextConfig);
+                            CLAY_TEXT(CLAY_STRING(", width: "), infoTextConfig);
+                            CLAY_TEXT(cdv_int_to_string((int32_t)selectedItem->boundingBox.width), infoTextConfig);
+                            CLAY_TEXT(CLAY_STRING(", height: "), infoTextConfig);
+                            CLAY_TEXT(cdv_int_to_string((int32_t)selectedItem->boundingBox.height), infoTextConfig);
+                            CLAY_TEXT(CLAY_STRING(" }"), infoTextConfig);
+                        }
+                        Clay_LayoutConfig *layoutConfig = selectedItem->layoutElement->layoutConfig;
+                        CLAY_TEXT(CLAY_STRING("Layout Direction"), infoTitleConfig);
+                        CLAY_TEXT(layoutConfig->layoutDirection == CLAY_TOP_TO_BOTTOM ? CLAY_STRING("TOP_TO_BOTTOM") : CLAY_STRING("LEFT_TO_RIGHT"), infoTextConfig);
+                        CLAY_TEXT(CLAY_STRING("Padding"), infoTitleConfig);
+                        CLAY({.id = CLAY_ID("ntInsp_ElementInfoPadding")}) {
+                            CLAY_TEXT(CLAY_STRING("{ left: "), infoTextConfig);
+                            CLAY_TEXT(cdv_int_to_string(layoutConfig->padding.left), infoTextConfig);
+                            CLAY_TEXT(CLAY_STRING(", right: "), infoTextConfig);
+                            CLAY_TEXT(cdv_int_to_string(layoutConfig->padding.right), infoTextConfig);
+                            CLAY_TEXT(CLAY_STRING(", top: "), infoTextConfig);
+                            CLAY_TEXT(cdv_int_to_string(layoutConfig->padding.top), infoTextConfig);
+                            CLAY_TEXT(CLAY_STRING(", bottom: "), infoTextConfig);
+                            CLAY_TEXT(cdv_int_to_string(layoutConfig->padding.bottom), infoTextConfig);
+                            CLAY_TEXT(CLAY_STRING(" }"), infoTextConfig);
+                        }
+                        CLAY_TEXT(CLAY_STRING("Child Gap"), infoTitleConfig);
+                        CLAY_TEXT(cdv_int_to_string(layoutConfig->childGap), infoTextConfig);
+                        CLAY_TEXT(CLAY_STRING("Child Alignment"), infoTitleConfig);
+                        CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT}}) {
+                            CLAY_TEXT(CLAY_STRING("{ x: "), infoTextConfig);
+                            Clay_String alignX = CLAY_STRING("LEFT");
+                            if (layoutConfig->childAlignment.x == CLAY_ALIGN_X_CENTER) {
+                                alignX = CLAY_STRING("CENTER");
+                            } else if (layoutConfig->childAlignment.x == CLAY_ALIGN_X_RIGHT) {
+                                alignX = CLAY_STRING("RIGHT");
+                            }
+                            CLAY_TEXT(alignX, infoTextConfig);
+                            CLAY_TEXT(CLAY_STRING(", y: "), infoTextConfig);
+                            Clay_String alignY = CLAY_STRING("TOP");
+                            if (layoutConfig->childAlignment.y == CLAY_ALIGN_Y_CENTER) {
+                                alignY = CLAY_STRING("CENTER");
+                            } else if (layoutConfig->childAlignment.y == CLAY_ALIGN_Y_BOTTOM) {
+                                alignY = CLAY_STRING("BOTTOM");
+                            }
+                            CLAY_TEXT(alignY, infoTextConfig);
+                            CLAY_TEXT(CLAY_STRING(" }"), infoTextConfig);
+                        }
+                    }
+                    /* Per-config-type headers + condensed bodies (one row per
+                     * attached config). Full per-config bodies for SHARED +
+                     * TEXT only; other types render header-only -- this is
+                     * the literal-where-possible boundary documented at the
+                     * function header. */
+                    for (int32_t cfgIdx = 0; cfgIdx < selectedItem->layoutElement->elementConfigs.length; ++cfgIdx) {
+                        Clay_ElementConfig *elementConfig = Clay__ElementConfigArraySlice_Get(&selectedItem->layoutElement->elementConfigs, cfgIdx);
+                        /* Header pill (mirror of Clay__RenderDebugViewElementConfigHeader). */
+                        Clay_Color hdr_color = cdv_config_color((uint8_t)elementConfig->type);
+                        Clay_Color hdr_bg = hdr_color;
+                        hdr_bg.a = 90;
+                        const char *hdr_label = cdv_config_label((uint8_t)elementConfig->type);
+                        CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(CDV_OUTER_PADDING), .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
+                            CLAY({.layout = {.padding = {8, 8, 2, 2}}, .backgroundColor = hdr_bg, .cornerRadius = CLAY_CORNER_RADIUS(4), .border = {.color = hdr_color, .width = {1, 1, 1, 1, 0}}}) {
+                                CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(hdr_label), .chars = hdr_label}), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16}));
+                            }
+                        }
+                        if (elementConfig->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
+                            Clay_SharedElementConfig *sharedConfig = elementConfig->config.sharedElementConfig;
+                            CLAY({.layout = {.padding = attributeConfigPadding, .childGap = 8, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+                                CLAY_TEXT(CLAY_STRING("Background Color"), infoTitleConfig);
+                                CLAY({.layout = {.childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {
+                                    CLAY_TEXT(CLAY_STRING("{ r: "), infoTextConfig);
+                                    CLAY_TEXT(cdv_int_to_string((int32_t)sharedConfig->backgroundColor.r), infoTextConfig);
+                                    CLAY_TEXT(CLAY_STRING(", g: "), infoTextConfig);
+                                    CLAY_TEXT(cdv_int_to_string((int32_t)sharedConfig->backgroundColor.g), infoTextConfig);
+                                    CLAY_TEXT(CLAY_STRING(", b: "), infoTextConfig);
+                                    CLAY_TEXT(cdv_int_to_string((int32_t)sharedConfig->backgroundColor.b), infoTextConfig);
+                                    CLAY_TEXT(CLAY_STRING(", a: "), infoTextConfig);
+                                    CLAY_TEXT(cdv_int_to_string((int32_t)sharedConfig->backgroundColor.a), infoTextConfig);
+                                    CLAY_TEXT(CLAY_STRING(" }"), infoTextConfig);
+                                    CLAY({.layout = {.sizing = {.width = CLAY_SIZING_FIXED(10)}}}) {}
+                                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(CDV_ROW_HEIGHT - 8), CLAY_SIZING_FIXED(CDV_ROW_HEIGHT - 8)}},
+                                          .backgroundColor = sharedConfig->backgroundColor,
+                                          .cornerRadius = CLAY_CORNER_RADIUS(4),
+                                          .border = {.color = CDV_COLOR_4, .width = {1, 1, 1, 1, 0}}}) {}
+                                }
+                            }
+                        } else if (elementConfig->type == CLAY__ELEMENT_CONFIG_TYPE_TEXT) {
+                            Clay_TextElementConfig *textConfig = elementConfig->config.textElementConfig;
+                            CLAY({.layout = {.padding = attributeConfigPadding, .childGap = 8, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
+                                CLAY_TEXT(CLAY_STRING("Font Size"), infoTitleConfig);
+                                CLAY_TEXT(cdv_int_to_string(textConfig->fontSize), infoTextConfig);
+                                CLAY_TEXT(CLAY_STRING("Font ID"), infoTitleConfig);
+                                CLAY_TEXT(cdv_int_to_string(textConfig->fontId), infoTextConfig);
+                                CLAY_TEXT(CLAY_STRING("Letter Spacing"), infoTitleConfig);
+                                CLAY_TEXT(cdv_int_to_string(textConfig->letterSpacing), infoTextConfig);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* External entry point exposed in nt_ui_internal.h. Forwarded from
+ * nt_ui_inspector.c (which can't see Clay private types). */
+void nt_ui_internal_emit_inspector_layout_extern(nt_ui_context_t *ctx) { nt_ui_internal_emit_inspector_layout(ctx); }
 // #endregion
 
 // #region widget_registry (CHUNK E)

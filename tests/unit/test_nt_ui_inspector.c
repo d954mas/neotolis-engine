@@ -1,13 +1,17 @@
-/* Phase 56 ext (CHUNK E): nt_ui_inspector + widget_registry tests.
+/* Phase 56 ext rework: nt_ui_inspector + widget_registry tests.
  *
- * Two pieces of new surface to verify:
- *   1) widget_registry direct-mapped table -- register/lookup roundtrip,
- *      slot collision (replace-on-collision policy), reset each begin.
- *   2) nt_ui_inspector toggle + draw -- silent when inactive, no crash
- *      on zero / max registered widgets, doesn't disturb walker state.
+ * Inspector architecture is now layout-pass injection (nt_ui_inspector_emit_layout
+ * called inside nt_ui_end before Clay_EndLayout) + a post-walk single-element
+ * overlay (nt_ui_inspector_overlay_draw). Tests verify:
+ *   1) widget_registry direct-mapped table (unchanged from previous round).
+ *   2) inspector toggle is a persistent user pref.
+ *   3) inactive inspector is a silent no-op (no Clay emit, no draw).
+ *   4) active inspector emit_layout grows the layout element count -- proof
+ *      that the panel CLAY({...}) blocks ran.
+ *   5) overlay_draw is a no-op when no element is highlighted.
  *
- * Pixel output of the inspector is NOT unit-tested -- visual verification
- * happens in the ui_buttons_demo F3 toggle. */
+ * Pixel output is NOT unit-tested -- visual verification is in
+ * ui_buttons_demo (D toggle). */
 
 #include <stdalign.h>
 #include <stdbool.h>
@@ -189,27 +193,39 @@ static void test_inspector_toggle_persists(void) {
     TEST_ASSERT_FALSE(nt_ui_inspector_is_active(s_fx.ctx));
 }
 
-/* ---- Test 9: inactive inspector_draw is a silent no-op ---- */
-static void test_inspector_inactive_no_crash(void) {
+/* ---- Test 9: inactive inspector emit_layout is a no-op (no extra Clay elems) ---- */
+static void test_inspector_inactive_emit_noop(void) {
     TEST_ASSERT_FALSE(nt_ui_inspector_is_active(s_fx.ctx));
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {}
+    /* Capture the layout element count BEFORE end (after user emits). */
+    const int32_t before = nt_ui_internal_get_layout_element_count(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
-    nt_ui_inspector_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F); /* must not crash */
+    /* The total after end MUST equal what the user emitted -- inspector
+     * stayed off, no injection. */
+    const int32_t after = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    TEST_ASSERT_EQUAL_INT32(before, after);
 }
 
-/* ---- Test 10: active inspector_draw on zero declared widgets is safe ---- */
-static void test_inspector_zero_widgets_safe(void) {
+/* ---- Test 10: active inspector grows the layout element count ----
+ * Proves the verbatim port runs (emit_layout injected the panel CLAY blocks). */
+static void test_inspector_active_grows_element_count(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {}
+    const int32_t before = nt_ui_internal_get_layout_element_count(s_fx.ctx);
     nt_ui_end(s_fx.ctx);
-    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
-    nt_ui_inspector_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F); /* must not crash */
+    const int32_t after = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    /* The verbatim port emits at least the root panel + header bar + close
+     * button + scroll pane + element list outer (5+ elements) plus per-row
+     * element-outer wrappers. Assert ≥ 5 added elements as a conservative
+     * floor that survives small port adjustments. */
+    TEST_ASSERT_GREATER_THAN_INT32(before + 4, after);
 }
 
-/* ---- Test 11: active inspector_draw with a full sidebar of widgets is safe ---- */
+/* ---- Test 11: active inspector with a sidebar full of widgets is safe ---- */
 static void test_inspector_many_widgets_safe(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
@@ -223,57 +239,24 @@ static void test_inspector_many_widgets_safe(void) {
             (void)nt_ui_button_end(s_fx.ctx);
         }
     }
-    nt_ui_end(s_fx.ctx);
+    nt_ui_end(s_fx.ctx); /* emit_layout runs internally, must not crash */
+    /* Post-walk overlay with no element focused -> early-out, must not crash. */
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
-    nt_ui_inspector_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F); /* must not crash */
+    nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
 }
 
-/* ---- Test 12 (REWORKED): inspector_draw is a READER of the recorded zone
- *      buffer -- it must not MUTATE it (no consume, no rewrite). It IS now
- *      allowed (and expected) to forward the buffer to the hit-zone overlay
- *      drawing helper when ctx->debug_recording is on (re-coupling fix:
- *      F3 owns both the inspector panel AND the hit-zone visualization).
- *      The buffer contents stay byte-identical after the inspector returns. */
-static void test_inspector_does_not_mutate_zone_buffer(void) {
-    /* Arrange: record one hit-zone via a button under the mouse. */
-    nt_ui_debug_set_recording(s_fx.ctx, true);
+/* ---- Test 12: overlay_draw is a no-op when no highlight id is set ---- */
+static void test_overlay_noop_without_highlight(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-
-    /* Frame 1: declare so Clay stores the bbox in its persistent hashmap.
-     * Without a prior frame the bbox is unknown and the zone won't record. */
-    nt_pointer_t mouse = make_pointer(100.0F, 100.0F);
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("zbtn"), s_fx.atlas.handle, &s_btn_style, true);
-        nt_ui_label(s_fx.ctx, NULL, "Z", &s_label_style);
-        (void)nt_ui_button_end(s_fx.ctx);
-    }
+    CLAY({.id = CLAY_ID("root")}) {}
+    /* No widget hovered, no sidebar row clicked -> highlight stays 0 after end. */
     nt_ui_end(s_fx.ctx);
-
-    /* Frame 2: the button bbox is known; the recording path inside
-     * nt_ui_get_interaction_padded pushes one zone. */
-    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    CLAY({.id = CLAY_ID("root")}) {
-        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("zbtn"), s_fx.atlas.handle, &s_btn_style, true);
-        nt_ui_label(s_fx.ctx, NULL, "Z", &s_label_style);
-        (void)nt_ui_button_end(s_fx.ctx);
-    }
-    nt_ui_end(s_fx.ctx);
-
-    const uint32_t zone_count_before = nt_ui_debug_get_zone_count(s_fx.ctx);
-    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, zone_count_before);
-    /* Snapshot zone[0] -- inspector must not MUTATE the zone buffer. */
-    const nt_ui_debug_zone_t z_before = s_fx.ctx->debug_zones[0];
-
-    /* Act: draw the inspector. Inspector NOW also calls the overlay
-     * internally (debug_recording is on) -- but it only READS the zones. */
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
-    nt_ui_inspector_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
-
-    /* Assert: zone count is unchanged, zone[0] is byte-identical. */
-    const uint32_t zone_count_after = nt_ui_debug_get_zone_count(s_fx.ctx);
-    TEST_ASSERT_EQUAL_UINT32(zone_count_before, zone_count_after);
-    TEST_ASSERT_EQUAL_MEMORY(&z_before, &s_fx.ctx->debug_zones[0], sizeof z_before);
+    /* Must not crash; must not draw. We can only verify no-crash here (the
+     * draw is an emit; visual verification is in the demo). */
+    nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
 }
 
 int main(void) {
@@ -286,9 +269,9 @@ int main(void) {
     RUN_TEST(test_panel_widget_tagged);
     RUN_TEST(test_image_widget_tagged);
     RUN_TEST(test_inspector_toggle_persists);
-    RUN_TEST(test_inspector_inactive_no_crash);
-    RUN_TEST(test_inspector_zero_widgets_safe);
+    RUN_TEST(test_inspector_inactive_emit_noop);
+    RUN_TEST(test_inspector_active_grows_element_count);
     RUN_TEST(test_inspector_many_widgets_safe);
-    RUN_TEST(test_inspector_does_not_mutate_zone_buffer);
+    RUN_TEST(test_overlay_noop_without_highlight);
     return UNITY_END();
 }
