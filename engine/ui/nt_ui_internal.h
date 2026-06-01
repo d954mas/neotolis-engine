@@ -226,6 +226,13 @@ nt_ui_inspector_element_view_t nt_ui_internal_get_layout_element_view(const nt_u
  * in the per-frame widget_registry. Returns 0 if no ctx is in-frame. */
 uint32_t nt_ui_internal_current_open_element_id(void);
 
+/* Returns the id of the LAST layout element added to Clay's layoutElements
+ * array. Use only IMMEDIATELY after CLAY_TEXT (Clay__OpenTextElement adds
+ * the text leaf at the array tail but does NOT push it onto
+ * openLayoutElementStack, so current_open_element_id returns the PARENT's
+ * id). Returns 0 if no ctx is in-frame or layoutElements is empty. */
+uint32_t nt_ui_internal_last_emitted_element_id(void);
+
 /* Phase 56 ext rework (Clay debug view port): DFS pre-order entry for the
  * inspector. Mirrors the rows emitted by Clay's Clay__RenderDebugLayoutElementsList
  * (clay.h:3151) with depth, id-string, bbox, offscreen flag, and element-config

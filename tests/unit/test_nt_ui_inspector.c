@@ -207,6 +207,73 @@ static void test_image_widget_tagged(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* ---- Test 7b: nt_ui_label declaration auto-tags LABEL on the TEXT leaf ----
+ * Regression pin: user reported the label widget pill was missing from the
+ * inspector tree even though they could see the raw text content row.
+ * Root cause: Clay__OpenTextElement appends a text element to layoutElements
+ * but does NOT push it onto openLayoutElementStack -- so
+ * current_open_element_id() returned the PARENT's id, not the text leaf's.
+ * Calling nt_ui_widget_register(parent_id, &NT_UI_LABEL_DEF, ...) collided
+ * with the parent's existing registration (button/panel/whatever).
+ * Fix: nt_ui_label now uses last_emitted_element_id() which reads
+ * layoutElements[length-1] -- the just-emitted text leaf -- and registers
+ * NT_UI_LABEL_DEF against that id. The label's row in the inspector tree
+ * now carries the "nt_label" pill. */
+static void test_label_widget_tagged_on_text_leaf(void) {
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { nt_ui_label(s_fx.ctx, NULL, "hello", &s_label_style); }
+    /* Scan the registry for a slot pointing at NT_UI_LABEL_DEF -- proves the
+     * label registered itself (the previous behavior would have left zero
+     * label tags in the registry, since the path used to be a comment
+     * acknowledging "no auto-register today"). */
+    uint32_t label_count = 0U;
+    for (uint32_t i = 0; i < (uint32_t)NT_UI_WIDGET_REGISTRY_CAP; ++i) {
+        if (s_fx.ctx->widget_registry[i].id != 0U && s_fx.ctx->widget_registry[i].def == &NT_UI_LABEL_DEF) {
+            label_count++;
+        }
+    }
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, label_count);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 7c: label tag binds the TEXT leaf id, NOT the parent id ----
+ * Pins the exact registration shape: the label's def must NOT overwrite the
+ * parent container's registered widget (button/panel/group). Setup: a panel
+ * wraps a label; after declaration, the panel's id must still resolve to
+ * NT_UI_PANEL_DEF (not NT_UI_LABEL_DEF). Without the fix, both registers
+ * would land on the same parent id -- the LATER call (label) would clobber
+ * the panel tag. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_label_does_not_clobber_parent_widget(void) {
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    /* Panel parent + label child -- common pattern from the demo. */
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style);
+        nt_ui_label(s_fx.ctx, NULL, "hi", &s_label_style);
+        nt_ui_panel_end(s_fx.ctx);
+    }
+    /* Both tags must coexist: at least one PANEL slot AND at least one LABEL
+     * slot. Pre-fix, the LABEL register clobbered the PANEL register because
+     * both used the parent's id. */
+    uint32_t panel_count = 0U;
+    uint32_t label_count = 0U;
+    for (uint32_t i = 0; i < (uint32_t)NT_UI_WIDGET_REGISTRY_CAP; ++i) {
+        if (s_fx.ctx->widget_registry[i].id == 0U) {
+            continue;
+        }
+        if (s_fx.ctx->widget_registry[i].def == &NT_UI_PANEL_DEF) {
+            panel_count++;
+        } else if (s_fx.ctx->widget_registry[i].def == &NT_UI_LABEL_DEF) {
+            label_count++;
+        }
+    }
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, panel_count);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, label_count);
+    nt_ui_end(s_fx.ctx);
+}
+
 /* ---- Test 8: inspector toggle persists across frames ---- */
 static void test_inspector_toggle_persists(void) {
     TEST_ASSERT_FALSE(nt_ui_inspector_is_active(s_fx.ctx));
@@ -763,6 +830,9 @@ int main(void) {
     RUN_TEST(test_button_widget_auto_tagged);
     RUN_TEST(test_panel_widget_tagged);
     RUN_TEST(test_image_widget_tagged);
+    /* Phase 56 ext: nt_ui_label tags the TEXT leaf (not the parent). */
+    RUN_TEST(test_label_widget_tagged_on_text_leaf);
+    RUN_TEST(test_label_does_not_clobber_parent_widget);
     RUN_TEST(test_inspector_toggle_persists);
     RUN_TEST(test_inspector_inactive_emit_noop);
     RUN_TEST(test_inspector_active_grows_element_count);

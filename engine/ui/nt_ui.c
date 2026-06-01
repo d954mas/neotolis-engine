@@ -388,6 +388,27 @@ uint32_t nt_ui_internal_current_open_element_id(void) {
     return el->id;
 }
 
+uint32_t nt_ui_internal_last_emitted_element_id(void) {
+    if (g_nt_ui_inframe_ctx == NULL || g_nt_ui_inframe_ctx->clay == NULL) {
+        return 0U;
+    }
+    /* Phase 56 ext: text-leaf widget tagging (nt_ui_label).
+     * Clay__OpenTextElement (clay.h:1991) appends a text element to
+     * layoutElements and assigns ->id via Clay__HashNumber, but it does NOT
+     * push the new element onto openLayoutElementStack -- the stack still
+     * points at the PARENT. So current_open_element_id returns the parent's
+     * id, not the text leaf's. Calling THIS accessor IMMEDIATELY after
+     * CLAY_TEXT reads the freshly-added leaf at layoutElements.length-1.
+     * Robust against Clay's maxElementsExceeded early-out (length unchanged
+     * = 0 returned, no register). */
+    Clay_Context *cc = g_nt_ui_inframe_ctx->clay;
+    if (cc->layoutElements.length <= 0) {
+        return 0U;
+    }
+    Clay_LayoutElement *el = Clay_LayoutElementArray_Get(&cc->layoutElements, cc->layoutElements.length - 1);
+    return el->id;
+}
+
 /* Inspector lives in a separate TU but needs to peek at the Clay
  * layoutElements array. The full Clay_Context type is only visible inside
  * this TU (CLAY_IMPLEMENTATION) -- expose two thin accessors so the
