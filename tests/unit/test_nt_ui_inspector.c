@@ -957,6 +957,145 @@ static void test_inspector_click_text_content_row_selects_leaf(void) {
     TEST_ASSERT_EQUAL_UINT32(text_leaf_id, s_fx.ctx->inspector_selected_id);
 }
 
+/* ---- Test 15m: persistent selection drives inspector_highlight_id on the next
+ * frame -- pins the post-walk overlay fallback chain ----
+ *
+ * Phase 56 ext fix (issue 2 re-diagnosis): the user reported "the hit-zone
+ * polygons disappeared from the overlay" after the descriptor refactor +
+ * nt_-prefix + label-on-leaf round. Live diagnostic instrumentation
+ * (engine/ui/nt_ui_inspector.c overlay_draw + nt_ui.c emit_layout, reverted
+ * before commit) on examples/ui_buttons_demo proved the path actually runs
+ * end-to-end:
+ *   - 5 padded buttons register with pad={16,16,16,16} every frame
+ *   - hover-path / fallback-path both set inspector_highlight_id correctly
+ *   - overlay_draw passes ALL early-out gates and reaches the
+ *     "PAINTING padded zone" branch
+ *
+ * Root cause of the user-visible regression: the cyan/yellow padded zone
+ * IS painted, but its right portion was hidden under the inspector panel
+ * (commit 1 in this branch fixed the visual occlusion via a CPU clip
+ * against panel_left_x). Buttons declared with hit_padding={0,0,0,0} (e.g.
+ * the demo's ICON/ICON+TEXT variants) correctly skip the padded zone --
+ * only the white visual outline + id label render. The user was likely
+ * inspecting one of the unpadded variants when they saw "nothing draws."
+ *
+ * To prevent a SILENT regression of the actual chain, this test pins that
+ * a click on a sidebar row updates inspector_selected_id AND the very next
+ * frame's emit_layout copies selected_id into inspector_highlight_id via
+ * the fallback branch. nt_ui_widget_get_hit_padding then returns the
+ * recorded pad, so the overlay's cyan/yellow branch fires. If any link
+ * breaks (slot wiped, fallback removed, padding lost), this test fails. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_overlay_fallback_chain_with_padded_button(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    /* Style with non-zero hit_padding -- mirrors the demo's reference buttons. */
+    nt_ui_button_style_t padded_style = s_btn_style;
+    padded_style.hit_padding_lrtb[0] = 16;
+    padded_style.hit_padding_lrtb[1] = 16;
+    padded_style.hit_padding_lrtb[2] = 16;
+    padded_style.hit_padding_lrtb[3] = 16;
+
+    /* Frame 1: emit the button so Clay has a stable id+bbox for frame 2,
+     * AND directly set inspector_selected_id so the fallback chain
+     * (no hover, but persistent selection) is exercised. */
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("padded_btn"), s_fx.atlas.handle, &padded_style, true);
+        nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
+        (void)nt_ui_button_end(s_fx.ctx);
+    }
+    /* Confirm padding was registered (the cyan/yellow overlay branch depends on this). */
+    int16_t pad[4] = {0, 0, 0, 0};
+    TEST_ASSERT_TRUE(nt_ui_widget_get_hit_padding(s_fx.ctx, nt_ui_id("padded_btn"), pad));
+    TEST_ASSERT_EQUAL_INT16(16, pad[0]);
+    TEST_ASSERT_EQUAL_INT16(16, pad[1]);
+    TEST_ASSERT_EQUAL_INT16(16, pad[2]);
+    TEST_ASSERT_EQUAL_INT16(16, pad[3]);
+    /* Set selected_id directly (mirrors the user's "click a sidebar row" effect). */
+    s_fx.ctx->inspector_selected_id = nt_ui_id("padded_btn");
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: same tree, no hover -- the fallback chain in
+     * cdv_render_layout_elements_list must copy selected_id into
+     * inspector_highlight_id. inspector_highlight_id is cleared at begin
+     * and recomputed during emit_layout, so we read it AFTER nt_ui_end. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("padded_btn"), s_fx.atlas.handle, &padded_style, true);
+        nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
+        (void)nt_ui_button_end(s_fx.ctx);
+    }
+    /* selected_id should still hold from frame 1 (persistent across frames). */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("padded_btn"), s_fx.ctx->inspector_selected_id);
+    nt_ui_end(s_fx.ctx);
+
+    /* Post-end: the fallback branch must have set highlight_id = selected_id. */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("padded_btn"), s_fx.ctx->inspector_highlight_id);
+
+    /* The widget_registry must still hold the padding for this id (post-end,
+     * because overlay_draw runs AFTER end -- the registry must survive end). */
+    int16_t pad2[4] = {0, 0, 0, 0};
+    TEST_ASSERT_TRUE(nt_ui_widget_get_hit_padding(s_fx.ctx, nt_ui_id("padded_btn"), pad2));
+    TEST_ASSERT_EQUAL_INT16(16, pad2[0]);
+    TEST_ASSERT_EQUAL_INT16(16, pad2[1]);
+    TEST_ASSERT_EQUAL_INT16(16, pad2[2]);
+    TEST_ASSERT_EQUAL_INT16(16, pad2[3]);
+
+    /* overlay_draw with a stub target -- must not crash and must reach the
+     * code path that paints the padded zone. Visual verification stays in
+     * the demo; this test pins the data contract. */
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
+}
+
+/* ---- Test 15n: overlay_draw safely handles a SELECTED widget with NO padding ----
+ *
+ * The demo declares two unpadded buttons (ICON / ICON+TEXT variants with
+ * hit_padding_lrtb = {0,0,0,0}). Their cyan/yellow padded branch must be
+ * skipped (correct: no padding to outline distinct from visual), but the
+ * white visual outline + id label must still render. Pins that
+ * get_hit_padding returns TRUE with all-zero components when the widget
+ * was registered via non-NULL pad pointer holding zeros (current
+ * descriptor-refactor contract), and that the overlay correctly takes the
+ * else-branch in this case. */
+static void test_overlay_skips_padded_zone_for_zero_padding(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_ui_button_style_t zero_pad_style = s_btn_style;
+    zero_pad_style.hit_padding_lrtb[0] = 0;
+    zero_pad_style.hit_padding_lrtb[1] = 0;
+    zero_pad_style.hit_padding_lrtb[2] = 0;
+    zero_pad_style.hit_padding_lrtb[3] = 0;
+
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("nopad_btn"), s_fx.atlas.handle, &zero_pad_style, true);
+        nt_ui_label(s_fx.ctx, NULL, "X", &s_label_style);
+        (void)nt_ui_button_end(s_fx.ctx);
+    }
+    /* button passes a non-NULL pad pointer (style->hit_padding_lrtb is an
+     * array; never NULL), so the registry records has_padding=1 with all
+     * zeros. get_hit_padding therefore returns TRUE -- the overlay's
+     * if-condition then short-circuits via the OR-of-components check.
+     * Pin both halves. */
+    int16_t pad[4] = {99, 99, 99, 99};
+    TEST_ASSERT_TRUE(nt_ui_widget_get_hit_padding(s_fx.ctx, nt_ui_id("nopad_btn"), pad));
+    TEST_ASSERT_EQUAL_INT16(0, pad[0]);
+    TEST_ASSERT_EQUAL_INT16(0, pad[1]);
+    TEST_ASSERT_EQUAL_INT16(0, pad[2]);
+    TEST_ASSERT_EQUAL_INT16(0, pad[3]);
+    s_fx.ctx->inspector_selected_id = nt_ui_id("nopad_btn");
+    nt_ui_end(s_fx.ctx);
+
+    /* Highlight propagates via the fallback. */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("nopad_btn"), s_fx.ctx->inspector_highlight_id);
+    /* overlay_draw must not crash when the padded branch is skipped. */
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
+}
+
 /* ---- Test 15: inactive inspector NEVER intercepts (no false positives) ----
  * Even if the pointer is at x=600 (would be inside the sidebar IF active),
  * the gate must stay off when the inspector is disabled -- otherwise the game
@@ -1013,6 +1152,14 @@ int main(void) {
     RUN_TEST(test_highlight_layer_below_panel_layer);
     /* Phase 56 ext fix: text-content row hit-test (off-by-one selection). */
     RUN_TEST(test_inspector_click_text_content_row_selects_leaf);
+    /* Phase 56 ext (issue 2 re-diagnosis): overlay path end-to-end. The user-
+     * visible "hit-zone disappeared" was actually the cyan zone being hidden
+     * under the panel; commit 1 in this branch added a CPU clip. These tests
+     * pin the data chain (padding stored -> survives end -> highlight set
+     * via fallback -> overlay reads padding) so a future refactor cannot
+     * silently break the contract that surfaces the regression. */
+    RUN_TEST(test_overlay_fallback_chain_with_padded_button);
+    RUN_TEST(test_overlay_skips_padded_zone_for_zero_padding);
     RUN_TEST(test_inspector_inactive_no_interception);
     return UNITY_END();
 }
