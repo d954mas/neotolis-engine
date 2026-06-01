@@ -317,6 +317,11 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
 /* Forward declaration -- defined later in this TU (needs Clay private types). */
 static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx);
 
+/* Forward declaration -- compose_transform_level lives lower in the file but
+ * the inspector viewport-hover propagation (transform-aware path, debug_zones
+ * scan) reuses it. Shared math = single source of truth with ui_hit_test. */
+static void compose_transform_level(const nt_ui_transform_t *t, float cx, float cy, float *a, float *b, float *c, float *d, float *tx, float *ty);
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_end: ctx must be non-NULL");
@@ -1263,6 +1268,70 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
      * that passes BOTH filters wins. */
     if (highlightedElementId == 0U && !ctx->inspector_pointer_consumed) {
         const float panel_left_x = context->layoutDimensions.width - (float)CDV_PANEL_WIDTH;
+
+        /* Phase 56 ext fix (transform-aware hover): scan debug_zones FIRST.
+         * Recorded zones carry the declaration-time accum stack snapshot, so
+         * we can inverse-affine the pointer through each zone's own transform
+         * and point-in-rect against the (untransformed) visual bbox -- same
+         * math as ui_hit_test that the click/capture path uses. This closes
+         * the divergence the user reported: Clay's pointerOverIds is axis-
+         * aligned in LAYOUT space; for transformed widgets (e.g. the demo's
+         * BAKED button rotated 25 deg, or the runtime-rotated row via Q/E)
+         * the hover misses the visually-correct widget while the click still
+         * lands on it -- a confusing mismatch.
+         *
+         * Order: LAST hit wins (deepest in declaration order) -- mirrors the
+         * "deepest under pointer" semantics Clay's pointerOverIds end-first
+         * scan already follows. The inspector-owned-id filter does not apply
+         * here because debug_zones is recorded ONLY by user-widget queries
+         * (the inspector itself never calls get_interaction). The panel-area
+         * filter still applies, but it compares the SCREEN-SPACE forward-
+         * transformed visual center, not the raw layout bbox -- otherwise a
+         * widget whose layout sits inside the panel area but renders OUTSIDE
+         * it (e.g. a translated grid) would be incorrectly filtered out. */
+        const float px = context->pointerInfo.position.x;
+        const float py = context->pointerInfo.position.y;
+        for (int32_t zi = (int32_t)ctx->debug_zone_count - 1; zi >= 0; --zi) {
+            const nt_ui_debug_zone_t *z = &ctx->debug_zones[zi];
+            if (z->id == 0U) {
+                continue;
+            }
+            /* Forward-transform the visual center to screen space to test the
+             * panel-area filter. compose_transform_level accumulates the
+             * affine; apply to (center_x, center_y) which is invariant. */
+            float a = 1.0F;
+            float b = 0.0F;
+            float c = 0.0F;
+            float dd = 1.0F;
+            float tx = 0.0F;
+            float ty = 0.0F;
+            for (uint32_t k = 0; k < z->accum_depth; ++k) {
+                compose_transform_level(&z->accum[k], z->center_x, z->center_y, &a, &b, &c, &dd, &tx, &ty);
+            }
+            const float screen_cx = (z->center_x * a) + (z->center_y * b) + tx;
+            if (screen_cx >= panel_left_x) {
+                continue; /* rendered inside the panel footprint */
+            }
+            /* Inverse-affine the pointer into the zone's untransformed layout
+             * frame, then point-in-rect against the visual bbox. */
+            const float det = (a * dd) - (b * c);
+            if (det == 0.0F) {
+                continue; /* degenerate transform */
+            }
+            const float inv_a = dd / det;
+            const float inv_b = -b / det;
+            const float inv_c = -c / det;
+            const float inv_d = a / det;
+            const float rx = px - tx;
+            const float ry = py - ty;
+            const float lx = (inv_a * rx) + (inv_b * ry);
+            const float ly = (inv_c * rx) + (inv_d * ry);
+            if (lx >= z->visual_l && lx <= z->visual_r && ly >= z->visual_t && ly <= z->visual_b) {
+                highlightedElementId = z->id;
+                break; /* LAST in declaration order = deepest visually */
+            }
+        }
+
         /* Clay populates pointerOverIds in DFS pre-order (outermost first,
          * deepest last; see Clay_SetPointerState at clay.h:3935-3973). Scan
          * from END to START so the DEEPEST user element under the pointer
@@ -1279,34 +1348,44 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
          * shipped with the propagation block in 5c600b4. If no registered
          * widget is under the pointer (raw Clay tree, no nt_ui_* widget
          * along the hover path), fall through to the deepest non-owned
-         * element so plain rows still highlight. */
-        uint32_t fallback_id = 0U;
-        for (int32_t i = context->pointerOverIds.length - 1; i >= 0; --i) {
-            const Clay_ElementId *eid = Clay_ElementIdArray_Get(&context->pointerOverIds, i);
-            if (cdv_is_inspector_owned_id(eid->id)) {
-                continue;
+         * element so plain rows still highlight.
+         *
+         * This pointerOverIds fallback runs ONLY when the debug_zones scan
+         * above failed -- it covers the case of plain Clay containers (no
+         * nt_ui_get_interaction call) that the user can still hover. For
+         * transformed widgets, the debug_zones scan above wins because the
+         * widget queries get_interaction inside its begin() (recording the
+         * zone with the live accum snapshot) while the pointerOverIds path
+         * here is axis-aligned and would miss them. */
+        if (highlightedElementId == 0U) {
+            uint32_t fallback_id = 0U;
+            for (int32_t i = context->pointerOverIds.length - 1; i >= 0; --i) {
+                const Clay_ElementId *eid = Clay_ElementIdArray_Get(&context->pointerOverIds, i);
+                if (cdv_is_inspector_owned_id(eid->id)) {
+                    continue;
+                }
+                const Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(eid->id);
+                if (item == NULL) {
+                    continue;
+                }
+                /* Skip elements whose bbox.x is in the panel footprint -- catches
+                 * the indent wrappers, row backgrounds, per-element ElementOuter
+                 * blocks, etc. that the cached named-id set does not enumerate. */
+                if (item->boundingBox.x >= panel_left_x) {
+                    continue;
+                }
+                if (nt_ui_widget_lookup(ctx, eid->id) != NULL) {
+                    highlightedElementId = eid->id;
+                    break;
+                }
+                /* First viable non-widget candidate becomes the fallback. */
+                if (fallback_id == 0U) {
+                    fallback_id = eid->id;
+                }
             }
-            const Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(eid->id);
-            if (item == NULL) {
-                continue;
+            if (highlightedElementId == 0U && fallback_id != 0U) {
+                highlightedElementId = fallback_id;
             }
-            /* Skip elements whose bbox.x is in the panel footprint -- catches
-             * the indent wrappers, row backgrounds, per-element ElementOuter
-             * blocks, etc. that the cached named-id set does not enumerate. */
-            if (item->boundingBox.x >= panel_left_x) {
-                continue;
-            }
-            if (nt_ui_widget_lookup(ctx, eid->id) != NULL) {
-                highlightedElementId = eid->id;
-                break;
-            }
-            /* First viable non-widget candidate becomes the fallback. */
-            if (fallback_id == 0U) {
-                fallback_id = eid->id;
-            }
-        }
-        if (highlightedElementId == 0U && fallback_id != 0U) {
-            highlightedElementId = fallback_id;
         }
     }
 

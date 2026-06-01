@@ -1624,6 +1624,105 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
     (void)nt_ui_test_last_walk_unlayered_count(s_fx.ctx);
 }
 
+/* ---- Test 15y: viewport hover is TRANSFORM-AWARE via debug_zones scan ----
+ *
+ * Phase 56 ext fix (CHUNK B): Clay's pointerOverIds is axis-aligned in layout
+ * space; for a widget rotated 25 deg the pointer coords land inside the
+ * AXIS-ALIGNED bbox at one place but inside the VISUAL bbox at another. The
+ * click/capture path already uses inverse-affine through the recorded accum
+ * stack (D-56-07). The inspector viewport-hover now uses the SAME math by
+ * scanning debug_zones (deepest declaration wins -> end of array first).
+ *
+ * Setup: declare a button at known bbox under a non-identity transform
+ * (rotation 25 deg, scale, offset). The interaction query inside button_begin
+ * records the zone with the accum snapshot. Frame 2's pointer sits at a
+ * coordinate that is INSIDE the rotated visual but OUTSIDE the axis-aligned
+ * layout bbox -- pre-fix Clay's pointerOverIds would have missed the widget
+ * and inspector_highlight_id would be 0; post-fix the debug_zones scan picks
+ * the widget via the same inverse-affine the click uses. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_hover_transformed_widget(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+    const float btn_x = 100.0F; /* left of sidebar at 400 */
+    const float btn_y = 200.0F;
+    const float btn_w = 160.0F;
+    const float btn_h = 48.0F;
+    const float btn_cx = btn_x + (btn_w * 0.5F);
+    const float btn_cy = btn_y + (btn_h * 0.5F);
+
+    /* Frame 1: declare under transform so Clay has the prev-frame bbox AND
+     * the accum is recorded into the zone. */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    nt_ui_transform_t baked = nt_ui_transform_defaults();
+    baked.rotation = 25.0F * 0.017453292F; /* 25 deg in rad */
+    CLAY({.id = CLAY_ID("xf_btn_root")}) {
+        nt_ui_push_transform(s_fx.ctx, &baked);
+        CLAY({.id = CLAY_ID("xf_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
+            /* Issue the interaction query INSIDE the CLAY block so the
+             * declaration-time accum is captured into the zone. */
+            (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("xf_btn"));
+        }
+        nt_ui_pop_transform(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: place the pointer at a coord that's INSIDE the rotated visual
+     * but OUTSIDE the axis-aligned layout bbox. The visual bbox is rotated
+     * around (btn_cx, btn_cy) by 25 deg. A point at (btn_cx + 75, btn_cy + 30)
+     * is OUTSIDE the layout bbox right edge (260) but the rotation pulls a
+     * corner near it. Strongest pin: a coord SO close to one edge of the
+     * rotated bbox that any axis-aligned check would miss it.
+     *
+     * Use a pointer at the layout TOP-RIGHT CORNER (btn_x + btn_w, btn_y).
+     * Layout bbox AABB only just contains it. After 25 deg rotation that
+     * point lies OUTSIDE the rotated quad on the layout's solved bbox but
+     * INSIDE the layout bbox itself -- the inverse-affine UN-rotates the
+     * pointer, landing it back near the corner ON the visual quad.
+     *
+     * To make the pin unambiguous: pick a point clearly outside the layout
+     * AABB but inside the rotation-aware test. Use the FORWARD-rotated
+     * corner of the layout bbox: rotate (btn_cx + btn_w/2, btn_cy) around
+     * (btn_cx, btn_cy) by 25 deg -> a point off the layout AABB. The
+     * inverse-affine reverses the rotation, landing back at the layout
+     * right-center -- exactly ON the visual edge.
+     *
+     * cos(25 deg) ~= 0.9063, sin(25 deg) ~= 0.4226.
+     * dx = btn_w/2 = 80, dy = 0.
+     * rx = btn_cx + 0.9063 * 80 = 180 + 72.5 = 252.5
+     * ry = btn_cy + 0.4226 * 80 = 224 + 33.8 = 257.8
+     * Layout AABB y-range is [200, 248]; ry=257.8 is OUTSIDE the AABB. */
+    const float c = 0.9063F;
+    const float s = 0.4226F;
+    const float dx = btn_w * 0.5F;
+    const float rx = btn_cx + (c * dx);
+    const float ry = btn_cy + (s * dx);
+    /* Sanity: this coord is OUTSIDE the axis-aligned layout AABB. */
+    TEST_ASSERT_TRUE(ry > btn_y + btn_h);
+
+    nt_pointer_t f2 = make_pointer(rx, ry);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
+    CLAY({.id = CLAY_ID("xf_btn_root")}) {
+        nt_ui_push_transform(s_fx.ctx, &baked);
+        CLAY({.id = CLAY_ID("xf_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
+            /* Query so the zone is recorded with the live accum (otherwise
+             * frame 2 has no zone to scan). */
+            (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("xf_btn"));
+        }
+        nt_ui_pop_transform(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Transform-aware path picked the widget. Without the fix, the axis-aligned
+     * pointerOverIds scan would have missed the widget (pointer outside layout
+     * AABB) -> highlight_id == 0. */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("xf_btn"), s_fx.ctx->inspector_highlight_id);
+}
+
 /* ---- Test 15: inactive inspector NEVER intercepts (no false positives) ----
  * Even if the pointer is at x=600 (would be inside the sidebar IF active),
  * the gate must stay off when the inspector is disabled -- otherwise the game
@@ -1706,6 +1805,9 @@ int main(void) {
     RUN_TEST(test_inspector_highlight_ignores_panel_hover);
     RUN_TEST(test_inspector_highlight_zero_when_no_pointer_over);
     RUN_TEST(test_inspector_viewport_hover_prefers_widget_over_child);
+    /* Phase 56 ext fix (CHUNK B): viewport hover uses inverse-affine on the
+     * recorded debug_zones, NOT Clay's axis-aligned pointerOverIds. */
+    RUN_TEST(test_inspector_hover_transformed_widget);
     /* Phase 56 ext: every inspector-owned CLAY/CLAY_TEXT emit carries
      * NT_UI_LAYER_DEBUG_PANEL (root + inner) or HIGHLIGHT (floating rect).
      * No layer-0 leak. */
