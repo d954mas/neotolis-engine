@@ -8,6 +8,15 @@
 #include "font/nt_font.h"
 #include "ui/nt_ui_internal.h"
 
+/* Phase 56 ext (descriptor refactor): static descriptor consumed by the
+ * inspector. Blue pill (0xFFC88C5A -- R=90,G=140,B=200; preserved from the
+ * pre-refactor cdv_widget_color switch). */
+const nt_ui_widget_def_t NT_UI_LABEL_DEF = {
+    .name = "label",
+    .pill_color = 0xFFC88C5AU,
+    ._reserved = 0U,
+};
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style) {
     NT_ASSERT(ctx != NULL && "nt_ui_label: ctx must be non-NULL");

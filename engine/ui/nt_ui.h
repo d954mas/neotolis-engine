@@ -146,35 +146,48 @@ void nt_ui_end(nt_ui_context_t *ctx);
  * verbatim port of Clay__RenderDebugView injected into the layout pass via
  * nt_ui_end. */
 
-/* Phase 56 ext (CHUNK E): widget-type tagging for nt_ui_inspector. Every
- * engine widget (button/image/label/panel/group) records its element id +
- * widget tag in a per-frame direct-mapped registry inside ctx so the
- * inspector can show "button" / "image" / "label" / etc next to each entry
- * in the element tree. Plain Clay elements (no widget call) implicitly fall
- * through with NT_UI_WIDGET_NONE (rendered as "(plain)"). Registry resets
- * each nt_ui_begin. nt_ui_widget_register is called BY widget code -- game
- * code does not call it directly. id 0 is silently dropped (sentinel). */
-typedef enum {
-    NT_UI_WIDGET_NONE = 0,
-    NT_UI_WIDGET_BUTTON = 1,
-    NT_UI_WIDGET_IMAGE = 2,
-    NT_UI_WIDGET_LABEL = 3,
-    NT_UI_WIDGET_PANEL = 4,
-    NT_UI_WIDGET_GROUP = 5,
-} nt_ui_widget_type_t;
+/* Phase 56 ext (CHUNK E, refactor): extensible widget descriptor for
+ * nt_ui_inspector. Every engine widget (button/image/label/panel/group) AND
+ * any GAME widget (inventory_slot, dialogue_choice, ...) records its element
+ * id + descriptor pointer in a per-frame direct-mapped registry inside ctx
+ * so the inspector can show the widget's name + pill color next to each
+ * entry in the element tree. Plain Clay elements (no widget call) fall
+ * through to NULL (rendered as plain Clay). Registry resets each
+ * nt_ui_begin. id 0 is silently dropped (sentinel).
+ *
+ * Descriptors are static const, pointer-stable for the lifetime of the
+ * registering module. Engine descriptors are exported by each widget
+ * header (NT_UI_BUTTON_DEF / NT_UI_IMAGE_DEF / NT_UI_LABEL_DEF /
+ * NT_UI_PANEL_DEF / NT_UI_GROUP_DEF). Games declare their own:
+ *
+ *   static const nt_ui_widget_def_t INV_SLOT_DEF = {
+ *       .name = "inv_slot", .pill_color = 0xFFB060A0,
+ *   };
+ *   nt_ui_widget_register(ctx, id, &INV_SLOT_DEF, NULL);
+ */
+typedef struct nt_ui_widget_def_t {
+    const char *name;    /* shown in inspector pill; e.g. "button" */
+    uint32_t pill_color; /* 0xAABBGGRR */
+    /* Reserved for future extension (icon region, tooltip, ...). */
+    uint32_t _reserved;
+} nt_ui_widget_def_t;
 
-void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, nt_ui_widget_type_t type);
-/* Padded variant: same as register + records the widget's hit-zone padding so
- * the inspector overlay can show the touch-target distinct from the visual
- * bbox. pad_lrtb NULL = treated as {0,0,0,0} (equivalent to the unpadded call).
- * Components must be >= 0 (asserted). Buttons call this with style->hit_padding_lrtb;
- * other widgets call the unpadded form. */
-void nt_ui_widget_register_padded(nt_ui_context_t *ctx, uint32_t id, nt_ui_widget_type_t type, const int16_t pad_lrtb[4]);
-nt_ui_widget_type_t nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32_t id);
+/* Register the widget at `id` with the descriptor `def`. Optional
+ * `pad_lrtb` records the touch-target inflation so the inspector overlay can
+ * outline the padded hit zone distinctly; pass NULL for none. def must
+ * outlive the frame (static const is the canonical pattern). id 0 is
+ * silently dropped (sentinel). def NULL is silently dropped. */
+void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]);
+
+/* Return the descriptor registered for `id` this frame, or NULL when no
+ * widget is registered at that id. The returned pointer is the same one
+ * passed to nt_ui_widget_register (caller-owned lifetime). */
+const nt_ui_widget_def_t *nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32_t id);
+
 /* Read back the registered hit-zone padding for id. Returns true and writes
  * {l,r,t,b} into out_lrtb when the id has a recorded padding; returns false
- * (out untouched) when the id is not registered OR was registered via the
- * unpadded form. */
+ * (out untouched) when the id is not registered OR was registered with a
+ * NULL hit_padding_lrtb. */
 bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16_t out_lrtb[4]);
 
 /* Read-only on frozen_cmds + bindings; per-walk stats reflect the latest call.

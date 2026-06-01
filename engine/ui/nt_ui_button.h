@@ -23,6 +23,11 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
+/* Inspector descriptor: pill name + color shown in the element tree. Game
+ * code may compare pointer identity against this symbol if it needs to
+ * filter by "is this a button" without parsing names. */
+extern const nt_ui_widget_def_t NT_UI_BUTTON_DEF;
+
 /* Per-state CONTAINER visual only (D-56-11). Layout/sizing/padding live on the
  * Clay begin element (game-supplied), NOT in the style -- matches panel. */
 typedef struct {

@@ -12,6 +12,11 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
+/* Inspector descriptor: pill name + color shown in the element tree. Game
+ * code may compare pointer identity against this symbol if it needs to
+ * filter by "is this an image" without parsing names. */
+extern const nt_ui_widget_def_t NT_UI_IMAGE_DEF;
+
 /* Style flag bits. */
 #define NT_UI_IMAGE_SLICE9_OVERRIDE (1U << 0) /* use slice9_lrtb even if {0,0,0,0} */
 #define NT_UI_IMAGE_ORIGIN_OVERRIDE (1U << 1) /* use origin_x/y instead of atlas default */

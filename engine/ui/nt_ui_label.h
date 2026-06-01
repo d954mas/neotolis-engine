@@ -12,6 +12,12 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
+/* Inspector descriptor: pill name + color shown in the element tree. Labels
+ * emit a CLAY_TEXT leaf with no game-side id, so the descriptor is not
+ * auto-registered today; the symbol is exported so future label-as-container
+ * variants (or games that wrap labels) can register it consistently. */
+extern const nt_ui_widget_def_t NT_UI_LABEL_DEF;
+
 typedef struct {
     uint16_t font_id;         /* index into ctx->fonts[]; asserted < NT_UI_MAX_FONTS */
     float font_size;          /* px; asserted > 0. Passed to Clay as (uint16_t) for layout, float for rendering. */

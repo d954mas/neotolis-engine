@@ -32,10 +32,10 @@
 _Static_assert((NT_UI_WIDGET_REGISTRY_CAP & (NT_UI_WIDGET_REGISTRY_CAP - 1)) == 0, "NT_UI_WIDGET_REGISTRY_CAP must be a power of two");
 
 typedef struct {
-    uint32_t id;         /* 0 = slot empty */
-    uint8_t type;        /* nt_ui_widget_type_t */
-    uint8_t has_padding; /* 0 = none recorded, 1 = hit_padding_lrtb is valid */
-    uint8_t _pad[2];
+    uint32_t id;                   /* 0 = slot empty */
+    const nt_ui_widget_def_t *def; /* NULL = slot empty (kept in sync with id==0) */
+    uint8_t has_padding;           /* 0 = none recorded, 1 = hit_padding_lrtb is valid */
+    uint8_t _pad[3];
     int16_t hit_padding_lrtb[4]; /* layout-space padding {l,r,t,b}; matches nt_ui_button_style_t */
 } nt_ui_widget_slot_t;
 

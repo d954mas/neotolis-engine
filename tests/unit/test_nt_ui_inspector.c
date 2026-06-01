@@ -75,12 +75,12 @@ static void test_registry_register_lookup(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     /* Empty by default. */
-    TEST_ASSERT_EQUAL_INT(NT_UI_WIDGET_NONE, (int)nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
+    TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
     /* Register one. */
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("foo"), NT_UI_WIDGET_BUTTON);
-    TEST_ASSERT_EQUAL_INT(NT_UI_WIDGET_BUTTON, (int)nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
-    /* Different id, same bucket NOT guaranteed -- but distinct lookups return NONE. */
-    TEST_ASSERT_EQUAL_INT(NT_UI_WIDGET_NONE, (int)nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("bar")));
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("foo"), &NT_UI_BUTTON_DEF, NULL);
+    TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
+    /* Different id, same bucket NOT guaranteed -- but distinct lookups return NULL. */
+    TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("bar")));
     nt_ui_end(s_fx.ctx);
 }
 
@@ -88,13 +88,13 @@ static void test_registry_register_lookup(void) {
 static void test_registry_resets_each_begin(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("foo"), NT_UI_WIDGET_BUTTON);
-    TEST_ASSERT_EQUAL_INT(NT_UI_WIDGET_BUTTON, (int)nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("foo"), &NT_UI_BUTTON_DEF, NULL);
+    TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
     nt_ui_end(s_fx.ctx);
 
     /* Next begin -- registry must be empty again. */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    TEST_ASSERT_EQUAL_INT(NT_UI_WIDGET_NONE, (int)nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
+    TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("foo")));
     nt_ui_end(s_fx.ctx);
 }
 
@@ -107,13 +107,13 @@ static void test_registry_replace_on_collision(void) {
      * id & (CAP-1) is identical for both. CAP is power-of-two by _Static_assert. */
     const uint32_t base_id = nt_ui_id("collide_a");
     const uint32_t collide_id = base_id + (uint32_t)NT_UI_WIDGET_REGISTRY_CAP;
-    nt_ui_widget_register(s_fx.ctx, base_id, NT_UI_WIDGET_BUTTON);
-    TEST_ASSERT_EQUAL_INT(NT_UI_WIDGET_BUTTON, (int)nt_ui_widget_lookup(s_fx.ctx, base_id));
+    nt_ui_widget_register(s_fx.ctx, base_id, &NT_UI_BUTTON_DEF, NULL);
+    TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, base_id));
     /* Collide -- new write must overwrite the slot. */
-    nt_ui_widget_register(s_fx.ctx, collide_id, NT_UI_WIDGET_IMAGE);
-    TEST_ASSERT_EQUAL_INT(NT_UI_WIDGET_IMAGE, (int)nt_ui_widget_lookup(s_fx.ctx, collide_id));
+    nt_ui_widget_register(s_fx.ctx, collide_id, &NT_UI_IMAGE_DEF, NULL);
+    TEST_ASSERT_EQUAL_PTR(&NT_UI_IMAGE_DEF, nt_ui_widget_lookup(s_fx.ctx, collide_id));
     /* The original id now misses (replace-on-collision policy). */
-    TEST_ASSERT_EQUAL_INT(NT_UI_WIDGET_NONE, (int)nt_ui_widget_lookup(s_fx.ctx, base_id));
+    TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, base_id));
     nt_ui_end(s_fx.ctx);
 }
 
@@ -121,8 +121,35 @@ static void test_registry_replace_on_collision(void) {
 static void test_registry_id_zero_dropped(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    nt_ui_widget_register(s_fx.ctx, 0U, NT_UI_WIDGET_BUTTON); /* must not assert */
-    TEST_ASSERT_EQUAL_INT(NT_UI_WIDGET_NONE, (int)nt_ui_widget_lookup(s_fx.ctx, 0U));
+    nt_ui_widget_register(s_fx.ctx, 0U, &NT_UI_BUTTON_DEF, NULL); /* must not assert */
+    TEST_ASSERT_NULL(nt_ui_widget_lookup(s_fx.ctx, 0U));
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 4b: register two widgets with distinct defs (engine + game) ----
+ * Pins the descriptor-pointer refactor: a game-side static const def must
+ * coexist with an engine def in the same registry, and lookup must return
+ * the exact pointer per id (pill name + color flow from def->name / pill_color). */
+static const nt_ui_widget_def_t TEST_GAME_INV_SLOT_DEF = {
+    .name = "inv_slot",
+    .pill_color = 0xFFB060A0U,
+    ._reserved = 0U,
+};
+static void test_registry_engine_and_game_defs_coexist(void) {
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("a_btn"), &NT_UI_BUTTON_DEF, NULL);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("a_slot"), &TEST_GAME_INV_SLOT_DEF, NULL);
+
+    const nt_ui_widget_def_t *btn = nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("a_btn"));
+    const nt_ui_widget_def_t *slot = nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("a_slot"));
+    TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, btn);
+    TEST_ASSERT_EQUAL_PTR(&TEST_GAME_INV_SLOT_DEF, slot);
+    /* Pill data is reachable through the pointer (no copy). */
+    TEST_ASSERT_EQUAL_STRING("button", btn->name);
+    TEST_ASSERT_EQUAL_STRING("inv_slot", slot->name);
+    TEST_ASSERT_EQUAL_UINT32(0xFF60D070U, btn->pill_color);
+    TEST_ASSERT_EQUAL_UINT32(0xFFB060A0U, slot->pill_color);
     nt_ui_end(s_fx.ctx);
 }
 
@@ -135,8 +162,8 @@ static void test_button_widget_auto_tagged(void) {
         nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
-    /* While in-frame, the button id must be tagged BUTTON. */
-    TEST_ASSERT_EQUAL_INT(NT_UI_WIDGET_BUTTON, (int)nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("btn")));
+    /* While in-frame, the button id must be tagged with NT_UI_BUTTON_DEF. */
+    TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("btn")));
     nt_ui_end(s_fx.ctx);
 }
 
@@ -146,15 +173,15 @@ static void test_panel_widget_tagged(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     /* Panel/image use Clay's auto-assigned id (no explicit id arg in API),
      * so we can't easily look it up by name. Verify by counting tags: at least
-     * one PANEL entry must exist in the registry after declaration. */
+     * one PANEL-def entry must exist in the registry after declaration. */
     CLAY({.id = CLAY_ID("root")}) {
         nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style);
         nt_ui_panel_end(s_fx.ctx);
     }
-    /* Scan the registry for any PANEL-tagged slot. */
+    /* Scan the registry for any slot pointing at NT_UI_PANEL_DEF. */
     uint32_t panel_count = 0U;
     for (uint32_t i = 0; i < (uint32_t)NT_UI_WIDGET_REGISTRY_CAP; ++i) {
-        if (s_fx.ctx->widget_registry[i].id != 0U && s_fx.ctx->widget_registry[i].type == (uint8_t)NT_UI_WIDGET_PANEL) {
+        if (s_fx.ctx->widget_registry[i].id != 0U && s_fx.ctx->widget_registry[i].def == &NT_UI_PANEL_DEF) {
             panel_count++;
         }
     }
@@ -169,7 +196,7 @@ static void test_image_widget_tagged(void) {
     CLAY({.id = CLAY_ID("root")}) { nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style); }
     uint32_t image_count = 0U;
     for (uint32_t i = 0; i < (uint32_t)NT_UI_WIDGET_REGISTRY_CAP; ++i) {
-        if (s_fx.ctx->widget_registry[i].id != 0U && s_fx.ctx->widget_registry[i].type == (uint8_t)NT_UI_WIDGET_IMAGE) {
+        if (s_fx.ctx->widget_registry[i].id != 0U && s_fx.ctx->widget_registry[i].def == &NT_UI_IMAGE_DEF) {
             image_count++;
         }
     }
@@ -427,7 +454,7 @@ static void test_inspector_walker_enumerates_user_tree(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(empty_inspector_grew + 5, full_inspector_grew);
 }
 
-/* ---- Test 15c: register_padded round-trip + get_hit_padding returns padding ----
+/* ---- Test 15c: register with padding round-trip + get_hit_padding returns padding ----
  * Pin for the inspector-overlay padded fill: the button's hit_padding_lrtb
  * must survive into the inspector's widget_registry slot so the overlay can
  * outline the touch-target distinct from the visual bbox. */
@@ -435,9 +462,9 @@ static void test_widget_register_padded_roundtrip(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     const int16_t pad[4] = {12, 14, 16, 18};
-    nt_ui_widget_register_padded(s_fx.ctx, nt_ui_id("btn_padded"), NT_UI_WIDGET_BUTTON, pad);
-    /* Type still resolves through the plain lookup. */
-    TEST_ASSERT_EQUAL_INT(NT_UI_WIDGET_BUTTON, (int)nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("btn_padded")));
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("btn_padded"), &NT_UI_BUTTON_DEF, pad);
+    /* Def still resolves through lookup. */
+    TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("btn_padded")));
     /* Padding is recovered exactly. */
     int16_t out[4] = {-1, -1, -1, -1};
     TEST_ASSERT_TRUE(nt_ui_widget_get_hit_padding(s_fx.ctx, nt_ui_id("btn_padded"), out));
@@ -448,13 +475,13 @@ static void test_widget_register_padded_roundtrip(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 15d: unpadded register reports false from get_hit_padding ----
- * Plain image/panel widgets register via the unpadded form and must NOT
+/* ---- Test 15d: NULL-padding register reports false from get_hit_padding ----
+ * Plain image/panel widgets register with NULL pad_lrtb and must NOT
  * accidentally show a padded hit zone in the inspector overlay. */
 static void test_widget_unpadded_no_hit_padding(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
-    nt_ui_widget_register(s_fx.ctx, nt_ui_id("img"), NT_UI_WIDGET_IMAGE);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("img"), &NT_UI_IMAGE_DEF, NULL);
     int16_t out[4] = {99, 99, 99, 99};
     TEST_ASSERT_FALSE(nt_ui_widget_get_hit_padding(s_fx.ctx, nt_ui_id("img"), out));
     /* out untouched on miss (documented contract). */
@@ -588,6 +615,7 @@ int main(void) {
     RUN_TEST(test_registry_resets_each_begin);
     RUN_TEST(test_registry_replace_on_collision);
     RUN_TEST(test_registry_id_zero_dropped);
+    RUN_TEST(test_registry_engine_and_game_defs_coexist);
     RUN_TEST(test_button_widget_auto_tagged);
     RUN_TEST(test_panel_widget_tagged);
     RUN_TEST(test_image_widget_tagged);

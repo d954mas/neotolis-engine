@@ -703,44 +703,17 @@ static Clay_Color cdv_config_color(uint8_t type) {
     }
 }
 
-/* Engine extension column: widget-type pill (button/image/label/panel/group).
- * Pulls from ctx->widget_registry. Plain Clay rows show "-". */
-static const char *cdv_widget_tag(nt_ui_widget_type_t t) {
-    switch (t) {
-    case NT_UI_WIDGET_BUTTON:
-        return "button";
-    case NT_UI_WIDGET_IMAGE:
-        return "image";
-    case NT_UI_WIDGET_LABEL:
-        return "label";
-    case NT_UI_WIDGET_PANEL:
-        return "panel";
-    case NT_UI_WIDGET_GROUP:
-        return "group";
-    case NT_UI_WIDGET_NONE:
-    default:
-        return "-";
-    }
-}
-
-static Clay_Color cdv_widget_color(nt_ui_widget_type_t t) {
-    /* Distinct hues from Clay's config-type pills so the extension column
-     * reads as a separate dimension. */
-    switch (t) {
-    case NT_UI_WIDGET_BUTTON:
-        return (Clay_Color){70, 180, 90, 200};
-    case NT_UI_WIDGET_IMAGE:
-        return (Clay_Color){120, 90, 180, 200};
-    case NT_UI_WIDGET_LABEL:
-        return (Clay_Color){90, 140, 200, 200};
-    case NT_UI_WIDGET_PANEL:
-        return (Clay_Color){180, 120, 70, 200};
-    case NT_UI_WIDGET_GROUP:
-        return (Clay_Color){160, 160, 90, 200};
-    case NT_UI_WIDGET_NONE:
-    default:
-        return (Clay_Color){80, 80, 80, 120};
-    }
+/* Engine extension column: widget descriptor pill (button/image/label/panel/
+ * group OR any game widget). Pulls from ctx->widget_registry via
+ * nt_ui_widget_lookup -> def. Plain Clay rows have def==NULL (no pill). */
+static inline Clay_Color cdv_widget_color_from_packed(uint32_t packed) {
+    /* Packed format matches nt_ui style packing: 0xAABBGGRR. */
+    Clay_Color c;
+    c.r = (float)(packed & 0xFFU);
+    c.g = (float)((packed >> 8) & 0xFFU);
+    c.b = (float)((packed >> 16) & 0xFFU);
+    c.a = (float)((packed >> 24) & 0xFFU);
+    return c;
 }
 
 /* Engine extension column: layer number from nt_ui_element_data_t.layer (via
@@ -867,19 +840,19 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             dfs_visited[dfs_length - 1] = true;
             Clay_LayoutElementHashMapItem *currentElementData = Clay__GetHashMapItem(currentElement->id);
             bool offscreen = currentElementData != NULL && Clay__ElementIsOffscreen(&currentElementData->boundingBox);
-            /* Phase 56 ext extension columns: widget-type pill + layer cell. */
+            /* Phase 56 ext extension columns: widget descriptor pill + layer cell. */
             const int32_t layer = cdv_element_layer(currentElement);
-            const nt_ui_widget_type_t wtype = nt_ui_widget_lookup(ctx, currentElement->id);
+            const nt_ui_widget_def_t *wdef = nt_ui_widget_lookup(ctx, currentElement->id);
             Clay_String idString = context->layoutElementIdStrings.internalArray[currentElementIndex];
             /* Phase 56 ext fix: filter out the 3 anonymous indent wrappers we
              * open per child (lines below) plus any other Clay-auto-anonymous
              * container -- a row is emitted only when the element has a
              * meaningful identity:
-             *   has_identity = (stringId.length > 0) || widget_lookup != NONE
+             *   has_identity = (stringId.length > 0) || widget_lookup != NULL
              * Falls back to descending silently (no row, no wrappers) so the
              * tree shows only user-named/widget-tagged elements. The text
              * branch below is exempt -- text content is its own identity. */
-            const bool has_identity = (idString.length > 0) || (wtype != NT_UI_WIDGET_NONE);
+            const bool has_identity = (idString.length > 0) || (wdef != NULL);
             if (has_identity) {
                 if (highlighted_row_index == layoutData.row_count) {
                     if (context->pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
@@ -950,12 +923,14 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                             CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(labelStr), .chars = labelStr}), CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 16}));
                         }
                     }
-                    /* Engine extension columns: widget-type pill + layer cell. */
-                    if (wtype != NT_UI_WIDGET_NONE) {
-                        Clay_Color wbg = cdv_widget_color(wtype);
-                        const char *wlabel = cdv_widget_tag(wtype);
+                    /* Engine extension columns: widget descriptor pill + layer cell.
+                     * Pill background uses the descriptor's pill_color directly
+                     * (verbatim Clay convention: pill background = descriptor color
+                     * with full opacity, border = same color). */
+                    if (wdef != NULL && wdef->name != NULL) {
+                        Clay_Color wbg = cdv_widget_color_from_packed(wdef->pill_color);
                         CLAY({.layout = {.padding = {8, 8, 2, 2}}, .backgroundColor = wbg, .cornerRadius = CLAY_CORNER_RADIUS(4), .border = {.color = wbg, .width = {1, 1, 1, 1, 0}}}) {
-                            CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(wlabel), .chars = wlabel}), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16}));
+                            CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(wdef->name), .chars = wdef->name}), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16}));
                         }
                     }
                     /* Layer cell -- "L:N" or "-". */
@@ -1189,8 +1164,8 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                         /* Engine extension rows -- Widget type + Layer.
                          * Surfaced at the TOP of the info pane so the user
                          * sees them first when inspecting an element. */
-                        const nt_ui_widget_type_t sel_w = nt_ui_widget_lookup(ctx, ctx->inspector_selected_id);
-                        const char *sel_w_tag = cdv_widget_tag(sel_w);
+                        const nt_ui_widget_def_t *sel_def = nt_ui_widget_lookup(ctx, ctx->inspector_selected_id);
+                        const char *sel_w_tag = (sel_def != NULL && sel_def->name != NULL) ? sel_def->name : "-";
                         CLAY_TEXT(CLAY_STRING("Widget"), infoTitleConfig);
                         CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(sel_w_tag), .chars = sel_w_tag}), infoTextConfig);
                         CLAY_TEXT(CLAY_STRING("Layer"), infoTitleConfig);
@@ -1311,24 +1286,22 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
 void nt_ui_internal_emit_inspector_layout_extern(nt_ui_context_t *ctx) { nt_ui_internal_emit_inspector_layout(ctx); }
 // #endregion
 
-// #region widget_registry (CHUNK E)
-/* Direct-mapped per-frame widget tag table. Replace-on-collision because the
- * inspector is observability (not correctness): missing a single colliding
- * tag is acceptable, complex chaining would cost runtime + memory for no
- * real win at the inspector cap of ~128 widgets per frame. id 0 is the
- * no-widget sentinel; silently dropped. */
-void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, nt_ui_widget_type_t type) { nt_ui_widget_register_padded(ctx, id, type, NULL); }
-
-void nt_ui_widget_register_padded(nt_ui_context_t *ctx, uint32_t id, nt_ui_widget_type_t type, const int16_t pad_lrtb[4]) {
-    NT_ASSERT(ctx != NULL && "nt_ui_widget_register_padded: ctx must be non-NULL");
-    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_widget_register_padded: pad_lrtb components must be >= 0");
-    if (id == 0U) {
-        return; /* sentinel: never register the no-id slot */
+// #region widget_registry (CHUNK E, descriptor-pointer refactor)
+/* Direct-mapped per-frame widget descriptor table. Replace-on-collision because
+ * the inspector is observability (not correctness): missing a single colliding
+ * descriptor is acceptable, complex chaining would cost runtime + memory for
+ * no real win at the inspector cap of ~128 widgets per frame. id 0 is the
+ * no-widget sentinel; silently dropped. NULL def is silently dropped. */
+void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_widget_register: ctx must be non-NULL");
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_widget_register: pad_lrtb components must be >= 0");
+    if (id == 0U || def == NULL) {
+        return; /* sentinel / NULL def: never register */
     }
     const uint32_t bucket = id & (NT_UI_WIDGET_REGISTRY_CAP - 1U);
     nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
     s->id = id;
-    s->type = (uint8_t)type;
+    s->def = def;
     if (pad_lrtb != NULL) {
         s->has_padding = 1U;
         s->hit_padding_lrtb[0] = pad_lrtb[0];
@@ -1344,14 +1317,14 @@ void nt_ui_widget_register_padded(nt_ui_context_t *ctx, uint32_t id, nt_ui_widge
     }
 }
 
-nt_ui_widget_type_t nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32_t id) {
+const nt_ui_widget_def_t *nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_widget_lookup: ctx must be non-NULL");
     if (id == 0U) {
-        return NT_UI_WIDGET_NONE;
+        return NULL;
     }
     const uint32_t bucket = id & (NT_UI_WIDGET_REGISTRY_CAP - 1U);
     const nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
-    return (s->id == id) ? (nt_ui_widget_type_t)s->type : NT_UI_WIDGET_NONE;
+    return (s->id == id) ? s->def : NULL;
 }
 
 bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16_t out_lrtb[4]) {

@@ -140,11 +140,11 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
     /* Phase 56 ext fix: when the highlighted widget has a registered hit-zone
-     * padding (button via nt_ui_widget_register_padded), draw the padded hit
-     * area as a translucent fill UNDERNEATH the visual bbox so the user sees
-     * both at once. When no padding is recorded, only the visual highlight is
-     * drawn (same as before). The padded fill is drawn first so the visual
-     * outline on top stays crisp. */
+     * padding (button via nt_ui_widget_register with non-NULL pad_lrtb), draw
+     * the padded hit area as a translucent fill UNDERNEATH the visual bbox
+     * so the user sees both at once. When no padding is recorded, only the
+     * visual highlight is drawn (same as before). The padded fill is drawn
+     * first so the visual outline on top stays crisp. */
     int16_t pad[4] = {0, 0, 0, 0};
     if (nt_ui_widget_get_hit_padding(ctx, ctx->inspector_highlight_id, pad) && (pad[0] > 0 || pad[1] > 0 || pad[2] > 0 || pad[3] > 0)) {
         /* Padded extents in Clay layout space: visual bbox + pad on each side.

@@ -12,6 +12,15 @@
 #include "ui/nt_ui_internal.h"
 #include "ui/nt_ui_label.h"
 
+/* Phase 56 ext (descriptor refactor): static descriptor consumed by the
+ * inspector. Green pill (0xFF60D070 -- {0x70,0xD0,0x60,0xFF} = R=112,G=208,B=96).
+ * Preserved from the pre-refactor cdv_widget_color switch. */
+const nt_ui_widget_def_t NT_UI_BUTTON_DEF = {
+    .name = "button",
+    .pill_color = 0xFF60D070U,
+    ._reserved = 0U,
+};
+
 static inline float clampf(float v, float lo, float hi) {
     if (v < lo) {
         return lo;
@@ -106,9 +115,9 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     /* Phase 56 ext (CHUNK E): tag this element so nt_ui_inspector can show
      * "button" next to it in the element tree. Zero-overhead lookup; reset
      * at every nt_ui_begin. id is guaranteed non-zero by the assert above.
-     * Padded form records style->hit_padding_lrtb so the inspector overlay
-     * can outline the visual bbox AND the padded hit zone distinctly. */
-    nt_ui_widget_register_padded(ctx, id, NT_UI_WIDGET_BUTTON, style->hit_padding_lrtb);
+     * Pass style->hit_padding_lrtb so the inspector overlay can outline the
+     * visual bbox AND the padded hit zone distinctly. */
+    nt_ui_widget_register(ctx, id, &NT_UI_BUTTON_DEF, style->hit_padding_lrtb);
 
     ctx->pending_button.active = true;
     ctx->pending_button.clicked = in.clicked;
