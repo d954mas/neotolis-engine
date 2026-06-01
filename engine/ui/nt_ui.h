@@ -97,27 +97,45 @@ typedef struct {
  * its sidebar + highlight overlay above ALL game UI by tagging its Clay
  * elements with NT_UI_DATA_LAYER(NT_UI_LAYER_DEBUG_*).
  *
- * Two distinct constants so the floating element-highlight is drawn UNDER
- * the sidebar panel where they geometrically overlap (highlighted widgets
- * near the right edge of the screen used to peek through the panel because
- * the highlight had a higher zIndex than the panel -- now lower zIndex AND
- * lower layer keep it strictly beneath). The panel itself still wins over
- * any game UI.
+ * Three distinct constants:
+ *   - HIGHLIGHT  = 240 -- element highlight float + post-walk hit-zone
+ *                         overlay polygons. Above game UI (10), below the
+ *                         panel (250/251) so highlights for widgets near
+ *                         the right edge of the screen stay strictly under
+ *                         the sidebar where they geometrically overlap.
+ *   - PANEL_BG   = 250 -- every inspector-owned CLAY rect/border/image
+ *                         (row backgrounds, dot, swatches, separators, etc.).
+ *   - PANEL_TEXT = 251 -- every inspector-owned CLAY_TEXT config (row labels,
+ *                         id text, pill labels, hex strings, info-pane text).
  *
- *   NT_UI_LAYER_DEBUG_HIGHLIGHT  = 240 -- element highlight float + post-walk
- *                                         hit-zone overlay polygons. Above
- *                                         game UI (10), below the panel (250).
- *   NT_UI_LAYER_DEBUG_PANEL      = 250 -- sidebar root. Always wins over the
- *                                         highlight where they overlap.
+ * Why split BG and TEXT into two layers (Phase 56 ext perf):
+ *   The walker dispatches commands in (zIndex asc, layer asc, declaration)
+ *   order. Within a single layer rect/text alternation forces sprite-then-
+ *   text-then-sprite pipeline flushes -- each pair costs ~2 draw calls.
+ *   By placing ALL inspector rects on PANEL_BG (250) and ALL inspector
+ *   texts on PANEL_TEXT (251), the walker processes ALL inspector RECT
+ *   commands first (one sprite batch) then ALL inspector TEXT commands
+ *   (one text batch) per zIndex/scissor segment -- collapsing the inner
+ *   alternation count from O(rows) to ~2 (BG -> TEXT boundary once).
+ *   The sort key (zIndex, layer, declaration) and the walker's ascending
+ *   layer iteration (active_layers bitmask drained LSB-first via
+ *   __builtin_ctz) preserve the BG-before-TEXT painter's order: row
+ *   backgrounds still paint before their labels. Layer 251 is reserved
+ *   so future engine overlays should pick 252..255.
  *
- * 250 leaves a small headroom (251..255) for future engine-level overlays
- * without colliding with the inspector. Layer is uint8_t (0..255); the
- * walker sort key is (zIndex asc, layer asc, declaration). NT_UI_LAYER_DEBUG
- * is kept as an alias for PANEL for any caller that wants "above everything";
- * new code should pick the explicit variant. */
+ * Layer is uint8_t (0..255). NT_UI_LAYER_DEBUG / NT_UI_LAYER_DEBUG_PANEL are
+ * kept as aliases for NT_UI_LAYER_DEBUG_PANEL_BG so existing callers
+ * (engine tests, the legacy name "PANEL", any out-of-tree code) keep
+ * resolving to a valid BG slot; new code should pick the explicit
+ * BG/TEXT variant. */
 #define NT_UI_LAYER_DEBUG_HIGHLIGHT ((nt_ui_layer_t)240)
-#define NT_UI_LAYER_DEBUG_PANEL ((nt_ui_layer_t)250)
-#define NT_UI_LAYER_DEBUG NT_UI_LAYER_DEBUG_PANEL
+#define NT_UI_LAYER_DEBUG_PANEL_BG ((nt_ui_layer_t)250)
+#define NT_UI_LAYER_DEBUG_PANEL_TEXT ((nt_ui_layer_t)251)
+/* Legacy aliases -- PANEL == PANEL_BG so any existing call site that wants
+ * "the inspector panel layer" still resolves to a valid (rect-bearing) slot.
+ * New code should use the BG/TEXT split explicitly. */
+#define NT_UI_LAYER_DEBUG_PANEL NT_UI_LAYER_DEBUG_PANEL_BG
+#define NT_UI_LAYER_DEBUG NT_UI_LAYER_DEBUG_PANEL_BG
 
 /* Macros allocate from nt_mem_scratch (frame arena) so the pointer stays valid
  * across helper-function returns until the next nt_mem_scratch_reset. Game

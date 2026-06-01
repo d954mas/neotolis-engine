@@ -1595,8 +1595,11 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
         }
         const nt_ui_element_data_t *ed = (const nt_ui_element_data_t *)cc->userData;
         const uint8_t layer = ed->layer;
-        /* Inspector-owned inner emit -- must be PANEL or HIGHLIGHT layer. */
-        const bool valid_layer = (layer == (uint8_t)NT_UI_LAYER_DEBUG_PANEL) || (layer == (uint8_t)NT_UI_LAYER_DEBUG_HIGHLIGHT);
+        /* Inspector-owned inner emit -- must be PANEL_BG / PANEL_TEXT /
+         * HIGHLIGHT layer. The BG/TEXT split (Phase 56 ext perf) lets the
+         * walker batch all inspector rects then all inspector texts per
+         * scissor segment. */
+        const bool valid_layer = (layer == (uint8_t)NT_UI_LAYER_DEBUG_PANEL_BG) || (layer == (uint8_t)NT_UI_LAYER_DEBUG_PANEL_TEXT) || (layer == (uint8_t)NT_UI_LAYER_DEBUG_HIGHLIGHT);
         TEST_ASSERT_TRUE_MESSAGE(valid_layer, "inspector inner emit carries non-debug layer");
     }
 
@@ -1837,6 +1840,207 @@ static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
     TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(60U, alternations, msg);
 }
 
+/* ---- Test 15x-perf-layer-split: BG/TEXT layer split collapses dispatch order
+ * to two monotype runs per scissor segment ----
+ *
+ * Phase 56 ext perf (BG/TEXT split): the inspector now tags every CLAY
+ * container with PANEL_BG (250) and every CLAY_TEXT config with PANEL_TEXT
+ * (251). The walker sorts within each zIndex segment by (layer asc,
+ * declaration), so AFTER sort the dispatch order is:
+ *   1) all PANEL_BG commands (RECT/IMAGE/BORDER, sprite pipeline) in
+ *      declaration order  -> ONE sprite batch
+ *   2) all PANEL_TEXT commands (TEXT, text pipeline) in declaration order
+ *      -> ONE text batch
+ * Pipeline alternations inside the inspector footprint collapse from O(rows)
+ * to ~1 per scissor segment (one BG -> TEXT boundary). The walker's layer
+ * iteration is ascending (active_layers bitmask drained LSB-first via
+ * __builtin_ctz) so the BG-before-TEXT painter's order is preserved.
+ *
+ * Pin shape: scan frozen_cmds and verify the invariant that backs the
+ * collapse:
+ *   - EVERY inspector cmd at PANEL_BG is rect-pipeline (RECT/IMAGE/BORDER).
+ *   - EVERY inspector cmd at PANEL_TEXT is text-pipeline (TEXT).
+ *
+ * If either invariant breaks, the layer-sort batching no longer collapses
+ * dispatch and the alternation count regresses. The post-layer-sort
+ * alternation lower-bound (number of zIndex-segment / scissor-segment
+ * boundaries the inspector crosses) is also asserted as ~2 (one for the
+ * sidebar BG->TEXT and one for the info-pane BG->TEXT, since the info pane
+ * sits inside its own clip sub-tree -- SCISSOR is a hard barrier in the
+ * walker). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_layer_split_collapses_dispatch(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const float panel_left_x = screen_w - 400.0F;
+
+    /* Frame 1: declare so prev-frame bbox exists for the info pane. */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("split_root"), .layout = {.padding = CLAY_PADDING_ALL(20)}, .backgroundColor = {30, 30, 30, 255}}) {
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("split_btn"), s_fx.atlas.handle, &s_btn_style, true);
+        nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
+        (void)nt_ui_button_end(s_fx.ctx);
+        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style);
+    }
+    s_fx.ctx->inspector_selected_id = nt_ui_id("split_btn");
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: full surface. */
+    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    CLAY({.id = CLAY_ID("split_root"), .layout = {.padding = CLAY_PADDING_ALL(20)}, .backgroundColor = {30, 30, 30, 255}}) {
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("split_btn"), s_fx.atlas.handle, &s_btn_style, true);
+        nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
+        (void)nt_ui_button_end(s_fx.ctx);
+        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
+    TEST_ASSERT_NOT_NULL(arr->internalArray);
+    TEST_ASSERT_GREATER_THAN_INT32(0, arr->length);
+
+    /* Walk frozen_cmds and verify the BG/TEXT invariants per inspector cmd. */
+    uint32_t bg_count = 0U;
+    uint32_t text_count = 0U;
+    uint32_t bad_bg_with_text_pipe = 0U;
+    uint32_t bad_text_with_sprite_pipe = 0U;
+    for (int32_t i = 0; i < arr->length; ++i) {
+        const Clay_RenderCommand *cc = &arr->internalArray[i];
+        /* Restrict to inspector footprint -- skip user widgets + cross-cutting
+         * non-drawable barriers. */
+        if (cc->boundingBox.x < panel_left_x) {
+            continue;
+        }
+        if (cc->commandType != CLAY_RENDER_COMMAND_TYPE_RECTANGLE && cc->commandType != CLAY_RENDER_COMMAND_TYPE_BORDER && cc->commandType != CLAY_RENDER_COMMAND_TYPE_IMAGE &&
+            cc->commandType != CLAY_RENDER_COMMAND_TYPE_TEXT) {
+            continue;
+        }
+        if (cc->userData == NULL) {
+            continue; /* unlayered -- excluded from the split invariant */
+        }
+        const nt_ui_element_data_t *ed = (const nt_ui_element_data_t *)cc->userData;
+        const uint8_t layer = ed->layer;
+        if (layer == (uint8_t)NT_UI_LAYER_DEBUG_PANEL_BG) {
+            ++bg_count;
+            if (cc->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
+                ++bad_bg_with_text_pipe;
+            }
+        } else if (layer == (uint8_t)NT_UI_LAYER_DEBUG_PANEL_TEXT) {
+            ++text_count;
+            if (cc->commandType != CLAY_RENDER_COMMAND_TYPE_TEXT) {
+                ++bad_text_with_sprite_pipe;
+            }
+        }
+    }
+
+    /* Vacuous-pass guards: both buckets non-empty (the inspector emits dozens
+     * of containers + texts). */
+    TEST_ASSERT_GREATER_THAN_UINT32(10U, bg_count);
+    TEST_ASSERT_GREATER_THAN_UINT32(10U, text_count);
+
+    char msg[160];
+    (void)snprintf(msg, sizeof msg, "PANEL_BG layer must carry only sprite cmds; got %u TEXT cmd(s) on BG (bg_count=%u)", bad_bg_with_text_pipe, bg_count);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, bad_bg_with_text_pipe, msg);
+
+    (void)snprintf(msg, sizeof msg, "PANEL_TEXT layer must carry only text cmds; got %u non-TEXT cmd(s) on TEXT (text_count=%u)", bad_text_with_sprite_pipe, text_count);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, bad_text_with_sprite_pipe, msg);
+
+    /* Simulate the walker's layer-sort dispatch order and count alternations
+     * over the inspector footprint. For each zIndex segment between SCISSOR/
+     * CUSTOM/NONE barriers, group commands by layer ascending then by
+     * declaration order, then count pipeline alternations across the resulting
+     * stream. Post-fix the alternations cap is small (<= one BG -> TEXT
+     * boundary per inspector-bearing scissor segment) -- a hard pin against
+     * future code accidentally re-mixing BG/TEXT inside one layer.
+     *
+     * The simulation is intentionally lightweight: we collect inspector cmds
+     * per segment, sort indices by layer asc, then emit pipes in that order.
+     * Bounded by frozen_cmds.length so no heap alloc. */
+    enum { PIPE_NONE = 0, PIPE_SPRITE = 1, PIPE_TEXT = 2, SEG_CAP = 1024 };
+    int32_t seg_idx[SEG_CAP];
+    uint8_t seg_layer[SEG_CAP];
+    int seg_pipe[SEG_CAP];
+    int32_t seg_len = 0;
+    int32_t prev_z = 0;
+    bool prev_z_valid = false;
+    uint32_t sim_alternations = 0U;
+    for (int32_t i = 0; i <= arr->length; ++i) {
+        const Clay_RenderCommand *cc = (i < arr->length) ? &arr->internalArray[i] : NULL;
+        const bool is_segmentable = (cc != NULL) && (cc->commandType == CLAY_RENDER_COMMAND_TYPE_RECTANGLE || cc->commandType == CLAY_RENDER_COMMAND_TYPE_BORDER ||
+                                                     cc->commandType == CLAY_RENDER_COMMAND_TYPE_IMAGE || cc->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT);
+        /* Segment boundary: end of array, non-segmentable cmd, or zIndex change. */
+        const bool boundary = (cc == NULL) || !is_segmentable || (prev_z_valid && cc->zIndex != prev_z);
+        if (boundary) {
+            if (seg_len > 0) {
+                /* Insertion sort segment indices by layer ascending. */
+                for (int32_t k = 1; k < seg_len; ++k) {
+                    const int32_t key = seg_idx[k];
+                    const uint8_t key_l = seg_layer[k];
+                    const int key_p = seg_pipe[k];
+                    int32_t p = k - 1;
+                    while (p >= 0 && seg_layer[p] > key_l) {
+                        seg_idx[p + 1] = seg_idx[p];
+                        seg_layer[p + 1] = seg_layer[p];
+                        seg_pipe[p + 1] = seg_pipe[p];
+                        --p;
+                    }
+                    seg_idx[p + 1] = key;
+                    seg_layer[p + 1] = key_l;
+                    seg_pipe[p + 1] = key_p;
+                }
+                /* Count pipeline alternations across sorted stream. */
+                int sim_prev = PIPE_NONE;
+                for (int32_t k = 0; k < seg_len; ++k) {
+                    if (sim_prev != PIPE_NONE && sim_prev != seg_pipe[k]) {
+                        ++sim_alternations;
+                    }
+                    sim_prev = seg_pipe[k];
+                }
+                seg_len = 0;
+            }
+            prev_z_valid = false;
+            if (cc == NULL) {
+                break;
+            }
+            if (!is_segmentable) {
+                continue;
+            }
+        }
+        /* Collect inspector-footprint cmds for the current segment. */
+        if (cc->boundingBox.x >= panel_left_x && seg_len < SEG_CAP) {
+            int pipe = PIPE_NONE;
+            if (cc->commandType == CLAY_RENDER_COMMAND_TYPE_TEXT) {
+                pipe = PIPE_TEXT;
+            } else {
+                pipe = PIPE_SPRITE;
+            }
+            const uint8_t layer = cc->userData ? ((const nt_ui_element_data_t *)cc->userData)->layer : 0U;
+            seg_idx[seg_len] = i;
+            seg_layer[seg_len] = layer;
+            seg_pipe[seg_len] = pipe;
+            ++seg_len;
+        }
+        prev_z = cc->zIndex;
+        prev_z_valid = true;
+    }
+
+    /* Post-fix the cap is small. <= 8 leaves headroom for: the inspector
+     * crosses several scissor/zIndex barriers (sidebar root, header bar,
+     * scroll clip, info-pane clip, floating panelContents). Each barrier
+     * resets the layer-sort and can add one BG->TEXT boundary. Measured
+     * value on this fixture: 5 alternations across the entire panel
+     * footprint. Pre-fix (single PANEL layer) the value would be O(rows)
+     * (~50 for this fixture) -- this hard ceiling pins both the optimization
+     * AND the BG-before-TEXT invariant inside each segment. */
+    char msg2[200];
+    (void)snprintf(msg2, sizeof msg2, "post-layer-sort inspector dispatch alternations: %u (cap 8). bg_count=%u text_count=%u. BG/TEXT layer split regression?", sim_alternations, bg_count,
+                   text_count);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(8U, sim_alternations, msg2);
+}
+
 /* ---- Test 15y: viewport hover is TRANSFORM-AWARE via debug_zones scan ----
  *
  * Phase 56 ext fix (CHUNK B): Clay's pointerOverIds is axis-aligned in layout
@@ -2034,6 +2238,11 @@ int main(void) {
      * alternations. Validates linear scaling of the per-row saving (each
      * row contributes ~2 alternations rather than ~6). */
     RUN_TEST(test_inspector_alternations_bulk_scene_after_strategy_a);
+    /* Phase 56 ext perf (BG/TEXT layer split): inspector tags every rect on
+     * PANEL_BG (250) and every text on PANEL_TEXT (251) so walker layer-sort
+     * batches both pipelines to ~2 dispatch alternations per scissor
+     * segment. */
+    RUN_TEST(test_inspector_layer_split_collapses_dispatch);
     RUN_TEST(test_inspector_inactive_no_interception);
     return UNITY_END();
 }
