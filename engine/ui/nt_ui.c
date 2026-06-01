@@ -2312,8 +2312,12 @@ typedef struct {
 
 /* DIRECT: viewport is GL physical; Y-flip inside viewport rect.
  * SCALED: viewport is logical (Y top-down); scale+shift to physical; Y-flip
- * against fb height for GL. Floor/ceil avoid 1-px sliver clipping. */
-static void apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp) {
+ * against fb height for GL. Floor/ceil avoid 1-px sliver clipping.
+ *
+ * Exposed via nt_ui_internal.h so nt_ui_inspector.c (post-walk overlay) can
+ * push GPU scissor with the SAME logical-to-physical math the walker uses --
+ * single source of truth for the scissor transform. */
+void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp) {
     const float vx = target->viewport[0];
     const float vy = target->viewport[1];
     const float vw = target->viewport[2];
@@ -2395,7 +2399,7 @@ static void scissor_push(const Clay_RenderCommand *c, scissor_rect_t *stack, int
 
     stack[(*depth)++] = (scissor_rect_t){.x = x, .y = y, .w = wp, .h = hp};
 
-    apply_scissor_logical_to_physical(target, x, y, wp, hp);
+    nt_ui_internal_apply_scissor_logical_to_physical(target, x, y, wp, hp);
     nt_gfx_set_scissor_enabled(true);
 }
 
@@ -2409,7 +2413,7 @@ static void scissor_pop(scissor_rect_t *stack, int *depth, const nt_ui_target_t 
         nt_gfx_set_scissor_enabled(false);
     } else {
         scissor_rect_t r = stack[*depth - 1];
-        apply_scissor_logical_to_physical(target, r.x, r.y, r.w, r.h);
+        nt_ui_internal_apply_scissor_logical_to_physical(target, r.x, r.y, r.w, r.h);
     }
 }
 // #endregion

@@ -27,6 +27,7 @@
 
 #include "core/nt_assert.h"
 #include "core/nt_builtins.h"
+#include "graphics/nt_gfx.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
@@ -74,56 +75,46 @@ static const float s_identity_mat[16] = {
     1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
 };
 
-/* CPU clip: width of the inspector sidebar panel. The post-walk overlay clips
- * its rect width against `panel_left_x = viewport.w - NT_UI_INSPECTOR_PANEL_WIDTH`
- * so the highlight + label do NOT visually overlap the sidebar -- the panel is
- * rendered by nt_ui_walk earlier in the pass, and this overlay is the only
- * thing drawn after the walk, so without clipping the highlight peeks over the
- * panel (user-visible regression for any widget near the screen's right edge).
+/* GPU scissor clip (Phase 56 ext REVIEW-2 P2-1): the post-walk overlay clips
+ * its highlight + label against the inspector sidebar via GPU scissor (set up
+ * in overlay_draw before the emit, cleared after). The walker's per-element
+ * Clay-driven scissor stack has already been torn down by walk exit, so the
+ * overlay simply enables scissor over the GAME area [0, 0, panel_left_x,
+ * screen_h] and disables it afterwards -- restoring the disabled state the
+ * walker left.
+ *
  * NT_UI_INSPECTOR_PANEL_WIDTH lives in nt_ui_internal.h (CHUNK A dedup) and is
- * shared with the verbatim Clay debug-view port in nt_ui.c. */
-
-/* Clamp a rect's right edge against `panel_left_x`. Returns the clipped width
- * (or 0 when the entire rect is inside the panel). Top/bottom/y stay as-is. */
-static float overlay_clip_w_to_panel(float x, float w, float panel_left_x) {
-    if (x >= panel_left_x) {
-        return 0.0F;
-    }
-    if ((x + w) > panel_left_x) {
-        return panel_left_x - x;
-    }
-    return w;
-}
+ * shared with the verbatim Clay debug-view port in nt_ui.c.
+ *
+ * Replaces the previous CPU-clip implementation: every overlay_emit_rect call
+ * used to clamp its width against panel_left_x in two paths (axis-aligned
+ * fallback) but the transformed path bypassed it entirely -- rotated/scaled
+ * highlights bled OVER the sidebar. GPU scissor handles both paths uniformly. */
 
 /* Emit a filled rect with GL Y-up coords. (x, y_top) = top-left in GL space;
- * the quad paints downward from y_top by `h`. Clips against the inspector
- * sidebar so the overlay stays UNDER the panel visually. */
-static void overlay_emit_rect(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, float panel_left_x, uint32_t color) {
-    const float clip_w = overlay_clip_w_to_panel(x, w, panel_left_x);
-    if (clip_w <= 0.0F || h <= 0.0F) {
+ * the quad paints downward from y_top by `h`. Sidebar clipping is now handled
+ * by GPU scissor configured in overlay_draw -- this emit is unclipped. */
+static void overlay_emit_rect(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, uint32_t color) {
+    if (w <= 0.0F || h <= 0.0F) {
         return;
     }
     const float verts[4][2] = {
         {x, y_top},
-        {x + clip_w, y_top},
-        {x + clip_w, y_top - h},
+        {x + w, y_top},
+        {x + w, y_top - h},
         {x, y_top - h},
     };
     const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
     nt_sprite_renderer_emit_geometry(atlas, region, verts, 4U, indices, 6U, s_identity_mat, color);
 }
 
-/* Thin 4-edge outline of an axis-aligned bbox in GL Y-up. Clips against the
- * inspector sidebar; the right edge silently vanishes when the bbox extends
- * past the panel left -- visually correct since the panel covers the rest. */
-static void overlay_emit_outline(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, float t, float panel_left_x, uint32_t color) {
-    overlay_emit_rect(atlas, region, x, y_top, w, t, panel_left_x, color);         /* top edge */
-    overlay_emit_rect(atlas, region, x, y_top - h + t, w, t, panel_left_x, color); /* bottom edge */
-    overlay_emit_rect(atlas, region, x, y_top, t, h, panel_left_x, color);         /* left edge */
-    /* Right edge: only emit when the visual bbox right is left of the panel. */
-    if ((x + w - t) < panel_left_x) {
-        overlay_emit_rect(atlas, region, x + w - t, y_top, t, h, panel_left_x, color);
-    }
+/* Thin 4-edge outline of an axis-aligned bbox in GL Y-up. Sidebar clipping is
+ * handled by GPU scissor configured in overlay_draw -- this emit is unclipped. */
+static void overlay_emit_outline(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, float t, uint32_t color) {
+    overlay_emit_rect(atlas, region, x, y_top, w, t, color);         /* top edge */
+    overlay_emit_rect(atlas, region, x, y_top - h + t, w, t, color); /* bottom edge */
+    overlay_emit_rect(atlas, region, x, y_top, t, h, color);         /* left edge */
+    overlay_emit_rect(atlas, region, x + w - t, y_top, t, h, color); /* right edge */
 }
 
 static void overlay_draw_text(nt_material_t text_mat, nt_font_t font, float x, float baseline_y, float size, const float color[4], const char *s, size_t n) {
@@ -166,6 +157,32 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     const float vy = target->viewport[1];
     const float vw = target->viewport[2];
     const float vh = target->viewport[3];
+
+    /* Phase 56 ext fix (REVIEW-2 P2-1): push GPU scissor over the GAME area
+     * (left of the inspector sidebar) so BOTH overlay paths (transformed and
+     * axis-aligned) clip the highlight at the panel's left edge. Pre-fix, the
+     * axis-aligned path did this via per-rect CPU width clamps and the
+     * transformed path had NO clipping -- rotated/scaled highlight bled OVER
+     * the sidebar.
+     *
+     * Panel is a right-attached float of width NT_UI_INSPECTOR_PANEL_WIDTH at
+     * layout-space origin, so its left edge sits at viewport.x + viewport.w -
+     * panel_w in the same logical space the overlay draws into. Scissor rect
+     * [0, 0, panel_left_x, screen_h] (logical, top-left convention -- the
+     * shared logical-to-physical helper handles Y-flip + DIRECT/SCALED).
+     *
+     * The walker tore down its scissor stack on exit (engine/ui/nt_ui.c
+     * scissor_pop:depth==0 -> set_scissor_enabled(false)), so the prior state
+     * is "disabled" -- we restore to "disabled" at every exit path below. */
+    const float panel_left_x = vx + vw - (float)NT_UI_INSPECTOR_PANEL_WIDTH;
+    const int scissor_x = (int)vx;
+    const int scissor_y = (int)vy;
+    const int scissor_w = (int)(panel_left_x - vx);
+    const int scissor_h = (int)vh;
+    if (scissor_w > 0 && scissor_h > 0) {
+        nt_ui_internal_apply_scissor_logical_to_physical(target, scissor_x, scissor_y, scissor_w, scissor_h);
+        nt_gfx_set_scissor_enabled(true);
+    }
 
     /* Phase 56 ext fix (inspector overlay transform-aware): if the highlighted
      * id was queried via nt_ui_get_interaction_padded this frame, a debug zone
@@ -243,26 +260,24 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
             nt_text_renderer_flush();
         }
+        /* Restore disabled scissor state (walker exit invariant). Flush BEFORE
+         * the disable so the panel-clipped staging actually carries the scissor. */
+        if (scissor_w > 0 && scissor_h > 0) {
+            nt_gfx_set_scissor_enabled(false);
+        }
         return;
     }
 
     /* Fallback: axis-aligned bbox in layout space. Used for plain Clay
      * elements with no recorded zone, or zones with no accum transform
-     * (depth==0 -> identity, same screen position as the bbox). The CPU
-     * panel clip keeps the highlight visually UNDER the sidebar.
+     * (depth==0 -> identity, same screen position as the bbox). GPU scissor
+     * (pushed above) handles the sidebar clip uniformly with the transformed
+     * path -- no more per-rect CPU clamps.
      * Clay Y-down -> GL Y-up: world_y(top) = vy+vh - clay_y(top). */
     const float gl_x = info.bbox_x;
     const float gl_y_top = vy + vh - info.bbox_y;
     const float w = info.bbox_w;
     const float h = info.bbox_h;
-
-    /* CPU clip boundary for "stay under the inspector panel". Panel is a
-     * right-attached float of width NT_UI_INSPECTOR_PANEL_WIDTH at the layout-
-     * space origin, so its left edge sits at viewport.x + viewport.w - panel_w
-     * in the SAME logical space the overlay draws into. When the panel is NOT
-     * visible (inspector inactive should have early-returned above, but
-     * defensive), the clip degenerates to the viewport right edge. */
-    const float panel_left_x = vx + vw - (float)NT_UI_INSPECTOR_PANEL_WIDTH;
 
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
@@ -286,20 +301,21 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         const float pad_h = h + pt + pb;
         /* Translucent cyan fill for the padded hit area (matches debug overlay
          * idle color so the two systems stay visually consistent). */
-        overlay_emit_rect(ctx->atlas, ctx->white_region, pad_x, pad_y_top, pad_w, pad_h, panel_left_x, 0x6033FFFFU);
+        overlay_emit_rect(ctx->atlas, ctx->white_region, pad_x, pad_y_top, pad_w, pad_h, 0x6033FFFFU);
         /* Thin yellow outline tracing the padded edge so the touch-target is
          * unambiguous. */
-        overlay_emit_outline(ctx->atlas, ctx->white_region, pad_x, pad_y_top, pad_w, pad_h, 1.0F, panel_left_x, 0xFF00FFFFU);
+        overlay_emit_outline(ctx->atlas, ctx->white_region, pad_x, pad_y_top, pad_w, pad_h, 1.0F, 0xFF00FFFFU);
     }
     /* Filled translucent highlight (matches Clay__debugViewHighlightColor = {168,66,28,100}). */
-    overlay_emit_rect(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, panel_left_x, 0x641C42A8U);
+    overlay_emit_rect(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, 0x641C42A8U);
     /* Bright opaque outline for clarity. */
-    overlay_emit_outline(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, 2.0F, panel_left_x, 0xFFFFFFFFU);
+    overlay_emit_outline(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, 2.0F, 0xFFFFFFFFU);
 
     /* Id label anchored at the top-left corner of the highlight rectangle.
-     * Skipped when the visual bbox starts inside the panel footprint -- the
-     * label would never be readable (panel covers it). */
-    if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F && gl_x < panel_left_x) {
+     * GPU scissor (set up above) crops the label glyphs against the panel's
+     * left edge, so the label is always at most partially visible -- the
+     * pre-fix early-skip-when-gl_x>=panel_left_x is no longer needed. */
+    if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
         char buf[80];
         int n;
         if (info.id_string_len > 0U && info.id_string != NULL) {
@@ -318,6 +334,10 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     nt_sprite_renderer_flush();
     if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
         nt_text_renderer_flush();
+    }
+    /* Restore disabled scissor state (walker exit invariant). */
+    if (scissor_w > 0 && scissor_h > 0) {
+        nt_gfx_set_scissor_enabled(false);
     }
 }
 // #endregion

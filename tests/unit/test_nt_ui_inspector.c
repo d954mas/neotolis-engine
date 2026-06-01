@@ -21,6 +21,7 @@
 
 #include "clay.h"
 #include "core/nt_assert.h"
+#include "graphics/nt_gfx.h"
 #include "input/nt_input.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
@@ -2140,6 +2141,89 @@ static void test_inspector_hover_transformed_widget(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_ui_id("xf_btn"), s_fx.ctx->inspector_highlight_id);
 }
 
+/* ---- Test 15z: REVIEW-2 P2-1 -- GPU scissor pinned to GAME area when overlay
+ * renders, scissor restored to disabled on exit ----
+ *
+ * Pin for the followup commit "GPU scissor for inspector overlay (both
+ * transformed + axis-aligned paths)". Pre-fix the axis-aligned overlay path
+ * relied on per-rect CPU width clamps against panel_left_x, AND the
+ * transformed path had NO clip math at all -- rotated/scaled highlights bled
+ * OVER the sidebar. Post-fix both paths push the SAME GPU scissor
+ * [vx, vy, panel_left_x - vx, vh] before emitting and restore disabled on exit.
+ *
+ * Setup: 800x600 viewport, NT_UI_INSPECTOR_PANEL_WIDTH = 400 -> panel_left_x
+ * = 400. A selected widget extends from x=500..900, overlapping the sidebar.
+ * After overlay_draw:
+ *   - nt_gfx_test_scissor_rect() must report [0, 0, 400, 600] in physical px
+ *     (the DIRECT-target path: target->fb_size = 0 -> nt_ui_internal_apply_*
+ *     emits (vx + x, vy + vh - y - hp, wp, hp) = (0, 0, 400, 600)).
+ *   - nt_gfx_test_scissor_enabled() must be FALSE (overlay restored the
+ *     walker-exit invariant: scissor stack tore down to disabled). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_overlay_scissor_clips_highlight_outside_panel(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+
+    /* Widget placed at x=500..900 -- straddles the sidebar left edge (400) so
+     * a no-clip overlay would bleed over the panel. We use a Clay floating
+     * element rather than a button so the selected-id resolves cleanly without
+     * pulling button-internal padding into the assertion. */
+    const float btn_x = 500.0F;
+    const float btn_y = 200.0F;
+    const float btn_w = 400.0F; /* extends to x=900, well past panel_left=400 */
+    const float btn_h = 48.0F;
+
+    /* Frame 1: declare so Clay records the bbox. */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("scissor_target"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {}
+    s_fx.ctx->inspector_selected_id = nt_ui_id("scissor_target");
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: stable bbox; selected_id propagates to highlight_id via the
+     * inspector emit fallback chain. */
+    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    CLAY({.id = CLAY_ID("scissor_target"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {}
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("scissor_target"), s_fx.ctx->inspector_highlight_id);
+
+    /* Pre-flight: ensure scissor is in a known sentinel state so the test can
+     * distinguish "overlay set it" from "leftover from a prior test". */
+    nt_gfx_set_scissor(0, 0, 0, 0);
+    nt_gfx_set_scissor_enabled(false);
+    int pre_rect[4] = {0};
+    nt_gfx_test_scissor_rect(pre_rect);
+    TEST_ASSERT_EQUAL_INT(0, pre_rect[2]);
+    TEST_ASSERT_EQUAL_INT(0, pre_rect[3]);
+
+    /* DIRECT target path: target->fb_size = 0 so apply_scissor_logical_to_physical
+     * routes through the simple branch (no scale/offset). */
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, screen_w, screen_h}};
+    nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
+
+    /* Scissor rect was set by the overlay to the GAME area:
+     *   x = vx + 0 = 0
+     *   y = (vy + vh) - 0 - vh = 0          (GL Y-bottom convention)
+     *   w = panel_left_x - vx = 400 - 0 = 400
+     *   h = vh = 600 */
+    int rect[4] = {0};
+    nt_gfx_test_scissor_rect(rect);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, rect[0], "scissor x must be game-area left");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, rect[1], "scissor y must be game-area bottom (GL Y-flip of viewport y)");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(400, rect[2], "scissor width must equal panel_left_x = screen_w - NT_UI_INSPECTOR_PANEL_WIDTH");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(600, rect[3], "scissor height must equal viewport height");
+
+    /* Restore invariant: overlay must disable scissor on exit (walker-exit
+     * invariant -- the scissor stack tore down to depth=0/disabled). */
+    TEST_ASSERT_FALSE_MESSAGE(nt_gfx_test_scissor_enabled(), "overlay must restore scissor to DISABLED on exit");
+}
+
 /* ---- Test 15: inactive inspector NEVER intercepts (no false positives) ----
  * Even if the pointer is at x=600 (would be inside the sidebar IF active),
  * the gate must stay off when the inspector is disabled -- otherwise the game
@@ -2243,6 +2327,9 @@ int main(void) {
      * batches both pipelines to ~2 dispatch alternations per scissor
      * segment. */
     RUN_TEST(test_inspector_layer_split_collapses_dispatch);
+    /* Phase 56 ext REVIEW-2 P2-1: GPU scissor for inspector overlay
+     * (both transformed and axis-aligned paths). */
+    RUN_TEST(test_inspector_overlay_scissor_clips_highlight_outside_panel);
     RUN_TEST(test_inspector_inactive_no_interception);
     return UNITY_END();
 }

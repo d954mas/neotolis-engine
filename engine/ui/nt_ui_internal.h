@@ -322,4 +322,14 @@ void nt_ui_internal_emit_filled_quad(nt_resource_t atlas, uint32_t region, const
 
 void nt_ui_internal_emit_outline(nt_resource_t atlas, uint32_t region, const float c[4][2], float thickness, uint32_t color);
 
+/* Phase 56 ext fix (REVIEW-2 P2-1): inspector overlay needs the SAME logical-
+ * to-physical scissor math the walker uses (engine/ui/nt_ui.c::scissor_push)
+ * so the overlay's GPU scissor and the walker's GPU scissor agree on every
+ * target shape (DIRECT vs SCALED viewport, fb offset/scale, Y-flip). Single
+ * source of truth in nt_ui.c -- here we just expose it. (x, y, wp, hp) are
+ * logical-space layout pixels: x/y top-left, wp/hp width/height. The function
+ * computes the physical GL rect and calls nt_gfx_set_scissor; the caller must
+ * then nt_gfx_set_scissor_enabled(true) and re-disable when done. */
+void nt_ui_internal_apply_scissor_logical_to_physical(const nt_ui_target_t *target, int x, int y, int wp, int hp);
+
 #endif /* NT_UI_INTERNAL_H */
