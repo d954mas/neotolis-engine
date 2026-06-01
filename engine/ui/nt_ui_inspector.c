@@ -74,25 +74,59 @@ static const float s_identity_mat[16] = {
     1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
 };
 
+/* CPU clip: width of the inspector sidebar panel (mirrors CDV_PANEL_WIDTH in
+ * nt_ui.c). The post-walk overlay clips its rect width against
+ * `panel_left_x = viewport.w - CDV_PANEL_WIDTH` so the highlight + label do
+ * NOT visually overlap the sidebar -- the panel is rendered by nt_ui_walk
+ * earlier in the pass, and this overlay is the only thing drawn after the
+ * walk, so without clipping the highlight peeks over the panel (user-visible
+ * regression for any widget near the screen's right edge). 400 is the
+ * file-static CDV_PANEL_WIDTH in engine/ui/nt_ui.c; if either changes the
+ * other must follow (a single shared constant would be cleaner long-term but
+ * needs the internal header surface). */
+#define NTINSP_OVERLAY_PANEL_W 400.0F
+
+/* Clamp a rect's right edge against `panel_left_x`. Returns the clipped width
+ * (or 0 when the entire rect is inside the panel). Top/bottom/y stay as-is. */
+static float overlay_clip_w_to_panel(float x, float w, float panel_left_x) {
+    if (x >= panel_left_x) {
+        return 0.0F;
+    }
+    if ((x + w) > panel_left_x) {
+        return panel_left_x - x;
+    }
+    return w;
+}
+
 /* Emit a filled rect with GL Y-up coords. (x, y_top) = top-left in GL space;
- * the quad paints downward from y_top by `h`. */
-static void overlay_emit_rect(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, uint32_t color) {
+ * the quad paints downward from y_top by `h`. Clips against the inspector
+ * sidebar so the overlay stays UNDER the panel visually. */
+static void overlay_emit_rect(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, float panel_left_x, uint32_t color) {
+    const float clip_w = overlay_clip_w_to_panel(x, w, panel_left_x);
+    if (clip_w <= 0.0F || h <= 0.0F) {
+        return;
+    }
     const float verts[4][2] = {
         {x, y_top},
-        {x + w, y_top},
-        {x + w, y_top - h},
+        {x + clip_w, y_top},
+        {x + clip_w, y_top - h},
         {x, y_top - h},
     };
     const uint16_t indices[6] = {0, 1, 2, 0, 2, 3};
     nt_sprite_renderer_emit_geometry(atlas, region, verts, 4U, indices, 6U, s_identity_mat, color);
 }
 
-/* Thin 4-edge outline of an axis-aligned bbox in GL Y-up. */
-static void overlay_emit_outline(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, float t, uint32_t color) {
-    overlay_emit_rect(atlas, region, x, y_top, w, t, color);         /* top edge */
-    overlay_emit_rect(atlas, region, x, y_top - h + t, w, t, color); /* bottom edge */
-    overlay_emit_rect(atlas, region, x, y_top, t, h, color);         /* left edge */
-    overlay_emit_rect(atlas, region, x + w - t, y_top, t, h, color); /* right edge */
+/* Thin 4-edge outline of an axis-aligned bbox in GL Y-up. Clips against the
+ * inspector sidebar; the right edge silently vanishes when the bbox extends
+ * past the panel left -- visually correct since the panel covers the rest. */
+static void overlay_emit_outline(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, float t, float panel_left_x, uint32_t color) {
+    overlay_emit_rect(atlas, region, x, y_top, w, t, panel_left_x, color);         /* top edge */
+    overlay_emit_rect(atlas, region, x, y_top - h + t, w, t, panel_left_x, color); /* bottom edge */
+    overlay_emit_rect(atlas, region, x, y_top, t, h, panel_left_x, color);         /* left edge */
+    /* Right edge: only emit when the visual bbox right is left of the panel. */
+    if ((x + w - t) < panel_left_x) {
+        overlay_emit_rect(atlas, region, x + w - t, y_top, t, h, panel_left_x, color);
+    }
 }
 
 static void overlay_draw_text(nt_material_t text_mat, nt_font_t font, float x, float baseline_y, float size, const float color[4], const char *s, size_t n) {
@@ -131,13 +165,23 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         return;
     }
 
+    const float vx = target->viewport[0];
     const float vy = target->viewport[1];
+    const float vw = target->viewport[2];
     const float vh = target->viewport[3];
     /* Clay Y-down -> GL Y-up: world_y(top) = vy+vh - clay_y(top). */
     const float gl_x = info.bbox_x;
     const float gl_y_top = vy + vh - info.bbox_y;
     const float w = info.bbox_w;
     const float h = info.bbox_h;
+
+    /* CPU clip boundary for "stay under the inspector panel". Panel is a
+     * right-attached float of width CDV_PANEL_WIDTH (400) at the layout-space
+     * origin, so its left edge sits at viewport.x + viewport.w - panel_w in
+     * the SAME logical space the overlay draws into. When the panel is NOT
+     * visible (inspector inactive should have early-returned above, but
+     * defensive), the clip degenerates to the viewport right edge. */
+    const float panel_left_x = vx + vw - NTINSP_OVERLAY_PANEL_W;
 
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
@@ -161,18 +205,20 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         const float pad_h = h + pt + pb;
         /* Translucent cyan fill for the padded hit area (matches debug overlay
          * idle color so the two systems stay visually consistent). */
-        overlay_emit_rect(ctx->atlas, ctx->white_region, pad_x, pad_y_top, pad_w, pad_h, 0x6033FFFFU);
+        overlay_emit_rect(ctx->atlas, ctx->white_region, pad_x, pad_y_top, pad_w, pad_h, panel_left_x, 0x6033FFFFU);
         /* Thin yellow outline tracing the padded edge so the touch-target is
          * unambiguous. */
-        overlay_emit_outline(ctx->atlas, ctx->white_region, pad_x, pad_y_top, pad_w, pad_h, 1.0F, 0xFF00FFFFU);
+        overlay_emit_outline(ctx->atlas, ctx->white_region, pad_x, pad_y_top, pad_w, pad_h, 1.0F, panel_left_x, 0xFF00FFFFU);
     }
     /* Filled translucent highlight (matches Clay__debugViewHighlightColor = {168,66,28,100}). */
-    overlay_emit_rect(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, 0x641C42A8U);
+    overlay_emit_rect(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, panel_left_x, 0x641C42A8U);
     /* Bright opaque outline for clarity. */
-    overlay_emit_outline(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, 2.0F, 0xFFFFFFFFU);
+    overlay_emit_outline(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, 2.0F, panel_left_x, 0xFFFFFFFFU);
 
-    /* Id label anchored at the top-left corner of the highlight rectangle. */
-    if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
+    /* Id label anchored at the top-left corner of the highlight rectangle.
+     * Skipped when the visual bbox starts inside the panel footprint -- the
+     * label would never be readable (panel covers it). */
+    if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F && gl_x < panel_left_x) {
         char buf[80];
         int n;
         if (info.id_string_len > 0U && info.id_string != NULL) {

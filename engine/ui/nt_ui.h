@@ -92,14 +92,32 @@ typedef struct {
     uint8_t _reserved[3];
 } nt_ui_element_data_t;
 
-/* Phase 56 ext: well-known debug layer for nt_ui_inspector emit.
- * Games typically use 0..~10 for normal UI (BG/IMG/TEXT/HUD); the inspector
- * floats its sidebar + highlight overlay above ALL game UI by tagging its
- * Clay elements with NT_UI_DATA_LAYER(NT_UI_LAYER_DEBUG). 250 leaves a small
- * headroom (251..255) for future engine-level overlays without colliding
- * with the inspector. Layer is uint8_t (0..255); the walker sort key is
- * (zIndex asc, layer asc, declaration). */
-#define NT_UI_LAYER_DEBUG ((nt_ui_layer_t)250)
+/* Phase 56 ext: well-known debug layers for nt_ui_inspector emit. Games
+ * typically use 0..~10 for normal UI (BG/IMG/TEXT/HUD); the inspector floats
+ * its sidebar + highlight overlay above ALL game UI by tagging its Clay
+ * elements with NT_UI_DATA_LAYER(NT_UI_LAYER_DEBUG_*).
+ *
+ * Two distinct constants so the floating element-highlight is drawn UNDER
+ * the sidebar panel where they geometrically overlap (highlighted widgets
+ * near the right edge of the screen used to peek through the panel because
+ * the highlight had a higher zIndex than the panel -- now lower zIndex AND
+ * lower layer keep it strictly beneath). The panel itself still wins over
+ * any game UI.
+ *
+ *   NT_UI_LAYER_DEBUG_HIGHLIGHT  = 240 -- element highlight float + post-walk
+ *                                         hit-zone overlay polygons. Above
+ *                                         game UI (10), below the panel (250).
+ *   NT_UI_LAYER_DEBUG_PANEL      = 250 -- sidebar root. Always wins over the
+ *                                         highlight where they overlap.
+ *
+ * 250 leaves a small headroom (251..255) for future engine-level overlays
+ * without colliding with the inspector. Layer is uint8_t (0..255); the
+ * walker sort key is (zIndex asc, layer asc, declaration). NT_UI_LAYER_DEBUG
+ * is kept as an alias for PANEL for any caller that wants "above everything";
+ * new code should pick the explicit variant. */
+#define NT_UI_LAYER_DEBUG_HIGHLIGHT ((nt_ui_layer_t)240)
+#define NT_UI_LAYER_DEBUG_PANEL ((nt_ui_layer_t)250)
+#define NT_UI_LAYER_DEBUG NT_UI_LAYER_DEBUG_PANEL
 
 /* Macros allocate from nt_mem_scratch (frame arena) so the pointer stays valid
  * across helper-function returns until the next nt_mem_scratch_reset. Game

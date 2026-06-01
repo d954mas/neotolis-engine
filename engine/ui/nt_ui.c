@@ -1163,16 +1163,22 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     if (highlightedElementId) {
         /* Mirror clay.h:3303 -- floating highlight rectangle attached to the
          * hovered element. This is the IN-VIEWPORT highlight as the user moves
-         * the pointer over the sidebar. Tagged with NT_UI_LAYER_DEBUG so the
-         * walker sorts it above any game UI element regardless of declaration
-         * order (the inspector is a debug overlay -- it must always win). */
+         * the pointer over the sidebar. Tagged with NT_UI_LAYER_DEBUG_HIGHLIGHT
+         * (240) so the walker sorts it above any game UI element (typical
+         * 0..~10) but BELOW the sidebar panel (250) where they overlap.
+         *
+         * zIndex is 32764 (was 32767 = above panel) so Clay's zIndex segmentation
+         * also keeps the highlight strictly under the panel root (32765). Without
+         * both adjustments, highlights for widgets near the screen's right edge
+         * leaked through the panel (visible bug in the user's screenshot).
+         * Order matters: zIndex segments come first, then per-segment layer sort. */
         CLAY({.id = CLAY_ID("ntInsp_ElementHighlight"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
-              .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG),
-              .floating = {.parentId = highlightedElementId, .zIndex = 32767, .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH, .attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID}}) {
+              .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_HIGHLIGHT),
+              .floating = {.parentId = highlightedElementId, .zIndex = 32764, .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH, .attachTo = CLAY_ATTACH_TO_ELEMENT_WITH_ID}}) {
             CLAY({.id = CLAY_ID("ntInsp_ElementHighlightRectangle"),
                   .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
-                  .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG),
+                  .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_HIGHLIGHT),
                   .backgroundColor = CDV_HIGHLIGHT_COLOR}) {}
         }
         /* Surface the hovered id to the post-walk overlay. */
@@ -1252,7 +1258,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
      * would land at [screen.w, screen.w + panel_w] -- entirely off-screen. */
     CLAY({.id = CLAY_ID("ntInsp_Root"),
           .layout = {.sizing = {CLAY_SIZING_FIXED((float)CDV_PANEL_WIDTH), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
-          .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG),
+          .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL),
           .floating = {.zIndex = 32765,
                        .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_CENTER, .parent = CLAY_ATTACH_POINT_RIGHT_CENTER},
                        .attachTo = CLAY_ATTACH_TO_ROOT,
