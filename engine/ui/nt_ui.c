@@ -684,9 +684,61 @@ static Clay_Color cdv_config_color(uint8_t type) {
     }
 }
 
-/* (Phase 56 ext commit 2 will add:
- *   - cdv_widget_tag / cdv_widget_color -- engine extension pill columns
- *   - cdv_element_layer -- userData layer field read for the layer column) */
+/* Engine extension column: widget-type pill (button/image/label/panel/group).
+ * Pulls from ctx->widget_registry. Plain Clay rows show "-". */
+static const char *cdv_widget_tag(nt_ui_widget_type_t t) {
+    switch (t) {
+    case NT_UI_WIDGET_BUTTON:
+        return "button";
+    case NT_UI_WIDGET_IMAGE:
+        return "image";
+    case NT_UI_WIDGET_LABEL:
+        return "label";
+    case NT_UI_WIDGET_PANEL:
+        return "panel";
+    case NT_UI_WIDGET_GROUP:
+        return "group";
+    case NT_UI_WIDGET_NONE:
+    default:
+        return "-";
+    }
+}
+
+static Clay_Color cdv_widget_color(nt_ui_widget_type_t t) {
+    /* Distinct hues from Clay's config-type pills so the extension column
+     * reads as a separate dimension. */
+    switch (t) {
+    case NT_UI_WIDGET_BUTTON:
+        return (Clay_Color){70, 180, 90, 200};
+    case NT_UI_WIDGET_IMAGE:
+        return (Clay_Color){120, 90, 180, 200};
+    case NT_UI_WIDGET_LABEL:
+        return (Clay_Color){90, 140, 200, 200};
+    case NT_UI_WIDGET_PANEL:
+        return (Clay_Color){180, 120, 70, 200};
+    case NT_UI_WIDGET_GROUP:
+        return (Clay_Color){160, 160, 90, 200};
+    case NT_UI_WIDGET_NONE:
+    default:
+        return (Clay_Color){80, 80, 80, 120};
+    }
+}
+
+/* Engine extension column: layer number from nt_ui_element_data_t.layer (via
+ * Clay's userData). Returns -1 if userData is NULL. */
+static int32_t cdv_element_layer(Clay_LayoutElement *el) {
+    for (int32_t i = 0; i < el->elementConfigs.length; ++i) {
+        Clay_ElementConfig *cfg = Clay__ElementConfigArraySlice_Get(&el->elementConfigs, i);
+        if (cfg->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
+            void *u = cfg->config.sharedElementConfig->userData;
+            if (u != NULL) {
+                const nt_ui_element_data_t *d = (const nt_ui_element_data_t *)u;
+                return (int32_t)d->layer;
+            }
+        }
+    }
+    return -1;
+}
 
 /* Clay__IntToString does int -> Clay_String. We can't see that file-static
  * symbol from this TU (it's also static), so reimplement using static buffers
@@ -769,9 +821,9 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             if (ctx->inspector_selected_id == currentElement->id) {
                 layoutData.selected_element_row_index = layoutData.row_count;
             }
-            /* (Phase 56 ext commit 2 will compute: int32_t layer +
-             *  nt_ui_widget_type_t wtype here for the per-row extension
-             *  columns.) */
+            /* Phase 56 ext extension columns: widget-type pill + layer cell. */
+            const int32_t layer = cdv_element_layer(currentElement);
+            const nt_ui_widget_type_t wtype = nt_ui_widget_lookup(ctx, currentElement->id);
             CLAY({.id = CLAY_IDI("ntInsp_ElementOuter", currentElement->id), .layout = Clay__DebugView_ScrollViewItemLayoutConfig}) {
                 /* Collapse icon / dot (verbatim shape but no debugData usage --
                  * we don't track collapse state in the engine; show the dot
@@ -821,8 +873,21 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                         CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(labelStr), .chars = labelStr}), CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 16}));
                     }
                 }
-                /* (Phase 56 ext commit 2 will add: widget-type pill +
-                 * layer cell columns here.) */
+                /* Engine extension columns: widget-type pill + layer cell. */
+                if (wtype != NT_UI_WIDGET_NONE) {
+                    Clay_Color wbg = cdv_widget_color(wtype);
+                    const char *wlabel = cdv_widget_tag(wtype);
+                    CLAY({.layout = {.padding = {8, 8, 2, 2}}, .backgroundColor = wbg, .cornerRadius = CLAY_CORNER_RADIUS(4), .border = {.color = wbg, .width = {1, 1, 1, 1, 0}}}) {
+                        CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(wlabel), .chars = wlabel}), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16}));
+                    }
+                }
+                /* Layer cell -- "L:N" or "-". */
+                if (layer >= 0) {
+                    CLAY({.layout = {.padding = {6, 6, 2, 2}}, .border = {.color = CDV_COLOR_3, .width = {1, 1, 1, 1, 0}}, .cornerRadius = CLAY_CORNER_RADIUS(4)}) {
+                        CLAY_TEXT(CLAY_STRING("L:"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16}));
+                        CLAY_TEXT(cdv_int_to_string(layer), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16}));
+                    }
+                }
             }
 
             /* Text-content row (verbatim from clay.h:3258-3270). */
@@ -1010,8 +1075,20 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                     }
                     Clay_Padding attributeConfigPadding = {CDV_OUTER_PADDING, CDV_OUTER_PADDING, 8, 8};
                     CLAY({.layout = {.padding = attributeConfigPadding, .childGap = 8, .layoutDirection = CLAY_TOP_TO_BOTTOM}}) {
-                        /* (Phase 56 ext commit 2 will add: Widget + Layer
-                         * extension rows here at the top of the info pane.) */
+                        /* Engine extension rows -- Widget type + Layer.
+                         * Surfaced at the TOP of the info pane so the user
+                         * sees them first when inspecting an element. */
+                        const nt_ui_widget_type_t sel_w = nt_ui_widget_lookup(ctx, ctx->inspector_selected_id);
+                        const char *sel_w_tag = cdv_widget_tag(sel_w);
+                        CLAY_TEXT(CLAY_STRING("Widget"), infoTitleConfig);
+                        CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(sel_w_tag), .chars = sel_w_tag}), infoTextConfig);
+                        CLAY_TEXT(CLAY_STRING("Layer"), infoTitleConfig);
+                        const int32_t selLayer = cdv_element_layer(selectedItem->layoutElement);
+                        if (selLayer >= 0) {
+                            CLAY_TEXT(cdv_int_to_string(selLayer), infoTextConfig);
+                        } else {
+                            CLAY_TEXT(CLAY_STRING("(none)"), infoTextConfig);
+                        }
                         CLAY_TEXT(CLAY_STRING("Bounding Box"), infoTitleConfig);
                         CLAY({.layout = {.layoutDirection = CLAY_LEFT_TO_RIGHT}}) {
                             CLAY_TEXT(CLAY_STRING("{ x: "), infoTextConfig);
