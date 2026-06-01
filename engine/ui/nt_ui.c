@@ -1359,7 +1359,21 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
          * transformed widgets, the debug_zones scan above wins because the
          * widget queries get_interaction inside its begin() (recording the
          * zone with the live accum snapshot) while the pointerOverIds path
-         * here is axis-aligned and would miss them. */
+         * here is axis-aligned and would miss them.
+         *
+         * REVIEW-2 ANALYSIS (kept 3-stage): an earlier proposal suggested
+         * dropping this widget-preference pass on the assumption that all
+         * registered widgets already record a debug_zone via Stage 1, making
+         * the preference redundant. That assumption is FALSE: only
+         * nt_ui_button calls nt_ui_get_interaction_padded today; panel,
+         * group, image, and label widgets register their descriptor but
+         * NEVER query interaction (they are non-interactive). For them no
+         * debug_zone exists, so Stage 1 cannot pick them, and removing this
+         * widget-preference pass would surface the deeper anonymous child
+         * instead of the widget itself (regression covered by
+         * test_inspector_viewport_hover_prefers_widget_over_child:1450).
+         * The widget-vs-fallback split is a real correctness gate, not a
+         * legacy optimization. */
         if (highlightedElementId == 0U) {
             uint32_t fallback_id = 0U;
             for (int32_t i = context->pointerOverIds.length - 1; i >= 0; --i) {
