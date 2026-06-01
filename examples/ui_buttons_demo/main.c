@@ -132,6 +132,15 @@ static const nt_ui_image_style_t g_btn_icon_style = {
 // #endregion
 
 // #region button style templates
+/* NOTE on the Kenney slice9 "gray center" the user spotted: button_blue_depth.png
+ * and button_green_depth.png are Kenney CC0 "depth" buttons -- intentional 3D
+ * art with an outer bright frame + an INNER recessed light-gray-blue panel.
+ * On the dark BG (#121216) the inner panel reads as gray. This is the Kenney
+ * art rendering correctly, NOT a tint/state bug; the slice9 borders (16 px
+ * each side) preserve the corners and stretch the inner gray patch to fill
+ * the button. Swapping to "flat" Kenney buttons (no depth suffix) would
+ * remove the gray look but lose the 3D affordance the demo wants to show. */
+
 /* Variant (a) STANDARD: eased baseline. Same shape as the old g_btn_eased_style
  * from the previous round; transition_speed 12, +16 hit padding. */
 static const nt_ui_button_style_t g_btn_standard_style = {
@@ -347,6 +356,18 @@ static void try_bind_resources(void) {
     {                                                                                                                                                                                                  \
         .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER} }                      \
     }
+
+/* nt_ui_button_begin opens a Clay IMAGE element WITHOUT layout sizing -- it
+ * defaults to FIT (Clay clay.h:301), so the slice9 background shrinks to the
+ * label/icon natural size (~80x40 for a label, ~72x72 for an icon) instead of
+ * filling the BTN_SLOT_LAYOUT 320x180 outer wrapper. Result: tiny slice9 button
+ * floating in a big empty slot -- the slice9's gray inner panel + light corners
+ * look like a "small white-ish square" against the dark BG. Wrapping the
+ * button's children in a FIXED inner Clay block forces the FIT button
+ * container to grow to that bbox so the slice9 renders at the full intended
+ * size. Subtract 16 px for the BTN_SLOT padding (8 px each side). */
+#define BTN_CONTENT_W (BTN_W - 16)
+#define BTN_CONTENT_H (BTN_H - 16)
 // #endregion
 
 // #region declare_reference_buttons (2 x 3 GRID)
@@ -377,7 +398,11 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("STANDARD (eased)", "+16 px touch padding");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    if (nt_ui_button(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_std, s_atlas_handle, "Save", &g_btn_label_style, &s_btn_standard, true)) {
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_std, s_atlas_handle, &s_btn_standard, true);
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_CONTENT_W), CLAY_SIZING_FIXED(BTN_CONTENT_H)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Save", &g_btn_label_style);
+                    }
+                    if (nt_ui_button_end(s_ctx)) {
                         s_clicks_std++;
                     }
                 }
@@ -388,7 +413,11 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("SCALE 0.80<->1.20", "+16 px touch padding");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    if (nt_ui_button(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_scale, s_atlas_handle, "Boom", &g_btn_label_style, &s_btn_scale, true)) {
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_scale, s_atlas_handle, &s_btn_scale, true);
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_CONTENT_W), CLAY_SIZING_FIXED(BTN_CONTENT_H)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Boom", &g_btn_label_style);
+                    }
+                    if (nt_ui_button_end(s_ctx)) {
                         s_clicks_scale++;
                     }
                 }
@@ -399,7 +428,11 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("VISUAL SWAP blue<->green", "+16 px touch padding");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    if (nt_ui_button(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_swap, s_atlas_handle, "Swap", &g_btn_label_style, &s_btn_swap, true)) {
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_swap, s_atlas_handle, &s_btn_swap, true);
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_CONTENT_W), CLAY_SIZING_FIXED(BTN_CONTENT_H)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Swap", &g_btn_label_style);
+                    }
+                    if (nt_ui_button_end(s_ctx)) {
                         s_clicks_swap++;
                     }
                 }
@@ -416,8 +449,8 @@ static void declare_reference_buttons(void) {
                 CELL_LABELS("ICON ONLY", "no padding");
                 CLAY(BTN_SLOT_LAYOUT) {
                     nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icon, s_atlas_handle, &s_btn_nopad, true);
-                    {
-                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(72), CLAY_SIZING_FIXED(72)}}}) {
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_CONTENT_W), CLAY_SIZING_FIXED(BTN_CONTENT_H)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(96)}}}) {
                             nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_icon_bunny_idx, &g_btn_icon_style);
                         }
                     }
@@ -433,8 +466,11 @@ static void declare_reference_buttons(void) {
                 CELL_LABELS("ICON + TEXT", "no padding");
                 CLAY(BTN_SLOT_LAYOUT) {
                     nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icontext, s_atlas_handle, &s_btn_nopad, true);
-                    {
-                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(64)}}}) {
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_CONTENT_W), CLAY_SIZING_FIXED(BTN_CONTENT_H)},
+                                     .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                                     .childGap = 16,
+                                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) {
                             nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_icon_bunny_idx, &g_btn_icon_style);
                         }
                         nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", &g_btn_label_style);
@@ -450,7 +486,11 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("DISABLED (enabled=false)", "+16 px (no hover)");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    if (nt_ui_button(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_disabled, s_atlas_handle, "Locked", &g_btn_label_style, &s_btn_standard, false)) {
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_disabled, s_atlas_handle, &s_btn_standard, false);
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_CONTENT_W), CLAY_SIZING_FIXED(BTN_CONTENT_H)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Locked", &g_btn_label_style);
+                    }
+                    if (nt_ui_button_end(s_ctx)) {
                         s_clicks_disabled++; /* unreachable while disabled -- proves the gate */
                     }
                 }
