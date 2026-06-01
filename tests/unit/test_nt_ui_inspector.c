@@ -259,6 +259,141 @@ static void test_overlay_noop_without_highlight(void) {
     nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
 }
 
+/* ---- Test 13: inspector sidebar INTERCEPTS pointer (regression pin) ----
+ * Bug: clicking the sidebar also fired the click on any button geometrically
+ * behind it (the sidebar paints on top but the hit-test was pure coord-vs-
+ * bbox). Fix: when inspector_active and the pointer is inside the right-
+ * attached sidebar footprint (CDV_PANEL_WIDTH = 400 wide on a 800-wide
+ * screen -> x >= 400), nt_ui_get_interaction must return a zeroed result
+ * for every user widget AND nt_ui_inspector_pointer_consumed must be true
+ * AND nt_ui_wants_pointer must be true. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_intercepts_pointer_over_sidebar(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    /* Frame 1: declare a button at (600, 200) -- inside the sidebar footprint
+     * on an 800-wide screen (sidebar starts at x=400). No interaction queried,
+     * just sets up the prev-frame bbox for frame 2. */
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+    const float btn_x = 600.0F;
+    const float btn_y = 200.0F;
+    const float btn_w = 160.0F;
+    const float btn_h = 48.0F;
+    const float btn_cx = btn_x + (btn_w * 0.5F);
+    const float btn_cy = btn_y + (btn_h * 0.5F);
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("hidden_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: pointer over the button center (which is also inside the
+     * sidebar) WITH left-button pressed_now -- the bug would have returned
+     * hovered + pressed_now + capture active. The fix returns zeroed. */
+    nt_pointer_t f2 = {0};
+    f2.x = btn_cx; /* 680 -- well past sidebar left edge at 400 */
+    f2.y = btn_cy;
+    f2.active = true;
+    f2.buttons[NT_BUTTON_LEFT].is_down = true;
+    f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    CLAY({.id = CLAY_ID("hidden_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
+    }
+
+    /* The flag is set in nt_ui_begin (coord-based, frame-1 safe). */
+    TEST_ASSERT_TRUE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
+
+    /* Both the unpadded and padded query MUST return zeroed -- no hover, no
+     * press, no clicked, no capture (the bug pinned here). */
+    nt_ui_interaction_t in = nt_ui_get_interaction(s_fx.ctx, nt_ui_id("hidden_btn"));
+    TEST_ASSERT_FALSE(in.hovered);
+    TEST_ASSERT_FALSE(in.pressed);
+    TEST_ASSERT_FALSE(in.pressed_now);
+    TEST_ASSERT_FALSE(in.clicked);
+    TEST_ASSERT_FALSE(in.released_now);
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
+
+    const int16_t pad[4] = {32, 32, 32, 32};
+    nt_ui_interaction_t in_pad = nt_ui_get_interaction_padded(s_fx.ctx, nt_ui_id("hidden_btn"), pad);
+    TEST_ASSERT_FALSE(in_pad.hovered);
+    TEST_ASSERT_FALSE(in_pad.pressed);
+    TEST_ASSERT_FALSE(in_pad.pressed_now);
+    TEST_ASSERT_FALSE(in_pad.clicked);
+
+    /* wants_pointer must be TRUE even though no user widget recorded hover,
+     * so the game can suppress its world-input. */
+    TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
+
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 14: pointer OUTSIDE the sidebar still works normally ----
+ * Counter-test: same setup but the pointer is on the LEFT half of the screen,
+ * outside the sidebar footprint. The button there must register normally,
+ * proving the gate is not over-aggressive. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_pointer_outside_sidebar_normal(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+    const float btn_x = 100.0F; /* x=100..260, well left of sidebar at 400 */
+    const float btn_y = 200.0F;
+    const float btn_w = 160.0F;
+    const float btn_h = 48.0F;
+    const float btn_cx = btn_x + (btn_w * 0.5F);
+    const float btn_cy = btn_y + (btn_h * 0.5F);
+
+    /* Frame 1: declare bbox so the next frame has a hit-target. */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    CLAY(
+        {.id = CLAY_ID("visible_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: pointer over the button center, NOT over the sidebar. */
+    nt_pointer_t f2 = {0};
+    f2.x = btn_cx; /* 180 -- well below sidebar threshold of 400 */
+    f2.y = btn_cy;
+    f2.active = true;
+    f2.buttons[NT_BUTTON_LEFT].is_down = true;
+    f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    CLAY(
+        {.id = CLAY_ID("visible_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
+    }
+
+    /* Inspector active but pointer is OUTSIDE the sidebar -> consumed false. */
+    TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
+
+    /* Normal interaction must fire. */
+    nt_ui_interaction_t in = nt_ui_get_interaction(s_fx.ctx, nt_ui_id("visible_btn"));
+    TEST_ASSERT_TRUE(in.hovered);
+    TEST_ASSERT_TRUE(in.pressed);
+    TEST_ASSERT_TRUE(in.pressed_now);
+
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 15: inactive inspector NEVER intercepts (no false positives) ----
+ * Even if the pointer is at x=600 (would be inside the sidebar IF active),
+ * the gate must stay off when the inspector is disabled -- otherwise the game
+ * loses input the moment the user thinks they closed the debug view. */
+static void test_inspector_inactive_no_interception(void) {
+    /* Inspector off (default). */
+    TEST_ASSERT_FALSE(nt_ui_inspector_is_active(s_fx.ctx));
+
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+    nt_pointer_t mouse = make_pointer(600.0F, 200.0F); /* would be in sidebar if active */
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &mouse, 1);
+    /* Even with the pointer "in sidebar coords", pointer_consumed must be false. */
+    TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
+    nt_ui_end(s_fx.ctx);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_registry_register_lookup);
@@ -273,5 +408,9 @@ int main(void) {
     RUN_TEST(test_inspector_active_grows_element_count);
     RUN_TEST(test_inspector_many_widgets_safe);
     RUN_TEST(test_overlay_noop_without_highlight);
+    /* Phase 56 ext fix: sidebar input interception regression pins. */
+    RUN_TEST(test_inspector_intercepts_pointer_over_sidebar);
+    RUN_TEST(test_inspector_pointer_outside_sidebar_normal);
+    RUN_TEST(test_inspector_inactive_no_interception);
     return UNITY_END();
 }

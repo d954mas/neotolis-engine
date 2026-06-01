@@ -176,6 +176,13 @@ struct nt_ui_context {
      * another row is clicked or selection is explicitly cleared). Mirrors
      * Clay's own debugSelectedElementId behavior. */
     uint32_t inspector_selected_id;
+    /* Per-frame: true when the pointer is inside the inspector's sidebar
+     * footprint (computed in nt_ui_begin from primary->x vs the panel width).
+     * Gates nt_ui_get_interaction_padded to a zeroed return so user widgets
+     * behind the sidebar do NOT register hover/press/click while the sidebar
+     * visually consumes the click. Also makes nt_ui_wants_pointer report true
+     * so the game can suppress its own world-input. Reset each nt_ui_begin. */
+    bool inspector_pointer_consumed;
 
     Clay_Arena clay_arena;
 };

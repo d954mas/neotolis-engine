@@ -45,6 +45,12 @@ enum {
 };
 // #endregion
 
+/* Inspector sidebar width (verbatim Clay debug-view port; clay.h:3113-3122).
+ * Defined HERE rather than alongside the other CDV_* metrics (~L640) so
+ * nt_ui_begin can use it for the inspector_pointer_consumed gate. The verbatim
+ * port below references this same macro -- one source of truth. */
+#define CDV_PANEL_WIDTH 400
+
 // #region module_state
 /* Only one ctx may be in-frame at a time; nt_ui_begin asserts NULL on entry. */
 static nt_ui_context_t *g_nt_ui_inframe_ctx = NULL;
@@ -280,6 +286,18 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
 
     /* v1.8 drives the primary pointer; Clay is fed only this one. */
     const nt_pointer_t *primary = &pointers[0];
+
+    /* Phase 56 ext fix: per-frame "pointer is over the inspector sidebar" gate.
+     * The sidebar is a right-attached floating panel CDV_PANEL_WIDTH wide; the
+     * same coord check is what the inspector's emit_layout uses to decide
+     * whether to highlight a sidebar row (line ~1005). Computing it here gates
+     * nt_ui_get_interaction_padded so user widgets behind the sidebar do NOT
+     * register hover/press/click when the sidebar visually consumes the click.
+     * Frame-1 safe (no layout solve required -- pure coord check). */
+    ctx->inspector_pointer_consumed = false;
+    if (ctx->inspector_active && primary->x >= (screen_w - (float)CDV_PANEL_WIDTH)) {
+        ctx->inspector_pointer_consumed = true;
+    }
 
     /* Clay's built-in debug view is intentionally OFF -- the inspector
      * REPLACES it entirely (one debug system; verbatim port). */
@@ -634,7 +652,8 @@ static const Clay_Color CDV_HIGHLIGHT_COLOR = {168, 66, 28, 100}; /* Clay__debug
 #define CDV_ROW_HEIGHT 30
 #define CDV_OUTER_PADDING 10
 #define CDV_INDENT_WIDTH 16
-#define CDV_PANEL_WIDTH 400
+/* CDV_PANEL_WIDTH moved to the top of the file so nt_ui_begin can read it
+ * for the inspector_pointer_consumed gate (Phase 56 ext fix). */
 
 /* Mirror of Clay__DebugGetElementConfigTypeLabel (clay.h:3130-3140) but
  * collapsed to just label + color (no inner struct). */
@@ -2719,6 +2738,19 @@ nt_ui_interaction_t nt_ui_get_interaction_padded(nt_ui_context_t *ctx, uint32_t 
 
     nt_ui_interaction_t out = {0};
 
+    /* Phase 56 ext fix: when the inspector sidebar is consuming the pointer
+     * (set in nt_ui_begin based on primary->x vs panel width), every user-
+     * widget interaction query short-circuits to a zeroed result -- no hover,
+     * no press, no clicked. Without this, clicking the visual sidebar would
+     * ALSO fire any button geometrically behind it (the sidebar paints on top
+     * but the hit-test is purely coord-vs-bbox). Returning zero here also
+     * naturally cleans up captures: capture_seen stays 0 for this id, so the
+     * next nt_ui_begin's orphan-cleanup wipes any in-progress capture instead
+     * of letting it persist into a phantom drag. */
+    if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
+        return out;
+    }
+
     /* No prev-frame bbox yet (first frame an id is declared) -> not hovered,
      * no capture can have started against it (D-56-06). */
     const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
@@ -2873,6 +2905,12 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
 
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_wants_pointer: ctx must be non-NULL");
+    /* Phase 56 ext fix: the inspector sidebar counts as "engine wants the
+     * pointer". Game world input (camera drag, etc.) is suppressed correctly
+     * even when no user widget is under the pointer. */
+    if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
+        return true;
+    }
     if (ctx->pointer_over_any) {
         return true;
     }

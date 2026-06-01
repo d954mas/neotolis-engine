@@ -45,6 +45,16 @@ typedef struct nt_ui_context nt_ui_context_t;
 void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on);
 bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx);
 
+/* True for the current frame iff the inspector is active AND the pointer is
+ * inside the sidebar footprint (right-attached, CDV_PANEL_WIDTH wide). The
+ * engine already uses this internally to gate nt_ui_get_interaction[_padded]
+ * so widgets behind the sidebar do NOT register hover/press/click; games that
+ * roll their OWN interactive zones (not via nt_ui_get_interaction) can query
+ * this to suppress their own click logic when the inspector is taking input.
+ * Returns false when the inspector is inactive. Computed in nt_ui_begin from
+ * the primary pointer position; the value is stable across the frame. */
+bool nt_ui_inspector_pointer_consumed(const nt_ui_context_t *ctx);
+
 /* Engine-internal: called by nt_ui_end if the inspector is active. Emits the
  * verbatim Clay debug view as CLAY({...}) blocks INSIDE the in-progress
  * layout pass (between user UI and Clay_EndLayout). Asserts in-frame.

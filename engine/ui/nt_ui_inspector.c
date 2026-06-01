@@ -47,6 +47,13 @@ bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_is_active: ctx must be non-NULL");
     return ctx->inspector_active;
 }
+
+bool nt_ui_inspector_pointer_consumed(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_inspector_pointer_consumed: ctx must be non-NULL");
+    /* inspector_pointer_consumed is only meaningful while the inspector is active;
+     * the and-with-active is defensive against stale state when the toggle flips. */
+    return ctx->inspector_active && ctx->inspector_pointer_consumed;
+}
 // #endregion
 
 // #region emit_layout (forwarder -- body in nt_ui.c)
