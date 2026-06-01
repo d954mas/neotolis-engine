@@ -569,6 +569,47 @@ static void test_inspector_filter_skips_anonymous(void) {
     TEST_ASSERT_LESS_OR_EQUAL_INT32(named_growth + 6, anon_growth);
 }
 
+/* ---- Test 15f-bis: filter PRESERVES Text/Image/SHARED-config rows ----
+ * Regression pin for commit 1a0d55b ("filter empty wrappers") which dropped
+ * config-bearing leaves alongside the truly anonymous wrappers. A CLAY_TEXT
+ * leaf (Clay TEXT config, no string id, no widget tag) MUST appear in the
+ * inspector tree -- user reported "Я теперь не вижу text/image раньше было".
+ *
+ * Method: compare two trees with the same named-element count, but tree A
+ * has a CLAY_TEXT leaf inside a named container while tree B has only the
+ * named container. Tree A must produce more inspector rows than B. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_filter_keeps_text_leaves(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+
+    /* Baseline: container, no text leaf. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root_no_text")}) {
+        CLAY({.id = CLAY_ID("box1"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) {}
+    }
+    const int32_t before_a = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    const int32_t after_a = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    const int32_t a_growth = after_a - before_a;
+
+    /* With text: same container, plus a CLAY_TEXT leaf (no string id, no
+     * widget tag -- only the TEXT element config). Pre-fix the filter killed
+     * this row. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root_with_text")}) {
+        CLAY({.id = CLAY_ID("box2"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) { nt_ui_label(s_fx.ctx, NULL, "hello", &s_label_style); }
+    }
+    const int32_t before_b = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    const int32_t after_b = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    const int32_t b_growth = after_b - before_b;
+
+    /* The text-bearing tree must produce MORE inspector elements -- the Text
+     * leaf row was preserved. Pre-fix, b_growth == a_growth (text dropped). */
+    TEST_ASSERT_GREATER_THAN_INT32(a_growth, b_growth);
+}
+
 /* ---- Test 15g: inspector emits a hex fallback for unnamed widgets ----
  * Pin for the empty-stringId fallback: when an element has no string id but
  * IS a registered widget (so it survives the filter), the inspector tree row
@@ -633,6 +674,7 @@ int main(void) {
     RUN_TEST(test_widget_unpadded_no_hit_padding);
     RUN_TEST(test_button_auto_records_hit_padding);
     RUN_TEST(test_inspector_filter_skips_anonymous);
+    RUN_TEST(test_inspector_filter_keeps_text_leaves);
     RUN_TEST(test_inspector_emits_hex_for_unnamed_widget);
     RUN_TEST(test_inspector_inactive_no_interception);
     return UNITY_END();

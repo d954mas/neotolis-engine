@@ -848,11 +848,26 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
              * open per child (lines below) plus any other Clay-auto-anonymous
              * container -- a row is emitted only when the element has a
              * meaningful identity:
-             *   has_identity = (stringId.length > 0) || widget_lookup != NULL
-             * Falls back to descending silently (no row, no wrappers) so the
-             * tree shows only user-named/widget-tagged elements. The text
-             * branch below is exempt -- text content is its own identity. */
-            const bool has_identity = (idString.length > 0) || (wdef != NULL);
+             *   has_identity = (stringId.length > 0)
+             *               || widget_lookup != NULL
+             *               || elementConfigs.length > 0
+             *
+             * The third clause restores Clay's verbatim debug-view behavior
+             * for ANY config-bearing leaf -- Text/Image/SHARED-color/Border/
+             * etc. -- which the earlier "kill empty wrappers" pass dropped by
+             * accident. Concrete regression: `nt_ui_label` emits a CLAY_TEXT
+             * child INSIDE the label's container -- the container has been
+             * tagged by the label widget but the Text leaf has no string id
+             * and no widget tag, only a Text config. Without this third
+             * clause that Text row vanished (user report: "Я теперь не вижу
+             * text/image раньше было"). Same applies to standalone CLAY_TEXT
+             * blocks, CLAY({ .image = ... }) leaves, and CLAY blocks that
+             * only carry a SHARED background color. Truly anonymous wrappers
+             * (no config, no id, no widget) still descend silently.
+             *
+             * The text branch below is exempt -- text content is its own
+             * identity. */
+            const bool has_identity = (idString.length > 0) || (wdef != NULL) || (currentElement->elementConfigs.length > 0);
             if (has_identity) {
                 if (highlighted_row_index == layoutData.row_count) {
                     if (context->pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
