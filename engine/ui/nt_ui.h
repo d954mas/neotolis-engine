@@ -128,9 +128,16 @@ typedef struct {
  * (engine tests, the legacy name "PANEL", any out-of-tree code) keep
  * resolving to a valid BG slot; new code should pick the explicit
  * BG/TEXT variant. */
+/* Engine reserves layers 240-255 for debug overlays and future engine UI surfaces.
+ * Game code MUST use layer values <= 239 to avoid interleaving with engine emit.
+ * The walker layer-sort guarantees engine debug renders strictly above game UI
+ * when this rule is honored. */
 #define NT_UI_LAYER_DEBUG_HIGHLIGHT ((nt_ui_layer_t)240)
 #define NT_UI_LAYER_DEBUG_PANEL_BG ((nt_ui_layer_t)250)
 #define NT_UI_LAYER_DEBUG_PANEL_TEXT ((nt_ui_layer_t)251)
+_Static_assert(NT_UI_LAYER_DEBUG_HIGHLIGHT >= 240 && NT_UI_LAYER_DEBUG_HIGHLIGHT <= 255, "NT_UI_LAYER_DEBUG_HIGHLIGHT must be in engine-reserved layer range 240-255");
+_Static_assert(NT_UI_LAYER_DEBUG_PANEL_BG >= 240 && NT_UI_LAYER_DEBUG_PANEL_BG <= 255, "NT_UI_LAYER_DEBUG_PANEL_BG must be in engine-reserved layer range 240-255");
+_Static_assert(NT_UI_LAYER_DEBUG_PANEL_TEXT >= 240 && NT_UI_LAYER_DEBUG_PANEL_TEXT <= 255, "NT_UI_LAYER_DEBUG_PANEL_TEXT must be in engine-reserved layer range 240-255");
 /* Legacy aliases -- PANEL == PANEL_BG so any existing call site that wants
  * "the inspector panel layer" still resolves to a valid (rect-bearing) slot.
  * New code should use the BG/TEXT split explicitly. */
