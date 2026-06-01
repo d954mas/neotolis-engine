@@ -92,7 +92,11 @@ typedef struct {
     uint8_t _reserved[3];
 } nt_ui_element_data_t;
 
-/* Phase 56 ext: well-known debug layers for nt_ui_inspector emit. Games
+/* EXPERIMENTAL (Phase 56 ext): API surface may change in v1.9. Used by
+ * ui_buttons_demo and inspector internals. Game code adopting this should
+ * pin the engine version.
+ *
+ * Phase 56 ext: well-known debug layers for nt_ui_inspector emit. Games
  * typically use 0..~10 for normal UI (BG/IMG/TEXT/HUD); the inspector floats
  * its sidebar + highlight overlay above ALL game UI by tagging its Clay
  * elements with NT_UI_DATA_LAYER(NT_UI_LAYER_DEBUG_*).
@@ -198,7 +202,13 @@ void nt_ui_end(nt_ui_context_t *ctx);
  * verbatim port of Clay__RenderDebugView injected into the layout pass via
  * nt_ui_end. */
 
-/* Phase 56 ext (CHUNK E, refactor): extensible widget descriptor for
+/* EXPERIMENTAL (Phase 56 ext): API surface may change in v1.9. Used by
+ * ui_buttons_demo and inspector internals. Game code adopting this should
+ * pin the engine version. Applies to the entire nt_ui_widget_* family below:
+ * nt_ui_widget_def_t typedef, nt_ui_widget_register, nt_ui_widget_lookup,
+ * nt_ui_widget_get_hit_padding.
+ *
+ * Phase 56 ext (CHUNK E, refactor): extensible widget descriptor for
  * nt_ui_inspector. Every engine widget (button/image/label/panel/group) AND
  * any GAME widget (inventory_slot, dialogue_choice, ...) records its element
  * id + descriptor pointer in a per-frame direct-mapped registry inside ctx
@@ -356,7 +366,11 @@ typedef struct {
  * off the precomputed nt_button_state_t edges + the transform-aware hit-test. */
 nt_ui_interaction_t nt_ui_get_interaction(nt_ui_context_t *ctx, uint32_t id);
 
-/* Padded variant (Phase 56 ext, touch-target inflation). Inflates the
+/* EXPERIMENTAL (Phase 56 ext): API surface may change in v1.9. Used by
+ * ui_buttons_demo and inspector internals. Game code adopting this should
+ * pin the engine version.
+ *
+ * Padded variant (Phase 56 ext, touch-target inflation). Inflates the
  * widget's layout-space bbox by pad_lrtb = {left, right, top, bottom} in
  * LAYOUT pixels BEFORE the inverse-affine transform check. Use for mobile
  * touch-friendly hit areas without changing visual size. Asserts each

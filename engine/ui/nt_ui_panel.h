@@ -13,7 +13,11 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Inspector descriptors: pill name "nt_panel" / "nt_group" + color shown in
+/* EXPERIMENTAL (Phase 56 ext): API surface may change in v1.9. Used by
+ * ui_buttons_demo and inspector internals. Game code adopting this should
+ * pin the engine version.
+ *
+ * Inspector descriptors: pill name "nt_panel" / "nt_group" + color shown in
  * the element tree. Engine widget defs use the "nt_" prefix to disambiguate
  * from Clay's own config-type pills on the same row. Game code may compare
  * pointer identity against these symbols. */

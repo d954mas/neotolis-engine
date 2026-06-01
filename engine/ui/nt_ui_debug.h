@@ -34,7 +34,14 @@ typedef enum {
     NT_UI_DEBUG_HIT_ALL = 3,      /* every recorded zone */
 } nt_ui_debug_hit_mode_t;
 
-/* Toggle per-frame zone recording. Default off (zero overhead).
+/* EXPERIMENTAL (Phase 56 ext): API surface may change in v1.9. Used by
+ * ui_buttons_demo and inspector internals. Game code adopting this should
+ * pin the engine version. Applies to the entire public surface in this
+ * header (nt_ui_debug_set_recording / nt_ui_debug_get_recording /
+ * nt_ui_debug_get_zone_count / nt_ui_debug_record_disabled_zone /
+ * nt_ui_debug_draw_hit_zones).
+ *
+ * Toggle per-frame zone recording. Default off (zero overhead).
  * Takes effect immediately; queries between this call and the next
  * nt_ui_begin reset are recorded if true at the time of the query. */
 void nt_ui_debug_set_recording(nt_ui_context_t *ctx, bool on);

@@ -38,7 +38,13 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Toggle the inspector. Default off (no debug elements injected, no per-frame
+/* EXPERIMENTAL (Phase 56 ext): API surface may change in v1.9. Used by
+ * ui_buttons_demo and inspector internals. Game code adopting this should
+ * pin the engine version. Applies to the entire public surface in this
+ * header (set_active / is_active / pointer_consumed / emit_layout /
+ * overlay_draw).
+ *
+ * Toggle the inspector. Default off (no debug elements injected, no per-frame
  * tree walk, no extra draw calls). When on, nt_ui_end injects the Clay debug
  * view BEFORE Clay_EndLayout so the inspector participates in the same layout
  * solve as the user's UI. */
