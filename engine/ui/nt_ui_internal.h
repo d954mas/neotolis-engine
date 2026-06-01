@@ -41,6 +41,14 @@ _Static_assert((NT_UI_WIDGET_REGISTRY_CAP & (NT_UI_WIDGET_REGISTRY_CAP - 1)) == 
 #define NT_UI_INSPECTOR_COLLAPSED_CAP 128
 #endif
 
+/* Phase 56 ext (CHUNK A dedup): inspector sidebar panel width. Shared between
+ * nt_ui.c (the Clay debug-view port emits the panel at this width and gates
+ * nt_ui_get_interaction_padded on this footprint) and nt_ui_inspector.c (the
+ * post-walk overlay clips its highlight rect against panel_left_x). One source
+ * of truth so the two sites can never drift. Verbatim Clay debug-view default
+ * (clay.h:3113-3122). */
+#define NT_UI_INSPECTOR_PANEL_WIDTH 400
+
 typedef struct {
     uint32_t id;                   /* 0 = slot empty */
     const nt_ui_widget_def_t *def; /* NULL = slot empty (kept in sync with id==0) */

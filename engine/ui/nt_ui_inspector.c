@@ -74,17 +74,14 @@ static const float s_identity_mat[16] = {
     1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
 };
 
-/* CPU clip: width of the inspector sidebar panel (mirrors CDV_PANEL_WIDTH in
- * nt_ui.c). The post-walk overlay clips its rect width against
- * `panel_left_x = viewport.w - CDV_PANEL_WIDTH` so the highlight + label do
- * NOT visually overlap the sidebar -- the panel is rendered by nt_ui_walk
- * earlier in the pass, and this overlay is the only thing drawn after the
- * walk, so without clipping the highlight peeks over the panel (user-visible
- * regression for any widget near the screen's right edge). 400 is the
- * file-static CDV_PANEL_WIDTH in engine/ui/nt_ui.c; if either changes the
- * other must follow (a single shared constant would be cleaner long-term but
- * needs the internal header surface). */
-#define NTINSP_OVERLAY_PANEL_W 400.0F
+/* CPU clip: width of the inspector sidebar panel. The post-walk overlay clips
+ * its rect width against `panel_left_x = viewport.w - NT_UI_INSPECTOR_PANEL_WIDTH`
+ * so the highlight + label do NOT visually overlap the sidebar -- the panel is
+ * rendered by nt_ui_walk earlier in the pass, and this overlay is the only
+ * thing drawn after the walk, so without clipping the highlight peeks over the
+ * panel (user-visible regression for any widget near the screen's right edge).
+ * NT_UI_INSPECTOR_PANEL_WIDTH lives in nt_ui_internal.h (CHUNK A dedup) and is
+ * shared with the verbatim Clay debug-view port in nt_ui.c. */
 
 /* Clamp a rect's right edge against `panel_left_x`. Returns the clipped width
  * (or 0 when the entire rect is inside the panel). Top/bottom/y stay as-is. */
@@ -260,12 +257,12 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     const float h = info.bbox_h;
 
     /* CPU clip boundary for "stay under the inspector panel". Panel is a
-     * right-attached float of width CDV_PANEL_WIDTH (400) at the layout-space
-     * origin, so its left edge sits at viewport.x + viewport.w - panel_w in
-     * the SAME logical space the overlay draws into. When the panel is NOT
+     * right-attached float of width NT_UI_INSPECTOR_PANEL_WIDTH at the layout-
+     * space origin, so its left edge sits at viewport.x + viewport.w - panel_w
+     * in the SAME logical space the overlay draws into. When the panel is NOT
      * visible (inspector inactive should have early-returned above, but
      * defensive), the clip degenerates to the viewport right edge. */
-    const float panel_left_x = vx + vw - NTINSP_OVERLAY_PANEL_W;
+    const float panel_left_x = vx + vw - (float)NT_UI_INSPECTOR_PANEL_WIDTH;
 
     nt_sprite_renderer_set_material(ctx->sprite_material);
 

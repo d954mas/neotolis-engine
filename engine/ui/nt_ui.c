@@ -45,11 +45,9 @@ enum {
 };
 // #endregion
 
-/* Inspector sidebar width (verbatim Clay debug-view port; clay.h:3113-3122).
- * Defined HERE rather than alongside the other CDV_* metrics (~L640) so
- * nt_ui_begin can use it for the inspector_pointer_consumed gate. The verbatim
- * port below references this same macro -- one source of truth. */
-#define CDV_PANEL_WIDTH 400
+/* Inspector sidebar width: NT_UI_INSPECTOR_PANEL_WIDTH lives in nt_ui_internal.h
+ * (shared with nt_ui_inspector.c's post-walk overlay clip). Verbatim Clay
+ * debug-view default (clay.h:3113-3122). */
 
 // #region module_state
 /* Only one ctx may be in-frame at a time; nt_ui_begin asserts NULL on entry. */
@@ -288,14 +286,14 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     const nt_pointer_t *primary = &pointers[0];
 
     /* Phase 56 ext fix: per-frame "pointer is over the inspector sidebar" gate.
-     * The sidebar is a right-attached floating panel CDV_PANEL_WIDTH wide; the
-     * same coord check is what the inspector's emit_layout uses to decide
-     * whether to highlight a sidebar row (line ~1005). Computing it here gates
-     * nt_ui_get_interaction_padded so user widgets behind the sidebar do NOT
-     * register hover/press/click when the sidebar visually consumes the click.
-     * Frame-1 safe (no layout solve required -- pure coord check). */
+     * The sidebar is a right-attached floating panel NT_UI_INSPECTOR_PANEL_WIDTH
+     * wide; the same coord check is what the inspector's emit_layout uses to
+     * decide whether to highlight a sidebar row (line ~1005). Computing it here
+     * gates nt_ui_get_interaction_padded so user widgets behind the sidebar do
+     * NOT register hover/press/click when the sidebar visually consumes the
+     * click. Frame-1 safe (no layout solve required -- pure coord check). */
     ctx->inspector_pointer_consumed = false;
-    if (ctx->inspector_active && primary->x >= (screen_w - (float)CDV_PANEL_WIDTH)) {
+    if (ctx->inspector_active && primary->x >= (screen_w - (float)NT_UI_INSPECTOR_PANEL_WIDTH)) {
         ctx->inspector_pointer_consumed = true;
     }
 
@@ -678,8 +676,9 @@ static const Clay_Color CDV_HIGHLIGHT_COLOR = {168, 66, 28, 100}; /* Clay__debug
 #define CDV_ROW_HEIGHT 30
 #define CDV_OUTER_PADDING 10
 #define CDV_INDENT_WIDTH 16
-/* CDV_PANEL_WIDTH moved to the top of the file so nt_ui_begin can read it
- * for the inspector_pointer_consumed gate (Phase 56 ext fix). */
+/* Inspector sidebar width: NT_UI_INSPECTOR_PANEL_WIDTH (nt_ui_internal.h, CHUNK A
+ * dedup). Shared between nt_ui.c (this verbatim port + nt_ui_begin's pointer-
+ * consumed gate) and nt_ui_inspector.c (post-walk overlay clip). */
 
 /* Phase 56 ext fix (viewport-hover propagation): set of Clay element ids the
  * inspector itself owns -- the sidebar panel, its scroll/content wrappers, the
@@ -1271,7 +1270,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
      * footprint (per-row wrappers, indent containers, etc.). The first id
      * that passes BOTH filters wins. */
     if (highlightedElementId == 0U && !ctx->inspector_pointer_consumed) {
-        const float panel_left_x = context->layoutDimensions.width - (float)CDV_PANEL_WIDTH;
+        const float panel_left_x = context->layoutDimensions.width - (float)NT_UI_INSPECTOR_PANEL_WIDTH;
 
         /* Phase 56 ext fix (transform-aware hover): scan debug_zones FIRST.
          * Recorded zones carry the declaration-time accum stack snapshot, so
@@ -1428,8 +1427,8 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
  *   - close button: we still emit it (visual parity) but the click sets
  *     ctx->inspector_active = false on press inside its bounds, not Clay's
  *     debugModeEnabled (which is no longer wired).
- *   - pointer-in-debug-view check uses our panel width (CDV_PANEL_WIDTH) and
- *     the 300 px info-pane reservation, same as Clay's literal constants.
+ *   - pointer-in-debug-view check uses our panel width (NT_UI_INSPECTOR_PANEL_WIDTH)
+ *     and the 300 px info-pane reservation, same as Clay's literal constants.
  *   - the info pane is a CONDENSED but faithful version of clay.h:3477-3800
  *     (Bounding Box, Layout Direction, Sizing, Padding, Child Gap, Child
  *     Alignment) + a single config-type header per element config + body for
@@ -1497,7 +1496,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
         }
     }
     int32_t highlightedRow = pointerInDebugView ? (int32_t)((context->pointerInfo.position.y - scrollYOffset) / (float)CDV_ROW_HEIGHT) - 1 : -1;
-    if (context->pointerInfo.position.x < context->layoutDimensions.width - (float)CDV_PANEL_WIDTH) {
+    if (context->pointerInfo.position.x < context->layoutDimensions.width - (float)NT_UI_INSPECTOR_PANEL_WIDTH) {
         highlightedRow = -1;
     }
     cdv_layout_data_t layoutData = {0};
@@ -1505,7 +1504,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
      * engine disables Clay debug mode so the root is full-width and the verbatim attach
      * would land at [screen.w, screen.w + panel_w] -- entirely off-screen. */
     CLAY({.id = CLAY_ID("ntInsp_Root"),
-          .layout = {.sizing = {CLAY_SIZING_FIXED((float)CDV_PANEL_WIDTH), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
+          .layout = {.sizing = {CLAY_SIZING_FIXED((float)NT_UI_INSPECTOR_PANEL_WIDTH), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
           .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL),
           .floating = {.zIndex = 32765,
                        .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_CENTER, .parent = CLAY_ATTACH_POINT_RIGHT_CENTER},

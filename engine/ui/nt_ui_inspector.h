@@ -46,7 +46,7 @@ void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on);
 bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx);
 
 /* True for the current frame iff the inspector is active AND the pointer is
- * inside the sidebar footprint (right-attached, CDV_PANEL_WIDTH wide). The
+ * inside the sidebar footprint (right-attached, NT_UI_INSPECTOR_PANEL_WIDTH wide). The
  * engine already uses this internally to gate nt_ui_get_interaction[_padded]
  * so widgets behind the sidebar do NOT register hover/press/click; games that
  * roll their OWN interactive zones (not via nt_ui_get_interaction) can query

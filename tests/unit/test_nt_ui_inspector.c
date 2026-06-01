@@ -361,7 +361,7 @@ static void test_overlay_noop_without_highlight(void) {
  * Bug: clicking the sidebar also fired the click on any button geometrically
  * behind it (the sidebar paints on top but the hit-test was pure coord-vs-
  * bbox). Fix: when inspector_active and the pointer is inside the right-
- * attached sidebar footprint (CDV_PANEL_WIDTH = 400 wide on a 800-wide
+ * attached sidebar footprint (NT_UI_INSPECTOR_PANEL_WIDTH = 400 wide on a 800-wide
  * screen -> x >= 400), nt_ui_get_interaction must return a zeroed result
  * for every user widget AND nt_ui_inspector_pointer_consumed must be true
  * AND nt_ui_wants_pointer must be true. */
@@ -1526,7 +1526,7 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     const float screen_w = 800.0F;
     const float screen_h = 600.0F;
-    const float panel_left_x = screen_w - 400.0F; /* CDV_PANEL_WIDTH = 400 */
+    const float panel_left_x = screen_w - 400.0F; /* NT_UI_INSPECTOR_PANEL_WIDTH = 400 */
 
     /* Pre-select an element so the info pane (Layout Config + sub-rows +
      * per-config pills + bodies) is also emitted -- exercises the entire
@@ -1672,7 +1672,7 @@ static void test_inspector_alternations_capped_after_strategy_a(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     const float screen_w = 1280.0F;
     const float screen_h = 800.0F;
-    const float panel_left_x = screen_w - 400.0F; /* CDV_PANEL_WIDTH = 400 */
+    const float panel_left_x = screen_w - 400.0F; /* NT_UI_INSPECTOR_PANEL_WIDTH = 400 */
 
     /* Frame 1: declare so prev-frame bbox exists. */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
