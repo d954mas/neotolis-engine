@@ -51,6 +51,22 @@ _Static_assert((NT_UI_WIDGET_REGISTRY_CAP & (NT_UI_WIDGET_REGISTRY_CAP - 1)) == 
  * nt_ui_inspector.c (post-walk overlay scissor). Defaults preserved 1:1 in
  * NT_UI_INSPECTOR_METRICS_DEFAULT (nt_ui_inspector.c). */
 
+/* Phase 56 ext (REVIEW-2 followup): hit-test clip stack capacity. Real UIs
+ * nest 1-3 clip levels (modal panel + scrolling list + inner pane); cap at
+ * 16 gives 5x headroom. Mirrors NT_UI_TRANSFORM_STACK_DEPTH_CAP. */
+#ifndef NT_UI_CLIP_STACK_CAP
+#define NT_UI_CLIP_STACK_CAP 16
+#endif
+
+typedef struct {
+    /* Layout-space rect (Clay Y-down). */
+    float x, y, w, h;
+    /* Affine snapshot composed at push time (a,b / c,d / tx,ty). Mirrors the
+     * structure produced by compose_transform_level walking the accum_stack
+     * at the clip rect's center -- same math ui_hit_test uses for widgets. */
+    float accum_a, accum_b, accum_c, accum_d, accum_tx, accum_ty;
+} nt_ui_clip_entry_t;
+
 typedef struct {
     uint32_t id;                   /* 0 = slot empty */
     const nt_ui_widget_def_t *def; /* NULL = slot empty (kept in sync with id==0) */
@@ -113,6 +129,16 @@ struct nt_ui_context {
      * Reset to depth 0 each nt_ui_begin. Kept separate from anim[] below. */
     nt_ui_transform_t accum_stack[NT_UI_TRANSFORM_STACK_DEPTH_CAP];
     uint32_t accum_depth;
+
+    /* Phase 56 ext (REVIEW-2 followup): declaration-time clip stack for the
+     * hit-test. push_clip captures the current transform accum at the clip
+     * rect's center and stores it alongside the rect; ui_hit_test walks the
+     * stack BEFORE the widget inverse-affine and rejects any point outside
+     * an ancestor clip. Mirrors push_transform / pop_transform (explicit >
+     * implicit). Reset to depth 0 each nt_ui_begin; nt_ui_end asserts the
+     * stack is balanced (depth == 0). */
+    nt_ui_clip_entry_t clip_stack[NT_UI_CLIP_STACK_CAP];
+    uint32_t clip_depth;
 
     /* Phase 56: per-pointer capture state machine (D-56-04). v1.8 drives the
      * primary pointer (index 0); the array is multitouch-ready for v1.9.

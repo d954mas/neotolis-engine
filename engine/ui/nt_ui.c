@@ -252,6 +252,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     g_nt_ui_inframe_ctx = ctx;
     ctx->marker_count = 0;
     ctx->accum_depth = 0; /* Phase 56: reset declaration-time transform stack. */
+    ctx->clip_depth = 0;  /* Phase 56 ext (REVIEW-2 followup): reset hit-test clip stack. */
 
     /* Snapshot the frame pointer list + dt for the engine-owned hit-test
      * (Plan 03 reads frame_pointers; anim cache reads frame_dt, D-56-15/19). */
@@ -335,6 +336,10 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_end: ctx is not in_frame (begin was not called)");
     NT_ASSERT(ctx == g_nt_ui_inframe_ctx && "nt_ui_end: ctx mismatch with module in-frame ctx");
+    /* Phase 56 ext (REVIEW-2 followup): clip stack must be balanced by end of
+     * the user's declaration phase. Asserts BEFORE inspector emit so a missing
+     * pop_clip is caught at its source, not blamed on engine-internal emit. */
+    NT_ASSERT(ctx->clip_depth == 0U && "nt_ui_end: unbalanced clip stack (missing nt_ui_pop_clip)");
 
     /* Phase 56 ext inspector rework: inject the verbatim Clay-debug-view port
      * AT ROOT SCOPE between the user's CLAY({...}) blocks and Clay_EndLayout.
@@ -3196,6 +3201,56 @@ void nt_ui_pop_opacity(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx->in_frame && "nt_ui_pop_opacity: must be called inside begin/end");
     emit_marker_base(ctx, NT_UI_MARKER_POP_OPACITY);
 }
+
+/* Phase 56 ext (REVIEW-2 followup): hit-test clip stack. Capture the current
+ * transform accum AT THE CLIP RECT CENTER and stash it alongside the rect, so
+ * a rotated clip parent's frame is preserved exactly. ui_hit_test will inverse-
+ * transform the pointer with this affine and test against the layout-space
+ * rect; ANY clip rejecting the point shorts the hit. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_ui_push_clip(nt_ui_context_t *ctx, float x, float y, float w, float h) {
+    NT_ASSERT(ctx != NULL && "nt_ui_push_clip: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && "nt_ui_push_clip: must be called inside begin/end");
+    NT_ASSERT(ctx->clip_depth < NT_UI_CLIP_STACK_CAP && "nt_ui_push_clip: clip stack overflow; raise NT_UI_CLIP_STACK_CAP");
+    NT_ASSERT(isfinite(x) && isfinite(y) && isfinite(w) && isfinite(h) && "nt_ui_push_clip: rect must be finite");
+    NT_ASSERT(w > 0.0F && h > 0.0F && "nt_ui_push_clip: non-positive clip size");
+
+    /* Compose the current transform accum at the clip rect center. Match the
+     * exact composition ui_hit_test uses for widget bboxes so the two affines
+     * agree when the clip wraps the widget tightly. */
+    const float cx = x + (w * 0.5F);
+    const float cy = y + (h * 0.5F);
+    float a = 1.0F;
+    float b = 0.0F;
+    float c = 0.0F;
+    float d = 1.0F;
+    float tx = 0.0F;
+    float ty = 0.0F;
+    for (uint32_t k = 0; k < ctx->accum_depth; ++k) {
+        compose_transform_level(&ctx->accum_stack[k], cx, cy, &a, &b, &c, &d, &tx, &ty);
+    }
+
+    ctx->clip_stack[ctx->clip_depth] = (nt_ui_clip_entry_t){
+        .x = x,
+        .y = y,
+        .w = w,
+        .h = h,
+        .accum_a = a,
+        .accum_b = b,
+        .accum_c = c,
+        .accum_d = d,
+        .accum_tx = tx,
+        .accum_ty = ty,
+    };
+    ctx->clip_depth++;
+}
+
+void nt_ui_pop_clip(nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_pop_clip: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && "nt_ui_pop_clip: must be called inside begin/end");
+    NT_ASSERT(ctx->clip_depth > 0U && "nt_ui_pop_clip: stack underflow");
+    ctx->clip_depth--;
+}
 // #endregion
 
 // #region nt_ui_custom
@@ -3257,6 +3312,31 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     if (!d.found) {
         return false; /* first frame an id is seen -> not hovered (D-56-06). */
     }
+
+    /* Phase 56 ext (REVIEW-2 followup): walk the clip stack BEFORE the widget
+     * inverse-affine. ANY ancestor clip rejecting the point shorts the test --
+     * a click that lands inside a widget's transformed bbox but outside a
+     * clipping parent is a MISS (visual scissor and hit-test now agree). Each
+     * clip entry stores the transform accum captured at its push time, so
+     * rotated clip parents are handled with the same math as widget bboxes. */
+    for (uint32_t k = 0; k < ctx->clip_depth; ++k) {
+        const nt_ui_clip_entry_t *cl = &ctx->clip_stack[k];
+        /* Inverse 2x2 + translate to bring (px,py) into this clip's frame. */
+        const float cdet = (cl->accum_a * cl->accum_d) - (cl->accum_b * cl->accum_c);
+        NT_ASSERT(cdet != 0.0F && "ui_hit_test: clip stack entry has singular affine");
+        const float cinv_a = cl->accum_d / cdet;
+        const float cinv_b = -cl->accum_b / cdet;
+        const float cinv_c = -cl->accum_c / cdet;
+        const float cinv_d = cl->accum_a / cdet;
+        const float crx = px - cl->accum_tx;
+        const float cry = py - cl->accum_ty;
+        const float clx = (cinv_a * crx) + (cinv_b * cry);
+        const float cly = (cinv_c * crx) + (cinv_d * cry);
+        if (clx < cl->x || clx > cl->x + cl->w || cly < cl->y || cly > cl->y + cl->h) {
+            return false;
+        }
+    }
+
     const Clay_BoundingBox box = d.boundingBox;
     /* Center is the GEOMETRIC center of the visual bbox (NOT the padded one) so
      * the same rotation pivot the renderer uses applies — padding is a hit-zone

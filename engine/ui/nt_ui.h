@@ -311,6 +311,20 @@ void nt_ui_pop_transform(nt_ui_context_t *ctx);
 /* Opacity inheritance: multiplied into alpha of all children. 1.0 = opaque. */
 void nt_ui_push_opacity(nt_ui_context_t *ctx, float opacity);
 void nt_ui_pop_opacity(nt_ui_context_t *ctx);
+
+/* Phase 56 ext (REVIEW-2 followup): hit-test clip stack. ui_hit_test now
+ * walks ctx->clip_stack before testing the widget's transformed bbox; a
+ * point outside ANY ancestor clip returns hit=false. Game MUST call
+ * nt_ui_push_clip BEFORE declaring CLAY({.clip = ...}) and nt_ui_pop_clip
+ * AFTER the Clay close. Mirrors push_transform/pop_transform (explicit >
+ * implicit). x/y/w/h are in LAYOUT pixels (same coord space as widget
+ * bboxes via Clay_GetElementData). The push captures the current transform
+ * accumulator so rotated clip parents are handled correctly.
+ *
+ * Without this pairing, hit-test silently ignores the clip (legacy behavior).
+ * Asserts on stack overflow (NT_UI_CLIP_STACK_CAP) and underflow. */
+void nt_ui_push_clip(nt_ui_context_t *ctx, float x, float y, float w, float h);
+void nt_ui_pop_clip(nt_ui_context_t *ctx);
 // #endregion
 
 /* Emit a game CUSTOM element. data is passed through to the custom handler

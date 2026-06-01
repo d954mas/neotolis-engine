@@ -363,6 +363,9 @@ static void try_bind_resources(void) {
  * BTN_W x BTN_H sizing + 8 px inner padding + center alignment. Without
  * this decl param, nt_ui_button_begin would open a FIT IMAGE and shrink
  * to children, requiring an inner FIXED CLAY wrap as workaround. */
+/* Note: this demo has no clip parents. If you wrap buttons in CLAY({.clip=...}),
+ * pair the declaration with nt_ui_push_clip/pop_clip so hit-test respects the
+ * clip (REVIEW-2 followup: explicit > implicit, same pattern as push_transform). */
 static const Clay_ElementDeclaration s_btn_decl = {
     .layout =
         {
