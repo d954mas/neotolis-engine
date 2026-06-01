@@ -105,12 +105,20 @@ int main(int argc, char *argv[]) {
 
     (void)printf("  Atlas: 2 buttons (384x128 s9:%d)\n", BUTTON_BORDER);
 
-    /* White pixel for UI rects + gold-tinted icon child. */
+    /* White pixel for UI rects (debug overlay, borders, inspector sidebar). */
     static const uint8_t white_pixel[4] = {255, 255, 255, 255};
     nt_atlas_sprite_opts_t white_opts = nt_atlas_sprite_opts_defaults();
     white_opts.name = "_white";
     nt_builder_atlas_add_raw(ctx, white_pixel, 1, 1, &white_opts);
     (void)printf("  Atlas region '_white': 1x1\n");
+
+    /* Real icon art (Kenney CC0 bunny, 32x32 sprite) for the ICON-ONLY and
+     * ICON+TEXT button variants -- replaces a gold-tinted stretched _white
+     * placeholder so the user sees a real "icon" instead of a flat square. */
+    nt_atlas_sprite_opts_t icon_opts = nt_atlas_sprite_opts_defaults();
+    icon_opts.name = "icon_bunny";
+    nt_builder_atlas_add(ctx, "examples/ui_buttons_demo/raw/icon_bunny.png", &icon_opts);
+    (void)printf("  Atlas region 'icon_bunny': 32x32 (Kenney bunnymark sd)\n");
 
     nt_builder_end_atlas(ctx);
     // #endregion

@@ -121,10 +121,11 @@ static const nt_ui_label_style_t g_btn_label_style = {
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 
-/* Icon child = the _white region tinted gold (exercises nt_ui_image tint +
- * opacity inheritance from the button's per-state push_opacity -- WIDGET-05). */
+/* Icon child = the icon_bunny region (Kenney CC0, 32x32). Untinted (0xFFFFFFFF
+ * = no tint) so the bunny renders in its natural blue color. opacity still
+ * inherits from the button's per-state push_opacity (WIDGET-05). */
 static const nt_ui_image_style_t g_btn_icon_style = {
-    .color_packed = 0xFF33CCFF, /* gold (0xAABBGGRR) */
+    .color_packed = 0xFFFFFFFF, /* no tint (0xAABBGGRR) -- show natural art */
     .origin_x = 0.5F,
     .origin_y = 0.5F,
 };
@@ -203,6 +204,7 @@ static bool s_font_bound;
 static uint32_t s_white_region_idx;
 static uint32_t s_button_blue_idx;
 static uint32_t s_button_green_idx;
+static uint32_t s_icon_bunny_idx;
 
 /* Reference-button runtime styles: const templates copied + bg_region patched
  * to the real atlas indices once the atlas binds (D-54-02). Button ids
@@ -261,6 +263,9 @@ static void try_bind_resources(void) {
         s_button_green_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_GREEN.value);
         NT_ASSERT(s_button_green_idx != NT_ATLAS_INVALID_REGION);
 
+        s_icon_bunny_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_ICON_BUNNY.value);
+        NT_ASSERT(s_icon_bunny_idx != NT_ATLAS_INVALID_REGION);
+
         nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, s_white_region_idx);
 
         /* Patch each variant's bg_region from the templates (D-54-02). */
@@ -290,7 +295,7 @@ static void try_bind_resources(void) {
         s_btn_nopad.disabled.bg_region = s_button_blue_idx;
 
         s_atlas_bound = true;
-        nt_log_info("ui_buttons_demo: atlas bound (button_blue + button_green + _white)");
+        nt_log_info("ui_buttons_demo: atlas bound (button_blue + button_green + _white + icon_bunny)");
     }
 
     if (!s_font_bound && nt_resource_is_ready(s_font_resource)) {
@@ -409,8 +414,8 @@ static void declare_reference_buttons(void) {
                 CLAY(BTN_SLOT_LAYOUT) {
                     nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icon, s_atlas_handle, &s_btn_nopad, true);
                     {
-                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(56), CLAY_SIZING_FIXED(56)}}}) {
-                            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_white_region_idx, &g_btn_icon_style);
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(72), CLAY_SIZING_FIXED(72)}}}) {
+                            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_icon_bunny_idx, &g_btn_icon_style);
                         }
                     }
                     if (nt_ui_button_end(s_ctx)) {
@@ -423,15 +428,11 @@ static void declare_reference_buttons(void) {
             // #region (e) ICON + TEXT
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("ICON + TEXT", "no padding");
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)},
-                                 .padding = CLAY_PADDING_ALL(8),
-                                 .layoutDirection = CLAY_LEFT_TO_RIGHT,
-                                 .childGap = 16,
-                                 .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                CLAY(BTN_SLOT_LAYOUT) {
                     nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icontext, s_atlas_handle, &s_btn_nopad, true);
                     {
-                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(44), CLAY_SIZING_FIXED(44)}}}) {
-                            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_white_region_idx, &g_btn_icon_style);
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(64), CLAY_SIZING_FIXED(64)}}}) {
+                            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_icon_bunny_idx, &g_btn_icon_style);
                         }
                         nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", &g_btn_label_style);
                     }
