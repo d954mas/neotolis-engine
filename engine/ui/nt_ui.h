@@ -164,7 +164,18 @@ typedef enum {
 } nt_ui_widget_type_t;
 
 void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, nt_ui_widget_type_t type);
+/* Padded variant: same as register + records the widget's hit-zone padding so
+ * the inspector overlay can show the touch-target distinct from the visual
+ * bbox. pad_lrtb NULL = treated as {0,0,0,0} (equivalent to the unpadded call).
+ * Components must be >= 0 (asserted). Buttons call this with style->hit_padding_lrtb;
+ * other widgets call the unpadded form. */
+void nt_ui_widget_register_padded(nt_ui_context_t *ctx, uint32_t id, nt_ui_widget_type_t type, const int16_t pad_lrtb[4]);
 nt_ui_widget_type_t nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32_t id);
+/* Read back the registered hit-zone padding for id. Returns true and writes
+ * {l,r,t,b} into out_lrtb when the id has a recorded padding; returns false
+ * (out untouched) when the id is not registered OR was registered via the
+ * unpadded form. */
+bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16_t out_lrtb[4]);
 
 /* Read-only on frozen_cmds + bindings; per-walk stats reflect the latest call.
  * Order: zIndex asc, then layer asc, then declaration. SCISSOR/CUSTOM are

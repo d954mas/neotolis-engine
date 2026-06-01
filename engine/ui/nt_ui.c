@@ -761,13 +761,41 @@ static int32_t cdv_element_layer(Clay_LayoutElement *el) {
 
 /* Clay__IntToString does int -> Clay_String. We can't see that file-static
  * symbol from this TU (it's also static), so reimplement using static buffers
- * cycled per call. The verbatim Clay uses static buffers internally too. */
-static char cdv_int_bufs[16][16];
+ * cycled per call. The verbatim Clay uses static buffers internally too.
+ *
+ * Phase 56 ext bug-fix (layer column reported the LAST element's layer for
+ * every row): the previous 16-slot ring buffer wrapped LONG before Clay's
+ * layout solve consumed the Clay_String pointers. With ~9 int-to-string calls
+ * in the info pane alone + 1 per tree row's "L:N" cell, a 30-row tree calls
+ * this ~40 times per frame; slot N got overwritten 2-3 times before render,
+ * so every CLAY_TEXT(cdv_int_to_string(layer)) pointer aliased the LAST
+ * snprintf result. Bumping the ring to 512 slots covers any practical UI tree
+ * + info pane in a single frame; the cursor still wraps but only once the
+ * widget count exceeds the cap (the ring is cleared each frame implicitly
+ * because all consumers run within the layout pass). 8 KB BSS cost is
+ * negligible vs the visual-correctness gain. */
+#ifndef NT_UI_INSPECTOR_INT_BUFS
+#define NT_UI_INSPECTOR_INT_BUFS 512
+#endif
+_Static_assert((NT_UI_INSPECTOR_INT_BUFS & (NT_UI_INSPECTOR_INT_BUFS - 1)) == 0, "NT_UI_INSPECTOR_INT_BUFS must be a power of two");
+static char cdv_int_bufs[NT_UI_INSPECTOR_INT_BUFS][16];
 static uint32_t cdv_int_buf_cursor = 0U;
 static Clay_String cdv_int_to_string(int32_t v) {
     char *buf = cdv_int_bufs[cdv_int_buf_cursor];
-    cdv_int_buf_cursor = (cdv_int_buf_cursor + 1U) & 15U;
+    cdv_int_buf_cursor = (cdv_int_buf_cursor + 1U) & (NT_UI_INSPECTOR_INT_BUFS - 1U);
     const int n = snprintf(buf, sizeof cdv_int_bufs[0], "%d", v);
+    return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
+}
+
+/* Same ring strategy for hex IDs (string-id-empty fallback). 8-char hex +
+ * "#" prefix + NUL fits in 16. Separate ring so hex and decimal don't
+ * compete for slots. */
+static char cdv_hex_bufs[NT_UI_INSPECTOR_INT_BUFS][16];
+static uint32_t cdv_hex_buf_cursor = 0U;
+static Clay_String cdv_hex_id_to_string(uint32_t v) {
+    char *buf = cdv_hex_bufs[cdv_hex_buf_cursor];
+    cdv_hex_buf_cursor = (cdv_hex_buf_cursor + 1U) & (NT_UI_INSPECTOR_INT_BUFS - 1U);
+    const int n = snprintf(buf, sizeof cdv_hex_bufs[0], "#%08X", v);
     return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
 }
 
@@ -794,6 +822,11 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     enum { CDV_DFS_CAP = 256 };
     int32_t dfs_elems[CDV_DFS_CAP];
     bool dfs_visited[CDV_DFS_CAP];
+    /* Phase 56 ext fix: track whether this frame emitted indent wrappers (the
+     * 3 anonymous Clay__OpenElement blocks at the children-recurse branch). If
+     * a frame is filtered out (no identity), we did NOT open them and must NOT
+     * close them on the second-visit pass either. Mirrors dfs_visited shape. */
+    bool dfs_opened_wrappers[CDV_DFS_CAP];
     int32_t dfs_length = 0;
     Clay__DebugView_ScrollViewItemLayoutConfig = (Clay_LayoutConfig){.sizing = {.height = CLAY_SIZING_FIXED(CDV_ROW_HEIGHT)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}};
     cdv_layout_data_t layoutData = {0};
@@ -807,6 +840,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
         }
         dfs_elems[dfs_length] = root->layoutElementIndex;
         dfs_visited[dfs_length] = false;
+        dfs_opened_wrappers[dfs_length] = false;
         dfs_length++;
         if (rootIndex > 0) {
             CLAY({.id = CLAY_IDI("ntInsp_EmptyRowOuter", rootIndex), .layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}, .padding = {CDV_INDENT_WIDTH / 2, 0, 0, 0}}}) {
@@ -820,7 +854,9 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             int32_t currentElementIndex = dfs_elems[dfs_length - 1];
             Clay_LayoutElement *currentElement = Clay_LayoutElementArray_Get(&context->layoutElements, (int)currentElementIndex);
             if (dfs_visited[dfs_length - 1]) {
-                if (!Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT) && currentElement->childrenOrTextContent.children.length > 0) {
+                /* Phase 56 ext fix: only close the 3 indent wrappers when this
+                 * frame actually opened them (filtered frames did not). */
+                if (dfs_opened_wrappers[dfs_length - 1]) {
                     Clay__CloseElement();
                     Clay__CloseElement();
                     Clay__CloseElement();
@@ -828,86 +864,109 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 dfs_length--;
                 continue;
             }
-            if (highlighted_row_index == layoutData.row_count) {
-                if (context->pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
-                    ctx->inspector_selected_id = currentElement->id;
-                }
-                highlightedElementId = currentElement->id;
-            }
             dfs_visited[dfs_length - 1] = true;
             Clay_LayoutElementHashMapItem *currentElementData = Clay__GetHashMapItem(currentElement->id);
             bool offscreen = currentElementData != NULL && Clay__ElementIsOffscreen(&currentElementData->boundingBox);
-            if (ctx->inspector_selected_id == currentElement->id) {
-                layoutData.selected_element_row_index = layoutData.row_count;
-            }
             /* Phase 56 ext extension columns: widget-type pill + layer cell. */
             const int32_t layer = cdv_element_layer(currentElement);
             const nt_ui_widget_type_t wtype = nt_ui_widget_lookup(ctx, currentElement->id);
-            CLAY({.id = CLAY_IDI("ntInsp_ElementOuter", currentElement->id), .layout = Clay__DebugView_ScrollViewItemLayoutConfig}) {
-                /* Collapse icon / dot (verbatim shape but no debugData usage --
-                 * we don't track collapse state in the engine; show the dot
-                 * variant always so the layout cadence matches Clay's). */
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}, .backgroundColor = CDV_COLOR_3, .cornerRadius = CLAY_CORNER_RADIUS(2)}) {}
-                }
-                if (offscreen) {
-                    CLAY({.layout = {.padding = {8, 8, 2, 2}}, .border = {.color = CDV_COLOR_3, .width = {1, 1, 1, 1, 0}}}) {
-                        CLAY_TEXT(CLAY_STRING("Offscreen"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16}));
+            Clay_String idString = context->layoutElementIdStrings.internalArray[currentElementIndex];
+            /* Phase 56 ext fix: filter out the 3 anonymous indent wrappers we
+             * open per child (lines below) plus any other Clay-auto-anonymous
+             * container -- a row is emitted only when the element has a
+             * meaningful identity:
+             *   has_identity = (stringId.length > 0) || widget_lookup != NONE
+             * Falls back to descending silently (no row, no wrappers) so the
+             * tree shows only user-named/widget-tagged elements. The text
+             * branch below is exempt -- text content is its own identity. */
+            const bool has_identity = (idString.length > 0) || (wtype != NT_UI_WIDGET_NONE);
+            if (has_identity) {
+                if (highlighted_row_index == layoutData.row_count) {
+                    if (context->pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
+                        ctx->inspector_selected_id = currentElement->id;
                     }
+                    highlightedElementId = currentElement->id;
                 }
-                Clay_String idString = context->layoutElementIdStrings.internalArray[currentElementIndex];
-                if (idString.length > 0) {
-                    CLAY_TEXT(idString, offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16}) : &Clay__DebugView_TextNameConfig);
-                }
-                for (int32_t elementConfigIndex = 0; elementConfigIndex < currentElement->elementConfigs.length; ++elementConfigIndex) {
-                    Clay_ElementConfig *elementConfig = Clay__ElementConfigArraySlice_Get(&currentElement->elementConfigs, elementConfigIndex);
-                    if (elementConfig->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
-                        const Clay_Color labelColor = {243, 134, 48, 90};
-                        Clay_Color backgroundColor = elementConfig->config.sharedElementConfig->backgroundColor;
-                        Clay_CornerRadius radius = elementConfig->config.sharedElementConfig->cornerRadius;
-                        if (backgroundColor.a > 0) {
-                            CLAY({.layout = {.padding = {8, 8, 2, 2}},
-                                  .backgroundColor = labelColor,
-                                  .cornerRadius = CLAY_CORNER_RADIUS(4),
-                                  .border = {.color = labelColor, .width = {1, 1, 1, 1, 0}}}) {
-                                CLAY_TEXT(CLAY_STRING("Color"), CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 16}));
-                            }
-                        }
-                        if (radius.bottomLeft > 0) {
-                            CLAY({.layout = {.padding = {8, 8, 2, 2}},
-                                  .backgroundColor = labelColor,
-                                  .cornerRadius = CLAY_CORNER_RADIUS(4),
-                                  .border = {.color = labelColor, .width = {1, 1, 1, 1, 0}}}) {
-                                CLAY_TEXT(CLAY_STRING("Radius"), CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 16}));
-                            }
-                        }
-                        continue;
-                    }
-                    Clay_Color config_color = cdv_config_color((uint8_t)elementConfig->type);
-                    Clay_Color backgroundColor = config_color;
-                    backgroundColor.a = 90;
-                    const char *labelStr = cdv_config_label((uint8_t)elementConfig->type);
-                    CLAY(
-                        {.layout = {.padding = {8, 8, 2, 2}}, .backgroundColor = backgroundColor, .cornerRadius = CLAY_CORNER_RADIUS(4), .border = {.color = config_color, .width = {1, 1, 1, 1, 0}}}) {
-                        CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(labelStr), .chars = labelStr}), CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 16}));
-                    }
-                }
-                /* Engine extension columns: widget-type pill + layer cell. */
-                if (wtype != NT_UI_WIDGET_NONE) {
-                    Clay_Color wbg = cdv_widget_color(wtype);
-                    const char *wlabel = cdv_widget_tag(wtype);
-                    CLAY({.layout = {.padding = {8, 8, 2, 2}}, .backgroundColor = wbg, .cornerRadius = CLAY_CORNER_RADIUS(4), .border = {.color = wbg, .width = {1, 1, 1, 1, 0}}}) {
-                        CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(wlabel), .chars = wlabel}), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16}));
-                    }
-                }
-                /* Layer cell -- "L:N" or "-". */
-                if (layer >= 0) {
-                    CLAY({.layout = {.padding = {6, 6, 2, 2}}, .border = {.color = CDV_COLOR_3, .width = {1, 1, 1, 1, 0}}, .cornerRadius = CLAY_CORNER_RADIUS(4)}) {
-                        CLAY_TEXT(CLAY_STRING("L:"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16}));
-                        CLAY_TEXT(cdv_int_to_string(layer), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16}));
-                    }
+                if (ctx->inspector_selected_id == currentElement->id) {
+                    layoutData.selected_element_row_index = layoutData.row_count;
                 }
             }
+            if (has_identity) {
+                CLAY({.id = CLAY_IDI("ntInsp_ElementOuter", currentElement->id), .layout = Clay__DebugView_ScrollViewItemLayoutConfig}) {
+                    /* Collapse icon / dot (verbatim shape but no debugData usage --
+                     * we don't track collapse state in the engine; show the dot
+                     * variant always so the layout cadence matches Clay's). */
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(8), CLAY_SIZING_FIXED(8)}}, .backgroundColor = CDV_COLOR_3, .cornerRadius = CLAY_CORNER_RADIUS(2)}) {}
+                    }
+                    if (offscreen) {
+                        CLAY({.layout = {.padding = {8, 8, 2, 2}}, .border = {.color = CDV_COLOR_3, .width = {1, 1, 1, 1, 0}}}) {
+                            CLAY_TEXT(CLAY_STRING("Offscreen"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16}));
+                        }
+                    }
+                    /* Phase 56 ext fix: when stringId is empty (CLAY_IDI / no-id /
+                     * Clay-auto-anonymous), Clay's debug view rendered nothing,
+                     * leaving the row visually blank. Fall back to the element id
+                     * as hex so unnamed elements are still identifiable in the
+                     * tree. Buffered via cdv_hex_id_to_string for stable Clay_String
+                     * pointers (same ring-buffer fix as the layer column). */
+                    if (idString.length > 0) {
+                        CLAY_TEXT(idString, offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16}) : &Clay__DebugView_TextNameConfig);
+                    } else {
+                        CLAY_TEXT(cdv_hex_id_to_string(currentElement->id), offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16}) : &Clay__DebugView_TextNameConfig);
+                    }
+                    for (int32_t elementConfigIndex = 0; elementConfigIndex < currentElement->elementConfigs.length; ++elementConfigIndex) {
+                        Clay_ElementConfig *elementConfig = Clay__ElementConfigArraySlice_Get(&currentElement->elementConfigs, elementConfigIndex);
+                        if (elementConfig->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
+                            const Clay_Color labelColor = {243, 134, 48, 90};
+                            Clay_Color backgroundColor = elementConfig->config.sharedElementConfig->backgroundColor;
+                            Clay_CornerRadius radius = elementConfig->config.sharedElementConfig->cornerRadius;
+                            if (backgroundColor.a > 0) {
+                                CLAY({.layout = {.padding = {8, 8, 2, 2}},
+                                      .backgroundColor = labelColor,
+                                      .cornerRadius = CLAY_CORNER_RADIUS(4),
+                                      .border = {.color = labelColor, .width = {1, 1, 1, 1, 0}}}) {
+                                    CLAY_TEXT(CLAY_STRING("Color"), CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 16}));
+                                }
+                            }
+                            if (radius.bottomLeft > 0) {
+                                CLAY({.layout = {.padding = {8, 8, 2, 2}},
+                                      .backgroundColor = labelColor,
+                                      .cornerRadius = CLAY_CORNER_RADIUS(4),
+                                      .border = {.color = labelColor, .width = {1, 1, 1, 1, 0}}}) {
+                                    CLAY_TEXT(CLAY_STRING("Radius"), CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 16}));
+                                }
+                            }
+                            continue;
+                        }
+                        Clay_Color config_color = cdv_config_color((uint8_t)elementConfig->type);
+                        Clay_Color backgroundColor = config_color;
+                        backgroundColor.a = 90;
+                        const char *labelStr = cdv_config_label((uint8_t)elementConfig->type);
+                        CLAY({.layout = {.padding = {8, 8, 2, 2}},
+                              .backgroundColor = backgroundColor,
+                              .cornerRadius = CLAY_CORNER_RADIUS(4),
+                              .border = {.color = config_color, .width = {1, 1, 1, 1, 0}}}) {
+                            CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(labelStr), .chars = labelStr}), CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 16}));
+                        }
+                    }
+                    /* Engine extension columns: widget-type pill + layer cell. */
+                    if (wtype != NT_UI_WIDGET_NONE) {
+                        Clay_Color wbg = cdv_widget_color(wtype);
+                        const char *wlabel = cdv_widget_tag(wtype);
+                        CLAY({.layout = {.padding = {8, 8, 2, 2}}, .backgroundColor = wbg, .cornerRadius = CLAY_CORNER_RADIUS(4), .border = {.color = wbg, .width = {1, 1, 1, 1, 0}}}) {
+                            CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(wlabel), .chars = wlabel}), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16}));
+                        }
+                    }
+                    /* Layer cell -- "L:N" or "-". */
+                    if (layer >= 0) {
+                        CLAY({.layout = {.padding = {6, 6, 2, 2}}, .border = {.color = CDV_COLOR_3, .width = {1, 1, 1, 1, 0}}, .cornerRadius = CLAY_CORNER_RADIUS(4)}) {
+                            CLAY_TEXT(CLAY_STRING("L:"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16}));
+                            CLAY_TEXT(cdv_int_to_string(layer), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16}));
+                        }
+                    }
+                }
+            } /* if (has_identity) */
 
             /* Text-content row (verbatim from clay.h:3258-3270). */
             if (Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT)) {
@@ -925,16 +984,25 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                     }
                     CLAY_TEXT(CLAY_STRING("\""), rawTextConfig);
                 }
-            } else if (currentElement->childrenOrTextContent.children.length > 0) {
+            } else if (has_identity && currentElement->childrenOrTextContent.children.length > 0) {
+                /* Only open the 3 indent wrappers when a row was emitted --
+                 * filtered (no-identity) elements descend SILENTLY so anonymous
+                 * Clay containers don't add visible indent steps. */
                 Clay__OpenElement();
                 Clay__ConfigureOpenElement((Clay_ElementDeclaration){.layout = {.padding = {.left = 8}}});
                 Clay__OpenElement();
                 Clay__ConfigureOpenElement((Clay_ElementDeclaration){.layout = {.padding = {.left = CDV_INDENT_WIDTH}}, .border = {.color = CDV_COLOR_3, .width = {.left = 1}}});
                 Clay__OpenElement();
                 Clay__ConfigureOpenElement((Clay_ElementDeclaration){.layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}});
+                dfs_opened_wrappers[dfs_length - 1] = true;
             }
 
-            layoutData.row_count++;
+            /* row_count tracks VISIBLE rows -- filtered frames do not advance it
+             * so highlighted_row_index from the pointer-Y math keeps mapping to
+             * the user-visible rows correctly. */
+            if (has_identity) {
+                layoutData.row_count++;
+            }
             if (!Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT)) {
                 const int32_t childLen = currentElement->childrenOrTextContent.children.length;
                 int32_t *childElems = currentElement->childrenOrTextContent.children.elements;
@@ -957,6 +1025,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                         }
                         dfs_elems[dfs_length] = childElems[i];
                         dfs_visited[dfs_length] = false;
+                        dfs_opened_wrappers[dfs_length] = false;
                         dfs_length++;
                     }
                 }
@@ -1001,6 +1070,14 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL);
     NT_ASSERT(ctx->in_frame);
     NT_ASSERT(ctx->clay != NULL);
+
+    /* Reset the int/hex string rings at the start of each emit so the cursor
+     * always begins at 0 -- gives us a deterministic 512-slot window per
+     * frame regardless of how many frames have run before. The Clay_String
+     * pointers remain stable through the layout solve since no other code
+     * writes into these buffers between emit_layout and Clay_EndLayout. */
+    cdv_int_buf_cursor = 0U;
+    cdv_hex_buf_cursor = 0U;
 
     Clay_Context *context = ctx->clay;
     Clay_ElementId closeButtonId = Clay__HashString(CLAY_STRING("ntInsp_CloseButton"), 0, 0);
@@ -1240,14 +1317,31 @@ void nt_ui_internal_emit_inspector_layout_extern(nt_ui_context_t *ctx) { nt_ui_i
  * tag is acceptable, complex chaining would cost runtime + memory for no
  * real win at the inspector cap of ~128 widgets per frame. id 0 is the
  * no-widget sentinel; silently dropped. */
-void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, nt_ui_widget_type_t type) {
-    NT_ASSERT(ctx != NULL && "nt_ui_widget_register: ctx must be non-NULL");
+void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, nt_ui_widget_type_t type) { nt_ui_widget_register_padded(ctx, id, type, NULL); }
+
+void nt_ui_widget_register_padded(nt_ui_context_t *ctx, uint32_t id, nt_ui_widget_type_t type, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_widget_register_padded: ctx must be non-NULL");
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_widget_register_padded: pad_lrtb components must be >= 0");
     if (id == 0U) {
         return; /* sentinel: never register the no-id slot */
     }
     const uint32_t bucket = id & (NT_UI_WIDGET_REGISTRY_CAP - 1U);
-    ctx->widget_registry[bucket].id = id;
-    ctx->widget_registry[bucket].type = (uint8_t)type;
+    nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
+    s->id = id;
+    s->type = (uint8_t)type;
+    if (pad_lrtb != NULL) {
+        s->has_padding = 1U;
+        s->hit_padding_lrtb[0] = pad_lrtb[0];
+        s->hit_padding_lrtb[1] = pad_lrtb[1];
+        s->hit_padding_lrtb[2] = pad_lrtb[2];
+        s->hit_padding_lrtb[3] = pad_lrtb[3];
+    } else {
+        s->has_padding = 0U;
+        s->hit_padding_lrtb[0] = 0;
+        s->hit_padding_lrtb[1] = 0;
+        s->hit_padding_lrtb[2] = 0;
+        s->hit_padding_lrtb[3] = 0;
+    }
 }
 
 nt_ui_widget_type_t nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32_t id) {
@@ -1258,6 +1352,24 @@ nt_ui_widget_type_t nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32_t id)
     const uint32_t bucket = id & (NT_UI_WIDGET_REGISTRY_CAP - 1U);
     const nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
     return (s->id == id) ? (nt_ui_widget_type_t)s->type : NT_UI_WIDGET_NONE;
+}
+
+bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16_t out_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_widget_get_hit_padding: ctx must be non-NULL");
+    NT_ASSERT(out_lrtb != NULL && "nt_ui_widget_get_hit_padding: out_lrtb must be non-NULL");
+    if (id == 0U) {
+        return false;
+    }
+    const uint32_t bucket = id & (NT_UI_WIDGET_REGISTRY_CAP - 1U);
+    const nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
+    if (s->id != id || !s->has_padding) {
+        return false;
+    }
+    out_lrtb[0] = s->hit_padding_lrtb[0];
+    out_lrtb[1] = s->hit_padding_lrtb[1];
+    out_lrtb[2] = s->hit_padding_lrtb[2];
+    out_lrtb[3] = s->hit_padding_lrtb[3];
+    return true;
 }
 // #endregion
 

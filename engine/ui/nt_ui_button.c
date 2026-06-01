@@ -105,8 +105,10 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
 
     /* Phase 56 ext (CHUNK E): tag this element so nt_ui_inspector can show
      * "button" next to it in the element tree. Zero-overhead lookup; reset
-     * at every nt_ui_begin. id is guaranteed non-zero by the assert above. */
-    nt_ui_widget_register(ctx, id, NT_UI_WIDGET_BUTTON);
+     * at every nt_ui_begin. id is guaranteed non-zero by the assert above.
+     * Padded form records style->hit_padding_lrtb so the inspector overlay
+     * can outline the visual bbox AND the padded hit zone distinctly. */
+    nt_ui_widget_register_padded(ctx, id, NT_UI_WIDGET_BUTTON, style->hit_padding_lrtb);
 
     ctx->pending_button.active = true;
     ctx->pending_button.clicked = in.clicked;

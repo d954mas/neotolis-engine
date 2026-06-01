@@ -427,6 +427,144 @@ static void test_inspector_walker_enumerates_user_tree(void) {
     TEST_ASSERT_GREATER_OR_EQUAL_INT32(empty_inspector_grew + 5, full_inspector_grew);
 }
 
+/* ---- Test 15c: register_padded round-trip + get_hit_padding returns padding ----
+ * Pin for the inspector-overlay padded fill: the button's hit_padding_lrtb
+ * must survive into the inspector's widget_registry slot so the overlay can
+ * outline the touch-target distinct from the visual bbox. */
+static void test_widget_register_padded_roundtrip(void) {
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    const int16_t pad[4] = {12, 14, 16, 18};
+    nt_ui_widget_register_padded(s_fx.ctx, nt_ui_id("btn_padded"), NT_UI_WIDGET_BUTTON, pad);
+    /* Type still resolves through the plain lookup. */
+    TEST_ASSERT_EQUAL_INT(NT_UI_WIDGET_BUTTON, (int)nt_ui_widget_lookup(s_fx.ctx, nt_ui_id("btn_padded")));
+    /* Padding is recovered exactly. */
+    int16_t out[4] = {-1, -1, -1, -1};
+    TEST_ASSERT_TRUE(nt_ui_widget_get_hit_padding(s_fx.ctx, nt_ui_id("btn_padded"), out));
+    TEST_ASSERT_EQUAL_INT16(12, out[0]);
+    TEST_ASSERT_EQUAL_INT16(14, out[1]);
+    TEST_ASSERT_EQUAL_INT16(16, out[2]);
+    TEST_ASSERT_EQUAL_INT16(18, out[3]);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 15d: unpadded register reports false from get_hit_padding ----
+ * Plain image/panel widgets register via the unpadded form and must NOT
+ * accidentally show a padded hit zone in the inspector overlay. */
+static void test_widget_unpadded_no_hit_padding(void) {
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_widget_register(s_fx.ctx, nt_ui_id("img"), NT_UI_WIDGET_IMAGE);
+    int16_t out[4] = {99, 99, 99, 99};
+    TEST_ASSERT_FALSE(nt_ui_widget_get_hit_padding(s_fx.ctx, nt_ui_id("img"), out));
+    /* out untouched on miss (documented contract). */
+    TEST_ASSERT_EQUAL_INT16(99, out[0]);
+    TEST_ASSERT_EQUAL_INT16(99, out[1]);
+    TEST_ASSERT_EQUAL_INT16(99, out[2]);
+    TEST_ASSERT_EQUAL_INT16(99, out[3]);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 15e: nt_ui_button auto-records hit_padding via the padded form ----
+ * End-to-end: declaring a button with non-zero style.hit_padding_lrtb must
+ * make the inspector see the padding via the widget_registry. */
+static void test_button_auto_records_hit_padding(void) {
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    nt_ui_button_style_t padded_style = s_btn_style;
+    padded_style.hit_padding_lrtb[0] = 8;
+    padded_style.hit_padding_lrtb[1] = 8;
+    padded_style.hit_padding_lrtb[2] = 4;
+    padded_style.hit_padding_lrtb[3] = 4;
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &padded_style, true);
+        nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
+        (void)nt_ui_button_end(s_fx.ctx);
+    }
+    int16_t out[4] = {0, 0, 0, 0};
+    TEST_ASSERT_TRUE(nt_ui_widget_get_hit_padding(s_fx.ctx, nt_ui_id("btn"), out));
+    TEST_ASSERT_EQUAL_INT16(8, out[0]);
+    TEST_ASSERT_EQUAL_INT16(8, out[1]);
+    TEST_ASSERT_EQUAL_INT16(4, out[2]);
+    TEST_ASSERT_EQUAL_INT16(4, out[3]);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 15f: inspector filter hides anonymous (no-id, no-widget) elements ----
+ * Pin for the empty-wrapper-row fix: anonymous Clay containers must NOT emit
+ * an inspector tree row. Compares the "active inspector" element-count growth
+ * for a tree that's all named vs a tree that injects extra anonymous containers
+ * around children. With the filter on, both should produce SIMILAR growth
+ * (anonymous wrappers don't add ElementOuter blocks). Pre-fix, the anonymous
+ * containers each added their own ElementOuter row + 3 indent wrappers. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_filter_skips_anonymous(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+
+    /* Named-only tree: 3 children all with CLAY_ID. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root_named")}) {
+        CLAY({.id = CLAY_ID("a"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+        CLAY({.id = CLAY_ID("b"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+        CLAY({.id = CLAY_ID("c"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+    }
+    const int32_t before_named = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    const int32_t named_after = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    const int32_t named_growth = named_after - before_named;
+
+    /* Anonymous-wrapper tree: same 3 named leaves but each wrapped in an
+     * anonymous Clay container (no .id). Pre-fix, each anonymous wrapper would
+     * have emitted its own ntInsp_ElementOuter row plus 3 indent wrappers. */
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root_anon")}) {
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {
+            CLAY({.id = CLAY_ID("a"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+        }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {
+            CLAY({.id = CLAY_ID("b"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+        }
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {
+            CLAY({.id = CLAY_ID("c"), .layout = {.sizing = {CLAY_SIZING_FIXED(10), CLAY_SIZING_FIXED(10)}}}) {}
+        }
+    }
+    const int32_t before_anon = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    const int32_t anon_after = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    const int32_t anon_growth = anon_after - before_anon;
+
+    /* With the filter on, the 3 extra anonymous wrappers each cost ZERO
+     * inspector elements: anon_growth should match named_growth (within slack
+     * for any per-anonymous CloseElement bookkeeping). Pre-fix, anon_growth
+     * was substantially larger because each anonymous container emitted its
+     * own ElementOuter row + 3 indent wrappers (8+ extra elements per anon). */
+    TEST_ASSERT_LESS_OR_EQUAL_INT32(named_growth + 6, anon_growth);
+}
+
+/* ---- Test 15g: inspector emits a hex fallback for unnamed widgets ----
+ * Pin for the empty-stringId fallback: when an element has no string id but
+ * IS a registered widget (so it survives the filter), the inspector tree row
+ * must show the element's hex id rather than nothing. We pin by emitting a
+ * panel (unnamed, but widget_registry tagged PANEL) and asserting the
+ * inspector layout element count grew -- the alternative implementation
+ * (drop the row) would not change the count. */
+static void test_inspector_emits_hex_for_unnamed_widget(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root_unnamed_panel")}) {
+        nt_ui_panel_begin(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style);
+        nt_ui_panel_end(s_fx.ctx);
+    }
+    const int32_t before = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    nt_ui_end(s_fx.ctx);
+    const int32_t after = nt_ui_internal_get_layout_element_count(s_fx.ctx);
+    /* Inspector must have grown by at least the root pane + header + 2 tree
+     * rows (root + panel). Conservative: > before + 4. */
+    TEST_ASSERT_GREATER_THAN_INT32(before + 4, after);
+}
+
 /* ---- Test 15: inactive inspector NEVER intercepts (no false positives) ----
  * Even if the pointer is at x=600 (would be inside the sidebar IF active),
  * the gate must stay off when the inspector is disabled -- otherwise the game
@@ -462,6 +600,12 @@ int main(void) {
     RUN_TEST(test_inspector_intercepts_pointer_over_sidebar);
     RUN_TEST(test_inspector_pointer_outside_sidebar_normal);
     RUN_TEST(test_inspector_walker_enumerates_user_tree);
+    /* Phase 56 ext bug-fix pass: widget_registry hit_padding + filter + hex fallback. */
+    RUN_TEST(test_widget_register_padded_roundtrip);
+    RUN_TEST(test_widget_unpadded_no_hit_padding);
+    RUN_TEST(test_button_auto_records_hit_padding);
+    RUN_TEST(test_inspector_filter_skips_anonymous);
+    RUN_TEST(test_inspector_emits_hex_for_unnamed_widget);
     RUN_TEST(test_inspector_inactive_no_interception);
     return UNITY_END();
 }
