@@ -293,4 +293,25 @@ nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_conte
  * forwards the public emit_layout call to this. Asserts in-frame. */
 void nt_ui_internal_emit_inspector_layout_extern(nt_ui_context_t *ctx);
 
+/* Phase 56 ext fix (inspector overlay transform-aware): shared math + emit
+ * helpers used by BOTH nt_ui_debug_draw_hit_zones AND
+ * nt_ui_inspector_overlay_draw. The walker Y-flip + per-level accum apply
+ * convention from D-56-07 (commit f948916) lives here as the single source
+ * of truth so the two overlays can never drift.
+ *
+ * - find_debug_zone:    linear scan of ctx->debug_zones[] by id; NULL if missing.
+ * - project_layout_to_world: project a Clay-layout point through z's accum
+ *   stack (NON-negated rotation, NO per-level Y-flip -- matches what was
+ *   RECORDED at query time inside nt_ui_get_interaction_padded) then apply
+ *   the walker's single GL Y-flip world_y = vy + vh - clay_y.
+ * - emit_filled_quad / emit_outline: sprite-renderer emits used by the
+ *   transformed-overlay path. Vertices in WORLD space (already flipped). */
+const nt_ui_debug_zone_t *nt_ui_internal_find_debug_zone(const nt_ui_context_t *ctx, uint32_t id);
+
+void nt_ui_internal_project_layout_to_world(const nt_ui_debug_zone_t *z, float vy, float vh, float x, float y, float *out_x, float *out_y);
+
+void nt_ui_internal_emit_filled_quad(nt_resource_t atlas, uint32_t region, const float v[4][2], uint32_t color);
+
+void nt_ui_internal_emit_outline(nt_resource_t atlas, uint32_t region, const float c[4][2], float thickness, uint32_t color);
+
 #endif /* NT_UI_INTERNAL_H */

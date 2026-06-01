@@ -3091,8 +3091,13 @@ nt_ui_interaction_t nt_ui_get_interaction_padded(nt_ui_context_t *ctx, uint32_t 
 
     /* Phase 56 ext: hit-zone overlay recording. Gated by debug_recording so
      * production overhead is zero. At-cap is silently dropped (overlay is a
-     * verification aid, not correctness). */
-    if (ctx->debug_recording && ctx->debug_zone_count < NT_UI_DEBUG_ZONE_CAP) {
+     * verification aid, not correctness).
+     * Phase 56 ext fix (inspector overlay transform-aware): also record while
+     * the inspector is active -- the inspector's post-walk overlay uses the
+     * recorded accum snapshot to project the highlight polygon to the
+     * transformed render position. Without this, the BAKED button overlay
+     * draws an axis-aligned bbox in layout space (visible bug). */
+    if ((ctx->debug_recording || ctx->inspector_active) && ctx->debug_zone_count < NT_UI_DEBUG_ZONE_CAP) {
         nt_ui_debug_zone_t *z = &ctx->debug_zones[ctx->debug_zone_count++];
         const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
         const float pr = (pad_lrtb != NULL) ? (float)pad_lrtb[1] : 0.0F;
@@ -3147,8 +3152,9 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
     NT_ASSERT(id != 0U && "nt_ui_debug_record_disabled_zone: id must be non-zero (0 = no widget)");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_debug_record_disabled_zone: pad_lrtb components must be >= 0");
 
-    /* Zero-overhead fast path. */
-    if (!ctx->debug_recording || ctx->debug_zone_count >= NT_UI_DEBUG_ZONE_CAP) {
+    /* Zero-overhead fast path. Inspector_active also enables recording so the
+     * inspector overlay surfaces disabled widgets without a separate toggle. */
+    if ((!ctx->debug_recording && !ctx->inspector_active) || ctx->debug_zone_count >= NT_UI_DEBUG_ZONE_CAP) {
         return;
     }
     /* First frame an id is declared has no prev-frame bbox -> no zone to record. */

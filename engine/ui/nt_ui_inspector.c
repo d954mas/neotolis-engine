@@ -169,7 +169,91 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     const float vy = target->viewport[1];
     const float vw = target->viewport[2];
     const float vh = target->viewport[3];
-    /* Clay Y-down -> GL Y-up: world_y(top) = vy+vh - clay_y(top). */
+
+    /* Phase 56 ext fix (inspector overlay transform-aware): if the highlighted
+     * id was queried via nt_ui_get_interaction_padded this frame, a debug zone
+     * carries the declaration-time accum-transform snapshot. Use it to project
+     * the visual + padded corners into world space so the overlay matches the
+     * EXACT rendered position. Without this, push_transform-wrapped widgets
+     * (e.g. ui_buttons_demo BAKED button) show the overlay at the layout
+     * bbox while the widget renders at the transformed position. Falls back
+     * to the axis-aligned bbox path when no zone is recorded (plain Clay
+     * containers, non-interactive elements). */
+    const nt_ui_debug_zone_t *z = nt_ui_internal_find_debug_zone(ctx, ctx->inspector_highlight_id);
+    if (z != NULL && z->accum_depth > 0U) {
+        nt_sprite_renderer_set_material(ctx->sprite_material);
+
+        /* The recorded zone carries the visual bbox AND the padded layout bbox
+         * (from the registered hit_padding_lrtb). Project them through the
+         * same per-level accum math + Y-flip the debug overlay uses. */
+        int16_t pad[4] = {0, 0, 0, 0};
+        const bool has_pad = nt_ui_widget_get_hit_padding(ctx, ctx->inspector_highlight_id, pad) && (pad[0] > 0 || pad[1] > 0 || pad[2] > 0 || pad[3] > 0);
+
+        if (has_pad) {
+            float pad_corners[4][2] = {
+                {z->layout_l, z->layout_t},
+                {z->layout_r, z->layout_t},
+                {z->layout_r, z->layout_b},
+                {z->layout_l, z->layout_b},
+            };
+            for (uint32_t k = 0; k < 4U; ++k) {
+                nt_ui_internal_project_layout_to_world(z, vy, vh, pad_corners[k][0], pad_corners[k][1], &pad_corners[k][0], &pad_corners[k][1]);
+            }
+            nt_ui_internal_emit_filled_quad(ctx->atlas, ctx->white_region, pad_corners, 0x6033FFFFU);
+            nt_ui_internal_emit_outline(ctx->atlas, ctx->white_region, pad_corners, 1.0F, 0xFF00FFFFU);
+        }
+
+        /* Visual bbox highlight: filled translucent fill + opaque outline. */
+        float vis_corners[4][2] = {
+            {z->visual_l, z->visual_t},
+            {z->visual_r, z->visual_t},
+            {z->visual_r, z->visual_b},
+            {z->visual_l, z->visual_b},
+        };
+        for (uint32_t k = 0; k < 4U; ++k) {
+            nt_ui_internal_project_layout_to_world(z, vy, vh, vis_corners[k][0], vis_corners[k][1], &vis_corners[k][0], &vis_corners[k][1]);
+        }
+        nt_ui_internal_emit_filled_quad(ctx->atlas, ctx->white_region, vis_corners, 0x641C42A8U);
+        nt_ui_internal_emit_outline(ctx->atlas, ctx->white_region, vis_corners, 2.0F, 0xFFFFFFFFU);
+
+        /* Label at the GL-Y-up TOP corner of the visual quad (max y after
+         * Y-flip = original top edge). Mirrors nt_ui_debug_draw_hit_zones's
+         * label placement so the two overlays look consistent. */
+        if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
+            float top_x = vis_corners[0][0];
+            float top_y = vis_corners[0][1];
+            for (uint32_t k = 1; k < 4U; ++k) {
+                if (vis_corners[k][1] > top_y) {
+                    top_y = vis_corners[k][1];
+                    top_x = vis_corners[k][0];
+                }
+            }
+            char buf[80];
+            int n;
+            if (info.id_string_len > 0U && info.id_string != NULL) {
+                const int slen = (info.id_string_len > 48U) ? 48 : (int)info.id_string_len;
+                n = snprintf(buf, sizeof buf, "id=%.*s", slen, info.id_string);
+            } else {
+                n = snprintf(buf, sizeof buf, "id=#%08X", ctx->inspector_highlight_id);
+            }
+            if (n > 0) {
+                const float color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
+                overlay_draw_text(ctx->text_material, font, top_x + 4.0F, top_y - label_size - 2.0F, label_size, color, buf, (size_t)n);
+            }
+        }
+
+        nt_sprite_renderer_flush();
+        if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
+            nt_text_renderer_flush();
+        }
+        return;
+    }
+
+    /* Fallback: axis-aligned bbox in layout space. Used for plain Clay
+     * elements with no recorded zone, or zones with no accum transform
+     * (depth==0 -> identity, same screen position as the bbox). The CPU
+     * panel clip keeps the highlight visually UNDER the sidebar.
+     * Clay Y-down -> GL Y-up: world_y(top) = vy+vh - clay_y(top). */
     const float gl_x = info.bbox_x;
     const float gl_y_top = vy + vh - info.bbox_y;
     const float w = info.bbox_w;

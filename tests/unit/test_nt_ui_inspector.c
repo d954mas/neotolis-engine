@@ -13,6 +13,7 @@
  * Pixel output is NOT unit-tested -- visual verification is in
  * ui_buttons_demo (D toggle). */
 
+#include <math.h>
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -1144,6 +1145,131 @@ static void test_inspector_reads_layer_from_shared_config_userdata(void) {
     TEST_ASSERT_EQUAL_UINT8(3U, (uint8_t)data_with_layer->layer);
 }
 
+/* ---- Test 15q: overlay projects hit-zone corners through accum for a
+ * transformed widget ----
+ *
+ * Phase 56 ext fix (visualization vs hit-test divergence). The inverse-affine
+ * hit-test (D-56-07) correctly clicks the rendered button at the transformed
+ * position, but the inspector overlay was drawing an axis-aligned bbox in
+ * layout space -- so the user saw the highlight at the WRONG place for any
+ * widget wrapped in nt_ui_push_transform (e.g. demo BAKED button).
+ *
+ * Setup: declare a button under a non-identity transform (offset + rotation
+ * + non-uniform scale). nt_ui_get_interaction_padded fires inside button_begin
+ * with inspector_active=true -> a debug zone is recorded with the accum
+ * snapshot. Assert the projected top-left corner DIFFERS from the layout
+ * bbox top-left (proves projection ran). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_overlay_projects_through_accum_for_transformed_id(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+    const float btn_x = 200.0F;
+    const float btn_y = 200.0F;
+    const float btn_w = 160.0F;
+    const float btn_h = 48.0F;
+
+    /* Frame 1: declare so Clay has a prev-frame bbox the inverse-affine
+     * hit-test can read on frame 2. */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("baked_root")}) {
+        CLAY({.id = CLAY_ID("xform_btn"),
+              .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {}
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: declare under the transform so the accum stack is non-empty at
+     * the time the interaction query records the debug zone. */
+    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    nt_ui_transform_t baked = nt_ui_transform_defaults();
+    baked.offset_x = 60.0F;
+    baked.offset_y = -20.0F;
+    baked.rotation = 25.0F * 0.017453292F; /* 25 deg -> rad */
+    baked.scale_x = 1.15F;
+    baked.scale_y = 0.85F;
+    CLAY({.id = CLAY_ID("baked_root")}) {
+        nt_ui_push_transform(s_fx.ctx, &baked);
+        CLAY({.id = CLAY_ID("xform_btn"),
+              .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
+              .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
+            /* Issue the interaction query INSIDE the CLAY block so the
+             * declaration-time accum stack is still active. Recording happens
+             * inside get_interaction_padded gated by inspector_active. */
+            (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("xform_btn"));
+        }
+        nt_ui_pop_transform(s_fx.ctx);
+    }
+
+    /* Zone must be recorded; accum_depth > 0 proves the snapshot landed. */
+    const nt_ui_debug_zone_t *z = nt_ui_internal_find_debug_zone(s_fx.ctx, nt_ui_id("xform_btn"));
+    TEST_ASSERT_NOT_NULL(z);
+    TEST_ASSERT_GREATER_THAN_UINT32(0U, z->accum_depth);
+
+    /* Project the layout-space top-left corner through the accum snapshot +
+     * walker Y-flip. The projected position MUST differ from the simple
+     * Y-flip of (visual_l, visual_t) -- otherwise the projection silently
+     * collapsed back to axis-aligned (the bug). */
+    float proj_x = 0.0F;
+    float proj_y = 0.0F;
+    nt_ui_internal_project_layout_to_world(z, 0.0F, screen_h, z->visual_l, z->visual_t, &proj_x, &proj_y);
+    const float flat_x = z->visual_l;
+    const float flat_y = screen_h - z->visual_t;
+    const float dx = fabsf(proj_x - flat_x);
+    const float dy = fabsf(proj_y - flat_y);
+    /* offset_x=+60 -> projected x SHOULD be >= ~30 px away from the layout-
+     * space x even after scale+rotation interactions. Conservative threshold
+     * 10 px on either axis catches the bug (identity projection had dx=dy=0). */
+    TEST_ASSERT_TRUE_MESSAGE(dx > 10.0F || dy > 10.0F, "projected corner did not differ from axis-aligned -- accum stack ignored");
+
+    s_fx.ctx->inspector_selected_id = nt_ui_id("xform_btn");
+    nt_ui_end(s_fx.ctx);
+
+    /* overlay_draw must run without crashing; visual verification stays in the demo. */
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, screen_w, screen_h}};
+    nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
+}
+
+/* ---- Test 15r: overlay falls back to axis-aligned bbox when no zone is
+ * recorded ----
+ *
+ * Counterpart to 15q. Setup: a plain Clay container is selected but NEVER
+ * queried via nt_ui_get_interaction (e.g. a non-interactive panel that
+ * still appears in the inspector tree). No debug zone -> no accum snapshot.
+ * The overlay MUST fall back to the axis-aligned bbox path and emit
+ * normally (no crash). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_overlay_falls_back_to_axis_aligned_when_no_zone(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    /* Frame 1: declare a plain Clay container (no widget tag, no interaction). */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("plain_box"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 100.0F, .y = 100.0F}}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(60)}}}) {}
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: declare again so bbox is stable; do NOT query interaction. */
+    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
+    CLAY({.id = CLAY_ID("plain_box"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = 100.0F, .y = 100.0F}}, .layout = {.sizing = {CLAY_SIZING_FIXED(60), CLAY_SIZING_FIXED(60)}}}) {}
+    s_fx.ctx->inspector_selected_id = nt_ui_id("plain_box");
+    nt_ui_end(s_fx.ctx);
+
+    /* No zone -> find returns NULL. */
+    const nt_ui_debug_zone_t *z = nt_ui_internal_find_debug_zone(s_fx.ctx, nt_ui_id("plain_box"));
+    TEST_ASSERT_NULL(z);
+
+    /* highlight propagated via the fallback chain. */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("plain_box"), s_fx.ctx->inspector_highlight_id);
+
+    /* overlay_draw must take the axis-aligned fallback path; no crash. */
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
+    nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
+}
+
 /* ---- Test 15: inactive inspector NEVER intercepts (no false positives) ----
  * Even if the pointer is at x=600 (would be inside the sidebar IF active),
  * the gate must stay off when the inspector is disabled -- otherwise the game
@@ -1215,6 +1341,10 @@ int main(void) {
      * Clay's auto-conversion of Clay_ElementDeclaration.userData. */
     RUN_TEST(test_inspector_reads_layer_from_text_config_userdata);
     RUN_TEST(test_inspector_reads_layer_from_shared_config_userdata);
+    /* Phase 56 ext fix: overlay projects hit-zone through accum transform
+     * (transformed widget case + axis-aligned fallback). */
+    RUN_TEST(test_overlay_projects_through_accum_for_transformed_id);
+    RUN_TEST(test_overlay_falls_back_to_axis_aligned_when_no_zone);
     RUN_TEST(test_inspector_inactive_no_interception);
     return UNITY_END();
 }
