@@ -713,12 +713,14 @@ static void frame(void) {
             .scale_y = s_xform_scale,
         };
 
+        /* Y_CENTER alignment so a portrait-resized window keeps content
+         * vertically centered instead of clamping to the top edge. */
         CLAY({.id = CLAY_ID("root"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)},
                          .padding = CLAY_PADDING_ALL(20),
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
                          .childGap = 18,
-                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_TOP}},
+                         .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
               .backgroundColor = {18.0F, 18.0F, 22.0F, 255.0F}}) {
             CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), status_text, &g_status_style);
