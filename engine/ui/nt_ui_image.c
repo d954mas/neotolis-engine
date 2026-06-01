@@ -12,7 +12,7 @@
  * inspector. Purple pill (0xFFB45A78 -- R=120,G=90,B=180; preserved from
  * the pre-refactor cdv_widget_color switch). */
 const nt_ui_widget_def_t NT_UI_IMAGE_DEF = {
-    .name = "image",
+    .name = "nt_image",
     .pill_color = 0xFFB45A78U,
     ._reserved = 0U,
 };

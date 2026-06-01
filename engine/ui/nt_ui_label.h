@@ -12,10 +12,11 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Inspector descriptor: pill name + color shown in the element tree. Labels
- * emit a CLAY_TEXT leaf with no game-side id, so the descriptor is not
- * auto-registered today; the symbol is exported so future label-as-container
- * variants (or games that wrap labels) can register it consistently. */
+/* Inspector descriptor: pill name "nt_label" + color shown in the element
+ * tree. Engine widget defs use the "nt_" prefix to disambiguate from Clay's
+ * own config-type pills ("Text" appears on the same row from Clay's port).
+ * nt_ui_label auto-registers the descriptor against the just-emitted CLAY_TEXT
+ * leaf's id so a row tagged "nt_label" appears alongside the text content. */
 extern const nt_ui_widget_def_t NT_UI_LABEL_DEF;
 
 typedef struct {

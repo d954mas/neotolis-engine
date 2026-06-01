@@ -16,7 +16,7 @@
  * inspector. Green pill (0xFF60D070 -- {0x70,0xD0,0x60,0xFF} = R=112,G=208,B=96).
  * Preserved from the pre-refactor cdv_widget_color switch. */
 const nt_ui_widget_def_t NT_UI_BUTTON_DEF = {
-    .name = "button",
+    .name = "nt_button",
     .pill_color = 0xFF60D070U,
     ._reserved = 0U,
 };

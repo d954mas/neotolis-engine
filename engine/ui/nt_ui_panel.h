@@ -13,8 +13,10 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Inspector descriptors: pill name + color shown in the element tree. Game
- * code may compare pointer identity against these symbols. */
+/* Inspector descriptors: pill name "nt_panel" / "nt_group" + color shown in
+ * the element tree. Engine widget defs use the "nt_" prefix to disambiguate
+ * from Clay's own config-type pills on the same row. Game code may compare
+ * pointer identity against these symbols. */
 extern const nt_ui_widget_def_t NT_UI_PANEL_DEF;
 extern const nt_ui_widget_def_t NT_UI_GROUP_DEF;
 

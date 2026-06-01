@@ -12,7 +12,7 @@
  * inspector. Blue pill (0xFFC88C5A -- R=90,G=140,B=200; preserved from the
  * pre-refactor cdv_widget_color switch). */
 const nt_ui_widget_def_t NT_UI_LABEL_DEF = {
-    .name = "label",
+    .name = "nt_label",
     .pill_color = 0xFFC88C5AU,
     ._reserved = 0U,
 };

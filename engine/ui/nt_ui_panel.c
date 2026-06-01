@@ -13,12 +13,12 @@
  * pill for group (0xFF5AA0A0 -- R=160,G=160,B=90). Preserved from the
  * pre-refactor cdv_widget_color switch. */
 const nt_ui_widget_def_t NT_UI_PANEL_DEF = {
-    .name = "panel",
+    .name = "nt_panel",
     .pill_color = 0xFF4678B4U,
     ._reserved = 0U,
 };
 const nt_ui_widget_def_t NT_UI_GROUP_DEF = {
-    .name = "group",
+    .name = "nt_group",
     .pill_color = 0xFF5AA0A0U,
     ._reserved = 0U,
 };

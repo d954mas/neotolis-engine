@@ -12,9 +12,11 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Inspector descriptor: pill name + color shown in the element tree. Game
- * code may compare pointer identity against this symbol if it needs to
- * filter by "is this an image" without parsing names. */
+/* Inspector descriptor: pill name "nt_image" + color shown in the element
+ * tree. Engine widget defs use the "nt_" prefix to disambiguate from Clay's
+ * own config-type pills (Clay emits its own verbatim "Image" pill on the
+ * same row). Game code may compare pointer identity against this symbol if
+ * it needs to filter by "is this an image" without parsing names. */
 extern const nt_ui_widget_def_t NT_UI_IMAGE_DEF;
 
 /* Style flag bits. */

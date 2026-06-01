@@ -146,7 +146,10 @@ static void test_registry_engine_and_game_defs_coexist(void) {
     TEST_ASSERT_EQUAL_PTR(&NT_UI_BUTTON_DEF, btn);
     TEST_ASSERT_EQUAL_PTR(&TEST_GAME_INV_SLOT_DEF, slot);
     /* Pill data is reachable through the pointer (no copy). */
-    TEST_ASSERT_EQUAL_STRING("button", btn->name);
+    /* Engine widget defs are prefixed "nt_" to disambiguate from Clay's own
+     * verbatim config-type pills (Clay emits "Image" / "Text" / etc.). Game
+     * widgets are NOT prefix-constrained -- "inv_slot" stays as-is. */
+    TEST_ASSERT_EQUAL_STRING("nt_button", btn->name);
     TEST_ASSERT_EQUAL_STRING("inv_slot", slot->name);
     TEST_ASSERT_EQUAL_UINT32(0xFF60D070U, btn->pill_color);
     TEST_ASSERT_EQUAL_UINT32(0xFFB060A0U, slot->pill_color);
