@@ -42,11 +42,26 @@
 void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_set_active: ctx must be non-NULL");
     ctx->inspector_active = on;
+    /* First activation initialises the hit-mode default (HOVER). Game can
+     * override via nt_ui_inspector_set_hit_mode at any time. */
+    if (on && ctx->inspector_hit_mode == 0U) {
+        ctx->inspector_hit_mode = (uint8_t)NT_UI_DEBUG_HIT_HOVER;
+    }
 }
 
 bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_is_active: ctx must be non-NULL");
     return ctx->inspector_active;
+}
+
+void nt_ui_inspector_set_hit_mode(nt_ui_context_t *ctx, nt_ui_debug_hit_mode_t mode) {
+    NT_ASSERT(ctx != NULL && "nt_ui_inspector_set_hit_mode: ctx must be non-NULL");
+    ctx->inspector_hit_mode = (uint8_t)mode;
+}
+
+nt_ui_debug_hit_mode_t nt_ui_inspector_get_hit_mode(const nt_ui_context_t *ctx) {
+    NT_ASSERT(ctx != NULL && "nt_ui_inspector_get_hit_mode: ctx must be non-NULL");
+    return (nt_ui_debug_hit_mode_t)ctx->inspector_hit_mode;
 }
 // #endregion
 
@@ -516,17 +531,16 @@ void nt_ui_inspector_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt
         nt_text_renderer_flush();
     }
 
-    /* === Re-coupling: F3 alone now drives the hit-zone overlay. The
-     * inspector composes hit-zone visualization on top of its own panel
-     * when ctx->debug_recording is on. nt_ui_debug_draw_hit_zones gates
-     * internally on (mode != OFF) and on the bindings being ready, so
-     * passing NT_UI_DEBUG_HIT_HOVER here means "show hovered zones while
-     * inspector is active". The game's F2 cycles a separate s_dbg_mode
-     * which it forwards by calling nt_ui_debug_draw_hit_zones itself (no
-     * change there); the inspector adds the default-HOVER coverage when
-     * recording is on. */
-    if (ctx->debug_recording) {
-        nt_ui_debug_draw_hit_zones(ctx, target, NT_UI_DEBUG_HIT_HOVER, font, label_size);
+    /* === Re-coupling: F3 alone drives the hit-zone overlay. When the
+     * inspector is active AND debug_recording is on, the overlay paints on
+     * top of the panel using ctx->inspector_hit_mode (set by the game's
+     * F2 binding; default HOVER on first activation). The game does NOT
+     * call nt_ui_debug_draw_hit_zones itself anymore -- the inspector owns
+     * the overlay so F1 + a separate render-loop call become redundant.
+     * nt_ui_debug_draw_hit_zones gates internally on bindings + mode != OFF. */
+    const nt_ui_debug_hit_mode_t mode = (nt_ui_debug_hit_mode_t)ctx->inspector_hit_mode;
+    if (ctx->debug_recording && mode != NT_UI_DEBUG_HIT_OFF) {
+        nt_ui_debug_draw_hit_zones(ctx, target, mode, font, label_size);
     }
 }
 // #endregion

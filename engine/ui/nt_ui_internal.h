@@ -165,8 +165,12 @@ struct nt_ui_context {
 
     /* Phase 56 ext (CHUNK E): nt_ui_inspector toggle (HUD-style overlay drawn
      * by the game AFTER nt_ui_walk). Default off (zero overhead -- no per-frame
-     * tree walk, no extra draw calls). Game flips via nt_ui_inspector_set_active. */
+     * tree walk, no extra draw calls). Game flips via nt_ui_inspector_set_active.
+     * inspector_hit_mode controls which zones the inspector's internal overlay
+     * call draws (HOVER / CAPTURED / ALL / OFF); default HOVER. The game's F2
+     * binding cycles this so F3 stays the single master toggle. */
     bool inspector_active;
+    uint8_t inspector_hit_mode; /* nt_ui_debug_hit_mode_t; 0=OFF 1=HOVER 2=CAPTURED 3=ALL */
 
     Clay_Arena clay_arena;
 };
@@ -197,7 +201,7 @@ uint32_t nt_ui_internal_current_open_element_id(void);
  * Clay_LayoutElement directly. id_string is borrowed from Clay's
  * layoutElementIdStrings array -- lifetime extends through the next nt_ui_begin. */
 typedef struct nt_ui_inspector_tree_row {
-    const char *id_string; /* NUL-not-guaranteed; see id_string_len. Borrowed from Clay's layoutElementIdStrings -- lifetime through next nt_ui_begin. */
+    const char *id_string;  /* NUL-not-guaranteed; see id_string_len. Borrowed from Clay's layoutElementIdStrings -- lifetime through next nt_ui_begin. */
     const char *text_chars; /* NULL unless is_text -- borrowed from textElementData */
     uint32_t id;
     float bbox_x, bbox_y, bbox_w, bbox_h; /* Clay Y-down layout bbox */

@@ -38,7 +38,8 @@
 #include <stdbool.h>
 
 #include "font/nt_font.h"
-#include "ui/nt_ui.h" /* nt_ui_target_t */
+#include "ui/nt_ui.h"       /* nt_ui_target_t */
+#include "ui/nt_ui_debug.h" /* nt_ui_debug_hit_mode_t */
 
 typedef struct nt_ui_context nt_ui_context_t;
 
@@ -48,6 +49,14 @@ typedef struct nt_ui_context nt_ui_context_t;
  * declared widgets. */
 void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on);
 bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx);
+
+/* Which hit-zone filter the inspector uses for its internal overlay call.
+ * Default NT_UI_DEBUG_HIT_HOVER. The demo's F2 binding cycles this so the
+ * user can switch between HOVER / CAPTURED / ALL while F3 stays the single
+ * master toggle. Pass NT_UI_DEBUG_HIT_OFF to suppress the overlay entirely
+ * (panel still draws). */
+void nt_ui_inspector_set_hit_mode(nt_ui_context_t *ctx, nt_ui_debug_hit_mode_t mode);
+nt_ui_debug_hit_mode_t nt_ui_inspector_get_hit_mode(const nt_ui_context_t *ctx);
 
 /* Render the inspector (call AFTER nt_ui_walk, BEFORE end_pass).
  * `target` MUST be the same nt_ui_target_t passed to nt_ui_walk -- the
