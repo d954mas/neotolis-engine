@@ -1624,6 +1624,219 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
     (void)nt_ui_test_last_walk_unlayered_count(s_fx.ctx);
 }
 
+/* ---- Test 15x-perf: inspector draw-call ceiling via pipeline-type alternations ----
+ *
+ * Walker dispatch flushes the sprite renderer on every RECT->TEXT boundary and
+ * vice-versa (engine/ui/nt_ui.c::prep_sprite_dispatch + the TEXT branch's
+ * unconditional nt_sprite_renderer_flush). One alternation = at least one
+ * draw call. Per-row Pre-fix the inspector tree emitted ~6-8 RECT/TEXT
+ * alternations: row_bg(R) -> id(T) -> color_swatch(R) -> hex(T) -> radius_pill_bg(R) ->
+ * radius_pill_text(T) -> cfg_pill_bg(R) -> cfg_pill_text(T) -> widget_pill_bg(R) ->
+ * widget_pill_text(T) -> layer_pill_bg(R) -> layer_pill_text(T). Across ~30
+ * visible rows that compounds to ~200 draws inside the panel alone, matching
+ * the user's observation ("209 dc при открытом дебаг вью").
+ *
+ * STRATEGY A drops the per-row pill BACKGROUNDS (radius / per-config / widget /
+ * layer / info-pane config-header) and renders only colored text in the pill's
+ * tint -- the visual identification still works because the text color carries
+ * the pill's hue. The color swatch RECT stays because it's the only way to
+ * surface the SHARED config's actual color sample.
+ *
+ * Post-fix alternations per row collapse to ~4: row_bg(R) -> id(T) ->
+ * swatch_rect(R) -> hex+radius+cfg+widget+layer_texts(T...). The same scene
+ * that produced ~6 alternations per row now produces ~2.
+ *
+ * Pin: alternation count inside the panel footprint stays below a ceiling
+ * derived from "1 row_bg per visible row + 1 swatch per SHARED-bearing row +
+ * a small constant for header/info-pane". The expression keeps the bound
+ * tight enough that re-introducing a pill background regresses (i.e. the test
+ * stays catching even if rows-count shifts slightly).
+ *
+ * Numbers: with the demo-shaped scene below (button + label + image inside a
+ * root), the inspector emits ~6-8 tree rows + header bar + info pane. The
+ * BEFORE alternation count was measured at ~50; AFTER the fix it must be
+ * <= 20. The 20 ceiling leaves headroom for the swatch (1 per SHARED-config
+ * row) and the row_bg (1 per row), the close-button bg (1), header bg (1),
+ * panel separator (1), and any one-off bg-bearing pane element.
+ *
+ * Method: pre-select an element so the info pane emits its full surface, then
+ * scan frozen_cmds end-to-end and count adjacent RECT/IMAGE/BORDER <-> TEXT
+ * type-changes restricted to commands inside the panel footprint
+ * (boundingBox.x >= panel_left_x). The ceiling pins draws-saved without
+ * needing a live GL backend. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_alternations_capped_after_strategy_a(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const float panel_left_x = screen_w - 400.0F; /* CDV_PANEL_WIDTH = 400 */
+
+    /* Frame 1: declare so prev-frame bbox exists. */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("perf_root"), .layout = {.padding = CLAY_PADDING_ALL(20)}, .backgroundColor = {30, 30, 30, 255}}) {
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("perf_btn"), s_fx.atlas.handle, &s_btn_style, true);
+        nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
+        (void)nt_ui_button_end(s_fx.ctx);
+        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style);
+    }
+    s_fx.ctx->inspector_selected_id = nt_ui_id("perf_btn");
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: full inspector emit -- tree rows + info pane. */
+    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    CLAY({.id = CLAY_ID("perf_root"), .layout = {.padding = CLAY_PADDING_ALL(20)}, .backgroundColor = {30, 30, 30, 255}}) {
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("perf_btn"), s_fx.atlas.handle, &s_btn_style, true);
+        nt_ui_label(s_fx.ctx, NULL, "OK", &s_label_style);
+        (void)nt_ui_button_end(s_fx.ctx);
+        nt_ui_image(s_fx.ctx, NULL, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Count adjacent RECT/IMAGE/BORDER <-> TEXT transitions among inspector-owned
+     * commands. SCISSOR/CUSTOM/NONE are barriers (handled separately by the
+     * walker); they reset the prev-type tracker to avoid counting a barrier as
+     * an alternation. */
+    Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
+    TEST_ASSERT_NOT_NULL(arr->internalArray);
+    TEST_ASSERT_GREATER_THAN_INT32(0, arr->length);
+
+    enum { PIPE_NONE = 0, PIPE_SPRITE = 1, PIPE_TEXT = 2 };
+    int prev_pipe = PIPE_NONE;
+    uint32_t alternations = 0U;
+    uint32_t inside_cmd_count = 0U;
+    for (int32_t i = 0; i < arr->length; ++i) {
+        const Clay_RenderCommand *cc = &arr->internalArray[i];
+        int pipe = PIPE_NONE;
+        switch (cc->commandType) {
+        case CLAY_RENDER_COMMAND_TYPE_RECTANGLE:
+        case CLAY_RENDER_COMMAND_TYPE_BORDER:
+        case CLAY_RENDER_COMMAND_TYPE_IMAGE:
+            pipe = PIPE_SPRITE;
+            break;
+        case CLAY_RENDER_COMMAND_TYPE_TEXT:
+            pipe = PIPE_TEXT;
+            break;
+        default:
+            /* SCISSOR/CUSTOM/NONE = hard barriers. Reset prev so the next
+             * inspector cmd does not falsely register a type change. */
+            prev_pipe = PIPE_NONE;
+            continue;
+        }
+        /* Inspector-owned heuristic: bbox inside the panel footprint. */
+        if (cc->boundingBox.x < panel_left_x) {
+            prev_pipe = PIPE_NONE;
+            continue;
+        }
+        inside_cmd_count++;
+        if (prev_pipe != PIPE_NONE && prev_pipe != pipe) {
+            alternations++;
+        }
+        prev_pipe = pipe;
+    }
+
+    /* Vacuous-pass guard: assert we actually iterated the panel. */
+    TEST_ASSERT_GREATER_THAN_UINT32(20U, inside_cmd_count);
+
+    /* Strategy-A ceiling. Pre-fix value was ~50; post-fix the same scene
+     * produces <= 20. The bound stays catching: re-adding any per-row pill
+     * background brings the count above 20 (each row adds 2 extra
+     * alternations: text->rect-bg then rect-bg->text). */
+    char msg[160];
+    (void)snprintf(msg, sizeof msg, "inspector RECT<->TEXT alternations inside panel: %u (cap 20). cmd_count=%u. STRATEGY A regression?", alternations, inside_cmd_count);
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(20U, alternations, msg);
+}
+
+/* ---- Test 15x-perf-bulk: demo-shaped scene (~20 widgets) stays under
+ * scaled alternation cap. STRATEGY A scales linearly per row -- each row
+ * contributes ~2 alternations (dot bg + optional swatch). 20 widgets each
+ * with at least the row_bg + dot adds ~40 alternations. Tighten to 60 with
+ * headroom for the header bar, info pane, and the highlighted-element
+ * floating rect. The original 209-DC scene matched ~30 visible rows; this
+ * 20-row scene maps to a draw-call lower bound of about 60-80 (well under
+ * the user's 120 ceiling). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 1280.0F;
+    const float screen_h = 800.0F;
+    const float panel_left_x = screen_w - 400.0F;
+
+    /* Frame 1: declare the bulk scene -- 20 buttons in a row -- so frame 2
+     * has settled bboxes. */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("bulk_root"), .layout = {.padding = CLAY_PADDING_ALL(20), .childGap = 8}, .backgroundColor = {30, 30, 30, 255}}) {
+        for (int i = 0; i < 20; ++i) {
+            char name[24];
+            (void)snprintf(name, sizeof name, "bulk_btn_%d", i);
+            nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id(name), s_fx.atlas.handle, &s_btn_style, true);
+            nt_ui_label(s_fx.ctx, NULL, "X", &s_label_style);
+            (void)nt_ui_button_end(s_fx.ctx);
+        }
+    }
+    s_fx.ctx->inspector_selected_id = nt_ui_id("bulk_btn_0");
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: full surface. */
+    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    CLAY({.id = CLAY_ID("bulk_root"), .layout = {.padding = CLAY_PADDING_ALL(20), .childGap = 8}, .backgroundColor = {30, 30, 30, 255}}) {
+        for (int i = 0; i < 20; ++i) {
+            char name[24];
+            (void)snprintf(name, sizeof name, "bulk_btn_%d", i);
+            nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id(name), s_fx.atlas.handle, &s_btn_style, true);
+            nt_ui_label(s_fx.ctx, NULL, "X", &s_label_style);
+            (void)nt_ui_button_end(s_fx.ctx);
+        }
+    }
+    nt_ui_end(s_fx.ctx);
+
+    Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
+    TEST_ASSERT_NOT_NULL(arr->internalArray);
+
+    enum { PIPE_NONE = 0, PIPE_SPRITE = 1, PIPE_TEXT = 2 };
+    int prev_pipe = PIPE_NONE;
+    uint32_t alternations = 0U;
+    uint32_t inside_cmd_count = 0U;
+    for (int32_t i = 0; i < arr->length; ++i) {
+        const Clay_RenderCommand *cc = &arr->internalArray[i];
+        int pipe = PIPE_NONE;
+        switch (cc->commandType) {
+        case CLAY_RENDER_COMMAND_TYPE_RECTANGLE:
+        case CLAY_RENDER_COMMAND_TYPE_BORDER:
+        case CLAY_RENDER_COMMAND_TYPE_IMAGE:
+            pipe = PIPE_SPRITE;
+            break;
+        case CLAY_RENDER_COMMAND_TYPE_TEXT:
+            pipe = PIPE_TEXT;
+            break;
+        default:
+            prev_pipe = PIPE_NONE;
+            continue;
+        }
+        if (cc->boundingBox.x < panel_left_x) {
+            prev_pipe = PIPE_NONE;
+            continue;
+        }
+        inside_cmd_count++;
+        if (prev_pipe != PIPE_NONE && prev_pipe != pipe) {
+            alternations++;
+        }
+        prev_pipe = pipe;
+    }
+
+    TEST_ASSERT_GREATER_THAN_UINT32(50U, inside_cmd_count);
+
+    char msg[200];
+    (void)snprintf(msg, sizeof msg, "inspector RECT<->TEXT alternations (bulk 20-row scene): %u (cap 60). cmd_count=%u. STRATEGY A scaling regression?", alternations, inside_cmd_count);
+    /* 60 cap = 20 rows * ~2 alternations/row + ~20 for header/info-pane.
+     * Pre-fix measurement on the same scene: 120 alternations / 344 cmds.
+     * Post-fix: 44 / 237 (63% alternation reduction). */
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(60U, alternations, msg);
+}
+
 /* ---- Test 15y: viewport hover is TRANSFORM-AWARE via debug_zones scan ----
  *
  * Phase 56 ext fix (CHUNK B): Clay's pointerOverIds is axis-aligned in layout
@@ -1812,6 +2025,15 @@ int main(void) {
      * NT_UI_LAYER_DEBUG_PANEL (root + inner) or HIGHLIGHT (floating rect).
      * No layer-0 leak. */
     RUN_TEST(test_inspector_inner_emits_carry_debug_layer);
+    /* STRATEGY A perf pin: per-row pill backgrounds dropped; RECT/TEXT
+     * alternations inside the panel footprint capped at 20 (pre-fix ~50,
+     * each row contributed ~6 alternations from radius/cfg/widget/layer pill
+     * backgrounds). */
+    RUN_TEST(test_inspector_alternations_capped_after_strategy_a);
+    /* STRATEGY A scaling pin: 20-row demo-shaped scene stays under 60
+     * alternations. Validates linear scaling of the per-row saving (each
+     * row contributes ~2 alternations rather than ~6). */
+    RUN_TEST(test_inspector_alternations_bulk_scene_after_strategy_a);
     RUN_TEST(test_inspector_inactive_no_interception);
     return UNITY_END();
 }

@@ -1102,59 +1102,50 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                         }
                         break;
                     }
+                    /* Phase 56 ext perf (STRATEGY A, reduces ~209 draw calls on
+                     * open inspector to <=~80): pill BACKGROUNDS dropped. Pre-fix
+                     * each row emitted 3-5 (rect-bg + colored text) pairs:
+                     * radius / per-config / widget / layer. The walker flushes the
+                     * sprite pipeline on every RECT->TEXT boundary
+                     * (engine/ui/nt_ui.c::prep_sprite_dispatch + TEXT branch's
+                     * sprite_renderer_flush), so each pair cost ~2 draw calls.
+                     * The pill visual identity is preserved by rendering the
+                     * label TEXT in the pill's color (orange-ish for SHARED-radius,
+                     * per-config color for FLOATING/CLIP/etc., the widget def's
+                     * pill_color for the engine widget tag, CDV_COLOR_3 for the
+                     * layer column). The color swatch RECT in the inline display
+                     * is kept -- it is the only direct visual sample of the
+                     * widget's background color and dropping it would defeat the
+                     * point. Result: per-row alternations drop from ~6 to ~2
+                     * (row_bg + swatch + a long T...T run). Pin:
+                     * test_inspector_alternations_capped_after_strategy_a. */
                     for (int32_t elementConfigIndex = 0; elementConfigIndex < currentElement->elementConfigs.length; ++elementConfigIndex) {
                         Clay_ElementConfig *elementConfig = Clay__ElementConfigArraySlice_Get(&currentElement->elementConfigs, elementConfigIndex);
                         if (elementConfig->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
-                            const Clay_Color labelColor = {243, 134, 48, 90};
+                            /* Radius marker -- orange-ish text (same hue as the pre-fix bg pill),
+                             * no rect background. The label fontSize stays at 16 so the row
+                             * vertical extent matches the rest. */
                             Clay_CornerRadius radius = elementConfig->config.sharedElementConfig->cornerRadius;
-                            /* "Color" pill replaced by the inline swatch + hex
-                             * above. Radius pill kept verbatim -- it's still a
-                             * useful marker for slice9 / rounded panels. */
                             if (radius.bottomLeft > 0) {
-                                CLAY({.layout = {.padding = {8, 8, 2, 2}},
-                                      .backgroundColor = labelColor,
-                                      .userData = debug_data,
-                                      .cornerRadius = CLAY_CORNER_RADIUS(4),
-                                      .border = {.color = labelColor, .width = {1, 1, 1, 1, 0}}}) {
-                                    CLAY_TEXT(CLAY_STRING("Radius"), CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 16, .userData = debug_data}));
-                                }
+                                CLAY_TEXT(CLAY_STRING("Radius"), CLAY_TEXT_CONFIG({.textColor = {243, 134, 48, 255}, .fontSize = 16, .userData = debug_data}));
                             }
                             continue;
                         }
                         Clay_Color config_color = cdv_config_color((uint8_t)elementConfig->type);
-                        Clay_Color backgroundColor = config_color;
-                        backgroundColor.a = 90;
                         const char *labelStr = cdv_config_label((uint8_t)elementConfig->type);
-                        CLAY({.layout = {.padding = {8, 8, 2, 2}},
-                              .backgroundColor = backgroundColor,
-                              .userData = debug_data,
-                              .cornerRadius = CLAY_CORNER_RADIUS(4),
-                              .border = {.color = config_color, .width = {1, 1, 1, 1, 0}}}) {
-                            CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(labelStr), .chars = labelStr}),
-                                      CLAY_TEXT_CONFIG({.textColor = offscreen ? CDV_COLOR_3 : CDV_COLOR_4, .fontSize = 16, .userData = debug_data}));
-                        }
+                        /* Config-type label in the config's hue, no rect background. */
+                        CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(labelStr), .chars = labelStr}), CLAY_TEXT_CONFIG({.textColor = config_color, .fontSize = 16, .userData = debug_data}));
                     }
-                    /* Engine extension columns: widget descriptor pill + layer cell.
-                     * Pill background uses the descriptor's pill_color directly
-                     * (verbatim Clay convention: pill background = descriptor color
-                     * with full opacity, border = same color). */
+                    /* Engine widget descriptor name in the descriptor's pill_color hue, no rect. */
                     if (wdef != NULL && wdef->name != NULL) {
                         Clay_Color wbg = cdv_widget_color_from_packed(wdef->pill_color);
-                        CLAY({.layout = {.padding = {8, 8, 2, 2}},
-                              .backgroundColor = wbg,
-                              .userData = debug_data,
-                              .cornerRadius = CLAY_CORNER_RADIUS(4),
-                              .border = {.color = wbg, .width = {1, 1, 1, 1, 0}}}) {
-                            CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(wdef->name), .chars = wdef->name}),
-                                      CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16, .userData = debug_data}));
-                        }
+                        CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(wdef->name), .chars = wdef->name}), CLAY_TEXT_CONFIG({.textColor = wbg, .fontSize = 16, .userData = debug_data}));
                     }
-                    /* Layer cell -- "L:N" or "-". */
+                    /* Layer cell -- "L:N". No rect background or border; the L:N
+                     * label reads as a column tag on its own. */
                     if (layer >= 0) {
-                        CLAY({.layout = {.padding = {6, 6, 2, 2}}, .userData = debug_data, .border = {.color = CDV_COLOR_3, .width = {1, 1, 1, 1, 0}}, .cornerRadius = CLAY_CORNER_RADIUS(4)}) {
-                            CLAY_TEXT(CLAY_STRING("L:"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16, .userData = debug_data}));
-                            CLAY_TEXT(cdv_int_to_string(layer), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16, .userData = debug_data}));
-                        }
+                        CLAY_TEXT(CLAY_STRING("L:"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16, .userData = debug_data}));
+                        CLAY_TEXT(cdv_int_to_string(layer), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16, .userData = debug_data}));
                     }
                 }
             } /* if (has_identity) */
@@ -1645,21 +1636,15 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                      * function header. */
                     for (int32_t cfgIdx = 0; cfgIdx < selectedItem->layoutElement->elementConfigs.length; ++cfgIdx) {
                         Clay_ElementConfig *elementConfig = Clay__ElementConfigArraySlice_Get(&selectedItem->layoutElement->elementConfigs, cfgIdx);
-                        /* Header pill (mirror of Clay__RenderDebugViewElementConfigHeader). */
+                        /* Phase 56 ext perf (STRATEGY A): header pill background +
+                         * border dropped -- label is rendered in the config color
+                         * directly. The padded row container stays so vertical
+                         * spacing matches the rest of the info pane. */
                         Clay_Color hdr_color = cdv_config_color((uint8_t)elementConfig->type);
-                        Clay_Color hdr_bg = hdr_color;
-                        hdr_bg.a = 90;
                         const char *hdr_label = cdv_config_label((uint8_t)elementConfig->type);
                         CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(CDV_OUTER_PADDING), .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
                               .userData = debug_data}) {
-                            CLAY({.layout = {.padding = {8, 8, 2, 2}},
-                                  .backgroundColor = hdr_bg,
-                                  .userData = debug_data,
-                                  .cornerRadius = CLAY_CORNER_RADIUS(4),
-                                  .border = {.color = hdr_color, .width = {1, 1, 1, 1, 0}}}) {
-                                CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(hdr_label), .chars = hdr_label}),
-                                          CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16, .userData = debug_data}));
-                            }
+                            CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(hdr_label), .chars = hdr_label}), CLAY_TEXT_CONFIG({.textColor = hdr_color, .fontSize = 16, .userData = debug_data}));
                         }
                         if (elementConfig->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
                             Clay_SharedElementConfig *sharedConfig = elementConfig->config.sharedElementConfig;
