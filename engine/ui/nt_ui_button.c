@@ -3,7 +3,6 @@
 #include <math.h>
 #include <string.h>
 
-#include "atlas/nt_atlas.h"
 #include "core/nt_assert.h"
 #include "memory/nt_mem_scratch.h"
 #include "resource/nt_resource.h"
