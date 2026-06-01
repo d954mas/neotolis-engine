@@ -45,9 +45,10 @@ enum {
 };
 // #endregion
 
-/* Inspector sidebar width: NT_UI_INSPECTOR_PANEL_WIDTH lives in nt_ui_internal.h
- * (shared with nt_ui_inspector.c's post-walk overlay clip). Verbatim Clay
- * debug-view default (clay.h:3113-3122). */
+/* Inspector sizing (panel width / row height / font size / outer padding /
+ * indent width): ctx->inspector_metrics (REVIEW-2 P3-1, runtime tunable via
+ * nt_ui_inspector_set_metrics). Defaults match the verbatim Clay debug-view
+ * (clay.h:3113-3122). */
 
 // #region module_state
 /* Only one ctx may be in-frame at a time; nt_ui_begin asserts NULL on entry. */
@@ -172,6 +173,14 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     nt_ui_context_t *ctx = (nt_ui_context_t *)arena;
     memset(ctx, 0, sizeof(*ctx));
 
+    /* Phase 56 ext (REVIEW-2 P3-1): inspector sizing defaults. Memset to 0
+     * would set panel_width to 0 which trips the > 0 invariant in every
+     * consumer (overlay scissor produces negative width, Clay SIZING_FIXED
+     * collapses to 0). Initialize to the documented defaults so an
+     * inspector that is activated without an explicit set_metrics call
+     * looks identical to the pre-fix hardcoded shape. */
+    ctx->inspector_metrics = NT_UI_INSPECTOR_METRICS_DEFAULT;
+
     const size_t ctx_size = NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE);
     /* Layout: [ctx struct][markers][Clay arena]. */
     ctx->max_elements = desc->max_elements;
@@ -286,14 +295,15 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     const nt_pointer_t *primary = &pointers[0];
 
     /* Phase 56 ext fix: per-frame "pointer is over the inspector sidebar" gate.
-     * The sidebar is a right-attached floating panel NT_UI_INSPECTOR_PANEL_WIDTH
-     * wide; the same coord check is what the inspector's emit_layout uses to
-     * decide whether to highlight a sidebar row (line ~1005). Computing it here
-     * gates nt_ui_get_interaction_padded so user widgets behind the sidebar do
-     * NOT register hover/press/click when the sidebar visually consumes the
-     * click. Frame-1 safe (no layout solve required -- pure coord check). */
+     * The sidebar is a right-attached floating panel
+     * ctx->inspector_metrics.panel_width wide (REVIEW-2 P3-1, runtime tunable);
+     * the same coord check is what the inspector's emit_layout uses to decide
+     * whether to highlight a sidebar row (line ~1005). Computing it here gates
+     * nt_ui_get_interaction_padded so user widgets behind the sidebar do NOT
+     * register hover/press/click when the sidebar visually consumes the click.
+     * Frame-1 safe (no layout solve required -- pure coord check). */
     ctx->inspector_pointer_consumed = false;
-    if (ctx->inspector_active && primary->x >= (screen_w - (float)NT_UI_INSPECTOR_PANEL_WIDTH)) {
+    if (ctx->inspector_active && primary->x >= (screen_w - ctx->inspector_metrics.panel_width)) {
         ctx->inspector_pointer_consumed = true;
     }
 
@@ -673,12 +683,12 @@ static const Clay_Color CDV_COLOR_3 = {141, 133, 135, 255};
 static const Clay_Color CDV_COLOR_4 = {238, 226, 231, 255};
 static const Clay_Color CDV_COLOR_SELECTED_ROW = {102, 80, 78, 255};
 static const Clay_Color CDV_HIGHLIGHT_COLOR = {168, 66, 28, 100}; /* Clay__debugViewHighlightColor */
-#define CDV_ROW_HEIGHT 30
-#define CDV_OUTER_PADDING 10
-#define CDV_INDENT_WIDTH 16
-/* Inspector sidebar width: NT_UI_INSPECTOR_PANEL_WIDTH (nt_ui_internal.h, CHUNK A
- * dedup). Shared between nt_ui.c (this verbatim port + nt_ui_begin's pointer-
- * consumed gate) and nt_ui_inspector.c (post-walk overlay clip). */
+/* Phase 56 ext (REVIEW-2 P3-1): the verbatim Clay debug-view literals
+ * (CDV_ROW_HEIGHT 30, CDV_OUTER_PADDING 10, CDV_INDENT_WIDTH 16) and the
+ * shared sidebar width NT_UI_INSPECTOR_PANEL_WIDTH moved to runtime config
+ * on ctx->inspector_metrics. Each emit function caches local consts of the
+ * correct type at entry and uses those throughout. Defaults preserved
+ * verbatim in NT_UI_INSPECTOR_METRICS_DEFAULT. */
 
 /* Phase 56 ext fix (viewport-hover propagation): set of Clay element ids the
  * inspector itself owns -- the sidebar panel, its scroll/content wrappers, the
@@ -919,6 +929,13 @@ typedef struct {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity,misc-no-recursion)
 static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, int32_t initial_roots_length, int32_t highlighted_row_index) {
     Clay_Context *context = ctx->clay;
+    /* Phase 56 ext (REVIEW-2 P3-1): runtime metrics cached at entry. Pre-fix
+     * these were file-scope #defines (CDV_ROW_HEIGHT 30, CDV_INDENT_WIDTH 16,
+     * literal .fontSize 16). Casts match the Clay struct types: Clay_Padding
+     * uses uint16_t; CLAY_TEXT_CONFIG .fontSize is uint16_t. */
+    const float row_h = ctx->inspector_metrics.row_height;
+    const uint16_t font_sz = ctx->inspector_metrics.font_size;
+    const uint16_t indent_w = (uint16_t)ctx->inspector_metrics.indent_width;
     /* Private DFS stack -- avoids mutating Clay's reusableElementIndexBuffer
      * which is otherwise touched by Clay's own layout solve. Cap matches
      * Clay's headroom (max element depth = 256). At-cap the walk stops
@@ -932,7 +949,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
      * close them on the second-visit pass either. Mirrors dfs_visited shape. */
     bool dfs_opened_wrappers[CDV_DFS_CAP];
     int32_t dfs_length = 0;
-    Clay__DebugView_ScrollViewItemLayoutConfig = (Clay_LayoutConfig){.sizing = {.height = CLAY_SIZING_FIXED(CDV_ROW_HEIGHT)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}};
+    Clay__DebugView_ScrollViewItemLayoutConfig = (Clay_LayoutConfig){.sizing = {.height = CLAY_SIZING_FIXED(row_h)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}};
     cdv_layout_data_t layoutData = {0};
     uint32_t highlightedElementId = 0U;
     /* Phase 56 ext: every inspector-owned CLAY/CLAY_TEXT block must carry a
@@ -971,9 +988,10 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
         dfs_opened_wrappers[dfs_length] = false;
         dfs_length++;
         if (rootIndex > 0) {
-            CLAY({.id = CLAY_IDI("ntInsp_EmptyRowOuter", rootIndex), .layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}, .padding = {CDV_INDENT_WIDTH / 2, 0, 0, 0}}, .userData = debug_bg_data}) {
+            CLAY(
+                {.id = CLAY_IDI("ntInsp_EmptyRowOuter", rootIndex), .layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}, .padding = {(uint16_t)(indent_w / 2U), 0, 0, 0}}, .userData = debug_bg_data}) {
                 CLAY({.id = CLAY_IDI("ntInsp_EmptyRow", rootIndex),
-                      .layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED((float)CDV_ROW_HEIGHT)}},
+                      .layout = {.sizing = {.width = CLAY_SIZING_GROW(0), .height = CLAY_SIZING_FIXED(row_h)}},
                       .userData = debug_bg_data,
                       .border = {.color = CDV_COLOR_3, .width = {.top = 1}}}) {}
             }
@@ -1066,7 +1084,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                     }
                     if (offscreen) {
                         CLAY({.layout = {.padding = {8, 8, 2, 2}}, .userData = debug_bg_data, .border = {.color = CDV_COLOR_3, .width = {1, 1, 1, 1, 0}}}) {
-                            CLAY_TEXT(CLAY_STRING("Offscreen"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16, .userData = debug_text_data}));
+                            CLAY_TEXT(CLAY_STRING("Offscreen"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .userData = debug_text_data}));
                         }
                     }
                     /* Phase 56 ext fix: when stringId is empty (CLAY_IDI / no-id /
@@ -1076,10 +1094,10 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                      * tree. Buffered via cdv_hex_id_to_string for stable Clay_String
                      * pointers (same ring-buffer fix as the layer column). */
                     if (idString.length > 0) {
-                        CLAY_TEXT(idString, offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16, .userData = debug_text_data}) : debug_text_name_cfg);
+                        CLAY_TEXT(idString, offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .userData = debug_text_data}) : debug_text_name_cfg);
                     } else {
                         CLAY_TEXT(cdv_hex_id_to_string(currentElement->id),
-                                  offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16, .userData = debug_text_data}) : debug_text_name_cfg);
+                                  offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .userData = debug_text_data}) : debug_text_name_cfg);
                     }
                     /* Phase 56 ext (CHUNK C, UX fix #5): inline SHARED bg-color
                      * swatch + hex string in the row's identification area --
@@ -1104,7 +1122,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                          * with the id text. Border color matches the row's
                          * subtle frame style. fontSize 14 keeps the row's
                          * vertical extent unchanged from the verbatim shape. */
-                        CLAY({.layout = {.sizing = {.height = CLAY_SIZING_FIXED(CDV_ROW_HEIGHT - 8)}, .childGap = 4, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}, .userData = debug_bg_data}) {
+                        CLAY({.layout = {.sizing = {.height = CLAY_SIZING_FIXED(row_h - 8.0F)}, .childGap = 4, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}, .userData = debug_bg_data}) {
                             CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}},
                                   .backgroundColor = bg,
                                   .userData = debug_bg_data,
@@ -1139,25 +1157,26 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                              * vertical extent matches the rest. */
                             Clay_CornerRadius radius = elementConfig->config.sharedElementConfig->cornerRadius;
                             if (radius.bottomLeft > 0) {
-                                CLAY_TEXT(CLAY_STRING("Radius"), CLAY_TEXT_CONFIG({.textColor = {243, 134, 48, 255}, .fontSize = 16, .userData = debug_text_data}));
+                                CLAY_TEXT(CLAY_STRING("Radius"), CLAY_TEXT_CONFIG({.textColor = {243, 134, 48, 255}, .fontSize = font_sz, .userData = debug_text_data}));
                             }
                             continue;
                         }
                         Clay_Color config_color = cdv_config_color((uint8_t)elementConfig->type);
                         const char *labelStr = cdv_config_label((uint8_t)elementConfig->type);
                         /* Config-type label in the config's hue, no rect background. */
-                        CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(labelStr), .chars = labelStr}), CLAY_TEXT_CONFIG({.textColor = config_color, .fontSize = 16, .userData = debug_text_data}));
+                        CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(labelStr), .chars = labelStr}),
+                                  CLAY_TEXT_CONFIG({.textColor = config_color, .fontSize = font_sz, .userData = debug_text_data}));
                     }
                     /* Engine widget descriptor name in the descriptor's pill_color hue, no rect. */
                     if (wdef != NULL && wdef->name != NULL) {
                         Clay_Color wbg = cdv_widget_color_from_packed(wdef->pill_color);
-                        CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(wdef->name), .chars = wdef->name}), CLAY_TEXT_CONFIG({.textColor = wbg, .fontSize = 16, .userData = debug_text_data}));
+                        CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(wdef->name), .chars = wdef->name}), CLAY_TEXT_CONFIG({.textColor = wbg, .fontSize = font_sz, .userData = debug_text_data}));
                     }
                     /* Layer cell -- "L:N". No rect background or border; the L:N
                      * label reads as a column tag on its own. */
                     if (layer >= 0) {
-                        CLAY_TEXT(CLAY_STRING("L:"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16, .userData = debug_text_data}));
-                        CLAY_TEXT(cdv_int_to_string(layer), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16, .userData = debug_text_data}));
+                        CLAY_TEXT(CLAY_STRING("L:"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .userData = debug_text_data}));
+                        CLAY_TEXT(cdv_int_to_string(layer), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = font_sz, .userData = debug_text_data}));
                     }
                 }
             } /* if (has_identity) */
@@ -1186,9 +1205,9 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                     highlightedElementId = currentElement->id;
                 }
                 Clay__TextElementData *textElementData = currentElement->childrenOrTextContent.textElementData;
-                Clay_TextElementConfig *rawTextConfig = offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16, .userData = debug_text_data}) : debug_text_name_cfg;
-                CLAY({.layout = {.sizing = {.height = CLAY_SIZING_FIXED(CDV_ROW_HEIGHT)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}, .userData = debug_bg_data}) {
-                    CLAY({.layout = {.sizing = {.width = CLAY_SIZING_FIXED(CDV_INDENT_WIDTH + 16)}}, .userData = debug_bg_data}) {}
+                Clay_TextElementConfig *rawTextConfig = offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .userData = debug_text_data}) : debug_text_name_cfg;
+                CLAY({.layout = {.sizing = {.height = CLAY_SIZING_FIXED(row_h)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}, .userData = debug_bg_data}) {
+                    CLAY({.layout = {.sizing = {.width = CLAY_SIZING_FIXED((float)(indent_w + 16U))}}, .userData = debug_bg_data}) {}
                     CLAY_TEXT(CLAY_STRING("\""), rawTextConfig);
                     if (textElementData != NULL) {
                         CLAY_TEXT(textElementData->text.length > 40 ? ((Clay_String){.length = 40, .chars = textElementData->text.chars}) : textElementData->text, rawTextConfig);
@@ -1208,8 +1227,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 Clay__OpenElement();
                 Clay__ConfigureOpenElement((Clay_ElementDeclaration){.layout = {.padding = {.left = 8}}, .userData = debug_bg_data});
                 Clay__OpenElement();
-                Clay__ConfigureOpenElement(
-                    (Clay_ElementDeclaration){.layout = {.padding = {.left = CDV_INDENT_WIDTH}}, .userData = debug_bg_data, .border = {.color = CDV_COLOR_3, .width = {.left = 1}}});
+                Clay__ConfigureOpenElement((Clay_ElementDeclaration){.layout = {.padding = {.left = indent_w}}, .userData = debug_bg_data, .border = {.color = CDV_COLOR_3, .width = {.left = 1}}});
                 Clay__OpenElement();
                 Clay__ConfigureOpenElement((Clay_ElementDeclaration){.layout = {.layoutDirection = CLAY_TOP_TO_BOTTOM}, .userData = debug_bg_data});
                 dfs_opened_wrappers[dfs_length - 1] = true;
@@ -1270,7 +1288,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
      * footprint (per-row wrappers, indent containers, etc.). The first id
      * that passes BOTH filters wins. */
     if (highlightedElementId == 0U && !ctx->inspector_pointer_consumed) {
-        const float panel_left_x = context->layoutDimensions.width - (float)NT_UI_INSPECTOR_PANEL_WIDTH;
+        const float panel_left_x = context->layoutDimensions.width - ctx->inspector_metrics.panel_width;
 
         /* Phase 56 ext fix (transform-aware hover): scan debug_zones FIRST.
          * Recorded zones carry the declaration-time accum stack snapshot, so
@@ -1441,7 +1459,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
  *   - close button: we still emit it (visual parity) but the click sets
  *     ctx->inspector_active = false on press inside its bounds, not Clay's
  *     debugModeEnabled (which is no longer wired).
- *   - pointer-in-debug-view check uses our panel width (NT_UI_INSPECTOR_PANEL_WIDTH)
+ *   - pointer-in-debug-view check uses our panel width (ctx->inspector_metrics.panel_width)
  *     and the 300 px info-pane reservation, same as Clay's literal constants.
  *   - the info pane is a CONDENSED but faithful version of clay.h:3477-3800
  *     (Bounding Box, Layout Direction, Sizing, Padding, Child Gap, Child
@@ -1463,6 +1481,15 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
      * writes into these buffers between emit_layout and Clay_EndLayout. */
     cdv_int_buf_cursor = 0U;
     cdv_hex_buf_cursor = 0U;
+
+    /* Phase 56 ext (REVIEW-2 P3-1): runtime metrics cached at entry. Pre-fix
+     * these were file-scope #defines + literals. row_h/font_sz are floats /
+     * uint16 to match Clay struct types; outer_pad/indent_w are uint16 for
+     * Clay_Padding. Defaults: 400 / 30 / 16 / 10 / 16 (verbatim Clay shape). */
+    const float panel_w = ctx->inspector_metrics.panel_width;
+    const float row_h = ctx->inspector_metrics.row_height;
+    const uint16_t font_sz = ctx->inspector_metrics.font_size;
+    const uint16_t outer_pad = (uint16_t)ctx->inspector_metrics.outer_padding;
 
     Clay_Context *context = ctx->clay;
     /* Lazily cache the set of inspector-owned named ids -- used by the
@@ -1493,8 +1520,8 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
      * active_layers bitmask + __builtin_ctz). */
     void *const debug_bg_data = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_BG);
     void *const debug_text_data = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_TEXT);
-    Clay_TextElementConfig *infoTextConfig = CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16, .wrapMode = CLAY_TEXT_WRAP_NONE, .userData = debug_text_data});
-    Clay_TextElementConfig *infoTitleConfig = CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16, .wrapMode = CLAY_TEXT_WRAP_NONE, .userData = debug_text_data});
+    Clay_TextElementConfig *infoTextConfig = CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = font_sz, .wrapMode = CLAY_TEXT_WRAP_NONE, .userData = debug_text_data});
+    Clay_TextElementConfig *infoTitleConfig = CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .wrapMode = CLAY_TEXT_WRAP_NONE, .userData = debug_text_data});
     Clay_ElementId scrollId = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0);
     float scrollYOffset = 0;
     bool pointerInDebugView = context->pointerInfo.position.y < context->layoutDimensions.height - 300;
@@ -1509,8 +1536,8 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
             break;
         }
     }
-    int32_t highlightedRow = pointerInDebugView ? (int32_t)((context->pointerInfo.position.y - scrollYOffset) / (float)CDV_ROW_HEIGHT) - 1 : -1;
-    if (context->pointerInfo.position.x < context->layoutDimensions.width - (float)NT_UI_INSPECTOR_PANEL_WIDTH) {
+    int32_t highlightedRow = pointerInDebugView ? (int32_t)((context->pointerInfo.position.y - scrollYOffset) / row_h) - 1 : -1;
+    if (context->pointerInfo.position.x < context->layoutDimensions.width - panel_w) {
         highlightedRow = -1;
     }
     cdv_layout_data_t layoutData = {0};
@@ -1518,7 +1545,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
      * engine disables Clay debug mode so the root is full-width and the verbatim attach
      * would land at [screen.w, screen.w + panel_w] -- entirely off-screen. */
     CLAY({.id = CLAY_ID("ntInsp_Root"),
-          .layout = {.sizing = {CLAY_SIZING_FIXED((float)NT_UI_INSPECTOR_PANEL_WIDTH), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
           .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL),
           .floating = {.zIndex = 32765,
                        .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_CENTER, .parent = CLAY_ATTACH_POINT_RIGHT_CENTER},
@@ -1526,19 +1553,19 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                        .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT},
           .border = {.color = CDV_COLOR_3, .width = {.bottom = 1}}}) {
         /* Header bar. */
-        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(CDV_ROW_HEIGHT)}, .padding = {CDV_OUTER_PADDING, CDV_OUTER_PADDING, 0, 0}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(row_h)}, .padding = {outer_pad, outer_pad, 0, 0}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
               .backgroundColor = CDV_COLOR_2,
               .userData = debug_bg_data}) {
             CLAY_TEXT(CLAY_STRING("nt_ui_inspector (Clay debug view port)"), infoTextConfig);
             CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}}, .userData = debug_bg_data}) {}
             /* Close button (verbatim shape from clay.h:3439-3447). */
             CLAY({.id = closeButtonId,
-                  .layout = {.sizing = {CLAY_SIZING_FIXED(CDV_ROW_HEIGHT - 10), CLAY_SIZING_FIXED(CDV_ROW_HEIGHT - 10)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
+                  .layout = {.sizing = {CLAY_SIZING_FIXED(row_h - 10.0F), CLAY_SIZING_FIXED(row_h - 10.0F)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                   .backgroundColor = {217, 91, 67, 80},
                   .userData = debug_bg_data,
                   .cornerRadius = CLAY_CORNER_RADIUS(4),
                   .border = {.color = {217, 91, 67, 255}, .width = {1, 1, 1, 1, 0}}}) {
-                CLAY_TEXT(CLAY_STRING("x"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = 16, .userData = debug_text_data}));
+                CLAY_TEXT(CLAY_STRING("x"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = font_sz, .userData = debug_text_data}));
             }
         }
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(1)}}, .backgroundColor = CDV_COLOR_3, .userData = debug_bg_data}) {}
@@ -1554,8 +1581,8 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                       .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
                       .userData = debug_bg_data,
                       .floating = {.zIndex = 32766, .pointerCaptureMode = CLAY_POINTER_CAPTURE_MODE_PASSTHROUGH, .attachTo = CLAY_ATTACH_TO_PARENT, .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT}}) {
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = {CDV_OUTER_PADDING, CDV_OUTER_PADDING, 0, 0}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
-                          .userData = debug_bg_data}) {
+                    CLAY(
+                        {.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}, .padding = {outer_pad, outer_pad, 0, 0}, .layoutDirection = CLAY_TOP_TO_BOTTOM}, .userData = debug_bg_data}) {
                         layoutData = cdv_render_layout_elements_list(ctx, (int32_t)initialRootsLength, highlightedRow);
                     }
                 }
@@ -1572,9 +1599,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                         rowColor.g *= 1.25F;
                         rowColor.b *= 1.25F;
                     }
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(CDV_ROW_HEIGHT)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
-                          .backgroundColor = rowColor,
-                          .userData = debug_bg_data}) {}
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(row_h)}, .layoutDirection = CLAY_TOP_TO_BOTTOM}, .backgroundColor = rowColor, .userData = debug_bg_data}) {}
                 }
             }
         }
@@ -1587,9 +1612,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                       .userData = debug_bg_data,
                       .clip = {.vertical = true, .childOffset = Clay_GetScrollOffset()},
                       .border = {.color = CDV_COLOR_3, .width = {.betweenChildren = 1}}}) {
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(CDV_ROW_HEIGHT + 8)},
-                                     .padding = {CDV_OUTER_PADDING, CDV_OUTER_PADDING, 0, 0},
-                                     .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIXED(row_h + 8.0F)}, .padding = {outer_pad, outer_pad, 0, 0}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
                           .userData = debug_bg_data}) {
                         CLAY_TEXT(CLAY_STRING("Layout Config"), infoTextConfig);
                         CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}}, .userData = debug_bg_data}) {}
@@ -1597,7 +1620,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                             CLAY_TEXT(selectedItem->elementId.stringId, infoTitleConfig);
                         }
                     }
-                    Clay_Padding attributeConfigPadding = {CDV_OUTER_PADDING, CDV_OUTER_PADDING, 8, 8};
+                    Clay_Padding attributeConfigPadding = {outer_pad, outer_pad, 8, 8};
                     CLAY({.layout = {.padding = attributeConfigPadding, .childGap = 8, .layoutDirection = CLAY_TOP_TO_BOTTOM}, .userData = debug_bg_data}) {
                         /* Engine extension rows -- Widget type + Layer.
                          * Surfaced at the TOP of the info pane so the user
@@ -1676,10 +1699,9 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                          * spacing matches the rest of the info pane. */
                         Clay_Color hdr_color = cdv_config_color((uint8_t)elementConfig->type);
                         const char *hdr_label = cdv_config_label((uint8_t)elementConfig->type);
-                        CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(CDV_OUTER_PADDING), .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}},
-                              .userData = debug_bg_data}) {
+                        CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(outer_pad), .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}, .userData = debug_bg_data}) {
                             CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(hdr_label), .chars = hdr_label}),
-                                      CLAY_TEXT_CONFIG({.textColor = hdr_color, .fontSize = 16, .userData = debug_text_data}));
+                                      CLAY_TEXT_CONFIG({.textColor = hdr_color, .fontSize = font_sz, .userData = debug_text_data}));
                         }
                         if (elementConfig->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
                             Clay_SharedElementConfig *sharedConfig = elementConfig->config.sharedElementConfig;
@@ -1690,7 +1712,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                                  * the pane read the same color at a glance. */
                                 CLAY_TEXT(CLAY_STRING("Background Color"), infoTitleConfig);
                                 CLAY({.layout = {.childGap = 8, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}, .userData = debug_bg_data}) {
-                                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(CDV_ROW_HEIGHT - 8), CLAY_SIZING_FIXED(CDV_ROW_HEIGHT - 8)}},
+                                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(row_h - 8.0F), CLAY_SIZING_FIXED(row_h - 8.0F)}},
                                           .backgroundColor = sharedConfig->backgroundColor,
                                           .userData = debug_bg_data,
                                           .cornerRadius = CLAY_CORNER_RADIUS(4),

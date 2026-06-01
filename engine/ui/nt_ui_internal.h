@@ -11,6 +11,7 @@
 #include "input/nt_input.h"
 #include "ui/nt_ui.h"
 #include "ui/nt_ui_anim.h"
+#include "ui/nt_ui_inspector.h"
 
 /* Phase 56 ext: hit-zone debug overlay (engine/ui/nt_ui_debug.{h,c}).
  * Fixed compile-time cap matches the anim cache budget shape; at-cap is
@@ -41,13 +42,14 @@ _Static_assert((NT_UI_WIDGET_REGISTRY_CAP & (NT_UI_WIDGET_REGISTRY_CAP - 1)) == 
 #define NT_UI_INSPECTOR_COLLAPSED_CAP 128
 #endif
 
-/* Phase 56 ext (CHUNK A dedup): inspector sidebar panel width. Shared between
- * nt_ui.c (the Clay debug-view port emits the panel at this width and gates
- * nt_ui_get_interaction_padded on this footprint) and nt_ui_inspector.c (the
- * post-walk overlay clips its highlight rect against panel_left_x). One source
- * of truth so the two sites can never drift. Verbatim Clay debug-view default
- * (clay.h:3113-3122). */
-#define NT_UI_INSPECTOR_PANEL_WIDTH 400
+/* Phase 56 ext (REVIEW-2 P3-1): inspector sidebar width / row height / font
+ * size / paddings live on ctx->inspector_metrics. The compile-time
+ * NT_UI_INSPECTOR_PANEL_WIDTH macro (and the CDV_* siblings in nt_ui.c) were
+ * removed in favor of nt_ui_inspector_metrics_t -- consume the values via
+ * ctx->inspector_metrics.{panel_width, row_height, font_size, outer_padding,
+ * indent_width} in nt_ui.c (Clay debug-view emit + input-consume gate) and
+ * nt_ui_inspector.c (post-walk overlay scissor). Defaults preserved 1:1 in
+ * NT_UI_INSPECTOR_METRICS_DEFAULT (nt_ui_inspector.c). */
 
 typedef struct {
     uint32_t id;                   /* 0 = slot empty */
@@ -212,6 +214,14 @@ struct nt_ui_context {
      * (set_active(false)). */
     uint32_t inspector_collapsed_ids[NT_UI_INSPECTOR_COLLAPSED_CAP];
     uint32_t inspector_collapsed_count;
+
+    /* Phase 56 ext (REVIEW-2 P3-1): runtime inspector sizing. Read by both
+     * the verbatim Clay debug-view layout emit in nt_ui.c (panel_width /
+     * row_height / font_size / outer_padding / indent_width) and the post-
+     * walk overlay's GPU scissor in nt_ui_inspector.c (panel_width). Default-
+     * initialized in nt_ui_create_context to NT_UI_INSPECTOR_METRICS_DEFAULT;
+     * games override via nt_ui_inspector_set_metrics. */
+    nt_ui_inspector_metrics_t inspector_metrics;
 
     Clay_Arena clay_arena;
 };

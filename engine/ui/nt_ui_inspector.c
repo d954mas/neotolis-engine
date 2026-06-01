@@ -32,6 +32,34 @@
 #include "resource/nt_resource.h"
 #include "ui/nt_ui_internal.h"
 
+// #region metrics
+/* Phase 56 ext (REVIEW-2 P3-1): default metrics preserve the previous hardcoded
+ * shape verbatim -- panel_width 400 (NT_UI_INSPECTOR_PANEL_WIDTH), row_height
+ * 30 (CDV_ROW_HEIGHT), font_size 16 (literal in CLAY_TEXT_CONFIG sites),
+ * outer_padding 10 (CDV_OUTER_PADDING), indent_width 16 (CDV_INDENT_WIDTH).
+ * A game with NO call to nt_ui_inspector_set_metrics sees the identical
+ * inspector that shipped pre-fix. */
+const nt_ui_inspector_metrics_t NT_UI_INSPECTOR_METRICS_DEFAULT = {
+    .panel_width = 400.0F,
+    .row_height = 30.0F,
+    .font_size = 16U,
+    .outer_padding = 10U,
+    .indent_width = 16U,
+};
+
+/* 5 sequential NT_ASSERTs trip the cognitive-complexity threshold; each is a
+ * straight precondition check on a distinct field. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_metrics_t *metrics) {
+    NT_ASSERT(ctx != NULL && "nt_ui_inspector_set_metrics: ctx must be non-NULL");
+    NT_ASSERT(metrics != NULL && "nt_ui_inspector_set_metrics: metrics must be non-NULL");
+    NT_ASSERT(metrics->panel_width > 0.0F && "nt_ui_inspector_set_metrics: panel_width must be > 0");
+    NT_ASSERT(metrics->row_height > 0.0F && "nt_ui_inspector_set_metrics: row_height must be > 0");
+    NT_ASSERT(metrics->font_size > 0U && "nt_ui_inspector_set_metrics: font_size must be > 0");
+    ctx->inspector_metrics = *metrics;
+}
+// #endregion
+
 // #region toggle + getters
 void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_set_active: ctx must be non-NULL");
@@ -82,8 +110,11 @@ static const float s_identity_mat[16] = {
  * screen_h] and disables it afterwards -- restoring the disabled state the
  * walker left.
  *
- * NT_UI_INSPECTOR_PANEL_WIDTH lives in nt_ui_internal.h (CHUNK A dedup) and is
- * shared with the verbatim Clay debug-view port in nt_ui.c.
+ * Phase 56 ext (REVIEW-2 P3-1): panel width comes from
+ * ctx->inspector_metrics.panel_width (set via nt_ui_inspector_set_metrics,
+ * default 400). The same metric drives the Clay debug-view emit in nt_ui.c
+ * AND the input-consume gate in nt_ui_begin -- one source of truth so the
+ * three sites can never drift.
  *
  * Replaces the previous CPU-clip implementation: every overlay_emit_rect call
  * used to clamp its width against panel_left_x in two paths (axis-aligned
@@ -164,8 +195,8 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
      * transformed path had NO clipping -- rotated/scaled highlight bled OVER
      * the sidebar.
      *
-     * Panel is a right-attached float of width NT_UI_INSPECTOR_PANEL_WIDTH at
-     * layout-space origin, so its left edge sits at viewport.x + viewport.w -
+     * Panel is a right-attached float of width ctx->inspector_metrics.panel_width
+     * at layout-space origin, so its left edge sits at viewport.x + viewport.w -
      * panel_w in the same logical space the overlay draws into. Scissor rect
      * [0, 0, panel_left_x, screen_h] (logical, top-left convention -- the
      * shared logical-to-physical helper handles Y-flip + DIRECT/SCALED).
@@ -173,7 +204,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
      * The walker tore down its scissor stack on exit (engine/ui/nt_ui.c
      * scissor_pop:depth==0 -> set_scissor_enabled(false)), so the prior state
      * is "disabled" -- we restore to "disabled" at every exit path below. */
-    const float panel_left_x = vx + vw - (float)NT_UI_INSPECTOR_PANEL_WIDTH;
+    const float panel_left_x = vx + vw - ctx->inspector_metrics.panel_width;
     const int scissor_x = (int)vx;
     const int scissor_y = (int)vy;
     const int scissor_w = (int)(panel_left_x - vx);

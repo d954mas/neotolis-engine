@@ -52,14 +52,40 @@ void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on);
 bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx);
 
 /* True for the current frame iff the inspector is active AND the pointer is
- * inside the sidebar footprint (right-attached, NT_UI_INSPECTOR_PANEL_WIDTH wide). The
- * engine already uses this internally to gate nt_ui_get_interaction[_padded]
- * so widgets behind the sidebar do NOT register hover/press/click; games that
- * roll their OWN interactive zones (not via nt_ui_get_interaction) can query
- * this to suppress their own click logic when the inspector is taking input.
- * Returns false when the inspector is inactive. Computed in nt_ui_begin from
- * the primary pointer position; the value is stable across the frame. */
+ * inside the sidebar footprint (right-attached, ctx->inspector_metrics.panel_width
+ * wide). The engine already uses this internally to gate
+ * nt_ui_get_interaction[_padded] so widgets behind the sidebar do NOT register
+ * hover/press/click; games that roll their OWN interactive zones (not via
+ * nt_ui_get_interaction) can query this to suppress their own click logic
+ * when the inspector is taking input. Returns false when the inspector is
+ * inactive. Computed in nt_ui_begin from the primary pointer position; the
+ * value is stable across the frame. */
 bool nt_ui_inspector_pointer_consumed(const nt_ui_context_t *ctx);
+
+/* Phase 56 ext (REVIEW-2 P3-1): runtime-tunable inspector sizing. Pre-fix the
+ * sidebar width, row height, font size, padding, and indent were hardcoded as
+ * file-scope #defines (NT_UI_INSPECTOR_PANEL_WIDTH 400, CDV_ROW_HEIGHT 30,
+ * CDV_OUTER_PADDING 10, CDV_INDENT_WIDTH 16, .fontSize = 16 literal). Games
+ * targeting different screen sizes (mobile portrait, ultrawide, etc.) or with
+ * different DPI scaling could not adjust. The struct is consumed by both the
+ * verbatim Clay debug-view layout emit AND the post-walk overlay's GPU scissor
+ * (panel_width). NT_UI_INSPECTOR_METRICS_DEFAULT preserves the previous
+ * hardcoded values exactly. nt_ui_create_context initializes ctx with the
+ * default; nt_ui_inspector_set_metrics overrides at any time (outside or
+ * inside a frame -- the new values take effect from the next emit_layout). */
+typedef struct nt_ui_inspector_metrics_t {
+    float panel_width;     /* sidebar width in layout pixels (default 400) */
+    float row_height;      /* element-row height (default 30) */
+    uint16_t font_size;    /* text font size for all inspector labels (default 16) */
+    uint8_t outer_padding; /* panel content outer padding (default 10) */
+    uint8_t indent_width;  /* per-depth indent step (default 16) */
+} nt_ui_inspector_metrics_t;
+
+extern const nt_ui_inspector_metrics_t NT_UI_INSPECTOR_METRICS_DEFAULT;
+
+/* Replaces ctx->inspector_metrics with *metrics. Asserts ctx and metrics
+ * non-NULL, asserts panel_width / row_height / font_size strictly > 0. */
+void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_metrics_t *metrics);
 
 /* Engine-internal: called by nt_ui_end if the inspector is active. Emits the
  * verbatim Clay debug view as CLAY({...}) blocks INSIDE the in-progress

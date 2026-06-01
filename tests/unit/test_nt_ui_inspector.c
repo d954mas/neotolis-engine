@@ -2240,6 +2240,151 @@ static void test_inspector_inactive_no_interception(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* ---- REVIEW-2 P3-1: runtime nt_ui_inspector_metrics_t replaces hardcoded
+ * panel_width / row_height / font_size / outer_padding / indent_width ---- */
+
+/* Pin the documented defaults (preserve pre-fix verbatim shape: 400 / 30 /
+ * 16 / 10 / 16). Any silent tweak to the default constant trips this.
+ * Unity floating-point assertions are disabled in this build, so float fields
+ * are compared via fabsf within 1e-3 tolerance. */
+static void test_inspector_metrics_default_values(void) {
+    TEST_ASSERT_TRUE(fabsf(NT_UI_INSPECTOR_METRICS_DEFAULT.panel_width - 400.0F) <= 1e-3F);
+    TEST_ASSERT_TRUE(fabsf(NT_UI_INSPECTOR_METRICS_DEFAULT.row_height - 30.0F) <= 1e-3F);
+    TEST_ASSERT_EQUAL_UINT16(16U, NT_UI_INSPECTOR_METRICS_DEFAULT.font_size);
+    TEST_ASSERT_EQUAL_UINT8(10U, NT_UI_INSPECTOR_METRICS_DEFAULT.outer_padding);
+    TEST_ASSERT_EQUAL_UINT8(16U, NT_UI_INSPECTOR_METRICS_DEFAULT.indent_width);
+}
+
+/* Freshly-created ctx must come out with defaults installed (not memset 0).
+ * Pre-fix this slot didn't exist; if a future refactor reintroduces 0-init,
+ * panel_width would be 0 which trips the > 0 invariant in every consumer. */
+static void test_inspector_metrics_zero_init_uses_defaults(void) {
+    /* The fixture already created s_fx.ctx -- inspect its metrics directly. */
+    TEST_ASSERT_TRUE(fabsf(s_fx.ctx->inspector_metrics.panel_width - 400.0F) <= 1e-3F);
+    TEST_ASSERT_TRUE(fabsf(s_fx.ctx->inspector_metrics.row_height - 30.0F) <= 1e-3F);
+    TEST_ASSERT_EQUAL_UINT16(16U, s_fx.ctx->inspector_metrics.font_size);
+    TEST_ASSERT_EQUAL_UINT8(10U, s_fx.ctx->inspector_metrics.outer_padding);
+    TEST_ASSERT_EQUAL_UINT8(16U, s_fx.ctx->inspector_metrics.indent_width);
+}
+
+/* set_metrics replaces the runtime panel_width AND the value flows into the
+ * nt_ui_begin pointer-consume gate. Default 400: pointer at x=screen_w-100
+ * (= 700 on 800 wide -> inside 400 panel) is consumed. After setter changes
+ * panel_width to 200, the SAME pointer at x=700 is now OUTSIDE the panel
+ * (panel left edge moves from 400 to 600 -> 700 still inside). Use 320 to
+ * make it cleanly differ: x=420 -> in default 400 zone (400..800) but
+ * OUTSIDE the post-setter 320 zone (480..800). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_metrics_set_changes_input_consume_gate(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+
+    /* Default panel_width = 400 -> sidebar covers x=400..800. x=420 is INSIDE. */
+    nt_pointer_t p_default = make_pointer(420.0F, 100.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &p_default, 1);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_inspector_pointer_consumed(s_fx.ctx), "default 400 panel: pointer at x=420 must be consumed");
+    nt_ui_end(s_fx.ctx);
+
+    /* Shrink to 320 -> sidebar covers x=480..800. x=420 is now OUTSIDE. */
+    nt_ui_inspector_metrics_t narrow = NT_UI_INSPECTOR_METRICS_DEFAULT;
+    narrow.panel_width = 320.0F;
+    nt_ui_inspector_set_metrics(s_fx.ctx, &narrow);
+    TEST_ASSERT_TRUE(fabsf(s_fx.ctx->inspector_metrics.panel_width - 320.0F) <= 1e-3F);
+
+    nt_pointer_t p_after = make_pointer(420.0F, 100.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &p_after, 1);
+    TEST_ASSERT_FALSE_MESSAGE(nt_ui_inspector_pointer_consumed(s_fx.ctx), "after set_metrics(panel_width=320): pointer at x=420 must NOT be consumed");
+    nt_ui_end(s_fx.ctx);
+
+    /* Sanity: a pointer INSIDE the narrowed panel still triggers. x=600 is
+     * inside 320 (covers 480..800) and was already inside default 400. */
+    nt_pointer_t p_in_narrow = make_pointer(600.0F, 100.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &p_in_narrow, 1);
+    TEST_ASSERT_TRUE_MESSAGE(nt_ui_inspector_pointer_consumed(s_fx.ctx), "narrowed 320 panel: pointer at x=600 must be consumed");
+    nt_ui_end(s_fx.ctx);
+}
+
+/* Invalid metrics MUST assert (death tests via the assert trap). Pins the
+ * setter's input contract so a future regression that drops a check on one
+ * field is caught. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_metrics_setter_asserts_on_invalid(void) {
+    nt_ui_inspector_metrics_t ok = NT_UI_INSPECTOR_METRICS_DEFAULT;
+
+    /* NULL ctx. */
+    NT_TEST_EXPECT_ASSERT(nt_ui_inspector_set_metrics(NULL, &ok));
+    /* NULL metrics. */
+    NT_TEST_EXPECT_ASSERT(nt_ui_inspector_set_metrics(s_fx.ctx, NULL));
+    /* panel_width == 0. */
+    nt_ui_inspector_metrics_t zero_panel = ok;
+    zero_panel.panel_width = 0.0F;
+    NT_TEST_EXPECT_ASSERT(nt_ui_inspector_set_metrics(s_fx.ctx, &zero_panel));
+    /* row_height == 0. */
+    nt_ui_inspector_metrics_t zero_row = ok;
+    zero_row.row_height = 0.0F;
+    NT_TEST_EXPECT_ASSERT(nt_ui_inspector_set_metrics(s_fx.ctx, &zero_row));
+    /* font_size == 0. */
+    nt_ui_inspector_metrics_t zero_font = ok;
+    zero_font.font_size = 0U;
+    NT_TEST_EXPECT_ASSERT(nt_ui_inspector_set_metrics(s_fx.ctx, &zero_font));
+}
+
+/* The overlay's GPU scissor reads panel_width from ctx->inspector_metrics --
+ * after set_metrics(320), the scissor rect width must reflect the new value
+ * (screen_w - 320 = 480, not the pre-fix 400). Mirrors the commit-1 scissor
+ * pin but with the runtime metric override. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_metrics_set_changes_overlay_scissor(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+
+    /* Narrow the panel to 320 BEFORE the overlay draws. */
+    nt_ui_inspector_metrics_t narrow = NT_UI_INSPECTOR_METRICS_DEFAULT;
+    narrow.panel_width = 320.0F;
+    nt_ui_inspector_set_metrics(s_fx.ctx, &narrow);
+
+    /* Declare a widget straddling the new panel edge (panel left = 800-320 = 480).
+     * Widget at x=500..900 -- crosses panel_left and triggers the scissor branch. */
+    const float btn_x = 500.0F;
+    const float btn_y = 200.0F;
+    const float btn_w = 400.0F;
+    const float btn_h = 48.0F;
+
+    /* Frame 1: declare so Clay records the bbox. */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("metric_scissor_target"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {}
+    s_fx.ctx->inspector_selected_id = nt_ui_id("metric_scissor_target");
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: stable bbox; selected_id propagates to highlight_id. */
+    nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    CLAY({.id = CLAY_ID("metric_scissor_target"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {}
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("metric_scissor_target"), s_fx.ctx->inspector_highlight_id);
+
+    /* Reset scissor sentinel + draw overlay. */
+    nt_gfx_set_scissor(0, 0, 0, 0);
+    nt_gfx_set_scissor_enabled(false);
+    nt_ui_target_t target = {.viewport = {0.0F, 0.0F, screen_w, screen_h}};
+    nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
+
+    /* Scissor width must equal screen_w - panel_width = 800 - 320 = 480. */
+    int rect[4] = {0};
+    nt_gfx_test_scissor_rect(rect);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, rect[0], "scissor x (game-area left)");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, rect[1], "scissor y (GL Y-bottom)");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(480, rect[2], "scissor width must equal screen_w - inspector_metrics.panel_width (800 - 320)");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(600, rect[3], "scissor height must equal viewport height");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_registry_register_lookup);
@@ -2330,5 +2475,11 @@ int main(void) {
      * (both transformed and axis-aligned paths). */
     RUN_TEST(test_inspector_overlay_scissor_clips_highlight_outside_panel);
     RUN_TEST(test_inspector_inactive_no_interception);
+    /* Phase 56 ext REVIEW-2 P3-1: runtime nt_ui_inspector_metrics_t. */
+    RUN_TEST(test_inspector_metrics_default_values);
+    RUN_TEST(test_inspector_metrics_zero_init_uses_defaults);
+    RUN_TEST(test_inspector_metrics_set_changes_input_consume_gate);
+    RUN_TEST(test_inspector_metrics_setter_asserts_on_invalid);
+    RUN_TEST(test_inspector_metrics_set_changes_overlay_scissor);
     return UNITY_END();
 }
