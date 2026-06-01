@@ -1241,7 +1241,20 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
          * deepest last; see Clay_SetPointerState at clay.h:3935-3973). Scan
          * from END to START so the DEEPEST user element under the pointer
          * wins -- mirrors the visual expectation "hovering the button
-         * highlights the button, not the panel that contains it". */
+         * highlights the button, not the panel that contains it".
+         *
+         * Two-pass: first prefer a REGISTERED WIDGET id (button/panel/image/
+         * label/group OR any game widget). Plain Clay containers nested inside
+         * a widget (e.g. nt_ui_button's anonymous BTN_CONTENT child wrapper)
+         * are visually part of the widget; surfacing the child id would yield
+         * no recorded debug zone AND no hit-padding metadata, so the post-walk
+         * overlay's hit-zone visualization (padded touch-target fill +
+         * outline) vanishes -- which is the user-visible regression that
+         * shipped with the propagation block in 5c600b4. If no registered
+         * widget is under the pointer (raw Clay tree, no nt_ui_* widget
+         * along the hover path), fall through to the deepest non-owned
+         * element so plain rows still highlight. */
+        uint32_t fallback_id = 0U;
         for (int32_t i = context->pointerOverIds.length - 1; i >= 0; --i) {
             const Clay_ElementId *eid = Clay_ElementIdArray_Get(&context->pointerOverIds, i);
             if (cdv_is_inspector_owned_id(eid->id)) {
@@ -1257,8 +1270,17 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             if (item->boundingBox.x >= panel_left_x) {
                 continue;
             }
-            highlightedElementId = eid->id;
-            break;
+            if (nt_ui_widget_lookup(ctx, eid->id) != NULL) {
+                highlightedElementId = eid->id;
+                break;
+            }
+            /* First viable non-widget candidate becomes the fallback. */
+            if (fallback_id == 0U) {
+                fallback_id = eid->id;
+            }
+        }
+        if (highlightedElementId == 0U && fallback_id != 0U) {
+            highlightedElementId = fallback_id;
         }
     }
 

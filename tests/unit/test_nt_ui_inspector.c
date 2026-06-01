@@ -1431,6 +1431,70 @@ static void test_inspector_highlight_zero_when_no_pointer_over(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(Clay__HashString(CLAY_STRING("ntInsp_CloseButton"), 0, 0).id, hl);
 }
 
+/* ---- Test 15w: viewport hover prefers REGISTERED WIDGET over anonymous child ----
+ * Regression pin for the bug introduced by commit 5c600b4: viewport hover
+ * propagation scanned pointerOverIds end-to-start (deepest first), naively
+ * picking the deepest non-owned/non-panel id. If a registered widget (button
+ * etc.) had an anonymous Clay child wrapper (CLAY({...}) with no id, sized
+ * smaller than the widget for layout reasons), the deepest pick was the
+ * CHILD, NOT the widget. Consequence: nt_ui_internal_find_debug_zone (keyed
+ * on the widget's id) returned NULL for the child id; nt_ui_widget_get_hit_padding
+ * returned false; the post-walk overlay rendered no padded hit-zone -- the
+ * "hit-zone vanished" user report.
+ *
+ * Fix: two-pass scan -- prefer the first ID in pointerOverIds that has a
+ * widget_registry entry; fall through to the deepest non-owned non-panel id
+ * only when no widget is found on the hover path. This test pins the
+ * preference. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_viewport_hover_prefers_widget_over_child(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+    const float panel_x = 100.0F;
+    const float panel_y = 200.0F;
+    const float panel_w = 160.0F;
+    const float panel_h = 80.0F;
+    const float child_cx = panel_x + (panel_w * 0.5F);
+    const float child_cy = panel_y + (panel_h * 0.5F);
+
+    /* Frame 1: declare a CLAY element registered as a widget via
+     * nt_ui_widget_register, with an anonymous CLAY child inside that fills
+     * the parent. Both elements end up under (child_cx, child_cy) -- the
+     * widget at the outer level, the anonymous child at the deepest level.
+     * Pointer at (0,0) -- nothing under the cursor yet. */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("widget_floater"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = panel_x, .y = panel_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(panel_h)}}}) {
+        nt_ui_widget_register(s_fx.ctx, nt_ui_id("widget_floater"), &NT_UI_PANEL_DEF, NULL);
+        /* Anonymous nested child. No id, NOT a registered widget. Fills the
+         * parent so the hover point is INSIDE both. */
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {}
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: hover the center -- both widget and anonymous child are under
+     * the pointer. pointerOverIds will contain {root, widget_floater, child}
+     * (child being the deepest). Pre-fix the propagation picked the child id
+     * (highlight_id != widget_floater). Post-fix the registered widget wins. */
+    nt_pointer_t f2 = make_pointer(child_cx, child_cy);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
+    CLAY({.id = CLAY_ID("widget_floater"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = panel_x, .y = panel_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(panel_h)}}}) {
+        nt_ui_widget_register(s_fx.ctx, nt_ui_id("widget_floater"), &NT_UI_PANEL_DEF, NULL);
+        CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {}
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Pin: highlight is the registered widget id, NOT the anonymous child. */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("widget_floater"), s_fx.ctx->inspector_highlight_id);
+}
+
 /* ---- Test 15: inactive inspector NEVER intercepts (no false positives) ----
  * Even if the pointer is at x=600 (would be inside the sidebar IF active),
  * the gate must stay off when the inspector is disabled -- otherwise the game
@@ -1512,6 +1576,7 @@ int main(void) {
     RUN_TEST(test_inspector_highlight_from_viewport_hover);
     RUN_TEST(test_inspector_highlight_ignores_panel_hover);
     RUN_TEST(test_inspector_highlight_zero_when_no_pointer_over);
+    RUN_TEST(test_inspector_viewport_hover_prefers_widget_over_child);
     RUN_TEST(test_inspector_inactive_no_interception);
     return UNITY_END();
 }
