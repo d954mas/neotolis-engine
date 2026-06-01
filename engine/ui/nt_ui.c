@@ -1071,9 +1071,29 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 }
             } /* if (has_identity) */
 
-            /* Text-content row (verbatim from clay.h:3258-3270). */
+            /* Text-content row (verbatim from clay.h:3258-3270, with engine
+             * addition: hit-test the text-content row too).
+             *
+             * Phase 56 ext fix: Clay's verbatim port treats this row as
+             * non-interactive -- the hit-test at line ~939 only fires on the
+             * element row (row N), so a click on the text-content row (row
+             * N+1) was a silent no-op leaving inspector_selected_id unchanged
+             * (user-visible symptom: "clicking text selects the last selected
+             * one"). After commit ab6d235 (nt_ui_label registers its widget
+             * tag on the CLAY_TEXT leaf), the text-content row IS describing
+             * a meaningful, identified widget -- the user reasonably expects
+             * clicking it to select that widget. The text-content row maps to
+             * the SAME currentElement->id as the element row above it (Clay
+             * does not split text leaves into two distinct elements), so we
+             * mirror the line ~939 hit-test here against row N+1. */
             if (Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT)) {
                 layoutData.row_count++;
+                if (highlighted_row_index == layoutData.row_count) {
+                    if (context->pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
+                        ctx->inspector_selected_id = currentElement->id;
+                    }
+                    highlightedElementId = currentElement->id;
+                }
                 Clay__TextElementData *textElementData = currentElement->childrenOrTextContent.textElementData;
                 Clay_TextElementConfig *rawTextConfig = offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = 16}) : &Clay__DebugView_TextNameConfig;
                 CLAY({.layout = {.sizing = {.height = CLAY_SIZING_FIXED(CDV_ROW_HEIGHT)}, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}}) {

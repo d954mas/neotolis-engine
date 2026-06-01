@@ -859,6 +859,88 @@ static void test_layer_debug_value_above_game_layers(void) {
     TEST_ASSERT_LESS_THAN_UINT8(255U, (uint8_t)NT_UI_LAYER_DEBUG);
 }
 
+/* ---- Test 15l: clicking the TEXT-CONTENT row selects the same id as the
+ * element row above it -- not a silent no-op (user-visible "stuck selection") ----
+ * Phase 56 ext fix regression pin. Verbatim Clay treats text-content rows as
+ * non-interactive: the hit-test inside Clay__RenderDebugLayoutElementsList
+ * fires only at the ELEMENT row, so clicking on the text-content row leaves
+ * inspector_selected_id unchanged. After commit ab6d235 (nt_ui_label
+ * registers its widget tag on the CLAY_TEXT leaf), the text-content row IS a
+ * meaningfully identified widget; the user reasonably expects clicking on
+ * either the element row OR the text-content row to select the same leaf.
+ *
+ * Tree shape (sidebar walk order):
+ *   row 0: Clay__RootContainer (stringId, has_identity)
+ *   row 1: "root_label" (CLAY_ID, has_identity)
+ *   row 2: TEXT leaf X      <- element row (always hit-testable)
+ *   row 3: text-content row <- pre-fix: silent no-op. post-fix: selects X.
+ *
+ * Y-math: highlightedRow = (pointer.y / CDV_ROW_HEIGHT) - 1 (the -1 accounts
+ * for the inspector header row). With CDV_ROW_HEIGHT=30:
+ *   Y=95  -> highlightedRow=2 (visual row 2 = element row of X)
+ *   Y=135 -> highlightedRow=3 (visual row 3 = text-content row of X)
+ *
+ * Pressed-this-frame requires a previous frame with pointer NOT down (Clay's
+ * state machine, clay.h:3986-3991). Frame 1 primes the released state;
+ * frame 2 transitions to pressed and runs the hit-test. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_click_text_content_row_selects_leaf(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+
+    /* Frame 1: prime released state + capture the text-leaf's id. */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    uint32_t text_leaf_id = 0U;
+    CLAY({.id = CLAY_ID("root_label")}) {
+        nt_ui_label(s_fx.ctx, NULL, "hello", &s_label_style);
+        /* nt_ui_label emits CLAY_TEXT then registers the LABEL def against
+         * layoutElements[length-1]. The same accessor reads back the leaf id. */
+        text_leaf_id = nt_ui_internal_last_emitted_element_id();
+    }
+    TEST_ASSERT_NOT_EQUAL_UINT32(0U, text_leaf_id);
+    nt_ui_end(s_fx.ctx);
+
+    /* Sanity: nothing clicked yet -> selected_id stays 0. */
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->inspector_selected_id);
+
+    /* Frame 2a: click on the ELEMENT row (visual row 2) -- both pre-fix and
+     * post-fix this MUST select the text leaf. Pins the existing hit-test. */
+    nt_pointer_t f2 = {0};
+    f2.x = 600.0F; /* inside sidebar (x >= 800 - 400) */
+    f2.y = 95.0F;  /* -> highlightedRow = (95/30) - 1 = 2 (element row of leaf) */
+    f2.active = true;
+    f2.buttons[NT_BUTTON_LEFT].is_down = true;
+    f2.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    CLAY({.id = CLAY_ID("root_label")}) { nt_ui_label(s_fx.ctx, NULL, "hello", &s_label_style); }
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32(text_leaf_id, s_fx.ctx->inspector_selected_id);
+
+    /* Reset selected_id, prime released state again for the next press-this-frame. */
+    s_fx.ctx->inspector_selected_id = 0U;
+    nt_pointer_t f3_released = make_pointer(600.0F, 95.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f3_released, 1);
+    CLAY({.id = CLAY_ID("root_label")}) { nt_ui_label(s_fx.ctx, NULL, "hello", &s_label_style); }
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->inspector_selected_id);
+
+    /* Frame 2b: click on the TEXT-CONTENT row (visual row 3). Pre-fix this
+     * was the bug -- selected_id stayed 0 (silent no-op). Post-fix this
+     * selects the same text_leaf_id as row 2 did. */
+    nt_pointer_t f4 = {0};
+    f4.x = 600.0F;
+    f4.y = 135.0F; /* -> highlightedRow = (135/30) - 1 = 3 (text-content row) */
+    f4.active = true;
+    f4.buttons[NT_BUTTON_LEFT].is_down = true;
+    f4.buttons[NT_BUTTON_LEFT].is_pressed = true;
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f4, 1);
+    CLAY({.id = CLAY_ID("root_label")}) { nt_ui_label(s_fx.ctx, NULL, "hello", &s_label_style); }
+    nt_ui_end(s_fx.ctx);
+    TEST_ASSERT_EQUAL_UINT32(text_leaf_id, s_fx.ctx->inspector_selected_id);
+}
+
 /* ---- Test 15: inactive inspector NEVER intercepts (no false positives) ----
  * Even if the pointer is at x=600 (would be inside the sidebar IF active),
  * the gate must stay off when the inspector is disabled -- otherwise the game
@@ -911,6 +993,8 @@ int main(void) {
     /* Phase 56 ext CHUNK C: inspector emits on NT_UI_LAYER_DEBUG. */
     RUN_TEST(test_inspector_root_emitted_on_debug_layer);
     RUN_TEST(test_layer_debug_value_above_game_layers);
+    /* Phase 56 ext fix: text-content row hit-test (off-by-one selection). */
+    RUN_TEST(test_inspector_click_text_content_row_selects_leaf);
     RUN_TEST(test_inspector_inactive_no_interception);
     return UNITY_END();
 }
