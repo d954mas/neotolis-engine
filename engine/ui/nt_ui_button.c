@@ -116,8 +116,10 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
      * "button" next to it in the element tree. Zero-overhead lookup; reset
      * at every nt_ui_begin. id is guaranteed non-zero by the assert above.
      * Pass style->hit_padding_lrtb so the inspector overlay can outline the
-     * visual bbox AND the padded hit zone distinctly. */
-    nt_ui_widget_register(ctx, id, &NT_UI_BUTTON_DEF, style->hit_padding_lrtb, data);
+     * visual bbox AND the padded hit zone distinctly. data flows to the
+     * Clay declaration's userData (auto-routed to SHARED config) -- the
+     * inspector reads the layer from there, no need to duplicate it here. */
+    nt_ui_widget_register(ctx, id, &NT_UI_BUTTON_DEF, style->hit_padding_lrtb);
 
     ctx->pending_button.active = true;
     ctx->pending_button.clicked = in.clicked;

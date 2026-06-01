@@ -46,11 +46,13 @@ void nt_ui_label(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const c
      * onto openLayoutElementStack (clay.h:1991-2023). Use
      * last_emitted_element_id() to read layoutElements[length-1] = the leaf
      * we just emitted. id 0 (Clay's maxElementsExceeded early-out) is
-     * silently dropped by widget_register. */
-    /* Phase 56 ext (layer-from-data): forward `data` so the registry captures the
-     * caller's layer. CLAY_TEXT has no SHARED config -> .userData has no slot,
-     * so the layer would otherwise be discarded for label widgets. */
-    nt_ui_widget_register(ctx, nt_ui_internal_last_emitted_element_id(), &NT_UI_LABEL_DEF, NULL, data);
+     * silently dropped by widget_register.
+     *
+     * Layer recovery: CLAY_TEXT_CONFIG above already sets .userData = data, so
+     * cdv_element_layer reads the layer directly from the TEXT config's
+     * userData slot (Clay_TextElementConfig has its own userData at
+     * clay.h:386). No widget-registry duplication needed. */
+    nt_ui_widget_register(ctx, nt_ui_internal_last_emitted_element_id(), &NT_UI_LABEL_DEF, NULL);
 }
 
 void nt_ui_label_sized(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const char *text, const nt_ui_label_style_t *style, float font_size_override) {
