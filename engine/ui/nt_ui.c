@@ -676,6 +676,49 @@ static const Clay_Color CDV_HIGHLIGHT_COLOR = {168, 66, 28, 100}; /* Clay__debug
 /* CDV_PANEL_WIDTH moved to the top of the file so nt_ui_begin can read it
  * for the inspector_pointer_consumed gate (Phase 56 ext fix). */
 
+/* Phase 56 ext fix (viewport-hover propagation): set of Clay element ids the
+ * inspector itself owns -- the sidebar panel, its scroll/content wrappers, the
+ * close button, and the floating element-highlight rect + its inner
+ * rectangle. The viewport-hover propagation in cdv_render_layout_elements_list
+ * scans context->pointerOverIds to find the first user element under the
+ * cursor; without this filter, a previous frame's floating highlight rect
+ * (which attaches at the user element's bbox via parentId) would be picked
+ * up, causing a self-feedback loop on the highlight target. The geometric
+ * panel-area check filters the sidebar wrappers but NOT the floating
+ * highlight (which lives in the VIEWPORT, not the panel), so a small named-id
+ * set is the simplest robust filter. Cached lazily on first call -- the
+ * Clay__HashString computes are cheap but constant across frames. */
+enum { CDV_OWNED_ID_COUNT = 7 };
+static uint32_t s_cdv_owned_ids[CDV_OWNED_ID_COUNT];
+static bool s_cdv_owned_ids_init = false;
+
+static void cdv_init_owned_ids_once(void) {
+    if (s_cdv_owned_ids_init) {
+        return;
+    }
+    s_cdv_owned_ids[0] = Clay__HashString(CLAY_STRING("ntInsp_Root"), 0, 0).id;
+    s_cdv_owned_ids[1] = Clay__HashString(CLAY_STRING("ntInsp_OuterScrollPane"), 0, 0).id;
+    s_cdv_owned_ids[2] = Clay__HashString(CLAY_STRING("ntInsp_PaneOuter"), 0, 0).id;
+    s_cdv_owned_ids[3] = Clay__HashString(CLAY_STRING("ntInsp_CloseButton"), 0, 0).id;
+    s_cdv_owned_ids[4] = Clay__HashString(CLAY_STRING("ntInsp_ElementHighlight"), 0, 0).id;
+    s_cdv_owned_ids[5] = Clay__HashString(CLAY_STRING("ntInsp_ElementHighlightRectangle"), 0, 0).id;
+    /* Clay__RootContainer is the auto-emitted root that covers the entire
+     * canvas (clay.h:4186). It would always be in pointerOverIds when any
+     * point is inside the viewport -- skipping it ensures the propagation
+     * picks an actual user-emitted element. */
+    s_cdv_owned_ids[6] = Clay__HashString(CLAY_STRING("Clay__RootContainer"), 0, 0).id;
+    s_cdv_owned_ids_init = true;
+}
+
+static bool cdv_is_inspector_owned_id(uint32_t id) {
+    for (int32_t i = 0; i < CDV_OWNED_ID_COUNT; ++i) {
+        if (s_cdv_owned_ids[i] == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Mirror of Clay__DebugGetElementConfigTypeLabel (clay.h:3130-3140) but
  * collapsed to just label + color (no inner struct). */
 static const char *cdv_config_label(uint8_t type) {
@@ -1177,6 +1220,48 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
         }
     }
 
+    /* Phase 56 ext fix (viewport-hover propagation): if the sidebar did not
+     * pick a row this frame AND the pointer is NOT over the inspector panel,
+     * scan context->pointerOverIds for the first user element underneath the
+     * cursor and adopt it as the highlight target. Mirrors Clay's stock
+     * "hovering a sidebar row highlights the widget", extended to "hovering
+     * the widget itself in the viewport also highlights it in the sidebar".
+     * pointerOverIds is populated by Clay_SetPointerState (called in
+     * nt_ui_begin) and contains every element under the pointer in z-order.
+     * cdv_is_inspector_owned_id filters out the inspector's own named
+     * elements (panel root, scroll wrappers, close button, floating
+     * highlight rect -- the last one is critical: it lives in the viewport
+     * attached to the user element and would otherwise self-feedback). The
+     * geometric panel-area check filters anything inside the sidebar
+     * footprint (per-row wrappers, indent containers, etc.). The first id
+     * that passes BOTH filters wins. */
+    if (highlightedElementId == 0U && !ctx->inspector_pointer_consumed) {
+        const float panel_left_x = context->layoutDimensions.width - (float)CDV_PANEL_WIDTH;
+        /* Clay populates pointerOverIds in DFS pre-order (outermost first,
+         * deepest last; see Clay_SetPointerState at clay.h:3935-3973). Scan
+         * from END to START so the DEEPEST user element under the pointer
+         * wins -- mirrors the visual expectation "hovering the button
+         * highlights the button, not the panel that contains it". */
+        for (int32_t i = context->pointerOverIds.length - 1; i >= 0; --i) {
+            const Clay_ElementId *eid = Clay_ElementIdArray_Get(&context->pointerOverIds, i);
+            if (cdv_is_inspector_owned_id(eid->id)) {
+                continue;
+            }
+            const Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(eid->id);
+            if (item == NULL) {
+                continue;
+            }
+            /* Skip elements whose bbox.x is in the panel footprint -- catches
+             * the indent wrappers, row backgrounds, per-element ElementOuter
+             * blocks, etc. that the cached named-id set does not enumerate. */
+            if (item->boundingBox.x >= panel_left_x) {
+                continue;
+            }
+            highlightedElementId = eid->id;
+            break;
+        }
+    }
+
     if (highlightedElementId) {
         /* Mirror clay.h:3303 -- floating highlight rectangle attached to the
          * hovered element. This is the IN-VIEWPORT highlight as the user moves
@@ -1236,6 +1321,10 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
     cdv_hex_buf_cursor = 0U;
 
     Clay_Context *context = ctx->clay;
+    /* Lazily cache the set of inspector-owned named ids -- used by the
+     * viewport-hover propagation inside cdv_render_layout_elements_list to
+     * skip our own elements when scanning pointerOverIds. */
+    cdv_init_owned_ids_once();
     Clay_ElementId closeButtonId = Clay__HashString(CLAY_STRING("ntInsp_CloseButton"), 0, 0);
     if (context->pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
         for (int32_t i = 0; i < context->pointerOverIds.length; ++i) {

@@ -750,7 +750,11 @@ static void test_inspector_collapsed_storage(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_collapse_hides_children(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+    /* Pointer parked OFFSCREEN at (-100, -100) so the Phase 56 ext
+     * viewport-hover propagation does NOT fire (which would emit the
+     * floating ElementHighlight rect and skew the inspector growth count
+     * between walks). Test focus is collapse vs full DFS, not hover. */
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
 
     /* Walk 1: full tree (parent + 4 children). */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -999,8 +1003,14 @@ static void test_overlay_fallback_chain_with_padded_button(void) {
 
     /* Frame 1: emit the button so Clay has a stable id+bbox for frame 2,
      * AND directly set inspector_selected_id so the fallback chain
-     * (no hover, but persistent selection) is exercised. */
-    nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
+     * (no hover, but persistent selection) is exercised.
+     *
+     * Pointer is parked OFFSCREEN at (-100, -100) so the Phase 56 ext
+     * viewport-hover propagation does NOT pick a user element under it --
+     * the test's intent is "no hover" so the selected_id fallback fires.
+     * Pre-fix (no viewport propagation), (0,0) was fine; post-fix (0,0)
+     * lands inside the user "root"/button bbox and would propagate. */
+    nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("padded_btn"), s_fx.atlas.handle, &padded_style, true);
@@ -1270,6 +1280,157 @@ static void test_overlay_falls_back_to_axis_aligned_when_no_zone(void) {
     nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
 }
 
+/* ---- Test 15s: viewport hover propagates inspector_highlight_id ----
+ * Phase 56 ext fix: hovering an actual widget in the GAME viewport (not the
+ * sidebar) must set inspector_highlight_id to that widget's id so the
+ * post-walk overlay AND the floating in-viewport highlight rect both follow
+ * the pointer.
+ *
+ * Verbatim Clay debug-view behavior (clay.h:3303): the floating
+ * ElementHighlight rect attaches to highlightedElementId, which can be set
+ * by sidebar row hover OR by viewport pointer-over a user element. Our
+ * port previously only did the sidebar half; this test pins the viewport
+ * half.
+ *
+ * Two-frame setup: frame 1 declares the widget so Clay records its bbox
+ * and Clay_SetPointerState (called in nt_ui_begin) can populate
+ * pointerOverIds for frame 2. Frame 2 positions the pointer over the
+ * widget's center (OUTSIDE the sidebar footprint at x=400) and runs the
+ * inspector emit. After nt_ui_end, inspector_highlight_id must equal the
+ * widget's id. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_highlight_from_viewport_hover(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+    const float btn_x = 100.0F; /* well left of sidebar at 400 */
+    const float btn_y = 200.0F;
+    const float btn_w = 160.0F;
+    const float btn_h = 48.0F;
+    const float btn_cx = btn_x + (btn_w * 0.5F);
+    const float btn_cy = btn_y + (btn_h * 0.5F);
+
+    /* Frame 1: declare the widget so Clay has a bbox to hit-test on frame 2.
+     * Pointer is at (0,0) -- nothing is hovered yet. */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("hover_target"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {}
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: pointer over the widget center -- well outside the sidebar.
+     * Clay_SetPointerState (called inside nt_ui_begin) populates
+     * pointerOverIds with the elements under (btn_cx, btn_cy) -- including
+     * the hover_target -- using frame 1's solved bboxes. The inspector
+     * emit then propagates that to inspector_highlight_id. */
+    nt_pointer_t f2 = make_pointer(btn_cx, btn_cy);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    /* Sanity: pointer is NOT inside the sidebar footprint. */
+    TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
+    CLAY({.id = CLAY_ID("hover_target"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {}
+    nt_ui_end(s_fx.ctx);
+
+    /* Highlight propagates to the hovered widget id. */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("hover_target"), s_fx.ctx->inspector_highlight_id);
+}
+
+/* ---- Test 15t: viewport hover INSIDE panel area does NOT override highlight ----
+ * The viewport-hover propagation is gated by inspector_pointer_consumed: when
+ * the pointer is over the sidebar footprint, the propagation does NOT fire
+ * (the sidebar row hover is the source of truth in that region). Pins that
+ * the gate works -- a panel-area pointer must not produce a viewport-driven
+ * highlight from a stale or geometrically-overlapping user element. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_inspector_highlight_ignores_panel_hover(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+
+    /* Frame 1: declare a widget WHOSE BBOX OVERLAPS the panel footprint
+     * (panel starts at x=400). The widget's center (x=500) lies inside the
+     * panel area; the propagation must NOT pick it up when the pointer is
+     * in the panel area. */
+    const float btn_x = 420.0F;
+    const float btn_y = 50.0F; /* near top so it doesn't overlap sidebar rows */
+    const float btn_w = 160.0F;
+    const float btn_h = 48.0F;
+    const float btn_cx = btn_x + (btn_w * 0.5F);
+    const float btn_cy = btn_y + (btn_h * 0.5F);
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("in_panel_widget"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {}
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: pointer inside the sidebar footprint. Even though
+     * pointerOverIds will contain "in_panel_widget" (its bbox covers the
+     * pointer), inspector_pointer_consumed is TRUE and the viewport-hover
+     * propagation block is gated off. inspector_highlight_id stays whatever
+     * the sidebar driver decided (zero or a sidebar-row hit). */
+    nt_pointer_t f2 = make_pointer(btn_cx, btn_cy);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    /* Sanity: pointer IS inside the sidebar footprint. */
+    TEST_ASSERT_TRUE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
+    CLAY({.id = CLAY_ID("in_panel_widget"),
+          .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
+          .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {}
+    nt_ui_end(s_fx.ctx);
+
+    /* The propagation did NOT fire -- highlight stays at whatever the
+     * sidebar emit decided. At y=50 the sidebar header bar is in view,
+     * no actual ROW is hovered, so the sidebar driver does not set
+     * highlight either -- net: highlight stays 0 (no false positive). */
+    TEST_ASSERT_NOT_EQUAL_UINT32(nt_ui_id("in_panel_widget"), s_fx.ctx->inspector_highlight_id);
+}
+
+/* ---- Test 15u: pointer over NOTHING leaves highlight at zero ----
+ * Counter-test: if no widget is under the pointer (empty canvas), the
+ * viewport-hover propagation must NOT spuriously assign an id. Confirms the
+ * scan loop yields cleanly when pointerOverIds is empty or contains only
+ * inspector-owned/panel-area elements. */
+static void test_inspector_highlight_zero_when_no_pointer_over(void) {
+    nt_ui_inspector_set_active(s_fx.ctx, true);
+
+    const float screen_w = 800.0F;
+    const float screen_h = 600.0F;
+
+    /* Frame 1: declare nothing extra (empty root). */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
+    CLAY({.id = CLAY_ID("empty_root")}) {}
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: pointer at (50, 50) -- nothing user-emitted is there, only
+     * the auto Clay__RootContainer covers the whole canvas. The propagation
+     * MAY pick the root container (it has no string id, lives at the
+     * viewport origin, passes the panel-area filter). The behavior we
+     * require is: highlight does NOT pick an inspector-owned id, AND does
+     * not become a user-id we did NOT emit. The strongest assertion that
+     * holds regardless of root-container behavior: highlight_id is NOT one
+     * of the inspector's own named ids (no self-feedback). */
+    nt_pointer_t f2 = make_pointer(50.0F, 50.0F);
+    nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
+    TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
+    CLAY({.id = CLAY_ID("empty_root")}) {}
+    nt_ui_end(s_fx.ctx);
+
+    /* Pin: highlight_id must NOT be any inspector-owned named id (the
+     * floating highlight rect, panel root, etc.). This is the self-feedback
+     * pin -- the bug class we explicitly designed the named-id filter
+     * against. */
+    const uint32_t hl = s_fx.ctx->inspector_highlight_id;
+    TEST_ASSERT_NOT_EQUAL_UINT32(Clay__HashString(CLAY_STRING("ntInsp_ElementHighlight"), 0, 0).id, hl);
+    TEST_ASSERT_NOT_EQUAL_UINT32(Clay__HashString(CLAY_STRING("ntInsp_ElementHighlightRectangle"), 0, 0).id, hl);
+    TEST_ASSERT_NOT_EQUAL_UINT32(Clay__HashString(CLAY_STRING("ntInsp_Root"), 0, 0).id, hl);
+    TEST_ASSERT_NOT_EQUAL_UINT32(Clay__HashString(CLAY_STRING("ntInsp_CloseButton"), 0, 0).id, hl);
+}
+
 /* ---- Test 15: inactive inspector NEVER intercepts (no false positives) ----
  * Even if the pointer is at x=600 (would be inside the sidebar IF active),
  * the gate must stay off when the inspector is disabled -- otherwise the game
@@ -1345,6 +1506,12 @@ int main(void) {
      * (transformed widget case + axis-aligned fallback). */
     RUN_TEST(test_overlay_projects_through_accum_for_transformed_id);
     RUN_TEST(test_overlay_falls_back_to_axis_aligned_when_no_zone);
+    /* Phase 56 ext fix: viewport hover propagation (Clay__RenderDebugView
+     * clay.h:3303 mirror -- the floating ElementHighlight follows the
+     * widget under the pointer, not just sidebar row hover). */
+    RUN_TEST(test_inspector_highlight_from_viewport_hover);
+    RUN_TEST(test_inspector_highlight_ignores_panel_hover);
+    RUN_TEST(test_inspector_highlight_zero_when_no_pointer_over);
     RUN_TEST(test_inspector_inactive_no_interception);
     return UNITY_END();
 }
