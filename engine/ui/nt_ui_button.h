@@ -18,8 +18,7 @@
 
 #include "clay.h"
 #include "resource/nt_resource.h"
-#include "ui/nt_ui.h"       /* nt_ui_element_data_t */
-#include "ui/nt_ui_label.h" /* leaf sugar child style */
+#include "ui/nt_ui.h" /* nt_ui_element_data_t */
 
 typedef struct nt_ui_context nt_ui_context_t;
 
@@ -61,13 +60,26 @@ _Static_assert(sizeof(nt_ui_button_style_t) == 108, "nt_ui_button_style_t expect
 
 /* Container: begin -> children -> bool end. id from nt_ui_id("...") (never 0).
  * enabled=false short-circuits hover + click (D-56-12) and forces the disabled
- * visual; begin still pushes transform/opacity so end stays balanced. */
-void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_resource_t atlas, const nt_ui_button_style_t *style, bool enabled);
+ * visual; begin still pushes transform/opacity so end stays balanced.
+ *
+ * decl (Phase 56 ext, P3-2): optional Clay_ElementDeclaration. NULL = FIT default
+ * (button shrinks to children). Pass a decl with .layout.sizing to drive a
+ * FIXED/GROW size, padding, child alignment, etc. The engine OWNS .id, .image,
+ * .backgroundColor, .userData fields -- caller MUST leave them zero/NULL or the
+ * asserts fire. All other fields (layout, scroll, floating, border, clip) flow
+ * through verbatim. */
+/* State-dependent content (label "Save" -> "Saving..." on press, icon swap):
+ * query the UNIVERSAL interaction service BEFORE button_begin. The same
+ * pattern works for any interactive widget (toggle, slider, drag-handle,
+ * custom). nt_ui_get_interaction is per-id-per-frame cached -- duplicate
+ * calls are free.
+ *
+ *   nt_ui_interaction_t in = nt_ui_get_interaction(ctx, btn_id);
+ *   nt_ui_button_begin(ctx, ..., btn_id, atlas, &style, &decl, true);
+ *     nt_ui_label(ctx, NULL, in.pressed ? "Saving..." : "Save", &lbl);
+ *   clicked = nt_ui_button_end(ctx);
+ */
+void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_resource_t atlas, const nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled);
 bool nt_ui_button_end(nt_ui_context_t *ctx);
-
-/* Leaf sugar (text-only common case) = begin + centered label child + end.
- * Returns clicked (one-shot on release within bounds). */
-bool nt_ui_button(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_resource_t atlas, const char *label, const nt_ui_label_style_t *label_style,
-                  const nt_ui_button_style_t *style, bool enabled);
 
 #endif /* NT_UI_BUTTON_H */

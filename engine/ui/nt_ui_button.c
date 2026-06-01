@@ -10,7 +10,6 @@
 #include "ui/nt_ui_anim.h"
 #include "ui/nt_ui_debug.h" /* record-only debug zone for disabled buttons */
 #include "ui/nt_ui_internal.h"
-#include "ui/nt_ui_label.h"
 
 /* Phase 56 ext (descriptor refactor): static descriptor consumed by the
  * inspector. Green pill (0xFF60D070 -- {0x70,0xD0,0x60,0xFF} = R=112,G=208,B=96).
@@ -32,12 +31,22 @@ static inline float clampf(float v, float lo, float hi) {
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_resource_t atlas, const nt_ui_button_style_t *style, bool enabled) {
+void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_resource_t atlas, const nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl,
+                        bool enabled) {
     NT_ASSERT(ctx != NULL && "nt_ui_button_begin: ctx must be non-NULL");
     NT_ASSERT(style != NULL && "nt_ui_button_begin: style must be non-NULL");
     NT_ASSERT(atlas.id != 0 && "nt_ui_button_begin: invalid atlas handle");
     NT_ASSERT(id != 0U && "nt_ui_button_begin: id 0 is the no-widget sentinel");
     NT_ASSERT(!ctx->pending_button.active && "nt_ui_button: nested buttons unsupported");
+    /* Phase 56 ext (P3-2): engine owns id/image/backgroundColor/userData; caller
+     * declares layout/padding/childAlignment/etc on decl, leaves the engine fields
+     * zero. Crash early on accidental overlap so the override contract is loud. */
+    if (decl != NULL) {
+        NT_ASSERT(decl->id.id == 0U && "nt_ui_button_begin: decl->id must be 0 (id is the explicit param)");
+        NT_ASSERT(decl->image.imageData == NULL && "nt_ui_button_begin: decl->image.imageData must be NULL (atlas+region controls image)");
+        NT_ASSERT(decl->backgroundColor.a == 0.0F && "nt_ui_button_begin: decl->backgroundColor must be zero (style->bg_tint controls)");
+        NT_ASSERT(decl->userData == NULL && "nt_ui_button_begin: decl->userData must be NULL (data param controls)");
+    }
     // #region state-pick + ease
     /* Disabled short-circuits the hit-test/capture entirely (D-56-12). The
      * padded query forwards the style's touch-target inflation (zero = old
@@ -103,13 +112,13 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         tint.a = (float)((st->bg_tint >> 24) & 0xFFU);
     }
 
+    Clay_ElementDeclaration final = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
+    final.id = (Clay_ElementId){.id = id};
+    final.image = (Clay_ImageElementConfig){.imageData = p};
+    final.backgroundColor = tint;
+    final.userData = (void *)data;
     Clay__OpenElement();
-    Clay__ConfigureOpenElement((Clay_ElementDeclaration){
-        .id = (Clay_ElementId){.id = id},
-        .backgroundColor = tint,
-        .image = {.imageData = p},
-        .userData = (void *)data,
-    });
+    Clay__ConfigureOpenElement(final);
     // #endregion
 
     /* Phase 56 ext (CHUNK E): tag this element so nt_ui_inspector can show
@@ -138,11 +147,4 @@ bool nt_ui_button_end(nt_ui_context_t *ctx) {
     ctx->pending_button.active = false;
     ctx->pending_button.clicked = false;
     return clicked;
-}
-
-bool nt_ui_button(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_resource_t atlas, const char *label, const nt_ui_label_style_t *label_style,
-                  const nt_ui_button_style_t *style, bool enabled) {
-    nt_ui_button_begin(ctx, data, id, atlas, style, enabled);
-    nt_ui_label(ctx, NULL, label, label_style);
-    return nt_ui_button_end(ctx);
 }

@@ -359,17 +359,18 @@ static void try_bind_resources(void) {
         .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER} }                      \
     }
 
-/* nt_ui_button_begin opens a Clay IMAGE element WITHOUT layout sizing -- it
- * defaults to FIT (Clay clay.h:301), so the slice9 background shrinks to the
- * label/icon natural size (~80x40 for a label, ~72x72 for an icon) instead of
- * filling the BTN_SLOT_LAYOUT 320x180 outer wrapper. Result: tiny slice9 button
- * floating in a big empty slot -- the slice9's gray inner panel + light corners
- * look like a "small white-ish square" against the dark BG. Wrapping the
- * button's children in a FIXED inner Clay block forces the FIT button
- * container to grow to that bbox so the slice9 renders at the full intended
- * size. Subtract 16 px for the BTN_SLOT padding (8 px each side). */
-#define BTN_CONTENT_W (BTN_W - 16)
-#define BTN_CONTENT_H (BTN_H - 16)
+/* Phase 56 ext (P3-2): Clay layout decl for button-begin. Drives FIXED
+ * BTN_W x BTN_H sizing + 8 px inner padding + center alignment. Without
+ * this decl param, nt_ui_button_begin would open a FIT IMAGE and shrink
+ * to children, requiring an inner FIXED CLAY wrap as workaround. */
+static const Clay_ElementDeclaration s_btn_decl = {
+    .layout =
+        {
+            .sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)},
+            .padding = CLAY_PADDING_ALL(8),
+            .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER},
+        },
+};
 // #endregion
 
 // #region declare_reference_buttons (2 x 3 GRID)
@@ -399,12 +400,13 @@ static void declare_reference_buttons(void) {
 
             // #region (a) STANDARD
             CLAY(CELL_LAYOUT) {
-                CELL_LABELS("STANDARD (eased)", "+16 px touch padding");
+                CELL_LABELS("STANDARD (eased)", "label swaps on press");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_std, s_atlas_handle, &s_btn_standard, true);
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_CONTENT_W), CLAY_SIZING_FIXED(BTN_CONTENT_H)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Save", &g_btn_label_style);
-                    }
+                    /* Universal interaction pattern (D-56-21): query BEFORE begin
+                     * so the label content reacts to press without bespoke API. */
+                    nt_ui_interaction_t in_std = nt_ui_get_interaction(s_ctx, s_id_std);
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_std, s_atlas_handle, &s_btn_standard, &s_btn_decl, true);
+                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), in_std.pressed ? "pressed" : "click me", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_std++;
                     }
@@ -416,10 +418,8 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("SCALE 0.80<->1.20", "+16 px touch padding");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_scale, s_atlas_handle, &s_btn_scale, true);
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_CONTENT_W), CLAY_SIZING_FIXED(BTN_CONTENT_H)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Boom", &g_btn_label_style);
-                    }
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_scale, s_atlas_handle, &s_btn_scale, &s_btn_decl, true);
+                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Boom", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_scale++;
                     }
@@ -431,10 +431,8 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("VISUAL SWAP blue<->green", "+16 px touch padding");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_swap, s_atlas_handle, &s_btn_swap, true);
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_CONTENT_W), CLAY_SIZING_FIXED(BTN_CONTENT_H)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Swap", &g_btn_label_style);
-                    }
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_swap, s_atlas_handle, &s_btn_swap, &s_btn_decl, true);
+                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Swap", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_swap++;
                     }
@@ -451,11 +449,9 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("ICON ONLY", "no padding");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icon, s_atlas_handle, &s_btn_nopad, true);
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_CONTENT_W), CLAY_SIZING_FIXED(BTN_CONTENT_H)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(96)}}}) {
-                            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_icon_bunny_idx, &g_btn_icon_style);
-                        }
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icon, s_atlas_handle, &s_btn_nopad, &s_btn_decl, true);
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(96), CLAY_SIZING_FIXED(96)}}}) {
+                        nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_icon_bunny_idx, &g_btn_icon_style);
                     }
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_icon++;
@@ -468,16 +464,23 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("ICON + TEXT", "no padding");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icontext, s_atlas_handle, &s_btn_nopad, true);
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_CONTENT_W), CLAY_SIZING_FIXED(BTN_CONTENT_H)},
-                                     .layoutDirection = CLAY_LEFT_TO_RIGHT,
-                                     .childGap = 16,
-                                     .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                        CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) {
-                            nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_icon_bunny_idx, &g_btn_icon_style);
-                        }
-                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", &g_btn_label_style);
+                    /* Inline ICON + TEXT decl: same sizing as s_btn_decl but
+                     * LEFT_TO_RIGHT with childGap so icon and label sit side-by-side. */
+                    static const Clay_ElementDeclaration s_btn_decl_icontext = {
+                        .layout =
+                            {
+                                .sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)},
+                                .padding = CLAY_PADDING_ALL(8),
+                                .layoutDirection = CLAY_LEFT_TO_RIGHT,
+                                .childGap = 16,
+                                .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER},
+                            },
+                    };
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_icontext, s_atlas_handle, &s_btn_nopad, &s_btn_decl_icontext, true);
+                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(80), CLAY_SIZING_FIXED(80)}}}) {
+                        nt_ui_image(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_atlas_handle, s_icon_bunny_idx, &g_btn_icon_style);
                     }
+                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Play", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_icontext++;
                     }
@@ -489,10 +492,8 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("DISABLED (enabled=false)", "+16 px (no hover)");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_disabled, s_atlas_handle, &s_btn_standard, false);
-                    CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_CONTENT_W), CLAY_SIZING_FIXED(BTN_CONTENT_H)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                        nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Locked", &g_btn_label_style);
-                    }
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_disabled, s_atlas_handle, &s_btn_standard, &s_btn_decl, false);
+                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Locked", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {
                         s_clicks_disabled++; /* unreachable while disabled -- proves the gate */
                     }
@@ -536,10 +537,8 @@ static void declare_reference_buttons(void) {
                     .scale_y = 0.85F,
                 };
                 nt_ui_push_transform(s_ctx, &baked);
-                nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_baked, s_atlas_handle, &s_btn_standard, true);
-                CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(BTN_CONTENT_W), CLAY_SIZING_FIXED(BTN_CONTENT_H)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
-                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Baked", &g_btn_label_style);
-                }
+                nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_baked, s_atlas_handle, &s_btn_standard, &s_btn_decl, true);
+                nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Baked", &g_btn_label_style);
                 if (nt_ui_button_end(s_ctx)) {
                     s_clicks_baked++;
                 }

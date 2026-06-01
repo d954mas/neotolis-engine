@@ -24,10 +24,18 @@ const nt_ui_widget_def_t NT_UI_GROUP_DEF = {
 };
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style) {
+void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_resource_t atlas, uint32_t region_index, const nt_ui_image_style_t *style, const Clay_ElementDeclaration *decl) {
     NT_ASSERT(ctx != NULL && "nt_ui_panel_begin: ctx must be non-NULL");
     NT_ASSERT(style != NULL && "nt_ui_panel_begin: style must be non-NULL");
     NT_ASSERT(atlas.id != 0 && "nt_ui_panel_begin: invalid atlas handle");
+    /* Phase 56 ext (P3-2): same override contract as button. Caller declares
+     * layout/sizing/padding on decl; engine owns image/bg/userData/id. */
+    if (decl != NULL) {
+        NT_ASSERT(decl->id.id == 0U && "nt_ui_panel_begin: decl->id must be 0 (panel id auto-assigned by Clay)");
+        NT_ASSERT(decl->image.imageData == NULL && "nt_ui_panel_begin: decl->image.imageData must be NULL (atlas+region controls image)");
+        NT_ASSERT(decl->backgroundColor.a == 0.0F && "nt_ui_panel_begin: decl->backgroundColor must be zero (style->color_packed controls)");
+        NT_ASSERT(decl->userData == NULL && "nt_ui_panel_begin: decl->userData must be NULL (data param controls)");
+    }
 
     /* Allocate payload for Clay IMAGE */
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
@@ -52,12 +60,12 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
     }
 
     /* Open Clay IMAGE container -- children go between _begin and _end */
+    Clay_ElementDeclaration final = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
+    final.backgroundColor = tint;
+    final.image = (Clay_ImageElementConfig){.imageData = p};
+    final.userData = (void *)data;
     Clay__OpenElement();
-    Clay__ConfigureOpenElement((Clay_ElementDeclaration){
-        .backgroundColor = tint,
-        .image = {.imageData = p},
-        .userData = (void *)data,
-    });
+    Clay__ConfigureOpenElement(final);
 
     /* Phase 56 ext (CHUNK E): tag this Clay element so nt_ui_inspector shows
      * "panel" in the tree. Clay auto-assigns the id; fetch it post-open via
@@ -71,8 +79,15 @@ void nt_ui_panel_end(nt_ui_context_t *ctx) {
     (void)ctx;
 }
 
-void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data) {
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, const Clay_ElementDeclaration *decl) {
     NT_ASSERT(ctx != NULL && "nt_ui_group_begin: ctx must be non-NULL");
+    /* Phase 56 ext (P3-2): group has no image/bg -- only id + userData are
+     * engine-owned. Layout/sizing/childAlignment flow through. */
+    if (decl != NULL) {
+        NT_ASSERT(decl->id.id == 0U && "nt_ui_group_begin: decl->id must be 0 (group id auto-assigned by Clay)");
+        NT_ASSERT(decl->userData == NULL && "nt_ui_group_begin: decl->userData must be NULL (data param controls)");
+    }
 
     /* CUSTOM anchor: zero draw calls, zero darkening. type=NONE tells the
      * walker to skip the handler call but still use the bbox for deferred
@@ -81,11 +96,11 @@ void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data) {
     NT_ASSERT(anchor != NULL && "nt_ui_group_begin: scratch alloc failed");
     *anchor = (nt_ui_custom_data_t){.type = NT_UI_CUSTOM_TYPE_NONE, .data = NULL};
 
+    Clay_ElementDeclaration final = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
+    final.custom = (Clay_CustomElementConfig){.customData = anchor};
+    final.userData = (void *)data;
     Clay__OpenElement();
-    Clay__ConfigureOpenElement((Clay_ElementDeclaration){
-        .custom = {.customData = anchor},
-        .userData = (void *)data,
-    });
+    Clay__ConfigureOpenElement(final);
 
     /* Phase 56 ext (CHUNK E): tag this Clay element so nt_ui_inspector shows
      * "group" in the tree. Clay auto-assigns the id; fetch it post-open via
