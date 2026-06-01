@@ -3206,8 +3206,13 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_get_bbox: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_get_bbox: id must be non-zero (0 = no widget)");
     /* Thin wrapper: raw prev-frame LAYOUT bbox (Y-down). On miss Clay returns a
-     * zeroed box with found == false (D-56-09). */
+     * zeroed box with found == false (D-56-09). Snapshot+restore Clay current
+     * context so the read uses THIS ctx's clay regardless of which ctx the
+     * caller had active (multi-ctx safety, REVIEW-2 P2-2). */
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
     const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
+    Clay_SetCurrentContext(saved);
     return (nt_ui_bbox_t){.x = d.boundingBox.x, .y = d.boundingBox.y, .width = d.boundingBox.width, .height = d.boundingBox.height, .found = d.found};
 }
 
