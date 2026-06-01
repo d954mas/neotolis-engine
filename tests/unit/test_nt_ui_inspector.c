@@ -228,11 +228,13 @@ static void test_inspector_many_widgets_safe(void) {
     nt_ui_inspector_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F); /* must not crash */
 }
 
-/* ---- Test 12: inspector_draw is SIDEBAR-ONLY -- does not touch the
- *      recorded hit-zone buffer (no double-draw / no consume). Pins the
- *      decoupling between nt_ui_inspector and nt_ui_debug_draw_hit_zones
- *      (review §1 fix: inspector must not call the overlay internally). */
-static void test_inspector_does_not_double_draw_zones(void) {
+/* ---- Test 12 (REWORKED): inspector_draw is a READER of the recorded zone
+ *      buffer -- it must not MUTATE it (no consume, no rewrite). It IS now
+ *      allowed (and expected) to forward the buffer to the hit-zone overlay
+ *      drawing helper when ctx->debug_recording is on (re-coupling fix:
+ *      F3 owns both the inspector panel AND the hit-zone visualization).
+ *      The buffer contents stay byte-identical after the inspector returns. */
+static void test_inspector_does_not_mutate_zone_buffer(void) {
     /* Arrange: record one hit-zone via a button under the mouse. */
     nt_ui_debug_set_recording(s_fx.ctx, true);
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -260,16 +262,15 @@ static void test_inspector_does_not_double_draw_zones(void) {
 
     const uint32_t zone_count_before = nt_ui_debug_get_zone_count(s_fx.ctx);
     TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1U, zone_count_before);
-    /* Snapshot zone[0] -- inspector must not mutate the zone buffer. */
+    /* Snapshot zone[0] -- inspector must not MUTATE the zone buffer. */
     const nt_ui_debug_zone_t z_before = s_fx.ctx->debug_zones[0];
 
-    /* Act: draw the inspector. */
+    /* Act: draw the inspector. Inspector NOW also calls the overlay
+     * internally (debug_recording is on) -- but it only READS the zones. */
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_inspector_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
 
-    /* Assert: zone count is unchanged (inspector neither adds nor drops
-     * zones), and zone[0] content is byte-identical (inspector is a pure
-     * reader). This pins "inspector draws sidebar only". */
+    /* Assert: zone count is unchanged, zone[0] is byte-identical. */
     const uint32_t zone_count_after = nt_ui_debug_get_zone_count(s_fx.ctx);
     TEST_ASSERT_EQUAL_UINT32(zone_count_before, zone_count_after);
     TEST_ASSERT_EQUAL_MEMORY(&z_before, &s_fx.ctx->debug_zones[0], sizeof z_before);
@@ -288,6 +289,6 @@ int main(void) {
     RUN_TEST(test_inspector_inactive_no_crash);
     RUN_TEST(test_inspector_zero_widgets_safe);
     RUN_TEST(test_inspector_many_widgets_safe);
-    RUN_TEST(test_inspector_does_not_double_draw_zones);
+    RUN_TEST(test_inspector_does_not_mutate_zone_buffer);
     return UNITY_END();
 }

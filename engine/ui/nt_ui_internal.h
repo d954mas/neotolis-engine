@@ -189,4 +189,57 @@ nt_ui_inspector_element_view_t nt_ui_internal_get_layout_element_view(const nt_u
  * in the per-frame widget_registry. Returns 0 if no ctx is in-frame. */
 uint32_t nt_ui_internal_current_open_element_id(void);
 
+/* Phase 56 ext rework (Clay debug view port): DFS pre-order entry for the
+ * inspector. Mirrors the rows emitted by Clay's Clay__RenderDebugLayoutElementsList
+ * (clay.h:3151) with depth, id-string, bbox, offscreen flag, and element-config
+ * type bitmask (1<<Clay__ElementConfigType bit per config attached). The inspector
+ * walks these in declaration order to render the element tree without seeing
+ * Clay_LayoutElement directly. id_string is borrowed from Clay's
+ * layoutElementIdStrings array -- lifetime extends through the next nt_ui_begin. */
+typedef struct nt_ui_inspector_tree_row {
+    const char *id_string; /* NUL-not-guaranteed; see id_string_len. Borrowed from Clay's layoutElementIdStrings -- lifetime through next nt_ui_begin. */
+    const char *text_chars; /* NULL unless is_text -- borrowed from textElementData */
+    uint32_t id;
+    float bbox_x, bbox_y, bbox_w, bbox_h; /* Clay Y-down layout bbox */
+    uint16_t id_string_len;
+    uint16_t text_len;
+    uint8_t depth;
+    uint8_t config_mask; /* bit0=Shared bit1=Text bit2=Aspect bit3=Image bit4=Floating bit5=Clip bit6=Border bit7=Custom */
+    uint8_t offscreen;
+    uint8_t is_text; /* element has CLAY__ELEMENT_CONFIG_TYPE_TEXT */
+} nt_ui_inspector_tree_row_t;
+
+/* Fill out[] with up to out_cap pre-order rows; returns count written. ctx
+ * must have just completed nt_ui_end (Clay_EndLayout invoked -- otherwise no
+ * tree is solved). Sets Clay current context internally and restores on exit. */
+int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspector_tree_row_t *out, int32_t out_cap);
+
+/* Layout config of a single element (for the element-info pane). Looked up by
+ * the Clay-assigned id (e.g. from a tree row). found = false if unknown. */
+typedef struct nt_ui_inspector_element_info {
+    bool found;
+    /* Bounding box (Clay Y-down). */
+    float bbox_x, bbox_y, bbox_w, bbox_h;
+    /* Layout config bits. */
+    uint8_t layout_direction; /* 0=LTR 1=TTB (matches Clay_LayoutDirection enum) */
+    uint16_t padding_l, padding_r, padding_t, padding_b;
+    uint16_t child_gap;
+    uint8_t child_align_x; /* 0=L 1=C 2=R */
+    uint8_t child_align_y; /* 0=T 1=C 2=B */
+    /* Element-id string (borrowed). */
+    const char *id_string;
+    uint16_t id_string_len;
+    uint8_t config_mask;
+    /* For SHARED config: background RGBA + corner-radius. */
+    float bg_r, bg_g, bg_b, bg_a;
+    float corner_tl, corner_tr, corner_bl, corner_br;
+    /* For TEXT config: font_size, color, alignment label. */
+    uint16_t text_font_size;
+    uint16_t text_font_id;
+    float text_color_r, text_color_g, text_color_b, text_color_a;
+    uint8_t text_align; /* 0=LEFT 1=CENTER 2=RIGHT */
+} nt_ui_inspector_element_info_t;
+
+nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_context_t *ctx, uint32_t id);
+
 #endif /* NT_UI_INTERNAL_H */

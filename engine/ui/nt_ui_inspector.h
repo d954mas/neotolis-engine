@@ -1,38 +1,39 @@
 #ifndef NT_UI_INSPECTOR_H
 #define NT_UI_INSPECTOR_H
 
-/* Phase 56 ext (CHUNK E): nt_ui_inspector -- engine-extended debug view.
+/* Phase 56 ext rework: nt_ui_inspector -- a Clay-styled debug view + engine
+ * extensions.
  *
- * Starting point: Clay's built-in Clay__RenderDebugView (clay.h ~line 3392)
- * which shows an element-tree sidebar + selection details + bbox highlight.
- * Port path chosen: HYBRID -- we DO NOT copy ~500 lines of Clay internals.
- * Instead we walk Clay's layout-elements array through the same internal
- * pointers Clay's debug view reads from (Clay_Context.layoutElements +
- * layoutElementsHashMapInternal) and render our OWN sidebar via the public
- * CLAY({...}) macros. This isolates the Clay-internal dependency to a thin
- * iteration helper; sidebar layout is owned by our code so Clay upgrades
- * only touch the iteration cursor.
+ * Design ported from Clay's built-in `Clay__RenderDebugView` (deps/clay/clay.h:
+ * lines ~3392-3800 -- the floating right-pinned debug panel with element tree,
+ * collapse indicators, config-type pills, and per-element info pane). Clay is
+ * zlib-licensed; the visual structure (colors `CLAY__DEBUGVIEW_COLOR_1..4`,
+ * row heights, layout proportions, info-pane attribute rows) is reproduced
+ * here as faithfully as Clay's source supports for a post-walk overlay
+ * (Clay's own debug view runs INSIDE the declaration phase via CLAY({...})
+ * macros; ours runs AFTER nt_ui_walk and emits sprite + text commands
+ * directly through our renderers, which keeps the inspector callable in the
+ * same place as nt_stats_draw).
  *
- * Extensions on TOP of Clay's debug view:
- *   1) Widget-type column from nt_ui_widget_lookup (button/image/panel/group);
- *      labels render as "label(text)"; plain Clay elements as "(plain)".
- *   2) Hit-zone column: for elements whose id is in debug_zones (i.e. the
- *      game queried interaction on them), the row shows a "has hit-zone"
- *      badge + the padded bbox dimensions. The inspector draws SIDEBAR
- *      ONLY; the game calls nt_ui_debug_draw_hit_zones explicitly for the
- *      overlay. The two debug aids are independent and composable.
- *   3) The sidebar uses world-space (GL Y-up) emit -- same target contract
- *      as nt_ui_walk.
+ * Extensions ON TOP of the Clay design:
+ *   1) Widget-type pill per row -- pulled from ctx->widget_registry: button /
+ *      image / label / panel / group (or "(plain Clay)" for raw CLAY).
+ *   2) Hit-zone overlay -- the inspector calls nt_ui_debug_draw_hit_zones at
+ *      the end of its draw when debug_recording is on. This RE-COUPLES the
+ *      inspector and the overlay: F3 toggles both, F1 is redundant.
  *
  * Public API:
- *   set_active / is_active: persistent toggle (zero overhead when off).
- *   draw: HUD-style overlay (renderer flushed before return). Must be called
- *     AFTER nt_ui_walk, BEFORE nt_gfx_end_pass. Same sprite_material binding
- *     contract as nt_ui_debug_draw_hit_zones.
+ *   set_active / is_active  -- persistent toggle (zero overhead when off).
+ *   draw                    -- call AFTER nt_ui_walk, BEFORE nt_gfx_end_pass.
  *
- * Tests: see test_nt_ui_inspector.c (widget_registry slot collision,
- * register/lookup roundtrip, reset each begin, draw no-crash). The visual
- * output is verified in ui_buttons_demo (F3 toggles). */
+ * The inspector reads Clay state (layoutElements + hashmap + idStrings) via
+ * nt_ui_internal_collect_tree_rows / nt_ui_internal_get_element_info -- those
+ * accessors live in nt_ui.c next to CLAY_IMPLEMENTATION, so the inspector TU
+ * never sees Clay private types directly.
+ *
+ * Tests: tests/unit/test_nt_ui_inspector.c -- widget_registry (untouched) +
+ * inspector toggle + no-crash on zero/many widgets. The visual look is
+ * verified in ui_buttons_demo (F3 toggle). */
 
 #include <stdbool.h>
 
@@ -41,21 +42,20 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* Toggle the inspector. Default off (no per-frame tree walk, no draws).
- * When on, nt_ui_inspector_draw renders the SIDEBAR ONLY. The hit-zone
- * overlay is independent -- the game calls nt_ui_debug_draw_hit_zones
- * explicitly when it wants zones drawn. */
+/* Toggle the inspector. Default off (no per-frame draws). When on,
+ * nt_ui_inspector_draw renders the Clay-styled element tree + info pane AND,
+ * if ctx->debug_recording is true, the hit-zone overlay on top of the
+ * declared widgets. */
 void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on);
 bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx);
 
-/* Render the inspector sidebar (call AFTER nt_ui_walk, BEFORE end_pass).
+/* Render the inspector (call AFTER nt_ui_walk, BEFORE end_pass).
  * `target` MUST be the same nt_ui_target_t passed to nt_ui_walk -- the
- * sidebar emits in world space using the target's viewport for placement.
- * font + label_size are for the sidebar text; size <= 0 skips text
- * (rects only).
+ * inspector emits in world space using the same Y-flip and viewport.
+ * font + label_size drive the panel text; size <= 0 skips text (panel
+ * background still renders).
  *
- * Silent skip when inactive, or when ctx has no atlas/sprite_material bound.
- * Same per-call binding contract as nt_ui_debug_draw_hit_zones. */
+ * Silent skip when inactive, or when ctx has no atlas/sprite_material bound. */
 void nt_ui_inspector_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_font_t font, float label_size);
 
 #endif /* NT_UI_INSPECTOR_H */

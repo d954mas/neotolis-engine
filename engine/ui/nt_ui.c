@@ -403,6 +403,205 @@ nt_ui_inspector_element_view_t nt_ui_internal_get_layout_element_view(const nt_u
     }
     return v;
 }
+
+/* Map Clay's CLAY__ELEMENT_CONFIG_TYPE_* bitmask (Clay__ElementConfigType) to
+ * our exposed 8-bit mask. Order mirrors the Clay__DebugGetElementConfigTypeLabel
+ * switch at clay.h:3130 (Shared / Text / Aspect / Image / Floating / Clip /
+ * Border / Custom). */
+static uint8_t inspector_element_config_mask(Clay_LayoutElement *el) {
+    uint8_t mask = 0U;
+    for (int32_t i = 0; i < el->elementConfigs.length; ++i) {
+        Clay_ElementConfig *cfg = Clay__ElementConfigArraySlice_Get(&el->elementConfigs, i);
+        switch (cfg->type) {
+        case CLAY__ELEMENT_CONFIG_TYPE_SHARED:
+            mask |= 1U << 0U;
+            break;
+        case CLAY__ELEMENT_CONFIG_TYPE_TEXT:
+            mask |= 1U << 1U;
+            break;
+        case CLAY__ELEMENT_CONFIG_TYPE_ASPECT:
+            mask |= 1U << 2U;
+            break;
+        case CLAY__ELEMENT_CONFIG_TYPE_IMAGE:
+            mask |= 1U << 3U;
+            break;
+        case CLAY__ELEMENT_CONFIG_TYPE_FLOATING:
+            mask |= 1U << 4U;
+            break;
+        case CLAY__ELEMENT_CONFIG_TYPE_CLIP:
+            mask |= 1U << 5U;
+            break;
+        case CLAY__ELEMENT_CONFIG_TYPE_BORDER:
+            mask |= 1U << 6U;
+            break;
+        case CLAY__ELEMENT_CONFIG_TYPE_CUSTOM:
+            mask |= 1U << 7U;
+            break;
+        default:
+            break;
+        }
+    }
+    return mask;
+}
+
+/* DFS pre-order tree walk -- mirrors Clay__RenderDebugLayoutElementsList
+ * (clay.h:3151) but writes flat rows to caller-owned storage instead of
+ * emitting CLAY({...}) macros. Depth is tracked via a small explicit stack
+ * (cap matches Clay's reusableElementIndexBuffer depth budget). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspector_tree_row_t *out, int32_t out_cap) {
+    NT_ASSERT(ctx != NULL && "nt_ui_internal_collect_tree_rows: ctx must be non-NULL");
+    NT_ASSERT(out != NULL && "nt_ui_internal_collect_tree_rows: out must be non-NULL");
+    NT_ASSERT(out_cap >= 0 && "nt_ui_internal_collect_tree_rows: out_cap must be >= 0");
+    if (ctx->clay == NULL || out_cap == 0) {
+        return 0;
+    }
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+
+    int32_t written = 0;
+    const int32_t roots = ctx->clay->layoutElementTreeRoots.length;
+
+    /* Explicit DFS stack: (element_index, depth, child_cursor). Cap matches
+     * Clay's reusableElementIndexBuffer headroom -- if it overflows we stop
+     * walking gracefully (inspector is observability). */
+    enum { STACK_CAP = 256 };
+    struct {
+        int32_t elem_idx;
+        uint8_t depth;
+        int32_t child_cursor;
+    } stack[STACK_CAP];
+    int32_t sp = 0;
+
+    for (int32_t r = 0; r < roots && written < out_cap; ++r) {
+        Clay__LayoutElementTreeRoot *root = Clay__LayoutElementTreeRootArray_Get(&ctx->clay->layoutElementTreeRoots, r);
+        if (sp >= STACK_CAP) {
+            break;
+        }
+        stack[sp].elem_idx = root->layoutElementIndex;
+        stack[sp].depth = 0U;
+        stack[sp].child_cursor = -1;
+        sp++;
+
+        while (sp > 0 && written < out_cap) {
+            int32_t top = sp - 1;
+            Clay_LayoutElement *el = Clay_LayoutElementArray_Get(&ctx->clay->layoutElements, stack[top].elem_idx);
+            if (stack[top].child_cursor < 0) {
+                /* First visit -- emit row. */
+                nt_ui_inspector_tree_row_t *row = &out[written++];
+                memset(row, 0, sizeof *row);
+                row->id = el->id;
+                row->depth = stack[top].depth;
+                row->config_mask = inspector_element_config_mask(el);
+                Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(el->id);
+                if (item != NULL) {
+                    row->bbox_x = item->boundingBox.x;
+                    row->bbox_y = item->boundingBox.y;
+                    row->bbox_w = item->boundingBox.width;
+                    row->bbox_h = item->boundingBox.height;
+                    row->offscreen = (uint8_t)Clay__ElementIsOffscreen(&item->boundingBox);
+                }
+                Clay_String idStr = ctx->clay->layoutElementIdStrings.internalArray[stack[top].elem_idx];
+                row->id_string = idStr.chars;
+                row->id_string_len = (uint16_t)((idStr.length < 0) ? 0 : idStr.length);
+                row->is_text = (uint8_t)Clay__ElementHasConfig(el, CLAY__ELEMENT_CONFIG_TYPE_TEXT);
+                if (row->is_text) {
+                    Clay__TextElementData *td = el->childrenOrTextContent.textElementData;
+                    if (td != NULL) {
+                        row->text_chars = td->text.chars;
+                        row->text_len = (uint16_t)((td->text.length < 0) ? 0 : td->text.length);
+                    }
+                }
+                stack[top].child_cursor = 0;
+                if (row->is_text) {
+                    /* TEXT element has no recursable children -- pop now. */
+                    sp--;
+                    continue;
+                }
+            }
+            /* Push next child or pop. */
+            const int32_t childCount = el->childrenOrTextContent.children.length;
+            if (stack[top].child_cursor < childCount) {
+                int32_t child_idx = el->childrenOrTextContent.children.elements[stack[top].child_cursor];
+                stack[top].child_cursor++;
+                if (sp >= STACK_CAP) {
+                    /* Stack overflow -- stop walking. */
+                    sp = 0;
+                    break;
+                }
+                if (stack[top].depth >= UINT8_MAX - 1U) {
+                    /* Skip pushing -- depth would overflow. */
+                    continue;
+                }
+                stack[sp].elem_idx = child_idx;
+                stack[sp].depth = (uint8_t)(stack[top].depth + 1U);
+                stack[sp].child_cursor = -1;
+                sp++;
+            } else {
+                sp--;
+            }
+        }
+    }
+
+    Clay_SetCurrentContext(saved);
+    return written;
+}
+
+nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_context_t *ctx, uint32_t id) {
+    NT_ASSERT(ctx != NULL && "nt_ui_internal_get_element_info: ctx must be non-NULL");
+    nt_ui_inspector_element_info_t info = {0};
+    if (ctx->clay == NULL || id == 0U) {
+        return info;
+    }
+    Clay_Context *saved = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
+    Clay_LayoutElementHashMapItem *item = Clay__GetHashMapItem(id);
+    if (item == NULL || item->layoutElement == NULL) {
+        Clay_SetCurrentContext(saved);
+        return info;
+    }
+    info.found = true;
+    info.bbox_x = item->boundingBox.x;
+    info.bbox_y = item->boundingBox.y;
+    info.bbox_w = item->boundingBox.width;
+    info.bbox_h = item->boundingBox.height;
+    info.id_string = item->elementId.stringId.chars;
+    info.id_string_len = (uint16_t)((item->elementId.stringId.length < 0) ? 0 : item->elementId.stringId.length);
+    Clay_LayoutConfig *lc = item->layoutElement->layoutConfig;
+    info.layout_direction = (uint8_t)lc->layoutDirection;
+    info.padding_l = lc->padding.left;
+    info.padding_r = lc->padding.right;
+    info.padding_t = lc->padding.top;
+    info.padding_b = lc->padding.bottom;
+    info.child_gap = lc->childGap;
+    info.child_align_x = (uint8_t)lc->childAlignment.x;
+    info.child_align_y = (uint8_t)lc->childAlignment.y;
+    info.config_mask = inspector_element_config_mask(item->layoutElement);
+
+    for (int32_t i = 0; i < item->layoutElement->elementConfigs.length; ++i) {
+        Clay_ElementConfig *cfg = Clay__ElementConfigArraySlice_Get(&item->layoutElement->elementConfigs, i);
+        if (cfg->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
+            info.bg_r = cfg->config.sharedElementConfig->backgroundColor.r;
+            info.bg_g = cfg->config.sharedElementConfig->backgroundColor.g;
+            info.bg_b = cfg->config.sharedElementConfig->backgroundColor.b;
+            info.bg_a = cfg->config.sharedElementConfig->backgroundColor.a;
+            info.corner_tl = cfg->config.sharedElementConfig->cornerRadius.topLeft;
+            info.corner_tr = cfg->config.sharedElementConfig->cornerRadius.topRight;
+            info.corner_bl = cfg->config.sharedElementConfig->cornerRadius.bottomLeft;
+            info.corner_br = cfg->config.sharedElementConfig->cornerRadius.bottomRight;
+        } else if (cfg->type == CLAY__ELEMENT_CONFIG_TYPE_TEXT) {
+            info.text_font_size = cfg->config.textElementConfig->fontSize;
+            info.text_font_id = cfg->config.textElementConfig->fontId;
+            info.text_color_r = cfg->config.textElementConfig->textColor.r;
+            info.text_color_g = cfg->config.textElementConfig->textColor.g;
+            info.text_color_b = cfg->config.textElementConfig->textColor.b;
+            info.text_color_a = cfg->config.textElementConfig->textColor.a;
+            info.text_align = (uint8_t)cfg->config.textElementConfig->textAlignment;
+        }
+    }
+    Clay_SetCurrentContext(saved);
+    return info;
+}
 // #endregion
 
 // #region widget_registry (CHUNK E)
