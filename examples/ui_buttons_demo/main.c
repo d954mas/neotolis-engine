@@ -309,11 +309,14 @@ static void try_bind_resources(void) {
 
 // #region grid cell sizing
 /* Each cell = vertical stack: title text + sub text + button.
- * Cell is 360 wide so the 320 button has 20 px breathing room. */
+ * Cell is 360 wide so the 320 button has 20 px breathing room. Button
+ * bumped 120 -> 180 per user feedback ("кнопки сделаем больше по высоте")
+ * so the Kenney slice9 art reads clearly + icons aren't dwarfed. Cell H
+ * bumped proportionally (240 -> 320) so title+sub still fit above. */
 #define CELL_W 360
-#define CELL_H 240
+#define CELL_H 320
 #define BTN_W 320
-#define BTN_H 120
+#define BTN_H 180
 
 /* Macro to declare the title + sub strip of a cell (callable inside a CLAY block).
  * The cell itself + the button slot are declared inline in the caller. */
