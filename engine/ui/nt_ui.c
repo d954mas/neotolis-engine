@@ -1025,10 +1025,13 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
         highlightedRow = -1;
     }
     cdv_layout_data_t layoutData = {0};
+    /* RIGHT_CENTER/RIGHT_CENTER (overlay) instead of Clay's LEFT_CENTER/RIGHT_CENTER (side-by-side):
+     * engine disables Clay debug mode so the root is full-width and the verbatim attach
+     * would land at [screen.w, screen.w + panel_w] -- entirely off-screen. */
     CLAY({.id = CLAY_ID("ntInsp_Root"),
           .layout = {.sizing = {CLAY_SIZING_FIXED((float)CDV_PANEL_WIDTH), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
           .floating = {.zIndex = 32765,
-                       .attachPoints = {.element = CLAY_ATTACH_POINT_LEFT_CENTER, .parent = CLAY_ATTACH_POINT_RIGHT_CENTER},
+                       .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_CENTER, .parent = CLAY_ATTACH_POINT_RIGHT_CENTER},
                        .attachTo = CLAY_ATTACH_TO_ROOT,
                        .clipTo = CLAY_CLIP_TO_ATTACHED_PARENT},
           .border = {.color = CDV_COLOR_3, .width = {.bottom = 1}}}) {
