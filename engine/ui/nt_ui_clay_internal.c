@@ -914,7 +914,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
      * side-by-side attach would land off-screen. */
     CLAY({.id = CLAY_ID("ntInsp_Root"),
           .layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
-          .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL),
+          .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_BG),
           .floating = {.zIndex = 32765,
                        .attachPoints = {.element = CLAY_ATTACH_POINT_RIGHT_CENTER, .parent = CLAY_ATTACH_POINT_RIGHT_CENTER},
                        .attachTo = CLAY_ATTACH_TO_ROOT,

@@ -106,12 +106,7 @@ typedef struct {
 #define NT_UI_LAYER_DEBUG_HIGHLIGHT ((nt_ui_layer_t)240)
 #define NT_UI_LAYER_DEBUG_PANEL_BG ((nt_ui_layer_t)250)
 #define NT_UI_LAYER_DEBUG_PANEL_TEXT ((nt_ui_layer_t)251)
-_Static_assert(NT_UI_LAYER_DEBUG_HIGHLIGHT >= 240 && NT_UI_LAYER_DEBUG_HIGHLIGHT <= 255, "NT_UI_LAYER_DEBUG_HIGHLIGHT must be in engine-reserved layer range 240-255");
-_Static_assert(NT_UI_LAYER_DEBUG_PANEL_BG >= 240 && NT_UI_LAYER_DEBUG_PANEL_BG <= 255, "NT_UI_LAYER_DEBUG_PANEL_BG must be in engine-reserved layer range 240-255");
-_Static_assert(NT_UI_LAYER_DEBUG_PANEL_TEXT >= 240 && NT_UI_LAYER_DEBUG_PANEL_TEXT <= 255, "NT_UI_LAYER_DEBUG_PANEL_TEXT must be in engine-reserved layer range 240-255");
-/* Legacy aliases — new code should pick the BG/TEXT split explicitly. */
-#define NT_UI_LAYER_DEBUG_PANEL NT_UI_LAYER_DEBUG_PANEL_BG
-#define NT_UI_LAYER_DEBUG NT_UI_LAYER_DEBUG_PANEL_BG
+_Static_assert(NT_UI_LAYER_DEBUG_HIGHLIGHT >= 240 && NT_UI_LAYER_DEBUG_PANEL_BG >= 240 && NT_UI_LAYER_DEBUG_PANEL_TEXT >= 240, "debug layers must be in engine-reserved range 240-255");
 #endif /* NT_UI_DEBUG_TOOLS */
 
 /* Macros allocate from nt_mem_scratch (frame arena) so the pointer stays valid
@@ -287,9 +282,6 @@ void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, v
 /* Precompute once per id (game caches): wraps Clay_GetElementId, returns the
  * uint32 hash (never 0 -- Clay returns hash+1). Asserts s != NULL. */
 uint32_t nt_ui_id(const char *s);
-/* Per-frame string convenience (hashes each call; also names the Clay debug
- * overlay). Identical result to nt_ui_id; kept distinct for intent. */
-uint32_t nt_ui_id_str(const char *s);
 
 /* Prev-frame LAYOUT bbox (thin Clay_GetElementData wrapper; raw layout space,
  * Y-down). found == false on the first frame an id is seen. */

@@ -1920,8 +1920,6 @@ uint32_t nt_ui_id(const char *s) {
     return Clay_GetElementId((Clay_String){.length = (int32_t)strlen(s), .chars = s}).id;
 }
 
-uint32_t nt_ui_id_str(const char *s) { return nt_ui_id(s); }
-
 nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_get_bbox: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_get_bbox: id must be non-zero (0 = no widget)");

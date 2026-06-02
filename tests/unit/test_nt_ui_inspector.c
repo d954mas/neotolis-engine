@@ -773,7 +773,7 @@ static void test_inspector_collapse_hides_children(void) {
     TEST_ASSERT_EQUAL_INT32(full_growth, restored_growth);
 }
 
-/* ---- Test 15j: inspector emits on NT_UI_LAYER_DEBUG_PANEL ----
+/* ---- Test 15j: inspector emits on NT_UI_LAYER_DEBUG_PANEL_BG ----
  * Pins the panel-vs-highlight layer relationship by checking the macro value. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_root_emitted_on_debug_layer(void) {
@@ -790,7 +790,7 @@ static void test_inspector_root_emitted_on_debug_layer(void) {
     TEST_ASSERT_GREATER_THAN_INT32(0, count);
 
     /* Pin macro value 250 so a silent change is caught. */
-    TEST_ASSERT_EQUAL_UINT8(250U, (uint8_t)NT_UI_LAYER_DEBUG_PANEL);
+    TEST_ASSERT_EQUAL_UINT8(250U, (uint8_t)NT_UI_LAYER_DEBUG_PANEL_BG);
     /* Inspector emit ran (root was added to layoutElements). */
     nt_ui_inspector_element_view_t v;
     bool found_root = false;
@@ -804,26 +804,24 @@ static void test_inspector_root_emitted_on_debug_layer(void) {
     TEST_ASSERT_TRUE_MESSAGE(found_root, "ntInsp_Root element must be present after active emit");
 }
 
-/* ---- Test 15k: NT_UI_LAYER_DEBUG_PANEL is 250 and sits above typical game layers ---- */
+/* ---- Test 15k: NT_UI_LAYER_DEBUG_PANEL_BG is 250 and sits above typical game layers ---- */
 static void test_layer_debug_value_above_game_layers(void) {
-    /* Layer is uint8_t (0..255). NT_UI_LAYER_DEBUG_PANEL must be > 10 (typical
+    /* Layer is uint8_t (0..255). NT_UI_LAYER_DEBUG_PANEL_BG must be > 10 (typical
      * game UI uses 0..~10 for BG/IMG/TEXT/HUD) and < 255 (leave 251..255
      * headroom for future engine overlays). */
-    TEST_ASSERT_GREATER_THAN_UINT8(10U, (uint8_t)NT_UI_LAYER_DEBUG_PANEL);
-    TEST_ASSERT_LESS_THAN_UINT8(255U, (uint8_t)NT_UI_LAYER_DEBUG_PANEL);
+    TEST_ASSERT_GREATER_THAN_UINT8(10U, (uint8_t)NT_UI_LAYER_DEBUG_PANEL_BG);
+    TEST_ASSERT_LESS_THAN_UINT8(255U, (uint8_t)NT_UI_LAYER_DEBUG_PANEL_BG);
 }
 
 /* ---- Test 15k-bis: highlight layer sits BELOW the panel layer ----
  * Highlight at 240, panel at 250 — both inequalities (layer + zIndex) matter. */
 static void test_highlight_layer_below_panel_layer(void) {
-    TEST_ASSERT_LESS_THAN_UINT8((uint8_t)NT_UI_LAYER_DEBUG_PANEL, (uint8_t)NT_UI_LAYER_DEBUG_HIGHLIGHT);
+    TEST_ASSERT_LESS_THAN_UINT8((uint8_t)NT_UI_LAYER_DEBUG_PANEL_BG, (uint8_t)NT_UI_LAYER_DEBUG_HIGHLIGHT);
     /* Highlight still above typical game UI (0..~10). */
     TEST_ASSERT_GREATER_THAN_UINT8(10U, (uint8_t)NT_UI_LAYER_DEBUG_HIGHLIGHT);
     /* Concrete values pin the constants so a silent edit is caught. */
     TEST_ASSERT_EQUAL_UINT8(240U, (uint8_t)NT_UI_LAYER_DEBUG_HIGHLIGHT);
-    TEST_ASSERT_EQUAL_UINT8(250U, (uint8_t)NT_UI_LAYER_DEBUG_PANEL);
-    /* Legacy alias still resolves to PANEL for backward compat. */
-    TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_UI_LAYER_DEBUG_PANEL, (uint8_t)NT_UI_LAYER_DEBUG);
+    TEST_ASSERT_EQUAL_UINT8(250U, (uint8_t)NT_UI_LAYER_DEBUG_PANEL_BG);
 }
 
 /* ---- Test 15l: clicking the TEXT-CONTENT row selects the parent's id ----
