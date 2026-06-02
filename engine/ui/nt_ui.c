@@ -159,10 +159,11 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     Clay_SetCurrentContext(saved_ctx);
     const uint32_t max_m = (desc->max_markers > 0U) ? desc->max_markers : desc->max_elements * 2U;
     const size_t marker_bytes = NT_ALIGN_UP(sizeof(nt_ui_marker_t) * max_m, NT_UI_CACHE_LINE);
-    /* Walker pre-pass arrays sized to max_elements so the hot path never allocs. */
+    /* Walker pre-pass arrays sized to max_elements so the hot path never allocs.
+     * sorted + sorted_temp = ping-pong buffers for the 2-pass radix sort. */
     const size_t baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
     const size_t sorted_bytes = NT_ALIGN_UP(sizeof(int32_t) * desc->max_elements, NT_UI_CACHE_LINE);
-    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + marker_bytes + baked_bytes + sorted_bytes + clay_bytes;
+    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + marker_bytes + baked_bytes + (2U * sorted_bytes) + clay_bytes;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -182,7 +183,7 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
 #endif
 
     const size_t ctx_size = NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE);
-    /* Layout: [ctx struct][markers][walker_baked][walker_sorted][Clay arena]. */
+    /* Layout: [ctx][markers][walker_baked][walker_sorted][walker_sorted_temp][Clay arena]. */
     ctx->max_elements = desc->max_elements;
     const uint32_t max_m = (desc->max_markers > 0U) ? desc->max_markers : desc->max_elements * 2U;
     const size_t marker_bytes = NT_ALIGN_UP(sizeof(nt_ui_marker_t) * max_m, NT_UI_CACHE_LINE);
@@ -193,8 +194,9 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->marker_count = 0;
     ctx->walker_baked = (nt_ui_baked_xform_t *)((char *)arena + ctx_size + marker_bytes);
     ctx->walker_sorted = (int32_t *)((char *)arena + ctx_size + marker_bytes + baked_bytes);
-    void *clay_mem = (char *)arena + ctx_size + marker_bytes + baked_bytes + sorted_bytes;
-    const size_t clay_size = arena_size - ctx_size - marker_bytes - baked_bytes - sorted_bytes;
+    ctx->walker_sorted_temp = (int32_t *)((char *)arena + ctx_size + marker_bytes + baked_bytes + sorted_bytes);
+    void *clay_mem = (char *)arena + ctx_size + marker_bytes + baked_bytes + (2U * sorted_bytes);
+    const size_t clay_size = arena_size - ctx_size - marker_bytes - baked_bytes - (2U * sorted_bytes);
 
     /* Stage max_elements via the Clay global so Clay_Initialize inherits it;
      * SetMaxElementCount writes per-ctx if current is non-NULL — null it first. */
@@ -1619,21 +1621,38 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
             /* ctx-preallocated, max_elements-sized -- no hot-path scratch alloc. */
             baked = ctx->walker_baked;
             /* Sort indices by nt_layout_index so marker drain sees declaration
-             * order regardless of Clay's z-sort on the render command array. */
+             * order regardless of Clay's z-sort on the render command array.
+             * Keys are uint16_t (max_elements ≤ UINT16_MAX asserted at create);
+             * LSD radix with 2× 8-bit passes is O(2n) regardless of input order. */
             int32_t *sorted = ctx->walker_sorted;
+            int32_t *temp = ctx->walker_sorted_temp;
             for (int32_t k = 0; k < seg_n; ++k) {
                 sorted[k] = k;
             }
-            // #region insertion sort by nt_layout_index
-            for (int32_t k = 1; k < seg_n; ++k) {
-                const int32_t key = sorted[k];
-                const int32_t key_li = arr->internalArray[i + key].nt_layout_index;
-                int32_t p = k - 1;
-                while (p >= 0 && arr->internalArray[i + sorted[p]].nt_layout_index > key_li) {
-                    sorted[p + 1] = sorted[p];
-                    --p;
+            // #region radix sort (2× 8-bit passes by nt_layout_index)
+            uint32_t bucket[256];
+            for (int pass = 0; pass < 2; ++pass) {
+                const int shift = pass * 8;
+                for (int b = 0; b < 256; ++b) {
+                    bucket[b] = 0U;
                 }
-                sorted[p + 1] = key;
+                for (int32_t k = 0; k < seg_n; ++k) {
+                    const uint32_t li = (uint32_t)arr->internalArray[i + sorted[k]].nt_layout_index;
+                    bucket[(li >> shift) & 0xFFU]++;
+                }
+                uint32_t total = 0U;
+                for (int b = 0; b < 256; ++b) {
+                    const uint32_t cnt = bucket[b];
+                    bucket[b] = total;
+                    total += cnt;
+                }
+                for (int32_t k = 0; k < seg_n; ++k) {
+                    const uint32_t li = (uint32_t)arr->internalArray[i + sorted[k]].nt_layout_index;
+                    temp[bucket[(li >> shift) & 0xFFU]++] = sorted[k];
+                }
+                int32_t *swap = sorted;
+                sorted = temp;
+                temp = swap;
             }
             // #endregion
             for (int32_t k = 0; k < seg_n; ++k) {

@@ -142,9 +142,11 @@ struct nt_ui_context {
     uint32_t max_markers;
 
     /* Walker pre-pass scratch — preallocated, max_elements-sized so the hot
-     * path never touches the per-frame scratch arena. */
+     * path never touches the per-frame scratch arena. walker_sorted_temp
+     * is the ping-pong destination for the 2-pass radix sort. */
     nt_ui_baked_xform_t *walker_baked;
     int32_t *walker_sorted;
+    int32_t *walker_sorted_temp;
 
     /* Per-walk metrics. Walker writes; nt_ui_get_last_walk_* reads. */
     uint32_t last_walk_draw_call_delta;
