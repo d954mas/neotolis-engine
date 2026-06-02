@@ -4,9 +4,7 @@
 #include <string.h>
 
 #include "clay.h"
-#include "graphics/nt_gfx.h"
 #include "renderers/nt_sprite_renderer.h"
-#include "renderers/nt_text_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_walker_fixture.h"
 #include "ui/nt_ui.h"

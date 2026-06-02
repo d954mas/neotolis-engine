@@ -19,11 +19,8 @@
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <string.h>
 
 #include "clay.h"
-#include "core/nt_assert.h"
-#include "input/nt_input.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_test_arena.h"
 #include "test_helpers/ui_walker_fixture.h"
