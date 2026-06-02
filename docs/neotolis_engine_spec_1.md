@@ -126,13 +126,20 @@ If a decision can be deferred without loss of base architecture — it is deferr
   publicly-promised surface; bumping Clay can require coordinated
   game-side changes.
 
-  When `NT_UI_DEBUG_TOOLS=ON` the inspector additionally depends on
-  ~30 Clay **private** symbols (`Clay__*` statics and `Clay_Context`
-  internal arrays — accessed via thin wrappers in
+  Even with `NT_UI_DEBUG_TOOLS=OFF`, nt_ui touches ~10 Clay **private**
+  symbols (`Clay__OpenElement` / `Clay__ConfigureOpenElement` /
+  `Clay__CloseElement`, the `Clay__MeasureText` callback hookup, a few
+  `Clay__default*` size constants) — all routed through thin wrappers in
   `engine/ui/nt_ui_clay_internal.c`, the exclusive `CLAY_IMPLEMENTATION`
-  TU). This is the verbatim Clay debug-view port; it raises the Clay
-  upgrade cost for debug builds. Production builds (`OFF`) carry the
-  public dependency only.)
+  TU. The widget composition pattern (button / panel / group `_begin`)
+  needs `nt_ui_widget_register` to fire BETWEEN `Open` and `Configure`,
+  which Clay's public `CLAY({...})` macro doesn't expose. The wrappers
+  are the smallest possible escape hatch.
+
+  With `NT_UI_DEBUG_TOOLS=ON` this expands by ~30 more Clay private
+  symbols for the verbatim Clay debug-view port (the inspector body
+  lives in the same TU). Either way, bumping Clay can require
+  coordinated nt_ui-side changes.)
 - hot reload of compiled native/WASM code
 - generic reflection-heavy system architecture
 - WebGL 1 support
