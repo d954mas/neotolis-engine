@@ -27,6 +27,7 @@ int32_t nt_ui_clay_priv_default_max_measure_text_word_cache_count(void);
  * between open and configure, which the CLAY({...}) macro doesn't allow. */
 void nt_ui_clay_priv_open_element(void);
 void nt_ui_clay_priv_configure_open_element(Clay_ElementDeclaration decl);
+void nt_ui_clay_priv_close_element(void);
 // #endregion
 
 // #region clay_context primitive accessors

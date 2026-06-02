@@ -125,7 +125,7 @@ bool nt_ui_button_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_button_end: ctx must be non-NULL");
     NT_ASSERT(ctx->pending_button.active && "nt_ui_button_end without begin");
 
-    Clay__CloseElement();
+    nt_ui_clay_priv_close_element();
     /* Reverse push order from begin (opacity then transform). */
     nt_ui_pop_opacity(ctx);
     nt_ui_pop_transform(ctx);

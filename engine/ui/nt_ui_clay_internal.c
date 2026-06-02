@@ -26,6 +26,8 @@ int32_t nt_ui_clay_priv_default_max_measure_text_word_cache_count(void) { return
 void nt_ui_clay_priv_open_element(void) { Clay__OpenElement(); }
 
 void nt_ui_clay_priv_configure_open_element(Clay_ElementDeclaration decl) { Clay__ConfigureOpenElement(decl); }
+
+void nt_ui_clay_priv_close_element(void) { Clay__CloseElement(); }
 // #endregion
 
 // #region clay_context primitive accessors

@@ -69,7 +69,7 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
 
 void nt_ui_panel_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_panel_end: ctx must be non-NULL");
-    Clay__CloseElement();
+    nt_ui_clay_priv_close_element();
     (void)ctx;
 }
 
@@ -100,6 +100,6 @@ void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, c
 
 void nt_ui_group_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_group_end: ctx must be non-NULL");
-    Clay__CloseElement();
+    nt_ui_clay_priv_close_element();
     (void)ctx;
 }
