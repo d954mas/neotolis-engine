@@ -146,12 +146,12 @@ static const nt_ui_button_style_t g_btn_scale_style = {
     .slice9_scale = 1.0F,
 };
 
-/* (c) VISUAL SWAP: bg_region differs per state (blue/green); bg_region 0
+/* (c) VISUAL SWAP: bg_region differs per state (blue/green/red); bg_region 0
  * in the const = sentinel, patched at runtime once atlas indices are known. */
 static const nt_ui_button_style_t g_btn_swap_style = {
     .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
     .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
-    .pressed = {.bg_region = 0, .bg_tint = 0xFFCCCCCC, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
+    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
     .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
     .transition_speed = 12.0F,
     .hit_padding_lrtb = {16, 16, 16, 16},
@@ -211,6 +211,7 @@ static bool s_font_bound;
 static uint32_t s_white_region_idx;
 static uint32_t s_button_blue_idx;
 static uint32_t s_button_green_idx;
+static uint32_t s_button_red_idx;
 static uint32_t s_icon_bunny_idx;
 
 /* Reference-button runtime styles: const templates copied + bg_region patched
@@ -280,6 +281,9 @@ static void try_bind_resources(void) {
         s_button_green_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_GREEN.value);
         NT_ASSERT(s_button_green_idx != NT_ATLAS_INVALID_REGION);
 
+        s_button_red_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_BUTTON_RED.value);
+        NT_ASSERT(s_button_red_idx != NT_ATLAS_INVALID_REGION);
+
         s_icon_bunny_idx = nt_atlas_find_region(s_atlas_handle, ASSET_ATLAS_REGION_UI_BUTTONS_DEMO_ATLAS_ICON_BUNNY.value);
         NT_ASSERT(s_icon_bunny_idx != NT_ATLAS_INVALID_REGION);
 
@@ -302,7 +306,7 @@ static void try_bind_resources(void) {
         s_btn_swap = g_btn_swap_style;
         s_btn_swap.idle.bg_region = s_button_blue_idx;
         s_btn_swap.hover.bg_region = s_button_green_idx;
-        s_btn_swap.pressed.bg_region = s_button_green_idx;
+        s_btn_swap.pressed.bg_region = s_button_red_idx;
         s_btn_swap.disabled.bg_region = s_button_blue_idx;
 
         s_btn_nopad = g_btn_nopad_style;
@@ -452,7 +456,7 @@ static void declare_reference_buttons(void) {
 
             // #region (c) VISUAL SWAP
             CLAY(CELL_LAYOUT) {
-                CELL_LABELS("VISUAL SWAP blue<->green", "+16 px touch padding");
+                CELL_LABELS("VISUAL SWAP", "blue idle / green hover / red pressed");
                 CLAY(BTN_SLOT_LAYOUT) {
                     nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_swap, s_atlas_handle, &s_btn_swap, &s_btn_decl, true);
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "Swap", &g_btn_label_style);

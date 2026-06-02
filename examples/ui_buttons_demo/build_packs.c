@@ -88,10 +88,8 @@ int main(int argc, char *argv[]) {
 
     nt_builder_begin_atlas(ctx, "ui_buttons_demo_atlas", &atlas_opts);
 
-    /* Kenney buttons (384x128, 16px corners) -- TWO regions so the
-     * VISUAL-SWAP variant in main.c can swap bg_region per state
-     * (blue idle/disabled vs green hover/pressed). Mirrors the
-     * slice9_demo pattern (lines 108-117 of its build_packs.c). */
+    /* Kenney buttons (384x128, 16px corners). Three colors so VISUAL-SWAP can
+     * show idle=blue, hover=green, pressed=red. */
     nt_atlas_sprite_opts_t btn_opts = nt_atlas_sprite_opts_defaults();
     btn_opts.name = "button_blue";
     btn_opts.slice9_left = BUTTON_BORDER;
@@ -103,7 +101,10 @@ int main(int argc, char *argv[]) {
     btn_opts.name = "button_green";
     nt_builder_atlas_add(ctx, "examples/ui_buttons_demo/raw/button_green_depth.png", &btn_opts);
 
-    (void)printf("  Atlas: 2 buttons (384x128 s9:%d)\n", BUTTON_BORDER);
+    btn_opts.name = "button_red";
+    nt_builder_atlas_add(ctx, "examples/ui_buttons_demo/raw/button_red_depth.png", &btn_opts);
+
+    (void)printf("  Atlas: 3 buttons (384x128 s9:%d)\n", BUTTON_BORDER);
 
     /* White pixel for UI rects (debug overlay, borders, inspector sidebar). */
     static const uint8_t white_pixel[4] = {255, 255, 255, 255};
