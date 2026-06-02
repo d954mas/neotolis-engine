@@ -1,15 +1,5 @@
-/* GREEN tests for the nt_ui_button container widget (WIDGET-02/03/04, Plan 04).
- *
- * The button is a CONTAINER (panel clone + a Clay .id) whose content
- * (text / icon / icon+text) is composed as children via nt_ui_label /
- * nt_ui_image. This test focuses on:
- *   - Child composition: text-only / icon-only / icon+text -> count TEXT vs
- *     IMAGE render commands (the button bg is itself one IMAGE).
- *   - Stack balance: nt_ui_button_begin/end push+pop transform+opacity
- *     symmetrically on EVERY branch (incl. the disabled path), so the walker's
- *     transform/opacity stacks never underflow. Mirrors test_nt_ui_panel.c.
- * (Click-fires-once is covered by test_nt_ui_interaction per the VALIDATION map;
- * here transition_speed=0 makes the per-state apply deterministic/instant.) */
+/* Container widget tests: child composition (TEXT vs IMAGE counts), stack
+ * balance for transform/opacity on every branch (including disabled). */
 
 #include <math.h>
 #include <stdalign.h>
@@ -236,7 +226,7 @@ static void test_button_slice9_scale_asserts_negative(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* REVIEW-5 P1 regression guard: per-state visual fields must be finite + in range. */
+/* Per-state visual fields must be finite + in range. */
 static void try_bad_state(const nt_ui_button_style_t *bad) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);

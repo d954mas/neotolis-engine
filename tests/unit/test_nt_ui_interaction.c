@@ -372,11 +372,8 @@ static void test_query_is_idempotent(void) {
     (void)query_btn_frame(&f2); /* uses step under the hood */
     TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn"), nt_ui_test_capture_active_id(s_fx.ctx, 0));
 
-    /* Frame 3: release inside. The OLD bug was: first nt_ui_get_interaction
-     * call returned clicked=true and zeroed cap->active_id; the second call
-     * saw 0 and returned clicked=false. With the CQS split, calling
-     * nt_ui_query_interaction N times all return clicked=true and leave
-     * cap->active_id UNCHANGED (no step in this test = no commit). */
+    /* Frame 3: release inside. query is idempotent — N calls return identical
+     * clicked=true and leave cap->active_id unchanged (no step → no commit). */
     nt_pointer_t f3 = make_pointer(BTN_CX, BTN_CY, false, false, true);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1);
     declare_btn_element();

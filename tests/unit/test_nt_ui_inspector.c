@@ -198,18 +198,9 @@ static void test_image_widget_tagged(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 7b: nt_ui_label declaration auto-tags LABEL on the TEXT leaf ----
- * Regression pin: user reported the label widget pill was missing from the
- * inspector tree even though they could see the raw text content row.
- * Root cause: Clay__OpenTextElement appends a text element to layoutElements
- * but does NOT push it onto openLayoutElementStack -- so
- * current_open_element_id() returned the PARENT's id, not the text leaf's.
- * Calling nt_ui_widget_register(parent_id, &NT_UI_LABEL_DEF, ...) collided
- * with the parent's existing registration (button/panel/whatever).
- * Fix: nt_ui_label now uses last_emitted_element_id() which reads
- * layoutElements[length-1] -- the just-emitted text leaf -- and registers
- * NT_UI_LABEL_DEF against that id. The label's row in the inspector tree
- * now carries the "nt_label" pill. */
+/* nt_ui_label registers LABEL_DEF against the just-emitted text leaf id
+ * (last_emitted_element_id) — not the parent — so the pill lands on the
+ * text row, not on the button/panel that opened it. */
 static void test_label_widget_tagged_on_text_leaf(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
