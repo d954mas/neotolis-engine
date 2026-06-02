@@ -18,14 +18,13 @@ const nt_ui_widget_def_t NT_UI_BUTTON_DEF = {
     ._reserved = 0U,
 };
 
-static inline float clampf(float v, float lo, float hi) {
-    if (v < lo) {
-        return lo;
-    }
-    if (v > hi) {
-        return hi;
-    }
-    return v;
+/* Each per-state visual must be in render-safe ranges; caller bugs surface as
+ * "almost works" without these. Fail-early per AGENTS.md. */
+static void assert_state_valid(const nt_ui_btn_state_t *st, const char *which) {
+    (void)which;
+    NT_ASSERT(isfinite(st->scale) && st->scale > 0.0F && "nt_ui_button_begin: style.scale must be finite and > 0");
+    NT_ASSERT(isfinite(st->offset_x) && isfinite(st->offset_y) && "nt_ui_button_begin: style.offset must be finite");
+    NT_ASSERT(isfinite(st->opacity) && st->opacity >= 0.0F && st->opacity <= 1.0F && "nt_ui_button_begin: style.opacity must be finite in [0,1]");
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -36,6 +35,11 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(atlas.id != 0 && "nt_ui_button_begin: invalid atlas handle");
     NT_ASSERT(id != 0U && "nt_ui_button_begin: id 0 is the no-widget sentinel");
     NT_ASSERT(!ctx->pending_button.active && "nt_ui_button: nested buttons unsupported");
+    NT_ASSERT(isfinite(style->transition_speed) && style->transition_speed >= 0.0F && "nt_ui_button_begin: style.transition_speed must be finite >= 0");
+    assert_state_valid(&style->idle, "idle");
+    assert_state_valid(&style->hover, "hover");
+    assert_state_valid(&style->pressed, "pressed");
+    assert_state_valid(&style->disabled, "disabled");
     /* Engine owns id/image/backgroundColor/userData; caller's decl must leave these zero. */
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && "nt_ui_button_begin: decl->id must be 0 (id is the explicit param)");
@@ -77,12 +81,12 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     // #endregion
     // #region apply transform + opacity (ALWAYS — balanced on disabled path)
     nt_ui_transform_t t = nt_ui_transform_defaults();
-    t.scale_x = fmaxf(a->scale, 0.001F); /* scale must be > 0 */
-    t.scale_y = t.scale_x;
+    t.scale_x = a->scale;
+    t.scale_y = a->scale;
     t.offset_x = a->off_x;
     t.offset_y = a->off_y;
     nt_ui_push_transform(ctx, &t);
-    nt_ui_push_opacity(ctx, clampf(a->opacity, 0.0F, 1.0F));
+    nt_ui_push_opacity(ctx, a->opacity);
     // #endregion
     // #region open Clay IMAGE element WITH .id (the one structural addition over panel)
     /* bg_region 0 = same as idle. */
