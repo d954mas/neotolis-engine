@@ -65,6 +65,14 @@ endif()
 
 nt_add_module(nt_ui LOG_DOMAIN "ui" ${NT_UI_SOURCES})
 
+# Propagate to consumers via target_link_libraries — public headers use
+# #if NT_UI_DEBUG_TOOLS. Always defined 0/1 to be -Wundef-safe.
+if(NT_UI_DEBUG_TOOLS)
+    target_compile_definitions(nt_ui PUBLIC NT_UI_DEBUG_TOOLS=1)
+else()
+    target_compile_definitions(nt_ui PUBLIC NT_UI_DEBUG_TOOLS=0)
+endif()
+
 # Clay vendored header -- PUBLIC include. Clay is part of the engine's
 # public surface: nt_ui wraps lifecycle (context, walker, themes) but
 # game code drives layout/widgets via CLAY_* macros directly. SYSTEM

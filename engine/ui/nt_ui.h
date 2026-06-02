@@ -4,6 +4,14 @@
 /* Immediate-mode UI bridge over Clay v0.14. Only one ctx may be in-frame at
  * a time; caller owns the Globals UBO -- walker writes viewport + scissor. */
 
+/* PUBLIC build flag propagated via nt_ui target. Consumers must reach this
+ * header via target_link_libraries(... nt_ui) for the define to resolve;
+ * without it, #if NT_UI_DEBUG_TOOLS would silently pick the stubs and
+ * mismatch the linked library's ABI. */
+#ifndef NT_UI_DEBUG_TOOLS
+#error "NT_UI_DEBUG_TOOLS not defined — link against nt_ui via target_link_libraries(<target> PUBLIC|PRIVATE nt_ui)"
+#endif
+
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stddef.h>
