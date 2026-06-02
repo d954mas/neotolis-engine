@@ -22,6 +22,10 @@ void nt_ui_clay_priv_set_measure_text_cb(Clay_Dimensions (*cb)(Clay_StringSlice,
 int32_t nt_ui_clay_priv_default_max_element_count(void) { return Clay__defaultMaxElementCount; }
 
 int32_t nt_ui_clay_priv_default_max_measure_text_word_cache_count(void) { return Clay__defaultMaxMeasureTextWordCacheCount; }
+
+void nt_ui_clay_priv_open_element(void) { Clay__OpenElement(); }
+
+void nt_ui_clay_priv_configure_open_element(Clay_ElementDeclaration decl) { Clay__ConfigureOpenElement(decl); }
 // #endregion
 
 // #region clay_context primitive accessors

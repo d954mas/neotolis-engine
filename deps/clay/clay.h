@@ -6,8 +6,9 @@
 //      command. Set in Clay__AddRenderCommand from context state, updated
 //      in DFS traversal. Used by nt_ui side-channel transform markers.
 //      Search "nt_" for all patch sites (4 total).
-// NT DEPENDENCY: nt_ui_panel.c uses Clay__OpenElement / Clay__CloseElement /
-//   Clay__ConfigureOpenElement directly for begin/end split pattern.
+// NT DEPENDENCY: nt_ui_clay_internal.c wraps Clay__OpenElement /
+//   Clay__ConfigureOpenElement for the begin/end split pattern used by
+//   nt_ui_panel.c and nt_ui_button.c (Clay__CloseElement still called direct).
 //   Verify these internal APIs still exist after Clay update.
 
 /*

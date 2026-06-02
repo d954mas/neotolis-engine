@@ -7,6 +7,7 @@
 #include "memory/nt_mem_scratch.h"
 #include "resource/nt_resource.h"
 #include "ui/nt_ui_anim.h"
+#include "ui/nt_ui_clay_internal.h"
 #include "ui/nt_ui_debug.h" /* record-only debug zone for disabled buttons */
 #include "ui/nt_ui_internal.h"
 
@@ -109,8 +110,8 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     final.image = (Clay_ImageElementConfig){.imageData = p};
     final.backgroundColor = tint;
     final.userData = (void *)data;
-    Clay__OpenElement();
-    Clay__ConfigureOpenElement(final);
+    nt_ui_clay_priv_open_element();
+    nt_ui_clay_priv_configure_open_element(final);
     // #endregion
 
     /* Tag for the inspector tree + outline of the padded hit zone. */

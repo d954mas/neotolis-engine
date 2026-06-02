@@ -5,6 +5,7 @@
 #include "core/nt_assert.h"
 #include "memory/nt_mem_scratch.h"
 #include "resource/nt_resource.h"
+#include "ui/nt_ui_clay_internal.h"
 #include "ui/nt_ui_internal.h"
 
 /* Inspector descriptors: orange pill for panel, olive for group. */
@@ -59,8 +60,8 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
     final.backgroundColor = tint;
     final.image = (Clay_ImageElementConfig){.imageData = p};
     final.userData = (void *)data;
-    Clay__OpenElement();
-    Clay__ConfigureOpenElement(final);
+    nt_ui_clay_priv_open_element();
+    nt_ui_clay_priv_configure_open_element(final);
 
     /* Inspector tag — Clay auto-assigns the id; fetch post-open. */
     nt_ui_widget_register(ctx, nt_ui_internal_current_open_element_id(), &NT_UI_PANEL_DEF, NULL);
@@ -90,8 +91,8 @@ void nt_ui_group_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, c
     Clay_ElementDeclaration final = (decl != NULL) ? *decl : (Clay_ElementDeclaration){0};
     final.custom = (Clay_CustomElementConfig){.customData = anchor};
     final.userData = (void *)data;
-    Clay__OpenElement();
-    Clay__ConfigureOpenElement(final);
+    nt_ui_clay_priv_open_element();
+    nt_ui_clay_priv_configure_open_element(final);
 
     /* Inspector tag — Clay auto-assigns the id; fetch post-open. */
     nt_ui_widget_register(ctx, nt_ui_internal_current_open_element_id(), &NT_UI_GROUP_DEF, NULL);

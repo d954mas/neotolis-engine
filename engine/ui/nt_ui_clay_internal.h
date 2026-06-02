@@ -23,6 +23,10 @@ typedef struct nt_ui_context nt_ui_context_t;
 void nt_ui_clay_priv_set_measure_text_cb(Clay_Dimensions (*cb)(Clay_StringSlice, Clay_TextElementConfig *, void *));
 int32_t nt_ui_clay_priv_default_max_element_count(void);
 int32_t nt_ui_clay_priv_default_max_measure_text_word_cache_count(void);
+/* Open/configure wrappers — widgets need to inject code (e.g. widget_register)
+ * between open and configure, which the CLAY({...}) macro doesn't allow. */
+void nt_ui_clay_priv_open_element(void);
+void nt_ui_clay_priv_configure_open_element(Clay_ElementDeclaration decl);
 // #endregion
 
 // #region clay_context primitive accessors
