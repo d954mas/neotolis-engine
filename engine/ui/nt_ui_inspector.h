@@ -1,12 +1,12 @@
 #ifndef NT_UI_INSPECTOR_H
 #define NT_UI_INSPECTOR_H
 
-/* Inspector — port of Clay's debug view injected into the user's layout pass.
- * emit_layout (called by nt_ui_end when active) emits CLAY({...}) blocks that
- * solve through the same pipeline as user UI. overlay_draw paints the post-walk
- * highlight for the currently-focused element (hover OR clicked sidebar row).
+/* nt_ui_inspector: post-walk overlay + sidebar (Clay debug view port).
  *
- * Engine extensions: widget-type column + layer column ("L:N") per element row. */
+ * Build flag: NT_UI_DEBUG_TOOLS (CMake option, default OFF).
+ *   OFF: this entire surface is no-op stubs; production excludes the TU
+ *        and ctx state (~30 KB binary, ~9 KB ctx savings).
+ *   ON:  cmake -DNT_UI_DEBUG_TOOLS=ON. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -15,6 +15,18 @@
 #include "ui/nt_ui.h" /* nt_ui_target_t */
 
 typedef struct nt_ui_context nt_ui_context_t;
+
+/* Runtime-tunable inspector sizing. Visible in both modes so callers may
+ * keep a local instance even when stubs are no-op. */
+typedef struct nt_ui_inspector_metrics_t {
+    float panel_width;     /* sidebar width in layout pixels (default 400) */
+    float row_height;      /* element-row height (default 30) */
+    uint16_t font_size;    /* text font size for all inspector labels (default 16) */
+    uint8_t outer_padding; /* panel content outer padding (default 10) */
+    uint8_t indent_width;  /* per-depth indent step (default 16) */
+} nt_ui_inspector_metrics_t;
+
+#if NT_UI_DEBUG_TOOLS
 
 /* EXPERIMENTAL: API surface may change in v1.9. Game code should pin the engine version.
  *
@@ -26,16 +38,6 @@ bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx);
  * Games rolling their own click logic should query this to suppress it
  * (step_interaction already honors it internally). Stable across the frame. */
 bool nt_ui_inspector_pointer_consumed(const nt_ui_context_t *ctx);
-
-/* Runtime-tunable inspector sizing — sidebar width, row height, font, padding.
- * Consumed by the layout emit AND the post-walk overlay scissor. */
-typedef struct nt_ui_inspector_metrics_t {
-    float panel_width;     /* sidebar width in layout pixels (default 400) */
-    float row_height;      /* element-row height (default 30) */
-    uint16_t font_size;    /* text font size for all inspector labels (default 16) */
-    uint8_t outer_padding; /* panel content outer padding (default 10) */
-    uint8_t indent_width;  /* per-depth indent step (default 16) */
-} nt_ui_inspector_metrics_t;
 
 extern const nt_ui_inspector_metrics_t NT_UI_INSPECTOR_METRICS_DEFAULT;
 
@@ -50,5 +52,34 @@ void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx);
  * label_size <= 0 skips the label; rect still drawn. Silent skip when inactive,
  * when ctx is missing bindings, or when no element is focused. */
 void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_font_t font, float label_size);
+
+#else /* NT_UI_DEBUG_TOOLS */
+
+/* No-op stubs — game code compiles unchanged; debug calls vanish in release. */
+static inline void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on) {
+    (void)ctx;
+    (void)on;
+}
+static inline bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx) {
+    (void)ctx;
+    return false;
+}
+static inline bool nt_ui_inspector_pointer_consumed(const nt_ui_context_t *ctx) {
+    (void)ctx;
+    return false;
+}
+static inline void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_metrics_t *metrics) {
+    (void)ctx;
+    (void)metrics;
+}
+static inline void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx) { (void)ctx; }
+static inline void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *target, nt_font_t font, float label_size) {
+    (void)ctx;
+    (void)target;
+    (void)font;
+    (void)label_size;
+}
+
+#endif /* NT_UI_DEBUG_TOOLS */
 
 #endif /* NT_UI_INSPECTOR_H */

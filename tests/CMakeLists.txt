@@ -446,9 +446,15 @@ if(NOT EMSCRIPTEN)
         test_nt_ui_clip_hittest
         test_nt_ui_anim
         test_nt_ui_button
-        test_nt_ui_debug
-        test_nt_ui_inspector
     )
+    # Inspector + hit-zone tests exercise the optional subsystem; only built
+    # when nt_ui_inspector.c + nt_ui_debug.c are compiled in.
+    if(NT_UI_DEBUG_TOOLS)
+        list(APPEND _nt_ui_test_names
+            test_nt_ui_debug
+            test_nt_ui_inspector
+        )
+    endif()
 
     foreach(_t IN LISTS _nt_ui_test_names)
         add_executable(${_t}

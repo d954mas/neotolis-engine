@@ -32,7 +32,7 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include "log/nt_log.h"
 #include "memory/nt_mem_scratch.h"
 #include "ui/nt_ui_clay_internal.h" /* Clay private surface lives in nt_ui_clay_internal.c */
-#include "ui/nt_ui_debug.h"         /* nt_ui_debug_record_disabled_zone prototype */
+#include "ui/nt_ui_debug.h"         /* nt_ui_debug_record_disabled_zone proto (or stub when NT_UI_DEBUG_TOOLS=OFF) */
 #include "ui/nt_ui_image.h"         /* NT_UI_IMAGE_*_OVERRIDE flags */
 #include "ui/nt_ui_internal.h"
 
@@ -176,8 +176,10 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     nt_ui_context_t *ctx = (nt_ui_context_t *)arena;
     memset(ctx, 0, sizeof(*ctx));
 
+#if NT_UI_DEBUG_TOOLS
     /* Defaults — memset zero would set panel_width=0 and break consumers. */
     ctx->inspector_metrics = NT_UI_INSPECTOR_METRICS_DEFAULT;
+#endif
 
     const size_t ctx_size = NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE);
     /* Layout: [ctx struct][markers][walker_baked][walker_sorted][Clay arena]. */
@@ -270,28 +272,34 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     }
     ctx->pointer_over_any = false;
 
+#if NT_UI_DEBUG_TOOLS
     ctx->debug_zone_count = 0U;
+#endif
 
     /* Dev-mode guard — a button begin that asserted mid-flight would wedge
      * every subsequent frame on "nested buttons unsupported". */
     ctx->pending_button.active = false;
 
+#if NT_UI_DEBUG_TOOLS
     /* Widget registry is per-frame; inspector_active is a user toggle (persists). */
     memset(ctx->widget_registry, 0, sizeof(ctx->widget_registry));
 
     /* highlight_id resets each begin (recomputed during emit_layout);
      * selected_id persists across frames (sidebar click). */
     ctx->inspector_highlight_id = 0U;
+#endif
 
     /* v1.8 single-pointer; Clay is fed only the primary. */
     const nt_pointer_t *primary = &pointers[0];
 
+#if NT_UI_DEBUG_TOOLS
     /* Gate user widgets behind the sidebar so the panel visually consumes the
      * click. Frame-1 safe — pure coord check, no layout solve required. */
     ctx->inspector_pointer_consumed = false;
     if (ctx->inspector_active && primary->x >= (screen_w - ctx->inspector_metrics.panel_width)) {
         ctx->inspector_pointer_consumed = true;
     }
+#endif
 
     /* Clay's built-in debug view is OFF — the inspector replaces it. */
     Clay_SetDebugModeEnabled(false);
@@ -317,11 +325,13 @@ void nt_ui_end(nt_ui_context_t *ctx) {
     /* Asserts BEFORE inspector emit so a missing pop_clip is caught at its source. */
     NT_ASSERT(ctx->clip_depth == 0U && "nt_ui_end: unbalanced clip stack (missing nt_ui_pop_clip)");
 
+#if NT_UI_DEBUG_TOOLS
     /* Inject the Clay debug-view at root scope; floating panels attached to
      * the root keep it out of the user's layout tree. */
     if (ctx->inspector_active) {
         nt_ui_internal_emit_inspector_layout_extern(ctx);
     }
+#endif
 
     /* layout_ms times the Clay layout solve only, not the begin->end span. */
     const double layout_t0 = nt_time_now();
@@ -368,10 +378,12 @@ nt_ui_context_t *nt_ui_internal_get_inframe_ctx(void) { return g_nt_ui_inframe_c
 
 // #region widget_registry
 /* Direct-mapped per-frame table; replace-on-collision (observability path).
- * id 0 / NULL def are silently dropped. */
+ * id 0 / NULL def are silently dropped. Bodies compile to a no-op when
+ * NT_UI_DEBUG_TOOLS=OFF — the registry exists purely for the inspector. */
 void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_widget_register: ctx must be non-NULL");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_widget_register: pad_lrtb components must be >= 0");
+#if NT_UI_DEBUG_TOOLS
     if (id == 0U || def == NULL) {
         return; /* sentinel / NULL def: never register */
     }
@@ -392,21 +404,37 @@ void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget
         s->hit_padding_lrtb[2] = 0;
         s->hit_padding_lrtb[3] = 0;
     }
+#else
+    (void)ctx;
+    (void)id;
+    (void)def;
+    (void)pad_lrtb;
+#endif
 }
 
 const nt_ui_widget_def_t *nt_ui_widget_lookup(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_widget_lookup: ctx must be non-NULL");
+#if NT_UI_DEBUG_TOOLS
     if (id == 0U) {
         return NULL;
     }
     const uint32_t bucket = id & (NT_UI_WIDGET_REGISTRY_CAP - 1U);
     const nt_ui_widget_slot_t *s = &ctx->widget_registry[bucket];
     return (s->id == id) ? s->def : NULL;
+#else
+    (void)ctx;
+    (void)id;
+    return NULL;
+#endif
 }
 
+/* out_lrtb is the public output buffer; the OFF body discards it but the
+ * signature is fixed by the header. */
+// NOLINTNEXTLINE(readability-non-const-parameter)
 bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16_t out_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_widget_get_hit_padding: ctx must be non-NULL");
     NT_ASSERT(out_lrtb != NULL && "nt_ui_widget_get_hit_padding: out_lrtb must be non-NULL");
+#if NT_UI_DEBUG_TOOLS
     if (id == 0U) {
         return false;
     }
@@ -420,6 +448,12 @@ bool nt_ui_widget_get_hit_padding(const nt_ui_context_t *ctx, uint32_t id, int16
     out_lrtb[2] = s->hit_padding_lrtb[2];
     out_lrtb[3] = s->hit_padding_lrtb[3];
     return true;
+#else
+    (void)ctx;
+    (void)id;
+    (void)out_lrtb;
+    return false;
+#endif
 }
 
 // #endregion
@@ -1985,11 +2019,13 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
 
     nt_ui_interaction_t out = {0};
 
+#if NT_UI_DEBUG_TOOLS
     /* Sidebar consumes the pointer — short-circuit so any user widget
      * geometrically behind the sidebar reports no hover/press/click. */
     if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
         return out;
     }
+#endif
 
     /* No prev-frame bbox yet — not hovered, no capture possible. */
     const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
@@ -2073,12 +2109,14 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
 
     const nt_ui_interaction_t out = nt_ui_query_interaction_padded(ctx, id, pad_lrtb);
 
+#if NT_UI_DEBUG_TOOLS
     /* Inspector consume gate — query returned zeroed; step skips all commits.
      * capture_seen stays 0 so next begin's orphan cleanup wipes any in-progress
      * capture (prevents phantom drag). */
     if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
         return out;
     }
+#endif
 
     /* First-frame guard mirrors query's. */
     const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
@@ -2119,6 +2157,7 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
         }
     }
 
+#if NT_UI_DEBUG_TOOLS
     /* Hit-zone overlay recording — debug_recording OFF by default = zero overhead.
      * Inspector_active also enables recording so its post-walk overlay can project
      * the highlight through the recorded accum snapshot. At-cap drops silently. */
@@ -2156,6 +2195,7 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
         }
         z->state_flags = flags;
     }
+#endif
 
     return out;
 }
@@ -2163,9 +2203,11 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
 /* Thin wrapper: zero-padding specialization of the padded variant. */
 nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_step_interaction_padded(ctx, id, NULL); }
 
+#if NT_UI_DEBUG_TOOLS
 /* Record-only push for DISABLED widgets that skip hit-test. No capture work.
  * Sets NT_UI_DEBUG_FLAG_DISABLED so mode=ALL surfaces it while HOVER/CAPTURED
- * filters hide it. First-frame Clay miss → no zone (not an assert). */
+ * filters hide it. First-frame Clay miss → no zone (not an assert).
+ * No-op when NT_UI_DEBUG_TOOLS=OFF (header provides a static inline stub). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_debug_record_disabled_zone: ctx must be non-NULL");
@@ -2205,14 +2247,17 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
     }
     z->state_flags = (uint16_t)NT_UI_DEBUG_FLAG_DISABLED;
 }
+#endif /* NT_UI_DEBUG_TOOLS */
 
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_wants_pointer: ctx must be non-NULL");
+#if NT_UI_DEBUG_TOOLS
     /* Sidebar counts as "engine wants the pointer" so game world input is
      * suppressed even when no user widget is under the pointer. */
     if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
         return true;
     }
+#endif
     if (ctx->pointer_over_any) {
         return true;
     }

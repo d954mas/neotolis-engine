@@ -315,10 +315,13 @@ nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_conte
 }
 // #endregion
 
+#if NT_UI_DEBUG_TOOLS
 // #region inspector_emit_layout
 /* Verbatim port of Clay__RenderDebugView, run inside the user layout pass so it
  * can read Clay private types. Sidebar width + row metrics are runtime config
- * via ctx->inspector_metrics (defaults match Clay's literals). */
+ * via ctx->inspector_metrics (defaults match Clay's literals).
+ * Entire region excluded when NT_UI_DEBUG_TOOLS=OFF — production drops the
+ * sidebar emit + cdv_int/hex_bufs (16 KB BSS) and the inspector ctx state. */
 
 static const Clay_Color CDV_COLOR_1 = {58, 56, 52, 255};
 static const Clay_Color CDV_COLOR_2 = {62, 60, 58, 255};
@@ -1091,3 +1094,4 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
 /* External entry forwarded from nt_ui_inspector.c (no Clay private types there). */
 void nt_ui_internal_emit_inspector_layout_extern(nt_ui_context_t *ctx) { nt_ui_internal_emit_inspector_layout(ctx); }
 // #endregion
+#endif /* NT_UI_DEBUG_TOOLS */

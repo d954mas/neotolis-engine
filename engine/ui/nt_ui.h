@@ -96,10 +96,13 @@ typedef struct {
  * Used by ui_buttons_demo and inspector internals. Game code adopting these
  * should pin the engine version. */
 
+#if NT_UI_DEBUG_TOOLS
 /* Well-known debug layers for nt_ui_inspector. Engine reserves 240-255; game
  * code MUST use <= 239. BG (250) and TEXT (251) split so the walker batches
  * inspector rects before texts per zIndex/scissor segment (collapses per-row
- * pipeline alternations to one BG->TEXT boundary). */
+ * pipeline alternations to one BG->TEXT boundary).
+ * When NT_UI_DEBUG_TOOLS=OFF the engine never reserves these layers and the
+ * full 0..255 range is available to game code. */
 #define NT_UI_LAYER_DEBUG_HIGHLIGHT ((nt_ui_layer_t)240)
 #define NT_UI_LAYER_DEBUG_PANEL_BG ((nt_ui_layer_t)250)
 #define NT_UI_LAYER_DEBUG_PANEL_TEXT ((nt_ui_layer_t)251)
@@ -109,6 +112,7 @@ _Static_assert(NT_UI_LAYER_DEBUG_PANEL_TEXT >= 240 && NT_UI_LAYER_DEBUG_PANEL_TE
 /* Legacy aliases — new code should pick the BG/TEXT split explicitly. */
 #define NT_UI_LAYER_DEBUG_PANEL NT_UI_LAYER_DEBUG_PANEL_BG
 #define NT_UI_LAYER_DEBUG NT_UI_LAYER_DEBUG_PANEL_BG
+#endif /* NT_UI_DEBUG_TOOLS */
 
 /* Macros allocate from nt_mem_scratch (frame arena) so the pointer stays valid
  * across helper-function returns until the next nt_mem_scratch_reset. Game

@@ -31,7 +31,9 @@ set(_clay_major "${CMAKE_MATCH_1}")
 set(_clay_minor "${CMAKE_MATCH_2}")
 
 # --- Module declaration ---
-nt_add_module(nt_ui LOG_DOMAIN "ui"
+# nt_ui_inspector.c + nt_ui_debug.c are gated by NT_UI_DEBUG_TOOLS (default OFF);
+# nt_ui_clay_internal.c always built (owns CLAY_IMPLEMENTATION).
+set(NT_UI_SOURCES
     nt_ui.c
     nt_ui.h
     nt_ui_internal.h
@@ -51,11 +53,17 @@ nt_add_module(nt_ui LOG_DOMAIN "ui"
     nt_ui_anim.h
     nt_ui_button.c
     nt_ui_button.h
-    nt_ui_debug.c
     nt_ui_debug.h
-    nt_ui_inspector.c
     nt_ui_inspector.h
 )
+if(NT_UI_DEBUG_TOOLS)
+    list(APPEND NT_UI_SOURCES
+        nt_ui_inspector.c
+        nt_ui_debug.c
+    )
+endif()
+
+nt_add_module(nt_ui LOG_DOMAIN "ui" ${NT_UI_SOURCES})
 
 # Clay vendored header -- PUBLIC include. Clay is part of the engine's
 # public surface: nt_ui wraps lifecycle (context, walker, themes) but

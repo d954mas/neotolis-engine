@@ -172,6 +172,7 @@ struct nt_ui_context {
 
     nt_ui_anim_interaction_t anim[NT_UI_ANIM_SLOTS]; /* direct-mapped state-anim cache */
 
+#if NT_UI_DEBUG_TOOLS
     /* Hit-zone debug overlay. OFF by default; game opts in via debug_set_recording.
      * Zones cleared each nt_ui_begin; at-cap pushes silently dropped. */
     nt_ui_debug_zone_t debug_zones[NT_UI_DEBUG_ZONE_CAP];
@@ -198,6 +199,7 @@ struct nt_ui_context {
     /* Runtime inspector sizing — read by the layout emit (nt_ui_clay_internal.c)
      * and the post-walk overlay scissor (nt_ui_inspector.c). */
     nt_ui_inspector_metrics_t inspector_metrics;
+#endif /* NT_UI_DEBUG_TOOLS */
 
     Clay_Arena clay_arena;
 };

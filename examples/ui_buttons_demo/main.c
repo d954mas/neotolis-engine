@@ -562,7 +562,7 @@ static void handle_transform_and_debug_input(void) {
         s_xform_scale = 1.0F;
         s_xform_deg = 0.0F;
     }
-    /* D toggles the inspector. */
+    /* D toggles the inspector. No-op unless built with -DNT_UI_DEBUG_TOOLS=ON. */
     if (nt_input_key_is_pressed(NT_KEY_D)) {
         const bool now_on = !nt_ui_inspector_is_active(s_ctx);
         nt_ui_inspector_set_active(s_ctx, now_on);

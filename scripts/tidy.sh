@@ -20,6 +20,20 @@ fi
 SOURCES=$(find engine shared tools examples tests \
     -name '*.c' | grep -v 'deps/\|/web/\|_web\.c\|tools/research/')
 
+# Skip files not in compile_commands.json — they were excluded from the build
+# (e.g. NT_UI_DEBUG_TOOLS=OFF drops the inspector/debug TUs and tests).
+# Match basename in either / or \ path style (CMake on Windows writes backslashes).
+COMPILE_DB="$BUILD_DIR/compile_commands.json"
+FILTERED_SOURCES=""
+while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    base=$(basename "$f")
+    if grep -q -E "[/\\\\]${base}\"" "$COMPILE_DB"; then
+        FILTERED_SOURCES="$FILTERED_SOURCES$f"$'\n'
+    fi
+done <<< "$SOURCES"
+SOURCES="$FILTERED_SOURCES"
+
 FILE_COUNT=$(echo "$SOURCES" | wc -w)
 echo "Running clang-tidy on $FILE_COUNT files..."
 
