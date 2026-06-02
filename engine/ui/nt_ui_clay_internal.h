@@ -2,9 +2,9 @@
 #define NT_UI_CLAY_INTERNAL_H
 
 /* Exclusive CLAY_IMPLEMENTATION TU. Owns Clay private types + statics; the rest
- * of the engine stays on Clay's public API. The inspector's verbatim debug-view
- * emit body lives in nt_ui_clay_internal.c (touches ~30 Clay private symbols);
- * nt_ui_inspector.c forwards through the extern prototype below. */
+ * of the engine uses Clay's public API. The inspector emit body lives here
+ * (~30 Clay private symbols); nt_ui_inspector.c forwards through the extern
+ * prototype below. */
 
 #include <stdbool.h>
 #include <stdint.h>

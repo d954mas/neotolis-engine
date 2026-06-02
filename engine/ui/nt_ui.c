@@ -2053,12 +2053,8 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
         }
     }
 
-    /* Pure equivalent of the OLD inline ordering: in the original
-     * nt_ui_get_interaction the cap->active_id WRITE on press_now happened
-     * BEFORE the mine check, so on the press_now frame mine was true within
-     * the same call. Reproduce that semantically without the write: mine is
-     * "this id will own the capture after step commits" -- either it already
-     * does, or pressed_now will assign it. */
+    /* mine = "this id will own the capture after step commits" — either it
+     * already does, or pressed_now will assign it on the same frame. */
     const bool mine = !exclusive_gated && ((cap->active_id == id) || out.pressed_now);
     if (mine) {
         out.pressed = btn.is_down;
