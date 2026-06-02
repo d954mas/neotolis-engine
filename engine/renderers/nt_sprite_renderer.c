@@ -543,8 +543,10 @@ static void emit_one(const nt_render_item_t *item, const nt_sprite_comp_view_t *
             fb = st;
         }
 
-        /* DST corner size = src × per-entity slice9_scale (legacy zero → 1.0). */
-        const float s9_scale = (sv->slice9_scale[s_idx] > 0.0F) ? sv->slice9_scale[s_idx] : 1.0F;
+        /* DST corner size = src × per-entity slice9_scale. sprite_comp setter
+         * asserts > 0 and _add inits to 1.0F; this is the last-line tripwire. */
+        NT_ASSERT(isfinite(sv->slice9_scale[s_idx]) && sv->slice9_scale[s_idx] > 0.0F && "emit_one: sv->slice9_scale[s_idx] must be finite > 0");
+        const float s9_scale = sv->slice9_scale[s_idx];
 
         /* Build 4x4 grid in local source space (ipu-scaled, origin at 0,0). */
         const float src_w = (float)r->source_w * ipu;

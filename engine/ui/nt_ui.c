@@ -881,8 +881,10 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
      * works without flag. */
     const bool has_s9_override = (p->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) || (p->slice9_override[0] | p->slice9_override[1] | p->slice9_override[2] | p->slice9_override[3]) != 0;
     const bool region_slice9 = (r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0;
-    /* Legacy zero-init payloads carry slice9_scale=0.0F; treat as 1.0F. */
-    const float s9_scale = (p->slice9_scale > 0.0F) ? p->slice9_scale : 1.0F;
+    /* button/image/panel entry points assert > 0; this is the last-line tripwire
+     * if a game custom widget builds payload directly with zero-init. */
+    NT_ASSERT(isfinite(p->slice9_scale) && p->slice9_scale > 0.0F && "nt_ui walker: payload.slice9_scale must be finite > 0");
+    const float s9_scale = p->slice9_scale;
 
     if (has_s9_override || region_slice9) {
         if (has_s9_override) {

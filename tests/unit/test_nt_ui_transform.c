@@ -39,6 +39,7 @@ void setUp(void) {
     s_game_custom_user = NULL;
     memset(s_test_cmds, 0, sizeof s_test_cmds);
     memset(&s_image_payload, 0, sizeof s_image_payload);
+    s_image_payload.slice9_scale = 1.0F;
     s_test_le_count = 0;
 
     ui_walker_fixture_init(&s_fx, s_arena, sizeof s_arena, UI_WALKER_FX_BIND_ALL);
