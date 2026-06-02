@@ -13,8 +13,6 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* EXPERIMENTAL: API may change in v1.9. */
-
 /* Inspector descriptors. */
 extern const nt_ui_widget_def_t NT_UI_PANEL_DEF;
 extern const nt_ui_widget_def_t NT_UI_GROUP_DEF;

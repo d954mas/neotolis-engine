@@ -123,8 +123,7 @@ static const nt_ui_image_style_t g_btn_icon_style = {
  * the button. Swapping to "flat" Kenney buttons (no depth suffix) would
  * remove the gray look but lose the 3D affordance the demo wants to show. */
 
-/* Variant (a) STANDARD: eased baseline. Same shape as the old g_btn_eased_style
- * from the previous round; transition_speed 12, +16 hit padding. */
+/* (a) STANDARD: eased baseline. */
 static const nt_ui_button_style_t g_btn_standard_style = {
     .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
     .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
@@ -134,7 +133,7 @@ static const nt_ui_button_style_t g_btn_standard_style = {
     .hit_padding_lrtb = {16, 16, 16, 16},
 };
 
-/* Variant (b) SCALE: exaggerated scale per state -- pressed 0.80, hover 1.20. */
+/* (b) SCALE: exaggerated scale per state. */
 static const nt_ui_button_style_t g_btn_scale_style = {
     .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
     .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.20F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
@@ -144,9 +143,8 @@ static const nt_ui_button_style_t g_btn_scale_style = {
     .hit_padding_lrtb = {16, 16, 16, 16},
 };
 
-/* Variant (c) VISUAL SWAP: bg_region swaps per state -- idle/disabled = blue,
- * hover/pressed = green; pressed tints green darker (0xFFCCCCCC). Patched at
- * runtime with real button_blue/green indices (bg_region 0 in const = sentinel). */
+/* (c) VISUAL SWAP: bg_region differs per state (blue/green); bg_region 0
+ * in the const = sentinel, patched at runtime once atlas indices are known. */
 static const nt_ui_button_style_t g_btn_swap_style = {
     .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
     .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},

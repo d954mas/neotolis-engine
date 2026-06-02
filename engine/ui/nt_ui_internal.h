@@ -21,7 +21,7 @@
 /* Widget_registry capacity. Direct-mapped (id mod cap); collisions replace.
  * Power-of-two for the cheap modulo. */
 #ifndef NT_UI_WIDGET_REGISTRY_CAP
-#define NT_UI_WIDGET_REGISTRY_CAP 128
+#define NT_UI_WIDGET_REGISTRY_CAP 1024
 #endif
 _Static_assert((NT_UI_WIDGET_REGISTRY_CAP & (NT_UI_WIDGET_REGISTRY_CAP - 1)) == 0, "NT_UI_WIDGET_REGISTRY_CAP must be a power of two");
 

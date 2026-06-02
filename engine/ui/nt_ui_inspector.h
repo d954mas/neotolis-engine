@@ -28,9 +28,7 @@ typedef struct nt_ui_inspector_metrics_t {
 
 #if NT_UI_DEBUG_TOOLS
 
-/* EXPERIMENTAL: API surface may change in v1.9. Game code should pin the engine version.
- *
- * Toggle the inspector. Default off; zero overhead when off. */
+/* Toggle the inspector. Default off; zero overhead when off. */
 void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on);
 bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx);
 

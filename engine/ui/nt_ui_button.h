@@ -16,8 +16,6 @@
 
 typedef struct nt_ui_context nt_ui_context_t;
 
-/* EXPERIMENTAL: API may change in v1.9. */
-
 /* Inspector descriptor; "nt_" prefix disambiguates from Clay's own config-type pills. */
 extern const nt_ui_widget_def_t NT_UI_BUTTON_DEF;
 

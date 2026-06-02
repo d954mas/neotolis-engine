@@ -92,10 +92,6 @@ typedef struct {
     uint8_t _reserved[3];
 } nt_ui_element_data_t;
 
-/* EXPERIMENTAL: nt_ui_widget_* / inspector / debug-layer API may change in v1.9.
- * Used by ui_buttons_demo and inspector internals. Game code adopting these
- * should pin the engine version. */
-
 #if NT_UI_DEBUG_TOOLS
 /* Well-known debug layers for nt_ui_inspector. Engine reserves 240-255; game
  * code MUST use <= 239. BG (250) and TEXT (251) split so the walker batches
@@ -185,9 +181,9 @@ typedef struct nt_ui_widget_def_t {
  * the frame (static const is the canonical pattern). id 0 is silently dropped
  * (sentinel). def NULL is silently dropped.
  *
- * Storage is a 128-slot direct-mapped table; first collisions expected around
- * 14 widgets (birthday-paradox), replace-on-collision. Observability-only —
- * losing a tag for one of two colliding widgets is acceptable. */
+ * Storage is a 1024-slot direct-mapped table; first collisions expected
+ * around 40 widgets (birthday-paradox), replace-on-collision. Observability-
+ * only — losing a tag for one of two colliding widgets is acceptable. */
 void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]);
 
 /* Return the descriptor registered for `id` this frame, or NULL when no

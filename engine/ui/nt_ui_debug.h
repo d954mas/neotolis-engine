@@ -27,9 +27,7 @@ typedef enum {
 
 #if NT_UI_DEBUG_TOOLS
 
-/* EXPERIMENTAL: API may change in v1.9.
- *
- * Toggle per-frame zone recording. Default off; takes effect immediately. */
+/* Toggle per-frame zone recording. Default off; takes effect immediately. */
 void nt_ui_debug_set_recording(nt_ui_context_t *ctx, bool on);
 bool nt_ui_debug_get_recording(const nt_ui_context_t *ctx);
 
