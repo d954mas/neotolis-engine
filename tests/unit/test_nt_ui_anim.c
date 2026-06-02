@@ -101,36 +101,48 @@ static void test_anim_first_touch_no_flash(void) {
     TEST_ASSERT_EQUAL_UINT32(id, r->id);
 }
 
-/* ---- Test 4: replace-on-collision (two ids same slot, no crash) ---- */
+/* ---- Test 4: open addressing coexists two ids that hash to same base ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-static void test_anim_replace_on_collision(void) {
+static void test_anim_open_address_coexists(void) {
     s_fx.ctx->frame_dt = 1.0F / 60.0F;
-    /* id1 and id2 map to the same slot: (1) & 63 == (1 + 64) & 63. */
+    /* id1, id2 same base bucket — linear probe gives them adjacent slots. */
     const uint32_t id1 = 1U;
     const uint32_t id2 = 1U + NT_UI_ANIM_SLOTS;
     TEST_ASSERT_EQUAL_UINT32(id1 & (NT_UI_ANIM_SLOTS - 1U), id2 & (NT_UI_ANIM_SLOTS - 1U));
 
     nt_ui_anim_target_t t1 = {.scale = 1.0F, .off_x = 0.0F, .off_y = 0.0F, .opacity = 1.0F, .tint_t = 0.0F};
     const nt_ui_anim_interaction_t *r1 = nt_ui_anim(s_fx.ctx, id1, &t1, 0.0F);
-    TEST_ASSERT_NOT_NULL(r1);
     TEST_ASSERT_EQUAL_UINT32(id1, r1->id);
-    TEST_ASSERT_TRUE(float_near(r1->scale, 1.0F, 1e-6F));
 
-    /* id2 collides -> slot re-keyed to id2, cur re-seeded to id2's target,
-     * no crash, no eviction scan. */
     nt_ui_anim_target_t t2 = {.scale = 0.5F, .off_x = 2.0F, .off_y = 0.0F, .opacity = 1.0F, .tint_t = 0.0F};
     const nt_ui_anim_interaction_t *r2 = nt_ui_anim(s_fx.ctx, id2, &t2, 10.0F);
-    TEST_ASSERT_NOT_NULL(r2);
-    TEST_ASSERT_EQUAL_PTR(r1, r2); /* same physical slot */
     TEST_ASSERT_EQUAL_UINT32(id2, r2->id);
-    TEST_ASSERT_TRUE(float_near(r2->scale, 0.5F, 1e-6F)); /* re-seeded, not eased from 1.0 */
-    TEST_ASSERT_TRUE(float_near(r2->off_x, 2.0F, 1e-6F));
+    TEST_ASSERT_TRUE_MESSAGE(r1 != r2, "open addressing must land id2 in a different slot than id1");
+    TEST_ASSERT_TRUE(float_near(r1->scale, 1.0F, 1e-6F)); /* id1 untouched */
+    TEST_ASSERT_TRUE(float_near(r2->scale, 0.5F, 1e-6F));
 
-    /* Collision is mutual: re-accessing id1 re-seeds the slot to id1 again. */
+    /* Re-access id1: must keep its eased state, NOT snap. */
     const nt_ui_anim_interaction_t *r3 = nt_ui_anim(s_fx.ctx, id1, &t1, 10.0F);
-    TEST_ASSERT_NOT_NULL(r3);
+    TEST_ASSERT_EQUAL_PTR(r1, r3);
     TEST_ASSERT_EQUAL_UINT32(id1, r3->id);
     TEST_ASSERT_TRUE(float_near(r3->scale, 1.0F, 1e-6F));
+}
+
+/* All NT_UI_ANIM_PROBE_MAX consecutive slots full with other ids → evict base. */
+static void test_anim_evicts_when_probes_exhausted(void) {
+    s_fx.ctx->frame_dt = 1.0F / 60.0F;
+    nt_ui_anim_target_t t = {.scale = 1.0F, .opacity = 1.0F};
+    /* Fill NT_UI_ANIM_PROBE_MAX consecutive slots starting at bucket 1. */
+    for (uint32_t k = 0; k < NT_UI_ANIM_PROBE_MAX; ++k) {
+        const uint32_t id = 1U + (k * NT_UI_ANIM_SLOTS);
+        (void)nt_ui_anim(s_fx.ctx, id, &t, 0.0F);
+    }
+    /* New id hashing to same base: all probes occupied → evict base. */
+    const uint32_t bumped = 1U + (NT_UI_ANIM_PROBE_MAX * NT_UI_ANIM_SLOTS);
+    nt_ui_anim_target_t t_new = {.scale = 0.25F, .opacity = 1.0F};
+    const nt_ui_anim_interaction_t *r = nt_ui_anim(s_fx.ctx, bumped, &t_new, 10.0F);
+    TEST_ASSERT_EQUAL_UINT32(bumped, r->id);
+    TEST_ASSERT_TRUE(float_near(r->scale, 0.25F, 1e-6F));
 }
 
 int main(void) {
@@ -138,6 +150,7 @@ int main(void) {
     RUN_TEST(test_anim_instant_when_speed_zero);
     RUN_TEST(test_anim_eases_toward_target);
     RUN_TEST(test_anim_first_touch_no_flash);
-    RUN_TEST(test_anim_replace_on_collision);
+    RUN_TEST(test_anim_open_address_coexists);
+    RUN_TEST(test_anim_evicts_when_probes_exhausted);
     return UNITY_END();
 }

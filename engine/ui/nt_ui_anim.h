@@ -1,9 +1,9 @@
 #ifndef NT_UI_ANIM_H
 #define NT_UI_ANIM_H
 
-/* Direct-mapped per-id animation cache. Fixed power-of-2 array, key = Clay
- * uint32 id (already a hash), replace-on-collision, no LRU. Widgets set a
- * target each frame; the cache eases the stored value toward it. */
+/* Per-id animation cache. Open addressing with linear probing (max 4 probes):
+ * lookup tries slot[h], slot[h+1], ... up to NT_UI_ANIM_PROBE_MAX. Eviction
+ * (= snap reseed) only when all probes are occupied by other ids. */
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -14,6 +14,10 @@ typedef struct nt_ui_context nt_ui_context_t;
 #define NT_UI_ANIM_SLOTS 64 /* power-of-2 for the slot mask; ~28 B/slot */
 #endif
 _Static_assert((NT_UI_ANIM_SLOTS & (NT_UI_ANIM_SLOTS - 1)) == 0, "NT_UI_ANIM_SLOTS must be power-of-2 (slot = id & (N-1))");
+
+#ifndef NT_UI_ANIM_PROBE_MAX
+#define NT_UI_ANIM_PROBE_MAX 4 /* linear probes per lookup; 4 keeps lookup cache-friendly */
+#endif
 
 /* Smoothed per-id visual fields. */
 typedef struct {
