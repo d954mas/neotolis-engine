@@ -52,13 +52,13 @@ uint32_t nt_ui_debug_get_zone_count(const nt_ui_context_t *ctx);
 
 /* Record-only push for a DISABLED widget that intentionally skipped the
  * interaction hit-test (e.g. nt_ui_button on enabled=false short-circuits
- * nt_ui_get_interaction_padded). Same per-frame guarding as the recording
- * inside nt_ui_get_interaction_padded: gated by ctx->debug_recording (OFF
+ * nt_ui_step_interaction_padded). Same per-frame guarding as the recording
+ * inside nt_ui_step_interaction_padded: gated by ctx->debug_recording (OFF
  * default = zero overhead), silently dropped at cap. The recorded zone
  * carries NT_UI_DEBUG_FLAG_DISABLED, no hover/press/captured -- it is a
  * VISUAL-only entry the overlay surfaces when the developer wants to see
  * "why didn't this respond?". Caller has the same prev-frame bbox
- * preconditions as nt_ui_get_interaction (id must have been declared at
+ * preconditions as nt_ui_step_interaction (id must have been declared at
  * least once before; first-frame Clay_GetElementData miss -> no zone is
  * recorded, NOT an assert). pad_lrtb NULL = zero padding. */
 void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);

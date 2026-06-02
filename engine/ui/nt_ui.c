@@ -300,7 +300,7 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
      * ctx->inspector_metrics.panel_width wide (REVIEW-2 P3-1, runtime tunable);
      * the same coord check is what the inspector's emit_layout uses to decide
      * whether to highlight a sidebar row (line ~1005). Computing it here gates
-     * nt_ui_get_interaction_padded so user widgets behind the sidebar do NOT
+     * nt_ui_step_interaction_padded so user widgets behind the sidebar do NOT
      * register hover/press/click when the sidebar visually consumes the click.
      * Frame-1 safe (no layout solve required -- pure coord check). */
     ctx->inspector_pointer_consumed = false;
@@ -1378,9 +1378,9 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
          *
          * This pointerOverIds fallback runs ONLY when the debug_zones scan
          * above failed -- it covers the case of plain Clay containers (no
-         * nt_ui_get_interaction call) that the user can still hover. For
+         * nt_ui_step_interaction call) that the user can still hover. For
          * transformed widgets, the debug_zones scan above wins because the
-         * widget queries get_interaction inside its begin() (recording the
+         * widget steps interaction inside its begin() (recording the
          * zone with the live accum snapshot) while the pointerOverIds path
          * here is axis-aligned and would miss them.
          *
@@ -1388,7 +1388,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
          * dropping this widget-preference pass on the assumption that all
          * registered widgets already record a debug_zone via Stage 1, making
          * the preference redundant. That assumption is FALSE: only
-         * nt_ui_button calls nt_ui_get_interaction_padded today; panel,
+         * nt_ui_button calls nt_ui_step_interaction_padded today; panel,
          * group, image, and label widgets register their descriptor but
          * NEVER query interaction (they are non-interactive). For them no
          * debug_zone exists, so Stage 1 cannot pick them, and removing this
@@ -3374,14 +3374,23 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     return (lx >= box.x - pl) && (lx <= box.x + box.width + pr) && (ly >= box.y - pt) && (ly <= box.y + box.height + pb);
 }
 
+/* Phase 56 ext (CQS split): pure compute -- no state mutation. Reads bbox,
+ * transform/clip stacks, capture, and pointer to produce the interaction
+ * struct. Safe to call N times in the same frame; every call returns the same
+ * struct because nothing it reads changes across calls.
+ *
+ * The state-machine writes that used to live here (capture begin/release,
+ * pos tracking, capture_seen flag, pointer_over_any, debug zone push) all
+ * moved to nt_ui_step_interaction_padded -- which calls THIS function for
+ * the read and then applies the commit. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-nt_ui_interaction_t nt_ui_get_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
-    NT_ASSERT(ctx != NULL && "nt_ui_get_interaction_padded: ctx must be non-NULL");
-    NT_ASSERT(id != 0U && "nt_ui_get_interaction_padded: id must be non-zero (0 = no widget)");
-    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_get_interaction_padded: no frame pointer snapshot (call inside begin/end)");
+nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    NT_ASSERT(ctx != NULL && "nt_ui_query_interaction_padded: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_query_interaction_padded: id must be non-zero (0 = no widget)");
+    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_query_interaction_padded: no frame pointer snapshot (call inside begin/end)");
     /* Negative padding is a use error: the API shrinks-from-bbox use case is
      * better served by sizing the widget smaller, NOT a negative inflation. */
-    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_get_interaction_padded: pad_lrtb components must be >= 0");
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_query_interaction_padded: pad_lrtb components must be >= 0");
 
     nt_ui_interaction_t out = {0};
 
@@ -3390,10 +3399,7 @@ nt_ui_interaction_t nt_ui_get_interaction_padded(nt_ui_context_t *ctx, uint32_t 
      * widget interaction query short-circuits to a zeroed result -- no hover,
      * no press, no clicked. Without this, clicking the visual sidebar would
      * ALSO fire any button geometrically behind it (the sidebar paints on top
-     * but the hit-test is purely coord-vs-bbox). Returning zero here also
-     * naturally cleans up captures: capture_seen stays 0 for this id, so the
-     * next nt_ui_begin's orphan-cleanup wipes any in-progress capture instead
-     * of letting it persist into a phantom drag. */
+     * but the hit-test is purely coord-vs-bbox). */
     if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
         return out;
     }
@@ -3408,64 +3414,56 @@ nt_ui_interaction_t nt_ui_get_interaction_padded(nt_ui_context_t *ctx, uint32_t 
     /* v1.8 single-pointer: the primary pointer is index 0 (D-56-04). */
     const uint32_t pidx = 0U;
     const nt_pointer_t *p = &ctx->frame_pointers[pidx];
-    nt_ui_capture_t *cap = &ctx->captures[pidx];
+    const nt_ui_capture_t *cap = &ctx->captures[pidx];
     const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT]; /* precomputed edges */
 
     /* Phase 56 ext fix (exclusive capture): when ANOTHER widget owns this
      * pointer's capture (press-began on it, not yet released), THIS widget
      * sees zero interaction -- no hover, no press, no clicked -- regardless
-     * of where the pointer geometrically sits. Standard UI semantics: drag
-     * inside button A and slide onto button B; B must NOT light up. Without
-     * this gate, B's hit-test still computed over=true while A held the
-     * capture, so a row of touch-padded buttons would all show hover when
-     * the pointer slid across them mid-drag.
-     *
-     * The zone is still RECORDED (the inspector overlay needs to see B's
-     * bbox), but with state_flags=0 (idle) so the visual matches reality:
-     * B is not interacting on this pointer. */
+     * of where the pointer geometrically sits. */
     const bool exclusive_gated = (cap->active_id != 0U) && (cap->active_id != id);
 
     bool over = false;
     if (!exclusive_gated) {
         over = ui_hit_test(ctx, id, p->x, p->y, pad_lrtb);
         out.hovered = over;
-        if (over) {
-            ctx->pointer_over_any = true; /* feeds nt_ui_wants_pointer (D-56-08). */
-        }
-
-        /* Begin capture on press-over-widget. */
+        /* Begin-capture preview (no write to cap here -- step does it). */
         if (over && btn.is_pressed) {
-            cap->active_id = id;
-            cap->press_pos[0] = p->x;
-            cap->press_pos[1] = p->y;
-            cap->pos[0] = p->x;
-            cap->pos[1] = p->y;
             out.pressed_now = true;
         }
     }
 
-    const bool mine = !exclusive_gated && (cap->active_id == id);
+    /* Pure equivalent of the OLD inline ordering: in the original
+     * nt_ui_get_interaction the cap->active_id WRITE on press_now happened
+     * BEFORE the mine check, so on the press_now frame mine was true within
+     * the same call. Reproduce that semantically without the write: mine is
+     * "this id will own the capture after step commits" -- either it already
+     * does, or pressed_now will assign it. */
+    const bool mine = !exclusive_gated && ((cap->active_id == id) || out.pressed_now);
     if (mine) {
-        cap->pos[0] = p->x;
-        cap->pos[1] = p->y;
         out.pressed = btn.is_down;
         out.released_now = btn.is_released;
         /* clicked = release OVER the widget; off-widget release cancels
          * (released_now true, clicked false). */
         out.clicked = btn.is_released && over;
         out.pointer_id = p->id;
-        out.press_pos[0] = cap->press_pos[0];
-        out.press_pos[1] = cap->press_pos[1];
-        out.pos[0] = cap->pos[0];
-        out.pos[1] = cap->pos[1];
-        out.drag_dx = cap->pos[0] - cap->press_pos[0];
-        out.drag_dy = cap->pos[1] - cap->press_pos[1];
-        /* This capture was queried this frame -> not an orphan. */
-        ctx->capture_seen[pidx] = 1U;
-        /* Release ends the capture (whether over or not). */
-        if (btn.is_released) {
-            cap->active_id = 0U;
+        /* On press_now the press_pos hasn't been written yet -- report the
+         * current pointer position (matches what step will write). On later
+         * frames it's the stored press position. */
+        if (out.pressed_now) {
+            out.press_pos[0] = p->x;
+            out.press_pos[1] = p->y;
+        } else {
+            out.press_pos[0] = cap->press_pos[0];
+            out.press_pos[1] = cap->press_pos[1];
         }
+        /* Pure read: report the CURRENT pointer position as where pos would
+         * be after step. Drag delta is derived from the (frozen) press_pos
+         * and the current pointer. Matches what step will write. */
+        out.pos[0] = p->x;
+        out.pos[1] = p->y;
+        out.drag_dx = p->x - out.press_pos[0];
+        out.drag_dy = p->y - out.press_pos[1];
     } else {
         /* Not captured: pos reflects the current pointer; no drag. */
         out.press_pos[0] = p->x;
@@ -3475,14 +3473,84 @@ nt_ui_interaction_t nt_ui_get_interaction_padded(nt_ui_context_t *ctx, uint32_t 
         out.pointer_id = p->id;
     }
 
+    return out;
+}
+
+/* Thin wrapper: zero-padding specialization of the padded variant. */
+nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_query_interaction_padded(ctx, id, NULL); }
+
+/* Phase 56 ext (CQS split): query + commit. Same compute as
+ * nt_ui_query_interaction_padded, then applies the state-machine writes:
+ *   - cap->active_id transitions (set on press_now, cleared on release),
+ *   - cap->press_pos / cap->pos tracking,
+ *   - ctx->capture_seen[pidx] (so orphan cleanup in next begin spares us),
+ *   - ctx->pointer_over_any (feeds nt_ui_wants_pointer, D-56-08),
+ *   - debug zone push (overlay recording).
+ * Call exactly ONCE per widget per frame from the widget's begin. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
+    /* Same preconditions as query. */
+    NT_ASSERT(ctx != NULL && "nt_ui_step_interaction_padded: ctx must be non-NULL");
+    NT_ASSERT(id != 0U && "nt_ui_step_interaction_padded: id must be non-zero (0 = no widget)");
+    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_step_interaction_padded: no frame pointer snapshot (call inside begin/end)");
+    NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_step_interaction_padded: pad_lrtb components must be >= 0");
+
+    const nt_ui_interaction_t out = nt_ui_query_interaction_padded(ctx, id, pad_lrtb);
+
+    /* Inspector consume gate: query already returned a zeroed struct in this
+     * branch; step also skips ALL commits. Mirrors the old inline behavior
+     * (capture_seen stays 0 -- next nt_ui_begin's orphan cleanup wipes any
+     * in-progress capture instead of letting it persist into a phantom drag). */
+    if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
+        return out;
+    }
+
+    /* First-frame guard mirrors query's. */
+    const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
+    if (!d.found) {
+        return out;
+    }
+
+    const uint32_t pidx = 0U;
+    const nt_pointer_t *p = &ctx->frame_pointers[pidx];
+    nt_ui_capture_t *cap = &ctx->captures[pidx];
+    const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT];
+
+    const bool exclusive_gated = (cap->active_id != 0U) && (cap->active_id != id);
+
+    if (!exclusive_gated) {
+        if (out.hovered) {
+            ctx->pointer_over_any = true; /* feeds nt_ui_wants_pointer (D-56-08). */
+        }
+        /* Begin capture on press-over-widget (matches out.pressed_now). */
+        if (out.pressed_now) {
+            cap->active_id = id;
+            cap->press_pos[0] = p->x;
+            cap->press_pos[1] = p->y;
+            cap->pos[0] = p->x;
+            cap->pos[1] = p->y;
+        }
+    }
+
+    const bool mine = !exclusive_gated && (cap->active_id == id);
+    if (mine) {
+        cap->pos[0] = p->x;
+        cap->pos[1] = p->y;
+        /* This capture was queried this frame -> not an orphan. */
+        ctx->capture_seen[pidx] = 1U;
+        /* Release ends the capture (whether over or not). */
+        if (btn.is_released) {
+            cap->active_id = 0U;
+        }
+    }
+
     /* Phase 56 ext: hit-zone overlay recording. Gated by debug_recording so
      * production overhead is zero. At-cap is silently dropped (overlay is a
      * verification aid, not correctness).
      * Phase 56 ext fix (inspector overlay transform-aware): also record while
      * the inspector is active -- the inspector's post-walk overlay uses the
      * recorded accum snapshot to project the highlight polygon to the
-     * transformed render position. Without this, the BAKED button overlay
-     * draws an axis-aligned bbox in layout space (visible bug). */
+     * transformed render position. */
     if ((ctx->debug_recording || ctx->inspector_active) && ctx->debug_zone_count < NT_UI_DEBUG_ZONE_CAP) {
         nt_ui_debug_zone_t *z = &ctx->debug_zones[ctx->debug_zone_count++];
         const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
@@ -3522,11 +3590,11 @@ nt_ui_interaction_t nt_ui_get_interaction_padded(nt_ui_context_t *ctx, uint32_t 
 }
 
 /* Thin wrapper: zero-padding specialization of the padded variant. */
-nt_ui_interaction_t nt_ui_get_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_get_interaction_padded(ctx, id, NULL); }
+nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_step_interaction_padded(ctx, id, NULL); }
 
 /* Phase 56 ext: record-only push for DISABLED widgets that skip hit-test
  * entirely (e.g. nt_ui_button enabled=false). Mirrors the zone-fill block
- * inside nt_ui_get_interaction_padded but does NO hit-test / capture work
+ * inside nt_ui_step_interaction_padded but does NO hit-test / capture work
  * (the widget is non-interactive by contract). Recording is gated by
  * ctx->debug_recording (OFF default = zero overhead); at-cap silently
  * dropped. First-frame Clay_GetElementData miss -> no zone (NOT an assert).

@@ -405,9 +405,11 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("STANDARD (eased)", "label swaps on press");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    /* Universal interaction pattern (D-56-21): query BEFORE begin
-                     * so the label content reacts to press without bespoke API. */
-                    nt_ui_interaction_t in_std = nt_ui_get_interaction(s_ctx, s_id_std);
+                    /* Universal interaction pattern (D-56-21): PURE query BEFORE
+                     * begin so the label content reacts to press without bespoke
+                     * API. button_begin internally calls step (mutating) -- query
+                     * is idempotent and returns the same struct step will. */
+                    nt_ui_interaction_t in_std = nt_ui_query_interaction(s_ctx, s_id_std);
                     nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_std, s_atlas_handle, &s_btn_standard, &s_btn_decl, true);
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), in_std.pressed ? "pressed" : "click me", &g_btn_label_style);
                     if (nt_ui_button_end(s_ctx)) {

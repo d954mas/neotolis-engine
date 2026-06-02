@@ -226,7 +226,7 @@ struct nt_ui_context {
     uint32_t inspector_selected_id;
     /* Per-frame: true when the pointer is inside the inspector's sidebar
      * footprint (computed in nt_ui_begin from primary->x vs the panel width).
-     * Gates nt_ui_get_interaction_padded to a zeroed return so user widgets
+     * Gates nt_ui_step_interaction_padded to a zeroed return so user widgets
      * behind the sidebar do NOT register hover/press/click while the sidebar
      * visually consumes the click. Also makes nt_ui_wants_pointer report true
      * so the game can suppress its own world-input. Reset each nt_ui_begin. */
@@ -346,7 +346,7 @@ void nt_ui_internal_emit_inspector_layout_extern(nt_ui_context_t *ctx);
  * - find_debug_zone:    linear scan of ctx->debug_zones[] by id; NULL if missing.
  * - project_layout_to_world: project a Clay-layout point through z's accum
  *   stack (NON-negated rotation, NO per-level Y-flip -- matches what was
- *   RECORDED at query time inside nt_ui_get_interaction_padded) then apply
+ *   RECORDED at step time inside nt_ui_step_interaction_padded) then apply
  *   the walker's single GL Y-flip world_y = vy + vh - clay_y.
  * - emit_filled_quad / emit_outline: sprite-renderer emits used by the
  *   transformed-overlay path. Vertices in WORLD space (already flipped). */

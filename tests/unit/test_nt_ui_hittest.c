@@ -401,7 +401,7 @@ int main(void) {
     RUN_TEST(test_hittest_axis_aligned_baseline);
     RUN_TEST(test_hittest_rotated_asymmetric_probes);
     RUN_TEST(test_hittest_no_render_y_flip);
-    /* Phase 56 ext: touch-target padding (nt_ui_get_interaction_padded). */
+    /* Phase 56 ext: touch-target padding (nt_ui_step_interaction_padded). */
     RUN_TEST(test_hittest_padded_asymmetric);
     RUN_TEST(test_hittest_padded_with_rotation);
     RUN_TEST(test_hittest_padded_combinatorial_worst_case);

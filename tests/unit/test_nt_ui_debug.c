@@ -1,7 +1,7 @@
 /* Phase 56 ext: hit-zone debug overlay.
  *
  * Recording is OFF by default (zero overhead). When ON, each call to
- * nt_ui_get_interaction_padded pushes a zone record into the ctx ring.
+ * nt_ui_step_interaction_padded pushes a zone record into the ctx ring.
  * Drawing is decoupled from recording.
  *
  * Tests cover:
@@ -80,7 +80,7 @@ static void test_debug_recording_off_no_capture(void) {
     TEST_ASSERT_FALSE(nt_ui_debug_get_recording(s_fx.ctx));
     /* Many queries; none should be recorded. */
     for (uint32_t i = 0; i < 5U; ++i) {
-        (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnA"));
+        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     }
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_debug_get_zone_count(s_fx.ctx));
     nt_ui_end(s_fx.ctx);
@@ -105,10 +105,10 @@ static void test_debug_recording_on_records_zones(void) {
     declare_btn("btnA", BTN_X, BTN_Y);
     declare_btn("btnB", BTN_X + 200.0F, BTN_Y);
     declare_btn("btnC", BTN_X, BTN_Y + 100.0F);
-    (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnA"));
-    (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
     const int16_t pad[4] = {8, 8, 8, 8};
-    (void)nt_ui_get_interaction_padded(s_fx.ctx, nt_ui_id("btnC"), pad);
+    (void)nt_ui_step_interaction_padded(s_fx.ctx, nt_ui_id("btnC"), pad);
     TEST_ASSERT_EQUAL_UINT32(3U, nt_ui_debug_get_zone_count(s_fx.ctx));
 
     /* IDs come back in query order. */
@@ -144,7 +144,7 @@ static void test_debug_recording_clears_each_begin(void) {
     nt_ui_debug_set_recording(s_fx.ctx, true);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
     declare_btn("btnA", BTN_X, BTN_Y);
-    (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_debug_get_zone_count(s_fx.ctx));
     nt_ui_end(s_fx.ctx);
 
@@ -175,7 +175,7 @@ static void test_debug_draw_off_mode_silent(void) {
     nt_ui_end(s_fx.ctx);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
     declare_btn("btnA", BTN_X, BTN_Y);
-    (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_debug_get_zone_count(s_fx.ctx));
     nt_ui_end(s_fx.ctx);
 
@@ -199,8 +199,8 @@ static void test_debug_mode_filter(void) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
     declare_btn("btnA", BTN_X, BTN_Y);
     declare_btn("btnB", BTN_X + 300.0F, BTN_Y);
-    (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnA"));
-    (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
 
     /* Inspect the recorded flags directly (drawing is a sink, not a return). */
     uint32_t hover_match = 0U;
@@ -236,7 +236,7 @@ static void test_debug_emit_matches_walker_coord_space(void) {
     nt_ui_debug_set_recording(s_fx.ctx, true);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
     declare_btn("btnA", BTN_X, BTN_Y);
-    (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     nt_ui_end(s_fx.ctx);
 
     TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_debug_get_zone_count(s_fx.ctx));
@@ -283,7 +283,7 @@ static void test_debug_emit_matches_walker_coord_space(void) {
  * disabled buttons were invisible in the debug overlay. The fix adds an
  * explicit nt_ui_debug_record_disabled_zone call on the disabled path.
  * This test exercises the helper directly (same pattern test_nt_ui_debug
- * uses for nt_ui_get_interaction_padded -- driving the foundation, not the
+ * uses for nt_ui_step_interaction_padded -- driving the foundation, not the
  * widget): the helper MUST drop a zone with DISABLED set and must NOT
  * touch the capture state. Button wiring is regression-protected by
  * test_nt_ui_button + the disabled-button visual in ui_buttons_demo. */
@@ -359,7 +359,7 @@ static void test_debug_cap_saturates_silently(void) {
     declare_btn("btnA", BTN_X, BTN_Y);
     const uint32_t over = NT_UI_DEBUG_ZONE_CAP + 10U;
     for (uint32_t i = 0; i < over; ++i) {
-        (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnA"));
+        (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     }
     TEST_ASSERT_EQUAL_UINT32((uint32_t)NT_UI_DEBUG_ZONE_CAP, nt_ui_debug_get_zone_count(s_fx.ctx));
     nt_ui_end(s_fx.ctx);

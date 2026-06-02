@@ -1,10 +1,15 @@
 /* Engine-owned interaction state machine (WIDGET-02, D-56-04/06).
  *
- * nt_ui_get_interaction drives the per-pointer capture state machine off the
+ * nt_ui_step_interaction drives the per-pointer capture state machine off the
  * precomputed nt_button_state_t edges (is_pressed/is_down/is_released) + the
  * transform-aware hit-test, computed lazily: this-frame primary pointer vs the
  * PREVIOUS-frame Clay bbox (1-frame IM lag). The bbox is only available from
  * frame 2 onward (frame 1 declares + ends -> Clay hashmap stores it).
+ *
+ * Phase 56 ext (CQS split): nt_ui_query_interaction is the pure read used by
+ * the new test_query_is_idempotent / test_step_commits_what_query_previewed /
+ * test_query_step_under_rotation -- everything else here drives state across
+ * frames and uses step.
  *
  * Frame sequence (RESEARCH "Concrete unit-test design for the state machine"):
  *   Frame 1: declare CLAY({.id=CLAY_ID("btn")}) at a known bbox; end.
@@ -78,13 +83,13 @@ static void declare_btn_frame(const nt_pointer_t *p) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* A query frame: begin with pointer p, declare the element, query interaction
- * (INSIDE the frame -- get_interaction needs Clay's context set), then end.
- * Mirrors how a game/button calls get_interaction during declaration. */
+/* A step frame: begin with pointer p, declare the element, step interaction
+ * (INSIDE the frame -- step needs Clay's context set), then end. Mirrors how
+ * a game/button calls step_interaction during declaration. */
 static nt_ui_interaction_t query_btn_frame(const nt_pointer_t *p) {
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, p, 1);
     declare_btn_element();
-    nt_ui_interaction_t in = nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btn"));
+    nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
     nt_ui_end(s_fx.ctx);
     return in;
 }
@@ -196,7 +201,7 @@ static void test_interaction_disabled_skips(void) {
     const bool enabled = false;
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
     declare_btn_element();
-    nt_ui_interaction_t in = enabled ? nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btn")) : (nt_ui_interaction_t){0};
+    nt_ui_interaction_t in = enabled ? nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn")) : (nt_ui_interaction_t){0};
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_FALSE(in.hovered);
     TEST_ASSERT_FALSE(in.pressed);
@@ -207,7 +212,7 @@ static void test_interaction_disabled_skips(void) {
 }
 
 /* ---- Test 6: padded interaction (Phase 56 ext) ----
- * nt_ui_get_interaction_padded inflates the layout-space bbox by pad_lrtb
+ * nt_ui_step_interaction_padded inflates the layout-space bbox by pad_lrtb
  * BEFORE the inverse-affine. A pointer 12 px past the right edge becomes
  * hovered + can begin a capture when the right padding is 16. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -224,7 +229,7 @@ static void test_interaction_padded_hover_and_capture(void) {
     const int16_t pad_right[4] = {0, 16, 0, 0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
     declare_btn_element();
-    nt_ui_interaction_t in = nt_ui_get_interaction_padded(s_fx.ctx, nt_ui_id("btn"), pad_right);
+    nt_ui_interaction_t in = nt_ui_step_interaction_padded(s_fx.ctx, nt_ui_id("btn"), pad_right);
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_TRUE(in.hovered);
     TEST_ASSERT_TRUE(in.pressed);
@@ -261,7 +266,7 @@ static void test_interaction_disabled_with_padding_stays_disabled(void) {
     declare_btn_element();
     /* Mirror the button's branch (D-56-12): disabled => zeroed interaction,
      * the query is not invoked. */
-    nt_ui_interaction_t in = enabled ? nt_ui_get_interaction_padded(s_fx.ctx, nt_ui_id("btn"), big_pad) : (nt_ui_interaction_t){0};
+    nt_ui_interaction_t in = enabled ? nt_ui_step_interaction_padded(s_fx.ctx, nt_ui_id("btn"), big_pad) : (nt_ui_interaction_t){0};
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_FALSE(in.hovered);
     TEST_ASSERT_FALSE(in.pressed);
@@ -325,9 +330,9 @@ static void test_interaction_capture_excludes_other_widgets(void) {
     nt_pointer_t f2 = make_pointer(a_cx, a_cy, true, true, false);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
     CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
-    nt_ui_interaction_t inA_press = nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    nt_ui_interaction_t inA_press = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     CLAY({.id = CLAY_ID("btnB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = b_x, .y = b_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
-    nt_ui_interaction_t inB_press = nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    nt_ui_interaction_t inB_press = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_TRUE(inA_press.hovered);
     TEST_ASSERT_TRUE(inA_press.pressed_now);
@@ -342,9 +347,9 @@ static void test_interaction_capture_excludes_other_widgets(void) {
     nt_pointer_t f3 = make_pointer(b_cx, b_cy, true, false, false);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1);
     CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
-    nt_ui_interaction_t inA_drag = nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    nt_ui_interaction_t inA_drag = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     CLAY({.id = CLAY_ID("btnB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = b_x, .y = b_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
-    nt_ui_interaction_t inB_drag = nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    nt_ui_interaction_t inB_drag = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
     nt_ui_end(s_fx.ctx);
     /* A still owns the capture; pointer is off-widget so A's hovered is false
      * but pressed (capture-held) is true. */
@@ -365,15 +370,15 @@ static void test_interaction_capture_excludes_other_widgets(void) {
     nt_pointer_t f4 = make_pointer(b_cx, b_cy, false, false, true);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f4, 1);
     CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
-    nt_ui_interaction_t inA_rel = nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnA"));
+    nt_ui_interaction_t inA_rel = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     /* A processed the release: released_now true, clicked false (off A). Capture cleared. */
     TEST_ASSERT_TRUE(inA_rel.released_now);
     TEST_ASSERT_FALSE(inA_rel.clicked);
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
     CLAY({.id = CLAY_ID("btnB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = b_x, .y = b_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
-    /* By the time B is queried, A's call has cleared the capture, so B is
+    /* By the time B is stepped, A's call has cleared the capture, so B is
      * no longer exclusive_gated and reports hovered=true (pointer is over B). */
-    nt_ui_interaction_t inB_rel = nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    nt_ui_interaction_t inB_rel = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_TRUE(inB_rel.hovered);
 
@@ -381,12 +386,163 @@ static void test_interaction_capture_excludes_other_widgets(void) {
     nt_pointer_t f5 = make_pointer(b_cx, b_cy, false, false, false);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f5, 1);
     CLAY({.id = CLAY_ID("btnA"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = a_x, .y = a_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}){}(
-        void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnA"));
+        void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnA"));
     CLAY({.id = CLAY_ID("btnB"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = b_x, .y = b_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {}
-    nt_ui_interaction_t inB_idle = nt_ui_get_interaction(s_fx.ctx, nt_ui_id("btnB"));
+    nt_ui_interaction_t inB_idle = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btnB"));
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_TRUE(inB_idle.hovered);
     TEST_ASSERT_FALSE(inB_idle.pressed);
+}
+
+/* ---- Test 9 (Phase 56 ext CQS): query is idempotent on the release frame ----
+ *
+ * Pins the bug that motivated the CQS split. Pre-split, the single
+ * nt_ui_get_interaction silently ate clicks: on the release frame, the first
+ * call cleared cap->active_id and reported clicked=true; a SECOND call saw
+ * cap->active_id==0 and returned clicked=false (state visible to user
+ * widgets vanished). Query is pure -- N calls return the SAME struct AND
+ * cap->active_id is unchanged. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_query_is_idempotent(void) {
+    /* Frame 1: declare. */
+    nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    declare_btn_frame(&f1);
+
+    /* Frame 2: press inside (capture begins via step). */
+    nt_pointer_t f2 = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    (void)query_btn_frame(&f2); /* uses step under the hood */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn"), nt_ui_test_capture_active_id(s_fx.ctx, 0));
+
+    /* Frame 3: release inside. The OLD bug was: first nt_ui_get_interaction
+     * call returned clicked=true and zeroed cap->active_id; the second call
+     * saw 0 and returned clicked=false. With the CQS split, calling
+     * nt_ui_query_interaction N times all return clicked=true and leave
+     * cap->active_id UNCHANGED (no step in this test = no commit). */
+    nt_pointer_t f3 = make_pointer(BTN_CX, BTN_CY, false, false, true);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1);
+    declare_btn_element();
+
+    nt_ui_interaction_t calls[5];
+    for (int i = 0; i < 5; ++i) {
+        calls[i] = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("btn"));
+    }
+
+    /* All five returns are byte-identical. */
+    for (int i = 1; i < 5; ++i) {
+        TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&calls[0], &calls[i], sizeof(nt_ui_interaction_t), "query is not idempotent (the bug)");
+    }
+    /* And all 5 reported clicked=true on the release frame -- the bug
+     * would have shown calls[0].clicked=true and calls[1..4].clicked=false. */
+    TEST_ASSERT_TRUE(calls[0].clicked);
+    TEST_ASSERT_TRUE(calls[0].released_now);
+
+    /* cap->active_id is UNCHANGED by query (still owns the press; only step
+     * would clear it). */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn"), nt_ui_test_capture_active_id(s_fx.ctx, 0));
+
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 10 (Phase 56 ext CQS): step commits what query previewed ----
+ *
+ * Query returns the same struct step would have returned, AND step makes the
+ * state-machine writes (press_now: capture begins; release: capture clears). */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_step_commits_what_query_previewed(void) {
+    /* Frame 1: declare. */
+    nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false, false);
+    declare_btn_frame(&f1);
+
+    /* Frame 2: press_now. Pre-query first (capture still 0), then step. */
+    nt_pointer_t f2 = make_pointer(BTN_CX, BTN_CY, true, true, false);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
+    declare_btn_element();
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
+    nt_ui_interaction_t qA = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("btn"));
+    /* Query did NOT mutate. */
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
+    nt_ui_interaction_t qB = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    /* Step committed: capture begins. */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn"), nt_ui_test_capture_active_id(s_fx.ctx, 0));
+    /* Returns are byte-identical. */
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&qA, &qB, sizeof(nt_ui_interaction_t), "query and step diverged on press_now frame");
+    TEST_ASSERT_TRUE(qA.pressed_now);
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 3: release. Query first (capture still owned), then step. */
+    nt_pointer_t f3 = make_pointer(BTN_CX, BTN_CY, false, false, true);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f3, 1);
+    declare_btn_element();
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn"), nt_ui_test_capture_active_id(s_fx.ctx, 0));
+    nt_ui_interaction_t rA = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("btn"));
+    /* Query did NOT clear capture. */
+    TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn"), nt_ui_test_capture_active_id(s_fx.ctx, 0));
+    nt_ui_interaction_t rB = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn"));
+    /* Step cleared capture (release ends it). */
+    TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&rA, &rB, sizeof(nt_ui_interaction_t), "query and step diverged on release frame");
+    TEST_ASSERT_TRUE(rA.clicked);
+    TEST_ASSERT_TRUE(rA.released_now);
+    nt_ui_end(s_fx.ctx);
+}
+
+/* ---- Test 11 (Phase 56 ext CQS): query and step agree under rotation+clip ----
+ *
+ * Pure compute lives in query (the inverse-affine + clip walk in ui_hit_test).
+ * Under a 30 deg push_transform + a clip, query's hit-test answer must equal
+ * step's. Pin: a pointer that's OUTSIDE the axis-aligned layout AABB but
+ * INSIDE the rotated visual quad -- only the inverse-affine path hits it. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+static void test_query_step_under_rotation(void) {
+    /* Frame 1: declare the element under the same transform so its bbox is
+     * stored for frame 2's hit-test. */
+    nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false, false);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
+    nt_ui_transform_t rot = nt_ui_transform_defaults();
+    rot.rotation = 30.0F * 0.017453292F; /* 30 deg */
+    CLAY({.id = CLAY_ID("rot_root")}) {
+        nt_ui_push_transform(s_fx.ctx, &rot);
+        /* Clip generous enough to contain the rotated widget. */
+        nt_ui_push_clip(s_fx.ctx, BTN_X - 200.0F, BTN_Y - 200.0F, BTN_W + 400.0F, BTN_H + 400.0F);
+        CLAY({.id = CLAY_ID("rotbtn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {
+        }
+        nt_ui_pop_clip(s_fx.ctx);
+        nt_ui_pop_transform(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    /* Frame 2: pointer at the forward-rotated layout right-center.
+     * cos(30)=0.8660, sin(30)=0.5.
+     * dx = BTN_W/2 = 80, dy = 0.
+     * rx = BTN_CX + cos*dx = 180 + 69.3 = 249.3
+     * ry = BTN_CY + sin*dx = 224 + 40.0 = 264.0
+     * Layout AABB y-range is [200, 248]; ry=264 is OUTSIDE the AABB. */
+    const float c = 0.8660F;
+    const float sn = 0.5F;
+    const float dx = BTN_W * 0.5F;
+    const float rx = BTN_CX + (c * dx);
+    const float ry = BTN_CY + (sn * dx);
+    /* Sanity: this coord is OUTSIDE the axis-aligned layout AABB. */
+    TEST_ASSERT_TRUE(ry > BTN_Y + BTN_H);
+
+    nt_pointer_t f2 = make_pointer(rx, ry, true, true, false);
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
+    CLAY({.id = CLAY_ID("rot_root")}) {
+        nt_ui_push_transform(s_fx.ctx, &rot);
+        nt_ui_push_clip(s_fx.ctx, BTN_X - 200.0F, BTN_Y - 200.0F, BTN_W + 400.0F, BTN_H + 400.0F);
+        CLAY({.id = CLAY_ID("rotbtn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = BTN_X, .y = BTN_Y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}}}) {
+            /* Query + step under the SAME accum stack -- both must agree. */
+            const nt_ui_interaction_t q = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("rotbtn"));
+            const nt_ui_interaction_t s = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("rotbtn"));
+            /* The inverse-rotation lands the pointer on the visual quad -> hover. */
+            TEST_ASSERT_TRUE_MESSAGE(q.hovered, "query inverse-affine missed the rotated quad");
+            TEST_ASSERT_TRUE(q.pressed_now);
+            TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&q, &s, sizeof(nt_ui_interaction_t), "query and step diverged under rotation+clip");
+        }
+        nt_ui_pop_clip(s_fx.ctx);
+        nt_ui_pop_transform(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
 }
 
 int main(void) {
@@ -401,5 +557,9 @@ int main(void) {
     RUN_TEST(test_interaction_disabled_with_padding_stays_disabled);
     /* Phase 56 ext fix: exclusive capture (no cross-widget interference). */
     RUN_TEST(test_interaction_capture_excludes_other_widgets);
+    /* Phase 56 ext CQS split: query is pure, step commits. */
+    RUN_TEST(test_query_is_idempotent);
+    RUN_TEST(test_step_commits_what_query_previewed);
+    RUN_TEST(test_query_step_under_rotation);
     return UNITY_END();
 }

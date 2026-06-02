@@ -4,13 +4,13 @@
 /* Interactive container button (D-56-10). A near-clone of nt_ui_panel_begin/end
  * whose ONE structural addition is the Clay element .id (so the engine hit-test
  * finds it via Clay_GetElementData). The button runs the state machine +
- * transitions automatically (D-56-14): query interaction (nt_ui_get_interaction),
+ * transitions automatically (D-56-14): step interaction (nt_ui_step_interaction),
  * pick state (disabled?:pressed?:hover?:idle), ease the picked state's
  * scale/offset/opacity via the anim cache (nt_ui_anim), and apply via
  * push_transform + push_opacity + the slice9 bg region/tint. Content
  * (label / icon / icon+text) is composed as CHILDREN between begin/end. This is
- * a thin convenience wrapper over nt_ui_get_interaction (D-56-21): everything it
- * does, a game could do by hand. Per-state descriptors are intrinsic to
+ * a thin convenience wrapper over nt_ui_step_interaction (D-56-21): everything
+ * it does, a game could do by hand. Per-state descriptors are intrinsic to
  * interaction (universal), NOT a central variant taxonomy (D-56-02, Model D). */
 
 #include <stdbool.h>
@@ -50,7 +50,7 @@ typedef struct {
      * {left, right, top, bottom}. {0,0,0,0} = no padding (visual = hit).
      * Inflated in layout space BEFORE the inverse-affine, so the padded zone
      * rotates with the widget. Each component >= 0 (asserted). Forwarded
-     * straight to nt_ui_get_interaction_padded on the enabled path. */
+     * straight to nt_ui_step_interaction_padded on the enabled path. */
     int16_t hit_padding_lrtb[4];
 } nt_ui_button_style_t;
 /* Catches accidental growth past the documented field set. 4 nt_ui_btn_state_t
@@ -69,16 +69,19 @@ _Static_assert(sizeof(nt_ui_button_style_t) == 108, "nt_ui_button_style_t expect
  * asserts fire. All other fields (layout, scroll, floating, border, clip) flow
  * through verbatim. */
 /* State-dependent content (label "Save" -> "Saving..." on press, icon swap):
- * query the UNIVERSAL interaction service BEFORE button_begin. The same
- * pattern works for any interactive widget (toggle, slider, drag-handle,
- * custom). nt_ui_get_interaction is per-id-per-frame cached -- duplicate
- * calls are free.
+ * call nt_ui_query_interaction (PURE READ) before button_begin and use the
+ * returned struct to pick content. The button internally calls step (mutating)
+ * once during begin; query and step return the same struct because compute is
+ * deterministic. Calling query N times is safe -- no state mutation.
  *
- *   nt_ui_interaction_t in = nt_ui_get_interaction(ctx, btn_id);
+ *   nt_ui_interaction_t in = nt_ui_query_interaction(ctx, btn_id);
  *   nt_ui_button_begin(ctx, ..., btn_id, atlas, &style, &decl, true);
  *     nt_ui_label(ctx, NULL, in.pressed ? "Saving..." : "Save", &lbl);
  *   clicked = nt_ui_button_end(ctx);
- */
+ *
+ * IMPORTANT: query must be in the SAME transform+clip scope as the eventual
+ * button_begin -- inverse-affine in hit-test uses the live stacks. Query
+ * before push_transform -> different hit-test answer than step inside it. */
 void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, uint32_t id, nt_resource_t atlas, const nt_ui_button_style_t *style, const Clay_ElementDeclaration *decl, bool enabled);
 bool nt_ui_button_end(nt_ui_context_t *ctx);
 

@@ -12,7 +12,7 @@
 #include "ui/nt_ui_internal.h"
 
 /* Phase 56 ext: hit-zone debug overlay. Recording is per-frame ctx state
- * (filled inside nt_ui_get_interaction_padded when ctx->debug_recording is
+ * (filled inside nt_ui_step_interaction_padded when ctx->debug_recording is
  * true); drawing is decoupled and called after nt_ui_walk by the game. */
 
 // #region toggle + getters

@@ -55,7 +55,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
      * ctx->debug_recording so production overhead stays zero. */
     nt_ui_interaction_t in;
     if (enabled) {
-        in = nt_ui_get_interaction_padded(ctx, id, style->hit_padding_lrtb);
+        in = nt_ui_step_interaction_padded(ctx, id, style->hit_padding_lrtb);
     } else {
         in = (nt_ui_interaction_t){0};
         nt_ui_debug_record_disabled_zone(ctx, id, style->hit_padding_lrtb);

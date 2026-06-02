@@ -362,7 +362,7 @@ static void test_overlay_noop_without_highlight(void) {
  * behind it (the sidebar paints on top but the hit-test was pure coord-vs-
  * bbox). Fix: when inspector_active and the pointer is inside the right-
  * attached sidebar footprint (NT_UI_INSPECTOR_PANEL_WIDTH = 400 wide on a 800-wide
- * screen -> x >= 400), nt_ui_get_interaction must return a zeroed result
+ * screen -> x >= 400), nt_ui_step_interaction must return a zeroed result
  * for every user widget AND nt_ui_inspector_pointer_consumed must be true
  * AND nt_ui_wants_pointer must be true. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -404,7 +404,7 @@ static void test_inspector_intercepts_pointer_over_sidebar(void) {
 
     /* Both the unpadded and padded query MUST return zeroed -- no hover, no
      * press, no clicked, no capture (the bug pinned here). */
-    nt_ui_interaction_t in = nt_ui_get_interaction(s_fx.ctx, nt_ui_id("hidden_btn"));
+    nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("hidden_btn"));
     TEST_ASSERT_FALSE(in.hovered);
     TEST_ASSERT_FALSE(in.pressed);
     TEST_ASSERT_FALSE(in.pressed_now);
@@ -413,7 +413,7 @@ static void test_inspector_intercepts_pointer_over_sidebar(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
 
     const int16_t pad[4] = {32, 32, 32, 32};
-    nt_ui_interaction_t in_pad = nt_ui_get_interaction_padded(s_fx.ctx, nt_ui_id("hidden_btn"), pad);
+    nt_ui_interaction_t in_pad = nt_ui_step_interaction_padded(s_fx.ctx, nt_ui_id("hidden_btn"), pad);
     TEST_ASSERT_FALSE(in_pad.hovered);
     TEST_ASSERT_FALSE(in_pad.pressed);
     TEST_ASSERT_FALSE(in_pad.pressed_now);
@@ -467,7 +467,7 @@ static void test_inspector_pointer_outside_sidebar_normal(void) {
     TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
 
     /* Normal interaction must fire. */
-    nt_ui_interaction_t in = nt_ui_get_interaction(s_fx.ctx, nt_ui_id("visible_btn"));
+    nt_ui_interaction_t in = nt_ui_step_interaction(s_fx.ctx, nt_ui_id("visible_btn"));
     TEST_ASSERT_TRUE(in.hovered);
     TEST_ASSERT_TRUE(in.pressed);
     TEST_ASSERT_TRUE(in.pressed_now);
@@ -1165,7 +1165,7 @@ static void test_inspector_reads_layer_from_shared_config_userdata(void) {
  * widget wrapped in nt_ui_push_transform (e.g. demo BAKED button).
  *
  * Setup: declare a button under a non-identity transform (offset + rotation
- * + non-uniform scale). nt_ui_get_interaction_padded fires inside button_begin
+ * + non-uniform scale). nt_ui_step_interaction_padded fires inside button_begin
  * with inspector_active=true -> a debug zone is recorded with the accum
  * snapshot. Assert the projected top-left corner DIFFERS from the layout
  * bbox top-left (proves projection ran). */
@@ -1209,7 +1209,7 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
             /* Issue the interaction query INSIDE the CLAY block so the
              * declaration-time accum stack is still active. Recording happens
              * inside get_interaction_padded gated by inspector_active. */
-            (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("xform_btn"));
+            (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("xform_btn"));
         }
         nt_ui_pop_transform(s_fx.ctx);
     }
@@ -1247,7 +1247,7 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
  * recorded ----
  *
  * Counterpart to 15q. Setup: a plain Clay container is selected but NEVER
- * queried via nt_ui_get_interaction (e.g. a non-interactive panel that
+ * queried via nt_ui_step_interaction (e.g. a non-interactive panel that
  * still appears in the inspector tree). No debug zone -> no accum snapshot.
  * The overlay MUST fall back to the axis-aligned bbox path and emit
  * normally (no crash). */
@@ -2081,7 +2081,7 @@ static void test_inspector_hover_transformed_widget(void) {
         CLAY({.id = CLAY_ID("xf_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
             /* Issue the interaction query INSIDE the CLAY block so the
              * declaration-time accum is captured into the zone. */
-            (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("xf_btn"));
+            (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("xf_btn"));
         }
         nt_ui_pop_transform(s_fx.ctx);
     }
@@ -2128,7 +2128,7 @@ static void test_inspector_hover_transformed_widget(void) {
         CLAY({.id = CLAY_ID("xf_btn"), .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}}, .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
             /* Query so the zone is recorded with the live accum (otherwise
              * frame 2 has no zone to scan). */
-            (void)nt_ui_get_interaction(s_fx.ctx, nt_ui_id("xf_btn"));
+            (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("xf_btn"));
         }
         nt_ui_pop_transform(s_fx.ctx);
     }

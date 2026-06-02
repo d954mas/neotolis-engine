@@ -215,7 +215,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     }
 
     /* Phase 56 ext fix (inspector overlay transform-aware): if the highlighted
-     * id was queried via nt_ui_get_interaction_padded this frame, a debug zone
+     * id was stepped via nt_ui_step_interaction_padded this frame, a debug zone
      * carries the declaration-time accum-transform snapshot. Use it to project
      * the visual + padded corners into world space so the overlay matches the
      * EXACT rendered position. Without this, push_transform-wrapped widgets

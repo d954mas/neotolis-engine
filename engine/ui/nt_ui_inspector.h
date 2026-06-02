@@ -54,9 +54,9 @@ bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx);
 /* True for the current frame iff the inspector is active AND the pointer is
  * inside the sidebar footprint (right-attached, ctx->inspector_metrics.panel_width
  * wide). The engine already uses this internally to gate
- * nt_ui_get_interaction[_padded] so widgets behind the sidebar do NOT register
+ * nt_ui_step_interaction[_padded] so widgets behind the sidebar do NOT register
  * hover/press/click; games that roll their OWN interactive zones (not via
- * nt_ui_get_interaction) can query this to suppress their own click logic
+ * nt_ui_step_interaction) can query this to suppress their own click logic
  * when the inspector is taking input. Returns false when the inspector is
  * inactive. Computed in nt_ui_begin from the primary pointer position; the
  * value is stable across the frame. */

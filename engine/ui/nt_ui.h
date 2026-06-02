@@ -375,10 +375,25 @@ typedef struct {
     uint32_t pointer_id;    /* which pointer captured (multitouch) */
 } nt_ui_interaction_t;
 
-/* THE foundation (D-56-21). The button (Plan 04) and every custom widget query
- * this. id from nt_ui_id("..."). Drives the per-pointer capture state machine
- * off the precomputed nt_button_state_t edges + the transform-aware hit-test. */
-nt_ui_interaction_t nt_ui_get_interaction(nt_ui_context_t *ctx, uint32_t id);
+/* THE foundation (D-56-21). The button (Plan 04) and every custom widget read
+ * from this. id from nt_ui_id("..."). Split into PURE query + MUTATING step
+ * for CQS (Command-Query Separation): the old single nt_ui_get_interaction
+ * silently ate clicks when called twice on the release frame (first call
+ * cleared capture, second saw cap.active_id==0 and returned clicked=false).
+ *
+ * PURE: returns interaction state as if the state machine had advanced for
+ * this id. Does NOT mutate ctx->capture or any other state. Safe to call N
+ * times in the same frame -- every call returns the same struct. Use for
+ * state-dependent content (label/icon swap on press), peek tooltips, custom
+ * widget previews. Pair with nt_ui_step_interaction in the widget begin to
+ * actually drive the state machine.
+ *
+ * Constraint: query must be called in the SAME transform+clip context as
+ * the eventual step (i.e. inside the same CLAY scope and after the same
+ * push_transform/push_clip calls). Calling outside that context gives a
+ * different hit-test answer because the inverse-affine uses accum_stack /
+ * clip_stack at call time. */
+nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id);
 
 /* EXPERIMENTAL (Phase 56 ext): API surface may change in v1.9. Used by
  * ui_buttons_demo and inspector internals. Game code adopting this should
@@ -390,9 +405,21 @@ nt_ui_interaction_t nt_ui_get_interaction(nt_ui_context_t *ctx, uint32_t id);
  * touch-friendly hit areas without changing visual size. Asserts each
  * component >= 0 (negative padding is a use error -- use a smaller widget).
  * pad_lrtb may be NULL (treated as {0,0,0,0}; equivalent to the unpadded
- * call). nt_ui_get_interaction(ctx, id) is implemented as the {0,0,0,0}
+ * call). nt_ui_query_interaction(ctx, id) is implemented as the {0,0,0,0}
  * specialization of this. */
-nt_ui_interaction_t nt_ui_get_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
+nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
+
+/* MUTATING: same compute as nt_ui_query_interaction, then commits the state-
+ * machine writes (capture transitions, cap->pos tracking, capture_seen,
+ * pointer_over_any, debug zone push). Call ONCE per widget per frame from
+ * the widget's begin (button, toggle, custom widget). Returns the same struct
+ * query would have returned for the SAME (ctx, id) at the same call site. */
+nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id);
+
+/* MUTATING padded variant. Same touch-target inflation semantics as
+ * nt_ui_query_interaction_padded. Commits state-machine writes; call ONCE
+ * per widget per frame from the widget's begin. */
+nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]);
 
 /* True when any capture is active OR a pointer is over a widget this frame
  * (~ ImGui io.WantCaptureMouse). The game gates its own world input on this. */

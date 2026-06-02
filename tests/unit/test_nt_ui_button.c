@@ -8,8 +8,6 @@
  *   - Stack balance: nt_ui_button_begin/end push+pop transform+opacity
  *     symmetrically on EVERY branch (incl. the disabled path), so the walker's
  *     transform/opacity stacks never underflow. Mirrors test_nt_ui_panel.c.
- *   - Leaf sugar nt_ui_button(...) = begin + centered label + end, returns
- *     clicked (false with no input).
  * (Click-fires-once is covered by test_nt_ui_interaction per the VALIDATION map;
  * here transition_speed=0 makes the per-state apply deterministic/instant.) */
 
@@ -250,7 +248,8 @@ static void test_button_decl_asserts_caller_clean(void) {
  *      the label (~50x20). With decl.layout.sizing = FIXED(320, 180), Clay
  *      lays the button out at 320x180 and the hit-test honors that bbox.
  *      Two-frame setup: frame 1 declares so Clay has a prev-frame bbox;
- *      frame 2 queries get_interaction at the test points. ---- */
+ *      frame 2 calls query_interaction (pure read) for verification --
+ *      button_begin already stepped the state machine for this id. ---- */
 static void test_button_decl_fixed_size_hit_test(void) {
     static const Clay_ElementDeclaration fixed_decl = {
         .layout =
@@ -278,7 +277,7 @@ static void test_button_decl_fixed_size_hit_test(void) {
         nt_ui_label(s_fx.ctx, NULL, "Hit", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
-    nt_ui_interaction_t inside = nt_ui_get_interaction(s_fx.ctx, nt_ui_id("fxbtn"));
+    nt_ui_interaction_t inside = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("fxbtn"));
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_TRUE_MESSAGE(inside.hovered, "decl.layout.sizing FIXED(320,180) -- point (200,100) inside bbox must hover");
 
@@ -290,7 +289,7 @@ static void test_button_decl_fixed_size_hit_test(void) {
         nt_ui_label(s_fx.ctx, NULL, "Hit", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
-    nt_ui_interaction_t outside = nt_ui_get_interaction(s_fx.ctx, nt_ui_id("fxbtn"));
+    nt_ui_interaction_t outside = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("fxbtn"));
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_FALSE_MESSAGE(outside.hovered, "decl.layout.sizing FIXED(320,180) -- point (400,100) outside bbox must NOT hover");
 }
