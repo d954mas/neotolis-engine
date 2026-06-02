@@ -124,7 +124,15 @@ If a decision can be deferred without loss of base architecture — it is deferr
   Clay's pinned API (`CLAY_PINNED_MAJOR/MINOR` enforced via
   `_Static_assert` in `nt_ui.c`) becomes part of the engine's
   publicly-promised surface; bumping Clay can require coordinated
-  game-side changes.)
+  game-side changes.
+
+  When `NT_UI_DEBUG_TOOLS=ON` the inspector additionally depends on
+  ~30 Clay **private** symbols (`Clay__*` statics and `Clay_Context`
+  internal arrays — accessed via thin wrappers in
+  `engine/ui/nt_ui_clay_internal.c`, the exclusive `CLAY_IMPLEMENTATION`
+  TU). This is the verbatim Clay debug-view port; it raises the Clay
+  upgrade cost for debug builds. Production builds (`OFF`) carry the
+  public dependency only.)
 - hot reload of compiled native/WASM code
 - generic reflection-heavy system architecture
 - WebGL 1 support
