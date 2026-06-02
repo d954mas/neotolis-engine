@@ -861,6 +861,33 @@ void test_emit_slice9_from_region_scale_two_doubles_borders(void) {
     TEST_ASSERT_EQUAL_UINT16_MESSAGE(16520U, uv2[0], "scale=2.0 UV column-2 must use SRC=atlas borders");
 }
 
+/* ECS path: set_slice9_scale on sprite_comp must scale destination corner size
+ * (via emit_one), keeping UV unchanged. Mirrors the from_region semantics. */
+void test_sprite_comp_slice9_scale_affects_emit_position(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xC1ULL);
+    nt_material_t mat = create_test_material();
+    nt_entity_t e = create_sprite_entity(s_atlas_res, FIXTURE_RS9_HASH, mat);
+    nt_sprite_comp_set_slice9_scale(e, 2.0F);
+
+    nt_render_item_t items[1];
+    items[0].sort_key = 0;
+    items[0].entity = e.id;
+    items[0].batch_key = nt_batch_key(mat.id, (uint32_t)FIXTURE_RS9_HASH);
+    nt_sprite_renderer_draw_list(items, 1);
+
+    /* rs9: 100×100 src, slice9=16, origin (0,0) → local lxs[1] = 16 × scale = 32. */
+    float v1[3];
+    nt_sprite_renderer_test_last_emit_position(1, v1);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(v1[0] - 32.0F) < 0.5F, "ECS slice9_scale=2 must shift inner-left to 32 px");
+    /* UV stays at src=16. */
+    uint16_t uv1[2];
+    nt_sprite_renderer_test_last_emit_texcoord(1, uv1);
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(14480U, uv1[0], "ECS slice9_scale must not shift UV");
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -878,5 +905,6 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_sampler_override_does_not_stick);
     RUN_TEST(test_emit_slice9_from_region_scale_one_matches_atlas);
     RUN_TEST(test_emit_slice9_from_region_scale_two_doubles_borders);
+    RUN_TEST(test_sprite_comp_slice9_scale_affects_emit_position);
     return UNITY_END();
 }
