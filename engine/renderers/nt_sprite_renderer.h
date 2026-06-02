@@ -130,6 +130,17 @@ void nt_sprite_renderer_emit_slice9_from_region(nt_resource_t atlas, uint32_t re
 void nt_sprite_renderer_emit_slice9_explicit(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t src_sl, uint16_t src_sr, uint16_t src_st, uint16_t src_sb,
                                              uint16_t dst_sl, uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, float rotation);
 
+#include "core/nt_assert.h"
+
+/* Round-nearest scale of a slice9 border to uint16_t with overflow assert.
+ * For atlas border 16 px, scale must stay below ~4096; production scales
+ * are 0.1..10. */
+static inline uint16_t nt_sprite_renderer_scale_slice9_border(uint16_t base, float scale) {
+    const float f = ((float)base * scale) + 0.5F;
+    NT_ASSERT(f >= 0.0F && f <= 65535.0F && "slice9 border × scale overflows uint16_t");
+    return (uint16_t)f;
+}
+
 /* Emit an arbitrary triangle list sampling a single UV from the given
  * atlas region. Intended for solid-color shapes drawn against a
  * white-pixel region (rounded corners, ring sectors, custom fan/strip).

@@ -1080,11 +1080,11 @@ void nt_sprite_renderer_emit_slice9_from_region(nt_resource_t atlas, uint32_t re
     const uint16_t src_r = r->slice9_lrtb[1];
     const uint16_t src_t = r->slice9_lrtb[2];
     const uint16_t src_b = r->slice9_lrtb[3];
-    /* DST borders = src * scale (drives destination corner size). Round-nearest. */
-    const uint16_t dst_l = (uint16_t)(((float)src_l * slice9_scale) + 0.5F);
-    const uint16_t dst_r = (uint16_t)(((float)src_r * slice9_scale) + 0.5F);
-    const uint16_t dst_t = (uint16_t)(((float)src_t * slice9_scale) + 0.5F);
-    const uint16_t dst_b = (uint16_t)(((float)src_b * slice9_scale) + 0.5F);
+    /* DST borders = src * scale (drives destination corner size). */
+    const uint16_t dst_l = nt_sprite_renderer_scale_slice9_border(src_l, slice9_scale);
+    const uint16_t dst_r = nt_sprite_renderer_scale_slice9_border(src_r, slice9_scale);
+    const uint16_t dst_t = nt_sprite_renderer_scale_slice9_border(src_t, slice9_scale);
+    const uint16_t dst_b = nt_sprite_renderer_scale_slice9_border(src_b, slice9_scale);
     emit_slice9_internal(atlas, region_index, x, y, w, h, src_l, src_r, src_t, src_b, dst_l, dst_r, dst_t, dst_b, color_packed, flip_bits, rotation);
 }
 // #endregion

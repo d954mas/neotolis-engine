@@ -893,10 +893,10 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
             const uint16_t src_r = p->slice9_override[1];
             const uint16_t src_t = p->slice9_override[2];
             const uint16_t src_b = p->slice9_override[3];
-            const uint16_t dst_l = (uint16_t)(((float)src_l * s9_scale) + 0.5F);
-            const uint16_t dst_r = (uint16_t)(((float)src_r * s9_scale) + 0.5F);
-            const uint16_t dst_t = (uint16_t)(((float)src_t * s9_scale) + 0.5F);
-            const uint16_t dst_b = (uint16_t)(((float)src_b * s9_scale) + 0.5F);
+            const uint16_t dst_l = nt_sprite_renderer_scale_slice9_border(src_l, s9_scale);
+            const uint16_t dst_r = nt_sprite_renderer_scale_slice9_border(src_r, s9_scale);
+            const uint16_t dst_t = nt_sprite_renderer_scale_slice9_border(src_t, s9_scale);
+            const uint16_t dst_b = nt_sprite_renderer_scale_slice9_border(src_b, s9_scale);
             nt_sprite_renderer_emit_slice9_explicit(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, src_l, src_r, src_t, src_b, dst_l, dst_r, dst_t, dst_b, col, p->flip_bits, rotation);
         } else {
             /* Atlas-driven path: src = atlas-baked, dst = src*scale (inside helper). */
