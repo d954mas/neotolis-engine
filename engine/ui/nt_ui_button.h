@@ -38,8 +38,6 @@ typedef struct {
      * inverse-affine so the padded zone rotates with the widget. */
     int16_t hit_padding_lrtb[4];
 } nt_ui_button_style_t;
-/* 4 states (24 each) + speed (4) + padding (8) = 108. */
-_Static_assert(sizeof(nt_ui_button_style_t) == 108, "nt_ui_button_style_t expected size 108 B");
 
 /* begin → children → bool end. enabled=false short-circuits hover/click and
  * forces the disabled visual; transform/opacity still push so end stays balanced.

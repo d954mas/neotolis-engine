@@ -188,7 +188,11 @@ typedef struct nt_ui_widget_def_t {
  * `pad_lrtb` records the touch-target inflation so the inspector overlay can
  * outline the padded hit zone distinctly; pass NULL for none. def must outlive
  * the frame (static const is the canonical pattern). id 0 is silently dropped
- * (sentinel). def NULL is silently dropped. */
+ * (sentinel). def NULL is silently dropped.
+ *
+ * Storage is a 128-slot direct-mapped table; first collisions expected around
+ * 14 widgets (birthday-paradox), replace-on-collision. Observability-only —
+ * losing a tag for one of two colliding widgets is acceptable. */
 void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]);
 
 /* Return the descriptor registered for `id` this frame, or NULL when no
@@ -332,7 +336,12 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
 
 /* MUTATING: same compute as the query, then commits state-machine writes
  * (capture transitions, cap->pos, capture_seen, pointer_over_any, debug zone).
- * Call ONCE per widget per frame from the widget's begin. */
+ * Call ONCE per widget per frame from the widget's begin.
+ *
+ * When NT_UI_DEBUG_TOOLS is ON AND nt_ui_inspector_pointer_consumed() is true,
+ * BOTH query and step return a zeroed struct (sidebar swallows the click).
+ * Game code that needs to know SHOULD check nt_ui_inspector_pointer_consumed
+ * before reacting to a "no interaction" result. */
 nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id);
 
 /* MUTATING padded variant — same touch-target inflation as query_padded. */
