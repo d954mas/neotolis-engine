@@ -3,6 +3,8 @@
 
 #include "ui/nt_ui_inspector.h"
 
+#if NT_UI_DEBUG_TOOLS
+
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -281,3 +283,5 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     }
 }
 // #endregion
+
+#endif /* NT_UI_DEBUG_TOOLS */

@@ -1,5 +1,7 @@
 #include "ui/nt_ui_debug.h"
 
+#if NT_UI_DEBUG_TOOLS
+
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -281,3 +283,5 @@ void nt_ui_debug_draw_hit_zones(nt_ui_context_t *ctx, const nt_ui_target_t *targ
     }
 }
 // #endregion
+
+#endif /* NT_UI_DEBUG_TOOLS */
