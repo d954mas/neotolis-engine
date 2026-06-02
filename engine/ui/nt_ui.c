@@ -8,12 +8,8 @@
 #include "renderers/nt_text_renderer.h"
 #include "time/nt_time.h"
 
-/* Phase 56 ext rework (TU split): CLAY_IMPLEMENTATION now lives in
- * engine/ui/nt_ui_clay_internal.c (the exclusive TU that owns Clay's static
- * globals + private-typed bodies). This file pulls in Clay via the same
- * header but WITHOUT the implementation guard so it only sees the public
- * API surface. Clay-private reads (marker emit length, test-access pointer
- * fields) go through wrappers in nt_ui_clay_internal.h. */
+/* CLAY_IMPLEMENTATION lives in nt_ui_clay_internal.c. This file uses Clay's
+ * public API only; private reads go through nt_ui_clay_internal.h wrappers. */
 
 #if !defined(CLAY_PINNED_MAJOR) || !defined(CLAY_PINNED_MINOR)
 #error "nt_ui: CLAY_PINNED_MAJOR / CLAY_PINNED_MINOR must be defined by CMake"
@@ -35,7 +31,7 @@ _Static_assert(CLAY_PINNED_MAJOR == 0 && CLAY_PINNED_MINOR == 14, "Clay v0.14 re
 #include "input/nt_input.h" /* NT_INPUT_MAX_POINTERS, nt_pointer_t */
 #include "log/nt_log.h"
 #include "memory/nt_mem_scratch.h"
-#include "ui/nt_ui_clay_internal.h" /* Phase 56 ext rework (TU split): Clay private surface lives in nt_ui_clay_internal.c. */
+#include "ui/nt_ui_clay_internal.h" /* Clay private surface lives in nt_ui_clay_internal.c */
 #include "ui/nt_ui_debug.h"         /* nt_ui_debug_record_disabled_zone prototype */
 #include "ui/nt_ui_image.h"         /* NT_UI_IMAGE_*_OVERRIDE flags */
 #include "ui/nt_ui_internal.h"
@@ -49,10 +45,8 @@ enum {
 };
 // #endregion
 
-/* Inspector sizing (panel width / row height / font size / outer padding /
- * indent width): ctx->inspector_metrics (REVIEW-2 P3-1, runtime tunable via
- * nt_ui_inspector_set_metrics). Defaults match the verbatim Clay debug-view
- * (clay.h:3113-3122). */
+/* Inspector sizing lives on ctx->inspector_metrics; runtime-tunable via
+ * nt_ui_inspector_set_metrics. Defaults match Clay's debug-view literals. */
 
 // #region module_state
 /* Only one ctx may be in-frame at a time; nt_ui_begin asserts NULL on entry. */
@@ -65,7 +59,7 @@ static nt_ui_element_data_t s_default_element_data[256];
 // #endregion
 
 // #region clay_error_handler
-/* All Clay errors are fatal -- assert compiles out in NT_ASSERT_OFF production. */
+/* All Clay errors are fatal; assert compiles out in NT_ASSERT_OFF builds. */
 static void nt_ui_clay_error_cb(Clay_ErrorData err) {
     /* errorText is .length + .chars, NOT NUL-terminated. */
     const int len = err.errorText.length;
@@ -179,12 +173,7 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     nt_ui_context_t *ctx = (nt_ui_context_t *)arena;
     memset(ctx, 0, sizeof(*ctx));
 
-    /* Phase 56 ext (REVIEW-2 P3-1): inspector sizing defaults. Memset to 0
-     * would set panel_width to 0 which trips the > 0 invariant in every
-     * consumer (overlay scissor produces negative width, Clay SIZING_FIXED
-     * collapses to 0). Initialize to the documented defaults so an
-     * inspector that is activated without an explicit set_metrics call
-     * looks identical to the pre-fix hardcoded shape. */
+    /* Defaults — memset zero would set panel_width=0 and break consumers. */
     ctx->inspector_metrics = NT_UI_INSPECTOR_METRICS_DEFAULT;
 
     const size_t ctx_size = NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE);
@@ -198,10 +187,8 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     void *clay_mem = (char *)arena + ctx_size + marker_bytes;
     const size_t clay_size = arena_size - ctx_size - marker_bytes;
 
-    /* Stage max_elements into Clay's globals so Clay_Initialize inherits it;
-     * re-null current before restore -- Clay_SetMaxElementCount writes
-     * per-ctx when current is non-NULL. Clay__defaultMaxElementCount is
-     * CLAY_IMPLEMENTATION-private; reach it via the wrapper. */
+    /* Stage max_elements via the Clay global so Clay_Initialize inherits it;
+     * SetMaxElementCount writes per-ctx if current is non-NULL — null it first. */
     Clay_Context *saved_ctx = Clay_GetCurrentContext();
     const int32_t saved_default = nt_ui_clay_priv_default_max_element_count();
     Clay_SetCurrentContext(NULL);
@@ -258,18 +245,16 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     ctx->in_frame = true;
     g_nt_ui_inframe_ctx = ctx;
     ctx->marker_count = 0;
-    ctx->accum_depth = 0; /* Phase 56: reset declaration-time transform stack. */
-    ctx->clip_depth = 0;  /* Phase 56 ext (REVIEW-2 followup): reset hit-test clip stack. */
+    ctx->accum_depth = 0; /* reset declaration-time transform stack */
+    ctx->clip_depth = 0;  /* reset hit-test clip stack */
 
-    /* Snapshot the frame pointer list + dt for the engine-owned hit-test
-     * (Plan 03 reads frame_pointers; anim cache reads frame_dt, D-56-15/19). */
+    /* Snapshot pointer list + dt for engine-owned hit-test + anim cache. */
     memcpy(ctx->frame_pointers, pointers, sizeof(nt_pointer_t) * count);
     ctx->frame_pointer_count = count;
     ctx->frame_dt = dt;
 
-    /* Phase 56 (D-56-06): orphaned-capture cleanup. A capture whose widget was
-     * NOT re-queried last frame (capture_seen == 0) is abandoned -> clear it,
-     * else it would hold the pointer forever. Then reset the per-frame flags. */
+    /* Orphaned-capture cleanup — captures unqueried last frame would hold the
+     * pointer forever. Then reset per-frame flags. */
     for (uint32_t i = 0; i < NT_INPUT_MAX_POINTERS; ++i) {
         if (ctx->captures[i].active_id != 0U && ctx->capture_seen[i] == 0U) {
             ctx->captures[i].active_id = 0U;
@@ -278,45 +263,30 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     }
     ctx->pointer_over_any = false;
 
-    /* Phase 56 ext: hit-zone debug overlay recording is per-frame; clear the
-     * zone buffer each begin so stale zones never bleed across frames. The
-     * debug_recording flag persists (it's a user toggle). */
     ctx->debug_zone_count = 0U;
 
-    /* Dev-mode footgun guard: a button begin/end that asserted mid-flight in
-     * NT_ASSERT_FULL would leave pending_button.active=true, wedging every
-     * subsequent frame with "nested buttons unsupported". Release/TRAP dies
-     * on the first assert so this only matters in dev. Reset is unconditional. */
+    /* Dev-mode guard — a button begin that asserted mid-flight would wedge
+     * every subsequent frame on "nested buttons unsupported". */
     ctx->pending_button.active = false;
 
-    /* Phase 56 ext (CHUNK E): widget tag registry is per-frame; clear every
-     * slot (id=0 = empty). inspector_active is a user toggle (persists). */
+    /* Widget registry is per-frame; inspector_active is a user toggle (persists). */
     memset(ctx->widget_registry, 0, sizeof(ctx->widget_registry));
 
-    /* Phase 56 ext inspector rework: inspector_highlight_id is per-frame
-     * (cleared each begin, recomputed during emit_layout via hover detection).
-     * inspector_selected_id PERSISTS across frames -- only the sidebar click
-     * inside emit_layout (or an explicit unselect) modifies it. */
+    /* highlight_id resets each begin (recomputed during emit_layout);
+     * selected_id persists across frames (sidebar click). */
     ctx->inspector_highlight_id = 0U;
 
-    /* v1.8 drives the primary pointer; Clay is fed only this one. */
+    /* v1.8 single-pointer; Clay is fed only the primary. */
     const nt_pointer_t *primary = &pointers[0];
 
-    /* Phase 56 ext fix: per-frame "pointer is over the inspector sidebar" gate.
-     * The sidebar is a right-attached floating panel
-     * ctx->inspector_metrics.panel_width wide (REVIEW-2 P3-1, runtime tunable);
-     * the same coord check is what the inspector's emit_layout uses to decide
-     * whether to highlight a sidebar row (line ~1005). Computing it here gates
-     * nt_ui_step_interaction_padded so user widgets behind the sidebar do NOT
-     * register hover/press/click when the sidebar visually consumes the click.
-     * Frame-1 safe (no layout solve required -- pure coord check). */
+    /* Gate user widgets behind the sidebar so the panel visually consumes the
+     * click. Frame-1 safe — pure coord check, no layout solve required. */
     ctx->inspector_pointer_consumed = false;
     if (ctx->inspector_active && primary->x >= (screen_w - ctx->inspector_metrics.panel_width)) {
         ctx->inspector_pointer_consumed = true;
     }
 
-    /* Clay's built-in debug view is intentionally OFF -- the inspector
-     * REPLACES it entirely (one debug system; verbatim port). */
+    /* Clay's built-in debug view is OFF — the inspector replaces it. */
     Clay_SetDebugModeEnabled(false);
     Clay_SetLayoutDimensions((Clay_Dimensions){.width = screen_w, .height = screen_h});
 
@@ -330,34 +300,23 @@ void nt_ui_begin(nt_ui_context_t *ctx, float screen_w, float screen_h, float dt,
     Clay_BeginLayout();
 }
 
-/* Phase 56 ext rework (TU split): the inspector layout-emit body lives in
- * nt_ui_clay_internal.c; the prototype lives in nt_ui_clay_internal.h which
- * this file already includes. nt_ui_end forwards to it when the inspector
- * is active. compose_transform_level was renamed
- * nt_ui_internal_compose_transform_level (non-static) so clay_internal.c
- * can reuse the same math for the viewport-hover propagation; the prototype
- * lives in nt_ui_internal.h. */
+/* Inspector layout-emit body lives in nt_ui_clay_internal.c (Clay private types). */
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_end(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_end: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_end: ctx is not in_frame (begin was not called)");
     NT_ASSERT(ctx == g_nt_ui_inframe_ctx && "nt_ui_end: ctx mismatch with module in-frame ctx");
-    /* Phase 56 ext (REVIEW-2 followup): clip stack must be balanced by end of
-     * the user's declaration phase. Asserts BEFORE inspector emit so a missing
-     * pop_clip is caught at its source, not blamed on engine-internal emit. */
+    /* Asserts BEFORE inspector emit so a missing pop_clip is caught at its source. */
     NT_ASSERT(ctx->clip_depth == 0U && "nt_ui_end: unbalanced clip stack (missing nt_ui_pop_clip)");
 
-    /* Phase 56 ext inspector rework: inject the verbatim Clay-debug-view port
-     * AT ROOT SCOPE between the user's CLAY({...}) blocks and Clay_EndLayout.
-     * Floating panels attached to the root keep the inspector OUT of the
-     * user's layout tree -- it shares the same layout solve and renders via
-     * nt_ui_walk through the same sprite/text path. */
+    /* Inject the Clay debug-view at root scope; floating panels attached to
+     * the root keep it out of the user's layout tree. */
     if (ctx->inspector_active) {
         nt_ui_internal_emit_inspector_layout_extern(ctx);
     }
 
-    /* layout_ms times the Clay layout solve (EndLayout), not the begin->end span. */
+    /* layout_ms times the Clay layout solve only, not the begin->end span. */
     const double layout_t0 = nt_time_now();
     ctx->frozen_cmds = Clay_EndLayout();
     ctx->last_layout_ms = (float)((nt_time_now() - layout_t0) * 1000.0);
@@ -396,20 +355,13 @@ const nt_ui_element_data_t *nt_ui_make_element_data(nt_ui_layer_t layer, void *u
 }
 // #endregion
 
-// #region inframe_ctx_getter (TU split bridge)
-/* nt_ui_clay_internal.c's nt_ui_internal_current_open_element_id /
- * nt_ui_internal_last_emitted_element_id need to read the module-global
- * "currently in-frame ctx" that this file owns. Single thin getter avoids
- * exporting the static storage itself. */
+// #region inframe_ctx_getter
 nt_ui_context_t *nt_ui_internal_get_inframe_ctx(void) { return g_nt_ui_inframe_ctx; }
 // #endregion
 
-// #region widget_registry (CHUNK E, descriptor-pointer refactor)
-/* Direct-mapped per-frame widget descriptor table. Replace-on-collision because
- * the inspector is observability (not correctness): missing a single colliding
- * descriptor is acceptable, complex chaining would cost runtime + memory for
- * no real win at the inspector cap of ~128 widgets per frame. id 0 is the
- * no-widget sentinel; silently dropped. NULL def is silently dropped. */
+// #region widget_registry
+/* Direct-mapped per-frame table; replace-on-collision (observability path).
+ * id 0 / NULL def are silently dropped. */
 void nt_ui_widget_register(nt_ui_context_t *ctx, uint32_t id, const nt_ui_widget_def_t *def, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_widget_register: ctx must be non-NULL");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_widget_register: pad_lrtb components must be >= 0");
@@ -1220,7 +1172,7 @@ static inline uint32_t apply_opacity(uint32_t color_packed, float opacity) {
     return (color_packed & 0x00FFFFFFU) | (a << 24);
 }
 
-/* Phase 55: per-walk counters passed to dispatch helpers. */
+/* Per-walk counters passed to dispatch helpers. */
 typedef struct {
     uint32_t rect_command_count;
     uint32_t image_command_count;
@@ -1834,7 +1786,7 @@ void nt_ui_push_transform(nt_ui_context_t *ctx, const nt_ui_transform_t *transfo
     NT_ASSERT(isfinite(transform->rotation) && "nt_ui_push_transform: rotation must be finite");
     NT_ASSERT(isfinite(transform->offset_x) && isfinite(transform->offset_y) && "nt_ui_push_transform: offset must be finite");
     emit_marker_base(ctx, NT_UI_MARKER_PUSH_TRANSFORM)->transform = *transform;
-    /* Phase 56: mirror onto the live accum stack for the hit-test (Option A). */
+    /* Mirror onto the live accum stack for the hit-test. */
     NT_ASSERT(ctx->accum_depth < NT_UI_TRANSFORM_STACK_DEPTH_CAP && "transform accum overflow");
     ctx->accum_stack[ctx->accum_depth++] = *transform;
 }
@@ -1843,7 +1795,7 @@ void nt_ui_pop_transform(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_pop_transform: ctx must be non-NULL");
     NT_ASSERT(ctx->in_frame && "nt_ui_pop_transform: must be called inside begin/end");
     emit_marker_base(ctx, NT_UI_MARKER_POP_TRANSFORM);
-    /* Phase 56: keep the live accum stack balanced with push. */
+    /* Keep the live accum stack balanced with push. */
     NT_ASSERT(ctx->accum_depth > 0 && "transform accum underflow");
     ctx->accum_depth--;
 }
@@ -1861,11 +1813,8 @@ void nt_ui_pop_opacity(nt_ui_context_t *ctx) {
     emit_marker_base(ctx, NT_UI_MARKER_POP_OPACITY);
 }
 
-/* Phase 56 ext (REVIEW-2 followup): hit-test clip stack. Capture the current
- * transform accum AT THE CLIP RECT CENTER and stash it alongside the rect, so
- * a rotated clip parent's frame is preserved exactly. ui_hit_test will inverse-
- * transform the pointer with this affine and test against the layout-space
- * rect; ANY clip rejecting the point shorts the hit. */
+/* Captures the transform accum AT THE CLIP RECT CENTER so rotated clip
+ * parents preserve their frame exactly when ui_hit_test inverse-transforms. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_push_clip(nt_ui_context_t *ctx, float x, float y, float w, float h) {
     NT_ASSERT(ctx != NULL && "nt_ui_push_clip: ctx must be non-NULL");
@@ -1874,9 +1823,7 @@ void nt_ui_push_clip(nt_ui_context_t *ctx, float x, float y, float w, float h) {
     NT_ASSERT(isfinite(x) && isfinite(y) && isfinite(w) && isfinite(h) && "nt_ui_push_clip: rect must be finite");
     NT_ASSERT(w > 0.0F && h > 0.0F && "nt_ui_push_clip: non-positive clip size");
 
-    /* Compose the current transform accum at the clip rect center. Match the
-     * exact composition ui_hit_test uses for widget bboxes so the two affines
-     * agree when the clip wraps the widget tightly. */
+    /* Same composition as ui_hit_test for widget bboxes so the two affines agree. */
     const float cx = x + (w * 0.5F);
     const float cy = y + (h * 0.5F);
     float a = 1.0F;
@@ -1930,9 +1877,8 @@ void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, v
 // #region interaction_id_bbox_hittest
 uint32_t nt_ui_id(const char *s) {
     NT_ASSERT(s != NULL && "nt_ui_id: string must be non-NULL");
-    /* Clay hashes the string with its own one-at-a-time hash and returns
-     * hash+1, so the result is never 0 (the no-widget sentinel, D-56-05). A
-     * different hash (nt_hash/FNV) would miss Clay's hashmap (Pitfall 4). */
+    /* Clay's hash returns id+1 so the result is never 0 (no-widget sentinel).
+     * Must use Clay's hash — a different one would miss Clay's hashmap. */
     return Clay_GetElementId((Clay_String){.length = (int32_t)strlen(s), .chars = s}).id;
 }
 
@@ -1941,10 +1887,8 @@ uint32_t nt_ui_id_str(const char *s) { return nt_ui_id(s); }
 nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_get_bbox: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_get_bbox: id must be non-zero (0 = no widget)");
-    /* Thin wrapper: raw prev-frame LAYOUT bbox (Y-down). On miss Clay returns a
-     * zeroed box with found == false (D-56-09). Snapshot+restore Clay current
-     * context so the read uses THIS ctx's clay regardless of which ctx the
-     * caller had active (multi-ctx safety, REVIEW-2 P2-2). */
+    /* Raw prev-frame layout bbox (Y-down). On miss returns zeroed box with
+     * found=false. Snapshot+restore current ctx for multi-ctx safety. */
     Clay_Context *saved = Clay_GetCurrentContext();
     Clay_SetCurrentContext(ctx->clay);
     const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
@@ -1952,32 +1896,23 @@ nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
     return (nt_ui_bbox_t){.x = d.boundingBox.x, .y = d.boundingBox.y, .width = d.boundingBox.width, .height = d.boundingBox.height, .found = d.found};
 }
 
-/* Transform-aware hit-test (D-56-07). Build the declaration-time accumulated
- * affine from ctx->accum_stack using the widget's PREV-FRAME bbox center as the
- * center for ALL levels (accepted approximation: the common case is the widget
- * being the first renderable after its own push, so the deferred render center
- * resolves to this same point -- consistent to within the accepted 1-frame
- * transform lag). Then inverse-transform (px,py) and point-in-(layout)-bbox.
- * Stays in Clay Y-DOWN, NON-negated rotation (Pitfall 2).
- *
- * Phase 56 ext: pad_lrtb (NULL allowed = {0,0,0,0}) inflates the layout-space
- * bbox BEFORE the inverse-affine check, so the padded zone rotates with the
- * widget. pad_lrtb[i] >= 0 is asserted by the public _padded entry point. */
+/* Transform-aware hit-test: compose ctx->accum_stack using the prev-frame
+ * bbox center as the rotation pivot at every level, then inverse-transform
+ * (px,py) and point-in-(layout)-bbox. Clay Y-down, non-negated rotation.
+ * pad_lrtb inflates layout-space bbox before the inverse-affine so the
+ * padded zone rotates with the widget. */
 static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float py, const int16_t pad_lrtb[4]) {
     if (id == 0U) {
         return false;
     }
     const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
     if (!d.found) {
-        return false; /* first frame an id is seen -> not hovered (D-56-06). */
+        return false; /* first frame an id is seen → not hovered */
     }
 
-    /* Phase 56 ext (REVIEW-2 followup): walk the clip stack BEFORE the widget
-     * inverse-affine. ANY ancestor clip rejecting the point shorts the test --
-     * a click that lands inside a widget's transformed bbox but outside a
-     * clipping parent is a MISS (visual scissor and hit-test now agree). Each
-     * clip entry stores the transform accum captured at its push time, so
-     * rotated clip parents are handled with the same math as widget bboxes. */
+    /* Walk the clip stack BEFORE the widget inverse-affine — any ancestor
+     * clip rejecting the point shorts the test. Each entry stores its push-
+     * time transform accum so rotated clip parents use the same math. */
     for (uint32_t k = 0; k < ctx->clip_depth; ++k) {
         const nt_ui_clip_entry_t *cl = &ctx->clip_stack[k];
         /* Inverse 2x2 + translate to bring (px,py) into this clip's frame. */
@@ -2033,15 +1968,8 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
     return (lx >= box.x - pl) && (lx <= box.x + box.width + pr) && (ly >= box.y - pt) && (ly <= box.y + box.height + pb);
 }
 
-/* Phase 56 ext (CQS split): pure compute -- no state mutation. Reads bbox,
- * transform/clip stacks, capture, and pointer to produce the interaction
- * struct. Safe to call N times in the same frame; every call returns the same
- * struct because nothing it reads changes across calls.
- *
- * The state-machine writes that used to live here (capture begin/release,
- * pos tracking, capture_seen flag, pointer_over_any, debug zone push) all
- * moved to nt_ui_step_interaction_padded -- which calls THIS function for
- * the read and then applies the commit. */
+/* PURE compute — no state mutation. Safe to call N times per frame; every
+ * call returns the same struct. State-machine writes live in step_interaction_padded. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_query_interaction_padded: ctx must be non-NULL");
@@ -2053,30 +1981,25 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
 
     nt_ui_interaction_t out = {0};
 
-    /* Phase 56 ext fix: when the inspector sidebar is consuming the pointer
-     * (set in nt_ui_begin based on primary->x vs panel width), every user-
-     * widget interaction query short-circuits to a zeroed result -- no hover,
-     * no press, no clicked. Without this, clicking the visual sidebar would
-     * ALSO fire any button geometrically behind it (the sidebar paints on top
-     * but the hit-test is purely coord-vs-bbox). */
+    /* Sidebar consumes the pointer — short-circuit so any user widget
+     * geometrically behind the sidebar reports no hover/press/click. */
     if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
         return out;
     }
 
-    /* No prev-frame bbox yet (first frame an id is declared) -> not hovered,
-     * no capture can have started against it (D-56-06). */
+    /* No prev-frame bbox yet — not hovered, no capture possible. */
     const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
     if (!d.found) {
         return out;
     }
 
-    /* v1.8 single-pointer: the primary pointer is index 0 (D-56-04). */
+    /* v1.8 single-pointer; primary is index 0. */
     const uint32_t pidx = 0U;
     const nt_pointer_t *p = &ctx->frame_pointers[pidx];
     const nt_ui_capture_t *cap = &ctx->captures[pidx];
     const nt_button_state_t btn = p->buttons[NT_BUTTON_LEFT]; /* precomputed edges */
 
-    /* Phase 56 ext fix (exclusive capture): when ANOTHER widget owns this
+    /* Exclusive capture — when another widget owns this
      * pointer's capture (press-began on it, not yet released), THIS widget
      * sees zero interaction -- no hover, no press, no clicked -- regardless
      * of where the pointer geometrically sits. */
@@ -2102,13 +2025,10 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
     if (mine) {
         out.pressed = btn.is_down;
         out.released_now = btn.is_released;
-        /* clicked = release OVER the widget; off-widget release cancels
-         * (released_now true, clicked false). */
+        /* clicked = release OVER the widget; off-widget release cancels. */
         out.clicked = btn.is_released && over;
         out.pointer_id = p->id;
-        /* On press_now the press_pos hasn't been written yet -- report the
-         * current pointer position (matches what step will write). On later
-         * frames it's the stored press position. */
+        /* On press_now report current pointer; later frames return the stored press_pos. */
         if (out.pressed_now) {
             out.press_pos[0] = p->x;
             out.press_pos[1] = p->y;
@@ -2116,9 +2036,7 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
             out.press_pos[0] = cap->press_pos[0];
             out.press_pos[1] = cap->press_pos[1];
         }
-        /* Pure read: report the CURRENT pointer position as where pos would
-         * be after step. Drag delta is derived from the (frozen) press_pos
-         * and the current pointer. Matches what step will write. */
+        /* Pure read: report current pointer as pos (matches what step will write). */
         out.pos[0] = p->x;
         out.pos[1] = p->y;
         out.drag_dx = p->x - out.press_pos[0];
@@ -2138,14 +2056,9 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
 /* Thin wrapper: zero-padding specialization of the padded variant. */
 nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_query_interaction_padded(ctx, id, NULL); }
 
-/* Phase 56 ext (CQS split): query + commit. Same compute as
- * nt_ui_query_interaction_padded, then applies the state-machine writes:
- *   - cap->active_id transitions (set on press_now, cleared on release),
- *   - cap->press_pos / cap->pos tracking,
- *   - ctx->capture_seen[pidx] (so orphan cleanup in next begin spares us),
- *   - ctx->pointer_over_any (feeds nt_ui_wants_pointer, D-56-08),
- *   - debug zone push (overlay recording).
- * Call exactly ONCE per widget per frame from the widget's begin. */
+/* Query + commit: same compute as query_padded, then applies state-machine
+ * writes (cap transitions, pos tracking, capture_seen, pointer_over_any,
+ * debug zone). Call ONCE per widget per frame from the widget's begin. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
     /* Same preconditions as query. */
@@ -2156,10 +2069,9 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
 
     const nt_ui_interaction_t out = nt_ui_query_interaction_padded(ctx, id, pad_lrtb);
 
-    /* Inspector consume gate: query already returned a zeroed struct in this
-     * branch; step also skips ALL commits. Mirrors the old inline behavior
-     * (capture_seen stays 0 -- next nt_ui_begin's orphan cleanup wipes any
-     * in-progress capture instead of letting it persist into a phantom drag). */
+    /* Inspector consume gate — query returned zeroed; step skips all commits.
+     * capture_seen stays 0 so next begin's orphan cleanup wipes any in-progress
+     * capture (prevents phantom drag). */
     if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
         return out;
     }
@@ -2179,7 +2091,7 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
 
     if (!exclusive_gated) {
         if (out.hovered) {
-            ctx->pointer_over_any = true; /* feeds nt_ui_wants_pointer (D-56-08). */
+            ctx->pointer_over_any = true; /* feeds nt_ui_wants_pointer */
         }
         /* Begin capture on press-over-widget (matches out.pressed_now). */
         if (out.pressed_now) {
@@ -2195,7 +2107,7 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
     if (mine) {
         cap->pos[0] = p->x;
         cap->pos[1] = p->y;
-        /* This capture was queried this frame -> not an orphan. */
+        /* Queried this frame → not an orphan. */
         ctx->capture_seen[pidx] = 1U;
         /* Release ends the capture (whether over or not). */
         if (btn.is_released) {
@@ -2203,13 +2115,9 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
         }
     }
 
-    /* Phase 56 ext: hit-zone overlay recording. Gated by debug_recording so
-     * production overhead is zero. At-cap is silently dropped (overlay is a
-     * verification aid, not correctness).
-     * Phase 56 ext fix (inspector overlay transform-aware): also record while
-     * the inspector is active -- the inspector's post-walk overlay uses the
-     * recorded accum snapshot to project the highlight polygon to the
-     * transformed render position. */
+    /* Hit-zone overlay recording — debug_recording OFF by default = zero overhead.
+     * Inspector_active also enables recording so its post-walk overlay can project
+     * the highlight through the recorded accum snapshot. At-cap drops silently. */
     if ((ctx->debug_recording || ctx->inspector_active) && ctx->debug_zone_count < NT_UI_DEBUG_ZONE_CAP) {
         nt_ui_debug_zone_t *z = &ctx->debug_zones[ctx->debug_zone_count++];
         const float pl = (pad_lrtb != NULL) ? (float)pad_lrtb[0] : 0.0F;
@@ -2251,26 +2159,20 @@ nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t
 /* Thin wrapper: zero-padding specialization of the padded variant. */
 nt_ui_interaction_t nt_ui_step_interaction(nt_ui_context_t *ctx, uint32_t id) { return nt_ui_step_interaction_padded(ctx, id, NULL); }
 
-/* Phase 56 ext: record-only push for DISABLED widgets that skip hit-test
- * entirely (e.g. nt_ui_button enabled=false). Mirrors the zone-fill block
- * inside nt_ui_step_interaction_padded but does NO hit-test / capture work
- * (the widget is non-interactive by contract). Recording is gated by
- * ctx->debug_recording (OFF default = zero overhead); at-cap silently
- * dropped. First-frame Clay_GetElementData miss -> no zone (NOT an assert).
- * The zone carries NT_UI_DEBUG_FLAG_DISABLED so mode=ALL surfaces it while
- * mode=HOVER/CAPTURED naturally hide it (those filters don't match it). */
+/* Record-only push for DISABLED widgets that skip hit-test. No capture work.
+ * Sets NT_UI_DEBUG_FLAG_DISABLED so mode=ALL surfaces it while HOVER/CAPTURED
+ * filters hide it. First-frame Clay miss → no zone (not an assert). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_debug_record_disabled_zone: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_debug_record_disabled_zone: id must be non-zero (0 = no widget)");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_debug_record_disabled_zone: pad_lrtb components must be >= 0");
 
-    /* Zero-overhead fast path. Inspector_active also enables recording so the
-     * inspector overlay surfaces disabled widgets without a separate toggle. */
+    /* Zero-overhead fast path; inspector_active also enables recording. */
     if ((!ctx->debug_recording && !ctx->inspector_active) || ctx->debug_zone_count >= NT_UI_DEBUG_ZONE_CAP) {
         return;
     }
-    /* First frame an id is declared has no prev-frame bbox -> no zone to record. */
+    /* No prev-frame bbox on first frame an id is declared. */
     const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
     if (!d.found) {
         return;
@@ -2302,9 +2204,8 @@ void nt_ui_debug_record_disabled_zone(nt_ui_context_t *ctx, uint32_t id, const i
 
 bool nt_ui_wants_pointer(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_wants_pointer: ctx must be non-NULL");
-    /* Phase 56 ext fix: the inspector sidebar counts as "engine wants the
-     * pointer". Game world input (camera drag, etc.) is suppressed correctly
-     * even when no user widget is under the pointer. */
+    /* Sidebar counts as "engine wants the pointer" so game world input is
+     * suppressed even when no user widget is under the pointer. */
     if (ctx->inspector_active && ctx->inspector_pointer_consumed) {
         return true;
     }

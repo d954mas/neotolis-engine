@@ -1,10 +1,6 @@
-/* Phase 56 ext (REVIEW-2 followup): hit-test clip stack.
- *
- * nt_ui_push_clip / nt_ui_pop_clip pair the visual Clay clip with a hit-test
- * scissor so a click landing outside a clipping ancestor is a MISS even if the
- * widget's transformed bbox covers the point. Walking the clip stack BEFORE
- * the widget inverse-affine matches the visual scissor: ANY clip rejecting the
- * point shorts the test. Mirrors push_transform/pop_transform (explicit > implicit).
+/* Hit-test clip stack: push_clip / pop_clip pair the visual Clay clip with a
+ * hit-test scissor. Walking the stack BEFORE the inverse-affine ensures a click
+ * outside a clipping ancestor is a MISS regardless of bbox coverage.
  *
  * Test geometry is deliberately asymmetric per AGENTS.md so an axis swap / sign
  * flip in the inverse-affine of the clip entry's accumulated affine would be
@@ -46,11 +42,8 @@ void setUp(void) {
 
 void tearDown(void) { ui_walker_fixture_shutdown(&s_fx); }
 
-/* Frame 1: declare the asymmetric button bbox so Clay stores it in the
- * persistent hashmap; the next frame's hit-test reads it via prev-frame
- * lookup (D-56-06). FIXED-size + ABSOLUTE floating element so the layout
- * lands exactly where the test expects -- the clip rects are sized against
- * this exact rect. */
+/* Frame 1 declares the asymmetric bbox so the next frame's hit-test reads
+ * the stored Clay element. FIXED + ABSOLUTE floating keeps the layout exact. */
 static void declare_bbox_frame(void) {
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, SCREEN_W, SCREEN_H, 0.0F, &mouse, 1);

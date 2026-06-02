@@ -1,7 +1,5 @@
-/* Unit tests for nt_ui_image widget (Phase 54 Plan 05).
- *
- * Tests follow the nt_ui_label test pattern: walker fixture with stub
- * backend, death tests gated to NT_ASSERT_FULL mode. */
+/* Unit tests for nt_ui_image. Walker fixture with stub backend; death tests
+ * gated to NT_ASSERT_FULL. */
 
 #include <stdalign.h>
 #include <stdbool.h>

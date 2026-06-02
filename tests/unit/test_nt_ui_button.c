@@ -202,7 +202,7 @@ static void test_button_id_zero_asserts(void) {
 
 /* ---- Test: decl override contract -- each of the 4 caller-clean fields asserts ----
  *      Sub-cases: non-zero id, non-NULL imageData, non-zero bg alpha, non-NULL userData.
- *      Each fails the override contract assertion (Phase 56 ext, P3-2). */
+ *      Each fails the override contract assertion. */
 static void test_button_decl_asserts_caller_clean(void) {
     nt_pointer_t mouse = {0};
 

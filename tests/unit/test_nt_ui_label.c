@@ -1,4 +1,4 @@
-/* Unit tests for nt_ui_label widget (Phase 53 Plan 04).
+/* Unit tests for nt_ui_label.
  *
  * Note on floats: Unity is compiled with UNITY_EXCLUDE_FLOAT (see
  * deps/unity/CMakeLists.txt) -- TEST_ASSERT_EQUAL_FLOAT fails at runtime.

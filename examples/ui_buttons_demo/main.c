@@ -1,37 +1,20 @@
-/* UI Buttons Demo -- WIDGET-02/03/04 visual gate + WIDGET-05 verify +
- * Phase 56 ext: transform-aware hit-test proof (D-56-07) + touch-target
- * padding (hit_padding_lrtb) + nt_ui_inspector (verbatim Clay debug view port).
+/* UI Buttons Demo — 2x3 grid of button variants showing transform-aware hit-test,
+ * touch-target padding, state swaps, and a baked-transform proof button below.
  *
- * Renders a 2 x 3 GRID of LABELED button variants -- each cell has the
- * button (320x180) + a description text label above it -- so the user can
- * see at a glance what each variant demonstrates:
- *
- *   (a) STANDARD (eased)              -- baseline text button, transition_speed=12
- *   (b) SCALE (exaggerated 0.80<->1.20) -- per-state scale dramatized
- *   (c) VISUAL SWAP (blue<->green)    -- bg_region swaps per state (D-56-11)
- *   (d) ICON ONLY                      -- nt_ui_image bunny icon
- *   (e) ICON + TEXT                    -- image + label inside one button
- *   (f) DISABLED (enabled=false)      -- short-circuit gate
- *
- * Below the grid: a 7th BAKED-TRANSFORM button (offset+rotation+scale at
- * idle) that proves the inverse-affine hit-test (D-56-07) on a statically
- * transformed widget.
- *
- * Per-button click counters print to the status line.
- * Variants (a)(b)(c)(f) ship +16 px touch padding; (d)(e) and the baked
- * variant have no padding.
- *
- * Buttons run inside a runtime-controllable transform (arrow keys translate,
- * PageUp/Down scale, Q/E rotate, R reset) -- the grid visibly moves while
- * remaining clickable, proving the inverse-affine hit-test live.
+ *   (a) STANDARD (eased)
+ *   (b) SCALE (exaggerated)
+ *   (c) VISUAL SWAP (bg_region swap per state)
+ *   (d) ICON ONLY
+ *   (e) ICON + TEXT
+ *   (f) DISABLED (short-circuit gate)
  *
  * Keys:
- *   Esc      quit (native)
- *   D        toggle inspector (panel + hit-zone overlay -- ONE debug system)
- *   arrows   translate transform (+- 8 px / frame)
- *   PgUp/Dn  scale transform (+- 0.05, clamp 0.5..2.0)
- *   Q / E    rotate transform (+- 5 deg / press)
- *   R        reset transform to identity
+ *   Esc          quit (native)
+ *   D            toggle inspector
+ *   arrows       translate transform
+ *   PgUp/Dn      scale (clamp 0.5..2.0)
+ *   Q / E        rotate
+ *   R            reset
  *
  * Build packs: build_ui_buttons_demo_packs build/examples/ui_buttons_demo */
 
@@ -94,8 +77,7 @@ static const nt_ui_label_style_t g_help_style = {
     .align = CLAY_TEXT_ALIGN_CENTER,
 };
 
-/* Per-cell variant title (one line above each button). Bigger than help/status
- * so the user can tell variants apart at a glance ("чтобы я понимал где какая"). */
+/* Per-cell variant title (above each button); bigger than help/status for legibility. */
 static const nt_ui_label_style_t g_cell_title_style = {
     .font_id = 0,
     .font_size = 26,
@@ -216,8 +198,7 @@ static uint32_t s_button_green_idx;
 static uint32_t s_icon_bunny_idx;
 
 /* Reference-button runtime styles: const templates copied + bg_region patched
- * to the real atlas indices once the atlas binds (D-54-02). Button ids
- * precomputed once via nt_ui_id inside the first Clay frame. */
+ * once the atlas binds. ids precomputed via nt_ui_id on the first Clay frame. */
 static nt_ui_button_style_t s_btn_standard;
 static nt_ui_button_style_t s_btn_scale;
 static nt_ui_button_style_t s_btn_swap;
@@ -279,7 +260,7 @@ static void try_bind_resources(void) {
 
         nt_ui_set_atlas_white_region(s_ctx, s_atlas_handle, s_white_region_idx);
 
-        /* Patch each variant's bg_region from the templates (D-54-02). */
+        /* Patch each variant's bg_region from the templates. */
         s_btn_standard = g_btn_standard_style;
         s_btn_standard.idle.bg_region = s_button_blue_idx;
         s_btn_standard.hover.bg_region = s_button_blue_idx;
@@ -319,11 +300,7 @@ static void try_bind_resources(void) {
 // #endregion
 
 // #region grid cell sizing
-/* Each cell = vertical stack: title text + sub text + button.
- * Cell is 360 wide so the 320 button has 20 px breathing room. Button
- * bumped 120 -> 180 per user feedback ("кнопки сделаем больше по высоте")
- * so the Kenney slice9 art reads clearly + icons aren't dwarfed. Cell H
- * bumped proportionally (240 -> 320) so title+sub still fit above. */
+/* Each cell = vertical stack of title + sub + button (360x320 cell, 320x180 btn). */
 #define CELL_W 360
 #define CELL_H 320
 #define BTN_W 320
@@ -359,13 +336,8 @@ static void try_bind_resources(void) {
         .layout = {.sizing = {CLAY_SIZING_FIXED(BTN_W), CLAY_SIZING_FIXED(BTN_H)}, .padding = CLAY_PADDING_ALL(8), .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER} }                      \
     }
 
-/* Phase 56 ext (P3-2): Clay layout decl for button-begin. Drives FIXED
- * BTN_W x BTN_H sizing + 8 px inner padding + center alignment. Without
- * this decl param, nt_ui_button_begin would open a FIT IMAGE and shrink
- * to children, requiring an inner FIXED CLAY wrap as workaround. */
-/* Note: this demo has no clip parents. If you wrap buttons in CLAY({.clip=...}),
- * pair the declaration with nt_ui_push_clip/pop_clip so hit-test respects the
- * clip (REVIEW-2 followup: explicit > implicit, same pattern as push_transform). */
+/* Layout decl for button-begin — drives FIXED sizing without an inner CLAY wrap.
+ * If you wrap buttons in CLAY({.clip = ...}), pair with push_clip/pop_clip. */
 static const Clay_ElementDeclaration s_btn_decl = {
     .layout =
         {
@@ -377,9 +349,7 @@ static const Clay_ElementDeclaration s_btn_decl = {
 // #endregion
 
 // #region declare_reference_buttons (2 x 3 GRID)
-/* Builds the 6-variant grid (2 rows x 3 cols). Each cell shows its title
- * above the button so the user can tell variants apart at a glance.
- * ids precomputed once on the first Clay frame. */
+/* 6-variant grid (2x3). Each cell shows its title above the button. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void declare_reference_buttons(void) {
     if (!s_btn_ids_ready) {
@@ -405,10 +375,8 @@ static void declare_reference_buttons(void) {
             CLAY(CELL_LAYOUT) {
                 CELL_LABELS("STANDARD (eased)", "label swaps on press");
                 CLAY(BTN_SLOT_LAYOUT) {
-                    /* Universal interaction pattern (D-56-21): PURE query BEFORE
-                     * begin so the label content reacts to press without bespoke
-                     * API. button_begin internally calls step (mutating) -- query
-                     * is idempotent and returns the same struct step will. */
+                    /* PURE query before begin so label content reacts to press.
+                     * button_begin internally calls step; query is idempotent. */
                     nt_ui_interaction_t in_std = nt_ui_query_interaction(s_ctx, s_id_std);
                     nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_std, s_atlas_handle, &s_btn_standard, &s_btn_decl, true);
                     nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), in_std.pressed ? "pressed" : "click me", &g_btn_label_style);
@@ -507,20 +475,11 @@ static void declare_reference_buttons(void) {
             // #endregion
         }
 
-        // #region (g) BAKED TRANSFORM (7th button -- D-56-07 static proof)
-        /* User scope COMMIT 3: a 7th button wrapped in nt_ui_push_transform
-         * with non-trivial BAKED values so the user sees it offset+rotated+
-         * scaled at IDLE (before any hover), and clicking it at the
-         * transformed on-screen position proves the inverse-affine hit-test
-         * (D-56-07) works for statically-transformed widgets too. Baked values:
-         *   offset_x: +60   (clearly offset from layout slot)
-         *   offset_y: -20
-         *   rotation: 25 deg (CCW visually -- Clay Y-down -> screen flip)
-         *   scale_x:  1.15  (anisotropic)
-         *   scale_y:  0.85
-         * Outer slot has ~80 px extra padding so the rotated button does not
-         * overlap row 2 or the help bar. The button itself uses the eased
-         * STANDARD style; click counter s_clicks_baked. */
+        // #region (g) BAKED TRANSFORM
+        /* 7th button wrapped in push_transform with baked offset/rotation/scale
+         * so the user can verify the inverse-affine hit-test on a statically-
+         * transformed widget. 80 px outer padding keeps the rotated button from
+         * overlapping neighbors. */
         CLAY({.id = CLAY_ID("ref-btn-baked-section"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)},
                          .padding = {.left = 0, .right = 0, .top = 80, .bottom = 80},
@@ -603,10 +562,7 @@ static void handle_transform_and_debug_input(void) {
         s_xform_scale = 1.0F;
         s_xform_deg = 0.0F;
     }
-    /* D: toggle nt_ui_inspector (single master debug key, Phase 56 ext rework).
-     * The inspector is the verbatim Clay debug view port + engine extensions
-     * (widget-type pill + layer column). Clay's built-in debug is gone --
-     * there is ONE debug system now. */
+    /* D toggles the inspector. */
     if (nt_input_key_is_pressed(NT_KEY_D)) {
         const bool now_on = !nt_ui_inspector_is_active(s_ctx);
         nt_ui_inspector_set_active(s_ctx, now_on);
@@ -730,9 +686,8 @@ static void frame(void) {
                 nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), status_text, &g_status_style);
             }
 
-            /* Wrap the grid in the runtime transform. The accumulated transform
-             * feeds the engine's inverse-affine hit-test (D-56-07) so every
-             * variant stays clickable even rotated 30 deg. */
+            /* Runtime transform around the grid — accumulated and fed to the
+             * inverse-affine hit-test so every variant stays clickable. */
             nt_ui_push_transform(s_ctx, &row_xform);
             declare_reference_buttons();
             nt_ui_pop_transform(s_ctx);
@@ -749,12 +704,8 @@ static void frame(void) {
         nt_ui_target_t target = nt_ui_scale_make_target(&scale);
         nt_ui_walk(s_ctx, &target);
 
-        // #region nt_ui_inspector (single-element hit-zone overlay)
-        /* The inspector panel itself was already emitted into the layout pass
-         * inside nt_ui_end. The post-walk call here paints a hit-zone +
-         * id label for the ONE element the user is focused on (sidebar
-         * hover/click OR viewport hover via Clay's pointerOver). One key
-         * (D) toggles the whole system. */
+        // #region nt_ui_inspector overlay
+        /* Panel emit happened in nt_ui_end; this paints the single-element hit-zone. */
         nt_ui_inspector_overlay_draw(s_ctx, &target, s_font, 16.0F);
         // #endregion
 

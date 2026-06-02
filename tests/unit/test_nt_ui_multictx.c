@@ -105,13 +105,9 @@ static void test_per_ctx_in_frame_isolation(void) {
     nt_ui_destroy_context(b);
 }
 
-/* REVIEW-2 P2-2: public read APIs must snapshot+restore Clay current context.
- * Without this, calling a B-read API while A is the caller's "active" Clay ctx
- * silently leaks B's clay onto the global slot -- the next Clay op on caller's
- * side hits the wrong ctx. The pattern fix is the 3-line
+/* Public read APIs must snapshot+restore Clay current context. Pattern:
  *   saved = Clay_GetCurrentContext(); set(B->clay); read; set(saved);
- * which restores whatever WAS set on entry. This test covers every public read
- * API that touches Clay private accessors. */
+ * Without it, reads on B leak B's clay onto the global slot. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_read_apis_restore_clay_current_context(void) {
     nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);
@@ -163,13 +159,9 @@ static void test_read_apis_restore_clay_current_context(void) {
     nt_ui_destroy_context(b);
 }
 
-/* REVIEW-2 P2-2 (correctness arm): nt_ui_get_bbox(B, id) must read from
- * B's clay regardless of what's globally current. Pre-fix, the function called
- * Clay_GetElementData WITHOUT setting current to ctx->clay -- it silently
- * returned the CURRENT ctx's data instead. This test runs a frame on A with a
- * known id, runs no frame on B, then queries B for that id while A is current.
- * Correct behavior: B.found == false (no such id in B). Pre-fix would have
- * returned A's bbox (false positive). */
+/* nt_ui_get_bbox(B, id) reads from B's clay regardless of global current.
+ * Setup: frame A with a known id, no frame on B, query B while A is current;
+ * B.found must be false. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_get_bbox_reads_from_passed_ctx_not_current(void) {
     nt_ui_context_t *a = nt_ui_create_context(s_arena_a, sizeof s_arena_a, &s_ui_desc);

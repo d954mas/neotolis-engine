@@ -1,30 +1,5 @@
-/* Phase 56 ext rework: nt_ui_inspector public API + post-walk overlay.
- *
- * The verbatim Clay-debug-view emit_layout body lives in nt_ui_clay_internal.c
- * -- the exclusive CLAY_IMPLEMENTATION TU. The body touches Clay private
- * types (Clay_Context fields, Clay__GetHashMapItem, Clay__ElementIsOffscreen,
- * Clay__HashString, the layoutElementTreeRoots / layoutElements /
- * reusableElementIndexBuffer arrays, debugSelectedElementId, etc.) that are
- * file-static or compile-time-private to the CLAY_IMPLEMENTATION TU.
- *
- * Pre-rework these symbols lived in nt_ui.c (which also defined
- * CLAY_IMPLEMENTATION); the TU split moves CLAY_IMPLEMENTATION + the
- * inspector body to nt_ui_clay_internal.c so nt_ui.c stays pure engine code
- * using Clay's public API only.
- *
- * This TU exposes the public functions (set_active / is_active / set_metrics /
- * pointer_consumed / emit_layout / overlay_draw) and owns the post-walk
- * single-element hit-zone overlay (which stays Clay-agnostic and lives here
- * verbatim). emit_layout forwards to nt_ui_internal_emit_inspector_layout_extern
- * (prototype in nt_ui_clay_internal.h).
- *
- * Vendored Clay is zlib licensed (deps/clay/LICENSE -- (c) 2024 Nic Barker).
- * The emit_layout body in nt_ui_clay_internal.c is a renamed-and-adapted
- * verbatim copy of Clay__RenderDebugView / Clay__RenderDebugLayoutElementsList /
- * Clay__RenderDebugViewElementConfigHeader / Clay__RenderDebugViewColor /
- * Clay__RenderDebugViewCornerRadius (deps/clay/clay.h:3341-3800). The
- * CLAY({...}) emits are reproduced byte-for-byte where Clay's public API
- * permits; private accessors are adapted in place with comments. */
+/* nt_ui_inspector: public API + post-walk overlay. emit_layout body lives in
+ * nt_ui_clay_internal.c (Clay private types). Clay is zlib-licensed (deps/clay). */
 
 #include "ui/nt_ui_inspector.h"
 
@@ -41,12 +16,7 @@
 #include "ui/nt_ui_internal.h"
 
 // #region metrics
-/* Phase 56 ext (REVIEW-2 P3-1): default metrics preserve the previous hardcoded
- * shape verbatim -- panel_width 400 (NT_UI_INSPECTOR_PANEL_WIDTH), row_height
- * 30 (CDV_ROW_HEIGHT), font_size 16 (literal in CLAY_TEXT_CONFIG sites),
- * outer_padding 10 (CDV_OUTER_PADDING), indent_width 16 (CDV_INDENT_WIDTH).
- * A game with NO call to nt_ui_inspector_set_metrics sees the identical
- * inspector that shipped pre-fix. */
+/* Defaults match Clay's debug-view literals (panel 400, row 30, font 16, etc.). */
 const nt_ui_inspector_metrics_t NT_UI_INSPECTOR_METRICS_DEFAULT = {
     .panel_width = 400.0F,
     .row_height = 30.0F,
@@ -55,8 +25,7 @@ const nt_ui_inspector_metrics_t NT_UI_INSPECTOR_METRICS_DEFAULT = {
     .indent_width = 16U,
 };
 
-/* 5 sequential NT_ASSERTs trip the cognitive-complexity threshold; each is a
- * straight precondition check on a distinct field. */
+/* Five preconditions trip cognitive-complexity but each is straight-line. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void nt_ui_inspector_set_metrics(nt_ui_context_t *ctx, const nt_ui_inspector_metrics_t *metrics) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_set_metrics: ctx must be non-NULL");
@@ -73,8 +42,7 @@ void nt_ui_inspector_set_active(nt_ui_context_t *ctx, bool on) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_set_active: ctx must be non-NULL");
     ctx->inspector_active = on;
     if (!on) {
-        /* Clear focus + selection + collapsed-set on disable so a re-enable
-         * starts clean (the user expects the next open to show the full tree). */
+        /* Clear focus + selection + collapsed-set so a re-enable starts clean. */
         ctx->inspector_highlight_id = 0U;
         ctx->inspector_selected_id = 0U;
         ctx->inspector_collapsed_count = 0U;
@@ -88,17 +56,12 @@ bool nt_ui_inspector_is_active(const nt_ui_context_t *ctx) {
 
 bool nt_ui_inspector_pointer_consumed(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_pointer_consumed: ctx must be non-NULL");
-    /* inspector_pointer_consumed is only meaningful while the inspector is active;
-     * the and-with-active is defensive against stale state when the toggle flips. */
+    /* Guard against stale state when the toggle flips. */
     return ctx->inspector_active && ctx->inspector_pointer_consumed;
 }
 // #endregion
 
-// #region emit_layout (forwarder -- body in nt_ui_clay_internal.c)
-/* The real implementation needs Clay private types (Clay_Context fields,
- * Clay__GetHashMapItem, etc.) which only the CLAY_IMPLEMENTATION TU can see.
- * Phase 56 ext rework (TU split): that TU is now nt_ui_clay_internal.c, not
- * nt_ui.c. This public symbol forwards through the same prototype as before. */
+// #region emit_layout (forwarder; body in nt_ui_clay_internal.c)
 void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_emit_layout: ctx must be non-NULL");
     nt_ui_internal_emit_inspector_layout_extern(ctx);
@@ -110,28 +73,10 @@ static const float s_identity_mat[16] = {
     1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
 };
 
-/* GPU scissor clip (Phase 56 ext REVIEW-2 P2-1): the post-walk overlay clips
- * its highlight + label against the inspector sidebar via GPU scissor (set up
- * in overlay_draw before the emit, cleared after). The walker's per-element
- * Clay-driven scissor stack has already been torn down by walk exit, so the
- * overlay simply enables scissor over the GAME area [0, 0, panel_left_x,
- * screen_h] and disables it afterwards -- restoring the disabled state the
- * walker left.
- *
- * Phase 56 ext (REVIEW-2 P3-1): panel width comes from
- * ctx->inspector_metrics.panel_width (set via nt_ui_inspector_set_metrics,
- * default 400). The same metric drives the Clay debug-view emit in nt_ui.c
- * AND the input-consume gate in nt_ui_begin -- one source of truth so the
- * three sites can never drift.
- *
- * Replaces the previous CPU-clip implementation: every overlay_emit_rect call
- * used to clamp its width against panel_left_x in two paths (axis-aligned
- * fallback) but the transformed path bypassed it entirely -- rotated/scaled
- * highlights bled OVER the sidebar. GPU scissor handles both paths uniformly. */
+/* GPU scissor clips highlight + label against the sidebar (replaces per-rect
+ * CPU clamping that only covered the axis-aligned path). */
 
-/* Emit a filled rect with GL Y-up coords. (x, y_top) = top-left in GL space;
- * the quad paints downward from y_top by `h`. Sidebar clipping is now handled
- * by GPU scissor configured in overlay_draw -- this emit is unclipped. */
+/* Filled rect with GL Y-up coords; (x, y_top) is the top-left. */
 static void overlay_emit_rect(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, uint32_t color) {
     if (w <= 0.0F || h <= 0.0F) {
         return;
@@ -146,8 +91,7 @@ static void overlay_emit_rect(nt_resource_t atlas, uint32_t region, float x, flo
     nt_sprite_renderer_emit_geometry(atlas, region, verts, 4U, indices, 6U, s_identity_mat, color);
 }
 
-/* Thin 4-edge outline of an axis-aligned bbox in GL Y-up. Sidebar clipping is
- * handled by GPU scissor configured in overlay_draw -- this emit is unclipped. */
+/* Thin 4-edge outline of an axis-aligned bbox in GL Y-up. */
 static void overlay_emit_outline(nt_resource_t atlas, uint32_t region, float x, float y_top, float w, float h, float t, uint32_t color) {
     overlay_emit_rect(atlas, region, x, y_top, w, t, color);         /* top edge */
     overlay_emit_rect(atlas, region, x, y_top - h + t, w, t, color); /* bottom edge */
@@ -183,9 +127,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         return;
     }
 
-    /* Look up the layout bbox via the engine-internal accessor. The bbox is
-     * in Clay Y-down space; the walker's GL Y-flip per-corner gives the
-     * matching GL-Y-up screen position. */
+    /* Bbox is Clay Y-down; walker's per-corner Y-flip maps it to GL Y-up. */
     nt_ui_inspector_element_info_t info = nt_ui_internal_get_element_info(ctx, ctx->inspector_highlight_id);
     if (!info.found) {
         return;
@@ -196,22 +138,8 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     const float vw = target->viewport[2];
     const float vh = target->viewport[3];
 
-    /* Phase 56 ext fix (REVIEW-2 P2-1): push GPU scissor over the GAME area
-     * (left of the inspector sidebar) so BOTH overlay paths (transformed and
-     * axis-aligned) clip the highlight at the panel's left edge. Pre-fix, the
-     * axis-aligned path did this via per-rect CPU width clamps and the
-     * transformed path had NO clipping -- rotated/scaled highlight bled OVER
-     * the sidebar.
-     *
-     * Panel is a right-attached float of width ctx->inspector_metrics.panel_width
-     * at layout-space origin, so its left edge sits at viewport.x + viewport.w -
-     * panel_w in the same logical space the overlay draws into. Scissor rect
-     * [0, 0, panel_left_x, screen_h] (logical, top-left convention -- the
-     * shared logical-to-physical helper handles Y-flip + DIRECT/SCALED).
-     *
-     * The walker tore down its scissor stack on exit (engine/ui/nt_ui.c
-     * scissor_pop:depth==0 -> set_scissor_enabled(false)), so the prior state
-     * is "disabled" -- we restore to "disabled" at every exit path below. */
+    /* Push GPU scissor over the GAME area (left of sidebar) so both overlay
+     * paths clip uniformly. Walker exit left scissor disabled; restore that. */
     const float panel_left_x = vx + vw - ctx->inspector_metrics.panel_width;
     const int scissor_x = (int)vx;
     const int scissor_y = (int)vy;
@@ -222,22 +150,14 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         nt_gfx_set_scissor_enabled(true);
     }
 
-    /* Phase 56 ext fix (inspector overlay transform-aware): if the highlighted
-     * id was stepped via nt_ui_step_interaction_padded this frame, a debug zone
-     * carries the declaration-time accum-transform snapshot. Use it to project
-     * the visual + padded corners into world space so the overlay matches the
-     * EXACT rendered position. Without this, push_transform-wrapped widgets
-     * (e.g. ui_buttons_demo BAKED button) show the overlay at the layout
-     * bbox while the widget renders at the transformed position. Falls back
-     * to the axis-aligned bbox path when no zone is recorded (plain Clay
-     * containers, non-interactive elements). */
+    /* Project corners through the recorded accum transform so the overlay
+     * matches the rendered widget; fall back to axis-aligned bbox when no
+     * zone was recorded (plain Clay elements). */
     const nt_ui_debug_zone_t *z = nt_ui_internal_find_debug_zone(ctx, ctx->inspector_highlight_id);
     if (z != NULL && z->accum_depth > 0U) {
         nt_sprite_renderer_set_material(ctx->sprite_material);
 
-        /* The recorded zone carries the visual bbox AND the padded layout bbox
-         * (from the registered hit_padding_lrtb). Project them through the
-         * same per-level accum math + Y-flip the debug overlay uses. */
+        /* Zone carries both visual and padded bboxes; project both. */
         int16_t pad[4] = {0, 0, 0, 0};
         const bool has_pad = nt_ui_widget_get_hit_padding(ctx, ctx->inspector_highlight_id, pad) && (pad[0] > 0 || pad[1] > 0 || pad[2] > 0 || pad[3] > 0);
 
@@ -255,7 +175,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
             nt_ui_internal_emit_outline(ctx->atlas, ctx->white_region, pad_corners, 1.0F, 0xFF00FFFFU);
         }
 
-        /* Visual bbox highlight: filled translucent fill + opaque outline. */
+        /* Visual bbox: translucent fill + opaque outline. */
         float vis_corners[4][2] = {
             {z->visual_l, z->visual_t},
             {z->visual_r, z->visual_t},
@@ -268,9 +188,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         nt_ui_internal_emit_filled_quad(ctx->atlas, ctx->white_region, vis_corners, 0x641C42A8U);
         nt_ui_internal_emit_outline(ctx->atlas, ctx->white_region, vis_corners, 2.0F, 0xFFFFFFFFU);
 
-        /* Label at the GL-Y-up TOP corner of the visual quad (max y after
-         * Y-flip = original top edge). Mirrors nt_ui_debug_draw_hit_zones's
-         * label placement so the two overlays look consistent. */
+        /* Label at the GL-Y-up TOP corner of the projected quad. */
         if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
             float top_x = vis_corners[0][0];
             float top_y = vis_corners[0][1];
@@ -298,20 +216,16 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
             nt_text_renderer_flush();
         }
-        /* Restore disabled scissor state (walker exit invariant). Flush BEFORE
-         * the disable so the panel-clipped staging actually carries the scissor. */
+        /* Restore disabled scissor (walker exit invariant). Flush BEFORE disable
+         * so the panel-clipped staging actually carries the scissor. */
         if (scissor_w > 0 && scissor_h > 0) {
             nt_gfx_set_scissor_enabled(false);
         }
         return;
     }
 
-    /* Fallback: axis-aligned bbox in layout space. Used for plain Clay
-     * elements with no recorded zone, or zones with no accum transform
-     * (depth==0 -> identity, same screen position as the bbox). GPU scissor
-     * (pushed above) handles the sidebar clip uniformly with the transformed
-     * path -- no more per-rect CPU clamps.
-     * Clay Y-down -> GL Y-up: world_y(top) = vy+vh - clay_y(top). */
+    /* Fallback: axis-aligned bbox in layout space.
+     * Clay Y-down → GL Y-up: world_y(top) = vy+vh - clay_y(top). */
     const float gl_x = info.bbox_x;
     const float gl_y_top = vy + vh - info.bbox_y;
     const float w = info.bbox_w;
@@ -319,16 +233,10 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
 
     nt_sprite_renderer_set_material(ctx->sprite_material);
 
-    /* Phase 56 ext fix: when the highlighted widget has a registered hit-zone
-     * padding (button via nt_ui_widget_register with non-NULL pad_lrtb), draw
-     * the padded hit area as a translucent fill UNDERNEATH the visual bbox
-     * so the user sees both at once. When no padding is recorded, only the
-     * visual highlight is drawn (same as before). The padded fill is drawn
-     * first so the visual outline on top stays crisp. */
+    /* When the widget has registered hit-zone padding, draw the padded fill
+     * UNDER the visual bbox so both are visible. */
     int16_t pad[4] = {0, 0, 0, 0};
     if (nt_ui_widget_get_hit_padding(ctx, ctx->inspector_highlight_id, pad) && (pad[0] > 0 || pad[1] > 0 || pad[2] > 0 || pad[3] > 0)) {
-        /* Padded extents in Clay layout space: visual bbox + pad on each side.
-         * Layout space matches the recorded padding direction (left/right/top/bottom). */
         const float pl = (float)pad[0];
         const float pr = (float)pad[1];
         const float pt = (float)pad[2];
@@ -337,22 +245,16 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         const float pad_y_top = gl_y_top + pt; /* GL Y-up: top edge moves UP by pt */
         const float pad_w = w + pl + pr;
         const float pad_h = h + pt + pb;
-        /* Translucent cyan fill for the padded hit area (matches debug overlay
-         * idle color so the two systems stay visually consistent). */
+        /* Translucent cyan fill (matches debug overlay idle color). */
         overlay_emit_rect(ctx->atlas, ctx->white_region, pad_x, pad_y_top, pad_w, pad_h, 0x6033FFFFU);
-        /* Thin yellow outline tracing the padded edge so the touch-target is
-         * unambiguous. */
+        /* Thin yellow outline for the touch-target edge. */
         overlay_emit_outline(ctx->atlas, ctx->white_region, pad_x, pad_y_top, pad_w, pad_h, 1.0F, 0xFF00FFFFU);
     }
-    /* Filled translucent highlight (matches Clay__debugViewHighlightColor = {168,66,28,100}). */
+    /* Translucent fill (matches Clay__debugViewHighlightColor) + opaque outline. */
     overlay_emit_rect(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, 0x641C42A8U);
-    /* Bright opaque outline for clarity. */
     overlay_emit_outline(ctx->atlas, ctx->white_region, gl_x, gl_y_top, w, h, 2.0F, 0xFFFFFFFFU);
 
-    /* Id label anchored at the top-left corner of the highlight rectangle.
-     * GPU scissor (set up above) crops the label glyphs against the panel's
-     * left edge, so the label is always at most partially visible -- the
-     * pre-fix early-skip-when-gl_x>=panel_left_x is no longer needed. */
+    /* Id label at the top-left corner; GPU scissor clips it against the panel. */
     if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
         char buf[80];
         int n;
@@ -364,7 +266,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
         }
         if (n > 0) {
             const float color[4] = {1.0F, 1.0F, 1.0F, 1.0F};
-            /* GL Y-up: gl_y_top is the top edge; baseline sits just inside. */
+            /* GL Y-up: baseline sits just inside the top edge. */
             overlay_draw_text(ctx->text_material, font, gl_x + 4.0F, gl_y_top - label_size - 2.0F, label_size, color, buf, (size_t)n);
         }
     }
@@ -373,7 +275,7 @@ void nt_ui_inspector_overlay_draw(nt_ui_context_t *ctx, const nt_ui_target_t *ta
     if (ctx->text_material.id != 0U && font.id != 0U && label_size > 0.0F) {
         nt_text_renderer_flush();
     }
-    /* Restore disabled scissor state (walker exit invariant). */
+    /* Restore disabled scissor (walker exit invariant). */
     if (scissor_w > 0 && scissor_h > 0) {
         nt_gfx_set_scissor_enabled(false);
     }

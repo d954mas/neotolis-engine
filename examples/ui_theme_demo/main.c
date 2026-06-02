@@ -251,8 +251,7 @@ static void frame(void) {
         nt_log_info("ui_theme_demo: swapped to %s palette", g_current->name);
     }
     if (nt_input_key_is_pressed(NT_KEY_D)) {
-        /* Phase 56 ext: Clay built-in debug overlay was removed. The
-         * replacement is nt_ui_inspector (verbatim Clay debug view port). */
+        /* Use nt_ui_inspector — Clay's built-in debug overlay is not wired. */
         const bool now_on = !nt_ui_inspector_is_active(s_ctx);
         nt_ui_inspector_set_active(s_ctx, now_on);
         nt_log_info("ui_theme_demo: inspector %s", now_on ? "ON" : "OFF");

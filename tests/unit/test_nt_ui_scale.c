@@ -1,4 +1,4 @@
-/* Unit tests for nt_ui_scale math (Phase 53 Plan 05 adaptive UI helper).
+/* Unit tests for nt_ui_scale math.
  *
  * Note on floats: Unity is compiled with UNITY_EXCLUDE_FLOAT (see
  * deps/unity/CMakeLists.txt). All values here are integer-valued or

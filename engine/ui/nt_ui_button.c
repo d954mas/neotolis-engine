@@ -10,9 +10,7 @@
 #include "ui/nt_ui_debug.h" /* record-only debug zone for disabled buttons */
 #include "ui/nt_ui_internal.h"
 
-/* Phase 56 ext (descriptor refactor): static descriptor consumed by the
- * inspector. Green pill (0xFF60D070 -- {0x70,0xD0,0x60,0xFF} = R=112,G=208,B=96).
- * Preserved from the pre-refactor cdv_widget_color switch. */
+/* Inspector descriptor; green pill (R=112,G=208,B=96). */
 const nt_ui_widget_def_t NT_UI_BUTTON_DEF = {
     .name = "nt_button",
     .pill_color = 0xFF60D070U,
@@ -37,9 +35,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(atlas.id != 0 && "nt_ui_button_begin: invalid atlas handle");
     NT_ASSERT(id != 0U && "nt_ui_button_begin: id 0 is the no-widget sentinel");
     NT_ASSERT(!ctx->pending_button.active && "nt_ui_button: nested buttons unsupported");
-    /* Phase 56 ext (P3-2): engine owns id/image/backgroundColor/userData; caller
-     * declares layout/padding/childAlignment/etc on decl, leaves the engine fields
-     * zero. Crash early on accidental overlap so the override contract is loud. */
+    /* Engine owns id/image/backgroundColor/userData; caller's decl must leave these zero. */
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && "nt_ui_button_begin: decl->id must be 0 (id is the explicit param)");
         NT_ASSERT(decl->image.imageData == NULL && "nt_ui_button_begin: decl->image.imageData must be NULL (atlas+region controls image)");
@@ -47,12 +43,9 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         NT_ASSERT(decl->userData == NULL && "nt_ui_button_begin: decl->userData must be NULL (data param controls)");
     }
     // #region state-pick + ease
-    /* Disabled short-circuits the hit-test/capture entirely (D-56-12). The
-     * padded query forwards the style's touch-target inflation (zero = old
-     * behavior); disabled path still gets a zeroed interaction. Phase 56 ext:
-     * the disabled path STILL records a debug zone (DISABLED flag) so the
-     * overlay surfaces "why didn't this respond?" -- recording is gated by
-     * ctx->debug_recording so production overhead stays zero. */
+    /* Disabled skips hit-test/capture but still records a debug zone so the
+     * overlay can surface "why didn't this respond?". Recording is gated by
+     * ctx->debug_recording (zero overhead when off). */
     nt_ui_interaction_t in;
     if (enabled) {
         in = nt_ui_step_interaction_padded(ctx, id, style->hit_padding_lrtb);
@@ -61,7 +54,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         nt_ui_debug_record_disabled_zone(ctx, id, style->hit_padding_lrtb);
     }
 
-    /* D-56-14 priority: disabled ? : pressed ? : hover ? : idle. */
+    /* Priority: disabled → pressed → hover → idle. */
     const nt_ui_btn_state_t *st = &style->idle;
     if (!enabled) {
         st = &style->disabled;
@@ -71,7 +64,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
         st = &style->hover;
     }
 
-    /* Ease the picked state's visual toward the cache (Plan 02). */
+    /* Ease the picked state's visual toward the cached anim target. */
     nt_ui_anim_target_t tgt = {
         .scale = st->scale,
         .off_x = st->offset_x,
@@ -81,17 +74,17 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     };
     const nt_ui_anim_interaction_t *a = nt_ui_anim(ctx, id, &tgt, style->transition_speed);
     // #endregion
-    // #region apply transform + opacity (ALWAYS -- balanced on disabled path, Pitfall 3)
+    // #region apply transform + opacity (ALWAYS — balanced on disabled path)
     nt_ui_transform_t t = nt_ui_transform_defaults();
-    t.scale_x = fmaxf(a->scale, 0.001F); /* scale must be > 0 (transform assert) */
+    t.scale_x = fmaxf(a->scale, 0.001F); /* scale must be > 0 */
     t.scale_y = t.scale_x;
     t.offset_x = a->off_x;
     t.offset_y = a->off_y;
     nt_ui_push_transform(ctx, &t);
     nt_ui_push_opacity(ctx, clampf(a->opacity, 0.0F, 1.0F));
     // #endregion
-    // #region open Clay IMAGE element WITH .id (the ONE structural addition over panel)
-    /* bg_region 0 = same as idle (D-56-11). */
+    // #region open Clay IMAGE element WITH .id (the one structural addition over panel)
+    /* bg_region 0 = same as idle. */
     const uint32_t region = (st->bg_region != 0U) ? st->bg_region : style->idle.bg_region;
 
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);
@@ -120,13 +113,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     Clay__ConfigureOpenElement(final);
     // #endregion
 
-    /* Phase 56 ext (CHUNK E): tag this element so nt_ui_inspector can show
-     * "button" next to it in the element tree. Zero-overhead lookup; reset
-     * at every nt_ui_begin. id is guaranteed non-zero by the assert above.
-     * Pass style->hit_padding_lrtb so the inspector overlay can outline the
-     * visual bbox AND the padded hit zone distinctly. data flows to the
-     * Clay declaration's userData (auto-routed to SHARED config) -- the
-     * inspector reads the layer from there, no need to duplicate it here. */
+    /* Tag for the inspector tree + outline of the padded hit zone. */
     nt_ui_widget_register(ctx, id, &NT_UI_BUTTON_DEF, style->hit_padding_lrtb);
 
     ctx->pending_button.active = true;

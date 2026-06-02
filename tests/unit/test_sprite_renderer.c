@@ -748,9 +748,8 @@ void test_sprite_renderer_sampler_override_does_not_stick(void) {
     nt_texture_t page0_tex = (nt_texture_t){.id = nt_resource_get(page0_res)};
     nt_sampler_t page0_default = nt_gfx_get_texture_default_sampler(page0_tex);
 
-    /* The last sampler bound on slot 0 must equal page0's default — not the
-     * override left over from cmd 0. Pre-fix this assertion fails because cmd 1
-     * (no override, same texture) would skip bind_sampler entirely. */
+    /* Last sampler on slot 0 must equal page0's default, not the override
+     * carried over from cmd 0. */
     uint32_t last = nt_gfx_stub_test_last_sampler(0);
     uint32_t default_backend = nt_gfx_test_sampler_backend_id(page0_default);
     uint32_t override_backend = nt_gfx_test_sampler_backend_id(override);

@@ -1,10 +1,8 @@
-/* Transform-aware hit-test (D-56-07, supersedes D-54-08).
+/* Transform-aware hit-test.
  *
- * The hit-test inverse-transforms the pointer by the declaration-time
- * accumulated transform (Option A, ctx-resident accum stack maintained by
- * push/pop_transform), then point-in-rect against Clay's stable layout bbox
- * (prev-frame, via Clay_GetElementData). The test data is asymmetric per
- * AGENTS.md ("data that breaks on axis swap or flip"):
+ * Inverse-transforms the pointer by the declaration-time accum stack, then
+ * point-in-rect against Clay's stable prev-frame bbox. Test data is
+ * asymmetric per AGENTS.md ("breaks on axis swap or flip"):
  *   - NON-square bbox 200x60 at a NON-origin position (x=150, y=80).
  *   - ASYMMETRIC transform: rotation = 30 deg, scale_x=1.2 != scale_y=0.8,
  *     offset_x=10 != offset_y=-25 (anisotropic scale + offset + rotation so an
@@ -164,11 +162,9 @@ static void test_hittest_rotated_asymmetric_probes(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 4: padded hit-test, asymmetric padding (touch-target inflation) ----
- * Phase 56 ext: nt_ui_test_hit_padded inflates the LAYOUT-space bbox by
- * pad_lrtb = {left, right, top, bottom} BEFORE the inverse-affine. With no
- * transform pushed, a point that sits 12 px OUTSIDE the bbox to the right
- * is OUTSIDE the unpadded hit zone but INSIDE the {0,16,0,0} padded one. */
+/* ---- Test 4: padded hit-test inflates layout bbox before inverse-affine ----
+ * Pad {0,16,0,0}: a point 12 px past the right edge is outside unpadded but
+ * inside padded. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_hittest_padded_asymmetric(void) {
     declare_bbox_frame();
@@ -399,7 +395,6 @@ int main(void) {
     RUN_TEST(test_hittest_axis_aligned_baseline);
     RUN_TEST(test_hittest_rotated_asymmetric_probes);
     RUN_TEST(test_hittest_no_render_y_flip);
-    /* Phase 56 ext: touch-target padding (nt_ui_step_interaction_padded). */
     RUN_TEST(test_hittest_padded_asymmetric);
     RUN_TEST(test_hittest_padded_with_rotation);
     RUN_TEST(test_hittest_padded_combinatorial_worst_case);

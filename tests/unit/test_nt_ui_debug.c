@@ -1,8 +1,5 @@
-/* Phase 56 ext: hit-zone debug overlay.
- *
- * Recording is OFF by default (zero overhead). When ON, each call to
- * nt_ui_step_interaction_padded pushes a zone record into the ctx ring.
- * Drawing is decoupled from recording.
+/* Hit-zone debug overlay. Recording OFF by default; when ON each padded
+ * step pushes a zone. Drawing is decoupled from recording.
  *
  * Tests cover:
  *   1) recording off -> debug_zone_count stays 0 even after queries
@@ -275,16 +272,10 @@ static void test_debug_emit_matches_walker_coord_space(void) {
     }
 }
 
-/* ---- Test 8: disabled-record helper drops a DISABLED zone (overlay surfaces it) ----
- *
- * Phase 56 ext extension: nt_ui_button on enabled=false short-circuits the
- * interaction hit-test. Previously this also short-circuited recording, so
- * disabled buttons were invisible in the debug overlay. The fix adds an
- * explicit nt_ui_debug_record_disabled_zone call on the disabled path.
- * This test exercises the helper directly (same pattern test_nt_ui_debug
- * uses for nt_ui_step_interaction_padded -- driving the foundation, not the
- * widget): the helper MUST drop a zone with DISABLED set and must NOT
- * touch the capture state. Button wiring is regression-protected by
+/* ---- Test 8: disabled-record helper drops a DISABLED zone ----
+ * The disabled path skips the hit-test but must still record a zone so the
+ * overlay surfaces it. Helper must not touch capture state. Button wiring
+ * regression-protected by
  * test_nt_ui_button + the disabled-button visual in ui_buttons_demo. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_debug_disabled_helper_records_zone(void) {

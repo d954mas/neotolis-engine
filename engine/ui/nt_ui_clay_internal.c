@@ -1,8 +1,5 @@
-/* Phase 56 ext: exclusive CLAY_IMPLEMENTATION TU. Owns Clay's static globals
- * and private-typed bodies that the verbatim Clay-debug-view port + the
- * inspector internal accessors need. nt_ui.c (engine) and nt_ui_inspector.c
- * (public inspector API) include <clay.h> via the public header path; only
- * THIS file defines CLAY_IMPLEMENTATION. */
+/* Exclusive CLAY_IMPLEMENTATION TU. Owns Clay's static globals + private-typed
+ * bodies that the inspector port needs. Other TUs include clay.h header-only. */
 
 /* clang-format off */
 #define CLAY_IMPLEMENTATION
@@ -50,20 +47,15 @@ int nt_ui_clay_priv_pointer_pressed(Clay_Context *clay) {
 }
 // #endregion
 
-// #region inspector_internal_accessors (CHUNK E)
-/* Phase 56 ext rework (TU split): these accessors expose just enough of
- * Clay's private surface for the inspector to read element trees / hashmap
- * items / element configs. They live here because each touches Clay_Context
- * fields and Clay__* statics that are only visible inside CLAY_IMPLEMENTATION. */
+// #region inspector_internal_accessors
+/* Inspector accessors that touch Clay private types (Clay_Context fields, Clay__* statics). */
 
 uint32_t nt_ui_internal_current_open_element_id(void) {
     nt_ui_context_t *ctx = nt_ui_internal_get_inframe_ctx();
     if (ctx == NULL || ctx->clay == NULL) {
         return 0U;
     }
-    /* Mirror Clay__GetOpenLayoutElement (clay.h:1325) without going through
-     * its private prototype: top of openLayoutElementStack indexes into
-     * layoutElements; ->id is the Clay-assigned id. */
+    /* Top of openLayoutElementStack indexes layoutElements; ->id is Clay-assigned. */
     Clay_Context *cc = ctx->clay;
     if (cc->openLayoutElementStack.length <= 0) {
         return 0U;
@@ -78,15 +70,9 @@ uint32_t nt_ui_internal_last_emitted_element_id(void) {
     if (ctx == NULL || ctx->clay == NULL) {
         return 0U;
     }
-    /* Phase 56 ext: text-leaf widget tagging (nt_ui_label).
-     * Clay__OpenTextElement (clay.h:1991) appends a text element to
-     * layoutElements and assigns ->id via Clay__HashNumber, but it does NOT
-     * push the new element onto openLayoutElementStack -- the stack still
-     * points at the PARENT. So current_open_element_id returns the parent's
-     * id, not the text leaf's. Calling THIS accessor IMMEDIATELY after
-     * CLAY_TEXT reads the freshly-added leaf at layoutElements.length-1.
-     * Robust against Clay's maxElementsExceeded early-out (length unchanged
-     * = 0 returned, no register). */
+    /* Clay__OpenTextElement appends to layoutElements but does NOT push on
+     * openLayoutElementStack — call this immediately after CLAY_TEXT to read
+     * the freshly-added text leaf at layoutElements.length-1. */
     Clay_Context *cc = ctx->clay;
     if (cc->layoutElements.length <= 0) {
         return 0U;
@@ -95,10 +81,7 @@ uint32_t nt_ui_internal_last_emitted_element_id(void) {
     return el->id;
 }
 
-/* Inspector lives in a separate TU but needs to peek at the Clay
- * layoutElements array. The full Clay_Context type is only visible inside
- * this TU (CLAY_IMPLEMENTATION) -- expose two thin accessors so the
- * inspector stays Clay-agnostic. */
+/* Thin accessors so the inspector TU stays Clay-agnostic. */
 int32_t nt_ui_internal_get_layout_element_count(const nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_internal_get_layout_element_count: ctx must be non-NULL");
     if (ctx->clay == NULL) {
@@ -115,10 +98,7 @@ nt_ui_inspector_element_view_t nt_ui_internal_get_layout_element_view(const nt_u
     }
     Clay_LayoutElement *el = Clay_LayoutElementArray_Get(&ctx->clay->layoutElements, index);
     v.id = el->id;
-    /* Position via Clay_GetElementData -- requires Clay's current context set
-     * (Clay__GetHashMapItem dereferences it). Inspector is called AFTER
-     * nt_ui_end (which clears current context), so set it for the lookup
-     * and restore afterward to keep the post-end invariant. */
+    /* Clay_GetElementData needs current context set; restore on exit. */
     Clay_Context *saved = Clay_GetCurrentContext();
     Clay_SetCurrentContext(ctx->clay);
     Clay_ElementData ed = Clay_GetElementData((Clay_ElementId){.id = el->id});
@@ -137,10 +117,7 @@ nt_ui_inspector_element_view_t nt_ui_internal_get_layout_element_view(const nt_u
     return v;
 }
 
-/* Map Clay's CLAY__ELEMENT_CONFIG_TYPE_* bitmask (Clay__ElementConfigType) to
- * our exposed 8-bit mask. Order mirrors the Clay__DebugGetElementConfigTypeLabel
- * switch at clay.h:3130 (Shared / Text / Aspect / Image / Floating / Clip /
- * Border / Custom). */
+/* Map Clay's CLAY__ELEMENT_CONFIG_TYPE_* bitmask to our exposed 8-bit mask. */
 static uint8_t inspector_element_config_mask(Clay_LayoutElement *el) {
     uint8_t mask = 0U;
     for (int32_t i = 0; i < el->elementConfigs.length; ++i) {
@@ -177,10 +154,7 @@ static uint8_t inspector_element_config_mask(Clay_LayoutElement *el) {
     return mask;
 }
 
-/* DFS pre-order tree walk -- mirrors Clay__RenderDebugLayoutElementsList
- * (clay.h:3151) but writes flat rows to caller-owned storage instead of
- * emitting CLAY({...}) macros. Depth is tracked via a small explicit stack
- * (cap matches Clay's reusableElementIndexBuffer depth budget). */
+/* DFS pre-order walk into flat caller-owned rows. Depth tracked via explicit stack. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspector_tree_row_t *out, int32_t out_cap) {
     NT_ASSERT(ctx != NULL && "nt_ui_internal_collect_tree_rows: ctx must be non-NULL");
@@ -195,9 +169,7 @@ int32_t nt_ui_internal_collect_tree_rows(const nt_ui_context_t *ctx, nt_ui_inspe
     int32_t written = 0;
     const int32_t roots = ctx->clay->layoutElementTreeRoots.length;
 
-    /* Explicit DFS stack: (element_index, depth, child_cursor). Cap matches
-     * Clay's reusableElementIndexBuffer headroom -- if it overflows we stop
-     * walking gracefully (inspector is observability). */
+    /* Explicit DFS stack; cap matches Clay's depth budget. Overflow stops gracefully. */
     enum { STACK_CAP = 256 };
     struct {
         int32_t elem_idx;
@@ -337,44 +309,20 @@ nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_conte
 }
 // #endregion
 
-// #region inspector_emit_layout (verbatim Clay debug view port)
-/* Phase 56 ext rework: verbatim port of Clay__RenderDebugView (clay.h:3392-3800)
- * adapted to run inside the user's layout pass (between user CLAY blocks and
- * Clay_EndLayout in nt_ui_end). Lives in this TU because the body touches
- * Clay private types (Clay_Context fields, Clay__GetHashMapItem,
- * Clay__ElementIsOffscreen, layoutElements / layoutElementTreeRoots /
- * reusableElementIndexBuffer / pointerInfo / pointerOverIds / etc.) that are
- * file-static in clay.h.
- *
- * Lines 3113-3122 of clay.h define the palette + metrics (COLOR_1..4,
- * SELECTED_ROW, ROW_HEIGHT=30, OUTER_PADDING=10, INDENT_WIDTH=16). Reproduced
- * verbatim here as static const. */
+// #region inspector_emit_layout
+/* Verbatim port of Clay__RenderDebugView, run inside the user layout pass so it
+ * can read Clay private types. Sidebar width + row metrics are runtime config
+ * via ctx->inspector_metrics (defaults match Clay's literals). */
 
 static const Clay_Color CDV_COLOR_1 = {58, 56, 52, 255};
 static const Clay_Color CDV_COLOR_2 = {62, 60, 58, 255};
 static const Clay_Color CDV_COLOR_3 = {141, 133, 135, 255};
 static const Clay_Color CDV_COLOR_4 = {238, 226, 231, 255};
 static const Clay_Color CDV_COLOR_SELECTED_ROW = {102, 80, 78, 255};
-static const Clay_Color CDV_HIGHLIGHT_COLOR = {168, 66, 28, 100}; /* Clay__debugViewHighlightColor */
-/* Phase 56 ext (REVIEW-2 P3-1): the verbatim Clay debug-view literals
- * (CDV_ROW_HEIGHT 30, CDV_OUTER_PADDING 10, CDV_INDENT_WIDTH 16) and the
- * shared sidebar width NT_UI_INSPECTOR_PANEL_WIDTH moved to runtime config
- * on ctx->inspector_metrics. Each emit function caches local consts of the
- * correct type at entry and uses those throughout. Defaults preserved
- * verbatim in NT_UI_INSPECTOR_METRICS_DEFAULT. */
+static const Clay_Color CDV_HIGHLIGHT_COLOR = {168, 66, 28, 100};
 
-/* Phase 56 ext fix (viewport-hover propagation): set of Clay element ids the
- * inspector itself owns -- the sidebar panel, its scroll/content wrappers, the
- * close button, and the floating element-highlight rect + its inner
- * rectangle. The viewport-hover propagation in cdv_render_layout_elements_list
- * scans context->pointerOverIds to find the first user element under the
- * cursor; without this filter, a previous frame's floating highlight rect
- * (which attaches at the user element's bbox via parentId) would be picked
- * up, causing a self-feedback loop on the highlight target. The geometric
- * panel-area check filters the sidebar wrappers but NOT the floating
- * highlight (which lives in the VIEWPORT, not the panel), so a small named-id
- * set is the simplest robust filter. Cached lazily on first call -- the
- * Clay__HashString computes are cheap but constant across frames. */
+/* Inspector-owned element ids — filtered out of the viewport-hover scan so the
+ * floating highlight rect can't self-feedback as its own hover target. */
 enum { CDV_OWNED_ID_COUNT = 7 };
 static uint32_t s_cdv_owned_ids[CDV_OWNED_ID_COUNT];
 static bool s_cdv_owned_ids_init = false;
@@ -389,10 +337,7 @@ static void cdv_init_owned_ids_once(void) {
     s_cdv_owned_ids[3] = Clay__HashString(CLAY_STRING("ntInsp_CloseButton"), 0, 0).id;
     s_cdv_owned_ids[4] = Clay__HashString(CLAY_STRING("ntInsp_ElementHighlight"), 0, 0).id;
     s_cdv_owned_ids[5] = Clay__HashString(CLAY_STRING("ntInsp_ElementHighlightRectangle"), 0, 0).id;
-    /* Clay__RootContainer is the auto-emitted root that covers the entire
-     * canvas (clay.h:4186). It would always be in pointerOverIds when any
-     * point is inside the viewport -- skipping it ensures the propagation
-     * picks an actual user-emitted element. */
+    /* Skip Clay's auto-emitted root so propagation picks a real user element. */
     s_cdv_owned_ids[6] = Clay__HashString(CLAY_STRING("Clay__RootContainer"), 0, 0).id;
     s_cdv_owned_ids_init = true;
 }
@@ -406,8 +351,6 @@ static bool cdv_is_inspector_owned_id(uint32_t id) {
     return false;
 }
 
-/* Mirror of Clay__DebugGetElementConfigTypeLabel (clay.h:3130-3140) but
- * collapsed to just label + color (no inner struct). */
 static const char *cdv_config_label(uint8_t type) {
     switch (type) {
     case CLAY__ELEMENT_CONFIG_TYPE_SHARED:
@@ -454,11 +397,8 @@ static Clay_Color cdv_config_color(uint8_t type) {
     }
 }
 
-/* Engine extension column: widget descriptor pill (button/image/label/panel/
- * group OR any game widget). Pulls from ctx->widget_registry via
- * nt_ui_widget_lookup -> def. Plain Clay rows have def==NULL (no pill). */
+/* Widget descriptor pill color — unpacks the nt_ui 0xAABBGGRR style format. */
 static inline Clay_Color cdv_widget_color_from_packed(uint32_t packed) {
-    /* Packed format matches nt_ui style packing: 0xAABBGGRR. */
     Clay_Color c;
     c.r = (float)(packed & 0xFFU);
     c.g = (float)((packed >> 8) & 0xFFU);
@@ -467,19 +407,11 @@ static inline Clay_Color cdv_widget_color_from_packed(uint32_t packed) {
     return c;
 }
 
-/* Engine extension column: layer number from nt_ui_element_data_t.layer (via
- * Clay's userData). Returns -1 if no userData is found on any config.
- *
- * Reads userData from BOTH SHARED and TEXT configs. Clay auto-routes
- * Clay_ElementDeclaration.userData into a SHARED config (clay.c:2065-2071), so
- * images / panels / customs that pass .userData = data are readable via SHARED.
- * CLAY_TEXT bypasses SHARED: nt_ui_label sets .userData on the TEXT config
- * itself (Clay_TextElementConfig has its own userData slot at clay.h:386), so
- * the TEXT branch is required to recover the layer for label leaves. Note that
- * Clay_ImageElementConfig and Clay_CustomElementConfig do NOT have userData
- * fields (clay.h:424-426, 521-525) -- they piggy-back on SHARED. */
+/* Layer column from nt_ui_element_data_t.userData. Returns -1 if no userData.
+ * Reads BOTH SHARED and TEXT configs — CLAY_TEXT routes userData to the TEXT
+ * config, every other path routes to SHARED. */
 static int32_t cdv_element_layer(const nt_ui_context_t *ctx, Clay_LayoutElement *el) {
-    (void)ctx; /* kept in signature for symmetry with other inspector accessors */
+    (void)ctx;
     for (int32_t i = 0; i < el->elementConfigs.length; ++i) {
         Clay_ElementConfig *cfg = Clay__ElementConfigArraySlice_Get(&el->elementConfigs, i);
         void *u = NULL;
@@ -500,21 +432,8 @@ static int32_t cdv_element_layer(const nt_ui_context_t *ctx, Clay_LayoutElement 
     return -1;
 }
 
-/* Clay__IntToString does int -> Clay_String. We can't see that file-static
- * symbol from this TU (it's also static), so reimplement using static buffers
- * cycled per call. The verbatim Clay uses static buffers internally too.
- *
- * Phase 56 ext bug-fix (layer column reported the LAST element's layer for
- * every row): the previous 16-slot ring buffer wrapped LONG before Clay's
- * layout solve consumed the Clay_String pointers. With ~9 int-to-string calls
- * in the info pane alone + 1 per tree row's "L:N" cell, a 30-row tree calls
- * this ~40 times per frame; slot N got overwritten 2-3 times before render,
- * so every CLAY_TEXT(cdv_int_to_string(layer)) pointer aliased the LAST
- * snprintf result. Bumping the ring to 512 slots covers any practical UI tree
- * + info pane in a single frame; the cursor still wraps but only once the
- * widget count exceeds the cap (the ring is cleared each frame implicitly
- * because all consumers run within the layout pass). 8 KB BSS cost is
- * negligible vs the visual-correctness gain. */
+/* 512-slot ring buffer of int-to-string scratch — must outlive Clay_String
+ * pointers through the layout solve (consumer count >> 16). */
 #ifndef NT_UI_INSPECTOR_INT_BUFS
 #define NT_UI_INSPECTOR_INT_BUFS 512
 #endif
@@ -528,9 +447,7 @@ static Clay_String cdv_int_to_string(int32_t v) {
     return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
 }
 
-/* Same ring strategy for hex IDs (string-id-empty fallback). 8-char hex +
- * "#" prefix + NUL fits in 16. Separate ring so hex and decimal don't
- * compete for slots. */
+/* Same ring strategy for hex IDs; separate ring so hex and decimal don't compete. */
 static char cdv_hex_bufs[NT_UI_INSPECTOR_INT_BUFS][16];
 static uint32_t cdv_hex_buf_cursor = 0U;
 static Clay_String cdv_hex_id_to_string(uint32_t v) {
@@ -540,11 +457,7 @@ static Clay_String cdv_hex_id_to_string(uint32_t v) {
     return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
 }
 
-/* Same ring strategy for "#RRGGBBAA" color hex strings (SHARED bg-color
- * inline display per Phase 56 ext UX feedback). Shares the hex ring's
- * cursor space implicitly because each frame resets cdv_hex_buf_cursor to
- * 0 and the ring is sized for the worst-case row count. 10 chars ("#"
- * + 8 hex + NUL) fits in 16. */
+/* "#RRGGBBAA" color strings — shares the hex ring's cursor space (reset per frame). */
 static Clay_String cdv_color_hex_to_string(Clay_Color c) {
     char *buf = cdv_hex_bufs[cdv_hex_buf_cursor];
     cdv_hex_buf_cursor = (cdv_hex_buf_cursor + 1U) & (NT_UI_INSPECTOR_INT_BUFS - 1U);
@@ -556,9 +469,7 @@ static Clay_String cdv_color_hex_to_string(Clay_Color c) {
     return (Clay_String){.length = (n > 0) ? n : 0, .chars = buf};
 }
 
-/* Phase 56 ext: persistent collapsed-id set helpers. Linear scan -- N <=
- * NT_UI_INSPECTOR_COLLAPSED_CAP (128). At-cap adds are silently dropped so
- * the user can still operate but loses no existing collapses. */
+/* Collapsed-id set helpers — linear scan, N <= NT_UI_INSPECTOR_COLLAPSED_CAP. */
 static bool cdv_is_collapsed(const nt_ui_context_t *ctx, uint32_t id) {
     for (uint32_t i = 0; i < ctx->inspector_collapsed_count; ++i) {
         if (ctx->inspector_collapsed_ids[i] == id) {
@@ -574,7 +485,7 @@ static void cdv_toggle_collapsed(nt_ui_context_t *ctx, uint32_t id) {
     }
     for (uint32_t i = 0; i < ctx->inspector_collapsed_count; ++i) {
         if (ctx->inspector_collapsed_ids[i] == id) {
-            /* Remove via swap-with-last (order-independent set). */
+            /* Swap-with-last; order-independent set. */
             ctx->inspector_collapsed_ids[i] = ctx->inspector_collapsed_ids[ctx->inspector_collapsed_count - 1U];
             ctx->inspector_collapsed_count--;
             return;
@@ -583,67 +494,36 @@ static void cdv_toggle_collapsed(nt_ui_context_t *ctx, uint32_t id) {
     if (ctx->inspector_collapsed_count < NT_UI_INSPECTOR_COLLAPSED_CAP) {
         ctx->inspector_collapsed_ids[ctx->inspector_collapsed_count++] = id;
     }
-    /* At cap: silently drop (no assert; observability not correctness). */
 }
 
-/* Forward declaration -- mutual recursion with the tree walk. */
 typedef struct {
     int32_t row_count;
     int32_t selected_element_row_index;
 } cdv_layout_data_t;
 
-/* Verbatim port of Clay__RenderDebugLayoutElementsList (clay.h:3151-3308).
- * Adapted only for:
- *   - reuses ctx->treeNodeVisited if available; falls back to a private stack
- *     when Clay's `treeNodeVisited` isn't pre-sized.
- *   - hooks ctx->inspector_highlight_id when a row is hovered + ctx->
- *     inspector_selected_id on click (mirror of Clay's debugSelectedElementId).
- *   - emits the engine widget-tag pill + layer column at the tail of each row. */
+/* Port of Clay__RenderDebugLayoutElementsList. Adds engine widget-tag pill +
+ * layer column per row; hover routes to ctx->inspector_highlight_id, click
+ * routes to ctx->inspector_selected_id. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity,misc-no-recursion)
 static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, int32_t initial_roots_length, int32_t highlighted_row_index) {
     Clay_Context *context = ctx->clay;
-    /* Phase 56 ext (REVIEW-2 P3-1): runtime metrics cached at entry. Pre-fix
-     * these were file-scope #defines (CDV_ROW_HEIGHT 30, CDV_INDENT_WIDTH 16,
-     * literal .fontSize 16). Casts match the Clay struct types: Clay_Padding
-     * uses uint16_t; CLAY_TEXT_CONFIG .fontSize is uint16_t. */
+    /* Cached at entry so cast types match Clay structs (uint16_t for Clay_Padding / fontSize). */
     const float row_h = ctx->inspector_metrics.row_height;
     const uint16_t font_sz = ctx->inspector_metrics.font_size;
     const uint16_t indent_w = (uint16_t)ctx->inspector_metrics.indent_width;
-    /* Private DFS stack -- avoids mutating Clay's reusableElementIndexBuffer
-     * which is otherwise touched by Clay's own layout solve. Cap matches
-     * Clay's headroom (max element depth = 256). At-cap the walk stops
-     * gracefully; the inspector is observability, not correctness. */
+    /* Private DFS stack — avoid mutating Clay's reusableElementIndexBuffer. */
     enum { CDV_DFS_CAP = 256 };
     int32_t dfs_elems[CDV_DFS_CAP];
     bool dfs_visited[CDV_DFS_CAP];
-    /* Phase 56 ext fix: track whether this frame emitted indent wrappers (the
-     * 3 anonymous Clay__OpenElement blocks at the children-recurse branch). If
-     * a frame is filtered out (no identity), we did NOT open them and must NOT
-     * close them on the second-visit pass either. Mirrors dfs_visited shape. */
+    /* Track whether this frame opened the 3 indent wrappers — filtered (no-identity)
+     * frames skip the open and must skip the close. */
     bool dfs_opened_wrappers[CDV_DFS_CAP];
     int32_t dfs_length = 0;
     Clay__DebugView_ScrollViewItemLayoutConfig = (Clay_LayoutConfig){.sizing = {.height = CLAY_SIZING_FIXED(row_h)}, .childGap = 6, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}};
     cdv_layout_data_t layoutData = {0};
     uint32_t highlightedElementId = 0U;
-    /* Phase 56 ext: every inspector-owned CLAY/CLAY_TEXT block must carry a
-     * layer-PANEL element_data so the walker's layer sort places it strictly
-     * above any game UI. Without this, inner blocks fall back to layer 0 and
-     * any game UI emitted with a non-zero layer below PANEL (e.g. game HUD
-     * at layer 200) could render BETWEEN the inspector root (250) and its
-     * inner children.
-     *
-     * Phase 56 ext perf: split into TWO debug layers so the walker batches
-     * the inspector emits cleanly:
-     *   - debug_bg_data   (PANEL_BG   = 250) for CLAY containers (rect/border/
-     *     image backgrounds + structural wrappers that carry no draw cmd
-     *     themselves but stay in the BG layer for consistency).
-     *   - debug_text_data (PANEL_TEXT = 251) for CLAY_TEXT configs.
-     * The walker iterates layers ascending so BG (250) paints before TEXT
-     * (251) -- row backgrounds still appear under their labels. Within each
-     * layer the dispatch is monotype, so the sprite pipeline flushes once
-     * after all BG cmds and the text pipeline flushes once after all TEXT
-     * cmds per zIndex/scissor segment. Pre-split alternation count was
-     * O(rows); post-split it is ~2 per segment (one BG->TEXT boundary). */
+    /* BG (250) for CLAY containers, TEXT (251) for CLAY_TEXT — ascending-layer
+     * walk batches all inspector rects before all inspector texts per segment. */
     void *const debug_bg_data = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_BG);
     void *const debug_text_data = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_TEXT);
     Clay_TextElementConfig debug_text_name_cfg_storage = Clay__DebugView_TextNameConfig;
@@ -674,8 +554,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             int32_t currentElementIndex = dfs_elems[dfs_length - 1];
             Clay_LayoutElement *currentElement = Clay_LayoutElementArray_Get(&context->layoutElements, (int)currentElementIndex);
             if (dfs_visited[dfs_length - 1]) {
-                /* Phase 56 ext fix: only close the 3 indent wrappers when this
-                 * frame actually opened them (filtered frames did not). */
+                /* Close the 3 indent wrappers only when this frame opened them. */
                 if (dfs_opened_wrappers[dfs_length - 1]) {
                     Clay__CloseElement();
                     Clay__CloseElement();
@@ -687,33 +566,11 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             dfs_visited[dfs_length - 1] = true;
             Clay_LayoutElementHashMapItem *currentElementData = Clay__GetHashMapItem(currentElement->id);
             bool offscreen = currentElementData != NULL && Clay__ElementIsOffscreen(&currentElementData->boundingBox);
-            /* Phase 56 ext extension columns: widget descriptor pill + layer cell. */
             const int32_t layer = cdv_element_layer(ctx, currentElement);
             const nt_ui_widget_def_t *wdef = nt_ui_widget_lookup(ctx, currentElement->id);
             Clay_String idString = context->layoutElementIdStrings.internalArray[currentElementIndex];
-            /* Phase 56 ext fix: filter out the 3 anonymous indent wrappers we
-             * open per child (lines below) plus any other Clay-auto-anonymous
-             * container -- a row is emitted only when the element has a
-             * meaningful identity:
-             *   has_identity = (stringId.length > 0)
-             *               || widget_lookup != NULL
-             *               || elementConfigs.length > 0
-             *
-             * The third clause restores Clay's verbatim debug-view behavior
-             * for ANY config-bearing leaf -- Text/Image/SHARED-color/Border/
-             * etc. -- which the earlier "kill empty wrappers" pass dropped by
-             * accident. Concrete regression: `nt_ui_label` emits a CLAY_TEXT
-             * child INSIDE the label's container -- the container has been
-             * tagged by the label widget but the Text leaf has no string id
-             * and no widget tag, only a Text config. Without this third
-             * clause that Text row vanished (user report: "Я теперь не вижу
-             * text/image раньше было"). Same applies to standalone CLAY_TEXT
-             * blocks, CLAY({ .image = ... }) leaves, and CLAY blocks that
-             * only carry a SHARED background color. Truly anonymous wrappers
-             * (no config, no id, no widget) still descend silently.
-             *
-             * The text branch below is exempt -- text content is its own
-             * identity. */
+            /* Only emit a row for elements with identity (string id, widget tag, or
+             * any attached config). Truly anonymous wrappers descend silently. */
             const bool has_identity = (idString.length > 0) || (wdef != NULL) || (currentElement->elementConfigs.length > 0);
             if (has_identity) {
                 if (highlighted_row_index == layoutData.row_count) {
@@ -728,12 +585,8 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             }
             if (has_identity) {
                 CLAY({.id = CLAY_IDI("ntInsp_ElementOuter", currentElement->id), .layout = Clay__DebugView_ScrollViewItemLayoutConfig, .userData = debug_bg_data}) {
-                    /* Collapse icon / dot. Click on the inner 8x8 toggles the
-                     * collapsed-set entry for currentElement->id; collapsed
-                     * rows paint the dot in the brighter CDV_COLOR_4 + sharp
-                     * (cornerRadius 0) so users can tell at a glance which
-                     * subtrees are folded. Verbatim shape from Clay's debug
-                     * view -- only the .id + color/radius variation are new. */
+                    /* Collapse dot — click toggles collapsed-set; collapsed rows
+                     * paint brighter (CDV_COLOR_4) with sharp corner radius. */
                     const bool currently_collapsed = cdv_is_collapsed(ctx, currentElement->id);
                     const Clay_ElementId dotId = Clay__HashString(CLAY_STRING("ntInsp_CollapseDot"), 0, currentElement->id);
                     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}, .userData = debug_bg_data}) {
@@ -743,9 +596,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                               .backgroundColor = currently_collapsed ? CDV_COLOR_4 : CDV_COLOR_3,
                               .cornerRadius = currently_collapsed ? CLAY_CORNER_RADIUS(0) : CLAY_CORNER_RADIUS(2)}) {}
                     }
-                    /* Detect click on the dot: same pattern as the close-button
-                     * gate at the top of emit_inspector_layout. Pressed THIS
-                     * frame + pointer-over-dot id = toggle. */
+                    /* Pressed-this-frame + pointer-over-dot id = toggle. */
                     if (context->pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
                         for (int32_t pi = 0; pi < context->pointerOverIds.length; ++pi) {
                             const Clay_ElementId *over = Clay_ElementIdArray_Get(&context->pointerOverIds, pi);
@@ -760,27 +611,17 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                             CLAY_TEXT(CLAY_STRING("Offscreen"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .userData = debug_text_data}));
                         }
                     }
-                    /* Phase 56 ext fix: when stringId is empty (CLAY_IDI / no-id /
-                     * Clay-auto-anonymous), Clay's debug view rendered nothing,
-                     * leaving the row visually blank. Fall back to the element id
-                     * as hex so unnamed elements are still identifiable in the
-                     * tree. Buffered via cdv_hex_id_to_string for stable Clay_String
-                     * pointers (same ring-buffer fix as the layer column). */
+                    /* Fall back to hex element id when stringId is empty so unnamed
+                     * elements (CLAY_IDI / auto-anonymous) stay identifiable. */
                     if (idString.length > 0) {
                         CLAY_TEXT(idString, offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .userData = debug_text_data}) : debug_text_name_cfg);
                     } else {
                         CLAY_TEXT(cdv_hex_id_to_string(currentElement->id),
                                   offscreen ? CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .userData = debug_text_data}) : debug_text_name_cfg);
                     }
-                    /* Phase 56 ext (CHUNK C, UX fix #5): inline SHARED bg-color
-                     * swatch + hex string in the row's identification area --
-                     * replaces the standalone "Color" pill that the user found
-                     * cryptic ("это мой цвет или нет?"). Surfaced right after
-                     * the id text so the color reads as PART of the row's
-                     * identity. Only emitted when a SHARED config with non-zero
-                     * alpha is attached (matches the pre-fix gate). The matching
-                     * pre-fix "Color" pill in the config-loop below is removed
-                     * (no equivalent left -- the inline form IS the surface). */
+                    /* Inline SHARED bg-color swatch + hex right after the id text
+                     * so the color reads as part of the row identity. Only when
+                     * a SHARED config with non-zero alpha is attached. */
                     for (int32_t cfgScan = 0; cfgScan < currentElement->elementConfigs.length; ++cfgScan) {
                         Clay_ElementConfig *sc = Clay__ElementConfigArraySlice_Get(&currentElement->elementConfigs, cfgScan);
                         if (sc->type != CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
@@ -790,11 +631,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                         if (bg.a <= 0) {
                             break;
                         }
-                        /* Swatch quad (16x16, corner-radius 4) + hex text. Sits
-                         * in a row container so it shares the vertical center
-                         * with the id text. Border color matches the row's
-                         * subtle frame style. fontSize 14 keeps the row's
-                         * vertical extent unchanged from the verbatim shape. */
+                        /* 16x16 swatch + hex text in a row sharing the id's vertical center. */
                         CLAY({.layout = {.sizing = {.height = CLAY_SIZING_FIXED(row_h - 8.0F)}, .childGap = 4, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}, .userData = debug_bg_data}) {
                             CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(16), CLAY_SIZING_FIXED(16)}},
                                   .backgroundColor = bg,
@@ -805,29 +642,13 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                         }
                         break;
                     }
-                    /* Phase 56 ext perf (STRATEGY A, reduces ~209 draw calls on
-                     * open inspector to <=~80): pill BACKGROUNDS dropped. Pre-fix
-                     * each row emitted 3-5 (rect-bg + colored text) pairs:
-                     * radius / per-config / widget / layer. The walker flushes the
-                     * sprite pipeline on every RECT->TEXT boundary
-                     * (engine/ui/nt_ui.c::prep_sprite_dispatch + TEXT branch's
-                     * sprite_renderer_flush), so each pair cost ~2 draw calls.
-                     * The pill visual identity is preserved by rendering the
-                     * label TEXT in the pill's color (orange-ish for SHARED-radius,
-                     * per-config color for FLOATING/CLIP/etc., the widget def's
-                     * pill_color for the engine widget tag, CDV_COLOR_3 for the
-                     * layer column). The color swatch RECT in the inline display
-                     * is kept -- it is the only direct visual sample of the
-                     * widget's background color and dropping it would defeat the
-                     * point. Result: per-row alternations drop from ~6 to ~2
-                     * (row_bg + swatch + a long T...T run). Pin:
-                     * test_inspector_alternations_capped_after_strategy_a. */
+                    /* No pill backgrounds — render each label in the config color
+                     * directly so the row collapses to one BG->TEXT boundary
+                     * (was per-pill, ~6 alternations per row). */
                     for (int32_t elementConfigIndex = 0; elementConfigIndex < currentElement->elementConfigs.length; ++elementConfigIndex) {
                         Clay_ElementConfig *elementConfig = Clay__ElementConfigArraySlice_Get(&currentElement->elementConfigs, elementConfigIndex);
                         if (elementConfig->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
-                            /* Radius marker -- orange-ish text (same hue as the pre-fix bg pill),
-                             * no rect background. The label fontSize stays at 16 so the row
-                             * vertical extent matches the rest. */
+                            /* Radius marker — orange-ish text, no rect background. */
                             Clay_CornerRadius radius = elementConfig->config.sharedElementConfig->cornerRadius;
                             if (radius.bottomLeft > 0) {
                                 CLAY_TEXT(CLAY_STRING("Radius"), CLAY_TEXT_CONFIG({.textColor = {243, 134, 48, 255}, .fontSize = font_sz, .userData = debug_text_data}));
@@ -836,17 +657,13 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                         }
                         Clay_Color config_color = cdv_config_color((uint8_t)elementConfig->type);
                         const char *labelStr = cdv_config_label((uint8_t)elementConfig->type);
-                        /* Config-type label in the config's hue, no rect background. */
                         CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(labelStr), .chars = labelStr}),
                                   CLAY_TEXT_CONFIG({.textColor = config_color, .fontSize = font_sz, .userData = debug_text_data}));
                     }
-                    /* Engine widget descriptor name in the descriptor's pill_color hue, no rect. */
                     if (wdef != NULL && wdef->name != NULL) {
                         Clay_Color wbg = cdv_widget_color_from_packed(wdef->pill_color);
                         CLAY_TEXT(((Clay_String){.length = (int32_t)strlen(wdef->name), .chars = wdef->name}), CLAY_TEXT_CONFIG({.textColor = wbg, .fontSize = font_sz, .userData = debug_text_data}));
                     }
-                    /* Layer cell -- "L:N". No rect background or border; the L:N
-                     * label reads as a column tag on its own. */
                     if (layer >= 0) {
                         CLAY_TEXT(CLAY_STRING("L:"), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_3, .fontSize = font_sz, .userData = debug_text_data}));
                         CLAY_TEXT(cdv_int_to_string(layer), CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = font_sz, .userData = debug_text_data}));
@@ -854,21 +671,9 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 }
             } /* if (has_identity) */
 
-            /* Text-content row (verbatim from clay.h:3258-3270, with engine
-             * addition: hit-test the text-content row too).
-             *
-             * Phase 56 ext fix: Clay's verbatim port treats this row as
-             * non-interactive -- the hit-test at line ~939 only fires on the
-             * element row (row N), so a click on the text-content row (row
-             * N+1) was a silent no-op leaving inspector_selected_id unchanged
-             * (user-visible symptom: "clicking text selects the last selected
-             * one"). After commit ab6d235 (nt_ui_label registers its widget
-             * tag on the CLAY_TEXT leaf), the text-content row IS describing
-             * a meaningful, identified widget -- the user reasonably expects
-             * clicking it to select that widget. The text-content row maps to
-             * the SAME currentElement->id as the element row above it (Clay
-             * does not split text leaves into two distinct elements), so we
-             * mirror the line ~939 hit-test here against row N+1. */
+            /* Text-content row shares its parent's Clay id — mirror the row-N
+             * hit-test against row N+1 so clicking the text row selects the
+             * same widget the parent row would. */
             if (Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT)) {
                 layoutData.row_count++;
                 if (highlighted_row_index == layoutData.row_count) {
@@ -891,12 +696,8 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                     CLAY_TEXT(CLAY_STRING("\""), rawTextConfig);
                 }
             } else if (has_identity && currentElement->childrenOrTextContent.children.length > 0 && !cdv_is_collapsed(ctx, currentElement->id)) {
-                /* Only open the 3 indent wrappers when a row was emitted AND
-                 * the subtree is not collapsed -- filtered (no-identity) and
-                 * collapsed elements descend SILENTLY so the indent steps
-                 * (vertical line + padding) do not appear for hidden subtrees.
-                 * Phase 56 ext: each wrapper carries the PANEL layer so the
-                 * walker keeps them grouped above any game UI. */
+                /* Open 3 indent wrappers only when a row was emitted and not collapsed —
+                 * hidden subtrees descend silently with no indent step. */
                 Clay__OpenElement();
                 Clay__ConfigureOpenElement((Clay_ElementDeclaration){.layout = {.padding = {.left = 8}}, .userData = debug_bg_data});
                 Clay__OpenElement();
@@ -906,27 +707,18 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 dfs_opened_wrappers[dfs_length - 1] = true;
             }
 
-            /* row_count tracks VISIBLE rows -- filtered frames do not advance it
-             * so highlighted_row_index from the pointer-Y math keeps mapping to
-             * the user-visible rows correctly. */
+            /* row_count tracks VISIBLE rows so highlighted_row_index from
+             * pointer-Y math keeps mapping correctly across filtered frames. */
             if (has_identity) {
                 layoutData.row_count++;
             }
-            /* Children are skipped entirely when this id is collapsed --
-             * mirrors Clay's debug-view collapsed flag (clay.h:3281). The
-             * dot icon click toggles the collapsed-set entry for this id. */
+            /* Collapsed subtrees skip their children entirely. */
             if (!Clay__ElementHasConfig(currentElement, CLAY__ELEMENT_CONFIG_TYPE_TEXT) && !cdv_is_collapsed(ctx, currentElement->id)) {
                 const int32_t childLen = currentElement->childrenOrTextContent.children.length;
                 int32_t *childElems = currentElement->childrenOrTextContent.children.elements;
-                /* Clay's lifecycle: children.elements is assigned in Clay__CloseElement (clay.h:1828).
-                 * Our verbatim port is invoked from nt_ui_end BEFORE Clay_EndLayout, so the
-                 * auto-emitted Clay__RootContainer (always element 0) is still OPEN -- its
-                 * children.elements is NULL even though children.length tracks how many user
-                 * top-level CLAY blocks closed under it. For that single case the live child
-                 * indices are at the BOTTOM of context->layoutElementChildrenBuffer (the buffer
-                 * Clay uses for in-flight children; clay.h:1906). Every other element on the
-                 * walk path either has children.elements already populated (closed normally)
-                 * or is genuinely a leaf. */
+                /* Clay__RootContainer (element 0) is still OPEN when we run
+                 * (before Clay_EndLayout) — its children live in the in-flight
+                 * layoutElementChildrenBuffer, not children.elements. */
                 if (childLen > 0 && childElems == NULL && currentElementIndex == 0) {
                     childElems = context->layoutElementChildrenBuffer.internalArray;
                 }
@@ -945,44 +737,16 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
         }
     }
 
-    /* Phase 56 ext fix (viewport-hover propagation): if the sidebar did not
-     * pick a row this frame AND the pointer is NOT over the inspector panel,
-     * scan context->pointerOverIds for the first user element underneath the
-     * cursor and adopt it as the highlight target. Mirrors Clay's stock
-     * "hovering a sidebar row highlights the widget", extended to "hovering
-     * the widget itself in the viewport also highlights it in the sidebar".
-     * pointerOverIds is populated by Clay_SetPointerState (called in
-     * nt_ui_begin) and contains every element under the pointer in z-order.
-     * cdv_is_inspector_owned_id filters out the inspector's own named
-     * elements (panel root, scroll wrappers, close button, floating
-     * highlight rect -- the last one is critical: it lives in the viewport
-     * attached to the user element and would otherwise self-feedback). The
-     * geometric panel-area check filters anything inside the sidebar
-     * footprint (per-row wrappers, indent containers, etc.). The first id
-     * that passes BOTH filters wins. */
+    /* Viewport-hover propagation — when no sidebar row was picked, scan for a
+     * user element under the cursor and adopt it as the highlight target. */
     if (highlightedElementId == 0U && !ctx->inspector_pointer_consumed) {
         const float panel_left_x = context->layoutDimensions.width - ctx->inspector_metrics.panel_width;
 
-        /* Phase 56 ext fix (transform-aware hover): scan debug_zones FIRST.
-         * Recorded zones carry the declaration-time accum stack snapshot, so
-         * we can inverse-affine the pointer through each zone's own transform
-         * and point-in-rect against the (untransformed) visual bbox -- same
-         * math as ui_hit_test that the click/capture path uses. This closes
-         * the divergence the user reported: Clay's pointerOverIds is axis-
-         * aligned in LAYOUT space; for transformed widgets (e.g. the demo's
-         * BAKED button rotated 25 deg, or the runtime-rotated row via Q/E)
-         * the hover misses the visually-correct widget while the click still
-         * lands on it -- a confusing mismatch.
-         *
-         * Order: LAST hit wins (deepest in declaration order) -- mirrors the
-         * "deepest under pointer" semantics Clay's pointerOverIds end-first
-         * scan already follows. The inspector-owned-id filter does not apply
-         * here because debug_zones is recorded ONLY by user-widget queries
-         * (the inspector itself never calls get_interaction). The panel-area
-         * filter still applies, but it compares the SCREEN-SPACE forward-
-         * transformed visual center, not the raw layout bbox -- otherwise a
-         * widget whose layout sits inside the panel area but renders OUTSIDE
-         * it (e.g. a translated grid) would be incorrectly filtered out. */
+        /* Transform-aware: debug_zones carry the declaration-time accum stack
+         * snapshot so we inverse-affine the pointer through each zone's own
+         * transform — same math as ui_hit_test. LAST hit wins (deepest in
+         * declaration order). Panel-area filter uses the SCREEN-SPACE forward-
+         * transformed center, not the raw bbox. */
         const float px = context->pointerInfo.position.x;
         const float py = context->pointerInfo.position.y;
         for (int32_t zi = (int32_t)ctx->debug_zone_count - 1; zi >= 0; --zi) {
@@ -990,9 +754,7 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             if (z->id == 0U) {
                 continue;
             }
-            /* Forward-transform the visual center to screen space to test the
-             * panel-area filter. compose_transform_level accumulates the
-             * affine; apply to (center_x, center_y) which is invariant. */
+            /* Forward-transform the visual center to screen space for the panel filter. */
             float a = 1.0F;
             float b = 0.0F;
             float c = 0.0F;
@@ -1004,13 +766,12 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             }
             const float screen_cx = (z->center_x * a) + (z->center_y * b) + tx;
             if (screen_cx >= panel_left_x) {
-                continue; /* rendered inside the panel footprint */
+                continue;
             }
-            /* Inverse-affine the pointer into the zone's untransformed layout
-             * frame, then point-in-rect against the visual bbox. */
+            /* Inverse-affine pointer into zone's untransformed frame, then point-in-rect. */
             const float det = (a * dd) - (b * c);
             if (det == 0.0F) {
-                continue; /* degenerate transform */
+                continue;
             }
             const float inv_a = dd / det;
             const float inv_b = -b / det;
@@ -1022,49 +783,14 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
             const float ly = (inv_c * rx) + (inv_d * ry);
             if (lx >= z->visual_l && lx <= z->visual_r && ly >= z->visual_t && ly <= z->visual_b) {
                 highlightedElementId = z->id;
-                break; /* LAST in declaration order = deepest visually */
+                break;
             }
         }
 
-        /* Clay populates pointerOverIds in DFS pre-order (outermost first,
-         * deepest last; see Clay_SetPointerState at clay.h:3935-3973). Scan
-         * from END to START so the DEEPEST user element under the pointer
-         * wins -- mirrors the visual expectation "hovering the button
-         * highlights the button, not the panel that contains it".
-         *
-         * Two-pass: first prefer a REGISTERED WIDGET id (button/panel/image/
-         * label/group OR any game widget). Plain Clay containers nested inside
-         * a widget (e.g. nt_ui_button's anonymous BTN_CONTENT child wrapper)
-         * are visually part of the widget; surfacing the child id would yield
-         * no recorded debug zone AND no hit-padding metadata, so the post-walk
-         * overlay's hit-zone visualization (padded touch-target fill +
-         * outline) vanishes -- which is the user-visible regression that
-         * shipped with the propagation block in 5c600b4. If no registered
-         * widget is under the pointer (raw Clay tree, no nt_ui_* widget
-         * along the hover path), fall through to the deepest non-owned
-         * element so plain rows still highlight.
-         *
-         * This pointerOverIds fallback runs ONLY when the debug_zones scan
-         * above failed -- it covers the case of plain Clay containers (no
-         * nt_ui_step_interaction call) that the user can still hover. For
-         * transformed widgets, the debug_zones scan above wins because the
-         * widget steps interaction inside its begin() (recording the
-         * zone with the live accum snapshot) while the pointerOverIds path
-         * here is axis-aligned and would miss them.
-         *
-         * REVIEW-2 ANALYSIS (kept 3-stage): an earlier proposal suggested
-         * dropping this widget-preference pass on the assumption that all
-         * registered widgets already record a debug_zone via Stage 1, making
-         * the preference redundant. That assumption is FALSE: only
-         * nt_ui_button calls nt_ui_step_interaction_padded today; panel,
-         * group, image, and label widgets register their descriptor but
-         * NEVER query interaction (they are non-interactive). For them no
-         * debug_zone exists, so Stage 1 cannot pick them, and removing this
-         * widget-preference pass would surface the deeper anonymous child
-         * instead of the widget itself (regression covered by
-         * test_inspector_viewport_hover_prefers_widget_over_child:1450).
-         * The widget-vs-fallback split is a real correctness gate, not a
-         * legacy optimization. */
+        /* Scan pointerOverIds back-to-front so the deepest hovered element wins.
+         * Prefer a REGISTERED WIDGET id first (panel/group/image/label do not
+         * query interaction and so have no debug_zone — without this pass we
+         * would surface their anonymous child wrapper instead of the widget). */
         if (highlightedElementId == 0U) {
             uint32_t fallback_id = 0U;
             for (int32_t i = context->pointerOverIds.length - 1; i >= 0; --i) {
@@ -1076,9 +802,8 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                 if (item == NULL) {
                     continue;
                 }
-                /* Skip elements whose bbox.x is in the panel footprint -- catches
-                 * the indent wrappers, row backgrounds, per-element ElementOuter
-                 * blocks, etc. that the cached named-id set does not enumerate. */
+                /* Skip anything inside the panel footprint (row backgrounds, indent
+                 * wrappers, etc. — the named-id set doesn't enumerate them all). */
                 if (item->boundingBox.x >= panel_left_x) {
                     continue;
                 }
@@ -1086,7 +811,6 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                     highlightedElementId = eid->id;
                     break;
                 }
-                /* First viable non-widget candidate becomes the fallback. */
                 if (fallback_id == 0U) {
                     fallback_id = eid->id;
                 }
@@ -1098,17 +822,8 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
     }
 
     if (highlightedElementId) {
-        /* Mirror clay.h:3303 -- floating highlight rectangle attached to the
-         * hovered element. This is the IN-VIEWPORT highlight as the user moves
-         * the pointer over the sidebar. Tagged with NT_UI_LAYER_DEBUG_HIGHLIGHT
-         * (240) so the walker sorts it above any game UI element (typical
-         * 0..~10) but BELOW the sidebar panel (250) where they overlap.
-         *
-         * zIndex is 32764 (was 32767 = above panel) so Clay's zIndex segmentation
-         * also keeps the highlight strictly under the panel root (32765). Without
-         * both adjustments, highlights for widgets near the screen's right edge
-         * leaked through the panel (visible bug in the user's screenshot).
-         * Order matters: zIndex segments come first, then per-segment layer sort. */
+        /* Floating highlight rect attached to the hovered element. LAYER_DEBUG_HIGHLIGHT
+         * (240) + zIndex 32764 keep it above game UI but strictly under the panel root. */
         CLAY({.id = CLAY_ID("ntInsp_ElementHighlight"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}},
               .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_HIGHLIGHT),
@@ -1118,56 +833,35 @@ static cdv_layout_data_t cdv_render_layout_elements_list(nt_ui_context_t *ctx, i
                   .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_HIGHLIGHT),
                   .backgroundColor = CDV_HIGHLIGHT_COLOR}) {}
         }
-        /* Surface the hovered id to the post-walk overlay. */
         ctx->inspector_highlight_id = highlightedElementId;
     } else if (ctx->inspector_selected_id != 0U) {
-        /* No hover -- fall back to persistent selection so the overlay still
-         * focuses the last clicked sidebar row. */
+        /* No hover — overlay focuses the last clicked sidebar row. */
         ctx->inspector_highlight_id = ctx->inspector_selected_id;
     }
     return layoutData;
 }
 
-/* Verbatim port of Clay__RenderDebugView (clay.h:3392-3800). Adapted:
- *   - close button: we still emit it (visual parity) but the click sets
- *     ctx->inspector_active = false on press inside its bounds, not Clay's
- *     debugModeEnabled (which is no longer wired).
- *   - pointer-in-debug-view check uses our panel width (ctx->inspector_metrics.panel_width)
- *     and the 300 px info-pane reservation, same as Clay's literal constants.
- *   - the info pane is a CONDENSED but faithful version of clay.h:3477-3800
- *     (Bounding Box, Layout Direction, Sizing, Padding, Child Gap, Child
- *     Alignment) + a single config-type header per element config + body for
- *     SHARED/TEXT/IMAGE/CLIP/BORDER (Floating/Custom/Aspect ports are
- *     headers-only to keep this TU finite -- the user explicitly accepted
- *     literal-where-possible; truly verbose configs degrade to header only).
- *   - warnings pane is dropped (engine doesn't read Clay warnings here). */
+/* Port of Clay__RenderDebugView. Close button toggles ctx->inspector_active
+ * (Clay's debugModeEnabled is unwired here). Info pane is a condensed body
+ * for SHARED/TEXT/IMAGE/CLIP/BORDER; other configs render header-only. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL);
     NT_ASSERT(ctx->in_frame);
     NT_ASSERT(ctx->clay != NULL);
 
-    /* Reset the int/hex string rings at the start of each emit so the cursor
-     * always begins at 0 -- gives us a deterministic 512-slot window per
-     * frame regardless of how many frames have run before. The Clay_String
-     * pointers remain stable through the layout solve since no other code
-     * writes into these buffers between emit_layout and Clay_EndLayout. */
+    /* Reset both string rings so the cursor starts at 0 each frame —
+     * gives a deterministic 512-slot window for stable Clay_String pointers. */
     cdv_int_buf_cursor = 0U;
     cdv_hex_buf_cursor = 0U;
 
-    /* Phase 56 ext (REVIEW-2 P3-1): runtime metrics cached at entry. Pre-fix
-     * these were file-scope #defines + literals. row_h/font_sz are floats /
-     * uint16 to match Clay struct types; outer_pad/indent_w are uint16 for
-     * Clay_Padding. Defaults: 400 / 30 / 16 / 10 / 16 (verbatim Clay shape). */
+    /* Cached metrics; casts match Clay struct types (uint16 for Padding / fontSize). */
     const float panel_w = ctx->inspector_metrics.panel_width;
     const float row_h = ctx->inspector_metrics.row_height;
     const uint16_t font_sz = ctx->inspector_metrics.font_size;
     const uint16_t outer_pad = (uint16_t)ctx->inspector_metrics.outer_padding;
 
     Clay_Context *context = ctx->clay;
-    /* Lazily cache the set of inspector-owned named ids -- used by the
-     * viewport-hover propagation inside cdv_render_layout_elements_list to
-     * skip our own elements when scanning pointerOverIds. */
     cdv_init_owned_ids_once();
     Clay_ElementId closeButtonId = Clay__HashString(CLAY_STRING("ntInsp_CloseButton"), 0, 0);
     if (context->pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
@@ -1182,15 +876,8 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
 
     uint32_t initialRootsLength = (uint32_t)context->layoutElementTreeRoots.length;
     uint32_t initialElementsLength = (uint32_t)context->layoutElements.length;
-    /* Phase 56 ext: PANEL element_data for every inspector-owned CLAY/CLAY_TEXT
-     * block. cdv_render_layout_elements_list constructs its own local copy of
-     * the same metadata so its CLAY emits route through the same layers.
-     *
-     * Phase 56 ext perf: split into BG (250) for CLAY containers and TEXT (251)
-     * for CLAY_TEXT configs so the walker batches all inspector rects then all
-     * inspector texts per zIndex/scissor segment. See cdv_render_layout_elements_list
-     * for the rationale + walker invariant (ascending layer iteration via
-     * active_layers bitmask + __builtin_ctz). */
+    /* Split BG (250) / TEXT (251) layers so the walker batches inspector
+     * rects then texts per zIndex/scissor segment. */
     void *const debug_bg_data = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_BG);
     void *const debug_text_data = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL_TEXT);
     Clay_TextElementConfig *infoTextConfig = CLAY_TEXT_CONFIG({.textColor = CDV_COLOR_4, .fontSize = font_sz, .wrapMode = CLAY_TEXT_WRAP_NONE, .userData = debug_text_data});
@@ -1214,9 +901,8 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
         highlightedRow = -1;
     }
     cdv_layout_data_t layoutData = {0};
-    /* RIGHT_CENTER/RIGHT_CENTER (overlay) instead of Clay's LEFT_CENTER/RIGHT_CENTER (side-by-side):
-     * engine disables Clay debug mode so the root is full-width and the verbatim attach
-     * would land at [screen.w, screen.w + panel_w] -- entirely off-screen. */
+    /* RIGHT_CENTER/RIGHT_CENTER (overlay) — engine root is full-width so Clay's
+     * side-by-side attach would land off-screen. */
     CLAY({.id = CLAY_ID("ntInsp_Root"),
           .layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(context->layoutDimensions.height)}, .layoutDirection = CLAY_TOP_TO_BOTTOM},
           .userData = NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL),
@@ -1231,7 +917,6 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
               .userData = debug_bg_data}) {
             CLAY_TEXT(CLAY_STRING("nt_ui_inspector (Clay debug view port)"), infoTextConfig);
             CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}}, .userData = debug_bg_data}) {}
-            /* Close button (verbatim shape from clay.h:3439-3447). */
             CLAY({.id = closeButtonId,
                   .layout = {.sizing = {CLAY_SIZING_FIXED(row_h - 10.0F), CLAY_SIZING_FIXED(row_h - 10.0F)}, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}},
                   .backgroundColor = {217, 91, 67, 80},
@@ -1295,9 +980,7 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                     }
                     Clay_Padding attributeConfigPadding = {outer_pad, outer_pad, 8, 8};
                     CLAY({.layout = {.padding = attributeConfigPadding, .childGap = 8, .layoutDirection = CLAY_TOP_TO_BOTTOM}, .userData = debug_bg_data}) {
-                        /* Engine extension rows -- Widget type + Layer.
-                         * Surfaced at the TOP of the info pane so the user
-                         * sees them first when inspecting an element. */
+                        /* Engine rows (Widget + Layer) surfaced at top of info pane. */
                         const nt_ui_widget_def_t *sel_def = nt_ui_widget_lookup(ctx, ctx->inspector_selected_id);
                         const char *sel_w_tag = (sel_def != NULL && sel_def->name != NULL) ? sel_def->name : "-";
                         CLAY_TEXT(CLAY_STRING("Widget"), infoTitleConfig);
@@ -1359,17 +1042,9 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                             CLAY_TEXT(CLAY_STRING(" }"), infoTextConfig);
                         }
                     }
-                    /* Per-config-type headers + condensed bodies (one row per
-                     * attached config). Full per-config bodies for SHARED +
-                     * TEXT only; other types render header-only -- this is
-                     * the literal-where-possible boundary documented at the
-                     * function header. */
+                    /* Per-config headers + condensed bodies; SHARED/TEXT only carry full bodies. */
                     for (int32_t cfgIdx = 0; cfgIdx < selectedItem->layoutElement->elementConfigs.length; ++cfgIdx) {
                         Clay_ElementConfig *elementConfig = Clay__ElementConfigArraySlice_Get(&selectedItem->layoutElement->elementConfigs, cfgIdx);
-                        /* Phase 56 ext perf (STRATEGY A): header pill background +
-                         * border dropped -- label is rendered in the config color
-                         * directly. The padded row container stays so vertical
-                         * spacing matches the rest of the info pane. */
                         Clay_Color hdr_color = cdv_config_color((uint8_t)elementConfig->type);
                         const char *hdr_label = cdv_config_label((uint8_t)elementConfig->type);
                         CLAY({.layout = {.sizing = {.width = CLAY_SIZING_GROW(0)}, .padding = CLAY_PADDING_ALL(outer_pad), .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}, .userData = debug_bg_data}) {
@@ -1379,10 +1054,6 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
                         if (elementConfig->type == CLAY__ELEMENT_CONFIG_TYPE_SHARED) {
                             Clay_SharedElementConfig *sharedConfig = elementConfig->config.sharedElementConfig;
                             CLAY({.layout = {.padding = attributeConfigPadding, .childGap = 8, .layoutDirection = CLAY_TOP_TO_BOTTOM}, .userData = debug_bg_data}) {
-                                /* Phase 56 ext (CHUNK C, UX fix #5): info-pane
-                                 * bg color uses the same swatch + hex shape as
-                                 * the tree row's inline display -- the row and
-                                 * the pane read the same color at a glance. */
                                 CLAY_TEXT(CLAY_STRING("Background Color"), infoTitleConfig);
                                 CLAY({.layout = {.childGap = 8, .childAlignment = {.y = CLAY_ALIGN_Y_CENTER}}, .userData = debug_bg_data}) {
                                     CLAY({.layout = {.sizing = {CLAY_SIZING_FIXED(row_h - 8.0F), CLAY_SIZING_FIXED(row_h - 8.0F)}},
@@ -1411,7 +1082,6 @@ static void nt_ui_internal_emit_inspector_layout(nt_ui_context_t *ctx) {
     }
 }
 
-/* External entry point exposed in nt_ui_clay_internal.h. Forwarded from
- * nt_ui_inspector.c (which can't see Clay private types). */
+/* External entry forwarded from nt_ui_inspector.c (no Clay private types there). */
 void nt_ui_internal_emit_inspector_layout_extern(nt_ui_context_t *ctx) { nt_ui_internal_emit_inspector_layout(ctx); }
 // #endregion

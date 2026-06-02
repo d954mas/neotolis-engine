@@ -120,7 +120,7 @@ static uint32_t s_button_green_idx;
 #define UI_REF_W 960.0F
 #define UI_REF_H 640.0F
 
-/* Animation toggles (D-54-21) — start ON for visual verification */
+/* Animation toggles — start ON for visual verification. */
 static bool s_anim_scale = true;
 static bool s_anim_opacity = true;
 static bool s_anim_position = true;
@@ -330,8 +330,7 @@ static void frame(void) {
         nt_log_info("slice9_demo: all animations %s", !all_on ? "ON" : "OFF");
     }
     if (nt_input_key_is_pressed(NT_KEY_D)) {
-        /* Phase 56 ext: Clay built-in debug overlay was removed. The
-         * replacement is nt_ui_inspector (verbatim Clay debug view port). */
+        /* Use nt_ui_inspector — Clay's built-in debug overlay is not wired. */
         const bool now_on = !nt_ui_inspector_is_active(s_ctx);
         nt_ui_inspector_set_active(s_ctx, now_on);
         nt_log_info("slice9_demo: inspector %s", now_on ? "ON" : "OFF");

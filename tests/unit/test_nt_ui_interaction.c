@@ -1,24 +1,15 @@
-/* Engine-owned interaction state machine (WIDGET-02, D-56-04/06).
+/* Engine-owned interaction state machine.
  *
- * nt_ui_step_interaction drives the per-pointer capture state machine off the
- * precomputed nt_button_state_t edges (is_pressed/is_down/is_released) + the
- * transform-aware hit-test, computed lazily: this-frame primary pointer vs the
- * PREVIOUS-frame Clay bbox (1-frame IM lag). The bbox is only available from
- * frame 2 onward (frame 1 declares + ends -> Clay hashmap stores it).
+ * step_interaction drives per-pointer capture off precomputed button edges +
+ * transform-aware hit-test against PREVIOUS-frame Clay bbox (1-frame IM lag).
+ * Bbox available from frame 2 onward.
  *
- * Phase 56 ext (CQS split): nt_ui_query_interaction is the pure read used by
- * the new test_query_is_idempotent / test_step_commits_what_query_previewed /
- * test_query_step_under_rotation -- everything else here drives state across
- * frames and uses step.
- *
- * Frame sequence (RESEARCH "Concrete unit-test design for the state machine"):
- *   Frame 1: declare CLAY({.id=CLAY_ID("btn")}) at a known bbox; end.
- *   Frame 2: pointer inside + is_pressed/is_down -> hovered+pressed+pressed_now,
- *            !clicked, !released_now; capture active_id == id.
- *   Frame 3: is_released, pointer inside -> released_now && clicked && !pressed;
- *            capture cleared (active_id 0).
- *   Variant: Frame 3 with pointer OUTSIDE -> released_now && !clicked.
- *   Hover-only (over, no button) -> hovered && !pressed && !pressed_now. */
+ * Frame sequence:
+ *   Frame 1: declare CLAY({.id=CLAY_ID("btn")}) at known bbox; end.
+ *   Frame 2: pointer inside + is_pressed → hovered+pressed+pressed_now;
+ *            capture active_id == id.
+ *   Frame 3: is_released inside → released_now && clicked, capture cleared.
+ *   Frame 3 outside → released_now && !clicked. */
 
 #include <math.h>
 #include <stdalign.h>
@@ -183,17 +174,12 @@ static void test_interaction_release_outside_cancels(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
 }
 
-/* ---- Test 4: disabled widget skips hover + click (D-56-12 foundation) ---- */
+/* ---- Test 4: disabled widget skips hover + click ---- */
 static void test_interaction_disabled_skips(void) {
     nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false, false);
     declare_btn_frame(&f1);
 
-    /* Frame 2: pointer inside + pressed, but the widget is disabled. The
-     * disabled path (D-56-12) is the button's job: when enabled == false the
-     * button does NOT call get_interaction and reports a zeroed interaction.
-     * Model that here -- the full button enabled=false path is exercised by
-     * Plan 04. A zeroed interaction has no hover/press/click and forms no
-     * capture, and the engine does not want the pointer. */
+    /* Disabled = button never calls get_interaction → zeroed result, no capture. */
     nt_pointer_t f2 = make_pointer(BTN_CX, BTN_CY, true, true, false);
     const bool enabled = false;
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
@@ -208,18 +194,14 @@ static void test_interaction_disabled_skips(void) {
     TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
 }
 
-/* ---- Test 6: padded interaction (Phase 56 ext) ----
- * nt_ui_step_interaction_padded inflates the layout-space bbox by pad_lrtb
- * BEFORE the inverse-affine. A pointer 12 px past the right edge becomes
- * hovered + can begin a capture when the right padding is 16. */
+/* ---- Test 6: padded interaction inflates bbox before inverse-affine ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_interaction_padded_hover_and_capture(void) {
     /* Frame 1: declare bbox (no pointer over). */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false, false);
     declare_btn_frame(&f1);
 
-    /* Frame 2: pointer 12 px past the right edge, button down -> with right
-     * padding 16, the padded query reports hovered + pressed_now + capture. */
+    /* Pointer 12 px past right edge + pad right 16 → hovered + pressed_now. */
     const float right_outside_x = BTN_X + BTN_W + 12.0F;
     const float center_y = BTN_Y + (BTN_H * 0.5F);
     nt_pointer_t f2 = make_pointer(right_outside_x, center_y, true, true, false);
@@ -233,10 +215,7 @@ static void test_interaction_padded_hover_and_capture(void) {
     TEST_ASSERT_TRUE(in.pressed_now);
     TEST_ASSERT_EQUAL_UINT32(nt_ui_id("btn"), nt_ui_test_capture_active_id(s_fx.ctx, 0));
 
-    /* Same pointer position, NULL pad (== unpadded) -> NOT hovered, no capture.
-     * Need fresh frame 1 to clear the prior capture; orphan cleanup runs at
-     * begin. Easier: assert by calling the unpadded test_hit probe directly
-     * on the same frame state. Clear the capture first via a quiet frame. */
+    /* Clear capture via a quiet frame; orphan cleanup runs at begin. */
     nt_pointer_t f3 = make_pointer(0.0F, 0.0F, false, false, true);
     declare_btn_frame(&f3); /* releases + frame 1 will clear orphan */
     nt_pointer_t f4 = make_pointer(0.0F, 0.0F, false, false, false);
@@ -244,12 +223,7 @@ static void test_interaction_padded_hover_and_capture(void) {
     TEST_ASSERT_EQUAL_UINT32(0U, nt_ui_test_capture_active_id(s_fx.ctx, 0));
 }
 
-/* ---- Test 7: padded query on a DISABLED widget does NOT make it hoverable ----
- * The button's enabled=false path (D-56-12) SHORT-CIRCUITS the query entirely
- * and returns a zeroed interaction. Padding is in the same code path -- a
- * disabled button must stay non-hoverable even with large padding.
- * Modeled here at the foundation level (the full nt_ui_button enabled=false
- * path is exercised in test_nt_ui_button). */
+/* ---- Test 7: padded query on a DISABLED widget stays non-hoverable ---- */
 static void test_interaction_disabled_with_padding_stays_disabled(void) {
     nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false, false);
     declare_btn_frame(&f1);
@@ -261,8 +235,7 @@ static void test_interaction_disabled_with_padding_stays_disabled(void) {
     const int16_t big_pad[4] = {32, 32, 32, 32};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f2, 1);
     declare_btn_element();
-    /* Mirror the button's branch (D-56-12): disabled => zeroed interaction,
-     * the query is not invoked. */
+    /* Mirror the button's disabled branch: query not invoked, zeroed result. */
     nt_ui_interaction_t in = enabled ? nt_ui_step_interaction_padded(s_fx.ctx, nt_ui_id("btn"), big_pad) : (nt_ui_interaction_t){0};
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_FALSE(in.hovered);
@@ -278,8 +251,7 @@ static void test_interaction_wants_pointer(void) {
     nt_pointer_t f1 = make_pointer(BTN_CX, BTN_CY, false, false, false);
     declare_btn_frame(&f1);
 
-    /* Frame 2: hover only -> wants_pointer true (checked after end; the flag
-     * persists until the next begin). */
+    /* Hover only → wants_pointer true (persists until next begin). */
     nt_pointer_t f2 = make_pointer(BTN_CX, BTN_CY, false, false, false);
     (void)query_btn_frame(&f2);
     TEST_ASSERT_TRUE(nt_ui_wants_pointer(s_fx.ctx));
@@ -290,18 +262,8 @@ static void test_interaction_wants_pointer(void) {
     TEST_ASSERT_FALSE(nt_ui_wants_pointer(s_fx.ctx));
 }
 
-/* ---- Test 8: exclusive capture -- while A owns the pointer's capture, B
- * sees zero interaction even if the pointer is geometrically over it ----
- *
- * Phase 56 ext fix (exclusive capture). User report: pressing button A and
- * sliding to button B mid-drag lit B up as hovered. Standard UI semantics:
- * one widget owns the capture per pointer, every other widget gets nothing.
- *
- * Setup: two buttons A and B at non-overlapping bboxes. Press inside A
- * (capture begins on A). Move pointer to B's bbox WITHOUT releasing.
- * get_interaction(B) must report hovered=false / pressed=false / clicked=false.
- * After release, A's capture clears -- a fresh query of B with the pointer
- * over B must then report hovered=true. */
+/* ---- Test 8: exclusive capture — while A owns capture, B sees zero ----
+ * Standard UI semantics: one widget per pointer captures, others get nothing. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_interaction_capture_excludes_other_widgets(void) {
     /* B is positioned far from A so the same pointer cannot hover both. */
@@ -391,7 +353,7 @@ static void test_interaction_capture_excludes_other_widgets(void) {
     TEST_ASSERT_FALSE(inB_idle.pressed);
 }
 
-/* ---- Test 9 (Phase 56 ext CQS): query is idempotent on the release frame ----
+/* ---- Test 9: query is idempotent on the release frame ----
  *
  * Pins the bug that motivated the CQS split. Pre-split, the single
  * nt_ui_get_interaction silently ate clicks: on the release frame, the first
@@ -428,8 +390,7 @@ static void test_query_is_idempotent(void) {
     for (int i = 1; i < 5; ++i) {
         TEST_ASSERT_EQUAL_MEMORY_MESSAGE(&calls[0], &calls[i], sizeof(nt_ui_interaction_t), "query is not idempotent (the bug)");
     }
-    /* And all 5 reported clicked=true on the release frame -- the bug
-     * would have shown calls[0].clicked=true and calls[1..4].clicked=false. */
+    /* All 5 must report clicked=true on the release frame. */
     TEST_ASSERT_TRUE(calls[0].clicked);
     TEST_ASSERT_TRUE(calls[0].released_now);
 
@@ -440,10 +401,7 @@ static void test_query_is_idempotent(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 10 (Phase 56 ext CQS): step commits what query previewed ----
- *
- * Query returns the same struct step would have returned, AND step makes the
- * state-machine writes (press_now: capture begins; release: capture clears). */
+/* ---- Test 10: step commits what query previewed ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_step_commits_what_query_previewed(void) {
     /* Frame 1: declare. */
@@ -483,16 +441,11 @@ static void test_step_commits_what_query_previewed(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 11 (Phase 56 ext CQS): query and step agree under rotation+clip ----
- *
- * Pure compute lives in query (the inverse-affine + clip walk in ui_hit_test).
- * Under a 30 deg push_transform + a clip, query's hit-test answer must equal
- * step's. Pin: a pointer that's OUTSIDE the axis-aligned layout AABB but
- * INSIDE the rotated visual quad -- only the inverse-affine path hits it. */
+/* ---- Test 11: query and step agree under rotation+clip ----
+ * Pointer is outside the axis-aligned AABB but inside the rotated visual. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_query_step_under_rotation(void) {
-    /* Frame 1: declare the element under the same transform so its bbox is
-     * stored for frame 2's hit-test. */
+    /* Frame 1: declare under the same transform so frame 2's hit-test bbox is stored. */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F, false, false, false);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &f1, 1);
     nt_ui_transform_t rot = nt_ui_transform_defaults();
@@ -549,12 +502,9 @@ int main(void) {
     RUN_TEST(test_interaction_release_outside_cancels);
     RUN_TEST(test_interaction_disabled_skips);
     RUN_TEST(test_interaction_wants_pointer);
-    /* Phase 56 ext: padded variant + disabled-with-padding guard. */
     RUN_TEST(test_interaction_padded_hover_and_capture);
     RUN_TEST(test_interaction_disabled_with_padding_stays_disabled);
-    /* Phase 56 ext fix: exclusive capture (no cross-widget interference). */
     RUN_TEST(test_interaction_capture_excludes_other_widgets);
-    /* Phase 56 ext CQS split: query is pure, step commits. */
     RUN_TEST(test_query_is_idempotent);
     RUN_TEST(test_step_commits_what_query_previewed);
     RUN_TEST(test_query_step_under_rotation);

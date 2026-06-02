@@ -1,10 +1,7 @@
-/* Direct-mapped per-id state-transition anim cache (D-56-15/16/17).
+/* Direct-mapped per-id state-transition anim cache. Fixed power-of-2 array,
+ * key = Clay uint32 id, replace-on-collision, no LRU.
  *
- * Plan 02 (Wave 1): turns the Plan-01 RED scaffold GREEN. The cache follows the
- * Phase-51 font-measure-cache precedent: fixed power-of-2 array, key = Clay
- * uint32 id directly (no hashing), replace-on-collision, no LRU/eviction.
- *
- * Test design (RESEARCH 56 New Work Item 3 + CONTEXT D-56-15/16):
+ * Test design:
  *   - Lerp convergence: cur += (target - cur) * clampf(transition_speed*dt,0,1).
  *       transition_speed == 0 -> instant (cur == target).
  *       transition_speed  > 0 -> cur approaches target over N dt steps

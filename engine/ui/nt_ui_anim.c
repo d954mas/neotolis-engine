@@ -18,12 +18,12 @@ const nt_ui_anim_interaction_t *nt_ui_anim(nt_ui_context_t *ctx, uint32_t id, co
     NT_ASSERT(t != NULL && "nt_ui_anim: target must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_anim: id 0 is the no-widget sentinel");
     // #region slot-map + lerp
-    /* Direct-mapped slot; id is already a hash (D-56-05) so no rehash. */
+    /* id is already a hash; no rehash. */
     const uint32_t slot = id & (uint32_t)(NT_UI_ANIM_SLOTS - 1);
     nt_ui_anim_interaction_t *a = &ctx->anim[slot];
-    const bool fresh = (!a->valid) || (a->id != id); /* empty OR collision -> re-seed */
+    const bool fresh = (!a->valid) || (a->id != id); /* empty OR collision → re-seed */
     if (fresh) {
-        /* Replace-on-collision + first-touch: snap cur=target, no flash, no scan. */
+        /* First-touch / replace-on-collision: snap cur=target, no flash. */
         a->id = id;
         a->valid = true;
         a->scale = t->scale;

@@ -8,9 +8,7 @@
 #include "resource/nt_resource.h"
 #include "ui/nt_ui_internal.h"
 
-/* Phase 56 ext (descriptor refactor): static descriptor consumed by the
- * inspector. Purple pill (0xFFB45A78 -- R=120,G=90,B=180; preserved from
- * the pre-refactor cdv_widget_color switch). */
+/* Inspector descriptor; purple pill. */
 const nt_ui_widget_def_t NT_UI_IMAGE_DEF = {
     .name = "nt_image",
     .pill_color = 0xFFB45A78U,
@@ -51,10 +49,7 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_reso
         .image = {.imageData = p},
         .userData = (void *)data,
     }) {
-        /* Phase 56 ext (CHUNK E): tag this Clay element so nt_ui_inspector
-         * shows "image" in the tree. Clay auto-assigns the id (no game-side
-         * id needed); we read it via the internal accessor (the just-opened
-         * element is the current top of openLayoutElementStack). */
+        /* Inspector tag — Clay auto-assigns the id; read top-of-stack. */
         nt_ui_widget_register(ctx, nt_ui_internal_current_open_element_id(), &NT_UI_IMAGE_DEF, NULL);
     }
 }

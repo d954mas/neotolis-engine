@@ -1,8 +1,5 @@
-/* Unit tests for nt_ui_panel/group widgets (Phase 54 Plan 05).
- *
- * Tests verify Clay element tree integrity and death tests for invalid input.
- * Panel/group no longer push transform/opacity -- game uses explicit push/pop.
- * Pattern follows test_nt_ui_label.c and test_nt_ui_image.c. */
+/* Unit tests for nt_ui_panel/group. Clay element tree integrity + death tests.
+ * Panel/group never push transform/opacity — game uses explicit push/pop. */
 
 #include <stdalign.h>
 #include <stdbool.h>

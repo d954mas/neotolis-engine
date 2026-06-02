@@ -1,17 +1,5 @@
-/* Phase 56 ext rework: nt_ui_inspector + widget_registry tests.
- *
- * Inspector architecture is now layout-pass injection (nt_ui_inspector_emit_layout
- * called inside nt_ui_end before Clay_EndLayout) + a post-walk single-element
- * overlay (nt_ui_inspector_overlay_draw). Tests verify:
- *   1) widget_registry direct-mapped table (unchanged from previous round).
- *   2) inspector toggle is a persistent user pref.
- *   3) inactive inspector is a silent no-op (no Clay emit, no draw).
- *   4) active inspector emit_layout grows the layout element count -- proof
- *      that the panel CLAY({...}) blocks ran.
- *   5) overlay_draw is a no-op when no element is highlighted.
- *
- * Pixel output is NOT unit-tested -- visual verification is in
- * ui_buttons_demo (D toggle). */
+/* nt_ui_inspector + widget_registry tests. Visual verification of pixels lives
+ * in ui_buttons_demo (D toggle). */
 
 #include <math.h>
 #include <stdalign.h>
@@ -255,9 +243,7 @@ static void test_label_does_not_clobber_parent_widget(void) {
         nt_ui_label(s_fx.ctx, NULL, "hi", &s_label_style);
         nt_ui_panel_end(s_fx.ctx);
     }
-    /* Both tags must coexist: at least one PANEL slot AND at least one LABEL
-     * slot. Pre-fix, the LABEL register clobbered the PANEL register because
-     * both used the parent's id. */
+    /* Both tags coexist: PANEL on the container, LABEL on the TEXT leaf. */
     uint32_t panel_count = 0U;
     uint32_t label_count = 0U;
     for (uint32_t i = 0; i < (uint32_t)NT_UI_WIDGET_REGISTRY_CAP; ++i) {
@@ -589,12 +575,8 @@ static void test_button_auto_records_hit_padding(void) {
 }
 
 /* ---- Test 15f: inspector filter hides anonymous (no-id, no-widget) elements ----
- * Pin for the empty-wrapper-row fix: anonymous Clay containers must NOT emit
- * an inspector tree row. Compares the "active inspector" element-count growth
- * for a tree that's all named vs a tree that injects extra anonymous containers
- * around children. With the filter on, both should produce SIMILAR growth
- * (anonymous wrappers don't add ElementOuter blocks). Pre-fix, the anonymous
- * containers each added their own ElementOuter row + 3 indent wrappers. */
+ * Anonymous Clay containers must NOT emit an inspector tree row — named-only
+ * tree and anonymous-wrapped tree should produce similar element-count growth. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_filter_skips_anonymous(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -612,9 +594,7 @@ static void test_inspector_filter_skips_anonymous(void) {
     const int32_t named_after = nt_ui_internal_get_layout_element_count(s_fx.ctx);
     const int32_t named_growth = named_after - before_named;
 
-    /* Anonymous-wrapper tree: same 3 named leaves but each wrapped in an
-     * anonymous Clay container (no .id). Pre-fix, each anonymous wrapper would
-     * have emitted its own ntInsp_ElementOuter row plus 3 indent wrappers. */
+    /* Same 3 named leaves wrapped in anonymous containers. */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root_anon")}) {
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {
@@ -632,23 +612,12 @@ static void test_inspector_filter_skips_anonymous(void) {
     const int32_t anon_after = nt_ui_internal_get_layout_element_count(s_fx.ctx);
     const int32_t anon_growth = anon_after - before_anon;
 
-    /* With the filter on, the 3 extra anonymous wrappers each cost ZERO
-     * inspector elements: anon_growth should match named_growth (within slack
-     * for any per-anonymous CloseElement bookkeeping). Pre-fix, anon_growth
-     * was substantially larger because each anonymous container emitted its
-     * own ElementOuter row + 3 indent wrappers (8+ extra elements per anon). */
+    /* anon_growth should match named_growth within slack. */
     TEST_ASSERT_LESS_OR_EQUAL_INT32(named_growth + 6, anon_growth);
 }
 
-/* ---- Test 15f-bis: filter PRESERVES Text/Image/SHARED-config rows ----
- * Regression pin for commit 1a0d55b ("filter empty wrappers") which dropped
- * config-bearing leaves alongside the truly anonymous wrappers. A CLAY_TEXT
- * leaf (Clay TEXT config, no string id, no widget tag) MUST appear in the
- * inspector tree -- user reported "Я теперь не вижу text/image раньше было".
- *
- * Method: compare two trees with the same named-element count, but tree A
- * has a CLAY_TEXT leaf inside a named container while tree B has only the
- * named container. Tree A must produce more inspector rows than B. */
+/* Filter preserves Text/Image/SHARED-config leaves: tree with a CLAY_TEXT leaf
+ * must produce more inspector rows than one without. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_filter_keeps_text_leaves(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -664,9 +633,7 @@ static void test_inspector_filter_keeps_text_leaves(void) {
     const int32_t after_a = nt_ui_internal_get_layout_element_count(s_fx.ctx);
     const int32_t a_growth = after_a - before_a;
 
-    /* With text: same container, plus a CLAY_TEXT leaf (no string id, no
-     * widget tag -- only the TEXT element config). Pre-fix the filter killed
-     * this row. */
+    /* Same container plus a CLAY_TEXT leaf (no id, only TEXT config). */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root_with_text")}) {
         CLAY({.id = CLAY_ID("box2"), .layout = {.sizing = {CLAY_SIZING_FIXED(40), CLAY_SIZING_FIXED(40)}}}) { nt_ui_label(s_fx.ctx, NULL, "hello", &s_label_style); }
@@ -676,8 +643,7 @@ static void test_inspector_filter_keeps_text_leaves(void) {
     const int32_t after_b = nt_ui_internal_get_layout_element_count(s_fx.ctx);
     const int32_t b_growth = after_b - before_b;
 
-    /* The text-bearing tree must produce MORE inspector elements -- the Text
-     * leaf row was preserved. Pre-fix, b_growth == a_growth (text dropped). */
+    /* Text-bearing tree must produce more inspector rows. */
     TEST_ASSERT_GREATER_THAN_INT32(a_growth, b_growth);
 }
 
@@ -750,8 +716,8 @@ static void test_inspector_collapsed_storage(void) {
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_collapse_hides_children(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
-    /* Pointer parked OFFSCREEN at (-100, -100) so the Phase 56 ext
-     * viewport-hover propagation does NOT fire (which would emit the
+    /* Pointer parked offscreen (-100,-100) so viewport-hover propagation
+     * does NOT fire (which would emit the
      * floating ElementHighlight rect and skew the inspector growth count
      * between walks). Test focus is collapse vs full DFS, not hover. */
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
@@ -788,8 +754,7 @@ static void test_inspector_collapse_hides_children(void) {
     nt_ui_end(s_fx.ctx);
     const int32_t collapsed_growth = nt_ui_internal_get_layout_element_count(s_fx.ctx) - before_collapsed;
 
-    /* Collapsed walk MUST be smaller -- children skipped + 3 indent wrappers
-     * also skipped. Pre-fix collapsed_growth == full_growth (no collapse). */
+    /* Collapsed walk must be smaller — children + indent wrappers skipped. */
     TEST_ASSERT_LESS_THAN_INT32(full_growth, collapsed_growth);
 
     /* Walk 3: clear the set -> full tree restored. */
@@ -808,17 +773,8 @@ static void test_inspector_collapse_hides_children(void) {
     TEST_ASSERT_EQUAL_INT32(full_growth, restored_growth);
 }
 
-/* ---- Test 15j: inspector emits on NT_UI_LAYER_DEBUG_PANEL (always-on-top) ----
- * Phase 56 ext CHUNK C: the inspector's root floating panel must carry
- * .userData = NT_UI_DATA_LAYER(NT_UI_LAYER_DEBUG_PANEL) so the walker's layer
- * sort places it above any game UI that uses lower layers (BG=0, IMG=1,
- * TEXT=2, ...). Without an explicit layer the inspector falls back to layer
- * 0 = drawn-below-everything.
- *
- * Method: emit a frame with the inspector active, scan the layout elements
- * by id ("ntInsp_Root"), assert it was emitted (layer is verified by
- * construction at the emit site -- testing the macro value pins the panel
- * vs highlight relationship). */
+/* ---- Test 15j: inspector emits on NT_UI_LAYER_DEBUG_PANEL ----
+ * Pins the panel-vs-highlight layer relationship by checking the macro value. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_root_emitted_on_debug_layer(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -833,9 +789,7 @@ static void test_inspector_root_emitted_on_debug_layer(void) {
     const int32_t count = nt_ui_internal_get_layout_element_count(s_fx.ctx);
     TEST_ASSERT_GREATER_THAN_INT32(0, count);
 
-    /* Panel layer is NT_UI_LAYER_DEBUG_PANEL by construction at the emit site
-     * in nt_ui.c (NT_UI_CLAY_DATA(NT_UI_LAYER_DEBUG_PANEL)). Pin the macro
-     * value (250) here so a silent change is caught. */
+    /* Pin macro value 250 so a silent change is caught. */
     TEST_ASSERT_EQUAL_UINT8(250U, (uint8_t)NT_UI_LAYER_DEBUG_PANEL);
     /* Inspector emit ran (root was added to layoutElements). */
     nt_ui_inspector_element_view_t v;
@@ -859,16 +813,8 @@ static void test_layer_debug_value_above_game_layers(void) {
     TEST_ASSERT_LESS_THAN_UINT8(255U, (uint8_t)NT_UI_LAYER_DEBUG_PANEL);
 }
 
-/* ---- Test 15k-bis: highlight layer sits BELOW the panel layer ---- */
-/* Phase 56 ext fix: the floating element-highlight that follows the user's
- * sidebar hover/selection used to share NT_UI_LAYER_DEBUG (250) with the
- * panel root AND used a HIGHER zIndex (32767 vs 32765), so highlighted
- * widgets near the right edge of the screen showed their orange highlight
- * polygon ON TOP of the sidebar panel. Fix: split into
- * NT_UI_LAYER_DEBUG_HIGHLIGHT (240) for the highlight and
- * NT_UI_LAYER_DEBUG_PANEL (250) for the panel root, AND lower the highlight
- * zIndex to 32764 so Clay's zIndex segmentation also keeps it strictly
- * under the panel. Both inequalities matter -- zIndex first, layer second. */
+/* ---- Test 15k-bis: highlight layer sits BELOW the panel layer ----
+ * Highlight at 240, panel at 250 — both inequalities (layer + zIndex) matter. */
 static void test_highlight_layer_below_panel_layer(void) {
     TEST_ASSERT_LESS_THAN_UINT8((uint8_t)NT_UI_LAYER_DEBUG_PANEL, (uint8_t)NT_UI_LAYER_DEBUG_HIGHLIGHT);
     /* Highlight still above typical game UI (0..~10). */
@@ -880,30 +826,9 @@ static void test_highlight_layer_below_panel_layer(void) {
     TEST_ASSERT_EQUAL_UINT8((uint8_t)NT_UI_LAYER_DEBUG_PANEL, (uint8_t)NT_UI_LAYER_DEBUG);
 }
 
-/* ---- Test 15l: clicking the TEXT-CONTENT row selects the same id as the
- * element row above it -- not a silent no-op (user-visible "stuck selection") ----
- * Phase 56 ext fix regression pin. Verbatim Clay treats text-content rows as
- * non-interactive: the hit-test inside Clay__RenderDebugLayoutElementsList
- * fires only at the ELEMENT row, so clicking on the text-content row leaves
- * inspector_selected_id unchanged. After commit ab6d235 (nt_ui_label
- * registers its widget tag on the CLAY_TEXT leaf), the text-content row IS a
- * meaningfully identified widget; the user reasonably expects clicking on
- * either the element row OR the text-content row to select the same leaf.
- *
- * Tree shape (sidebar walk order):
- *   row 0: Clay__RootContainer (stringId, has_identity)
- *   row 1: "root_label" (CLAY_ID, has_identity)
- *   row 2: TEXT leaf X      <- element row (always hit-testable)
- *   row 3: text-content row <- pre-fix: silent no-op. post-fix: selects X.
- *
- * Y-math: highlightedRow = (pointer.y / CDV_ROW_HEIGHT) - 1 (the -1 accounts
- * for the inspector header row). With CDV_ROW_HEIGHT=30:
- *   Y=95  -> highlightedRow=2 (visual row 2 = element row of X)
- *   Y=135 -> highlightedRow=3 (visual row 3 = text-content row of X)
- *
- * Pressed-this-frame requires a previous frame with pointer NOT down (Clay's
- * state machine, clay.h:3986-3991). Frame 1 primes the released state;
- * frame 2 transitions to pressed and runs the hit-test. */
+/* ---- Test 15l: clicking the TEXT-CONTENT row selects the parent's id ----
+ * Y=95 → element row 2; Y=135 → text-content row 3. Both must select the leaf.
+ * Frame 1 primes released state; frame 2 transitions to pressed. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_click_text_content_row_selects_leaf(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -916,8 +841,7 @@ static void test_inspector_click_text_content_row_selects_leaf(void) {
     uint32_t text_leaf_id = 0U;
     CLAY({.id = CLAY_ID("root_label")}) {
         nt_ui_label(s_fx.ctx, NULL, "hello", &s_label_style);
-        /* nt_ui_label emits CLAY_TEXT then registers the LABEL def against
-         * layoutElements[length-1]. The same accessor reads back the leaf id. */
+        /* Same accessor that the label tag uses; reads layoutElements[length-1]. */
         text_leaf_id = nt_ui_internal_last_emitted_element_id();
     }
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, text_leaf_id);
@@ -926,8 +850,7 @@ static void test_inspector_click_text_content_row_selects_leaf(void) {
     /* Sanity: nothing clicked yet -> selected_id stays 0. */
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->inspector_selected_id);
 
-    /* Frame 2a: click on the ELEMENT row (visual row 2) -- both pre-fix and
-     * post-fix this MUST select the text leaf. Pins the existing hit-test. */
+    /* Frame 2a: click on the ELEMENT row (visual row 2) → selects text leaf. */
     nt_pointer_t f2 = {0};
     f2.x = 600.0F; /* inside sidebar (x >= 800 - 400) */
     f2.y = 95.0F;  /* -> highlightedRow = (95/30) - 1 = 2 (element row of leaf) */
@@ -947,9 +870,7 @@ static void test_inspector_click_text_content_row_selects_leaf(void) {
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_EQUAL_UINT32(0U, s_fx.ctx->inspector_selected_id);
 
-    /* Frame 2b: click on the TEXT-CONTENT row (visual row 3). Pre-fix this
-     * was the bug -- selected_id stayed 0 (silent no-op). Post-fix this
-     * selects the same text_leaf_id as row 2 did. */
+    /* Frame 2b: click on the TEXT-CONTENT row (visual row 3) → selects same leaf. */
     nt_pointer_t f4 = {0};
     f4.x = 600.0F;
     f4.y = 135.0F; /* -> highlightedRow = (135/30) - 1 = 3 (text-content row) */
@@ -962,54 +883,21 @@ static void test_inspector_click_text_content_row_selects_leaf(void) {
     TEST_ASSERT_EQUAL_UINT32(text_leaf_id, s_fx.ctx->inspector_selected_id);
 }
 
-/* ---- Test 15m: persistent selection drives inspector_highlight_id on the next
- * frame -- pins the post-walk overlay fallback chain ----
- *
- * Phase 56 ext fix (issue 2 re-diagnosis): the user reported "the hit-zone
- * polygons disappeared from the overlay" after the descriptor refactor +
- * nt_-prefix + label-on-leaf round. Live diagnostic instrumentation
- * (engine/ui/nt_ui_inspector.c overlay_draw + nt_ui.c emit_layout, reverted
- * before commit) on examples/ui_buttons_demo proved the path actually runs
- * end-to-end:
- *   - 5 padded buttons register with pad={16,16,16,16} every frame
- *   - hover-path / fallback-path both set inspector_highlight_id correctly
- *   - overlay_draw passes ALL early-out gates and reaches the
- *     "PAINTING padded zone" branch
- *
- * Root cause of the user-visible regression: the cyan/yellow padded zone
- * IS painted, but its right portion was hidden under the inspector panel
- * (commit 1 in this branch fixed the visual occlusion via a CPU clip
- * against panel_left_x). Buttons declared with hit_padding={0,0,0,0} (e.g.
- * the demo's ICON/ICON+TEXT variants) correctly skip the padded zone --
- * only the white visual outline + id label render. The user was likely
- * inspecting one of the unpadded variants when they saw "nothing draws."
- *
- * To prevent a SILENT regression of the actual chain, this test pins that
- * a click on a sidebar row updates inspector_selected_id AND the very next
- * frame's emit_layout copies selected_id into inspector_highlight_id via
- * the fallback branch. nt_ui_widget_get_hit_padding then returns the
- * recorded pad, so the overlay's cyan/yellow branch fires. If any link
- * breaks (slot wiped, fallback removed, padding lost), this test fails. */
+/* ---- Test 15m: persistent selection drives highlight_id next frame ----
+ * Pins the selected_id → highlight_id fallback chain for the overlay. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_overlay_fallback_chain_with_padded_button(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
 
-    /* Style with non-zero hit_padding -- mirrors the demo's reference buttons. */
+    /* Non-zero hit_padding — mirrors the demo's reference buttons. */
     nt_ui_button_style_t padded_style = s_btn_style;
     padded_style.hit_padding_lrtb[0] = 16;
     padded_style.hit_padding_lrtb[1] = 16;
     padded_style.hit_padding_lrtb[2] = 16;
     padded_style.hit_padding_lrtb[3] = 16;
 
-    /* Frame 1: emit the button so Clay has a stable id+bbox for frame 2,
-     * AND directly set inspector_selected_id so the fallback chain
-     * (no hover, but persistent selection) is exercised.
-     *
-     * Pointer is parked OFFSCREEN at (-100, -100) so the Phase 56 ext
-     * viewport-hover propagation does NOT pick a user element under it --
-     * the test's intent is "no hover" so the selected_id fallback fires.
-     * Pre-fix (no viewport propagation), (0,0) was fine; post-fix (0,0)
-     * lands inside the user "root"/button bbox and would propagate. */
+    /* Frame 1: emit button + set selected_id directly. Pointer is offscreen
+     * (-100,-100) so viewport-hover propagation doesn't fire. */
     nt_pointer_t mouse = make_pointer(-100.0F, -100.0F);
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
@@ -1028,10 +916,8 @@ static void test_overlay_fallback_chain_with_padded_button(void) {
     s_fx.ctx->inspector_selected_id = nt_ui_id("padded_btn");
     nt_ui_end(s_fx.ctx);
 
-    /* Frame 2: same tree, no hover -- the fallback chain in
-     * cdv_render_layout_elements_list must copy selected_id into
-     * inspector_highlight_id. inspector_highlight_id is cleared at begin
-     * and recomputed during emit_layout, so we read it AFTER nt_ui_end. */
+    /* Frame 2: same tree, no hover — fallback must copy selected_id into
+     * highlight_id. highlight_id resets each begin so read AFTER nt_ui_end. */
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
     CLAY({.id = CLAY_ID("root")}) {
         nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("padded_btn"), s_fx.atlas.handle, &padded_style, NULL, true);
@@ -1045,8 +931,7 @@ static void test_overlay_fallback_chain_with_padded_button(void) {
     /* Post-end: the fallback branch must have set highlight_id = selected_id. */
     TEST_ASSERT_EQUAL_UINT32(nt_ui_id("padded_btn"), s_fx.ctx->inspector_highlight_id);
 
-    /* The widget_registry must still hold the padding for this id (post-end,
-     * because overlay_draw runs AFTER end -- the registry must survive end). */
+    /* Registry must hold padding post-end so overlay_draw can read it. */
     int16_t pad2[4] = {0, 0, 0, 0};
     TEST_ASSERT_TRUE(nt_ui_widget_get_hit_padding(s_fx.ctx, nt_ui_id("padded_btn"), pad2));
     TEST_ASSERT_EQUAL_INT16(16, pad2[0]);
@@ -1054,23 +939,14 @@ static void test_overlay_fallback_chain_with_padded_button(void) {
     TEST_ASSERT_EQUAL_INT16(16, pad2[2]);
     TEST_ASSERT_EQUAL_INT16(16, pad2[3]);
 
-    /* overlay_draw with a stub target -- must not crash and must reach the
-     * code path that paints the padded zone. Visual verification stays in
-     * the demo; this test pins the data contract. */
+    /* Stub target — overlay_draw must reach the padded-zone path without crashing. */
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, 800.0F, 600.0F}};
     nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
 }
 
-/* ---- Test 15n: overlay_draw safely handles a SELECTED widget with NO padding ----
- *
- * The demo declares two unpadded buttons (ICON / ICON+TEXT variants with
- * hit_padding_lrtb = {0,0,0,0}). Their cyan/yellow padded branch must be
- * skipped (correct: no padding to outline distinct from visual), but the
- * white visual outline + id label must still render. Pins that
- * get_hit_padding returns TRUE with all-zero components when the widget
- * was registered via non-NULL pad pointer holding zeros (current
- * descriptor-refactor contract), and that the overlay correctly takes the
- * else-branch in this case. */
+/* ---- Test 15n: overlay_draw handles a SELECTED widget with zero padding ----
+ * get_hit_padding returns TRUE with all-zero components; overlay must skip
+ * the padded branch via the OR-of-components check, not crash. */
 static void test_overlay_skips_padded_zone_for_zero_padding(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     nt_ui_button_style_t zero_pad_style = s_btn_style;
@@ -1086,11 +962,8 @@ static void test_overlay_skips_padded_zone_for_zero_padding(void) {
         nt_ui_label(s_fx.ctx, NULL, "X", &s_label_style);
         (void)nt_ui_button_end(s_fx.ctx);
     }
-    /* button passes a non-NULL pad pointer (style->hit_padding_lrtb is an
-     * array; never NULL), so the registry records has_padding=1 with all
-     * zeros. get_hit_padding therefore returns TRUE -- the overlay's
-     * if-condition then short-circuits via the OR-of-components check.
-     * Pin both halves. */
+    /* Button passes a non-NULL pad array (always non-NULL) → registry records
+     * has_padding=1 with zeros; overlay short-circuits via OR-of-components. */
     int16_t pad[4] = {99, 99, 99, 99};
     TEST_ASSERT_TRUE(nt_ui_widget_get_hit_padding(s_fx.ctx, nt_ui_id("nopad_btn"), pad));
     TEST_ASSERT_EQUAL_INT16(0, pad[0]);
@@ -1107,15 +980,8 @@ static void test_overlay_skips_padded_zone_for_zero_padding(void) {
     nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
 }
 
-/* ---- Test 15o: inspector reads layer from TEXT config userData (CLAY_TEXT leaves) ----
- * Phase 56 ext fix (architectural): nt_ui_label emits CLAY_TEXT with
- * .userData = data on the Clay_TextElementConfig itself (Clay_TextElementConfig
- * has its own userData slot at clay.h:386). CLAY_TEXT leaves have NO SHARED
- * config, so the inspector's cdv_element_layer must read userData from BOTH
- * SHARED and TEXT configs to recover the layer for label widgets. This test
- * pins the TEXT-config path: declare a label with NT_UI_DATA_LAYER(N) and
- * confirm the inspector's element-info pane reports the same layer (by
- * proxy: the TEXT element carries the userData pointer Clay used). */
+/* ---- Test 15o: inspector reads layer from CLAY_TEXT userData ----
+ * Label sets userData on the TEXT config (no SHARED). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_reads_layer_from_text_config_userdata(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
@@ -1129,20 +995,12 @@ static void test_inspector_reads_layer_from_text_config_userdata(void) {
     TEST_ASSERT_NOT_EQUAL_UINT32(0U, leaf_id);
     nt_ui_end(s_fx.ctx);
 
-    /* The inspector tree row for a CLAY_TEXT element has is_text=1 and carries
-     * the TEXT config bit; we can verify the data pointer survived by checking
-     * the recorded layer reaches the user via the data pointer we constructed
-     * (the macro alloc is scratch-arena, valid through the next nt_ui_begin). */
+    /* Verify data pointer survived; macro alloc is scratch, valid through next begin. */
     TEST_ASSERT_EQUAL_UINT8(5U, (uint8_t)data_with_layer->layer);
 }
 
-/* ---- Test 15p: inspector reads layer from SHARED config userData (image/panel/custom) ----
- * Counterpart to the TEXT test. Clay auto-routes Clay_ElementDeclaration.userData
- * into a SHARED config (clay.c:2065-2071), so any element passing .userData via
- * the declaration (image / panel / button / custom) is readable through the
- * SHARED branch of cdv_element_layer. Clay_ImageElementConfig has no userData
- * field of its own (clay.h:424-426) -- the layer for an image flows through
- * SHARED, not IMAGE. */
+/* ---- Test 15p: inspector reads layer from SHARED config userData ----
+ * Clay auto-routes Clay_ElementDeclaration.userData into a SHARED config. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_reads_layer_from_shared_config_userdata(void) {
     nt_pointer_t mouse = make_pointer(0.0F, 0.0F);
@@ -1150,25 +1008,13 @@ static void test_inspector_reads_layer_from_shared_config_userdata(void) {
     const nt_ui_element_data_t *data_with_layer = NT_UI_DATA_LAYER((nt_ui_layer_t)3);
     CLAY({.id = CLAY_ID("root_shared_layer")}) { nt_ui_image(s_fx.ctx, data_with_layer, s_fx.atlas.handle, s_fx.atlas.white_region_idx, &s_img_style); }
     nt_ui_end(s_fx.ctx);
-    /* Data pointer survived; Clay stored it in a SHARED config attached to the
-     * image element. cdv_element_layer's SHARED branch returns the layer. */
+    /* Clay stored data in SHARED; cdv_element_layer's SHARED branch returns the layer. */
     TEST_ASSERT_EQUAL_UINT8(3U, (uint8_t)data_with_layer->layer);
 }
 
 /* ---- Test 15q: overlay projects hit-zone corners through accum for a
- * transformed widget ----
- *
- * Phase 56 ext fix (visualization vs hit-test divergence). The inverse-affine
- * hit-test (D-56-07) correctly clicks the rendered button at the transformed
- * position, but the inspector overlay was drawing an axis-aligned bbox in
- * layout space -- so the user saw the highlight at the WRONG place for any
- * widget wrapped in nt_ui_push_transform (e.g. demo BAKED button).
- *
- * Setup: declare a button under a non-identity transform (offset + rotation
- * + non-uniform scale). nt_ui_step_interaction_padded fires inside button_begin
- * with inspector_active=true -> a debug zone is recorded with the accum
- * snapshot. Assert the projected top-left corner DIFFERS from the layout
- * bbox top-left (proves projection ran). */
+ * transformed widget. The projected corner must differ from the axis-aligned
+ * Y-flip of the layout bbox — otherwise the accum snapshot was ignored. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_overlay_projects_through_accum_for_transformed_id(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -1180,8 +1026,7 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
     const float btn_w = 160.0F;
     const float btn_h = 48.0F;
 
-    /* Frame 1: declare so Clay has a prev-frame bbox the inverse-affine
-     * hit-test can read on frame 2. */
+    /* Frame 1: prev-frame bbox for the hit-test. */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
     CLAY({.id = CLAY_ID("baked_root")}) {
@@ -1191,8 +1036,7 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Frame 2: declare under the transform so the accum stack is non-empty at
-     * the time the interaction query records the debug zone. */
+    /* Frame 2: declare under the transform so accum is non-empty at query time. */
     nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
     nt_ui_transform_t baked = nt_ui_transform_defaults();
@@ -1206,9 +1050,7 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
         CLAY({.id = CLAY_ID("xform_btn"),
               .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = btn_x, .y = btn_y}},
               .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {
-            /* Issue the interaction query INSIDE the CLAY block so the
-             * declaration-time accum stack is still active. Recording happens
-             * inside get_interaction_padded gated by inspector_active. */
+            /* Query INSIDE the CLAY block so accum is still active; recording is gated by inspector_active. */
             (void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("xform_btn"));
         }
         nt_ui_pop_transform(s_fx.ctx);
@@ -1219,10 +1061,7 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
     TEST_ASSERT_NOT_NULL(z);
     TEST_ASSERT_GREATER_THAN_UINT32(0U, z->accum_depth);
 
-    /* Project the layout-space top-left corner through the accum snapshot +
-     * walker Y-flip. The projected position MUST differ from the simple
-     * Y-flip of (visual_l, visual_t) -- otherwise the projection silently
-     * collapsed back to axis-aligned (the bug). */
+    /* Project top-left through accum + Y-flip; must differ from axis-aligned. */
     float proj_x = 0.0F;
     float proj_y = 0.0F;
     nt_ui_internal_project_layout_to_world(z, 0.0F, screen_h, z->visual_l, z->visual_t, &proj_x, &proj_y);
@@ -1230,27 +1069,18 @@ static void test_overlay_projects_through_accum_for_transformed_id(void) {
     const float flat_y = screen_h - z->visual_t;
     const float dx = fabsf(proj_x - flat_x);
     const float dy = fabsf(proj_y - flat_y);
-    /* offset_x=+60 -> projected x SHOULD be >= ~30 px away from the layout-
-     * space x even after scale+rotation interactions. Conservative threshold
-     * 10 px on either axis catches the bug (identity projection had dx=dy=0). */
-    TEST_ASSERT_TRUE_MESSAGE(dx > 10.0F || dy > 10.0F, "projected corner did not differ from axis-aligned -- accum stack ignored");
+    /* Conservative 10 px threshold catches identity-projection regression. */
+    TEST_ASSERT_TRUE_MESSAGE(dx > 10.0F || dy > 10.0F, "projected corner did not differ from axis-aligned");
 
     s_fx.ctx->inspector_selected_id = nt_ui_id("xform_btn");
     nt_ui_end(s_fx.ctx);
 
-    /* overlay_draw must run without crashing; visual verification stays in the demo. */
+    /* overlay_draw must run without crashing. */
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, screen_w, screen_h}};
     nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
 }
 
-/* ---- Test 15r: overlay falls back to axis-aligned bbox when no zone is
- * recorded ----
- *
- * Counterpart to 15q. Setup: a plain Clay container is selected but NEVER
- * queried via nt_ui_step_interaction (e.g. a non-interactive panel that
- * still appears in the inspector tree). No debug zone -> no accum snapshot.
- * The overlay MUST fall back to the axis-aligned bbox path and emit
- * normally (no crash). */
+/* ---- Test 15r: overlay falls back to axis-aligned when no zone recorded ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_overlay_falls_back_to_axis_aligned_when_no_zone(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -1281,23 +1111,8 @@ static void test_overlay_falls_back_to_axis_aligned_when_no_zone(void) {
 }
 
 /* ---- Test 15s: viewport hover propagates inspector_highlight_id ----
- * Phase 56 ext fix: hovering an actual widget in the GAME viewport (not the
- * sidebar) must set inspector_highlight_id to that widget's id so the
- * post-walk overlay AND the floating in-viewport highlight rect both follow
- * the pointer.
- *
- * Verbatim Clay debug-view behavior (clay.h:3303): the floating
- * ElementHighlight rect attaches to highlightedElementId, which can be set
- * by sidebar row hover OR by viewport pointer-over a user element. Our
- * port previously only did the sidebar half; this test pins the viewport
- * half.
- *
- * Two-frame setup: frame 1 declares the widget so Clay records its bbox
- * and Clay_SetPointerState (called in nt_ui_begin) can populate
- * pointerOverIds for frame 2. Frame 2 positions the pointer over the
- * widget's center (OUTSIDE the sidebar footprint at x=400) and runs the
- * inspector emit. After nt_ui_end, inspector_highlight_id must equal the
- * widget's id. */
+ * Frame 1 declares widget so frame 2's pointerOverIds is populated;
+ * pointer at widget center outside sidebar → highlight = widget id. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_highlight_from_viewport_hover(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -1311,8 +1126,7 @@ static void test_inspector_highlight_from_viewport_hover(void) {
     const float btn_cx = btn_x + (btn_w * 0.5F);
     const float btn_cy = btn_y + (btn_h * 0.5F);
 
-    /* Frame 1: declare the widget so Clay has a bbox to hit-test on frame 2.
-     * Pointer is at (0,0) -- nothing is hovered yet. */
+    /* Frame 1: declare widget; pointer (0,0). */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
     CLAY({.id = CLAY_ID("hover_target"),
@@ -1320,11 +1134,7 @@ static void test_inspector_highlight_from_viewport_hover(void) {
           .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {}
     nt_ui_end(s_fx.ctx);
 
-    /* Frame 2: pointer over the widget center -- well outside the sidebar.
-     * Clay_SetPointerState (called inside nt_ui_begin) populates
-     * pointerOverIds with the elements under (btn_cx, btn_cy) -- including
-     * the hover_target -- using frame 1's solved bboxes. The inspector
-     * emit then propagates that to inspector_highlight_id. */
+    /* Frame 2: pointer at widget center; SetPointerState fills pointerOverIds. */
     nt_pointer_t f2 = make_pointer(btn_cx, btn_cy);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
     /* Sanity: pointer is NOT inside the sidebar footprint. */
@@ -1338,12 +1148,8 @@ static void test_inspector_highlight_from_viewport_hover(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_ui_id("hover_target"), s_fx.ctx->inspector_highlight_id);
 }
 
-/* ---- Test 15t: viewport hover INSIDE panel area does NOT override highlight ----
- * The viewport-hover propagation is gated by inspector_pointer_consumed: when
- * the pointer is over the sidebar footprint, the propagation does NOT fire
- * (the sidebar row hover is the source of truth in that region). Pins that
- * the gate works -- a panel-area pointer must not produce a viewport-driven
- * highlight from a stale or geometrically-overlapping user element. */
+/* ---- Test 15t: viewport hover inside panel area does NOT override highlight ----
+ * inspector_pointer_consumed gates the propagation. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_highlight_ignores_panel_hover(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -1351,10 +1157,7 @@ static void test_inspector_highlight_ignores_panel_hover(void) {
     const float screen_w = 800.0F;
     const float screen_h = 600.0F;
 
-    /* Frame 1: declare a widget WHOSE BBOX OVERLAPS the panel footprint
-     * (panel starts at x=400). The widget's center (x=500) lies inside the
-     * panel area; the propagation must NOT pick it up when the pointer is
-     * in the panel area. */
+    /* Widget bbox overlaps the panel footprint (panel at x=400). */
     const float btn_x = 420.0F;
     const float btn_y = 50.0F; /* near top so it doesn't overlap sidebar rows */
     const float btn_w = 160.0F;
@@ -1368,11 +1171,7 @@ static void test_inspector_highlight_ignores_panel_hover(void) {
           .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {}
     nt_ui_end(s_fx.ctx);
 
-    /* Frame 2: pointer inside the sidebar footprint. Even though
-     * pointerOverIds will contain "in_panel_widget" (its bbox covers the
-     * pointer), inspector_pointer_consumed is TRUE and the viewport-hover
-     * propagation block is gated off. inspector_highlight_id stays whatever
-     * the sidebar driver decided (zero or a sidebar-row hit). */
+    /* Frame 2: pointer in sidebar; pointer_consumed gates the propagation off. */
     nt_pointer_t f2 = make_pointer(btn_cx, btn_cy);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
     /* Sanity: pointer IS inside the sidebar footprint. */
@@ -1382,18 +1181,11 @@ static void test_inspector_highlight_ignores_panel_hover(void) {
           .layout = {.sizing = {CLAY_SIZING_FIXED(btn_w), CLAY_SIZING_FIXED(btn_h)}}}) {}
     nt_ui_end(s_fx.ctx);
 
-    /* The propagation did NOT fire -- highlight stays at whatever the
-     * sidebar emit decided. At y=50 the sidebar header bar is in view,
-     * no actual ROW is hovered, so the sidebar driver does not set
-     * highlight either -- net: highlight stays 0 (no false positive). */
+    /* Propagation did not fire — no widget id reaches highlight. */
     TEST_ASSERT_NOT_EQUAL_UINT32(nt_ui_id("in_panel_widget"), s_fx.ctx->inspector_highlight_id);
 }
 
-/* ---- Test 15u: pointer over NOTHING leaves highlight at zero ----
- * Counter-test: if no widget is under the pointer (empty canvas), the
- * viewport-hover propagation must NOT spuriously assign an id. Confirms the
- * scan loop yields cleanly when pointerOverIds is empty or contains only
- * inspector-owned/panel-area elements. */
+/* ---- Test 15u: pointer over nothing leaves highlight clean of inspector-owned ids ---- */
 static void test_inspector_highlight_zero_when_no_pointer_over(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
 
@@ -1406,24 +1198,14 @@ static void test_inspector_highlight_zero_when_no_pointer_over(void) {
     CLAY({.id = CLAY_ID("empty_root")}) {}
     nt_ui_end(s_fx.ctx);
 
-    /* Frame 2: pointer at (50, 50) -- nothing user-emitted is there, only
-     * the auto Clay__RootContainer covers the whole canvas. The propagation
-     * MAY pick the root container (it has no string id, lives at the
-     * viewport origin, passes the panel-area filter). The behavior we
-     * require is: highlight does NOT pick an inspector-owned id, AND does
-     * not become a user-id we did NOT emit. The strongest assertion that
-     * holds regardless of root-container behavior: highlight_id is NOT one
-     * of the inspector's own named ids (no self-feedback). */
+    /* Pointer at empty area; require no inspector-owned id leaks into highlight. */
     nt_pointer_t f2 = make_pointer(50.0F, 50.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
     TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
     CLAY({.id = CLAY_ID("empty_root")}) {}
     nt_ui_end(s_fx.ctx);
 
-    /* Pin: highlight_id must NOT be any inspector-owned named id (the
-     * floating highlight rect, panel root, etc.). This is the self-feedback
-     * pin -- the bug class we explicitly designed the named-id filter
-     * against. */
+    /* Self-feedback pin: highlight is not any inspector-owned named id. */
     const uint32_t hl = s_fx.ctx->inspector_highlight_id;
     TEST_ASSERT_NOT_EQUAL_UINT32(Clay__HashString(CLAY_STRING("ntInsp_ElementHighlight"), 0, 0).id, hl);
     TEST_ASSERT_NOT_EQUAL_UINT32(Clay__HashString(CLAY_STRING("ntInsp_ElementHighlightRectangle"), 0, 0).id, hl);
@@ -1432,20 +1214,7 @@ static void test_inspector_highlight_zero_when_no_pointer_over(void) {
 }
 
 /* ---- Test 15w: viewport hover prefers REGISTERED WIDGET over anonymous child ----
- * Regression pin for the bug introduced by commit 5c600b4: viewport hover
- * propagation scanned pointerOverIds end-to-start (deepest first), naively
- * picking the deepest non-owned/non-panel id. If a registered widget (button
- * etc.) had an anonymous Clay child wrapper (CLAY({...}) with no id, sized
- * smaller than the widget for layout reasons), the deepest pick was the
- * CHILD, NOT the widget. Consequence: nt_ui_internal_find_debug_zone (keyed
- * on the widget's id) returned NULL for the child id; nt_ui_widget_get_hit_padding
- * returned false; the post-walk overlay rendered no padded hit-zone -- the
- * "hit-zone vanished" user report.
- *
- * Fix: two-pass scan -- prefer the first ID in pointerOverIds that has a
- * widget_registry entry; fall through to the deepest non-owned non-panel id
- * only when no widget is found on the hover path. This test pins the
- * preference. */
+ * Two-pass scan: prefer first id in pointerOverIds with widget_registry entry. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_viewport_hover_prefers_widget_over_child(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -1459,27 +1228,19 @@ static void test_inspector_viewport_hover_prefers_widget_over_child(void) {
     const float child_cx = panel_x + (panel_w * 0.5F);
     const float child_cy = panel_y + (panel_h * 0.5F);
 
-    /* Frame 1: declare a CLAY element registered as a widget via
-     * nt_ui_widget_register, with an anonymous CLAY child inside that fills
-     * the parent. Both elements end up under (child_cx, child_cy) -- the
-     * widget at the outer level, the anonymous child at the deepest level.
-     * Pointer at (0,0) -- nothing under the cursor yet. */
+    /* Frame 1: registered widget wrapping anonymous CLAY child filling the parent. */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
     CLAY({.id = CLAY_ID("widget_floater"),
           .floating = {.attachTo = CLAY_ATTACH_TO_ROOT, .offset = {.x = panel_x, .y = panel_y}},
           .layout = {.sizing = {CLAY_SIZING_FIXED(panel_w), CLAY_SIZING_FIXED(panel_h)}}}) {
         nt_ui_widget_register(s_fx.ctx, nt_ui_id("widget_floater"), &NT_UI_PANEL_DEF, NULL);
-        /* Anonymous nested child. No id, NOT a registered widget. Fills the
-         * parent so the hover point is INSIDE both. */
+        /* Anonymous nested child fills the parent. */
         CLAY({.layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_GROW(0)}}}) {}
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Frame 2: hover the center -- both widget and anonymous child are under
-     * the pointer. pointerOverIds will contain {root, widget_floater, child}
-     * (child being the deepest). Pre-fix the propagation picked the child id
-     * (highlight_id != widget_floater). Post-fix the registered widget wins. */
+    /* Frame 2: hover center; the registered widget must win over the anonymous child. */
     nt_pointer_t f2 = make_pointer(child_cx, child_cy);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
     TEST_ASSERT_FALSE(nt_ui_inspector_pointer_consumed(s_fx.ctx));
@@ -1495,32 +1256,8 @@ static void test_inspector_viewport_hover_prefers_widget_over_child(void) {
     TEST_ASSERT_EQUAL_UINT32(nt_ui_id("widget_floater"), s_fx.ctx->inspector_highlight_id);
 }
 
-/* ---- Test 15x: inspector inner emits ALL carry NT_UI_LAYER_DEBUG_* metadata ----
- *
- * Phase 56 ext: previously only the floating root panel + the floating
- * ElementHighlight rect carried .userData with a debug-layer element_data.
- * Every other inspector-owned CLAY block (header bar, close button, tree
- * rows, config pills, widget pills, layer cells, swatches, separators, info
- * pane sub-rows, indent wrappers, CLAY_TEXT calls) emitted with userData=NULL,
- * causing the walker to treat them as layer 0. Visually they still drew in
- * declaration order (parent panel at layer 250 wraps them), but any game UI
- * emitted with a non-zero layer below PANEL (e.g. game HUD at layer 200)
- * would render BETWEEN the inspector root and its children -- incorrect
- * stacking.
- *
- * This test pins the post-fix contract: every render command whose Clay
- * element is owned by the inspector (filtered by boundingBox.x >= panel_left_x
- * geometric heuristic -- same path as the viewport-hover filter) must have
- * userData != NULL and the element_data's layer must be either
- * NT_UI_LAYER_DEBUG_PANEL (250) or NT_UI_LAYER_DEBUG_HIGHLIGHT (240).
- *
- * Exclusions:
- * - CLAY_RENDER_COMMAND_TYPE_SCISSOR_START/END forced to userData=0 by Clay
- *   itself (deps/clay/clay.h:2710 + the SCISSOR_END emit at clay.h:3046). They
- *   are layer-sort barriers and never participate in the layer pass anyway.
- * - CLAY_RENDER_COMMAND_TYPE_CUSTOM is excluded from the unlayered-count
- *   diagnostic by convention (no custom emits inside the inspector).
- * - CLAY_RENDER_COMMAND_TYPE_NONE is a placeholder barrier; same exclusion. */
+/* ---- Test 15x: every inspector-owned cmd carries a DEBUG layer in userData ----
+ * SCISSOR/CUSTOM/NONE are barriers and excluded. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_inner_emits_carry_debug_layer(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -1528,9 +1265,7 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
     const float screen_h = 600.0F;
     const float panel_left_x = screen_w - 400.0F; /* NT_UI_INSPECTOR_PANEL_WIDTH = 400 */
 
-    /* Pre-select an element so the info pane (Layout Config + sub-rows +
-     * per-config pills + bodies) is also emitted -- exercises the entire
-     * inspector emit surface, not just the tree walker. */
+    /* Pre-select so the info pane emits too. */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
     CLAY({.id = CLAY_ID("inspect_root")}) {
@@ -1553,10 +1288,7 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Scan frozen_cmds (populated by Clay_EndLayout inside nt_ui_end). For each
-     * RECT / IMAGE / TEXT / BORDER command whose Clay element is inside the
-     * panel footprint (bbox.x >= panel_left_x), assert userData carries a
-     * PANEL or HIGHLIGHT element_data. */
+    /* Inside-panel commands must carry PANEL or HIGHLIGHT layer in userData. */
     Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
     TEST_ASSERT_NOT_NULL(arr->internalArray);
     TEST_ASSERT_GREATER_THAN_INT32(0, arr->length);
@@ -1565,26 +1297,12 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
     uint32_t leaked_layer0_count = 0U;
     for (int32_t i = 0; i < arr->length; ++i) {
         const Clay_RenderCommand *cc = &arr->internalArray[i];
-        /* Skip non-renderable barriers: NONE, SCISSOR_START, SCISSOR_END,
-         * CUSTOM. Clay forces SCISSOR userData to 0 internally (clay.h:2710,
-         * 3046) and the layer sort treats them as hard barriers anyway. */
+        /* Skip non-renderable barriers (Clay zeroes their userData). */
         if (cc->commandType == CLAY_RENDER_COMMAND_TYPE_NONE || cc->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_START || cc->commandType == CLAY_RENDER_COMMAND_TYPE_SCISSOR_END ||
             cc->commandType == CLAY_RENDER_COMMAND_TYPE_CUSTOM) {
             continue;
         }
-        /* Inspector ownership heuristic: bbox sits in the panel footprint.
-         * Misses the floating ElementHighlight (which attaches to user widgets
-         * elsewhere), but no element was selected this frame's emit aside from
-         * the persistent selection, AND the highlight is the only inspector
-         * geometry outside the panel area -- since the inspector chooses
-         * highlight target via hover, and the pointer is at (0,0), the
-         * highlight is the persistent selection's bbox which IS inside the
-         * panel area for "inspect_btn" only if the button itself is in the
-         * panel; in this test the button is in the user area at x=0,
-         * so the highlight rect actually emits at the button's bbox, OUTSIDE
-         * the panel footprint. That's the path covered by the
-         * test_highlight_layer_below_panel_layer pin. Here we focus on the
-         * inner panel emits. */
+        /* Inspector ownership heuristic: bbox sits in the panel footprint. */
         if (cc->boundingBox.x < panel_left_x) {
             continue;
         }
@@ -1595,78 +1313,25 @@ static void test_inspector_inner_emits_carry_debug_layer(void) {
         }
         const nt_ui_element_data_t *ed = (const nt_ui_element_data_t *)cc->userData;
         const uint8_t layer = ed->layer;
-        /* Inspector-owned inner emit -- must be PANEL_BG / PANEL_TEXT /
-         * HIGHLIGHT layer. The BG/TEXT split (Phase 56 ext perf) lets the
-         * walker batch all inspector rects then all inspector texts per
-         * scissor segment. */
+        /* Inspector inner emits must be on PANEL_BG / PANEL_TEXT / HIGHLIGHT. */
         const bool valid_layer = (layer == (uint8_t)NT_UI_LAYER_DEBUG_PANEL_BG) || (layer == (uint8_t)NT_UI_LAYER_DEBUG_PANEL_TEXT) || (layer == (uint8_t)NT_UI_LAYER_DEBUG_HIGHLIGHT);
         TEST_ASSERT_TRUE_MESSAGE(valid_layer, "inspector inner emit carries non-debug layer");
     }
 
-    /* Sanity: we actually iterated inspector-owned commands (otherwise the
-     * test is vacuously true). The inspector emits dozens of header / tree /
-     * info-pane rects + texts when active. */
+    /* Sanity: we iterated inspector-owned commands. */
     TEST_ASSERT_GREATER_THAN_UINT32(10U, inspector_inside_cmd_count);
 
     /* No layer-0 leaks among inner inspector commands. */
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, leaked_layer0_count, "inspector inner emit fell back to layer 0 (userData NULL)");
 
-    /* Cross-check via the global test counter: total unlayered (NULL userData
-     * on non-CUSTOM cmds) over the whole frame should match the user-side
-     * unlayered emits only (user "inspect_root" container, button bg/border,
-     * image, label -- none carrying a debug layer). Run nt_ui_walk to populate
-     * the counter. The fixture wires sprite/text materials + atlas so the walk
-     * is safe to invoke. */
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, screen_w, screen_h}};
     nt_ui_walk(s_fx.ctx, &target);
-    /* The counter includes ALL unlayered cmds (user side + any leak). We can't
-     * assert an exact value (user emits depend on widget internals), but the
-     * inspector contribution to it must be zero -- proven by leaked_layer0_count
-     * above. The counter itself is a useful diagnostic across the rest of the
-     * tree, kept here as the global cross-check. */
     (void)nt_ui_test_last_walk_unlayered_count(s_fx.ctx);
 }
 
-/* ---- Test 15x-perf: inspector draw-call ceiling via pipeline-type alternations ----
- *
- * Walker dispatch flushes the sprite renderer on every RECT->TEXT boundary and
- * vice-versa (engine/ui/nt_ui.c::prep_sprite_dispatch + the TEXT branch's
- * unconditional nt_sprite_renderer_flush). One alternation = at least one
- * draw call. Per-row Pre-fix the inspector tree emitted ~6-8 RECT/TEXT
- * alternations: row_bg(R) -> id(T) -> color_swatch(R) -> hex(T) -> radius_pill_bg(R) ->
- * radius_pill_text(T) -> cfg_pill_bg(R) -> cfg_pill_text(T) -> widget_pill_bg(R) ->
- * widget_pill_text(T) -> layer_pill_bg(R) -> layer_pill_text(T). Across ~30
- * visible rows that compounds to ~200 draws inside the panel alone, matching
- * the user's observation ("209 dc при открытом дебаг вью").
- *
- * STRATEGY A drops the per-row pill BACKGROUNDS (radius / per-config / widget /
- * layer / info-pane config-header) and renders only colored text in the pill's
- * tint -- the visual identification still works because the text color carries
- * the pill's hue. The color swatch RECT stays because it's the only way to
- * surface the SHARED config's actual color sample.
- *
- * Post-fix alternations per row collapse to ~4: row_bg(R) -> id(T) ->
- * swatch_rect(R) -> hex+radius+cfg+widget+layer_texts(T...). The same scene
- * that produced ~6 alternations per row now produces ~2.
- *
- * Pin: alternation count inside the panel footprint stays below a ceiling
- * derived from "1 row_bg per visible row + 1 swatch per SHARED-bearing row +
- * a small constant for header/info-pane". The expression keeps the bound
- * tight enough that re-introducing a pill background regresses (i.e. the test
- * stays catching even if rows-count shifts slightly).
- *
- * Numbers: with the demo-shaped scene below (button + label + image inside a
- * root), the inspector emits ~6-8 tree rows + header bar + info pane. The
- * BEFORE alternation count was measured at ~50; AFTER the fix it must be
- * <= 20. The 20 ceiling leaves headroom for the swatch (1 per SHARED-config
- * row) and the row_bg (1 per row), the close-button bg (1), header bg (1),
- * panel separator (1), and any one-off bg-bearing pane element.
- *
- * Method: pre-select an element so the info pane emits its full surface, then
- * scan frozen_cmds end-to-end and count adjacent RECT/IMAGE/BORDER <-> TEXT
- * type-changes restricted to commands inside the panel footprint
- * (boundingBox.x >= panel_left_x). The ceiling pins draws-saved without
- * needing a live GL backend. */
+/* ---- Test 15x-perf: inspector RECT↔TEXT alternations capped after Strategy A.
+ * Per-row pill backgrounds dropped (colored text only) → alternations <= 20
+ * for the demo-shaped scene. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_alternations_capped_after_strategy_a(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -1697,10 +1362,7 @@ static void test_inspector_alternations_capped_after_strategy_a(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Count adjacent RECT/IMAGE/BORDER <-> TEXT transitions among inspector-owned
-     * commands. SCISSOR/CUSTOM/NONE are barriers (handled separately by the
-     * walker); they reset the prev-type tracker to avoid counting a barrier as
-     * an alternation. */
+    /* Count adjacent RECT/IMAGE/BORDER ↔ TEXT transitions in inspector-owned cmds. */
     Clay_RenderCommandArray *arr = &s_fx.ctx->frozen_cmds;
     TEST_ASSERT_NOT_NULL(arr->internalArray);
     TEST_ASSERT_GREATER_THAN_INT32(0, arr->length);
@@ -1722,8 +1384,7 @@ static void test_inspector_alternations_capped_after_strategy_a(void) {
             pipe = PIPE_TEXT;
             break;
         default:
-            /* SCISSOR/CUSTOM/NONE = hard barriers. Reset prev so the next
-             * inspector cmd does not falsely register a type change. */
+            /* Barriers reset prev so subsequent cmds don't falsely alternate. */
             prev_pipe = PIPE_NONE;
             continue;
         }
@@ -1742,23 +1403,13 @@ static void test_inspector_alternations_capped_after_strategy_a(void) {
     /* Vacuous-pass guard: assert we actually iterated the panel. */
     TEST_ASSERT_GREATER_THAN_UINT32(20U, inside_cmd_count);
 
-    /* Strategy-A ceiling. Pre-fix value was ~50; post-fix the same scene
-     * produces <= 20. The bound stays catching: re-adding any per-row pill
-     * background brings the count above 20 (each row adds 2 extra
-     * alternations: text->rect-bg then rect-bg->text). */
+    /* Ceiling 20 catches per-row pill-background regressions. */
     char msg[160];
-    (void)snprintf(msg, sizeof msg, "inspector RECT<->TEXT alternations inside panel: %u (cap 20). cmd_count=%u. STRATEGY A regression?", alternations, inside_cmd_count);
+    (void)snprintf(msg, sizeof msg, "inspector RECT↔TEXT alternations: %u (cap 20). cmd_count=%u", alternations, inside_cmd_count);
     TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(20U, alternations, msg);
 }
 
-/* ---- Test 15x-perf-bulk: demo-shaped scene (~20 widgets) stays under
- * scaled alternation cap. STRATEGY A scales linearly per row -- each row
- * contributes ~2 alternations (dot bg + optional swatch). 20 widgets each
- * with at least the row_bg + dot adds ~40 alternations. Tighten to 60 with
- * headroom for the header bar, info pane, and the highlighted-element
- * floating rect. The original 209-DC scene matched ~30 visible rows; this
- * 20-row scene maps to a draw-call lower bound of about 60-80 (well under
- * the user's 120 ceiling). */
+/* ---- Test 15x-perf-bulk: 20 widgets stay under scaled alternation cap (60). ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -1766,8 +1417,7 @@ static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
     const float screen_h = 800.0F;
     const float panel_left_x = screen_w - 400.0F;
 
-    /* Frame 1: declare the bulk scene -- 20 buttons in a row -- so frame 2
-     * has settled bboxes. */
+    /* Frame 1: declare 20 buttons; frame 2 has settled bboxes. */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
     CLAY({.id = CLAY_ID("bulk_root"), .layout = {.padding = CLAY_PADDING_ALL(20), .childGap = 8}, .backgroundColor = {30, 30, 30, 255}}) {
@@ -1833,41 +1483,14 @@ static void test_inspector_alternations_bulk_scene_after_strategy_a(void) {
     TEST_ASSERT_GREATER_THAN_UINT32(50U, inside_cmd_count);
 
     char msg[200];
-    (void)snprintf(msg, sizeof msg, "inspector RECT<->TEXT alternations (bulk 20-row scene): %u (cap 60). cmd_count=%u. STRATEGY A scaling regression?", alternations, inside_cmd_count);
-    /* 60 cap = 20 rows * ~2 alternations/row + ~20 for header/info-pane.
-     * Pre-fix measurement on the same scene: 120 alternations / 344 cmds.
-     * Post-fix: 44 / 237 (63% alternation reduction). */
+    (void)snprintf(msg, sizeof msg, "inspector RECT↔TEXT alternations (bulk 20-row scene): %u (cap 60). cmd_count=%u", alternations, inside_cmd_count);
+    /* 60 cap = 20 rows × ~2 + ~20 for header/info-pane. */
     TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(60U, alternations, msg);
 }
 
-/* ---- Test 15x-perf-layer-split: BG/TEXT layer split collapses dispatch order
- * to two monotype runs per scissor segment ----
- *
- * Phase 56 ext perf (BG/TEXT split): the inspector now tags every CLAY
- * container with PANEL_BG (250) and every CLAY_TEXT config with PANEL_TEXT
- * (251). The walker sorts within each zIndex segment by (layer asc,
- * declaration), so AFTER sort the dispatch order is:
- *   1) all PANEL_BG commands (RECT/IMAGE/BORDER, sprite pipeline) in
- *      declaration order  -> ONE sprite batch
- *   2) all PANEL_TEXT commands (TEXT, text pipeline) in declaration order
- *      -> ONE text batch
- * Pipeline alternations inside the inspector footprint collapse from O(rows)
- * to ~1 per scissor segment (one BG -> TEXT boundary). The walker's layer
- * iteration is ascending (active_layers bitmask drained LSB-first via
- * __builtin_ctz) so the BG-before-TEXT painter's order is preserved.
- *
- * Pin shape: scan frozen_cmds and verify the invariant that backs the
- * collapse:
- *   - EVERY inspector cmd at PANEL_BG is rect-pipeline (RECT/IMAGE/BORDER).
- *   - EVERY inspector cmd at PANEL_TEXT is text-pipeline (TEXT).
- *
- * If either invariant breaks, the layer-sort batching no longer collapses
- * dispatch and the alternation count regresses. The post-layer-sort
- * alternation lower-bound (number of zIndex-segment / scissor-segment
- * boundaries the inspector crosses) is also asserted as ~2 (one for the
- * sidebar BG->TEXT and one for the info-pane BG->TEXT, since the info pane
- * sits inside its own clip sub-tree -- SCISSOR is a hard barrier in the
- * walker). */
+/* ---- Test 15x-perf-layer-split: BG (250) carries only sprite cmds, TEXT (251)
+ * only text cmds, so the walker's layer-sort collapses dispatch to one BG→TEXT
+ * boundary per scissor segment. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_layer_split_collapses_dispatch(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -1909,8 +1532,7 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
     uint32_t bad_text_with_sprite_pipe = 0U;
     for (int32_t i = 0; i < arr->length; ++i) {
         const Clay_RenderCommand *cc = &arr->internalArray[i];
-        /* Restrict to inspector footprint -- skip user widgets + cross-cutting
-         * non-drawable barriers. */
+        /* Restrict to inspector footprint; skip user widgets + non-drawable barriers. */
         if (cc->boundingBox.x < panel_left_x) {
             continue;
         }
@@ -1919,7 +1541,7 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
             continue;
         }
         if (cc->userData == NULL) {
-            continue; /* unlayered -- excluded from the split invariant */
+            continue; /* unlayered — excluded from split invariant */
         }
         const nt_ui_element_data_t *ed = (const nt_ui_element_data_t *)cc->userData;
         const uint8_t layer = ed->layer;
@@ -1936,8 +1558,7 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
         }
     }
 
-    /* Vacuous-pass guards: both buckets non-empty (the inspector emits dozens
-     * of containers + texts). */
+    /* Vacuous-pass guards: both buckets non-empty. */
     TEST_ASSERT_GREATER_THAN_UINT32(10U, bg_count);
     TEST_ASSERT_GREATER_THAN_UINT32(10U, text_count);
 
@@ -1948,17 +1569,8 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
     (void)snprintf(msg, sizeof msg, "PANEL_TEXT layer must carry only text cmds; got %u non-TEXT cmd(s) on TEXT (text_count=%u)", bad_text_with_sprite_pipe, text_count);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0U, bad_text_with_sprite_pipe, msg);
 
-    /* Simulate the walker's layer-sort dispatch order and count alternations
-     * over the inspector footprint. For each zIndex segment between SCISSOR/
-     * CUSTOM/NONE barriers, group commands by layer ascending then by
-     * declaration order, then count pipeline alternations across the resulting
-     * stream. Post-fix the alternations cap is small (<= one BG -> TEXT
-     * boundary per inspector-bearing scissor segment) -- a hard pin against
-     * future code accidentally re-mixing BG/TEXT inside one layer.
-     *
-     * The simulation is intentionally lightweight: we collect inspector cmds
-     * per segment, sort indices by layer asc, then emit pipes in that order.
-     * Bounded by frozen_cmds.length so no heap alloc. */
+    /* Simulate the layer-sort dispatch + count alternations per scissor segment.
+     * Bounded by frozen_cmds.length; no heap alloc. */
     enum { PIPE_NONE = 0, PIPE_SPRITE = 1, PIPE_TEXT = 2, SEG_CAP = 1024 };
     int32_t seg_idx[SEG_CAP];
     uint8_t seg_layer[SEG_CAP];
@@ -2027,36 +1639,16 @@ static void test_inspector_layer_split_collapses_dispatch(void) {
         prev_z_valid = true;
     }
 
-    /* Post-fix the cap is small. <= 8 leaves headroom for: the inspector
-     * crosses several scissor/zIndex barriers (sidebar root, header bar,
-     * scroll clip, info-pane clip, floating panelContents). Each barrier
-     * resets the layer-sort and can add one BG->TEXT boundary. Measured
-     * value on this fixture: 5 alternations across the entire panel
-     * footprint. Pre-fix (single PANEL layer) the value would be O(rows)
-     * (~50 for this fixture) -- this hard ceiling pins both the optimization
-     * AND the BG-before-TEXT invariant inside each segment. */
+    /* Cap 8 leaves headroom for ~5 scissor/zIndex barriers (sidebar / header /
+     * scroll clip / info-pane clip / panelContents). */
     char msg2[200];
-    (void)snprintf(msg2, sizeof msg2, "post-layer-sort inspector dispatch alternations: %u (cap 8). bg_count=%u text_count=%u. BG/TEXT layer split regression?", sim_alternations, bg_count,
-                   text_count);
+    (void)snprintf(msg2, sizeof msg2, "post-sort inspector dispatch alternations: %u (cap 8). bg_count=%u text_count=%u", sim_alternations, bg_count, text_count);
     TEST_ASSERT_LESS_OR_EQUAL_UINT32_MESSAGE(8U, sim_alternations, msg2);
 }
 
-/* ---- Test 15y: viewport hover is TRANSFORM-AWARE via debug_zones scan ----
- *
- * Phase 56 ext fix (CHUNK B): Clay's pointerOverIds is axis-aligned in layout
- * space; for a widget rotated 25 deg the pointer coords land inside the
- * AXIS-ALIGNED bbox at one place but inside the VISUAL bbox at another. The
- * click/capture path already uses inverse-affine through the recorded accum
- * stack (D-56-07). The inspector viewport-hover now uses the SAME math by
- * scanning debug_zones (deepest declaration wins -> end of array first).
- *
- * Setup: declare a button at known bbox under a non-identity transform
- * (rotation 25 deg, scale, offset). The interaction query inside button_begin
- * records the zone with the accum snapshot. Frame 2's pointer sits at a
- * coordinate that is INSIDE the rotated visual but OUTSIDE the axis-aligned
- * layout bbox -- pre-fix Clay's pointerOverIds would have missed the widget
- * and inspector_highlight_id would be 0; post-fix the debug_zones scan picks
- * the widget via the same inverse-affine the click uses. */
+/* ---- Test 15y: viewport hover is transform-aware via debug_zones scan ----
+ * Pointer inside rotated visual but outside axis-aligned bbox; debug_zones
+ * inverse-affine picks the widget. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_hover_transformed_widget(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -2070,8 +1662,7 @@ static void test_inspector_hover_transformed_widget(void) {
     const float btn_cx = btn_x + (btn_w * 0.5F);
     const float btn_cy = btn_y + (btn_h * 0.5F);
 
-    /* Frame 1: declare under transform so Clay has the prev-frame bbox AND
-     * the accum is recorded into the zone. */
+    /* Frame 1: declare under transform; bbox cached + accum recorded. */
     nt_pointer_t f1 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f1, 1);
     nt_ui_transform_t baked = nt_ui_transform_defaults();
@@ -2134,40 +1725,19 @@ static void test_inspector_hover_transformed_widget(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Transform-aware path picked the widget. Without the fix, the axis-aligned
-     * pointerOverIds scan would have missed the widget (pointer outside layout
-     * AABB) -> highlight_id == 0. */
+    /* Transform-aware path picked the widget. */
     TEST_ASSERT_EQUAL_UINT32(nt_ui_id("xf_btn"), s_fx.ctx->inspector_highlight_id);
 }
 
-/* ---- Test 15z: REVIEW-2 P2-1 -- GPU scissor pinned to GAME area when overlay
- * renders, scissor restored to disabled on exit ----
- *
- * Pin for the followup commit "GPU scissor for inspector overlay (both
- * transformed + axis-aligned paths)". Pre-fix the axis-aligned overlay path
- * relied on per-rect CPU width clamps against panel_left_x, AND the
- * transformed path had NO clip math at all -- rotated/scaled highlights bled
- * OVER the sidebar. Post-fix both paths push the SAME GPU scissor
- * [vx, vy, panel_left_x - vx, vh] before emitting and restore disabled on exit.
- *
- * Setup: 800x600 viewport, NT_UI_INSPECTOR_PANEL_WIDTH = 400 -> panel_left_x
- * = 400. A selected widget extends from x=500..900, overlapping the sidebar.
- * After overlay_draw:
- *   - nt_gfx_test_scissor_rect() must report [0, 0, 400, 600] in physical px
- *     (the DIRECT-target path: target->fb_size = 0 -> nt_ui_internal_apply_*
- *     emits (vx + x, vy + vh - y - hp, wp, hp) = (0, 0, 400, 600)).
- *   - nt_gfx_test_scissor_enabled() must be FALSE (overlay restored the
- *     walker-exit invariant: scissor stack tore down to disabled). */
+/* ---- Test 15z: GPU scissor pinned to GAME area; restored to disabled on exit ---- */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_overlay_scissor_clips_highlight_outside_panel(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
     const float screen_w = 800.0F;
     const float screen_h = 600.0F;
 
-    /* Widget placed at x=500..900 -- straddles the sidebar left edge (400) so
-     * a no-clip overlay would bleed over the panel. We use a Clay floating
-     * element rather than a button so the selected-id resolves cleanly without
-     * pulling button-internal padding into the assertion. */
+    /* Widget at x=500..900 straddles sidebar edge (400). Plain floating element
+     * keeps selected_id resolution clean (no button padding interference). */
     const float btn_x = 500.0F;
     const float btn_y = 200.0F;
     const float btn_w = 400.0F; /* extends to x=900, well past panel_left=400 */
@@ -2182,8 +1752,7 @@ static void test_inspector_overlay_scissor_clips_highlight_outside_panel(void) {
     s_fx.ctx->inspector_selected_id = nt_ui_id("scissor_target");
     nt_ui_end(s_fx.ctx);
 
-    /* Frame 2: stable bbox; selected_id propagates to highlight_id via the
-     * inspector emit fallback chain. */
+    /* Frame 2: stable bbox; selected_id propagates to highlight_id. */
     nt_pointer_t f2 = make_pointer(0.0F, 0.0F);
     nt_ui_begin(s_fx.ctx, screen_w, screen_h, 0.0F, &f2, 1);
     CLAY({.id = CLAY_ID("scissor_target"),
@@ -2192,8 +1761,7 @@ static void test_inspector_overlay_scissor_clips_highlight_outside_panel(void) {
     nt_ui_end(s_fx.ctx);
     TEST_ASSERT_EQUAL_UINT32(nt_ui_id("scissor_target"), s_fx.ctx->inspector_highlight_id);
 
-    /* Pre-flight: ensure scissor is in a known sentinel state so the test can
-     * distinguish "overlay set it" from "leftover from a prior test". */
+    /* Pre-flight sentinel so we can attribute scissor changes to the overlay. */
     nt_gfx_set_scissor(0, 0, 0, 0);
     nt_gfx_set_scissor_enabled(false);
     int pre_rect[4] = {0};
@@ -2201,16 +1769,11 @@ static void test_inspector_overlay_scissor_clips_highlight_outside_panel(void) {
     TEST_ASSERT_EQUAL_INT(0, pre_rect[2]);
     TEST_ASSERT_EQUAL_INT(0, pre_rect[3]);
 
-    /* DIRECT target path: target->fb_size = 0 so apply_scissor_logical_to_physical
-     * routes through the simple branch (no scale/offset). */
+    /* DIRECT target path: fb_size = 0 → simple scissor branch (no scale/offset). */
     nt_ui_target_t target = {.viewport = {0.0F, 0.0F, screen_w, screen_h}};
     nt_ui_inspector_overlay_draw(s_fx.ctx, &target, NT_FONT_INVALID, 0.0F);
 
-    /* Scissor rect was set by the overlay to the GAME area:
-     *   x = vx + 0 = 0
-     *   y = (vy + vh) - 0 - vh = 0          (GL Y-bottom convention)
-     *   w = panel_left_x - vx = 400 - 0 = 400
-     *   h = vh = 600 */
+    /* Scissor = GAME area: [0, 0, 400, 600] (GL Y-bottom convention). */
     int rect[4] = {0};
     nt_gfx_test_scissor_rect(rect);
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, rect[0], "scissor x must be game-area left");
@@ -2218,15 +1781,12 @@ static void test_inspector_overlay_scissor_clips_highlight_outside_panel(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(400, rect[2], "scissor width must equal panel_left_x = screen_w - NT_UI_INSPECTOR_PANEL_WIDTH");
     TEST_ASSERT_EQUAL_INT_MESSAGE(600, rect[3], "scissor height must equal viewport height");
 
-    /* Restore invariant: overlay must disable scissor on exit (walker-exit
-     * invariant -- the scissor stack tore down to depth=0/disabled). */
+    /* Overlay must disable scissor on exit (walker-exit invariant). */
     TEST_ASSERT_FALSE_MESSAGE(nt_gfx_test_scissor_enabled(), "overlay must restore scissor to DISABLED on exit");
 }
 
-/* ---- Test 15: inactive inspector NEVER intercepts (no false positives) ----
- * Even if the pointer is at x=600 (would be inside the sidebar IF active),
- * the gate must stay off when the inspector is disabled -- otherwise the game
- * loses input the moment the user thinks they closed the debug view. */
+/* ---- Test 15: inactive inspector never intercepts ----
+ * Gate stays off when the inspector is disabled. */
 static void test_inspector_inactive_no_interception(void) {
     /* Inspector off (default). */
     TEST_ASSERT_FALSE(nt_ui_inspector_is_active(s_fx.ctx));
@@ -2240,13 +1800,9 @@ static void test_inspector_inactive_no_interception(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- REVIEW-2 P3-1: runtime nt_ui_inspector_metrics_t replaces hardcoded
- * panel_width / row_height / font_size / outer_padding / indent_width ---- */
+/* ---- Runtime nt_ui_inspector_metrics_t ---- */
 
-/* Pin the documented defaults (preserve pre-fix verbatim shape: 400 / 30 /
- * 16 / 10 / 16). Any silent tweak to the default constant trips this.
- * Unity floating-point assertions are disabled in this build, so float fields
- * are compared via fabsf within 1e-3 tolerance. */
+/* Pin documented defaults (400 / 30 / 16 / 10 / 16). */
 static void test_inspector_metrics_default_values(void) {
     TEST_ASSERT_TRUE(fabsf(NT_UI_INSPECTOR_METRICS_DEFAULT.panel_width - 400.0F) <= 1e-3F);
     TEST_ASSERT_TRUE(fabsf(NT_UI_INSPECTOR_METRICS_DEFAULT.row_height - 30.0F) <= 1e-3F);
@@ -2255,9 +1811,7 @@ static void test_inspector_metrics_default_values(void) {
     TEST_ASSERT_EQUAL_UINT8(16U, NT_UI_INSPECTOR_METRICS_DEFAULT.indent_width);
 }
 
-/* Freshly-created ctx must come out with defaults installed (not memset 0).
- * Pre-fix this slot didn't exist; if a future refactor reintroduces 0-init,
- * panel_width would be 0 which trips the > 0 invariant in every consumer. */
+/* Freshly-created ctx installs defaults, not memset 0. */
 static void test_inspector_metrics_zero_init_uses_defaults(void) {
     /* The fixture already created s_fx.ctx -- inspect its metrics directly. */
     TEST_ASSERT_TRUE(fabsf(s_fx.ctx->inspector_metrics.panel_width - 400.0F) <= 1e-3F);
@@ -2267,13 +1821,7 @@ static void test_inspector_metrics_zero_init_uses_defaults(void) {
     TEST_ASSERT_EQUAL_UINT8(16U, s_fx.ctx->inspector_metrics.indent_width);
 }
 
-/* set_metrics replaces the runtime panel_width AND the value flows into the
- * nt_ui_begin pointer-consume gate. Default 400: pointer at x=screen_w-100
- * (= 700 on 800 wide -> inside 400 panel) is consumed. After setter changes
- * panel_width to 200, the SAME pointer at x=700 is now OUTSIDE the panel
- * (panel left edge moves from 400 to 600 -> 700 still inside). Use 320 to
- * make it cleanly differ: x=420 -> in default 400 zone (400..800) but
- * OUTSIDE the post-setter 320 zone (480..800). */
+/* set_metrics flows panel_width into the pointer-consume gate. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_metrics_set_changes_input_consume_gate(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -2305,9 +1853,7 @@ static void test_inspector_metrics_set_changes_input_consume_gate(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* Invalid metrics MUST assert (death tests via the assert trap). Pins the
- * setter's input contract so a future regression that drops a check on one
- * field is caught. */
+/* Invalid metrics must assert (death tests via the assert trap). */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_metrics_setter_asserts_on_invalid(void) {
     nt_ui_inspector_metrics_t ok = NT_UI_INSPECTOR_METRICS_DEFAULT;
@@ -2330,10 +1876,7 @@ static void test_inspector_metrics_setter_asserts_on_invalid(void) {
     NT_TEST_EXPECT_ASSERT(nt_ui_inspector_set_metrics(s_fx.ctx, &zero_font));
 }
 
-/* The overlay's GPU scissor reads panel_width from ctx->inspector_metrics --
- * after set_metrics(320), the scissor rect width must reflect the new value
- * (screen_w - 320 = 480, not the pre-fix 400). Mirrors the commit-1 scissor
- * pin but with the runtime metric override. */
+/* Overlay scissor reads panel_width from ctx->inspector_metrics. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_metrics_set_changes_overlay_scissor(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -2345,8 +1888,7 @@ static void test_inspector_metrics_set_changes_overlay_scissor(void) {
     narrow.panel_width = 320.0F;
     nt_ui_inspector_set_metrics(s_fx.ctx, &narrow);
 
-    /* Declare a widget straddling the new panel edge (panel left = 800-320 = 480).
-     * Widget at x=500..900 -- crosses panel_left and triggers the scissor branch. */
+    /* Widget straddling the new panel edge (panel left = 480, widget at 500..900). */
     const float btn_x = 500.0F;
     const float btn_y = 200.0F;
     const float btn_w = 400.0F;
@@ -2395,7 +1937,6 @@ int main(void) {
     RUN_TEST(test_button_widget_auto_tagged);
     RUN_TEST(test_panel_widget_tagged);
     RUN_TEST(test_image_widget_tagged);
-    /* Phase 56 ext: nt_ui_label tags the TEXT leaf (not the parent). */
     RUN_TEST(test_label_widget_tagged_on_text_leaf);
     RUN_TEST(test_label_does_not_clobber_parent_widget);
     RUN_TEST(test_inspector_toggle_persists);
@@ -2403,79 +1944,38 @@ int main(void) {
     RUN_TEST(test_inspector_active_grows_element_count);
     RUN_TEST(test_inspector_many_widgets_safe);
     RUN_TEST(test_overlay_noop_without_highlight);
-    /* Phase 56 ext fix: sidebar input interception regression pins. */
     RUN_TEST(test_inspector_intercepts_pointer_over_sidebar);
     RUN_TEST(test_inspector_pointer_outside_sidebar_normal);
     RUN_TEST(test_inspector_walker_enumerates_user_tree);
-    /* Phase 56 ext bug-fix pass: widget_registry hit_padding + filter + hex fallback. */
     RUN_TEST(test_widget_register_padded_roundtrip);
     RUN_TEST(test_widget_unpadded_no_hit_padding);
     RUN_TEST(test_button_auto_records_hit_padding);
     RUN_TEST(test_inspector_filter_skips_anonymous);
     RUN_TEST(test_inspector_filter_keeps_text_leaves);
     RUN_TEST(test_inspector_emits_hex_for_unnamed_widget);
-    /* Phase 56 ext collapse/expand: dot-icon click state machine. */
     RUN_TEST(test_inspector_collapsed_storage);
     RUN_TEST(test_inspector_collapse_hides_children);
-    /* Phase 56 ext CHUNK C: inspector emits on NT_UI_LAYER_DEBUG_PANEL;
-     * highlight sits a layer BELOW the panel so it never peeks through. */
     RUN_TEST(test_inspector_root_emitted_on_debug_layer);
     RUN_TEST(test_layer_debug_value_above_game_layers);
     RUN_TEST(test_highlight_layer_below_panel_layer);
-    /* Phase 56 ext fix: text-content row hit-test (off-by-one selection). */
     RUN_TEST(test_inspector_click_text_content_row_selects_leaf);
-    /* Phase 56 ext (issue 2 re-diagnosis): overlay path end-to-end. The user-
-     * visible "hit-zone disappeared" was actually the cyan zone being hidden
-     * under the panel; commit 1 in this branch added a CPU clip. These tests
-     * pin the data chain (padding stored -> survives end -> highlight set
-     * via fallback -> overlay reads padding) so a future refactor cannot
-     * silently break the contract that surfaces the regression. */
     RUN_TEST(test_overlay_fallback_chain_with_padded_button);
     RUN_TEST(test_overlay_skips_padded_zone_for_zero_padding);
-    /* Phase 56 ext (layer-from-clay-userdata fix): the inspector's
-     * cdv_element_layer reads userData from BOTH SHARED and TEXT configs.
-     * CLAY_TEXT carries userData on Clay_TextElementConfig (no SHARED);
-     * IMAGE / panel / button / custom route userData through SHARED via
-     * Clay's auto-conversion of Clay_ElementDeclaration.userData. */
     RUN_TEST(test_inspector_reads_layer_from_text_config_userdata);
     RUN_TEST(test_inspector_reads_layer_from_shared_config_userdata);
-    /* Phase 56 ext fix: overlay projects hit-zone through accum transform
-     * (transformed widget case + axis-aligned fallback). */
     RUN_TEST(test_overlay_projects_through_accum_for_transformed_id);
     RUN_TEST(test_overlay_falls_back_to_axis_aligned_when_no_zone);
-    /* Phase 56 ext fix: viewport hover propagation (Clay__RenderDebugView
-     * clay.h:3303 mirror -- the floating ElementHighlight follows the
-     * widget under the pointer, not just sidebar row hover). */
     RUN_TEST(test_inspector_highlight_from_viewport_hover);
     RUN_TEST(test_inspector_highlight_ignores_panel_hover);
     RUN_TEST(test_inspector_highlight_zero_when_no_pointer_over);
     RUN_TEST(test_inspector_viewport_hover_prefers_widget_over_child);
-    /* Phase 56 ext fix (CHUNK B): viewport hover uses inverse-affine on the
-     * recorded debug_zones, NOT Clay's axis-aligned pointerOverIds. */
     RUN_TEST(test_inspector_hover_transformed_widget);
-    /* Phase 56 ext: every inspector-owned CLAY/CLAY_TEXT emit carries
-     * NT_UI_LAYER_DEBUG_PANEL (root + inner) or HIGHLIGHT (floating rect).
-     * No layer-0 leak. */
     RUN_TEST(test_inspector_inner_emits_carry_debug_layer);
-    /* STRATEGY A perf pin: per-row pill backgrounds dropped; RECT/TEXT
-     * alternations inside the panel footprint capped at 20 (pre-fix ~50,
-     * each row contributed ~6 alternations from radius/cfg/widget/layer pill
-     * backgrounds). */
     RUN_TEST(test_inspector_alternations_capped_after_strategy_a);
-    /* STRATEGY A scaling pin: 20-row demo-shaped scene stays under 60
-     * alternations. Validates linear scaling of the per-row saving (each
-     * row contributes ~2 alternations rather than ~6). */
     RUN_TEST(test_inspector_alternations_bulk_scene_after_strategy_a);
-    /* Phase 56 ext perf (BG/TEXT layer split): inspector tags every rect on
-     * PANEL_BG (250) and every text on PANEL_TEXT (251) so walker layer-sort
-     * batches both pipelines to ~2 dispatch alternations per scissor
-     * segment. */
     RUN_TEST(test_inspector_layer_split_collapses_dispatch);
-    /* Phase 56 ext REVIEW-2 P2-1: GPU scissor for inspector overlay
-     * (both transformed and axis-aligned paths). */
     RUN_TEST(test_inspector_overlay_scissor_clips_highlight_outside_panel);
     RUN_TEST(test_inspector_inactive_no_interception);
-    /* Phase 56 ext REVIEW-2 P3-1: runtime nt_ui_inspector_metrics_t. */
     RUN_TEST(test_inspector_metrics_default_values);
     RUN_TEST(test_inspector_metrics_zero_init_uses_defaults);
     RUN_TEST(test_inspector_metrics_set_changes_input_consume_gate);
