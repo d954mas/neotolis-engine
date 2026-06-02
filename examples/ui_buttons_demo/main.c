@@ -348,9 +348,9 @@ static void try_bind_resources(void) {
 // #region grid cell sizing
 /* Each cell = vertical stack of title + sub + button (360x320 cell, 320x180 btn). */
 #define CELL_W 360
-#define CELL_H 320
+#define CELL_H 240
 #define BTN_W 320
-#define BTN_H 180
+#define BTN_H 140
 
 /* Macro to declare the title + sub strip of a cell (callable inside a CLAY block).
  * The cell itself + the button slot are declared inline in the caller. */
@@ -531,7 +531,7 @@ static void declare_reference_buttons(void) {
          * overlapping neighbors. */
         CLAY({.id = CLAY_ID("ref-btn-baked-section"),
               .layout = {.sizing = {CLAY_SIZING_GROW(0), CLAY_SIZING_FIT(0)},
-                         .padding = {.left = 0, .right = 0, .top = 80, .bottom = 80},
+                         .padding = {.left = 0, .right = 0, .top = 30, .bottom = 30},
                          .layoutDirection = CLAY_TOP_TO_BOTTOM,
                          .childGap = 12,
                          .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
