@@ -827,7 +827,9 @@ void test_emit_slice9_from_region_scale_one_matches_atlas(void) {
     TEST_ASSERT_TRUE_MESSAGE(fabsf(v2[0] - 84.0F) < 0.5F, "scale=1.0 inner-right should be 84 px");
 }
 
-/* scale=2.0F → borders doubled → grid inner shifts 32/68 on 100-wide quad. */
+/* scale=2.0F → DST borders doubled (positions 32/68) BUT SRC borders unchanged
+ * → UV cut stays at atlas src_l/source_w. Guards the user-caught bug where the
+ * earlier impl scaled src too and corners sampled edge content. */
 void test_emit_slice9_from_region_scale_two_doubles_borders(void) {
     nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
     TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
@@ -840,12 +842,23 @@ void test_emit_slice9_from_region_scale_two_doubles_borders(void) {
     nt_sprite_renderer_emit_slice9_from_region(s_atlas_res, rs9, 0.0F, 0.0F, 100.0F, 100.0F, 2.0F, 0xFFFFFFFFU, 0, 0.0F);
 
     TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
+    /* Positions reflect DST (= src*scale = 32). */
     float v1[3];
     nt_sprite_renderer_test_last_emit_position(1, v1);
     TEST_ASSERT_TRUE_MESSAGE(fabsf(v1[0] - 32.0F) < 0.5F, "scale=2.0 inner-left should be 32 px");
     float v2[3];
     nt_sprite_renderer_test_last_emit_position(2, v2);
     TEST_ASSERT_TRUE_MESSAGE(fabsf(v2[0] - 68.0F) < 0.5F, "scale=2.0 inner-right should be 68 px");
+    /* UV reflects SRC (= atlas-baked 16). For the fixture: u_min=14000, u_range=3000,
+     * src_l=16, source_w=100 → uv_col1 = 14000 + 16*3000/100 = 14480.
+     * If a regression scales src too, this u shifts to 14960 (32 instead of 16). */
+    uint16_t uv1[2];
+    nt_sprite_renderer_test_last_emit_texcoord(1, uv1);
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(14480U, uv1[0], "scale=2.0 UV column-1 must use SRC=atlas borders, NOT DST");
+    uint16_t uv2[2];
+    nt_sprite_renderer_test_last_emit_texcoord(2, uv2);
+    /* uv_col2 = u_max - 16*u_range/100 = 17000 - 480 = 16520. */
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(16520U, uv2[0], "scale=2.0 UV column-2 must use SRC=atlas borders");
 }
 
 /* ---- main ---- */
