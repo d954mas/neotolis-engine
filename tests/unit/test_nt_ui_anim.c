@@ -1,19 +1,10 @@
-/* Direct-mapped per-id state-transition anim cache. Fixed power-of-2 array,
- * key = Clay uint32 id, replace-on-collision, no LRU.
+/* Per-id state-transition anim cache. Open addressing with linear probing
+ * (NT_UI_ANIM_PROBE_MAX from base bucket); collision coexists in adjacent
+ * slots, eviction only when all probes are taken by other ids.
  *
- * Test design:
- *   - Lerp convergence: cur += (target - cur) * clampf(transition_speed*dt,0,1).
- *       transition_speed == 0 -> instant (cur == target).
- *       transition_speed  > 0 -> cur approaches target over N dt steps
- *       (monotone, never overshoots).
- *   - First touch of a slot initializes cur = target (no animate-from-zero flash).
- *   - Replace-on-collision: two ids mapping to the same slot via
- *       id & (NT_UI_ANIM_SLOTS - 1) -> the second overwrites the first,
- *       no crash, no eviction scan.
- *
- * frame_dt is set directly on the fixture ctx (nt_ui_anim only reads it; no Clay
- * state needed). float_near is used because Unity float macros are excluded
- * (UNITY_EXCLUDE_FLOAT, see TESTING.md). */
+ * Tests: lerp convergence (cur += (target - cur) * k), first-touch no-flash
+ * snap, open-address coexistence, eviction-after-probes. frame_dt is set
+ * directly on the fixture; no Clay state needed. */
 
 #include <math.h>
 #include <stdalign.h>

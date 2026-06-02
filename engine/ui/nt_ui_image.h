@@ -23,7 +23,7 @@ typedef struct {
     uint16_t slice9_lrtb[4]; /* override; {0,0,0,0} + no flag = atlas default */
     float origin_x;          /* pivot 0..1; only used if ORIGIN_OVERRIDE flag set */
     float origin_y;
-    float slice9_scale; /* multiplies atlas/override slice9 borders; 1.0F = default, <=0 → 1.0F via walker */
+    float slice9_scale; /* multiplies atlas/override slice9 borders; MUST be finite > 0 (helper asserts). */
     uint8_t flip_bits;  /* NT_SPRITE_FLAG_FLIP_X | _FLIP_Y */
     uint8_t flags;      /* NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE */
 } nt_ui_image_style_t;

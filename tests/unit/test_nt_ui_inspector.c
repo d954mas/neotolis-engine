@@ -454,20 +454,9 @@ static void test_inspector_pointer_outside_sidebar_normal(void) {
     nt_ui_end(s_fx.ctx);
 }
 
-/* ---- Test 15b: walker enumerates the user's tree (NOT just the auto-root) ----
- * Regression pin: cdv_render_layout_elements_list runs from nt_ui_end BEFORE
- * Clay_EndLayout closes the auto-emitted Clay__RootContainer. At that point
- * Clay__RootContainer.children.elements is NULL even though children.length is
- * populated -- the walker has to fall back to context->layoutElementChildrenBuffer
- * to find the user's first-level CLAY blocks. The pre-fix walker stopped at the
- * auto-root and emitted only ONE ElementOuter row (regardless of how big the
- * user tree was). The fix surfaces every reachable element.
- *
- * We pin the regression by inspector-emitted-element-count growth. Each row the
- * walker visits emits a `CLAY({.id = CLAY_IDI("ntInsp_ElementOuter", ...)})`
- * block (+ inner Clay calls). With ~6 user elements (root + 5 panels) the
- * walker must emit substantially more inspector wrappers than the empty-root
- * test above. */
+/* Inspector emit walks the live Clay tree at nt_ui_end time, BEFORE
+ * Clay_EndLayout closes the auto-root. Pins growth: ~6 user elements
+ * produces many more inspector wrappers than an empty root. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void test_inspector_walker_enumerates_user_tree(void) {
     nt_ui_inspector_set_active(s_fx.ctx, true);
@@ -1196,7 +1185,7 @@ static void test_inspector_highlight_zero_when_no_pointer_over(void) {
     CLAY({.id = CLAY_ID("empty_root")}) {}
     nt_ui_end(s_fx.ctx);
 
-    /* Self-feedback pin: highlight is not any inspector-owned named id. */
+    /* highlight must not target any inspector-owned id (no self-feedback). */
     const uint32_t hl = s_fx.ctx->inspector_highlight_id;
     TEST_ASSERT_NOT_EQUAL_UINT32(Clay__HashString(CLAY_STRING("ntInsp_ElementHighlight"), 0, 0).id, hl);
     TEST_ASSERT_NOT_EQUAL_UINT32(Clay__HashString(CLAY_STRING("ntInsp_ElementHighlightRectangle"), 0, 0).id, hl);

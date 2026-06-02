@@ -38,20 +38,22 @@ if(NOT EMSCRIPTEN)
     add_test(NAME test_core COMMAND test_core)
 
     # --- Sanitizer proof test ---
-    # Intentionally triggers UB to prove ASan+UBSan are working.
-    # WILL_FAIL=TRUE: CTest expects this test to fail (sanitizer aborts it).
-    add_executable(test_sanitizer_proof unit/test_sanitizer_proof.c)
-    target_link_libraries(test_sanitizer_proof PRIVATE nt_core unity)
+    # Triggers UB to prove ASan+UBSan are detecting. Skipped on Windows+Clang
+    # where sanitizers are disabled (clang interception_win can't patch UCRT).
+    if(NOT (WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang"))
+        add_executable(test_sanitizer_proof unit/test_sanitizer_proof.c)
+        target_link_libraries(test_sanitizer_proof PRIVATE nt_core unity)
 
-    nt_set_warning_flags(test_sanitizer_proof)
-    nt_set_sanitizer_flags(test_sanitizer_proof)
+        nt_set_warning_flags(test_sanitizer_proof)
+        nt_set_sanitizer_flags(test_sanitizer_proof)
 
-    set_target_properties(test_sanitizer_proof PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
-    )
+        set_target_properties(test_sanitizer_proof PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/build/tests/${NT_PRESET_NAME}"
+        )
 
-    add_test(NAME sanitizer_proof COMMAND test_sanitizer_proof)
-    set_tests_properties(sanitizer_proof PROPERTIES WILL_FAIL TRUE)
+        add_test(NAME sanitizer_proof COMMAND test_sanitizer_proof)
+        set_tests_properties(sanitizer_proof PROPERTIES WILL_FAIL TRUE)
+    endif()
 
     # --- Swap demo tests ---
     # Same source, different implementation linked.

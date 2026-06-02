@@ -314,12 +314,14 @@ typedef struct {
  * every call returns the same struct. Use for state-dependent content
  * (label/icon swap on press), tooltips, previews. Pair with step in begin.
  *
- * Query must run in the SAME transform+clip context as the eventual step:
- * the inverse-affine reads accum_stack / clip_stack at call time.
+ * In-frame: must run in the SAME transform+clip context as the eventual step
+ * — hit-test reads accum_stack / clip_stack at call time. Outside-frame:
+ * memory-safe (snapshot/restore Clay ctx) and returns prev-frame state, but
+ * the result is only meaningful for widgets with NO active transform/clip
+ * push at query time. transform/clip-wrapped widgets need in-frame query.
  *
- * Query is also safe OUTSIDE begin/end (snapshot/restore Clay ctx like get_bbox);
- * it returns prev-frame state. step is strictly in-frame only — mutating cap
- * on stale frame_pointers fires spurious transitions. */
+ * step is strictly in-frame — mutating cap on stale frame_pointers fires
+ * spurious transitions. */
 nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id);
 
 /* Padded variant: inflates layout bbox by {left,right,top,bottom} BEFORE the
