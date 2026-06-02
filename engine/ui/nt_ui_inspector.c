@@ -1,19 +1,26 @@
 /* Phase 56 ext rework: nt_ui_inspector public API + post-walk overlay.
  *
- * The verbatim Clay-debug-view emit_layout body lives in nt_ui.c (it must
- * touch Clay private types: Clay_Context fields, Clay__GetHashMapItem,
- * Clay__ElementIsOffscreen, Clay__HashString, the layoutElementTreeRoots /
- * layoutElements / reusableElementIndexBuffer arrays, debugSelectedElementId,
- * etc. Those symbols are file-static or compile-time-private to the
- * CLAY_IMPLEMENTATION TU). This TU exposes the three public functions and
- * owns the post-walk single-element hit-zone overlay (which can stay
- * Clay-agnostic). The internal entry point nt_ui_internal_inspector_overlay
- * lives in nt_ui_internal.h and is implemented in nt_ui.c for the engine to
- * keep one TU per private surface.
+ * The verbatim Clay-debug-view emit_layout body lives in nt_ui_clay_internal.c
+ * -- the exclusive CLAY_IMPLEMENTATION TU. The body touches Clay private
+ * types (Clay_Context fields, Clay__GetHashMapItem, Clay__ElementIsOffscreen,
+ * Clay__HashString, the layoutElementTreeRoots / layoutElements /
+ * reusableElementIndexBuffer arrays, debugSelectedElementId, etc.) that are
+ * file-static or compile-time-private to the CLAY_IMPLEMENTATION TU.
+ *
+ * Pre-rework these symbols lived in nt_ui.c (which also defined
+ * CLAY_IMPLEMENTATION); the TU split moves CLAY_IMPLEMENTATION + the
+ * inspector body to nt_ui_clay_internal.c so nt_ui.c stays pure engine code
+ * using Clay's public API only.
+ *
+ * This TU exposes the public functions (set_active / is_active / set_metrics /
+ * pointer_consumed / emit_layout / overlay_draw) and owns the post-walk
+ * single-element hit-zone overlay (which stays Clay-agnostic and lives here
+ * verbatim). emit_layout forwards to nt_ui_internal_emit_inspector_layout_extern
+ * (prototype in nt_ui_clay_internal.h).
  *
  * Vendored Clay is zlib licensed (deps/clay/LICENSE -- (c) 2024 Nic Barker).
- * The emit_layout body in nt_ui.c is a renamed-and-adapted verbatim copy of
- * Clay__RenderDebugView / Clay__RenderDebugLayoutElementsList /
+ * The emit_layout body in nt_ui_clay_internal.c is a renamed-and-adapted
+ * verbatim copy of Clay__RenderDebugView / Clay__RenderDebugLayoutElementsList /
  * Clay__RenderDebugViewElementConfigHeader / Clay__RenderDebugViewColor /
  * Clay__RenderDebugViewCornerRadius (deps/clay/clay.h:3341-3800). The
  * CLAY({...}) emits are reproduced byte-for-byte where Clay's public API
@@ -30,6 +37,7 @@
 #include "renderers/nt_sprite_renderer.h"
 #include "renderers/nt_text_renderer.h"
 #include "resource/nt_resource.h"
+#include "ui/nt_ui_clay_internal.h" /* nt_ui_internal_emit_inspector_layout_extern prototype */
 #include "ui/nt_ui_internal.h"
 
 // #region metrics
@@ -86,11 +94,11 @@ bool nt_ui_inspector_pointer_consumed(const nt_ui_context_t *ctx) {
 }
 // #endregion
 
-// #region emit_layout (forwarder -- body in nt_ui.c)
+// #region emit_layout (forwarder -- body in nt_ui_clay_internal.c)
 /* The real implementation needs Clay private types (Clay_Context fields,
  * Clay__GetHashMapItem, etc.) which only the CLAY_IMPLEMENTATION TU can see.
- * Expose a thin internal accessor and forward to it -- the public symbol
- * stays in this header, the body stays where Clay's private surface lives. */
+ * Phase 56 ext rework (TU split): that TU is now nt_ui_clay_internal.c, not
+ * nt_ui.c. This public symbol forwards through the same prototype as before. */
 void nt_ui_inspector_emit_layout(nt_ui_context_t *ctx) {
     NT_ASSERT(ctx != NULL && "nt_ui_inspector_emit_layout: ctx must be non-NULL");
     nt_ui_internal_emit_inspector_layout_extern(ctx);

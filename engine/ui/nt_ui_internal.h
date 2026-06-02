@@ -330,12 +330,17 @@ typedef struct nt_ui_inspector_element_info {
 
 nt_ui_inspector_element_info_t nt_ui_internal_get_element_info(const nt_ui_context_t *ctx, uint32_t id);
 
-/* Phase 56 ext rework: external symbol that re-exposes the file-static
- * emit_layout body from nt_ui.c. The body must live there because it touches
- * Clay private types (Clay_Context fields, Clay__GetHashMapItem, layoutElements
- * array, etc.) that only the CLAY_IMPLEMENTATION TU can see. nt_ui_inspector.c
- * forwards the public emit_layout call to this. Asserts in-frame. */
-void nt_ui_internal_emit_inspector_layout_extern(nt_ui_context_t *ctx);
+/* Phase 56 ext rework: nt_ui_internal_emit_inspector_layout_extern moved to
+ * nt_ui_clay_internal.h (the bridge header for the CLAY_IMPLEMENTATION TU).
+ * Consumers that need it (nt_ui.c::nt_ui_end, nt_ui_inspector.c::emit_layout
+ * forwarder) include nt_ui_clay_internal.h directly. */
+
+/* Phase 56 ext (TU split): shared declaration-time transform composer. The
+ * walker (engine/ui/nt_ui.c), the hit-test, AND the inspector viewport-hover
+ * propagation (engine/ui/nt_ui_clay_internal.c) all need this; keeping ONE
+ * non-static definition in nt_ui.c with this extern keeps the math a single
+ * source of truth. local = T(O) * T(C) * R(θ)*S * T(-C). */
+void nt_ui_internal_compose_transform_level(const nt_ui_transform_t *t, float cx, float cy, float *a, float *b, float *c, float *d, float *tx, float *ty);
 
 /* Phase 56 ext fix (inspector overlay transform-aware): shared math + emit
  * helpers used by BOTH nt_ui_debug_draw_hit_zones AND

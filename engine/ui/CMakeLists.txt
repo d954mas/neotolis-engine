@@ -35,6 +35,8 @@ nt_add_module(nt_ui LOG_DOMAIN "ui"
     nt_ui.c
     nt_ui.h
     nt_ui_internal.h
+    nt_ui_clay_internal.c
+    nt_ui_clay_internal.h
     nt_ui_label.c
     nt_ui_label.h
     nt_ui_scale.c
