@@ -124,6 +124,12 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
 void nt_sprite_renderer_emit_slice9_from_region(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, float slice9_scale, uint32_t color_packed, uint8_t flip_bits,
                                                 float rotation);
 
+/* Separate src (UV cut into atlas) and dst (destination corner size) borders.
+ * Use when game has its own borders (override) but wants visual zoom decoupled
+ * from UV. emit_slice9 = src==dst; emit_slice9_from_region = src=atlas, dst=src*scale. */
+void nt_sprite_renderer_emit_slice9_explicit(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t src_sl, uint16_t src_sr, uint16_t src_st, uint16_t src_sb,
+                                             uint16_t dst_sl, uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, float rotation);
+
 /* Emit an arbitrary triangle list sampling a single UV from the given
  * atlas region. Intended for solid-color shapes drawn against a
  * white-pixel region (rounded corners, ring sectors, custom fan/strip).

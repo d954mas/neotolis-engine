@@ -886,14 +886,18 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
 
     if (has_s9_override || region_slice9) {
         if (has_s9_override) {
-            /* Scale override borders inline to preserve the existing emit_slice9 path. */
-            const uint16_t sl = (uint16_t)(((float)p->slice9_override[0] * s9_scale) + 0.5F);
-            const uint16_t sr = (uint16_t)(((float)p->slice9_override[1] * s9_scale) + 0.5F);
-            const uint16_t st = (uint16_t)(((float)p->slice9_override[2] * s9_scale) + 0.5F);
-            const uint16_t sb = (uint16_t)(((float)p->slice9_override[3] * s9_scale) + 0.5F);
-            nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, sl, sr, st, sb, col, p->flip_bits, rotation);
+            /* SRC = override (UV cut), DST = override × scale (corner size). */
+            const uint16_t src_l = p->slice9_override[0];
+            const uint16_t src_r = p->slice9_override[1];
+            const uint16_t src_t = p->slice9_override[2];
+            const uint16_t src_b = p->slice9_override[3];
+            const uint16_t dst_l = (uint16_t)(((float)src_l * s9_scale) + 0.5F);
+            const uint16_t dst_r = (uint16_t)(((float)src_r * s9_scale) + 0.5F);
+            const uint16_t dst_t = (uint16_t)(((float)src_t * s9_scale) + 0.5F);
+            const uint16_t dst_b = (uint16_t)(((float)src_b * s9_scale) + 0.5F);
+            nt_sprite_renderer_emit_slice9_explicit(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, src_l, src_r, src_t, src_b, dst_l, dst_r, dst_t, dst_b, col, p->flip_bits, rotation);
         } else {
-            /* Atlas-driven path: read region borders + scale via the renderer helper. */
+            /* Atlas-driven path: src = atlas-baked, dst = src*scale (inside helper). */
             nt_sprite_renderer_emit_slice9_from_region(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, s9_scale, col, p->flip_bits, rotation);
         }
         return;

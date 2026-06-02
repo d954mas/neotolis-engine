@@ -1047,6 +1047,11 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
                                     uint8_t flip_bits, float rotation) {
     emit_slice9_internal(atlas, region_index, x, y, w, h, sl, sr, st, sb, sl, sr, st, sb, color_packed, flip_bits, rotation);
 }
+
+void nt_sprite_renderer_emit_slice9_explicit(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t src_sl, uint16_t src_sr, uint16_t src_st, uint16_t src_sb,
+                                             uint16_t dst_sl, uint16_t dst_sr, uint16_t dst_st, uint16_t dst_sb, uint32_t color_packed, uint8_t flip_bits, float rotation) {
+    emit_slice9_internal(atlas, region_index, x, y, w, h, src_sl, src_sr, src_st, src_sb, dst_sl, dst_sr, dst_st, dst_sb, color_packed, flip_bits, rotation);
+}
 // #endregion
 
 // #region emit_slice9_from_region
