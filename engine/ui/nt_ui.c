@@ -159,7 +159,10 @@ size_t nt_ui_min_arena_size(const nt_ui_create_desc_t *desc) {
     Clay_SetCurrentContext(saved_ctx);
     const uint32_t max_m = (desc->max_markers > 0U) ? desc->max_markers : desc->max_elements * 2U;
     const size_t marker_bytes = NT_ALIGN_UP(sizeof(nt_ui_marker_t) * max_m, NT_UI_CACHE_LINE);
-    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + marker_bytes + clay_bytes;
+    /* Walker pre-pass arrays sized to max_elements so the hot path never allocs. */
+    const size_t baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t sorted_bytes = NT_ALIGN_UP(sizeof(int32_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    return NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE) + marker_bytes + baked_bytes + sorted_bytes + clay_bytes;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -177,15 +180,19 @@ nt_ui_context_t *nt_ui_create_context(void *arena, size_t arena_size, const nt_u
     ctx->inspector_metrics = NT_UI_INSPECTOR_METRICS_DEFAULT;
 
     const size_t ctx_size = NT_ALIGN_UP(sizeof(struct nt_ui_context), NT_UI_CACHE_LINE);
-    /* Layout: [ctx struct][markers][Clay arena]. */
+    /* Layout: [ctx struct][markers][walker_baked][walker_sorted][Clay arena]. */
     ctx->max_elements = desc->max_elements;
     const uint32_t max_m = (desc->max_markers > 0U) ? desc->max_markers : desc->max_elements * 2U;
     const size_t marker_bytes = NT_ALIGN_UP(sizeof(nt_ui_marker_t) * max_m, NT_UI_CACHE_LINE);
+    const size_t baked_bytes = NT_ALIGN_UP(sizeof(nt_ui_baked_xform_t) * desc->max_elements, NT_UI_CACHE_LINE);
+    const size_t sorted_bytes = NT_ALIGN_UP(sizeof(int32_t) * desc->max_elements, NT_UI_CACHE_LINE);
     ctx->markers = (nt_ui_marker_t *)((char *)arena + ctx_size);
     ctx->max_markers = max_m;
     ctx->marker_count = 0;
-    void *clay_mem = (char *)arena + ctx_size + marker_bytes;
-    const size_t clay_size = arena_size - ctx_size - marker_bytes;
+    ctx->walker_baked = (nt_ui_baked_xform_t *)((char *)arena + ctx_size + marker_bytes);
+    ctx->walker_sorted = (int32_t *)((char *)arena + ctx_size + marker_bytes + baked_bytes);
+    void *clay_mem = (char *)arena + ctx_size + marker_bytes + baked_bytes + sorted_bytes;
+    const size_t clay_size = arena_size - ctx_size - marker_bytes - baked_bytes - sorted_bytes;
 
     /* Stage max_elements via the Clay global so Clay_Initialize inherits it;
      * SetMaxElementCount writes per-ctx if current is non-NULL — null it first. */
@@ -1568,18 +1575,15 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
          * bake transform/opacity per render-command index. Markers fire
          * before the Clay command whose declaration index they precede.
          * Skipped entirely when marker_count == 0 (identity transform). */
-        typedef struct {
-            float a, b, c, d, tx, ty;
-            float scale_x, scale_y, rotation, opacity;
-        } baked_xform_t;
-        baked_xform_t *baked = NULL;
+        nt_ui_baked_xform_t *baked = NULL;
 
         uint32_t active_layers[8] = {0U};
         if (ctx->marker_count > 0) {
-            baked = (baked_xform_t *)nt_mem_scratch_alloc(sizeof(baked_xform_t) * (size_t)seg_n, _Alignof(baked_xform_t));
+            /* ctx-preallocated, max_elements-sized -- no hot-path scratch alloc. */
+            baked = ctx->walker_baked;
             /* Sort indices by nt_layout_index so marker drain sees declaration
              * order regardless of Clay's z-sort on the render command array. */
-            int32_t *sorted = (int32_t *)nt_mem_scratch_alloc(sizeof(int32_t) * (size_t)seg_n, _Alignof(int32_t));
+            int32_t *sorted = ctx->walker_sorted;
             for (int32_t k = 0; k < seg_n; ++k) {
                 sorted[k] = k;
             }
@@ -1619,7 +1623,7 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
                     walker_recompute_transform(&ws);
                 }
                 /* baked[] indexed by original array position for layer dispatch. */
-                baked[orig_idx] = (baked_xform_t){
+                baked[orig_idx] = (nt_ui_baked_xform_t){
                     .a = ws.aff_a,
                     .b = ws.aff_b,
                     .c = ws.aff_c,

@@ -82,6 +82,13 @@ typedef struct {
     };
 } nt_ui_marker_t;
 
+/* Walker pre-pass per-command baked transform. Preallocated in ctx so
+ * the walker hot path never hits the scratch arena. */
+typedef struct {
+    float a, b, c, d, tx, ty;
+    float scale_x, scale_y, rotation, opacity;
+} nt_ui_baked_xform_t;
+
 /* Lives at arena head; hot fields first. Per-ctx -- no module globals. */
 struct nt_ui_context {
     Clay_Context *clay;
@@ -133,6 +140,11 @@ struct nt_ui_context {
     nt_ui_marker_t *markers; /* allocated from arena at create_context */
     uint32_t marker_count;
     uint32_t max_markers;
+
+    /* Walker pre-pass scratch — preallocated, max_elements-sized so the hot
+     * path never touches the per-frame scratch arena. */
+    nt_ui_baked_xform_t *walker_baked;
+    int32_t *walker_sorted;
 
     /* Per-walk metrics. Walker writes; nt_ui_get_last_walk_* reads. */
     uint32_t last_walk_draw_call_delta;

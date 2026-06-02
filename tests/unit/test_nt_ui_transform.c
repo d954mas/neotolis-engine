@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "clay.h"
+#include "memory/nt_mem_scratch.h"
 #include "renderers/nt_sprite_renderer.h"
 #include "test_helpers/nt_assert_trap.h"
 #include "test_helpers/ui_walker_fixture.h"
@@ -558,6 +559,38 @@ static void test_zsorted_marker_drain_order(void) {
     TEST_ASSERT_TRUE(pos[0] == 30.0F);
 }
 
+/* Walker pre-pass must not touch the scratch arena — baked/sorted arrays
+ * are preallocated in ctx (audit F2: no hidden hot-path realloc). */
+static void test_walker_no_scratch_alloc_when_markers(void) {
+    nt_ui_transform_t t = {.offset_x = 5.0F, .offset_y = 0, .rotation = 0, .scale_x = 1.0F, .scale_y = 1.0F};
+    inject_marker(MARKER_PUSH_TRANSFORM, &t, 1.0F);
+
+    s_test_cmds[0].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[0].boundingBox = (Clay_BoundingBox){.x = 0, .y = 0, .width = 40, .height = 30};
+    s_test_cmds[0].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 255, .b = 255, .a = 255};
+    track_clay_element_cmd(0);
+
+    s_test_cmds[1].commandType = CLAY_RENDER_COMMAND_TYPE_RECTANGLE;
+    s_test_cmds[1].boundingBox = (Clay_BoundingBox){.x = 50, .y = 0, .width = 40, .height = 30};
+    s_test_cmds[1].renderData.rectangle.backgroundColor = (Clay_Color){.r = 255, .g = 0, .b = 0, .a = 255};
+    track_clay_element_cmd(1);
+
+    inject_marker(MARKER_POP_TRANSFORM, NULL, 1.0F);
+    inject_frozen_cmds(2);
+
+    /* Baseline scratch usage right before the walk. */
+    nt_mem_scratch_reset();
+    const size_t scratch_before = nt_mem_scratch_test_used();
+
+    nt_ui_target_t target = {.viewport = {0, 0, 800, 600}};
+    nt_ui_walk(s_fx.ctx, &target);
+
+    /* Walker hot path must not have grown scratch usage. */
+    TEST_ASSERT_EQUAL_size_t(scratch_before, nt_mem_scratch_test_used());
+    /* Sanity: transform actually applied (path was exercised, not just skipped). */
+    TEST_ASSERT_EQUAL_UINT32(1U, nt_ui_get_last_walk_transform_pushes(s_fx.ctx));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_push_pop_transform_balanced);
@@ -576,5 +609,6 @@ int main(void) {
     RUN_TEST(test_empty_container_scale_no_crash);
     RUN_TEST(test_scale_before_scissor_resolves_center);
     RUN_TEST(test_zsorted_marker_drain_order);
+    RUN_TEST(test_walker_no_scratch_alloc_when_markers);
     return UNITY_END();
 }
