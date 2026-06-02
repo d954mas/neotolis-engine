@@ -54,11 +54,12 @@ typedef struct {
     uint16_t slice9_override[4]; /* {0,0,0,0} + no flag = use atlas default */
     float origin_x;
     float origin_y;
+    float slice9_scale; /* multiplies atlas/override slice9 borders; <=0 treated as 1.0F by walker */
     uint8_t flip_bits;
     uint8_t flags; /* copied from style (NT_UI_IMAGE_SLICE9_OVERRIDE | NT_UI_IMAGE_ORIGIN_OVERRIDE) */
     uint8_t _reserved[2];
 } nt_ui_image_payload_t;
-_Static_assert(sizeof(nt_ui_image_payload_t) == 28, "nt_ui_image_payload_t stable ABI");
+_Static_assert(sizeof(nt_ui_image_payload_t) == 32, "nt_ui_image_payload_t stable ABI");
 
 /* Typed wrapper for Clay CUSTOM element data. Engine and game share the
  * same customData slot; type tag distinguishes engine anchors from game

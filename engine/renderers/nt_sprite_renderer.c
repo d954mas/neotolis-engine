@@ -1022,6 +1022,46 @@ void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, 
 }
 // #endregion
 
+// #region emit_slice9_from_region
+/* Scales the atlas region's baked borders by slice9_scale; rounds nearest. */
+// NOLINTNEXTLINE(readability-function-cognitive-complexity)
+void nt_sprite_renderer_emit_slice9_from_region(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, float slice9_scale, uint32_t color_packed, uint8_t flip_bits,
+                                                float rotation) {
+    NT_ASSERT(s_sprite.initialized);
+    NT_ASSERT(atlas.id != 0 && "nt_sprite_renderer_emit_slice9_from_region: invalid atlas handle");
+    NT_ASSERT(nt_resource_is_ready(atlas) && "nt_sprite_renderer_emit_slice9_from_region: atlas must be READY");
+    NT_ASSERT(isfinite(slice9_scale) && slice9_scale > 0.0F && "nt_sprite_renderer_emit_slice9_from_region: slice9_scale must be finite > 0");
+
+    const nt_texture_region_t *r = nt_atlas_get_region(atlas, region_index);
+    if (r->vertex_count == 0U) {
+        return; /* tombstone or out-of-range */
+    }
+    /* Round-nearest preserves symmetry at scale=1.0 (e.g. 16*1.0F == 16). */
+    const uint16_t sl = (uint16_t)(((float)r->slice9_lrtb[0] * slice9_scale) + 0.5F);
+    const uint16_t sr = (uint16_t)(((float)r->slice9_lrtb[1] * slice9_scale) + 0.5F);
+    const uint16_t st = (uint16_t)(((float)r->slice9_lrtb[2] * slice9_scale) + 0.5F);
+    const uint16_t sb = (uint16_t)(((float)r->slice9_lrtb[3] * slice9_scale) + 0.5F);
+    /* Per-side clamp so scale>>1 still satisfies emit_slice9's sl+sr<source_w assert. */
+    const uint16_t max_lr = (uint16_t)(r->source_w - 1U);
+    const uint16_t max_tb = (uint16_t)(r->source_h - 1U);
+    uint16_t fsl = sl;
+    uint16_t fsr = sr;
+    uint16_t fst = st;
+    uint16_t fsb = sb;
+    if (fsl + fsr > max_lr) {
+        const uint32_t total = (uint32_t)fsl + (uint32_t)fsr;
+        fsl = (uint16_t)(((uint32_t)fsl * max_lr) / total);
+        fsr = (uint16_t)(max_lr - fsl);
+    }
+    if (fst + fsb > max_tb) {
+        const uint32_t total = (uint32_t)fst + (uint32_t)fsb;
+        fst = (uint16_t)(((uint32_t)fst * max_tb) / total);
+        fsb = (uint16_t)(max_tb - fst);
+    }
+    nt_sprite_renderer_emit_slice9(atlas, region_index, x, y, w, h, fsl, fsr, fst, fsb, color_packed, flip_bits, rotation);
+}
+// #endregion
+
 // #region draw_list
 /* Phase 1: open a cmd per batch_key, stream verts into staging via
  * emit_one. Phase 2 = nt_sprite_renderer_flush. */

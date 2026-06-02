@@ -117,6 +117,13 @@ void nt_sprite_renderer_emit_region(nt_resource_t atlas, uint32_t region_index, 
 void nt_sprite_renderer_emit_slice9(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, uint16_t sl, uint16_t sr, uint16_t st, uint16_t sb, uint32_t color_packed,
                                     uint8_t flip_bits, float rotation);
 
+/* Read atlas region's baked slice9 borders, multiply by slice9_scale, emit.
+ * scale=1.0 → atlas borders verbatim. scale > 1 enlarges corners, scale < 1
+ * shrinks. Caller is responsible that scaled corners fit (w, h); excess is
+ * proportionally clamped inside emit_slice9 (same path as the override). */
+void nt_sprite_renderer_emit_slice9_from_region(nt_resource_t atlas, uint32_t region_index, float x, float y, float w, float h, float slice9_scale, uint32_t color_packed, uint8_t flip_bits,
+                                                float rotation);
+
 /* Emit an arbitrary triangle list sampling a single UV from the given
  * atlas region. Intended for solid-color shapes drawn against a
  * white-pixel region (rounded corners, ring sectors, custom fan/strip).

@@ -1,5 +1,6 @@
 #include "sprite_comp/nt_sprite_comp.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -23,6 +24,7 @@ static uint32_t *s_atlas_revision; /* cached atlas snapshot revision */
 static nt_sprite_resolved_region_t *s_resolved;
 static float (*s_origin)[2];         /* effective origin */
 static uint16_t (*s_slice9_lrtb)[4]; /* per-entity slice9 override [l,r,t,b] */
+static float *s_slice9_scale;        /* per-entity slice9 scale, default 1.0F */
 static uint8_t *s_flags;
 
 /* ---- Helpers ---- */
@@ -105,6 +107,7 @@ static void sprite_default(uint16_t idx) {
     s_origin[idx][0] = 0.0F;
     s_origin[idx][1] = 0.0F;
     memset(s_slice9_lrtb[idx], 0, sizeof(s_slice9_lrtb[0]));
+    s_slice9_scale[idx] = 1.0F;
     s_flags[idx] = 0;
 }
 
@@ -117,6 +120,7 @@ static void sprite_swap(uint16_t dst, uint16_t src) {
     s_origin[dst][0] = s_origin[src][0];
     s_origin[dst][1] = s_origin[src][1];
     memcpy(s_slice9_lrtb[dst], s_slice9_lrtb[src], sizeof(s_slice9_lrtb[0]));
+    s_slice9_scale[dst] = s_slice9_scale[src];
     s_flags[dst] = s_flags[src];
 }
 
@@ -146,11 +150,18 @@ nt_result_t nt_sprite_comp_init(const nt_sprite_comp_desc_t *desc) {
     s_resolved = (nt_sprite_resolved_region_t *)calloc(cap, sizeof(nt_sprite_resolved_region_t));
     s_origin = calloc(cap, sizeof(*s_origin));
     s_slice9_lrtb = calloc(cap, sizeof(*s_slice9_lrtb));
+    s_slice9_scale = (float *)calloc(cap, sizeof(float));
     s_flags = (uint8_t *)calloc(cap, sizeof(uint8_t));
 
-    if (!s_atlas || !s_region_hash || !s_region_index || !s_atlas_revision || !s_resolved || !s_origin || !s_slice9_lrtb || !s_flags) {
+    if (!s_atlas || !s_region_hash || !s_region_index || !s_atlas_revision || !s_resolved || !s_origin || !s_slice9_lrtb || !s_slice9_scale || !s_flags) {
         nt_sprite_comp_shutdown();
         return NT_ERR_INIT_FAILED;
+    }
+    /* calloc leaves slice9_scale[*] == 0.0F; sprite_default sets 1.0F per-entry
+     * at add time, but pre-add slots also need a sane value so view dumps don't
+     * trip the >0 contract. */
+    for (uint16_t i = 0; i < cap; i++) {
+        s_slice9_scale[i] = 1.0F;
     }
 
     /* Register last. No nt_entity_unregister_storage exists, so if this ran before
@@ -177,6 +188,7 @@ void nt_sprite_comp_shutdown(void) {
     free(s_resolved);
     free(s_origin);
     free(s_slice9_lrtb);
+    free(s_slice9_scale);
     free(s_flags);
     s_atlas = NULL;
     s_region_hash = NULL;
@@ -185,6 +197,7 @@ void nt_sprite_comp_shutdown(void) {
     s_resolved = NULL;
     s_origin = NULL;
     s_slice9_lrtb = NULL;
+    s_slice9_scale = NULL;
     s_flags = NULL;
     s_last_publication_epoch = 0;
     s_sync_dirty = false;
@@ -317,6 +330,19 @@ bool nt_sprite_comp_has_slice9_override(nt_entity_t entity) {
     return (s_flags[idx] & NT_SPRITE_FLAG_SLICE9_OV) != 0;
 }
 
+void nt_sprite_comp_set_slice9_scale(nt_entity_t entity, float scale) {
+    NT_ASSERT(isfinite(scale) && scale > 0.0F && "nt_sprite_comp_set_slice9_scale: scale must be finite > 0");
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    s_slice9_scale[idx] = scale;
+}
+
+float nt_sprite_comp_slice9_scale(nt_entity_t entity) {
+    uint16_t idx = nt_comp_storage_index(&s_storage, entity);
+    NT_ASSERT(idx != NT_INVALID_COMP_INDEX);
+    return s_slice9_scale[idx];
+}
+
 /* ---- Flip control ---- */
 
 void nt_sprite_comp_set_flip(nt_entity_t entity, bool flip_x, bool flip_y) {
@@ -370,6 +396,7 @@ nt_sprite_comp_view_t nt_sprite_comp_view(void) {
         .resolved = s_resolved,
         .origin = (const float(*)[2])s_origin,
         .slice9_lrtb = (const uint16_t(*)[4])s_slice9_lrtb,
+        .slice9_scale = s_slice9_scale,
         .flags = s_flags,
     };
 }

@@ -85,15 +85,16 @@ static uint32_t build_mock_atlas_blob(uint8_t *out, uint32_t cap, const mock_atl
 #define FIXTURE_R0_HASH 0x100ULL    /* rect, 4 verts, 6 indices */
 #define FIXTURE_R1_HASH 0x200ULL    /* rect, 4 verts, 6 indices */
 #define FIXTURE_RPOLY_HASH 0x300ULL /* polygon, 6 verts, 12 indices (4 triangles fan) */
+#define FIXTURE_RS9_HASH 0x400ULL   /* rect with baked slice9 borders 16/16/16/16 */
 #define FIXTURE_PAGE0_RID 0x7000ULL
 #define FIXTURE_PAGE1_RID 0x7001ULL
 
 static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
-    /* Layout: [r0 verts: 4] [r1 verts: 4] [poly verts: 6] = 14 verts
-     *         [r0 idx: 6] [r1 idx: 6] [poly idx: 12] = 24 indices */
-    NtAtlasVertex verts[14];
-    uint16_t indices[24];
-    for (uint16_t i = 0; i < 14; i++) {
+    /* Layout: [r0 verts: 4] [r1 verts: 4] [poly verts: 6] [rs9 verts: 4] = 18 verts
+     *         [r0 idx: 6] [r1 idx: 6] [poly idx: 12] [rs9 idx: 6] = 30 indices */
+    NtAtlasVertex verts[18];
+    uint16_t indices[30];
+    for (uint16_t i = 0; i < 18; i++) {
         verts[i].local_x = (int16_t)(i * 10);
         verts[i].local_y = (int16_t)(i * 20);
         verts[i].atlas_u = (uint16_t)(i * 1000);
@@ -127,8 +128,15 @@ static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
     indices[21] = 0;
     indices[22] = 4;
     indices[23] = 5;
+    /* rs9: rect quad */
+    indices[24] = 0;
+    indices[25] = 1;
+    indices[26] = 2;
+    indices[27] = 0;
+    indices[28] = 2;
+    indices[29] = 3;
 
-    NtAtlasRegion regions[3];
+    NtAtlasRegion regions[4];
     memset(regions, 0, sizeof(regions));
     regions[0].name_hash = FIXTURE_R0_HASH;
     regions[0].source_w = 64;
@@ -168,14 +176,34 @@ static uint32_t build_test_atlas_blob(uint8_t *atlas_blob, uint32_t cap) {
     regions[2].page_index = 0;
     regions[2].transform = 0;
 
+    /* rs9: 100x100 rect with baked slice9 borders {16,16,16,16}. Source big
+     * enough that scale=2.0F (→ 32) still satisfies emit_slice9's sl+sr<source_w
+     * contract; lets the from_region helper pass borders verbatim. */
+    regions[3].name_hash = FIXTURE_RS9_HASH;
+    regions[3].source_w = 100;
+    regions[3].source_h = 100;
+    regions[3].origin_x = 0.0F;
+    regions[3].origin_y = 0.0F;
+    regions[3].vertex_start = 14;
+    regions[3].index_start = 24;
+    regions[3].vertex_count = 4;
+    regions[3].index_count = 6;
+    regions[3].page_index = 0;
+    regions[3].transform = 0;
+    regions[3].flags = NT_ATLAS_REGION_FLAG_QUAD_012023;
+    regions[3].slice9_lrtb[0] = 16;
+    regions[3].slice9_lrtb[1] = 16;
+    regions[3].slice9_lrtb[2] = 16;
+    regions[3].slice9_lrtb[3] = 16;
+
     uint64_t page_ids[2] = {FIXTURE_PAGE0_RID, FIXTURE_PAGE1_RID};
     mock_atlas_spec_t spec = {
         .regions = regions,
-        .region_count = 3,
+        .region_count = 4,
         .vertices = verts,
-        .total_vertex_count = 14,
+        .total_vertex_count = 18,
         .indices = indices,
-        .total_index_count = 24,
+        .total_index_count = 30,
         .page_ids = page_ids,
         .page_count = 2,
     };
@@ -757,6 +785,69 @@ void test_sprite_renderer_sampler_override_does_not_stick(void) {
     TEST_ASSERT_EQUAL_UINT32(default_backend, last);
 }
 
+/* ---- emit_slice9_from_region tests ---- */
+
+/* Helper: resolve the rs9 region's runtime index in the registered atlas. */
+static uint32_t find_rs9_region_index(nt_resource_t atlas) {
+    const uint32_t count = nt_atlas_region_count(atlas);
+    for (uint32_t i = 0; i < count; i++) {
+        const nt_texture_region_t *r = nt_atlas_get_region(atlas, i);
+        if (r->slice9_lrtb[0] == 16 && r->slice9_lrtb[1] == 16 && r->slice9_lrtb[2] == 16 && r->slice9_lrtb[3] == 16) {
+            return i;
+        }
+    }
+    TEST_FAIL_MESSAGE("rs9 region with slice9_lrtb=16/16/16/16 not found");
+    return 0;
+}
+
+/* scale=1.0F → atlas borders unchanged → grid x_inner == x + 16; matches emit_slice9. */
+void test_emit_slice9_from_region_scale_one_matches_atlas(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xB1ULL);
+    nt_material_t mat = create_test_material();
+    nt_sprite_renderer_set_material(mat);
+
+    const uint32_t rs9 = find_rs9_region_index(s_atlas_res);
+    const float x = 0.0F;
+    const float y = 0.0F;
+    const float w = 100.0F;
+    const float h = 100.0F;
+    nt_sprite_renderer_emit_slice9_from_region(s_atlas_res, rs9, x, y, w, h, 1.0F, 0xFFFFFFFFU, 0, 0.0F);
+
+    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
+    /* Inner column 1 = x + (16 * 1.0F) = 16. */
+    float v1[3];
+    nt_sprite_renderer_test_last_emit_position(1, v1);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(v1[0] - 16.0F) < 0.5F, "scale=1.0 inner-left should be 16 px");
+    /* Inner column 2 = x + w - (16 * 1.0F) = 84. */
+    float v2[3];
+    nt_sprite_renderer_test_last_emit_position(2, v2);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(v2[0] - 84.0F) < 0.5F, "scale=1.0 inner-right should be 84 px");
+}
+
+/* scale=2.0F → borders doubled → grid inner shifts 32/68 on 100-wide quad. */
+void test_emit_slice9_from_region_scale_two_doubles_borders(void) {
+    nt_sprite_renderer_desc_t desc = nt_sprite_renderer_desc_defaults();
+    TEST_ASSERT_EQUAL(NT_OK, nt_sprite_renderer_init(&desc));
+
+    s_atlas_res = register_test_atlas(0xB2ULL);
+    nt_material_t mat = create_test_material();
+    nt_sprite_renderer_set_material(mat);
+
+    const uint32_t rs9 = find_rs9_region_index(s_atlas_res);
+    nt_sprite_renderer_emit_slice9_from_region(s_atlas_res, rs9, 0.0F, 0.0F, 100.0F, 100.0F, 2.0F, 0xFFFFFFFFU, 0, 0.0F);
+
+    TEST_ASSERT_EQUAL_UINT32(16U, nt_sprite_renderer_test_last_slice9_vertex_count());
+    float v1[3];
+    nt_sprite_renderer_test_last_emit_position(1, v1);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(v1[0] - 32.0F) < 0.5F, "scale=2.0 inner-left should be 32 px");
+    float v2[3];
+    nt_sprite_renderer_test_last_emit_position(2, v2);
+    TEST_ASSERT_TRUE_MESSAGE(fabsf(v2[0] - 68.0F) < 0.5F, "scale=2.0 inner-right should be 68 px");
+}
+
 /* ---- main ---- */
 
 int main(void) {
@@ -772,5 +863,7 @@ int main(void) {
     RUN_TEST(test_sprite_renderer_restore_gpu_cycle);
     RUN_TEST(test_sprite_renderer_pipeline_cache_capacity);
     RUN_TEST(test_sprite_renderer_sampler_override_does_not_stick);
+    RUN_TEST(test_emit_slice9_from_region_scale_one_matches_atlas);
+    RUN_TEST(test_emit_slice9_from_region_scale_two_doubles_borders);
     return UNITY_END();
 }

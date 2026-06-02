@@ -300,10 +300,11 @@ if(NOT EMSCRIPTEN)
     nt_setup_test_target(test_atlas)
 
     # --- Sprite component tests ---
-    add_executable(test_sprite_comp unit/test_sprite_comp.c)
+    add_executable(test_sprite_comp unit/test_sprite_comp.c unit/test_helpers/nt_assert_trap.c)
     target_link_libraries(test_sprite_comp PRIVATE
         nt_sprite_comp nt_atlas nt_entity nt_resource nt_hash nt_pool nt_shared unity
     )
+    target_include_directories(test_sprite_comp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/unit")
     target_compile_definitions(test_sprite_comp PRIVATE _CRT_SECURE_NO_WARNINGS)
     nt_setup_test_target(test_sprite_comp)
 

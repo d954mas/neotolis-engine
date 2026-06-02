@@ -131,6 +131,7 @@ static const nt_ui_button_style_t g_btn_standard_style = {
     .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
     .transition_speed = 12.0F,
     .hit_padding_lrtb = {16, 16, 16, 16},
+    .slice9_scale = 1.0F,
 };
 
 /* (b) SCALE: exaggerated scale per state. */
@@ -141,6 +142,7 @@ static const nt_ui_button_style_t g_btn_scale_style = {
     .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
     .transition_speed = 12.0F,
     .hit_padding_lrtb = {16, 16, 16, 16},
+    .slice9_scale = 1.0F,
 };
 
 /* (c) VISUAL SWAP: bg_region differs per state (blue/green); bg_region 0
@@ -152,6 +154,7 @@ static const nt_ui_button_style_t g_btn_swap_style = {
     .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
     .transition_speed = 12.0F,
     .hit_padding_lrtb = {16, 16, 16, 16},
+    .slice9_scale = 1.0F,
 };
 
 /* Variant (d)(e) ICON / ICON+TEXT: same shape as STANDARD but NO touch padding,
@@ -163,6 +166,20 @@ static const nt_ui_button_style_t g_btn_nopad_style = {
     .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
     .transition_speed = 12.0F,
     .hit_padding_lrtb = {0, 0, 0, 0},
+    .slice9_scale = 1.0F,
+};
+
+/* Row (g) SLICE9_SCALE knob — 3 buttons with identical art + size but slice9_scale
+ * 0.25 / 1.0 / 4.0 so the user can see baked atlas border (~16 px) scale to
+ * 4 / 16 / 64 px. Base template shared; per-cell copies patch slice9_scale. */
+static const nt_ui_button_style_t g_btn_s9_base = {
+    .idle = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .hover = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.05F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 1.0F},
+    .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .offset_x = 0.0F, .offset_y = 2.0F, .opacity = 1.0F},
+    .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .offset_x = 0.0F, .offset_y = 0.0F, .opacity = 0.4F},
+    .transition_speed = 12.0F,
+    .hit_padding_lrtb = {16, 16, 16, 16},
+    .slice9_scale = 1.0F, /* template; patched per-cell. */
 };
 // #endregion
 
@@ -201,6 +218,9 @@ static nt_ui_button_style_t s_btn_standard;
 static nt_ui_button_style_t s_btn_scale;
 static nt_ui_button_style_t s_btn_swap;
 static nt_ui_button_style_t s_btn_nopad;
+static nt_ui_button_style_t s_btn_s9_quarter;
+static nt_ui_button_style_t s_btn_s9_one;
+static nt_ui_button_style_t s_btn_s9_four;
 static uint32_t s_id_std;
 static uint32_t s_id_scale;
 static uint32_t s_id_swap;
@@ -208,6 +228,9 @@ static uint32_t s_id_icon;
 static uint32_t s_id_icontext;
 static uint32_t s_id_disabled;
 static uint32_t s_id_baked;
+static uint32_t s_id_s9_quarter;
+static uint32_t s_id_s9_one;
+static uint32_t s_id_s9_four;
 static bool s_btn_ids_ready;
 /* Per-variant click counters. */
 static uint32_t s_clicks_std;
@@ -217,6 +240,9 @@ static uint32_t s_clicks_icon;
 static uint32_t s_clicks_icontext;
 static uint32_t s_clicks_disabled; /* should always stay 0 */
 static uint32_t s_clicks_baked;
+static uint32_t s_clicks_s9_quarter;
+static uint32_t s_clicks_s9_one;
+static uint32_t s_clicks_s9_four;
 
 /* Runtime transform around the reference button grid. */
 static float s_xform_tx;
@@ -283,6 +309,28 @@ static void try_bind_resources(void) {
         s_btn_nopad.hover.bg_region = s_button_blue_idx;
         s_btn_nopad.pressed.bg_region = s_button_blue_idx;
         s_btn_nopad.disabled.bg_region = s_button_blue_idx;
+
+        /* (g) SLICE9_SCALE row — same blue art, only slice9_scale differs. */
+        s_btn_s9_quarter = g_btn_s9_base;
+        s_btn_s9_quarter.idle.bg_region = s_button_blue_idx;
+        s_btn_s9_quarter.hover.bg_region = s_button_blue_idx;
+        s_btn_s9_quarter.pressed.bg_region = s_button_blue_idx;
+        s_btn_s9_quarter.disabled.bg_region = s_button_blue_idx;
+        s_btn_s9_quarter.slice9_scale = 0.25F;
+
+        s_btn_s9_one = g_btn_s9_base;
+        s_btn_s9_one.idle.bg_region = s_button_blue_idx;
+        s_btn_s9_one.hover.bg_region = s_button_blue_idx;
+        s_btn_s9_one.pressed.bg_region = s_button_blue_idx;
+        s_btn_s9_one.disabled.bg_region = s_button_blue_idx;
+        s_btn_s9_one.slice9_scale = 1.0F;
+
+        s_btn_s9_four = g_btn_s9_base;
+        s_btn_s9_four.idle.bg_region = s_button_blue_idx;
+        s_btn_s9_four.hover.bg_region = s_button_blue_idx;
+        s_btn_s9_four.pressed.bg_region = s_button_blue_idx;
+        s_btn_s9_four.disabled.bg_region = s_button_blue_idx;
+        s_btn_s9_four.slice9_scale = 4.0F;
 
         s_atlas_bound = true;
         nt_log_info("ui_buttons_demo: atlas bound (button_blue + button_green + _white + icon_bunny)");
@@ -358,6 +406,9 @@ static void declare_reference_buttons(void) {
         s_id_icontext = nt_ui_id("btn_icontext");
         s_id_disabled = nt_ui_id("btn_disabled");
         s_id_baked = nt_ui_id("btn_baked");
+        s_id_s9_quarter = nt_ui_id("btn_s9_quarter");
+        s_id_s9_one = nt_ui_id("btn_s9_one");
+        s_id_s9_four = nt_ui_id("btn_s9_four");
         s_btn_ids_ready = true;
     }
 
@@ -505,6 +556,45 @@ static void declare_reference_buttons(void) {
                     s_clicks_baked++;
                 }
                 nt_ui_pop_transform(s_ctx);
+            }
+        }
+        // #endregion
+
+        // #region (g) SLICE9_SCALE row (0.25 / 1.0 / 4.0)
+        /* Identical button size + art; only slice9_scale differs. Demonstrates
+         * the new knob: scale=0.25 → tiny corners, 1.0 → atlas default, 4.0
+         * → chunky corners. */
+        CLAY({.id = CLAY_ID("ref-btn-row-s9"),
+              .layout = {.sizing = {CLAY_SIZING_FIT(0), CLAY_SIZING_FIT(0)}, .layoutDirection = CLAY_LEFT_TO_RIGHT, .childGap = 24, .childAlignment = {CLAY_ALIGN_X_CENTER, CLAY_ALIGN_Y_CENTER}}}) {
+            CLAY(CELL_LAYOUT) {
+                CELL_LABELS("SCALE 0.25", "tiny corners");
+                CLAY(BTN_SLOT_LAYOUT) {
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_s9_quarter, s_atlas_handle, &s_btn_s9_quarter, &s_btn_decl, true);
+                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "0.25x", &g_btn_label_style);
+                    if (nt_ui_button_end(s_ctx)) {
+                        s_clicks_s9_quarter++;
+                    }
+                }
+            }
+            CLAY(CELL_LAYOUT) {
+                CELL_LABELS("SCALE 1.0", "atlas default");
+                CLAY(BTN_SLOT_LAYOUT) {
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_s9_one, s_atlas_handle, &s_btn_s9_one, &s_btn_decl, true);
+                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "1.0x", &g_btn_label_style);
+                    if (nt_ui_button_end(s_ctx)) {
+                        s_clicks_s9_one++;
+                    }
+                }
+            }
+            CLAY(CELL_LAYOUT) {
+                CELL_LABELS("SCALE 4.0", "chunky corners");
+                CLAY(BTN_SLOT_LAYOUT) {
+                    nt_ui_button_begin(s_ctx, NT_UI_DATA_LAYER(LAYER_IMG), s_id_s9_four, s_atlas_handle, &s_btn_s9_four, &s_btn_decl, true);
+                    nt_ui_label(s_ctx, NT_UI_DATA_LAYER(LAYER_TEXT), "4.0x", &g_btn_label_style);
+                    if (nt_ui_button_end(s_ctx)) {
+                        s_clicks_s9_four++;
+                    }
+                }
             }
         }
         // #endregion

@@ -1,16 +1,19 @@
 /* System headers before Unity to avoid noreturn / __declspec conflict on MSVC */
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 /* clang-format off */
 #include "atlas/nt_atlas.h"
+#include "core/nt_assert.h"
 #include "entity/nt_entity.h"
 #include "nt_atlas_format.h"
 #include "nt_crc32.h"
 #include "nt_pack_format.h"
 #include "resource/nt_resource.h"
 #include "sprite_comp/nt_sprite_comp.h"
+#include "test_helpers/nt_assert_trap.h"
 #include "unity.h"
 /* clang-format on */
 
@@ -222,6 +225,7 @@ void setUp(void) {
     s_atlas_res = NT_RESOURCE_INVALID;
     memset((void *)s_pack_blobs, 0, sizeof(s_pack_blobs));
     s_pack_blob_count = 0;
+    nt_test_assert_install();
     nt_entity_init(&(nt_entity_desc_t){.max_entities = 16});
     nt_sprite_comp_init(&(nt_sprite_comp_desc_t){.capacity = 16});
 }
@@ -637,6 +641,42 @@ void test_reset_slice9(void) {
     TEST_ASSERT_EQUAL_UINT16(0, s9[3]);
 }
 
+/* ---- slice9_scale tests ---- */
+
+void test_sprite_comp_slice9_scale_default_one(void) {
+    nt_entity_t e = nt_entity_create();
+    nt_sprite_comp_add(e);
+    TEST_ASSERT_TRUE(nt_sprite_comp_slice9_scale(e) == 1.0F); /* NOLINT(cert-flp30-c) exact literal */
+}
+
+void test_sprite_comp_slice9_scale_setter_roundtrip(void) {
+    nt_entity_t e = nt_entity_create();
+    nt_sprite_comp_add(e);
+    nt_sprite_comp_set_slice9_scale(e, 2.5F);
+    TEST_ASSERT_TRUE(nt_sprite_comp_slice9_scale(e) == 2.5F); /* NOLINT(cert-flp30-c) exact literal */
+}
+
+void test_sprite_comp_slice9_scale_remove_resets(void) {
+    nt_entity_t e = nt_entity_create();
+    nt_sprite_comp_add(e);
+    nt_sprite_comp_set_slice9_scale(e, 2.0F);
+    nt_sprite_comp_remove(e);
+
+    nt_entity_t e2 = nt_entity_create();
+    nt_sprite_comp_add(e2);
+    TEST_ASSERT_TRUE(nt_sprite_comp_slice9_scale(e2) == 1.0F); /* NOLINT(cert-flp30-c) exact literal */
+}
+
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+void test_sprite_comp_slice9_scale_setter_asserts_negative(void) {
+    nt_entity_t e = nt_entity_create();
+    nt_sprite_comp_add(e);
+    NT_TEST_EXPECT_ASSERT(nt_sprite_comp_set_slice9_scale(e, -1.0F));
+    NT_TEST_EXPECT_ASSERT(nt_sprite_comp_set_slice9_scale(e, 0.0F));
+    NT_TEST_EXPECT_ASSERT(nt_sprite_comp_set_slice9_scale(e, NAN));
+}
+#endif
+
 /* ---- Main ---- */
 
 int main(void) {
@@ -658,5 +698,11 @@ int main(void) {
     RUN_TEST(test_entity_destroy_removes_sprite);
     RUN_TEST(test_set_slice9);
     RUN_TEST(test_reset_slice9);
+    RUN_TEST(test_sprite_comp_slice9_scale_default_one);
+    RUN_TEST(test_sprite_comp_slice9_scale_setter_roundtrip);
+    RUN_TEST(test_sprite_comp_slice9_scale_remove_resets);
+#if NT_ASSERT_MODE == NT_ASSERT_FULL
+    RUN_TEST(test_sprite_comp_slice9_scale_setter_asserts_negative);
+#endif
     return UNITY_END();
 }

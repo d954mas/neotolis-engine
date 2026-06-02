@@ -36,6 +36,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     NT_ASSERT(id != 0U && "nt_ui_button_begin: id 0 is the no-widget sentinel");
     NT_ASSERT(!ctx->pending_button.active && "nt_ui_button: nested buttons unsupported");
     NT_ASSERT(isfinite(style->transition_speed) && style->transition_speed >= 0.0F && "nt_ui_button_begin: style.transition_speed must be finite >= 0");
+    NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_button_begin: style.slice9_scale must be finite > 0");
     assert_state_valid(&style->idle, "idle");
     assert_state_valid(&style->hover, "hover");
     assert_state_valid(&style->pressed, "pressed");
@@ -97,6 +98,7 @@ void nt_ui_button_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, 
     *p = (nt_ui_image_payload_t){
         .atlas = atlas,
         .region_index = region,
+        .slice9_scale = style->slice9_scale,
     };
     /* slice9 from atlas default (no override); origin/flip default. */
 

@@ -41,6 +41,7 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
         .region_index = region_index,
         .origin_x = style->origin_x,
         .origin_y = style->origin_y,
+        .slice9_scale = style->slice9_scale,
         .flip_bits = style->flip_bits,
         .flags = style->flags,
     };

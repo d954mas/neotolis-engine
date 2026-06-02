@@ -71,6 +71,12 @@ void nt_sprite_comp_reset_slice9(nt_entity_t entity);
 const uint16_t *nt_sprite_comp_slice9_lrtb(nt_entity_t entity);
 bool nt_sprite_comp_has_slice9_override(nt_entity_t entity);
 
+/* Per-entity slice9 scale multiplier. Default 1.0F at add; multiplies the
+ * atlas region's baked slice9 borders at render. Reset via set(entity, 1.0F).
+ * Asserts isfinite(scale) && scale > 0.0F. */
+void nt_sprite_comp_set_slice9_scale(nt_entity_t entity, float scale);
+float nt_sprite_comp_slice9_scale(nt_entity_t entity);
+
 /* ---- Flip control ---- */
 
 void nt_sprite_comp_set_flip(nt_entity_t entity, bool flip_x, bool flip_y);
@@ -119,6 +125,7 @@ typedef struct {
     const nt_sprite_resolved_region_t *resolved;
     const float (*origin)[2];
     const uint16_t (*slice9_lrtb)[4];
+    const float *slice9_scale;
     const uint8_t *flags;
 } nt_sprite_comp_view_t;
 

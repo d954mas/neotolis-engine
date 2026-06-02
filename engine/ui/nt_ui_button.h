@@ -35,6 +35,9 @@ typedef struct {
     /* Touch-target inflation {l,r,t,b} in layout pixels. Inflated BEFORE the
      * inverse-affine so the padded zone rotates with the widget. */
     int16_t hit_padding_lrtb[4];
+    /* Multiplies the atlas region's baked slice9 borders; applies to every state.
+     * 1.0F preserves atlas-verbatim render. <=0 is asserted in button_begin. */
+    float slice9_scale;
 } nt_ui_button_style_t;
 
 /* begin → children → bool end. enabled=false short-circuits hover/click and

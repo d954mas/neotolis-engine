@@ -41,6 +41,7 @@ static const nt_ui_button_style_t s_btn_style = {
     .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .opacity = 1.0F},
     .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .opacity = 0.5F},
     .transition_speed = 0.0F,
+    .slice9_scale = 1.0F,
 };
 
 static const nt_ui_label_style_t s_label_style = {
@@ -53,6 +54,7 @@ static const nt_ui_image_style_t s_img_style = {
     .color_packed = 0xFFFFFFFF,
     .flip_bits = 0,
     .slice9_lrtb = {0, 0, 0, 0},
+    .slice9_scale = 1.0F,
 };
 
 void setUp(void) {
@@ -189,8 +191,50 @@ static void test_button_begin_label_end_inline(void) {
     TEST_ASSERT_NOT_NULL(find_first_text_cmd(s_fx.ctx));
 }
 
+/* ---- Test: slice9_scale propagates from style to the IMAGE payload. ---- */
+static void test_button_slice9_scale_propagates_to_payload(void) {
+    nt_ui_button_style_t styled = s_btn_style;
+    styled.slice9_scale = 2.5F;
+
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) {
+        nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn_s9"), s_fx.atlas.handle, &styled, NULL, true);
+        nt_ui_label(s_fx.ctx, NULL, "x", &s_label_style);
+        (void)nt_ui_button_end(s_fx.ctx);
+    }
+    nt_ui_end(s_fx.ctx);
+
+    const Clay_RenderCommand *c = find_first_image_cmd(s_fx.ctx);
+    TEST_ASSERT_NOT_NULL(c);
+    const nt_ui_image_payload_t *p = (const nt_ui_image_payload_t *)c->renderData.image.imageData;
+    TEST_ASSERT_NOT_NULL(p);
+    TEST_ASSERT_TRUE(p->slice9_scale == 2.5F); /* NOLINT(cert-flp30-c) exact literal */
+}
+
 /* ---- Death tests (NT_ASSERT_FULL only) ---- */
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
+
+/* ---- Test: button_begin asserts on non-positive / non-finite slice9_scale. ---- */
+static void test_button_slice9_scale_asserts_negative(void) {
+    nt_ui_button_style_t bad = s_btn_style;
+    nt_pointer_t mouse = {0};
+
+    bad.slice9_scale = -1.0F;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &bad, NULL, true)); }
+    nt_ui_end(s_fx.ctx);
+
+    bad.slice9_scale = 0.0F;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &bad, NULL, true)); }
+    nt_ui_end(s_fx.ctx);
+
+    bad.slice9_scale = NAN;
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, &bad, NULL, true)); }
+    nt_ui_end(s_fx.ctx);
+}
 
 /* ---- Test 7: button_begin with id 0 (no-widget sentinel) asserts ---- */
 static void test_button_id_zero_asserts(void) {
@@ -325,9 +369,11 @@ int main(void) {
     RUN_TEST(test_button_stack_balanced);
     RUN_TEST(test_button_disabled_path_balanced);
     RUN_TEST(test_button_begin_label_end_inline);
+    RUN_TEST(test_button_slice9_scale_propagates_to_payload);
 #if NT_ASSERT_MODE == NT_ASSERT_FULL
     RUN_TEST(test_button_id_zero_asserts);
     RUN_TEST(test_button_decl_asserts_caller_clean);
+    RUN_TEST(test_button_slice9_scale_asserts_negative);
 #endif
     RUN_TEST(test_button_decl_fixed_size_hit_test);
     RUN_TEST(test_button_recovers_after_simulated_mid_button_state);

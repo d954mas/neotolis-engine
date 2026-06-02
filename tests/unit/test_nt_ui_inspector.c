@@ -32,6 +32,7 @@ static const nt_ui_button_style_t s_btn_style = {
     .pressed = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 0.95F, .opacity = 1.0F},
     .disabled = {.bg_region = 0, .bg_tint = 0xFFFFFFFF, .scale = 1.0F, .opacity = 0.5F},
     .transition_speed = 0.0F,
+    .slice9_scale = 1.0F,
 };
 
 static const nt_ui_image_style_t s_img_style = {

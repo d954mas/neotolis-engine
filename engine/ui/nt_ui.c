@@ -881,24 +881,21 @@ static void emit_image(const Clay_RenderCommand *c, float rotation) {
      * works without flag. */
     const bool has_s9_override = (p->flags & NT_UI_IMAGE_SLICE9_OVERRIDE) || (p->slice9_override[0] | p->slice9_override[1] | p->slice9_override[2] | p->slice9_override[3]) != 0;
     const bool region_slice9 = (r->slice9_lrtb[0] | r->slice9_lrtb[1] | r->slice9_lrtb[2] | r->slice9_lrtb[3]) != 0;
+    /* Legacy zero-init payloads carry slice9_scale=0.0F; treat as 1.0F. */
+    const float s9_scale = (p->slice9_scale > 0.0F) ? p->slice9_scale : 1.0F;
 
     if (has_s9_override || region_slice9) {
-        uint16_t sl;
-        uint16_t sr;
-        uint16_t st;
-        uint16_t sb;
         if (has_s9_override) {
-            sl = p->slice9_override[0];
-            sr = p->slice9_override[1];
-            st = p->slice9_override[2];
-            sb = p->slice9_override[3];
+            /* Scale override borders inline to preserve the existing emit_slice9 path. */
+            const uint16_t sl = (uint16_t)(((float)p->slice9_override[0] * s9_scale) + 0.5F);
+            const uint16_t sr = (uint16_t)(((float)p->slice9_override[1] * s9_scale) + 0.5F);
+            const uint16_t st = (uint16_t)(((float)p->slice9_override[2] * s9_scale) + 0.5F);
+            const uint16_t sb = (uint16_t)(((float)p->slice9_override[3] * s9_scale) + 0.5F);
+            nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, sl, sr, st, sb, col, p->flip_bits, rotation);
         } else {
-            sl = r->slice9_lrtb[0];
-            sr = r->slice9_lrtb[1];
-            st = r->slice9_lrtb[2];
-            sb = r->slice9_lrtb[3];
+            /* Atlas-driven path: read region borders + scale via the renderer helper. */
+            nt_sprite_renderer_emit_slice9_from_region(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, s9_scale, col, p->flip_bits, rotation);
         }
-        nt_sprite_renderer_emit_slice9(p->atlas, p->region_index, bb.x, bb.y, bb.width, bb.height, sl, sr, st, sb, col, p->flip_bits, rotation);
         return;
     }
 
