@@ -315,7 +315,11 @@ typedef struct {
  * (label/icon swap on press), tooltips, previews. Pair with step in begin.
  *
  * Query must run in the SAME transform+clip context as the eventual step:
- * the inverse-affine reads accum_stack / clip_stack at call time. */
+ * the inverse-affine reads accum_stack / clip_stack at call time.
+ *
+ * Query is also safe OUTSIDE begin/end (snapshot/restore Clay ctx like get_bbox);
+ * it returns prev-frame state. step is strictly in-frame only — mutating cap
+ * on stale frame_pointers fires spurious transitions. */
 nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id);
 
 /* Padded variant: inflates layout bbox by {left,right,top,bottom} BEFORE the

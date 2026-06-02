@@ -2006,12 +2006,14 @@ static bool ui_hit_test(const nt_ui_context_t *ctx, uint32_t id, float px, float
 }
 
 /* PURE compute — no state mutation. Safe to call N times per frame; every
- * call returns the same struct. State-machine writes live in step_interaction_padded. */
+ * call returns the same struct. Also safe outside begin/end: snapshot/restore
+ * Clay ctx mirrors nt_ui_get_bbox, caller reads prev-frame state. State-
+ * machine writes live in step_interaction_padded. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
     NT_ASSERT(ctx != NULL && "nt_ui_query_interaction_padded: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_query_interaction_padded: id must be non-zero (0 = no widget)");
-    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_query_interaction_padded: no frame pointer snapshot (call inside begin/end)");
+    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_query_interaction_padded: no frame pointer snapshot yet (call after first nt_ui_begin)");
     /* Negative padding is a use error: the API shrinks-from-bbox use case is
      * better served by sizing the widget smaller, NOT a negative inflation. */
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_query_interaction_padded: pad_lrtb components must be >= 0");
@@ -2026,9 +2028,15 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
     }
 #endif
 
+    /* Multi-ctx safety: caller may be outside frame or have a different Clay
+     * ctx current. Set ours, restore on exit. ui_hit_test below also queries
+     * Clay so it shares this scope. */
+    Clay_Context *saved_clay = Clay_GetCurrentContext();
+    Clay_SetCurrentContext(ctx->clay);
     /* No prev-frame bbox yet — not hovered, no capture possible. */
     const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
     if (!d.found) {
+        Clay_SetCurrentContext(saved_clay);
         return out;
     }
 
@@ -2085,6 +2093,7 @@ nt_ui_interaction_t nt_ui_query_interaction_padded(nt_ui_context_t *ctx, uint32_
         out.pointer_id = p->id;
     }
 
+    Clay_SetCurrentContext(saved_clay);
     return out;
 }
 
@@ -2093,13 +2102,15 @@ nt_ui_interaction_t nt_ui_query_interaction(nt_ui_context_t *ctx, uint32_t id) {
 
 /* Query + commit: same compute as query_padded, then applies state-machine
  * writes (cap transitions, pos tracking, capture_seen, pointer_over_any,
- * debug zone). Call ONCE per widget per frame from the widget's begin. */
+ * debug zone). Call ONCE per widget per frame from the widget's begin.
+ * MUST be called between nt_ui_begin and nt_ui_end on the in-frame ctx —
+ * mutating cap on stale frame_pointers fires spurious transitions. */
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 nt_ui_interaction_t nt_ui_step_interaction_padded(nt_ui_context_t *ctx, uint32_t id, const int16_t pad_lrtb[4]) {
-    /* Same preconditions as query. */
     NT_ASSERT(ctx != NULL && "nt_ui_step_interaction_padded: ctx must be non-NULL");
+    NT_ASSERT(ctx->in_frame && ctx == g_nt_ui_inframe_ctx && "nt_ui_step_interaction_padded: must be called between nt_ui_begin and nt_ui_end on the active ctx");
     NT_ASSERT(id != 0U && "nt_ui_step_interaction_padded: id must be non-zero (0 = no widget)");
-    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_step_interaction_padded: no frame pointer snapshot (call inside begin/end)");
+    NT_ASSERT(ctx->frame_pointer_count > 0U && "nt_ui_step_interaction_padded: no frame pointer snapshot");
     NT_ASSERT((pad_lrtb == NULL || (pad_lrtb[0] >= 0 && pad_lrtb[1] >= 0 && pad_lrtb[2] >= 0 && pad_lrtb[3] >= 0)) && "nt_ui_step_interaction_padded: pad_lrtb components must be >= 0");
 
     const nt_ui_interaction_t out = nt_ui_query_interaction_padded(ctx, id, pad_lrtb);

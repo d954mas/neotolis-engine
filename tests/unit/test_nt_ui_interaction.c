@@ -495,6 +495,27 @@ static void test_query_step_under_rotation(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* step is strictly in-frame; calling outside begin/end must assert. */
+static void test_step_outside_frame_asserts(void) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(50), CLAY_SIZING_FIXED(50)}}}) {}
+    nt_ui_end(s_fx.ctx);
+    /* No begin in flight → step must trip the in-frame assert. */
+    NT_TEST_EXPECT_ASSERT((void)nt_ui_step_interaction(s_fx.ctx, nt_ui_id("btn")));
+}
+
+/* query is safe outside begin/end (snapshot/restore Clay ctx, like get_bbox). */
+static void test_query_outside_frame_returns_prev_frame_state(void) {
+    nt_pointer_t mouse = {.x = 25.0F, .y = 25.0F, .active = true};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("btn"), .layout = {.sizing = {CLAY_SIZING_FIXED(50), CLAY_SIZING_FIXED(50)}}}) {}
+    nt_ui_end(s_fx.ctx);
+    /* Outside frame: query reads prev-frame bbox + pointer, returns without asserting. */
+    const nt_ui_interaction_t in = nt_ui_query_interaction(s_fx.ctx, nt_ui_id("btn"));
+    TEST_ASSERT_TRUE_MESSAGE(in.hovered, "query outside frame must read prev-frame bbox");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_interaction_click_on_release_within_bounds);
@@ -508,5 +529,7 @@ int main(void) {
     RUN_TEST(test_query_is_idempotent);
     RUN_TEST(test_step_commits_what_query_previewed);
     RUN_TEST(test_query_step_under_rotation);
+    RUN_TEST(test_step_outside_frame_asserts);
+    RUN_TEST(test_query_outside_frame_returns_prev_frame_state);
     return UNITY_END();
 }
