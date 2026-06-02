@@ -1,5 +1,6 @@
 #include "ui/nt_ui_image.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "core/nt_assert.h"
@@ -19,6 +20,7 @@ void nt_ui_image(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, nt_reso
     NT_ASSERT(ctx != NULL && "nt_ui_image: ctx must be non-NULL");
     NT_ASSERT(style != NULL && "nt_ui_image: style must be non-NULL");
     NT_ASSERT(atlas.id != 0 && "nt_ui_image: invalid atlas handle");
+    NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_image: style.slice9_scale must be finite > 0");
 
     /* Allocate payload from scratch arena */
     nt_ui_image_payload_t *p = NT_MEM_SCRATCH_ALLOC(nt_ui_image_payload_t);

@@ -1,5 +1,6 @@
 #include "ui/nt_ui_panel.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "core/nt_assert.h"
@@ -25,6 +26,7 @@ void nt_ui_panel_begin(nt_ui_context_t *ctx, const nt_ui_element_data_t *data, n
     NT_ASSERT(ctx != NULL && "nt_ui_panel_begin: ctx must be non-NULL");
     NT_ASSERT(style != NULL && "nt_ui_panel_begin: style must be non-NULL");
     NT_ASSERT(atlas.id != 0 && "nt_ui_panel_begin: invalid atlas handle");
+    NT_ASSERT(isfinite(style->slice9_scale) && style->slice9_scale > 0.0F && "nt_ui_panel_begin: style.slice9_scale must be finite > 0");
     /* Override contract: engine owns image/bg/userData/id. */
     if (decl != NULL) {
         NT_ASSERT(decl->id.id == 0U && "nt_ui_panel_begin: decl->id must be 0 (panel id auto-assigned by Clay)");

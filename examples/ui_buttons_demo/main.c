@@ -110,6 +110,7 @@ static const nt_ui_image_style_t g_btn_icon_style = {
     .color_packed = 0xFFFFFFFF, /* no tint (0xAABBGGRR) -- show natural art */
     .origin_x = 0.5F,
     .origin_y = 0.5F,
+    .slice9_scale = 1.0F,
 };
 // #endregion
 

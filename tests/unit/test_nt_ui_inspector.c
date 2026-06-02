@@ -37,6 +37,7 @@ static const nt_ui_button_style_t s_btn_style = {
 
 static const nt_ui_image_style_t s_img_style = {
     .color_packed = 0xFFFFFFFF,
+    .slice9_scale = 1.0F,
 };
 
 static const nt_ui_label_style_t s_label_style = {

@@ -24,6 +24,7 @@ static const nt_ui_image_style_t s_style_default = {
     .color_packed = 0xFFFFFFFF,
     .flip_bits = 0,
     .slice9_lrtb = {0, 0, 0, 0},
+    .slice9_scale = 1.0F,
 };
 
 void setUp(void) {
@@ -67,6 +68,7 @@ static void test_image_slice9_override(void) {
         .color_packed = 0xFFFFFFFF,
         .flip_bits = 0,
         .slice9_lrtb = {4, 4, 4, 4},
+        .slice9_scale = 1.0F,
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -88,6 +90,7 @@ static void test_image_tint_color(void) {
         .color_packed = 0x80FF8040, /* A=0x80, B=0xFF, G=0x80, R=0x40 */
         .flip_bits = 0,
         .slice9_lrtb = {0, 0, 0, 0},
+        .slice9_scale = 1.0F,
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -125,6 +128,7 @@ static void test_image_flip_bits(void) {
         .color_packed = 0xFFFFFFFF,
         .flip_bits = 3, /* FLIP_X | FLIP_Y */
         .slice9_lrtb = {0, 0, 0, 0},
+        .slice9_scale = 1.0F,
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
@@ -145,6 +149,7 @@ static void test_image_flags_origin(void) {
         .origin_y = 0.75F,
         .flip_bits = 0,
         .flags = NT_UI_IMAGE_ORIGIN_OVERRIDE | NT_UI_IMAGE_SLICE9_OVERRIDE,
+        .slice9_scale = 1.0F,
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);

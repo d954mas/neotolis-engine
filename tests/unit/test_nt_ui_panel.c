@@ -26,6 +26,7 @@ static const nt_ui_image_style_t s_panel_style = {
     .color_packed = 0xFFFFFFFF,
     .flip_bits = 0,
     .slice9_lrtb = {0, 0, 0, 0},
+    .slice9_scale = 1.0F,
 };
 
 static const nt_ui_label_style_t s_label_style = {
@@ -209,6 +210,7 @@ static void test_panel_payload_flags_origin(void) {
         .origin_x = 0.1F,
         .origin_y = 0.9F,
         .flags = NT_UI_IMAGE_ORIGIN_OVERRIDE,
+        .slice9_scale = 1.0F,
     };
     nt_pointer_t mouse = {0};
     nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);

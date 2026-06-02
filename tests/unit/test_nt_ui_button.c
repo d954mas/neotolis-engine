@@ -236,6 +236,38 @@ static void test_button_slice9_scale_asserts_negative(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* REVIEW-5 P1 regression guard: per-state visual fields must be finite + in range. */
+static void try_bad_state(const nt_ui_button_style_t *bad) {
+    nt_pointer_t mouse = {0};
+    nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+    CLAY({.id = CLAY_ID("root")}) { NT_TEST_EXPECT_ASSERT(nt_ui_button_begin(s_fx.ctx, NULL, nt_ui_id("btn"), s_fx.atlas.handle, bad, NULL, true)); }
+    nt_ui_end(s_fx.ctx);
+}
+
+static void test_button_asserts_bad_state_values(void) {
+    nt_ui_button_style_t bad = s_btn_style;
+    bad.idle.scale = 0.0F;
+    try_bad_state(&bad);
+    bad = s_btn_style;
+    bad.hover.scale = -1.0F;
+    try_bad_state(&bad);
+    bad = s_btn_style;
+    bad.pressed.opacity = 1.5F;
+    try_bad_state(&bad);
+    bad = s_btn_style;
+    bad.disabled.opacity = NAN;
+    try_bad_state(&bad);
+    bad = s_btn_style;
+    bad.idle.offset_x = NAN;
+    try_bad_state(&bad);
+    bad = s_btn_style;
+    bad.transition_speed = -1.0F;
+    try_bad_state(&bad);
+    bad = s_btn_style;
+    bad.transition_speed = NAN;
+    try_bad_state(&bad);
+}
+
 /* ---- Test 7: button_begin with id 0 (no-widget sentinel) asserts ---- */
 static void test_button_id_zero_asserts(void) {
     nt_pointer_t mouse = {0};
@@ -374,6 +406,7 @@ int main(void) {
     RUN_TEST(test_button_id_zero_asserts);
     RUN_TEST(test_button_decl_asserts_caller_clean);
     RUN_TEST(test_button_slice9_scale_asserts_negative);
+    RUN_TEST(test_button_asserts_bad_state_values);
 #endif
     RUN_TEST(test_button_decl_fixed_size_hit_test);
     RUN_TEST(test_button_recovers_after_simulated_mid_button_state);

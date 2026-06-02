@@ -52,6 +52,7 @@
 // #region styles
 static const nt_ui_image_style_t g_panel_style = {
     .color_packed = 0xFFFFFFFF, /* no tint */
+    .slice9_scale = 1.0F,
 };
 
 static const nt_ui_label_style_t g_status_style = {
