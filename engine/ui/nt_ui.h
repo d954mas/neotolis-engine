@@ -298,8 +298,10 @@ void nt_ui_custom(nt_ui_context_t *ctx, const nt_ui_element_data_t *elem_data, v
  * uint32 hash (never 0 -- Clay returns hash+1). Asserts s != NULL. */
 uint32_t nt_ui_id(const char *s);
 
-/* Prev-frame LAYOUT bbox (thin Clay_GetElementData wrapper; raw layout space,
- * Y-down). found == false on the first frame an id is seen. */
+/* Prev-frame LAYOUT bbox (Y-down). `found == false` if the id was not declared
+ * in the immediately preceding frame — first-frame ids, ids dropped from this
+ * frame's layout, and ids Clay's hashmap still holds but that weren't
+ * re-declared all read false. Same generation pinning as hit-test. */
 typedef struct {
     float x, y, width, height;
     bool found;

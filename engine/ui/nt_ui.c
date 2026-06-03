@@ -1455,7 +1455,9 @@ void nt_ui_walk(nt_ui_context_t *ctx, const nt_ui_target_t *target) {
         }
 
         /* Layer passes: dispatch renderables in ascending layer order, sourcing
-         * per-command baked from tree_baked. */
+         * per-command baked from tree_baked. O(L_active * N_seg) is intentional:
+         * counting-sort buys little when L_active is small (<10 in real UIs)
+         * and the skip-branch is one byte-compare; dispatch_command dominates. */
         for (uint32_t word_idx = 0U; word_idx < 8U; ++word_idx) {
             uint32_t mask = active_layers[word_idx];
             while (mask != 0U) {
@@ -1573,13 +1575,23 @@ uint32_t nt_ui_id(const char *s) {
 nt_ui_bbox_t nt_ui_get_bbox(const nt_ui_context_t *ctx, uint32_t id) {
     NT_ASSERT(ctx != NULL && "nt_ui_get_bbox: ctx must be non-NULL");
     NT_ASSERT(id != 0U && "nt_ui_get_bbox: id must be non-zero (0 = no widget)");
-    /* Raw prev-frame layout bbox (Y-down). On miss returns zeroed box with
-     * found=false. Snapshot+restore current ctx for multi-ctx safety. */
+    /* Prev-frame layout bbox (Y-down). Same staleness contract as ui_hit_test:
+     * Clay_GetElementData also returns ids declared frames-ago that linger in
+     * the persistent hashmap; we reject those via hit_generation so callers
+     * get a meaningful "actually in last frame" answer. Snapshot+restore the
+     * Clay current ctx for multi-ctx safety. */
     Clay_Context *saved = Clay_GetCurrentContext();
     Clay_SetCurrentContext(ctx->clay);
     const Clay_ElementData d = Clay_GetElementData((Clay_ElementId){.id = id});
     Clay_SetCurrentContext(saved);
-    return (nt_ui_bbox_t){.x = d.boundingBox.x, .y = d.boundingBox.y, .width = d.boundingBox.width, .height = d.boundingBox.height, .found = d.found};
+    if (!d.found) {
+        return (nt_ui_bbox_t){0};
+    }
+    const int32_t slot = nt_ui_clay_priv_hashmap_slot_for_id(ctx->clay, id);
+    if (slot < 0 || slot >= (int32_t)ctx->max_elements || ctx->hit_generation[slot] != ctx->current_generation) {
+        return (nt_ui_bbox_t){0};
+    }
+    return (nt_ui_bbox_t){.x = d.boundingBox.x, .y = d.boundingBox.y, .width = d.boundingBox.width, .height = d.boundingBox.height, .found = true};
 }
 
 /* Hit-test reads PREV-frame data via Clay's persistent hashmap slot — the slot

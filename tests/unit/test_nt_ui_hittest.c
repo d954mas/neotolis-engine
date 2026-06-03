@@ -290,6 +290,32 @@ static void test_hittest_survives_layout_idx_shift_between_frames(void) {
     nt_ui_end(s_fx.ctx);
 }
 
+/* ---- Test 9: get_bbox rejects ids Clay's hashmap still holds but that
+ *      weren't re-declared this frame (stale generation). Mirrors the
+ *      hit-test rejection so the two APIs agree on "in last frame". ---- */
+static void test_get_bbox_rejects_stale_id(void) {
+    /* Frame 1: declare htbtn. */
+    declare_bbox_with_xform(NULL);
+    /* Sanity: bbox found in the immediately-following frame. */
+    {
+        nt_pointer_t mouse = {0};
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        nt_ui_bbox_t b = nt_ui_get_bbox(s_fx.ctx, nt_ui_id("htbtn"));
+        TEST_ASSERT_TRUE_MESSAGE(b.found, "bbox of just-declared id must be found");
+        nt_ui_end(s_fx.ctx);
+    }
+    /* Frame 2: do NOT declare htbtn. Clay's hashmap still holds it but
+     * hit_generation[slot] != current_generation -> get_bbox rejects. */
+    {
+        nt_pointer_t mouse = {0};
+        nt_ui_begin(s_fx.ctx, 800.0F, 600.0F, 0.0F, &mouse, 1);
+        nt_ui_bbox_t b = nt_ui_get_bbox(s_fx.ctx, nt_ui_id("htbtn"));
+        TEST_ASSERT_FALSE_MESSAGE(b.found, "stale id must report found=false");
+        TEST_ASSERT_TRUE(b.x == 0.0F && b.y == 0.0F && b.width == 0.0F && b.height == 0.0F);
+        nt_ui_end(s_fx.ctx);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_hittest_axis_aligned_baseline);
@@ -300,5 +326,6 @@ int main(void) {
     RUN_TEST(test_hittest_padded_combinatorial_worst_case);
     RUN_TEST(test_hittest_padded_zero_equals_unpadded);
     RUN_TEST(test_hittest_survives_layout_idx_shift_between_frames);
+    RUN_TEST(test_get_bbox_rejects_stale_id);
     return UNITY_END();
 }
