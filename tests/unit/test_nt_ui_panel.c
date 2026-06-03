@@ -1,5 +1,6 @@
 /* Panel/group widget tree integrity + payload pinning + death tests. */
 
+#include <math.h>
 #include <stdalign.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -112,8 +113,9 @@ static void test_panel_no_transform(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    /* Walk succeeds with no transform at all. */
-    TEST_PASS();
+    /* IMAGE cmd emitted for the panel bg even without a transform attached. */
+    const Clay_RenderCommand *img = find_first_image_cmd(s_fx.ctx);
+    TEST_ASSERT_NOT_NULL_MESSAGE(img, "panel without transform must still emit its background IMAGE");
 }
 
 /* ---- Test 4: group_begin/end balanced with child label ---- */
@@ -151,7 +153,21 @@ static void test_group_with_opacity(void) {
     }
     nt_ui_end(s_fx.ctx);
 
-    TEST_PASS();
+    /* Opacity propagates to the label's TEXT cmd; tree_baked[label].opacity = 0.5
+     * (root 0.5 * child 1.0). Walker reads this to apply per-cmd alpha. */
+    const Clay_RenderCommand *txt = find_first_text_cmd(s_fx.ctx);
+    TEST_ASSERT_NOT_NULL_MESSAGE(txt, "label must emit TEXT cmd inside opacity group");
+    /* Scan tree_baked for a 0.5-opacity entry — order-independent. */
+    const int32_t N = nt_ui_internal_test_get_tree_baked_count(s_fx.ctx);
+    bool found_half = false;
+    for (int32_t i = 0; i < N; ++i) {
+        const nt_ui_baked_xform_t *bk = nt_ui_internal_test_get_tree_baked(s_fx.ctx, i);
+        if (fabsf(bk->opacity - 0.5F) < 1e-4F) {
+            found_half = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found_half, "tree_baked must record root's 0.5 opacity");
 }
 
 /* ---- Test 6: panel payload carries atlas/region ---- */

@@ -1669,8 +1669,9 @@ static void test_inspector_hover_transformed_widget(void) {
      * rx = btn_cx + 0.9063 * 80 = 180 + 72.5 = 252.5
      * ry = btn_cy + 0.4226 * 80 = 224 + 33.8 = 257.8
      * Layout AABB y-range is [200, 248]; ry=257.8 is OUTSIDE the AABB. */
-    const float c = 0.9063F;
-    const float s = 0.4226F;
+    const float rot = 25.0F * 0.017453292F;
+    const float c = cosf(rot);
+    const float s = sinf(rot);
     const float dx = btn_w * 0.5F;
     const float rx = btn_cx + (c * dx);
     const float ry = btn_cy + (s * dx);
